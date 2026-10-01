@@ -1,0 +1,4 @@
+<program>
+throw "x"
+<p>x</p>
+</program>

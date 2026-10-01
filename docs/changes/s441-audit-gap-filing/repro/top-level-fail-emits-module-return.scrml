@@ -1,0 +1,21 @@
+// S441 reproducer — addendum-5 P4: `fail .X` outside any function compiles and emits a top-level `return`.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/top-level-fail-emits-module-return.scrml --output-dir <scratch>
+// Expected: a diagnostic — `fail` is only meaningful inside a `!` function (§19).
+// Actual:   exit 0, no diagnostic. client.js, at script top level:
+//           `return { __scrml_error: true, type: "", variant: "X", data: null };` — `type:""` (no function error type),
+//           and a top-level `return` in a classic <script> is a SyntaxError in the browser ("Illegal return
+//           statement"), so the whole page script never runs. The emitted-JS parse gate does not catch it
+//           (`node --check`, CommonJS-wrapped, also accepts it).
+<program>
+${
+    type A:enum = { X, Y(msg: string) }
+    <out> = ""
+    fail .X
+    function run() {
+        @out = "r"
+    }
+}
+<button onclick=run()>go</button>
+<p>${@out}</p>
+</program>

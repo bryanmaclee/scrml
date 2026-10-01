@@ -1,0 +1,16 @@
+{
+  "id": "protect-symbol-description-e006",
+  "description": "§14.8.9 S443 round 6b — a Symbol built from a protected value carries it: `Symbol.for(u.passwordHash).description` is the hash. E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "§14.8.9: unresolvable callees fail closed on their arguments. Round 6 special-cased `Symbol.for` and returned a fresh value WITHOUT the argument's provenance; review measured HTTP 200 \"SECRET-HASH-123\" (and via .toString(), Symbol.keyFor, getOwnPropertySymbols(...).description, String(Symbol.for(h))).",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}

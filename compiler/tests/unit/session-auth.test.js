@@ -174,8 +174,16 @@ describe("S3: AST builder auth attribute defaults", () => {
     expect(result.ast.authConfig.loginRedirect).toBe("/login");
   });
 
-  test("csrf defaults to off", () => {
+  // §40.2 (S441 ruling) — under auth=, csrf="auto" is the default; only an
+  // explicit csrf="off" opts out. (Pre-S441 this defaulted to "off", so adding
+  // auth= removed the CSRF gate — g-auth-program-without-csrf-attr-emits-no-csrf-check.)
+  test("csrf defaults to auto under auth=", () => {
     const result = parseSource('<program auth="required">\n</program>');
+    expect(result.ast.authConfig.csrf).toBe("auto");
+  });
+
+  test("explicit csrf=\"off\" opts out", () => {
+    const result = parseSource('<program auth="required" csrf="off">\n</program>');
     expect(result.ast.authConfig.csrf).toBe("off");
   });
 
@@ -456,13 +464,26 @@ describe("S8c: RI auth precedence — explicit auth= wins over protect= escalati
     expect(result.errors.find(e => e.code === "W-AUTH-MIDDLEWARE-AUTO-INJECTED")).toBeUndefined();
   });
 
-  test("<page auth=\"required\" loginRedirect=> + protect= — page's loginRedirect honoured", () => {
-    const file = makeFileAST(FP, [pageNode([authAttr("required"), strAttr("loginRedirect", "/signin"), strAttr("csrf", "off")])]);
-    const result = runRI({ files: [file], protectAnalysis: pa() });
+  // S443 — `loginRedirect=` is not a `<page>` attribute (E-PAGE-INVALID-ATTR); a page
+  // scope's redirect target is the application <program>'s loginRedirect= (§40.2).
+  // The page's own csrf= still applies.
+  test("<page auth=\"required\"> + protect= — redirect target comes from the program, csrf= from the page", () => {
+    const page = makeFileAST(FP, [pageNode([authAttr("required"), strAttr("loginRedirect", "/ignored"), strAttr("csrf", "off")])]);
+    // The application's top-level <program> (S443 r3: the redirect target is read
+    // from its declared loginRedirect= attribute).
+    const program = makeFileAST(
+      "/test/app.scrml",
+      [makeMarkupNode("program", [authAttr("required"), strAttr("loginRedirect", "/signin")], [])],
+      { authConfig: { auth: "required", loginRedirect: "/signin", csrf: "auto", sessionExpiry: "1h" } },
+    );
+    const result = runRI({ files: [program, page], protectAnalysis: pa() });
     const mw = result.routeMap.authMiddleware.get(FP);
     expect(mw).toBeDefined();
     expect(mw.loginRedirect).toBe("/signin");
     expect(mw.csrf).toBe("off");
+    // No program declaring auth= → the §52.13 default.
+    const alone = runRI({ files: [page], protectAnalysis: pa() }).routeMap.authMiddleware.get(FP);
+    expect(alone.loginRedirect).toBe("/login");
   });
 
   // --- absent auth= (the case W-AUTH-MIDDLEWARE-AUTO-INJECTED is actually meant for) ---

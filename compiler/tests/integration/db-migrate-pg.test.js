@@ -27,6 +27,10 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+// A live-PG CREATE DATABASE waits for a checkpoint (PG <15 FILE_COPY) and was measured at
+// ~24s on a dev machine; bun's 5s default hook timeout then fails the suite and leaks the
+// scratch DB/role. The hooks get real headroom instead.
+const PG_HOOK_TIMEOUT_MS = 120_000;
 import { existsSync, mkdtempSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -128,7 +132,7 @@ d("§14.8.11 M2 — scrml db-migrate through-CLI acceptance (live Postgres)", ()
       await tx.unsafe("SET LOCAL ROLE scrml_app");
       await tx`INSERT INTO invoices (id, tenant_id, amount) VALUES (gen_random_uuid(), ${TENANT_B}, 999.00)`;
     });
-  });
+  }, PG_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     if (m) await m.close().catch(() => {});
@@ -139,7 +143,7 @@ d("§14.8.11 M2 — scrml db-migrate through-CLI acceptance (live Postgres)", ()
     // Leave the cluster-global `scrml_app` role in place (mirrors db-authoritative-pg
     // test) — it is NOLOGIN + harmless, and dropping it can race a parallel PG test.
     await admin.close().catch(() => {});
-  });
+  }, PG_HOOK_TIMEOUT_MS);
 
   test("the CLI applied the M1 db-authoritative DDL and exited 0", () => {
     expect(cliExit).toBe(0);
@@ -312,7 +316,7 @@ d("§14.8.11 M2 SECURITY — malicious live-DB identifier cannot inject via db-m
       await tx.unsafe("SET LOCAL ROLE scrml_app");
       await tx`INSERT INTO invoices (id, tenant_id, amount) VALUES (gen_random_uuid(), ${TENANT_B}, 999.00)`;
     });
-  });
+  }, PG_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     if (m) await m.close().catch(() => {});
@@ -321,7 +325,7 @@ d("§14.8.11 M2 SECURITY — malicious live-DB identifier cannot inject via db-m
     await admin.unsafe(`DROP DATABASE IF EXISTS ${SCRATCH_DB2}`).catch(() => {});
     await admin.unsafe(`DROP ROLE IF EXISTS ${MIGRATOR2}`).catch(() => {});
     await admin.close().catch(() => {});
-  });
+  }, PG_HOOK_TIMEOUT_MS);
 
   test("db-migrate over a malicious-identifier schema applies cleanly (exit 0)", () => {
     expect(run2Exit).toBe(0);

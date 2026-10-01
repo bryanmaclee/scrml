@@ -27,7 +27,7 @@ import { SecretRedactor } from "./diagnostic-secrets.ts";
 import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
-import { runTS, buildTypeRegistry } from "./type-system.ts";
+import { runTS, buildTypeRegistry, BUILTIN_TYPES } from "./type-system.ts";
 import { runMetaChecker } from "./meta-checker.ts";
 import { runDG } from "./dependency-graph.ts";
 import { isLibraryShape, classifyFileShape } from "./library-shape.js";
@@ -41,11 +41,14 @@ import { serializeChunksManifest } from "./codegen/route-splitter.ts";
 import { buildMcpDescriptors } from "./codegen/mcp-descriptors.ts";
 import { runCG } from "./code-generator.js";
 import { generateValueOnlyServerJs, distRelativeLocalSpecifier } from "./codegen/emit-server.ts";
+import { workerBundleFilename, workerBundleSuffix } from "./codegen/emit-worker.ts";
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 import { detectSqlInConciseArrowBody } from "./codegen/detect-sql-in-arrow.ts";
 import { fnv1aHash } from "./codegen/fnv1a-hash.ts";
 import { checkCssConflicts } from "./codegen/css-conflict-check.ts";
+import { generateCss } from "./codegen/emit-css.ts";
 import { stripPagesPrefix } from "./codegen/utils.ts";
+import { collectClientAssets, relFromRoot, CLIENT_ASSET_MANIFEST } from "./static-serve-policy.js";
 import { runMetaEval } from "./meta-eval.ts";
 import { resolveModules, resolveModulePath, resolveModulePathNative } from "./module-resolver.js";
 import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
@@ -73,6 +76,7 @@ import { runTryCatchLint } from "./validators/lint-try-catch.ts";
 import { runAsyncAwaitReject } from "./validators/lint-async-user-source.ts";
 import { runDeferChecks } from "./validators/lint-defer.ts";
 import { runRedeclareChecks } from "./validators/lint-redeclare.ts";
+import { takeProtectRegistry, analyzeCompileProtectFlow } from "./codegen/protect-flow.ts";
 import { forbiddenJsDiagnosticsForDefault, nativeForbiddenJsAttrDiagnostics } from "./native-walker/forbidden-js-native.ts";
 
 // ---------------------------------------------------------------------------
@@ -778,6 +782,9 @@ export function rewriteStdlibImports(jsCode, bundleDir, outputDir, bundled) {
  * @param {object} options
  * @param {string[]} options.inputFiles        — resolved .scrml file paths to compile
  * @param {string}  [options.outputDir]        — directory to write output files; defaults to dist/ next to first input
+ * @param {string}  [options.buildRoot]        — S445: the build root (§40.8). Route files are the files under ITS
+ *   `pages/` / `routes/` (§40.2); directories above it are never consulted. Default: inferred from the
+ *   application's entry file (route-inference.ts `resolveBuildRoot`; SPEC §40.8 "The build root").
  * @param {boolean} [options.verbose]          — emit per-stage timing and counts to options.log
  * @param {boolean} [options.convertLegacyCss] — pre-process <style> blocks to #{…}
  * @param {boolean} [options.embedRuntime]     — embed runtime inline instead of writing separate file (browser mode only)
@@ -1069,6 +1076,16 @@ function _compileScrmlImpl(options = {}) {
      * to runCG; surfaced via the `--module-format=classic|esm` CLI flag.
      */
     moduleFormat = "classic",
+    /**
+     * Pre-write commit decision (g-session-config-refusal-still-writes-dist).
+     * Called ONCE, after every compile diagnostic is known and before the first
+     * byte reaches `outputDir`, with `{ errors, outputDir, plannedServerUnits }`
+     * (`plannedServerUnits`: `{ relPath, source }` per `.server.js` this run will
+     * write, `relPath` from the same dist-space index the write phase uses).
+     * Returning `false` skips EVERY write (stdlib bundle included) and leaves
+     * `outputDir` exactly as it was. Only consulted when `write` is true.
+     */
+    beforeWrite = null,
   } = options;
 
   let { outputDir } = options;
@@ -2212,7 +2229,11 @@ function _compileScrmlImpl(options = {}) {
 
   // Stage 5: RI (all files)
   const _runRI = seams.pick("RI", runRI);
-  const riResult = stage("RI", () => _runRI({ files: ceResults, protectAnalysis: paResult.protectAnalysis }));
+  // S445 — a caller-given build root (§40.8); absent, RI infers it from the entry file.
+  const riBuildRoot = typeof options.buildRoot === "string" && options.buildRoot !== ""
+    ? resolve(options.buildRoot)
+    : undefined;
+  const riResult = stage("RI", () => _runRI({ files: ceResults, protectAnalysis: paResult.protectAnalysis, buildRoot: riBuildRoot }));
   collectErrors("RI", riResult.errors);
   if (verbose) {
     const routeCount = riResult.routeMap?.functions?.size ?? 0;
@@ -2453,6 +2474,16 @@ function _compileScrmlImpl(options = {}) {
       return depRegistryCache.get(absSource);
     }
     const reg = buildTypeRegistry(depTypeDecls, [], { file: absSource, start: 0, end: 0, line: 1, col: 1 });
+    // S443 — keep ONLY the dep's own declarations. buildTypeRegistry seeds the
+    // BUILTIN_TYPES (a local `type X` overwrites its entry), so an entry still
+    // identical to the built-in object is not declared by this dep. Left in, a
+    // re-exporting file that also declares a type of its own would "resolve"
+    // `export { AuthError } from './errs.scrml'` to the BUILT-IN AuthError and
+    // shadow the user enum it forwards (resolveTypeThroughReExport stops at the
+    // first registry hit).
+    for (const [name, t] of reg) {
+      if (t === BUILTIN_TYPES.get(name)) reg.delete(name);
+    }
     depRegistryCache.set(absSource, reg);
     return reg;
   }
@@ -2824,8 +2855,14 @@ function _compileScrmlImpl(options = {}) {
 
   // When selfHostModules.runCG is provided (or stageOverrides names the stage), the validated stage seam (pipeline-seam.ts) substitutes it.
   const _runCG = seams.pick("CG", runCG);
+  // §14.8.9 — start this compile with an empty protect-flow registry (a prior
+  // compile that threw mid-CG must not leak its per-file records into this one).
+  takeProtectRegistry();
   const cgResult = stage("CG", () => _runCG({
     files: metaFiles,
+    // s440-bootstrap-css-theme-t3 — the CSS sub-seam of CG (pipeline-seam.ts `CSS`): `generateCss`
+    // itself unless a bootstrap stylesheet emitter is swapped in (identity pick → byte-identical).
+    generateCss: seams.pick("CSS", generateCss),
     routeMap: riResult.routeMap,
     depGraph: dgResult.depGraph,
     protectAnalysis: paResult.protectAnalysis,
@@ -2902,9 +2939,8 @@ function _compileScrmlImpl(options = {}) {
   if (mcpAutoActivated) {
     stdlibSpecifiers.add("mcp");
   }
-  const bundledStdlib = (write && outputDir)
-    ? bundleStdlibForRun(stdlibSpecifiers, outputDir, verbose ? log : null, allErrors)
-    : new Set();
+  // (`bundledStdlib` — the first disk write — is computed below, after the
+  // `beforeWrite` commit decision, so a refused build writes nothing at all.)
 
   // ---------------------------------------------------------------------------
   // D-4 (S296) — DIST-space reversal of an emitted server import specifier.
@@ -3166,6 +3202,55 @@ function _compileScrmlImpl(options = {}) {
   }
   emitValueOnlyServerJsForDanglingImports();
   checkServerImportInvariant();
+  runProtectFlow();
+
+  // ---------------------------------------------------------------------------
+  // §14.8.9 protected-column PROVENANCE FLOW (S441) — compile-wide. Each
+  // protect-active file registered its strip records during CG; the flow runs
+  // here over EVERY emitted server module of the compile, with `./X.server.js`
+  // imports resolved to the module that emits it (the same reversal
+  // `checkServerImportInvariant` uses), so a helper in another file is analysed
+  // rather than guessed. Anything it cannot resolve is a host import and fails
+  // closed. Raises E-PROTECT-006 + the (now truthful) I-PROTECT-STRIP-001.
+  // ---------------------------------------------------------------------------
+  function runProtectFlow() {
+    const reg = takeProtectRegistry();
+    if (reg.size === 0 || !cgResult.outputs) return;
+    const regAbs = new Map();
+    for (const [fp, v] of reg) regAbs.set(resolve(fp), v);
+    const modules = [];
+    const pathOfAbs = new Map();
+    for (const [fp, out] of cgResult.outputs) {
+      if (!out.serverJs) continue;
+      const r = regAbs.get(resolve(fp));
+      modules.push({ filePath: fp, js: out.serverJs, infos: r?.infos, spanOf: r?.spanOf });
+      pathOfAbs.set(resolve(fp), fp);
+    }
+    const byFile = analyzeCompileProtectFlow(modules, (from, spec) => {
+      if (!/^\.\.?\//.test(spec) || !spec.endsWith(".server.js")) return null;
+      return pathOfAbs.get(resolve(serverImportTargetSource(from, spec))) ?? null;
+    });
+    for (const [fp, errs] of byFile) collectErrors("CG", errs, fp);
+  }
+
+  // Pre-write commit decision — see the `beforeWrite` option. The planned
+  // `.server.js` set is read off `distServerKeyToSource` (the forward index built
+  // through the write phase's `pathFor` transform), never re-derived here.
+  let writeCommitted = write;
+  if (write && outputDir && typeof beforeWrite === "function") {
+    const outputByAbsSource = new Map();
+    for (const [fp, output] of cgResult.outputs ?? []) outputByAbsSource.set(resolve(fp), output);
+    const plannedServerUnits = [];
+    for (const [relPath, absSource] of distServerKeyToSource) {
+      const output = outputByAbsSource.get(absSource);
+      if (output && output.serverJs) plannedServerUnits.push({ relPath, source: output.serverJs });
+    }
+    writeCommitted = beforeWrite({ errors: allErrors, outputDir, plannedServerUnits }) !== false;
+  }
+
+  const bundledStdlib = (writeCommitted && outputDir)
+    ? bundleStdlibForRun(stdlibSpecifiers, outputDir, verbose ? log : null, allErrors)
+    : new Set();
 
   // ---------------------------------------------------------------------------
   // Write output files
@@ -3176,8 +3261,15 @@ function _compileScrmlImpl(options = {}) {
   // dist-relative POSIX paths. Function-scoped so it reaches the return value;
   // populated in the write phase below. Empty for `write:false` / library mode.
   const hashedAssets = new Set();
+  // SPEC §47.13 — the client-asset manifest (g-static-server-serves-db-and-server-
+  // source). `clientSeeds` records every artifact written FOR THE BROWSER
+  // (documents, CSS, client bundles, the shared runtime, per-route chunks);
+  // `collectClientAssets` closes it over their relative imports after the write
+  // phase. Both static servers serve ONLY this set (plus passive media).
+  const clientSeeds = new Set();
+  let clientAssets = [];
 
-  if (write && outputDir) {
+  if (writeCommitted && outputDir) {
     mkdirSync(outputDir, { recursive: true });
 
     // `emitGateFailed` short-circuits ALL writes below (runtime chunk, per-file
@@ -3293,6 +3385,12 @@ function _compileScrmlImpl(options = {}) {
           let c = rewriteRelativeImportPaths(output.clientJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets);
           c = rewriteStdlibImports(c, gateDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.client.js`, c);
+          // §4.12.4 — the page's nested-program worker bundles are browser JS too.
+          if (output.workerBundles) {
+            for (const [name, workerJs] of output.workerBundles) {
+              pushArtifact(filePath, workerBundleFilename(filePath, name), workerJs);
+            }
+          }
         }
       }
       if (mode !== "library" && cgResult.runtimeJs && cgResult.runtimeFilename) {
@@ -3302,6 +3400,9 @@ function _compileScrmlImpl(options = {}) {
         for (const chunk of cgResult.chunks.values()) {
           pushArtifact(chunk.filename, chunk.filename, chunk.payloadJs);
         }
+      }
+      if (emitPerRoute && cgResult.chunksBootJs && cgResult.chunksBootFilename) {
+        pushArtifact(cgResult.chunksBootFilename, cgResult.chunksBootFilename, cgResult.chunksBootJs);
       }
       const gateErrors = validateEmittedArtifacts(gateArtifacts);
       if (gateErrors.length > 0) {
@@ -3346,10 +3447,14 @@ function _compileScrmlImpl(options = {}) {
         if (chunk && chunk.filename) hashedAssets.add(chunk.filename);
       }
     }
+    if (emitPerRoute && cgResult.chunksBootFilename) {
+      hashedAssets.add(cgResult.chunksBootFilename);
+    }
 
     // In browser mode, write the shared runtime file (not needed in library mode)
     if (!emitGateFailed && mode !== 'library' && cgResult.runtimeJs && cgResult.runtimeFilename) {
       writeFileSync(join(outputDir, cgResult.runtimeFilename), cgResult.runtimeJs);
+      clientSeeds.add(cgResult.runtimeFilename);
       if (verbose) log(`  [CG] Wrote shared runtime: ${cgResult.runtimeFilename}`);
     }
 
@@ -3427,6 +3532,15 @@ function _compileScrmlImpl(options = {}) {
         mkdirSync(targetDir, { recursive: true });
         writeFileSync(fullPath, contents);
         writtenPaths.set(fullPath, filePath);
+        // §47.13 — a browser artifact (document, stylesheet, client bundle, hashed
+        // or not, and a §4.12.4 worker bundle) seeds the client-asset manifest.
+        // `.server.js`, library/tool `.js`, source maps and test files do not: a
+        // library `.js` a client bundle imports is admitted by the import closure,
+        // never by its suffix.
+        if (suffix === ".html" || suffix.endsWith(".css") || /^\.client(\.[a-z0-9]+)?\.js$/.test(suffix)
+          || suffix.endsWith(".worker.js")) {
+          clientSeeds.add(relFromRoot(outputDir, fullPath));
+        }
         return true;
       }
 
@@ -3638,6 +3752,17 @@ function _compileScrmlImpl(options = {}) {
             c = rewriteStdlibImports(c, targetDir, outputDir, bundledStdlib);
             if (writeOutput(filePath, ".client.js", c)) fileCount++;
           }
+          // §4.12.4 — each nested `<program name=…>` worker is a separate bundle,
+          // written beside the page so the page's `new Worker("<page>-<name>.worker.js")`
+          // resolves (dpa-056 D1: the bundles were built in memory and never
+          // written, so every worker 404'd). Only a browser page instantiates
+          // workers, so only an output carrying client JS writes them. Never
+          // content-hashed: the URL is baked into the client bundle's bytes.
+          if (output.workerBundles) {
+            for (const [name, workerJs] of output.workerBundles) {
+              if (writeOutput(filePath, workerBundleSuffix(name), workerJs)) fileCount++;
+            }
+          }
         }
         if (output.html) {
           // #82 — rewrite `.client.js`/`.css` refs to their hashed names
@@ -3738,6 +3863,7 @@ function _compileScrmlImpl(options = {}) {
         const chunkPath = join(outputDir, chunk.filename);
         mkdirSync(dirname(chunkPath), { recursive: true });
         writeFileSync(chunkPath, chunk.payloadJs);
+        clientSeeds.add(relFromRoot(outputDir, chunkPath));
         fileCount++;
         const byteLen = Buffer.byteLength(chunk.payloadJs, "utf8");
         if (chunk.tier === "tier1") {
@@ -3753,6 +3879,17 @@ function _compileScrmlImpl(options = {}) {
           log(`  [CG] Wrote chunk: ${chunk.filename} (${byteLen} B)`);
         }
       }
+      // s444-csp-inline-chunks — the build's chunk-activation script
+      // (`_SCRML_CHUNKS` manifest + role bootstrap), referenced by every
+      // augmented page as a same-origin `<script src>` (never inline, so it
+      // runs under `headers="strict"`'s `default-src 'self'`).
+      if (cgResult.chunksBootJs && cgResult.chunksBootFilename) {
+        writeFileSync(join(outputDir, cgResult.chunksBootFilename), cgResult.chunksBootJs);
+        clientSeeds.add(cgResult.chunksBootFilename);
+        fileCount++;
+        if (verbose) log(`  [CG] Wrote chunk activation script: ${cgResult.chunksBootFilename}`);
+      }
+
       const manifestPath = join(outputDir, "chunks.json");
       // A-4.6 — pass `cgResult.chunks` so the on-disk JSON resolves
       // ChunkKey → URL-style content-addressed filename per the
@@ -3816,6 +3953,18 @@ function _compileScrmlImpl(options = {}) {
         // fetches OTHER routes' INITIAL chunks — not files counted here.
         log(`  [CG] Tier-2 intra-route prefetch chunks: ${tier2Count} file(s), ${tier2Bytes} B total`);
       }
+    }
+
+    // SPEC §47.13 — close the browser artifacts over their relative imports and
+    // record the result beside the build output. The manifest is a DOTFILE, so the
+    // policy that reads it can never serve it. Not counted in `fileCount`: it is
+    // compiler bookkeeping, not a compiled artifact.
+    if (!emitGateFailed) {
+      clientAssets = collectClientAssets(outputDir, clientSeeds);
+      writeFileSync(
+        join(outputDir, CLIENT_ASSET_MANIFEST),
+        JSON.stringify({ clientAssets }, null, 2) + "\n",
+      );
     }
   } else if (!write && cgResult.outputs) {
     // Still count outputs even when not writing
@@ -3897,11 +4046,20 @@ function _compileScrmlImpl(options = {}) {
     // exercised (e.g. fatal upstream errors); callers fall back to the
     // legacy literal `RUNTIME_FILENAME` when needed.
     runtimeFilename: cgResult.runtimeFilename,
+    // s444-csp-inline-chunks — under `emitPerRoute`, the build's same-origin
+    // chunk-activation script (manifest + role bootstrap) and its dist-root
+    // filename. Undefined when no chunks were emitted.
+    chunksBootJs: cgResult.chunksBootJs,
+    chunksBootFilename: cgResult.chunksBootFilename,
     // adopter-#82 FIX 1 — dist-relative POSIX paths of every content-addressed
     // (immutable-safe) artifact written this build (runtime + per-route chunks +,
     // on the build path, page bundles + CSS). The generated `_server.js` serves
     // `immutable` by membership in this set — never by a filename shape guess.
     hashedAssets: [...hashedAssets],
+    // SPEC §47.13 — dist-relative POSIX paths the static servers may serve (the
+    // browser artifacts + their import closure). `generateServerEntry` bakes it
+    // into `_server.js`; `scrml dev` reads the `.scrml-client-assets.json` copy.
+    clientAssets,
     // W2 §21.7: the full gathered .scrml file set (after auto-gather pre-pass).
     // Equal to options.inputFiles when gather is disabled. Includes all
     // transitively-reachable .scrml files when gather is enabled.

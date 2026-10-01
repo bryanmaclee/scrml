@@ -1,0 +1,16 @@
+{
+  "id": "server-db-inline-handler-server-call-condition-runtime",
+  "description": "SECURITY (s441, F5). An inline event handler tests a server-function call as a condition: `onclick=${ if (isOk(1)) {…} else {…} }`. The server answers false, so the click MUST take the else branch (\"rejected\"). Before s441 an inline handler was lowered through the string rewriter and never reached the function-body auto-await: the handler emitted `if (isOk(1))`, a Promise, always truthy — \"accepted\" for every input. The handler now awaits the call (and runs async).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2: the compiler SHALL insert `await` at every call site where a server-generated fetch call is made — including an inline event-handler value (ruling S440 JS-WAT #11: handler bodies are subject to every rule).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SERVER-FN-IN-SYNC-CALLBACK", "E-ASYNC-FN-ESCAPES-AS-VALUE"],
+    "serverStub": { "isOk": false },
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": { "verdict": "rejected" },
+    "domAnchored": [{ "selector": "#out", "text": "rejected" }]
+  }
+}

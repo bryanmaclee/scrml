@@ -1,0 +1,7 @@
+<program>
+<count> = 1
+type N = number extra
+export type T = "a" | "b" more words
+console.log("after")
+<p id="z">${@count}</p>
+</program>

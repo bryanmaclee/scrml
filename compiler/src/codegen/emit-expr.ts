@@ -59,8 +59,11 @@ import { emitMarkupValueExpr } from "./emit-lift.js";
 // Phase-2 colorless-async — the async-callback collection-method combinator
 // transform (DD colorless-async-boundaries §2 position 1, FORK 1). Dependency-
 // neutral, so no import cycle.
-import { ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, callbackReachesAsync, isAsyncCalleeName, isServerBoundaryCallee } from "./async-combinators.ts";
+import { ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, callbackReachesAsync, isAsyncCalleeName, isServerBoundaryCallee, isSyncCallbackConsumerCall } from "./async-combinators.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
+// s440 — nested-helper async coloring (lexical resolutions marked by the pre-pass).
+import { localCalleeOf, localFnRefOf, localSyncShadowOf, anchorDiagnosticSpan } from "./local-async-fns.ts";
+import type { AsyncRoot } from "./local-async-fns.ts";
 
 // ---------------------------------------------------------------------------
 // §20.6 (F4=A) — production strip toggle for the log() builtin.
@@ -2115,6 +2118,42 @@ function combinatorIsAsyncName(name: string, ctx: EmitExprContext): boolean {
 }
 
 /**
+ * s440 — WHY an (unshadowed) outer name is async, for diagnostic-code selection: a
+ * server-boundary fn is `server` (E-SERVER-FN-IN-SYNC-CALLBACK); a stdlib export or
+ * a transitively-async local peer is `stdlib` (E-ASYNC-STDLIB-IN-SYNC-CALLBACK).
+ */
+function outerAsyncRootOf(name: string, ctx: EmitExprContext): AsyncRoot {
+  return isServerBoundaryCallee(name, asyncNameFactsOf(ctx))
+    ? { kind: "server", via: name }
+    : { kind: "stdlib", via: name };
+}
+
+/**
+ * s440 — record an async call site the compiler emitted BARE because `await` is not
+ * legal where it sits (or because the consuming call is not one it can await). The
+ * site carries the root of the callee's asyncness so the drain names the right code,
+ * and a span with a REAL line/col (expression spans are a `1:1` placeholder — the
+ * enclosing statement's span stands in). Server mode drains `syncPeerCalls` in
+ * emit-server; client mode drains it in emit-functions (and the structural
+ * `collectNonAwaitableAsyncCalls` backstop catches the same sites where no sink is
+ * threaded).
+ */
+function recordAsyncSyncCallSite(
+  name: string,
+  root: AsyncRoot | null,
+  span: unknown,
+  ctx: EmitExprContext,
+): void {
+  if (!ctx.syncPeerCalls) return;
+  const site = {
+    name,
+    span: anchorDiagnosticSpan(span, ctx.stmtSpan),
+    ...(root ? { rootKind: root.kind, via: root.via } : {}),
+  };
+  ctx.syncPeerCalls.push(site);
+}
+
+/**
  * Issue #26 — does this call node lower to an `await <stdlibAsync>(...)` form?
  * Mirror of `isAwaitedPeerCall` for the stdlib-import surface: SERVER-mode +
  * an awaitable position (`peerAwaitable !== false`) + an unshadowed ident whose
@@ -2283,7 +2322,9 @@ function emitReceiver(node: ExprNode, ctx: EmitExprContext): string {
     isAwaitedStdlibAsyncCall(node, ctx) ||
     isAwaitedClientAsyncCall(node, ctx) ||
     isAwaitedClientServerFnCall(node, ctx) ||
-    isAwaitedCombinatorCall(node, ctx)
+    isAwaitedCombinatorCall(node, ctx) ||
+    // s440 — an awaited NESTED async helper (`inner(x).ok` → `(await inner(x)).ok`).
+    (node.kind === "call" && localCalleeOf(node)?.async === true && ctx.peerAwaitable !== false)
   ) return `(${s})`;
   return receiverNeedsParens(node) ? `(${s})` : s;
 }
@@ -3565,7 +3606,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
         if (ctx.mode === "server") {
           _serverAsyncClassifier?.syncCallSink?.push({
             name: `${method}(…) async-callback combinator`,
-            span: node.span,
+            span: anchorDiagnosticSpan(node.span, ctx.stmtSpan),
           });
         }
         return combinatorCall;
@@ -3618,6 +3659,64 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
 
   const callee = emitReceiver(node.callee, ctx);
   const args = node.args.map(a => emitExpr(a, ctx)).join(", ");
+
+  // s440-sync-callback-async-helper — an async function passed BY REFERENCE to a
+  // collection method that invokes it synchronously, consumes the result, and has no
+  // async combinator (`SYNC_CALLBACK_CONSUMER_METHODS`: `.sort` — DD FORK 2 — and
+  // friends): `xs.sort(inner)` compares Promises. The consuming call is not one the
+  // compiler can await, in ANY position, so the site fails closed. (A user HOF is
+  // NOT flagged — it may await what it is given; see the set's doc.) The client /
+  // library drains catch the same shape structurally; this record covers the server
+  // route-handler bodies, which have no drain of their own.
+  if (isSyncCallbackConsumerCall(node)) {
+    for (const a of node.args) {
+      if (a.kind !== "ident") continue;
+      const local = localFnRefOf(a);
+      if (local) {
+        if (local.async) recordAsyncSyncCallSite(local.name, local.root, a.span, ctx);
+        continue;
+      }
+      // s441 (FP2) — the binding in scope is a SYNC nested fn that merely shares
+      // an async name (`function verifyPassword(a, b) { return a - b }`).
+      if (localSyncShadowOf(a)) continue;
+      const nm = (a as IdentExpr).name;
+      if (combinatorIsAsyncName(nm, ctx)) recordAsyncSyncCallSite(nm, outerAsyncRootOf(nm, ctx), a.span, ctx);
+    }
+  }
+
+  // s440-sync-callback-async-helper — a call to a NESTED helper function. The
+  // file-scope async sets (`clientAsyncFnNames`, `serverFnNames`, the stdlib
+  // classifier) cannot see a function declared inside another; the pre-pass
+  // (`local-async-fns.ts`, run by every emitter before a body is emitted) resolved
+  // this callee lexically and recorded whether the compiler emits it `async`.
+  //   - async, awaitable position     → `await inner(…)` (§13.2: every async call site)
+  //   - async, NON-awaitable position → bare + RECORD → fail closed, with the code the
+  //     helper's root names (a peer server fn → E-SERVER-FN-IN-SYNC-CALLBACK; stdlib
+  //     / `?{}` → E-ASYNC-STDLIB-IN-SYNC-CALLBACK). Before s440 this emitted
+  //     `xs.some(x => inner(x))` bare with no diagnostic: a Promise per element,
+  //     always truthy — `.some` true for EVERY input.
+  // A call resolving to a SYNC nested function carries NO mark (fix round, F1) and
+  // falls through to the name-based branches below: if its name is also an async
+  // outer name it is awaited / failed closed as that name would be. Never demoted
+  // to a plain call — a wrong shadow decision there shipped an unawaited
+  // `verifyPassword` (every password accepted) in the first draft.
+  const _localCallee = localCalleeOf(node);
+  if (_localCallee && _localCallee.async) {
+    if (ctx.peerAwaitable === false) {
+      recordAsyncSyncCallSite(_localCallee.name, _localCallee.root, node.span, ctx);
+      return `${callee}(${args})`;
+    }
+    return `await ${callee}(${args})`;
+  }
+  // s441 (g-sync-local-with-async-name-treated-async) — the callee CERTAINLY
+  // resolves to a SYNC nested function that shares an async outer name. Where
+  // `await` is illegal (a sync callback, a `.sort` comparator) the call is a plain
+  // sync call — nothing to fail closed on. In an awaitable position it keeps the
+  // name-based treatment below (an `await` of a sync value is the same value), so
+  // this mark can never remove an await.
+  if (ctx.peerAwaitable === false && localSyncShadowOf(node)) {
+    return `${callee}(${args})`;
+  }
 
   // §20.5 (S265, i29e) — `session` server-builtin method calls. Inside a
   // server-escalated fn body `session.set(key, value)` / `session.get(key)` /
@@ -3722,7 +3821,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     // (`isAwaitedPeerCall` mirrors this exact condition + `peerAwaitable !==
     // false` so emitReceiver can wrap an await form used as a receiver.)
     if (ctx.peerAwaitable === false) {
-      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: node.span });
+      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
       return `${callee}(${args})`;
     }
     return `await ${callee}(${args})`;
@@ -3739,7 +3838,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   if (isDispatchPeerCall(node, ctx)) {
     if (ctx.peerAwaitable === false) {
       const _objName = ((node.callee as MemberExpr | IndexExpr).object as { name?: string }).name;
-      if (ctx.syncPeerCalls && typeof _objName === "string") ctx.syncPeerCalls.push({ name: _objName, span: node.span });
+      if (ctx.syncPeerCalls && typeof _objName === "string") ctx.syncPeerCalls.push({ name: _objName, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
       return `${callee}(${args})`;
     }
     return `await ${callee}(${args})`;
@@ -3779,7 +3878,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name))
   ) {
     if (ctx.peerAwaitable === false) {
-      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: node.span });
+      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
       return `${callee}(${args})`;
     }
     return `await ${callee}(${args})`;
@@ -3811,7 +3910,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // drives the fail-closed diagnostic rather than shipping a silent leak.
   if (isClientServerFnCall(node, ctx)) {
     if (ctx.peerAwaitable === false) {
-      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name as string, span: node.span });
+      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name as string, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
       return `${callee}(${args})`;
     }
     return `await ${callee}(${args})`;
@@ -3884,7 +3983,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       // level — the artifact IS written on a fatal CG error. See :1281 and
       // `g-cli-emits-artifacts-on-failed-compile`.
       if (ctx.mode === "server") {
-        _serverAsyncClassifier?.syncCallSink?.push({ name: node.callee.name, span: node.span });
+        _serverAsyncClassifier?.syncCallSink?.push({ name: node.callee.name, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
       }
       return `${callee}(${args})`;
     }

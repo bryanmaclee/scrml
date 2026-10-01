@@ -25,16 +25,12 @@
   <db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads">
 
     ${
-        function getCurrentUser(sessionToken) {
-            if (sessionToken is not) return not
-            const store = createSessionStore(SESSION_DB_PATH)
-            const userId = store.get(sessionToken)
-            if (userId is not) return not
-            return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
-        }
 
         function fetchCustomerServer(sessionToken) {
-            const user = getCurrentUser(sessionToken)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
@@ -52,7 +48,10 @@
             pickupAt, deliverBy,
             commodity, weightLbs
         ) {
-            const user = getCurrentUser(sessionToken)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
@@ -144,7 +143,7 @@
             const tok = getSessionToken()
             const data = fetchCustomerServer(tok)
             if (data.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             if (data.error) {
@@ -182,7 +181,7 @@
                 @quoteForm.commodity, @quoteForm.weightLbs
             )
             if (result.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             if (result.error) {
@@ -202,7 +201,7 @@
 
         function logout() {
             document.cookie = "scrml_session=; Path=/; Max-Age=0"
-            window.location.href = "/login"
+            window.location.href = "/auth/login?logout=1"
         }
 
         on mount {
@@ -217,11 +216,11 @@
     <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">
       <header class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
           <div class="flex items-center gap-3">
-              <a href="/customer" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
+              <a href="/customer/home" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
               <span class="text-xs uppercase tracking-wider text-slate-400">Request rate quote</span>
           </div>
           <nav class="flex items-center gap-4 text-sm">
-              <a href="/customer" class="hover:text-blue-300">Home</a>
+              <a href="/customer/home" class="hover:text-blue-300">Home</a>
               <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
               <a href="/customer/invoices" class="hover:text-blue-300">Invoices</a>
               <a href="/customer/profile" class="hover:text-blue-300">Profile</a>
@@ -338,7 +337,7 @@
                       Rate will be set by your dispatcher and shown on the load detail page.
                   </p>
                   <div class="flex items-center gap-2">
-                      <a href="/customer" class="text-sm px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-md">Cancel</a>
+                      <a href="/customer/home" class="text-sm px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-md">Cancel</a>
                       <button type="submit" disabled=!@quoteForm.isValid class="text-sm px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-medium disabled:opacity-50 disabled:cursor-not-allowed">
                           Submit tender
                       </button>

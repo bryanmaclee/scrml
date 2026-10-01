@@ -21,8 +21,8 @@
  *      8-char base36 hash (§47.5); per-role per-page chunk variance
  *      visible at the chunk-output layer.
  *   5. Per-route HTML augmentation (A-4.7) — every route's HTML
- *      includes the `_SCRML_CHUNKS` inline manifest + role-detection
- *      bootstrap.
+ *      loads the build's same-origin chunk-activation script (the
+ *      `_SCRML_CHUNKS` manifest + role-detection bootstrap).
  *   6. Determinism (A-2.8 + A-4.6) — two compileScrml invocations
  *      on the same source produce byte-identical chunks.json AND
  *      byte-identical per-chunk JS payloads + per-chunk content hashes.
@@ -467,48 +467,43 @@ describe("FX-1 — per-route HTML augmentation (A-4.7)", () => {
     expect(htmlByFile(result, "routes/admin.scrml")).toBeDefined();
   });
 
-  test("every route's HTML carries `window._SCRML_CHUNKS` inline manifest", () => {
+  test("every route's HTML loads the chunk-activation script by same-origin src, with its own route", () => {
     const result = compileFx1();
-    for (const suffix of [
-      "routes/index.scrml",
-      "routes/loads.scrml",
-      "routes/admin.scrml",
+    for (const [suffix, route] of [
+      ["routes/index.scrml", "/"],
+      ["routes/loads.scrml", "/loads"],
+      ["routes/admin.scrml", "/admin"],
     ]) {
       const html = htmlByFile(result, suffix);
-      expect(html).toContain("window._SCRML_CHUNKS");
+      // s444-csp-inline-chunks — never inline (refused under headers="strict").
+      expect(html).toContain(`<script src="/${result.chunksBootFilename}" data-scrml-route="${route}"></script>`);
+      expect(html).not.toContain("window._SCRML_CHUNKS");
+      expect(html).not.toContain("scrml_role");
     }
   });
 
-  test("every route's HTML carries the role-detection bootstrap (localStorage + script-loader)", () => {
+  test("the chunk-activation script carries the manifest + role-detection bootstrap (localStorage + script-loader)", () => {
     const result = compileFx1();
-    for (const suffix of [
-      "routes/index.scrml",
-      "routes/loads.scrml",
-      "routes/admin.scrml",
-    ]) {
-      const html = htmlByFile(result, suffix);
-      expect(html).toContain('localStorage.getItem("scrml_role")');
-      expect(html).toContain('"_anonymous"');
-      expect(html).toContain('document.createElement("script")');
-    }
+    const js = result.chunksBootJs;
+    expect(js).toContain("window._SCRML_CHUNKS = ");
+    expect(js).toContain('localStorage.getItem("scrml_role")');
+    expect(js).toContain('"_anonymous"');
+    expect(js).toContain('document.createElement("script")');
   });
 
-  test("HTML inline manifest references all three role variants", () => {
+  test("chunk manifest references all three role variants", () => {
     const result = compileFx1();
-    const html = htmlByFile(result, "routes/index.scrml");
-    expect(html).toContain('"Admin"');
-    expect(html).toContain('"Anonymous"');
-    expect(html).toContain('"Driver"');
+    expect(result.chunksBootJs).toContain('"Admin"');
+    expect(result.chunksBootJs).toContain('"Anonymous"');
+    expect(result.chunksBootJs).toContain('"Driver"');
   });
 
-  test("HTML inline manifest is keyed by route URL pattern (`/`, `/loads`, `/admin`) per A-4.7 EpId→route translation", () => {
+  test("chunk manifest is keyed by route URL pattern (`/`, `/loads`, `/admin`) per A-4.7 EpId→route translation", () => {
     const result = compileFx1();
-    const html = htmlByFile(result, "routes/index.scrml");
-    // The route-keyed manifest emits at the inline-`_SCRML_CHUNKS` site.
     // Quoting around keys per JSON.stringify(..., null, 2) shape.
-    expect(html).toContain('"/":');
-    expect(html).toContain('"/loads":');
-    expect(html).toContain('"/admin":');
+    expect(result.chunksBootJs).toContain('"/":');
+    expect(result.chunksBootJs).toContain('"/loads":');
+    expect(result.chunksBootJs).toContain('"/admin":');
   });
 });
 

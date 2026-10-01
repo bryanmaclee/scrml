@@ -1296,6 +1296,11 @@ function exprSourceText(nativeExpr) {
 // a recoverable shape). emit-expr.ts:emitEscapeHatch recognizes the native
 // kind values directly (it already branches on `kind === "Arrow"` /
 // `"Function"`), so the escape-hatch is the documented dual-mode seam.
+// (An escape-hatch whose `raw` is "" carries NO source text: whatever it
+// stands for never reaches the emitted code. The S441 body-top coverage check
+// — parse-markup.js, body-top-coverage.js `liveTreeDropsText` — finds these in
+// the TRANSLATED output, so a statement holding one is not credited as
+// compiled.)
 function makeEscapeHatch(nativeKind, raw, span) {
     return {
         kind: "escape-hatch",

@@ -1,0 +1,15 @@
+{
+  "id": "error-fail-bare-variant-reaches-handler",
+  "description": "§19.3.3 bare form (S441), RT: load('missing') runs `fail .NotFound(id)` — the bare variant resolves against the declared `! LoadError`, and the call-site `!{}` handler matches `.NotFound(mid)` and lifts @phase = Phase.Missing(mid). Proves the bare form produces the same error envelope (type LoadError, variant NotFound, field-keyed payload) as the qualified `fail LoadError.NotFound(id)`, so handler arm matching and payload binding still work.",
+  "language-version": "1.0",
+  "spec": "§19.3.3",
+  "rationale": "§19.3.3: `fail .Variant` resolves the bare variant against the error type declared in the function's `!` signature (§14.10 applied to the `fail` target); `fail` is `return ErrorType::Variant(args)` (§19.3.2), so the call-site handler receives LoadError.NotFound('missing'). The whole E-ERROR-* family stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-"],
+    "input": [{ "click": "#btn-missing" }],
+    "state": { "phase": { "variant": "Missing", "data": { "id": "missing" } } },
+    "domAnchored": [{ "selector": "#out", "count": 1 }]
+  }
+}

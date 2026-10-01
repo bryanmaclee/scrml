@@ -1,0 +1,16 @@
+<program>
+<x> = 3
+<p>WSA:   lead and trail   :WSA</p>
+<p>   WSB-leading-3sp</p>
+<p>WSC-trailing-3sp   </p>
+<p>WSD  two   three    four</p>
+<div>
+    WSE after newline+indent
+        WSE2 deeper indent
+</div>
+<p>WSF before ${@x}   after-interp   ${@x}  end</p>
+<p>WSG	tab	sep</p>
+<span>  WSH  </span>
+<p>WSI line1
+line2</p>
+</program>

@@ -4,7 +4,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, matchArmBlockBinding, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, matchArmBlockBinding, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
@@ -17,6 +17,8 @@ import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
 import { emitInlineMessageOverrides } from "./emit-messages.ts";
 import { emitCompoundSynthSurface } from "./emit-synth-surface.ts";
 import { CGError } from "./errors.ts";
+import { localAsyncDeclRoot } from "./local-async-fns.ts";
+import { bodyTextHasOwnAwait } from "./js-async-analysis.ts";
 
 // ---------------------------------------------------------------------------
 // Deep reactive wrapping helper (Reactivity Phase 1)
@@ -455,6 +457,22 @@ export interface EmitLogicOpts {
    * (CPS-split server-fn emission in emit-functions.ts).
    */
   insideFunctionBody?: boolean;
+  /**
+   * s441 — the statements are lowered inside a JS function WRAPPER whose own
+   * `return` is the author's `return`, although they are NOT a function body for
+   * declaration purposes (`insideFunctionBody` stays false, so a cell write keeps
+   * its `_scrml_init_set` reset thunk exactly as at top level). The one host
+   * today is the engine opener `effect=` (§51.0.H Form 3), emitted as
+   * `(function () { … })()` / `(async function () { … })()`. Read ONLY by the
+   * `!{}` lowering: a terminal arm `return` stays a real `return` out of the
+   * effect (instead of the top-level `<result> = null` rewrite, after which the
+   * effect ran on and the recovery write-back stored null into the cell), and an
+   * unhandled variant escalates with `return <result>`. Threaded through the
+   * if / for / while / do-while hops (emit-logic + emit-control-flow) alongside
+   * `insideFunctionBody`, so a `!{}` nested in a block inside the effect exits the
+   * effect too.
+   */
+  returnExitsWrapper?: boolean;
   /**
    * C2 — Function body registry for transitive reactive-dep extraction
    * through function calls in derived-cell init expressions. Closes the
@@ -1309,9 +1327,17 @@ function _emitInitThunkSidecar(node: any, qualifiedName: string, opts: EmitLogic
     typeof _thunkAnno === "string" &&
     isMapTypeAnnotation(_thunkAnno) &&
     _thunkAnno.trim().endsWith("@ordered");
+  // s441 — in an async host (the engine opener `effect=`) the init expression
+  // emits its server calls AWAITED (`[0, ...(await stub())].length`). The reset
+  // thunk then has to be an ASYNC arrow so those awaits are legal and the value
+  // is computed from resolved results; `_scrml_reset_apply` settles the promise
+  // the async thunk returns. An init with no server call emits no `await`, so
+  // its thunk stays the plain synchronous arrow (byte-identical to before).
   const _thunkExprCtx: EmitExprContext = _thunkInitOrderedMap
     ? { ..._makeExprCtx(opts), emitMapLitOrdered: true }
     : _makeExprCtx(opts);
+  const _thunkArrow = (body: string): string =>
+    opts.clientAsyncBody && /\bawait\b/.test(body) ? "async () =>" : "() =>";
 
   // Prefer the structured `initExpr` (Phase 3 fast path); fall back to the
   // raw `init` string when only the legacy AST shape is available. Both
@@ -1331,7 +1357,7 @@ function _emitInitThunkSidecar(node: any, qualifiedName: string, opts: EmitLogic
       arrowBodyNeedsParens(node.initExpr) || arrowBodyStringNeedsParens(initBody)
         ? `(${initBody})`
         : initBody;
-    return `_scrml_init_set(${JSON.stringify(encodedName)}, () => ${wrappedInit});`;
+    return `_scrml_init_set(${JSON.stringify(encodedName)}, ${_thunkArrow(initBody)} ${wrappedInit});`;
   }
   const initStr: string = node.init ?? "";
   // M-7C-D-12 Track 3: post-OQ-5(a) the "no init present" sentinel string is "null"
@@ -1344,7 +1370,7 @@ function _emitInitThunkSidecar(node: any, qualifiedName: string, opts: EmitLogic
   // GITI-014: same paren-wrap guard for the fallback string path. No ExprNode
   // available here, so use the string-form predicate.
   const wrappedInit = arrowBodyStringNeedsParens(initBody) ? `(${initBody})` : initBody;
-  return `_scrml_init_set(${JSON.stringify(encodedName)}, () => ${wrappedInit});`;
+  return `_scrml_init_set(${JSON.stringify(encodedName)}, ${_thunkArrow(initBody)} ${wrappedInit});`;
 }
 
 /**
@@ -3074,6 +3100,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         synthCellKeys: opts.synthCellKeys,
         declaredNames: opts.declaredNames,
         insideFunctionBody: opts.insideFunctionBody,
+        returnExitsWrapper: opts.returnExitsWrapper,
         boundary: opts.boundary,
         channelOwnedCells: opts.channelOwnedCells,
         ...(opts.engineBindings ? { engineBindings: opts.engineBindings } : {}),
@@ -3117,6 +3144,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         dbVar: opts.dbVar,
         declaredNames: opts.declaredNames,
         insideFunctionBody: opts.insideFunctionBody,
+        returnExitsWrapper: opts.returnExitsWrapper,
         fnBodyRegistry: opts.fnBodyRegistry,
         boundary: opts.boundary,
         channelOwnedCells: opts.channelOwnedCells,
@@ -3141,12 +3169,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path
       // when the enclosing fn is server-bound.
-      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, returnExitsWrapper: opts.returnExitsWrapper, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ clientAsyncBody: (opts as { clientAsyncBody?: boolean }).clientAsyncBody, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "do-while-stmt":
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path.
-      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, returnExitsWrapper: opts.returnExitsWrapper, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ clientAsyncBody: (opts as { clientAsyncBody?: boolean }).clientAsyncBody, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "break-stmt":
       return emitBreakStmt(node);
@@ -3592,7 +3620,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           if (method === "all") {
             return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${tagged}`, rawQuery, false), rawQuery)) + ";";
           }
-          return `await ${tagged};`;
+          // ⚑ S443 round 6: `.run()` / any other terminator / a bare `?{}` is the
+          // driver's result array when used as a value (`let r = ?{`SELECT *…`}.run()`,
+          // `UPDATE … RETURNING *`) — measured serving `passwordHash` untagged. Every
+          // terminator below is tagged; a statement with no protected output emits
+          // unchanged (protectTagSqlResult is a no-op for it).
+          return protectTagSqlResult(`await ${tagged}`, rawQuery) + ";";
         }
 
         // Branch B: SQL uses bare ? placeholders + explicit call.args.
@@ -3605,7 +3638,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           if (method === "all") {
             return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`, rawQuery, false), rawQuery)) + ";";
           }
-          return `await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]);`;
+          return protectTagSqlResult(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`, rawQuery) + ";";
         }
 
         // Branch C: no params, no call.args. Bare tagged template.
@@ -3616,16 +3649,16 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         if (method === "all") {
           return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${taggedNoParams}`, rawQuery, false), rawQuery)) + ";";
         }
-        return `await ${taggedNoParams};`;
+        return protectTagSqlResult(`await ${taggedNoParams}`, rawQuery) + ";";
       }
 
       // No chained call.
       if (params.length > 0) {
         // Defaults to .run() semantics — value dropped.
-        return `await ${taggedFromParams()};`;
+        return protectTagSqlResult(`await ${taggedFromParams()}`, rawQuery) + ";";
       }
       // Static DDL — route through unsafe() so the runtime accepts no-param SQL.
-      return `await ${db}.unsafe(${JSON.stringify(rawQuery)});`;
+      return protectTagSqlResult(`await ${db}.unsafe(${JSON.stringify(rawQuery)})`, rawQuery) + ";";
     }
 
     case "fail-expr": {
@@ -3883,7 +3916,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // result (the binding takes it) instead of an illegal return. A bare
       // `return;` (no value) becomes `resultVar = null` (canonical absence).
       const rewriteTopLevelReturn = (stmt: string): string => {
-        if (opts.insideFunctionBody) return stmt;
+        if (opts.insideFunctionBody || opts.returnExitsWrapper) return stmt;
         const m = stmt.match(/^return\b\s*([\s\S]*?)\s*;?$/);
         if (!m) return stmt;
         const val = (m[1] ?? "").trim();
@@ -3999,11 +4032,11 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           // unhandled error simply remains the value of resultVar (and of any
           // `var binding = resultVar` emitted below), which is the correct
           // top-level semantics — no statement is needed.
-          if (opts.insideFunctionBody && !opts.inDeferredBody) {
+          if ((opts.insideFunctionBody || opts.returnExitsWrapper) && !opts.inDeferredBody) {
             lines.push(`  else { return ${resultVar}; }`);
           }
         }
-      } else if (opts.insideFunctionBody && !opts.inDeferredBody) {
+      } else if ((opts.insideFunctionBody || opts.returnExitsWrapper) && !opts.inDeferredBody) {
         lines.push(`  return ${resultVar};`);
       }
 
@@ -4104,7 +4137,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // AST path above) is awaited here too.
         body = sched.injectFnBodyServerCallAwaits(body, (n) => whenSrvNames.has(n), "none");
       }
-      const isAsync = !isServer && /\bawait\b/.test(body);
+      // s441 — own-level `await` only (a colored handler inside is its own scope).
+      const _whenOwnAwait = bodyTextHasOwnAwait(body);
+      const isAsync = !isServer && (_whenOwnAwait !== null ? _whenOwnAwait : /\bawait\b/.test(body));
       const ctx = opts.encodingCtx;
       const seen = new Set<string>();
       const subs: string[] = [];
@@ -4133,14 +4168,18 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // `@cell` write inside a worker handler is not routed through the transition
       // guard (a narrow shared limitation, not specific to this path).
       // The when-handler body is wrapped in a plain, NON-async `function(){}`
-      // (`worker.onmessage` / `worker.onerror`), so no `await`
+      // (a worker `message` / `error` listener), so no `await`
       // may be emitted into it. Force `clientAsyncBody:false` in the lowering ctx
       // so a server-fn / async-peer call cannot strand an `await` in the sync
       // wrapper (S374 review #1 — latent: top-level when-sites carry no async
       // colour today, but this makes the sync-wrapper invariant explicit and
       // future-proof; matches the pre-#693 string path, which never awaited).
       const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", { ..._makeExprCtx(opts), clientAsyncBody: false });
-      return `${workerVar}.onmessage = function(event) { const ${binding} = event.data; ${body}; };`;
+      // D2 (S443): a LISTENER, never an `onmessage` assignment — `.send()`'s reply
+      // router and every other `when message from` hook on this worker coexist
+      // with it (§46.2 source order, §46.6). Messages arrive as `{ replyTo, data }`
+      // (emit-worker.ts wire format); the hook sees only `data`.
+      return `${workerVar}.addEventListener("message", function(event) { const ${binding} = event.data.data; ${body}; });`;
     }
 
     case "when-worker-error": {
@@ -4150,14 +4189,15 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const workerVar = `_scrml_worker_${node.workerName}`;
       const binding = node.binding ?? "e";
       // The when-handler body is wrapped in a plain, NON-async `function(){}`
-      // (`worker.onmessage` / `worker.onerror`), so no `await`
+      // (a worker `message` / `error` listener), so no `await`
       // may be emitted into it. Force `clientAsyncBody:false` in the lowering ctx
       // so a server-fn / async-peer call cannot strand an `await` in the sync
       // wrapper (S374 review #1 — latent: top-level when-sites carry no async
       // colour today, but this makes the sync-wrapper invariant explicit and
       // future-proof; matches the pre-#693 string path, which never awaited).
       const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", { ..._makeExprCtx(opts), clientAsyncBody: false });
-      return `${workerVar}.onerror = function(${binding}) { ${body}; };`;
+      // A listener, not an `onerror` assignment, so several hooks all run (§46.2).
+      return `${workerVar}.addEventListener("error", function(${binding}) { ${body}; });`;
     }
 
     case "upload-call": {
@@ -4446,6 +4486,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         declaredNames: new Set<string>(opts.declaredNames ?? []),
         insideFunctionBody: true,
         inDeferredBody: false,
+        // s440 — a nested helper the pre-pass colored async is emitted `async`
+        // (below), so its body is an async host: the client auto-await gates
+        // (`clientAsyncBody`) must open for it exactly as for a colored top-level fn.
+        ...(localAsyncDeclRoot(node) != null && !node.isGenerator ? { clientAsyncBody: true } : {}),
       };
       delete (fnOpts as any).deferStack;
       // §19.16.6 — a nested function's own defer closures are sync unless its
@@ -4483,10 +4527,19 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // body stubs its SQL to `return null` (no await), so the function stays
       // synchronous and this is a no-op. A generator (`function*`) is never
       // marked async (async generators are a distinct, unused form here).
-      const _nestedHasAwait = !node.isGenerator && fnBodyLines.some(
+      // s441 — only an `await` at THIS function's own level counts: an
+      // `async function(event) { await … }` handler lifted inside the body is its
+      // own async scope (a token scan made the helper async, and its callers got a
+      // Promise). Unparseable text keeps the token scan (fail-safe).
+      const _nestedOwnAwait = node.isGenerator ? false : bodyTextHasOwnAwait(fnBodyLines.join("\n"));
+      const _nestedHasAwait = !node.isGenerator && (_nestedOwnAwait !== null ? _nestedOwnAwait : fnBodyLines.some(
         (l) => /(^|[^.\w$])await\s/.test(l),
-      );
-      const _asyncKw = _nestedHasAwait ? "async " : "";
+      ));
+      // s440-sync-callback-async-helper — OR the pre-pass's structural verdict
+      // (`local-async-fns.ts`). Every call site of this helper was lowered from that
+      // SAME verdict (awaited / combinator-lifted / failed closed), so the keyword
+      // must agree with it even where the body's own `await` text does not show it.
+      const _asyncKw = (_nestedHasAwait || (!node.isGenerator && localAsyncDeclRoot(node) != null)) ? "async " : "";
 
       const fnLines: string[] = [];
       fnLines.push(`${_asyncKw}function${generatorStar} ${fnName}(${paramSigs.join(", ")}) {`);
@@ -5553,6 +5606,11 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     if (!child) continue;
     // Structured match-arm-block nodes (from `. Variant => { ... }` arms)
     if (child.kind === "match-arm-block") {
+      // Carry the payload binding (raw `field: local` text, else the positional
+      // local list) exactly as the sibling emitter in emit-control-flow.ts does —
+      // a hard-coded `null` here emitted NO `const local = …data.field` prelude,
+      // so a block arm of `const r = match …` referenced an unbound name.
+
       arms.push({
         kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
         test: child.variant ?? null,
@@ -5666,11 +5724,12 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
         conditionIndex++;
       } else {
         const prefix = conditionIndex === 0 ? "if" : "else if";
-        // arm.test for variant arms is a bare name; for string arms it already
-        // includes the surrounding quotes. Compare against the appropriate var.
-        const cmp = arm.kind === "variant"
-          ? `${tagVar} === "${arm.test}"`
-          : `${tmpVar} === ${arm.test}`;
+        // The shared arm-condition builder (emit-control-flow.ts): variant arms
+        // compare the tag, literal arms the raw value, and an ALTERNATION arm
+        // (`.B | .C`, `"a" | "b"`, `1 | 2`) ORs every alternate. This path hand-
+        // built the single `test` comparison and so lowered `.B | .C :>` as `.B`
+        // alone (g-impl1-match-miscompiles F12 sibling — `const r = match …`).
+        const cmp = armCondition(arm, tmpVar, tagVar);
         lines.push(`${prefix} (${cmp}) {`);
         conditionIndex++;
       }
@@ -5721,9 +5780,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       conditionIndex++;
     } else {
       const prefix = conditionIndex === 0 ? "if" : "else if";
-      const cmp = arm.kind === "variant"
-        ? `${tagVar} === "${arm.test}"`
-        : `${tmpVar} === ${arm.test}`;
+      const cmp = armCondition(arm, tmpVar, tagVar);
       lines.push(`${prefix} (${cmp}) {`);
       if (bindingPrelude) lines.push(`  ${bindingPrelude.trimEnd()}`);
       lines.push(armResultLine(arm));

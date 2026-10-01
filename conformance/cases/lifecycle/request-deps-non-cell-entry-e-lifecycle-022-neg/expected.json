@@ -1,0 +1,12 @@
+{
+  "id": "request-deps-non-cell-entry-e-lifecycle-022-neg",
+  "description": "§6.7.7 the E-LIFECYCLE-022 resolution: list the CELL (`deps=[@u]`), and read its field in the body (`suggest(@u.id)`). A bare `@identifier` entry is the grammar, so no E-LIFECYCLE-022. Twin of request-deps-non-cell-entry-e-lifecycle-022-pos.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 grammar `deps-list ::= ('@' identifier (',' '@' identifier)*)?`.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-LIFECYCLE-022"],
+    "notCodePrefixes": ["E-"]
+  }
+}

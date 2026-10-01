@@ -1,0 +1,25 @@
+// S441 reproducer — addendum-3 T2: a component body reading its prop with `@` compiles clean when the component
+// is `lift`ed from a `for`, then throws at load (the old tutorial 03-todos shape).
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/tut-component-prop-at-read-in-lift-throws.scrml --output-dir <scratch>
+// Expected: E-STATE-UNDECLARED, as the same component rendered DIRECTLY (`<TodoRow item=@one/>`) already gives:
+//           "bare `@item` read with no reactive cell in scope". §15 props: "Props declared via `props` are in
+//           scope throughout the entire component body" — read by bare name (§15 worked example `${name}`).
+// Actual:   exit 0, no error. client.js: `_scrml_lift_tn_10.textContent = String((_scrml_cs_reactive_get("item").body) ?? "");`
+//           EXECUTED (happy-dom, emitted html + runtime + client.js): `TypeError: undefined is not an object
+//           (evaluating '_scrml_cs_reactive_get("item").body')`; the <ul> stays empty.
+<program>
+type Todo:struct = { id: number, body: string, done: boolean }
+<items>: Todo[] = [{ id: 1, body: "a", done: true }]
+const TodoRow = <li props={ item: Todo }>
+    <input type="checkbox" checked=@item.done/>
+    <span>${@item.body}</span>
+</li>
+<ul>
+    ${
+        for (let t of @items) {
+            lift <TodoRow item=t/>
+        }
+    }
+</ul>
+</program>

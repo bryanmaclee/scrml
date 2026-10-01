@@ -4038,3 +4038,97 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3565] rule · **§66 rulings** L6 (a) · L12 (b) · identities · spread = field edit · O58 (b) · O57 no · O59/O60 leans · O21/O43 closed · reads through a conditional handle require narrowing → #1107 #1108 · two PA restatement widenings corrected (user-voice S437)
 
 [3566] land · **#1109 bootstrap slice M2 MERGED (072741ca9)** — Fork-A proof: lower(analyze(parse(lex(SPEC §66.19)))) == M1 hand-built Core; M3 item 1 = the typer (11 silent shapes pinned test.failing)
+
+[3567] land · **#1112 E-MW-008 counts only non-tool files** (98d94e96) — round 1 node-skip recreated the class; per-file `isToolProgram` · SPEC rows amended
+
+[3568] land · **#1113 #1045 F1** (b7c86323) — clientJs rebased in gate+write; browser half RE-OPENED (disk ≠ browser)
+
+[3569] land · **#1114 8b defers session config to the program** (8c55f518) — 2+-program files keep base stamp; 5 Windows residue suites fixed
+
+[3570] land · **#1116 E-SCHEMA-012/013 tenant floor** (afc2308b) — 5 S239 rounds; stop condition removed the SECDEF fn exemption
+
+[3571] land · **#1119 F12/F13/F14 + E-MATCH-ALT-BINDING** (fb21983a) — stop condition reverted a division probe
+
+[3572] escalate · **to bryan**: hold/s438-1109-review-fixes (M2 spread HIGH) · hold/s438-refusal-writes-no-dist (a/b/c) · 3 new codes · §20.5.1 line — note in handOffs/incoming
+
+[3573] state · **HELD** hold/s438-impl1-imported-enum-match @5bea376e — cross-file bare-dot arg loud→silent; fix direction on the gap
+
+[3574] rule · **bryan S439 "all recs"** on the six peter→bryan notes — land S432 #1/#4/#6 holds; retire q5 + s429 holds (read S438 wrap)
+
+[3575] land · **#1117** bootstrap M3 item 1 — typer + scope pass (analyze); program cells file-scoped; mutation harness loud · review 4 rounds
+
+[3576] land · **#1120** SPEC text for S439 "all recs" (§40.8 §18.0.1 §47.1.1 §50.8.5 §5.2.2 §51.0.E/K §66.13.4 §6.7.2.1 §19.4.3) · #14 OPEN
+
+[3577] state · **#1118** (M3 item 3 ingest+footprint+bite matrix) + **#1122** (M3 item 2 tables split, inert) queued --auto, re-synced at wrap
+
+[3578] find · first bootstrap corpus grade: 18/18 runtime, 32 certified, NOT-YET 573 → docs/changes/s439-bootstrap-m3-ingest/footprint-2026-09-27.md
+
+[3579] escalate · **to bryan**: #14 E-ERROR-002 (SPEC has NO handler exemption — restore conformance vs amend) · typer OWES-A-RULING list · PA-interim "handle shadows visible cell → refuse"
+
+[3580] friction · PA bounced merges to bryan all session — compound cmd around `gh pr merge` escapes the allow rule → classifier deny; run it BARE (memory)
+
+[3581] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/decimal-money-type-dpa-054-2026-09-28.md` · verdict: the worst money leak is the SQL NUMERIC/BIGINT decode (JS string → `row.total + 1` = "64.921", HIGH silent), not float maths; lean H (~0.55) int minor units + required-rounding integer division + `scrml:money`, core `decimal` deferred; §8 #1 rule first + alone; 6 defects routed)** · ADVISORY
+
+[3582] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/numeric-vectors-tensors-dpa-055-2026-09-28.md` · verdict: client has NO tensor path; Float32Array crosses the wire as {"0":…} at exit 0; lean Pole B staged (~0.6) dtype tapes + `scrml:tensor` fns not operators + bind transformers.js, NOT a core tensor type; R0 scope first; 7 defects routed)** · ADVISORY · ⚑ dPA-framed concurrently with #1134 — 3 PA framing points listed OPEN in the artifact
+
+[3583] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/atomics-shared-memory-dpa-056-2026-09-28.md` · verdict: shared MUTABLE memory is the wrong layer; lean A+ (~0.7) shared-nothing zero-copy (lin-send = transfer, grant-less tape shared-not-copied); ⚑ examples/13-worker broken today (bundle never written + send() clobbers when-message))** · ADVISORY · ⚑ 4 PA framing points listed OPEN in the artifact
+
+[3584] dpa · **(dpa: ran-before-supersede → `scrml-support/docs/deep-dives/value-mutability-sequences-tuples-dpa-052-2026-09-28.md` · the dPA ran dpa-052 before #1135 superseded it; it did NOT re-argue the §66 core — residuals only: silent alias writes under value semantics (5 routes), COW-on-unique as a perf contract (spread-accumulate 8,670× slower at 50k), element-level spreads bypass sub-field graphs (kanban); offered to §66.22)** · status left `superseded` — the PA's call
+
+[3585] land · S440: #1125 #1129 #1131 #1133 #1137 #1139 (code) + #1126 #1127 #1128 #1130 #1132 #1134 #1135 #1136 (docs); E-ERROR-002 + CSS-T3 HELD on branches (fix rounds done, targeted check owed)
+
+[3586] rule · S440 ~100 rulings (user-voice S440): JS-WAT Q1-12 (operators numbers-only, !/&&/|| booleans, T|not narrowed, truthiness (c), var/this/void/delete/with/eval/Promise rejected, no implicit globals, ASI, int enforced, Dates as values, sort, on-mount conformance, @cell=serverFn race fix) · dpa-037 (NaN defined + comparison family) · dpa-052 Q1-Q10 · dpa-054 #1-#8 (core decimal in the bootstrap) · dpa-055 R0-R8 (tensors: manipulation+retrieval, dtype tapes, bf16, pgvector, scrml:ml) · dpa-056 R1-R7 (no shared mutable memory; share immutable, transfer lin) · dpa-053 (B) · sequence kind named `tape`
+
+[3587] find · JS-WAT gauntlet: 352 probes, 273 silent leaks, 1 warned → scrml-support/docs/deep-dives/js-wat-gauntlet-2026-09-28/ (+ truthiness/operator measurement)
+
+[3588] friction · four fix rounds each found a finding of the round's OWN making (security r1 block-shadow accept-all; re-land r2 effect loop; "~" r2 keyword-as-property; Date r1 NaN vs a same-day ruling) — pre-set stop conditions ended each; the dPA missed S440 items because the queue was merged but not PULLED to the disk it reads (per-clone) and had no table rows
+
+[3589] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md` · verdict: O25 (a) bind always written; (b) native validator subset follows the bind, conditional on compiler `novalidate` (R1); 9 impl#1 defects routed)**
+
+[3590] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/server-helper-return-leak-placement-dpa-057-2026-09-29.md` · verdict: D now — already SPEC §13.4, app mode non-conformant, no ruling needed; B egress-registry floor for bryan; A relay pull-up on top; C rejected; 4 HIGH defects routed)**
+
+[3591] land · S441: #1141 #1142 #1145 #1146 (docs/audit) + #1147 #1149 #1150 #1152 #1153 #1155 #1158 #1161 #1162 #1163 (code; four SECURITY: #1155 #1161 #1162 #1163); site published; protect §14.8.9 + declared prose + err-arm HELD on branches for S442
+
+[3592] rule · S441 (user-voice S441): one-README-two-registers + facts sheet; site; `fail .Variant`; handler references are E-ERROR-002; loose prose not allowed in program/page bodies (declared prose); `| err :>` binds the error; csrf="auto" under auth; WS Origin check; §14.8.9 ratified ×2 + arithmetic stays protected (declassify = reveal); firstPaint keys; standing push authorization covers agent branches
+
+[3593] find · spotlight audit → security: static server served the DB + session store + server source (on main, fixed #1162); CSRF absent under auth (#1161); WS hijack (#1161); example-23 tokens replayable (#1155); `<page auth="required">` and nested `<program auth>` gate nothing (OPEN, HIGH); protect= bypassed by SQL case + SQL expressions (OPEN, HIGH)
+
+[3594] friction · text-scan fixes lost to adversarial review three rounds running (F4/F5, declared prose); structural rules (scope resolution, binding poisoning, coverage invariant) ended it. A red test passed the full hook because runtime tests skip under happy-dom in the one-process hook (gap filed). Sub-agent pushes classifier-denied repeatedly (ruled covered)
+
+[3595] state · S442 (bryan/XPS) successor to S441 (ASUS); took S441's FREE lanes: bootstrap typer + §66.19 programs + maps; Bun 1.3.6→1.4.2 on XPS
+
+[3596] rule · S442 bryan: tape grow/shrink split (append/pop, prepend/shift, insert/remove — tokens ruled) + anywhere covers end/front; O55 = error; six typer recs (bool|not bare condition error, handle presence narrows, int everywhere, 4 codes); T|not into T error for all types; sequence spreads one snapshot → user-voice S442
+
+[3597] rule · S442 bryan: dpa-058 all recs (bind always written; validators follow the bind; novalidate; O54=(a); dead validators error; D1 fixed) + dpa-045 AXIOM ruled (a′: two text-mode productions; closed exit set = context sigils + // + <[a-zA-Z!/?*_.]; cooked; no display-text escapes; whitespace kept)
+
+[3598] land · S442: #1144 maps · #1148 bank dpa-058 · #1151 #1157 #1159 bootstrap typer · #1154 #1168 dpa drain/ruled · #1156 SPEC §66.12/O55 · #1160 impl#1 self-close · #1164 §66.19 programs; queued #1167 #1169 #1170
+
+[3599] find · dpa-045's ratified closed exit set omitted //, #{, ^{, !{ and the <* <_ <. tag forms (~580 corpus uses) — found independently by both build agents; bryan ruled the full list
+
+[3600] friction · S442 PA dropped 10 S441 gap entries (4 HIGH) resolving known-gaps.md with a keep-one-side regex; caught by id diff pre-push; + toggled auto-merge on S441's #1153 by a guessed PR number (reverted)
+
+[3601] state · S442 HELD for Oct 2 (agent weekly limit): feat/s442-dpa045-bootstrap @1fe0b22a UNREVIEWED; typer r8 on feat/s442-typer-r8-wip; dpa-058 bootstrap build; SPEC follow-up (4 PA readings); impl#1 gaps to file (liftedali content loss; _{ as text)
+
+[3602] land · S443: #1171 (protect §14.8.9 r1-r5) #1172 (builtin-name enum shadow — #1147 regression) #1173 (page auth / E-PROGRAM-NESTED-AUTH / member-page inheritance) #1174 (workers D1/D2, ex13 works) #1175 (ledger) #1177 (E-PROGRAM-002 same-file) #1180 (ex23 end-to-end) #1183 (ex23 no helper routes); README #1176 HELD for bryan
+
+[3603] find · S441's "reviews lost in compaction" was false for #1145 #1152 #1155 (never reviewed; #1155 told to bryan as reviewed) — post-merge reviews run; #1147's un-re-reviewed fix round carried a false E-ERROR-009 regression
+
+[3604] rule · S443 (user-voice S443): "your recs" ×7 — page optional/none relaxes a required app; stricter auth= wins per file; E-PROGRAM-002 same-file; body-top no-op code is an error; README held; derived SQL over protected cols stays stripped; bare digest stays protected · bun upgrade ASUS · "no waiting, go now" (ex23 PA-direct)
+
+[3605] find · post-merge agent reviews: #1173 abs-path /pages/ disables member-page inheritance (HIGH, fail-open); #1177 <div>-wrapped <program auth> runs anonymously (HIGH, pre-existing); #1180 getCurrentUser(userId) helper = public user-enumeration route (MED, introduced → fixed #1183) + ex23 authz/routing residuals
+
+[3606] find · ex23/ex13 dog-food → compiler defects: markup `${fn(@x.f)}` also emitted as a load-time statement (HIGH); engine write in !{} arm bypasses the setter (HIGH); class-attr template doesn't lower scrml exprs; prod static no directory index; WS handlers merged ×12; bare `{` in markup text swallows child tags (flint, HIGH)
+
+[3607] friction · sub-agent weekly quota exhausted mid-session (3 agents died); continued PA-direct with self-reviewed landings labelled; agent reviews re-run post-merge on quota return found real defects in all three
+
+[3608] state · S443 held for next session: prose r5 + protect r6 briefs (scrml-support/handOffs/s443-briefs/), ex23 residuals, err-arm branch, README #1176; S444-bryan-xps LIVE (successor)
+
+[3609] land · S444: #1181 #1182 #1184 #1185 #1186 #1188 #1189 #1190 #1191 #1193 #1195 #1197 #1199 #1200 #1202 — bootstrap dpa-045 parser + typer r8 + Core additions/dpa-058; impl#1 <request> fixes (S435 exception); per-route chunks CSP fix; SPEC §6.7.7.1/.2, §6.14, §6.14.4 → docs/changelog.md S444
+
+[3610] rule · S444 (user-voice §S444): dpa-059 C (abort reads/discard writes) · dpa-060 B2 + no author TTL + revalidate · dpa-061 persist= (lifetime attr, key= required, decode-first, write-failure status, reveal/lin errors, theme pre-paint, IndexedDB planned stdlib) · dpa-062 c + recs (prepaint REFLECT / hold=@cell, CSP sha256) · free-text // only after whitespace, opaque to EOL · display escapes restored (supersedes S442 B(2)/B(3)) · display literal = standalone statement · #1191 S435 exception
+
+[3611] find · the bootstrap has NO server boundary and NO async → dpa-059/060 sit behind U0 async + U1 server (L each) → scrml-support/docs/deep-dives/bootstrap-server-boundary-arc-plan-2026-09-30.md; impl#1 <request> self-subscription re-fetch loop (fixed #1191); strict CSP refused per-route inline chunk scripts (fixed #1200)
+
+[3612] friction · three confident PA diagnoses reversed by execution (browser failures "unflagged" — baselined; post-merge protect failures "real interaction" — pre-existing test-order pollution; §20.8 "already aborts <request>" — router fetch only) + #1191 dispatched against S435 policy; two parallel sessions → every PR conflicts on generated files (resolve/train scripts)
+
+[3613] state · S444 WRAPPED. Open for bryan: dpa-058 B3 (bound top-level scalar lowers attrs? one switch), SPEC "unawaited Promise" softening, dpa-063/064 (S445 lane). S445 LIVE successor (ASUS). Next bootstrap arc: U0 async core.

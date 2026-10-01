@@ -310,7 +310,7 @@ The V5-strict access model (§1.6) applies differently in each context locus. Th
 
 **S130 amendment (2026-05-25) — `@.` contextual sigil (iteration arc Landing 2).** The `@.` form added to the table above is a CONTEXTUAL SIGIL — not a reserved identifier. It resolves only inside an `<each>` body scope (§17.7). The sigil extension is V5-strict-compatible: `@` continues to be the canonical state-access sigil per §6.1; `@.` extends it to "the value in the current iteration scope" without introducing a new reserved name (the DD-eliminated `@it` Approach C was eliminated because a reserved name violates the V5-strict rule that bare names are local identifiers only — a sigil avoids that violation because sigils are not identifiers). Full semantic + override-via-`as`-clause + member-access form: §17.7.3.
 
-**S111 amendment (2026-05-20) — code-default body loci (quoted-text model, scope b).** Engine state-child bodies, match block-form arm bodies, and `:`-shorthand bodies are **code-default-body loci**: in those bodies a bare run is code and display text is an explicit `"..."` display-text literal. This is a body-mode property distinct from the per-context access-form table above (the V5-strict `@`-sigil rule is unchanged in those bodies). The canonical definition of the code-default body mode and the display-text literal is §4.18; this note records the locus list for navigation. Plain-markup bodies (`<p>`, `<h1>`, HTML/component elements) stay free-text — unchanged. The `<program>` / `<page>` body is a distinct **third** body-mode (`default-logic`), owned by §40.8 — it is neither free-text nor code-default, and the §4.18 split does not classify it.
+**S111 amendment (2026-05-20) — code-default body loci (quoted-text model, scope b).** Engine state-child bodies, match block-form arm bodies, and `:`-shorthand bodies are **code-default-body loci**: in those bodies a bare run is code and display text is an explicit `"..."` display-text literal. This is a body-mode property distinct from the per-context access-form table above (the V5-strict `@`-sigil rule is unchanged in those bodies). The canonical definition of the code-default body mode and the display-text literal is §4.18; this note records the locus list for navigation. Plain-markup bodies (`<p>`, `<h1>`, HTML/component elements) stay free-text — unchanged. The `<program>` / `<page>` body is a distinct **third** body-mode (`default-logic`), owned by §40.8 — it is neither free-text nor code-default, and the §4.18 split does not classify it. *(**Superseded S441:** the `<program>` / `<page>` / `<channel>` body is a code-default body — a bare run there is code and displayed text is a markup element or a `"..."` literal. §40.8 S441 bullet; §4.18.1.)*
 
 **Cross-references:**
 - §1.6 — The V5-strict access principle (foundational statement)
@@ -410,6 +410,7 @@ A space (or tab, or newline) between `<` and the identifier is the **deprecated*
 **Migration path:**
 
 - P1: both forms (`<state-type>` and `< state-type>`) compile. The space-after-`<` form emits W-WHITESPACE-001 (deprecation warning).
+  > **Amendment S442 (dpa-045) — inside a free-text body the spaced form is TEXT.** In a plain-markup free-text body (§4.18.1) a `<` is a markup-open attempt only when immediately followed by `[a-zA-Z!/?*_.]` (§4.18.1b), so `< tag>` there is content, not an opener, and no W-WHITESPACE-001 fires on it. The spaced form keeps the P1 behaviour above everywhere else (e.g. a `<program>` / `<page>` body, §40.8). impl#1 still treats it as an opener in a free-text body; affected corpus: **one** conformance case, `conformance/cases/control-flow/ctrl-004-else-on-state-opener-pos` (not edited). **Provenance:** ruling:user-voice-scrml.md S442 dpa-045 follow-ups, item 1 — *"The deprecated `< tag>` spaced opener becomes text (1 conformance case)."* · supersedes: "both forms compile" for a spaced opener inside a free-text body.
 - Removal (a future MAJOR language-version event; unscheduled per §63.7): the space-after-`<` form is removed; uniform `<identifier>` becomes the only legal opener (E-WHITESPACE-001).
 - The compiler resolves `<identifier>` against the unified state-type registry (§15.X) at NR (Stage 3.05). Casing is irrelevant to resolution; convention is PascalCase for components and lowercase for HTML elements / built-in scrml lifecycle types.
 
@@ -551,6 +552,16 @@ scrml defines `//` as the universal single-line comment syntax (§27). The block
 - Comment suppression applies even when `//` appears inside a brace-delimited context. Both §4.6 and §4.7 rules are in effect simultaneously; they are not mutually exclusive.
 
 **S88 amendment note (2026-05-13):** the prior `SHALL NOT handle <!-- -->` wording (pre-S87) was authored before the BS-layer comment-skip mechanism shipped. Per S86 ratification ("BS-layer over SPEC retreat" — when SPEC and implementation diverge AND SPEC is design-intent, implementation catches up; conversely when implementation is the right answer, SPEC catches up), this amendment softens §4.7 to MAY-permit `<!-- -->` skip at BS-layer, matching the shipped block-splitter behavior. The skip is conservative: it treats the entire comment span as raw content; it does not interpret content inside the comment for delimiter recognition. `/* */` remains forbidden at BS-layer — those genuinely belong to per-context tokenizers (CSS, JS) and crossing the BS layer would create false context-mode transitions inside non-comment code.
+
+**S444 narrowing — `//` inside a free-text body.** Inside a free-text body (§4.18.1 — plain-markup element bodies,
+component bodies, the `<errors>` override template), the two characters `//` open a comment **only** when they are
+immediately preceded by a whitespace byte (space, tab, LF, CR — so a `//` at the start of a line,
+after its indentation, or after a space mid-line). Anywhere else in a free-text body `//` is content and suppresses
+nothing: `http://x`, `a//b` and `</b>// x` are text. When `//` does open a comment, this section applies unchanged — the
+comment runs to end of line and every delimiter in it (including a closer such as `</p>`) is raw comment text. The
+normative rule is §4.18.1b exit (2). In every other context (`<program>` / `<page>` `default-logic` bodies, logic,
+code-default bodies, CSS, the block splitter's own brace-delimited scanning) this section is unchanged.
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" (item 1: *"a `//` starts a comment ONLY at the start of a line or after whitespace; the comment runs to end of line and is OPAQUE"*) · supersedes: ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2) (an unqualified `//` in free text)
 
 **Rationale:** Without this rule, a commented-out delimiter sequence such as `// <db src="db.sql">` or `// ${` would be scanned by the block splitter and would open a spurious block context, corrupting the block stream and all downstream passes.
 
@@ -750,6 +761,14 @@ The top-level `<program>` MUST NOT have a `name=` attribute (it is the implicit 
 Nested `<program>` elements SHOULD have a `name=` attribute for reference and diagnostics;
 an unnamed nested `<program>` generates a compiler-assigned identifier (W-PROGRAM-001).
 
+`auth=` is not in the table above: a nested `<program>` is not an auth scope. An `auth=`
+attribute on a nested `<program>` — any `<program>` with a `<program>` or `<page>` ancestor —
+SHALL be a compile error (`E-PROGRAM-NESTED-AUTH`), whatever its value; the compiler SHALL
+NOT accept it silently. The error names the fix: put `auth=` on the top-level `<program>`
+(the whole application) or on the `<page>` that needs it (§52.13).
+
+> **Provenance:** spec:§4.12.2 (nested-attribute table omits auth=) · pa-ruled:S443
+
 #### 4.12.3 Execution Context Types
 
 Nested `<program>` covers four distinct execution context types determined by attribute
@@ -901,6 +920,7 @@ mechanism depends on the execution context type:
 | E-PROGRAM-001 | Circular `<program>` nesting (a `<program>` is a descendant of itself) **(Reserved / spec-ahead, S263 — no fire site: circular `<program>` nesting is unconstructable-by-construction — a lexical tree cannot contain itself and there is no include/inline mechanism; defensive guard, condition unreachable. Excluded from the freeze fireable set.)** | Error |
 | W-PROGRAM-001 | Nested `<program>` has no `name=` attribute | Warning |
 | W-PROGRAM-TITLE-NESTED | Documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>` (see §40.7) | Warning |
+| E-PROGRAM-NESTED-AUTH | `auth=` appears on a nested `<program>` (one with a `<program>` or `<page>` ancestor); see §4.12.2. Emitted at `compiler/src/codegen/index.ts` (`detectNestedProgramAuth`). | Error |
 | E-STORY-UNKNOWN | `story="<name>"` references a build story not declared in the `scrml.toml` `[story]` table (see §58) | Error |
 | W-STORY-ON-TOP-LEVEL | `story=` appears on the top-level `<program>`; ignored — the top-level build story is owned by `[story] default` (see §58) | Warning |
 
@@ -1168,6 +1188,8 @@ Counter is now ${@count}:
 **S108 sibling — markup-text-mode SQL gate (Bug 4 C-narrow).** This section's raw-content rule for `<pre>` / `<code>` is one side of a broader locus-gating principle: a sigil-prefix opener is recognized only inside its normatively-permitted parent context. The companion rule, ratified S108 via deep-dive `scrml-support/docs/deep-dives/bug-4-docs-mode-escape-2026-05-19.md`, gates the `?{` SQL opener on Logic-parent context per §3.1 + §8.1 — bare `?{` in markup-text body is text (the `?` accumulates literally; the `{` is tracked as an orphan-brace and pairs with a matching `}` if present). Together the two rules collapse into the invariant: **`?{` is a SQL opener only where SPEC §3.1 normatively places SQL — inside Logic.** This eliminates the pre-S108 dogfood-bug surface where bare `?{` in adopter prose ("`<p>The ?{ syntax opens SQL</p>`") catastrophically consumed the rest of the file as SQL, producing an EOF-cascade. Adopters no longer need entity-escapes for `?{` in prose. (Q-BUG4-OPEN-1 surfaced the question of extending the same gate to `!{` / `^{` / `_{`; deferred pending friction signal — the dogfood report named only `?{` + `/`.)
 
 > **Orthogonality note (S111 — quoted-text model).** Raw-content status (this section) and the **code-default body mode** (§4.18) are orthogonal mechanisms. `<pre>` / `<code>` remain raw-content elements with plain free-text-mode bodies; the quoted-text model's scope (b) does NOT change their treatment. A `<pre>` / `<code>` opened inside a code-default body (e.g. as a plain-markup child of an engine state-child body) follows the §4.18 rule for plain-markup elements: it opens a free-text body, and within that body raw-content scanning applies as specified here.
+>
+> **Amendment S442 (dpa-045).** Raw content is a **third, orthogonal text-mode production**, not a free-text body with exits switched off: *"`<pre>`/`<code>` raw content is a third, orthogonal production — zero active sequences, not two, its only exit its own matching close tag, matched by name."* (§4.18.1a). The two §4.18 text-mode productions (free-text, code-default — §4.18.1) do not extend to this section; the element-kind rule above (a `<pre>`/`<code>` inside a code-default body opens its own body, not a code-default one) is unchanged. **Provenance:** ruling:user-voice-scrml.md S442 — "all recs" · dPA artifact `scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-round2-2026-09-08.md` (Q1 draft §4.18.1a) · supersedes: *"with plain free-text-mode bodies"* in the second sentence above (read: with raw-content bodies).
 
 ### 4.18 Code-default body mode and the display-text literal (S111 — quoted-text model, scope b)
 
@@ -1175,27 +1197,243 @@ Counter is now ${@count}:
 
 This subsection is the **single canonical definition** of the code-default body mode and the display-text literal. §3.4, §4.14, §4.15, §18.0.1, and §51.0 cross-reference this subsection; they do NOT re-define the literal grammar.
 
-#### 4.18.1 The two §4.18 body modes
+> **Amendment S442 — dpa-045: plain-markup text (AXIOM-LEVEL). The two text-mode productions (§4.18.1 / §4.18.1a /
+> §4.18.1b), whitespace kept exactly (§4.18.5), and the display-text literal's character escapes deleted (§4.18.3).**
+> *(S444: the escape deletion is SUPERSEDED — `\"`, `\\`, `\${` are restored, §4.18.3; and exit (2), `//` comments, is
+> narrowed to a `//` at the start of a line or after whitespace, §4.18.1b. The rest of this banner stands.)*
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2) · ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2) (the `//` part)
+> Free text (plain-markup bodies, literal by default) and code-default (engine state-children, match arms,
+> `:`-shorthand; display text inside `"…"`) are specified as a pair of **text-mode productions** — duals, not one model.
+> Neither is a string literal, and neither may be called one.
+>
+> **Status: Nominal/spec-ahead.** *"This amendment SHALL NOT be read as ratifying working behavior for either
+> production's escape table. It ratifies the RULE; the rule is not yet true of the compiler in the production it
+> already governs, let alone the one this amendment adds. Ratifying the free-text escape clause without also scheduling
+> the propagation fix repeats, in real time and with the debate's own eyes open, exactly the defect class Call 1
+> named."* The propagation fixes are scheduled by the same ruling (B): (1) route the free-text `${` scan through the
+> proper brace scanner; (2) make the §4.18.3 escape table actually work OR delete it from SPEC — not neither
+> (RULED S442 follow-up: ~~**delete** — §4.18.3~~ *superseded S444: the catalog is restored and made to work,
+> §4.18.3*); (3) ~~delete the `\"` escape (done — §4.18.3)~~ *(superseded S444: `\"` restored, §4.18.3)*. B(1) and the
+> whitespace fixes (§4.18.5) are built in the BOOTSTRAP; impl#1 only if one proves to be security (S435 policy). The loop census (C — every scanner that independently decides where a body
+> ends) runs against the bootstrap's `parse.scrml`, not impl#1.
+>
+> **The six implementer pins** — each is part of the ratified wording, and each is stated where it applies:
+> (1) the free-text exit set is a CLOSED enumeration, *"these and no others"* (§4.18.1b — its CONTENT RULED by the
+> S442 follow-up); (2) whitespace verbatim, with §4.18.5's collapse claim deleted in this same amendment (§4.18.5);
+> (3) extent-vs-content is a PROPERTY, not a procedure (§4.18.1b); (4) cooked-or-raw is stated normatively — RULED
+> cooked (§4.18.1b); (5) the free-text escape policy DIVERGES
+> from §4.18.3, deliberately and in writing (§4.18.1b); (6) the grammar-vs-conformance disclaimer (§4.18.1b).
+>
+> **Provenance:** ruling:user-voice-scrml.md S442 — "all recs" (dpa-045 = D + A + B + E, C in the bootstrap; *"D —
+> ratify (a′) with the round-2 drafted wording"*) · dPA artifact
+> `scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-round2-2026-09-08.md` (Q1 "THE RATIFIABLE WORDING",
+> the six pins, the status tag; "THE CALLS FOR BRYAN" A–E); round 1:
+> `scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-2026-09-07.md` (Repair 1 — the HTML5 `<` lookahead)
+> · E measurements (run before this text landed, per the ruling): `docs/changes/s442-dpa045-spec/progress.md`
+> · ruling:user-voice-scrml.md S442 — "your recs" (**dpa-045 follow-ups: the full closed exit set; cooked; delete the
+> rest of the escape catalog; whitespace-only text kept** — answering the two build agents' finding that the drafted
+> exit set "`${` and `<`+[a-zA-Z!/?] and no others" was incomplete).
+> **supersedes:** the prior §4.18.1 table and its free-text row (*"free text, recognized as today (heuristic text/code
+> boundary …)"*); the one-model ("string-literal") framing; §4.18.5's free-text bullet (*"runs of whitespace collapse,
+> leading/trailing whitespace strips"*) and its "two whitespace regimes" paragraph; §4.18.3's whole escape catalog
+> (`\"`, `\\`, `\${`); the drafted two-member exit set (replaced by the follow-up's closed set, §4.18.1b); the
+> §4.3 / §15.15.5 spaced `< tag>` opener inside a free-text body.
 
-A markup/state body — the content between a tag opener's `>` and the matching closer (`</>` / `</tagname>`) — is scanned by the block splitter in one of two body modes that **this amendment governs**:
+#### 4.18.1 The two text-mode productions
 
-| Body mode | Bodies that have it | What a bare (unquoted) run means |
-|---|---|---|
-| **free-text mode** | Plain-markup elements: HTML elements (`<p>`, `<h1>`, `<li>`, `<button>`, `<div>`, `<span>`, …), component-element bodies, the `<errors>` override-template body. | A bare run is **display text** — free text, recognized as today (heuristic text/code boundary; `${...}` is the delimited code exception). UNCHANGED by this amendment. |
-| **code-default mode** | The three **code-bearing loci**: engine state-child bodies (§51.0), match block-form arm bodies (§18.0.1), and `:`-shorthand bodies (§4.14). | A bare run is **code** — an identifier, a keyword, a call, member access, a nested `<tag>` (markup-as-value, §1.4), or a `${...}` interpolation. Display text in a code-default body MUST be written as a **display-text literal** (`"..."`, §4.18.3). |
+*(Amendment S442 — the round-2 drafted §4.18.1. Three edits to the drafted text, all ruled: the free-text row keeps
+the prior §4.18.1's HTML-element list; its exit column is the follow-up's closed set (§4.18.1b); and the code-default
+escape column is empty — `\"` deleted per B(3), `\\` / `\${` per B(2) = delete. See the banner above.)*
+*(S444, "standalone only": the code-default exit cell is narrowed — only a standalone `"…"` body statement is a
+display-text literal; §4.18.3.)*
+> **Provenance:** ruling:user-voice-scrml.md S444 "standalone only, your rec" · narrows: the §4.18.1 code-default cell "`\"` opens a display-text literal (§4.18.3)" and the S111 §4.18.3 scope ("the vehicle for plain display text inside a code-default body") — which since #1190 the bootstrap read as EVERY `"…"` in a code-default body
+*(S444: two table cells amended — the free-text exit column's `//` is narrowed to a `//` at the start of a line or
+after whitespace (§4.18.1b exit (2)), and the code-default escape column is no longer empty: `\"`, `\\`, `\${` are
+restored (§4.18.3).)*
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2) · ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2) (the `//` part)
+
+A markup/state body — the content between a tag opener's `>` and the matching closer (`</>` / `</tagname>`) — is
+scanned by exactly one of two **text-mode productions**. A text-mode production is a region whose extent and internal
+escape/exit points are decidable by bounded lookahead over raw bytes, with no reference to any name, binding, or
+previously established context. **Neither production is a string literal, and this section deliberately avoids that
+name.** The two productions are **duals, not one model wearing two hats**:
+
+| production | governs | default | exit sequence(s) | escape into the default |
+|---|---|---|---|---|
+| **free-text** | plain-markup element bodies (HTML elements — `<p>`, `<h1>`, `<li>`, `<button>`, `<div>`, `<span>`, …), component bodies, the `<errors>` override template | literal | the context sigils (`${` logic, `#{` CSS, `^{` meta, `!{` error, `~{` test — §4.18.1b); `//` comments — a `//` at the start of a line or immediately after whitespace only (§4.18.1b exit (2), §4.7); `<`+[a-zA-Z!/?*_.] opens/closes a nested element | none needed |
+| **code-default** | engine state-children (§51.0), match arms (§18.0.1), `:`-shorthand (§4.14) — and (S441) `<program>` / `<page>` / `<channel>` bodies (§40.8), where a bare run is a sequence of statements | code | ~~`"` opens a display-text literal (§4.18.3)~~ S444: a `"…"` standing ALONE as a body statement is a display-text literal (§4.18.3); a `"…"` operand inside an expression is an ordinary string | inside a display-text literal: `\"` (a literal `"`), `\\` (a literal `\`), `\${` (a literal `${`) — §4.18.3 (restored S444; ~~S442: NO character escapes~~) |
+
+- The body mode SHALL be determined by the **enclosing element kind**, never by the lexical content of the body.
+  *(Unchanged from the prior §4.18.1.)* An engine state-child body is code-default because it is an engine state-child
+  body — independent of what it contains.
+- **Prior drafts described these as one "string-literal" model. That framing is withdrawn.**
+- In a code-default body a bare run is **code** — an identifier, a keyword, a call, member access, a nested `<tag>`
+  (markup-as-value, §1.4), or a `${...}` interpolation (§4.18.2); display text MUST be written as a **display-text
+  literal** (`"..."`, §4.18.3) — or, in a `<program>` / `<page>` / `<channel>` body (S441), inside a markup element. In a free-text body a bare run is **display text**, literal by default, left only by
+  the exit sequences of §4.18.1b.
+- ~~A bare run is **display text** — free text, recognized as today (heuristic text/code boundary; `${...}` is the
+  delimited code exception). UNCHANGED by this amendment.~~ *(superseded S442 — the free-text row above; the free-text
+  boundary is the closed exit grammar of §4.18.1b, not a heuristic)*
 
 **Normative statements:**
 
-- The block splitter SHALL assign a body mode to every markup/state body at the point the body's opener is recognized. The default body mode is **free-text mode**. A body is in **code-default mode** if and only if it is one of the three code-bearing loci enumerated above.
-- The body mode SHALL be determined by the **enclosing element kind**, not by the lexical content of the body. An engine state-child body is code-default because it is an engine state-child body — independent of what it contains.
+- The block splitter SHALL assign a body mode to every markup/state body at the point the body's opener is recognized. The default body mode is **free-text mode**. A body is in **code-default mode** if and only if it is one of the code-default loci enumerated above (the three code-bearing loci, and — S441 — a `<program>` / `<page>` / `<channel>` body).
 - Body modes nest. A plain-markup element opened *inside* a code-default body (e.g. a `<button>` inside an engine state-child body) opens a **free-text-mode** body — the inner element's body mode is its own, not inherited from the enclosing code-default body. Conversely, an engine / match opened inside a free-text body opens code-default bodies for its state-children / arms. Each body carries its own mode; the mode in effect at any cursor position is the mode of the innermost enclosing body.
-- This amendment is **scope (b)**: it changes the body mode of the three code-bearing loci only. Every other body that this section classifies — all plain markup — stays in free-text mode and is **unchanged**. There is no syntactic position outside the three code-bearing loci where this amendment alters how a body is scanned.
+- This amendment is **scope (b)**: it changes the body mode of the three code-bearing loci only. Every other body that this section classifies — all plain markup — stays in free-text mode and is **unchanged**. There is no syntactic position outside the three code-bearing loci where this amendment alters how a body is scanned. *(S442: "this amendment" here is S111. The S442 amendment DOES specify how a free-text body is scanned — §4.18.1b's exit grammar and §4.18.5's verbatim whitespace; which bodies are free-text is unchanged.)* *(Extended S441 to `<program>` / `<page>` / `<channel>` bodies — see the S441 note below. Plain markup is still unchanged.)*
 
-**S111 amendment (2026-05-20) — `default-logic` is a distinct third body-mode; §4.18 does not classify it.** The `<program>` / `<page>` body parses in **`default-logic` mode** — a distinct third body-mode, owned and defined by §40.8 (v0.3 program shape). `default-logic` mode is neither free-text mode nor code-default mode: in a `<program>` / `<page>` body a bare top-level declaration (`<x> = 0`, `function f() { ... }`) auto-lifts to the logic context, which is not free-text display-text scanning and is not the code-default text/code boundary. The §4.18 free-text / code-default split governs **only** the relationship between the three code-bearing loci (engine state-children, match block-form arms, `:`-shorthand bodies) and plain markup; it does **not** classify or reclassify the `<program>` / `<page>` body. The `<program>` / `<page>` body is therefore intentionally absent from the free-text-mode row above — its mode is `default-logic`, per §40.8. (This note reconciles §4.18.1's original free-text-mode listing with §40.8's `default-logic` statement; the native-parser charter deep-dive surfaced the inconsistency.)
+**S111 amendment (2026-05-20) — `default-logic` is a distinct third body-mode; §4.18 does not classify it.** The `<program>` / `<page>` body parses in **`default-logic` mode** — a distinct third body-mode, owned and defined by §40.8 (v0.3 program shape). `default-logic` mode is neither free-text mode nor code-default mode: in a `<program>` / `<page>` body a bare top-level declaration (`<x> = 0`, `function f() { ... }`) auto-lifts to the logic context, which is not free-text display-text scanning and is not the code-default text/code boundary. The §4.18 free-text / code-default split governs **only** the relationship between the three code-bearing loci (engine state-children, match block-form arms, `:`-shorthand bodies) and plain markup; it does **not** classify or reclassify the `<program>` / `<page>` body. The `<program>` / `<page>` body is therefore intentionally absent from the free-text-mode row above — its mode is `default-logic`, per §40.8. (This note reconciles §4.18.1's original free-text-mode listing with §40.8's `default-logic` statement; the native-parser charter deep-dive surfaced the inconsistency.) *(**Superseded S441** — see the next note.)*
+
+**S441 amendment — `<program>` / `<page>` / `<channel>` bodies are code-default; loose prose is not allowed.** A `<program>`, `<page>` or `<channel>` body is a **code-default** body. The unit of code there is not a single expression (as in a `:`-shorthand body) but a **sequence of statements**: a bare run is parsed as logic at its position — declarations auto-lift as before (§40.8), and every other statement is logic, checked exactly as the same text inside an explicit `${ … }` would be. It SHALL NOT be scanned as free text and SHALL NOT ship as page text. Display text in such a body is **declared**, by either (a) a markup element (`<p>…</p>`, `<h1>…</h1>`, any HTML or component element), which opens its own free-text body per the nesting statement above — plain-markup bodies are unchanged; or (b) a `"..."` display-text literal (§4.18.3–§4.18.6), rendered as a text node at its position. A bare run that is not valid code is `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7). The body mode is fixed by the element kind (`<program>` / `<page>` / `<channel>`), per the normative statement above, and not by the run's content. A bare expression statement there is evaluated, not rendered. `E-UNQUOTED-DISPLAY-TEXT` fires immediately (no §63 window). Full statement: §40.8 S441 bullet.
+> **Provenance:** ruling:user-voice-scrml.md S441 "prose should be declared as such" + ruling:user-voice-scrml.md S441 "declared-prose implementation: \"yes to all four\"" (*"yes to all four, your recs on the rest"*) · supersedes: the S111 note above (the `<program>` / `<page>` body as a distinct third body-mode, "not classified by §4.18").
+
+**S444 note — a `<schema>` body is not free text.** A `<schema>` body (§39) is not display text and is not
+rendered. Its content is the §39.2 `schema-block` grammar (declarative `table-declaration`s and raw `CREATE TABLE`
+DDL), and §39 governs how that body is read. It is not in the free-text row above (which lists plain-markup element
+bodies, component bodies and the `<errors>` override template), and §4.18 does not classify it. This is the same
+position as the `<program>` / `<page>` `default-logic` body.
+> **Provenance:** rationale:§39.2 gives the `<schema>` body its own grammar (`schema-block ::= '<schema>' table-declaration* closer`) and the §4.18.1 free-text row does not list it, so treating its content as page text would contradict §39 (PA reading S444, bryan veto window)
+
+#### 4.18.1a The shared principle
+
+*(Amendment S442 — the round-2 drafted §4.18.1a.)*
+
+An active sequence is active **to the recognizer, at scan time, unconditionally** — never a convention a downstream
+stage chooses to honour. *(Note: this does not extend §4.18 to §4.17. `<pre>`/`<code>` raw content is a third,
+orthogonal production — zero active sequences, not two, its only exit its own matching close tag, matched by name.)*
+
+#### 4.18.1b The free-text production's exit grammar
+
+*(Amendment S442 — the round-2 drafted §4.18.1b, plus the pins it names. Status Nominal/spec-ahead — see the §4.18
+banner.)*
+
+**Free text's closed exit set (RULED, S442 follow-up — the ruling's words):** *"Free text's closed exit set is:
+(1) every context sigil §3.1 already defines (`${`, `#{`, `^{`, `!{`, and so on); (2) `//` comments (§4.7); (3) `<`
+followed by a letter, `!`, `/`, `?`, `*`, `_` or `.` — the three additions are scrml's own tag forms. That list, and no
+others."* So `5 < 7` is just text. *(S444: exit (2) is narrowed — a `//` opens a comment only at the start of a line or
+after whitespace; see item 2 below.)*
+
+- **Closed exit set (pin 1).** A free-text body is left by exactly these sequences — **that list, and no others**:
+  1. **The context sigils** (a `{`-delimited context opens; content resumes at its matching `}`):
+     - `${` — logic (§3.1 table, parent Markup/State);
+     - `#{` — CSS inline (§3.1 table, parent Markup/State);
+     - `^{` — meta (§22.2) and `!{` — error context (§19; sigil rule §4.11). Neither is a row of the §3.1 table; both
+       are named by the ruling itself.
+     - `~{` — test context (§19.12). Not a §3.1 row and not named by the ruling; listed as an exit because the block
+       splitter opens it in a markup body today (corpus: 0 in free-text bodies) — the ruling's "and so on".
+       `provenance: rationale:PA S442 — preserves current behaviour; bryan veto`
+     - `_{` — foreign code (§23) — is **neither an exit nor content**: in a markup body it is an ERROR,
+       `E-FOREIGN-004` — a markup element body is not one of §23.2.4's three valid contexts. The opener is the §23.2
+       opener, so a `_{` immediately after an identifier character (`my_{`) is not an opener and is content.
+       `provenance: rationale:PA S442 — preserves current behaviour; bryan veto` *(S444: the "preserves current
+       behaviour" premise was false for impl#1, which renders a markup-body `_{ … }` slice as page text with no
+       diagnostic — gap `g-foreign-block-in-markup-body-rendered-as-text`. The rule stands; impl#1 diverges.)*
+       > **Provenance:** rationale:§23.2.4 already makes a `_{}` in a markup element body E-FOREIGN-004; the struck "as today" was false for impl#1 (verified by execution at `108ca89b`) (PA reading S444, bryan veto window)
+     - NOT exits: `?{` — the §3.1 table's third row, whose parent is Logic only; in a markup body it is text (§4.17
+       S108 note, §8.1).
+  2. ~~**`//` comments** — §4.7 suppression; the comment runs to end of line and is not content.~~ *(superseded S444 —
+     the next paragraph narrows which `//` opens a comment)*
+     **`//` comments — at the start of a line or after whitespace only (S444).** A `//` in a free-text body opens a
+     comment **if and only if** the byte immediately before its first `/` is a **whitespace byte** — space (U+0020),
+     tab (U+0009), line feed (U+000A) or carriage return (U+000D); these four, and no others. (A free-text body always
+     follows its opener's `>`, so a byte before the `//` always exists.) "The start of a line" is the case where that byte is a line terminator; a `//` after a line's
+     leading indentation is preceded by whitespace and so opens a comment too. "Immediately before" means the source byte
+     itself, whatever construct it ends: a `//` right after a tag's `>` (`<p>// x`, `</b>// x`), after an
+     interpolation's `}` or after a `-->` is NOT a comment. Every other `//` is **content** — so `http://x`,
+     `https://x.y` and `a//b` are text, while `a // b` and `</label>   // note` are comments.
+     A comment runs from the `//` to (not including) the next line terminator, or to end of file, and it is **opaque**:
+     it is its own delimited region, so nothing inside it is an exit or a closer — `<p> // ends with </p>` followed
+     on the next line by `</p>` is an empty-of-content `<p>` (its whitespace kept, §4.18.5) whose closer is the SECOND
+     `</p>`. (A consequence, not an exception: written on ONE line, `<p> // ends with </p> </p>` puts both `</p>` in
+     the comment, and the `<p>` closes at the next closer after that line.) The comment is not content; the line
+     terminator that ends it is content (§4.18.5). Pin 3 holds: the comment's extent is set by its own delimiters (the
+     whitespace-preceded `//` and the line end), and no byte inside it moves the body's end.
+     > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" (item 1, bryan's
+     > counter-example *"<p> // this tag should end with </p> </p>"*: *"a `//` starts a comment ONLY at the start of a
+     > line or after whitespace; the comment runs to end of line and is OPAQUE (a `</p>` inside it is comment text — the
+     > comment is its own delimited region, so pin 3 holds). So `http://x`, `a//b`, `https://x.y` stay text;
+     > `</label>   // note` unchanged; prose `a // b` becomes a comment."*) · the whitespace set, the start-of-line
+     > reading and the "immediately before is the source byte" reading are PA readings S444 (bryan veto window) ·
+     > supersedes: ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2) (an unqualified `//`)
+  3. **`<` immediately followed by `[a-zA-Z!/?*_.]`** — opens or closes a nested element: a tag opener, `</>`,
+     `</tag>`, `<!-- -->` (`!`), and scrml's own tag forms `<*x/>` (the existing instance, §66.6), `<_ …>` (the
+     wildcard arm) and `<.Variant …>` (a variant arm, §18.0.1).
+
+  Every other byte and sequence in a free-text body is content. *(Pin 1's reason, from the artifact: an exit set
+  written as prose instead of a closed enumeration becomes an "advisory recognizer over an inert region" that grows
+  heuristics — `lint-w-interp-in-raw-content.js` `detectToken` grew three because nobody wrote "and no others".)*
+  *(The round-2 draft's two-member set — `${` and `<`+[a-zA-Z!/?] — was incomplete: read literally it turned 459 `//`
+  comments, 87 `#{`, 29 `^{` and 5 `!{` corpus blocks, and the `<*x/>` / `<_ …>` / `<.Variant …>` tag forms, into
+  page text. The follow-up ruling replaces it. Counts: `docs/changes/s442-dpa045-spec/progress.md`.)*- `<` SHALL be a markup-open attempt **if and only if** immediately followed by `[a-zA-Z!/?*_.]`. A `<` followed by
+  anything else is ordinary content — not recognized, not an error. *(Closes the `<`+SPACE gap: `a < b` is content,
+  matching HTML5.)* **The spaced opener `< tag>` is therefore content in a free-text body** — the deprecated
+  whitespace-after-`<` form of §4.3 / §15.15.5 is no longer an opener there (RULED, S442 follow-up: *"The deprecated
+  `< tag>` spaced opener becomes text"*). Affected corpus: **one** conformance case,
+  `conformance/cases/control-flow/ctrl-004-else-on-state-opener-pos` (`< profile else name(string)/>` inside a
+  `<div>` body) — impl#1 still treats it as an opener; the case is not edited by this amendment.
+- **`<`+letter is an irreducible collision, not a defect of this rule.** No bounded lookahead distinguishes "naming a
+  tag" from "prose beginning with a letter after `<`." HTML5 resolves it as a tag-open attempt; this amendment adopts
+  the same resolution.
+- ⚑ **An interpolation's extent — `${` to its balancing `}` — SHALL be determined by lexing the interpolation body and
+  tracking brace-token depth over the resulting token stream (the `findInterpolationCloseOffset` shape), never by
+  counting raw `{`/`}` bytes. A raw-byte counter is NON-CONFORMANT: it cannot distinguish a `{` inside a nested
+  string, comment, or template literal from a structural brace** — e.g. `${"${"}`.
+- **A behavior-change claim SHALL be stated per surface** — inert / newly-accepting-as-bug-fix /
+  newly-accepting-as-DX-regression — never as one global "inert" claim. (This amendment's own claims are in the table
+  below.)
+- **Extent vs content is a PROPERTY, not a procedure (pin 3).** *The body's extent is determined by the delimiters
+  alone; no byte inside the body may change where the body ends.* The body's end is set by its delimiters alone. No
+  character inside can move it.
+- **Cooked (pin 4 — RULED).** The node handed to codegen SHALL be **cooked**: delimiters removed and escapes
+  decoded. For a display-text literal, the `"` delimiters are removed before any downstream stage receives the content,
+  and no downstream stage SHALL re-scan that content for escapes. ~~(With §4.18.3's catalog deleted there are no escapes
+  left to decode; the rule still binds the delimiters and forbids a downstream re-scan.)~~ *(S444: the catalog is
+  restored — `\"` → `"`, `\\` → `\`, `\${` → the two characters `${`, decoded once, by the scan that finds the literal's
+  extent; a decoded `${` is content and is never re-read as an interpolation.)* For the free-text production,
+  cooked and raw are the same bytes — the production has no delimiters inside the run and no escapes (pin 5).
+  *(Round 2 Call 2 measured two shipped modules disagreeing: `parse-file.js:316` hands codegen the verbatim source
+  including quotes; `emit-match.ts:647` strips the delimiters and decodes the escapes. impl#1 divergence.)*
+  > **Provenance:** ruling:user-voice-scrml.md S442 dpa-045 follow-ups, item 2 — *"Cooked — the node handed to codegen
+  > has delimiters removed and escapes decoded (dpa-045 pin 4). → RULED."*
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
+- **The free-text escape policy DIVERGES from §4.18.3 — deliberately (pin 5).** The free-text production has **no
+  escape table**. **A stray `\` in free text is just content** — silent content: not an escape, not an error, not a
+  diagnostic. §4.18.3's escape set and its `E-PARSE-001` malformed-escape rule for `\x` (~~both deleted S442~~ both
+  restored S444) never apply to a free-text body, and no escape rule SHALL be applied to one. (The artifact names the hazard: that rule
+  extended to free text would newly-reject every Windows path, every `\n` in prose, every regex in a `<p>` — "one word
+  away … the word being 'literal' spanning both productions.") *Informative:* a literal `${` in free text is written
+  with a DELIMITER escape — interpolate the text, e.g. `${"$"}{5}` — never a character escape (round 2, Q3).
+  *(S444: unchanged — free text stays escape-free; the restored escapes are the display-text literal's only.)*
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
+- **Grammar vs conformance (pin 6).** This subsection specifies a grammar property (bounded-lookahead decidability); it
+  does NOT thereby claim the shipping compiler computes this production's extent via a single canonical scan. Where
+  more than one component independently computes an extent for the same body, this subsection's guarantee holds only
+  where those components are demonstrated to agree; an extent mismatch at such a locus is a **conformance bug against
+  this subsection**, not evidence against the grammar.
+
+**Per-surface behaviour-change claims (S442; measured at `6dccbd6c` unless marked "round 2").** Every claim is a
+claim about the rule; the shipping compiler has not moved (Nominal/spec-ahead).
+
+| surface | today | under §4.18.1b / §4.18.5 | claim |
+|---|---|---|---|
+| `<` + a byte outside `[a-zA-Z!/?*_.]` in free text, e.g. `<p>5 < 7 is true</p>` | fails — `E-CTX-001` (`'</program>' tries to close '<7>'`) + `E-CTX-003` cascade | content | newly-accepting-as-bug-fix |
+| `<` + digit / `=` in free text (`x <3`, `a <= b`) | content | content | inert |
+| `${…}` whose body holds a string brace, `<p>Use the ${"${"} syntax</p>` | fails — `E-CTX-003` Unclosed 'logic' + Unclosed 'p' (round 2) | balanced by token depth | newly-accepting-as-bug-fix |
+| stray `\` in free text (`C:\Users\bryan`, `\n`, `\d+` in a `<p>`) | rendered as written; corpus uses: **0** | content | inert |
+| `\${` in free text | `\` + a live interpolation — `Cost: \${5}` emits `Cost: \5` (round 2) | the same: `\` is content, `${` exits | inert |
+| whitespace — static-HTML path (plain markup at top level / in `<program>`, `if=` templates, markup nested in match arms and engine state-children, both display-text-literal loci) | verbatim, byte for byte | verbatim | inert |
+| whitespace — component-definition bodies (`const Box = <div>…</>`) | runs collapse to one space, indentation stripped, tab → space; one case ADDS a trailing space | verbatim | emitted-output change (conformance fix; no acceptance change) |
+| whitespace — markup built from logic (`lift <li>…</li>`, markup-as-value `const m = <p>…</p>`) | each text segment trimmed and collapsed; the whitespace next to `${…}` is DELETED (`   lifted   ${it}   li` renders `liftedali`) | verbatim | emitted-output change (bug-fix — today's output drops content) |
+| `\"` in a code-default display-text literal | `:`-shorthand: `E-ENGINE-STATE-CHILD-MISSING` for children present in source (round 2) | ~~not an escape: `\` is content and the `"` closes the literal (§4.18.3)~~ S444: an escape — a literal `"`; the literal does not close (§4.18.3) | ~~changes meaning at the SPEC level~~ S444: the S111 meaning restored; corpus uses: **0** |
+| `\\` / `\${` in a code-default display-text literal | `\\` renders `\\` (cooked value discarded); `\${` is a no-op — the interpolation fires (round 2) | ~~not escapes: `\` is content; `${` opens an interpolation~~ S444: escapes — a literal `\` / a literal `${` (no interpolation) (§4.18.3) | ~~changes meaning at the SPEC level~~ S444: the S111 meaning restored; corpus uses: **0** / **0** |
+| `//` comments, `#{`, `^{`, `!{` blocks in a free-text body | exits (459 / 87 / 29 / 5 corpus blocks) | exits (S444: a `//` only at the start of a line or after whitespace — next row) | inert |
+| S444 (measured at `12aae48a1`) — a free-text `//` NOT preceded by whitespace (`a//b`, `</b>// x`, `<p>// x`, `${x}// y`) | impl#1: a comment (except a `:`-preceded `//`, which its URL carve-out keeps as text) — silently deletes the rest of the line | content (§4.18.1b exit (2)) | changes meaning — was a comment, is now text; corpus (`examples/ samples/ conformance/`): **0** (all 55 `\S//` hits are in attributes, logic strings or comments); bootstrap parse of 2,130 corpus files: **0** changed |
+| S444 — a free-text `//` after whitespace or at a line start (`a // b`, `</label>   // note`, an indented `// note`) | a comment | a comment, opaque to end of line | inert |
+| the spaced opener `< tag>` in a free-text body | an opener + W-WHITESPACE-001 | content | changes meaning — was an opener, is now text; corpus: **1** (`ctrl-004`, conformance) |
+| `<*x/>`, `<_ …>`, `<.Variant …>` in a free-text body | tag forms | tag forms | inert |
 
 #### 4.18.2 What a bare run means in code-default mode
 
-In a code-default-mode body, the block splitter and tokenizer do NOT apply the free-text heuristics. A bare (unquoted) run of source characters is parsed as **code**, following the universal scrml expression grammar (§7 logic-context grammar):
+In a code-default-mode body, the block splitter and tokenizer do NOT apply the free-text production (§4.18.1b). A bare (unquoted) run of source characters is parsed as **code**, following the universal scrml expression grammar (§7 logic-context grammar):
 
 - A bare identifier resolves as an expression — a local identifier, or a keyword. (Reactive state access still requires the `@` sigil per §1.6 / §6.1 — the code-default body mode does not change the V5-strict access rule.)
 - A call (`fn(...)`), member access (`a.b.c`), and a literal (number, boolean, `not`) are code.
@@ -1209,20 +1447,67 @@ This is the **explicit text/code boundary** the model establishes: in a code-def
 
 A **display-text literal** is the vehicle for plain display text inside a code-default body.
 
+**Scope — a standalone body statement only (S444).** A `"…"` in a code-default body is a display-text literal **only
+when it stands alone as a body statement** — the whole statement is the one `"…"` (a body may hold several such
+statements; a `:`-shorthand body is one). A `"…"` that is an operand inside an expression — `@n > 5 ? "many\n" :
+"few"`, `f("x")`, `"a" + @b`, `("x")` — is an **ordinary string value** with the ordinary logic-string escapes (`\n` is a
+newline, `\t` a tab; there is no `E-PARSE-001` for them) and none of this section's rules. Everything below in §4.18.3
+/ §4.18.4 (the escape catalog, `E-PARSE-001`, `${…}` segments, cooking) applies to the standalone literal only.
+> **Provenance:** ruling:user-voice-scrml.md S444 "standalone only, your rec" · narrows: the §4.18.1 code-default cell "`\"` opens a display-text literal (§4.18.3)" and the S111 §4.18.3 scope ("the vehicle for plain display text inside a code-default body") — which since #1190 the bootstrap read as EVERY `"…"` in a code-default body
+
 **Formal rule:**
 
 ```
 display-text-literal ::= '"' ( literal-segment | interpolation )* '"'
-literal-segment      ::= (any character except '"', '\', or the '${' sequence)+
+literal-segment      ::= ( escape | any character except '"', '\' or the '${' sequence )+
+escape               ::= '\"' | '\\' | '\${'                            -- S444: restored (S442's "no escapes" superseded)
 interpolation        ::= '${' expression '}'
 ```
+
+A `\` followed by anything other than `"`, `\` or `${` is a malformed escape (`E-PARSE-001`, below).
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
 
 **Normative statements:**
 
 - A display-text literal is delimited by the double-quote character `"` on both ends. The double-quote is the **only** display-text-literal delimiter. This matches the §5 attribute-string convention (`attr="value"` — §5.1), which is `"`-only; scrml uses one string delimiter language-wide.
 - The apostrophe `'` is an **ordinary interior character** of a display-text literal — it carries no delimiter role and requires no escape. `"Don't worry — it's fine"` is a single well-formed literal. The backtick `` ` `` is likewise an ordinary interior character and is NOT a display-text delimiter.
-- A literal double-quote `"` SHALL be written as `\"`; a literal backslash as `\\`; a literal `${` sequence as `\${` (the interpolation opener — see §4.18.4). These are the three escape sequences inside a display-text literal; a backslash followed by any other character is a malformed escape (`E-PARSE-001`). (This mirrors the minimal escape set scrml uses for `"`-delimited strings elsewhere; `'` needs no escape precisely because it is not a delimiter. The `\${` form was previously documented only in §4.18.4; the S114 editorial amendment lifted it here so §4.18.3 carries the full escape catalog without a forward reference.)
+- ~~A literal double-quote `"` SHALL be written as `\"`; a literal backslash as `\\`; a literal `${` sequence as `\${` (the interpolation opener — see §4.18.4). These are the three escape sequences inside a display-text literal; a backslash followed by any other character is a malformed escape (`E-PARSE-001`). (This mirrors the minimal escape set scrml uses for `"`-delimited strings elsewhere; `'` needs no escape precisely because it is not a delimiter. The `\${` form was previously documented only in §4.18.4; the S114 editorial amendment lifted it here so §4.18.3 carries the full escape catalog without a forward reference.)~~ *(superseded S442 — next bullet; RESTORED S444 — the "Amendment S444" bullet below)*
+- ~~**Amendment S442 — the display-text literal has NO character escapes.** The whole former catalog is deleted: `\"` (B(3)), and `\\` and `\${` (B(2) = delete). A `\` inside a display-text literal is an ordinary content character; there is no malformed-escape error (`E-PARSE-001` no longer fires on `\x` here). Consequently `\"` is a `\` followed by the closing `"`, `\\` is two backslashes, and `\${` is a `\` followed by an interpolation. The free-text production has never had an escape table (§4.18.1b, pin 5), so neither text-mode production has character escapes.~~ *(superseded S444 — the escape catalog is restored; see the "Amendment S444" bullet below. The S442 provenance and evidence that follow are kept as the record.)*
+  > **Provenance:** ruling:user-voice-scrml.md S442 — "all recs" (B(3): *"delete the `\"` escape"*) · ruling:user-voice-scrml.md S442 dpa-045 follow-ups, item 3 — *"B(2) = delete the rest of the §4.18.3 display-text escape catalog (`\\`, `\${`) — measured zero uses in 2,138 files. → RULED. (With B(3), the code-default display-text literal has no character escapes.)"* · dPA artifact `scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-round2-2026-09-08.md` Q3 (*"Consider DELETING `\"` from §4.18.3 rather than fixing it … a character-escape is Class D machinery"*; *"Resolve root cause A one way or the other, but not neither"*) · supersedes: the struck three-escape sentence above. **Direction of change:** changes meaning at the SPEC level for `\"` / `\\` / `\${` inside a display-text literal. Evidence (S442 E measurement, `docs/changes/s442-dpa045-spec/progress.md`): across 2,138 `.scrml` files the catalog had **zero uses** — `\"` 0, `\\` 0, `\${` 0 — in 40 display-text literals (37 `:`-shorthand, 3 block-form). Shipping state (round 2 + S442): `\"` mis-scans (`E-ENGINE-STATE-CHILD-MISSING` for children present in source); `\\` passes only because the cooked value is discarded; `\${` is a no-op; the block splitter splits `"lit \${5}"` into text + a live `${5}` logic block. impl#1 divergences.
+  >
+  > ~~⚑ **OPEN (residue — the ledger's scope note, verbatim):** *"with the catalog deleted, how an author writes a literal `"` or a literal `${` inside a code-default display-text literal is an OPEN residue (the dPA artifact already flagged the `"` case) — not decided here."* (The artifact: scrml has one string delimiter language-wide, so a `"` inside a display-text literal *"has no delimiter answer"*; it places *"the generalizable raw-content marker"* at that hole.)~~ *(CLOSED S444 — bryan ruled option A, restore the escapes; option B (doubled `""` / `$${`), option C (raw `#"…"#`) and interpolation (`${'"'}`) were not taken — next bullet.)*
+- **Amendment S444 — the escape catalog is RESTORED.** Inside a display-text literal there are exactly three escape
+  sequences, and no others:
+  - `\"` — a literal double-quote. It does NOT close the literal: `"She said \"hi\""` is `She said "hi"`.
+  - `\\` — a literal backslash. `"C:\\"` is `C:\` — the `"` after the escaped backslash closes the literal.
+  - `\${` — the two characters `${` as content, NOT an interpolation: `"\${x}"` is the four characters `${x}`. (After
+    it, `x}` is ordinary content; no brace matching happens.)
+
+  A backslash followed by any other character — `\q`, `\n`, `\t`, a `\` followed by a `$` that is not followed by
+  `{`, a `\` at a line end — is a **malformed escape: `E-PARSE-001`**, against the backslash and the character after it.
+  This restores the S111 catalog's rule exactly (S111, commit `d0b75a8f7`: *"a backslash followed by any other character
+  is a malformed escape (`E-PARSE-001`)"*); it is not a new design. On recovery the two characters are kept as content
+  and the scan continues after them, so a malformed escape never moves where the literal ends (the `"` after `\q` still
+  closes it). The escapes are decoded once, by the scan that finds the literal's extent (§4.18.1b pin 4 — cooked); the
+  node handed on carries the decoded text, and a decoded `${` is content that no later stage re-reads as an
+  interpolation. A `\` inside an interpolation's `${ … }` belongs to the expression's own grammar (a logic-context
+  string's escapes), not to this catalog. **The free-text production stays escape-free** (§4.18.1b pin 5): a `\` in a
+  plain-markup body is content — unchanged.
+  The unterminated-literal check (next bullet) uses the same scan: an escaped `\"` is not the closing quote, and an
+  escaped `\\` does not escape the character after it.
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
+  > **Direction of change (per surface):** `\"` — was (S442) a `\` then the closing `"`; now a literal `"` and the
+  > literal continues (changes meaning; corpus uses **0**, S442 E measurement). `\\` — was two backslashes; now one
+  > (changes meaning; **0**). `\${` — was a `\` then a live interpolation; now a literal `${` (changes meaning; **0**).
+  > `\q` and every other `\` + char — was content; now `E-PARSE-001` (newly-rejecting; **0** — the S442 E cross-check
+  > found all 347 `\` characters in the corpus in logic, none inside a display-text literal).
+  > **Unknown-escape decision (S444):** the PA's lean was "`\` + char kept as content"; the brief's own condition
+  > governs — the pre-S442 catalog had `E-PARSE-001` for a malformed escape, so that behaviour is restored exactly.
 - A display-text literal that reaches end-of-file (or the body's closer) before its closing `"` is an unterminated literal — `E-CTX-001` against the opening `"`, recovered per §4.18.7.
+  *(S444:)* The recovered content is cooked with the same escape table, and each malformed escape in it is
+  `E-PARSE-001` — including a `\` immediately before the recovery point (`"abc\` at end of file: `E-CTX-001`, then
+  `E-PARSE-001` for the trailing `\`). Its `${` is content: the literal never closed, so no interpolation is walked.
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" (the catalog applies to the literal's content however it ends) · review:S444 S239 review of 5d5ad360b nit 3 (the recovery path was raw and silent)
 
 **Worked example — display-text literals in code-default bodies:**
 
@@ -1245,7 +1530,11 @@ A display-text literal is a **sequence of literal-text segments and `${expr}` in
 - `${expr}` inside a display-text literal opens a logic context per §3.1, exactly as `${...}` does elsewhere. The `expr` follows logic-context grammar; `@`-sigil reactive access applies normally.
 - A display-text literal carrying one or more `${...}` interpolations is a single body child — a template-string-valued display-text node interleaving literal-text segments and interpolated expressions. It is NOT decomposed into sibling text + interpolation children.
 - The `${...}` interpolation token keeps a single meaning across the language: "interpolate an expression here." It is the same token in an attribute-value string (`attr="${@x}"` — §5, already template-string-shaped) and in a body display-text literal. A display-text literal is the body-position analogue of the attribute-value string.
-- A literal `${` sequence intended as display text (not an interpolation) is written with the `\${` escape — see §4.18.3 for the full escape catalog. The escape is rare in practice (the `${` sequence is the interpolation opener inside the literal and is normally used for that purpose).
+- ~~A literal `${` sequence intended as display text (not an interpolation) is written with the `\${` escape — see §4.18.3 for the full escape catalog. The escape is rare in practice (the `${` sequence is the interpolation opener inside the literal and is normally used for that purpose).~~ *(superseded S442 — the `\${` escape is deleted, §4.18.3 (B(2) = delete); how to write a literal `${` inside a display-text literal is ⚑ OPEN — the §4.18.3 residue)*
+- **Amendment S444 — the struck bullet above is restored.** A literal `${` sequence intended as display text (not an
+  interpolation) is written with the `\${` escape — see §4.18.3 for the full escape catalog. `"Cost: \${5}"` renders
+  `Cost: ${5}`; `"Cost: ${5}"` renders `Cost: 5`.
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
 
 **Worked example — interpolation inside the literal:**
 
@@ -1258,7 +1547,7 @@ A display-text literal is a **sequence of literal-text segments and `${expr}` in
 
 `"Loaded ${@result.count} rows"` is **one** display-text literal — literal segment `Loaded `, interpolation `${@result.count}`, literal segment ` rows`. The whitespace around the interpolation is inside the quotes and is therefore content (§4.18.5).
 
-#### 4.18.5 Whitespace inside the literal
+#### 4.18.5 Whitespace — kept exactly in both productions (revised S442)
 
 Whitespace inside a display-text literal is **verbatim** — preserved exactly as written, byte for byte. A run of spaces is that run of spaces; a newline inside a multi-line display-text literal is a newline in the rendered output. The literal *is* the whitespace declaration; there is no collapse and no leading/trailing strip inside a display-text literal.
 
@@ -1266,9 +1555,41 @@ Whitespace inside a display-text literal is **verbatim** — preserved exactly a
 
 - Inside a display-text literal, every whitespace character (space, tab, newline) between the opening `"` and the closing `"` SHALL be preserved verbatim in the rendered display text. `"two  spaces"` renders two spaces.
 - Whitespace **outside** a display-text literal but inside a code-default body — whitespace between a literal and a sibling value, between two nested tags, between a value and a closer — is **source formatting** and is NOT content. It is ignored, exactly as whitespace between function arguments is ignored.
-- Plain-markup free-text-mode bodies (§4.18.1) are **unchanged**: they retain HTML-style whitespace handling — runs of whitespace collapse, leading/trailing whitespace strips. This amendment does NOT alter free-text-body whitespace. The verbatim-whitespace guarantee is a property of the display-text literal, not of free-text bodies.
+- ~~Plain-markup free-text-mode bodies (§4.18.1) are **unchanged**: they retain HTML-style whitespace handling — runs of whitespace collapse, leading/trailing whitespace strips. This amendment does NOT alter free-text-body whitespace. The verbatim-whitespace guarantee is a property of the display-text literal, not of free-text bodies.~~ *(superseded S442 — deleted as a documentation defect; see "Whitespace (revised)" below)*
 
-This is the resolved-by-coupling consequence of scope (b): the display-text literal gets the verbatim-whitespace guarantee where it is wanted (the code-bearing loci); plain-markup `<p>` / `<h1>` prose keeps HTML-collapse. Two whitespace regimes, split by body mode — the same split as the body-mode split itself (§4.18.1).
+~~This is the resolved-by-coupling consequence of scope (b): the display-text literal gets the verbatim-whitespace guarantee where it is wanted (the code-bearing loci); plain-markup `<p>` / `<h1>` prose keeps HTML-collapse. Two whitespace regimes, split by body mode — the same split as the body-mode split itself (§4.18.1).~~ *(superseded S442)*
+
+**Whitespace (revised) — Amendment S442 (pin 2).** §4.18.5's claimed collapse regime *("runs of whitespace collapse,
+leading/trailing whitespace strips")* **is false against the shipping compiler and is DELETED as a documentation
+defect.** Both productions preserve whitespace verbatim. Visual collapse is the browser's `white-space: normal`
+default, downstream and identical under every pole. **Whitespace is kept exactly.**
+
+- A free-text body is a **region** (§4.18.1): its whitespace — including the newline and indentation after the
+  opener's `>` and before the closer — SHALL be preserved verbatim in the emitted text. No stage SHALL collapse runs,
+  strip leading or trailing whitespace, or drop the whitespace adjacent to a `${…}` interpolation. *(Pin 2's reason,
+  from the artifact: with the body a region, a strip rule "on a literal" gets implemented on the region — "lit#114,
+  built deliberately, from scrml's own spec".)*
+- **Whitespace-only text between elements is kept exactly too** (RULED, S442 follow-up item 4). A run of free text
+  that is only whitespace — including one that contains a newline, e.g. the newline + indentation between two sibling
+  elements — is content like any other run and SHALL NOT be dropped or normalized.
+  > **Provenance:** ruling:user-voice-scrml.md S442 dpa-045 follow-ups, item 4 — *"Whitespace-only text between
+  > elements is kept exactly too (the bootstrap `lower` currently drops whitespace-only text containing a newline —
+  > L13), done in the bootstrap together with the measured component-body and `lift`-segment whitespace fixes; it
+  > deliberately changes the pre-existing programs' lowered output. → RULED."*
+- The code-default rules above are unchanged: whitespace inside a display-text literal is content; whitespace between
+  values in a code-default body is source formatting.
+- **impl#1 divergences (measured, S442 E(a), `docs/changes/s442-dpa045-spec/progress.md`).** The static-HTML path
+  already conforms (plain markup, `if=` templates, markup nested in match arms / engine state-children, both
+  display-text-literal loci: byte-identical). Two paths do not: **component-definition bodies** (runs collapse,
+  indentation stripped, tab → space, one case adds a trailing space) and **markup built from logic** (`lift`,
+  markup-as-value — each text segment trimmed and collapsed, and the whitespace next to `${…}` deleted, so
+  `   lifted   ${it}   li` renders `liftedali` — **content loss**, not cosmetic). Per the ruling these are fixed in
+  the BOOTSTRAP; in impl#1 they are filed as gaps, fixed only if the S435 policy admits them. The per-surface claims
+  are in the §4.18.1b table.
+  > **Provenance:** ruling:user-voice-scrml.md S442 — "all recs" (D: *"Whitespace is kept exactly"* (SPEC §4.18.5's
+  > collapse claim deleted)) · ruling:user-voice-scrml.md S442 dpa-045 follow-ups, scope note (*"impl#1 whitespace
+  > defects found by the E measurement … are filed as gaps, fixed in impl#1 only if the S435 policy admits them"*) ·
+  > dPA artifact round 2, Q1 draft "4.18.5 — Whitespace (revised)" + pin 2 · supersedes: the two struck passages above.
 
 #### 4.18.6 Auto-HTML-escaping of literal text content
 
@@ -1292,11 +1613,12 @@ The author writes the literal `<`, `>`, `&` characters. The emitted HTML carries
 
 #### 4.18.7 `E-UNQUOTED-DISPLAY-TEXT` — bare display text in a code-default body
 
-A run of bare (unquoted) source characters in a code-default body (engine state-child body, match block-form arm body, `:`-shorthand body) that is **not a valid scrml expression** and **not whitespace** is a compile error — `E-UNQUOTED-DISPLAY-TEXT` (§34).
+A run of bare (unquoted) source characters in a code-default body (engine state-child body, match block-form arm body, `:`-shorthand body; and — S441 — a `<program>` / `<page>` / `<channel>` body) that is **not valid code for that body** and **not whitespace** is a compile error — `E-UNQUOTED-DISPLAY-TEXT` (§34). Valid code is a scrml expression in the three code-bearing loci, and a statement sequence (§40.8) in a `<program>` / `<page>` / `<channel>` body.
 
 **Fire condition:**
 
-- The error fires when, scanning a **code-default-mode** body (§4.18.1), the block splitter / tokenizer encounters a run of non-whitespace source characters that is neither (a) a valid scrml expression per §4.18.2 (identifier, keyword, call, member access, literal, nested `<tag>`, `${...}`), nor (b) a display-text literal (`"..."`, §4.18.3).
+- The error fires when, scanning a **code-default-mode** body (§4.18.1), the block splitter / tokenizer encounters a run of non-whitespace source characters that is neither (a) a valid scrml expression per §4.18.2 (identifier, keyword, call, member access, literal, nested `<tag>`, `${...}`) — in a `<program>` / `<page>` / `<channel>` body, a valid statement sequence (S441) — nor (b) a display-text literal (`"..."`, §4.18.3).
+- In a `<program>` / `<page>` / `<channel>` body (S441) the diagnostic SHALL also name the markup-element form (`<p>…</p>`) as a fix, alongside the `"..."` literal. One diagnostic covers each maximal run of consecutive statements that are not valid code, and the statements it covers raise no other diagnostic (the author sees the root cause, not an `E-SCOPE-001` on the prose's first word). A bare prose run that happens to be valid code — a single word such as `Counter` parses as an identifier — is code and is diagnosed as code (e.g. `E-SCOPE-001`); that diagnostic SHOULD mention the declared-prose forms when the offending run is the whole of a body-top run. *(S445: a lone identifier or cell read standing as a statement has no effect, so at a `<program>` / `<page>` / `<channel>` body top it is `E-STMT-NO-EFFECT` (§40.8), whose message names the declared forms.)*
 - The diagnostic SHALL identify the offending run and SHALL suggest wrapping the run in a display-text literal — e.g. *"Display text in an engine state-child body must be a quoted display-text literal. Did you mean `\"<the run>\"`?"*.
 - The error does NOT fire in free-text-mode bodies — a bare run of prose in a `<p>` body is display text, unchanged. `E-UNQUOTED-DISPLAY-TEXT` is a code-default-body diagnostic only.
 
@@ -1326,9 +1648,9 @@ and gets **literal quote marks** in the rendered output — `<p>` is a free-text
 
 **Normative statements (`W-DISPLAY-TEXT-OVERQUOTE`):**
 
-- The lint SHALL fire when, inside a code-default body (engine state-child body §51.0, match block-form arm body §18.0.1, or `:`-shorthand body §4.14), a **plain-markup element** (an HTML element whose body is free-text per §4.18.1 — NOT a component, NOT a scrml structural element) has, after ignoring whitespace-only source formatting, **exactly one** body child that is a single `"..."` display-text literal (no interior unescaped `"`).
-- The lint SHALL NOT fire on: (a) a `"..."` display-text literal written **directly** in the code-default body — that is the CORRECT §4.18.3 form, quotes stripped on emit; (b) bare free text in a plain-markup body — that is correct verbatim display text; (c) a `"..."` literal in plain markup that is **outside** any code-default-body context — there is no code-default habit to carry, so no footgun; (d) a **non-sole-content** quoted run such as `<p>"a" and "b"</p>` — the interior unescaped quotes show the adopter intends literal quote marks; (e) a `:`-shorthand body that **is** a display-text literal (`<Idle : "Waiting…">`) — the quotes are stripped per §4.18.3 (correct), so the over-quote never reaches the output.
-- `W-DISPLAY-TEXT-OVERQUOTE` partitions into `result.warnings` (non-fatal, info). It is lint-only: it changes no emitted output — the literal quotes still render (the verbatim free-text behavior is unchanged); the lint only surfaces the surprise. (This is the INVERSE footgun of `E-UNQUOTED-DISPLAY-TEXT`, which is the under-quoting case in the code-default body itself; `E-UNQUOTED-DISPLAY-TEXT` remains spec-ahead/unwired — `W-DISPLAY-TEXT-OVERQUOTE` is a separate, independently-wired lint.)
+- The lint SHALL fire when, inside a code-default body (engine state-child body §51.0, match block-form arm body §18.0.1, or `:`-shorthand body §4.14), a **plain-markup element** (an HTML element whose body is free-text per §4.18.1 — NOT a component, NOT a scrml structural element) has, after ignoring whitespace-only source formatting, **exactly one** body child that is a single `"..."` display-text literal (no interior `"` — S442: a free-text body has no escapes, §4.18.1b pin 5, so "unescaped" is dropped).
+- The lint SHALL NOT fire on: (a) a `"..."` display-text literal written **directly** in the code-default body — that is the CORRECT §4.18.3 form, quotes stripped on emit; (b) bare free text in a plain-markup body — that is correct verbatim display text; (c) a `"..."` literal in plain markup that is **outside** any code-default-body context — there is no code-default habit to carry, so no footgun; (d) a **non-sole-content** quoted run such as `<p>"a" and "b"</p>` — the interior quotes show the adopter intends literal quote marks; (e) a `:`-shorthand body that **is** a display-text literal (`<Idle : "Waiting…">`) — the quotes are stripped per §4.18.3 (correct), so the over-quote never reaches the output.
+- `W-DISPLAY-TEXT-OVERQUOTE` partitions into `result.warnings` (non-fatal, info). It is lint-only: it changes no emitted output — the literal quotes still render (the verbatim free-text behavior is unchanged); the lint only surfaces the surprise. (This is the INVERSE footgun of `E-UNQUOTED-DISPLAY-TEXT`, which is the under-quoting case in the code-default body itself; `E-UNQUOTED-DISPLAY-TEXT` is wired at the `<program>` / `<page>` / `<channel>` locus since S441 and remains unwired in the three code-bearing loci — `W-DISPLAY-TEXT-OVERQUOTE` is a separate, independently-wired lint.)
 
 #### 4.18.8 The `text` block / AST kind survives
 
@@ -1341,7 +1663,10 @@ The `text` block kind (at the block-splitter layer) and the corresponding `TextN
 - §3.4 — V5-strict access form per context; the engine-state-child / match-arm / `:`-shorthand loci are code-default-body loci.
 - §4.14 — the `:`-shorthand body form; a `:`-shorthand body is a single code-default expression.
 - §4.15 — the structural-elements registry; `<engine>` / `<match>` body-form notes.
-- §4.17 — `<pre>` / `<code>` raw-content (orthogonal mechanism — see the orthogonality note above).
+- §3.1 / §4.7 / §19 / §19.12 / §22.2 — the context sigils and `//` comments that are members of the free-text closed exit set (§4.18.1b, S442).
+- §4.3 / §15.15.5 — the deprecated spaced opener `< tag>`, which is content inside a free-text body (S442).
+- §66.6 / §18.0.1 — the `<*x/>`, `<_ …>`, `<.Variant …>` tag forms admitted by the `<`+[a-zA-Z!/?*_.] exit class (S442).
+- §4.17 — `<pre>` / `<code>` raw-content (orthogonal mechanism — see the orthogonality note above). S442: raw content is a **third, orthogonal text-mode production** — zero active sequences, its only exit its own matching close tag, matched by name (§4.18.1a).
 - §5 / §5.1 — attribute quoting; the `"`-only attribute-string convention, the precedent this subsection's `"`-only display-text literal matches.
 - §18.0.1 — match block-form arms (a code-default-body locus).
 - §51.0 / §51.0.B / §51.0.I — engine state-children (code-default-body loci).
@@ -1457,6 +1782,15 @@ All valid event handler binding forms:
 - `onclick=${fn(expr)}` SHALL use the `${}` expression directly as the event handler. `expr` is evaluated inside the handler (at click time), not at render time.
 - `onclick=handler` (no parentheses) SHALL wire `handler` directly as the event listener without wrapping.
 - Use `onclick=${() => fn(item.id)}` (expression form) when inside a loop and closure capture is needed — `onclick=fn(item.id)` does not capture `item.id` per-iteration.
+
+**Dispatch contract — one contract, native bubbling (S439 ruling #9).** Every event-handler form above obeys ONE dispatch contract, the same for page markup and for `<each>` rows (§17.7):
+
+- For an event that bubbles in the DOM: when it fires on an element nested inside an ancestor that also handles that event, the inner handler SHALL run first and the ancestor's handler after it; both SHALL fire. (A non-bubbling event — e.g. `focus`, `blur`, `mouseenter`, `load` — does not reach the ancestor.)
+- A handler that calls `stopPropagation()` on the event SHALL prevent the handlers of its ancestors from running for that event.
+
+⚑ **Carried impl#1 divergence, not the language rule:** impl#1's page-markup delegation runs only the INNERMOST handler (the ancestor's does not fire), while its `<each>` rows bubble natively. (Both halves measured S439 by executing the compiled bundle in happy-dom: a click on a `<button onclick>` inside a `<div onclick>` fired the button's handler only; the same nesting inside an `<each>` row fired both. Handler order was not measured.) The contract above is the language rule; the bootstrap implements it.
+
+> **Provenance:** ruling:user-voice-scrml.md S439 #9 "all recs" (Rec: one contract, native bubbling — "The inner handler runs first, both fire, and `stopPropagation` is honoured. The SPEC is silent").
 
 #### 5.2.3 Event handler forms — bare single-expression and inline block (Stage 0b D4 — M11; L19 REVERSED S435)
 
@@ -1633,9 +1967,21 @@ bind-attr ::= 'bind:' attribute-name '=' '@' identifier ('.' identifier)*
   in the generated `onchange` handler. The coercions are:
     - `number` (or any numeric refinement type): `Number(event.target.value)`
     - `boolean`: `event.target.value === "true"`
-    - `enum`: `(EnumTypeName_toEnum[event.target.value] ?? event.target.value)` — where
+    - `enum`: `EnumTypeName_toEnum[event.target.value]` ~~`?? event.target.value`~~ *(raw-string
+      fallback struck S440 — an unmatched value is handled by the S440 text directly below)* — where
       `EnumTypeName_toEnum` is the compiler-generated lookup table for the enum type (§14.4.1).
-      The `?? event.target.value` fallback preserves the raw string if no variant matches.
+      ~~The `?? event.target.value` fallback preserves the raw string if no variant matches.~~
+      *(superseded S440 — an unmatched value never writes a stray string:)* **If no variant
+      matches:** when the cell's type admits `not` (`E | not`), the write stores `not`; otherwise
+      the write is REFUSED and the cell is unchanged. In the refused case, every static
+      `<option value="…">` literal of that `<select>` SHALL be checked against the enum's variant
+      set at compile time; a literal that names no variant is **`E-SELECT-OPTION-NOT-VARIANT`**.
+      **Named; impl pending — Nominal / not yet emitted**; impl#1 carries it (§34.0).
+      > **Provenance:** ruling:user-voice-scrml.md S440 (coercion follow-ups, #4) — *"an unmatched
+      > `<select>` value becomes `not` (or is refused) rather than a stray string"* · the two-limbed
+      > split (`E | not` → `not`; otherwise refused + static `<option>` check) is the **PA reading
+      > for build, flagged for veto** in the same entry's scope note · supersedes: the struck
+      > raw-string fallback sentence above.
     - `string` (or unknown/unannotated): no coercion; `event.target.value` is used as-is.
   The coercion is applied only at the write-back site (the generated `onchange` handler).
   The `value=` attribute binding (reading from `@variable` to the DOM) is unaffected;
@@ -2652,6 +2998,8 @@ replacement from the subscriber's perspective — both result in a `_scrml_react
 ---
 
 #### 6.5.6 Nested Reactive Arrays
+
+> **Note:** Not amended toward deep reactivity (S439 #3): for the §66 model the question is dissolved by §66.10 (value semantics) — there is no deep-reactive proxy to specify. **Provenance:** ruling:user-voice-scrml.md S439 #3 "all recs" (Rec: don't amend §6.5.6).
 
 Nested arrays (arrays of arrays) are supported. Only the outermost reactive variable is
 reactive. Mutating an inner array does NOT trigger subscribers of the outer variable unless
@@ -3952,6 +4300,15 @@ navigation (a route region).
   the first**, and its registered `cleanup()` SHALL run on the matching **route-leave**. §6.7.1a's unity
   is preserved without exception: `on mount`, bare lifecycle expressions and `<request>` remain one
   mechanism, differing only in which owner the compiler binds them to. *(Amended S313 — ratified Pole C.)*
+  *(narrowed S439 #12 — declarations in a `${…lift…}` block inside an `if=` scope run once at file init; see the next bullet)*
+- **A `${…}` block containing `lift` inside an `if=` scope (S439 ruling #12).** Its DECLARATIONS run ONCE,
+  at file init — they are file-scope declarations (§7.6), not per-mount state. Its `lift` statements run
+  on every mount of the `if=` scope, including each remount. The association and remount rules above
+  govern the block's `lift` statements; they do not re-run its declarations. (This is the behaviour that
+  shipped as #1021.)
+  > **Provenance:** ruling:user-voice-scrml.md S439 #12 "all recs" (Rec: A — "Declarations run at file
+  > init (§7.6 file scope) and lift statements run per mount") · supersedes (narrows): the association
+  > bullet and the memoryless-remount clause above, for declarations in such a block.
 - When a scope destroys, all associated lifecycle resources are torn down in the following
   canonical order:
   1. All `when` effects registered in that scope are unregistered (no further executions
@@ -3964,7 +4321,8 @@ navigation (a route region).
   sequence before the parent scope begins its teardown sequence.
 - A scope that remounts (i.e., `if=` transitions false → true a second time) SHALL re-run
   all bare expressions and re-start all `<timer>` and `<poll>` instances declared in that
-  scope exactly as if the scope were mounting for the first time.
+  scope exactly as if the scope were mounting for the first time. *(narrowed S439 #12 —
+  does not re-run declarations in a `${…lift…}` block; see the S439 #12 bullet above)*
 
 **Definition — "outside any element scope":** A construct is outside any element scope when
 it appears at the file level without a `<program>` root element ancestor, or when it
@@ -4262,7 +4620,7 @@ and read the derived value inside the body.
 
 **Normative statement:**
 
-- `when @var changes { body }` SHALL execute `body` after the `_scrml_reactive_set` call completes and before the next microtask boundary. This is the canonical pattern for localStorage sync, analytics, and auto-save.
+- `when @var changes { body }` SHALL execute `body` after the `_scrml_reactive_set` call completes and before the next microtask boundary. This is the canonical pattern for localStorage sync, analytics, and auto-save. *(S444: browser persistence of a cell is now §6.14 `persist=`; see the corrected idiom row below.)*
 
 **Canonical use cases:**
 
@@ -4270,8 +4628,11 @@ and read the derived value inside the body.
 |---|---|
 | Derive a value from reactive state | `const <name> = expr` (§6.6) |
 | Run a side effect when state changes | `when @var changes { body }` |
-| Sync to localStorage on change | `when @var changes { localStorage.setItem(key, @var) }` |
+| ~~Sync to localStorage on change~~ | ~~`when @var changes { localStorage.setItem(key, @var) }`~~ |
+| Persist a cell across reloads | `<x persist="local" key="app.x"> = init` (§6.14 — **Nominal**, lands with the bootstrap). Until it lands, a hand-written recipe SHALL encode on write and decode + check on read: see the note below. |
 | Auto-save form fields | `when (@field1, @field2) changes { saveForm(@field1, @field2) }` |
+
+> **Correction S444 (dpa-061 call 8) — the struck row was silently lossy.** Web Storage stores `String(v)`, so the struck recipe stored a `string[]` as `"a,b"`, an object as `"[object Object]"`, and `not` as the present string `"null"`; it covered only the write half. It is correct **only for a `string` cell**. Browser persistence is now the `persist=` lifetime attribute (§6.14), which owns restore, encoding, fail-closed decode, cross-tab sync and write failure. A hand-written recipe for a non-`string` cell, until §6.14 lands, SHALL encode the value (e.g. `JSON.stringify`) in a named function that the `when` body calls, and on load SHALL decode inside a guard and check the decoded value's shape before assigning it (on failure, keep the default). `JSON.stringify` does not round-trip a map (§59.10 — `JSON.stringify(new Map(...))` is `"{}"`). The recipe's `!{}` guard goes in the named function, not in the `when` body (`g-bang-brace-in-when-changes-body-invalid-logic`). **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 calls 5, 7, 8 — *"5, 7, 8 your recs. expound 6"* (8: *"the design-independent fixes land now: the SPEC §6.7.4 lossy localStorage recipe row, the `when`-body `!{}` codegen defect (`g-bang-brace-in-when-changes-body-invalid-logic`), and a PRIMER entry. RULED."*) · dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` C4 P1 · **supersedes:** the struck row above. Resolves `g-spec-6-7-4-localstorage-recipe-lossy-for-non-string-cells`.
 
 ---
 
@@ -4553,10 +4914,11 @@ If a future revision determines that `<request>` cannot justify all three distin
 request-decl  ::= '<request' request-attrs '>' request-body '/'
                | '<request' request-attrs '/>'
 
-request-attrs ::= id-attr (deps-attr)?
+request-attrs ::= id-attr (deps-attr)? (cache-attr)?
 id-attr       ::= 'id=' string-literal
 deps-attr     ::= 'deps=' '[' deps-list ']'
 deps-list     ::= ('@' identifier (',' '@' identifier)*)?
+cache-attr    ::= 'cache'                          (S444 dpa-060 — bare; takes no value, see §6.7.7.2)
 
 request-body  ::= '$' '{' assignment-expression '}'
 ```
@@ -4564,6 +4926,8 @@ request-body  ::= '$' '{' assignment-expression '}'
 The `id` attribute is required (E-LIFECYCLE-018). The body SHALL contain exactly one assignment expression of the form `@variable = expr`.
 
 The `deps` attribute is optional. When absent, the compiler infers reactive dependencies from `@variable` reads within the fetch expression. When present, `deps` overrides inference.
+
+The `cache` attribute is optional and bare (S444, dpa-060 — **Nominal / spec-ahead**). Its semantics are §6.7.7.2.
 
 ```scrml
 // Minimal — fetches on mount, re-fetches when @userId changes (inferred)
@@ -4614,7 +4978,7 @@ The `deps` attribute is optional. When absent, the compiler infers reactive depe
 
 On re-execution, `<#id>.data` is NOT cleared. `stale` is `true` during re-fetch if prior data exists.
 
-**Destroy behavior:** On scope destroy, in-flight results are discarded. The compiler SHALL generate a cancellation guard.
+**Destroy behavior:** On scope destroy, in-flight results are discarded. The compiler SHALL generate a cancellation guard. **Amended S444 (dpa-059):** on scope destroy an in-flight fetch's result is never applied, and a request the compiler classifies **READ** additionally has its transport **aborted**; a **WRITE** request is **discarded** — its result is not applied and its transport runs to completion (§6.7.7.1).
 
 **`<request>` is not a loop.** Unlike `<timer>` and `<poll>`, the body executes once on mount, then only on dependency change or `refetch()`.
 
@@ -4628,7 +4992,9 @@ On re-execution, `<#id>.data` is NOT cleared. `stale` is `true` during re-fetch 
 | `<#id>.stale` | `boolean` | `true` when data exists AND a new fetch is in flight |
 | `<#id>.refetch()` | `() -> void` | Imperatively re-execute the fetch body |
 
-**`stale` does not imply cache TTL.** Staleness is point-in-time: data exists and a fetch is in flight. No cache expiration, no max-age, no background revalidation. Cache semantics are a stdlib concern.
+**`stale` does not imply cache TTL.** Staleness is point-in-time: data exists and a fetch is in flight. No cache expiration, no max-age~~, no background revalidation. Cache semantics are a stdlib concern~~.
+
+> **Amendment S444 (dpa-060) — the stdlib deferral is struck.** A `<request>` MAY opt into result caching with the bare `cache` attribute (§6.7.7.2). A cache hit revalidates in the background, and during that fetch `stale` is `true` — which is exactly this paragraph's point-in-time definition (data exists and a fetch is in flight). There is still no cache expiration and no max-age: no author TTL exists anywhere on `<request>`. **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 1 — *"i and B2"* (the entry: *"Supersedes §6.7.7's unprovenanced "Cache semantics are a stdlib concern" (scrml8 `1ce4ff6`, agent-authored one-shot patch — rationale-grade, per the dd)."*) · ruling:user-voice-scrml.md S444 dpa-060 call 3 — *"(ii) and revalidate"* · dd:`scrml-support/docs/deep-dives/request-caching-dpa-060-2026-09-30.md` C1 (the sentence arrived verbatim in scrml8 `1ce4ff6`'s one-shot `apply_patch.py` L118; no deliberation found — `rationale:`-grade under Rule 4b) · **supersedes:** *"no background revalidation. Cache semantics are a stdlib concern."* (struck above).
 
 #### Integration with E-RI-002
 
@@ -4638,11 +5004,11 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 
 **EC-1: Error then refetch.** A dependency change or `refetch()` clears `<#id>.error` to `not` and begins a new loading cycle. `<#id>.data` retains its value.
 
-**EC-2: Rapid dependency changes.** Each change starts a new fetch. Previously in-flight fetches are superseded — only the most recently initiated fetch's result is applied. The compiler SHALL generate a sequence number per `<request>` instance.
+**EC-2: Rapid dependency changes.** Each change starts a new fetch. Previously in-flight fetches are superseded — only the most recently initiated fetch's result is applied. The compiler SHALL generate a sequence number per `<request>` instance. **Amended S444 (dpa-059):** a superseded fetch of a **READ** request (§6.7.7.1) SHALL have its transport **aborted**; a superseded fetch of a **WRITE** request SHALL be **discarded** — its result is not applied and its transport runs to completion. In both cases only the most recently initiated fetch's result is applied, and the sequence number remains the guard.
 
-**EC-3: Scope destroyed during in-flight fetch.** The resolution is discarded. The compiler SHALL generate a mounted-guard check.
+**EC-3: Scope destroyed during in-flight fetch.** The resolution is discarded. The compiler SHALL generate a mounted-guard check. **Amended S444 (dpa-059):** teardown follows the same rule as supersede — a **READ** request's in-flight transport SHALL be **aborted**; a **WRITE** request's SHALL be **discarded** (result not applied, transport completes). This is the same rule as §20.8.8 step 2.3 (route-leave), and the two sentences now agree (§6.7.7.1).
 
-**EC-4: `refetch()` while loading.** Starts a new fetch immediately, superseding the in-flight one (same as EC-2).
+**EC-4: `refetch()` while loading.** Starts a new fetch immediately, superseding the in-flight one (same as EC-2, including the S444 abort-reads / discard-writes rule).
 
 **EC-5: No reactive deps, no `refetch()`.** Fetch executes once on mount. Valid. The compiler SHALL emit W-LIFECYCLE-013 when a body references no reactive `@variables` and `deps=` is absent or empty (suppressed by explicit `deps=[]`).
 
@@ -4656,6 +5022,9 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 - A `<request>` SHALL discard in-flight results on scope destroy.
 - The compiler SHALL generate a mounted-guard check in every `<request>` resolution.
 - The compiler SHALL generate a sequence number for every `<request>` instance (EC-2, EC-4).
+- *(S444, dpa-059 — Nominal / spec-ahead.)* On supersede (EC-2, EC-4) and on teardown (EC-3, §20.8.8 step 2.3), a `<request>` classified **READ** (§6.7.7.1) SHALL have its in-flight transport aborted; a `<request>` classified **WRITE** SHALL have its in-flight result discarded while its transport runs to completion.
+- *(S444, dpa-059.)* An abort SHALL NOT set `<#id>.error`, and SHALL NOT be treated as, or imply, a rollback (§6.7.7.1).
+- *(S444, dpa-060 — Nominal / spec-ahead.)* `cache` on a `<request>` that has no compiler-derivable read-set (a `url=` or `api=` request) SHALL be `E-REQUEST-CACHE-NO-READSET` (§6.7.7.2).
 - `<#id>.data` SHALL NOT be cleared on re-fetch. It SHALL retain its previous value until the new fetch settles.
 - `<#id>.error` SHALL be reset to `not` at the start of each new fetch.
 - `<#id>.stale` SHALL be `true` iff `<#id>.data` is not `not` and a fetch is in flight.
@@ -4736,6 +5105,58 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 | W-LIFECYCLE-012 | `refetch()` called inside `<timer>`/`<poll>` body | Warning |
 | W-LIFECYCLE-013 | No reactive deps, no explicit `deps=[]` | Warning |
 | W-LIFECYCLE-014 | `<request>` inside `for/lift` loop | Warning |
+| E-REQUEST-CACHE-NO-READSET | `cache` on a `<request>` with no compiler-derivable read-set (`url=` / `api=`) — §6.7.7.2. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+
+#### 6.7.7.1 Supersede and teardown — abort READS, discard WRITES (S444, dpa-059)
+
+> **Provenance:** ruling:user-voice-scrml.md S444 dpa-059 — *"C for abort."* (options: A discard-everywhere (today) · B abort-everything · C abort reads, discard writes (compiler-classified, unclassifiable = write) · D author-declared; **RULED C**) · dd:`scrml-support/docs/deep-dives/request-supersede-abort-dpa-059-2026-09-30.md` (Approach C; C2 edge table; C3(e) guard analysis) · **supersedes:** the discard-only reading of §6.7.7 EC-2 / EC-3 / EC-4 and the destroy-behaviour paragraph, and the unconditional *"in-flight `<request>`s issued by the region are **aborted**"* of §20.8.8 step 2.3.
+>
+> **⚑ Ruled vs entailed.** bryan's line answers the dd's call 1. The user-voice entry's PA scope note: *"The PA's recs on calls 2–5 were presented alongside but not separately answered: (2) route-leave teardown follows the same rule (reads aborted, writes discarded; §20.8.8 step 2.3 and §6.7.7 EC-3 both rewritten); (3) a SPEC clause: abort is transport-only — not a rollback, the server may have committed, never sets `.error`; (4) the read-only test = no non-SELECT SQL anywhere in the call, a single batch, GET/HEAD for `url=`/`api=`, surfaced in `scrml explain` not a lint; (5) CPS-batch threading dissolves under C (reads are single-batch). The PA treats (2)(4)(5) as entailed by C and (3) as owed under any abort pole — flag for correction."* Rules 1, 3, 4 and 5 below therefore carry the status **PA reading of S444, bryan veto window**; rule 2 is the ruling itself.
+>
+> **Nominal / spec-ahead.** impl#1 discards on every edge today — the sequence-number and mounted guards, with no `AbortController` on any `<request>` transport (`g-region-request-discard-not-abort`). Per S444 (*"impl#1 divergence is filed as gaps, not fixed"*) impl#1 carries the divergence and the bootstrap builds this section.
+
+1. **Classification.** The compiler SHALL classify every `<request>` at compile time as **READ** or **WRITE**:
+   - **Body form** (`${ @x = call }`): **READ** iff (a) no non-`SELECT` SQL (`?{}`) is reachable anywhere in the call graph of the body's call expression — transitively, through every server function the call reaches — **and** (b) the call lowers to a single server batch (not a §19.9.9 multi-batch CPS body).
+   - **`url=` / `api=` form** (§60): **READ** iff the HTTP method is `GET` or `HEAD`.
+   - **Every other request is WRITE — including any request the compiler cannot classify.** Unclassifiable = write: the classification fails closed to discard.
+2. **Supersede** (EC-2, EC-4). When an in-flight fetch is superseded, a **READ** request's superseded transport SHALL be **aborted**. A **WRITE** request's superseded fetch SHALL be **discarded**: its result SHALL NOT be applied, and its transport SHALL NOT be aborted — it runs to completion.
+3. **Teardown** (EC-3 scope destroy; §20.8.8 step 2.3 route-leave). The same rule applies: a **READ** request's in-flight transport SHALL be aborted; a **WRITE** request's in-flight fetch SHALL be discarded (result not applied, transport completes).
+4. **Abort is transport-only.** An abort closes the client's side of the in-flight HTTP request and discards any response. It is **not a rollback**: an abort SHALL NOT imply that the server did not execute, commit, or partially commit the call — **the server may have committed**. (§8.9.2 / §19.10.5's only ROLLBACK trigger remains an exception inside the handler.) An aborted fetch SHALL NOT set `<#id>.error`, and SHALL NOT be treated as a failure settle.
+5. **Explain surface, not a lint.** The READ / WRITE classification of each `<request>` SHALL be surfaced by `scrml explain`. It SHALL NOT be reported as a lint or warning.
+6. **Multi-batch CPS.** A multi-batch body is WRITE by rule 1(b), so an abort never lands between two committed batches. Abort therefore introduces no partial-commit state that discard does not already have.
+
+**OPEN (dpa-059 — not ruled; not decided by this section):**
+
+- **O-059-1** — `scrml explain` is not yet a specified command. Its surface and the output form of the classification are OPEN.
+- **O-059-2** — Transport coverage inside a READ request. A single-batch READ body can still reach more than one transport (two server calls in one expression; the CSRF 403 retry). Whether every such transport SHALL be aborted, or first-hop-only with a stated coverage seam, is not ruled (the dd's call 5; the PA note reads only the CPS-batch half as dissolved).
+- **O-059-3** — Non-SQL side effects. The READ test names only SQL. Whether a call graph with no non-`SELECT` SQL but with a side-effecting non-SQL call (a host / `_{}` call, a stdlib write such as `scrml:store`'s `set`, an outbound HTTP call) is READ or WRITE is not ruled.
+- **O-059-4** — Whether a READ server handler SHALL observe the request's abort signal on the server (return early, skip serialization), or abort is purely client-side (dd Open Questions).
+- **O-059-5** — `<poll>` / `<timer>`: an in-flight tick on route-leave (§20.8.8 step 2.2 "stopped" vs §6.7.5 EC-3 "SHALL complete") is outside dpa-059 and not ruled.
+
+#### 6.7.7.2 `cache` — compiler-derived result caching (S444, dpa-060)
+
+> **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 1 — *"i and B2"* (*"B2 bare `cache` attribute, invalidation derived by the compiler from the request's read-set + the visible write `invalidates` edges (consistent with the §20.8.4 ruling "Invalidation SHALL be compiler-derived, not an author TTL") … RULED B2."*) · ruling:user-voice-scrml.md S444 dpa-060 call 2 (+4) — *"(i) and yes"* (*"`cache` is legal only where the compiler can derive staleness (a read-set); `cache` on a `url=`/`api=` request (no read-set) is a compile ERROR, not a silent TTL; fail-closed, relaxable later. RULED yes."*) · ruling:user-voice-scrml.md S444 dpa-060 call 3 — *"(ii) and revalidate"* (*"show cached immediately + background re-fetch (`stale` = true during it, the existing §6.7.7 flag) … RULED revalidate."*) · spec:§20.8.4 — *"Invalidation SHALL be compiler-derived, not an author TTL."* · dd:`scrml-support/docs/deep-dives/request-caching-dpa-060-2026-09-30.md` (Approach B2; C4 read/write-set facts) · **supersedes:** §6.7.7's *"Cache semantics are a stdlib concern"* (struck in the Properties paragraph above, with its note).
+>
+> **Nominal / spec-ahead.** impl#1 silently accepts an unknown `<request>` attribute today, so `<request cache>` compiles with no effect. impl#1 carries the divergence; the bootstrap builds this section.
+
+1. **Surface.** `cache` is a **bare** attribute on `<request>`. It takes no value. There is **no author TTL**, no max-age and no expiry attribute on `<request>`.
+2. **Legality — a read-set is required.** `cache` is legal only where the compiler can derive staleness, i.e. where the request has a read-set. A `url=` or `api=` request has no read-set, and `cache` on one SHALL be **`E-REQUEST-CACHE-NO-READSET`** (compile error). There is no TTL fallback. (Fail-closed; relaxable later.)
+3. **Read-set.** A body-form request's read-set is the set of tables read by `SELECT` SQL (`?{}`) reachable in the call graph of the body's call expression (the §19.9.9 body-DG's read facts — over-approximate, never under).
+4. **Invalidation is compiler-derived, never author-specified.** A server function whose SQL write-set intersects a cached request's read-set is **invalidating** for that request (the body-DG's `invalidates` edge: a non-`SELECT` write against a table the request `SELECT`s). When a call to an invalidating function visible to the compiler completes on the client, that request's cached result SHALL be treated as invalid. Invalidation SHALL NOT be expressed as an author TTL (the §20.8.4 rule, applied to `<request>`).
+5. **A hit is stale-while-revalidate.** When a `cache` request is triggered (mount, dependency change, `refetch()`) and a valid cached result exists for it, the assigned `@variable` and `<#id>.data` SHALL be set to the cached value immediately, **and the fetch SHALL still run** as an ordinary fetch under this section's mount and settle rules, so `<#id>.stale` is `true` while it is in flight. A hit SHALL NOT skip the fetch. (The ruling's reason: the compiler cannot see out-of-band writes — other users, other clients — so a skipping cache can serve wrong data indefinitely; the cache buys latency, not request volume. Server-side memoization is the load lever.)
+6. **Supersede and abort.** The background revalidation is an ordinary fetch: §6.7.7.1 applies to it unchanged.
+
+**OPEN (dpa-060 — not ruled; not decided by this section):**
+
+- **O-060-1** — **Cache key.** Whether the key is the request's dependency tuple (the emitted deps list), how it is canonicalised (§59.5 value-canonical?), and whether it adds a `sessionScope` component when the callee reads the session (the §20.8.4 / §52.15 precedent).
+- **O-060-2** — **Memory bound / entry lifetime.** Whether entries live and die with the `<request>` instance (scope destroy, §20.8.8 teardown, navigation), are program-wide, and whether a compiler-default cap (LRU N) applies.
+- **O-060-3** — **SSR.** Whether an SSR pre-render seeds the cache.
+- **O-060-4** — **Invalidation granularity and follow-up.** Whether invalidation drops all of the request's entries (table-level, the §20.8.4 precedent) or only entries whose key intersects the written rows; and whether invalidation also re-fetches the live key immediately.
+- **O-060-5** — **Out-of-band and other-client writes.** Whether the §38.13 Postgres-trigger invalidation push (the §20.8.4 route) applies to `<request>` caches, or revalidate-on-hit alone covers them.
+- **O-060-6** — **Unresolvable read-set on the body form** (dynamic SQL, `extractSelectProjection` not `resolvable`). Whether this is `E-REQUEST-CACHE-NO-READSET` under the ruled *"legal only where the compiler can derive staleness"*, or cache-disabled plus a warning (the `W-KEEPALIVE-UNRESOLVABLE-READSET` precedent).
+- **O-060-7** — **`cache` on a WRITE-classified request** (§6.7.7.1). Whether it is legal (revalidate-on-hit still runs the write) or an error.
+- **O-060-8** — Whether the result of a superseded, aborted or discarded fetch is ever stored in the cache.
+- **O-060-9** — The diagnostic for a valued `cache=…` (for example `cache=30s`, an author TTL): which code fires.
 
 ### 6.7.8 `<timeout>` — Single-Shot Timer State Type
 
@@ -6005,6 +6426,176 @@ The grammar SHALL reuse the `parseAfterDuration` helper (`compiler/src/codegen/p
 - L18 — `reset(@cell)` keyword + `default=` attribute (reset cancels pending timed writes).
 - L20 — Vocabulary smell rule (this section eliminates the pre-v0.next `@debounced(N)` keyword-form, collapsing onto one declarative surface).
 
+### 6.14 Lifetime Attribute — `persist=` (Browser-Persisted Cells)
+
+> **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 1 — *"B for localstorage"* / *"the persist= attribute"* (*"RULED (b) — the deep-dive's pole A2 … A1 (authority value) is eliminated."*) · call 2 — *"i and B2. with one caveat, I have found indexedDB to be really usefull is some cases in the past. so lets just plan on the stdlib addition."* · call 3 — *"(i) and yes"* (`key=` required) · call 4 — *"(ii) and revalidate"* (decode-first) · calls 5 / 7 / 8 — *"5, 7, 8 your recs. expound 6"* · call 6 — *"your rec on 6. though I really like the second option, but it gets complicated. We could have the dev explicate when a cell needs that behaviour, but I don't know what that would look like."* · dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` (Approach A2; the cross-cutting table) · **supersedes:** §6.7.4's idiom-table row *"Sync to localStorage on change — `when @var changes { localStorage.setItem(key, @var) }`"* as the canonical persistence recipe (corrected in §6.7.4).
+>
+> **Nominal / spec-ahead.** impl#1 does not accept `persist=` (an unknown decl-attr stops the line being a declaration — `g-unknown-decl-attr-silently-undeclares-cell`). Per S444 impl#1 carries the divergence and the bootstrap builds this section.
+
+Browser persistence is a **lifetime** property of a client-owned cell, orthogonal to authority (§52). It is **not** a §52 authority value: a persisted cell is still client-local for every §52 / E-AUTH rule. The attribute sits in the same slot as `debounced=` / `throttled=` (§6.13).
+
+```scrml
+<recent persist="local" key="myapp.recent">: string[] = []     // survives reload; synced across tabs
+<tabFilter persist="session" key="myapp.filter"> = "all"       // survives reload in this tab only
+```
+
+#### 6.14.1 Surface
+
+1. `persist=` takes exactly one of two values: **`"local"`** (Web `localStorage`) or **`"session"`** (Web `sessionStorage`). Both are synchronous storages. Any other value SHALL be `E-PERSIST-STORAGE-UNKNOWN`.
+2. **`key=` is REQUIRED** on every `persist=` cell. `persist=` without `key=` SHALL be `E-PERSIST-KEY-REQUIRED`. The key is an external storage contract, written by the author; the compiler SHALL NOT derive one. (The ruling's reason: a derived key makes a cell rename silently drop every user's saved value, and explicit keys prevent same-origin cross-app collisions.)
+3. **Where legal.** `persist=` is legal on client-owned state cells. On a §66 declaration it governs the **shared instance only** (the §66.16 analog for `server` / `pinned`); a plain instance of a `persist=` declaration is not persisted.
+4. **`persist="cookie"` is DEFERRED** (not in this revision). **IndexedDB is NOT a `persist=` value**: it is asynchronous and cannot be restored at construction. It is a **PLANNED stdlib addition** — planned work, not gated behind an adopter re-trigger — whose surface (sync-looking, auto-awaited stdlib calls per §13.2) is owed a design pass when scheduled.
+
+#### 6.14.2 Semantics
+
+1. **Restore at construction.** A `persist=` cell's stored value SHALL be read synchronously when the cell is constructed, before the first client render, inside a compiler-emitted host-JS storage guard (the §19 "localStorage availability guard" precedent). Restore is construction, not a transition. On a §66 declaration the restored value is a **§66.9 seed** of the shared instance: seeded once, thereafter independent and writable.
+2. **Codec.** The stored value SHALL be encoded and decoded with the §57 wire format and the §59.10 lossless codec (so maps and a stored `not` round-trip). Browser storage becomes a listed §57.1 sink for `persist=` cells.
+3. **Decode against the current type and full contract first; default on failure; never coerced.** On restore the stored value SHALL be decoded against the cell's **current** declared type and its full declared contract (e.g. §53 refinements, §66.12 sequence bounds). If the key is absent, storage is unavailable, the decode fails, or the decoded value does not satisfy the contract, the cell SHALL take its default (its §6.8 value: `default=` if present, else the initializer). A stored value that does not satisfy the current contract SHALL NOT reach the cell and SHALL NOT be coerced into it. A type edit therefore does not by itself discard stored data: a stored value that still satisfies the edited type is kept.
+4. **Write on change.** When the cell's value changes, the compiler-emitted code SHALL encode the new value and write it to storage under `key`, inside the storage guard. (Composed with `debounced=` / `throttled=`, the storage write follows the cell's wrapped write.)
+5. **Cross-tab sync — `"local"` only.** A `persist="local"` cell SHALL subscribe to the Web `storage` event for its key and apply a changed value written by another same-origin document, decoded under rule 3. A `persist="session"` cell has no cross-tab sync (session storage is per tab).
+6. **Write failure is a read-only synthesized status property.** A storage write that fails (quota exceeded, storage unavailable) SHALL NOT throw into user code. It SHALL be reflected in a **read-only, compiler-synthesized status property** on the persisted cell, following the §55 validity-surface precedent (§55.7: read-only; a write to it is `E-SYNTHESIZED-WRITE`). The property's name and shape are OPEN (O-061-1).
+7. **First paint = default-then-restore.** A persisted cell is client-local, so SSR output renders its default (§52.8), and the restored value appears when client code runs. The pre-paint mechanisms of §6.14.4 (rule 8's theme restore, cell-level `prepaint`, region-level `hold=@cell`) are the exceptions. (⚑ This rule's "renders its default" does not match impl#1's static emit, which carries no value for a client-local read — `g-client-local-static-html-no-initial-value`, §S444e.)
+8. **Pre-paint restore for a theme mode cell — automatic.** When a `persist=` cell is the mode cell of a `<theme for=@cell>` (§65.6; §66.17), the compiler SHALL additionally restore it before first paint: the document's pre-paint script (§6.14.4.1) reads and decodes the stored value (rule 3) and sets the §65.6 root attribute `data-scrml-theme-<cell>` before first paint. This is automatic; there is no author surface for it. The attribute name stays `data-scrml-theme-<cell>` (it is not renamed to the §6.14.4.2 `key=`-derived form). The theme restore is one member of the general pre-paint section §6.14.4, which also governs its placement, per-cell guard, CSP hash and after-boot handling. For cells other than a theme mode cell, the explicit opt-in is §6.14.4 (O-061-2, CLOSED).
+   > **Provenance (amended S444):** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30 — rec 7 verbatim: *"Root attribute name → **derived from `key=`**; §6.14.2 r8's `data-scrml-theme-<cell>` left as is."*
+
+#### 6.14.3 Privacy and ownership — errors
+
+1. `persist=` on a cell whose value carries `reveal`-declassified protected provenance (§14.8.9) SHALL be `E-PERSIST-REVEALED`.
+2. `persist=` on a `lin` cell (§35) SHALL be `E-PERSIST-LIN`. A stored `lin` value would be replayable on every reload.
+3. `persist=` on a server-authority cell (§52: `<x server>`, a Tier-1 `authority="server"` type instance) SHALL be `E-PERSIST-WITH-SERVER`. (dd A2 item 7: the cell is already durable, and persistence is legal only where authority is local.)
+
+#### 6.14.4 Pre-paint — cell-level `prepaint` and region-level `hold=@cell`
+
+> **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30
+>
+> - **Call 1 — RULED (c)** (bryan: *"c"*). The PA's options, verbatim: *"(a) bare `prepaint`, compiler picks REFLECT/HOLD per read · (b) `prepaint="reflect"|"hold"` on the cell · (c) cell-level `prepaint` = REFLECT only (stored value onto `<html>` pre-paint, styling keyed off it) + a region marker `hold=@cell` (hide an author-chosen region until restored, pure-CSS failsafe release) · (d) REFLECT automatic, only `hold=` explicit. RULED (c)."*
+> - **Calls 2–8 — RULED = PA recs** (bryan: *"recs"*). Verbatim:
+>   *"2. A `prepaint` cell also read where REFLECT can't cover (text / `<each>` / `if=`) → an **Info diagnostic naming each site** (not silent; not an error — those reads are empty before JS, never wrong).*
+>   *3. REFLECT applier → **CSS-keyed for `show=` / `style:` / theme; STAMP for `class:` and attribute bindings.***
+>   *4. CSP under `headers="strict"` → **inline pre-paint script + the compiler adds a per-build `'sha256-…'` to the CSP it emits.***
+>   *5. HOLD → **3000 ms pure-CSS failsafe; `visibility:hidden` (keeps the layout box); `aria-busy="true"` while held.***
+>   *6. REFLECT domain → **bool, payload-free enum, and `| not` of those**; no string pass-through, no multi-cell product in v1.*
+>   *7. Root attribute name → **derived from `key=`**; §6.14.2 r8's `data-scrml-theme-<cell>` left as is.*
+>   *8. `prepaint` or `hold=` without `persist=` → **both errors in v1**; a general "cloak until rendered" marker is a separate question (route-to-PA R4)."*
+> - **Design detail** (mechanisms REFLECT / HOLD, probes B1–B18, findings F1–F6): `scrml-support/docs/deep-dives/prepaint-opt-in-dpa-062-2026-09-30.md`. Browser claims there were measured on hand-edited copies of real emit, not compiler output.
+> - **Closes** O-061-2 (§6.14.5).
+>
+> **Nominal / spec-ahead.** impl#1 accepts neither `persist=` nor `prepaint` / `hold=` (`g-unknown-decl-attr-silently-undeclares-cell`); every code below lands with the impl.
+
+The problem this section solves: a persisted cell restores in client code (§6.14.2 rule 1). On a slow network the browser paints the parsed body before the client runs (dd F1: first paint ~20–280 ms against client JS at ~2 s), so a restored value that changes styling shows the wrong state first. Two mechanisms fix it, decided in two places:
+
+- **REFLECT** (cell-level `prepaint`) — the stored value goes onto `<html>` before paint and the styling that depends on it is keyed off that root attribute. It never shows a blank, and it covers only attribute-shaped reads.
+- **HOLD** (region-level `hold=@cell`) — an author-chosen region is hidden until the client has rendered it. It covers any read shape, at the cost of a brief blank.
+
+```scrml
+type SidebarMode:enum = { Open, Collapsed }
+
+<sidebar persist="local" key="ui.sidebar" prepaint>: SidebarMode = .Open   // REFLECT
+<recent persist="local" key="myapp.recent">: string[] = []
+
+<aside class:collapsed=(@sidebar == .Collapsed)>…</aside>   // covered (STAMP)
+<div show=(@sidebar == .Open)>panel</div>                   // covered (CSS-keyed)
+<button onclick=toggle()>${@sidebar == .Open ? "Collapse" : "Expand"}</button>   // not covered → Info (rule 6)
+
+<section hold=@recent>                                      // HOLD region
+    <h2>Recent searches</h2>
+    <ul><each in=@recent as s key=__index__><li>${s}</li></each></ul>
+</section>
+```
+
+##### 6.14.4.1 The pre-paint script
+
+> **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30 (§"Recommendation" item 3; must-address 3, 5, 7; B2–B9, B16, B17).
+
+1. **One script per document.** Every pre-paint restore a document needs — §6.14.2 rule 8 theme mode cells, `prepaint` cells (§6.14.4.2), `hold=` cells (§6.14.4.3) — SHALL be emitted as **one** blocking inline `<script>` in `<head>`. A document that needs no pre-paint restore SHALL NOT carry one.
+2. **Placement.** The script SHALL be placed **before** the document's first `<link rel="stylesheet">`. (dd must-address 3: an inline script after a stylesheet waits for the stylesheet to download.)
+3. **Per-cell guards.** Each cell's storage read and pre-paint decode SHALL run inside its own guard. A storage throw, an absent key, unparseable data, or a value outside the cell's pre-paint domain SHALL leave that cell's root state unset — the cell's default paints (theme / REFLECT) or nothing is held (HOLD) — and SHALL NOT affect any other cell. No exception SHALL escape the script (dd B7–B9, B16).
+4. **Storage.** The script reads `localStorage` for `persist="local"` and `sessionStorage` for `persist="session"`, synchronously. A new tab's empty session storage yields the default and no hold.
+5. **What it may touch.** The script SHALL set only attributes of the root `<html>` element, with one exception: the STAMP applier (§6.14.4.2 rule 5) additionally sets the real class / attribute on compiler-marked elements as the parser inserts them, and stops at `DOMContentLoaded`.
+6. **The client's decode is authoritative.** The pre-paint decode is a membership check over a finite domain (REFLECT) or a presence-and-parse check (HOLD); it is not the §6.14.2 rule 3 full-contract decode. The client's construction-time decode (§6.14.2 rules 1 and 3) is **authoritative**: at boot it SHALL overwrite or remove whatever root state the script set. A disagreement between the two decoders therefore produces at most one visible correction, never a lasting mismatch.
+7. **Fail-safe.** If the script does not run (JavaScript disabled, refused by a CSP, blocked), the document SHALL render exactly as it would without pre-paint (§6.14.2 rule 7): no root attribute is set and nothing is held (dd B4).
+8. **CSP.** The script is emitted **inline**. It is a pure function of the build (the cells, keys and domains are compile-time facts; only the stored values are read in the browser), so it has one hash per build. Under `<program headers="strict">` (§39.2.5) the compiler SHALL compute a `'sha256-…'` source over the **exact emitted script bytes** and add it to the `Content-Security-Policy` it emits, as `default-src 'self'; script-src 'self' 'sha256-<base64>'`. The same header value SHALL be emitted for the static file and for the §40.2 compose route (both serve the same document). A document with no pre-paint script leaves the CSP as §39.2.5 states it. No nonce is used. (dd B4–B5: without the hash the script is refused and the page degrades to the flash.)
+
+##### 6.14.4.2 Cell-level `prepaint` — REFLECT only
+
+> **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" (call 1 (c); recs 2, 3, 6, 7, 8) · dd:prepaint-opt-in-dpa-062-2026-09-30 (§"Mechanism REFLECT", coverage rule; B10–B13, B18; F4, F5).
+
+1. **Surface.** `prepaint` is a bare (valueless) attribute on a state-cell declaration, in the §6.13 / §6.14 decl-attribute slot. It means REFLECT and nothing else; there is no `prepaint="hold"`.
+2. **Requires `persist=`.** `prepaint` on a cell without `persist=` SHALL be `E-PREPAINT-WITHOUT-PERSIST` (rec 8).
+3. **Domain.** A `prepaint` cell's type SHALL be `bool`, a payload-free enum, or either of those `| not` (rec 6). v1 has no string pass-through and no multi-cell product. (The diagnostic for a `prepaint` cell outside this domain is OPEN, O-062-5.)
+4. **Root attribute.** Before first paint the script (§6.14.4.1) sets one root attribute per `prepaint` cell whose stored value is present and in the domain. Its name is `data-scrml-p-<k>`, where `<k>` is **derived from the cell's `key=`** (rec 7). The derivation SHALL be deterministic and SHALL map distinct keys to distinct names: `key=` is unique per origin by the §6.14.1 rule 2 author contract, whereas cell names are unique only per chunk, so a cell-name-derived attribute could collide on `<html>`. Its value is the enum variant's tag name, or `true` / `false`. (The exact derivation, and the token for a stored `not`, are OPEN, O-062-1.) §6.14.2 rule 8's `data-scrml-theme-<cell>` is not affected.
+5. **Coverage and appliers.** A read of a `prepaint` cell is **covered** when all three hold (dd coverage rule):
+   - (a) **position** — it is attribute-shaped: `show=`, `style:prop=` (§65, Wave 2), a `<theme>` token (§66.17 rule 3), `class:x=`, or a plain attribute binding (`aria-expanded=@open`);
+   - (b) **inputs** — its only reactive inputs are that one `prepaint` cell and client-local cells whose initializers are compile-time constants (folded at compile time); it reads no server-authority cell (the §52 SSR seed is parsed after the head script) and no second `prepaint` cell (rec 6: no multi-cell product);
+   - (c) **evaluability** — the expression is pure and evaluable at compile time for every value in the cell's domain.
+
+   The compiler precomputes, for each covered read, the domain values at which it applies, and applies them with the applier rec 3 assigns to the position:
+   - **CSS-keyed** — for `show=`, `style:`, and theme. The compiler emits rules keyed on the root attribute, e.g. `:root[data-scrml-p-<k>="Collapsed"] [data-scrml-bind-show="…"] { display: none; }` — §66.17 rule 3's recognition rule generalized beyond theme tokens.
+   - **STAMP** — for `class:` and attribute bindings. The script sets the real class or attribute on the compiler-marked element as the parser inserts it (the dd probe used a `MutationObserver` in `<head>` over the existing `data-scrml-class-*` markers) and stops at `DOMContentLoaded`. STAMP sets the real class, so it works whatever CSS styles that class (scrml-owned `#{}`, Tailwind, external), and a STAMP-applied `aria-*` binding is correct for assistive technology from the first frame.
+6. **Uncovered reads — Info diagnostic.** Every read of a `prepaint` cell that is not covered by rule 5 (text content `${@c}`, `<each>`, `if=`, and any read failing 5(a)–(c)) SHALL produce `W-PREPAINT-UNCOVERED-READ` (**Info**), **one per read site**, naming the site. It is not an error: in impl#1's emit those reads are empty before JavaScript runs, never wrong (rec 2; dd F2). (Its adequacy depends on the static-emit strategy; see O-062-9.)
+7. **After boot.** A root attribute set by the script SHALL NOT keep driving a CSS-keyed rule against a stale value once the client has booted (dd B18: a toggle after load stayed wrong). The client SHALL either keep each `data-scrml-p-<k>` in sync with the cell by an effect (as §65.6 does for `data-scrml-theme-<cell>`) or remove it at boot, after applying the real class / inline style. (Which of the two is OPEN, O-062-2.)
+
+##### 6.14.4.3 Region-level `hold=@cell` — HOLD
+
+> **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" (call 1 (c); recs 5, 8) · dd:prepaint-opt-in-dpa-062-2026-09-30 (§"Mechanism HOLD"; must-address 2, 5, 8; B14–B16; F2).
+
+1. **Surface.** `hold=@cell` is a markup attribute on an element; the element is the **held region**. The author chooses the region (dd F2: the read site itself is empty before JavaScript in impl#1, so holding only the read site hides nothing). HOLD covers any read shape inside the region — text, lists, structs.
+2. **Requires `persist=`.** A `hold=` whose operand is not a `persist=` cell SHALL be `E-HOLD-WITHOUT-PERSIST` (rec 8). A general "cloak until rendered" marker for non-persisted content is a separate question, not this attribute (rec 8; dd route-to-PA R4).
+3. **When a region is held.** The script (§6.14.4.1) adds the cell's hold token to the space-separated `data-scrml-hold` attribute on `<html>` **only when** the cell's key is present and its stored value parses. An absent key, a storage throw or a parse failure SHALL leave the region unheld (dd B16). The hold token is derived from `key=` by the §6.14.4.2 rule 4 derivation (rec 7's collision reasoning applies to every root attribute value).
+4. **How it hides.** While held, the region SHALL have `visibility: hidden` (rec 5). This keeps the region's layout box — the box of the static markup, not of the restored content — so the release can still shift layout when the restored content is larger; reserving further space is author CSS (e.g. `min-height`). The compiler emits the hiding rule keyed on the root token, e.g. `:root[data-scrml-hold~="<t>"] [data-scrml-held~="<t>"] { visibility: hidden; … }`.
+5. **a11y.** While held, the region SHALL carry `aria-busy="true"`; after release it SHALL NOT (rec 5).
+6. **Three releases — a hold never sticks.** A held region SHALL be released by whichever comes first:
+   - (a) **never held** — rule 3's conditions fail;
+   - (b) **client release** — after the client's first render pass of the region, it removes the token from `data-scrml-hold` and clears `aria-busy`;
+   - (c) **pure-CSS failsafe** — the hiding rule carries a CSS animation that makes the region visible **3000 ms** after the rule first applies (e.g. `animation: scrml-unhold 0s 3000ms forwards` with `@keyframes scrml-unhold { to { visibility: visible; } }`). The failsafe SHALL need no JavaScript, so it releases the region even when client JS throws or fails to load (dd B15: a runtime 404 left the token set; the failsafe released at the deadline).
+7. **No JS / refused script.** If the script does not run, nothing is held (§6.14.4.1 rule 7).
+
+##### 6.14.4.4 OPEN (dpa-062 — not decided by the rulings or the deep-dive)
+
+- **O-062-1** — The exact `key=` → `<k>` derivation (sanitized key vs a hash; length bound), and the root-attribute token for a stored `not` of a `bool | not` / `Enum | not` cell.
+- **O-062-2** — After boot (§6.14.4.2 rule 7): keep `data-scrml-p-<k>` in sync by an effect, or remove it at boot — one rule for all, or per applier.
+- **O-062-3** — STAMP timing on a large, streamed document: whether the parse-time applier runs before the first paint when the parser yields between an element and the observer flush (dd B13 covers only a small single-chunk page).
+- **O-062-4** — `prepaint` on a `<theme for=>` mode cell, which §6.14.2 rule 8 already restores automatically: redundant (a warning) or silently accepted.
+- **O-062-5** — The diagnostic for `prepaint` on a cell whose type is outside the rule-3 domain (e.g. `string`, a payload enum, a struct): a dedicated error, or rule 6's Info at each read site.
+- **O-062-6** — Which cells each document's script covers under per-route output: every `prepaint` / `hold=` cell in the app, or only those read by that page and its shell. (Soft navigation (§20.8) does not re-run `<head>` scripts; only the first document load needs pre-paint.)
+- **O-062-7** — A static host where scrml does not emit the CSP header: whether the compiler reports the per-build hash so the author can add it.
+- **O-062-8** — A `hold=` region that contains an SSR-seeded (server-cell) read: whether it is a diagnostic (the hold delays content that was already correct).
+- **O-062-9** — The static-emit strategy for client-local reads (dd F3; `g-client-local-static-html-no-initial-value`). If client-local defaults are emitted into the static HTML (as §52.8 / §6.14.2 rule 7 read), an uncovered text / `<each>` / `if=` read of a `prepaint` cell would paint a *wrong* default before JS, and rule 6's Info (justified by "empty, never wrong") must be revisited.
+- **O-062-10** — `hold=` operand forms other than one bare `@cell` (several cells; an expression), and `hold=` naming a §66 declaration's persisted shared instance.
+- **O-062-11** — How `aria-busy="true"` reaches the region only while held (rule 5) — a static attribute the client clears would stay set with JavaScript disabled and on a never-held region — and whether it has the intended screen-reader effect (dd: not tested).
+
+#### 6.14.5 OPEN (dpa-061 — not ruled; not decided by this section)
+
+- **O-061-1** — The write-failure status property (§6.14.2 rule 6): its **name**, its **shape** (boolean vs a failure-reason enum), and whether a later successful write clears it and re-syncs the whole value.
+- ~~**O-061-2** — **Explicit pre-paint opt-in** for cells other than a theme mode cell — bryan's stated preference for option (ii) generally, via an explicit author opt-in; he does not know what that surface would look like. **Banked as dpa-062.**~~ **CLOSED S444 → §6.14.4** (dpa-062 RULED: cell-level `prepaint` = REFLECT only + region-level `hold=@cell`). *ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30*
+- **O-061-3** — The stored **envelope** (e.g. a version marker or a §47.1.4 type-fingerprint field). Under the call-4 ruling a fingerprint mismatch is not by itself a discard trigger, so what, if anything, the envelope carries is open.
+- **O-061-4** — Whether the §55 validators are part of the "full declared contract" a restored value is decoded against, or only type-level contracts (refinements, sequence bounds, lifecycles).
+- **O-061-5** — A cross-tab `storage`-event value: is it judged as a write under the §66.11 write contract (e.g. `rule=` guards) or applied as construction-like hydration? What happens when it fails to decode (keep the current value, or take the default) and when the key is removed in the other tab?
+- **O-061-6** — Whether the restore at construction fires `when @x changes` effects.
+- **O-061-7** — Write timing: per-change or coalesced per microtask (the §6.7.4 timing).
+- **O-061-8** — Whether `reset(@x)` also **removes** the storage key, or only writes the default.
+- **O-061-9** — The attribute's **position in a §66 opener**, and `persist=` on a §66 declaration's **non-shared** instances with an author per-instance key expression.
+- **O-061-10** — `persist=` on a derived cell, and on a function-typed cell (no codec).
+- **O-061-11** — A persisted `(not to T)` lifecycle cell (§14.12 / §66.11.6): the static state at reads before discrimination.
+- **O-061-12** — Whether widening §57.1 to a storage sink binds stored values to the §57.5 canonical-only decoder at v1.0.
+
+#### 6.14.6 Error codes (Nominal)
+
+Named here; each §34 row is **Nominal / spec-ahead — not yet emitted; lands with the impl**.
+
+| Code | Trigger | Severity |
+|---|---|---|
+| `E-PERSIST-STORAGE-UNKNOWN` | `persist=` value is not `"local"` or `"session"` (including the deferred `"cookie"`, and IndexedDB) — Nominal / spec-ahead, not yet emitted | Error |
+| `E-PERSIST-KEY-REQUIRED` | `persist=` without `key=` — Nominal / spec-ahead, not yet emitted | Error |
+| `E-PERSIST-REVEALED` | `persist=` on a value carrying `reveal`-declassified protected provenance — Nominal / spec-ahead, not yet emitted | Error |
+| `E-PERSIST-LIN` | `persist=` on a `lin` cell — Nominal / spec-ahead, not yet emitted | Error |
+| `E-PERSIST-WITH-SERVER` | `persist=` on a server-authority cell — Nominal / spec-ahead, not yet emitted | Error |
+| `E-PREPAINT-WITHOUT-PERSIST` | `prepaint` on a cell without `persist=` (§6.14.4.2 rule 2) — Nominal / spec-ahead, not yet emitted | Error |
+| `E-HOLD-WITHOUT-PERSIST` | `hold=` whose operand is not a `persist=` cell (§6.14.4.3 rule 2) — Nominal / spec-ahead, not yet emitted | Error |
+| `W-PREPAINT-UNCOVERED-READ` | a read of a `prepaint` cell that REFLECT cannot cover (text, `<each>`, `if=`, or failing §6.14.4.2 rule 5), one per site (§6.14.4.2 rule 6) — Nominal / spec-ahead, not yet emitted | Info |
+
+**Cross-references:** §6.7.4 (the corrected localStorage idiom row) · §6.8 (the default value) · §6.13 (the sibling write-path attributes) · §13.2 (auto-await — the planned IndexedDB stdlib) · §14.8.9 (`reveal`) · §35 (`lin`) · §52 (authority — orthogonal) · §55 (synthesized-property precedent) · §57 / §59.10 (codec) · §65.6 / §66.17 (theme mode cell; §66.17 rule 3 is generalized by the §6.14.4.2 CSS-keyed applier) · §66.9 (seed) · §66.16 (shared instance only) · §39.2.5 / §40.2 (the pre-paint script's CSP hash).
+
 ---
 
 
@@ -6082,6 +6673,9 @@ Inside a logic context, two lazy function declaration forms are supported in add
 - `fn` is semantically equivalent to `pure function` (§48.11) and is distinct from bare `function` (no `pure` modifier). Bare `function` is unconstrained; `fn` and `pure function` enforce the purity contract of §33.3. See §48.11.
 - A bare expression in a logic context (not wrapped in a function declaration) SHALL execute at initial render.
 - The compiler SHALL treat calls to server-inferred functions as async call sites and insert `await` automatically (see Section 13).
+- **Call arity (S440 ruling #2).** A call that passes MORE arguments than the function declares parameters is a compile error, **`E-CALL-ARITY`**. A call that passes FEWER is a compile error too, **unless** each omitted parameter has a default (§7.3.2). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles `add(1, 2, 3)` and `add(1)` against `function add(a, b)` at exit 0); impl#1 carries it (§34.0). **Reopen condition (recorded as ruled):** the callback case is *"the one reason that would reopen"* the extra-arguments rule.
+  **PA reading, S440 — flagged for veto** (the ruling did not address these; the code name `E-CALL-ARITY` is also the PA's choice): a rest parameter (`...xs`) absorbs any number of extra arguments; a spread argument at the call site is not counted (arity is unchecked for that call); a `?`-optional parameter counts as defaulted; and the check applies only when the callee is statically resolved (provable-or-silent). Reason: the language already ships variadic functions — §41.18 `scrml:math` `min(...values)` / `max(...values)` ("Variadic — `min(a, b)` or `min(...arr)`").
+  > **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #2) — *"make extra arguments an error now, and write the callback case down as the one reason that would reopen it"*; *"too few arguments is an error unless the parameter has a default (§7.3.2)"*.
 
 #### 7.3.1 Nested Function Declarations
 
@@ -6135,8 +6729,10 @@ block, one of the function's parameters. Violation: **E-SCOPE-REDECLARE**, namin
 
 - Shadowing in a NESTED block (an `if` / loop / `match`-arm body declaring a name the enclosing block
   or the parameter list already binds) is legal and unaffected.
-- Two `function` declarations of one name in one block are outside this rule.
-- File-scope duplicates are E-SCOPE-010 (§7.6), not this code.
+- Two `function` declarations of one name in one block (of a function body) are outside this rule.
+- File-scope duplicates are E-SCOPE-010 (§7.6), not this code — including two top-level `function`
+  declarations of one name *(amended S440 #6; provenance: ruling:user-voice-scrml.md S440 (the S440 22-item
+  queue, item 6))*.
 
 *Why a rule (not just a codegen failure):* such a program previously failed at codegen as an
 unexplained E-CODEGEN-INVALID-LOGIC ("Identifier 'x' has already been declared") — and the same
@@ -6204,7 +6800,9 @@ const VERSION = "v0.3.0"
 - When `expr` references NO reactive cells AND does NOT collapse to a compile-time constant (e.g., `${Date.now()}`, `${Math.random()}`, `${someJsLibCall()}`), the compiler SHALL emit a one-shot evaluation at module initialization that writes the result to the interpolation site. The site SHALL NOT re-evaluate after initial render.
 - The reactive case (deps present) and the non-reactive non-constant case (deps absent, expression not foldable) SHALL be observationally distinguished only by whether subsequent state changes trigger re-render — both produce the value at module init.
 - When `expr` does NOT resolve in scope, the compiler SHALL emit `E-NAME-NOT-FOUND` (or the applicable lookup-failure diagnostic per the resolver's normal contract). Interpolation does NOT bypass normal name resolution.
-- The string conversion rule SHALL be JavaScript's standard `String()` coercion. `null` and `undefined` produce the literal strings `"null"` and `"undefined"` respectively (cross-ref §42 absence-value handling — adopters writing `${@maybe-empty-cell}` should use `${@cell ?? "default"}` or rely on the validator surface).
+- The string conversion rule SHALL be JavaScript's standard `String()` coercion. ~~`null` and `undefined` produce the literal strings `"null"` and `"undefined"` respectively (cross-ref §42 absence-value handling — adopters writing `${@maybe-empty-cell}` should use `${@cell ?? "default"}` or rely on the validator surface).~~ *(superseded S440 — next bullet)*
+- **`${not}` renders NOTHING (S440 ruling).** When `expr` evaluates to `not` (§42), the interpolation site renders nothing — not the literal text `"null"` (or `"undefined"`). impl#1 currently renders the text `"null"` (gap `g-interpolation-renders-not-as-literal-null`); impl#1 carries the divergence (§34.0).
+  > **Provenance:** ruling:user-voice-scrml.md S440 (coercion follow-ups, #3) — *"`${not}` renders nothing"* (not the literal text `"null"`; consistent with S89 and with `class=` treating `not` as remove-the-attribute) · supersedes: the struck `"null"` / `"undefined"` sentence above.
 
 **Worked examples:**
 
@@ -6340,6 +6938,19 @@ Two things moved, and each states which position it closes per the additivity ru
 | 3 | argument | `fn f(x: number)` called `f("nope")` | not checked |
 | 4 | return | `fn f() -> number { return "nope" }` | not checked |
 | 5 | operand | `let z = "x" * 2` | not checked |
+| 6 | cell or field write | `<n>: number = 1` then `@n = "nope"`; a `number` field `x` of `@p`, then `@p.x = "nope"` | **RULED S440 — E-TYPE-031; not yet checked** (measured S440: impl#1 compiles both at exit 0 — the cell write in an event-handler value and in a function body, the field write in an event-handler value) |
+
+**Position 6 — a cell or field write (S440 ruling #1).** A write to a cell whose value does not satisfy
+the cell's declared type is **E-TYPE-031**, the same code as positions 1 and 2; so is a wrong-typed write
+to a typed FIELD of a cell (`@p.x = "nope"` into a `number` field). "Does not satisfy" is judged by the
+SAME provable domain as positions 1 and 2 (the Normative statements below), until this section widens —
+the `int` / `number` status stays exactly as this section already states it. **Nominal on impl#1 — not
+yet emitted** (the row above); impl#1 carries it (§34.0, S440 #12) and the bootstrap implements it.
+
+> **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 1) — *"cell write type
+> mismatch → E-TYPE-031 + a §66.20 row + a cell-write row in §7.5.1"* · and (the three SPEC-text OPEN items,
+> #1) — *"a typed field is as typed as a typed cell"* → *"a wrong-typed FIELD write is E-TYPE-031 too"* ·
+> supersedes: the round-1 ⚑ OPEN on field writes.
 
 **Normative statements.**
 
@@ -6347,6 +6958,10 @@ Two things moved, and each states which position it closes per the additivity ru
   position 2 — a state-cell declaration (§6.1.5) — carrying an unpredicated primitive annotation
   (`number`, `string`, `boolean`) whose initializer is a syntactically-determined literal of a
   different primitive type.
+- The compiler SHALL emit `E-TYPE-031` at position 6 — a write `@x = v` to a cell, or `@x.f = v` to a
+  field of a cell — whose target carries an unpredicated primitive annotation (`number`, `string`,
+  `boolean`) and whose value `v` is a syntactically-determined literal of a different primitive type: the
+  position-1/2 rule at a write node (S440 #1; Nominal on impl#1).
 - The literal forms that are syntactically determined for this purpose are the four scrml has for a
   §7.5 primitive: a double-quoted string, a number, `true` / `false`, and a back-tick template
   (which denotes a `string` whether or not it interpolates). The `not` literal is §42's absence value
@@ -6555,6 +7170,9 @@ ${ let loud = greeting.toUpperCase() }
 - Reactive variables (`@var`) declared at file level (outside any `${}`) are in scope for all `${}` blocks and markup throughout the file (§6.1).
 - Variables declared inside a function body within a `${}` block are scoped to that function. Only top-level declarations within the `${}` block participate in file scope.
 - Re-declaring a name with `let` in a later file-level `${}` block when that name was already declared at file scope SHALL be a compile error (E-SCOPE-010: duplicate binding in file scope).
+- **Two top-level `function` declarations of one name SHALL be a compile error (E-SCOPE-010: duplicate binding in file scope)** — the rule above names `let`; it applies to `function` too (S440 ruling #6). **Named; impl pending — Nominal / not yet emitted for the `function` case** (measured S440: impl#1 compiles two top-level `function f()` declarations in one `<program>` at exit 0); impl#1 carries it (§34.0). A duplicate `function` inside a function body is §7.3.3's concern, not this rule's.
+  > **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6) — *"duplicate top-level `function` → E-SCOPE-010, §7.6 text fixed to name `function`"*.
+- A declaration in a `${…lift…}` block nested inside an `if=` element is a file-scope declaration: it runs ONCE, at file init — not once per mount of the `if=` scope. The block's `lift` statements run per mount (§6.7.2.1). **Provenance:** ruling:user-voice-scrml.md S439 #12 "all recs".
 
 #### 7.6.1 File-level scope under V5-strict + hoisting + `pinned` (Stage 0b D4 — M11)
 
@@ -7182,13 +7800,20 @@ Three CSS context forms are supported. All three support scrml's CSS variable sy
 css-inline-context ::= '#{' css-content '}'
 ```
 
-Valid inside markup and state contexts, and at program scope (top-level in the program body, not nested inside any element). Applies styles to the document globally when used at program scope, or inline at the element level when used inside a markup or state context.
+Valid inside markup and state contexts, and at program scope (top-level in the program body, not nested inside any element). Applies styles to the document globally when used at program scope or inside a plain markup element, and scoped to the component when used inside a component (state type constructor) — see DQ-7 (the element-level reading is ruling:user-voice-scrml.md S440, all recs #2, item 4).
 
 **Normative statements (DQ-6):**
 
 - A `#{}` block MAY appear at the top level of a file (outside any markup element). Top-level `#{}` is valid and SHALL compile.
 - Top-level `#{}` compiles to a stylesheet that is included in the page's global styles, applied to the entire document.
-- `#{}` inside a markup element applies styles at the element level (inline or scoped per compiler settings).
+- `#{}` inside a markup element that is not inside a component (state type constructor) is **program-global**: its rules compile exactly as a program-level `#{}` — global CSS with no `@scope` wrapper, in the `global` cascade layer (§65.5, §65.8). A plain element creates no scope; component scoping is DQ-7 below. This rule places **selector rules**.
+  > **Provenance:** ruling:user-voice-scrml.md S440 (all recs #2, item 4). Replaces "applies styles at the element level (inline or scoped per compiler settings)" — no such compiler setting existed.
+  >
+  > ⚑ **OPEN — flat-declaration blocks outside the DQ-7 case are UNRULED.** A flat-declaration `#{}` (bare `property: value;` pairs, no selector) is ruled only by DQ-7 below (inside a constructor scope → inline `style=` on the containing element). Ruling #4 (S440) placed selector rules only; it did not rule these two cases, and neither has a normative reading yet:
+  > 1. **A flat block in a plain markup element** (not inside a component) — impl#1 today emits the bare declarations inside `@layer global { … }` with no selector: invalid CSS the browser discards, so the block has no effect, and no diagnostic.
+  > 2. **A flat block in an element nested inside a component** (not the constructor root) — impl#1 today drops it silently: no `style=`, no CSS, no diagnostic.
+  >
+  > The bootstrap's stylesheet shim refuses both (not-yet) rather than guess. Tracked as `g-impl1-flat-css-block-on-plain-element-emits-dead-css` and `g-impl1-flat-css-block-nested-in-component-dropped` (docs/known-gaps.md).
 - Using `#{}` at top level SHALL NOT be a compile error or warning.
 
 **Normative statements (DQ-7 — CSS Scoping):**
@@ -7851,6 +8476,19 @@ The compiler SHALL:
 - The compiler SHALL wrap any function containing at least one server call in an `async` function in generated code.
 - The developer SHALL write flat, synchronous-looking code. The compiler SHALL produce optimal async execution patterns from this code.
 - Independent server calls in the same function body SHALL be parallelized in generated code unless there is a data dependency between them.
+- These statements apply to EVERY body the compiler emits, including an inline event-handler value (`onclick=${…}` / `onclick={…}`) and an `on mount` block (§6.7.1a): a server call there SHALL be awaited, and the handler or block SHALL run in an `async` scope when it awaits.
+- An **async-colored function** is one the compiler emits `async`: a server function, a Promise-returning standard-library function, or any function that (transitively) calls one. An async-colored function SHALL NOT be used as a value. It MAY be called directly (the compiler awaits the call), and it MAY be passed as the first argument of an awaited collection method (`.some`, `.every`, `.find`, `.findIndex`, `.filter`, `.map`, `.forEach`, `.reduce`, `.flatMap` — the compiler lowers the call to a combinator that awaits every invocation). Passing it to any other function (a user-written higher-order function, `Array.from(xs, fn)`, `new Promise(fn)`), aliasing it, storing it in an array or object, returning it, or reading it as an object SHALL be a compile error (`E-ASYNC-FN-ESCAPES-AS-VALUE`). Every such position would hand a caller an unawaited Promise, which is always truthy — a check written against it passes for every input. The compiler does NOT insert an implicit `await` at every call of a function-typed value. Two positions are not uses as a value: an argument of a fire-and-forget scheduler (`setTimeout`, `setInterval`, `setImmediate`, `queueMicrotask`, `requestAnimationFrame`, `requestIdleCallback`), which discards the return; and `typeof f`. A synchronous consumer with no awaited form (`.sort(f)`, `.findLast(f)`) keeps its own error (`E-SERVER-FN-IN-SYNC-CALLBACK` / `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`).
+
+> **Provenance:** ruling:user-voice-scrml.md S440 F4 ("async helpers may not escape as values"; rejected alternative: implicit await on every call of a function-typed value) · ruling:user-voice-scrml.md S440 JS-WAT #11 (`on mount` / inline handler bodies are subject to every rule) · s441-async-escape-f4-f5
+
+- The fire-and-forget exemption applies only to the GLOBAL scheduler. A callee the program itself binds under a scheduler's name (a local, parameter, file-scope function, top-level declaration or import named `setTimeout`, …) is an ordinary function, and passing an async-colored function to it SHALL be `E-ASYNC-FN-ESCAPES-AS-VALUE` The scheduler is global only when the file neither binds its name in any form (a declaration of any pattern shape, a parameter, a function, class or method name, a catch parameter, an import alias, an object-literal key) nor writes it (`setTimeout = …`, `globalThis.setTimeout = …`, `window.setTimeout = …`, a computed write, or a reflective definition such as `Object.defineProperty(globalThis, "setTimeout", …)`); otherwise no exemption is given (fail closed). A scheduler name inside a plain string or a comment is neither.
+- When a handler awaits (above), it runs asynchronously from its first `await` on; by then the browser has performed the event's default action and propagated it. After the handler's first `await` (in source order, once the awaited operand has been evaluated), the handler's event parameter — identified by BINDING, not by name — and every value derived from it SHALL be usable only for a plain read of a non-control property (`event.target`, `event.key`, …). Any other use SHALL be a compile error (`E-EVENT-CONTROL-AFTER-AWAIT`): reading, calling, `.call`/`.bind`-ing or assigning a control member (`preventDefault`, `stopPropagation`, `stopImmediatePropagation`, `returnValue`, `cancelBubble`); a computed member access with a non-literal key; passing the event as an argument; and any use of a value derived from the event — an alias in any binding form (`const`/`let` declaration or later assignment, array or object destructuring of a control member or rest, a container that holds it), a control method taken off it, or a function that uses the event other than by a plain non-control read. A value derived BEFORE the first `await` is equally restricted after it. A destructure of non-control fields (`const { target } = event`) binds plain values and is not restricted. The compiler SHALL NOT move a call (a conditional call would change meaning). "After" is source order, so a call in a branch that does not follow the awaiting branch (`if (c) { … await … } else { event.preventDefault() }`), or after an `await` in a branch that was not taken, is also rejected — a known conservative case: move the call before the first server call. An inner parameter or a block-local binding that is also named `event` is a different binding and is not restricted.
+- A call the compiler awaits yields the resolved value, not a Promise. Reading `.then`, `.catch` or `.finally` off such a call SHALL be a compile error (`E-ASYNC-CALL-PROMISE-METHOD`).
+- If the compiler cannot analyse an event handler's body (its text does not parse) and the body references an async-colored function, the build SHALL fail (`E-ASYNC-HANDLER-UNANALYZABLE`) rather than ship the call unawaited.
+
+> **Provenance:** review:S441-f4f5-review (scheduler shadow bypass; `preventDefault`/`stopPropagation` after the first await; `.then` on an auto-awaited call; fail-closed unanalysable handler) · s441-async-escape-f4-f5 fix round
+
+⚑ **Carried impl#1 gaps — the statements of this section are the language rule; impl#1 does not yet meet them everywhere.** Open holes, each filed in `docs/known-gaps.md`: `g-promise-all-batch-puts-unawaited-call-under-sync-operator` (a client function's parallel batch tests an un-awaited call under `?`/`!`/`&&`, object/array literals); `g-markup-gate-tests-server-call-promise` (`if=`/`show=`/`disabled=`/`${f() ? … }` on a server call); `g-top-level-async-closure-called-later-accept-all` (top-level `const check = (n) => isOk(n)`, function expressions, object methods); `g-cross-file-async-helper-called-unawaited` (an imported helper that calls a server function); `g-top-level-derived-from-async-helper-holds-promise` (`const ok = isOk(1)` / `<ok> = m(1)` at top level); `g-handler-local-shadowing-server-fn-renamed-to-fetch` (a handler local named like a server function); `g-handler-independent-server-calls-serialized` (§13.2 parallelization in handler / `on mount` bodies); and the pre-existing `g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources`.
 
 ### 13.3 Worked Example
 
@@ -8259,6 +8897,18 @@ names are distinct types and are not interchangeable. The single, bounded except
 (§14.8.8) — that exception applies *only* to a `<sql-row>` source and a `:struct` prop target,
 and does not generalise struct assignment to structural. See §14.8.8 and §15.11.
 
+**A struct literal names each key at most once (S440).** A duplicate key in any struct literal — a plain
+literal (`@p = { x: 5, x: 6, y: 1, z: 1 }`), a nested one, or the spread-override shape
+(`{ ...@g, phase: .Gone, phase: .Live }`, §66.11.3) — is a compile error, **`E-STRUCT-DUPLICATE-KEY`**. **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles
+`@p = { x: 5, x: 6, y: 1 }` at exit 0); impl#1 carries it (§34.0). The corpus count of the literals this rejects
+is a MIGRATION measurement owed with the landing, not a gate on the ruling. (A map literal's duplicate key is
+`W-MAP-DUPLICATE-LITERAL-KEY`, §59.3 — a map is not a struct, and this rule does not touch it.)
+
+> **Provenance:** ruling:user-voice-scrml.md S440 — *"duplicate keys are an error in ANY struct literal"*
+> (*"error on dup keys. surface Qs"*): *"a duplicate key in any struct literal (plain, nested, or the
+> spread-override shape) is a compile error"* · and the six-open-questions *"all recs"* (S440, second entry), item 2 (duplicate
+> override key).
+
 #### 14.3.1 Optional Struct Fields
 
 A struct field may be declared with a default value of `not`, making it optional at construction time:
@@ -8376,7 +9026,7 @@ is backwards-compatible.
 
 #### 14.4.1 String-to-Enum Coercion — `toEnum()`
 
-The `toEnum()` function accepts a string value and returns the corresponding enum variant, or throws if no variant matches. Codegen emits a lookup table for O(1) conversion. See implementation: rewrite.ts `rewriteEnumToEnum()`.
+The `toEnum()` function accepts a string value and returns the corresponding enum variant, or `not` if no variant matches (it does not throw — scrml has no try/catch; see the return type below; S443, reported by flogence S51). Codegen emits a lookup table for O(1) conversion. See implementation: rewrite.ts `rewriteEnumToEnum()`.
 
 **Syntax:** `let role = UserRole.toEnum(roleString)`
 
@@ -8914,8 +9564,98 @@ prerender payload, a channel `broadcast()` published frame (§38), and a `server
 sinks; a value the compiler serializes to the client passes through one of them, and each reads the
 provenance descriptor and redacts. The strip keys on the column's
 resolved source **`(table, column)` origin, never its surface name** — so `SELECT passwordHash
-AS h` is redacted identically to `SELECT passwordHash`. The redaction is the **load-bearing
+AS h` is redacted identically to `SELECT passwordHash`. Origin matching SHALL follow SQLite identifier
+rules: table and column identifiers are compared CASE-INSENSITIVELY, quoted or not, with a schema
+qualifier (`main.users`) ignored — `SELECT * FROM USERS`, `SELECT PASSWORDHASH` and `u.PasswordHash`
+all resolve to the protected origin. (S441 round 4: the lookup was exact-case, so `FROM USERS`
+emitted no descriptor at all and the whole-row strip vanished — measured, also on main.) Every
+column comparison the floor makes — the descriptor, a `reveal` name, the row key at the sink — SHALL
+be on the case-folded name, and the descriptor SHALL record the name the row actually carries: an
+unaliased column's DECLARED name (the driver returns `SELECT PASSWORDHASH` keyed `passwordHash`), an
+alias exactly as written. (S441 round 5: the descriptor recorded the surface spelling, the strip
+compared exact-case, and `SELECT PASSWORDHASH … return u` served the hash — measured.) A query
+whose origins cannot be resolved still degrades to the wholesale strip, never to "no protected
+column". An output column COMPUTED in SQL — an expression, function call, cast, concatenation, a
+quoted / bracketed / backticked spelling, or a scalar subquery — that references a protected column
+by any spelling (case-folded, quote-stripped, qualified or not), or that contains a nested
+projection `*`, IS that column's value re-encoded by the database; its output key is not
+statically reliable, so the row SHALL be stripped wholesale. This deliberately over-approximates: a
+value derived in SQL (`length(passwordHash)`, `passwordHash = ${x} AS ok`) strips its row too.
+(S441 round 5: such a column carried no descriptor, and `passwordHash || ''`, `lower()`, `hex()`,
+`CAST`, `substr`, `coalesce`, `json_object`, `group_concat`, `pin + 0`, `"passwordHash"` and a
+scalar subquery each served the value — measured, also on main.) The redaction is the **load-bearing
 guarantee**: it is sound *by construction*, not by proving any return clean.
+
+⚑ **S443 round 6 — WHICH ROWS ARE TAGGED, AND WHAT AN UNKNOWN ORIGIN MEANS.** Every row a `?{}`
+lowering hands to the program SHALL carry the descriptor, whatever its terminator — `.get()`,
+`.all()`, `.run()`, or a bare `?{}` used as a value — and a write with a `RETURNING` clause
+(`INSERT` / `REPLACE` / `UPDATE` / `DELETE … RETURNING …`) IS a row-producing query: its `RETURNING`
+list is resolved exactly as `SELECT <list> FROM <target>`, an `UPDATE … FROM` or an unreadable target
+degrading to the wholesale strip. A table whose columns the compile does not know — neither declared
+by a `CREATE TABLE` (in `<schema>`, `schemaFor`, or a `?{}`) nor a base table of a database a `<db>`
+block opened; e.g. a view, or a view created at runtime — may carry a protected column under any
+name, so a query over it SHALL be stripped wholesale, never treated as "no protected column". A
+projection `*` the resolver cannot attach to a table (`users . *`, a schema-qualified `main.users.*`)
+likewise strips wholesale. (Measured before round 6, each over HTTP: `UPDATE … RETURNING *`, a
+`.run()` / bare `SELECT *` returned as a value, `SELECT users . * FROM users`, and `SELECT * FROM v`
+over a runtime `CREATE VIEW v AS SELECT * FROM users` all served `passwordHash`.)
+
+⚑ **The descriptor is one MARKER PER PROTECTED COLUMN, read by presence (S443 round 6b).** Each
+tagged row carries, per protected output column, a Symbol-keyed marker property; the sink strips
+every column a marker is PRESENT for. Consequences a conformant implementation SHALL preserve:
+- **Merging unions.** Combining rows (`{...a, ...b}`, `Object.assign({}, a, b)`) keeps every
+  source's markers, so the result strips the UNION of their protected columns; a `reveal` on one
+  source removes only that source's marker and never un-strips a column another source still
+  protects. `reveal("col")` on the merged value itself declassifies `col` there, as anywhere.
+  (Measured at round 6, with one descriptor per object: the second source's descriptor REPLACED the
+  first's — `{...a, ...b}` shipped `passwordHash`, `{...a, ...b.reveal("pin")}` shipped hash + pin.)
+- **Writing cannot under-strip.** Overwriting a marker's value, or adding properties, leaves it
+  present; assigning a row onto a row (`Object.assign(a, b)`, a refresh in place) SHALL work. (At
+  round 6 an immutable descriptor made that throw — a 500 on a legitimate program.)
+- **Only a removal can.** On the row a query returned the markers SHALL be non-removable (a
+  `delete` or redefinition throws). A copy's markers are ordinary properties, so the provenance
+  analysis (below) SHALL treat a REMOVAL by a key that is not a string / number literal from a
+  row-bearing value — `delete o[k]`, `Reflect.deleteProperty`, `Object.defineProperty` /
+  `defineProperties` (a hidden marker is dropped by the next copy), an object-rest pattern that
+  excludes a computed key, a reflection-capable global callee handed the row — as making that row
+  ship every protected column it holds, WHATEVER produced the key. (A key that is a string / number
+  literal, or a `const` bound to one, names a column, not a marker — S443 round 6c. The diagnostic
+  for this rule SHALL name the fix: a literal key, or rebuilding the collection without the entry.)
+  ~~a value which may be the
+  descriptor's key — `Symbol.for(…)`, `Object.getOwnPropertySymbols`, `Reflect.ownKeys`, or anything
+  built from them~~ *(round-6 wording, SUPERSEDED: a list of Symbol sources is a recognizer, and
+  aliases — `const S = Symbol; S.for(…)`, `globalThis.Symbol.for`, `const O = Object`, `.bind`,
+  destructuring — each walked past it and served the full row, review-measured; JS offers no sound
+  way to know which values can be Symbols.)*
+- **`toJSON` cannot re-introduce a column (S443 round 6c).** The serializer invokes a value's
+  `toJSON` AFTER the sink's walk, so the sink SHALL do it first: invoke `toJSON` (once) and redact
+  what it returns, and leave no function-valued property in what it hands the serializer, at any
+  depth. (Measured on base and round 6b: `{ toJSON: () => u }`, `u.toJSON = () => ({ ...u })`,
+  `{ ...u, toJSON: () => u }` and `{ data: { toJSON: () => [u] } }` each served the full row.)
+- **The sink OWNS serialization (S443 round 6d).** Every client-egress sink SHALL serialize a
+  SNAPSHOT it built itself — a fresh tree of plain objects, arrays and primitives in which every
+  property was read exactly once, every `toJSON` invoked once, every function, Symbol and accessor
+  removed, and every marked column stripped — and SHALL NOT hand the serializer any object the
+  author's code can still reach. The snapshot follows the serializer's own rules (omitted values,
+  `null` in arrays, boxed primitives, a `Date` through the built-in conversion captured at load,
+  a cycle is an error), so the bytes of plain data are unchanged. (Measured at round 6c: an object
+  on a non-plain prototype whose getter answered `"ok"` on the first read and the row on the
+  second was walked once, then handed as-is to the serializer, which read the getter again and
+  served the full row. Two losses to runtime-object tricks — `toJSON`, then getters — are why the
+  rule is ownership of serialization, not a smarter walk.) The CPS error envelope is such a sink.
+- **`this` never sees a protected column (S443 round 6e).** An author function the sink invokes —
+  a `toJSON`, an accessor — SHALL run with `this` bound to a marker-STRIPPED copy of its object
+  (same prototype, own data copied with every marked column removed, recursively; building it
+  invokes nothing), never the tagged row itself. At compile time, `this` inside a function stored
+  on an object (`o.f = function …`, an object-literal method / getter / setter, a
+  `defineProperty` getter or value, a method copied in by `Object.assign`) carries that object's
+  provenance, so `return this.passwordHash` from it is `E-PROTECT-006`. (Measured at rounds 6c/6d:
+  `u.toJSON = function () { return { pw: this.passwordHash } }` served the hash; and, on base as
+  well, a `defineProperty` getter reading `this.passwordHash` served it through the server-function
+  response, `/__mountHydrate` and the SSR state script.) Disclosed bound: a WRITE through `this`
+  (`this.x = h` inside such a function) is not modelled by the provenance analysis.
+(Measured before round 6: `delete u[Symbol.for("scrml.protect.origin")]`, pushing onto the
+descriptor's reveal list, and deleting a copy's Symbol-keyed properties each served the full row.)
 
 **The provenance map (shared primitive — a reuse).** At `?{}` query-lowering, every output column
 is resolved to its source `(table, column)` through the FROM/JOIN alias map — the same map
@@ -8935,10 +9675,175 @@ cover:
   identity (`{ hasPw: row.passwordHash != "" }`, `row.passwordHash.length`). The output carries no
   protected-origin column; closing this would require full expression-label information-flow
   analysis, out of scope at this revision.
-- **Covert channels** (timing, error-shape, row presence/absence).
+- **Covert channels** (timing, error-shape, row presence/absence). The error's SHAPE is a covert
+  channel; its CONTENT is not — an error message that quotes a protected value is that value, and is
+  governed by the error-egress rule below.
 - **Unresolvable dynamic SQL** — a fully string-built `?{}` whose column origins cannot be
   statically resolved. Per the fail-closed policy below such a row is **stripped wholesale** at
   egress (every column dropped) with an `I-PROTECT-STRIP-001` lint; it is never accept-unknown.
+
+⚑ **S441 amendment — EXTRACTION IS AN EXPLICIT-COLUMN FLOW, AND THE RUNTIME STRIP CANNOT SEE IT.**
+The descriptor lives on the ROW. A value taken OUT of a row — `return u.passwordHash`, a new
+object or array holding it (`{ h: u.passwordHash }`, `[u.passwordHash]`), string concatenation or
+template interpolation, destructuring (`const { passwordHash } = u`), a helper that extracts from a
+row passed to it, `rows.map(r => r.passwordHash)`, `JSON.stringify(u)` — IS the protected column's
+value (it is not a derived flow of independent identity), but it carries no descriptor, so the
+sink has nothing to read. Prior revisions of this section called the floor sound by construction
+without that qualification; MEASURED at S441, `return u.passwordHash` served HTTP 200 with the
+hash in the body while `I-PROTECT-STRIP-001` reported the column stripped
+(`g-protected-column-escapes-redaction-as-scalar`). The guarantee is therefore stated in two
+halves, and a conformant implementation SHALL enforce both:
+1. **Rows** — a value that still is, or contains, a descriptor-bearing row is stripped at the sink
+   at runtime, by construction (the contract above).
+2. **Extracted values** — a value whose provenance includes a `protect=` column and which reaches a
+   client-egress sink OUTSIDE a descriptor-bearing row SHALL be rejected at compile time with
+   **`E-PROTECT-006`**. Rejection, not runtime stripping, is required: a stripped scalar would
+   silently change what the program returns. The obligation is bounded as follows, and these bounds
+   are normative:
+   - **Scope — the whole compile.** The analysis SHALL cover every server module the compile emits,
+     with the imports between them resolved: a helper in another `.scrml` file is analysed, not
+     assumed. (S441 fix round: splitting an extracting helper into a second file was the first
+     bypass of a single-module analysis — it compiled at exit 0 and served the hash.)
+   - **Provenance is preserved by default.** Any step not positively known to produce a value of
+     independent identity preserves it — including binding, member / index / destructuring
+     extraction, re-housing in an object or array literal, spread, writes into a container —
+     including a write through an ALIAS of that container or through a helper that receives it
+     (`const o2 = o; o2.x = h`, `setv(o, h)`, `box.m.set(h, 1)`: every binding that may hold the
+     same object sees the write), a write into an element a collection hands back
+     (`arr.find(…).x = h`, `arr.at(0).x = h`, `m.get(k).x = h`, `Object.values(o)[0].x = h`, an
+     iterator's `.next().value`), and a write into a prototype (`Object.setPrototypeOf(o, p)`,
+     `Object.create(p)`) — string
+     concatenation and template interpolation, conditional and logical operators, `await`, array
+     callbacks, getters and `toJSON` the serializer invokes, `throw` → `catch`, promise resolution,
+     encodings (`Buffer`, `btoa`, `encodeURIComponent`, character codes), and serializing built-ins.
+   - **Unresolvable callees fail closed.** A call into code the compile does not contain — a host,
+     stdlib or npm import, or a platform API — that receives a protected value (a scalar OR a whole
+     row) returns a protected value, unless the callee is on the deriver allowlist. ⚑ S443 round 6:
+     such a callee may also CALL any function value it is handed (directly, or held in an argument):
+     every such function SHALL be analysed as called with every parameter — and its `arguments` —
+     bound to everything the receiver and all arguments carry, row columns included as values, and
+     what it returns is part of the call's result (measured: a `replace` callback,
+     `JSON.stringify(u, replacer)` and `"x".replace("x", () => h)` each served the hash). A function's
+     `arguments` object carries every argument passed to it.
+   - **Global stores.** Every name the compile does not bind (`globalThis`, `process`, `Bun`, …) and
+     `import.meta` denote ONE global heap shared by every server module and every request. A value
+     whose provenance includes a `protect=` column, written into it outside a descriptor-bearing row
+     (`globalThis.x = h`, `process.env.X = h`, through an alias of a global object), IS an egress —
+     `E-PROTECT-006` — because other requests and code the compiler cannot see can read it; and
+     what any code writes there is what any read of it carries. A row written there keeps its
+     descriptor and is stripped wherever it later leaves. (Measured before round 6: a value stored in
+     `globalThis` / `process.env` by one server function and returned by another served the hash.)
+     A FUNCTION kept in a global is analysed at the calls that name it (`globalThis.clamp(…)`,
+     `clamp(…)`) — or at every global call when it was stored where no name is readable — never at
+     unrelated platform calls (`Math.abs(…)`); a diagnostic SHALL NOT blame code the author did not
+     write for a global store the author made.
+   - **The derived-flow exemption is an explicit ALLOWLIST, not "any callee the module does not
+     define".** A value is DERIVED (outside the claim) only when produced by: a comparison, equality,
+     relational, `in` or `instanceof` operator, `!`, `typeof`, `void`, `delete` (never an arithmetic
+     one — see below); `.length` of a value whose length is a count of independent identity — the
+     column's own string, a string or array literal built from it, a `.map` / `.filter` / `.sort`
+     of an array, an array of rows — and of NO other value: `.length` of `({ length: h })`,
+     `new Array(u.pin)`, `"x".repeat(u.pin)` or an unmodelled method's result IS the value and
+     preserves provenance (S441 round 5: `.length` was derived on any receiver, and those shapes
+     served the value — measured); a predicate / position method (`includes`,
+     `startsWith`, `indexOf`, …, but NOT `charCodeAt` / `codePointAt`, which are lossless, and NOT
+     `getTime`, which is the identity on a number) called on a string-like receiver — the same
+     method NAME on an object carrying protected data is an unmodelled method and fails closed; or
+     an allowlisted one-way / boolean function — `scrml:auth` `verifyPassword` / `hashPassword` /
+     `verifyTotp`, `scrml:crypto` `verifyHash`, `hash("argon2", …)`, and `hmac(key, …)` whose KEY is
+     neither itself protected nor a compile-time constant (below), `Boolean`, `console.*`. ~~`scrml:crypto` `hash` / `hmac` / `verifyHash`,
+     `crypto.subtle.digest`~~ *(S441 wording — SUPERSEDED for bare digests by RULING S443 #7, below)*.
+     `Number(x)` is not on it (on a numeric protected column it is the identity), and
+     neither is any `Bun.*` API (`Bun.hash` is a non-cryptographic hash, brute-forceable on a
+     low-entropy column).
+     **A bare digest stays PROTECTED.** Only keyed or password-class derivations produce a value of
+     independent identity (`verifyPassword`, `verifyHash`, a keyed HMAC, argon2-class hashing). An
+     unkeyed digest — `scrml:crypto` `hash` with `md5` / `sha1` / `sha256` / `sha512` / `blake2b256`
+     or a non-literal algorithm, `crypto.subtle.digest` — of a protected value IS protected, and
+     reaching an egress is `E-PROTECT-006`: it is reversible by enumeration on a low-entropy column
+     (`hash("md5", u.pin)` of a 4-digit pin falls in 10⁴ tries), the same reason `Bun.hash` was never
+     allowlisted. An HMAC keyed BY the protected value over a known message is a digest of it and is
+     likewise protected.
+     > **Provenance:** ruling:user-voice-scrml.md S443 item 7
+
+     **A keyed HMAC counts only when its key is not a compile-time constant.** A key whose provenance
+     is a compile-time constant — a literal, a `const` bound to one, a template or concatenation of
+     constants, or a CHOICE that may be one (`process.env.K ?? "dev-key"`, a helper called with a
+     literal on some call site) — is public, so `hmac("public-key", String(u.pin))` is reversible by
+     enumeration exactly like a bare digest: the result stays PROTECTED (`E-PROTECT-006` at egress).
+     A key from the environment, configuration, a secret store or another runtime value remains a
+     declassifier, provided the key is not itself protected.
+     ⚑ **S443 round 6c — the decision needs POSITIVE evidence, and fails closed without it.** A key
+     declassifies only when its provenance is entirely a runtime secret source — a read under
+     `process.env` / `Bun.env` / `import.meta.env`, a database value, or the result of a host call
+     that DOES I/O, reads a secret or configuration, or draws entropy — at this revision the stdlib
+     calls `scrml:process` `env` (THE configuration read; there is no separate config module) /
+     `argv`, `scrml:fs` `readFileSync` / `readdirSync`, `scrml:http` `get` / `post` / `put` / `del`
+     / `patch`, `scrml:redis` `get` / `getBuffer` / `smembers`, `scrml:random` `random` /
+     `randomInt`, `scrml:crypto` `generateToken` / `generateUUID` — and has NO constant part. A pure
+     stdlib function carries its arguments' constness (`scrml:path` `normalize("public-key")` and
+     `scrml:crypto` `hash("sha256", "public")` are constants; `normalize(env("K"))` is runtime), and
+     an npm / host function the compiler has no model for is NOT evidence of a secret (fail closed:
+     a constant). ~~or the result of a host (stdlib / npm) call such as a configuration or
+     secret-store read~~ *(round-6c wording, SUPERSEDED S443 round 6d: any host call counted, and pure
+     helpers of constants laundered a constant key — review, measured.)* Not constant-free: a
+     constant computed through a call (`String.fromCharCode(107, 101, 121)`, `JSON.parse('"key"')`,
+     `String(Math.PI)`), a key with no evidence at all (a free name, a parameter no caller shows), and
+     a concatenation with a constant part (`"k" + process.env.K` is `"kundefined"` when the variable
+     is unset) all stay PROTECTED. A constant imported from another server module is a constant.
+     ~~(a concatenation with a runtime part included)~~ *(round-6b wording, SUPERSEDED: 6b treated any
+     unmodelled call or global read as runtime and those constant keys declassified — review,
+     measured.)*
+     > **Provenance:** ruling:user-voice-scrml.md S445 item 4 (refines S443 item 7)
+   - **Arithmetic stays protected** (ruling, S441: "ratify with the changes, arithmetic stays
+     protected"). The result of an arithmetic, bitwise or shift operator (`+ - * / % **`, `& | ^ ~`,
+     `<< >> >>>`), of unary `+` / `-` / `~`, of `++` / `--`, and of a compound assignment on a
+     protected value IS protected, and so is anything derived from it: `u.pin * 1`, `+u.pin`,
+     `u.pin - 0` and `cost_price * qty` are `E-PROTECT-006` at egress. To compute with a protected
+     column, declassify it with `reveal`: `const r = u.reveal("cost_price"); return r.cost_price * qty`
+     is a declassified read followed by arithmetic, and ships.
+   - **Keys are data.** A protected value used as an object KEY (`{ [h]: 1 }`, `o[h] = v`,
+     `m.set(h, v)`) is carried into the container: a key is serialized as surely as a value. A
+     lookup KEYED by a protected value (`labels[h]`, `table[h[i]]`, `m.get(h[i])`) selects by the
+     secret, and its result is protected ALL THE WAY DOWN — a field read off it (`L[c].v`), a method
+     on it (`L[c].test()`), and `Object.keys(L[c])` are all protected. `Object.keys` of a
+     descriptor-bearing row yields column NAMES, not values, and is clean.
+   - **First-party helpers are modelled, not trusted.** `scrml:data` `pick(obj, keys)` /
+     `omit(obj, keys)` with a literal key list are modelled exactly (they copy into a fresh object,
+     so precisely the protected columns that survive the selection are protected — `pick(u, ["id",
+     "name"])` is clean); a non-literal key list fails closed. A `.scrml` re-export
+     (`export { x } from './b.scrml'`) is resolved to the module that defines `x`.
+   - **Sinks.** Every compiler-emitted client-egress serializer, AND every argument of an
+     author-built `Response` — its body AND its `init` (a `Location` or `Set-Cookie` header built
+     from the column is egress even on a null-body response) — `Response.redirect`, `Response.json`,
+     and channel publish / stream enqueue / socket send.
+   - **Error egress (S443 round 6).** An error is an egress the provenance analysis cannot see into
+     when a host API constructs it (SQLite: `json_extract('{}', passwordHash)` fails with
+     "bad JSON path: '<the hash>'"; a `JSON.parse` SyntaxError quotes its input). Therefore, in a
+     compile that declares `protect=` columns, the §19.9.5 CPS envelope's `ServerError.message` SHALL
+     NOT be the thrown error's message: it is a fixed, value-free string, and the error is logged
+     server-side (`fn` is unchanged; a typed scrml failure still passes through, and IS analysed).
+     §19.9.5 types the variant as `ServerError(message: string, fn: string)` and does not fix the text.
+     And the compiler-emitted production server SHALL answer any error a handler does not catch with
+     a fixed, value-free `500` — never the message or a stack — whatever `NODE_ENV` is. (Measured
+     before round 6: the CPS envelope returned the hash in `data.message`, and an uncaught error in a
+     plain server function got the runtime's development error page, message and source included.)
+   - **Out of scope: position oracles and implicit flows.** A position method given a protected
+     ARGUMENT (`ALPHABET.indexOf(h[i])`, `[...ALPHABET].findIndex(c => c == h[i])`) and an implicit /
+     control-dependence flow (`if (h[i] == c) s += c`) can each reconstruct the value character by
+     character; neither is within this version's guarantee.
+   - **Out of scope: a DB round trip.** Writing the value into a non-protected column and reading it
+     back yields a new row whose column origin is not protected; the egress guarantee does not
+     follow a value through the database. (Keeping a protected value out of a non-protected column
+     is a schema / write-path concern, not an egress one.)
+   - **Disclosed imprecision (fails closed, never open).** The analysis is call-site sensitive (each
+     distinct argument signature of a helper is analysed separately) but flow-INsensitive within a
+     function: a variable reassigned from a protected value to a clean one is still treated as
+     protected. An implementation that cannot finish the analysis — an unparseable emitted module,
+     or an exhausted analysis budget — SHALL fail closed with `E-PROTECT-006`.
+
+   `reveal("col")` discharges it for the named column exactly as at the sink; the name is compared
+   case-insensitively, as SQL identifiers are (`reveal("PIN")` declassifies `pin`).
 
 **Declassification — `reveal` (the sole admit path).** A protected-origin column reaches the
 client **iff** it is explicitly declassified via the field-level `reveal` construct at the value:
@@ -9028,7 +9933,16 @@ diagnosable build-time condition into a runtime failure.
 named-codes-land-with-impl precedent — Rule 4):
 - **`I-PROTECT-STRIP-001`** (Info) — names each column the egress sink stripped (the redaction is
   never silent — the dev sees what the floor removed). Also fires on the wholesale strip of an
-  unresolvable-dynamic-SQL row.
+  unresolvable-dynamic-SQL row. ⚑ **S441: it SHALL fire only for a query whose row actually reaches
+  a client-egress sink carrying an unrevealed protected column.** It previously fired for every
+  protected SELECT — including one whose column left as an extracted scalar, which it reported as
+  stripped while it shipped, and one used only server-side (a login that verifies the hash), where
+  nothing is stripped at all. An info that claims a strip that did not happen is a false
+  confidentiality claim, not a lint.
+- **`E-PROTECT-006`** (Error) — a value whose provenance includes a `protect=` column reaches a
+  compiler-emitted client-egress sink outside a descriptor-bearing row (the S441 amendment above),
+  or is written into a global store (S443 round 6). Names the column, the extraction site and the
+  egress. Also raised, fail-closed, when the emitted server module cannot be analysed.
 - **`E-PROTECT-004`** (Error) — a protected-origin column co-occurs, in one function body, with a
   compiler-unanalyzable egress (a `_{}` foreign block or an `asIs` value) where strip-by-origin
   cannot be guaranteed, and it is not `reveal`-declassified for every protected output column of
@@ -9056,7 +9970,10 @@ consuming the stream that is about to be returned — and would replay it under 
 without its headers. Closing it needs a store that can hold status + headers + a buffered body,
 which is a §19.9.6 change.
 
-**The DX layer (deferred — incremental, not load-bearing).** An *early authoring-time* static
+**The DX layer (deferred — incremental, not load-bearing).** ⚑ *S441: this paragraph governs a
+protected-origin ROW. For an EXTRACTED value the compile-time check is not DX — it is the second
+half of the guarantee (`E-PROTECT-006`, above), because no runtime floor can see an extracted
+value.* An *early authoring-time* static
 error reading the **same** provenance map — flagging a protected-origin return at compile time
 before the floor strips it — is a **deferred incremental DX addition**. It would ride the existing
 server-function-return boundary gate at `type-system.ts` (where `E-ROUTE-003` / `E-ROUTE-004`
@@ -9715,7 +10632,7 @@ applyMushroom(.Small)                   // bare variant — parameter type fixes
 **Normative statements:**
 
 - A bare variant reference is the form `.VariantName` with no preceding type qualifier.
-- A bare variant reference SHALL be resolved by the compiler when the type at the position can be inferred from one of: a type annotation on the LHS (`<x>: T = .V`), a previously-declared cell or local with a known type (`@cell = .V` where `@cell: T`), a function parameter type (`fn(.V)` where the parameter is typed `T`), a function return type (`return .V` where the return is typed `T`), a match on-expression type (`<match for=T> | .V => ...`), an engine `for=T` qualifier (`<engine for=T initial=.V>`), or any other position where the type is fixed by the surrounding declaration.
+- A bare variant reference SHALL be resolved by the compiler when the type at the position can be inferred from one of: a type annotation on the LHS (`<x>: T = .V`), a previously-declared cell or local with a known type (`@cell = .V` where `@cell: T`), a function parameter type (`fn(.V)` where the parameter is typed `T`), a function return type (`return .V` where the return is typed `T`), a `fail` target (`fail .V` where the enclosing function is declared `! T`, §19.3.3), a match on-expression type (`<match for=T> | .V => ...`), an engine `for=T` qualifier (`<engine for=T initial=.V>`), or any other position where the type is fixed by the surrounding declaration.
 - An enum-payload-variant CONSTRUCTOR argument is such a position. In `<x>: Mode = .OnePlayer(.Easy)` (where `Mode:enum = { OnePlayer(difficulty: Difficulty), ... }`), the argument `.Easy` resolves against the `OnePlayer` payload-field type (`Difficulty`) — NOT the outer enum `Mode`. The constructor callee may be bare (`.OnePlayer(...)`, resolved against the surrounding-declaration enum) or qualified (`Mode.OnePlayer(...)` / `Mode::OnePlayer(...)`, resolved directly). A wrong argument variant fails with `E-TYPE-063` naming the PAYLOAD enum (`Difficulty`), not the constructor's enum. (Added ss16 C5 — §14.10 position-3 for variant constructors.)
 - A bare variant reference SHALL fail with `E-VARIANT-AMBIGUOUS` when the position's type is a union or otherwise ambiguous (e.g., `let x = .Small` with no annotation; the compiler cannot pick which enum has a `.Small` variant).
 - A bare variant reference IS NOT supported in expression positions where no type context exists (top-level expressions, `let`/`const` without annotation in untyped contexts).
@@ -11220,6 +12137,8 @@ The block splitter's `Block.openerHadSpaceAfterLt: boolean` annotation drives **
 
 Both forms compile today. The warning is reserved to promote to **E-WHITESPACE-001** (hard error) only at a future MAJOR language-version event (unscheduled per §63.7).
 
+> **Amendment S442 (dpa-045).** Inside a plain-markup free-text body (§4.18.1) the spaced form is not an opener at all — `<` followed by a space is content (§4.18.1b) — so W-WHITESPACE-001 does not fire there; the text renders. Outside free-text bodies this subsection is unchanged. Affected corpus: one conformance case, `ctrl-004-else-on-state-opener-pos` (impl#1 divergence; case not edited). **Provenance:** ruling:user-voice-scrml.md S442 dpa-045 follow-ups, item 1 · supersedes: "Both forms compile" for a spaced opener inside a free-text body.
+
 #### 15.15.6 NameRes Authority (Post-P3-FOLLOW)
 
 The NR stage (Stage 3.05) is the **AUTHORITATIVE** source of state-type and component routing for every downstream stage in the pipeline. NR computes `resolvedKind` and `resolvedCategory` for every opener and records them on the AST node, and downstream stages (CE, MOD, TS, validators, codegen, LSP) consume those fields directly.
@@ -12078,6 +12997,7 @@ A `for` loop with `lift` MAY include an `else` block. The `else` block executes 
 - If `collection.length === 0` (or `collection is not`), the `for` body does not execute and the `else` body executes exactly once.
 - If `collection.length > 0`, the `for` body executes for each element and the `else` body does not execute.
 - The `else` body is valid only on a `for/lift` loop. A `for` loop without `lift` SHALL NOT accept an `else` block (E-CTRL-010).
+- A keywordless loop binder — `x` in `for (x of collection)` — is `const` (§50.8.5); a write to it SHALL be E-ASSIGN-004. **Provenance:** ruling:user-voice-scrml.md S439 #8 "all recs".
 
 **Worked example:**
 
@@ -12679,6 +13599,23 @@ The outer `as row` makes the outer item addressable as `row` inside nested scope
 **Normative statements:**
 
 - An `<each>` opener SHALL carry exactly one of `in=expr` or `of=expr` (`E-EACH-ITER-SHAPE` — §34, queued).
+- **The `in=` value SHALL be a sequence (S440 ruling #3).** `<each in=expr>` over a value that is not a
+  sequence is a compile error, **`E-EACH-NOT-SEQUENCE`** (§34). A sequence is §66.12.1's one sequence kind
+  (arrays and tuples); a map is iterated through one of its array views (`.entries()` / `.keys()` /
+  `.values()`, §59.8). A value typed `S | not`, where `S` is a sequence, is admitted: when it is `not`, the
+  `<empty>` branch renders (§17.7.4 — the empty-state condition already includes `expr is not`).
+  **The error fires only when the value is PROVABLY not a sequence.** When the `in=` value's type is not
+  resolved (§7.5.2), the compiler stays SILENT (the typer's provable-or-silent rule) — no error.
+  **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles
+  `<n>: number = 5` + `<each in=@n>` at exit 0, with only the `W-EACH-KEY-001` lint); impl#1 carries it
+  (§34.0).
+  ⚑ **OPEN (not ruled):** the name of the sequence kind is itself an un-ruled item (S440 scope note: "the
+  sequence-kind name").
+  > **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 3) — *"`<each in=>` over a
+  > non-sequence → error, name a code (`E-EACH-NOT-SEQUENCE`)"* · and (the three SPEC-text OPEN items, #3) —
+  > *"stay silent under the typer's provable-or-silent rule, and error only when the value is provably not a
+  > sequence"* · supersedes: the round-1 ⚑ OPEN (a) on unresolved types. The `S | not` admission is derived
+  > from §17.7.4, not a new ruling.
 - The body of `<each>` SHALL contain at least one per-item template element OR the `<empty>` sub-element (or both). An `<each>` with no body content is `E-EACH-EMPTY-BODY` (§34, queued).
 - The per-item template MAY contain MORE THAN ONE root element. "At least one" above is a floor, not a cap: an `<each>` body with N sibling roots SHALL render all N per item, in source order, with no wrapper element introduced. The N roots of one item are one reconciliation unit — a keyed insert, move or removal SHALL act on the whole run and SHALL preserve intra-item root order. This mirrors §10.8 accumulation mode ("`lift` MAY appear multiple times in a single logic block; each call appends one item"), which grants the same N-root-per-iteration shape at Tier 0. (Restored S281 for adopter issue #141; roots 2..N were previously built and then discarded.)
 - The `as name` clause is OPTIONAL. When present, it binds the current iteration value to the named identifier in the body scope (per §17.7.3).
@@ -13080,6 +14017,15 @@ inside it (§4.18.4). A bare `<Small : Small Mario>` (prose, not a valid express
   (§18.8.1): a `<match>` covering exactly the subset's variants is exhaustive (no `<_>`
   required); a state-child naming an excluded variant is a dead arm
   (`E-MATCH-SUBSET-DEAD-ARM`); a vacuous `<_>` over a fully-covered subset fires `W-MATCH-001`.
+- **Nesting in a dispatched arm (S439 ruling #5).** A block `<match>` MAY appear inside the
+  body of a DISPATCHED arm — a block-form `<match>` arm, or an `<engine>` state-child
+  (§51.0.B) — and SHALL NOT be refused there. (For the state-child case impl#1 carries a
+  divergence under `W-ENGINE-MATCH-IN-STATE-CHILD`, §34; see §51.0.B.)
+  For a block `<match>` nested in a dispatched `<match>` arm, impl#1 emits no inner dispatcher
+  and renders nothing, with no diagnostic (`g-nested-block-match-in-dispatched-arm-silently-drops`).
+  > **Provenance:** ruling:user-voice-scrml.md S439 #5 "all recs" (Rec: B; "Answer the open
+  > nested-block-match-in-dispatched-arm fork (refuse vs support) the same way") · supersedes:
+  > the OPEN fork `g-nested-block-match-in-dispatched-arm-silently-drops`.
 
 **Output category:** the block-form emits MARKUP. Use it inside markup contexts (component
 bodies, `<page>`, anywhere a tag is legal). Use the JS-style form (§18.1+) inside
@@ -13237,6 +14183,13 @@ tuple value (no-tuple, §59.7 / §14.11). Full grammar + product-exhaustiveness 
   and SHALL produce **E-MATCH-ARM-SEPARATOR** (§34). The grammar admits exactly one canonical
   separator (the `=>`/`->` arrow within an arm); widening it to accept commas is rejected for
   language cohesion (one canonical separator). (S144 Cluster D — Bug Y.)
+- An arm pattern MAY list several alternates separated by `|` (`.B | .C :> r`, `"a" | "b" :> r`,
+  `1 | 2 :> r` — the §51.0.J `derived=match` form), at ANY arm position. An alternation containing
+  a wildcard alternate (`_` / `else`) is the wildcard arm. The alternates of one arm SHALL NOT carry
+  payload patterns — a binding (`.P(a: x) | .Q(a: x) :> x`), a NAMED field even when discarded
+  (`.P(a: _) | .Q(a: _)`), or a nested / literal pattern — each SHALL produce **E-MATCH-ALT-BINDING**
+  (§34). Only POSITIONAL `_` discards (`.P(_) | .Q(_) :> r`) are permitted. (S438 —
+  g-impl1-match-miscompiles F12.)
 
 - **`match` is a contextual keyword** (GITI-016, bryan S241 — Option A; modeled on the `to` §14.12
   and `from` §21.3 precedents). The token `match` SHALL be reserved ONLY where it opens a
@@ -14627,8 +15580,10 @@ type PaymentError:enum = {
 #### 19.3.1 Syntax
 
 ```
-fail-stmt ::= 'fail' enum-type ('.' | '::') variant-name ('(' arg-list ')')?
+fail-stmt ::= 'fail' enum-type? ('.' | '::') variant-name ('(' arg-list ')')?
 ```
+
+The `enum-type` MAY be omitted (the bare form, §19.3.3); the variant then resolves against the function's declared error type.
 
 **Syntax:**
 
@@ -14636,6 +15591,7 @@ fail-stmt ::= 'fail' enum-type ('.' | '::') variant-name ('(' arg-list ')')?
 fail PaymentError::InvalidAmount("Amount must be positive")
 fail PaymentError::CustomerNotFound(customerId)
 fail PaymentError::ExpiredCard
+fail .ExpiredCard                    // bare form — resolves against the declared `! PaymentError`
 ```
 
 #### 19.3.2 Semantics
@@ -14648,6 +15604,12 @@ fail PaymentError::ExpiredCard
 
 - `fail` SHALL be valid only inside a function body declared with the `!` modifier. Using `fail` in a function without `!` SHALL be a compile error: **E-ERROR-001** -- `'fail' used in function '{name}' which is not declared as failable. Add '!' to the function signature: 'function {name}(...)! -> {ErrorType}'.`
 - `fail` SHALL produce a value of the error enum type declared in the function's `!` signature. The variant specified in the `fail` statement SHALL be a valid variant of that error enum type. A variant that does not belong to the declared error type SHALL be a compile error: **E-ERROR-009** -- `'fail' names variant '{Variant}' which is not a valid variant of the declared error type '{ErrorType}' for function '{name}'. Valid variants: {list}.` This covers a variant undeclared by the declared enum, a `fail` naming a foreign enum entirely, and a `fail` target that is not an enum variant. For a bare-`!` function the declared error type is the built-in `Error` enum (§19.4.2), whose sole valid variant is `Generic`.
+- **Bare form.** A `fail` whose target omits the enum type — `fail .Variant` or `fail .Variant(args)` (also spelled `fail ::Variant`) — SHALL resolve the bare variant against the error type declared in the enclosing function's `!` signature: this is §14.10 bare-variant inference applied to the `fail` target, the declared error type being the position type. The resolved `fail .V` SHALL be equivalent in every respect to the qualified `fail ErrorType.V` — the same validity checks (E-ERROR-009 for a name that is not a variant of the declared type, E-TYPE-082 for a valid variant with the wrong payload arity) and the same produced error value. For a bare-`!` function the resolution target is the built-in `Error` enum, so `fail .Generic(msg)` is `fail Error.Generic(msg)`. An error enum imported from another scrml file resolves exactly as a local one.
+  - *Declared type not an enum.* A declared error type that is not an enum — undeclared, a non-enum type, or a type alias — is governed by §19.4.4.1 (**E-ERROR-011**, reserved). Until E-ERROR-011 has an emitter, impl#1 reports a bare `fail .V` against such a type as **E-ERROR-009**, because the bare variant has no variant set to resolve against. This is a carried interim, and E-ERROR-011 subsumes it when that code ships. The qualified `fail T.V` against the same type is not yet diagnosed (gap `g-qualified-fail-against-non-enum-error-type-undiagnosed`).
+  - *Type alias.* A bare variant does not resolve through a type alias. `type A = E` is not a `:enum` declaration (§19.4.4.1), so in a function declared `! A`, `fail .V` falls under the preceding sub-bullet. Write the enum name in the signature (`! E`). Whether an alias of an enum is a legal `!` error type at all is **OPEN**: the SPEC has no normative alias construct beyond the `type A = Type` annotation position (§14.1.2).
+  - *Unverifiable import.* An error type imported from a module whose declaration the compiler cannot see is unverifiable, not invalid. Two cases qualify: a non-scrml (host) module, or single-file mode where the import is not loaded. A bare variant against such a type is accepted exactly as the qualified form is: it resolves to the declared name and is not checked. An imported type whose declaration *is* visible and is not an enum is not exempt.
+
+  > **Provenance:** ruling:user-voice-scrml.md S441 "fail shorthand yes" · supersedes: unrecoverable:the prior implicit rejection (no ruling found — the §19.3.1 grammar required `enum-type` and the E-ERROR-009 check read a bare target as "not a variant"; recorded as gap `g-fail-variant-shorthand-rejected-by-ts-context`, where the reject also fired only when the declared enum resolved).
 - When the `fail` names a VALID variant of the declared error type but supplies the wrong number of payload arguments (too few, too many, or any payload on a unit variant), that is a distinct error class from E-ERROR-009: it SHALL be a compile error **E-TYPE-082** (enum-variant construction payload arity mismatch, §14.4 / §18.7). Because `fail MyError.Timeout("oops")` is a variant CONSTRUCTION, the arity check is the same one applied to non-`fail` construction (`let e = MyError.Timeout("oops")`, `return MyError.Timeout("oops")`) — it lives at the variant-constructor site, not the `fail` handler alone. E-ERROR-009 (invalid variant NAME) and E-TYPE-082 (valid variant, wrong arity) never double-fire on the same `fail`.
 - `fail` SHALL cause the enclosing function to return immediately with the error variant value. Statements after `fail` in the same block are unreachable. The compiler MAY emit a warning for unreachable code after `fail`.
 - `fail` SHALL be valid inside any control flow construct (if/else, for, match) within a `!` function body. The `fail` returns from the function, not from the control flow construct.
@@ -14699,16 +15661,36 @@ A call to a `!` function SHALL NOT be ignored. The caller MUST do one of the fol
 1. **Match** the result: `match riskyFunction() { ::Ok(val) -> ... ::ErrorVariant -> ... }`
 2. **Propagate** with `?`: `let x = riskyFunction()?`
 3. **Catch** with `!{}` inline handler: `let x = riskyFunction() !{ ::ErrorVariant -> fallbackValue }`
-4. **Contain** inside `<errorBoundary>`: in markup context, an `<errorBoundary>` catches the error
+4. **Contain** inside `<errorBoundary>`: in markup context, an `<errorBoundary>` catches the error of a call made while RENDERING (§19.6.6). It does not contain a call in an event handler, which runs after render.
 
 Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: **E-ERROR-002** -- `Result of failable function '{name}' is not handled. Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`
+
+At an event-handler site neither `?` (a handler is not a `!` function, §19.5.4) nor `<errorBoundary>` (render-time only, §19.6.6) can handle the call, so the message offers only the remedies that apply there. For a call: `Result of failable function '{name}' is not handled in this event handler. Catch it with '!{}' (e.g. '{name}(…) !{ | .Variant :> … }'), match the result, or call it from a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).` For a reference (below): `Failable function '{name}' is passed as an event-handler reference, so the event would call it and discard its error. Call it in a handler that handles the result (e.g. '{attr}={ {name}() !{ | .Variant :> … } }'), or wire a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`
+
+**Event-handler values — no exemption (S439 ruling #14; S440 "restore conformance").** The two SHALLs above (this section's E-ERROR-002 sentence and §19.4.4) apply to event-handler attribute values (§5.2.2, §5.2.3) exactly as they apply anywhere else. Every unhandled call to a `!` function in an event-handler value SHALL be E-ERROR-002, whatever the handler's statement count or form. The answer follows the unhandled call, not the shape of the handler around it. The bare `onclick=risky()`, the braced `onclick={ risky() }` (on one line or several), `onclick=${risky()}`, the multi-statement `onclick={ risky(); @r = 1 }`, and a call reached through control flow in the handler (`onclick={ if (@ready) risky() }`, `onclick={ for (const i of ids) risky() }`) all get the same answer. So does a handler placed at top level, in an `<each>` row, in an engine state-child, in a `<match>` arm, or in a component body.
+
+A handler handles the call the way any other caller does: `onclick={ risky() !{ | .Empty :> @r = 1 } }`, a `match` on the result, or a non-failable function that handles the call and is wired as the handler (`onclick=load()`). An enclosing `<errorBoundary>` does NOT handle it: a handler runs when its event fires, after render, and the boundary (item 4, §19.6.6) catches render-time calls only (its one handler-time exception is the compiler-generated `<formFor>` submit dispatch, §19.6.6 / §41.14.3, which no author-written handler reaches). A handler call inside an `<errorBoundary>` is therefore E-ERROR-002 when unhandled, like anywhere else. This is §19.6.6 as limited by S440 #22: a boundary catches errors raised while rendering, not in event handlers. A function whose `!` is only CPS-implicit (a server function not declared `!`, §19.4.2) is outside this rule. Its one-statement handler call gets neither E-ERROR-002 nor W-CPS-NEEDS-FAILABLE (S440 #18). The callee is resolved through scope, so a local binding that shadows a failable function's name (an `<each in=@xs as risky>` row alias, a component prop) is not that function.
+
+**Handler references (S441 ruling).** A `!` function passed as an event-handler REFERENCE — the bare `onclick=risky`, `onclick=${risky}`, or `onclick={ risky }` — SHALL be E-ERROR-002, exactly like `onclick=risky()`: the event dispatcher calls the function and discards its result, so the reference is an unhandled call. This holds in every position a handler call is checked in (top level, an `<each>` row, an engine state-child, a `<match>` arm, a component body, inside an `<errorBoundary>`). A reference to a non-failable function is an ordinary handler. The rule applies to event-handler attributes only: a component's declared prop whose name starts with `on` (`<Btn onSave=risky/>`) is a callback value handed to the component, not a handler reference. Where the component wires such a prop as its own raw handler reference (`onclick=onSave`), the resulting handler is a reference to whatever the call site passed, and a call site that passes a `!` function is E-ERROR-002 (reported at that call site). The one exempt reference is `<formFor onsubmit=persist/>`: §41.14.3 (`E-FORMFOR-ONSUBMIT-SIGNATURE`) REQUIRES that function to be failable, and its error takes the compiler-generated submit route to the nearest `<errorBoundary>` (§19.6.6, §41.14.3). The same scope applies as for a call: the callee is resolved through scope, and a function whose `!` is only CPS-implicit is outside the rule.
+
+> **Provenance:** ruling:user-voice-scrml.md S441 "yes on references" ("RULED — a failable function passed as a handler REFERENCE is E-ERROR-002 (S441)"). Newly-rejecting; measured S441 by compiling `examples/ samples/ conformance/cases/ docs/readme-snippets/ docs/tutorial-snippets/` (2041 files): no file other than the new pinning case `conformance/cases/error/handler-failable-reference-pos` passes a `!` function as a handler reference, so no migration was needed. The S440 pin `handler-failable-reference-and-guard-neg`, which held `onclick=risky` clean, became `handler-failable-guard-and-plain-reference-neg` (a non-failable reference).
+
+**Arrow-valued handlers (S440 ruling).** An arrow-valued handler — `onclick=${(e) => risky()}`, `onclick=${() => { … }}`, `onclick={ () => risky() }` — passes a function VALUE whose body runs on the event exactly like an inline block. Its body SHALL be checked the same way: an unhandled `!` call in it is E-ERROR-002, and a `!{}` guard in it SHALL be emitted and SHALL run. The arrow's parameter receives the event. This paragraph covers only an arrow that IS the handler value. An arrow passed somewhere else (stored in a cell, passed as a component prop) is not covered by it. The general SHALL above still applies to calls in such an arrow's body (impl#1 gap: value-position calls are unchecked). A plain function reference (`onclick=risky`, `onclick=${risky}`) is not an arrow; it is governed by the handler-reference paragraph above.
+
+> **Provenance:** ruling:user-voice-scrml.md S440 (all recs #2, item 1)
+
+**Carried impl#1 gaps (tracked in `docs/known-gaps.md`, not the language rule).** impl#1 checks only a call that is a whole statement. A `!` call used as a value (`@r = risky()`, `let v = risky()`, an argument, a ternary branch) is not flagged in any context. An imported `!` function is not recognised as failable. A `!{}` written after an unbraced handler call (`onclick=risky() !{ … }`) is silently dropped, so that handler reports E-ERROR-002; it compiles when the handler is braced. Some arrow forms are not modelled: an arrow handler with more than one parameter, or with a non-simple parameter (a default `(e = 1)`, a rest `(...a)`, or a destructuring pattern with a default), and a `function (e) { … }` expression (which fails codegen with E-CODEGEN-INVALID-LOGIC). None of these is checked. Each is emitted exactly as before S440. A component prop that holds a function and is called with the bare `onclick=act()` form is not substituted (the handler emits `act()`), so that call is not checked either. A `!{}` guard inside a ONE-LINE single-statement `if`/`for` handler (`onclick={ if (c) { risky() !{ … } } }`) passes the check but fails the build with E-CODEGEN-INVALID-LOGIC (a raw `!{` is emitted; fails closed; `g-guard-in-one-line-if-for-emits-raw-bang-brace`) — the multi-line and multi-statement forms compile. A `?` in a handler (`onclick={ risky()?; @m = 1 }`) is not flagged: a handler is not a `!` function, so §19.5.4's E-ERROR-003 applies, but impl#1 checks `?` only in function bodies; at runtime the handler returns early and the error is discarded (`g-propagate-in-handler-silently-drops-error`). A failable call in a `when … changes` body is not flagged, while the same call in `on mount` is (`g-when-changes-body-failable-call-unchecked`). Only a DIRECT handler reference is checked: a `!` function reached through a cell (`onclick=@fnc`), a member (`onclick=o.m`), a conditional (`${ c ? risky : plain }`) or a local alias (`const h = risky`) is not (`g-failable-handler-indirect-reference-unchecked`).
+
+**Direction of change (pa-base §8): newly-rejecting. The migration was measured and has landed.** Before S440, impl#1 split on the statement count. `onclick={ risky(); @r = 1 }` was E-ERROR-002, while `onclick=risky()`, `onclick={ risky() }`, `onclick=${risky()}` and `onclick={ if (c) risky() }` compiled at exit 0. That split was impl#1's alone; the SPEC never granted it. Measured S439 by instrumenting the compiler over `examples/ samples/ conformance/ stdlib/ benchmarks/`, and re-measured S440 by compiling the same tree before and after: **6 attributes in 5 files** used an exempt form. All of them were bare `onX=fn()` calls, in `conformance/cases/defer/control-flow-neg`, `conformance/cases/error/propagate-in-non-failable-fn-neg`, `conformance/cases/error/propagate-non-failable-callee-neg`, `conformance/cases/error/propagate-non-failable-callee-pos` and `samples/compilation-tests/gauntlet-s20-error-test/server-failable-001.scrml`. Each was migrated so it still tests what it was written to test, either with an exhaustive `!{}` in the handler or through a non-failable wrapper. After the migration, every file's diagnostic set (errors and warnings) is identical to what it was before. Arrow-valued handlers (ruled S440) were measured in the same compile: none in the corpus has an unhandled `!` call in its body, so the arrow rule newly rejects nothing. Four `!{}` emission defects were closed in the same landing, because the ruling sends authors to the guard. A one-statement braced guard lost its arms at emission; a guard in a `<match>` arm lost its arms and every later statement; a guard in a component body emitted a raw `!{` (E-CODEGEN-INVALID-LOGIC); a guard in an arrow handler's body was dropped, and a block-bodied one failed codegen.
+
+> **Provenance:** ruling:user-voice-scrml.md S439 #14 + S440 "all recs" (restore conformance)
 
 #### 19.4.4 Normative Statements
 
 - The `!` modifier SHALL appear after the parameter list and before the optional error-type annotation in a function declaration.
 - The error type annotation after `!` MAY be declared with the arrow form (`! -> ErrorType`) or the bare form (`! ErrorType`) — the two forms are EQUIVALENT; both declare the function's error type explicitly (S137 amendment). That type SHALL be an enum (§19.4.4.1).
 - A function with `!` SHALL accept `fail` statements in its body. A function without `!` SHALL NOT accept `fail` statements (E-ERROR-001).
-- The caller of a `!` function SHALL handle the result via match, `?`, `!{}`, or `<errorBoundary>`. An unhandled `!` function call SHALL be a compile error (E-ERROR-002).
+- The caller of a `!` function SHALL handle the result via match, `?`, `!{}`, or `<errorBoundary>` (`?` inside a `!` function only, §19.5.4; `<errorBoundary>` for render-time calls only, §19.6.6). An unhandled `!` function call SHALL be a compile error (E-ERROR-002).
 - The `!` modifier SHALL be part of the function's type signature. It is visible to the type system and participates in type checking.
 
 ##### 19.4.4.1 The error type SHALL be an enum
@@ -14870,8 +15852,15 @@ When an error variant with a `renders` clause is caught by an `<errorBoundary>`,
 #### 19.6.6 Normative Statements
 
 - `<errorBoundary>` SHALL be a pre-defined state type recognized by the compiler. It SHALL NOT be user-definable; the compiler provides it.
-- `<errorBoundary>` SHALL catch error variants produced by any `!` function call in its direct or nested markup content.
-- Within an `<errorBoundary>`, calling a `!` function without explicit match/propagation SHALL NOT trigger E-ERROR-002. The boundary satisfies the handling requirement.
+- `<errorBoundary>` SHALL catch error variants produced by any `!` function call made while RENDERING its direct or nested markup content (a `${…}` interpolation, for example). It SHALL NOT catch an error raised in an author-written event handler (an `on…=` attribute value, including an arrow-valued one): a handler runs when its event fires, after render.
+- **The one handler-time exception is the `<formFor>` submit route (§41.14.3, S440 #19).** The error returned by a `<formFor>`'s `onsubmit=` handler SHALL route to the nearest `<errorBoundary>` enclosing the `<formFor>`. With no enclosing boundary, the `<formFor>` SHALL be E-ERROR-005. That handler is called by the compiler-generated submit dispatch, not by an author-written handler, so the render-time limit above does not apply to it. Its error variants are reachable inside the boundary for the E-ERROR-005 exhaustiveness check below (each needs a `renders` clause or the boundary's `fallback`). No other handler-time error reaches a boundary.
+  > *(PA note, S441)* The exhaustiveness consequence is DERIVED from the existing §19.6.6 E-ERROR-005 SHALL ("every error variant reachable inside an `<errorBoundary>` …") applied to the routed variants; ruling #19 itself states only the routing and the no-boundary E-ERROR-005.
+- Within an `<errorBoundary>`, a RENDER-time call to a `!` function without explicit match/propagation SHALL NOT trigger E-ERROR-002; the boundary satisfies the handling requirement. A call in an author-written event handler inside the boundary is not render-time: when it is unhandled it is E-ERROR-002, as anywhere else (§19.4.3). The `<formFor>` `onsubmit=` value is the one handler reference exempt from E-ERROR-002 (§19.4.3, S441); its handling requirement is the route above.
+
+> **Provenance (the three statements above):** ruling:user-voice-scrml.md S440 (22-item queue, #22) — "limit §19.6.6 to render-time calls — a boundary catches errors thrown while rendering, not in event handlers; handler calls keep E-ERROR-002." — and #19 — "a `formFor` submit handler's error routes to the nearest `<errorBoundary>`; with none, E-ERROR-005" (the exception statement, reconciled S441 with §41.14.3). Previously: "`<errorBoundary>` SHALL catch error variants produced by any `!` function call in its direct or nested markup content." / "Within an `<errorBoundary>`, calling a `!` function without explicit match/propagation SHALL NOT trigger E-ERROR-002. The boundary satisfies the handling requirement."
+>
+> **impl#1 status of the `<formFor>` route — Nominal, carried (§34.0).** Measured S441: impl#1 emits neither half. With a boundary, the submit dispatch calls the handler and discards its result, so the error never reaches the boundary. With no boundary, the `<formFor>` compiles with no E-ERROR-005. Tracked as `g-formfor-onsubmit-error-discarded` in `docs/known-gaps.md`. The render-time limit and the author-written-handler E-ERROR-002 are implemented.
+
 - Nested `<errorBoundary>` elements SHALL follow inner-catches-first semantics. An error caught by an inner boundary SHALL NOT propagate to an outer boundary.
 - The compiler SHALL verify, at compile time, that every error variant reachable inside an `<errorBoundary>` either has a `renders` clause or is covered by the boundary's `fallback` attribute. Failure to satisfy this SHALL be E-ERROR-005.
 
@@ -15637,13 +16626,13 @@ The following error codes are introduced by this section. They SHALL be added to
 | Code | Section | Trigger | Severity |
 |------|---------|---------|----------|
 | E-ERROR-001 | §19.3.3 | `fail` used in non-`!` function | Error |
-| E-ERROR-002 | §19.4.3 | `!` function result not handled (no match, `?`, `!{}`, or boundary) | Error |
+| E-ERROR-002 | §19.4.3 | `!` function result not handled (no match, `?`, `!{}`, or boundary). At an event-handler site — a call or a reference to a `!` function (S441) — only `!{}`, `match`, or a handling wrapper applies; `?` and a boundary do not (emitted at `compiler/src/type-system.ts:10892` for a statement-position call, `:14374` for an event-handler call, and `:14547` for an event-handler reference.) | Error |
 | E-ERROR-003 | §19.5.4 | `?` propagation used in non-`!` function | Error |
 | E-ERROR-004 | §19.5.4 | `?` applied to non-`!` function call | Error |
-| E-ERROR-005 | §19.6.3 | Error variant in markup without `renders` clause or boundary `fallback` | Error |
+| E-ERROR-005 | §19.6.3, §41.14.3 | Error variant in markup without `renders` clause or boundary `fallback`; ALSO (S440 #19) a `<formFor>` whose `onsubmit=` error has no enclosing `<errorBoundary>` (§41.14.3; Nominal for that case) | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
-| E-ERROR-009 | §19.3.3 | `fail` variant not a valid variant of the declared error enum | Error |
+| E-ERROR-009 | §19.3.3 | `fail` variant (qualified, or bare `fail .V` resolved against the declared `!` type) not a valid variant of the declared error enum (emitted at `compiler/src/type-system.ts:10629`, `:10637`, `:10644` for a qualified/bare target that is not a variant, and `:10686` for a bare `fail .V` whose declared type is not an enum.) | Error |
 | E-ERROR-010 | §19.5.4 | `?`-propagation: a called function's error variants are incompatible with the enclosing function's declared error type (dedicated code; formerly overloaded on E-TYPE-001) | Error |
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's enum has no `renders` clause (reuses the §19.6.6 E-ERROR-005 exhaustiveness fence at the render-expression fire site) | Error |
@@ -16259,7 +17248,9 @@ exceptions** (each a compile error naming the construct, never a silently differ
 - the deferred statement reads a name a later declaration re-binds: E-DEFER-LATER-SHADOW (§19.16.2);
 - the block that contains the `defer` declares the same `function` name twice:
   **E-DEFER-DUPLICATE-FUNCTION** (S430 round 6). §7.3.3 deliberately does not reject duplicate
-  `function` declarations in general, but the lowered block is a host `try` block, where a second
+  `function` declarations inside a function body *(amended S440 #6: a duplicate TOP-LEVEL `function` is
+  E-SCOPE-010, §7.6 — provenance: ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6); a
+  `defer` block is always inside a function body, so this bullet is unchanged in effect)*, but the lowered block is a host `try` block, where a second
   declaration of the same function name is not allowed; the compiler names both declarations rather
   than fail at codegen.
 
@@ -16612,7 +17603,8 @@ propagate the program setting to the minting unit).
 **Resolution order per unit**, in precedence order, first defined answer wins:
 1. the unit's own auth-middleware config (`authMiddleware` entry);
 2. the unit's OWN raw `<program>` / `<page>` attribute (`<program>` wins over
-   `<page>`);
+   `<page>`) *(for `session-secure=` the `<page>` limb is struck — S440 #13: a page does not carry
+   it, see B4b below)*;
 3. the PROGRAM-wide value — the attribute as declared by the compile set's ONE
    web-application `<program>`. A file emitted as a §64 tool — its first top-level
    `<program>` declares `kind="tool"`, so the whole file takes the tool emit path —
@@ -16626,8 +17618,11 @@ compile set — so in a two-`<program>` build one unit's own declaration is sile
 governed by its sibling's (S433: `30m` and `7d` both emitted `maxAge=1800`).
 
 **Step 1 answers only with a DECLARED value, or with a `<program auth="required">`'s
-own defaults (S438).** Route inference writes an auth-middleware entry for two kinds of
-unit, and they differ in what the entry carries:
+own defaults (S438).** Route inference writes an auth-middleware entry for these kinds of
+unit, and they differ in what the entry carries (the second bullet's rule also governs the
+two page-scope kinds S443 added — a `<page auth="required">` with no `protect=` columns,
+and a member page with no `auth=` inside a `<program auth="required">`, §40.2: their entry
+carries no session field of its own, since a `<page>` can declare neither):
 - a `<program auth="required">` — the entry carries that program's `sessionExpiry=` /
   `session-secure=`, or the `1h` / secure defaults when it declares none. Those defaults
   ARE that program's own answer, which is why such a unit always resolves for itself
@@ -16644,7 +17639,7 @@ unit, and they differ in what the entry carries:
   counted by the same walk step 2 performs). Step 2 cannot say which of them is the
   unit's own: it answers with the LAST declaring `<program>` in document order
   (`g-two-programs-one-file-session-attr-last-wins`), and what a second `<program>` in
-  one file means is reserved for `E-PROGRAM-002`. For such a file the second kind of
+  one file means is reserved for `E-PROGRAM-002` — and since S443 two TOP-LEVEL `<program>`s in one file ARE `E-PROGRAM-002` (§40.8), so only the nested case below remains reachable. For such a file the second kind of
   entry keeps the `1h` / secure defaults (declared page values still apply), exactly as
   before S438, so a later program's `session-secure="false"` cannot strip `__Host-` from
   a gated unit. The "never weaker" guarantee above does NOT extend to OTHER session units
@@ -16708,8 +17703,12 @@ network or sibling-subdomain attacker cannot plant or overwrite the session cook
 and it cannot be set over plain http off-host. A `Secure` cookie still round-trips
 over `http://localhost` (localhost is a secure context), so dev is unaffected.
 
-**`session-secure=` opt-out (B4b).** `<program session-secure="false">` (also valid
-on `<page>`) opts out of the hardening for a conscious TLS-less deployment (e.g. a
+**`session-secure=` opt-out (B4b).** `<program session-secure="false">` ~~(also valid
+on `<page>`)~~ *(struck S440 #13 — `session-secure=` is a `<program>` attribute only; it is not
+in `<page>`'s per-route attribute set (§40.8), so `<page session-secure=…>` is `E-PAGE-INVALID-ATTR`.
+Provenance: ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 13) — "page-level
+session-secure → strike from SPEC (Peter's lean)"; resolves `g-page-session-secure-three-way-disagreement`
+on the SPEC side)* opts out of the hardening for a conscious TLS-less deployment (e.g. a
 bare-http Pi mesh): the cookie is the plain `scrml_sid` with `Secure` gated on the
 request (on for https / non-local, omitted for `http://localhost`). The default is
 `session-secure="true"` (`__Host-` + always-Secure). The READ side is MODE-GATED: it
@@ -16788,7 +17787,7 @@ is reachable only from a server-escalated function — give `getUser` a server r
 
 | Code | Trigger | Severity |
 |---|---|---|
-| E-SCOPE-010 | Developer declares a variable with a reserved binding name (`route`, `session`) **(the reserved-binding trigger is spec-ahead, S265 — not fired for `route`/`session`; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)** | Error |
+| E-SCOPE-010 | Developer declares a variable with a reserved binding name (`route`, `session`) **(the reserved-binding trigger is spec-ahead, S265 — not fired for `route`/`session`; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)**. ALSO (S440 #6, §7.6): two top-level `function` declarations of one name — Nominal for that case. | Error |
 | E-SCOPE-011 | Access to an undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
 | E-SCOPE-012 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` builtin is built; bare `session` is bound into server-escalated scopes (and auto-escalates its enclosing function), so a `session` reference that is NOT server-escalated — e.g. top-level `${ }` logic — fires this. Distinct from the `@session` client projection.)** | Error |
 
@@ -17043,7 +18042,15 @@ The shell runtime SHALL NOT be re-booted. Client-side rendering of the route (du
    the outgoing route's DOM is still attached. Order within the edge:
    1. region-scoped reactive display effects and subscriptions are disposed;
    2. `<timer>` and `<poll>` instances declared in the region are **stopped**;
-   3. in-flight `<request>`s issued by the region are **aborted**;
+   3. in-flight `<request>`s issued by the region are **aborted**; **amended S444 (dpa-059):** a region
+      `<request>` classified **READ** has its in-flight transport **aborted**; one classified **WRITE** is
+      **discarded** — its result is not applied and its transport runs to completion. The classification,
+      the transport-only meaning of abort (not a rollback; the server may have committed; never sets
+      `.error`) and the Nominal status are §6.7.7.1, and this step now agrees with §6.7.7 EC-3.
+      **Provenance:** ruling:user-voice-scrml.md S444 dpa-059 — *"C for abort."* (teardown follows the
+      same rule: the PA's call-2 rec, read as entailed by C — *"flag for correction"*) ·
+      dd:`scrml-support/docs/deep-dives/request-supersede-abort-dpa-059-2026-09-30.md` C2 · **supersedes:**
+      the unconditional "aborted" for WRITE requests;
    4. `if=` scopes inside the region destroy **depth-first** under §6.7.2's four steps;
    5. author `cleanup()` registrations in the region run **LIFO**;
    6. pending `animationFrame()` callbacks in the region are cancelled.
@@ -18444,6 +19451,12 @@ SHALL emit a warning (W-FOREIGN-001) when a level-0 `_{}` block is used, recomme
 - The block splitter SHALL recognize `_` followed by zero or more `=` followed by `{` as a
   foreign code block opener. The block splitter SHALL store the opener level (the count of
   `=` characters).
+- **Identifier guard (S444).** A `_` immediately preceded by an identifier character (a letter,
+  digit, `_` or `$`) is the tail of that identifier, never a foreign code block opener. So `my_{`
+  in a markup body is content (§4.18.1b), and `my_={ a: 1 }` in a logic context is the identifier
+  `my_` followed by `= { a: 1 }`. A `_` at start of input or after whitespace or punctuation is
+  eligible.
+  > **Provenance:** rationale:records the guard impl#1 already applies (`matchForeignOpener`, block-splitter.js — `_` after `[A-Za-z0-9_$]` never opens; `my_={ a: 1 }` emits `my_ = {a: 1}`, verified by execution at `108ca89b`) so an assignment to an identifier ending in `_` is not a foreign block (PA reading S444, bryan veto window)
 - The block splitter SHALL scan for the matching closer: `}` followed by the same number of
   `=` characters as the opener. No other character sequence closes the foreign code block.
 - The interior of a `_{}` block is opaque. The compiler SHALL NOT parse, tokenize, or
@@ -19769,6 +20782,10 @@ scrml emits a single fixed `@layer` order once — `@layer reset, thirdparty, ba
 
 `//` is a single-line comment. It is valid in all scrml contexts.
 
+*(S444: inside a free-text body — plain markup — a `//` opens a comment only at the start of a line or immediately
+after whitespace; elsewhere there it is content, so `http://x` in a `<p>` is text. §4.18.1b exit (2), §4.7.)*
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2)
+
 ### 27.2 Per-Context Native Comments
 
 Each context type also accepts its native comment syntax:
@@ -20353,6 +21370,18 @@ inspection — `bun scripts/s34-census.ts` reports it; `--check-new` enforces th
 **This is an editorial well-formedness rule, not a language rule.** It changes no program's meaning and
 no program's acceptance status (direction-of-change: inert), so it is not a §62 version event.
 
+**A newly named error is CARRIED by impl#1 (S440 ruling #12).** When a ruling names a new error (or a new
+trigger for an existing one — PA reading, S440) that impl#1 does not yet emit, impl#1 **carries** the
+divergence — its SPEC text (and §34 row, where its section's convention places one) is marked Nominal /
+spec-ahead under outcome (2) above and the bootstrap implements it — **unless** the error is
+security or bootstrap-serving, in which case impl#1 is fixed (the S435 TS policy: impl#1 changes only to serve
+the bootstrap/native compiler or to fix security). This is stated once, here; it answers the #1120 OPEN item
+"whether impl#1 fixes or carries each newly-named error" for every such code, and a row need not repeat it.
+
+> **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 12) — *"impl#1 carries each
+> newly named error unless security or bootstrap-serving (S435 policy)"* · policy source: user-voice S435
+> *"Resulting TS policy (S435)"*.
+
 | Code | Section | Trigger | Severity |
 |---|---|---|---|
 | E-CTX-001 | §3.2 | Wrong closer for context type | Error |
@@ -20401,6 +21430,8 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-TOOL-ROUTE-NEEDS-SERVE | §64.1 | An `<endpoint>` (§61) or SSE `server function* route=` (§37) appears in a `kind="tool"` program with NO `serve=` listener to host it. A non-serve tool emits no `Bun.serve`, so the route would be silently un-hosted (the tool appears to define an API but serves nothing) — FAIL-CLOSED (§49 no-silent-bad-output). Add `serve=PORT` (§64.9), or remove the route. (S255 — server-program-shape Fork 1A.) | Error |
 | E-PROGRAM-001 | §4.12 | Circular `<program>` nesting detected **(Reserved / spec-ahead, S263 — no fire site: circular `<program>` nesting is unconstructable-by-construction — a lexical tree cannot contain itself and there is no include/inline mechanism; defensive guard, condition unreachable. Excluded from the freeze fireable set.)** | Error |
 | W-PROGRAM-TITLE-NESTED | §40.7 | A documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>`. Documentary attributes are meaningful only at the top level (HTML `<head>` semantics); workers have no DOM `<head>`. Move the attribute to the top-level `<program>` or remove it. (Phase A1a) | Warning |
+| E-PROGRAM-002 | §40.8, §20.5.1 | Two or more top-level `<program>` elements in ONE file (S443, same-file case only — the §40.8 cross-file case stays reserved). A file declares its top-level `<program>` exactly once; before S443 the second was silently mis-read (its `auth=`, session and middleware attributes ignored — a `<program auth="required">` after a plain one served its routes anonymously). A `<program>` NESTED in the first (worker / sidecar / scoped-db, §4.12) is not counted. Resolution: merge them into one `<program>`, or move the second into its own file. Emitted at `compiler/src/codegen/index.ts` (the top-level `<program>` count after `detectNestedProgramAuth`). Provenance: ruling:user-voice-scrml.md S443 item 3. | Error |
+| E-PROGRAM-NESTED-AUTH | §4.12.2, §52.13 | An `auth=` attribute appears on a nested `<program>` — any `<program>` with a `<program>` or `<page>` ancestor. `auth=` is not a nested-valid `<program>` attribute (the §4.12.2 table omits it): a nested `<program>` is not an auth scope, and before S443 its `auth=` was silently dropped, so a nested `<program auth="required">`'s server functions ran for anonymous callers (MEASURED S441: an anonymous POST wrote a row). Fires for any value (a literal, an interpolation, or bare) — never a silent no-op. Resolution: put `auth=` on the top-level `<program>` (the whole application) or on the `<page>` that needs it, and remove it from the nested `<program>`. Emitted at `compiler/src/codegen/index.ts` (`detectNestedProgramAuth`). Provenance: spec:§4.12.2 · pa-ruled:S443 (`g-nested-program-auth-attr-silently-ignored`). | Error |
 | E-STORY-UNKNOWN | §58.9 | A `story="<name>"` attribute on a nested `<program>` references a `<name>` with no corresponding `[story.<name>]` entry in the project manifest (`scrml.toml`). Declare the build story in the manifest's `[story]` table, or correct the name. (S118 — Build Story, §58) | Error |
 | W-STORY-ON-TOP-LEVEL | §58.8 | A `story=` attribute appears on the top-level `<program>` (§40.8). The attribute is ignored — the top-level build story is owned exclusively by `[story] default` in `scrml.toml`. Remove the attribute, or set the project default in the manifest. (S118 — Build Story, §58) | Warning |
 | E-MAP-KEY-NOT-COMPARABLE | §59.4 | A value-native map (§59) key type is not §45-comparable (the general code; cross-references `E-EQ-003` for a function-containing key type). Map keys are identified by structural `==`, so a key type must be comparable. Resolution: use a comparable key type (primitive, struct of comparables, enum). (S168 — Value-Native Maps, §59) | Error |
@@ -20411,6 +21442,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | W-MAP-STRUCT-KEY-LITERAL | §59.3 | A struct/enum-key map literal (`[ {a:1}: {b:2} ]`) appears in v1 — the grammar admits it but v1 codegen requires the `.insert` form for struct/enum keys. Parse-accepted, codegen-deferred; names the `.insert` form. (S168 — Value-Native Maps, §59.3/§59.12) | Info |
 | W-MAP-DUPLICATE-LITERAL-KEY | §59.3 | A map literal has two bracket-depth-1 entries whose keys are §45-equal (`[ "DAL": 3, "DAL": 5 ]`); the later entry wins (last-wins, matching `.insert` overwrite). Surfaces the overwrite. (S168 — Value-Native Maps, §59.3) | Info |
 | E-STRUCT-FUNCTION-FIELD | §14.3 | A struct field (named `type T :struct = {...}` decl OR inline-struct annotation `<x>: { f: fn() }`) is declared with a FUNCTION type (`() -> void`, `fn()`, `(x: int) => string`). REJECTED: a function is not value data — no structural equality (§45.2), not serializable, cannot be a map key (§59.4) — so it SHALL NOT be STORED as a struct field. The limit-the-primitive axiom (§14.1.1: a struct is a collection of data and state, not a behavior-bearing object) and the STORED face of the passed-vs-stored rule (§15.11.5: a function may be PASSED as a prop or CALLED as a handler, never STORED). To model behavior in stored state, use an enum tag the consumer matches on, or an engine (§51.0). The field resolves to a distinguishable `FunctionType` (not opaque `asIs`) so the reject fires precisely; this also closed the thin-arrow `() -> void` int-for-fn silent hole. Does NOT fire on a lifecycle annotation `(A to B)` / `(A -> B)` (the arrow wrapped in outer parens is a lifecycle, not a function type). (Was the info-level `W-TYPE-FN-FIELD` — ratified S171 (item) + S173 (severity/code/scope); ESCALATED to this hard error S174.) Partitions into `result.errors`. | Error |
+| E-STRUCT-DUPLICATE-KEY | §14.3, §66.11.3 | A struct literal names the same key twice — a plain literal (`{ x: 5, x: 6 }`), a nested one, or the spread-override shape (`{ ...@g, phase: .Gone, phase: .Live }`). Not a map literal (that is `W-MAP-DUPLICATE-LITERAL-KEY`, §59.3). **Provenance:** ruling:user-voice-scrml.md S440 — "duplicate keys are an error in ANY struct literal" + the six-open-questions "all recs" (S440, second entry), item 2. **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles `@p = { x: 5, x: 6, y: 1 }` at exit 0); impl#1 carries it (§34.0). | Error |
 | E-PRINT-NON-PRIMITIVE | §20.7.2 | A `print()` / `println()` argument is not a `string` / `number` / `boolean` — a struct, enum, array, value-native map (§59), markup-as-value, or the absence value `not`. `print` / `println` write RAW stdout (§20.7), machine-parsed program output, so structured data SHALL be serialized explicitly (a JSON or custom serializer of the author's choosing) rather than rendered to a human-readable projection — the deliberate divergence from `log()`'s value-faithful §20.6.4 render (a *human* projection, the wrong shape for a consumed stream). The typer classifier is conservative: it flags only positively-provable non-primitive shapes (a collection/markup/`not` literal, or an identifier bound to a non-primitive-typed decl); an unresolvable expression (member access, a call result, `asIs`) is left unflagged so the check never false-positives. Partitions into `result.errors`. (S241 — SPEC §20.7 fork B(i); emitted at `compiler/src/type-system.ts` `checkPrintArgs`.) | Error |
 | W-LOG-SHADOWED | §20.6.7 | A user-declared in-scope binding named `log` (the canonical no-op debugging stub `function log(...)`, or any local/import named `log`) shadows the location-transparent `log()` builtin (§20.6). The builtin steps aside and the call is emitted as an ordinary call to the user's `log`; the side/`file:line` origin tag and dev unified-view forwarding are NOT applied. Surfaces so the author knows the builtin is inactive for that name. `log` is NOT a reserved identifier (declaring `function log` is legal — this lint, not `E-RESERVED-IDENTIFIER`). Partitions into `result.warnings` (non-fatal). Reserved for promotion to `E-LOG-SHADOWED` end-of-window once shadowing declarations migrate. (S174 — ratified S173, deep-dive `log-location-transparency-2026-06-07.md` Open-Q3.) | Info |
 | W-RENDER-SHADOWED | §20.3a | A user-declared `function render` / `fn render` (or any in-scope binding named `render`) shadows the `render()` client component-render call built-in. The built-in steps aside; `render(...)` resolves to the user function (the §47 name-encoding + `fnNameMap` post-pass rewrite the call site to the encoded user-fn name, so def and call agree). Without the yield the hijack emitted `_scrml_render` directly — a name the word-boundary post-pass cannot repair — causing a def/call mismatch + runtime ReferenceError. Surfaces so the author knows the built-in is inactive for that name. `render` is NOT a reserved identifier (the hard-reserved client identifier is `reset`); this lint, not `E-RESERVED-IDENTIFIER`. Partitions into `result.warnings` (non-fatal). Mirrors `W-LOG-SHADOWED`. (Catalog addition ss16 C3; emitted at `compiler/src/type-system.ts` `checkRenderShadowing`.) | Info |
@@ -20420,6 +21452,10 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-SQL-005 | §8.1.1 | Unrecognized database connection string prefix in `db=` attribute | Error |
 | E-SERVER-FN-IN-SYNC-CALLBACK | §13.2 | A **peer server-fn** call appears in a **server** function in a position where the compiler CANNOT insert `await` — a synchronous `.some`/`.sort`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a parameter default. scrml has no source `await` (§13.1), so the compiler auto-awaits peer calls in awaitable positions; a **bare** emission here returns an unawaited Promise, which is **always truthy** — the same accept-everything hazard the async-stdlib sibling below describes. **FAIL-CLOSED** — a hard compile error rather than a silent wrong answer (§49 no-silent-bad-output). Resolution: restructure so the call runs in the server function's async body (e.g. hoist it into a `for` loop). The peer-server-fn twin of `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`. (Catalog addition S305 — the code was LIVE at `compiler/src/codegen/emit-server.ts` and reachable from source [verified by execution], but carried no row: its sibling's row named it in prose while it had none of its own, so the freeze gate could neither pin nor honestly defer it. Closes `g-e-server-fn-in-sync-callback-uncatalogued`.) | Error |
 | E-ASYNC-STDLIB-IN-SYNC-CALLBACK | §13.2 | A Promise-returning stdlib call (`scrml:auth` `verifyPassword`/`hashPassword`, `scrml:crypto`, `scrml:redis`, `scrml:http`, …) appears in a **server** function in a position where the compiler CANNOT insert `await`: a synchronous `.some`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a parameter default (`await` is illegal in all three — a sync callback yields values, not Promises, and a default is evaluated eagerly). scrml has no source `await` (§13.1), so the compiler auto-awaits Promise-returning stdlib calls in awaitable positions (§13.2) — but a **bare** emission here returns an unawaited Promise, which is **always truthy**: `hashes.some(h => verifyPassword(pw, h))` accepts EVERY password (an accept-all auth bypass). **FAIL-CLOSED** — a hard compile error rather than a silent security leak (§49 no-silent-bad-output). Resolution: restructure so the call runs in the server function's async body — e.g. hoist it into a `for` loop (`for (const x of xs) { const r = verifyPassword(…); … }`). The async-stdlib sibling of the peer-server-fn `E-SERVER-FN-IN-SYNC-CALLBACK`. (Issue #26 Finding-2 — S239 adversarial review of the auth-bypass auto-await fix; emitted at `compiler/src/codegen/emit-server.ts`.) | Error |
+| E-ASYNC-CALL-PROMISE-METHOD | §13.2 | `.then`, `.catch` or `.finally` is read off a call the compiler awaits for you (a server function, a Promise-returning stdlib function, a helper that calls one). The await yields the RESOLVED value, so `(await f()).then(…)` throws a TypeError at run time for any non-thenable result. Became reachable in inline event handlers and `on mount` blocks once they gained §13.2 auto-await (s441), where it silently broke code that previously chained on the Promise. Resolution: remove `.then(…)` and use the value directly — `const r = f(…)` then work with `r`; handle a failure with `!{}` (§19). (Catalog addition s441 fix round — review:S441-f4f5-review; emitted from `compiler/src/codegen/js-async-analysis.ts` (`checkPromiseMethod`) via `jsAsyncUsesErrors` in `compiler/src/codegen/emit-library-shared.ts`, for handler and `on mount` bodies. A `.then` on an awaited call inside an ordinary function body is not yet diagnosed — carried under g-auto-await-family-not-closed.) | Error |
+| E-ASYNC-HANDLER-UNANALYZABLE | §13.2 | An event handler's body references an async-colored function but the compiler could not analyse the handler's code (its emitted text does not parse), so it cannot insert the `await` §13.2 requires. **FAIL-CLOSED**: the build fails rather than ship an unawaited call (a Promise is always truthy). Resolution: move the body into a named function and reference it (`onclick=handle()`); report it — it indicates a compiler defect. (Catalog addition s441 fix round — review:S441-f4f5-review; emitted from `compiler/src/codegen/js-async-analysis.ts` (`unanalyzableHandlerUses`) via `emit-event-wiring.ts` / the active-client-emission handler path.) | Error |
+| E-ASYNC-FN-ESCAPES-AS-VALUE | §13.2 | An **async-colored function** — one the compiler emits `async`: a server function, a Promise-returning stdlib function (`scrml:auth` `verifyPassword`, …), or a helper that transitively calls one (including a helper declared inside another function) — is used as a **value**: aliased (`const g = m`), stored in an array or object (`[m]`, `{ f: m }`, `{ m }`), passed to a function that is not an awaited collection method (a user-written higher-order function `drive(m)`, `Array.from(xs, m)`, `new Promise(m)`, `el.addEventListener("x", m)`), returned, or read as an object (`m.call(…)`). Whoever calls it through that value receives an unawaited Promise, which is **always truthy** — `drive(m)` with `drive(f) { return f(pw) }` accepts EVERY password (the accept-all the sync-callback codes exist to prevent, one level of indirection away). The compiler inserts `await` only at call sites it can see (§13.2) and does not implicitly await every call of a function-typed value. **FAIL-CLOSED** hard error. Checked in every body: function bodies (client, server, library, tool — nested helpers included), raw block-body callbacks and template interpolations, inline event handlers and `on mount` blocks. NOT a value use: a direct call; the first argument of `.some`/`.every`/`.find`/`.findIndex`/`.filter`/`.map`/`.forEach`/`.reduce`/`.flatMap` (lowered to an awaited combinator); an argument of a fire-and-forget scheduler (`setTimeout` & co. discard the return); `typeof m`. Resolution: call the function directly (`m(…)`) where its value is needed, or pass it to an awaited collection method. (Catalog addition s441 — ruling:user-voice-scrml.md S440 F4; closes `g-async-helper-escaping-as-a-value-accept-all`; emitted from `compiler/src/codegen/local-async-fns.ts` + `compiler/src/codegen/js-async-analysis.ts`.) | Error |
+| E-EVENT-CONTROL-AFTER-AWAIT | §13.2 | After an event handler's first `await` (an awaited server / async call, §13.2), the handler's event parameter, or a value derived from it, is used other than by a plain read of a non-control property: a control member (`preventDefault`, `stopPropagation`, `stopImmediatePropagation`, `returnValue`, `cancelBubble`) is read, called, `.call`/`.bind`-ed or assigned; a computed member with a non-literal key is read; the event is passed as an argument; or an alias, container, destructured control method or closure that misuses the event is used. The handler has yielded to the event loop: the browser has already performed the default action (the form submitted, the link navigated) or propagated the event, and cancelling it now has no effect. The event is followed by BINDING (scope-resolved), so an inner `(event) => …` parameter or a block-local `const event` is not it. **Hard error; not auto-moved** — hoisting a conditional `preventDefault` would change which events it applies to. Resolution: call it before the first server call; if it depends on the server's answer, call it unconditionally first and perform the action yourself when the answer allows. (Catalog addition s441 fix round — review:S441-f4f5-review; widened s441 round 4 from call shapes to binding poisoning after the round-3 review bypassed the shape list; emitted from `compiler/src/codegen/js-async-analysis.ts` (`analyze`, handler roots) via `jsAsyncUsesErrors`.) | Error |
 | E-WASM-001 | §23.3 | Call char not in default registry and no `callchar=` declaration | Error |
 | E-WASM-002 | §23.3 | Call-char function called with no corresponding `extern` declaration | Error |
 | E-WASM-003 | §23.3 | `extern` declaration references a call char with no matching `<program>` | Error |
@@ -20443,7 +21479,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | W-DEAD-FUNCTION | §12.2 | A function is declared but called from neither a server-classified context nor a client-classified context, is not exported, is not server-annotated, and is not referenced from markup. The function will be tree-shaken from the output. Remove the declaration if intended dead, or wire it up to a caller. RI does not yet track all markup reference patterns; if the diagnostic is a false positive, exporting the function or adding an explicit caller suppresses it. **Fires:** emitted by RI (`compiler/src/route-inference.ts` Step 5d, D4) at the function's declaration site. Added 2026-05-08 (Insight 26 Batch 1) as the in-vacuum complement to caller-context propagation (Trigger 5). | Warning |
 | W-SERVER-IMPORT-UNEMITTED | §21, §12.2 | A compiled server bundle imports `from "./X.server.js"` but the import would fail at runtime: either (a) `X.scrml` has no server content so no `.server.js` is emitted (runtime `Cannot find module`), or (b) `X.server.js` IS emitted but does not export an imported name — e.g. a server-CALLED pure helper that route-infers into a handler (`auth.server.js` emits `export const __ri_route_rolePath`, not `export const rolePath`) → runtime missing-export. Non-fatal — green compile / `node --check` pass; the import only fails when the server bundle is RUN (the "compiled-green ≠ works" class). Companion to the emit-server tree-shake (`g-pure-module-server-emit` Fix A) which prunes the client-only-used import; this cross-file invariant catches the residual server-USED shapes emit-server cannot see (it has no sibling-emission knowledge). **Fires:** post-emit cross-file scan over `cgResult.outputs` in `compiler/src/api.js` (S208, Fix B). | Warning |
 | E-TYPE-030 | §14.7, §15.2 | `asIs` value used past resolution requirement **(Reserved / spec-ahead, S263 — no fire site: the `asIs` resolution-obligation tracker, analogous to the built `lin`/`~` tracker, is unbuilt. Excluded from the freeze fireable set.)** | Error |
-| E-TYPE-031 | §7.5.1, §15.3, §15.10, §15.11, §17.6, §55.1 | **General assignability failure — a value is assigned to a position whose declared type it does not satisfy.** *(Section list reconciled S365, dpa-036 call 4; the reconciliation's own figures and citations CORRECTED in the S365 fix round, which is why they are now stated with their measurement method attached. This row previously named only §15.3/§15.10 and described the code as "Prop value fails declared type constraint" — the PROP case only — while the SPEC's normative text already used it far more widely. MEASURED (`grep -n 'E-TYPE-031' compiler/SPEC.md`, excluding this §34 row and the `W-TYPE-031-UNPROVEN` row): **18 mentions across 12 distinct sections** — §7.5, §7.5.1, §7.5.2, §15.3 (the `using (expr)` value constraint), §15.10, §15.11.2, §15.11.4, §15.11.7, §15.12, §17.6.3 and §17.6.4 (if-as-expression binding), and §55.1. The earlier reconciliation note said "NINE normative sites" and mis-booked three of them — it placed the `using (expr)` constraint at §14.6, which is *Pattern Matching*, and if-as-expression binding at §18, which is *Pattern Matching and Enums* and begins well after those lines. The registry and the normative text disagreed about the code's own scope, which is the §34.0 defect one level up: a catalog that mis-books a code cannot be used to look it up — and a correction that mis-books it differently is the same defect wearing a newer date. The code's fire behaviour is UNCHANGED by either pass; only the booking is corrected.)* The **provable** fire domain is narrower than the section list, and is stated here from the emitters rather than from the prose. MEASURED (`grep -rn '"E-TYPE-031"' compiler/src`): **19 push sites, and exactly three positions** — (a) the annotated `let`/`const` declaration position, one site, `compiler/src/type-system.ts` `annotateNodes` (its annotated-declaration primitive-mismatch arm); (b) the annotated STATE-CELL declaration position (§7.5.1 position 2), one site, the same function's reactive-decl arm, added S402 with the position-1/2 widening; and (c) the validator predicate/arity/arg-shape path, seventeen sites, all in `compiler/src/symbol-table.ts` `checkValidator` and its `checkArgShape` helper, whose own messages cite §55.1 and §55.10. **The prop-passing position (§15.3/§15.10) and the `using`-constraint position have ZERO push sites in `compiler/src` and do not fire today** — they are specified, not implemented, exactly as §7.5.1's measured table already records for positions 3-5. *(Count and position list re-measured S402 — 18/two became 19/three when position 2 landed. This row asserts a measurement, so a widening that does not update it turns the row into the false claim it was written to remove.)* An earlier draft of this row named them as part of the provable domain; that was a false claim inside the §62.2 contract, and it contradicted §7.5.1 in the same commit. Where inference is DEFEATED rather than contradicted, the compiler emits `W-TYPE-031-UNPROVEN` instead (§7.5.2) — the two codes are complements, not alternatives: 031 is "I proved it does not fit", W-031-UNPROVEN is "I could not prove anything". (Emitted by `compiler/src/type-system.ts` `annotateNodes` (declaration position) and `compiler/src/symbol-table.ts` `checkValidator` (validator position). ⛑ **Provenance in this row, and in the `W-TYPE-031-UNPROVEN` row below, cites FILE + SYMBOL and carries NO `:N` — dropped, not re-measured, in the S365 fix round.** `scripts/s34-census.ts` resolves the PATH and the SYMBOL but strips `:N` (`PATH_REF` ends `(?::\d+)?`), so a line number is the one part of a provenance note CI can never falsify: it rots silently and forever. That is how `:10112` survived here — and then four FRESH citations in these two rows went stale by +85 / +89 / +104 lines inside the very round whose purpose was fixing the first one, because they were measured before that round's own insertions. Re-measuring buys a number that is stale again at the next edit to a 17k-line file; dropping it leaves exactly the claim the gate checks. Trust the symbol — and now the symbol is all there is.) | Error |
+| E-TYPE-031 | §7.5.1, §15.3, §15.10, §15.11, §17.6, §55.1 | **General assignability failure — a value is assigned to a position whose declared type it does not satisfy.** *(Section list reconciled S365, dpa-036 call 4; the reconciliation's own figures and citations CORRECTED in the S365 fix round, which is why they are now stated with their measurement method attached. This row previously named only §15.3/§15.10 and described the code as "Prop value fails declared type constraint" — the PROP case only — while the SPEC's normative text already used it far more widely. MEASURED (`grep -n 'E-TYPE-031' compiler/SPEC.md`, excluding this §34 row and the `W-TYPE-031-UNPROVEN` row): **18 mentions across 12 distinct sections** — §7.5, §7.5.1, §7.5.2, §15.3 (the `using (expr)` value constraint), §15.10, §15.11.2, §15.11.4, §15.11.7, §15.12, §17.6.3 and §17.6.4 (if-as-expression binding), and §55.1. The earlier reconciliation note said "NINE normative sites" and mis-booked three of them — it placed the `using (expr)` constraint at §14.6, which is *Pattern Matching*, and if-as-expression binding at §18, which is *Pattern Matching and Enums* and begins well after those lines. The registry and the normative text disagreed about the code's own scope, which is the §34.0 defect one level up: a catalog that mis-books a code cannot be used to look it up — and a correction that mis-books it differently is the same defect wearing a newer date. The code's fire behaviour is UNCHANGED by either pass; only the booking is corrected.)* The **provable** fire domain is narrower than the section list, and is stated here from the emitters rather than from the prose. MEASURED (`grep -rn '"E-TYPE-031"' compiler/src`): **19 push sites, and exactly three positions** — (a) the annotated `let`/`const` declaration position, one site, `compiler/src/type-system.ts` `annotateNodes` (its annotated-declaration primitive-mismatch arm); (b) the annotated STATE-CELL declaration position (§7.5.1 position 2), one site, the same function's reactive-decl arm, added S402 with the position-1/2 widening; and (c) the validator predicate/arity/arg-shape path, seventeen sites, all in `compiler/src/symbol-table.ts` `checkValidator` and its `checkArgShape` helper, whose own messages cite §55.1 and §55.10. **The prop-passing position (§15.3/§15.10) and the `using`-constraint position have ZERO push sites in `compiler/src` and do not fire today** — they are specified, not implemented, exactly as §7.5.1's measured table already records for positions 3-5. *(Count and position list re-measured S402 — 18/two became 19/three when position 2 landed. This row asserts a measurement, so a widening that does not update it turns the row into the false claim it was written to remove.)* An earlier draft of this row named them as part of the provable domain; that was a false claim inside the §62.2 contract, and it contradicted §7.5.1 in the same commit. Where inference is DEFEATED rather than contradicted, the compiler emits `W-TYPE-031-UNPROVEN` instead (§7.5.2) — the two codes are complements, not alternatives: 031 is "I proved it does not fit", W-031-UNPROVEN is "I could not prove anything". (Emitted by `compiler/src/type-system.ts` `annotateNodes` (declaration position) and `compiler/src/symbol-table.ts` `checkValidator` (validator position). ⛑ **Provenance in this row, and in the `W-TYPE-031-UNPROVEN` row below, cites FILE + SYMBOL and carries NO `:N` — dropped, not re-measured, in the S365 fix round.** `scripts/s34-census.ts` resolves the PATH and the SYMBOL but strips `:N` (`PATH_REF` ends `(?::\d+)?`), so a line number is the one part of a provenance note CI can never falsify: it rots silently and forever. That is how `:10112` survived here — and then four FRESH citations in these two rows went stale by +85 / +89 / +104 lines inside the very round whose purpose was fixing the first one, because they were measured before that round's own insertions. Re-measuring buys a number that is stale again at the next edit to a 17k-line file; dropping it leaves exactly the claim the gate checks. Trust the symbol — and now the symbol is all there is.) **Position 6 (S440 ruling #1, §7.5.1) — a cell write or a typed-field write:** RULED, **Nominal / not yet emitted** (no push site; the measured "exactly three positions" above is unchanged; measured S440: exit 0); impl#1 carries it (§34.0). **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 1; the three SPEC-text OPEN items, #1). | Error |
 | W-TYPE-031-UNPROVEN | §7.5.2 | A `let` / `const` declaration carries **no** type annotation and expression inference could not determine its type, so the declaration's resolved type is `unknown`. The message names the AST expression node kind at which inference stopped (e.g. `call`, `member`, `binary`, `ternary`, `lit`). **This is the compiler reporting a gap in ITSELF, not a defect in the program:** the program compiles and emits exactly as before, no previously-performed check is skipped, and the process exit status is unchanged. It exists because before S365 a defeated inference produced `asIs` — the SAME value §14.7 reserves for a deliberate, developer-signed escape hatch — so *absence of a diagnostic* and *success* were the same observation, and an unproven type was indistinguishable from a signed-for one. Resolution, and there are exactly two, both one edit: **prove it** by annotating the declaration (`x: T = …`), or **sign for it** by annotating `asIs`, which is silent by design (§14.7). Does NOT fire when an annotation is present, for a `?{ … }` SQL initializer (`W-SQL-ROW-UNTYPED` owns that path), or for a `_={ … }=` foreign initializer **in a position where the language ADMITS one** (§23.2.3 opacity IS the signature). ⚑ That last carve-out is CONDITIONAL, not blanket, and this row states it the way §7.5.2 — its governing section — already does: suppression is keyed to the declaration's ATTACHED foreign slice (§23.2.2), and the parser attaches that slice only at a `_={ … }=` initializer inside a FUNCTION BODY. Written at bare logic-statement scope — directly in a `${ … }` block, outside any function — the slice is not attached, the warning DOES fire, and `E-CODEGEN-INVALID-LOGIC` is the governing diagnostic for a construct the language does not admit there; the firing is incidental to an already-rejected construct, not a defect in the carve-out. MEASURED by compiling both shapes under `<program lang="ts">`: function body → no `W-TYPE-031-UNPROVEN`; bare logic scope → `W-TYPE-031-UNPROVEN` **and** `E-CODEGEN-INVALID-LOGIC`. An earlier draft of this row stated the carve-out unconditionally, which contradicted §7.5.2 in the same commit — the §34.0 defect of a catalog row disagreeing with the section that governs it. Partitions into `result.warnings` (non-fatal; CLI exit unchanged). ⚑ EXPECT A LARGE COUNT ON FIRST CONTACT and read it as a measurement, not a regression — it is the first observation of debt that was always present: 9,954 occurrences across 490 of 2,362 tracked `.scrml` files at introduction, 82.5% of it in the B4 self-host/native-parser trees, and 55% of ALL occurrences at one node kind (`call`). The §7.5.1 widenings retire it. (Catalog addition S365 — dpa-036 call 1; emitted by `compiler/src/type-system.ts` `annotateNodes`, at the un-annotated-declaration arm of its `let` / `const` walker; the gap itself is classified by `compiler/src/type-system.ts` `inferExprType`. ⛑ Provenance in this row cites FILE + SYMBOL and deliberately carries NO `:N` — see the E-TYPE-031 row above for why.) | Warning |
 | E-TYPE-ANY-FORBIDDEN | §14.1.1 | The literal type-token `any` appears in a type-annotation position (struct / error / enum-variant-payload / tuple field, type-alias RHS, state-cell annotation, `fn`/`function` parameter or return type, and the recursive leaf positions). `any` is not a scrml type — there is no `any` (S174 hard line; TypeScript's type-checking opt-out has no scrml equivalent). Use a concrete type, or `asIs` for a deliberate, named untyped escape hatch. Symmetric with `E-TYPE-UNKNOWN-NAME` (§14.1.2) — an undefined type NAME is rejected at the identical loci via the same locus traversal. (Catalog addition S174; loci broadened S174 follow-on; emitted at `compiler/src/type-system.ts` `checkAnyTypeForbidden`.) | Error |
 | E-TYPE-UNKNOWN-NAME | §14.1.2 | An unrecognized (typo'd or undefined) type NAME appears in a type-annotation position — the SAME loci as `E-TYPE-ANY-FORBIDDEN` (struct / error / enum-variant-payload / tuple field, type-alias RHS, state-cell annotation, `fn`/`function` param + return, and recursive leaf positions: inline-struct field, array element, map VALUE, union member, snippet param, lifecycle post-type). The name resolves against the file's `typeRegistry` per §53.14.5 (forward-reference-safe placeholder pass); cross-file imports resolve via §21.8 / the §21.3 imported-types seed, and an imported specifier name is exempt even in single-file mode. `asIs` is the never-fires escape hatch. Carve-outs: a map KEY is owned by `E-MAP-KEY-NOT-COMPARABLE` (§59.4, no double-fire); a machine name (§51.3) and `<db>`-block-scoped annotations are exempt. Before this rule the name collapsed SILENTLY to `asIs` (the broader leak §14.1.1 deferred). Emitted at the decl-binding sites (NOT `resolveTypeExpr`, which is span-free) by `compiler/src/type-system.ts` `checkUnknownTypeNames` (run AFTER the imported-types seed). (Catalog addition S174 follow-on.) | Error |
@@ -20465,12 +21501,14 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-ATTR-002 | §5.3 | Boolean attribute assigned a string literal | Error |
 | E-ATTR-010 | §5.4 | `bind:` target is not an `@` reactive variable | Error |
 | E-ATTR-011 | §5.4 | `bind:` used on an unsupported attribute name | Error |
+| E-SELECT-OPTION-NOT-VARIANT | §5.4 | A `<select>` with `bind:value` on an enum cell whose type does NOT admit `not`: a static `<option value="…">` literal names no variant of the enum. **Provenance:** ruling:user-voice-scrml.md S440 (coercion follow-ups, #4; the two-limbed PA reading, flagged for veto). **Named; impl pending — Nominal / not yet emitted**; impl#1 carries it (§34.0). | Error |
 | ~~E-ATTR-012~~ | §5.4 | **Retired (S249-drop, SPEC-cleaned S274)** — `bind:`+same-event-handler is composable by design; see `bind-value.test.js` §12/§13. | Error |
 | E-ATTR-WRITER-CONFLICT | §5.5.3, §5.5.4 | A WHOLESALE reactive value writer — `class=(expr)` / `style=(expr)` (the whole attribute) or `value=(expr)` on a form control (the `.value` property) — shares a physical DOM surface with ANOTHER writer on the SAME element, so the wholesale write would silently erase the other's work on its next reactive evaluation. Detected pairs: `class=(expr)` with `class:name=` or transition classes (`className` surface); `style=(expr)` with `if=`/`show=` or transitions (`style`/`display` surface); `value=(expr)` with `bind:value` (`.value` surface). Axiom ① (bryan's #81 ruling): each physical DOM surface has at most one wholesale owner — the diagnostic names BOTH sites and the author picks one. The conflicting attribute is NOT emitted (byte-identical to pre-#81), so an ignored error degrades to the old behavior rather than a broken one. Generic string attributes (`title=`, `id=`, `alt=`, `data-*`) have no per-token composer form and are always sole writers. (Catalog addition S268 — #81 writer-ownership Axiom ①; emitted at `compiler/src/codegen/emit-html.ts` `analyzeWriterConflict`.) | Error |
 | E-ATTR-UNQUOTED-OPERATOR | §5.1, §17.1 | An unquoted attribute CONDITION (`if=`/`show=`/`else-if=`) contains a bare binary/ternary operator (`>= > < <= == != && \|\| + - * /` or ternary `?:`). An unquoted condition admits only the atomic forms (`@var` / `obj.prop` / `fn()` / prefix `!`); operator conditions SHALL be parenthesized `if=(expr)` or quoted `if="expr"`. Fires ONCE per offending attribute (cluster-A, S188 "reject + parens"). | Error |
 | E-SCOPE-001 | §5.2 | Unquoted identifier not resolvable in scope | Error |
 | E-SCOPE-REDECLARE | §7.3.3 | Inside a function body, a `let` / `const` / `lin` / `function` declaration redeclares a name already bound in the SAME block (another such declaration, or — in the function's top-level block — a parameter). Nested-block shadowing is legal. Before this code the program failed at codegen ("Identifier already declared"); a `defer` in the block made it compile. Direction: newly-rejecting in name only (every rejected program already failed at codegen). (S430 round 5; emitted at `compiler/src/validators/lint-redeclare.ts`.) | Error |
-| E-SCOPE-010 | §20.4 | Developer declares variable with reserved binding name (`route`, `session`) **(reserved-binding trigger spec-ahead, S265 — not fired; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)** | Error |
+| E-CALL-ARITY | §7.3 | A call passes more arguments than the function declares parameters, or fewer — unless each omitted parameter has a default (§7.3.2). Reopen condition (ruled): the callback case. **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #2). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles both at exit 0); impl#1 carries it (§34.0). | Error |
+| E-SCOPE-010 | §20.4, §7.6 | Developer declares variable with reserved binding name (`route`, `session`) **(reserved-binding trigger spec-ahead, S265 — not fired; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)**. ALSO (S440 ruling #6, §7.6): two top-level `function` declarations of one name. **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6). **Named; impl pending — Nominal / not yet emitted for the `function` case** (measured S440: exit 0); impl#1 carries it (§34.0). | Error |
 | E-SCOPE-011 | §20.4 | Access to undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
 | E-SCOPE-012 | §20.5 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` establishment builtin is built; bare `session` is bound into server-escalated scopes and auto-escalates its enclosing function, so a `session` reference that is NOT server-escalated (e.g. top-level `${ }` logic) fires this. Distinct from the `@session` client projection.)** | Error |
 | E-SESSION-CONTEXT | §20.5.1 | `session.*` used outside a web-app server route handler — an SSE `server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called by another server function, or a headless `kind="tool"` program. Those contexts have no cookie-session request/response context. **(LIVE, S265/S239 i29e.)** | Error |
@@ -20497,7 +21535,8 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-PROTECT-004 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` A protected-origin column (a `protect=` field, resolved BY ORIGIN through the SQL FROM/JOIN alias map — so alias-safe; `passwordHash AS h` is still caught) **co-occurs, in one function body,** with a compiler-unanalyzable egress — a `_{}` foreign-code block (§23) or an `asIs`-typed value (§14.1.1) — at a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38), or `server function*` SSE (§37) boundary, and the column is not `reveal`-declassified. Resolution: declassify EVERY protected output column of that query with `value.reveal("col")`, or project them out. The confidentiality sibling of `E-PROTECT-001` (read-site) in the return-boundary direction. ⛔ **THIS IS A CONSERVATIVE LINT AND §14.8.9 NOW SAYS SO NORMATIVELY — DO NOT CITE IT AS A CONFIDENTIALITY GUARANTEE.** It is a per-body SOURCE-TEXT co-occurrence test, and ordinary function extraction defeats it: REPRODUCED at `8fa6854d`, the same code with the query in a helper and the raw egress in the caller compiled at exit 0 while the one-body form fired. Recognizing more spellings does not repair that — a completeness fix on this mechanism has no done-condition, which is exactly why the repair sat unscheduled for ~40 sessions. It bounds the §14.8.9 DERIVED-FLOW boundary, which that section already excludes from its soundness claim, so its incompleteness is disclosed rather than new. ⚑ **TWO CHANGES AT S405, BOTH NEWLY-REJECTING.** (a) **The `Response` kind LEFT this row** — an author-constructed `Response` is now `E-PROTECT-005`, raised structurally at emission, because that limb was the one whose text co-occurrence stood in for a REAL compiler-visible fact (the emitted envelope is fail-open on a `Response`). Do not re-add it here. (b) **Suppression is COLUMN-keyed, not existence-keyed** — previously ANY `.reveal(` anywhere in the body disarmed the gate for EVERY protected column in it, so `reveal("email")` silently declassified `passwordHash` (REPRODUCED). A strip-all (unresolvable-SQL) query can never be discharged by named reveals; a `.reveal(<non-literal>)` names no readable column and discharges nothing. ⚑ **AND THE `_{}` LIMB DID NOT FIRE ON THE SYNTAX §23 RECOMMENDS, WHICH IS WHY THIS ROW NOW STATES THE OPENER FAMILY.** §23.2 defines the opener as `_` + **zero or more** `=` + `{`, and `W-FOREIGN-001` steers authors AWAY from the level-0 `_{`; the predicate matched level 0 ONLY until S405, so it recognized exactly the spelling the compiler discourages. REPRODUCED at `8fa6854d`: `let w = _={ JSON.stringify(v) }=` in a `protect=` body compiled at exit 0 with no diagnostic and shipped `passwordHash` in full. Cases: `conformance/cases/protect/raw-egress-e004` (fires, level-1 opener) · `reveal-suppresses-e004` (discharged) · `reveal-wrong-column-e004` (NOT discharged — the column-keyed proof). *(Catalog addition S230 dpa-017; scope corrected + narrowed S405 arc A, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` via `detectProtectedRawEgress`.)* | Error |
 | E-PROTECT-005 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` **A server function, `<endpoint>` arm or `server function*` generator in a scope that declares `protect=` columns SERIALIZES ITS OWN RESPONSE BODY.** The compiler owns the §14.8.9 egress envelope and MEDIATES it — `_scrml_protect_redact` walks the value, reads each protected-origin descriptor and strips what was not `reveal`-declassified. It cannot mediate a body the author already serialized: that body is an opaque stream the floor cannot read, and the Symbol-keyed descriptor does not survive the author's own `JSON.stringify`. So the compiler refuses to emit an envelope it cannot mediate. Resolution: return the VALUE (the compiler serializes and redacts it for you); or move the function into a file that declares no `protect=` columns. ⛔ **THERE IS NO ESCAPE HATCH AND `reveal("col")` DELIBERATELY DOES NOT DISCHARGE IT.** `reveal` declassifies a NAMED COLUMN at a value the floor can still WALK; a hand-serialized body is not walkable, so there is no column to admit and nothing for the stamp to mean. ⚑ **THE UNIT IS THE BODY, NOT THE `Response` — AND GETTING THAT WRONG SHIPPED A BUILD BREAK WITH NO WORKAROUND.** The first S405 landing gated the full WHATWG producer set, including `Response.redirect` and `Response.error`, both of which have a NULL BODY. There is no stream to fail to inspect, so the error contradicted its own rationale, and its stated resolution ("return the value") **cannot produce a 302**. Combined with the no-escape-hatch rule that meant a `protect=` app could not redirect from a server fn or an `<endpoint>` arm AT ALL — REPRODUCED base-clean / tip-failing on a fn whose SELECT projected every protected column out. Now gated on BODY-CARRYING constructions only (`new Response(<body>, …)` and `Response.json(…)`); `new Response()` / `new Response(not, …)` are silent, and the two null-body statics raise `W-PROTECT-005` instead. **The adopter-facing contract is one sentence: a `protect=` app keeps full control of STATUS and HEADERS and gives up authoring the BODY.** ⛔ **IT IS FILE-SCOPED, NOT QUERY-SCOPED, AND THAT IS DELIBERATE.** It fires wherever the body is built, even in a function that selects no protected column. Keying it on the query would make it a per-body CO-OCCURRENCE test — the exact mechanism `E-PROTECT-004`'s `Response` limb was deleted for, since moving the query one function away defeats it (measured). Immunity to extraction is bought by keying on the CONSTRUCTION alone, and the message says so. ⚑ **EARLY WARNING, NOT THE GUARANTEE.** Detection is an acorn scan over the ALREADY-LOWERED body slice in CODE POSITION (the name inside a string literal or comment does not fire). A `Response` reached by ALIASING, `await fetch(...)`, `.clone()`, or a callee outside the slice is invisible to ANY syntactic scan; chasing those spellings is the unbounded fix this arc refuses. **Those are caught by §14.8.9 limb 3 — the RUNTIME refusal, where `instanceof Response` is exact.** An unparseable slice does not fire (fail-open FOR THE WARNING ONLY, defensible solely because limb 3 holds). Cases: `conformance/cases/protect/e-protect-005-pos` (fires) · `e-protect-005-neg` (same source, `protect=` removed, compiles) · `null-body-response-clean` (the null-body form is silent). *(Catalog addition S405 arc A, scope corrected in the S405 fix round, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` `_protectResponseGate`, scanning via `compiler/src/codegen/protect-egress.ts` `findAuthoredResponseConstruction`.)* | Error |
 | W-PROTECT-005 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` **A scope that declares `protect=` columns returns a response the COMPILER can prove payload-free but the RUNTIME sink cannot recognize as such** — on this implementation `Response.redirect(...)` and `Response.error()`. It COMPILES (there is no body for the §14.8.9 floor to fail to inspect, so `E-PROTECT-005` would be wrong), but the runtime guard still refuses it with a 500. Resolution: write the equivalent explicit null-body form, which BOTH limbs accept — `new Response(not, { status: 302, headers: { Location: "/where" } })`, `new Response(not, { status: 204 })`. ⚑ **THIS ROW EXISTS BECAUSE THE TWO LIMBS CAN PROVE DIFFERENT THINGS, AND THE SEAM HAD TO GO SOMEWHERE VISIBLE.** MEASURED on Bun 1.3.14: `new Response()` / `new Response(null, …)` give `.body === null`, but `Response.redirect(...)` and `Response.error()` give a **0-byte ReadableStream**, so the sink's non-destructive test cannot distinguish them from a body-carrying response. And it must not try: `new Response("s3cret", {status:302, headers:{Location:"/h"}})` presents IDENTICALLY — same `location`, no `content-length`, same `.body` shape — so any heuristic short of consuming (and destroying) the stream is unsound. ⛔ **The alternative to this warning is silence, and silence here is a WORSE defect than the build break it replaced**: the shape would compile clean and then 500 on the first request. A diagnosable build-time condition SHALL NOT be converted into a runtime failure. Cases: `conformance/cases/protect/w-protect-005-null-body-static` (fires) · `null-body-response-clean` (the named resolution, compiled — a diagnostic that names a working path owes a proof that it works). *(Catalog addition S405 fix round, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` `_protectResponseGate`.)* | Warning |
-| I-PROTECT-STRIP-001 | §14.8.9 | The compiler-emitted egress serializer stripped one or more protected-origin columns from a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — before it crossed to the client (the §14.8.9 structural-redaction floor). Names each stripped column so the redaction is never silent. Also fires on the wholesale strip of a row whose dynamic SQL could not be statically origin-resolved (fail-closed strip-all). Info-level — never fatal. (Catalog addition S230 dpa-017; emitted when the §14.8.9 floor build lands.) | Info |
+| I-PROTECT-STRIP-001 | §14.8.9 | The compiler-emitted egress serializer stripped one or more protected-origin columns from a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — before it crossed to the client (the §14.8.9 structural-redaction floor). Names each stripped column so the redaction is never silent. Also fires on the wholesale strip of a row whose dynamic SQL could not be statically origin-resolved (fail-closed strip-all). Info-level — never fatal. ⚑ **S441: fires ONLY for a query whose row actually reaches a client-egress sink carrying an unrevealed protected column** — decided by the §14.8.9 provenance flow over the emitted server module. It used to fire for every protected SELECT, so a column that left as an extracted scalar was reported "stripped" while it shipped (`g-protected-column-escapes-redaction-as-scalar`), and a row used only server-side (a login that verifies the hash) was reported stripped when nothing was. Cases: `conformance/cases/protect/strip-info-select-star` (fires) · `login-verify-clean` · `nonprotected-field-runtime` · `reveal-client-visible-runtime` (silent — nothing stripped). (Catalog addition S230 dpa-017; emitted when the §14.8.9 floor build lands; S441 truthfulness fix at `compiler/src/codegen/protect-flow.ts` `buildProtectFlowDiagnostics`.) | Info |
+| E-PROTECT-006 | §14.8.9 | `provenance: brief s441-protect-scalar-egress (SECURITY HIGH, g-protected-column-escapes-redaction-as-scalar); PA ratification pending` **A value whose provenance includes a `protect=` column reaches a compiler-emitted client-egress sink OUTSIDE a descriptor-bearing row** — a server-fn / `<endpoint>` response, SSR `/__serverLoad`, `/__mountHydrate`, channel `broadcast()` (§38), or a `server function*` SSE frame (§37, including its `event` / `id`, which are serialized outside the redact). The §14.8.9 runtime floor strips a protected column by the origin descriptor its ROW carries; a value EXTRACTED from the row carries none, so before this code `return u.passwordHash` served HTTP 200 with the hash in the body (MEASURED). The analysis covers EVERY server module of the compile with imports between them resolved (a helper in another file is analysed). Provenance is PRESERVED BY DEFAULT: extraction, re-housing, concatenation / templates / encodings (`Buffer`, `btoa`, character codes), `await`, callbacks, getters / `toJSON`, `throw` → `catch`, and any call into code the compile does not contain (a host / stdlib / npm import or platform API) receiving a protected scalar or row — fail closed. The derived-flow exemption is an explicit ALLOWLIST: comparison / relational operators, `!`, `typeof`, `.length` of a value whose length is a known count (the column's own string, a string / array literal built from it, a mapped array, a row array — NOT `({ length: h })` or `new Array(u.pin)`, S441 round 5), predicate / position methods on a string-like receiver (not `charCodeAt` / `codePointAt` / `getTime`), and the one-way / boolean functions `scrml:auth` `verifyPassword` / `hashPassword` / `verifyTotp`, `scrml:crypto` `verifyHash`, `hash("argon2", …)`, `hmac(key, …)` with an unprotected, non-constant key, `Boolean`, `console.*` — no `Bun.*` API, and (RULING S443 #7) NO bare digest: `hash("md5" | "sha256" | …)` and `crypto.subtle.digest` of a protected value stay protected. ⚑ **S443 round 6:** a function handed to a callee the compile does not contain is analysed as called with everything the receiver and arguments carry (its `arguments` too); a value outside a row written into a global store (`globalThis`, `process.env`, `import.meta`, an alias of one) IS an egress and every global read carries what was written (a function kept in a global is analysed through the name it was stored under); ⚑ **round 6b:** a row from which a property is REMOVED by a key that is not a string / number literal (`delete`, `Reflect.deleteProperty`, `defineProperty`/`defineProperties`, an object-rest exclusion, a reflection-capable global callee handed the row) ships every protected column, whatever produced the key; an HMAC keyed by a compile-time constant stays protected (RULING S445 #4). A protected value used as an object KEY, or as a lookup key, is protected (keys are data). `scrml:data` `pick` / `omit` with literal key lists and `.scrml` re-exports are modelled. Sinks: every compiler-emitted client-egress serializer plus every argument of an author-built `Response` (body AND `init` headers — `Location` / `Set-Cookie`), `Response.redirect`, `Response.json`, publish / enqueue / send. `reveal("col")` discharges it for the named OUTPUT column. Resolution: return the row itself (the floor strips the column), or only a derived value; to send it deliberately, `row.reveal("col").col`. Also raised, fail-closed, when an emitted server module cannot be parsed or the analysis budget runs out. ⚑ **Arithmetic stays protected** (ruling S441): an arithmetic / bitwise / unary `+ - ~` / `++ --` / compound-assignment result on a protected value is protected (`u.pin * 1`, `+u.pin`, `cost_price * qty`); compute with a protected column by declassifying it with `reveal`. ⚑ **Keys and aliases:** a protected value used as an object key or lookup key is protected all the way down (`L[c].v`, `Object.keys(L[c])`); a write through an alias or a helper parameter lands in every binding that may hold the object. Origin matching is case-insensitive per SQLite identifier rules. ⚑ **Bounds, disclosed:** position methods with a protected ARGUMENT and implicit / control-dependence flows are out of scope; a DB round trip (write into a non-protected column, read back) is out of scope; the analysis is call-site sensitive but flow-INsensitive within a function (a binding reassigned from a protected value to a clean one is still treated as protected — fails closed). Cases: `conformance/cases/protect/scalar-return-e006` · `scalar-in-new-object-e006` · `scalar-concat-e006` · `scalar-map-e006` · `scalar-helper-e006` · `scalar-helper-cross-file-e006` · `response-header-e006` · `scalar-encoding-e006` · `computed-key-e006` · `reduce-index-by-e006` · `lookup-field-e006` · `lookup-method-e006` · `map-get-field-e006` · `lookup-keys-e006` · `alias-write-e006` · `helper-mutates-param-e006` · `nested-container-write-e006` · `select-upper-column-e006` · `from-upper-table-e006` · `arithmetic-e006` · `callback-param-e006` · `arguments-e006` · `global-store-e006` · `descriptor-symbol-e006` · `bare-digest-e006` · `symbol-description-e006` · `marker-removal-alias-e006` · `hmac-constant-key-e006` (fire) · `merge-rows-strip-runtime` · `assign-refresh-runtime` (strip) · `keyed-hash-clean` (silent) · `upper-table-row-strip` · `reveal-then-arithmetic-clean` (compile) · `login-verify-clean` · `nonprotected-field-runtime` (silent). *(Catalog addition S441; emitted compile-wide at `compiler/src/api.js` `runProtectFlow` via `analyzeCompileProtectFlow` in `compiler/src/codegen/protect-flow.ts`.)* | Error |
 | E-TENANT-AGG | §14.8.10 | An aggregate/scalar read (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`/…) over a tenant-scoped table (a `<schema>` table carrying a `tenant_id` column) has NO output tenant discriminator (`GROUP BY tenant_id` yielding a per-tenant keyable row), so the §14.8.10 row-redaction floor has no row to key on — a bare `COUNT(*)` folds every tenant into one scalar. In V1-minimal (no SQL-WHERE-injection) such a read cannot be soundly tenant-scoped → fail-closed at compile. Resolution: add a per-tenant `GROUP BY tenant_id` (and project it) so each output row carries its tenant, or mark the query `.acrossTenants()` for a deliberate cross-tenant aggregate. The aggregate sibling of the redact floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `resolveTenantScoping` (kind `agg`).) | Error |
 | E-TENANT-WRITE | §14.8.10 | A write (INSERT / UPDATE / DELETE) against a tenant-scoped table cannot be tenant-constrained by the V1-minimal floor: there is no egress sink for a write, and a committed cross-tenant write is durable before any redaction could run — so it must fail closed at compile. An INSERT that OMITS `tenant_id` and is the parseable single-row `INSERT INTO t (cols) VALUES (...)` shape is auto-injected `tenant_id = @currentUser.tenantId` (no error); an UPDATE/DELETE (which needs a WHERE constraint the V1 floor does not parse), or an un-injectable INSERT (already sets `tenant_id`, is multi-row, or is `INSERT ... SELECT`), fires this error. Resolution: for a per-tenant INSERT omit `tenant_id`; for a deliberate cross-tenant write mark the query `.acrossTenants()`. The row-isolation write sibling of the read floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `classifyTenantWrite`.) | Error |
 | E-TENANT-RAW-EGRESS | §14.8.10 | A tenant-scoped table's rows reach a compiler-unanalyzable egress path — a `_{}` foreign-code block (§23), a manual `Response` / `handle()` body (§40), or an `asIs`-typed value (§14.1.1) — where the compiler cannot tag/redact the rows, so a cross-tenant row cannot be proven stripped at this boundary. Fail-closed: the compiler will not silently ship a tenant-scoped row through a path it cannot redact. The row-isolation sibling of `E-PROTECT-004` (the column direction). Resolution: return the rows through the normal compiler-emitted response, or, for a deliberate cross-tenant read, mark the query `.acrossTenants()`. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `detectTenantRawEgress`.) | Error |
@@ -20554,13 +21593,13 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | W-MATCH-002 | §18.16 | Non-exhaustive literal match (string/number/boolean without `_` arm) | Warning |
 | W-DERIVED-001 | §6.6.11 | `const <name> = expr` has no `@variable` references; value never re-evaluates | Warning |
 | E-ERROR-001 | §19.3.3 | `fail` used in non-`!` function | Error |
-| E-ERROR-002 | §19.4.3 | `!` function result not handled (no match, `?`, `!{}`, or boundary) | Error |
+| E-ERROR-002 | §19.4.3 | `!` function result not handled (no match, `?`, `!{}`, or boundary). At an event-handler site — a call or a reference to a `!` function (S441) — only `!{}`, `match`, or a handling wrapper applies; `?` and a boundary do not (emitted at `compiler/src/type-system.ts:10892` for a statement-position call, `:14374` for an event-handler call, and `:14547` for an event-handler reference.) | Error |
 | E-ERROR-003 | §19.5.4 | `?` propagation used in non-`!` function | Error |
 | E-ERROR-004 | §19.5.4 | `?` applied to non-`!` function call | Error |
-| E-ERROR-005 | §19.6.3 | Error variant in markup without `renders` clause or boundary `fallback` | Error |
+| E-ERROR-005 | §19.6.3, §41.14.3 | Error variant in markup without `renders` clause or boundary `fallback`. ALSO (S440 ruling #19, §41.14.3): a `<formFor>` whose `onsubmit=` handler's error has no enclosing `<errorBoundary>` to route to. **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 19). **Named; impl pending — Nominal / not yet emitted for the `formFor` case** (measured S440: compiles clean); impl#1 carries it (§34.0). | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
-| E-ERROR-009 | §19.3.3 | `fail` variant not a valid variant of the declared error enum | Error |
+| E-ERROR-009 | §19.3.3 | `fail` variant (qualified, or bare `fail .V` resolved against the declared `!` type) not a valid variant of the declared error enum (emitted at `compiler/src/type-system.ts:10629`, `:10637`, `:10644` for a qualified/bare target that is not a variant, and `:10686` for a bare `fail .V` whose declared type is not an enum.) | Error |
 | E-ERROR-010 | §19.5.4 | `?`-propagation: a called function's error variants are incompatible with the enclosing function's declared error type (dedicated code; formerly overloaded on E-TYPE-001) | Error |
 | E-DEFER-CONTROL-FLOW | §19.16.3 | A deferred body (`defer <stmt>`) contains `return`, `fail`, a `?` propagation, or a `break`/`continue` whose target lies outside the deferred body. A deferred body runs while its block is already exiting, so it cannot redirect control. A loop inside the deferred body, and a function nested in it, are their own targets/scopes. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-NESTED | §19.16.3 | A deferred body contains a `defer` statement (outside a nested function). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
@@ -20642,7 +21681,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-ASSIGN-001 | §50.9 | Declaration form (`let`/`const`/`lin`) in expression position | Error |
 | E-ASSIGN-002 | §50.9 | Type mismatch in chained assignment | Error |
 | E-ASSIGN-003 | §50.9 | Undeclared identifier as assignment expression target | Error |
-| E-ASSIGN-004 | §50.9 | `const` variable as assignment target, statement or expression position (emitted at `compiler/src/type-system.ts`) | Error |
+| E-ASSIGN-004 | §50.9 | `const` variable as assignment target, statement or expression position (emitted at `compiler/src/type-system.ts`). Includes a write to a keywordless loop binder (`for (it of xs)`, §50.8.5 — S439 ruling #8) — **Nominal for that case: not yet emitted.** | Error |
 | E-AUTH-001 | §52.11 | Client-local `@var` used as bound parameter in `?{}` INSERT/UPDATE/DELETE outside server function | Error |
 | E-AUTH-002 | §52.11 | `<var server>` initial value directly derived from a client-local `@var` | Error |
 | E-AUTH-003 | §52.11 | State type declares `authority="server"` without `table=` attribute | Error |
@@ -20703,7 +21742,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-THEME-TOKEN-UNKNOWN | §65.3.2, §65.6, §65.10 | (CSS Wave-1 EMISSION — wired by the `<theme>` token lowering, `css-wave1-emission-2026-07-16`; the `@`-sigil use-site check ratified 2026-07-16.) Two decidable fires. **(a) USE SITE:** a `@`-sigil token reference in a `#{}` value (`color: @brand`) whose name resolves to **neither** an in-scope `<theme>` token **NOR** a declared reactive/derived cell. The `@` sigil makes this decidable + false-positive-free: a BARE identifier (`color: red`, `font-weight: bold`) is a literal CSS value and NEVER fires — a token can never shadow a CSS keyword. A `@name` matching a declared theme token lowers to `var(--name)`; a `@name` matching a declared cell keeps the §25 reactive-CSS-var bridge `var(--scrml-name)`; a `@name` matching neither is the unknown. **(b) VARIANT RE-BIND:** a `<theme>` variant (`.Dark { … }`) or `@media` auto-bind that re-binds a token name **absent from the GLOBAL base token set** (the union across every `<theme>` block, so a base+variant split across two `<theme for=@cell>` blocks is not falsely rejected) — per §65.6 a variant re-binds a SUBSET of the base; a variant-only token has no default-state value. Emitted by `lowerCssValueRefs` / `emitThemeCss` in `compiler/src/codegen/emit-theme-reset.ts` (run inside `generateCss`); the `E-` prefix partitions it into `result.errors`. Resolution: declare / spell-fix the token, drop the `@` for a literal value, or remove the variant re-bind. Partitions into `result.errors`. | Error |
 | E-NAME-COLLIDES-STATE | §6.1 | Local identifier declaration uses the same name as a registered state cell in scope. Local names cannot shadow state names. Example: `<count> = 0; ... let count = 5`. | Error |
 | E-STATE-UNDECLARED | §6.1.1, §6.1.2, §6.1.3 | S123 V-kill — bare `@name = expr` write inside a `fn`/`function`/user-written `${...}` body without a structural `<name>` declaration in scope. The canonical form `@name = expr` is a WRITE to a pre-declared cell, not a declaration; the auto-synth path (silent phantom-cell creation from bare writes) was retired at S123 per the auto-state-cell-synthesis deep-dive (`scrml-support/docs/deep-dives/auto-state-cell-synthesis-investigation-2026-05-23.md`). Exempts default-logic body-top auto-lift at `<program>`/`<page>`/`<channel>` (§40.8) and meta `^{...}` bodies (BUG-META-6 dependency) — both deferred to follow-up units. Fix: add `<name> = <init>` declaration before the write, or remove the `@` prefix if a local identifier was intended. **Read-side fire WIRED S192 at TS (post-CE relocation).** A bare `@name` read that resolves to NEITHER a reactive cell, NOR an `<each>`/`<tableFor>` loop local, NOR an import binding is also `E-STATE-UNDECLARED` — the silent-bug class that produced the 7 flagship `@currentCustomerEvents`/`@currentDriverEvents` typos at S192. The fire lives at the type-system stage (`compiler/src/type-system.ts`, the logic-expr ident walker), which runs POST-CE and rebuilds a complete `@name` resolution table over the expanded AST. This is the relocation the SYM-stage prototype's failure pointed to: SYM is the WRONG LAYER (it over-fires on `@`-names materialised POST-SYM — `<each>`/`<tableFor>` `@row` loop locals absent from the SYM AST; engine boot-`effect=` cells; cross-FILE channel cells inlined by CE §38.12). TS resolves ALL of these directly: the cross-file channel cell flows through CE inlining into TS's scopeChain (the SYM-stage Class-B channel-body scan is RETIRED — TS reaches the inlined channel decl directly); the engine `<machine name=UI>` lowercased read `${@ui}` resolves via the §51.0.C-canonicalised machineRegistry pre-bind; and the engine boot-`effect=` implicit cell (`@tasks = …` written in the raw-text opener effect, §51.0.H Form 3) resolves via a dedicated openerEffect-write pre-bind. A component-def `${@Name}` read (PascalCase `const Name = <markup>`, instantiated via `<Name/>`) CORRECTLY fires — symmetric with the existing bare-path `E-SCOPE-001`. The §51.0.C engine var-name canonicalisation LANDED S192 (register/read/codegen agree on the one canonical var name); S192 stage-1 closed the same-file registration gaps (legacy `const @name`→`const <name>` + deprecation-lint; `ref=@name` bindings registered; state-block bare-writes migrated). | Error |
-| E-WRITE-NOT-IN-LOGIC-CONTEXT | §40.8, §6.1.1, §6.2 | S123 Unit CC — companion to V-kill (catalog row above). Bare `@name = expr` write at the IMMEDIATE body-top of `<program>` / `<page>` / `<channel>` (the §40.8 default-logic-mode surface). Default-logic mode auto-lifts DECLARATIONS only (structural `<name> = expr`, structural derived `const <name> = expr`, `function`/`fn`, `type`, `let`/`const` locals, `import`); the bare V5-strict WRITE form `@name = expr` is NOT a declaration — writes ARE logic; logic goes in `${...}`. Per the S122 user-voice Option-2 ratification, this shape is normatively rejected. Fix: either (a) wrap in explicit logic block `${ @name = ... }`, or (b) convert to a structural declaration `<name> = ...`. **Discrimination:** Unit CC fires at the IMMEDIATE body-top only; bare writes nested inside a function body (`function f() { @x = 5 }`) or inside an explicit user-written `${...}` block at body-top are governed by V-kill (E-STATE-UNDECLARED above). `<db>` / `<state>` STATE-block bodies are NOT default-logic-mode loci and are NOT affected by THIS (hard) code — a bare `@x = init` directly in a state-block body surfaces the INFO-level `W-STATE-BLOCK-BARE-WRITE-DECL` (catalog row below) instead. **Per-file exemption:** `compiler/src/unit-cc-exemption-list.json` provides path-based suppression for the pre-S123 corpus; each adopter source file removes its own entry as migration completes (sunset is per-file, manual — file deletion does not auto-sunset because the files are adopter source, not scheduled deletion targets like V-kill's `compiler/native-parser/*.scrml` exemption). Companion to `E-STATE-UNDECLARED`; emitted at `compiler/src/symbol-table.ts` PASS 3 (`walkResolveAtNames`) state-decl arm on `_isUnitCCWrite`-tagged nodes. | Error |
+| E-WRITE-NOT-IN-LOGIC-CONTEXT | §40.8, §6.1.1, §6.2 | ⛑ **RETIRED S441 — no longer fires.** A `<program>` / `<page>` / `<channel>` body is code (§40.8 S441 bullet), so a bare `@name = expr` at its body-top is an ordinary write in a logic context, treated exactly as the same write inside an explicit `${ … }` at that position; this code's only locus is gone, and the (now deleted) unit-cc-exemption-list.json + `default-logic-exemption.ts` were removed with it. The `<db>` / `<state>` state-block case keeps `W-STATE-BLOCK-BARE-WRITE-DECL` (unchanged). Provenance: ruling:user-voice-scrml.md S441 "declared-prose implementation: \"yes to all four\"" (item 4). The text below is the S123 history. S123 Unit CC — companion to V-kill (catalog row above). Bare `@name = expr` write at the IMMEDIATE body-top of `<program>` / `<page>` / `<channel>` (the §40.8 default-logic-mode surface). Default-logic mode auto-lifts DECLARATIONS only (structural `<name> = expr`, structural derived `const <name> = expr`, `function`/`fn`, `type`, `let`/`const` locals, `import`); the bare V5-strict WRITE form `@name = expr` is NOT a declaration — writes ARE logic; logic goes in `${...}`. Per the S122 user-voice Option-2 ratification, this shape is normatively rejected. Fix: either (a) wrap in explicit logic block `${ @name = ... }`, or (b) convert to a structural declaration `<name> = ...`. **Discrimination:** Unit CC fires at the IMMEDIATE body-top only; bare writes nested inside a function body (`function f() { @x = 5 }`) or inside an explicit user-written `${...}` block at body-top are governed by V-kill (E-STATE-UNDECLARED above). `<db>` / `<state>` STATE-block bodies are NOT default-logic-mode loci and are NOT affected by THIS (hard) code — a bare `@x = init` directly in a state-block body surfaces the INFO-level `W-STATE-BLOCK-BARE-WRITE-DECL` (catalog row below) instead. **Per-file exemption:** the (now deleted) unit-cc-exemption-list.json provides path-based suppression for the pre-S123 corpus; each adopter source file removes its own entry as migration completes (sunset is per-file, manual — file deletion does not auto-sunset because the files are adopter source, not scheduled deletion targets like V-kill's `compiler/native-parser/*.scrml` exemption). Companion to `E-STATE-UNDECLARED`; emitted at `compiler/src/symbol-table.ts` PASS 3 (`walkResolveAtNames`) state-decl arm on `_isUnitCCWrite`-tagged nodes. | Error |
 | W-STATE-BLOCK-BARE-WRITE-DECL | §38.4, §6, §40.8 | A bare `@name = init` line directly in a `<db>` / `<state>` STATE-block MARKUP body (not inside a `${...}` logic block, not inside a function). A state-block body is markup context (SPEC §4); per §38.4 ("bare names are LOCALS only") + §6 V5-strict, a bare `@name = init` is NOT a declaration — `@name` is a READ/WRITE of a pre-declared cell. In the markup body it is silently DROPPED (inert text — neither registered nor emitted), so the cell never resolves at SYM. The canonical state-block declaration is the STRUCTURAL form inside a `${...}` logic block: `${ <name> = init }` (see `examples/03-contact-book.scrml` / `08-chat.scrml`). The INFO lint steers there; `bun scrml migrate` does not yet auto-fix (the rewrite re-homes the decl into a `${}` block — an AST relocation, not a text swap). The state-block companion to `E-WRITE-NOT-IN-LOGIC-CONTEXT` (Unit CC, the row above — which deliberately EXCLUDES state-block bodies because a hard error there is a bigger call). The end-of-window timing promotes this to a reserved `E-STATE-BLOCK-BARE-WRITE-DECL`. **Fires:** emitted by TAB (`compiler/src/ast-builder.js` `scanStateBlockBareWriteDecls`, called from `liftBareDeclarations`) — covers BOTH the canonical no-space opener `<db>` / `<state>` / `<schema>` (BS-classified `type=markup`, scanned via `_STATE_BLOCK_BARE_WRITE_NAMES` on the markup path) AND the deprecated whitespace opener `< db>` (BS-classified `type=state`, scanned on the state path). (Added 2026-06-13, sym-cell-registration-completeness; canonical-opener coverage added 2026-06-13 fixup.) | Info |
 | E-STATE-BLOCK-STATEMENT-FORM | §38.4, §40.8, §4.18.1 | A **lifecycle STATEMENT** — `on mount { … }` / `on dismount { … }` — written directly in a `<db>` / `<state>` STATE-block MARKUP body (not inside a `${...}` logic block, not inside a function). A state-block body is markup context, NOT a `default-logic` locus (§4.18.1; see `E-WRITE-NOT-IN-LOGIC-CONTEXT` above, which excludes state-block bodies for the same reason), so the §40.8 `on mount` auto-lift that applies at a `<program>` / `<page>` / `<channel>` body-top does NOT reach here. The statement is neither registered nor lifted: it ships into the DOM as **literal page text and never runs**, at exit 0 with zero diagnostics — the "my app doesn't load" failure, not a dropped assignment. Fix: move the lifecycle block out to the `<program>` / `<page>` body, or wrap it in an explicit `${ ... }` logic block. **Scope is ONE named form, and the complement is deliberately refused** — bare calls at this locus stay legal (a MEASURED typestate false-positive class: `validate() => < Validated> { }` in a `type:"state"` block, 4 live conformance cases), control flow is `E-CONTROL-FLOW-IN-MARKUP`, bare writes are the `W-STATE-BLOCK-BARE-WRITE-DECL` deprecation cycle above, and prose must keep compiling. **DISTINCT from the reserved `E-STATE-BLOCK-BARE-WRITE-DECL`**, which is shape-specific to `@name = init` and is that cycle's endpoint — a fresh code was allocated at S376 precisely so one row does not mean two shapes while being simultaneously live and reserved (§63.1 has no such stage). Newly-rejecting; migration MEASURED from the compiler over 2,194 `.scrml` — **1 file** (`samples/htmx-debate-dashboard.scrml`), migrated in the same landing. **Provenance:** `ruling:` user-voice-scrml.md S375 (limb b — refuse, not lint) + S376 (the code-name decision). **Fires:** emitted at `compiler/src/lint-e-state-block-statement-form.js` (`runEStateBlockStatementForm`, scanning block-splitter text children via `scanStateBlockChildren`), wired at `compiler/src/api.js` Stage 2.5c; covers BOTH the canonical `<db>` / `<state>` opener and the deprecated whitespace opener `< db>`. (Added 2026-08-26, db-state-block-locus.) | Error |
 | E-DERIVED-WRITE | §6.6, §6.6.8 | Reassignment to a `const`-derived reactive cell. Derived cells are read-only; assignment is not permitted. Example: `const <displayName> = @name.toUpperCase(); @displayName = "x"`. Sibling: in-place mutation is `E-DERIVED-VALUE-MUTATE` (§6.6.18). (Renamed from `E-REACTIVE-002` in S59 lock L21.) | Error |
@@ -20724,6 +21763,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-MATCH-ONTRANSITION-FORBIDDEN | §18.0.2 | `<onTransition>` element used inside a `<match>` block. Transition handlers are engine-only. Use `<engine>` (Tier 2). | Error |
 | E-MATCH-NOT-EXHAUSTIVE | §18.0.1 | Block-form `<match for=Type>` is missing variants of `Type` and has no wildcard `<_>` catch-all. Add the missing variants or add `<_>`. | Error |
 | E-MATCH-INVALID-ARM | §18.0.1 | A tag opener at the block-form `<match>` arm position is not a variant-named arm (`<VariantName>…</>`) or the wildcard `<_>…</_>` catch-all — e.g. the Ghost-Pattern `<when is="…">` (the Vue/Svelte-style conditional an LLM or framework-refugee reaches for). Such a tag is un-tokenizable as an arm; left un-flagged it yields ZERO recognised arms, the match tree-shakes to nothing, and a DEAD PAGE is emitted with 0 errors (the worst failure shape). Resolution: rewrite each case as a variant arm matching the enum of `for=Type`/the `on=` cell (`<Ok>…</>`, `<Err>…</>`), or use `<_>…</_>` for a catch-all. (Catalog addition S288 — g-match-without-for-plus-when-children; emitted by the Phase-2 arm tokenizer at `compiler/src/match-statechild-parser.ts:parseMatchArms`.) | Error |
+| E-MATCH-ALT-BINDING | §18.2, §18.7 | A `|` alternation arm whose alternates carry PAYLOAD PATTERNS — a binding (`.P(a: x) \| .Q(a: x) :> x`, `.P(x) \| .Q(x) :> x`), a NAMED field even when discarded (`.P(a: _) \| .Q(a: _)`), or a nested / literal pattern — in a JS-style `match`, at any arm position. The arm has no lowering (dispatch compares the variant tags only); before S438 it compiled with ZERO diagnostics and the arm silently never matched (or, as a non-first arm, satisfied exhaustiveness while being dropped). Only POSITIONAL `_` discards are accepted in an alternation. Resolution: give each variant its own arm, or use positional `_` discards (`.P(_) \| .Q(_) :> …`) when the body does not need the payload. (Catalog addition S438 — g-impl1-match-miscompiles F12 review F1; emitted at `compiler/src/ast-builder.js` `armChainBindingAlternate`.) | Error |
 | E-MATCH-SUBSET-DEAD-ARM | §18.8.1, §53.15 | A concrete arm names a variant that is excluded by the matched value's enum-subset refinement type (`oneOf([…])` / `notIn([…])`) — the arm is dead (the variant can never inhabit the value). The message names the excluded variant + the subset. Distinct from E-TYPE-023 (duplicate arm names the SAME variant twice); a dead subset arm names an excluded variant once. (Catalog addition S154 — §53.15 enum-subset refinement, SF-1.) | Error |
 | E-MATCH-ON-REQUIRED | §18.0.1 | (Catalog addition S107 — Phase 2 of match block-form impl arc.) Block-form `<match for=Type>` is missing the `on=expr` attribute AND no `<engine for=Type>` for the same `Type` is in scope (auto-implied `on=` per §18.0.1 line 9578-9580 requires a same-type engine for the most-local-semantics-friendly resolution). Add `on=expr` to the `<match>` opener or declare a compatible `<engine>` in scope. | Error |
 | E-MATCH-ARM-SEPARATOR | §18.2 | A `match` arm is followed by a `,` separator. Match arms are juxtaposed (`match-arm+` per §18.2 grammar); the ONLY arm separator is the arm body's terminating `:>`-introduced arm boundary (the deprecated `=>`/`->` aliases behave identically) — arms are written one per line (newline-separated). A trailing `,` after an arm body is invalid. Resolution: remove the `,` (`.A :> x, .B :> y` → `.A :> x` / `.B :> y` on separate lines). Replaces the generic E-CODEGEN-INVALID-LOGIC that the stray comma would otherwise surface from codegen. (Catalog addition S144 Cluster D — Bug Y; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
@@ -20738,7 +21778,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-VARIANT-AMBIGUOUS | §14.10, §18.0.3 | Bare variant reference (e.g., `let x = .Small` or `<Small>` arm pattern) is ambiguous because the position's type is a union with multiple members declaring the variant, OR the position has no statically-known enum type context. §14.10 covers general expression positions (LHS state-decl / let / const annotations, fn params, fn return); §18.0.3 covers match-arm patterns. Qualify the variant: `TypeName.Small` / `<TypeName.Small>`. | Error |
 | E-ENGINE-INVALID-TRANSITION | §51.0.F, §51.0.G | Direct write to engine variable or `.advance()` violates the from-state's `rule=` contract. Statically rejected when from-state is known; runtime-thrown otherwise. **v0.3 Option-d carve-out:** self-writes (target equals current variant) are NO-OPS, NOT violations — see §51.0.F.1 + W-ENGINE-SELF-WRITE-DETECTED. | Runtime |
 | W-ENGINE-SELF-WRITE-DETECTED | §51.0.F.1 | (v0.3, info-level) The compiler has detected an engine self-write — `@var = .CurrentVariant` or `@var.advance(.CurrentVariant)` where `.CurrentVariant` either matches the enclosing state-child tag (STRICT — inside-state-child fire) OR is a declared variant of the engine and the write site is outside any state-child body (CONSERVATIVE — outside-state-child fire). Per §51.0.F.1, self-writes are runtime NO-OPS: no `<onTransition>` fires, no history capture (§51.0.N), no timer rearm (§51.0.M), no idle-watchdog reset (§51.0.R), no subscriber notification. If the no-op-when-already-in-state behavior is INTENTIONAL (e.g., a defensive `set(.Current)` reachable from multiple variants), the lint is informational only — no action required. If a state change was expected unconditionally, verify the write target or guard the call site. Suppression: rephrase the write target via a derived cell (avoid the literal `.Variant` form), or remove the write entirely. Joins the small `W-PROGRAM-SPA-INFERRED` / `I-MATCH-PROMOTABLE` / `D-BATCH-001` family of synthesis-pattern info lints (Insight 30 closure precedent). (Catalog addition v0.3 Option-d synthesis 2026-05-12; emitted at `compiler/src/symbol-table.ts` PASS 16 fire-site #10 + PASS 12.B `walkEngineSelfWriteOutside`.) | Info |
-| W-ENGINE-MATCH-IN-STATE-CHILD | §51.0.B | (Known-limitation warning, pending a ruling.) A block `<match>` (§18.0.1) appears inside an engine state-child body — directly, inside lowercase elements, or via a component whose body is the match, in the outer engine or a nested one. Measured behaviour: the match renders when its state-child is on screen at page load, but the engine writes the state-child with innerHTML, so every LATER entry (leaving and re-entering the state-child, or first entering a state-child that is not `initial=`) creates a fresh, empty match mount that stays BLANK until the match's `on=` value changes. Identical for `</>` and named `</X>` arm closers. Not fired for a `<match>` inside an `<each>` body in the state-child (the `<each>` re-mounts on entry and renders correctly), nor for a `<match>` outside any state-child. ⚑ Whether a block `<match>` is permitted in a dispatched arm / engine state-child at all is the OPEN (A) refuse / (B) support fork in `g-nested-block-match-in-dispatched-arm-silently-drops`; this row does not decide it — (A) promotes this code to an error, (B) retires it with the re-entry fix. Workaround: move the `<match>` outside the `<engine>` into an element gated on the engine variable, e.g. `<div if=(@phase == .On)> <match …>…</match> </div>`; wrapping the match in a component does not help. Direction-of-change: **newly-warning only** — no predicate, emitted artifact or exit code moves. (Catalog addition S432; emitted at `compiler/src/validators/post-ce-invariant.ts` `warnMatchInStateChild` on the post-CE AST, so both parse pipelines.) | Warning |
+| W-ENGINE-MATCH-IN-STATE-CHILD | §51.0.B | (**Carried impl#1 divergence — NOT the language rule.** The language SUPPORTS a block `<match>` in a state-child, §51.0.B / §18.0.1, S439 ruling #5; bryan approved this row as that divergence's code. **Provenance:** ruling:user-voice-scrml.md S439 #5 "all recs" · supersedes: "Known-limitation warning, pending a ruling" and the ⚑ OPEN-fork sentence below, kept for the record.) A block `<match>` (§18.0.1) appears inside an engine state-child body — directly, inside lowercase elements, or via a component whose body is the match, in the outer engine or a nested one. Measured behaviour: the match renders when its state-child is on screen at page load, but the engine writes the state-child with innerHTML, so every LATER entry (leaving and re-entering the state-child, or first entering a state-child that is not `initial=`) creates a fresh, empty match mount that stays BLANK until the match's `on=` value changes. Identical for `</>` and named `</X>` arm closers. Not fired for a `<match>` inside an `<each>` body in the state-child (the `<each>` re-mounts on entry and renders correctly), nor for a `<match>` outside any state-child. ⚑ *(superseded S439 — ruled (B) support)* ~~Whether a block `<match>` is permitted in a dispatched arm / engine state-child at all is the OPEN (A) refuse / (B) support fork in `g-nested-block-match-in-dispatched-arm-silently-drops`; this row does not decide it — (A) promotes this code to an error, (B) retires it with the re-entry fix.~~ Workaround: move the `<match>` outside the `<engine>` into an element gated on the engine variable, e.g. `<div if=(@phase == .On)> <match …>…</match> </div>`; wrapping the match in a component does not help. Direction-of-change: **newly-warning only** — no predicate, emitted artifact or exit code moves. (Catalog addition S432; emitted at `compiler/src/validators/post-ce-invariant.ts` `warnMatchInStateChild` on the post-CE AST, so both parse pipelines.) | Warning |
 | E-ENGINE-EFFECT-AMBIGUOUS | §51.0.H | `effect=` attribute used on a state-child whose `rule=` is multi-target. Use `<onTransition>` element child(ren) instead — `effect=` requires a single-target rule. | Error |
 | E-ENGINE-EFFECT-ON-DERIVED | §51.0.H, §51.0.J | `effect=` used on the opener of a `derived=` engine (the boot init effect, §51.0.H Form 3). A derived engine has no init→`initial=` edge (its initial value is computed from `derived=expr`, not entered) and its variable is read-only (`E-DERIVED-ENGINE-NO-WRITE`), so a boot effect has nothing to do. Resolution: use a mount-time `${}` effect at the enclosing scope, or a non-derived engine. (Catalog addition S148 — Insight 33 Fork C1 edge-case ruling iii. NB: state-child `effect=` on a derived engine remains LEGAL per §51.0.J — fires on derived state changes.) | Error |
 | E-ENGINE-EFFECT-NOT-INTERPOLATED | §51.0.B, §51.0.H | `effect=` (engine opener Form 3 OR state-child Form 1) is a §7 logic-context block, so the `${...}` form is REQUIRED. A bare value (`effect=load()`) or unbalanced/empty braces was previously captured as null and SILENTLY tree-shaken — the effect never ran. The bare single-expression sugar that a plain event handler permits (`onclick=load()`, §5.2.3) does NOT extend to `effect=`. Resolution: wrap the body in `${...}` — `effect=${ load() }`. (Catalog addition S182 — dog-food round 2; Option B reject-with-diagnostic, user-ratified.) | Error |
@@ -20751,7 +21791,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-DERIVED-ENGINE-NO-WRITE | §51.0.J | Direct write to the auto-declared variable of a derived engine. Derived-engine variables are read-only. | Error |
 | E-DERIVED-ENGINE-INITIAL-ABSENT | §51.0.J | (S90 rename — M-7C-D-12 Track 4 / OQ-6) `derived=expr` returns scrml-absence (`not`) when the source is in its initial state. The derived engine has no initial variant to enter. Add a default arm or use a wildcard arm in the derivation. **Pre-S90 name:** `E-DERIVED-ENGINE-INITIAL-UNDEFINED` (renamed for §42.8 "No scrml program SHALL directly emit JavaScript `undefined`" alignment; the runtime condition is scrml-absence, not JS-`undefined`). | Error |
 | E-DERIVED-ENGINE-CIRCULAR | §51.0.J | Chained derivation (engine A → engine B → engine A) forms a cycle. Detected at compile time by the dependency-graph machinery (§31). Break the cycle. | Error |
-| E-COMPONENT-ENGINE-SCOPE | §51.0.K | A component declaration body contains an `<engine>` element. Engines are singletons; instantiating a component multiple times would produce multiple "singletons", violating the invariant. Use plain reactive cells inside components, or define the engine outside the component. | Error |
+| E-COMPONENT-ENGINE-SCOPE | §51.0.K | A component declaration body contains an `<engine>` element. Engines are singletons; instantiating a component multiple times would produce multiple "singletons", violating the invariant. Use plain reactive cells inside components, or define the engine outside the component. ALSO (S439 ruling #10): an `<engine>` inside an `<each>` row template (a row is a multi-instance context); the message names the per-row form — an ordinary declaration, keyed per row (§66.7.3). **Nominal for the `<each>`-row case — not yet emitted** (impl#1 compiles it at exit 0 and drops the body). | Error |
 | E-ENGINE-MOUNT-NOT-ENGINE | §51.0.D, §21.8 | A self-closing tag `<EngineName/>` mounts an imported binding whose source export is NOT an engine (e.g., a component, channel, type, function, or arbitrary const). Cross-file engine mount via `<EngineName/>` requires the imported name to be the variable of an exported `<engine>` declaration. Either import an engine binding from the source file, or use the appropriate mount form for the imported kind (e.g., component instantiation for components, expression read for const values). (Catalog addition S68 — A1b B14.) | Error |
 | E-ENGINE-STATE-CHILD-MISSING | §51.0.B, §51.0.F | A variant of the engine's `for=Type` has no matching state-child tag in the engine body. Per §51.0.F, every variant must have a corresponding state-child (`<Variant>...</>`) — exhaustiveness over the variant set is what gives `<engine>` its compile-time guarantees. Add the missing `<Variant>` state-child(ren). (Catalog addition S68 — A1b B15.) | Error |
 | E-ENGINE-STATE-CHILD-INVALID-VARIANT | §51.0.B | A state-child tag in the engine body does not match any variant of the engine's `for=Type`. State-child tags are PascalCase variant names; `<UnknownTag>` inside an `<engine for=MarioState>` is rejected because `UnknownTag` is not a `MarioState` variant. Either rename the tag to a valid variant or add the variant to the type. (Catalog addition S68 — A1b B15.) | Error |
@@ -20766,6 +21806,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-ENGINE-RULE-INVALID-VARIANT | §51.0.F | A `rule=` value references a variant (`rule=.X` or one of `rule=(.A \| .B)`) that is not in the engine's `for=Type` variants. The `rule=` contract is over the engine type's variants; foreign-type variants are rejected. (Catalog addition S68 — A1b B15.) | Error |
 | E-ENGINE-RULE-LEGACY-SYNTAX | §51.0.F, §51.3 | The legacy event-arrow rule grammar appears on the `<engine>` keyword (state-engine form, §51.0.C). TWO fire-sites: **(a) `rule=` attribute** — a `rule=` value uses the legacy event-arrow form (`rule="event -> Variant"`); on `<engine>`, `rule=` must use one of the three §51.0.F target-only forms: single-target (`rule=.NextVariant`), multi-target (`rule=(.A \| .B \| .C)`), or wildcard (`rule=*`). **(b) whole-body arrow form** — the engine body is a machine-style arrow-rule block (`.From => .To`) instead of state-children. This is NOT valid on the `<engine for=T initial=...>` state-engine form: such a body has no state-child opener, so it half-compiles (the `__scrml_transitions` table emits, but the §51.0.C auto-declared cell init does NOT), leaving the governed cell `undefined` at mount and any driven `<match on=@var>` rendering empty. Rewrite each variant as a state-child carrying its outgoing `rule=`. Whole-body event-arrow rules belong to the named/legacy `<machine>` surface (§51.3, deprecated) — declare `<engine name=Name for=T>` (or the deprecated `<machine name=Name for=T>`, W-DEPRECATED-001) and bind a variable to it via `@var: Name` if a machine is intended. Both fire-sites are §51.0.C `<engine>`-keyword-only: the `<machine>` keyword and the `<engine name=...>` named-machine form (§51.3.2) and derived engines (§51.0.J / §51.9 projection bodies) are EXEMPT. (Catalog addition S68 — A1b B15; whole-body fire-site added 6nz B2 2026-06-24.) | Error |
 | E-HISTORY-NO-INNER-ENGINE | §51.0.N, §51.0.Q | The `history` attribute appears on a state-child whose body does not contain a nested `<engine>`. `history` is meaningful only on composite state-children (those with an inner engine to track). Either add a nested `<engine>` to the body, or remove `history`. (Catalog addition S67 — DD-Harel Approach C Hybrid, Insight 23 grammar decision #2.) | Error |
+| E-INTERNAL-BODY-TOP-DROPPED | §40.8 | (S441 round 4 — the body-top coverage invariant.) **Internal compiler error, fail-closed.** After a `<program>` / `<page>` / `<channel>` body-top run is parsed and checked, a non-whitespace, non-comment byte of it is in neither (a) a statement the compiler compiles nor (b) an error diagnostic: the compiler would otherwise have dropped it silently. **Fire condition:** the post-parse coverage check (§40.8 S441 bullet) finds such a byte. The diagnostic names the text and its line, states that this is a compiler bug, and names both declared-prose forms (`<p>…</p>`, `"…"`) in case the text was meant for display. It is never the intended response to a source shape — any occurrence is a defect in the parser path that dropped the text. *(S441 round 5.)* "Compiles" is the statement's own grammar extent (§40.8: an `import` ends at its specifier string, a `type` alias where its type expression ends, …), not the tokens its parse consumed; a statement that compiles nothing (`404`, `import stuff`) is `E-UNQUOTED-DISPLAY-TEXT`, not this code. A `;` is source formatting. **Does NOT fire** when the run already carries an error diagnostic — that error stops the build, so nothing can ship silently. On `--parser=scrml-native` it fires for a statement whose TRANSLATION into the shared AST lost text — an expression the native bridge turns into an empty escape-hatch, e.g. a tagged template (``tag`x` ``) or a comma sequence inside a call argument (`go((a(), 7))`); pre-existing native bridge gaps, so the text would otherwise vanish. Emitted by `compiler/src/ast-builder.js` `assertBodyTopCoverage` (default front end) and `compiler/native-parser/parse-markup.js` `assertBodyTopCoverageNative` (`--parser=scrml-native`). | Error |
 | E-INTERNAL-RULE-NOT-COMPOSITE | §51.0.O, §51.0.Q | The `internal:rule=` prefix appears on a state-child that is not composite (no nested `<engine>` body). The internal-vs-external distinction is meaningful only when there is an inner engine whose lifecycle would be preserved on internal transitions. Use canonical `rule=` on non-composite state-children. (Catalog addition S67 — DD-Harel Approach C Hybrid, Insight 23 grammar decision #4.) | Error |
 | E-ENGINE-PAYLOAD-ON-UNIT-VARIANT | §51.0.B.1 | Payload-binding attributes appear on an engine state-child whose variant is a unit variant (no payload fields per §14.4). Unit variants have no fields to bind; the bindings are a developer mistake (typically a payload field was removed from the variant declaration but the bindings on the state-child were not updated). Either add fields to the variant declaration (`Variant(field:type, ...)` per §14.4) or remove the binding attributes from the state-child opener. (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
 | E-ENGINE-PAYLOAD-ARITY-MISMATCH | §51.0.B.1 | The number of payload-binding attributes on an engine state-child does not match the variant's payload field count (per §14.4). In the bare-attribute and positional-parenthesized forms, all fields MUST be bound; too few or too many bindings fire this code. Also fires when the bare-attribute or named form contains mixed positional + named bindings within the same state-child opener (the §18.7 mixed-form prohibition extends to this locus). Distinct from §18.7's `E-TYPE-021` because the diagnostic surface differs (state-child attribute list vs match arm pattern); in the parenthesized form `E-TYPE-021` fires for arity / mixed-form (per §18.7 inheritance) and `E-ENGINE-PAYLOAD-ARITY-MISMATCH` is reserved for the attribute-list-based forms. Resolution: list all payload field bindings in declaration order, OR use the named form to bind a subset by field name. (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
@@ -20779,7 +21820,17 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-DEBOUNCED-WITH-DERIVED | §6.13 | A `debounced=` (or `throttled=`) reactivity attribute is applied to a derived cell (`const <x debounced=300ms> = expr`). Derived cells are read-only; debounce/throttle is a write-side wrapper; combining the two is meaningless. Resolution: debounce the upstream source instead (`<source debounced=300ms> = @raw; const <doubled> = @source * 2`). (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
 | E-DEBOUNCED-WITH-SERVER | §6.13, §52 | A `debounced=` (or `throttled=`) reactivity attribute is applied to a `<x server>` server-authoritative cell. Server-authoritative writes go through the §52 server-write path, not the client-side debounce/throttle wrapper; the two surfaces don't compose. Server-side timing semantics are out of scope for this revision. Resolution: remove the reactivity attribute, or restructure so the client-side cell carries the timing and the server-authoritative cell receives the resolved value. (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
 | E-REACTIVITY-ATTR-CONFLICT | §6.13 | Both `debounced=DURATION` and `throttled=DURATION` appear on the same state-cell declaration. The two attributes describe competing timing rules (debounce coalesces writes; throttle leading+trailing-fires). Pick one. (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
+| E-PERSIST-STORAGE-UNKNOWN | §6.14 | A `persist=` value other than `"local"` or `"session"` — including `"cookie"` (deferred) and IndexedDB (a planned stdlib addition, never a `persist=` value). **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 2 — *"i and B2. …"*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PERSIST-KEY-REQUIRED | §6.14 | A `persist=` cell has no `key=`. The key is an external storage contract; the compiler does not derive one. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 3 — *"(i) and yes"*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PERSIST-REVEALED | §6.14, §14.8.9 | `persist=` on a cell whose value carries `reveal`-declassified protected provenance. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 7 — *"5, 7, 8 your recs."*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PERSIST-LIN | §6.14, §35 | `persist=` on a `lin` cell — a stored `lin` value would be replayable on every reload. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 7 — *"5, 7, 8 your recs."*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PERSIST-WITH-SERVER | §6.14, §52 | `persist=` on a server-authority cell (`<x server>`, a Tier-1 `authority="server"` type instance). **Provenance:** dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` A2 item 7 (within ruled pole A2, call 1 — *"the persist= attribute"*). **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PREPAINT-WITHOUT-PERSIST | §6.14.4.2 | `prepaint` (cell-level pre-paint REFLECT) on a state cell that has no `persist=`. Rec 8 verbatim: *"`prepaint` or `hold=` without `persist=` → **both errors in v1**"*. **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-HOLD-WITHOUT-PERSIST | §6.14.4.3 | A `hold=@cell` region marker whose operand is not a `persist=` cell. A general "cloak until rendered" marker is a separate question (dd route-to-PA R4). **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| W-PREPAINT-UNCOVERED-READ | §6.14.4.2 | A read of a `prepaint` cell that REFLECT cannot cover — text content (`${@c}`), `<each>`, `if=`, or any read failing the §6.14.4.2 rule 5 coverage rule (non-attribute position, a server-cell or second-`prepaint`-cell input, not compile-time evaluable). Emitted once per read site, naming the site. Rec 2 verbatim: *"an **Info diagnostic naming each site** (not silent; not an error — those reads are empty before JS, never wrong)"*. **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Info |
 | E-VALIDATOR-INLINE-DYNAMIC | §55.10 | The Level-1 inline message override on a validator (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`) must be a static string literal. Per L12 Edge F, dynamic expressions / interpolations defeat i18n tooling extraction (messages must be statically discoverable). Use a static literal here, OR define a project-registered message via `data.registerMessages` (Level 2), OR use the `<match for=ValidationError>` escape hatch (Level 4). (Catalog addition S68 — A1b B13.) | Error |
+| E-VALIDATOR-DEAD | §55.5, §66.5.5 | A declaration's validators can never be observed, so they are silently dead: (a) they stand on a single-value top-level cell, which synthesizes no validity surface (§55.5 Edge A) — bound or not; or (b) they stand on a child field that no `bind:` targets — a validator reaches the page only through the element that binds its value, and the bind is always written (dpa-058 items (1)/(2)). Resolution: make the value a validated child field of a declaration and bind it in its `renders` (`renders <input bind:value=@email/>`). **Provenance:** ruling:user-voice-scrml.md S442 "RULED — dpa-058 (O25) = all PA recs", item (5) — *"Silently dead validators become errors"*. (Named S444; emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`fieldVals`, `validatorPass`); impl#1: **Nominal / not yet emitted** — impl#1 carries it, §34.0.) | Error |
+| E-VALIDITY-NO-SURFACE | §55.5 | A read of a synthesized validity property — `isValid`, `errors`, `touched`, `submitted` — on a cell that has no validity surface: a single-value top-level cell (§55.5 Edge A). Only a declaration and its child fields synthesize the surface (§55.5, §55.6). **Provenance:** ruling:user-voice-scrml.md S442 "RULED — dpa-058 (O25) = all PA recs", item (5) — "`@x.isValid` on a no-surface cell → an error". (Named S444; emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveMember`); impl#1: **Nominal / not yet emitted** — impl#1 carries it, §34.0.) | Error |
 | E-VALIDATOR-INLINE-COLON | §55.10, §41.12 | The inline message override on a validator uses the COLON form (`<name req:"…msg…">`, `<name length(>=2):"…msg…">`) — this is NOT valid scrml. The §55.10-normative Level-1 inline override is the PAREN form: a trailing string-literal ARG inside the validator's parens (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`). The colon-after-validator collides with the decl scanner's `:`-handling (typed-cell annotation / §4.14 colon-shorthand) and silently corrupted state-cell `@`-access registration pre-fix (the cell then mis-reported as undeclared via a misleading E-SCOPE-001). Resolution: move the message inside the validator's parens — `req("…msg…")` not `req:"…msg…"`. The compiler recovers by registering the cell with the message as the paren-form inline override, so this is the only diagnostic on the decl. (Catalog addition S185 — g-validator-inline-msg-colon-form.) | Error |
 | E-CHANNEL-INSIDE-PROGRAM | §38.1 | **Retired 2026-05-12 (v0.3 Wave 1 direction reversal).** Pre-v0.3 fired on a `<channel>` descended from `<program>` — this is now the canonical v0.3 placement (channels live inside `<program>`). The pre-v0.3 trigger shape is no longer a violation. New v0.3 placement-direction code: `E-CHANNEL-OUTSIDE-PROGRAM`. | Error (retired) |
 | E-CHANNEL-OUTSIDE-PROGRAM | §38.1 | (v0.3 Wave 1; refined S87 Insight 30) A `<channel>` element appears at file top level IN A FILE THAT ALSO CONTAINS a `<program>` element — the "your-file-has-a-`<program>`-but-this-`<channel>`-isn't-inside-it" shape. Under v0.3, when a file declares `<program>`, channels in that file SHALL be descendants of `<program>` (the canonical placement). Move the `<channel>` declaration to be a child of `<program>`. **Module-file dispensation (S87):** a `<channel>` at file top in a file that contains NO `<program>` element (the PURE-CHANNEL-FILE shape per §38.12.6) is canonical and does NOT fire this code — module-file channels are admitted per the engine-parity precedent (§21.8 / B14). (Direction REVERSED from pre-v0.3 `E-CHANNEL-INSIDE-PROGRAM`.) | Error |
@@ -20802,12 +21853,13 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-CTRL-011 | §17.4 | `for (... in ...)` is not a valid scrml loop form. scrml iterates values via `of`: `for (item of @items)`. The `in` keyword iterates object keys in JavaScript and does not appear in scrml's vocabulary. (Catalog addition S64 audit; emitted at `compiler/src/ast-builder.js:4087-4093, 6517-6519`) | Error |
 | E-FOR-UNPARENTHESIZED-HEAD | §17.4, §17.4a | (S308.) A braceless (unparenthesized) `for … of` loop head — `for x of @items { ... }` or `for x of @items lift ...` — written without the parentheses the canonical form requires (§17.4a `**Syntax:**` `for (let x of collection) { ... }`). The braceless-head parse branch handles only the legacy English `in` form (`for item in @items { ... }`, value-iteration); a braceless `of` is NOT consumed, so `collectExpr` mis-reads the iterable as the bare token `of` and codegen emits `for (const x of of)` — valid to `node --check`, but a `ReferenceError: of is not defined` at module-eval (a silent-broken bundle: exit-0 compile, dead page). **Reject + recover:** fires this code once per offending head and RECOVERS by consuming the `of` and collecting the real iterable, so no broken loop is emitted and downstream analysis does not cascade. **Does NOT fire:** the canonical parenthesized `for (x of @items) { ... }`; the legacy braceless English `for item in @items { ... }` form (left unchanged); a `for (... in ...)` inside parentheses (that is `E-CTRL-011`). Emitted in the for-statement parse path at `compiler/src/ast-builder.js` (the braceless-head branch). Partitions into `result.errors`. | Error |
 | E-CONDITION-HEAD-UNPARENTHESIZED | §49.2.3, §50.2.1, §50.2.3 | `provenance: spec:§50.2.3-the-outer-parens-are-the-while-condition's-required-parens` (S414.) **An `if` or `while` condition head whose outermost `(` closes and whose condition then CONTINUES past it** — `while (n + 1) < 4 { ... }`, `if (n + 1) < 4 { ... }`, `while (a) && (b) { ... }`. §49.2.1 (`'while' '(' expression ')'`) and §50.2.1 (`while-stmt`, `if-stmt-logic`) make the parens the CONDITION's own delimiters, and §50.2.3 says so in words — "the outer parens are the while condition's **required** parens" — so the parens must wrap the WHOLE condition and these heads are not legal. The canonical fix is `while (n + 1 < 4)` or `while ((n + 1) < 4)`. ⚑ **THE SYMPTOM WAS SILENT, WHICH IS WHY THIS IS AN ERROR AND NOT A WARNING.** The head collector stopped the instant the outermost `(` closed, so everything after the `)` was DROPPED — and because that remainder includes the `{`, the whole body went with it: `while (n + 1) < 4 { n = n + 1 }` emitted `while (n + 1) {\n}` at **exit 0 with zero diagnostics**, an infinite loop whenever the condition depends on the body; `if (n + 1) < 4 { n = 0 }` silently lost its branch the same way; `while (a) && (b) { ... }` produced no artifact and a confusing downstream `E-CODEGEN-INVALID-LOGIC`. ⚑ **ONE DEFECT, TWO ARRIVAL DATES, ONE ROOT.** `if` has used `collectIfCondition()` all along and truncated identically on both sides of #933; the three `while` parse sites inherited the truncation when #933 switched them there from `collectExpr("{")`. The fix is in the collector, so `if` and all three `while` sites close together. ⛔ **REJECT WITHOUT RECOVERY — and unlike `E-FOR-UNPARENTHESIZED-HEAD` above, this code deliberately does NOT repair the head.** It fires ONCE per offending head and the collector then stops at the closing `)`, exactly as it did before this code existed; whatever follows is parsed as whatever follows a condition. **The emitted output for an offending head is therefore NOT meaningful — the build fails, and a correct artifact for a failed build buys nothing.** Three successively tighter recovery bounds were implemented and withdrawn, each deleting or fabricating source in a NEW shape: (1) bounded at `{`/`;`/statement keywords, an IDENT stopped nothing, so `if (a) && (b) n = 1` plus a following `n = n + 5` ate BOTH statements; (2) plus a value/operator check that accepted ANY punct, so every punctuation-starting body was eaten — `(out = 7)` absorbed as a call argument, `!flag` deleted, and `++n`/`-n`/`.ok` deleted with `b++`/`b - n`/`b.ok` **INVENTED**; (3) plus a conservative operator set — but the bound knew "can this token follow a value", not "is this OPERAND FINISHED", so after an accepted operator the scan ate the operand HEAD and stopped at its SUFFIX, landing INSIDE the author's own condition: `if (a) && b[0] { out = 7 }` emitted `if (a && b) { [0]; }` with `out = 7` deleted, and `while (i) < n >> 1 { i = i + 1 }` emitted `while (i < n) { }` — **an infinite loop, where the non-recovering parse emits `while (i) { }`, which terminates.** Recovery reproduced the very defect this code is named after. The S308 precedent is not a counter-example: its recovery is a BOUNDED LOCAL REPAIR (consume one `of`, collect the iterable); an open-ended scan over arbitrary trailing tokens is a different thing. The precedent's principle is "do not cascade", and stopping at the `)` does not cascade — it is exactly the pre-existing parse. ⚑ **THE CONTINUATION SET IS DELIBERATELY CONSERVATIVE — DO NOT WIDEN IT.** The code fires only when the token immediately after the closing `)` is one of `<` `<=` `>` `>=` `==` `!=` `===` `!==` `&&` `||` `??` `*` `%` `?` — **all PUNCT, and that is the invariant.** **`/` is excluded and that exclusion is load-bearing:** a braceless `while` body may START WITH A REGEX LITERAL (`while (h) /a\sb/.test(c)`, pinned by `compiler/tests/unit/while-braceless-body-stays-in-the-loop.test.js`), and reading that `/` as division swallows the regex. `+` and `-` are excluded because they are also unary prefixes; `.`, `(` and `[` because each can also begin a statement; `:` because of labels and ternary alternates. ⚑ **`is` IS EXCLUDED TOO, AND A CUT THAT INCLUDED IT WAS A FALSE REJECTION.** The §11 type-test operator is the only continuation candidate that is WORD-shaped, so it is also a legal ordinary identifier — and the lexer classifies `is` context-free as KEYWORD (`tokenizer.ts` KEYWORDS) with a demotion pass for `match` ONLY. Nothing at this site can therefore distinguish `(x) is Foo` from a user's `function f(is) { if (n < 3) is(n) }`; MEASURED, both an IDENT-or-KEYWORD arm and a KEYWORD-only arm reject that program (which compiles on base) and DELETE the `is(n)` call. A set member that cannot fire correctly is worse than an absent one, so `is` is absent. Every excluded token keeps the pre-S414 behaviour exactly. **Does NOT fire:** `while (n + 1 < 4)` / `if (n + 1 < 4)` (condition fully inside the parens); `while ((n + 1) < 4)` (redundant inner parens, the outermost closes at the end of the head); the §50.2.3 double-parens assignment form `while ((x = expr))` / `if ((x = expr))`; the unparenthesized `while cond { ... }` form (it never reaches this branch — `collectIfCondition` falls back to `collectExpr("{")`); any braceless body (#933), **including one that starts with a regex literal**. ⚑ **Population at landing: ZERO of 2,553 tracked corpus `.scrml` files**, so this newly-rejecting change migrates nothing. Emitted in `collectIfCondition()` at `compiler/src/ast-builder.js`, which serves `parseOneIfStmt` and all three `while` parse sites. Partitions into `result.errors`. ⚑ **THE `export` SWALLOW IS CLOSED (S430).** Until S430 this code — like every ast-builder parse-path diagnostic — reached neither stream inside an `export`-ed declaration: the export synth re-parse (`ast-builder.js`, the `_subErrors` site) surfaced only `E-FN-EQUALS-BODY` and discarded the rest, and an exported GENERATOR (`export function *k`, `export function* k`, `export server function* k`) was not re-parsed at all, because the export-decl name matcher required `function <name>` and missed the `*`. Both are closed: the code now fires inside `export function` / `export function*` (every spelling) / `export fn` / `export server function` / `export pure fn`, and inside any `function` nested in one, exactly as it fires on the un-exported declaration. ⚑ **ONE REGION IS STILL NOT COVERED, AND IT IS NOT AN `export` ISSUE:** the body of a block-bodied arrow or function EXPRESSION (`const g = () => { … }`, `const g = function() { … }`, exported or not) is never statement-parsed by the ast-builder — it is carried as an escape-hatch expression — so no parse-path diagnostic fires inside it. For this head shape a WRITING build (`write: true`, the CLI) fails later as `E-CODEGEN-INVALID-LOGIC`; a non-writing compile (`write: false`) reports NOTHING and exits clean. (The S414 measurement listed `export const g = () => …` as a swallow case; it is this gap instead.) Closing the swallow newly failed 6 of 2,577 tracked corpus files (13 changed) — `docs/changes/s430-p2-export-swallow/`. Tests: `compiler/tests/unit/loop-head-truncated-at-first-close-paren.test.js`. | Error |
-| E-CONTROL-FLOW-IN-MARKUP | §17.4, §7 | (S203 — bare-control-flow-in-markup-diagnostic-2026-06-17.) A bare control-flow STATEMENT — `for (...) { ... }`, `if (...) { ... }`, or `while (...) { ... }` — appears directly in a **markup body** without being wrapped in a `${ ... }` logic block. Per §17.4 (Tier-0 iteration is `${ for/lift }`) and §7 (control flow lives in a logic context), control flow in a markup body MUST be inside a `${ ... }` logic block. A bare `for`/`if`/`while` directly in a markup body is NOT recognised as logic (the §40.8 default-logic auto-lift fires only at `<program>`/`<page>`/`<channel>` direct-child roots, never nested markup; `BARE_DECL_RE` matches declaration keywords only) — pre-fix the whole construct, INCLUDING its inner `${...}` interpolations, was classified as inert `[text]` and SHIPPED RAW into the DOM (a silent-accept). **Reject + recover** (user ruling (a), S203): fires this code ONCE per offending construct and RECOVERS by dropping the raw-text emission — the construct ships NEITHER `for(){}` NOR `${...}` into the DOM. **Does NOT fire:** the canonical `${ for (...) { lift ... } }` form (a `${ }` logic block, not a markup text run); a `<program>`/`<page>`/`<channel>` direct-child default-logic root — ⚑ **NOT because that locus is safe, but because this diagnostic does not reach it: see the S378 correction at the end of this row. Do not read this entry as coverage**; an `if=`/`show=`/`else-if=` attribute condition (§17.0 — an attribute, not a body construct); the `<each>`/`<match>` structural elements; or control flow already inside a `${ }` / logic block. The diagnostic suggests the canonical `<ul>${ for (x of @items) { lift <li>${x}</> } }</>` (Tier-0, §17.4) and names the Tier-1 `<each in=@items>` alternative (§17.7). Sibling of E-UNQUOTED-DISPLAY-TEXT (§4.18.7, S111) — a "bare X in a body that needs a specific wrapping" diagnostic. Emitted by `liftBareDeclarations` at `compiler/src/ast-builder.js` (the markup-text recognition site, gated `parentType === "markup"`; see `BARE_CONTROL_FLOW_IN_MARKUP_RE`). Partitions into `result.errors`. ⚑ **S378 CORRECTION (Rule 4), AND THE HOLE IT EXPOSES IS OPEN.** This row previously listed the default-logic root under **Does NOT fire** giving as its reason that *"the §40.8 auto-lift handles it."* **It does not** — `parentType === "markup"` is the COMPLEMENT of the §40.8 locus, and the auto-lift covers DECLARATIONS only (§40.8, S123 amendment), so that locus is covered by **NEITHER** the lift nor this code: `<program>` + `if (1) { }` compiles at exit 0 and ships the statement into `<body>` as page text, taking with it every diagnostic its contents would have raised. Ruling 3 (user-voice **S375**) directed BOTH halves — correct the claim, and extend the diagnostic to this locus. ⚑ **THE CORRECTION IS LANDED HERE; THE EXTENSION IS HELD** (bryan, **S383**: *"land the stable half"*), so **this row describes ONE locus — a markup body — and that is the current, complete truth of what fires.** The extension was held because extending the LOCUS does not extend the COVERAGE: the recognizer requires a `{`, and at the pre-existing markup locus `if (@a) log(1)`, `switch (@a) { }`, `outer: for (…) { … }` and `do { … } while (@a)` all ship raw source into the DOM today. A braceless control-flow statement cannot be separated from prose by any text-level recognizer — `if (@a) log(1)` vs `if (you ask) we deliver` differ only in whether the tail is code or prose — and prose at a default-logic body-top renders and is a working shape (S368 refused *"diagnose every non-declaration run"* on exactly that ground). **Closing the class is a grammar-derived arc over the parsed tree, and a wider regex is not it.** Problem statement + fixture corpus + the recognizer post-conditions earned across five review rounds: `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`. Direction of change when it lands: **newly-rejecting**, owing its own measured migration. | Error |
+| E-CONTROL-FLOW-IN-MARKUP | §17.4, §7 | (S203 — bare-control-flow-in-markup-diagnostic-2026-06-17.) A bare control-flow STATEMENT — `for (...) { ... }`, `if (...) { ... }`, or `while (...) { ... }` — appears directly in a **markup body** without being wrapped in a `${ ... }` logic block. Per §17.4 (Tier-0 iteration is `${ for/lift }`) and §7 (control flow lives in a logic context), control flow in a markup body MUST be inside a `${ ... }` logic block. A bare `for`/`if`/`while` directly in a markup body is NOT recognised as logic (the §40.8 default-logic auto-lift fires only at `<program>`/`<page>`/`<channel>` direct-child roots, never nested markup; `BARE_DECL_RE` matches declaration keywords only) — pre-fix the whole construct, INCLUDING its inner `${...}` interpolations, was classified as inert `[text]` and SHIPPED RAW into the DOM (a silent-accept). **Reject + recover** (user ruling (a), S203): fires this code ONCE per offending construct and RECOVERS by dropping the raw-text emission — the construct ships NEITHER `for(){}` NOR `${...}` into the DOM. **Does NOT fire:** the canonical `${ for (...) { lift ... } }` form (a `${ }` logic block, not a markup text run); a `<program>`/`<page>`/`<channel>` direct-child default-logic root — ⚑ **NOT because that locus is safe, but because this diagnostic does not reach it: see the S378 correction at the end of this row. Do not read this entry as coverage**; an `if=`/`show=`/`else-if=` attribute condition (§17.0 — an attribute, not a body construct); the `<each>`/`<match>` structural elements; or control flow already inside a `${ }` / logic block. The diagnostic suggests the canonical `<ul>${ for (x of @items) { lift <li>${x}</> } }</>` (Tier-0, §17.4) and names the Tier-1 `<each in=@items>` alternative (§17.7). Sibling of E-UNQUOTED-DISPLAY-TEXT (§4.18.7, S111) — a "bare X in a body that needs a specific wrapping" diagnostic. Emitted by `liftBareDeclarations` at `compiler/src/ast-builder.js` (the markup-text recognition site, gated `parentType === "markup"`; see `BARE_CONTROL_FLOW_IN_MARKUP_RE`). Partitions into `result.errors`. ⚑ **S378 CORRECTION (Rule 4), AND THE HOLE IT EXPOSES IS OPEN.** This row previously listed the default-logic root under **Does NOT fire** giving as its reason that *"the §40.8 auto-lift handles it."* **It does not** — `parentType === "markup"` is the COMPLEMENT of the §40.8 locus, and the auto-lift covers DECLARATIONS only (§40.8, S123 amendment), so that locus is covered by **NEITHER** the lift nor this code: `<program>` + `if (1) { }` compiles at exit 0 and ships the statement into `<body>` as page text, taking with it every diagnostic its contents would have raised. Ruling 3 (user-voice **S375**) directed BOTH halves — correct the claim, and extend the diagnostic to this locus. ⚑ **THE CORRECTION IS LANDED HERE; THE EXTENSION IS HELD** (bryan, **S383**: *"land the stable half"*), so **this row describes ONE locus — a markup body — and that is the current, complete truth of what fires.** The extension was held because extending the LOCUS does not extend the COVERAGE: the recognizer requires a `{`, and at the pre-existing markup locus `if (@a) log(1)`, `switch (@a) { }`, `outer: for (…) { … }` and `do { … } while (@a)` all ship raw source into the DOM today. A braceless control-flow statement cannot be separated from prose by any text-level recognizer — `if (@a) log(1)` vs `if (you ask) we deliver` differ only in whether the tail is code or prose — and prose at a default-logic body-top renders and is a working shape (S368 refused *"diagnose every non-declaration run"* on exactly that ground). **Closing the class is a grammar-derived arc over the parsed tree, and a wider regex is not it.** Problem statement + fixture corpus + the recognizer post-conditions earned across five review rounds: `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`. Direction of change when it lands: **newly-rejecting**, owing its own measured migration. ⛑ **S441 — the default-logic half of this hole is CLOSED at the root, not by this code.** A `<program>` / `<page>` / `<channel>` body is code (§40.8 S441 bullet): a bare control-flow statement at its body-top — braced or braceless, `switch`, labelled, `do`/`while` — is parsed as a statement, so it is checked exactly as inside `${ … }` and never ships as page text. `E-CONTROL-FLOW-IN-MARKUP` still names ONE locus, a plain markup body, and its braceless gap there is unchanged. | Error |
 | E-EACH-BODY-DECL-UNSUPPORTED | §17.7.3, §17.7.2 | A `let` / `const` / `function` DECLARATION appears in an `<each>` body interpolation (`${ let nm = @.name }`). The each-body scope (§17.7.3) is the `@.` contextual sigil plus an optional `as` alias — NOT author-declared locals. The decl has no `exprNode`/`raw`, so codegen dropped it silently, while a later `${nm}` still lowered to a bare `String(nm)`: a dangling reference that throws inside the per-item render factory and renders the WHOLE list empty, at exit-0 with no diagnostic (a silent-broken bundle). **Reject (fail-closed), user ruling S339:** fires once per offending decl and returns, so no broken render is emitted. **Does NOT fire:** a bare field-read interpolation (`${@.field}`, or `${x.field}` with `as x`); a declaration OUTSIDE the `<each>` (the ordinary lift); a non-declaration `${expr}`. Supporting author locals in an each body (replay the binding into the per-item factory closure, like the for-lift path) is a separate §17.7.3 language-surface ruling — this row REJECTS until such a ruling lands; it does not forbid the feature. (Catalog addition S339 (peter); emitted at `compiler/src/codegen/emit-each.ts` in the logic-child handler; partitions into `result.errors`.) | Error |
+| E-EACH-NOT-SEQUENCE | §17.7.2 | `<each in=expr>` over a value that is not a sequence (§66.12.1: arrays and tuples; a map iterates through its `.entries()` / `.keys()` / `.values()` array views, §59.8). Fires only when the value is PROVABLY not a sequence: `S | not` over a sequence `S` is admitted (`not` renders `<empty>`, §17.7.4), and an unresolved `in=` type is silent (provable-or-silent). **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 3; the three SPEC-text OPEN items, #3). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles `<each in=@n>` over a `number` cell at exit 0); impl#1 carries it (§34.0). | Error |
 | E-META-EVAL-001 | §22.4 | Compile-time meta evaluation failed at runtime — the `^{}` block body threw an exception when evaluated by the meta interpreter. The error message includes the underlying runtime error. (Catalog addition S64 audit; emitted at `compiler/src/meta-eval.ts`) | Error |
 | E-META-EVAL-002 | §22.4 | Re-parsing the code emitted by a `^{}` meta block failed. The meta block produced output that is not syntactically valid scrml/JavaScript. The error message includes the underlying parse error. (Catalog addition S64 audit; emitted at `compiler/src/meta-eval.ts`) | Error |
 | E-SYNTAX-050 | §4 | Bare `/` is no longer a valid closer for an open tag. Use `</>` to close the most recently opened tag, or use the explicit form `</TagName>`. **Scoping note (S111 — quoted-text model, scope b):** this code fires from the block splitter's `looksLikeCloser` bare-`/` heuristic, which is a **free-text-mode** mechanism. Under §4.18 it continues to fire in plain-markup free-text bodies (`<p>`, `<h1>`, …), but it SHALL NOT fire inside a **code-default body** (engine state-child / match arm / `:`-shorthand body) — there a `/` is an ordinary operator character of the code-default expression grammar, not a closer-shaped token, and the free-text bare-`/` heuristic does not run. (Catalog addition S64 audit; emitted at `compiler/src/block-splitter.js`) | Error |
-| E-UNQUOTED-DISPLAY-TEXT | §4.18.7, §4.18, §4.14, §18.0.1, §51.0 | (S111 — quoted-text model, scope b.) A run of bare (unquoted) source characters appears in a **code-default body** — an engine state-child body (§51.0), a match block-form arm body (§18.0.1), or a `:`-shorthand body (§4.14) — and the run is neither a valid scrml expression (identifier, keyword, call, member access, literal, nested `<tag>` markup-as-value, `${...}` interpolation — per §4.18.2) nor a `"..."` display-text literal (§4.18.3). In a code-default body the default is code and display text is the explicit `"..."`-quoted exception; a bare prose run is therefore an error. **Fire condition:** the block splitter / tokenizer, scanning a code-default-mode body, encounters a non-whitespace run that is not valid code and not a display-text literal. The diagnostic SHALL identify the offending run and suggest wrapping it in a display-text literal (`"<the run>"`). **Does NOT fire** in free-text-mode bodies — a bare prose run in a plain-markup `<p>` / `<h1>` body is display text, unchanged. This is the enforcement code for the explicit text/code boundary the quoted-text model establishes. (Spec-ahead-of-implementation per the established §34 pattern — S68 A5-1, S78 backfill; Wave 2+ of the quoted-text-model implementation arc wires the compiler-side fire. Authority: `scrml-support/archive/changes/quoted-text-model/IMPLEMENTATION-ROADMAP.md`.) | Error |
+| E-UNQUOTED-DISPLAY-TEXT | §4.18.7, §4.18, §4.14, §18.0.1, §51.0, §40.8 | (S111 — quoted-text model, scope b.) A run of bare (unquoted) source characters appears in a **code-default body** — an engine state-child body (§51.0), a match block-form arm body (§18.0.1), a `:`-shorthand body (§4.14), or (S441) a `<program>` / `<page>` / `<channel>` body (§40.8; valid code there is a statement sequence, and a markup element is a second declared-text form; one diagnostic per maximal run of invalid statements, which raise nothing else) — and the run is neither a valid scrml expression (identifier, keyword, call, member access, literal, nested `<tag>` markup-as-value, `${...}` interpolation — per §4.18.2) nor a `"..."` display-text literal (§4.18.3). In a code-default body the default is code and display text is the explicit `"..."`-quoted exception; a bare prose run is therefore an error. **Fire condition:** the block splitter / tokenizer, scanning a code-default-mode body, encounters a non-whitespace run that is not valid code and not a display-text literal. The diagnostic SHALL identify the offending run and suggest wrapping it in a display-text literal (`"<the run>"`). **Does NOT fire** in free-text-mode bodies — a bare prose run in a plain-markup `<p>` / `<h1>` body is display text, unchanged. This is the enforcement code for the explicit text/code boundary the quoted-text model establishes. (**Wired S441** at the `<program>` / `<page>` / `<channel>` locus in both front ends — `compiler/src/ast-builder.js` `rejectBodyTopProse` and `compiler/native-parser/parse-markup.js` `rejectBodyTopProseNative`; immediate error, no §63 window, per ruling:user-voice-scrml.md S441 "declared-prose implementation: \"yes to all four\"" (*"yes to all four, your recs on the rest"*). The three code-bearing loci remain spec-ahead-of-implementation per the established §34 pattern — S68 A5-1, S78 backfill; Wave 2+ of the quoted-text-model implementation arc wires them. Authority: `scrml-support/archive/changes/quoted-text-model/IMPLEMENTATION-ROADMAP.md`.) | Error |
 | W-DISPLAY-TEXT-OVERQUOTE | §4.18.7, §4.18.1, §4.18.3, §18.0.1, §51.0 | (S181 — the inverse of E-UNQUOTED-DISPLAY-TEXT.) A `"..."` display-text literal is the **sole content** of a **plain-markup element** (an HTML element — NOT a component, NOT a scrml structural element) that is **nested inside a code-default body** (an engine state-child body §51.0, a match block-form arm body §18.0.1, or a `:`-shorthand body §4.14). The nested plain-markup element opens a **free-text body** (§4.18.1 — body modes nest), so the `"..."` the adopter wrote (correct in the enclosing code-default body) renders **literally** — the quote marks appear in the output. This surfaces the over-quoting footgun: the mirror of E-UNQUOTED-DISPLAY-TEXT, which is the UNDER-quoting case (bare prose in the code-default body itself, where a literal is required). **Fire condition:** a plain-markup element (`getElementShape(tag) !== null`) nested in one of the three code-default-body loci whose body, after ignoring whitespace-only formatting, is exactly one display-text literal (`"..."` with no interior unescaped `"`). **Does NOT fire:** a `"..."` directly in the code-default body (the CORRECT §4.18.3 display-text literal); bare free text in a plain-markup body; a `"..."` in plain markup OUTSIDE any code-default-body context; a NON-sole-content quoted string (`<p>"a" and "b"</p>` — the adopter clearly intends literal quotes); a `:`-shorthand body that IS a display-text literal (the quotes are stripped per §4.18.3 — correct, no footgun). The diagnostic SHALL suggest bare free text (`<p>On the way.</p>`). Partitions into `result.warnings` (non-fatal). Fire site: `type-system.ts` `checkDisplayTextOverquote` (the type pass — the FileAST carries the engine `bodyChildren` / match arm bodies and the wired W-/I- diagnostic stream). Reserved for promotion to a hard reject only if the under-quoting E-UNQUOTED-DISPLAY-TEXT is wired (they share the code-default-body boundary). | Info |
 | E-PARSEVARIANT-TYPE-NOT-ENUM | §41.13, §53.14 | Second argument to `parseVariant` is not a bare scrml-native `:enum` type identifier. Struct types, named-shape types, refinement-type literals, string literals, and arbitrary expressions are rejected. Resolution: pass an enum type as the second argument; for struct-shape boundary parsing, use a server-function normalization step or §53.4 SPARK boundary refinement on assignment. (Stage TS — type-system pass; catalog addition S65 — parseVariant Path-A architectural commit) | Error |
 | E-PARSEVARIANT-DISCRIMINATOR-MISSING | §41.13 | Runtime: a `parseVariant` call's input is an OBJECT that lacks a `tag` field at parse time. Surfaced via `::ParseError::MissingDiscriminator`. (A `null`/non-object/non-string input routes to `::ParseError::Malformed` instead — not a decodable object shape; S236 ruling `g-parsevariant-null-routing`.) Resolution: ensure the wire format includes the enum-variant-name discriminator; non-conforming wire shapes require server-fn normalization before `parseVariant`. (Runtime; catalog addition S65) | Error |
@@ -20906,6 +21958,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-LIFECYCLE-015 | §28.5 | `animationFrame()` called with zero arguments or a non-function argument. The function expects a single callback. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
 | E-LIFECYCLE-017 | §28.5 | `animationFrame()` called outside any element scope. The function attaches per-frame work to an enclosing element's lifecycle; without a host element it has nowhere to attach. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
 | E-LIFECYCLE-018 | §28.3 | `<request>` element has no `id` attribute. The `id` is required so the request can be addressed and cancelled. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Error |
+| E-LIFECYCLE-022 | §6.7.7 | A `<request>` `deps=` entry is not a bare `@identifier` — a member access (`@u.id`), a call, a literal, or a name without the `@` sigil — or the `deps=` value is not a `[ ]` list (`deps=@n`). Grammar: `deps-list ::= ('@' identifier (',' '@' identifier)*)?`. An explicit `deps=` overrides inference, so an unrecognized entry would otherwise leave the request mount-only with no diagnostic. Resolution: list the cell itself (`deps=[@u]` for `@u.id`), or `deps=[]` for fetch-on-mount-only. The "undeclared `@x`" limb of §6.7.7's statement is refused by `E-STATE-UNDECLARED` at the same entry. (Catalog addition S444; emitted at `compiler/src/codegen/emit-html.ts` via `analyzeRequestDepsAttr` in `compiler/src/codegen/reactive-deps.ts`.) | Error |
 | W-LIFECYCLE-002 | §28.1 | `<timer>` has no body (self-closing form). A bodyless timer has no observable effect; the warning surfaces probable dead code. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Warning |
 | W-LIFECYCLE-007 | §28.1 | `running=false` literal boolean on `<timer>` or `<poll>`. The literal-false form is useless — the element can never become un-paused without a reactive variable. Use `running=@flag` or remove the attribute. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Warning |
 | E-LIN-005 | §35.5 | `let` / `const` / `lin` declaration shadows an in-scope `lin` variable of the same name. Shadowing a `lin` variable prevents the compiler from determining which binding a consumption refers to. Resolution: rename the new binding, or consume the outer `lin` variable before this declaration. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts` (`checkLinShadowing`). Supersedes the retired pre-2026-04 E-LIN-005 noted in §6.7.12.) | Error |
@@ -20988,6 +22041,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-LIFECYCLE-020 | §28.4 | A `<request>` body contains more than one assignment. `<request>` is single-assignment-by-design: the lone `@var = expr` form captures the fetch result; multiple assignments would race. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3881.) | Error |
 | E-LIFECYCLE-021 | §28.4 | A `<request>` body contains logic but no `@var = expr` capture. The fetch result is silently discarded. Resolution: add the assignment (`@var = fetchResult(...)`) or remove the logic. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3882.) | Error |
 | E-LIFECYCLE-022 | §28.4 | A `<request>` `deps=` entry names an undeclared variable or a non-`@` variable. The `deps=` list participates in re-fetch invalidation; entries must resolve to declared reactive variables. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3883.) | Error |
+| E-REQUEST-CACHE-NO-READSET | §6.7.7.2 | The bare `cache` attribute is placed on a `<request>` that has no compiler-derivable read-set — a `url=` or `api=` request. `cache` is legal only where the compiler can derive staleness; there is no author-TTL fallback. Resolution: remove `cache`, or fetch through a server function whose SQL the compiler can see. **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 2 (+4) — *"(i) and yes"*. **Nominal / spec-ahead — not yet emitted; lands with the impl** (impl#1 carries the divergence; the bootstrap builds it). | Error |
 | W-LIFECYCLE-003 | §6.7.10, §28.1 | A `<timer>` or `<poll>` is declared inside a `for`/`lift` loop body. N loop iterations produce N independent ticking instances; the resulting count and lifetime are usually unintended. Resolution: hoist the element to outside the loop, or confirm via a comment that N instances is intentional. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4323.) | Warning |
 | W-LIFECYCLE-004 | §28.1 | A `<poll>` body contains no function call. A poll with a body that mutates only local variables has no observable effect; the warning surfaces probable dead code. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4324.) | Warning |
 | W-LIFECYCLE-005 | §28.1 | A `<timer>` or `<poll>` body calls a server function and the `interval` is shorter than 500 ms. High-frequency server polling is almost always a footgun (latency variance, retry storms, cost). Resolution: relax the interval, switch to `<channel>` for server-push, or annotate the long-polling pattern explicitly. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4325.) | Warning |
@@ -21031,6 +22085,8 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-SCHEMA-009 | §39.12 | The database file referenced by `<program db=...>` exists on disk but is not a valid SQLite file. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16982.) | Error |
 | E-SCHEMA-010 | §39.5.8 | A `oneOf([...])` / `notIn([...])` item on a `<schema>` column is not a scrml literal — in practice a BARE IDENTIFIER (`oneOf([user, admin])`). §39.5.8 lowers each item to its SQL literal form, and a bare word lowers to a SQL IDENTIFIER, so the migration fails at apply with `column "user" does not exist`. Resolution: quote the value (`oneOf(["user", "admin"])`), or use a numeric / boolean / bare-variant (`.Admin`) literal. RULED S288 — reject rather than widen a bareword into a string: rejecting is the reversible direction and the corpus migration was measured at zero. (Catalog addition S288; emitted at `compiler/src/gauntlet-phase1-checks.js` via `findNonLiteralSetItems`.) | Error |
 | E-SCHEMA-011 | §39.5.5 | A `<schema>` column writes `references` but no foreign key parses. §39.5.5 declares exactly ONE production — `references <table>(<column>)`, table name OUTSIDE the parentheses — and every other shape (the dot-in-parens `references(owners.id)`, a spaced `references owners (id)`, a bare `references owners.id`) was silently DROPPED: the column compiled and migrated clean with no `REFERENCES` clause and no diagnostic. An adopter declared 34 foreign keys in a real 19-table ledger schema and got zero rows in `pg_constraint`; an INSERT naming a non-existent parent was accepted. Resolution: write `references <table>(<column>)`. RULED S290 — reject rather than accept a second form: accepting is newly-ACCEPTING beyond the contract (§8 one-way door) while rejecting is recoverable, and the migration was MEASURED at 17 sites, every one of them scrml's own docs/spec. (Catalog addition S290; emitted at `compiler/src/gauntlet-phase1-checks.js` from `parseColumns`'s `malformedReferences`.) | Error |
+| E-SCHEMA-012 | §39.2, §14.8.10 | `provenance: ruling:user-voice-scrml.md S435 "1 both"` **A raw `CREATE TABLE` head in a `<schema>` body names a schema/database-QUALIFIED table** — at any qualifier count (`public.assets`, `mydb.public.assets`), any identifier quoting, any whitespace/comments around the `.`, after any table-kind modifier or `IF NOT EXISTS`. Every `<schema>` consumer (the §14.8.10 tenant floor, the §14.8.9 protect floor, the shadow DB) keys a table by its unqualified name, so a qualifier can only be dropped (collapsing `a.assets`/`b.assets` onto one key) or leave the table undeclared — and an undeclared `tenant_id` table is a silently inert tenant isolation floor at exit 0. Both shipped: the two-qualifier form matched no recognizer (gap `g-tenant-floor-inert-for-a-two-qualifier-create-table`; with a second table present not even `W-SCHEMA-NO-TABLES-DECLARED` fired) and the one-qualifier form was accepted by stripping. RULED S435 — reject both, fail-closed, until the qualifier has an identity model. Resolution: write `CREATE TABLE <name> (…)` and select the schema through the connection (e.g. Postgres `search_path`). A `.` inside one quoted identifier (`"a.assets"`) is not a qualifier. The head is read STRUCTURALLY — `CREATE` (word-initial: not preceded by a letter, digit or `_` — a `$` delimiter does not count), at most three ASCII words, `TABLE`, then a name chain of Unicode-letter/digit/`_`/`$` or quoted parts — so the qualifier count is reported, never a shape the reader can skip; a head whose modifier words fall outside the §39.2 table-kind set is held to this code only when it reads as a head (a readable name plus a valid follower). The diagnostic is not raised for a head inside the forms §39.2 lists (`--`, closed `/* */`, one-line `'…'`/`"…"`, `pattern(/…/)`); `//`, any `"""` span and backticks are NOT exempt. Known fail-closed false positives: a `//`-commented qualified head, and a qualified head inside a SECURITY-DEFINER `fn` `"""` body (gap `g-secdef-fn-body-ddl-false-positive`). The FLOORS still read every head wherever it is, so the per-body harvest is a superset of the pre-S438 harvest by construction (pinned by a generated-sweep test). An UNREADABLE head is the separate code `E-SCHEMA-013`. Migration MEASURED S438: zero authored `.scrml` uses in the scrml repo, `flogenceP` and `assetManagement`; a 169-file corpus differential (base vs branch, codes + tenant-tag counts) is identical. (Catalog addition S438; emitted at `compiler/src/gauntlet-phase1-checks.js` in the `<schema>` body checks, from `schema-differ.js` `findRejectedCreateTableHeads`.) | Error |
+| E-SCHEMA-013 | §39.2, §14.8.10 | `provenance: ruling:user-voice-scrml.md S435 "1 both"` (the fail-closed extension raised by the S438 S239 review) **A known-kind `CREATE … TABLE` head in a `<schema>` body whose table name the compiler cannot read** — the name chain does not reach the column list `(` or a name follower (`AS`, `USING`, `WITH`, `ON`, `TABLESPACE`, `PARTITION OF`, `OF`, `INHERITS`): a hyphen (`my-db.public.assets`), an empty quoted part (`"".assets`), a fullwidth `．`, a zero-width character, a nested or unterminated comment, `IF EXISTS` for `IF NOT EXISTS`. Before S438 such a head was "not a table" — no declaration, no diagnostic, and for a `tenant_id` table a silently inert §14.8.10 floor — so it is rejected fail-closed rather than skipped. A distinct code from E-SCHEMA-012 because "could not read the name" is a different defect from "the name is qualified". "Known-kind" = the words between `CREATE` and `TABLE` are all in the §39.2 table-kind set (none, `TEMP`, `TEMPORARY`, `GLOBAL`, `LOCAL`, `UNLOGGED`, `VIRTUAL`, `FOREIGN`, `OR REPLACE`), so prose such as `create the table for tenants` does not fire; the same comment/literal exemption as E-SCHEMA-012 applies (no SECURITY-DEFINER `fn`-body exemption: an unreadable head there is the same known false positive, gap `g-secdef-fn-body-ddl-false-positive`). Direction of change: newly-rejecting; migration MEASURED S438 at zero (scrml repo, `flogenceP`, `assetManagement`). Accepted fail-closed false positive: a malformed DSL line such as `create table: text` (a column name containing a space) reports here. (Catalog addition S438; emitted at `compiler/src/gauntlet-phase1-checks.js` in the `<schema>` body checks, from `schema-differ.js` `findRejectedCreateTableHeads`.) | Error |
 | W-SCHEMA-001 | §39.12 | A table declaration in `<schema>` has no primary key. Most tooling, ORMs, and migration assumptions presume a primary key; the absence is surfaced as a warning. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16983.) | Warning |
 | W-SCHEMA-002 | §39.12 | The migration diff between the desired schema and the live database contains a destructive operation (`DROP TABLE` or `DROP COLUMN`). Destructive migrations are not auto-applied; the warning surfaces them for adopter review. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16984.) | Warning |
 | W-SCHEMA-003 | §39.12 | The compiler generated TypeScript / scrml types from the desired-state `<schema>`, but the live database is currently out of sync with that schema. The emitted types describe the desired shape, not the current shape. Resolution: run `bun scrml migrate` to bring the live database in line. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16985.) | Warning |
@@ -21093,6 +22149,10 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | I-AUTH-REDIRECT-UNRESOLVED | §40.1.1, §34 | Info-level: an `<auth>` / `<page auth=>` / `<program auth=>` gate carries a `redirect=` / `else=` / `loginRedirect=` target path string that does NOT match any URL pattern in the file set's `RouteMap.pages`. The gate REMAINS LEGAL at runtime (per OQ-A2-E + OQ-A3-B (a) S90 ratification the redirect target is the page author's concern, not a compile error) — the lint surfaces a probable typo or unimplemented route so adopters can confirm intent. Fires from the A-3.4 cross-ref pass (`compiler/src/auth-graph.ts` `crossRefRedirects`). Resolution: rename the redirect path to match an existing page URL pattern, OR add the missing page route. (Catalog addition S91 A-3.5; full prose at §40.1.1.) | Info |
 | W-AUTH-PAGE-INFERRED | §40.1.1, §34 | Info-level: a `<page>` element under a `<program auth="required">` enclosing scope lacks an explicit `auth=` attribute. Per OQ-A3-C (b) S90 ratification (explicit-per-page-only inheritance + lint nudge) the gate is NOT auto-inherited at the closure-analysis layer — program-level auth still enforces at the request boundary, but the closure-analyzer ships the page ungated. The lint nudges adopters to add explicit per-page `auth=` so closure analysis can classify the page accurately. Fires from the A-3.3 classifier (`compiler/src/auth-graph.ts` `classifyGates`). Resolution: add `auth="required"` (or the appropriate per-page value) to each `<page>` element, OR accept the program-level boundary enforcement as the sole gate. (Catalog addition S91 A-3.5; full prose at §40.1.1.) | Info |
 | W-AUTH-LOGIN-MISSING | §40.1.1, §40.9.11, §52.13 | Warning-level: a compilation unit contains one or more auth gates (`<program auth=>`, `<page auth=>`, `<auth role=>`, `<channel auth=>`) that declare a redirect target (`loginRedirect=` / `redirect=` / `else=`) but NO page in the compilation unit's `RouteMap.pages` matches ANY of the targets the gates name. Distinct from `I-AUTH-REDIRECT-UNRESOLVED` — that fires per-gate at INFO when one specific redirect path does not resolve; `W-AUTH-LOGIN-MISSING` fires AT MOST ONCE per compilation at WARNING level when the structural gap is TOTAL (no working login page exists anywhere). Fires from the A-3.4 cross-ref pass (`compiler/src/auth-graph.ts` `crossRefRedirects`) after the per-gate sweep, anchored at the first redirect-naming gate. Per OQ-1 two-tier severity ratification (docs/changes/03-contact-book-auth-redirect-SCOPING/SCOPING.md §5): the info-level per-gate signal is too quiet to surface the structural gap loudly enough; the warning loudly nudges adopters at compile time so the runtime-302-to-404 silent-failure window closes. The redirect target remains the page author's concern per OQ-A2-E (no entry-point synthesis); the warning points adopters at `scrml generate auth` to scaffold a working login page. Resolution: author a `<page>` at the gate's redirect target path (default `/login`), OR run `scrml generate auth` to scaffold one keyed to the project's `<db>` schema, OR drop the auth declaration if auth is not actually wired. (Catalog addition S91 03-contact-book-auth-redirect; full prose at §40.1.1 + §52.13.) | Warning |
+| W-AUTH-FILE-CONFLICT | §40.2, §52.13 | Warning-level: one file declares `auth="required"` at one site (its first top-level `<program>` or a `<page>`) and a laxer `auth=` (`"optional"` / `"none"`) at another. A route is one file and one served document, so the stricter declaration wins — the whole route (its document and every server function in the file) requires authentication and the laxer declaration has no effect. The message names both declarations with their positions. Resolution: move the public content to its own page file, or make the declarations agree. Emitted by route inference (`compiler/src/route-inference.ts` Step 8d). Provenance: S443 review F2 · rationale:one-route-per-file-fail-closed · pending-ruling:bryan-S443. | Warning |
+| W-AUTH-REDIRECT-LOOP | §40.2, §52.13 | Warning-level: an `auth="required"` route's unauthenticated-request redirect target (the application's top-level `<program>`'s `loginRedirect=`, default `/login`) is that route itself — compared CASE-SENSITIVELY (routing is case-sensitive; S443 r3 F5), ignoring a trailing `/`, a `.html` suffix and any query/fragment — so an anonymous request redirects in a loop and never reaches a login form (e.g. a `pages/login.scrml` declaring `<page auth="required">`). Resolution: give the login page `<page auth="optional">` or `<page auth="none">`, or point the `<program>`'s `loginRedirect=` at a page that does. Emitted by route inference (`compiler/src/route-inference.ts` Step 8e). Provenance: S443 review F3. | Warning |
+| W-AUTH-LOGIN-REDIRECT-AMBIGUOUS | §40.2, §52.13 | Warning-level: the build has no single application `<program>` (§40.2 — zero or several web-application files with a top-level `<program>` outside `pages/` / `routes/`) and its `<program>`s declare different `loginRedirect=` values, so a page scope (an explicit `<page auth="required">`, an inherited member page, or a `protect=`-escalated unit) redirects unauthenticated requests to the §52.13 default `/login`. Fires at most once per build, only when some page scope used that fallback; names the conflicting values. Resolution: build one application per output directory, or make the values agree. Emitted by route inference (`compiler/src/route-inference.ts` Step 8f). Provenance: S443 round 3 (review nit). | Warning |
+| W-AUTH-REQUIRED-NOT-INHERITED | §40.2, §40.8 | Warning-level: a `<program auth="required">` is a route file's own `<program>` — its file is under the build root's `pages/` or `routes/` (§40.2: route files are classified by their path RELATIVE TO THE BUILD ROOT, never by a directory above it) — so it gates only its own file, and no required application `<program>` covers the build's member pages: none is identified (§40.2: "When the build has zero such files … nothing below is inherited") or the identified one does not declare `auth="required"`. Fires once per such `<program>`, only when at least one member page (a `<page>` or bare-markup route file, not a `_layout.scrml`, declaring no recognized `auth=`) is therefore served WITHOUT authentication; names those pages, the build root used, the file's path relative to it, and whether the root was given (`compileScrml`'s `buildRoot`) or inferred from the entry file (§40.8 "The build root"); the message says how to make the intended file the entry file. Does NOT change what is gated (the §40.2 outcome stands); it says the outcome out loud. Resolution: declare `<program auth="required">` in the application's entry file at the build root, or write `<page auth="required">` in the route file if only that route requires sign-in. Emitted by route inference (`compiler/src/route-inference.ts` Step 8c-warn). Provenance: spec:§40.2 (fail-closed ambiguous-application rule) · review:S443-post-merge-1173b-F2 (`g-required-program-with-no-identified-app-root-is-silent`). | Warning |
 | W-AUTH-MIDDLEWARE-AUTO-INJECTED | §40.1.1, §12.2 | Warning-level: a compilation unit declares `protect=` fields but carries NO explicit `auth=` attribute on either `<program>` or any `<page>`. The compiler auto-injects auth middleware (`auth="required"`, `csrf="auto"`, `sessionExpiry="1h"`, `sessionSecure=true`) and warns so the adopter knows a gate was chosen FOR them. Does NOT fire when an explicit `auth=` exists at either level — an explicit `auth="optional"`/`"none"` is honoured and never escalated (that override was the `g-protect-overrides-page-auth` defect), and an explicit `auth="required"` registers the gate without the warning because the declaration is already explicit. Fires from Step 8b (`compiler/src/route-inference.ts`). **ALLOCATED S299 — this meaning previously shared `W-AUTH-001`**, which §52.11 defines as the unrelated "`<var server>` has no detectable initial load" guarantee fired from `type-system.ts`. One code, two unrelated meanings, only one documented — the same shape as the `E-IMPORT-007` triple-allocation, and resolved the same way bryan ruled that one (S297): allocate fresh rather than renumber the documented diagnostic, because additive is `inert` for existing source while renumbering is `semantics-changed` on a code adopters may key on. `W-AUTH-001` keeps its §52.11 meaning unchanged. Named rather than numbered — `W-AUTH-003` is free but sits in a gap beneath a used `W-AUTH-004`, and a skipped number is a retired-code hazard; the family already uses semantic names. | Warning |
 | W-AUTH-CONTENT-NOT-GATED | §34, §40.9.5 | Warning-level (security footgun): an `<auth role="X">` element is present in the compilation. `<auth role=>` gates only the JS mount/behaviour of its subtree (and only under `--emit-per-route`, which produces per-(entry-point, role) JS chunks) — it does NOT withhold served HTML content. The gated markup is emitted VERBATIM into the HTML payload by `emit-html.ts` (the `<auth>` element passes through as a literal tag and its children render as static markup) and is therefore visible to ALL viewers, regardless of role, including under `--emit-per-route` — that mode role-splits JS BEHAVIOUR only; the shared HTML still carries the gated subtree. The reachability solver DOES compute per-role visibility (`reachability-solver.ts` `computeAuthGatedBoundariesVisibleTo` / `isVisibleForRole`) but that verdict is consumed only by the route-splitter to scope JS mount sets — HTML emission never consults it. The warning is honest in BOTH modes: it does NOT claim `--emit-per-route` closes the content leak. Fires once per `<auth role=>` site (anchored at the gate span) from the A-3.5b content-lint pass (`compiler/src/auth-graph.ts` `flagContentNotGated`), for any auth-role-block gate that names a `role=` value. A bare `<auth>` or check-only `<auth check=>` (no `role=`) is out of scope (see E-AUTH-GRAPH-004 / W-AUTH-RUNTIME-FALLBACK). Resolution: do NOT rely on `<auth role>` for content secrecy — enforce sensitive gating server-side (e.g. branch in a server-fn / page loader on the authenticated role and omit the sensitive markup from the response body). The gate remains LEGAL — it is a JS-mount optimization, not a content-visibility control. (Catalog addition — GITI-027 part A; full prose at §40.9.5.) | Warning |
 | W-EACH-PROMOTABLE | §17.X (NEW per S130), §56 | Info-level lint: a `${ for (let x of @cell) { lift <markup/> } }` site is the Tier-0 iteration form per HU-1; the Tier-1 structural form `<each in=@cell as x>...</each>` (NEW SPEC §17.X) is more discoverable, composes with the `<empty>` sub-element + inferred `key=`, and is the canonical iteration shape per the S130 HU-1 ratifications. The lint message names the suggested mechanical promotion target (`<each in=@cell as x>...</each>`) and cross-refs the `bun scrml promote --each <file>[:line]` CLI helper (Landing 3 of the 5-landing iteration arc). Tier-0 form continues to compile cleanly; the lint is informational only. Mirrors the `I-MATCH-PROMOTABLE` (§56) pattern — declaration-site promotion lint along the case-analysis / iteration tier ladders. **Fires:** emitted by `compiler/src/lint-w-each-promotable.js` (Stage 6.4c in `api.js`); conservative fire conditions — for-stmt's iterable must contain a reactive `@cell` ref AND body must contain at least one `lift-expr`. (Catalog addition S130 HU-1 iteration Landing 1; cross-ref the §17.X NEW subsection introduced in Landing 2.) | Info |
@@ -21162,6 +22222,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 |---|---|---|---|
 | E-STMT-UNEXPECTED-TOKEN | §4 | Unexpected token — no statement begins here. Core statement-grammar parse error. | Error |
 | E-STMT-MISSING-SEMICOLON | §4 | Expected `;` or a newline to end the statement. | Error |
+| E-STMT-NO-EFFECT | §40.8 | (S445 item 2.) An expression statement at the top of a `<program>` / `<page>` / `<channel>` body has **no effect** — it contains no call, no assignment, no `++` / `--`, no `send` (e.g. bare `@count`, `@a == 1`, `"Total: " + @count`, `x => y`). It is valid code that does nothing, so it is reported as that, not as `E-UNQUOTED-DISPLAY-TEXT`; the message names the declared forms for showing a value (`<span>${@count}</span>`, `"${@count}"`). A literal-only statement (`404`) is `E-UNQUOTED-DISPLAY-TEXT`; an untargeted label is `E-UNQUOTED-DISPLAY-TEXT` on the label. Emitted at `compiler/src/ast-builder.js` via `noEffectError` (default front end) and `compiler/native-parser/parse-markup.js` via `noEffectNativeMessage` (native); the judgment is the shared `compiler/native-parser/body-top-coverage.js` `liveExprHasEffect`. | Error |
 | E-STMT-UNCLOSED-BLOCK | §4 | Expected `}` to close a block statement. | Error |
 | E-STMT-STRAY-ELSE | §4 | `else` with no matching `if`. | Error |
 | E-STMT-BINDING-NAME | §4 | Expected an identifier in a binding position. | Error |
@@ -22515,6 +23576,8 @@ There is no backward compatibility shim; v0.3 is scrml as of 2026-05-12; v0.next
 
 The `auth=` attribute on `<channel>` accepts `"required" | "optional" | "none"` (per §52.13). When `auth="required"` is set, the compiler injects an `_scrml_auth_check(req)` call before `server.upgrade()` is invoked; unauthenticated upgrade requests are rejected. (Prior to S80, this attribute was named `protect=` on `<channel>`. The rename aligns channel session-gating with the canonical routing-surface vocabulary defined in §52.13; the field-level access control surface `protect=` remains on `<db>` and `<Type>` declarations per §6.12.1 and §52.)
 
+Independently of `auth=`, every channel upgrade in a web-application program refuses a cross-origin handshake (§40.2, S441 — the session cookie rides a WebSocket handshake, so the auth check alone cannot tell the viewer's own page from another site's).
+
 ### 38.6 broadcast() and disconnect() Built-ins
 
 `broadcast(data)` and `disconnect()` are available inside **any function whose declaration appears within the lexical scope of a `<channel>` body**. (Prior to 2026-06-10 this was scoped to "any server-annotated function or handler"; the `server` keyword requirement was relaxed by change-id `server-keyword-eliminate-2026-06-10` D2 — a `broadcast()`/`disconnect()` call is now itself a §12.2 Trigger-7 server-escalation signal, so the keyword that previously distinguished these functions is no longer required. The escalation circularity — "available only in server functions, but the keyword is being eliminated" — is broken by making the call the escalation signal.) This includes:
@@ -23224,6 +24287,15 @@ column-constraint ::= 'primary key' | 'not null' | 'unique' | 'default' '(' lite
 
 A `<schema>` block appears as an immediate child of the `<program>` root, alongside (not nested inside) `<db>` / `<page>` / other program children. It does not require the `src=` or `tables=` attributes of `<db>` because the database path is read from the enclosing `<program db="...">`.
 
+**Raw `CREATE TABLE` heads are unqualified.** A `<schema>` body MAY also declare a table with raw SQL `CREATE TABLE <name> ( … )` DDL (the form every §14.8.9 / §14.8.10 floor reads alongside the declarative `table-declaration`; see `W-SCHEMA-NO-TABLES-DECLARED`). *(provenance: ruling:user-voice-scrml.md S435 "1 both" — gap `g-tenant-floor-inert-for-a-two-qualifier-create-table`.)*
+
+- The table head of a raw `CREATE TABLE` in a `<schema>` body SHALL name an **unqualified** table. A head whose name carries a schema or database qualifier — at ANY count (`public.assets`, `mydb.public.assets`), in any identifier quoting (`"public"."assets"`, `` `db`.[public].assets ``), with any whitespace or comments around the `.`, after any table-kind modifier (`TEMP`, `UNLOGGED`, …) or `IF NOT EXISTS` — SHALL be a compile error (E-SCHEMA-012). A `.` inside ONE quoted identifier (`"a.assets"`) is part of that identifier, not a qualifier. An identifier part is a run of Unicode letters, digits, `_` and `$`, or one quoted identifier.
+- **What is a head.** `CREATE` (starting a word — not directly preceded by a letter, digit or `_`; a `$`, as in a `$$…$$` dollar-quote delimiter, does not count), then at most three ASCII words, then `TABLE`. A head whose words between `CREATE` and `TABLE` are all table-kind modifiers — `TEMP`, `TEMPORARY`, `GLOBAL`, `LOCAL`, `UNLOGGED`, `VIRTUAL`, `FOREIGN`, `OR`, `REPLACE` — is a *known-kind* head. A head with any other word there (prose such as `create the table for tenants`) is treated as a head only when the rest reads as one (a readable name followed by a valid follower, below).
+- A known-kind head whose table name cannot be read through to what may follow a name — the column list `(`, or `AS`, `USING`, `WITH`, `ON`, `TABLESPACE`, `PARTITION OF`, `OF` (a typed table), `INHERITS` — SHALL be a compile error (**E-SCHEMA-013**): a stray character, an empty quoted part, a non-ASCII-period separator, an unterminated or nested comment. Fail-closed: a head the compiler cannot read would otherwise declare no table, silently. *(A readable head with no column list — `OF type`, `PARTITION OF parent`, `AS query` — is accepted, and still declares no columns for the floors, exactly as before S438: gap `g-schema-no-column-list-heads-declare-nothing`.)* **Direction of change (pa-base §8): newly-rejecting;** such a head compiled before and declared nothing. Migration MEASURED S438: zero occurrences across the scrml repo, `flogenceP` and `assetManagement`. *(provenance: ruling:user-voice-scrml.md S435 "1 both" — the fail-closed extension raised in the S438 S239 review; a distinct code because "unreadable" is a different defect from "qualified".)*
+- **Comments and literals.** E-SCHEMA-012 and E-SCHEMA-013 are NOT raised for a head that lies inside: a SQL `--` line comment, a closed `/* … */` block comment, a `'…'` or `"…"` literal on one line, or a `pattern(/…/)` regex. Nothing else is exempt: a `"""` pair or a `//` in raw SQL text (`"""a"` quoted identifiers, `DEFAULT $$http://x$$`) is ordinary text, and a backtick-quoted span is a quoted identifier or a `?{`…`}` wrapper around live DDL. **Known fail-closed false positives:** (1) a qualified head in a DSL `//` comment line was recorded as reported — ⚑ S440 review: it does NOT reproduce through `scrml compile` (three probes — a `//` line above, and a trailing `//` after, a DSL table; the scrml `//` comment is stripped before the check reads the body); whether any other entry point hands the check raw comment text is unprobed; (2) a qualified or unreadable `CREATE TABLE` head inside a §14.8.11.2 SECURITY-DEFINER `fn` `"""…"""` body — runtime plpgsql, not a declaration — is reported as E-SCHEMA-012/013 (gap `g-secdef-fn-body-ddl-false-positive`, which records the repair). Both are loud, never silent, and measured at zero in the corpus. The exemption governs the diagnostics only. For the §14.8.9 / §14.8.10 floors every `CREATE TABLE` head in the body text is read as a declaration wherever it appears — including inside comments and `fn` bodies — exactly as before S438, so a comment-lookalike inside a string or regex can never remove a table the pre-S438 compiler read. Note the known consequence of that parity: a commented-out declaration is still a declaration, and because same-name declarations resolve first-wins, a commented-out copy WITHOUT `tenant_id` placed before the live table shadows it (gap `g-schema-commented-out-declaration-shadows-live-table`).
+- **Why reject rather than strip.** Every `<schema>` consumer — the §14.8.10 tenant-row isolation floor, the §14.8.9 protect floor, and the compile-time shadow database — keys a table by its unqualified name. A qualifier can therefore only be dropped (so `a.assets` and `b.assets` collapse onto one key) or leave the table undeclared — and an undeclared `tenant_id` table is a tenant isolation floor that emits nothing, at exit 0. Both have shipped: the two-qualifier form matched no recognizer and was silently inert (with no warning at all once a second table was present), and the one-qualifier form was accepted by stripping. Until the qualifier has a defined identity model, it is rejected fail-closed. The schema is selected through the connection instead (e.g. the Postgres `search_path`).
+- **Direction of change (pa-base §8): newly-rejecting** for the one-qualifier form, which compiled before; the two-qualifier form compiled to a silently inert floor, so rejecting it turns a silent security absence into a loud error. Migration MEASURED (at the ruling, and re-measured S438 against `072741ca`): **zero** authored `.scrml` files across the scrml repo, `flogenceP` and `assetManagement` use either form.
+
 **Worked example — valid:**
 
 ```scrml
@@ -23645,6 +24717,8 @@ rule); §39.1 (`<schema>` opener forms).
 | E-SCHEMA-009 | Database file exists but is not a valid SQLite file | Error |
 | E-SCHEMA-010 | A `oneOf`/`notIn` item is not a literal (bare identifier) | Error |
 | E-SCHEMA-011 | A column writes `references` but no FK parses — the only form is `references <table>(<column>)` | Error |
+| E-SCHEMA-012 | A raw `CREATE TABLE` head in `<schema>` carries a schema/database qualifier (any count) — §39.2. *(Emitted at `compiler/src/gauntlet-phase1-checks.js` in the `<schema>` body checks; full rationale in the §34 catalog row.)* | Error |
+| E-SCHEMA-013 | A known-kind `CREATE … TABLE` head in `<schema>` whose table name cannot be read — §39.2. *(Emitted at `compiler/src/gauntlet-phase1-checks.js` in the `<schema>` body checks; full rationale in the §34 catalog row.)* | Error |
 | W-SCHEMA-001 | Table declaration has no primary key | Warning |
 | W-SCHEMA-002 | Migration diff contains a destructive operation (DROP TABLE or DROP COLUMN) | Warning |
 | W-SCHEMA-003 | Types generated from `<schema>` desired state; database is out of sync | Warning |
@@ -23693,7 +24767,7 @@ The following attributes on `<program>` enable automatic middleware generation:
 |---|---|---|
 | `cors=` | `"*"` or `"https://example.com"` | CORS preflight handler (OPTIONS route) + `Access-Control-*` headers on all responses |
 | `log=` | `"structured"` \| `"minimal"` \| `"off"` | Request/response logging with timestamp, method, path, status, duration |
-| `csrf=` | `"auto"` \| `"off"` | CSRF token generation, cookie injection, and validation on state-mutating requests. With `<program auth=>` present, emits session-bound synchronizer-token validation; without auth, baseline double-submit cookie helpers are auto-emitted on routes that mutate state. See §52.13 for the canonical value set. |
+| `csrf=` | `"auto"` \| `"off"` (`"auto"` is the default whenever `auth=` is present) | CSRF token generation, cookie injection, and validation on state-mutating requests. With `<program auth=>` present, emits session-bound synchronizer-token validation; without auth, baseline double-submit cookie helpers are auto-emitted on routes that mutate state. See §52.13 for the canonical value set. |
 | `ratelimit=` | `"100/min"` \| `"N/unit"` | In-memory sliding window rate limiter per IP; 429 response when exceeded |
 | `headers=` | `"strict"` | Injects `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and `Content-Security-Policy: default-src 'self'` on all responses |
 | `idempotency-store=` | `"auto"` (default) \| `"sqlite"` \| `"postgres"` \| `"mysql"` \| `"redis"` \| `"none"` | Per-app idempotency-key store backend used by §19.9.6 replay-safety machinery. See §39.2.6. |
@@ -23703,7 +24777,26 @@ The following attributes on `<program>` enable automatic middleware generation:
 - All `<program>` middleware attributes SHALL be processed before any route handler is invoked.
 - Multiple `<program>` middleware attributes MAY be combined on a single `<program>` element. The compiler SHALL generate them in the order: CORS → rate limit → CSRF → route handler → security headers → logging.
 - The compiler SHALL generate these middleware handlers as server-side code only. None of these constructs produce client-side JavaScript.
-- A `<program>` element with none of these attributes generates no middleware infrastructure. The absence of a middleware attribute SHALL NOT be a compile error or warning.
+- A `<program>` element with none of these attributes generates no middleware infrastructure beyond the CSRF protection §39.2.3 requires by default (baseline double-submit on state-mutating routes of an app without `auth=`; `csrf="auto"` under `auth=`, next statement). The absence of a middleware attribute SHALL NOT be a compile error or warning — an absent attribute means its default applies.
+- **CSRF under `auth=` is on by default.** When a `<program>` declares `auth=` and carries no `csrf=` attribute, the compiler SHALL treat it exactly as if it declared `csrf="auto"`: the emitted server, client and HTML SHALL be those of the explicit `csrf="auto"` form. Only the literal `csrf="off"` opts out. The default fails closed: a `csrf=` literal outside the §52.13 set (which emits `W-ATTR-002`) SHALL also resolve to `"auto"`, never to "no check". Routes that are CSRF-exempt by construction keep that exemption — the `<endpoint>` foreign-facing surface (§61.7), the SSE `route=` generator (§37.3, a `GET`), and every non-state-mutating (`GET`/`HEAD`) route, including `/__serverLoad`. The WebSocket upgrade (§38) is a `GET` and is outside the CSRF token mechanism; it is protected by the Origin check in the next statement instead.
+  The same holds for a `<page auth="required">`, which is an auth scope on its own (§52.13) whether or not its file carries `protect=` fields: its served document, its compose route and every server function its file declares SHALL be gated exactly as a `<program auth="required">`'s are, and its state-mutating routes SHALL get `csrf="auto"` unless the page declares `csrf="off"`.
+  **One file, conflicting `auth=` values.** A route is a file (§47.9.2) and one served document, so a `<page auth="required">` anywhere in a file makes that file's route the gated scope, and a laxer `auth=` elsewhere in the same file — another `<page>`, or the file's `<program auth="none">` / `auth="optional"` — does not relax it; the same holds for a `<program auth="required">` with a laxer `<page auth=>` in its own file. The compiler SHALL emit `W-AUTH-FILE-CONFLICT` naming both declarations and stating that the stricter one wins.
+  > **Provenance:** ruling:user-voice-scrml.md S443 item 2 ("your recs" — one file is one route; the stricter declaration wins, W-AUTH-FILE-CONFLICT names both)
+  **The application's top-level `<program>`.** In this section and §52.13 it is the `<program>` of the application's entry file (§40.8): the one web-application file of the build (not a §64 tool) that has a top-level `<program>` and is not a route file under `pages/` or `routes/`. A `<program>` declared inside a route file is that file's own: its `auth=` governs that file only (as a `<program>` scope, above). When the build has zero such files, no application `<program>` is identified and nothing below is inherited. When it has several, the application is ambiguous and the member-page inheritance below SHALL fail closed: it applies if ANY of them declares `auth="required"`. *(S443 PA review of round 3: "several → nothing inherited" let one extra non-route file with its own top-level `<program>` un-gate every unannotated member page of a required application — measured `/about` 302 → 200.)*
+  **A required `<program>` that is not the application's.** Route files are classified by their path relative to the build root (§40.8 "The build root"), never by a directory above it. When a route file's own `<program>` declares `auth="required"` and no application `<program>` declaring `auth="required"` covers the build's member pages — none is identified, or the identified one (or, when several, none of them) declares it — the compiler SHALL emit `W-AUTH-REQUIRED-NOT-INHERITED` for that `<program>` whenever at least one member page (as defined in the member-pages paragraph below) is therefore served without authentication, naming those pages, the build root used and whether it was given or inferred from the entry file (§40.8). The warning changes nothing that is gated: the outcome above stands (a route file's `<program>` governs that file only; zero application `<program>`s means nothing is inherited).
+  > **Provenance:** spec:§40.2 fail-closed-ambiguous rule · review:S443-post-merge-1173b-F2
+  **The redirect target of a page scope.** `loginRedirect=` is not a `<page>` attribute (`E-PAGE-INVALID-ATTR`), so a page scope's unauthenticated request SHALL be redirected to the `loginRedirect=` declared on the application's top-level `<program>`, or to the §52.13 default `/login` when it declares none. When no application `<program>` is identified, the single `loginRedirect=` value declared by the build's `<program>`s applies; when they declare different values, `/login` applies and the compiler SHALL emit `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS` naming the values. This applies to every page scope: an explicit `<page auth="required">`, an inherited member page (next paragraph), and a `protect=`-escalated unit (§20.5.1). *(Before S443 round 2 every page scope redirected to `/login` whatever the program declared.)* When a gated route's redirect target is that route itself — compared case-sensitively (routing is case-sensitive), ignoring a trailing `/`, a `.html` suffix and any query or fragment — an anonymous request redirects in a loop; the compiler SHALL emit `W-AUTH-REDIRECT-LOOP` for that route.
+  **Member pages of a `<program auth="required">` are inside its scope.** When the application's top-level `<program>` declares `auth="required"`, every member route file of that application that declares no recognized `auth=` value of its own — a file with no `<program>` whose top-level markup is a `<page>` (§40.8), or top-level markup with no `<page>` wrapper, other than a `_layout.scrml` wrapper — SHALL be gated exactly as an explicit `<page auth="required">`: its served document, its compose route and every server function its file declares, with `csrf="auto"`. Only one of §52.13's three literals is a declaration: an unrecognized literal (`auth="Required"`, `auth="off"`, …, which emits `W-ATTR-002`) or a non-literal value declares nothing, and the page inherits — fail closed, as an unknown `csrf=` literal resolves to `"auto"`. A member page that declares `auth="optional"` or `auth="none"` is NOT gated by this rule: an explicit page value relaxes the application program's `auth="required"` for that page (a login or registration page must be reachable anonymously). *(Ruled by bryan, S443: "your recs" — ruling:user-voice-scrml.md S443 item 1.)*
+  > **Provenance:** spec:§52.13 + §34 W-AUTH-PAGE-INFERRED row ("program-level auth still enforces at the request boundary") · pa-ruled:S443 round 2 conformance restoration (before it, the `<program>`'s entry covered only the entry file, and an unannotated member page served its document at 200 and ran its server functions for anonymous callers). The redirect-target paragraph: pa-directed S443 round 2 (the round-1 text named "the page's `loginRedirect=`", which cannot be declared). The application-`<program>` definition, the unrecognized-literal rule, the ambiguity warning and case-sensitive loop comparison: S443 round 3 (adversarial review of 5390820dd, F1/F2/F5 — before it, any `<program auth="required">` anywhere in the build, including one inside a route file, gated every unannotated page of a public application, and a typo'd page `auth=` served the page publicly under a required application).
+  > **Provenance:** spec:§52.13 ("every request to this scope SHALL be authenticated"; `<page>` is named among the elements that accept `auth=`) · pa-ruled:S443 conformance restoration (`g-page-auth-required-protects-nothing` — before S443 a `<page auth="required">` without `protect=` fields was not registered as an auth scope at all: an anonymous `GET` served the page at 200 and an anonymous `POST` ran its server function).
+- **The WebSocket upgrade SHALL refuse a cross-origin handshake.** Every compiler-emitted WebSocket upgrade route of a web-application program (the §38 channel route `/_scrml_ws/<name>`) SHALL accept the upgrade only when the request's `Origin` names the server's own origin: the same host — taken from `X-Forwarded-Host` when a proxy sets it, else the request's own host — and the same scheme — `X-Forwarded-Proto`, else the request's — except that an `https` origin SHALL be accepted on a request that arrived as plain `http` (TLS terminated by a proxy that sets no `X-Forwarded-Proto`). Default ports compare equal to their omitted form. A mismatched origin, and the opaque `Origin: null`, SHALL be refused with `403` before the upgrade and before any channel handler runs. A handshake with NO `Origin` header is a non-browser client (a browser always sends one), which cannot carry a victim's ambient cookie; it SHALL be accepted, and the channel's own `auth=` session check (§38.5) SHALL still apply to it. The development server SHALL apply the same rule to the upgrade it proxies, before accepting the browser's socket. Because the check trusts `X-Forwarded-Host` / `X-Forwarded-Proto`, a deployment behind a reverse proxy MUST have that proxy strip or overwrite both headers on every inbound request; a proxy that passes a client-supplied value through lets a non-browser client choose the host the check compares against (a browser cannot set these headers on a WebSocket handshake, so the cross-site case stays closed either way). There is no allow-list for other origins in this version. A headless program (no cookie session) emits no Origin check.
+- **The HTML-composition route is a document request.** The request-time compose route that serves a page's first-paint HTML (§52.8 SSR pre-render; the §39.2.3 `<meta name="csrf-token">` fill, which every `csrf="auto"` scope emits) serves the SAME document as the static file. Under `auth="required"` it SHALL run the same §52.13 gate before composing anything: an unauthenticated request is redirected to `loginRedirect` and no seed query runs. It SHALL NOT be a path around the protected-document guard.
+
+> **Provenance:** ruling:user-voice-scrml.md S441 "yes on csrf auto" — *"when `auth=` is present, `csrf="auto"` is the default, written into §40.2. It fails closed, and apps that need to opt out can say `csrf="off"`."* Before S441 an absent `csrf=` under `auth="required"` emitted no CSRF check while the same app without `auth=` got the baseline double-submit gate, so adding authentication removed the CSRF gate (gap `g-auth-program-without-csrf-attr-emits-no-csrf-check`, resolved by change-id `s441-csrf-default-under-auth`).
+>
+> **Provenance (compose-route bullet):** S441 security review F1 of `s441-csrf-default-under-auth` — making `csrf="auto"` the default also made its compose route the default, and that route (dispatched before the static-file branch that carries the §52.13 guard) served an `auth="required"` page to anonymous requests at 200. Governing: §52.13 *"every request to this scope SHALL be authenticated; unauthenticated requests are redirected to `loginRedirect=`"*. The WebSocket sentence was reworded in the same review (F2) so the section does not bless the cross-site WebSocket hole.
+>
+> **Provenance (WebSocket Origin bullet):** ruling:user-voice-scrml.md S441 "yes on origin check" — closes `g-ws-upgrade-no-origin-check-cross-site-websocket-hijacking` (measured before: a cross-origin handshake carrying the session cookie opened, drove the author's `onserver:message` handler, and relayed a `__sync` write to every subscriber).
 
 #### 39.2.1 `cors=`
 
@@ -23750,6 +24843,7 @@ The compiler generates:
 - CSRF protection SHALL apply only to requests that mutate state (POST, PUT, PATCH, DELETE). GET requests SHALL NOT be subject to CSRF validation.
 - `csrf=` accepts the literal values `"auto"` and `"off"` (canonical value set defined at §52.13). Any other literal value SHALL emit `W-ATTR-002` per §52.13.2.
 - `csrf="auto"` SHALL be paired with `<program auth=>` to enable session-bound synchronizer-token validation; without `auth=`, baseline double-submit cookie helpers are auto-emitted on routes that mutate state.
+- Under `auth=`, an absent `csrf=` SHALL behave as `csrf="auto"`; only `csrf="off"` opts out (§40.2, S441).
 
 #### 39.2.4 `ratelimit=`
 
@@ -23779,6 +24873,7 @@ The compiler generates an in-memory sliding window rate limiter keyed by client 
 **Normative statement:**
 
 - `headers="strict"` is intended as a secure-by-default baseline. If the developer's application loads scripts or styles from external origins, the CSP will block them. In that case the developer MUST override the `Content-Security-Policy` via `handle()`.
+- When the document carries a §6.14.4.1 pre-paint script (a persisted `<theme for=>` mode cell, a `prepaint` cell or a `hold=` region), the compiler SHALL add that script's per-build `'sha256-…'` source to the CSP it emits: `default-src 'self'; script-src 'self' 'sha256-<base64>'` (§6.14.4.1 rule 8). The pre-paint script is compiler-emitted content, so the `handle()` override above is not the author's remedy for it. *(Added S444, Nominal / spec-ahead — ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30.)*
 
 #### 39.2.6 `idempotency-store=`
 
@@ -24044,11 +25139,35 @@ The nested `<program>` carries `title="InnerOops"`. The compiler emits `W-PROGRA
 **Normative statements:**
 
 - A scrml **application** SHALL declare its top-level `<program>` element exactly ONCE, in the application's **entry file**. The entry file is the file resolved by the build root (e.g. `app.scrml` in a single-file app, or the source root of the compilation).
+- **The build root, and which files are route files.** A route file (§40.2) is a file whose path RELATIVE TO THE BUILD ROOT has a `pages/` or `routes/` directory component; the directories above the build root SHALL NOT be consulted. When the compilation is given a build root (the `compileScrml` `buildRoot` option), that directory is the build root. When it is not (every command-line form, and a file list), the build root SHALL be read off the entry file: let *E* be the build's web-application files (not §64 tools) with a top-level `<program>`; the entry-file candidates are the members of *E* with no `pages/` or `routes/` directory anywhere in their path, or, when there are none, the members of *E* in the shallowest directory. Exactly one candidate is the entry file and the build root is its directory: route files are the files with a `pages/` or `routes/` component below it, or, when none lies below it and the directory is itself named `pages` or `routes`, the other files directly in it. Once the root is inferred, the application `<program>`s are read against it by §40.2's own definition — the entry file, and every other `<program>` file that is not a route file relative to that root — so a second such file makes the application ambiguous and the member-page inheritance fails closed, exactly as it would were the build not under a `pages`/`routes` directory. Zero or several candidates infer no build root: route files are then the files with a `pages/` or `routes/` component anywhere in their path, and the application `<program>` is as §40.2 states for zero (nothing inherited) or several (fail closed) application files. A build with no `pages`/`routes` directory above its entry file classifies identically under both readings.
+  > **Provenance:** spec:§40.2 ("not a route file under `pages/` or `routes/`") + this section ("The entry file is the file resolved by the build root") · review:S443-post-merge-1173b-F1 (`g-app-root-route-prefix-matched-on-absolute-path` — the prefix had been searched in the absolute path, so a project under any directory named `pages`/`routes` lost its application `<program>` and served its member pages anonymously) · S445 review rounds 1-3 (a directory-shape inference moved the root for flat apps, lone pages and legacy `routes/` sets; the entry-file anchor replaced it) · S445 review round 4 (the shallowest-file pick alone dropped a second non-route `<program>` from the candidates under a `pages` ancestor — `/src/pages/about` 200 there, 302 in the control; the candidates are re-read against the inferred root).
 - The `<program>` declaration SHALL NOT appear in any non-entry file of the same application. A second top-level `<program>` in any other file of the same compilation is `E-PROGRAM-002` (TBD — separate diagnostic; not part of Wave 1).
+- A second (or later) top-level `<program>` in the SAME file SHALL be `E-PROGRAM-002` (compile error). Before S443 it was silently mis-read — its `auth=`, session and middleware attributes were ignored, so a `<program auth="required">` after a plain `<program>` served its routes to anonymous callers. The cross-file case above stays reserved.
+  > **Provenance:** ruling:user-voice-scrml.md S443 item 3 ("your recs" — E-PROGRAM-002 covers the same-file case; measured 0 corpus files)
 - **Application-wide attributes** continue to live on `<program>`. These attributes are app-scope (not per-route): `title=`, `description=`, `version=`, `author=`, `license=` (documentary, §40.7); `cors=`, `cors-max-age=`, `log=`, `headers=`, `idempotency-store=`, `idempotency-ttl=`, `channel-reconnect=` (app-scope middleware, §40.2 + §38.3.1). The `<program>` is the canonical host scope for these concerns.
-- Inside `<program>`, the body parses in **default-logic mode** under v0.3. Bare top-level declarations (`<x> = 0`, `function f() { ... }`) auto-lift to the logic context without explicit `${...}` wrapping. The author MAY still write `${...}` explicitly for clarity, but redundant `${...}` at the top level of `<program>` fires `W-PROGRAM-REDUNDANT-LOGIC` (info-level lint; warning in v0.3, error in v0.4 per Q5 deprecation cycle). **S111 amendment (2026-05-20):** `default-logic` mode is a **distinct third body-mode**, owned by this section — it is neither the **free-text mode** nor the **code-default mode** of the quoted-text model's §4.18 body-mode split. The §4.18 free-text / code-default split governs only the three code-bearing loci (engine state-children, match block-form arms, `:`-shorthand bodies) versus plain markup; it does **not** classify or reclassify the `<program>` / `<page>` body. The complete body-mode picture is therefore three-way — free-text / code-default (both §4.18) and `default-logic` (this section). See §4.18.1 for the reciprocal note. (This amendment reconciles §40.8's `default-logic` statement with §4.18.1's body-mode listing; the native-parser charter deep-dive surfaced the inconsistency.)
-- **S123 amendment (2026-05-23) — auto-lift covers DECLARATIONS only, NOT writes.** Per the S122 user-voice Option-2 ratification, `default-logic` mode auto-lifts DECLARATIONS only — the structural state-decl form `<name> = expr`, the structural derived form `const <name> = expr`, function declarations (`function name() { ... }`, `fn name(...) { ... }`), type declarations (`type Name:enum = { ... }`), `let`/`const` local declarations, and `import` declarations. The bare V5-strict reactive WRITE form `@name = expr` is **NOT** a declaration — it is a write to a pre-declared cell, and writes ARE logic; logic goes in `${...}`. Bare `@name = expr` at the IMMEDIATE body-top of `<program>` / `<page>` / `<channel>` (the §40.8 default-logic-body surface) SHALL fire `E-WRITE-NOT-IN-LOGIC-CONTEXT`. The fix is either (a) wrap in an explicit logic block `${ @name = ... }`, or (b) convert to a structural declaration `<name> = ...`. This is the COMPANION amendment to V-kill (commits `c22b3fda` + `c2d2741a` + `489e5943`): V-kill killed silent auto-state-cell synthesis inside `fn` / `function` / user-written `${...}` body contexts; Unit CC closes the default-logic body-top case that V-kill explicitly carved out. **Scope discrimination:** Unit CC fires ONLY at the IMMEDIATE body-top of the synthetic default-logic auto-lift wrapper. Bare `@name = expr` nested inside a function body (`function f() { @x = 5 }`) is governed by V-kill (the V-kill default-logic-lift carve-out is preserved at the parser level to keep blast radius narrow on the 110-file unmigrated corpus). The `<db>` / `<state>` STATE-block bodies (V5-strict state-block grammar per the per-block body conventions) are NOT default-logic-mode loci and are NOT affected by Unit CC; bare `@x = []` inside `<db>` direct-child position remains canonical. **Per-file exemption surface:** `compiler/src/unit-cc-exemption-list.json` provides a path-based suppression mechanism for the pre-S123 corpus (each adopter source file removes its own entry as migration completes). The exemption is intentionally per-file (not blanket) so migration progress is visible in version control. See `E-WRITE-NOT-IN-LOGIC-CONTEXT` in §34 for the diagnostic row + cross-reference.
-- ⚑ **S378 note (ruling 3) — a bare CONTROL-FLOW statement at this body-top is a KNOWN OPEN HOLE. This bullet records it; it does not close it.** The S123 amendment above enumerates what `default-logic` mode auto-LIFTS and is otherwise silent on the COMPLEMENT, **and that silence was read as coverage**: `E-CONTROL-FLOW-IN-MARKUP`'s §34 row listed a `<program>` / `<page>` / `<channel>` default-logic root under **Does NOT fire**, giving as its reason that *"the §40.8 auto-lift handles it."* Because the lift covers DECLARATIONS only, it does not — the locus is covered by **NEITHER**, and `<program>` + `if (1) { }` compiles at exit 0 and ships the statement into the emitted `<body>` as page text, taking every diagnostic its contents would have raised with it. **This is recorded at THIS locus because its absence here is what let the defect stand.** ⚑ **No SHALL is stated, deliberately.** Ruling 3 (user-voice S375) directed the diagnostic be extended here; that extension is **HELD** (bryan, S383) because the recognizer requires a `{` and therefore cannot separate a braceless control-flow statement from prose — and prose at this body-top renders and is a working shape, which is why S368 refused *"diagnose every non-declaration run"*. Closing it is a grammar-derived arc; see the `E-CONTROL-FLOW-IN-MARKUP` row in §34 and `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`. ⚠ **Reading this bullet as narrowing the complement is the mistake to avoid.** `default-logic` mode rejects exactly ONE named shape at this body-top today — a bare write (the S123 amendment above). Everything else outside the lift set becomes page TEXT, which is correct for **prose** and is a working shape. Whether any further shape is logic rather than text is an open operator question per-shape, not an inference from this list.
+- Inside `<program>`, the body parses in **default-logic mode** under v0.3. Bare top-level declarations (`<x> = 0`, `function f() { ... }`) auto-lift to the logic context without explicit `${...}` wrapping. The author MAY still write `${...}` explicitly for clarity, but redundant `${...}` at the top level of `<program>` fires `W-PROGRAM-REDUNDANT-LOGIC` (info-level lint; warning in v0.3, error in v0.4 per Q5 deprecation cycle). **S111 amendment (2026-05-20):** `default-logic` mode is a **distinct third body-mode**, owned by this section — it is neither the **free-text mode** nor the **code-default mode** of the quoted-text model's §4.18 body-mode split. The §4.18 free-text / code-default split governs only the three code-bearing loci (engine state-children, match block-form arms, `:`-shorthand bodies) versus plain markup; it does **not** classify or reclassify the `<program>` / `<page>` body. The complete body-mode picture is therefore three-way — free-text / code-default (both §4.18) and `default-logic` (this section). See §4.18.1 for the reciprocal note. (This amendment reconciles §40.8's `default-logic` statement with §4.18.1's body-mode listing; the native-parser charter deep-dive surfaced the inconsistency.) *(**Classification superseded S441** — a `<program>` / `<page>` body is now a §4.18 **code-default** body, not a distinct third mode; see the S441 bullet below. The declaration auto-lift and `W-PROGRAM-REDUNDANT-LOGIC` stated in this bullet are unchanged.)*
+- *(**E-WRITE-NOT-IN-LOGIC-CONTEXT RETIRED S441** — the body is code (the S441 bullet below), so a bare `@name = expr` at this body-top is an ordinary write in a logic context, treated exactly as the same write inside an explicit `${ … }` there. The declaration list below still describes what the auto-lift recognizes; the SHALL-fire sentence, the Unit CC discrimination and the per-file exemption list no longer apply. Retained for provenance.)* **S123 amendment (2026-05-23) — auto-lift covers DECLARATIONS only, NOT writes.** Per the S122 user-voice Option-2 ratification, `default-logic` mode auto-lifts DECLARATIONS only — the structural state-decl form `<name> = expr`, the structural derived form `const <name> = expr`, function declarations (`function name() { ... }`, `fn name(...) { ... }`), type declarations (`type Name:enum = { ... }`), `let`/`const` local declarations, and `import` declarations. The bare V5-strict reactive WRITE form `@name = expr` is **NOT** a declaration — it is a write to a pre-declared cell, and writes ARE logic; logic goes in `${...}`. Bare `@name = expr` at the IMMEDIATE body-top of `<program>` / `<page>` / `<channel>` (the §40.8 default-logic-body surface) SHALL fire `E-WRITE-NOT-IN-LOGIC-CONTEXT`. The fix is either (a) wrap in an explicit logic block `${ @name = ... }`, or (b) convert to a structural declaration `<name> = ...`. This is the COMPANION amendment to V-kill (commits `c22b3fda` + `c2d2741a` + `489e5943`): V-kill killed silent auto-state-cell synthesis inside `fn` / `function` / user-written `${...}` body contexts; Unit CC closes the default-logic body-top case that V-kill explicitly carved out. **Scope discrimination:** Unit CC fires ONLY at the IMMEDIATE body-top of the synthetic default-logic auto-lift wrapper. Bare `@name = expr` nested inside a function body (`function f() { @x = 5 }`) is governed by V-kill (the V-kill default-logic-lift carve-out is preserved at the parser level to keep blast radius narrow on the 110-file unmigrated corpus). The `<db>` / `<state>` STATE-block bodies (V5-strict state-block grammar per the per-block body conventions) are NOT default-logic-mode loci and are NOT affected by Unit CC; bare `@x = []` inside `<db>` direct-child position remains canonical. **Per-file exemption surface:** `compiler/src/unit-cc-exemption-list.json` provides a path-based suppression mechanism for the pre-S123 corpus (each adopter source file removes its own entry as migration completes). The exemption is intentionally per-file (not blanket) so migration progress is visible in version control. See `E-WRITE-NOT-IN-LOGIC-CONTEXT` in §34 for the diagnostic row + cross-reference.
+- *(**SUBSUMED S441** — the hole this note records is closed at the root by the S441 bullet below: no run at this body-top is text, so there is no per-shape question left to answer. Retained for provenance; its "prose at this body-top renders and is a working shape" premise no longer holds.)* ⚑ **S378 note (ruling 3) — a bare CONTROL-FLOW statement at this body-top is a KNOWN OPEN HOLE. This bullet records it; it does not close it.** The S123 amendment above enumerates what `default-logic` mode auto-LIFTS and is otherwise silent on the COMPLEMENT, **and that silence was read as coverage**: `E-CONTROL-FLOW-IN-MARKUP`'s §34 row listed a `<program>` / `<page>` / `<channel>` default-logic root under **Does NOT fire**, giving as its reason that *"the §40.8 auto-lift handles it."* Because the lift covers DECLARATIONS only, it does not — the locus is covered by **NEITHER**, and `<program>` + `if (1) { }` compiles at exit 0 and ships the statement into the emitted `<body>` as page text, taking every diagnostic its contents would have raised with it. **This is recorded at THIS locus because its absence here is what let the defect stand.** ⚑ **No SHALL is stated, deliberately.** Ruling 3 (user-voice S375) directed the diagnostic be extended here; that extension is **HELD** (bryan, S383) because the recognizer requires a `{` and therefore cannot separate a braceless control-flow statement from prose — and prose at this body-top renders and is a working shape, which is why S368 refused *"diagnose every non-declaration run"*. Closing it is a grammar-derived arc; see the `E-CONTROL-FLOW-IN-MARKUP` row in §34 and `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`. ⚠ **Reading this bullet as narrowing the complement is the mistake to avoid.** `default-logic` mode rejects exactly ONE named shape at this body-top today — a bare write (the S123 amendment above). Everything else outside the lift set becomes page TEXT, which is correct for **prose** and is a working shape. *(narrowed S439 #2 — a bare `when` is lifted; see the next bullet)* Whether any further shape is logic rather than text is an open operator question per-shape, not an inference from this list. *(narrowed S439 #2 — a bare `when` is lifted; see the next bullet)*
+- *(**SUBSUMED S441** — now a special case of the S441 bullet below: a bare `when` is logic because every bare run at this body-top is code, not because of its grammar head. The SHALLs of this bullet hold as consequences; the per-head lift is no longer the mechanism.)* **S439 ruling (#2) — a bare `when` at the body-top of a `<program>` / `<page>` is LOGIC, by its grammar head.** A statement whose grammar head is the `when` keyword (e.g. `when @var changes { … }`, §6.7.4), written directly at the body-top of a `<program>` or `<page>` *(extended S440 #8 — or a `<channel>`; see the next bullet)* — in any position among the body's direct children — SHALL be lifted into the logic context by that grammar head, as the ruling states an `on mount {` block is. It SHALL NOT ship as page text. This answers the S378 note's open per-shape operator question (above) **for this one shape only**; every other shape outside the lift set keeps that note's status. The rejected alternative — make a bare `when` here an error — was refused because it leaves a `when` that shares a text run with a declaration silently lifted, a position-dependent rule.
+  > **Provenance:** ruling:user-voice-scrml.md S439 #2 "all recs" (Rec: A — lift it by its grammar head, like `on mount {`) · supersedes: the S378 note's "open operator question per-shape" for the bare-`when` shape only.
+- *(**SUBSUMED S441** for the mechanism, as the S439 #2 bullet above; the S441 rule covers a `<channel>` body — see the S441 bullet.)* **S440 ruling (#8) — the same holds at the body-top of a `<channel>`.** A statement whose grammar head is the `when` keyword, written directly at the body-top of a `<channel>` (a §40.8 default-logic body, like `<program>` / `<page>`) — in any position among the body's direct children — SHALL be lifted into the logic context by that grammar head, exactly as the S439 #2 bullet above states for `<program>` / `<page>`. It SHALL NOT ship as page text. This closes the #1120 OPEN item "`when` lift at `<channel>` body-top"; every other shape outside the lift set keeps the S378 note's status at a `<channel>` body-top too.
+  > **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 8) — *"bare `when` at `<channel>` body top → lift by grammar head, as #2 (S439)"*.
+- **S441 ruling — a `<program>` / `<page>` / `<channel>` body carries no loose prose; displayed text is DECLARED.** A `<program>`, `<page>` or `<channel>` body is a **code-default body** (§4.18.1). A bare run — a run of non-whitespace source characters written directly among the body's children, not inside a markup element and not a `"..."` display-text literal — is **code**. It SHALL be parsed and checked as logic at its position, exactly as the content of the declaration auto-lift above is, and it SHALL NOT ship as page text. Every diagnostic the same statements raise inside an explicit `${ … }` at that position SHALL fire there (e.g. the §7.2.1 `E-*-NOT-IN-SCRML` codes for `class` / `try` / `throw` / `async`, and `E-SCOPE-001` for an undeclared name). Displayed text in these bodies SHALL be declared, in one of two forms: **(a)** a markup element — `<p>…</p>`, `<h1>…</h1>`, any HTML or component element — whose own body stays a free-text body (§4.18.1: body modes nest, and plain-markup bodies are unchanged); or **(b)** a `"..."` display-text literal (§4.18.3 — `${…}` interpolation inside it per §4.18.4, verbatim whitespace per §4.18.5, auto-escaped per §4.18.6), which renders as a text node at its position — the `"` delimiters are not rendered, and a `${…}` inside it renders its value. A bare run that is not valid code is `E-UNQUOTED-DISPLAY-TEXT` (§4.18.7). Whitespace between children is source formatting and is not a run (§4.18.5).
+  - A `"..."` is a display-text literal here only when it stands as its OWN statement: it opens a line (or directly follows a markup element), is not the operand of a preceding operator (`const s =⏎ "x"` is code), and nothing but whitespace, `;` or a `//` comment follows its closing `"` on that line (`"a" + b` and `"x".length` are code). Any other `"` is an ordinary code string.
+  - A comma **sequence** (`Hello, world`) is not a scrml expression — §4.18.2 lists what a bare run may be, and scrml has no comma operator — so a body-top run of that shape is `E-UNQUOTED-DISPLAY-TEXT`, not a statement. *(S441 review #6.)*
+  - A **bare expression statement** at this body-top (`step()`, a `${ … }` written around one) is **evaluated, not rendered** — it runs once at mount in source order, like any other body-top statement. Anything displayed is declared (markup or a `"..."` literal); a value is shown with `"${@count}"` or `<span>${@count}</span>`. *(S445: the `@count` example this bullet carried is superseded — a bare `@count` has no effect and is an error; see the next-but-two bullet.)*
+  - A **bare write** at this body-top (`@x = 1`) is an ordinary write in a logic context and is treated exactly as the same write inside an explicit `${ … }` at that position (§6.1 governs a write to an undeclared cell there, as it does in the explicit form). `E-WRITE-NOT-IN-LOGIC-CONTEXT` is **retired** for `<program>` / `<page>` / `<channel>` bodies — the only locus it had.
+  - **Coverage invariant (S441 round 4).** Every non-whitespace, non-comment byte of a bare run at this body-top SHALL end up in exactly one of: (a) a statement the compiler compiles, or (b) an error diagnostic. No byte is dropped silently. The compiler SHALL check this after parsing the run (in every front end) rather than rely on the parser having no drop path: a byte that is in neither is `E-INTERNAL-BODY-TOP-DROPPED` (§34), an internal compiler error that stops the build. "Compiled" is measured, not assumed — a byte the tokenizer produced no token for is not compiled even when a statement's span encloses it, and a statement whose head expression was parsed as a valid prefix with the rest discarded is not compiled unless an error reports the discarded text. The per-shape recognizers that turn a run into the right statement or `E-UNQUOTED-DISPLAY-TEXT` are how the common shapes get a precise diagnostic; the check is what makes an unanticipated shape loud instead of lost. *(S441 round 5.)* **A statement covers only the tokens it compiles**, measured by that statement's own grammar, not by the tokens its parse consumed: an `import` ends at its module-specifier string; an `export` ends where what it exports ends (a re-export at its specifier string, a declaration where that declaration ends); a `type` alias ends where its type expression ends (§7.5 `type-expr`, which has no juxtaposition — `type N = number extra` compiles `number` only); a function declaration requires its `{ … }` body, and covers its head (name, parameters, return type, `!` marker) and that body only — a token between the head's end and the body's `{` (`-> number oops {`) is `E-UNQUOTED-DISPLAY-TEXT` *(S441 round 5c)*. The tokens after the end, on the statement's own line, are `E-UNQUOTED-DISPLAY-TEXT`; tokens it consumed from later lines are parsed as the statements that follow it. A statement whose grammar is not satisfied at all (`import stuff`, `import "./x.js"`, `type here`, `export data`, `export default …`, `export * as ns from …`, `fn heading`) compiles nothing and is `E-UNQUOTED-DISPLAY-TEXT` on its line. A type's right-hand side is one type expression whatever its first operand — `type L = { a: number }[]` and `type U = { … } | { … }` read whole — and a function's `-> T` / `: T` return type is read as a type before its `{ … }` body is looked for *(S441 round 5b)*. A front end that builds its own tree and translates it into the shared AST (`--parser=scrml-native`) measures "compiled" on the TRANSLATION: a statement whose translation holds an expression the translation could not carry (an empty escape-hatch — a tagged template, a comma sequence inside a call argument) is not compiled, and fails closed. When the run already carries an error diagnostic the build is stopped by it, and the check adds no `E-INTERNAL-BODY-TOP-DROPPED` beside it.
+  - **Body-top code that does nothing is a compile error.** A bare expression statement at this body-top built only from literals and operators — `404`, `-1`, `true`, `[1, 2]`, `"a" + 1` — computes nothing observable, so it compiles nothing: it is `E-UNQUOTED-DISPLAY-TEXT` (it is almost always display text written without its declaration — `<p>404</p>` / `"404"`). So is a label on a statement that is not a loop (`Total: 42`, `Docs: https://…`): a label is meaningful only as a `break` / `continue` target (§49), and the statement it labels (`42`) does nothing. *(The last sentence of this bullet as written in round 5 — "a bare expression statement that names something — `@count`, `step()`, `a.b` — is evaluated … and is not affected" — is superseded by the S445 bullet below for everything but a call.)*
+  - **An expression statement with no effect is a compile error** *(S445)*. *"Any expression statement with no effect is an error. An effect means a call, an assignment, `++`/`--`, or a `send`. Bare `@count` becomes an error too, which replaces the `@count` example in S441 (3), and a label nothing targets is also an error. … Calls always count as effects, even calls to pure functions."* At this body-top a bare expression statement SHALL contain an effect — a call (any call: a pure function, a method, `send(…)`, `new`, a tagged template), an assignment (compound too, anywhere inside the expression), `++` / `--`, `delete`, a `?{ … }` SQL block, or `reset(…)`; a lambda's body is not evaluated by the statement and does not count. Otherwise it is **`E-STMT-NO-EFFECT`** (§34): `@count`, `@o.a`, `@a == 1`, `"Total: " + @count`, `!@x`, `typeof @x`, `@x ? 1 : 2`, `"abc".length`, `x => y`, `this`. A statement built only from literals (`404`) stays `E-UNQUOTED-DISPLAY-TEXT` (the bullet above — it is almost always undeclared display text). A label that no `break` / `continue` targets is an error on the label (`E-UNQUOTED-DISPLAY-TEXT` on `Instructions:` in `Instructions:⏎while (…) { … }`); the loop itself compiles. `reset(…)` is a cell write (§6.8) and counts. An expression the structured parser did not model (a regex literal, `this`, a block-body lambda) is re-parsed with the front end's own expression grammar and has an effect only if it contains one of the above — fail-closed *(S441 round 5d)*: `/abc/` alone is `E-STMT-NO-EFFECT`; text that does not parse whole counts as an effect (it has its own diagnostic). Two or more no-effect statements on one line (`@a; @b`) are one `E-STMT-NO-EFFECT`.
+  > **Provenance:** ruling:user-voice-scrml.md S445 item 2 · supersedes: ruling:user-voice-scrml.md S441 item (3) (the `@count` example only) · direction-of-change: **newly-rejecting** (measured: `docs/changes/s441-declared-prose-body/progress.md`, round 5c).
+  > **Provenance:** ruling:user-voice-scrml.md S443 item 4 (*"Body-top code that does nothing (`import stuff`, a bare `404`): should it be an error? I recommend yes."* → RULED: *"compile error (the declared-prose coverage rule: a node covers only tokens it compiles)"*) · direction-of-change: **newly-rejecting** (measured: `docs/changes/s441-declared-prose-body/progress.md`, round 5).
+  - This removes the per-shape question the S378 note (above) left open. Nothing outside the lift set is text at this body-top, so the S439 #2 / S440 #8 grammar-head lifts become special cases of this rule, and the shapes that defeated a text-level recognizer (S383: a braceless statement, `try` with its `{` on the next line, `throw`, `await`, dynamic `import()`) do not arise — the run is parsed, not pattern-matched.
+  - A `<page>` body in a route file (a `<page>` with no enclosing `<program>`, §40.8 multi-page apps) and a `<channel>` body (S440 #8's locus) are the same locus and follow the same rule.
+  - Unchanged by this bullet: the declaration auto-lift (S123 amendment's recognition list) and `W-PROGRAM-REDUNDANT-LOGIC`. The file top level outside any `<program>` / `<page>` / `<channel>` is NOT this locus.
+  - **Migration (RULED S441): an immediate error, no §63 window, no `scrml fix` rule.** `E-UNQUOTED-DISPLAY-TEXT` fires at this locus from the landing version; there is no `W-` lint window and no codemod. The diagnostic itself names both declared-prose forms (`<p>…</p>` and `"…"`). This is the §63.7 `<machine>` pre-1.0 route — deciding what language-1.0 contains, not removing a released form — and the ruling is its designer-card. A codemod was refused on the measurement: at `5c366fe15`, over 2,230 `.scrml` sources (`examples/`, `samples/`, `conformance/cases/`, `docs/readme-snippets/`, `docs/tutorial-snippets/`, `stdlib/`, `scrml-site`, `flogence`; both front ends; `scripts/measure-loose-body-prose.ts`), 1,202 `<program>`, 158 `<page>` and 48 `<channel>` bodies held 8 loose runs in 7 files, only **one** of them display prose (a conformance counter-gate pinning the pre-S441 behaviour) and **seven** code or markup that shipped as page text by accident (among them a `?{}` `CREATE TABLE` statement in public HTML and a stdlib module tail). A wrap-it-in-quotes rewrite would have preserved those seven as declared display text.
+  > **Provenance:** ruling:user-voice-scrml.md S441 "declared-prose implementation: \"yes to all four\"" (*"yes to all four, your recs on the rest"*) · supersedes: the four OPEN items this bullet carried in draft (migration mechanism, `<channel>` reach, bare-expression rendering, the bare write).
+  > **Provenance:** ruling:user-voice-scrml.md S441 "prose should be declared as such" · supersedes: the S111 amendment's classification of the `<program>` / `<page>` body as a distinct third body-mode (here and at §4.18.1 / §3.4); the S378 note's per-shape open question; the S439 #2 / S440 #8 per-head lift as the MECHANISM (their SHALLs survive as consequences) · direction-of-change: **newly-rejecting** (a bare prose run that renders today becomes `E-UNQUOTED-DISPLAY-TEXT`) and **meaning-changing** (a code-shaped run that renders as page text today becomes code).
 - **Multi-page apps.** A `<program>` MAY contain zero or more `<page>` declarations (§4.15) as direct children. Each `<page>` is a per-route attribute container — its URL is inferred from filesystem location (no `route=` attr; per Pillar 3 compiler-owns-the-wiring, and cross-ref §47.9.2 path-preserve emission). The five per-route attributes are `db=`, `auth=`, `csrf=`, `ratelimit=`, `keep-alive` (§20.8.4); any other attribute on `<page>` fires `E-PAGE-INVALID-ATTR`.
 
 > **Provenance (pa-base v2.10 Rule 4b):** `dd:page-helper-element-design-2026-05-12` · `ruling:` user-voice **S314** (*"accept the 5fth attribute"*) · **supersedes:** the four-set enumeration in that DD. The DD's governing rule is an **app-wide-vs-per-route partition**, not a designed bound — §0.3 enumerated the `<program>` attribute surface *as it stood 2026-05-12* and classified each entry, and the four were that classification's OUTPUT. `keep-alive` did not exist then, and is per-route by construction (§20.8.4: a **route** opts in; §20.8.8 keys the region by `(route, params)`). Admitting it is newly-accepting **toward the contract** (pa-base §8) because §20.8.4 already declared the form legal — a conformance fix, not a widening. The set stays **closed and enumerated** deliberately: a list is mechanically checkable, whereas *"is this attribute per-route?"* is a judgment call that drifts.
@@ -24098,7 +25217,7 @@ No `<page>` sibling is present; the application has a single route inferred from
 
 **Cross-references:**
 - §4.15 — `<page>` structural-element registration (block-grammar surface).
-- §4.18 — quoted-text model body-mode split (free-text / code-default). The `<program>` / `<page>` `default-logic` body mode defined here is the distinct **third** body-mode (S111 — reciprocal note at §4.18.1).
+- §4.18 — quoted-text model body-mode split (free-text / code-default). Since S441 the `<program>` / `<page>` body is a code-default body (the S441 bullet above; reciprocal note at §4.18.1). *(The S111 "distinct third body-mode" classification is superseded.)*
 - §24.4 — `<page>` HTML-spec-awareness mirror (registry distinction).
 - §38.1 — channel inside-`<program>` placement (v0.3 direction).
 - §39.12.0 — db-anchor `<program db=>` workaround for schema/seeds files (v0.3 only; v0.4 promotes `<schema db=>` direct).
@@ -24865,6 +25984,8 @@ The element form is canonical. A bare-call form (`const handle = formFor(Signup,
 - The submit handler signature SHALL match `fn(values: StructType) ! ErrorType`, where `StructType` is the resolved `for=` type (or its `pick`/`omit`/`partial` derivative — see §41.14.5). Handler signature mismatch SHALL emit `E-FORMFOR-ONSUBMIT-SIGNATURE`.
 - A `<button slot="submit">` child SHALL be admitted as a customization slot (per §16 component slots). When absent, the compiler SHALL emit a default submit `<button type="submit">` with `disabled=!@<varName>.isValid` wired (so submission is blocked until all validators pass).
 - Submit dispatch SHALL set `@<varName>.submitted = true` BEFORE invoking the handler, enabling the validity surface's `submitted` field to drive "show errors after first submit attempt" UX patterns.
+- **The submit handler's error routes to the nearest `<errorBoundary>` (S440 ruling #19).** An error returned by the `onsubmit=` handler (its `! ErrorType`) SHALL route to the nearest `<errorBoundary>` (§19.6) enclosing the `<formFor>`. With no enclosing `<errorBoundary>`, the `<formFor>` is a compile error, **E-ERROR-005**. *(PA reading, S440)* The compiler-generated `formFor` submit dispatch is the one handler-time route to a boundary: it is not an author-written event handler, so the rule that author-written handler calls keep E-ERROR-002 (S440 #22) does not apply to it. **Named; impl pending — Nominal / not yet emitted for either case**: impl#1 compiles a `<formFor onsubmit=persistSignup/>` with no boundary cleanly today (measured S440: `conformance/cases/form-for/formfor-submit-collects-values`, which expects no codes, compiles with no error), and with an enclosing boundary the submit dispatch discards the handler's result, so the error is not routed (measured S441); impl#1 carries both (§34.0). The boundary side of this rule is stated at §19.6.6. Newly-rejecting: the `formFor` conformance cases with an `onsubmit=` (every one is failable — the signature above requires `! ErrorType`) and no boundary migrate WITH the implementation.
+  > **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 19) — *"a `formFor` submit handler's error routes to the nearest `<errorBoundary>`; with none, E-ERROR-005"*.
 
 #### 41.14.4 Normative statements — per-field customization (OQ-FF-1)
 
@@ -26267,6 +27388,11 @@ seq           ::= 1 or 2 base36 characters [0-9a-z]  (see §47.4)
 ```
 
 - The `_` prefix is reserved for compiler-generated names. User-authored scrml identifiers and vanilla JS identifiers SHALL NOT begin with `_` followed by a `kind` character and 8 base36 characters. The compiler SHALL reject any user-authored identifier that would collide with this pattern (E-CG-012).
+- **S439 ruling (#7) — the `_scrml_` identifier namespace is RESERVED.** A user-authored scrml program SHALL NOT **declare** a binding whose name begins with `_scrml_`; that prefix names compiler/runtime identifiers (`_scrml_reactive_set`, `_scrml_session_destroy`, …). Such a declaration is a compile error: **`E-NAME-COLLIDES-RESERVED-PREFIX`** — **Nominal / spec-ahead — not yet emitted**; its §34 catalog row lands WITH the implementation (house rule — no §34 row precedes its emitter, as §66.20). Newly-rejecting, so reversible, and it limits rather than widens.
+  > ~~⚑ **OPEN (not ruled):** whether a *reference* to a `_scrml_` name is refused, and the status of stdlib source (which references `_scrml_messages_register`, `_scrml_message_for`, `_scrml_labels_register`), is not ruled.~~ *(ruled S440 #9 — see the next bullet)*
+  > **Provenance:** ruling:user-voice-scrml.md S439 #7 "all recs" (Rec: yes — a SPEC sentence plus a diagnostic).
+- **S440 ruling (#9) — REFERENCES are refused too; stdlib is exempt by path.** A user-authored scrml program SHALL NOT **reference** a name that begins with `_scrml_` either — the reservation above covers references as well as declarations, under the same code, **`E-NAME-COLLIDES-RESERVED-PREFIX`** (Nominal / spec-ahead — not yet emitted; impl#1 carries it, §34.0). **Standard-library source is exempt by path:** a file of the scrml standard library (the `stdlib/` source tree) MAY declare and reference `_scrml_` names (it references `_scrml_messages_register`, `_scrml_message_for`, `_scrml_labels_register`).
+  > **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 9) — *"`_scrml_` → reject references as well as declarations; stdlib exempt by path"* · supersedes: the S439 #7 OPEN block (above, struck).
 - The full alphabet of the encoded portion (excluding the `$` separator used in debug mode, §47.3) is `[_0-9a-z]`.
 
 #### 47.1.2 Kind Markers
@@ -26822,6 +27948,34 @@ exactly one server.js.
 The routes registry array SHALL also de-duplicate by name — registering the
 same route binding multiple times is correctness-equivalent (same path /
 method / handler) but wasteful.
+
+### 47.13 Static-File Serving — Client-Artifact Allowlist
+
+**Added:** 2026-09-29 (S441). Resolves `g-static-server-serves-db-and-server-source`: both static-serving paths — the production `_server.js` (§47.12) and `scrml dev` — served ANY file that existed under the output directory, so an anonymous request received the SQLite database (`protect=` columns and password hashes included), the session store, every `*.server.js`, and `_server.js` itself.
+
+The output directory holds server-side artifacts beside the client ones (§47.9, §47.11, and the §20.5 session store, which lives at the dist root). A compiled server SHALL NOT serve server modules, databases, dotfiles, or sources as static files. Static serving is therefore an **allowlist**: a file is served if and only if
+
+1. it is NOT in a **denied class**, AND
+2. it is either a **client artifact** of the build or a **passive media asset**.
+
+Every other request that reaches the static fallback SHALL receive `404 Not Found` with a body that does not disclose the file's contents.
+
+**Denied classes.** These SHALL NOT be served, whatever the manifest says. The match SHALL be case-insensitive, because a case-insensitive filesystem serves `APP.SERVER.JS` from `app.server.js`.
+
+- server modules and anything named `*.server.*`, including `_server.js` and server source maps;
+- databases: `*.db`, `*.db-wal`, `*.db-shm`, `*.db-journal`, and `*.sqlite*`;
+- dotfiles and dot-directories (`.env`, `.git/…`, `.scrml-sessions.db`), meaning any path segment that begins with `.`;
+- `.scrml` sources;
+- source maps (`*.map`). A client map embeds the whole `.scrml` source as `sourcesContent`, server functions and SQL included, so a map is source disclosure;
+- any path that resolves outside the output directory.
+
+**Request-path handling.** The request path SHALL be percent-decoded before it is judged, so an encoded traversal (`%2e%2e`, `%2f`, `%5c`) is evaluated in the form the filesystem sees. The request SHALL be refused if the decoded path contains NUL, `\`, or `:`, if any segment begins with `.`, or if any segment ends in `.` or a space (on Windows, `app.db.` resolves to `app.db`). The allowlist SHALL be checked against the resolved candidate file, so every resolution rule passes through it: exact file, clean URL `<p>.html`, directory index, and dev's root fallback.
+
+**Client artifacts: the manifest.** The compiler SHALL record every artifact it writes for the browser: the HTML documents, the CSS, the client bundles (hashed or not, §47.9.8), the shared runtime, the per-route chunks, and the worker bundles of nested `<program>` workers (§4.12.4; `<page>-<name>.worker.js`, written beside the page that instantiates them). It SHALL close that set over the relative module imports of its JavaScript members, which admits, for example, a `_scrml/<name>.js` shim that a client bundle imports and excludes a shim that only a server module imports. A closure target that falls in a denied class is not admitted. `compileScrml` returns the set as `clientAssets` (output-relative POSIX paths) and writes it to `<outputDir>/.scrml-client-assets.json`. That file is a dotfile, so it is itself unservable. `scrml build` SHALL bake the set into `_server.js`, so that nothing written into the deploy directory after the build can widen what the server serves. `scrml dev` SHALL read the manifest file, which it rewrites on every recompile. A missing manifest is an empty set, so the server fails closed. A stale artifact that the latest compile did not write is not in the set and is not served.
+
+**Passive media.** A file with one of the following extensions is served without a manifest entry, provided it is not in a denied class: `png`, `jpg`, `jpeg`, `gif`, `webp`, `avif`, `svg`, `ico`, `bmp`, `woff`, `woff2`, `ttf`, `otf`, `eot`, `mp3`, `mp4`, `webm`, `ogg`, `wav`. These are the images, icons, fonts, and audio/video an author places beside the build output. The SPEC defines no `public/` or assets directory. Any other file the build did not write for the browser is refused, including `.json`, `.txt`, and author `.js`.
+
+**One policy, both servers.** `scrml dev` and the production `_server.js` SHALL apply the identical decision. Implementation: `compiler/src/static-serve-policy-emitted.js` holds the policy functions. Dev imports them, and `generateServerEntry` copies their source text verbatim into `_server.js`. `collectClientAssets` in `compiler/src/static-serve-policy.js` computes the manifest.
 
 ---
 
@@ -28673,6 +29827,20 @@ ${
 
 A `let` binding stays mutable for its whole lifetime. Reassigning it any number of times is legal; the FIRST reassignment does not convert it to a `const`.
 
+**S439 ruling (#8) — a keywordless loop binder is `const`.** The binder of a keywordless loop head — `it` in `for (it of xs)` — is created without `let`, so it is `const` by the rule above (matching §66's immutable-by-default). A write to it is **E-ASSIGN-004**:
+
+```scrml
+${
+    for (it of @xs) {
+        it = it + 1        // E-ASSIGN-004 — `it` is a keywordless loop binder, so `const`
+    }
+}
+```
+
+⚑ **Nominal for this case on impl#1** — not yet emitted (measured S439, exit 0).
+
+> **Provenance:** ruling:user-voice-scrml.md S439 #8 "all recs" (Rec: no — it's `const` per §50.8.5; "it just needs a proper diagnostic").
+
 ### 50.9 Normative Statements
 
 - A bare assignment expression `x = value` SHALL produce the assigned value as its result when appearing in any expression position. (§50.3.1)
@@ -29017,6 +30185,17 @@ This declaration:
   spec amendment SHALL cross-reference §51.0.B.1's reserved-name precedence rule and
   SHALL define migration semantics for adopter code whose payload-binding names would
   shadow the new reserved name.
+- **S439 ruling (#5) — a block `<match>` inside a state-child body is SUPPORTED.** A block
+  `<match>` (§18.0.1) MAY appear in an engine state-child body; it SHALL NOT be refused.
+  Under §66 ruling O5 (1i) a state-child's body is ordinary markup (§66.13), and `<match>`
+  is legal in markup. The companion fork — a block `<match>` nested inside a DISPATCHED
+  `<match>` block-form arm — is answered the same way: supported, not refused (§18.0.1).
+  ⚑ **Carried impl#1 divergence, not the language rule:** impl#1 renders such a match only
+  when its state-child is on screen at page load, and warns with `W-ENGINE-MATCH-IN-STATE-CHILD`
+  (§34) — that warning is the divergence's code.
+  > **Provenance:** ruling:user-voice-scrml.md S439 #5 "all recs" (Rec: B) · supersedes: the
+  > OPEN (A) refuse / (B) support fork recorded in the `W-ENGINE-MATCH-IN-STATE-CHILD` row
+  > (§34) and in `g-nested-block-match-in-dispatched-arm-silently-drops`.
 
 #### 51.0.B.1 Payload binding on state-children
 
@@ -29362,11 +30541,36 @@ the body lives at the declaration site. Adding a body at the use-site is a parse
 `initial=` sets the engine's starting state. It accepts EXACTLY ONE of two
 mutually-exclusive value forms:
 
-- `initial=.Variant` — a STATIC literal (the fixed start state, validated at
-  compile time against the `for=T` variant set).
+- `initial=.Variant` — a variant literal (the start state; the VARIANT is validated at
+  compile time against the `for=T` variant set). *(extended S439 #11 — or a payload
+  constructor; see "Payload constructor" below — whose arguments need not be static,
+  S440 #10; this bullet formerly read "a STATIC literal")*
 - `initial=@cell` — RUNTIME-CELL HYDRATION (S198, Approach F A-leg): the engine
   is seeded from the snapshot of a reactive `@cell` at engine-construction. See
   "Runtime-cell hydration (`initial=@cell`)" below.
+
+**Payload constructor (S439 ruling #11).** `initial=` also accepts a payload
+constructor for a payload-bearing variant — `initial=.Ready([…])` — and the engine
+starts in that variant WITH that payload: the payload is carried, not dropped. Under
+§66 `initial=` becomes the declaration's own value — the field's initializer, which
+takes any value (§66.3; `<engine for=T initial=.X>` ≡ `<t:T=.X single>`, §66.13.3).
+⚑ **impl#1 divergence (measured S439):** `initial=.Ready(["a", "b"])` compiles at exit 0
+and the payload does not appear in the emitted client JS — impl#1 drops it.
+> ~~⚑ **OPEN (not ruled):** whether payload arguments must be compile-time static.~~ *(ruled S440 #10 —
+> below)*
+>
+> ✅ **RULED S440 (#10) — payload arguments take any value.** The arguments of an `initial=` payload
+> constructor take any value — they are NOT required to be compile-time static. (The variant itself is still validated at compile time against the `for=T`
+> variant set.) **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 10) —
+> *"`initial=` payload args → any value"* · supersedes: the S439 #11 OPEN line above (struck).
+>
+> ⚑ **OPEN (not ruled):** whether a reactive payload argument (e.g. `initial=.Ready(@items)`) SEEDS the
+> engine once, from its value at construction (as `initial=@cell` does), or TRACKS later changes of the cell.
+> The #10 ruling says the argument may be any value; it does not say which.
+>
+> **Provenance:** ruling:user-voice-scrml.md S439 #11 "all recs" (Rec: honour it) ·
+> supersedes (extends): "It accepts EXACTLY ONE of two mutually-exclusive value
+> forms" (above) — its `.Variant` form now includes a payload constructor.
 
 **Lint behavior:**
 - On a NON-derived engine, `initial=` is REQUIRED. If omitted, the compiler emits
@@ -30027,6 +31231,17 @@ declaration contains an `<engine>` element in its body. Reasoning: instantiating
 component multiple times would create multiple "singleton" engines, violating the
 singleton invariant. If you want per-instance state machines, use plain reactive cells
 (`@cell`) inside the component, not engines.
+
+**An `<engine>` inside an `<each>` row is FORBIDDEN (S439 ruling #10).** An `<each>` row
+template (§17.7) is a multi-instance context — the many-instances argument above applies to
+a row word for word — so an `<engine>` declared inside an `<each>` row template SHALL be
+refused with `E-COMPONENT-ENGINE-SCOPE` (§34). The message SHALL name the per-row form:
+per-row state is spelled as an ordinary declaration, which gets a keyed instance per row
+(§66.7.3). **Nominal for this case on impl#1** — impl#1 does not yet emit it (measured
+S439: the program compiles at exit 0 and the engine's body is silently dropped from the
+row).
+> **Provenance:** ruling:user-voice-scrml.md S439 #10 "all recs" (Rec: refuse it) ·
+> supersedes: nothing (the SPEC was silent; impl#1 silently dropped the body).
 
 **Conversely:** an engine body MAY instantiate components. That direction is fine —
 components are presentation factories that engines can use to render variant bodies.
@@ -33793,8 +35008,8 @@ exactly three literal values:
 
 The `csrf=` attribute accepts:
 
-- `csrf="auto"` — automatic CSRF token injection + verification.
-- `csrf="off"` — no CSRF check.
+- `csrf="auto"` — automatic CSRF token injection + verification. The default whenever `auth=` is present (§40.2, S441).
+- `csrf="off"` — no CSRF check. Under `auth=` this is the only opt-out spelling; any other literal emits `W-ATTR-002` and resolves to `"auto"`.
 
 **Login-page requirement.** When `auth="required"` is declared (whether on
 `<program>`, `<page>`, or `<auth>`) the redirect target (default `/login`)
@@ -33824,6 +35039,16 @@ server functions until the ergonomic completion lands. See
 Any literal value not in the recognized set SHALL emit `W-ATTR-002`.
 The attribute is currently passed through to the rendered HTML as-is;
 the warning surfaces the gap without breaking existing behavior.
+
+For `auth=` the warning SHALL state the value's actual effect. On a
+`<page>`, an unrecognized value is not an auth declaration: the page
+inherits the application's gate when the application's top-level
+`<program>` declares `auth="required"`, and is otherwise public (§40.2,
+S443). On a `<program>`, an unrecognized value applies no auth gate at
+all — the program and its pages are public (current behaviour; tracked
+as `g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth`). On a
+`<channel>`, any `auth=` attribute gates the WebSocket upgrade as if it
+were `"required"`.
 
 This is consistent with the validation principle: silent acceptance of
 attribute values that have no compile-time effect is itself a P0
@@ -33963,7 +35188,7 @@ A server-authority cell scopes its rows to the request by promoting to a Tier-2 
 Route-admission (§52.15.2 — whole route → 401) ⟂ row-selection (§52.15.3 — per row → `WHERE`) ⟂ column-redaction (§14.8.9 protect-floor — per column → strip protected-origin). They STACK; none substitutes: a column-redacted payload can still leak every user's rows; a row-scoped payload can still leak a protected column. The compiler applies all three at the egress; §14.8.9 is reused unchanged. §14.8.10 tenant-row isolation (Nominal) adds a **fourth, coarser row-selection axis** (whole-tenant): route-admission ⟂ tenant-scope ⟂ per-user row-selection ⟂ column-redaction — a per-user-scoped payload can still leak a wrong tenant's rows, so it too stacks and substitutes for none.
 
 #### 52.15.5 SSR sequencing — auto-make-safe (`I-SSR-AUTH-SCOPED-CLIENT-HYDRATED`)
-Per §52.8, the SSR compose route is an **anonymous-reachable GET** (it serves the first-paint HTML to every viewer, gated or not — the `<page>`/`<program auth="required">` redirect covers navigation, not the compose route's own output). Seeding an **auth-scoped, UNSCOPED** cell (a Tier-1 `SELECT *`, or a Pattern-C query with no `${@currentUser.…}` filter) into that first paint would bake one query result into every viewer's first-paint HTML **and** the `window.__scrml_ssr_state` seed — a cross-user leak, strictly worse than the gated `/__serverLoad` client fetch (401 for anon) the pre-render accelerates.
+Per §52.8, the SSR compose route serves the first-paint HTML to every viewer the page admits. Under `<program auth="required">` it runs the §52.13 document gate first (§40.2 — anonymous → redirect, S441); a page that does not require auth serves it anonymously. Either way ONE composed document goes to every admitted viewer, so the omission below stays load-bearing under the gate: it is what keeps viewer A's rows out of viewer B's first paint. Seeding an **auth-scoped, UNSCOPED** cell (a Tier-1 `SELECT *`, or a Pattern-C query with no `${@currentUser.…}` filter) into that first paint would bake one query result into every viewer's first-paint HTML **and** the `window.__scrml_ssr_state` seed — a cross-user leak, strictly worse than the gated `/__serverLoad` client fetch (401 for anon) the pre-render accelerates.
 
 The compiler **auto-makes-safe** at this egress sink (mirroring the §14.8.9 protect-floor's auto-redaction, not a hard error that breaks idiomatic code): an auth-scoped unscoped cell is **OMITTED** from the SSR seed entirely — no first-paint markup fill (its `<div data-scrml-each-mount>` is left empty), no `window.__scrml_ssr_state` entry. The cell then hydrates client-side behind its already-gated `/__serverLoad` fetch **post-mount** (the standard graceful-degradation path a static-hosted deployment already uses) — safe by construction, and idiomatic code still compiles and renders correctly for authorized viewers. An `I-SSR-AUTH-SCOPED-CLIENT-HYDRATED` **Info** lint (per-var) records the omission so it is never silent, and steers the developer to §52.15.3 row-scoping to restore the first-paint acceleration.
 
@@ -36595,6 +37820,7 @@ This section defines the canonical scrml wire format for absence-bearing values 
 - WebSocket channel broadcast messages (§38).
 - Server-sent event payloads (§37).
 - Any JSON payload the compiler emits for a `T | not` field whose value is the scrml-absence sentinel `not`.
+- Values a `persist=` cell writes to and restores from browser storage (`localStorage` / `sessionStorage`, §6.14) — *added S444 (dpa-061); Nominal / spec-ahead*. This is the one non-network sink: the value crosses the page-lifetime boundary, not the network. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 1 — *"the persist= attribute"* (the ruled pole A2 includes *"the §57 lossless codec"*) · dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` A2 item 2 (*"widens §57.1's sink list to include storage"*). Whether this binds stored values to the §57.5 canonical-only decoder is OPEN (§6.14.4 O-061-12).
 
 The wire format does NOT apply to:
 
@@ -39104,6 +40330,20 @@ is a struct value of those fields (§66.8.1). Inside `x`'s own `renders`, `@x` n
 A markup instance is **anonymous** unless bound: `<dropdown as=country …/>` makes the instance addressable from
 logic as `@country` (reusing the `<each … as>` vocabulary). An unbound instance is not addressable from logic.
 
+**A handle name is not redeclared (S440 ruling #5).** Each of the following is a compile error,
+**`E-HANDLE-REDECLARE`** (§66.20):
+- **(i)** two `as=` handles of the same name in one scope;
+- **(ii)** an `as=` handle named like a cell;
+- **(iii)** the same `as=` name on instances under mutually exclusive `if=` conditions — an error **for now**,
+  logged as a candidate widening.
+
+**Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §66; the bootstrap does); impl#1 carries it
+(§34.0). A row-scoped handle in an `<each>` row may shadow a program-level HANDLE but not a cell (§66.7.4).
+
+> **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #5) — *"(i) duplicate
+> `as=` in one scope and (ii) a handle named like a cell are errors under one code (`E-HANDLE-REDECLARE`); (iii)
+> the same name on mutually exclusive `if=` instances is an error for now, logged as a candidate widening."*
+
 #### 66.7.3 Instances inside `<each>` (#18 part 1)
 
 An instance inside an `<each>` row template is **keyed by the row's `key=`** (§17.7.5). Its state follows its row
@@ -39114,6 +40354,19 @@ collection.
 
 `as=` on an instance inside an `<each>` row template is legal and **ROW-SCOPED**: the name is visible within that
 row's template only, and names that row's instance. It is not an error.
+
+**A row handle MAY shadow a program-level handle (S440 ruling #7).** A row-scoped `as=` name inside an `<each>`
+row template MAY be the same name as a program-level `as=` handle. It is legal, not an error: within that row's
+template the name names the row's instance (the paragraph above); outside the row it names the program-level
+handle. **A row handle may NOT shadow a program-level CELL:** a row `as=` name that is the name of a
+program-level cell is `E-HANDLE-REDECLARE` (§66.7.2 (ii) — a handle named like a cell is an error, and a row
+scope does not change that ambiguity for `@name`).
+
+> **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 7) — *"a handle in an `<each>` row
+> may shadow a program-level handle → legal (§66.7.4)"* · and (the three SPEC-text OPEN items, #7) — *"Your #5
+> ruling makes a handle named like a cell an error, and a row scope doesn't change that ambiguity for `@name`"*
+> → *"a row `as=` handle may shadow a program-level HANDLE, not a CELL"* · supersedes: the round-1 ⚑ OPEN on
+> shadowing a declaration.
 
 #### 66.7.5 A handle to a conditionally-mounted instance is `T | not` (#24)
 
@@ -39404,7 +40657,7 @@ Data is **immutable by default**. A write is legal only when the target's **type
 | none (omission) | nothing — the target is FIXED |
 | a lifecycle `(A to B)` | a write along the declared path `A → B` (a lifecycle IS a write contract — §66.11.6) |
 | a transition graph (`rule=` state-children, §66.13) | a write along the graph's edges |
-| sequence edit grants (§66.12) | the granted edits (end / front / anywhere, positions, length) |
+| sequence edit grants (§66.12) | the granted edits (grow and shrink, each granted separately at end / front / anywhere — S442, §66.12.2; positions; length) |
 | `replace` (on a scalar: `let`, §66.9) | replacing the whole value, bounded by the invariants |
 
 #### 66.11.2 Permissions govern the transition, never the spelling
@@ -39414,10 +40667,11 @@ of check:
 
 1. **Invariants** — length bounds and per-position types (§66.12) — are checked on **EVERY** write, however it
    is spelled.
-2. **Edits** — end / front / anywhere / positions-writable — are **classified at compile time**, from mutating
-   method calls AND from **recognized reassignment shapes**:
-   - `@x = [...@x, e]` is an **end-append** (the same edit as `@x.push(e)`);
-   - `@x = @x.filter(…)` is a **shrink-anywhere**;
+2. **Edits** — grow / shrink at the end / front / anywhere (each a separate grant, S442 — §66.12.2) and
+   positions-writable — are **classified at compile time**, from mutating method calls AND from **recognized
+   reassignment shapes**:
+   - `@x = [...@x, e]` is an **end-append** (the same edit as `@x.push(e)`; granted by `append`);
+   - `@x = @x.filter(…)` is a **shrink-anywhere** (granted by `remove`);
    - `@x = @x.map(…)` is a **position-write**.
 3. **`replace`** — writing an unrelated whole value, including `reset(@x)` and a server reload of the cell — is
    its **OWN explicit grant**, still **bounded by the invariants**. `replace` is NOT an "any" grant.
@@ -39465,6 +40719,19 @@ does not let a write to a struct skip the contract a SUB-FIELD carries by spelli
 
    > **Provenance:** ruling:user-voice-scrml.md S437 — *"1 yes, 2 yes, 6 yes"* (items 1 and 2: the two spread-shape
    > derivations the §66 draft self-flagged, confirmed as written).
+
+   **One snapshot, all or nothing.** Every read of `@x` inside the shape sees ONE snapshot of `@x` taken at the
+   start of the statement, before any override expression is evaluated — so `@p = { ...@p, x: @p.y, y: @p.x }`
+   swaps, and in `@p = { ...@p, x: bump(), y: @p.z }` the read of `@p.z` sees the value from before the statement
+   even when `bump()` writes `@p.z`. The same field SHALL NOT be overridden twice in one shape
+   (`{ ...@g, phase: .Gone, phase: .Live }` is a compile error, `E-STRUCT-DUPLICATE-KEY` — §14.3).
+   And the write is ALL-OR-NOTHING: every overridden field's contract is checked against the new value before any
+   field is written; if any check refuses at runtime, NO field is written and `@x` is unchanged — a spread write
+   never leaves a partial apply behind.
+
+   > **Provenance:** ruling:user-voice-scrml.md S440 — the boot-report *"all recs"* (S440, first entry) (spread
+   > all-or-nothing) and the six-open-questions *"all recs"* (S440, second entry — "all recs #2") items 2 and 3 (duplicate override key; strict snapshot). Origin: Peter's #1109 review F1 (S438) and the S440
+   > adversarial reviews of the re-land.
 2. **A GENUINE replace is AUTHORITATIVE (O58 = (b)).** A value that is not the spread-override shape of the same
    value (e.g. `@order = loadOrder()`), `reset(@x)`, or a server reload does NOT have to satisfy the contracts its
    sub-fields carry: `reset` restores the declared initial state; a reload takes the server's state. It still
@@ -39575,11 +40842,38 @@ using only non-mutating operations). Permissions are therefore **axes**, checkab
 | Axis | Values |
 |---|---|
 | **length** | fixed · bounded (e.g. `1..10`) · free |
-| **where it changes** | end · front · anywhere |
+| **where it changes** | grow and shrink, granted SEPARATELY at each place: end (`append` · `pop`) · front (`prepend` · `shift`) · anywhere (`insert` · `remove`) — `anywhere` covers end and front |
 | **positions** | read-only · writable |
 | **position types** | uniform (an array) · per-position (a tuple) |
 
-`push` + `pop` together are "free length, changes at the end" — a stack. A splice is "changes anywhere".
+> **Amendment S442 — the "where it changes" axis splits grow from shrink; `anywhere` covers end and front.**
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 yes, 2 yes, 3 all your recs"*, ratifying the PA's text:
+> *"the 'where it changes' axis needs to separate growing from shrinking. Rec: split `end` into `append` (grow at
+> the end) and `pop` (shrink at the end), and likewise `front`/`anywhere`. An audit log becomes `Entry[free,
+> append]` — genuinely append-only; a stack is `Frame[free, append, pop]`."* and *"Rec: yes — `anywhere`
+> includes `end` and `front` … `anywhere` means grow/shrink at any position."*
+> **Provenance (tokens):** ruling:user-voice-scrml.md S442 — *"spellings are fine"* (the grow/shrink grant tokens,
+> O10 part): `append`/`pop`, `prepend`/`shift`, `insert`/`remove` are the grant spellings for grow/shrink at the
+> end / front / anywhere.
+> **supersedes:** the sentence *"`push` + `pop` together are "free length, changes at the end" — a stack. A splice
+> is "changes anywhere"."*, and the single-token `end` · `front` · `anywhere` values of this axis. It closes the
+> contradiction with §66.19.5, where `[free, end]` granted `pop`, so the "provably append-only" log was poppable.
+
+**Grow and shrink are separate grants at each place** (end / front / anywhere):
+
+| Place | Grow | Shrink |
+|---|---|---|
+| end | `append` | `pop` |
+| front | `prepend` | `shift` |
+| anywhere | `insert` | `remove` |
+
+**`anywhere` covers `end` and `front`:** an anywhere-grow grant (`insert`) admits appends and prepends; an
+anywhere-shrink grant (`remove`) admits pops and shifts.
+
+A stack grants both halves at the end — `Frame[free, append, pop]`. An append-only log grants only the grow half —
+`Entry[free, append]` (§66.19.5). A splice changes anywhere: its removals are a shrink-anywhere (`remove`), its
+insertions a grow-anywhere (`insert`). (The bracket-list form these examples are written in is still ⚑ O10; the six
+tokens are ruled.)
 
 #### 66.12.3 Permissions live on the TYPE
 
@@ -39602,6 +40896,14 @@ an argument whose type grants MORE than the parameter's is ACCEPTED; the callee 
 grants. (`Edit[any]` in that text was later ruled out — there is no `any`, §66.12.4; the direction survives with any
 superset grant.)
 
+> **Amendment S442 — reading the quoted `Edit[end]` under the grow/shrink split (§66.12.2).** The block above is
+> the answered S435 text, kept verbatim. Its single-token `end` is superseded: `end` is now two grants, `append`
+> (grow) and `pop` (shrink). `pushEdit` only grows its parameter, so in current spelling its parameter and return
+> are `Edit[append]`. The call-site direction is unchanged: an argument whose type grants more (e.g.
+> `Edit[append, pop]`) is accepted where the parameter grants only `append`.
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 yes, 2 yes, 3 all your recs"* (item 1: *"split `end` into
+> `append` (grow at the end) and `pop` (shrink at the end)"*); tokens: S442 — *"spellings are fine"*.
+
 > ✅ **RULED S435 — O37 = (c)** (bryan: *"c"*): a call's write-back into a cell is an EDIT only when the compiler CERTIFIES the callee — it runs the §66.11.2 edit classifier over the function body once and records the edit kind it performs on its parameter (e.g. `return [...a, e]` → an end-append of `a`) as part of its signature; `@audit = appended(@audit, e)` is then that edit and is checked against the cell's grants. An uncertifiable callee's result is a `replace`. NOT trust-the-return-type (unsound). Direction: a more-permissive argument is accepted where a parameter grants less (answered "type" text). The prior OPEN text follows for the record.
 >
 > *(superseded)* **O37: write-back of a helper's result into a `replace`-less sequence.** The same answered
@@ -39613,7 +40915,16 @@ superset grant.)
 > callee's BODY as an edit kind (the compiler classifies what the function does to its parameter); **(c)** leave
 > it a `replace` (helpers cannot write into `replace`-less sequences). PA lean: (b), certify.
 
-> ⚑ **OPEN (not ruled) — O10: the concrete spelling of a grant.** The grant spellings in the PA text bryan
+> ✅ **RULED S442 — O10, in part: the six grow/shrink grant tokens.** `append` / `pop` (end), `prepend` / `shift`
+> (front), `insert` / `remove` (anywhere) are the grant spellings for grow / shrink at each place (§66.12.2).
+> **O10 stays OPEN for the rest:** the bracket-list-on-the-element-type form itself (`Entry[free, append]`),
+> `free` / `writable` / `replace` as tokens, and the bounded-length token (`1..10`). The single-token `end` /
+> `front` / `anywhere` quoted below are superseded by the S442 split (§66.12.2). The prior OPEN text follows for
+> the record, narrowed as stated here.
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"spellings are fine"* (answering *"The token spelling —
+> `append`/`pop`, `prepend`/`shift`, `insert`/`remove` — is still your call under O10."*).
+>
+> ⚑ **OPEN (not ruled, narrowed S442) — O10: the concrete spelling of a grant.** The grant spellings in the PA text bryan
 > answered *"1 yes, 2 yes"* (the one-axis ruling) are a bracket list on the element type — `Entry[free, end]`
 > (append-only), `Todo[free, anywhere, writable, replace]`, and a tuple with `replace`, `[:number, :number,
 > replace]` — and `Edit[end]` in a parameter appears in an earlier sketch explicitly marked "illustrative, not a
@@ -39736,9 +41047,15 @@ applies to enum-typed fields: the graph's coverage of the enum and its edges are
 
 A declaration marked **`single`** is a singleton: singleton-ness is an opt-in MODIFIER, not a separate vehicle
 (ruling:S435 (PA proposal text answered "a") — *"Singleton-ness becomes opt-in"*). Its shared instance (§66.6.4) is
-reached as `<*x/>` in markup and `@x` in logic. That a plain use `<x/>` of a `single` declaration is an ERROR
-(`E-DECL-SINGLE-INSTANTIATED`, §66.20) is the DD §5.a mechanism (*"`single` forbids plain instances"*); the answered
-Q6 text implies it ("singleton") but does not state the error — ⚑ O55.
+reached as `<*x/>` in markup and `@x` in logic. **A plain use `<x/>` of a `single` declaration is an ERROR,
+`E-DECL-SINGLE-INSTANTIATED` (§66.20); `<*x/>` is the only way to render it** (O55, ruled S442 — below).
+
+> **Amendment S442 — O55 ruled: a plain use of a `single` declaration is an error.**
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"*, item 1 ratifying the
+> PA's text: *"a plain `<phase/>` of a `single` declaration is either an error (`E-DECL-SINGLE-INSTANTIATED`) or it
+> renders the one instance. Rec: error. `<*phase/>` already says 'the existing one'."*
+> **supersedes:** the prior sentence here, which named the error only as the DD §5.a mechanism ("`single` forbids
+> plain instances"), implied but not stated by the answered Q6 text — ⚑ O55.
 
 **`<engine>` is re-expressed as a `single` declaration whose value carries a transition graph** — one vehicle for
 "a typed thing with a transition contract". **Spelling: ruling:S435 (PA proposal text answered "a")** — the Q6
@@ -39768,6 +41085,24 @@ carry. The load-bearing invariant survives under its existing code: **`E-COMPONE
 `single` declaration appears inside a multi-instance declaration** (one declaration site inside N instances
 cannot be one instance).
 
+**An `<each>` row is a multi-instance context (S439 ruling #10).** An engine is a `single` declaration
+(§66.13.3), and the invariant's many-instances argument applies to an `<each>` row word for word: an `<engine>`
+(in §66 terms, a `single` declaration carrying a transition graph) inside an `<each>` row template SHALL be
+refused with `E-COMPONENT-ENGINE-SCOPE`. The message SHALL name the per-row form: an ordinary (non-`single`)
+declaration, which gets a keyed instance per row (§66.7.3). Same rule as §51.0.K.
+> ~~⚑ **OPEN (not ruled):** whether a plain `single` declaration WITHOUT a transition graph is refused in an
+> `<each>` row.~~ *(ruled S440 #11 — below)*
+>
+> **Provenance:** ruling:user-voice-scrml.md S439 #10 "all recs" (Rec: refuse it).
+
+**A plain `single` declaration in an `<each>` row is refused too (S440 ruling #11).** A `single` declaration
+WITHOUT a transition graph, declared inside an `<each>` row template, SHALL be refused exactly as S439 #10 refuses
+an `<engine>` there — with the same code, `E-COMPONENT-ENGINE-SCOPE`, and the message SHALL name the same per-row
+form (an ordinary, non-`single` declaration, keyed per row, §66.7.3). **Nominal / spec-ahead — not yet emitted**
+(impl#1 does not implement §66; the bootstrap does).
+> **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 11) — *"plain `single` in an
+> `<each>` row → refuse, as #10 (S439)"* · supersedes: the S439 #10 OPEN line above (struck).
+
 > ✅ **RULED S435 — O5** (bryan: *"yes, table, 1i, 2ii"*): `rule=` unchanged; `effect=` / `<onTransition>` / `history` / `internal:rule=` / `<onTimeout>` / `<onIdle>` carry over as features of a field's transition graph — per instance on a non-`single` declaration, timers disposed with the instance; `var=` / `name=` / §51.0.C auto-naming RETIRE (the declaration's name is the variable); `derived=` RETIRES (a locked declaration with a reactive initializer is derived, §66.9); `.advance(.X)` is kept as the loud write; a nested `<engine>` becomes an enum-valued child field with its own graph; cross-file `<EngineName/>` becomes `<*name/>` of an exported `single`; engine `server` becomes the declaration `server` modifier (§66.16). **(1i)** state-child BODIES stay: a state-child's body is that variant's markup, rendered wherever the field renders. **(2ii)** `accepts=` + message arms are KEPT but CONFINED: an arm may only CHOOSE a write, and every write is still checked against `rule=` — a dispatch convenience, not a second transition definition. The prior OPEN text follows for the record.
 >
 > *(superseded)* **O5: re-homing the §51.0 engine surface.** The ruling re-expresses `<engine>` as a
@@ -39783,7 +41118,11 @@ cannot be one instance).
 *(Former O6 — the spelling of `single` — is CLOSED: the trailing modifier appears in the PA text bryan answered
 "a", above. Note it differs from `let`'s prefix position; that asymmetry is the ruled text, not an OPEN item.)*
 
-> ⚑ **OPEN (not ruled) — O55: a plain use of a `single` declaration.** Whether `<x/>` of a `single` declaration
+> ✅ **RULED S442 — O55 = error** (ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"*): a
+> plain use of a `single` declaration is `E-DECL-SINGLE-INSTANTIATED`; `<*x/>` is the only way to render it. The
+> prior OPEN text follows for the record.
+>
+> *(superseded)* **O55: a plain use of a `single` declaration.** Whether `<x/>` of a `single` declaration
 > is an error (DD §5.a: *"`single` forbids plain instances"*; `E-DECL-SINGLE-INSTANTIATED`), or renders the one
 > instance (engine parity: `<EngineName/>` mounts the singleton, §51.0.D), is not stated in the answered text.
 
@@ -39936,6 +41275,8 @@ the #15 lean: such a copy does not fetch on its own mount and is not server-auth
 4. **One namespace.** A token IS a declaration, so a token and a same-named cell cannot coexist silently (the
    token/cell collision the DD measured, D7, is gone by construction), and a token is readable from logic as
    `@brand` like any cell. A CSS-position reference `@brand` resolves as §65.3.2 specifies (→ `var(--brand)`).
+   A token and a same-named cell is `E-THEME-TOKEN-CELL-COLLISION` (§66.20; ruling:user-voice-scrml.md S440,
+   all recs #2, item 5).
 5. **The mode cell is an ordinary `let` declaration** — `<let mode:Mode=.Light/>` (the ruling records the PA's
    worked-example erratum: `<mode:Mode=.Light let/>` is wrong; `let` is a prefix).
 6. The `name = value;` body grammar and `.Variant { }` blocks go through the §63 lifecycle (§66.21).
@@ -40151,11 +41492,22 @@ ${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } f
 
 #### 66.19.5 An append-only audit log
 
+> **Amendment S442 — the log grants `append` only, so it is genuinely append-only.** Under the S442 grow/shrink
+> split (§66.12.2) the former `Entry[free, end]` granted `pop` too, so the "provably append-only" log was
+> poppable. The type is now `Entry[free, append]` and `@audit.pop()` is refused.
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 yes, 2 yes, 3 all your recs"* (item 1: *"An audit log
+> becomes `Entry[free, append]` — genuinely append-only"*); tokens: S442 — *"spellings are fine"*. The
+> `@audit[0].action` comment gives the one real reason per ruling:user-voice-scrml.md S440 dpa-052 Q3 — *"a, next
+> Q"* (*"an element-field write is a FIELD edit of that field … fix §66.19.5's two-reason comment to the one real
+> reason"*).
+> **supersedes:** `<audit:Entry[free, end]=[]/>` and its *"changes at the end"* comment; the two-reason
+> `@audit[0].action` comment.
+
 ```scrml
 <program>
     type Entry:struct = { at: number, actor: string, action: string }   // fields carry no contract → fixed
 
-    <audit:Entry[free, end]=[]/>                    // free length, changes at the end, NO replace — ⚑ O10 spelling
+    <audit:Entry[free, append]=[]/>                 // free length, grows at the end only, NO replace — ⚑ O10: bracket form (tokens ruled S442)
     <let actor:string="ops"/>
 
     function record(action: string) {
@@ -40168,9 +41520,10 @@ ${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } f
     // reset(@audit)                                 → E-WRITE-NOT-GRANTED (reset is a replace)
     // @audit = appended(@audit, e)                  → legal IF `appended` is certified an end-append (O37 RULED (c)): "fine" in the answered "type" text; a
     //                                                 `replace` under the later one-axis rule — with bryan
-    // @audit.shift()                                → E-WRITE-NOT-GRANTED (changes at the front)
+    // @audit.pop()                                  → E-WRITE-NOT-GRANTED (shrinks at the end; only `append` is granted)
+    // @audit.shift()                                → E-WRITE-NOT-GRANTED (shrinks at the front)
     // @audit = @audit.filter(e => e.actor != "x")   → E-WRITE-NOT-GRANTED (shrink-anywhere)
-    // @audit[0].action = "edited"                   → E-WRITE-NOT-GRANTED (positions read-only; Entry.action is fixed)
+    // @audit[0].action = "edited"                   → E-WRITE-NOT-GRANTED (a FIELD edit of `action`, and Entry.action is fixed)
     // let snapshot = @audit                         → a SNAPSHOT (§66.10): a later record() does not change it
 
     <main>
@@ -40185,8 +41538,11 @@ ${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } f
 </program>
 ```
 
-Without a `replace` grant the log is provably append-only: no statement in the program can remove or rewrite an
-entry, and the compiler checks that on every write however it is spelled (§66.11.3).
+The log's type grants one edit — grow at the end (`append`) — and no `replace`, so it is provably append-only: no
+shrink (`pop`, `shift`, `remove`) is granted, so no statement in the program can remove an entry; no `prepend` or
+`insert`, so entries arrive only at the end; positions are read-only, so no entry can be replaced; and the element
+type's fields are locked by omission (S440 dpa-052 Q3), so no entry can be rewritten. The compiler checks that on
+every write however it is spelled (§66.11.2, §66.11.3).
 
 #### 66.19.6 An engine re-expressed as a `single` declaration
 
@@ -40240,7 +41596,7 @@ After:
         <button onclick=load()>Load</button>
         <card title="One"/>
         <card title="Two"/>                         // each card has its own `status`
-        <!-- <phase/> → E-DECL-SINGLE-INSTANTIATED (O55) -->
+        <!-- <phase/> → E-DECL-SINGLE-INSTANTIATED (O55, ruled S442): <*phase/> is the only way to render it -->
     </main>
 </program>
 ```
@@ -40261,13 +41617,36 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-DECL-STAR-PREDEFINED`** | Error | `<*x/>` where `x` is a predefined (HTML) declaration, e.g. `<*div/>` (§66.6.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-STAR-REF-ATTR-WRITE`** | Error | An attribute on a `<*x …>` reference would write the referenced instance (§66.6.7). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write OR a read (S437) through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3) — conditional on O55. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-HANDLE-REDECLARE`** | Error | (i) Two `as=` handles of the same name in one scope; (ii) an `as=` handle named like a cell — including a row-scoped handle in an `<each>` row named like a program-level cell (§66.7.4); (iii) the same `as=` name on mutually exclusive `if=` instances — an error for now, logged as a candidate widening (§66.7.2). **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #5). **Named; impl pending — Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3); `<*x/>` is the only way to render it. O55 RULED S442 (formerly conditional on O55). **Provenance:** ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"* (item 1). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit, or a write off a lifecycle path — including a transition off a lifecycle path or sequence edit grant on a SUB-FIELD, written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2; enforcement of the unprovable case is O36). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`W-GRANT-REDUNDANT`** | Warning | A type grants `replace` together with edit grants, which `replace` subsumes (§66.11.3). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-FIELD-PRIVATE-WRITE`** | Error | A write from a file other than the defining file to a field that is not `export`ed (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-FOREIGN-REPLACE-PRIVATE`** | Error | A whole-value replace, from outside the defining file, of a value whose type has any private field (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-THEME-TOKEN-CELL-COLLISION`** | Error | A `<theme>` token and a cell are declared with the same name in one program — tokens and cells share ONE namespace (§66.17 item 4), so the pair cannot coexist silently. The message names both declarations. (No existing code fits: `E-NAME-COLLIDES-STATE` is a *local* reusing a cell name, §6.1.3; `E-SCOPE-REDECLARE` is function-body scope, §7.3.3.) **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §66; the bootstrap front end does not parse T3 yet, so it has no fire site). Provenance: ruling:user-voice-scrml.md S440 (all recs #2, item 5). |
+
+**Cross-reference (not a §66 code):** a field overridden twice in one spread-override shape
+(`{ ...@g, phase: .Gone, phase: .Live }`, §66.11.3 item 1) is `E-STRUCT-DUPLICATE-KEY` — a language-wide
+struct-literal code whose home is §14.3 and whose row is in §34.
+
+**Typer codes accepted S442 (language-wide — not §66-form codes).**
+
+> **Amendment S442 — four typer codes accepted.** The S440 truthiness and operator rulings (and dpa-054 #3) had
+> no named codes; S442 accepts the four below. Their full SPEC text is the S440 SPEC pass (not yet written); these
+> rows only name them. Each is **Nominal — not yet emitted by impl#1; the bootstrap emits them.**
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 yes, 2 yes, 3 all your recs"* (item 3: *"accept
+> `E-COND-NOT-BOOLEAN`, `E-OPERATOR-OPERAND-TYPE`, `E-OPERAND-NOT-NARROWED`, `E-INT-DIVISION`"*). Meanings from
+> ruling:user-voice-scrml.md S440 — *"#4 = (c)"*; *"all recs on 1-3 and dpa-037"* (Truthiness Q1/Q2, Gotcha
+> Q1–Q3); dpa-054 #3 (`/` is float-only).
+
+| Code | Severity | Fires when |
+|---|---|---|
+| **`E-COND-NOT-BOOLEAN`** | Error | A condition — `if=`, an `if` / `while` statement, a ternary test — whose value is provably neither a `bool` nor a `T \| not` presence test: numbers and strings have no truthiness (write `@count > 0`, `@user is some`). Provable-or-silent: an error wherever the violation is provable, silence where the type is unknown; no §63 window (S440 #4 = (c), Truthiness Q2). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
+| **`E-OPERATOR-OPERAND-TYPE`** | Error | An operand of a type its operator does not take: an arithmetic or relational operator on a non-number; `+` on anything but two numbers or two strings (string ordering goes through an explicit compare); `!`, `&&`, `\|\|` (and `and` / `or`) on a non-boolean — defaults use `??` (S440 Gotcha Q1, Q2). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
+| **`E-OPERAND-NOT-NARROWED`** | Error | A `T \| not` operand not narrowed before `+`, arithmetic, comparison, or use in a string template (S440 Gotcha Q3). A markup `${@o.n}` without narrowing stays SILENT (`${not}` renders nothing, S442). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
+| **`E-INT-DIVISION`** | Error | `/` between two `int`s: `/` is float-only (it divides `number`s); integer division is explicit, `div(a, b, .Mode)`, the rounding mode required (S440 dpa-054 #3). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
 
 **Retained codes with a restated condition or message**
 
@@ -40275,8 +41654,9 @@ emitter). Every code below is Nominal on impl#1.
 |---|---|
 | **`E-DERIVED-WRITE`** | Fires on a write to a DERIVED declaration (locked + reactive initializer, §66.9). The message SHALL name the `let`-seeding trade-off (§66.9 rule 5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DERIVED-VALUE-MUTATE`** | Unchanged in meaning; applies to derived declarations as spelled in §66.9. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-COMPONENT-ENGINE-SCOPE`** | Survives as the Move-20 invariant: fires when a `single` declaration appears inside a multi-instance declaration (§66.13.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-COMPONENT-ENGINE-SCOPE`** | Survives as the Move-20 invariant: fires when a `single` declaration appears inside a multi-instance declaration (§66.13.4) — including an `<engine>` (a `single` declaration carrying a transition graph) in an `<each>` row template (S439 ruling #10; the message names the per-row ordinary declaration, §66.7.3) — and a plain `single` without a graph in a row, the same way (S440 ruling #11; formerly OPEN. **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 11)). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-ENGINE-INVALID-TRANSITION`** | Reused for a write off a transition-graph field's `rule=` edges (§66.13.2) — including a graph transition on a SUB-FIELD written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-TYPE-031`** | Also fires on a cell write, or a write to a typed field of a cell, whose value does not satisfy the target's declared type (§7.5.1 position 6, judged within §7.5.1's provable domain). **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 1; the three SPEC-text OPEN items, #1). **Named; impl pending — Nominal / not yet emitted for this case** (measured S440: impl#1 compiles it at exit 0; impl#1 carries it, §34.0; the bootstrap implements it). |
 | **`E-CELL-NO-RENDER-SPEC`** | Fire condition under §66 is OPEN (O51, §66.6.8) — it continues to police the legacy Shape-1 `<x/>` form during the window. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 
 **Legacy-form codes** — the W-lint + reserved-E pairs of §66.21 (`W-DECL-LEGACY-RHS`, `W-CONST-CELL-DEPRECATED`,
@@ -40319,7 +41699,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O7 | §66.13 | Whether contract kinds combine on one field (lifecycle + graph; `let` + graph — `replace` subsumes edits, §66.11.3, so `let` would make a graph dead); the fate of §14.12.4's carve-out. |
 | ~~O8~~ RULED wiring | §66.15 | Function-typed attributes vs the passed-vs-stored rule (§15.11.5.1, `E-STRUCT-FUNCTION-FIELD`, `E-EQ-003`). |
 | O9 | §66.15.2 | Named and parametric slots on a declaration. |
-| O10 | §66.12.3 | Whether the grant spellings in the answered one-axis text (`Entry[free, end]`, `Todo[free, anywhere, writable, replace]`) are the final syntax; the bounded-length token. |
+| O10 (narrowed S442) | §66.12.3 | Whether the grant spellings in the answered one-axis text (`Entry[free, end]`, `Todo[free, anywhere, writable, replace]`) are the final syntax; the bounded-length token. PARTLY RULED S442: the six grow/shrink tokens (`append`/`pop`, `prepend`/`shift`, `insert`/`remove`) are ruled. Still OPEN: the bracket-list-on-the-element-type form itself, `free` / `writable` / `replace` as tokens, the bounded-length token (`1..10`). Provenance: ruling:user-voice-scrml.md S442 — *"spellings are fine"*. |
 | O12 | §66.12.4 | The "hard" severity of the legacy-RHS deprecation within §63 ("clear dep terms" = removal at a MAJOR with `scrml fix`, per the answered L362 text). |
 | O13 | §66.9 | Whether logic-local `const` (and §50.8.5's keywordless-binding-is-`const`) retires. |
 | O14 | §66.11 | Whether field contracts govern non-cell (local) values — reversing §50.9's `const`-property-write sentence (lean: yes — an error; the §50.9 reversal was parked on dpa-052, which has ruled). |
@@ -40349,7 +41729,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | ~~O52~~ RULED | §66.2.2 | How `rule=` state-children fit the declaration/use marker and §66.2.3's "after `:` read a type"; whether the `:`-shorthand body survives there. |
 | O25 | §66.5.5 | Record gap: implicit bind vs explicit `bind:` in `renders`, and whether validators reach the `renders` input (§6.4.2 steps 3–4). |
 | O54 | §66.6.3 | Record gap: whether `@x` inside `x`'s own `renders` names the current instance (DD #8, not in the answered text). |
-| O55 | §66.13.3 | Whether a plain use of a `single` declaration is an error (DD §5.a) or renders the one instance. |
+| ~~O55~~ RULED S442 = error | §66.13.3 | Whether a plain use of a `single` declaration is an error (DD §5.a) or renders the one instance. RULED: a plain use is `E-DECL-SINGLE-INSTANTIATED`; `<*x/>` is the only way to render it. Provenance: ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"*. |
 | ~~O56~~ RULED narrow (S437: confirmed not re-widened by "identities yes") | §66.7.5 | Scope of the `given` carve-out: instance handles only, or named shared instances / plain `T \| not` cells too; live reads through `c`; `let d = c`; direct `@handle.f = …` inside the block. |
 | O47 | §66.17 | (narrowed) A reactive token in a shape other than match-over-enum (e.g. `<ink:string=(@userColor)/>`). |
 | ~~O57~~ RULED S437 = no | §66.11.3 | Does a contract-free (fixed / locked) sub-field bound a whole-struct `replace`? RULED no — else O3's struct-level `let` is a dead grant. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
@@ -40360,6 +41740,8 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 Closed by the PA proposal text bryan answered (the terse-answer rule, §66 preamble): O6 (`single` is a trailing
 modifier — Q6 "a"), O40 (the `given` binding writes the instance — lists "yes"; its scope is O56), O53 (`let` / `export let` on attributes; `export <child>` —
 Q6 "a", "E2, move on", "yes, :struct,"). Ruled S437 (*"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*): O21 (by derivation from L6), O57, O58, O59, O60.
+Ruled S442: O55 (*"1 your rec, 2 deliberate, 3 your rec"* — a plain use of a `single` declaration is an error);
+O10 in part (*"spellings are fine"* — the six grow/shrink tokens; the rest of O10 stays OPEN).
 
 ### 66.23 Cross-references
 

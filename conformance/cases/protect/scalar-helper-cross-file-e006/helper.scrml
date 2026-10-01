@@ -1,0 +1,7 @@
+<program>
+  ${
+    export function pick(r) {
+      return r.passwordHash
+    }
+  }
+</program>

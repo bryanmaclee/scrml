@@ -66,6 +66,10 @@ beforeAll(() => mkdirSync(FIXTURE_DIR, { recursive: true }));
 afterAll(() => { try { rmSync(FIXTURE_DIR, { recursive: true, force: true }); } catch {} });
 
 const CODE = "E-ASYNC-STDLIB-IN-SYNC-CALLBACK";
+// s440-sync-callback-async-helper — a client site whose callee is a SERVER fn now
+// reports the peer-server-fn code (before s440 every client site used the stdlib
+// code). Sections (3) and (5) below are server-fn sites.
+const SERVER_CODE = "E-SERVER-FN-IN-SYNC-CALLBACK";
 
 /** Compile a `<program>` app fixture; return { clientJs, codes }. */
 function compileApp(name, src) {
@@ -155,7 +159,7 @@ describe("isServerBoundaryCallee — shared by the provider and isClientServerFn
 // (3) end-to-end — the shape the old drain could not see
 // ---------------------------------------------------------------------------
 describe("client server fn in a NON-awaitable position now fails closed", () => {
-  test("a fn-SIGNATURE parameter default calling a server fn raises " + CODE, () => {
+  test("a fn-SIGNATURE parameter default calling a server fn raises " + SERVER_CODE, () => {
     // A parameter default is spliced as RAW TEXT by `paramSignature`, so it is in
     // neither `fn.body` nor any structural node — emit-expr's own
     // `_clientSyncPeerCalls` sink structurally cannot reach it. Only the drain can,
@@ -173,7 +177,7 @@ describe("client server fn in a NON-awaitable position now fails closed", () => 
       "function go() { usesDefault(1) }",
       "</program>",
     ].join("\n"));
-    expect(codes).toContain(CODE);
+    expect(codes).toContain(SERVER_CODE);
   });
 });
 
@@ -195,6 +199,7 @@ describe("negative controls", () => {
       "</program>",
     ].join("\n"));
     expect(codes).not.toContain(CODE);
+    expect(codes).not.toContain(SERVER_CODE);
     expect(clientJs).toMatch(/await\s+_scrml_fetch_loadRows/);
   });
 });
@@ -229,7 +234,7 @@ describe("negative controls", () => {
 // telling you to delete it. That is the intent.
 // ---------------------------------------------------------------------------
 describe("KNOWN FALSE POSITIVE: position-blind text scan on an awaited nested-arm site", () => {
-  test("a nested `!{}` arm body holding an AWAITED server call still raises " + CODE, () => {
+  test("a nested `!{}` arm body holding an AWAITED server call still raises " + SERVER_CODE, () => {
     const { clientJs, codes } = compileApp("parse-error-arm", [
       '<program title="pe">',
       "<state>",
@@ -256,7 +261,7 @@ describe("KNOWN FALSE POSITIVE: position-blind text scan on an awaited nested-ar
       "</program>",
     ].join("\n"));
     // The diagnostic fires — this is the false positive, locked.
-    expect(codes).toContain(CODE);
+    expect(codes).toContain(SERVER_CODE);
     // …and here is the PROOF that it is false: the emission is correct. The host
     // carries `async` and the inner server call IS awaited. If this pair ever
     // disagrees — diagnostic gone AND emission still awaited — the root has been

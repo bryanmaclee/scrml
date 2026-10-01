@@ -153,18 +153,47 @@ function validateMarkup(
           `W-ATTR-002: Value \`"${literal}"\` is not a recognized shape for ` +
           `\`${name}=\` on \`<${tag}>\`. ` +
           `Recognized values: ${recognized}. ` +
-          `The attribute is currently accepted as-is with no compile-time enforcement. ` +
           (name === "auth"
-            ? `For role-based access control, the \`role:X\` shape is documented in the dispatch ` +
-              `app FRICTION ledger but is NOT yet implemented (see F-AUTH-001). The page is ` +
-              `silently authorized for every authenticated user; gate roles via a server fn ` +
-              `until the ergonomic completion lands.`
-            : `Use one of the recognized values to ensure the attribute does what its name implies.`),
+            ? authUnrecognizedEffect(tag) +
+              (literal.startsWith("role:")
+                ? ` For role-based access control, the \`role:X\` shape is documented in the dispatch ` +
+                  `app FRICTION ledger but is NOT yet implemented (see F-AUTH-001); gate roles via a ` +
+                  `server fn until the ergonomic completion lands.`
+                : "")
+            : `The attribute is currently accepted as-is with no compile-time enforcement. ` +
+              `Use one of the recognized values to ensure the attribute does what its name implies.`),
         span,
         severity: "warning",
       });
     }
   }
+}
+
+/**
+ * What an UNRECOGNIZED `auth=` literal does today, per element (S443 r3) — so the
+ * warning states the real effect instead of "accepted as-is".
+ *   - `<page>`: it is not an auth declaration. The page inherits its application's
+ *     `<program auth="required">` gate if the application's top-level `<program>`
+ *     declares one (route-inference Step 8c); otherwise it gates nothing.
+ *   - `<program>`: no auth gate is applied at all (the value is not "required").
+ *   - `<channel>`: any `auth=` attribute gates the WebSocket upgrade as if required.
+ */
+function authUnrecognizedEffect(tag: string): string {
+  if (tag === "page") {
+    return `An unrecognized \`auth=\` value is not an auth declaration: this page inherits ` +
+      `the application's gate if the application's top-level \`<program>\` declares ` +
+      `\`auth="required"\` (it then requires authentication), and otherwise it gates nothing ` +
+      `(the page is public). Write one of the recognized values.`;
+  }
+  if (tag === "program") {
+    return `An unrecognized \`auth=\` value applies NO auth gate: this program and its pages ` +
+      `are public. Write \`auth="required"\` if a login is intended.`;
+  }
+  if (tag === "channel") {
+    return `On a \`<channel>\` any \`auth=\` attribute gates the WebSocket upgrade as if it ` +
+      `were \`auth="required"\`. Write one of the recognized values.`;
+  }
+  return `The attribute is currently accepted as-is with no compile-time enforcement.`;
 }
 
 // ---------------------------------------------------------------------------

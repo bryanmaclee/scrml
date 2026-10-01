@@ -336,7 +336,9 @@ describe("--emit-block-analysis CLI write-loop (end-to-end, real binary)", () =>
     const names = messages.blocks.map((b) => b.name);
     expect(names).not.toContain("publishDriverEvent");
     // The page's blocks are exactly its 11 locally-declared functions.
-    expect(messages.blocks.length).toBe(11);
+    // 10 since S443: the per-page getCurrentUser helper was inlined into its callers
+    // (a `?{}` helper compiled to its own public route — a user-lookup oracle).
+    expect(messages.blocks.length).toBe(10);
     // The channel's OWN sidecar still declares publishDriverEvent — the fix
     // removes the phantom from the CONSUMER, never the real decl from its owner.
     const channel = analysisForFileEndingWith(

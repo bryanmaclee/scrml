@@ -344,14 +344,23 @@ export function noDefault(what) {
 /** A `rule=` graph edge table, shared by every instance of the declaration (§5.4). */
 export function edges(table) { return table; }
 
-/** A graph write with a runtime edge check (§6.3). A self-write is a no-op (§51.0.F.1). */
-export function transition(target, table, to) {
+/**
+ * The runtime edge check alone (§6.3): throws unless `to` is reachable from the
+ * current state in one edge. A self-write passes (§51.0.F.1). Writes nothing —
+ * an all-or-nothing spread edit (RULED S440) checks every edge before any write.
+ */
+export function checkEdge(target, table, to) {
   const from = target.peek();
   if (from === to) return;
   const allowed = table[from];
   if (!allowed || !allowed.includes(to)) {
     throw new Error(`E-ENGINE-INVALID-TRANSITION: .${from} → .${to} is not an edge of this field's rule= graph`);
   }
+}
+
+/** A graph write with a runtime edge check (§6.3). A self-write is a no-op (§51.0.F.1). */
+export function transition(target, table, to) {
+  checkEdge(target, table, to);
   target.set(to);
 }
 
@@ -359,6 +368,26 @@ export function transition(target, table, to) {
 export function append(target, element) { target.set([...target.peek(), element]); }
 /** A front-prepend edit. */
 export function prepend(target, element) { target.set([element, ...target.peek()]); }
+/** A removal of `n` elements at the end (`pop()`, n = 1): a new, shorter array. An empty sequence stays empty. */
+export function removeEnd(target, n) { const xs = target.peek(); target.set(xs.slice(0, Math.max(0, xs.length - n))); }
+/** A removal of `n` elements at the front (`shift()`, n = 1). */
+export function removeFront(target, n) { target.set(target.peek().slice(n)); }
+/**
+ * A write of struct path `path` inside the element at position `index`
+ * (`@xs[i].f = v`, dpa-052 Q3). A position outside the sequence is refused —
+ * nothing is written (a write never grows or pads a sequence).
+ */
+export function setAt(target, index, path, v) {
+  const xs = target.peek();
+  if (!Number.isInteger(index)) {
+    throw new Error(`index ${JSON.stringify(index)} is not a sequence position (an int) — nothing was written`);
+  }
+  if (index < 0 || index >= xs.length) {
+    const has = xs.length === 0 ? "the sequence is empty" : `its positions are 0..${xs.length - 1}`;
+    throw new Error(`position ${index} is outside the sequence (${has}) — nothing was written`);
+  }
+  setIn(target, [index, ...path], v);
+}
 /**
  * A write at `path` (struct property names / sequence indices): a new value
  * along the path, sharing every untouched branch with the old one.
@@ -442,6 +471,23 @@ export function on(scope, el, event, handler) {
   el.addEventListener(event, h);
   stats.listeners++;
   scope.own(() => { el.removeEventListener(event, h); stats.listeners--; });
+}
+
+/**
+ * A two-way bind (§5.4): the element's `prop` (`value` / `checked`) shows
+ * `read()` and follows it; the element's input (`value`) / change (`checked`)
+ * event hands the property's value to `write` — the compiled, contract-checked
+ * write of that value to the same place. A write that lands the value the
+ * element already shows changes nothing (no caret jump).
+ */
+export function bind(scope, el, prop, read, write) {
+  requireScope(scope, "a bind");
+  effect(scope, () => {
+    const v = read();
+    const shown = prop === "checked" ? v === true : display(v);
+    if (el[prop] !== shown) el[prop] = shown;
+  });
+  on(scope, el, prop === "checked" ? "change" : "input", () => write(el[prop]));
 }
 
 /**

@@ -1,0 +1,13 @@
+<program>
+  #{
+      p     { margin-top: 8px; }
+      .note { color: rgb(1, 2, 3); }
+  }
+  const Card = <div props={}>
+      #{ .lead { margin-top: 4px; } }
+      <p class="lead">lead</p>
+  </>
+  <Card/>
+  <p id="plain">plain</p>
+  <span class="note">n</span>
+</program>

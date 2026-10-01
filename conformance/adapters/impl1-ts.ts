@@ -48,6 +48,23 @@ export function setCompileOverlay(overlay: Record<string, unknown> | null): void
   compileOverlay = overlay ?? {};
 }
 
+/**
+ * Client-artifact executor (s439-bootstrap-m3-ingest). `run()` normally executes impl#1's
+ * artifact — `SCRML_RUNTIME + clientJs + CONFORMANCE_SHIM` in one IIFE. A hybrid whose CG stage
+ * is the BOOTSTRAP's printer emits a different artifact (an ES module over the bootstrap's own
+ * runtime), which that IIFE cannot run; the hybrid then installs the substitute's executor here.
+ * The executor mounts the page into the current document, runs the client, and publishes the
+ * OQ3 `globalThis.__scrml_conformance` hook over its own model (the ratified contract: each impl
+ * implements the same signature over its own model). Everything else in `run()` — the fresh DOM,
+ * server stubs, the virtual clock, input driving, settle, snapshot, DOM normalization — is shared.
+ * `null` (the default) = impl#1's own execution, unchanged.
+ */
+export type ClientExecutor = (artifact: { html: string; clientJs: string }) => Promise<void>;
+let clientExecutor: ClientExecutor | null = null;
+export function setClientExecutor(executor: ClientExecutor | null): void {
+  clientExecutor = executor;
+}
+
 export type Severity = "error" | "warning" | "info";
 
 export interface CompileResult {
@@ -437,6 +454,62 @@ function installNoopEventSource(): () => void {
   };
 }
 
+/**
+ * Install a minimal, NEVER-CONNECTING `globalThis.WebSocket` for the duration of
+ * one `run()` (s441). happy-dom's WebSocket is a REAL `ws` client: a `<channel>`
+ * (§38) opens a socket at module-init, the connection to the absent host fails,
+ * and `ws` emits an `error` event with no listener — an unhandled error that
+ * kills a `bun:test` run, and a real network attempt the hermetic harness must
+ * never make. Same shape as `installNoopEventSource`: it models the
+ * PRE-CONNECT window (`readyState` CONNECTING, never OPEN, never fires), which a
+ * channel client is already built to tolerate (it sends only at readyState OPEN).
+ * Installed ONLY when the emitted client constructs a WebSocket, so the global
+ * env is byte-identical for every other case. NOT a channel-sync model: no case
+ * asserts cross-client sync, and one that wants to would need a driver verb.
+ */
+function installNoopWebSocket(): () => void {
+  const g = globalThis as any;
+  const real = g.WebSocket;
+  class NoopWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+    url: string;
+    readyState = 0;
+    binaryType = "blob";
+    bufferedAmount = 0;
+    protocol = "";
+    onopen: ((ev: any) => void) | null = null;
+    onmessage: ((ev: any) => void) | null = null;
+    onerror: ((ev: any) => void) | null = null;
+    onclose: ((ev: any) => void) | null = null;
+    _listeners: Record<string, Array<(ev: any) => void>> = {};
+    constructor(url: string) {
+      this.url = String(url);
+    }
+    addEventListener(type: string, cb: (ev: any) => void): void {
+      (this._listeners[type] = this._listeners[type] || []).push(cb);
+    }
+    removeEventListener(type: string, cb: (ev: any) => void): void {
+      const a = this._listeners[type];
+      if (a) this._listeners[type] = a.filter((f) => f !== cb);
+    }
+    send(_data: unknown): void {
+      // Never OPEN, so the channel client (which sends only at readyState OPEN)
+      // never calls this; a no-op rather than a throw keeps the stub inert.
+    }
+    close(): void {
+      this.readyState = 3; // CLOSED
+    }
+  }
+  g.WebSocket = NoopWebSocket;
+  return () => {
+    if (real === undefined) delete g.WebSocket;
+    else g.WebSocket = real;
+  };
+}
+
 function ensureFreshDom(): void {
   // A fresh window per run isolates DOMContentLoaded listeners + state from the
   // prior run (verified: re-register drops old listeners). unregister() is async.
@@ -469,6 +542,7 @@ export async function run(
   // §37.5 SSE binding — a never-firing EventSource stub, installed below only
   // when the emitted client actually opens a stream (assigned inside the try).
   let restoreEventSource: (() => void) | null = null;
+  let restoreWebSocket: (() => void) | null = null;
 
   // Virtual clock — installed just before the eval (so timer arming at module-
   // init + on DOMContentLoaded funnels through it) and restored in finally.
@@ -496,7 +570,19 @@ export async function run(
     if (clientJs.includes("new EventSource")) {
       restoreEventSource = installNoopEventSource();
     }
+    // §38 `<channel>`: never let a run open a real socket (see installNoopWebSocket).
+    if (clientJs.includes("new WebSocket")) {
+      restoreWebSocket = installNoopWebSocket();
+    }
 
+    if (clientExecutor !== null) {
+      // A hybrid whose CG is the bootstrap's (s439-bootstrap-m3-ingest): its artifact runs
+      // on ITS runtime, mounted and executed by the substitute's own executor, which
+      // publishes the OQ3 hook. Same clock rule as below.
+      clock.install();
+      await clientExecutor({ html, clientJs });
+    } else {
+    // (the impl#1 path — unchanged, kept at its original indentation)
     // Mirror the browser harness: extract <body> inner, strip <script>, mount.
     const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
     const bodyHtml = bodyMatch ? bodyMatch[1] : html;
@@ -515,6 +601,7 @@ export async function run(
     const code = "(function () {\n" + SCRML_RUNTIME + "\n" + clientJs + "\n" + CONFORMANCE_SHIM + "\n})();";
     // eslint-disable-next-line no-eval
     (0, eval)(code);
+    }
 
     const doc = (globalThis as any).document;
     doc.dispatchEvent(new (globalThis as any).Event("DOMContentLoaded", { bubbles: true }));
@@ -534,6 +621,7 @@ export async function run(
     delete (globalThis as any).__scrml_conformance;
     if (restoreFetch) restoreFetch();
     if (restoreEventSource) restoreEventSource();
+    if (restoreWebSocket) restoreWebSocket();
     clock.restore();
   }
 }
@@ -586,6 +674,16 @@ export interface FirstPaintAssertion {
   contains?: string[];
   /** No substring may appear (e.g. a §14.8.9-protected column / its value). */
   notContains?: string[];
+  /** WHO requests the document (S441). `"anonymous"` (default) — no session.
+   *  `"authenticated"` — a viewer who passes the page's `auth=` gate. An
+   *  `auth="required"` page's document redirects an anonymous viewer (§52.13,
+   *  §40.2 compose-route bullet), so its first paint is only observable as an
+   *  authenticated viewer. The rest of the run (client hydration) stays anonymous. */
+  viewer?: "anonymous" | "authenticated";
+  /** S441 — the ANONYMOUS document request (made in addition to the `viewer`
+   *  one) SHALL be refused with a redirect (§52.13: "unauthenticated requests are
+   *  redirected to loginRedirect"). The value is the expected redirect target. */
+  anonymousRedirect?: string;
 }
 
 /** The subset of the emitted server module the harness drives. */
@@ -891,6 +989,9 @@ function extractSsrSeed(firstPaint: string): unknown {
 export interface ServerRunResult extends RunResult {
   /** The composed SSR first-paint HTML (SSR mode only; else undefined). */
   firstPaint?: string;
+  /** SSR mode: the ANONYMOUS document response (status + Location), always
+   *  measured so a case can assert the §52.13 redirect. */
+  anonymousDocument?: { status: number; location: string | null };
 }
 
 export interface ServerRunOptions {
@@ -900,6 +1001,8 @@ export interface ServerRunOptions {
   serverDb: ServerDb;
   /** When true, compose the SSR first-paint, mount THAT + seed, then hydrate. */
   ssr?: boolean;
+  /** SSR mode: who requests the document (see FirstPaintAssertion.viewer). */
+  viewer?: "anonymous" | "authenticated";
   /** Fork A opt-in. `"real"` stands up a real seeded Bun.SQL in-memory SQLite
    *  (Fork B: DDL from the case's `<schema>`, loose-infer fallback) as
    *  `_scrml_sql` — so WHERE / bound params / JOIN / RETURNING / aggregate /
@@ -917,7 +1020,7 @@ export interface ServerRunOptions {
  * non-determinism never reaches asserted output.
  */
 export async function runServer(source: string, opts: ServerRunOptions): Promise<ServerRunResult> {
-  const { input = [], auxFiles = {}, serverDb, ssr = false, sqlEngine = "stub" } = opts;
+  const { input = [], auxFiles = {}, serverDb, ssr = false, sqlEngine = "stub", viewer = "anonymous" } = opts;
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
   // A real document URL is required for happy-dom's cookie jar (the baseline CSRF
   // double-submit reads/writes `document.cookie`); about:blank rejects cookies.
@@ -953,11 +1056,39 @@ export async function runServer(source: string, opts: ServerRunOptions): Promise
     // SSR mode: compose the first-paint, mount THAT (its <body>), and seed
     // window.__scrml_ssr_state so the client hydrates the server rows in place.
     let firstPaint: string | undefined;
+    let anonymousDocument: { status: number; location: string | null } | undefined;
     let seedState: unknown = null;
     let mountSource = html;
     if (ssr) {
       if (!mod.compose) throw new Error("server-eval SSR: emitted serverJs has no _scrml_ssr_compose_handler");
-      const resp = await mod.compose({});
+      // A page GET shaped like the dispatch requests above (the host always hands
+      // the compose handler a request). The ANONYMOUS request is always made, so a
+      // case can assert the §52.13 document redirect; the first paint comes from
+      // the `viewer` request. An "authenticated" viewer is a session record the
+      // emitted session middleware resolves (userId set) + its cookie — the same
+      // state a login leaves behind. impl-private: impl#2 authenticates its own way.
+      const docReq = (cookie: string | null) => ({
+        url: "http://localhost/",
+        method: "GET",
+        headers: { get: (k: string) => (String(k).toLowerCase() === "cookie" ? cookie : null) },
+      });
+      const anon = (await mod.compose(docReq(null))) as any;
+      anonymousDocument = {
+        status: anon.status,
+        location: anon.headers && typeof anon.headers.get === "function" ? anon.headers.get("Location") : null,
+      };
+      let resp = anon;
+      if (viewer === "authenticated") {
+        const store: Map<string, unknown> = ((globalThis as any).__scrml_session_store ??= new Map());
+        const sid = "conformance-viewer-" + Math.random().toString(36).slice(2);
+        store.set(sid, { userId: 1, role: null });
+        const cookieName = serverJs.includes("__Host-scrml_sid") ? "__Host-scrml_sid" : "scrml_sid";
+        try {
+          resp = await mod.compose(docReq(cookieName + "=" + sid));
+        } finally {
+          store.delete(sid);
+        }
+      }
       firstPaint = await resp.text();
       seedState = extractSsrSeed(firstPaint);
       mountSource = firstPaint;
@@ -984,7 +1115,7 @@ export async function runServer(source: string, opts: ServerRunOptions): Promise
 
     const state = hook && hook.snapshot ? hook.snapshot() : { cells: {}, derived: {} };
     const dom = normalizeDom(doc.body);
-    return { dom, state, body: doc.body, firstPaint };
+    return { dom, state, body: doc.body, firstPaint, anonymousDocument };
   } finally {
     rmSync(dir, { recursive: true, force: true });
     delete (globalThis as any).__scrml_conformance;

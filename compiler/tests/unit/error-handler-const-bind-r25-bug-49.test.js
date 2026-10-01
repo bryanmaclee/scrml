@@ -321,7 +321,9 @@ describe("R25-Bug-49 §5: nested handler — `!{...}` inside an arm body", () =>
     // the locked repros: `compiler/tests/unit/async-name-provider.test.js` §5/§6.
     // Corpus impact measured at 0 of 1878 sources. Narrowed rather than deleted so
     // any OTHER new diagnostic still fails here.
-    const KNOWN_FALSE_POSITIVE = "E-ASYNC-STDLIB-IN-SYNC-CALLBACK";
+    // s440 — the site is a client call to SERVER fn `b`, so the drain now reports
+    // the peer-server-fn code (it used the stdlib code for every client site).
+    const KNOWN_FALSE_POSITIVE = "E-SERVER-FN-IN-SYNC-CALLBACK";
     expect((result.errors ?? []).filter((e) => e.code !== KNOWN_FALSE_POSITIVE)).toHaveLength(0);
     expectNoStatementBoundaryWarning();
 

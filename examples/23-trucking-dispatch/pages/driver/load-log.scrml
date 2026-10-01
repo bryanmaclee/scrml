@@ -18,16 +18,12 @@
   <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, loads, log_entries">
 
     ${
-        function getCurrentUser(sessionToken) {
-            if (sessionToken is not) return not
-            const store = createSessionStore(SESSION_DB_PATH)
-            const userId = store.get(sessionToken)
-            if (userId is not) return not
-            return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
-        }
 
         function fetchLogServer(sessionToken, loadId) {
-            const user = getCurrentUser(sessionToken)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
@@ -83,7 +79,7 @@
             const loadId = getLoadId()
             const data = fetchLogServer(tok, loadId)
             if (data.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             if (data.notFound) {
@@ -134,11 +130,11 @@
     <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">
       <header class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
           <div class="flex items-center gap-3">
-              <a href="/driver" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
+              <a href="/driver/home" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
               <span class="text-xs uppercase tracking-wider text-slate-400">Load log</span>
           </div>
           <nav class="flex items-center gap-4 text-sm">
-              <a href="/driver" class="hover:text-blue-300">Home</a>
+              <a href="/driver/home" class="hover:text-blue-300">Home</a>
               <a href="/driver/hos" class="hover:text-blue-300">HOS</a>
               <a href="/driver/messages" class="hover:text-blue-300">Messages</a>
           </nav>

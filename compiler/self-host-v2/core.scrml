@@ -51,7 +51,10 @@ ${
     // -------------------------------------------------------------------------
     export type SeqAt:enum = { End, Front, Anywhere }
     export type LengthGrant:enum = { Fixed, Bounded(min: int, max: int), Free }
-    export type SeqGrants:struct = { length: LengthGrant, at: SeqAt[], positionsWritable: boolean }
+    // `at` = the places the sequence may GROW, `shrink` = the places it may
+    // SHRINK (RULED S442 grow/shrink split: `append`/`pop`, `prepend`/`shift`,
+    // `insert`/`remove`; s444: shrink joined Core when removals became edits).
+    export type SeqGrants:struct = { length: LengthGrant, at: SeqAt[], shrink: SeqAt[], positionsWritable: boolean }
 
     export type Type:enum = {
         Int,
@@ -134,6 +137,13 @@ ${
         PWild,
     }
 
+    // s444 — the host calls Core admits (a CLOSED set; see progress.md
+    // "host call surface"): `Date.now()` only — the §66.19.5 timestamp.
+    export type HostCall:enum = { DateNow }
+    // s444 — the sequence functions a lambda is admitted as the argument of.
+    // Each makes a NEW sequence value (R3: values are immutable).
+    export type SeqFn:enum = { Filter, Map }
+
     export type Expr:enum = {
         Lit(lit: Literal),
         Local(sym: Sym),
@@ -149,6 +159,13 @@ ${
         // L6 / §66.9, else the declared default), evaluated again now. What
         // `reset(@x.f)` writes (L4) when the instance may have had a use site.
         InitOf(decl: Sym, inst: InstRef, idx: int),
+        // s444: a host call (the closed HostCall set; never in a pure `fn`).
+        Host(call: HostCall),
+        // s444: a function value — its parameters are binder-minted locals;
+        // the body is ONE expression. Only as a SeqCall's argument.
+        Lambda(params: Sym[], body: Expr),
+        // s444: `seq.filter(f)` / `seq.map(f)` — a new sequence value.
+        SeqCall(op: SeqFn, seq: Expr, f: Expr),
     }
     export type MatchArm:struct = { pat: Pattern, body: Expr }
 
@@ -160,6 +177,13 @@ ${
     // capability symbol, so no Write can name it — see progress.md "grants are
     // symbols".
     // -------------------------------------------------------------------------
+    // s444: the SHRINK edits (a Write's value is the COUNT removed, an Int
+    // literal, for RemoveEnd / RemoveFront — `pop()` / `shift()` remove 1; the
+    // NEW whole value, `SeqCall(Filter, <the field>, λ)`, for RemoveAnywhere —
+    // `@x = @x.filter(λ)`), and ElemAt: a write of struct path `path` inside the
+    // element at position `index` (`@xs[i].f = v`, dpa-052 Q3 — judged by the
+    // ELEMENT field's own contract). In a GrantSet, an element-field grant is
+    // listed as `FieldAt(path)` over the element struct (it names no index).
     export type EditKind:enum = {
         Replace,
         Append,
@@ -168,15 +192,27 @@ ${
         PositionWrite,
         FieldAt(path: FieldRef[]),
         Transition,
+        RemoveEnd,
+        RemoveFront,
+        RemoveAnywhere,
+        ElemAt(index: Expr, path: FieldRef[]),
     }
     // RuntimeEdge: a `rule=` edge whose from-state is not statically known
     // (§6.3). The invariant hook (O36) is deliberately absent until O36 rules.
     export type Check:enum = { Static, RuntimeEdge }
 
+    // Commit: an ALL-OR-NOTHING group of Writes — the spread-override field
+    // edit `@x = { ...@x, f: v, g: w }` (§66.11.3 item 1; RULED S440: "Should a
+    // spread write be all-or-nothing on a runtime refusal? Yes."). Every
+    // Write's contract is checked first; only if every check passes are the
+    // Writes applied, in order; on a refusal NONE is applied. Its Writes' values
+    // are Locals — the one snapshot, evaluated by the Lets before it (check.scrml
+    // C7), so checking and applying never re-evaluate a value.
     export type Stmt:enum = {
         Let(sym: Sym, init: Expr),
         Assign(local: Sym, value: Expr),
         Write(cap: Sym, inst: InstRef, edit: EditKind, value: Expr, check: Check),
+        Commit(writes: Stmt[]),
         If(cond: Expr, thenB: Block, elseB: Block | not),
         Return(e: Expr),
         Eval(e: Expr),
@@ -187,10 +223,18 @@ ${
     // Views. Every child position is a View LIST (no Fragment variant).
     // Events are attributes of their element (§3.2 had View.On).
     // -------------------------------------------------------------------------
+    // s444 — a two-way bind (§5.4): `read` is shown in the element's `value`
+    // / `checked` property; on the element's input / change event its property
+    // value is bound to `sink` (a binder-minted local) and `write` runs — ONE
+    // capability-checked Write of `Local(sink)` to the place `read` reads
+    // (check.scrml C8). The event-value round trip, with no expression text.
+    export type BindKind:enum = { Value, Checked }
+
     export type Attr:enum = {
         Static(name: string, value: string),
         Bound(name: string, e: Expr),
         On(event: string, body: Block),
+        Bind(kind: BindKind, read: Expr, sink: Sym, write: Block),
     }
     export type ConstructAttr:struct = { field: int, value: Expr }
     export type CondArm:struct = { test: Expr, body: View[] }
@@ -203,6 +247,9 @@ ${
         Each(src: Expr, bind: Sym, key: Expr | not, handles: Sym[], row: View[]),
         Instance(decl: Sym, attrs: ConstructAttr[], slot: View[], alias: Sym | not),
         Slot,
+        // s444 — `<*x/>` (§66.6.2): the EXISTING instance `inst` of `decl`,
+        // rendered with decl's renders; constructs nothing (M1 D4 closed).
+        Star(decl: Sym, inst: InstRef),
     }
 
     // -------------------------------------------------------------------------
@@ -358,5 +405,71 @@ ${
     export fn grantsAnyWrite(f: Field) -> boolean {
         if (f.grants.replace) return true
         return f.grants.edits.length > 0
+    }
+
+    // -------------------------------------------------------------------------
+    // CSS (s440-bootstrap-css-theme-t3; dpa-051 §8.4 step 1). The per-file
+    // STYLESHEET Core — a root of its own, NOT a CoreProgram field: FileOutput.css
+    // is an independent sub-seam (dpa-051 §8.4), so the stylesheet pass (css.scrml)
+    // consumes only this. Its strings are CSS-language LITERALS (a selector's
+    // names, an attribute test, a declaration's literal text) or identifiers;
+    // every `@` reference is a node (TokenVar / CellVar), never text the emitter
+    // re-reads (§3.6, §4).
+    // -------------------------------------------------------------------------
+    export type SimpleSel:enum = {
+        Universal,
+        TagSel(name: string),
+        ClassSel(name: string),
+        IdSel(name: string),
+        AttrSel(test: string),                        // the text between `[` and `]`
+        PseudoClass(name: string, arg: string | not), // `:hover`, `:not(.a)` (arg = `.a`)
+        PseudoElement(name: string),                  // `::before`
+    }
+    export type Combinator:enum = { Descendant, DirectChild, NextSibling, LaterSibling }
+    export type Compound:struct = { parts: SimpleSel[] }
+    export type SelLink:struct = { comb: Combinator, target: Compound }
+    // One arm of a selector list: `head (combinator compound)*`.
+    export type ComplexSel:struct = { head: Compound, links: SelLink[] }
+
+    // A declaration value: literal CSS text, with the `@` references resolved.
+    export type CssPart:enum = {
+        CssText(text: string),
+        TokenVar(token: Sym),   // §65.3.2 / §25.7: `@name` of a theme token → var(--name)
+        CellVar(cell: Sym),     // §25.7: `@name` of a reactive cell → var(--scrml-name)
+    }
+    export type CssDecl:struct = { prop: string, value: CssPart[] }
+    export type StyleRule:struct = { sel: ComplexSel[], decls: CssDecl[] }
+
+    // §66.17 (T3) — a theme token is a LOCKED declaration (`<theme>` is a marker).
+    // Its initializer decides its CSS:
+    //   Constant     — a literal (item 2) → static `:root { --t: v }`.
+    //   OnVariant    — a `match` over an enum-typed cell, every arm a constant
+    //                  (item 3, RECOGNIZED) → one `:root[data-scrml-theme-<cell>="<V>"]`
+    //                  block per arm; `otherwise` = a wildcard arm (→ `:root`).
+    //   ScriptWrites — a `match` over an enum cell NOT recognized (item 7) → per-token
+    //                  `:root` writes from script; NO stylesheet contribution.
+    // A reactive token of any other shape is O47 (OPEN) and has no variant here:
+    // the producer reports it not-yet.
+    export type TokenArm:struct = { variant: string, value: CssPart[] }
+    export type TokenInit:enum = {
+        Constant(value: CssPart[]),
+        OnVariant(cell: Sym, arms: TokenArm[], otherwise: CssPart[] | not),
+        ScriptWrites(cell: Sym),
+    }
+    export type ThemeToken:struct = { sym: Sym, init: TokenInit }
+
+    export type CssImport:struct = { url: string, conditions: string }
+    export type ScopeSheet:struct = { component: string, rules: StyleRule[] }
+
+    // One file's stylesheet. `reset` = the §65.3.4 built-in reset is on (opt out:
+    // `<program reset="none">`). `global` = program-level `#{}` rules (§9.1, the
+    // §65.5 `global` layer); `scopes` = component-scope `#{}` rules (§9.1 DQ-7).
+    export type CssUnit:struct = {
+        charsets: string[],
+        imports: CssImport[],
+        reset: boolean,
+        tokens: ThemeToken[],
+        global: StyleRule[],
+        scopes: ScopeSheet[],
     }
 }

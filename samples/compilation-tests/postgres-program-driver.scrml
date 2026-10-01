@@ -8,11 +8,16 @@
 // `new SQL("postgres://...")` at runtime.
 //
 // No real Postgres connection is touched at compile time. Schema validation
-// uses the shadow DB built from the CREATE TABLE statement below.
+// uses the shadow DB built from the CREATE TABLE statement in the `${}` block.
 
 <program db="postgres://localhost:5432/scrml_demo">
 
     ${
+        // The shadow-schema statement is CODE (a `<program>` body carries no
+        // loose prose — SPEC §40.8 S441); pre-S441 it sat bare after the markup
+        // and shipped into the page as text.
+        ?{`CREATE TABLE IF NOT EXISTS hits (id INTEGER PRIMARY KEY, when_ts INTEGER)`}
+
         // body-content inference (§12.2 T1) escalates recordHit to server
         // automatically — `server` modifier deprecated per Insight 26 (2026-05-08).
         function recordHit() {
@@ -24,7 +29,5 @@
         <h1>Phase 2 Postgres Smoke</>
         <button onclick=recordHit()>Record Hit</>
     </>
-
-    ?{`CREATE TABLE IF NOT EXISTS hits (id INTEGER PRIMARY KEY, when_ts INTEGER)`}
 
 </>

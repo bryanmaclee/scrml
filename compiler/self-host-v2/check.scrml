@@ -30,10 +30,20 @@
 //       is a no-op, §51.0.F.1). No flow facts exist in Core, so a from-state
 //       "proven by a dominating test" is NOT provable here: lower must emit
 //       RuntimeEdge for it (L8).
+//   C7  a Commit (all-or-nothing spread edit, RULED S440) holds ≥ 2 Writes and
+//       nothing else, each storing a Local (the snapshot its Let evaluated)
+//   C8  (s444) a Bind writes exactly its event-value sink, once, to the place
+//       its `read` reads (Replace or FieldAt of that field)
+//   C9  (s444) a removal's value: RemoveEnd / RemoveFront carry an Int count
+//       ≥ 1; RemoveAnywhere carries `SeqCall(Filter, <the field itself>, λ)`
+//   C10 (s444) a Star's instance resolves to its declaration (C4's rule), and
+//       that declaration has a renders
+//   (C3 covers the s444 edits: the removals by the field's grants; ElemAt by
+//   the ELEMENT field's own contract, dpa-052 Q3.)
 // A diagnostic is a message string (§4 permits strings as text).
 // =============================================================================
 ${
-    import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr,
+    import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, Attr, Block,
              EditKind, Check, Stmt, View, Field, Decl, CoreProgram, CapOwner, TransitionGraph,
              capOwner, grantsAnyWrite, findDecl, findTypeDef } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
@@ -81,14 +91,163 @@ ${
             .NInst(i: i) :> []
             .NPattern(pat: pat) :> []
             .NEdit(k: k) :> []
-            .NView(v: v) :> []
-            .NAttr(a: a) :> []
+            .NView(v: v) :> checkView(p, encl, v)
+            .NAttr(a: a) :> checkAttr(p, encl, a)
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // C8 (s444) — a Bind is ONE capability-checked write of its event-value
+    // sink to the place its `read` reads: `write` is exactly
+    // [Write(cap, inst, Replace | FieldAt(path), Local(sink), _)], and `read` is
+    // Read(Cell(<cap's declaration>, inst, [<cap's field>] ++ path)) — so the
+    // value shown and the value written are the same place.
+    // -------------------------------------------------------------------------
+    fn checkAttr(p: CoreProgram, encl: Decl[], a: Attr) -> string[] {
+        return match a {
+            .Bind(kind: k, read: r, sink: sk, write: w) :> checkBind(p, r, sk, w)
+            .Static(name: x) :> []
+            .Bound(name: x) :> []
+            .On(event: x) :> []
+        }
+    }
+
+    fn checkBind(p: CoreProgram, read: Expr, sink: Sym, write: Block) -> string[] {
+        if (write.stmts.length != 1) return ["C8: a bind writes " + write.stmts.length + " statement(s); it is exactly one Write of its sink"]
+        const w: Stmt = write.stmts[0]
+        return match w {
+            .Write(cap: cap, inst: inst, edit: edit, value: v) :> bindWrite(p, read, sink, cap, inst, edit, v)
+            .Let(sym: x) :> ["C8: a bind's write is not a Write"]
+            .Assign(local: x) :> ["C8: a bind's write is not a Write"]
+            .Commit(writes: x) :> ["C8: a bind's write is not a Write"]
+            .If(cond: x) :> ["C8: a bind's write is not a Write"]
+            .Return(e: x) :> ["C8: a bind's write is not a Write"]
+            .Eval(e: x) :> ["C8: a bind's write is not a Write"]
+        }
+    }
+
+    fn bindWrite(p: CoreProgram, read: Expr, sink: Sym, cap: Sym, inst: InstRef, edit: EditKind, v: Expr) -> string[] {
+        let out: string[] = []
+        if (!isLocalOf(v, sink)) out = out.concat(["C8: a bind's Write stores something other than its sink `" + sink.hint + "`"])
+        const owner: CapOwner | not = capOwner(p, cap)
+        if (owner is not) return out                     // C2 reports it
+        let want: FieldRef[] = [{ owner: owner.decl.sym, idx: owner.idx }]
+        const extra: FieldRef[] | not = bindEditPath(edit)
+        if (extra is not) return out.concat(["C8: a bind's Write is not a replace of its place (Replace or FieldAt)"])
+        want = want.concat(extra)
+        const got: string = readKey(read)
+        const exp: string = placeKeyOf(owner.decl.sym, inst, want)
+        if (got != exp) out = out.concat(["C8: a bind reads " + got + " but writes " + exp])
+        return out
+    }
+
+    fn bindEditPath(k: EditKind) -> FieldRef[] | not {
+        return match k {
+            .Replace :> []
+            .FieldAt(path: path) :> path
+            .Append :> not
+            .Prepend :> not
+            .Anywhere :> not
+            .PositionWrite :> not
+            .Transition :> not
+            .RemoveEnd :> not
+            .RemoveFront :> not
+            .RemoveAnywhere :> not
+            .ElemAt(index: x) :> not
+        }
+    }
+
+    fn isLocalOf(e: Expr, s: Sym) -> boolean {
+        return match e {
+            .Local(sym: x) :> x.id == s.id
+            .Lit(lit: x) :> false
+            .Read(place: x) :> false
+            .Call(callee: x) :> false
+            .Prim(op: x) :> false
+            .Match(scrut: x) :> false
+            .ArrayOf(elems: x) :> false
+            .StructOf(ty: x) :> false
+            .Handle(inst: x) :> false
+            .InitOf(decl: x) :> false
+            .Host(call: x) :> false
+            .Lambda(params: x) :> false
+            .SeqCall(op: x) :> false
+        }
+    }
+
+    // A cell read's identity, as text of ids.
+    fn readKey(e: Expr) -> string {
+        return match e {
+            .Read(place: pl) :> cellKey(pl)
+            .Lit(lit: x) :> "(not a cell read)"
+            .Local(sym: x) :> "(not a cell read)"
+            .Call(callee: x) :> "(not a cell read)"
+            .Prim(op: x) :> "(not a cell read)"
+            .Match(scrut: x) :> "(not a cell read)"
+            .ArrayOf(elems: x) :> "(not a cell read)"
+            .StructOf(ty: x) :> "(not a cell read)"
+            .Handle(inst: x) :> "(not a cell read)"
+            .InitOf(decl: x) :> "(not a cell read)"
+            .Host(call: x) :> "(not a cell read)"
+            .Lambda(params: x) :> "(not a cell read)"
+            .SeqCall(op: x) :> "(not a cell read)"
+        }
+    }
+
+    fn cellKey(pl: Place) -> string {
+        return match pl {
+            .Cell(decl: d, inst: i, path: path) :> placeKeyOf(d, i, path)
+            .LocalPath(sym: s) :> "(a local path)"
+        }
+    }
+
+    fn placeKeyOf(d: Sym, i: InstRef, path: FieldRef[]) -> string {
+        let k: string = "<" + d.hint + "#" + d.id + ">@" + instIdKey(i)
+        for (const r of path) { k = k + "." + r.owner.id + ":" + r.idx }
+        return k
+    }
+
+    fn instIdKey(i: InstRef) -> string {
+        return match i {
+            .Shared(decl: d) :> "S" + d.id
+            .Lexical(depth: k) :> "L" + k
+            .Alias(sym: s) :> "A" + s.id
+            .Narrowed(sym: s) :> "N" + s.id
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // C10 (s444) — a Star renders an EXISTING instance with its declaration's
+    // renders: the instance resolves to that declaration (C4's rule), and the
+    // declaration has a renders.
+    // -------------------------------------------------------------------------
+    fn checkView(p: CoreProgram, encl: Decl[], v: View) -> string[] {
+        return match v {
+            .Star(decl: d, inst: i) :> checkStar(p, encl, d, i)
+            .El(tag: x) :> []
+            .Text(text: x) :> []
+            .Dyn(e: x) :> []
+            .Cond(arms: x) :> []
+            .Each(src: x) :> []
+            .Instance(decl: x) :> []
+            .Slot :> []
+        }
+    }
+
+    fn checkStar(p: CoreProgram, encl: Decl[], dsym: Sym, i: InstRef) -> string[] {
+        const d: Decl | not = findDecl(p, dsym)
+        if (d is not) return ["C10: a Star names declaration `" + dsym.hint + "`, which does not exist"]
+        const target: Decl | not = resolveInst(p, encl, i)
+        if (target is not) return ["C10: a Star of <" + d.sym.hint + "> goes through " + instText(i) + ", which does not resolve"]
+        if (target.sym.id != d.sym.id) return ["C10: a Star of <" + d.sym.hint + "> goes through " + instText(i) + ", an instance of <" + target.sym.hint + ">"]
+        if (d.renders is not) return ["C10: a Star of <" + d.sym.hint + ">, which has no renders"]
+        return []
     }
 
     fn checkStmt(p: CoreProgram, encl: Decl[], s: Stmt) -> string[] {
         return match s {
-            .Write(cap: cap, inst: inst, edit: edit, value: v) :> checkWrite(p, encl, cap, inst, edit, v, writeCheck(s))
+            .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> checkWrite(p, encl, cap, inst, edit, v, ck)
+            .Commit(writes: ws) :> checkCommit(ws)
             .Let(sym: sym) :> []
             .Assign(local: l) :> []
             .If(cond: c) :> []
@@ -97,15 +256,48 @@ ${
         }
     }
 
-    // F13: Stmt.Write has 5 fields; `check` is read through this accessor.
-    fn writeCheck(s: Stmt) -> Check {
+    // C7: a Commit (an all-or-nothing spread edit, RULED S440) groups two or
+    // more Writes and nothing else, and every Write's value is a Local — the
+    // snapshot its Let evaluated — so the printer may read a value once to
+    // check it and again to apply it. Its Writes themselves are checked by
+    // C2–C6 as every Write is (walk visits them as ordinary statements).
+    fn checkCommit(ws: Stmt[]) -> string[] {
+        let out: string[] = []
+        if (ws.length < 2) out = out.concat(["C7: a Commit groups " + ws.length + " write(s); one write is already all-or-nothing — it must be a plain Write"])
+        for (const w of ws) {
+            const problem: string = commitMember(w)
+            if (problem != "") out = out.concat(["C7: " + problem])
+        }
+        return out
+    }
+
+    fn commitMember(s: Stmt) -> string {
         return match s {
-            .Write(check: c) :> c
-            .Let(sym: x) :> Check.Static
-            .Assign(local: x) :> Check.Static
-            .If(cond: x) :> Check.Static
-            .Return(e: x) :> Check.Static
-            .Eval(e: x) :> Check.Static
+            .Write(value: v) :> commitValue(v)
+            .Commit(writes: x) :> "a Commit nested in a Commit"
+            .Let(sym: x) :> "a Let inside a Commit (its Lets come before it)"
+            .Assign(local: x) :> "an Assign inside a Commit"
+            .If(cond: x) :> "an If inside a Commit"
+            .Return(e: x) :> "a Return inside a Commit"
+            .Eval(e: x) :> "an Eval inside a Commit"
+        }
+    }
+
+    fn commitValue(v: Expr) -> string {
+        return match v {
+            .Local(sym: x) :> ""
+            .Lit(lit: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .Read(place: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .Call(callee: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .Prim(op: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .Match(scrut: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .ArrayOf(elems: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .StructOf(ty: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .Handle(inst: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .InitOf(decl: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .Host(call: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .Lambda(params: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .SeqCall(op: x) :> "a Commit write's value is not a Local (the snapshot)"
         }
     }
 
@@ -128,7 +320,75 @@ ${
         if (problem != "") out = out.concat(["C3: " + where + ": " + problem])
         const cp: string = checkProblem(p, f, edit, value, check)
         if (cp != "") out = out.concat(["C6: " + where + ": " + cp])
+        const rv: string = removalValueProblem(d.sym, owner.idx, edit, value)
+        if (rv != "") out = out.concat(["C9: " + where + ": " + rv])
         return out
+    }
+
+    // C9 (s444) — a removal's value: RemoveEnd / RemoveFront carry the COUNT
+    // removed (an Int literal >= 1); RemoveAnywhere carries the new value, which
+    // must be `SeqCall(Filter, <this field>, f)` — a filter of the field itself,
+    // so a shrink grant can never carry an arbitrary replace.
+    fn removalValueProblem(d: Sym, idx: int, edit: EditKind, value: Expr) -> string {
+        return match edit {
+            .RemoveEnd :> countProblem(value)
+            .RemoveFront :> countProblem(value)
+            .RemoveAnywhere :> filterProblem(d, idx, value)
+            .Replace :> ""
+            .Append :> ""
+            .Prepend :> ""
+            .Anywhere :> ""
+            .PositionWrite :> ""
+            .FieldAt(path: x) :> ""
+            .Transition :> ""
+            .ElemAt(index: x) :> ""
+        }
+    }
+
+    fn countProblem(v: Expr) -> string {
+        const l: Literal | not = exprLiteral(v)
+        if (l is not) return "a removal's count is not a literal"
+        if (intAtLeastOne(l)) return ""
+        return "a removal's count is not an int >= 1"
+    }
+
+    fn intAtLeastOne(l: Literal) -> boolean {
+        return match l {
+            .Int(v: n) :> n >= 1
+            .Num(v: x) :> false
+            .Str(v: x) :> false
+            .Bool(v: x) :> false
+            .Variant(enumSym: x) :> false
+            .Absent :> false
+        }
+    }
+
+    fn filterProblem(d: Sym, idx: int, v: Expr) -> string {
+        return match v {
+            .SeqCall(op: op, seq: sq) :> filterOf(d, idx, op, sq)
+            .Lit(lit: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Local(sym: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Read(place: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Call(callee: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Prim(op: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Match(scrut: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .ArrayOf(elems: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .StructOf(ty: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Handle(inst: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .InitOf(decl: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Host(call: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Lambda(params: x) :> "a shrink-anywhere's value is not a filter of the field"
+        }
+    }
+
+    fn filterOf(d: Sym, idx: int, op: SeqFn, sq: Expr) -> string {
+        const isFilter: boolean = op == SeqFn.Filter
+        if (!isFilter) return "a shrink-anywhere's value is a map, not a filter"
+        const k: string = readKey(sq)
+        const pre: string = "<" + d.hint + "#" + d.id + ">@"
+        const tail: string = "." + d.id + ":" + idx
+        if (k.indexOf(pre) != 0 || k.substring(k.length - tail.length) != tail) return "a shrink-anywhere filters " + k + ", not the field it writes"
+        return ""
     }
 
     fn instText(i: InstRef) -> string {
@@ -159,6 +419,50 @@ ${
             .Anywhere :> granted(f.grants.replace || hasEdit(f, EditKind.Anywhere), "an anywhere-edit is not granted")
             .PositionWrite :> granted(f.grants.replace || hasEdit(f, EditKind.PositionWrite), "a position write is not granted")
             .FieldAt(path: path) :> fieldAtProblem(p, f, path)
+            .RemoveEnd :> granted(f.grants.replace || hasEdit(f, EditKind.RemoveEnd), "a removal at the end is not granted")
+            .RemoveFront :> granted(f.grants.replace || hasEdit(f, EditKind.RemoveFront), "a removal at the front is not granted")
+            .RemoveAnywhere :> granted(f.grants.replace || hasEdit(f, EditKind.RemoveAnywhere), "a shrink-anywhere is not granted")
+            .ElemAt(index: ix, path: path) :> elemAtProblem(p, f, path)
+        }
+    }
+
+    // s444 — `@xs[i].f = v` (dpa-052 Q3, RULED S440): the path walks the
+    // ELEMENT struct of the field's sequence type, and the write is granted
+    // iff the TARGET element field grants `replace` (its own contract — not a
+    // position replace, not the outer field's grants).
+    fn elemAtProblem(p: CoreProgram, f: Field, path: FieldRef[]) -> string {
+        if (path.length == 0) return "an empty ElemAt path (a whole-element write is a position write)"
+        const et: Type | not = seqElemOf(f.ty)
+        if (et is not) return "ElemAt on a field whose value is not a sequence"
+        let ty: Type = et
+        let targetGrants = false
+        let i = 0
+        for (const step of path) {
+            const s: Sym | not = namedSym(ty)
+            if (s is not) return "ElemAt step " + i + " steps into a value that is not a struct"
+            if (s.id != step.owner.id) return "ElemAt step " + i + " names owner `" + step.owner.hint + "` but the value there is a `" + s.hint + "`"
+            const td: TypeDef | not = findTypeDef(p, s)
+            if (td is not) return "ElemAt step " + i + ": `" + s.hint + "` is not a declared type"
+            const fs: FieldDef[] | not = structFields(td)
+            if (fs is not) return "ElemAt step " + i + ": `" + s.hint + "` is not a struct"
+            if (step.idx < 0 || step.idx >= fs.length) return "ElemAt step " + i + ": `" + s.hint + "` has no field " + step.idx
+            targetGrants = fs[step.idx].grants.replace
+            ty = fs[step.idx].ty
+            i = i + 1
+        }
+        if (targetGrants) return ""
+        return "the target element field grants no write (its own contract, dpa-052 Q3)"
+    }
+
+    fn seqElemOf(t: Type) -> Type | not {
+        return match t {
+            .Seq(elem: e) :> e
+            .Named(sym: s) :> not
+            .Maybe(inner: i) :> not
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
         }
     }
 
@@ -284,6 +588,7 @@ ${
             .Cond(arms: a) :> not
             .Each(src: s) :> not
             .Slot :> not
+            .Star(decl: d) :> not
         }
     }
 
@@ -327,6 +632,7 @@ ${
             .Let(sym: sym, init: init) :> letInitHandle(sym, init, c)
             .Assign(local: l) :> not
             .Write(cap: x) :> not
+            .Commit(writes: x) :> not
             .If(cond: x) :> not
             .Return(e: x) :> not
             .Eval(e: x) :> not
@@ -350,6 +656,9 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
         }
     }
 
@@ -366,6 +675,9 @@ ${
             .ArrayOf(elems: es) :> []
             .StructOf(ty: t) :> []
             .Handle(inst: i) :> []
+            .Host(call: c) :> []
+            .Lambda(params: ps) :> []
+            .SeqCall(op: o) :> []
         }
     }
 
@@ -402,6 +714,10 @@ ${
             .Prepend :> false
             .Anywhere :> false
             .PositionWrite :> false
+            .RemoveEnd :> false
+            .RemoveFront :> false
+            .RemoveAnywhere :> false
+            .ElemAt(index: x) :> false
         }
     }
 
@@ -425,6 +741,9 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
         }
     }
 

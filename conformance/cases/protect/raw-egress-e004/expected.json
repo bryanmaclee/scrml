@@ -4,10 +4,18 @@
   "language-version": "1.0",
   "spec": "§14.8.9",
   "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
-  "rationale": "§14.8.9 closed-world precondition: an egress path the compiler cannot analyze (`_{}` foreign block, `asIs` value) carrying a protected-origin column SHALL fail closed with E-PROTECT-004 — the confidentiality sibling of the read-site E-PROTECT-001, in the return-boundary direction. I-PROTECT-STRIP-001 co-fires (the SELECT * is tagged). ⚑ The block is written at LEVEL 1 (`_={ … }=`) on purpose. SPEC §23.2 defines the opener as `_` + zero or more `=` + `{`, and W-FOREIGN-001 steers authors AWAY from the level-0 `_{`; until S405 this gate's own predicate matched level 0 ONLY, so it recognized exactly the spelling the compiler discourages and missed every recommended one. This case therefore goes RED against the pre-S405 emitter and is a proof of the level-family fix, not a description of it. The case previously used a manual `new Response(...)`; that shape moved to E-PROTECT-005 (`e-protect-005-pos`) when the `Response` kind was promoted from this source-text lint to a structural emission-time gate.",
+  "rationale": "§14.8.9 closed-world precondition: an egress path the compiler cannot analyze (`_{}` foreign block, `asIs` value) carrying a protected-origin column SHALL fail closed with E-PROTECT-004 — the confidentiality sibling of the read-site E-PROTECT-001, in the return-boundary direction. ⚑ The block is written at LEVEL 1 (`_={ … }=`) on purpose. SPEC §23.2 defines the opener as `_` + zero or more `=` + `{`, and W-FOREIGN-001 steers authors AWAY from the level-0 `_{`; until S405 this gate's own predicate matched level 0 ONLY, so it recognized exactly the spelling the compiler discourages and missed every recommended one. This case therefore goes RED against the pre-S405 emitter and is a proof of the level-family fix, not a description of it. The case previously used a manual `new Response(...)`; that shape moved to E-PROTECT-005 (`e-protect-005-pos`) when the `Response` kind was promoted from this source-text lint to a structural emission-time gate. ⚑ S441 (`g-protected-column-escapes-redaction-as-scalar`): `I-PROTECT-STRIP-001` no longer co-fires here, because nothing is stripped — the info now fires only for a query whose row the egress sink ACTUALLY stripped (the §14.8.9 provenance flow, `compiler/src/codegen/protect-flow.ts`). Before S441 it fired for every protected SELECT, and this case pinned that false claim. The foreign block lowers to `JSON.stringify(u)` in the emitted server module, which the provenance flow reads: the row's protected column comes out of that call NAKED and reaches the response, so `E-PROTECT-006` co-fires — structurally, not by per-body co-occurrence, so unlike E-PROTECT-004 it is not defeated by moving the query into a helper.",
   "expect": {
-    "codes": ["E-PROTECT-004", "I-PROTECT-STRIP-001"],
-    "notCodes": ["E-PROTECT-005"],
-    "severity": { "E-PROTECT-004": "error", "I-PROTECT-STRIP-001": "info" }
+    "codes": [
+      "E-PROTECT-004",
+      "E-PROTECT-006"
+    ],
+    "notCodes": [
+      "E-PROTECT-005"
+    ],
+    "severity": {
+      "E-PROTECT-004": "error",
+      "E-PROTECT-006": "error"
+    }
   }
 }

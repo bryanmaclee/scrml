@@ -1,0 +1,22 @@
+{
+  "id": "protect-spaced-star-strip-runtime",
+  "description": "§14.8.9 S443 round 6 (P2) — `SELECT users . * FROM users` (whitespace around the dot) is a star projection. The extractor does not resolve it, so the row is tagged strip-all (fail closed) and the client receives an empty object — never the protected column.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9: \"A query whose origins cannot be resolved still degrades to the wholesale strip, never to 'no protected column'.\" Before S443 round 6 the spaced star fell to an opaque entry naming no protected identifier and the route served the full row, passwordHash included (measured over HTTP).",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-PROTECT-STRIP-001": "info" },
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice", "passwordHash": "SECRET_HASH_ALICE" }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": { "user": {} }
+  }
+}

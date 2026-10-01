@@ -57,6 +57,7 @@ ${
             .Let(sym: x) :> "Let"
             .Assign(local: x) :> "Assign"
             .Write(cap: x) :> "Write"
+            .Commit(writes: x) :> "Commit"
             .If(cond: x) :> "If"
             .Return(e: x) :> "Return"
             .Eval(e: x) :> "Eval"
@@ -75,6 +76,9 @@ ${
             .StructOf(ty: x) :> "StructOf"
             .Handle(inst: x) :> "Handle"
             .InitOf(decl: x) :> "InitOf"
+            .Host(call: x) :> "Host"
+            .Lambda(params: x) :> "Lambda"
+            .SeqCall(op: x) :> "SeqCall"
         }
     }
 
@@ -111,6 +115,10 @@ ${
             .PositionWrite :> "PositionWrite"
             .FieldAt(path: x) :> "FieldAt"
             .Transition :> "Transition"
+            .RemoveEnd :> "RemoveEnd"
+            .RemoveFront :> "RemoveFront"
+            .RemoveAnywhere :> "RemoveAnywhere"
+            .ElemAt(index: x) :> "ElemAt"
         }
     }
 
@@ -123,6 +131,7 @@ ${
             .Each(src: x) :> "Each"
             .Instance(decl: x) :> "Instance"
             .Slot :> "Slot"
+            .Star(decl: x) :> "Star"
         }
     }
 
@@ -131,6 +140,7 @@ ${
             .Static(name: x) :> "Static"
             .Bound(name: x) :> "Bound"
             .On(event: x) :> "On"
+            .Bind(kind: x) :> "Bind"
         }
     }
 }

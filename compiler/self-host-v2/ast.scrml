@@ -12,15 +12,16 @@
 //     (`Str.v`, `Num.raw`, `Text.text`, `Quoted.v`, `Import.from`),
 //     identifiers (names, tags, attribute names, grant words) and spans. No
 //     expression, statement, handler, arm or markup body is ever text.
-//   - Comments are trivia: the parser drops them (and the whitespace-only text
-//     they leave behind is normalized by `lower`, L13).
+//   - Comments are trivia: the parser drops them (the whitespace around them
+//     stays content — L13 retired, dpa-045 follow-up 4, RULED S442).
 //   - The FileAst is SYNTAX. Whether `@x` names a field, a handle or a shared
 //     instance, whether `open` in a renders is a bare projection, what `.Closed`
 //     is a variant of — all of that is analyze's (side-tables by nid).
 //
-// impl#1 workarounds: F13 (a payload pattern may bind at most 4 fields) — every
-// payload variant here has at most 3 fields, and the big node kinds carry ONE
-// struct payload. F15 — no helper fn in this file shares a name with a field.
+// Every payload variant here has at most 3 fields, and the big node kinds carry
+// ONE struct payload (first shaped around impl#1's F13 — a ≥5-field payload arm
+// — which #1119 fixed; the shape is kept on its own merits, S440). impl#1
+// workaround: F15 — no helper fn in this file shares a name with a field.
 // =============================================================================
 ${
     export type ASpan:struct = { start: int, end: int }
@@ -43,6 +44,7 @@ ${
         Str(v: string),
         Bool(v: boolean),
         NotLit,                                      // not
+        Recovered,                                   // a parse-error placeholder: the parser reported it; nothing downstream types or checks it
         Variant(name: string),                       // .Name — a bare variant
         Member(obj: AExpr, name: string),
         Call(callee: AExpr, args: AExpr[]),
@@ -52,6 +54,13 @@ ${
         Assign(target: AExpr, value: AExpr),         // statement position only (analyze checks)
         ArrayLit(elems: AExpr[]),
         ObjectLit(props: AProp[]),
+        // s442 (§66.19.5): an array element `...e` (an object literal's spread is
+        // AProp.spread); `a[i]`; an arrow function `x => e` / `(a, b) => e`
+        // (expression body). Each is legal only where analyze recognizes it
+        // (an edit shape, §66.11.2) — Core has no spread, index or function value.
+        Spread(e: AExpr),
+        Index(obj: AExpr, idx: AExpr),
+        Lambda(params: string[], body: AExpr),
     }
 
     // -------------------------------------------------------------------------
@@ -62,7 +71,7 @@ ${
 
     export type AStmtK:enum = {
         Eval(e: AExpr),                                     // an expression statement (incl. an assignment)
-        Local(name: string, mutable: boolean, init: AExpr), // let / const
+        Local(name: string, mutable: boolean, ty: AType | not, init: AExpr), // let / const [: T]
         Return(e: AExpr | not),
         If(cond: AExpr, thenB: ABlock, elseB: ABlock | not),
         Given(name: string, subject: AExpr, body: ABlock),  // given c = @h :> { … }
@@ -119,7 +128,7 @@ ${
     export type ANode:struct = { nid: int, span: ASpan, k: ANodeK }
     export type ANodeK:enum = {
         Elem(e: AElem),
-        Text(text: string),        // verbatim (comments removed); normalized by lower (L13)
+        Text(text: string),        // verbatim (comments removed; whitespace-only runs kept — L13 retired, dpa-045 fu4)
         Interp(e: AExpr),          // ${ expr }
         DeclNode(d: ADecl),        // a declaration where markup may stand (a program body)
     }
@@ -134,19 +143,38 @@ ${
     }
     // A state-child (O52 ruled): a tag in a declaration body with neither an own
     // value nor a typed attribute — it names a variant of the enclosing field.
-    export type AStateChild:struct = { nid: int, span: ASpan, name: string, attrs: AAttr[] }
+    // `body` = that variant's markup (O5 RULED (1i): "a state-child's body is
+    // that variant's markup, rendered wherever the field renders"): the one
+    // Interp node of a `:`-shorthand body (§4.14, `<Idle rule=.X : "Ready">`),
+    // the children of a bare body (`<Idle rule=.X>…</>`), or none (void).
+    export type AStateChild:struct = { nid: int, span: ASpan, name: string, attrs: AAttr[], body: ANode[] }
 
     export type ADeclChild:enum = {
         ChildField(d: ADecl),
         StateChild(s: AStateChild),
     }
 
+    // s444 Phase B (dpa-058) — a validator in a declaration opener (§55.1, §66.4
+    // rule 3: it binds that declaration's own value), by its argument shape:
+    // `req` (NoArgs) · `length(>=5)` (Cmp: the comparison and its operand) ·
+    // `min(0)` / `eq(@x)` / `oneOf([…])` / `req("msg")` (Exprs) · `pattern(/re/i)`
+    // (Regex: the source between the slashes and the flags).
+    export type AValArg:enum = {
+        NoArgs,
+        Cmp(op: string, e: AExpr),
+        Exprs(es: AExpr[]),
+        Regex(source: string, flags: string),
+    }
+    export type AValidator:struct = { nid: int, span: ASpan, name: string, arg: AValArg }
+
     // `ty` = the own type (`name:Type`); `own` = the own value (NoValue = none);
-    // `mods` = the opener's other words (`single`, validators, …).
+    // `mods` = the opener's other words (`single`, …); `validators` = its
+    // validators, in source order (§55.12: error order is declaration order).
     export type ADecl:struct = {
         nid: int, span: ASpan, exported: boolean, isLet: boolean,
         name: string, ty: AType | not, own: AAttrValue,
         attrs: ADeclAttr[], mods: AAttr[], body: ADeclChild[], renders: AElem | not,
+        validators: AValidator[],
     }
 
     // -------------------------------------------------------------------------
@@ -166,7 +194,9 @@ ${
 
     // `path` is the file's path as the driver names it (an identifier of the
     // file, used to resolve import sources).
-    export type FileAst:struct = { path: string, items: AItem[] }
+    // `errs`: the spans the parser reported an error at — a declaration or
+    // signature containing one is not trusted by the typer (no check against it).
+    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[] }
 
     // A diagnostic: a code, a message, where. (§4 permits message text.)
     export type Diag:struct = { code: string, message: string, file: string, span: ASpan }

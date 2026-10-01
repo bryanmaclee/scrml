@@ -11,10 +11,9 @@
 // default arm genuinely fails to compile when a variant is added; a `_ :>` / `else :>` arm is the
 // one spelling that switches that off.
 //
-// ALSO FLAGGED (review F8, until impl#1 is fixed): an ALTERNATION arm (`.A | .B :>`) that is not
-// the first arm of its match, in ANY match — impl#1 glues it onto the previous arm's body and drops
-// it silently (slice-m1/progress.md F12), which also defeats E-TYPE-020; and a wildcard INSIDE an
-// alternation (`_ | .A :>`) in an enum match — a default arm by another spelling.
+// ALSO FLAGGED (review F8): a wildcard INSIDE an alternation (`_ | .A :>`) in an enum match — a
+// default arm by another spelling. (Until S440 a non-first ALTERNATION arm was flagged too, for
+// impl#1's F12 — slice-m1/progress.md; #1119 fixed F12 and that rule is retired.)
 //
 // WHAT IS FLAGGED. In every `.scrml` file under the root (default `compiler/self-host-v2`), a
 // `match` is an ENUM match when any arm pattern names a variant (`.X`, `.X(…)`, `T.X`, or a tuple
@@ -191,15 +190,10 @@ export function lintText(src) {
       violations.push({ line: firstLine, col: toks[a.start].span.col, message });
     };
 
-    arms.forEach((a, armIndex) => {
+    // (F12 — impl#1 glued a non-first alternation arm onto the previous arm's body — was flagged
+    // here until #1119 fixed it; the rule is retired, S440. An alternation arm is legal anywhere.)
+    arms.forEach((a) => {
       const patText = src.slice(toks[a.start].span.start, a.tok.span.end);
-      // F12 (impl#1): an alternation arm that is not the FIRST arm is glued onto the previous
-      // arm's body and silently dropped — which also defeats E-TYPE-020 exhaustiveness. Flag it
-      // in ANY match until impl#1 is fixed.
-      if (a.alts.length > 1 && armIndex > 0) {
-        report(a, `alternation arm \`${patText}\` is not the first arm — impl#1 drops it silently (slice-m1 F12); make it the first arm or split it`);
-        return;
-      }
       if (!isEnumMatch) return;
       if (a.alts.length > 1 && a.alts.some(altIsWild)) {
         report(a, `wildcard inside the alternation \`${patText}\` in a match over an enum — a default arm by another spelling (dpa-051 §3.4)`);

@@ -65,7 +65,7 @@ ${
 
     // A sequence type with no grants is fully constrained (§66.12.1).
     fn fixedSeq(elem: Type) -> Type {
-        return Type.Seq(elem, { length: LengthGrant.Fixed, at: [], positionsWritable: false })
+        return Type.Seq(elem, { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false })
     }
 
     fn strList(xs: string[]) -> Expr {
@@ -194,21 +194,31 @@ ${
             Stmt.Write(wOpen, here, EditKind.Transition, litVariant(sOpenness, CLOSED), Check.RuntimeEdge),
         ])], [dyn(Expr.Local(sOpt))])
 
+        // dpa-045 follow-up 4 (RULED S442, SPEC §4.18.5): whitespace-only text
+        // between elements is kept exactly — the source's newline + indentation
+        // (and the spaces before a dropped `// …` comment; the comment's bytes
+        // are gone, the bytes around it stay). L13 (which dropped these) is retired.
         const dropdownView: View = el("div", [staticAttr("class", "dropdown")], [
+            textView("\n    "),
             el("button", [staticAttr("class", "dropdown__toggle"), onEvent("click", [toggle])], [
                 dyn(readField(sDropdown, here, LABEL)),
                 textView(": "),
                 dyn(readField(sDropdown, here, VALUE)),
             ]),
+            textView("\n    "),
             // `if=` on an element lowers to a one-arm Cond around the element (L5).
             View.Cond([{
                 test: prim2(PrimOp.EqPrim, readOpen, litVariant(sOpenness, OPENED)),
                 body: [el("ul", [staticAttr("class", "dropdown__menu")], [
+                    textView("\n        "),
                     // No key= → positional keys (L9).
-                    View.Each(readField(sDropdown, here, OPTIONS), sOpt, not, [], [pick]),
+                    View.Each(readField(sDropdown, here, OPTIONS), sOpt, not, [], [textView("\n            "), pick, textView("\n        ")]),
+                    textView("\n    "),
                 ])],
             }]),
+            textView("\n    "),
             View.Slot,
+            textView("                                                   \n"),
         ])
 
         const dropdown: Decl = {
@@ -253,52 +263,65 @@ ${
                 dyn(call0(sCountryValue)),
                 textView(" / "),
                 dyn(readField(sProgram, here, FIRSTCOUNTRY)),
-            ])]
+            ]), textView("\n        ")]
         }
 
-        const main: View = el("main", [staticAttr("class", "filters")], earlyViews.concat([
+        const main: View = el("main", [staticAttr("class", "filters")], [textView("\n        ")].concat(earlyViews).concat([
             View.Instance(sDropdown, [
                 construct(LABEL, litStr("Country")),
                 construct(OPTIONS, strList(["US", "CA", "MX"])),
                 construct(VALUE, litStr("US")),
             ], [], hCountry),
+            textView("   \n        "),
             View.Instance(sDropdown, [
                 construct(LABEL, litStr("Size")),
                 construct(OPTIONS, strList(["S", "M", "L"])),
                 construct(VALUE, litStr("M")),
             ], [], not),
+            textView("                     \n        "),
             View.Cond([{
                 test: readField(sProgram, here, SHOWCOLOR),
                 body: [el("div", [], [
+                    textView("\n            "),
                     View.Instance(sDropdown, [
                         construct(LABEL, litStr("Color")),
                         construct(OPTIONS, strList(["red", "blue"])),
                     ], [], hColor),
+                    textView("                 \n        "),
                 ])],
             }]),
+            textView("\n        "),
             el("p", [], [textView("Shipping to "), dyn(countryValue)]),
+            textView("\n        "),
             el("button", [onEvent("click", [Stmt.Eval(call0(sCloseCountry))])], [textView("Done")]),
+            textView("\n        "),
             el("button", [onEvent("click", [
                 Stmt.Write(wShowColor, here, EditKind.Replace,
                     prim1(PrimOp.Not, readField(sProgram, here, SHOWCOLOR)), Check.Static),
             ])], [textView("Colours")]),
+            textView("\n        "),
             el("button", [onEvent("click", [Stmt.Eval(call0(sClearColor))])], [textView("Clear colour")]),
+            textView("\n\n        "),
             View.Each(readField(sProgram, here, LINES), sLineRow,
                 readLocalField(sLineRow, sLine, LINE_ID),
                 [hQty],
                 [
+                    textView("                      \n            "),
                     View.Instance(sDropdown, [
                         // A locked attribute set from a row value tracks it (L6).
                         construct(LABEL, readLocalField(sLineRow, sLine, LINE_NAME)),
                         construct(OPTIONS, strList(["1", "2", "3"])),
                         construct(VALUE, litStr("1")),
                     ], [], hQty),
+                    textView("        \n            "),
                     el("span", [], [
                         dyn(readLocalField(sLineRow, sLine, LINE_NAME)),
                         textView(" × "),
                         dyn(qtyValue),
                     ]),
+                    textView("\n        "),
                 ]),
+            textView("\n\n        \n        \n    "),
         ]))
 
         let programFields: Field[] = [fLines, fShowColor]

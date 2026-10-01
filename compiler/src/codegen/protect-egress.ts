@@ -27,13 +27,16 @@
  *      `reveal`-stamped. Redaction is sound BY CONSTRUCTION — the compiler reads
  *      a tag at egress; it never proves a return clean (no value-flow obligation).
  *
- * Soundness bound (§14.8.9 normative — DO NOT over-claim): complete for
- * explicit-column flows of statically-resolvable SQL, by ORIGIN. NOT covered:
- * derived/implicit flows (`{ hasPw: row.pw != "" }` — a value of independent
- * identity carries no descriptor), covert channels, and member-extraction into
- * a re-keyed fresh literal (`{ secret: row.pw }` — same derived-flow boundary).
- * Unresolvable dynamic SQL is stripped WHOLESALE (fail-closed), never
- * accept-unknown.
+ * Soundness bound (§14.8.9 normative — DO NOT over-claim): the RUNTIME strip
+ * here is complete only for values that still ARE (or contain) a tagged row. A
+ * value EXTRACTED from the row — `return row.pw`, `{ secret: row.pw }`,
+ * `"x" + row.pw`, `JSON.stringify(row)` — carries no descriptor and passes this
+ * floor untouched. That is NOT the derived-flow boundary (the value IS the
+ * column); it is closed at COMPILE time by the provenance flow in
+ * `protect-flow.ts` (`E-PROTECT-006`, S441 — until then it shipped, measured).
+ * Genuinely derived flows (`{ hasPw: row.pw != "" }` — a value of independent
+ * identity) and covert channels remain out of scope. Unresolvable dynamic SQL is
+ * stripped WHOLESALE (fail-closed), never accept-unknown.
  *
  * RAW / FOREIGN EGRESS — the closed-world precondition, enforced in THREE places
  * with three different strengths. Read the strengths; they are not interchangeable:
@@ -75,6 +78,12 @@ export interface ProtectContext {
   protectedByTable: Map<string, Set<string>>;
   /** table name -> all column names on that table (for `SELECT *` expansion). */
   schemaByTable: Map<string, string[]>;
+  /**
+   * Every base table the compile knows the columns of (lower-cased) — see
+   * `ProtectAnalysis.declaredTables`. A query over a table outside this set and
+   * outside `schemaByTable` strips its rows wholesale (S443 round 6, P4).
+   */
+  knownTables?: Set<string>;
 }
 
 /**
@@ -91,8 +100,11 @@ export function buildProtectContext(protectAnalysis: unknown): ProtectContext {
   const protectedByTable = new Map<string, Set<string>>();
   const schemaByTable = new Map<string, string[]>();
   const views = (protectAnalysis as { views?: Map<string, unknown> } | null | undefined)?.views;
+  const declared = (protectAnalysis as { declaredTables?: Set<string> } | null | undefined)?.declaredTables;
+  const knownTables = new Set<string>();
+  if (declared && typeof (declared as Set<string>).forEach === "function") for (const t of declared) knownTables.add(foldIdent(t));
   if (!views || typeof (views as Map<string, unknown>).forEach !== "function") {
-    return { protectedByTable, schemaByTable };
+    return { protectedByTable, schemaByTable, knownTables };
   }
   for (const [, dbViews] of views as Map<string, { tables?: Map<string, unknown> }>) {
     const tables = dbViews?.tables;
@@ -112,7 +124,7 @@ export function buildProtectContext(protectAnalysis: unknown): ProtectContext {
       }
     }
   }
-  return { protectedByTable, schemaByTable };
+  return { protectedByTable, schemaByTable, knownTables };
 }
 
 /**
@@ -172,44 +184,324 @@ function isRowProducingQuery(sqlContent: string): boolean {
  * Reuses `extractSelectProjection` (the §14.8.7 alias-origin map). A `SELECT *`
  * / `table.*` star is expanded against the protected table's column set.
  */
+/**
+ * Fold a SQLite identifier for comparison: drop a schema qualifier
+ * (`main.users`), strip one layer of identifier quoting (`"x"`, `` `x` ``,
+ * `[x]`), and lower-case it. SQLite compares identifiers case-insensitively
+ * whether or not they are quoted.
+ */
+export function foldIdent(name: string): string {
+  // Last dot-separated segment outside quotes = the identifier itself.
+  let s = name.trim();
+  const m = /(?:^|\.)("(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\]|[^."`\[\]]+)$/.exec(s);
+  if (m) s = m[1];
+  const q = /^"((?:[^"]|"")*)"$/.exec(s) ?? /^`([^`]*)`$/.exec(s) ?? /^\[([^\]]*)\]$/.exec(s);
+  if (q) s = q[1].replace(/""/g, '"');
+  return s.toLowerCase();
+}
+
+/** table (folded) -> Map<column (folded) -> declared column name>. */
+function protectedIndexCI(ctx: ProtectContext): Map<string, Map<string, string>> {
+  const idx = new Map<string, Map<string, string>>();
+  for (const [t, cols] of ctx.protectedByTable) {
+    const key = foldIdent(t);
+    const m = idx.get(key) ?? new Map<string, string>();
+    for (const c of cols) m.set(foldIdent(c), c);
+    idx.set(key, m);
+  }
+  return idx;
+}
+
+/** Every table the compile knows the full column set of (folded names). */
+function knownTablesCI(ctx: ProtectContext): Set<string> {
+  const s = new Set<string>();
+  for (const t of ctx.schemaByTable.keys()) s.add(foldIdent(t));
+  for (const t of ctx.protectedByTable.keys()) s.add(foldIdent(t));
+  if (ctx.knownTables) for (const t of ctx.knownTables) s.add(foldIdent(t));
+  return s;
+}
+
+/**
+ * The SQL text with string literals, quoted identifiers and comments blanked
+ * out (same length, so indices line up), and `${…}` holes replaced by spaces.
+ * Keyword scans run over this so `'… RETURNING …'` in a literal is not a clause.
+ */
+function blankSqlNoise(sql: string): string {
+  let out = "";
+  let i = 0;
+  const n = sql.length;
+  while (i < n) {
+    const c = sql[i];
+    if (c === "$" && sql[i + 1] === "{") {
+      let depth = 1;
+      let j = i + 2;
+      while (j < n && depth > 0) { if (sql[j] === "{") depth++; else if (sql[j] === "}") depth--; j++; }
+      out += " ".repeat(j - i);
+      i = j;
+      continue;
+    }
+    if (c === "-" && sql[i + 1] === "-") {
+      const nl = sql.indexOf("\n", i);
+      const j = nl === -1 ? n : nl;
+      out += " ".repeat(j - i);
+      i = j;
+      continue;
+    }
+    if (c === "/" && sql[i + 1] === "*") {
+      const e = sql.indexOf("*/", i + 2);
+      const j = e === -1 ? n : e + 2;
+      out += " ".repeat(j - i);
+      i = j;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === "`" || c === "[") {
+      const close = c === "[" ? "]" : c;
+      let j = i + 1;
+      while (j < n) {
+        if (sql[j] === close && close !== "]" && sql[j + 1] === close) { j += 2; continue; }
+        if (sql[j] === close) { j++; break; }
+        j++;
+      }
+      // Keep a quoted IDENTIFIER visible as a placeholder word (it is a name, not
+      // data); blank a string literal entirely.
+      out += c === "'" ? " ".repeat(j - i) : "q" + " ".repeat(Math.max(0, j - i - 1));
+      i = j;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
+}
+
+/** Index of the first depth-0 occurrence of keyword `kw` in blanked SQL, or -1. */
+function topLevelKeyword(blanked: string, kw: string): number {
+  const re = new RegExp(`\\b${kw}\\b`, "gi");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(blanked)) !== null) {
+    let depth = 0;
+    for (let k = 0; k < m.index; k++) {
+      if (blanked[k] === "(") depth++;
+      else if (blanked[k] === ")") depth = Math.max(0, depth - 1);
+    }
+    if (depth === 0) return m.index;
+  }
+  return -1;
+}
+
+/**
+ * ⚑ S443 round 6 (P1) — an INSERT / REPLACE / UPDATE / DELETE with a
+ * `RETURNING` clause IS a row-producing query: the driver hands back the
+ * written rows, and `UPDATE users SET … RETURNING *` served `passwordHash`
+ * (measured; the tag only ever looked at SELECTs). Its `RETURNING` list is a
+ * projection over the TARGET table, so it is resolved exactly like
+ * `SELECT <list> FROM <target>`. Returns:
+ *   - `null`           — not a write, or a write with no RETURNING (no rows);
+ *   - `{ all: true }`  — a RETURNING write whose target cannot be read (fail closed);
+ *   - `{ select }`     — the equivalent SELECT to resolve.
+ */
+function returningAsSelect(sqlContent: string): { select: string } | { all: true } | null {
+  // `blankSqlNoise` preserves length, so offsets in `blanked` index `original`.
+  const original = stripLeadingSqlNoise(sqlContent);
+  const blanked = blankSqlNoise(original);
+  const lead = /^(insert|replace|update|delete)\b/i.exec(blanked);
+  if (!lead) return null;
+  const retAt = topLevelKeyword(blanked, "returning");
+  if (retAt === -1) return null;
+  const list = original.slice(retAt + "returning".length).trim();
+  if (list.length === 0) return { all: true };
+  const IDENT_RE = "([A-Za-z_][A-Za-z0-9_]*)";
+  let m: RegExpExecArray | null;
+  let target: string | null = null;
+  const verb = lead[1].toLowerCase();
+  if (verb === "insert" || verb === "replace") {
+    m = new RegExp(`^(?:insert|replace)(?:\\s+or\\s+\\w+)?\\s+into\\s+${IDENT_RE}(?:\\s+as\\s+${IDENT_RE})?(?=[\\s(]|$)`, "i").exec(blanked);
+    if (m) target = m[1];
+  } else if (verb === "update") {
+    m = new RegExp(`^update(?:\\s+or\\s+\\w+)?\\s+${IDENT_RE}(?:\\s+(?:as\\s+)?${IDENT_RE})?\\s+set\\b`, "i").exec(blanked);
+    if (m) target = m[1];
+    // UPDATE … FROM joins other tables into the statement: fail closed.
+    if (topLevelKeyword(blanked, "from") !== -1) return { all: true };
+  } else {
+    m = new RegExp(`^delete\\s+from\\s+${IDENT_RE}(?:\\s+(?:as\\s+)?${IDENT_RE})?(?=\\s|$)`, "i").exec(blanked);
+    if (m) target = m[1];
+  }
+  if (!target) return { all: true };
+  return { select: `SELECT ${list} FROM ${target}` };
+}
+
 export function resolveProtectedOutputColumns(
   sqlContent: string,
   ctx: ProtectContext,
 ): ProtectedColumns {
-  // Only a row-producing query (a leading SELECT or a WITH/CTE, after stripping
-  // leading SQL comments) can carry a client-facing protected column. A non-row
-  // producer (INSERT/UPDATE/DELETE/DDL) produces no typed row in the v1 SQL
-  // surface; `RETURNING` is part of the deferred long tail (documented). A
+  // Only a row-producing query can carry a client-facing protected column: a
+  // leading SELECT or a WITH/CTE (after stripping leading SQL comments), or —
+  // S443 round 6 (P1) — an INSERT / REPLACE / UPDATE / DELETE with a
+  // `RETURNING` clause, which is resolved as `SELECT <list> FROM <target>`. A
   // comment- or CTE-prefixed row must NOT slip past this gate untagged (§14.8.9
   // fail-closed): a WITH degrades to strip-all below, never accept-unknown.
-  if (!isRowProducingQuery(sqlContent)) return null;
+  const returning = returningAsSelect(sqlContent);
+  if (returning !== null && "all" in returning) return { all: true };
+  if (returning === null && !isRowProducingQuery(sqlContent)) return null;
 
-  const proj = extractSelectProjection(sqlContent);
+  const proj = extractSelectProjection(returning ? returning.select : sqlContent);
   // Unresolvable SELECT (dynamic / CTE / UNION / subquery-in-FROM) — fail-closed:
   // strip every column wholesale at egress (OQ-3), never accept-unknown.
   if (!proj.resolvable) return { all: true };
 
+  // ⚑ S443 round 6 (P4) — a table the compile does not know the columns of (a
+  // view created at runtime, a table no `<db tables=>` names) may carry a
+  // protected column under any name: `CREATE VIEW v AS SELECT * FROM users`
+  // then `SELECT * FROM v` served `passwordHash` (measured) because an unknown
+  // table resolved to "no protected columns". It resolves to strip-all.
+  const known = knownTablesCI(ctx);
+  for (const t of proj.fromTables) if (!known.has(foldIdent(t))) return { all: true };
+
+  // ⚑ S441 round 4 (F3) — SQLite identifiers are CASE-INSENSITIVE, quoted or
+  // not (`users`, `USERS`, `"Users"` and `main.users` name one table;
+  // `passwordHash` and `PASSWORDHASH` one column). This lookup was exact-case,
+  // so `SELECT * FROM USERS …` emitted NO tag at all — the whole-row runtime
+  // strip vanished and the route served the hash (measured, also on main).
+  // Origin matching is therefore case-folded; the OUTPUT name stays exactly as
+  // SQLite returns it (the key as written in the SELECT, or the declared name
+  // for a `*` expansion), because that is the key the row object carries.
+  const prot = protectedIndexCI(ctx);
   const out = new Set<string>();
   for (const col of proj.columns) {
     if (col.kind === "column" && col.table && col.column) {
-      const prot = ctx.protectedByTable.get(col.table);
-      if (prot && prot.has(col.column)) out.add(col.outputName);
+      const cols = prot.get(foldIdent(col.table));
+      const declared = cols?.get(foldIdent(col.column));
+      // An UNALIASED column comes back keyed by its DECLARED name (SQLite:
+      // `SELECT PASSWORDHASH` → key `passwordHash`, measured) — record that,
+      // not the surface spelling; an alias comes back exactly as written.
+      if (declared !== undefined) out.add(col.outputName === col.column ? declared : col.outputName);
     } else if (col.kind === "star") {
       // `SELECT *` (no table) expands against every FROM/JOIN table; `table.*`
       // expands against that one table. The output column name of a starred
       // column IS the source column name, so a protected source column appears
-      // under its own name in the result row (alias-safe by construction).
+      // under its own (declared) name in the result row.
       const tables = col.table ? [col.table] : proj.fromTables;
       for (const t of tables) {
-        const prot = ctx.protectedByTable.get(t);
-        if (prot) for (const c of prot) out.add(c);
+        const declared = prot.get(foldIdent(t));
+        if (declared) for (const c of declared.values()) out.add(c);
       }
     }
-    // kind "opaque" (computed/expression column) carries no resolvable origin —
-    // it is a derived flow (§14.8.9 out-of-scope), not a protected-origin column.
+    else if (col.kind === "opaque" && opaqueColumnMayCarryProtected(col.raw, prot)) {
+      // ⚑ S441 round 5 (F3) — an EXPRESSION output column computed in SQL from a
+      // protected column IS that column's value, re-encoded by the database:
+      // `passwordHash || ''`, `lower()` / `hex()` / `CAST` / `substr` /
+      // `coalesce` / `json_object` / `group_concat`, `pin + 0`, a quoted or
+      // bracketed spelling (`"passwordHash"`, `[passwordHash]`), a
+      // table-qualified one, a scalar subquery. Round 4 treated every such
+      // column as a derived flow and emitted NO descriptor — MEASURED, each of
+      // those shapes served the hash (also on main). Its output key is not
+      // statically reliable (an unaliased expression is keyed by its own text,
+      // engine-specifically), so the row is stripped WHOLESALE — the same
+      // fail-closed degradation as unresolvable SQL (OVER-APPROXIMATION: a
+      // derived-in-SQL value such as `length(passwordHash)` or
+      // `passwordHash = ${x} AS ok` strips the whole row too).
+      return { all: true };
+    }
   }
   if (out.size === 0) return null;
   return { cols: [...out] };
+}
+
+/**
+ * The identifier-like tokens of one SQL projection entry, lexed STRUCTURALLY
+ * (not pattern-matched): `'…'` string literals are skipped (they are data, not
+ * references); `"…"`, `` `…` `` and `[…]` quoted identifiers are unwrapped;
+ * bare words are taken whole; every identifier is folded with `foldIdent`
+ * (SQLite identifiers are case-insensitive). A qualified reference
+ * `users.passwordHash` yields both segments. Also reports whether the entry
+ * contains a nested `SELECT`, and a PROJECTION star — a `*` whose previous
+ * token is `SELECT` / `DISTINCT` / `ALL` / `,` / `.` (a nested `SELECT *` or
+ * `t.*`), as opposed to `COUNT(*)` (after `(`) or multiplication (after an
+ * operand). (S441 round 5: treating EVERY `*` as a projection stripped the
+ * trucking-dispatch customer list wholesale over a `(SELECT COUNT(*) …)`.)
+ */
+export function lexSqlEntry(entry: string): { idents: string[]; hasSelect: boolean; hasStar: boolean } {
+  const idents: string[] = [];
+  let hasSelect = false;
+  let hasStar = false;
+  // The previous significant token, for classifying a `*`.
+  let prev = "";
+  let i = 0;
+  const n = entry.length;
+  const isWordStart = (c: string) => /[A-Za-z_\u0080-\uffff]/.test(c);
+  const isWord = (c: string) => /[A-Za-z0-9_$\u0080-\uffff]/.test(c);
+  while (i < n) {
+    const c = entry[i];
+    if (c === "'") {
+      // String literal; `''` is an escaped quote inside it.
+      i++;
+      while (i < n) {
+        if (entry[i] === "'" && entry[i + 1] === "'") { i += 2; continue; }
+        if (entry[i] === "'") { i++; break; }
+        i++;
+      }
+      continue;
+    }
+    if (c === '"' || c === "`" || c === "[") {
+      const close = c === "[" ? "]" : c;
+      let j = i + 1;
+      let s = "";
+      while (j < n) {
+        if (entry[j] === close && close !== "]" && entry[j + 1] === close) { s += close; j += 2; continue; }
+        if (entry[j] === close) { j++; break; }
+        s += entry[j];
+        j++;
+      }
+      idents.push(s.toLowerCase());
+      prev = "ident";
+      i = j;
+      continue;
+    }
+    if (isWordStart(c)) {
+      let j = i + 1;
+      while (j < n && isWord(entry[j])) j++;
+      const w = entry.slice(i, j).toLowerCase();
+      if (w === "select") hasSelect = true;
+      idents.push(w);
+      prev = w;
+      i = j;
+      continue;
+    }
+    if (/[0-9]/.test(c)) {
+      // A numeric literal (incl. `1e5`, `0x1F`) — not a reference.
+      let j = i + 1;
+      while (j < n && /[0-9A-Za-z_.]/.test(entry[j])) j++;
+      prev = "number";
+      i = j;
+      continue;
+    }
+    if (c === "*" && (prev === "select" || prev === "distinct" || prev === "all" || prev === "," || prev === ".")) hasStar = true;
+    if (!/\s/.test(c)) prev = c;
+    i++;
+  }
+  return { idents, hasSelect, hasStar };
+}
+
+/**
+ * May an EXPRESSION output column carry a protected column's value? Fail-closed:
+ * yes when any identifier in it (case-folded, quote-stripped, either segment of
+ * a qualified name) names a protected column of ANY protected table — the
+ * table is deliberately not required to match, because a scalar subquery can
+ * read a table the outer FROM does not name — or when it contains a nested
+ * `SELECT` with a `*` (a subquery whose projected columns are not visible here).
+ */
+function opaqueColumnMayCarryProtected(raw: string, prot: Map<string, Map<string, string>>): boolean {
+  const { idents, hasStar } = lexSqlEntry(raw);
+  // ⚑ S443 round 6 (P2) — ANY projection star in an entry the extractor could
+  // not resolve is a star over some table: `users . *` (whitespace around the
+  // dot) fell through to an opaque entry with no protected identifier and
+  // served the whole row (measured). A projection `*` (after `.`, `SELECT`,
+  // `DISTINCT`, `ALL` or `,` — never `COUNT(*)` or multiplication) fails closed.
+  if (hasStar) return true;
+  for (const id of idents) {
+    for (const cols of prot.values()) if (cols.has(id)) return true;
+  }
+  return false;
 }
 
 /**
@@ -221,11 +513,17 @@ export function resolveProtectedOutputColumns(
 export const SERVER_PROTECT_HELPER: string = [
   "",
   "// --- §14.8.9 Protected-column egress redaction (server-only confidentiality floor) ---",
-  "// A Symbol-keyed descriptor records, per result row, which OUTPUT columns",
-  "// originate from a `protect=` field. It is enumerable (so `{...row}` spread /",
-  "// `.map` carry it) but Symbol-keyed (so JSON.stringify ignores it). The egress",
-  "// sink reads it and drops protected columns unless `reveal`-stamped.",
-  "const _SCRML_PROTECT = Symbol.for(\"scrml.protect.origin\");",
+  "// Each result row carries one MARKER per protected OUTPUT column: an own,",
+  "// enumerable property keyed `Symbol.for(\"scrml.protect.col:<column>\")`. Enumerable,",
+  "// so `{...row}` / `Object.assign` / `.map` copy them; Symbol-keyed, so",
+  "// JSON.stringify never serializes them. The egress sink strips every column a",
+  "// marker names. ⚑ S443 round 6b: ONE descriptor per object was replaced by one",
+  "// marker per column because merging two rows (`{...a, ...b}`,",
+  "// `Object.assign({}, a, b)`) let b's descriptor REPLACE a's and a's protected",
+  "// column shipped (measured). Markers UNION on merge by construction, and a",
+  "// `reveal` on one source removes only that source's marker — it can never",
+  "// un-strip a column another source still marks.",
+  "const _SCRML_PROTECT_PREFIX = \"scrml.protect.col:\";",
   "// ⚑ THE MEDIATION MARK — THIS IS THE SEAM BETWEEN THE COMPILE-TIME AND",
   "// RUN-TIME LIMBS, AND IT EXISTS BECAUSE THE TWO WERE ANSWERING THE SAME",
   "// QUESTION WITH DIFFERENT PREDICATES.",
@@ -257,28 +555,130 @@ export const SERVER_PROTECT_HELPER: string = [
   "    message: \"the server refused a response body it cannot redact: a `protect=` column could not be proven absent (SPEC §14.8.9). Return the value itself — the compiler envelopes and redacts it — instead of a hand-built Response.\",",
   "  } }), { status: 500, headers: { \"Content-Type\": \"application/json\" } });",
   "}",
+  "// SQL identifiers are CASE-INSENSITIVE (SQLite; Postgres folds unquoted names),",
+  "// so the row key the driver returns need not match the spelling in the SELECT:",
+  "// `SELECT PASSWORDHASH` comes back keyed `passwordHash`. Every comparison the",
+  "// floor makes — descriptor columns, reveal names, row keys — is on the folded",
+  "// name (S441 round 5: an exact-case compare shipped the hash).",
+  "function _scrml_protect_fold(c) {",
+  "  return typeof c === \"string\" ? c.toLowerCase() : c;",
+  "}",
+  "// The markers on the row the query returned are NON-CONFIGURABLE: a `delete`",
+  "// or a redefinition throws (server modules are strict). They stay WRITABLE, so",
+  "// assigning a row onto a row (`Object.assign(a, b)`, a refresh in place) is not",
+  "// an error (S443 round 6b: a frozen, non-writable descriptor made that a 500).",
+  "// Overwriting a marker's VALUE changes nothing: the sink reads its presence.",
+  "// A spread COPY holds ordinary markers again; deleting one there is what the",
+  "// compile-time provenance flow rejects (E-PROTECT-006: a computed-key delete or",
+  "// property redefinition on a row-bearing value — the key may be a marker).",
+  "function _scrml_protect_mark(row, col) {",
+  "  const k = Symbol.for(_SCRML_PROTECT_PREFIX + col);",
+  "  const prev = Object.getOwnPropertyDescriptor(row, k);",
+  "  if (prev && !prev.configurable) return;",
+  "  Object.defineProperty(row, k, { value: true, enumerable: true, writable: true, configurable: false });",
+  "}",
+  "function _scrml_protect_mark_row(row, cols) {",
+  "  // `\"*\"` (unresolvable SQL): every column the row has is protected.",
+  "  const list = cols === \"*\" ? Object.keys(row).map(_scrml_protect_fold) : cols;",
+  "  for (const c of list) _scrml_protect_mark(row, c);",
+  "}",
+  "// The folded column names an object's markers protect (null when untagged).",
+  "function _scrml_protect_marked(value) {",
+  "  let out = null;",
+  "  for (const s of Object.getOwnPropertySymbols(value)) {",
+  "    const k = Symbol.keyFor(s);",
+  "    if (typeof k === \"string\" && k.startsWith(_SCRML_PROTECT_PREFIX)) {",
+  "      if (!out) out = new Set();",
+  "      out.add(k.slice(_SCRML_PROTECT_PREFIX.length));",
+  "    }",
+  "  }",
+  "  return out;",
+  "}",
   "function _scrml_protect_tag(value, cols) {",
   "  if (value == null || typeof value !== \"object\") return value;",
+  "  if (Array.isArray(cols)) cols = cols.map(_scrml_protect_fold);",
   "  if (Array.isArray(value)) {",
   "    for (const row of value) {",
-  "      if (row != null && typeof row === \"object\" && !Array.isArray(row)) row[_SCRML_PROTECT] = { cols, revealed: [] };",
+  "      if (row != null && typeof row === \"object\" && !Array.isArray(row)) _scrml_protect_mark_row(row, cols);",
   "    }",
   "    return value;",
   "  }",
-  "  value[_SCRML_PROTECT] = { cols, revealed: [] };",
+  "  _scrml_protect_mark_row(value, cols);",
   "  return value;",
   "}",
   "function _scrml_protect_reveal(value, col) {",
   "  if (value == null || typeof value !== \"object\") return value;",
   "  if (Array.isArray(value)) return value.map((r) => _scrml_protect_reveal(r, col));",
-  "  const d = value[_SCRML_PROTECT];",
-  "  if (!d) return value;",
-  "  const next = { ...value };",
-  "  next[_SCRML_PROTECT] = { cols: d.cols, revealed: [...d.revealed, col] };",
+  "  const marked = _scrml_protect_marked(value);",
+  "  if (!marked) return value;",
+  "  const f = _scrml_protect_fold(col);",
+  "  const next = {};",
+  "  for (const k of Object.keys(value)) next[k] = value[k];",
+  "  for (const c of marked) if (c !== f) _scrml_protect_mark(next, c);",
   "  return next;",
   "}",
+  "// ⛔ S443 round 6d — THE SINK OWNS SERIALIZATION. It returns a SNAPSHOT: a fresh",
+  "// tree of plain objects, arrays and primitives in which every property was read",
+  "// EXACTLY ONCE, every `toJSON` was invoked once (as the serializer would), every",
+  "// function / Symbol / accessor is gone, and every marked column is stripped. The",
+  "// serializer then sees only data the author's code can no longer influence.",
+  "// Round 6c walked the value and then handed the ORIGINAL (non-plain) object to",
+  "// `JSON.stringify` when nothing changed — which read its getters a SECOND time:",
+  "// a getter returning `\"ok\"` once and the row the next time shipped the full row",
+  "// (review, measured). Two losses to runtime-object tricks (`toJSON`, getters) are",
+  "// why this is a snapshot and not a smarter walk: nothing author-reachable is ever",
+  "// handed to the serializer. The snapshot follows JSON.stringify's own rules —",
+  "// `undefined` / functions / Symbols are dropped from objects and become `null`",
+  "// in arrays, boxed primitives unbox, a `Date` becomes its ISO string (through",
+  "// the intrinsic captured at load, not a `toJSON` an author could replace), and a",
+  "// cycle throws — so for plain data the serialized bytes are unchanged.",
+  "const _scrml_date_toJSON = Date.prototype.toJSON;",
+  "const _scrml_date_iso = Date.prototype.toISOString;",
+  "const _scrml_num_valueOf = Number.prototype.valueOf;",
+  "const _scrml_str_valueOf = String.prototype.valueOf;",
+  "const _scrml_bool_valueOf = Boolean.prototype.valueOf;",
+  "// Marks a position the serializer would OMIT (a function, a Symbol, an absent",
+  "// value) — kept distinct from `null`, which it would write.",
+  "const _SCRML_OMIT = Symbol(\"scrml.protect.omit\");",
   "function _scrml_protect_redact(value) {",
-  "  if (value == null || typeof value !== \"object\") return value;",
+  "  const _r = _scrml_protect_snap(value, \"\", false, { seen: new Set(), stripped: new Map() });",
+  "  return _r === _SCRML_OMIT ? null : _r;",
+  "}",
+  "// ⚑ S443 round 6e — the `this` an author function runs with. A `toJSON` or a",
+  "// getter invoked with `this` = the ORIGINAL tagged row read the protected",
+  "// column straight off it (`u.toJSON = function () { return { pw:",
+  "// this.passwordHash } }` served the hash — review, measured; base served `{}`).",
+  "// Every author function the snapshot invokes runs with `this` bound to a",
+  "// STRIPPED COPY of its object instead: same prototype (methods still work),",
+  "// every own data property copied with every marked column REMOVED, recursively,",
+  "// accessors carried over (so a getter reached through `this` also runs on the",
+  "// copy), no marker, no Symbol key. Building it invokes nothing — only property",
+  "// descriptors are read — so the \"each property read once\" rule still holds.",
+  "function _scrml_protect_stripped(value, ctx) {",
+  "  if (value === null || typeof value !== \"object\") return value;",
+  "  if (value instanceof Date) return value;",
+  "  if (typeof Response !== \"undefined\" && value instanceof Response) return value;",
+  "  const _hit = ctx.stripped.get(value);",
+  "  if (_hit) return _hit;",
+  "  const out = Array.isArray(value) ? [] : Object.create(Object.getPrototypeOf(value));",
+  "  ctx.stripped.set(value, out);",
+  "  const marked = _scrml_protect_marked(value);",
+  "  const descs = Object.getOwnPropertyDescriptors(value);",
+  "  for (const k of Object.keys(descs)) {",
+  "    if (marked && marked.has(_scrml_protect_fold(k))) continue;",
+  "    if (k === \"length\" && Array.isArray(out)) continue;",
+  "    const d = descs[k];",
+  "    if (\"value\" in d) d.value = _scrml_protect_stripped(d.value, ctx);",
+  "    d.configurable = true;",
+  "    Object.defineProperty(out, k, d);",
+  "  }",
+  "  return out;",
+  "}",
+  "function _scrml_protect_snap(value, _key, _noToJSON, ctx) {",
+  "  if (value === null) return null;",
+  "  const _t = typeof value;",
+  "  if (_t === \"undefined\" || _t === \"function\" || _t === \"symbol\") return _SCRML_OMIT;",
+  "  if (_t !== \"object\") return value;",
   "  // §14.8.9 fail-CLOSED on an opaque egress. A Response is a one-shot stream",
   "  // handle: the redactor cannot read its body, so it cannot prove a `protect=`",
   "  // column is absent from it. Refuse what the monitor cannot inspect.",
@@ -313,9 +713,10 @@ export const SERVER_PROTECT_HELPER: string = [
   "  // that measured LENGTH would have to consume the stream and destroy it.",
   "  if (typeof Response !== \"undefined\" && value instanceof Response) {",
   "    // PROVENANCE first, shape second. A response the compiler built is already",
-  "    // mediated — refusing it would refuse our own 400s and 403s.",
-  "    if (value[_SCRML_MEDIATED]) return value;",
-  "    if (value.body === null) return value;",
+  "    // mediated — refusing it would refuse our own 400s and 403s. (Serialized as",
+  "    // the serializer would: a Response has no own enumerable data.)",
+  "    if (value[_SCRML_MEDIATED]) return {};",
+  "    if (value.body === null) return {};",
   "    // TAGGED, not just thrown. A caller that catches this has to be able to tell",
   "    // a confidentiality refusal apart from an ordinary failure — the §37 SSE",
   "    // stream wrapper does exactly that, and without the tag its generic `catch`",
@@ -324,46 +725,48 @@ export const SERVER_PROTECT_HELPER: string = [
   "    _scrml_e.__scrml_protect_opaque = true;",
   "    throw _scrml_e;",
   "  }",
-  "  if (Array.isArray(value)) return value.map(_scrml_protect_redact);",
-  "  // ⛔ THE WALK IS UNCONDITIONAL. ONLY THE RECONSTRUCTION IS CONDITIONAL.",
-  "  //",
-  "  // Rebuilding a fresh `{}` from `Object.keys` destroys any value whose JSON",
-  "  // form is not its own enumerable keys — a `Date` has none, so a TIMESTAMP",
-  "  // column serialized as `{}` instead of its ISO string. The first attempt at",
-  "  // preserving those SHORT-CIRCUITED on a non-plain prototype and returned the",
-  "  // object WITHOUT DESCENDING, which turned a cosmetic flaw into a fail-OPEN",
-  "  // one: a tagged row inside any class-instance wrapper shipped `passwordHash`",
-  "  // in cleartext, and a nested `Response` — the limb §14.8.9 designates THE",
-  "  // GUARANTEE — was never reached. MEASURED, both.",
-  "  //",
-  "  // \"Do not rebuild\" and \"do not look\" are different instructions, and inside a",
-  "  // fail-closed floor only the first one is ever safe. So: always descend, and",
-  "  // decide how to RETURN afterwards.",
-  "  //   plain object      -> return the rebuilt copy (lossless for plain objects,",
-  "  //                        and byte-identical to the original behaviour);",
-  "  //   non-plain, and the walk changed NOTHING -> return the ORIGINAL untouched,",
-  "  //                        so a `Date` / `toJSON` value survives intact;",
-  "  //   non-plain, and something HAD to change -> rebuild onto the same prototype,",
-  "  //                        so methods survive. Internal slots cannot, but this",
-  "  //                        arm is reached only when the value actually carried a",
-  "  //                        protected column, where the prior behaviour was `{}`.",
-  "  const d = value[_SCRML_PROTECT];",
-  "  const stripAll = d && d.cols === \"*\";",
-  "  const protectedCols = d && Array.isArray(d.cols) ? d.cols : null;",
-  "  const revealed = d ? d.revealed : null;",
-  "  const out = {};",
-  "  let _changed = false;",
-  "  for (const k of Object.keys(value)) {",
-  "    const isRevealed = revealed && revealed.indexOf(k) !== -1;",
-  "    if (!isRevealed && (stripAll || (protectedCols && protectedCols.indexOf(k) !== -1))) { _changed = true; continue; }",
-  "    const _rv = _scrml_protect_redact(value[k]);",
-  "    if (_rv !== value[k]) _changed = true;",
-  "    out[k] = _rv;",
+  "  if (value instanceof Date && !Object.prototype.hasOwnProperty.call(value, \"toJSON\") && value.toJSON === _scrml_date_toJSON) {",
+  "    return isFinite(value) ? _scrml_date_iso.call(value) : null;",
   "  }",
-  "  const _proto = Object.getPrototypeOf(value);",
-  "  if (_proto === Object.prototype || _proto === null) return out;",
-  "  if (!_changed) return value;",
-  "  return Object.assign(Object.create(_proto), out);",
+  "  // `toJSON` is invoked ONCE per position (S443 round 6c), with the key the",
+  "  // serializer would pass, and its RESULT is snapshotted — never re-invoked.",
+  "  const _toJSON = _noToJSON ? null : value.toJSON;",
+  "  if (typeof _toJSON === \"function\") {",
+  "    return _scrml_protect_snap(_toJSON.call(_scrml_protect_stripped(value, ctx), _key), _key, true, ctx);",
+  "  }",
+  "  if (value instanceof Number) return _scrml_num_valueOf.call(value);",
+  "  if (value instanceof String) return _scrml_str_valueOf.call(value);",
+  "  if (value instanceof Boolean) return _scrml_bool_valueOf.call(value);",
+  "  const _s = ctx.seen;",
+  "  if (_s.has(value)) throw new TypeError(\"scrml §14.8.9: cannot serialize a circular structure\");",
+  "  _s.add(value);",
+  "  // Own properties are read through their DESCRIPTORS: a data value as is, an",
+  "  // accessor by calling its getter ONCE with `this` = the stripped copy.",
+  "  const _read = (k) => {",
+  "    const d = Object.getOwnPropertyDescriptor(value, k);",
+  "    if (!d) return value[k];",
+  "    if (\"value\" in d) return d.value;",
+  "    return typeof d.get === \"function\" ? d.get.call(_scrml_protect_stripped(value, ctx)) : _SCRML_OMIT;",
+  "  };",
+  "  let out;",
+  "  if (Array.isArray(value)) {",
+  "    out = [];",
+  "    const _n = value.length;",
+  "    for (let i = 0; i < _n; i++) {",
+  "      const _r = _scrml_protect_snap(_read(String(i)), String(i), false, ctx);",
+  "      out.push(_r === _SCRML_OMIT ? null : _r);",
+  "    }",
+  "  } else {",
+  "    const marked = _scrml_protect_marked(value);",
+  "    out = {};",
+  "    for (const k of Object.keys(value)) {",
+  "      if (marked && marked.has(_scrml_protect_fold(k))) continue;",
+  "      const _r = _scrml_protect_snap(_read(k), k, false, ctx);",
+  "      if (_r !== _SCRML_OMIT) out[k] = _r;",
+  "    }",
+  "  }",
+  "  _s.delete(value);",
+  "  return out;",
   "}",
   "",
 ].join("\n");
@@ -398,7 +801,7 @@ function revealedColumnsIn(fnSource: string): Set<string> {
   while ((r = revealRe.exec(fnSource)) !== null) {
     const arg = r[1].trim();
     const lit = /^(["'`])([^"'`]*)\1$/.exec(arg);
-    if (lit) named.add(lit[2]);
+    if (lit) named.add(foldIdent(lit[2])); // reveal names compare case-insensitively (SQL identifiers)
   }
   return named;
 }
@@ -472,7 +875,7 @@ export function detectProtectedRawEgress(
     if ("all" in resolved) {
       undischarged = "*";
     } else {
-      const missing = resolved.cols.filter((c) => !revealed.has(c));
+      const missing = resolved.cols.filter((c) => !revealed.has(foldIdent(c)));
       if (missing.length === 0) continue;
       undischarged = missing;
     }

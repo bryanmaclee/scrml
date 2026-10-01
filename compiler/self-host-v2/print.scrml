@@ -21,12 +21,13 @@
 // this module built), then wires holes. Nested arms / rows / slots are their own
 // templates, rendered into their own child scopes by the runtime.
 //
-// impl#1 workarounds: F11 (named payload binding everywhere), F12 (no `|`
-// alternation arms), F13 (a payload pattern binds at most 4 fields — the 5-field
-// variants Stmt.Write / View.Each are bound in two steps).
+// impl#1 workaround: F11 (named payload binding everywhere). (F12 — a non-first
+// `|` alternation arm — and F13 — a ≥5-field payload arm — are fixed in impl#1
+// by #1119; Stmt.Write / View.Each are bound in one arm again, S440.)
 // =============================================================================
 ${
     import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
+             HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, FieldRole, Field,
              Decl, Fn, CoreProgram, CapOwner,
              findDecl, findTypeDef, typeDefSym, capOwner } from "./core.scrml"
@@ -280,7 +281,31 @@ ${
             .StructOf(ty: ty, fields: fs) :> structJs(ctx, ty, fs)
             .Handle(inst: i) :> instJs(ctx, i)
             .InitOf(decl: d, inst: i, idx: x) :> rtCall(ctx, "initial", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))])
+            .Host(call: c) :> hostJs(c)
+            .Lambda(params: ps, body: b) :> JsExpr.JArrowE(symNames(ctx, ps), exprJs(ctx, b))
+            .SeqCall(op: o, seq: sq, f: f) :> jmcall(exprJs(ctx, sq), seqFnName(o), [exprJs(ctx, f)])
         }
+    }
+
+    // s444 — the host calls Core admits, printed as the host spells them
+    // (`Date` is a reserved name: no minted name shadows it, names.scrml).
+    fn hostJs(c: HostCall) -> JsExpr {
+        return match c {
+            .DateNow :> jcall(jmember(jid("Date"), "now"), [])
+        }
+    }
+
+    fn seqFnName(o: SeqFn) -> string {
+        return match o {
+            .Filter :> "filter"
+            .Map :> "map"
+        }
+    }
+
+    fn symNames(ctx: Ctx, ss: Sym[]) -> string[] {
+        let out: string[] = []
+        for (const s of ss) { out = out.concat([symName(ctx, s)]) }
+        return out
     }
 
     fn litJs(ctx: Ctx, l: Literal) -> JsExpr {
@@ -428,22 +453,11 @@ ${
         return match s {
             .Let(sym: sym, init: init) :> [letJs(ctx, sym, init, assigned)]
             .Assign(local: l, value: v) :> [JsStmt.SAssign(jid(symName(ctx, l)), exprJs(ctx, v))]
-            .Write(cap: cap, inst: inst, edit: edit, value: v) :> [writeJs(ctx, cap, inst, edit, v, writeCheck(s))]
+            .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> [writeJs(ctx, cap, inst, edit, v, ck)]
+            .Commit(writes: ws) :> commitJs(ctx, ws)
             .If(cond: c, thenB: t, elseB: e) :> [JsStmt.SIf(exprJs(ctx, c), blockJs(ctx, t), elseJs(ctx, e))]
             .Return(e: e) :> [JsStmt.SReturn(exprJs(ctx, e))]
             .Eval(e: e) :> [sexpr(exprJs(ctx, e))]
-        }
-    }
-
-    // F13: Stmt.Write has 5 fields; its `check` is bound here, separately.
-    fn writeCheck(s: Stmt) -> Check {
-        return match s {
-            .Write(check: c) :> c
-            .Let :> Check.Static
-            .Assign :> Check.Static
-            .If :> Check.Static
-            .Return :> Check.Static
-            .Eval :> Check.Static
         }
     }
 
@@ -467,6 +481,86 @@ ${
         return sexpr(editJs(ctx, target, owner, edit, v, check))
     }
 
+    // An all-or-nothing group of writes (Stmt.Commit, RULED S440): first every
+    // runtime contract check (a RuntimeEdge transition's edge), then every
+    // write. A refused check throws before anything is written. Each write's
+    // edge is already proven by then, so it is emitted as a Static write.
+    // The values are Locals (check.scrml C7): reading one twice is free.
+    // The writes run inside ONE `rt.batch`: a `.set` outside a batch flushes
+    // its observers synchronously (a Commit reached from a render hole or an
+    // effect runs at batch depth 0), and an observer running between two
+    // writes would see — and could act on — the half-applied value. In the
+    // batch, observers run once, after the last write. The checks stay OUTSIDE
+    // the batch: they are pure reads (`peek`), nothing can run between them and
+    // the batch, and a refusal throws before any batch bookkeeping begins.
+    fn commitJs(ctx: Ctx, ws: Stmt[]) -> JsStmt[] {
+        let checks: JsStmt[] = []
+        let writes: JsStmt[] = []
+        for (const s of ws) {
+            checks = checks.concat(commitCheckJs(ctx, s))
+            writes = writes.concat(commitWriteJs(ctx, s))
+        }
+        return checks.concat([sexpr(rtCall(ctx, "batch", [JsExpr.JArrow([], writes)]))])
+    }
+
+    fn commitCheckJs(ctx: Ctx, s: Stmt) -> JsStmt[] {
+        return match s {
+            .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> edgeCheckJs(ctx, cap, inst, edit, v, ck)
+            .Commit :> []
+            .Let :> []
+            .Assign :> []
+            .If :> []
+            .Return :> []
+            .Eval :> []
+        }
+    }
+
+    fn commitWriteJs(ctx: Ctx, s: Stmt) -> JsStmt[] {
+        return match s {
+            .Write(cap: cap, inst: inst, edit: edit, value: v) :> [writeJs(ctx, cap, inst, edit, v, Check.Static)]
+            .Commit :> []
+            .Let :> []
+            .Assign :> []
+            .If :> []
+            .Return :> []
+            .Eval :> []
+        }
+    }
+
+    // The edge check alone (no write) for a RuntimeEdge transition; nothing
+    // for a write the Core already proves.
+    fn edgeCheckJs(ctx: Ctx, cap: Sym, inst: InstRef, edit: EditKind, value: Expr, check: Check) -> JsStmt[] {
+        if (!isTransitionEdit(edit) || !isRuntimeEdge(check)) return []
+        const owner: CapOwner | not = capOwner(ctx.p, cap)
+        if (owner is not) return [sexpr(jid("danglingWriteCapability$" + cap.id))]
+        const target: JsExpr = fieldCell(instJs(ctx, inst), owner.decl, owner.idx)
+        const edges: JsExpr = jid(nameOf(ctx.names, NameKey.Edges(owner.decl.sym.id, owner.idx)))
+        return [sexpr(rtCall(ctx, "checkEdge", [target, edges, exprJs(ctx, value)]))]
+    }
+
+    fn isTransitionEdit(k: EditKind) -> boolean {
+        return match k {
+            .Transition :> true
+            .Replace :> false
+            .Append :> false
+            .Prepend :> false
+            .Anywhere :> false
+            .PositionWrite :> false
+            .FieldAt :> false
+            .RemoveEnd :> false
+            .RemoveFront :> false
+            .RemoveAnywhere :> false
+            .ElemAt(index: x) :> false
+        }
+    }
+
+    fn isRuntimeEdge(c: Check) -> boolean {
+        return match c {
+            .RuntimeEdge :> true
+            .Static :> false
+        }
+    }
+
     fn editJs(ctx: Ctx, target: JsExpr, owner: CapOwner, edit: EditKind, v: JsExpr, check: Check) -> JsExpr {
         return match edit {
             .Replace :> jmcall(target, "set", [v])
@@ -476,6 +570,10 @@ ${
             .PositionWrite :> jmcall(target, "set", [v])
             .FieldAt(path: path) :> rtCall(ctx, "setIn", [target, fieldPathJs(ctx, path), v])
             .Transition :> transitionJs(ctx, target, owner, v, check)
+            .RemoveEnd :> rtCall(ctx, "removeEnd", [target, v])
+            .RemoveFront :> rtCall(ctx, "removeFront", [target, v])
+            .RemoveAnywhere :> jmcall(target, "set", [v])
+            .ElemAt(index: ix, path: path) :> rtCall(ctx, "setAt", [target, exprJs(ctx, ix), fieldPathJs(ctx, path), v])
         }
     }
 
@@ -526,6 +624,7 @@ ${
             .Each :> hole(HNode.HComment("each"), path, v)
             .Instance(decl: d) :> hole(HNode.HComment(d.hint), path, v)
             .Slot :> hole(HNode.HComment("slot"), path, v)
+            .Star(decl: d) :> hole(HNode.HComment("*" + d.hint), path, v)
         }
     }
 
@@ -547,6 +646,7 @@ ${
             .Static(name: n, value: v) :> [{ name: n, value: v }]
             .Bound :> []
             .On :> []
+            .Bind :> []
         }
     }
 
@@ -564,6 +664,7 @@ ${
             .Static(name: n) :> false
             .Bound(name: n) :> true
             .On(event: ev) :> true
+            .Bind(kind: k) :> true
         }
     }
 
@@ -614,6 +715,7 @@ ${
             .Cond :> false
             .Each :> false
             .Slot :> false
+            .Star :> false
         }
     }
 
@@ -636,6 +738,7 @@ ${
             .Cond :> []
             .Each :> []
             .Slot :> []
+            .Star :> []
         }
     }
 
@@ -647,23 +750,18 @@ ${
             .Text :> only([])
             .Dyn(e: e) :> only([sexpr(rtCall(ctx, "text", [scopeVar(), node, jthunk(exprJs(ctx, e))]))])
             .Cond(arms: arms) :> condJs(nested(ctx), arms, node, tid + "/" + pathText(h.path))
-            .Each(src: src, bind: bind, key: key, row: row) :> eachJs(ctx, src, bind, key, eachHandles(v), row, node, tid + "/" + pathText(h.path))
+            .Each(src: src, bind: bind, key: key, handles: hs, row: row) :> eachJs(ctx, src, bind, key, hs, row, node, tid + "/" + pathText(h.path))
             .Instance(decl: d, attrs: attrs, slot: slot, alias: alias) :> instanceJs(ctx, d, attrs, slot, alias, node, h.path, tid, kid)
             .Slot :> only([sexpr(rtCall(ctx, "slot", [scopeVar(), node, ctx.slot]))])
+            .Star(decl: d, inst: i) :> starJs(ctx, d, i, node)
         }
     }
 
-    // F13: View.Each has 5 fields; its `handles` are bound here, separately.
-    fn eachHandles(v: View) -> Sym[] {
-        return match v {
-            .Each(handles: hs) :> hs
-            .El :> []
-            .Text :> []
-            .Dyn :> []
-            .Cond :> []
-            .Instance :> []
-            .Slot :> []
-        }
+    // s444 — `<*x/>` (§66.6.2): the EXISTING instance, rendered with x's
+    // renders into THIS scope (so its view effects are disposed with this
+    // site, while the instance itself lives on). Nothing is constructed.
+    fn starJs(ctx: Ctx, d: Sym, i: InstRef, node: JsExpr) -> Rendered {
+        return only([sexpr(jcall(jid(nameOf(ctx.names, NameKey.Render(d.id))), [instJs(ctx, i), scopeVar(), node, JsExpr.JNull]))])
     }
 
     fn attrsJs(ctx: Ctx, attrs: Attr[], node: JsExpr) -> JsStmt[] {
@@ -677,6 +775,15 @@ ${
             .Static :> []
             .Bound(name: n, e: e) :> [sexpr(rtCall(ctx, "attr", [scopeVar(), node, jstr(n), jthunk(exprJs(ctx, e))]))]
             .On(event: ev, body: body) :> [sexpr(rtCall(ctx, "on", [scopeVar(), node, jstr(ev), JsExpr.JArrow([], blockJs(ctx, body))]))]
+            .Bind(kind: k, read: r, sink: sk, write: w) :> [sexpr(rtCall(ctx, "bind", [scopeVar(), node, jstr(bindProp(k)), jthunk(exprJs(ctx, r)), JsExpr.JArrow([symName(ctx, sk)], blockJs(ctx, w))]))]
+        }
+    }
+
+    // s444 — the element property a bind shows and reads back (§5.4).
+    fn bindProp(k: BindKind) -> string {
+        return match k {
+            .Value :> "value"
+            .Checked :> "checked"
         }
     }
 
@@ -801,6 +908,7 @@ ${
             .Cond(arms: a) :> false
             .Each(src: s) :> false
             .Slot :> false
+            .Star(decl: d) :> false
         }
     }
 
@@ -847,6 +955,12 @@ ${
             }
         }
         let templates: Template[] = []
+        // s444: a prebuilt kid renders into the scope THIS render was given —
+        // the parent instance's scope for a new instance (the same lifetime as
+        // the kid's own), the `<*x/>` site's scope for a Star render (so the
+        // view is disposed with the site, never left in the kid's scope).
+        let renderScope: JsExpr = jmember(jid(iv), "scope")
+        if (ctx.prebuilt) renderScope = scopeVar()
         if (d.renders is some) {
             let slotFn: JsExpr = JsExpr.JNull
             if (slot.length > 0) {
@@ -855,7 +969,7 @@ ${
                 templates = r.templates
             }
             stmts = stmts.concat([sexpr(jcall(jid(nameOf(ctx.names, NameKey.Render(dsym.id))),
-                [jid(iv), jmember(jid(iv), "scope"), node, slotFn]))])
+                [jid(iv), renderScope, node, slotFn]))])
         }
         return { stmts: stmts, templates: templates }
     }
@@ -1041,6 +1155,9 @@ ${
             .ArrayOf(elems: es) :> false
             .StructOf(ty: t) :> false
             .Handle(inst: i) :> false
+            .Host(call: c) :> false
+            .Lambda(params: ps) :> false
+            .SeqCall(op: o) :> false
         }
     }
 
@@ -1069,6 +1186,7 @@ ${
             .Cond :> []
             .Each :> []
             .Slot :> []
+            .Star :> []
         }
     }
 

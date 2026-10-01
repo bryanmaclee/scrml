@@ -1,0 +1,15 @@
+{
+  "id": "reactive-reset-handler-nonzero-initial",
+  "description": "A reset handler re-renders its interpolation (§6.1). @count starts at 5; one click on #reset runs clearCount(), writing 0; #display and the snapshot both read 0. Sibling of reset-handler: that case ends on an inc, so it no longer asserts the display right after clearCount(); this one does, and because the initial state (5) differs from the asserted end state (0), it fails if the handler or the write does nothing.",
+  "language-version": "1.0",
+  "spec": "§6.1",
+  "rationale": "§6.1 reactive cells: a write from a handler (clearCount sets @count to 0) updates the cell AND re-renders every interpolation that reads it. Starting from a non-zero value makes the reset observable in both the DOM and the state.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#reset" }],
+    "state": { "count": 0 },
+    "dom": "<button id=\"inc\">+</button><button id=\"reset\">Reset</button><p id=\"display\">Count: 0</p>",
+    "domAnchored": [{ "selector": "#display", "text": "Count: 0" }]
+  }
+}

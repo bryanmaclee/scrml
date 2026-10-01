@@ -102,7 +102,7 @@ ${
             .NPlace(pl: pl) :> placeKids(pl)
             .NInst(i: i) :> []
             .NPattern(pat: pat) :> []
-            .NEdit(k: k) :> []
+            .NEdit(k: k) :> editKids(k)
             .NView(v: v) :> viewKids(v)
             .NAttr(a: a) :> attrKids(a)
         }
@@ -128,6 +128,7 @@ ${
             .Assign(local: local, value: value) :> [Node.NExpr(value)]
             .Write(inst: inst, edit: edit, value: value) :>
                 [Node.NInst(inst), Node.NEdit(edit), Node.NExpr(value)]
+            .Commit(writes: ws) :> stmtNodes(ws)
             .If(cond: cond, thenB: thenB, elseB: elseB) :>
                 [Node.NExpr(cond), Node.NBlock(thenB)].concat(maybeBlock(elseB))
             .Return(e: e) :> [Node.NExpr(e)]
@@ -147,6 +148,26 @@ ${
             .StructOf(ty: ty, fields: fields) :> exprNodes(fields)
             .Handle(inst: inst) :> [Node.NInst(inst)]
             .InitOf(decl: d, inst: inst) :> [Node.NInst(inst)]
+            .Host(call: c) :> []
+            .Lambda(params: ps, body: b) :> [Node.NExpr(b)]
+            .SeqCall(op: o, seq: sq, f: f) :> [Node.NExpr(sq), Node.NExpr(f)]
+        }
+    }
+
+    // s444: an ElemAt edit holds its index expression.
+    fn editKids(k: EditKind) -> Node[] {
+        return match k {
+            .ElemAt(index: i, path: p) :> [Node.NExpr(i)]
+            .Replace :> []
+            .Append :> []
+            .Prepend :> []
+            .Anywhere :> []
+            .PositionWrite :> []
+            .FieldAt(path: p) :> []
+            .Transition :> []
+            .RemoveEnd :> []
+            .RemoveFront :> []
+            .RemoveAnywhere :> []
         }
     }
 
@@ -168,6 +189,7 @@ ${
             .Instance(decl: decl, attrs: attrs, slot: slot, alias: alias) :>
                 constructNodes(attrs).concat(viewNodes(slot))
             .Slot :> []
+            .Star(decl: d, inst: inst) :> [Node.NInst(inst)]
         }
     }
 
@@ -176,6 +198,7 @@ ${
             .Static(name: name, value: value) :> []
             .Bound(name: name, e: e) :> [Node.NExpr(e)]
             .On(event: event, body: body) :> [Node.NBlock(body)]
+            .Bind(kind: k, read: r, sink: sk, write: w) :> [Node.NExpr(r), Node.NBlock(w)]
         }
     }
 
@@ -255,16 +278,44 @@ ${
             .NView(v: v) :> viewBinds(v)
             .NPattern(pat: pat) :> patternBinds(pat)
             .NFn(f: f) :> paramSyms(f)
+            .NExpr(e: e) :> exprBinds(e)
+            .NAttr(a: a) :> attrBinds(a)
             .NProgram(p: p) :> []
             .NDecl(d: d) :> []
             .NField(f: f) :> []
             .NServerFn(f: f) :> []
             .NBlock(b: b) :> []
-            .NExpr(e: e) :> []
             .NPlace(pl: pl) :> []
             .NInst(i: i) :> []
             .NEdit(k: k) :> []
-            .NAttr(a: a) :> []
+        }
+    }
+
+    // s444: a lambda binds its parameters; a bind binds its event-value sink.
+    fn exprBinds(e: Expr) -> Sym[] {
+        return match e {
+            .Lambda(params: ps) :> ps
+            .Lit(lit: x) :> []
+            .Local(sym: x) :> []
+            .Read(place: x) :> []
+            .Call(callee: x) :> []
+            .Prim(op: x) :> []
+            .Match(scrut: x) :> []
+            .ArrayOf(elems: x) :> []
+            .StructOf(ty: x) :> []
+            .Handle(inst: x) :> []
+            .InitOf(decl: x) :> []
+            .Host(call: x) :> []
+            .SeqCall(op: x) :> []
+        }
+    }
+
+    fn attrBinds(a: Attr) -> Sym[] {
+        return match a {
+            .Bind(sink: s) :> [s]
+            .Static(name: x) :> []
+            .Bound(name: x) :> []
+            .On(event: x) :> []
         }
     }
 
@@ -279,6 +330,7 @@ ${
             .Let(sym: sym, init: init) :> [sym]
             .Assign(local: local, value: value) :> []
             .Write :> []
+            .Commit :> []
             .If(cond: cond, thenB: thenB, elseB: elseB) :> []
             .Return(e: e) :> []
             .Eval(e: e) :> []
@@ -294,6 +346,7 @@ ${
             .Cond(arms: arms) :> []
             .Instance(decl: decl, attrs: attrs, slot: slot, alias: alias) :> []
             .Slot :> []
+            .Star(decl: d) :> []
         }
     }
 
@@ -340,6 +393,7 @@ ${
             .Assign(local: local, value: value) :> local.id
             .Let(sym: sym, init: init) :> -1
             .Write :> -1
+            .Commit :> -1
             .If(cond: cond, thenB: thenB, elseB: elseB) :> -1
             .Return(e: e) :> -1
             .Eval(e: e) :> -1

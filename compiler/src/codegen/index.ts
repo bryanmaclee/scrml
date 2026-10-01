@@ -54,7 +54,7 @@ const RUNTIME_FILENAME_PLACEHOLDER = "__SCRML_RUNTIME_FILENAME_PLACEHOLDER__";
 import { resetVarCounter } from "./var-counter.ts";
 import { enableSrcmapProvenance, disableSrcmapProvenance } from "./srcmap-provenance.ts";
 import { escapeHtmlAttr } from "./utils.ts";
-import { generateHtml, augmentHtmlForChunks } from "./emit-html.ts";
+import { generateHtml, augmentHtmlForChunks, buildChunksBootJs } from "./emit-html.ts";
 import { generateCss } from "./emit-css.ts";
 import { collectUsedTransitions, renderTransitionCss } from "./emit-transition-css.ts";
 import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
@@ -145,6 +145,8 @@ export interface CgDepGraph {
 
 export interface CgProtectAnalysis {
   views?: Map<string, object>;
+  /** §14.8.9 — base tables whose columns the compile knows (see ProtectAnalysis). */
+  declaredTables?: Set<string>;
 }
 
 export interface CgInput {
@@ -288,6 +290,13 @@ export interface CgInput {
    * test harnesses + the CLI verbose-buffer share a single sink.
    */
   log?: (msg: string) => void;
+  /**
+   * s440-bootstrap-css-theme-t3 — the CSS sub-seam (pipeline-seam.ts `CSS`). api.js passes
+   * `seams.pick("CSS", generateCss)`: `generateCss` itself unless a bootstrap stylesheet emitter is
+   * swapped in. Called once per file for the user stylesheet; Tailwind + §38 keyframes are appended
+   * after it as before. Absent → `generateCss`.
+   */
+  generateCss?: typeof generateCss;
 }
 
 export interface CgFileOutput {
@@ -333,7 +342,21 @@ export interface CgOutput {
    * Absent (undefined) when the splitter is not invoked.
    */
   chunksManifest?: ChunksManifest;
+  /**
+   * s444-csp-inline-chunks — the build's chunk-activation script
+   * (`window._SCRML_CHUNKS` manifest + role-detection bootstrap), referenced by
+   * every augmented page as `<script src="/<chunksBootFilename>">`. The caller
+   * writes it to `<outputDir>/<chunksBootFilename>`.
+   *
+   * Absent when no page was augmented (splitter not invoked / no chunks).
+   */
+  chunksBootJs?: string;
+  /** Content-addressed dist-root filename: `scrml-chunks.<hash>.js`. */
+  chunksBootFilename?: string;
 }
+
+/** Basename of the build's chunk-activation script (`<base>.<hash>.js`). */
+export const CHUNKS_BOOT_BASENAME = "scrml-chunks";
 
 /**
  * Source path → the POSIX path the artifact ACTUALLY occupies relative to the
@@ -1181,6 +1204,8 @@ export function runCG(input: CgInput): CgOutput {
     // assembled runtime into an ES module (see the `!embedRuntime` path below).
     moduleFormat = "classic",
     log = console.log,
+    // s440 — the CSS sub-seam's pick (identity when nothing is swapped).
+    generateCss: userStylesheet = generateCss,
   } = input;
 
   // §20.6 — fresh per-compile log() file:line source registry.
@@ -1614,6 +1639,70 @@ export function runCG(input: CgInput): CgOutput {
       }
     }
     detectNestedDocAttrs(nodes, 0);
+
+    // §4.12.2 (S443, g-nested-program-auth-attr-silently-ignored) — `auth=` is NOT
+    // a nested-valid `<program>` attribute. Auth config is read from the file's
+    // FIRST top-level `<program>` only (compute-program-config.ts), so a nested
+    // `<program auth="required">` compiled with no auth at all: its server
+    // functions ran for anonymous callers (MEASURED S441: an anonymous POST wrote
+    // a row). "Nested" here is any `<program>` with a `<program>` OR `<page>`
+    // ancestor — a `<page>` is a per-route container inside the application's one
+    // `<program>` (§40.8), so a `<program>` under it is nested too, and its `auth=`
+    // was dropped the same way (MEASURED S443: 200 for an anonymous GET). Fail
+    // closed: any `auth=` there, whatever its value, is an error, never a no-op.
+    function detectNestedProgramAuth(parentChildren: any[], nested: boolean): void {
+      for (const node of parentChildren) {
+        if (!node || typeof node !== "object" || node.kind !== "markup") continue;
+        if (node.tag === "program" && nested) {
+          const attrs: any[] = node.attributes ?? node.attrs ?? [];
+          const authAttr = attrs.find((a: any) => a && a.name === "auth");
+          if (authAttr) {
+            const span = (authAttr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+            errors.push(new CGError(
+              "E-PROGRAM-NESTED-AUTH",
+              "E-PROGRAM-NESTED-AUTH: `auth=` is not valid on a nested <program> — a nested " +
+              "<program> is not an auth scope, so its server functions would run unauthenticated. " +
+              "Put `auth=` on the top-level <program> (the whole application) or on the " +
+              "<page> that needs it, and remove it from the nested <program>. (§4.12.2, §52.13)",
+              { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+              "error",
+            ));
+          }
+        }
+        if (Array.isArray(node.children) && node.children.length > 0) {
+          detectNestedProgramAuth(node.children, nested || node.tag === "program" || node.tag === "page");
+        }
+      }
+    }
+    detectNestedProgramAuth(nodes, false);
+
+    // §40.8 / §20.5.1 (S443, ruled by bryan — user-voice S443 item 3): a file declares
+    // its top-level `<program>` exactly once. Two or more top-level `<program>`
+    // elements in ONE file is `E-PROGRAM-002`. Before S443 the second one was
+    // silently mis-read: compute-program-config reads auth= from the FIRST
+    // top-level `<program>` only, so `<program>…</program><program auth="required">`
+    // served the second program's routes to anonymous callers
+    // (g-two-top-level-programs-one-file-second-auth-dropped). NARROW: same-file
+    // only — the §40.8 cross-file case stays reserved (library-shape.js,
+    // type-system.ts and the session-config comments above depend on it).
+    {
+      const topPrograms = (Array.isArray(nodes) ? nodes : []).filter(
+        (n: any) => n && typeof n === "object" && n.kind === "markup" && n.tag === "program",
+      );
+      for (const extra of topPrograms.slice(1)) {
+        const span = extra.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
+        errors.push(new CGError(
+          "E-PROGRAM-002",
+          "E-PROGRAM-002: a file declares its top-level <program> exactly once, but this file " +
+          `has ${topPrograms.length}. Everything after the first is mis-read — its auth=, ` +
+          "session and middleware attributes are ignored, so its routes run with the FIRST " +
+          "program's settings. Merge them into one <program>, or move the second into its own " +
+          "file (a nested <program> inside the first is a worker or scoped-db context, §4.12). (§40.8)",
+          { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+          "error",
+        ));
+      }
+    }
 
     extractWorkerPrograms(nodes);
 
@@ -2340,7 +2429,7 @@ export function runCG(input: CgInput): CgOutput {
       // Generate CSS — emitted in both modes.
       // ---------------------------------------------------------------------------
       const userCss: string = codegenStage("emit-css", () =>
-        generateCss(nodes, analysis?.cssBlocks, errors, fileAST as Record<string, unknown>)
+        userStylesheet(nodes, analysis?.cssBlocks, errors, fileAST as Record<string, unknown>, { filePath, mode })
       ) || "";
 
       // ---------------------------------------------------------------------------
@@ -3836,6 +3925,10 @@ export function runCG(input: CgInput): CgOutput {
   // -------------------------------------------------------------------------
   let chunks: Map<ChunkKey, ChunkOutput> | undefined;
   let chunksManifest: ChunksManifest | undefined;
+  // s444-csp-inline-chunks — the build's chunk-activation script + its
+  // content-addressed dist-root filename (set by the A-4.7 augmentation pass).
+  let chunksBootJs: string | undefined;
+  let chunksBootFilename: string | undefined;
   if (emitPerRoute && reachabilityRecordInput) {
     const splitterResult = emitPerRouteChunks({
       reachabilityRecord: reachabilityRecordInput,
@@ -3893,12 +3986,14 @@ export function runCG(input: CgInput): CgOutput {
     // with the chunk-activation scaffolding emitted by
     // `emit-html.ts:augmentHtmlForChunks`:
     //
-    //   - Inline `<script>window._SCRML_CHUNKS = { ... }</script>` (route-
-    //     keyed manifest for runtime `_scrml_prefetch_tier2` lookup +
-    //     bootstrap dispatch).
     //   - `<link rel="modulepreload">` for non-empty tier-1 chunks.
-    //   - Role-detection bootstrap `<script>` (localStorage > cookie >
-    //     <meta name="scrml-role"> > "_anonymous").
+    //   - `<script src="/scrml-chunks.<hash>.js" data-scrml-route="…">` — the
+    //     build's same-origin chunk-activation script (`buildChunksBootJs`):
+    //     the route-keyed `_SCRML_CHUNKS` manifest (runtime
+    //     `_scrml_prefetch_tier2` lookup + bootstrap dispatch) and the
+    //     role-detection bootstrap (localStorage > cookie >
+    //     <meta name="scrml-role"> > "_anonymous"). NOT inline — see
+    //     s444-csp-inline-chunks in `buildChunksBootJs`.
     //
     // Per OQ-A4-E ratification (S91): ONE HTML per route + role-detection
     // bootstrap loads the per-role initial chunk. No per-(route, role)
@@ -3983,6 +4078,15 @@ export function runCG(input: CgInput): CgOutput {
         if (!list.includes(epId)) list.push(epId);
       }
 
+      // s444-csp-inline-chunks — the manifest + role-detection bootstrap ship
+      // as ONE same-origin, content-addressed file at the dist root (never an
+      // inline `<script>`: `headers="strict"` pins `default-src 'self'`, which
+      // refuses inline script). Every page references it by root-absolute URL
+      // — the manifest's own chunk URLs are root-absolute already.
+      chunksBootJs = buildChunksBootJs({ chunks, epIdToRoutePath, moduleFormat });
+      chunksBootFilename = `${CHUNKS_BOOT_BASENAME}.${fnv1aHash(chunksBootJs)}.js`;
+      const chunksBootSrc = `/${chunksBootFilename}`;
+
       // Augment each file's HTML in place. Files without HTML
       // (library mode, worker bundles, fixture files with no markup)
       // are skipped — the augmenter would have nothing to inject into.
@@ -3995,7 +4099,7 @@ export function runCG(input: CgInput): CgOutput {
           chunks,
           fileEntryPointIds: fileEpIds,
           epIdToRoutePath,
-          moduleFormat,
+          chunksBootSrc,
         });
         // Avoid mutating the existing output object reference; replace
         // the HTML field on a fresh shallow copy. (`output` is the
@@ -4071,6 +4175,7 @@ export function runCG(input: CgInput): CgOutput {
     runtimeFilename,
     ...(chunks !== undefined && { chunks }),
     ...(chunksManifest !== undefined && { chunksManifest }),
+    ...(chunksBootJs !== undefined && { chunksBootJs, chunksBootFilename }),
   };
 }
 

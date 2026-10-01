@@ -1,0 +1,11 @@
+{
+  "id": "w-auth-file-conflict-neg",
+  "description": "§40.2 (S443 review F2) — the `<program>` and its `<page>` both declare `auth=\"required\"`: the declarations agree, so W-AUTH-FILE-CONFLICT does not fire.",
+  "language-version": "1.0",
+  "spec": "§40.2, §52.13",
+  "rationale": "§40.2 (S443): W-AUTH-FILE-CONFLICT is for a file mixing `auth=\"required\"` with a laxer `auth=`; agreeing declarations are not a conflict.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-AUTH-FILE-CONFLICT"]
+  }
+}

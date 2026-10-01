@@ -1,0 +1,14 @@
+# progress s441-async-escape-f4-f5
+- 2026-09-29T06:46:12-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a0333df5bdd0af1c3, base cf62b4154
+- 2026-09-29T06:50:03-06:00 reproduced F5 (a-d), F4 (15 shapes; 5 nested verifyPassword executed: wrong pw accepted), FP1 a-d, FP2 on base
+- 2026-09-29T07:52:15-06:00 F5 (handlers+mount via js-async-analysis), F4 (E-ASYNC-FN-ESCAPES-AS-VALUE + SPEC), FP1, FP2 implemented; core suite 0 fail; new unit file 62 pass (37 red on base)
+- 2026-09-29T09:10:14-06:00 blast radius: each-row + lift handlers colored (same root), top-level F4 escapes, facts computed once; suite 32406 pass / 1 flaky (standalone-tool-target Bun.serve, env — identical emitted output vs base)
+- 2026-09-29T09:50:35-06:00 snippet-gate regression (match IIFE token await scan) fixed via own-level await parse; CI gates run: facts, spec-index, s34-census, delta-lint, snippet-gate, corpus-compile-floor, browser-baseline, types-gate, e2e/lsp/commands — all PASS
+- 2026-09-29T10:21:34-06:00 RESUMED after rate-limit kill: Phase 3 grep 0/0, corpus 5 newly failing (4 new neg cases + flogence dispatch-tool.scrml), conformance 1053/1060 (+6 new cases, 7 xfail)
+- 2026-09-29T11:02:49-06:00 review fix round 1-5 + ledger §S441c; conformance 1056/1063 (+3 cases); snippet 122/122; s34 PASS; types identical to base
+- 2026-09-29T12:19:10-06:00 round 3 N1: scheduler exemption narrowed to source-provable calls/member reads; +4 conformance, +7 unit
+- 2026-09-29T12:51:12-06:00 round 3 N2/N3 (+N4 bracket then): event matched by binding; +5 unit, +3 conformance; conformance 1079/1086
+- 2026-09-29T13:13:58-06:00 round 3 N1 follow-up: comments no longer withdraw the scheduler exemption (flogence app.scrml false positive caught by corpus diff); corpus = new cases + dispatch-tool only
+- 2026-09-29T14:09:48-06:00 round 4 step 2: event binding poisoning after the first await; e01-e24+h03 fire, e25/h08 clean; +16 unit, +14 conformance; conformance 1100/1107
+- 2026-09-29T14:31:55-06:00 round 4 step 1: scheduler exemption on the tree (schedulerNamesNotProvablyGlobal), text scan deleted; x*/s*/m* fail closed; corpus = new cases + dispatch-tool; conformance 1104/1111; snippet 122/122
+- 2026-09-29T15:04:44-06:00 round 4 item 4: named-handler-fn gap (h01/h02/h04/h09/c02) annotated in ledger; push of cded03d29 was denied by the auto-mode classifier

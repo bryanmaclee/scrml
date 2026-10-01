@@ -1,0 +1,14 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+function m(n) { return isOk(n) }
+function setTimeout(f) { return f(1) }
+function decide() {
+return setTimeout(m) ? "accepted" : "rejected"
+}
+function go() {
+@verdict = decide()
+}
+<button id="go" onclick=go()>go</button>
+<p id="out">${@verdict}</p>
+</program>

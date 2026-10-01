@@ -12,8 +12,10 @@
 //   L7  c ? a : b          → Match over a bool with `true` / `false` arms
 //   L9  <each> w/o key=    → key: not
 //   L11 given c = @h :> {} → Let c = Handle(h); If(IsSome(c), {…})
-//   L13 whitespace-only text containing a newline is dropped; other text is
-//       kept verbatim (comments are gone already — the parser drops them)
+//   L13 RETIRED (dpa-045 follow-up 4, RULED S442 — SPEC §4.18.5): every
+//       free-text run is kept verbatim, whitespace-only runs (a newline +
+//       indentation between two elements) included; comments are gone
+//       already (the parser drops them, keeping the bytes around them)
 //   L14 the program's markup is its renders; `type`s → CoreProgram.types
 //   L15 one CoreProgram per LINKED program (files in link order)
 //   L17 field order (analyze built it); L18 graph fields (analyze); L19 int
@@ -22,26 +24,34 @@
 // L1/L2/L3/L6/L8/L10/L12/L16 are facts analyze computed; lower copies them.
 //
 // Every traversal is a total `match` over the AST enums with no default arm
-// (dpa-051 §3.4). impl#1 workarounds: F4, F11, F13, F16, F17 (an arm whose
+// (dpa-051 §3.4). impl#1 workarounds: F4, F11, F16, F17 (an arm whose
 // body is an object literal loses its bindings — constructors instead).
 // =============================================================================
 ${
-    import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
+    import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram,
              block, litStr } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag,
              mkSpan } from "./ast.scrml"
-    import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, AttrKind, Fact,
-             NodeFact, Tables, TypedProgram, factOf, declInfo } from "./analyze.scrml"
+    import { Node, allNodes } from "./walk.scrml"
+    import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair,
+             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram,
+             nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest } from "./analyze.scrml"
 
     export type Lowered:struct = { core: CoreProgram, diags: Diag[] }
 
     // The lowering context: the tables, the file (for diagnostics), and — while
     // lowering a field initializer for `reset` (L4) — the instance being reset,
     // which is what `.Lexical(0)` inside an initializer means there.
-    type LC:struct = { t: Tables, file: string, subst: InstRef | not }
+    // `snap` — while lowering a spread's override values (RULED S440, strict
+    // snapshot): a read of the spread target's place (`decl` / `inst` / `path`,
+    // or a place under it) reads a snapshot local instead of the live cell —
+    // the per-FIELD local of the field it reads (`fields`), or `whole` for a
+    // read of the whole target value.
+    type SnapB:struct = { decl: Sym, inst: InstRef, path: FieldRef[], whole: Sym, fields: SnapField[] }
+    type LC:struct = { t: Tables, file: string, subst: InstRef | not, snap: SnapB | not }
 
     // Lowering is total over the facts analyze produced; a node with a missing
     // or mismatched fact means analyze reported an error, and lower emits a
@@ -64,6 +74,174 @@ ${
         return i
     }
 
+    // A read of a declaration field / whole instance: the live cell — or, while
+    // lowering a spread's override values, the statement's snapshot when the
+    // place is the spread target or under it (RULED S440).
+    fn cellRead(c: LC, d: Sym, i: InstRef, path: FieldRef[]) -> Expr {
+        const s: SnapB | not = c.snap
+        if (s is some) {
+            if (s.decl.id == d.id && instKey(s.inst) == instKey(i) && hasPrefix(path, s.path)) {
+                let rest: FieldRef[] = []
+                let k: int = s.path.length
+                while (k < path.length) {
+                    rest = rest.concat([path[k]])
+                    k = k + 1
+                }
+                if (rest.length == 0) return Expr.Local(s.whole)
+                const f: SnapField | not = snapFieldOf(s.fields, rest[0])
+                if (f is not) return Expr.Read(Place.LocalPath(s.whole, rest))
+                if (rest.length == 1) return Expr.Local(f.local)
+                return Expr.Read(Place.LocalPath(f.local, dropFirst(rest)))
+            }
+        }
+        return Expr.Read(Place.Cell(d, i, path))
+    }
+
+    fn dropFirst(path: FieldRef[]) -> FieldRef[] {
+        let out: FieldRef[] = []
+        let k = 1
+        while (k < path.length) {
+            out = out.concat([path[k]])
+            k = k + 1
+        }
+        return out
+    }
+
+    fn snapFieldOf(fs: SnapField[], r: FieldRef) -> SnapField | not {
+        for (const f of fs) {
+            if (f.ref.owner.id == r.owner.id && f.ref.idx == r.idx) return f
+        }
+        return not
+    }
+
+    fn hasPrefix(path: FieldRef[], pre: FieldRef[]) -> boolean {
+        if (path.length < pre.length) return false
+        let k = 0
+        while (k < pre.length) {
+            if (path[k].owner.id != pre[k].owner.id || path[k].idx != pre[k].idx) return false
+            k = k + 1
+        }
+        return true
+    }
+
+    // Two instance references name the same instance iff they are spelled the same.
+    fn instKey(i: InstRef) -> string {
+        return match i {
+            .Shared(decl: d) :> "S" + d.id
+            .Lexical(depth: k) :> "L" + k
+            .Alias(sym: s) :> "A" + s.id
+            .Narrowed(sym: s) :> "N" + s.id
+        }
+    }
+
+    // The snapshot binding for a spread whose operand lowered to `op` (a cell read).
+    fn snapOf(op: Expr, whole: Sym, fields: SnapField[]) -> SnapB | not {
+        return match op {
+            .Read(place: pl) :> snapOfPlace(pl, whole, fields)
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Call(callee: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .Handle(inst: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+        }
+    }
+
+    fn snapOfPlace(pl: Place, whole: Sym, fields: SnapField[]) -> SnapB | not {
+        return match pl {
+            .Cell(decl: d, inst: i, path: path) :> snapB(d, i, path, whole, fields)
+            .LocalPath(sym: x) :> not
+        }
+    }
+
+    // The spread operand's cell read, re-addressed through the instance local.
+    fn throughInst(op: Expr, one: InstRef) -> Expr {
+        return match op {
+            .Read(place: pl) :> Expr.Read(placeThrough(pl, one))
+            .Lit(lit: x) :> op
+            .Local(sym: x) :> op
+            .Call(callee: x) :> op
+            .Prim(op: x) :> op
+            .Match(scrut: x) :> op
+            .ArrayOf(elems: x) :> op
+            .StructOf(ty: x) :> op
+            .Handle(inst: x) :> op
+            .InitOf(decl: x) :> op
+            .Host(call: x) :> op
+            .Lambda(params: x) :> op
+            .SeqCall(op: x) :> op
+        }
+    }
+
+    fn placeThrough(pl: Place, one: InstRef) -> Place {
+        return match pl {
+            .Cell(decl: d, inst: i, path: path) :> Place.Cell(d, one, path)
+            .LocalPath(sym: s, path: path) :> pl
+        }
+    }
+
+    fn snapB(d: Sym, i: InstRef, path: FieldRef[], whole: Sym, fields: SnapField[]) -> SnapB {
+        return { decl: d, inst: i, path: path, whole: whole, fields: fields }
+    }
+
+    // Does `e` read the local `s` (as a whole, or along a path)?
+    fn readsLocal(e: Expr, s: Sym) -> boolean {
+        for (const n of allNodes(Node.NExpr(e))) {
+            if (nodeReadsLocal(n, s)) return true
+        }
+        return false
+    }
+
+    fn nodeReadsLocal(n: Node, s: Sym) -> boolean {
+        return match n {
+            .NExpr(e: x) :> exprIsLocal(x, s)
+            .NPlace(pl: pl) :> placeIsLocal(pl, s)
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NFn(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NStmt(s: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
+        }
+    }
+
+    fn exprIsLocal(e: Expr, s: Sym) -> boolean {
+        return match e {
+            .Local(sym: y) :> y.id == s.id
+            .Lit(lit: x) :> false
+            .Read(place: x) :> false
+            .Call(callee: x) :> false
+            .Prim(op: x) :> false
+            .Match(scrut: x) :> false
+            .ArrayOf(elems: x) :> false
+            .StructOf(ty: x) :> false
+            .Handle(inst: x) :> false
+            .InitOf(decl: x) :> false
+            .Host(call: x) :> false
+            .Lambda(params: x) :> false
+            .SeqCall(op: x) :> false
+        }
+    }
+
+    fn placeIsLocal(pl: Place, s: Sym) -> boolean {
+        return match pl {
+            .LocalPath(sym: y) :> y.id == s.id
+            .Cell(decl: x) :> false
+        }
+    }
+
     // =========================================================================
     // Expressions.
     // =========================================================================
@@ -73,165 +251,186 @@ ${
         return out
     }
 
+    // A condition the typer recorded as a PRESENCE TEST (a `T | not` value in
+    // an `if` / `if=` / ternary test — RULED S440, truthiness Q1: "the compiler
+    // emits an absence check, never JS truthiness") lowers to `IsSome(x)`.
+    // (s442 — additive; the decision is the typer's `Typing.presence`.)
     export fn lowerExpr(c: LC, e: AExpr) -> Expr {
-        const f: Fact = factOf(c.t, e.nid)
+        if (presenceTest(c.t, e.nid)) return Expr.Prim(PrimOp.IsSome, [presenceOperand(c, e)])
+        return lowerExprK(c, e)
+    }
+
+    // (s442 r4 (b)) A presence test of a HANDLE tests the handle, not a
+    // snapshot of its (possibly unmounted) instance — as `given` does (L11).
+    fn presenceOperand(c: LC, e: AExpr) -> Expr {
+        const f: NameFact | not = nameFact(c.t.names, e.nid)
+        const i: InstRef | not = aliasInst(f)
+        if (i is some) return Expr.Handle(instOf(c, i))
+        return lowerExprK(c, e)
+    }
+
+    fn aliasInst(f: NameFact | not) -> InstRef | not {
+        return match f {
+            .NInst(decl: d, inst: i) :> aliasOnly(i)
+            .NLocal(sym: s) :> not
+            .NField(decl: d) :> not
+            .NStruct(owner: o) :> not
+            .NFn(sym: s) :> not
+            .NLength :> not
+            not :> not
+        }
+    }
+
+    fn aliasOnly(i: InstRef) -> InstRef | not {
+        return match i {
+            .Alias(sym: s) :> i
+            .Shared(decl: d) :> not
+            .Lexical(depth: n) :> not
+            .Narrowed(sym: s) :> not
+        }
+    }
+
+    fn lowerExprK(c: LC, e: AExpr) -> Expr {
         const k: AExprK = e.k
         return match k {
-            .Name(name: n) :> readFact(c, f)
-            .At(name: n) :> readFact(c, f)
-            .AtItem :> readFact(c, f)
-            .Num(raw: r) :> litFact(f)
-            .Str(v: s) :> litFact(f)
-            .Bool(v: b) :> litFact(f)
-            .NotLit :> litFact(f)
-            .Variant(name: n) :> variantFact(f)
-            .Member(obj: o, name: n) :> memberExpr(c, f, o)
+            .Name(name: n) :> readName(c, nameFact(c.t.names, e.nid))
+            .At(name: n) :> readName(c, nameFact(c.t.names, e.nid))
+            .AtItem :> readName(c, nameFact(c.t.names, e.nid))
+            .Num(raw: r) :> valueExpr(c, valueFact(c.t.values, e.nid), [])
+            .Str(v: s) :> valueExpr(c, valueFact(c.t.values, e.nid), [])
+            .Bool(v: b) :> valueExpr(c, valueFact(c.t.values, e.nid), [])
+            .NotLit :> valueExpr(c, valueFact(c.t.values, e.nid), [])
+            .Recovered :> Expr.Lit(Literal.Absent)
+            .Variant(name: n) :> valueExpr(c, valueFact(c.t.values, e.nid), [])
+            .Member(obj: o, name: n) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
 
-            .Call(callee: cal, args: args) :> callExpr(c, cal, args)
-            .Unary(op: o, e: x) :> Expr.Prim(opFact(f), [lowerExpr(c, x)])
-            .Binary(op: o, l: l, r: r) :> Expr.Prim(opFact(f), [lowerExpr(c, l), lowerExpr(c, r)])
+            .Call(callee: cal, args: args) :> callOrBuiltin(c, e, cal, args)
+            .Unary(op: o, e: x) :> Expr.Prim(opOf(valueFact(c.t.values, e.nid)), [lowerExpr(c, x)])
+            .Binary(op: o, l: l, r: r) :> Expr.Prim(opOf(valueFact(c.t.values, e.nid)), [lowerExpr(c, l), lowerExpr(c, r)])
             .Ternary(test: t, yes: y, no: n) :> boolMatch(lowerExpr(c, t), lowerExpr(c, y), lowerExpr(c, n))
             .Assign(target: t) :> missing()
             .ArrayLit(elems: es) :> Expr.ArrayOf(lowerExprs(c, es))
-            .ObjectLit(props: ps) :> structExpr(c, f, ps)
+            .ObjectLit(props: ps) :> valueExpr(c, valueFact(c.t.values, e.nid), ps)
+            .Spread(e: sx) :> missing()
+            .Index(obj: ix) :> missing()
+            .Lambda(params: lp, body: lb) :> lambdaExpr(c, valueFact(c.t.values, e.nid), lb)
+        }
+    }
+
+    // s444 — a call: a host call / a sequence function (the binder's value
+    // fact on the call), else a call of a named function.
+    fn callOrBuiltin(c: LC, e: AExpr, cal: AExpr, args: AExpr[]) -> Expr {
+        const f: ValueFact | not = valueFact(c.t.values, e.nid)
+        return match f {
+            .VHost(call: h) :> Expr.Host(h)
+            .VSeqCall(op: o) :> seqCallExpr(c, o, cal, args)
+            .VLit(lit: l) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VVariant(enumSym: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VStructOf(ty: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VOp(op: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VLambda(params: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            not :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+        }
+    }
+
+    fn seqCallExpr(c: LC, o: SeqFn, cal: AExpr, args: AExpr[]) -> Expr {
+        const obj: AExpr | not = calleeObj(cal)
+        if (obj is not || args.length != 1) return missing()
+        return Expr.SeqCall(o, lowerExpr(c, obj), lowerExpr(c, args[0]))
+    }
+
+    fn calleeObj(cal: AExpr) -> AExpr | not {
+        const k: AExprK = cal.k
+        return match k {
+            .Member(obj: o) :> o
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Call(callee: x) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: x) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    fn lambdaExpr(c: LC, f: ValueFact | not, body: AExpr) -> Expr {
+        return match f {
+            .VLambda(params: ps) :> Expr.Lambda(ps, lowerExpr(c, body))
+            .VLit(lit: l) :> missing()
+            .VVariant(enumSym: x) :> missing()
+            .VStructOf(ty: x) :> missing()
+            .VOp(op: x) :> missing()
+            .VHost(call: x) :> missing()
+            .VSeqCall(op: x) :> missing()
+            not :> missing()
         }
     }
 
     // A name / `@x` / `@.`: a local, a field read, or a whole instance value.
-    fn readFact(c: LC, f: Fact) -> Expr {
+    fn readName(c: LC, f: NameFact | not) -> Expr {
         return match f {
-            .FLocal(sym: s) :> Expr.Local(s)
-            .FField(decl: d, inst: i, idx: x) :> Expr.Read(Place.Cell(d, instOf(c, i), [{ owner: d, idx: x }]))
-            .FInst(decl: d, inst: i) :> Expr.Read(Place.Cell(d, instOf(c, i), []))
-            .FStruct(owner: o) :> missing()
-            .FFn(sym: s) :> missing()
-            .FVariant(enumSym: s) :> missing()
-            .FLit(lit: l) :> missing()
-            .FOp(op: o) :> missing()
-            .FStructOf(ty: t) :> missing()
-            .FWrite(w: w) :> missing()
-            .FSpread(ws: ws) :> missing()
-            .FReset(w: w) :> missing()
-            .FAssignLocal(sym: s) :> missing()
-            .FBind(sym: s) :> missing()
-            .FParam(sym: s) :> missing()
-            .FGiven(sym: s) :> missing()
-            .FUse(decl: d) :> missing()
-            .FEach(bind: b) :> missing()
-            .FSlot :> missing()
-            .FHtml :> missing()
-            .FAttr(k: a) :> missing()
-            .FNone :> missing()
+            .NLocal(sym: s) :> Expr.Local(s)
+            .NField(decl: d, inst: i, idx: x) :> cellRead(c, d, instOf(c, i), [{ owner: d, idx: x }])
+            .NInst(decl: d, inst: i) :> cellRead(c, d, instOf(c, i), [])
+            .NStruct(owner: o) :> missing()
+            .NFn(sym: s) :> missing()
+            .NLength :> missing()
+            not :> missing()
         }
     }
 
-    fn litFact(f: Fact) -> Expr {
+    // A constant the binder resolved: a literal, a variant, or a struct value
+    // in DECLARED field order (analyze's `order`: the prop index of each
+    // declared field; `ps` are the object literal's props). L19.
+    fn valueExpr(c: LC, f: ValueFact | not, ps: AProp[]) -> Expr {
         return match f {
-            .FLit(lit: l) :> Expr.Lit(l)
-            .FLocal(sym: s) :> missing()
-            .FField(decl: d) :> missing()
-            .FInst(decl: d) :> missing()
-            .FStruct(owner: o) :> missing()
-            .FFn(sym: s) :> missing()
-            .FVariant(enumSym: s) :> missing()
-            .FOp(op: o) :> missing()
-            .FStructOf(ty: t) :> missing()
-            .FWrite(w: w) :> missing()
-            .FSpread(ws: ws) :> missing()
-            .FReset(w: w) :> missing()
-            .FAssignLocal(sym: s) :> missing()
-            .FBind(sym: s) :> missing()
-            .FParam(sym: s) :> missing()
-            .FGiven(sym: s) :> missing()
-            .FUse(decl: d) :> missing()
-            .FEach(bind: b) :> missing()
-            .FSlot :> missing()
-            .FHtml :> missing()
-            .FAttr(k: a) :> missing()
-            .FNone :> missing()
+            .VLit(lit: l) :> Expr.Lit(l)
+            .VVariant(enumSym: s, idx: i) :> Expr.Lit(Literal.Variant(s, i))
+            .VStructOf(ty: t, order: order) :> Expr.StructOf(t, orderedProps(c, ps, order))
+            .VOp(op: o) :> missing()
+            .VHost(call: h) :> missing()
+            .VSeqCall(op: x) :> missing()
+            .VLambda(params: x) :> missing()
+            not :> missing()
         }
     }
 
-    fn variantFact(f: Fact) -> Expr {
+    fn opOf(f: ValueFact | not) -> PrimOp {
         return match f {
-            .FVariant(enumSym: s, idx: i) :> Expr.Lit(Literal.Variant(s, i))
-            .FLocal(sym: s) :> missing()
-            .FField(decl: d) :> missing()
-            .FInst(decl: d) :> missing()
-            .FStruct(owner: o) :> missing()
-            .FFn(sym: s) :> missing()
-            .FLit(lit: l) :> missing()
-            .FOp(op: o) :> missing()
-            .FStructOf(ty: t) :> missing()
-            .FWrite(w: w) :> missing()
-            .FSpread(ws: ws) :> missing()
-            .FReset(w: w) :> missing()
-            .FAssignLocal(sym: s) :> missing()
-            .FBind(sym: s) :> missing()
-            .FParam(sym: s) :> missing()
-            .FGiven(sym: s) :> missing()
-            .FUse(decl: d) :> missing()
-            .FEach(bind: b) :> missing()
-            .FSlot :> missing()
-            .FHtml :> missing()
-            .FAttr(k: a) :> missing()
-            .FNone :> missing()
+            .VOp(op: o) :> o
+            .VLit(lit: l) :> PrimOp.Not
+            .VVariant(enumSym: s) :> PrimOp.Not
+            .VStructOf(ty: t) :> PrimOp.Not
+            .VHost(call: h) :> PrimOp.Not
+            .VSeqCall(op: x) :> PrimOp.Not
+            .VLambda(params: x) :> PrimOp.Not
+            not :> PrimOp.Not
         }
     }
 
-    fn opFact(f: Fact) -> PrimOp {
+    // `a.b`: a field of an instance (the fact says which), a struct step
+    // appended to the place the object reads, or `.length`.
+    fn memberExpr(c: LC, f: NameFact | not, obj: AExpr) -> Expr {
         return match f {
-            .FOp(op: o) :> o
-            .FLocal(sym: s) :> PrimOp.Not
-            .FField(decl: d) :> PrimOp.Not
-            .FInst(decl: d) :> PrimOp.Not
-            .FStruct(owner: o) :> PrimOp.Not
-            .FFn(sym: s) :> PrimOp.Not
-            .FVariant(enumSym: s) :> PrimOp.Not
-            .FLit(lit: l) :> PrimOp.Not
-            .FStructOf(ty: t) :> PrimOp.Not
-            .FWrite(w: w) :> PrimOp.Not
-            .FSpread(ws: ws) :> PrimOp.Not
-            .FReset(w: w) :> PrimOp.Not
-            .FAssignLocal(sym: s) :> PrimOp.Not
-            .FBind(sym: s) :> PrimOp.Not
-            .FParam(sym: s) :> PrimOp.Not
-            .FGiven(sym: s) :> PrimOp.Not
-            .FUse(decl: d) :> PrimOp.Not
-            .FEach(bind: b) :> PrimOp.Not
-            .FSlot :> PrimOp.Not
-            .FHtml :> PrimOp.Not
-            .FAttr(k: a) :> PrimOp.Not
-            .FNone :> PrimOp.Not
-        }
-    }
-
-    // `a.b`: a field of an instance (the fact says which), or a struct step
-    // appended to the place the object reads.
-    fn memberExpr(c: LC, f: Fact, obj: AExpr) -> Expr {
-        return match f {
-            .FOp(op: o) :> Expr.Prim(o, [lowerExpr(c, obj)])
-            .FField(decl: d, inst: i, idx: x) :> Expr.Read(Place.Cell(d, instOf(c, i), [{ owner: d, idx: x }]))
-            .FStruct(owner: o, idx: x) :> stepInto(lowerExpr(c, obj), { owner: o, idx: x })
-            .FLocal(sym: s) :> missing()
-            .FInst(decl: d) :> missing()
-            .FFn(sym: s) :> missing()
-            .FVariant(enumSym: s) :> missing()
-            .FLit(lit: l) :> missing()
-            .FStructOf(ty: t) :> missing()
-            .FWrite(w: w) :> missing()
-            .FSpread(ws: ws) :> missing()
-            .FReset(w: w) :> missing()
-            .FAssignLocal(sym: s) :> missing()
-            .FBind(sym: s) :> missing()
-            .FParam(sym: s) :> missing()
-            .FGiven(sym: s) :> missing()
-            .FUse(decl: d) :> missing()
-            .FEach(bind: b) :> missing()
-            .FSlot :> missing()
-            .FHtml :> missing()
-            .FAttr(k: a) :> missing()
-            .FNone :> missing()
+            .NLength :> Expr.Prim(PrimOp.Length, [lowerExpr(c, obj)])
+            .NField(decl: d, inst: i, idx: x) :> cellRead(c, d, instOf(c, i), [{ owner: d, idx: x }])
+            .NStruct(owner: o, idx: x) :> stepInto(lowerExpr(c, obj), { owner: o, idx: x })
+            .NLocal(sym: s) :> missing()
+            .NInst(decl: d) :> missing()
+            .NFn(sym: s) :> missing()
+            not :> missing()
         }
     }
 
@@ -249,6 +448,9 @@ ${
             .StructOf(ty: t) :> missing()
             .Handle(inst: i) :> missing()
             .InitOf(decl: d) :> missing()
+            .Host(call: x) :> missing()
+            .Lambda(params: x) :> missing()
+            .SeqCall(op: x) :> missing()
         }
     }
 
@@ -259,31 +461,16 @@ ${
         }
     }
 
-    fn callExpr(c: LC, callee: AExpr, args: AExpr[]) -> Expr {
-        const f: Fact = factOf(c.t, callee.nid)
+    // A call of a named function (the callee's fact names it).
+    fn callExpr(c: LC, f: NameFact | not, args: AExpr[]) -> Expr {
         return match f {
-            .FFn(sym: s) :> Expr.Call(s, lowerExprs(c, args))
-            .FLocal(sym: s) :> missing()
-            .FField(decl: d) :> missing()
-            .FInst(decl: d) :> missing()
-            .FStruct(owner: o) :> missing()
-            .FVariant(enumSym: s) :> missing()
-            .FLit(lit: l) :> missing()
-            .FOp(op: o) :> missing()
-            .FStructOf(ty: t) :> missing()
-            .FWrite(w: w) :> missing()
-            .FSpread(ws: ws) :> missing()
-            .FReset(w: w) :> missing()
-            .FAssignLocal(sym: s) :> missing()
-            .FBind(sym: s) :> missing()
-            .FParam(sym: s) :> missing()
-            .FGiven(sym: s) :> missing()
-            .FUse(decl: d) :> missing()
-            .FEach(bind: b) :> missing()
-            .FSlot :> missing()
-            .FHtml :> missing()
-            .FAttr(k: a) :> missing()
-            .FNone :> missing()
+            .NFn(sym: s) :> Expr.Call(s, lowerExprs(c, args))
+            .NLocal(sym: s) :> missing()
+            .NField(decl: d) :> missing()
+            .NInst(decl: d) :> missing()
+            .NStruct(owner: o) :> missing()
+            .NLength :> missing()
+            not :> missing()
         }
     }
 
@@ -293,36 +480,6 @@ ${
         const fArm: MatchArm = { pat: Pattern.PLit(Literal.Bool(false)), body: no }
         return Expr.Match(test, [tArm, fArm])
     }
-
-    // An object literal → a struct value in DECLARED field order (analyze's
-    // `order`: the prop index of each declared field). L19.
-    fn structExpr(c: LC, f: Fact, ps: AProp[]) -> Expr {
-        return match f {
-            .FStructOf(ty: t, order: order) :> Expr.StructOf(t, orderedProps(c, ps, order))
-            .FLocal(sym: s) :> missing()
-            .FField(decl: d) :> missing()
-            .FInst(decl: d) :> missing()
-            .FStruct(owner: o) :> missing()
-            .FFn(sym: s) :> missing()
-            .FVariant(enumSym: s) :> missing()
-            .FLit(lit: l) :> missing()
-            .FOp(op: o) :> missing()
-            .FWrite(w: w) :> missing()
-            .FSpread(ws: ws) :> missing()
-            .FReset(w: w) :> missing()
-            .FAssignLocal(sym: s) :> missing()
-            .FBind(sym: s) :> missing()
-            .FParam(sym: s) :> missing()
-            .FGiven(sym: s) :> missing()
-            .FUse(decl: d) :> missing()
-            .FEach(bind: b) :> missing()
-            .FSlot :> missing()
-            .FHtml :> missing()
-            .FAttr(k: a) :> missing()
-            .FNone :> missing()
-        }
-    }
-
     fn orderedProps(c: LC, ps: AProp[], order: int[]) -> Expr[] {
         let out: Expr[] = []
         for (const j of order) {
@@ -377,103 +534,59 @@ ${
     }
 
     fn letStmt(c: LC, s: AStmt, init: AExpr) -> Stmt[] {
-        const f: Fact = factOf(c.t, s.nid)
-        const sym: Sym | not = bindOf(f)
+        const sym: Sym | not = letSym(bindFact(c.t.binds, s.nid))
         if (sym is not) return []
         return [Stmt.Let(sym, lowerExpr(c, init))]
     }
 
-    fn bindOf(f: Fact) -> Sym | not {
+    fn letSym(f: BindFact | not) -> Sym | not {
         return match f {
-            .FBind(sym: s) :> s
-            .FParam(sym: x) :> not
-            .FLocal(sym: s) :> not
-            .FField(decl: d) :> not
-            .FInst(decl: d) :> not
-            .FStruct(owner: o) :> not
-            .FFn(sym: s) :> not
-            .FVariant(enumSym: s) :> not
-            .FLit(lit: l) :> not
-            .FOp(op: o) :> not
-            .FStructOf(ty: t) :> not
-            .FWrite(w: w) :> not
-            .FSpread(ws: ws) :> not
-            .FReset(w: w) :> not
-            .FAssignLocal(sym: s) :> not
-            .FGiven(sym: s) :> not
-            .FUse(decl: d) :> not
-            .FEach(bind: b) :> not
-            .FSlot :> not
-            .FHtml :> not
-            .FAttr(k: a) :> not
-            .FNone :> not
+            .BBind(sym: s) :> s
+            .BParam(sym: x) :> not
+            .BGiven(sym: x) :> not
+            not :> not
         }
     }
 
     // L11: `given c = @h :> { … }` → Let c = Handle(h); If(IsSome(c), { … }).
     fn givenStmts(c: LC, s: AStmt, body: ABlock) -> Stmt[] {
-        const f: Fact = factOf(c.t, s.nid)
+        const f: BindFact | not = bindFact(c.t.binds, s.nid)
         return match f {
-            .FGiven(sym: sym, inst: i) :> [
+            .BGiven(sym: sym, inst: i) :> [
                 Stmt.Let(sym, Expr.Handle(i)),
                 Stmt.If(Expr.Prim(PrimOp.IsSome, [Expr.Local(sym)]), lowerBlock(c, body), not),
             ]
-            .FLocal(sym: x) :> []
-            .FField(decl: d) :> []
-            .FInst(decl: d) :> []
-            .FStruct(owner: o) :> []
-            .FFn(sym: x) :> []
-            .FVariant(enumSym: x) :> []
-            .FLit(lit: l) :> []
-            .FOp(op: o) :> []
-            .FStructOf(ty: t) :> []
-            .FWrite(w: w) :> []
-            .FSpread(ws: ws) :> []
-            .FReset(w: w) :> []
-            .FAssignLocal(sym: x) :> []
-            .FBind(sym: x) :> []
-            .FParam(sym: x) :> []
-            .FUse(decl: d) :> []
-            .FEach(bind: b) :> []
-            .FSlot :> []
-            .FHtml :> []
-            .FAttr(k: a) :> []
-            .FNone :> []
+            .BBind(sym: x) :> []
+            .BParam(sym: x) :> []
+            not :> []
         }
     }
 
     // An expression in statement position: a classified write, a local
     // rebinding, a reset, or an evaluated call.
     fn exprStmt(c: LC, e: AExpr) -> Stmt[] {
-        const f: Fact = factOf(c.t, e.nid)
+        const f: EffectFact | not = effectFact(c.t.effects, e.nid)
         const k: AExprK = e.k
         const value: AExpr | not = assignedValue(k)
         return match f {
-            .FWrite(w: w) :> writeStmt(c, w, value)
-            .FSpread(ws: ws) :> spreadStmts(c, ws, value)
-            .FReset(w: w, decl: d, idx: i) :> resetStmt(c, w, d, i)
-            .FAssignLocal(sym: s) :> assignLocal(c, s, value)
-            .FLocal(sym: s) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FField(decl: d) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FInst(decl: d) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FStruct(owner: o) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FFn(sym: s) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FVariant(enumSym: s) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FLit(lit: l) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FOp(op: o) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FStructOf(ty: t) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FBind(sym: s) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FParam(sym: s) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FGiven(sym: s) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FUse(decl: d) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FEach(bind: b) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FSlot :> [Stmt.Eval(lowerExpr(c, e))]
-            .FHtml :> [Stmt.Eval(lowerExpr(c, e))]
-            .FAttr(k: a) :> [Stmt.Eval(lowerExpr(c, e))]
-            .FNone :> [Stmt.Eval(lowerExpr(c, e))]
+            .EWrite(w: w) :> writeStmt(c, w, value)
+            .ESpread(ws: ws, inst: si, snap: sn, fields: sf) :> spreadStmts(c, ws, si, sn, sf, value)
+            .EReset(w: w, decl: d, idx: i) :> resetStmt(c, w, d, i)
+            .EAssignLocal(sym: s) :> assignLocal(c, s, value)
+            .EEdits(w: w, elems: es, tmps: ts, snap: sn) :> editStmts(c, w, es, ts, sn)
+            .ERemove(w: w) :> [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, Expr.Lit(Literal.Int(1)), w.check)]
+            .EElemAt(cap: cap, inst: i, index: ix, path: path) :> elemAtStmt(c, cap, i, ix, path, value)
+            not :> [Stmt.Eval(lowerExpr(c, e))]
         }
     }
 
+    // s444 — `@xs[i].f = v` → Write(cap, inst, ElemAt(i, path), v): the index
+    // and the value are lowered here; the element field's contract was judged
+    // by analyze (dpa-052 Q3) and is re-checked in Core (check.scrml C3).
+    fn elemAtStmt(c: LC, cap: Sym, i: InstRef, ix: AExpr, path: FieldRef[], value: AExpr | not) -> Stmt[] {
+        if (value is not) return []
+        return [Stmt.Write(cap, instOf(c, i), EditKind.ElemAt(lowerExpr(c, ix), path), lowerExpr(c, value), Check.Static)]
+    }
     // The value a write stores: an assignment's right side, or the element of
     // an edit method call (`@x.push(v)`).
     fn assignedValue(k: AExprK) -> AExpr | not {
@@ -487,6 +600,7 @@ ${
             .Str(v: s) :> not
             .Bool(v: b) :> not
             .NotLit :> not
+            .Recovered :> not
             .Variant(name: n) :> not
             .Member(obj: o) :> not
             .Unary(op: o) :> not
@@ -494,6 +608,9 @@ ${
             .Ternary(test: t) :> not
             .ArrayLit(elems: es) :> not
             .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
         }
     }
 
@@ -507,27 +624,162 @@ ${
         return [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, lowerExpr(c, value), w.check)]
     }
 
+    // s442 / r1 F5 F6 — a recognized sequence shape (§66.11.2): `@x = [...@x, a, b]`
+    // is the end-appends of `a` then `b` (the same edits as `@x.push(a);
+    // @x.push(b)`); `@x = [a, b, ...@x]` the front-prepends that leave the
+    // result reading `[a, b, …]`. The array literal is ONE value: every new
+    // element is evaluated, LEFT TO RIGHT, into its local (analyze minted
+    // `tmps`) before any write, so no element sees another's edit (`at:
+    // @x.length` twice reads the same length). Two or more writes form one
+    // Commit (all-or-nothing, batched); one element needs no local — its value
+    // is evaluated before its own single write.
+    // r2 (RULED S442, "sequence spreads use one snapshot"): every `@x` read
+    // inside the elements reads the value from BEFORE the statement — the one
+    // snapshot, a Let emitted only when some element reads it (as the struct
+    // spread's, S440). The edit itself is still the classified append /
+    // prepend onto the target (a write a called function made to `@x` while
+    // the elements were evaluated survives, as a struct spread keeps a write
+    // to a field it does not override).
+    fn editStmts(c: LC, w: WriteFact, elems: AExpr[], tmps: Sym[], sn: SeqSnap) -> Stmt[] {
+        const target: InstRef = instOf(c, w.inst)
+        const place: FieldRef[] = [{ owner: sn.decl, idx: sn.idx }]
+        const sc: LC = { t: c.t, file: c.file, subst: c.subst, snap: { decl: sn.decl, inst: target, path: place, whole: sn.local, fields: [] } }
+        let values: Expr[] = []
+        for (const x of elems) { values = values.concat([lowerExpr(sc, x)]) }
+        let pre: Stmt[] = []
+        if (anyReads(values, sn.local)) pre = [Stmt.Let(sn.local, Expr.Read(Place.Cell(sn.decl, target, place)))]
+        if (values.length == 1) return pre.concat([Stmt.Write(w.cap, target, w.edit, values[0], w.check)])
+        let lets: Stmt[] = pre
+        let k = 0
+        for (const v of values) {
+            lets = lets.concat([Stmt.Let(tmps[k], v)])
+            k = k + 1
+        }
+        const prepend: boolean = w.edit == EditKind.Prepend
+        let writes: Stmt[] = []
+        if (prepend) {
+            let j: int = tmps.length - 1
+            while (j >= 0) {
+                writes = writes.concat([Stmt.Write(w.cap, target, w.edit, Expr.Local(tmps[j]), w.check)])
+                j = j - 1
+            }
+        } else {
+            for (const t of tmps) {
+                writes = writes.concat([Stmt.Write(w.cap, target, w.edit, Expr.Local(t), w.check)])
+            }
+        }
+        const edit: Stmt = Stmt.Commit(writes)
+        return lets.concat([edit])
+    }
+
     fn assignLocal(c: LC, s: Sym, value: AExpr | not) -> Stmt[] {
         if (value is not) return []
         return [Stmt.Assign(s, lowerExpr(c, value))]
     }
 
-    // O58 (b): `@x = { ...@x, f: v }` → one FieldAt Write per override.
-    fn spreadStmts(c: LC, ws: SpreadWrite[], value: AExpr | not) -> Stmt[] {
+    // O58 (b): `@x = { ...@x, f: v }` → one contract-checked Write per override.
+    // The literal is ONE value built from one snapshot (§66.10 item 1), so with
+    // two or more overrides every value is evaluated into its local (analyze
+    // minted `tmp`) before the first write — `{ ...@p, x: @p.y, y: @p.x }`
+    // swaps, as the genuine replace does (§66.11.3 item 1). The writes are ONE
+    // edit: they form a Commit — every override's contract is checked before
+    // any is applied, and a refusal applies none (RULED S440: "Should a spread
+    // write be all-or-nothing on a runtime refusal? Yes."). A lone override
+    // needs neither: its value is evaluated before its own write, and one
+    // checked write is already all-or-nothing.
+    // Every override writes the SAME instance: it is resolved once, into the
+    // local analyze minted (`Let inst = Handle(…)`), and every Write of the
+    // Commit goes through `Narrowed(inst)` — the Commit never re-resolves a
+    // handle between its writes.
+    // STRICT SNAPSHOT (RULED S440): the spread operand `...@x` — the value from
+    // BEFORE the statement — is read ONCE into the local analyze minted (`snap`),
+    // before any override value is evaluated, and every read of `@x` (or under
+    // it) inside the override values reads that local. So a call in one
+    // override that writes `@x` is invisible to the others:
+    // `{ ...@p, x: bump(), y: @p.z }` with bump writing `@p.z = 99` gives y =
+    // the pre-statement z. (bump's own write to a field NOT overridden survives:
+    // the Commit writes only the overridden fields.) The snapshot Let is emitted
+    // only when some override value reads it.
+    fn spreadStmts(c: LC, ws: SpreadWrite[], inst: Sym, snap: Sym, fields: SnapField[], value: AExpr | not) -> Stmt[] {
         if (value is not) return []
         const ps: AProp[] = objectProps(value)
-        let out: Stmt[] = []
+        // `@x = { ...@x }`: no override — the same value; nothing to write
+        if (ws.length == 0) return []
+        const operand: Expr = lowerExpr(c, ps[0].value)
+        const sc: LC = { t: c.t, file: c.file, subst: c.subst, snap: snapOf(operand, snap, fields) }
+        let values: Expr[] = []
+        for (const sw of ws) { values = values.concat([lowerExpr(sc, ps[sw.prop].value)]) }
+        if (ws.length == 1) {
+            const w0: WriteFact = ws[0].w
+            return snapLets(operand, snap, fields, values).concat([Stmt.Write(w0.cap, instOf(c, w0.inst), w0.edit, values[0], w0.check)])
+        }
+        const one: InstRef = InstRef.Narrowed(inst)
+        let lets: Stmt[] = [Stmt.Let(inst, Expr.Handle(instOf(c, ws[0].w.inst)))]
+        // the snapshot reads through the instance local too (one resolution)
+        lets = lets.concat(snapLets(throughInst(operand, one), snap, fields, values))
+        let writes: Stmt[] = []
+        let k = 0
         for (const sw of ws) {
             const w: WriteFact = sw.w
-            out = out.concat([Stmt.Write(w.cap, instOf(c, w.inst), w.edit, lowerExpr(c, ps[sw.prop].value), w.check)])
+            const t: Sym | not = sw.tmp
+            if (t is some) {
+                lets = lets.concat([Stmt.Let(t, values[k])])
+                writes = writes.concat([Stmt.Write(w.cap, one, w.edit, Expr.Local(t), w.check)])
+            }
+            k = k + 1
+        }
+        return lets.concat([Stmt.Commit(writes)])
+    }
+
+    // The snapshot Lets (RULED S440 strict snapshot, narrowed by S440 re-review
+    // N1): ONLY the fields some override value reads lexically, each read once
+    // exactly as that lexical read would have read it (a tracked `.get()` of the
+    // field — so the reactive read set is the lexical one, never wider), and the
+    // whole value only if a value reads the whole `@x`. `operand` is the spread
+    // operand's cell read (already re-addressed through the instance local when
+    // there is a Commit).
+    fn snapLets(operand: Expr, whole: Sym, fields: SnapField[], values: Expr[]) -> Stmt[] {
+        let out: Stmt[] = []
+        if (anyReads(values, whole)) out = [Stmt.Let(whole, operand)]
+        for (const f of fields) {
+            if (anyReads(values, f.local)) out = out.concat([Stmt.Let(f.local, fieldOf(operand, f.ref))])
         }
         return out
+    }
+
+    fn anyReads(values: Expr[], s: Sym) -> boolean {
+        for (const v of values) {
+            if (readsLocal(v, s)) return true
+        }
+        return false
+    }
+
+    // A read of field `r` under the operand's place.
+    fn fieldOf(op: Expr, r: FieldRef) -> Expr {
+        return match op {
+            .Read(place: pl) :> Expr.Read(extendPlace(pl, r))
+            .Lit(lit: x) :> missing()
+            .Local(sym: x) :> missing()
+            .Call(callee: x) :> missing()
+            .Prim(op: x) :> missing()
+            .Match(scrut: x) :> missing()
+            .ArrayOf(elems: x) :> missing()
+            .StructOf(ty: x) :> missing()
+            .Handle(inst: x) :> missing()
+            .InitOf(decl: x) :> missing()
+            .Host(call: x) :> missing()
+            .Lambda(params: x) :> missing()
+            .SeqCall(op: x) :> missing()
+        }
     }
 
     fn objectProps(e: AExpr) -> AProp[] {
         const k: AExprK = e.k
         return match k {
             .ObjectLit(props: ps) :> ps
+            .Spread(e: sx) :> []
+            .Index(obj: ix) :> []
+            .Lambda(params: lp) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -535,6 +787,7 @@ ${
             .Str(v: s) :> []
             .Bool(v: b) :> []
             .NotLit :> []
+            .Recovered :> []
             .Variant(name: n) :> []
             .Member(obj: o) :> []
             .Call(callee: x) :> []
@@ -557,7 +810,7 @@ ${
         if (di is not) return []
         const target: InstRef = instOf(c, w.inst)
         if (!isProgramKind(di.kind)) return [Stmt.Write(w.cap, target, w.edit, Expr.InitOf(d, target, idx), w.check)]
-        const ic: LC = { t: c.t, file: c.file, subst: target }
+        const ic: LC = { t: c.t, file: c.file, subst: target, snap: not }
         const init: Expr | not = lowerValue(ic, di.fields[idx].init)
         if (init is not) return []
         return [Stmt.Write(w.cap, target, w.edit, init, w.check)]
@@ -574,13 +827,6 @@ ${
     // =========================================================================
     // Views.
     // =========================================================================
-    // L13: whitespace-only text that contains a newline is formatting.
-    fn isFormatting(t: string) -> boolean {
-        const s: string = t.trim()
-        if (s != "") return false
-        return t.indexOf("\n") >= 0
-    }
-
     fn lowerNodes(c: LC, ns: ANode[]) -> View[] {
         let out: View[] = []
         for (const n of ns) { out = out.concat(lowerNode(c, n)) }
@@ -597,67 +843,64 @@ ${
         }
     }
 
+    // dpa-045 follow-up 4 (RULED S442; SPEC §4.18.5 "whitespace-only text
+    // between elements is kept exactly too"): a Text node is free-text content
+    // (a code-default body never builds one for its formatting whitespace —
+    // parseCodeBody skips it) or a display-text literal segment — both
+    // verbatim. Only the parser's empty placeholder ("") renders nothing.
     fn textViews(t: string) -> View[] {
-        if (isFormatting(t)) return []
+        if (t == "") return []
         return [View.Text(t)]
     }
 
     fn lowerElem(c: LC, e: AElem) -> View[] {
-        const f: Fact = factOf(c.t, e.nid)
+        const f: ElemFact | not = elemFact(c.t.elems, e.nid)
         return match f {
-            .FHtml :> condWrap(c, e, [View.El(e.tag, htmlAttrs(c, e.attrs), lowerNodes(c, e.kids))])
-            .FUse(decl: d, alias: a) :> condWrap(c, e, [View.Instance(d, constructAttrs(c, e.attrs), lowerNodes(c, e.kids), a)])
-            .FEach(bind: b, handles: hs) :> [eachView(c, e, b, hs)]
-            .FSlot :> [View.Slot]
-            .FLocal(sym: s) :> []
-            .FField(decl: d) :> []
-            .FInst(decl: d) :> []
-            .FStruct(owner: o) :> []
-            .FFn(sym: s) :> []
-            .FVariant(enumSym: s) :> []
-            .FLit(lit: l) :> []
-            .FOp(op: o) :> []
-            .FStructOf(ty: t) :> []
-            .FWrite(w: w) :> []
-            .FSpread(ws: ws) :> []
-            .FReset(w: w) :> []
-            .FAssignLocal(sym: s) :> []
-            .FBind(sym: s) :> []
-            .FParam(sym: s) :> []
-            .FGiven(sym: s) :> []
-            .FAttr(k: a) :> []
-            .FNone :> []
+            .MHtml :> condWrap(c, e, [View.El(e.tag, htmlAttrs(c, e.attrs).concat(noValidate(c, e)), lowerNodes(c, e.kids))])
+            .MUse(decl: d, alias: a) :> condWrap(c, e, [View.Instance(d, constructAttrs(c, e.attrs), lowerNodes(c, e.kids), a)])
+            .MEach(bind: b, handles: hs) :> [eachView(c, e, b, hs)]
+            .MSlot :> [View.Slot]
+            .MStateView(v: v) :> [stateView(c, v)]
+            .MInline(v: v) :> inlineViews(c, v)
+            .MStar(decl: d, inst: i) :> [View.Star(d, instOf(c, i))]
+            not :> []
         }
+    }
+
+    // s444 Phase B (RULED S442 (3): "the compiler adds `novalidate` to any form
+    // carrying lowered attributes") — analyze listed the forms.
+    fn noValidate(c: LC, e: AElem) -> Attr[] {
+        if (c.t.novalidate.indexOf(e.nid) >= 0) return [Attr.Static("novalidate", "")]
+        return []
+    }
+
+    // s442 — `<*x/>` by inlining (analyze's InlineView): the markup, lowered in
+    // place; when it is a declaration's renders for its SHARED instance, its
+    // `.Lexical(0)` means that instance (`subst`, as L4's reset does).
+    fn inlineViews(c: LC, v: InlineView) -> View[] {
+        const s: InstRef | not = v.subst
+        if (s is not) return lowerNodes(c, v.nodes)
+        const ic: LC = { t: c.t, file: c.file, subst: s, snap: not }
+        return lowerNodes(ic, v.nodes)
+    }
+
+    // s442 — `<*f/>` of a graph field (O5 (1i)): a View.Cond with one arm per
+    // state-child body, each shown while the field holds that variant. The
+    // test reads the field (a nullary-variant compare, EqPrim — §45) through
+    // the instance analyze resolved; the bodies are lowered in place.
+    fn stateView(c: LC, v: StateView) -> View {
+        const read: Expr = cellRead(c, v.decl, instOf(c, v.inst), [{ owner: v.decl, idx: v.idx }])
+        let arms: CondArm[] = []
+        for (const a of v.arms) {
+            const test: Expr = Expr.Prim(PrimOp.EqPrim, [read, Expr.Lit(Literal.Variant(v.enumSym, a.variant))])
+            arms = arms.concat([{ test: test, body: lowerNodes(c, a.body) }])
+        }
+        return View.Cond(arms)
     }
 
     fn attrKind(c: LC, a: AAttr) -> AttrKind | not {
-        const f: Fact = factOf(c.t, a.nid)
-        return match f {
-            .FAttr(k: k) :> k
-            .FLocal(sym: s) :> not
-            .FField(decl: d) :> not
-            .FInst(decl: d) :> not
-            .FStruct(owner: o) :> not
-            .FFn(sym: s) :> not
-            .FVariant(enumSym: s) :> not
-            .FLit(lit: l) :> not
-            .FOp(op: o) :> not
-            .FStructOf(ty: t) :> not
-            .FWrite(w: w) :> not
-            .FSpread(ws: ws) :> not
-            .FReset(w: w) :> not
-            .FAssignLocal(sym: s) :> not
-            .FBind(sym: s) :> not
-            .FParam(sym: s) :> not
-            .FGiven(sym: s) :> not
-            .FUse(decl: d) :> not
-            .FEach(bind: b) :> not
-            .FSlot :> not
-            .FHtml :> not
-            .FNone :> not
-        }
+        return attrFact(c.t.attrs, a.nid)
     }
-
     fn isIf(k: AttrKind) -> boolean {
         return match k {
             .AIf :> true
@@ -669,6 +912,7 @@ ${
             .AEachIn :> false
             .AEachKey :> false
             .AEachAs :> false
+            .ABind(kind: k) :> false
         }
     }
 
@@ -706,6 +950,41 @@ ${
             .AEachIn :> []
             .AEachKey :> []
             .AEachAs :> []
+            .ABind(kind: bk, w: w, decl: d, idx: x, sink: sk, vattrs: vs) :> [bindAttr(c, bk, w, d, x, sk)].concat(validatorAttrs(vs))
+        }
+    }
+
+    // s444 Phase B (dpa-058, RULED S442 (2)) — the bound field's validators'
+    // HTML-native attributes (analyze computed them for THIS element).
+    fn validatorAttrs(vs: HtmlAttrPair[]) -> Attr[] {
+        let out: Attr[] = []
+        for (const v of vs) { out = out.concat([Attr.Static(v.name, v.value)]) }
+        return out
+    }
+
+    // s444 — `bind:value=@p` / `bind:checked=@p` → Attr.Bind: the read of the
+    // place (field `idx` of `decl` through the write's instance, then the
+    // write's FieldAt path) and ONE write of the event-value local `sink`
+    // (check.scrml C8 pins the pair to one place).
+    fn bindAttr(c: LC, k: BindKind, w: WriteFact, d: Sym, idx: int, sink: Sym) -> Attr {
+        const inst: InstRef = instOf(c, w.inst)
+        const read: Expr = cellRead(c, d, inst, [{ owner: d, idx: idx }].concat(editPath(w.edit)))
+        return Attr.Bind(k, read, sink, block([Stmt.Write(w.cap, inst, w.edit, Expr.Local(sink), w.check)]))
+    }
+
+    fn editPath(k: EditKind) -> FieldRef[] {
+        return match k {
+            .FieldAt(path: p) :> p
+            .Replace :> []
+            .Append :> []
+            .Prepend :> []
+            .Anywhere :> []
+            .PositionWrite :> []
+            .Transition :> []
+            .RemoveEnd :> []
+            .RemoveFront :> []
+            .RemoveAnywhere :> []
+            .ElemAt(index: x) :> []
         }
     }
 
@@ -782,6 +1061,7 @@ ${
             .AEachIn :> -1
             .AEachKey :> -1
             .AEachAs :> -1
+            .ABind(kind: k) :> -1
         }
     }
 
@@ -816,6 +1096,7 @@ ${
             .AConstruct(field: x) :> 0
             .AAs :> 0
             .AEachAs :> 0
+            .ABind(kind: k) :> 0
         }
     }
 
@@ -845,7 +1126,7 @@ ${
         const k: AItemK = it.k
         return match k {
             .DeclItem(d: d) :> [userSyntax(file, d)]
-            .ProgramItem(p: p) :> [{ nid: p.nid, file: file, renders: programMarkup(p.items), hasRenders: true }]
+            .ProgramItem(p: p) :> [{ nid: p.nid, file: file, renders: programMarkup(p.items), hasRenders: true }].concat(nestedSyntaxes(file, p.items))
             .ImportItem(i: i) :> []
             .TypeItem(t: t) :> []
             .FnItem(f: f) :> []
@@ -858,6 +1139,29 @@ ${
         if (r is not) return { nid: d.nid, file: file, renders: [], hasRenders: false }
         const node: ANode = { nid: -1, span: r.span, k: ANodeK.Elem(r) }
         return { nid: d.nid, file: file, renders: [node], hasRenders: true }
+    }
+
+    // s442: the declarations written inside `<program>` (a nested user
+    // declaration's renders is its own; a program cell's is none — syntaxOf
+    // is keyed by the declaration's nid, so a cell's entry is never asked for).
+    fn nestedSyntaxes(file: string, items: AItem[]) -> DeclSyntax[] {
+        let out: DeclSyntax[] = []
+        for (const it of items) {
+            const k: AItemK = it.k
+            out = out.concat(nestedDeclSyntax(file, k))
+        }
+        return out
+    }
+
+    fn nestedDeclSyntax(file: string, k: AItemK) -> DeclSyntax[] {
+        return match k {
+            .DeclItem(d: d) :> [userSyntax(file, d)]
+            .MarkupItem(n: n) :> []
+            .ImportItem(i: i) :> []
+            .TypeItem(t: t) :> []
+            .FnItem(f: f) :> []
+            .ProgramItem(p: p) :> []
+        }
     }
 
     fn programMarkup(items: AItem[]) -> ANode[] {
@@ -895,7 +1199,7 @@ ${
     }
 
     fn lowerDecl(t: Tables, ss: DeclSyntax[], d: DeclInfo) -> Decl {
-        const c: LC = { t: t, file: d.file, subst: not }
+        const c: LC = { t: t, file: d.file, subst: not, snap: not }
         let fields: Field[] = []
         for (const f of d.fields) { fields = fields.concat([lowerField(c, f)]) }
         let renders: View[] | not = not
@@ -935,39 +1239,20 @@ ${
         }
     }
 
-    fn paramOf(f: Fact) -> Param[] {
+    fn paramOf(f: BindFact | not) -> Param[] {
         return match f {
-            .FParam(sym: s, ty: ty) :> [{ sym: s, ty: ty }]
-            .FBind(sym: s) :> []
-            .FLocal(sym: s) :> []
-            .FField(decl: d) :> []
-            .FInst(decl: d) :> []
-            .FStruct(owner: o) :> []
-            .FFn(sym: s) :> []
-            .FVariant(enumSym: s) :> []
-            .FLit(lit: l) :> []
-            .FOp(op: o) :> []
-            .FStructOf(ty: t) :> []
-            .FWrite(w: w) :> []
-            .FSpread(ws: ws) :> []
-            .FReset(w: w) :> []
-            .FAssignLocal(sym: s) :> []
-            .FGiven(sym: s) :> []
-            .FUse(decl: d) :> []
-            .FEach(bind: b) :> []
-            .FSlot :> []
-            .FHtml :> []
-            .FAttr(k: a) :> []
-            .FNone :> []
+            .BParam(sym: s, ty: ty) :> [{ sym: s, ty: ty }]
+            .BBind(sym: s) :> []
+            .BGiven(sym: s) :> []
+            not :> []
         }
     }
-
     fn lowerFn(t: Tables, fs: FnSyntax[], info: FnInfo) -> Fn | not {
         for (const s of fs) {
             if (s.nid == info.nid) {
-                const c: LC = { t: t, file: info.file, subst: not }
+                const c: LC = { t: t, file: info.file, subst: not, snap: not }
                 let params: Param[] = []
-                for (const p of s.f.params) { params = params.concat(paramOf(factOf(t, p.nid))) }
+                for (const p of s.f.params) { params = params.concat(paramOf(bindFact(t.binds, p.nid))) }
                 return { sym: info.sym, params: params, body: lowerBlock(c, s.f.body), pure: info.pure }
             }
         }

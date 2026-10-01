@@ -1,6 +1,172 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-09-27T18:00:00Z  commit: 9941a504c
+# updated: 2026-10-01T14:31:06Z  commit: 464c9ab4d
+# ⛑ **S445 STAMP — `5b1d0dab0` -> `464c9ab4d`. 20 COMMITS (S443 wrap #1187, S444 #1182-#1202, S445 #1192/#1194/#1196/#1198),
+# incremental refresh, branch `maps/s444-wrap`.** MAP-STAMP RULE at write time: `git log --oneline 5b1d0dab0..464c9ab4d` -> 20;
+# `git merge-base HEAD origin/main` == `origin/main` == `464c9ab4d` (no fork). (The dispatch brief named `108ca89be` as the stamp;
+# line 3 actually read `5b1d0dab0` — the S444b refresh rode in #1187 — so the window starts there.) Source-relevant:
+# #1196 (§40.8 S441: `<program>`/`<page>`/`<channel>` bodies are CODE — catch-all body-top lift, `"…"` declared display text,
+# `E-STMT-NO-EFFECT`, `E-INTERNAL-BODY-TOP-DROPPED`; `E-WRITE-NOT-IN-LOGIC-CONTEXT` RETIRED; `default-logic-exemption.ts` +
+# `unit-cc-exemption-list.json` DELETED; NEW `native-parser/body-top-prose.js` + `body-top-coverage.js`), #1194 (route
+# inference: app root relative to the BUILD ROOT — `resolveBuildRoot` / `makeRouteClassifier`; `W-AUTH-REQUIRED-NOT-INHERITED`),
+# #1198 (§14.8.9 protect egress round 6 — RETURNING / every `?{}` terminator / spaced star / undeclared tables /
+# opaque callbacks / `arguments` / global stores / descriptor Symbol keys / bare digests; CPS `ServerError` message fixed
+# under `protect=`; prod `Bun.serve` `error:` handler), #1200 (`--emit-per-route`: chunk manifest + role bootstrap moved
+# from inline `<script>` to ONE same-origin `scrml-chunks.<hash>.js`), #1191 (`<request>` `deps=`, `refetch()` statements,
+# client-async bodies, re-fire loop; `E-LIFECYCLE-022` now FIRES), #1184 (`E-ASYNC-FN-ESCAPES-AS-VALUE` wording), #1182
+# (CI runs `slice-m4/`; live-PG hook timeouts 120 s). BOOTSTRAP: #1189 (typer r8), #1190 + #1195 (dpa-045 plain-markup
+# text grammar, `//` comment only after whitespace, display-text escapes), #1202 (Core additions: `Attr.Bind`, `Expr.Host`
+# (`Date.now`), `Expr.Lambda`, `Expr.SeqCall`, `View.Star`, removals, `ElemAt`; dpa-058 validators; fail-closed refusal of
+# unimplemented elements). SPEC-only: #1186/#1193 (§6.7.7.1 abort reads, §6.7.7.2 `<request cache>`, §6.14 `persist=`),
+# #1199 (§6.14.4 prepaint / `hold=@cell`). #1183 = example 23 helper routes removed. Rest: gaps / dpa-queue / wrap.
+# ⛑ **FIGURES RE-EXECUTED AT `464c9ab4d`** (`bun scripts/facts.ts --check` PASS): version **0.8.0** · `compiler/src`
+# **277,537 lines / 216 files** (+2,521 lines, -1 file) · test files **1,546** (+11) · `compiler/SPEC.md` **41,760** lines
+# (+546) · conformance **1200** cases (+49); `bun conformance/run.ts` -> **1192/1200 pass + 8 xfail** · §34 census
+# (`bun scripts/s34-census.ts`) **863 rows** (`SPEC.md:21341..22288`): PINNED 374 · IMPL-SITES 314 · DECLARED-AHEAD 32 ·
+# RUNTIME-SURFACED 3 · FALSE-CLAIM 106 · STRUCK 34 · unique `^| [EWIH]-` codes **817 -> 831** (+14, removed none) · known-gaps
+# open HIGH 215 -> **222**, MED 420 -> 433, LOW 190 -> 209, Nominal 7.
+# ⛑ **BOOTSTRAP RE-RUN AT `464c9ab4d`:** lint-no-default-arm 58 files / 0 violations · `slice-m1/` 73/73 · lowered `slice-m1/`
+# 73/73 · `slice-m2/` **448/448** (7 files) · `slice-m3/` 60/60 (5 files) · `slice-m4/` **403 pass + 1 todo / 404** (16 files;
+# NOW IN CI, `ci.yml:157`) · CG footprint runtime 18/0, codes-only 10/0, crashed 0, not-yet 697, front-end 475 · CSS
+# footprint runtime 335/0, codes-only 280/0, CSS half 38/38.
+# ⚑ `file:line` citations in S445 sections are grep-derived at `464c9ab4d`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S444b HEADER (stamp `5b1d0dab0`), CARRIED FOR PROVENANCE. ━━━━━━━
+# ⛑ **S444b STAMP — `108ca89be` -> `5b1d0dab0`. 2 COMMITS (#1180, #1181), incremental refresh.** MAP-STAMP RULE at
+# write time: `git log --oneline 108ca89be..5b1d0dab0` -> 2; HEAD `5b1d0dab0` == `origin/main`. Source-relevant: #1180 (S443
+# example 23 end-to-end — login/register call `session.set("userId", …)`, pages read `session.userId`, logout calls
+# `session.destroy()`, `<program … loginRedirect="/auth/login">`, driver BOL/POD/token reads guarded by `assignedDriverFor`,
+# `dispatch.db` ships pre-seeded (the `on mount { runSeeds() }` is gone); `stdlib/auth/templates/login.scrml` now calls
+# `session.set("userId", row.id)`; trucking smoke baseline drops `I-AUTH-REDIRECT-UNRESOLVED` / `W-AUTH-LOGIN-MISSING` /
+# `W-CG-CHUNK-PREFETCH-UNRESOLVED`, `W-TYPE-031-UNPROVEN` 321 -> 287). #1181 is the S444 map refresh itself.
+# ⛑ **`compiler/src` UNCHANGED over the window** (`git diff --stat 108ca89be..5b1d0dab0 -- compiler/src` empty) -> every S444
+# figure below stands; `bun scripts/facts.ts --check` PASS at `5b1d0dab0`. Known-gaps HIGH open 214 -> 215.
+# ⛑ **S444b ADDS S443 LOCI the reviews found missing** (grep-derived at `5b1d0dab0`; locate by SYMBOL after later commits):
+# route-inference Step 8 table + `appRoot` / `rootCandidates` / `findRoutePrefix` (matches on the ABSOLUTE path) ->
+# auth.map.md; `detectNestedProgramAuth`, E-PROGRAM-002 -> auth / error maps; `protect-flow.ts`, `emit-worker.ts`, worker
+# bundle writes in `api.js`, the §47.13 static-serve allowlist in `build.js` `generateServerEntry` -> structure / build maps.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S444 HEADER (stamp `108ca89be`), CARRIED FOR PROVENANCE. ━━━━━━━
+# ⛑ **S444 STAMP — `cf62b415` -> `108ca89be`. 37 COMMITS (#1141-#1179), SESSIONS S441 / S442 / S443 (incremental
+# refresh, branch `maps/s444-refresh`).** MAP-STAMP RULE at write time: `git log --oneline cf62b415..108ca89be` -> 37
+# commits; `git merge-base HEAD origin/main` == `origin/main` == `108ca89be` (no fork). Source-relevant: #1161 (CSRF
+# `auto` by default under `auth=`; compose route gated; WebSocket Origin check), #1162 (static serving is a client-asset
+# ALLOWLIST, §47.13), #1163 (async fn escaping as a value / event control after an await, S440 F4/F5), #1171
+# (protected-column egress `E-PROTECT-006`, §14.8.9), #1173 (`<page auth="required">` gates its page;
+# `E-PROGRAM-NESTED-AUTH`), #1177 (two top-level `<program>`s in one file = `E-PROGRAM-002`), #1174 (worker bundles
+# written + served, dpa-056 D1/D2), #1172 (user enum named like a built-in error type), #1150 (E-ERROR-002 handler
+# conformance), #1147 (bare `fail .Variant`), #1158 (`@cell = serverFn()` awaited in place), #1160 (self-closed non-void
+# element gets an end tag), #1153 (W-LINT-007/013 inline block handlers), #1152 (stdlib http/cron doc-comment leak),
+# #1155 (example 23 token guards). BOOTSTRAP: #1149 (CSS + `<theme>` T3 — `css.scrml`, `css-ingest.scrml`, CSS sub-seam),
+# #1151/#1157/#1159/#1167/#1169 (typer rounds), #1164 (the §66.19 worked programs — `slice-m4/`). SPEC-only: #1156
+# (tape grow/shrink, §66.x), #1170 (§4.18 dpa-045). The rest are docs / wrap / dpa-queue / gaps / ledger / @generated.
+# ⛑ **FIGURES RE-EXECUTED AT `108ca89be`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **275,016 lines / 217 files** per FACTS (+6,622 lines, +4 files:
+# `codegen/js-async-analysis.ts`, `codegen/protect-flow.ts`, `static-serve-policy.js`, `static-serve-policy-emitted.js`)
+# · test files **1,535** (+20) · `compiler/SPEC.md` **41,214** lines (+551) · conformance **1151** cases (+97) · §34
+# catalog **849** rows (+10), range `20832..21764`. `bun conformance/run.ts` (impl#1) -> **1144/1151 pass + 7 xfail**.
+# Census: PINNED 370 · IMPL-SITES 314 · DECLARED-AHEAD 21 · RUNTIME-SURFACED 3 · FALSE-CLAIM 107 · STRUCK 34.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **952 -> 960** · W **183 -> 186** · I 10 · H 2 FLAT ·
+# unique codes **807 -> 817**. **ADDED = {`E-ASYNC-CALL-PROMISE-METHOD`, `E-ASYNC-FN-ESCAPES-AS-VALUE`,
+# `E-ASYNC-HANDLER-UNANALYZABLE`, `E-EVENT-CONTROL-AFTER-AWAIT`, `E-PROGRAM-002`, `E-PROGRAM-NESTED-AUTH`,
+# `E-PROTECT-006`, `W-AUTH-FILE-CONFLICT`, `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS`, `W-AUTH-REDIRECT-LOOP`} — every one has a
+# live emitter in `compiler/src` (grep-verified); REMOVED = EMPTY.**
+# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `108ca89be` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
+# **58** files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **443/443** (7 files)
+# · `slice-m3/` **60/60** (5 files) · `slice-m4/` **130 pass + 1 todo / 131** (11 files; NOT in the CI gate — see
+# build.map.md) · CG footprint (`--swap CG=…/slice-m3/substitute.js --footprint`) -> runtime **18/0**, codes-only 10/0,
+# crashed 0, not-yet 666, front-end 457 · CSS footprint (`--swap CSS=…/slice-m3/css-substitute.js --footprint`) ->
+# runtime 320/0, codes-only 278/0, **CSS half 38/38** (conformance 17 · source 15 · core 6).
+# ⚑ `file:line` citations in S444 sections were grep-derived at `108ca89be`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S440 HEADER (stamp `cf62b415`), CARRIED FOR PROVENANCE. ━━━━━━━
+# ⛑ **S440 STAMP — `fb21983a` -> `cf62b415`. 23 COMMITS (#1117-#1140), SESSIONS S438-tail / S439 / S440 (incremental
+# refresh).** MAP-STAMP RULE at write time: `git log --oneline fb21983a..cf62b415` -> 23 commits; inbound `git merge-base
+# --is-ancestor fb21983a cf62b415` -> 0; outbound `git merge-base --is-ancestor cf62b415 origin/main` -> 0; HEAD `cf62b415`
+# == `origin/main` (`git fetch --dry-run`: main not advanced; no fork). Source-relevant: #1117 (bootstrap M3 typer + scope pass), #1118 (ingest shim + footprint
+# grader + bite matrix), #1122 (analyze facts -> six NodeId-indexed family tables), #1129 (re-land #1109 review fixes +
+# spread all-or-nothing `Stmt.Commit` + strict snapshot + E-BOOTSTRAP-DUP-OVERRIDE), #1125 (E-MW-007/008 refused build
+# writes no dist), #1131 ("~" + 3 sibling rewrites fenced out of literals), #1137 (Date/built-ins in cells; `==` on
+# built-ins), #1139 (nested async helpers vs sync-callback guards, SECURITY). SPEC-only: #1120 (S439 rulings), #1133
+# (S440 rulings). The rest are wrap / inbox / dpa-queue / gaps / review / @generated bookkeeping.
+# ⛑ **FIGURES RE-EXECUTED AT `cf62b415`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **268,394 lines / 213 files** per FACTS (+1,450 lines, +2 files:
+# `codegen/local-async-fns.ts`, `commands/refusal-gate.js`) · test files **1,515** (+6) · `compiler/SPEC.md` **40,663**
+# lines (+264) · conformance **1054** cases (+7) · §34 catalog **839** rows (+4), range `20443..21365`.
+# `bun conformance/run.ts` (impl#1) -> **1047/1054 pass + 7 xfail**.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **948 -> 952** · W 183 · I 10 · H 2 FLAT · unique codes
+# **803 -> 807**. **ADDED = {`E-CALL-ARITY`, `E-EACH-NOT-SEQUENCE`, `E-SELECT-OPTION-NOT-VARIANT`,
+# `E-STRUCT-DUPLICATE-KEY`} — all four rows say "Nominal / not yet emitted" (impl pending); REMOVED = EMPTY.**
+# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `cf62b415` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
+# 28 files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **325/325** (6 files) ·
+# `slice-m3/` **24/24** (3 files) · footprint grade (`bun scripts/hybrid.ts --swap CG=compiler/self-host-v2/slice-m3/substitute.js
+# --footprint`) -> runtime **18 pass / 0 fail**, codes-only 10/0, crashed 0, not-yet 579, front-end 447. The S438 CRLF
+# drift-guard failures are gone (the guard is CRLF-safe since #1129, and this clone is LF).
+# ⚑ `file:line` citations in S440 sections were grep-derived at `cf62b415`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S438 HEADER (stamp `fb21983a`), CARRIED FOR PROVENANCE. ━━━━━━━
+# ⛑ **S438 STAMP — `9941a504c` -> `fb21983a`. 9 COMMITS (#1109-#1119), SESSION S438 (incremental refresh, branch
+# `wrap/s438`).** MAP-STAMP RULE at write time: `git log --oneline 9941a504c..fb21983a` -> 9 commits; `git
+# merge-base --is-ancestor 9941a504c fb21983a` -> exit 0 (inbound ancestor check satisfied); HEAD `fb21983a` ==
+# `origin/main` at fetch (no fork this pass). Of the 9 commits, **3 are the PRIOR session's own maps/wrap
+# commits** (`c65f54b4` #1111 maps-refresh-to-9941a504c, `88a75073` #1110 wrap, and the inbox commit `0fc87bf9`
+# #1115 is bookkeeping only) — **6 are source-relevant**: `072741ca` #1109, `98d94e96` #1112, `b7c86323` #1113,
+# `8c55f518` #1114, `afc2308b` #1116, `fb21983a` #1119.
+# ⛑ **FIGURES RE-EXECUTED AT `fb21983a`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat — `package.json` untouched this window) · `compiler/src` **266,944 lines / 211 files**
+# per FACTS (+939 lines, files FLAT vs `9941a504c`'s 266,005/211) · test files **1,509** (+3:
+# `conf-SESSION-8B-DEFERS-TO-PROGRAM.test.js`, `clientjs-import-disk-rebase-gate-eq-write.test.js`,
+# `match-arm-shapes-f12-f14.test.js`, all under `compiler/tests/` — `compiler/self-host-v2/slice-m2` gained 4
+# more `*.test.js` OUTSIDE this count, per FACTS' own stated scope exclusion) · `compiler/SPEC.md` **40,399**
+# lines (+51) · conformance **1047** cases (FLAT) · §34 catalog **835** rows (+3), range `20331..21237`.
+# `bun conformance/run.ts` (impl#1) -> **1040/1047 pass + 7 xfail** — FLAT vs `9941a504c`.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **943 -> 948** · W 183 FLAT · I 10 FLAT · H 2
+# FLAT · unique codes **800 -> 803**. **ADDED = {`E-MATCH-ALT-BINDING`, `E-SCHEMA-012`, `E-SCHEMA-013`}; REMOVED
+# = EMPTY.**
+# ⛑ **WINDOW HEADLINES (verify in source, not here):**
+#   · **#1119** (`g-impl1-match-miscompiles` F12/F13/F14) — a `match` alternation arm (`.A | .B :> r`) is now
+#     recognised at ANY arm position, not only first (`ast-builder.js` `armPatternChainArrowOffset` /
+#     `scanArmPatternAlternate`; `emit-control-flow.ts` Form 0w/0/2 + `armCondition` shared by `emit-logic.ts`);
+#     a NAMED-field payload arm binding 5+ fields is no longer truncated by the old 20-token paren-scan cap
+#     (`scanPastBalancedParens`, and the native-parser mirror `scanPastPayloadParen`); a brace inside a CLOSED
+#     quoted string on the same line no longer mis-scopes a block (`block-splitter.js`
+#     `braceIsQuotedStringContent`, tokenizer-backed, cached per line). A payload-BEARING alternation
+#     (a binding, a named field even when discarded, a nested/literal pattern) now FAILS CLOSED —
+#     **`E-MATCH-ALT-BINDING`** — instead of silently dropping the arm or gluing it onto its neighbor.
+#   · **#1116** (§39.2/§14.8.10 tenant floor) — a `<schema>` raw `CREATE TABLE` head naming a
+#     schema/database-qualified table is rejected (**`E-SCHEMA-012`**); a known-kind head whose name the
+#     compiler cannot read through to a follower is rejected (**`E-SCHEMA-013`**) — both were previously
+#     silent, tenant-isolation-inert gaps (`schema-differ.js` `findRejectedCreateTableHeads`,
+#     `gauntlet-phase1-checks.js` `<schema>` body checks).
+#   · **#1114** (§20.5.1) — route-inference Step 8b (protect= auto-escalation / `<page auth="required">`) no
+#     longer stamps secure session defaults that outrank a unit's OWN `<program>`'s declared session config
+#     (`g-route-inference-8b-session-defaults-outrank-program-declaration`); the session-field resolution order
+#     is unchanged, but Step 8b now leaves its fields undefined unless the unit itself declares them
+#     (`session-config-resolve.ts` `countUnitProgramNodes`, `route-inference.ts`, `emit-server.ts` now reads the
+#     ONE resolver instead of `authMiddlewareEntry.sessionExpiry` directly).
+#   · **#1112** (§20.5.1) — `E-MW-008`'s program-site count no longer counts a `kind="tool"` file as a
+#     competing web application (`g-mw008-counts-headless-tool-programs`; `codegen/index.ts`
+#     `_collectProgramSites` now asks the emit dispatch's own `isToolProgram` per FILE, not per node).
+#   · **#1113** (#1045 F1) — client JS relative-import re-basing now applied in BOTH the gate and the write
+#     phase (`compiler/tests/integration/clientjs-import-disk-rebase-gate-eq-write.test.js`, NEW).
+#   · **#1109** (dpa-051 bootstrap slice M2, `compiler/self-host-v2/`) — the front end (`parse.scrml` 1641L,
+#     `lower.scrml` 993L NEW) proves the lowered Core EQUALS M1's hand-built oracle (Fork-A proof); `ast.scrml`
+#     (175L NEW) is the parser's own AST; `core/check/print/lex/walk/measure.scrml` and
+#     `slice-m1/runtime/runtime.js` all took matching edits; `slice-m2/` (16 files, harness + fixtures +
+#     4 `*.test.js`) is the M2 test bed; CI `gate`'s bootstrap step now also runs `slice-m2/` and re-runs the M1
+#     suite over LOWERED programs (`SLICE_CORE=lowered`).
+# ⚑ **RE-RUN AT THIS SHA ON THIS (WINDOWS) CLONE:** `bun test ./compiler/self-host-v2/slice-m1/` -> 73/73 pass;
+# `SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/` -> 73/73 pass; `bun scripts/lint-no-default-arm.js`
+# -> 26 files, 0 violations; `bun test ./compiler/self-host-v2/slice-m2/` -> **72/74 pass, 2 FAIL** — both in
+# `parse.test.js`'s "the §66.19 sources are the SPEC's code blocks, verbatim (drift guard)" (`counter.scrml`,
+# `lib/dropdown.scrml`+`app.scrml`), comparing a `\r\n`-checked-out fixture against a bare-`\n` SPEC extract —
+# a WINDOWS-CRLF-CHECKOUT artifact of this clone (same class as the known `scrml-regen-scripts-crlf-broken-on-windows`
+# pattern), NOT a landed defect and NOT reproduced by this session; see test.map.md. Not filed as a new gap (no
+# code moved to cause it; a checkout-line-ending property, orthogonal to #1109's content).
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`). Do not reformat it.
+# ⚑ `file:line` citations in this S438 block were grep-derived at `fb21983a`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S437b HEADER (stamp `9941a504c`, 2026-09-27), CARRIED FOR PROVENANCE. ITS FIGURES ARE `9941a504c`-ERA. ━━━━━━━
 # ⛑ **S437b STAMP — `d02738767` -> `9941a504c`. 7 COMMITS (#1102-#1108), SAME SESSION (S437, second wrap-6c pass).**
 # MAP-STAMP RULE at write time: `git fetch origin && git merge --ff-only origin/main` -> HEAD **`9941a504c`** (== `origin/main` at fetch;
 # `origin/main` then advanced to `072741ca9` mid-pass — see ⏳);
@@ -303,6 +469,117 @@
 # second call site in `collectFunctions`. No external dependency changed: `package.json` is untouched
 # in this window.
 #
+
+## S445 — DEPENDENCY DELTA (`5b1d0dab0..464c9ab4d`, from import statements at `464c9ab4d`)
+- No `package.json` change in-window (runtime / dev deps unchanged).
+- NEW edge `compiler/src/ast-builder.js` → `../native-parser/body-top-prose.js` (`segmentBodyTopItems`) and
+  `../native-parser/body-top-coverage.js` (`declExtent`, `liveStmtNothingReason`, `liveLabelIsTargeted`).
+- NEW edge `compiler/src/block-splitter.js` → `../native-parser/body-top-prose.js` (`bodyTopQuoteStartsStatement`,
+  `scanBodyTopLiteralClose`, `scanBodyTopTemplateClose`).
+- `compiler/native-parser/parse-markup.js` → `body-top-prose.js`, `body-top-coverage.js`.
+- `compiler/src/codegen/index.ts` → `emit-html.ts` now also imports `buildChunksBootJs`.
+- REMOVED: `default-logic-exemption.ts` and its single consumer edge (the row below is SUPERSEDED).
+
+## S444 — DEPENDENCY DELTA (`cf62b415..108ca89be`, from import statements at `108ca89be`)
+
+**External:** `package.json` — `homepage` now `https://scrml.dev`; keywords `typescript` and `no-build` removed.
+Dependencies unchanged (0.8.0). `acorn` gains two new importers (below). `puppeteer` (existing dep) is now also
+used by `compiler/self-host-v2/slice-m3/css-oracle.js`.
+
+### Internal edges added in `compiler/src`
+- `static-serve-policy.js` (NEW) → `static-serve-policy-emitted.js` (NEW); ← `api.js`, `commands/build.js`, `commands/dev.js`, `codegen/emit-server.ts`.
+- `codegen/js-async-analysis.ts` (NEW) → `acorn`, `codegen/async-combinators.ts`, `codegen/local-async-fns.ts` (type);
+  ← `emit-client.ts`, `emit-control-flow.ts`, `emit-each.ts`, `emit-event-wiring.ts`, `emit-lift.js`, `emit-library-shared.ts`,
+  `emit-logic.ts`, `emit-reactive-wiring.ts`, `local-async-fns.ts`.
+- `codegen/protect-flow.ts` (NEW) → `acorn`, `codegen/errors.ts` (`CGError`); ← `api.js` (`takeProtectRegistry`,
+  `analyzeCompileProtectFlow`), `codegen/emit-server.ts`, `codegen/protect-egress.ts`, `codegen/rewrite.ts`.
+- `api.js` → `type-system.ts` (`BUILTIN_TYPES` newly imported), `codegen/emit-worker.ts` (`workerBundleFilename`,
+  `workerBundleSuffix`), `codegen/emit-css.ts` (`generateCss`, now picked through the `CSS` seam).
+
+### Internal graph — `compiler/self-host-v2/` additions
+- `css.scrml` (NEW) → `core.scrml` (stylesheet Core types)
+- `css-ingest.scrml` (NEW) → `core.scrml`, `ingest.scrml` (`IVal`, `INode`, field accessors)
+- `slice-m3/css-bundle.scrml` → `core.scrml`, `css.scrml`, `css-ingest.scrml`, `ingest.scrml`, `slice-m3/css.core.scrml`
+- `slice-m3/css-oracle.js` → `compiler/src/api.js` (`compileScrml`), `puppeteer` (dynamic)
+- `slice-m4/harness.js` → `slice-m2/harness.js` (`loadM2`), `slice-m2/lowered.js` (`frontEnd`)
+
+
+## S440 — DEPENDENCY DELTA (`fb21983a..cf62b415`, from import statements at `cf62b415`)
+
+**External:** `package.json` unchanged (0.8.0). No new npm package.
+
+### Internal graph — `compiler/self-host-v2/` (CURRENT, full; supersedes the S438 list below, which mis-stated two edges)
+- `lex.scrml`, `ast.scrml`, `core.scrml`, `js.scrml`, `html.scrml`, `names.scrml` → (no imports)
+- `parse.scrml` → `lex.scrml`, `ast.scrml`
+- `analyze.scrml` → `core.scrml`, `ast.scrml`
+- `lower.scrml` → `core.scrml`, `ast.scrml`, `walk.scrml`, `analyze.scrml` (reads `Tables` / fact lookups)
+- `walk.scrml` → `core.scrml`
+- `check.scrml` → `core.scrml`, `walk.scrml`
+- `measure.scrml` → `core.scrml`, `walk.scrml`
+- `print.scrml` → `core.scrml`, `walk.scrml`, `js.scrml`, `html.scrml`, `names.scrml`
+- `ingest.scrml` (NEW) → `core.scrml`, `walk.scrml`, `measure.scrml`
+- Compile entries (each a `<program>` that imports every module it needs): `slice-m1/bundle.scrml`,
+  `slice-m2/bundle.scrml` (adds lex/parse/analyze/lower), `slice-m3/bundle.scrml` (ingest + check + print).
+- JS harness edges: `slice-m1/harness.js` → `compiler/src/api.js` (`compileScrml`); `slice-m2/harness.js` →
+  `slice-m1/harness.js`; `slice-m1/cores.js` → `slice-m2/{harness,lowered}.js`; `slice-m3/harness.js` →
+  `compiler/src/api.js`; `slice-m3/substitute.js` → `slice-m1/harness.js`; `slice-m3/footprint.test.js` →
+  `scripts/hybrid.ts`; `conformance/adapters/hybrid.ts` → `conformance/adapters/impl1-ts.ts` (`setClientExecutor`, installed from the substitute's `executeClient` via `scripts/hybrid.ts` `clientExecutorOf`).
+- Correction to S438: `slice-m2/compare.js` imports NOTHING (it walks impl#1's plain-object Core shape); `lower.scrml`
+  also imports `walk.scrml` and `analyze.scrml`.
+
+### Internal edges added in `compiler/src`
+- `codegen/local-async-fns.ts` (NEW) ← `emit-library-shared.ts` (`annotateLocalAsyncFns`; wrapped as exported
+  `annotateNestedAsyncHelpers`), `emit-expr.ts`, `emit-logic.ts`, `async-combinators.ts`, `emit-server.ts`, `emit-tool.ts`.
+- `emit-library-shared.ts` NEW exports `syncCallbackErrorForSite`, `serverFnSyncCallbackError`, `stdlibAsyncPredicate`,
+  `annotateNestedAsyncHelpers` ← `emit-functions.ts`, `emit-library.ts`, `emit-server.ts`, `emit-tool.ts`.
+- `codegen/emit-server.ts` → `runtime-template.js` (NEW import `SERVER_STRUCTURAL_EQ_SOURCE`; re-exported wrapped as
+  `SERVER_STRUCTURAL_EQ_HELPER`, consumed by `emit-library.ts` and `emit-tool.ts`).
+- `commands/refusal-gate.js` (NEW) ← `commands/build.js`, `commands/compile.js`.
+- `expression-parser.ts` → `codegen/code-segments.ts` (`rewriteCodeSegments`, now also fencing the `~`, `render name(`,
+  `::Upper`, `? .x` rewrites).
+
+
+## S438 — DEPENDENCY DELTA (`9941a504c..fb21983a`, from import statements at `fb21983a`)
+
+**External:** `package.json` NOT changed in the window (version stays `0.8.0`) — runtime and dev dependency lists
+are unchanged. No new npm package.
+
+### Internal edges / newly-imported symbols in `compiler/src`
+- `route-inference.ts` → `codegen/session-config-resolve.ts` (**NEW export** `countUnitProgramNodes` — how many
+  `<program>` nodes step 2 of the resolver walks in a unit; a file with 2+ keeps the pre-S438 session-default
+  stamping rather than falling through to a last-wins read), `codegen/collect.ts` (`getNodes`).
+- `codegen/emit-server.ts` → `codegen/session-config-resolve.ts` (now calls `_resolveSessionAttr` for
+  `sessionExpiry` directly rather than reading `authMiddlewareEntry.sessionExpiry`, which an auto-escalated /
+  `<page>` entry may leave undefined).
+- `codegen/index.ts` → `tool-program.ts` (`isToolProgram`, now consulted per FILE by `_collectProgramSites`
+  before counting a program site for `E-MW-008`).
+- `block-splitter.js` → `tokenizer.ts` (**NEW edge**, `tokenizeLogic` — consulted as a line-scoped probe deciding
+  whether a brace is quoted-string content; the block tree itself is still hand-scanned, unchanged).
+- `emit-logic.ts` → `emit-control-flow.ts` (**NEW export** `armCondition` — the shared arm-condition builder,
+  now also used by `emitMatchExprDecl`'s two hand-rolled `if`/`else if` chains instead of a duplicated
+  single-test comparison).
+- `ast-builder.js` — 4 new module-private helpers (`scanPastBalancedParens`, `scanArmPatternAlternate`,
+  `armPatternChainArrowOffset`, `armChainBindingAlternate`), no new cross-file edge; consumed by the existing
+  `collectExpr` arm-boundary detector at `:4794`.
+- `type-system.ts` / `emit-control-flow.ts` — no new cross-file edge; `parseArmPattern` (type-system) and
+  `parseMatchArm` (codegen) were independently extended with matching wildcard-alternate recognition — they
+  must keep agreeing (documented in both files' comments) but there is still no shared helper between them.
+- `schema-differ.js` → no new outbound edge; **new export** `findRejectedCreateTableHeads`, consumed by
+  `gauntlet-phase1-checks.js`'s `<schema>` body checks (existing edge, new symbol).
+
+### Internal graph — `compiler/self-host-v2/` (bootstrap, M1 + NEW M2)
+- `lower.scrml` → `ast.scrml`, `core.scrml` (M2's front-end: `ast.scrml` tree → Core IR)
+- `parse.scrml` → `ast.scrml`, `lex.scrml` (source text → `ast.scrml` tree)
+- `check.scrml` → `core.scrml` (unchanged edge; new check C7 reads the new `FieldDef.graph`)
+- `slice-m2/harness.js` → `compiler/src/api.js` (`compileScrml` — impl#1 compiles the M2 bundle, same pattern as
+  `slice-m1/harness.js`)
+- `slice-m2/compare.js` → `core.scrml`, `walk.scrml` (Core-tree structural diff — the Fork-A proof instrument)
+- `slice-m2/bundle.scrml` → `parse.scrml`, `lower.scrml`, `check.scrml`, `print.scrml`, `slice-m2/src/*.scrml`
+- Still true: the bootstrap tree imports nothing from `compiler/src` except via the test harness;
+  `compiler/self-host/` (FROZEN) is not imported by either M1 or M2.
+
+Resolves the prior ⏳ NOT-MAPPED note (M2 landed on `origin/main` mid-pass, after the `9941a504c` stamp).
+
 
 ## S437b — DEPENDENCY DELTA (`d02738767..9941a504c`, from import statements at `9941a504c`)
 
@@ -704,7 +981,7 @@ db-authoritative.ts — are unaffected).
 | codegen/cell-accessor-rename.ts | `renameCellAccessors` — the Acorn-parse + range-SPLICE pass rewriting every cell-accessor CALL to its `_scrml_cs_` chunk-local wrapper. The SOLE producer of `_scrml_cs_*`. **Runs at bundle assembly in index.ts, AFTER emit-client.ts's post-emit chunk scan** — that ordering is what makes the bare-name gate entry exact. |
 | codegen/fnv1a-hash.ts | the shared FNV-1a 32-bit -> 8-char base36 primitive (§47.1.3). |
 | **codegen/log-loc.ts** | the §20.6 per-file source registry (`registerFileSource`) and **TWO projections off it**: `resolveLogLoc` -> a `"basename:line"` STRING baked into emitted JS for the `log()` origin tag, and **`resolveSpanLineCol` (NEW S397, `:123`) -> numeric `{line, col}` for a DIAGNOSTIC span, or `null`**. ⚑ It exists because `expression-parser.ts`'s `spanFromEstree` hard-codes `line: 1, col: 1` — only `start`/`end` are true source coordinates on an expression-derived node. Dependency-light on purpose (its own `baseName`, no `node:path`). |
-| **default-logic-exemption.ts (NEW ⛑ S383)** | `isDefaultLogicBodyTopExempt(filePath)` (:88) — the per-file suppression predicate for the §40.8 default-logic BODY-TOP diagnostics, over `unit-cc-exemption-list.json` (loaded once at module init; malformed/absent JSON → empty list). Strict `Set` membership, then a `/`-boundary suffix match (spans carry ABSOLUTE paths; the list is repo-relative; a worktree harness inserts `.claude/worktrees/agent-XXX/`). **ZERO local imports, and that is the contract** — TAB runs before SYM, so `ast-builder.js` may not import `symbol-table.ts`; this leaf is what both stages may depend on. Extracted from `symbol-table.ts` at S379 for a SECOND consumer that is **HELD and not in the compiler**; as of S383 there are TWO held would-be consumers (`E-CALL-NOT-IN-LOGIC-CONTEXT`, and ruling 3's §40.8 arm of `E-CONTROL-FLOW-IN-MARKUP`). **Sole LIVE consumer: `symbol-table.ts` PASS 3 via the `isUnitCCExempt` alias (`E-WRITE-NOT-IN-LOGIC-CONTEXT`).** Do not fold it back in. |
+| **~~default-logic-exemption.ts~~ (⛑ S445: DELETED #1196 — row SUPERSEDED)** | `isDefaultLogicBodyTopExempt(filePath)` (:88) — the per-file suppression predicate for the §40.8 default-logic BODY-TOP diagnostics, over `unit-cc-exemption-list.json` (loaded once at module init; malformed/absent JSON → empty list). Strict `Set` membership, then a `/`-boundary suffix match (spans carry ABSOLUTE paths; the list is repo-relative; a worktree harness inserts `.claude/worktrees/agent-XXX/`). **ZERO local imports, and that is the contract** — TAB runs before SYM, so `ast-builder.js` may not import `symbol-table.ts`; this leaf is what both stages may depend on. Extracted from `symbol-table.ts` at S379 for a SECOND consumer that is **HELD and not in the compiler**; as of S383 there are TWO held would-be consumers (`E-CALL-NOT-IN-LOGIC-CONTEXT`, and ruling 3's §40.8 arm of `E-CONTROL-FLOW-IN-MARKUP`). **Sole LIVE consumer: `symbol-table.ts` PASS 3 via the `isUnitCCExempt` alias (`E-WRITE-NOT-IN-LOGIC-CONTEXT`).** Do not fold it back in. |
 | codegen/runtime-chunks.ts | the runtime chunk catalog + `CHUNK_DEPENDENCIES`. |
 | compute-pgo-flags.ts | the profile-guided flags `detectRuntimeChunks` reads for the `reset` / `equality` / for-stmt gates. Its header comments are the best in-tree narrative of what a missed gate costs. |
 | codegen/sql-lex.ts | the pure LIVE-vs-INERT `${}` classifier (§52.15.5). One function feeds BOTH collect.ts and rewrite.ts. |
@@ -909,7 +1186,7 @@ loader **strips DEFAULT imports**, and `path`'s shim is `import nodePath from "n
 if it passed the host-reach limb every export would `ReferenceError`.
 
 ## Tags
-#scrml #map #dependencies #trigger-3 #escalation-server-only #two-set-distinction #escalation-reasons #is-body-only-escalation #stdlib-client-safety #node-id-freshness #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces #structural-if #§17.1.2 #if-cond #if-raw #five-consumers #absent-not-null #parity-canary #credit-from-attr-value #e-dg-002-false-fire #visit-structural-if-attr #scope-push-order #indirect-callee-resolver #indirect-inverse-caller-map #inverse-caller-map-byte-identical #escalation-only #fix-a #fix-b #server-fn-peer-alias-names #export-const-client-gate #ident-expr-precise #pruned-subtrees #module-init #rehydrator-boundary #scrml-nav-rewire #scrml-boot #register-rehydrator #outlet-resident #region-cleanups #route-region #emit-reactive-wiring #no-route-splitter #inject-server-call-awaits-via-ast #acorn-scope-model #scheduling-rewrite #reactive-set-direct-value-lift #engine-audit #audit-registry #cell-scope-accessors #project-state-child-rules #dispatch-called-targets #template-dispatch-scan #ai-legs-killed #cost-decision #parenthesize-await-server-calls #match-arm-autoawait #crossmodule-async-markup #cross-file-client-reads #export-let-var-emission #serve-tool-reachability #dist-relative-local-specifier #distLocalPathOf #§64-import-rebase #pr-405-landed #cps-choke-point #s239-catch #inject-promise-await-retired #collect-await-sites #apply-await-sites #inject-fn-body-server-call-awaits #given-match-try-descend #collect-structural-decl-names #§6.8 #w-if-in-each #each-nested-if-not-reactive #async-name-provider #async-name-facts #is-async-callee-name #is-server-boundary-callee #decision-sites-3-to-1 #one-provider-three-consumers #seed-trigger-not-result-set #u1 #dpa-020 #dpa-023 #client-server-fn-await #is-client-server-fn-call #client-async-body #can-suppress-never-strand #owning-file-filter #routemap-key-carries-the-file #decide-off-emitted-output #match-iife-header #await-absorb #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #reset-init-thunk-promise #session-proxy-bind #gh357 #csrf-token-disclosure #dangling-ref-class #ast-reads-current-user-ambient #channel-auth-only #region-fence #two-region-classes #lexical-vs-structural #join-around-runtime-slot #change-the-input-not-the-pattern #classify-brace-group #object-shorthand-expansion #binding-pattern-limit #proto-shorthand-b31 #register-fn-name #zero-width-alternation #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #session-cookie-wrap #bun-welcome-page #block-arm-value-position #show-false-ssr #each-shorthand-markup-fn-mount #spec-silent-shall #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #two-callsites-of-four-routes #separator-dependent #closes-block-statement #step-3b #§6.6.19 #e-derived-server-only-reach #scan-for-server-only-binding-refs #one-walk-two-callers #names-not-just-modules #refuse-not-escalate #sets-unchanged-this-window #e-sql-006-sink-drain #prepared-stmt-errors #request-ref-reparse #collect-request-ids #gate-to-registered-requests #three-new-internal-edges #collect-request-ids #reparse-request-ref-escape-hatch #cgerror-into-a-pure-builder #two-paths-one-class-two-mechanisms #should-skip-expr-parse #component-expander-augmentation-coupling #tool-import-tree-shake #deferred-lifecycle-body-tags #timer-start-fifth-param #split-locus-gate-and-fire #never-refired-on-resume #zero-external-dep-diff #nine-windows-no-version-move #select-request-onion #shared-rule-node #one-provider-two-consumers #emit-transition-css #diagnostic-format #not-a-verb-hand-maintained #11-verbs-14-files #package-json-zero-diff-11-windows #lsp-one-line #e-mw-007-hover #synth-key-rule #five-copies #two-resolution-orders #resolve-synth-cell-prefix #emit-member #longest-key-first #shortest-prefix-first #ast-expr-ctx #object-literal-arm #if-cond-consumer-table #line-ref-drift #bs-lint-stage-2-5c #leaf-module-imports-nothing #copied-state-block-names #copied-lifecycle-regex #unenforced-duplication #s437b #9941a504c #self-host-v2-graph #handler-block
+#scrml #map #dependencies #trigger-3 #escalation-server-only #two-set-distinction #escalation-reasons #is-body-only-escalation #stdlib-client-safety #node-id-freshness #module-graph #stdlib #chunk-namespace #cell-accessor-rename #detect-runtime-chunks #post-emit-chunk-gates #runtime-chunks #chunk-dependencies #fnv1a #semdiff #pipeline #bun #acorn #sql-lex #tenant-egress #tenant-floor #theme-reset #content-hash #colorless-async #async-combinators #on-mount #gh237 #scheduling #writer-ownership #bind-value #i225 #directive-is-form-value #batch-hoist #session-establishment #outlet #one-landmark #shell-composition #esm-chunks #module-format #each-fence #dist-space #source-space #d4 #d5 #forward-index #server-import-unemitted #dbauth #db-migrate #sql-table-refs #queried-table-grants #quoteIdent #sql-ident #navigate-wave1c #chunk-loading-depth-counter #tailwind-outline #e-schema-011 #npm-publishable #no-workspaces #structural-if #§17.1.2 #if-cond #if-raw #five-consumers #absent-not-null #parity-canary #credit-from-attr-value #e-dg-002-false-fire #visit-structural-if-attr #scope-push-order #indirect-callee-resolver #indirect-inverse-caller-map #inverse-caller-map-byte-identical #escalation-only #fix-a #fix-b #server-fn-peer-alias-names #export-const-client-gate #ident-expr-precise #pruned-subtrees #module-init #rehydrator-boundary #scrml-nav-rewire #scrml-boot #register-rehydrator #outlet-resident #region-cleanups #route-region #emit-reactive-wiring #no-route-splitter #inject-server-call-awaits-via-ast #acorn-scope-model #scheduling-rewrite #reactive-set-direct-value-lift #engine-audit #audit-registry #cell-scope-accessors #project-state-child-rules #dispatch-called-targets #template-dispatch-scan #ai-legs-killed #cost-decision #parenthesize-await-server-calls #match-arm-autoawait #crossmodule-async-markup #cross-file-client-reads #export-let-var-emission #serve-tool-reachability #dist-relative-local-specifier #distLocalPathOf #§64-import-rebase #pr-405-landed #cps-choke-point #s239-catch #inject-promise-await-retired #collect-await-sites #apply-await-sites #inject-fn-body-server-call-awaits #given-match-try-descend #collect-structural-decl-names #§6.8 #w-if-in-each #each-nested-if-not-reactive #async-name-provider #async-name-facts #is-async-callee-name #is-server-boundary-callee #decision-sites-3-to-1 #one-provider-three-consumers #seed-trigger-not-result-set #u1 #dpa-020 #dpa-023 #client-server-fn-await #is-client-server-fn-call #client-async-body #can-suppress-never-strand #owning-file-filter #routemap-key-carries-the-file #decide-off-emitted-output #match-iife-header #await-absorb #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #reset-init-thunk-promise #session-proxy-bind #gh357 #csrf-token-disclosure #dangling-ref-class #ast-reads-current-user-ambient #channel-auth-only #region-fence #two-region-classes #lexical-vs-structural #join-around-runtime-slot #change-the-input-not-the-pattern #classify-brace-group #object-shorthand-expansion #binding-pattern-limit #proto-shorthand-b31 #register-fn-name #zero-width-alternation #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #session-cookie-wrap #bun-welcome-page #block-arm-value-position #show-false-ssr #each-shorthand-markup-fn-mount #spec-silent-shall #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #two-callsites-of-four-routes #separator-dependent #closes-block-statement #step-3b #§6.6.19 #e-derived-server-only-reach #scan-for-server-only-binding-refs #one-walk-two-callers #names-not-just-modules #refuse-not-escalate #sets-unchanged-this-window #e-sql-006-sink-drain #prepared-stmt-errors #request-ref-reparse #collect-request-ids #gate-to-registered-requests #three-new-internal-edges #collect-request-ids #reparse-request-ref-escape-hatch #cgerror-into-a-pure-builder #two-paths-one-class-two-mechanisms #should-skip-expr-parse #component-expander-augmentation-coupling #tool-import-tree-shake #deferred-lifecycle-body-tags #timer-start-fifth-param #split-locus-gate-and-fire #never-refired-on-resume #zero-external-dep-diff #nine-windows-no-version-move #select-request-onion #shared-rule-node #one-provider-two-consumers #emit-transition-css #diagnostic-format #not-a-verb-hand-maintained #11-verbs-14-files #package-json-zero-diff-11-windows #lsp-one-line #e-mw-007-hover #synth-key-rule #five-copies #two-resolution-orders #resolve-synth-cell-prefix #emit-member #longest-key-first #shortest-prefix-first #ast-expr-ctx #object-literal-arm #if-cond-consumer-table #line-ref-drift #bs-lint-stage-2-5c #leaf-module-imports-nothing #copied-state-block-names #copied-lifecycle-regex #unenforced-duplication #s437b #9941a504c #self-host-v2-graph #handler-block #s440 #cf62b415 #bootstrap-import-graph #local-async-fns
 #tilde-diagnostic-sink #narrow-sink-pattern #two-drains #log-loc-two-projections #resolvespanlinecol #drain-or-it-looks-dead #e-sql-006-precedent
 #int-number-census-new-consumer #internal-graph-moved-manifest-did-not #fifth-flat-window
 #s405 #external-deps-zero-diff-sixth-window #internal-graph-moved #schema-differ-is-the-one-recognizer #eight-consumers-one-recognizer #import-direction-invariant #no-bun-sqlite-in-the-pa-stage #protect-analyzer-deleted-its-regex #gauntlet-phase1-imports-the-recognizer #acorn-in-protect-egress #db-authoritative-single-producer #two-consumers-opposite-polarity #a-graph-edge-does-not-show-polarity #701-import-edges #dependencies-generated-regenerated

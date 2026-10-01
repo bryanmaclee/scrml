@@ -1,0 +1,5 @@
+<program>
+<count> = 1
+Total: 42
+<p id="z">${@count}</p>
+</program>

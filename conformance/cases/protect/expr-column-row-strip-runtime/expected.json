@@ -1,0 +1,21 @@
+{
+  "id": "protect-expr-column-row-strip-runtime",
+  "description": "§14.8.9 S441 round 5 (F3) — an output column computed IN SQL from a protected column (`lower(passwordHash) AS x`) is the column's value re-encoded by the database. The row is tagged strip-all (its output keys are not statically reliable) and the client receives an empty object.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "MEASURED before the fix, also on main (S441 round-4 review, F3): expression columns — `||`, lower/hex/CAST/substr/coalesce/json_object/group_concat, `pin + 0`, quoted / bracketed / table-qualified spellings, scalar subqueries — carried NO descriptor and the route served the value.",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-PROTECT-STRIP-001": "info" },
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice", "passwordHash": "SECRET_HASH_ALICE" }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": { "user": {} }
+  }
+}

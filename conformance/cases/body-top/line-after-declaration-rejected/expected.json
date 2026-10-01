@@ -1,0 +1,20 @@
+{
+  "id": "body-top-line-after-declaration-rejected",
+  "description": "A prose line after a declaration is its own run: E-UNQUOTED-DISPLAY-TEXT once, the declaration survives.",
+  "language-version": "1.0",
+  "spec": "§40.8, §4.18.7",
+  "source-test": "compiler/tests/unit/s441-review-r4.test.js",
+  "rationale": "§40.8 S441 bullet (coverage invariant, S441 round 4).",
+  "expect": {
+    "codes": [
+      "E-UNQUOTED-DISPLAY-TEXT"
+    ],
+    "notCodes": [
+      "E-STATE-UNDECLARED",
+      "E-SCOPE-001"
+    ],
+    "codeCounts": {
+      "E-UNQUOTED-DISPLAY-TEXT": 1
+    }
+  }
+}

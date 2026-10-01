@@ -63,8 +63,17 @@ export function selectRequestOnion(serverModules) {
   if (candidates.length === 0) return { onion: null, error: null };
   if (candidates.length === 1) return { onion: candidates[0], error: null };
 
-  const sources = candidates.map(
-    (m) => m.middlewareDeclaredIn || m.filename,
+  // Name each competing source once and unambiguously: the declaring `.scrml`
+  // name alone is a BASENAME, so two units from same-named files in different
+  // directories (or a stale unit beside its renamed successor) would print
+  // "(main.scrml, main.scrml)". Where a name repeats, append the unit's dist path.
+  const label = (m) => m.middlewareDeclaredIn || m.filename;
+  const seen = new Map();
+  for (const m of candidates) seen.set(label(m), (seen.get(label(m)) ?? 0) + 1);
+  const sources = candidates.map((m) =>
+    seen.get(label(m)) > 1 && m.middlewareDeclaredIn
+      ? `${m.middlewareDeclaredIn} (${String(m.filename).replace(/\\/g, "/")})`
+      : label(m),
   );
   return {
     onion: null,

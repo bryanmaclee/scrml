@@ -1,0 +1,13 @@
+<program>
+    type Phase:enum = { Idle, Loading, Done, Failed }
+
+    <engine for=Phase initial=.Idle>
+        <Idle    rule=.Loading : "Ready">
+        <Loading rule=(.Done | .Failed) : "Loading…">
+        <Done    rule=.Idle : "Done">
+        <Failed  rule=(.Loading | .Idle) : "Failed — retry?">
+    </>
+
+    function load() { @phase = .Loading }
+    <button onclick=load()>Load</button>
+</program>

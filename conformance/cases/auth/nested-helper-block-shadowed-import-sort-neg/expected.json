@@ -1,0 +1,13 @@
+{
+  "id": "auth-nested-helper-block-shadowed-import-sort-neg",
+  "description": "SECURITY (s440 fix round, F1). A function declared inside `if (false) { … }` is visible ONLY inside that block (strict/module semantics). It must not shadow the imported async `verifyPassword` outside the block: `matches` calls the REAL `verifyPassword`, so `matches` is async, and its use in a `.sort` comparator (no async combinator — DD FORK 2) must fail closed. A first-draft fix registered block-level declarations at function scope, which made the real call look like a sync local: it was emitted unawaited (an always-truthy Promise — every password accepted in the direct `if (verifyPassword(pw, hash))` form) and this comparator compiled silently.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s440-nested-helper-async-sync-callback.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2: a Promise-returning stdlib call is auto-awaited; a position where `await` cannot be inserted fails closed (§34 E-ASYNC-STDLIB-IN-SYNC-CALLBACK). Name resolution follows lexical block scope, so the block-local declaration does not change which `verifyPassword` `matches` calls — the async import — and the comparator is a non-awaitable async call site.",
+  "expect": {
+    "codes": ["E-ASYNC-STDLIB-IN-SYNC-CALLBACK"],
+    "notCodes": ["E-SERVER-FN-IN-SYNC-CALLBACK"],
+    "severity": { "E-ASYNC-STDLIB-IN-SYNC-CALLBACK": "error" }
+  }
+}

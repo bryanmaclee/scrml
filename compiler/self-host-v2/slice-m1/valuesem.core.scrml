@@ -8,7 +8,7 @@
 // used by the §6.1 O(n)-copy measurement.
 //
 //   <program>
-//       <audit:string[free, end]=([])/>      // append-only (⚑ O10: grant spelling; ⚑ O32: `([])`)
+//       <audit:string[free, append]=([])/>      // append-only (⚑ O10: grant spelling; ⚑ O32: `([])`)
 //       <let seen:int=0/>
 //       function log() {
 //           let before = @audit              // a snapshot (§66.10)
@@ -43,7 +43,7 @@ ${
 
         const fAudit: Field = {
             sym: sAudit,
-            ty: Type.Seq(Type.Str, { length: LengthGrant.Free, at: [SeqAt.End], positionsWritable: false }),
+            ty: Type.Seq(Type.Str, { length: LengthGrant.Free, at: [SeqAt.End], shrink: [], positionsWritable: false }),
             init: Expr.ArrayOf([]),
             mode: FieldMode.Locked, role: FieldRole.Child,
             grants: { replace: false, edits: [EditKind.Append] },
@@ -64,13 +64,18 @@ ${
             ]),
         }
 
+        // dpa-045 follow-up 4 (RULED S442, SPEC §4.18.5): whitespace-only text
+        // between elements is kept exactly (L13, which dropped it, is retired).
         const main: View = el("main", [], [
+            textView("\n        "),
             el("button", [onEvent("click", [Stmt.Eval(call0(sLog))])], [textView("log")]),
+            textView("\n        "),
             el("p", [], [
                 dyn(readField(sProgram, here, SEEN)),
                 textView(" / "),
                 dyn(prim1(PrimOp.Length, readField(sProgram, here, AUDIT))),
             ]),
+            textView("\n    "),
         ])
 
         const program: Decl = {

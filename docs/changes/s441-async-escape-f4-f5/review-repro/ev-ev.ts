@@ -1,0 +1,28 @@
+// usage: bun ev.ts <tree> <case.scrml> <selector> <eventType>
+import { writeFileSync, mkdtempSync } from "fs"; import { join } from "path"; import { tmpdir } from "os";
+const [tree, src, sel, type] = process.argv.slice(2);
+const { compileScrml } = await import(tree + "/compiler/src/api.js");
+const { GlobalRegistrator } = await import(tree + "/node_modules/@happy-dom/global-registrator/lib/index.js");
+const { SCRML_RUNTIME } = await import(tree + "/compiler/src/runtime-template.js");
+GlobalRegistrator.register({ url: "http://localhost/" });
+const g: any = globalThis;
+g.fetch = async (url: string) => { await new Promise(r => setTimeout(r, 5)); return new Response(JSON.stringify(false), { status: 200, headers: { "Content-Type": "application/json" } }); };
+const dir = mkdtempSync(join(tmpdir(), "ev-")); const f = join(dir, "case.scrml");
+writeFileSync(f, await Bun.file(src).text());
+const res: any = compileScrml({ inputFiles: [f], write: false, outputDir: join(dir, "out"), log: () => {} });
+const out = res.outputs.get(f); const errs = (res.errors || []).filter((e: any) => (e.severity ?? "error") === "error").map((e: any) => e.code);
+if (errs.length) console.log("compile errors:", errs.join(","));
+const body = (out.html.match(/<body[^>]*>([\s\S]*)<\/body>/i) || [, out.html])[1].replace(/<script[^>]*>[\s\S]*?<\/script>/g, "");
+g.document.body.innerHTML = body;
+(0, eval)("(function(){\n" + SCRML_RUNTIME + "\n" + out.clientJs + "\n})();");
+g.document.dispatchEvent(new g.Event("DOMContentLoaded", { bubbles: true }));
+await new Promise(r => setTimeout(r, 20));
+const el = g.document.querySelector(sel);
+const ev = type === "click" ? new g.MouseEvent("click", { bubbles: true, cancelable: true }) : new g.Event(type, { bubbles: true, cancelable: true });
+let propagatedToDoc = false;
+g.document.addEventListener(type, () => { propagatedToDoc = true; });
+const ret = el.dispatchEvent(ev);
+console.log(`sync after dispatch: defaultPrevented=${ev.defaultPrevented} dispatchReturned=${ret} reachedDocumentListener=${propagatedToDoc}`);
+await new Promise(r => setTimeout(r, 50));
+console.log(`after settle: defaultPrevented=${ev.defaultPrevented} out=${g.document.querySelector("#out")?.textContent}`);
+process.exit(0);

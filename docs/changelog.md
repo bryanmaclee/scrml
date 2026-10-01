@@ -2,6 +2,81 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S442 — 2026-09-29 (bryan · XPS, concurrent with S441)
+
+The bootstrap got the S440 typer rules end to end and grew to the §66.19 worked programs; bryan ruled the tape
+grow/shrink split, dpa-058 (renders / bind / validators) and dpa-045 (plain-markup text, axiom-level) — and every
+landing needed at least one review round to fix something its own round had made.
+
+- **Bootstrap typer** (#1151 #1157 #1159, #1167 queued): conditions (`E-COND-NOT-BOOLEAN`, bare `T | not` = a presence
+  test, bare `bool | not` refused), operators (`E-OPERATOR-OPERAND-TYPE`, `E-OPERAND-NOT-NARROWED`) with flow
+  narrowing, `int` enforced everywhere, `E-CALL-ARITY` / `E-EACH-NOT-SEQUENCE` / `E-HANDLE-REDECLARE` /
+  `E-STRUCT-DUPLICATE-KEY`, an un-narrowed `T | not` into `T` refused for every type, full checks at arguments and
+  returns (§7.5.1 widening, PA-ruled, measured-zero corpus).
+- **Bootstrap §66.19 programs** (#1164, #1169 queued): §66.19.6 (engine as a `single`) runs verbatim; audit log and
+  form run minus Core-blocked constructs; tape grants (`append`/`pop`, `prepend`/`shift`, `insert`/`remove`);
+  O55 (`E-DECL-SINGLE-INSTANTIATED`); O19 / O33 refused at compile time.
+- **SPEC** (#1156, #1170 queued): §66.12 grow/shrink split + `anywhere`, O55, O10 tokens, four typer codes; §4.18
+  rewritten for dpa-045 (two text-mode productions, a closed exit set, cooked, no display-text escapes, whitespace
+  kept).
+- **impl#1** (#1160): a self-closed non-void element gets an explicit end tag (`<textarea/>` no longer swallows the
+  page); dpa-058 D2-D9 filed.
+- **Docs**: maps refreshed to cf62b415 (#1144); dpa-058 banked, drained, ruled (#1148 #1154 #1168); dpa-045 queue rows
+  de-duplicated. Article draft `docs/articles/tape-2026-09-29.md` (untracked, bryan's).
+- Held for Oct 2 (agent weekly limit): the dpa-045 bootstrap branch (unreviewed), typer r8, the dpa-058 build.
+
+## S441 — 2026-09-29 (bryan · ASUS)
+
+Spotlight prep: every public surface was audited for old or wrong information, and the audit surfaced a run of real security holes. Most of the session went into closing them, with S239 adversarial review on every code landing.
+
+- **#1141 / #1142 / #1145** — NERDME, kickstarter, external-js, lin, examples docs, package.json and the tutorial made accurate at v0.8.0; every program in them is gated; a snippet drift gate means a doc copy can no longer diverge from its gated source.
+- **#1146** — 59 audit-surfaced defects filed with version-stamped reproducers.
+- **#1147** — bare `fail .Variant` resolves against the declared `!` type (ruling); examples/09 compiles.
+- **#1149** — bootstrap CSS + `<theme>` T3 (dpa-051 §8.4 step 1).
+- **#1150** — E-ERROR-002 handler conformance restored: no handler exemption; failable handler references checked (ruling).
+- **#1152** — stdlib http/cron doc comments closed early and leaked exports as page text; a regression gate compiles every stdlib module.
+- **#1153** — no false W-LINT-007/013 on inline block handlers.
+- **#1155** — SECURITY: example 23's one-time-token guards were bypassable (replay, forged and concurrent tokens all accepted).
+- **#1158** — `@cell = serverFn()` is awaited in place (S440 #12): no stale reads or racing writes; the flagship tasks-app boots correctly.
+- **#1161** — SECURITY: `csrf="auto"` is the default under `auth=` (before: zero CSRF checks); the compose route is gated; the WebSocket upgrade checks `Origin` (cross-site WebSocket hijack closed).
+- **#1162** — SECURITY: static serving is an allowlist. Before, both servers handed out any dist file — the SQLite database, `.scrml-sessions.db`, server source and source maps.
+- **#1163** — SECURITY (S440 F4/F5): an async function cannot escape as a value into a sync slot (accept-all password checks); event control after an await is an error. Four review rounds, ending in a structural rule (scope-resolved scheduler exemption, poisoned event binding).
+- Site: scrml.dev published with the audit fixes.
+- HELD for S442: protected-column egress §14.8.9 (ratified; round 5 owed), declared prose §40.8 (ruled; round-4 WIP salvaged), `| err :>` error binding (ruled).
+
+## S440 — 2026-09-28/29 (bryan · ASUS)
+
+A ruling-heavy session driven by a JS "stupid behaviour" gauntlet (352 probes, 273 silent leaks) and four dPA deep-dives — ~100 bryan rulings, all in `scrml-support/user-voice-scrml.md` S440. Every code landing went through S239 adversarial review; four needed fix rounds for findings of their own making.
+
+- **#1125** — a refused build (E-MW-007/008) writes no dist (Peter's hold, ruled (b)).
+- **#1129** — bootstrap: Peter's #1109 review fixes re-landed over the typer + tables; spread writes are ONE snapshot (strict), ALL-OR-NOTHING (one `rt.batch`), duplicate override key refused; four S239 rounds (a partial-apply and an effect-loop both PA-reproduced and fixed).
+- **#1131** — `"~"` and three sibling raw-text rewrites no longer corrupt string/regex literals; the literal fence's regex-vs-division reading fixed at the root (three rounds).
+- **#1133** — SPEC text for the S440 rulings: E-CALL-ARITY, E-HANDLE-REDECLARE, E-STRUCT-DUPLICATE-KEY, E-EACH-NOT-SEQUENCE, E-SELECT-OPTION-NOT-VARIANT, §66.11.3 one-snapshot/all-or-nothing, `${not}` renders nothing, and the 22-item queue (drift-reviewed twice against the ledger).
+- **#1137** — Dates/built-ins in reactive cells no longer break the page; `==` compares built-ins by value (by brand; SameValueZero per the dpa-037 ruling); the server `==` is sliced from the client runtime; `_scrml_deep_set` fails loud on a non-plain target.
+- **#1139** — SECURITY: nested async helpers no longer bypass the sync-callback fail-closed guards (an accept-all on `xs.some(x => inner(x))`); block-scoped, fails closed on ambiguity; verified with real `scrml:auth` hashing.
+- Docs: #1126/#1128 return-legs to Peter; #1127 review of Peter's S438 codes + new HIGH `g-engine-msg-arm-alternation-emits-arms-as-text`; #1130 coercion gaps; #1132/#1134/#1135/#1136 dPA queue (dpa-054/055/056 banked, drained, rows fixed); 49 new gaps + 16 notes from the gauntlet and the DDs (this wrap).
+- HELD on branches for next session (fix rounds complete, one targeted check each): E-ERROR-002 handler conformance restore (+ §19.6.6 render-time); bootstrap CSS + `<theme>` T3 (§8.4 step 1).
+
+## S439 — 2026-09-27/28 (bryan · ASUS)
+
+The bootstrap got its first measurement against the conformance corpus, and a typer. M3 items 1–3 were built and adversarially reviewed; the corpus grade was rebuilt around a bite matrix after review showed the first headline certified `if=` with zero positive evidence. bryan ruled Peter's six-note queue ("all recs") and the rulings were written into SPEC after a drift review caught three widenings in the PA's own briefs.
+
+- **#1115** — return-leg to Peter for the S439 "all recs" ruling (14 items); his six notes archived; #1111 review carve-out.
+- **#1117** — bootstrap M3 item 1: the TYPER + scope pass in `compiler/self-host-v2/analyze.scrml`. Program cells are file-scoped (§7.6.1), which closed a SILENT cross-file mis-link; §7.5.1 position 1 enforced on annotated locals; a local's type = annotation or the join of its assignments (§42.3.1). The governing-sentence gate changed 7 of 11 pinned codes (3 shapes are legal). The mutation harness now fails loudly on NOT-RUN/GREEN. Four review rounds; a pre-set stop condition ended round 3's regression with one guard.
+- **#1120** — SPEC text for the S439 rulings (§40.8, §18.0.1, §47.1.1, §50.8.5, §5.2.2, §51.0.E/K, §66.13.4, §6.7.2.1, §19.4.3); #14 left OPEN with its measured count; new HIGH gap `g-handler-loop-binder-write-creates-window-global`.
+- **Queued (`--auto`)**: #1118 — M3 item 3, the ingest shim + conformance footprint grader + bite matrix (first corpus grade: 18/18 runtime passes, 32 certified constructs, NOT-YET 573 = the ranked work queue); #1122 — M3 item 2, analyze facts split into six NodeId-indexed family tables (inert: 459 + 128 programs, 0 changed).
+
+## S438 — 2026-09-27 (peter · P-Tech1)
+
+Security and bootstrap-blocker lane under the S435 TS policy, at full throttle with 17 adversarial review rounds across seven arcs. Five PRs landed, each on green with the `tracking` name set matched against main. Three fixes are parked on hold refs. About 25 gaps were filed.
+
+- **#1112** — E-MW-008 no longer counts a `kind="tool"` file as an application (this regression came from #1094).
+- **#1113** — #1045 F1: client JS relative imports are re-based in both the gate and the write phase. The browser half of the gap is re-opened.
+- **#1114** — route-inference 8b defers session config to the program. The 302 lockout for a user logged in on the root is fixed. Five integration suites now use a per-run temp dir, which fixes the Windows residue failures.
+- **#1116** — tenant floor: new **E-SCHEMA-012** rejects a qualified `<schema>` `CREATE TABLE` head, and new **E-SCHEMA-013** rejects an unreadable one. The two-qualifier form no longer leaves the floor inert.
+- **#1119** — match arms F12, F13 and F14 are fixed. New **E-MATCH-ALT-BINDING** rejects payload alternation instead of silently dropping the arm.
+- Hold refs: `hold/s438-1109-review-fixes` (bryan's M2: spread-swap HIGH + 2), `hold/s438-refusal-writes-no-dist` (bryan ruling), `hold/s438-impl1-imported-enum-match` (F11/F15/F16/F17, held on one loud→silent shape).
+
 ## S437 — 2026-09-27 (bryan · ASUS)
 
 The bootstrap's first slice landed and its central design claim held: a real parse → analyze → lower front end produces, from SPEC §66's own source, exactly the Core that was hand-built as the oracle (dpa-051 Fork A). dpa-051 was ruled (keep the S233 re-cut; `compiler/self-host/` frozen), and a long run of §66 rulings went into SPEC after two PA restatements were caught widening what bryan had answered. A handler silent-drop fix grew into five adversarial rounds and landed three silent-miscompile fixes, including an `else` that ran unconditionally in every function body.
@@ -7678,6 +7753,88 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+
+### S444 (2026-09-30/10-01, bryan · XPS) — a coderlegion port became four rulings, and the TS compiler's `<request>` turned out to loop
+
+**The arc.** Booted as successor to S443 and worked S442's held bootstrap lane: the dpa-045 plain-markup parser (three review
+rounds — the second caught a fix that let a *closed* literal move a body's end), typer r8 (two rounds), then bootstrap Core
+additions + dpa-058 so §66.19.5 (audit log) and §66.19.2 (validated form) run from their verbatim SPEC sources. A side quest —
+porting the coderlegion article "Searching a billion records" to 37 compiled lines of scrml — surfaced three places scrml was
+not equivalent; bryan said "those first 3 are things we should look at", and they became dpa-059 (a superseded `<request>`
+aborts READS, discards WRITES), dpa-060 (a bare compiler-derived `cache`, no author TTL, revalidate on hit), dpa-061 (`persist=`
+— a lifetime attribute, not an authority value; `key=` required; decode-first; IndexedDB a planned stdlib), and dpa-062
+(`prepaint` REFLECT on the cell + `hold=@cell` on a region). All four are SPEC-landed (Nominal); the bootstrap has no server
+boundary yet, so the build is a planned multi-session arc. Ruled too: free-text `//` is a comment only after whitespace (and
+swallows the rest of the line); display-text escapes `\"` `\\` `\${` restored (reversing S442); a `"…"` is display text only as a
+standalone statement. The fix work found the impl#1 `<request>` re-fetched in a loop on its own settle (example 32: 51 calls on
+mount) — landed as an explicit S435 exception — and a strict-CSP break in per-route chunk loading (fixed, same-origin script).
+
+- #1181 maps · #1182 slice-m4 in CI + live-PG hook timeouts · #1184 honest E-ASYNC-FN-ESCAPES-AS-VALUE wording (flogence)
+- #1185 dpa-045 SPEC follow-ups + 6 gaps · #1186 bank dpa-059/060/061 (+062) · #1188 / #1197 gap filings (3 `<request>` resolved)
+- #1189 bootstrap typer r8 · #1190 dpa-045 bootstrap parser · #1195 `//` + escapes + standalone display literal
+- #1191 impl#1 `<request>`: deps= honored, re-fire loop, refetch() kept, client-async bodies awaited, E-LIFECYCLE-022
+- #1193 SPEC §6.7.7.1 / §6.7.7.2 / §6.14 · #1199 SPEC §6.14.4 prepaint/hold + CSP sha256
+- #1200 security: per-route chunk manifest/bootstrap → same-origin script (strict CSP refused the inline ones)
+- #1202 bootstrap Core additions (bind, Date.now, `<*x/>`, removals, index places, lambdas) + dpa-058 validators + fail-closed refusal of unimplemented elements
+- Gate: cloud `gate` green on every merge; review floor markers for all S444 PRs.
+
+### S443 (2026-09-29/30, bryan · ASUS) — the S441 review record was wrong, the auth holes closed, and two broken flagship examples work end to end
+
+**The arc.** Booted as successor to S442 (XPS, bootstrap lane) and took S441's held security pickup, whose
+worktrees lived on this machine. The session's most important finding was about the RECORD, not the code: a
+read-only reconstruction of the S441 transcript showed that three of four S441 PRs whose reviews were "lost
+in a compaction" (#1145 #1152 #1155) had **never been reviewed at all** — S441 had told bryan #1155 (the
+flagship's one-time-token security fix) was reviewed. All four got post-merge S239 reviews against their
+merge commits; #1147's un-re-reviewed fix-round commit turned out to carry a real regression (imported
+`AuthError` enums false-fired E-ERROR-009), fixed in #1172. Mid-session the sub-agent weekly quota ran out;
+reviews and landings continued PA-direct, disclosed as self-reviewed, and were re-reviewed by agents once the
+quota returned (outcomes below).
+
+**Landed (8 PRs):**
+- **#1171** — protected-column egress §14.8.9 (S441 rounds 1-4 + S443 round 5): extracted protected values are
+  E-PROTECT-006 at compile time; case-insensitive origin; SQL-computed columns over a protected column strip the
+  row (fail-closed over-approximation); `.length` a count only on known-count receivers; element-returning
+  collection methods join the alias class. Residual leak classes (all pre-existing, main shipped more) filed as
+  `g-protect-egress-round-6-residuals`.
+- **#1172** — a user enum named like a built-in error type (local, imported, re-exported) is the type the file
+  uses — the #1147 regression and the silent invalid-variant accept it hid.
+- **#1173** — `<page auth="required">` gates its document, compose route and server fns; `auth=` on a nested
+  `<program>` is E-PROGRAM-NESTED-AUTH; unannotated member pages inherit the application's required gate; the
+  program's `loginRedirect=` reaches page scopes; W-AUTH-FILE-CONFLICT / W-AUTH-REDIRECT-LOOP /
+  W-AUTH-LOGIN-REDIRECT-AMBIGUOUS. Three review rounds; the PA-direct round-3 review found "several root
+  candidates → nothing inherited" was fail-OPEN and fixed it (ee3af947b).
+- **#1174** — worker bundles are written and served; `.send()` no longer kills `when message from` handlers
+  (dpa-056 D1/D2) — examples/13 works in Chromium.
+- **#1175** — review ledger: post-merge markers, the S441 record corrected, §S443 gap filings.
+- **#1177** — two top-level `<program>`s in one file are E-PROGRAM-002 (bryan ruling; same-file only).
+- **#1180** — examples/23 works end to end: login creates a real framework session (the app's own token rode an
+  HttpOnly cookie set from JS, which browsers refuse), 18 pages read `session.userId`, BOL/POD check driver
+  assignment, the database ships seeded, links point at real pages; `scrml generate auth`'s template now
+  authenticates; examples/09 SubmitFailed reachable.
+- **#1183** — examples/23: no helper server routes — the post-merge review found #1180's per-page
+  `getCurrentUser(userId)` helpers were public routes (any logged-in user could enumerate accounts); lookups
+  inlined on `session.userId`, dead app-KV auth fns removed.
+- README (#1176) rewritten per the S441 two-register ruling — **held for bryan's read**.
+
+**Rulings (user-voice S443):** "your recs" ×7 — explicit page `optional`/`none` relaxes a required app; stricter
+`auth=` wins within a file; E-PROGRAM-002 same-file; body-top no-op code is an error; README held; derived SQL
+values over protected columns stay stripped; a bare digest of a protected value stays protected. Bun upgraded
+on ASUS (1.3.14 → 1.4.2). "no waiting, go now" (ex23 PA-direct).
+
+**Compiler defects found by dog-fooding the examples (filed):** a markup `${fn(@x.f)}` interpolation is ALSO
+emitted as a load-time statement and throws when `@x` is `not` (HIGH); an engine write inside a `!{}` arm
+bypasses the engine setter (HIGH); `class="…${…}"` templates don't lower scrml expressions; prod static has
+no directory index; worker supervision has no codegen.
+
+**Post-merge agent reviews (quota back):** #1173 → `finding` (a `/pages/` directory anywhere in the absolute
+project path disables member-page inheritance — HIGH, filed); #1177 → `finding` (a `<div>`-wrapped `<program auth>`
+runs anonymously — pre-existing HIGH, filed; message/SPEC text LOW); #1180 → `finding` (the helper-route enumeration,
+fixed #1183; plus pre-existing ex23 authz/routing holes, filed). Inbox triage: flint + flogence reports re-measured —
+two fixed (#900, #1046), three filed (incl. HIGH: a bare `{` in markup text swallows child tags); return legs sent.
+
+**Held for the next session:** declared-prose round 5 (round 4 DO-NOT-LAND; ruling #4 folds in), protect round
+6 (+ ruling #7), the `| err :>` S441 branch — briefs in `scrml-support/handOffs/s443-briefs/`.
+
 
 ### S433 (2026-09-26, Peter · AdiPDesk — a SECOND peter box, parallel to S432 on the laptop) — every fix that self-reported clean came back with a finding, and four measurement failures shared one shape
 

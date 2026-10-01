@@ -325,9 +325,9 @@ ${
     // scripts/lint-no-default-arm.js): a new token kind must decide here whether
     // it carries a keyword. Payload variants are listed one per arm (a `|`
     // alternation containing a payload pattern is dropped today — F6); the
-    // nullary kinds share one alternation arm, which must be the FIRST arm (an
-    // alternation arm in any later position is glued onto the previous arm's
-    // body — slice-m1/progress.md F12).
+    // nullary kinds share one alternation arm. (It sits first because impl#1's
+    // F12 once glued a later alternation arm onto the previous arm's body —
+    // slice-m1/progress.md; #1119 fixed that, S440.)
     fn keywordName(k: TokenKind) -> string {
         return match k {
             .LParen | .RParen | .LBrace | .RBrace | .LBracket | .RBracket |
@@ -642,16 +642,47 @@ ${
         return { text: decodeSingleEscape(esc), cur: advance(c, 1) }
     }
 
+    // F9: a literal `$`+`{` in a scrml string is interpolation under impl#1 —
+    // the two characters are joined at run time.
+    fn interpOpenText() -> string { return "$" + "{" }
+
     // Scan a quoted string from the opening quote to its close (or EOF). The
     // cursor is threaded; `cooked` accumulates the decoded value.
-    fn scanString(cur: Cursor, q: QuoteKind) -> Scan {
+    fn scanString(cur: Cursor, q: QuoteKind, display: boolean) -> Scan {
         const closeCode: int = quoteCode(q)
         let c = advance(cur, 1)           // consume the opening quote
         let cooked: string = ""
         let done = false
         while (!isEof(c) && !done) {
             const code: int = peekCode(c, 0)
-            if (code == 92) {             // backslash — decode the escape (precise)
+            const dq: boolean = display && closeCode == 34
+            if (dq && code == 92) {
+                // SPEC §4.18.3 (RULED S444, restoring the S111 catalog): a
+                // display-text literal has exactly three escapes — `\"` (a
+                // literal `"`; it does not close the literal), `\\` (a literal
+                // `\`) and `\${` (a literal `${`, not an interpolation). Any
+                // other `\` + char is malformed (E-PARSE-001 — reported by the
+                // parser, displayEscapeDiags); both characters are kept.
+                const n1: int = peekCode(c, 1)
+                if (n1 == 34 || n1 == 92) {
+                    cooked = cooked + String.fromCharCode(n1)
+                    c = advance(c, 2)
+                } else if (n1 == 36 && peekCode(c, 2) == 123) {
+                    cooked = cooked + interpOpenText()
+                    c = advance(c, 3)
+                } else {
+                    cooked = cooked + charAt(c)
+                    c = advance(c, 1)
+                }
+            } else if (dq && code == 36 && peekCode(c, 1) == 123) {
+                // §4.18.4: `${ … }` inside a display-text literal is an
+                // interpolation — its extent is the canonical walker's (a `"` or
+                // `}` inside it cannot end the literal); the parser splits it out
+                const run: LexRun = lexFrom(c.source, c.pos + 1, LexStop.Balanced)
+                const to: Cursor = advanceTo(c, run.end)
+                cooked = cooked + sliceText(c, to)
+                c = to
+            } else if (code == 92) {             // backslash — decode the escape (precise)
                 const esc: EscapeScan = scanEscape(c)
                 cooked = cooked + esc.text
                 c = esc.cur
@@ -815,12 +846,16 @@ ${
         tokens: Token[],
         bracketStack: BracketKind[],
         interpDepths: int[],
+        // dpa-045 B(3): lexing a CODE-DEFAULT region (a `:`-shorthand body, a
+        // state-child body run) — its `"…"` are display-text literals (§4.18.3),
+        // in which `\"` is NOT an escape (RULED S442: deleted).
+        display: boolean,
     }
 
     // The single LexState constructor — keeps the field list in ONE place so
     // later slices (recovery) extend it here, not at every call site.
-    fn mkState(cur: Cursor, mode: LexMode, tokens: Token[], bracketStack: BracketKind[], interpDepths: int[]) -> LexState {
-        return { cur: cur, mode: mode, tokens: tokens, bracketStack: bracketStack, interpDepths: interpDepths }
+    fn mkState(cur: Cursor, mode: LexMode, tokens: Token[], bracketStack: BracketKind[], interpDepths: int[], display: boolean) -> LexState {
+        return { cur: cur, mode: mode, tokens: tokens, bracketStack: bracketStack, interpDepths: interpDepths, display: display }
     }
 
     fn skipTrivia(cur: Cursor) -> Cursor {
@@ -908,13 +943,15 @@ ${
     // total with no default arm (dpa-051 §3.4; scripts/lint-no-default-arm.js).
     // dispatch is reached only for InCode (templateBodyStep owns InTemplateBody;
     // the atomic-scan modes settle back to InCode within one step); the other
-    // modes are routed to dispatchOffMode, which keeps the fold total. (An
-    // alternation arm must come FIRST — F12.)
+    // modes are routed to dispatchOffMode, which keeps the fold total. (The
+    // alternation arm is deliberately NOT first: impl#1's F12 — a non-first
+    // alternation arm glued onto the previous arm's body — is fixed by #1119,
+    // and every lexer test exercises this arm, S440.)
     fn dispatch(st: LexState, ev: LexEvent) -> LexState {
         return match st.mode {
+            .InCode :> dispatchInCode(st, ev)
             .InTemplateBody | .InSingleString | .InDoubleString |
                   .InLineComment | .InBlockComment | .InRegexBody :> dispatchOffMode(st, ev)
-            .InCode :> dispatchInCode(st, ev)
         }
     }
 
@@ -955,7 +992,7 @@ ${
 
     fn codeStep(st: LexState) -> LexState {
         const cur: Cursor = skipTrivia(st.cur)
-        const st2: LexState = mkState(cur, st.mode, st.tokens, st.bracketStack, st.interpDepths)
+        const st2: LexState = mkState(cur, st.mode, st.tokens, st.bracketStack, st.interpDepths, st.display)
         const ev: LexEvent = classifyCode(st2, cur)
         return dispatch(st2, ev)
     }
@@ -964,7 +1001,7 @@ ${
         const c0: int = peekCode(st.cur, 0)
         const scan: Scan = pickScan(st.cur, c0)
         const nstack: BracketKind[] = pushBracket(st.bracketStack, c0)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), nstack, st.interpDepths)
+        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), nstack, st.interpDepths, st.display)
     }
 
     fn pickScan(cur: Cursor, c0: int) -> Scan {
@@ -975,29 +1012,29 @@ ${
 
     // A string emits one StringLit; a comment emits NO token (trivia).
     fn scanStringStep(st: LexState, q: QuoteKind) -> LexState {
-        const scan: Scan = scanString(st.cur, q)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interpDepths)
+        const scan: Scan = scanString(st.cur, q, st.display)
+        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interpDepths, st.display)
     }
 
     fn scanLineCommentStep(st: LexState) -> LexState {
-        return mkState(skipLineComment(st.cur), st.mode, st.tokens, st.bracketStack, st.interpDepths)
+        return mkState(skipLineComment(st.cur), st.mode, st.tokens, st.bracketStack, st.interpDepths, st.display)
     }
 
     fn scanBlockCommentStep(st: LexState) -> LexState {
-        return mkState(skipBlockComment(st.cur), st.mode, st.tokens, st.bracketStack, st.interpDepths)
+        return mkState(skipBlockComment(st.cur), st.mode, st.tokens, st.bracketStack, st.interpDepths, st.display)
     }
 
     // A regex emits one RegexLit and stays InCode.
     fn scanRegexStep(st: LexState) -> LexState {
         const scan: Scan = scanRegex(st.cur)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interpDepths)
+        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interpDepths, st.display)
     }
 
     // A bare variant `.foo` emits one BareVariant and stays InCode. The `.` is
     // not a bracket, so the bracket stack is threaded through unchanged.
     fn scanBareVariantStep(st: LexState) -> LexState {
         const scan: Scan = scanBareVariant(st.cur)
-        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interpDepths)
+        return mkState(scan.cur, st.mode, st.tokens.concat([scan.tok]), st.bracketStack, st.interpDepths, st.display)
     }
 
     // Enter a template: consume the opening backtick (no token) and DRIVE the
@@ -1006,7 +1043,7 @@ ${
     // which the `while (!isEof)` driver would otherwise skip at EOF).
     fn enterTemplateStep(st: LexState) -> LexState {
         const to: Cursor = advance(st.cur, 1)
-        const started: LexState = mkState(to, LexMode.InTemplateBody, st.tokens, st.bracketStack, st.interpDepths)
+        const started: LexState = mkState(to, LexMode.InTemplateBody, st.tokens, st.bracketStack, st.interpDepths, st.display)
         return templateBodyStep(started)
     }
 
@@ -1019,9 +1056,9 @@ ${
         const chunk: Token = mkTok(kTemplateChunk(scan.cooked, scan.raw), scan.raw, st.cur, scan.cur)
         const toks: Token[] = st.tokens.concat([chunk])
         return match scan.term {
-            .TermInterp   :> emitInterpStart(scan.cur, toks, st.bracketStack, st.interpDepths)
-            .TermBacktick :> mkState(scan.cur, LexMode.InCode, toks, st.bracketStack, st.interpDepths)
-            .TermEof      :> mkState(scan.cur, LexMode.InCode, toks, st.bracketStack, st.interpDepths)
+            .TermInterp   :> emitInterpStart(scan.cur, toks, st.bracketStack, st.interpDepths, st.display)
+            .TermBacktick :> mkState(scan.cur, LexMode.InCode, toks, st.bracketStack, st.interpDepths, st.display)
+            .TermEof      :> mkState(scan.cur, LexMode.InCode, toks, st.bracketStack, st.interpDepths, st.display)
         }
     }
 
@@ -1029,10 +1066,10 @@ ${
     // bracket-stack DEPTH (length) at which the interp opened; lex the body as
     // InCode. The stack itself is threaded through unchanged (the `${` opens no
     // bracket — only the depth snapshot the closing `}` is matched against).
-    fn emitInterpStart(cur: Cursor, toks: Token[], stack: BracketKind[], ids: int[]) -> LexState {
+    fn emitInterpStart(cur: Cursor, toks: Token[], stack: BracketKind[], ids: int[], display: boolean) -> LexState {
         const to: Cursor = advance(cur, 2)   // consume ${
         const tok: Token = mkTok(TokenKind.TemplateInterpStart, sliceText(cur, to), cur, to)
-        return mkState(to, LexMode.InCode, toks.concat([tok]), stack, ids.concat([stack.length]))
+        return mkState(to, LexMode.InCode, toks.concat([tok]), stack, ids.concat([stack.length]), display)
     }
 
     // Close the innermost interp: emit TemplateInterpEnd (`}`), pop its frame,
@@ -1042,14 +1079,14 @@ ${
     fn closeInterpStep(st: LexState) -> LexState {
         const to: Cursor = advance(st.cur, 1)   // consume the closing }
         const tok: Token = mkTok(TokenKind.TemplateInterpEnd, sliceText(st.cur, to), st.cur, to)
-        return mkState(to, LexMode.InTemplateBody, st.tokens.concat([tok]), st.bracketStack, popDepth(st.interpDepths))
+        return mkState(to, LexMode.InTemplateBody, st.tokens.concat([tok]), st.bracketStack, popDepth(st.interpDepths), st.display)
     }
 
     // DEFERRED-event safety net (unreachable in practice — every InCode event has
     // an explicit arm above, and InTemplateBody is routed through step). Advances
     // one code point so the driver always makes progress. TODO(slice-4).
     fn deferAdvance(st: LexState) -> LexState {
-        return mkState(advance(st.cur, 1), st.mode, st.tokens, st.bracketStack, st.interpDepths)
+        return mkState(advance(st.cur, 1), st.mode, st.tokens, st.bracketStack, st.interpDepths, st.display)
     }
 
     fn makeEof(cur: Cursor) -> Token {
@@ -1058,7 +1095,7 @@ ${
 
     // The driver: fold `step` until the cursor is exhausted, then append EOF.
     export fn lex(src: string) -> Token[] {
-        let st: LexState = mkState(makeCursor(src), LexMode.InCode, [], [], [])
+        let st: LexState = mkState(makeCursor(src), LexMode.InCode, [], [], [], false)
         while (!isEof(st.cur)) {
             st = step(st)
         }
@@ -1081,6 +1118,8 @@ ${
         BareValue,   // an unquoted attribute value: stop at depth 0 before trivia, `>` or `/>`
         Statement,   // a `function` / `type` declaration: stop after a `}` that returns to depth 0
         Line,        // a braceless declaration (`import … from "…"`): stop at depth 0 before a newline
+        Shorthand,   // a `:`-shorthand body (§4.14): stop at depth 0 before the `>` (or `/>`) that ends the opener
+        CodeBody,    // a run of a code-default body (§4.18.1): stop at depth 0 before a tag (`<x`, `</`, `<!`) or `${`
     }
     export type LexRun:struct = { tokens: Token[], end: int }
 
@@ -1117,6 +1156,8 @@ ${
         return match stop {
             .BareValue :> isTrivia(c0) || c0 == 62 || (c0 == 47 && peekCode(st.cur, 1) == 62)
             .Line      :> lineEndsAt(skipBlanks(st.cur))
+            .Shorthand :> endsOpener(skipTriviaAhead(st.cur))
+            .CodeBody  :> startsMarkup(skipTriviaAhead(st.cur))
             .Balanced  :> false
             .Statement :> false
         }
@@ -1130,6 +1171,8 @@ ${
             .Statement :> lastIsCloser(st, true)
             .BareValue :> false
             .Line      :> false
+            .Shorthand :> false
+            .CodeBody  :> false
         }
     }
 
@@ -1149,8 +1192,64 @@ ${
         return c
     }
 
+    // §4.14: a `:`-shorthand body runs to the `>` that terminates the opener.
+    // Looked for past trivia (a step may consume whitespace and the next token
+    // together); `/>` is reported by the parser (E-CLOSER-001: no closer on a
+    // `:`-shorthand body).
+    fn endsOpener(c: Cursor) -> boolean {
+        const c0: int = peekCode(c, 0)
+        // r1 F3: `>=` is an operator, never the opener's end
+        if (c0 == 62) return peekCode(c, 1) != 61
+        return c0 == 47 && peekCode(c, 1) == 62
+    }
+
+    // A tag (`<name`, `</`, `<!--`) or an interpolation (`${`) — where a
+    // code-default body's expression run ends (a `<` before a space / digit is
+    // a comparison and does not stop it).
+    fn startsMarkup(c: Cursor) -> boolean {
+        const c0: int = peekCode(c, 0)
+        const c1: int = peekCode(c, 1)
+        if (c0 == 36) return c1 == 123
+        if (c0 != 60) return false
+        return c1 == 47 || c1 == 33 || (c1 >= 65 && c1 <= 90) || (c1 >= 97 && c1 <= 122)
+    }
+
+    fn skipTriviaAhead(cur: Cursor) -> Cursor {
+        let c = cur
+        while (isTrivia(peekCode(c, 0))) {
+            c = advance(c, 1)
+        }
+        return c
+    }
+
+    // The cursor moved forward to offset `pos` (line / col tracked).
+    fn advanceTo(cur: Cursor, pos: int) -> Cursor {
+        let c = cur
+        while (c.pos < pos && !isEof(c)) { c = advance1(c) }
+        return c
+    }
+
+    fn isCodeDefault(stop: LexStop) -> boolean {
+        return match stop {
+            .Shorthand :> true
+            .CodeBody  :> true
+            .Balanced  :> false
+            .BareValue :> false
+            .Statement :> false
+            .Line      :> false
+        }
+    }
+
     export fn lexFrom(src: string, pos: int, stop: LexStop) -> LexRun {
-        let st: LexState = mkState(cursorAt(src, pos), LexMode.InCode, [], [], [])
+        return lexFromMode(src, pos, stop, isCodeDefault(stop))
+    }
+
+    // lexFrom with the display flag given explicitly. RULED S444 ("standalone
+    // only"): a code-default region's `"…"` is a display-text literal only when
+    // it stands alone as the body statement — the parser re-lexes any other
+    // code-default region with display = false (ordinary strings, logic escapes).
+    export fn lexFromMode(src: string, pos: int, stop: LexStop, display: boolean) -> LexRun {
+        let st: LexState = mkState(cursorAt(src, pos), LexMode.InCode, [], [], [], display)
         let done = false
         while (!done && !isEof(st.cur)) {
             if (stopBefore(st, stop)) {

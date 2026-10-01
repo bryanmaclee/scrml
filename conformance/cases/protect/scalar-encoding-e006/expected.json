@@ -1,0 +1,19 @@
+{
+  "id": "protect-scalar-encoding-e006",
+  "description": "§14.8.9 S441 fix round (F2) — a REVERSIBLE ENCODING of the protected column (a character-code round trip through `Array.from` + `String.fromCharCode`) is not a derived flow. Provenance is preserved by default through any call the compiler does not know to be a one-way deriver: E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/protect-scalar-egress.test.js",
+  "rationale": "MEASURED on the first S441 cut (g-protected-column-escapes-redaction-as-scalar, security review F2): the analysis treated any unmodelled callee given a scalar as \"derived\", so this — and `Buffer.from(h).toString(\"base64\")`, `new URL(\"…?h=\" + h).search`, `new Error(h).message` — served the hash. §14.8.9 (S441 amendment): \"The derived-flow exemption is an explicit ALLOWLIST, not 'any callee the module does not define'\"; charCodeAt is lossless and is not on it.",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "notCodes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}

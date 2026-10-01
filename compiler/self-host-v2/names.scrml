@@ -102,6 +102,7 @@ ${
             "Math" :> true
             "String" :> true
             "Number" :> true
+            "Date" :> true
             _ :> false
         }
     }

@@ -26,7 +26,7 @@ function withStmts(core, stmts) {
 
 // The counter program plus a struct-typed field `pt: Point` where
 //   Point = { x: let int, y: int (no contract), z: int with a non-replace contract,
-//             w: string[free, end] (append-only: an edit grant, no `replace`) }
+//             w: string[free, append] (append-only: an edit grant, no `replace`) }
 // `ptGrants` is the resolved grant set of the program field `pt`.
 function pointCore(ptGrants) {
   const core = cores.counter();
@@ -37,7 +37,7 @@ function pointCore(ptGrants) {
     { sym: sX, ty: C.Type.Int, grants: C.replaceGrant() },
     { sym: sY, ty: C.Type.Int, grants: C.noGrants() },
     { sym: sZ, ty: C.Type.Int, grants: { replace: false, edits: [C.EditKind.Transition] } },
-    { sym: C.mkSym(110, "w"), ty: C.Type.Seq(C.Type.Str, { length: C.LengthGrant.Free, at: [C.SeqAt.End], positionsWritable: false }),
+    { sym: C.mkSym(110, "w"), ty: C.Type.Seq(C.Type.Str, { length: C.LengthGrant.Free, at: [C.SeqAt.End], shrink: [], positionsWritable: false }),
       grants: { replace: false, edits: [C.EditKind.Append] } },
   ]);
   const fPt = {
@@ -181,14 +181,21 @@ describe("F7 — `Check.Static` on a transition only when Core proves the edge (
     const core = cores.dropdown();
     const dropdown = decl(core, "dropdown");
     const div = dropdown.renders[0];
-    const button = div.data.kids[0];
+    // dpa-045 fu4 (SPEC §4.18.5) keeps whitespace-only Text between elements,
+    // so the toggle button is the FIRST NON-WHITESPACE kid (s444 r2: the
+    // order assertion `kids[0]` made, restored against the kept whitespace).
+    const kids0 = div.data.kids;
+    const bi = kids0.findIndex((k) => !(k.variant === "Text" && k.data.text.trim() === ""));
+    const button = kids0[bi];
+    expect(button.variant).toBe("El");
+    expect(button.data.tag).toBe("button");
     const onClick = button.data.attrs[1];
     const toggle = onClick.data.body.stmts[0];          // Write(wOpen, Lexical(0), Transition, Match…, RuntimeEdge)
     expect(toggle.data.check).toBe("RuntimeEdge");
     // Re-point the SAME write at Static, in place (so its Lexical(0) still resolves).
     const staticToggle = C.Stmt.Write(toggle.data.cap, toggle.data.inst, toggle.data.edit, toggle.data.value, C.Check.Static);
     const attrs = [button.data.attrs[0], C.Attr.On("click", C.block([staticToggle]))];
-    const kids = [C.View.El("button", attrs, button.data.kids), ...div.data.kids.slice(1)];
+    const kids = [...kids0.slice(0, bi), C.View.El("button", attrs, button.data.kids), ...kids0.slice(bi + 1)];
     const renders = [C.View.El(div.data.tag, div.data.attrs, kids)];
     const bad = withDecl(core, "dropdown", { ...dropdown, renders });
     expect(check(bad)).toEqual(["C6: <dropdown>.open: a Static transition to a non-literal value is not provable in Core; use RuntimeEdge"]);
