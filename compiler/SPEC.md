@@ -6821,15 +6821,15 @@ corpus when it landed).
 
 #### 7.3.4 Call checking — arity and argument types (S447)
 
-**Added 2026-10-01 (S447, UFCS sub-call 9). Status: Nominal / spec-ahead — impl#1 emits neither check
-(measured S447: `addOne(@phrase)` with a `string` argument and `addOne(x, 2)` against
-`function addOne(a: number)` both compile at exit 0); impl#1 carries it (§34.0); the bootstrap implements it.**
+**Added 2026-10-01 (S447). Status: Nominal / spec-ahead — impl#1 emits neither check (measured S447:
+`addOne(@phrase)` with a `string` argument and `addOne(x, 2)` against `function addOne(a: number)` both compile at
+exit 0); impl#1 carries it (§34.0); the bootstrap implements it.**
 
-> **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs on 3-11"*, item 9: *"Argument arity and
-> argument-type checking are specified and emitted FIRST — prerequisite for UFCS's errors."* · origin: bryan S447
-> *"@userStuff.otherNumbers.addOne() //error, wrong number of arguments*/ @useStuff.phrase.addOne() //type error"*
-> · dd:scrml-support/docs/deep-dives/ufcs-method-call-syntax-2026-10-01.md (C2: *"There is no SPEC rule that a
-> plain function call's argument must be assignable to the parameter type."*).
+> **Provenance:** ruling:user-voice-scrml.md S447 — *"RULED — UFCS PARKED; keep only the argument checks"*
+> (*"keep the argument checks. but lets park this."*): call 9 is KEPT — *"argument arity + argument-type checking
+> for plain calls (SPEC §7.3.4)"*; the rest of the UFCS package is parked, not adopted · origin: S447 *"your recs on
+> 3-11"*, item 9 · dd:scrml-support/docs/deep-dives/ufcs-method-call-syntax-2026-10-01.md (C2: *"There is no SPEC
+> rule that a plain function call's argument must be assignable to the parameter type."*).
 
 **Why this section is here.** §7.3 owns function declaration and call forms, and already carries the S440
 arity rule; §7.5.1 owns assignability and enumerates the positions it is judged at, with the argument as
@@ -6852,13 +6852,10 @@ A call to a statically resolved scrml function — a `fn` or `function` declared
    imposes no argument-type check. (Arity still applies.)
 4. **An argument whose type is not proven passes.** Provable-or-silent, as everywhere in §7.5.1: where
    inference is defeated the argument is `unknown` and §7.5.2 governs; an `asIs` argument passes.
-5. **Plain calls AND dot calls.** Both checks apply identically to `f(x, a)` and to its uniform-function-call
-   spelling `x.f(a)` (§67): the receiver is argument 1. So `@n.addOne(5)` is `E-CALL-ARITY`
-   (two arguments to a one-parameter function), and `@userStuff.phrase.addOne()` (a `string` receiver to
-   `a: number`) and `@userStuff.otherNumbers.addOne()` (a `number[]` receiver) are `E-TYPE-031` — the latter
-   is a TYPE error, not an arity error: it passes exactly one argument.
-6. **Order.** The bootstrap SHALL emit both checks before, or together with, the §67 dot-call errors — a
-   dot call that LOOKS checked but is not is the failure S447 ruled out.
+5. **Worked cases** against `function addOne(a: number)`: `addOne(@n, 5)` is `E-CALL-ARITY` (two arguments to
+   a one-parameter function); `addOne(@userStuff.phrase)` (a `string`) and `addOne(@userStuff.otherNumbers)` (a
+   `number[]`) are `E-TYPE-031` — the latter is a TYPE error, not an arity error: it passes exactly one argument.
+6. **Order.** S447 ruled these checks specified and emitted FIRST; the bootstrap SHALL emit both.
 
 Out of scope here (not ruled): calls to host / foreign functions (`_{ }`, `.js` imports, `import:host`) — the
 S440 PA reading's *"the check applies only when the callee is statically resolved"* is the standing text; a
@@ -7057,7 +7054,7 @@ Two things moved, and each states which position it closes per the additivity ru
 |---|---|---|---|
 | 1 | annotated variable declaration | `let n: number = "nope"` | **CHECKED** — E-TYPE-031, all 8 off-diagonal cells of {`number`,`string`,`boolean`} × {`"s"`, `42`, `true`, `` `tpl` ``} |
 | 2 | annotated state-cell declaration | `<n>: number = "nope"` | **CHECKED** — E-TYPE-031, same rule and same 8 cells as position 1 |
-| 3 | argument | `fn f(x: number)` called `f("nope")`; the dot form `"nope".f()` (§67) | **RULED S447 — E-TYPE-031; not yet checked** (measured S447: impl#1 compiles `addOne(@phrase)` with a `string` argument at exit 0) |
+| 3 | argument | `fn f(x: number)` called `f("nope")` | **RULED S447 — E-TYPE-031; not yet checked** (measured S447: impl#1 compiles `addOne(@phrase)` with a `string` argument at exit 0) |
 | 4 | return | `fn f() -> number { return "nope" }` | not checked |
 | 5 | operand | `let z = "x" * 2` | not checked |
 | 6 | cell or field write | `<n>: number = 1` then `@n = "nope"`; a `number` field `x` of `@p`, then `@p.x = "nope"` | **RULED S440 — E-TYPE-031; not yet checked** (measured S440: impl#1 compiles both at exit 0 — the cell write in an event-handler value and in a function body, the field write in an event-handler value) |
@@ -7074,19 +7071,17 @@ yet emitted** (the row above); impl#1 carries it (§34.0, S440 #12) and the boot
 > #1) — *"a typed field is as typed as a typed cell"* → *"a wrong-typed FIELD write is E-TYPE-031 too"* ·
 > supersedes: the round-1 ⚑ OPEN on field writes.
 
-**Position 3 — an argument (S447 UFCS sub-call 9).** A call argument whose type the compiler PROVES and that
-does not satisfy the corresponding parameter's declared type is **E-TYPE-031**, the same code as positions 1, 2
-and 6 (the call-site rule is §7.3.4; it covers plain calls and the §67 dot form, whose receiver is argument 1).
-An argument's type is PROVEN when it is (a) a syntactically-determined literal (the position-1/2 literal set), or
-(b) an expression whose type a resolved declaration fixes — a read of an annotated cell or of a typed field of a
-cell, an annotated `let` / `const` / parameter, or a call to a function with a declared `->` return type.
-"Does not satisfy" is decided, at this position, in exactly these cases:
+**Position 3 — an argument (S447, call 9 kept).** A plain call's argument whose type the compiler PROVES and
+that does not satisfy the corresponding parameter's declared type is **E-TYPE-031**, the same code as positions
+1, 2 and 6 (the call-site rule is §7.3.4). An argument's type is PROVEN when it is (a) a syntactically-determined
+literal (the position-1/2 literal set), or (b) an expression whose type a resolved declaration fixes — a read of
+an annotated cell or of a typed field of a cell, an annotated `let` / `const` / parameter, or a call to a function
+with a declared `->` return type. "Does not satisfy" is decided, at this position, in exactly these cases:
 
 1. both types are unpredicated primitives from the enumerated set (`number`, `string`, `boolean`) and differ —
    the position-1/2 rule;
 2. one side is a primitive and the other a sequence (`T[]`, a tuple), a struct, an enum or a map — a
-   **kind** mismatch (bryan's S447 `@userStuff.otherNumbers.addOne()`, a `number[]` into `a: number`; and
-   `@userStuff.phrase.addOne()`, a `string` into `a: number`, is case 1);
+   **kind** mismatch (bryan's S447 example: a `number[]` into `a: number`);
 3. the argument is a proven `T | not` and the parameter's type does not admit `not` — ruling S442 #4
    (*"`T | not` into `T` is an error for EVERY type … A `T | not` isn't a `T`."*).
 
@@ -7098,11 +7093,11 @@ measured false-positive class of the ⚑ note below. A sequence argument's grant
 granting MORE than the parameter is accepted). **Nominal on impl#1 — not yet emitted** (the row above);
 impl#1 carries it (§34.0) and the bootstrap implements it.
 
-> **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs on 3-11"* (item 9) · S442 — *"your recs. if the
-> lifecycle says T | not then it can only end as not, yes for all types"* (item 4) · S404 — *"actually I meant a"*
-> (`int` refines `number`) · supersedes: this section's *"Positions 3-5 are NOT YET CHECKED"* on the position-3
-> axis only, and the ⚑ note's *"the normative text lands with the implementation"* on its timing — S447 item 9
-> orders the text FIRST.
+> **Provenance:** ruling:user-voice-scrml.md S447 — *"RULED — UFCS PARKED; keep only the argument checks"* (call 9
+> kept: *"argument arity + argument-type checking for plain calls"*) · S442 — *"your recs. if the lifecycle says T |
+> not then it can only end as not, yes for all types"* (item 4) · S404 — *"actually I meant a"* (`int` refines
+> `number`) · supersedes: this section's *"Positions 3-5 are NOT YET CHECKED"* on the position-3 axis only, and the
+> ⚑ note's *"the normative text lands with the implementation"* on its timing — S447 orders the text FIRST.
 
 **Normative statements.**
 
@@ -7122,9 +7117,8 @@ impl#1 carries it (§34.0) and the bootstrap implements it.
   OUTSIDE it: `int` is a distinct builtin (§14.1.2) and no section of this specification rules
   `int` / `number` assignability, so firing on `<n>: int = "s"` would invent a rule rather than
   enforce one.
-- The compiler SHALL emit `E-TYPE-031` at position 3 — a call argument, including the receiver of a §67 dot
-  call — in the three cases the position-3 paragraph above enumerates, and in no other (S447 item 9; Nominal
-  on impl#1).
+- The compiler SHALL emit `E-TYPE-031` at position 3 — a plain call's argument — in the three cases the
+  position-3 paragraph above enumerates, and in no other (S447 call 9; Nominal on impl#1).
 - Positions 4-5 are **NOT YET CHECKED**, nor are the position-3 pairs the position-3 paragraph leaves
   undecided. A program that assigns a non-assignable value at those positions SHALL compile. This is a statement about the current provable domain, NOT a claim that
   such a program is well-typed: it is not, and a later widening of this section MAY reject it.
@@ -7170,10 +7164,11 @@ the change is `semantics-changed` for a non-literal argument, which no diagnosti
 Until that lands, position 3 remains NOT CHECKED and the row in the table above stands.
 `provenance: ruling:user-voice-scrml.md S404 "actually I meant a"`
 
-⚑ **Amended 2026-10-01 (S447) — position 3 is now WRITTEN (Nominal).** S447 item 9 ruled the argument check
-specified FIRST, ahead of the S404 implementation; the position-3 paragraph above is that text. It is scoped so
-the blocking shape (a `number` argument at an `int` parameter) does NOT fire, so writing it reopens none of the
-false positives this note measures. "Not checked" in the table row now means *not yet emitted by impl#1*.
+⚑ **Amended 2026-10-01 (S447) — position 3 is now WRITTEN (Nominal).** S447 (call 9, kept when the UFCS
+package was parked) ruled the argument check specified FIRST, ahead of the S404 implementation; the position-3
+paragraph above is that text. It is scoped so the blocking shape (a `number` argument at an `int` parameter) does
+NOT fire, so writing it reopens none of the false positives this note measures. "Not checked" in the table row
+now means *not yet emitted by impl#1*.
 
 ### 7.5.2 Unproven types — `asIs` is a signature, not a shrug
 
@@ -21734,7 +21729,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-DEAD-FUNCTION | §12.2 | A function is declared but called from neither a server-classified context nor a client-classified context, is not exported, is not server-annotated, and is not referenced from markup. The function will be tree-shaken from the output. Remove the declaration if intended dead, or wire it up to a caller. RI does not yet track all markup reference patterns; if the diagnostic is a false positive, exporting the function or adding an explicit caller suppresses it. **Fires:** emitted by RI (`compiler/src/route-inference.ts` Step 5d, D4) at the function's declaration site. Added 2026-05-08 (Insight 26 Batch 1) as the in-vacuum complement to caller-context propagation (Trigger 5). | Warning |
 | W-SERVER-IMPORT-UNEMITTED | §21, §12.2 | A compiled server bundle imports `from "./X.server.js"` but the import would fail at runtime: either (a) `X.scrml` has no server content so no `.server.js` is emitted (runtime `Cannot find module`), or (b) `X.server.js` IS emitted but does not export an imported name — e.g. a server-CALLED pure helper that route-infers into a handler (`auth.server.js` emits `export const __ri_route_rolePath`, not `export const rolePath`) → runtime missing-export. Non-fatal — green compile / `node --check` pass; the import only fails when the server bundle is RUN (the "compiled-green ≠ works" class). Companion to the emit-server tree-shake (`g-pure-module-server-emit` Fix A) which prunes the client-only-used import; this cross-file invariant catches the residual server-USED shapes emit-server cannot see (it has no sibling-emission knowledge). **Fires:** post-emit cross-file scan over `cgResult.outputs` in `compiler/src/api.js` (S208, Fix B). | Warning |
 | E-TYPE-030 | §14.7, §15.2 | `asIs` value used past resolution requirement **(Reserved / spec-ahead, S263 — no fire site: the `asIs` resolution-obligation tracker, analogous to the built `lin`/`~` tracker, is unbuilt. Excluded from the freeze fireable set.)** | Error |
-| E-TYPE-031 | §7.5.1, §15.3, §15.10, §15.11, §17.6, §55.1 | **General assignability failure — a value is assigned to a position whose declared type it does not satisfy.** *(Section list reconciled S365, dpa-036 call 4; the reconciliation's own figures and citations CORRECTED in the S365 fix round, which is why they are now stated with their measurement method attached. This row previously named only §15.3/§15.10 and described the code as "Prop value fails declared type constraint" — the PROP case only — while the SPEC's normative text already used it far more widely. MEASURED (`grep -n 'E-TYPE-031' compiler/SPEC.md`, excluding this §34 row and the `W-TYPE-031-UNPROVEN` row): **18 mentions across 12 distinct sections** — §7.5, §7.5.1, §7.5.2, §15.3 (the `using (expr)` value constraint), §15.10, §15.11.2, §15.11.4, §15.11.7, §15.12, §17.6.3 and §17.6.4 (if-as-expression binding), and §55.1. The earlier reconciliation note said "NINE normative sites" and mis-booked three of them — it placed the `using (expr)` constraint at §14.6, which is *Pattern Matching*, and if-as-expression binding at §18, which is *Pattern Matching and Enums* and begins well after those lines. The registry and the normative text disagreed about the code's own scope, which is the §34.0 defect one level up: a catalog that mis-books a code cannot be used to look it up — and a correction that mis-books it differently is the same defect wearing a newer date. The code's fire behaviour is UNCHANGED by either pass; only the booking is corrected.)* The **provable** fire domain is narrower than the section list, and is stated here from the emitters rather than from the prose. MEASURED (`grep -rn '"E-TYPE-031"' compiler/src`): **19 push sites, and exactly three positions** — (a) the annotated `let`/`const` declaration position, one site, `compiler/src/type-system.ts` `annotateNodes` (its annotated-declaration primitive-mismatch arm); (b) the annotated STATE-CELL declaration position (§7.5.1 position 2), one site, the same function's reactive-decl arm, added S402 with the position-1/2 widening; and (c) the validator predicate/arity/arg-shape path, seventeen sites, all in `compiler/src/symbol-table.ts` `checkValidator` and its `checkArgShape` helper, whose own messages cite §55.1 and §55.10. **The prop-passing position (§15.3/§15.10) and the `using`-constraint position have ZERO push sites in `compiler/src` and do not fire today** — they are specified, not implemented, exactly as §7.5.1's measured table already records for positions 3-5. *(Count and position list re-measured S402 — 18/two became 19/three when position 2 landed. This row asserts a measurement, so a widening that does not update it turns the row into the false claim it was written to remove.)* An earlier draft of this row named them as part of the provable domain; that was a false claim inside the §62.2 contract, and it contradicted §7.5.1 in the same commit. Where inference is DEFEATED rather than contradicted, the compiler emits `W-TYPE-031-UNPROVEN` instead (§7.5.2) — the two codes are complements, not alternatives: 031 is "I proved it does not fit", W-031-UNPROVEN is "I could not prove anything". (Emitted by `compiler/src/type-system.ts` `annotateNodes` (declaration position) and `compiler/src/symbol-table.ts` `checkValidator` (validator position). ⛑ **Provenance in this row, and in the `W-TYPE-031-UNPROVEN` row below, cites FILE + SYMBOL and carries NO `:N` — dropped, not re-measured, in the S365 fix round.** `scripts/s34-census.ts` resolves the PATH and the SYMBOL but strips `:N` (`PATH_REF` ends `(?::\d+)?`), so a line number is the one part of a provenance note CI can never falsify: it rots silently and forever. That is how `:10112` survived here — and then four FRESH citations in these two rows went stale by +85 / +89 / +104 lines inside the very round whose purpose was fixing the first one, because they were measured before that round's own insertions. Re-measuring buys a number that is stale again at the next edit to a 17k-line file; dropping it leaves exactly the claim the gate checks. Trust the symbol — and now the symbol is all there is.) **Position 6 (S440 ruling #1, §7.5.1) — a cell write or a typed-field write:** RULED, **Nominal / not yet emitted** (no push site; the measured "exactly three positions" above is unchanged; measured S440: exit 0); impl#1 carries it (§34.0). **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 1; the three SPEC-text OPEN items, #1). **Position 3 (S447 ruling item 9, §7.5.1 / §7.3.4) — a call argument, including a §67 dot call's receiver:** RULED, **Nominal / not yet emitted** (no push site; measured S447: impl#1 compiles `addOne(@phrase)` at exit 0); impl#1 carries it (§34.0). **Provenance:** ruling:user-voice-scrml.md S447 (*"your recs on 3-11"*, item 9). | Error |
+| E-TYPE-031 | §7.5.1, §15.3, §15.10, §15.11, §17.6, §55.1 | **General assignability failure — a value is assigned to a position whose declared type it does not satisfy.** *(Section list reconciled S365, dpa-036 call 4; the reconciliation's own figures and citations CORRECTED in the S365 fix round, which is why they are now stated with their measurement method attached. This row previously named only §15.3/§15.10 and described the code as "Prop value fails declared type constraint" — the PROP case only — while the SPEC's normative text already used it far more widely. MEASURED (`grep -n 'E-TYPE-031' compiler/SPEC.md`, excluding this §34 row and the `W-TYPE-031-UNPROVEN` row): **18 mentions across 12 distinct sections** — §7.5, §7.5.1, §7.5.2, §15.3 (the `using (expr)` value constraint), §15.10, §15.11.2, §15.11.4, §15.11.7, §15.12, §17.6.3 and §17.6.4 (if-as-expression binding), and §55.1. The earlier reconciliation note said "NINE normative sites" and mis-booked three of them — it placed the `using (expr)` constraint at §14.6, which is *Pattern Matching*, and if-as-expression binding at §18, which is *Pattern Matching and Enums* and begins well after those lines. The registry and the normative text disagreed about the code's own scope, which is the §34.0 defect one level up: a catalog that mis-books a code cannot be used to look it up — and a correction that mis-books it differently is the same defect wearing a newer date. The code's fire behaviour is UNCHANGED by either pass; only the booking is corrected.)* The **provable** fire domain is narrower than the section list, and is stated here from the emitters rather than from the prose. MEASURED (`grep -rn '"E-TYPE-031"' compiler/src`): **19 push sites, and exactly three positions** — (a) the annotated `let`/`const` declaration position, one site, `compiler/src/type-system.ts` `annotateNodes` (its annotated-declaration primitive-mismatch arm); (b) the annotated STATE-CELL declaration position (§7.5.1 position 2), one site, the same function's reactive-decl arm, added S402 with the position-1/2 widening; and (c) the validator predicate/arity/arg-shape path, seventeen sites, all in `compiler/src/symbol-table.ts` `checkValidator` and its `checkArgShape` helper, whose own messages cite §55.1 and §55.10. **The prop-passing position (§15.3/§15.10) and the `using`-constraint position have ZERO push sites in `compiler/src` and do not fire today** — they are specified, not implemented, exactly as §7.5.1's measured table already records for positions 3-5. *(Count and position list re-measured S402 — 18/two became 19/three when position 2 landed. This row asserts a measurement, so a widening that does not update it turns the row into the false claim it was written to remove.)* An earlier draft of this row named them as part of the provable domain; that was a false claim inside the §62.2 contract, and it contradicted §7.5.1 in the same commit. Where inference is DEFEATED rather than contradicted, the compiler emits `W-TYPE-031-UNPROVEN` instead (§7.5.2) — the two codes are complements, not alternatives: 031 is "I proved it does not fit", W-031-UNPROVEN is "I could not prove anything". (Emitted by `compiler/src/type-system.ts` `annotateNodes` (declaration position) and `compiler/src/symbol-table.ts` `checkValidator` (validator position). ⛑ **Provenance in this row, and in the `W-TYPE-031-UNPROVEN` row below, cites FILE + SYMBOL and carries NO `:N` — dropped, not re-measured, in the S365 fix round.** `scripts/s34-census.ts` resolves the PATH and the SYMBOL but strips `:N` (`PATH_REF` ends `(?::\d+)?`), so a line number is the one part of a provenance note CI can never falsify: it rots silently and forever. That is how `:10112` survived here — and then four FRESH citations in these two rows went stale by +85 / +89 / +104 lines inside the very round whose purpose was fixing the first one, because they were measured before that round's own insertions. Re-measuring buys a number that is stale again at the next edit to a 17k-line file; dropping it leaves exactly the claim the gate checks. Trust the symbol — and now the symbol is all there is.) **Position 6 (S440 ruling #1, §7.5.1) — a cell write or a typed-field write:** RULED, **Nominal / not yet emitted** (no push site; the measured "exactly three positions" above is unchanged; measured S440: exit 0); impl#1 carries it (§34.0). **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 1; the three SPEC-text OPEN items, #1). **Position 3 (S447 call 9, §7.5.1 / §7.3.4) — a plain call's argument:** RULED, **Nominal / not yet emitted** (no push site; measured S447: impl#1 compiles `addOne(@phrase)` at exit 0); impl#1 carries it (§34.0). **Provenance:** ruling:user-voice-scrml.md S447 (*"RULED — UFCS PARKED; keep only the argument checks"* — call 9 kept). | Error |
 | W-TYPE-031-UNPROVEN | §7.5.2 | A `let` / `const` declaration carries **no** type annotation and expression inference could not determine its type, so the declaration's resolved type is `unknown`. The message names the AST expression node kind at which inference stopped (e.g. `call`, `member`, `binary`, `ternary`, `lit`). **This is the compiler reporting a gap in ITSELF, not a defect in the program:** the program compiles and emits exactly as before, no previously-performed check is skipped, and the process exit status is unchanged. It exists because before S365 a defeated inference produced `asIs` — the SAME value §14.7 reserves for a deliberate, developer-signed escape hatch — so *absence of a diagnostic* and *success* were the same observation, and an unproven type was indistinguishable from a signed-for one. Resolution, and there are exactly two, both one edit: **prove it** by annotating the declaration (`x: T = …`), or **sign for it** by annotating `asIs`, which is silent by design (§14.7). Does NOT fire when an annotation is present, for a `?{ … }` SQL initializer (`W-SQL-ROW-UNTYPED` owns that path), or for a `_={ … }=` foreign initializer **in a position where the language ADMITS one** (§23.2.3 opacity IS the signature). ⚑ That last carve-out is CONDITIONAL, not blanket, and this row states it the way §7.5.2 — its governing section — already does: suppression is keyed to the declaration's ATTACHED foreign slice (§23.2.2), and the parser attaches that slice only at a `_={ … }=` initializer inside a FUNCTION BODY. Written at bare logic-statement scope — directly in a `${ … }` block, outside any function — the slice is not attached, the warning DOES fire, and `E-CODEGEN-INVALID-LOGIC` is the governing diagnostic for a construct the language does not admit there; the firing is incidental to an already-rejected construct, not a defect in the carve-out. MEASURED by compiling both shapes under `<program lang="ts">`: function body → no `W-TYPE-031-UNPROVEN`; bare logic scope → `W-TYPE-031-UNPROVEN` **and** `E-CODEGEN-INVALID-LOGIC`. An earlier draft of this row stated the carve-out unconditionally, which contradicted §7.5.2 in the same commit — the §34.0 defect of a catalog row disagreeing with the section that governs it. Partitions into `result.warnings` (non-fatal; CLI exit unchanged). ⚑ EXPECT A LARGE COUNT ON FIRST CONTACT and read it as a measurement, not a regression — it is the first observation of debt that was always present: 9,954 occurrences across 490 of 2,362 tracked `.scrml` files at introduction, 82.5% of it in the B4 self-host/native-parser trees, and 55% of ALL occurrences at one node kind (`call`). The §7.5.1 widenings retire it. (Catalog addition S365 — dpa-036 call 1; emitted by `compiler/src/type-system.ts` `annotateNodes`, at the un-annotated-declaration arm of its `let` / `const` walker; the gap itself is classified by `compiler/src/type-system.ts` `inferExprType`. ⛑ Provenance in this row cites FILE + SYMBOL and deliberately carries NO `:N` — see the E-TYPE-031 row above for why.) | Warning |
 | E-TYPE-ANY-FORBIDDEN | §14.1.1 | The literal type-token `any` appears in a type-annotation position (struct / error / enum-variant-payload / tuple field, type-alias RHS, state-cell annotation, `fn`/`function` parameter or return type, and the recursive leaf positions). `any` is not a scrml type — there is no `any` (S174 hard line; TypeScript's type-checking opt-out has no scrml equivalent). Use a concrete type, or `asIs` for a deliberate, named untyped escape hatch. Symmetric with `E-TYPE-UNKNOWN-NAME` (§14.1.2) — an undefined type NAME is rejected at the identical loci via the same locus traversal. (Catalog addition S174; loci broadened S174 follow-on; emitted at `compiler/src/type-system.ts` `checkAnyTypeForbidden`.) | Error |
 | E-TYPE-UNKNOWN-NAME | §14.1.2 | An unrecognized (typo'd or undefined) type NAME appears in a type-annotation position — the SAME loci as `E-TYPE-ANY-FORBIDDEN` (struct / error / enum-variant-payload / tuple field, type-alias RHS, state-cell annotation, `fn`/`function` param + return, and recursive leaf positions: inline-struct field, array element, map VALUE, union member, snippet param, lifecycle post-type). The name resolves against the file's `typeRegistry` per §53.14.5 (forward-reference-safe placeholder pass); cross-file imports resolve via §21.8 / the §21.3 imported-types seed, and an imported specifier name is exempt even in single-file mode. `asIs` is the never-fires escape hatch. Carve-outs: a map KEY is owned by `E-MAP-KEY-NOT-COMPARABLE` (§59.4, no double-fire); a machine name (§51.3) and `<db>`-block-scoped annotations are exempt. Before this rule the name collapsed SILENTLY to `asIs` (the broader leak §14.1.1 deferred). Emitted at the decl-binding sites (NOT `resolveTypeExpr`, which is span-free) by `compiler/src/type-system.ts` `checkUnknownTypeNames` (run AFTER the imported-types seed). (Catalog addition S174 follow-on.) | Error |
@@ -21762,12 +21757,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ATTR-UNQUOTED-OPERATOR | §5.1, §17.1 | An unquoted attribute CONDITION (`if=`/`show=`/`else-if=`) contains a bare binary/ternary operator (`>= > < <= == != && \|\| + - * /` or ternary `?:`). An unquoted condition admits only the atomic forms (`@var` / `obj.prop` / `fn()` / prefix `!`); operator conditions SHALL be parenthesized `if=(expr)` or quoted `if="expr"`. Fires ONCE per offending attribute (cluster-A, S188 "reject + parens"). | Error |
 | E-SCOPE-001 | §5.2 | Unquoted identifier not resolvable in scope | Error |
 | E-SCOPE-REDECLARE | §7.3.3 | Inside a function body, a `let` / `const` / `lin` / `function` declaration redeclares a name already bound in the SAME block (another such declaration, or — in the function's top-level block — a parameter). Nested-block shadowing is legal. Before this code the program failed at codegen ("Identifier already declared"); a `defer` in the block made it compile. Direction: newly-rejecting in name only (every rejected program already failed at codegen). (S430 round 5; emitted at `compiler/src/validators/lint-redeclare.ts`.) | Error |
-| E-CALL-ARITY | §7.3 | A call passes more arguments than the function declares parameters, or fewer — unless each omitted parameter has a default (§7.3.2). Reopen condition (ruled): the callback case. **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #2). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles both at exit 0); impl#1 carries it (§34.0). **S447:** also fires on a §67 dot call — the receiver is argument 1 (§7.3.4); same Nominal status. **Provenance:** ruling:user-voice-scrml.md S447 (*"your recs on 3-11"*, item 9). | Error |
-| E-CALL-MEMBER-COLLISION | §67.5 | `recv.name(…)` where `name` is BOTH a built-in member of the receiver's static type (a host member on a string / number / sequence, or a compiler-owned member — §59 map/set vocabulary, §51.0.G `.advance`, `?{}` `.get`/`.all`/`.run`, §66.12 sequence edits) AND a function in scope. A compile error: the author disambiguates — the plain call `name(recv, …)` for the function, or rename / alias it on import. Struct and enum receivers never collide (`E-STRUCT-FUNCTION-FIELD`: they have no function members). Both silent alternatives were rejected (function-wins re-routes 17 stdlib calls; member-wins shadows a user function and flips on host evolution). **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs on both UFCS calls"* (call 1). **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §67; the bootstrap does). | Error |
-| E-CALL-UNKNOWN-MEMBER | §67.5 | `recv.name(…)` on a receiver of KNOWN static type where `name` is neither a member of that type nor a dot-callable function (§67.3: declared in scope or imported by name) — `@phrase.notAThing()`, `@name.lenght()`, or a function reachable only through a braceless `use` (the message then names the plain call). A host / foreign / `asIs` receiver passes through. Closes impl#1's silent emit of `.addOne()` on a value (a runtime `TypeError`). **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs on 3-11"* (items 4 and 6). **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §67; the bootstrap does). | Error |
-| E-DOT-ASSIGN-NOT-STATEMENT | §67.7 | A `.=` write form (`L .= f(…)`, ≡ `L = L.f(…)`) in an expression position. `.=` is statement-only, like `+=` (§50.13). **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs on both UFCS calls"* (call 2, the answered option text *"Statement-only, like `+=`"*). **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §67; the bootstrap does). | Error |
-| E-DOT-ASSIGN-NOT-CALL | §67.7 | The right-hand side of a `.=` does not begin with a call (`@n .= 5`, `@n .= other`, `@n .= x.f()`): the left side is the implied receiver, so the right side starts at `identifier(…)`. A field-first `.=` is not ruled (§67.12 U5). **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs on both UFCS calls"* (call 2). **Nominal / spec-ahead — not yet emitted** (impl#1 accepts `@n .= addOne()` and silently miscompiles it to a zero-argument call — `docs/known-gaps.md`). | Error |
-| E-PIPE-NOT-IN-SCRML | §67.2 | A `\|>` in logic. scrml has no pipe operator — neither a write-back pipe nor a pure pipe; the dot chain is the pipe (§67). The message names `\|>` and the two scrml forms, `x.f()` and `x .= f()`. Named in the `E-*-NOT-IN-SCRML` family (§7.2.1), though `\|>` is not JavaScript. **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs on both UFCS calls"* (call 2: `\|>`-writes rejected) and *"your recs on 3-11"* (item 3: *"No `\|>` at all"*). **Nominal / spec-ahead — not yet emitted** (impl#1 fails with an unnamed `E-CODEGEN-INVALID-LOGIC`). | Error |
+| E-CALL-ARITY | §7.3 | A call passes more arguments than the function declares parameters, or fewer — unless each omitted parameter has a default (§7.3.2). Reopen condition (ruled): the callback case. **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #2). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles both at exit 0); impl#1 carries it (§34.0). **S447:** the call-site check is restated with the argument-type check in §7.3.4 (plain calls); same Nominal status. **Provenance:** ruling:user-voice-scrml.md S447 (*"RULED — UFCS PARKED; keep only the argument checks"* — call 9 kept). | Error |
 | E-SCOPE-010 | §20.4, §7.6 | Developer declares variable with reserved binding name (`route`, `session`) **(reserved-binding trigger spec-ahead, S265 — not fired; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)**. ALSO (S440 ruling #6, §7.6): two top-level `function` declarations of one name. **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6). **Named; impl pending — Nominal / not yet emitted for the `function` case** (measured S440: exit 0); impl#1 carries it (§34.0). | Error |
 | E-SCOPE-011 | §20.4 | Access to undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
 | E-SCOPE-012 | §20.5 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` establishment builtin is built; bare `session` is bound into server-escalated scopes and auto-escalates its enclosing function, so a `session` reference that is NOT server-escalated (e.g. top-level `${ }` logic) fires this. Distinct from the `@session` client projection.)** | Error |
@@ -22398,7 +22388,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MW-004 | §40 | `handle()` middleware returns a value whose type is not `Response`. Middleware must produce a Bun `Response`; non-`Response` returns indicate a malformed pipeline. (Catalog addition S84 Wave 2 #5; full prose at §40 lines 17226, 17306.) | Error |
 | E-TYPE-043 | §17.6, §33 | A function with a non-optional declared return type has a code path that returns `not` (the absence sentinel) — directly via `return not` or implicitly by falling off the end of the function body. Resolution: include `\| not` in the declared return type, or guarantee a non-`not` return on every path. Server functions that fall through implicitly are subject to the same rule. (Catalog addition S84 Wave 2 #5; full prose at §17.6 lines 17901, 17928, 17988.) | Error |
 | E-TYPE-044 | §17.6 | `given` (presence-guard) is applied to a variable whose declared type does not include `\| not`. The guard has nothing to refine — the variable is already known to be non-`not`. Resolution: drop the `given` guard, or widen the variable's type. (Catalog addition S84 Wave 2 #5; full prose at §17.6 line 17929.) | Error |
-| E-TYPE-046 | §42.3.5, §14.3.1 | Member access (`.field` / `[key]` / `.method(...)`) through a **plain-optional** (`T \| not` / `T?`) receiver that may hold `not`, without optional-chaining the access (`recv?.field`, §42.3.6) or narrowing the receiver (`if=` / `given` / `is not` / `match`). An unguarded dereference would fault at runtime (`null`-access `TypeError`); `not` propagates, it does not fault (§42.1). Per-hop: `?.` guards only its immediate receiver. Distinct from E-TYPE-001 (lifecycle `(not to T)`, pre-transition read) — a receiver fires exactly one. Resolution: `recv?.field` to propagate absence, or narrow `recv` to prove presence. (S237 — ruling `docs/known-gaps.md` `g-not-cell-render-null-throw`; wired S237.) **S447 (§67.9):** a §67 dot call through such a receiver (`@maybe.addOne()`) is a member access and fires this code; `@maybe?.addOne()` propagates `not`. **Nominal / not yet emitted for the dot-call-over-a-free-function case** (impl#1 does not implement §67). **Provenance:** dd:scrml-support/docs/deep-dives/ufcs-method-call-syntax-2026-10-01.md (interactions table; not separately ruled). | Error |
+| E-TYPE-046 | §42.3.5, §14.3.1 | Member access (`.field` / `[key]` / `.method(...)`) through a **plain-optional** (`T \| not` / `T?`) receiver that may hold `not`, without optional-chaining the access (`recv?.field`, §42.3.6) or narrowing the receiver (`if=` / `given` / `is not` / `match`). An unguarded dereference would fault at runtime (`null`-access `TypeError`); `not` propagates, it does not fault (§42.1). Per-hop: `?.` guards only its immediate receiver. Distinct from E-TYPE-001 (lifecycle `(not to T)`, pre-transition read) — a receiver fires exactly one. Resolution: `recv?.field` to propagate absence, or narrow `recv` to prove presence. (S237 — ruling `docs/known-gaps.md` `g-not-cell-render-null-throw`; wired S237.) | Error |
 | E-CONTRACT-002-RT | §53.11 | **Reserved.** Named shape registry lookup is fully resolved at compile time; this runtime form SHALL NOT be emitted by the runtime. Preserved for forensic search-hit stability and to mirror the runtime/compile-time naming convention used elsewhere in the contract family. (Catalog addition S84 Wave 2 #5; full prose at §53.11 lines 25028-25030.) | Runtime |
 | E-REPLAY-001-RT | §51.14 | Runtime: a replay-mode replay index is out of bounds for the recorded log. Message format: `E-REPLAY-001-RT: replay index {n} out of bounds for log of length {m}`. Thrown by the runtime when a deterministic-replay step attempts to read past the recorded boundary — usually indicates a divergence between record-time and replay-time event-counts. (Catalog addition S84 Wave 2 #5; full prose at §51.14 lines 23495-23541.) | Runtime |
 | E-CLOSURE-001 | §40.9.1, §40.9.11 | Closure analysis fails to terminate — a cycle exists in the reachability graph that the fixed-point operator does not collapse. Defensive; SHOULD NOT fire on valid source because the underlying graphs (§31 DG reactive, §40 auth, §52 server-fn, §41 vendor) are themselves finite. If observed, file a compiler bug — indicates either a missing fixed-point fold case in the Stage 7.6 Reachability Solver (PIPELINE.md Stage 7.6) or a divergence between the input graphs and their finiteness guarantees. (Catalog addition S86 v0.3 Approach A spec-amendment; full prose at §40.9.1.) | Error |
@@ -22485,7 +22475,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 |---|---|---|---|
 | E-STMT-UNEXPECTED-TOKEN | §4 | Unexpected token — no statement begins here. Core statement-grammar parse error. | Error |
 | E-STMT-MISSING-SEMICOLON | §4 | Expected `;` or a newline to end the statement. | Error |
-| E-STMT-NO-EFFECT | §40.8 | (S445 item 2.) An expression statement at the top of a `<program>` / `<page>` / `<channel>` body has **no effect** — it contains no call, no assignment, no `++` / `--`, no `send` (e.g. bare `@count`, `@a == 1`, `"Total: " + @count`, `x => y`). It is valid code that does nothing, so it is reported as that, not as `E-UNQUOTED-DISPLAY-TEXT`; the message names the declared forms for showing a value (`<span>${@count}</span>`, `"${@count}"`). A literal-only statement (`404`) is `E-UNQUOTED-DISPLAY-TEXT`; an untargeted label is `E-UNQUOTED-DISPLAY-TEXT` on the label. Emitted at `compiler/src/ast-builder.js` via `noEffectError` (default front end) and `compiler/native-parser/parse-markup.js` via `noEffectNativeMessage` (native); the judgment is the shared `compiler/native-parser/body-top-coverage.js` `liveExprHasEffect`. **S447 (§67.6):** a dot call to a `fn`, or a §66.12 sequence-edit member call (`@items.push(x)`), does not count as an effect — as a statement it fires this code, message naming the `.=` form; **Nominal / not yet emitted for that case** (impl#1 does not implement §67). **Provenance:** ruling:user-voice-scrml.md S447 (*"your recs on 3-11"*, items 8 and 11). | Error |
+| E-STMT-NO-EFFECT | §40.8 | (S445 item 2.) An expression statement at the top of a `<program>` / `<page>` / `<channel>` body has **no effect** — it contains no call, no assignment, no `++` / `--`, no `send` (e.g. bare `@count`, `@a == 1`, `"Total: " + @count`, `x => y`). It is valid code that does nothing, so it is reported as that, not as `E-UNQUOTED-DISPLAY-TEXT`; the message names the declared forms for showing a value (`<span>${@count}</span>`, `"${@count}"`). A literal-only statement (`404`) is `E-UNQUOTED-DISPLAY-TEXT`; an untargeted label is `E-UNQUOTED-DISPLAY-TEXT` on the label. Emitted at `compiler/src/ast-builder.js` via `noEffectError` (default front end) and `compiler/native-parser/parse-markup.js` via `noEffectNativeMessage` (native); the judgment is the shared `compiler/native-parser/body-top-coverage.js` `liveExprHasEffect`. | Error |
 | E-STMT-UNCLOSED-BLOCK | §4 | Expected `}` to close a block statement. | Error |
 | E-STMT-STRAY-ELSE | §4 | `else` with no matching `if`. | Error |
 | E-STMT-BINDING-NAME | §4 | Expected an identifier in a binding position. | Error |
@@ -41142,21 +41132,6 @@ operation is not a reactive-correctness question — it is `E-WRITE-NOT-GRANTED`
 > §18.19 ("No-tuple invariant"), §59.7 and §59.8 (the language now has tuples — bracketed, per-position-typed
 > sequences; the parenthesized forms those sections describe remain non-tuples).
 
-> ⚑ **Amendment 2026-10-01 (S447) — every sequence edit is spelled with `.=`; `.` never writes (§67.8).**
-> **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs on 3-11"*, item 11: *"`.` NEVER writes: `.push`
-> and every §66.12 sequence edit use the write form — `@items .= push(x)` — checked against the sequence's grants
-> as an assignment. No exceptions to "`.` never writes"."*
-> The edits this section grants are WRITTEN `@items .= push(x)`, `@items .= pop()`, `@items .= unshift(x)`,
-> `@items .= shift()`, `@items .= splice(…)` — each a `.=` assignment (§67.7) whose classified transition
-> (§66.11.2) is checked against the type's grants. The edit members return the edited sequence and change
-> nothing (§67.8 item 2). **A bare `@items.push(x)` statement is an error** — it has no effect,
-> `E-STMT-NO-EFFECT`, and the message names `@items .= push(x)` (§67.6). §66.12 itself spells no edit with a
-> bare `.`; the `.`-spelled edits elsewhere in §66 — §66.10 item 1 (`@a.push(3)`), §66.11.2 (*"from mutating
-> method calls"*, *"the same edit as `@x.push(e)`"*), §66.19.5 (`@audit.push(…)`, `@audit.pop()`,
-> `@audit.shift()`) — are read in the `.=` spelling and are NOT rewritten in this amendment: §66 is under a
-> concurrent edit (#1214), and §66.19.5's block is the bootstrap's verbatim drift-guarded source (its rewrite
-> lands with the bootstrap's `.=` support). Nominal; impl#1 carries it.
-
 #### 66.12.1 One sequence kind; omission is fully constrained
 
 Arrays and tuples are **ONE sequence kind**. Constraints are opted OUT of by granting permissions; **a sequence
@@ -42088,427 +42063,3 @@ lifecycle, §66.21) · §65.3.2 / §65.6 (`<theme>` — T3, §66.17). dpa-053 (b
 and not specified here. The bootstrap codegen design for §66 (instance-keyed state, per-instance effect scopes and
 disposal, the lazy shared instance, `as=` aliases, lexical self-resolution, keyed instances in `<each>`, value
 semantics and the transition axis) is dpa-051.
-
-## 67. Uniform Function Call Syntax and the `.=` Write Form
-
-> **Status: Nominal / spec-ahead.** This section is NORMATIVE for the scrml language. **impl#1 (the TS
-> compiler, `compiler/src/`) does not implement it** (S435 TS policy: impl#1 does not take new language
-> surface); every impl#1 divergence is CARRIED (§34.0, S440 ruling #12) and the **bootstrap** implements it.
-> What impl#1 does with these spellings today is measured in §67.11 and filed in `docs/known-gaps.md`.
->
-> **Authority.** bryan's verbatim rulings in `scrml-support/user-voice-scrml.md`, S447: *"STATED IDEA → DD —
-> method-call syntax with different semantics (UFCS), no virtual functions"*; *"RULED — "your recs on both UFCS
-> calls""* (calls 1-2); *"RULED — "your recs on 3-11": the UFCS sub-calls"* (calls 3-11). The deep-dive
-> `scrml-support/docs/deep-dives/ufcs-method-call-syntax-2026-10-01.md` is the design record and is **advisory
-> only**: where this section states something only the DD settles, it says so; what neither settles is a
-> `⚑ OPEN` item, consolidated in §67.12. Call numbers below (call 1 … call 11) are the S447 call numbers.
->
-> **Direction of change.** Newly-ACCEPTING for dot calls over free functions (deliberately — bryan S447: *"the
-> syntax itself is well accepted"*); newly-REJECTING for: collisions (call 1), unknown members on known types
-> (call 6), discarded `fn` dot-results (call 8), and every bare `.`-spelled cell edit (call 11 — the 10 measured
-> `@items.push(x)` / `splice` corpus sites migrate to `.=`).
-
-### 67.1 Overview — method syntax, function semantics
-
-`x.f(a)` means `f(x, a)`. That is the whole idea: **uniform function call syntax** (UFCS). The dot is a
-spelling of an ordinary call to a free function, chosen at the call site for reading order —
-`@orders.paid().onOrAfter(@day).top(5)` instead of `top(onOrAfter(paid(@orders), @day), 5)`.
-
-It adds **no** method semantics:
-
-- **No dispatch.** The callee is resolved statically, at the call site, by name (§67.5). Nothing is looked up
-  through the value at runtime.
-- **No `this`.** The receiver is the function's first argument, nothing more. The function is an ordinary
-  `fn` / `function`; it cannot tell how it was called.
-- **No receiver-type selection.** A name has exactly one function in a scope — function overloading is
-  RETIRED (§17.5(a), debate-02) — so the compiler never chooses among same-named functions by the receiver's
-  type.
-- **No behaviour on values.** S430 P1 rejected classes, methods and virtual functions (*"I am against virtual
-  functions. I don't believe that "methods" clean the code, more than stand alone funtions"*; §7.2.1
-  `E-CLASS-NOT-IN-SCRML`). UFCS keeps that: behaviour stays in free functions over values; only the call's
-  SPELLING moves. S447 supersedes S430's "not cleaner" remark on the syntax axis only.
-- **`.` never writes** (§67.8). Value semantics (§66.10) already means no function can change its argument;
-  a dot call is a call, so `@x.f()` never changes `@x`. Writing the result back is the separate `.=` form
-  (§67.7).
-
-### 67.2 Grammar
-
-```
-dot-call     ::= expr '.' identifier arguments          // recv.f(args)  ≡  f(recv, args)
-dot-assign   ::= lvalue '.=' identifier arguments chain? // statement only (§67.7)
-chain        ::= ( '.' identifier arguments | '.' identifier | '[' expr ']' | '?.' … )*
-arguments    ::= '(' arg-list? ')'
-```
-
-1. **Desugar.** A dot call `recv.f(a1, …, an)` whose name resolves to a function (§67.5) is the call
-   `f(recv, a1, …, an)`. Every rule that governs the plain call governs the dot call — arity and argument types
-   (§7.3.4), failable handling (§19.4.3), server-call splitting (§19.9), purity (§48). The receiver is evaluated
-   once, before the other arguments, in source order.
-2. **Parentheses are always required** (call 7). `x.f()` is a call; `x.f` is always a member/field access and
-   never a call. There is no Nim-style `x.len`. (`@x.trim()`, never `@x.trim`.)
-3. **`?.` always means optional chaining** (call 10, §42.3.6). `recv?.f(a)` short-circuits to `not` when `recv`
-   is `not`, otherwise is `f(recv, a)`. Postfix `?` propagation (§19.5) followed by `.` is NOT `?.`: to
-   propagate and then continue, write `(f()?).g()` or bind the result to a name. So `raw.parse()?.validate()`
-   is an optional chain, not "propagate, then validate".
-4. **No `|>`** (call 3). scrml has no pipe operator — not as a write, not as a pure pipe: the dot chain is the
-   pipe. A `|>` in logic is a compile error, `E-PIPE-NOT-IN-SCRML` (§67.10), whose message names the dot chain
-   (`x.f()`) and the write form (`x .= f()`).
-5. **Layout.** A line starting with `.` / `?.` is an error (ruling S446, dpa-063 Call 4 — not yet in this SPEC); inside an open bracket newlines are
-   insignificant, so a leading-dot chain is written inside parentheses (§67.9 example 1).
-
-### 67.3 The dot-callable set (call 4)
-
-A function is **dot-callable** in a file when its name is bound there by:
-
-- a `fn` / `function` declaration in scope (file scope or an enclosing function body, §7.3.1), or
-- a **named** import — `import { f } from './x.scrml'`, `import { f as g } …` (the bound name is `g`), or a
-  `use scrml:x { f }` named import (§41.2).
-
-A name that arrives only through a **braceless `use`** (`use scrml:x`, which brings ALL exports into scope,
-§41.2.2) is **plain-call only**: `f(x)` works, `x.f()` does not resolve to it. Nothing is global: there is no
-extension registry, and an imported function is dot-callable in the importing file only.
-
-*Why (DD C5 / interactions):* D restricts UFCS to module-scope functions *"to avoid unexpected name conflicts"*,
-and Kotlin's documented failure is *"imports start deciding behavior"*. A braceless `use` is exactly that
-vector — one line adds every export of a module to every dot call in the file.
-
-### 67.4 Targets (call 5)
-
-`fn` and `function` are both dot targets, server functions included.
-
-- **`fn` and `function`.** Value semantics (§66.10) means neither can change the receiver through the
-  argument; restricting `.` to `fn` would make callers know a callee's purity to pick a syntax.
-- **Server functions.** A server call in a chain is split as usual (§19.9): `countOrders(10).label()` lowers to
-  the same tree as `label(countOrders(10))` (measured S447, P6: that nested form already lowers). The receiver
-  travels as an ordinary argument; that is not a cell read inside the server body (E-REACTIVE-003 concerns
-  reads of `@x` in the body).
-- **Failable `!` functions.** A dot call to a `!` function is a call to a `!` function: it SHALL be handled at
-  that link (§19.4.3, `E-ERROR-002`) — `x.parse()?` inside a `!` function, `x.parse() !{ … }`, a `match`, or a
-  binding. A mid-chain failable link is handled at that link: `(raw.parse()?).validate()` (§67.2 item 3).
-- **Not targets:** a function-typed value is never a dot target — no struct field holds one
-  (`E-STRUCT-FUNCTION-FIELD`, §14.3), and a callback parameter is a value, not a `fn` / `function` declaration.
-  Whether a host / foreign function (`_{ }`, a `.js` named import, `import:host`) is a dot target is not ruled
-  (`⚑ OPEN U8`).
-
-### 67.5 Resolution and the collision error (calls 1 and 6)
-
-For `recv.name(args)` the compiler computes two facts, from the receiver's static type and the scope:
-
-- **M** — `name` is a **built-in member** of the receiver's type: a host member the language exposes on
-  strings, numbers and sequences (`trim`, `toLowerCase`, `filter`, `map`, `join`, `slice`, …), or a
-  compiler-owned member of the type (the §59 map / set vocabulary `insert` / `remove` / `update` / `getOr` /
-  `has` / …, the §51.0.G engine `.advance`, the `?{}` SQL `.get` / `.all` / `.run`, the §66.12 sequence edits,
-  §67.8).
-- **F** — `name` is a function in scope (call 1's words: *"an in-scope function"*).
-
-| M | F | Result |
-|---|---|---|
-| yes | no | member call |
-| no | yes, dot-callable (§67.3) | **UFCS:** `name(recv, args)` |
-| no | yes, plain-call only (braceless `use`) | `E-CALL-UNKNOWN-MEMBER` on a known type (below); the message names the plain call `name(recv, …)` |
-| yes | yes | **`E-CALL-MEMBER-COLLISION`** — a compile error; the author disambiguates |
-| no | no | `E-CALL-UNKNOWN-MEMBER` on a known type; pass-through on a host / foreign / `asIs` receiver |
-
-**The collision is an error (call 1).** *"A name that is BOTH an in-scope function and a built-in member of the
-receiver's type is a COMPILE ERROR (the author disambiguates)."* The message names both — *"`trim` is both a
-member of `string` and your function `trim` (line N); write `trim(@x)` for yours, or rename / alias it on
-import"*. The two silent alternatives were rejected on measured evidence: **function-wins** silently re-routes 17
-existing stdlib calls, two of them with swapped arguments (`scrml:regex` `replace(pattern, str, …)`,
-`scrml:path` `join`); **member-wins** silently shadows a user's own `fn trim`, and silently flips when the host
-adds a member (ES2025 added `Set.prototype.union` / `intersection` / `difference`; `scrml:data` exports all
-three). An error is also the reversible choice: every ambiguous program is rejected, so a later ruling can
-loosen it without changing any program that compiles.
-
-**Struct and enum receivers never collide.** A struct field cannot be a function: *"A field whose type is a
-**function type** … is **REJECTED** at declaration with the hard error `E-STRUCT-FUNCTION-FIELD` … a struct is a
-collection of data and state, NOT a behavior-bearing object"* (§14.3). So a struct value has fields and no
-members; for a struct (or enum) receiver M is always "no" and a dot call over a dot-callable function is always
-UFCS. `p.pos.add(v)` with `fn add(a: Vec, b: Vec)` is `add(p.pos, v)` even though `add` is a `Set` member name —
-the receiver is known to be a `Vec`.
-
-**Unknown member on a known type (call 6).** When the receiver's static type is KNOWN (a primitive, a sequence,
-a struct, an enum, a map / set, an engine value) and `name` is neither a member of it nor a dot-callable
-function, the call is **`E-CALL-UNKNOWN-MEMBER`** (`@phrase.notAThing()`, `@name.lenght()`). This closes the
-silent pass-through measured on impl#1 (P1: `@userStuff.oldNum.addOne()` emits `.addOne()` on a number — a
-runtime `TypeError`). A receiver of host / foreign / `asIs` type passes through (the member is the host's
-business, §23).
-
-**Not ruled — how M is computed for an `asIs` or `unknown` receiver** (a signed hatch, or inference defeated, §7.5.2) when `name` IS a dot-callable function. The DD's design
-computes M conservatively — `name` counts as a member if it is a member of ANY modeled receiver kind — so a
-weakly-typed line fails closed rather than silently resolving; it is not in the answered call text. `⚑ OPEN U1`.
-
-### 67.6 Discarded results (call 8)
-
-*"A discarded result of a dot-called `fn` is an error (the S445 #2 no-effect rule)."* A dot call whose callee is
-a `fn` (§48) does **not** count as an effect. An expression statement made of one — `@n.addOne()` alone on a
-line — therefore has no effect and is **`E-STMT-NO-EFFECT`**: the result is dropped and `@n` is unchanged
-(§67.1). For this shape the message names the write form: *"`@n.addOne()` computes a new value and discards
-it — to store it, write `@n .= addOne()`"*.
-
-- **The code is the existing one.** Call 8 cites the S445 #2 rule by name, and that rule is language-wide:
-  *"`E-STMT-NO-EFFECT` is language-wide"* — every logic body, not only the §40.8 body top (ruling S446,
-  dpa-063 Call 5 — not yet written into §40.8; the §34 row still states the body-top scope). Call 8 narrows its
-  effect list: S445 #2's *"Calls always count as effects, even calls to pure functions"* no longer covers a
-  dot-called `fn`. Reason ratified with the call: under UFCS the no-op looks exactly like the old in-place
-  `@items.push(x)`.
-- **The `~` exception carries over** (S446 Call 5's refinement): a statement whose value the next statement reads
-  through `~` (§32.2) is used, not discarded.
-- **Sequence edits.** A §66.12 sequence-edit member call used as a statement (`@items.push(x)` — §67.8) has no
-  effect either, for the same reason (`.` never writes, call 11), and is `E-STMT-NO-EFFECT` with a message
-  naming `@items .= push(x)`.
-- **Not changed by call 8:** a discarded PLAIN call `addOne(@n)`, and a discarded `function` dot call (a
-  `function` may have effects) — both still count as effects under S445 #2. Whether a discarded call to a pure
-  built-in member (`@s.trim()` as a statement) also stops counting is not ruled (`⚑ OPEN U4`).
-
-### 67.7 The `.=` write form (call 2)
-
-```
-@n .= f(a)            ≡   @n = @n.f(a)          ≡   @n = f(@n, a)
-@n .= f().g(b)        ≡   @n = @n.f().g(b)      ≡   @n = g(f(@n), b)
-```
-
-1. **Meaning.** `L .= <chain>` is the assignment `L = L.<chain>`, where `<chain>` begins with a call
-   (`identifier arguments`) and may continue with any dot chain (§67.2). It is the `+=` family — *"the `+=`
-   family; Raku precedent"* — not `|>`: *"`|>` is a pure pipe everywhere else; 14/14 dev personas read it as
-   computing."*
-2. **Statement only**, like `+=` (§50.13: *"`+=`, `-=`, `*=`, `/=`, `%=` are currently statement-only in
-   scrml"*). A `.=` in an expression position is `E-DOT-ASSIGN-NOT-STATEMENT`.
-3. **One write.** The whole chain is one right-hand side, so a chain writes ONCE, at the end — never once per
-   link (a per-link write would notify subscribers per step). The target `L` is evaluated once
-   (`@a[i()] .= f()` calls `i()` once), as for every compound assignment, and its value at that point is the
-   receiver.
-4. **Any assignable lvalue.** A cell `@n`, a field `@form.email`, an indexed position `@a[i]`, a row field
-   `@.qty` inside `<each>` (§17.7.3), a local `let` binding (§50).
-5. **It inherits every assignment rule — nothing is new.** Because `.=` IS an assignment, the checks the
-   desugared `L = L.<chain>` gets apply unchanged: §66 grants (`E-WRITE-NOT-GRANTED`; a certified callee's
-   write-back is an edit, not a replace — §66.12.3 O37 = (c)); `E-DERIVED-WRITE` on a derived declaration
-   (§66.9); an engine field's `rule=` edges (`E-ENGINE-INVALID-TRANSITION`, §66.13.2); lifecycles (§66.11.6);
-   field contracts (§66.11.4); `E-ASSIGN-004` on a `const` binding (§50); `E-TYPE-031` for a wrongly-typed
-   result (§7.5.1 position 6); validators and the validity surface (§55) see the write exactly as they see `=`.
-6. **The right-hand side must begin with a call.** `@n .= 5`, `@n .= other`, `@n .= x.f()` are
-   `E-DOT-ASSIGN-NOT-CALL` — the left side is the implied receiver, so the right side starts at the call. A
-   field-first form (`@node .= next`, ≡ `@node = @node.next`) is not in the ruled text (`⚑ OPEN U5`).
-7. **Failable links** behave as in any expression: `@n .= parsed()?` is `@n = @n.parsed()?` (inside a `!`
-   function); `@n .= parsed() !{ | .Bad :> lift 0 }` handles it inline.
-
-### 67.8 `.` never writes — sequence edits use `.=` (call 11)
-
-*"`.` NEVER writes: `.push` and every §66.12 sequence edit use the write form — `@items .= push(x)` — checked
-against the sequence's grants as an assignment. No exceptions to "`.` never writes"."*
-
-1. **Every write carries an `=`-family token.** A dot call never changes its receiver — not for scrml
-   functions (value semantics, §66.10), and not for built-in members.
-2. **The sequence edits are value-returning members.** `push`, `pop`, `unshift`, `shift`, `splice`, and the
-   in-place reorderers `sort`, `reverse`, `fill`, `copyWithin` — the measured host mutators — are members of a
-   sequence type that RETURN the edited sequence and leave the receiver unchanged. This is forced by the ruled
-   desugar: `@items .= push(x)` is `@items = @items.push(x)`, which stores the right thing only if
-   `@items.push(x)` IS the new sequence. (Not the host's meaning — JS `push` returns the new length. The
-   compiler lowers each edit to a non-mutating form; `⚑ OPEN U6` for the exact vocabulary and the removed
-   element of `pop` / `shift`.)
-3. **The write is classified as the edit, against the grants.** `@items .= push(x)` is an end-append (granted by
-   `append`), `@items .= pop()` a shrink at the end (`pop`), `@items .= unshift(x)` a front grow (`prepend`),
-   `@items .= shift()` a front shrink (`shift`), `@items .= splice(i, n, …)` a shrink-anywhere and/or
-   grow-anywhere (`remove` / `insert`), `@items .= sort()` a position-write — §66.11.2 / §66.12.2. A write the
-   cell's type does not grant is `E-WRITE-NOT-GRANTED`.
-4. **A bare edit statement is an error.** `@items.push(x)` as a statement computes a new sequence and discards
-   it; it has no effect and is `E-STMT-NO-EFFECT` (§67.6), whose message names `@items .= push(x)`. Inside an
-   expression (`let more = @items.push(x)`) it is legal and writes nothing.
-5. **Supersession.** This replaces every spelling in which a `.` call writes a cell: §66.11.2's *"classified at
-   compile time, from mutating method calls"* now means the `.=`-spelled edits; §66.11.2's *"(the same edit as
-   `@x.push(e)`; …)"*, §66.10's `@a.push(3)` and §66.19.5's `@audit.push(…)` / `@audit.pop()` /
-   `@audit.shift()` are read as `@x .= push(e)` / `@a .= push(3)` / `@audit .= push(…)` / `@audit .= pop()` /
-   `@audit .= shift()`. Those §66 lines are not rewritten in this pass (§66.12's amendment banner records why);
-   §6.5's array-mutation text is impl#1's model and is superseded by §66.12 already.
-6. **Not ruled — writes through other compiler-owned members.** §51.0.G `@marioState.advance(.Big)` is a
-   member call that WRITES the engine variable, and §66.13 O5 carried `.advance` over. Call 11 says *"No
-   exceptions"*; whether `.advance` therefore becomes `@m .= advance(.Big)` (or retires in favour of the direct
-   write `@m = .Big`) is not decided — `⚑ OPEN U7`. Effects that are not value writes — a `?{}` `.run()`, a DOM
-   `event.preventDefault()`, a `send` — are outside "`.` never writes": it is about writes to a cell, a field or
-   a binding.
-
-### 67.9 Worked examples
-
-All examples use the §66 declaration forms (Nominal; no compiler builds them yet) and the DD's programs.
-
-**1 — a data pipeline (structs, UFCS).**
-
-```scrml
-<program>
-type Status:enum = { Placed, Paid, Refunded }
-type Order:struct = { id: int, customer: string, total: number, status: Status, day: string }
-type Row:struct   = { customer: string, spend: number }
-
-import { sortBy } from 'scrml:data'
-
-fn paid(xs: Order[]) -> Order[]                   { return xs.filter(o => o.status == .Paid) }
-fn onOrAfter(xs: Order[], day: string) -> Order[] { return xs.filter(o => o.day >= day) }
-fn spendBy(xs: Order[]) -> Row[]                  { … }
-fn top(rows: Row[], n: int) -> Row[]              { return sortBy(rows, "spend", "desc").slice(0, n) }
-
-<let orders:Order[]=[]/>
-<let day:string="2026-09-01"/>
-
-<topCustomers:Row[]=(@orders.paid().onOrAfter(@day).spendBy().top(5))/>
-// the same, one link per line — newlines inside the open paren are insignificant (§67.2 item 5):
-<topCustomers2:Row[]=(
-    @orders
-        .paid()
-        .onOrAfter(@day)
-        .spendBy()
-        .top(5)
-)/>
-</program>
-```
-
-`filter` / `slice` are built-in members of a sequence (M = yes, F = no); `paid`, `onOrAfter`, `spendBy`, `top`
-are dot-callable functions with no member of that name (UFCS). `@orders.spendBy().top(5, 1)` is `E-CALL-ARITY`
-(three arguments to `top(rows, n)`); `@day.top(5)` is `E-TYPE-031` (a `string` receiver into `rows: Row[]`, a
-kind mismatch — §7.5.1 position 3).
-
-**2 — a form normalizer (`.=` on fields, members and functions in one chain).**
-
-```scrml
-import { titleCase } from 'scrml:format'
-fn digitsOnly(s: string) -> string { return s.replace(/\D/g, "") }
-
-function normalize() {
-    @signup.email .= trim().toLowerCase()     // ≡ @signup.email = @signup.email.trim().toLowerCase()
-    @signup.phone .= digitsOnly()             // ≡ @signup.phone = digitsOnly(@signup.phone)
-    @signup.name  .= trim().titleCase()       // one write, after both links
-}
-```
-
-Each line is one field write, judged by the field's contract (§66.11.4) and seen by its validators (§55).
-
-**3 — a game tick (struct receivers never collide).**
-
-```scrml
-type Vec:struct    = { x: number, y: number }
-type Player:struct = { pos: Vec, vel: Vec, hp: int }
-
-fn add(a: Vec, b: Vec) -> Vec            { return { x: a.x + b.x, y: a.y + b.y } }
-fn scale(v: Vec, k: number) -> Vec       { return { x: v.x * k, y: v.y * k } }
-fn step(p: Player, dt: number) -> Player { return { ...p, pos: p.pos.add(p.vel.scale(dt)) } }
-fn clampTo(p: Player, w: number, h: number) -> Player { … }
-
-<let player:Player={ pos: {x:0,y:0}, vel: {x:1,y:0}, hp: 10 }/>
-
-function tick(dt: number) { @player .= step(dt).clampTo(800, 600) }
-```
-
-**4 — collisions and unknown members.**
-
-```scrml
-fn trim(s: string) -> string { … }        // the author's own trim
-fn addOne(a: number) -> number { return a + 1 }
-
-@signup.email.trim()        // E-CALL-MEMBER-COLLISION: `trim` is a string member AND your function
-trim(@signup.email)         // fine — the plain call is always yours
-@signup.email.lenght()      // E-CALL-UNKNOWN-MEMBER (known type `string`)
-<theNewNum:number=(@userStuff.oldNum.addOne())/>   // UFCS — addOne(@userStuff.oldNum)
-@userStuff.phrase.addOne()  // E-TYPE-031: a `string` receiver into `a: number` (§7.3.4)
-@userStuff.oldNum.addOne()  // as a statement: E-STMT-NO-EFFECT — write `@userStuff.oldNum .= addOne()`
-```
-
-**5 — sequence edits under grants.**
-
-```scrml
-type Entry:struct = { at: number, actor: string, action: string }
-<audit:Entry[free, append]=[]/>                  // append-only (§66.19.5)
-<let actor:string="ops"/>
-fn appended(xs: Entry[], e: Entry) -> Entry[] { return [...xs, e] }   // certifiable: an end-append (§66.12.3)
-
-function record(action: string) {
-    @audit .= push({ at: Date.now(), actor: @actor, action: action })   // end-append: granted
-}
-// @audit .= pop()           → E-WRITE-NOT-GRANTED (shrink at the end; only `append` is granted)
-// @audit.push(e)            → E-STMT-NO-EFFECT: `.` never writes — write `@audit .= push(e)`
-// @audit .= appended(e)     → a certified callee (§66.12.3 O37): classified end-append → granted
-```
-
-**6 — derived, engine and `not`.**
-
-```scrml
-fn round(n: number) -> number { … }
-fn next(p: Phase) -> Phase { … }           // Phase: an enum; @phase: a field carrying a rule= graph (§66.13.2)
-
-<total:number=(@price * @qty)/>
-@total .= round()            // E-DERIVED-WRITE — the same error as `@total = @total.round()`
-@phase .= next()             // a result off the field's rule= graph → E-ENGINE-INVALID-TRANSITION
-
-// given a cell @maybe of type `number | not`:
-@maybe.addOne()              // E-TYPE-046 — a possibly-`not` receiver (§42.3.5)
-@maybe?.addOne()             // `not` when @maybe is `not`, else addOne(@maybe)
-```
-
-### 67.10 Diagnostics
-
-Named here; Nominal on impl#1 (no emitter; the bootstrap emits them). §34 carries a Nominal row for each
-(§34.0 outcome 2, the convention the S440 `E-CALL-ARITY` row set for a language-wide Nominal call code).
-
-**New codes**
-
-| Code | Severity | Fires when |
-|---|---|---|
-| **`E-CALL-MEMBER-COLLISION`** | Error | `recv.name(…)` where `name` is both a built-in member of the receiver's static type and a function in scope (§67.5, call 1). The message names both and the two fixes (plain call / rename or alias). **Nominal / spec-ahead — not yet emitted.** |
-| **`E-CALL-UNKNOWN-MEMBER`** | Error | `recv.name(…)` on a receiver of KNOWN type where `name` is neither a member of that type nor a dot-callable function (§67.5, call 6) — including a function reachable only by braceless `use` (the message then names the plain call). **Nominal / spec-ahead — not yet emitted** (impl#1 emits the call raw: a runtime `TypeError`). |
-| **`E-DOT-ASSIGN-NOT-STATEMENT`** | Error | A `.=` in an expression position (§67.7 item 2). **Nominal / spec-ahead — not yet emitted.** |
-| **`E-DOT-ASSIGN-NOT-CALL`** | Error | The right-hand side of `.=` does not begin with a call (`@n .= 5`, `@n .= x.f()`) (§67.7 item 6). **Nominal / spec-ahead — not yet emitted** (impl#1 accepts `@n .= addOne()` and miscompiles it, §67.11). |
-| **`E-PIPE-NOT-IN-SCRML`** | Error | A `\|>` in logic (§67.2 item 4, call 3). The message names `\|>` and the two scrml forms (`x.f()`, `x .= f()`). **Nominal / spec-ahead — not yet emitted** (impl#1 fails with an unnamed `E-CODEGEN-INVALID-LOGIC`). |
-
-**Existing codes with a new trigger**
-
-| Code | New trigger |
-|---|---|
-| **`E-CALL-ARITY`** (§7.3) | Also fires on a dot call; the receiver is argument 1 (§7.3.4). Nominal (unchanged status). |
-| **`E-TYPE-031`** (§7.5.1) | Position 3 — a call argument, including a dot call's receiver (§7.3.4, §7.5.1). Nominal for this case. |
-| **`E-TYPE-046`** (§42.3.5) | A dot call through a possibly-`not` receiver — it is a member access (`recv.method(…)`). Fires instead of E-TYPE-031 for the receiver (one diagnostic per receiver). Nominal for the dot-call case. |
-| **`E-STMT-NO-EFFECT`** (§40.8) | Also fires on an expression statement that is a dot call to a `fn`, or a §66.12 sequence-edit member call — call 8 removes them from the effect list (§67.6, §67.8); the message names the `.=` form. Language-wide per S446 dpa-063 Call 5. Nominal for these cases. |
-| `E-ERROR-002`, `E-WRITE-NOT-GRANTED`, `E-DERIVED-WRITE`, `E-ENGINE-INVALID-TRANSITION`, `E-ASSIGN-004` | Unchanged in meaning; they reach a dot call / a `.=` through the desugar (§67.4, §67.7 item 5). |
-
-### 67.11 What impl#1 does today (measured S447, DD §C3)
-
-| Source | impl#1 result |
-|---|---|
-| `@userStuff.oldNum.addOne()` (free `fn`) | exit 0; emits `.addOne()` on the value — a runtime `TypeError` |
-| `@userStuff.phrase.notAThing()` | exit 0; emitted raw |
-| local `fn trim` + `@x.trim()` | exit 0; the host `trim` runs; the local function is unreachable by dot |
-| `addOne(@phrase)`, `addOne(x, 2)` | exit 0; no argument-type or arity check, even for plain calls |
-| `@n \|> addOne()` | `E-CODEGEN-INVALID-LOGIC` — fails closed, does not name `\|>` |
-| `@n .= addOne()` | **exit 0, silent miscompile**: `addOne()` is called with NO argument; `@n` becomes `NaN` |
-
-Filed in `docs/known-gaps.md` (the impl#1 entry, prov=empirical:S447-ufcs-dd). Per the S435 policy impl#1 is
-not changed to implement §67; the `.=` miscompile is a silent-wrong-output defect the ledger tracks.
-
-### 67.12 OPEN items (not ruled)
-
-| # | Where | The question |
-|---|---|---|
-| U1 | §67.5 | How M is computed for an `asIs` / `unknown` receiver when `name` is a dot-callable function: the DD's conservative "member of ANY modeled kind" (fail closed — `E-CALL-MEMBER-COLLISION` or UFCS), or pass-through to the host member. |
-| U2 | §67.3 / §67.5 | Whether a function reachable only by braceless `use` (plain-call only, call 4) still counts as "an in-scope function" for the collision rule (call 1's literal text says yes; §67.5 follows the literal text). |
-| U3 | §67.3 | Whether a DEFAULT import (`import f from …`) is "imported by name". |
-| U4 | §67.6 | Whether a discarded call to a pure built-in member (`@s.trim();`) — and a discarded plain `fn` call — is also an error, aligning with call 8. |
-| U5 | §67.7 | A field-first `.=` (`@node .= next` ≡ `@node = @node.next`). |
-| U6 | §67.8 | The exact sequence-edit member vocabulary; how the removed element of `pop` / `shift` / `splice` is read when the member returns the edited sequence; the familiarity cost (`let n = xs.push(1)` is a sequence, not a length). |
-| U7 | §67.8 | `.advance` (§51.0.G) and any other compiler-owned member that writes, under "`.` never writes — no exceptions". |
-| U8 | §67.4 | Dot calls over host / foreign functions (`_{ }`, `.js` imports, `import:host`). |
-| U9 | §67.5 | A function whose first parameter admits `T \| not`, dot-called on an un-narrowed `T \| not` receiver: §42.3.5 (E-TYPE-046) rejects it while the plain call is legal. |
-| U10 | §32 | Whether `~` (the implicit pipeline accumulator) retires now that dot chains cover its main use (S446 flagged it). |
-| U11 | §67.5 | Namespace-object receivers (`Math.max(…)`, a module namespace) — not a value receiver; outside UFCS by construction or by rule. |
-| U12 | stdlib | `scrml:regex` `replace(pattern, str, …)` is subject-second; the DD recommends subject-first so UFCS is useful. The 17 stdlib collision sites migrate (rename the import, or plain-call) — not scheduled. |
-
-### 67.13 Cross-references
-
-§7.3 / §7.3.4 (call forms; arity + argument types) · §7.5.1 (assignability, position 3) · §7.2.1
-(`E-CLASS-NOT-IN-SCRML`, S430 P1) · §14.3 (`E-STRUCT-FUNCTION-FIELD`) · §17.5(a) (overloading retired) · §17.7.3
-(`@.` row fields) · §19.4.3 / §19.5 (failable calls, `?`) · §19.9 (server calls, CPS split) · §32 (`~`) · §40.8
-(`E-STMT-NO-EFFECT`) · §41.2 (`use`) · §21.3 (`import`) · §42.3.5 / §42.3.6 (`T | not` receivers, `?.`) · §48
-(`fn`) · §50 (assignment; `+=` statement-only) · §51.0.G (`.advance`) · §55 (validators) · §59 (map / set
-members) · §66.9-§66.13 (grants, derived, value semantics, sequences, engines).
-
-> **Provenance:** ruling:user-voice-scrml.md S447 — "STATED IDEA → DD — method-call syntax with different
-> semantics (UFCS), no virtual functions"; "RULED — "your recs on both UFCS calls": dot calls are uniform
-> function calls; collision is an error; `.=` writes back"; "RULED — "your recs on 3-11": the UFCS sub-calls" ·
-> dd:scrml-support/docs/deep-dives/ufcs-method-call-syntax-2026-10-01.md · supersedes: nothing ruled (new
-> surface); §66.11.2's "mutating method calls" spelling on the `.`-writes axis (§67.8 item 5); S445 #2's
-> "calls always count as effects" for dot-called `fn` (§67.6).

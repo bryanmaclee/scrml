@@ -6,3 +6,4 @@
 - known-gaps: 2 entries (impl#1 + bootstrap); state.ts --write/--check PASS; SPEC-INDEX §67 row + 7 Quick Lookup lines + §7 row; facts --write/--check PASS; PRIMER §6.6 + §11 anti-pattern row
 - tests: unit 21331 pass / 0 fail; slice-m2 448/0, m3 60/0, m4 403/0 (1 skip)
 - incident (not path): a pkill -f with a specific pattern killed my own shell (exit 144); no other effect
+- REWORK (bryan S447 "UFCS PARKED; keep only the argument checks"): SPEC.md + PRIMER restored to origin/main and only §7.3.4 / §7.5.1 position 3 / E-CALL-ARITY + E-TYPE-031 row amendments re-applied (plain calls only); §67, §66.12 banner, 5 new §34 rows, E-STMT-NO-EFFECT/E-TYPE-046 notes, PRIMER §6.6 + §11 row, SPEC-INDEX §67 row/lookups removed; gaps renamed g-impl1-call-checks-and-member-calls-fail-open (HIGH) + g-bootstrap-call-arity-and-argument-type-checks-owed (MED)
