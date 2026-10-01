@@ -32,15 +32,22 @@
 // ---------------------------------------------------------------------------
 // Stats — live effect / listener counts, for tests and devtools.
 // ---------------------------------------------------------------------------
-export const stats = { effects: 0, deriveds: 0, listeners: 0, instances: 0 };
+export const stats = { effects: 0, deriveds: 0, listeners: 0, instances: 0, whens: 0 };
 
 // ---------------------------------------------------------------------------
 // Scopes.
+//
+// Teardown order (SPEC §6.7.2): depth-first — every child scope is torn down
+// before its parent begins; then, for the scope itself, step 1 unregisters its
+// `when` effects, and the remaining cleanups (listeners, effects, DOM, records)
+// run last-in-first-out. (Steps 2–4 — <timer>/<poll>, cleanup(), animationFrame
+// — have no bootstrap form yet; they will join the LIFO list after step 1.)
 // ---------------------------------------------------------------------------
 export class Scope {
   constructor(parent) {
     this.parent = parent;
     this.children = new Set();
+    this.whens = [];
     this.cleanups = [];
     this.disposed = false;
     if (parent) parent.children.add(this);
@@ -50,15 +57,22 @@ export class Scope {
     if (this.disposed) { cleanup(); return; }
     this.cleanups.push(cleanup);
   }
+  /** Register a `when` effect's unregistration — teardown step 1 (§6.7.2). */
+  ownWhen(unregister) {
+    if (this.disposed) { unregister(); return; }
+    this.whens.push(unregister);
+  }
   child() { return new Scope(this); }
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
     batch(() => {
       for (const c of [...this.children].reverse()) c.dispose();
+      for (const unregister of this.whens) unregister();
       for (let i = this.cleanups.length - 1; i >= 0; i--) this.cleanups[i]();
     });
     this.children.clear();
+    this.whens = [];
     this.cleanups = [];
     if (this.parent) this.parent.children.delete(this);
   }
@@ -214,6 +228,114 @@ class Effect {
 export function effect(scope, fn) {
   requireScope(scope, "an effect");
   return new Effect(scope, fn);
+}
+
+// ---------------------------------------------------------------------------
+// `when <deps> changes { body }` (SPEC §6.7.4) and the suspendable task layer.
+//
+// A When subscribes to EXACTLY its dep cells (it is an observer of each, the
+// set every write fans out to) and never tracks its body: an unlisted read is
+// not a trigger. It does not run at registration. A change queues it; it runs
+// once per flush — after the write's batch completes, before control returns
+// to the writer, so before the next microtask boundary — however many of its
+// deps that batch changed. Its body runs untracked and in ONE batch. A derived
+// value is recomputed on read (lazy pull), so a derived the body reads already
+// reflects the change (§6.7.4 flush ordering, by construction).
+//
+// Each run gets a TASK: the handle a suspension (`suspend`, Core
+// Stmt.Suspend) resumes through. Unregistering the When (its scope's teardown,
+// step 1) cancels every task it has in flight: a cancelled task's continuation
+// never runs, so a destroyed scope's effect never resumes and never writes.
+// (⚑ A When re-triggered while an earlier run is suspended: SPEC does not say —
+// see docs/changes/s446-bootstrap-u0-when-effects/DESIGN.md §5. U0 has no
+// source form that suspends; each run's task is independent here.)
+// ---------------------------------------------------------------------------
+class Task {
+  constructor(owner) {
+    this.owner = owner;
+    this.cancelled = false;
+    this.pending = 0;
+  }
+  cancel() { this.cancelled = true; }
+}
+
+class When {
+  constructor(scope, deps, body) {
+    this.deps = deps;
+    this.body = body;
+    this.disposed = false;
+    this.tasks = new Set();
+    for (const d of deps) d.observers.add(this);
+    stats.whens++;
+    scope.ownWhen(() => this.unregister());
+  }
+  markStale() {
+    if (this.disposed) return;
+    queue.add(this);
+    if (batchDepth === 0) flush();
+  }
+  run() {
+    const task = new Task(this);
+    this.tasks.add(task);
+    try {
+      untrack(() => batch(() => this.body(task)));
+    } finally {
+      this.settled(task);
+    }
+  }
+  /** A task with no suspension pending is finished. */
+  settled(task) {
+    if (task.pending === 0) this.tasks.delete(task);
+  }
+  unregister() {
+    if (this.disposed) return;
+    this.disposed = true;
+    queue.delete(this);
+    for (const d of this.deps) d.observers.delete(this);
+    for (const t of this.tasks) t.cancel();
+    this.tasks.clear();
+    stats.whens--;
+  }
+}
+
+/**
+ * Register `when <deps> changes { body }` in `scope` (§6.7.4). `deps` are the
+ * dep CELLS; `body(task)` is the effect. Unregistered when `scope` is disposed.
+ */
+export function when(scope, deps, body) {
+  requireScope(scope, "a when effect");
+  for (const d of deps) {
+    if (!(d instanceof Cell)) throw new Error("a when dep must be a mutable cell (§6.7.4, E-LIFECYCLE-007)");
+  }
+  new When(scope, deps, body);
+}
+
+/**
+ * Suspend `task` on `value` (Core Stmt.Suspend — the CPS split, §19.9.8): when
+ * it settles, run the continuation `k(v)` in one batch — unless the task was
+ * cancelled meanwhile, in which case nothing runs and nothing is written. A
+ * rejection reaching a live task is re-raised (never swallowed); the §19 error
+ * context of a `when` body arrives with server calls (U1).
+ */
+export function suspend(task, value, k) {
+  task.pending++;
+  Promise.resolve(value).then(
+    (v) => {
+      task.pending--;
+      if (task.cancelled) return;
+      try {
+        untrack(() => batch(() => k(v)));
+      } finally {
+        task.owner.settled(task);
+      }
+    },
+    (e) => {
+      task.pending--;
+      if (task.cancelled) return;
+      task.owner.settled(task);
+      throw e;
+    },
+  );
 }
 
 /** A writable cell holding `v`. */

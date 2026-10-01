@@ -61,6 +61,7 @@ ${
             .If(cond: x) :> "If"
             .Return(e: x) :> "Return"
             .Eval(e: x) :> "Eval"
+            .Suspend(bind: x) :> "Suspend"
         }
     }
 
@@ -132,6 +133,7 @@ ${
             .Instance(decl: x) :> "Instance"
             .Slot :> "Slot"
             .Star(decl: x) :> "Star"
+            .When(deps: x) :> "When"
         }
     }
 

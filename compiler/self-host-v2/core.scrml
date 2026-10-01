@@ -208,6 +208,15 @@ ${
     // Writes applied, in order; on a refusal NONE is applied. Its Writes' values
     // are Locals — the one snapshot, evaluated by the Lets before it (check.scrml
     // C7), so checking and applying never re-evaluate a value.
+    // s446 (U0) — Suspend: the CPS suspension point (§19.9.8: "the canonical
+    // scrml async surface is the body-split / CPS mechanism"; §13.2: the
+    // compiler inserts the await). Evaluate `on`; suspend; when it settles with
+    // a value, bind it to `bind` and run `then` — unless the effect that owns
+    // the suspension was torn down meanwhile (then `then` never runs). The
+    // continuation is EXPLICIT: nothing follows a Suspend in its block
+    // (check.scrml C12 — and, in U0, a Suspend stands only at the tail of a
+    // When body or of another Suspend's `then`). No source form produces one
+    // until U1 (`ServerCall` will be its `on`).
     export type Stmt:enum = {
         Let(sym: Sym, init: Expr),
         Assign(local: Sym, value: Expr),
@@ -216,6 +225,7 @@ ${
         If(cond: Expr, thenB: Block, elseB: Block | not),
         Return(e: Expr),
         Eval(e: Expr),
+        Suspend(bind: Sym, on: Expr, then: Block),
     }
     export type Block:struct = { stmts: Stmt[] }
 
@@ -239,6 +249,12 @@ ${
     export type ConstructAttr:struct = { field: int, value: Expr }
     export type CondArm:struct = { test: Expr, body: View[] }
 
+    // s446 (U0) — one entry of a `when` dep-list (§6.7.4: `'@' identifier`):
+    // ONE cell, field `idx` of `decl` through `inst`. A whole instance, a
+    // member path or a computed value is unrepresentable here; that the field
+    // is MUTABLE (has a write capability) is check.scrml C11.
+    export type WhenDep:struct = { decl: Sym, inst: InstRef, idx: int }
+
     export type View:enum = {
         El(tag: string, attrs: Attr[], kids: View[]),
         Text(text: string),
@@ -250,6 +266,14 @@ ${
         // s444 — `<*x/>` (§66.6.2): the EXISTING instance `inst` of `decl`,
         // rendered with decl's renders; constructs nothing (M1 D4 closed).
         Star(decl: Sym, inst: InstRef),
+        // s446 (U0) — `when <deps> changes { body }` (§6.7.4): a reactive
+        // effect OWNED BY THE SCOPE THIS VIEW LIST RENDERS INTO (a
+        // declaration's render, a Cond arm, an Each row — §6.7.2) and
+        // unregistered when that scope is destroyed (teardown step 1). It
+        // renders no DOM. It runs `body` when a listed cell changes, never on
+        // mount; unlisted reads are not triggers. Nesting is unrepresentable
+        // (a body is a Block; no Stmt holds a View).
+        When(deps: WhenDep[], body: Block),
     }
 
     // -------------------------------------------------------------------------

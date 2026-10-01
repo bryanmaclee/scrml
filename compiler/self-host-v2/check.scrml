@@ -38,13 +38,18 @@
 //       ≥ 1; RemoveAnywhere carries `SeqCall(Filter, <the field itself>, λ)`
 //   C10 (s444) a Star's instance resolves to its declaration (C4's rule), and
 //       that declaration has a renders
+//   C11 (s446) a When's dep-list is non-empty, every dep resolves (C4's rule)
+//       to a MUTABLE field (one with a write capability — E-LIFECYCLE-007), and
+//       the body writes no dep (E-LIFECYCLE-006)
+//   C12 (s446) a Suspend stands only at the tail of an effect body (a When
+//       body, or the `then` of another Suspend) — the CPS split point
 //   (C3 covers the s444 edits: the removals by the field's grants; ElemAt by
 //   the ELEMENT field's own contract, dpa-052 Q3.)
 // A diagnostic is a message string (§4 permits strings as text).
 // =============================================================================
 ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, Attr, Block,
-             EditKind, Check, Stmt, View, Field, Decl, CoreProgram, CapOwner, TransitionGraph,
+             EditKind, Check, Stmt, View, WhenDep, Field, Decl, CoreProgram, CapOwner, TransitionGraph,
              capOwner, grantsAnyWrite, findDecl, findTypeDef } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
 
@@ -66,7 +71,7 @@ ${
         for (const s of p.server) {
             for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, [], n)) }
         }
-        return out
+        return out.concat(checkSuspends(p))
     }
 
     fn checkField(d: Decl, f: Field) -> string[] {
@@ -123,6 +128,7 @@ ${
             .If(cond: x) :> ["C8: a bind's write is not a Write"]
             .Return(e: x) :> ["C8: a bind's write is not a Write"]
             .Eval(e: x) :> ["C8: a bind's write is not a Write"]
+            .Suspend(bind: x) :> ["C8: a bind's write is not a Write"]
         }
     }
 
@@ -224,6 +230,7 @@ ${
     fn checkView(p: CoreProgram, encl: Decl[], v: View) -> string[] {
         return match v {
             .Star(decl: d, inst: i) :> checkStar(p, encl, d, i)
+            .When(deps: ds, body: b) :> checkWhen(p, encl, ds, b)
             .El(tag: x) :> []
             .Text(text: x) :> []
             .Dyn(e: x) :> []
@@ -232,6 +239,175 @@ ${
             .Instance(decl: x) :> []
             .Slot :> []
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // C11 (s446) — a When (§6.7.4): its dep-list is non-empty; every dep
+    // resolves (C4's rule) to a field of its declaration that has a write
+    // capability — a locked or derived field has no change event
+    // (E-LIFECYCLE-007); and the body writes no dep through the dep's own
+    // instance (E-LIFECYCLE-006 — the effect would re-trigger itself).
+    // -------------------------------------------------------------------------
+    fn checkWhen(p: CoreProgram, encl: Decl[], deps: WhenDep[], body: Block) -> string[] {
+        let out: string[] = []
+        if (deps.length == 0) out = out.concat(["C11: a When has an empty dep-list (§6.7.4: at least one entry)"])
+        for (const dep of deps) { out = out.concat(checkWhenDep(p, encl, dep)) }
+        for (const n of allNodes(Node.NBlock(body))) { out = out.concat(depWriteProblems(p, deps, n)) }
+        return out
+    }
+
+    fn checkWhenDep(p: CoreProgram, encl: Decl[], dep: WhenDep) -> string[] {
+        const d: Decl | not = findDecl(p, dep.decl)
+        if (d is not) return ["C11: a When dep names declaration `" + dep.decl.hint + "`, which does not exist"]
+        const target: Decl | not = resolveInst(p, encl, dep.inst)
+        if (target is not) return ["C11: a When dep of <" + d.sym.hint + "> goes through " + instText(dep.inst) + ", which does not resolve"]
+        if (target.sym.id != d.sym.id) return ["C11: a When dep of <" + d.sym.hint + "> goes through " + instText(dep.inst) + ", an instance of <" + target.sym.hint + ">"]
+        if (dep.idx < 0 || dep.idx >= d.fields.length) return ["C11: a When dep names field " + dep.idx + " of <" + d.sym.hint + ">, which has no such field"]
+        const f: Field = d.fields[dep.idx]
+        if (f.wcap is not) return ["C11: a When dep <" + d.sym.hint + ">." + f.sym.hint + " is not a mutable cell (no write capability — a locked or derived field has no change event)"]
+        return []
+    }
+
+    fn depWriteProblems(p: CoreProgram, deps: WhenDep[], n: Node) -> string[] {
+        return match n {
+            .NStmt(s: s) :> stmtDepWrite(p, deps, s)
+            .NProgram(p: q) :> []
+            .NDecl(d: d) :> []
+            .NField(f: f) :> []
+            .NFn(f: f) :> []
+            .NServerFn(f: f) :> []
+            .NBlock(b: b) :> []
+            .NExpr(e: e) :> []
+            .NPlace(pl: pl) :> []
+            .NInst(i: i) :> []
+            .NPattern(pat: pat) :> []
+            .NEdit(k: k) :> []
+            .NView(v: v) :> []
+            .NAttr(a: a) :> []
+        }
+    }
+
+    fn stmtDepWrite(p: CoreProgram, deps: WhenDep[], s: Stmt) -> string[] {
+        return match s {
+            .Write(cap: cap, inst: inst) :> writesDep(p, deps, cap, inst)
+            .Let(sym: x) :> []
+            .Assign(local: x) :> []
+            .Commit(writes: x) :> []
+            .If(cond: x) :> []
+            .Return(e: x) :> []
+            .Eval(e: x) :> []
+            .Suspend(bind: x) :> []
+        }
+    }
+
+    fn writesDep(p: CoreProgram, deps: WhenDep[], cap: Sym, inst: InstRef) -> string[] {
+        const owner: CapOwner | not = capOwner(p, cap)
+        if (owner is not) return []                     // C2 reports it
+        for (const dep of deps) {
+            if (dep.decl.id == owner.decl.sym.id && dep.idx == owner.idx && instIdKey(dep.inst) == instIdKey(inst)) {
+                return ["C11: a When body writes its own dep <" + owner.decl.sym.hint + ">." + owner.decl.fields[owner.idx].sym.hint + " (E-LIFECYCLE-006: the effect would re-trigger itself)"]
+            }
+        }
+        return []
+    }
+
+    // -------------------------------------------------------------------------
+    // C12 (s446) — a Suspend is a CPS split point: its continuation is its
+    // `then`, so nothing may follow it in its block, and in U0 it stands only
+    // at the TAIL of an effect body — a When body, or (a chain) the `then` of
+    // another Suspend. In an If branch the statements after the If would run
+    // before the branch's continuation; in a function, handler or bind there
+    // is no owning effect to cancel it on teardown (U1 widens this).
+    // -------------------------------------------------------------------------
+    fn checkSuspends(p: CoreProgram) -> string[] {
+        let total: int = 0
+        let legal: int = 0
+        for (const n of allNodes(Node.NProgram(p))) {
+            total = total + suspendAt(n)
+            legal = legal + whenTails(n)
+        }
+        if (total == legal) return []
+        return ["C12: " + (total - legal) + " Suspend(s) stand outside the tail of an effect body (a When body or a Suspend's continuation, and last in that block)"]
+    }
+
+    fn suspendAt(n: Node) -> int {
+        return match n {
+            .NStmt(s: s) :> suspendThenCount(s)
+            .NProgram(p: q) :> 0
+            .NDecl(d: d) :> 0
+            .NField(f: f) :> 0
+            .NFn(f: f) :> 0
+            .NServerFn(f: f) :> 0
+            .NBlock(b: b) :> 0
+            .NExpr(e: e) :> 0
+            .NPlace(pl: pl) :> 0
+            .NInst(i: i) :> 0
+            .NPattern(pat: pat) :> 0
+            .NEdit(k: k) :> 0
+            .NView(v: v) :> 0
+            .NAttr(a: a) :> 0
+        }
+    }
+
+    fn suspendThenCount(s: Stmt) -> int {
+        const t: Block | not = suspendThen(s)
+        if (t is some) return 1
+        return 0
+    }
+
+    fn suspendThen(s: Stmt) -> Block | not {
+        return match s {
+            .Suspend(then: t) :> t
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+        }
+    }
+
+    fn whenTails(n: Node) -> int {
+        return match n {
+            .NView(v: v) :> viewWhenTails(v)
+            .NProgram(p: q) :> 0
+            .NDecl(d: d) :> 0
+            .NField(f: f) :> 0
+            .NFn(f: f) :> 0
+            .NServerFn(f: f) :> 0
+            .NBlock(b: b) :> 0
+            .NStmt(s: s) :> 0
+            .NExpr(e: e) :> 0
+            .NPlace(pl: pl) :> 0
+            .NInst(i: i) :> 0
+            .NPattern(pat: pat) :> 0
+            .NEdit(k: k) :> 0
+            .NAttr(a: a) :> 0
+        }
+    }
+
+    fn viewWhenTails(v: View) -> int {
+        return match v {
+            .When(body: b) :> tailChain(b)
+            .El(tag: x) :> 0
+            .Text(text: x) :> 0
+            .Dyn(e: x) :> 0
+            .Cond(arms: x) :> 0
+            .Each(src: x) :> 0
+            .Instance(decl: x) :> 0
+            .Slot :> 0
+            .Star(decl: x) :> 0
+        }
+    }
+
+    // The legally placed Suspends of a chain: the block's LAST statement, if a
+    // Suspend, and those of its continuation.
+    fn tailChain(b: Block) -> int {
+        if (b.stmts.length == 0) return 0
+        const t: Block | not = suspendThen(b.stmts[b.stmts.length - 1])
+        if (t is not) return 0
+        return 1 + tailChain(t)
     }
 
     fn checkStar(p: CoreProgram, encl: Decl[], dsym: Sym, i: InstRef) -> string[] {
@@ -253,6 +429,7 @@ ${
             .If(cond: c) :> []
             .Return(e: e) :> []
             .Eval(e: e) :> []
+            .Suspend(bind: b) :> []
         }
     }
 
@@ -280,6 +457,7 @@ ${
             .If(cond: x) :> "an If inside a Commit"
             .Return(e: x) :> "a Return inside a Commit"
             .Eval(e: x) :> "an Eval inside a Commit"
+            .Suspend(bind: x) :> "a Suspend inside a Commit"
         }
     }
 
@@ -589,6 +767,7 @@ ${
             .Each(src: s) :> not
             .Slot :> not
             .Star(decl: d) :> not
+            .When(deps: ds) :> not
         }
     }
 
@@ -636,6 +815,7 @@ ${
             .If(cond: x) :> not
             .Return(e: x) :> not
             .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
         }
     }
 
