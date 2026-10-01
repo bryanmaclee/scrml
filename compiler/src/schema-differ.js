@@ -1173,15 +1173,6 @@ function blankLiteralBodies(s, opts = {}) {
         continue;
       }
     }
-    // S446 fix round: in comment mode a `"""` is NOT a short literal. Read as `""`
-    // then a `"`-to-end-of-line literal, it blanked the rest of the line, so a
-    // top-level `""" CREATE TEMP TABLE assets (…) """` hid its head from
-    // E-SCHEMA-012/013/014. The three quotes stay live, and so does what follows.
-    if (comments && s.startsWith('"""', i)) {
-      out += '"""';
-      i += 3;
-      continue;
-    }
     if (ch === "'" || ch === '"' || (ch === "`" && backtick)) {
       out += ch;
       i++;

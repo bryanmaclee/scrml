@@ -164,24 +164,52 @@ ${DSL_ASSETS}`;
     }
   });
 
-  // S446 fix round — the exemption is TEMP / TEMPORARY ONLY.
-  test("UNLOGGED / GLOBAL TEMPORARY / non-temp CTAS / PARTITION OF inside a fn body are STILL E-SCHEMA-014", () => {
+  // S446 fix round — the exemption is TEMP / TEMPORARY ONLY. `LOCAL TEMP` is
+  // E-SCHEMA-014 by design (LOCAL is not in the exempt word list).
+  test("UNLOGGED / GLOBAL TEMPORARY / LOCAL TEMP / non-temp CTAS / PARTITION OF inside a fn body are STILL E-SCHEMA-014", () => {
     for (const sql of [
       "CREATE UNLOGGED TABLE s (id INTEGER, tenant_id TEXT);",
       "CREATE GLOBAL TEMPORARY TABLE s3 (id INTEGER);",
+      "CREATE LOCAL TEMP TABLE s4 AS SELECT 1;",
       "CREATE TABLE snap AS SELECT * FROM invoices;",
       "CREATE TABLE archived PARTITION OF invoices DEFAULT;",
     ]) {
       expect(schemaCodes(compileApp(withFn(realFn(sql)), PG).r)).toEqual(["E-SCHEMA-014"]);
-      expect(schemaCodes(compileApp(withFn(oneLineFn(sql)), PG).r)).toEqual(["E-SCHEMA-014"]);
     }
   });
 
-  // S446 fix round — a `"""` is not a one-line literal, so a top-level `"""` pair
-  // with no fn does not hide a head (it used to: `""` + `"`-to-end-of-line).
-  test("a top-level `\"\"\" CREATE TEMP TABLE … \"\"\"` with no fn is E-SCHEMA-014", () => {
-    const { r } = compileApp(`    """ CREATE TEMP TABLE assets ${C} """\n    CREATE TABLE notes (id INTEGER PRIMARY KEY)`);
-    expect(schemaCodes(r)).toEqual(["E-SCHEMA-014"]);
+  // KNOWN LOW, base-equal (pinned so a fix flips it): the comment-mode blanker reads a
+  // `"""` as `""` + a `"`-to-end-of-line literal, so a head on the SAME LINE after a
+  // `"""` is masked — a top-level `""" CREATE TEMP TABLE … """` and a one-line fn body
+  // `{ """ CREATE UNLOGGED TABLE … """ }` are silent. Treating `"""` as live text was
+  // tried in the S446 fix round and REVERTED: it un-masked nothing safely — a quoted
+  // identifier starting with three quotes (`"""a"`, `""""`) then blanked the rest of
+  // ITS line and hid a following head (a HIGH silent pass vs main; S438 r4 F2's escape).
+  test("KNOWN LOW (base-equal): a head on the same line after a `\"\"\"` is masked", () => {
+    expect(schemaCodes(compileApp(`    """ CREATE TEMP TABLE assets ${C} """\n    CREATE TABLE notes (id INTEGER PRIMARY KEY)`).r)).toEqual([]);
+    expect(schemaCodes(compileApp(withFn(oneLineFn("CREATE UNLOGGED TABLE s (id INTEGER);")), PG).r)).toEqual([]);
+  });
+
+  // The S446 re-review's repros: a quoted identifier beginning with three quotes must
+  // NOT hide a later head on its line (each is loud on main; the reverted `"""` change
+  // made all of them silent).
+  const Q3 = `    CREATE TABLE notes (id INTEGER PRIMARY KEY, """a" TEXT); `;
+  const Q4 = `    CREATE TABLE notes (id INTEGER PRIMARY KEY, """" TEXT); `;
+  const LOUD = {
+    'qualified head after `"""a"`': [`${Q3}CREATE TABLE public.assets ${C}`, "E-SCHEMA-012"],
+    'qualified head after `""""`': [`${Q4}CREATE TABLE public.assets ${C}`, "E-SCHEMA-012"],
+    'unreadable head after `"""a"`': [`${Q3}CREATE TABLE "" ${C}`, "E-SCHEMA-013"],
+    'UNLOGGED head after `"""a"`': [`${Q3}CREATE UNLOGGED TABLE assets ${C}`, "E-SCHEMA-014"],
+  };
+  for (const [label, [schema, code]] of Object.entries(LOUD)) {
+    test(`LOUD: ${label}`, () => {
+      expect(schemaCodes(compileApp(schema).r)).toContain(code);
+    });
+  }
+  test('reader level: DSL glue after `"""a"` on the same line is still seen', () => {
+    const body = (h) => `CREATE TABLE notes (id INTEGER PRIMARY KEY, """a" TEXT); ${h} {\n id: integer primary key\n}`;
+    expect(findGluedDslTableHeads(body("mydb.assets")).map((g) => g.kind)).toEqual(["qualified"]);
+    expect(findGluedDslTableHeads(body("my-assets")).map((g) => g.kind)).toEqual(["unreadable"]);
   });
 
   const STILL = {
