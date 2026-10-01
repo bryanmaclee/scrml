@@ -36994,6 +36994,21 @@ The validator surface is the kickstarter v2 §6 LOCKED form. Where this section 
 kickstarter disagree on surface syntax, the kickstarter wins (per dispatch authorization
 §4 — "Tiebreaker if spec contradicts — kickstarter wins").
 
+> ⚑ **Amended 2026-10-01 (S447) — validity calls 1-6 + S442 dpa-058 (2)/(3).** A top-level value that carries
+> validators now has the full surface (§55.5.1, Edge A reversed); only values that carry validators get one;
+> `submitted` is scoped to a form that binds the value (§55.7); validators reach bound native controls and the
+> compiler adds `novalidate` to forms carrying them, and gates those forms' submits itself (§55.17); E-VALIDATOR-DEAD
+> narrows to "nothing can ever change the value" (§55.5.2); the four surface names are reserved (§55.5.3); the
+> interaction bundle is in §55.7, §55.8, §55.13 and §55.14. **Status: Nominal / spec-ahead on every implementation.**
+> impl#1 compiles a top-level validated Shape-2 cell with native `required` and **no** `novalidate`, so the browser
+> blocks its submit, and reads `@x.isValid` on a top-level cell as a silent `undefined` (§S447 gaps). The bootstrap
+> emits `novalidate` but has no §55 surface and no gate yet. Per §34.0 / S440 #12 both carry the divergence until the
+> bootstrap builds this section.
+> **Provenance:** ruling:user-voice-scrml.md S447 "RULED — \"your recs\": validated top-level cells get a validity
+> surface (Edge A reversed) …" (item 1) · ruling:user-voice-scrml.md S447 "RULED — \"your recs on all of them, and
+> the diagnostic\": validity calls 2-6" · ruling:user-voice-scrml.md S442 "RULED — dpa-058 (O25) = all PA recs"
+> items (1)-(3), (5) · dd:scrml-support/docs/deep-dives/top-level-validity-surface-dpa-058c-2026-10-01.md.
+
 ### 55.1 The shared validator core vocabulary (L4)
 
 A small fixed set of predicates ("the universal core") is the shared validator vocabulary
@@ -37062,7 +37077,9 @@ Bare-attribute syntax on the structural decl (cross-ref §6 for Shape 1/2/3):
 - **Failure populates `errors`.** A failing predicate appends a `ValidationError` enum tag
   (§55.9) to the cell's auto-synthesized `errors` array (§55.5, §55.6).
 - **Form-validity gating.** `@signup.isValid` is `false` until ALL fields pass their
-  validators; `true` when all pass.
+  validators; `true` when all pass. `isValid` is a value; the compiler-emitted submit gate that
+  stops an invalid `<form>` submit is §55.17 (S447). Outside a gated form, an action is gated only
+  by the author's own `isValid` check (§55.17.5).
 - **Touched / submitted lifecycle.** Errors are computed continuously, but a UI may want
   to suppress them until the user has interacted with a field. The synthesized `touched`
   and `submitted` flags (§55.5, §55.7) provide the gating timing without requiring the
@@ -37152,7 +37169,7 @@ savings — see no-validator-compounds clause below). No authoring required.
                      (per-field first-interaction tracking — true once user has touched the field)
 
 @signup.submitted  : boolean
-                     (true after first submit-form attempt; compound-level)
+                     (true after the first submit of a <form> that binds any of its fields — §55.7)
 ```
 
 **Read-only.** ALL synthesized properties are read-only. Writing to any of them is
@@ -37163,12 +37180,126 @@ savings — see no-validator-compounds clause below). No authoring required.
 empty structures. Predictability over namespace savings — applications can check
 `@form.isValid` without first asking "does this compound have any validators?"
 
-**Single-value Tier-1 cells DO NOT get the auto-namespace.** Per L11 Edge A, a top-level
-`<count req min(0)>` cell does NOT synthesize `count.isValid` / `count.errors` — those
-properties are available only on COMPOUND cells (cells with internal field structure).
-The validator on a single-value cell still fires; failure is tracked via the type-system
-(refinement type) or via the parent compound if any. For form cells, a one-field
-compound is the conventional pattern (`<form><name req/></>`).
+~~**Single-value Tier-1 cells DO NOT get the auto-namespace.** Per L11 Edge A, a top-level
+`<count req min(0)>` cell does NOT synthesize `count.isValid` / `count.errors` …~~ **Superseded
+S447 — Edge A is reversed; see §55.5.1.**
+
+#### 55.5.1 A top-level value that carries validators has the surface (S447 — Edge A reversed)
+
+> ⚑ **Amended 2026-10-01 (S447).** Reverses L11 Edge A. Edge A was a PA leaning inside a five-edge survey,
+> bulk-approved at S56 (*"I concur with all your leanings"*); its one stated reason was a namespace one ("keeps
+> `@count` as the primitive"). Three later texts already assumed the reverse: §55.16's worked example
+> (`@cards.isValid` on a top-level cell), the §52 header ("synthesised regardless of authority") and the S197
+> RemoteData resolution. This amendment makes §55.5 agree with them.
+> **Provenance:** ruling:user-voice-scrml.md S447 "RULED — \"your recs\": validated top-level cells get a validity
+> surface (Edge A reversed) …" item 1 — *"do validated top-level cells get a validity surface? I recommend yes."* →
+> RULED (c) "yes, always, bound or not" · ruling:user-voice-scrml.md S447 "validity calls 2-6" call 3 ·
+> dd:top-level-validity-surface-dpa-058c-2026-10-01 §3, §9.4, §12 · **supersedes:** §55.5 Edge A (S56 L11, PA
+> leaning bulk-approved); the §34 E-VALIDATOR-DEAD clause (a) "single-value top-level cell … bound or not";
+> E-VALIDITY-NO-SURFACE for VALIDATED top-level cells.
+
+1. **A top-level value that carries validators synthesizes the per-field surface** — `isValid`, `errors`,
+   `touched` — **plus** `submitted`, with the per-field shapes of §55.6: `errors` is an **array** of
+   `ValidationError` tags (§55.9), not a map; `isValid` and `touched` are single booleans. This holds
+   **always — bound or not**: a value nothing binds (set from logic, server-loaded, restored by `persist=`) has
+   the surface too. "Top-level value" means a declaration (or a legacy top-level cell) whose own value is a
+   scalar, a sequence or a struct value and which has no child declarations; a declaration with child
+   declarations is a compound and keeps the compound surface above.
+2. **Only values that carry validators get it.** A top-level value with **no** validators (`let <count:int=0/>`)
+   has no surface, and a read of `@count.isValid` / `.errors` / `.touched` / `.submitted` stays
+   **E-VALIDITY-NO-SURFACE** (§34). This differs deliberately from Edge B (a compound with no validators still
+   has a trivially-valid surface): Edge B exists so an author need not ask whether a compound's fields carry
+   validators; a top-level value's validators are on the one opener the author is reading.
+3. **The surface sits beside the value on one `.`.** `@email.length` (the value's member) and `@email.isValid`
+   (the surface) are both legal. The four surface names cannot collide with a value member: no scalar or
+   sequence type has a member by those names, and a struct value's fields are kept off them by §55.5.3.
+4. **Reactive recomputation and `isValid` timing** are §55.6's: the surface is computed at construction (an
+   initial `""` with `req` reads `isValid == false` before any interaction — §55.16's "at placeholder mount") and
+   recomputed on every change of the value or of a cell its predicate args read (§55.11).
+5. **`touched`** is §55.7's: the first interaction with **any** native control that binds the value (a `bind:`
+   change or the first focus-out). A value nothing binds keeps `touched == false` unless a gated submit marks it
+   (§55.17.3 step 1 — only a value bound inside the form is marked, so in practice it stays `false`).
+6. **`submitted`** is §55.7's form-scoped definition (call 3): `true` after the first submit of a `<form>` that
+   binds the value. A value bound in several forms has **one** `submitted` flag, set by any of them; per-form
+   submission state is a declaration the author writes.
+7. **Read-only.** A write to any of the four is `E-SYNTHESIZED-WRITE`, as for a compound.
+
+```scrml
+<program>
+    let <email:string="" req length(>=5)/>                 // validated: has isValid / errors / touched / submitted
+    let <q:string="" length(>=2)/>
+    let <count:int=0/>                                       // no validators: no surface
+
+    function register() { createAccount(@email) }           // runs only on a valid submit (§55.17)
+
+    <main>
+        <form onsubmit=register()>                           // compiler: novalidate + the submit gate (§55.17)
+            <label>Email <input type="email" bind:value=@email/></label>   // → required minlength="5"
+            ${ if (@email.touched) { lift <errors of=@email/> } }          // §55.8 accepts a top-level value
+            <button type="submit">Create account</button>
+        </form>
+        <p>${@q.isValid ? "" : "type at least 2 characters"}</p>         // legal: q carries a validator
+        <p>${@count.isValid}</p>                             // E-VALIDITY-NO-SURFACE: count carries none
+    </main>
+</program>
+```
+
+(`createAccount` elided. The example is written in the S447 opener-keyword form, `let <x …/>`.)
+
+#### 55.5.2 When validators are dead — E-VALIDATOR-DEAD (S447 call 4)
+
+> ⚑ **Amended 2026-10-01 (S447).**
+> **Provenance:** ruling:user-voice-scrml.md S447 "validity calls 2-6" call 4 — *"E-VALIDATOR-DEAD only when nothing
+> can ever change the value: no bind, no write grant, not server-loaded. A value set from logic and read through
+> `isValid` is legal (child fields and top-level alike)."* · **supersedes:** the §34 E-VALIDATOR-DEAD wording (both
+> clauses: (a) the single-value top-level cell "bound or not"; (b) "a child field that no `bind:` targets"), and
+> S442 (5)'s "or on a declaration nothing binds" as written into that row (S444).
+
+Validators on a value are **dead** — `E-VALIDATOR-DEAD` (§34), an error — **only when nothing can ever change the
+value**, which is when **all three** hold:
+
+1. **no bind** — no `bind:` anywhere in the program targets the value; and
+2. **no write grant** — the value is **locked** (written without `let`, §66.9 rule 1; a locked value with a
+   reactive initializer is derived and is E-DERIVED-WITH-VALIDATORS instead, §55.14); and
+3. **not server-loaded** — the value does not have `server` authority (§52), so no fetch ever writes it.
+
+Its validity is then a compile-time constant, and the validators can never report a change. A value set only
+from logic (a colour chosen by swatch buttons, read through `@accent.isValid` on an "Apply" button) is **legal**,
+for child fields and top-level values alike — this restores dpa-058 R4's "nothing binds **or writes**", which the
+S444 row dropped. A validated **constant** stays dead.
+
+> ⚑ **OPEN (not ruled) — two edges of "can ever change".** (a) A **locked** child field seeded per instance at the
+> use site (§66.9 rule 8): its value differs per instance but never changes after construction. (b) A `persist=`
+> restore (§6.14.2 r1) on a value with no write grant. The ruling's three conditions do not name either. The DD
+> (§10.5) listed "not a use-site seed" as a fourth condition (i.e. a seeded value is NOT dead); the ruling text did
+> not carry it. PA to confirm.
+
+#### 55.5.3 The four surface names are reserved (S447 call 5)
+
+> ⚑ **Amended 2026-10-01 (S447).** **Nominal / spec-ahead — lands with the impl.**
+> **Provenance:** ruling:user-voice-scrml.md S447 "validity calls 2-6" call 5 — *"`isValid` / `errors` / `touched` /
+> `submitted` are illegal field / attribute names (and as fields of a struct type used as a validated value's
+> type). Newly rejecting; corpus impact measured zero by the DD."* · dd:top-level-validity-surface-dpa-058c §6 (N1),
+> F12.
+
+`isValid`, `errors`, `touched` and `submitted` SHALL NOT be used as:
+
+1. the name of a **child field** (child declaration) or an **attribute** of any declaration — every compound has
+   the surface (Edge B), so a field by one of these names would shadow it; and
+2. the name of a **field of a struct type** that is used as the type of a **validated** value (a value carrying
+   validators, §55.5.1) — its own value's fields and its surface would share one `.`.
+
+Each is **`E-VALIDITY-RESERVED-NAME`** (§34), naming the field and the surface property it would hide. Before this
+rule a field named `errors` silently hid the surface (the bootstrap resolved the field first — DD F12); the
+diagnostic replaces that silent shadowing.
+
+**Not affected:** a **top-level** declaration whose own name is one of the four (`let <submitted:bool=false/>`,
+`<errors> = []`) — it is not a field and hangs no surface (it carries no validators); a struct-literal key
+(`{ errors: allErrors }`) and a field of a struct type that is never a validated value's type.
+
+**Why a distinct code** (not `E-DECL-ILLEGAL-FIELD-NAME`, §66.2.3): that code's five names collide with the
+namespaced-attribute **grammar**; these four collide with the compiler-synthesized **surface**, and case 2 is a
+struct type, not a declaration. The code names the root cause the author must see.
 
 ### 55.6 Auto-synthesized validity surface — per-field (L11)
 
@@ -37192,6 +37323,11 @@ no validators — `@signup.someUnvalidated.isValid` is trivially `true`; `errors
 This is the predictability rule (§55.5): field-level access works regardless of whether
 validators are declared.
 
+**A validated top-level value carries this per-field surface (S447).** `@email.isValid`, `@email.errors`
+(an array) and `@email.touched` on a top-level value that carries validators have exactly the shapes above,
+plus `@email.submitted` (§55.7) — a child field reads `submitted` from its compound, a top-level value has no
+compound to read it from. See §55.5.1. (A child field has no `submitted` of its own; that is unchanged.)
+
 ### 55.7 Synthesized-property semantics
 
 Behavior of the four synthesized properties at both compound and per-field scope:
@@ -37201,10 +37337,39 @@ Behavior of the four synthesized properties at both compound and per-field scope
 | `isValid` | Reactive — recomputes whenever any contributing validator's inputs change. | `true` |
 | `errors` | Reactive — recomputes per-field on cell change or cross-field dep change. | `[]` (empty array) per-field; `{}` (empty object) compound-level |
 | `touched` | Becomes `true` on first interaction with the field — defined as ANY of: `bind:value` change, `bind:checked` change, OR first focus-out. The most-permissive trigger is chosen so the surface "feels right" with idiomatic UI. Per-field timing. Once true, never reverts (until `reset` — §55.13). | `false` |
-| `submitted` | Compound-level. Becomes `true` on first submit-form attempt. Once true, never reverts (until `reset`). | `false` |
+| `submitted` | On a compound and on a validated top-level value (§55.5.1). Becomes `true` on the first submit of a `<form>` that **binds the value** — for a compound, a form that binds any of its fields (S447 call 3). A submit of an unrelated form elsewhere in the document does NOT set it. In a gated form (§55.17) it is set by the gate even when the submit is cancelled. Once true, never reverts (until `reset`). | `false` |
 
 **All read-only.** Writing to any synthesized property is `E-SYNTHESIZED-WRITE` (§34).
 Reactive consumers wire to them like any other reactive cell.
+
+**`submitted` is form-scoped (S447 call 3).** "Binds the value" is the same join S442 (2)/(3) use (§55.17.1):
+a native control inside the form whose `bind:` targets the value. impl#1's current behaviour — one
+document-wide `submit` listener per compound, so ANY form submitted anywhere sets EVERY compound's
+`submitted` — is superseded; impl#1 carries the divergence (§34.0).
+
+> ⚑ **Amended 2026-10-01 (S447).**
+> **Provenance:** ruling:user-voice-scrml.md S447 "validity calls 2-6" call 3 — *"`submitted` = a submit of a form
+> that BINDS the value — for declarations too (re-scopes impl#1's any-submit-in-the-document)."* · **supersedes:**
+> §55.7's "Compound-level. Becomes `true` on first submit-form attempt" and §55.5's "true after first submit-form
+> attempt".
+
+**Where the value comes from — the surface observes, it does not gate the source (S447 call 6 (i), (iii)).**
+The surface is a **state observation** of whatever value the cell holds (§55.16's rationale), however the value
+got there:
+
+- **(i) `persist=` restore (§6.14).** A restored value is **not** re-validated on restore. Validators are not
+  part of the §6.14.2 r3 decode contract — only the type, its §53 refinements and §66.12 sequence bounds reject
+  a stored value. A restored value that fails a validator is restored, and its surface shows it invalid
+  (`@digestHour == 99` with `max(23)` reads `isValid == false`, `errors == [.MaxFailed(23)]`). A restore is not
+  an interaction: it does not set `touched`.
+- **(iii) Channel cells (§38).** The surface of a validated channel-declared value is computed **per client**
+  from that client's current value. `touched` and `submitted` are per-client UI state and are **never synced**;
+  only the value crosses the wire (§38.4).
+- **Server cells (§52, §55.16)** — unchanged: the surface reflects the placeholder, then the fetched value.
+
+> **Provenance:** ruling:user-voice-scrml.md S447 "validity calls 2-6" call 6 (i), (iii) — *"(i) a `persist=`-restored
+> value is not re-validated on restore (shows invalid if it is; only refinements/bounds reject); … (iii) channel
+> values compute the surface per client, `touched`/`submitted` never synced"*.
 
 ### 55.8 The `<errors of=expr/>` first-class element (L13)
 
@@ -37233,7 +37398,7 @@ or compound:
 
 | Attribute | Required? | Meaning |
 |---|---|---|
-| `of=expr` | REQUIRED | References either a per-field cell (`@signup.name`) or a compound cell (`@signup`). The compiler reads `.errors` from the referenced cell by convention — same logic as `<engine for=Type>` reading auto-state from the type. |
+| `of=expr` | REQUIRED | References a per-field cell (`@signup.name`), a compound cell (`@signup`), or a **validated top-level value** (`@email`, §55.5.1 — S447 call 6 (v)). The compiler reads `.errors` from the referenced cell by convention — same logic as `<engine for=Type>` reading auto-state from the type. A top-level value's `errors` is an array (the per-field shape), so `of=@email` renders like `of=@signup.email`. A top-level value that carries **no** validators has no surface; `of=` it reads `.errors` on a no-surface value and is E-VALIDITY-NO-SURFACE *(agent reading, S447 — it is the S442 (5) read rule applied to the convention above; PA to confirm)*. |
 | `all` | optional flag | When present, renders the FULL error array. Default behavior renders the first error only. |
 
 **Default rendering.** A single first error wrapped as:
@@ -37410,6 +37575,10 @@ resetting the underlying value:
 |---|---|
 | `reset(@signup)` | Resets every field of the compound. All synthesized properties revert: per-field `errors` becomes `[]`, per-field `touched` becomes `false`, compound `submitted` becomes `false`, compound `isValid` recomputes (likely `false` again immediately, since fields are now empty and `req` fires). |
 | `reset(@signup.name)` | Resets the named field only. That field's `errors`, `touched` revert; the compound's `isValid` recomputes; `submitted` is unchanged. |
+| `reset(@email)` (a validated top-level value, §55.5.1) | Restores the value (§6.8.2); `errors` and `isValid` recompute from it; `touched` becomes `false`; `submitted` becomes `false` (S447 call 6 (ii)). |
+
+> **Provenance (`reset(@email)` row, added S447):** ruling:user-voice-scrml.md S447 "validity calls 2-6" call 6 (ii)
+> — *"`reset(@x)` clears `touched` + `submitted`"*.
 
 `reset` is a language keyword (`E-RESET-NO-ARG` if called with no argument; `E-RESERVED-IDENTIFIER`
 if shadowed); see §6.8 for the underlying semantics. Synthesized-property-side effects
@@ -37432,6 +37601,12 @@ incoherent on a read-only computed value. The compiler emits `E-DERIVED-WITH-VAL
 (§34) at parse-time.[^55-14-parse-time] If the developer wants validation on a derived
 value, they should add a refinement type (`const <x>: number(>=0) = ...`) — that is the
 type-level invariant equivalent.
+
+**Unchanged by S447 for top-level values (call 6 (iv)).** Reversing Edge A (§55.5.1) does NOT admit validators on a
+derived value: a derived top-level value (a §66.9 locked declaration with a reactive initializer) with validators
+stays `E-DERIVED-WITH-VALIDATORS`. Its validity would gate nothing the author can change.
+> **Provenance:** ruling:user-voice-scrml.md S447 "validity calls 2-6" call 6 (iv) — *"E-DERIVED-WITH-VALIDATORS
+> stays"*.
 
 [^55-14-parse-time]: "Parse-time" is operational shorthand. The compiler enforces this
     via the A1b resolve-type stage (the validator-walking pass after shape-discrimination
