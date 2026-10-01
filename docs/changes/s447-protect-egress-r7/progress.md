@@ -1,0 +1,10 @@
+# progress — s447-protect-egress-r7 (append-only)
+
+- 2026-10-01 start: worktree /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a5699210c8ea28be2, branch worktree-agent-a5699210c8ea28be2. Pre-fetch origin/main == HEAD be5e36b57 (check passed); my own `git fetch` then moved origin/main to bca39b61a (S445 wrap, docs-only) — fast-forwarded. bun install + pretest OK.
+- Map read (.claude/maps/primary.map.md): load-bearing only as locus confirmation (protect-flow.ts = E-PROTECT-006 flow; dev.js request pipeline).
+- BASE reproduction (frozen copy `git archive HEAD compiler stdlib` in scratch r7/base; reviewer probe.mjs served over Bun.serve, SQLite seeded SECRET-HASH-123 / 4321):
+  - item 1: W1 W2 W4 W5 W7 W9 W14 W16 W17 <<LEAK>> (HTTP 200 with hash/pin). W6/W8/W13 (`function` DECLARATION writing `this.x = …`) HTTP 500 — NEW codegen defect: scrml emits `this . x = this . passwordHash.x = this . x = …` (statement duplicated into the RHS), TypeError on a primitive. W10/W11/W12/W18/W19/W20 "rejected" only because object-literal method shorthand / accessors miscompile (`{ h: "", set: }`) and the module fails to parse (fail-closed) — these shapes are tested on raw JS at unit level.
+  - item 2: I1 I2 I3 I4 I7 I8 I9 I12 I14 I15 I18 I19 I22 I25 I26 <<LEAK>>. I13/I23 are not scrml (`await`/`async` rejected). Controls C1 C2 C4-C7 serve; C3/C8 fail only on the method-shorthand miscompile.
+  - three sinks (ssr-r7.scrml forced to run): W1 W5 I1 I2 I4 leak through the server-fn response, `/__mountHydrate` and the SSR state script.
+  - item 3: `import { verifyPassword } from "./_scrml/auth.js"` (author file returning its 2nd arg) → HTTP 200 "SECRET-HASH-123"; same for hashPassword. Control `scrml:auth` → `false`. At flow time the genuine stdlib specifier is still `scrml:auth` (the flow runs before `rewriteStdlibImports`), so the path-shape match is pure spoof surface.
+  - item 4: real `scrml dev` (devprobe.mjs): POST route whose SQL is `json_extract('{}', passwordHash)` → HTTP 500 `{"error":"Internal server error","detail":"bad JSON path: 'SECRET-HASH-123'"}` <<LEAK>>.
