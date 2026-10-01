@@ -1,6 +1,85 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-10-01T14:31:06Z  commit: 464c9ab4d
+# updated: 2026-10-01T21:45:00Z  commit: 78e4ddad
+# ⛑ **S446 STAMP — `464c9ab4d` -> `78e4ddad`. 13 COMMITS (S444/S445 wrap tail #1201/#1203-#1206, S446-peter
+# #1207/#1209/#1212/#1217, test fixes #1219/#1220, S447-bryan #1215/#1218), incremental refresh, branch `wrap/s446-peter`.**
+# MAP-STAMP RULE at write time: `git log --oneline 464c9ab4d..78e4ddad` -> 13; `bun scripts/state.ts --check` reports
+# `maps: 13 commits behind HEAD (watermark 464c9ab4d, HEAD 78e4ddad)` at the moment this pass started — confirms the
+# window exactly. Source-relevant, grep-verified at `78e4ddad`:
+# #1201 (§4.12/§40 program role by ancestor — NEW `compiler/src/program-role.ts`: `ProgramRole`, `forEachProgramWithRole`,
+# `findTopLevelProgram(s)`, `stampImpliedProgramAncestors`, `nestedProgramAttrVerdict`; NEW codes `E-PROGRAM-NESTED-SESSION`,
+# `E-PROGRAM-NESTED-ATTR`, `E-PROGRAM-CONFIG-UNREAD`, `W-PROGRAM-TITLE-NESTED` beside the S443 `E-PROGRAM-002` /
+# `E-PROGRAM-NESTED-AUTH`; a `<program>` is top-level iff it has no `<program>`/`<page>` ancestor, whatever markup wraps
+# it, and every `<program>` in a route file of a build with an app program is nested (implied ancestor); consumed by
+# `compute-program-config.ts`, `tool-program.ts`, `auth-graph.ts`, `reachability/entry-points.ts`, `route-inference.ts`,
+# `refusal-gate.js` (fail-closed: no `server.js` written on `E-PROGRAM-002`/`E-PROGRAM-NESTED-AUTH`); +9 conformance
+# cases under `conformance/cases/auth/program-*`), #1209 (schema: `E-SCHEMA-014` NEW — a readable, unqualified
+# `CREATE TABLE` head that is not a plain declaration (a kind modifier / no column list / unclosed list / trailing
+# `INHERITS`); extends `E-SCHEMA-012`/`013` to a declarative `name {` DSL head glued to a longer token; emitted at
+# `gauntlet-phase1-checks.js` from `schema-differ.js` `findRejectedCreateTableHeads` / `findGluedDslTableHeads`; a
+# same-PR tenant-declaration UNION attempt was REVERTED for a worse silent over-scope — base shadow (first-wins)
+# stands, gap reopened routed to bryan), #1207 (CLI: NEW `compiler/src/commands/listen.js` — the ONE CLI `Bun.serve`
+# call site (`listen`, `listenOrExit`, `parseHostFlag`, `isLoopbackHost`, `bindPlan`, `displayUrl`, `networkNotice`);
+# `scrml dev`/`scrml serve` now bind `127.0.0.1` (+ a best-effort `::1` twin) by default instead of every interface;
+# `--host`/`--host=` opts in, bare `--host` = `0.0.0.0`; new non-catalog CLI error codes `E_SCRML_HOST_SHORTHAND`
+# (inet_aton numeric shorthand refused on every OS), `E_SCRML_HOST_WHITESPACE`, `E_SCRML_LISTEN`), #1212 + #1217
+# (§5.2.3/§13.2 handler statement lists, three residual silent drops + one regression of the fix itself, all
+# execute-verified in happy-dom: `for…lift` rows now attach `handlerBlock` via the same `attachHandlerStatementList`
+# function bodies use, lowered by `emit-lift.js` `emitHandlerStatementList`; a match-arm handler's LATER statements are
+# now scanned for the arm-name read by `emit-variant-guard.ts` `exprReadsArmName` (the old `handlerReadsArmName` was
+# first-statement-only); `collectExpr`'s ASI boundary now treats a postfix `++`/`--` as value-ending so the next line
+# is not swallowed into one bare-expr statement; #1217 then makes a ≥2-statement handler's OWN server-call cell write
+# await in place before the next statement reads the cell (`js-async-analysis.ts` `handlerStatementListColor` /
+# `activeHandlerStatementListColor`, `ColorOpts.reactiveArg1SkipKeep`), with a same-PR fix-round narrowing it to KEEP
+# the §36 SSE-generator arg1 skip (`scheduling.ts` `_clientSseFnNames`) so GITI-026's subscription rewrite still
+# matches — `emit-event-wiring.ts`/`emit-each.ts` call sites pass the new skip-set through; 7 out-of-scope gaps filed
+# (4 HIGH) for shapes still dropped: an imported server fn call, an SSE call nested in an expression), #1215 (db: NEW
+# `compiler/src/db-ownership.ts` (`decideOwnedDbFiles`, `sqlDeclaresTable`, `fileDefaultDbValue`, `collectOwnedDbFiles`)
+# + NEW `compiler/src/codegen/sqlite-file-target.ts` (`projectRootFor`, `runtimeDbPath`, `sqliteFileHandle` —
+# `_scrml_sqlite_owned` / `_scrml_sqlite_referenced`); a `db=` path now resolves against ITS DECLARING FILE and
+# OWNERSHIP is per declaring file (only the file whose body declares the schema may create the database; a
+# referencing file opens lazily, never creates, loud error if absent); ONE runtime data root, `SCRML_DATA_DIR` env var
+# if set else the recorded project root (NEW SPEC §47.14); `db-target.ts` `resolveDbFilePath` is the one compile-time
+# resolver, used by `protect-analyzer.ts`; NEW catalog row `W-DB-PATH-RESOLVES-ELSEWHERE`; NEW non-catalog build
+# warnings `W-DEPLOY-DB-OUTSIDE-DATA-ROOT` / `W-DEPLOY-DB-NO-PROJECT-ROOT` / `W-DEPLOY-DB-SHARED-PATH`
+# (`commands/build.js`); docker/fly/render/railway adapters now set `SCRML_DATA_DIR=/data` on a mounted volume; `scrml
+# dev` ignores `SCRML_DATA_DIR` by design (opens beside the declaring `.scrml`)), #1218 (§14.8.9 protect egress round
+# 7, `protect-flow.ts`: `this` is tracked as the receiver so `this.p = v` writes the class exactly as `o.p = v`; a
+# function stored under a key the LANGUAGE may call — protocol string keys, accessors, any key the compiler cannot
+# read, a thenable `.then`, a tagged-template call, an `instanceof` hasInstance hook, a built-in-shadowing method name
+# — is analysed as invoked with that `this`; stdlib-identity now keys on the pre-write `scrml:NAME` specifier, not any
+# `_scrml/NAME.js`-shaped path (closes a same-named author file spoofing the allowlist); `scrml dev`'s route catch and
+# its `error:` handler now answer a FIXED 500 body, never `err.message`, matching the production entry), #1219/#1220
+# (test-only: 58 files restore happy-dom globals at a root `afterAll` — a prior file's leaked `Response`/`fetch`/
+# `window`/`document` no longer bleeds into a later file in the same `bun test` process; one §K assertion now expects
+# the platform-resolved project root, forward-slashed, instead of a hard-coded POSIX `/test` — Windows-red since
+# `c12b52c2`, root-caused to this very session).
+# ⛑ **FIGURES RE-EXECUTED AT `78e4ddad`** (`bun scripts/facts.ts --check` PASS): version **0.8.0** · `compiler/src`
+# **280,428 lines / 220 files** (+2,891 lines, +4 files — the four NEW modules above) · test files **1,557** (+11,
+# exactly the 11 new test files below) · `compiler/SPEC.md` **41,986 lines** (+226; `bun scripts/regen-spec-index.ts
+# --check` PASS, 72/72 sections current) · conformance **1209** cases (+9); `bun conformance/run.ts` ->
+# **1201/1209 pass + 8 xfail** · `docs/known-gaps.md` `@generated:gap-counts` open **HIGH 225** (+3; 4 carried) ·
+# **MED 442** (+9) · **LOW 214** (+5) · Nominal 7 (+0) — vs the S445-stamp figures 222/433/209/7.
+# ⚑ **§34 census (`bun scripts/s34-census.ts`) NOT FULLY TRUSTED THIS PASS, ON THIS OS — ROOT-CAUSED, NOT
+# HAND-WAVED.** Row total **869** (+6 vs the S445 stamp's 863 — reconciles: +1 `E-SCHEMA-014`, +4 program-role codes,
+# +1 `W-DB-PATH-RESOLVES-ELSEWHERE`) and STRUCK **34** / PINNED **377** are reliable (string/JSON-derived, no path
+# logic). The IMPL-SITES/FALSE-CLAIM split this run read **IMPL-SITES 0 · FALSE-CLAIM 395**, which is WRONG: the
+# script's emitter scan guards `isImpl` with `rel.startsWith("compiler/src/")` against a path from Node's `relative()`,
+# which on **win32** returns `\`-separated segments (`compiler\src\...`) and so NEVER matches — `implHits` stays
+# empty for every run on this Windows checkout, and every code that should land in IMPL-SITES falls through to
+# FALSE-CLAIM/DECLARED-AHEAD instead. Confirmed directly: `E-STMT-NO-EFFECT` is a live string literal at
+# `ast-builder.js:1708` (grep-verified), yet the census still scored 0 IMPL-SITES. This is a PRE-EXISTING cross-platform
+# bug in `scripts/s34-census.ts` (zero-diff this window — not caused by any commit above) — filed as a tooling
+# finding in `non-compliance.report.md`, not fixed (a mapper does not edit source). Do not cite this pass's
+# IMPL-SITES/FALSE-CLAIM/DECLARED-AHEAD split as ground truth; re-run on Linux/macOS or after a `path.sep`-safe fix.
+# ⛑ **BOOTSTRAP RE-RUN: NOT RE-EXECUTED THIS PASS** (time budget). `compiler/self-host-v2` has exactly ONE line-level
+# touch this window (`ingest.scrml`, registering `precgTopLevelProgramSpan` as an identity field for the within-node
+# classifier, part of #1201's `E-PROGRAM-CONFIG-UNREAD` support — no logic change); `compiler/native-parser` is
+# zero-diff. lint-no-default-arm / slice-m1..m4 / CG+CSS footprint figures from the S445 stamp stand, carried forward
+# unchanged.
+# ⚑ `file:line` citations in S446 sections are grep-derived at `78e4ddad`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S445 HEADER (stamp `464c9ab4d`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S445 STAMP — `5b1d0dab0` -> `464c9ab4d`. 20 COMMITS (S443 wrap #1187, S444 #1182-#1202, S445 #1192/#1194/#1196/#1198),
 # incremental refresh, branch `maps/s444-wrap`.** MAP-STAMP RULE at write time: `git log --oneline 5b1d0dab0..464c9ab4d` -> 20;
 # `git merge-base HEAD origin/main` == `origin/main` == `464c9ab4d` (no fork). (The dispatch brief named `108ca89be` as the stamp;
@@ -968,6 +1047,57 @@ THIS one and exited 0 again. Nothing in the toolchain fails on stale maps.
 #
 # Per-window landing narratives stay DELETED (S302 ruling). **History lives in `docs/changelog.md` +
 # `handOffs/delta-log.md`.** What earns space here is rules a grep cannot find.
+
+## S446 — READ FIRST (facts at `78e4ddad`; supersedes the S445 block below where it conflicts)
+
+**Window:** `464c9ab4d → 78e4ddad`, 13 commits — S444/S445 wrap tail (#1201 program role by ancestor,
+#1203-#1206), S446-peter (#1207 loopback-default CLI bind, #1209 schema tenant-floor holes / `E-SCHEMA-014`, #1212 +
+#1217 §5.2.3 handler-statement-list ordering, #1219/#1220 test-only), S447-bryan (#1215 db ownership /
+`SCRML_DATA_DIR`, #1218 protect-egress round 7). Full per-area detail lives in each map's own `## S446 — … DELTA`
+section (prepended above its S445 predecessor); this section is the cross-map summary.
+
+**Fingerprint, unchanged:** language/framework/runtime facts are unchanged this window — still Bun + TypeScript/JS,
+still the same CLI verb set (11; `listen` is an internal helper, NOT a 12th verb — confirmed via `facts.ts`'s
+`NOT_A_VERB` set).
+
+**Size, updated:** `compiler/src` **280,428 lines / 220 files** (+2,891 / +4 — `commands/listen.js`,
+`db-ownership.ts`, `codegen/sqlite-file-target.ts`, `program-role.ts`). Test files **1,557** (+11). `compiler/SPEC.md`
+**41,986 lines** (+226; SPEC-INDEX regen-checked current, 72/72 sections). Conformance **1209** cases (+9), run result
+**1201 pass + 8 xfail**. `docs/known-gaps.md` open **HIGH 225** (+3, 4 carried) · **MED 442** (+9) · **LOW 214**
+(+5) · Nominal 7.
+
+**Tooling caveat carried into this stamp:** `scripts/s34-census.ts`'s IMPL-SITES/FALSE-CLAIM split is NOT trustworthy
+on a Windows checkout (a `relative()`-vs-`startsWith("compiler/src/")` separator bug zeroes `implHits` every run) —
+filed in `non-compliance.report.md`, not fixed here. The row-count total (869) and PINNED/STRUCK buckets are
+unaffected and reliable.
+
+## Map Index (counts refreshed at `78e4ddad`)
+| Map                  | Status  | Contents                          |
+|----------------------|---------|-----------------------------------|
+| structure.map.md     | present | +4 new `compiler/src` files, +11 new test files |
+| dependencies.map.md  | present | 0 new npm packages; +8 internal module-graph edges |
+| schema.map.md        | present | +1 diagnostic (`E-SCHEMA-014`), 2 new schema-differ.js exports |
+| config.map.md        | present | +1 env var (`SCRML_DATA_DIR`), +1 CLI flag (`--host`) |
+| build.map.md         | present | loopback-default bind, 4 deploy adapters rewired, +2 commands-tier tests |
+| error.map.md         | present | +6 catalog codes, +4 non-catalog CLI/build codes |
+| test.map.md          | present | 1,557 test files (+11); 58-file happy-dom hygiene fix |
+| auth.map.md          | present | program-role ancestor model, +9 conformance cases |
+| domain.map.md        | present | 4 new/sharpened business invariants |
+| infra.map.md         | present | 4 deploy adapters now provision `SCRML_DATA_DIR` |
+| migrations.map.md    | present | zero-diff (db-migrate.js untouched) |
+
+## Key Facts (S446 additions)
+- A `<program>`'s top-level/nested role is now ancestor-based and markup-transparent (`program-role.ts`, §4.12) —
+  the single source every auth/codegen consumer reads.
+- A SQLite database is owned by exactly one declaring file; every other file only references it, lazily, and never
+  creates it (`db-ownership.ts`, SPEC §8.1.1); the runtime data root is `SCRML_DATA_DIR` or the project root
+  (§47.14), and `scrml dev` deliberately ignores that env var.
+- `scrml dev` / `scrml serve` bind loopback (`127.0.0.1` + `::1`) by default now, not every interface; the one
+  listener call site is `commands/listen.js`, structurally pinned by a test.
+- A `${s1; s2}` handler's own server-call cell write is now awaited before the next statement runs, except an
+  SSE-generator write (kept un-awaited so its subscription rewrite still matches).
+- `scripts/s34-census.ts` has a pre-existing, unfixed Windows path-separator bug that zeroes its IMPL-SITES bucket on
+  this OS — do not trust that split from a Windows run.
 
 ## S445 — READ FIRST (facts at `464c9ab4d`; supersede the S444b / S444 blocks below where they conflict)
 - **§40.8 body-top is CODE now (#1196).** Every bare run at a `<program>` / `<page>` / `<channel>` body-top is lifted as code

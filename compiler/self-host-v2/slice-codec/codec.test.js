@@ -5,7 +5,7 @@
 //
 // SPEC: §57.2-§57.5, §12.5.1, §42.3.1, §42.8-§42.9, §6.14.2 r3, §66.12.
 
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadCodec, descriptor } from "./harness.js";
@@ -507,5 +507,75 @@ describe("L4 — encode failures are kind 'value', including overflow", () => {
     const n = { v: 1, kids: [], next: null };
     n.next = n;
     expect(encode(table(named("Node")), n).error).toEqual({ kind: "value", path: "$", reason: "nesting too deep (or a cyclic value)" });
+  });
+});
+
+// ---- follow-up (s446-uc r2 N1-N3) ---------------------------------------------
+
+describe("N1 — option flags are OWN properties only (prototype pollution cannot flip a default)", () => {
+  afterEach(() => {
+    delete Object.prototype.hostNullPassthrough;
+    delete Object.prototype.canonicalOnly;
+  });
+
+  test("a polluted Object.prototype.hostNullPassthrough does not open the strict encoder", () => {
+    Object.prototype.hostNullPassthrough = true;
+    expect(encodeText({ defs: [], root: { k: "int" } }, null).error.kind).toBe("value");
+    expect(encodeText(table(T.Int), null, {}).error.kind).toBe("value");
+  });
+
+  test("a polluted Object.prototype.canonicalOnly does not change the decoder", () => {
+    Object.prototype.canonicalOnly = true;
+    expect(decodeText(table(T.Maybe(T.Int)), "null")).toEqual({ ok: true, value: null });
+    expect(decodeText(table(T.Maybe(T.Int)), "null", {})).toEqual({ ok: true, value: null });
+  });
+
+  test("inherited flags on a user opts object are ignored; own flags still work", () => {
+    const inherited = Object.create({ hostNullPassthrough: true, canonicalOnly: true });
+    expect(encode(table(T.Int), null, inherited).error.kind).toBe("value");
+    expect(decodeText(table(T.Maybe(T.Int)), "null", inherited).ok).toBe(true);
+    expect(encodeText(table(T.Int), null, { hostNullPassthrough: true })).toEqual({ ok: true, text: "null" });
+    expect(decodeText(table(T.Maybe(T.Int)), "null", { canonicalOnly: true }).ok).toBe(false);
+  });
+});
+
+describe("N2 — a throwing opts object is a failure, not a throw", () => {
+  test("a getter on opts", () => {
+    const bad = { get hostNullPassthrough() { throw new Error("g"); }, get canonicalOnly() { throw new Error("g"); } };
+    expect(encode(table(T.Int), 1, bad).error).toEqual({ kind: "value", path: "$", reason: "reading the input threw: g" });
+    expect(encodeText(table(T.Int), 1, bad).ok).toBe(false);
+    expect(decode(table(T.Int), 1, bad).error.kind).toBe("malformed");
+    expect(decodeText(table(T.Int), "1", bad).error.kind).toBe("malformed");
+  });
+
+  test("a revoked Proxy as opts", () => {
+    const r = Proxy.revocable({}, {});
+    r.revoke();
+    expect(encode(table(T.Int), 1, r.proxy).ok).toBe(false);
+    expect(decodeText(table(T.Int), "1", r.proxy).ok).toBe(false);
+  });
+});
+
+describe("N3 — encode refuses an undeclared own key (symmetric with decode)", () => {
+  test("extra key on a struct value", () => {
+    const v = { x: 1, y: 2, label: "a", on: true, extra: 2 };
+    expect(encode(table(named("Pt")), v).error).toEqual({ kind: "value", path: "$.extra", reason: "Pt has no field extra" });
+    expect(decode(table(named("Pt")), v).error).toEqual({ kind: "malformed", path: "$.extra", reason: "Pt has no field extra" });
+  });
+  test("nested: an extra key inside a sequence element", () => {
+    const v = [{ x: 1, y: 2, label: "a", on: true, z: 0 }];
+    expect(encode(table(T.Seq(T.Maybe(named("Pt")))), v).error.path).toBe("$[0].z");
+  });
+  test("a non-enumerable own property is not a key (Object.keys / JSON agree)", () => {
+    const v = { x: 1, y: 2, label: "a", on: true };
+    Object.defineProperty(v, "hidden", { value: 1, enumerable: false });
+    expect(encodeText(table(named("Pt")), v)).toEqual({ ok: true, text: '{"x":1,"y":2,"label":"a","on":true}' });
+  });
+});
+
+describe("header exception — number -0 (SPEC Q6, unruled, not normalised)", () => {
+  test("-0 encodes as 0 and decodes as 0", () => {
+    expect(encodeText(table(T.Num), -0)).toEqual({ ok: true, text: "0" });
+    expect(Object.is(decodeText(table(T.Num), "0").value, 0)).toBe(true);
   });
 });

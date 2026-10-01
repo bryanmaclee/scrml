@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 226 | 4 |
-| MED | 443 | 0 |
-| LOW | 214 | 0 |
+| HIGH | 230 | 4 |
+| MED | 455 | 0 |
+| LOW | 216 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -19220,6 +19220,7 @@ Measured while fixing S432 review F2. A user `function e()` next to an inline wo
 
 ### g-map-insert-chain-lowers-only-the-first-insert — `@a = @a.insert("X", 1).insert("Y", 2)` lowers only the FIRST insert — `_scrml_map_insert(...).insert("Y", 2)` throws TypeError on click; the conformance case pinning order-independent map equality passes only because the throw leaves both maps empty — `NEW S432-peter; HIGH; open`
 <!-- @gap id=g-map-insert-chain-lowers-only-the-first-insert sev=HIGH status=open locus=not-traced prov=empirical:S432 -->
+> **S446 re-confirmed (review:S446-multistmt, pre-existing on main):** `.insert(…).insert(…)` still lowers only the first call → `TypeError: ….insert is not a function` at click, and `conformance/cases/maps/order-independent-eq-rt` still PASSES VACUOUSLY (both maps stay `[:]`, so `eq` is true). Sibling filed S446: g-map-insert-in-row-handler-typeerror (a single inline `.insert` in a row handler).
 > **S440 reconfirmed — the set vocabulary too (JS-WAT gauntlet D BUG-6; re-executed on `5e5c952cd` by the s440-gap-backlog agent):** `<nums>: set[number] = [:]` · `@out = String(@nums.add(5).has(5))` compiles clean and emits `_scrml_map_insert(_scrml_cs_reactive_get("nums"), 5, true).has(5)` — `.add` lowered, the chained `.has` left raw → `….has is not a function` at runtime.
 
 PA-reproduced on `61e05f02` by compiling `conformance/cases/maps/order-independent-eq-rt/case.scrml` (0 errors): the handler emits `_scrml_cs_reactive_set("a", _scrml_map_insert(_scrml_cs_reactive_get("a"), "X", 1).insert("Y", 2))` — the chained `.insert` is a method call on a plain runtime Map value, which has none. ⚑ **FALSE GREEN:** the case asserts `eq` after the click; both handlers throw before writing, so `@a` and `@b` stay `[:]` and `eq` is true — the case passes while testing nothing. Fix the lowering to fold the whole chain, and rewrite the case so it asserts the map contents, not only equality. found by: S432 handler gift-wrap agent (side finding); PA-reproduced.
@@ -20308,6 +20309,7 @@ Found by the S437 bootstrap slice M1 (dpa-051), each with shape + reproducer + t
 ### g-per-route-chunk-dir-named-after-absolute-source-path — `--emit-per-route` on pages with no route map names each chunk dir after the mangled ABSOLUTE source path — `NEW S438; LOW; open`
 <!-- @gap id=g-per-route-chunk-dir-named-after-absolute-source-path sev=LOW status=open locus=searched:compiler/src/codegen/route-splitter.ts(chunk descriptor route-path derivation when no route map applies)—not-traced prov=empirical:S438-peter-per-route-build-of-app-page-and-app-sub-deep-identical-on-base-072741ca -->
 A `--emit-per-route` build of pages with no route map writes chunks to `dist/C__Users_<…>_app_page/_anonymous.initial.<hash>.js` (the absolute source path with separators mangled to `_`), and `chunks.json` points at those dirs. The output layout therefore depends on the machine and checkout location — not reproducible across hosts — and leaks the builder's filesystem path into shipped URLs. **PRE-EXISTING**: byte-identical on `072741ca` (measured by the S438 #1045 F1 repro; the S239 review confirmed). Direction (unverified): derive the chunk dir from the dist-relative page path (the same `pathFor` / `stripPagesPrefix` computation the page's own artifacts use) when no route map applies.
+> **S446 re-confirmed (review:S446-cj-rv, pre-existing on main):** the per-route chunk directory names still embed the absolute build path (`C__Users_…`) in served URLs. Two co-located defects in the same directory build were filed separately as g-emit-per-route-directory-build-pages-collide-on-root-route.
 
 ## §S441 — public-surface audit, onboarding, site/tutorial-fix and review-floor defects (2026-09-29; every entry reproduced on `cf62b4154`)
 
@@ -20625,6 +20627,7 @@ PA-reproduced (and re-seen by dpa-054 M6 at `048df04db`): `let big = 10n / 3n + 
 ### g-prefix-increment-statement-deleted-in-function-body — a line-leading `++x` / `--x` statement in a `function` body is deleted from the emit — `NEW S440; HIGH; open`
 <!-- @gap id=g-prefix-increment-statement-deleted-in-function-body sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(function-body statement splitter — newline before a prefix update)—not-traced prov=empirical:S440-JS-WAT-C21-C21b-PA-reproduced -->
 PA-reproduced: `let b = 1` / `++b` / `let c = 1` / `c++` / `--d` on separate lines → `"1|2|1"`; emitted body has `c++;` but no `++b;`/`--d;`. Works with an explicit `;`, in `on mount`, in inline handlers, and in expression position (`let y = ++x`). JS keeps the statement (ASI restricted production), so this is scrml-own. Near relatives, not duplicates: g-bare-block-statement-is-silently-dropped, g-double-unary-minus-emit-decrement.
+> **S446 re-confirmed (review:S446-ms-rv, pre-existing on main) — more shapes, including handler statement lists:** `a` ⏎ `++b` and `let r = q()` ⏎ `++a` silently lose the `++b` / `++a`. Same family, different token: `x = y++` ⏎ `(z)` drops the `(z)` statement. This is the nearest sibling of the postfix-update fix in #1212 (which covered only `x++` ⏎ next line); the prefix and paren-led continuations were not covered.
 
 ### g-regex-literal-initializer-without-semicolon-swallows-the-next-statement — a regex-literal initializer with no trailing `;` deletes the following statement — `NEW S440; HIGH; open`
 <!-- @gap id=g-regex-literal-initializer-without-semicolon-swallows-the-next-statement sev=HIGH status=open locus=searched:compiler/src/tokenizer.ts,compiler/src/ast-builder.js(statement boundary after a regex-literal RHS)—not-traced prov=empirical:S440-JS-WAT-D-BUG-1+re-executed-on-5e5c952cd -->
@@ -21097,6 +21100,7 @@ Repro: `<program><f><a pattern(/abc/i)> = <input type="text"/><b pattern(/abc/)>
 Repro: `<program><email req> = ""<main><input bind:value=@email/><p>${@email.isValid}</p><errors of=@email/></main></program>` → exit 0; client.js contains 0 `_scrml_validator_fire`. Expected (§55.5 Edge A gives a top-level scalar no surface): either synthesize the surface or reject the validator / the `.isValid` read with a diagnostic.
 <!-- @gap id=g-top-level-scalar-validators-dead sev=MED status=open locus=searched:compiler/src/symbol-table.ts,compiler/src/codegen/emit-logic.ts(validity-surface synthesis is compound-only; the top-level scalar path was not traced) prov=dd:scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md -->
 
+**S447 update — expectation now ruled; re-confirmed on `01f8dda17`.** `<email req length(>=3)> = <input type="email"/>` + `<count req min(0)> = 0` with `${@email.isValid}` / `${@count.isValid}` in a `<form onsubmit=go()>` → exit 0, no diagnostic naming the reads; client.js has `_scrml_cs_reactive_get("email").isValid` and `_scrml_cs_reactive_get("count").isValid` (a string's / number's `.isValid` → `undefined`, renders empty); the form has no `novalidate`, the input carries `required="" minlength="3"` (so the browser blocks the submit). **Expected (S447, SPEC §55.5.1):** a top-level value that carries validators synthesizes `isValid` / `errors` / `touched` / `submitted` — option "synthesize", not "reject". Filed as the S447 impl#1 gap by UPDATING this entry rather than duplicating it (same defect, dpa-058 D7 = dpa-058c F2). Per §34.0 / S440 #12 impl#1 carries the divergence unless the PA rules this a silent-wrong-output exception. prov=ruling:S447.
 ### g-formfor-inputs-carry-no-validator-attrs — `<formFor for=S>` emits every field input with an explicit bind and NO HTML validator attributes, while §41.14.2 says formFor produces "Shape 2 sub-cells" (which §6.4.2 step 4 would give attributes) — `NEW S442 (dpa-058 D8)`; **LOW** (spec drift; the scrml surface is wired); open
 Repro: `${ import { formFor } from 'scrml:data'` + `type S:struct = { name: string req length(>=2)` / `email: string req }` + `function go(values: S) { } }` then `<program><main><formFor for=S onsubmit=go/></main></program>` → inputs `<input type="text" data-scrml-bind-value=… data-scrml-formfor-input="name" />`; 0 `required` / `minlength` in the HTML. Resolution depends on the dpa-058 pole ruling (P2b vs P3) — either formFor gains the attributes or §41.14.2 is amended.
 <!-- @gap id=g-formfor-inputs-carry-no-validator-attrs sev=LOW status=open locus=compiler/src/codegen/emit-form-for.ts(field emission — explicit bind:value path, not render-by-tag; buildShape2StateDecl carries the validators but they are not lowered to attrs) prov=dd:scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md -->
@@ -21612,10 +21616,11 @@ Reviewer-executed (h2/h3/h4/h5 under `rev-progrole-work/`). Direction (PA): item
 <!-- @gap id=g-bootstrap-bind-value-with-hand-written-value-accepted sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml:4855-4866(the Attr.Bind checks — E-ATTR-011 covers the target name and element; there is no check for a same-named static attribute) prov=review:#1202 -->
 **Reproduced on `464c9ab4d`.** `<let s:string="a"/>` with `<input value="z" bind:value=@s/>` → zero diagnostics. Mounted, the element has the attribute `value="z"`, and `.value` is `"a"` (the bind wins at runtime). **Expected:** a diagnostic, because the two state different initial values. This matches the r2 F6 rule for hand-written attributes that conflict with a lowered validator (`handAttrConflict`, analyze.scrml:4943), which refuses a contradiction instead of silently letting one side win. The only visible effect is a stale `value` attribute (form reset restores `"z"`), so this is LOW.
 
-### g-bootstrap-bound-top-level-validated-scalar-ruling-owed — bootstrap: a BOUND top-level scalar with validators is refused E-VALIDATOR-DEAD; the PA reads S442 ruling (2) "validators follow the bind" as saying it should lower its attributes instead — ruling owed (dpa-058 B3)
-<!-- @gap id=g-bootstrap-bound-top-level-validated-scalar-ruling-owed sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml:1297(`fn topLevelValidatorsLower() -> boolean { return false }` — the one switch; consumed at :1269 and :8320) prov=ruling-owed:dpa-058-B3 -->
+### g-bootstrap-bound-top-level-validated-scalar-ruling-owed — bootstrap: a BOUND top-level scalar with validators is refused E-VALIDATOR-DEAD; the PA reads S442 ruling (2) "validators follow the bind" as saying it should lower its attributes instead — ruling owed (dpa-058 B3) — **RESOLVED S447 (ruled)**
+<!-- @gap id=g-bootstrap-bound-top-level-validated-scalar-ruling-owed sev=LOW status=resolved locus=compiler/self-host-v2/analyze.scrml:1297(`fn topLevelValidatorsLower() -> boolean { return false }` — the one switch; consumed at :1269 and :8320) prov=ruling-owed:dpa-058-B3 -->
 **Reproduced on `464c9ab4d` (the current, deliberate behaviour).** `<let email:string="" req/>` with `<input bind:value=@email/>` → `["E-VALIDATOR-DEAD"]`. validators.test.js:226 pins this ("bound or not"). **The question for bryan:** S442 ruling (5) ("silently dead validators become errors") clearly covers an UNBOUND top-level scalar. For a BOUND one, the PA's reading of ruling (2) ("validators follow the bind") is that the validators are not dead: their HTML-native subset should land on the bound input, as a child field's does. If that reading is confirmed, the change is one line: `topLevelValidatorsLower()` returns `true`, and the bound case lowers while the unbound case stays E-VALIDATOR-DEAD. `@email.isValid` stays refused either way (§55.5 Edge A: no validity surface). Filed so the open ruling is tracked. It is not a defect until the ruling is made.
 
+**Resolved S447 — ruled S447: legal, has a surface, gated.** ruling:user-voice-scrml.md S447 "RULED — \"your recs\": validated top-level cells get a validity surface (Edge A reversed)" item 1 + "validity calls 2-6" (*"dpa-058 B3 CLOSES: the bound top-level validated scalar is legal, has a surface, and is gated in a form"*). SPEC §55.5.1 / §55.5.2 / §55.17 (change `docs/changes/s447-spec-validity-surface/`). The question this entry tracked is answered; the build it now owes (flip `topLevelValidatorsLower()`, the surface, the gate) is `g-bootstrap-validated-form-fields-fail-open-no-surface-no-gate` (§S447).
 ### g-commands-dev-tests-leak-dev-child-servers — `compiler/tests/commands/dev-watcher-churn-starvation.test.js` and `dev-compile-throw-fail-closed.test.js` kill the `scrml dev` parent but not its `--__dev-child`; every full-suite run leaves ~3 bun servers listening (cwd a deleted temp dir)
 <!-- @gap id=g-commands-dev-tests-leak-dev-child-servers sev=MED status=open locus=compiler/tests/commands/dev-watcher-churn-starvation.test.js+compiler/tests/commands/dev-compile-throw-fail-closed.test.js prov=empirical:S445 -->
 PA-measured S445: 81 orphaned bun servers (~3 GB RAM) accumulated over ~a day of post-commit full runs + agent runs; two pre-commit gate runs failed on a 300-s "(unnamed)" hang until they were killed (by cwd `(deleted)` / `scrml-dev-*`). Fix: kill the process group (spawn detached + `process.kill(-pid)`) or have `scrml dev` forward SIGTERM to its child; assert no listener survives in an afterAll.
@@ -21632,3 +21637,120 @@ Bootstrap counterpart for (a): [[g-bootstrap-call-arity-and-argument-type-checks
 ### g-bootstrap-call-arity-and-argument-type-checks-owed — bootstrap: call arity + argument-type checks owed (§7.3.4)
 <!-- @gap id=g-bootstrap-call-arity-and-argument-type-checks-owed sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(call-site checks — no E-CALL-ARITY, no position-3 E-TYPE-031) prov=ruling:user-voice-scrml.md-S447-"UFCS PARKED; keep only the argument checks" -->
 SPEC §7.3.4 + §7.5.1 position 3 (Nominal): `E-CALL-ARITY` for too many / too few arguments (defaults per §7.3.2), and `E-TYPE-031` for a proven argument type not assignable to the parameter's declared type in the three position-3 cases (primitive mismatch; kind mismatch; `T | not` into `T`). Plain calls only. S447 ordered these checks specified and emitted FIRST.
+
+## §S446-peter — filed at wrap (S446, Peter · P-Tech1)
+
+Surfaced by the S446 S239 reviews of the multi-statement handler arc (#1212 / #1217), the client-helper / `_scrml_local` arc (#1211) and the schema arc (#1209), and by the multi-statement port agents. Every entry is PRE-EXISTING on `main` unless it says otherwise. Two items were folded into existing entries instead of being re-filed: the chained `.insert` (g-map-insert-chain-lowers-only-the-first-insert) and the line-leading prefix update (g-prefix-increment-statement-deleted-in-function-body). The absolute-path chunk directory has its own existing entry, g-per-route-chunk-dir-named-after-absolute-source-path.
+
+### g-braceless-do-while-next-line-compiles-to-infinite-loop — `do a++` ⏎ `while (a < 3)` compiles to `do {} while (a++); while (a<3) {…}`, an infinite loop, with no diagnostic — `NEW S446-peter; HIGH; open`
+
+<!-- @gap id=g-braceless-do-while-next-line-compiles-to-infinite-loop sev=HIGH status=open locus=not-traced(do-while statement parse — braceless body followed by a next-line `while`) prov=review:S446-ms-rv -->
+
+A braceless `do` body with the `while` on the next line is mis-split. The body becomes the condition of an empty `do {}` loop, and the real `while (a < 3)` becomes a separate `while` loop. The emitted code is `do {} while (a++); while (a<3) {…}`. It compiles at exit 0 and hangs at runtime. Fix direction: parse the braceless `do` body as one statement and require the `while (…)` tail, or reject a braceless `do`.
+
+### g-stale-scrml-local-copies-ship-from-reused-dist — client-helper copies under `dist/_scrml_local/` from earlier builds are never removed from a reused dist — `NEW S446-peter; HIGH; open (present only once #1211 lands)`
+
+<!-- @gap id=g-stale-scrml-local-copies-ship-from-reused-dist sev=HIGH status=open locus=compiler/src/codegen(the `_scrml_local/` client-helper copy step of #1211 — no stale-file sweep of a reused output dir) prov=review:S446-cj-rv2 -->
+
+**Introduced surface: PR #1211 (draft, held for bryan).** This defect is NOT on `main` until #1211 lands. It is filed now so it travels with that PR. A rebuild into an existing dist leaves the previous builds' helper copies under `dist/_scrml_local/`. The generated `_server.js` refuses to serve them because they are not in the manifest. A deploy that uploads the whole dist to a static host ships them anyway. Fix direction: sweep `_scrml_local/` (or every file the manifest does not list) on each build.
+
+### g-examples-server-js-fails-to-boot-tablefor-export — building all of `examples/` into one `_server.js` fails to boot: `Export named 'tableFor' not found in module _scrml/data.js` — `NEW S446-peter; HIGH; open`
+
+<!-- @gap id=g-examples-server-js-fails-to-boot-tablefor-export sev=HIGH status=open locus=not-traced(the `_scrml/data.js` server stdlib module vs an import of `tableFor` in a multi-example build) prov=review:S446-cj-rv -->
+
+Reviewer-executed: `scrml build examples/` compiles, but the combined `_server.js` fails to boot with `Export named 'tableFor' not found in module _scrml/data.js`, so no route is served. The likely cause (not traced) is that one example's import of `tableFor` resolves against a shared `_scrml/data.js` that does not export it.
+
+### g-lift-handlers-skip-scope-and-state-checks — in `for … lift` rows, `nope()` and `@zz = 1` compile clean where the top level and `<each>` give E-SCOPE-001 / E-STATE-UNDECLARED — `NEW S446-peter; MED; open`
+
+<!-- @gap id=g-lift-handlers-skip-scope-and-state-checks sev=MED status=open locus=compiler/src/codegen/emit-lift.js+the scope/state checkers (lift-row handler bodies are not walked) prov=review:S446-ms-rv -->
+
+An undeclared function call (`nope()`) or an undeclared cell write (`@zz = 1`) in a handler on a `for … lift` row compiles at exit 0. The same handler at the top level or in an `<each>` row gives E-SCOPE-001 / E-STATE-UNDECLARED. This holds for single-statement handlers too, so it is not caused by the multi-statement work.
+
+### g-arm-name-read-in-template-literal-or-object-shorthand-missed — `handlerReadsArmName` misses an arm binding read inside a template literal or object shorthand, so the handler throws `ReferenceError` at click — `NEW S446-peter; MED; open`
+
+<!-- @gap id=g-arm-name-read-in-template-literal-or-object-shorthand-missed sev=MED status=open locus=compiler/src/codegen/emit-variant-guard.ts(handlerReadsArmName — identifier scan skips `${…}` inside template literals and `{ name }` shorthand) prov=review:S446-ms-rv -->
+
+A handler inside a match/engine arm that reads the arm binding `note` only as `` `${note}!` `` or as `{ note }` is not detected as reading the arm name, and the click throws a `ReferenceError` on `note`. Reproduced for single- and multi-statement handlers.
+
+### g-map-insert-in-row-handler-typeerror — an inline `@m = @m.insert(…)` in an `<each>` or `for … lift` row handler throws TypeError at click, even single-statement — `NEW S446-peter; MED; open`
+
+<!-- @gap id=g-map-insert-in-row-handler-typeerror sev=MED status=open locus=compiler/src/codegen/emit-each.ts+compiler/src/codegen/emit-lift.js(row handler bodies skip the §59 map/set method lowering) prov=review:S446-multistmt -->
+
+The click throws a `TypeError` from the `.insert` call. This happens with a single statement, so it is not a multi-statement regression. Related: g-map-insert-chain-lowers-only-the-first-insert (the chained form at top level).
+
+### g-button-vanishes-when-row-handler-contains-json-parse-brace — in an `<each>` row, a handler containing `JSON.parse('{')` makes the button disappear, with no diagnostic — `NEW S446-peter; MED; open`
+
+<!-- @gap id=g-button-vanishes-when-row-handler-contains-json-parse-brace sev=MED status=open locus=not-traced(each-row markup/handler splitting — a `{` inside a string literal is counted as a brace) prov=review:S446-multistmt -->
+
+The `<button>` is not rendered and the compile is clean. Likely cause (not traced): the `{` inside the string literal is counted by a brace scan that delimits the row markup. Expected: string contents are opaque to that scan.
+
+### g-braced-handler-on-lifted-markup-not-rendered — `lift <li><button onclick={ f() }>…` does not render the element at all, with no diagnostic (single statement too) — `NEW S446-peter; MED; open`
+
+<!-- @gap id=g-braced-handler-on-lifted-markup-not-rendered sev=MED status=open locus=compiler/src/codegen/emit-lift.js(lifted markup with a `{ … }` attribute value) prov=S446-ms-port -->
+
+Found by the S446 multi-statement port agent. A braced handler `onclick={ f() }` on markup inside a `lift` makes the lifted element disappear from the output: no `<li>` and no `<button>`, and no diagnostic. It happens with a single statement too, so it is not specific to multi-statement bodies.
+
+### g-same-line-juxtaposed-statements-in-expr-handler-drop — `${h() f()}` / `${@a++ f()}` silently drop `f()`; the single-statement path discards the statement parse's E-STMT-MISSING-SEMICOLON — `NEW S446-peter; MED; open`
+
+<!-- @gap id=g-same-line-juxtaposed-statements-in-expr-handler-drop sev=MED status=open locus=compiler/src/codegen/emit-event-wiring.ts(single-statement `${}` handler path — the statement parse's diagnostics are not propagated) prov=S446-ms-port -->
+
+Found by the S446 multi-statement port agent. S284 made same-line juxtaposed statements a hard `E-STMT-MISSING-SEMICOLON` (§4). In a `${…}` event handler, the single-statement path parses the body, gets that error, and then discards it. It emits only the first statement, so `f()` never runs and the compile exits 0. Fix: surface the parse's diagnostics on this path.
+
+### g-emit-per-route-chunk-mount-race — under `--emit-per-route`, `ReferenceError: _scrml_chunk_mount is not defined` on about 1–2 of every 10 page loads (classic and module scripts alike) — `NEW S446-peter; MED; open`
+
+<!-- @gap id=g-emit-per-route-chunk-mount-race sev=MED status=open locus=compiler/src/codegen/emit-client.ts+compiler/src/codegen/index.ts(per-route chunk activation vs the definition of `_scrml_chunk_mount`) prov=review:S446-cj-rv -->
+
+Reviewer-executed with repeated page loads of a per-route build: about 10–20% of loads throw `ReferenceError: _scrml_chunk_mount is not defined`. The failure is intermittent, which suggests a load-order race between the chunk script and the script that defines the mount function (not traced). Both classic and `type="module"` emission are affected.
+
+### g-emit-per-route-directory-build-pages-collide-on-root-route — under `--emit-per-route`, single-file pages in a directory build all claim route `/`, and one page's anonymous chunk hash is not deterministic across builds — `NEW S446-peter; MED; open`
+
+<!-- @gap id=g-emit-per-route-directory-build-pages-collide-on-root-route sev=MED status=open locus=compiler/src/codegen/route-splitter.ts(chunk descriptor route derivation when no route map applies) prov=review:S446-cj-rv -->
+
+Reviewer-executed on a per-route build of `examples/`. (1) Every single-file page in the directory build claims route `/`, so pages pick up each other's chunks: `02-counter.html` modulepreloads `30-validated-form`'s chunk. (2) `12-snippets-slots`' `_anonymous.initial.<hash>.js` gets a different hash on two builds of the same source, which breaks reproducible builds and caching. The absolute-path chunk directory names seen in the same build are the existing g-per-route-chunk-dir-named-after-absolute-source-path. All three probably share one fix: derive the route from the dist-relative page path.
+
+### g-nested-program-worker-drops-file-level-helper-import — a nested-program worker that calls a file-level helper import compiles clean, but its bundle has no import, so it throws `ReferenceError` at runtime — `NEW S446-peter; MED; open`
+
+<!-- @gap id=g-nested-program-worker-drops-file-level-helper-import sev=MED status=open locus=not-traced(worker bundle emission for a nested `<program name=…>` — the file's imports are not carried into the worker) prov=review:S446-cj-rv -->
+
+A nested worker `<program>` whose body calls a helper imported at the top of the file compiles at exit 0. The emitted worker bundle has no matching import, so the first call throws `ReferenceError` inside the worker. Expected: carry the referenced imports into the worker bundle, or fail the compile.
+
+### g-protect-floor-shadow-db-first-wins-per-name — the §14.8.9 protect floor's shadow DB takes the FIRST declaration per table name, so a commented-out copy still feeds it — `NEW S446-peter; MED; open`
+
+<!-- @gap id=g-protect-floor-shadow-db-first-wins-per-name sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(comment-agnostic first-wins harvest that feeds the protect-floor shadow DB) prov=S446-schema -->
+
+This is the protect-floor sibling of g-schema-commented-out-declaration-shadows-live-table (the tenant floor). The same comment-agnostic, first-wins harvest feeds the shadow DB that the protect floor checks against. A commented-out earlier `CREATE TABLE` of the same name therefore decides the columns the protect floor sees, not the live declaration. **Owner: bryan.** Protect egress is the S447-bryan lane, so it is routed rather than fixed here.
+
+### g-generated-headless-and-prod-servers-bind-all-interfaces — the `scrml build` production server and the compiler-generated server for headless serve targets pass no hostname, so they bind every interface — `NEW S446-peter; MED; open (routed: ruling for bryan)`
+
+<!-- @gap id=g-generated-headless-and-prod-servers-bind-all-interfaces sev=MED status=open owner=bryan locus=compiler/src/codegen/emit-tool.ts(generated headless server — no `hostname`)+the `scrml build` production server entry prov=S446-#1207-scope-note -->
+
+#1207 made `scrml dev` / `scrml serve` loopback-by-default (g-dev-server-binds-all-interfaces, resolved S446). It deliberately left two servers alone: the production server emitted by `scrml build`, and the server the compiler generates for headless serve targets (`emit-tool.ts`). Both still bind all interfaces. That is normal for a production server. **Ruling owed (bryan):** should the headless target (a local tool or agent server) default to loopback, with an explicit opt-in for public binding? The recommended default is loopback for headless and unchanged for the production server.
+
+### g-test-body-comment-openers-stripped — `~{ test }` body comment openers are stripped, so `// we defer…` becomes code in testMode and the test JS is invalid, yet the run exits 0 — `NEW S446-peter; MED; open`
+
+<!-- @gap id=g-test-body-comment-openers-stripped sev=MED status=open locus=not-traced(the `~{ test }` body extraction for testMode — `//` openers removed, comment text kept) prov=S446-PR1208-draft -->
+
+Also drafted by PR #1208, which is unmerged, so it is filed here so that it is on `main`. Delete this copy if #1208 lands with its own. In a `~{ test }` body, a line comment such as `// we defer the …` loses its `//` opener and the comment text is emitted as code in testMode. The generated test JS is a syntax error, but the test run still exits 0, so the tests in that block never ran and nothing reported it.
+
+### g-destructured-lift-iteration-stale-after-same-key-update — `for ({id, n} of @rows)` shows a stale `n` after a same-key update and logs "Cannot destructure property 'id' from null" — `NEW S446-peter; LOW; open`
+
+<!-- @gap id=g-destructured-lift-iteration-stale-after-same-key-update sev=LOW status=open locus=compiler/src/codegen/emit-lift.js(keyed reconcile of a destructured loop binding) prov=review:S446-ms-rv -->
+
+When a row is replaced by a row with the same `id` and a new `n`, the rendered `n` keeps the old value, and the console logs `Cannot destructure property 'id' from null`.
+
+### g-postfix-update-before-in-or-instanceof-newly-loud — after #1212, `x++` ⏎ `instanceof T` and `x++` ⏎ `in obj` fail with E-CODEGEN-INVALID-LOGIC — `NEW S446-peter; LOW; open`
+
+<!-- @gap id=g-postfix-update-before-in-or-instanceof-newly-loud sev=LOW status=open locus=compiler/src/ast-builder.js(the #1212 postfix-update statement split) prov=review:S446-ms-rv -->
+
+Measured on `main` after #1212. A postfix update followed by a line that starts with `instanceof` or `in` is now split into two statements, and the second one is invalid, so the compile fails with E-CODEGEN-INVALID-LOGIC. The shape is contrived, it fails closed, and it matches main's existing IDENT ⏎ `instanceof` split. It is filed so the behavior is recorded, not because it needs urgent work.
+
+### g-dev-missing-helper-dep-not-watched — under `scrml dev`, creating a client helper dependency that was previously missing does not trigger a recompile — `NEW S446-peter; LOW; open (present only once #1211 lands)`
+
+<!-- @gap id=g-dev-missing-helper-dep-not-watched sev=LOW status=open locus=compiler/src/commands/dev.js(watch set — only paths that resolved are watched) prov=review:S446-cj-rv2 -->
+
+**Introduced surface: PR #1211 (draft, held for bryan).** It is not on `main` until #1211 lands. If a page imports a client helper file that does not exist yet, the compile fails. Creating the file afterwards does not recompile, because the missing path was never added to the watch set. Workaround: touch the importer. Fix: watch the unresolved paths, or their parent directories.
+## §S447 — validity-surface build owed by the S447 rulings (2026-10-01; ruling:user-voice-scrml.md S447 "validated top-level cells get a validity surface (Edge A reversed)" item 1 + "validity calls 2-6"; SPEC §55.5.1-§55.5.3 / §55.7 / §55.17, change `docs/changes/s447-spec-validity-surface/`. Bootstrap loci read at `01f8dda17`; no browser run)
+
+### g-bootstrap-validated-form-fields-fail-open-no-surface-no-gate — bootstrap: emits `novalidate` on every form carrying lowered validator attributes (S442 (3)) while it has NO §55 validity surface and NO submit gate, so a validated child field inside a `<form>` gates nothing: the browser's block is removed and nothing replaces it
+<!-- @gap id=g-bootstrap-validated-form-fields-fail-open-no-surface-no-gate sev=HIGH status=open locus=compiler/self-host-v2/analyze.scrml(validatorPass :8315 + formsInElem :8429 collect the novalidate forms; resolveMember :2704 refuses a child field's surface read E-BOOTSTRAP-UNSUPPORTED; topLevelValidatorsLower :1297 = false refuses every top-level validator E-VALIDATOR-DEAD)+compiler/self-host-v2/lower.scrml(noValidate :872) prov=ruling:S447 -->
+**Read on `01f8dda17` (not run in a browser — dpa-058c F5/F6 derived it the same way).** `validatorPass` collects the forms that get `novalidate`, and `lower.scrml`'s `noValidate` emits it; the HTML-native attributes on a bound child field are therefore disarmed. The surface read `@signup.email.isValid` is `E-BOOTSTRAP-UNSUPPORTED` (:2704), so the author cannot write the check either, and no compiler gate exists. **Consequence:** a `<form onsubmit=save()>` with `<let email:string="" req/>` bound inside it runs `save()` with `""` — fail-open on the language's documented form-validation path. **Build owed (SPEC as amended S447):** (1) the §55 surface — compound (§55.5), per-field (§55.6), and validated top-level values (§55.5.1: flip `topLevelValidatorsLower()`, drop the E-VALIDITY-NO-SURFACE arm for validated cells); `submitted` scoped to a form that binds the value (§55.7); (2) the §55.17 submit gate (touch → submitted → cancel + skip `onsubmit` if invalid; `formnovalidate` on `SubmitEvent.submitter` bypasses) on every form that binds a validated value, with or without `novalidate` (S447 gate-calls item 1; a `formnovalidate` bypass still sets `submitted`, item 2); (3) `I-FORM-SUBMIT-GATED` + `data-scrml-gated` (§55.17.6); (4) `E-VALIDITY-RESERVED-NAME` (§55.5.3); (5) E-VALIDATOR-DEAD narrowed to §55.5.2 (no bind + locked + not server + no use-site seed + no `persist=`). `slice-m4/validators.test.js` :226 / :230 / :235 pin the superseded readings and flip. **Interim option (PA's call, dpa-058c "PA action requested"):** hold `novalidate` emission until (1)+(2) land, which restores the browser's block meanwhile.
