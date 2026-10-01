@@ -7754,6 +7754,30 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### S444 (2026-09-30/10-01, bryan · XPS) — a coderlegion port became four rulings, and the TS compiler's `<request>` turned out to loop
+
+**The arc.** Booted as successor to S443 and worked S442's held bootstrap lane: the dpa-045 plain-markup parser (three review
+rounds — the second caught a fix that let a *closed* literal move a body's end), typer r8 (two rounds), then bootstrap Core
+additions + dpa-058 so §66.19.5 (audit log) and §66.19.2 (validated form) run from their verbatim SPEC sources. A side quest —
+porting the coderlegion article "Searching a billion records" to 37 compiled lines of scrml — surfaced three places scrml was
+not equivalent; bryan said "those first 3 are things we should look at", and they became dpa-059 (a superseded `<request>`
+aborts READS, discards WRITES), dpa-060 (a bare compiler-derived `cache`, no author TTL, revalidate on hit), dpa-061 (`persist=`
+— a lifetime attribute, not an authority value; `key=` required; decode-first; IndexedDB a planned stdlib), and dpa-062
+(`prepaint` REFLECT on the cell + `hold=@cell` on a region). All four are SPEC-landed (Nominal); the bootstrap has no server
+boundary yet, so the build is a planned multi-session arc. Ruled too: free-text `//` is a comment only after whitespace (and
+swallows the rest of the line); display-text escapes `\"` `\\` `\${` restored (reversing S442); a `"…"` is display text only as a
+standalone statement. The fix work found the impl#1 `<request>` re-fetched in a loop on its own settle (example 32: 51 calls on
+mount) — landed as an explicit S435 exception — and a strict-CSP break in per-route chunk loading (fixed, same-origin script).
+
+- #1181 maps · #1182 slice-m4 in CI + live-PG hook timeouts · #1184 honest E-ASYNC-FN-ESCAPES-AS-VALUE wording (flogence)
+- #1185 dpa-045 SPEC follow-ups + 6 gaps · #1186 bank dpa-059/060/061 (+062) · #1188 / #1197 gap filings (3 `<request>` resolved)
+- #1189 bootstrap typer r8 · #1190 dpa-045 bootstrap parser · #1195 `//` + escapes + standalone display literal
+- #1191 impl#1 `<request>`: deps= honored, re-fire loop, refetch() kept, client-async bodies awaited, E-LIFECYCLE-022
+- #1193 SPEC §6.7.7.1 / §6.7.7.2 / §6.14 · #1199 SPEC §6.14.4 prepaint/hold + CSP sha256
+- #1200 security: per-route chunk manifest/bootstrap → same-origin script (strict CSP refused the inline ones)
+- #1202 bootstrap Core additions (bind, Date.now, `<*x/>`, removals, index places, lambdas) + dpa-058 validators + fail-closed refusal of unimplemented elements
+- Gate: cloud `gate` green on every merge; review floor markers for all S444 PRs.
+
 ### S443 (2026-09-29/30, bryan · ASUS) — the S441 review record was wrong, the auth holes closed, and two broken flagship examples work end to end
 
 **The arc.** Booted as successor to S442 (XPS, bootstrap lane) and took S441's held security pickup, whose

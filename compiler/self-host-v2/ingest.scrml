@@ -1051,6 +1051,9 @@ ${
             .StructOf(ty: x) :> false
             .Handle(inst: x) :> false
             .InitOf(decl: x) :> false
+            .Host(call: x) :> false
+            .Lambda(params: x) :> false
+            .SeqCall(op: x) :> false
         }
     }
 
@@ -1307,6 +1310,9 @@ ${
             .StructOf(ty: x) :> "Expr.StructOf"
             .Handle(inst: x) :> "Expr.Handle"
             .InitOf(decl: x) :> "Expr.InitOf"
+            .Host(call: x) :> "Expr.Host"
+            .Lambda(params: x) :> "Expr.Lambda"
+            .SeqCall(op: x) :> "Expr.SeqCall"
         }
     }
 

@@ -28,7 +28,7 @@
 // body is an object literal loses its bindings — constructors instead).
 // =============================================================================
 ${
-    import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
+    import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram,
              block, litStr } from "./core.scrml"
@@ -36,7 +36,7 @@ ${
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag,
              mkSpan } from "./ast.scrml"
     import { Node, allNodes } from "./walk.scrml"
-    import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind,
+    import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair,
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest } from "./analyze.scrml"
 
@@ -147,6 +147,9 @@ ${
             .StructOf(ty: x) :> not
             .Handle(inst: x) :> not
             .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
         }
     }
 
@@ -170,6 +173,9 @@ ${
             .StructOf(ty: x) :> op
             .Handle(inst: x) :> op
             .InitOf(decl: x) :> op
+            .Host(call: x) :> op
+            .Lambda(params: x) :> op
+            .SeqCall(op: x) :> op
         }
     }
 
@@ -223,6 +229,9 @@ ${
             .StructOf(ty: x) :> false
             .Handle(inst: x) :> false
             .InitOf(decl: x) :> false
+            .Host(call: x) :> false
+            .Lambda(params: x) :> false
+            .SeqCall(op: x) :> false
         }
     }
 
@@ -295,7 +304,7 @@ ${
             .Variant(name: n) :> valueExpr(c, valueFact(c.t.values, e.nid), [])
             .Member(obj: o, name: n) :> memberExpr(c, nameFact(c.t.names, e.nid), o)
 
-            .Call(callee: cal, args: args) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .Call(callee: cal, args: args) :> callOrBuiltin(c, e, cal, args)
             .Unary(op: o, e: x) :> Expr.Prim(opOf(valueFact(c.t.values, e.nid)), [lowerExpr(c, x)])
             .Binary(op: o, l: l, r: r) :> Expr.Prim(opOf(valueFact(c.t.values, e.nid)), [lowerExpr(c, l), lowerExpr(c, r)])
             .Ternary(test: t, yes: y, no: n) :> boolMatch(lowerExpr(c, t), lowerExpr(c, y), lowerExpr(c, n))
@@ -304,7 +313,68 @@ ${
             .ObjectLit(props: ps) :> valueExpr(c, valueFact(c.t.values, e.nid), ps)
             .Spread(e: sx) :> missing()
             .Index(obj: ix) :> missing()
-            .Lambda(params: lp) :> missing()
+            .Lambda(params: lp, body: lb) :> lambdaExpr(c, valueFact(c.t.values, e.nid), lb)
+        }
+    }
+
+    // s444 — a call: a host call / a sequence function (the binder's value
+    // fact on the call), else a call of a named function.
+    fn callOrBuiltin(c: LC, e: AExpr, cal: AExpr, args: AExpr[]) -> Expr {
+        const f: ValueFact | not = valueFact(c.t.values, e.nid)
+        return match f {
+            .VHost(call: h) :> Expr.Host(h)
+            .VSeqCall(op: o) :> seqCallExpr(c, o, cal, args)
+            .VLit(lit: l) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VVariant(enumSym: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VStructOf(ty: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VOp(op: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            .VLambda(params: x) :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+            not :> callExpr(c, nameFact(c.t.names, cal.nid), args)
+        }
+    }
+
+    fn seqCallExpr(c: LC, o: SeqFn, cal: AExpr, args: AExpr[]) -> Expr {
+        const obj: AExpr | not = calleeObj(cal)
+        if (obj is not || args.length != 1) return missing()
+        return Expr.SeqCall(o, lowerExpr(c, obj), lowerExpr(c, args[0]))
+    }
+
+    fn calleeObj(cal: AExpr) -> AExpr | not {
+        const k: AExprK = cal.k
+        return match k {
+            .Member(obj: o) :> o
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Call(callee: x) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: x) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    fn lambdaExpr(c: LC, f: ValueFact | not, body: AExpr) -> Expr {
+        return match f {
+            .VLambda(params: ps) :> Expr.Lambda(ps, lowerExpr(c, body))
+            .VLit(lit: l) :> missing()
+            .VVariant(enumSym: x) :> missing()
+            .VStructOf(ty: x) :> missing()
+            .VOp(op: x) :> missing()
+            .VHost(call: x) :> missing()
+            .VSeqCall(op: x) :> missing()
+            not :> missing()
         }
     }
 
@@ -330,6 +400,9 @@ ${
             .VVariant(enumSym: s, idx: i) :> Expr.Lit(Literal.Variant(s, i))
             .VStructOf(ty: t, order: order) :> Expr.StructOf(t, orderedProps(c, ps, order))
             .VOp(op: o) :> missing()
+            .VHost(call: h) :> missing()
+            .VSeqCall(op: x) :> missing()
+            .VLambda(params: x) :> missing()
             not :> missing()
         }
     }
@@ -340,6 +413,9 @@ ${
             .VLit(lit: l) :> PrimOp.Not
             .VVariant(enumSym: s) :> PrimOp.Not
             .VStructOf(ty: t) :> PrimOp.Not
+            .VHost(call: h) :> PrimOp.Not
+            .VSeqCall(op: x) :> PrimOp.Not
+            .VLambda(params: x) :> PrimOp.Not
             not :> PrimOp.Not
         }
     }
@@ -372,6 +448,9 @@ ${
             .StructOf(ty: t) :> missing()
             .Handle(inst: i) :> missing()
             .InitOf(decl: d) :> missing()
+            .Host(call: x) :> missing()
+            .Lambda(params: x) :> missing()
+            .SeqCall(op: x) :> missing()
         }
     }
 
@@ -495,8 +574,18 @@ ${
             .EReset(w: w, decl: d, idx: i) :> resetStmt(c, w, d, i)
             .EAssignLocal(sym: s) :> assignLocal(c, s, value)
             .EEdits(w: w, elems: es, tmps: ts, snap: sn) :> editStmts(c, w, es, ts, sn)
+            .ERemove(w: w) :> [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, Expr.Lit(Literal.Int(1)), w.check)]
+            .EElemAt(cap: cap, inst: i, index: ix, path: path) :> elemAtStmt(c, cap, i, ix, path, value)
             not :> [Stmt.Eval(lowerExpr(c, e))]
         }
+    }
+
+    // s444 — `@xs[i].f = v` → Write(cap, inst, ElemAt(i, path), v): the index
+    // and the value are lowered here; the element field's contract was judged
+    // by analyze (dpa-052 Q3) and is re-checked in Core (check.scrml C3).
+    fn elemAtStmt(c: LC, cap: Sym, i: InstRef, ix: AExpr, path: FieldRef[], value: AExpr | not) -> Stmt[] {
+        if (value is not) return []
+        return [Stmt.Write(cap, instOf(c, i), EditKind.ElemAt(lowerExpr(c, ix), path), lowerExpr(c, value), Check.Static)]
     }
     // The value a write stores: an assignment's right side, or the element of
     // an edit method call (`@x.push(v)`).
@@ -678,6 +767,9 @@ ${
             .StructOf(ty: x) :> missing()
             .Handle(inst: x) :> missing()
             .InitOf(decl: x) :> missing()
+            .Host(call: x) :> missing()
+            .Lambda(params: x) :> missing()
+            .SeqCall(op: x) :> missing()
         }
     }
 
@@ -764,14 +856,22 @@ ${
     fn lowerElem(c: LC, e: AElem) -> View[] {
         const f: ElemFact | not = elemFact(c.t.elems, e.nid)
         return match f {
-            .MHtml :> condWrap(c, e, [View.El(e.tag, htmlAttrs(c, e.attrs), lowerNodes(c, e.kids))])
+            .MHtml :> condWrap(c, e, [View.El(e.tag, htmlAttrs(c, e.attrs).concat(noValidate(c, e)), lowerNodes(c, e.kids))])
             .MUse(decl: d, alias: a) :> condWrap(c, e, [View.Instance(d, constructAttrs(c, e.attrs), lowerNodes(c, e.kids), a)])
             .MEach(bind: b, handles: hs) :> [eachView(c, e, b, hs)]
             .MSlot :> [View.Slot]
             .MStateView(v: v) :> [stateView(c, v)]
             .MInline(v: v) :> inlineViews(c, v)
+            .MStar(decl: d, inst: i) :> [View.Star(d, instOf(c, i))]
             not :> []
         }
+    }
+
+    // s444 Phase B (RULED S442 (3): "the compiler adds `novalidate` to any form
+    // carrying lowered attributes") — analyze listed the forms.
+    fn noValidate(c: LC, e: AElem) -> Attr[] {
+        if (c.t.novalidate.indexOf(e.nid) >= 0) return [Attr.Static("novalidate", "")]
+        return []
     }
 
     // s442 — `<*x/>` by inlining (analyze's InlineView): the markup, lowered in
@@ -812,6 +912,7 @@ ${
             .AEachIn :> false
             .AEachKey :> false
             .AEachAs :> false
+            .ABind(kind: k) :> false
         }
     }
 
@@ -849,6 +950,41 @@ ${
             .AEachIn :> []
             .AEachKey :> []
             .AEachAs :> []
+            .ABind(kind: bk, w: w, decl: d, idx: x, sink: sk, vattrs: vs) :> [bindAttr(c, bk, w, d, x, sk)].concat(validatorAttrs(vs))
+        }
+    }
+
+    // s444 Phase B (dpa-058, RULED S442 (2)) — the bound field's validators'
+    // HTML-native attributes (analyze computed them for THIS element).
+    fn validatorAttrs(vs: HtmlAttrPair[]) -> Attr[] {
+        let out: Attr[] = []
+        for (const v of vs) { out = out.concat([Attr.Static(v.name, v.value)]) }
+        return out
+    }
+
+    // s444 — `bind:value=@p` / `bind:checked=@p` → Attr.Bind: the read of the
+    // place (field `idx` of `decl` through the write's instance, then the
+    // write's FieldAt path) and ONE write of the event-value local `sink`
+    // (check.scrml C8 pins the pair to one place).
+    fn bindAttr(c: LC, k: BindKind, w: WriteFact, d: Sym, idx: int, sink: Sym) -> Attr {
+        const inst: InstRef = instOf(c, w.inst)
+        const read: Expr = cellRead(c, d, inst, [{ owner: d, idx: idx }].concat(editPath(w.edit)))
+        return Attr.Bind(k, read, sink, block([Stmt.Write(w.cap, inst, w.edit, Expr.Local(sink), w.check)]))
+    }
+
+    fn editPath(k: EditKind) -> FieldRef[] {
+        return match k {
+            .FieldAt(path: p) :> p
+            .Replace :> []
+            .Append :> []
+            .Prepend :> []
+            .Anywhere :> []
+            .PositionWrite :> []
+            .Transition :> []
+            .RemoveEnd :> []
+            .RemoveFront :> []
+            .RemoveAnywhere :> []
+            .ElemAt(index: x) :> []
         }
     }
 
@@ -925,6 +1061,7 @@ ${
             .AEachIn :> -1
             .AEachKey :> -1
             .AEachAs :> -1
+            .ABind(kind: k) :> -1
         }
     }
 
@@ -959,6 +1096,7 @@ ${
             .AConstruct(field: x) :> 0
             .AAs :> 0
             .AEachAs :> 0
+            .ABind(kind: k) :> 0
         }
     }
 

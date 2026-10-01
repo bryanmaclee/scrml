@@ -27,6 +27,7 @@
 // =============================================================================
 ${
     import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
+             HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, FieldRole, Field,
              Decl, Fn, CoreProgram, CapOwner,
              findDecl, findTypeDef, typeDefSym, capOwner } from "./core.scrml"
@@ -280,7 +281,31 @@ ${
             .StructOf(ty: ty, fields: fs) :> structJs(ctx, ty, fs)
             .Handle(inst: i) :> instJs(ctx, i)
             .InitOf(decl: d, inst: i, idx: x) :> rtCall(ctx, "initial", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))])
+            .Host(call: c) :> hostJs(c)
+            .Lambda(params: ps, body: b) :> JsExpr.JArrowE(symNames(ctx, ps), exprJs(ctx, b))
+            .SeqCall(op: o, seq: sq, f: f) :> jmcall(exprJs(ctx, sq), seqFnName(o), [exprJs(ctx, f)])
         }
+    }
+
+    // s444 — the host calls Core admits, printed as the host spells them
+    // (`Date` is a reserved name: no minted name shadows it, names.scrml).
+    fn hostJs(c: HostCall) -> JsExpr {
+        return match c {
+            .DateNow :> jcall(jmember(jid("Date"), "now"), [])
+        }
+    }
+
+    fn seqFnName(o: SeqFn) -> string {
+        return match o {
+            .Filter :> "filter"
+            .Map :> "map"
+        }
+    }
+
+    fn symNames(ctx: Ctx, ss: Sym[]) -> string[] {
+        let out: string[] = []
+        for (const s of ss) { out = out.concat([symName(ctx, s)]) }
+        return out
     }
 
     fn litJs(ctx: Ctx, l: Literal) -> JsExpr {
@@ -522,6 +547,10 @@ ${
             .Anywhere :> false
             .PositionWrite :> false
             .FieldAt :> false
+            .RemoveEnd :> false
+            .RemoveFront :> false
+            .RemoveAnywhere :> false
+            .ElemAt(index: x) :> false
         }
     }
 
@@ -541,6 +570,10 @@ ${
             .PositionWrite :> jmcall(target, "set", [v])
             .FieldAt(path: path) :> rtCall(ctx, "setIn", [target, fieldPathJs(ctx, path), v])
             .Transition :> transitionJs(ctx, target, owner, v, check)
+            .RemoveEnd :> rtCall(ctx, "removeEnd", [target, v])
+            .RemoveFront :> rtCall(ctx, "removeFront", [target, v])
+            .RemoveAnywhere :> jmcall(target, "set", [v])
+            .ElemAt(index: ix, path: path) :> rtCall(ctx, "setAt", [target, exprJs(ctx, ix), fieldPathJs(ctx, path), v])
         }
     }
 
@@ -591,6 +624,7 @@ ${
             .Each :> hole(HNode.HComment("each"), path, v)
             .Instance(decl: d) :> hole(HNode.HComment(d.hint), path, v)
             .Slot :> hole(HNode.HComment("slot"), path, v)
+            .Star(decl: d) :> hole(HNode.HComment("*" + d.hint), path, v)
         }
     }
 
@@ -612,6 +646,7 @@ ${
             .Static(name: n, value: v) :> [{ name: n, value: v }]
             .Bound :> []
             .On :> []
+            .Bind :> []
         }
     }
 
@@ -629,6 +664,7 @@ ${
             .Static(name: n) :> false
             .Bound(name: n) :> true
             .On(event: ev) :> true
+            .Bind(kind: k) :> true
         }
     }
 
@@ -679,6 +715,7 @@ ${
             .Cond :> false
             .Each :> false
             .Slot :> false
+            .Star :> false
         }
     }
 
@@ -701,6 +738,7 @@ ${
             .Cond :> []
             .Each :> []
             .Slot :> []
+            .Star :> []
         }
     }
 
@@ -715,7 +753,15 @@ ${
             .Each(src: src, bind: bind, key: key, handles: hs, row: row) :> eachJs(ctx, src, bind, key, hs, row, node, tid + "/" + pathText(h.path))
             .Instance(decl: d, attrs: attrs, slot: slot, alias: alias) :> instanceJs(ctx, d, attrs, slot, alias, node, h.path, tid, kid)
             .Slot :> only([sexpr(rtCall(ctx, "slot", [scopeVar(), node, ctx.slot]))])
+            .Star(decl: d, inst: i) :> starJs(ctx, d, i, node)
         }
+    }
+
+    // s444 — `<*x/>` (§66.6.2): the EXISTING instance, rendered with x's
+    // renders into THIS scope (so its view effects are disposed with this
+    // site, while the instance itself lives on). Nothing is constructed.
+    fn starJs(ctx: Ctx, d: Sym, i: InstRef, node: JsExpr) -> Rendered {
+        return only([sexpr(jcall(jid(nameOf(ctx.names, NameKey.Render(d.id))), [instJs(ctx, i), scopeVar(), node, JsExpr.JNull]))])
     }
 
     fn attrsJs(ctx: Ctx, attrs: Attr[], node: JsExpr) -> JsStmt[] {
@@ -729,6 +775,15 @@ ${
             .Static :> []
             .Bound(name: n, e: e) :> [sexpr(rtCall(ctx, "attr", [scopeVar(), node, jstr(n), jthunk(exprJs(ctx, e))]))]
             .On(event: ev, body: body) :> [sexpr(rtCall(ctx, "on", [scopeVar(), node, jstr(ev), JsExpr.JArrow([], blockJs(ctx, body))]))]
+            .Bind(kind: k, read: r, sink: sk, write: w) :> [sexpr(rtCall(ctx, "bind", [scopeVar(), node, jstr(bindProp(k)), jthunk(exprJs(ctx, r)), JsExpr.JArrow([symName(ctx, sk)], blockJs(ctx, w))]))]
+        }
+    }
+
+    // s444 — the element property a bind shows and reads back (§5.4).
+    fn bindProp(k: BindKind) -> string {
+        return match k {
+            .Value :> "value"
+            .Checked :> "checked"
         }
     }
 
@@ -853,6 +908,7 @@ ${
             .Cond(arms: a) :> false
             .Each(src: s) :> false
             .Slot :> false
+            .Star(decl: d) :> false
         }
     }
 
@@ -899,6 +955,12 @@ ${
             }
         }
         let templates: Template[] = []
+        // s444: a prebuilt kid renders into the scope THIS render was given —
+        // the parent instance's scope for a new instance (the same lifetime as
+        // the kid's own), the `<*x/>` site's scope for a Star render (so the
+        // view is disposed with the site, never left in the kid's scope).
+        let renderScope: JsExpr = jmember(jid(iv), "scope")
+        if (ctx.prebuilt) renderScope = scopeVar()
         if (d.renders is some) {
             let slotFn: JsExpr = JsExpr.JNull
             if (slot.length > 0) {
@@ -907,7 +969,7 @@ ${
                 templates = r.templates
             }
             stmts = stmts.concat([sexpr(jcall(jid(nameOf(ctx.names, NameKey.Render(dsym.id))),
-                [jid(iv), jmember(jid(iv), "scope"), node, slotFn]))])
+                [jid(iv), renderScope, node, slotFn]))])
         }
         return { stmts: stmts, templates: templates }
     }
@@ -1093,6 +1155,9 @@ ${
             .ArrayOf(elems: es) :> false
             .StructOf(ty: t) :> false
             .Handle(inst: i) :> false
+            .Host(call: c) :> false
+            .Lambda(params: ps) :> false
+            .SeqCall(op: o) :> false
         }
     }
 
@@ -1121,6 +1186,7 @@ ${
             .Cond :> []
             .Each :> []
             .Slot :> []
+            .Star :> []
         }
     }
 

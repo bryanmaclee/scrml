@@ -38,7 +38,7 @@ ${
     import { Token, TokenKind, LexStop, LexRun, lexFrom, lexFromMode } from "./lex.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
-             AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl,
+             AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, mkSpan } from "./ast.scrml"
 
     // =========================================================================
@@ -1171,6 +1171,7 @@ ${
         attrs: AAttr[],
         selfClosing: boolean,
         short: ANode[] | not,
+        vals: AValidator[],     // s444 Phase B: validator CALLS (`length(>=5)`); bare `req` stays in `attrs` until finishDecl
     }
     type ROpener:struct = { o: Opener, mp: MP }
 
@@ -1230,6 +1231,7 @@ ${
         let attrs: AAttr[] = []
         let selfClosing = false
         let short: ANode[] | not = not
+        let vals: AValidator[] = []
         let going = true
         while (going) {
             m = skipSpace(m)
@@ -1256,6 +1258,7 @@ ${
                 m = ra.mp
                 typed = typed.concat(ra.typed)
                 attrs = attrs.concat(ra.attrs)
+                vals = vals.concat(ra.vals)
                 if (m.pos == before) {
                     m = mDiag(m, "E-PARSE-TAG", "unexpected `" + chAt(m, 0) + "` in the tag `<" + nm.w + "`", m.pos, m.pos + 1)
                     m = mAdv(m, 1)
@@ -1263,7 +1266,7 @@ ${
             }
         }
         const o: Opener = { start: start, star: star, isLet: isLet, name: nm.w, ty: ty, own: own,
-                            typed: typed, attrs: attrs, selfClosing: selfClosing, short: short }
+                            typed: typed, attrs: attrs, selfClosing: selfClosing, short: short, vals: vals }
         return { o: o, mp: m }
     }
 
@@ -1670,7 +1673,7 @@ ${
         return src.length
     }
 
-    type RAttrScan:struct = { typed: ADeclAttr[], attrs: AAttr[], mp: MP }
+    type RAttrScan:struct = { typed: ADeclAttr[], attrs: AAttr[], vals: AValidator[], mp: MP }
 
     // SPEC §66.2.2 (i): "an own value — `=` immediately after the name, or after
     // `name:Type`". A spaced `=` (`<let count:int = 0/>`) is reported, then read
@@ -1699,7 +1702,7 @@ ${
             nm = readName(skipSpace(nm.mp))
         }
         m = nm.mp
-        if (nm.w == "") return { typed: [], attrs: [], mp: mp }
+        if (nm.w == "") return { typed: [], attrs: [], vals: [], mp: mp }
         // name:…
         if (chAt(m, 0) == ":" && !isNamespace(nm.w)) {
             const rt: RMType = parseOpenerType(mAdv(m, 1))
@@ -1713,16 +1716,22 @@ ${
             }
             const da: ADeclAttr = { nid: m.nid, span: mkSpan(start, m.pos), exported: exported, isLet: isLet,
                                     name: nm.w, ty: rt.t, dflt: dflt }
-            return { typed: [da], attrs: [], mp: mBump(m) }
+            return { typed: [da], attrs: [], vals: [], mp: mBump(m) }
         }
         let name: string = nm.w
         if (chAt(m, 0) == "(") {
-            // s442: a validator call in an opener (`length(>=5)`, `min(0)`, §6.4 /
-            // §66.4 rule 3) — skipped whole (balanced by the lexer) and reported.
             const vt: TP = regionTP(m, LexStop.Balanced)
-            const vm: MP = backToMarkup(m, vt)
-            const d: MP = mDiag(vm, "E-BOOTSTRAP-UNSUPPORTED", validatorMessage(nm.w + "(…)"), start, vm.pos)
-            return { typed: [], attrs: [], mp: d }
+            if (!isValidatorWord(nm.w)) {
+                // a call that is not a validator (§55.1's vocabulary): skipped whole, reported
+                const vm: MP = backToMarkup(m, vt)
+                const d: MP = mDiag(vm, "E-PARSE-ATTR", "`" + nm.w + "(…)` in a tag — only a validator (§55.1: `req`, `length`, `pattern`, `min`, `max`, `gt`, `lt`, `gte`, `lte`, `eq`, `neq`, `oneOf`, `notIn`) takes arguments here", start, vm.pos)
+                return { typed: [], attrs: [], vals: [], mp: d }
+            }
+            // s444 Phase B (dpa-058): a validator call in an opener (§55.1, §66.4 rule 3)
+            const rv: RValArg = parseValArg(vt)
+            const vm2: MP = backToMarkup(m, rv.tp)
+            const va: AValidator = { nid: vm2.nid, span: mkSpan(start, vm2.pos), name: nm.w, arg: rv.arg }
+            return { typed: [], attrs: [], vals: [va], mp: mBump(vm2) }
         }
         if (chAt(m, 0) == ":") {
             const sub: RWord = readName(mAdv(m, 1))
@@ -1746,7 +1755,30 @@ ${
         }
         if (exported || isLet) m = mDiag(m, "E-PARSE-ATTR", "`export` / `let` apply only to a typed attribute (`let " + name + ":Type=…`)", start, m.pos)
         const a: AAttr = { nid: m.nid, span: mkSpan(start, m.pos), name: name, value: v }
-        return { typed: [], attrs: [a], mp: mBump(m) }
+        return { typed: [], attrs: [a], vals: [], mp: mBump(m) }
+    }
+
+    // s444 Phase B — a validator's arguments, at its `(`: a comparison and its
+    // operand (`>=5`), a regex literal (`/re/flags`), or a list of expressions.
+    type RValArg:struct = { arg: AValArg, tp: TP }
+
+    fn parseValArg(tp0: TP) -> RValArg {
+        let t: TP = expectP(tp0, "(")
+        if (isP(t, ")")) return { arg: AValArg.Exprs([]), tp: expectRegionEnd(adv(t)) }
+        const op: string = cur(t).text
+        if (cur(t).cls == TC.Punct && (op == ">=" || op == "<=" || op == ">" || op == "<" || op == "==" || op == "!=")) {
+            const r: RExpr = parseTernary(adv(t))
+            return { arg: AValArg.Cmp(op, r.e), tp: expectRegionEnd(expectP(r.tp, ")")) }
+        }
+        const rt: PTok = cur(t)
+        if (rt.cls == TC.Other && rt.text.length > 1 && rt.text.substring(0, 1) == "/") {
+            const last: int = rt.text.lastIndexOf("/")
+            const src: string = rt.text.substring(1, last)
+            const flags: string = rt.text.substring(last + 1)
+            return { arg: AValArg.Regex(src, flags), tp: expectRegionEnd(expectP(adv(t), ")")) }
+        }
+        const rl: RExprs = parseList(t, ")")
+        return { arg: AValArg.Exprs(rl.es), tp: expectRegionEnd(rl.tp) }
     }
 
     // s442: validators (§6.4, kickstarter §6.1's shared vocabulary) are outside
@@ -1757,8 +1789,37 @@ ${
                w == "gte" || w == "lte" || w == "eq" || w == "neq" || w == "oneOf" || w == "notIn"
     }
 
-    fn validatorMessage(what: string) -> string {
-        return "the validator `" + what + "` is not in the bootstrap — validators imply the synthesized validity surface (§6.4), and whether they reach a `renders` input is ⚑ O25 (not ruled)"
+    fn isNoValue(v: AAttrValue) -> boolean {
+        return match v {
+            .NoValue :> true
+            .Quoted(v: x) :> false
+            .Bare(e: x) :> false
+            .Paren(e: x) :> false
+            .Braced(b: x) :> false
+        }
+    }
+
+    // Validators in SOURCE order (a bare word and a call interleave, §55.12).
+    fn bySource(vs: AValidator[]) -> AValidator[] {
+        let out: AValidator[] = []
+        let rest: AValidator[] = vs
+        while (rest.length > 0) {
+            let k = 0
+            let j = 1
+            while (j < rest.length) {
+                if (rest[j].span.start < rest[k].span.start) k = j
+                j = j + 1
+            }
+            out = out.concat([rest[k]])
+            let next: AValidator[] = []
+            let i = 0
+            for (const v of rest) {
+                if (i != k) next = next.concat([v])
+                i = i + 1
+            }
+            rest = next
+        }
+        return out
     }
 
     // =========================================================================
@@ -1813,6 +1874,10 @@ ${
 
     // An element after its opener: children until its closer.
     fn finishElem(o: Opener, mp: MP) -> RElem {
+        if (o.vals.length > 0) {
+            // s444 Phase B: a validator binds a DECLARATION's own value (§66.4 rule 3) — an element has none
+            return finishElem(noVals(o), mDiag(mp, "E-PARSE-ATTR", "the validator `" + o.vals[0].name + "(…)` is on the element `<" + o.name + ">` — a validator belongs in a declaration's opener, binding its own value (§66.4 rule 3, §55.2)", o.vals[0].span.start, o.vals[0].span.end))
+        }
         if (o.typed.length > 0 && o.star) {
             // a typed attribute on `<*x …>` is meaningless — a reference declares nothing
             return elemFrom(o, [], mDiag(mp, "E-PARSE-TAG", "a `<*" + o.name + ">` reference cannot declare typed attributes", o.start, mp.pos))
@@ -1828,6 +1893,11 @@ ${
         if (o.selfClosing || isVoidTag(o.name)) return elemFrom(o, [], mp)
         const kids: RNodes = parseKids(mp, o.name)
         return elemFrom(o, kids.nodes, kids.mp)
+    }
+
+    fn noVals(o: Opener) -> Opener {
+        return { start: o.start, star: o.star, isLet: o.isLet, name: o.name, ty: o.ty, own: o.own,
+                 typed: o.typed, attrs: o.attrs, selfClosing: o.selfClosing, short: o.short, vals: [] }
     }
 
     // Markup children until `</…>` (consumed).
@@ -2083,9 +2153,14 @@ ${
             m = checkOpenerValue(m, ta.dflt)
         }
         m = checkOpenerValue(m, o.own)
+        // s444 Phase B: a BARE validator word (`req`) is a validator, not a modifier
+        let mods: AAttr[] = []
+        let bare: AValidator[] = []
         for (const a of o.attrs) {
-            if (isValidatorWord(a.name)) {
-                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", validatorMessage(a.name), a.span.start, a.span.end)
+            if (isValidatorWord(a.name) && isNoValue(a.value)) {
+                bare = bare.concat([{ nid: a.nid, span: a.span, name: a.name, arg: AValArg.NoArgs }])
+            } else {
+                mods = mods.concat([a])
             }
             if (a.name.indexOf(":") >= 0) {
                 m = mDiag(m, "E-DECL-ILLEGAL-FIELD-NAME", "a declaration opener cannot carry `" + a.name + "` — `bind:` / `class:` / `style:` / `internal:` / `on…` are markup attributes; a declaration's markup is its `renders` (§66.2.3, §66.4)", a.span.start, a.span.end)
@@ -2117,7 +2192,8 @@ ${
         }
         const d: ADecl = {
             nid: m.nid, span: mkSpan(o.start, declEnd), exported: exported, isLet: o.isLet,
-            name: o.name, ty: o.ty, own: o.own, attrs: o.typed, mods: o.attrs, body: body, renders: renders,
+            name: o.name, ty: o.ty, own: o.own, attrs: o.typed, mods: mods, body: body, renders: renders,
+            validators: bySource(bare.concat(o.vals)),
         }
         return { d: d, mp: mBump(m) }
     }

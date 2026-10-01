@@ -45,8 +45,8 @@ describe("item 2 — shrinking a FIXED-length sequence is E-WRITE-INVARIANT (F7'
     expect(codes(seq("string[shift]", "@xs.shift()"))).toEqual(["E-WRITE-INVARIANT"]);
     expect(codes(seq("string[remove]", "@xs = @xs.filter(x => true)"))).toEqual(["E-WRITE-INVARIANT"]);
   });
-  test("twin: with `free` they are granted (not lowered: Core has no removal edit)", () => {
-    expect(codes(seq("string[free, pop]", "@xs.pop()"))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  test("twin: with `free` they are granted — and lowered (s444: Core has the removal edits)", () => {
+    expect(codes(seq("string[free, pop]", "@xs.pop()"))).toEqual([]);
   });
 });
 

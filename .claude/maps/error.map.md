@@ -1,6 +1,37 @@
 # error.map.md
 # project: scrml
-# updated: 2026-09-30T15:32:25Z  commit: 5b1d0dab0
+# updated: 2026-10-01T14:31:06Z  commit: 464c9ab4d
+# ⛑ **S445 STAMP — `5b1d0dab0` -> `464c9ab4d`. 20 COMMITS (S443 wrap #1187, S444 #1182-#1202, S445 #1192/#1194/#1196/#1198),
+# incremental refresh, branch `maps/s444-wrap`.** MAP-STAMP RULE at write time: `git log --oneline 5b1d0dab0..464c9ab4d` -> 20;
+# `git merge-base HEAD origin/main` == `origin/main` == `464c9ab4d` (no fork). (The dispatch brief named `108ca89be` as the stamp;
+# line 3 actually read `5b1d0dab0` — the S444b refresh rode in #1187 — so the window starts there.) Source-relevant:
+# #1196 (§40.8 S441: `<program>`/`<page>`/`<channel>` bodies are CODE — catch-all body-top lift, `"…"` declared display text,
+# `E-STMT-NO-EFFECT`, `E-INTERNAL-BODY-TOP-DROPPED`; `E-WRITE-NOT-IN-LOGIC-CONTEXT` RETIRED; `default-logic-exemption.ts` +
+# `unit-cc-exemption-list.json` DELETED; NEW `native-parser/body-top-prose.js` + `body-top-coverage.js`), #1194 (route
+# inference: app root relative to the BUILD ROOT — `resolveBuildRoot` / `makeRouteClassifier`; `W-AUTH-REQUIRED-NOT-INHERITED`),
+# #1198 (§14.8.9 protect egress round 6 — RETURNING / every `?{}` terminator / spaced star / undeclared tables /
+# opaque callbacks / `arguments` / global stores / descriptor Symbol keys / bare digests; CPS `ServerError` message fixed
+# under `protect=`; prod `Bun.serve` `error:` handler), #1200 (`--emit-per-route`: chunk manifest + role bootstrap moved
+# from inline `<script>` to ONE same-origin `scrml-chunks.<hash>.js`), #1191 (`<request>` `deps=`, `refetch()` statements,
+# client-async bodies, re-fire loop; `E-LIFECYCLE-022` now FIRES), #1184 (`E-ASYNC-FN-ESCAPES-AS-VALUE` wording), #1182
+# (CI runs `slice-m4/`; live-PG hook timeouts 120 s). BOOTSTRAP: #1189 (typer r8), #1190 + #1195 (dpa-045 plain-markup
+# text grammar, `//` comment only after whitespace, display-text escapes), #1202 (Core additions: `Attr.Bind`, `Expr.Host`
+# (`Date.now`), `Expr.Lambda`, `Expr.SeqCall`, `View.Star`, removals, `ElemAt`; dpa-058 validators; fail-closed refusal of
+# unimplemented elements). SPEC-only: #1186/#1193 (§6.7.7.1 abort reads, §6.7.7.2 `<request cache>`, §6.14 `persist=`),
+# #1199 (§6.14.4 prepaint / `hold=@cell`). #1183 = example 23 helper routes removed. Rest: gaps / dpa-queue / wrap.
+# ⛑ **FIGURES RE-EXECUTED AT `464c9ab4d`** (`bun scripts/facts.ts --check` PASS): version **0.8.0** · `compiler/src`
+# **277,537 lines / 216 files** (+2,521 lines, -1 file) · test files **1,546** (+11) · `compiler/SPEC.md` **41,760** lines
+# (+546) · conformance **1200** cases (+49); `bun conformance/run.ts` -> **1192/1200 pass + 8 xfail** · §34 census
+# (`bun scripts/s34-census.ts`) **863 rows** (`SPEC.md:21341..22288`): PINNED 374 · IMPL-SITES 314 · DECLARED-AHEAD 32 ·
+# RUNTIME-SURFACED 3 · FALSE-CLAIM 106 · STRUCK 34 · unique `^| [EWIH]-` codes **817 -> 831** (+14, removed none) · known-gaps
+# open HIGH 215 -> **222**, MED 420 -> 433, LOW 190 -> 209, Nominal 7.
+# ⛑ **BOOTSTRAP RE-RUN AT `464c9ab4d`:** lint-no-default-arm 58 files / 0 violations · `slice-m1/` 73/73 · lowered `slice-m1/`
+# 73/73 · `slice-m2/` **448/448** (7 files) · `slice-m3/` 60/60 (5 files) · `slice-m4/` **403 pass + 1 todo / 404** (16 files;
+# NOW IN CI, `ci.yml:157`) · CG footprint runtime 18/0, codes-only 10/0, crashed 0, not-yet 697, front-end 475 · CSS
+# footprint runtime 335/0, codes-only 280/0, CSS half 38/38.
+# ⚑ `file:line` citations in S445 sections are grep-derived at `464c9ab4d`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S444b HEADER (stamp `5b1d0dab0`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S444b STAMP — `108ca89be` -> `5b1d0dab0`. 2 COMMITS (#1180, #1181), incremental refresh.** MAP-STAMP RULE at
 # write time: `git log --oneline 108ca89be..5b1d0dab0` -> 2; HEAD `5b1d0dab0` == `origin/main`. Source-relevant: #1180 (S443
 # example 23 end-to-end — login/register call `session.set("userId", …)`, pages read `session.userId`, logout calls
@@ -532,6 +563,26 @@
 # a spurious `E-ROUTE-001` on a `server fn` declared inside an `if=`/`else` branch of a `<program>`
 # worker body. Both descents landed in the same commit for that reason.
 #
+
+## S445 — DIAGNOSTIC DELTA (`5b1d0dab0..464c9ab4d`)
+Unique `^| [EWIH]-` codes in `compiler/SPEC.md` 817 -> 831. ADDED (14), emitter status grep-verified:
+| code | emitter |
+|---|---|
+| `E-STMT-NO-EFFECT` | `ast-builder.js:1707`; native `parse-markup.js` / `body-top-coverage.js` |
+| `E-INTERNAL-BODY-TOP-DROPPED` | `ast-builder.js:1996` (`assertBodyTopCoverage`, internal fail-closed); native `parse-markup.js` |
+| `W-AUTH-REQUIRED-NOT-INHERITED` | `route-inference.ts:6745` |
+| `E-VALIDATOR-DEAD`, `E-VALIDITY-NO-SURFACE` | bootstrap only (`compiler/self-host-v2/analyze.scrml`); impl#1 Nominal per §34 rows |
+| `E-PERSIST-STORAGE-UNKNOWN`, `E-PERSIST-KEY-REQUIRED`, `E-PERSIST-REVEALED`, `E-PERSIST-LIN`, `E-PERSIST-WITH-SERVER`, `E-PREPAINT-WITHOUT-PERSIST`, `E-HOLD-WITHOUT-PERSIST`, `W-PREPAINT-UNCOVERED-READ` | **none** — §34 rows say "Nominal / spec-ahead — not yet emitted" (§6.14) |
+| `E-REQUEST-CACHE-NO-READSET` | **none** — Nominal (§6.7.7.2) |
+- RETIRED: `E-WRITE-NOT-IN-LOGIC-CONTEXT` (row kept, `SPEC.md:21745`, "RETIRED S441 — no longer fires"; no emitter).
+- NOW FIRES: `E-LIFECYCLE-022` — `codegen/emit-html.ts:2688` (non-list `deps=` value), `:2704` (non-cell entry).
+- REWORDED: `E-ASYNC-FN-ESCAPES-AS-VALUE` builder (`codegen/emit-library-shared.ts:563`, push `:590`).
+- `E-UNQUOTED-DISPLAY-TEXT` extended to `<program>`/`<page>`/`<channel>` body-top prose (`ast-builder.js:1484`).
+- Error transport (#1198): under `protect=` the CPS `ServerError.message` is the fixed string "the server could not complete
+  this call (details are in the server log)" and the real error is `console.error`ed (`emit-server.ts:1824`); typed scrml
+  failures (`__scrml_error`) pass through `_scrml_protect_redact`. Prod `Bun.serve` `error:` → fixed 500 (`build.js:696`).
+- Bootstrap: pure `fn` calling a `function` → `E-FN-003`; clock reads reached through a helper in initializer / markup →
+  `E-BOOTSTRAP-UNSUPPORTED`; unimplemented structural elements are refused fail-closed (#1202).
 
 ## S444b — EMITTER LOCI for the S443 codes (grep at `5b1d0dab0`)
 | code | file:line | function / block |

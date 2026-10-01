@@ -297,15 +297,17 @@ describe("the typer's table — a type per expression node (Tables.typing)", () 
 // ---------------------------------------------------------------------------
 const BASE_66_19 = [
   [],
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"],
+  // §66.19.2: s444 — the binds are Core (Phase A) and the validators land per dpa-058 (Phase B): clean.
+  [],
   ["E-PROGRAM-MISSING"],
   ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-TYPE-VARIANT"],
   ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPECTED", "E-PARSE-EXPECTED", "E-PARSE-TRAILING", "E-PARSE-TRAILING", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001"],
   ["E-DECL-STAR-PREDEFINED", "E-DECL-STAR-PREDEFINED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001"],
-  // §66.19.5: re-measured at the S442 SPEC amendment (`Entry[free, append]`) — only its Core-blocked constructs
-  // remain (2× Date.now() host call + 1 bind:), no grant diagnostic.
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"],
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-SCOPE-001"],
+  // §66.19.5: s444 Phase A — the host call and the bind are Core now: the program compiles clean.
+  [],
+  // §66.19.6 Before (the retired `<engine>`): s444 (PA) — `<engine>` is a scrml structural element and is refused
+  // WHOLE (it used to fall through as an HTML element, its state-children then failing one by one).
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"],
   [],
 ];
 

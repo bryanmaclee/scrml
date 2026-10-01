@@ -5,9 +5,9 @@
 // (anywhere) — and `insert` / `remove` cover end and front. The retired bare
 // `end` / `front` / `anywhere` are refused naming both halves.
 //
-// A GRANTED removal (pop / shift / filter) is still E-BOOTSTRAP-UNSUPPORTED:
-// Core has no removal edit (core.scrml is outside this slice) — so "granted"
-// below means "not a grant error".
+// s444: a GRANTED removal (pop / shift / filter) now lowers — Core has the
+// removal edits (RemoveEnd / RemoveFront / RemoveAnywhere); they RUN in
+// seqops.test.js. "granted" below means "no diagnostic at all".
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
@@ -19,7 +19,7 @@ afterEach(() => expectNoPageErrors());
 
 const prog = (type, body) => `<program>\n    <xs:${type}=([])/>\n    function f() { ${body} }\n    <main><ul><each in=@xs as x><li>\${x}</li></each></ul></main>\n</program>\n`;
 const codes = (type, body) => frontEnd(mods, [{ path: "g.scrml", src: prog(type, body) }]).diags.map((d) => d.code);
-const GRANTED_NOT_LOWERED = ["E-BOOTSTRAP-UNSUPPORTED"];
+const GRANTED = []; // s444: a granted removal / filter now LOWERS (Core RemoveEnd / RemoveFront / RemoveAnywhere)
 
 describe("the audit log `[free, append]` is append-only", () => {
   const T = "string[free, append]";
@@ -36,9 +36,9 @@ describe("the audit log `[free, append]` is append-only", () => {
 
 describe("a stack `[free, append, pop]`", () => {
   const T = "string[free, append, pop]";
-  test("push granted; pop granted (not a grant error — Core has no removal edit)", () => {
+  test("push granted; pop granted and lowered (s444)", () => {
     expect(codes(T, `@xs.push("a")`)).toEqual([]);
-    expect(codes(T, `@xs.pop()`)).toEqual(GRANTED_NOT_LOWERED);
+    expect(codes(T, `@xs.pop()`)).toEqual(GRANTED);
   });
   test("shift is still refused (a front removal)", () => {
     expect(codes(T, `@xs.shift()`)).toEqual(["E-WRITE-NOT-GRANTED"]);
@@ -50,9 +50,9 @@ describe("`[free, insert, remove, writable]` — anywhere covers end and front",
   test("push and unshift (grow) granted and lowered; pop, shift, filter (shrink) granted", () => {
     expect(codes(T, `@xs.push("a")`)).toEqual([]);
     expect(codes(T, `@xs.unshift("a")`)).toEqual([]);
-    expect(codes(T, `@xs.pop()`)).toEqual(GRANTED_NOT_LOWERED);
-    expect(codes(T, `@xs.shift()`)).toEqual(GRANTED_NOT_LOWERED);
-    expect(codes(T, `@xs = @xs.filter(x => true)`)).toEqual(GRANTED_NOT_LOWERED);
+    expect(codes(T, `@xs.pop()`)).toEqual(GRANTED);
+    expect(codes(T, `@xs.shift()`)).toEqual(GRANTED);
+    expect(codes(T, `@xs = @xs.filter(x => true)`)).toEqual(GRANTED);
   });
   test("runs: an `insert` grant appends AND prepends", async () => {
     const src = `<program>\n    <xs:string[free, insert]=([])/>\n    function f() { @xs.push("b")\n @xs.unshift("a")\n @xs = [...@xs, "c"] }\n    <main><button onclick=f()>go</button><ul><each in=@xs as x><li>\${x}</li></each></ul></main>\n</program>\n`;
@@ -64,11 +64,11 @@ describe("`[free, insert, remove, writable]` — anywhere covers end and front",
     expect([...document.querySelectorAll("main li")].map((li) => li.textContent)).toEqual(["a", "b", "c"]);
   });
   test("`filter` is a SHRINK: granted by `remove`, refused under `insert` alone", () => {
-    expect(codes("string[free, remove]", `@xs = @xs.filter(x => true)`)).toEqual(GRANTED_NOT_LOWERED);
+    expect(codes("string[free, remove]", `@xs = @xs.filter(x => true)`)).toEqual(GRANTED);
     expect(codes("string[free, insert]", `@xs = @xs.filter(x => true)`)).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
   test("a SHRINK-only type (`[free, pop]`) grants pop (no growing grant needed)", () => {
-    expect(codes("string[free, pop]", `@xs.pop()`)).toEqual(GRANTED_NOT_LOWERED);
+    expect(codes("string[free, pop]", `@xs.pop()`)).toEqual(GRANTED);
   });
   test("`remove` alone grants no growing edit", () => {
     expect(codes("string[free, remove]", `@xs.push("a")`)).toEqual(["E-WRITE-NOT-GRANTED"]);
@@ -80,7 +80,7 @@ describe("`[free, prepend, shift]` — a queue at the front", () => {
   test("unshift and `[e, ...@xs]` granted; shift granted; push and pop refused", () => {
     expect(codes(T, `@xs.unshift("a")`)).toEqual([]);
     expect(codes(T, `@xs = ["a", ...@xs]`)).toEqual([]);
-    expect(codes(T, `@xs.shift()`)).toEqual(GRANTED_NOT_LOWERED);
+    expect(codes(T, `@xs.shift()`)).toEqual(GRANTED);
     expect(codes(T, `@xs.push("a")`)).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(codes(T, `@xs.pop()`)).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
