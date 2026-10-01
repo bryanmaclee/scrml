@@ -117,3 +117,16 @@ find . -name '*.db*' (excluding out/) -> nothing created
 Processes: killed by PID only my own dev servers (2091898/2091944, 2094578/2094638) and three orphaned dev children
 from MY worktree's earlier hook run (2073263, 2073340, 2073425 — `agent-ae3007278485636a2/.../--__dev-child`, ppid 1-reaped).
 Left alone: 443349, 892523 (agent-a92d7cfc42e15dd09), 4119655 (rev-approot), and agent-a5977877acc5cf4dd test children.
+
+## 2026-10-01 11:40 — merged origin/main again, final verification
+- origin/main moved (2fc4605cb #1212, 310eee4c4 #1209) → merged e996ef0fa; SPEC-INDEX/FACTS: took main's, re-applied the
+  §47 row note, regen. Pre-commit on the merge: 33758 pass / 0 fail.
+- One combined run (unit+integration+conformance+commands) that overlapped a concurrent pre-commit hook gave 6
+  timing fails (5 dev-watcher tests at ~11 s + my R4-3 server test at the 5 s default). All pass in isolation and
+  `compiler/tests/commands` alone is 286/0; my test file now sets a 60 s default timeout (5db3b49ab).
+- Post-merge: commands + dev-db + the two helper-stripping browser tests + parser-conformance canary/markup:
+  1070 pass / 0 fail.
+- FINDING (not fixed, out of scope): every full-suite run in this worktree left 3 orphaned
+  `scrml dev --__dev-child /tmp/scrml-dev-child-<pid>-1.json` processes (generation-1 children, i.e. the child a
+  dev server respawned after a restart; parent killed by the test → child reparented to the user systemd). This is
+  the source of the leaked servers the brief warns about. Killed mine by PID (9 total over the session).
