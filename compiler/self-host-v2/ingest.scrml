@@ -262,7 +262,9 @@ ${
     // A lowered expression, its type when known, and the not-yet reasons.
     type LE:struct = { e: Expr, ty: Type | not, why: string[] }
     type LS:struct = { stmts: Stmt[], cx: Cx, why: string[] }
-    type LV:struct = { views: View[], why: string[] }
+    // `codes` (s446): diagnostics a MAPPED node reports (E-LIFECYCLE-007 from a
+    // `when-effect` the shim reached) — scoped to what was actually lowered.
+    type LV:struct = { views: View[], why: string[], codes: string[] }
     type LA:struct = { attrs: Attr[], test: Expr | not, why: string[] }
 
     fn placeholder() -> Expr { return Expr.Lit(Literal.Absent) }
@@ -695,16 +697,19 @@ ${
     fn lowerViews(cx: Cx, ns: INode[]) -> LV {
         let out: View[] = []
         let why: string[] = []
+        let codes: string[] = []
         for (const n of ns) {
             const r: LV = lowerView(cx, n)
             out = out.concat(r.views)
             why = why.concat(r.why)
+            codes = codes.concat(r.codes)
         }
-        return { views: out, why: why }
+        return { views: out, why: why, codes: codes }
     }
 
-    fn viewsOf(vs: View[], why: string[]) -> LV { return { views: vs, why: why } }
-    fn notYetV(why: string) -> LV { return { views: [], why: [why] } }
+    fn viewsOf(vs: View[], why: string[]) -> LV { return { views: vs, why: why, codes: [] } }
+    fn viewsCoded(vs: View[], why: string[], codes: string[]) -> LV { return { views: vs, why: why, codes: codes } }
+    fn notYetV(why: string) -> LV { return { views: [], why: [why], codes: [] } }
 
     fn lowerView(cx: Cx, n: INode) -> LV {
         const k: string = kindAt(n)
@@ -719,71 +724,32 @@ ${
     }
 
     // s446 — impl#1's `when-effect` (§6.7.4): `dependencies` (cell names) and
-    // the body. A dep that is not a mutable cell rejects the program with
-    // E-LIFECYCLE-007 (whenCodes) — no view, and nothing to map. Otherwise the
+    // the body. A dep that is not a declared mutable cell of the program — no
+    // such cell, or a `const` (derived or locked) one (§6.7.4 + EC-1) — is
+    // E-LIFECYCLE-007, which the shim reports ITSELF (impl#1 reports it in its
+    // CG): the program is rejected, no view, nothing more to map. The code is
+    // raised only for a `when-effect` the shim actually reaches while lowering
+    // the program's markup (review F4: never from a walk over the whole AST, so
+    // a component-local or nested-scope `when` cannot raise it). Otherwise the
     // BODY cannot be mapped: impl#1 carries only its FIRST statement as
     // structure (`bodyExpr`); the whole body is text (`bodyRaw`), and Rule 7
     // forbids reading it — so the shim never knows whether `bodyExpr` is the
     // whole body. Not-yet, never a guess.
     fn whenEffect(cx: Cx, n: INode) -> LV {
         const why: string[] = unmapped(n, "when-effect", ["kind", "dependencies", "bodyExpr", "bodyRaw"], ["id"])
+        let codes: string[] = []
         for (const d of listAt(n, "dependencies")) {
             const name: string | not = valStr(d)
             if (name is not) return notYetV("when-effect: a dependency that is not a name")
             const f: FieldInfo | not = findField(cx, name)
-            if (f is not) return viewsOf([], why)                 // E-LIFECYCLE-007 (whenCodes)
-            if (f.wcap is not) return viewsOf([], why)            // E-LIFECYCLE-007 (whenCodes)
-        }
-        return notYetV("when-effect body: impl#1 carries only its first statement as structure (`bodyExpr`); the body is text (`bodyRaw`)")
-    }
-
-    // s446 — the codes the shim itself reports (the CG stage's own codes, which
-    // impl#1 reports in ITS CG): E-LIFECYCLE-007 for every `when` dep that is
-    // not a declared mutable cell of the program — no such cell, or a `const`
-    // (derived or locked) one (§6.7.4 + EC-1).
-    fn whenCodes(root: INode, fields: FieldInfo[]) -> string[] {
-        let out: string[] = []
-        for (const w of whenNodes(root)) {
-            for (const d of listAt(w, "dependencies")) {
-                const name: string | not = valStr(d)
-                if (name is some) {
-                    if (!mutableField(fields, name)) out = out.concat(["E-LIFECYCLE-007"])
-                }
+            if (f is not) {
+                codes = codes.concat(["E-LIFECYCLE-007"])
+            } else if (f.wcap is not) {
+                codes = codes.concat(["E-LIFECYCLE-007"])
             }
         }
-        return out
-    }
-
-    fn mutableField(fields: FieldInfo[], name: string) -> boolean {
-        for (const f of fields) {
-            if (f.name == name) return f.wcap is some
-        }
-        return false
-    }
-
-    // Every `when-effect` node under `n` (a schema-free walk over the encoding).
-    fn whenNodes(n: INode) -> INode[] {
-        let out: INode[] = []
-        if (kindAt(n) == "when-effect") out = [n]
-        for (const e of n.entries) { out = out.concat(whenNodesIn(e.val)) }
-        return out
-    }
-
-    fn whenNodesIn(v: IVal) -> INode[] {
-        return match v {
-            .VNode(obj: o) :> whenNodes(o)
-            .VList(elems: xs) :> whenNodesInList(xs)
-            .VStr(s: x) :> []
-            .VNum(n: x) :> []
-            .VBool(b: x) :> []
-            .VNull :> []
-        }
-    }
-
-    fn whenNodesInList(xs: IVal[]) -> INode[] {
-        let out: INode[] = []
-        for (const x of xs) { out = out.concat(whenNodesIn(x)) }
-        return out
+        if (codes.length > 0) return viewsCoded([], why, codes)
+        return notYetV("when-effect body: impl#1 carries only its first statement as structure (`bodyExpr`); the body is text (`bodyRaw`)")
     }
 
     // L13: whitespace-only text containing a newline is dropped; other text is
@@ -799,12 +765,14 @@ ${
     fn interpolation(cx: Cx, n: INode) -> LV {
         let why: string[] = unmapped(n, "interpolation", ["kind", "body"], ["id"])
         let out: View[] = []
+        let codes: string[] = []
         for (const s of nodesAt(n, "body")) {
             // s446: `${ when … }` in markup — owned by the enclosing scope (§6.7.2)
             if (kindAt(s) == "when-effect") {
                 const w: LV = whenEffect(cx, s)
                 out = out.concat(w.views)
                 why = why.concat(w.why)
+                codes = codes.concat(w.codes)
             } else {
                 if (kindAt(s) != "bare-expr") return notYetV("markup: `${}` block containing " + kindAt(s))
                 why = why.concat(unmapped(s, "bare-expr", ["kind", "exprNode"], ["id", "expr"]))
@@ -813,7 +781,7 @@ ${
                 why = why.concat(x.why)
             }
         }
-        return viewsOf(out, why)
+        return viewsCoded(out, why, codes)
     }
 
     fn element(cx: Cx, n: INode) -> LV {
@@ -834,9 +802,9 @@ ${
         const el: View = View.El(tag, a.attrs, kids.views)
         const why: string[] = why0.concat(a.why).concat(kids.why)
         const test: Expr | not = a.test
-        if (test is not) return viewsOf([el], why)
+        if (test is not) return viewsCoded([el], why, kids.codes)
         // L5: `if=` on an element → a one-arm Cond around it.
-        return viewsOf([View.Cond([condArm(test, [el])])], why)
+        return viewsCoded([View.Cond([condArm(test, [el])])], why, kids.codes)
     }
 
     fn condArm(test: Expr, body: View[]) -> CondArm { return { test: test, body: body } }
@@ -1336,7 +1304,7 @@ ${
             renders: vs.views, wiring: [], handles: [],
         }
         const core: CoreProgram = { program: prog, decls: [decl], types: [], fns: fns, server: [] }
-        return { core: core, why: dedupeStr(why), codes: whenCodes(ast, fs.infos) }
+        return { core: core, why: dedupeStr(why), codes: vs.codes }
     }
 
     fn dedupeStr(xs: string[]) -> string[] {

@@ -75,7 +75,8 @@ stats.whens                                            // live `when` registrati
   `${ when … }` logic block in the program's markup (§6.7.2 "every `${}` logic block … is associated … with the
   nearest enclosing element scope"), including inside an `if=` element and an `<each>` row.
 - FAIL CLOSED (E-BOOTSTRAP-UNSUPPORTED): a `when` in a user declaration's `renders` (which scope owns it — the
-  instance or the render site — is not settled by §6.7.2/§66; see §5), a `when` in a function body or a handler,
+  instance or the render site — is not settled by §6.7.2/§66; see §5), a `when` in use-site slot content (review
+  F1), a `when` in a function body or a handler,
   a dep that names a whole instance (`@decl`, `@handle`), a `${}` block in markup holding anything besides `when`s.
 - Codes: E-LIFECYCLE-006, E-LIFECYCLE-007 (undeclared name, locked field, derived field), E-LIFECYCLE-016 (a `when`
   directly in another's body), W-LIFECYCLE-010 (empty body), W-LIFECYCLE-006 (the body is one `@v = <pure expression
@@ -91,14 +92,24 @@ derived dep is E-LIFECYCLE-007, reported by the shim as a CODE (not a not-yet re
 - No source syntax produces `Suspend` (no server calls until U1); it is exercised by hand-built Core + runtime tests.
 - §19 error context for a rejected suspension (the `when` body's `!{}`): U1, with `ServerCall`'s error type.
 - §13.2 parallelisation (`Promise.all` of independent calls): U1+.
-- **FORK (not settled by SPEC — reported, not picked):** a `when` re-triggered while an earlier run of the SAME effect
-  is suspended. Options: (a) both runs continue independently (impl#1's behaviour today — each body is just called);
-  (b) latest-wins: the new run cancels the suspended run's continuation (§6.7.7.1's supersede rule for `<request>`,
-  by analogy); (c) serialize: queue the new run until the suspended one finishes; (d) drop while busy.
-  **Rec: (b)** — a `when` body is "the response to the latest state"; a stale continuation writing after a newer run
-  is the classic race §6.7.7.1 already rules out for reads. U0's runtime keeps each run's task separate and cancels
-  only on teardown — i.e. it implements none of (b)–(d) and behaves as (a) only because U0 has no source that can
-  suspend; U1 must not ship a server call in a `when` body before this is ruled.
+- **RULED (b), user-voice S446 — a `when` re-triggered while an earlier run of the SAME effect is suspended: the
+  newest run wins.** (Was an open fork in the first round; options were (a) independent runs — impl#1's behaviour,
+  (b) latest-wins, (c) serialize, (d) drop while busy.) Implemented in the runtime: a new run (`When.runOnce`)
+  cancels every task of that When still in flight before it starts — the earlier run's continuation never resumes.
+  Cancellation is NOT a rollback: what the earlier run wrote before it suspended stays written. Tested with an
+  injected host promise (slice-m1/when.runtime.test.js "RULED (b)").
+- **Re-entry (review F2, PA-ruled parity with impl#1):** a When re-triggered while its body is RUNNING is not
+  recursed into; it is marked pending and re-runs ONCE after the current run; a further re-trigger in that re-run is
+  dropped and reported (`console.error`, the impl#1 wording) — the page stays alive. Covers a direct self-write
+  through a call (not caught statically) and a cycle through another `when`.
+- **U1 BLOCKER (review F3):** a rejected suspension surfaces as an unhandled promise rejection. §6.7.4: "the error
+  propagates through the `when` body's error context (§19)" — that context does not exist until U1. Today nothing
+  writes and nothing is swallowed.
 - SPEC questions surfaced: (1) does a `when` in a §66 user declaration's `renders` belong to the instance or to the
   render site? (2) is `@decl` (a whole shared instance, §66.7.1) a "declared mutable @variable" for the dep-list?
-  (3) E-LIFECYCLE-006 is "the body writes" — direct writes only, or through called functions too?
+  (3) E-LIFECYCLE-006 is "the body writes" — direct writes only, or through called functions too? (4) review F1:
+  which scope owns a `when` in USE-SITE SLOT CONTENT (§66.15.2) — rendered once per `<slot/>`, possibly zero or
+  several times? (refused in the bootstrap) (5) review F2: cross-`when` cycles (A writes B's dep, B writes A's) —
+  SPEC names only the direct self-write; the bootstrap bounds them at runtime like impl#1.
+- W-LIFECYCLE-006 amendment (decided S446, SPEC text in flight): not fired when the right-hand side reads the
+  assigned cell (an accumulator — the derived form would be circular).

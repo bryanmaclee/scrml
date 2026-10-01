@@ -223,6 +223,13 @@ describe("s446 — impl#1's `when-effect` (§6.7.4)", () => {
     expect(r.why.join("\n")).toMatch(/when-effect body: impl#1 carries only its first statement/);
   });
 
+  test("review F4: a code is raised only for a `when-effect` the shim actually lowers — not one inside an unmapped construct", () => {
+    // The when sits in an <each> row, which the shim does not map (not-yet): no code, the not-yet stands.
+    const r = ingestSource(`<program>\n  <rows> = [1, 2]\n  <p> = 1\n  <log> = 0\n  const <d> = @p * 2\n  <ul><each in=@rows as r><li>\${r}\${ when @d changes { @log = 1 } }</li></each></ul>\n</program>\n`);
+    expect(r.codes).toEqual([]);
+    expect(r.why.length).toBeGreaterThan(0);
+  });
+
   test("the substitute's runCG rejects a coded program with the code and prints nothing", async () => {
     const { runCG } = await import("./substitute.js");
     const { args } = cgArgsOf(caseSource("lifecycle/when-dep-derived-error"));

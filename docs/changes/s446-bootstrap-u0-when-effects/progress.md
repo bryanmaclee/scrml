@@ -85,6 +85,33 @@ derived flush; `@qty` unlisted never triggers. scoped: the effect stops firing a
 - 2026-10-01 DONE. Open for PA: the re-trigger-while-suspended FORK (DESIGN.md §5), SPEC questions (DESIGN.md §5),
   W-LIFECYCLE-006 literal rule fires on the accumulate idiom `@hits = @hits + 1` (not derivable — SPEC defect?).
 
+## Review round 1 (findings on 7b56eb2b2)
+
+- 2026-10-01 origin/main had moved to 310eee4c4 (#1212, #1209 — no overlap with self-host-v2 / hybrid.ts);
+  `merge --ff-only` impossible (branch has commits) → merged origin/main (3cba4b846).
+- F1 REPRODUCED (scratch test): slot content `<card title="a"><b>x</b>${ when @n changes {…} }</card>`, `renders`
+  without `<slot/>` → diags [], whens 0, hits 0 after a click; with `<slot/><slot/>` → diags [], whens 2, hits 2
+  after ONE click. FIXED: analyze `resolveUse` refuses every `when` in a use's kids (E-BOOTSTRAP-UNSUPPORTED, slot
+  ownership unsettled); tests for no-slot, double-slot and nested-in-element. SPEC question (4) added (DESIGN §5).
+- F2 REPRODUCED: the two-`when` cycle → one click: hits 7038, RangeError "Maximum call stack size exceeded" as a
+  page error. FIXED: runtime `When.markStale` marks a RUNNING when pending instead of recursing; `run` re-runs once
+  (WHEN_RERUN_CAP = 1) and drops+reports a further re-trigger with impl#1's console.error text. Tests: runtime
+  cycle / self-write-through-a-call / single re-run, and the e2e cycle program (bounded, reported, no page error).
+  SPEC question (5) added.
+- RULED (b) S446 implemented: `When.runOnce` cancels the When's in-flight tasks before a new run (newest wins; no
+  rollback). Test with injected host promises: stale continuation does not write, fresh one does, pre-suspension
+  write of the stale run stays. DESIGN §5 updated from "fork" to "ruled (b), user-voice S446".
+- F3 RECORDED — **U1 BLOCKER:** a rejected suspension is an unhandled promise rejection (runtime `suspend`). §6.7.4:
+  "If the server call fails, the error propagates through the `when` body's error context (§19)". U1 must route it
+  into that context before any server call can stand in a `when` body. Today: nothing writes, nothing is swallowed.
+- F4 not reproduced as a false code by the reviewer; FIXED anyway (cheap): the whole-AST `whenCodes` walk is gone —
+  E-LIFECYCLE-007 is raised only by a `when-effect` the shim actually lowers (LV.codes, threaded through
+  lowerViews / interpolation / element). Test: a derived-dep `when` inside an unmapped `<each>` raises no code.
+- W-LIFECYCLE-006 amended (S446): not fired when the RHS reads the assigned cell (`readsAtName`); tests:
+  `@m = @m + 1` and `@m = @n * 2 + @m` → no warning; `@m = @n * 2 + 1` → warning.
+- BITES (each restored, diff checked): runOnce without the cancel loop → "RULED (b)" RED; markStale without the
+  running check → 2 runtime re-entry tests + the e2e cycle test RED; resolveUse scanning `[]` → 3 slot tests RED.
+
 ## Governing sentences (SPEC §6.7.4 / §6.7.2) — quoted, each implemented
 
 1. "when-stmt ::= 'when' dep-list 'changes' '{' logic-content '}' / dep-list ::= '@' identifier | '(' dep-item (',' dep-item)* ')'"
