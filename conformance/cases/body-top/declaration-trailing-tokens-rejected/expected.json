@@ -1,0 +1,19 @@
+{
+  "id": "body-top-declaration-trailing-tokens-rejected",
+  "description": "A `type` alias covers only its type expression: the words after it on its line are E-UNQUOTED-DISPLAY-TEXT (one per line), never silently dropped; the code line after them still compiles.",
+  "language-version": "1.0",
+  "spec": "§40.8, §7.5",
+  "source-test": "compiler/tests/unit/s441-review-r5.test.js",
+  "rationale": "§40.8 S441 coverage bullet (round 5): a statement covers only the tokens it compiles, measured by its own grammar. Round 4 credited the whole line to the type declaration, and `extra` vanished.",
+  "expect": {
+    "codes": [
+      "E-UNQUOTED-DISPLAY-TEXT"
+    ],
+    "notCodes": [
+      "E-INTERNAL-BODY-TOP-DROPPED"
+    ],
+    "codeCounts": {
+      "E-UNQUOTED-DISPLAY-TEXT": 2
+    }
+  }
+}

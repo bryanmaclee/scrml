@@ -1,0 +1,9 @@
+<program>
+<c1> = 1
+console.log("m2")
+loading loading!
+<c4> = 4
+orders, data
+<c6> = 6
+<p id="z">${@c1} ${@c4} ${@c6}</p>
+</program>

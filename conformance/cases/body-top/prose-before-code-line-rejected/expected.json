@@ -1,0 +1,20 @@
+{
+  "id": "body-top-prose-before-code-line-rejected",
+  "description": "A prose line whose statement swallowed the next CODE line is judged again once cut back to its own line: `careful, world` is a comma sequence, E-UNQUOTED-DISPLAY-TEXT; the code line survives. Before the fix it was kept as code, compiled clean, and threw a ReferenceError at boot.",
+  "language-version": "1.0",
+  "spec": "§40.8, §4.18.7",
+  "source-test": "compiler/tests/unit/s441-coverage-invariant.test.js",
+  "rationale": "§40.8 S441 bullet: a bare run that is not valid code is E-UNQUOTED-DISPLAY-TEXT; a comma sequence is not a scrml expression (S441 review #6 sub-bullet). Found by the S441 round-4 fuzz.",
+  "expect": {
+    "codes": [
+      "E-UNQUOTED-DISPLAY-TEXT"
+    ],
+    "notCodes": [
+      "E-INTERNAL-BODY-TOP-DROPPED",
+      "E-SCOPE-001"
+    ],
+    "codeCounts": {
+      "E-UNQUOTED-DISPLAY-TEXT": 1
+    }
+  }
+}

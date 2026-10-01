@@ -145,6 +145,8 @@ export interface CgDepGraph {
 
 export interface CgProtectAnalysis {
   views?: Map<string, object>;
+  /** §14.8.9 — base tables whose columns the compile knows (see ProtectAnalysis). */
+  declaredTables?: Set<string>;
 }
 
 export interface CgInput {

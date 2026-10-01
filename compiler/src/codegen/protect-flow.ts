@@ -50,10 +50,11 @@
  *       the predicate / position methods in `DERIVED_METHODS`
  *       (`includes`, `startsWith`, `indexOf`, …) — NOT `charCodeAt` /
  *       `codePointAt`, which are lossless;
- *     - one-way / boolean functions in `DERIVER_CALLS`: `scrml:auth`
- *       `verifyPassword` / `hashPassword` / `verifyTotp`, `scrml:crypto`
- *       `hash` / `hmac` / `verifyHash`, `Bun.password.*`, `Bun.hash`,
- *       `crypto.subtle.digest`, a hasher's `.digest()`, `Boolean`,
+ *     - one-way / boolean functions (`DERIVER_CALLS`, `STDLIB_DERIVERS`):
+ *       `scrml:auth` `verifyPassword` / `hashPassword` / `verifyTotp`,
+ *       `scrml:crypto` `verifyHash`, `hash("argon2", …)` and `hmac(key, …)`
+ *       with an unprotected key — and NOT a bare digest (`hash("sha256", …)`,
+ *       `crypto.subtle.digest`: RULING S443 #7) — plus `Boolean`,
  *       `Array.isArray`, `Number.isNaN` / `isNaN`, `console.*` (returns nothing).
  *     (`Number(x)` is deliberately NOT allowlisted: on a numeric protected column
  *     it is the identity.)
@@ -97,6 +98,39 @@ import { CGError } from "./errors.ts";
 
 /** Label used for a row whose SQL origins could not be resolved (strip-all). */
 export const ALL_COLUMNS_LABEL = "*";
+
+/**
+ * S443 round 6b (L4) — a PSEUDO-label, carried through the same maps as the
+ * protected labels so every propagation and alias rule applies to it
+ * unchanged, but never reported as a column: "a property of this object may
+ * have been REMOVED by a key the compiler cannot read". The runtime floor is one
+ * marker per protected column, keyed by a registry Symbol and read by PRESENCE,
+ * so writing or overwriting a key can never under-strip — only REMOVING a marker
+ * can. Every removal whose key is not a string / number literal therefore
+ * carries this label into the object: `delete o[k]`, `Reflect.deleteProperty(o,
+ * k)`, `Object.defineProperty(o, k, …)` (a hidden marker is dropped by the next
+ * spread), `Object.defineProperties(o, …)`, and an object-rest pattern that
+ * excludes a computed key (`const { [k]: _, ...rest } = o`). A value that
+ * carries a descriptor-bearing ROW together with this label ships every
+ * protected column of that row at a sink.
+ *
+ * Round 6 keyed this on the KEY's provenance instead (a list of Symbol
+ * sources: `Symbol.for`, `Object.getOwnPropertySymbols`, `Reflect.ownKeys`).
+ * That was a recognizer list and aliases walked past it — `const S = Symbol;
+ * S.for(…)`, `globalThis.Symbol.for`, `const O = Object`, `Symbol.for.bind`,
+ * `const { for: sf } = Symbol` all served the full row (review, measured). JS
+ * has no sound way to know which values can be Symbols (`({}).constructor` is
+ * `Object`), so the rule now looks only at the removal, whatever the key.
+ */
+const MARKER_REMOVED_LABEL = "\u0000marker-removed";
+function isPseudoLabel(l: string): boolean {
+  return l.startsWith("\u0000");
+}
+
+/** The compile-wide binding cell every free (global) name reads and writes (L3). */
+const GLOBAL_CELL = "\u0000global";
+
+type SinkKind = "redact" | "frame" | "serializer" | "serializer-json" | "global";
 
 interface RowPart {
   /** `_scrml_protect_tag` call sites (module-qualified) this row came from. */
@@ -162,6 +196,34 @@ interface Taint {
    * `new Array(u.pin).length` shipped the value.)
    */
   len?: Map<string, string>;
+  /**
+   * RULING S445 #4 — where the value's bits come from, for the `hmac` KEY rule:
+   * bit 1 = a compile-time constant (a literal) is part of it; bit 2 = POSITIVE
+   * evidence of a runtime secret source is part of it — a read under
+   * `process.env` / `Bun.env` / `import.meta.env`, a database value, or the
+   * result of a host (stdlib / npm) call such as a config or secret-store read.
+   * Every combination UNIONS the bits — a choice (`a ?? b`), a join of call
+   * sites, and a concatenation alike. `hmac` declassifies only for a key that
+   * is EXACTLY runtime (2): a key with no evidence (0 — `String(Math.PI)`, a
+   * parameter no caller shows, a platform call) or with any constant part
+   * (`"k" + process.env.K` is `"kundefined"` when the variable is unset) stays
+   * protected. S443 round 6c: 6b treated every unmodelled call and every global
+   * read as runtime, so `String.fromCharCode(107,101,121)`, `JSON.parse('"key"')`
+   * and `String(Math.PI)` keys declassified (review, measured).
+   */
+  k?: number;
+}
+
+/** Constness bits of a combined value: the union of its parts' (S445 #4). */
+function opK(...ts: Taint[]): number | undefined {
+  let bits = 0;
+  for (const t of ts) bits |= t?.k ?? 0;
+  return bits === 0 ? undefined : bits;
+}
+
+/** A global path that reads the process environment (positive runtime evidence). */
+function isEnvPath(path: string | null): boolean {
+  return path !== null && /^(?:(?:globalThis|self|global)\.)?(?:process\.env|Bun\.env)(?:\.|$)/.test(path);
 }
 
 /** What `.length` of the value reveals (see `Taint.len`). */
@@ -183,6 +245,14 @@ function withLen(t: Taint, len: Map<string, string>): Taint {
 
 function clean(): Taint {
   return { row: null, scalar: new Map(), deep: new Map(), fns: new Set() };
+}
+
+/** The value's data only — no function values, no alias cells. */
+function dataOnly(t: Taint): Taint {
+  const r: Taint = { row: t.row ? copyRow(t.row) : null, scalar: new Map(t.scalar), deep: new Map(t.deep), fns: new Set() };
+  if (t.len !== undefined) r.len = new Map(t.len);
+  if (t.k !== undefined) r.k = t.k;
+  return r;
 }
 
 function refsOf(t: Taint): Set<string> {
@@ -217,6 +287,7 @@ function join(...ts: Taint[]): Taint {
       if (!out.refs) out.refs = new Set();
       for (const r of t.refs) out.refs.add(r);
     }
+    if (t.k) out.k = (out.k ?? 0) | t.k;
   }
   // `.length` of a join is whatever `.length` of ANY part reveals.
   if (ts.some((t) => t && t.len !== undefined)) {
@@ -238,12 +309,12 @@ function naked(t: Taint): Map<string, string> {
 /** The value, placed inside a fresh container (object / array literal slot). */
 function containerOf(t: Taint): Taint {
   // The container HOLDS the value — if it is an object, the container reaches it.
-  return { row: t.row ? copyRow(t.row) : null, scalar: new Map(), deep: naked(t), fns: new Set(t.fns), refs: new Set(refsOf(t)) };
+  return { row: t.row ? copyRow(t.row) : null, scalar: new Map(), deep: naked(t), fns: new Set(t.fns), refs: new Set(refsOf(t)), ...(t.k ? { k: t.k } : {}) };
 }
 
 /** An element / field of the value, when WHICH one is not statically known. */
 function elemOf(t: Taint): Taint {
-  return { row: t.row ? copyRow(t.row) : null, scalar: naked(t), deep: new Map(t.deep), fns: new Set(t.fns), refs: new Set(refsOf(t)) };
+  return { row: t.row ? copyRow(t.row) : null, scalar: naked(t), deep: new Map(t.deep), fns: new Set(t.fns), refs: new Set(refsOf(t)), ...(t.k ? { k: t.k } : {}) };
 }
 
 /** The protected labels a row still carries (not `reveal`ed). */
@@ -266,7 +337,7 @@ function taintKey(t: Taint): string {
   const f = [...t.fns].map((c) => c.cid).sort((a, b) => a - b).join(",");
   const a = [...refsOf(t)].sort().join(",");
   const l = t.len ? [...t.len.keys()].sort().join(",") : "~";
-  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${f}#${a}#${l}`;
+  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${f}#${a}#${l}#${t.k ?? 0}`;
 }
 
 /** The protected part of a taint's key (no function values). */
@@ -291,6 +362,7 @@ function tainted(args: Taint[], site: string): Taint {
   const r = clean();
   for (const a of args) mergeMap(r.scalar, everything(a, site));
   r.deep = new Map(r.scalar);
+  r.k = opK(...args); // an opaque call carries its arguments' constness (no evidence of its own)
   // NOT aliased to the arguments: the result is already fail-closed (every
   // protected label comes out naked), and aliasing it back into an argument's
   // cell would poison that argument with the result's naked labels (measured:
@@ -325,16 +397,62 @@ const IDENTITY_BUILTINS = new Set([
  */
 const DERIVER_CALLS = new Set([
   "Boolean", "isNaN", "isFinite", "Number.isNaN", "Number.isFinite", "Number.isInteger", "Array.isArray",
-  "crypto.subtle.digest", "crypto.timingSafeEqual",
+  // NOT `crypto.subtle.digest`: a bare digest (RULING S443 #7, below).
+  "crypto.timingSafeEqual",
   "console.log", "console.error", "console.warn", "console.info", "console.debug", "console.trace",
 ]);
+/**
+ * RULING S443 #7 (user-voice-scrml.md §S443): only KEYED or PASSWORD-class
+ * derivations produce a value of independent identity — `verifyPassword`,
+ * `hashPassword` (argon2id), `verifyTotp` (a boolean), `verifyHash` (a boolean),
+ * `hash("argon2", …)`, and `hmac(key, …)` when the key is not itself protected.
+ * A BARE DIGEST (`hash("md5" | "sha256" | …, x)`, `crypto.subtle.digest`) stays
+ * PROTECTED: it is reversible by enumeration on a low-entropy column —
+ * `hash("md5", u.pin)` of a 4-digit pin falls in 10⁴ tries, the same reason
+ * `Bun.hash` was never on the list. (It was on the list at S441; measured, the
+ * digest shipped.)
+ */
 const STDLIB_DERIVERS: Record<string, Set<string>> = {
   auth: new Set(["verifyPassword", "hashPassword", "verifyTotp"]),
-  crypto: new Set(["hash", "hmac", "verifyHash"]),
+  crypto: new Set(["verifyHash"]),
 };
-function isStdlibDeriver(source: string, imported: string): boolean {
+/**
+ * RULING S445 #4 — the stdlib calls whose RESULT is a runtime source (I/O, a
+ * secret / configuration read, the environment, entropy): an `hmac` key built
+ * only from these declassifies. `scrml:process` `env("HMAC_KEY")` is THE
+ * configuration read; there is no separate config module. Everything else in
+ * the stdlib is a pure function of its arguments.
+ */
+const RUNTIME_SOURCE_CALLS: Record<string, Set<string>> = {
+  process: new Set(["env", "argv"]),
+  fs: new Set(["readFileSync", "readdirSync"]),
+  http: new Set(["get", "post", "put", "del", "patch"]),
+  redis: new Set(["get", "getBuffer", "smembers"]),
+  random: new Set(["random", "randomInt"]),
+  crypto: new Set(["generateToken", "generateUUID"]),
+};
+function stdlibModuleOf(source: string): string | null {
   const m = /(?:^scrml:|(?:^|\/)_scrml\/)([a-z]+)(?:\.js)?$/.exec(source);
-  return !!m && !!STDLIB_DERIVERS[m[1]]?.has(imported);
+  return m ? m[1] : null;
+}
+function isStdlibDeriver(source: string, imported: string, node?: any, args?: Taint[]): boolean {
+  const mod = stdlibModuleOf(source);
+  if (!mod) return false;
+  if (STDLIB_DERIVERS[mod]?.has(imported)) return true;
+  if (mod === "crypto" && imported === "hash") {
+    // Only the password-hashing algorithm, named literally.
+    return staticKey(node?.arguments?.[0]) === "argon2";
+  }
+  if (mod === "crypto" && imported === "hmac") {
+    // Keyed: the KEY must not itself be the protected value (a MAC keyed by the
+    // secret over a known message is a digest of the secret), and — RULING S445
+    // #4 — must not be a compile-time constant: `hmac("public-key", pin)` is
+    // reversible by enumeration exactly like a bare digest. Only a key that is
+    // exactly a RUNTIME value (env, config, a secret store, a DB read) counts.
+    const key = args?.[0] ?? clean();
+    return everything(key, "").size === 0 && key.k === 2;
+  }
+  return false;
 }
 
 /**
@@ -440,6 +558,8 @@ export interface ProtectFlowLeak {
   siteFn: string | null;
   /** Source file the extraction happened in. */
   siteFile: string | null;
+  /** The egress is a write into a global store (S443 round 6, L3), not a response. */
+  global?: boolean;
 }
 
 /** One `_scrml_protect_tag` site: the SQL it wraps + whether a redact sink stripped it. */
@@ -584,7 +704,7 @@ export function analyzeCompileProtectFlow(
   const isCompilerName = (n: string) => n.startsWith("_scrml_") || n === "<module>";
   const byExtraction = new Map<string, ProtectFlowLeak>();
   for (const leak of flow.leaks) {
-    const key = `${leak.column}\u0000${leak.site}\u0000${leak.siteFile}`;
+    const key = `${leak.column}\u0000${leak.site}\u0000${leak.siteFile}\u0000${leak.global ? "g" : ""}`;
     const prev = byExtraction.get(key);
     if (!prev || (isCompilerName(prev.sinkFn) && !isCompilerName(leak.sinkFn))) byExtraction.set(key, leak);
   }
@@ -597,14 +717,26 @@ export function analyzeCompileProtectFlow(
       span = siteSpanOf(leak.siteFn);
       if (span) file = leak.siteFile!;
     }
-    const egress = isCompilerName(leak.sinkFn)
+    const egress = leak.global
+      ? `a write into a global store (\`globalThis\`, \`process.env\`, \`import.meta\` or another object reached ` +
+        `from a global name) in \`${leak.sinkFn}\` — any other request, and code the compiler cannot see, can read ` +
+        `it back and send it`
+      : isCompilerName(leak.sinkFn)
       ? `the compiler-emitted client egress \`${leak.sinkFn}\``
       : `the client egress of \`${leak.sinkFn}\``;
     const what = leak.column === ALL_COLUMNS_LABEL
       ? "a column of a row whose SQL column origins cannot be resolved statically (the floor treats every column " +
         "of such a row as protected and strips the row wholesale)"
       : `the protected (\`protect=\`) column \`${leak.column}\``;
-    const resolution = leak.column === ALL_COLUMNS_LABEL
+    const resolution = leak.site.includes("§14.8.9 column marker")
+      ? "remove the property with a LITERAL key — `delete o.name`, `delete o[\"name\"]`, or a `const` bound to a " +
+        "string / number literal — or rebuild the collection without the entry (`rows.filter((r) => r.id != id)`, a " +
+        "`Map` and `.delete(id)`); a computed key the compiler cannot read might be one of the row's §14.8.9 column " +
+        "markers, and removing one would ship every protected column of the row"
+      : leak.global
+      ? "keep the value in a local binding, or store the ROW itself (it keeps its descriptor and is stripped " +
+        "wherever it later leaves the server) — never a value taken out of it"
+      : leak.column === ALL_COLUMNS_LABEL
       ? "rewrite the query so its column origins resolve (a plain SELECT with an explicit column list), then " +
         "return the row itself or only its non-protected fields"
       : `return the row itself (the floor strips \`${leak.column}\` and keeps the rest), or only a value DERIVED ` +
@@ -733,7 +865,9 @@ class FlowAnalysis {
    *                      `….enqueue`, `….send` (the init HEADERS included);
    *   serializer-json  — `Response.json(value)`, which JSON-encodes a row itself.
    */
-  private sinks: Array<{ t: Taint; fnName: string; kind: "redact" | "frame" | "serializer" | "serializer-json"; mod: Mod }> = [];
+  private sinks: Array<{ t: Taint; fnName: string; kind: SinkKind; mod: Mod }> = [];
+  /** The function instance being walked (null = a module body) — names a global-store sink. */
+  private curInst: Instance | null = null;
   private tagMeta = new Map<string, { mod: Mod; skeleton: string | null; cols: string[] | "*" }>();
   private resolved = new Map<string, Taint>();
   private rejecter: Closure;
@@ -767,8 +901,10 @@ class FlowAnalysis {
       passes = pass + 1;
       this.changed = false;
       this.sinks = [];
+      this.globalRetCache.clear();
       for (const mod of this.mods) {
         this.curMod = mod;
+        this.curInst = null;
         this.walkBody(mod.root.body, mod.scope, null);
       }
       for (let i = 0; i < this.instanceList.length && !this.saturated; i++) this.walkInstance(this.instanceList[i]);
@@ -782,15 +918,27 @@ class FlowAnalysis {
     const seen = new Set<string>();
     const stripped = new Set<string>();
     for (const s of this.sinks) {
+      const nk = naked(s.t);
+      // A ROW written into a global store keeps its descriptor (a later read of
+      // it is still redacted at a sink); only a value OUTSIDE a row is refused.
       const shipped = s.kind === "serializer-json"
         ? everything(s.t, "a protected row serialized by `Response.json` without the §14.8.9 redact")
-        : naked(s.t);
+        : new Map(nk);
+      // A row that may have lost a column marker (L4): every column may ship.
+      const symSite = nk.get(MARKER_REMOVED_LABEL);
+      if (symSite !== undefined && s.t.row) {
+        for (const c of unrevealed(s.t.row)) if (!shipped.has(c)) shipped.set(c, symSite);
+      }
       for (const [col, site] of shipped) {
-        const key = `${s.mod.filePath}\u0000${s.fnName}\u0000${col}\u0000${site}`;
+        if (isPseudoLabel(col)) continue;
+        const key = `${s.mod.filePath}\u0000${s.fnName}\u0000${col}\u0000${site}\u0000${s.kind}`;
         if (seen.has(key)) continue;
         seen.add(key);
         const sf = this.siteFnOf.get(site);
-        leaks.push({ filePath: s.mod.filePath, sinkFn: s.fnName, column: col, site, siteFn: sf?.fn ?? null, siteFile: sf?.file ?? s.mod.filePath });
+        leaks.push({
+          filePath: s.mod.filePath, sinkFn: s.fnName, column: col, site, siteFn: sf?.fn ?? null,
+          siteFile: sf?.file ?? s.mod.filePath, ...(s.kind === "global" ? { global: true } : {}),
+        });
       }
       if (s.kind === "redact" && s.t.row && unrevealed(s.t.row).length > 0) for (const id of s.t.row.tags) stripped.add(id);
     }
@@ -821,6 +969,9 @@ class FlowAnalysis {
       }
       const fnNames = new Set<string>();
       if (node.type === "FunctionExpression" && node.id) fnNames.add(node.id.name);
+      // A non-arrow function has its own `arguments` (an arrow reads its
+      // enclosing function's, by ordinary scope resolution) — L2.
+      if (node.type !== "ArrowFunctionExpression") fnNames.add("arguments");
       for (const p of node.params) this.patternNames(p, fnNames);
       const fnDecls: any[] = [];
       const name = node.id?.name ?? "";
@@ -835,7 +986,22 @@ class FlowAnalysis {
     }
     switch (node.type) {
       case "VariableDeclaration":
-        for (const d of node.declarations) this.patternNames(d.id, names);
+        for (const d of node.declarations) {
+          // A `const` bound to a string / number literal IS that literal (it can
+          // never be rebound) — a removal keyed by it names a column, not a marker.
+          // Only when that name is declared ONCE in this function scope (block
+          // scopes share the set here, so any second declaration disqualifies it).
+          const declared = new Set<string>();
+          this.patternNames(d.id, declared);
+          let m = this.constLiterals.get(names);
+          if (!m) { m = new Map(); this.constLiterals.set(names, m); }
+          for (const n of declared) {
+            if (names.has(n) || m.has(n)) m.set(n, "\u0000ambiguous");
+            else if (node.kind === "const" && d.id?.type === "Identifier" && staticKey(d.init) !== null) m.set(n, staticKey(d.init)!);
+            else m.set(n, "\u0000ambiguous");
+          }
+          this.patternNames(d.id, names);
+        }
         break;
       case "ClassDeclaration":
         if (node.id) names.add(node.id.name);
@@ -844,7 +1010,14 @@ class FlowAnalysis {
         for (const s of node.specifiers) if (s.local) names.add(s.local.name);
         return;
       case "CatchClause":
-        if (node.param) this.patternNames(node.param, names);
+        if (node.param) {
+          const declared = new Set<string>();
+          this.patternNames(node.param, declared);
+          const m = this.constLiterals.get(names);
+          if (m) for (const n of declared) m.set(n, "\u0000ambiguous");
+          else if (declared.size) this.constLiterals.set(names, new Map([...declared].map((n) => [n, "\u0000ambiguous"])));
+          this.patternNames(node.param, names);
+        }
         break;
     }
     for (const k in node) {
@@ -980,12 +1153,23 @@ class FlowAnalysis {
       else if (p.type === "RestElement") this.bindPattern(p.argument, containerOf(join(...args.slice(i))), inst!.scope, inst!);
       else this.bindPattern(p, args[i] ?? clean(), inst!.scope, inst!);
     });
+    // S443 round 6 (L2) — `arguments` holds EVERY argument, including those no
+    // parameter names. It read as a free (clean) name, so `function f() {
+    // return arguments[0] } f(u.passwordHash)` and `return arguments` shipped the
+    // hash (measured). It is the container of the join of all arguments; its
+    // `.length` is the argument COUNT, a value of independent identity.
+    if (stat.node.type !== "ArrowFunctionExpression") {
+      const argsObj = containerOf(everyParam ?? join(...args));
+      argsObj.len = new Map();
+      this.mergeBinding("arguments", inst!.scope, argsObj);
+    }
     this.curMod = saved;
     return inst;
   }
 
   private walkInstance(inst: Instance): void {
     this.curMod = inst.stat.mod;
+    this.curInst = inst;
     const body = inst.stat.node.body;
     if (body && body.type === "BlockStatement") this.walkBody(body.body, inst.scope, inst);
     else if (body) this.addRet(inst, this.evalExpr(body, inst.scope, inst));
@@ -1027,9 +1211,111 @@ class FlowAnalysis {
     this.changed = true;
   }
 
+  /**
+   * S443 round 6 (L3) — EVERY free name (`globalThis`, `process`, `Bun`, `Date`,
+   * …) reads and writes ONE compile-wide cell. It used to read as clean and a
+   * write into it landed in a per-module slot nobody read, so
+   * `globalThis.x = u.passwordHash; return globalThis.x`, `process.env.X = h`,
+   * and the same store split across two server functions all served the hash
+   * (measured). Now what is written into the global heap is what any global
+   * read returns (provenance on read), and a write of a value outside a row is
+   * itself an egress (`E-PROTECT-006`, sink kind "global"): code the compiler
+   * cannot see — a library, a child process given `process.env` — may read it.
+   */
+  private readGlobal(): Taint {
+    const own = this.bindings.get(GLOBAL_CELL) ?? clean();
+    const writes = this.classWrites.get(this.find(GLOBAL_CELL));
+    const t = writes ? join(own, writes) : own;
+    return { ...t, refs: new Set([GLOBAL_CELL]) };
+  }
+
+  /**
+   * FUNCTIONS stored in the global heap, by the property NAME they were stored
+   * under (`globalThis.clamp = …` → "clamp"; `clamp = …` → "clamp"), plus the
+   * ones stored where no name is readable (an alias of a global object, a
+   * computed key, `Object.assign(globalThis, …)`). A global-path call applies —
+   * and joins the returns of — only the functions whose name appears in its
+   * path, plus the unnamed ones. S443 round 6b (review SHOULD 5/6): applying
+   * EVERY global-stored function at EVERY global call (`Math.abs(u.pin)` ran a
+   * `globalThis.clamp` closure) blamed compiler-emitted code the author cannot
+   * change (`_scrml_session_middleware`) for a leak, and went roughly cubic
+   * (89 s on a generated 32-function file).
+   */
+  private globalFnsByName = new Map<string, Set<Closure>>();
+  private globalFnsUnnamed = new Set<Closure>();
+  /** Set while a NAMED global write is being recorded, so it is not also unnamed. */
+  private namedGlobalWrite = false;
+  private recordGlobalFns(name: string | null, fns: Set<Closure>): void {
+    if (fns.size === 0) return;
+    let set: Set<Closure>;
+    if (name === null) set = this.globalFnsUnnamed;
+    else {
+      set = this.globalFnsByName.get(name) ?? new Set();
+      this.globalFnsByName.set(name, set);
+    }
+    for (const f of fns) if (!set.has(f)) { set.add(f); this.changed = true; }
+  }
+  /** The global-stored functions a call through global `path` may reach. */
+  private globalFnsFor(parts: string[]): Set<Closure> {
+    const out = new Set<Closure>(this.globalFnsUnnamed);
+    for (const p of parts) for (const f of this.globalFnsByName.get(p) ?? []) out.add(f);
+    return out;
+  }
+  /** What those functions have returned so far (data only), cached per pass. */
+  private globalRetCache = new Map<string, Taint>();
+  private globalFnRetFor(parts: string[]): Taint {
+    const fns = this.globalFnsFor(parts);
+    if (fns.size === 0) return clean();
+    const key = [...fns].map((c) => c.cid).sort((a, b) => a - b).join(",");
+    const hit = this.globalRetCache.get(key);
+    if (hit) return hit;
+    let r = clean();
+    for (const inst of this.instanceList) if (fns.has(inst.closure)) r = join(r, dataOnly(inst.ret));
+    r = dataOnly(r);
+    this.globalRetCache.set(key, r);
+    return r;
+  }
+
+  /** Does any argument carry protected data (a row, or a value outside one)? */
+  private carriesProtected(args: Taint[]): boolean {
+    return args.some((a) => [...everything(a, "").keys()].some((l) => !isPseudoLabel(l)));
+  }
+
+  /**
+   * A reflection-capable callee — a global-rooted path (`Reflect.deleteProperty`,
+   * an unmodelled `Object.*`) or a function reached from the global heap
+   * (`const O = Object; O.defineProperty(…)`) — handed a ROW may remove or hide
+   * one of its column markers; that argument ships every column from now on (L4).
+   * Host imports and compile functions are not covered by this rule: the
+   * markers on the row a query returned are non-configurable, so no callee can
+   * remove THOSE; only an author-made copy is exposed, and an author who hands a
+   * copy to reflection is what this rule sees.
+   */
+  private reflectionMayRemoveMarkers(args: Taint[], node: any, fn: Instance | null, scope: Scope): void {
+    const argNodes = node?.arguments ?? [];
+    args.forEach((a, i) => {
+      const an = argNodes[i];
+      if (a?.row && an && an.type !== "SpreadElement") this.markerRemoved(an, a, node, fn, scope);
+    });
+  }
+
+  /** Does this value belong to the global heap's alias class? */
+  private isGlobalValue(t: Taint): boolean {
+    const g = this.find(GLOBAL_CELL);
+    for (const r of refsOf(t)) if (this.find(r) === g) return true;
+    return false;
+  }
+
+  /** A write landed in the global heap's alias class: a value outside a row is an egress. */
+  private globalStore(slot: string, t: Taint): void {
+    if (this.find(slot) !== this.find(GLOBAL_CELL)) return;
+    if ([...naked(t).keys()].some((l) => !isPseudoLabel(l))) this.sink(t, this.curInst, "global");
+    if (!this.namedGlobalWrite) this.recordGlobalFns(null, t.fns);
+  }
+
   private getBinding(name: string, scope: Scope, depth = 0): Taint {
     const s = this.resolve(name, scope);
-    if (!s) return clean();
+    if (!s) return this.readGlobal();
     if (s.parent === null) {
       const imp = s.mod.imports.get(name);
       if (imp) return this.importValue(imp, depth);
@@ -1064,16 +1350,18 @@ class FlowAnalysis {
   }
 
   private mergeBinding(name: string, scope: Scope, t: Taint, isWrite = false): void {
-    let s = this.resolve(name, scope) ?? scope.mod.scope;
+    const resolved = this.resolve(name, scope);
+    let s = resolved ?? scope.mod.scope;
     // An assignment to an imported binding writes the exporting module's binding.
-    if (s.parent === null) {
+    if (resolved && s.parent === null) {
       const imp = s.mod.imports.get(name);
       if (imp?.target) {
         const local = imp.target.exports.get(imp.imported);
         if (local) { name = local; s = imp.target.scope; }
       }
     }
-    const key = `${s.id}:${name}`;
+    // A free name is the global heap (L3).
+    const key = resolved ? `${s.id}:${name}` : GLOBAL_CELL;
     // The value may BE another binding's object — join its alias class.
     for (const r of refsOf(t)) this.unite(key, r);
     const plain = { ...t };
@@ -1082,6 +1370,15 @@ class FlowAnalysis {
     // the binding itself stays the binding's own.
     const store = isWrite ? this.classWrites : this.bindings;
     const slot = isWrite ? this.find(key) : key;
+    if (!resolved && !isWrite) {
+      // `clamp = () => …` to a free name: a global stored under that name.
+      this.recordGlobalFns(name, plain.fns);
+      const prevNamed = this.namedGlobalWrite;
+      this.namedGlobalWrite = true;
+      try { this.globalStore(slot, plain); } finally { this.namedGlobalWrite = prevNamed; }
+    } else if (isWrite || key === GLOBAL_CELL) {
+      this.globalStore(slot, plain);
+    }
     const prev = store.get(slot) ?? clean();
     const next = join(prev, plain);
     if (taintKey(prev) !== taintKey(next)) {
@@ -1151,7 +1448,7 @@ class FlowAnalysis {
     return s;
   }
 
-  private sink(t: Taint, inst: Instance | null, kind: "redact" | "frame" | "serializer" | "serializer-json"): void {
+  private sink(t: Taint, inst: Instance | null, kind: SinkKind): void {
     this.sinks.push({ t, fnName: this.displayName(inst?.stat.node ?? null), kind, mod: this.curMod! });
   }
 
@@ -1297,8 +1594,17 @@ class FlowAnalysis {
         for (const pr of p.properties) {
           if (pr.type === "RestElement") {
             // Object rest copies enumerable Symbol-keyed props too — the
-            // descriptor survives, exactly as for `{...row}`.
-            this.bindPattern(pr.argument, t, scope, fn);
+            // column markers survive, exactly as for `{...row}` — EXCEPT a key
+            // the pattern names: excluding a computed key the compiler cannot
+            // read (`const { [k]: _, ...rest } = row`) may drop a marker (L4).
+            const dynExcluded = p.properties.some((q: any) => q.type !== "RestElement" && q.computed && this.literalKey(q.key, scope) === null);
+            if (dynExcluded) {
+              const lost = { ...t, scalar: new Map(t.scalar), deep: new Map(t.deep) };
+              lost.deep.set(MARKER_REMOVED_LABEL, `${this.site(p, fn)} — excludes a key the compiler cannot read from an object rest (it may be a §14.8.9 column marker)`);
+              this.bindPattern(pr.argument, lost, scope, fn);
+            } else {
+              this.bindPattern(pr.argument, t, scope, fn);
+            }
             continue;
           }
           let v: Taint;
@@ -1330,6 +1636,51 @@ class FlowAnalysis {
         const objT = this.evalExpr(p.object, scope, fn);
         // `o[h] = v` writes the KEY `h` into `o` as well as the value (N1).
         const k = p.computed ? keyOnly(this.evalExpr(p.property, scope, fn)) : clean();
+        // A function stored straight into a global object is recorded under the
+        // property name it is stored as (see `globalFnsByName`).
+        // (Walks through `(g.x ??= {})[k]` / parentheses to the root, and names a
+        // computed-key store after the nearest STATIC name on its path —
+        // `(globalThis.__scrml_session_stores ??= {})[path] = store` is
+        // "__scrml_session_stores" — so the compiler's own session store's methods
+        // are applied only at calls that name that path, not at every global call.)
+        const rootOf = (e: any): any => {
+          while (e) {
+            if (e.type === "MemberExpression") e = e.object;
+            else if (e.type === "ChainExpression" || e.type === "ParenthesizedExpression") e = e.expression;
+            else if (e.type === "AssignmentExpression") e = e.left;
+            else return e;
+          }
+          return e;
+        };
+        const staticNameOf = (e: any): string | null => {
+          while (e) {
+            if (e.type === "MemberExpression") {
+              const n = e.computed ? staticKey(e.property) : (e.property?.name ?? null);
+              if (n !== null) return n;
+              e = e.object;
+            } else if (e.type === "ChainExpression" || e.type === "ParenthesizedExpression") e = e.expression;
+            else if (e.type === "AssignmentExpression") e = e.left;
+            else return null;
+          }
+          return null;
+        };
+        const root = rootOf(p.object);
+        const freeRoot = !!root && ((root.type === "Identifier" && !this.resolve(root.name, scope)) || root.type === "MetaProperty");
+        const propName = p.computed ? staticKey(p.property) : (p.property?.name ?? null);
+        const globalName = propName ?? staticNameOf(p.object);
+        if (t.fns.size > 0) {
+          // `o.f = function …` runs with `this` = o (round 6e) — and a `toJSON`
+          // (or a key the compiler cannot read, which may be `toJSON`) is INVOKED
+          // by the serializer: what it returns is part of o.
+          this.recordThis(t.fns, objT);
+          if (propName === "toJSON" || propName === null) t = join(t, containerOf(this.applyFns(t.fns, [], undefined, p, fn)));
+        }
+        if (freeRoot && globalName !== null && t.fns.size > 0) {
+          this.recordGlobalFns(globalName, t.fns);
+          this.namedGlobalWrite = true;
+          try { this.writeThrough(p.object, objT, containerOf(join(t, k)), scope); } finally { this.namedGlobalWrite = false; }
+          return;
+        }
         this.writeThrough(p.object, objT, containerOf(join(t, k)), scope);
         return;
       }
@@ -1341,6 +1692,7 @@ class FlowAnalysis {
     let e = expr;
     while (e && (e.type === "MemberExpression" || e.type === "ChainExpression")) e = e.type === "ChainExpression" ? e.expression : e.object;
     if (e && e.type === "Identifier") this.mergeBinding(e.name, scope, t, true);
+    else if (e && e.type === "MetaProperty") this.writeCell(GLOBAL_CELL, t);
   }
 
   /**
@@ -1352,6 +1704,13 @@ class FlowAnalysis {
    * `arr.at(0).x = h`, `m.get(k).x = h`, `Object.values(o)[0].x = h`,
    * `it.next().value.x = h` — reached no binding and the container shipped.
    */
+  /** A property of `expr`'s object may have been removed by an unreadable key (L4). */
+  private markerRemoved(expr: any, exprT: Taint, node: any, fn: Instance | null, scope: Scope): void {
+    const t = clean();
+    t.deep.set(MARKER_REMOVED_LABEL, `${this.site(node, fn)} — removes a property by a key the compiler cannot read (it may be a §14.8.9 column marker)`);
+    this.writeThrough(expr, exprT, t, scope);
+  }
+
   private writeThrough(expr: any, exprT: Taint, t: Taint, scope: Scope): void {
     this.mutateRoot(expr, t, scope);
     for (const r of refsOf(exprT)) this.writeCell(r, t);
@@ -1363,6 +1722,7 @@ class FlowAnalysis {
     const plain = { ...t };
     delete plain.refs;
     const slot = this.find(key);
+    this.globalStore(slot, plain);
     const prev = this.classWrites.get(slot) ?? clean();
     const next = join(prev, plain);
     if (taintKey(prev) !== taintKey(next)) {
@@ -1423,6 +1783,7 @@ class FlowAnalysis {
     // §14.8.9 allowlisted derived count. Anything that merged container
     // contents (`o.deep`) may be an object with its own `length` — default.
     if (columnRead && namedColumnOffRow && o.fns.size === 0) r.len = new Map();
+    if (o.k) r.k = o.k; // a part of a constant is constant; of a runtime value, runtime
     return r;
   }
 
@@ -1433,20 +1794,27 @@ class FlowAnalysis {
         if (node.name === "undefined") return clean();
         return this.getBinding(node.name, scope);
       case "Literal":
+        return { ...clean(), k: 1 };
       case "ThisExpression":
+        return this.thisTaint(fn);
       case "Super":
-      case "MetaProperty":
       case "PrivateIdentifier":
         return clean();
+      case "MetaProperty":
+        // `import.meta` is a host-owned object like any global (L3).
+        return this.readGlobal();
       case "TemplateLiteral": {
         const r = clean();
         // The string's length is the sum of its parts' lengths (F1).
         r.len = new Map();
+        const parts: Taint[] = [{ ...clean(), k: 1 }];
         for (const e of node.expressions) {
           const v = this.evalExpr(e, scope, fn);
           mergeMap(r.scalar, naked(v));
           mergeMap(r.len, lenOf(v));
+          parts.push(v);
         }
+        r.k = opK(...parts);
         return r;
       }
       case "TaggedTemplateExpression": {
@@ -1458,7 +1826,7 @@ class FlowAnalysis {
         // `_scrml_sql`…`` / `tx`…`` — a query. Its interpolations are bound
         // parameters (server-side use), and its result is a row read from the
         // database: a DB round trip is outside the egress guarantee (F5).
-        return clean();
+        return { ...clean(), k: 2 };
       }
       case "ArrayExpression": {
         let r = clean();
@@ -1475,6 +1843,7 @@ class FlowAnalysis {
       }
       case "ObjectExpression": {
         let r = clean();
+        const methods: Array<{ fns: Set<Closure>; invoked: boolean }> = [];
         for (const pr of node.properties) {
           if (pr.type === "SpreadElement") {
             // `{...row}` copies the enumerable Symbol descriptor: still a row.
@@ -1486,14 +1855,17 @@ class FlowAnalysis {
           if (pr.computed) r = join(r, containerOf(keyOnly(this.evalExpr(pr.key, scope, fn))));
           const v = this.evalExpr(pr.value, scope, fn);
           r = join(r, containerOf(v));
-          // A getter, or a `toJSON` method, is INVOKED by `JSON.stringify` at the
-          // sink — what it returns is what ships.
           const keyName = pr.key?.type === "Identifier" ? pr.key.name : staticKey(pr.key);
-          if (v.fns.size > 0 && (pr.kind === "get" || keyName === "toJSON")) {
-            r = join(r, containerOf(this.applyFns(v.fns, [], undefined, node, fn)));
-          }
+          if (v.fns.size > 0) methods.push({ fns: v.fns, invoked: pr.kind === "get" || pr.kind === "set" || keyName === "toJSON" });
         }
-        return r;
+        // S443 round 6e — a function stored on this object runs with `this` =
+        // the object: `{ ...u, toJSON() { return { pw: this.passwordHash } } }`.
+        for (const m of methods) this.recordThis(m.fns, r);
+        // A getter, or a `toJSON` method, is INVOKED by `JSON.stringify` at the
+        // sink — what it returns is what ships.
+        let invokedRet = clean();
+        for (const m of methods) if (m.invoked) invokedRet = join(invokedRet, this.applyFns(m.fns, [], undefined, node, fn));
+        return methods.some((m) => m.invoked) ? join(r, containerOf(invokedRet)) : r;
       }
       case "FunctionExpression":
       case "ArrowFunctionExpression":
@@ -1502,6 +1874,17 @@ class FlowAnalysis {
         return this.evalGeneric(node, scope, fn);
       case "UnaryExpression":
       case "UpdateExpression": {
+        if (node.type === "UnaryExpression" && node.operator === "delete") {
+          // `delete o[k]` with a key that is not a string / number literal may
+          // remove a §14.8.9 column marker from a copy of a row (L4).
+          const target = node.argument?.type === "ChainExpression" ? node.argument.expression : node.argument;
+          if (target?.type === "MemberExpression" && target.computed) {
+            const objT = this.evalExpr(target.object, scope, fn);
+            this.evalExpr(target.property, scope, fn);
+            if (this.literalKey(target.property, scope) === null) this.markerRemoved(target.object, objT, node, fn, scope);
+            return clean();
+          }
+        }
         const v = this.evalExpr(node.argument, scope, fn);
         // RULING (bryan, S441): arithmetic stays protected. Unary `+` / `-` /
         // `~` and `++` / `--` yield a number computed from the operand — `+u.pin`
@@ -1511,6 +1894,7 @@ class FlowAnalysis {
         }
         const r = clean();
         mergeMap(r.scalar, naked(v));
+        r.k = opK(v);
         return r;
       }
       case "BinaryExpression": {
@@ -1534,6 +1918,7 @@ class FlowAnalysis {
         r.len = new Map();
         mergeMap(r.len, lenOf(l));
         mergeMap(r.len, lenOf(rr));
+        r.k = opK(l, rr);
         return r;
       }
       case "LogicalExpression":
@@ -1549,6 +1934,7 @@ class FlowAnalysis {
           v = clean();
           mergeMap(v.scalar, naked(lv));
           mergeMap(v.scalar, naked(rv));
+          v.k = opK(lv, rv);
         }
         this.bindPattern(node.left, v, scope, fn);
         return v;
@@ -1591,6 +1977,9 @@ class FlowAnalysis {
         const sel = naked(keyTaint);
         mergeMap(read.scalar, sel);
         mergeMap(read.deep, sel);
+        // S445 #4: a read of the process environment is positive evidence of a
+        // runtime (secret) source — `process.env.X`, `Bun.env.X`, `import.meta.env.X`.
+        if (isEnvPath(this.globalPath(node, scope)) || this.isImportMetaEnv(node)) read.k = 2;
         return read;
       }
       case "CallExpression":
@@ -1656,11 +2045,23 @@ class FlowAnalysis {
    * unless the callee is an allowlisted DERIVER (a one-way digest / boolean).
    */
   private hostCall(host: { source: string; imported: string }, args: Taint[], node: any, fn: Instance | null): Taint {
-    if (isStdlibDeriver(host.source, host.imported)) return clean();
+    const cb = this.opaqueCallbacks(null, args, node, fn);
+    if (isStdlibDeriver(host.source, host.imported, node, args)) return clean();
     const pm = this.pickOmit(host, args, node, fn);
-    if (pm) return pm;
-    if (args.every((a) => everything(a, "").size === 0)) return clean();
-    return tainted(args, `${this.site(node, fn)} — \`${host.imported}\` from \`${host.source}\`, code the compiler cannot see into`);
+    if (pm) return join(pm, cb);
+    // S445 #4 (round 6d): a host call is positive runtime evidence ONLY when it
+    // is a recognized I/O / secret / entropy source (`RUNTIME_SOURCE_CALLS`) —
+    // its argument is a selector (a variable name, a path, a URL), not key
+    // material, so the result is runtime whatever the argument. Any other host
+    // function — a pure stdlib helper (`scrml:path` `normalize`, `scrml:format`
+    // `capitalize`, `scrml:crypto` `hash`) or an npm import the compiler has no
+    // model for — carries its arguments' constness: a function of constants is
+    // a constant (fail closed). Round 6c counted every host call as runtime and
+    // `normalize("public-key")` laundered a constant key (review, measured).
+    const src = stdlibModuleOf(host.source);
+    const k = src !== null && RUNTIME_SOURCE_CALLS[src]?.has(host.imported) ? 2 : opK(...args);
+    if (args.every((a) => everything(a, "").size === 0)) return { ...cb, k };
+    return { ...join(cb, tainted(args, `${this.site(node, fn)} — \`${host.imported}\` from \`${host.source}\`, code the compiler cannot see into`)), k };
   }
 
   /**
@@ -1699,10 +2100,12 @@ class FlowAnalysis {
 
   /** A call to a global the analysis has no model for: same fail-closed rule. */
   private unknownCall(path: string | null, args: Taint[], node: any, fn: Instance | null): Taint {
+    let cb = this.opaqueCallbacks(null, args, node, fn);
     if (path !== null && DERIVER_CALLS.has(path)) return clean();
-    if (args.every((a) => everything(a, "").size === 0)) return clean();
+    if (path !== null) cb = join(cb, this.globalFnRetFor(path.split(".")));
+    if (args.every((a) => everything(a, "").size === 0)) return cb;
     const what = path ?? "an unmodelled callee";
-    return tainted(args, `${this.site(node, fn)} — \`${what}\`, which the compiler does not know to be a one-way deriver`);
+    return join(cb, tainted(args, `${this.site(node, fn)} — \`${what}\`, which the compiler does not know to be a one-way deriver`));
   }
 
   private evalCall(node: any, scope: Scope, fn: Instance | null): Taint {
@@ -1725,6 +2128,7 @@ class FlowAnalysis {
         return {
           ...clean(),
           row: { tags: new Set([id]), cols: new Set(cols === "*" ? [] : cols), all: cols === "*", revealed: new Set() },
+          k: 2,
         };
       }
       if (name === "_scrml_protect_reveal") {
@@ -1778,16 +2182,38 @@ class FlowAnalysis {
         return clean();
       }
       if (path === "Object.defineProperty" || path === "Reflect.defineProperty") {
-        // The descriptor's `value` / getter become a field of the target.
+        // The descriptor's `value` / getter become a field of the target, and a
+        // redefinition by an unreadable key may HIDE a column marker (a
+        // non-enumerable marker is dropped by the next spread) — L4.
         const desc = args[2] ?? clean();
+        this.recordThis(desc.fns, args[0] ?? clean()); // a getter / value function runs with `this` = the target (6e)
         const got = this.hasCallable(desc) ? this.applyFns(desc.fns, [], undefined, node, fn) : clean();
-        this.writeThrough(node.arguments[0], args[0] ?? clean(), containerOf(join(desc, got)), scope);
-        return join(args[0] ?? clean(), containerOf(join(desc, got)));
+        const written = containerOf(join(desc, got, keyOnly(args[1] ?? clean())));
+        this.writeThrough(node.arguments[0], args[0] ?? clean(), written, scope);
+        if (this.literalKey(node.arguments[1], scope) === null) this.markerRemoved(node.arguments[0], args[0] ?? clean(), node, fn, scope);
+        return join(args[0] ?? clean(), written);
+      }
+      if (path === "Object.defineProperties" || path === "Reflect.set" || path === "Reflect.deleteProperty") {
+        // Keys and values of the second argument (or the key + value) are written
+        // into the target; a redefinition / removal by an unreadable key may
+        // drop a column marker (L4). A function among them runs with `this` = the target (6e).
+        this.recordThis(path === "Reflect.set" ? (args[2] ?? clean()).fns : (args[1] ?? clean()).fns, args[0] ?? clean());
+        const written = path === "Object.defineProperties"
+          ? containerOf(join(args[1] ?? clean(), ...(this.hasCallable(args[1] ?? clean()) ? [this.applyFns(args[1].fns, [], undefined, node, fn)] : [])))
+          : containerOf(join(keyOnly(args[1] ?? clean()), args[2] ?? clean()));
+        this.writeThrough(node.arguments[0], args[0] ?? clean(), written, scope);
+        if (path === "Object.defineProperties" || (path === "Reflect.deleteProperty" && this.literalKey(node.arguments[1], scope) === null)) {
+          this.markerRemoved(node.arguments[0], args[0] ?? clean(), node, fn, scope);
+        }
+        return path === "Object.defineProperties" ? join(args[0] ?? clean(), written) : clean();
       }
       if (path !== null) {
         const b = this.builtin(path, args, node, fn);
-        if (b) return b;
-        if (DERIVER_CALLS.has(path)) return clean();
+        if (b) return join(b, this.opaqueCallbacks(null, args, node, fn));
+        if (DERIVER_CALLS.has(path)) {
+          this.opaqueCallbacks(null, args, node, fn); // side effects only: the result is derived
+          return clean();
+        }
       }
       const recv = this.evalExpr(m.object, scope, fn);
       let method: string | null = null;
@@ -1824,13 +2250,31 @@ class FlowAnalysis {
         // `m.set(k, v)` stores the KEY too (N1).
         const written = method === "set" ? join(keyOnly(args[0] ?? clean()), args[1] ?? clean()) : method === "splice" ? join(...args.slice(2)) : join(...args);
         this.writeThrough(m.object, recv, containerOf(written), scope);
-        return method === "push" || method === "unshift" ? clean() : join(recv, containerOf(written));
+        const cbm = this.opaqueCallbacks(path === null ? recv : dataOnly(recv), args, node, fn); // `store.update(fn)` calls it
+        return method === "push" || method === "unshift" ? cbm : join(recv, containerOf(written), cbm);
       }
       // A method stored in an object the compile built (`api.f(x)`), or a
       // function value reached through a host namespace.
       const viaField = this.memberRead(recv, method, method === null, node, fn);
       let r = clean();
-      if (this.hasCallable(viaField)) r = join(r, this.applyFns(viaField.fns, args, undefined, node, fn));
+      // A method reached from the GLOBAL heap (`Math.abs(…)`, `process.env.x.trim()`,
+      // `const O = Object; O.keys(…)`) is a platform API — unless a function was
+      // stored in a global under a name on its path (`globalThis.clamp(…)`), which
+      // is applied (only when protected data is passed) and whose returns join
+      // the result. See `globalFnsByName`.
+      const recvGlobal = path !== null || this.isGlobalValue(recv);
+      const gParts = path !== null ? path.split(".") : (method !== null ? [method] : []);
+      if (recvGlobal) {
+        const gf = this.globalFnsFor(gParts);
+        if (gf.size > 0 && this.carriesProtected(args)) r = join(r, this.applyFns(gf, args, undefined, node, fn));
+      } else if (this.hasCallable(viaField)) {
+        r = join(r, this.applyFns(viaField.fns, args, undefined, node, fn));
+      }
+      // L1 — a method the analysis has no model for may call any function it is
+      // handed (a compile-defined method is walked exactly instead, above).
+      if (recvGlobal || !this.hasCallable(viaField)) r = join(r, this.opaqueCallbacks(recvGlobal ? dataOnly(recv) : recv, args, node, fn));
+      // L4 — reflection reached from the global heap may remove a row's marker.
+      if (recvGlobal) this.reflectionMayRemoveMarkers(args, node, fn, scope);
 
       // A predicate / position method is DERIVED only on a string-like receiver.
       // An OBJECT receiver carrying protected data (`new Box(h).test()`, a
@@ -1855,23 +2299,47 @@ class FlowAnalysis {
       // analysis has no model for. FAIL CLOSED: the result carries the receiver
       // AND every argument (`String.prototype.concat.call("", h)`,
       // `Buffer.from(h).toString("base64")`, `h.charCodeAt(0)`).
-      if (this.hasCallable(viaField) && recv.row === null && recv.scalar.size === 0 && recv.deep.size === 0) return r;
+      // (Not for a GLOBAL-rooted callee: the global heap's function values are
+      // whatever anything ever stored there, not a model of `Math.max`.)
+      if (!recvGlobal && this.hasCallable(viaField) && recv.row === null && recv.scalar.size === 0 && recv.deep.size === 0) return r;
       const out: Taint = { row: recv.row ? copyRow(recv.row) : null, scalar: new Map(recv.scalar), deep: new Map(recv.deep), fns: new Set() };
       // …and it may BE (or hand back) an object reachable from the receiver or
       // an argument — `arr.values().next().value`, `it.next().value`, a
       // library `wrap(o)` — so it joins their alias classes (round 5, F4).
       const aliases = new Set<string>(refsOf(recv));
+      // A GLOBAL-rooted method (`Date.now()`, `Math.max(…)`, `crypto.randomUUID()`)
+      // is a platform API, not a handle into the global heap: aliasing its
+      // result to the global cell unified every value near a timestamp with
+      // every global store (measured: examples/23 did not finish in 400 s with
+      // it, 0.95 s without). A global OBJECT reached by name or member
+      // (`const e = process.env; e.X = h`) still aliases it. Disclosed in
+      // g-protect-egress-round-7-residuals: `process.env.valueOf().X = h`.
+      if (path !== null) aliases.delete(GLOBAL_CELL);
       for (const a of args) for (const x of refsOf(a)) aliases.add(x);
       if (aliases.size > 0) out.refs = aliases;
       for (const a of args) mergeMap(out.scalar, everything(a, this.site(node, fn)));
       if (out.scalar.size > 0) mergeMap(out.deep, out.scalar);
-      return join(r, out);
+      out.k = opK(recv, ...args);
+      return recvGlobal ? join(r, out, this.globalFnRetFor(gParts)) : join(r, out);
     }
 
     // --- plain calls -------------------------------------------------------------
     const ct = this.evalExpr(callee, scope, fn);
-    if (this.hasCallable(ct)) return this.applyFns(ct.fns, args, undefined, node, fn);
     const path = this.globalPath(callee, scope);
+    // A GLOBAL callee may be a function something stored in the global heap
+    // (L3) — applied — but it is also the platform built-in of that name, which
+    // keeps its own (fail-closed) model below.
+    const gfPlain = path !== null ? this.globalFnsFor(path.split(".")) : null;
+    const viaGlobal = gfPlain !== null && gfPlain.size > 0 && this.carriesProtected(args)
+      ? this.applyFns(gfPlain, args, undefined, node, fn)
+      : null;
+    if (path === null && this.hasCallable(ct)) return this.applyFns(ct.fns, args, undefined, node, fn);
+    if (viaGlobal) return join(viaGlobal, this.evalGlobalCall(path!, node, args, fn));
+    return this.evalGlobalCall(path, node, args, fn);
+  }
+
+  /** A plain call whose callee is not a function value the analysis holds. */
+  private evalGlobalCall(path: string | null, node: any, args: Taint[], fn: Instance | null): Taint {
     if (path === "Promise" && node.type === "NewExpression" && args[0] && this.hasCallable(args[0])) {
       // `new Promise((resolve, reject) => resolve(u.passwordHash))` — the promise
       // settles to whatever the executor passes to `resolve`.
@@ -1892,9 +2360,101 @@ class FlowAnalysis {
     }
     if (path !== null) {
       const b = this.builtin(path, args, node, fn);
-      if (b) return b;
+      if (b) return join(b, this.opaqueCallbacks(null, args, node, fn));
+      // L4 — an unmodelled global (reflection) handed a row may remove a marker.
+      if (!DERIVER_CALLS.has(path)) this.reflectionMayRemoveMarkers(args, node, fn, fn?.scope ?? this.curMod!.scope);
     }
     return this.unknownCall(path, args, node, fn);
+  }
+
+  /**
+   * S443 round 6 (L1) — a function value handed to code the analysis has no
+   * model for (a host / stdlib / npm call, a platform built-in, an unmodelled
+   * method) may be CALLED by it, with anything that code can reach. It used to
+   * be walked only by its default instance, every parameter clean — so
+   * `h.replace(/.+/, m => { s = m })`, a `JSON.stringify(u, replacer)` replacer
+   * and `"x".replace("x", () => h)` shipped the hash (measured). Every such
+   * function (directly an argument, or held inside one) is applied with EVERY
+   * parameter — and its `arguments` — bound to the join of the receiver and
+   * all arguments, row columns included as values (a replacer is handed each
+   * column's value), and what it returns joins the call's result. This is the
+   * fail-closed model; it deliberately does not try to know which built-ins
+   * call back and with what.
+   */
+  private opaqueCallbacks(recv: Taint | null, args: Taint[], node: any, fn: Instance | null): Taint {
+    const fns = new Set<Closure>();
+    for (const a of args) for (const f of a.fns) fns.add(f);
+    if (fns.size === 0) return clean();
+    const all = join(...(recv ? [recv] : []), ...args);
+    const every = everything(all, `${this.site(node, fn)} — handed to a callback of code the compiler has no model for`);
+    const param: Taint = {
+      row: all.row ? copyRow(all.row) : null,
+      scalar: new Map(every),
+      deep: new Map(every),
+      fns: new Set(all.fns),
+      refs: new Set(refsOf(all)),
+    };
+    return this.applyFns(fns, [], param, node, fn);
+  }
+
+  /**
+   * S443 round 6e — `this`. A function stored ON an object (`o.f = function …`,
+   * a method / getter / setter in an object literal, a `defineProperty` getter or
+   * value, `Object.assign(o, { f() … })`) runs with `this` = that object, so a
+   * `this.passwordHash` inside it IS the column. `this` used to read as clean:
+   * `u.toJSON = function () { return { pw: this.passwordHash } }` and a
+   * `defineProperty(u, "pw3", { get: function () { return this.passwordHash } })`
+   * served the hash through the response, `/__mountHydrate` and the SSR state
+   * script (review, measured; no `_{}` needed). Keyed by the function NODE: every
+   * object a function was ever stored on joins into its `this` (fail closed).
+   */
+  private thisOf = new Map<any, Taint>();
+  private recordThis(fns: Set<Closure>, obj: Taint): void {
+    const data = dataOnly(obj);
+    // Data only — no alias cells: a READ through `this` sees what the object
+    // carries; a WRITE through `this` is not modelled (it lands nowhere, as it did
+    // before round 6e). Aliasing `this` to its object made the compiler's own
+    // session object (whose methods run on every opaque-call over-approximation)
+    // collect every protected value in the compile — a false E-PROTECT-006 on
+    // examples/23's login. Disclosed in g-protect-egress-round-7-residuals.
+    for (const c of fns) {
+      if (!c.node) continue;
+      const prev = this.thisOf.get(c.node) ?? clean();
+      const next = join(prev, data);
+      if (taintKey(next) !== taintKey(prev)) { this.thisOf.set(c.node, next); this.changed = true; }
+    }
+  }
+  /** `this` inside the walked function (an arrow's is its enclosing function's). */
+  private thisTaint(fn: Instance | null): Taint {
+    let node = fn?.stat.node ?? null;
+    while (node && node.type === "ArrowFunctionExpression") node = this.fnParent.get(node) ?? null;
+    const t = node ? this.thisOf.get(node) : undefined;
+    return t ? { ...t, refs: t.refs ? new Set(t.refs) : undefined } : clean();
+  }
+
+  /** `const` names bound to a string / number literal, per declaring scope's name set. */
+  private constLiterals = new WeakMap<Set<string>, Map<string, string>>();
+
+  /**
+   * The literal string a property key denotes, or null: a string / number
+   * literal, or an identifier bound by `const` to one (S443 round 6c — `const
+   * gone = 1; delete byId[gone]` is a literal key, not a possible marker).
+   */
+  private literalKey(node: any, scope: Scope): string | null {
+    const k = staticKey(node);
+    if (k !== null) return k;
+    if (node?.type === "Identifier") {
+      const s = this.resolve(node.name, scope);
+      const v = s ? this.constLiterals.get(s.names)?.get(node.name) : undefined;
+      if (v !== undefined && v !== "\u0000ambiguous") return v;
+    }
+    return null;
+  }
+
+  /** `import.meta.env.X` (or `import.meta.env[…]`). */
+  private isImportMetaEnv(node: any): boolean {
+    const o = node?.object;
+    return o?.type === "MemberExpression" && !o.computed && o.property?.name === "env" && o.object?.type === "MetaProperty";
   }
 
   /** A callee identifier that a local binding shadows is not the runtime helper. */
@@ -1904,6 +2464,11 @@ class FlowAnalysis {
   }
 
   private builtin(path: string, args: Taint[], node: any, fn: Instance | null): Taint | null {
+    // (No special case for `Symbol.for` / `Object.getOwnPropertySymbols` /
+    // `Reflect.ownKeys`: they are unmodelled calls and fail closed on their
+    // arguments like any other. Round 6 returned a fresh marker value for them
+    // WITHOUT the arguments' provenance, and `Symbol.for(u.passwordHash)
+    // .description` served the hash — review, measured.)
     if (SERIALIZING_BUILTINS.has(path)) {
       // The descriptor is a Symbol key: these drop it and keep the column.
       const r = tainted(args, `\`${path}(…)\` of a protected value in \`${this.displayName(fn?.stat.node ?? null)}\``);
@@ -1939,10 +2504,13 @@ class FlowAnalysis {
       const r = clean();
       r.len = new Map();
       for (const a of args) { mergeMap(r.scalar, naked(a)); mergeMap(r.len, lenOf(a)); }
+      r.k = opK(...args);
       return r;
     }
     if (path === "Object.assign" && node?.arguments?.[0]) {
-      // Writes every source into the TARGET object (round 4, F2).
+      // Writes every source into the TARGET object (round 4, F2) — methods
+      // included, which then run with `this` = the target (round 6e).
+      this.recordThis(join(...args.slice(1)).fns, args[0] ?? clean());
       this.writeThrough(node.arguments[0], args[0] ?? clean(), containerOf(join(...args.slice(1))), fn?.scope ?? this.curMod!.scope);
     }
     if (path === "Object.keys") {

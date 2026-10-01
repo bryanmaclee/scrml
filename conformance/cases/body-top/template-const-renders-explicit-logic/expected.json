@@ -1,0 +1,20 @@
+{
+  "id": "body-top-template-const-renders-explicit-logic",
+  "description": "The same template const inside an explicit `${ }` renders its value (the pre-existing constant-folder defect, fixed with #4).",
+  "language-version": "1.0",
+  "spec": "§7",
+  "source-test": "compiler/tests/unit/s441-review-r4.test.js",
+  "rationale": "§40.8 S441 bullet: a <program> body-top run is code, checked exactly as inside `${ … }`. A `const` bound to an interpolated template literal holds the template's value; `${name}` in markup renders that value (§4.18.4 / §7). S441 round 4 (#4): the constant folder used to fold an interpolated template to \"\" — the page rendered an empty element with no binding.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#z",
+        "text": "total is 4 units"
+      }
+    ]
+  }
+}

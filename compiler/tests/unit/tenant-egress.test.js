@@ -267,14 +267,14 @@ describe("§14.8.10 SERVER_TENANT_HELPER — the shipped tag/redact runtime (eva
 
   test("composition: preserves the §14.8.9 protect descriptor Symbol on survivors", () => {
     const H = loadHelper();
-    const PROT = Symbol.for("scrml.protect.origin");
+    const PROT = Symbol.for("scrml.protect.col:secret");
     const rows = [{ id: 1, name: "a1", secret: "s", tenant_id: "A" }];
-    rows[0][PROT] = { cols: ["secret"], revealed: [] };
+    rows[0][PROT] = true;
     const tagged = H._scrml_tenant_tag(rows, "tenant_id", true);
     const out = H._scrml_tenant_redact(tagged, "A");
     // tenant redact stripped the floor-added tenant_id but kept the protect Symbol
     // so a subsequent protect-redact still sees which column to strip.
-    expect(out[0][PROT]).toEqual({ cols: ["secret"], revealed: [] });
+    expect(out[0][PROT]).toBe(true);
     expect("tenant_id" in out[0]).toBe(false);
   });
 
