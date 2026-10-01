@@ -41,3 +41,79 @@ scrml server listening on http://localhost:38471
 $ ls r41/shared  -> app.db (4096 bytes)       $ ls r41/data -> (empty)
 ```
 Confirmed: SCRML_DATA_DIR is ignored and the owning handle creates at the build machine's absolute path.
+
+## 2026-10-01 10:35 — fix landed (b729f34f8), code + tests one commit, pre-commit full suite green
+- R4-1 runtime: `_scrml_sqlite_owned` refuses (throws at module load) when SCRML_DATA_DIR is set, the file is missing,
+  and the path is not inside SCRML_DATA_DIR (only possible for a path recorded absolute). New emitted helpers
+  `_scrml_sqlite_data_dir` (normalizes; relative → CWD) and `_scrml_sqlite_inside`. Existing file still opens; an
+  absolute path inside SCRML_DATA_DIR still creates; unset SCRML_DATA_DIR unchanged. Referencing error gains a note when
+  SCRML_DATA_DIR did not apply to an absolute path.
+- R4-1 build: W-DEPLOY-DB-OUTSIDE-DATA-ROOT on docker/fly/render/railway (skipped when the absolute path is under /data).
+- R4-2 build: W-DEPLOY-DB-NO-PROJECT-ROOT when the project root came from the build root (no scrml.toml / .git).
+- R4-3: `_server.js` bakes the referenced-only dbs (no server module owns them); startup prints one error per missing
+  one; /_scrml/health answers 503 (count only — public route, no paths) until they exist. Chose 503 over exit:
+  ruling B ("Other modules then open it once it exists") accepts a referenced db appearing after load, and a server that
+  exits at boot crash-loops so the operator cannot seed the volume through the running machine (`fly ssh sftp`);
+  the failing health check still keeps the deploy from going green. Checked always (SCRML_DATA_DIR ?? recorded root).
+- R4-4: build prints "Databases expected under $SCRML_DATA_DIR (unset: the project root recorded at build, <root>;
+  a relative SCRML_DATA_DIR resolves against the server's working directory):" + one line per db
+  (owning — created on first run / referencing — seed it / absolute — NOT under $SCRML_DATA_DIR).
+- R4-5: documented in SPEC §47.14 ("Known: the recorded project root" — server-side only, never client); relative
+  SCRML_DATA_DIR → CWD documented in the build report header + emitted helper comment + §47.14. Not "fixed".
+- Plumbing: emit-server/emit-tool `noteSqliteHandle` → fileAST._sqliteFileHandles → `compileScrml().sqliteDatabases`;
+  build.js `sqliteBuildReport` (pure) + `generateServerEntry(..., referencedDbs)` (byte-identical when empty).
+- Tests: NEW compiler/tests/commands/build-sqlite-data-root.test.js (12 tests: R4-1 runtime refuse/relative/unset/
+  inside/existing + build warning matrix; R4-2; R4-3 live server 503→200 + entry byte-identity + referenced-only
+  filter; R4-4 two CLI e2e builds). Updated: dev-db-no-side-file §1 (handle.record), emit-server-sql-emission (helper).
+
+## 2026-10-01 10:37 — empirical, after the fix
+R4-1 (same r41 project, rebuilt):
+```
+$ scrml build src --target docker -o dist
+  [warn] W-DEPLOY-DB-OUTSIDE-DATA-ROOT: "../../shared/app.db" in src/app.scrml names $SP/r41/shared/app.db, outside
+  the project root ($SP/r41/proj) or written absolute, so it is recorded as that absolute path and SCRML_DATA_DIR
+  (/data on --target docker) does not move it. In the deployed server the program refuses to create it ...
+Databases expected under $SCRML_DATA_DIR (...):
+  $SP/r41/shared/app.db  (absolute — NOT under $SCRML_DATA_DIR; owning — created on first run only when SCRML_DATA_DIR is unset or contains it)
+$ cd dist && SCRML_DATA_DIR=../../data PORT=38472 bun _server.js
+error: scrml: refusing to create database $SP/r41/shared/app.db: SCRML_DATA_DIR is set ($SP/r41/data) but this path
+  is not inside it. "../../shared/app.db" in app.scrml is outside the project root (or written absolute), ... Fix: move
+  the database inside the project root so it resolves under SCRML_DATA_DIR, declare it as an absolute path inside
+  SCRML_DATA_DIR, or create $SP/r41/shared/app.db yourself if that location is persistent.
+exit=1     ls shared/ -> (empty)    ls data/ -> (empty)
+```
+examples/09 (copy at $SP/ex09 with scrml.toml) — build:
+```
+$ scrml build src --target fly -o out
+Databases expected under $SCRML_DATA_DIR (unset: the project root recorded at build, $SP/ex09; ...):
+  src/contact.db  (owning — created on first run)
+$ cd out && SCRML_DATA_DIR=../vol PORT=38473 bun _server.js      (relative data dir)
+scrml: created new database $SP/ex09/vol/src/contact.db (declared as "contact.db" in app.scrml)
+GET /_scrml/health -> 200 {"status":"ok",...}
+```
+examples/09 — dev:
+```
+$ scrml dev src/app.scrml --port 38474     -> GET /app.html 200
+scrml: created new database $SP/ex09/src/contact.db (declared as "contact.db" in app.scrml)   (beside the source)
+POST /_scrml/__ri_route_submit_1 {} -> 500 "NOT NULL constraint failed: contact_messages.name"
+  (the CREATE TABLE ran on that file; the empty body is my probe's, not a defect)
+```
+Referencing-only program (`<program db="./ref.db">`, SELECT only), db missing — build + run:
+```
+  src/ref.db  (referencing — seed it)
+$ SCRML_DATA_DIR=../vol PORT=38475 bun _server.js
+scrml: database file not found: $SP/refonly/vol/src/ref.db — declared as "./ref.db" in src/app.scrml, which only uses
+  it, so this server never creates it. Seed it (...). /_scrml/health answers 503 until it exists.
+GET /_scrml/health -> 503 {"status":"unavailable","reason":"1 database file(s) missing — see the server log"}
+POST count -> 500; log: scrml: database file not found: $SP/refonly/vol/src/ref.db — ... never creates it ...
+ls vol -> (empty)
+```
+Referencing-only — dev:
+```
+$ scrml dev src/app.scrml --port 38476 ; POST count ->
+500 {"detail":"scrml: database file not found: $SP/refonly/src/ref.db — declared as \"./ref.db\" in app.scrml, which only uses it ..."}
+find . -name '*.db*' (excluding out/) -> nothing created
+```
+Processes: killed by PID only my own dev servers (2091898/2091944, 2094578/2094638) and three orphaned dev children
+from MY worktree's earlier hook run (2073263, 2073340, 2073425 — `agent-ae3007278485636a2/.../--__dev-child`, ppid 1-reaped).
+Left alone: 443349, 892523 (agent-a92d7cfc42e15dd09), 4119655 (rev-approot), and agent-a5977877acc5cf4dd test children.
