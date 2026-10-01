@@ -9747,7 +9747,11 @@ every column a marker is PRESENT for. Consequences a conformant implementation S
     receiver of a method call, the first argument of `call` / `apply` / `bind`, an array method's
     `thisArg`, the fresh object of `new`, and anything code the compiler has no model for holds —
     and a write through `this` as a write INTO that receiver (as `o.p = v` is), visible through
-    every alias of it;
+    the bindings that hold that receiver. ⚑ Known residual
+    ([[g-protect-egress-round-8-residuals]]): this does NOT yet hold for a receiver held in the
+    GLOBAL heap and reached through an alias, when the called method's name matches a modelled
+    built-in (`globalThis.box = { set: function (r) { this.h = r.passwordHash } }; const g =
+    globalThis.box; g.set(u); return g` serves the hash — measured on base and round 7);
   - a function stored where the language may call it — under `then`, `toString`, `valueOf`,
     `toJSON`, `toLocaleString`, an iterator's `next` / `return` / `throw`, `__proto__`, as an
     accessor, or under a key the compiler cannot read (every Symbol-keyed hook is a computed key)
@@ -9757,7 +9761,11 @@ every column a marker is PRESENT for. Consequences a conformant implementation S
   - a tagged template as a call of its tag with the strings array first; a tag the analysis holds
     no function for is code the compiler cannot see into (fail closed), unless it IS the
     compiler's own SQL client;
-  - `x instanceof C` as a call of `C`'s hooks with `x`.
+  - `x instanceof C` as a call of `C`'s hooks with `x` when `C` is not held in the global heap,
+    or is named by a global path (`u instanceof globalThis.C`). ⚑ Known residual
+    ([[g-protect-egress-round-8-residuals]]): a hook object stored in the global heap and reached
+    through an alias (`const { C } = globalThis`, `const C = globalThis.C`, `P.C` with
+    `const P = process`) is not called — measured to serve the hash on base and round 7.
 (Measured before round 6: `delete u[Symbol.for("scrml.protect.origin")]`, pushing onto the
 descriptor's reveal list, and deleting a copy's Symbol-keyed properties each served the full row.)
 

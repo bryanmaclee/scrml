@@ -1124,6 +1124,18 @@ function devClientAssets(serveDir) {
 }
 
 /**
+ * The fixed, value-free 500 `scrml dev` answers a failing request with (§14.8.9
+ * error egress — the detail goes to the server log, never the client).
+ * Exported for tests.
+ */
+export function devInternalErrorResponse() {
+  return new Response(
+    JSON.stringify({ error: "Internal server error" }),
+    { status: 500, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+/**
  * §40.3 — the remainder of the `scrml dev` request pipeline: registered-route
  * match → static file → 404. This is exactly what `resolve(request)` runs
  * inside an author's `handle()`.
@@ -1137,18 +1149,6 @@ function devClientAssets(serveDir) {
  * @param {object} opts          dev options (entry-candidate resolution)
  * @returns {Promise<Response>}
  */
-/**
- * The fixed, value-free 500 `scrml dev` answers a failing request with (§14.8.9
- * error egress — the detail goes to the server log, never the client).
- * Exported for tests.
- */
-export function devInternalErrorResponse() {
-  return new Response(
-    JSON.stringify({ error: "Internal server error" }),
-    { status: 500, headers: { "Content-Type": "application/json" } },
-  );
-}
-
 export async function devDispatch(req, server, serveDir, opts) {
   const url = new URL(req.url);
   const pathname = url.pathname;
