@@ -94,7 +94,7 @@ export function parseStatementText(text: string, filePath = "defer-probe.scrml")
 
 /**
  * The text-carried bodies of one node, each as `{ text, label }`:
- *   - `!{}` handler arms (`arms[].handler`);
+ *   - `!{}` handler arms (`arms[].handler` of a `guarded-expr` or a statement `!{ … }` `error-effect`);
  *   - a live `match-expr` / `match-stmt`: its `bare-expr` arms (split by
  *     codegen's own `parseMatchArm`) and `match-arm-inline.result`;
  *   - a native `match-expr`: `rawArms[]` (split by `parseMatchArm`).
@@ -110,7 +110,7 @@ export function textBodiesOf(n: Node): TextBody[] {
       !n._onMountEffect) {
     out.push({ text: n.expr as string, label: "a bare `{ }` block" });
   }
-  if (n.kind === "guarded-expr" && Array.isArray(n.arms)) {
+  if ((n.kind === "guarded-expr" || n.kind === "error-effect") && Array.isArray(n.arms)) {
     for (const a of n.arms as Node[]) {
       if (a && typeof a.handler === "string" && (a.handler as string).trim() !== "") {
         out.push({ text: a.handler as string, label: "a `!{}` handler arm" });
@@ -278,8 +278,10 @@ export function textContainsDirectDeferStatement(text: string): TextProbe {
  *                              as text including any function / arrow in it
  *                              (anyDepth; the attribute's own value node is then
  *                              not re-walked under the lambda rule).
- *   - `component-def.raw` is markup text, re-parsed and walked by the checker
- *     itself (lint-defer.ts) rather than listed here — its bodies are markup.
+ *   - `onchange-decl`          a `<channel>` `<onchange>` arm body          .arms[].bodyRaw
+ *   - `component-def.raw` (and an `export const Name = <…>` export-decl's
+ *     markup) is markup text, re-parsed and walked by the checker itself
+ *     (lint-defer.ts) rather than listed here — its bodies are markup.
  * A non-handler attribute value is an EXPRESSION position, where `defer` is an
  * ordinary identifier (§19.16.1) — not listed. Match / `!{}` arm bodies and bare
  * blocks carried as text are `textBodiesOf` (above); `on mount { }` is the
@@ -311,6 +313,16 @@ export function textLoweredBodiesOf(n: Node): LoweredTextBody[] {
     for (const v of [g.before, g.after]) {
       const body = lines(v);
       if (body) out.push({ text: body, label: "a test `before` / `after` body", anyDepth: true });
+    }
+  }
+  // A `<channel>` `<onchange>` arm body (§52 — shorthand `<V(row) : stmt>` or a
+  // block body): codegen splices the text into the change dispatcher as
+  // statements (S446 — a `defer` there reached the client JS verbatim).
+  if (k === "onchange-decl" && Array.isArray(n.arms)) {
+    for (const a of n.arms as Node[]) {
+      if (a && typeof a.bodyRaw === "string" && (a.bodyRaw as string).trim() !== "") {
+        out.push({ text: a.bodyRaw as string, label: "a `<channel>` `<onchange>` arm body", anyDepth: true });
+      }
     }
   }
   if (k === "markup" && Array.isArray(n.attrs)) {

@@ -202,6 +202,84 @@ describe("§19.16.3 rule 4 — every non-function body kind × both front-ends",
 });
 
 // ---------------------------------------------------------------------------
+// S446 — the two S432 round-2 review misses (an EXPORTED component; a
+// `<channel>` `<onchange>` arm) plus the statement `!{ … } catch` arm. Each
+// compiled CLEAN and emitted `defer …` verbatim into the client JS.
+// ---------------------------------------------------------------------------
+
+function compileFiles(files, entry, opts = {}) {
+  const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const tmpDir = resolve("/tmp", `scrml-defer-bodies-${uniq}`);
+  mkdirSync(tmpDir, { recursive: true });
+  for (const [name, src] of Object.entries(files)) writeFileSync(resolve(tmpDir, name), src);
+  try {
+    const result = compileScrml({ inputFiles: [resolve(tmpDir, entry)], write: false, outputDir: resolve(tmpDir, "out"), ...opts });
+    const out = [...(result.outputs?.values?.() ?? [])].map((o) => o.clientJs ?? "").join("\n");
+    return { errors: result.errors ?? [], clientJs: out };
+  } finally {
+    if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+const CHANNEL = (arm) => `<program db="postgres://localhost/app">
+  <schema>
+    orders {
+      id: integer primary key
+      status: text
+    }
+  </schema>
+  <channel name="orders-feed" watches=orders>
+    <onchange>
+${arm}
+      <Updated(row) : print(row)>
+      <Deleted(row) : print(row)>
+    </onchange>
+  </channel>
+</program>
+`;
+
+describe("§19.16.3 rule 4 — exported components, <onchange> arms, statement `!{}` catch arms (S446)", () => {
+  const app = `\${\n    import { Btn } from "./btn.scrml"\n    <trace> = ""\n}\n<program>\n    <Btn/>\n    <p id="out">\${@trace}</p>\n</program>\n`;
+  for (const [pipe, opts] of [["live", {}], ["native", { parser: "scrml-native" }]]) {
+    test(`an exported component's handler attribute — ${pipe}`, () => {
+      const btn = `\${\n    export const Btn = <button id="go" onclick=\${ defer [1].forEach(console.log) }>Go</>\n}\n`;
+      const r = compileFiles({ "btn.scrml": btn, "app.scrml": app }, "app.scrml", opts);
+      expect(codes(r).filter((c) => c === OUT).length).toBe(1);
+    });
+    test(`an exported component's \${ } logic — ${pipe}`, () => {
+      const btn = `\${\n    export const Btn = <div>\${ defer console.log("d") }</div>\n}\n`;
+      expect(codes(compileFiles({ "btn.scrml": btn, "app.scrml": app }, "app.scrml", opts))).toContain(OUT);
+    });
+    test(`exports that only MENTION defer are untouched — ${pipe}`, () => {
+      const btn = `\${
+    export const defer = [1]
+    export const Btn = <div><p>please defer this</p><script defer src="a.js"></script><button onclick=\${ console.log("defer x") }>m</button></div>
+    export const Fn = <div>\${ function h() { defer console.log("x") } }<button onclick=h()>b</button></div>
+}
+`;
+      const app2 = `\${\n    import { Btn, Fn } from "./btn.scrml"\n    <trace> = ""\n}\n<program>\n    <Btn/>\n    <Fn/>\n</program>\n`;
+      const r = compileFiles({ "btn.scrml": btn, "app.scrml": app2 }, "app.scrml", opts);
+      expect(codes(r).filter((c) => c.startsWith("E-DEFER-"))).toEqual([]);
+    });
+  }
+  test("an <onchange> shorthand arm — live", () => {
+    const r = compile(CHANNEL(`      <Inserted(row) : defer print(row)>`));
+    expect(codes(r).filter((c) => c === OUT).length).toBe(1);
+  });
+  test("an <onchange> block arm — live", () => {
+    const r = compile(CHANNEL(`      <Inserted(row)>\n        defer print(row)\n        print(row)\n      </>`));
+    expect(codes(r)).toContain(OUT);
+  });
+  test("an <onchange> arm that only mentions defer is untouched — live", () => {
+    expect(codes(compile(CHANNEL(`      <Inserted(row) : print("defer " + row)>`)))).toEqual([]);
+  });
+  test("a statement `!{ … } catch` arm inside a function — E-DEFER-UNSUPPORTED-SITE (live)", () => {
+    const r = compile(logic(`    function f() {\n        !{ note("t") } catch Error as e { defer note("x") }\n        note("after")\n    }`));
+    expect(codes(r)).toContain("E-DEFER-UNSUPPORTED-SITE");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // A2 — `defer` in a braced `match` STATEMENT arm inside a function (§19.16.2
 // lists "a braced match arm block" as a defer site). Live: supported (the arm is
 // a structured `match-arm-block`). Native: the bridge carries every

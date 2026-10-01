@@ -33,6 +33,7 @@ const EXCLUDED = {
   "engine-decl.varNameOverride": "as engine-decl.varName",
   "for-stmt.letBinder": "a boolean flag (`let` vs `const` binder), not a name",
   "for-stmt.constBinder": "a boolean flag, not a name",
+  "const-decl._handlerParamPrelude": "a boolean flag marking the synthesized `const <param> = event` of an arrow-valued handler attribute; the binding itself is the const-decl's `name` (in the table)",
   "props-block.propsDecl[].bindable": "a boolean flag, not a name",
   "theme-decl.mediaBinds": "CSS media-query bindings of a theme (§65), not scrml logic identifiers",
   "try-stmt.catchNode": "container object; its binder text is `catchNode.header` (in the table)",

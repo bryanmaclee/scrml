@@ -50,6 +50,20 @@ const CLASSIFIED = {
   // --- covered: arm / bare-block text, checked by textBodiesOf ---
   "match-expr.rawArms": "armText",
   "match-arm-inline.result": "armText",
+  "guarded-expr.arms[].handler": "armText",
+  "error-effect.arms[].handler": "armText", // statement `!{ … } catch T as e { … }` / legacy `| ::T e -> …` (S446)
+  // --- covered: lowered as text, keyed under a KIND-LESS sub-object (S446) ---
+  "onchange-decl.arms[].bodyRaw": "loweredArm",
+  "test.testGroup.tests[].body": "loweredTest", // checked in its own test below
+  // --- kind-less sub-object fields that are not statement text (S446) ---
+  "onchange-decl.arms[].bodyForm": "notStatement", // a form tag ("shorthand" / "block")
+  "onchange-decl.arms[].payloadBindingsRaw": "notStatement", // a binder pattern (in the E-DEFER-AMBIGUOUS-LEAD binder table)
+  "endpoint-decl.arms[].bodyForm": "notStatement",
+  "endpoint-decl.arms[].payloadBindingsRaw": "notStatement",
+  "endpoint-decl.arms[].bodyRaw": "notStatement", // the RESPONSE VALUE expression of an endpoint arm; a multi-statement block arm is E-ENDPOINT-MULTI-STATEMENT-ARM
+  "state-constructor-def.typedAttrs[].typeExpr": "notStatement",
+  "test.testGroup.tests[].asserts[].raw": "notStatement", // an assert EXPRESSION
+  "try-stmt.catchNode.header": "notStatement", // `catch (e)` header — the binder is in the binder table
   // --- covered: re-parsed markup, walked by the checker ---
   "component-def.raw": "reparsed",
   "match-block.armsRaw": "reparsed", // live also carries it structurally (armBodyChildren); native only as text
@@ -60,7 +74,7 @@ const CLASSIFIED = {
   "expr.expr": "sibling:exprNode",
   "escape-hatch.raw": "notStatement", // an EXPRESSION the parser could not structure; lambdas in it: textLambdaContainsDefer
   "function-decl.raw": "sibling:body",
-  "export-decl.raw": "notStatement", // declaration header text; an exported function's body is a re-parsed function-decl
+  "export-decl.raw": "reparsed", // `export const Name = <markup>`: lint-defer.ts recovers the markup the way the component expander does and walks it (S446); otherwise declaration header text — an exported function's body is a re-parsed function-decl
   "each-block.bodyRaw": "sibling:bodyChildren",
   "markup._reparseEachArmBodyRaw": "sibling:children",
   "engine-decl.rulesRaw": "notStatement", // state-child rule markup; bodies reach the AST as children / logic blocks
@@ -132,20 +146,31 @@ function collect() {
   const pairs = new Map(); // key -> { siblingMissing: number, seen: number, where }
   const visit = (root, file) => {
     const seen = new WeakSet();
-    const walk = (n) => {
+    // `owner` names a KIND-LESS sub-object by its path from the nearest kinded
+    // node (`onchange-decl.arms[]`), so text a kind carries inside an untyped
+    // sub-object (arms[], attrs[] …) is censused too (S446: the `<onchange>`
+    // arm body, `onchange-decl.arms[].bodyRaw`, was invisible to a census that
+    // only read a kinded node's own fields).
+    const walk = (n, owner) => {
       if (!n || typeof n !== "object" || seen.has(n)) return;
       seen.add(n);
-      if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (Array.isArray(n)) { for (const c of n) walk(c, owner && !owner.endsWith("[]") ? owner + "[]" : owner); return; }
       // Lowercase kinds are the live-shaped AST every later stage consumes; a
       // Capitalised kind is the native parser's own tree, retained for
       // provenance (bodyChildren etc.) and bridged into live-shaped fields.
-      if (typeof n.kind === "string" && /^[a-z]/.test(n.kind)) {
+      const kinded = typeof n.kind === "string";
+      if (kinded && !/^[a-z]/.test(n.kind)) {
+        for (const k of Object.keys(n)) if (k !== "span") walk(n[k], null);
+        return;
+      }
+      const here = kinded ? n.kind : owner;
+      if (here) {
         for (const k of Object.keys(n)) {
           const v = n[k];
           const isText = (typeof v === "string" && v.length > 0) ||
             (Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "string"));
           if (!isText || !FIELD_RE.test(k)) continue;
-          const key = `${n.kind}.${k}`;
+          const key = `${here}.${k}`;
           const rec = pairs.get(key) ?? { seen: 0, siblingMissing: 0, where: file };
           rec.seen++;
           const cls = CLASSIFIED[key];
@@ -156,9 +181,9 @@ function collect() {
           pairs.set(key, rec);
         }
       }
-      for (const k of Object.keys(n)) if (k !== "span") walk(n[k]);
+      for (const k of Object.keys(n)) if (k !== "span") walk(n[k], here ? `${here}.${k}` : null);
     };
-    walk(root);
+    walk(root, null);
   };
   for (const f of files) {
     const src = readFileSync(f, "utf8");
@@ -226,6 +251,13 @@ describe("every text-carried body is classified for the §19.16.3 rule-4 check",
     expect(m.map((b) => b.text)).toEqual(["{ defer f() }"]);
     const inl = textBodiesOf({ kind: "match-stmt", body: [{ kind: "match-arm-inline", result: "{ defer f() }" }] });
     expect(inl.map((b) => b.text)).toEqual(["{ defer f() }"]);
+  });
+
+  test("`loweredArm` / error-effect `armText` entries are returned (S446)", () => {
+    const oc = textLoweredBodiesOf({ kind: "onchange-decl", arms: [{ bodyRaw: "defer f()" }, { bodyRaw: "g()" }] });
+    expect(oc.map((b) => b.text)).toEqual(["defer f()", "g()"]);
+    const ee = textBodiesOf({ kind: "error-effect", arms: [{ handler: "defer f()" }] });
+    expect(ee.map((b) => b.text)).toEqual(["defer f()"]);
   });
 
   test("`~{}` test bodies (string[] in the untyped testGroup) are lowered", () => {

@@ -3,7 +3,7 @@
   "description": "§19.16.1 (S432 review B-1) — a match-arm PAYLOAD binder named `defer` (`.A(defer) :> { defer [1].split(\"\").forEach(note) }`) makes `defer [` ambiguous exactly like a `let defer`: before `defer` was a statement the tokens indexed the payload (the program ran `y;a;`); read as a defer statement it throws a TypeError in the finally. E-DEFER-AMBIGUOUS-LEAD, exactly once.",
   "language-version": "1.0",
   "spec": "§19.16.1",
-  "provenance": "ruling:user-voice-S430-P3",
+  "provenance": "ruling:user-voice-scrml.md S439 #6 (the four defer SPEC calls, all recs)",
   "rationale": "§19.16.1: where a binding named `defer` is visible at a `defer [`, the program is rejected naming both spellings rather than silently re-read; a match-arm payload binder is a binding visible in its arm.",
   "expect": {
     "codes": ["E-DEFER-AMBIGUOUS-LEAD"],

@@ -3,7 +3,7 @@
   "description": "§7.3.3 (S432 B1) — a nested `function` declaration named like a parameter is outside E-SCOPE-REDECLARE: it is host-legal and replaces the parameter's value for the whole body. f(1) returns 7; with a `defer` in the block (the body wrapped in a host `try`, where the declaration shadows the parameter from the block's start) g(1) returns 8 and its deferred write runs on the way out: trace = \"d;7;8;\". Compiled and ran before §7.3.3; §7.3.3's direction of change rejects only programs that already failed at codegen.",
   "language-version": "1.0",
   "spec": "§7.3.3",
-  "provenance": "ruling:user-voice-S430-P3",
+  "provenance": "ruling:user-voice-scrml.md S439 #6 (the four defer SPEC calls, all recs)",
   "rationale": "§7.3.3: 'Direction of change: newly-rejecting in name only — every program it rejects already failed to compile at codegen'. A function declaration over a parameter never failed at codegen, with or without a `defer` (§19.16.6: adding a `defer` does not change which programs compile).",
   "expect": {
     "codes": [],

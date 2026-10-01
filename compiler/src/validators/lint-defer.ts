@@ -293,6 +293,27 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
       }
       return;
     }
+    // The same for an EXPORTED component, `export const Name = <markup>` (S446):
+    // that form reaches the AST only as an `export-decl` whose `raw` holds the
+    // markup, and the component expander recovers the body by stripping the
+    // `export const Name =` prefix (component-expander.ts, cross-file path b).
+    // Recover it the same way and walk it like a `component-def`.
+    if (kind === "export-decl" && n.exportKind === "const" && typeof n.exportedName === "string" &&
+        typeof n.raw === "string" && (n.raw as string).includes("defer")) {
+      const prefix = `export const ${n.exportedName as string} =`;
+      const idx = (n.raw as string).indexOf(prefix);
+      const body = idx === -1 ? "" : (n.raw as string).slice(idx + prefix.length).trimStart();
+      if (body.startsWith("<")) {
+        const parsed = parseComponentMarkup(body, n.exportedName as string, filePath);
+        if (parsed === null) {
+          report("E-DEFER-OUTSIDE-FUNCTION", n, unverified(null, TOP_LEVEL_MSG));
+        } else {
+          const prevForced = forcedAnchor;
+          forcedAnchor = n;
+          try { walk(parsed, { inFunction: false, defer: null }); } finally { forcedAnchor = prevForced; }
+        }
+      }
+    }
     // §19.16.3 rule 4 (S432, A1) — statement bodies a node carries AND codegen
     // lowers as TEXT, in any context: `when` handler bodies, `test` bodies, an
     // `on*=${ … }` handler attribute. None is a function-declaration body. The
@@ -523,6 +544,18 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
   }
 
   walk((ast as { nodes?: unknown }).nodes ?? ast, { inFunction: false, defer: null });
+  // S446 — the export registry is where the component expander reads an
+  // exported component's markup (`ast.exports`); the native front-end carries
+  // the full `export const Name = <…>` text ONLY there. Walk the entries the
+  // tree walk did not reach (the `seen` set keeps a shared entry single).
+  const exportsList = (ast as { exports?: unknown }).exports;
+  if (Array.isArray(exportsList)) {
+    for (const e of exportsList) {
+      if (e && typeof e === "object" && (e as Node).kind === "export-decl" && !seen.has(e as object)) {
+        walk(e, { inFunction: false, defer: null });
+      }
+    }
+  }
   checkLaterShadow((ast as { nodes?: unknown }).nodes ?? ast, filePath, report);
   checkAmbiguousLead((ast as { nodes?: unknown }).nodes ?? ast, report);
   return diagnostics;
@@ -651,7 +684,7 @@ function deferredFreeNames(stmts: unknown[]): Set<string> | null {
     }
     for (const key of Object.keys(nn)) {
       if (key === "span") continue;
-      if (key === "arms" && k === "guarded-expr") continue;  // handler bodies walked via textBodiesOf
+      if (key === "arms" && (k === "guarded-expr" || k === "error-effect")) continue;  // handler bodies walked via textBodiesOf
       if (key === "rawArms") continue;
       if ((k === "match-expr" || k === "match-stmt") && key === "body") {
         // arm PATTERNS are not reads; arm bodies were walked via textBodiesOf,
