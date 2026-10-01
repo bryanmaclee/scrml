@@ -100,6 +100,8 @@ function stripModuleSyntax(src) {
   // the whole line — deleting the whole `export const X = {` opener orphaned the multi-line
   // object body (`path:`, `method:` …) into statement position, which bun 1.3.x's lenient
   // `vm.Script` tolerated but bun 1.4.0's stricter parser rejects with `Unexpected token ':'`.
+  // `import.meta` is module-only syntax too (the s445 `_scrml_sqlite_file` helper
+  // resolves the database against `import.meta.url`); give it a stand-in value.
   return src
     .split("\n")
     .map((l) =>
@@ -107,7 +109,8 @@ function stripModuleSyntax(src) {
         ? ""
         : l.replace(/^(\s*)export\s+default\s+/, "$1").replace(/^(\s*)export\s+/, "$1"),
     )
-    .join("\n");
+    .join("\n")
+    .replace(/import\.meta\.url/g, JSON.stringify("file:///module.js"));
 }
 
 const REPRO_SRC = `

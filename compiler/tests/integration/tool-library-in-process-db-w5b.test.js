@@ -19,6 +19,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
+import { emittedDbFile } from "../helpers/self-host-server-import.js";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
@@ -38,6 +39,10 @@ function compileMultiToDist(files, entryOrder, extra = {}) {
   return { result, dist, dir };
 }
 const errCodes = (r) => (r.errors ?? []).map((e) => e.code).filter((c) => c && String(c).startsWith("E-"));
+// S445 review F1 — an OWNING program announces, on stderr, a database it creates
+// (§8.1.1 *Creation*). Every other stderr line is still a failure.
+const stderrBeyondCreated = (run) => run.stderr.toString().split("\n")
+  .filter((l) => l.length > 0 && !/^scrml: created new database /.test(l)).join("\n");
 
 const DB_LIB = `<db src="sqlite:./w5b.db" tables="items" />
 \${
@@ -80,7 +85,8 @@ describe("W5b — tool imports a db-bound library (in-process `?{}`)", () => {
       expect(libJs).toContain("export async function insertItem");
       expect(libJs).toContain("export async function countItems");
       expect(libJs).toContain("await _scrml_sql`");
-      expect(libJs).toContain('new SQL("sqlite:./w5b.db")');
+      // S445 — the library declares the table, so it OWNS w5b.db (beside the source).
+      expect(emittedDbFile(libJs)).toEqual({ file: join(dir, "w5b.db"), owns: true });
       expect(libJs).not.toContain("= null; // SQL-init");
       // A schema-setup `?{}` fn with no return (flogence's ensureFspSchema shape).
       expect(libJs).toMatch(/export async function ensureSchema\(\) \{\s*await _scrml_sql`CREATE TABLE/);
@@ -91,11 +97,18 @@ describe("W5b — tool imports a db-bound library (in-process `?{}`)", () => {
       expect(toolJs).toMatch(/import \{[^}]*countItems[^}]*\} from "\.\/dblib\.js";/);
       expect(toolJs).toContain("await countItems()");
       // RUN — the imported db fns execute the SQL in-process.
-      rmSync(join(dist, "w5b.db"), { force: true });
+      rmSync(join(dir, "w5b.db"), { force: true }); // S445: the program OWNS this db (its CREATE TABLE) — the run CREATES it, beside the .scrml source
       const run = Bun.spawnSync({ cmd: ["bun", "tool.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
-      expect(run.stderr.toString()).toBe("");
+      expect(stderrBeyondCreated(run)).toBe("");
       expect(run.exitCode).toBe(0);
       expect(run.stdout.toString()).toContain("count=2 score=4");
+      // S445 — the owning program created its database beside the declaring .scrml
+      // file (never in dist/, the working directory the tool ran in).
+      expect(existsSync(join(dir, "w5b.db"))).toBe(true);
+      expect(existsSync(join(dist, "w5b.db"))).toBe(false);
+      // …and said so, exactly once (S445 review F1).
+      const created = run.stderr.toString().split("\n").filter((l) => l.startsWith("scrml: created new database "));
+      expect(created).toEqual([`scrml: created new database ${join(dir, "w5b.db")} (declared as "sqlite:./w5b.db" in dblib.scrml)`]);
     } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
   });
 
@@ -147,9 +160,9 @@ function main(args: string[]): number {
       expect(libJs).not.toContain("?{`");
       expect(libJs).not.toContain("_={");
       expect(libJs).toContain("export function taskLabel");
-      rmSync(join(dist, "fsp.db"), { force: true });
+      rmSync(join(dir, "fsp.db"), { force: true }); // S445: the program OWNS this db (its CREATE TABLE) — the run CREATES it, beside the .scrml source
       const run = Bun.spawnSync({ cmd: ["bun", "fleet.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
-      expect(run.stderr.toString()).toBe("");
+      expect(stderrBeyondCreated(run)).toBe("");
       expect(run.exitCode).toBe(0);
       expect(run.stdout.toString()).toContain("routed:F1:2 task#7");
     } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
@@ -177,9 +190,9 @@ await insertItem("x");
 await insertItem("y");
 await insertItem("z");
 console.log("srv count=" + (await countItems()) + " score=" + scoreOf(await countItems()));`);
-      rmSync(join(dist, "w5b.db"), { force: true });
+      rmSync(join(dir, "w5b.db"), { force: true }); // S445: the program OWNS this db (its CREATE TABLE) — the run CREATES it, beside the .scrml source
       const run = Bun.spawnSync({ cmd: ["bun", "_consumer.mjs"], cwd: dist, stdout: "pipe", stderr: "pipe" });
-      expect(run.stderr.toString()).toBe("");
+      expect(stderrBeyondCreated(run)).toBe("");
       expect(run.exitCode).toBe(0);
       expect(run.stdout.toString()).toContain("srv count=3 score=6");
     } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
@@ -311,9 +324,9 @@ function main(args: string[]): number {
       // The tool awaits the transitively-async report().
       const toolJs = readFileSync(join(dist, "ortool.js"), "utf8");
       expect(toolJs).toContain("await report()");
-      rmSync(join(dist, "o.db"), { force: true });
+      rmSync(join(dir, "o.db"), { force: true }); // S445: the program OWNS this db (its CREATE TABLE) — the run CREATES it, beside the .scrml source
       const run = Bun.spawnSync({ cmd: ["bun", "ortool.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
-      expect(run.stderr.toString()).toBe("");
+      expect(stderrBeyondCreated(run)).toBe("");
       expect(run.stdout.toString()).toContain("report=2");
     } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
   });
@@ -365,9 +378,9 @@ function main(args: string[]): number {
       expect(depJs).toContain('from "./other.js"'); // .scrml → .js rewritten
       const t2Js = readFileSync(join(dist, "t2.js"), "utf8");
       expect(t2Js).toContain("await label(");
-      rmSync(join(dist, "x.db"), { force: true });
+      rmSync(join(dir, "x.db"), { force: true }); // S445: the program OWNS this db (its CREATE TABLE) — the run CREATES it, beside the .scrml source
       const run = Bun.spawnSync({ cmd: ["bun", "t2.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
-      expect(run.stderr.toString()).toBe("");
+      expect(stderrBeyondCreated(run)).toBe("");
       expect(run.stdout.toString()).toContain("label=x:alpha");
     } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
   });
@@ -412,9 +425,9 @@ function main(args: string[]): number {
       expect(errCodes(result)).toEqual([]);
       const libJs = readFileSync(join(dist, "elib.js"), "utf8");
       expect(libJs).toContain("export const Status = Object.freeze(");
-      rmSync(join(dist, "e.db"), { force: true });
+      rmSync(join(dir, "e.db"), { force: true }); // S445: the program OWNS this db (its CREATE TABLE) — the run CREATES it, beside the .scrml source
       const run = Bun.spawnSync({ cmd: ["bun", "etool.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
-      expect(run.stderr.toString()).toBe("");
+      expect(stderrBeyondCreated(run)).toBe("");
       expect(run.stdout.toString()).toContain("status=Open c=0");
     } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
   });
@@ -461,7 +474,7 @@ function main(args: string[]): number { _={ console.log(label(7)) }= return 0 }
       const result = compileScrml({ inputFiles: [join(dir, "actool.scrml"), join(dir, "aclib.scrml")], write: true, outputDir: dist, validateEmit: true, log: () => {} });
       expect(errCodes(result)).toEqual([]);
       const run = Bun.spawnSync({ cmd: ["bun", "actool.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
-      expect(run.stderr.toString()).toBe("");
+      expect(stderrBeyondCreated(run)).toBe("");
       expect(run.stdout.toString()).toContain("acct#7");
     } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
   });

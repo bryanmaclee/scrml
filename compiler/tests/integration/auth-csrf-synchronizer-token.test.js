@@ -27,6 +27,7 @@ import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
+import { assertOpensDb } from "../helpers/self-host-server-import.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 // Per-run scratch (S438) — see helpers/per-run-tmp.js (Windows EBUSY residue).
@@ -184,13 +185,8 @@ describe("round-trip — auth-path CSRF actually validates end-to-end", () => {
     expect(nonWarn(errors)).toEqual([]);
 
     const absDbPath = resolve(tmpDir, "items.db");
-    writeFileSync(
-      serverJsPath,
-      readFileSync(serverJsPath, "utf-8").replace(
-        'const _scrml_sql = new SQL("sqlite:./items.db");',
-        `const _scrml_sql = new SQL(${JSON.stringify("sqlite:" + absDbPath)});`,
-      ),
-    );
+    // s445: the module opens the seeded file itself (declaring-file-relative, CWD-independent) — assert it.
+    assertOpensDb(serverJsPath, absDbPath);
 
     const mod = await import(`file://${serverJsPath}?v=${Date.now()}-${Math.random()}`);
     const store = globalThis.__scrml_session_store;

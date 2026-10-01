@@ -25,7 +25,7 @@
  * registered during reconcile — class:, style:, attribute interpolation, etc.
  */
 
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 
@@ -281,4 +281,11 @@ describe("Bug 11 §3: tracking-pause-restore semantic preserved", () => {
     rt._scrml_reactive_set("c", 2);
     expect(outerBodyRuns).toBe(0);
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

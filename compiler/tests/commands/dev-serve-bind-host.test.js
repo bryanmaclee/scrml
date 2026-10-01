@@ -1,0 +1,174 @@
+/**
+ * g-dev-server-binds-all-interfaces — the REAL `scrml dev` / `scrml serve` CLIs
+ * listen on loopback by default and on the network only with `--host`.
+ *
+ * Drives each CLI in a subprocess on an ephemeral port (`--port 0`, read back
+ * from its startup line) and probes with raw TCP:
+ *
+ *   §1  `scrml dev` (default)  → 127.0.0.1 connects; the LAN address does not;
+ *                                no network notice printed
+ *   §2  `scrml dev --host`     → the LAN address connects; the one-line
+ *                                "reachable from the network" notice is printed
+ *   §3  `scrml serve` (default)→ 127.0.0.1 connects; the LAN address does not
+ *   §4  an unbindable `--host` exits 1 with a message naming the host
+ * (§1/§3 also require ::1 to connect when the machine has IPv6.)
+ *
+ * The LAN probes skip when the machine has no non-internal IPv4 address.
+ * Commands tier: NOT in the pre-commit gate — run `bun test compiler/tests/commands`.
+ */
+
+import { describe, test, expect, afterEach } from "bun:test";
+import { mkdtempSync, writeFileSync, rmSync } from "fs";
+import { join, resolve } from "path";
+import { tmpdir } from "os";
+import { createConnection } from "net";
+import { lanIPv4Addresses } from "../../src/commands/listen.js";
+
+const CLI = resolve(import.meta.dir, "../../bin/scrml.js");
+const LAN = lanIPv4Addresses();
+let HAS_V6 = false;
+try { const p = Bun.serve({ port: 0, hostname: "::1", fetch: () => new Response(null) }); p.stop(true); HAS_V6 = true; } catch { /* no IPv6 */ }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function tcpProbe(host, port, timeoutMs = 1500) {
+  return new Promise((done) => {
+    const sock = createConnection({ host, port });
+    const finish = (v) => { try { sock.destroy(); } catch { /* gone */ } done(v); };
+    const t = setTimeout(() => finish("timeout"), timeoutMs);
+    sock.once("connect", () => { clearTimeout(t); finish("connected"); });
+    sock.once("error", () => { clearTimeout(t); finish("refused"); });
+  });
+}
+
+async function waitFor(probe, timeoutMs = 20_000, everyMs = 100) {
+  const t0 = Date.now();
+  while (true) {
+    const v = await probe();
+    if (v) return v;
+    if (Date.now() - t0 > timeoutMs) return null;
+    await sleep(everyMs);
+  }
+}
+
+/** A CLI subprocess whose combined output is accumulated in `.out`. */
+class Cli {
+  constructor(argv, cwd) {
+    this.out = "";
+    this.cwd = cwd;
+    this.proc = Bun.spawn(["bun", CLI, ...argv], { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    const pump = async (s) => { for await (const c of s) this.out += new TextDecoder().decode(c); };
+    pump(this.proc.stdout);
+    pump(this.proc.stderr);
+  }
+  async port(re) {
+    const m = await waitFor(() => re.exec(this.out));
+    if (!m) throw new Error(`server did not come up.\n${this.out}`);
+    return Number(m[1]);
+  }
+  async stop() {
+    try { this.proc.kill(); } catch { /* gone */ }
+    try { await this.proc.exited; } catch { /* ignore */ }
+    try { rmSync(this.cwd, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
+}
+
+const DEV_RE = /\[dev\] Serving .* at http:\/\/localhost:(\d+)/;
+const SERVE_RE = /listening on http:\/\/localhost:(\d+)/;
+
+function devProject() {
+  const dir = mkdtempSync(join(tmpdir(), "scrml-dev-bind-"));
+  const entry = join(dir, "entry.scrml");
+  writeFileSync(entry, `<div>\n    <h1>bind probe</>\n</div>\n`);
+  return { dir, entry };
+}
+
+let live = null;
+afterEach(async () => {
+  if (live) await live.stop();
+  live = null;
+});
+
+describe("§1 scrml dev binds loopback by default", () => {
+  test("127.0.0.1 and ::1 connect; LAN address does not; no network notice", async () => {
+    const { dir, entry } = devProject();
+    live = new Cli(["dev", entry, "--port", "0", "--output", join(dir, "dist")], dir);
+    const port = await live.port(DEV_RE);
+    expect(await tcpProbe("127.0.0.1", port)).toBe("connected");
+    if (HAS_V6) expect(await tcpProbe("::1", port)).toBe("connected");
+    if (LAN.length > 0) expect(await tcpProbe(LAN[0], port)).not.toBe("connected");
+    expect(live.out).not.toContain("reachable from the network");
+  }, 45_000);
+});
+
+describe("§2 scrml dev --host opts in to the network", () => {
+  test.skipIf(LAN.length === 0)("bare --host: LAN address connects and the notice names it", async () => {
+    const { dir, entry } = devProject();
+    live = new Cli(["dev", "--host", entry, "--port", "0", "--output", join(dir, "dist")], dir);
+    const port = await live.port(DEV_RE);
+    expect(await tcpProbe(LAN[0], port)).toBe("connected");
+    // The notice is printed right after the "Serving" line — wait for the full line.
+    await waitFor(() => /reachable from the network[^\n]*\n/.test(live.out), 5_000);
+    const notice = live.out.split(/\r?\n/).filter((l) => l.includes("reachable from the network"));
+    expect(notice.length).toBe(1);
+    expect(notice[0]).toContain(`http://${LAN[0]}:${port}`);
+  }, 45_000);
+});
+
+describe("§3 scrml serve binds loopback by default", () => {
+  test("127.0.0.1 connects; LAN address does not", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-serve-bind-"));
+    live = new Cli(["serve", "--port", "0"], dir);
+    const port = await live.port(SERVE_RE);
+    expect(await tcpProbe("127.0.0.1", port)).toBe("connected");
+    if (HAS_V6) expect(await tcpProbe("::1", port)).toBe("connected");
+    if (LAN.length > 0) expect(await tcpProbe(LAN[0], port)).not.toBe("connected");
+    expect(live.out).not.toContain("reachable from the network");
+  }, 30_000);
+});
+
+describe("§4 an unbindable --host fails with a message naming the host, not Bun's stack", () => {
+  test("scrml serve --host 192.168.99.99 → exit 1, names the host", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-serve-badhost-"));
+    live = new Cli(["serve", "--port", "0", "--host", "192.168.99.99"], dir);
+    const code = await live.proc.exited;
+    expect(code).toBe(1);
+    await waitFor(() => live.out.includes("Could not listen"), 5_000); // drain piped output
+    expect(live.out).toContain('Could not listen on host "192.168.99.99"');
+    expect(live.out).toContain("Underlying error:"); // R2-3: runtime reason kept
+    expect(live.out).not.toMatch(/^\s+at .*\(/m); // a message, not an uncaught stack
+  }, 30_000);
+
+  test("scrml dev --host=myhost.invalid → exit 1, names the host", async () => {
+    const { dir, entry } = devProject();
+    live = new Cli(["dev", entry, "--port", "0", "--host=myhost.invalid", "--output", join(dir, "dist")], dir);
+    const code = await live.proc.exited;
+    expect(code).toBe(1);
+    await waitFor(() => live.out.includes("Could not listen"), 5_000); // drain piped output
+    expect(live.out).toContain('[dev] Could not listen on host "myhost.invalid"');
+    expect(live.out).toContain("Underlying error:"); // R2-3: runtime reason kept
+    expect(live.out).not.toMatch(/^\s+at .*\(/m); // a message, not an uncaught stack
+  }, 45_000);
+});
+
+describe("§5 the printed URL is what is actually bound (R2-1 / R2-2)", () => {
+  test.skipIf(!HAS_V6)("scrml serve --host=::1 prints http://[::1]:<port>", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-serve-v6-"));
+    live = new Cli(["serve", "--port", "0", "--host=::1"], dir);
+    const port = await live.port(/listening on http:\/\/\[::1\]:(\d+)/);
+    expect(await tcpProbe("::1", port)).toBe("connected");
+    expect(live.out).not.toContain("http://localhost:");
+  }, 30_000);
+
+  test.skipIf(!HAS_V6)("::1 twin held by another process → prints http://127.0.0.1:<port>, not localhost", async () => {
+    const hog = Bun.serve({ port: 0, hostname: "::1", fetch: () => new Response("OTHER PROCESS") });
+    try {
+      const dir = mkdtempSync(join(tmpdir(), "scrml-serve-hog-"));
+      live = new Cli(["serve", "--port", String(hog.port)], dir);
+      const port = await live.port(/listening on http:\/\/127\.0\.0\.1:(\d+)/);
+      expect(port).toBe(hog.port);
+      expect(live.out).not.toMatch(/listening on http:\/\/localhost:/); // (the twin warning may name localhost as the hazard)
+    } finally {
+      hog.stop(true);
+    }
+  }, 30_000);
+});

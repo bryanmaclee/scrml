@@ -2,6 +2,17 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S448 — 2026-10-01 (bryan · XPS, successor to the reboot-killed S446-xps)
+
+A reboot took S446-xps down mid-lane; S448 recovered its three in-flight pieces, landed the bootstrap wire codec, and traced the 1h45m boot to where the /tmp volume actually came from.
+
+- **#1213** — bootstrap §57 wire codec (type-directed encode, fail-closed decode); branch brought up to date + fresh `gate` before merge.
+- **#1221** — codec r2: option flags read as own properties only (a polluted `Object.prototype` can no longer enable raw-null passthrough), no throws on hostile input, undeclared keys refused; re-reviewed on a frozen ref.
+- **dpa-063 SPEC text** (§7.2.2 statement termination, E-STMT-NO-EFFECT language-wide, `when` re-trigger) recovered from the dead session's worktree; on `wip/s448-spec-dpa063`, awaiting bryan's veto of 10 PA readings.
+- **U0 (`when` effects)**: round 2 fixed N1-N3; its re-review found the run-count cap drops non-looping runs and an `<each>`-row runaway reachable from source → round 3 (cycle detection by causal ancestry + backstop) in flight at wrap (`wip/s448-bootstrap-u0-r3` + patch).
+- **/tmp hygiene**: measured the test suite at ~4-7k leaked files per hook run and scratchpad worktrees at ~20.5k files each. Layer 1 (bun test preload owning a per-process temp root outside any repo) in flight (`wip/s448-test-tmp-root` + patch); layer 2 rules in pa-scrml overlay v2.5; layer 3 (`/etc/tmpfiles.d` age-out instead of boot delete) owed by bryan. First wrap probe reading: 6,399 /tmp entries since boot.
+- `handOffs/dpa-queue.md`: dpa-062/064 result rows folded in from a stranded XPS commit; dpa-063 marked RULED S446.
+
 ## S445 — 2026-09-30 (bryan · ASUS, concurrent with S444 on XPS)
 
 S443's held security pickup, driven through adversarial review until each landing was strictly better than main —
@@ -7777,6 +7788,29 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+
+### S446 (2026-10-01, Peter · P-Tech1) — six landings through scripted merge-on-green, three reviewed drafts for bryan, and the tests had been lying about the network
+
+**The arc.** Peter's ruled queue (bryan's S439/S440 answers to his S432/S438 notes) at full throttle. Every landing went
+through an adversarial (S239) review and, after any fix round, a narrow re-review; several reviews changed the outcome — the
+schema PR shipped WITHOUT its tenant-union (it caused silent data loss) and with a `"""` change reverted (it reopened an S438
+security escape); the loopback PR's two CI reds were real (Linux binds `--host 0` to every interface; 58 test files leaked
+happy-dom's `fetch` into every later test). Three drafts — defer Part A, client-JS helper copy, imported-enum — are reviewed
+and waiting on one word each from bryan.
+
+- **#1212** — handler statement lists: `for … lift` rows run every statement, later statements read match-arm bindings,
+  `@a++`⏎ no longer drops the next statement in any function body (S439 #4).
+- **#1209** — `<schema>` tenant-floor holes fail closed: E-SCHEMA-014 (TEMP / no column list / INHERITS), E-SCHEMA-012/013
+  on qualified and glued DSL heads (S440 #15). The commented-out-shadow hole is routed to bryan.
+- **#1207** — `scrml dev` / `scrml serve` bind loopback by default (`--host` opts in); numeric-shorthand and whitespace hosts
+  refused on every OS (S439 #1).
+- **#1217** — a server-call cell write in a `${s1; s2}` handler is awaited before the next statement; SSE writes keep their
+  subscription; single-statement handlers byte-identical (S439 #4 + §13.2).
+- **#1219** — 58 test files now unregister happy-dom; 9 server-fetch tests (incl. tracking's dev-watcher set) pass.
+- **#1220** — §K test expected a POSIX-only root; main's `windows` job was red since c12b52c2.
+- Held for bryan (drafts, reviewed): **#1208** (defer SPEC calls + Part A), **#1211** (client-JS helpers into dist),
+  **#1210** (imported-enum F11/F15–F17 via callee parameter types). ~30 gaps filed (§S446-peter + PR-filed entries).
+- Outside scrml: flogenceP `db=` paths fixed for #1215 (f3b1b28).
 
 ### S444 (2026-09-30/10-01, bryan · XPS) — a coderlegion port became four rulings, and the TS compiler's `<request>` turned out to loop
 

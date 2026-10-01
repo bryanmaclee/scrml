@@ -147,7 +147,8 @@ jobs:
       # lowered Core equals M1's hand-built oracle, its §66.19 negative lines, and the M1 suite run a
       # second time on the LOWERED programs (SLICE_CORE=lowered).
       # S444 — slice-m4 (#1164: the §66.19 programs compiled from source and run) ran in NO job until now.
-      - name: Bootstrap slice (self-host-v2) — no-default-arm lint + M1 slice + M2 front end + M3 ingest/footprint + M4 §66.19 programs + v2 lexer oracle
+      # S446 — slice-codec (arc unit Uc: the §57 wire codec, descriptor + runtime half + cross-impl vs impl#1).
+      - name: Bootstrap slice (self-host-v2) — no-default-arm lint + M1 slice + M2 front end + M3 ingest/footprint + M4 §66.19 programs + §57 codec + v2 lexer oracle
         run: |
           bun scripts/lint-no-default-arm.js
           bun test ./compiler/self-host-v2/slice-m1/
@@ -155,6 +156,7 @@ jobs:
           SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/
           bun test ./compiler/self-host-v2/slice-m3/
           bun test ./compiler/self-host-v2/slice-m4/
+          bun test ./compiler/self-host-v2/slice-codec/
           bun test compiler/tests/integration/self-host-v2-lexer
       - name: Gauntlet quick check (TodoMVC compiles + emitted JS parses)
         run: |
