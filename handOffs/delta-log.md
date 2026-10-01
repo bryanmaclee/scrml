@@ -4142,3 +4142,13 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3617] friction · two flaky 300-s pre-commit hangs = 81 orphaned bun servers (commands dev tests leak --__dev-child; old review servers), ~3 GB; killed by cwd (deleted) · → hand-off S445 DURABLE
 
 [3618] state · S445 held: dev-db r4 reviewed LAND-WITH-NITS — round 5 owes R4-1 (outside-root owning db ignores SCRML_DATA_DIR) then land + flogence path heads-up; protect round 7; dpa-063/064 COMPLETE ADVISORY, surface to bryan first · → hand-off.md S445 · @adv:g-dev-creates-empty-db-stubs-that-break-later-compiles,dpa-063,dpa-064
+
+[3619] land · S446-peter: #1212 handler stmt lists (lift rows, arm reads, postfix++⏎) · #1209 schema holes fail-closed (E-SCHEMA-014; union removed, """ change reverted) · #1207 loopback default + host shorthand/whitespace refusal · #1217 handler server-write awaited (SSE kept) · #1219 58-file happy-dom hygiene · #1220 §K POSIX-only test (main windows red since c12b52c2)
+
+[3620] escalate · S446-peter → bryan: note 2026-10-01-from-S446-peter-to-bryan-four-holds-one-word-each.md — #1208 Part A stamp, #1211 E-IMPORT-011-outside-root + type=module stamps, #1210 newly-loud class (38 rows); 5 language Qs (commented schema shadow, LIKE tmpl, nested-sequence stale read, headless server bind, E-ATTR-MULTI-STATEMENT)
+
+[3621] find · S446-peter: 58 test files leaked happy-dom fetch/Response into later files — tracking's 5 dev-watcher 'baseline' failures were this, not real; a stable failure set is not evidence
+
+[3622] find · S446-peter: hand-rolled AST walks again — #1210 r5 counted fn decls via body/children only, missed if/else/match-arm blocks (if-chain class); r6 generic walk
+
+[3623] state · S446-peter wrap: #1210 r6 final check in flight at wrap (enum2-rv4); holds deleted q5/s429-match/s432-expr-handler/s432-dev-server/s446-enum-removal (SHAs in hand-off); flogenceP f3b1b28 db paths; ~30 gaps filed §S446-peter

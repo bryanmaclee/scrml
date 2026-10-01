@@ -1,3 +1,111 @@
+# scrml — Session 446 (peter · P-Tech1) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Concurrent: **S445-bryan (ASUS, wrapped
+> mid-S446)**, **S446-bryan-xps (bootstrap lane)** and **S447-bryan (dev-db, protect r7, S445 unowned HIGHs)** — all LIVE or
+> wrapped around us; footprints disjoint (board `scrml-support/handOffs/active-sessions/S446-peter.md`). Operator pattern =
+> S438's: *"full throttle"*, *"merge on green"* (scripted re-check, never `--auto`), gift-wrap every route to bryan.
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 1. bryan's answers to the S446 routing note → land the held drafts (one merge each)
+Note: `handOffs/incoming/2026-10-01-from-S446-peter-to-bryan-four-holds-one-word-each.md`. On each answer: merge origin/main
+into the branch (MERGE; resolve `docs/known-gaps.md` LINE-wise, regen facts/state/SPEC-INDEX), mark ready, run
+`merge-on-green.sh` (S446 scratch `ci/`; re-create from the S438 copy if gone — it now compares only COMPLETED main runs).
+- **#1208** defer (branch `fix/s446-defer-spec-calls`, draft) — needs the **Part A** stamp. "No" → rebuild the four SPEC calls
+  on main without Part A (hold `hold/s432-defer-spec-calls` @2d5ed0f9 is the source).
+- **#1211** client-JS helper copy (branch `fix/s446-clientjs-helper-copy` @2930ea4d, draft) — needs stamps on (a) E-IMPORT-011
+  outside-root (we recommend keep) and (b) the classic→`type="module"` promotion. Behind main — re-merge first.
+- **#1210** imported-enum F11/F15/F16/F17 (branch `fix/s446-impl1-imported-enum-match` @25bf17ee, draft, r6) — needs bryan to
+  accept the newly-loud class (38 rows + a `lift` body's nested `fn h` beside a top-level `fn h`). **r6's final independent
+  check: LAND-READY-PENDING-RULING** (scratch `enum2-rv4/`) — no under-count leads to wrong data; component and lift
+  expansion run BEFORE the count (counted); the only uncounted form, a nested `fn* h`, stays raw text and is rejected on main
+  and r6 alike. main-correct → wrong = 0 / 284 rows; bite (counting off) → 8 rows wrong. The one loud→silent row, c3 M11,
+  is identical in every round since r1 and is the filed residual. If a future round finds an under-count, do NOT patch a 7th
+  time: key each call-arg signature to its exact declaration node (scope entry ↔ decl). Hold
+  `hold/s438-impl1-imported-enum-match` @5bea376e stays until #1210 lands.
+
+### 2. Peter-lane queue (all filed this wrap — `docs/known-gaps.md` §S446-peter + the entries #1209/#1217 filed)
+Ranked by Peter's S436 rule (aM/flogence first, then bootstrap, then security). Nothing here has an aM/flogence repro yet.
+- HIGH `g-imported-server-fn-call-in-handler-not-awaited` (an imported server fn in a handler leaves a Promise in the cell —
+  read from emit, NOT run; run it first) · HIGH `g-sse-generator-write-in-client-fn-body-awaited-loses-subscription` (+ nested
+  SSE in a handler expression) · HIGH `g-handled-error-arm-failure-writes-envelope-into-cell` · HIGH
+  `g-each-block-arrow-handler-never-runs` · HIGH `g-braceless-do-while-next-line-compiles-to-infinite-loop` · HIGH
+  `g-chained-map-insert-lowers-first-call-only` (⚑ conformance `maps/order-independent-eq-rt` passes VACUOUSLY).
+- Check each against S435 policy (impl#1 changes only for security / bootstrap / adopter) BEFORE dispatching; S439 #4 covers
+  the handler-statement family.
+
+### 3. Ruling-gated (routed in the note — wait for bryan)
+`g-schema-commented-out-declaration-shadows-live-table` · `g-schema-create-table-like-template-columns-not-declared` ·
+`g-handler-nested-sequence-server-write-stale-read` · `g-generated-headless-and-prod-servers-bind-all-interfaces` ·
+E-ATTR-MULTI-STATEMENT (from the retired S432 hold).
+
+## WHAT LANDED — six PRs, each merged by `merge-on-green.sh` (gate + windows green on the CURRENT head; tracking name set = main's)
+| PR | what | review |
+|---|---|---|
+| **#1212** | handler statement lists: `for … lift` rows, arm-binding reads in later statements, postfix `++`⏎ boundary (S439 #4) | S239 LAND (+ body amendment) |
+| **#1209** | `<schema>` tenant-floor holes fail-closed: E-SCHEMA-014 (TEMP/no column list/INHERITS), 012/013 on DSL heads (S440 #15) | S239 + 2 narrow re-reviews; union REMOVED (silent data loss), `"""` change REVERTED (security regression) |
+| **#1207** | `scrml dev`/`serve` loopback by default, `--host` opts in; inet_aton shorthand + whitespace hosts refused (S439 #1) | hold reviewed twice + 2 CI root-causes + PA spot-check |
+| **#1220** | §K test expected POSIX root `/test` — main `windows` red since c12b52c2 (S447's #1215 test); fixed at Peter's direction | PA, bite-tested |
+| **#1219** | 58 test files leaked happy-dom globals into later files (fixed 9 server-fetch tests incl. tracking's 5 dev-watcher names) | PA diff check |
+| **#1217** | server-call cell write in a handler list awaited before the next statement (S439 #4 + §13.2) | S239 FIX → round → narrow re-review LAND |
+Outside scrml: **flogenceP main f3b1b28** — `db=` paths relative to the declaring file (#1215); return note to flogence 69f1a73.
+
+## 🔭 DURABLE
+**A walk that lists its keys is the bug.** #1210 r5 counted duplicate fn declarations by walking `body`/`children` — and missed
+every fn inside `if`/`else`/match-arm blocks, the exact class of the memory note `if-chain-node-invisible-to-hand-rolled-child-walks`.
+r6 walks every own key. Any new "find all X in the AST" must be a generic walk, or name why not.
+
+**The repo's tests had been lying about the network for a long time.** 58 files left happy-dom's `fetch`/`Response` installed, so
+every later server test in the same process talked to happy-dom, not the server. Five `tracking` failures that sessions had
+been comparing name-for-name as "main's baseline" were this. A stable failure set is not evidence the failures are real.
+
+**Read the board before choosing work, every time you choose.** Mid-session two more bryan sessions went LIVE; checking their
+footprints first is what turned "fix the serve gap / the flogence dev-db report" into "verify read-only and hand them evidence".
+
+**A comparison against an in-progress run reads as zero.** `merge-on-green.sh` compared #1219's tracking set against a main
+run still running → "0 names". Harmless there (the PR's own tracking passed) — fixed: compare only `--status completed` runs.
+
+## ⚑ MISSES (mine)
+1. ★★ Told Peter #1207 "probably merged" from an exit code; it had refused (no CI run — the branch was CONFLICTING). Read the log.
+2. ★ Assumed "same pattern as last time" included "merge on green" and merged before he had said it this session; autoMode
+   stopped it. Ask, or wait for the words.
+3. ★ My first spot-check of #1209 read a STALE remote-tracking ref (this clone tracks main only) and nearly reported phantom
+   diffs — fetch branches with an explicit refspec.
+4. ★ #1210 took six rounds; I should have named the mechanism change (signature ↔ declaration identity) at round 4.
+
+## Review ledger
+S239 + narrow re-reviews: #1207 (hold ×2 + CI RCA), #1208 (S239 + fix round; Part A open), #1209 (S239 + re-review ×2),
+#1210 (r3 S239, r4/r5/r6 narrow checks), #1211 (S239 + narrow re-review), #1212 (S239), #1217 (S239 + narrow). #1219/#1220:
+PA-direct (test-only). All reports in the S446 scratchpad (`*-rv*/`).
+
+## Holds
+Deleted (ruled/landed/superseded): `hold/s432-q5-deep-reactive-cells-spec` @bfcf8e89 · `hold/s429-match-in-engine-state-child`
+@e0ac22d6 · `hold/s432-expr-handler-multi-stmt` @1b7018e2 (superseded by #1106 + #1212) · `hold/s432-dev-server-localhost-default`
+@cb9e0ac6 (landed #1207) · `hold/s446-enum-removal-attempt` @4e21816a (superseded by #1210 r3+). Kept: `hold/s432-defer-spec-calls`,
+`hold/s438-impl1-imported-enum-match` (until #1208/#1210 land); `hold/s438-1109-review-fixes`, `hold/s438-refusal-writes-no-dist`
+(S440 dispatched re-lands — retire when those land).
+
+## Gate at close
+- Local `bun test compiler/tests/unit compiler/tests/conformance` on main 78e4ddad (+ wrap docs): **23,301 pass / 47 skip /
+  8 todo / 2 fail** (4m32s). Both fails root-caused: `lift-engine-advance-bug65` §1 is a 5-s `node --check` timeout that fails
+  IDENTICALLY on the pre-session base 8b87ce2e (11/1, three runs each) and passes with `--timeout 60000`; `g-each-in-if-else-
+  chain-emits-zero-renderers` passes 6/6 alone (load flake). No regression.
+- Cloud: every landed PR's head was `gate` + `windows` green with `tracking` = main's newest completed run (`merge-on-green.sh`).
+  main `windows` was red c12b52c2 → fixed by #1220.
+- `state.ts --check` PASS after the known-gaps filing (HIGH 228 / MED 454 / LOW 217 open). `master-list.md` recent-sessions
+  churn (hash width) deliberately NOT committed.
+- Maps: project-mapper incremental 464c9ab4d → 78e4ddad (13 maps + non-compliance report). New **N-S446-1**:
+  `scripts/s34-census.ts` has a win32 separator bug that zeroes IMPL-SITES on Windows. U-S444b-1 closed.
+- Review floor: all six S446 landings recorded in `docs/pr-reviews.md`. `review-debt.ts` → 8 OWED, ALL bryan's
+  (#1203–#1206, #1213, #1215, #1218, #1221). S447 claimed the review-debt drain, so not touched (shared-surface rule).
+- `facts.ts --check` PASS · `regen-spec-index.ts --check` OK · `state.ts --check`: only `@generated:recent-sessions`
+  (master-list) stale — the known hash-width churn, deliberately not committed (CI does not gate it).
+- Worktrees: 21 landed/finished agent worktrees removed at wrap; retained = the three held drafts' agent worktrees
+  (`agent-a997…` #1208, `agent-a790…` #1211, `agent-adce…` #1210 — branches pushed). Older, NOT this session's, left alone:
+  `C:/b431s`, `C:/b431w`, `C:/r431w`, `C:/w431`, `C:/w431s`, `C:/wtdefer` (S431/S432) — Peter's to clear.
+
+---
+
 # scrml — Session 445 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Concurrent: **S444-bryan-xps (XPS) — WRAPPED
