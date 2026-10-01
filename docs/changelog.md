@@ -2,6 +2,17 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S448 — 2026-10-01 (bryan · XPS, successor to the reboot-killed S446-xps)
+
+A reboot took S446-xps down mid-lane; S448 recovered its three in-flight pieces, landed the bootstrap wire codec, and traced the 1h45m boot to where the /tmp volume actually came from.
+
+- **#1213** — bootstrap §57 wire codec (type-directed encode, fail-closed decode); branch brought up to date + fresh `gate` before merge.
+- **#1221** — codec r2: option flags read as own properties only (a polluted `Object.prototype` can no longer enable raw-null passthrough), no throws on hostile input, undeclared keys refused; re-reviewed on a frozen ref.
+- **dpa-063 SPEC text** (§7.2.2 statement termination, E-STMT-NO-EFFECT language-wide, `when` re-trigger) recovered from the dead session's worktree; on `wip/s448-spec-dpa063`, awaiting bryan's veto of 10 PA readings.
+- **U0 (`when` effects)**: round 2 fixed N1-N3; its re-review found the run-count cap drops non-looping runs and an `<each>`-row runaway reachable from source → round 3 (cycle detection by causal ancestry + backstop) in flight at wrap (`wip/s448-bootstrap-u0-r3` + patch).
+- **/tmp hygiene**: measured the test suite at ~4-7k leaked files per hook run and scratchpad worktrees at ~20.5k files each. Layer 1 (bun test preload owning a per-process temp root outside any repo) in flight (`wip/s448-test-tmp-root` + patch); layer 2 rules in pa-scrml overlay v2.5; layer 3 (`/etc/tmpfiles.d` age-out instead of boot delete) owed by bryan. First wrap probe reading: 6,399 /tmp entries since boot.
+- `handOffs/dpa-queue.md`: dpa-062/064 result rows folded in from a stranded XPS commit; dpa-063 marked RULED S446.
+
 ## S445 — 2026-09-30 (bryan · ASUS, concurrent with S444 on XPS)
 
 S443's held security pickup, driven through adversarial review until each landing was strictly better than main —
