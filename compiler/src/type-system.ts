@@ -11319,7 +11319,7 @@ function annotateNodes(
             // ordering rationale as comparison-site: resolve bare variants
             // at typed-function call-arg positions before the LHS-driven
             // walk runs, so the no-context branch doesn't fire on them.
-            inferBareVariantsAtCallArgs(initExprForScope, callArgFnSignatures, letSpan, errors);
+            inferBareVariantsAtCallArgs(initExprForScope, callArgFnSignatures, letSpan, errors, scopeChain);
             // §59.4 / §14.10 — map-KEY-arg pre-pass. `const x = @m.getOr(.City, 0)`
             // / `@m[.City]` — the bare KEY variant resolves against the map's
             // declared key enum (`[City:int]`) BEFORE the LHS-driven flat walker
@@ -11878,7 +11878,7 @@ function annotateNodes(
             // where `wrap(b: Bra) -> Tok` — `.Paren` belongs to `Bra`, not
             // `Tok`). Was ordered AFTER struct-nav → the cross-enum call-arg
             // resolved too late.
-            inferBareVariantsAtCallArgs(reactInitExprNode, callArgFnSignatures, reactSpan, errors);
+            inferBareVariantsAtCallArgs(reactInitExprNode, callArgFnSignatures, reactSpan, errors, scopeChain);
             // §59.4 / §14.10 — map-KEY-arg pre-pass. `@m = @m.insert(.City, v)` —
             // the bare KEY variant resolves against the map's declared key enum
             // BEFORE the struct-nav/flat walker runs (bvCtxType is null for a map
@@ -12282,7 +12282,7 @@ function annotateNodes(
             checkEqPayloadVariantOperands(beExprNode, typeRegistry, beSpan, errors);
             // S84 v0.2.4 #5-followon (Gap B.4) — call-arg inference at
             // bare-expr top-level (e.g. `applyState(.V)` as its own stmt).
-            inferBareVariantsAtCallArgs(beExprNode, callArgFnSignatures, beSpan, errors);
+            inferBareVariantsAtCallArgs(beExprNode, callArgFnSignatures, beSpan, errors, scopeChain);
             // §59.4 / §14.10 — map-KEY-arg pre-pass at bare-expr (`@m.update(.City,
             // f)` / `@m.has(.City)` as a statement). Resolves the bare KEY variant
             // against the map's declared key enum + stamps.
@@ -12803,7 +12803,7 @@ function annotateNodes(
             // call-arg walker would correctly resolve. Each helper stamps
             // `_bareVariantInferredAtBinaryExpr` on resolved idents so the
             // downstream walkers can deduplicate.
-            inferBareVariantsAtCallArgs(ifCondExpr, callArgFnSignatures, ifCondSpan, errors);
+            inferBareVariantsAtCallArgs(ifCondExpr, callArgFnSignatures, ifCondSpan, errors, scopeChain);
             // §59.4 / §14.10 — map-KEY-arg pre-pass inside an if/while condition
             // (`if (@m.has(.City))`). Resolves the bare KEY variant against the
             // map's declared key enum + stamps.
@@ -13159,7 +13159,7 @@ function annotateNodes(
           // E-VARIANT-AMBIGUOUS on a call-arg whose param enum differs from
           // the fn's return type (`return wrap(.Paren)` where
           // `wrap(b: Bra) -> Tok` — `.Paren` belongs to `Bra`, not `Tok`).
-          inferBareVariantsAtCallArgs(retExprNode, callArgFnSignatures, retSpan, errors);
+          inferBareVariantsAtCallArgs(retExprNode, callArgFnSignatures, retSpan, errors, scopeChain);
           // §59.4 / §14.10 — map-KEY-arg pre-pass in a return value
           // (`return @m.getOr(.City, 0)`). Resolves the bare KEY variant against
           // the map's declared key enum + stamps, so the return-type-context
@@ -13244,7 +13244,7 @@ function annotateNodes(
           // let/return); a reassignment of a local whose type was WRITTEN
           // (`let e: Expr = …; e = .Neg(k)`) takes that declared type. Any other
           // position stays unstamped — codegen then never guesses the enum.
-          inferBareVariantsAtCallArgs(tildInitExpr, callArgFnSignatures, tildSpan, errors);
+          inferBareVariantsAtCallArgs(tildInitExpr, callArgFnSignatures, tildSpan, errors, scopeChain);
           if (typeof n.name === "string") {
             const prior = scopeChain.lookup(n.name) as ScopeEntry | undefined;
             const rt = prior && prior.kind === "variable" && prior.annotated === true ? prior.resolvedType : null;
@@ -15581,6 +15581,14 @@ function inferBareVariantsInExpr(
   contextType: ResolvedType | null,
   span: Span,
   errors: TSError[],
+  /**
+   * S446 r4 — consider ONLY value-spine idents (neither stamp nor diagnose the
+   * rest). Set by the call-argument pass for an IMPORTED signature: before
+   * imported signatures existed that pass never ran on such an argument, so a
+   * comparison operand / ternary test inside it (`yOf(k == .Q ? … : …)`, `k: L`)
+   * must not now be checked against the PARAMETER's enum (a false E-TYPE-063).
+   */
+  spineOnly?: boolean,
 ): void {
   if (!exprNode || typeof exprNode !== "object") return;
   // S446 — `contextType` is the type of the WHOLE expression. An ident inside a
@@ -15591,6 +15599,12 @@ function inferBareVariantsInExpr(
   // PARAMETER type as the root context (the call-site passes), and a call TS
   // cannot type leaves the argument unstamped — the pre-F11 loud lowering.
   const callArgIdents = collectCallArgumentIdents(exprNode);
+  // S446 r4 — and only an ident whose value IS the expression's value (the
+  // VALUE SPINE: the root, a ternary's branches, `??` / `||` operands, a
+  // constructor callee there) sits at `contextType`'s position. A comparison
+  // operand (`k == .Neg(1)`) or a ternary TEST is at another position (the
+  // other operand's type), so it is never stamped from this context.
+  const valueSpineIdents = collectValueSpineIdents(exprNode);
   forEachIdentInExprNode(exprNode as any, (ident) => {
     if (typeof ident.name !== "string") return;
     const raw = ident.name;
@@ -15599,6 +15613,7 @@ function inferBareVariantsInExpr(
     if (raw.length < 2 || raw[0] !== ".") return;
     const variantName = raw.slice(1);
     if (!/^[A-Z][A-Za-z0-9_]*$/.test(variantName)) return;
+    if (spineOnly === true && !valueSpineIdents.has(ident)) return;
 
     // §14.10 binary-expr comparison position (S84 v0.2.4 #5): if a prior
     // pre-pass at `inferBareVariantsAtComparisonSites` has already resolved
@@ -15616,7 +15631,8 @@ function inferBareVariantsInExpr(
     // by-variant-NAME lookup that a same-named variant of another enum (a local
     // `Neg(y, z)` beside the annotated imported `Neg(x)`) can shadow (S438
     // review F2). First resolution wins (a later pass may have no context).
-    if (contextType && !callArgIdents.has(ident) && !Object.prototype.hasOwnProperty.call(ident, "__variantFields")) {
+    if (contextType && !callArgIdents.has(ident) && valueSpineIdents.has(ident)
+        && !Object.prototype.hasOwnProperty.call(ident, "__variantFields")) {
       const resolvedEnum: EnumType | null =
         contextType.kind === "enum" ? contextType as EnumType
         : (contextType.kind === "predicated" && (contextType as PredicatedType).baseType === "enum")
@@ -15811,6 +15827,25 @@ function inferBareVariantsInExpr(
  * `.Neg` in the set. Used only to keep `inferBareVariantsInExpr` from stamping
  * the whole-expression context onto a parameter position.
  */
+function collectValueSpineIdents(root: unknown): Set<unknown> {
+  const out = new Set<unknown>();
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as Record<string, unknown> & { kind?: unknown; op?: unknown };
+    if (n.kind === "ident") { out.add(node); return; }
+    if (n.kind === "paren") { visit(n.expr); return; }
+    if (n.kind === "ternary") { visit(n.consequent); visit(n.alternate); return; }
+    if (n.kind === "binary" && (n.op === "??" || n.op === "||")) { visit(n.left); visit(n.right); return; }
+    if (n.kind === "call") {
+      // Only a bare-dot constructor callee: its value is the call's value.
+      const callee = n.callee as { kind?: unknown; name?: unknown } | undefined;
+      if (callee && callee.kind === "ident" && typeof callee.name === "string" && callee.name.startsWith(".")) out.add(callee);
+    }
+  };
+  visit(root);
+  return out;
+}
+
 function collectCallArgumentIdents(root: unknown): Set<unknown> {
   const out = new Set<unknown>();
   const seen = new Set<unknown>();
@@ -17026,8 +17061,27 @@ function inferBareVariantsAtCallArgs(
   }>,
   span: Span,
   errors: TSError[],
+  /**
+   * S446 r4 — the scope the call sits in. A signature is the callee's only when
+   * the name RESOLVES to that declaration: a nearer binding of the same name (a
+   * parameter, a `const f = …`, a loop / destructured variable) shadows it and
+   * the call's arguments stay unstamped. An IMPORTED signature additionally
+   * requires the name to resolve to the import binding itself.
+   */
+  scopeChain?: ScopeChain,
 ): void {
   if (!exprNode || typeof exprNode !== "object") return;
+
+  const sigFor = (name: string): { params: Array<{ name: string; type: ResolvedType }> } | undefined => {
+    const sig = fnSignatures.get(name) as (FnSignature & { imported?: boolean }) | undefined;
+    if (!sig || !scopeChain) return sig;
+    const entry = scopeChain.lookup(name);
+    if (sig.imported === true) return entry && entry.kind === "import" ? sig : undefined;
+    // A local function: an unresolved name (forward reference — a function is
+    // bound after its body) keeps its signature; a non-function binding shadows.
+    if (entry && entry.kind !== "function" && entry.kind !== "import") return undefined;
+    return sig;
+  };
 
   const walk = (node: unknown): void => {
     if (!node || typeof node !== "object") return;
@@ -17042,7 +17096,7 @@ function inferBareVariantsAtCallArgs(
       // `inferReactiveSiteBareVariants` path when the bare-expr root is
       // the call itself; otherwise they're not in §14.10 scope today.
       if (callee && callee.kind === "ident" && typeof callee.name === "string") {
-        const sig = fnSignatures.get(callee.name);
+        const sig = sigFor(callee.name);
         if (sig) {
           for (let i = 0; i < args.length; i++) {
             const arg = args[i];
@@ -17056,7 +17110,7 @@ function inferBareVariantsAtCallArgs(
             // expected type. Idents stamped here get the standard flag, so
             // the call-arg's bare-variant gets diagnosed against the right
             // enum context AND any downstream walker skips it.
-            inferBareVariantsInExpr(arg, paramType, span, errors);
+            inferBareVariantsInExpr(arg, paramType, span, errors, (sig as { imported?: boolean }).imported === true);
             // Also stamp the call-arg ident directly if it's a top-level
             // bare-variant ident. `inferBareVariantsInExpr` doesn't stamp;
             // it only emits diagnostics. Stamping here lets the comparison-
@@ -26226,7 +26280,12 @@ export interface ImportedFnDecl {
   depTypeDecls: ASTNodeLike[];
 }
 
-type FnSignature = { params: Array<{ name: string; type: ResolvedType }>; returnType: ResolvedType };
+type FnSignature = {
+  params: Array<{ name: string; type: ResolvedType }>;
+  returnType: ResolvedType;
+  /** Read off an IMPORTED declaration (resolveImportedFnSignatures). */
+  imported?: boolean;
+};
 
 /**
  * §14.10 — "a function parameter type (`fn(.V)` where the parameter is typed
@@ -26281,7 +26340,7 @@ function resolveImportedFnSignatures(
         }
         params.push({ name: paramName, type });
       }
-      out.set(localName, { params, returnType: tAsIs() });
+      out.set(localName, { params, returnType: tAsIs(), imported: true });
     } catch {
       // A signature that cannot be read is simply absent: its call arguments stay
       // unstamped (the codegen side then refuses to guess) — never a crash.

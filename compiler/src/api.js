@@ -2650,6 +2650,10 @@ function _compileScrmlImpl(options = {}) {
     if (!depGraphEntry || !depGraphEntry.exports) return null;
     for (const exp of depGraphEntry.exports) {
       if (exp.name !== fnName || !exp.reExportSource) continue;
+      // A RENAMED re-export (`export { yOf as g } from …`) is refused, not
+      // chased: chasing the exported name would find an unrelated `g` in the
+      // source file. No signature → the call's arguments stay unstamped.
+      if (typeof exp.localName === 'string' && exp.localName !== fnName) return null;
       const found = resolveFnThroughReExport(exp.reExportSource, fnName, visited);
       if (found) return found;
     }
