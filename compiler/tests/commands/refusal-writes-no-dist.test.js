@@ -290,7 +290,10 @@ describe("beforeWrite (compileScrml) — the planned units ARE the written units
     const p = project({
       "index.scrml": prog("", "aGo"),
       "other/zzz.scrml": prog("", "bGo"),
-      "pages/admin/panel.scrml": prog("", "cGo"),
+      // S445 items 1 + 5: a route file's <program> is nested under the application
+      // program, and `csrf=` is application-level (E-PROGRAM-NESTED-ATTR) — so the
+      // route file's program carries no app-level attribute.
+      "pages/admin/panel.scrml": prog("", "cGo").replace(' csrf="off"', ""),
     });
     const inputFiles = ["index.scrml", "other/zzz.scrml", "pages/admin/panel.scrml"].map((f) => join(p.src, f));
     let planned = null;

@@ -1,0 +1,8 @@
+<program>
+<p>app</p>
+<div>
+<program name="w" ratelimit="1/min" headers="strict">
+  when message(d) { send(d) }
+</program>
+</div>
+</program>

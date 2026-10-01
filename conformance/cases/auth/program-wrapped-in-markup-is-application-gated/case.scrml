@@ -1,0 +1,5 @@
+<div>
+<program auth="required">
+<p class="secret">wrapped-secret-marker</p>
+</program>
+</div>

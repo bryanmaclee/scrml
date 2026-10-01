@@ -64,6 +64,9 @@ import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-cl
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
+import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
+import { getElementAttrSchema } from "../attribute-registry.js";
+
 import { classifyFileShape } from "../library-shape.js";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
@@ -107,6 +110,11 @@ import {
   type ChunkOutput,
   type ChunksManifest,
 } from "./route-splitter.ts";
+
+/** Membership in the `<program>` attribute registry (S445 item 5 — the closed set the nested rule ranges over). */
+const _programAttrSchema: any = getElementAttrSchema("program");
+const _isRegisteredProgramAttr = (n: string): boolean =>
+  !!(_programAttrSchema && _programAttrSchema.allowedAttrs && _programAttrSchema.allowedAttrs.has(n));
 
 // ---------------------------------------------------------------------------
 // Input / output types
@@ -1566,111 +1574,190 @@ export function runCG(input: CgInput): CgOutput {
     }
 
     // §40.7 documentary-attrs-on-nested-program detection (Phase A1a, 2026-05-05).
-    // Walk all <program> nodes; the FIRST top-level <program> is the document
-    // root (its documentary attrs emit head metadata in the head-emission pass
-    // below). Any deeper <program> with one of the five documentary attrs
-    // (title, description, version, author, license) emits W-PROGRAM-TITLE-NESTED.
+    // The file's top-level <program> is the document root (its documentary attrs
+    // emit head metadata in the head-emission pass below). Any NESTED <program>
+    // with one of the five documentary attrs (title, description, version,
+    // author, license) emits W-PROGRAM-TITLE-NESTED. Top-level vs nested is the
+    // ONE shared definition (program-role.ts, §4.12 / S445): nested = has a
+    // <program> or <page> ancestor, whatever markup sits between.
     // Runs BEFORE extractWorkerPrograms() so worker-program nodes are still in
     // tree and discoverable.
+    // S445 item 1 — a route file of a build with an application program has the
+    // application program as an IMPLIED ancestor: all its programs are nested.
+    const _roleOpts = programRoleOptionsOf(fileAST);
     const DOC_ATTR_NAMES = ["title", "description", "version", "author", "license"];
-    function detectNestedDocAttrs(parentChildren: any[], depth: number): void {
-      for (const node of parentChildren) {
-        if (!node || typeof node !== "object") continue;
-        if (node.kind === "markup" && node.tag === "program") {
-          if (depth >= 1) {
-            // Nested <program> — check for documentary attrs
-            const attrs: any[] = node.attributes ?? node.attrs ?? [];
-            const offending = attrs.filter((a: any) =>
-              DOC_ATTR_NAMES.includes(a.name) &&
-              a.value && a.value.kind === "string-literal" &&
-              typeof a.value.value === "string" && a.value.value !== ""
-            );
-            for (const a of offending) {
-              const span = (a.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
-              errors.push(new CGError(
-                "W-PROGRAM-TITLE-NESTED",
-                `W-PROGRAM-TITLE-NESTED: Documentary attribute \`${a.name}=\` on a nested ` +
-                `<program> has no effect — workers have no DOM <head>. Move \`${a.name}=\` to ` +
-                `the top-level <program> or remove it. (§40.7)`,
-                { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
-                "warning",
-              ));
-            }
-          }
-          // Recurse into nested program children at the next depth
-          if (Array.isArray(node.children)) {
-            detectNestedDocAttrs(node.children, depth + 1);
-          }
-          continue;
-        }
-        if (node.kind === "markup" && Array.isArray(node.children) && node.children.length > 0) {
-          detectNestedDocAttrs(node.children, depth);
-        }
+    forEachProgramWithRole(nodes, (node: any, role) => {
+      if (role !== "nested") return;
+      const attrs: any[] = node.attributes ?? node.attrs ?? [];
+      const offending = attrs.filter((a: any) =>
+        DOC_ATTR_NAMES.includes(a.name) &&
+        a.value && a.value.kind === "string-literal" &&
+        typeof a.value.value === "string" && a.value.value !== ""
+      );
+      for (const a of offending) {
+        const span = (a.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+        errors.push(new CGError(
+          "W-PROGRAM-TITLE-NESTED",
+          `W-PROGRAM-TITLE-NESTED: Documentary attribute \`${a.name}=\` on a nested ` +
+          `<program> has no effect — workers have no DOM <head>. Move \`${a.name}=\` to ` +
+          `the top-level <program> or remove it. (§40.7)`,
+          { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+          "warning",
+        ));
       }
-    }
-    detectNestedDocAttrs(nodes, 0);
+    }, _roleOpts);
 
     // §4.12.2 (S443, g-nested-program-auth-attr-silently-ignored) — `auth=` is NOT
-    // a nested-valid `<program>` attribute. Auth config is read from the file's
-    // FIRST top-level `<program>` only (compute-program-config.ts), so a nested
-    // `<program auth="required">` compiled with no auth at all: its server
-    // functions ran for anonymous callers (MEASURED S441: an anonymous POST wrote
-    // a row). "Nested" here is any `<program>` with a `<program>` OR `<page>`
-    // ancestor — a `<page>` is a per-route container inside the application's one
-    // `<program>` (§40.8), so a `<program>` under it is nested too, and its `auth=`
-    // was dropped the same way (MEASURED S443: 200 for an anonymous GET). Fail
-    // closed: any `auth=` there, whatever its value, is an error, never a no-op.
-    function detectNestedProgramAuth(parentChildren: any[], nested: boolean): void {
-      for (const node of parentChildren) {
-        if (!node || typeof node !== "object" || node.kind !== "markup") continue;
-        if (node.tag === "program" && nested) {
-          const attrs: any[] = node.attributes ?? node.attrs ?? [];
-          const authAttr = attrs.find((a: any) => a && a.name === "auth");
-          if (authAttr) {
-            const span = (authAttr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
-            errors.push(new CGError(
-              "E-PROGRAM-NESTED-AUTH",
-              "E-PROGRAM-NESTED-AUTH: `auth=` is not valid on a nested <program> — a nested " +
-              "<program> is not an auth scope, so its server functions would run unauthenticated. " +
-              "Put `auth=` on the top-level <program> (the whole application) or on the " +
-              "<page> that needs it, and remove it from the nested <program>. (§4.12.2, §52.13)",
-              { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
-              "error",
-            ));
-          }
-        }
-        if (Array.isArray(node.children) && node.children.length > 0) {
-          detectNestedProgramAuth(node.children, nested || node.tag === "program" || node.tag === "page");
-        }
-      }
-    }
-    detectNestedProgramAuth(nodes, false);
-
-    // §40.8 / §20.5.1 (S443, ruled by bryan — user-voice S443 item 3): a file declares
-    // its top-level `<program>` exactly once. Two or more top-level `<program>`
-    // elements in ONE file is `E-PROGRAM-002`. Before S443 the second one was
-    // silently mis-read: compute-program-config reads auth= from the FIRST
-    // top-level `<program>` only, so `<program>…</program><program auth="required">`
-    // served the second program's routes to anonymous callers
-    // (g-two-top-level-programs-one-file-second-auth-dropped). NARROW: same-file
-    // only — the §40.8 cross-file case stays reserved (library-shape.js,
-    // type-system.ts and the session-config comments above depend on it).
+    // a nested-valid `<program>` attribute: a nested `<program>` is not an auth
+    // scope, and its `auth=` was silently dropped (MEASURED S441: an anonymous POST
+    // wrote a row; S443: 200 for an anonymous GET under a `<page>`). Fail closed:
+    // any `auth=` there, whatever its value, is an error, never a no-op.
+    //
+    // §40.8 / §20.5.1 (S443 item 3) — a file declares its top-level `<program>`
+    // exactly once; two or more is `E-PROGRAM-002`. NARROW: same-file only — the
+    // §40.8 cross-file case stays reserved.
+    //
+    // BOTH detectors read ONE definition of a program's role (program-role.ts;
+    // §4.12, ruling S445 option b): a `<program>` is TOP-LEVEL when it has no
+    // `<program>` or `<page>` ancestor, whatever markup wraps it, and NESTED when
+    // it has one. Before S445 the E-PROGRAM-002 count read only the file's DIRECT
+    // top-level nodes while the nested-auth detector tracked ancestors, so a
+    // `<div>`-wrapped `<program auth="required">` was neither — no error, its
+    // `auth=` dropped, its server functions open to anonymous callers
+    // (g-wrapped-program-auth-silently-dropped). Wrapper markup never changes a
+    // program's role, and no placement rule is added: a `<program>` may appear
+    // anywhere. S445 item 1: in a route file of a build with an application
+    // program, every `<program>` is nested (the implied ancestor, `_roleOpts`).
+    //
+    // §4.12.2 (S445 item 3) — a SESSION attribute (`sessionExpiry=`,
+    // `session-secure=`) on a nested `<program>` is `E-PROGRAM-NESTED-SESSION`.
+    // The session cookie is application-scope (§20.5.1), and a nested program's
+    // declaration used to reach the resolver's last-wins read: a nested
+    // `session-secure="false"` silently downgraded the application's `__Host-`
+    // cookie to plain `scrml_sid` (g-two-programs-one-file-session-attr-last-wins).
+    // Placeholder until dpa-064 designs nested auth / session scopes.
     {
-      const topPrograms = (Array.isArray(nodes) ? nodes : []).filter(
-        (n: any) => n && typeof n === "object" && n.kind === "markup" && n.tag === "program",
-      );
+      const topPrograms: any[] = [];
+      // Programs that are top-level STRUCTURALLY but nested only by the implied
+      // application ancestor (a route file's <program>, S445 item 1) — the
+      // diagnostics say which, since nothing in the file itself encloses them.
+      const _impliedOnly = new Set<any>(_roleOpts.impliedAncestor ? findTopLevelPrograms(nodes) : []);
+      const _whyNested = (node: any): string => _impliedOnly.has(node)
+        ? "(this file is a route file under pages/ or routes/ of an application, so its " +
+          "<program>s are nested under the application's <program>, §4.12)"
+        : "(one inside another <program> or a <page>)";
+      forEachProgramWithRole(nodes, (node: any, role) => {
+        if (role === "top-level") {
+          topPrograms.push(node);
+          return;
+        }
+        const attrs: any[] = node.attributes ?? node.attrs ?? [];
+        const authAttr = attrs.find((a: any) => a && a.name === "auth");
+        if (authAttr) {
+          const span = (authAttr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+          errors.push(new CGError(
+            "E-PROGRAM-NESTED-AUTH",
+            "E-PROGRAM-NESTED-AUTH: `auth=` is not valid on a nested <program> " + _whyNested(node) +
+            " — a nested <program> is not an auth scope, so its " +
+            "server functions would run unauthenticated. Put `auth=` on the top-level <program> " +
+            "(the whole application) or on the <page> that needs it, and remove it from the " +
+            "nested <program>. (§4.12.2, §52.13)",
+            { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+            "error",
+          ));
+        }
+        for (const sessAttr of attrs.filter((a: any) => a && NESTED_SESSION_ATTRS.has(a.name))) {
+          const span = (sessAttr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+          errors.push(new CGError(
+            "E-PROGRAM-NESTED-SESSION",
+            `E-PROGRAM-NESTED-SESSION: \`${sessAttr.name}=\` is not valid on a nested <program> ` +
+            _whyNested(node) + " — the session cookie belongs to the whole application, so a nested " +
+            "program's session setting would silently change the application's cookie. Put it " +
+            "on the top-level <program> and remove it from the nested one. (§4.12.2, §20.5.1)",
+            { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+            "error",
+          ));
+        }
+        // §4.12.2 (S445 item 5) — every OTHER application-level `<program>` attribute
+        // on a nested program fails loudly: the §4.12.2 table (+ §43.4 lifecycle) is
+        // the nested-valid list (program-role.ts `nestedProgramAttrVerdict`). Before
+        // S445 item 5 these were read from the top-level program only and silently
+        // dropped here — MEASURED (review of 5c706940b): a route file's nested
+        // `ratelimit="1/min"` stopped limiting (200/429/429 → 200/200/200) and its
+        // `headers="strict"` stopped sending CSP / X-Frame-Options.
+        for (const a of attrs) {
+          if (!a || typeof a.name !== "string") continue;
+          if (nestedProgramAttrVerdict(a.name, _isRegisteredProgramAttr) !== "E-PROGRAM-NESTED-ATTR") continue;
+          const span = (a.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+          errors.push(new CGError(
+            "E-PROGRAM-NESTED-ATTR",
+            `E-PROGRAM-NESTED-ATTR: \`${a.name}=\` is an application-level <program> attribute and ` +
+            "is not valid on a nested <program> " + _whyNested(node) + " — a nested <program> is " +
+            "a worker, sidecar or scoped-db context and carries only name=, lang=, db=, mode=, " +
+            "build=, port=, health=, route=, protect=, callchar=, story=, capabilities= and the " +
+            "§43.4 lifecycle attributes, so this setting would be silently ignored. Put it on " +
+            "the top-level <program> (the whole application) and remove it from the nested " +
+            "one. (§4.12.2)",
+            { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+            "error",
+          ));
+        }
+      }, _roleOpts);
       for (const extra of topPrograms.slice(1)) {
         const span = extra.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
         errors.push(new CGError(
           "E-PROGRAM-002",
           "E-PROGRAM-002: a file declares its top-level <program> exactly once, but this file " +
-          `has ${topPrograms.length}. Everything after the first is mis-read — its auth=, ` +
-          "session and middleware attributes are ignored, so its routes run with the FIRST " +
-          "program's settings. Merge them into one <program>, or move the second into its own " +
-          "file (a nested <program> inside the first is a worker or scoped-db context, §4.12). (§40.8)",
+          `has ${topPrograms.length}. A <program> is top-level when no other <program> or ` +
+          "<page> encloses it, whatever markup (a <div>, <main>, …) wraps it, so this one is a " +
+          "second application program, not a nested one. The compiler cannot tell which " +
+          "program's auth=, session and middleware settings govern this file's routes, so " +
+          "the file does not compile. Merge them into one <program> carrying one set of " +
+          "those settings, or build the second as a separate application. If the second is " +
+          "meant as a worker, sidecar or scoped-db context, place it inside the first WITHOUT " +
+          "auth=, session or other application-level attributes — a nested <program> takes " +
+          "none of them (§4.12.2). (§40.8)",
           { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
           "error",
         ));
+      }
+
+      // F2 (S445 review, fail-open) — the program-config reader runs at PRECG,
+      // BEFORE component expansion; these detectors run after it. A `<program>`
+      // that only becomes top-level through CE (`const Svc = <div><program
+      // auth="required">…</program></div>` + `<Svc/>`) was invisible to PRECG, so
+      // its `auth=` / session / middleware attributes were never read and its
+      // server functions answered anonymous callers. Do not guess a config for it:
+      // the post-CE top-level program MUST be the node PRECG configured (compared by
+      // source span); if it is not, refuse the build. Skipped only when PRECG never
+      // ran on this FileAST (a direct-codegen unit test — the field is undefined).
+      const _precgSpan = (fileAST as any)?.ast?.precgTopLevelProgramSpan !== undefined
+        ? (fileAST as any).ast.precgTopLevelProgramSpan
+        : (fileAST as any)?.precgTopLevelProgramSpan;
+      if (_precgSpan !== undefined) {
+        const cgTop: any = topPrograms[0] ?? null;
+        const same = cgTop === null
+          ? _precgSpan === null
+          : _precgSpan !== null && cgTop.span != null &&
+            (cgTop.span.start ?? null) === _precgSpan.start && (cgTop.span.end ?? null) === _precgSpan.end;
+        if (!same) {
+          const offender: any = cgTop ?? null;
+          const span = offender?.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
+          errors.push(new CGError(
+            "E-PROGRAM-CONFIG-UNREAD",
+            "E-PROGRAM-CONFIG-UNREAD: " + (offender
+              ? "this file's top-level <program> only exists after component expansion (it comes " +
+                "from a component such as `const X = <div><program …>…</program></div>` used as " +
+                "`<X/>`), so its auth=, session and middleware attributes were never read — its " +
+                "routes would run without them. "
+              : "the top-level <program> this file was configured from is gone after component " +
+                "expansion, so its auth=, session and middleware settings cannot be applied. ") +
+            "Write the application's <program> directly in the file (it may be wrapped in " +
+            "markup), not inside a component. (§4.12, §40.8)",
+            { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+            "error",
+          ));
+        }
       }
     }
 
@@ -1963,9 +2050,11 @@ export function runCG(input: CgInput): CgOutput {
   // There is no reliable unit → owning-`<program>` relation to key this on. The
   // compiler says so itself at the shell-composition post-pass below: per SPEC §40.8
   // the entry file is "the file resolved by the build root" — a BUILD fact — this
-  // pipeline infers it from file CONTENT and takes the first match, `E-PROGRAM-002`
-  // is reserved-not-implemented, so a second top-level `<program>` in a compile unit
-  // is silently tolerated. Inventing a membership notion here (by directory, by
+  // pipeline infers it from file CONTENT and takes the first match, and the
+  // CROSS-FILE case of `E-PROGRAM-002` is reserved-not-implemented, so a second
+  // program-bearing FILE in a compile unit is silently tolerated. (The same-file
+  // case fires since S443, counting markup-wrapped programs since S445 — see the
+  // `forEachProgramWithRole` block above.) Inventing a membership notion here (by directory, by
   // import graph) would be guessing at the language.
   //
   // So FAIL CLOSED ON THE COUNT, which needs no membership notion to be sound:
@@ -2004,7 +2093,7 @@ export function runCG(input: CgInput): CgOutput {
   // it extends a settled rule rather than setting one — SPEC §40 (`:23763`) already
   // makes "two applications in one compiled server" an Error via `E-MW-007`, with
   // the same remedy, and explicitly frames `E-MW-007` as the emitted-server
-  // consequence of the reserved `E-PROGRAM-002` shape. Contested session config is
+  // consequence of the reserved (cross-file) `E-PROGRAM-002` shape. Contested session config is
   // the same class of application-scope conflict.
   //
   // ⚑ THE INVARIANT THIS BUYS, and it is why the suppression below is now
@@ -2025,9 +2114,11 @@ export function runCG(input: CgInput): CgOutput {
   // declaring `session-secure="false"`) plus a plain minting `pages/other.scrml` →
   // `other` emitted `scrml_sid`/604800, identical to the unfixed compiler, while the
   // same page compiled alone emitted `__Host-`/3600. Note the irony recorded above:
-  // `E-PROGRAM-002` being reserved-not-implemented is exactly WHY a second top-level
-  // `<program>` can sit in one file, so the file-granular count was blind to the very
-  // shape its own rationale cited.
+  // `E-PROGRAM-002` being reserved-not-implemented was exactly WHY a second top-level
+  // `<program>` could sit in one file, so the file-granular count was blind to the very
+  // shape its own rationale cited. (Since S443 that same-file shape IS `E-PROGRAM-002`,
+  // and since S445 it counts a markup-wrapped program too and the build is refused
+  // before any write; nested `<program>`s are still counted here.)
   //
   // RECURSIVE (S436 fix-round, F3). A top-level-only scan cannot see a `<program>`
   // nested inside other markup, but `_readRawProgramAttr` in emit-server — the reader
@@ -2083,9 +2174,10 @@ export function runCG(input: CgInput): CgOutput {
   // session attribute, some `<program>` declares it AND some compilation unit cannot
   // resolve it for itself — i.e. exactly when the compiler would otherwise have to
   // GUESS that unit's owner. Scoped EXACTLY there, and deliberately NOT to the
-  // general second-`<program>` shape: that is `E-PROGRAM-002`, still reserved, and
-  // implementing it would reject a MEASURED 75 of 1137 corpus compile sets — a
-  // separate and much larger arc.
+  // general second-`<program>` shape: that is `E-PROGRAM-002` — its SAME-FILE case
+  // fires since S443 (S445: whatever markup wraps either program), its CROSS-FILE case
+  // is still reserved, and implementing that would reject a MEASURED 75 of 1137 corpus
+  // compile sets — a separate and much larger arc.
   //
   // ⛔ THE DRIVER NO LONGER COMPUTES THIS PREDICATE (S436 round 4). It ASKS.
   //
@@ -2723,9 +2815,10 @@ export function runCG(input: CgInput): CgOutput {
       // version, author, license) emit standard HTML head tags. Empty-string
       // values are treated as absent. Non-string-literal values are silently
       // ignored — head metadata is static, not reactive.
-      const topLevelProgram = (nodes as any[]).find(
-        (n: any) => n && n.kind === "markup" && n.tag === "program",
-      );
+      // The file's top-level <program> by the shared role definition
+      // (program-role.ts, §4.12 / S445) — a <div>-wrapped application program
+      // is still the document root whose head metadata this reads.
+      const topLevelProgram: any = findTopLevelProgram(nodes, programRoleOptionsOf(fileAST));
       function getDocAttr(name: string): string | null {
         if (!topLevelProgram) return null;
         const attrs: any[] = topLevelProgram.attributes ?? topLevelProgram.attrs ?? [];
@@ -3157,7 +3250,8 @@ export function runCG(input: CgInput): CgOutput {
           `${_plural(_blocked.length, "itself", "themselves")}: ${_blocked.join(", ")}. ` +
           `The compiler cannot attribute ${_plural(_blocked.length, "it", "them")} to an owning ` +
           `<program> — §40.8 makes entry identity a BUILD fact, not a file fact, and ` +
-          `E-PROGRAM-002 is reserved-not-implemented. Applying one program's declaration ` +
+          `a second <program> in another file is not yet an error (E-PROGRAM-002's cross-file ` +
+          `case is reserved). Applying one program's declaration ` +
           `build-wide silently strips __Host- and Secure from the other's cookie; ` +
           `withholding it splits one program's own units across two disjoint readers, ` +
           `so a login on one route leaves that program's other routes logged out.\n` +
@@ -3240,9 +3334,10 @@ export function runCG(input: CgInput): CgOutput {
     // are the same test; the gap is the QUESTION. Per SPEC §40.8 the entry file
     // is *"the file resolved by the build root"* — a BUILD fact. This site
     // infers it from file CONTENT and takes the first match, and the compiler
-    // does not enforce uniqueness (`E-PROGRAM-002` is reserved-not-implemented,
-    // §40.8: "TBD — separate diagnostic; not part of Wave 1"), so a second
-    // top-level `<program>` in the compile unit is silently ignored here.
+    // does not enforce uniqueness ACROSS FILES (`E-PROGRAM-002`'s cross-file case
+    // is reserved-not-implemented, §40.8: "TBD — separate diagnostic; not part of
+    // Wave 1"; the same-file case fires since S443/S445), so a second
+    // program-bearing file in the compile unit is silently ignored here.
     // Closing this needs a build-root entry resolver over the file SET, which
     // is a separate arc.
     // `hasProgramRoot` lives on the FileAST. In the CG pipeline,
@@ -3273,7 +3368,7 @@ export function runCG(input: CgInput): CgOutput {
       const stamped = f?.ast?.fileShape ?? f?.fileShape;
       if (stamped) return stamped;
       const nodes = f?.ast?.nodes ?? f?.nodes ?? [];
-      return classifyFileShape(nodes, getHasProgramRoot(f));
+      return classifyFileShape(nodes, getHasProgramRoot(f), programRoleOptionsOf(f));
     }
     let entryFile: any = null;
     for (const f of files) {
