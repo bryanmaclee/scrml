@@ -2,6 +2,30 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S445 — 2026-09-30 (bryan · ASUS, concurrent with S444 on XPS)
+
+S443's held security pickup, driven through adversarial review until each landing was strictly better than main —
+four security arcs landed, eight rulings, and every one of them reproduced by execution before it entered a brief.
+
+- **App root relative to the build root** (#1194): a project living under any `…/pages/…` or `…/routes/…` directory
+  no longer serves member pages of a `<program auth="required">` app anonymously (`/about` 200 → 302). One rule for the
+  build root (§40.8 "The build root"): the application entry file's directory; `W-AUTH-REQUIRED-NOT-INHERITED`. Four
+  S239 rounds; corpus byte-identical.
+- **Declared prose** (#1196, rulings S441 / S443 #4 / S445 #2): `<program>`/`<page>`/`<channel>` bodies carry no loose
+  prose — every byte compiles or is an error, on both parsers; new `E-STMT-NO-EFFECT` (an expression statement with no
+  effect is an error — `@a == 1`, `"Total: " + @count`, bare `@count`). Enum `renders` bodies now taken verbatim
+  (`No #${id}` → `No #42`; main dropped the `#`). Five rounds.
+- **Protected-column egress round 6** (#1198, rulings S443 #7, S445 #4): nine leak classes closed; per-column markers;
+  the sink builds its own plain-data snapshot (getters/`toJSON` run once, against a stripped `this`); an HMAC key
+  declassifies only with positive runtime evidence. Six rounds; `this`-writes filed HIGH for round 7.
+- **Program role by ancestor** (#1201, rulings S445 (b) + items 1/3/5): a `<div>`-wrapped app program's `auth=` is
+  enforced; route-file programs are nested (implied ancestor); session + every app-level attribute on a nested program
+  are errors (`E-PROGRAM-NESTED-SESSION` / `-NESTED-ATTR` / `-CONFIG-UNREAD`); refused builds write nothing.
+- **In flight at wrap:** dev-db resolution (`db=` relative to the declaring file; ownership-gated creation;
+  `SCRML_DATA_DIR`) — round 4.
+- Banked dpa-063 (statement termination) + dpa-064 (nested program as an auth scope) (#1192). flogence: `@adv` lapsed,
+  carried in the overlay again. Gaps filed §S445 (incl. HIGH `scrml serve` exposure).
+
 ## S442 — 2026-09-29 (bryan · XPS, concurrent with S441)
 
 The bootstrap got the S440 typer rules end to end and grew to the §66.19 worked programs; bryan ruled the tape
@@ -7753,6 +7777,30 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+
+### S444 (2026-09-30/10-01, bryan · XPS) — a coderlegion port became four rulings, and the TS compiler's `<request>` turned out to loop
+
+**The arc.** Booted as successor to S443 and worked S442's held bootstrap lane: the dpa-045 plain-markup parser (three review
+rounds — the second caught a fix that let a *closed* literal move a body's end), typer r8 (two rounds), then bootstrap Core
+additions + dpa-058 so §66.19.5 (audit log) and §66.19.2 (validated form) run from their verbatim SPEC sources. A side quest —
+porting the coderlegion article "Searching a billion records" to 37 compiled lines of scrml — surfaced three places scrml was
+not equivalent; bryan said "those first 3 are things we should look at", and they became dpa-059 (a superseded `<request>`
+aborts READS, discards WRITES), dpa-060 (a bare compiler-derived `cache`, no author TTL, revalidate on hit), dpa-061 (`persist=`
+— a lifetime attribute, not an authority value; `key=` required; decode-first; IndexedDB a planned stdlib), and dpa-062
+(`prepaint` REFLECT on the cell + `hold=@cell` on a region). All four are SPEC-landed (Nominal); the bootstrap has no server
+boundary yet, so the build is a planned multi-session arc. Ruled too: free-text `//` is a comment only after whitespace (and
+swallows the rest of the line); display-text escapes `\"` `\\` `\${` restored (reversing S442); a `"…"` is display text only as a
+standalone statement. The fix work found the impl#1 `<request>` re-fetched in a loop on its own settle (example 32: 51 calls on
+mount) — landed as an explicit S435 exception — and a strict-CSP break in per-route chunk loading (fixed, same-origin script).
+
+- #1181 maps · #1182 slice-m4 in CI + live-PG hook timeouts · #1184 honest E-ASYNC-FN-ESCAPES-AS-VALUE wording (flogence)
+- #1185 dpa-045 SPEC follow-ups + 6 gaps · #1186 bank dpa-059/060/061 (+062) · #1188 / #1197 gap filings (3 `<request>` resolved)
+- #1189 bootstrap typer r8 · #1190 dpa-045 bootstrap parser · #1195 `//` + escapes + standalone display literal
+- #1191 impl#1 `<request>`: deps= honored, re-fire loop, refetch() kept, client-async bodies awaited, E-LIFECYCLE-022
+- #1193 SPEC §6.7.7.1 / §6.7.7.2 / §6.14 · #1199 SPEC §6.14.4 prepaint/hold + CSP sha256
+- #1200 security: per-route chunk manifest/bootstrap → same-origin script (strict CSP refused the inline ones)
+- #1202 bootstrap Core additions (bind, Date.now, `<*x/>`, removals, index places, lambdas) + dpa-058 validators + fail-closed refusal of unimplemented elements
+- Gate: cloud `gate` green on every merge; review floor markers for all S444 PRs.
 
 ### S443 (2026-09-29/30, bryan · ASUS) — the S441 review record was wrong, the auth holes closed, and two broken flagship examples work end to end
 

@@ -4122,3 +4122,23 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3607] friction · sub-agent weekly quota exhausted mid-session (3 agents died); continued PA-direct with self-reviewed landings labelled; agent reviews re-run post-merge on quota return found real defects in all three
 
 [3608] state · S443 held for next session: prose r5 + protect r6 briefs (scrml-support/handOffs/s443-briefs/), ex23 residuals, err-arm branch, README #1176; S444-bryan-xps LIVE (successor)
+
+[3609] land · S444: #1181 #1182 #1184 #1185 #1186 #1188 #1189 #1190 #1191 #1193 #1195 #1197 #1199 #1200 #1202 — bootstrap dpa-045 parser + typer r8 + Core additions/dpa-058; impl#1 <request> fixes (S435 exception); per-route chunks CSP fix; SPEC §6.7.7.1/.2, §6.14, §6.14.4 → docs/changelog.md S444
+
+[3610] rule · S444 (user-voice §S444): dpa-059 C (abort reads/discard writes) · dpa-060 B2 + no author TTL + revalidate · dpa-061 persist= (lifetime attr, key= required, decode-first, write-failure status, reveal/lin errors, theme pre-paint, IndexedDB planned stdlib) · dpa-062 c + recs (prepaint REFLECT / hold=@cell, CSP sha256) · free-text // only after whitespace, opaque to EOL · display escapes restored (supersedes S442 B(2)/B(3)) · display literal = standalone statement · #1191 S435 exception
+
+[3611] find · the bootstrap has NO server boundary and NO async → dpa-059/060 sit behind U0 async + U1 server (L each) → scrml-support/docs/deep-dives/bootstrap-server-boundary-arc-plan-2026-09-30.md; impl#1 <request> self-subscription re-fetch loop (fixed #1191); strict CSP refused per-route inline chunk scripts (fixed #1200)
+
+[3612] friction · three confident PA diagnoses reversed by execution (browser failures "unflagged" — baselined; post-merge protect failures "real interaction" — pre-existing test-order pollution; §20.8 "already aborts <request>" — router fetch only) + #1191 dispatched against S435 policy; two parallel sessions → every PR conflicts on generated files (resolve/train scripts)
+
+[3613] state · S444 WRAPPED. Open for bryan: dpa-058 B3 (bound top-level scalar lowers attrs? one switch), SPEC "unawaited Promise" softening, dpa-063/064 (S445 lane). S445 LIVE successor (ASUS). Next bootstrap arc: U0 async core.
+
+[3614] rule · S445 (user-voice S445): top-level <program> = no <program>/<page> ancestor (b); route-file programs nested (item 1); no-effect statement is an error (item 2); nested session attrs error (3); constant-key HMAC protected (4); nested app attrs error (5); db= relative to declaring file + ownership-gated create (6); SCRML_DATA_DIR + per-file ownership · → scrml-support/user-voice-scrml.md §S445 · @adv:g-wrapped-program-auth-silently-dropped,g-dev-creates-empty-db-stubs-that-break-later-compiles
+
+[3615] land · S445: #1194 app root build-relative · #1196 declared prose + E-STMT-NO-EFFECT · #1198 protect egress r6 · #1201 program role by ancestor · #1192 bank dpa-063/064 · → docs/changelog.md S445 · @adv:g-app-root-route-prefix-matched-on-absolute-path,g-body-top-invariant-bypassed-by-raw-text-nodes,g-protect-egress-round-6-residuals,g-wrapped-program-auth-silently-dropped
+
+[3616] find · S445 reviews: protect 6c/6d regressions of their own round (toJSON this-leak); writes through `this` leak on base (HIGH, round 7); `scrml serve` binds *:3100 unauthenticated with arbitrary file r/w (HIGH); server fn in `${ lift }` ships to client; named top-level program = public worker · → docs/known-gaps.md §S445 · @adv:g-protect-egress-round-7-residuals,g-serve-listens-all-interfaces-unauthenticated
+
+[3617] friction · two flaky 300-s pre-commit hangs = 81 orphaned bun servers (commands dev tests leak --__dev-child; old review servers), ~3 GB; killed by cwd (deleted) · → hand-off S445 DURABLE
+
+[3618] state · S445 held: dev-db r4 reviewed LAND-WITH-NITS — round 5 owes R4-1 (outside-root owning db ignores SCRML_DATA_DIR) then land + flogence path heads-up; protect round 7; dpa-063/064 COMPLETE ADVISORY, surface to bryan first · → hand-off.md S445 · @adv:g-dev-creates-empty-db-stubs-that-break-later-compiles,dpa-063,dpa-064

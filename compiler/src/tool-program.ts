@@ -17,6 +17,7 @@
  */
 
 import { classifyFileShape, isLibraryShape } from "./library-shape.js";
+import { findTopLevelProgram, programRoleOptionsOf } from "./program-role.ts";
 
 /** A loosely-typed AST node. */
 type ASTNodeLike = Record<string, unknown>;
@@ -38,15 +39,14 @@ function isProgramMarkup(node: unknown): node is ASTNodeLike {
 }
 
 /**
- * The top-level `<program>` node — the FIRST program markup node in the root
- * nodes array (§40.8: one-program-per-app; the entry file declares it). Returns
- * null when the file has no top-level `<program>` (a §21.5 library file).
+ * The top-level `<program>` node — the FIRST `<program>` with no `<program>` or
+ * `<page>` ancestor, whatever markup wraps it (§4.12, S445; §40.8:
+ * one-program-per-app; the entry file declares it). The role is decided by the ONE
+ * shared definition in `program-role.ts`. Returns null when the file has no
+ * top-level `<program>` (a §21.5 library file).
  */
 export function findTopLevelProgramNode(fileAST: unknown): ASTNodeLike | null {
-  for (const n of getToolNodes(fileAST)) {
-    if (isProgramMarkup(n)) return n;
-  }
-  return null;
+  return findTopLevelProgram(getToolNodes(fileAST), programRoleOptionsOf(fileAST));
 }
 
 /**
@@ -120,7 +120,7 @@ export function isLibraryShapedFile(fileAST: unknown): boolean {
   const nodes = (Array.isArray(src.nodes) ? src.nodes : []) as ASTNodeLike[];
   const shape =
     (src.fileShape as string | undefined) ??
-    classifyFileShape(nodes, src.hasProgramRoot === true);
+    classifyFileShape(nodes, src.hasProgramRoot === true, programRoleOptionsOf(src));
   return isLibraryShape(shape, (src.exports as unknown[] | undefined) ?? []);
 }
 

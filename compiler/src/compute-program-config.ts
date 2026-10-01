@@ -21,9 +21,14 @@
  * with `auth` / `loginRedirect` / `csrf` / `sessionExpiry` for downstream
  * stages that walk the node.
  *
+ * "The `<program>`" is the file's TOP-LEVEL one as `program-role.ts` defines it
+ * (no `<program>` / `<page>` ancestor, whatever markup wraps it — S445).
+ *
  * NOT relocated: the E-MW-002 ratelimit-format validation — that is an
  * error-emitting check, not extraction, and stays in `ast-builder.js`.
  */
+
+import { findTopLevelProgram, type ProgramRoleOptions } from "./program-role.ts";
 
 export interface AuthConfig {
   auth: string;
@@ -109,7 +114,7 @@ export interface ProgramConfig {
  *
  * @param nodes Top-level AST nodes (live `buildAST` output or native-parser).
  */
-export function computeProgramConfig(nodes: any[]): ProgramConfig {
+export function computeProgramConfig(nodes: any[], roleOpts: ProgramRoleOptions = {}): ProgramConfig {
   // ---------------------------------------------------------------------------
   // Session/auth attribute extraction from <program> (Option C hybrid)
   //
@@ -119,9 +124,17 @@ export function computeProgramConfig(nodes: any[]): ProgramConfig {
   // ---------------------------------------------------------------------------
 
   let authConfig: AuthConfig | null = null;
-  const programNode = Array.isArray(nodes)
-    ? nodes.find((n: any) => n.kind === "markup" && n.tag === "program")
-    : undefined;
+  // The file's top-level `<program>` — the first one with no `<program>` or
+  // `<page>` ancestor, WHATEVER MARKUP WRAPS IT (§4.12, ruling S445 option b).
+  // Before S445 this read only a DIRECT top-level node, so a
+  // `<div><program auth="required">…</program></div>` had its `auth=`, session and
+  // middleware attributes silently dropped and its server functions answered
+  // anonymous callers (g-wrapped-program-auth-silently-dropped). A second
+  // top-level `<program>` in the file is E-PROGRAM-002 (codegen/index.ts), read
+  // through the same definition.
+  // S445 item 1: in a route file of a build with an application program, every
+  // `<program>` is nested (`roleOpts.impliedAncestor`) — none is read here.
+  const programNode: any = findTopLevelProgram(nodes, roleOpts) ?? undefined;
   if (programNode) {
     const programAttrs = programNode.attrs ?? [];
 

@@ -84,6 +84,7 @@ import { collectChannelFunctionMap, collectChannelCellMap, collectChannelAttrHan
 import { buildBodyDG } from "./body-dg-builder.ts";
 import { planMultiBatchCPS } from "./cps-batch-planner.ts";
 import { isToolProgram, findToolMainFn, findTopLevelProgramNode } from "./tool-program.ts";
+import { findTopLevelProgram, programRoleOptionsOf } from "./program-role.ts";
 import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 import { countUnitProgramNodes } from "./codegen/session-config-resolve.ts";
 import { effectiveCsrfUnderAuth } from "./compute-program-config.ts";
@@ -4386,8 +4387,8 @@ function readStringAttrOf(attrs: any[] | undefined, name: string): string | null
 
 /**
  * Every literal `auth=` declaration that governs this file's route, in document
- * order: the FIRST top-level `<program>` (the only one compute-program-config
- * reads) and every `<page auth=>`. Nested `<program>`s are skipped — their `auth=`
+ * order: the file's top-level `<program>` (program-role.ts — the only one
+ * compute-program-config reads) and every `<page auth=>`. Nested `<program>`s are skipped — their `auth=`
  * is E-PROGRAM-NESTED-AUTH, not a declaration of this route.
  */
 function collectFileAuthDecls(fileAST: FileAST): Array<{ site: "program" | "page"; value: string; node: any; line: number; col: number }> {
@@ -4399,31 +4400,33 @@ function collectFileAuthDecls(fileAST: FileAST): Array<{ site: "program" | "page
     const sp = (a && a.span) || node.span || {};
     return { line: sp.line ?? 0, col: sp.col ?? 0 };
   };
-  let firstProgramSeen = false;
-  const walk = (ns: any[] | undefined, topLevel: boolean): void => {
+  // The file's top-level `<program>` by the ONE shared role definition
+  // (program-role.ts; §4.12, S445): no `<program>` / `<page>` ancestor, whatever
+  // markup wraps it — the same node compute-program-config reads.
+  const topProgram = findTopLevelProgram(nodes, programRoleOptionsOf(fileAST));
+  const walk = (ns: any[] | undefined): void => {
     if (!Array.isArray(ns)) return;
     for (const node of ns) {
       if (!node || node.kind !== "markup") continue;
       if (node.tag === "program") {
-        // Only the first top-level `<program>`'s auth= is this route's program
+        // Only the top-level `<program>`'s auth= is this route's program
         // declaration; a nested / second top-level one is not recorded (its
         // children are still walked so a `<page auth=>` inside is never missed).
-        if (topLevel && !firstProgramSeen) {
-          firstProgramSeen = true;
+        if (node === topProgram) {
           const v = readStringAttrOf(node.attrs, "auth");
           if (v) out.push({ site: "program", value: v, node, ...at(node) });
         }
-        walk(node.children, false);
+        walk(node.children);
         continue;
       }
       if (node.tag === "page") {
         const v = readStringAttrOf(node.attrs, "auth");
         if (v) out.push({ site: "page", value: v, node, ...at(node) });
       }
-      walk(node.children, false);
+      walk(node.children);
     }
   };
-  walk(nodes, true);
+  walk(nodes);
   return out;
 }
 
@@ -6409,6 +6412,32 @@ export function runRI(input: RIInput): RIOutput {
   const rootCandidates = buildRootRes.candidates;
   const appRoot: FileAST | null = rootCandidates.length === 1 ? rootCandidates[0] : null;
 
+  // S445 re-review nit (a) — a GIVEN build root that does not contain an application
+  // `<program>` file of the build. Route files are classified relative to the given
+  // root only, so a `<program>` file outside it is neither a route file nor inside
+  // the application the root describes, and a page under the root may stop
+  // inheriting that program's gate (measured: `buildRoot="<src>/pages"` with the app
+  // at `<src>/app.scrml` — a member page holding a wrapped worker program became a
+  // second application and served its server fn anonymously). Say so; the root is
+  // the caller's configuration, so this warns rather than guessing a different root.
+  if (buildRootRes.origin === "given" && buildRoot !== "") {
+    for (const f of rootCandidates) {
+      const norm = f.filePath.replace(/\\/g, "/");
+      if (norm.startsWith(buildRoot + "/")) continue;
+      const w = new RIError(
+        "W-BUILD-ROOT-EXCLUDES-PROGRAM",
+        `W-BUILD-ROOT-EXCLUDES-PROGRAM: this file declares a top-level <program> but lies outside the ` +
+        `build root the compiler was given ("${buildRoot}"). Route files (pages/, routes/) are classified ` +
+        `relative to that root only, so pages under it may not inherit this program's auth= gate — they ` +
+        `can be served without authentication. Give the build root that contains the application's entry ` +
+        `file (compileScrml's buildRoot; §40.8 "The build root").`,
+        { file: f.filePath, start: 0, end: 0, line: 1, col: 1 } as any,
+      );
+      w.severity = "warning";
+      errors.push(w);
+    }
+  }
+
   // The redirect target of a page scope (S443 rounds 2-3): `loginRedirect=` is not a
   // `<page>` attribute (E-PAGE-INVALID-ATTR), so it comes from the application's
   // top-level `<program>`'s declared `loginRedirect=`, else the §52.13 default
@@ -7088,6 +7117,40 @@ function makeRouteClassifier(res: BuildRootResolution): (filePath: string) => { 
       return { idx: root.length - rootName.length - 1, prefix: "/" + rootName + "/" };
     }
     return null;
+  };
+}
+
+/**
+ * S445 item 1 — the build facts `program-role.ts#stampImpliedProgramAncestors`
+ * needs: does an application program exist, and which files are its route files.
+ * Decided by THIS file's build-root resolution (`resolveBuildRoot` +
+ * `makeRouteClassifier`), the same rule Step 8 uses, so the implied ancestor and
+ * the app-root identification cannot disagree. `api.js` calls it once, after
+ * parsing and before PRECG, over the parsed FileASTs (no file is stamped yet, so
+ * every `<program>` has its structural role here).
+ *
+ * An application program exists when a candidate is a real application file —
+ * the inferred/given entry, or a candidate that is not itself a route file.
+ * `origin: "none"` with only route-file candidates (the legacy all-`<program>`
+ * `routes/` set, where the shallowest route files are the fallback candidates)
+ * has NO application program, so nothing becomes nested there.
+ */
+export function programRoleBuildFacts(
+  files: readonly FileAST[],
+  givenRoot?: string,
+): { applicationExists: boolean; isRouteFile: (fileAST: unknown) => boolean } {
+  const res = resolveBuildRoot(files, givenRoot);
+  const classify = makeRouteClassifier(res);
+  const appFiles = new Set<FileAST>(
+    res.candidates.filter((f) => f === res.entry || classify(f.filePath) === null),
+  );
+  return {
+    applicationExists: appFiles.size > 0,
+    isRouteFile: (fileAST: unknown) => {
+      const f = fileAST as FileAST;
+      if (!f || typeof f.filePath !== "string" || appFiles.has(f)) return false;
+      return classify(f.filePath) !== null;
+    },
   };
 }
 
