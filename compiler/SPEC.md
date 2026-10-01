@@ -39983,7 +39983,8 @@ The §34 catalog rows for every `E-STYLE-*`/`W-STYLE-*`/`E-THEME-*`/`E-DEFAULTS-
 > **Authority.** bryan's verbatim rulings in `scrml-support/user-voice-scrml.md`: the S430 block (from *"P1
 > ruled"* through *"dpa-052 reframed by bryan"*), every S435 block, the S437 bootstrap-slice-M1 block
 > (*"L6 a, L12 b, identities yes, replace respects sub-fields"*) and its follow-up (*"O58 b, O57 no, O59 lean, O60
-> lean, confirms yes"*); the queue bodies `[dpa-050]` /
+> lean, confirms yes"*); the S447 opener-keyword block (*"your recs"*, item 2 — keywords go OUTSIDE the
+> declaration opener, option (b)); the queue bodies `[dpa-050]` /
 > `[dpa-052]` in `handOffs/dpa-queue.md`. The dPA deep-dive
 > `scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md` is
 > **advisory only**: where a ruling differs from its lean (notably **Q6 was ruled option (a)**, not the DD's
@@ -40049,9 +40050,30 @@ the follow-up *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*).** Each is ma
 | §66.10 item 6 | Identities are not values: an `as=` handle refers to its instance and does not snapshot it; values snapshot | O56 = NARROW confirmed unchanged |
 | §66.11.3 (xrefs §66.11.4, §66.20) | The spread-override shape `@x = { ...@x, f: v }` is a field edit judged by `f`'s own contract; a genuine replace is authoritative (O58 = (b)); a contract-free sub-field does not bound a replace (O57 = no) | O57, O58 ruled |
 
-**Notation.** Every example in §66 uses the ruled spelling: `let` is a PREFIX (`<let count:int=0/>`); the own
-value `=` sits inside the opener; a void declaration closes `/>`, a bodied one `</>`; a non-trivial opener
-expression is parenthesized (§66.2.4).
+**S447 amendment — keywords go OUTSIDE the declaration opener (option (b)).** Marked in place with an
+`Amendment S447` banner at each section it touches (§66.0 Notation, §66.2.5 (new), §66.3, §66.4, §66.5.1, §66.8.2,
+§66.9, §66.11.3, §66.13.3, §66.14, §66.17, §66.19, §66.20, §66.21, §66.22). It supersedes text inside §66 only:
+
+| Where | Ruling | Effect |
+|---|---|---|
+| §66.2.5 (new), §66.9 rule 2, Notation | Words that say what kind of thing a declaration is — `export`, `let` — go BEFORE the `<`, in JS order: `let <x:T=v/>`, `export let <x:T=v/>`, `export <x …/>`. Inside the opener: only the name, `:Type`, `=value`, typed attributes, and flags true by presence. After the closer: `renders` (unchanged) | supersedes ruling S435 "writable cells spelled `let`" — POSITION ONLY (the word `let`, `const` retiring, derived / seeded all stand) |
+| §66.5.1, §66.20 | `renders` inside an opener is its own error (sub-ruling 2) | new code `E-DECL-RENDERS-IN-OPENER` |
+| §66.2.5, §66.20 | `let <x/>` / `export <x/>` only where declarations are ITEMS (program body, declaration body); an error elsewhere, never text (sub-ruling 3) | new code `E-DECL-KEYWORD-NOT-ITEM` |
+| §66.4 rule 6, §66.14 rule 3 | Writable / exported attributes become CHILD declarations; attributes are always locked data (sub-ruling 4); a use-site attribute still sets a child (O43) | §66.4 rule 6 (former O53) RETIRES |
+
+> **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs"* (item 2: *"Words that say what kind of thing it
+> is go before the `<` (`export`, `let`, in the same order as JavaScript); inside the opener only the name, type,
+> value, typed attributes, and flags that are true just by being present (`req`, `single`, `server`, `pinned`);
+> after the closer, `renders`."* → RULED (b); sub-recs 2, 3, 4 ratified) · supersedes: ruling:S435 "writable
+> cells spelled `let`" (position only) and §66.4 rule 6 (former O53) · artifact:
+> `scrml-support/docs/deep-dives/opener-keyword-vs-attribute-2026-10-01.md` (Approach B).
+
+**Notation.** Every example in §66 uses the ruled spelling: `let` and `export` go BEFORE the `<`
+(`let <count:int=0/>`, `export let <value:string=""/>` — S447); inside the opener stand only the name, `:Type`,
+the own value `=`, typed attributes and flags true by presence; `renders` follows the closer; a void declaration
+closes `/>`, a bodied one `</>`; a non-trivial opener expression is parenthesized (§66.2.4). (The S435 spelling
+put `let` inside the opener as a prefix to the name, `<let count:int=0/>`; it is superseded by S447 and is an error,
+§66.20.)
 
 ### 66.1 What a declaration is
 
@@ -40090,9 +40112,9 @@ A declaration closes like every tag: **`/>` when void, `</>` when bodied.** Ther
 terminator.
 
 ```scrml
-<let count:int=0/>                         // void
+let <count:int=0/>                         // void (`let` before the `<` — §66.2.5, S447)
 <signup:struct>                            // bodied — the body holds child declarations
-    <let email:string=""/>
+    let <email:string=""/>
 </>
 ```
 
@@ -40164,6 +40186,61 @@ follows the adopted restatement.)
 > the tuple literal of §66.12.5 — may stand bare in an opener, or must be parenthesized, is not ruled. §66's
 > examples parenthesize every compound literal except the empty `[]`.
 
+#### 66.2.5 Keywords go outside the opener (S447)
+
+> **Amendment S447 — keywords go OUTSIDE the declaration opener (option (b)).**
+> **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs"* (item 2: *"Words that say what kind of thing it
+> is go before the `<` (`export`, `let`, in the same order as JavaScript); inside the opener only the name, type,
+> value, typed attributes, and flags that are true just by being present (`req`, `single`, `server`, `pinned`);
+> after the closer, `renders`."*; sub-recs 2 and 3 ratified) · supersedes: ruling:S435 "writable cells spelled
+> `let`" — the PREFIX-in-the-opener POSITION only (the word `let`, `const` retiring, derived / seeded all stand).
+
+A declaration is read in three zones. **No word inside an opener modifies or introduces the word after it.**
+
+1. **Before the `<` — what kind of thing the declaration is.** `export` and `let`, in the JavaScript order:
+   `let <darkMode:bool=false/>`, `export let <on:bool=false/>`, `export <toggle label:string>…</>`. `let` is the
+   `replace` grant (§66.9 rule 2); `export` is cross-file visibility / write (§66.14).
+2. **Inside the opener — data and flags true by presence.** Only the name, `:Type`, the own value `=value`, typed
+   attributes (`attr:Type=default`), and flags that are true just by being present: validators (`req`,
+   `length(…)`, …), `single`, `server`, `pinned`, `prepaint`, and the valued modifiers (`persist=`, `key=`,
+   `debounced=`, …). (`<`/`*` in `<*x/>` is a sigil on a USE, §66.6.2, not a keyword.)
+3. **After the closer — the declaration's markup.** `renders <markup>` (§66.5.1, unchanged).
+
+```scrml
+let <darkMode:bool=false/>                     // writable: `let` before the `<`
+<seatPrice:number=12/>                         // locked constant
+let <seats:int=3/>
+<total:number=(@seatPrice * @seats)/>          // derived (locked + reactive initializer)
+<profile:struct>
+    <name:string="Ada"/>                       // locked field
+    let <email:string="" req length(>=5)/>     // writable, validated field — `req` is a flag inside the opener
+    renders <input type="email" bind:value=@email/>   // `renders` after the closer (⚑ O54 / O25)
+</>
+export let <mode:Mode=.Light/>                 // exported and writable: JS order (⚑ O2 / O39 on what export grants)
+```
+
+**Where `let <x/>` and `export <x/>` are recognized (sub-ruling 3).** `let` or `export` before a tag is recognized
+ONLY where declarations are ITEMS: a program body and a declaration body. Anywhere else — for example inside a
+markup body (`<main>`, `<div>`, a `renders`) — `let` or `export` followed by a tag is an error,
+`E-DECL-KEYWORD-NOT-ITEM` (§66.20); it is never guessed to be the text "let" followed by an element. (So a
+declaration in a markup position — §66.5.4, ⚑ O38 — cannot carry `let` or `export`.)
+
+**`let` followed by `<` is the declaration keyword; `let` followed by a name is the logic binding.** In an item
+position (whose body parses in the §40.8 default-logic mode), `let` (or `export let`) whose next token is `<` is
+this declaration keyword; `let` followed by an identifier stays the logic-local binding (§50; §66.11.5). The two
+never share a next token.
+
+**Errors in the opener.** `let` written inside an opener — the S435 spelling `<let count:int=0/>`, or on an
+attribute (`<x let a:T/>`, `export let a:T`) — is `E-DECL-LET-IN-OPENER` (§66.20; the message names the S447 form,
+`let <count:int=0/>`, or a child declaration for an attribute, §66.4 rule 6). `renders` inside an opener is
+`E-DECL-RENDERS-IN-OPENER` (§66.5.1).
+
+> ⚑ **OPEN (not ruled) — O61: which bodies other than a program body and a declaration body are item
+> positions.** Sub-ruling 3 names the program body and a declaration body. Not ruled: whether a `<page>` body
+> (which parses in the same §40.8 default-logic mode as `<program>`) and a `<theme>` body (which holds only token
+> declarations, §66.17) are item positions — §66.19.4 writes `export` on `<theme>` tokens, as it did before S447,
+> and marks those lines `⚑ O61`.
+
 ### 66.3 Own value, inline defaults, and inference
 
 > **Provenance:** ruling:user-voice-scrml.md S430 (Q3) · *"c, and go uniform"*; S435 (#17) · *"retire, int,
@@ -40183,7 +40260,7 @@ follows the adopted restatement.)
    **An integer literal infers `int`; a non-integer numeric literal infers `number`; an annotation wins**
    (`<ratio:number=1/>` is a `number`).
 4. The own value, like every declaration (§66.9), is **locked** unless `let` is written: `<count:int=0/>` is a
-   constant; `<let count:int=0/>` is writable.
+   constant; `let <count:int=0/>` is writable (`let` before the `<` — §66.2.5, S447).
 
 > ⚑ **OPEN (not ruled) — O35: the rest of DD §7 #17.** bryan expounded #17 and ruled only its integer-literal
 > half (*"int"*). The rest of the DD's #17 lean is not ruled: **(a)** inference applies to the own value ONLY,
@@ -40203,9 +40280,9 @@ follows the adopted restatement.)
 ### 66.4 Attributes are data; children are validated fields
 
 > **Provenance:** ruling:user-voice-scrml.md S430 (Q4) · *"A, attributes for data, children for validated
-> fields"*.
+> fields"*; ruling:user-voice-scrml.md S447 · *"your recs"* (item 2, sub-rec 4 — rule 6 below).
 > **supersedes:** §6.3.2's Variant C field spelling (`<name> = ""` children); the §6.3.1–§6.3.2 Tier-1/Tier-2
-> presentation is re-expressed by §66.3 (own value) and this subsection (children).
+> presentation is re-expressed by §66.3 (own value) and this subsection (children); (S447) the former rule 6.
 
 1. An **attribute** is a bare typed value — data. It carries a type and, optionally, a default (§66.3); it
    carries NO modifiers, validators, `renders` or instances of its own.
@@ -40213,9 +40290,10 @@ follows the adopted restatement.)
    state kind in its own right, declared in the parent's body:
 
    ```scrml
-   <signup let agree:bool=false>                         // `agree` is data: an attribute (`let` on an attribute: rule 6)
-       <let email:string="" req length(>=5)/>            // `email` is validated: a child declaration
-       <let password:string="" req length(>=8)/>
+   <signup source:string="web">                          // `source` is data: a (locked) attribute
+       let <agree:bool=false/>                           // `agree` is writable: a child declaration (rule 6, S447)
+       let <email:string="" req length(>=5)/>            // `email` is validated: a child declaration
+       let <password:string="" req length(>=8)/>
    </>
    ```
 
@@ -40225,15 +40303,49 @@ follows the adopted restatement.)
 4. **A declaration's body holds child declarations** (and the transition-graph children of §66.13), never
    markup. A declaration's markup attaches only through `renders` (§66.5).
 5. **Promotion is mechanical.** Moving an attribute to a child declaration (when it grows validators,
-   modifiers, a render or instances) is a mechanical rewrite offered by a compiler hint and performed by
-   `scrml promote` (§56). The hint's code and its exact trigger are not ruled (OPEN — O42).
+   modifiers, a render, instances, or — S447, rule 6 — a `let` / `export` grant) is a mechanical rewrite offered
+   by a compiler hint and performed by `scrml promote` (§56). The hint's code and its exact trigger are not ruled
+   (OPEN — O42).
 
-6. **`let` and `export let` are legal on an ATTRIBUTE**, and `export` on a child field is written before its tag.
-   Provenance: ruling:S435 (PA proposal text answered "a", "E2, move on", "yes, :struct,") — all three messages
-   write the dropdown's attribute as `let value:string=""` / `export let value:string=""` inside the opener, and
-   the E2 message exports a CHILD field as `export <open:Openness=.Closed> … </>`. (Former O53 — closed. Q4's
-   "a field that needs its own modifiers … is a CHILD" is thereby read as covering validators / renders /
-   instances, not the `let` / `export` grants.)
+> **Amendment S447 — rule 6 RETIRES: attributes are always locked data; a writable or exported field is a CHILD
+> declaration.**
+> **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs"* (item 2, sub-rec 4: *"writable attributes become
+> child declarations — attributes are always locked data (a use-site attribute still sets a child, O43)"*) ·
+> supersedes: §66.4 rule 6 below (former O53, ruling:S435 PA proposal text answered "a", "E2, move on", "yes,
+> :struct,") and ruling:S435 "writable cells spelled `let`" (position only).
+
+6. **Attributes are always LOCKED DATA; a writable or exported field is a CHILD declaration (S447).** An attribute
+   carries no grant: neither `let` nor `export` may be written on it (rule 1 — *"it carries NO modifiers"* — now
+   holds without exception; `let` in an opener is `E-DECL-LET-IN-OPENER`, §66.20). A field that must be writable
+   (`let`) or writable from other files (`export`, §66.14) is a child declaration in the parent's body, with its
+   keywords before its `<` (§66.2.5): `let <f:T=v/>`, `export let <f:T=v/>`, `export <f:T=v>…</>`. A use-site
+   attribute still sets such a child for that instance (O43, ruled S437; §66.9 rule 8), so a component's use site
+   reads the same as before:
+
+   ```scrml
+   // lib/toggle.scrml
+   export <toggle label:string>                       // `label`: a locked attribute (data)
+       export let <on:bool=false/>                    // a writable, exported CHILD (was an attribute under S435)
+   </>
+   renders <label><input type="checkbox" bind:checked=@toggle.on/> ${label}</label>   // ⚑ O54
+
+   // app.scrml
+   <toggle as=notify label="Email me" on=true/>      // a use-site attribute still sets the child (O43)
+   function muteAll() { @notify.on = false }          // a cross-file write to an EXPORTED field (§66.14)
+   ```
+
+   **The cost, stated:** a component with writable state now has a body. A declaration whose only fields were
+   writable attributes — the swatch of §66.8.2 / §66.19.4 — goes from one opener to a `:struct` body of child
+   declarations (one line becomes four), and the declaration/use marker then comes from `:struct` (§66.2.2),
+   since no typed attribute remains in the opener.
+
+   *(Retired, kept for the record)* ~~**`let` and `export let` are legal on an ATTRIBUTE**, and `export` on a child
+   field is written before its tag.~~ Provenance: ruling:S435 (PA proposal text answered "a", "E2, move on", "yes,
+   :struct,") — all three messages write the dropdown's attribute as `let value:string=""` / `export let
+   value:string=""` inside the opener, and the E2 message exports a CHILD field as `export <open:Openness=.Closed>
+   … </>`. (Former O53 — closed at S435, superseded S447. The S435 reading of Q4 — that "a field that needs its own
+   modifiers … is a CHILD" covers validators / renders / instances but not the `let` / `export` grants — is
+   superseded: the grants now make a field a child too.)
 
 > ✅ **RULED S437 — O43: a use-site attribute MAY set a child field's value.** `<dropdown open=(@x)/>` (a child
 > field set by a same-named use-site attribute) is legal, and §66.9 rule 8 governs it (that instance's initializer;
