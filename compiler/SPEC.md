@@ -6164,6 +6164,7 @@ reset(@compound)          // reset all fields of a compound cell
 - §6.2 — Three RHS shapes (which cells support `default=`)
 - §6.3 — Compound state (compound reset semantics; §6.3.5 grounds multi-level)
 - §6.13 — Reactivity attributes (`debounced=` / `throttled=`); reset cancels pending timed writes.
+- §55.13 — reset clears the validity surface's `touched` / `submitted` (for a compound, a field, and — S447 — a validated top-level value).
 - §14.12 — Lifecycle annotation; reset reverts per-access transition state per §6.8.3.
 - §34 — E-RESERVED-IDENTIFIER, E-RESET-NO-ARG, E-RESET-INVALID-TARGET
 
@@ -6356,41 +6357,40 @@ Timeline:
 
 ### 6.11 Auto-Synthesized Validity Surface (stub — see §55)
 
-When a compound state declaration contains one or more fields with validator attributes (`req`, `length(>=N)`, `pattern(...)`, `min=`, `max=`, etc.), the compiler auto-synthesizes a reactive validity surface accessible at two levels:
+> **Provenance (stub corrected S447):** dd:top-level-validity-surface-dpa-058c-2026-10-01 "PA action requested" (the
+> stub still listed `@x.errors: string[]` and `@x.field.error`, contradicting §55.6 / §55.9) · ruling:user-voice-scrml.md
+> S447 "RULED — \"your recs\": validated top-level cells get a validity surface (Edge A reversed) …" item 1 ·
+> **supersedes:** this stub's previous property table (whose S67 correction note is folded into the table below).
 
-**Compound rollup:** `@signup.isValid` — `true` when ALL fields pass their validators.
+The compiler auto-synthesizes a reactive, read-only validity surface on (a) **every compound** state declaration
+(a declaration with fields — even with no validators, §55.5 Edge B) and its fields, and (b) **every top-level value
+that carries validators** (`req`, `length(…)`, `pattern(…)`, `min(…)`, `max(…)`, …; §55.5.1, S447). A top-level
+value with no validators has none.
 
-**Per-field validity:** `@signup.name.isValid`, `@signup.email.isValid` — `true` when that field passes its validators.
+| Property | On | Type | Description |
+|---|---|---|---|
+| `@signup.isValid` | compound | `boolean` | `true` ↔ every field passes its validators |
+| `@signup.errors` | compound | `{ fieldName: ValidationError[], … }` | per-field arrays of `ValidationError` tags (§55.9) |
+| `@signup.touched` | compound | `{ fieldName: bool, … }` | per-field first-interaction flags |
+| `@signup.submitted` | compound | `boolean` | a `<form>` binding any of its fields has been submitted (§55.7) |
+| `@signup.email.isValid` | field | `boolean` | this field passes its validators |
+| `@signup.email.errors` | field | `ValidationError[]` | this field's failing tags, in declaration order (§55.12) |
+| `@signup.email.touched` | field | `boolean` | the user has interacted with this field |
+| `@email.isValid` / `.errors` / `.touched` | validated top-level value | as for a field | §55.5.1 |
+| `@email.submitted` | validated top-level value | `boolean` | a `<form>` binding the value has been submitted (§55.7) |
 
-Additional synthesized properties:
+`errors` holds `ValidationError` enum tags, never strings; render them with `<errors of=…/>` (§55.8) or
+`messageFor` (§55.10). There is no singular `error` property. All synthesized properties are **READ-ONLY**:
+writing to one is **E-SYNTHESIZED-WRITE** (compile error; see §34). The four names are reserved as field names
+(§55.5.3).
 
-| Property | Type | Description |
-|---|---|---|
-| `@x.isValid` | `boolean` | All fields valid |
-| `@x.errors` | `string[]` | List of validation error messages |
-| `@x.touched` | `boolean` | User has interacted with any field |
-| `@x.submitted` | `boolean` | Form has been submitted at least once |
-| `@x.field.isValid` | `boolean` | Per-field validity |
-| `@x.field.error` | `string \| not` | Per-field error message |
-| `@x.field.touched` | `boolean` | User has interacted with this field |
-
-All synthesized properties are **READ-ONLY**. Writing to them is **E-SYNTHESIZED-WRITE** (compile error; see §34).
-
-**Full treatment: §55 (forthcoming).** This section is a forward stub. §55 covers the complete validator grammar, error message synthesis, `<errors of=expr/>` display helpers, and interaction with the bind: dispatch table.
-
-> **Note on type-shape correction (S67, parallel to §6.6.8 S59 + §6.6.10 S66 rename footnotes).** The type-shape table in this stub predates §55.9's `ValidationError` enum (locked at L12). The canonical types per §55.5–§55.7 supersede the stub:
->
-> - Compound `errors` is `{ fieldName: [...errorTags], ... }` (object map of arrays of `ValidationError` enum tags), NOT `string[]`.
-> - Per-field property is `errors` (plural, array of enum tags), NOT singular `error: string | not`.
-> - All `errors` arrays contain `ValidationError` enum tags per §55.9, NOT raw strings.
->
-> §55.5–§55.7 are the authoritative type-shape reference. Surfaced by S67 A1b B11 + B12 Rule-4 audits (`docs/audits/a1b-b11-rule4-audit-2026-05-07.md`, `docs/audits/a1b-b12-rule4-audit-2026-05-07.md`).
+**Full treatment: §55.** This section is a forward stub; §55 is authoritative for every shape above.
 
 **Cross-references:**
 - §6.2 — Shape 2 (decl-with-render-spec): where validators appear
 - §34 — E-SYNTHESIZED-WRITE
-- §55 — Inline Type Predicates (full validator specification; forthcoming)
-- §55.5–§55.7 — canonical synthesized-property type shapes (supersede this stub's table per the S67 footnote above)
+- §55 — Validators and the Auto-Synthesized Validity Surface (full specification)
+- §55.5–§55.7 — canonical synthesized-property type shapes (the table above agrees with them as of S447)
 - §55.9 — `ValidationError` enum (the canonical error tag type)
 
 ---
@@ -6526,7 +6526,7 @@ Browser persistence is a **lifetime** property of a client-owned cell, orthogona
 
 1. **Restore at construction.** A `persist=` cell's stored value SHALL be read synchronously when the cell is constructed, before the first client render, inside a compiler-emitted host-JS storage guard (the §19 "localStorage availability guard" precedent). Restore is construction, not a transition. On a §66 declaration the restored value is a **§66.9 seed** of the shared instance: seeded once, thereafter independent and writable.
 2. **Codec.** The stored value SHALL be encoded and decoded with the §57 wire format and the §59.10 lossless codec (so maps and a stored `not` round-trip). Browser storage becomes a listed §57.1 sink for `persist=` cells.
-3. **Decode against the current type and full contract first; default on failure; never coerced.** On restore the stored value SHALL be decoded against the cell's **current** declared type and its full declared contract (e.g. §53 refinements, §66.12 sequence bounds). If the key is absent, storage is unavailable, the decode fails, or the decoded value does not satisfy the contract, the cell SHALL take its default (its §6.8 value: `default=` if present, else the initializer). A stored value that does not satisfy the current contract SHALL NOT reach the cell and SHALL NOT be coerced into it. A type edit therefore does not by itself discard stored data: a stored value that still satisfies the edited type is kept.
+3. **Decode against the current type and full contract first; default on failure; never coerced.** On restore the stored value SHALL be decoded against the cell's **current** declared type and its full declared contract (e.g. §53 refinements, §66.12 sequence bounds). If the key is absent, storage is unavailable, the decode fails, or the decoded value does not satisfy the contract, the cell SHALL take its default (its §6.8 value: `default=` if present, else the initializer). A stored value that does not satisfy the current contract SHALL NOT reach the cell and SHALL NOT be coerced into it. A type edit therefore does not by itself discard stored data: a stored value that still satisfies the edited type is kept. **§55 validators are not part of this contract** (S447 call 6 (i)): a stored value that fails a validator is restored, and the cell's validity surface shows it invalid (§55.7); a restore does not set `touched`.
 4. **Write on change.** When the cell's value changes, the compiler-emitted code SHALL encode the new value and write it to storage under `key`, inside the storage guard. (Composed with `debounced=` / `throttled=`, the storage write follows the cell's wrapped write.)
 5. **Cross-tab sync — `"local"` only.** A `persist="local"` cell SHALL subscribe to the Web `storage` event for its key and apply a changed value written by another same-origin document, decoded under rule 3. A `persist="session"` cell has no cross-tab sync (session storage is per tab).
 6. **Write failure is a read-only synthesized status property.** A storage write that fails (quota exceeded, storage unavailable) SHALL NOT throw into user code. It SHALL be reflected in a **read-only, compiler-synthesized status property** on the persisted cell, following the §55 validity-surface precedent (§55.7: read-only; a write to it is `E-SYNTHESIZED-WRITE`). The property's name and shape are OPEN (O-061-1).
@@ -22001,8 +22001,10 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-HOLD-WITHOUT-PERSIST | §6.14.4.3 | A `hold=@cell` region marker whose operand is not a `persist=` cell. A general "cloak until rendered" marker is a separate question (dd route-to-PA R4). **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | W-PREPAINT-UNCOVERED-READ | §6.14.4.2 | A read of a `prepaint` cell that REFLECT cannot cover — text content (`${@c}`), `<each>`, `if=`, or any read failing the §6.14.4.2 rule 5 coverage rule (non-attribute position, a server-cell or second-`prepaint`-cell input, not compile-time evaluable). Emitted once per read site, naming the site. Rec 2 verbatim: *"an **Info diagnostic naming each site** (not silent; not an error — those reads are empty before JS, never wrong)"*. **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Info |
 | E-VALIDATOR-INLINE-DYNAMIC | §55.10 | The Level-1 inline message override on a validator (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`) must be a static string literal. Per L12 Edge F, dynamic expressions / interpolations defeat i18n tooling extraction (messages must be statically discoverable). Use a static literal here, OR define a project-registered message via `data.registerMessages` (Level 2), OR use the `<match for=ValidationError>` escape hatch (Level 4). (Catalog addition S68 — A1b B13.) | Error |
-| E-VALIDATOR-DEAD | §55.5, §66.5.5 | A declaration's validators can never be observed, so they are silently dead: (a) they stand on a single-value top-level cell, which synthesizes no validity surface (§55.5 Edge A) — bound or not; or (b) they stand on a child field that no `bind:` targets — a validator reaches the page only through the element that binds its value, and the bind is always written (dpa-058 items (1)/(2)). Resolution: make the value a validated child field of a declaration and bind it in its `renders` (`renders <input bind:value=@email/>`). **Provenance:** ruling:user-voice-scrml.md S442 "RULED — dpa-058 (O25) = all PA recs", item (5) — *"Silently dead validators become errors"*. (Named S444; emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`fieldVals`, `validatorPass`); impl#1: **Nominal / not yet emitted** — impl#1 carries it, §34.0.) | Error |
-| E-VALIDITY-NO-SURFACE | §55.5 | A read of a synthesized validity property — `isValid`, `errors`, `touched`, `submitted` — on a cell that has no validity surface: a single-value top-level cell (§55.5 Edge A). Only a declaration and its child fields synthesize the surface (§55.5, §55.6). **Provenance:** ruling:user-voice-scrml.md S442 "RULED — dpa-058 (O25) = all PA recs", item (5) — "`@x.isValid` on a no-surface cell → an error". (Named S444; emitted by the bootstrap at `compiler/self-host-v2/analyze.scrml` (`resolveMember`); impl#1: **Nominal / not yet emitted** — impl#1 carries it, §34.0.) | Error |
+| E-VALIDATOR-DEAD | §55.5.2, §66.5.5 | **Amended S447 (call 4).** A value's validators are dead because **nothing can ever change the value** — all three hold: (1) no `bind:` anywhere targets it; (2) it has no write grant (it is locked — written without `let`, §66.9; a locked value with a reactive initializer is derived and is E-DERIVED-WITH-VALIDATORS instead); (3) it is not server-loaded (no `server` authority, §52). Its validity is then a compile-time constant. A value set only from logic and read through `isValid` is **legal**, for child fields and top-level values alike; a validated top-level value is no longer dead for being top-level (§55.5.1). Resolution: bind it, make it writable (`let`), or drop the validators. **Provenance:** ruling:user-voice-scrml.md S447 "validity calls 2-6" call 4 — *"E-VALIDATOR-DEAD only when nothing can ever change the value: no bind, no write grant, not server-loaded"* · origin: S442 "RULED — dpa-058 (O25) = all PA recs" item (5) · **supersedes:** this row's S444 wording, both clauses — (a) "a single-value top-level cell … (§55.5 Edge A) — bound or not" and (b) "a child field that no `bind:` targets". (Named S444. The bootstrap emits it at `compiler/self-host-v2/analyze.scrml` (`fieldVals`, `validatorPass`) under the **superseded** S444 trigger; the S447 trigger is **Nominal / lands with the impl** in the bootstrap. impl#1: **Nominal / not yet emitted** — impl#1 carries it, §34.0.) | Error |
+| E-VALIDITY-NO-SURFACE | §55.5.1 | **Amended S447 (call 3).** A read of a synthesized validity property — `isValid`, `errors`, `touched`, `submitted` (including `<errors of=@x/>`, which reads `.errors`) — on a value that has no validity surface: a **top-level value that carries no validators** (`let <count:int=0/>` then `@count.isValid`). A validated top-level value has the surface (§55.5.1); a declaration and its child fields always have it (§55.5 Edge B, §55.6). **Provenance:** ruling:user-voice-scrml.md S442 "RULED — dpa-058 (O25) = all PA recs", item (5) — "`@x.isValid` on a no-surface cell → an error" · ruling:user-voice-scrml.md S447 "validity calls 2-6" call 3 — *"Only values carrying validators get the surface"* · **supersedes:** the trigger "a single-value top-level cell (§55.5 Edge A)" for VALIDATED top-level cells (S447 item 1). (Named S444. The bootstrap emits it at `compiler/self-host-v2/analyze.scrml` (`resolveMember`) for EVERY program cell — the narrowing to unvalidated cells is **Nominal / lands with the impl**. impl#1: **Nominal / not yet emitted** — impl#1 reads the property off the raw value and yields `undefined` silently (known gap); impl#1 carries it, §34.0.) | Error |
+| E-VALIDITY-RESERVED-NAME | §55.5.3, §66.2.3 | `isValid`, `errors`, `touched` or `submitted` used as (1) the name of a child field or an attribute of a declaration, or (2) the name of a field of a struct type used as the type of a validated value (a value carrying validators). The name would shadow the synthesized validity surface (§55.5–§55.7); the message names the field and the surface property it hides. Not affected: a top-level declaration so named (it is not a field), a struct-literal key, a struct type never used as a validated value's type. **Provenance:** ruling:user-voice-scrml.md S447 "validity calls 2-6" call 5 — *"`isValid` / `errors` / `touched` / `submitted` are illegal field / attribute names (and as fields of a struct type used as a validated value's type). Newly rejecting; corpus impact measured zero by the DD."* (Named S447. **Nominal / spec-ahead — lands with the impl**; not yet emitted by either implementation (the bootstrap today resolves a field so named before the surface — silent shadowing, dpa-058c F12). impl#1 carries it, §34.0.) | Error |
+| I-FORM-SUBMIT-GATED | §55.17.6 | Info, one per **gated form** (a `<form>` the compiler gives `novalidate` under §55.17.2), at the form's opener: *"this form's submit is gated by: email, password"* — the bound validated values whose invalidity cancels the submit and skips the author's `onsubmit` (§55.17.3), named in source order (top-level `email`; child field `signup.email`). The same names are emitted on the form as `data-scrml-gated` (§55.17.6). **Provenance:** ruling:user-voice-scrml.md S447 "RULED — \"your recs on all of them, and the diagnostic\": validity calls 2-6" call 2 — *"an Info diagnostic on each gated form naming the gating values … and a marker attribute in the emitted output"*. (Named S447. **Nominal / spec-ahead — lands with the impl**; not yet emitted by either implementation. impl#1 carries it, §34.0.) | Info |
 | E-VALIDATOR-INLINE-COLON | §55.10, §41.12 | The inline message override on a validator uses the COLON form (`<name req:"…msg…">`, `<name length(>=2):"…msg…">`) — this is NOT valid scrml. The §55.10-normative Level-1 inline override is the PAREN form: a trailing string-literal ARG inside the validator's parens (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`). The colon-after-validator collides with the decl scanner's `:`-handling (typed-cell annotation / §4.14 colon-shorthand) and silently corrupted state-cell `@`-access registration pre-fix (the cell then mis-reported as undeclared via a misleading E-SCOPE-001). Resolution: move the message inside the validator's parens — `req("…msg…")` not `req:"…msg…"`. The compiler recovers by registering the cell with the message as the paren-form inline override, so this is the only diagnostic on the decl. (Catalog addition S185 — g-validator-inline-msg-colon-form.) | Error |
 | E-CHANNEL-INSIDE-PROGRAM | §38.1 | **Retired 2026-05-12 (v0.3 Wave 1 direction reversal).** Pre-v0.3 fired on a `<channel>` descended from `<program>` — this is now the canonical v0.3 placement (channels live inside `<program>`). The pre-v0.3 trigger shape is no longer a violation. New v0.3 placement-direction code: `E-CHANNEL-OUTSIDE-PROGRAM`. | Error (retired) |
 | E-CHANNEL-OUTSIDE-PROGRAM | §38.1 | (v0.3 Wave 1; refined S87 Insight 30) A `<channel>` element appears at file top level IN A FILE THAT ALSO CONTAINS a `<program>` element — the "your-file-has-a-`<program>`-but-this-`<channel>`-isn't-inside-it" shape. Under v0.3, when a file declares `<program>`, channels in that file SHALL be descendants of `<program>` (the canonical placement). Move the `<channel>` declaration to be a child of `<program>`. **Module-file dispensation (S87):** a `<channel>` at file top in a file that contains NO `<program>` element (the PURE-CHANNEL-FILE shape per §38.12.6) is canonical and does NOT fire this code — module-file channels are admitted per the engine-parity precedent (§21.8 / B14). (Direction REVERSED from pre-v0.3 `E-CHANNEL-INSIDE-PROGRAM`.) | Error |
@@ -23702,6 +23704,7 @@ On every local write to a channel-declared cell, the compiler emits a sync messa
 - Cells declared inside a channel body SHALL be reachable from within `<program>` and from any logic context in the same file via canonical `@name` access — the same machinery that makes engine auto-declared variables visible across the file (§51.0.D, §6.9 hoisting model).
 - LOCALS declared inside a channel body's logic blocks (`let x = ...`, `const x = ...`) SHALL NOT auto-sync. Only V5-strict structural-decl cells (`<x> = init`) are synced.
 - The `@shared` modifier SHALL NOT appear in any v0.next source. Use SHALL emit `E-CHANNEL-SHARED-MODIFIER`.
+- **Validated channel cells (S447 call 6 (iii)).** A channel-declared value that carries §55 validators has its validity surface computed **per client** from that client's current value; `touched` and `submitted` are per-client UI state and are **never synced** — only the value crosses the wire (§55.7). *Provenance: ruling:user-voice-scrml.md S447 "validity calls 2-6" call 6 (iii).*
 
 **Cross-ref §6.1** for the V5-strict two-form access model. **Cross-ref §6.2** for the three RHS shapes for state declarations (Shape 1 plain cell, Shape 2 form-coupled, Shape 3 derived). All three shapes are legal inside a channel body; Shape-2 form-coupled cells inside a channel body are legal (the form input lives in `<program>`, the state cell lives in the channel — the auto-sync continues to apply).
 
@@ -24606,7 +24609,7 @@ Signals that a column was previously named `identifier` in the database and shou
 
 | Locus | Enforcement | Failure mode |
 |---|---|---|
-| State-cell validator (§55.2) | Reactive UI gating | Form `isValid` false; submit blocked |
+| State-cell validator (§55.2) | Reactive UI gating | Form `isValid` false; submit blocked in a gated form by the compiler submit gate (§55.17, S447); elsewhere author-gated on `isValid` |
 | Refinement type (§53) | Compile-time + runtime boundary | Type error at decl; runtime error at boundary |
 | Schema column (here) | DBMS at INSERT/UPDATE | DB raises constraint violation |
 
@@ -26171,6 +26174,7 @@ The element form is canonical. A bare-call form (`const handle = formFor(Signup,
 - The submit handler signature SHALL match `fn(values: StructType) ! ErrorType`, where `StructType` is the resolved `for=` type (or its `pick`/`omit`/`partial` derivative — see §41.14.5). Handler signature mismatch SHALL emit `E-FORMFOR-ONSUBMIT-SIGNATURE`.
 - A `<button slot="submit">` child SHALL be admitted as a customization slot (per §16 component slots). When absent, the compiler SHALL emit a default submit `<button type="submit">` with `disabled=!@<varName>.isValid` wired (so submission is blocked until all validators pass).
 - Submit dispatch SHALL set `@<varName>.submitted = true` BEFORE invoking the handler, enabling the validity surface's `submitted` field to drive "show errors after first submit attempt" UX patterns.
+- **Relation to the compiler submit gate (§55.17, S447).** A `formFor` form that carries lowered validator attributes is a gated form (§55.17.2): the gate guards this submit dispatch, and its step 2 sets `submitted` exactly as the bullet above does. The default button's `disabled=!@<varName>.isValid` remains a stricter pre-gate; while it is disabled no submit fires from it (click or implicit submission), so `submitted` is not reachable through it. ⚑ Whether the default button drops `disabled=` now that the gate exists is OPEN (§55.17.7).
 - **The submit handler's error routes to the nearest `<errorBoundary>` (S440 ruling #19).** An error returned by the `onsubmit=` handler (its `! ErrorType`) SHALL route to the nearest `<errorBoundary>` (§19.6) enclosing the `<formFor>`. With no enclosing `<errorBoundary>`, the `<formFor>` is a compile error, **E-ERROR-005**. *(PA reading, S440)* The compiler-generated `formFor` submit dispatch is the one handler-time route to a boundary: it is not an author-written event handler, so the rule that author-written handler calls keep E-ERROR-002 (S440 #22) does not apply to it. **Named; impl pending — Nominal / not yet emitted for either case**: impl#1 compiles a `<formFor onsubmit=persistSignup/>` with no boundary cleanly today (measured S440: `conformance/cases/form-for/formfor-submit-collects-values`, which expects no codes, compiles with no error), and with an enclosing boundary the submit dispatch discards the handler's result, so the error is not routed (measured S441); impl#1 carries both (§34.0). The boundary side of this rule is stated at §19.6.6. Newly-rejecting: the `formFor` conformance cases with an `onsubmit=` (every one is failable — the signature above requires `! ErrorType`) and no boundary migrate WITH the implementation.
   > **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 19) — *"a `formFor` submit handler's error routes to the nearest `<errorBoundary>`; with none, E-ERROR-005"*.
 
@@ -35819,7 +35823,9 @@ enforcement layers stack:
 
 The two layers compose cleanly: the type predicate guards the cell's contents; the state-cell validator gates the form's submission. Cross-ref §55.2 for state-cell validator semantics and §55.5 for the auto-synthesized validity surface.
 
-**Inviolable property:** the type predicate fires at every assignment regardless of whether the cell is form-coupled. State-cell validators fire only on cells declared with bare-attribute validators inside a compound state element. The two are independent enforcement mechanisms with independent firing rules.
+**Inviolable property:** the type predicate fires at every assignment regardless of whether the cell is form-coupled. State-cell validators fire on every value that declares them as bare-attribute validators — a field of a compound state element **or a top-level value** (§55.5.1, S447) — and report into that value's validity surface; they never reject an assignment. The two are independent enforcement mechanisms with independent firing rules. (The "gates the form's submission" sentence above holds in a gated form, §55.17; elsewhere the author gates on `isValid`.)
+
+> **Provenance (amended S447):** ruling:user-voice-scrml.md S447 "RULED — \"your recs\": validated top-level cells get a validity surface (Edge A reversed) …" item 1 · **supersedes:** "State-cell validators fire only on cells declared with bare-attribute validators inside a compound state element" (the §53 restatement of §55.5 Edge A).
 
 ---
 
@@ -37631,6 +37637,9 @@ stays `E-DERIVED-WITH-VALIDATORS`. Its validity would gate nothing the author ca
 | Error codes index | §34 |
 | Reactive dependency graph (cross-field machinery) | §31 |
 | Validator composition with `server` modifier (placeholder + fetch firing) | §55.16 |
+| Validators on native controls, `novalidate`, the submit gate (S442 (2)/(3), S447) | §55.17 |
+| `persist=` restore (validators not part of the decode contract) | §6.14.2, §55.7 |
+| Channel cells (surface per client; `touched` / `submitted` never synced) | §38.4, §55.7 |
 | `server` modifier cell-authority semantics | §52.4 |
 
 **Error codes introduced or referenced by §55** (each is added to §34's table; see §3.6
@@ -37641,6 +37650,10 @@ of the original D2 brief for the canonical listing):
 | `E-SYNTHESIZED-WRITE` | Error | Assignment to auto-synthesized property (already in §34 from D1). |
 | `E-VALIDATOR-CIRCULAR-DEP` | Error | Circular dependency via cross-field predicate args (§55.11). |
 | `E-DERIVED-WITH-VALIDATORS` | Error | Validators applied to a derived cell (§55.14). |
+| `E-VALIDATOR-DEAD` | Error | Validators on a value nothing can ever change: no bind, no write grant, not server-loaded (§55.5.2, S447). |
+| `E-VALIDITY-NO-SURFACE` | Error | A surface property read on a top-level value that carries no validators (§55.5.1 rule 2, S447). |
+| `E-VALIDITY-RESERVED-NAME` | Error | `isValid` / `errors` / `touched` / `submitted` as a field / attribute name, or as a field of a validated value's struct type (§55.5.3, S447). |
+| `I-FORM-SUBMIT-GATED` | Info | A form whose submit the compiler gates, naming the gating values (§55.17.6, S447). |
 | `E-VALIDATOR-INLINE-DYNAMIC` | Error | Level-1 inline message override is not a static string literal (§55.10 / L12 Edge F). |
 | `E-VALIDATOR-INLINE-COLON` | Error | Inline message override uses the colon form `req:"…"` (not valid scrml); use the paren form `req("…")` (§55.10). |
 | `W-MATCH-RULE-INERT` | Warning | rule= legal but inert inside a match-block (§18.0.2). |
@@ -37741,6 +37754,177 @@ Note that `removeAll()` triggers the same firing rule as any §55.2 reactive-rec
 - §52.4.3 — placeholder semantics.
 - §6.10.6 — `pinned` + `server` composition (the placeholder-pinning rule that this subsection notes does NOT suppress validator firing).
 - §55.2 / §55.5 / §55.6 — standard validator firing + auto-synth surface rules (which apply to the fetched-value lifecycle).
+- §55.5.1 — (S447) this subsection's top-level `<cards server req …>` example is a validated top-level value; its
+  surface is now stated by §55.5.1 rather than assumed. No change to the firing rule above. A server-loaded value
+  nothing binds keeps `touched == false` and `submitted == false`.
+
+### 55.17 Validators on native controls, `novalidate`, and the compiler submit gate
+
+> ⚑ **Added 2026-10-01 (S447).** Writes S442 dpa-058 items (2) and (3) into the SPEC for the first time (they were
+> ruled S442 but never written; `novalidate` appeared nowhere in SPEC.md) and adds the S447 submit gate (G2) with
+> its diagnostic. **Nominal / spec-ahead — lands with the impl.** impl#1 lowers a Shape-2 cell's validators but adds
+> no `novalidate` and emits no gate (the browser blocks the submit, and `submitted` never flips — dpa-058 M12). The
+> bootstrap adds `novalidate` (`validatorPass`) but has no surface and no gate, so a validated field in a form is
+> fail-open there today (known gap). Both carry the divergence (§34.0).
+> **Provenance:** ruling:user-voice-scrml.md S442 "RULED — dpa-058 (O25) = all PA recs" items (2) — *"Validators
+> follow the bind"* — and (3) — *"the compiler adds `novalidate` to any form carrying lowered attributes. The
+> attributes keep their meaning for accessibility and styling but lose the power to block, and the scrml surface
+> becomes the only gate."* · ruling:user-voice-scrml.md S447 "RULED — \"your recs on all of them, and the
+> diagnostic\": validity calls 2-6" call 2 — *"The compiler blocks an invalid submit (G2), option (b)"* and *"and
+> the diagnostic"* · dd:top-level-validity-surface-dpa-058c-2026-10-01 §5.2 (G2), §10.4, §11.
+
+**Why the gate exists.** S442 (3) took the browser's block away from every form carrying lowered attributes. Without
+a replacement, a hand-written `<form onsubmit=save()>` runs `save()` on invalid data unless the author remembers
+`if (!@x.isValid) return`. The gate puts scrml's block back in exactly the forms where the browser's block was
+removed, so `req` means in scrml what `required` means in plain HTML.
+
+#### 55.17.1 Validators follow the bind (S442 (2))
+
+1. The **HTML-native subset** of a value's validators lands, as HTML attributes, on **every** native `<input>`,
+   `<textarea>` and `<select>` whose `bind:` targets that value, **wherever the bind is written** (in the value's
+   own `renders`, in a parent's markup, in a use site). The subset is: `req` → `required`; `length(>=N)` →
+   `minlength="N"`; `length(<=N)` → `maxlength="N"`; `min(n)` → `min`; `max(n)` → `max`; `pattern(re)` →
+   `pattern`, **only when the lowering is exact** (the HTML attribute accepts exactly the language the scrml
+   regex accepts — dpa-058 M2/M13 measured anchoring and flag divergence). No other validator is lowered.
+2. **No bind → no attributes.** A value nothing binds gets the validity surface only (§55.5.1). The bind is always
+   written; there is no implicit bind (S442 (1), §66.5.5).
+3. The lowered attributes keep their meaning for **accessibility and styling** (`required` is exposed to
+   assistive technology; `:user-invalid` / `:invalid` match). They do **not** block a submit (§55.17.2).
+
+#### 55.17.2 `novalidate` on every form carrying lowered attributes (S442 (3))
+
+1. The compiler SHALL add `novalidate` to every `<form>` whose markup contains a native control carrying an
+   attribute lowered under §55.17.1. "Contains" is the form's **composed** subtree: its own markup plus markup
+   that reaches it through `<*x/>` inlines, declaration uses, `<each>` rows and state-view arms (the walk the
+   bootstrap's `validatorPass` already makes), and markup lifted from a logic block inside the form *(agent
+   reading — dpa-058c §11.1 left `lift` unchecked; PA to confirm)*.
+2. These forms — and only these — are **gated forms**: the compiler emits the §55.17.3 gate on each of them.
+3. **Consequence the author must know:** `novalidate` disarms **every** native constraint in the form, including a
+   hand-written `required` on a raw `<input>` that binds nothing validated. In a gated form, a constraint the
+   author wants enforced must be a scrml validator on a bound value.
+
+#### 55.17.3 The submit gate (G2)
+
+On each gated form's `submit` event, the compiler-emitted gate SHALL run **before** any author handler and
+**synchronously** (before any `await` in the author's handler, §13.2), unless bypassed (§55.17.4):
+
+1. **Touch.** Mark `touched = true` on every **bound validated value** of the form — every value that carries
+   validators (a validated top-level value, §55.5.1, or a validated child field of a declaration) whose `bind:` is
+   on a native control inside the form (the §55.17.2 rule 1 composed subtree).
+2. **Submitted.** Set `submitted = true` on those values (top-level) and on the compounds that own them (child
+   fields) — §55.7.
+3. **Block if invalid.** If **any** of those values has `isValid == false`, cancel the submission: prevent the
+   event's default action (no native navigation, no native POST) and do **not** run the author's `onsubmit`.
+4. **Otherwise proceed.** Run the author's `onsubmit` (if any); the native submission proceeds unless that
+   handler prevents it.
+
+Only the values bound **in this form** gate it. A compound whose fields are split across two forms is gated
+field-by-field: form A's submit is not blocked by an invalid field bound only in form B. Because steps 1 and 2 run
+on a blocked submit, the errors become visible (`touched` / `submitted`) on the first attempt — the dpa-058 M12
+defect (handler suppressed, flags never set) does not arise. Declaration forms are gated exactly like forms that
+bind top-level values; a `formFor` form is §55.17.7.
+
+#### 55.17.4 `formnovalidate` bypasses the gate; which submitter fired
+
+1. A submit whose **submitter** carries HTML's `formnovalidate` attribute (`<button type="submit" formnovalidate>`,
+   or `<input type="submit" formnovalidate>`) **bypasses** the gate: steps 1 and 3 do not run, and the submission
+   proceeds as in step 4. No scrml syntax is added; HTML defines `formnovalidate` for this purpose ("Save draft").
+2. **The submitter is the event's `SubmitEvent.submitter`** — the gate reads it, because a form-level `submit`
+   handler cannot otherwise tell which button fired. Consequently:
+   - an **implicit submission** (Enter in a text field) has the form's default button as its submitter — it is
+     bypassed exactly when that button carries `formnovalidate` (as in HTML);
+   - `form.requestSubmit()` with no argument has a `null` submitter and is **gated**; `requestSubmit(btn)` is
+     judged by `btn`;
+   - `form.submit()` dispatches no `submit` event, so neither HTML validation nor the gate runs (HTML's own
+     behaviour; it is a host-JS call, not a scrml construct).
+3. **Event order on a bypass button with its own `onclick`.** The button's `onclick` runs first (click precedes
+   submit), and the form's `onsubmit` **also** runs (a bypassed submit proceeds as in step 4). An author who wants a
+   "Save draft" action that does not run the form's handler writes `type="button" onclick=saveDraft()`, which never
+   submits.
+
+> ⚑ **OPEN (not ruled) — does a bypassed submit set `submitted`?** Call 3 defines `submitted` as "a submit of a form
+> that binds the value", which reads as yes; call 2 places "marked … submitted" inside the gate, which a bypass
+> skips. Stated neither way here. (A "yes" makes a "Save draft" click reveal every error.)
+
+#### 55.17.5 Scope — forms only
+
+The gate exists only on gated forms (§55.17.2). It needs a join between "this action" and "these values", and the
+`<form>` is the only one the compiler can see. **Nothing else is gated:** an `onclick` outside a form, a
+`type="button"` inside one, a `when … changes` auto-save, a timer. Those stay author-gated through the surface:
+`if (!@x.isValid) return`, `disabled=!@x.isValid`. This is possible for every validated value now that top-level
+values have a surface (§55.5.1).
+
+> ⚑ **OPEN (not ruled) — a form that binds validated values but carries no lowered attribute.** The gate set is,
+> by the ruling's text, the `novalidate` set, which is decided by **lowered attributes**. A form whose bound
+> validated values carry only non-lowered validators (`eq(@password)`, `gt(…)`, `oneOf([…])`, `is some`, a custom
+> validator, an inexact `pattern`) gets neither `novalidate` nor the gate, and the browser does not block it
+> either: its submit is **fail-open**. Example: `let <confirm:string="" eq(@password)/>` bound alone in a form.
+> (`req` on the same value would lower and close it.) The fail-closed reading would gate every form that binds a
+> validated value. Not decided here; PA to surface.
+
+#### 55.17.6 The diagnostic and the marker attribute (S447 "and the diagnostic")
+
+The gate is invisible at the `<form>` — the validators that condition it may be declared in another file. Two
+signals make it visible:
+
+1. **`I-FORM-SUBMIT-GATED`** (Info, §34) — one per gated form, at the form's opener, naming the gating values in
+   source order: *"this form's submit is gated by: email, password"*. A top-level value is named by its name
+   (`email`); a child field by its compound path (`signup.email`). As an `I-` code it is non-fatal and reports in
+   the warnings stream.
+2. **`data-scrml-gated`** — an attribute on the emitted `<form>`, whose value is the same names, space-separated
+   (`<form novalidate data-scrml-gated="email password">`). It is visible in devtools without the compile log.
+
+**Why this name and shape.** `data-scrml-*` is the namespace every compiler-emitted marker already uses
+(`data-scrml-bind-show`, `data-scrml-hold`, `data-scrml-held`, `data-scrml-p-<k>`), so an author reading the DOM
+recognizes it as the compiler's; a `data-` attribute is valid HTML and inert. Carrying the names (not a bare flag)
+answers "why didn't my handler run?" in the place the author is looking, and the space-separated token list matches
+CSS `[data-scrml-gated~="email"]` the way `data-scrml-hold` does. The names are source identifiers that the emitted
+client JavaScript already contains, so the attribute discloses nothing new. Whether the runtime locates gated forms
+by this attribute is an implementation choice.
+
+#### 55.17.7 Relation to `formFor` (§41.14.3)
+
+A `formFor` (§41.14) emits a `<form>`. When its fields carry lowered attributes it is a gated form like any other,
+and its synthesized submit dispatch is the `onsubmit` the gate guards; §41.14.3's "set `@<varName>.submitted = true`
+BEFORE invoking the handler" agrees with gate step 2. §41.14.3's default submit button carries
+`disabled=!@<varName>.isValid`, which **remains**: it is a stricter pre-gate. While it is disabled, neither a click
+nor an implicit submission fires a `submit` (HTML suppresses implicit submission when the default button is
+disabled), so the gate does not run from it and `submitted` cannot become true by that path — §41.14.3's "show
+errors after first submit attempt" is unreachable through the default button.
+
+> ⚑ **OPEN (not ruled) — formFor's disabled default button vs the gate.** With the gate, the disabled button is
+> redundant as a block and it suppresses `submitted`. Whether formFor's default button drops `disabled=` (relying on
+> the gate) is not ruled by S447 (dpa-058c §10.5 flagged it as a follow-up).
+
+#### 55.17.8 Worked example
+
+```scrml
+<program>
+    let <email:string="" req length(>=5)/>
+    let <password:string="" req length(>=8)/>
+    let <confirm:string="" req eq(@password)/>
+
+    function register() { createAccount(@email, @password) }   // runs only when all three are valid
+    function saveDraft() { storeDraft(@email) }
+
+    <main>
+        // compiler: novalidate + the gate + data-scrml-gated="email password confirm"
+        // I-FORM-SUBMIT-GATED: "this form's submit is gated by: email, password, confirm"
+        <form onsubmit=register()>
+            <label>Email <input type="email" bind:value=@email/></label>             // required minlength="5"
+            ${ if (@email.touched) { lift <errors of=@email/> } }
+            <label>Password <input type="password" bind:value=@password/></label>    // required minlength="8"
+            <label>Confirm <input type="password" bind:value=@confirm/></label>      // required (eq is not lowered)
+            ${ if (@confirm.touched) { lift <errors of=@confirm/> } }
+            <button type="submit">Create account</button>                            // gated
+            <button type="button" onclick=saveDraft()>Save draft</button>            // never submits: not gated
+        </form>
+    </main>
+</program>
+```
+
+An empty submit marks all three `touched` and `submitted`, shows the `.Required` errors, and does not call
+`register()`. (`createAccount`, `storeDraft` elided.)
 
 ---
 
