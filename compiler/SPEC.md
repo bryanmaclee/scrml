@@ -7288,26 +7288,40 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
 - **Resolution base.** A relative SQLite file path in a `db=` or `<db src=>` value (with or
   without the `sqlite:` prefix) SHALL resolve against the directory of the `.scrml` file that
   declares it. The process working directory SHALL NOT affect which file it names. The
-  compile-time schema read (§14.8, E-PA-001..007) and the running program (`scrml dev`,
-  `scrml serve`, a built server, a `kind="tool"` program, a §44.7.1 module-with-db-context)
-  SHALL open the same file. An absolute path names itself.
+  compile-time schema read (§14.8, E-PA-001..007) and the running program (`scrml dev`, a
+  server built by `scrml build`, a `kind="tool"` program, a §44.7.1 module-with-db-context)
+  SHALL open the same file. An absolute path names itself. A `file:` URI is not a path and
+  SHALL be E-SQL-005; write the path itself or `sqlite:<path>`.
 - **Ownership.** A program *owns* a SQLite database file when at least one of its `.scrml`
   files declares schema for that file. A file declares schema for a database when it has a
-  `?{}` block containing a `CREATE TABLE` statement that runs against that database, or a
-  `<schema>` block (in any form, including raw DDL and `schemaFor(T)`) in that database's scope.
+  `?{}` block holding a statement that creates a table in that database, or a `<schema>` block
+  (in any form, including raw DDL and `schemaFor(T)`) for that database.
   - *Program* means the set of `.scrml` files compiled together.
-  - *Runs against* and *in scope* mean the innermost enclosing `<program db=>` or `<db src=>`,
-    the same scoping this section and §44.7.1 give `?{}`.
-  - A declaration with no enclosing target belongs to the file's database target when the
-    file has exactly one. When it has more than one, the declaration is ambiguous and owns
-    nothing.
+  - *Creates a table* means a `CREATE TABLE` or `CREATE VIRTUAL TABLE` statement (with a
+    column list, `AS SELECT …`, or `USING module(…)`) that is not inside a SQL comment or
+    string literal. A `TEMP` / `TEMPORARY` table does not count (it lives in the
+    connection's temp schema, not the file). A table qualified to another attached schema
+    (`other.t`) does not count; `main.t` does.
+  - *That database* for a `?{}` block is the database the block runs against: every `?{}` in
+    a file runs on the file's default database — its first `<db src=>` in document order,
+    else its first `<program db=>`. A `<schema>` block declares for its innermost enclosing
+    `<program db=>` or `<db src=>`, else for the file's default database.
   - Ownership is decided at compile time, per database file. Every handle a program opens on
     a file it owns is an owning handle, whichever file declares it.
 - **Creation.** A program SHALL create a SQLite database file at runtime only if it owns that
-  file. A program that only references a database (declares no schema for it) SHALL NOT
-  create the file. When the file is missing, the program SHALL fail when the module that opens
-  it loads, naming the resolved absolute path and the `db=` / `src=` value it came from. An
-  empty stand-in database is never created for a referencing program.
+  file. When an owning program creates the file, it SHALL say so in one line on standard
+  error, naming the absolute path, the `db=` / `src=` value and the declaring file. A program
+  that only references a database (declares no schema for it) SHALL NOT create the file.
+  When the file is missing, the program SHALL fail when the module that opens it loads,
+  naming the resolved absolute path and the `db=` / `src=` value it came from. An empty
+  stand-in database is never created for a referencing program.
+- **A path written for another base.** When a relative SQLite path resolves to a file that is
+  missing or holds no tables, but the same path resolved from the working directory, the
+  build root (the deepest directory containing every compiled file) or the project root (the
+  nearest enclosing directory holding `scrml.toml`, else the enclosing `.git` checkout) names
+  a database that has tables, the compiler SHALL warn
+  (W-DB-PATH-RESOLVES-ELSEWHERE). The warning names both files and states which one the
+  program uses.
 - **An owned, empty database at compile time.** For an owned database, a file that exists
   but holds no tables or views (e.g. created by `touch`, or created by a run that has not
   reached its `CREATE TABLE` yet) SHALL be read at compile time as if it were absent. The
@@ -7315,7 +7329,7 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
   file). A database with at least one table is read as it is. For a referencing program, an
   empty file is reported under E-PA-004 as before.
 
-> **Provenance:** ruling:user-voice-scrml.md S445 item 6 — *"A `db=` path resolves against the directory of the `.scrml` file that declares it, and I'd add that sentence to SPEC. A program that declares its own schema (its own `CREATE TABLE`s or a `<schema>`) owns the database, so the runtime may create the file. A program that only references a database never creates it and fails loudly if the file is missing."* · supersedes: the ss19 #9 emission (a `sqlite:` literal re-relativized to the compile unit's output base and opened relative to the process CWD), which had no governing sentence.
+> **Provenance:** ruling:user-voice-scrml.md S445 item 6 — *"A `db=` path resolves against the directory of the `.scrml` file that declares it, and I'd add that sentence to SPEC. A program that declares its own schema (its own `CREATE TABLE`s or a `<schema>`) owns the database, so the runtime may create the file. A program that only references a database never creates it and fails loudly if the file is missing."* · supersedes: the ss19 #9 emission (a `sqlite:` literal re-relativized to the compile unit's output base and opened relative to the process CWD), which had no governing sentence. The "created" line, the W-DB-PATH-RESOLVES-ELSEWHERE warning, the statement-level reading of *creates a table*, the default-database rule for a `?{}`, and the `file:` rejection were added by the S445 review (findings F1, F5, F6, F8). They are mechanical consequences of the ruling, not new rulings. Two design questions remain open for a ruling: where a built server looks for its database after its output is moved (review F2), and whether ownership is program-wide or per compiled file (review F4).
 - The bound parameter security rule of §8.1 (E-SQL-001) applies regardless of driver.
   All `${}` interpolations inside `?{}` blocks SHALL be bound parameters, never string
   interpolation, across all drivers.
@@ -21559,6 +21573,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-PA-005 | §11.5 | `tables=` attribute absent from `<db>` block | Error |
 | E-PA-006 | §11.5 | `src=` attribute absent from `<db>` block | Error |
 | E-PA-007 | §11.3 | `protect=` field name matches no table column | Error |
+| W-DB-PATH-RESOLVES-ELSEWHERE | §8.1.1 | A relative SQLite `db=` / `<db src=>` path resolves (against the declaring file's directory) to a file that is missing or holds no tables, while the same path resolved from the working directory, the build root or the project root names a database WITH tables. The path was probably written for the old CWD-relative runtime. An owning program would now create and use a new empty database, and the owned-empty rule no longer raises E-PA-004 for it. The message names both files, says which one the program uses, and suggests the path relative to the declaring file. Warning only: an unrelated database of the same name elsewhere is legitimate. Partitions into `result.warnings`. (Catalog addition S445 review F1; provenance: ruling:user-voice-scrml.md S445 item 6; emitted at `compiler/src/protect-analyzer.ts` `checkDbPathsResolvingElsewhere`.) | Warning |
 | E-PROTECT-001 | §11.3.2 | Protected field accessed on client type | Error |
 | W-SQL-ROW-UNTYPED | §14.8.7 | A `?{ ... }` SQL query result (or one of its projection columns) could not be typed from the §14.8 generated table types and falls back to `asIs`. Info-level. Fires for the deferred v1 SQL surface long tail: a computed / expression / function-call projection column (that ONE field is `asIs`; the rest of the row stays typed), `SELECT *` over a JOIN, a CTE / `WITH`, a `UNION`, a subquery-in-FROM, or a query whose FROM table has no generated type in scope (no enclosing `<db>` block). NEVER fatal — the build always completes; the row's untyped fields are simply not statically checked. Single-table SELECTs and qualified-column JOINs with an explicit projection list (incl. `AS` aliases) DO get a typed projection row and fire no lint. (Catalog addition: typed-sql-row Tranche 1; emitted at `compiler/src/type-system.ts` `resolveSqlRowType`.) | Info |
 | E-SQL-ROW-CONTRACT-MISMATCH | §14.8.8 | A SQL-projection-row value (a Tranche-1 typed `?{ SELECT ... }` row, or its per-item element) is passed to a component prop whose declared type is a developer-authored `:struct` contract, and the row does NOT structurally width-subtype into that contract: either (a) the contract requires a field the row does not project (`missing`), or (b) the row projects the field but its type is not assignable to the contract's declared type (`incompatible`). One diagnostic fires PER unsatisfied field, naming the field + the contract type. BOUNDED: this is the ONLY structural-subtyping path — it applies solely when the SOURCE is a SQL-projection row (`<sql-row>` provenance) and the TARGET is a declared `:struct` prop contract. General struct-to-struct assignment stays NOMINAL (§14.8.1) and never triggers this code. EXTRA columns in the row are allowed (width-subtyping). (Catalog addition: typed-sql-row Tranche 2 — Shape C, ratified S175; emitted at `compiler/src/type-system.ts` `checkPropContract` via `checkSqlRowWidthSubtype`; the call-site descriptor is recorded by `compiler/src/component-expander.ts` as `__propContractChecks`.) | Error |

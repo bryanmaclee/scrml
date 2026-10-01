@@ -167,7 +167,7 @@ describe("ss19 #9 — db src= emits a runtime-consistent path across directories
     expect((result.errors ?? []).filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
     const appJs = readFileSync(join(outDir, "app.server.js"), "utf-8");
     // dist/app.server.js -> ../m.db = <root>/m.db (the declaring file's directory).
-    expect(appJs).toContain('new SQL(_scrml_sqlite_file("../m.db", "./m.db", false))');
+    expect(appJs).toContain('new SQL(_scrml_sqlite_file("../m.db", "./m.db", "app.scrml", false))');
     expect(opensFile(join(outDir, "app.server.js"), appJs)).toBe(join(root, "m.db"));
   });
 });

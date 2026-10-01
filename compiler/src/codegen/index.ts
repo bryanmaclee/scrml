@@ -64,7 +64,7 @@ import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-cl
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
-import { collectProgramOwnedDbFiles } from "../db-ownership.ts";
+import { decideOwnedDbFiles } from "../db-ownership.ts";
 import { classifyFileShape } from "../library-shape.js";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
@@ -1928,7 +1928,7 @@ export function runCG(input: CgInput): CgOutput {
   // or a <schema>) may be created by EVERY unit's handle on it, so which module loads
   // first can never decide whether a referencing handle finds the file. Stamped once;
   // sqlite-file-target.ts reads `_ownedDbFiles` (per-file fallback for direct callers).
-  const _ownedDbFiles = collectProgramOwnedDbFiles(files as unknown[]);
+  const _ownedDbFiles = decideOwnedDbFiles(files as unknown[]);
   for (const f of files) (f as any)._ownedDbFiles = _ownedDbFiles;
 
   // §20.5 / §20.5.1 (S433) — TWO MORE SESSION FACTS THAT ARE PROGRAM-SCOPED AND WERE

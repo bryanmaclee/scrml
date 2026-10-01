@@ -59,13 +59,14 @@
  */
 
 import { Database, constants as sqliteConstants } from "bun:sqlite";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, relative, isAbsolute, sep } from "node:path";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import type { Span, AttrNode, ASTNode, StateNode } from "./types/ast.ts";
 import { redactDbUri } from "./db-uri-redact.ts";
 import { displayConnectionValue } from "./diagnostic-secrets.ts";
 import { classifyDbTarget, resolveDbFilePath, type DbTargetClass } from "./db-target.ts";
-import { collectProgramOwnedDbFiles } from "./db-ownership.ts";
+import { decideOwnedDbFiles, dbAttrValue } from "./db-ownership.ts";
+import { findManifest } from "./host-import.js";
 // Import-free by construction (it takes an already-open handle, duck-typed on `.run`), so it
 // cannot drag `bun:sqlite`/`node:fs` into a stage that avoids them — and it is NOT a codegen
 // module, which this stage deliberately does not pull (see the schema-differ.js note below).
@@ -1175,6 +1176,123 @@ function attrStringValue(attrNode: AttrNode | undefined): string | null {
 /**
  * Run the protect= Analyzer (PA, Stage 4).
  */
+// ---------------------------------------------------------------------------
+// W-DB-PATH-RESOLVES-ELSEWHERE (§8.1.1; S445 review F1)
+// ---------------------------------------------------------------------------
+
+/** Tables + views in the SQLite file at `path`: -1 missing/unreadable, 0 empty, n ≥ 1. */
+function sqliteFileTableCount(path: string): number {
+  if (!existsSync(path)) return -1;
+  let db: Database | null = null;
+  try {
+    db = openSchemaReadHandle(path);
+    return userTableCount(db);
+  } catch {
+    return -1;
+  } finally {
+    try { db?.close(); } catch { /* already closed */ }
+  }
+}
+
+/** The deepest directory containing every path (the build's source base). */
+function commonAncestorDir(paths: string[]): string | null {
+  if (paths.length === 0) return null;
+  let parts = dirname(resolve(paths[0])).split(sep);
+  for (const p of paths.slice(1)) {
+    const q = dirname(resolve(p)).split(sep);
+    let i = 0;
+    while (i < parts.length && i < q.length && parts[i] === q[i]) i++;
+    parts = parts.slice(0, i);
+  }
+  return parts.length === 0 ? sep : (parts.join(sep) || sep);
+}
+
+/**
+ * §8.1.1 makes a relative `db=` / `<db src=>` path resolve against the declaring
+ * `.scrml` file's directory. A path WRITTEN for another base — the directory the
+ * server used to be launched from, the build root, the project root — used to work
+ * by accident (the old runtime opened it relative to the CWD). Now an owning program
+ * silently gets a NEW, EMPTY database there, and the owned-empty rule (read an empty
+ * owned file like an absent one) removed the E-PA-004 that used to catch it.
+ *
+ * So: when a relative SQLite path resolves to a file that is MISSING or has NO
+ * tables, but the same text resolved from the working directory, the build root or
+ * the project root names a database that HAS tables, warn — naming both files and
+ * which one the program uses. Never an error: a fresh project may legitimately keep
+ * an unrelated database of the same name elsewhere.
+ */
+function checkDbPathsResolvingElsewhere(files: unknown[], errors: PAError[]): void {
+  const filePaths = files
+    .map((f) => (f && typeof f === "object" ? (f as { filePath?: unknown }).filePath : null))
+    .filter((p): p is string => typeof p === "string" && p.length > 0);
+  const buildRoot = commonAncestorDir(filePaths);
+  const cwd = process.cwd();
+  const seen = new Set<string>();
+
+  for (const f of files) {
+    if (!f || typeof f !== "object") continue;
+    const file = f as { filePath?: string; ast?: { nodes?: unknown }; nodes?: unknown };
+    const filePath = file.filePath;
+    if (!filePath) continue;
+    const nodes = file.ast ? file.ast.nodes : (file.nodes ?? []);
+    const projectRoot = findManifest(filePath)?.projectRoot ?? null;
+
+    const sites: Array<{ value: string; span: Span }> = [];
+    const walk = (value: unknown, depth: number): void => {
+      if (value === null || typeof value !== "object" || depth > 96) return;
+      if (Array.isArray(value)) { for (const v of value) walk(v, depth + 1); return; }
+      const node = value as Record<string, unknown>;
+      const v = node.kind === "markup" && node.tag === "program" ? dbAttrValue(node, "db")
+        : node.kind === "state" && node.stateType === "db" ? dbAttrValue(node, "src")
+        : null;
+      if (v !== null) sites.push({ value: v, span: (node.span as Span) ?? ({ file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span) });
+      for (const key of Object.keys(node)) {
+        if (key === "span" || key.startsWith("_")) continue;
+        walk(node[key], depth + 1);
+      }
+    };
+    walk(nodes, 0);
+
+    for (const site of sites) {
+      const cls = classifyDbTarget(site.value);
+      if (cls.kind !== "sqlite-file" || cls.sqlitePath === null || cls.sqlitePath === ":memory:") continue;
+      if (isAbsolute(cls.sqlitePath)) continue;
+      const used = resolveDbFilePath(cls, filePath);
+      const key = `${filePath}\0${used}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const usedCount = sqliteFileTableCount(used);
+      if (usedCount > 0) continue;
+
+      const bases: Array<[string, string | null]> = [
+        ["the working directory", cwd],
+        ["the build root", buildRoot],
+        ["the project root", projectRoot],
+      ];
+      for (const [label, base] of bases) {
+        if (!base) continue;
+        const alt = resolve(base, cls.sqlitePath);
+        if (alt === used) continue;
+        const altCount = sqliteFileTableCount(alt);
+        if (altCount <= 0) continue;
+        let suggestion = relative(dirname(filePath), alt).split(sep).join("/");
+        if (!suggestion.startsWith(".")) suggestion = "./" + suggestion;
+        const usedState = usedCount < 0 ? "does not exist" : "has no tables";
+        errors.push(Object.assign(new PAError(
+          "W-DB-PATH-RESOLVES-ELSEWHERE",
+          `W-DB-PATH-RESOLVES-ELSEWHERE: \`${cls.trimmed}\` in ${filePath} resolves against the ` +
+          `directory of that file (§8.1.1) to \`${used}\`, which ${usedState} — that is the database ` +
+          `this program uses. Resolved from ${label} (\`${base}\`) the same path names \`${alt}\`, ` +
+          `which has ${altCount} table${altCount === 1 ? "" : "s"}. If that is your database, write ` +
+          `the path relative to this file: \`"${suggestion}"\`.`,
+          site.span,
+        ), { severity: "warning" }));
+        break;
+      }
+    }
+  }
+}
+
 export function runPA(input: PAInput): { protectAnalysis: ProtectAnalysis; errors: PAError[] } {
   const { files } = input;
 
@@ -1183,7 +1301,7 @@ export function runPA(input: PAInput): { protectAnalysis: ProtectAnalysis; error
   const cache = new SchemaCache(input.onNote);
   // §44.2 (ruling:user-voice-scrml.md S445 item 6) — the database files this PROGRAM
   // owns (declares schema for), the same predicate codegen uses to emit `create`.
-  const ownedDbFiles = collectProgramOwnedDbFiles(files as unknown[]);
+  const ownedDbFiles = decideOwnedDbFiles(files as unknown[]);
   const declaredTables = new Set<string>();
 
   try {
@@ -1231,6 +1349,8 @@ export function runPA(input: PAInput): { protectAnalysis: ProtectAnalysis; error
         processDbBlock(block, filePath, cache, views, errors, createTableMap, declaredTables, ownedDbFiles);
       }
     }
+    // §8.1.1 (S445 review F1) — a relative path written for some OTHER base.
+    checkDbPathsResolvingElsewhere(files as unknown[], errors);
   } finally {
     cache.closeAll();
   }

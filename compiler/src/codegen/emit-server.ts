@@ -26,6 +26,7 @@ import { resolveDbDriver } from "./db-driver.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
 import { sqliteFileHandleArg, ownedDbFilesFor, SQLITE_FILE_HELPER_IMPORT, SQLITE_FILE_HELPER_LINES } from "./sqlite-file-target.ts";
+import { fileDefaultDbValue } from "../db-ownership.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
@@ -794,28 +795,6 @@ export function collectDbScopes(
         }
       }
 
-      // Form 2: `<db src=>` state-block. AST: { kind:"state", stateType:"db", attrs:[...] }.
-      if (node.kind === "state" && node.stateType === "db") {
-        const attrs: any[] = node.attrs ?? node.attributes ?? [];
-        const srcAttr = attrs.find((a: any) => a && a.name === "src");
-        const srcVal: string =
-          srcAttr?.value?.kind === "string-literal"
-            ? srcAttr.value.value
-            : srcAttr?.value?.value ?? srcAttr?.value?.name ?? "";
-        if (typeof srcVal === "string" && srcVal.length > 0) {
-          const driverResult = resolveDbDriver(srcVal);
-          const driver: "sqlite" | "postgres" | "mysql" = driverResult.ok
-            ? driverResult.info.driver
-            : "sqlite";
-          // The default unscoped identifier matches `context.ts:99` and
-          // `rewrite.ts:251` defaults — i.e. what the rewriter already
-          // emitted into the body.
-          if (!scopes.has("_scrml_sql")) {
-            scopes.set("_scrml_sql", { connectionString: srcVal, driver });
-          }
-        }
-      }
-
       // Recurse into markup children + state children.
       if (Array.isArray(node.children) && node.children.length > 0) {
         walk(node.children);
@@ -825,22 +804,20 @@ export function collectDbScopes(
 
   walk(nodes);
 
-  // Fallback aliasing: if the unscoped `_scrml_sql` identifier is referenced
-  // in the body but no `<db src=>` block contributed it, alias it to the
-  // first `<program db=>` scope (the upstream index.ts annotation tags
-  // descendants with the scoped name, but emit-server.ts does not currently
-  // thread that scoped name into per-handler emit-logic opts — so SQL bodies
-  // continue to use the default `_scrml_sql` identifier even when only
-  // `<program db=>` is in scope). Without this aliasing the default
-  // identifier would fall through to the :memory: WARNING fallback even
-  // though a valid program-scoped connection string is available.
-  if (!scopes.has("_scrml_sql")) {
-    for (const [dbVar, info] of scopes) {
-      if (dbVar.startsWith("_scrml_sql_")) {
-        scopes.set("_scrml_sql", info);
-        break;
-      }
-    }
+  // The default unscoped `_scrml_sql` handle — the one EVERY `?{}` in this file is
+  // lowered onto (codegen/index.ts passes `dbVar: "_scrml_sql"`; `context.ts` /
+  // `rewrite.ts` default to it; emit-server does not thread the scoped
+  // `_scrml_sql_<n>` names into per-handler opts). Which database it is comes from
+  // ONE rule shared with the ownership decision (S445 review F6):
+  // `db-ownership.ts fileDefaultDbValue` — the first `<db src=>` in document order,
+  // else the first `<program db=>` (the prior first-`<db src>` / first-scope
+  // aliasing, now in one place). Filed: a `<program db=a>` with a sibling
+  // `<db src=b>` runs every `?{}` on b.
+  const defaultValue = fileDefaultDbValue(nodes);
+  if (defaultValue !== null) {
+    const driverResult = resolveDbDriver(defaultValue);
+    const driver: "sqlite" | "postgres" | "mysql" = driverResult.ok ? driverResult.info.driver : "sqlite";
+    scopes.set("_scrml_sql", { connectionString: defaultValue, driver });
   }
   return scopes;
 }

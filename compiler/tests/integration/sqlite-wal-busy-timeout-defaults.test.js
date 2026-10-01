@@ -115,7 +115,7 @@ describe("§44 — a file-backed sqlite handle gets WAL + a 5s busy-timeout by d
     expect(nonWarn(errors)).toEqual([]);
 
     // s445 — a SQLite file opens through `_scrml_sqlite_file` (declaring-file-relative; this program only references it, so `false`: never created).
-    expect(serverJs).toMatch(/const _scrml_sql = new SQL\(_scrml_sqlite_file\("[^"]*m\.db", "\.\/m\.db", false\)\);/);
+    expect(serverJs).toMatch(/const _scrml_sql = new SQL\(_scrml_sqlite_file\("[^"]*m\.db", "\.\/m\.db", "[^"]*", false\)\);/);
     expect(serverJs).toContain("function _scrml_sqlite_configure(_h)");
     expect(serverJs).toContain("PRAGMA journal_mode = WAL");
     expect(serverJs).toContain("PRAGMA busy_timeout = 5000");
@@ -308,7 +308,7 @@ function main(args: string[]) -> number {
   test("the emitted tool module carries the configure block and AWAITS it", () => {
     const { errors, toolJs } = buildTool("tool-emit");
     expect(nonWarn(errors)).toEqual([]);
-    expect(toolJs).toMatch(/const _scrml_sql = new SQL\(_scrml_sqlite_file\("[^"]*app\.db", "\.\/app\.db", false\)\);/);
+    expect(toolJs).toMatch(/const _scrml_sql = new SQL\(_scrml_sqlite_file\("[^"]*app\.db", "\.\/app\.db", "[^"]*", false\)\);/);
     expect(toolJs).toContain("PRAGMA busy_timeout = 5000");
     expect(toolJs).toContain("PRAGMA journal_mode = WAL");
     // AWAITED, not floating: the §64.3 harness ends with `process.exit(code)`, a hard

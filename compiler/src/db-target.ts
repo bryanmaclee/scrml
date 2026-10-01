@@ -28,7 +28,12 @@ import { resolve as resolvePath, dirname as dirnamePath } from "node:path";
  *   mongo               starts with `mongo://` | `mongodb://`   (E-SQL-005)
  *   unsupported-scheme  any other `scheme://` shape, matched case-INsensitively
  *                       exactly as `resolveDbDriver`'s E-SQL-005 branch did — so
- *                       `POSTGRES://` / `MONGODB://` / `SQLITE://` land HERE
+ *                       `POSTGRES://` / `MONGODB://` / `SQLITE://` land HERE.
+ *                       Also a `file:` URI (any case, with or without `//`): it
+ *                       used to fall through to `sqlite-file` and name a file
+ *                       literally called `file:./x.db` beside the source (S445 F8);
+ *                       it is now an unsupported target (E-SQL-005) — write the
+ *                       path itself, or `sqlite:<path>`.
  *   empty               "" / whitespace
  *
  * `scheme` is the matched scheme as WRITTEN (case preserved — it is quoted
@@ -60,6 +65,9 @@ export function classifyDbTarget(raw: string): DbTargetClass {
   if (trimmed.startsWith("mongo://") || trimmed.startsWith("mongodb://")) {
     return { kind: "mongo", trimmed, scheme: trimmed.slice(0, trimmed.indexOf(":")), sqlitePath: null };
   }
+  // S445 F8 — a `file:` URI is not a path; refuse it loudly rather than resolve it as one.
+  const fileUri = trimmed.match(/^(file):/i);
+  if (fileUri !== null) return { kind: "unsupported-scheme", trimmed, scheme: fileUri[1], sqlitePath: null };
   const m = trimmed.match(/^([a-z][a-z0-9+.\-]*):\/\//i);
   if (m !== null) return { kind: "unsupported-scheme", trimmed, scheme: m[1], sqlitePath: null };
   return { kind: "sqlite-file", trimmed, scheme: null, sqlitePath: trimmed };
@@ -93,10 +101,9 @@ export function isDriverConnectionUri(raw: string): boolean {
  * empty file the compiler never looked at, or one it did look at and then
  * reported every declared table missing from (flogence S49/S51).
  *
- * SPEC is silent on the resolution base (§8.1.1 / §44.2 only say a plain path is
- * `sqlite:`-prefixed); the declaring-file base is the one the compiler has always
- * used for the schema read and that E-PA-004 names, and it matches how every other
- * relative reference in a `.scrml` file resolves (§21 imports).
+ * SPEC §8.1.1 *Resolution base* (ruling:user-voice-scrml.md S445 item 6) is the
+ * governing sentence: "A relative SQLite file path in a `db=` or `<db src=>` value
+ * … SHALL resolve against the directory of the `.scrml` file that declares it."
  *
  * `cls.sqlitePath` is the path with any `sqlite:` prefix removed; for a target the
  * classifier does not call a sqlite file the trimmed value is resolved as-is, which

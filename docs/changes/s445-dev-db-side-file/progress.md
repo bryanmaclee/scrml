@@ -43,3 +43,24 @@
   13 (referencing-missing loud, owning-fresh creates+uses, owned-empty touch compiles, referenced-empty
   E-PA-004, program-wide ownership, <schema> owner).
 - suites: unit+integration+conformance 26801/0/70/12; browser-baseline --check PASS (48 asserted).
+
+## Round 3 — S239 review of 955816ba2 (DO-NOT-LAND) — mechanical findings
+- merged origin/main 3a4d869a3 (90e2c5e0c): protect-analyzer.ts 3-way (declaredTables param from #1198 + ownedDbFiles
+  kept, both threaded); FACTS / SPEC-INDEX theirs + regen.
+- CORRECTION to round 1: "no stubs with stale artifacts" was measured with the round-1 helper on artifacts the
+  round-1 compiler had just regenerated; artifacts left by an OLDER compiler (literal `sqlite:src/flogence.db`)
+  still created stubs when dev imported them (review F3, reproduced by the reviewer). Fixed below (F3).
+- F1 (a) runtime: owning handle that creates the file prints one stderr line
+  `scrml: created new database <abs> (declared as "<v>" in <file>)`; (b) compile-time W-DB-PATH-RESOLVES-ELSEWHERE
+  (protect-analyzer.ts checkDbPathsResolvingElsewhere): relative path → missing/zero-table file while the same path
+  from CWD / build root / project root names a db with tables. §34 row added.
+- F3: api.js returns `serverModules` (the .server.js this compile wrote); dev passes it to the app child;
+  loadServerRoutes mounts only those and reports leftovers in one line (never imports, never deletes).
+- F5: db-ownership.ts sqlDeclaresTable — tokenizer drops comments + string literals; CTAS + VIRTUAL own; TEMP and
+  other-schema-qualified do not; `main.` does.
+- F6: one rule — db-ownership.ts fileDefaultDbValue is what codegen binds `_scrml_sql` to (collectDbScopes now
+  calls it) and what a `?{}` declaration owns.
+- F7: dev mounts a failed module's declared routes as 500s carrying the import error (failedModuleRoutes).
+- F8: SPEC drops `scrml serve`; db-target.ts comment cites §8.1.1; `file:` URI → unsupported-scheme → E-SQL-005.
+- Structure: runtime path = sqlite-file-target.ts runtimeDbSpecifier (one function; F2 pending);
+  ownership = db-ownership.ts decideOwnedDbFiles (one function; F4 pending).

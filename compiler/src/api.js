@@ -3260,6 +3260,8 @@ function _compileScrmlImpl(options = {}) {
   // dist-relative POSIX paths. Function-scoped so it reaches the return value;
   // populated in the write phase below. Empty for `write:false` / library mode.
   const hashedAssets = new Set();
+  // S445 review F3 — dist-relative POSIX paths of every `.server.js` written this run.
+  const writtenServerModules = new Set();
   // SPEC §47.13 — the client-asset manifest (g-static-server-serves-db-and-server-
   // source). `clientSeeds` records every artifact written FOR THE BROWSER
   // (documents, CSS, client bundles, the shared runtime, per-route chunks);
@@ -3534,6 +3536,9 @@ function _compileScrmlImpl(options = {}) {
           || suffix.endsWith(".worker.js")) {
           clientSeeds.add(relFromRoot(outputDir, fullPath));
         }
+        // S445 review F3 — the server modules THIS compile wrote, so `scrml dev`
+        // loads only those and never a stale `.server.js` an earlier compile left.
+        if (suffix === ".server.js") writtenServerModules.add(relFromRoot(outputDir, fullPath));
         return true;
       }
 
@@ -4033,6 +4038,10 @@ function _compileScrmlImpl(options = {}) {
     // on the build path, page bundles + CSS). The generated `_server.js` serves
     // `immutable` by membership in this set — never by a filename shape guess.
     hashedAssets: [...hashedAssets],
+    // S445 review F3 — dist-relative POSIX paths of every `.server.js` this compile
+    // wrote. `scrml dev` mounts exactly these; any other `.server.js` under the
+    // output dir is a leftover of an earlier compile and is not imported.
+    serverModules: [...writtenServerModules],
     // SPEC §47.13 — dist-relative POSIX paths the static servers may serve (the
     // browser artifacts + their import closure). `generateServerEntry` bakes it
     // into `_server.js`; `scrml dev` reads the `.scrml-client-assets.json` copy.

@@ -1,47 +1,50 @@
 /**
- * db-ownership.ts — which SQLite database FILES a program OWNS (§44.2, S445 ruling).
+ * db-ownership.ts — which SQLite database FILES a program OWNS (§8.1.1, S445 ruling).
  *
  * > "A program that declares its own schema (its own `CREATE TABLE`s or a `<schema>`)
  * > owns the database, so the runtime may create the file. A program that only
  * > references a database never creates it and fails loudly if the file is missing."
  * > — ruling:user-voice-scrml.md S445 item 6
  *
+ * ⚑ THE OWNERSHIP DECISION IS ONE FUNCTION: `decideOwnedDbFiles`. Its program-wide
+ * scope (every file compiled together) is an open design question (S445 review F4 —
+ * a file compiled alone can decide differently than the same file compiled with its
+ * siblings); keep every consumer on this one entry point so the answer changes in
+ * one place.
+ *
  * THE PREDICATE, per database TARGET (one resolved file, `db-target.ts
- * resolveDbFilePath`) and per PROGRAM (the set of `.scrml` files compiled together):
- * the program owns a target when at least one of its files DECLARES SCHEMA FOR IT —
+ * resolveDbFilePath`): the program owns a target when at least one of its files
+ * DECLARES SCHEMA FOR IT —
  *
- *   - a `?{}` block containing a `CREATE TABLE` statement (the one recognizer,
- *     `schema-differ.js harvestCreateTables`) that runs against that target, or
- *   - a `<schema>` block (any form — declarative, raw DDL, `schemaFor(T)`) in that
- *     target's scope.
+ *   - a `?{}` block holding a statement that CREATES A TABLE IN THAT DATABASE
+ *     (`sqlDeclaresTable`: `CREATE [VIRTUAL] TABLE`, including `… AS SELECT`; not
+ *     `TEMP`, not a table qualified to another attached schema), or
+ *   - a `<schema>` block (any form — declarative, raw DDL, `schemaFor(T)`).
  *
- * "Runs against / in scope of" is the innermost enclosing `<program db=>` or
- * `<db src=>` — the same scoping §44.2 / §44.7.1 give `?{}`. A declaration with NO
- * enclosing target (a library file's `?{}` fns written beside its top-level
- * `<db src>`, the §44.7.1 shape) belongs to the file's target when the file has
- * exactly ONE; with several it is ambiguous and owns nothing (fail-closed: no create).
+ * WHICH TARGET (S445 review F6 — one rule with codegen). A `?{}` block runs against
+ * the handle codegen binds it to, and codegen binds EVERY `?{}` in a file to the
+ * file's DEFAULT handle `_scrml_sql` (`fileDefaultDbValue`: the first `<db src=>` in
+ * document order, else the first `<program db=>`) — `collectDbScopes` calls the same
+ * function. So a `?{}` declaration owns the file's default target, exactly the
+ * database its statement will run against. A `<schema>` block is not executed; it
+ * declares schema for its innermost enclosing `<program db=>` / `<db src=>`, else for
+ * the file's default target.
  *
- * Two consumers, so they cannot disagree about ownership:
- *   - codegen (`codegen/sqlite-file-target.ts`): an owned target's handle opens with
- *     `create: true`; any other SQLite file handle opens with `create: false` and the
- *     module refuses to load when the file is missing.
+ * Consumers (none may decide ownership another way):
+ *   - codegen (`codegen/sqlite-file-target.ts`): an owned target's handle may create
+ *     the file; any other SQLite file handle refuses to load when it is missing.
  *   - the compile-time schema read (`protect-analyzer.ts`): an owned target whose file
- *     exists but holds NO tables is read like an absent one — the schema comes from
- *     the program's own declarations — so `touch app.db` before the first run is not
- *     an E-PA-004 dead end.
+ *     exists but holds NO tables is read like an absent one.
  *
- * Pure: AST walk + path arithmetic, no filesystem access.
+ * Pure: AST walk, SQL tokenizing and path arithmetic — no filesystem access.
  */
 
 import { classifyDbTarget, resolveDbFilePath } from "./db-target.ts";
-// THE ONE `CREATE TABLE` recognizer — schema-differ.js imports nothing heavy (see the
-// protect-analyzer.ts note on why it lives there).
-import { harvestCreateTables } from "./schema-differ.js";
 
 type AnyNode = Record<string, unknown>;
 
 /** A string-valued attribute's value, across the AST's attribute shapes. */
-function attrValue(node: AnyNode, name: string): string | null {
+export function dbAttrValue(node: AnyNode, name: string): string | null {
   const attrs = ((node.attributes ?? node.attrs) as unknown[] | undefined) ?? [];
   for (const a of attrs) {
     if (!a || typeof a !== "object") continue;
@@ -59,6 +62,43 @@ function attrValue(node: AnyNode, name: string): string | null {
   return null;
 }
 
+function hasAttr(node: AnyNode, name: string): boolean {
+  const attrs = ((node.attributes ?? node.attrs) as unknown[] | undefined) ?? [];
+  return attrs.some((a) => !!a && typeof a === "object" && (a as AnyNode).name === name);
+}
+
+/**
+ * The `db=` / `src=` value codegen binds a file's default `_scrml_sql` handle to —
+ * THE rule for which database a `?{}` block runs against (every `?{}` in a file is
+ * lowered onto `_scrml_sql`; codegen/index.ts passes `dbVar: "_scrml_sql"`).
+ *
+ * Walks `children` depth-first in document order, as `collectDbScopes` always has:
+ * the first non-empty `<db src=>` wins; with none, the first `<program db=>` that
+ * carries no `name=` (a named program is not a db scope — `annotateDbScopes`).
+ */
+export function fileDefaultDbValue(nodes: unknown): string | null {
+  let firstDbSrc: string | null = null;
+  let firstProgramDb: string | null = null;
+  const walk = (children: unknown): void => {
+    if (!Array.isArray(children) || firstDbSrc !== null) return;
+    for (const n of children) {
+      if (!n || typeof n !== "object" || firstDbSrc !== null) continue;
+      const node = n as AnyNode;
+      if (node.kind === "markup" && node.tag === "program" && firstProgramDb === null && !hasAttr(node, "name")) {
+        const v = dbAttrValue(node, "db");
+        if (v !== null && v.length > 0) firstProgramDb = v;
+      }
+      if (node.kind === "state" && node.stateType === "db") {
+        const v = dbAttrValue(node, "src");
+        if (v !== null && v.length > 0) { firstDbSrc = v; return; }
+      }
+      walk(node.children);
+    }
+  };
+  walk(nodes);
+  return firstDbSrc ?? firstProgramDb;
+}
+
 /** The absolute FILE a `db=` / `src=` value names, or null when it is not a SQLite file. */
 export function sqliteFileTarget(value: string | null, declaringSourceFile: string): string | null {
   if (value === null || !declaringSourceFile) return null;
@@ -67,42 +107,116 @@ export function sqliteFileTarget(value: string | null, declaringSourceFile: stri
   return resolveDbFilePath(cls, declaringSourceFile);
 }
 
-/** Does this `?{}` text declare a table? */
-function declaresTable(query: string): boolean {
-  const found = new Map<string, string>();
-  harvestCreateTables(query, found, true);
-  return found.size > 0;
+// ---------------------------------------------------------------------------
+// SQL: does a statement create a table in THIS database? (S445 review F5)
+// ---------------------------------------------------------------------------
+
+type SqlTok = { k: "word" | "ident" | "punct"; v: string };
+
+/**
+ * Tokenize SQL text for statement-head recognition. Comments (`--`, `/* *\/`) and
+ * string literals (`'…'`) are DROPPED, so a `CREATE TABLE` inside either is not a
+ * statement; quoted identifiers (`"…"`, `` `…` ``, `[…]`) are kept as identifiers;
+ * a scrml `${…}` interpolation is one opaque token.
+ */
+function tokenizeSql(sql: string): SqlTok[] {
+  const out: SqlTok[] = [];
+  const n = sql.length;
+  let i = 0;
+  while (i < n) {
+    const c = sql[i];
+    if (c === "-" && sql[i + 1] === "-") { while (i < n && sql[i] !== "\n") i++; continue; }
+    if (c === "/" && sql[i + 1] === "*") { const e = sql.indexOf("*/", i + 2); i = e < 0 ? n : e + 2; continue; }
+    if (c === "'") {
+      i++;
+      while (i < n) { if (sql[i] === "'") { if (sql[i + 1] === "'") { i += 2; continue; } i++; break; } i++; }
+      continue;
+    }
+    if (c === '"' || c === "`" || c === "[") {
+      const close = c === "[" ? "]" : c;
+      let j = i + 1; let v = "";
+      while (j < n) { if (sql[j] === close) { if (close !== "]" && sql[j + 1] === close) { v += close; j += 2; continue; } j++; break; } v += sql[j]; j++; }
+      out.push({ k: "ident", v }); i = j; continue;
+    }
+    if (c === "$" && sql[i + 1] === "{") {
+      let depth = 0; let j = i + 1;
+      for (; j < n; j++) { if (sql[j] === "{") depth++; else if (sql[j] === "}") { depth--; if (depth === 0) { j++; break; } } }
+      out.push({ k: "punct", v: "${}" }); i = j; continue;
+    }
+    if (/[A-Za-z_]/.test(c)) {
+      let j = i + 1; while (j < n && /[A-Za-z0-9_$]/.test(sql[j])) j++;
+      out.push({ k: "word", v: sql.slice(i, j) }); i = j; continue;
+    }
+    if (/\s/.test(c)) { i++; continue; }
+    out.push({ k: "punct", v: c }); i++;
+  }
+  return out;
 }
 
 /**
- * The SQLite files ONE `.scrml` file declares schema for. `nodes` is the file's
- * top-level node list (or any subtree); `filePath` its absolute path.
+ * True when some statement in `sql` creates a table in the database the `?{}` runs
+ * against: `CREATE [VIRTUAL] TABLE [IF NOT EXISTS] [main.]name …` — with a column
+ * list, `AS SELECT …`, or `USING module(…)`. NOT a `TEMP`/`TEMPORARY` table (it lives
+ * in the connection's temp schema, not the file), NOT one qualified to another
+ * attached schema (`other.t`), and NOT text inside a comment or string literal.
  */
-export function collectOwnedDbFiles(nodes: unknown, filePath: string, out: Set<string> = new Set()): Set<string> {
-  const targets = new Set<string>();
-  let unscopedDeclaration = false;
+export function sqlDeclaresTable(sql: string): boolean {
+  const toks = tokenizeSql(sql);
+  const kw = (t: SqlTok | undefined, w: string) => !!t && t.k === "word" && t.v.toUpperCase() === w;
+  let atStart = true;
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    if (t.k === "punct" && t.v === ";") { atStart = true; continue; }
+    if (!atStart) continue;
+    atStart = false;
+    if (!kw(t, "CREATE")) continue;
+    let j = i + 1;
+    if (kw(toks[j], "TEMP") || kw(toks[j], "TEMPORARY")) continue; // temp schema, not the file
+    if (kw(toks[j], "VIRTUAL")) j++;
+    if (!kw(toks[j], "TABLE")) continue;
+    j++;
+    if (kw(toks[j], "IF") && kw(toks[j + 1], "NOT") && kw(toks[j + 2], "EXISTS")) j += 3;
+    const name = toks[j];
+    if (!name || (name.k !== "word" && name.k !== "ident" && !(name.k === "punct" && name.v === "${}"))) continue;
+    if (toks[j + 1]?.k === "punct" && toks[j + 1].v === ".") {
+      // schema-qualified: only `main` is this database (`temp` is the temp schema).
+      if (name.v.toLowerCase() !== "main") continue;
+    }
+    return true;
+  }
+  return false;
+}
 
-  const visit = (value: unknown, target: string | null, depth: number): void => {
+// ---------------------------------------------------------------------------
+// Ownership
+// ---------------------------------------------------------------------------
+
+/** The SQLite files ONE `.scrml` file declares schema for (see the module comment). */
+export function collectOwnedDbFiles(nodes: unknown, filePath: string, out: Set<string> = new Set()): Set<string> {
+  const fileDefault = sqliteFileTarget(fileDefaultDbValue(nodes), filePath);
+
+  const visit = (value: unknown, scope: string | null, depth: number): void => {
     if (value === null || typeof value !== "object" || depth > 96) return;
     if (Array.isArray(value)) {
-      for (const item of value) visit(item, target, depth + 1);
+      for (const item of value) visit(item, scope, depth + 1);
       return;
     }
     const node = value as AnyNode;
-    let here = target;
-    if (node.kind === "markup" && node.tag === "program") {
-      const t = sqliteFileTarget(attrValue(node, "db"), filePath);
-      if (t !== null) { here = t; targets.add(t); }
+    let here = scope;
+    if (node.kind === "markup" && node.tag === "program" && !hasAttr(node, "name")) {
+      const t = sqliteFileTarget(dbAttrValue(node, "db"), filePath);
+      if (t !== null) here = t;
     } else if (node.kind === "state" && node.stateType === "db") {
-      const t = sqliteFileTarget(attrValue(node, "src"), filePath);
-      if (t !== null) { here = t; targets.add(t); }
+      const t = sqliteFileTarget(dbAttrValue(node, "src"), filePath);
+      if (t !== null) here = t;
     }
-    const isDeclaration =
-      (node.kind === "sql" && typeof node.query === "string" && declaresTable(node.query as string)) ||
-      (node.kind === "state" && node.stateType === "schema");
-    if (isDeclaration) {
-      if (here !== null) out.add(here);
-      else unscopedDeclaration = true;
+    if (node.kind === "sql" && typeof node.query === "string" && sqlDeclaresTable(node.query as string)) {
+      // A `?{}` runs on the file's default handle — own THAT database.
+      if (fileDefault !== null) out.add(fileDefault);
+    }
+    if (node.kind === "state" && node.stateType === "schema") {
+      const t = here ?? fileDefault;
+      if (t !== null) out.add(t);
     }
     for (const key of Object.keys(node)) {
       if (key === "span" || key.startsWith("_")) continue;
@@ -111,7 +225,6 @@ export function collectOwnedDbFiles(nodes: unknown, filePath: string, out: Set<s
   };
 
   visit(nodes, null, 0);
-  if (unscopedDeclaration && targets.size === 1) out.add([...targets][0]);
   return out;
 }
 
@@ -124,8 +237,11 @@ function fileNodes(f: AnyNode): unknown {
   return [];
 }
 
-/** The SQLite files a PROGRAM (every file compiled together) owns. */
-export function collectProgramOwnedDbFiles(files: readonly unknown[]): Set<string> {
+/**
+ * THE ownership decision: the SQLite files this compile's program owns. `files` is
+ * every file compiled together (file ASTs carrying `filePath` + `nodes` / `ast.nodes`).
+ */
+export function decideOwnedDbFiles(files: readonly unknown[]): Set<string> {
   const out = new Set<string>();
   for (const f of files) {
     if (!f || typeof f !== "object") continue;

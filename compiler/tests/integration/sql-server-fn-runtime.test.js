@@ -163,7 +163,7 @@ describe("Bug 3a §1 — basic <db src=> server-fn round-trip with real SQLite",
     }
     // We use a real SQLite file (pre-seeded with CREATE TABLE items) so PA's
     // filesystem-existence check passes. The compiled server.js will declare
-    // `const _scrml_sql = new SQL(_scrml_sqlite_file("../items.db", "./items.db", false))`
+    // `const _scrml_sql = new SQL(_scrml_sqlite_file("../items.db", "./items.db", "<tag>.scrml", false))`
     // — the seeded file beside the .scrml source, resolved from the module's own
     // location (s445), so the test's CWD plays no part.
     const src = `
@@ -191,7 +191,7 @@ describe("Bug 3a §1 — basic <db src=> server-fn round-trip with real SQLite",
 
 </program>
 `;
-    const { errors, warnings, serverJsPath, tmpDir } = compileToFiles(src, "sql-roundtrip", {
+    const { errors, warnings, serverJsPath, tmpDir, tag } = compileToFiles(src, "sql-roundtrip", {
       "items.db": ["CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)"],
     });
     expect(errors.filter(e => !e.code?.startsWith("W-"))).toEqual([]);
@@ -201,7 +201,7 @@ describe("Bug 3a §1 — basic <db src=> server-fn round-trip with real SQLite",
     expect(existsSync(serverJsPath)).toBe(true);
     const serverJsText = readFileSync(serverJsPath, "utf-8");
     expect(serverJsText).toContain('import { SQL } from "bun"');
-    expect(serverJsText).toContain('const _scrml_sql = new SQL(_scrml_sqlite_file("../items.db", "./items.db", false))');
+    expect(serverJsText).toContain(`const _scrml_sql = new SQL(_scrml_sqlite_file("../items.db", "./items.db", "${tag}.scrml", false))`);
     // The body should use the declared handle, not be a dangling reference
     expect(serverJsText).toMatch(/await _scrml_sql`/);
 
@@ -324,14 +324,14 @@ describe("Bug 3a §3 — bundled <db>-using examples emit valid declarations", (
 
 </program>
 `;
-    const { errors, serverJsPath } = compileToFiles(src, "contacts-shape", {
+    const { errors, serverJsPath, tag } = compileToFiles(src, "contacts-shape", {
       "contacts.db": ["CREATE TABLE contacts (id INTEGER PRIMARY KEY, name TEXT NOT NULL)"],
     });
     expect(errors.filter(e => !e.code?.startsWith("W-"))).toEqual([]);
     const serverJsText = readFileSync(serverJsPath, "utf-8");
     expect(serverJsText).toContain('import { SQL } from "bun"');
     // A SQLite file opens through the s445 helper (adapter: "sqlite" — never the postgres default).
-    expect(serverJsText).toContain('const _scrml_sql = new SQL(_scrml_sqlite_file("../contacts.db", "./contacts.db", false))');
+    expect(serverJsText).toContain(`const _scrml_sql = new SQL(_scrml_sqlite_file("../contacts.db", "./contacts.db", "${tag}.scrml", false))`);
   });
 
   test("<program db='postgres://...'> annotates correctly (driver passthrough)", () => {
@@ -383,11 +383,11 @@ describe("Bug 3a §3 — bundled <db>-using examples emit valid declarations", (
 
 </program>
 `;
-    const { errors, serverJsPath } = compileToFiles(src, "things-shape", {
+    const { errors, serverJsPath, tag } = compileToFiles(src, "things-shape", {
       "things.db": ["CREATE TABLE things (id INTEGER PRIMARY KEY, name TEXT)"],
     });
     expect(errors.filter(e => !e.code?.startsWith("W-"))).toEqual([]);
     const serverJsText = readFileSync(serverJsPath, "utf-8");
-    expect(serverJsText).toContain('const _scrml_sql = new SQL(_scrml_sqlite_file("../things.db", "./things.db", false))');
+    expect(serverJsText).toContain(`const _scrml_sql = new SQL(_scrml_sqlite_file("../things.db", "./things.db", "${tag}.scrml", false))`);
   });
 });
