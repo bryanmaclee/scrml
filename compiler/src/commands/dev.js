@@ -28,6 +28,7 @@ import { tmpdir } from "os";
 import { resolve, dirname, join, basename, relative } from "path";
 import { compileScrml, scanDirectory, findOutputFiles, toPosixSpecifier } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
+import { hasApplicationScopeRefusal } from "./refusal-gate.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
 import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
 import { listen, listenOrExit, parseHostFlag, networkNotice, displayUrl, DEFAULT_HOST } from "./listen.js";
@@ -615,6 +616,12 @@ function runOnce(opts, gatheredOut) {
       // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Default
       // `classic` keeps the shared runtime byte-identical to pre-arc output.
       moduleFormat,
+      // S445 — honour the same no-write refusal `build` / `compile` apply
+      // (./refusal-gate.js): a refused compile (E-MW-008, E-PROGRAM-002,
+      // E-PROGRAM-NESTED-AUTH, …) writes nothing, so the fail-open units never
+      // reach the out dir. The fetch handler already serves the compile error
+      // while the build is failing; this keeps the disk consistent with that.
+      beforeWrite: ({ errors }) => !hasApplicationScopeRefusal(errors),
     });
   } catch (err) {
     // Fail CLOSED: a throw is a failed compile. Record it exactly like a

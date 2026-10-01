@@ -227,13 +227,18 @@ describe("W-AUTH-REQUIRED-NOT-INHERITED", () => {
     expect(r.errors.filter((e) => e.severity !== "warning")).toEqual([]); // a warning: the build succeeds
   });
 
-  test("a public application <program> elsewhere: the message names it", () => {
+  // S445 item 1 (ruling:user-voice-scrml.md S445): when an application <program>
+  // exists, a route file's <program> is NESTED (implied ancestor, §4.12), so its
+  // auth="required" is E-PROGRAM-NESTED-AUTH (build refused) — not a warning that
+  // it gates only its own file. W-AUTH-REQUIRED-NOT-INHERITED stays for a build with
+  // NO application program.
+  test("S445 #1: a public application <program> elsewhere → the route file's required <program> is E-PROGRAM-NESTED-AUTH", () => {
     const root = writeProject("w-publicroot", { ...ENTRY_IN_PAGES, "lib/x.scrml": `<program>\n<p>lib-marker</p>\n</program>\n` });
     const r = compile(root, { buildRoot: root });
-    const d = diag(r, "W-AUTH-REQUIRED-NOT-INHERITED");
-    expect(d.length).toBe(1);
-    expect(d[0].message).toContain("does not declare auth=\"required\"");
-    expect(d[0].message).toContain("x.scrml");
+    expect(diag(r, "W-AUTH-REQUIRED-NOT-INHERITED").length).toBe(0);
+    const e = diag(r, "E-PROGRAM-NESTED-AUTH");
+    expect(e.length).toBe(1);
+    expect(e[0].message).toContain("route file");
   });
 
   test("silent when the application program is required (members are gated) — the control", () => {
@@ -325,14 +330,15 @@ describe("W-AUTH-REQUIRED-NOT-INHERITED names the build root actually used and h
     expect(d.message).toContain(`the route file "pages/index.scrml"`);
     expect(d.message).toContain("compileScrml's buildRoot");
   });
-  test("an inferred root", () => {
+  test("an inferred root (S445 #1: the route file's required <program> is nested → E-PROGRAM-NESTED-AUTH)", () => {
     // No root given: lib/x.scrml is the one <program> outside pages/ and routes/,
-    // so it is the entry and the build root is its directory; pages/index.scrml's
-    // required <program> is a route file's own, and pages/about.scrml is public.
+    // so it is the entry and the build root is its directory; pages/index.scrml is a
+    // route file of that application, so its <program> is nested (§4.12, S445 item 1).
     const root = writeProject("w-inferred", { ...ENTRY_IN_PAGES, "lib/x.scrml": `<program>\n<p>lib-marker</p>\n</program>\n` });
-    const [d] = diag(compile(root), "W-AUTH-REQUIRED-NOT-INHERITED");
-    expect(d.message).toContain("the directory of the entry file");
-    expect(d.message).toContain("x.scrml");
+    const r = compile(root);
+    expect(diag(r, "W-AUTH-REQUIRED-NOT-INHERITED").length).toBe(0);
+    const [e] = diag(r, "E-PROGRAM-NESTED-AUTH");
+    expect(e.message).toContain("route file");
   });
   test("no root given and the entry placed under pages/: the entry IS the application (fail closed, no warning)", () => {
     const root = writeProject("w-entry-in-pages-inferred", { ...ENTRY_IN_PAGES, "side.scrml": `<p>side-marker</p>\n` });
@@ -390,18 +396,17 @@ describe("a second non-route <program> gates the same wherever the project lives
 });
 
 describe("W-AUTH-REQUIRED-NOT-INHERITED under an inferred root states the inference and a CLI-reachable remedy", () => {
-  test("shallowest-file inference under a pages/ ancestor", () => {
+  test("shallowest-file inference under a pages/ ancestor (S445 #1: → E-PROGRAM-NESTED-AUTH on the route file's program)", () => {
     const root = writeProject("r4-msg/pages/proj", {
       "scratch.scrml": PUB,
       "src/pages/index.scrml": APP["app.scrml"],
       "src/pages/about.scrml": APP["pages/about.scrml"],
     });
-    const [d] = diag(compile(root), "W-AUTH-REQUIRED-NOT-INHERITED");
-    expect(d.message).toContain(`the directory of the entry file "${join(root, "scratch.scrml")}"`);
-    expect(d.message).toContain("it is the shallowest <program> file");
-    expect(d.message).toContain(`the route file "src/pages/index.scrml"`);
-    expect(d.message).toContain("move it out of the pages/ or routes/ directory it is in");
-    expect(d.message).not.toContain("buildRoot");
+    const r = compile(root);
+    expect(diag(r, "W-AUTH-REQUIRED-NOT-INHERITED").length).toBe(0);
+    const e = diag(r, "E-PROGRAM-NESTED-AUTH");
+    expect(e.length).toBe(1);
+    expect(e[0].filePath ?? e[0].span?.file ?? "").toContain("src/pages/index.scrml");
   });
 });
 

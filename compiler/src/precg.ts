@@ -14,6 +14,7 @@
  */
 import { computePGOFlags, computeFileShape } from "./compute-pgo-flags.ts";
 import { computeProgramConfig } from "./compute-program-config.ts";
+import { findTopLevelProgram, programRoleOptionsOf } from "./program-role.ts";
 
 export function runPRECG(fileAST: any): void {
   const nodes = fileAST.nodes ?? [];
@@ -22,7 +23,15 @@ export function runPRECG(fileAST: any): void {
   fileAST.hasEqualityExpr = pgo.hasEqualityExpr;
   fileAST.hasChunkedMarkupTag = pgo.hasChunkedMarkupTag;
   fileAST.hasForStmt = pgo.hasForStmt;
-  const cfg = computeProgramConfig(nodes);
+  const roleOpts = programRoleOptionsOf(fileAST);
+  const cfg = computeProgramConfig(nodes, roleOpts);
+  // F2 (S445 review) — record WHICH `<program>` this pass configured (by span), so
+  // codegen can refuse a build whose post-CE top-level program is a different node
+  // (e.g. one produced by a component expansion) rather than guess its config.
+  const top: any = findTopLevelProgram(nodes, roleOpts);
+  fileAST.precgTopLevelProgramSpan = top && top.span
+    ? { start: top.span.start ?? null, end: top.span.end ?? null }
+    : null;
   fileAST.authConfig = cfg.authConfig;
   fileAST.middlewareConfig = cfg.middlewareConfig;
   computeFileShape(fileAST);

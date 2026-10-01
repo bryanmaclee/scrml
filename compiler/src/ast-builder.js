@@ -110,6 +110,7 @@ import { getElementShape } from "./html-elements.js";
 import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
 import { classifyFileShape, isRecognizedNonEntryShape } from "./library-shape.js";
+import { hasTopLevelProgram, findTopLevelProgram } from "./program-role.ts";
 
 import { existsSync, statSync } from "fs";
 import { dirname as _pathDirname, join as _pathJoin, isAbsolute as _pathIsAbsolute } from "path";
@@ -21952,10 +21953,10 @@ export function buildAST(bsOutput, tokenizerOverrides) {
   // from logic blocks + top-level markup.
   const { imports, exports, typeDecls, components, machineDecls, channelDecls } = collectHoisted(nodes);
 
-  // W-PROGRAM-001: Check for <program> root element
-  const hasProgramRoot = nodes.some(
-    n => n.kind === "markup" && n.tag === "program"
-  );
+  // W-PROGRAM-001: Check for <program> root element — a TOP-LEVEL `<program>` by
+  // the one shared role definition (program-role.ts; §4.12, S445): no `<program>`
+  // / `<page>` ancestor, whatever markup wraps it.
+  const hasProgramRoot = hasTopLevelProgram(nodes);
 
   // S115 (DD #27 / F6 / Pivot 2) — `authConfig` / `middlewareConfig`
   // extraction from the <program> attributes is NO LONGER done at TAB time.
@@ -21965,7 +21966,9 @@ export function buildAST(bsOutput, tokenizerOverrides) {
   // same field names and reproduces the <program>-node annotation side-effect.
   // The E-MW-002 ratelimit-format validation below is an error-emitting CHECK
   // (not extraction) and STAYS here at TAB time.
-  const programNode = nodes.find(n => n.kind === "markup" && n.tag === "program");
+  // The file's top-level <program> by the one shared role definition
+  // (program-role.ts; §4.12, S445) — the same node computeProgramConfig reads.
+  const programNode = findTopLevelProgram(nodes);
 
   // E-MW-002: ratelimit= value must match N/unit where unit is sec, min, or hour.
   if (programNode) {
@@ -22373,9 +22376,8 @@ export function buildAST(bsOutput, tokenizerOverrides) {
   // ---------------------------------------------------------------------------
   {
     // Condition (1): top-level <program> present.
-    const entryProgramNode = nodes.find(
-      n => n && n.kind === "markup" && n.tag === "program"
-    );
+    // (program-role.ts, S445 — top-level whatever markup wraps it.)
+    const entryProgramNode = findTopLevelProgram(nodes);
 
     // §64 — a `kind="tool"` program emits a plain runnable MODULE (a CLI / server),
     // not a web application, so the SPA-vs-multi-page-app filesystem inference is
