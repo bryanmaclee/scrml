@@ -13,13 +13,28 @@
  * This file drives the REAL emitted handler against a REAL SQLite database behind a
  * REAL `Bun.serve` whose `error:` handler is the one `generateServerEntry` emits.
  */
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeAll } from "bun:test";
 import { writeFileSync, readFileSync, mkdtempSync, mkdirSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { generateServerEntry } from "../../src/commands/build.js";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+
+// Harness isolation (no expectation changes). This file serves REAL HTTP through
+// `Bun.serve` + the native `fetch` / `Request` / `Response`. Bun runs every test
+// file in ONE process, and an earlier file can leave happy-dom's globals installed
+// (the conformance adapter `run()` registers and never unregisters, e.g. via
+// cell-assign-server-call-awaited.test.js). Then `Response` is happy-dom's, and
+// `Bun.serve` refuses it ("Expected a Response object") while `fetch` reports a
+// network error, so every over-HTTP case fails for a reason that has nothing to
+// do with §14.8.9. The pairing reproduces on clean main: run
+// cell-assign-server-call-awaited.test.js before this file and 5 cases fail.
+// Restore the native globals first.
+beforeAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+});
 
 const SECRET = "SECRET-HASH-123";
 

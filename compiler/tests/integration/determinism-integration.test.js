@@ -226,22 +226,14 @@ describe("FX-1 — per-route HTML byte-identity", () => {
     }
   });
 
-  test("inline _SCRML_CHUNKS manifest (in HTML) is byte-stable", () => {
+  test("_SCRML_CHUNKS manifest (chunk-activation script) is byte-stable", () => {
     const a = compileFx1();
     const b = compileFx1();
-    // Spot-check the home page's HTML — pick the inline-manifest slice
-    // and assert byte-identity. The slice is bounded by the assignment
-    // `window._SCRML_CHUNKS = ` and a `;` terminator on the same line
-    // family per A-4.7's emit shape.
-    function homeHtml(result) {
-      for (const [path, out] of result.outputs) {
-        if (out.html && path.endsWith("routes/index.scrml")) return out.html;
-      }
-      return undefined;
-    }
-    const ha = homeHtml(a);
-    const hb = homeHtml(b);
-    expect(ha).toBe(hb);
+    // s444-csp-inline-chunks — the manifest ships in the build's same-origin
+    // chunk-activation script (content-addressed filename), not inline HTML.
+    expect(a.chunksBootJs).toBeDefined();
+    expect(a.chunksBootJs).toBe(b.chunksBootJs);
+    expect(a.chunksBootFilename).toBe(b.chunksBootFilename);
   });
 });
 

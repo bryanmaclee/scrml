@@ -4,9 +4,11 @@
  * A-4.7 — Per-route HTML augmentation tests.
  *
  * Covers:
- *   §1  augmentHtmlForChunks direct invocation — bootstrap script shape.
- *   §2  augmentHtmlForChunks direct invocation — _SCRML_CHUNKS inline.
- *   §3  augmentHtmlForChunks direct invocation — modulepreload links.
+ *   §1  buildChunksBootJs — role-detection bootstrap (shape + behaviour).
+ *   §2  buildChunksBootJs — the _SCRML_CHUNKS manifest.
+ *   §3  augmentHtmlForChunks — same-origin script tag + modulepreload links
+ *       (s444-csp-inline-chunks: NO inline script — `headers="strict"` pins
+ *       `default-src 'self'`, which refuses inline script).
  *   §4  augmentHtmlForChunks direct invocation — degenerate inputs.
  *   §5  End-to-end via compileScrml — §40.9.9 worked example HTML output.
  *   §6  End-to-end via compileScrml — tree-shake elision when no chunks.
@@ -26,7 +28,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, mkdtempSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
-import { augmentHtmlForChunks } from "../../src/codegen/emit-html.ts";
+import { augmentHtmlForChunks, buildChunksBootJs } from "../../src/codegen/emit-html.ts";
 import { RUNTIME_CHUNKS, assembleRuntime, RUNTIME_CHUNK_ORDER } from "../../src/codegen/runtime-chunks.ts";
 
 // ---------------------------------------------------------------------------
@@ -99,42 +101,201 @@ function compileWorked({ emitPerRoute = true } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// §1 — augmentHtmlForChunks direct invocation — bootstrap script shape
+// Helpers — s444-csp-inline-chunks
 // ---------------------------------------------------------------------------
 
-describe("§1 — augmentHtmlForChunks: role-detection bootstrap", () => {
-  test("bootstrap script contains localStorage / cookie / meta fallback order", () => {
+const BOOT_SRC = "/scrml-chunks.abcd1234.js";
+
+/**
+ * Every EXECUTABLE inline `<script>` in `html` — a `<script>` with no `src=`
+ * whose `type` is absent / a JS type / `module`. Under
+ * `<program headers="strict">` the compiler pins
+ * `Content-Security-Policy: default-src 'self'` (§39.2.5), which carries no
+ * `'unsafe-inline'`, no nonce and no hash — so EVERY such script is refused by
+ * the browser. The only compliant count is zero. (A non-JS `type`, e.g.
+ * `application/json`, is a data block: never executed, nothing to refuse.)
+ */
+function executableInlineScripts(html) {
+  const out = [];
+  const re = /<script\b([^>]*)>([\s\S]*?)<\/script>/gi;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const attrs = m[1];
+    if (/\bsrc\s*=/.test(attrs)) continue;
+    const typeMatch = attrs.match(/\btype\s*=\s*["']?([^"'\s>]+)/i);
+    const type = typeMatch ? typeMatch[1].toLowerCase() : "";
+    const isJs = type === "" || type === "text/javascript" || type === "application/javascript" || type === "module";
+    if (isJs) out.push(m[2]);
+  }
+  return out;
+}
+
+/**
+ * Execute the emitted chunk-activation script against a minimal host: the
+ * loading `<script>` tag carries `routeAttr` as `data-scrml-route`, and the
+ * role hint comes from `role` (via localStorage). Returns the chunk URL the
+ * bootstrap injected (or null) + the manifest it published + any warnings.
+ */
+function runBoot(bootJs, { routeAttr, role }) {
+  const injected = [];
+  const warnings = [];
+  const win = {};
+  const doc = {
+    currentScript: {
+      getAttribute: (n) => (n === "data-scrml-route" ? (routeAttr ?? null) : null),
+    },
+    cookie: "",
+    querySelector: () => null,
+    createElement: () => ({}),
+    head: { appendChild: (el) => injected.push(el) },
+  };
+  const ls = { getItem: (k) => (k === "scrml_role" ? (role ?? null) : null) };
+  const con = { warn: (msg) => warnings.push(String(msg)) };
+  new Function("window", "document", "localStorage", "console", bootJs)(win, doc, ls, con);
+  return { injected, warnings, manifest: win._SCRML_CHUNKS };
+}
+
+// ---------------------------------------------------------------------------
+// §1 — buildChunksBootJs — role-detection bootstrap
+// ---------------------------------------------------------------------------
+
+describe("§1 — buildChunksBootJs: role-detection bootstrap", () => {
+  test("bootstrap contains localStorage / cookie / meta fallback order", () => {
     const chunks = new Map([
       ["k1", chunk("/abs/app.scrml#page@/loads", "Driver", "initial", "loads/Driver.initial.abc12345.js", "// payload")],
     ]);
-    const out = augmentHtmlForChunks({
-      html: BASE_HTML,
+    const js = buildChunksBootJs({
       chunks,
-      fileEntryPointIds: ["/abs/app.scrml#page@/loads"],
       epIdToRoutePath: new Map([["/abs/app.scrml#page@/loads", "/loads"]]),
     });
-    expect(out).toContain('localStorage.getItem("scrml_role")');
-    expect(out).toContain("document.cookie.match");
-    expect(out).toContain('querySelector(\'meta[name="scrml-role"]\')');
-    expect(out).toContain('"_anonymous"');
+    expect(js).toContain('localStorage.getItem("scrml_role")');
+    expect(js).toContain("document.cookie.match");
+    expect(js).toContain('querySelector(\'meta[name="scrml-role"]\')');
+    expect(js).toContain('"_anonymous"');
   });
 
-  test("bootstrap script dispatches via dynamic <script> injection", () => {
+  test("bootstrap dispatches the role's initial chunk via dynamic <script> injection", () => {
     const chunks = new Map([
-      ["k1", chunk("/abs/app.scrml#program", "_anonymous", "initial", "_root/_anonymous.initial.deadbeef.js", "// payload")],
+      ["k1", chunk("/abs/app.scrml#page@/loads", "Driver", "initial", "loads/Driver.initial.a.js", "// p")],
+      ["k2", chunk("/abs/app.scrml#page@/loads", "Admin", "initial", "loads/Admin.initial.b.js", "// p")],
     ]);
-    const out = augmentHtmlForChunks({
-      html: BASE_HTML,
+    const js = buildChunksBootJs({
       chunks,
-      fileEntryPointIds: ["/abs/app.scrml#program"],
-      epIdToRoutePath: new Map([["/abs/app.scrml#program", "/"]]),
+      epIdToRoutePath: new Map([["/abs/app.scrml#page@/loads", "/loads"]]),
     });
-    expect(out).toContain('document.createElement("script")');
-    expect(out).toContain("s.defer = true");
-    expect(out).toContain("document.head.appendChild(s)");
+    expect(js).toContain('document.createElement("script")');
+    expect(js).toContain("s.defer = true");
+    expect(js).toContain("document.head.appendChild(s)");
+    const run = runBoot(js, { routeAttr: "/loads", role: "Admin" });
+    expect(run.injected.map((s) => s.src)).toEqual(["/loads/Admin.initial.b.js"]);
+    expect(run.warnings).toEqual([]);
   });
 
-  test("bootstrap script hardcodes the active route from first EpId", () => {
+  test("the active route comes from the loading tag's data-scrml-route, not a baked literal", () => {
+    const chunks = new Map([
+      ["k1", chunk("/abs/a.scrml#page@/a", "Driver", "initial", "a/Driver.initial.1.js", "// p")],
+      ["k2", chunk("/abs/b.scrml#page@/b", "Driver", "initial", "b/Driver.initial.2.js", "// p")],
+    ]);
+    const js = buildChunksBootJs({
+      chunks,
+      epIdToRoutePath: new Map([
+        ["/abs/a.scrml#page@/a", "/a"],
+        ["/abs/b.scrml#page@/b", "/b"],
+      ]),
+    });
+    expect(js).not.toContain("var activeRoute = \"");
+    expect(runBoot(js, { routeAttr: "/a", role: "Driver" }).injected[0].src).toBe("/a/Driver.initial.1.js");
+    expect(runBoot(js, { routeAttr: "/b", role: "Driver" }).injected[0].src).toBe("/b/Driver.initial.2.js");
+  });
+
+  test("bootstrap warns + loads nothing when the tag carries no route", () => {
+    const chunks = new Map([
+      ["k1", chunk("/abs/app.scrml#program", "_anonymous", "initial", "_root/_anonymous.initial.x.js", "// p")],
+    ]);
+    const js = buildChunksBootJs({ chunks, epIdToRoutePath: new Map([["/abs/app.scrml#program", "/"]]) });
+    const run = runBoot(js, { routeAttr: null, role: "_anonymous" });
+    expect(run.injected).toEqual([]);
+    expect(run.warnings.join("\n")).toContain("no active route for chunk bootstrap");
+  });
+
+  test("bootstrap warns + loads nothing for a role with no chunk", () => {
+    const chunks = new Map([
+      ["k1", chunk("/abs/app.scrml#page@/x", "Admin", "initial", "x/Admin.initial.x.js", "// p")],
+    ]);
+    const js = buildChunksBootJs({ chunks, epIdToRoutePath: new Map([["/abs/app.scrml#page@/x", "/x"]]) });
+    const run = runBoot(js, { routeAttr: "/x", role: "Driver" });
+    expect(run.injected).toEqual([]);
+    expect(run.warnings.join("\n")).toContain("no chunk for role 'Driver'");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §2 — buildChunksBootJs — the _SCRML_CHUNKS manifest
+// ---------------------------------------------------------------------------
+
+describe("§2 — buildChunksBootJs: _SCRML_CHUNKS manifest", () => {
+  test("manifest contains route-keyed entries for all roles + tiers", () => {
+    const chunks = new Map([
+      ["k1", chunk("/abs/app.scrml#page@/loads", "Driver", "initial", "loads/Driver.initial.abc1.js", "// p")],
+      ["k2", chunk("/abs/app.scrml#page@/loads", "Driver", "tier1", "loads/Driver.tier1.abc2.js", "// p")],
+      ["k3", chunk("/abs/app.scrml#page@/loads", "Admin", "initial", "loads/Admin.initial.abc3.js", "// p")],
+    ]);
+    const js = buildChunksBootJs({
+      chunks,
+      epIdToRoutePath: new Map([["/abs/app.scrml#page@/loads", "/loads"]]),
+    });
+    expect(js).toContain("window._SCRML_CHUNKS = ");
+    const { manifest } = runBoot(js, { routeAttr: "/loads", role: "Driver" });
+    expect(manifest).toEqual({
+      "/loads": {
+        Driver: { initial: "/loads/Driver.initial.abc1.js", tier1: "/loads/Driver.tier1.abc2.js" },
+        Admin: { initial: "/loads/Admin.initial.abc3.js" },
+      },
+    });
+  });
+
+  test("manifest skips tier-1 URLs for empty payloads", () => {
+    const chunks = new Map([
+      ["k1", chunk("/abs/app.scrml#page@/loads", "Driver", "initial", "loads/Driver.initial.x.js", "// p")],
+      ["k2", chunk("/abs/app.scrml#page@/loads", "Driver", "tier1", "loads/Driver.tier1.y.js", "" /* empty */)],
+    ]);
+    const js = buildChunksBootJs({
+      chunks,
+      epIdToRoutePath: new Map([["/abs/app.scrml#page@/loads", "/loads"]]),
+    });
+    expect(js).toContain('"/loads/Driver.initial.x.js"');
+    // Empty tier-1 payload → URL skipped from the manifest.
+    expect(js).not.toContain("/loads/Driver.tier1.y.js");
+  });
+
+  test("esm: the injected chunk script is marked type=\"module\"; classic has no s.type line", () => {
+    const chunks = new Map([
+      ["k1", chunk("/abs/app.scrml#page@/x", "Driver", "initial", "x/Driver.initial.x.js", "// p")],
+    ]);
+    const epIdToRoutePath = new Map([["/abs/app.scrml#page@/x", "/x"]]);
+    const esm = buildChunksBootJs({ chunks, epIdToRoutePath, moduleFormat: "esm" });
+    const classic = buildChunksBootJs({ chunks, epIdToRoutePath });
+    expect(esm).toContain('s.type = "module";');
+    expect(classic).not.toContain("s.type");
+    expect(runBoot(esm, { routeAttr: "/x", role: "Driver" }).injected[0].type).toBe("module");
+  });
+
+  test("deterministic — identical input → byte-identical script", () => {
+    const mk = () => new Map([
+      ["k1", chunk("/abs/app.scrml#page@/x", "Driver", "initial", "x/Driver.initial.x.js", "// p")],
+      ["k2", chunk("/abs/app.scrml#page@/x", "Admin", "initial", "x/Admin.initial.y.js", "// p")],
+    ]);
+    const epIdToRoutePath = new Map([["/abs/app.scrml#page@/x", "/x"]]);
+    expect(buildChunksBootJs({ chunks: mk(), epIdToRoutePath })).toBe(buildChunksBootJs({ chunks: mk(), epIdToRoutePath }));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §3 — augmentHtmlForChunks — the HTML references (no inline script)
+// ---------------------------------------------------------------------------
+
+describe("§3 — augmentHtmlForChunks: same-origin script tag + modulepreload links", () => {
+  test("injects a same-origin <script src> carrying the active route; NO inline script", () => {
     const chunks = new Map([
       ["k1", chunk("/abs/app.scrml#page@/dashboard", "_anonymous", "initial", "dashboard/_anonymous.initial.deadbeef.js", "// payload")],
     ]);
@@ -143,69 +304,15 @@ describe("§1 — augmentHtmlForChunks: role-detection bootstrap", () => {
       chunks,
       fileEntryPointIds: ["/abs/app.scrml#page@/dashboard"],
       epIdToRoutePath: new Map([["/abs/app.scrml#page@/dashboard", "/dashboard"]]),
+      chunksBootSrc: BOOT_SRC,
     });
-    expect(out).toContain('var activeRoute = "/dashboard"');
+    expect(out).toContain(`<script src="${BOOT_SRC}" data-scrml-route="/dashboard"></script>`);
+    expect(out).not.toContain("_SCRML_CHUNKS");
+    expect(out).not.toContain("scrml_role");
+    expect(executableInlineScripts(out)).toEqual([]);
   });
 
-  test("bootstrap script warns + degrades when active route unresolvable", () => {
-    const chunks = new Map([
-      ["k1", chunk("/abs/app.scrml#program", "_anonymous", "initial", "_root/_anonymous.initial.x.js", "// p")],
-    ]);
-    const out = augmentHtmlForChunks({
-      html: BASE_HTML,
-      chunks,
-      fileEntryPointIds: ["/abs/app.scrml#program"],
-      // Empty map → activeRoute stays null.
-      epIdToRoutePath: new Map(),
-    });
-    expect(out).toContain("var activeRoute = null");
-    expect(out).toContain("no active route for chunk bootstrap");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// §2 — augmentHtmlForChunks direct invocation — _SCRML_CHUNKS inline
-// ---------------------------------------------------------------------------
-
-describe("§2 — augmentHtmlForChunks: _SCRML_CHUNKS inline manifest", () => {
-  test("inline manifest contains route-keyed entries for all roles + tiers", () => {
-    const chunks = new Map([
-      ["k1", chunk("/abs/app.scrml#page@/loads", "Driver", "initial", "loads/Driver.initial.abc1.js", "// p")],
-      ["k2", chunk("/abs/app.scrml#page@/loads", "Driver", "tier1", "loads/Driver.tier1.abc2.js", "// p")],
-      ["k3", chunk("/abs/app.scrml#page@/loads", "Admin", "initial", "loads/Admin.initial.abc3.js", "// p")],
-    ]);
-    const out = augmentHtmlForChunks({
-      html: BASE_HTML,
-      chunks,
-      fileEntryPointIds: ["/abs/app.scrml#page@/loads"],
-      epIdToRoutePath: new Map([["/abs/app.scrml#page@/loads", "/loads"]]),
-    });
-    expect(out).toContain("window._SCRML_CHUNKS");
-    expect(out).toContain('"/loads"');
-    expect(out).toContain('"Driver"');
-    expect(out).toContain('"Admin"');
-    expect(out).toContain('"/loads/Driver.initial.abc1.js"');
-    expect(out).toContain('"/loads/Driver.tier1.abc2.js"');
-    expect(out).toContain('"/loads/Admin.initial.abc3.js"');
-  });
-
-  test("inline manifest skips tier-1 URLs for empty payloads", () => {
-    const chunks = new Map([
-      ["k1", chunk("/abs/app.scrml#page@/loads", "Driver", "initial", "loads/Driver.initial.x.js", "// p")],
-      ["k2", chunk("/abs/app.scrml#page@/loads", "Driver", "tier1", "loads/Driver.tier1.y.js", "" /* empty */)],
-    ]);
-    const out = augmentHtmlForChunks({
-      html: BASE_HTML,
-      chunks,
-      fileEntryPointIds: ["/abs/app.scrml#page@/loads"],
-      epIdToRoutePath: new Map([["/abs/app.scrml#page@/loads", "/loads"]]),
-    });
-    expect(out).toContain('"/loads/Driver.initial.x.js"');
-    // Empty tier-1 payload → URL skipped from inline manifest.
-    expect(out).not.toContain("/loads/Driver.tier1.y.js");
-  });
-
-  test("inline manifest inserted before </head> close", () => {
+  test("script tag inserted before </head> close", () => {
     const chunks = new Map([
       ["k1", chunk("/abs/app.scrml#page@/x", "_anonymous", "initial", "x/_anonymous.initial.a.js", "// p")],
     ]);
@@ -214,21 +321,45 @@ describe("§2 — augmentHtmlForChunks: _SCRML_CHUNKS inline manifest", () => {
       chunks,
       fileEntryPointIds: ["/abs/app.scrml#page@/x"],
       epIdToRoutePath: new Map([["/abs/app.scrml#page@/x", "/x"]]),
+      chunksBootSrc: BOOT_SRC,
     });
-    const manifestIdx = out.indexOf("window._SCRML_CHUNKS");
+    const tagIdx = out.indexOf(BOOT_SRC);
     const headCloseIdx = out.indexOf("</head>");
     const bodyOpenIdx = out.indexOf("<body>");
-    expect(manifestIdx).toBeGreaterThanOrEqual(0);
-    expect(headCloseIdx).toBeGreaterThan(manifestIdx);
+    expect(tagIdx).toBeGreaterThanOrEqual(0);
+    expect(headCloseIdx).toBeGreaterThan(tagIdx);
     expect(bodyOpenIdx).toBeGreaterThan(headCloseIdx);
   });
-});
 
-// ---------------------------------------------------------------------------
-// §3 — modulepreload links
-// ---------------------------------------------------------------------------
+  test("unresolvable active route → tag carries NO data-scrml-route (bootstrap warns + skips)", () => {
+    const chunks = new Map([
+      ["k1", chunk("/abs/app.scrml#program", "_anonymous", "initial", "_root/_anonymous.initial.x.js", "// p")],
+    ]);
+    const out = augmentHtmlForChunks({
+      html: BASE_HTML,
+      chunks,
+      fileEntryPointIds: ["/abs/app.scrml#program"],
+      epIdToRoutePath: new Map(),
+      chunksBootSrc: BOOT_SRC,
+    });
+    expect(out).toContain(`<script src="${BOOT_SRC}"></script>`);
+    expect(out).not.toContain("data-scrml-route");
+  });
 
-describe("§3 — augmentHtmlForChunks: modulepreload links", () => {
+  test("route value is attribute-escaped", () => {
+    const chunks = new Map([
+      ["k1", chunk("/abs/app.scrml#page@/a\"b", "Driver", "initial", "ab/Driver.initial.x.js", "// p")],
+    ]);
+    const out = augmentHtmlForChunks({
+      html: BASE_HTML,
+      chunks,
+      fileEntryPointIds: ["/abs/app.scrml#page@/a\"b"],
+      epIdToRoutePath: new Map([["/abs/app.scrml#page@/a\"b", "/a\"b"]]),
+      chunksBootSrc: BOOT_SRC,
+    });
+    expect(out).toContain('data-scrml-route="/a&quot;b"');
+  });
+
   test("non-empty tier-1 → emits modulepreload link", () => {
     const chunks = new Map([
       ["k1", chunk("/abs/app.scrml#page@/loads", "Driver", "initial", "loads/Driver.initial.x.js", "// p")],
@@ -239,6 +370,7 @@ describe("§3 — augmentHtmlForChunks: modulepreload links", () => {
       chunks,
       fileEntryPointIds: ["/abs/app.scrml#page@/loads"],
       epIdToRoutePath: new Map([["/abs/app.scrml#page@/loads", "/loads"]]),
+      chunksBootSrc: BOOT_SRC,
     });
     expect(out).toContain('<link rel="modulepreload" href="/loads/Driver.tier1.y.js">');
   });
@@ -253,6 +385,7 @@ describe("§3 — augmentHtmlForChunks: modulepreload links", () => {
       chunks,
       fileEntryPointIds: ["/abs/app.scrml#page@/loads"],
       epIdToRoutePath: new Map([["/abs/app.scrml#page@/loads", "/loads"]]),
+      chunksBootSrc: BOOT_SRC,
     });
     expect(out).not.toContain('rel="modulepreload"');
   });
@@ -269,6 +402,7 @@ describe("§3 — augmentHtmlForChunks: modulepreload links", () => {
       chunks,
       fileEntryPointIds: ["/abs/app.scrml#page@/x"],
       epIdToRoutePath: new Map([["/abs/app.scrml#page@/x", "/x"]]),
+      chunksBootSrc: BOOT_SRC,
     });
     expect(out).toContain("/x/Driver.tier1.y.js");
     expect(out).toContain("/x/Admin.tier1.z.js");
@@ -289,6 +423,7 @@ describe("§4 — augmentHtmlForChunks: degenerate inputs", () => {
       chunks: new Map(),
       fileEntryPointIds: [],
       epIdToRoutePath: new Map(),
+      chunksBootSrc: BOOT_SRC,
     });
     expect(out).toBe(BASE_HTML);
   });
@@ -300,6 +435,7 @@ describe("§4 — augmentHtmlForChunks: degenerate inputs", () => {
       chunks: new Map([["k1", chunk("/x.scrml#program", "_anonymous", "initial", "_root/_anonymous.initial.a.js", "// p")]]),
       fileEntryPointIds: ["/x.scrml#program"],
       epIdToRoutePath: new Map([["/x.scrml#program", "/"]]),
+      chunksBootSrc: BOOT_SRC,
     });
     expect(out).toBe(html);
   });
@@ -310,37 +446,35 @@ describe("§4 — augmentHtmlForChunks: degenerate inputs", () => {
 // ---------------------------------------------------------------------------
 
 describe("§5 — compileScrml HTML output (§40.9.9 worked example)", () => {
-  test("HTML output contains _SCRML_CHUNKS inline manifest", () => {
+  test("result carries a content-addressed dist-root chunk-activation script", () => {
+    const result = compileWorked();
+    expect(result.chunksBootFilename).toMatch(/^scrml-chunks\.[0-9a-z]{8}\.js$/);
+    expect(result.chunksBootJs).toContain("window._SCRML_CHUNKS = ");
+    expect(result.chunksBootJs).toContain('localStorage.getItem("scrml_role")');
+    expect(result.chunksBootJs).toContain('document.createElement("script")');
+  });
+
+  test("HTML references the script by same-origin src, with the page's route", () => {
     const result = compileWorked();
     const fileOut = result.outputs.values().next().value;
     expect(fileOut?.html).toBeDefined();
-    expect(fileOut.html).toContain("window._SCRML_CHUNKS");
+    expect(fileOut.html).toContain(`<script src="/${result.chunksBootFilename}" data-scrml-route="/"></script>`);
+    expect(fileOut.html).not.toContain("window._SCRML_CHUNKS");
   });
 
-  test("HTML output contains role-detection bootstrap", () => {
+  test("manifest references all four role variants", () => {
     const result = compileWorked();
-    const fileOut = result.outputs.values().next().value;
-    expect(fileOut.html).toContain('localStorage.getItem("scrml_role")');
-    expect(fileOut.html).toContain('"_anonymous"');
-    expect(fileOut.html).toContain('document.createElement("script")');
+    expect(result.chunksBootJs).toContain('"Admin"');
+    expect(result.chunksBootJs).toContain('"Anonymous"');
+    expect(result.chunksBootJs).toContain('"Dispatcher"');
+    expect(result.chunksBootJs).toContain('"Driver"');
   });
 
-  test("HTML output references all four role variants in inline manifest", () => {
+  test("manifest references chunk filenames matching chunks Map", () => {
     const result = compileWorked();
-    const fileOut = result.outputs.values().next().value;
-    expect(fileOut.html).toContain('"Admin"');
-    expect(fileOut.html).toContain('"Anonymous"');
-    expect(fileOut.html).toContain('"Dispatcher"');
-    expect(fileOut.html).toContain('"Driver"');
-  });
-
-  test("HTML output references chunk filenames matching chunks Map", () => {
-    const result = compileWorked();
-    const fileOut = result.outputs.values().next().value;
-    // Each chunk's filename should appear in the inline manifest.
     for (const chunk of result.chunks.values()) {
       if (chunk.tier !== "initial") continue;
-      expect(fileOut.html).toContain(chunk.filename);
+      expect(result.chunksBootJs).toContain(chunk.filename);
     }
   });
 
@@ -358,6 +492,31 @@ describe("§5 — compileScrml HTML output (§40.9.9 worked example)", () => {
     // real page, this assertion flips polarity.
     expect(typeof fileOut.html).toBe("string");
   });
+
+  test("headers=\"strict\": the pinned CSP admits every script the page carries (no executable inline script)", () => {
+    const filePath = join(TMP, "strict-app.scrml");
+    writeFileSync(filePath, WORKED_EXAMPLE_SOURCE.replace('auth="required">', 'auth="required" headers="strict">'));
+    const result = compileScrml({
+      inputFiles: [filePath],
+      outputDir: join(TMP, "dist-strict"),
+      write: false,
+      emitPerRoute: true,
+      log: () => {},
+    });
+    const fileOut = result.outputs.get(filePath);
+    // The CSP the compiler pins: `default-src 'self'` — no 'unsafe-inline', no
+    // nonce, no hash. So an inline script is covered only if there are none.
+    const cspMatch = fileOut.serverJs.match(/'Content-Security-Policy',\s*"([^"]*)"/);
+    expect(cspMatch).not.toBeNull();
+    const csp = cspMatch[1];
+    expect(csp).toBe("default-src 'self'");
+    expect(csp).not.toContain("unsafe-inline");
+    expect(executableInlineScripts(fileOut.html)).toEqual([]);
+    // …and every external script is same-origin (root-relative or relative).
+    const srcs = [...fileOut.html.matchAll(/<script\b[^>]*\bsrc="([^"]+)"/g)].map((m) => m[1]);
+    expect(srcs).toContain(`/${result.chunksBootFilename}`);
+    for (const src of srcs) expect(src).not.toMatch(/^(?:[a-z]+:)?\/\//i);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -371,6 +530,9 @@ describe("§6 — chunks-disabled mode preserves pre-A-4.7 HTML shape", () => {
     expect(fileOut?.html).toBeDefined();
     expect(fileOut.html).not.toContain("window._SCRML_CHUNKS");
     expect(fileOut.html).not.toContain('scrml_role');
+    expect(fileOut.html).not.toContain("scrml-chunks.");
+    expect(result.chunksBootJs).toBeUndefined();
+    expect(result.chunksBootFilename).toBeUndefined();
   });
 });
 
