@@ -9728,8 +9728,36 @@ every column a marker is PRESENT for. Consequences a conformant implementation S
   provenance, so `return this.passwordHash` from it is `E-PROTECT-006`. (Measured at rounds 6c/6d:
   `u.toJSON = function () { return { pw: this.passwordHash } }` served the hash; and, on base as
   well, a `defineProperty` getter reading `this.passwordHash` served it through the server-function
-  response, `/__mountHydrate` and the SSR state script.) Disclosed bound: a WRITE through `this`
-  (`this.x = h` inside such a function) is not modelled by the provenance analysis.
+  response, `/__mountHydrate` and the SSR state script.) ~~Disclosed bound: a WRITE through `this`
+  (`this.x = h` inside such a function) is not modelled by the provenance analysis.~~ *(round-6e
+  bound, SUPERSEDED S447 round 7 — writes through `this` are modelled; next bullet.)*
+- **`this` is the receiver, and a function the LANGUAGE calls is called (S447 round 7).** The
+  item-2 obligation below — "Provenance is preserved by default. Any step not positively known to
+  produce a value of independent identity preserves it — including … writes into a container …
+  getters and `toJSON` the serializer invokes" — was false for two families, each measured over
+  HTTP at exit 0: a WRITE through `this` (`u.stash = function () { this.x = this.passwordHash };
+  u.stash(); return u`, and `o.set = function (r) { this.h = r.passwordHash }; o.set(u); return o`
+  served the hash through the server-function response, `/__mountHydrate` and the SSR state script),
+  and a function the language invokes WITHOUT the program naming the call (a tagged template's tag;
+  `toString` / `valueOf` / `[Symbol.toPrimitive]` under a template, `+` or a property key;
+  `[Symbol.iterator]` under spread, `for…of`, destructuring or `yield*`; `[Symbol.hasInstance]`
+  under `instanceof`; a thenable's `then`, including a server function that RETURNS a thenable).
+  The analysis SHALL therefore treat:
+  - `this` in a function as every receiver it may run with — the object it is stored on, the
+    receiver of a method call, the first argument of `call` / `apply` / `bind`, an array method's
+    `thisArg`, the fresh object of `new`, and anything code the compiler has no model for holds —
+    and a write through `this` as a write INTO that receiver (as `o.p = v` is), visible through
+    every alias of it;
+  - a function stored where the language may call it — under `then`, `toString`, `valueOf`,
+    `toJSON`, `toLocaleString`, an iterator's `next` / `return` / `throw`, `__proto__`, as an
+    accessor, or under a key the compiler cannot read (every Symbol-keyed hook is a computed key)
+    — as so invoked, with `this` = the object: what it returns is part of the object, so a
+    coercion, iteration or spread of the object carries it; `await` (and `for await`) of a value
+    holding a possible `then` carries what that function passes to its parameters;
+  - a tagged template as a call of its tag with the strings array first; a tag the analysis holds
+    no function for is code the compiler cannot see into (fail closed), unless it IS the
+    compiler's own SQL client;
+  - `x instanceof C` as a call of `C`'s hooks with `x`.
 (Measured before round 6: `delete u[Symbol.for("scrml.protect.origin")]`, pushing onto the
 descriptor's reveal list, and deleting a copy's Symbol-keyed properties each served the full row.)
 
@@ -9829,6 +9857,10 @@ halves, and a conformant implementation SHALL enforce both:
      `verifyTotp`, `scrml:crypto` `verifyHash`, `hash("argon2", …)`, and `hmac(key, …)` whose KEY is
      neither itself protected nor a compile-time constant (below), `Boolean`, `console.*`. ~~`scrml:crypto` `hash` / `hmac` / `verifyHash`,
      `crypto.subtle.digest`~~ *(S441 wording — SUPERSEDED for bare digests by RULING S443 #7, below)*.
+     The `scrml:` names here denote the compiler's OWN stdlib (the `scrml:NAME` specifier), never a
+     module that merely sits at a look-alike path: S447 round 7 measured an author file at
+     `./_scrml/auth.js` whose `verifyPassword` returned its argument being given this allowlist,
+     and serving the hash — "derived only when produced by" was false for it.
      `Number(x)` is not on it (on a numeric protected column it is the identity), and
      neither is any `Bun.*` API (`Bun.hash` is a non-cryptographic hash, brute-forceable on a
      low-entropy column).
