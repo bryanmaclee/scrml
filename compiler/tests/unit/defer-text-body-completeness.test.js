@@ -46,7 +46,7 @@ const CLASSIFIED = {
   "when-message.bodyRaw": "lowered",
   "when-worker-message.bodyRaw": "lowered",
   "when-worker-error.bodyRaw": "lowered",
-  // (`test.testGroup.tests[].body` is a string[] inside an untyped object — checked in its own test below)
+  // (`test.testGroup.tests[].body` — deliberately not probed, S446 F1; see below)
   // --- covered: arm / bare-block text, checked by textBodiesOf ---
   "match-expr.rawArms": "armText",
   "match-arm-inline.result": "armText",
@@ -54,7 +54,7 @@ const CLASSIFIED = {
   "error-effect.arms[].handler": "armText", // statement `!{ … } catch T as e { … }` / legacy `| ::T e -> …` (S446)
   // --- covered: lowered as text, keyed under a KIND-LESS sub-object (S446) ---
   "onchange-decl.arms[].bodyRaw": "loweredArm",
-  "test.testGroup.tests[].body": "loweredTest", // checked in its own test below
+  "test.testGroup.tests[].body": "notProbed", // S446 F1: excluded from the rule-4 probe (comment openers stripped → false rejections); test bodies never reach production output — known-gaps
   // --- kind-less sub-object fields that are not statement text (S446) ---
   "onchange-decl.arms[].bodyForm": "notStatement", // a form tag ("shorthand" / "block")
   "onchange-decl.arms[].payloadBindingsRaw": "notStatement", // a binder pattern (in the E-DEFER-AMBIGUOUS-LEAD binder table)
@@ -260,9 +260,9 @@ describe("every text-carried body is classified for the §19.16.3 rule-4 check",
     expect(ee.map((b) => b.text)).toEqual(["defer f()"]);
   });
 
-  test("`~{}` test bodies (string[] in the untyped testGroup) are lowered", () => {
+  test("`~{}` test bodies are deliberately NOT probed (S446 F1 — comment openers are stripped there; never production output)", () => {
     const got = textLoweredBodiesOf({ kind: "test", testGroup: { tests: [{ body: ["defer f ( )", "assert 1 == 1"] }], before: ["defer g ( )"], after: null } });
-    expect(got.length).toBe(2);
+    expect(got.length).toBe(0);
   });
 
   test("an on*=${} handler attribute (expr.raw on a markup owner) is lowered, a non-handler one is not", () => {

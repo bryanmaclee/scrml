@@ -65,7 +65,6 @@ const ROWS = [
   { name: "worker self-handler + parent `when message from`", src: `<program>\n<program name="w1">\n    \${\n        when message(data) {\n            defer send({ r: 1 })\n            send({ r: 2 })\n        }\n    }\n</>\n\${\n    <trace> = ""\n    function go() { <#w1>.send({ v: 1 }) }\n    when message from <#w1> (data) {\n        defer note("d")\n        @trace = @trace + data.r + ";"\n    }\n    function note(x) { @trace = @trace + x + ";" }\n}\n<button id="go" onclick=go()>Go</>\n<p id="out">\${@trace}</p>\n</program>\n`, live: OUT, native: "fails" },
   { name: "event-handler attribute `onclick=${defer f()}`", src: page("", `    <button id="go" onclick=\${defer note("d")}>Go</>`), live: OUT, native: OUT },
   { name: "event-handler attribute inside <each>", src: page("", `    <each in=@items as it>\n        <button onclick=\${defer note("d")}>x</>\n    </each>`), live: OUT, native: OUT },
-  { name: "`~{}` test body", src: `\${\n    <trace> = ""\n    function note(x) { @trace = @trace + x + ";" }\n}\n~{ "t"\n    test "x" {\n        defer note("d")\n        assert 1 == 1\n    }\n}\n<program>\n    <p id="out">\${@trace}</p>\n</program>\n`, live: OUT, native: "dropped" },
   // --- text-carried arm / block bodies at the TOP level (no enclosing function) ---
   { name: "top-level braced match arm", src: logic(`    type M:enum = { A, B }\n    let mm: M = M.A\n    match mm {\n        .A :> {\n            defer note("d")\n            note("a")\n        }\n        .B :> { note("b") }\n    }`), live: OUT, native: OUT },
   { name: "top-level unbraced match arm", src: logic(`    type M:enum = { A, B }\n    let mm: M = M.A\n    match mm {\n        .A :> defer note("d")\n        .B :> note("b")\n    }`), live: OUT, native: "E-DEFER-UNSUPPORTED-SITE" },
@@ -188,6 +187,13 @@ describe("§19.16.3 rule 4 — every non-function body kind × both front-ends",
     const hits = r.errors.filter((e) => e.code === OUT);
     expect(hits.length).toBe(1);
     expect(hits[0].span?.line).toBe(4);
+  });
+
+  test("a `~{}` test body is not probed — a comment mentioning defer is not a false rejection (S446 review F1)", () => {
+    const TB = (body) => `\${\n  function add(x) { return x + 1 }\n}\n~{\n  test "a" {\n${body}\n    assert add(1) == 2\n  }\n}\n<program><p>hi</p></program>\n`;
+    for (const body of [`    // we defer the save here`, `    /* defer cleanup */`, `    // TODO: defer this`]) {
+      expect(codes(compile(TB(body))).filter((c) => c.startsWith("E-DEFER-"))).toEqual([]);
+    }
   });
 
   test("`defer` as an identifier in a when body / handler attribute is untouched (§19.16.1)", () => {

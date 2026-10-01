@@ -272,7 +272,7 @@ export function textContainsDirectDeferStatement(text: string): TextProbe {
  *   - `when-message`           (worker self-handler `when message(d) { … }`) .bodyRaw
  *   - `when-worker-message` / `when-worker-error`
  *                              (`when message from <#w> (d) { … }`)          .bodyRaw
- *   - `test`                   (`~{ test "…" { … } }` bodies, before/after)  .testGroup
+ *   (`~{ test … }` bodies are NOT listed — see the note in the function, S446 F1)
  *   - `markup`                 an `on*=${ … }` event-handler attribute value — a
  *                              statement body (emit-event-wiring Case C), lowered
  *                              as text including any function / arrow in it
@@ -302,19 +302,11 @@ export function textLoweredBodiesOf(n: Node): LoweredTextBody[] {
     const label = k === "when-effect" ? "a `when … changes { }` body" : "a `when message { }` handler body";
     out.push({ text: n.bodyRaw as string, label, anyDepth: true });
   }
-  if (k === "test" && n.testGroup && typeof n.testGroup === "object") {
-    const g = n.testGroup as { tests?: Array<{ body?: unknown }>; before?: unknown; after?: unknown };
-    const lines = (v: unknown): string | null =>
-      Array.isArray(v) ? v.filter((s) => typeof s === "string").join("\n") : (typeof v === "string" ? v : null);
-    for (const t of Array.isArray(g.tests) ? g.tests : []) {
-      const body = t ? lines(t.body) : null;
-      if (body) out.push({ text: body, label: "a `test` body", anyDepth: true });
-    }
-    for (const v of [g.before, g.after]) {
-      const body = lines(v);
-      if (body) out.push({ text: body, label: "a test `before` / `after` body", anyDepth: true });
-    }
-  }
+  // `~{ test … }` bodies (and `before` / `after`) are deliberately NOT probed
+  // (S446 review F1): the front-end strips comment openers from
+  // `testGroup.tests[].body`, so a comment mentioning `defer` read as a
+  // statement and was falsely rejected. Test bodies never reach production
+  // output; the comment-stripping defect is filed in known-gaps.
   // A `<channel>` `<onchange>` arm body (§52 — shorthand `<V(row) : stmt>` or a
   // block body): codegen splices the text into the change dispatcher as
   // statements (S446 — a `defer` there reached the client JS verbatim).

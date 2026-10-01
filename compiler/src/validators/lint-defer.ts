@@ -817,7 +817,8 @@ function checkLaterShadow(root: unknown, filePath: string, report: ReportFn): vo
 const DEFER_NAME = "defer";
 
 function bindingName(raw: string): string {
-  return raw.replace(/^\s*(const|let|var|lin)\s+/, "").split(":")[0].split("=")[0].trim();
+  // A rest binder (`...defer`) binds the name after the spread (S446 review F2).
+  return raw.replace(/^\s*(const|let|var|lin)\s+/, "").split(":")[0].split("=")[0].trim().replace(/^\.\.\.\s*/, "");
 }
 
 /**
@@ -954,6 +955,12 @@ function checkAmbiguousLead(root: unknown, report: ReportFn): void {
     if (nn.kind === "function-decl") { if (nn.name === DEFER_NAME) fileBinds = true; return; }
     if (nn.kind === "lambda") return;
     if (bindsDeferIn(nn, "list")) { fileBinds = true; return; }
+    // S446 review F4 — only TRUE file-level bindings: a statement's nested block
+    // (`for (…) { let defer }`, `if (…) { const defer }`, a match arm, a `given`
+    // body) is block-scoped and not visible inside a function. Narrowed by not
+    // descending into statement nodes at all.
+    if (typeof nn.kind === "string" &&
+        (/-stmt$/.test(nn.kind) || /^(for|if|match|while)-expr$/.test(nn.kind) || nn.kind === "given-guard")) return;
     for (const key of Object.keys(nn)) if (key !== "span" && key !== "parent") scanTop(nn[key]);
   };
   scanTop(root);
@@ -962,12 +969,12 @@ function checkAmbiguousLead(root: unknown, report: ReportFn): void {
   const isStmtList = (x: unknown[]): boolean =>
     x.some((c) => c && typeof c === "object" && typeof (c as Node).kind === "string");
 
-  const walkList = (list: unknown[], bound: boolean): void => {
+  const walkList = (list: unknown[], bound: boolean, inFn: boolean): void => {
     // a function declaration is hoisted to the top of its block
     let b = bound || list.some((c) => c && typeof c === "object" &&
       (c as Node).kind === "function-decl" && (c as Node).name === DEFER_NAME);
     for (const c of list) {
-      walk(c, b);
+      walk(c, b, inFn);
       const cn = c as Node;
       if (!b && cn && typeof cn === "object" && bindsDeferIn(cn, "list")) {
         b = true; // declared here: visible to the statements after it
@@ -975,25 +982,29 @@ function checkAmbiguousLead(root: unknown, report: ReportFn): void {
     }
   };
 
-  const walk = (x: unknown, bound: boolean): void => {
+  // `inFn`: inside a function DECLARATION body. A `defer` anywhere else is
+  // E-DEFER-OUTSIDE-FUNCTION (§19.16.3 rule 4), which is the error there
+  // INSTEAD of this one (§19.16.1; S446 review F3 — both used to fire).
+  const walk = (x: unknown, bound: boolean, inFn: boolean): void => {
     if (!x || typeof x !== "object" || seen.has(x as object)) return;
     seen.add(x as object);
     if (Array.isArray(x)) {
-      if (isStmtList(x)) walkList(x, bound);
-      else for (const c of x) walk(c, bound);
+      if (isStmtList(x)) walkList(x, bound, inFn);
+      else for (const c of x) walk(c, bound, inFn);
       return;
     }
     const nn = x as Node;
     const inner = bound || bindsDeferIn(nn, "subtree");
-    if (nn.kind === "defer-stmt" && bound && deferIsBracketLed(nn)) {
+    const innerFn = inFn || nn.kind === "function-decl";
+    if (nn.kind === "defer-stmt" && bound && inFn && deferIsBracketLed(nn)) {
       report("E-DEFER-AMBIGUOUS-LEAD", nn,
         `\`defer [\` is ambiguous here: a binding named \`defer\` is in scope, so this could index it ` +
         `(\`defer[…]\`) or defer a statement that starts with an array literal (§19.16.1). Write ` +
         `\`defer[…]\` with no space to index the binding, \`defer { […]… }\` to defer the statement, or ` +
         `rename the binding.`);
     }
-    for (const key of Object.keys(nn)) if (key !== "span" && key !== "parent") walk(nn[key], inner);
+    for (const key of Object.keys(nn)) if (key !== "span" && key !== "parent") walk(nn[key], inner, innerFn);
   };
 
-  walk(root, fileBinds);
+  walk(root, fileBinds, false);
 }

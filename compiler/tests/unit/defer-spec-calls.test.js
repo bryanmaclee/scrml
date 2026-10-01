@@ -121,6 +121,7 @@ describe("B2 §19.16.1 — `defer [` while `defer` is a binding in scope", () =>
     }
     function go() { go2({ defer: [[1]] }) }`,
     "a for-of binder": `    function go() {\n        for (const defer of [[[1]]]) {\n            defer [0].forEach(note)\n        }\n    }`,
+    "a rest parameter `...defer` (S446 review F2)": `    function go2(...defer) {\n        defer [0].push(9)\n    }\n    function go() { go2([1]) }`,
   };
   for (const [name, logic] of Object.entries(bindings)) {
     test(`the binding is ${name} — E-DEFER-AMBIGUOUS-LEAD`, () => {
@@ -145,7 +146,16 @@ describe("B2 §19.16.1 — `defer [` while `defer` is a binding in scope", () =>
         defer ["a"].forEach(note)
     }`,
     "a non-`[` lead with a binding in scope is the defer statement (§19.16.1, unchanged)": `    function go() {\n        let defer = 1\n        defer note("d")\n        note("x")\n    }`,
+    "a `let defer` inside a TOP-LEVEL statement's block is not file-level (S446 review F4)": `    for (const k of [1]) {\n        let defer = k\n    }\n    if (true) {\n        const defer = 1\n    }\n    function go() {\n        defer ["a"].forEach(note)\n        note("x")\n    }`,
   };
+  for (const [pipe, opts] of BOTH) {
+    test(`outside a function declaration only E-DEFER-OUTSIDE-FUNCTION fires, not both (S446 review F3) (${pipe})`, () => {
+      const src = `\${\n    <trace> = ""\n    const defer = [[1]]\n    defer [0].push(2)\n}\n<program>\n    <p id="out">\${@trace}</p>\n</program>\n`;
+      const c = codes(compile(src, opts));
+      expect(c).toContain("E-DEFER-OUTSIDE-FUNCTION");
+      expect(c).not.toContain("E-DEFER-AMBIGUOUS-LEAD");
+    });
+  }
   for (const [name, logic] of Object.entries(unaffected)) {
     for (const [pipe, opts] of BOTH) {
       test(`${name} — no E-DEFER-AMBIGUOUS-LEAD (${pipe})`, () => {
