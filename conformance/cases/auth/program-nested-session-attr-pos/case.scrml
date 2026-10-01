@@ -1,0 +1,8 @@
+<program session-secure="true" sessionExpiry="15m">
+<p>app</p>
+<div>
+<program db="./x.db" session-secure="false" sessionExpiry="30d">
+<p>scoped</p>
+</program>
+</div>
+</program>
