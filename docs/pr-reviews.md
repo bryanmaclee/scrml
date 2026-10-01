@@ -2028,3 +2028,5 @@ that the ledger is *substantively* wrong; a consumer of it can.
 <!-- @review pr=1217 verdict=clean by=S446-peter date=2026-10-01 probe=S239(stale-rv:6-positions,SSE-mock,double-click)+narrow(stale-rv2:84-single-stmt-byte-pins,SSE-keep-set-bite) note=round1-SSE-regression-fixed;single-stmt-byte-identical -->
 <!-- @review pr=1219 verdict=clean by=S446-peter date=2026-10-01 probe=PA-diff(58-files-afterAll-unregister-only)+preload-detector-206-files note=test-only-inert -->
 <!-- @review pr=1220 verdict=clean by=S446-peter date=2026-10-01 probe=PA(bite:/elsewhere-red;posix-resolve-identical) note=test-only-inert;main-windows-red-c12b52c2 -->
+<!-- @review pr=1213 verdict=clean by=S446-bryan-xps date=2026-10-01 probe=S239 r1 at 40692dd64 (L1-L4/L7 fixed), re-review clean; merged by S448 after update-branch + fresh gate -->
+<!-- @review pr=1221 verdict=finding by=S448-bryan date=2026-10-01 probe=frozen re-review at 13ebd7bed: N1-N3 hold under hostile probing (proto pollution, revoked Proxy, throwing traps, __proto__ keys), 92/92; 4 LOW nits in PR body -->

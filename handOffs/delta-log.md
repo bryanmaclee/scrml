@@ -4152,3 +4152,15 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3622] find · S446-peter: hand-rolled AST walks again — #1210 r5 counted fn decls via body/children only, missed if/else/match-arm blocks (if-chain class); r6 generic walk
 
 [3623] state · S446-peter wrap: #1210 r6 final check in flight at wrap (enum2-rv4); holds deleted q5/s429-match/s432-expr-handler/s432-dev-server/s446-enum-removal (SHAs in hand-off); flogenceP f3b1b28 db paths; ~30 gaps filed §S446-peter
+
+[3624] state · S448-bryan-xps booted as successor to S446-bryan-xps (killed by the 11:21 reboot, unwrapped); took its lane (bryan: "take its lane") · @adv:s446-bootstrap-u0-when-effects
+
+[3625] land · S448: #1213 bootstrap §57 wire codec (update-branch + fresh gate) · #1221 codec r2 N1-N3 (re-review LAND-WITH-NITS) · @adv:s446-bootstrap-uc-codec
+
+[3626] find · XPS 1h45m boot = systemd-tmpfiles deleting ~1M /tmp files; dominant source = the test suite (~4-7k files/hook run, 529 tmpdir test files), second = full worktrees in the /tmp-resident scratchpad (~20.5k files each) → layer 1 preload (wip/s448-test-tmp-root), layer 2 overlay v2.5 rules, layer 3 sudo tmpfiles change owed by bryan · @adv:s448-test-tmp-root
+
+[3627] find · U0 re-review r2: the run-COUNT cap dropped non-looping runs (R2-1, regression) + an <each>-row when growing its own collection overflows the stack from source (R2-2) → round 3 = cycle detection by causal ancestry + per-event backstop; stopped mid-round at wrap (wip/s448-bootstrap-u0-r3 + patch) · @adv:s446-bootstrap-u0-when-effects
+
+[3628] friction · gh pr merge "blocked" for sessions = compound commands escaping the allow rule into the auto-mode classifier; run it standalone. In-repo TMPDIR breaks walk-up tests (import-host). zsh no-word-split made wrong-commit review trees.
+
+[3629] state · S448 WRAPPED (moving to ASUS): in-flight pushed as wip/s448-{bootstrap-u0-r3,test-tmp-root,spec-dpa063,dpa-062-064-results} + patches in scrml-support/handOffs/s448-wip-patches/; dpa-063 SPEC text awaits bryan's veto of 10 PA readings
