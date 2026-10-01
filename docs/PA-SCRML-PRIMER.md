@@ -723,6 +723,19 @@ The hybrid mechanism specifies the binary case. Multi-variant chains — `(.Draf
 
 ---
 
+## §6.6 Dot calls over free functions (UFCS) and the `.=` write form — SPEC §67 (S447; Nominal)
+
+> **Nominal / spec-ahead.** impl#1 does not implement §67; the bootstrap will. **Do not write these forms for impl#1** — there `@n .= addOne()` silently miscompiles to `addOne()` with no argument (`NaN`), and `@x.addOne()` on a free `fn` is a runtime `TypeError` (`g-impl1-ufcs-dot-assign-and-call-checks-fail-open`).
+
+- **`x.f(a)` means `f(x, a)`** — method SYNTAX over free functions, resolved statically at the call site. No dispatch, no `this`, no overloading (S430 P1 stands: no classes, no methods). `@orders.paid().top(5)` ≡ `top(paid(@orders), 5)`.
+- **Collision is an error:** a name that is both a built-in member of the receiver's type and your function (`fn trim` + `@s.trim()`) → `E-CALL-MEMBER-COLLISION`; plain-call yours. Struct receivers never collide (no function fields). Unknown member on a known type → `E-CALL-UNKNOWN-MEMBER`.
+- **Dot-callable** = declared in scope or imported BY NAME; a braceless `use scrml:x` name is plain-call only. Parens always required. `?.` is always optional chaining. **No `|>`.**
+- **`.` never writes.** Writing back is `@n .= addOne()` (≡ `@n = @n.addOne()`), statement-only, one write per chain, every assignment check (grants, `E-DERIVED-WRITE`, engine `rule=`) applies. Sequence edits are `@items .= push(x)`; a bare `@items.push(x)` / `@n.addOne()` statement is `E-STMT-NO-EFFECT`.
+- **Prerequisite (§7.3.4):** call arity (`E-CALL-ARITY`) and argument types (`E-TYPE-031`, §7.5.1 position 3) are checked for plain AND dot calls — the receiver is argument 1.
+- Unruled interactions: SPEC §67.12 (U1-U12).
+
+---
+
 ## §7 Engines (Tier 2) — the centerpiece (§51)
 
 Engines are the v0.next centerpiece. Singleton-by-design (one declaration mounts the singleton; cross-file mount via `<EngineName/>`). Components are the multi-instance vehicle (Move 20 — components and engines are distinct, do not collapse).
@@ -1140,6 +1153,7 @@ What LLMs reflexively reach for + the scrml form:
 | `<x>: SomeEnum = SomeEnum.Variant` | redundant prefix | `<x>: SomeEnum = .Variant` |
 | `match` without exhaustiveness | scrml requires it at Tier 1+ | E-MATCH-NOT-EXHAUSTIVE; cover every variant or use `_` wildcard |
 | Unbraced multi-statement event handler `onclick=doA(); doB()` | an unbraced handler value has no closing delimiter — `doB()` could equally be the next attribute (§5.2.3) | E-MULTI-STATEMENT-HANDLER; wrap it in braces — the **inline block** `onclick={ doA(); doB() }` is legal and canonical (L19 REVERSED S435) — or name a function if it is reused |
+| `@items.push(x)` / `@n.addOne()` as a statement to change the cell (once SPEC §67 lands — Nominal, S447) | `.` never writes: a dot call returns a new value and changes nothing, so the statement is a no-op (`E-STMT-NO-EFFECT`); on impl#1 today `@items.push(x)` still mutates — keep the impl#1 form until the bootstrap ships §67 | `@items .= push(x)` / `@n .= addOne()` (≡ `@n = @n.addOne()`), checked against the cell's grants (§6.6, SPEC §67.7-§67.8) |
 | `class Counter { … }` / `this.n++` | scrml has no OOP construct — no classes, methods, or virtual dispatch (§7.2.1, S430 P1) | E-CLASS-NOT-IN-SCRML; a struct type + free `fn`s that RETURN a new value (`c = stepped(c)`); behaviour selection is a `match` at the use site. `class=` / `x.class` / a `class` field stay legal |
 | `const m = await import("./x.js")` / `import("./x.js")` | a dynamic import is a Promise scrml cannot name (no `await`) — before S430 it silently emitted an un-awaited Promise (§21.3.2) | E-DYNAMIC-IMPORT-NOT-IN-SCRML (also inside `^{}`); a static `import { … } from "…"` at file top |
 | `import:host { x } from "./lib.ts"` in app code to reach a TS/JS module | `import:host` is the manifest-gated self-host bootstrap bridge, not an adopter interop door (§21.3.1 / §22.13) | E-IMPORT-008 outside the `[capabilities] host-import` allow-list (default `"disabled"`); drop it — adopter code imports scrml-source modules with a plain `import` |
