@@ -20,7 +20,8 @@ import type { ExprNode } from "../types/ast.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
-import { colorAsyncFunctionExpr, unanalyzableHandlerUses, HANDLER_STATEMENT_LIST_COLOR, type ColorOpts } from "./js-async-analysis.ts";
+import { colorAsyncFunctionExpr, unanalyzableHandlerUses, handlerStatementListColor, type ColorOpts } from "./js-async-analysis.ts";
+import { _clientSseFnNames } from "./scheduling.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { clientAsyncFactsOf } from "./emit-functions.ts";
 
@@ -510,6 +511,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   //     event is non-delegable. Delegable events (click, submit) survive
   //     innerHTML replace via document-level delegation, so they stay in
   //     the global delegation registry regardless of arm tag.
+  // S446 — §36 SSE generator fns keep the arg1 skip in a statement-list handler.
+  const sseFnNames = ctx.routeMap ? _clientSseFnNames(ctx.routeMap, ctx.filePath ?? "") : null;
   const eventBindings = allEventBindings.filter((b) => {
     if (!b.engineArm) return true;
     const domEvent = (b.eventName || "").replace(/^on/, "");
@@ -1336,7 +1339,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     // in place, so the next statement sees the resolved value (see ColorOpts).
     handlerExpr = colorHandlerAsync(
       handlerExpr, binding.span, ctx,
-      binding.handlerBlock && Array.isArray(binding.handlerBlock.stmts) ? HANDLER_STATEMENT_LIST_COLOR : {},
+      handlerStatementListColor(binding.handlerBlock?.stmts, sseFnNames),
     );
 
     if (!byEventType.has(eventName)) {

@@ -29,7 +29,15 @@ import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 // The server call resolves on a LATER macrotask, so a statement that runs before
 // the write lands observes the pre-fetch value (the defect this file pins).
 let inflight = 0;
+// §36 SSE: every EventSource the client opens (the test fires its onmessage).
+const eventSources = [];
+class StubEventSource {
+  constructor(url) { this.url = url; eventSources.push(this); }
+  close() {}
+}
 function stubFetch() {
+  globalThis.EventSource = StubEventSource;
+  if (globalThis.window) globalThis.window.EventSource = StubEventSource;
   globalThis.fetch = async (path) => {
     inflight++;
     try {
@@ -54,6 +62,7 @@ beforeEach(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
   await GlobalRegistrator.register();
   inflight = 0;
+  eventSources.length = 0;
   stubFetch();
 });
 afterEach(async () => {
@@ -119,6 +128,7 @@ const PRE = `  <x> = 0
   <y> = 0
   <s> = ""
   <c> = true
+  <feed> = 0
   <rows> = [{ id: 1 }]
   type LoadError:enum = { QueryFailed(reason: string) }
   \${
@@ -126,6 +136,13 @@ const PRE = `  <x> = 0
     server function save2() { return 20 }
     server function boom() ! LoadError { return 1 }
     server function okf() ! LoadError { return 10 }
+    server function* ticks() {
+      let i = 0
+      while (i < 3) {
+        yield i
+        i = i + 1
+      }
+    }
   }
 `;
 const HEAD = `  type Doc:enum = { Empty, Note(note: string) }\n  <cur> = Doc.Note("hi")\n`;
@@ -173,6 +190,55 @@ for (const pos of Object.keys(POSITIONS)) {
         const got = {};
         for (const k of Object.keys(want)) got[k] = app.get(k);
         expect(got).toEqual(want);
+      });
+    }
+  });
+}
+
+// PR #1217 review finding 1 — a §36 SSE generator write is a SUBSCRIPTION (GITI-026),
+// not a value to await. In a statement list it must keep the subscription rewrite:
+// the cell receives each message, never the EventSource object.
+const SSE_CASES = [
+  ["SSE write first in a list", "@feed = ticks(); @y = 1", { feed: 42, y: 1 }],
+  ["SSE write second in a list", "@y = 1; @feed = ticks()", { feed: 42, y: 1 }],
+  ["SSE write inside an if in a list", "if (@c) { @feed = ticks() }; @y = 1", { feed: 42, y: 1 }],
+  ["single SSE statement split across lines", "@feed = ticks(\n    )", { feed: 42 }],
+];
+for (const pos of Object.keys(POSITIONS)) {
+  describe(`S446 — an SSE generator write in a \`\${…}\` handler keeps its subscription — ${pos}`, () => {
+    for (const [name, handler, want] of SSE_CASES) {
+      test(name, async () => {
+        const app = mount(program(pos, handler));
+        expect(app.errs).toEqual([]);
+        expect(app.initError).toBeNull();
+        await app.click("b");
+        expect(eventSources.length).toBe(1);
+        expect(typeof eventSources[0].onmessage).toBe("function");
+        eventSources[0].onmessage({ data: "42" });
+        const got = {};
+        for (const k of Object.keys(want)) got[k] = app.get(k);
+        expect(got).toEqual(want);
+      });
+    }
+  });
+}
+
+// PR #1217 review finding 2 — a 1-statement handler that still carries a
+// handlerBlock (a guarded `!{}` write; a single statement split across lines)
+// keeps its detached-IIFE emit and its `.catch` → error-boundary log.
+const SINGLE_BLOCK_FORMS = [
+  ["guarded `!{}` write", '@x = okf() !{ | e :> { @s = "err" } }'],
+  ["write split across lines", "@x = save(\n    )"],
+];
+for (const pos of Object.keys(POSITIONS)) {
+  describe(`S446 — a 1-statement handler with a handlerBlock keeps its emit — ${pos}`, () => {
+    for (const [name, handler] of SINGLE_BLOCK_FORMS) {
+      test(name, () => {
+        const app = mount(program(pos, handler));
+        expect(app.errs).toEqual([]);
+        expect(app.clientJs).not.toMatch(/async function\(event\)/);
+        expect(app.clientJs).toMatch(/function\(event\) \{ \(async \(\) =>/);
+        expect(app.clientJs).toContain('.catch(_scrml_async_err => _scrml_error_boundary_log("x", _scrml_async_err))');
       });
     }
   });

@@ -1,5 +1,5 @@
 // s441 — §13.2 for per-element event handlers (see colorActiveHandler).
-import { colorActiveHandler, HANDLER_STATEMENT_LIST_COLOR } from "./js-async-analysis.ts";
+import { colorActiveHandler, activeHandlerStatementListColor } from "./js-async-analysis.ts";
 import { emitExprField, reparseRequestRefEscapeHatch } from "./emit-expr.ts";
 import { rewriteExprArrowBody } from "./rewrite.js";
 import { emitStringFromTree } from "../expression-parser.ts";
@@ -1729,7 +1729,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           });
           // S446 (S439 #4) — await a server-call cell write in place so the next
           // statement sees the resolved value (js-async-analysis ColorOpts).
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(blockBody)} }`, attr?.span, HANDLER_STATEMENT_LIST_COLOR)});`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(blockBody)} }`, attr?.span, activeHandlerStatementListColor(val.handlerBlock.stmts))});`);
           continue;
         }
         // Bug 65 (S157) — engine transition `${@engine.advance(.X)}` (CallExpr) /

@@ -448,6 +448,8 @@ interface AnalyzeOpts {
   eventParam?: string | null;
   /** Leave a SERVER fn call that is the direct value of `_scrml_(cs_)reactive_set` alone (emit-client's IIFE lift owns it). */
   reactiveArg1Skip: boolean;
+  /** Callees that keep that skip when `reactiveArg1Skip` is false (ColorOpts.reactiveArg1SkipKeep). */
+  reactiveArg1SkipKeep?: ReadonlySet<string> | null;
 }
 
 function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFree: FreeAsyncResolver, opts: AnalyzeOpts): ColoredBody {
@@ -691,7 +693,8 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
         consumed.add(node.callee);
         const r = asyncOf(node.callee);
         if (r) {
-          const arg1Skip = opts.reactiveArg1Skip && r.root.kind === "server" && !r.local &&
+          const arg1Skip = (opts.reactiveArg1Skip || !!opts.reactiveArg1SkipKeep?.has(node.callee.name)) &&
+            r.root.kind === "server" && !r.local &&
             parent && parent.type === "CallExpression" && parent.callee && parent.callee.type === "Identifier" &&
             REACTIVE_ARG1_WRAPPERS.has(parent.callee.name) && parent.arguments[1] === node;
           const alreadyAwaited = !!parent && parent.type === "AwaitExpression";
@@ -1216,6 +1219,8 @@ export function bodyTextHasOwnAwait(bodyText: string): boolean | null {
 export interface ActiveClientAsync {
   resolveFree: FreeAsyncResolver;
   report: (uses: JsAsyncUses, span: unknown) => void;
+  /** The file's §36 SSE generator server fns (see `handlerStatementListColor`). */
+  sseFnNames?: ReadonlySet<string> | null;
 }
 
 let _activeClientAsync: ActiveClientAsync | null = null;
@@ -1268,7 +1273,7 @@ export interface ColorOpts {
    * See AnalyzeOpts.reactiveArg1Skip. Default true.
    *
    * S446 (S439 #4 + §13.2) — a §5.2.3 multi-statement handler (`${s1; s2}`, the
-   * `handlerBlock` form) passes `false`, through `HANDLER_STATEMENT_LIST_COLOR`.
+   * `handlerBlock` form) passes `false`, through `handlerStatementListColor`.
    * Its statements run IN ORDER, so `@x = save(); @y = @x + 1` must await the
    * write before the next statement reads `@x` — exactly as the same statements
    * in a function body do. With the skip on, the arg1 call was left to
@@ -1276,14 +1281,37 @@ export interface ColorOpts {
    * the pre-fetch value. Off, the call is awaited in place (the handler becomes
    * `async`, the same lowering a bare `save()` statement already gets), and
    * emit-client's `emitterAwaited` branch leaves the awaited site as emitted.
-   * A 1-statement handler has no handlerBlock and keeps the default (its
-   * fire-and-forget write is unchanged — a separate language question).
+   * A 1-statement handler keeps the default (its fire-and-forget write is
+   * unchanged — a separate language question): `handlerStatementListColor`
+   * returns `{}` below two statements, including the 1-statement values that
+   * still carry a handlerBlock (a guarded `!{}` write, a write split over lines).
    */
   reactiveArg1Skip?: boolean;
+  /**
+   * S446 (PR #1217 fix round) — callees that KEEP the arg1 skip when
+   * `reactiveArg1Skip` is false: the §36 SSE generator server fns. Their cell
+   * write is not a value to await — emit-client's GITI-026 pass rewrites
+   * `_scrml_reactive_set(N, _scrml_sse_X(args))` into a subscription, and an
+   * awaited value no longer matches it (the cell would hold the EventSource and
+   * every message would drop).
+   */
+  reactiveArg1SkipKeep?: ReadonlySet<string> | null;
 }
 
-/** The ColorOpts every §5.2.3 statement-list handler site passes (see ColorOpts). */
-export const HANDLER_STATEMENT_LIST_COLOR: ColorOpts = Object.freeze({ reactiveArg1Skip: false });
+/**
+ * S446 (S439 #4) — the ColorOpts a §5.2.3 statement-list handler site passes
+ * (see ColorOpts.reactiveArg1Skip). `{}` (the unchanged default) unless the
+ * handler has two or more statements; SSE generator writes keep the skip.
+ */
+export function handlerStatementListColor(stmts: unknown, sseFnNames?: ReadonlySet<string> | null): ColorOpts {
+  if (!Array.isArray(stmts) || stmts.length < 2) return {};
+  return { reactiveArg1Skip: false, reactiveArg1SkipKeep: sseFnNames ?? null };
+}
+
+/** `handlerStatementListColor` under the active client emission (row / lift handlers). */
+export function activeHandlerStatementListColor(stmts: unknown): ColorOpts {
+  return handlerStatementListColor(stmts, _activeClientAsync?.sseFnNames ?? null);
+}
 
 /**
  * TRANSFORM an emitted STATEMENT body that will run in a compiler-controlled scope
@@ -1317,7 +1345,7 @@ export function colorAsyncFunctionExpr(code: string, resolveFree: FreeAsyncResol
   if (!root || (root.type !== "FunctionExpression" && root.type !== "ArrowFunctionExpression")) return null;
   if (root.start !== PREFIX.length) return null;
   const eventParam = root.params && root.params[0] && root.params[0].type === "Identifier" ? root.params[0].name : null;
-  let r = analyze(src, program, PREFIX.length, src.length - SUFFIX.length, resolveFree, { transform: true, root, eventParam, reactiveArg1Skip: opts.reactiveArg1Skip !== false });
+  let r = analyze(src, program, PREFIX.length, src.length - SUFFIX.length, resolveFree, { transform: true, root, eventParam, reactiveArg1Skip: opts.reactiveArg1Skip !== false, reactiveArg1SkipKeep: opts.reactiveArg1SkipKeep ?? null });
   if (r.rootAsync && !root.async) r = { ...r, code: "async " + r.code };
   return r;
 }
