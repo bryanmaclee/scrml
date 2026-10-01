@@ -190,6 +190,31 @@ describe("s446 F2 — two whens writing each other's deps (a cycle SPEC is silen
     expect(errs.some((e) => /E-LIFECYCLE-006 — re-triggered during its re-run; dropped/.test(e))).toBe(true);
     expect(takePageErrors()).toEqual([]);
   });
+
+  // review round 3, R2-2: a row `when` that grows its own collection creates a NEW when per run —
+  // never a cycle by provenance. It used to recurse to "Maximum call stack size exceeded" (4189
+  // whens, an uncaught page error, no diagnostic). Now the per-event runaway budget stops it.
+  test("R2-2: a row `when` that grows its own <each> — bounded by the runaway budget, reported, no page error, page alive", async () => {
+    // mutation RED: WhenEvent.spend() always true (no budget)
+    const src = P(`    type Row:struct = { id: int }\n    <rows:Row[replace, free]=([{ id: 1 }])/>\n    <let k:int=0/>\n    <let hits:int=0/>\n    function grow() {\n        @k = @k + 1\n        @rows.push({ id: @k + 1 })\n    }`,
+      `        <ul><each in=@rows key=@.id as r><li>\${ when @k changes {\n            @hits = @hits + 1\n            grow()\n        } }</li></each></ul>\n        <p class="out">\${@hits}</p>\n        <button onclick=(@k = @k + 1)>go</button>`);
+    const { rt } = await loadProgram(coreOf(src), "when-runaway");   // compiles clean (no diagnostic governs it — DESIGN §5 (7))
+    const errs = [];
+    const saved = console.error;
+    console.error = (...a) => errs.push(a.join(" "));
+    try { click(btn("go")); } finally { console.error = saved; }
+    expect(takePageErrors()).toEqual([]);
+    expect(errs.some((e) => /runaway — one change caused more than 10000 when runs/.test(e))).toBe(true);
+    const hits = Number($("p.out").textContent);
+    expect(hits).toBeGreaterThan(100);
+    expect(hits).toBeLessThanOrEqual(10000);
+    expect(rt.stats.whens).toBeLessThanOrEqual(10002);
+    // the page is alive: the DOM agrees with the state, and a further click is bounded the same way
+    expect(document.querySelectorAll("li").length).toBe(rt.stats.whens);
+    console.error = () => {};
+    try { click(btn("go")); } finally { console.error = saved; }
+    expect(takePageErrors()).toEqual([]);
+  }, 60000);
 });
 
 describe("§6.7.4 — codes", () => {

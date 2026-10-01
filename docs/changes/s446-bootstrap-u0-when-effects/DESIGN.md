@@ -103,23 +103,65 @@ derived dep is E-LIFECYCLE-007, reported by the shim as a CODE (not a not-yet re
   recursed into; it is marked pending and re-runs ONCE after the current run; a further re-trigger in that re-run is
   dropped and reported (`console.error`, the impl#1 wording) — the page stays alive. Covers a direct self-write
   through a call (not caught statically) and a cycle through another `when`.
-- **The cap counts the CAUSAL CHAIN, continuations included (review r2 N1).** Round 1 counted re-runs inside one
-  synchronous `run()` call. A When is not `running` while a task of it is suspended, so a continuation that wrote its
-  own dep (or closed a cycle through another When) got a fresh `run()` with a fresh count every time — measured:
-  100,000 runs, 0 errors, the microtask queue never drained (the page hangs). Fix: a runtime `Chain` per EXTERNAL
-  event. A When run whose trigger was written outside every When body and continuation (`currentChain === null`)
-  starts a new chain; the body runs with `currentChain` = that chain, every continuation of its task resumes with it
-  (the task carries it), and every When a write under that chain triggers inherits it. The cap is `runs per When per
-  chain ≤ 1 + WHEN_RERUN_CAP`; the next one is dropped and reported with the same text as the synchronous path.
-  Measured after: the self-write-through-a-continuation and the cross-`when` variant both give 2 runs + 1 error —
-  identical to the synchronous control.
-  **Why ruled (b) survives — the distinction.** Newest-wins is about a re-trigger from OUTSIDE the run (the user
-  clicked again; another event wrote the dep): that write happens with no chain current, so it starts a NEW chain
-  with a fresh budget, cancels the suspended task, and is never a cap violation however many times it happens. The
-  cap is about a re-trigger the run CAUSED itself (its body, its continuation, or a When those triggered) — that is
-  the loop the cap exists to stop. A When queued by both an external and a chained write before it runs is treated
-  as external (the external event alone would run it). Every chain is born from an external event, so total runs are
-  bounded by (events × Whens × 2). Tested both ways (slice-m1/when.runtime.test.js "re-entry through a suspension").
+- **Cycles are decided by PROVENANCE, not by a counter (review round 3; supersedes round 2's chain counter).**
+  History: round 1 counted re-runs inside one synchronous `run()` — a continuation (the When is not `running` while
+  suspended) escaped it: 100,000 runs, 0 errors, the page hung (r2 N1). Round 2 counted runs per When per external
+  chain — which also capped NON-cyclic runs: an observer re-triggered by three links of another run's continuation
+  chain lost the third change to a false E-LIFECYCLE-006 (r3 R2-1). The mechanism now:
+  - Every run carries a CAUSE — a provenance link `Cause(when, parent, event)` naming the When that ran and the cause
+    of that run, back to an external write (`null`). The body, every continuation of the run's task (the task carries
+    the link) and every write under them run with `currentCause` = that link; a When those writes trigger records it.
+  - A trigger is **CYCLIC iff its cause's ancestry already contains the triggered When** — the When caused its own
+    re-trigger: a self-write (directly, through a call, synchronously or from a resumed continuation) or a cycle through
+    other Whens. impl#1 parity on what a cycle does: the first cyclic re-trigger re-runs (ancestry holds the When
+    once); the next one (ancestry holds it twice) is dropped and reported — "E-LIFECYCLE-006 — re-triggered during its
+    re-run; dropped." — once per external event (a runaway can drop thousands). The page stays alive.
+  - A **non-cyclic** trigger always runs (SPEC §6.7.4: "The body executes whenever any listed dependency changes
+    value"). R2-1 after the fix: the observer sees `["loading","parsing","done"]`, 0 errors.
+  - A When queued by several writes before it runs keeps the least cyclic cause (an external one if any): that trigger
+    alone would have run it.
+  - **Ruled (b) is unaffected, by construction.** An external write has no cause (empty ancestry), so a re-trigger from
+    outside a suspended run is never cyclic: it runs and cancels the suspended task (newest wins), however often it
+    happens (5 external writes during a suspension → 5 runs, the newest continuation resumes, 0 errors).
+- **The runaway backstop (review round 3, R2-2) — and a correction.** Round 2 claimed "total runs are bounded by
+  (events × Whens × 2)". **That was false**: the set of Whens is not fixed during an event. A row `when` that appends
+  a row creates a NEW When per run; the new When's ancestry never contains it, so no cycle is ever detected —
+  measured from source (one click): 4,189 Whens, then "Maximum call stack size exceeded" as an uncaught page error,
+  0 diagnostics (the runtime reproduction: 4,480 runs, then the same RangeError). Fail-closed floor:
+  - **A per-external-event budget, `WHEN_EVENT_BUDGET = 10000`**, spent by every When RUN and every When
+    REGISTRATION that some When CAUSED (non-null cause). An "event" is one outermost flush (a handler's batch, one
+    resumed continuation's batch carries its own run's event). When the budget is spent the event is STOPPED: reported
+    once ("runaway — one change caused more than 10000 when runs / registrations; the rest of that chain is stopped."),
+    and every further run or continuation it caused is dropped. Never a crash.
+  - **Why 10,000 and why only CAUSED work.** The direct fan-out of an external write is bounded by the Whens that
+    already exist — it cannot run away — so it is free: 12,000 row `when`s on one cell all run on one click (tested).
+    Only work a When caused can grow without bound. 10,000 caused runs + registrations is far beyond any legitimate
+    effect cascade (a `when` that loads 2,000 rows each carrying a `when` spends 2,000), and small enough to stop a
+    runaway in seconds, not minutes (R2-2 from source: stopped after ~5,000 runs + ~5,000 registrations, about 3.7 s
+    in happy-dom, dominated by rendering 5,000 rows). It is a floor, not a semantics: SPEC question (7).
+  - **When runs are flushed iteratively.** A When triggered inside another When's body (or by an effect that body
+    caused) waits for the outermost flush loop instead of recursing (`whenRunning`), so a long chain is a loop, not a
+    deep stack: a 6,000-link chain of distinct Whens completes (tested; the re-entrant flush overflowed the stack at a
+    few thousand). Order is unchanged: the queue was already one FIFO `Set` that the nested flushes drained in
+    insertion order; render / structure effects still settle at every batch end.
+  - **Compile time.** Searched SPEC for a sentence that would make the R2-2 program an error: §6.7.4 "The compiler SHALL
+    emit E-LIFECYCLE-006 if the body writes to any variable in the `dep-list`" — the R2-2 body writes `@k` (its dep)
+    THROUGH `grow()`, a call, which is exactly the unruled SPEC question (3) below (direct writes only, or through
+    called functions?). No sentence on runaway / unbounded effect cascades exists (searched "runaway", "infinite loop",
+    "unbounded", "re-entrant" — the only `when` hits are E-LIFECYCLE-006's own rationale, §6.7.5 / the §34 row). So no
+    compile-time diagnostic is emitted; the runtime backstop is the floor. If (3) is ruled "through calls", the R2-2
+    program becomes an E-LIFECYCLE-006 at compile time (the analysis would need the call graph's write sets).
+  - Tests: slice-m1/when.runtime.test.js "provenance — only CYCLIC re-triggers are capped …" (R2-1, fan-in, R2-2
+    runtime, free fan-out, iterative chain) and slice-m4/when.test.js "R2-2: a row `when` that grows its own <each>".
+- **LOW notes filed from the round-3 re-review (not fixed):**
+  - A write made from a HOST microtask / timer callback (`queueMicrotask`, `setTimeout`) inside a When body runs
+    with no cause — it escapes the provenance and counts as an external event (new budget, never cyclic). In the
+    BOOTSTRAP it is not expressible from source today (measured: `queueMicrotask(() => { @n = 1 })` →
+    E-SCOPE-001 "`queueMicrotask` is not declared" + E-BOOTSTRAP-UNSUPPORTED for the braced arrow; the closed host
+    surface is `Date.now()`). Whether scrml source at large can express it is **UNVERIFIED**. When a host surface that
+    defers work lands, it must capture and restore `currentCause` the way `suspend` does.
+  - A derived-field cycle — `<a:int=(@b + 1)/>` + `<b:int=(@a + 1)/>` — raises no diagnostic (measured: diags
+    `[]`). Pre-existing; not a `when` matter (§66.9 derived fields), filed for the analyze queue.
 - **U1 BLOCKER (review F3):** a rejected suspension surfaces as an unhandled promise rejection. §6.7.4: "the error
   propagates through the `when` body's error context (§19)" — that context does not exist until U1. Today nothing
   writes and nothing is swallowed.
@@ -134,7 +176,13 @@ derived dep is E-LIFECYCLE-007, reported by the shim as a CODE (not a not-yet re
   superseded component text) has fallback only through `??` on a snippet prop. SPEC is silent, Core `View.Slot` has no
   fallback, and the bootstrap used to drop the content unvisited — a `when` there ran 0 times and `${@nope}` raised no
   E-SCOPE-001, against §6.7.4 "A `when` statement is associated with the enclosing element scope". FAIL CLOSED: any
-  non-whitespace content inside `<slot>` is E-BOOTSTRAP-UNSUPPORTED (analyze `resolveSlot`).
+  non-whitespace content inside `<slot>` is E-BOOTSTRAP-UNSUPPORTED (analyze `resolveSlot`). (7) review round 3
+  R2-2: what bounds a RUNAWAY `when` cascade that is never cyclic (a `when` whose run creates new `when`s, e.g. a row
+  `when` that appends rows)? §6.7.4 specifies no bound, and impl#1 crashes the same way (stack overflow). The
+  bootstrap stops the event after `WHEN_EVENT_BUDGET = 10000` caused When runs + registrations and reports it
+  (rationale above); the number, the unit (runs + registrations caused by one external event) and the report are
+  bootstrap choices pending a ruling. Related: if (3) is ruled "through called functions", such programs are also
+  E-LIFECYCLE-006 at compile time.
 - W-LIFECYCLE-006 amendment (decided S446, SPEC text in flight): not fired when the right-hand side reads the
   assigned cell (an accumulator — the derived form would be circular). Review r2 N3: "reads the assigned cell"
   includes reading it THROUGH derived cells (`<dm=(@m + 1)/>`, `@m = @n + @dm`; transitively through further derived

@@ -198,8 +198,8 @@ describe("RULED (b), S446 — a re-trigger while an earlier run is suspended: th
   });
 });
 
-// Review r2 N1: before the causal-chain fix, a When was not `running` while
-// suspended, so a continuation's re-trigger got a fresh run with a fresh cap —
+// Review r2 N1 (mechanism re-done r3: provenance): a When is not `running` while
+// suspended; before r2 a continuation's re-trigger got a fresh run with a fresh cap —
 // unbounded runs, the microtask queue never drained, 0 errors. Each body below
 // stops suspending after GUARD runs so a regression fails instead of hanging.
 describe("re-entry through a suspension — the cap counts the whole causal chain (review r2 N1)", () => {
@@ -214,7 +214,7 @@ describe("re-entry through a suspension — the cap counts the whole causal chai
   async function drain() { for (let i = 0; i < 10; i++) await tick(); }
 
   test("a continuation that writes its own dep (through a call) re-runs once, then is dropped and reported", async () => {
-    // mutation RED: suspend() running k outside inChain(task.chain) (each re-trigger a new chain → GUARD runs, 0 errors)
+    // mutation RED: suspend() running k outside underCause(task.cause) (each re-trigger looks external → GUARD runs, 0 errors)
     const scope = rt.root.child();
     const dep = rt.cell(0);
     let runs = 0;
@@ -232,7 +232,7 @@ describe("re-entry through a suspension — the cap counts the whole causal chai
   });
 
   test("the chain starts at the external run's BODY: a sync write → a suspending when → back is counted from the first run", async () => {
-    // mutation RED: runOnce() running the body outside inChain(chain) (B's first run looks external → A runs 3 times)
+    // mutation RED: runOnce() running the body outside underCause(link) (B's first run looks external → A runs 3 times)
     const scope = rt.root.child();
     const n = rt.cell(0);
     const m = rt.cell(0);
@@ -247,7 +247,7 @@ describe("re-entry through a suspension — the cap counts the whole causal chai
   });
 
   test("a cycle closed through another when from a continuation is bounded and reported", async () => {
-    // mutation RED: suspend() running k outside inChain(task.chain)
+    // mutation RED: suspend() running k outside underCause(task.cause)
     const scope = rt.root.child();
     const n = rt.cell(0);
     const m = rt.cell(0);
@@ -273,7 +273,7 @@ describe("re-entry through a suspension — the cap counts the whole causal chai
   });
 
   test("RULED (b) stays intact: external re-triggers during a suspension are new chains, never cap violations", async () => {
-    // mutation RED: markStale() keeping the old cause for an external trigger / run() reusing one chain per When
+    // mutation RED: one provenance per When across events (an external trigger counted as a re-run)
     const scope = rt.root.child();
     const dep = rt.cell(0);
     const hosts = [held(), held(), held(), held(), held()];
@@ -317,6 +317,109 @@ describe("re-entry through a suspension — the cap counts the whole causal chai
     });
     expect(runs).toBe(3);
     expect(errs.length).toBe(1);
+    scope.dispose();
+  });
+});
+
+// Review round 3. R2-1: the r2 chain counter capped EVERY run of a When in a
+// chain, so a non-looping observer re-triggered by a run's continuations was
+// dropped with a false E-LIFECYCLE-006. R2-2: a chain that keeps CREATING Whens
+// (a row `when` appending a row) is never cyclic; it recursed until "Maximum
+// call stack size exceeded". Fix: provenance (a trigger is cyclic iff its
+// ancestry holds the When) + a per-event runaway budget + iterative When flush.
+describe("provenance — only CYCLIC re-triggers are capped; runaway growth is bounded (review round 3)", () => {
+  async function withErrors(fn) {
+    const errs = [];
+    const saved = console.error;
+    console.error = (...a) => errs.push(a.join(" "));
+    try { await fn(); } finally { console.error = saved; }
+    return errs;
+  }
+  async function drain() { for (let i = 0; i < 10; i++) await tick(); }
+
+  test("R2-1: an observer re-triggered by every link of another run's continuation chain sees every change, no error", async () => {
+    // mutation RED: admit() capping on runs-per-event instead of the trigger's ancestry (r2's counter)
+    const scope = rt.root.child();
+    const q = rt.cell(0);
+    const st = rt.cell("");
+    const d = [];
+    rt.when(scope, [q], (t) => {
+      st.set("loading");
+      rt.suspend(t, 1, () => { st.set("parsing"); rt.suspend(t, 2, () => st.set("done")); });
+    });
+    rt.when(scope, [st], () => d.push(st.peek()));
+    const errs = await withErrors(async () => { q.set(1); await drain(); });
+    expect(d).toEqual(["loading", "parsing", "done"]);
+    expect(errs).toEqual([]);
+    scope.dispose();
+  });
+
+  test("a synchronous non-cyclic fan-in coalesces (one flush): the observer runs once, sees the final value, no error", () => {
+    // (the same FIFO order the re-entrant flush of rounds 0-2 produced: the three writers ran before the observer)
+    const scope = rt.root.child();
+    const x = rt.cell(0);
+    const out = rt.cell(0);
+    let runs = 0, seen = -1;
+    for (let i = 0; i < 3; i++) rt.when(scope, [x], () => { out.set(out.peek() + 1); });
+    rt.when(scope, [out], () => { runs++; seen = out.peek(); });
+    const errs = [];
+    const saved = console.error;
+    console.error = (...a) => errs.push(a.join(" "));
+    try { x.set(1); } finally { console.error = saved; }
+    expect(runs).toBe(1);
+    expect(seen).toBe(3);
+    expect(errs).toEqual([]);
+    scope.dispose();
+  });
+
+  test("R2-2 (runtime): a when that keeps registering new whens is stopped by the event budget — reported, no crash, page alive", async () => {
+    // mutation RED: WhenEvent.spend() always true (no budget) → "Maximum call stack size exceeded" or no report
+    const scope = rt.root.child();
+    const k = rt.cell(0);
+    let runs = 0;
+    // (stops growing at 15000 runs so a regression fails instead of hanging)
+    const row = () => rt.when(scope, [k], () => { runs++; if (runs < 15000) { k.set(k.peek() + 1); row(); } });
+    row();
+    let thrown = null;
+    const errs = await withErrors(async () => {
+      try { k.set(1); } catch (e) { thrown = e; }
+      await drain();
+    });
+    expect(thrown).toBe(null);
+    expect(runs).toBeGreaterThan(100);              // it ran: the budget is not a cycle cap
+    expect(runs).toBeLessThanOrEqual(10000);        // and it stopped
+    expect(errs.some((e) => /runaway — one change caused more than 10000 when runs/.test(e))).toBe(true);
+    // the page is alive: the next external change runs the registered whens again (within a fresh budget)
+    const before = runs;
+    const errs2 = await withErrors(async () => { k.set(k.peek() + 1); await drain(); });
+    expect(runs).toBeGreaterThan(before);
+    expect(errs2.some((e) => /runaway/.test(e))).toBe(true);
+    scope.dispose();
+  });
+
+  test("the direct fan-out of an external write is free: 12,000 independent whens on one cell all run, no report", () => {
+    // mutation RED: admit() spending the budget for an external (null-cause) trigger
+    const scope = rt.root.child();
+    const x = rt.cell(0);
+    let runs = 0;
+    for (let i = 0; i < 12000; i++) rt.when(scope, [x], () => { runs++; });
+    const errs = [];
+    const saved = console.error;
+    console.error = (...a) => errs.push(a.join(" "));
+    try { x.set(1); } finally { console.error = saved; }
+    expect(runs).toBe(12000);
+    expect(errs).toEqual([]);
+    scope.dispose();
+  });
+
+  test("a long NON-cyclic chain of distinct whens runs iteratively — no stack overflow below the budget", () => {
+    // mutation RED: flush() running Whens re-entrantly (no `whenRunning` guard) → RangeError at a few thousand
+    const scope = rt.root.child();
+    const N = 6000;
+    const cells = Array.from({ length: N + 1 }, () => rt.cell(0));
+    for (let i = 0; i < N; i++) rt.when(scope, [cells[i]], () => cells[i + 1].set(1));
+    cells[0].set(1);
+    expect(cells[N].peek()).toBe(1);
     scope.dispose();
   });
 });
