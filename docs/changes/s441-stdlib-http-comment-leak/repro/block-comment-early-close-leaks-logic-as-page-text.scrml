@@ -1,0 +1,13 @@
+<program>
+${
+    <n> = 0
+    /**
+     * Example: post("/x", body, { headers: { /* none */ } })
+     */
+    function bump() {
+        @n = @n + 1
+    }
+}
+<button onclick=bump()>+</button>
+<p>${@n}</p>
+</program>

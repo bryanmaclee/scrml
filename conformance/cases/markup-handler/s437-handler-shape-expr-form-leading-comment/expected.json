@@ -1,0 +1,38 @@
+{
+  "id": "markup-handler-s437-handler-shape-expr-form-leading-comment",
+  "description": "F1 — `${ // note\\n a; b }`: a leading comment inside the `${…}` form. Written in all four handler positions — top level (#top), an engine state-child (#eng), a `<match>` arm (#mat) and an `<each>` row (.row); each click appends position-tagged tokens to `log`, so the final value proves every statement ran, once, in source order, at every position. S437 round 3 (the handler statement list is PARSED by the function-body statement parser, not split as text).",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§5.2.3: \"The statement list is logic context — the same statement grammar as a function body (§7.3): statements are separated by `;` or by a newline, and assignments, calls, `const`/`let` declarations, and `if`/loop statements are all legal. The block MAY span any number of lines.\" and \"No statement of the block SHALL be dropped, whatever its kind or position\".",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-MULTI-STATEMENT-HANDLER",
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "input": [
+      {
+        "click": "#top"
+      },
+      {
+        "click": "#eng"
+      },
+      {
+        "click": "#mat"
+      },
+      {
+        "click": ".row"
+      }
+    ],
+    "state": {
+      "log": "T1,T2,E1,E2,M1,M2,R1,R2,"
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "T1,T2,E1,E2,M1,M2,R1,R2,"
+      }
+    ]
+  }
+}

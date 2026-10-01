@@ -1,0 +1,9 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+on mount {
+  function inner(x) { return isOk(x) }
+  if (inner(1)) { @verdict = "accepted" } else { @verdict = "rejected" }
+}
+<p id="out">${@verdict}</p>
+</program>

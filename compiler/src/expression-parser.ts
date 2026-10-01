@@ -16,6 +16,7 @@
 import * as acorn from "acorn";
 // @ts-ignore — astring ships its own types
 import { generate as astringGenerate } from "astring";
+import { ARRAY_MUTATING_METHODS } from "./derived-mutation-ops.ts";
 // GITI-017 (S125): shared regex/comment/string fence. preprocessForAcorn's
 // `not `→`!` lowering must skip regex-literal / comment / string interiors or
 // it corrupts `/not a jj repo/i` → `/!a jj repo/i` (silent-corruption class).
@@ -809,6 +810,131 @@ export function astToJs(node: ESNode): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * The bare cell name when `node` is an `@<cell>` Identifier naming a plain
+ * (non-derived) reactive cell; null otherwise.
+ */
+function reactiveCellIdentName(node: ESNode | undefined, derivedNames: Set<string> | null): string | null {
+  if (!node || node.type !== "Identifier" || typeof node.name !== "string" || !node.name.startsWith("@")) return null;
+  const varName = node.name.slice(1);
+  if (!varName || !/^[A-Za-z_$]/.test(varName)) return null;
+  if (derivedNames && derivedNames.has(varName)) return null;
+  return varName;
+}
+
+/**
+ * The root cell of a FIELD / INDEX path (`@o.x`, `@rows[i].done`) — a
+ * non-optional MemberExpression chain of at least one link ending at an
+ * `@<cell>` Identifier; null for anything else (a bare `@x`, a loop alias
+ * `t.done`, an optional chain).
+ */
+function reactiveFieldPathRoot(node: ESNode | undefined, derivedNames: Set<string> | null): string | null {
+  if (!node || node.type !== "MemberExpression") return null;
+  let cursor: ESNode | undefined = node;
+  while (cursor && cursor.type === "MemberExpression") {
+    if (cursor.optional) return null;
+    cursor = cursor.object as ESNode | undefined;
+  }
+  return reactiveCellIdentName(cursor, derivedNames);
+}
+
+/**
+ * §6.5.1 / §6.3 — find every IN-PLACE write to a plain reactive cell's value in
+ * `ast`. Must run on the PRE-rename tree (the `@` identifier is the reactive
+ * signature). The string-pipeline twin of emit-expr.ts's structured cases, with
+ * the same receiver shapes:
+ *
+ *   - a mutating array method (ARRAY_MUTATING_METHODS) called directly on the
+ *     cell — `@items.push(v)`. A deeper receiver (`@obj.list.push(v)`) is not a
+ *     write to the cell (§6.5.6) and the statement form does not notify it.
+ *   - an assignment (any operator), `++` / `--`, or `delete` whose target is a
+ *     FIELD / INDEX path into the cell — `@o.x = v`, `@o.n += 1`, `@rows[i].n++`.
+ *     A bare `@x = v` is not matched (reactive-assign lowering owns it), nor a
+ *     loop alias (`t.done = true`, §6.5.7).
+ *
+ * Optional calls / chains are left untouched.
+ */
+function collectReactiveInPlaceWrites(
+  ast: ESNode,
+  derivedNames: Set<string> | null,
+): Array<{ node: ESNode; varName: string }> {
+  const found: Array<{ node: ESNode; varName: string }> = [];
+  walk(ast, (node) => {
+    let varName: string | null = null;
+    if (node.type === "CallExpression" && !node.optional) {
+      const callee = node.callee as ESNode | undefined;
+      if (callee && callee.type === "MemberExpression" && !callee.computed && !callee.optional) {
+        const prop = callee.property as ESNode | undefined;
+        if (prop && prop.type === "Identifier" && typeof prop.name === "string"
+            && ARRAY_MUTATING_METHODS.has(prop.name)) {
+          varName = reactiveCellIdentName(callee.object as ESNode | undefined, derivedNames);
+        }
+      }
+    } else if (node.type === "AssignmentExpression") {
+      varName = reactiveFieldPathRoot(node.left as ESNode | undefined, derivedNames);
+    } else if (node.type === "UpdateExpression") {
+      varName = reactiveFieldPathRoot(node.argument as ESNode | undefined, derivedNames);
+    } else if (node.type === "UnaryExpression" && node.operator === "delete") {
+      varName = reactiveFieldPathRoot(node.argument as ESNode | undefined, derivedNames);
+    }
+    if (varName !== null) found.push({ node, varName });
+  });
+  return found;
+}
+
+/**
+ * Rewrite a collected in-place write IN PLACE so the cell is notified once after
+ * it runs and the expression's own value is preserved — the string-pipeline
+ * twin of `emit-expr.ts wrapReactiveNotify`, the same JS shape modulo astring's
+ * formatting:
+ *
+ *   ((_scrml_m) => (_scrml_reactive_set("k", _scrml_reactive_get("k")), _scrml_m))(<write>)
+ *
+ * The original expression becomes the IIFE's argument, so it is evaluated in the
+ * enclosing scope (an `await` in it keeps its meaning). A nested write inside it
+ * (`@a.push(@b.pop())`) is its own collected node, shared by reference with the
+ * copy made here, so each is wrapped exactly once.
+ */
+function wrapReactiveNotifyNode(node: ESNode, varName: string): void {
+  const inner: ESNode = { ...node };
+  for (const k of Object.keys(node)) delete (node as Record<string, unknown>)[k];
+  const key = (): ESNode => ({ type: "Literal", value: varName });
+  const temp = (): ESNode => ({ type: "Identifier", name: "_scrml_m" });
+  Object.assign(node, {
+    type: "CallExpression",
+    optional: false,
+    callee: {
+      type: "ArrowFunctionExpression",
+      id: null,
+      params: [temp()],
+      async: false,
+      generator: false,
+      expression: true,
+      body: {
+        type: "SequenceExpression",
+        expressions: [
+          {
+            type: "CallExpression",
+            optional: false,
+            callee: { type: "Identifier", name: "_scrml_reactive_set" },
+            arguments: [
+              key(),
+              {
+                type: "CallExpression",
+                optional: false,
+                callee: { type: "Identifier", name: "_scrml_reactive_get" },
+                arguments: [key()],
+              },
+            ],
+          },
+          temp(),
+        ],
+      },
+    },
+    arguments: [inner],
+  });
+}
+
+/**
  * Rewrite `@varName` reactive references to runtime getter calls using ESTree.
  *
  * Parses the expression with acorn, walks the tree to find @-prefixed Identifiers,
@@ -841,6 +967,11 @@ export function rewriteReactiveRefsAST(expr: string, derivedNames: Set<string> |
   const hasDerived = derivedNames && derivedNames.size > 0;
   let modified = false;
 
+  // §6.5.1 / §6.3 — collect the in-place writes to a reactive cell's value
+  // (`@items.push(v)`, `@o.x = v`, `@o.n++`) BEFORE the `@var` rename below
+  // erases the `@` receiver shape. See `wrapReactiveNotifyNode`.
+  const mutationCalls = collectReactiveInPlaceWrites(ast, hasDerived ? derivedNames : null);
+
   // Walk and replace @var Identifiers in-place
   walk(ast, (node, parent) => {
     if (node.type !== "Identifier" || typeof node.name !== "string" || !node.name.startsWith("@")) return;
@@ -867,6 +998,8 @@ export function rewriteReactiveRefsAST(expr: string, derivedNames: Set<string> |
   });
 
   if (!modified) return { result: expr, ok: true };
+
+  for (const m of mutationCalls) wrapReactiveNotifyNode(m.node, m.varName);
 
   try {
     const js = astToJs(ast);
@@ -1488,7 +1621,11 @@ function preprocessForAcorn(
   // Standalone `::Variant` (shorthand, no enum-type prefix) also normalizes
   // to `.Variant`, which then falls into the existing bare-dot variant
   // placeholder path below.
-  s = s.replace(/::(?=\s*[A-Z])/g, ".");
+  //
+  // S440 (f18 sibling): fenced via rewriteCodeSegments so a string / template /
+  // regex literal containing `::Upper` (`"a::B"`) passes through verbatim —
+  // previously emitted as `"a.B"`.
+  s = rewriteCodeSegments(s, (code) => code.replace(/::(?=\s*[A-Z])/g, "."));
 
   // S142 gate-tail: collapse the BS tokenizer's space-padded optional-chaining
   // operator `? .` back to `?.` so acorn parses `file.ast?.filePath` as an
@@ -1504,7 +1641,10 @@ function preprocessForAcorn(
   // (`cond ? .Active : .Idle`) — its leading char after `.` is UPPERCASE — so
   // gating the collapse on a non-uppercase following char preserves ternaries
   // with bare-variant arms.
-  s = s.replace(/\?\s*\.\s*(?=[a-z_$[(])/g, "?.");
+  //
+  // S440 (f18 sibling): fenced via rewriteCodeSegments so literal content like
+  // `"why? .x"` is not collapsed to `"why?.x"`.
+  s = rewriteCodeSegments(s, (code) => code.replace(/\?\s*\.\s*(?=[a-z_$[(])/g, "?."));
 
   // Replace `match expr { arms }` with placeholder
   // This is processed first because match may contain `is` operators inside arms.
@@ -1743,9 +1883,16 @@ function preprocessForAcorn(
   });
 
   // §14.9/§16.6: render name() → __scrml_render_name__()
-  s = s.replace(
-    /(?<![A-Za-z0-9_$])render\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g,
-    '__scrml_render_$1__('
+  //
+  // S440 (f18 sibling): fenced via rewriteCodeSegments — previously an unfenced
+  // whole-string replace, so the string literal `"render foo("` was emitted as
+  // `"__scrml_render_foo__("` (silent data corruption, same class as the
+  // bare-variant / `not` / `~` passes).
+  s = rewriteCodeSegments(s, (code) =>
+    code.replace(
+      /(?<![A-Za-z0-9_$])render\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g,
+      '__scrml_render_$1__('
+    )
   );
 
   // §32 tilde accumulator: replace standalone `~` with placeholder identifier.
@@ -1767,7 +1914,23 @@ function preprocessForAcorn(
   // The `opts?.tildeActive` parameter is retained in the signature for backward
   // compatibility and to allow future tilde-scope-aware diagnostics, but is no
   // longer load-bearing for this substitution.
-  s = s.replace(/(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/g, "__scrml_tilde__");
+  //
+  // S440 f18: fenced via rewriteCodeSegments. This preprocess runs on raw text
+  // BEFORE acorn tokenizes, so there are no tokens to ask yet; the shared
+  // literal/comment-aware splitter is the existing lexer-level fence (the same
+  // one the bare-variant / `not` / `or`/`and` passes above use). Previously the
+  // substitution ran over the WHOLE string, so a string / template / regex
+  // literal whose content was a standalone `~` (`"~"`, `'~'`, `` `~` ``,
+  // `` `a${x}~` ``, `/~/`) was silently emitted as `__scrml_tilde__`. Template
+  // `${…}` interpolations are still descended into as code, so a `~` keyword
+  // inside an interpolation is still the accumulator.
+  //
+  // The reverse mapping (esTreeToExprNode, Identifier arm) is structural — it
+  // fires only on an acorn Identifier node — so a user string literal that
+  // contains the text `__scrml_tilde__` is never turned into `~`.
+  s = rewriteCodeSegments(s, (code) =>
+    code.replace(/(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/g, "__scrml_tilde__")
+  );
 
   return s;
 }
@@ -2978,6 +3141,41 @@ function convertParams(params: ESNode[], filePath: string, baseOffset: number): 
  * @param offset - Byte offset of the expression start in the preprocessed source file
  * @returns A structured ExprNode. Returns EscapeHatchExpr on parse failure.
  */
+/**
+ * S437 round 4 — the "statement boundary not detected" console warning is a
+ * guard against a SILENT drop. For a §5.2.3 event-handler value the drop no
+ * longer happens once the value carries its parsed statement list
+ * (`handlerBlock`), and whether it will is only known AFTER the value's
+ * expression is parsed. `captureTrailingContentWarnings` runs `fn` with the
+ * warning HELD instead of printed and returns it, so the caller (ast-builder)
+ * prints it only when nothing handles the trailing statements.
+ */
+let _trailingWarningSink: string[] | null = null;
+export function captureTrailingContentWarnings<T>(fn: () => T): { result: T; warnings: string[] } {
+  const prev = _trailingWarningSink;
+  const sink: string[] = [];
+  _trailingWarningSink = sink;
+  try {
+    return { result: fn(), warnings: sink };
+  } finally {
+    _trailingWarningSink = prev;
+  }
+}
+
+/**
+ * S441 — the body-top strictness oracle (SPEC §40.8 S441 bullet, §4.18.7).
+ * A `<program>` / `<page>` / `<channel>` body-top run is a statement sequence;
+ * an expression the lenient statement collector handed over that acorn can only
+ * parse by DROPPING trailing content (`parseExpressionAt` stops early —
+ * `Welcome to the dashboard.` keeps `Welcome`) is not valid code. The returned
+ * ExprNode then carries a NON-enumerable `_s441Trailing` flag (invisible to
+ * serialization and structural equality); ast-builder's body-top check reads it
+ * through `hasLostTrailingContent`.
+ */
+export function hasLostTrailingContent(node: unknown): boolean {
+  return !!node && typeof node === "object" && (node as Record<string, unknown>)._s441Trailing === true;
+}
+
 export function parseExprToNode(raw: string, filePath: string, offset: number, opts?: { tildeActive?: boolean }): ExprNode {
   // §42.10 ENFORCEMENT (S188 g-not-negation-enforce): a detector object captures
   // whether preprocessForAcorn lowered a prefix-`not`-as-negation (bare `not @x`
@@ -2992,8 +3190,17 @@ export function parseExprToNode(raw: string, filePath: string, offset: number, o
   // sanctioned absence/presence keyword nor a `.Variant` pattern. When it fires
   // we stamp `_isValueRhsOnIs`; the gauntlet-phase3 §45 harvest fires E-EQ-005
   // (once per stamped node) BEFORE codegen, steering the author to `==`.
-  const _detector = { notPrefixNegation: false, valueRhsOnIs: false };
+  const _detector: { notPrefixNegation: boolean; valueRhsOnIs: boolean; lostTrailing?: boolean; lostTrailingText?: string; lostTrailingLine?: number } = { notPrefixNegation: false, valueRhsOnIs: false };
   const _node = _parseExprToNodeInner(raw, filePath, offset, opts, _detector);
+  if (_node && typeof _node === "object" && _detector.lostTrailing) {
+    Object.defineProperty(_node, "_s441Trailing", { value: true, enumerable: false, configurable: true, writable: true });
+    // S441 round 4 — WHAT was lost and on which line of the expression it
+    // starts (0 = the expression's first line), so the body-top check can
+    // keep the valid prefix and re-parse / report the lost tail at its own
+    // position instead of dropping it.
+    Object.defineProperty(_node, "_s441TrailingText", { value: _detector.lostTrailingText ?? "", enumerable: false, configurable: true, writable: true });
+    Object.defineProperty(_node, "_s441TrailingLine", { value: _detector.lostTrailingLine ?? 0, enumerable: false, configurable: true, writable: true });
+  }
   if (_node && typeof _node === "object") {
     if (_detector.notPrefixNegation) (_node as Record<string, unknown>)._notPrefixNegation = true;
     if (_detector.valueRhsOnIs) (_node as Record<string, unknown>)._isValueRhsOnIs = true;
@@ -3066,9 +3273,38 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
   // followed by code — this is the signature of the ASI merge bug.
   // Single-line trailing content (e.g., tokenizer-spaced "header ( )") is typically
   // from the space-separated token stream, not from merged statements.
+  if (estree && trailingContent && _notDetector) {
+    // acorn reports a parenthesized expression's node WITHOUT its wrapping
+    // parens, so `(1)` "trails" `)`. Discount one `)` per `(` that precedes
+    // the node's start; anything left over was genuinely dropped.
+    let wrap = 0;
+    const lead = processed.slice(0, (estree as { start?: number }).start ?? 0);
+    for (const ch of lead) if (ch === "(") wrap++;
+    // Untrimmed tail, so the line the lost content starts on is known.
+    const endAt = (estree as { end?: number }).end ?? 0;
+    let rest = processed.slice(endAt);
+    let consumed = 0;
+    while (wrap > 0) {
+      const m = /^\s*\)/.exec(rest);
+      if (!m) break;
+      consumed += m[0].length;
+      rest = rest.slice(m[0].length);
+      wrap--;
+    }
+    if (rest.trim() !== "") {
+      const det = _notDetector as { lostTrailing?: boolean; lostTrailingText?: string; lostTrailingLine?: number };
+      det.lostTrailing = true;
+      det.lostTrailingText = rest.trim();
+      // 0-based line (within the trimmed expression text) of the first lost char.
+      const leadWs = (/^\s*/.exec(rest) || [""])[0];
+      det.lostTrailingLine = (processed.slice(0, endAt + consumed) + leadWs).split("\n").length - 1;
+    }
+  }
   if (estree && trailingContent && trailingContent.includes("\n") && /[a-zA-Z_$@]/.test(trailingContent)) {
     const preview = trailingContent.length > 60 ? trailingContent.slice(0, 60) + "..." : trailingContent;
-    console.warn(`[scrml] warning: statement boundary not detected — trailing content would be silently dropped: "${preview}" (in ${filePath} near offset ${offset})`);
+    const msg = `[scrml] warning: statement boundary not detected — trailing content would be silently dropped: "${preview}" (in ${filePath} near offset ${offset})`;
+    if (_trailingWarningSink) _trailingWarningSink.push(msg);
+    else console.warn(msg);
   }
 
   if (!estree) {

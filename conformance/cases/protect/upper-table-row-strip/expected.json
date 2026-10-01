@@ -1,0 +1,19 @@
+{
+  "id": "protect-upper-table-row-strip",
+  "description": "§14.8.9 S441 round 4 (F3) — the whole row of `SELECT * FROM USERS` is tagged and stripped at the egress sink: it compiles, and I-PROTECT-STRIP-001 truthfully reports the strip.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "MEASURED before the fix, ALSO ON MAIN: the untagged row served the hash in cleartext (g-protected-column-escapes-redaction-as-scalar, S441 round 4 review, F3).",
+  "expect": {
+    "codes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "notCodes": [
+      "E-PROTECT-006"
+    ],
+    "severity": {
+      "I-PROTECT-STRIP-001": "info"
+    }
+  }
+}

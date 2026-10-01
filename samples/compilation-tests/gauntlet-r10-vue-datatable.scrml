@@ -192,8 +192,10 @@
             }
         }
 
-        // Reset to page 1 whenever search or filter causes fewer pages
-        when @filteredEmployees changes {
+        // Reset to page 1 whenever search or filter causes fewer pages. A derived
+        // cell cannot be a `when` trigger (§6.7.4 EC-1, E-LIFECYCLE-007) — list the
+        // mutable cells @filteredEmployees is computed from.
+        when (@searchTerm, @employees) changes {
             if (@currentPage > @totalPages) {
                 @currentPage = 1
             }

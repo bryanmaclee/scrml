@@ -26,6 +26,11 @@ export function makeLexContext() {
         // that the matching `}` can be recognized as TemplateInterpEnd
         // (per §51.0.Q.1 nested-engine pattern; see lex-in-template.js).
         templateStack: [],
+        // The most recent `)`: { at: start offset, frame: the paren frame it
+        // popped } — lets the `/` after it tell a control-head `)` (a regex
+        // follows) from a value `)` (division) (lex-in-code.js
+        // closerEndsStatement, S432 F1).
+        lastCloser:    null,
     };
 }
 

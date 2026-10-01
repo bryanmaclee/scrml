@@ -1,0 +1,12 @@
+<program>
+server function isOk(n) { return n > 100 }
+server function ranked() {
+  function inner(x) { return isOk(x) }
+  return [3, 1, 2].sort((a, b) => inner(a) ? -1 : 1)
+}
+function go() {
+  const r = ranked()
+  console.log(r)
+}
+<button onclick=go()>go</button>
+</program>

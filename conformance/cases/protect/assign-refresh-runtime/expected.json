@@ -1,0 +1,44 @@
+{
+  "id": "protect-assign-refresh-runtime",
+  "description": "§14.8.9 S443 round 6b — assigning one tagged row onto another (a refresh in place) works and still strips: the client receives {id, name}.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "Round 6 made the descriptor non-writable, so `Object.assign(a, b)` on two tagged rows threw a TypeError and the route answered 500 where base answered 200 stripped (review, measured). A legitimate program must not crash; the per-column markers are writable (the sink reads their presence) and non-configurable (cannot be removed).",
+  "expect": {
+    "codes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "Alice",
+          "passwordHash": "SECRET_HASH_ALICE",
+          "pin": 4321
+        }
+      ]
+    },
+    "input": [
+      {
+        "click": "#load"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "user": {
+        "id": 1,
+        "name": "Alice"
+      }
+    },
+    "severity": {
+      "I-PROTECT-STRIP-001": "info"
+    }
+  }
+}

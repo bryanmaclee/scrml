@@ -1,0 +1,18 @@
+{
+  "id": "server-fn-cell-assign-successive-writes-ordered",
+  "description": "§13.2 — successive writes to one cell, two of them server calls, land in SOURCE ORDER: `@out = double(1); @out = double(2); @out = @out + 100; @final = @out`. The stub answers 7, so the last write is 7 + 100 and both @out and @final end at 107. The pre-fix emit fired each server write as a detached IIFE: `@out + 100` read the stale 0 (@final = 100) and a server write that resolved LATER overwrote @out with 7 — arrival order, not source order, decided the final value (g-cell-assign-server-call-fired-detached).",
+  "language-version": "1.0",
+  "spec": "§13.2",
+  "rationale": "§13.2 SHALL \"Sequence dependent operations using `await`\" and SHALL insert `await` at every server call site. Each write to @out depends on the previous one (the third reads it), so the writes must complete in source order and the last one wins.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#seq" }, { "wait": "settle" }],
+    "serverStub": { "double": 7 },
+    "state": { "out": 107, "final": 107 },
+    "domAnchored": [
+      { "selector": "#out", "text": "107" },
+      { "selector": "#final", "text": "107" }
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+<program>
+<n> = 0
+<r> = 0
+<r2> = 0
+${ function h() { @r2 = 9 } }
+<button onclick={ if (@n > 0) { @r = 1 }; else @r = 2 }>x</button>
+</program>

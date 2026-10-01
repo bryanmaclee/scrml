@@ -10,7 +10,7 @@
  *   §1  single-file / flat-multifile envelope (`codegen/index.ts` doc envelope)
  *   §2  composed MPA per-page re-emit (`codegen/index.ts` shell composition)
  *   §3  role-detection bootstrap dynamic `<script>` inject
- *       (`codegen/emit-html.ts:augmentHtmlForChunks`)
+ *       (`codegen/emit-html.ts:buildChunksBootJs`)
  *
  * Byte-identity of the classic path is proven separately (esm-client-chunk-format
  * §2 + the corpus diff in the U3 report); here we assert the presence/absence of
@@ -22,7 +22,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
 import { compileScrml, scanDirectory } from "../../src/api.js";
-import { augmentHtmlForChunks } from "../../src/codegen/emit-html.ts";
+import { buildChunksBootJs } from "../../src/codegen/emit-html.ts";
 import { toEsmClientChunk } from "../../src/codegen/emit-client-esm.ts";
 
 const FLAT_MULTIFILE = join(import.meta.dir, "../../../examples/22-multifile");
@@ -72,8 +72,10 @@ function entryHtml(htmlByFile, base) {
 }
 
 // All `<script src=...>` tags that reference a client chunk or the shared runtime
-// (i.e. the tags Unit 3 modularizes). Inline `<script>…</script>` blocks (the
-// _SCRML_CHUNKS manifest, the role bootstrap) have no `src=` and are excluded.
+// (i.e. the tags Unit 3 modularizes). The per-route chunk-activation script
+// (`<script src="/scrml-chunks.<hash>.js" data-scrml-route=…>`, emitted only
+// under emitPerRoute) stays CLASSIC — it reads `document.currentScript`, which
+// is null in a module — and carries an extra attribute, so it is excluded.
 function scriptSrcTags(html) {
   return [...html.matchAll(/<script[^>]*\ssrc="[^"]*"><\/script>/g)].map((m) => m[0]);
 }
@@ -143,30 +145,25 @@ describe("§2 composed MPA — per-page re-emitted script set (docs/website)", (
 function chunkDesc(epId, role, tier, filename, payloadJs = "// payload") {
   return { entryPointId: epId, role, tier, filename, payloadJs };
 }
-const BOOT_HTML = `<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8"><title>x</title></head>
-<body><h1>hi</h1></body></html>`;
 
-describe("§3 role-detection bootstrap dynamic inject — augmentHtmlForChunks", () => {
+describe("§3 role-detection bootstrap dynamic inject — buildChunksBootJs", () => {
   const baseInput = {
-    html: BOOT_HTML,
     chunks: new Map([
       ["k1", chunkDesc("/abs/app.scrml#page@/loads", "Driver", "initial", "loads/Driver.initial.abc12345.js")],
     ]),
-    fileEntryPointIds: ["/abs/app.scrml#page@/loads"],
     epIdToRoutePath: new Map([["/abs/app.scrml#page@/loads", "/loads"]]),
   };
 
   test("esm: the injected chunk script is marked type=\"module\"", () => {
-    const out = augmentHtmlForChunks({ ...baseInput, moduleFormat: "esm" });
+    const out = buildChunksBootJs({ ...baseInput, moduleFormat: "esm" });
     expect(out).toContain('document.createElement("script")');
     expect(out).toContain('s.type = "module";');
     expect(out).toContain("s.defer = true"); // module scripts are deferred anyway
   });
 
   test("classic (default): the injected chunk script has NO s.type line", () => {
-    const outDefault = augmentHtmlForChunks(baseInput);
-    const outClassic = augmentHtmlForChunks({ ...baseInput, moduleFormat: "classic" });
+    const outDefault = buildChunksBootJs(baseInput);
+    const outClassic = buildChunksBootJs({ ...baseInput, moduleFormat: "classic" });
     expect(outDefault).not.toContain('s.type = "module"');
     expect(outClassic).not.toContain('s.type = "module"');
     // Default and explicit-classic are identical for the bootstrap.

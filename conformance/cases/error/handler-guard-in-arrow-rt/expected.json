@@ -1,0 +1,15 @@
+{
+  "id": "error-handler-guard-in-arrow-rt",
+  "description": "`!{}`-guarded calls inside ARROW-valued handlers (RT). #expr: `(e) => risky() !{…}` — the .Empty arm sets @r = 1. #block: a block-bodied arrow whose guard adds 10 and whose second statement reads the arrow's parameter (the event): @kind = e.type = \"click\". Before S440 the arrow was emitted as-is from its expression view and the guard was dropped (`(e) => _scrml_risky()`, r stayed 0); the block form failed codegen (E-CODEGEN-INVALID-LOGIC).",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "provenance": "ruling:user-voice-scrml.md S440 (all recs #2, item 1)",
+  "rationale": "§19.4.3 (S440 ruling) — an arrow body runs on the event exactly like `{ risky() }`, so it is checked the same way and its guard is emitted. §5.2.3 — no statement of a handler SHALL be dropped.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-", "E-CODEGEN-"],
+    "input": [{ "click": "#expr" }, { "click": "#block" }],
+    "state": { "r": 11, "kind": "click" }
+  }
+}

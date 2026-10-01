@@ -54,20 +54,21 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { Database } from "bun:sqlite";
 import { parse as acornParse } from "acorn";
 import { compileScrml } from "../../src/api.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
-const TMP_ROOT = resolve(testDir, "_tmp_authed_server_fn_response");
+// A FRESH directory per run (S438) — see helpers/per-run-tmp.js: a fixed path left
+// `items.db` behind on Windows (afterAll EBUSY) and the next run's `CREATE TABLE items`
+// turned all 17 tests red.
+const _tmp = perRunTmp(resolve(testDir, "_tmp_authed_server_fn_response"));
+const TMP_ROOT = _tmp.root;
 let tmpCounter = 0;
 
-beforeAll(() => {
-  if (!existsSync(TMP_ROOT)) mkdirSync(TMP_ROOT, { recursive: true });
-});
-afterAll(() => {
-  if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
-});
+beforeAll(_tmp.setup);
+afterAll(_tmp.teardown);
 
 const ITEMS_SEED = [
   "CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, secret TEXT)",

@@ -44,7 +44,9 @@
 
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
-import { buildAST } from "./ast-builder.js";
+import { buildAST, attachHandlerStatementListsInTree } from "./ast-builder.js";
+import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
+import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
 import type {
   Span,
@@ -443,6 +445,13 @@ export interface CEFileInput {
   filePath: string;
   ast: FileAST;
   errors: TABErrorInfo[];
+  /**
+   * The file's original source text, attached to the TAB result in api.js. CE
+   * is the earliest stage handed it (PRECG / NR / TC / SYM receive only
+   * `{filePath, ast}`), which is why the §17.6.10 implied-`lift` desugar runs
+   * here — it has to re-read the arm's markup from the source.
+   */
+  _sourceText?: string;
 }
 
 /** A single file's record output from CE. */
@@ -1194,6 +1203,14 @@ function reparseSynthesizedFile(
   const errors = result.errors ?? [];
   upgradeNativePropsDeclsInFileAST(result.ast, errors);
   upgradeNativeCallRefArgExprNodesInFileAST(result.ast, filePath);
+  // §5.2.3 handler statement lists — the native parser gives a handler value
+  // neither `exprNode` nor `handlerBlock`, so a component body's handler fell
+  // to the string lowering: `onclick={ f() !{…} }` emitted a raw `!{`
+  // (E-CODEGEN-INVALID-LOGIC), and the §19.4.3 check never saw its statements
+  // (S440 F2/F4). Attach them with the SAME statement parser the TAB path and
+  // the `<match>` arm re-parse (emit-match.ts) use. The live-fallback branch
+  // above already has them — buildAST attaches while building each block.
+  attachHandlerStatementListsInTree(result.ast.nodes, filePath, { synthesizeExprNode: false });
   return { ast: result.ast, errors };
 }
 
@@ -1206,6 +1223,18 @@ function parseComponentBody(
     const normalized = normalizeTokenizedRaw(raw);
 
     const reparsed = reparseSynthesizedFile(filePath + "#" + componentName, normalized);
+
+    // §17.6.10 / §10.1 — the implied `lift`, re-applied HERE for the same reason
+    // as at `emit-match.ts`'s arm-body site: this body was re-parsed from
+    // `normalizeTokenizedRaw(raw)`, so the copy the CE-head pass desugared is
+    // thrown away and a `const Card = <div>${ if (@on) { <p>a</p> } … }</>` body
+    // dropped its branches while the identical interpolation OUTSIDE a component
+    // rendered (measured: base and fix byte-identical, emitted HTML a bare
+    // `<span data-scrml-logic>` anchor with no branch code, while the
+    // explicit-`lift` twin rendered on both sides — a live asymmetry against the
+    // equivalence §17.6.10 asserts). `normalized` IS the text the re-parsed spans
+    // are relative to, so it is what the pass must be given.
+    desugarImpliedLiftMarkupArms(reparsed.ast, normalized, filePath + "#" + componentName);
 
     // Collect ALL markup nodes from the parsed result (multi-root support)
     const markupNodes = reparsed.ast.nodes.filter(n => n && n.kind === "markup") as MarkupNode[];
@@ -2263,9 +2292,29 @@ function substitutePropsInLogicStmt(
     }
     case "guarded-expr": {
       const n = stmt as GuardedExprNode;
+      // The `!{}` ARMS are substituted too (S440 N2): each arm body carries a raw
+      // `handler` string (what the arm emitter lowers) and a parsed `handlerExpr`
+      // (what the type system checks). An arm's payload binding shadows a
+      // same-named prop inside that arm only.
+      const arms = Array.isArray(n.arms)
+        ? n.arms.map((arm) => {
+            if (!arm || typeof arm !== "object") return arm;
+            const a = arm as unknown as { binding?: string; handler?: string; handlerExpr?: ExprNode };
+            const armShadowed = new Set(shadowed);
+            if (typeof a.binding === "string" && a.binding) {
+              for (const b of a.binding.split(",")) if (b.trim()) armShadowed.add(b.trim());
+            }
+            return {
+              ...(arm as object),
+              ...(typeof a.handler === "string" ? { handler: rewriteIdentsInRawExpr(a.handler, propExprMap, armShadowed) } : {}),
+              ...(a.handlerExpr ? { handlerExpr: substitutePropsInExprNode(a.handlerExpr, propExprMap, armShadowed) } : {}),
+            } as typeof arm;
+          })
+        : n.arms;
       return {
         ...n,
         guardedNode: substitutePropsInLogicStmt(n.guardedNode, propExprMap, shadowed),
+        arms,
       } satisfies GuardedExprNode;
     }
     // "when-effect" and the "when-worker-*" kinds emit from `bodyRaw` and are
@@ -2364,8 +2413,21 @@ function substituteProps(
   // Markup nodes: substitute in attrs and recurse into children
   if (cloned.kind === "markup") {
     if (Array.isArray(cloned.attrs)) {
+      const outerProps = props;
+      const outerPropExprMap = propExprMap;
       cloned.attrs = (cloned.attrs as AttrNode[]).map((attr: AttrNode) => {
         if (!attr || !attr.value) return attr;
+        // Inside an event-handler value `event` is the DOM event (§5.2.2), so a
+        // prop named `event` is shadowed there — in EVERY lowering path (the
+        // statement list already shadowed it; the one-statement / call-ref / raw
+        // paths substituted it — S440 N4).
+        const isHandlerAttr = typeof attr.name === "string" && isEventHandlerAttrName(attr.name);
+        const props = isHandlerAttr && outerProps.has("event")
+          ? new Map([...outerProps].filter(([k]) => k !== "event"))
+          : outerProps;
+        const propExprMap = isHandlerAttr && outerPropExprMap && outerPropExprMap.has("event")
+          ? new Map([...outerPropExprMap].filter(([k]) => k !== "event"))
+          : outerPropExprMap;
         if (attr.value.kind === "string-literal") {
           // First the whole-prop-name `${name}` substitution (string values).
           let newVal = applyPropSubstitutions(attr.value.value, props);
@@ -2485,7 +2547,17 @@ function substituteProps(
           }
         }
         if (propExprMap && attr.value.kind === "expr") {
-          const exprVal = attr.value as { raw: string; refs: string[]; exprNode?: ExprNode; span: ExprSpan };
+          const exprVal = attr.value as { raw: string; refs: string[]; exprNode?: ExprNode; span: ExprSpan; handlerBlock?: { stmts: LogicStatement[] } };
+          // §5.2.3 statement list (`handlerBlock`, attached at the body re-parse):
+          // it is what codegen emits and what the type system checks, so the
+          // props are substituted INTO it — every statement, not just the first
+          // (the `exprNode` below only ever held statement 1). The handler's
+          // `event` binding shadows a same-named prop.
+          if (exprVal.handlerBlock && Array.isArray(exprVal.handlerBlock.stmts)) {
+            const stmts = substitutePropsInLogicStmts(exprVal.handlerBlock.stmts, propExprMap, new Set(["event"]));
+            const first = exprVal.exprNode ? substitutePropsInExprNode(exprVal.exprNode, propExprMap, new Set()) : exprVal.exprNode;
+            return { ...attr, value: { ...exprVal, exprNode: first, handlerBlock: { stmts } } };
+          }
           if (exprVal.exprNode) {
             const replaced = substitutePropsInExprNode(exprVal.exprNode, propExprMap, new Set());
             if (replaced !== exprVal.exprNode) {
@@ -3300,13 +3372,17 @@ function parseSnippetBodyNodes(
   // (S375 review #1). Rendering it as literal text is the safe default — a body
   // that genuinely means a variable read is written `${var}` or returns markup.
   // (Span note: buildAST numbers the reparsed nodes against the synthetic
-  // `<program>` wrapper; any diagnostic on malformed snippet content folds into
+  // wrapper; any diagnostic on malformed snippet content folds into
   // ceErrors with the render-site `child.span` — an accurate author position.)
   const asExpr = parseExprToNode(trimmed, filePath, span?.start ?? 0);
   const interpolate = asExpr && asExpr.kind !== "escape-hatch" && asExpr.kind !== "ident";
+  // The body is RENDERED content, so it is reparsed inside a plain-markup
+  // wrapper whose body is free text (§4.18.1). ⛑ S441: this used to be a
+  // synthetic `<program>` wrapper, which is now a code-default body (§40.8
+  // S441 bullet) — a bare-word body there would be read as code.
   const wrapped = interpolate
-    ? `<program>\n\${${trimmed}}\n</program>\n`
-    : `<program>\n${trimmed}\n</program>\n`;
+    ? `<div>\n\${${trimmed}}\n</div>\n`
+    : `<div>\n${trimmed}\n</div>\n`;
   const bsOut = splitBlocks(filePath, wrapped);
   const tabOut = buildAST(bsOut) as { ast: FileAST; errors: TABErrorInfo[] };
   if (ceErrors) {
@@ -3317,7 +3393,7 @@ function parseSnippetBodyNodes(
     }
   }
   const prog = (tabOut.ast?.nodes ?? []).find(
-    (n: unknown) => (n as MarkupNode)?.kind === "markup" && (n as MarkupNode)?.tag === "program",
+    (n: unknown) => (n as MarkupNode)?.kind === "markup" && (n as MarkupNode)?.tag === "div",
   ) as MarkupNode | undefined;
   const kids = prog?.children ?? [];
   return _deepCloneAst(kids, counter) as ASTNode[];
@@ -4278,6 +4354,15 @@ export function runCEFile(
   if (!ast) {
     return { filePath, ast, errors: ceErrors };
   }
+
+  // §17.6.10 / §10.1 — the IMPLIED `lift` of a single-markup-expression
+  // control-flow arm (`g-if-arm-bare-markup-branch-silently-dropped`). Runs
+  // BEFORE component expansion so a desugared `<Foo/>` arm is expanded like any
+  // other component reference, and before the CE short-circuit below so a file
+  // with no components still gets it. Raises no diagnostics and leaves the tree
+  // untouched when it cannot recover the arm's markup exactly. See
+  // implied-lift-desugar.ts for why this seam and not the TAB.
+  desugarImpliedLiftMarkupArms(ast, tabOutput._sourceText ?? "", filePath);
 
   // Build the component registry from ast.components (same-file)
   const componentDefs = (ast.components ?? []) as ExtendedComponentDefNode[];

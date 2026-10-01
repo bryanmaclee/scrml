@@ -1,0 +1,24 @@
+// S441 reproducer — addendum item 21: an inline `onsubmit=${ … }` handler gets no `event.preventDefault()`,
+// so the browser natively submits and reloads; `onsubmit=fn()` on the same page gets it.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/inline-onsubmit-block-no-preventdefault.scrml --output-dir <scratch>
+// Expected: both forms behave the same. RULING-GATED on the SPEC side (no sentence mandates the auto-inject; see
+//           the gap), but the compiler's own convention is auto-inject for submit (emit-event-wiring.ts:~1262).
+// Actual:   exit 0. client.js submit registry:
+//             "_scrml_attr_onsubmit_1": function(event) { event.preventDefault(); _scrml_go_5(); },
+//             "_scrml_attr_onsubmit_3": function(event) { _scrml_cs_reactive_set("n", _scrml_cs_reactive_get("n") + 1); },
+//           Form B reloads the page on submit; an async server call in the block (the onboarding login shape,
+//           `onsubmit=${ @token = login(@email, @password) }`) is cut off by the navigation.
+<program>
+<q> = ""
+<n> = 0
+function go() { @n = @n + 1 }
+<form onsubmit=go()>
+    <input bind:value=@q/>
+    <button type="submit">A</button>
+</form>
+<form onsubmit=${ @n = @n + 1 }>
+    <button type="submit">B</button>
+</form>
+<p>${@n}</p>
+</program>

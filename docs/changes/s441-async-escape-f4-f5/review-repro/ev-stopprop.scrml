@@ -1,0 +1,6 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+<p id="out">${@verdict}</p>
+<div id="wrap"><button id="f" onclick=${ @verdict = isOk(1) ? "accepted" : "rejected"; event.stopPropagation() }>b</button></div>
+</program>

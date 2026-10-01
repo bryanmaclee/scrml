@@ -1,0 +1,15 @@
+{
+  "spec": "§9.1, §4.17",
+  "rationale": "The component-scope `#{ .btn { color: red } }` applies to the component's button.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": ".btn",
+          "prop": "color",
+          "value": "rgb(255, 0, 0)"
+        }
+      ]
+    }
+  ]
+}

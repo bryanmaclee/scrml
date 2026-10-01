@@ -1,0 +1,45 @@
+{
+  "spec": "§65.6, §65.3.2",
+  "rationale": "§65.6: each variant re-binds its subset over the base, keyed on `:root[data-scrml-theme-mode=\"<Variant>\"]`; switching the cell flips the page, and switching back to the base variant restores the base value.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": ".t",
+          "prop": "color",
+          "value": "rgb(17, 17, 17)"
+        }
+      ]
+    },
+    {
+      "click": "#dark",
+      "expect": [
+        {
+          "sel": ".t",
+          "prop": "color",
+          "value": "rgb(238, 238, 238)"
+        }
+      ]
+    },
+    {
+      "click": "#sepia",
+      "expect": [
+        {
+          "sel": ".t",
+          "prop": "color",
+          "value": "rgb(112, 66, 20)"
+        }
+      ]
+    },
+    {
+      "click": "#light",
+      "expect": [
+        {
+          "sel": ".t",
+          "prop": "color",
+          "value": "rgb(17, 17, 17)"
+        }
+      ]
+    }
+  ]
+}

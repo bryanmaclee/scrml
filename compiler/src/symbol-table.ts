@@ -198,35 +198,11 @@ import {
   ROWCHANGE_VARIANT_NAMES,
 } from "./channel-watches.ts";
 
-// Unit CC (S123 — companion to V-kill): per-file exemption list for the
-// E-WRITE-NOT-IN-LOGIC-CONTEXT diagnostic. The 110-ish-file pre-S123 corpus
-// uses bare `@x = expr` at `<program>` / `<page>` body-top — a pattern that
-// V-kill carved out from its own fire and Unit CC now enforces per Option 2.
-// Adopter migration is deferred; each file sunsets by removing its entry
-// from the JSON. List shape: repo-relative path strings (e.g.,
-// "samples/contact-directory.scrml").
-//
-// Loaded once at module init via synchronous readFileSync. JSON file lives
-// in compiler/src/ so it ships with the compiler. Matching is strict membership
-// first, then a `/`-boundary suffix match, which covers the fact that spans
-// carry ABSOLUTE paths while the list is repo-relative and the checkout location
-// varies (a worktree harness inserts a `.claude/worktrees/agent-XXX/` segment).
-// ⚑ S379: that description used to name `isUnitCCExempt()` as the place the
-// normalization happens. It was inlined here and is not any more — the logic
-// moved to `default-logic-exemption.ts` and `isUnitCCExempt` is now only a local
-// alias for the import below. Describing a function's internals from the outside
-// is how that reference went stale; point at the module instead.
-// S368 — the loader + predicate moved to a leaf module (`default-logic-exemption.ts`)
-// so a TAB-stage gate at this SAME §40.8 body-top locus can consult the SAME
-// list. TAB runs BEFORE SYM, so `ast-builder.js` cannot import from this file;
-// the leaf module is what both sides are allowed to depend on. ⚑ S379: the TAB
-// consumer that motivated the extraction (`E-CALL-NOT-IN-LOGIC-CONTEXT`) is HELD
-// and is NOT in the compiler — this is currently the list's only live consumer.
-// Read the leaf module's header before folding it back in here.
-import { isDefaultLogicBodyTopExempt } from "./default-logic-exemption.ts";
-
-/** Back-compat alias for the Unit CC call sites below. */
-const isUnitCCExempt = isDefaultLogicBodyTopExempt;
+// ⛑ S441 — E-WRITE-NOT-IN-LOGIC-CONTEXT (S123 "Unit CC") is RETIRED: a
+// `<program>` / `<page>` / `<channel>` body is code (SPEC §40.8 S441 bullet), so
+// a bare write at its body-top is ordinary logic. The per-file exemption list
+// (`unit-cc-exemption-list.json`) and its loader (`default-logic-exemption.ts`)
+// had no other consumer and were removed with it.
 
 // ---------------------------------------------------------------------------
 // B4 — Import binding registry
@@ -2536,69 +2512,6 @@ function walkResolveAtNames(
             });
           }
         }
-      }
-      // Unit CC (S123 — companion to V-kill): for `_isUnitCCWrite`-tagged
-      // state-decls (bare `@name = expr` writes at default-logic body-top —
-      // the §40.8 auto-lifted `<program>` / `<page>` / `<channel>` body),
-      // fire E-WRITE-NOT-IN-LOGIC-CONTEXT regardless of whether the target
-      // cell is declared. Per the S122 user-voice Option-2 ratification,
-      // §40.8 auto-lift covers DECLARATIONS only (`<x> = 0`, `function f()
-      // { }`) — NOT writes. Writes are LOGIC; logic goes in `${...}`.
-      //
-      // The diagnostic is a SHAPE error, not a name-resolution error: the
-      // cell may or may not exist; the wrong is the bare write at body-top.
-      // PASS 1 deliberately STILL registers the auto-synthesised cell for
-      // _isUnitCCWrite nodes (unlike V-kill which skips registration), so
-      // downstream stages remain unchanged — only the loud diagnostic is
-      // new. The user fixes by either:
-      //   (a) wrapping the write in `${...}`: `${ @name = expr }`, OR
-      //   (b) converting to a structural decl: `<name> = expr`.
-      //
-      // EXEMPTION: per-file path-based suppression for the 110-file corpus
-      // that pre-dates Unit CC's enforcement. Each exempted file sunsets
-      // per-file as adopters migrate (remove the file's path from
-      // `unit-cc-exemption-list.json`). Sunset is intentionally manual
-      // (vs V-kill's auto-sunset on file deletion) because these files are
-      // not scheduled for deletion — they are adopter source that needs
-      // migration. The list, the loader and the matching rule all live in
-      // `default-logic-exemption.ts`; `isUnitCCExempt` here is a local alias
-      // for its `isDefaultLogicBodyTopExempt` export. Read that module for
-      // the behaviour — including what happens when the JSON is malformed.
-      //
-      // ⛑ S383: this comment used to describe the loader's internals from out
-      // here — it named the module-init Set binding directly — and that binding
-      // no longer exists in this file, because the S379 extraction moved it.
-      // That is exactly the failure the banner above this file's import names:
-      // describing a function's internals from the outside is how a reference
-      // goes stale. Point at the module. (The dead symbol is deliberately not
-      // repeated here, so a grep for it stays a reliable staleness check.)
-      if ((anyN as any)._isUnitCCWrite === true && typeof anyN.name === "string") {
-        const filePath = (anyN.span && typeof anyN.span.file === "string") ? anyN.span.file : "";
-        if (isUnitCCExempt(filePath)) {
-          // Exempt — skip the fire. Sunset is per-file (remove entry from JSON).
-          continue;
-        }
-        const targetName: string = anyN.name;
-        const declSpan = anyN.span ?? {
-          file: currentScope.qualifiedPath || "",
-          start: 0,
-          end: 0,
-          line: 1,
-          col: 1,
-        };
-        errors.push({
-          code: "E-WRITE-NOT-IN-LOGIC-CONTEXT",
-          message:
-            `E-WRITE-NOT-IN-LOGIC-CONTEXT: bare \`@${targetName} = ...\` write at `
-            + `default-logic body-top. Default-logic mode (SPEC §40.8) auto-lifts `
-            + `DECLARATIONS only (\`<${targetName}> = ...\`, \`function f() {}\`) — `
-            + `NOT writes. Writes are logic; wrap in \`\${...}\`: `
-            + `\`\${ @${targetName} = ... }\`. `
-            + `Alternative: if this was meant to be a declaration, use the `
-            + `structural form \`<${targetName}> = ...\`.`,
-          span: declSpan as Span,
-          severity: "error",
-        });
       }
       // Use the compound sub-scope for nested @-refs inside compound bodies.
       const stateScope = (anyN as ReactiveDeclNode & ScopeAnnotated)._scope;

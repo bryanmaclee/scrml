@@ -1,0 +1,24 @@
+change-id: s441-declared-prose-body (round 5)
+
+CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE (incident counter: 0 this session)
+1. `pwd` MUST start with `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-`; `git rev-parse --show-toplevel` == pwd; tree clean. Else STOP and report.
+2. Start state: `git fetch origin && git reset --hard origin/worktree-agent-a2f3ca098c5412926` (round-4 tip 94cd0ae58 — verify `git rev-parse HEAD`), then `git merge origin/main`. Conflicts: docs/FACTS.md is GENERATED → take either side then regen (`bun scripts/facts.ts --write`); docs/known-gaps.md is MIXED hand+generated → resolve the count hunk only, keep EVERY hand entry from both sides (diff the `@gap id=` sets before/after — dropping entries has happened before); SPEC-INDEX regen via `bun run scripts/regen-spec-index.ts`.
+3. `bun install`; `bun run pretest` plainly from the worktree CWD.
+4. Every Edit/Write: absolute path UNDER your worktree. Never `cd` into main. NEVER `git stash`. NEVER `pkill -f`/`killall` on shared strings — kill by captured PID; 47xx ports. Scratch: /tmp/claude-1000/-home-bryan-maclee-scrmlMaster-scrml/777e6bc5-4a13-4cb4-b3a0-497aaeb21665/scratchpad/s445-prose/.
+5. First commit after the merge: append this brief verbatim → `docs/changes/s441-declared-prose-body/BRIEF-round5.md`; progress.md append-only. Commit after each unit; code + test in ONE commit; foreground commits timeout ≥300000; never `--no-verify`, never touch core.hooksPath.
+6. Parallel siblings live (don't edit their surfaces): app-root auth (compiler/src/route-inference.ts, commands/build.js) and protected egress r6 (protect-flow.ts, emit-server.ts, commands/build.js). Your surface: ast-builder.js, block-splitter.js, native-parser/*, symbol-table.ts, type-system.ts (only the prose-related hunks), constant-folder, emit-html.ts, component-expander.ts, conformance/cases/body-top/*.
+
+MAPS — REQUIRED FIRST READ: `.claude/maps/primary.map.md` (stamp 5b1d0dab0; verify loci). Report whether load-bearing.
+
+GOVERNING: SPEC §40.8 (program shape; default-logic body) + §4.18 (read both IN FULL on the branch after the merge) + the rulings in scrml-support/user-voice-scrml.md §S441 ("loose prose is not allowed; prose must be DECLARED", and "declared-prose implementation: yes to all four") and §S443 item 4 ("Body-top code that does nothing (`import stuff`, a bare `404`): should it be an error? I recommend yes." → RULED: compile error — the declared-prose coverage rule: a node covers only tokens it compiles). Quote, don't paraphrase, in any SPEC text you add.
+
+Round-4 review (tag review/s443-prose-r4) = DO-NOT-LAND. Full findings: docs/known-gaps.md `g-body-top-invariant-bypassed-by-raw-text-nodes`. Reproduce each first, then fix:
+A (root): coverage credits a node only for tokens it actually COMPILES. import/export/type declarations must reject trailing tokens on their line (E-UNQUOTED-DISPLAY-TEXT or a parse error) and must not swallow the next line. This settles ruling S443 #4 by construction (`import stuff`, `type here`, `export data`, `fn heading` at body top → error); a bare literal statement at body top that does nothing (bare `404`) is ALSO an error — confirm against SPEC §40.8 and add the sentence with `> **Provenance:** ruling:user-voice-scrml.md S443 item 4`.
+B (native, introduced): body-top `;` fires E-INTERNAL — treat `;` as formatting; never fire E-INTERNAL when an E- error already covers the run.
+C (native, introduced): label lines (`Total: 42`, `Step1: "…"`, `Docs: https://…`) vanish → must be E-UNQUOTED-DISPLAY-TEXT.
+D (native, pre-existing): tagged templates dropped — fix if same root, else report.
+Keep the constant-folder change (silent-empty → loud E-CODEGEN is accepted).
+STOP CONDITION: this is round 5 of a class that has repeatedly lost to text-shape patching. If a fix you are about to write is a new shape-recognizer rather than the coverage invariant, stop and make it the invariant; report any shape you could not bring under the invariant instead of patching it.
+Re-run the fuzz with the reviewer's shapes on BOTH parsers (default and `--parser=scrml-native`). Measured migration: compile examples/, samples/, docs/readme-snippets/, conformance/cases/ + ../scrml-site and ../flogence (READ-ONLY — compile into your scratch dir, never write there); report counts and files per new error.
+Suites: `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` 0 fail + `bun conformance/run.ts`. `git push origin HEAD:worktree-agent-a2f3ca098c5412926` (the existing branch; fast-forward from 94cd0ae58 + merge — if non-ff, push to `s445-prose-r5` instead and say so).
+REPORT: worktree, branch, FINAL SHA, files, each finding A-D fixed/reported, fuzz results both parsers, migration counts, suite numbers. `git status` clean before DONE.

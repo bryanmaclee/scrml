@@ -1,0 +1,9 @@
+<count> = 0
+<msg> = ""
+
+<button id="add" onclick={
+    const next = @count + 1
+    @count = next
+    if (next > 2) { @msg = "big" }
+}>Add</>
+<p id="out">${@count} ${@msg}</p>

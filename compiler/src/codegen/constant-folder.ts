@@ -200,9 +200,16 @@ function foldExpr(node: ExprNode, env: ConstFoldEnv): ConstResult {
     // ---------------------------------------------------------------- literal
     case "lit": {
       switch (node.litType) {
+        case "template":
+          // S441 round 4 (#4) — an INTERPOLATED template literal's `value` is
+          // not its value (the expression layer leaves it "" — the `${…}`
+          // parts are not folded), so folding it rendered `const msg =
+          // \`total is ${n + 1} units\`` + `${msg}` as an EMPTY string with no
+          // runtime binding. Only a plain (no-`${}`) template is a constant.
+          if ((node as { hasInterpolation?: boolean }).hasInterpolation === true) return RUNTIME;
+          return constant(node.value as ConstValue);
         case "number":
         case "string":
-        case "template":
         case "bool":
           // `value` is already the parsed primitive.
           return constant(node.value as ConstValue);

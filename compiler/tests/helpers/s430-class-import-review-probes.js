@@ -27,7 +27,11 @@ export const S430_REVIEW_PROBES = [
   ["fp07_markuptext", "<program>\n<p>the class Foo is full</p>\n<p>import(\"x\") explained</p>\n<pre>class X {} import(\"./x\")</pre>\n<code>class X extends Y {}</code>\n</program>\n", [], []],
   ["fp08_css", "<program>\n#{ .class { color: red; } .import { color: blue; } }\n<p class=\"class\">x</p>\n</program>\n", [], []],
   ["fp09_sql", "<program db=\"./t.db\">\n< db src=\"./t.db\" tables=\"t\">\n${\n  server function f() {\n    return ?{`SELECT class FROM t`}.all()\n  }\n}\n</>\n<p>x</p>\n</program>\n", [], []],
-  ["fp10_foreign", "<program lang=\"ts\">\n_{ class X { } ; import(\"x\") }\n<p>x</p>\n</program>\n", [], null],
+  // S441: a `<program>` body is code now, so the foreign block is parsed rather
+  // than shipped as page text — and a level-0 `_{ … }` closes at its FIRST `}`
+  // (§23.2), which cut this probe's interior short. The level-1 `_={ … }=` form
+  // keeps the whole interior opaque, which is what the probe is about.
+  ["fp10_foreign", "<program lang=\"ts\">\n_={ class X { } ; import(\"x\") }=\n<p>x</p>\n</program>\n", [], null],
   ["fp10b_foreign_inline", "<program lang=\"ts\">\n${\n  export function f(p: string) {\n    const out: string = _={ in: { p }\n      class K { m() { return 1 } }\n      const m = await import(\"node:fs\")\n      return String(new K().m()) + p\n    }=\n    return out\n  }\n}\n<p>x</p>\n</program>\n", [], null],
   ["fp11_importmeta", "<program>\n${\n  const u = import.meta.url\n  const o = { import: (x) => x }\n  const v = o.import(1)\n  function importFoo(x) { return x }\n  const w = importFoo(2)\n}\n<p>x</p>\n</program>\n", [], []],
   ["fp12_logic_markup", "<program>\n${\n  const items = [1, 2]\n  for (const i of items) { lift <li class=\"row\">the class Foo is ${i}</li> }\n}\n<p>x</p>\n</program>\n", [], []],

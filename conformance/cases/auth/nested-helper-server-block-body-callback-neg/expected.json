@@ -1,0 +1,13 @@
+{
+  "id": "auth-nested-helper-server-block-body-callback-neg",
+  "description": "SECURITY (s440 fix round, F2). On the SERVER, a block-body callback (`h => { return m(h) }`) is emitted as raw text, so a call inside it cannot be awaited. `m` is a nested helper that wraps `verifyPassword`, so `hashes.some(h => { return m(h) })` would hand `.some` an always-truthy Promise — every password accepted. The direct form (`verifyPassword` inside the block body) already failed closed; through a nested helper it compiled clean. It now fails closed with the async-stdlib code.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s440-nested-helper-async-sync-callback.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2 requires every Promise-returning call to be awaited; §34 E-ASYNC-STDLIB-IN-SYNC-CALLBACK makes a position where the compiler cannot insert `await` a hard, fail-closed error. A nested helper that calls `verifyPassword` is itself Promise-returning, so calling it from a verbatim block-body callback is exactly such a position.",
+  "expect": {
+    "codes": ["E-ASYNC-STDLIB-IN-SYNC-CALLBACK"],
+    "notCodes": ["E-SERVER-FN-IN-SYNC-CALLBACK"],
+    "severity": { "E-ASYNC-STDLIB-IN-SYNC-CALLBACK": "error" }
+  }
+}

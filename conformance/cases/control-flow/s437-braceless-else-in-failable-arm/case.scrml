@@ -1,0 +1,24 @@
+${
+    type LoadError:enum = {
+        NotFound(id: string)
+        Timeout
+    }
+    function loadItem(id: string)! LoadError {
+        if (id == "missing") fail LoadError.NotFound(id)
+        return id
+    }
+}
+<r> = ""
+${
+    function go() {
+        let result = loadItem("missing") !{
+            | .NotFound(mid) :> {
+                if (mid == "missing") @r = "yes"; else @r = "no"
+                @r = @r + "!"
+            }
+            | .Timeout :> @r = "timeout"
+        }
+    }
+}
+<button id="go" onclick=go()>go</button>
+<p id="out">${@r}</p>

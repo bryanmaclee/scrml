@@ -1,0 +1,127 @@
+{
+  "spec": "§65.3.4",
+  "rationale": "§65.3.4, bullet by bullet: (1) `box-sizing: border-box` on `*, ::before, ::after`; (2) margin zeroed on the flow set (body, headings, paragraphs, lists, figure, blockquote, hr, fieldset); (3) replaced media `display: block; max-width: 100%`; (4) form controls inherit `font` (the body's 16px, not the UA's 13.33px); (5) a sane body — readability `line-height` (1.5 → 24px at 16px) and `min-height: 100vh` (the 600px test viewport). The `line-height` value 1.5 is the reset's frozen, documented value (§65.3.4 says 'readability line-height', frozen + documented).",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "#p",
+          "prop": "box-sizing",
+          "value": "border-box"
+        },
+        {
+          "sel": "#p",
+          "pseudo": "::before",
+          "prop": "box-sizing",
+          "value": "border-box"
+        },
+        {
+          "sel": "#p",
+          "pseudo": "::after",
+          "prop": "box-sizing",
+          "value": "border-box"
+        },
+        {
+          "sel": "body",
+          "prop": "margin-top",
+          "value": "0px"
+        },
+        {
+          "sel": "#h1",
+          "prop": "margin-top",
+          "value": "0px"
+        },
+        {
+          "sel": "#h3",
+          "prop": "margin-bottom",
+          "value": "0px"
+        },
+        {
+          "sel": "#p",
+          "prop": "margin-top",
+          "value": "0px"
+        },
+        {
+          "sel": "#ul",
+          "prop": "margin-top",
+          "value": "0px"
+        },
+        {
+          "sel": "#ol",
+          "prop": "margin-bottom",
+          "value": "0px"
+        },
+        {
+          "sel": "#figure",
+          "prop": "margin-left",
+          "value": "0px"
+        },
+        {
+          "sel": "#bq",
+          "prop": "margin-left",
+          "value": "0px"
+        },
+        {
+          "sel": "#hr",
+          "prop": "margin-top",
+          "value": "0px"
+        },
+        {
+          "sel": "#fs",
+          "prop": "margin-left",
+          "value": "0px"
+        },
+        {
+          "sel": "body",
+          "prop": "line-height",
+          "value": "24px"
+        },
+        {
+          "sel": "body",
+          "prop": "min-height",
+          "value": "600px"
+        },
+        {
+          "sel": "#img",
+          "prop": "display",
+          "value": "block"
+        },
+        {
+          "sel": "#img",
+          "prop": "max-width",
+          "value": "100%"
+        },
+        {
+          "sel": "#video",
+          "prop": "display",
+          "value": "block"
+        },
+        {
+          "sel": "#canvas",
+          "prop": "max-width",
+          "value": "100%"
+        },
+        {
+          "sel": "#input",
+          "prop": "font-size",
+          "value": "16px"
+        },
+        {
+          "sel": "#button",
+          "prop": "font-size",
+          "value": "16px"
+        },
+        {
+          "sel": "#textarea",
+          "prop": "font-size",
+          "value": "16px"
+        },
+        {
+          "sel": "#select",
+          "prop": "font-size",
+          "value": "16px"
+        }
+      ]
+    }
+  ]
+}

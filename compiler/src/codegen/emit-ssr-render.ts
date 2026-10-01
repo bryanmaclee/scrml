@@ -42,6 +42,8 @@ import { getNodes } from "./collect.ts";
 import { CGError } from "./errors.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
+import { isGateableIfValue, IF_GATE_BYPASS_TAGS } from "./emit-html.ts";
+import { lookupStateCell, getCellKind } from "../symbol-table.ts";
 import { nsId } from "./chunk-namespace.ts";
 
 /**
@@ -332,6 +334,185 @@ function resolveKeyReadExpr(node: any): string {
 }
 
 /**
+ * The advice tail of `I-SSR-EACH-CLIENT-RENDERED` when the fallback is caused by
+ * the ROW TEMPLATE being outside the §52.8 renderable subset.
+ */
+const ROW_TEMPLATE_ADVICE =
+  "Bring the row template into the §52.8 SSR-renderable subset, or accept the client-only first paint.";
+
+/**
+ * The advice tail when the fallback is caused by an inert-`if=` enclosure. The
+ * row template is irrelevant in that case — widening the renderable subset would
+ * change nothing, so the row-template advice would send the author the wrong way.
+ */
+const INERT_IF_ADVICE =
+  "`if=` REMOVES rather than hides (§17.1), so no descendant of an `if=` subtree can appear in the server HTML. " +
+  "Move the `<each>` out of the `if=` subtree, use `show=` instead of `if=` (it keeps the DOM live and DOES server-render), " +
+  "or accept the client-only first paint.";
+
+/**
+ * The advice tail for an AUTHOR-WRITTEN `<template>` tag. `show=` is not a
+ * remedy here — a `<template>`'s content is inert by the HTML standard itself,
+ * not by any scrml lowering — so the `if=` advice would be wrong.
+ */
+const AUTHOR_TEMPLATE_ADVICE =
+  "A `<template>`'s content is inert by the HTML standard — it is a document fragment, not part of the tree, " +
+  "until something clones it, so nothing inside one can be part of any first paint. " +
+  "Move the `<each>` out of the `<template>`, or accept the client-only first paint.";
+
+/** An enclosure that makes a descendant each-mount unpaintable at first paint. */
+interface InertHost {
+  /** Why, phrased to slot into the lint's "renders client-only … — <reason>." */
+  reason: string;
+  /** The advice tail — the remedy differs per host, so it travels with the reason. */
+  advice: string;
+}
+
+/**
+ * Does this node put its subtree somewhere the FIRST PAINT cannot reach?
+ *
+ * `if=` does not hide, it REMOVES: `emit-html.ts`'s `emitIfMountGate` emits
+ * `<template id=…>` + `<!--scrml-if-marker:…-->`, and a `<template>`'s content is
+ * NOT in the document tree until the client mount controller clones it. Anything
+ * the SSR compose handler splices in there is therefore invisible at first paint,
+ * however faithfully it was rendered. `show=` is the opposite (a `display`
+ * toggle over LIVE DOM — its subtree IS first-paintable), which is exactly why
+ * the same `<each>` paints under `show=` and comes up blank under `if=`.
+ *
+ * Returns the lint reason + its remedy, or `null` when the node's children stay
+ * in the live tree.
+ *
+ * ⛔ THE MIRROR IS OF THE EMITTER'S **DISPATCH**, NOT MERELY OF ITS GATE
+ * PREDICATE — and that distinction is a measured defect, not pedantry (S433 fix
+ * round). `isGateableIfValue` answers "would the gate accept this value"; it says
+ * nothing about whether control flow REACHES the gate. Several tags dispatch to
+ * their own handler and `return` first, and on those `if=` is silently ignored —
+ * the children stay LIVE. Claiming inert there SUPPRESSES A SERVER FIRST PAINT
+ * THAT WORKED and emits a lint whose reason is false: REPRODUCED THROUGH
+ * `compileScrml` for `<errorBoundary if=…>` and for a compound-parent wrapper —
+ * fence LIVE, renderer suppressed, 0 rows in the composed first paint where the
+ * same source without the `if=` painted 2. (⚠ `<page if=…>` looked identical but
+ * is NOT a real instance: it hard-errors `E-PAGE-INVALID-ATTR`. That reproduction
+ * came from a test harness which returns `buildAST(...).ast` and DISCARDS
+ * buildAST's own diagnostics, so the fatal was invisible to it. It is still in
+ * the bypass set on dispatch grounds; it is just not evidence.) Both bypass
+ * families are excluded below — and they are tested
+ * BEFORE every other host, because a tag that never reaches the `if=` gate never
+ * reaches the generic element emitter either, so no question about what that
+ * emitter WOULD have produced is meaningful until they are ruled out.
+ *
+ * The hosts, each mirrored from its emit site:
+ *   - `if-chain` — EVERY branch AND the else are mount-deferred templates
+ *     (`emit-html.ts`, the `node.kind === "if-chain"` block).
+ *   - an AUTHOR-WRITTEN `<template>` tag — no `if=` needed and no scrml lowering
+ *     involved: the generic markup path emits the literal tag and the children
+ *     land in its content fragment. Same silent blank paint by a different route
+ *     (MEASURED: renderer emitted, rows present in the composed bytes, 0 rows
+ *     reachable from `document`). Checked AFTER the two bypasses: a compound-parent
+ *     cell may be NAMED `template`, and then no `<template>` element exists at all.
+ *   - `markup` carrying a gateable `if=`, EXCEPT a capital-initial tag (a
+ *     component use-site owns its own mount lifecycle), a tag in
+ *     `IF_GATE_BYPASS_TAGS`, or a compound-parent namespace wrapper.
+ *   - a structural opener (`<each>` / `<match>` / `<engine>`) carrying `ifCond` —
+ *     `emitGatedStructural` routes its whole mount HTML through the same gate.
+ *
+ * ⚠ DIRECTION OF SAFETY. A MISSED host costs a missed diagnosis — the
+ * pre-existing conservative blank first paint, unchanged. A FALSE host costs a
+ * deleted server first paint on working code. The two are not symmetric, so
+ * every uncertain case resolves to `null`.
+ *
+ * @param fileScope the file's symbol table (`fileAST._scope`), or `null` when the
+ *   AST was built without the SYM stage. Needed because emit-html's
+ *   compound-parent wrapper dispatch — which also returns before the gate — is
+ *   keyed on a per-FILE declaration, so no tag set can carry it. With a `null`
+ *   scope that dispatch cannot fire in the emitter either, so skipping the test
+ *   is faithful rather than merely convenient.
+ */
+function inertHostFor(node: any, fileScope: any): InertHost | null {
+  if (!node || typeof node !== "object") return null;
+  if (node.kind === "if-chain") {
+    return {
+      reason:
+        "it is inside an `if=` / `else-if=` / `else` chain branch, whose subtree is emitted into an inert `<template>` (§17.1.1) and is not part of the first paint",
+      advice: INERT_IF_ADVICE,
+    };
+  }
+  if (node.kind === "markup") {
+    // Default to `div`, exactly as `emitNode` does, so a tagless node can never
+    // render a lint reading "`<if=…>`".
+    const tag: string = node.tag ?? node.tagName ?? "div";
+    // ⛔ THE BYPASS TESTS RUN FIRST — INCLUDING BEFORE THE `template` TEST BELOW,
+    // AND THAT ORDER IS LOAD-BEARING, NOT TIDINESS. A tag that never reaches the
+    // `if=` gate ALSO never reaches the generic element emitter that would put a
+    // literal `<template>` in the output, so "is this an author `<template>`" is
+    // only a meaningful question once both bypasses have been ruled out. Asking it
+    // first made the predicate claim a host for a file that emits no `<template>`
+    // element at all — measured below.
+    //
+    // The emitter never reaches the `if=` gate for these tags — `if=` has no
+    // effect and whatever they emit stays LIVE. (That the predicate has no effect
+    // there at all is a separate pre-existing defect —
+    // g-if-has-no-effect-on-fifteen-dispatch-routes-that-return-before-the-mount-gate
+    // — NOT this function's to fix, and pretending the subtree is inert would
+    // break working pages. `W-ATTR-001` already names it on six of those routes.)
+    if (IF_GATE_BYPASS_TAGS.has(tag)) return null;
+    // Same bypass, dynamic: a block-form tag resolving to a `compound-parent`
+    // cell is a TRANSPARENT namespace wrapper — emit-html walks its children and
+    // returns before the gate. Mirrors that dispatch's own test.
+    //
+    // ⚑ AND THIS IS EXACTLY WHY IT MUST PRECEDE THE `template` TEST. The emitter's
+    // compound-parent dispatch excludes `channel` / `errorBoundary` / `program` /
+    // `errors` — but NOT `template`. So in a file that declares a compound-parent
+    // cell NAMED `template`, `<template>…</template>` takes the transparent-wrapper
+    // path: NO `<template>` element is emitted and the each's fence lands straight
+    // in `<body>`, live. MEASURED three ways through `compileScrml` (S433 final
+    // round): (A) compound-parent named `template` → no `<template>` in the html,
+    // fence LIVE, and with the `template` test first the renderer was suppressed on
+    // a false reason and the composed first paint carried 0 rows; (B) the identical
+    // shape with the wrapper renamed `templateX` → renderer emitted, 2 rows — so the
+    // NAME was the only delta; (C) `template` undeclared → correctly inert. Ordered
+    // as it is now, (A) keeps its server render and (C) still falls through to the
+    // author-`<template>` host below.
+    if (fileScope && /^[a-z]/.test(tag) && !VOID_ELEMENTS.has(tag)) {
+      try {
+        const decl: any = lookupStateCell(fileScope, tag);
+        if (decl && getCellKind(decl.declNode as any) === "compound-parent") return null;
+      } catch {
+        // A scope shape this lookup cannot read resolves to "not a wrapper" —
+        // i.e. the each keeps its renderer. Fail toward NOT suppressing.
+      }
+    }
+    // An author-written `<template>` that really is emitted as one: inert by the
+    // HTML standard, `if=` or not.
+    if (tag === "template") {
+      return {
+        reason:
+          "it is inside an author-written `<template>` element, whose content is a document fragment and is not part of the first paint",
+        advice: AUTHOR_TEMPLATE_ADVICE,
+      };
+    }
+    const attrs: any[] = node.attributes ?? node.attrs ?? [];
+    const ifAttr = Array.isArray(attrs) ? attrs.find((a: any) => a && a.name === "if") : undefined;
+    if (ifAttr && isGateableIfValue(ifAttr.value) && !/^[A-Z]/.test(tag)) {
+      return {
+        reason: `it is enclosed by a \`<${tag} if=…>\` element, whose subtree is emitted into an inert \`<template>\` (§17.1) and is not part of the first paint`,
+        advice: INERT_IF_ADVICE,
+      };
+    }
+    return null;
+  }
+  // §17.1.2 structural hosts: the opener's own mount HTML is wrapped by the gate.
+  if (isGateableIfValue((node as any).ifCond)) {
+    return {
+      reason:
+        "it is enclosed by a structural opener carrying `if=`, whose mount HTML is emitted into an inert `<template>` (§17.1.2) and is not part of the first paint",
+      advice: INERT_IF_ADVICE,
+    };
+  }
+  return null;
+}
+
+/**
  * Build the server-side render function for ONE each-block, or a `{ fallback }`
  * descriptor naming WHY the template is outside the supported subset (the each
  * then falls back to the pre-existing client-only render — empty mount, no
@@ -387,9 +568,25 @@ function buildOneRenderer(node: any, varName: string): SsrEachRenderer | { fallb
 
 /**
  * Enumerate the server-renderable each-blocks in a file: TOP-LEVEL (non-nested)
- * `<each in=@<seededVar>>` blocks whose per-item template is within the supported
- * subset. `seededVarNames` is the set of cells the SSR compose handler bakes into
- * `_scrml_ssr_state` (Tier-1 + Pattern-C + coalesced callables).
+ * `<each in=@<seededVar>>` blocks that are NOT inside an inert `if=` `<template>`
+ * and whose per-item template is within the supported subset. `seededVarNames` is
+ * the set of cells the SSR compose handler bakes into `_scrml_ssr_state` (Tier-1 +
+ * Pattern-C + coalesced callables).
+ *
+ * TWO independent disqualifiers, and they are not interchangeable:
+ *   - `insideEach` — a NESTED each has no mount fence of its own to fill (it is
+ *     built inline by the outer row factory), so it is not a candidate at all.
+ *   - `inertHost` (g-ssr-each-under-if-blank-paint, S433) — the mount fence
+ *     exists but sits inside an `if=`-lowered `<template>`, so filling it paints
+ *     NOTHING. Before S433 `walk` threaded only `insideEach`, an if-enclosed each
+ *     was classified as a top-level server-render mount, and the emitted renderer
+ *     filled a fence no browser paints: a BLANK first paint at exit 0 with zero
+ *     diagnostics, on the dominant guarded-list shape (`<div if=@loaded>` around
+ *     a server-authority `<each>`). The each now takes the same client-render
+ *     fallback the unrenderable-row-template case takes, and says so through
+ *     `I-SSR-EACH-CLIENT-RENDERED`. Server-rendering the RESOLVABLE branch (so a
+ *     guarded list paints at first paint) is deliberately NOT done here — that is
+ *     the separate ruled arc (operator, S385: "(a) now, (b) as its own arc").
  */
 export function buildSsrEachRenderers(
   fileAST: any,
@@ -400,14 +597,29 @@ export function buildSsrEachRenderers(
   if (!seededVarNames || seededVarNames.size === 0) return [];
   const out: SsrEachRenderer[] = [];
   const seenIds = new Set<number>();
+  // The file's symbol table, read exactly as emit-html reads it (`emit-html.ts`
+  // `const fileScope = fileAST?._scope ?? fileAST?.ast?._scope ?? null`) so the
+  // compound-parent bypass test below and the emitter's own cannot disagree.
+  const fileScope: any = fileAST?._scope ?? fileAST?.ast?._scope ?? null;
 
-  const walk = (node: any, insideEach: boolean): void => {
+  const walk = (node: any, insideEach: boolean, inertHost: InertHost | null): void => {
     if (!node || typeof node !== "object") return;
     if (Array.isArray(node)) {
-      for (const n of node) walk(n, insideEach);
+      for (const n of node) walk(n, insideEach, inertHost);
       return;
     }
     if (node.kind === "each-block") {
+      // §17.1.2 — an `if=` on the `<each>` OPENER gates the each's own mount
+      // fence, so the fence itself lands inside the inert `<template>`. Same
+      // consequence as an enclosing `if=`, one node closer.
+      const ownHost: InertHost | null = isGateableIfValue((node as any).ifCond)
+        ? {
+            reason:
+              "the `<each>` opener itself carries `if=`, so its mount fence is emitted into an inert `<template>` (§17.1.2) and is not part of the first paint",
+            advice: INERT_IF_ADVICE,
+          }
+        : null;
+      const eachHost = inertHost ?? ownHost;
       // Only a TOP-LEVEL each mounts to a static `data-scrml-each-mount` div; a
       // nested each is emitted inline in the outer factory (no mount to fill).
       if (!insideEach && typeof node.id === "number" && !seenIds.has(node.id)) {
@@ -418,7 +630,15 @@ export function buildSsrEachRenderers(
           // server-authority cell. It either server-renders, or falls back to
           // client-only render — and that fallback was SILENT before this lint.
           seenIds.add(node.id);
-          const r = buildOneRenderer(node, m[1]);
+          // g-ssr-each-under-if-blank-paint (S433) — an if-ENCLOSED mount is
+          // checked BEFORE the row template, and it short-circuits: the mount is
+          // inert at first paint, so a renderer for it renders into a
+          // `<template>` nobody paints (silent blank first paint), and the row
+          // template's renderability is irrelevant to the outcome. The enclosure
+          // is therefore the reason the author needs to hear.
+          const r: SsrEachRenderer | { fallback: string; advice?: string } = eachHost
+            ? { fallback: eachHost.reason, advice: eachHost.advice }
+            : buildOneRenderer(node, m[1]);
           if ("fallback" in r) {
             // §52.8: the each ships EMPTY in the first-paint HTML and populates
             // after hydration (no crawler/slow-connection first paint, no DOM
@@ -432,7 +652,7 @@ export function buildSsrEachRenderers(
                   "I-SSR-EACH-CLIENT-RENDERED",
                   `I-SSR-EACH-CLIENT-RENDERED: <each in=@${m[1]}> renders client-only for first paint — ${r.fallback}. ` +
                     `The list ships empty in the server HTML and populates after hydration (no first paint for crawlers or slow connections, no DOM adoption). ` +
-                    `Bring the row template into the §52.8 SSR-renderable subset, or accept the client-only first paint.`,
+                    ((r as any).advice ?? ROW_TEMPLATE_ADVICE),
                   (node.span ?? { file: filePath ?? "", start: 0, end: 0 }) as any,
                   "info",
                 ),
@@ -446,18 +666,22 @@ export function buildSsrEachRenderers(
       // Descend into this each's template under the nested flag (any each found
       // there is iter-scoped, not a top-level mount).
       for (const key of ["templateChildren", "bodyChildren", "emptyChild"]) {
-        if ((node as any)[key] != null) walk((node as any)[key], true);
+        if ((node as any)[key] != null) walk((node as any)[key], true, eachHost);
       }
       return;
     }
+    // An inert enclosure is STICKY: once a subtree is inside a `<template>`, no
+    // depth of plain markup underneath brings it back into the first paint, so the
+    // host is threaded down rather than re-tested at the each.
+    const childHost = inertHost ?? inertHostFor(node, fileScope);
     for (const key of Object.keys(node)) {
       if (key === "span") continue;
       const v = (node as any)[key];
-      if (v && typeof v === "object") walk(v, insideEach);
+      if (v && typeof v === "object") walk(v, insideEach, childHost);
     }
   };
 
-  walk(getNodes(fileAST), false);
+  walk(getNodes(fileAST), false, null);
   // Stable order (by mount id) so the emitted bundle is deterministic.
   out.sort((a, b) => a.id - b.id);
   return out;

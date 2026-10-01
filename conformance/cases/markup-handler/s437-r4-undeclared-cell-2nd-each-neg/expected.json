@@ -1,0 +1,14 @@
+{
+  "id": "markup-handler-s437-r4-undeclared-cell-2nd-each-neg",
+  "description": "#3 — `{ @n = 1; @zz = 3 }`: a write to an undeclared cell in statement 2..n is E-STATE-UNDECLARED, as in a function body. Position: each.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§5.2.3: \"The statement list is logic context — the same statement grammar as a function body (§7.3) … The block MAY span any number of lines.\" and \"No statement of the block SHALL be dropped\".",
+  "expect": {
+    "codes": [
+      "E-STATE-UNDECLARED"
+    ],
+    "notCodes": []
+  }
+}

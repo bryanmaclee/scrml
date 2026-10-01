@@ -1,0 +1,12 @@
+{
+  "id": "markup-handler-multi-stmt-handler-assign-led-pos",
+  "description": "§5.2.3 — a BARE (unbraced) handler whose FIRST statement is an assignment (`onclick=@count = 0; track(\"reset\")`) fires E-MULTI-STATEMENT-HANDLER exactly as the call-led form does. Pre-S437 impl#1 compiled this at exit 0: the handler kept only `@count = 0` and `track(\"reset\")` was emitted as two bare HTML attributes (`<button … track reset>`) — the silent misread the rule exists to prevent.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§5.2.3: \"A BARE event-handler value that contains a `;` outside of expression-internal contexts (string literals, template literals, parentheses, brackets, braces, nested function bodies, comments) is compile error `E-MULTI-STATEMENT-HANDLER`.\" The rule does not depend on what the first statement is. \"The error is kept so the unbraced sequence can never be silently read the wrong way.\"",
+  "expect": {
+    "codes": ["E-MULTI-STATEMENT-HANDLER"],
+    "notCodes": []
+  }
+}

@@ -1,0 +1,8 @@
+<program>
+  <items> = ["a", "b"]
+  <ul>
+    <each in=@items as it>
+      <li class="row">#{ .row { padding-left: 7px; } }<span>${it}</span></li>
+    </each>
+  </ul>
+</program>

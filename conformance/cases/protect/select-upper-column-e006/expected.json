@@ -1,0 +1,19 @@
+{
+  "id": "protect-select-upper-column-e006",
+  "description": "§14.8.9 S441 round 4 (F3) — SQLite identifiers are case-insensitive: `SELECT PASSWORDHASH` selects the protected `passwordHash` column. Origin matching is case-folded, so extracting it (`v.PASSWORDHASH`) is E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "MEASURED before the fix: the exact-case origin match missed PASSWORDHASH, no tag was emitted and the route served the hash (g-protected-column-escapes-redaction-as-scalar, S441 round 4 review).",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "notCodes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}

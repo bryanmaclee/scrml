@@ -1,0 +1,17 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function getItems(id) {
+        const u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        const items = [{ label: "a" }]
+        items.find(e => e.label == "a").label = u.passwordHash
+        return items
+      }
+    }
+  </db>
+  <items> = []
+  <button id="load" onclick=${ @items = getItems(1) }>load</button>
+</program>

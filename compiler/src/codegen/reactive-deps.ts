@@ -249,6 +249,61 @@ export function collectReactiveVarNames(fileAST: Record<string, unknown>): Set<s
 // ---------------------------------------------------------------------------
 
 /**
+ * §6.7.4 EC-1 — E-LIFECYCLE-007 (read-only half): every `when … changes` dep
+ * that names a READ-ONLY cell (a `const <name>` — derived or constant) and no
+ * mutable cell. Returns `{ node, dep }` per offending entry (deduped per node).
+ *
+ * Resolved the way the emitted effect resolves it at RUNTIME, not by lexical
+ * scope: `_scrml_reactive_subscribe(dep, h)` keys the file's ONE flat cell store
+ * by the bare name, and that key only ever changes when a `_scrml_reactive_set`
+ * of it runs — i.e. when SOME mutable cell of that name is written. A read-only
+ * `const <name>` is never written (a derived one is `_scrml_derived_declare`d and
+ * recomputed on read), so a dep that names only read-only cells is a dead
+ * effect wherever the declaration sits — top level, a `${ }` block, nested
+ * markup, an `if=` region, an inlined component body. A name that ALSO has a
+ * mutable declaration anywhere is NOT flagged (its writes do fire the effect).
+ *
+ * Runs on the post-CE tree codegen emits from, and walks EVERY node edge
+ * generically (not a curated container list), so no declaration locus can hide.
+ */
+export function findWhenDepsOnReadOnlyCells(
+  fileAST: Record<string, unknown>,
+): Array<{ node: Record<string, unknown>; dep: string }> {
+  const readOnly = new Set<string>();
+  const mutable = new Set<string>();
+  const whens: Array<Record<string, unknown>> = [];
+  const seen = new WeakSet<object>();
+  const walk = (v: unknown): void => {
+    if (!v || typeof v !== "object") return;
+    if (seen.has(v as object)) return;
+    seen.add(v as object);
+    if (Array.isArray(v)) { for (const x of v) walk(x); return; }
+    const n = v as Record<string, unknown>;
+    if (n.kind === "state-decl" && typeof n.name === "string" && n.name.length > 0) {
+      if (n.isConst === true || n.shape === "derived") readOnly.add(n.name);
+      else mutable.add(n.name);
+    }
+    if (n.kind === "when-effect") whens.push(n);
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "parent" || k.startsWith("_")) continue;
+      walk(n[k]);
+    }
+  };
+  walk(getNodes(fileAST));
+  const out: Array<{ node: Record<string, unknown>; dep: string }> = [];
+  for (const w of whens) {
+    const deps = Array.isArray(w.dependencies) ? (w.dependencies as unknown[]) : [];
+    const done = new Set<string>();
+    for (const dep of deps) {
+      if (typeof dep !== "string" || done.has(dep)) continue;
+      done.add(dep);
+      if (readOnly.has(dep) && !mutable.has(dep)) out.push({ node: w, dep });
+    }
+  }
+  return out;
+}
+
+/**
  * Collect all derived reactive variable names declared in a fileAST.
  *
  * Walks logic blocks for derived state-decl nodes and returns their names.
@@ -994,6 +1049,151 @@ export function collectRequestIds(fileAST: Record<string, unknown>): Set<string>
 }
 
 /**
+ * §6.7.7 — the analysed `deps=[…]` attribute of a `<request>`.
+ *
+ *   - `present` — the attribute is written at all. "When present, `deps`
+ *     overrides inference." — so a present-but-empty `deps=[]` is the
+ *     fetch-on-mount-only form (§6.7.7 Example 2), never "infer".
+ *   - `names`   — the listed cells, `@` stripped; duplicates collapse, order kept.
+ *   - `invalid` — every entry that is NOT a bare `@identifier`, as source-ish
+ *     text (`@u.id`, `n`, `3`, `f(@n)`), or the whole value when it is not a
+ *     `[…]` list at all (`deps=@n`). SPEC grammar:
+ *       `deps-list ::= ('@' identifier (',' '@' identifier)*)?`
+ *     and "The compiler SHALL emit E-LIFECYCLE-022 if a `deps=` entry names an
+ *     undeclared or non-`@` variable." emit-html reports these as
+ *     E-LIFECYCLE-022; the readers never treat them as deps.
+ *
+ * S444 review (fix round): the first version of this reader SKIPPED a
+ * non-`@identifier` entry silently. Because an explicit list blocks inference,
+ * `deps=[@u.id]` compiled to a MOUNT-ONLY request with no diagnostic — hence
+ * `invalid`, which the build now refuses.
+ */
+export interface RequestDepsAnalysis {
+  present: boolean;
+  names: string[];
+  invalid: string[];
+  /** The value is not a `[…]` list at all (`deps=@n`); `invalid` then holds the whole value. */
+  notList: boolean;
+}
+
+const BARE_AT_IDENT = /^@([A-Za-z_$][A-Za-z0-9_$]*)$/;
+
+export function analyzeRequestDepsAttr(node: unknown): RequestDepsAnalysis {
+  const n = node as any;
+  const attrs: any[] = n?.attrs ?? n?.attributes ?? [];
+  const depsAttr = attrs.find((a: any) => a?.name === "deps");
+  const out: RequestDepsAnalysis = { present: !!depsAttr, names: [], invalid: [], notList: false };
+  if (!depsAttr) return out;
+  const v = depsAttr.value;
+  const add = (bare: string): void => { if (!out.names.includes(bare)) out.names.push(bare); };
+  const entryText = (el: any): string => {
+    try { return emitStringFromTree(el); } catch { return String(el?.kind ?? "?"); }
+  };
+  const fromElements = (elements: any[]): void => {
+    for (const el of elements) {
+      if (el?.kind === "ident" && typeof el.name === "string" && BARE_AT_IDENT.test(el.name)) {
+        add(el.name.slice(1));
+      } else if (el?.kind === "variable-ref" && typeof el.name === "string" && /^@?[A-Za-z_$][A-Za-z0-9_$]*$/.test(el.name)) {
+        add(el.name.replace(/^@/, ""));
+      } else {
+        out.invalid.push(entryText(el));
+      }
+    }
+  };
+  // Text form (no parsed node): `[@a, @b]` — each entry must be a bare `@ident`.
+  const fromText = (text: string): void => {
+    const t = text.trim();
+    if (!t.startsWith("[") || !t.endsWith("]")) { out.invalid.push(t); out.notList = true; return; }
+    const inner = t.slice(1, -1).trim();
+    if (inner === "") return;
+    for (const part of inner.split(",")) {
+      const p = part.trim();
+      const m = BARE_AT_IDENT.exec(p);
+      if (m) add(m[1]);
+      else out.invalid.push(p);
+    }
+  };
+  if (v?.kind === "expr") {
+    if (v.exprNode?.kind === "array" && Array.isArray(v.exprNode.elements)) fromElements(v.exprNode.elements);
+    else if (typeof v.raw === "string") fromText(v.raw);
+    else { out.invalid.push("?"); out.notList = true; }
+  } else if (v?.kind === "array" && Array.isArray(v.elements)) {
+    fromElements(v.elements);
+  } else if (typeof v === "string") {
+    fromText(v);
+  } else if (v?.kind === "string-literal" && typeof v.value === "string") {
+    fromText(v.value);
+  } else if (v?.kind === "variable-ref" && typeof v.name === "string") {
+    // `deps=@n` — a single cell without the list brackets: not the grammar.
+    out.invalid.push(v.name);
+    out.notList = true;
+  } else if (v == null || v?.kind === "absent") {
+    out.invalid.push("deps");
+    out.notList = true;
+  } else if (typeof v?.raw === "string") {
+    fromText(v.raw);
+  } else if (typeof v?.value === "string") {
+    fromText(v.value);
+  } else {
+    out.invalid.push("?");
+    out.notList = true;
+  }
+  return out;
+}
+
+/**
+ * §6.7.7 — the dependency-read lines at the top of a `<request>` re-fire
+ * effect: `var <depsVar> = [<one read per dep>];`, preceded (only when a dep is
+ * a DERIVED cell) by an untracked settle of those derived cells.
+ *
+ * Why the settle (S444 review fix round): reading a derived cell inside an
+ * effect while it is dirty RE-EVALUATES it there, so the effect subscribed to
+ * the derived cell AND to every input the evaluation read. One upstream write
+ * then woke the effect twice — once through the input, once through the
+ * derived cell's dirty-propagation trigger — and the request fetched 1–2 extra
+ * times per change (measured: `const <qq> = @q + "!"`, three writes to `@q` →
+ * +2, +1, +2 fetches). Settling the derived cells untracked first leaves them
+ * clean, so the tracked `_scrml_derived_get` read subscribes to the derived
+ * cell alone: one upstream change, one fetch.
+ */
+export function requestDepReadLines(
+  depsVars: readonly string[],
+  derivedNames: ReadonlySet<string>,
+  depsVar: string,
+  indent = "  ",
+): string[] {
+  const lines: string[] = [];
+  const derived = depsVars.filter((d) => derivedNames.has(d));
+  if (derived.length > 0) {
+    lines.push(`${indent}// derived deps: settle untracked, then subscribe to the derived cell alone`);
+    lines.push(`${indent}_scrml_untracked(function() { ${derived.map((d) => `_scrml_derived_get(${JSON.stringify(d)});`).join(" ")} });`);
+  }
+  const reads = depsVars
+    .map((d) => derivedNames.has(d) ? `_scrml_derived_get(${JSON.stringify(d)})` : `_scrml_reactive_get(${JSON.stringify(d)})`)
+    .join(", ");
+  lines.push(`${indent}var ${depsVar} = [${reads}];`);
+  return lines;
+}
+
+/**
+ * §6.7.7 — the explicit deps of a `<request>`: `null` when `deps=` is ABSENT
+ * (the caller infers from the body), else the listed cell names — possibly
+ * EMPTY (`deps=[]`, mount-only). The single reader for BOTH request forms (the
+ * `url=` fetch in `emitRequestNode` and the body form in
+ * `collectRequestBodyCells`). g-request-deps-attr-ignored-both-forms (S444):
+ * both readers used to accept only a `kind:"array"` value or a string
+ * `.value`, but the attribute arrives as
+ *   `{kind:"expr", raw:"[@q, @ver]", refs:["q","ver"],
+ *     exprNode:{kind:"array", elements:[{kind:"ident", name:"@q"}, …]}}`
+ * so both returned `[]`. Invalid entries are never deps; they are reported as
+ * E-LIFECYCLE-022 (see `analyzeRequestDepsAttr`).
+ */
+export function readRequestDepsAttr(node: unknown): string[] | null {
+  const a = analyzeRequestDepsAttr(node);
+  return a.present ? a.names : null;
+}
+
+/**
  * §6.7.7 — the reactive-assign settle info for each body-form `<request>`.
  * `<request id="R">${ @cell = serverFn(...) }</>` — the "body form" that has NO
  * `url=` and NO `api=` attr (those two drive their own fetch machinery in
@@ -1043,23 +1243,6 @@ export function collectRequestBodyCells(
     return attrs.some((a) => a?.name === name);
   }
 
-  // Explicit `deps=[@a, @b]` → the @-var names (mirrors emitRequestNode).
-  function explicitDeps(node: any): string[] {
-    const attrs: any[] = node.attrs ?? node.attributes ?? [];
-    const depsAttr = attrs.find((a) => a?.name === "deps");
-    if (!depsAttr) return [];
-    const v = depsAttr.value;
-    const found: string[] = [];
-    if (v?.kind === "array" && Array.isArray(v.elements)) {
-      for (const el of v.elements) {
-        if (el?.kind === "variable-ref") found.push((el.name ?? "").replace(/^@/, ""));
-      }
-    } else if (typeof v?.value === "string") {
-      for (const m of v.value.matchAll(/@([A-Za-z_$][A-Za-z0-9_$]*)/g)) found.push(m[1]);
-    }
-    return found;
-  }
-
   function visit(nodeList: unknown[]): void {
     if (!Array.isArray(nodeList)) return;
     for (const node of nodeList) {
@@ -1087,9 +1270,12 @@ export function collectRequestBodyCells(
           if (cell) break;
         }
         if (requestId && cell) {
-          // deps=[...] wins; else infer @var reads from the body expr (§6.7.7).
-          let depsVars = explicitDeps(n);
-          if (depsVars.length === 0 && initSrc) {
+          // §6.7.7 "When present, `deps` overrides inference." — an explicit
+          // `deps=[...]` wins, INCLUDING `deps=[]` (mount-only); only an ABSENT
+          // attribute infers @var reads from the body expr.
+          const explicit = readRequestDepsAttr(n);
+          let depsVars: string[] = explicit ?? [];
+          if (explicit === null && initSrc) {
             depsVars = [...extractReactiveDeps(initSrc, null)];
           }
           out.set(cell, { requestId, depsVars });

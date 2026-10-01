@@ -1102,6 +1102,18 @@ function synthEachBlockNode(block, idGen, source, errors) {
 // span (the live `text` node's `value` is the raw block text — ast-builder.js
 // L10504). An out-of-range span folds to "".
 function synthTextNode(block, idGen, source) {
+    // S441 — a declared body-top `"..."` display-text literal carries its
+    // decoded, HTML-escaped content as `valueOverride` (parse-markup.js
+    // splitBodyTopDisplayLiteralsNative); every other Text reads its span.
+    if (block._displayLiteral === true && typeof block.valueOverride === "string") {
+        return {
+            id: stampId(idGen),
+            kind: "text",
+            value: block.valueOverride,
+            span: block.span !== undefined ? block.span : null,
+            _displayLiteral: true,
+        };
+    }
     return {
         id: stampId(idGen),
         kind: "text",
@@ -1196,10 +1208,19 @@ function synthErrorEffectNode(block, idGen) {
 // (collectHoisted is the single source). Leaving them empty keeps the node
 // interface-complete without duplicating the hoist.
 function synthLogicNode(block, idGen) {
+    const body = translateStmtList(block.body, idGen);
+    // S441 — a lone identifier at a `<program>` / `<page>` / `<channel>`
+    // body-top is valid code; mark it so E-SCOPE-001 can name the declared-prose
+    // forms (mirrors ast-builder.js rejectBodyTopProse).
+    if (block._bodyTop === true) {
+        for (const st of body) {
+            if (st && st.kind === "bare-expr" && st.exprNode && st.exprNode.kind === "ident") st._bodyTopBareRun = true;
+        }
+    }
     return {
         id: stampId(idGen),
         kind: "logic",
-        body: translateStmtList(block.body, idGen),
+        body,
         imports: [],
         exports: [],
         typeDecls: [],
@@ -1213,6 +1234,9 @@ function synthLogicNode(block, idGen) {
         // pipeline). Consumed by the W-PROGRAM-REDUNDANT-LOGIC lint (live-only);
         // surfaced here for within-node parity.
         ...(block._synthetic === true ? { _synthetic: true } : {}),
+        // S441 — a `${...}` inside a body-top `"..."` display-text literal
+        // renders (§4.18.4); mirrors ast-builder.js.
+        ...(block._displayInterp === true ? { _displayInterp: true } : {}),
     };
 }
 

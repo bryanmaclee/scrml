@@ -38,13 +38,16 @@ function compileToClient(src) {
   }
 }
 
-// Grab the `<worker>.onmessage = function(event){ … }` handler body text.
+// Grab the `when message from` hook body text. The hook is a listener,
+// `<worker>.addEventListener("message", function(event){ const m = event.data.data; … })`
+// (dpa-056 D2); the `event.data.data` binding anchor skips the `.send()` reply
+// router, which is also a "message" listener.
 function onmessageBody(clientJs) {
-  const m = clientJs.match(/onmessage\s*=\s*function\s*\(event\)\s*\{([\s\S]*?)\};/);
+  const m = clientJs.match(/addEventListener\("message", function\s*\(event\)\s*\{(\s*const \w+ = event\.data\.data;[\s\S]*?)\}\);/);
   return m ? m[1] : "";
 }
 function onerrorBody(clientJs) {
-  const m = clientJs.match(/onerror\s*=\s*function\s*\([^)]*\)\s*\{([\s\S]*?)\};/);
+  const m = clientJs.match(/addEventListener\("error", function\s*\([^)]*\)\s*\{([\s\S]*?)\}\);/);
   return m ? m[1] : "";
 }
 
@@ -154,8 +157,12 @@ describe("g-when-message-parent-handler-drops-all-but-the-first-statement (§4.1
 // ---------------------------------------------------------------------------
 
 function effectBody(clientJs) {
-  // the reactive effect that reads @count (skip render effects)
-  const re = /_scrml_effect\(function\(\)\s*\{([\s\S]*?)\}\);/g;
+  // The `when` effect's body. §6.7.4 (S429): the effect is keyed on its dep-list
+  // (`_scrml_when_changes(<per-dep subscribe>, function() { body })`), no longer a
+  // bare `_scrml_effect`, which ran the body at mount and auto-tracked its reads —
+  // "The body does NOT execute on initial mount." Only the extractor moved; the
+  // multi-statement assertions below are unchanged.
+  const re = /_scrml_when_changes\(function\(_h\) \{[\s\S]*?\}, (?:async )?function\(\)\s*\{([\s\S]*?)\}\);/g;
   let m;
   while ((m = re.exec(clientJs))) {
     if (/reactive_get\("count"\)/.test(m[1]) && /reactive_set/.test(m[1])) return m[1];

@@ -12,8 +12,20 @@ ${
     }
     return user
   }
+
+  // §19.4.3 — the handler must handle getUser's failure (E-ERROR-002 in
+  // every handler form, S440); a non-failable wrapper catches it with !{}.
+  function load() {
+    getUser(1) !{
+      | .NotFound :> @status = "not found"
+      | .Forbidden :> @status = "forbidden"
+    }
+  }
+
+  <status> = ""
 }
 <div>
-  <button onclick=getUser(1)>Load</>
+  <button onclick=load()>Load</>
+  <p>${@status}</>
 </div>
 </>

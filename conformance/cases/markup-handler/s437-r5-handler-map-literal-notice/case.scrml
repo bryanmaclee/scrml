@@ -1,0 +1,4 @@
+<r> = 0
+<m> = [:]
+<button id="go" onclick={ @r = 7; @m = [ "DAL": 3, "DAL": 5 ] }>go</button>
+<p id="out">${@r}</p>

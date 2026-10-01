@@ -1,0 +1,28 @@
+<program>
+  // The nearest form impl#1 compiles today — dpa-050 §3.2 "CURRENT" verbatim
+  // (compiles, exit 0; RUNTIME-BROKEN: one click opens all three — dpa-050 D1).
+  // It is a SUBSET of §66.19.3: no conditional instance, no <each> rows, no
+  // handle writes (impl#1 has no `as=`, and `<each>` / bind props inside a
+  // component fail — dpa-050 M16), so a callback prop stands in for `as=`.
+  const Dropdown = <div class="dropdown" props={ label: string, options: string[], current: string, onpick: fn }>
+    ${ <open> = false }
+    <button class="dropdown__toggle" onclick=(@open = !@open)>${label}: ${current}</button>
+    <ul class="dropdown__menu" if=@open>
+      ${ for (const opt of options) { lift <li onclick=${() => { onpick(opt); @open = false }}>${opt}</li> } }
+    </ul>
+  </>
+
+  <country> = "US"
+  <size> = "M"
+  <color> = "red"
+  function pickCountry(c) { @country = c }
+  function pickSize(s) { @size = s }
+  function pickColor(c) { @color = c }
+
+  <div class="filters">
+    <Dropdown label="Country" options=["US", "CA", "MX"] current=@country onpick=pickCountry/>
+    <Dropdown label="Size"    options=["S", "M", "L"]    current=@size    onpick=pickSize/>
+    <Dropdown label="Color"   options=["red", "blue"]    current=@color   onpick=pickColor/>
+    <p>Shipping to ${@country}</p>
+  </div>
+</program>

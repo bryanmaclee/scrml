@@ -1,0 +1,205 @@
+// =============================================================================
+// self-host-v2 / ast.scrml — FileAst: the parser's output (bootstrap impl#2,
+// slice M2). The S233 re-cut: `[Token] → FileAst → TypedProgram → CoreProgram`.
+//
+// Design authority: dpa-051 §3.1, §3.3, §4 (R1 (a), ruled S437).
+//
+//   - EVERY node is a struct `{ nid, span, … }`: `nid` is its NodeId (dense
+//     per LINKED program — the driver gives each file a disjoint id range), the
+//     key every analyze side-table uses (§3.5). `span` is a byte range of the
+//     node's source file.
+//   - §4 invariant (bodies are trees): `string` appears ONLY in literal values
+//     (`Str.v`, `Num.raw`, `Text.text`, `Quoted.v`, `Import.from`),
+//     identifiers (names, tags, attribute names, grant words) and spans. No
+//     expression, statement, handler, arm or markup body is ever text.
+//   - Comments are trivia: the parser drops them (the whitespace around them
+//     stays content — L13 retired, dpa-045 follow-up 4, RULED S442).
+//   - The FileAst is SYNTAX. Whether `@x` names a field, a handle or a shared
+//     instance, whether `open` in a renders is a bare projection, what `.Closed`
+//     is a variant of — all of that is analyze's (side-tables by nid).
+//
+// Every payload variant here has at most 3 fields, and the big node kinds carry
+// ONE struct payload (first shaped around impl#1's F13 — a ≥5-field payload arm
+// — which #1119 fixed; the shape is kept on its own merits, S440). impl#1
+// workaround: F15 — no helper fn in this file shares a name with a field.
+// =============================================================================
+${
+    export type ASpan:struct = { start: int, end: int }
+
+    // -------------------------------------------------------------------------
+    // Expressions (logic).
+    // -------------------------------------------------------------------------
+    export type BinOp:enum = { Add, Sub, Mul, Div, Mod, Lt, Le, Gt, Ge, Eq, Ne, And, Or, Pipe }
+    export type UnOp:enum = { Not, Neg }
+
+    export type AExpr:struct = { nid: int, span: ASpan, k: AExprK }
+    // An object-literal entry: `name: value`, or `...value` (spread = true, name "").
+    export type AProp:struct = { nid: int, span: ASpan, spread: boolean, name: string, value: AExpr }
+
+    export type AExprK:enum = {
+        Name(name: string),                          // a bare identifier
+        At(name: string),                            // @name
+        AtItem,                                      // @.  — the current <each> item (§17.7.3)
+        Num(raw: string),
+        Str(v: string),
+        Bool(v: boolean),
+        NotLit,                                      // not
+        Recovered,                                   // a parse-error placeholder: the parser reported it; nothing downstream types or checks it
+        Variant(name: string),                       // .Name — a bare variant
+        Member(obj: AExpr, name: string),
+        Call(callee: AExpr, args: AExpr[]),
+        Unary(op: UnOp, e: AExpr),
+        Binary(op: BinOp, l: AExpr, r: AExpr),
+        Ternary(test: AExpr, yes: AExpr, no: AExpr),
+        Assign(target: AExpr, value: AExpr),         // statement position only (analyze checks)
+        ArrayLit(elems: AExpr[]),
+        ObjectLit(props: AProp[]),
+        // s442 (§66.19.5): an array element `...e` (an object literal's spread is
+        // AProp.spread); `a[i]`; an arrow function `x => e` / `(a, b) => e`
+        // (expression body). Each is legal only where analyze recognizes it
+        // (an edit shape, §66.11.2) — Core has no spread, index or function value.
+        Spread(e: AExpr),
+        Index(obj: AExpr, idx: AExpr),
+        Lambda(params: string[], body: AExpr),
+    }
+
+    // -------------------------------------------------------------------------
+    // Statements.
+    // -------------------------------------------------------------------------
+    export type AStmt:struct = { nid: int, span: ASpan, k: AStmtK }
+    export type ABlock:struct = { nid: int, span: ASpan, stmts: AStmt[] }
+
+    export type AStmtK:enum = {
+        Eval(e: AExpr),                                     // an expression statement (incl. an assignment)
+        Local(name: string, mutable: boolean, ty: AType | not, init: AExpr), // let / const [: T]
+        Return(e: AExpr | not),
+        If(cond: AExpr, thenB: ABlock, elseB: ABlock | not),
+        Given(name: string, subject: AExpr, body: ABlock),  // given c = @h :> { … }
+    }
+
+    // -------------------------------------------------------------------------
+    // Type expressions and type declarations.
+    // -------------------------------------------------------------------------
+    export type AType:struct = { nid: int, span: ASpan, k: ATypeK }
+    export type ATypeK:enum = {
+        TName(name: string),                   // int · string · bool · number · struct · Line · Openness …
+        TSeq(elem: AType, grants: string[]),   // T[] or T[g1, g2] (⚑ O10 spelling)
+        TMaybe(inner: AType),                  // T | not
+    }
+
+    export type ATypeField:struct = { nid: int, span: ASpan, isLet: boolean, name: string, ty: AType }
+    export type AVariant:struct   = { nid: int, span: ASpan, name: string, fields: ATypeField[] }
+    export type ATypeBody:enum = {
+        EnumBody(variants: AVariant[]),
+        StructBody(fields: ATypeField[]),
+    }
+    export type ATypeDecl:struct = { nid: int, span: ASpan, exported: boolean, name: string, body: ATypeBody }
+
+    // -------------------------------------------------------------------------
+    // Functions and imports.
+    // -------------------------------------------------------------------------
+    export type AParam:struct = { nid: int, span: ASpan, name: string, ty: AType | not }
+    // `pure` = declared with `fn` (§48.3); `function` otherwise.
+    export type AFn:struct = {
+        nid: int, span: ASpan, exported: boolean, pure: boolean,
+        name: string, params: AParam[], ret: AType | not, body: ABlock,
+    }
+    export type AImportName:struct = { nid: int, span: ASpan, name: string }
+    export type AImport:struct = { nid: int, span: ASpan, names: AImportName[], from: string }
+
+    // -------------------------------------------------------------------------
+    // Markup: attributes, elements, text, interpolation.
+    // -------------------------------------------------------------------------
+    // An attribute value, by its spelling (§66.2.4 cares which one was written).
+    export type AAttrValue:enum = {
+        NoValue,
+        Quoted(v: string),       // "…"
+        Bare(e: AExpr),          // an unquoted value: a literal, a name, @ref, a call, a member path
+        Paren(e: AExpr),         // ( expr )
+        Braced(b: ABlock),       // { stmts }
+    }
+    // `name` includes a namespace when written (`bind:value`, `class:active`).
+    export type AAttr:struct = { nid: int, span: ASpan, name: string, value: AAttrValue }
+
+    // A markup element: an HTML element or a USE of a declaration (§66.6.1);
+    // `star` = `<*x …>`, the existing instance (§66.6.2).
+    export type AElem:struct = { nid: int, span: ASpan, star: boolean, tag: string, attrs: AAttr[], kids: ANode[] }
+
+    export type ANode:struct = { nid: int, span: ASpan, k: ANodeK }
+    export type ANodeK:enum = {
+        Elem(e: AElem),
+        Text(text: string),        // verbatim (comments removed; whitespace-only runs kept — L13 retired, dpa-045 fu4)
+        Interp(e: AExpr),          // ${ expr }
+        DeclNode(d: ADecl),        // a declaration where markup may stand (a program body)
+    }
+
+    // -------------------------------------------------------------------------
+    // Declarations (§66.1–§66.5, §66.13).
+    // -------------------------------------------------------------------------
+    // A typed attribute of a declaration opener: `[export] [let] name:Type[=default]`.
+    export type ADeclAttr:struct = {
+        nid: int, span: ASpan, exported: boolean, isLet: boolean,
+        name: string, ty: AType, dflt: AAttrValue,
+    }
+    // A state-child (O52 ruled): a tag in a declaration body with neither an own
+    // value nor a typed attribute — it names a variant of the enclosing field.
+    // `body` = that variant's markup (O5 RULED (1i): "a state-child's body is
+    // that variant's markup, rendered wherever the field renders"): the one
+    // Interp node of a `:`-shorthand body (§4.14, `<Idle rule=.X : "Ready">`),
+    // the children of a bare body (`<Idle rule=.X>…</>`), or none (void).
+    export type AStateChild:struct = { nid: int, span: ASpan, name: string, attrs: AAttr[], body: ANode[] }
+
+    export type ADeclChild:enum = {
+        ChildField(d: ADecl),
+        StateChild(s: AStateChild),
+    }
+
+    // s444 Phase B (dpa-058) — a validator in a declaration opener (§55.1, §66.4
+    // rule 3: it binds that declaration's own value), by its argument shape:
+    // `req` (NoArgs) · `length(>=5)` (Cmp: the comparison and its operand) ·
+    // `min(0)` / `eq(@x)` / `oneOf([…])` / `req("msg")` (Exprs) · `pattern(/re/i)`
+    // (Regex: the source between the slashes and the flags).
+    export type AValArg:enum = {
+        NoArgs,
+        Cmp(op: string, e: AExpr),
+        Exprs(es: AExpr[]),
+        Regex(source: string, flags: string),
+    }
+    export type AValidator:struct = { nid: int, span: ASpan, name: string, arg: AValArg }
+
+    // `ty` = the own type (`name:Type`); `own` = the own value (NoValue = none);
+    // `mods` = the opener's other words (`single`, …); `validators` = its
+    // validators, in source order (§55.12: error order is declaration order).
+    export type ADecl:struct = {
+        nid: int, span: ASpan, exported: boolean, isLet: boolean,
+        name: string, ty: AType | not, own: AAttrValue,
+        attrs: ADeclAttr[], mods: AAttr[], body: ADeclChild[], renders: AElem | not,
+        validators: AValidator[],
+    }
+
+    // -------------------------------------------------------------------------
+    // Files.
+    // -------------------------------------------------------------------------
+    export type AProgram:struct = { nid: int, span: ASpan, attrs: AAttr[], items: AItem[] }
+
+    export type AItem:struct = { nid: int, span: ASpan, k: AItemK }
+    export type AItemK:enum = {
+        ImportItem(i: AImport),
+        TypeItem(t: ATypeDecl),
+        FnItem(f: AFn),
+        DeclItem(d: ADecl),
+        MarkupItem(n: ANode),
+        ProgramItem(p: AProgram),
+    }
+
+    // `path` is the file's path as the driver names it (an identifier of the
+    // file, used to resolve import sources).
+    // `errs`: the spans the parser reported an error at — a declaration or
+    // signature containing one is not trusted by the typer (no check against it).
+    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[] }
+
+    // A diagnostic: a code, a message, where. (§4 permits message text.)
+    export type Diag:struct = { code: string, message: string, file: string, span: ASpan }
+
+    export fn mkSpan(start: int, end: int) -> ASpan { return { start: start, end: end } }
+}

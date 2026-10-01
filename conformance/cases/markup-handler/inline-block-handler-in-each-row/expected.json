@@ -1,0 +1,28 @@
+{
+  "id": "markup-handler-inline-block-handler-in-each-row",
+  "description": "§5.2.3 (S435) — an inline block handler on a button inside an `<each>` row runs BOTH statements on click. Neither statement is a call and neither reads the row. Was carried on impl#1 (S435, P7: the row handler kept only the first statement); resolved S437.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "rationale": "§5.2.3 (amended S435): \"On each dispatch of the event, the statements of an inline block SHALL run in source order, each one exactly once … No statement of the block SHALL be dropped … whether the handler sits at top level, inside an engine state-child (§51.0.I), or inside an `<each>` row (§17.7).\" One click on the first row: a 0 → 1, b 0 → 2.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-MULTI-STATEMENT-HANDLER"
+    ],
+    "input": [
+      {
+        "click": ".row"
+      }
+    ],
+    "state": {
+      "a": 1,
+      "b": 2
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "1 2"
+      }
+    ]
+  }
+}

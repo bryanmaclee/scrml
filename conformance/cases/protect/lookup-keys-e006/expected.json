@@ -1,0 +1,19 @@
+{
+  "id": "protect-lookup-keys-e006",
+  "description": "§14.8.9 S441 round 4 (F1) — `Object.keys(L[c])` over a table whose entries are keyed by characters rebuilds the hash. E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "MEASURED after round 3: Object.keys read only the container part of the taint, so this served the hash (g-protected-column-escapes-redaction-as-scalar, S441 round 4 review).",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "notCodes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+// S441 reproducer — addendum-3 T6(a): E-TYPE-026 is a text regex over markup text children — it rejects prose
+// that starts a line with the word "match", and its advice teaches the deprecated `=>` arm separator.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/tut-e-type-026-prose-and-stale-arrow.scrml --output-dir <scratch>
+// Expected: compiles — §4.18.1: in a plain-markup (free-text mode) body "A bare run is display text".
+//           And any E-TYPE-026 advice should use `:>` — §18.2: "New code SHALL use `:>`" (`=>` is deprecated,
+//           W-MATCH-ARROW-LEGACY).
+// Actual:   exit 1: `error [E-TYPE-026]: `match` is not valid directly in markup (§18.9). Wrap the match in a
+//           logic interpolation — e.g. `${ match subject { .A => <p>a</> else => <p>b</> } }` — …`.
+//           Root (traced): compiler/src/type-system.ts ~L10109 — `/(?:^|\n)\s*(?:partial\s+)?match\s+/` over a
+//           markup text child's value; the message string at ~L10113.
+<program>
+<p>
+  match starts at noon
+</p>
+</program>

@@ -1,0 +1,6 @@
+<program>
+<program name="calc">
+  when message(d) { send(d) }
+</program>
+<p>x</p>
+</program>

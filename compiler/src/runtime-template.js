@@ -2490,13 +2490,25 @@ function _scrml_remount_each(root) {
   }
 }
 
+// Spreading a Date/URL/Map/class instance would silently re-type it as a plain
+// object. It is a value, not a record: fail loud.
+function _scrml_deep_set_copy(c, key) {
+  if (Array.isArray(c)) return [...c];
+  const proto = c !== null && typeof c === "object" ? Object.getPrototypeOf(c) : null;
+  if (proto !== null && Object.getPrototypeOf(proto) !== null) {
+    const cls = (proto.constructor && proto.constructor.name) || Object.prototype.toString.call(c).slice(8, -1);
+    throw new TypeError("scrml: cannot write ." + String(key) + " of a " + cls + " in place; it is a value. Assign the whole cell.");
+  }
+  return { ...c };
+}
+
 function _scrml_deep_set(obj, path, value) {
   if (!path || path.length === 0) return value;
-  const result = Array.isArray(obj) ? [...obj] : { ...obj };
+  const result = _scrml_deep_set_copy(obj, path[0]);
   let current = result;
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i];
-    current[key] = Array.isArray(current[key]) ? [...current[key]] : { ...current[key] };
+    current[key] = _scrml_deep_set_copy(current[key], path[i + 1]);
     current = current[key];
   }
   current[path[path.length - 1]] = value;
@@ -4094,11 +4106,94 @@ function _scrml_input_gamepad_destroy(id, scopeId) {
 // §45 Structural equality — deep value comparison for structs and enums
 // ---------------------------------------------------------------------------
 
+// __SCRML_STRUCTURAL_EQ_START__ (server-inline slice boundary, s440-date-in-cell-and-eq)
+// This one function is ALSO the server copy: emit-server.ts inlines the text
+// between these markers into any .server.js that calls it. Keep it
+// self-contained — it must not call another runtime helper.
 function _scrml_structural_eq(a, b, seen) {
   if (a === b) return true;
-  if (a === null || b === null || a === undefined || b === undefined) return false;
+  if (a == null || b == null) return false; // loose: null and undefined are both absence
   if (typeof a !== typeof b) return false;
-  if (typeof a !== "object") return a === b;
+  if (typeof a !== "object") return a === b; // NaN here: the dpa-037 comparison-family build
+  // The value's class, read by BRAND (not instanceof) so a Date from another
+  // realm (an iframe, a vm context) is still a Date. Values of two different
+  // classes are never equal; this also keeps an array from equalling an
+  // object with the same index keys.
+  const tag = Object.prototype.toString.call(a);
+  if (tag !== Object.prototype.toString.call(b)) return false;
+  // SameValueZero, the NaN rule the S440 dpa-037 ruling gives == (NaN is a
+  // defined value and == is reflexive). Used for the number-valued slots below.
+  const sameNum = (x, y) => x === y || (x !== x && y !== y);
+  // An ArrayBuffer / DataView is raw memory, so it compares BYTE for byte (byte
+  // identity, not numeric equality: two NaN bit patterns can differ).
+  const bytesEq = (bufA, offA, bufB, offB, len) => {
+    const x = new Uint8Array(bufA, offA, len);
+    const y = new Uint8Array(bufB, offB, len);
+    for (let i = 0; i < len; i++) {
+      if (x[i] !== y[i]) return false;
+    }
+    return true;
+  };
+  // Built-in classes (S440 ruling #8: date/timestamp are VALUE types, == by
+  // instant). They keep their value in internal slots, not own enumerable
+  // keys, so the struct branch at the bottom would see two empty key sets and
+  // call any two of them equal. Each gets its own rule.
+  if (ArrayBuffer.isView(a)) {
+    if (a.byteLength !== b.byteLength) return false;
+    if (tag === "[object DataView]") return bytesEq(a.buffer, a.byteOffset, b.buffer, b.byteOffset, a.byteLength);
+    // A typed array compares element by element, as numbers.
+    for (let i = 0; i < a.length; i++) {
+      if (!sameNum(a[i], b[i])) return false;
+    }
+    return true;
+  }
+  // A brand can be spoofed (Symbol.toStringTag), so every value below is read
+  // through the class's OWN brand-checking method or getter: a spoof throws a
+  // TypeError instead of being compared by whatever fields it happens to carry.
+  const read = (cls, key, x) => {
+    if (typeof cls !== "function") throw new TypeError("scrml ==: no " + key + " reader for this class here");
+    // Walk up: a polyfill (happy-dom's URL) may subclass the native class.
+    let p = cls.prototype;
+    let d;
+    while (p && !(d = Object.getOwnPropertyDescriptor(p, key))) p = Object.getPrototypeOf(p);
+    return d.get ? d.get.call(x) : d.value.call(x);
+  };
+  switch (tag) {
+    case "[object Date]":
+      return sameNum(read(Date, "getTime", a), read(Date, "getTime", b));
+    case "[object RegExp]":
+      // source is brand-checked; flags (a generic getter) is only read once
+      // source has proven both are RegExps.
+      return read(RegExp, "source", a) === read(RegExp, "source", b) &&
+        read(RegExp, "flags", a) === read(RegExp, "flags", b);
+    case "[object ArrayBuffer]": {
+      const len = read(ArrayBuffer, "byteLength", a);
+      return len === read(ArrayBuffer, "byteLength", b) && bytesEq(a, 0, b, 0, len);
+    }
+    case "[object URL]":
+      // URL's toString is brand-checked and returns the href.
+      return read(typeof URL !== "undefined" && URL, "toString", a) === read(typeof URL !== "undefined" && URL, "toString", b);
+    case "[object URLSearchParams]":
+      return read(typeof URLSearchParams !== "undefined" && URLSearchParams, "toString", a) ===
+        read(typeof URLSearchParams !== "undefined" && URLSearchParams, "toString", b);
+    // No synchronously readable value: equal only when the same object, which
+    // the a === b check above has already ruled out.
+    case "[object Promise]":
+    case "[object WeakMap]":
+    case "[object WeakSet]":
+    case "[object Blob]":
+    case "[object File]":
+      return false;
+    case "[object Error]":
+      // message is an own NON-enumerable key, so check it (and the name) here;
+      // the struct branch below then compares the enumerable fields (type and
+      // cause on the §19 error classes). Accepted cost of realm-safe matching:
+      // an Error subclass that sets no name of its own == a base Error.
+      if (a.name !== b.name || a.message !== b.message) return false;
+      break;
+  }
+  // A polyfilled Blob (happy-dom, jsdom) carries no Blob brand; catch it by class.
+  if (typeof Blob !== "undefined" && (a instanceof Blob || b instanceof Blob)) return false;
   // Cycle guard: value-cycles are FORBIDDEN in scrml (§6.5.1 reassignment-
   // canonical), but a malformed JS-host value reaching == could still carry
   // one. Track visited (a, b) pairs so a revisit terminates instead of
@@ -4106,15 +4201,53 @@ function _scrml_structural_eq(a, b, seen) {
   // already compared against it. The standard structural-eq cycle convention
   // is assume-equal-on-revisit: the only way to reach a matching (a, b)
   // revisit is a structurally-matching cyclic shape.
-  if (seen === undefined) seen = new WeakMap();
+  if (seen == null) seen = new WeakMap();
   let seenBs = seen.get(a);
-  if (seenBs === undefined) {
+  if (seenBs == null) {
     seenBs = new WeakSet();
     seen.set(a, seenBs);
   } else if (seenBs.has(b)) {
     return true;
   }
   seenBs.add(b);
+  // JS Map / Set (host interop values; the §59 value-native map is a tagged
+  // plain object with its own branch below). Equal when the entries pair up
+  // ONE-TO-ONE. A primitive key/element can only pair with itself, found by
+  // the collection's own SameValueZero lookup. An object key/element pairs
+  // with a not-yet-used structurally-equal one. A Map value compares
+  // structurally, with the NaN rule. Trial comparisons pass a FRESH cycle
+  // guard: a failed trial must not leave its pair in seen, where a later
+  // revisit would read it as equal.
+  if (tag === "[object Map]" || tag === "[object Set]") {
+    if (a.size !== b.size) return false;
+    const isMap = tag === "[object Map]";
+    const valEq = (x, y, s) => sameNum(x, y) || _scrml_structural_eq(x, y, s);
+    const bObjects = [];
+    for (const entry of b) {
+      const key = isMap ? entry[0] : entry;
+      if (key !== null && typeof key === "object") bObjects.push(entry);
+    }
+    const used = new Array(bObjects.length).fill(false);
+    for (const entry of a) {
+      const key = isMap ? entry[0] : entry;
+      if (key === null || typeof key !== "object") {
+        if (!b.has(key)) return false;
+        if (isMap && !valEq(entry[1], b.get(key), seen)) return false;
+        continue;
+      }
+      let found = -1;
+      for (let i = 0; i < bObjects.length && found < 0; i++) {
+        if (used[i]) continue;
+        const bEntry = bObjects[i];
+        if (isMap
+          ? _scrml_structural_eq(key, bEntry[0]) && valEq(entry[1], bEntry[1])
+          : _scrml_structural_eq(key, bEntry)) found = i;
+      }
+      if (found < 0) return false;
+      used[found] = true;
+    }
+    return true;
+  }
   // Array comparison (for tuple-like fields)
   if (Array.isArray(a)) {
     if (!Array.isArray(b) || a.length !== b.length) return false;
@@ -4147,7 +4280,7 @@ function _scrml_structural_eq(a, b, seen) {
     return true;
   }
   // Enum: compare tag + payload
-  if (a._tag !== undefined && b._tag !== undefined) {
+  if (a._tag != null && b._tag != null) {
     if (a._tag !== b._tag) return false;
     // Unit variant (no payload beyond _tag)
     const aKeys = Object.keys(a);
@@ -4169,6 +4302,7 @@ function _scrml_structural_eq(a, b, seen) {
   }
   return true;
 }
+// __SCRML_STRUCTURAL_EQ_END__
 
 // ---------------------------------------------------------------------------
 // Fine-grained reactivity primitives (Reactivity Phase 1)
@@ -4270,7 +4404,7 @@ const _scrml_array_mutators = new Set([
  * - Array mutating methods (push/pop/splice/etc.) trigger via Proxy set trap
  *
  * @param {*} value — the value to wrap
- * @returns {*} — Proxy-wrapped if object/array, otherwise the value unchanged
+ * @returns {*} — Proxy-wrapped if array/plain object, otherwise the value unchanged
  */
 function _scrml_deep_reactive(value) {
   if (value === null || value === undefined) return value;
@@ -4282,6 +4416,12 @@ function _scrml_deep_reactive(value) {
 
   // Return cached proxy if we already wrapped this object
   if (_scrml_proxy_cache.has(value)) return _scrml_proxy_cache.get(value);
+
+  // Arrays + plain objects only; a Date/class breaks under a Proxy (writes untracked, by design).
+  if (!Array.isArray(value)) {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== null && Object.getPrototypeOf(proto) !== null) return value;
+  }
 
   const proxy = new Proxy(value, {
     get(target, prop, receiver) {
@@ -4505,6 +4645,76 @@ function _scrml_effect_static(fn) {
     }
     cleanupEntries = [];
   };
+}
+
+/**
+ * §6.7.4 \`when <dep-list> changes { body }\` — a reactive effect keyed on an
+ * EXPLICIT dependency list. Unlike _scrml_effect it does NOT run at registration
+ * and does NOT auto-track the body's reads:
+ *
+ *   - subscribe(handler) is the emitted per-dep \`_scrml_reactive_subscribe(dep, h)\`
+ *     calls (emitted in the chunk so the chunk-cell-scope rename namespaces each
+ *     dep key exactly as it namespaces the body's own reads). It returns the
+ *     unsubscribe functions. The subscriber list is the same one every
+ *     _scrml_reactive_set write fans out to, so change detection is reference
+ *     identity on the write (a §6.5 array mutation is a clone-replace write).
+ *   - The body runs with tracking PAUSED: a write that happens while an outer
+ *     _scrml_effect is running must not hand the body's reads to that effect.
+ *   - Subscribers fire after _scrml_propagate_dirty, so a derived read in the
+ *     body pulls the post-change value (the §6.7.4 flush-ordering contract).
+ *   - A synchronous re-entry is not recursed: the effect is marked pending and
+ *     re-runs ONCE after the current run (keeps an acyclic chain through a
+ *     second effect whole). Trade-off: a self-loop (E-LIFECYCLE-006, not yet
+ *     a compile error — this cap is the only guard) gets one re-run, then the
+ *     next pending re-run is dropped and reported; a longer chain re-entering
+ *     the same effect twice in one write loses the second re-entry, also
+ *     reported via console.error, never silently.
+ *   - An async (CPS, §13) body's rejection is reported here; it does not reach
+ *     the writer (§6.7.4 "does NOT propagate to the enclosing scope").
+ *   - The disposer is registered against the if= mount being wired, if any
+ *     (§6.7.2 step 1), and returned so any other host can own it.
+ *
+ * @param {function(function): Array<function>} subscribe — registers the handler
+ * @param {function} body — the lowered effect body
+ * @returns {function} dispose
+ */
+const _SCRML_WHEN_RERUN_CAP = 1;
+function _scrml_when_changes(subscribe, body) {
+  let running = false;
+  let pending = false;
+  let disposed = false;
+  function handler() {
+    if (disposed) return;
+    if (running) { pending = true; return; }
+    running = true;
+    const wasPaused = _scrml_tracking_paused;
+    _scrml_tracking_paused = true;
+    let reruns = 0;
+    try {
+      do {
+        pending = false;
+        const r = body();
+        if (r && typeof r.then === "function") {
+          r.then(null, function (e) { console.error("scrml when-effect error:", e); });
+        }
+        if (pending && !disposed && ++reruns > _SCRML_WHEN_RERUN_CAP) {
+          console.error("scrml when-effect error: E-LIFECYCLE-006 — re-triggered during its re-run; dropped.");
+          break;
+        }
+      } while (pending && !disposed);
+    } finally {
+      _scrml_tracking_paused = wasPaused;
+      running = false;
+      pending = false;
+    }
+  }
+  const unsubs = subscribe(handler) || [];
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    for (let i = 0; i < unsubs.length; i++) unsubs[i]();
+  }
+  return _scrml_mount_track(dispose);
 }
 
 /**
@@ -6418,6 +6628,38 @@ export const SERVER_VALUE_NATIVE_MAP_HELPER = (() => {
     body.trim() +
     "\n\n"
   );
+})();
+
+/**
+ * s440-date-in-cell-and-eq — the §45 structural-equality helper, sliced VERBATIM
+ * out of SCRML_RUNTIME between the `__SCRML_STRUCTURAL_EQ_START__` /
+ * `__SCRML_STRUCTURAL_EQ_END__` markers, for inlining into a `.server.js`, a
+ * `kind="tool"` library, or a library module that calls `_scrml_structural_eq(`
+ * (emit-server.ts wraps it as SERVER_STRUCTURAL_EQ_HELPER).
+ *
+ * Before this, the server copy was a hand-written duplicate in emit-server.ts
+ * that had drifted: no §59 value-native map branch (so `==` on two maps was
+ * order-SENSITIVE on the server, against §59.9), no cycle guard, and none of
+ * the built-in class rules — a server `Date == Date` was always true. One
+ * source means the two sides cannot disagree again.
+ */
+export const SERVER_STRUCTURAL_EQ_SOURCE = (() => {
+  const startTag = "// __SCRML_STRUCTURAL_EQ_START__";
+  const endTag = "// __SCRML_STRUCTURAL_EQ_END__";
+  const s = SCRML_RUNTIME.indexOf(startTag);
+  const e = SCRML_RUNTIME.indexOf(endTag);
+  // Fail LOUD if a marker is lost: an empty helper would turn every server-side
+  // `==` on a non-primitive into a silent ReferenceError at request time.
+  if (s === -1 || e === -1) {
+    throw new Error(
+      "runtime-template.js: structural-equality slice markers " +
+        "(__SCRML_STRUCTURAL_EQ_START__/__SCRML_STRUCTURAL_EQ_END__) not found — " +
+        "the server _scrml_structural_eq inline is broken.",
+    );
+  }
+  // Skip the START marker's line and the note under it; begin at the function.
+  const fnStart = SCRML_RUNTIME.indexOf("function _scrml_structural_eq(", s);
+  return SCRML_RUNTIME.slice(fnStart, e).trim();
 })();
 
 /**

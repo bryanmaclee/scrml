@@ -1,0 +1,15 @@
+type Phase:enum = { Idle, Loading }
+
+<count> = 0
+<last> = ""
+
+${ function track(name) { @last = name } }
+
+<p id="out">${@count} ${@last}</p>
+
+<engine for=Phase initial=.Idle>
+    <Idle>
+        <button id="go" onclick=@count = @count + 1; track("go")>Begin</>
+    </>
+    <Loading : "Loading…">
+</>

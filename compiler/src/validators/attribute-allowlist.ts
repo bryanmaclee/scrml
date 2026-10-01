@@ -30,6 +30,7 @@
 import type { Span, FileAST, MarkupNode } from "../types/ast.ts";
 import { getElementAttrSchema, isOpenAttrPrefix } from "../attribute-registry.js";
 import { walkFileAst } from "./ast-walk.ts";
+import { connectionFragmentAttrs } from "../diagnostic-secrets.ts";
 
 // ---------------------------------------------------------------------------
 // Diagnostic shape
@@ -84,6 +85,22 @@ function validateMarkup(
   const schema = getElementAttrSchema(tag);
   if (!schema) return;
 
+  // s432 F3 — an UNQUOTED connection value (`<program db=postgres://u:p/w@h>`)
+  // is mis-tokenized: only its leading identifier is the value, and the rest
+  // of it — the userinfo, i.e. the password — becomes a run of attribute NAMES
+  // (`u:p`, `w@h`, ...). Echoing those names prints the password in pieces no
+  // value-based redactor can recognise (a middle piece need carry no `:` or
+  // `@`). So once a connection attribute on this element has an unquoted
+  // TEXT value, every later UNRECOGNIZED non-string attribute is reported
+  // without its name (connectionFragmentAttrs — shared with the chokepoint).
+  // Positional, not a name-shape test: a fragment may look like any ordinary
+  // name. The cost: a genuinely unknown attribute written after an unquoted
+  // `db=` loses its name in W-ATTR-001 — on an element that already fails to
+  // compile (the unquoted value is E-SCOPE-001).
+  const frag = connectionFragmentAttrs(tag, node.attrs);
+  const fragments = new Set(frag.fragments);
+  const afterUnquotedConnection = frag.via;
+
   for (const attr of node.attrs ?? []) {
     if (!attr || !attr.name) continue;
     const name = attr.name;
@@ -95,6 +112,20 @@ function validateMarkup(
     const spec = schema.allowedAttrs.get(name);
     if (!spec) {
       const span = attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+      if (fragments.has(attr)) {
+        warnings.push({
+          code: "W-ATTR-001",
+          message:
+            `W-ATTR-001: An attribute (name <redacted>) is not recognized on \`<${tag}>\`. ` +
+            `It follows the unquoted \`${afterUnquotedConnection}=\` value and is most likely a ` +
+            `fragment of it: an unquoted attribute value is read only up to the end of its leading ` +
+            `identifier, so the rest of a connection string (including any password) is read as ` +
+            `further attribute names. Quote the value: \`${afterUnquotedConnection}="…"\`.`,
+          span,
+          severity: "warning",
+        });
+        continue;
+      }
       warnings.push({
         code: "W-ATTR-001",
         message:
@@ -122,18 +153,47 @@ function validateMarkup(
           `W-ATTR-002: Value \`"${literal}"\` is not a recognized shape for ` +
           `\`${name}=\` on \`<${tag}>\`. ` +
           `Recognized values: ${recognized}. ` +
-          `The attribute is currently accepted as-is with no compile-time enforcement. ` +
           (name === "auth"
-            ? `For role-based access control, the \`role:X\` shape is documented in the dispatch ` +
-              `app FRICTION ledger but is NOT yet implemented (see F-AUTH-001). The page is ` +
-              `silently authorized for every authenticated user; gate roles via a server fn ` +
-              `until the ergonomic completion lands.`
-            : `Use one of the recognized values to ensure the attribute does what its name implies.`),
+            ? authUnrecognizedEffect(tag) +
+              (literal.startsWith("role:")
+                ? ` For role-based access control, the \`role:X\` shape is documented in the dispatch ` +
+                  `app FRICTION ledger but is NOT yet implemented (see F-AUTH-001); gate roles via a ` +
+                  `server fn until the ergonomic completion lands.`
+                : "")
+            : `The attribute is currently accepted as-is with no compile-time enforcement. ` +
+              `Use one of the recognized values to ensure the attribute does what its name implies.`),
         span,
         severity: "warning",
       });
     }
   }
+}
+
+/**
+ * What an UNRECOGNIZED `auth=` literal does today, per element (S443 r3) — so the
+ * warning states the real effect instead of "accepted as-is".
+ *   - `<page>`: it is not an auth declaration. The page inherits its application's
+ *     `<program auth="required">` gate if the application's top-level `<program>`
+ *     declares one (route-inference Step 8c); otherwise it gates nothing.
+ *   - `<program>`: no auth gate is applied at all (the value is not "required").
+ *   - `<channel>`: any `auth=` attribute gates the WebSocket upgrade as if required.
+ */
+function authUnrecognizedEffect(tag: string): string {
+  if (tag === "page") {
+    return `An unrecognized \`auth=\` value is not an auth declaration: this page inherits ` +
+      `the application's gate if the application's top-level \`<program>\` declares ` +
+      `\`auth="required"\` (it then requires authentication), and otherwise it gates nothing ` +
+      `(the page is public). Write one of the recognized values.`;
+  }
+  if (tag === "program") {
+    return `An unrecognized \`auth=\` value applies NO auth gate: this program and its pages ` +
+      `are public. Write \`auth="required"\` if a login is intended.`;
+  }
+  if (tag === "channel") {
+    return `On a \`<channel>\` any \`auth=\` attribute gates the WebSocket upgrade as if it ` +
+      `were \`auth="required"\`. Write one of the recognized values.`;
+  }
+  return `The attribute is currently accepted as-is with no compile-time enforcement.`;
 }
 
 // ---------------------------------------------------------------------------

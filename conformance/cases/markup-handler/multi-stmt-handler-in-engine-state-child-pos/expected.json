@@ -1,0 +1,12 @@
+{
+  "id": "markup-handler-multi-stmt-handler-in-engine-state-child-pos",
+  "description": "§5.2.3 — a BARE `;`-sequence handler on a button inside an engine state-child body fires E-MULTI-STATEMENT-HANDLER. Pre-S437 impl#1 built engine bodies into a discarded error buffer, so even the call-led form compiled at exit 0 there.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§5.2.3: \"A BARE event-handler value that contains a `;` outside of expression-internal contexts … is compile error `E-MULTI-STATEMENT-HANDLER`.\" The rule has no positional exemption; §5.2.3 names the engine state-child (§51.0.I) as a position whose handlers follow the same rules as top level.",
+  "expect": {
+    "codes": ["E-MULTI-STATEMENT-HANDLER"],
+    "notCodes": []
+  }
+}

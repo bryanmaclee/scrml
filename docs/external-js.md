@@ -2,7 +2,9 @@
 
 Before you reach for an external JS library, check whether scrml already handles the problem. Adopters coming from the TypeScript/React/Vue ecosystem tend to reach for packages reflexively — the muscle memory is `npm install lodash` before checking if the language already has what lodash provides. This doc is the translation table and the escape hatches, in that order.
 
-**The most important thing to know up front:** scrml's type system, shape system, reactive runtime, and stdlib cover a surprising amount of what adopters typically pull from npm. A large fraction of "I need X" objections resolve at the first section below without touching any escape hatch.
+> Accurate as of scrml v0.8.0 (2026-09-29). Every complete program on this page compiles with that compiler; blocks marked *fragment* are excerpts, not whole programs.
+
+**The most important thing to know up front:** scrml's type system, reactive runtime, and stdlib cover a surprising amount of what adopters typically pull from npm. A large fraction of "I need X" objections resolve at the first section below without touching any escape hatch.
 
 ---
 
@@ -10,39 +12,42 @@ Before you reach for an external JS library, check whether scrml already handles
 
 ### "I need zod for runtime schema validation"
 
-You don't. scrml's type system runs at compile time AND enforces at runtime. The combination of `<struct>`, `<shape>`, enums (`type Color:enum = { Red, Green, Blue }`), and inline type predicates (`number(>0 && <10000)`, `string(email)`, §53) covers the entire zod surface, with compile-time errors instead of runtime exceptions.
+Usually you don't. scrml's type system checks at compile time and at the boundary where untrusted values enter. Struct types (`type User:struct = { ... }`), enums (`type Color:enum = { Red, Green, Blue }`), and inline type predicates (`number(>0 && <10000)`, `string(email)`, SPEC §53) cover most of what zod is used for, with compile-time errors instead of runtime exceptions where the value is known statically.
 
 ```scrml
-${
-    type Email = string(email)
-    type Age = number(>= 0 && <= 150)
+<program>
+type Email = string(email)
+type Age = number(>= 0 && <= 150)
 
-    struct User {
-        name: string
-        email: Email        // validated at every construction site
-        age: Age
-    }
+type User:struct = {
+    name:  string,
+    email: Email,        // a predicate-typed field
+    age:   Age
 }
+
+<u>: User = { name: "Ada", email: "ada@example.com", age: 36 }
+<p>${@u.name}</p>
+</program>
 ```
 
-`scrml:data` exports validation primitives (`required`, `email`, `minLength`, `pattern`, `validate`, etc.) for when you want runtime-validated records without a full struct shape.
+`scrml:data` exports validation primitives (`required`, `email`, `minLength`, `pattern`, `validate`, etc.) for when you want runtime-validated records without declaring a struct type.
 
 ### "I need lodash"
 
 `scrml:data` covers most of it. Available today: `pick`, `omit`, `mapKeys`, `mapValues`, `groupBy`, `indexBy`, `sortBy`, `unique`, `flatten`, `flattenDeep`, `chunk`, `clamp`, `paginate`, `deepMerge`, `toSnakeCase`, `toCamelCase`, `camelizeKeys`, `snakifyKeys`.
 
 ```scrml
-${ import { groupBy, sortBy, pick } from 'scrml:data' }
+import { groupBy, sortBy, pick } from 'scrml:data'     // fragment — one line inside <program>
 ```
 
-For the ~10% of lodash that isn't in stdlib, write it inline (lodash functions are typically 5–15 lines) or use `^{}` meta to shell out to Bun.
+For the lodash functions that aren't in the stdlib, write them inline (lodash functions are typically 5–15 lines) or import a small local `.js` helper (§3).
 
 ### "I need date-fns / dayjs / moment"
 
 `scrml:time`. `formatDate`, `formatTime`, `formatDateTime`, `formatRelative`, `startOf`, `addTime`, `diffTime`, `debounce`, `throttle`, all pure, usable client-side and server-side.
 
 ```scrml
-${ import { formatDate, formatRelative } from 'scrml:time' }
+import { formatDate, formatRelative } from 'scrml:time'   // fragment — one line inside <program>
 ```
 
 ### "I need axios / ky for HTTP"
@@ -67,23 +72,32 @@ You don't. scrml has first-class form handling: `bind:value` on `<input>` wires 
 
 ### "I need redux / zustand / recoil / jotai"
 
-You don't. scrml's `@variable` reactive system is the state primitive. `const @derived = ...` replaces selectors. `<engine>` replaces state-machine libraries (XState). (`<machine>` was the old keyword; REMOVED at S307.)
+You don't. Reactive state cells are the state primitive: `<count> = 0` declares one, `@count` reads and writes it. `const <doubled> = @count * 2` is a derived cell and replaces selectors. `<engine>` replaces state-machine libraries (XState). (The older `<machine>` element has been removed.)
+
+```scrml
+<program>
+<count> = 0
+const <doubled> = @count * 2
+<button onclick=@count++>+</button>
+<p>${@doubled}</p>
+</program>
+```
 
 ### "I need tailwindcss"
 
-scrml compiles `#{...}` blocks inline with the markup — class-less styling by default. If you want Tailwind specifically, it's a build-step concern, not a scrml concern; scrml does not ship a preprocessor for it today.
+You don't need to install it. The compiler has a built-in Tailwind utility engine (SPEC §26): use utility classes (`p-4`, `max-w-2xl`, `hover:text-rose-900`, `md:grid-cols-2`) directly in markup and the compiler emits CSS for only the classes you use — no Tailwind CLI, PostCSS, or config file. Variant prefixes and many arbitrary values (`grid-cols-[1fr_2fr]`) are supported; an unrecognized class fires the `W-TAILWIND-UNRECOGNIZED-CLASS` lint. For hand-written CSS, use `#{...}` blocks: inside a component they are scoped with native `@scope`; at `<program>` level they are global.
 
 ### "I need an ORM (Prisma, Drizzle, TypeORM)"
 
-You don't. scrml's `?{ SELECT ... FROM users }` is compile-time-typed SQL with schema introspection from `<db src="…">`. Type-safe queries without a query builder.
+You don't. scrml's `?{ SELECT ... FROM users }` is SQL checked at compile time against the schema (from `<schema>` or the `<db src="…">` database). Type-checked queries without a query builder, and `scrml db-migrate` applies `<schema>` changes to a real database.
 
 ### "I need a test runner (jest, vitest)"
 
-`scrml:test` (early). For the compiler itself, scrmlTS uses `bun test` directly — works on any `.test.js` file. Auto-property tests emit from `<engine>` declarations (§51.13) — ported off the removed `<machine>` keyword at S307.
+`~{}` inline test blocks run under the compiler and are stripped from production builds; `scrml:test` provides assertion helpers. The scrml compiler's own suite uses `bun test` directly — that works on any `.test.js` file. `--emit-machine-tests` emits property tests from `<engine>` declarations (§51.13).
 
 ### "I need JSON Schema / OpenAPI"
 
-Shapes (§14, §16) + inline type predicates are the source of truth. Generate OpenAPI downstream from shapes if you need the ecosystem interop; don't author OpenAPI by hand.
+Struct and enum types + inline type predicates are the source of truth. Generate OpenAPI downstream from those types if you need the ecosystem interop; don't author OpenAPI by hand.
 
 ### "I need graphql / trpc"
 
@@ -96,74 +110,79 @@ You don't. Server functions are typed RPCs. The compiler-inferred call graph IS 
 Appendix D of SPEC.md lists globals available inside `${ }` logic with no import and no `^{}` ceremony: `Array`, `Object`, `Boolean`, `Date`, `JSON`, `Math`, `console`, `Intl`, `Reflect`, `Proxy`, `parseInt`, `parseFloat`, `Number.isFinite`, `isNaN`, `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, `structuredClone`, `encodeURIComponent`, `decodeURIComponent`, `btoa`, `atob`. Provided by the Bun runtime, part of ECMAScript.
 
 ```scrml
-${
-    const today = new Date()
-    const formatted = today.toISOString().split("T")[0]
-    const random = Math.floor(Math.random() * 100)
-}
+const today = new Date()                              // fragment — inside <program> or a function body
+const formatted = today.toISOString().split("T")[0]
 ```
+
+For numbers and randomness the stdlib has sanctioned wrappers — `scrml:math` (pure: `round`, `floor`, `clamp`, `parseInt`, …) and `scrml:random` (`random`, `randomInt`) — which keep pure `fn` bodies pure.
 
 ---
 
 ## 3. Local `.js` helper files
 
-If you have a small JS file in your project, import it with a relative path inside `${ }`. This has been ratified in SPEC §21 since the first import-system design.
+If you have a small JS file in your project, import it with a relative path (SPEC §21):
 
 ```scrml
-${
-    import { helper } from './helper.js'
-    import { computeThing } from './utils/math.js'
-}
+import { helper } from './helper.js'              // fragment — inside <program>
+import { computeThing } from './utils/math.js'
 ```
 
 Use this for small, project-local utilities. No ceremony, no tooling, no manifest.
 
 ---
 
-## 4. `^{}` meta escape hatch — the designed answer
+## 4. `^{}` meta blocks — compile-time code generation
 
-When you genuinely need a runtime capability that scrml doesn't expose directly, `^{}` is the escape hatch. The rule is memoryable: **scrml is always at least as powerful as raw Bun/JS.** Anything Bun can do, `^{}` can do.
-
-The `^{}` block runs at compile time; it can inline computed values into your source, run code generation, or emit JS that will execute at runtime.
+`^{}` runs at compile time. It works over a closed set of meta primitives (`emit()`, `reflect(Type)`, and a few others — SPEC §22): it can generate markup from compile-time data or introspect your types. It is **not** a host escape hatch — no DOM, no SQL, no file or network I/O, and no `eval`.
 
 ```scrml
-${
-    // Compile-time computation inlined into the module
-    ^{ emit(`const BUILD_ID = "${Date.now()}"`) }
+<program>
+const links = [
+    { href: "/docs", label: "Docs" },
+    { href: "/blog", label: "Blog" },
+]
 
-    @buildId: string = BUILD_ID
-}
+<nav>
+    ^{
+        // Runs at compile time: the loop unrolls into static markup.
+        for (const l of links) {
+            emit(`<a href="${l.href}">${l.label}</a>`)
+        }
+    }
+</nav>
+</program>
 ```
 
-Runtime capability escape (using `bun.eval` through `^{}`) is the path for "use an npm package I absolutely must have" — a partially-implemented feature as of 2026-04. This is the path that deprecates the "add npm support to scrml" ask.
+**When `^{}` is the right tool:** code generation, compile-time constants, markup derived from a type (`reflect`).
 
-**When `^{}` is the right tool:** one-off runtime capability, codegen, compile-time constants, environment-dependent values, external capability that doesn't map to the stdlib.
-
-**When `^{}` is the wrong tool:** every function call in the codebase. If you find yourself writing 50 `^{}` blocks, the real ask is "add this to stdlib" — open an issue.
+**When `^{}` is the wrong tool:** reaching a runtime capability. Use the stdlib, a local `.js` file (§3), or a vendored library (§5). A JS-host API that throws can be wrapped with `scrml:host`'s `safeCall` / `safeCallAsync`, which turn the throw into a scrml failable result. Direct host imports (`import:host`) are gated by a `scrml.toml` `[capabilities] host-import` allow-list that is disabled by default (SPEC §22.13).
 
 ---
 
 ## 5. `vendor/` pattern — for whole libraries you've reviewed
 
-For third-party source you want to ship with your project, copy it into `vendor/<name>/` and import via the `vendor:` prefix:
+For third-party scrml source you want to ship with your project, copy it into `vendor/` at the project root and import it via the `vendor:` prefix:
 
 ```scrml
-${ import { specialThing } from 'vendor:some-library' }
+import { specialThing } from 'vendor:some-library'   // fragment — resolves to vendor/some-library.scrml
 ```
 
-The import resolver (§41) treats `vendor:` as a first-class prefix, resolved to `vendor/<name>/` in project root. No registry, no lockfile, no auto-fetch. You read the source, you commit it, you know what you're shipping. This is the Odin-model escape hatch.
+The import resolver (§41) treats `vendor:` as a first-class prefix: `vendor:<name>` resolves to `vendor/<name>.scrml` under the project root (a missing file is `E-IMPORT-006`). No registry, no lockfile, no auto-fetch. You read the source, you commit it, you know what you're shipping.
 
-For the library to be importable, its source must either be `.scrml` or `.js`/`.mjs` that scrml's module resolver can read. ESM syntax only.
+A vendored plain-JavaScript library (ESM) is imported with a relative path instead — `import { x } from './vendor/lib/index.js'` — as in §3.
 
 **Future tooling:** `scrml vendor add <url>` (planned, not yet shipped) will automate the fetch + hash-verify + write. Today it's a manual copy.
 
 ---
 
-## 6. Sidecars — `use foreign:` for server-only external code
+## 6. Sidecars — `use foreign:` for non-JS code (specified, not shipped)
 
-If your external code is not JavaScript at all — Go, Rust, Python, etc. — the pattern is a sidecar: nest a `<program lang="...">` block with the foreign source, and import its exported functions with `use foreign:`:
+> **Not in the shipping compiler.** Sidecars are specified in SPEC §23.4 / §43, but the out-of-process sidecar codegen is not implemented in v0.8.0. A `use foreign:` declaration fails closed with `E-FOREIGN-SIDECAR-NOMINAL`. The block below shows the specified design; it does not compile today.
+
+If your external code is not JavaScript at all — Go, Rust, Python, etc. — the specified pattern is a sidecar: nest a `<program lang="...">` block with the foreign source, and import its exported functions with `use foreign:`:
 
 ```scrml
+// specified in SPEC §23.4 — not in the shipping compiler yet
 <program>
     <program lang="python" name="ml">
         def predict(features): ...
@@ -177,7 +196,7 @@ If your external code is not JavaScript at all — Go, Rust, Python, etc. — th
 </program>
 ```
 
-Server-side only (E-FOREIGN-012). The compiler generates HTTP/socket client code; types are declared in scrml and checked at the boundary.
+As specified: server-side only, the compiler generates the HTTP/socket client code, and types are declared in scrml and checked at the boundary.
 
 ---
 
@@ -185,13 +204,17 @@ Server-side only (E-FOREIGN-012). The compiler generates HTTP/socket client code
 
 ### npm registry — by design
 
-Bare specifiers (`import X from "lodash"`) are a compile error (E-IMPORT-005). scrml has no npm integration, no lockfile, no auto-fetch. This is a philosophical commitment documented in spec §41.4 and §41.6: the toolchain SHALL NOT download anything automatically. The approved path for any npm package's functionality is `^{}` + `bun.eval` (scrml ≥ Bun capability guarantee) or source-copy into `vendor/`.
+Bare specifiers (`import X from "lodash"`) are a compile error (E-IMPORT-005). scrml has no npm integration, no lockfile, no auto-fetch. This is a deliberate commitment (SPEC §41.4, §41.6): the toolchain does not download anything automatically. The paths for an npm package's functionality are: the stdlib, a local `.js` file (§3), or a reviewed source copy (§5).
+
+### `eval` / `new Function` — not supported
+
+There is no runtime code evaluation in scrml: `eval(...)` and `new Function(...)` do not resolve (they are rejected as undeclared identifiers, `E-SCOPE-001`). Dynamic `import(...)` is also rejected (`E-DYNAMIC-IMPORT-NOT-IN-SCRML`).
 
 If you're looking for "how do I use lodash in scrml" — section 1 above probably already answered it.
 
 ### CDN imports — not yet specced
 
-No `cdn:` or `https:` prefix today. If you need to load an external browser module at runtime (e.g., CodeMirror, Monaco, D3), today's pattern is a script-injection bridge inside `^{}` at compile time. An explicit answer is an open design question tied to Phase 0/1 in the npm-bridge insight.
+No `cdn:` or `https:` prefix today. Loading an external browser module at runtime (e.g., CodeMirror, Monaco, D3) has no first-class answer yet; it is an open design question.
 
 ### Bundler integration — deferred
 
@@ -203,7 +226,7 @@ scrml's compiler emits plain JS; if you need a separate bundler (Vite, esbuild) 
 
 ### "Why not just add npm support?"
 
-The short answer: every language that shipped a "temporary" npm bridge kept it. The `^{}` escape hatch and `vendor/` pattern are the designed answers — they preserve the philosophy that dependencies are a liability, not a feature. If you find an actual gap, the productive ask is "add this to stdlib" or "close the `^{}` runtime-capability gap," not "add a package manager."
+The short answer: every language that shipped a "temporary" npm bridge kept it. The stdlib, local `.js` imports, and the `vendor/` pattern are the designed answers — they preserve the philosophy that dependencies are a liability, not a feature. If you find an actual gap, the productive ask is "add this to stdlib," not "add a package manager."
 
 ### "The stdlib is missing X. What do I do?"
 
@@ -215,38 +238,40 @@ Not directly; scrml compiles to standalone HTML/JS/CSS, not to framework-embedda
 
 ### "How do I type an external JS library?"
 
-If you're calling through `^{}` or a local `.js` file, write a shape or struct that represents the surface you consume. The type constraint attaches at the import site:
+If you're calling a local `.js` file, write a struct type that represents the surface you consume and annotate the binding:
 
 ```scrml
-${
-    import { parseDate } from './date-helper.js'
+<program>
+import { parseDate } from './date-helper.js'
 
-    shape DateResult {
-        year: int
-        month: int
-        day: int
-    }
-
-    const result: DateResult = parseDate("2026-04-22")
+type DateResult:struct = {
+    year:  int,
+    month: int,
+    day:   int
 }
+
+const result: DateResult = parseDate("2026-04-22")
+<p>${result.year}</p>
+</program>
 ```
 
 ### "I'm writing a CodeMirror / Monaco / D3 integration. What's the current-best-practice pattern?"
 
-Today: the `^{}` + `<script type="module">` injection + `window.__mod` + `CustomEvent` bridge pattern (see 6nz's CM6 probe in `6NZ` repo's `playground-three`). The 9/9 smoke-test outcome confirms it works end-to-end, but it's known-clunky. Cleaner patterns are under design discussion.
+There is no first-class pattern yet. Integrations built so far inject a `<script type="module">`, expose the module on `window`, and talk to scrml state through `CustomEvent`s. It works but is clunky; a cleaner pattern is an open design question.
 
 ### "Is there a path to CDN imports someday?"
 
-Possibly. The question is tracked as Phase 1 in the npm-bridge insight. The prerequisite ("Phase 0") is finishing the `^{}` + `bun.eval` wiring, shipping this doc (the one you're reading), and shipping `scrml vendor add`. Phase 1 is only re-opened if adopter evidence continues to demand it after Phase 0 ships.
+Possibly. It is an open question, to be revisited if real adopters need it after `scrml vendor add` ships.
 
 ---
 
 ## Reference
 
 - SPEC §21 — Module and Import System
-- SPEC §23.4 — `use foreign:` sidecars
+- SPEC §23.4 — `use foreign:` sidecars (specified; not in the shipping compiler)
 - SPEC §41 — Import System (`use` + `import` hybrid)
 - SPEC §53 — Inline Type Predicates
 - SPEC Appendix D — JS standard library access
-- `stdlib/` — current module set (`scrml:auth`, `scrml:crypto`, `scrml:data`, `scrml:format`, `scrml:fs`, `scrml:http`, `scrml:path`, `scrml:process`, `scrml:router`, `scrml:store`, `scrml:test`, `scrml:time`)
+- SPEC §26 — Tailwind utility classes
+- `stdlib/` — the standard-library modules, each importable as `scrml:<name>`; the current list and count are in [`docs/FACTS.md`](FACTS.md)
 - `examples/` — working sample apps

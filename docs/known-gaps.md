@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 135 | 4 |
-| MED | 296 | 0 |
-| LOW | 108 | 0 |
+| HIGH | 223 | 4 |
+| MED | 436 | 0 |
+| LOW | 213 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -367,9 +367,81 @@ arc edited. One axis, two instances, one enumerated.
 
 ### g-tenant-floor-inert-for-a-two-qualifier-CREATE-TABLE — `db.schema.table` matches the harvest regex nowhere, so §14.8.10 is silently inert; a second table removes the last warning
 
-<!-- @gap id=g-tenant-floor-inert-for-a-two-qualifier-create-table sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js:188(CREATE_TABLE_HEAD_RE — ONE optional qualifier only; locate by the regex CONST NAME, not the line)+compiler/src/codegen/tenant-egress.ts(buildTenantContext, the consumer that comes up empty) prov=review:S410-peter-S239-pass-on-901+empirical:PA-reproduced-by-compilation-on-HEAD-2e570b7e-with-bare-and-one-qualifier-CONTROLS-both-ACTIVE -->
+<!-- @gap id=g-tenant-floor-inert-for-a-two-qualifier-create-table sev=HIGH status=resolved owner=bryan locus=compiler/src/schema-differ.js(readCreateTableHead + scanCreateTableHeads + findQualifiedCreateTableHeads — the head regex CREATE_TABLE_HEAD_RE is DELETED)+compiler/src/gauntlet-phase1-checks.js(E-SCHEMA-012 in the <schema> body checks) prov=review:S410-peter-S239-pass-on-901+empirical:PA-reproduced-by-compilation-on-HEAD-2e570b7e-with-bare-and-one-qualifier-CONTROLS-both-ACTIVE+ruling:user-voice-scrml.md-S435-"1-both"+empirical:S438-re-reproduced-on-072741ca -->
 
-**ROUTED TO BRYAN — a §14.8.10 security floor + the `<schema>` recognizer surface. Filed, not fixed.**
+**⚑ RESOLVED S438 by branch `fix/s438-tenant-floor-qualified-create-table` — bryan RULED S435
+"1 both": REJECT a qualified `<schema>` `CREATE TABLE` head, both the ≥2-qualifier form (the
+silently inert one) AND the previously-accepted one-qualifier form, fail-closed — new
+`E-SCHEMA-012` (SPEC §39.2 + §39.12 + §34 row).** Re-reproduced on `072741ca` before the fix, by
+compilation, `<schema>`-only app, no `<db>`: 0 qualifiers → floor ACTIVE; 1 → ACTIVE (accepted by
+stripping); 2 → INERT + `W-SCHEMA-NO-TABLES-DECLARED`; 2 + a second recognized table → INERT with
+**no diagnostic at all**, exit 0. After: 0 → unchanged; 1, 2, 2+second → `E-SCHEMA-012`, and the
+floor stays ENGAGED (tenant tag emitted) because the harvest still reads + strips the qualified
+head, so there is no `W-SCHEMA-NO-TABLES-DECLARED` / `E-PA-003` cascade. **The identity-model
+question below was answered by NOT widening:** the head regex is deleted and the head is READ as a
+name chain (`readCreateTableHead`), so the qualifier COUNT is reported rather than a shape the
+pattern can fail to anticipate; the rejection and the three harvests read the same heads. Sibling
+shapes bite-tested (all rejected): `"db"."public"."assets"`, `` `mydb`.[public].assets ``,
+comments/whitespace around the dots, lowercase `if not exists`, `CREATE TEMP TABLE temp.assets`,
+a dangling `public.`, `CREATE TABLE a.b AS SELECT`, a qualified head beside a DSL table. Not
+rejected (correctly): `"a.assets"` (one identifier), a head inside `--`/`/* */`, a qualified
+`REFERENCES` target. The `?{}` walker's acceptance set is held where it was (≤1 qualifier) —
+E-SCHEMA-012 is `<schema>`-scoped. Two sibling residuals this did NOT change are filed below as
+`g-schema-create-temp-table-silently-not-a-declaration` and
+`g-schema-dsl-qualified-table-head-silently-stripped`.
+
+**S438 FIX ROUND (S239 review of `c0327349` = `finding`).** F1 HIGH: the first cut's reader SKIPPED
+top-level comments with no string/regex awareness, so a DSL `pattern(/^\/*[a-z0-9-]+$/)` (or
+`default("/api/*")`, `default("https://…")`, `default("--")`) swallowed a later real
+`CREATE TABLE assets (…, tenant_id)` from all three harvests — a floor base ENGAGED went silently
+off (reviewer-executed via the CLI). Fixed by construction: the `<schema>` harvest is now the
+pre-S438 read (verbatim, comment-agnostic) ∪ the structured reader's extra keys, base winning per
+key; comment/literal awareness (string- and `pattern(/…/)`-aware, via `blankLiteralBodies`'s new
+comment mode) is used ONLY to suppress E-SCHEMA-012 on a dead head. Pinned by an invariant test —
+harvest ⊇ the pre-S438 harvest, table by table and column by column — over the named review shapes
+and a 3,000-body seeded sweep (bite-tested: it fails on `c0327349`). F2 MED: both hand-rolled
+`<schema>` walks in `gauntlet-phase1-checks.js` now descend the markup `if-chain` node via ONE
+shared child list (`schemaWalkChildLists`) — E-SCHEMA-003 was missed there on base too. F3 MED:
+identifier parts read `[\p{L}\p{N}_$]+`; any `CREATE … TABLE` head the reader cannot read through
+to `(` / `AS` / `USING` is now E-SCHEMA-012 (fail-closed) instead of "not a head". Reviewer's 83
+probe shapes: 0 silent tenant-tag losses vs `98d94e96`; 169-file corpus differential: identical.
+A pre-existing sibling found in the round is filed below as
+`g-schema-commented-out-declaration-shadows-live-table`.
+
+**S438 ROUND 3 (review of `dccdc1cc`: security core holds; false positives + SPEC accuracy).**
+F-A: SQL inside a multi-line SECURITY-DEFINER `fn` `"""…"""` body no longer raises E-SCHEMA-012 —
+the comment-mode blanker now recognizes `"""…"""` across lines (and `//`, the DSL line comment);
+the harvest is untouched. F-B: `PARTITION OF`, `OF type`, `ON COMMIT`, `WITH`, `TABLESPACE`,
+`INHERITS` are valid name followers; the remaining unreadable heads moved to a DISTINCT code,
+**E-SCHEMA-013** (own §34 + §39.12 rows, newly-rejecting, corpus-measured zero). F-C: `CREATE` must
+start a word, and a head whose modifier words are outside the SQLite/Postgres table-kind set is
+held to the rules only when it reads as a head — prose (`# create the table for tenants`) no longer
+fires. SPEC §39.2 now lists the exempt literal forms and no longer claims a commented-out
+declaration "only adds floor". All new pins are red on `dccdc1cc`.
+
+**S438 ROUND 4 — the last round; NARROWING only (review of `38ec0e14`: no tag loss vs base,
+but round 3's new surface opened escapes).** F1: round 3's word-start guard counted `$` as a word
+character, so `$$CREATE TABLE a.b.assets (…)$$` escaped E-SCHEMA-012 AND dropped out of the
+harvest's structured (extra-keys) leg — round 3's code comment said the harvest was unaffected;
+that was wrong for the extra-keys leg (the pre-S438 leg, and so the ⊇-base guarantee, was
+unaffected). The boundary is now letter/digit/`_` only. F2: round 3's `//` and free-text `"""`
+masks were wider than §39.2 and masked live qualified heads in raw SQL (`DEFAULT $$http://x$$`,
+`"""a"` … `"b"""`). `//` masking is dropped (a `//`-commented qualified head is the accepted
+fail-closed false positive) and the `fn`-body exemption is now STRUCTURAL — the ranges of the
+SECURITY-DEFINER `fn` declarations the `<schema>` parser itself accepts (`schemaFnDeclRanges`,
+the same scan as `parseSchemaBlock`), no free-text pairing. F3: `PARTITION` is a follower only as
+`PARTITION OF`; the no-column-list acceptance is filed below as
+`g-schema-no-column-list-heads-declare-nothing`. All round-4 pins are red on `38ec0e14`.
+
+**S438 FINAL (review of `c59046d2`; fail-closed REMOVAL only).** Round 4's structural fn-body
+exemption was itself an escape: `scanSchemaBlock` sees `fn NAME(…) owner(…)` inside `--` / `/* */`
+comments, strings, and without a brace, and the exemption covered the whole fn span — so a commented
+`-- fn f() owner(r) {` … `-- }` wrapping `CREATE TABLE my-db.public.assets (…, tenant_id …)`
+compiled at exit 0 with no diagnostic and tag=0. The exemption is REMOVED; a qualified/unreadable
+head inside a real SECDEF `fn` `"""` body is now the loud, documented false positive filed as
+`g-secdef-fn-body-ddl-false-positive`. Every other round-4 narrowing is kept.
+
+**(Original entry, kept for the record.) ROUTED TO BRYAN — a §14.8.10 security floor + the `<schema>` recognizer surface. Filed, not fixed.**
 
 The sibling `g-tenant-floor-does-not-harvest-raw-DDL` was rated **HIGH** and RESOLVED by #900
 (`e74f5423`); that flip is genuine and was independently reproduced-as-fixed. **But it closed the
@@ -386,7 +458,113 @@ multi-tenant isolation floor that is silently absent.
 `n` qualifiers is the tempting move, but the qualifier is normalized away downstream, so
 `a.assets` and `b.assets` would collapse to one key — the S405 arc already had two of its own fixes
 cancel each other on exactly this seam (#900 round 3). **Decide the identity model before the regex.**
-— `NEW S410-peter (S239 pass on #901; PA-reproduced by compilation with controls)`; **HIGH**; open
+— `NEW S410-peter (S239 pass on #901; PA-reproduced by compilation with controls)`; **HIGH**; RESOLVED S438 (branch `fix/s438-tenant-floor-qualified-create-table`, E-SCHEMA-012)
+
+### g-schema-create-temp-table-silently-not-a-declaration — `CREATE TEMP TABLE assets (…, tenant_id)` in a `<schema>` declares nothing; beside a second table the tenant floor is inert with NO diagnostic
+
+<!-- @gap id=g-schema-create-temp-table-silently-not-a-declaration sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(schemaCreateTables — the modifier filter; the head reader already READS TEMP/TEMPORARY/UNLOGGED/GLOBAL/LOCAL)+compiler/src/gauntlet-phase1-checks.js(the <schema> body checks) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+
+**Sibling of the RESOLVED `g-tenant-floor-inert-for-a-two-qualifier-create-table`, found by the S438
+bite-test of that fix; NOT changed by it, deliberately.** Same class — a `<schema>` table head the
+recognizer does not count as a declaration — one axis over (a table-kind MODIFIER instead of a
+qualifier). Measured by compilation, `<schema>`-only app, query `SELECT id, name, tenant_id FROM
+assets`, on BOTH `072741ca` and the fix branch:
+
+| `<schema>` body | diagnostics | tenant tag |
+|---|---|---|
+| `CREATE TEMP TABLE assets (id …, tenant_id TEXT)` | `W-SCHEMA-NO-TABLES-DECLARED` | **none** |
+| same + `CREATE TABLE notes (id …, body TEXT)` | **none**, exit 0 | **none** |
+
+**Why not fixed on the S438 branch:** the S435 ruling covers QUALIFIERS; whether a `TEMP`/`UNLOGGED`
+table in a `<schema>` is a DECLARATION (newly-accepting — and `UNLOGGED` would then need stripping
+before the SQLite shadow-DB replay, the #900 seam) or is REJECTED (newly-rejecting) is a language
+call. **PA recommendation: reject** (an `E-SCHEMA-012`-shaped error for a modified head) — a
+schema-as-code declaration of a session-scoped table has no coherent migration meaning, rejecting is
+the recoverable direction (the S290 E-SCHEMA-011 argument), and the reader already sees these heads
+(`findQualifiedCreateTableHeads` rejects `CREATE TEMP TABLE temp.assets` today), so the fix is a
+filter + a message. Corpus use of modified heads in `<schema>`: zero (measured S438, same grep as the
+parent gap). — `NEW S438-peter`; **HIGH**; open
+
+### g-schema-commented-out-declaration-shadows-live-table — a commented-out earlier declaration of the same table (raw or DSL) wins first-wins, so a live `tenant_id` table is silently NOT tenant-scoped
+
+<!-- @gap id=g-schema-commented-out-declaration-shadows-live-table sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(the pre-S438 read inside schemaCreateTables — comment-agnostic, first-wins per key)+compiler/src/schema-differ.js(parseSchemaBlock — reads DSL inside /* */) prov=empirical:S438-peter-fix-round-reproduced-by-compilation-on-98d94e96-and-the-fix-branch-identical -->
+
+**Pre-existing on `98d94e96`, identical on the S438 branch (which deliberately preserves base's
+harvest per key — see the S438 fix-round note above).** The `<schema>` recognizers read declarations
+inside comments, and the harvest is first-wins per table name. So:
+
+| `<schema>` body | tenant tag (query on `assets`) |
+|---|---|
+| `-- CREATE TABLE assets (id INTEGER)` then `CREATE TABLE assets (…, tenant_id TEXT)` | **none**, exit 0 |
+| `/* assets { id: integer primary key } */` then `CREATE TABLE assets (…, tenant_id TEXT)` | **none**, exit 0 |
+
+The commented-out, `tenant_id`-less declaration shadows the live one. **Same class, noted not fixed
+(S438 round 3):** the harvest also reads a plain `CREATE TABLE x (…)` INSIDE a §14.8.11.2
+SECURITY-DEFINER `fn` `"""…"""` body as a `<schema>` declaration (pre-S438 behaviour, held for
+base parity) — runtime plpgsql becomes a declared table, and can shadow a live one the same way.
+(Since the S438 final commit, E-SCHEMA-012/013 also REPORT a qualified/unreadable head there — the
+false positive `g-secdef-fn-body-ddl-false-positive`.) **PA recommendation:** for the
+§14.8.10 declaration read, UNION the columns of every same-name declaration (over-declaring only adds
+floor) rather than change which statement feeds the shadow DB — a fix that preserves the harvest ⊇
+base invariant. Not done in S438: it changes base's per-key record, which the fix round held fixed on
+purpose. — `NEW S438-peter`; **HIGH**; open
+
+### g-secdef-fn-body-ddl-false-positive — a qualified or unreadable `CREATE TABLE` inside a SECURITY-DEFINER `fn` `"""` body raises E-SCHEMA-012/013 although it is runtime plpgsql, not a declaration
+
+<!-- @gap id=g-secdef-fn-body-ddl-false-positive sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(findRejectedCreateTableHeads — no fn-body exemption; parseFnDecl, which would supply the body span)+compiler/src/schema-differ.js(parseSchemaBlock — treats a commented `fn … owner() {` as a real fn) prov=review:S438-final-review-of-c59046d2+empirical:reviewer-cases15-by-compilation -->
+
+**Deliberate, fail-closed, filed by the S438 final commit.** A §14.8.11.2 SECURITY-DEFINER `fn`
+body such as `"""\n CREATE TABLE IF NOT EXISTS audit.snap (…);\n …"""` is runtime plpgsql, but the
+`<schema>` head checks now REPORT its qualified (E-SCHEMA-012) or unreadable (E-SCHEMA-013) heads.
+Loud, never silent; corpus-measured zero. Two exemption attempts in S438 each opened an escape
+(round 3: free-text `"""` pairing masked raw SQL; round 4: the parser's whole-fn span, which a
+commented `-- fn f() owner(r) {` … `-- }` could forge around a live head at exit 0), so the
+exemption was removed rather than patched a third time.
+
+**Reviewer's recommended repair (verbatim):** exempt ONLY the `"""…"""` body span of a
+parser-accepted fn (have parseFnDecl return it) AND require the `fn` token to be live in `masked`
+(not in `--`/`/* */`/quotes).
+
+**Pre-existing finding recorded here:** the `<schema>` parser (`parseSchemaBlock` →
+`parseFnDecl`) treats a COMMENTED `-- fn … owner() {` as a real `fn` — measured as E-DBAUTH-SQLITE
+on a SQLite program on base. — `NEW S438-peter`; **MED**; open
+
+### g-schema-no-column-list-heads-declare-nothing — `CREATE TABLE t OF type` / `PARTITION OF parent` / `AS query` in a `<schema>` compile clean and declare no columns, so a `tenant_id` table reached that way is not tenant-scoped
+
+<!-- @gap id=g-schema-no-column-list-heads-declare-nothing sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(the harvest reads a column list only; readCreateTableHead's CREATE_TABLE_NAME_FOLLOWERS accepts OF / PARTITION OF / AS / WITH / ON / TABLESPACE / INHERITS heads without one) prov=review:S438-round-4-F3+empirical:reviewer-compiled-on-38ec0e14-and-base-identical -->
+
+**Pre-existing on base, unchanged by S438 (whose round 4 kept these heads ACCEPTED rather than
+rejecting them).** A raw head with no column list — a typed table `CREATE TABLE assets OF
+asset_t`, a partition child `CREATE TABLE assets_p PARTITION OF assets DEFAULT`, a CTAS
+`CREATE TABLE assets AS SELECT … tenant_id …` — declares NO columns to the §14.8.9 / §14.8.10
+floors, so a query on that table gets no tenant tag (measured tag=0, exit 0, on base and branch;
+the CTAS case happened to tag only because its source table was declared). The same holds for the
+other accepted followers (`WITH`, `ON COMMIT`, `TABLESPACE`, `INHERITS` — the latter declares its
+own list but not the parent's inherited `tenant_id`). **Direction is bryan's:** reject these in a
+`<schema>` (fail-closed, E-SCHEMA-013-shaped), or resolve their columns (parent / type / query) —
+the latter is a real schema-resolution feature. — `NEW S438-peter`; **MED**; open
+
+### g-schema-dsl-qualified-table-head-silently-stripped — the DECLARATIVE `mydb.public.assets { … }` is accepted as `assets`, so `a.assets` + `b.assets` collapse and the second (with `tenant_id`) is silently dropped
+
+<!-- @gap id=g-schema-dsl-qualified-table-head-silently-stripped sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(parseSchemaBlock — the "advance one char and resume" recovery slides past `mydb.public.` to match `assets {`) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+
+**The DSL twin of the RESOLVED `g-tenant-floor-inert-for-a-two-qualifier-create-table`, found by the
+S438 bite-test; NOT changed by that fix (the S435 ruling names `CREATE TABLE`).** SPEC §39.2's grammar
+is `table-declaration ::= table-name '{' …` — a qualified head is not grammatical — but
+`parseSchemaBlock` recovers from an unrecognized position by advancing ONE character and retrying, so
+it slides past `mydb.public.` and matches `assets {`. The qualifier is silently STRIPPED — exactly
+the identity collapse the S435 ruling rejected for raw DDL. Measured by compilation on BOTH
+`072741ca` and the fix branch, query on `assets`:
+
+| `<schema>` body | diagnostics | tenant tag |
+|---|---|---|
+| `mydb.public.assets { id, name, tenant_id }` | none | emitted (accepted as `assets`) |
+| `a.assets { id, name }` + `b.assets { id, tenant_id }` | **none**, exit 0 | **none** — first wins, the `tenant_id` table is dropped |
+
+**PA recommendation: extend `E-SCHEMA-012` to the DSL head** (the §39.2 grammar already excludes it,
+so this is spec-conformance, not a new rule — and it is the same fail-closed argument). Fix locus:
+detect a `.`-joined identifier chain immediately before a table `{` in `parseSchemaBlock` and report
+it rather than sliding. Corpus use: zero (measured S438). — `NEW S438-peter`; **HIGH**; open
 
 ### g-7.5.2-has-no-row-for-annotated-plus-inference-defeated — the remedy the diagnostic itself recommends routes authors into an unspecified cell
 
@@ -560,7 +738,7 @@ actually reaching a client over HTTP) was NOT tested — the proof here is compi
 
 ### g-baseline-csrf-arm-has-no-instanceof-Response-guard-so-a-deliberate-403-ships-200 — a server fn returning `new Response("forbidden", {status:403})` comes back **200 / application/json / `{}`**, no diagnostic
 
-<!-- @gap id=g-baseline-csrf-arm-has-no-instanceof-Response-guard sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts(the baseline-CSRF server-fn arm emits `_resultExprCsrf` with NO `instanceof Response` passthrough; the authed arm's guard is the ONLY one on a server-fn result path — locate by symbol `grep -n "instanceof Response" emit-server.ts`, the other four hits are the handle() middleware path) prov=dd:scrml-support/docs/deep-dives/document-workflows-egress-upload-dpa-039-2026-09-03.md+empirical:reproduced-by-EXECUTION-at-0d8d7eac-403-returns-200 -->
+<!-- @gap id=g-baseline-csrf-arm-has-no-instanceof-Response-guard sev=HIGH status=resolved locus=compiler/src/codegen/emit-server.ts(the baseline-CSRF server-fn arm emits `_resultExprCsrf` with NO `instanceof Response` passthrough; the authed arm's guard is the ONLY one on a server-fn result path — locate by symbol `grep -n "instanceof Response" emit-server.ts`, the other four hits are the handle() middleware path) prov=dd:scrml-support/docs/deep-dives/document-workflows-egress-upload-dpa-039-2026-09-03.md+empirical:reproduced-by-EXECUTION-at-0d8d7eac-403-returns-200 -->
 
 **REPRODUCED BY EXECUTION at `0d8d7eac`** — a dispatched agent drove the emitted WinterCG `fetch()`
 with a valid CSRF cookie+header pair; the PA independently confirmed the structural asymmetry.
@@ -697,6 +875,8 @@ model, not of the proposal. Filing it separately so the ruling is not charged fo
 ### g-lt-followed-by-space-is-read-as-a-tag-opener-so-ordinary-prose-comparisons-cascade — `<p>if a < b then stop</p>` raises `E-CTX-001` claiming `</div>` tries to close `<b>`
 
 <!-- @gap id=g-lt-space-read-as-tag-opener sev=MED status=open locus=searched:compiler/src/block-splitter.js,compiler/src/ast-builder.js,compiler/SPEC.md — SPEC has NO `tag-open` production and no `U+003C` text; the divergence from the HTML5 tag-open state (which requires an ASCII alpha after `<`) is unspecified in either direction prov=dd:scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-round-1+empirical:PA-reproduced-by-execution-at-8f1cea31 -->
+> **S440 reconfirmed — and a higher-hit position than prose (JS-WAT gauntlet A6 / B#61 / B#27, finder-executed at `7e4bc8155`):** the same `<`+whitespace trigger fires in a TOP-LEVEL declaration RHS. `const <minor> = @age < 18` → `E-CTX-001 "'</div>' tries to close '<18>'"` + `W-WHITESPACE-001 "Opener < 18>"`; `<r> = 10 < 9`, `<v> = "a" < "B"` and `<bw4> = 1 << 31` likewise. `@one<@two` (no space) and the same expression inside `${ }` compile. Loud, but it rejects the most ordinary derived cell there is; the fix lever is the same (§4.3 whitespace opener).
+> **S441 — a SILENT position (audit item 7, executed at `cf62b4154`):** inside a top-level refinement predicate, `<pw>: string(.length > 7 && .length < 255) = "longenough"` compiles exit 0 with only `W-WHITESPACE-001`, loses the initializer (`reactive_set("pw", null)`) and drops the following `<input>` from the HTML. Filed separately as HIGH — g-refinement-predicate-lt-space-silently-eats-decl-and-markup — because this entry's positions are loud; same root.
 
 **PA-REPRODUCED BY EXECUTION at `8f1cea31`:**
 
@@ -813,6 +993,7 @@ Corrected on #509 and the adopter was told to use `_SCRML_IMMUTABLE` in the inte
 ### g-interpolated-template-initializer-on-a-state-cell-is-silently-discarded — `<s> = ` + "`${@a} world`" + ` emits an EMPTY template and the entire initializer is lost, at exit 0 with zero diagnostics
 
 <!-- @gap id=g-interpolated-template-initializer-on-a-state-cell-is-silently-discarded sev=HIGH status=open locus=searched:compiler/src/expression-parser.ts — a multi-quasi template parses to `lit{ raw:"``", value:"" }` so the text never reaches the state-decl initializer; the deciding site was NOT traced, and the `let` form and the single-quasi form both emit correctly prov=empirical:PA-reproduced-on-main-at-499eecce-emits-_scrml_cs_init_set-s-arrow-empty-backticks-with-zero-errors -->
+> **S440 — a sibling shape now fails LOUD (JS-WAT gauntlet A72, finder-executed at `7e4bc8155`):** `` <i11> = `v=${@missing}` `` gives `E-CODEGEN-INVALID-LOGIC "Unexpected character '@'"` (a "compiler defect" blame) rather than the silent discard above. Same multi-quasi-template-initializer family; not separately traced.
 
 **PA-REPRODUCED ON MAIN at `499eecce`** — surfaced by the S402 two-wins dispatch while verifying a
 candidate patch, and confirmed pre-existing:
@@ -1125,6 +1306,9 @@ Emitted verbatim: `function _scrml_bad_1(a, b) { return a * b; }` and `_scrml_lo
 ### g-recent-sessions-index-drops-named-session-wraps — `master-list.md`'s `@generated:recent-sessions` forensic index silently omits **every** wrap commit whose subject carries a contributor suffix, so a whole collaborator's sessions are invisible on a board that reads complete. **PA-CONFIRMED BY EXECUTION on `2ec2ce3a`**: `isSessionClose` (`scripts/state.ts:551-552`) tests `/\bwrap\(s\d+\)/i`, which requires the `)` to follow the digits immediately — `wrap(s390)` MATCHES, `wrap(s389-peter)` does NOT. Measured over the last 600 commits: **12 `wrap(sNNN)` seen, 5 `wrap(sNNN-name)` dropped**, and the index therefore jumps `wrap(s385)` → `wrap(s390)` with S386/S387/S388/S389 absent. ⚑ **The guard cannot see this, by construction.** `refuseDegenerateProjection` fires only on the ZERO-population path (`NO_SESSIONS_SENTINEL`), and its own doc comment records that this guard already went dead once for a different reason — so a **partial** drop is exactly the case it does not cover. A truncated enumeration reads identically to a complete one (base §8, the truncated probe). **This is NOT filed as a turnkey fix, because the fix direction is a question, not a defect:** widening the regex to `\bwrap\(s\d+[^)]*\)` makes one shared index carry both contributors' sessions, and it is not established that a shared index is what is wanted — a per-contributor index, or an explicit contributor column, may be the right shape. Whoever rules it owes a bite proof: the current matcher has never been shown to fail, which is why it has been wrong for at least five sessions with a green `--check` the whole time. — `NEW S391-bryan (found while regenerating the block during a wrap-6d gate failure; matcher behaviour proven by executing the regex against the real commit subjects, not by reading it)`; **MED**; open
 <!-- @gap id=g-recent-sessions-index-drops-named-session-wraps sev=MED status=open locus=scripts/state.ts:551-552(isSessionClose requires a close-paren immediately after the session digits, so a contributor-suffixed wrap subject never matches; recentSessions at :570 then never sees it and refuseDegenerateProjection at :430 only guards the zero-population case) prov=empirical:executed-the-matcher-against-real-commit-subjects-12-of-17-wrap-commits-matched-5-dropped-all-of-them-the-wrap-sNNN-name-form -->
 
+### g-recent-sessions-index-stale-on-main-after-every-wrap-merge — `bun scripts/state.ts --check` FAILS on `main` immediately after every wrap PR merges, by construction. The `@generated:recent-sessions` block is keyed on the wrap commits' SHAs on the trunk, and a wrap PR's own entry is its squash-merge commit — which does not exist until the merge, so the wrap's own `--write` (wrap step 6d) can never include itself. A concurrent wrap compounds it: #1101 (s435) was regenerated before #1095 (s436) merged and was then rebased under `strict:true` without a re-run, so main at `d02738767` listed s433 as newest and omitted BOTH s435 and s436. **PA-CONFIRMED BY EXECUTION at S437:** `--check` on `d02738767` → `FAIL — stale/missing @generated section(s): @generated:recent-sessions`; `--write` on the same tree produced `d02738767 wrap(s435)` and `90130f5a3 wrap(s436)` at the top, then PASS. This is the base §8 **non-deterministic input** gate shape: the gate derives from an input (the post-merge trunk SHA) that does not change WITH the commit being gated, so it goes red on main for reasons no change caused, and the fix is re-run-by-the-next-session, which is how a gate gets ignored. Fix directions (a ruling, not turnkey): key the index on something the wrap commit carries itself (e.g. the PR's head-branch commit / the `wrap(sNNN)` subject, not the trunk SHA), or exclude the newest-wrap row from `--check` and let `--write` catch it up. **S438-peter — a SECOND, independent cause (PA-executed on P-Tech1 at `072741ca`, clean main):** `--check` FAILS with the entries IDENTICAL and only the SHA width different — `%h` / `rev-parse --short` take git's AUTO abbreviation, which scales with each clone's object count, so this clone renders `d0273876` (8) where main carries `d02738767` (9). `--write` here rewrites all 8 rows to 8 chars and `--check` then PASSES, i.e. the section is host-dependent and every clone with a different object count is red on an untouched main (and a `--write` from it churns all rows for every other clone). Turnkey half: pin the width (`--abbrev=9` on the `git log`, `--short=9` on `rev-parse`) in `scripts/state.ts` (`:647`, `:751`, and the `rev-parse --short` stamps). Not applied S438 — left with this gap's ruling.; **LOW**; open
+<!-- @gap id=g-recent-sessions-index-stale-on-main-after-every-wrap-merge sev=LOW status=open locus=scripts/state.ts(recent-sessions section derives from trunk wrap-commit SHAs; the wrap's own squash-merge SHA is post-merge) prov=empirical:state-ts-check-FAIL-on-d02738767-then-write-listed-s435-s436-then-PASS -->
+
 ⚑⚑ **ALL FOUR MATCHING DEFECTS FIXED S410-peter — BUT THIS ENTRY STAYS `open` DELIBERATELY**, because
 the S391 note below reserves the *mechanism* question for bryan (a session anchor is a fact the wrap
 procedure KNOWS and could record as a trailer or tag, rather than being re-derived from prose — the
@@ -1206,7 +1390,12 @@ That mis-measurement was made and caught during this fix, and is pinned in the t
 <!-- @gap id=g-native-sqlite-connection-lacks-wal-and-busy-timeout-config sev=MED status=open locus=compiler/src/codegen/emit-server.ts:727-729(+2438-2441-session-store) prov=adopter:assetManagement-db.js-parity-audit-S387-peter-PA-confirmed-by-execution-scratchpad/dogfood/wal-empirical.mjs-scrml-emitted-new-SQL-reads-journal_mode=delete-busy_timeout=0-vs-db.js-wal/5000 route=bryan:handOffs/incoming/S387-peter-routes.md -->
 
 ### g-ssr-each-under-if-template-silently-blank-first-paint — a server-authority `<each>` wrapped in an `if=` renders its SSR-composed rows into a `data-scrml-each-mount` div that sits INSIDE the `if=`'s inert `<template>`, so the rows never paint — **blank first paint, ZERO diagnostics**. **PA-CONFIRMED by execution** (`scratchpad/dogfood/s387ssr-if-wrap-traps-each-isolation.mjs`, mounted in happy-dom): the identical `<each in=@accounts>` over a seeded server-authority cell paints under a plain `<div>`, no-wrap, and `show=`, but is BLANK under `if=` — all four 0-error/0-warning/0-lint. `if=` lowers to an inert `<template>` + hydrate-marker (`show=` keeps the DOM live, so it is spared). **PA-VERIFIED locus:** `compiler/src/codegen/emit-ssr-render.ts` `buildSsrEachRenderers`→`walk(node, insideEach)` (~404-458) threads only `insideEach`; an each under `<div if=>` has `insideEach===false` → line 413 treats it as a top-level server-render mount → `out.push(r)` (442) emits a renderer for a mount the `if=` template makes inert, and the existing `I-SSR-EACH-CLIENT-RENDERED` fallback lint (429-440) never fires (it keys on an unrenderable ROW TEMPLATE, not if-enclosure). Dominant real-world shape (a guarded list: `if=@loaded`/`if=@currentUser`/`if=@rows.length` around an `<each>`) silently loses its server first paint. **Fork (turnkey in the routing note):** A = thread an `insideInertIf` flag so an if-enclosed each falls back to client-render + fires the existing lint (kills the silence; peter-buildable once ruled) · B = server-render a server-known `if=` branch at first paint (semantics-changed; also closes the sibling `if=@serverState`-never-server-evaluated finding). ROUTED to bryan (design half). — `NEW S387-peter (SSR dog-food Finding 1, PA-confirmed by execution on 551ffcbc)`; **HIGH**; open
-<!-- @gap id=g-ssr-each-under-if-template-silently-blank-first-paint sev=HIGH status=open locus=compiler/src/codegen/emit-ssr-render.ts:404-458-walk-tracks-insideEach-not-if-template-enclosure prov=adopter-shape:assetManagement-guarded-lists-S387-peter-SSR-dogfood-Finding-1-PA-confirmed-by-execution-happy-dom-isolation-each-paints-under-div/no-wrap/show-but-blank-under-if route=bryan:handOffs/incoming/S387-peter-routes-ssr-if-each.md -->
+⛑ **S433 — LIMB A IS LANDED; THE SILENCE IS CLOSED AND THE ENTRY IS NARROWED, NOT RESOLVED.** Per the operator's S385 ruling (*"(a) NOW, (b) AS ITS OWN ARC"*), `walk` now threads an inert-`if=` enclosure reason alongside `insideEach` (`inertIfEnclosureReason`, `emit-ssr-render.ts`), so an if-enclosed each emits NO server renderer and DOES fire `I-SSR-EACH-CLIENT-RENDERED` with the enclosure named and `show=`-shaped advice. **The locus hypothesis in the paragraph above HELD and was WIDENED by a class probe: the misclassification is not limited to `if=` on the immediate parent.** Five shapes reproduced identically and are all now covered — `if=` immediately above · `if=` several levels up (the reason is STICKY) · `if=` on the `<each>` OPENER itself (`node.ifCond`, §17.1.2) · an `else-if=` arm · an `else` arm (an `if`-chain lowers EVERY branch and the else into a `<template>`). ⚠ **What limb A does NOT do: the guarded list still does not paint at FIRST paint** — it paints after hydration, exactly as any client-rendered each does (measured both sides in happy-dom: 0 live rows before hydration, 2 after, identical pre- and post-fix). What changed is that the author is now TOLD, and the compiler stops emitting a renderer whose output it splices into a `<template>` nobody paints. **Direction of change: INERT on the whole shipped corpus** — `scripts/corpus-emit-differential.ts` over 1981 sources / 7698 artifacts: *NO DIFFERENCES* (0 artifact content diffs, 0 diagnostic changes), because no corpus file carries a server-authority each under an `if=`. On the defect shape itself the HTML and client bundle are byte-identical and the server bundle loses only the dead renderer + fill. Gate: `compiler/tests/integration/ssr-a-terminus.test.js` (f) — 9 cases, 6 of them BITE-VERIFIED red against the pre-fix compiler — plus conformance `ssr/i-ssr-each-client-rendered-if-enclosed-pos` and the `show=` control `ssr/i-ssr-each-client-rendered-show-enclosed-neg` (the discriminator is the §17.1 template lowering, NOT "carries a conditional attribute"). **REMAINING (= limb B, the ruled separate arc):** server-render the resolvable `if=` branch at first paint, which also closes the sibling `if=@serverState`-never-server-evaluated finding — `semantics-changed`, bryan's design half, still open. ⚠ **Also MEASURED and deliberately NOT in scope:** an `<each>` inside a `<match>`/`<when>` arm is invisible to `buildSsrEachRenderers` altogether (the arm body arrives as a raw `text` child — the invariant-70 two-parse-origins split), so it emits no renderer AND no lint; that is the conservative client-render fallback, unannounced. Not the blank-paint defect (no wrong renderer is emitted), but a separate residual silence. **Severity re-grade is the PA's call** — the silent-wrong limb is gone; what is left is a loud conservative limitation. ⛑ **S433 FIX ROUND (adversarial review, LAND-WITH-FIXES) — THE FIRST CUT CARRIED AN INVERTED DEFECT OF ITS OWN, AND THE LESSON GENERALISES.** Mirroring emit-html's `if=` **gate PREDICATE** (`isGateableIfValue`) is NOT mirroring its **DISPATCH**: the predicate says whether the gate would accept the value, never whether control flow REACHES the gate. Fourteen tags dispatch to their own handler and `return` first, and there `if=` is silently ignored — no `<template>`, children LIVE. The first cut called them inert and so **DELETED A SERVER FIRST PAINT THAT HAD ALWAYS WORKED**, with a lint whose stated reason was false: REPRODUCED through `compileScrml` for `<errorBoundary if=…>` and for a compound-parent wrapper (2 rows painted → 0, exit 0). ⛑ **A `<page if=…>` reproduction was also claimed in the first draft of this note and is WITHDRAWN — `<page if=…>` hard-errors `E-PAGE-INVALID-ATTR`; the apparent reproduction came from a harness that discards `buildAST`'s diagnostics (see the FIFTEEN-ROUTES entry below for the harness lesson). `page` stays in the bypass set on DISPATCH grounds, which is the only ground the set needs.** Fixed by an exported `IF_GATE_BYPASS_TAGS` derived by **enumerating every `return` above the gate** (`channel errorBoundary errorboundary errors gamepad keyboard mouse page poll program render request timeout timer`), with `outlet` deliberately EXCLUDED — verified, not assumed: outlet REWRITES its node to `main`/`div` keeping `if=` and re-enters `emitNode`, so the gate does fire. ⚑ **AND A THIRD BYPASS THE REVIEW DID NOT FIND: emit-html's COMPOUND-PARENT wrapper dispatch also returns before the gate, and its condition is `lookupStateCell(fileScope, tag) === "compound-parent"` — a per-FILE declaration fact NO TAG SET CAN CARRY.** Reproduced through the real `compileScrml` path (fence LIVE, renderer suppressed); handled by mirroring that test directly off `fileAST._scope`, the same artifact emit-html reads. ⚑ **Second fix-round finding, same silence by a shorter route: an AUTHOR-WRITTEN `<template>` tag**, no `if=` anywhere — renderer emitted, rows in the composed bytes, 0 rows reachable from `document`. Now an inert host in its own right, with its own advice tail (`show=` is no remedy for a literal `<template>`; its content is inert by the HTML standard). **Standing rule this arc earned:** a MISSED inert host costs a missed diagnosis (the pre-existing blank paint, unchanged); a FALSE one costs working output — the two are not symmetric, so every uncertain case must resolve to "not inert". Corpus re-measured after the fix round: over the same 1,985 sources / 7,718 artifacts the ONLY differences are the two new POS conformance cases written to prove the change moves. — `S433-peter (limb A built, reproduced + class-probed + corpus-measured; fix round closed 2 review findings + 1 self-found)`; **HIGH**; narrowed
+<!-- @gap id=g-ssr-each-under-if-template-silently-blank-first-paint sev=HIGH status=narrowed locus=compiler/src/codegen/emit-ssr-render.ts:inertHostFor+walk-threads-inertHost+IF_GATE_BYPASS_TAGS-S433-limb-A-landed;remaining=limb-B-server-render-the-resolvable-branch prov=adopter-shape:assetManagement-guarded-lists-S387-peter-SSR-dogfood-Finding-1-PA-confirmed-by-execution-happy-dom-isolation-each-paints-under-div/no-wrap/show-but-blank-under-if route=bryan:handOffs/incoming/S387-peter-routes-ssr-if-each.md -->
+
+### g-if-has-no-effect-on-fifteen-dispatch-routes-that-return-before-the-mount-gate — `if=` on any of **fifteen** dispatch routes has **NO EFFECT**: the element renders (or its children do) unconditionally. **PA-CONFIRMED by compiling** (S433, through `compileScrml`): `<errorBoundary if=@loaded>` emits `<div data-scrml-error-boundary="…">` with its children in the LIVE tree and **no `<template>`, no mount marker, no binding** — structurally identical output with and without the `if=` (not *byte*-identical: the content-addressed chunk-namespace token moves with any source byte, which is the hash doing its job, not a behaviour difference). **Root, read not inferred:** in `emit-html.ts` `emitNode`'s markup branch, the §17.1 `if=` mount gate is the LAST dispatch (`const ifAttrCheck = attrs.find(a => a.name === "if")`); **fourteen** earlier `return`s hand the node to a tag-specific handler that never consults `if=` — `errorBoundary`/`errorboundary`, `errors`, `render`, `program` (two returns: the named-worker `if (nameAttr) return;` and the transparent-children one), `page`, `channel`, `LIFECYCLE_SILENT_TAGS` (`timer`, `poll`), `INPUT_STATE_TAGS` (`keyboard`, `mouse`, `gamepad`), `REQUEST_TAGS` (`request`), `TIMEOUT_TAGS` (`timeout`) — plus a **FIFTEENTH route, the dynamic one**: a block-form tag resolving to a `compound-parent` cell (a transparent namespace wrapper). The STATIC 14 tag names are exported as `IF_GATE_BYPASS_TAGS` (`emit-html.ts`) because a second consumer needs them; the dynamic route cannot be in a tag set and is mirrored by its own `lookupStateCell` test in `emit-ssr-render.ts`. ⛑ **"SILENTLY" IS FALSE FOR MOST OF THEM, AND THAT WEAKENS FORK A — MEASURED PER TAG (S433 final round), not assumed:** **`W-ATTR-001` ALREADY FIRES and names the attribute** — *"Attribute `if=` is not recognized on `<errorBoundary>` … has no compile-time effect"* — for `errorBoundary`, `errorboundary`, `errors`, `render`, `channel` and `program`. **`<page if=…>` is a hard ERROR, `E-PAGE-INVALID-ATTR`** (plus `W-ATTR-001`) — so `page` is not a silent-drop instance at all. `timer`/`poll`/`keyboard`/`mouse`/`gamepad`/`request`/`timeout` raise no `if=`-naming diagnostic, but every shape that reaches them hard-errors on their own required attributes (`E-LIFECYCLE-009`/`-018`, `E-INPUT-001`/`-002`/`-003`, `E-TIMEOUT-001`, and `E-SCOPE-001` on the `if=` value itself for `timer`/`poll`/`timeout`), so the file does not compile and the drop is not independently observable. ⚑ **THE RESIDUE IS THEREFORE ONE LIMB, NOT FOURTEEN: the compound-parent namespace wrapper — `<signupForm if=@loaded>` compiles CLEAN and diagnostic-free, and its children render unconditionally.** Plus the softer point that on the six `W-ATTR-001` tags an author who does not read warnings gets content rendered that they asked to be conditional. **Fork (a semantics call, not a codegen patch):** A = ESCALATE/EXTEND the existing signal — `W-ATTR-001` covers six of the routes already, so the work is adding the compound-parent wrapper and deciding whether "your predicate does nothing" deserves an error rather than a warning · B = HONOR `if=` on the child-emitting routes by routing them through `emitIfMountGate` (bigger: `<errorBoundary>`'s own `<div>` and the boundary registration would move inside the template, and §17.1.2's `E-IF-IN-DISPATCHED-ARM` interactions need re-checking) · C = document it as intended per route. **Reachability MEASURED: zero instances in 1,985 corpus sources** (0 matches for `<errorBoundary … if=`, 0 for `<page … if=`) and zero `errorBoundary` in the adopter app — LATENT, not live. ⚠ **CARRY THE HARNESS LESSON, NOT JUST THE CORRECTED SENTENCE.** The first draft of this entry claimed `<page if=…>` reproduced the errorBoundary behaviour. It does not, and the reason is the measuring instrument: the round-1 evidence came through `ssr-a-terminus.test.js`'s `compileBundles`, whose `parseAST` returns `buildAST(...).ast` and **DISCARDS buildAST's own diagnostics**, so a FATAL `E-` was invisible to it. Same family as the standing "a probe reading only `result.errors` misses `warnings`/`lintDiagnostics`" lesson, one stage earlier: **a claim about what a compiler says must come from the path that reports everything the compiler says** (`compileScrml`, all three fields). Surfaced as the inverted-defect half of the S433 SSR-each arc; the drop itself is out of that arc's charter. — `NEW S433-peter (found while fixing g-ssr-each-under-if-template-silently-blank-first-paint; per-tag diagnostics MEASURED through compileScrml in the final round)`; **LOW**; open
+<!-- @gap id=g-if-has-no-effect-on-fifteen-dispatch-routes-that-return-before-the-mount-gate sev=LOW status=open locus=compiler/src/codegen/emit-html.ts:emitNode-markup-branch-fourteen-returns-above-the-if-gate+the-dynamic-compound-parent-wrapper-route(static-names-exported-as-IF_GATE_BYPASS_TAGS) prov=PA-confirmed-by-compiling-S433-via-compileScrml:W-ATTR-001-already-names-if-on-6-routes;page-hard-errors-E-PAGE-INVALID-ATTR;the-only-clean-and-diagnostic-free-limb-is-the-compound-parent-wrapper;zero-corpus-instances-in-1985-sources -->
+
 
 ### g-bindvalue-each-select-under-if-drops-initial-value — a `<select bind:value=@cell>` whose `<option>`s come from an `<each>` and that is mounted under `if=` renders with **no option selected** at first paint, though `@cell` matches an option and every option is in the DOM — silent, exit 0, zero diagnostics. **PA-CONFIRMED by execution on HEAD `085570ca`** (happy-dom; minimal repro + class matrix `/tmp/pa-f1.scrml`, aM Fleet Add/Edit form via `scratchpad/am-dogfood/laneA/`). **Class boundary mapped — the discriminator is the conjunction:** each-populated select + `bind:value` + `if=` mount fails; the SAME each-select at TOP LEVEL binds correctly, and a STATIC-option select under `if=` binds correctly. A post-mount `set(cell, …)` DOES update the select — only the INITIAL mount value is dropped. **Root (PA-verified, airtight):** `_scrml_mount_wire` (`compiler/src/runtime-template.js:1667-1668`) runs `rewire` (the emitted `_scrml_bind_rewire` → `select.value = get(cell)`, a no-op while the matching `<option>` does not exist yet) **before** `_scrml_remount_each` (which renders the options); the bind's re-apply effect tracks only the bound cell, never the each's source, so it never re-fires after the options append. Inverse of the correct top-level init order (each renderer runs BEFORE `_scrml_bind_rewire(document)`) — which is why the non-`if=` case works. Same root family as the aM app's imperative-paint-before-`if=`-mount symptom (Lane A Finding 2, MED). Distinct from `#131` (select+bind, general) and RESOLVED S286 `g-bindvalue-value-side-dropped-in-each` (each-item input, no `if=`); NOT gate-covered. **Fork (turnkey in the routing note):** A = swap the mount-wire order so `_scrml_remount_each` runs before `rewire` (minimal, PA-lean; owes the S239 pass for the every-`if=`-subtree blast radius) · B = re-apply the select value after its option children render (surgical; touches `emit-bindings.ts:656/666` + runtime, `<select>`-only). ROUTED to bryan (`if=`-mount effect-ordering = runtime-semantics authority). — `NEW S389-peter (aM client-UI dog-food sweep, PA-confirmed by execution on 085570ca)`; **HIGH**; open
 <!-- @gap id=g-bindvalue-each-select-under-if-drops-initial-value sev=HIGH status=open locus=compiler/src/runtime-template.js:1667-1668-_scrml_mount_wire-calls-rewire(select.value)-before-_scrml_remount_each(renders-options)-inverse-of-top-level-init-order prov=adopter:assetManagement-Fleet-Add/Edit-form-S389-peter-client-UI-dogfood-PA-confirmed-by-execution-085570ca-class-matrix-each-select-under-if-blank-vs-top-level/static-under-if-ok route=bryan:handOffs/incoming/S389-peter-routes-bindvalue-each-select-under-if.md -->
@@ -1227,6 +1416,32 @@ That mis-measurement was made and caught during this fix, and is pinned in the t
 
 ### g-failable-cell-load-fire-and-forget-stale-read-dead-return — a CELL-assigned failable call `@cell = fn() !{ arms }` lowers to `(async () => { … })().catch(_scrml_error_boundary_log)` with NO `await`, and the statements after it are left OUTSIDE the IIFE — so a following read of `@cell` runs SYNCHRONOUSLY against the STALE (pre-fetch) value and the error-arm `return` returns only from the IIFE (dead). **PA-CONFIRMED by execution** (`scratchpad/tool-dogfood/t2/refresh.scrml`+`run-refresh.mjs`, mirrors flogenceP `app.scrml refresh()`): `@needsAttention = @fleet.length` after `@fleet = loadFleet() !{…}` reads 0 over the empty initial cell (expected 2) → the real cockpit "N need attention" header (`app.scrml:1953/2017/2318`, rendered :2966) is PERMANENTLY 0. A bare/const failable in the same fn IS awaited inline (contrast), so the CELL-ASSIGN target is the defect. **Root:** `emit-client.ts:3386-3423` (cell-assigned `!{}` rewrite; continuation left outside per its :3400 comment). **Fork:** A = sequence the continuation (await/hoist) so the return is live + reads see the resolved cell (PA lean) · B = if §52.4 immediate-local-landing must hold, REFUSE/diagnose this form. Ruling owed: await vs refuse. Same fire-and-forget-cell substrate as `g-reactive-write-member-server-call-no-autoawait` (S267) + `G-HANDLER-RECOVERY-INTO-CELL` (S236) — converge. ROUTED to bryan (§52.4 sequencing semantics). — `NEW S389-peter (§64/error-state dog-food, PA-confirmed by execution on 88d59ac9)`; **HIGH**; open
 <!-- @gap id=g-failable-cell-load-fire-and-forget-stale-read-dead-return sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts:3386-3423-cell-assigned-failable-!{}-rewrite-fire-and-forget-async-IIFE-.catch-no-await-continuation-outside prov=adopter:flogenceP-app.scrml-refresh()-S389-peter-dogfood-PA-confirmed-by-execution-88d59ac9-needsAttention-reads-stale-empty-fleet-cockpit-header-permanently-0 route=bryan:handOffs/incoming/S389-peter-routes-tool-surface-4finds.md family=g-reactive-write-member-server-call-no-autoawait+G-HANDLER-RECOVERY-INTO-CELL -->
+
+⚑ **S436 — THE DISCRIMINATOR IS SERVER-ESCALATION, AND IT DECIDES THE MIGRATION DENOMINATOR. PA-VERIFIED BY
+EXECUTION.** bryan RULED this at S435 (option **lift**: await via the straight-line lift, drop the IIFE, so the
+arm's `return` returns from the author's function) and named the pre-work: *"measure flogenceP's 56 arm-`return`
+sites against the new behaviour and tell the flogence side before it lands."* Doing that surfaced a split the
+ruling's framing does not carry, and the PA was one step from relaying a wrong number to flogence:
+
+- **Server-escalated callee** — the shape this entry was filed on (`loadFleet()` doing SQL). The async IIFE,
+  the missing `await` and the dead arm-`return` are all real, exactly as recorded above.
+- **Client-local failable callee** — compiled at S436 (`@fleet = fetchFleet() !{ | ::Boom e :> { …; return } }`
+  where `fetchFleet()` only `fail`s). **There is NO IIFE at all**, the handler is inlined straight into the
+  author's function, and the arm's `return` **already returns from the author's function** — the statement after
+  the handler is genuinely not reached. For this shape the ruling's target behaviour is what already ships.
+
+**So "56 sites change meaning" is wrong as stated.** The affected set is the server-escalated subset. The S436
+census of the population (source-shape, bite-tested after the first classifier counted `return` inside a string
+literal): **flogenceP 55 affected lines / 65 returning arms** — `@cell =` **36**, `const/let =` 10, bare statement
+9 — and **assetManagement 0**, since aM uses no `!{}` handlers at all. **Whoever builds this owes the
+server/client split across those 55 before telling the flogence side anything.**
+
+⚑ **And the same compile shows a distinct silent-wrong on the client path, not previously recorded here:** the
+emitted line is `let _result = _scrml_cs_reactive_set("fleet", _scrml_fetchFleet_4())` — **the cell is assigned
+the ERROR ENVELOPE (`{__scrml_error:true, …}`) before anything checks whether it is an error.** A *handled*
+failure still lands in the cell and every subscriber sees it. The success-path re-assignment then sits after an
+`if`/`else` in which **both** branches `return`, so it is unreachable. Same substrate, same fix arc — recorded
+here rather than filed separately, per converge-don't-enumerate.
 > ⚑ **S391-bryan verification — CONFIRMED (agent-executed, NOT PA-reproduced), with one headline wording correction.** Independently reproduced by execution under happy-dom with a stubbed route: the observed order is `GET fleet -> []` · `SET needsAttention = 0` · `SET phase = "Ready"` and only THEN, after settle, `SET fleet = [...]` — so the stale read and the dead error-arm `return` are both real, and it is **SILENT** (exit 0, zero errors). ⚑ **"a fire-and-forget async IIFE (`.catch`, no await)" is inaccurate as written**: there IS an `await` — `await _scrml_fetch_loadFleet_4()` *inside* the IIFE. What is missing is an `await` on the IIFE **call**, with the continuation pushed after it. The entry's own root-cause prose implies this; the headline overstates it, and the distinction matters because a reader grepping for a missing `await` will not find one. Locus `emit-client.ts:3386-3423` is **decided-here and traced** (instrumented: `resultVar=_scrml__scrml_result_6 nameArg="fleet" interveningLen=61`); current lines have drifted to **3387-3419**. The §52.4 ruling this entry names is still owed and unchanged.
 
 ### g-tool-context-match-emits-await-in-non-async-fn — a `match` inside a non-async `fn` in a `<program kind="tool">` emits `return await (async function() { … })()` — `await` in a NON-async function → runtime `ReferenceError: await is not defined` (exit 1). **PA-CONFIRMED** (`scratchpad/tool-dogfood/t2/tool-simplematch.scrml`, 0 errors; emit `function roleLabel(role) { return await (async function() …`). The PAGE/client path emits a SYNCHRONOUS IIFE for the same match (`return (function(){…})()`) → TOOL-codegen-specific; every tool with a `match` in a helper fn crashes (un-dogfooded because real flogenceP tools branch via `_={…?…:…}=`). **Fork:** mark the wrapping fn `async`, or emit the page path's sync IIFE when arms are sync. ⚑ Likely the SAME incomplete tool-context match emitter as [[g-tool-context-match-loses-enum-field-order]] — one arc, not two patches. ROUTED to bryan (§64 tool codegen). — `NEW S389-peter (§64 tool dog-food, PA-confirmed by execution on 88d59ac9)`; **MED**; open
@@ -1257,6 +1472,22 @@ That mis-measurement was made and caught during this fix, and is pinned in the t
 ### g-nested-block-match-in-dispatched-arm-silently-drops — a block `<match>` nested inside a DISPATCHED `<match>` arm emits no inner dispatcher and **renders nothing at any value**, at exit 0 with zero diagnostics. **PA-REPRODUCED on `bf77be98`:** an outer `<match for=Out on=@outer>` whose `<Show>` arm contains an inner `<match for=In on=@inner>` compiles CLEAN; the emitted client carries `render_Show` and `render_Hide` (2 references each) and **`render_On` / `render_Off` at ZERO**, with exactly **one** `data-scrml-match-mount` div — the outer. The inner match's content is a static string inside the dispatched arm body, and nothing ever wires it. ⚑ **THE REASON THIS IS A RULING AND NOT A FIX IS THAT THE IMPLEMENTATION IS INTERNALLY INCOHERENT AT THIS EXACT POSITION, WHICH I MEASURED RATHER THAN RELAYED:** in the SAME dispatched-arm body, `if=` is LOUDLY REFUSED (`E-IF-IN-DISPATCHED-ARM` — PA-reproduced), `<each>` WORKS, `show=` WORKS, and a nested `<match>` SILENTLY DROPS. Three behaviours across four constructs whose only difference is which one someone got to. A new facet of [[G-IF-MOUNT-INSIDE-DISPATCHED-ARM-BODY]] (open, HIGH, S301); `emit-html.ts:1506` already carries a note that the `if=` guard "APPLIES HERE TOO" for match/engine arm bodies — the note exists, the guard does not. **NOT a duplicate of `g-nested-match-in-arm-body` (RESOLVED S241)**, which is the INLINE value-form `| .X :> match y { … }` — a different construct at a different locus; PA-verified that entry's resolution still holds. **THE FORK IS THE OPERATOR'S** and both limbs move the surface: **(A) REJECT** — extend `refuseConditionalInDispatchedArm` (`emit-html.ts:802`, call sites 1526/1755/2745) to nested `<match>`/`<engine>` and mint `E-MATCH-IN-DISPATCHED-ARM`; newly-rejecting, owes a measured migration, cheap, and makes the four constructs coherent by refusing three of them. **(B) SUPPORT** — emit and wire the nested dispatcher inside the arm's wire fn (`emit-match.ts` + emit-html dispatch), mirroring `<each>`-in-arm which already works; semantics-changed, larger, and per S384's read likely closes the WHOLE G-IF-MOUNT family in one wire-fn redesign rather than one construct at a time. ⚑ **PA recommendation: (B), and the FORK RULE is why.** Row 4 (root vs position) discriminates before row 5 ever gets a vote: (A) is a per-position refusal that leaves the family open and adds a fourth behaviour to a surface that already has three, while (B) fixes the shared wire-fn root that all four constructs hang off. Row 1 (limit-vs-widen) appears to favour (A) and does not actually apply — `<each>` and `show=` already work here, so the position is not a closed surface being widened; it is a partially-implemented one being finished. The cost asymmetry is real and is (B)'s only argument against, which is exactly what row 5 is a tiebreak for and rows 1-4 have already decided. Route: **bryan** — `NEW S383-bryan (routed by S384-peter, PA-reproduced by execution incl. the four-construct incoherence); **HIGH**; open`
 <!-- @gap id=g-nested-block-match-in-dispatched-arm-silently-drops sev=HIGH status=open locus=compiler/src/codegen/emit-html.ts:refuseConditionalInDispatchedArm prov=empirical:S383-PA-reproduced-render_On-and-render_Off-emit-zero-times-one-outer-match-mount-only-exit-0-zero-diagnostics-while-if-equals-is-refused-at-the-identical-position-with-E-IF-IN-DISPATCHED-ARM -->
 
+⛑ **S432-peter — engine-state-child facet: parser half LANDED, WARNING added, fork still open.** Branch
+`fix/s432-closer-in-state-child-parser`. (1) The fork-independent PARSER half of `hold/s429-match-in-engine-state-child`
+(`e0ac22d6`) landed: the engine state-child closer-finders are one open-element stack, so a `</>`-closed capitalised
+element inside a lowercase one no longer steals the state-child's closer (the real case is `<div><Card>…</></div>`;
+9/144 sibling shapes broken on main, all engine-state-child, 0/144 after). (2) That parse fix ALSO stops the false
+`E-ENGINE-STATE-CHILD-MISSING` for a `<match>` with `</>` arms in a state-child, which would have made that spelling
+join the named-`</X>` spelling in the SILENT behaviour (PA-measured on the branch: renders only if the state-child is
+on screen at page load; every later entry — re-entry, or first entry of a non-`initial=` state-child — is BLANK until
+`on=` changes; same via a component or a nested engine; a match inside an `<each>` in the state-child is correct). So
+both spellings now get **`W-ENGINE-MATCH-IN-STATE-CHILD`** (new §34 row, Warning; fired from the post-CE AST in
+`validators/post-ce-invariant.ts`, both pipelines), naming the limitation, this gap, and the working workaround (move
+the match outside the engine into `<div if=(@var == .Variant)>`). **The warning does not decide the fork:** (A)
+promotes it to an error, (B) deletes it with the re-entry fix. (3) The hold ref now carries ONLY the fork-deciding half
+(emit-engine re-entry re-dispatch + emit-match readiness gate / payload reads, its (B)-pinning browser test, MED-1/MED-2);
+its parser + VP-2 hunks are already on main via this branch and must be dropped when it is rebased.
+
 ### g-outgoing-staged-has-no-promotion-step-so-adopter-replies-are-never-delivered — `handOffs/outgoing-staged/` is a **WRITE-ONLY GRAVEYARD**: notes are authored into it and **nothing ever promotes them to the peer's `incoming/`**. The S310 RETURN-LEG RULE says a ruling answering a routed ask is dropped into the asker's `handOffs/incoming/` (write + commit + push); `outgoing-staged/` is a DIFFERENT artifact and no probe, wrap step or contract line reads it. **PA-MEASURED S385 — 4 notes resident, to 3 different adopters:** `2026-08-29-…-flogence-…-match-arm-workaround-and-triage` (`status: staged`, **confirmed never delivered** — flogence's `incoming/` holds only `read/`, and flogence found the reply by READING OUR TREE) · `STAGED-6NZ-resume-dogfooding-v0.6.7` and `STAGED-giti-resume-dogfooding-v0.6.7` (both `status: unread`, dated **2026-05-29 — ~93 days**) · `2026-08-02-…-rediledger-channel-gap-accepted-plus-unblocked` (claims `status: delivered 2026-08-02` but the PA could NOT locate it anywhere in RediLedger's tree). ⚑ **THE ADOPTER DIAGNOSED IT BEFORE WE DID, AND COUNTED IT: "That is now three times, and the failure is always the last hop, never the reasoning."** (flogence S36, 2026-08-30 — the same way they found the S279 ruling and #225/#228.) ⚑ **A `status:` field written by the note's own author is NOT evidence of delivery** — it is the §1 laundered-provenance shape wearing a frontmatter key: the only evidence is the file existing in the PEER's tree, committed and pushed. **This is base §10 exactly — the obligation (`incoming/`) and the artifact that actually holds the work (`outgoing-staged/`) are different files, so the check passes while the message never moves.** Fix direction (unverified): either delete `outgoing-staged/` so the only path is a direct peer-inbox write, or add a wrap step that promotes it and a probe that flags any staged note older than one session. **Cost so far is not hypothetical** — one blocking escalation and two ~3-month-old dogfooding restarts, and in the flogence case our triage was correct and simply never arrived. — `NEW S385-bryan (surfaced by flogence PA S36; PA-MEASURED, 4 notes, 3 adopters); **HIGH**; open`
 <!-- @gap id=g-outgoing-staged-has-no-promotion-step-so-adopter-replies-are-never-delivered sev=HIGH status=open locus=handOffs/outgoing-staged/ prov=adopter:flogence-S36-counted-three-delivery-failures-and-PA-measured-4-resident-notes-to-3-adopters-two-of-them-93-days-old-with-no-promotion-step-anywhere -->
 
@@ -1267,17 +1498,48 @@ That mis-measurement was made and caught during this fix, and is pinned in the t
 
 ### g-derived-engine-projection-ignored — `<engine for=T derived=@src>` with body projection arms emits **TWO substrates and consults the wrong one**: §51.0.J (an IDENTITY projection — the live read path, via `_scrml_cs_reactive_get`) and §51.9 (the correct mapping, `_scrml_derived_fns`, **never consulted**). So `@derived` mirrors the raw source instead of the projection the author wrote. ⚑ **The §51.0.J identity is DELIBERATE** — the rich `derived=match @x { … }` form is **NOT YET PARSED** (`emit-engine.ts:3310-3324`) — so this is a **half-implemented feature**, not a regression, and that is exactly why it is a ruling: the fork is whether to parse the projection form and retire the identity substrate, or keep identity and refuse the projection body loudly. Adopter-visible: **flagship 14's risk banner never renders.** — `NEW S381-peter (dog-food sweep); FILED S385-bryan; **HIGH**; needs bryan (projection-form + substrate-reconciliation ruling)`
 <!-- @gap id=g-derived-engine-projection-ignored sev=HIGH status=ruling-gated locus=compiler/src/codegen/emit-engine.ts:3310-3324 prov=adopter:S381-peter-dogfood-two-substrates-51.0.J-identity-live-and-51.9-derived-fns-never-consulted-rich-derived-match-form-not-yet-parsed-flagship-14-banner-dead -->
+> **S441 re-verified (tutorial-fix T4, at `cf62b4154`):** still live on the flagship `examples/14-mario-state-machine.scrml` — client.js L49 `_scrml_cs_derived_declare("healthRisk", () => { … return __scrml_derived_v; })` is the identity projection, and the correct mapping `_scrml_derived_fns["healthRisk"]` (L124) is never read, so `@healthRisk` holds values like `"Small"`. (The example's arms are `=>`-separated variant arms, not an arrow-function body.)
 
 ### g-checked-expr-attr-always-checked-for-falsy — a one-way `checked=<expr>` renders **CHECKED for any falsy value**. The compiler emits the raw source text as a literal string attribute (`checked="f0"`) with **no reactive wiring**, and the lifted-`for` path calls `setAttribute("checked", …)` **unconditionally — never `removeAttribute`** — so the box can never un-check. ⚑ **The asymmetry is the tell:** `class:done` on the SAME element correctly treats `0` as falsy, so two binding surfaces on one element disagree about truthiness. **The open question that makes it a ruling:** is one-way boolean-attribute binding a SUPPORTED form at all, or is `bind:checked` the only sanctioned one — in which case this is a missing-diagnostic rather than a codegen bug. Adopter-visible: **flagship 18.** — `NEW S381-peter (dog-food sweep); FILED S385-bryan; **HIGH**; needs bryan (is one-way boolean-attr binding supported?)`
 <!-- @gap id=g-checked-expr-attr-always-checked-for-falsy sev=HIGH status=ruling-gated locus=searched:compiler/src/codegen/emit-html.ts,compiler/src/codegen/emit-each.ts(lifted-for-setAttribute-path) prov=adopter:S381-peter-dogfood-checked-expr-emits-raw-source-as-a-literal-string-attr-with-no-reactive-wiring-and-setAttribute-unconditional-while-class-colon-done-on-the-same-element-treats-0-as-falsy -->
 
 ### g-fail-variant-shorthand-rejected-by-ts-context — `fail .Variant` (the bare-variant shorthand) is **rejected by `E-ERROR-009` at the TS stage** while the qualified `fail E.Variant` compiles. **S382-peter VERIFIED + ROOT-CAUSED + SPEC-checked: a SPEC-INTERNAL grammar-reconciliation RULING, not a bug fix.** ⚠ **The reject fires ONLY when the declared error enum RESOLVES** — a canonical `type ContactError:enum = { … }` declaration produces `E-ERROR-009`; a non-canonical `enum ContactError { … }` does not. The diagnostic is gated on a condition orthogonal to the shape it names. Adopter-visible and blocking: **flagship `09-error-handling` fails to compile — 4× `E-ERROR-009`** (`validate` ×3, `submit` ×1), and `login.scrml` likewise. Bare-variant inference is §14.10-sanctioned elsewhere (`<x>: Phase = .Idle`), which is why the shorthand reads as legal to an author and why the reconciliation is bryan's. — `NEW S381-peter (dog-food sweep), VERIFIED S382-peter; FILED S385-bryan; **HIGH**; needs bryan (SPEC-internal grammar reconciliation)`
-<!-- @gap id=g-fail-variant-shorthand-rejected-by-ts-context sev=HIGH status=ruling-gated locus=searched:compiler/src/type-system.ts(E-ERROR-009-fire-site),compiler/SPEC.md-§19,§14.10 prov=adopter:S381-peter-dogfood-VERIFIED-S382-peter-flagship-09-fails-4x-E-ERROR-009-and-the-reject-fires-only-when-the-error-enum-RESOLVES-canonical-type-enum-decl-vs-non-canonical -->
+<!-- @gap id=g-fail-variant-shorthand-rejected-by-ts-context sev=HIGH status=resolved locus=compiler/src/type-system.ts(annotateNodes-§19-fail-expr-E-ERROR-009-site-bare-resolution),compiler/SPEC.md-§19.3.1,§19.3.3,§14.10,§34-E-ERROR-009 prov=ruling:user-voice-scrml.md-S441-"fail-shorthand-yes"+adopter:S381-peter-dogfood-VERIFIED-S382-peter -->
+
+**RESOLVED S441** (`s441-fail-bare-variant`; ruling: user-voice-scrml.md S441 "site yes, fail shorthand yes"). `fail .V` /
+`fail .V(args)` / `fail ::V` now resolve the bare variant against the enclosing function's declared `!` error type
+(bare `!` → built-in `Error`, so `fail .Generic(m)` ≡ `fail Error.Generic(m)`). The E-ERROR-009 site in `type-system.ts`
+resolves first and writes the enum name onto the `fail-expr` node, then runs the unchanged §19.3.3 checks on the
+resolved variant — invalid name → E-ERROR-009 (Valid-variants list), valid name + wrong arity → E-TYPE-082. Codegen is
+byte-identical to the qualified form (asserted in `compiler/tests/unit/fail-bare-variant-shorthand-s441.test.js`).
+The gate asymmetry is closed: a bare `fail .V` whose declared type does NOT resolve to an enum (undeclared, non-enum,
+the non-canonical `enum E {…}` that never registers) is now E-ERROR-009 instead of passing vacuously; an imported
+error enum resolves (an import the registry lacks is exempt: unverifiable, not invalid). SPEC: §19.3.1 grammar makes
+`enum-type` optional, §19.3.3 gains the normative bare-form bullet, §14.10 lists the `fail` target as a position, §34
+E-ERROR-009 row reworded. Corpus: newly-accepting only — `examples/09-error-handling.scrml` and two
+`samples/compilation-tests/gauntlet-s19-phase1-decls/` files flip FAIL→OK; zero files flip OK→FAIL.
+⚑ **Surfaced, not fixed (pre-existing, identical under the qualified spelling):** 09's `<Failed err>` arm renders an
+EMPTY message at runtime — a catch-all `!{}` arm `| err :> …` lowers to `const err = result.data` (the payload), not the
+error variant, so `errorMessage(err)` gets `null` for `.EmptyName`. Filed separately; see the S441 report.
+
+### g-qualified-fail-against-non-enum-error-type-undiagnosed — the qualified `fail T.V` in a function declared `! T`, where `T` is undeclared / a non-enum type / a type alias, compiles with NO diagnostic — `NEW S441`; **MED** (silent acceptance of an invalid error type; the bare form is already fail-closed); open
+Executed on the s441-fail-bare-variant tip: `function check(n: string) ! Undeclared { if (n == "") fail Undeclared.X }` compiles at exit 0. So do `! S` with `type S:struct = {…}` + `fail S.X`, and `! A` with `type A = E` + `fail A.V`. The emitted envelope is `{ __scrml_error: true, type: "Undeclared", variant: "X", … }` — a variant of a type that does not exist. §19.4.4.1 already requires the `!` error type to be an enum and names **E-ERROR-011** (reserved, no emitter) for the non-enum case, so this is the qualified-form half of that unbuilt emitter. The impl half is tracked under [[g-failable-error-type-non-enum-spec-vs-corpus-conflict]] ("REMAINING — the impl half is NOT built"). The bare form `fail .V` against the same types reports **E-ERROR-009** as a carried interim (§19.3.3, S441), which E-ERROR-011 subsumes when it ships. A second strand: an UNDECLARED name in the `!` position is not reached by §14.1.2 `E-TYPE-UNKNOWN-NAME`, because the `!` error-type position is absent from that rule's Loci list. Decide whether that code or E-ERROR-011 owns the undeclared case. **Direction: newly-rejecting** — measure the corpus before landing (§34.0 / pa-base §8). The s441 corpus sweep (2,033 files) found no qualified `fail` against an unresolved `!` type among files that compile, but that sweep was not targeted at this shape. Re-measure.
+<!-- @gap id=g-qualified-fail-against-non-enum-error-type-undiagnosed sev=MED status=open locus=compiler/src/type-system.ts(annotateNodes-§19-fail-expr-E-ERROR-009-site,validVariants===null-branch)+compiler/src/ast-builder.js(consumeErrorTypeAnnotation-E-ERROR-011-natural-site) prov=review:S441-fail-bare-variant-PA-review-N1-reproduced-by-execution -->
+
 
 <!-- ⚑ S385-bryan filing batch 5 — the "separable defects, file not design" set from dpa-028 (offline/PWA, 2026-08-15). The DD named FOUR; the PA reproduced each by execution before filing rather than relaying, and ONE DID NOT REPRODUCE (recorded below, not filed). bryan: "file those four". -->
 
 ### g-when-changes-effect-fires-eagerly-at-registration — a `when @cell changes { … }` block RUNS ONCE AT BOOT, before anything has changed. **PA-REPRODUCED by emit on `9a0ad569`:** the block lowers to a bare `_scrml_effect(function(){ … })` (observed verbatim: `_scrml_effect(function() { if (_scrml_cs_reactive_get("online")) _scrml_flush_4();; });`), and `_scrml_effect` runs its body immediately at registration to collect dependencies — so the "changes" body executes at module init with the cell's INITIAL value. For the canonical offline shape (`when @online changes { if (@online) flush() }`) that means **a flush fires at page load**, against a queue the author expects to be replayed only on a transition. ⚑ **The name is the contract:** `changes` says "on change", and the S130 axiom is that state fully describes its own transitions — an edge-triggered construct that also level-triggers at boot is the construct disagreeing with its own name. **Spec-intent needs confirming before a fix direction is chosen** — if eager-first-run is intended, the SPEC must say so and the PRIMER must warn, because the emitted `_scrml_effect` is indistinguishable from a `${}` reactive block at the source level. Cosmetic rider observed in the same emit: a doubled statement terminator (`_scrml_flush_4();;`). — `NEW S385-bryan (dpa-028 separable defect 2; PA-reproduced by emit inspection); **MED**; open`
-<!-- @gap id=g-when-changes-effect-fires-eagerly-at-registration sev=HIGH status=open locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-event-wiring.ts,compiler/src/runtime-template.js(_scrml_effect) prov=dd:scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md-separable-defect-2-PA-reproduced-by-emit-the-when-block-lowers-to-a-bare-scrml-effect-which-runs-at-registration -->
+<!-- @gap id=g-when-changes-effect-fires-eagerly-at-registration sev=HIGH status=resolved locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-event-wiring.ts,compiler/src/runtime-template.js(_scrml_effect) prov=dd:scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md-separable-defect-2-PA-reproduced-by-emit-the-when-block-lowers-to-a-bare-scrml-effect-which-runs-at-registration -->
+
+**RESOLVED S432-peter** (`fix/s432-when-changes-dep-list`; P7 criterion 2 — assetManagement `portal.scrml:6656` documents
+working around the eager boot run so it would not silently overwrite a restored offline queue). `when … changes` now lowers
+to one `_scrml_reactive_subscribe` per LISTED dep around `_scrml_when_changes`: no mount run, no auto-tracked reads, body
+untracked, a sync re-entry gets one bounded re-run (cap 1, then an E-LIFECYCLE-006 console.error), an async body's rejection
+is reported, nested server calls are awaited. Fixed with it: §6.5.1 expression-position mutating methods and field/index
+writes now notify (the inline-handler `@items.push` no-notify noted below); the derived-dep half of E-LIFECYCLE-007
+(SPEC §6.7.5) is enforced at codegen. Three S239 rounds: R1 five findings, R2 the cap regression, R3 LAND; full tiers
+186 = 186 identical failure set vs 280ecbdd.
 
 ⛑ **S429-peter — WIDER THAN FILED, RAISED TO HIGH.** PA-verified on `085ddbe8` (program level AND inside `${}`): the
 `_scrml_effect(function(){ body })` lowering breaks all three §6.7.4 clauses, not just the eager run. `when @n changes
@@ -1303,6 +1565,7 @@ Behaviour changes measured on the corpus: `when-001-basic-effect`, `gauntlet-r10
 
 ### g-foreign-block-reading-a-browser-global-escalates-the-client-fn-to-the-server — a CLIENT function that reads a browser-only global through `_={ … }=` is **server-escalated**, so the global is evaluated where it does not exist. **PA-REPRODUCED by execution on `9a0ad569`:** `function checkOnline() { const v = _={ in: {} navigator.onLine }= ; @online = v }`, called from an `onclick`, emits `async function _scrml_fetch_checkOnline_3()` performing `await fetch("/_scrml/__ri_route_checkOnline_1", {method:"POST", …})` and produces a `.server.js` — `navigator.onLine` is routed to the server, where `navigator` is undefined. ⚑ **It also fails to compile, for a reason that makes the footgun worse:** `E-CPS-NONIDEM-NO-STORAGE` (2 errors) — the escalation drags in the A9-Ext-5 idempotency-key machinery and then demands a storage backend, for what the author wrote as a purely local browser check. So the author's diagnostic names an idempotency-storage gap and says nothing about the escalation that caused it. **This is the §12 inference boundary meeting §23's opacity rule:** the `_{}` interior is opaque (§23.2.3) so the compiler cannot see that `navigator` is client-only, and §12.2's escalation triggers treat the host reach as a server signal. The DD framed this as "documented behaviour … the emitted client reads an unbound continuation local"; the PA's reproduction is **sharper and worse** — full escalation plus a misleading terminal error. Fix direction unverified: candidates are a client-only `_{}` form, a browser-global recognition set at the §12.2 trigger, or a targeted diagnostic naming the escalation. — `NEW S385-bryan (dpa-028 separable defect 4; PA-reproduced by execution, and the reproduction sharpened the claim); **HIGH**; open`
 <!-- @gap id=g-foreign-block-reading-a-browser-global-escalates-the-client-fn-to-the-server sev=HIGH status=open locus=searched:compiler/src/route-inference.ts,compiler/src/codegen/emit-server.ts,compiler/src/type-system.ts(§12.2-triggers) prov=dd:offline-pwa-dpa-028-separable-defect-4-PA-reproduced-navigator-onLine-in-a-client-fn-emits-a-POST-to-_scrml-__ri_route-and-a-server-js-plus-a-misleading-E-CPS-NONIDEM-NO-STORAGE -->
+> **S440 reconfirmed (dpa-056 §2.1 P3b, DD-executed at `048df04db`):** an inline `_={ … }=` foreign block using `SharedArrayBuffer`/`Atomics` in a client-looking function under `<program lang="js">` is moved to the SERVER (client gets a CSRF'd fetch stub; HTTP 200 body `5`), no diagnostic — client compute silently becomes a network round trip. dpa-055 M9 saw the same for `_={}` feeding a cell (the cell starts `undefined`, page throws at mount). RULED S440 dpa-056 R6: a diagnostic now; client-side foreign placement banked.
 
 ### g-primer-has-no-entry-for-when-changes-or-browser-storage — `docs/PA-SCRML-PRIMER.md` — the canon snapshot every PA and every dispatched writer reads — contains **ZERO** occurrences of `when @` or `localStorage` (PA-MEASURED: `grep -ci 'when @\|localstorage'` returns **0**, and `PA-SCRML-REFERENCE.md` returns 0 for `localStorage` as well). `when @cell changes { … }` is a live reactive construct that dpa-028 exercised end-to-end in a compiling adopter-shaped program, and browser storage is the substrate of every offline recipe. **Consequence, and it is not cosmetic:** the anti-pattern briefing exists to counter training-data reflexes, and an LLM-authored corpus (100% of it, per S368) will reach for `useEffect`-shaped idioms and `localStorage` unguided if the canon is silent. A PA dispatching an offline-shaped writer today briefs neither. — `NEW S385-bryan (dpa-028 separable defect 3; PA-MEASURED by grep, both files); **LOW**; open`
 <!-- @gap id=g-primer-has-no-entry-for-when-changes-or-browser-storage sev=LOW status=open locus=docs/PA-SCRML-PRIMER.md prov=dd:offline-pwa-dpa-028-separable-defect-3-PA-measured-zero-occurrences-of-when-at-or-localStorage-in-the-primer-and-zero-localStorage-in-the-reference -->
@@ -2543,6 +2806,7 @@ and should be decided WITH it, not separately. **Reproduce before fixing.**
 
 ### g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources — the auto-await arc's motivating bug class is still live at ~150 call sites across cleanly-compiling corpus sources — `NEW S322-bryan (measured by the wide-corpus harness + an independent reviewer sweep); HIGH; open`
 <!-- @gap id=g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources sev=HIGH status=open locus=searched:compiler/src/codegen/emit-expr.ts,emit-client.ts,scheduling.ts,emit-functions.ts prov=dd:autoawait-choke-point-vs-heterogeneous-2026-08-04 -->
+> **S441 (review:S441-f4f5-review):** seven residual positions of this family are filed separately in §S441c (Promise.all batch operands, markup gates, top-level async closures, cross-file helpers, top-level derived constants, a handler-local shadow renamed to a fetch, handler parallelization), and a `.then` on an awaited call in a function body is noted there.
 
 **⚑ THE ID BAKES A STALE FIGURE — 150 vs 142. Do NOT rename it; `scripts/threads.ts` and the review records key on the id.** The `150` is the harness's wider **pre-rebase** count (looser counting rule, wider corpus). The **landed** re-measure, on the rebased tree under the fixed dual-goggle gate, is **142 bare of 464 across 103 sources, delta 0 base→head** — that is the figure in the changelog, delta-log [1171], and #429/#442. An independent reviewer's third count, different rule again, was 49 of 148 across 70 sources. **All three agree on the only number that gates anything: the delta is ZERO.** Cite 142 when quoting the current surface.
 
@@ -2802,6 +3066,7 @@ DD §0.3 then enumerates the entire `<program>` attribute surface **as it stood 
 
 ### g-no-caching-for-per-visit-expensive-request-work — `keep-alive` is SQL-server-load-only, so v1 has NO caching answer for expensive per-visit HTTP work in a `<request>` — `NEW S314-bryan (surfaced expounding Edge-2 fork 4); MED; open (PRE-V1 FOLLOW — owes a disposition before the language freeze, not a deferral to v1.next)`
 <!-- @gap id=g-no-caching-for-per-visit-expensive-request-work sev=MED status=open locus=compiler/SPEC.md:15802 prov=spec:§20.8.4 -->
+> **⚑ S444 premise correction (dpa-060 C2/C4, confirmed by reading `body-dg-builder.ts` `collectSqlFacts` / the `invalidates` edge and `sql-projection.ts` `fromTables`):** "a `<request>` … has no table read-set" is true only for the `url=` / `api=` forms. A body-form `<request>` (`${ @x = serverFn(…) }`) calls a server fn whose `?{}` read-set the compiler already derives. See dpa-060 for the disposition.
 **⚑ PRE-V1 FOLLOW (bryan, S314).** This is a MODEL gap, not a bug — nothing is broken, a capability is absent. It is marked pre-V1 because a capability boundary nobody wrote down is discovered by an adopter, and §62.5's 1.0-final gate is *"the corpus is the agreed surface"*. It owes a **disposition** before freeze — build, strike, or Nominal-label with the boundary stated — per the S310 Q1 (a)-as-DISPOSITION framing (*every freeze-relevant item gets disposed; only the guarantee-bearing ones get BUILT*). It does NOT owe a build.
 
 **Established from the mechanism, not the summary sentence.** §20.8.4 reads as a general route-payload cache in its first line, but every mechanism it specifies is a DATABASE mechanism: keyed by *"only-the-params that reach SQL"*; each sub-payload's table read-set derived at build time via `extractSelectProjection()`; invalidation by *"one Postgres `AFTER INSERT/UPDATE/DELETE` trigger per read table"*; a non-Postgres substrate falls back to focus-revalidate; a multi-database route is *"push-coherent only for its Postgres reads"*.
@@ -3576,6 +3841,8 @@ Three independent axes hide in that 235 B, and **only one of them is compression
 
 **What stays open, and why this entry is not resolved:** the shell shape is **9,628 B over** the aspiration and that is a real, tracked, unhidden gap. The ratchet stops it widening; it does not close it. The live work is the reduction itself — see [[g-emitted-js-never-minified-prize-unmeasured]] (the `--minify` flag is a documented no-op) and runtime tree-shaking. **What is no longer open is the fork**, and no future deliberation should be built on "16 KB with N bytes of margin" as though it described the shipped runtime. <!-- @gap id=g-spa-runtime-gzip-budget-knife-edge sev=HIGH status=open -->
 
+> **S440 (PA-measured):** after #1137 (Date/built-in cell + `==` runtime rules) the gated counter-shape runtime sits **9 B under** the Phase-B 16 KB gzip gate — the aspiration gate on the counter shape is back on a knife edge, independent of the shell overage above.
+
 ### G-SCHEMA-REFERENCES-DOT-FORM-EMITS-NO-FOREIGN-KEY — the SPEC-documented `references(parent.col)` form silently emits NO foreign key — `NEW S288; HIGH; open (adopter-reported, Adopter-A S5)`
 **Run-verified by Adopter-A against a real 19-table schema at `c700c435`: 34 `references()` declared → 189 statements applied → `0` rows in `pg_constraint WHERE contype='f'`, and an INSERT naming a non-existent parent was ACCEPTED.** Compile-clean, apply-clean, no diagnostic anywhere.
 
@@ -3914,6 +4181,7 @@ Adversarial-review finding (LOW). `generateSecdefDDL` grants the bounded owner C
 
 ### G-DECIMAL-MONEY-FIXED-POINT-SCALAR-AND-WIRE-CODEC-SEAM — no fixed-point/Decimal scalar + no author-controlled wire codec (Adopter-A S9) — `NEW S287; MED; open`
 Adopter-A's S9 ask (2026-07-25, adopter-validated read of the compiler): scrml's numeric vocabulary is `number`+`int` (both IEEE-754 doubles, §14.1.2); `<schema>` has only `real` for fractionals (no `decimal`/`numeric` column type, §39.4); `scrml introspect` remaps PG `numeric`/`decimal`/`float8` → `real` (`schema-differ.js:682-683`) — the exact float-corruption class for money (`7.89 → 7.889999…`); and there is **no author-controlled wire-codec seam** (a server-fn value serializes directly to JSON, §61.5/§57.3, so a `number` always crosses as a JSON number). Ask: a first-class **`decimal`** scalar mapping to PG `numeric`, serializing as a JSON **string** on every boundary, with arithmetic-without-float. The structural half — an author-controlled (de)serialize seam (a branded/opaque scalar whose wire form the author controls) — is a **general** capability with `decimal` as its first client, and is likely the load-bearing half. **Independent of the DB-authoritative security tier; parallel-buildable; ~L; P1, no timeline.** Also surfaced M1-side: `uuid`/`decimal` aren't legal `<schema>` column types today (hit `E-SCHEMA-004`), so a real financial db-authoritative schema can't declare them from source yet. Adopter hold meanwhile: money-as-`string` end-to-end + a negative test. Roadmap slotting is bryan's. <!-- @gap id=g-decimal-money-fixed-point-scalar-and-wire-codec-seam sev=MED status=open -->
+> **S440 (dpa-054 D2, DD-executed at `048df04db`):** the introspect mapper is a type lie in BOTH directions, not only lossy: executing `mapPgTypeToScrml` (`schema-differ.js:~2657-2692`) gives `numeric`/`decimal` → `real` and `bigint`/`int8` → `integer`, while Bun.SQL delivers all four as JS STRINGS (see g-pg-numeric-and-bigint-arrive-as-strings-so-arithmetic-concatenates); `money` → `text` + unmapped. The docstring's "without loss" is false. dpa-054 #2 RULED S440: Pole A, a core `decimal` type designed into the bootstrap.
 
 ### G-DBAUTH-BEARER-TOKEN-PRINCIPAL-AND-EXTERNAL-API — native-client bearer-token principal resolution + a stable versioned external JSON API (Adopter-A addendum; rides A1/S2) — `NEW S287; LOW; open`
 Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the life of the product) authenticates with a bearer JWT, not scrml's web-cookie session (§20.5.1). Ask (rides A1/S2, **not** a new root): (1) a bearer-token auth mode where the token resolves the **same** principal A1/S2 injects into the DB session (identity's second front-door, not a parallel authz path — RLS/`SET LOCAL` context reads identically regardless of caller); (2) a stable, versioned external JSON API surface for the native consumer (cf. `kind="tool"` modules). **Structurally accommodated by M1 already** — the A1 wrapper injects the principal via `_scrml_active_tenant(_scrml_req)` and is agnostic to how identity resolves, so a token front-door is additive, not a retrofit. NOT gating the reads-tier; needed at Adopter-A's native re-point step (post-reads-tier). Kept in view for the A1/S2 principal design. <!-- @gap id=g-dbauth-bearer-token-principal-and-external-api sev=LOW status=open -->
@@ -4693,8 +4961,188 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 > it is a few lines against a file that is about to be opened anyway. See
 > `docs/changes/ruling2-bare-call-landing-2026-08-26/DE-RISK.md`.
 
-### g-if-arm-bare-markup-branch-silently-dropped — ⭐ a lift-less MARKUP branch in a value-form `if` renders NOTHING at exit 0 with zero diagnostics, while the identical branch holding a STRING renders correctly
-<!-- @gap id=g-if-arm-bare-markup-branch-silently-dropped sev=HIGH status=open locus=compiler/src/codegen/emit-html.ts:isValueFormIfStmt(the value-form classifier)+compiler/src/codegen/emit-lift.js:emitIfStmtWithContainer(called from compiler/src/codegen/emit-control-flow.ts:725) prov=adopter:S377-peter-dog-food-routed -->
+### g-if-arm-bare-markup-branch-silently-dropped — ⭐ a lift-less MARKUP branch in a value-form `if` renders NOTHING at exit 0 with zero diagnostics, while the identical branch holding a STRING renders correctly — `HIGH; RESOLVED S433`
+<!-- @gap id=g-if-arm-bare-markup-branch-silently-dropped sev=HIGH status=resolved locus=compiler/src/implied-lift-desugar.ts(the pass)+compiler/src/component-expander.ts(runCEFile head — the pipeline seam)+compiler/src/codegen/emit-match.ts(re-applied after the bodyRaw re-parse)+compiler/src/type-system.ts(liftedMarkupChildNodes — the lifecycle-walker hole the desugar newly reached) resolved-by=S433-implied-lift-desugar prov=adopter:S377-peter-dog-food-routed -->
+
+> **⛑ RESOLVED S433 — and the ROUTED LOCUS HYPOTHESIS WAS HALF WRONG, which is the instructive part.**
+> The routed hypothesis named `emit-html.ts:isValueFormIfStmt` as the classifier to widen. It IS the
+> classifier that declines (`isSoleBareExprBranch` requires `kind === "bare-expr"`, and a bare-markup
+> arm parses to `{kind:"html-fragment"}` — AST-dumped, not inferred), **but widening it is the wrong
+> fix, and the sibling `match` limb is the measured proof.** The value-form route lowers an arm to a
+> CONDITIONAL EXPRESSION over the arm's raw text (§17.6.8 latitude), and a markup arm's raw text is not
+> JavaScript: a value-form `match` with markup arms emits `return <p>Yes < / p >;` — INVALID JS —
+> which is exactly why THAT limb carries `E-MATCH-ARM-MARKUP-IN-VALUE` instead of a lowering.
+>
+> **SPEC named the right lowering itself: the arm *carries an implied `lift`*** (§10.1 limb 2, S391
+> amendment, `provenance: ruling:user-voice-scrml.md S371 "value-form b"`; §17.6.10 "A branch body
+> that is exactly one expression SHALL be equivalent to `{ lift <expression> }`"; §1.4/L1 "markup
+> elements may sit anywhere expressions sit"). So the fix makes the implied `lift` EXPLICIT in the
+> tree and the already-correct `lift` pipeline handles it with **no codegen change at all** — render
+> slot (`stmtContainsLiftExpr`), lift group (`stmtContainsLift`), branch lowering
+> (`emitIfStmtWithContainer`). Measured: the desugared emit is **byte-identical to the
+> explicit-`lift` emit** apart from the content-derived chunk-scope id. That identity is the gate:
+> §17.6.10 asserts equivalence to `lift`, so parity with `lift` IS conformance.
+>
+> **Direction of change: newly-ACCEPTING in the compiler, conformance-RESTORING against SPEC.** Two-sided
+> evidence: **877 corpus files under `samples/` emit byte-identically** (the shape occurs nowhere in
+> the corpus, so the pass is inert on everything that already compiled), and the shape INJECTED into a
+> real sample (`combined-002-todo.scrml` + one `${ if (@todos.length > 0) { <p class="hint">…</p> } … }`)
+> goes from `if (get("todos").length > 0) { }` — empty — to the full reactive lift group.
+>
+> **Gates:** `compiler/tests/unit/implied-lift-markup-arm.test.js` (13 tests, bite-tested: 10 fail
+> with the fix reverted) and conformance `control-flow/ctrl-029-value-form-sugar-markup-branch-pos`
+> (the MARKUP-valued sibling of `ctrl-021`, which pins only the STRING limb — the defect was exactly a
+> regression of one limb that every string-branch case was blind to). Full suite: the 9 pre-existing
+> failure names, zero new. Conformance 957/958, 1 xfail.
+>
+> **THREE THINGS THE CLASS PROBE CAUGHT THAT THE REPORTED INSTANCE DID NOT**, all fixed here:
+> 1. **The fragmented arm.** `{ <p>n=${@n}</p> }` is ONE expression but THREE nodes (the block-splitter
+>    hoists the interpolation to a sibling BLOCK_REF `logic`). A node-count shape test declined it and
+>    left that branch silently empty while its sibling rendered. The shape test is at SOURCE level: the
+>    arm's whole span extent is re-parsed and must yield exactly one markup node. **This is the
+>    commonest adopter spelling**; the first cut would have shipped a half-fix.
+> 2. **The half-converted cascade.** Conversion is ALL-OR-NOTHING per cascade — one decline leaves the
+>    whole cascade at pre-existing behaviour, so a shape outside §17.6.10's grammar fails uniformly
+>    rather than arguing by its working half that it is supported.
+> 3. **The `<match for=…>` arm body.** `emit-match` re-parses `entry.bodyRaw` at emit time and discards
+>    the pipeline-desugared `armBodyChildren` copy, so the arm dropped its branches while the identical
+>    interpolation at file level rendered. The pass is re-applied at that re-parse site.
+>
+> **A PARSER-PARITY DIVERGENCE FOUND ON THE WAY, recorded because it is load-bearing for anyone else
+> touching this shape:** the NATIVE parser spells a bare-markup arm
+> `bare-expr{exprNode:{kind:"markup-value", node}}` — markup tree INTACT — where the live `ast-builder`
+> flattens it to a raw `html-fragment` string. The pass handles both, and the native spelling needs no
+> source text (which is what lets it run at source-free seams such as the match-arm re-parse).
+>
+> **SEAM, stated because it is a compromise and not an ideal:** the pass runs at the head of CE
+> (Stage 3.2), not in the TAB where a parse-level equivalence belongs, because **CE is the earliest
+> stage handed both the AST and the file's `_sourceText`** (PRECG / NR / TC / SYM receive only
+> `{filePath, ast}`) and the source is required — the `html-fragment`'s own `content` is the
+> tokenizer-rejoined form (`"<p>Yes < / p >"`), which does not re-parse and has already lost interior
+> whitespace. CE's head still precedes component expansion (so a `<Foo/>` arm IS expanded — measured),
+> VP-2, TS, DG and CG. **The durable placement is the TAB, where there is exactly one parse**; until
+> then a new body-re-parse site needs the pass applied there too.
+> (`ast-builder.js` was under another session's ownership lock this window, which is why not now.)
+>
+> ⛑ **THREE RE-PARSE SITES NEEDED IT, WHICH IS THE ARGUMENT FOR THE TAB, NOT A DETAIL.** The CE head
+> plus `emit-match.ts` (the `<match for=…>` arm body, re-parsed from `entry.bodyRaw`) plus
+> `component-expander.ts:parseComponentBody` (a component definition's body, re-parsed from
+> `normalizeTokenizedRaw(raw)` — found by the S433 adversarial pass, NOT by the class probe, because
+> every probe shape was written outside a component). Each site discards the desugared copy and
+> re-parses raw text, so each needs the pass or the shape silently drops there while rendering
+> everywhere else. **A fourth site is knowingly left un-desugared: `type-system.ts`'s match-arm-each
+> `let` re-parse** sees an `html-fragment` run where CG sees a `lift-expr`. That provenance split is
+> benign for what the site does (it looks for `let` declarations, not markup) and is commented in
+> place rather than fixed — widening a type-check surface for no measured gain. **The count is the
+> point: a pass that has to be re-applied per re-parse site is mis-placed, and only the TAB fixes
+> that structurally.**
+>
+> ⚑ **ONE PRE-EXISTING HOLE HAD TO BE CLOSED TO AVOID TAKING A DIAGNOSTIC AWAY, and the conformance
+> suite — not the unit tests — is what caught it.** `e-type-lifecycle-variant-not-transitioned-pos` is
+> `${ if (@phase is .Draft) { <p>${@phase.publishedAt}</p> } }`, and its diagnostic was firing only
+> because the arm reached the §14.3 lifecycle walkers as a flat `html-fragment` + BLOCK_REF run whose
+> TEXT those walkers scan. Desugaring it to the `lift-expr` SPEC says it is would have silently
+> removed the error. Measured: **the explicit-`lift` spelling never fired it either** — a lifted markup
+> tree hangs off `expr.node` behind two non-array hops and carries no string field, so BOTH walkers
+> missed every `${…}` inside lifted markup. New shared `type-system.ts:liftedMarkupChildNodes` gives
+> both walkers that one hop, so the diagnostic now fires for both spellings and the two cannot drift.
+> **Generalisable: a desugar that replaces a text-shaped node with a structured one can silently
+> disable any diagnostic that was reading the text.**
+>
+> ⛑ **AND THAT HOLE-CLOSING IS A NEWLY-REJECTING SURFACE WIDER THAN THIS ENTRY FIRST SAID. CORRECTED
+> HERE ON MEASUREMENT.** `liftedMarkupChildNodes` is wired into the §14.3 WALKERS, not into the
+> desugar, so the new rejection needs **no `if` and no control flow at all**:
+> `${ lift <p>${@phase.publishedAt}</p> }` on its own goes **exit 0 → exit 1 `E-TYPE-001`**
+> (PA-measured base-vs-fix). **The surface is: any explicit `lift` of markup whose interpolations read
+> a lifecycle-typed cell's post-transition field** — spanning two codes, `E-TYPE-001` and
+> `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED` — **not "a control-flow arm"**, which is how this entry
+> originally (and wrongly) scoped it. The rejection is CORRECT: it is a genuine premature read the base
+> compiler missed, so this is conformance-restoring, not a widening. **MIGRATION COST, MEASURED rather
+> than asserted** (repo-wide, `*.scrml`, excluding `node_modules`): **2,669 files; 250 use `lift`; 3
+> declare a variant-progression lifecycle type** (all three are `conformance/cases/type-state-codes/`
+> cases); **the intersection is EMPTY** — verified by grepping `lift` across exactly those three files,
+> zero hits. So the newly-rejecting surface breaks **nothing** in tree. (The adversarial pass measured
+> 190 `lift` files against a narrower root; the counts differ, the empty intersection does not.)
+> ⚠ The adopter clone is not reachable from this worktree, so its side is **unverified here** — the
+> reviewer reports 1 `lift` file / 0 lifecycle types, also empty, and that is RELAYED, not confirmed.
+>
+> ⚠ **"ZERO DIAGNOSTIC CHANGES" WAS WRONG, AND THE WAY IT WAS WRONG MATTERS MORE THAN THE FACT.** A
+> diagnostic is **REMOVED** by the desugar: `${ if (@on) { <p title="${@t}">MARKA</p> } else { … } }`
+> fires `E-DG-002` (`@t` declared but never consumed) at base and does NOT after. Our side is correct —
+> the read IS real once the markup is a tree — but it proves the desugar changes what **every** later
+> stage sees, DG included, not just codegen. **The reason it was missed is a defect in the measuring
+> harness, not in the fix:** the probe used `execFileSync`, whose return value is stdout ONLY, and
+> appended stderr just in the `catch` branch — so on a ZERO-EXIT compile every stderr diagnostic was
+> invisible and the per-file diagnostic set read as complete when it was not. **An assumed-zero was
+> reported as a measured-zero, twice.** Re-measured with `spawnSync` (both streams on every path): the
+> 877-file corpus differential is **877/877 identical on exit code, diagnostic SET *and* per-artifact
+> sha1** — the inertness claim survives, but it is only now actually measured. The lesson is the
+> general one: **state a measurement's REACH, and prove the harness can see the thing it reports zero
+> of.**
+>
+> **CLASS PROBE — 15 shapes, each measured against its explicit-`lift` twin**
+> (`scratch-if-arm/class-probe.mjs` on the S433 branch). **COVERED at `lift` parity:** the reported
+> instance · `else if` cascade · no `else` · nested `if` in an arm · nested markup subtree · void /
+> self-closing element · arm markup carrying an event handler (`addEventListener` wired) · arm holding
+> a COMPONENT (expanded, no phantom tag) · arm markup interpolating a reactive cell · inside an
+> `<each in= key= as >` row (byte-identical to the twin) · inside a `<match for=…>` arm
+> (byte-identical). **NOT desugared, by decision:** an `if` in a `function-decl` body (a `lift` there
+> is not an accumulation into a markup parent, so synthesising one would change meaning) · a
+> mixed-value cascade (`{ if c { <span/> } else { "s" } }`) — that one needs the markup-VALUE lowering
+> (`_scrml_render_value` already accepts a DOM node), not the lift lowering, and stays pinned by
+> `each-inline-value-form-if-interp.test.js`'s residual PIN.
+>
+> ⛑ **WHAT THE ADVERSARIAL PASS FOUND THAT THE 15-SHAPE PROBE DID NOT, and why the probe missed it —
+> both were HIGH, both are fixed, and both were REPRODUCED here before building.**
+> **(F1) The all-or-nothing invariant was stated and not enforced.** `planArm` classified an arm by
+> `pieces[0]` only, so an arm whose markup is not the FIRST piece came back "no markup here" and the
+> cascade converted its OTHER arms and left this one dropped — a HALF-RENDER, at exit 0 with no
+> diagnostic, in BOTH arm positions and in a three-arm cascade's middle arm. `else { log(…) <p>…</p> }`
+> is ordinary adopter code. **The probe missed it because every one of its 15 shapes led with markup.**
+> ⚠ **And the obvious fix would not have worked:** `{ @k = 1  <p>A</p> }` parses to a SINGLE
+> `state-decl` whose `init` string is `"1 < p > MARKA < / p >"` — the markup is **swallowed into the
+> preceding statement's raw text**, so there is no `html-fragment` node to test for. The decline is
+> therefore a TEXT test (exact source extent with a tight `<`-then-name-char regex, plus the piece's own
+> string fields with a looser regex for the rejoined form), run PER PIECE and skipping `if-stmt` pieces
+> because the recursion already owns their markup. The first cut scanned the arm's whole extent and so
+> declined every `else if` cascade and every nested-`if` arm — caught by re-running the class probe, and
+> now pinned by an explicit regression-guard test.
+> **(F2) A component body was still dropping.** `parseComponentBody` re-parses from
+> `normalizeTokenizedRaw(raw)`; base and fix were BYTE-IDENTICAL (a bare `<span data-scrml-logic>`
+> anchor, no branch code) while the component's own explicit-`lift` twin rendered on both sides. Fixed
+> at that site; verified byte-identical to the twin. **The probe missed it because no shape was written
+> inside a component.**
+>
+> **F6 — a DELIBERATE dimension wider than §17.6.10, recorded so it is not mistaken for an oversight:**
+> the pass converts an `if` that is **not the sole content** of the interpolation
+> (`${ let x = 1  if (@on) { <p>A</p> } … }`), which §17.6.10's grammar scopes to sole-content.
+> §10.1 limb 2 carries **no** sole-content condition — it speaks of "an arm body that is exactly one
+> expression" generally — so the wider behaviour is arguably authorized by the other normative sentence.
+> It is also strictly better than the alternative: in a non-sole-content interpolation the bare-markup
+> arm would otherwise still drop silently. Flagged as the one place the implementation is wider than the
+> narrower of the two sentences.
+>
+> **RESIDUALS, each filed as its own entry rather than folded in:**
+> [[g-if-arm-multi-markup-element-silently-dropped]] · [[g-for-arm-bare-markup-silently-dropped]]
+> (this is the S377 RELAYED-UNVERIFIED `for` half, now PA-VERIFIED by execution) ·
+> [[g-lift-markup-adjacent-text-leading-space-dropped]] (found as a FAVOURABLE divergence — the sugar
+> is the faithful one and the pre-existing `lift` path is the defective one).
+>
+> ⚠ **ONE ADVERSARIAL CLAIM DID NOT REPRODUCE AND IS NOT CLAIMED AS A BENEFIT.** The pass was reported
+> to also repair a hard compiler CRASH on `<match for=View>` inside `<each>` with a bare-markup arm.
+> **PA-PROBED, three variants** (`on=r.v` with a struct field; `on=@cell`; an else-less arm), **base
+> side: no crash on any of them** — every one compiles exit 0 with only benign `W-PROGRAM-*` warnings
+> and silently drops the arm, i.e. the ordinary defect this entry is about, lowered through the ordinary
+> path. **A crash-repair claim is therefore NOT written into this entry**; if a real crash repro exists
+> it should be filed with its source, because it would be a different (and worse) defect than the one
+> resolved here.
+>
+> ⚠ **PROBE-METHOD NOTE, because it cost a false negative here.** The first cut of the `<each>` probe
+> wrote `<each rows as row>` — INVALID per §17.7 / SPEC:1074, which require `in=` or `of=` — and it
+> compiles to NOTHING at exit 0 with no diagnostic. That read as "the fix misses `<each>` rows" for a
+> full round; with the canonical `<each in=@rows key=r.id as r>` the shape is byte-identical to its
+> `lift` twin. **A probe on malformed source measures the malformation.** The silent acceptance of an
+> `<each>` missing its required attribute is a separate fail-open finding, reported not fixed.
 
 > **⚑ PA-EXECUTED at S376 with a three-way discriminator — the fix direction the report proposed is NOT the one the evidence supports.** Routed turnkey by S377-peter from a happy-dom dog-food run; the PA reproduced it and then varied the branch VALUE, which changed the diagnosis.
 >
@@ -4714,8 +5162,97 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 >
 > **NOT established by the PA, carried as RELAYED-UNVERIFIED:** the report's second example, a bare-markup body in a `for` arm (`${ for (let x of @xs) { <li>…</li> } }`). §17.4 documents the Tier-0 form WITH `lift`, so "lift required" may be correct there and the defect only the silent drop — a different disposition from the `if` half. The PA's emitted-artifact probes could not discriminate the two `for` shapes and are recorded as inconclusive; **re-derive this half in a DOM before scoping it**, do not inherit it from this entry.
 
+### g-lift-markup-adjacent-text-leading-space-dropped — `lift <div><span>x</span> tail</div>` emits `createTextNode("tail")`, dropping the space, so `BIG 90` renders `BIG90` — `NEW S433; LOW; open`
+<!-- @gap id=g-lift-markup-adjacent-text-leading-space-dropped sev=LOW status=open locus=compiler/src/codegen/emit-lift.js(the markup-tree text-child lowering reached from emitLiftExpr — the `lift` path, NOT the §17.6.10 desugar) prov=empirical:S433-found-as-a-FAVOURABLE-divergence-while-checking-sugar-vs-lift-parity -->
+
+> **⚑ FOUND AS A PARITY FAILURE IN WHICH *OUR NEW PATH IS THE CORRECT ONE*, which is why it is filed
+> against `lift` and not against the sugar.** While gating [[g-if-arm-bare-markup-branch-silently-dropped]]
+> on "the sugar must emit what `lift` emits", one shape diverged in the sugar's FAVOUR:
+>
+> | spelling | emitted | rendered |
+> |---|---|---|
+> | `{ <div class="w"><span>x</span> tail</div> }` (sugar) | `createTextNode(" tail")` | `x tail` ✅ |
+> | `{ lift <div class="w"><span>x</span> tail</div> }` | `createTextNode("tail")` | `xtail` ❌ |
+>
+> The sugar re-parses the author's EXACT source slice, so it keeps the leading space; the `lift` path
+> loses it. Adopter-visible form: `BIG 90` renders `BIG90`.
+>
+> **Strictly, §17.6.10 is violated** — it asserts equivalence of *observable result* between the two
+> spellings, and these differ. **But the fix is on the `lift` side.** Resolving it by making the sugar
+> match `lift` would be propagating a whitespace bug for the sake of a symmetry, which inverts the
+> point of the equivalence clause.
+>
+> **Same family as** [[g-ast-markup-text-interp-adjacent-space-dropped]] (space before a `${…}` in
+> markup text) — both are "a space adjacent to a boundary inside markup text is dropped", and both sit
+> on the whitespace model. ⚠ **Whether HTML-style collapse makes this intentional is exactly the open
+> question there**, so the two should be dispositioned together rather than patched separately, and
+> that entry already names the whitespace-model fork as bryan's. LOW because the workaround is `&nbsp;`
+> or an explicit interpolation, and the sugar path (the one adopters now reach without writing `lift`)
+> is already correct.
+
+### g-if-arm-multi-markup-element-silently-dropped — an `if` arm holding TWO markup elements renders NOTHING at exit 0 with zero diagnostics — `NEW S433; MED; open`
+<!-- @gap id=g-if-arm-multi-markup-element-silently-dropped sev=MED status=open locus=compiler/src/implied-lift-desugar.ts(planArm declines when the arm's source recovers to more than one markup node — DELIBERATE, see the entry)+compiler/src/codegen/emit-logic.ts:1856(case "html-fragment": return "" — where the drop actually happens) prov=empirical:S433-class-probe-of-g-if-arm-bare-markup-branch-silently-dropped -->
+
+> **PA-EXECUTED at S433 by the class probe that landed
+> [[g-if-arm-bare-markup-branch-silently-dropped]]**, and verified two-sided against that fix's base:
+> `${ if (@on) { <p>A</p><p>B</p> } else { <p>No</p> } }` emits NO DOM at all — identical output before
+> and after the S433 fix (exit 0, zero diagnostics). The explicit-`lift` spelling of the same intent,
+> `{ lift <p>A</p> lift <p>B</p> }`, compiles and emits both elements, so the lowering target exists.
+>
+> **WHY S433 DID NOT FIX IT, stated so the next pass does not "just widen the check".** §17.6.10's
+> grammar is `value-form-if ::= 'if' condition '{' expression '}'` — **exactly ONE expression**. Per
+> invariant 83 that is a LOCAL `length !== 1 -> decline`, deliberately NOT §18.5's positional
+> "last expression" tail rule; routing the sugar arm through a tail rule silently admits shapes the
+> grammar does not define. Two elements are outside the grammar, so S433's pass declines them — and
+> declines the whole cascade with them (all-or-nothing), which is why the sibling `else` arm does not
+> half-render either.
+>
+> **SO THIS IS NOT A CODEGEN BUG, IT IS A MISSING DIAGNOSTIC — and that is the fix direction.** The
+> defect is not that the shape is refused; it is that the refusal is SILENT, which violates the S231
+> fail-closed-Nominal invariant (an unsupported form must fail closed with a diagnostic, never render
+> empty). Two candidate dispositions, and the choice is a grammar call, not ours:
+>   **(a)** emit an error naming the one-expression rule and the two fixes (wrap in a single parent
+>   element, or write explicit `lift`s) — the conservative option, symmetric with the sibling
+>   `E-MATCH-ARM-MARKUP-IN-VALUE` steer that already exists for the value-form `match` limb;
+>   **(b)** amend §17.6.10 to admit an arm that is a markup SEQUENCE, desugaring to one implied `lift`
+>   per element — a grammar widening, and it collides with §10's E-LIFT-002 multiplicity rule ("at most
+>   one `lift` on any execution path"), which is exactly why it needs a ruling rather than a patch.
+> **Recommend (a).** Cheap, closes the silence, and does not touch the multiplicity rule.
+>
+> Repro is in the S433 gate as a NEGATIVE assertion already — `compiler/tests/unit/implied-lift-markup-arm.test.js`
+> "an arm holding TWO markup elements is not a value-form and is not converted" pins the current
+> behaviour (including the all-or-nothing rule), so whichever disposition lands has a place to flip.
+
+### g-for-arm-bare-markup-silently-dropped — a bare-markup body in a `${ for … }` loop renders NOTHING at exit 0 with zero diagnostics (the S377 RELAYED half, now PA-VERIFIED) — `NEW S433; MED; ruling-gated`
+<!-- @gap id=g-for-arm-bare-markup-silently-dropped sev=MED status=ruling-gated locus=compiler/src/codegen/emit-logic.ts:1856(case "html-fragment": return "")+compiler/SPEC.md §17.4(documents the Tier-0 form WITH lift; carries no implied-lift sentence for a loop body) prov=adopter:S377-peter-dog-food-routed(relayed)+empirical:S433-PA-verified-by-execution -->
+
+> **⛑ THIS IS THE HALF [[g-if-arm-bare-markup-branch-silently-dropped]] RECORDED AS
+> "RELAYED-UNVERIFIED — re-derive this half before scoping it". S433 RE-DERIVED IT, and it reproduces.**
+> `${ for (let r of @rows) { <li>r</li> } }` emits NO DOM (exit 0, zero diagnostics); the
+> explicit-`lift` spelling `${ for (let r of @rows) { lift <li>r</li> } }` emits the keyed row factory.
+> Identical before and after the S433 fix — the S433 pass does not touch `for` bodies.
+>
+> **AND THE ENTRY'S SUSPICION WAS RIGHT: the disposition is NOT the same as the `if` half.** The `if`
+> half was fixable without a ruling because §10.1 and §17.6.10 say, normatively and unconditionally,
+> that a single-expression control-flow ARM carries an implied `lift`. **§17.4 says no such thing about
+> a loop BODY** — it documents the Tier-0 form WITH `lift`, and a loop body is not a branch arm of a
+> value-producing expression, so the §17.6.10 sugar does not reach it by its own terms. Quoting the
+> `if` half's sentences at this half would be extending a ruling past what it ruled.
+>
+> **So this is a grammar/semantics call and the fork is clean:**
+>   **(a)** `lift` stays REQUIRED in a loop body, and the fix is only to make the drop LOUD (a
+>   diagnostic naming the missing `lift`) — the S231 fail-closed floor, no grammar change;
+>   **(b)** extend the implied-`lift` sugar to a loop body whose body is exactly one markup expression,
+>   amending §17.4 — symmetric with §17.6.10 and the smaller surface for an adopter to learn.
+> **Recommend (a) FIRST regardless of the eventual answer:** (a) is strictly compatible with (b)
+> landing later (a loud refusal becoming an acceptance is not a breaking change), and it removes the
+> silent-wrong TODAY, which is the actual adopter cost. The lowering for (b) already exists —
+> `emitForStmtWithContainer` handles the `lift` spelling — so (b) is a desugar of the same shape as
+> S433's, not new codegen.
+
 ### g-ast-markup-text-interp-adjacent-space-dropped — a space between literal text and an adjacent `${…}` in markup text is dropped: `Saved ${@cell}` renders `Savedhello`
 <!-- @gap id=g-ast-markup-text-interp-adjacent-space-dropped sev=MED status=open locus=searched:compiler/src/tokenizer.ts(~804 read-to-whitespace-or-tag-close),compiler/src/ast-builder.js(text-child construction) — parseLiftContentParts PROVEN INNOCENT by S377-peter (returns [{text:"Saved "},{expr:"@cell"}] with the space intact); the content string reaching the emitter already lacks it prov=adopter:S377-peter-dog-food-routed -->
+> **S441 — now REPRODUCED by execution (tutorial-fix T3, happy-dom at `cf62b4154`), no longer relay-only:** `lift <p>Got ${n} rows.</p>` inside a JS-style `match` arm renders `<p>Got42rows.</p>`, while the identical text in the block-form `<match>` renders `Block got 42 rows.` — so the collapse is position-dependent, which argues against the "maybe intentional" reading. The multi-line half of the same probe is g-match-arm-lift-skips-render-by-tag-and-lands-outside-host. Reproducer `docs/changes/s441-audit-gap-filing/repro/tut-match-lift-multiline-form-garbage-dom.scrml`.
 
 > **Routed turnkey by S377-peter. RELAYED — the PA has NOT independently reproduced this one.** Reported shapes: `Saved ${@cell}` → `"Savedhello"`; `Val ${x}` in a for-lift → `"Val7"`; `Priority: ${p}` → `"Priority:7"` (the `:` survives, the space after it does not). Scope reported as shared across top-level markup AND for-lift.
 >
@@ -5779,6 +6316,7 @@ directory, not only "genuinely nested multi-segment flat routes".**
 ## §S265 — gaps filed S265 (2026-07-18, discovered during the CSS Wave-1 S239 review)
 
 ### g-css-selector-nested-reactive-ref-no-bridge — a component `#{ .box { color: @cell } }` (SELECTOR form, reactive cell) collects **no §25 CSS-var bridge**: `collectCssVariableBridges` (collect.ts) only gathers a block's top-level flat-declaration `reactiveRefs`, NOT selector-NESTED ones → the emitted CSS carries `var(--scrml-cell)` but nothing ever sets `--scrml-cell` → `E-DG-002` "never consumed" fires and the custom property is dead. Sibling of the flat-inline bug fixed in #98 (which handled the FLAT-declaration form). The natural warm-adjacent next pickup. — `NEW S265 (scoping agent, §25 fix); MED; open`
+> **S441 reconfirmed, and wider than a component (review:S441-css-t3-review; executed at `aedcc6d61`+):** a PROGRAM-level selector rule is dead the same way. `docs/changes/s441-land-bootstrap-css-t3/repro/bridge.scrml` (`<w> = 10`, `#{ .box { width: @w; } }`, a button writing `@w`) → the css reads `.box { width: var(--scrml-w); }` and `--scrml-w` appears in NO other output field (`repro/bridge-show.js`), no error. `collectCssVariableBridges` gathers only a block's top-level (flat) `reactiveRefs`, so every selector-nested `@cell` in any `#{}` is a static read of an unset property. Filed as the S440 bootstrap branch's "§25.7 bridge dead for stylesheet rules" finding — the same defect, not a new entry.
 ### g-css-inline-string-at-ident-miscompile — a flat-inline `#{ content: "@twitter" }` or `#{ background: url("@retina/x.png") }` — the `@ident` inside a CSS **string / url() literal** is mis-detected as a §25 reactive ref by `lowerCssValueRefs`/`AT_REF_RE` (which don't skip string/url literals) → malformed client JS (`_scrml_reactive_get("twitter")`, nested-quote breakage) → `E-CODEGEN-INVALID-LOGIC`. Pre-existing (reproduces on main). — `NEW S265 (S239 review R3); MED; open`
 ### g-css-value-string-brace-mangle — `#{ .a::before { content: "}"; color: red } }` — the `}` inside a CSS **string value** is mis-parsed as a rule terminator by the downstream CSS-value tokenizer / `renderCssBlock` → mangled output. Reproduces identically at PROGRAM level (never touches the component-expander masking) → a pre-existing downstream CSS-value-tokenizer bug, not the round-4 scanner. — `NEW S265 (S239 review R1); LOW; open`
 
@@ -7510,6 +8048,7 @@ L19 forbids multi-statement event handlers (`onclick=` must be a single expressi
 - **Status:** open HU follow-on; small enough to fold into iteration HU or its own sub-session.
 - **RULED S190 (decision pass): COMMISSION A DEEP-DIVE.** Lock-level (L19 + markup-as-value pillar) re-examination — NOT a snap ratify. The deep-dive explores whether modern composition (engines / body-split CPS) changes the single-expression-inline-handler constraint, the markup-as-value tension, prior art (Svelte/Vue/Solid/React inline-handler policies + rationale), cohesion cost, and whether a relaxation earns its surface vs the trivial named-fn workaround. PA lean going in = KEEP L19 (named-fn workaround is trivial+better; engines/CPS reduce the need; serves the pillar + limit-primitives) — but the user wants it explored properly. DD doc → `scrml-support/docs/deep-dives/l19-multi-statement-handler-2026-06-13.md`; possibly feeds a debate; ratification is a SEPARATE deliberate step with the user. Dispatched S190 (background, `scrml-deep-dive`).
 - **RESOLVED S190 — RATIFIED KEEP L19 (user, decision pass).** The deep-dive (`l19-multi-statement-handler-2026-06-13.md`) returned a one-directional KEEP recommendation; user ratified "Keep L19, close bug-17-l19." **L19 stands as-is** (single-expression inline handlers; `E-MULTI-STATEMENT-HANDLER` for multi-statement → named function). NO language change. Evidence: (1) §5.2.3's stated growth-drivers (branching/effects/awaits) each moved to a first-class home since L19's S56 ratification (engines/`rule=` · `<onTransition>`/`effect=` · body-split CPS) → modern composition REDUCES the pressure L19 manages; (2) ZERO multi-statement handlers across 781 corpus inline-handler sites + zero E-MULTI-STATEMENT-HANDLER friction; (3) prior art (Vue/Svelte5/Solid/React) PERMITS inline multi-statement but docs+lint RECOMMEND the named-fn extraction L19 enforces; (4) Pillar-1 + Reach-discipline + limit-primitives align with KEEP; (5) RELAX is MORE compiler work + a §4.14 amendment. Consistent with the S132 prior moot (named-function path stands). Honest steel-man (the trivially-related two-assignment one-off) acknowledged + outweighed (zero corpus instances; `reset()`+`default=` collapse many reset-pairs); bounded-relax considered+rejected (bespoke sub-grammar for a zero-instance case). Debate-live: marginal/lean-NO (the debate framing is parked in the DD's Phase-5 if a future adopter-refugee signal surfaces — OQ-2 corpus-blind-spot). DD doc → `status: ratified`.
+- **SUPERSEDED S435 — L19 REVERSED (bryan: "reverse L19").** Inline multi-statement (block) handlers `onclick={ s1; s2 }` are legal and canonical, no line limit — the S206 co-location axiom. §5.2.3 amended; `E-MULTI-STATEMENT-HANDLER` narrowed to the unbraced bare `;` sequence + the §4.14 `:`-shorthand locus. The S190 KEEP above is history. Measurement + the gaps it found: the "S435 — L19 reversal measurement" block at the end of this file.
 
 ---
 
@@ -7822,6 +8361,7 @@ The `bun scrml promote --match` CLI shipped S66 (Tier-0→1 lift mechanical). Th
 
 ### g-promote-engine-same-named-cell-no-lift — `promote --engine` leaves the redundant same-named cell decl — `open`
 <!-- @gap id=g-promote-engine-same-named-cell-no-lift sev=LOW status=open -->
+> **S441 re-verified (audit item 9, executed at `cf62b4154`):** `scrml promote --engine <file> --dry-run` on `type Door:enum` + `<door>: Door = .Closed` + `<match for=Door on=@door>` with `rule=` arms → `failed … rewritten source failed to compile — file left untouched: E-ENGINE-VAR-DUPLICATE`, exit 1. Still fails safe; still the idiomatic shape. Reproducer `docs/changes/s441-audit-gap-filing/repro/promote-engine-same-named-cell.scrml`.
 
 Follow-on from Bug 20 (S228, ss53). The ratified-scope `--engine` span-only rewrite promotes the `<match>` block in place but does NOT remove the now-redundant same-named cell decl outside the match span. Idiomatic shape — `<phase>: Phase` + `<match for=Phase on=@phase>` — after rewrite the surviving `<phase>` decl collides with the engine's auto-declared `@phase` → `E-ENGINE-VAR-DUPLICATE` → the transactional `sanityCheckParse` gate REVERTS (reports `failed`, file untouched; guided-not-silent). So `--engine` one-pass-promotes only when the match `on=@cell` name DIFFERS from the type-derived engine cell. Fix = extend `--engine` to lift/remove the redundant same-named decl. SPEC §56.6.2 documents the boundary honestly. LOW — usable today via guided revert + manual decl removal.
 
@@ -8422,6 +8962,7 @@ Fix SCOPE/BRIEF/reproducers at `docs/changes/errarm-refail-lowering-2026-06-11/`
 **S188 RESOLVED (follow-up, agent a409100175):** the residual hole is closed. **Root (empirically re-diagnosed — NOT the codegen `rewrite.ts` Locus-3 hypothesis):** bare prefix-`not` in an UNQUOTED attribute value was shredded UPSTREAM at the tokenizer (`tokenizer.ts` unquoted-value reader) — `if=not @y` tokenized as `ATTR_IDENT "not"` (the absence VALUE) plus a stray bareword attr `@y`, so `not @y` never reached `parseExprToNode` / never stamped `_notPrefixNegation` → harvest never fired. The paren form `if=(not @y)` already tokenized as `ATTR_EXPR` and routed through the choke-point, which is why h5 fired but h1/h6 did not. **Fix (single source of truth = the existing choke-point harvest, no second emit site):** (1) `tokenizer.ts` captures a bare `not <operand>` unquoted attr value as one `ATTR_EXPR` (`isPrefixNotOperandAhead` guard) → routes through `parseExprToNode` → stamps → harvest fires once (h1/h6/member); bare `if=not` with no operand stays `ATTR_IDENT` (valid absence value). (2) `ast-builder.js` (parseAttributes) fires E-TYPE-045 on the §5.5.2-malformed unquoted COMPOUND shred (`if=@x && not @y`, h2 — the leading stray `not`+operand pair), naming the real cause instead of only the misleading downstream E-SCOPE-001. **All 6 positions now fire E-TYPE-045 EXACTLY once** (h1/h2/h6 newly + h3/h4/h5/f1/f2 + if-stmt golden unchanged; no double-fire — harvest dedups by span). Valid forms unaffected: `if=not` (absence value), a literal `not=` attribute, `x is not`, `= not`, `return not`, regex/string/prose interiors. Test surface: `compiler/tests/unit/e-type-045-prefix-not-all-positions.test.js` (31 cases — the prior "attribute if= (bare)" case used the PAREN form, which is why the suite stayed green despite the hole; corrected + bare-attr/compound/single-fire/valid-attr cases added). Native parser (`compiler/native-parser/`) E-TYPE-045 emission remains DEFERRED to the ~v0.8 cutover (NotValue atom; `.scrml` mirrors feature-stale).
 ### G-DERIVED-RHS-INTERP-WRAPPED — `const <x> = ${expr}` drops the RHS → E-CODEGEN-INVALID-JS — `NEW S188 dog-food; LOW; codegen defect on a plausible decl shape`
 <!-- @gap id=g-derived-rhs-interp-wrapped sev=LOW status=resolved -->
+> **S441 — residual, filed separately (audit item 15, executed at `cf62b4154`):** the S190 `E-DECL-RHS-INTERP-WRAPPED` fires only when the declaration sits inside a `${ }` block. At `<program>`/`<page>` top level — the v0.3 canonical position — `const <label> = ${ … }` still reaches codegen and fails `E-CODEGEN-INVALID-LOGIC` (`const label = ; …`, "compiler defect"). See g-decl-rhs-interp-wrapped-uncaught-outside-a-logic-block.
 
 **Surfaced S188 dog-food (g-not-neg preserve-surface validation).** A derived-cell decl whose RHS is wrapped in a `${...}` logic block — `const <bad> = ${ @names.filter(n => n.length > 1) }` — drops the RHS entirely: codegen emits `const bad = ;` (empty initializer, invalid JS) and the filter expression leaks out as an orphaned statement. The compiler's self-parse-check catches it loudly (`E-CODEGEN-INVALID-JS` + "compiler defect, please report" — NOT a silent invalid-JS ship), but the user-facing outcome is a defect message instead of either unwrapping the `${}` or a clean diagnostic. **Isolated (verify-before-claim):** `const <bad> = ${ @names.filter(...) }` (block-wrapped RHS, NO regex/`not`) → FAILS (`/tmp/dfn/t3.scrml`); `const <bad> = @names.filter(...)` (plain expr RHS, same logic) → CLEAN (`t4`) — the trigger is the `${}` wrapper on the decl RHS, NOT the contents. Root: the block-splitter/ast-builder treats `${` as a block boundary, so `const <bad> =` gets an empty RHS and the `${...}` becomes a separate logic block. **Severity LOW** — the `${}` wrapper is already redundant at page-body level (`W-PROGRAM-REDUNDANT-LOGIC` teaches removing it); the canonical `const <x> = expr` form is unaffected; loud-not-silent. **Same family as [[g-markup-const-consumes-cell-decl]]** (the `${}`-boundary-in-decl mis-split class). **Fix direction:** recognize a `${...}`-wrapped RHS on a `const`/state decl as the decl's RHS (unwrap), OR emit a clean diagnostic ("derived RHS should not be `${}`-wrapped; remove the wrapper"). Repros: `/tmp/dfn/t3.scrml` (fails) vs `/tmp/dfn/t4.scrml` (clean).
 
@@ -9688,6 +10229,7 @@ Reported by scrml-site's error-code probe harness (one minimal reproducer per §
 
 ### g-nested-program-emits-artifacts-it-never-produces — a nested `<program>` emits a `new Worker(...)` reference and channel CLIENT connections, but neither the worker file nor the channel's SERVER route is ever produced — `NEW S354-bryan (S239 adversarial pass on the g-channel-in-nested-program-inside-page-ordering landing); HIGH; open`
 <!-- @gap id=g-nested-program-emits-artifacts-it-never-produces sev=HIGH status=open locus=compiler/src/codegen/emit-channel.ts prov=empirical:S354-bryan-reproduced -->
+> **S440 reconfirmed (dpa-056 D1, DD-executed at `048df04db` in headless Chromium):** the SHIPPED example `examples/13-worker.scrml` 404s its worker — `new Worker("primes.worker.js")`, output dir holds only `.html/.client.js/.css/runtime`; `api.js` still has 0 references to `workerBundles`; the unit test (`nested-program-e2e.test.js:52`) asserts only the in-memory map. With the bundle hand-supplied, the example is still stuck — see g-worker-send-overwrites-the-when-message-handler.
 **PRE-EXISTING and independent of the placement ruling — PA-reproduced by execution on BOTH `main` and the fix branch, not relayed from the review.** A nested `<program>` compiles to references it never backs with artifacts. Two instances in one emit:
 
 1. **The worker file is never written.** `<program name="worker">` emits `new Worker("worker.worker.js")` into the client bundle; no `worker.worker.js` appears in the output directory. Verified on `main` (control, no `<page>` involved) and on the fix branch.
@@ -10248,6 +10790,59 @@ The session is minted and persisted correctly; every reader looks for it in an e
 
 **Adjacent twin, same root shape, lower severity (folded here deliberately, per the reporter):** `<program sessionExpiry="7d">` reaches only the program unit, so the login unit that actually issues the `Set-Cookie` uses the 1h default and the declaration is **inert with no warning** — `app.server.js` `_scrml_session_max_age = 604800` vs `login.server.js` `= 3600`. §20.5 anticipates the mechanism (*"a login page carries no `sessionExpiry=` … so the 1h default governs there"*). ~~Resolved by (1); left live and made dangerous by (2).~~ **← CORRECTED S339-peter: (1) is the store hoist and NEVER touches expiry (different threading path — verified); the twin is LIVE on HEAD, and §20.5's sentence SANCTIONS the 1h default rather than forbidding it. Re-filed with the true classification below.**
 
+<!-- @gap id=g-two-programs-one-file-session-attr-last-wins sev=LOW status=open locus=compiler/src/codegen/session-config-resolve.ts(readRawUnitSessionAttr) prov=review:S436-round4-F-D -->
+### g-two-programs-one-file-session-attr-last-wins — two `<program>` nodes in ONE file both declaring a session attribute: the LAST in source order wins, silently
+
+**Filed by the S436 round-4 re-review (F-D), PRE-EXISTING, and deliberately NOT fixed there.**
+
+`readRawUnitSessionAttr` (moved verbatim from `emit-server`'s `_readRawProgramAttr`, unchanged
+since S433) walks a unit's nodes and keeps overwriting `progVal` for every `<program>` it finds,
+so when one file carries two top-level `<program>` nodes that both declare `sessionExpiry` or
+`session-secure`, the LAST one in source order governs the whole unit. No diagnostic fires. The
+`<page>` limb of the same function has the opposite precedence (FIRST match wins, `pageVal` is
+only assigned when still `undefined`), so the two halves disagree about which duplicate wins.
+
+**Why it is not fixed with `E-MW-008` (S436 round 4).** `E-MW-008` refuses a build where a unit
+cannot be attributed to an owning `<program>`. This is the *other* half of the same question: a
+unit that has TWO owning `<program>`s and picks one by source position. Answering it means saying
+what a second top-level `<program>` in one file MEANS — which is `E-PROGRAM-002`'s reserved
+territory (§40.8: *"TBD — separate diagnostic; not part of Wave 1"*) and the ownership arc the
+round-4 stopping rule routes to bryan. Picking a winner here, or erroring, is a language ruling,
+not a codegen fix.
+
+**Not currently reachable as a silent wrong answer in a multi-program build**, because a file with
+two `<program>` nodes makes the set multi-program, and if any unit is then unattributable
+`E-MW-008` refuses the build outright. It remains reachable when every session-emitting unit
+resolves for itself — e.g. the two-in-one-file programs are the only session-emitting units and
+both declare. Population in the corpus: measured 0 (no tracked `.scrml` declares either attribute).
+
+**Repro:** one file containing `<program sessionExpiry="30m">…</program>` followed by
+`<program sessionExpiry="7d">…</program>`, compiled alone; the emitted unit takes `7d`.
+
+**S438 annotation — it IS reachable as a silent wrong answer, in the DOWNGRADE direction, and
+the severity should be MED (proposed, not bumped — bryan's call with the E-PROGRAM-002 ruling).**
+The "not currently reachable" paragraph above holds only for multi-FILE sets; a single file is
+one compile set with one program-bearing file, no `E-MW-008` can fire, and step 2's last-wins
+governs. PA-executed on `origin/main` 98d94e96 (the S438 review's control): ONE file
+`<program auth="optional" csrf="off" session-secure="true" sessionExpiry="15m">` with a
+`session.set` login, followed by `<program csrf="off" auth="optional" session-secure="false"
+sessionExpiry="30d"><p>x</p></program>` → the login unit mints plain **`scrml_sid` / Max-Age
+2592000**, zero hard errors. The first program's explicit `session-secure="true"` is overridden
+by a later, content-free program: the cookie loses `__Host-` and always-Secure (the §20.5.1
+cookie-tossing defense) and lives 30 days instead of 15 minutes. So any non-protect session
+unit already reaches it today. **protect= units were one step from it (S438):** the
+`fix/s438-8b-session-defaults` change that stops route-inference Step 8b stamping `1h`/secure
+made a protect= / `<page auth="required">` unit in such a file fall through to this read, and
+the S239 review measured `scrml_sid` / 2592000 with the auto-escalated gate ACCEPTING a
+planted plain `scrml_sid` (base: `__Host-scrml_sid` / 3600). The landed fix carves 2+-`<program>`
+files out (8b keeps stamping there, byte-identical to base; counted with
+`countUnitProgramNodes`, the resolver's own step-2 walk), so this gap's reach is unchanged by
+S438 — but it is no longer LOW-shaped. A second shape of the same question, also unchanged:
+with the plain program FIRST, the file's `authConfig` is that program's `auth="optional"`, so
+a protect= `<db>` under the later secure program is not auto-escalated at all (no
+`_scrml_auth_check`; protect= still strips the column from client egress). Pinned in
+`conf-SESSION-8B-DEFERS-TO-PROGRAM.test.js` (F1 block).
+
 <!-- @gap id=g-program-sessionexpiry-inert-on-separate-login-unit sev=MED status=open -->
 ### g-program-sessionexpiry-inert-on-separate-login-unit — `<program sessionExpiry="7d">` is silently inert on the login unit that mints the cookie; the minted session lives 1h, not 7d — but §20.5 SANCTIONS the 1h default, so this is a RULING (behaviour-change) or a WARNING, not a bug-fix
 **Re-filed S339-peter from the #282 twin (which mis-marked it *"resolved by (1)"*).** Reproduced on HEAD `1ad65742` (separate login/write page + `<program auth="required" sessionExpiry="7d">`): the login/WRITE unit bakes `Max-Age=3600` into **both** the `Set-Cookie` and the durable-store TTL (`login.server.js:_scrml_session_max_age = 3600`), while the program unit emits `604800`. So a `7d` declaration yields a silent **1-hour** session on the exact unit that issues the cookie, no warning.
@@ -10579,6 +11174,7 @@ Step 5c (the placement consumer, located-not-traced).
 ---
 
 <!-- @gap id=g-e-route-001-severity-contradicts-12-4-and-one-limb-never-fires sev=MED status=open -->
+> **S440 reconfirmed (JS-WAT gauntlet D#5/#20, finder-executed at `7e4bc8155`):** the warning-severity `E-ROUTE-001` "computed member access … route inference" fires on every computed member access (`delete @ys[1]`, `store[k]`, `@fm[0.3]`, `o["__proto__"][k] = v`) and names nothing about the actual hazard at those sites — noise that trains adopters to skip it.
 ### G-E-ROUTE-001-SEVERITY-CONTRADICTS-12-4-AND-ONE-LIMB-NEVER-FIRES — the SPEC mandates an error, the catalog and the impl say warning, and the limb that matters has no fire site — `NEW S302; MED; open`
 
 Two defects in one code, both surfaced reverse-verifying GH **#284**.
@@ -11420,6 +12016,8 @@ The differential states: *"The emitted ARTIFACTS were separately verified to con
 
 ### g-cli-emits-artifacts-on-failed-compile — the CLI writes output artifacts even when the compile exits non-zero — ⚑ **RULED S354 (b): compile to a temp dir, swap on success only. The ruling was never recorded on this entry.** — `NEW S331-bryan (agent-found); RULED S354; sev LOW→MED S371; open`
 <!-- @gap id=g-cli-emits-artifacts-on-failed-compile sev=MED status=open locus=compiler/src/api.js:2962,2967(writes gated only by !emitGateFailed — which is set SOLELY by the flag-gated, default-OFF emitted-JS parse gate, so nothing gates the write on the general fatal-error state) prov=ruling:user-voice-scrml.md-S354-Q3-ruled-b-compile-to-a-temp-dir-swap-on-success-only-ratified-WITH-the-caveat-trace-the-dev-incremental-path-BEFORE-building-it -->
+> **S440 reconfirmed across all four JS-WAT gauntlet categories (finder-executed at `7e4bc8155`):** every FAILED compile in the run (E-EQ-001/002/004, E-SCOPE-001, E-TYPE-031, E-CTX-001, E-DERIVED-VALUE-MUTATE, E-MAP-BRACKET-WRITE, E-CTRL-011, a TAB-stage `var` error) left a runnable `.client.js` + `.html` + runtime, and the harness ran them (`0 == ""` → `false`). #1125 (S440 ruling (b)) gates only E-MW-007/008; codegen-stage refusals already write nothing. Also seen S440 on `5e5c952cd` (s440-gap-backlog probe): an `E-MAP-BRACKET-WRITE` build wrote its client.js.
+> **S441 re-verified (audit item 13, the tutorial §10 shape, executed at `cf62b4154`):** an `E-STATE-UNDECLARED` build (exit 1, `FAILED — 1 error`) writes `.client.js`, `.html` and the runtime. The written client.js parses (`node --check` rc=0) — the audit's "invalid JS" is not what ships; it is runnable JS for a program that failed. Also seen this pass on E-CG-001, E-SQL-004, E-NAME-COLLIDES-STATE, E-SCOPE-001 and E-AWAIT-NOT-IN-SCRML builds. Reproducer `docs/changes/s441-audit-gap-filing/repro/failed-compile-writes-artifacts.scrml`.
 > **⚑ S371-bryan: THE RULING EXISTS AND WAS NEVER ON THIS ENTRY — the S365 shape, again.** S354 Q3 ruled this **(b): compile to a temp dir, swap on success only**, ratified WITH its caveat *"trace the dev/incremental path BEFORE building it"* (`scrml dev` has its own fail-closed route — #539 serves a 500 naming the error — so it *should* not need partial output, but that was **reasoned, not traced**, and the ruling does not license skipping the trace). That ruling lived in `user-voice-scrml.md` S354 and delta-log `[1682]` — **but not here, where the work is picked up.** Per the S365 durable: *a ruling recorded everywhere except the drain path is, to the probe, not ruled.* ⚑ And the instrument for exactly this class, `scripts/ruling-debt.ts`, is **still not on `origin/main`** (S368 recorded the same absence) — the probe for undelivered rulings is itself undelivered, so nothing would have caught it.
 > **PA-RE-OBSERVED S371 by execution on `cb5db9c9`** (incidentally, while probing an unrelated fn-body matrix): a source with one `E-FN-003` printed `FAILED — 1 error` **and still wrote a complete, runnable artifact set**, which I then loaded in happy-dom and rendered successfully. Exit code 1, fully serveable output.
 > **Severity raised LOW → MED on the ruling's own recorded reasoning, not on new opinion:** (1) *"a failed build writes SOME files and not others, leaving a MIX of old and new — worse than either clean outcome, because it is the state most likely to look serveable"*; (2) *"the exit code protects `scrml build && deploy`; it protects nothing that copies `dist/` — and scrml OWNS deploy"* (§`--target fly|railway|render|docker`); (3) the S359-peter addendum below traced a **confidentiality dimension** — an emit that is syntactically valid but carries a fatal error still writes every artifact, and S354 recorded the concrete case of `app.server.js` left on disk *"carrying the very leak the gate refused."* MED = "silent acceptance + missing safety guarantees" fits; LOW did not. Flagged rather than silently carried — veto welcome.
@@ -12563,6 +13161,7 @@ The detector is **dot-requiring**, so it is a no-op on any lifecycle-annotated l
 
 ### g-auth-required-does-not-protect-the-served-html-document — `<program auth="required">` renders page content into a static HTML file and serves it to anonymous requests at 200, against §52.13's verbatim "every request to this scope SHALL be authenticated" — `NEW S365-bryan (surfaced by the handle-onion S239 pass, PA-REPRODUCED on main); HIGH; RESOLVED S380-peter (fix/s380-auth-required-document-gate)`
 <!-- @gap id=g-auth-required-does-not-protect-the-served-html-document sev=HIGH status=resolved locus=compiler/src/commands/build.js(generateServerEntry's _scrml_dispatch static-file branch — CORRECTED from the filed emit-server.ts locus: the document is served by the build's generated _server.js, not emit-server.ts) prov=spec:§52.13-every-request-to-this-scope-SHALL-be-authenticated-unauthenticated-requests-are-redirected-to-loginRedirect -->
+**S441 — a second path around the guard, closed.** The request-time compose route (§52.8 SSR seed / §39.2.3 csrf-meta fill) serves the SAME document, is mounted as a route, and is dispatched before the static branch this fix gated — it never called the auth check. Live for explicit `csrf="auto"` and SSR-seeded `auth="required"` pages; made universal when S441 made `csrf="auto"` the default under `auth=`. Gated at the handler in the `s441-csrf-default-under-auth` fix round (see g-auth-program-without-csrf-attr-emits-no-csrf-check).
 > **RESOLVED — S380-peter (`fix/s380-auth-required-document-gate`), repro-first + end-to-end proven.** The filed locus was WRONG ([[feedback-gap-report-fix-direction-can-be-wrong]]): the document is served by `commands/build.js` `generateServerEntry`, not `emit-server.ts`. The `_scrml_dispatch` static-file branch served `${pathname}.html` via `Bun.file` with no auth context (`_scrml_auth_check` only guards server FUNCTIONS). Fix (3 composed): (1) `emit-server.ts` — an `auth="required"` web module exports `_scrml_protected_document = { guard }` reusing its own `_scrml_auth_check`; (2) `build.js discoverServerRoutes` — derives the protected `.html` from `<base>.server.js`→`<base>.html`; (3) `build.js generateServerEntry` — imports each guard under a unique alias into `_SCRML_PROTECTED_DOCS` and gates the resolved candidate BEFORE serving/304. End-to-end (real Bun.serve, unauthenticated): `GET /secure.html` → 302→/login (secret absent; was 200+leak), `GET /secure` → 302, `GET /secure.css` → 200 (not over-blocked). Merge-blocker `compiler/tests/commands/auth-protected-document-served.test.js`; red-before-green proven (3/4 fail without the guard export). A NON-auth build is byte-unchanged.
 > **S239 pass (5 findings, all verified on HEAD):** (a) my own pass caught a **case-insensitive-FS bypass** — `/SECURE.html` resolved the file but missed a case-exact key → 200+leak; closed by lowercasing key+lookup. (b) `scrml dev` had its OWN ungated static path — extended the same guard into `dev.js loadServerRoutes`/`devDispatch` (dev/prod parity, e2e-proven). (c) `_scrml_protected_document` was leaking into the `routes` registry + double-imported — special-cased it in `discoverServerRoutes`. (d) case-insensitive matching CAN over-block a pathological `secure.html`+`Secure.html` case-sensitive-FS layout — KEPT (a leak is worse than redirecting a near-impossible layout; the exact-match alternative reintroduces the bypass). (e) only the `.html` is gated; the sibling client `.js`/`.css` still serve anonymously — acceptable today (the rendered secret + inline hydration data live in the gated `.html`; the client bundle is generic component code, no page data). **Follow-up if page data ever ships in a separate asset: gate the page's whole served scope, not just the document.** The guard sits inside the static `try/catch`, so an auth-infra throw fails CLOSED (404, not a leak).
 > **⚑ S365-bryan: PA-REPRODUCED on `main` by building and driving the emitted server.**
@@ -12971,6 +13570,7 @@ Pre-existing (reproduced with the #699 change stashed), orthogonal to the prop l
 
 ### g-stdlib-internal-reexport-noise-reaches-the-adopter — importing ONE stdlib function emits 23 warnings about scrml's own stdlib plumbing, and tells the adopter to go debug it — `NEW S368-bryan; MED; open`
 <!-- @gap id=g-stdlib-internal-reexport-noise-reaches-the-adopter sev=MED status=open locus=searched:compiler/src/api.js,compiler/src/route-inference.ts,stdlib/data/index.scrml — the W-STDLIB-SEED-FAILCLOSED emitter resolves stdlib re-exports at adopter-compile time and surfaces its own failures as adopter-facing warnings; the exact emit site is not yet traced prov=adopter:bryan-hit-this-writing-scrml-by-hand-S368 -->
+> **S441 re-verified (onboarding item 28, executed at `cf62b4154`):** narrower than filed but still live — `import { formFor } from "scrml:data"` (and `schemaFor`) now yields ONE `W-STDLIB-SEED-FAILCLOSED`, about the stdlib-internal `TableSort` re-export, with the absolute path of the compiler's own `stdlib/data/index.scrml` in the message. Nothing in it is actionable by the adopter.
 > **PA-REPRODUCED on `main` @ `772c0fb2`.** An **eight-line** program importing exactly one function
 > (`import { unique } from 'scrml:data'`) compiles with **24 diagnostics: 23 × `W-STDLIB-SEED-FAILCLOSED`**
 > plus one informational lint.
@@ -14680,8 +15280,14 @@ payload read in an EVENT HANDLER inside the nested arm is unbound (ReferenceErro
 into a boot crash. ⚑ The parser layer (1) is independently valuable — the likeliest real case is a COMPONENT closed with
 `</>` inside a `<div>` in a state-child — and can be split out once the ruling says how the match case should behave.
 
+⛑ **S432-peter — PARSER LAYER (1) SPLIT OUT AND LANDED** on `fix/s432-closer-in-state-child-parser` (with the VP-2
+walk of state-child bodies, so an unknown capitalised tag there stays `E-COMPONENT-035`). This entry's misleading
+`E-ENGINE-STATE-CHILD-MISSING` is gone; the shape now compiles with `W-ENGINE-MATCH-IN-STATE-CHILD` (see
+`g-nested-block-match-in-dispatched-arm-silently-drops`). Layers (2) and (3) remain on the hold ref, pending the ruling.
+
 ### g-mutating-method-string-args-lose-their-quotes — a string literal inside an argument to a reactive mutating method (`push`/`splice`/…) is emitted WITHOUT quotes — `NEW S429-peter; HIGH; carried (S431)`
 <!-- @gap id=g-mutating-method-string-args-lose-their-quotes sev=HIGH status=carried locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/rewrite.ts(the §6.5.1 clone-mutate-replace lowering)—not-traced prov=empirical:S429-replaced-row-dev-agent-found-PA-reproduced-on-d6d6e55a -->
+> **S440 reconfirmed (dpa-052 D1, DD-executed at `048df04db`):** still live on main — `@q.push("x")` → `E-SCOPE-001: Undeclared identifier 'x'`; same for `.unshift("x")`, `.push("has space")`, `.push({ t: "x" })`, whatever the cell's declared type. Controls pass: `.push(1)`, `.push("x", "y")`, `let s = "x"; @q.push(s)`, `@q = [...@q, "x"]`. It blocks §66.19.5's own worked shape; the hold ref above has not landed.
 
 `function a() { @groups.splice(0, 1, { id: 1, name: "S" }) }` emits `.splice(0 , 1 , { id : 1 , name : S })` — compiles
 clean, `ReferenceError: S is not defined` on click. `push({ id: 2, name: "P" })` emits `push({id: 2, name: P})` and is
@@ -15488,6 +16094,7 @@ closure nodes, and it should be narrowed the same way or deleted.
 ### g-bare-block-statement-is-silently-dropped — a standalone `{ … }` block statement is deleted from the emit at exit 0 with zero diagnostics — `NEW S414; HIGH; LIVE on main; pre-existing and independent of the S414 loop-head arc`
 
 <!-- @gap id=g-bare-block-statement-is-silently-dropped sev=HIGH status=open locus=searched:ast-builder.js(parseOneStatement/parseRecursiveBody),emit-logic.ts,emit-control-flow.ts — the drop was isolated by execution with two controls but the deciding site was NOT traced, so this locus is recorded as a SEARCH, not a claim prov=review:S414-peter-third-adversarial-pass-on-the-loop-head-arc-isolated-by-a-clean-control -->
+> **S440 reconfirmed (JS-WAT gauntlet C25, finder-executed at `7e4bc8155`):** `let r = 0` / `{ r = 5 }` renders `"0"` — block deleted, exit 0, no diagnostic.
 
 A bare block statement — `{ … }` used as a statement rather than as some construct's body — is
 **silently removed from the emitted JS**. No diagnostic, exit 0.
@@ -15952,6 +16559,7 @@ closed as a bug fix.
 
 ### g-multi-ops-first-match-shadows-the-longer-operator — the tokenizer's maximal munch is an ARRAY-ORDER invariant maintained by hand, its comment asserts an order the data violates, and `>>>` is structurally unreachable — `NEW S417-peter (found while proving a drift pin bites); MED; open — the ROOT of g-unsigned-right-shift-does-not-lower`
 <!-- @gap id=g-multi-ops-first-match-shadows-the-longer-operator sev=MED status=open locus=compiler/src/tokenizer.ts:1864 prov=empirical:PA-verified-by-execution-reorder-makes-the-operator-compile -->
+> **S440 reconfirmed (JS-WAT gauntlet B#25, finder-executed at `7e4bc8155`):** `<v> = -1 >>> 0`, `5 >>> 1`, and `@neg >>> 0` in a function all fail `E-CODEGEN-INVALID-LOGIC`; `--verbose` shows `>> > 0`. The message names no source line. SPEC still has no bitwise-operator text (see also g-tilde-diagnostic-explains-accumulator-for-bitwise-not).
 
 `tokenizer.ts` matches multi-char operators with a FIRST-MATCH-WINS loop under the comment
 `// Multi-char operators (check longest first)`. There is no length sort — maximal munch is a property
@@ -16505,6 +17113,7 @@ recorded is how the next reader concludes the whole 45 are noise.
 **Fork (not decided here):** (a) fail-closed — recognize the nested form and fire a `NOMINAL` diagnostic until the contexts are built, mirroring §23.3's recognized-and-fail-closed banner; (b) build §43.2's four context types. (a) is the containment move and is cheap; (b) is the feature. **They are not alternatives — (a) should land regardless of when (b) does.**
 — `NEW S407-bryan (found while writing the "I am Jack's <program>" article — the piece's standard is that every code block compiles, so the nesting block was compiled and its ARTIFACTS inspected; reading §43 alone would have published the boundary as real)`; **HIGH**; open
 <!-- @gap id=g-nested-program-is-accepted-and-silently-flattened-into-the-parent sev=HIGH status=open locus=compiler/src/(nested-<program> handling — the construct parses and its body is emitted into the parent client bundle; no execution-context split, no Worker emission, and neither E-PROG-003 nor E-PROG-004 has a reachable fire site) prov=empirical:PA-compiled-a-nested-program-reading-the-parent-cell-at-22bc1c08-exit-0-zero-diagnostics-no-worker-artifact-withTax-inlined-into-the-parent-client-bundle-reading-_scrml_cs_reactive_get-rate -->
+> **S441 re-verified (audit item 1, executed at `cf62b4154`):** still flattened — a nested `<program name="compute">`'s `export function add` is emitted into the PARENT client bundle as `function _scrml_add_3(a, b) { return a + b; }`. The output now also carries `new Worker("compute.worker.js")`, a file that is not written (g-nested-program-emits-artifacts-it-never-produces). New silent position filed as g-cross-program-call-assigned-to-cell-lowers-to-null; the symbol-table face of the same missing boundary is g-nested-program-local-collides-with-parent-cell.
 
 ### g-spec-43-5-1-cross-program-rpc-example-is-invalid-scrml — §43.5.1's worked example uses `await`, which §19.9.8 says the language does not have, making `E-PROG-004` unreachable
 
@@ -16521,6 +17130,7 @@ The contradiction closes a loop: §43.5.1 also states *"Unawaited cross-program 
 **Two things are owed and they are separable:** the SPEC example must be corrected to whatever the resolved-Promise surface actually is (§19.9.3 says the compiler resolves a host-boundary Promise with no source-level `await` — §43.5.1 predates that and was never revisited), and `E-PROG-004`'s wording needs re-deriving from the corrected form. Root cause of the unusability is [[g-nested-program-is-accepted-and-silently-flattened-into-the-parent]].
 — `NEW S407-bryan (found by compiling SPEC's own §43.5.1 worked example verbatim while drafting the <program> article)`; **MED**; open
 <!-- @gap id=g-spec-43-5-1-cross-program-rpc-example-is-invalid-scrml sev=MED status=open locus=compiler/SPEC.md(§43.5.1 worked example + the E-PROG-004 sentence, vs §19.9.8 no-await-keyword and §19.9.3 compiler-resolves-at-the-boundary) prov=empirical:PA-compiled-the-verbatim-43.5.1-example-at-22bc1c08-E-AWAIT-NOT-IN-SCRML-and-the-await-free-form-E-CODEGEN-INVALID-LOGIC -->
+> **S441 re-verified (audit items 1 + 19, executed at `cf62b4154`):** unchanged. §43.5.1 still shows `${ const result = await <#compute>.add(1, 2) }` (→ `E-AWAIT-NOT-IN-SCRML`), and the await-free `const result = <#compute>.add(1, 2)` still fails `E-CODEGEN-INVALID-LOGIC` (emitted `const result;`). The cell-assignment position `@r = <#compute>.add(1, 2)` is worse — silent `null` — filed as g-cross-program-call-assigned-to-cell-lowers-to-null. Reproducer `docs/changes/s441-audit-gap-filing/repro/spec-43-5-1-await-example.scrml`.
 
 ### g-spec-13-5-names-e-match-not-exhaustive-for-a-missing-engine-state-child — a §13.5 narrative cross-ref contradicts §51.0.B's normative statement, and the implementation sides with §51.0.B
 
@@ -17202,6 +17812,7 @@ and would double-count.
 ### g-foreign-slice-shape-scanner-is-regex-literal-blind-so-an-unbalanced-bracket-in-a-regex-desyncs-its-depth-count — the FOURTH trigger on `scanForeignSliceShape`, and the one that finally makes the "harden it once" call concrete — `NEW S425-bryan (adopter report from flogence PA S48, arrived UNTRACKED in the inbox mid-session; PA-REPRODUCED by execution on `c59367bb` — their 9-case matrix re-run 8-for-8, then the MECHANISM proven by prediction-and-test rather than by reading); MED; open`
 
 <!-- @gap id=g-foreign-slice-shape-scanner-is-regex-literal-blind-so-an-unbalanced-bracket-in-a-regex-desyncs-its-depth-count sev=MED status=open locus=compiler/src/codegen/emit-logic.ts:scanForeignSliceShape(LOCATE BY SYMBOL — the char scan tracks single/double-quoted strings, template literals, line comments and block comments, and has NO regex-literal state and no `\` escape handling outside a string span, so `\[`/`\]` inside a regex literal increment/decrement `depth`) prov=adopter:flogence-S48-2026-09-20-two-codegen-lowering-failures -->
+> **S443 second trigger, same root** (flogence 2026-09-07, `2026-09-07-to-scrml-regex-literal-with-quote-breaks-codegen-in-foreign-block.md`; triage-agent re-measured on 4953ff135): a `'`, `"` or `` ` `` inside a regex literal (`.replace(/[']s/g, "")`) opens the scanner's string/template state, so the following `return`/statement break is never seen and the slice is wrapped `return (const a = …)` → E-CODEGEN-INVALID-LOGIC. No bracket imbalance involved. Workaround: escaped codepoints (`/[’']s/g`). A regex-literal state closes both triggers; fixtures owe a quote-in-class case placed before a top-level statement break.
 
 **PA-REPRODUCED on `c59367bb`.** The reporter's matrix, re-run independently — 8 of their 9 rows
 (the 9th skipped for shell-escaping reasons only), **every one agreeing**:
@@ -17332,6 +17943,7 @@ surface entirely — a right mechanism wired to the wrong consumer.**
 ### g-default-logic-mode-loses-the-ghost-lint-logic-context-exemption-for-the-whole-program-body — the ghost-pattern scanner's `logicRanges` exemption is computed from explicit `${…}` spans only, so under §40.8 default-logic mode every JS-shaped construct in a `<program>`/`<page>` body is linted as framework ghost syntax — and the compiler's own `W-PROGRAM-REDUNDANT-LOGIC` tells authors to adopt exactly that shape — `NEW S425-bryan (surfaced as a "related and separate, not filed as a bug" aside in the flogence S48 report; PA-REPRODUCED and then WIDENED by measurement — the report's framing was foreign-interior-specific and the real scope is the whole body); MED; open`
 
 <!-- @gap id=g-default-logic-mode-loses-the-ghost-lint-logic-context-exemption-for-the-whole-program-body sev=MED status=open locus=compiler/src/lint-ghost-patterns.js:logicRanges(LOCATE BY SYMBOL — the pre-Stage-2 scanner's only logic-context protection is `skipIf: inRange(offset, logicRanges)` and `logicRanges` is derived from explicit `${ … }` spans; pattern 23's regex is `/(?:^|\s)\([a-z][a-zA-Z]*\)\s*=/g`, pattern for W-LINT-007 likewise) prov=adopter:flogence-S48-2026-09-20-two-codegen-lowering-failures -->
+> **S440 — probable further instances (JS-WAT gauntlet D, finder-executed at `7e4bc8155`; root NOT traced, attribution to this entry is a guess):** `W-LINT-021` ("Angular binding") false-fires on `[NaN] == [NaN]` and on `const g = (x) => double(x)` in ordinary scrml logic.
 
 **PA-REPRODUCED on `c59367bb`, and the reported scope was too NARROW.** The report frames it as *"the
 ghost-pattern lint scanner reads inside `_={ }=` interiors"*, cites §23.2.3's *"the `_{}` interior is
@@ -17895,7 +18507,7 @@ whether the spec is the language we want.** These are two instances of exactly t
 afternoon by pointing a real program at the compiler — the first such program this project has had.
 
 — NEW S428-bryan (both surfaced by the S428 self-host migration; GAP 2's no-diagnostic behaviour reported as MEASURED by the dispatch, PA has not re-run it)
-<!-- @gap id=g-two-language-gaps-a-real-12k-program-hit-that-the-corpus-never-did sev=MED status=open locus=searched:compiler/SPEC.md§19.9.8,compiler/src/codegen/emit-logic.ts prov=adopter:self-host-dogfood-RULING-GATED-no-governing-sentence-exists-for-either-shape -->
+<!-- @gap id=g-two-language-gaps-a-real-12k-program-hit-that-the-corpus-never-did sev=MED status=resolved locus=searched:compiler/SPEC.md§19.9.8,compiler/src/codegen/emit-logic.ts prov=adopter:self-host-dogfood-RULING-GATED-no-governing-sentence-exists-for-either-shape -->
 
 ### G-THE-TWO-FRONT-ENDS-DISAGREE-ABOUT-THE-GUARD-FORM — one `try`/`catch` → `!{}` migration produced NINE field-level parity divergences
 
@@ -18044,6 +18656,7 @@ deterministic; the harness currently works around it by running pure and hybrid 
 overflows the stack on a recursive component; the CLI prints "Compiler crashed unexpectedly".
 
 <!-- @gap id=g-recursive-component-overflows-ce-deep-clone sev=MED status=open locus=compiler/src/component-expander.ts prov=empirical:agent-s430-stage-swap -->
+> **S441 — now REPRODUCED (fail-shorthand review P8, at `cf62b4154`), no longer relay-only:** `bun compiler/bin/scrml.js compile samples/gauntlet-s19-phase4/nested-comments.scrml` prints `Maximum call stack size exceeded.` The review saw it on both of its trees.
 
 ### G-LOOP-BINDER-WRITE-DETECTION-SKIPS-CLOSURES-AND-TEMPLATE-INTERPOLATIONS — a `let` binder written from a closure still gets a `const` head
 
@@ -18070,6 +18683,7 @@ and the destructuring assignment `[x] = [x * 3]` emit invalid JS. The validate-e
 E-CODEGEN-INVALID-LOGIC ("compiler defect") — a diagnostic that does not name the root cause is itself a diagnostic bug.
 
 <!-- @gap id=g-labeled-loops-and-same-scope-redeclaration-reach-codegen-as-defects sev=LOW status=open locus=compiler/src/codegen/emit-control-flow.ts prov=review:S430-destructure-round2 -->
+> **S440 reconfirmed + RULED (JS-WAT gauntlet C23, finder-executed at `7e4bc8155`):** `outer: for (…) { for (…) { if (j == 1) { continue outer } } }` → `E-CODEGEN-INVALID-LOGIC "Unsyntactic continue"`; the `for` label is dropped from the emit, while §49's labeled `while` works. S440 JS-WAT #4 ruled labels KEPT — "fix the labeled-`for` codegen" (`user-voice-scrml.md` S440 JS-WAT decisions 4-12).
 
 ### G-FILE-TOP-JS-IMPORT-IN-A-PAGE-EMITS-AN-ES-IMPORT-INTO-A-CLASSIC-SCRIPT — the page dies with a SyntaxError on load
 
@@ -18141,9 +18755,10 @@ depend on its position. Repros: `C:\wt432s\pa\n4c.scrml`, `n4d.scrml`. **Exposur
 in assetManagement, flogenceP or `compiler/self-host/` (the one repo-corpus hit, `docs/website/pages/learn/validators.scrml:314`,
 is HTML-escaped sample text inside a `<pre>`). Pinned by `conformance/cases/reactive/nested-path-method-call-not-first-stmt`
 (impl#1: `o` stays `{list:[], m:[9]}`). PA-reproduced.
+⚑ **S441 — the DROP is fixed; the case still fails, for a narrower reason.** The S441 declared-prose work made a bare `@cell` on a later line after a value a statement boundary (`ast-builder.js` collectExpr ASI-NEWLINE `tokStartsStmt` now admits `AT_IDENT`), so both statements now EMIT (`#add` runs `@o.list.push(t)` → `#n` shows 1). `#refill` still reads 1, not 2: after `@o.m = [9]` (a `_scrml_deep_set` that replaces `o`) the following `@o.m.push(1)` mutates the new array without the display updating. Signature re-recorded on the case (`sha256:6744fc50e4841499`); the gap stays `carried` until the notify miss is traced — NOT traced in the S441 dispatch.
 
-### g-expr-handler-drops-every-statement-after-a-leading-call — an inline `${…}` handler whose FIRST statement is a call drops every statement after it — `NEW S432-peter; HIGH; carried (S432)`
-<!-- @gap id=g-expr-handler-drops-every-statement-after-a-leading-call sev=HIGH status=carried locus=searched:compiler/src/codegen/emit-event-wiring.ts,compiler/src/ast-builder.js(the `${}` event-attribute value collection)—not-traced prov=empirical:S432-PA-reproduced-semi2-re-verified-by-compile-on-280ecbdd -->
+### g-expr-handler-drops-every-statement-after-a-leading-call — an inline `${…}` handler whose FIRST statement is a call drops every statement after it — `NEW S432-peter; HIGH; resolved (S437)`
+<!-- @gap id=g-expr-handler-drops-every-statement-after-a-leading-call sev=HIGH status=resolved locus=searched:compiler/src/codegen/emit-event-wiring.ts,compiler/src/ast-builder.js(the `${}` event-attribute value collection)—not-traced prov=empirical:S432-PA-reproduced-semi2-re-verified-by-compile-on-280ecbdd -->
 
 `onclick=${@items.push(1); @last = 2}` emits `function(event) { _scrml_cs_reactive_get("items").push(1); }`;
 `onclick=${f(); g()}` emits `function(event) { _scrml_f_4(); }`. **Zero diagnostics, exit 0.** Assignment-first
@@ -18156,6 +18771,41 @@ proxy mutation with no `_scrml_reactive_set` (already recorded under `g-when-cha
 fixed on the when-changes branch by `becfbe96`). Repro `C:\wt432s\pa\semi2.scrml`. **Exposure: 0** (no
 `on*=${ call(…); …}` in assetManagement, flogenceP, `compiler/self-host/` or the repo corpus). Pinned by
 `conformance/cases/markup-handler/expr-handler-call-first-multi-stmt` (impl#1: `last` = 1, not 30). PA-reproduced.
+**S435 extension — the braced inline block reaches the same drop.** Under the §5.2.3 amendment (L19 reversed) the
+canonical multi-statement handler is `onclick={ s1; s2 }`; `onclick={ track("reset"); @count = 0 }` emits
+`function(event) { _scrml_track_4("reset"); }` at exit 0 (assignment-first blocks run every statement). The ⚑ above
+is now settled: §5.2.3 (amended) states *"a statement's effect SHALL NOT depend on whether an earlier statement is a
+call or an assignment"*. Second pin: `conformance/cases/markup-handler/inline-block-handler-call-first` (impl#1:
+`count` stays 5).
+**Disposition — RESOLVED S437 (`1719d1573`, change-id `s437-bare-handler-sequence-drop`; first cut `31ac90379`
+split the text and was replaced — see below).** Shares its root with
+`g-each-row-event-handler-keeps-only-first-statement`: the handler value's `exprNode` parses the statement list as ONE
+expression (first statement only), and the top-level / engine-arm emitters trusted it whenever the first statement was
+not an assignment. **The value is now PARSED as a statement list** by the function-body statement parser
+(`ast-builder.js:attachHandlerStatementLists` → `tokenizeLogic` + `parseLogicBody`, run in `buildBlock` right after
+`parseAttributes`), and a value whose parse holds 2+ statements carries `value.handlerBlock = { stmts }`. The count —
+so the 1-vs-many decision — comes from that parse: comments are not statements; a `;` in a regex / string / template /
+closure / IIFE is not a separator; continuation lines are one statement. Every handler emit site
+(`emit-event-wiring.ts`, `emit-variant-guard.ts`, `emit-each.ts`) lowers those nodes through ONE function-body lowering,
+`emit-logic.ts:emitHandlerStatementList` → `emitLogicBody` (`insideFunctionBody`, with the engine / map / set / request
+ctx). A 1-statement value keeps the single-expression path (§5.2.3: "equivalent to the bare shape"), byte-identical.
+⚑ The first cut (`31ac90379`) split the TEXT on `;`/newline and was reverted after re-review: it broke handlers that
+compiled on base (a `//` comment swallowing the next statement, `.method()` continuation lines, braceless `if … else`)
+and silently changed `${ /;/.test(@s) && … }` to `/; /`. Both pins pass (xfail marks removed); added
+`inline-block-handler-in-engine-state-child-call-led`, `inline-block-handler-in-match-arm`, and the sixteen
+`s437-handler-shape-*` cases (every shape in all four positions). Empirical: `onclick=${f(); g()}` →
+`function(event) { _scrml_f_N(); _scrml_g_N(); }`.
+**S437 round 4 (`622269c1f`)** — review items closed on the same structure: (1) a ONE-statement value
+spanning lines (`{ @r = @n⏎ + 1 }`) also lowers from its parsed statement — the older path split it at the newline
+(`+ 1;` dropped, silently); single-line single statements and callables keep the older path (byte-identical);
+(2) the value is parsed as a FUNCTION BODY (a `function … { }` token frame), so `@x = …` statements are writes; a
+statement SEQUENCE the parser rejects (top-level `;`, or statements left on a later line) is REPORTED —
+`${ () => @r = 1; @r2 = 2 }` E-STMT-MISSING-SEMICOLON, `{ try … ; h() }` E-TRY-NOT-IN-SCRML — instead of silently
+truncated (one arrow like `${() => @n = @n + 1}` is still one expression); (3) statements 2..n get the
+function-body checks: type-system `visitAttr` walks `handlerBlock.stmts` with `visitLogicNode` in a handler scope
+binding `event`, and resolves each `@x =` write target (E-SCOPE-001 / E-STATE-UNDECLARED, all four positions);
+(5) the "statement boundary not detected" warning is held and printed only when no statement list handles the
+trailing statements. Corpus migration: 0 files.
 
 ### g-when-changes-in-each-row-body-dropped — a `${ when @n changes { … } }` inside an `<each>` row body is dropped from the output entirely — `NEW S432-peter; HIGH; carried (S432)`
 <!-- @gap id=g-when-changes-in-each-row-body-dropped sev=HIGH status=carried locus=compiler/src/codegen/emit-each.ts(the row-body logic-interpolation arm — emits the comment "each: empty logic interpolation skipped") prov=review:S432-adversarial-review-of-the-when-changes-branch-reproduced-on-280ecbdd-and-the-fix-branch;empirical:re-verified-by-compile-on-280ecbdd -->
@@ -18225,7 +18875,7 @@ same compile also raises a spurious `E-DG-002` ("`@items` … never consumed") a
 (Whether a mutating `sort()` in a render expression should be legal at all is its own question — the pin waits for
 that.) found by: S432 adversarial review of the when-changes branch.
 
-### g-dev-server-binds-all-interfaces — `scrml dev` / `scrml serve` listen on every interface, so the dev server (and its compile-error overlay) is reachable from the LAN — `NEW S432-peter; MED; RESOLVED S432 (hold/s432-dev-server-localhost-default, merged on bryan's ruling)`
+### g-dev-server-binds-all-interfaces — `scrml dev` / `scrml serve` listen on every interface, so the dev server (and its compile-error overlay) is reachable from the LAN — `NEW S432-peter; MED; RESOLVED S446 (hold/s432-dev-server-localhost-default landed via fix/s446-loopback-default on bryan's S439 ruling)`
 <!-- @gap id=g-dev-server-binds-all-interfaces sev=MED status=resolved locus=compiler/src/commands/dev.js(buildServeConfig,runDevChildServer,the parent proxy Bun.serve),compiler/src/commands/serve.js — no `hostname` passed to Bun.serve prov=empirical:S432-redaction-dev-agent-netstat-0.0.0.0-LISTENING -->
 
 No `Bun.serve` call in `dev.js` or `serve.js` passes `hostname`; on this machine `Bun.serve({port:0})` shows in `netstat`
@@ -18248,3 +18898,2536 @@ by default so its pairing with `0.0.0.0` needs `ipv6Only:true`. Pinned by `compi
 (incl. a structural check that no other listener — `Bun.serve`/`Bun.listen` in any spelling, `createServer`, or an
 http/https/net/tls/http2/dgram import — exists in compiler/src, and an empirical LAN-address probe with a bare-`--host`
 control) + `compiler/tests/commands/dev-serve-bind-host.test.js` (the real CLIs).
+
+### g-native-component-def-with-children-throws-at-boot — under `--parser=scrml-native`, a markup-valued component definition that interpolates `${children}` is emitted as boot-time code that evaluates `children`, so the client throws `ReferenceError: children is not defined` at load — `NEW S432-peter; MED; open`
+<!-- @gap id=g-native-component-def-with-children-throws-at-boot sev=MED status=open locus=searched:compiler/native-parser(the native lowering of a `const X = <markup>` component definition — emits the definition body as a lift)—not-traced prov=empirical:S432-dev-agent-happy-dom-default-vs-native-A-B-on-451296f3-and-4d888293 -->
+
+`<program> const Card = <div class="card">${children}</div> <Card><p>x</p></Card> </program>` — the default pipeline
+compiles and runs clean (no `children` in the client JS). Under `--parser=scrml-native` it compiles clean too, but the
+client carries `_scrml_lift_el_1.appendChild(document.createTextNode(String((children) ?? "")))` at file scope and throws
+`children is not defined` at boot, killing the rest of the chunk (in an engine program the later setup never runs).
+It throws even when the component is declared and NEVER used. ⛑ **WIDER (S432 review, PA-accepted):** the claim that a
+component without `${children}` is fine is FALSE — native turns ANY component definition into code that runs at page
+load: unused `const Chip = <div>C</div>` and `const Wrap = <section><Chip/></section>` emit a boot-time
+`document.createElement("Chip")`. Missing `children` is one symptom of that; a stray component element is another. Native-only, pre-existing (reproduced on `451296f3`), not a regression of the closer-stack
+branch. MED: the native parser is opt-in, but it is the swap target and any `${children}` component breaks the whole
+page there. found by: S432 closer-stack dev agent while running the sibling matrix under both parsers.
+
+### g-textarea-raw-text-with-lt-loses-content-in-state-child — inside an engine state-child, `<textarea>a < B and </> here</textarea>` renders as `a here`; the text between is lost — `NEW S432-peter; LOW; open`
+<!-- @gap id=g-textarea-raw-text-with-lt-loses-content-in-state-child sev=LOW status=open locus=searched:the markup-level scan of raw-text elements (textarea) — not the S432 closer stack; identical on 451296f3 prov=review:S432-closer-stack-adversarial-happy-dom -->
+
+A `<` followed by a capital inside `<textarea>` raw text is read as markup, so `B and </>` is consumed as an element and
+its closer. Same on base `451296f3` and after the closer-stack fix; markup-level, not state-child-specific in cause (the
+review found it while probing state-child shapes). Silent content loss, but a rare shape. found by: S432 adversarial
+review of fix/s432-closer-in-state-child-parser.
+
+### g-bare-when-after-first-body-child-ships-as-page-text — a bare `when @x changes { … }` written in a `<program>` body AFTER its first `${}` block or markup child is emitted as LITERAL PAGE TEXT; no effect, no diagnostic — `NEW S432-peter; HIGH; open — RULING-GATED (bryan: §40.8 auto-lift set), gift-wrap in progress`
+<!-- @gap id=g-bare-when-after-first-body-child-ships-as-page-text sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(§40.8 default-logic auto-lift at program body-top) prov=empirical:S432-when-changes-dev-agent-and-round-3-reviewer-both-reproduced-on-280ecbdd -->
+
+`<program> <q> = 1  <c> = 0  ${ const <d> = @q * 2 }  when @d changes { @c = @d } </program>` exits 0 and the page
+HTML contains the text `when @d changes { @c = @d }`; no `_scrml_when_changes` is emitted. Same after a `<div>` child.
+The identical `when` placed before any `${}`/markup child compiles to an effect. SPEC §40.8 lists the auto-lifted
+shapes and calls the rest "an open operator question per-shape", so lift-vs-diagnose is bryan's; silent text emission
+is wrong under either answer. Gift-wrap (class table of every silent shape + the recommended fix on
+`hold/s432-bare-when-body-top`) in progress this session. found by: S432 when-changes dev agent while chasing a review finding.
+
+### g-regex-statement-after-block-closer-lexed-as-division — a regex literal that starts a statement right after a block `}` is lexed as DIVISION by all three lexers; the default pipeline emits a DIFFERENT regex at exit 0 — `NEW S432-peter; HIGH; open (P7 exposure 0 — carry candidate, pin owed)`
+<!-- @gap id=g-regex-statement-after-block-closer-lexed-as-division sev=HIGH status=open locus=compiler/src/tokenizer.ts(isRegexContext — no `}` handling),compiler/src/codegen/code-segments.ts(text twin),compiler/native-parser/lex-in-code.js(documented NOT HANDLED),compiler/self-host-v2/lex.scrml prov=empirical:S432-PA-reproduced-on-9743cfd2 -->
+
+`function t(s) { if (s) { s = s + "" }⏎ /a\sb/.test(s) … }` compiles with 0 errors and emits `/ a sb /.test(s)` — the
+tokenizer pads the "division" operands and drops the `\` escape, so a different regex runs (the S412
+`g-unbraced-if-for-body-regex-literal…` symptom, one level away). With a `"` inside that regex the default pipeline ALSO
+fires a false `E-CLASS-NOT-IN-SCRML` on a later string (`if (s) { }⏎/"/.test(s)⏎const msg = "class Foo { }"` → 8:16;
+74f64bef compiled it clean — the #1048 residual the S432 re-review flagged). A fix needs the four lexers moved TOGETHER:
+a native-only fix broke `self-host-v2-lexer-slice4b.test.js`, which pins `if (a) {}\n/re/g` as division. Related parity
+debt: native (impl#1) now reads `/` after an `if (…)` head as a regex (S432 #1048 fix) while self-host-v2 (impl#2) still
+reads division — the slice-4b parity corpus does not cover the shape. Exposure: 0 in compiler/self-host (its one
+line-start regex follows `||`), assetManagement, flogenceP. found by: S432 #1048-fix dev agent; PA-reproduced.
+
+## §S433 — gaps filed S433 (2026-09-26, Peter / AdiPDesk; the review-floor pass over #1045/#1046/#1050, two dispatched fixes, and four PA repros — every entry verified by execution unless it says otherwise)
+
+### G-CLIENTJS-SKIPS-RELATIVE-IMPORT-REBASING-SO-A-HOST-IMPORT-DANGLES — a `import:host` binding used in client-reachable code emits a source-space specifier into `<base>.client.js`, resolved against the output dir where nothing exists; valid JS, exit 0, `node --check` passes — `RE-OPENED S438, re-scoped: the on-disk/gate half fixed, the BROWSER half open`
+<!-- @gap id=g-clientjs-skips-relative-import-rebasing-so-a-host-import-dangles sev=MED status=open locus=compiler/src/api.js(the two bare rewriteStdlibImports-on-clientJs limbs — one in the validateEmit gate phase and one in the write phase — versus the three rewriteRelativeImportPaths limbs for toolJs/serverJs/libraryJs; locate by symbol, the write-phase client limb carries a comment stating the hole) prov=review:S433-peter-floor-pass-on-1045-reviewer-REPRODUCED-PA-verified-the-asymmetry-by-reading-api-js route=bryan:handOffs/incoming/2026-09-26-from-S433-peter-to-bryan-1045-client-host-import-dangling.md -->
+Introduced (made REACHABLE) by #1045. Both the write phase and the `validateEmit` gate phase pass `clientJs` through `rewriteStdlibImports` only; `toolJs` / `serverJs` / `libraryJs` each get `rewriteRelativeImportPaths` first. Every `clientJs` specifier was dist-space by construction until now, so the asymmetry was inert — **`import:host` is the first source-space relative specifier that can land in client output.** The emit gate cannot catch it: the bytes are valid JavaScript and only the specifier dangles. Blast radius today is small and stated honestly — the allow-list confines host imports to `stdlib/compiler/**`, which builds library/tool-shaped, so no in-tree artifact is currently broken. Fix is one call threaded into BOTH client limbs (the gate phase too, so the gated bytes stay the written bytes). **Routed to bryan on footprint alone** (`api.js` is his declared S430 surface); it needs no ruling. Direction: inert-to-fixing.
+**S438 (peter) — HALF FIXED on `fix/s438-1045-f1-client-import-rewrite`, then RE-OPENED by that branch's S239 review.** Reproduced on `072741ca` first, and wider than filed: not only `import:host` — **any plain `.js` helper imported by a page and used client-side** emitted its source-space specifier into `<base>.client.js` (`app/sub/deep.scrml` importing `../../vendor/util.js`, built to `build/dist`, wrote a `../../vendor/util.js` that resolves nowhere on disk).
+- **FIXED — the on-disk re-base + gate==write half.** `rewriteRelativeImportPaths` now runs on `clientJs` in all three client limbs (the `validateEmit` gate phase, the content-hash pre-pass, the plain write) from the file's own dist dir, so the written specifier resolves ON DISK and the gated bytes are the written bytes; every gate limb's stdlib rewrite also moved from the output ROOT to the per-file dist dir (a nested artifact's gated bytes used to differ from its written bytes — measured on a nested library `scrml:math` import). The naive one-call fix recreated the class one level away — under `--module-format=esm` a client chunk imports the shared runtime by a `.js` specifier that is ALREADY dist-space, and re-basing it broke every esm page (bite-tested) — so the rewriter takes a `distSpaceTargets` set (the runtime's dist path). The S239 review measured 0 dangling on-disk specifiers over a 113-build matrix and gate≠write artifacts 761→321. Consumers that read the file from disk (server-side / test harnesses) benefit. Pinned by `compiler/tests/integration/clientjs-import-disk-rebase-gate-eq-write.test.js`, which asserts disk resolution + gate==write ONLY.
+- **OPEN — the BROWSER half (reviewer-executed, S239 of edd61059).** Client JS runs in a browser, and on-disk resolution does not make it reachable there. **Classic format (the default):** the page loads `<base>.client.js` as a classic `<script>`, where a top-level `import` is a SyntaxError whatever its specifier (acorn `sourceType:"script"` rejects it; `compiler/src/codegen/validate-emit.ts` parses emitted JS as a MODULE, so the gate cannot see it) — the page is dead on arrival. **esm format:** the re-based specifier climbs out of dist into the SOURCE tree (e.g. `../../../../../../fx1/pages/admin/local.js`), and `scrml dev` serves only the output dir (`compiler/src/commands/dev.js` ~:1595 `serveDir`), so the fetch 404s — HTTP 404 count unchanged base vs branch (fx1: 3, fx3: 2). **Options (bryan's choice):** (a) copy client-reachable relative helpers into dist the way stdlib shims land in `_scrml/`, and re-base to the copy; or (b) a compile diagnostic for a non-`.scrml` relative import reaching CLASSIC client output, and for a `.ts` `import:host` reaching ANY client output (a browser cannot load `.ts`). **P7 disposition: `carried`** (not security, not bootstrap-blocking) — but the marker stays `status=open` for now: `conformance/run.ts` fails the gate on a `carried` gap with no pinning xfail case, and the pinning case's CORRECT behaviour depends on the (a)/(b) choice (a runnable helper vs a new diagnostic), so the case — and the flip to `carried` — follows bryan's ruling.
+- **Gate≠write residue (pre-existing, string-literal-only).** Under `contentHashAssets` the write phase applies `rewriteChunkImportRefs` and the `sourceMappingURL` rename AFTER the gate: **esm + content-hash WITHOUT source maps** still mismatches for any page with a cross-file `.client.js` dep (the chunk import URL is re-pointed at the hashed dep name), and **+ source maps** mismatches on the renamed `sourceMappingURL`. (Earlier wording here — "measured equal for the shapes above" — held only for dep-less pages.)
+- **LOW design note.** `distSpaceTargets` is a MIRROR: it lists what the emitter already knows. `emit-client.ts` (~:2218, the non-`.scrml` local-import limb that pushes `import … from ${jsSource}`) is the one place that knows which client imports are USER source-space; marking them there (or emitting them dist-space, as `emit-server.ts` does via `distRelativeServerSpecifier`) would remove the list. Complete today — the runtime is the only compiler-written dist-space `.js` import in client output — but future-fragile: the next one silently re-breaks.
+
+### G-EXPORT-FROM-AND-DYNAMIC-IMPORT-KEEP-SCRML-SPECIFIERS-IN-EMITTED-JS — a re-export from a `.scrml` module emits verbatim into the library `.js`, leaving a `.scrml` specifier in emitted JavaScript
+<!-- @gap id=g-export-from-and-dynamic-import-keep-scrml-specifiers-in-emitted-js sev=MED status=open locus=compiler/src/api.js(staticImportSources collects ImportDeclaration only, so an ExportNamedDeclaration carrying a source and an ImportExpression are never visited by rewriteRelativeImportPaths — locate both by symbol) prov=review:S433-peter-floor-pass-on-1045-reviewer-REPRODUCED-identical-at-the-parent-4b8ccdb8-caret-so-PRE-EXISTING-not-introduced -->
+PRE-EXISTING (byte-identical behaviour at `4b8ccdb8^`), surfaced by the #1045 review. #1045 replaced a line-anchored regex with an acorn walk whose doc-comment claims it rewrites "any clause shape" — but the collector visits `ImportDeclaration` only, **with the parsed tree already in hand** (Rule 7's shape: the structural route was available and a narrower node set was used instead). Measured population: **6 corpus files** — `samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-export-reexport-008.scrml`, `examples/23-trucking-dispatch/models/auth.scrml`, `stdlib/auth/index.scrml`, `stdlib/data/index.scrml` (×4 lines). Shares its locus with the entry above, so whoever opens that function should close both.
+**S438 note (still OPEN):** the #1045 F1 fix left a pointer comment at the `ImportDeclaration`-only collection in `staticImportSources` and did NOT fold this in — collecting `ExportNamedDeclaration` / `ExportAllDeclaration` sources there is only half the fix: the reported symptom is a `.scrml` specifier, which `rewriteRelativeImportPaths` never touches (its re-base is `.js`/`.mjs`/`.ts`/`.mts` only), so the `.scrml` → emitted-`.js` translation for re-exports has to land too (library emitter), plus dynamic `import()`.
+
+### G-BOOLEAN-COERCION-DOES-NOT-FIRE-OUTSIDE-A-DB-SRC-BLOCK — a declared `boolean` column read by a raw SQL block in a plain `function` under a program-level `db=` emits NO coercion; booleans reach the consumer as SQLite `0`/`1`
+<!-- @gap id=g-boolean-coercion-does-not-fire-outside-a-db-src-block sev=MED status=open locus=searched:compiler/src/codegen/bool-coerce.ts(buildBoolColumnsFromFileAST requires a state node whose stateType is schema and a column whose scrmlType is boolean),compiler/src/codegen/rewrite.ts(boolCoerceSqlResult returns inner unchanged when the module-level bool-columns context is null),compiler/src/codegen/emit-server.ts(the setBoolColumnsForRewriter call site) — the deciding condition was NOT traced; what is measured is the boundary, not the cause prov=empirical:S433-peter-PA-verified-by-execution-two-projection-shapes-bare-and-table-qualified-both-emit-no-wrapper -->
+**PA-verified by execution.** A program with a program-level sqlite `db=`, a `<schema>` declaring `enabled: boolean not null`, and a plain `function` running a raw SQL select of that column compiles clean (exit 0) and emits the bare `unsafe(...)` call with **no coercion wrapper and no helper block anywhere in the artifact.** Measured with BOTH an unqualified projection and a table-qualified one — neither fires, so the qualification hypothesis is REFUTED. The `table` keyword was present in the schema block on the final probe. The one structural difference from the shape that DOES work is the absence of a `<db src= tables=>` block: `compiler/tests/unit/sqlite-bool-column-coercion.test.js` wraps its query in one and passes **5/5** at HEAD.
+⚑ **This CORRECTS a stale-claim reading.** A triage pass concluded the sibling entry [[g-boolean-column-roundtrips-as-integer-0-1-not-bool-in-raw-select]] was fixed-and-unmarked by `8a68d960` (#842), on the structural evidence that the coercion helper exists and is wired at four raw-SQL result paths. That evidence is real and the fix does work — **for the `<db src>` shape.** The raw-SQL-under-program-level-`db=` path was never covered, so the sibling entry stays OPEN and its own scope question (does a raw SQL block count as a §39.4 "query helper"?) now has a measured boundary instead of an open guess. **Do not resolve either entry on the presence of the helper.**
+
+### G-SSR-EACH-IN-A-MATCH-ARM-IS-INVISIBLE-TO-THE-SSR-WALK — an `<each>` inside a `<match>` arm emits no SSR renderer AND no lint: the conservative client-render fallback, unannounced
+<!-- @gap id=g-ssr-each-in-a-match-arm-is-invisible-to-the-ssr-walk sev=MED status=open locus=compiler/src/ast-builder.js(the match/when arm body capture — the arm body never becomes structured children, so NO each-block node exists in the AST at all; emit-ssr-render.ts:buildSsrEachRenderers is downstream and blameless) prov=empirical:S433-peter-dispatch-measured-0-renderers-0-lint-both-sides-then-CORRECTED-by-the-S433-adversarial-pass-which-walked-the-AST-and-counted-each-block-nodes-anywhere-in-it-as-ZERO -->
+⚑ **LOCUS CORRECTED before this entry ever shipped.** It was first filed against `emit-ssr-render.ts`, on the reasonable-looking inference that the walk simply failed to visit the node. The S433 adversarial pass walked the AST and counted **`each-block` nodes anywhere in it: 0** — the arm body is never parsed into structured children, so **no pass keyed on `each-block` can ever see it**, and a fix in `buildSsrEachRenderers` is impossible by construction. This is the located-not-traced hazard in its usual costume: the symbol search found a plausible site, and only an execution trace found the real one.
+Surfaced as a measured residual by the S433 `if=`-enclosure fix's own class probe (the `<match>` arm row is the one shape reading 0 renderers / 0 lint on BOTH sides). Distinct from the `if=` defect: no WRONG renderer is emitted, so nothing renders into a dead `<template>` — but the author is never told the list will be absent from the first paint, which is the same silence the `if=` limb (a) fix exists to remove. Widening the lint to markup-origin eaches was deliberately NOT done inside that fix (scope creep); filed instead.
+
+### G-TWO-TEST-FILES-SHARE-FIXED-ABSOLUTE-TEMP-ROOTS-AND-RACE — the local baseline carries about a dozen phantom failures that move in both directions, making a name-set comparison the only safe regression check on a multi-session box
+<!-- @gap id=g-two-test-files-share-fixed-absolute-temp-roots-and-race sev=LOW status=open locus=compiler/tests/integration/cross-file-module-export-const-client.test.js(a fixed shared root under the system temp dir)+compiler/tests/integration/inline-sql-in-branch-cps.test.js(likewise) — both with a per-test recursive delete prov=empirical:S433-peter-measured-on-BOTH-sides-base-24859-pass-21-fail-vs-fixed-24877-pass-15-fail-with-4-names-appearing-on-only-one-side-and-24-of-24-passing-in-isolation -->
+Both files build a **fixed, shared, non-unique temp root outside the repo** and recursively delete it per test, so concurrent execution — two PA sessions on one machine, or agents running suites in parallel worktrees — makes them delete each other's fixtures. They fail in BOTH directions and pass **24/24 in isolation**, which is the signature. Cheap fix: a pid+timestamp-suffixed root and tolerant teardown, the pattern the two S433 test files already use. ⚑ **Operational consequence, worth carrying:** this box's pre-commit-subset baseline is **21 red, not the 9 a single quiet run reports** — so a red local tier here must be judged by comparing failure NAME SETS against a same-session base measurement, never by counting.
+
+### UPDATED — [[g-handle-globalthis-response-ships-protected-columns]] is now TWO-THIRDS CLOSED; only half (b) survives
+PA-verified at HEAD. Half **(a)** (the fail-OPEN `instanceof Response` passthrough) is closed: the opaque-result guard exists in `emit-server.ts` and, when protect is active, returns the Response only if it carries the mediated symbol or a `null` body, else refuses; the compiler rewrites an author's `return new Response(` into the mediated form, and **`E-PROTECT-005`** (the author-constructed-`Response` gate) did not exist when the entry was filed. Half **(c)** (SPEC §40.3.5's own `handle()` example failing `E-SCOPE-001`) is closed: **`Response`, `Request` and `Headers` are all in `LOGIC_SCOPE_GLOBAL_ALLOWLIST`** in `type-system.ts`, with an in-source comment explaining they were added for exactly this adopter case — so the bare-vs-qualified asymmetry the entry's decisive differential rested on no longer exists. **RESIDUAL: half (b) only** — `E-PROTECT-004` is still a per-body SOURCE-TEXT scan, self-described in-source as a conservative lint, i.e. the Rule 7 text-scan-in-a-post-AST-stage class rather than a confidentiality hole. Re-run the entry's differential by execution before building, then re-file as a (b)-only entry.
+⚑ Consequence for [[g-tenant-raw-egress-is-a-byte-identical-twin-of-the-protect-gate]]: its companion warning that the `instanceof Response` passthrough returns a manual Response before tenant redaction is now weaker on the PROTECT side, which is provenance-checked. The **tenant-side regexes are unambiguously still broken** (the body-wide `.acrossTenants(` suppressor and the member-chain-blind `new Response` match), so that entry stands — but re-measure the passthrough sub-claim at HEAD before building on it.
+
+### UPDATED — two entries flipped to `resolved` this session, both verified by execution rather than relayed
+- [[g-baseline-csrf-arm-has-no-instanceof-Response-guard]] → **resolved.** The opaque-result guard is now emitted in the baseline-CSRF arm ahead of the CSRF result expression and the JSON serialisation. ⚠ Its *secondary* claim survives: the unmerged rationale correction is still unmerged and main still carries the stale comment — re-file that half as NOMINAL if it matters.
+- [[g-two-language-gaps-a-real-12k-program-hit-that-the-corpus-never-did]] → **resolved.** Both halves were ruled at S430 and BUILT: the scope-exit primitive as `defer` (P3 stage 1, `lower-defer.ts` + `lint-defer.ts`, landed #1051) and the host-module question as `import:host` plus a parse-layer rejection of dynamic `import()` (P4, `E-DYNAMIC-IMPORT-NOT-IN-SCRML` across five files, landed #1048). It had been sitting in the operator's queue as RULING-GATED for a ruling he had already given.
+
+### g-when-reads-clause-not-parsed-e-scope-001 — `when @x changes reads @y { … }` (the §6.7.4 `reads` annotation) fails with E-SCOPE-001 on `reads`; the effect is dropped — `NEW S432-peter; MED; open`
+<!-- @gap id=g-when-reads-clause-not-parsed-e-scope-001 sev=MED status=open locus=compiler/src/ast-builder.js(the when-effect parse — after `changes` it expects `{`; no `reads` dep-list branch) prov=empirical:S432-bare-when-gift-wrap-agent-compiled-on-main-96e6c788-merge -->
+
+`<program> <x> = 0 <y> = 0 when @x changes reads @y { log(@y) } … </program>` → `E-SCOPE-001: Undeclared identifier
+`reads`, and no effect is emitted. SPEC §6.7.4 documents the form (*"annotate the read with the `reads` declaration in
+the `when` header"* — `when @price changes reads @qty { … }`) as informational, no semantic change. Loud (not silent), so
+MED. Noted in passing under `g-when-changes-effect-fires-eagerly-at-registration`; filed on its own here. Re-verified on
+the #1054 when-changes rewrite. found by: S432 bare-when gift-wrap agent while measuring the when-head class.
+
+### g-when-timer-fired-dep-head-silently-dropped — `when <#id>.fired changes { … }` (the §6.7.x `<timeout>` example) compiles clean and emits NOTHING — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-when-timer-fired-dep-head-silently-dropped sev=HIGH status=open locus=compiler/src/ast-builder.js(the when-effect parse — the dep-list branch accepts only AT_IDENT / a parenthesised AT_IDENT list; a `<#id>.prop` head leaves dependencies=[] and the node/body are lost) prov=empirical:S432-bare-when-gift-wrap-agent-compiled-on-main-96e6c788-merge -->
+
+`<program> <timeout id="g" delay=10> ${ log(1) } </> ${ when <#g>.fired changes { console.log("MK") } } <p>x</p> </program>`
+exits 0 with ZERO diagnostics and the client JS contains no `MK` and no `_scrml_when_changes` — the effect silently does
+not exist. SPEC's `<timeout>` section ("Referencing a Timeout Instance") shows exactly this head
+(`when <#paymentGuard>.fired changes { … }`) and states *"`.fired` is reactive … any markup or `when` block that reads
+`<#id>.fired` re-evaluates after the timeout fires."* The §6.7.4 dep-list grammar (`'@' identifier` only) does not admit
+`<#id>.prop`, so SPEC is self-inconsistent here: either the grammar grows a `<#id>.prop` dep-item or the example is wrong —
+but silent acceptance is wrong under both. Silent-drop class → HIGH. Related, not the same:
+`g-malformed-when-dep-list-compiles-clean` (malformed `@`-lists). found by: S432 bare-when gift-wrap agent.
+
+### g-no-program-file-root-ships-when-onmount-and-at-write-as-page-text — in a file with NO `<program>`, a `when … changes {}`, `on mount {}` or `@x = …` written after a markup child ships as LITERAL PAGE TEXT; the only diagnostic is an unrelated W-PROGRAM-001 — `NEW S432-peter; MED; open`
+<!-- @gap id=g-no-program-file-root-ships-when-onmount-and-at-write-as-page-text sev=MED status=open locus=compiler/src/ast-builder.js(liftBareDeclarations — the GITI-029 lifecycle gate, the Unit CC @-write gate and the S432 when gate are all `isDefaultLogicBody`, which is true only under <program>/<page>/<channel>; the file root runs with parentType=null, isDefaultLogicBody=false) prov=empirical:S432-bare-when-gift-wrap-agent-compiled-on-main-96e6c788-merge -->
+
+`<x> = 0 / <p>${@x}</p> / when @x changes { … }` (no `<program>`) → page HTML contains `when @x changes { … }`; same for
+`on mount { … }` and `@x = 4` in that position. Each compiles at exit 0 with only `W-PROGRAM-001`, whose advice ("wrap in
+`<program>`") happens to be the fix but does not name the leaked statement. Declarations (`<n> = …`, `function`) DO lift
+at the file root (BARE_DECL_RE / TOPLEVEL_STATE_DECL_RE gate on `parentType !== "markup"`, not on `isDefaultLogicBody`), so
+the file root is a half-default-logic locus. Ruling-adjacent: whether a `<program>`-less file root is a §40.8 surface at all
+is the parked `docs/pinned-discussions/w-program-001-warning-scope.md` question. Independent of the S432 when ruling (both
+hold branches leave the file root as it is). found by: S432 bare-when gift-wrap agent.
+
+### g-when-from-worker-parent-handler-ships-as-page-text-at-body-top — the parent-side worker hook `when message from <#wk> (r) { … }` (§43.5.3) written BARE at a `<program>` body-top is lost at EVERY position — page text, no handler, no diagnostic; only `${ … }` works — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-when-from-worker-parent-handler-ships-as-page-text-at-body-top sev=HIGH status=open locus=compiler/src/block-splitter.js(the default-logic body-top text run is CUT at the `<#wk>` token, so no text block carries the whole head)+compiler/src/ast-builder.js(liftBareDeclarations — no gate can see a head split across blocks) prov=empirical:S432-bare-when-gift-wrap-agent-measured-5-positions-on-main-28da69b0-and-on-hold-A-identical;review:S432-PA-adversarial-review-F1 -->
+
+Fixture: a nested `<program name="wk">` + `<got> = 0` + `<p>${@got}</p>`, and the hook `when message from <#wk> (r) { @got = r }`.
+- inside `${ … }`: handler emitted ✔ (the only working form).
+- after markup / first in the body: the whole statement is page text; no handler.
+- after declarations in the same run (the position that lifts every other `when`): the run is cut at `<#wk>`, the
+  `when message from` prefix is swallowed into the lifted declaration run and `<#wk> (r) { @got = r }` renders as page
+  text; no handler.
+All at exit 0 with no diagnostic (only an unrelated E-DG-002). `when error from <#wk> (e) {…}`: same — handler absent at
+every bare position, works in `${}`. `when terminate from <#wk> {…}`: E-SCOPE-001 even inside `${}` (not implemented at
+all). Identical on main and on `hold/s432-bare-when-body-top`, so pre-existing, not introduced; the S432 §40.8 amendment
+names it as an open exception and does NOT claim this form. §43.5.3 shows the hook bare, with no `${}`. found by: S432
+PA adversarial review (F1) of the bare-when gift-wrap; positions measured by the gift-wrap agent.
+
+### g-when-body-not-validated-garbage-compiles-to-a-client-syntax-error — a `when @x changes { … }` body is passed through unvalidated: `when @x changes {see below}` compiles at exit 0 and emits `function() { see below; }` — the client bundle then fails to PARSE at load — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-when-body-not-validated-garbage-compiles-to-a-client-syntax-error sev=HIGH status=open locus=compiler/src/ast-builder.js(the when-effect parse — bodyExpr is safeParseExprToNode of the raw body, which parses only the FIRST expression (`see`) and raises nothing)+compiler/src/codegen/emit-logic.ts(case "when-effect" emits bodyRaw verbatim) prov=empirical:S432-bare-when-gift-wrap-agent-on-main-28da69b0-shared-run-position-new-Function-SyntaxError-Unexpected-identifier-below -->
+
+`<program> <x> = 0  when @x changes {see below}  <p>${@x}</p> </program>` (the shared-run position, lifted on main) →
+0 errors; client JS `_scrml_when_changes(…, function() { see below; });` → `SyntaxError: Unexpected identifier 'below'`,
+which kills the whole client script. Also: an undeclared identifier in the body (`{ braces }`) raises no E-SCOPE-001, and
+an undeclared `@dep` (`when @mentions changes`) raises nothing (cf. `g-malformed-when-dep-list-compiles-clean`). Surface
+it widens: under the S432 hold branch A, head-shaped PROSE after markup (`when @x changes {see below}`) reaches this
+path instead of rendering as text — 0 corpus files. found by: S432 bare-when gift-wrap agent measuring review finding F3.
+
+### g-each-nested-peritem-if-not-reactive — an `if=` on a NON-root element of an `<each>` row is evaluated once at row creation and never follows the row's data — `NEW S432-peter; MED; open`
+<!-- @gap id=g-each-nested-peritem-if-not-reactive sev=MED status=open locus=compiler/src/codegen/emit-each.ts(renderTemplateChildToJs, the nested per-row if= create-time append gate) prov=empirical:S432-PA-review-of-hold/s432-q5(ifrow.mjs)-reproduced-by-dev-on-764365cc -->
+
+`<each in=@groups key=@.id as g><li><em if=g.hot>HOT</em><s>${g.hot}</s></li></each>` — a field write (`@groups[0].hot = true`, or `g.hot = true` through a loop alias) updates the `<s>` text to `true` but the `<em>HOT</em>` never appears. Same on a literal-initialised and a computed cell, and on main. **LOUD, not silent:** `W-IF-IN-EACH` fires at compile (§34 row names it a "deliberately-deferred §17.1 reactive-surface extension"), and only the sole-item-root `if=` is reactive. Filed so the deferral has a ledger entry the §6.5.6 item 3 carve-out can cite (it lists `<each>` per-item bindings as fine-grained). Closing it = the §17.1 per-row structural swap for nested elements (per-child anchor + reconcile interaction). Workaround in the warning text: a `show=` / `class` toggle, which IS reactive.
+
+### g-each-item-field-bind-no-write-back — `bind:value=r.f` on an `<each>` row renders the value but typing writes nothing back to the row — `NEW S432-peter; MED; open`
+<!-- @gap id=g-each-item-field-bind-no-write-back sev=MED status=open locus=compiler/src/codegen/emit-each.ts(renderTemplateAttrToJs, the bind:* item-field branch — W-EACH-BIND-ITEM-FIELD-DEFERRED) prov=empirical:S432-PA-review-of-hold/s432-q5(lift.mjs)-reproduced-by-dev-on-764365cc -->
+
+`<each in=@rows key=@.id as r><input bind:value=r.t/>…</each>` — an `input` event with the value `"Q"` leaves `@rows[0].t` at `"a"`. The outer-cell form (`bind:value=@cell`) is wired (i175, GH #175); the ITEM-FIELD half was deferred at S286 and is **LOUD**: `W-EACH-BIND-ITEM-FIELD-DEFERRED` fires. There was no open ledger entry for the deferral, only the resolved Half-1 entry (`g-bindvalue-value-side-dropped-in-each`), so the §6.5.6 carve-out had nothing to cite. With cells now deep-reactive on every write, the write-back is a plain field assignment through the row reference (`r.t = el.value`), which the Proxy set trap turns into a fine-grained update — the obvious lowering. Workaround in the warning text: an explicit `oninput` handler.
+
+### g-user-fn-rename-rewrites-emitted-helper-locals — the user-function rename pass rewrites bare identifiers across the WHOLE client chunk, so a compiler-emitted helper's local that shares a user function's name is silently captured — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-user-fn-rename-rewrites-emitted-helper-locals sev=HIGH status=open locus=searched:compiler/src/codegen(emit-client.ts worker block observed; the rename pass itself not traced) prov=empirical:S432-dev-reproduced-on-9743cfd2-lineage-while-fixing-review-F2 -->
+
+**On main (S432 wrap): unfixed at every site.** The worker send-wrapper site is fixed only on the gift-wrap branch `hold/s432-q5-deep-reactive-cells-spec` (all wrapper/helper locals `_scrml_`-prefixed); the class fix (binding-aware renaming, or a reserved `_scrml_` namespace for all emitted code — ties to Q7) is open.
+
+Measured while fixing S432 review F2. A user `function e()` next to an inline worker: the emitted send wrapper `onmessage = function(e) { resolve(e.data); }` came out as `function(_scrml_e_3) { _scrml_resolve_2(e.data); }` — the parameter renamed, the body's `e` NOT, and `resolve` renamed to the user's `resolve()` when one exists. Every worker reply resolved to `undefined` (the user function's `.data`), silently. A user `function c()` did the same to a `const c` inside an emitted helper (`seen.set(src, _scrml_c_5); return _scrml_c_5;`). **Fixed at the one site on hold/s432-q5-deep-reactive-cells-spec** (every local in the worker wrapper + `_scrml_to_plain` is `_scrml_`-prefixed), NOT as a class: any other emitted code that uses a bare, non-`_scrml_` identifier (callback params, loop vars, temps) is exposed to a same-named user function. Class fix: the rename pass must resolve bindings (skip identifiers bound by an enclosing emitted function/const), or every emitter must use the `_scrml_` namespace (ties to Q7, reserving `_scrml_`). Sweep target: grep the codegen for emitted `function(x)` / `const x` with a bare `x`.
+
+### g-map-insert-chain-lowers-only-the-first-insert — `@a = @a.insert("X", 1).insert("Y", 2)` lowers only the FIRST insert — `_scrml_map_insert(...).insert("Y", 2)` throws TypeError on click; the conformance case pinning order-independent map equality passes only because the throw leaves both maps empty — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-map-insert-chain-lowers-only-the-first-insert sev=HIGH status=open locus=not-traced prov=empirical:S432 -->
+> **S440 reconfirmed — the set vocabulary too (JS-WAT gauntlet D BUG-6; re-executed on `5e5c952cd` by the s440-gap-backlog agent):** `<nums>: set[number] = [:]` · `@out = String(@nums.add(5).has(5))` compiles clean and emits `_scrml_map_insert(_scrml_cs_reactive_get("nums"), 5, true).has(5)` — `.add` lowered, the chained `.has` left raw → `….has is not a function` at runtime.
+
+PA-reproduced on `61e05f02` by compiling `conformance/cases/maps/order-independent-eq-rt/case.scrml` (0 errors): the handler emits `_scrml_cs_reactive_set("a", _scrml_map_insert(_scrml_cs_reactive_get("a"), "X", 1).insert("Y", 2))` — the chained `.insert` is a method call on a plain runtime Map value, which has none. ⚑ **FALSE GREEN:** the case asserts `eq` after the click; both handlers throw before writing, so `@a` and `@b` stay `[:]` and `eq` is true — the case passes while testing nothing. Fix the lowering to fold the whole chain, and rewrite the case so it asserts the map contents, not only equality. found by: S432 handler gift-wrap agent (side finding); PA-reproduced.
+
+### g-expr-handler-bare-function-ref-emitted-as-dead-expression — `onclick=${handler}` (a bare function reference inside `${}`) emits `function(event) { _scrml_handler_4; }` — a dead expression; the handler never runs (top level AND lift rows); `onclick=handler` (no `${}`) wires correctly — `NEW S432-peter; MED; open`
+<!-- @gap id=g-expr-handler-bare-function-ref-emitted-as-dead-expression sev=MED status=open locus=not-traced prov=empirical:S432 -->
+
+SPEC §5.2: "`onclick=${expr}` … SHALL use the `${...}` expression directly as the event handler". Reproduced by the S432 lift-fix adversarial review on both cb38df9d and the fix; pre-existing. Silent (click does nothing).
+
+### g-lift-row-ternary-of-arrows-handler-dead — in a lift row, `onclick=${x > 1 ? () => f(1) : () => f(2)}` (a ternary producing a function) is emitted as a dead expression — `NEW S432-peter; LOW; open`
+<!-- @gap id=g-lift-row-ternary-of-arrows-handler-dead sev=LOW status=open locus=not-traced prov=empirical:S432 -->
+
+Same SPEC §5.2 clause as `g-expr-handler-bare-function-ref-emitted-as-dead-expression`; the callable test only recognises a literal arrow/function expression. Pre-existing (S432 lift-fix review).
+
+### g-lift-row-destructured-param-arrow-unbound-name — in a lift row, `onclick=${({ a }) => f(a)}` emits `(__destructured__) => _scrml_f_5(a)` — `a` unbound → ReferenceError on click — `NEW S432-peter; MED; open`
+<!-- @gap id=g-lift-row-destructured-param-arrow-unbound-name sev=MED status=open locus=not-traced prov=empirical:S432 -->
+
+Pre-existing (S432 lift-fix review, both cb38df9d and the fix). Silent at compile, throws at click.
+
+### g-expr-handler-juxtaposed-statements-no-separator-drop-second — `onclick=${f() g()}` (two statements on one line, no `;`) silently drops `g()` — `NEW S432-peter; MED; open`
+<!-- @gap id=g-expr-handler-juxtaposed-statements-no-separator-drop-second sev=MED status=open locus=not-traced prov=empirical:S432 -->
+
+Found by the S432 handler gift-wrap agent (both its hold branches still drop it). The natural fix is the existing `E-STMT-MISSING-SEMICOLON` (S284 ruling) applied to handler `${}` text. Separate from `g-expr-handler-drops-every-statement-after-a-leading-call` (carried; gift-wrapped on `hold/s432-expr-handler-multi-stmt`).
+
+### g-lift-row-bare-multi-statement-handler-no-e-multi-statement — a bare `onclick=f(); f()` in a lift row runs both statements with no §5.2.3 `E-MULTI-STATEMENT-HANDLER` (the top-level bare form errors) — `NEW S432-peter; LOW; open`
+<!-- @gap id=g-lift-row-bare-multi-statement-handler-no-e-multi-statement sev=LOW status=open locus=not-traced prov=empirical:S432 -->
+
+Found by the S432 handler gift-wrap agent. Loud-vs-silent inconsistency across positions, not data loss.
+
+### g-expr-handler-error-propagation-emits-invalid-js — `?`-propagation inside a handler `${}` (`risky()?; f()`, and as a single statement) emits `_scrml_risky()?` — `E-CODEGEN-INVALID-LOGIC` — `NEW S432-peter; LOW; open`
+<!-- @gap id=g-expr-handler-error-propagation-emits-invalid-js sev=LOW status=open locus=not-traced prov=empirical:S432 -->
+
+Loud, pre-existing (S432 handler gift-wrap agent).
+
+### g-let-initializer-markup-with-interpolated-handler-cut-off — inside a function, `let b = <button onclick=${ … }>x</button>` fails `E-CODEGEN-INVALID-LOGIC` on the default parser — the initializer is cut at `<button onclick=`; native handles it — `NEW S432-peter; MED; open`
+<!-- @gap id=g-let-initializer-markup-with-interpolated-handler-cut-off sev=MED status=open locus=not-traced prov=empirical:S432 -->
+
+Found by the S432 defer dev agent (with a `defer` in the handler the same error also masks the rule-4 diagnostic). Loud; live-parser only.
+
+### G-NESTED-ASYNC-FUNCTION-CALLED-WITHOUT-AWAIT-LOSES-ITS-FAILURE — a transport error from a nested server-calling fn is silently dropped
+
+**Reviewer-reproduced (S430 defer round-4 review, F6), same on base, SILENT.** A function declared inside another function
+becomes `async` because it calls a server function, but its call site is emitted without `await` (`let r = inner();`). The
+caller's `!{}` then tests a Promise, so a `CpsError.ServerError` is never handled: expected trace `work;inner-failed;`, observed
+`work;`. The no-defer twin is identically wrong. §13.2's await mandate is violated at a nested-declaration call site — the
+auto-await injector does not see locally-declared async functions.
+
+<!-- @gap id=g-nested-async-function-called-without-await-loses-its-failure sev=HIGH status=open locus=compiler/src/codegen/emit-functions.ts prov=review:S430-defer-round4-F6 -->
+
+### G-LIVE-PARSER-DROPS-AN-UNBRACED-ELSE-ARM-AND-RUNS-IT-UNCONDITIONALLY — `if (c) {…} else D()` always calls `D()` — `resolved (S437)`
+
+**Reviewer-reproduced (S430 defer round-5 review, F), same on base, SILENT, affects every program.** In the live (default)
+pipeline, `if (c) { D("y;") } else D("x;")` emits `if (c) {…}` followed by an UNCONDITIONAL `D("x;")` — the unbraced else arm is
+detached from its `if`. The native parser is correct. Any program writing a brace-less else runs that branch always, at exit 0.
+
+<!-- @gap id=g-live-parser-drops-an-unbraced-else-arm-and-runs-it-unconditionally sev=HIGH status=resolved locus=compiler/src/ast-builder.js(parseOneIfStmt) prov=review:S430-defer-round5-F -->
+
+**Disposition — RESOLVED S437 (`1719d1573`, change-id `s437-bare-handler-sequence-drop`).** Surfaced again in S437 round 3,
+because §5.2.3 inline-block handlers now parse through this same statement parser. `parseOneIfStmt` had TWO holes: (1) a
+braceless `else stmt` was not handled at all (only `else if` / `else {`), so the `else` was consumed and `stmt` became an
+unconditional sibling — this entry; (2) after a BRACELESS consequent (`if (c) a; else b` / `if (c) a⏎ else b`) the
+`;`/newline terminator sat between it and the `else`, so the `else` was never seen at all. The parser now looks past the
+terminator (`;`, comments, blank tokens — never a second `;`) and takes the `else` only when one follows, and parses
+`else stmt` as a one-statement alternate. Corpus artifact movement (measured vs origin/main `21a469b6b`): the gauntlet
+sample `phase2-if-as-expr-tilde-complete-013` (the else-assignment now sits inside `else {}`) and
+`conformance/cases/defer/unbraced-arm-neg` (still `E-DEFER-UNSUPPORTED-SITE`; its `else` arm is no longer detached) —
+both newly-correct. Pinned by `multi-statement-handler-s437-bare-sequence.test.js` §8c and
+`s437-handler-shape-if-else-braceless`.
+**S437 round 4 (`622269c1f`)** — the lookahead now applies ONLY after a BRACELESS consequent: a `;` after a braced
+`{ … }` ends the `if`, so `if (c) { a }; else b` is not an if/else (JS rejects it). Such a dangling `else` —
+directly after an `if` that did not take it — is now `E-STMT-UNEXPECTED-TOKEN` (§34 "no statement begins here");
+before, the parser kept the text `else { … }` as a bare expression, which either failed E-CODEGEN-INVALID-LOGIC or,
+in a function body (`if (c) { … };⏎ else { … }`), leaked into JS that re-read it as an if/else (compiled at exit
+0). Corpus: 0 files use the shape. Braceless `else` also verified in `!{}` arm bodies and engine `effect=` /
+`<onTransition>` bodies (`control-flow/s437-braceless-else-in-failable-arm`, `engine/s437-braceless-else-in-effect-bodies`).
+**S437 round 5 (`00ba0018e`)** — round 4's check rejected VALID code: a COMMENT between a braced `}` and `else`
+(`} // c⏎ else`, `} /* c */ else`, an own-line comment before `else` / `else if`, value-form `${ if @a {"A"} // x⏎
+else {"B"} }`) left the `if` ended at the comment. After a braced consequent the parser now skips comments and blank
+tokens (never a `;`) before looking for `else`, as JS does; `} ;  else` stays rejected, and the message now names the
+separator it actually found. The corpus had 0 such comments — pinned by eight `s437-r5-*` runtime cases instead.
+
+### G-DETERMINISM-GATE-WITHIN-UNIT-TEST-COMPARES-TWO-IDENTICAL-COMPILES — the F2 half of #1057 gates nothing, and the shape it names is alive
+
+**PA-VERIFIED BY EXECUTION (S436).** `compile-order-independence.test.js`'s second test — *"same file SET in one call:
+forward order == reverse order"* — cannot observe what its own docstring says it gates. `compiler/src/api.js:1127` does
+`resolvedInputFiles = inputFiles.map(resolve).sort(compareInputPathsCanonical)` **unconditionally, before the gather branch
+and before every stage**, and its own comment states the intent: *"the gathered set, and thus every minted id, is a pure
+function of the file SET, not the order it was passed."* So `digestCompileSet(SAMPLE)` and `digestCompileSet([...SAMPLE].reverse())`
+traverse the identical sequence — two byte-identical compiles. PA-verified by reading the sort site and the comparator at
+`:143`; the reviewer additionally measured `gatheredFiles` identical forward and reverse.
+
+**The shape it claims to gate is REAL and still ungated.** Reviewer control (two scratch corpora, same five case contents,
+the probe file's own directory name held fixed so the only variable is its traversal position inside ONE `compileScrml` call):
+probe FIRST emits `_scrml_logic_1`, probe LAST emits `_scrml_logic_31`, and the chunk-cell-scope hash differs — 2 of 5
+artifact fields. Within-unit traversal-order dependence is alive; the canonical sort MASKS it rather than removing it.
+
+**What the test IS worth, stated fairly:** it is a tripwire for the REMOVAL of that canonicalization (open thread
+`compilescrml-input-order-canonical`). That is a narrower property than its docstring and the PR title claim.
+**Do not close this on the presence of the test.** The F1 half of #1057 (folding `lintDiagnostics` into the digest) is
+genuinely load-bearing and is NOT in question — 4 of 5 sample digests change when it is included.
+
+<!-- @gap id=g-determinism-gate-within-unit-test-compares-two-identical-compiles sev=MED status=open locus=compiler/tests/integration/compile-order-independence.test.js:81 prov=review:S436-pr-1057 -->
+
+### G-SESSION-CONFIG-BLEEDS-FROM-A-SIBLING-PROGRAM-AND-DROPS-THE-HOST-PREFIX — one program's `session-secure="false"` downgrades an unrelated program's cookie
+
+**PA-VERIFIED BY EXECUTION WITH A CONTROL (S436). SECURITY. INTRODUCED by #1062.** `<program>`-level session config is
+resolved **BUILD-wide, not PROGRAM-wide**, so a program that declares nothing inherits an unrelated program's declaration.
+
+| compile set | emitted cookie for the non-declaring program |
+|---|---|
+| program B ALONE | `__Host-scrml_sid` — correct, secure default |
+| program A (`session-secure="false"`) + program B | **`scrml_sid`** — `__Host-` and always-Secure lost |
+
+Both input orders, zero hard errors, zero warnings naming it, zero lint. `__Host-` is browser-enforced hardening (no `Domain`,
+path `/`, always `Secure`), so this is a real downgrade. `sessionExpiry` bleeds by the identical mechanism (B inherits A's
+`604800` in place of its own default) — **one fix closes both.**
+
+**TRACED.** `compiler/src/codegen/index.ts:1867` `_readProgramAttr` iterates the whole `files` array and returns the FIRST
+`<program>` carrying the attribute, with **no program-membership test**; `:1878-1883` stamps that single build-wide answer onto
+every fileAST. `compiler/src/codegen/emit-server.ts:2679-2684` consumes it as the last fallback, and `_secureCookieMode` false
+selects `scrml_sid`. ⚑ The comment above the pre-scan claims the fallback is *"strictly ADDITIVE: it is reached only where the
+answer today is 'nothing declared → default secure'"* — that is precisely the case it flips, and the only reachable effect of
+the fallback is to weaken a secure default.
+
+**Not to be confused with** `g-session-store-namespace-not-discriminated-per-program` (two programs sharing one
+`.scrml-sessions.db` and one `"session"` namespace) — different mechanism, disclosed in SPEC §20.5, separate entry.
+Fix in flight at S436; fails CLOSED (a unit that declares nothing gets the secure default when the set holds 2+ programs).
+
+<!-- @gap id=g-session-config-bleeds-from-a-sibling-program-and-drops-the-host-prefix sev=HIGH status=open locus=compiler/src/codegen/index.ts:1867 prov=review:S436-pr-1062-F2 -->
+
+### G-EMITTED-SESSION-STORE-OPENS-SQLITE-WITH-NO-BUSY-TIMEOUT-OR-WAL — the one sqlite handle #1062's sweep did not reach
+
+**RELAYED from the S436 review of #1062 (F4), NOT PA-executed — reproduce before acting.** The durable session store is a
+file-backed sqlite database opened by the emitter and it received **neither** pragma: measured `journal_mode=delete
+busy_timeout=0`, and with a competing writer the login handler throws `database is locked` at **0 ms** — bit-for-bit the
+pre-fix symptom #1062 exists to remove. `sqlite-defaults.ts` sweeps `Bun.SQL` handles; the store is
+`new _ScrmlSessionDatabase(...)`, a raw `bun:sqlite` `Database`, so it fell outside the sweep's framing — the
+fix-recreates-its-class-one-level-away shape again. **Aggravated by #1062**: every unit of a dist now funnels its session
+writes onto ONE store file, so the contention this path cannot survive is exactly what the PR increases.
+Locus reported as `emit-server.ts:generateServerJs`, the `_anySessionWrite` branch.
+
+<!-- @gap id=g-emitted-session-store-opens-sqlite-with-no-busy-timeout-or-wal sev=MED status=open locus=compiler/src/codegen/emit-server.ts prov=review:S436-pr-1062-F4 -->
+
+### G-SCRML-DB-MIGRATE-STILL-DIES-ON-A-LOCKED-DATABASE — the adopter migration the WAL arc was filed to unblock
+
+**RELAYED from the S436 review of #1062 (F5), NOT PA-executed — a fix agent is reproducing it first.** ADOPTER-FACING
+(P7 criterion 2). The gap that motivated #1062 states *"That blocked the adopter's DB migration."* The migrator itself opens
+the adopter's sqlite file with no `busy_timeout`, so the migration still fails the instant anything holds a write lock:
+`error: migration failed (rolled back): database is locked` in ~222 ms, i.e. no wait at all (uncontended: `applied 1
+statement(s) in 1 transaction`). **`grep -rn busy_timeout compiler/src/` hits only `sqlite-defaults.ts` and two comment
+blocks** — nowhere else in the tree. #1062 unblocked the app and not the migration. Other raw opens named but NOT executed by
+the reviewer: `db-migrate.js:384` (postgres), `introspect.js:153`, `protect-analyzer.ts:439/441` (readonly).
+
+<!-- @gap id=g-scrml-db-migrate-still-dies-on-a-locked-database sev=MED status=open locus=compiler/src/commands/db-migrate.js:489 prov=review:S436-pr-1062-F5 -->
+
+### G-WAL-CONVERSION-OF-THE-ADOPTERS-DATABASE-IS-SILENT-AND-NOT-OPT-OUTABLE — semantics-changed on a file the compiler does not own
+
+**RELAYED from the S436 review of #1062 (F6).** Merely importing the emitted server module — no query issued, SELECT-only
+program — flips the adopter's sqlite file to `journal_mode=wal` **persistently in the file**, with no diagnostic and no opt-out
+(`<program journal-mode= busy-timeout=>` is deferred). An adopter who deliberately kept rollback-journal mode (single-file
+atomic copy/backup, a network filesystem where WAL's `-shm` is unsupported, an older consumer library) is converted without
+being asked. Best-effort and swallowed on failure, so it degrades safely. Named here because a semantics-changed effect
+OUTSIDE the compiled artifact owes an explicit record.
+
+<!-- @gap id=g-wal-conversion-of-the-adopters-database-is-silent-and-not-opt-outable sev=LOW status=open locus=compiler/src/codegen/sqlite-defaults.ts prov=review:S436-pr-1062-F6 -->
+
+### G-IMPLIED-LIFT-DESUGAR-MISSES-TWO-RENDER-POSITION-BODY-REPARSE-SITES — the sugar drops where the explicit `lift` renders
+
+**Reviewer-TRACED (S436 review of #1070, F1) by patching a scratch copy and observing both shapes then render; PRE-EXISTING
+(parent and merge both drop), so this is an INCOMPLETE CLOSURE, not a regression.** A bare-markup control-flow arm inside
+**(a)** a parametric snippet fill (`<TabStrip row={ (item) => <span>${ if (@on) { <p>A</p> } else { <p>B</p> } }</span> } />`)
+and **(b)** a `<tableFor>` `<column :let=…>` slot body renders NOTHING, while the byte-adjacent explicit-`lift` twin renders.
+That is the same live asymmetry against §17.6.10's asserted equivalence that justified covering the other sites.
+Loci: `component-expander.ts:parseSnippetBodyNodes` (~:3330) and `type-system.ts:_parseColumnLetArrow` (~:21460); the fix is the
+same one-line `desugarImpliedLiftMarkupArms(...)` call already used twice.
+
+⚑ **The PR's enumeration is falsified and should not be re-quoted.** It claims *"12 body-re-parse sites, 3 render-position, all
+3 covered."* The reviewer's independent count: **14 logical locations (17 parse call-sites), 4 measurably render-position, only
+2 covered** — the third "covered" item is the CE-head pass, which is not a re-parse site at all. `emit-error-boundary.ts:205`
+(`fallback={…}`) is render-position and uncovered but showed no asymmetry (the explicit `lift` does not render there either —
+**unmeasured** whether that path supports `lift`); `meta-eval.ts:397` (`^{}` meta-emit) is render-capable and **unmeasured**.
+
+<!-- @gap id=g-implied-lift-desugar-misses-two-render-position-body-reparse-sites sev=MED status=open locus=compiler/src/component-expander.ts:3330 prov=review:S436-pr-1070-F1 -->
+
+### G-ARMHOLDSMARKUP-DECLINES-ON-MARKUP-INSIDE-A-STRING-LITERAL-OR-COMMENT — a Rule-7 text shortcut makes a feature's availability depend on prose
+
+**Reviewer-TRACED (S436 review of #1070, F2), INTRODUCED by #1070.** Whether `${ if (@on) { <p>A</p> } else { @msg = "…" } }`
+renders depends on the CONTENTS OF THE STRING LITERAL IN THE SIBLING ARM. Silent, exit 0, zero diagnostics in all three fields.
+
+| sibling arm | renders? |
+|---|---|
+| `else { @k = 1 }` · `else { @msg = "plain text" }` · `else { @msg = "<3 love" }` | yes |
+| `else { @msg = "<b>x</b>" }` · `else { @msg = "see the <div /> tag" }` · `else { @k = 1 /* <p>ghost</p> */ }` | **NO** |
+
+Locus: `compiler/src/implied-lift-desugar.ts:armHoldsMarkup` — `MARKUP_OPENER_REJOINED` applied to the string fields of each arm
+piece, plus `MARKUP_OPENER_SRC` over the raw source slice. This is overlay **Rule 7** exactly (*a regex applied to SOURCE TEXT in
+a POST-AST stage*, asking what the parsed tree already answers) and it is the class that has survived five reviews on this
+project. Direction is over-declining, so it never mis-renders — it silently WITHHOLDS the feature.
+
+<!-- @gap id=g-armholdsmarkup-declines-on-markup-inside-a-string-literal-or-comment sev=MED status=open locus=compiler/src/implied-lift-desugar.ts prov=review:S436-pr-1070-F2 -->
+
+### G-EXPLICIT-LIFT-MANGLES-RAW-CONTENT-IN-PRE-AND-CODE — §4.17 holds for the sugar and is broken for the explicit form
+
+**Reviewer-measured (S436 review of #1070, F5), PRE-EXISTING at the parent — and the SUGAR is the correct side.**
+`{ <code>MARKA <p>notmarkup</p></code> }` — the sugar emits one text run `"MARKA <p>notmarkup</p>"` (correct per §4.17, which
+says scrml tokens are NOT parsed inside `<pre>`/`<code>`); the explicit `lift` emits a real `<p>` element (wrong).
+`{ <pre>x</program>MARKA</pre> }` — sugar emits `"x</program>MARKA"` (correct); explicit `lift` emits
+`textContent = "x < / program > MARKA < / pre >"`, tokenizer-rejoined junk. Silent-wrong output in the explicit-`lift` path.
+⚑ Consequence for #1070's own tests: their `expectLiftParity` bar compares against a BROKEN reference for raw-content shapes
+(they happen not to test one).
+
+<!-- @gap id=g-explicit-lift-mangles-raw-content-in-pre-and-code sev=MED status=open locus=searched:implied-lift-desugar.ts,emit-html.ts,ast-builder.js-no-locus-traced prov=review:S436-pr-1070-F5 -->
+
+### G-SSR-EACH-LINT-REASON-IS-WRONG-ON-A-VOID-IF-HOST — the message names an inert `<template>` that was never emitted
+
+**Reviewer-TRACED (S436 review of #1066, LOW-1), INTRODUCED by #1066.** `<param if=@loaded><each …></param>` fires
+`I-SSR-EACH-CLIENT-RENDERED` saying the each is *"enclosed by a `<param if=…>` element, whose subtree is emitted into an inert
+`<template>`"* — but for a VOID host no each mount fence is emitted anywhere (`fence=0`), so the stated reason describes
+something that does not exist. Locus: `emit-ssr-render.ts:inertHostFor`, the generic markup + gateable-`if=` branch, which
+excludes void tags from the compound-parent test but not from the `if=` host test. Painted rows are 0 on both sides and the
+corpus count is 0, so the behaviour is arguably the better one — only the reason string is inaccurate.
+
+<!-- @gap id=g-ssr-each-lint-reason-is-wrong-on-a-void-if-host sev=LOW status=open locus=compiler/src/codegen/emit-ssr-render.ts prov=review:S436-pr-1066-LOW1 -->
+---
+
+> **S435 — dpa-050 defect intake (D1–D7 + the §9.4 stale comment).** Found by the dpa-050 deliberation
+> (`scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md` §2.3, §9.4) at
+> `b22f5e83`; **every entry below was re-reproduced by compiling on `ea55368da`** (the dPA's measurements were not
+> carried). D5 is filed as TWO entries because its two halves have different roots. **P7 (S430) assessment, measured for
+> all eight at once** — approximate regex over the working trees, not `origin/main`: `compiler/self-host/` (11 `.scrml`
+> files), assetManagement `app/src/` (1 file) and flogence (29 files) contain **0** component definitions, **0** Tier-3
+> positional decls, **0** `<*` refs, **0** `bind` props, **0** `<theme>` blocks. So none is bootstrap-blocking
+> (criterion 1) or adopter-reported (criterion 2) by that measure, and none is security (criterion 3): all eight read
+> as `carried` candidates. **The PA sets `carried`, not this intake.** Caveat for D1/D6: the absence of components in
+> the adopter trees is itself the finding. The component path is the one with the silent-wrong defects, and adopters
+> are not on it yet.
+
+### G-COMPONENT-LOCAL-CELL-SHARED-ACROSS-INSTANCES — a state cell declared inside a component body is ONE cell keyed by its bare name, so every `<Comp/>` instance shares it; clicking one dropdown opens all three — `NEW S435-dpa050; HIGH; open`
+<!-- @gap id=g-component-local-cell-shared-across-instances sev=HIGH status=open locus=compiler/src/component-expander.ts:expandComponentNode+substitutePropsInLogicStmt(case "state-decl" keeps n.name verbatim; no per-instance cell namespace exists) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`, silent (exit 0).** Driven in happy-dom: before any click there are 0 `<ul>`; clicking the
+FIRST of three dropdown buttons leaves **3** `<ul>` open.
+
+```scrml
+<program>
+  const Dropdown = <div class="dd" props={ label: string }>
+    ${ <open> = false }
+    <button onclick=(@open = !@open)>${label}</button>
+    <ul if=@open><li>item</li></ul>
+  </>
+  <div>
+    <Dropdown label="A"/>
+    <Dropdown label="B"/>
+    <Dropdown label="C"/>
+  </div>
+</program>
+```
+
+`bun compiler/bin/scrml.js compile p03d.scrml --output-dir out` → exit 0. The client JS holds
+`_scrml_cs_reactive_set("open", false)` **three times on the same key**, and all three toggles write
+`_scrml_cs_reactive_set("open", !_scrml_cs_reactive_get("open"))`. (The bare, un-braced `<open> = false` form does not
+compile at all; that is `g-component-body-bare-state-decl-misclassified`.)
+
+**Expected:** three independent `open` cells, one per instance. **Actual:** one shared cell.
+
+**SPEC contradicted.** §15.13.5 normative: *"Each `<Card/>` tag instantiates a fresh component with its own internal
+state (`@var` declared inside the component body is per-instance)."* Its table row: *"Fresh state per instance — every
+`<Card/>` use-site has its own state."* §15.13.6: *"A component body MAY declare its own state cells (`<localCell> =
+init`) — these are per-instance per V5-strict's structural-form rule."*
+
+**Locus: TRACED.** Components are inlined at compile time by CE. `substitutePropsInLogicStmt`'s `case "state-decl"`
+copies the decl with `n.name` unchanged and only records the name as prop-shadowing, and `expandComponentNode` applies no
+per-instance renaming. No per-instance cell namespace exists anywhere downstream: `codegen/collect.ts:516` states
+*"components are compile-time INLINED, so there is no per-instance runtime element."* The emitted key is therefore the
+bare name, once per inlined copy.
+
+**Direction if fixed:** a behaviour change for accepted programs, from shared to per-instance (silent-wrong → correct).
+It needs a per-instance key or scope mechanism, a design call CE does not have today. This bears directly on the dpa-050
+Q6 ruling (how an instance writes its own state), so the fix shape should wait for that ruling.
+
+### G-COMPONENT-BODY-BARE-STATE-DECL-MISCLASSIFIED — a bare `<x> = v` inside a component body never parses as a declaration: as the FIRST child it turns the component root into text (`E-COMPONENT-035` ×N at every use); later in the body it cascades `E-CTX-001`/`E-CTX-003` — `NEW S435-dpa050; MED; open`
+<!-- @gap id=g-component-body-bare-state-decl-misclassified sev=MED status=open locus=compiler/src/block-splitter.js:splitBlocks(the program-body peekCompoundStateDeclSignal gate ~:3439 then classifyOpenerForCompoundScan reads a div opener whose first child is a bare open-cell decl as a §6.3.2 compound state-decl and lexes the whole component root as TEXT; below the top level the state-decl peeks do not run, so the cell opener opens an element) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`, loud, but the diagnostic names the wrong cause.**
+
+```scrml
+<program>
+  const Dropdown = <div class="dd" props={ label: string }>
+    <open> = false
+    <button onclick=(@open = !@open)>${label}</button>
+    <ul if=@open><li>item</li></ul>
+  </>
+  <div><Dropdown label="A"/><Dropdown label="B"/><Dropdown label="C"/></div>
+</program>
+```
+
+`bun compiler/bin/scrml.js compile p03b.scrml --output-dir out` → **exit 1**, `E-COMPONENT-035` ×3: *"Component
+`Dropdown` survived component expansion (CE) but was not resolved … Likely cause: cross-file component import …"*. The
+file has no import. Moving the decl after the `<button>` gives **exit 1** with `W-PROGRAM-001` + `E-CTX-001` (*"'</program>'
+tries to close '<div>'"*) + `E-CTX-003`. Wrapping the decl as `${ <open> = false }` compiles, and then hits
+`g-component-local-cell-shared-across-instances`.
+
+**Root, measured:** `splitBlocks` output for the first form is `text "const Dropdown = "` followed by
+**`text "<div class=\"dd\" props={…}>\n <open> = false …</>"`**. The component's root markup is a text block, so TAB
+builds a `const-decl` plus an `html-fragment` instead of a `component-def`, the registry never gets `Dropdown`, and CE
+reports the post-CE invariant.
+
+**Expected:** a state decl local to the component. **Actual:** the component is destroyed, and the error points at an
+import that does not exist. Under the S95 rule, a diagnostic that does not name the root cause is itself a diagnostic bug.
+
+**SPEC contradicted.** §15.13.6: *"A component body MAY declare its own state cells (`<localCell> = init`) — these are
+per-instance per V5-strict's structural-form rule."*
+
+**Locus: TRACED** at the classification step (`peekCompoundStateDeclSignal` → `classifyOpenerForCompoundScan`,
+program-body gate at `block-splitter.js` ~:3439). The second position's path (inside a markup frame, the state-decl
+peeks are gated on `stack.length === 0 || isProgramBody …`) is located, not traced line by line.
+
+**Direction if fixed:** newly-accepting (currently rejected; SPEC says MAY). At minimum, a diagnostic-correctness fix:
+name the bare decl, not an import.
+
+### G-TIER3-POSITIONAL-STRUCT-INIT-EMITS-JS-COMMA-EXPRESSION — `<brand>: Swatch = ("Brand", "#338967")` (§6.3.3 Tier-3 positional sugar) compiles at exit 0 to a JS comma expression, so the cell holds only the LAST element (`"#338967"`) — `NEW S435-dpa050; HIGH; open`
+<!-- @gap id=g-tier3-positional-struct-init-emits-js-comma-expression sev=HIGH status=open locus=compiler/src/expression-parser.ts:esTreeToExprNode(case "SequenceExpression" then makeEscapeHatch raw passthrough)+searched:compiler/src(no Tier-3 positional lowering exists anywhere — zero implementation hits for the struct-typed tuple init) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`, silent miscompile.**
+
+```scrml
+<program>
+  type Swatch:struct = { label: string, hex: string }
+  <brand>: Swatch = ("Brand", "#338967")
+  <p>${@brand.label} ${@brand.hex}</p>
+</program>
+```
+
+`bun compiler/bin/scrml.js compile p11.scrml --output-dir out` → exit 0, no diagnostic. Client JS:
+`_scrml_cs_reactive_set("brand", ( "Brand" , "#338967" ))`. That is a JS comma expression, so `@brand === "#338967"` and
+`@brand.label` is `undefined`. In the dPA's theme app (`cur-iii`), driven in happy-dom, the accent chip's label renders
+`""`. **The untyped form is also accepted:** `<pair> = ("Brand", "#338967")` compiles at exit 0 to the same comma
+expression, although §6.3.3 makes positional binding legal ONLY with a predefined type.
+
+**Expected:** a `Swatch` value `{ label: "Brand", hex: "#338967" }`, and a compile error for the untyped form.
+**Actual:** the string `"#338967"` in both cases.
+
+**SPEC contradicted.** §6.3.3: *"When the compound cell's shape is fixed by a predefined type, positional binding sugar
+is legal: … `<userInfo>: UserInfo = ("alice", 30, true)    // positional sugar`"*, and *"**Tier ladder rule:** positional
+binding `<x> = (a, b, c)` is legal ONLY when the structure is fixed by a predefined type."* Note also that scrml is not a
+JS superset: a JS comma operator reaching the output is not a scrml semantics at all.
+
+**Locus: TRACED for the passthrough, SEARCHED for the missing lowering.** `esTreeToExprNode`'s `case
+"SequenceExpression"` returns `makeEscapeHatch(node, span, rawSource)`, so the raw `( a , b )` text is emitted verbatim.
+A search of `compiler/src` for a positional / Tier-3 lowering finds none: no pass reads the `: Swatch` annotation to map
+the tuple onto the struct fields. Corpus: 0 tracked `.scrml` files use the typed positional form, so the blast radius is
+zero. That is not demand evidence either way.
+
+**Direction if fixed:** the typed form goes from silent-wrong to correct (behaviour change). The untyped form becomes
+newly-rejecting per the tier-ladder rule. Q2/F1 in dpa-050 (`(label: …, hex: …)` named form → `E-CODEGEN-INVALID-LOGIC`)
+is adjacent but loud.
+
+### G-STAR-TAG-REF-PASSES-THROUGH-AS-PAGE-TEXT — `<*count/>` in markup is emitted verbatim into the HTML body at exit 0; the page shows the literal text `<*count/>` — `NEW S435-dpa050; LOW; open`
+<!-- @gap id=g-star-tag-ref-passes-through-as-page-text sev=LOW status=open locus=compiler/src/block-splitter.js:splitBlocks(the less-than dispatch — less-than followed by neither `/`, `#` nor [A-Za-z_] (~:3334) falls through to text; no diagnostic) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`.**
+
+```scrml
+<program>
+  <count> = 0
+  <p><*count/></p>
+</program>
+```
+
+→ exit 0. The only diagnostic is `E-DG-002` (`@count` never consumed), a warning. The emitted HTML line is
+`<p><*count/></p>`. `<*` is not an HTML tag start, so the browser renders it as literal text.
+
+**Expected:** SPEC-silent. **Actual:** silent page-text passthrough of what is plainly a mistyped reference.
+
+**SPEC:** searched §4.1 and §6.4 — no governing sentence. §4.1 classifies only `<` + `[A-Za-z_]` as an element opener,
+and says nothing about `<` + a non-identifier character in free-text mode. `<*[a-z]` has 0 SPEC hits. Filed as
+missing-diagnostic, not spec-vs-impl.
+
+**Locus: LOCATED** (the block-splitter's `<` dispatch; the text fallthrough is the decision).
+
+**Direction if fixed:** newly-rejecting or -warning. **Becomes moot, or turns into newly-accepting, if dpa-050 Q1 adopts
+`<*name/>` as the instance-reference form.** The PA should hold this entry against that ruling rather than fix it
+independently.
+
+### G-COMPONENT-BIND-PROP-REJECTED-E-ATTR-011 — `bind:visible=@x` on a component whose props declare `bind visible: boolean` fails `E-ATTR-011` ("not a supported bind: attribute"); SPEC §15.11.1's OWN Modal worked example does not compile — `NEW S435-dpa050; MED; open`
+<!-- @gap id=g-component-bind-prop-rejected-e-attr-011 sev=MED status=open locus=compiler/src/component-expander.ts:expandComponentNode(callerNonClassAttrs merge ~:3129 carries the caller's bind:PROP attr onto the expanded ROOT element)+compiler/src/codegen/emit-html.ts(the bind: pre-pass SUPPORTED_BIND_NAMES check ~:2735 fires on that root; the _componentPropNames exemption is not consulted) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`, loud.** This is the §15.11.1 worked example, inlined:
+
+```scrml
+<program>
+    const Modal = <div class="modal" props={ bind visible: boolean, title: string }>
+        <h2>${title}</h2>
+        <button onclick=${ visible = false }>Close</button>
+    </>
+    <showModal> = false
+    <button onclick=${ @showModal = true }>Open settings</button>
+    <div><Modal bind:visible=@showModal title="Settings"/></div>
+</program>
+```
+
+→ **exit 1**, `E-ATTR-011: \`bind:visible\` is not a supported bind: attribute. Supported: \`bind:value\`, …`.
+
+**Partial machinery exists.** CE parses `bind` props (`PropDecl.bindable`), validates call sites (`E-COMPONENT-013`,
+`E-COMPONENT-014`, `E-ATTR-010`), and records `_bindProps` wiring metadata, which `emit-reactive-wiring.ts` (~:1953)
+consumes. But the caller's `bind:visible` attr is also merged onto the expanded root `<div>`. The HTML-element bind
+validator then rejects it before any of that wiring matters. The write-back half (whether `visible = false` inside the
+body propagates to `@showModal`) is **unmeasured**, because E-ATTR-011 stops the compile first.
+
+**SPEC contradicted.** §15.11.1: *"`bind:propName=@var` SHALL be valid on any component call where `propName` is declared
+as a `bind` prop in the component's `props` block."* Also: *"The compiler SHALL generate bidirectional synchronisation for
+`bind:` component props."*
+
+**Locus: TRACED** to the merge plus the pre-pass. The fix is more than the one-line exemption. The write-back path also
+needs a runtime check once E-ATTR-011 stops blocking the compile.
+
+**Direction if fixed:** newly-accepting (a SPEC SHALL currently rejected). This is the component write-back story
+dpa-050 §3 had to route around with callback props.
+
+### G-COMPONENT-EACH-IN-LITERAL-PROP-UNSUBSTITUTED — inside a component, `<each in=options>` fails `E-SCOPE-001` on `options` when the caller passes an array LITERAL (`options=["a","b"]`); the same body works when the caller passes `@cell`, and the `${ for … lift }` form works with the literal — `NEW S435-dpa050; MED; open`
+<!-- @gap id=g-component-each-in-literal-prop-unsubstituted sev=MED status=open locus=compiler/src/component-expander.ts:expandComponentNode(the string `props` map ~:2863 is filled ONLY for string-literal and variable-ref caller values; an `expr` value like an array literal lands only in propExprMap)+substituteProps(each-block raw fields inExprRaw/ofExprRaw/keyExprRaw are rewritten from the string map via substitutePropsInRawExpr, so an expr-valued prop is never substituted) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`, loud. Narrower than dpa-050 stated.**
+
+```scrml
+<program>
+  const Menu = <ul props={ options: string[] }>
+    <each in=options as opt><li>${opt}</li></each>
+  </>
+  <div><Menu options=["a","b"]/></div>
+</program>
+```
+
+→ **exit 1**, `E-SCOPE-001: Undeclared identifier \`options\`` at `p27.scrml#Menu:2:1`, stage TS. **Controls:** the same
+component called as `<Menu options=@opts/>` (with `<opts> = ["a", "b"]`) → exit 0. The `${ for (const opt of options) {
+lift … } }` body with the literal caller value (`p28`) → exit 0. dpa-050 M16 recorded this as "`<each in=prop>` fails".
+It fails only for expr-valued (non-string, non-`@`) caller values.
+
+**Expected:** the prop resolves as it does in the for-lift form. **Actual:** unsubstituted raw name, scope error.
+
+**SPEC:** no sentence names `<each in=prop>` inside a component directly. Governing by composition: §15.13.4, *"Non-`bind`
+props SHALL be evaluated at instantiation time"*, which does not depend on the caller value's syntactic kind. The S153
+each-in-enclosing-scope fix (comment at `component-expander.ts` ~:2627) states the intent that component-body `<each
+in=items>` substitutes the prop.
+
+**Locus: TRACED.** `substitutePropsInRawExpr` rewrites the each-block string fields from `props`. `props.set` is called
+only for `string-literal` and `variable-ref` values (~:2864–2867), so an array-literal value never enters it.
+
+**Direction if fixed:** newly-accepting (loud rejection → works). Related open entry:
+`g-snippet-param-in-attr-interp-and-each-raw-unsubstituted` has the same raw-string-field blind spot for snippet params.
+
+### G-COMPONENT-AT-PROP-IN-STRING-ATTR-EMITTED-AS-RAW-TEXT — a component prop passed an `@cell` value (`<Swatch hex=@c/>`) and used as `${hex}` inside a string attribute (`style="background:${hex}"`, `title="t-${hex}"`) is emitted as the literal text `@c` — `NEW S435-dpa050; HIGH; open`
+<!-- @gap id=g-component-at-prop-in-string-attr-emitted-as-raw-text sev=HIGH status=open locus=compiler/src/component-expander.ts:applyPropSubstitutions(replaces a whole `${prop}` segment with the string-map value; for a variable-ref caller value that value is the raw reference text `@c`, spliced in as LITERAL text) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`, silent miscompile, and broader than dpa-050 measured.** dpa-050 M20 showed it for a
+member access (`hex=@accent.hex` → `style="background:@accent.hex"`). A plain cell does the same:
+
+```scrml
+<program>
+  <c> = "#338967"
+  const Swatch = <span class="chip" props={ hex: string }>
+      <i style="background:${hex}" title="t-${hex}"></i>
+  </>
+  <Swatch hex=@c/>
+  <button onclick=(@c = "#dc2626")>x</button>
+</program>
+```
+
+→ exit 0, no diagnostic. Emitted HTML: `<i style="background:@c" title="t-@c">`. The client JS has no `background`
+wiring at all. String-literal caller values are correct: `<Swatch hex="#dc2626"/>` → `style="background:#dc2626"`. Text
+interpolation of the same prop (`${label}` as a child) is also correct, because it goes through the ExprNode map.
+
+**Expected:** at minimum the instantiation-time value (`background:#338967`). **Actual:** the source text `@c` in the
+attribute.
+
+**SPEC contradicted.** §15.13.4: *"Non-`bind` props SHALL be evaluated at instantiation time and SHALL NOT re-evaluate
+when the source value changes in the parent scope."* The prop is never evaluated. Its source text is pasted instead.
+
+**Locus: TRACED.** `applyPropSubstitutions` does
+`text.replace(/\$\{([^}]+)\}/g, … props.get(trimmed))`, and `props` holds `attr.value.name` (`"@c"`) for a variable-ref
+caller value (~:2866). The substitution drops the `${…}` wrapper and leaves `@c` as literal characters.
+
+**Related (resolved):** `g-inlined-component-root-class-interp-raw` (S200) left a literal `${…}` on an inlined root
+`class`, which is a different root. `g-value-attr-component-root-class-style-consumed` (LOW, open) covers `class=(expr)` /
+`style=(expr)` on a component root.
+
+**Direction if fixed:** silent-wrong → correct (behaviour change for accepted programs). Whether the fixed attribute is
+static (evaluated once, per §15.13.4) or reactive is a SPEC question: the §15.13.3 `bind:` split says static. dpa-050's
+Q6 may revisit it.
+
+### G-THEME-TOKEN-AND-SAME-NAMED-CELL-COEXIST-SILENTLY — a `<theme>` token `brand` and a cell `<brand>` in one program compile with no diagnostic; `@brand` then means the TOKEN in `#{}` CSS and the CELL in markup/logic — `NEW S435-dpa050; LOW; open`
+<!-- @gap id=g-theme-token-and-same-named-cell-coexist-silently sev=LOW status=open locus=compiler/src/codegen/emit-theme-reset.ts:lowerCssValueRefs(`themeTokens.has(name)` is checked FIRST then var(--name); a same-named cell is silently shadowed in CSS; no declaration-time collision check exists) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`.**
+
+```scrml
+<program>
+  <theme>
+      brand = #338967;
+  </theme>
+  <brand> = "x"
+  <p style="color: ${@brand}">${@brand}</p>
+  <div>#{ color: @brand; }hi</div>
+</program>
+```
+
+→ exit 0, no collision diagnostic. CSS: `:root { --brand: #338967; }` and `color: var(--brand)`, so the `#{}` `@brand` is
+the token. Client JS: `_scrml_cs_reactive_set("brand", "x")`, so the markup `@brand` is the cell. One spelling has two
+referents chosen by context. The reverse also holds (dpa-050 M18/p30): with no cell, `${@brand}` in logic is
+`E-STATE-UNDECLARED`, so a token is unreachable from logic.
+
+**SPEC:** searched §65.3.2, §65.9, §25.7 — no governing sentence for the collision. §65.3.2 says *"membership
+disambiguates — a `@name` matching a `<theme>` token lowers to `var(--name)`, otherwise the reactive-cell bridge"*, and is
+silent when both match. §65.9's "collision principle" is about keyword collisions (`<theme>` the element vs a `<theme>`
+cell), not token-vs-cell names. Filed as missing-diagnostic / SPEC ambiguity.
+
+**Locus: LOCATED** (`lowerCssValueRefs` token-first precedence). No collision check exists to trace.
+
+**Direction if fixed:** newly-rejecting or -warning (a collision diagnostic), and it needs a SPEC sentence first. Feeds
+dpa-050 F15.
+
+### G-SYMBOL-TABLE-STALE-COMMENT-NATIVE-WALKER-MESSAGEARMS-EMPTY — `symbol-table.ts` still says the native walker leaves engine `messageArms` empty, so §51.0.S message-arm validation is "a no-op on native-pipeline engine-decls"; both halves are false on HEAD — `NEW S435-dpa050; LOW; open`
+<!-- @gap id=g-symbol-table-stale-comment-native-walker-messagearms-empty sev=LOW status=open locus=compiler/src/symbol-table.ts(the §51.0.S message-arm validation block comment — "the native walker leaves it empty pending batch-1/native wiring … a no-op on native-pipeline engine-decls today", ~:7671-7674) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**A comment defect, verified by execution on `ea55368da`.** The comment (authored `c6f323f06`, S155 batch-2) reads:
+*"`messageArms` is populated by the live-pipeline state-child parser (`parseEngineStateChildren`); the native walker
+leaves it empty pending batch-1/native wiring (batch-3 note), so this validation is a no-op on native-pipeline
+engine-decls today."* The wiring landed in `7cbad5dd2` (*"F1-narrow + B2 — §51.0.S engine message-arm parity"*).
+`compiler/src/native-walker/engine-statechild-walker.ts` (~:542) sets
+`messageArms: (isColonShorthand || isSelfClose) ? [] : parseMessageArms(bodyRaw).arms`.
+
+**Empirical:** dpa-050's `p24` (an `accepts=OpenMsg` engine whose `<Closed>` state omits `.Close`) compiled with
+`--parser=scrml-native` → **exit 1**, `I-PARSER-NATIVE-SHADOW` + `E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE` (*"state-child
+`<Closed>` … does not cover every `OpenMsg` variant"*). The validation fires on the native pipeline.
+
+**Why it is filed:** it already misled a reader. dpa-050's architect panelist relayed "the native walker never fills
+`messageArms`" as fact, and the §9.4 verification refuted it. The comment sits on the exhaustiveness logic the bootstrap
+port will read. Line 9's S-era narrative in this ledger ("the native-walker hard-codes `messageArms:[]`") is the same
+historical claim, and is correct only as history.
+
+**SPEC:** not applicable (no behaviour defect). **Locus: TRACED** (the comment's text, and the walker line that
+falsifies it). **Direction if fixed:** comment-only; no behaviour change.
+
+### G-SHIPPED-STORE-SHIM-OPENS-SQLITE-WITH-NO-BUSY-TIMEOUT — the third sqlite population, in code the compiler hands the adopter
+
+**Reviewer-measured (S436 S239 pass on #1081/#1082), PRE-EXISTING.** `compiler/runtime/stdlib/store.js` does
+`new Database(dbPath)` with no `busy_timeout` and no WAL, and `compiler/src/runtime-template.js` copies it
+**verbatim** into the adopter's output as `dist/_scrml/store.js`. Measured behaviourally: compile any program
+importing `scrml:store`, `createStore(p)`, then hold `BEGIN IMMEDIATE` on `p` from a SEPARATE process —
+`store.set(...)` **throws `database is locked` in 0 ms**. No wait at all, in code the compiler ships.
+Its `.scrml` reference implementation `stdlib/store/kv.scrml` has the same shape.
+
+⚑ **This is the THIRD framing, and the framing is the lesson.** #1062 swept *`Bun.SQL` handles the compiler
+EMITS*; #1082 swept *`bun:sqlite` handles the compiler OPENS in its own process*; neither owns *`bun:sqlite`
+handles the compiler SHIPS INTO the adopter's build output*. Each sweep was diligent within its own framing
+and each framing is what decided what it missed. A fourth sweep should be phrased as a question about the
+POPULATION ("every sqlite handle that exists because of this compiler, wherever it runs"), not the constructor.
+
+Sibling, same population, filed separately: `g-emitted-session-store-opens-sqlite-with-no-busy-timeout-or-wal`
+(the §20.5 durable session store, reached via the ALIASED `new _ScrmlSessionDatabase(...)` — the alias is
+precisely why a `new Database(` grep does not find it).
+
+<!-- @gap id=g-shipped-store-shim-opens-sqlite-with-no-busy-timeout sev=MED status=open locus=compiler/runtime/stdlib/store.js:32 prov=review:S436-pr-1081-F1 -->
+
+### G-NESTED-PROGRAM-DECLARATION-INVISIBLE-TO-THE-SESSION-CONFIG-SCAN — a single program splits its own cookie name, no second program required
+
+**PA-relayed then agent-REPRODUCED on `origin/main` (S436), PRE-EXISTING.** ⚑ **Filed LOW during the #1080
+review and RE-GRADED to MED on measurement** — the original filing called it a false comment; it is a live
+defect. The `<program>` pre-scan in `codegen/index.ts` is **top-level-only**, while the reader that actually
+decides (`emit-server.ts:_readRawProgramAttr`) **recurses into children**. So a `<program session-secure="false">`
+nested inside a `<div>` is honoured for its own unit and invisible to the scan. Measured on `c46ebbf8` with
+NO second program in the set: the nesting file emits `scrml_sid` while its own member page emits
+`__Host-scrml_sid` — the #282 writer/reader split, live, in a single-program app.
+
+Closed by the recursive node scan in the S436 session-config arc; filed so the defect has its own record
+rather than living only in a fix's commit message.
+
+<!-- @gap id=g-nested-program-declaration-invisible-to-the-session-config-scan sev=MED status=open locus=compiler/src/codegen/index.ts prov=review:S436-pr-1080-F3-regraded -->
+
+### G-CLI-TRUNCATES-DIAGNOSTICS-AT-120-CHARS — every multi-line compiler error loses its remedy in transit
+
+**Reviewer-TRACED (S436 round-4 pass on #1092, F1), PRE-EXISTING.** `compiler/src/commands/build.js:907` and
+`compiler/src/commands/dev.js:630` both print a CG error as `${stripRedundantCode(e.code, e.message)?.slice(0, 120)}`,
+so **everything past 120 characters is never shown through the real CLI.** Measured on a ~1,400-character
+`E-MW-008`: the printed line ends mid-sentence at `…declares session configuration (`, discarding the contested
+attributes, the blocked units, the remedy, and the caveat — i.e. the entire actionable half.
+
+⚑ **The class is wider than one code, and it is invisible to the suite by construction:** every message-content
+assertion in the conformance tier goes through `compileScrml`, which returns the message UNTRUNCATED. A
+diagnostic can therefore be measured "names the blocked unit" in a passing test and show none of that to the
+adopter. `E-MW-007`, the sibling of the code that surfaced this, escapes only because the onion selector uses a
+different, non-truncating printer at `build.js:967` — so the two members of one family print to different rules.
+
+**Interim mitigation, not a fix:** `E-MW-008`'s message was rewritten at S436 to carry its remedy in the first
+111 characters, with a comment at the construction site saying to re-measure on any reorder. Every other
+multi-line diagnostic is still cut. **The real fix is a decision about the printer** — wrap rather than cut,
+cut at a sentence boundary, or print the first line in full plus a pointer — and it should be made once for
+the whole family rather than per-message.
+
+<!-- @gap id=g-cli-truncates-diagnostics-at-120-chars sev=MED status=open locus=compiler/src/commands/build.js:907 prov=review:S436-pr-1092-F1 -->
+> **S435 — L19 reversal measurement (four entries).** §5.2.3 was amended S435 (ruling:user-voice-scrml.md
+> S435, "reverse L19"): the brace-delimited inline block `onclick={ s1; s2 }` is now LEGAL and CANONICAL, and
+> `E-MULTI-STATEMENT-HANDLER` is narrowed to the UNBRACED bare `;` sequence plus the §4.14 `:`-shorthand locus.
+> impl#1 was measured against the amended text on `f89b665dc` (= `996c9aeda` + docs). It ACCEPTS the braced
+> form everywhere tried (exit 0, no code) and runs every statement at top level, inside an engine state-child
+> and across a multi-line block with `const` + `if`. Two positions still lose statements silently (the first
+> entry below, and the extension noted on `g-expr-handler-drops-every-statement-after-a-leading-call`); the
+> other three entries are the diagnostic text, the native front-end, and two pre-existing `:`-shorthand
+> misroutes found on the way. Exposure of the braced multi-statement form today: 0 (assetManagement, flogence,
+> `compiler/self-host/`, `examples/`, `samples/`) — but the SPEC now calls it canonical, so exposure will grow
+> from here; the PA may want to re-weigh P7 fix-for-cause on the first entry.
+
+### g-each-row-event-handler-keeps-only-first-statement — an event handler on an element inside an `<each>` row runs only its FIRST statement; the rest are dropped at exit 0, for the inline block and the `${…}` form alike — `NEW S435; HIGH; resolved (S437)`
+<!-- @gap id=g-each-row-event-handler-keeps-only-first-statement sev=HIGH status=resolved locus=compiler/src/codegen/emit-each.ts(buildEachExprHandlerBody ~:2206 — parseExprToNode parses ONE expression from the handler text and the remainder of the `;` sequence is discarded; traced by reading, not instrumented) prov=empirical:S435-l19-reversal-probes-p8-p9-p10-p12-on-f89b665dc -->
+
+`<each in=@items key=@.id><li><button onclick={ @a = @a + 1; @b = @b + 2 }>…</></></each>` emits
+`addEventListener("click", function(event) { _scrml_cs_reactive_set("a", _scrml_cs_reactive_get("a") + 1); })` —
+`@b` is never written. **Zero diagnostics, exit 0.** Not specific to the braced form or to a leading call:
+`{ @clicks = @clicks + 1; @picked = @.id }` keeps only the first; `${@picked = @.id; @clicks = @clicks + 1}` keeps
+only the first; a newline-separated block keeps only the first. The same handler at top level or inside an engine
+state-child runs every statement (pinned passing by `markup-handler/inline-block-handler-runs-every-statement` and
+`markup-handler/inline-block-handler-in-engine-state-child`). SPEC §5.2.3 (amended S435): *"No statement of the
+block SHALL be dropped, whatever its kind or position — in particular, a statement's effect SHALL NOT depend on …
+whether the handler sits at top level, inside an engine state-child (§51.0.I), or inside an `<each>` row
+(§17.7)."* Severity HIGH by the silent-drop precedent (`g-when-changes-in-each-row-body-dropped`).
+**Exposure: 0** today (see the header). Pinned by `conformance/cases/markup-handler/inline-block-handler-in-each-row`
+(impl#1: `b` stays 0). **Direction if fixed:** newly-correct runtime; no diagnostic change.
+**Disposition — RESOLVED S437 (`31ac90379`, change-id `s437-bare-handler-sequence-drop`).** Made urgent by that
+change's own E-MULTI-STATEMENT-HANDLER fix, which now steers every bare each-row sequence to the braced form: the
+adversarial review found following that advice produced a clean compile that dropped code. Root shared with
+`g-expr-handler-drops-every-statement-after-a-leading-call` (see its disposition, which also records why the first cut
+`31ac90379` was replaced): `emit-each.ts` lowers a clone of the PARSED statement nodes through the same
+`emitHandlerStatementList` as top level, after rewriting the row's `@.` idents to the factory binding structurally
+(`rewriteEachScopeInExprNode`), and Bug-73 live-keying still wraps it (final: `1719d1573`). Every shape above re-verified by compile: `{ @clicks = @clicks + 1;
+@picked = @.id }`, `${@picked = @.id; @clicks = @clicks + 1}` and the newline-separated block all emit both
+statements. The pin passes (xfail removed); added `inline-block-handler-in-each-row-call-led-row-item` (call-led +
+`@.name`, order-sensitive) and `expr-handler-in-each-row-call-led`.
+
+### g-e-multi-statement-handler-message-steers-only-to-a-named-function — the diagnostic's fix-it names the named-function form and not the braces the amended SPEC names first — `NEW S435; LOW; resolved (S437)`
+<!-- @gap id=g-e-multi-statement-handler-message-steers-only-to-a-named-function sev=LOW status=resolved locus=compiler/src/ast-builder.js(the E-MULTI-STATEMENT-HANDLER TABError text, ~:17783) prov=empirical:S435-l19-reversal-probe-p2-on-f89b665dc -->
+
+On `onclick=startGame(); track("start")` impl#1 fires the right code (exit 1) with *"For multi-statement intent,
+lift the body to a named function and wire by name"*. §5.2.3 (amended S435): *"The fix is to wrap the statements in
+braces — `onclick={ startGame(); track(\"start\") }` — or to name a function."* The message text is impl freedom, but
+it now steers every reader away from the canonical form and toward the one the ruling demoted to a free choice.
+**Direction if fixed:** message-only.
+**Disposition — RESOLVED S437 (`31ac90379`, change-id `s437-bare-handler-sequence-drop`).** The message now gives
+§5.2.3's fix first, built from the user's own statements (`onclick={ @count = 0; track("reset") }`), then "or name a
+function". When the bare value has run on into the next attribute (`onclick=@a = "s" hidden=@on;`), it says so and does
+not offer a rewrite that would move the attribute into the handler. LSP hover text updated to match.
+
+### g-native-bare-unbraced-multi-statement-handler-silently-reads-the-rest-as-attributes — under `--parser=scrml-native`, `onclick=startGame(); track("start")` compiles at exit 0; `track` and `start` become boolean attributes and only `startGame()` runs — `NEW S435; MED; open`
+<!-- @gap id=g-native-bare-unbraced-multi-statement-handler-silently-reads-the-rest-as-attributes sev=MED status=open locus=not-traced(native front-end attribute scan) prov=empirical:S435-l19-reversal-probe-p2-native-on-f89b665dc -->
+
+Default pipeline: `E-MULTI-STATEMENT-HANDLER`, exit 1 (correct). Native: exit 0, emitted HTML
+`<button data-scrml-bind-onclick="…" track start>`, handler `function(event) { _scrml_startGame_4(); }`. This is
+exactly the misreading §5.2.3's "Why the bare form stays single-expression" paragraph keeps the error for; §34
+(narrowed S435) SHALL fire on this shape on both front-ends. Native-only; MED rather than HIGH because the default
+pipeline is correct.
+**S437 extension — the native front-end has NO `E-MULTI-STATEMENT-HANDLER` rule at all** (`grep` over
+`compiler/native-parser/` returns 0 matches). Measured on the S437 19-case should-fire matrix (change-id
+`s437-bare-handler-sequence-drop`): every case compiles at exit 0 under `--parser=scrml-native` — call-, assignment-,
+compound-, postfix-, method- and member-assignment-led sequences, trailing attributes, and the `<each>` row, engine
+state-child and `<match>` arm positions — with the tail emitted as HTML attributes (`<button … track reset>`). The
+default pipeline fires on all 19 after S437. Fix = port the rule into the native attribute scan, both the `.js` and
+`.scrml` mirrors.
+
+### g-colon-shorthand-multi-statement-misroutes-to-codegen-defect-in-each-and-block-body — two §4.14 shapes that SHALL be user errors reach codegen and fail `E-CODEGEN-INVALID-LOGIC` instead — `NEW S435; LOW; open`
+<!-- @gap id=g-colon-shorthand-multi-statement-misroutes-to-codegen-defect-in-each-and-block-body sev=LOW status=open locus=compiler/src/symbol-table.ts(the §4.14 multi-statement scan covers engine state-children only)+not-traced(the `: { … }` block-body shape) prov=empirical:S435-l19-reversal-probes-p5-p6-on-f89b665dc -->
+
+(1) `<each in=@items><li : @.name; @.id></each>` — §17.7.6 names this `E-MULTI-STATEMENT-HANDLER`; impl#1 emits
+`String(_scrml_each_item.name; _scrml_each_item.id)` and fails `E-CODEGEN-INVALID-LOGIC` ("This is a compiler
+defect"). The `:`-shorthand scan is wired for engine state-children only. (2) `<Idle : { startGame(); track("start") }>`
+— §4.14 names this `E-PARSE-001`; impl#1 fails `E-CODEGEN-INVALID-LOGIC`. Loud (exit 1) in both cases, so no silent
+harm; the defect is that the diagnostic blames the compiler for a user error and does not name the fix. Pre-existing —
+found while measuring whether the L19 reversal reaches `:`-shorthand bodies (it does not; §4.14 is unchanged).
+
+### g-match-arm-handler-values-lack-an-exprnode-so-lower-as-text — a `<match>` arm body is re-parsed at emit time by the native front-end, whose handler values carry no `exprNode`, so every arm handler took the string path: a leading comment broke it and a `;` in a regex was rewritten (`/;/` → `/; /`) — `NEW S437; MED; resolved (S437)`
+<!-- @gap id=g-match-arm-handler-values-lack-an-exprnode-so-lower-as-text sev=MED status=resolved locus=compiler/src/codegen/emit-match.ts(the M6.3 nativeParseFile arm-body re-parse)+compiler/src/ast-builder.js(attachHandlerStatementListsInTree) prov=empirical:S437-round3-reproduced-on-origin-main-21a469b6b -->
+
+On origin/main `21a469b6b`, inside a `<match>` arm: `onclick={⏎ // note⏎ t("M")⏎ }` and `onclick=${ t("M"); // tail⏎ }` fail
+`E-CODEGEN-INVALID-LOGIC`; `onclick=${ /;/.test(@s) && t("M") }` compiles with the regex silently changed to `/; /`.
+The same handlers are correct at top level, in an engine state-child and in an `<each>` row. Cause: `emit-match.ts`
+re-parses an arm body without an `<each>` through `nativeParseFile`, which throws away the TAB copy; its handler values
+have no `exprNode`, so emit-event-wiring's string branch lowered them. **Disposition — RESOLVED S437 (`1719d1573`).**
+`attachHandlerStatementListsInTree` (applied to that re-parsed tree) gives each handler value the `exprNode` TAB itself
+builds (`safeParseExprToNodeGlobal`) and its §5.2.3 statement list, so an arm handler lowers exactly like one anywhere
+else. Pinned by the `s437-handler-shape-*` cases (the `#mat` position).
+
+### g-subparse-error-discard-drops-every-tab-diagnostic-in-each-engine-and-match-bodies — the `<each>` body re-split, the engine state-child body build and the `<match>` arm re-parse throw away every TAB diagnostic they raise; only `E-MULTI-STATEMENT-HANDLER` is forwarded — `NEW S437; MED; open`
+<!-- @gap id=g-subparse-error-discard-drops-every-tab-diagnostic-in-each-engine-and-match-bodies sev=MED status=open locus=compiler/src/ast-builder.js(the five `_forwardSubparseErrors` call sites — `<each>` `_subErrors`, engine-decl `_bodyErrors`, match-block `_bodyErrors`, match-arm re-parse `reTab.errors`, and the blanked each-bearing arm's diagnostics-only re-parse — plus `SUBPARSE_FORWARDED_CODES`) prov=empirical:S437-s437-bare-handler-sequence-drop-found-by-matrix-call-led-MSH-did-not-fire-in-each-engine-match -->
+
+Each of these sub-builds collects TAB errors into a local buffer and discards it, because engine-only attribute
+syntax and per-item `:`-shorthand openers raise E-ATTR-001 / E-SCOPE-001 / E-CTX-003-shaped false positives there
+and the authoritative validators re-check the nodes later. S437 found that this also silently dropped
+`E-MULTI-STATEMENT-HANDLER` for EVERY handler in those bodies (even the call-led form fired only at top level) and
+added `_forwardSubparseErrors` with an allow-list of one code. **Every other TAB diagnostic raised only at this
+stage is still dropped in those bodies** — any check that is decided from opener/attribute text in `buildBlock` and
+not re-derived downstream. Not enumerated. **Audit needed:** list the TAB-stage codes, decide per code whether a
+downstream validator re-derives it inside those bodies, and forward the rest (or replace the discard with a
+deny-list of the known false-positive codes).
+
+### g-gt-inside-bare-handler-value-silently-truncates-it — a `>` in a BARE event-handler value ends the opener: `onclick=@a = @b >= 1` compiles as `@a = @b` at exit 0 — `NEW S437; HIGH; open`
+<!-- @gap id=g-gt-inside-bare-handler-value-silently-truncates-it sev=HIGH status=open locus=searched:compiler/src/tokenizer.ts(tokenizeAttributes, the bare-assignment reader — breaks on any depth-0 `>`),compiler/src/block-splitter.js(opener end)—not-traced prov=review:S437-adversarial-review-of-s437-bare-handler-sequence-drop;empirical:PA-dispatch-reproduced-by-compile -->
+
+`<button onclick=@a = @b >= 1>x</button>` → exit 0, handler `function(event) { _scrml_cs_reactive_set("a",
+_scrml_cs_reactive_get("b")); }` — the comparison is gone. `<button onclick=@a = @b > 0 ? 1 : 2; f()>x</button>` →
+exit 0, same truncated handler, and ` 0 ? 1 : 2; f()` becomes the button's TEXT content (the opener closed at the
+`>`); no `E-MULTI-STATEMENT-HANDLER` either, because the `;` is no longer in the opener. A bare value has no end
+marker, so a `>` operator in it is indistinguishable from the tag close — the same ambiguity §5.2.3 cites for `;`.
+Direction: a diagnostic steering to braces / `${…}` / parens (cf. `E-ATTR-UNQUOTED-OPERATOR` for conditions), not
+a guess.
+
+### G-HANDLER-LOOP-BINDER-WRITE-CREATES-WINDOW-GLOBAL — in an event-handler value, a write to a keywordless loop binder silently creates a `window` global — `NEW S439; HIGH; open`
+<!-- @gap id=g-handler-loop-binder-write-creates-window-global sev=HIGH status=open locus=compiler/src/codegen/emit-event-wiring.ts:1140 prov=ruling:user-voice-scrml.md S439 #8 -->
+> **S440 reconfirmed (C70) and WIDER than this entry's shape (JS-WAT gauntlet C44–C47/C71, finder-executed at `7e4bc8155`, `window.*` diffed):** no binder write is needed — `on mount { tmp = 5 }` → `window.tmp`; `on mount { for (x of @items) {…} }` → `window.x`; and inside a `function` the nested arrow/function-expression bodies are emitted verbatim, so `@xs.forEach((v) => { last = v })` → `window.last`, `let f = () => { q = 1 }` → `window.q`. RULED S440 JS-WAT #5: a write to an undeclared name is E-SCOPE-001 in every body kind; arrow/function-expression bodies get the same statement analysis as `function` bodies.
+
+S439 ruling #8 says a keywordless loop binder (`for (it of xs)`) is `const` (§50.8.5), and a write to it is
+E-ASSIGN-004. That diagnostic is Nominal: impl#1 does not emit it. The ruling's premise, "it already fails
+loudly", holds in only ONE of two positions:
+
+- **Function body:** impl#1 emits `for (const it of …)`, so `it = it + 1` throws a JS `TypeError` at runtime.
+- **Event-handler value:** in `onclick=${ for (it of @xs) { it = it + 1; @n = @n + it } }`, the string path
+  (Case C, `rewriteBlockBody` at the locus above) re-emits the loop VERBATIM as `for (it of …)`, with no
+  declaration keyword. The client bundle is loaded as a classic `<script src>` with no `"use strict"`, so it
+  runs in sloppy mode. The write therefore **succeeds silently and creates an implicit `window.it` global**.
+
+**Measured S439 by execution:** compiled with `bun compiler/src/cli.js compile t8b.scrml -o out8b` (exit 0,
+no diagnostics; `<xs> = [1, 2, 3]`, `<n> = 0`, the handler above). The runtime and client JS were then run
+in a happy-dom `Window` via `node:vm` `runInContext` (classic-script global code), `DOMContentLoaded` was
+dispatched, and the button was clicked. Result: before the click, `"it" in window` = false; after it,
+`"it" in window` = true with `window.it === 4`; no error; `<p>` reads `9`. Both bundle files have 0
+`"use strict"`.
+
+Fix direction: emit E-ASSIGN-004 (the ruling), and/or lower handler-value loops through the statement
+emitter so the binder gets `const`.
+
+### g-e-error-002-handler-exemption-depends-on-statement-count — an unhandled failable call in a handler is E-ERROR-002 only when it shares the handler with another statement — `NEW S437; LOW; open (split CLOSED S440; residual holes listed below)`
+<!-- @gap id=g-e-error-002-handler-exemption-depends-on-statement-count sev=LOW status=open locus=compiler/src/type-system.ts(visitAttr — the §19.4.3 handler check: handlerBlock walk, parseHandlerStatementsForCheck check-walk, call-ref path; withHandlerCheckContext)+compiler/src/ast-builder.js(parseHandlerStatementListCore, parseArrowHandlerStatements, attachHandlerStatementList)+compiler/src/component-expander.ts(reparseSynthesizedFile + handlerBlock prop substitution) prov=review:S437-round5-review-item-a;empirical:S437-round5-reproduced-by-compile;review:S440-fix-round-F1-F10 -->
+
+With `function risky()! E`, measured on the S437 round-5 build: `onclick={ risky(); @r = 1 }` → **E-ERROR-002**
+(§19.4.3 — an unhandled failable call), but `onclick=risky()`, `onclick={ risky() }` and `onclick={⏎ risky()⏎ }`
+all compile at exit 0. The exemption for the single-expression handler forms predates S437; S437 only made statement
+lists visible to the check, which is what exposed the split. **Spec-consistency question for bryan:** is a failable
+call as a handler's WHOLE body exempt from §19.4.3 (the event dispatcher is the boundary), and if so, should that
+exemption extend to a failable statement inside a multi-statement handler — or should neither be exempt? Either
+answer makes the rule independent of the statement count; today it is not.
+
+**S440 — the split is CLOSED; the gap stays open for the residual holes below.** Ruled "neither is exempt" (S439 #14 +
+S440 "all recs": restore conformance) and arrow bodies ruled checked (S440 all recs #2 item 1); §19.4.3 states both.
+An unhandled `!` call is E-ERROR-002 in the bare, braced, `${}`, multi-statement, control-flow (`{ if (c) risky() }`)
+and arrow-valued forms, at top level / `<each>` row / engine state-child / `<match>` arm / component body, and inside an
+`<errorBoundary>` (a handler runs after render; the boundary does not catch it — verified at runtime S440; §19.6.6 was
+limited to render-time calls by S440 #22). The callee
+resolves through scope. `!{}` guards are emitted in the one-statement braced form, a `<match>` arm, a component body
+and an arrow body (each was silently dropped or failed codegen before) — but NOT in every position: a guard inside a
+ONE-LINE single-statement `if`/`for` handler (`onclick={ if (c) { risky() !{…} } }`) still fails the build with
+E-CODEGEN-INVALID-LOGIC at top level, `${}`, `<each>` row and component body (corrected S441 review;
+g-guard-in-one-line-if-for-emits-raw-bang-brace). The 6 measured corpus sites (5 files)
+were migrated. S441: a failable function passed as a handler REFERENCE (`onclick=risky`) is E-ERROR-002 too
+(ruled "yes on references"; g-failable-handler-reference-unchecked, resolved; no corpus site). Pinned by `compiler/tests/unit/e-error-002-handler-forms.test.js` and
+`conformance/cases/error/handler-{unhandled-failable-*,failable-guard-and-plain-reference-neg,failable-reference-*,guard-in-*-rt}`.
+
+**Still open (each has its own entry below):** the unbraced guard `onclick=risky() !{…}` is dropped at tokenize
+(g-unbraced-handler-guard-silently-dropped); an arrow handler with 2+ parameters or a non-simple parameter (default
+`(e = 1)`, rest `(...a)`, destructuring with a default) and a `function (e) {…}` handler expression are not modelled
+(unchecked, emitted as before S440; the function expression and the destructuring-with-default arrow fail codegen at
+base too); a function-valued prop called with the bare `onclick=act()` form is never substituted
+(g-component-fn-prop-bare-call-handler-unsubstituted); component-body E-ERROR-002 spans/repeats
+(g-component-body-handler-diagnostic-span-and-repeat); a guard on a call inside a NESTED arrow
+(g-nested-arrow-in-handler-guard-dropped); a guard in a one-line `if`/`for` handler (g-guard-in-one-line-if-for-emits-raw-bang-brace); `?` in a handler
+(g-propagate-in-handler-silently-drops-error); a failable call in a `when … changes` body
+(g-when-changes-body-failable-call-unchecked).
+
+### g-static-server-serves-db-and-server-source — the production `_server.js` and `scrml dev` served ANY file in the output dir to anyone: the SQLite database, the session store, every `*.server.js`, `_server.js` itself — `NEW S441; HIGH (security, CRITICAL); RESOLVED S441`
+<!-- @gap id=g-static-server-serves-db-and-server-source sev=HIGH status=resolved locus=compiler/src/static-serve-policy-emitted.js(the one allowlist policy — dev imports it, build copies its text into _server.js);compiler/src/commands/build.js(generateServerEntry static dispatch);compiler/src/commands/dev.js(devDispatch static loop);compiler/src/api.js(clientAssets manifest) prov=repro:PA-S441-curl-app.db-200 -->
+
+With `<program db="app.db">` built by `scrml build` and run from its dist dir, `curl /app.db` returned 200 and the
+whole database (`protect=` columns and password hashes included), `/app.server.js` returned the server source (SQL,
+auth logic), and `/_server.js` returned itself. Both static loops (the emitted `_server.js` and `devDispatch`) served
+whatever file a candidate path resolved to. The same hole exposed `.scrml-sessions.db` (the §20.5 session store sits at
+the dist root), `serverfns.json` and the other MCP sidecars, and `*.map` files, which embed the whole `.scrml` source as
+`sourcesContent`. **RESOLVED S441** by SPEC §47.13: static serving is an ALLOWLIST. A file is served iff it is not in a
+denied class (`*.server.*`/`_server.js`, `*.db*`/`*.sqlite*`, any dot-segment, `.scrml`, `*.map`, outside the root;
+case-insensitive) AND it is either in the build's client-asset manifest or passive media (images, fonts, audio/video).
+The manifest is what `compileScrml` wrote for the browser, closed over those files' relative imports. It is written to
+`.scrml-client-assets.json` (a dotfile, so it is unservable), baked into `_server.js`, and re-read by dev. Request paths
+are percent-decoded, then refused on traversal, dot-segments, `\`, `:`, NUL, or a trailing dot or space. Dev and prod
+run one policy source. Pinned by `compiler/tests/integration/static-serve-allowlist.test.js`, which runs the real
+`_server.js` and the real dev app child in child processes and probes them over raw sockets, and by
+`compiler/tests/commands/static-serve-allowlist-dev-http.test.js`, which runs a whole `scrml dev`.
+
+### g-failable-handler-reference-unchecked — `onclick=risky` (a `!` function wired by reference) compiled clean and discarded its error on every click — `NEW S441; HIGH; RESOLVED S441`
+<!-- @gap id=g-failable-handler-reference-unchecked sev=HIGH status=resolved locus=compiler/src/type-system.ts(visitAttr — the §19.4.3 handler-value check now also fires on a REFERENCE value via handlerValueAsReference; formFor exempt, scope-resolved, declared-`!` only) prov=review:S441-e-error-002-review;ruling:user-voice-scrml.md-S441-yes-on-references -->
+
+With `function risky()! -> LoadError { fail LoadError.Empty }`, `<button onclick=risky>` (and `onclick=${risky}`)
+compiled at exit 0 with no diagnostic and wired `"_scrml_attr_onclick_N": _scrml_risky_M` — the event dispatcher called
+the failable function and threw its error value away on every click (reproducer: the S441 review probe `ref2.scrml`).
+**RESOLVED S441** — bryan ruled "yes on references": a failable function passed as a handler reference is E-ERROR-002,
+the same as the call form (§19.4.3 "Handler references"); `<formFor onsubmit=fn/>` stays exempt (§19.6.6 / §41.14.3
+route). Implemented in the §19.4.3 handler-value check, in every position the call form is checked (top level, `<each>`
+row, engine state-child, `<match>` arm, component body, inside an `<errorBoundary>`); a local binding that shadows the
+name (row alias, component prop) and a CPS-implicit-only callee stay clean. Corpus measure (2041 files under `examples/
+samples/ conformance/cases/ docs/readme-snippets/ docs/tutorial-snippets/`): no newly failing file. Pinned by
+`compiler/tests/unit/e-error-002-handler-forms.test.js` and `conformance/cases/error/handler-failable-reference-{pos,exempt-neg}`.
+
+### g-guard-in-one-line-if-for-emits-raw-bang-brace — a `!{}` guard inside a one-line single-statement `if`/`for` handler fails codegen — `NEW S441 (filed; pre-existing); MED; open`
+<!-- @gap id=g-guard-in-one-line-if-for-emits-raw-bang-brace sev=MED status=open locus=compiler/src/codegen(the one-statement handler value keeps the single-expression codegen path; an `if`/`for` statement body is re-emitted from its raw text, so the nested `!{` reaches the output unlowered) prov=review:S441-e-error-002-review;empirical:S441-reproduced-on-branch-and-main -->
+
+`<button onclick={ if (@n == 0) { risky() !{ | .Empty :> @r = 1 | .Bad :> @r = 2 } } }>` → **E-CODEGEN-INVALID-LOGIC**
+(a raw `!{` is emitted). Same for `onclick={ for (const i of xs) { risky() !{…} } }`, and in `${…}` form, an `<each>` row
+and a component body. FAILS CLOSED (the build fails; no bad JS ships). The multi-line form of the same handler and the
+two-statement form (`{ if (c) { risky() !{…} }; @m = 1 }`) and an arrow body compile and run. Pre-existing on main. The
+check passes it (the call is handled), which is why the S440 unit test using `write:false` looked clean; that test now
+runs the full pipeline and is `test.failing`-pinned to this gap in
+`compiler/tests/unit/e-error-002-handler-forms.test.js`.
+
+### g-propagate-in-handler-silently-drops-error — `onclick={ risky()?; @msg = "after" }` compiles clean and drops the error — `NEW S441 (filed; pre-existing); HIGH; open`
+<!-- @gap id=g-propagate-in-handler-silently-drops-error sev=HIGH status=open locus=compiler/src/type-system.ts(the §19.5.4 E-ERROR-003 check runs in the function-body statement walk, keyed on the enclosing function's `canFail`; an event-handler value is not a function body, so `?` in a multi-statement handler is never checked) prov=review:S441-e-error-002-review;empirical:S441-reproduced-by-emit -->
+
+A handler is not a `!` function, so `?` inside it has nowhere to propagate: §19.5.4 ("`?` SHALL be valid only inside a
+`!` function body … E-ERROR-003") should fire. Instead `<button onclick={ risky()?; @msg = "after" }>` compiles at exit 0
+and emits `const t = _scrml_risky_N(); if (t.__scrml_error) return t; …` — on click the handler returns early and the
+error value is discarded by the dispatcher (runtime probe: S441 review `rt/prop-in-handler`). Silent error discard.
+(The one-statement `onclick={ risky()? }` form fails codegen instead — g-handler-propagate-in-handler-is-codegen-error.)
+
+### g-when-changes-body-failable-call-unchecked — `when @r changes { risky() }` gets no E-ERROR-002; `on mount { risky() }` does — `NEW S441 (filed; pre-existing); LOW; open`
+<!-- @gap id=g-when-changes-body-failable-call-unchecked sev=LOW status=open locus=not-traced(the E-ERROR-002 statement walk evidently does not reach a `when … changes` body; the skip site was not located) prov=review:S441-e-error-002-review;empirical:S441-reproduced-by-compile -->
+
+With the same `risky()!`, `${ when @r changes { risky() } }` compiles at exit 0 while `${ on mount { risky() } }` is
+E-ERROR-002. §19.4.3 exempts neither. Split from the HIGH `?` entry above because it is a missing diagnostic on a
+reactive body, not a handler; the runtime effect was not probed.
+
+### g-failable-handler-indirect-reference-unchecked — an INDIRECT reference to a `!` function as a handler is not caught — `NEW S441 (filed; follow-up); MED; open`
+<!-- @gap id=g-failable-handler-indirect-reference-unchecked sev=MED status=open locus=compiler/src/type-system.ts(handlerValueAsReference — recognises only a bare identifier naming a declared-`!` function; no value-flow tracking of function values) prov=review:S441-e-error-002-review-r2-N2;empirical:S441-reproduced-by-compile -->
+
+The S441 reference rule (§19.4.3 "Handler references") catches a DIRECT reference (`onclick=risky`, `${risky}`,
+`{ risky }`). Measured S441, each of these compiles at exit 0 although the dispatcher calls `risky` and discards its
+error: `<fnc> = risky` + `onclick=@fnc`; `const o = { m: risky }` + `onclick=o.m`; `onclick=${ @c ? risky : plain }`;
+`const h = risky` + `onclick=h`. An imported `!` function is not recognised as failable at all (the carried §19.4.3
+gap), so its reference is unchecked too (relayed from the review; not re-executed). These are outside the ruling's
+direct-reference scope as implemented; catching them needs function-value flow (or a type-level failable marker on
+function values). Follow-up.
+
+### g-component-on-prop-leaks-as-dom-listener — a declared `on*` component prop is ALSO wired as a DOM event listener on the component root — `NEW S441 (filed; pre-existing); MED; open`
+<!-- @gap id=g-component-on-prop-leaks-as-dom-listener sev=MED status=open locus=compiler/src/component-expander.ts(the call-site attrs — declared props included — are merged onto the expanded root's `attrs`)+compiler/src/codegen/emit-event-wiring.ts(any `on*` attr on an element is wired as an event handler; `_componentPropNames` is not consulted) prov=review:S441-e-error-002-review-r2;empirical:S441-reproduced-on-branch-and-main -->
+
+`${ const Show = <p props={ onSave: function }>hi</> }` + `<Show onSave=risky/>` emits
+`data-scrml-bind-onSave="…"` on the `<p>` and `el.addEventListener("Save", _scrml_risky_N)` in client JS — the
+callback prop becomes a listener for a DOM event named `Save`. Same on origin/main. Silent wrong wiring: nothing fires
+today because no `Save` event is dispatched, but a custom event of that name would call the function (and discard a
+failable's error); the prop is also exposed in the DOM. emit-html already consults `_componentPropNames` for reactive
+value attrs (S239 finding 7); event wiring does not. The §19.4.3 check skips declared props (S441 review B1), so this
+is a codegen-only bug.
+
+### g-component-handler-prop-in-value-position-unsubstituted — a component handler emits a raw prop name inside an `if` body, an arrow body, or a `match` statement — `NEW S440 (filed; pre-existing); MED; open`
+<!-- @gap id=g-component-handler-prop-in-value-position-unsubstituted sev=MED status=open locus=compiler/src/component-expander.ts(substituteProps — a one-statement handler value keeps its RAW text / exprNode and the leading-identifier raw rewrite does not reach into an if-statement body, an arrow body, or a match statement) prov=review:S440-final-round-N3;empirical:S440-reproduced-by-emit-both-trees -->
+
+With `const B = <button props={ n: number } onclick=…>` and `<B n=${9}/>`:
+`onclick={ if (n > 0) { @r = n } }` emits `if (n > 0) { … n … }` and `onclick=${() => { @r = n }}` emits the arrow
+with a bare `n` — both a ReferenceError on click. `onclick={ match @ph { .Idle :> @r = n  .Loading :> @r = 0 } }` is
+E-CODEGEN-INVALID-LOGIC. Same on base and after S440. (A multi-statement handler and a `!{}` guard's arms ARE
+substituted since S440.)
+
+### g-component-body-handler-diagnostic-span-and-repeat — E-ERROR-002 in a component body reports a component-relative line and repeats per instantiation — `NEW S440 (filed); LOW; open`
+<!-- @gap id=g-component-body-handler-diagnostic-span-and-repeat sev=LOW status=open locus=compiler/src/component-expander.ts(parseComponentBody re-parses the body under a synthetic `file#Component` path with body-relative spans; each expansion is type-checked separately) prov=review:S440-final-round-N7;empirical:S440-reproduced-by-compile -->
+
+`${ const B = <button onclick={ risky() }>go</> }` then `<B/>` twice → `E-ERROR-002@1`, `E-ERROR-002@1`: the line is
+relative to the component body (not the file) and the diagnostic fires once per `<B/>`. The code is right; the location
+and count are not what an author can act on. (Base reported nothing here — the check is new in S440.)
+
+### g-nested-arrow-in-handler-guard-dropped — `onclick={ const f = () => risky() !{…}; f() }` guards the arrow VALUE, not the call — `NEW S440 (filed; pre-existing); LOW; open`
+<!-- @gap id=g-nested-arrow-in-handler-guard-dropped sev=LOW status=open locus=compiler/src/ast-builder.js(the statement parser binds a trailing `!{}` to the whole initializer — the arrow — not to the call in the arrow body) prov=review:S440-final-round;empirical:S440-reproduced-by-emit-both-trees -->
+
+`<button onclick={ const f = () => risky() !{ | .Empty :> @r = 1 | .Bad :> @r = 2 }; f() }>` emits
+`let _result = () => _scrml_risky_2(); if (_result && _result.__scrml_error) …` — the guard tests the function value, never
+the call's result, so no arm runs (plus W-TYPE-031-UNPROVEN). Same on base. Not covered by the S440 arrow ruling (that
+covers an arrow that IS the handler value).
+
+### g-unbraced-handler-guard-silently-dropped — `onclick=risky() !{ | .E :> … }` loses its `!{…}` at tokenize, with no diagnostic — `NEW S440; LOW; open`
+<!-- @gap id=g-unbraced-handler-guard-silently-dropped sev=LOW status=open locus=compiler/src/tokenizer.ts(the bare attribute-value scan — ATTR_CALL ends at the call's `)` and the following `!{…}` text produces no attribute and no diagnostic) prov=review:S440-fix-round-F9;empirical:S440-reproduced-by-AST-dump -->
+
+`<button onclick=risky() !{ | .Empty :> @r = 3 }>` → the button's attrs are `id` and `onclick = call-ref risky` only;
+the `!{ … }` text is gone. Since S440 the handler reports the generic E-ERROR-002 (the guard is not visible to the
+checker); before S440 it compiled at exit 0 and ran unguarded. Fix direction: a diagnostic naming the unbraced guard
+("wrap the handler in braces: `onclick={ risky() !{ … } }`") at the tokenizer, or accept it as one bare expression.
+
+### g-failable-call-in-value-position-unchecked — `@r = risky()`, `let v = risky()`, `f(risky())`, `c ? risky() : 0` are never E-ERROR-002 — `NEW S440 (filed; pre-existing); MED; open`
+<!-- @gap id=g-failable-call-in-value-position-unchecked sev=MED status=open locus=compiler/src/type-system.ts(checkUnhandledFailableBareCall + the function-body §19 visitStmt walker — both resolve the callee from the statement ROOT only via extractCalleeNameFromNode) prov=review:S440-fix-round-out-of-scope;empirical:S440-reproduced-by-compile -->
+
+`function h() { @r = risky() }`, `function h3() { let x = risky(); return x }`, `function h4() { id(risky()) }`,
+`function h5() { @c ? risky() : 0 }` all compile clean (same in handlers). §19.4.3: "A call to a `!` function SHALL
+NOT be ignored" — a value-position call that is not matched / `?` / `!{}` is unhandled. Related: a statement-level
+`risky()` in a function body fires E-ERROR-002 TWICE (the function-body walker and the bare-expr case both fire), and
+a bare IDENT statement `risky` fires (the ident limb of extractCalleeNameFromNode treats a reference as a call).
+
+### g-imported-failable-function-never-checked — a `!` function imported from another file is never treated as failable — `NEW S440 (filed; pre-existing); MED; open`
+<!-- @gap id=g-imported-failable-function-never-checked sev=MED status=open locus=compiler/src/type-system.ts(fnCanFail / fnErrorTypes are built from this file's function-decls only — ~:9120) prov=review:S440-fix-round-F8;empirical:S440-reproduced-by-compile -->
+
+`lib.scrml`: `export function risky()! -> LoadError { fail LoadError.Empty }`. `main.scrml`: `import { risky } from
+'./lib.scrml'`, then `function go() { risky() }`, `<button onclick=risky()>`, `<button onclick={ risky(); @r = 1 }>`
+→ zero diagnostics. E-ERROR-002 (and `?`/E-ERROR-004 reasoning) never sees an imported failable.
+
+### g-component-fn-prop-bare-call-handler-unsubstituted — `<button props={ act: fn } onclick=act()>` emits a literal `act()` — `NEW S440 (filed; pre-existing); MED; open`
+<!-- @gap id=g-component-fn-prop-bare-call-handler-unsubstituted sev=MED status=open locus=compiler/src/component-expander.ts(substituteProps — the call-ref attribute value's NAME is not substituted by a function-valued prop) prov=empirical:S440-reproduced-by-compile-and-emit -->
+
+`${ const B = <button props={ act: fn } onclick=act()>go</> }` + `<B act=plain/>` emits
+`"_scrml_attr_onclick_1": function(event) { act(); }` — a ReferenceError on click (base and S440 alike). The braced
+forms (`{ act() }`, `{ act(); @r = 1 }`, `{ if (c) act() }`) ARE substituted, and since S440 are §19.4.3-checked
+after substitution. Per the S440 ruling, arrows passed as props (vs. arrows that ARE the handler value) are also out of
+§19.4.3's handler rule — filed here.
+
+### g-handler-block-guard-on-server-call-not-awaited — `onclick={ getUser(2) !{ … } }` tests the guard against a Promise — `NEW S440 (filed; pre-existing); MED; open`
+<!-- @gap id=g-handler-block-guard-on-server-call-not-awaited sev=MED status=open locus=compiler/src/codegen/emit-logic.ts(emitHandlerStatementList — the guarded-expr lowering does not await a CPS/server fetch; a function body's lowering does) prov=empirical:S440-reproduced-by-emit -->
+
+With `server function getUser(id)! -> UserError`, `<button onclick={ getUser(2) !{ | .NotFound :> … | .Forbidden :> … } }>`
+emits `let _r = _scrml_fetch_getUser_5(2); if (_r && _r.__scrml_error) …` — `_r` is a Promise, so no arm ever runs.
+The same guard inside `function load() { … }` emits `await _scrml_fetch_getUser_5(1)` and works. (This is why the
+S440 migration of server-failable-001 uses a wrapper function.)
+
+### g-handler-propagate-in-handler-is-codegen-error — `onclick={ risky()? }` is E-CODEGEN-INVALID-LOGIC, not a named diagnostic — `NEW S440 (filed; pre-existing); LOW; open`
+<!-- @gap id=g-handler-propagate-in-handler-is-codegen-error sev=LOW status=open locus=compiler/src/type-system.ts(the handler walk never reaches a `?` in a one-statement handler — its exprNode is an escape-hatch ParseError) prov=empirical:S440-reproduced-by-emit -->
+
+`<button onclick={ risky()? }>` → E-CODEGEN-INVALID-LOGIC (a codegen failure) at base and after S440. A handler is not
+a `!` function, so `?` there has nowhere to propagate — E-ERROR-003 is the named diagnostic a function body gets.
+
+### g-formfor-onsubmit-error-discarded — §41.14.3 requires a failable `onsubmit=` handler but says nothing of where its error goes — `NEW S440 (filed; SPEC gap); LOW; open`
+<!-- @gap id=g-formfor-onsubmit-error-discarded sev=LOW status=open locus=compiler/src/codegen/emit-event-wiring.ts(the formForSubmitCell branch — `${resolvedHandler}(values)` result is discarded)+compiler/SPEC.md(§41.14.3) prov=empirical:S440-read-of-emitter -->
+
+`<formFor for=Signup onsubmit=persistSignup/>` with `persistSignup(values)! SignupError` emits
+`function(event) { event.preventDefault(); …; _scrml_fetch_persistSignup_N(values); }` — the failure value is dropped.
+§41.14.3 mandates the `! ErrorType` signature but specifies no handling/display path for the error it produces.
+**Fix direction — RULED S440 (22-item queue, #19):** a `formFor` submit handler's error routes to the nearest
+`<errorBoundary>`; with no enclosing boundary, E-ERROR-005. Not implemented. The SPEC text has landed (§41.14.3,
+#1133; §19.6.6 names it as the one handler-time route to a boundary, S441); still needed: the submit-dispatch
+routing + the static E-ERROR-005 check. Re-measured S441: with an enclosing `<errorBoundary>` the dispatch still
+discards the result (not routed); with none, the `<formFor>` compiles with no E-ERROR-005.
+
+### g-handler-block-does-not-hoist-function-declarations — `onclick={ @r = inner(); function inner() {…} }` is E-SCOPE-001, though a function body hoists the same declaration — `NEW S437; LOW; open`
+<!-- @gap id=g-handler-block-does-not-hoist-function-declarations sev=LOW status=open locus=compiler/src/type-system.ts(visitAttr's §5.2.3 handler-statement walk visits statements in order; the function-decl pre-bind the function-body walk gets is not applied to handlerBlock.stmts) prov=review:S437-round5-review-item-b;empirical:S437-round5-reproduced-by-compile -->
+
+`onclick={ @r = inner(); function inner() { return 1 } }` → E-SCOPE-001 on `inner`; the same two statements in
+`function f() { @r = inner(); function inner() { return 1 } }` compile (§6.9 hoisting). §5.2.3: the inline block is
+"the same statement grammar as a function body (§7.3)", so the forward reference should resolve. Fix = pre-bind the
+block's function-decls (the way a function body's are) before walking `handlerBlock.stmts`.
+
+### g-e-cps-needs-failable-prints-as-error-but-is-nonfatal — E-CPS-NEEDS-FAILABLE prints with an `E-` prefix but does not fail the build on a two-server-call sequence — `NEW S437; LOW; open`
+<!-- @gap id=g-e-cps-needs-failable-prints-as-error-but-is-nonfatal sev=LOW status=open locus=not-traced(the E-CPS-NEEDS-FAILABLE fire site + its severity / stream routing) prov=review:S437-round5-review-item-c(RELAYED-UNVERIFIED — not re-executed by the S437 dispatch) -->
+
+Relayed from the S437 round-5 review, not re-executed: on a handler / body holding two server-call statements,
+`E-CPS-NEEDS-FAILABLE` is printed but the build does not fail. An `E-` code must be fatal (the W-/I- prefix partition
+routes non-fatal diagnostics); either the severity or the code prefix is wrong. Reproduce first.
+
+### g-this-member-emits-the-whole-expression-as-its-object — `this.x = 2` in logic emits `this . x = 2.x = 2` (invalid JS) — `NEW S437; MED; open`
+<!-- @gap id=g-this-member-emits-the-whole-expression-as-its-object sev=MED status=open locus=compiler/src/expression-parser.ts(esTreeToExprNode — a ThisExpression becomes an escape-hatch whose `raw` is the WHOLE rawSource, not the `this` slice; the member emitter then appends `.x`) prov=empirical:S437-round5-reproduced-by-compile-and-parse-probe -->
+> **S440 — a sibling symptom (JS-WAT gauntlet C11, finder-executed at `7e4bc8155`; same ThisExpression path suspected, not traced):** `let a = () => this` emits `let a = () => ;` → `E-CODEGEN-INVALID-LOGIC`. S440 JS-WAT #4 RULED `this` out of scrml (an `E-*-NOT-IN-SCRML` code), which would retire both symptoms — see g-js-constructs-not-rejected-with-named-codes.
+
+`function f() { @r = 1; this.x = 2 }` → E-CODEGEN-INVALID-LOGIC, emitted `this . x = 2.x = 2`; the same in a §5.2.3
+handler statement list. Probe: `parseExprToNode("this.x = 2")` gives `assign(target: member(object: escape-hatch
+{ nativeKind: "ThisExpression", raw: "this.x = 2" }, property: "x"))` — the escape-hatch carries the full source
+instead of `this`, so the member emit is `<whole expr>.x`. A separate root from the client template-literal defect (g-client-template-interpolation-lowering-needs-a-structural-emitter)
+(checked, per the review's ask). Fix = give ThisExpression a structured node (or slice `raw` to the node's own span).
+
+### g-client-template-interpolation-lowering-needs-a-structural-emitter — a `${@cell}` inside a client template literal is emitted RAW (invalid JS); since S437 this also breaks multi-statement handlers holding a template — `NEW S437; HIGH; carried (S437)`
+<!-- @gap id=g-client-template-interpolation-lowering-needs-a-structural-emitter sev=HIGH status=carried locus=compiler/src/codegen/emit-expr.ts(emitLit — a client-mode template `lit` returns node.raw verbatim; the server-mode emitServerTemplateLit re-scans template TEXT) prov=review:S437-round5-review(two executed silent-miscompile shapes);empirical:S437-round5+landing-reproduced-by-compile -->
+
+**(a) The regression this change ships.** §5.2.3 multi-statement handlers now lower through the function-body path
+(S437 round 3). That path reaches `emitLit`, which returns a client template literal's `raw` VERBATIM, so
+`onclick={ @r = 7; @s = \`v=${@r}\` }` (template second, or first in a multi-line handler) now fails
+E-CODEGEN-INVALID-LOGIC ("Unexpected character '@'"). On base the handler went down the string rewriter and compiled.
+The failure is LOUD (exit 1), not silent. Pinned XFAIL: `markup-handler/s437-r5-template-cell-read-second`,
+`markup-handler/s437-r5-template-cell-read-first-multiline`.
+**(b) Pre-existing on base.** Templates in client FUNCTION BODIES never lowered `@cell`:
+`function f() { @s = \`v=${@r}\` }` fails E-CODEGEN-INVALID-LOGIC on origin/main `21a469b6b`. A reactive value attr
+`style=(\`color: ${@c}\`)` is dropped with W-CG-VALUE-ATTR-UNLOWERABLE (the i81 fail-closed workaround). Two corpus
+samples (`samples/compilation-tests/helpers/dnd-setup.scrml`, `modern-007-dnd-with-helpers.scrml`) SHIP INVALID JS
+(`\`translate(${@dragX}px, …)\``) and `gauntlet-s20-meta/meta-type-registry-001.scrml` fails the gate — visible only
+when the emitted-JS gate runs (see `g-conformance-adapter-skips-the-emitted-js-gate-so-codegen-notcodes-are-vacuous`).
+Pinned XFAIL: `reactive/s437-r5-template-cell-read-function-body`, `reactive/s437-r5-template-cell-read-value-attr`.
+**(c) The bar any fix must clear — the S437 round-5 attempt failed it, and was reverted before landing.** Round 5
+reused the server-mode text scanner (`emitServerTemplateLit`) for client mode. Executed by the review, both SILENT:
+(1) the `${…}` scanner treats a quote inside a REGEX literal or a COMMENT as a string opener and runs to the template's
+end, and `parseExprToNode` then parses a valid PREFIX without throwing, so the rest is DROPPED —
+`\`[${s.replace(/'/g, "")}] tail\`` returned `"[its"` (base `"[its] tail"`); `\`${x /* it's */} tail\`` and
+`\`${x // don't⏎ } tail\`` likewise; (2) nested templates are re-emitted from the parser's lit `.raw`, which has lost
+the `\` before `` ` `` and `$` — `\`[${\`\\${s}\`}]\`` returned `"[x]"` (base: the literal `"[${s}]"`), and
+`\`[${\`\\\`\`}]\`` fails the gate. **(d) Fix direction.** Emit from the PARSED TemplateLiteral node's `quasis`
+(cooked AND raw preserved) and `expressions` — never by re-scanning template text (Rule 7). Any interior parse must
+consume the WHOLE interior (a valid prefix is not success). Nested templates keep their SOURCE raw. ⚠ **The
+server-mode `emitServerTemplateLit` is a latent copy of the same scanner** (the regex/comment-quote and nested-escape
+shapes apply there too) — fix both with the one structural emitter.
+
+### g-conformance-adapter-skips-the-emitted-js-gate-so-codegen-notcodes-are-vacuous — the conformance harness compiles with `write:false`, so the emitted-JS gate never runs; `notCodes: ["E-CODEGEN-INVALID-LOGIC"]` can never fail, and `codes: []` does not reject unlisted fatal errors — `NEW S437; MED; open`
+<!-- @gap id=g-conformance-adapter-skips-the-emitted-js-gate-so-codegen-notcodes-are-vacuous sev=MED status=open locus=conformance/adapters/impl1-ts.ts(compileScrml({ write:false }) at :118/:483/:935/:1030)+conformance/run.ts(the codes half — `emitted ⊇ codes AND emitted ∩ notCodes = ∅`, :6) prov=review:S437-round5-review;read:S437-landing-confirmed-write-false-sites-and-the-superset-rule(the codes:[]-with-fatal-errors pass is relayed, not re-executed) -->
+
+A hollow gate in the conformance harness itself. (1) `compileScrml` runs the emitted-JS parse gate
+(E-CODEGEN-INVALID-LOGIC) only on the WRITE path, and the impl#1 adapter compiles with `write: false`, so a case can
+never observe that code: `notCodes: ["E-CODEGEN-INVALID-LOGIC"]` is vacuous, and a case whose bundle is invalid JS
+only fails if its runtime half happens to execute the broken line. (S437 hit the same blind spot in its own unit
+harness and corpus census; both now run `validateEmittedArtifact` themselves.) (2) The codes half is a superset /
+absence check, so `codes: []` places no constraint on codes it does not name — a case with FATAL errors still passes
+when its runtime half holds (relayed from the review). Fix direction: run `validateEmittedArtifact` on every adapter
+compile (or compile with the gate on), and make any unlisted fatal (`E-*`, severity error) fail a case unless the case
+lists it.
+
+### g-is-event-handler-attr-name-matches-one-once-only — `isEventHandlerAttrName` treats any `on[a-z]+` name as an event handler, so `one=` / `once=` / `only=` / `onward=` are handled as event attributes — `NEW S437; LOW; open`
+<!-- @gap id=g-is-event-handler-attr-name-matches-one-once-only sev=LOW status=open locus=compiler/src/multi-statement-scan.ts(isEventHandlerAttrName — /^on[a-z]+$/i) and its inlined copy compiler/src/tokenizer.ts(isEventHandlerAttrName) prov=review:S437-adversarial-review-of-s437-bare-handler-sequence-drop;empirical:PA-dispatch-reproduced-by-compile -->
+
+`isEventHandlerAttrName` returns true for `one`, `once`, `only`, `onward`. Reproduced: `<div only=a;b>x</div>` fires
+`E-MULTI-STATEMENT-HANDLER` ("Event-handler attribute `only`"), and the tokenizer's copy reads such values with the
+event-handler value rules. Sibling of `g-emit-html-on-prefix-routes-only-once-onward-to-event-wiring` (the emit-side `startsWith("on")`
+routing of the same names). Fix =
+match against the known DOM event-name set (or `on` + a registered event), in both copies.
+
+<!-- @gap id=g-dev-compile-throw-test-fails-only-in-full-prepush-run sev=MED status=open locus=compiler/tests/commands/dev-compile-throw-fail-closed.test.js prov=review:S435-tag-push -->
+### G-DEV-COMPILE-THROW-TEST-FAILS-ONLY-IN-FULL-PREPUSH-RUN — a dev-server test blocks every tag push, passes alone
+
+**PA-VERIFIED BY EXECUTION (S435).** The pre-push hook's full run (`unit/integration/conformance/lsp/self-host/commands`)
+failed **twice** with `25806 pass, 5 fail`, all five in `dev-compile-throw-fail-closed.test.js` (§1 "compileScrml THROW
+under the watcher → fail CLOSED", §2 "delete-then-restore …"). Run alone, `bun test compiler/tests/commands/` →
+**258 pass, 0 fail** on the same commit, same clean worktree. So a test-ISOLATION defect between dev-server tests in the
+combined run (port / watcher / temp-dir state), not a compiler defect. Consequence: **no tag can be pushed through the
+hook** — `v0.8.0` was created via the GitHub API with bryan's explicit authorization. Second, independent symptom: the
+multi-minute pre-push run drops the SSH push connection (`client_loop: send disconnect: Broken pipe`) — run the suite
+before opening the connection, or raise ServerAliveInterval. Locus = the test file (located, not traced).
+
+<!-- @gap id=g-main-checkout-hangs-corpus-emit-differential-exit-codes sev=LOW status=open locus=searched:compiler/tests/integration/corpus-emit-differential-exit-codes.test.js,ASUS-main-checkout-local-state prov=review:S435-commit-block -->
+### G-MAIN-CHECKOUT-HANGS-CORPUS-EMIT-DIFFERENTIAL-EXIT-CODES — one integration test hangs 300s in one checkout only
+
+**PA-VERIFIED BY EXECUTION (S435).** `corpus-emit-differential-exit-codes.test.js` times out at 300s in the ASUS main
+checkout (a beforeEach/afterEach hook timeout; it blocked the 0.8.0 bump commit twice) but passes **36/36 in 2.7s** in a
+clean worktree at the same `origin/main`. The difference is local checkout state (untracked files / build output the
+enumeration walks). Not traced. Workaround: commit from a clean worktree. Measure with `git status --ignored` on the
+main checkout vs a fresh worktree.
+
+### g-mw008-counts-headless-tool-programs — `E-MW-008` refuses a single web app that has a `kind="tool"` `<program>` beside it (false-positive refusal, introduced by #1094)
+A compile set of ONE web app (`index.scrml` root `<program auth="optional" sessionExpiry="7d" session-secure="false">` + a `pages/` member minting a session) plus ONE headless `tools/seed.scrml` (`<program kind="tool" lang="ts">` with `main`) fails with `E-MW-008: two applications in one build contest one session cookie`. The tool program mints no cookie and owns no page, so the claim is false. **PA-REPRODUCED BY EXECUTION at S437** on `d02738767`: with the tool file → `E-MW-008`, `FAILED — 1 error`; tool file removed, same set → clean. The S437 adversarial review (post-merge, #1094) additionally measured the artifact split this causes: the member unit falls to `__Host-scrml_sid`/3600 while the root keeps `scrml_sid`/604800 (reviewer-executed, parent-vs-merge differential; PA did not re-run the cookie read). A §43 nested worker `<program name=…>` is NOT counted — not a false positive. Fix direction: count only programs that can own cookie-session units (exclude `kind="tool"` / headless) in both the stash suppression and the E-MW-008 gate. Lane: Peter (the #1094 arc; security). — `NEW S437-bryan`; **MED**; resolved (S438) — **FIXED S438-peter** on `fix/s438-mw008-tool-programs`: `_collectProgramSites` skips any file the emit dispatch sends down the tool path (`isToolProgram` — the SAME predicate, per FILE), so neither the count, the stash read, nor the E-MW-008 census sees it. (Round 1 skipped per `<program>` NODE; its S239 review found that re-created the class one level away — a tool file's second top-level `<program session-secure="false" sessionExpiry="7d">`, emitted nowhere, became the build's one program and turned a refused set into a silent `scrml_sid`/604800 downgrade. Fixed, pinned.) ⚑ One intentional behaviour change on a previously ACCEPTED shape: a tool declaring `session-secure="false"`/`sessionExpiry` beside a program-less minting `<page>` used to leak that declaration into the page (`scrml_sid`/604800); the page now gets the secure default — a cookie RENAME, so such an adopter is logged out once on upgrade. A/B on `072741ca` (8 shapes): the four tool-bearing false refusals (plain tool · `serve=` tool · a tool declaring `sessionExpiry`/`session-secure` · tool in the same file) flip clean with the member on `scrml_sid`/604800; two-web-app sets stay refused with or without a tool. SPEC rows (§20.5.1 table + §34) amended to count web-application programs only. 5 new conformance tests, all RED on the unfixed code.
+<!-- @gap id=g-mw008-counts-headless-tool-programs sev=MED status=resolved locus=compiler/src/codegen/index.ts(_collectProgramSites/_multiProgramCompileSet count every program node incl. kind=tool; PA-located-verify) prov=empirical:PA-compiled-3-file-set-E-MW-008-with-tool-program-clean-without -->
+
+### g-route-inference-8b-session-defaults-outrank-program-declaration — a `protect=` unit gets route-inference's hard-coded session defaults (`sessionSecure:true`, `sessionExpiry:"1h"`), overriding its own `<program>`'s declared session config
+`route-inference.ts` Step 8b registers an `authMiddleware` entry with hard-coded `sessionSecure:true` / `sessionExpiry:"1h"` for an auto-escalated `protect=` unit (and for `<page auth="required">` + `protect=`); `session-config-resolve.ts` step 1 treats ANY middleware value as the unit's own answer, so it outranks the program's declaration and the program stash — and the unit counts as ATTRIBUTABLE, so `E-MW-008` does not refuse the contested case. Reviewer-executed (S437 post-merge review of #1094, parent-vs-merge identical — PRE-EXISTING, not a #1094 regression): a single `<program csrf="off" sessionExpiry="7d" session-secure="false">` with a `protect=` `<db>` and a minting server fn emits `__Host-scrml_sid`/3600 + expiry `"1h"`, ignoring the program's own 7d; a root declaring `session-secure="false"` + a protect member page splits one app across two cookies (the #282 split shape); two programs where one declares nothing + a protect member → NO E-MW-008 in either input order. **Direction is always the SECURE side** (not a downgrade) — impact is functional: login lockout / 1h vs 7d server-side TTL. Also contradicts #1094's own SPEC rows and resolver header, which say entries come only from `<program auth=>`. **RELAYED — PA has NOT reproduced this one**; the reproducer needs a sqlite `app.db` with `users(id,name,password_hash)`. Adjacent: `emit-server.ts` `_scrml_session_expiry` reads `authMiddlewareEntry.sessionExpiry` directly, bypassing the resolver. Related: `g-route-inference-substituted-default-outranks-program-declaration` (S433, source-derived) — likely the same defect, now executed. Fix direction: 8b leaves `sessionSecure`/`sessionExpiry` `undefined` so the resolver falls through. Lane: Peter (security-adjacent; P7 criterion 3 if the lockout counts). — `NEW S437-bryan (relayed from reviewer)`; **MED**; resolved (S438) — **REPRODUCED BY EXECUTION + FIXED S438-peter** on `fix/s438-8b-session-defaults`. All three reviewer shapes reproduced on `4e72ec6a` (cookie read from emitted server JS): (a) `__Host-scrml_sid`/3600/`"1h"` → now `scrml_sid`/604800/`"7d"`; (b) root `scrml_sid`/604800 + protect member `__Host-scrml_sid`/3600 (EXECUTED: the root's login cookie got a 302 from the member's document guard — the lockout is real) → member `scrml_sid`/604800, guard admits; (c) no `E-MW-008` either order → `E-MW-008` both orders. Nearest sibling `<page auth="required">` (inside a 7d program, and as a member page) bit identically and is fixed by the same change. Fix: Step 8b (both limbs) sets `sessionExpiry`/`sessionSecure` ONLY when the unit itself declares them, so `session-config-resolve.ts` falls through to the unit's program / the stash; `emit-server`'s `_scrml_session_expiry` now reads through the same resolver. Step 8a (`<program auth="required">`) keeps its defaults — they are that program's own answer (SPEC E-MW-008 row). Gate unchanged (auth=required, csrf=auto, W-AUTH-MIDDLEWARE-AUTO-INJECTED). Corpus: 1222 directory compile sets, 0 diagnostic changes, 0 per-unit cookie changes, 0 new `E-MW-008`. SPEC §20.5.1 "Step 1" paragraph rewritten; this also settles the S433 open question `g-route-inference-substituted-default-outranks-program-declaration` (never filed as its own entry here — it lived only in SPEC §20.5.1 + hand-off). 13 conformance tests (`conf-SESSION-8B-DEFERS-TO-PROGRAM`, incl. one runtime): 9 RED on the unfixed code, 4 controls green on both. **S239 review fix-round (F1, MED, security direction):** removing the stamp let a protect= unit in a file with 2+ `<program>` nodes reach step 2's last-wins read (`g-two-programs-one-file-session-attr-last-wins`) — a first program declaring `session-secure="true" sessionExpiry="15m"` followed (or nested) by a `session-secure="false" sessionExpiry="30d"` program gave `scrml_sid`/2592000 and the gate accepted a planted plain `scrml_sid` (reviewer-executed, PA-reproduced). Carved out: for a file with 2+ `<program>` nodes (counted by `countUnitProgramNodes`, the resolver's own step-2 walk) both 8b limbs keep the pre-S438 stamp — emitted server JS byte-identical to `origin/main` 98d94e96 in 6 multi-program shapes (sha1 compare). 6 more tests (4 RED on c9d97065, incl. 2 executed: plain `scrml_sid` → 302, `__Host-` → admitted).
+<!-- @gap id=g-route-inference-8b-session-defaults-outrank-program-declaration sev=MED status=resolved locus=compiler/src/route-inference.ts(Step 8b authMiddleware stamping)+compiler/src/codegen/session-config-resolve.ts(step 1; PA-located-verify) prov=review:S437-post-merge-1094-reviewer-executed-4-shapes-parent-identical -->
+
+### g-page-session-secure-three-way-disagreement — `<page session-secure=…>` is rejected by the parser, specified as valid by §20.5.1, and registered as valid by the attribute registry
+Three normative-looking artifacts disagree. (1) SPEC §20.5.1 "`session-secure=` opt-out (B4b)": *"`<program session-secure="false">` (also valid on `<page>`)"*. (2) `compiler/src/attribute-registry.js` (~:226) registers `session-secure` on the page surface, "so a page-level `session-secure=` is recognized". (3) `compiler/src/ast-builder.js` `PAGE_ALLOWED_ATTRS` (~:20607) is the closed set `{ db, auth, csrf, ratelimit, keep-alive }`, so the parser emits **`E-PAGE-INVALID-ATTR`** — and the §34 row for that code (SPEC ~:20788, §4.15) agrees with the parser, not with §20.5.1. **PA-EXECUTED S438:** `<page auth="required" session-secure="true">` over a protect= `<db>` → `E-PAGE-INVALID-ATTR: \`<page session-secure=…>\` — session-secure is not in the per-route attribute set`. Downstream readers ALSO accept it: route-inference `getExplicitAuthDeclaration` reads a page `session-secure=` into the Step 8b entry, and `session-config-resolve.ts` step 2 reads `<page>` attrs (first match wins) — so the page limb exists end-to-end and only the parser gate refuses it. Fails CLOSED (a hard error, not a silent downgrade), hence LOW. Direction is a language ruling — admit it on `<page>` (and then decide what a per-page cookie NAME means when §20.5.1 makes the cookie application-scope, and E-MW-008's "a compiled server mints ONE cookie name") OR strike the §20.5.1 parenthetical + the registry entry + the dead downstream reads. Lean: strike — a per-page cookie name contradicts the application-scope rule. Lane: bryan (language surface). — `NEW S438-peter`; **LOW**; open
+<!-- @gap id=g-page-session-secure-three-way-disagreement sev=LOW status=open locus=compiler/src/ast-builder.js(PAGE_ALLOWED_ATTRS)+compiler/src/attribute-registry.js(page session-secure)+compiler/SPEC.md(§20.5.1 B4b "also valid on <page>") prov=empirical:PA-compiled-page-session-secure-E-PAGE-INVALID-ATTR -->
+
+### g-session-config-refusal-still-writes-dist — `E-MW-008` (and `E-MW-007`) fail the build by exit code but `scrml build` / `scrml compile --output-dir` still write a complete `dist/`, including the split-cookie server units
+So `codegen/index.ts`'s comment "the F1 split is unreachable by construction" holds only for callers that honour the exit code; a deploy script that ignores it ships the split. Reviewer-executed on the A+B two-program fixture (S437 post-merge review of #1094); `scrml dev` behaviour UNVERIFIED. Shared posture with E-MW-007, not new to #1094. Direction is a ruling: fail-closed = do not write artifacts on a hard session-config refusal. — `NEW S437-bryan (relayed from reviewer)`; **LOW**; open
+<!-- @gap id=g-session-config-refusal-still-writes-dist sev=LOW status=open locus=compiler/src/commands/build.js+compile.js(write phase does not gate on E-MW-007/008; PA-located-verify) prov=review:S437-post-merge-1094-reviewer-executed-cli-build-exit-1-dist-written -->
+**S438-peter:** a pre-built fail-closed fix sits on **`hold/s438-refusal-writes-no-dist` @ `074f1630`** (three S239 rounds: the refusal is decided before ANY write via a `beforeWrite` hook, E-MW-007 judged over the post-write unit set, success paths byte-identical, 15 tests) — awaiting bryan's ruling (note in `handOffs/incoming/`). ⚑ **Re-grade proposed LOW → MED:** measured on `072741ca`, a refused REBUILD overwrites the split units in place beside the previous `_server.js`, which boots and serves **200** on the split.
+
+### g-ghost-lint-false-fires-on-canonical-block-handler — the canonical inline block handler `onclick={ s1; s2 }` (L19 REVERSED S435, §5.2.3) fires `W-LINT-007` ("`<Comp prop={val}>` — scrml uses `<Comp prop=val>`") and `W-LINT-013` twice ("`@click=` Vue event shorthand") on a correct program
+**PA-REPRODUCED BY EXECUTION at S437** on `d02738767`: `<button onclick={ @a = @a + 1; @a = @a * 2 }>go</button>` → one `W-LINT-007` + two `W-LINT-013` on that line. The pre-Stage-2 ghost-pattern pass (PRIMER §12) predates the L19 reversal: `{…}` in attribute position reads as JSX `prop={val}`, and each `@a =` inside the braces reads as a Vue `@event=` inside a tag-opener range (the W14 Unit AA tag-opener gating does not exclude a braced attribute value). Same class as the S137 Bug 44 exemption. Every adopter writing the now-canonical form gets three false warnings, which teaches them to ignore W-LINT. Found by the S437 maps refresh (N-S437-5). P7 disposition owed: not bootstrap, not security → `carried` unless ruled otherwise; but the lint now contradicts a ruling made on 2026-09-26, so it is arguably part of the L19 reversal's own landing. — `NEW S437-bryan`; **LOW**; open
+<!-- @gap id=g-ghost-lint-false-fires-on-canonical-block-handler sev=LOW status=open locus=compiler/src/lint-ghost-patterns.js(W-LINT-007 JSX-prop pattern + W-LINT-013 tag-opener gating near :472/:1032; PA-located-verify) prov=empirical:PA-compiled-onclick-block-handler-1x-W-LINT-007-2x-W-LINT-013 -->
+
+### g-unbraced-handler-sequence-led-by-assignment-silently-drops-statements — `onclick=@count = 0; track("reset")` compiles at exit 0 with NO diagnostic: the handler keeps only `@count = 0`, and `track("reset")` is emitted as two bare HTML ATTRIBUTES (`track reset`) on the element
+**RESOLVED at #1106 (14bce6376), PA-verified by execution S437 wrap:** the assignment-led bare sequence now raises E-MULTI-STATEMENT-HANDLER, and its message gives the §5.2.3 braces fix built from the user's statements.
+**PA-REPRODUCED BY EXECUTION at S437** on `d02738767`: `<button onclick=@count = 0; track("reset")>` → emitted `<button data-scrml-bind-onclick="_scrml_attr_onclick_1" track reset>`, and `W-DEAD-FUNCTION` fires on `track` — the compiler reports the dropped call as dead code. A call-led sequence (`onclick=startGame(); track("start")`) correctly fires `E-MULTI-STATEMENT-HANDLER` (currency-pass probe, exit 1). **Governing sentence (§5.2.3):** *"A BARE event-handler value that contains a `;` outside of expression-internal contexts … is compile error `E-MULTI-STATEMENT-HANDLER`"* and *"The error is kept so the unbraced sequence can never be silently read the wrong way."* So this is a conformance defect: the SHALL fires only when the sequence is led by a call; an assignment-led sequence ends the attribute value at the `;`-adjacent whitespace and the tail re-tokenizes as attributes. Silent-wrong-output class. Fix direction is newly-REJECTING toward an existing sentence (the PA-ruled class, IF corpus impact measures zero by compiling). P7 disposition owed: not bootstrap, not security → `carried` unless ruled otherwise. Found by the S437 PRIMER currency pass. — `NEW S437-bryan`; **HIGH**; open
+<!-- @gap id=g-unbraced-handler-sequence-led-by-assignment-silently-drops-statements sev=HIGH status=resolved resolved=14bce6376 locus=searched:compiler/src/multi-statement-scan.ts(fire-site is call-led only per B18),attribute tokenizer in ast-builder.js/block-splitter — not traced prov=spec:§5.2.3-the-unbraced-sequence-can-never-be-silently-read-the-wrong-way -->
+
+### g-multi-statement-handler-message-gives-the-retired-l19-fix — `E-MULTI-STATEMENT-HANDLER`'s message still says "lift the body to a named function and wire by name"; §5.2.3 (L19 reversed S435) says the fix is to wrap the statements in braces — `onclick={ startGame(); track("start") }` — or to name a function
+**RESOLVED at #1106 (14bce6376), PA-verified by execution S437 wrap:** the assignment-led bare sequence now raises E-MULTI-STATEMENT-HANDLER, and its message gives the §5.2.3 braces fix built from the user's statements.
+Found by the S437 PRIMER currency pass (relayed; message text not PA-re-read). The diagnostic teaches the retired rule to every adopter who hits it. Part of the L19 reversal's own landing. — `NEW S437-bryan (relayed)`; **LOW**; open
+<!-- @gap id=g-multi-statement-handler-message-gives-the-retired-l19-fix sev=LOW status=resolved resolved=14bce6376 locus=searched:compiler/src/multi-statement-scan.ts — message site not traced prov=spec:§5.2.3-fix-is-to-wrap-the-statements-in-braces -->
+
+### g-impl1-match-miscompiles-hit-by-the-bootstrap — six impl#1 `match`/enum lowering defects found writing the native bootstrap (F11–F16); five are SILENT miscompiles
+Found by the S437 bootstrap slice M1 (dpa-051), each with shape + reproducer + the workaround used in `compiler/self-host-v2/slice-m1/progress.md` §F11–F16 (M1's own code carries the workarounds). **P7 criterion 1 (blocks the bootstrap) — eligible for an impl#1 fix.** One entry for the family because F11 and F16 share a root (`_variantFields` holds only the CURRENT file's enums), and the adversarial review of M1 re-confirmed F12 independently (`match m { .B :> "b"\n _ | .A :> "a" }` compiles with no diagnostic and drops the arm — `f(.A)` returns undefined, defeating E-TYPE-020).
+- **F11** positional payload binding in a `match` over an IMPORTED enum is silently dropped (named binding works).
+- **F12** a `|` alternation arm lowers only as the FIRST arm; later it is silently glued onto the previous arm. (The bootstrap's no-default-arm lint now flags a non-first alternation arm, S437.) — **FIXED S438 (branch `fix/s438-impl1-match-arm-shapes`)**: root = the collectExpr arm-boundary detector (`ast-builder.js`) required the arm arrow IMMEDIATELY after the first alternate; one token-kind walker (`armPatternChainArrowOffset`) now recognises every alternate shape at every chain length, and a collection's own arm head is never split. Siblings fixed with it (all execution-tested): `_ | .A` / `.A | _` lower as the wildcard arm (codegen + typer agree), `::B | ::C`, a continuation line opening with `|`, number/boolean alternation, a string alternate holding `|` (atomic enumeration), a nested `match` as an alternation arm's body, and the `const r = match …` lowering (`emit-logic.ts`), which compared only the first alternate. Native parser (`--parser=scrml-native`, opt-in) has no alternation-arm support at all and fails LOUDLY — not changed. **S239 review round (F1):** a `|` alternation over PAYLOAD variants now always extracts the `.variant` tag (library mode compared the raw object to `"P"` and never matched), and a BINDING alternation (`.P(a: x) | .Q(a: x) :> x`, any position, both modes) is rejected LOUDLY with the new **E-MATCH-ALT-BINDING** (SPEC §18.2 + §34) instead of silently dropping the arm. **Final review:** a NAMED payload alternate even when discarded (`.P(a: _) | .Q(a: _)`, silently dropped in both modes — codegen's alternation form accepts positional `_` only) and nested/literal payload alternation are rejected by the same code; ONLY positional `_` discards are accepted in an alternation. Recorded (not changed): program-mode SERVER functions are emitted before `setVariantFieldsForFile` runs (`compiler/src/codegen/index.ts`, server emit precedes the client registry install), so `_variantFields` is null there — unit-only alternation in a server fn gains tag extraction (benign; zero corpus diff; it also fixes server-side payload alternation). An IMPORTED payload enum in program mode still compares raw in a non-alternation arm (the registry side is the parallel branch `fix/s438-impl1-imported-enum-match`, F16). Residual (not fixed): the arm-boundary walker is quadratic on a very long literal `|` chain (8000 terms ≈ 2× base time) — noted, not a correctness issue.
+- **F13** a payload pattern binding five or more fields is not recognised as an arm. — **FIXED S438**: a 20-token cap in the arm-boundary payload walk (and a 40-token cap in the inline-arm walk; native `scanPastPayloadParen` mirrored); walks are now uncapped, bounded by `{`/`}`/`;`/EOF. Sibling fixed: a BLOCK arm's named binding (`.W(e: x) :> { … }`) bound `x` to the FIRST field (codegen used the local names positionally); the `const r = match …` path emitted no binding prelude for block arms at all.
+- **F14** a string literal containing `{`/`}` adjacent to other characters breaks `${}` block splitting. — **FIXED S438**: `block-splitter.js` only recognised the 3-char `"{"` shape; in `${}` / `!{}` / `~{}` contexts a brace is now string content when the logic tokenizer (regex-, comment- and escape-aware) puts it inside a CLOSED quote string on its line (`braceIsQuotedStringContent`). Residual (not changed): braces in backtick TEMPLATE text, `?{}`/`#{}`/`^{}` contexts (3-char rule only), and the separate F9 `"${"` gap. **S239 review round:** the probe analyses each line segment ONCE (cached; was re-tokenized per brace — a one-line 2000-object literal took ~97 s, now < 1 s; perf-guard test), **Known residual (division at line start, LOUD, base identical):** a segment OPENING with `/` that continues an expression from a value-ending previous line (`let r = a\n  / b; let s = '/'; if (c) { r = 'x'\n }`) is read as a regex opener by the cold-started per-line tokenizer → E-CTX-001. A synthetic-operand prefix repair was landed in round 2 and REVERTED in the final review: it misread a regex STATEMENT after a `//` comment line, a control-header `)` or `else` as division (E-CTX-003 where round 1 compiled). Suggested repair (reviewer): when scanning back for the previous significant character, skip trailing `//`/`/* */` comments; treat `)` as a value only when it does not close an `if`/`while`/`for` header; exclude keywords (`else`, `return`, `typeof`, …). **Known residual (a LOUD regression vs base, accepted at the review's stop condition):** a MULTI-LINE backtick template whose text line holds a quoted `{` that closes on a later line (`` `\n'a { b'\nc }\n` ``) now gives E-CTX-001 — the line-scoped probe cannot know it is inside template text; base compiled it because both braces were counted.
+- Tests: `compiler/tests/unit/match-arm-shapes-f12-f14.test.js` (6 of 8 red on main, all green on the branch).
+- **F15** an enum payload FIELD named like a same-file function is silently renamed in the constructor.
+- **F16** tag-only arms over an IMPORTED payload enum compare the value to a string and never match.
+— `NEW S437-bryan (relayed from the M1 build agent; F12 independently re-executed by the M1 adversarial review)`; **HIGH**; open
+<!-- @gap id=g-impl1-match-miscompiles-hit-by-the-bootstrap sev=HIGH status=open locus=searched:compiler/src/codegen/emit-match.ts,type-system.ts(_variantFields holds only the current file's enums — F11/F16 root, per the M1 agent; PA-located-verify) prov=empirical:bootstrap-slice-m1-progress-md-F11-F16-reproducers -->
+**S438-peter:** F12/F13/F14 landed #1119. **F11/F15/F16/F17 are fixed on `hold/s438-impl1-imported-enum-match` @ `5bea376e` but HELD** (four S239 rounds): the branch as a whole turns one LOUD failure silent — a bare-dot argument to a cross-file call whose parameter enum TS cannot see (`conv(.Neg(6))`, `Expr.Neg(x)` vs `Other.Neg(y)`) picks up the outer context's enum: main throws `"Neg" is not a function`, the branch returns wrong data. Fix direction: no stamp / no by-name imported lookup for a bare-dot constructor that is an ARGUMENT of a call TS could not type (→ loud), or stop TS pushing the outer context into call arguments. Everything else on the branch is verified (66 probe cases = main, the rest fixes or loud; reviewer harness in the S438 scratch `rv-enum3/`).
+
+## §S438 — gaps filed S438 (2026-09-27, Peter; surfaced while landing #1045 F1 + the two LOW manifest-gate notes)
+
+### g-host-import-nested-bare-expr-skips-the-manifest-check — a nested `import:host` gets E-IMPORT-003 only under the live front-end but E-IMPORT-003 + E-IMPORT-008 under `--parser=scrml-native` on a host-import-disabled project — `NEW S438; LOW; open`
+<!-- @gap id=g-host-import-nested-bare-expr-skips-the-manifest-check sev=LOW status=open locus=compiler/src/host-import.js(validateHostImports — the misplacedBare limb reports E-IMPORT-003 only; the live nested-statement parser has no import branch so the declaration survives as a bare-expr with no hostTag) prov=empirical:S438-peter-compiled-if-body-and-fn-body-import-host-both-front-ends-on-072741ca -->
+**Measured on `072741ca`, both front-ends, a `[capabilities] host-import = "disabled"` project:** an `import:host` inside an `if` body gives `E-IMPORT-003` under the live front-end but `E-IMPORT-003` + `E-IMPORT-008` under `scrml-native`. The same split now holds for a function body: S438 made the native `import-decl` there fail closed and held it to the manifest (it was previously never recorded — the #1045 review's LOW note), while the live front-end still sees a `bare-expr` with no `hostTag`. The compile fails either way (`E-IMPORT-003`), so no bytes ship; the defect is front-end diagnostic parity, which §22.13 requires ("The block-splitter / native parser SHALL consult the entry"). **Not reproduced from the same review note:** "the module resolver still loads the host module" for an in-function import — a missing or wrong-name host target inside a function body produced no `E-IMPORT-006`/`E-IMPORT-004` on either front-end at `072741ca`, so that load was not observable; the S438 rejection is defensive. Fix direction (unverified): give the `misplacedBare` limb the manifest check when its text is `import:host`, or give the live nested-statement parser an import branch.
+
+### g-per-route-chunk-dir-named-after-absolute-source-path — `--emit-per-route` on pages with no route map names each chunk dir after the mangled ABSOLUTE source path — `NEW S438; LOW; open`
+<!-- @gap id=g-per-route-chunk-dir-named-after-absolute-source-path sev=LOW status=open locus=searched:compiler/src/codegen/route-splitter.ts(chunk descriptor route-path derivation when no route map applies)—not-traced prov=empirical:S438-peter-per-route-build-of-app-page-and-app-sub-deep-identical-on-base-072741ca -->
+A `--emit-per-route` build of pages with no route map writes chunks to `dist/C__Users_<…>_app_page/_anonymous.initial.<hash>.js` (the absolute source path with separators mangled to `_`), and `chunks.json` points at those dirs. The output layout therefore depends on the machine and checkout location — not reproducible across hosts — and leaks the builder's filesystem path into shipped URLs. **PRE-EXISTING**: byte-identical on `072741ca` (measured by the S438 #1045 F1 repro; the S239 review confirmed). Direction (unverified): derive the chunk dir from the dist-relative page path (the same `pathFor` / `stripPagesPrefix` computation the page's own artifacts use) when no route map applies.
+
+## §S441 — public-surface audit, onboarding, site/tutorial-fix and review-floor defects (2026-09-29; every entry reproduced on `cf62b4154`)
+
+Sources: the S441 public-surface audit (the repo walk `A-repo`, the scrml.dev site pass `B-site`, the published-articles pass `C-articles`, and the NERDME claim probes), the S441 onboarding probes (`onramp`), the defects found by the S441 site-fix and tutorial-fix agents, and pre-existing defects surfaced by two S441 S239 reviews (the cell-12 review, `rv-cell12-out`, and the `fail`-shorthand review, `rv-fail-out`). Every entry was re-reproduced by this filing pass on `cf62b4154` from a minimal, version-stamped reproducer in `docs/changes/s441-audit-gap-filing/repro/` (the header of each file records the command, the expected behaviour with its SPEC sentence, and the emitted line). "Executed" means the emitted code was run, not read. Items that did not reproduce, and sub-claims that were wrong, are recorded in `docs/changes/s441-audit-gap-filing/progress.md` and are not filed. Status `ruling-gated` means no SPEC sentence governs the case (or two conflict); the defect is live and counts as open.
+
+### g-cross-program-call-assigned-to-cell-lowers-to-null — `@r = <#compute>.add(1, 2)` compiles to `_scrml_cs_reactive_set("r", null)`: the call is deleted, exit 0 — `NEW S441; HIGH; open`
+<!-- @gap id=g-cross-program-call-assigned-to-cell-lowers-to-null sev=HIGH status=open locus=searched:compiler/src/codegen(the `<#name>.method(…)` call-expression lowering — a cell-assignment RHS lowers to `null`, a `const` initializer to an empty one)—not-traced prov=empirical:S441-audit-nerdme-worker-rpc2+A-repo-m2-worker -->
+Reproducer `repro/cross-program-call-assigned-to-cell-lowers-to-null.scrml`. `function go() { @r = <#compute>.add(1, 2) }` emits `function _scrml_go_4() { _scrml_cs_reactive_set("r", null); }` with no diagnostic — clicking sets `@r` to null. The sibling `const result = <#compute>.add(1, 2)` fails loud (`E-CODEGEN-INVALID-LOGIC`, emitted `const result;`), which is the case g-spec-43-5-1-cross-program-rpc-example-is-invalid-scrml already records; the cell-assignment position is the silent one. Governing: §43.5.1 specifies `<#compute>.add(1, 2)` as the cross-program RPC form ("Cross-program calls return `Promise<T>`", restated to `T` by S440 dpa-056 R7), and §2.2.1 requires a construct the compiler cannot lower to get a hard diagnostic rather than a stub. The same build still inlines the worker's `add` into the main client bundle and references a `compute.worker.js` it never writes — the roots in g-nested-program-is-accepted-and-silently-flattened-into-the-parent and g-nested-program-emits-artifacts-it-never-produces. Direction: until cross-program RPC lowers, reject the call form with a named diagnostic in every position.
+
+### g-channel-dynamic-topic-emitted-as-literal-cell-name — `<channel topic=@room>` joins every client to the topic `"room"` (the cell's name), exit 0 — `NEW S441; HIGH; open`
+<!-- @gap id=g-channel-dynamic-topic-emitted-as-literal-cell-name sev=HIGH status=open locus=searched:compiler/src/codegen/emit-channel.ts(topic attribute read — an `@`-ref value is taken as its name text)—not-traced prov=empirical:S441-audit-nerdme-p-n5-topic-room -->
+Reproducer `repro/channel-dynamic-topic-emitted-as-literal-name.scrml`. server.js: `server.upgrade(req, { data: { __ch: "rooms", __topic: "room" } })`; client.js labels the channel `topic="room"`; no subscription call exists. Every client of every room subscribes to one topic, so a broadcast reaches all rooms. No diagnostic. Governing: §38.6.2 (SPEC.md:~22767) *"When `topic=@var` is dynamic, the compiler SHALL emit a topic subscription/unsubscription call in the client IIFE that fires on every write to `@var`."* **SPEC-vs-SPEC:** §38.11 says *"The `name=` and `topic=` attributes on `<channel>` SHALL be static literals"*, though its normative bullet only rejects `${…}` (E-CHANNEL-007). The output is wrong under either sentence — §38.6.2 wants a subscription, §38.11 wants a rejection — so this is a defect now; which fix is a ruling (implement §38.6.2, or extend E-CHANNEL-007 to `@`-refs and strike §38.6.2's dynamic-topic text).
+
+### g-nplus1-hoist-keys-map-by-unselected-column — the §8.10 loop hoist builds its lookup Map from a column the SELECT does not return, so every lookup is null — `NEW S441; HIGH; open`
+<!-- @gap id=g-nplus1-hoist-keys-map-by-unselected-column sev=HIGH status=open locus=compiler/src/batch-planner.ts(inSqlTemplate — the projection is not augmented with keyColumn)+compiler/src/codegen/emit-control-flow.ts:~964(`byKey.set(_r[keyColumn], _r)`)—agent-located-verify prov=empirical:S441-audit-nerdme-q-nplus1 -->
+Reproducer `repro/nplus1-hoist-key-column-not-selected.scrml`: a `for (const x of ids)` loop with `?{\`SELECT name FROM users WHERE id = ${x.id}\`}.get()`. The hoist emits `SELECT name FROM users WHERE id IN (…)` then `for (const _r of rows) byKey.set(_r["id"], _r)`. **Executed** against SQLite with the emitted lines verbatim: rows `[{"name":"a"},{"name":"b"},{"name":"c"}]`, Map keys `[undefined]`, result `[null,null,null]`; the un-rewritten loop returns all three rows. Exit 0, no diagnostic, silent data loss. Governing: §8.10.3 *"The rewritten loop is observationally equivalent to the un-rewritten loop on all side-effect orderings"*; §8.10.2 *"`.get()` in the loop becomes `Map<key, Row>`; missing keys yield `not`"* — here every key is missing. Direction: add the key column to the hoisted projection (and strip it from the row if it was not selected), or refuse the hoist with D-BATCH-001 when the key column is not projected.
+
+### g-auth-program-without-csrf-attr-emits-no-csrf-check — `<program auth="required">` with no `csrf=` emits no CSRF check on mutating routes, while the same app without `auth=` gets one — `NEW S441; HIGH (SECURITY); RESOLVED S441`
+<!-- @gap id=g-auth-program-without-csrf-attr-emits-no-csrf-check sev=HIGH status=resolved locus=compiler/src/codegen/emit-server.ts:4389(`useBaselineCsrf = !authMiddlewareEntry && isStateMutating && _webAppShape` — the baseline arm is switched off by auth=, and the synchronizer arm needs csrf="auto") prov=empirical:S441-audit-nerdme-q-csrf-none+csrf-noauth+csrf-auto -->
+Reproducer `repro/csrf-absent-under-auth.scrml` (an INSERT behind a button). Three builds of the same body: **no `auth=`** → baseline double-submit check (`_scrml_validate_csrf(req)` → 403); **`auth="required" csrf="auto"`** → session synchronizer-token check; **`auth="required"`, no `csrf=`** → server.js contains the string "csrf" zero times, and `_scrml_handler_add_1` runs the auth check then the INSERT. Adding authentication removes the CSRF gate. Mitigation that does exist: the session cookie is emitted `HttpOnly; SameSite=Lax` (emit-server.ts:~3205), which stops the classic cross-site form POST in current browsers; it does not cover same-site attackers (a sibling subdomain) or clients without SameSite enforcement.
+**Governing-sentence gate — no sentence sets the default; this is a ruling, not a conformance bug.** Searched §40.2, §39.2.3, §52.13, §34 (W-AUTH-MIDDLEWARE-AUTO-INJECTED). §40.2's table and §39.2.3 describe what `csrf="auto"` does *with* and *without* `auth=`; neither says what an absent `csrf=` means. The only sentence about absence is §40.2: *"A `<program>` element with none of these attributes generates no middleware infrastructure. The absence of a middleware attribute SHALL NOT be a compile error or warning."* Read literally that sanctions the auth-without-CSRF output — and makes the no-auth baseline an unspecified extra. Against it: the `protect=` auto-escalation path injects `auth="required", csrf="auto"` together (W-AUTH-MIDDLEWARE-AUTO-INJECTED), which reads as intent that auth implies CSRF. **Recommendation for bryan:** default `csrf="auto"` whenever `auth=` is present (explicit `csrf="off"` to opt out), and write the default into §40.2. The asymmetry — the safer-looking app is the less protected one — is the kind of trap an adopter cannot see.
+**RESOLVED S441 (change-id `s441-csrf-default-under-auth`).** Ruled by bryan (*"yes on csrf auto"*): under `auth=`, `csrf="auto"` is the default and only `csrf="off"` opts out; §40.2 now says so normatively (+ §39.2.3 / §52.13 cross-refs). Root cause was two copies of an `"off"` fallback — `compute-program-config.ts` (`getAttrValue("csrf") ?? "off"`) and route-inference Step 8a (`authConfig.csrf ?? "off"`); both now go through `effectiveCsrfUnderAuth()`, which also fails closed on an out-of-set literal (the retired `csrf="on"` used to mean "no check" under auth). Measured over real HTTP with an authenticated session, reproducer body: forged token-less POST **200 + row written → 403, nothing written**; the generated client's flow (token, one retry) 200; `csrf="off"` still 200; no-`auth=` baseline unchanged. Absent `csrf=` now emits byte-identical server/client/html to explicit `csrf="auto"`. Corpus: 21 of 2042 compiled units changed, every one a `<program auth="required">` without `csrf=` (10 conformance/auth, 7 conformance/ssr, docs/readme-snippets/tasks-app, docs/tutorial-snippets/09-auth, examples/07-admin-dashboard, examples/23-trucking-dispatch/app) and each now equals its explicit-`csrf="auto"` build. Runtime consequence: those apps now 403 token-less cross-site POSTs; the compiler-generated client sends the token. Tests: `compiler/tests/integration/csrf-default-under-auth.test.js`. Residual (separate gap): `csrf=` is inert off the `auth="required"` path — g-csrf-attr-inert-without-auth-required.
+**S441 fix round (PA security review of `32534fc8a`, verdict DO-NOT-LAND until fixed).** F1: `csrf="auto"` always emits the request-time HTML-composition route (the §39.2.3 `<meta name="csrf-token">` fill), which the build's `_server.js` and `scrml dev` dispatch BEFORE the static-file branch that carries the §52.13 protected-document guard — and it never ran the auth check. Making `csrf="auto"` the default therefore made every `auth="required"` page answer an anonymous `GET /<page>` with **200 + the markup** (measured with `scrml build` on `docs/tutorial-snippets/09-auth.scrml`: `/app` anon 200 while `/app.html` anon 302). Explicit `csrf="auto"` had the same hole before the default existed, as did any `auth="required"` page with a §52.8 SSR seed. Fixed at the root: the compose handler runs `_scrml_auth_check` first (anon → 302 to loginRedirect, no seed query runs); both hosts inherit it. After: `/app` anon **302 → /login**, authed 200 with a live meta token. F3: a stale first-paint meta token no longer defeats the one retry (the retry syncs the meta from the cookie the 403 planted; measured 403,403 → 403,200). SPEC §40.2 gained a compose-route bullet, the WebSocket sentence was reworded (it had blessed the hole filed — and, after bryan ruled "yes on origin check", closed — in the same round as g-ws-upgrade-no-origin-check-cross-site-websocket-hijacking), and §52.15.5's "anonymous-reachable compose route" sentence was corrected. Five SSR conformance cases now assert the anonymous redirect and compose their first paint as an authenticated viewer (new, unratified `firstPaint.viewer` / `firstPaint.anonymousRedirect`).
+
+### g-csrf-attr-inert-without-auth-required — `csrf="off"` does not opt out (and `csrf="auto"` does not select the session token) under `auth="optional"`, `auth="none"`, a non-protect `<page auth=>`, or no `auth=` — `NEW S441; LOW; open`
+<!-- @gap id=g-csrf-attr-inert-without-auth-required sev=LOW status=open locus=compiler/src/route-inference.ts(Step 8a registers authMiddleware only for auth="required")+compiler/src/codegen/emit-server.ts(useBaselineCsrf = !authMiddlewareEntry && isStateMutating && _webAppShape — never reads csrf=) prov=empirical:S441-s441-csrf-default-under-auth-matrix -->
+Found while landing g-auth-program-without-csrf-attr-emits-no-csrf-check. Same body as that gap's reproducer, compiled under every `auth=` × `csrf=` combination: for `auth="optional"`, `auth="none"` and no `auth=`, the three builds `csrf=` absent / `"auto"` / `"off"` are **byte-identical** (server, client, html) — all carry the baseline double-submit gate, and a token-less POST is 403 in all nine. So `csrf="off"` is silently ignored there, and `csrf="auto"` with `auth="optional"` gets the double-submit cookie rather than the session-bound synchronizer token §39.2.3 describes for *"`<program auth=>` present"*. Cause: only `auth="required"` registers an auth-middleware entry, and the baseline arm keys off that entry's absence, not off `csrf=`. Governing: §52.13 *"`csrf="off"` — no CSRF check"*; §40.2 (S441) *"Only the literal `csrf="off"` opts out"*. Fails closed (more protection than declared), hence LOW — but a declared opt-out that does nothing is a defect, not a doc gap. Direction needs a ruling on what `auth="optional"`/`"none"` mean for CSRF: synchronizer token when a session exists vs. double-submit; and whether `csrf="off"` without `auth=` should drop the baseline gate.
+
+### g-ws-upgrade-no-origin-check-cross-site-websocket-hijacking — a cross-origin page can open an `auth="required"` channel's WebSocket with the viewer's session cookie and drive `onserver:message` / relay `__sync` to every subscriber — `NEW S441; HIGH (SECURITY); RESOLVED S441`
+<!-- @gap id=g-ws-upgrade-no-origin-check-cross-site-websocket-hijacking sev=HIGH status=resolved locus=compiler/src/codegen/emit-server.ts(the §38 `_scrml_route_ws_<name>` upgrade handler — `_scrml_auth_check(req)` then `server.upgrade(...)`; no Origin/Host comparison anywhere on the path) prov=empirical:S441-security-review-F2-of-s441-csrf-default-under-auth -->
+Reproducer `docs/changes/s441-csrf-default-under-auth/repro/ws-channel-under-auth.scrml` + `ws-cross-origin-probe.ts` (the S441 PA review's probe). Compile, run the probe against the output. **Executed** on the fix-round branch: an anonymous cross-origin connect is `REJECTED` (the auth check works), but a connect from `Origin: https://evil.example` **carrying the session cookie** is `OPEN`, and both frames it sends reach the legitimate subscriber — `{"got":{"attacker":"drove onserver:message"}}` (the author's `onserver:message` handler ran on attacker input) and `{"__type":"__sync","cell":"count","value":999}` (a channel-cell write relayed to every client). The upgrade is a `GET`, so the CSRF token mechanism never covered it; the session cookie is the only credential, and a browser attaches it to a cross-site WebSocket handshake whenever `SameSite` allows (same-site sibling origins always; `SameSite=None` deployments cross-site). Mitigation that exists: the session cookie is `SameSite=Lax`, which keeps it off a handshake from a different registrable domain in current browsers. Governing: §52.13 authenticates the request but says nothing about its origin; §40.2 (S441, reworded in this fix round) now states the upgrade is outside the CSRF mechanism and names this gap rather than blessing it. **Ruling-gated on the fix shape** (the PA has asked bryan): an Origin-vs-Host check on the upgrade (reject a mismatched or missing Origin), a per-connection token (the §39.2.3 synchronizer token as a subprotocol or first-frame auth), or both.
+**RESOLVED S441 (same fix round; ruling bryan "yes on origin check").** Every web-app server module now emits one `_scrml_ws_origin_ok(req)` and every channel upgrade route calls it before the auth check and `server.upgrade()`: `Origin` must name this server — host from `X-Forwarded-Host` else the request's, scheme from `X-Forwarded-Proto` else the request's, default ports normalised — except an `https` origin is accepted on a plain-`http` request (TLS ended at a proxy that sets no `X-Forwarded-Proto`). Mismatch and `Origin: null` → `403`. **No Origin → allowed** (browsers always send one; a non-browser client cannot carry a victim's ambient cookie) and the channel's session check still applies — measured: no-Origin with cookie OPEN, no-Origin without cookie REJECTED. `scrml dev` applies the same rule in the parent before it accepts the browser socket (its proxy used to upgrade first, so a refused child still left the cross-origin socket open briefly), and forwards `Origin` + `X-Forwarded-Host`/`-Proto` so the child's check sees the browser's host. Headless programs (no cookie session) emit no check. No allow-list: the only existing attribute that could carry one is `cors=`, and coupling it would let `cors="*"` — common on JSON APIs — silently reopen this hole, so it was not reused. Measured after, reproducer probe: `{"anonCrossOrigin":"REJECTED","cookieCrossOrigin":"REJECTED","victimReceived":[]}`; same-origin and a same-origin peer's broadcast + `__sync` unaffected; through `scrml dev` and `scrml build` + `_server.js`: same-origin OPEN, cross-origin REJECTED, relay intact. Tests: `compiler/tests/integration/ws-upgrade-origin-check.test.js` (real Bun.serve + WebSocket matrix; dev/emitted rule parity). SPEC §40.2 bullet + §38.5 cross-ref.
+
+### g-formfor-no-js-fallback-posts-to-a-404-route-and-drops-the-csrf-field — `<formFor>`'s progressive-enhancement `<form action=>` targets `/api/…` (the route lives at `/_scrml/…`) and its hidden `_csrf` field is never read by the server — `NEW S441; MED; open`
+<!-- @gap id=g-formfor-no-js-fallback-posts-to-a-404-route-and-drops-the-csrf-field sev=MED status=open locus=compiler/src/type-system.ts:~22258(peActionUrl = `/api/${route}` — the served route path is `/_scrml/${route}`)+compiler/src/codegen/emit-html.ts:~3796(the `_csrf` hidden input)+compiler/src/codegen/emit-server.ts(route handlers parse `req.json()` only; no form-body or `_csrf` read) prov=empirical:S441-security-review-of-s441-csrf-default-under-auth -->
+Reproducer `docs/changes/s441-csrf-default-under-auth/repro/formfor-no-js-fallback.scrml` (`<formFor for=Signup onsubmit=persistSignup/>` under `auth="required"`). Emitted html: `<form … action="/api/__ri_route_persistSignup_1" method="POST">` and `<input type="hidden" name="_csrf" value="" data-scrml-csrf="…" />`. Emitted server.js mounts the handler at `path: "/_scrml/__ri_route_persistSignup_1"`, parses the body with `_scrml_req.json()`, and never reads a `_csrf` field. So with JavaScript off the form POSTs to a path nothing serves (404), and even at the right path an `application/x-www-form-urlencoded` body would fail the JSON parse and the CSRF gate (it reads only the `X-CSRF-Token` header). The no-JS fallback §41.14 requires does not work at all — and the SPEC text itself pins the wrong half: *"the compiler SHALL emit a default progressive-enhancement HTTP form fallback: the outer `<form>` element receives `action="/api/<derived-route>" method="POST"` automatically, deriving the route from the server function's name per §12.5 route inference"* — while the §12.5 route the server mounts is `/_scrml/<route>`. So the fix is a direction choice (serve the `/api/` path + accept a form body + read `_csrf`, or amend §41.14 to the `/_scrml/` path); either way the server half has to accept a form post; with JS on, the client intercepts the submit and the fetch path is correct, which is why it went unnoticed. Not a CSRF bypass (the request fails closed), but a dead documented path plus an unused security field.
+
+### g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth — `auth="Required"`, `auth=${mode}` and `auth=@mode` compile to an app with NO auth at all — `NEW S441; HIGH (SECURITY); open`
+> **S443 extension:** the same holds for `<page auth="Required">` / `auth=" required"` / `auth=${…}` on a `<page>` (only W-ATTR-002; page served 200, fn runs anonymously — reviewer-executed). Under a REQUIRED application program, #1173 (S443) makes such a page INHERIT the gate (fail closed); without one it gates nothing. `<program auth="Required">` still opens the whole app (measured on the S443 auth branch).
+<!-- @gap id=g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth sev=HIGH status=open locus=compiler/src/compute-program-config.ts(getAttrValue returns null for a non-string-literal value, so authConfig is never built)+compiler/src/route-inference.ts(Step 8a registers only authConfig.auth === "required" — exact, case-sensitive)+compiler/src/attribute-registry.js(`auth` supportsInterpolation:false is not enforced as an error) prov=empirical:S441-security-review-of-s441-csrf-default-under-auth -->
+Reproducers `docs/changes/s441-csrf-default-under-auth/repro/auth-Required-case.scrml`, `auth-interp.scrml` (`${ const mode = "required" }` then `<program auth=${mode}>`), `auth-cell.scrml` (`<program auth=@mode>`). **Measured on the fix-round branch** — diagnostics and whether server.js carries `_scrml_auth_check(_scrml_req)`: `auth="Required"` → `W-ATTR-002` (warning) plus `W-AUTH-LOGIN-MISSING` / `I-AUTH-REDIRECT-UNRESOLVED` (which treat it AS an auth gate), **no auth check emitted**; `auth=${mode}` → **no diagnostic at all**, no auth check; `auth=@mode` → **no diagnostic at all**, no auth check. In all three the page and every server function are public (they fall to the no-auth baseline double-submit CSRF arm, so writes still need a token — but no login). The author wrote "this needs a login" and got an open app: fail-OPEN on the most security-relevant attribute in the language. Governing: §52.13 *"The `auth=` attribute … accepts exactly three literal values"*; the attribute registry declares `auth` `supportsInterpolation: false`, which nothing enforces. Direction: an unrecognised or non-literal `auth=` should be a compile ERROR (fail closed), not a warning — and the two auth lints that already read `"Required"` as a gate show the compiler's other stages think the author meant auth.
+
+### g-session-destroy-route-has-no-csrf-check — `POST /_scrml/session/destroy` is state-mutating and carries no CSRF check (forced logout) — `NEW S441; LOW; open`
+<!-- @gap id=g-session-destroy-route-has-no-csrf-check sev=LOW status=open locus=compiler/src/codegen/emit-server.ts(`_scrml_session_destroy` handler)+compiler/src/codegen/emit-client.ts(`session.destroy()` posts with a bare fetch — no X-CSRF-Token, no retry) prov=empirical:S441-security-review-F5-of-s441-csrf-default-under-auth -->
+Every auth app mounts `POST /_scrml/session/destroy`, which deletes the session record for whatever `scrml_sid` cookie arrives and clears the cookie — with no CSRF check, under `csrf="auto"` (now the default) as well. A cross-site POST that carries the cookie logs the viewer out. Impact is a nuisance (forced logout, no data change), and `SameSite=Lax` already keeps the cookie off a cross-site POST in current browsers, hence LOW. **Not closed in the S441 fix round because it is not a one-line gate:** the client's `session.destroy()` sends a bare `fetch('/_scrml/session/destroy', { method: 'POST' })` with no token and no retry, and the `_scrml_fetch_with_csrf_retry` helper is only emitted when a CSRF-gated server fn exists — so gating the server side alone would break logout in apps whose only mutation is `session.destroy()`. Fix = gate the route under `csrf="auto"` AND route `session.destroy()` through the token + retry path (emitting the helper whenever the destroy route exists).
+
+### g-page-auth-required-protects-nothing — `<page auth="required">` (no `protect=`) gates neither the page document nor its server functions; an anonymous `GET /secret` returns the page and its server fns run anonymously, with no diagnostic — `NEW S441; HIGH (SECURITY); open`
+> **RESOLVED S443** — #1173 (`b3419e6d8`): a `<page auth="required">` gates its document, compose route and every server fn in its file (302 → the application's loginRedirect), csrf=auto. PA-verified by execution on the S441 reproducer: `/secret` and `/secret.html` 302, anonymous POST 302.
+<!-- @gap id=g-page-auth-required-protects-nothing sev=HIGH status=resolved locus=compiler/src/route-inference.ts(Step 8a registers authMiddleware only from `<program auth="required">`; a `<page auth=>` is read only by Step 8b, i.e. only when the file has protect= fields)+compiler/src/codegen/emit-server.ts(no authMiddlewareEntry → no `_scrml_auth_check`, no `_scrml_protected_document` guard) prov=empirical:S441-PA-review-round-3-of-s441-csrf-default-under-auth -->
+Reproducer `docs/changes/s441-csrf-default-under-auth/repro/page-auth-required/` — `app.scrml` = `<program><p>home</p></program>`; `pages/secret.scrml` = `<page auth="required">` with `<p>secret-marker</p>` and a server function (it reads `session`, so it escalates) wired to a button; `probe.ts` serves the build. **Executed** (`scrml build` of that dir, `bun _server.js`): anonymous `GET /secret` → **200, body contains `secret-marker`**; anonymous `GET /secret.html` → **200** with the marker; an anonymous POST to the page's server fn (carrying only a self-minted double-submit token) → **200 `"server-ran:null"`** — the function body ran for a caller with no session. The build prints no diagnostic about it (only `W-OUTLET-ABSENT-SOFT-NAV-DISABLED`). Governing: §52.13 *"`auth="required"` — every request to this scope SHALL be authenticated; unauthenticated requests are redirected to `loginRedirect=`"*, and §52.13 names `<page>` among the elements that accept `auth=`. Cause: only `<program auth="required">` registers an auth-middleware entry (Step 8a); a `<page auth=>` is consulted only on the `protect=` auto-escalation path (Step 8b), so a page with no protected columns gets no auth check, no protected-document guard, and the no-auth baseline CSRF arm. Filed, not fixed, on the S441 CSRF branch (PA scope decision). Related wording fix: SPEC §40.2's CSRF-default bullet was scoped to `<program>` and now records that `<page auth=>` currently gets only the baseline double-submit check.
+
+### g-nested-program-auth-attr-silently-ignored — an inner `<program auth="required">` nested in `<program db>` compiles with no auth at all: its server fns run for anonymous callers, no diagnostic — `NEW S441; HIGH (SECURITY); open`
+> **RESOLVED S443** — #1173 (`b3419e6d8`): `auth=` on a nested `<program>` is E-PROGRAM-NESTED-AUTH (compile error, both parsers). PA-verified: the S441 nested reproducer fails to build.
+<!-- @gap id=g-nested-program-auth-attr-silently-ignored sev=HIGH status=resolved locus=compiler/src/compute-program-config.ts(reads auth= from the FIRST `<program>` node only)+compiler/src/ast-builder.js(§4.12.2 nested-attribute validation — `auth` is not a nested-valid attribute and is accepted silently) prov=empirical:S441-PA-review-round-3-of-s441-csrf-default-under-auth -->
+Reproducer `docs/changes/s441-csrf-default-under-auth/repro/nested-program-auth.scrml` (an outer `<program db="./c.db">` holding a `<schema>` and an inner `<program auth="required">` with an INSERT server fn behind a button) + `nested-program-auth-probe.ts`. **Executed** (`scrml build`, `bun _server.js`): anonymous `GET /app` → 200 with the inner program's button; anonymous POST to `/_scrml/__ri_route_add_1` (self-minted double-submit token only) → **200, and the row is written** (`[{"body":"anon-write"}]`). Only diagnostic: `W-PROGRAM-SPA-INFERRED`. **Severity note — this differs from the PA's filing brief**, which described this shape as LOW ("drops the inner program entirely, and the client posts to a route that does not exist"). Measured on this branch the inner program is NOT dropped and the route DOES exist; the defect is that its `auth=` is silently discarded, which is fail-OPEN, hence HIGH. If the PA's observation came from a different shape (e.g. an inner `<program>` with its own `db=`, or a different build mode), that is a separate entry — not reproduced here. Governing: §4.12.2's nested-attribute table does not list `auth=` (so a nested `auth=` is not a valid attribute and should be a diagnostic, not a silent no-op); §52.13 for what the author was asking for.
+
+### g-db-migrate-ignores-schemafor-tables — `scrml db-migrate` reports "No <schema> tables found" for a `<schema>` built from `schemaFor(…)` — `NEW S441; MED; open`
+<!-- @gap id=g-db-migrate-ignores-schemafor-tables sev=MED status=open locus=compiler/src/commands/db-migrate.js:~226(extractDesiredSchema over a buildAST output where the `${ schemaFor(T) }` interpolation is never expanded)—agent-located-verify prov=empirical:S441-audit-A-repo-examples-26 -->
+Reproducer `repro/db-migrate-ignores-schemafor.scrml`; `examples/26-type-derived-schema.scrml` behaves identically. `scrml db-migrate <file> --db <path> --dry-run` → `No <schema> tables found — nothing to apply.`, exit 0. Control: `examples/17` (literal `<schema>`) → a 2-statement `CREATE TABLE` plan. The shipped example for schemaFor therefore cannot create its own tables. Governing: §41.15.2 *"schemaFor's output is internally equivalent to the hand-authored shared-core form for the same struct shape"*; §41.15.9 *"The emitted output … rides the existing `<schema>` parser + §39.5.8 SQL DDL lowering pipeline."* The protect-analyzer had the same blind spot and was taught Form-B recognition in S189 (G-SCHEMAFOR-PA-UNRECOGNIZED); the migrate consumer was not.
+
+### g-formfor-ignores-named-shape-input-attributes — `<formFor>` renders every string field as `<input type="text">`; `string(email)` does not get `type="email"` — `NEW S441; MED; open`
+<!-- @gap id=g-formfor-ignores-named-shape-input-attributes sev=MED status=open locus=compiler/src/codegen/emit-form-for.ts:~777(per-field inputAttrs — the §53.6 shape→attribute derivation is not consulted)—agent-located-verify prov=empirical:S441-audit-nerdme-p-n3-formfor -->
+Reproducer `repro/formfor-ignores-named-shape-input-type.scrml`. HTML: `<input type="text" … data-scrml-formfor-input="email" />`, and the same for a `string(phone)` field. Control: `<email>: string(email)` bound to a hand-written `<input bind:value=@email>` emits `type="email"`, so the derivation exists and formFor bypasses it. Governing: §53.6.1's built-in shape table (`email` → `type="email"`, `phone` → `type="tel"`, `url`, `date`, `time`, `color`); §41.14 describes formFor's expansion as what *"the developer could have hand-authored under Shape 2"*. Silent, but the loss is browser-side validation and input mode, not wrong data.
+
+### g-refinement-predicate-lt-space-silently-eats-decl-and-markup — `<pw>: string(.length > 7 && .length < 255) = "x"` loses the initializer and the next `<input>`, exit 0 — `NEW S441; HIGH; open`
+<!-- @gap id=g-refinement-predicate-lt-space-silently-eats-decl-and-markup sev=HIGH status=open locus=searched:compiler/src/block-splitter.js(`<`+whitespace read as a tag opener inside a top-level type annotation)—root-shared-with-g-lt-space-read-as-tag-opener prov=empirical:S441-audit-nerdme-q-hv-pw -->
+Reproducer `repro/refinement-predicate-lt-space-drops-markup.scrml`. The only diagnostic is `W-WHITESPACE-001: Opener \`< 255>\` uses whitespace … The canonical form is no-space (\`<255>\`)` — advice that names a nonexistent element. client.js: `_scrml_cs_reactive_set("pw", null)` (the `"longenough"` initializer is gone) and the HTML body has no `<input>`. Control: `.length <255` (no space) compiles correctly. Root is the `<`+whitespace opener of g-lt-space-read-as-tag-opener (MED), which is loud in prose and in a derived-cell RHS; in a refinement predicate it is silent, hence a separate HIGH. Governing: §53 predicate grammar (`.length < N` is a comparison) — no SPEC text lets a type annotation open markup. Not reproduced from the audit claim: a "mislabelled E-WHITESPACE-001" — the code is correctly `W-WHITESPACE-001`; the message only names the future P3 code.
+
+### g-fn-body-accepts-host-network-calls — `fetch(u)` inside a `fn` body compiles clean and runs as a fire-and-forget request — `NEW S441; MED; ruling-gated`
+<!-- @gap id=g-fn-body-accepts-host-network-calls sev=MED status=ruling-gated locus=searched:compiler/src/type-system.ts(§48.3 fn-body prohibition walker — NON_DET_CALLS list)+compiler/SPEC.md(§48.3.4 exhaustive list vs §34 E-FN-003 row) prov=empirical:S441-audit-nerdme-q-fnfetch -->
+Reproducer `repro/fetch-inside-fn-accepted.scrml`: `fn get(u: string) -> number { fetch(u); return 1 }` → exit 0, client.js `fetch(u);`. **Governing-sentence gate — two texts disagree, so ruling-gated.** §34's E-FN-003 row reads *"Outer-scope variable mutation inside a `fn` body, or call to a non-`pure`, non-`fn` function"*, which condemns `fetch` (and, read literally, `Math.max` and `JSON.stringify` too). §48.3.4 lists the forbidden non-deterministic calls and says *"This list is exhaustive for the initial version"*; `fetch` is not on it, and §48.3.3's body text (the E-FN-003 section) covers mutation only. A network request is a side effect under any reading of "pure". Recommendation: add host I/O (`fetch`, `XMLHttpRequest`, `WebSocket`, `navigator.sendBeacon`) to §48.3.4 as E-FN-004 and narrow the §34 E-FN-003 row to what §48.3.3 says.
+
+### g-protected-field-client-read-reports-cg-invariant-at-1-1 — reading `@user.passwordHash` on the client fails `E-CG-001` "upstream invariant violation" at 1:1, not a user-level error at the read — `NEW S441; MED; open`
+<!-- @gap id=g-protected-field-client-read-reports-cg-invariant-at-1-1 sev=MED status=open locus=searched:compiler/src/type-system.ts(no read-site protect check for a cell-held row),compiler/src/codegen/emit-client.ts(E-CG-001 egress scan is the first thing that notices) prov=empirical:S441-audit-A-repo-probes-p1-protect -->
+Reproducer `repro/protected-field-client-read-e-cg-001.scrml`: a server fn returns `SELECT *` from a `protect="passwordHash"` table into `@user`; markup reads `${@user.passwordHash}`. Result: exit 1, `error [E-CG-001]: Protected field \`passwordHash\` found in client JS output. This indicates an upstream invariant violation.`, span 1:1 (`<program db="t.db">`), stage CG. The program is fail-closed (good) but the diagnostic blames the compiler and points nowhere near the read. Governing: §34 E-PROTECT-001 *"Protected field accessed on client type"* (§11.3.2; §14.8.6 worked example). §14.8.7 marks the projection-side E-PROTECT-001 as DEFERRED for `?{}` read sites; this is a client read of a cell, which that deferral does not describe. Also: the failed compile writes artifacts (g-cli-emits-artifacts-on-failed-compile).
+
+### g-w-lint-008-false-fires-on-refinement-predicates — `W-LINT-008` ("`{cond && <El>}`, use `<El if=>`") fires on `number(>0 && <10000)` after any `{` — `NEW S441; LOW; open`
+<!-- @gap id=g-w-lint-008-false-fires-on-refinement-predicates sev=LOW status=open locus=compiler/src/lint-ghost-patterns.js(Pattern 8, regex `/\{[^}]+&&\s*</g` — skips only logic and comment ranges) prov=empirical:S441-audit-nerdme-q-refine -->
+Reproducer `repro/w-lint-008-refinement-predicate.scrml`: fires at the `{` opening a struct body and the `{` opening a `fn` body whose `let safe: number(>0 && <10000)` carries the predicate. The same predicate on a top-level cell (no preceding `{`) does not fire. Traced: any `{ … && <` outside `${}`/comments matches Pattern 8, and `&& <10000` is exactly that. Direction: require an identifier after `<` (a JSX element), or skip type-annotation ranges.
+
+### g-engine-effect-opener-reads-invisible-to-dead-function-and-dg — reads inside an engine `effect=${…}` opener are invisible to `W-DEAD-FUNCTION` and `E-DG-002`; a `//` comment naming the symbol silences both — `NEW S441; LOW; open`
+<!-- @gap id=g-engine-effect-opener-reads-invisible-to-dead-function-and-dg sev=LOW status=open locus=compiler/src/route-inference.ts(markupReferencedNames — no engine-opener effect= carrier)+searched:compiler/src/dependency-graph.ts(E-DG-002 consumer set) prov=empirical:S441-audit-A-repo-readme-snippets-tasks-app -->
+Reproducer `repro/engine-effect-reads-invisible-to-dg.scrml`. A helper called only from `<engine … effect=${ @items = build(@seed) }>` gets `W-DEAD-FUNCTION` ("It will be tree-shaken from the output") and the seed cell gets `E-DG-002` ("declared but never consumed"). Both are false: client.js keeps the helper and the effect IIFE calls it with the cell. The README flagship `docs/readme-snippets/tasks-app.scrml` ships with exactly these false warnings (`loadTasks`, `@userId`, `@tasks`). Same walker blind spot as g-match-fncall-scrutinee-prunes-effect-chunk-dead-page (an opener attribute the reference walker does not visit); here the damage is diagnostic only. **Second, opposite facet (measured):** a `//` header comment that spells the helper's and the cell's names suppresses both warnings — the reference walkers read comment text, so a comment can mask a genuinely dead function or unused cell. The reproducer's header avoids the names for that reason. The E-DG-002 remediation advice ("remove the unused variable") is destructive when false.
+
+### g-page-db-and-ratelimit-attrs-sanctioned-but-inert — `<page db=… ratelimit=…>` are in SPEC's `<page>` attribute set but the compiler neither registers nor implements them — `NEW S441; MED; ruling-gated`
+<!-- @gap id=g-page-db-and-ratelimit-attrs-sanctioned-but-inert sev=MED status=ruling-gated locus=compiler/src/attribute-registry.js(ELEMENT_ATTR_REGISTRY.set("page") — omits db and ratelimit; registers route/title/class/id, which §4.15 forbids)+compiler/src/codegen/index.ts(annotateDbScopes reads `<program db=>` only) prov=empirical:S441-audit-A-repo-examples-23 -->
+Reproducer `repro/page-db-attr-w-attr-001.scrml`. `<page db="notes.db" ratelimit="100/min">` → `W-ATTR-001: Attribute \`db=\` is not recognized on \`<page>\`. It is currently forwarded to the rendered HTML as-is and has no compile-time effect` (same for `ratelimit=`), then a `?{}` in the page fails `E-SQL-004: a \`?{}\` SQL block has no \`db=\` declaration in any ancestor \`<program>\``. So the warning is **accurate** about the implementation: the page-level `db=` is inert (db scopes come only from `<program db=>` and `<db src=>`). The shipped `examples/23-trucking-dispatch` pages carry `<page db="../../dispatch.db">` and work only because each also declares `<db src=…>`; every one of them prints this warning.
+**Which is right — the SPEC sanctions it, but defines nothing.** §4.15 (SPEC.md:~1097) *"The allowed attribute set on `<page>` is exactly the five PER-ROUTE concerns — `db=`, `auth=`, `csrf=`, `ratelimit=`, `keep-alive`"*, restated at §40.8. S365 established that this set is a declaration-scope taxonomy (where an attribute may be written), not a behavioural rule (g-spec-silent-on-which-requests-ratelimit-counts). No sentence says what a page-level `db=` does — scope the page's `?{}`? override `<program db=>`? So the compiler is wrong to call a sanctioned attribute "not recognized", and the SPEC owes the semantics. Recommendation: specify `<page db=>` as the page's `?{}` scope (overriding `<program db=>`) and implement it — the example corpus already writes it that way — or strike `db=`/`ratelimit=` from the §4.15 set. Either way, register the attributes so the warning stops contradicting the SPEC.
+
+### g-decl-rhs-interp-wrapped-uncaught-outside-a-logic-block — `const <x> = ${ … }` at `<program>` (or `<page>`) top level reaches codegen and fails as a "compiler defect" — `NEW S441; MED; open`
+<!-- @gap id=g-decl-rhs-interp-wrapped-uncaught-outside-a-logic-block sev=MED status=open locus=compiler/src/ast-builder.js:~7918(E-DECL-RHS-INTERP-WRAPPED fires in tryParseStructuralDecl inside a `${ }` block only; the default-logic body path does not reach it) prov=empirical:S441-audit-B-site-reference-contexts-logic+keywords-lift -->
+Reproducer `repro/decl-rhs-interp-wrapped-top-level.scrml`: `const <label> = ${ "Clicked " + @count + " times" }` → exit 1, `E-CODEGEN-INVALID-LOGIC … const label = ; "Clicked " + …  This is a compiler defect`. S190 resolved this class with a user-level error, `E-DECL-RHS-INTERP-WRAPPED` (g-derived-rhs-interp-wrapped), but its tests (`cluster-c-decl-boundary.test.js`) put the declaration inside a `${ }` block; the v0.3 default-logic body — now the canonical position — is not covered, and a `<page>` root fails the same way. scrml.dev's reference pages (`contexts/logic`, `keywords/lift`) teach this shape. Governing: §34 E-DECL-RHS-INTERP-WRAPPED / §6.2 "RHS is a bare expression", and §2.2.1 (no "compiler defect" for a user error). Direction: fire the existing code from the default-logic declaration path.
+
+### g-match-arm-bare-identifier-binding-lowers-to-undefined — `match a { .User u :> … }` exits 0 and the whole match becomes `return (undefined)` — `NEW S441; HIGH; open`
+<!-- @gap id=g-match-arm-bare-identifier-binding-lowers-to-undefined sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts:2578(`(undefined) /* E-CG-003: match expression had no lowerable arms */` stub)+searched:compiler/src/expression-parser.ts(arm-pattern parse accepts `.Variant ident`) prov=empirical:S441-audit-C-articles-why-deprecate-overloading -->
+Reproducer `repro/match-arm-bare-binding-emits-undefined.scrml`. Emitted: `function _scrml_actorKey_2(a) { return (undefined) /* E-CG-003: match expression had no lowerable arms */; }` — E-CG-003 exists only as a JS comment; the build reports one `W-CG-UNDEFINED-INTERPOLATION` warning and exits 0. `.User u` is not scrml (§18.2: `variant-pattern ::= ('.' | '::') VariantName ('(' binding-list ')')?`), so the program should fail; instead every call returns undefined. Governing: §2.2.1 *"A codegen path that cannot lower a construct SHALL emit a hard diagnostic (e.g. `E-CG-003`) rather than a silent stub"*; §34 lists E-CG-003 as Error. A published dev.to article still uses this arm form. Direction: reject the pattern at parse with the §18.2 grammar in the message, and make the codegen stub a real E-CG-003 error.
+
+### g-flat-css-block-outside-component-emits-invalid-css — a flat `#{ padding: 16px; }` inside a plain element emits `@layer global { padding: 16px; }` and no inline style; inside `${ lift … }` it vanishes — `NEW S441; HIGH; open`
+<!-- @gap id=g-flat-css-block-outside-component-emits-invalid-css sev=HIGH status=open locus=searched:compiler/src/codegen/emit-css.ts(flat-declaration classification — the inline-style path is taken only in constructor scope; elsewhere the bare declarations fall into the global layer) prov=empirical:S441-audit-C-articles-css-without-build-step-k2+k2b -->
+Reproducer `repro/flat-css-block-outside-component.scrml`. Output `.css` ends `@layer global {\npadding: 16px;\n}` — a declaration with no selector, which browsers discard — and the HTML is a bare `<div>`. The article's own shape (the same block inside `${ lift <div>…</div> }`) puts `padding` in no output file at all. Exit 0, no diagnostic. Governing: §9.1 *"`#{}` inside a markup element applies styles at the element level (inline or scoped per compiler settings)"*; §65.4.1 *"an inline flat `#{}` on an element is an anonymous style-value applied once"*. §9.1's flat-to-inline sentence names only constructor scope, which is presumably how the plain-element case fell through.
+
+### g-cli-help-and-lint-text-stale — three shipped strings describe behaviour that changed: `--emit-per-route` "default-on at v0.3.0", `promote` "impl pending", Tailwind arbitrary values "not yet supported" — `NEW S441; LOW; open`
+<!-- @gap id=g-cli-help-and-lint-text-stale sev=LOW status=open locus=compiler/src/commands/compile.js(help text; default at :120)+compiler/src/cli.js:48(+the "Status: … implementation pending" line)+compiler/src/tailwind-classes.js:~3423 prov=empirical:S441-audit-A-repo-cli-help -->
+Reproducer `repro/cli-stale-help-strings.scrml` (header lists the commands). (1) `compile --help`: `--emit-per-route … (SPEC §40.9.7; opt-in during A-4 wave; default-on at v0.3.0 cut)`, but `compile.js:120` is `let emitPerRoute = false;` at version 0.8.0. (2) `scrml --help`: `scrml promote --match|--engine … (CLI surface; impl pending)` and `Status: CLI surface locked; AST→AST rewrite implementation pending.`, while `promote --help` lists `--match` (S66), `--engine` (S228) and `--each` (S134) as shipped; `--each` is missing from the top-level line. (3) `W-TAILWIND-UNRECOGNIZED-CLASS` says an arbitrary-value class like `grid-cols-[auto_1fr_auto]` is something *"scrml's built-in Tailwind engine does not yet support"* — the same compile emits `.grid-cols-\[auto_1fr_auto\] { grid-template-columns: auto 1fr auto }`. §26.5 scopes the lint to arbitrary values *"whose particular utility prefix is not yet supported"*. No SPEC sentence sets the `--emit-per-route` default (searched §40.9.7).
+
+### g-spec-39-8-describes-a-migrate-cli-and-artifacts-that-do-not-exist — §39.8's `scrml migrate` schema-apply CLI and its compile-time `.migration.sql/.json` artifacts are not what ships; `scrml migrate` is the source codemod — `NEW S441; MED; open`
+<!-- @gap id=g-spec-39-8-describes-a-migrate-cli-and-artifacts-that-do-not-exist sev=MED status=open locus=compiler/SPEC.md(§39.8, subsections numbered 38.8.1/38.8.2)+compiler/src/commands/db-migrate.js prov=empirical:S441-audit-nerdme-spec-drift -->
+Reproducer `repro/spec-39-8-migrate-cli-drift.scrml`. §39.8 says *"The compiler SHALL always regenerate `<db-path>.migration.sql` and `<db-path>.migration.json` when a `<schema>` block is present"*; compiling a `<schema>` program writes neither, and no `migration.sql` string exists in `compiler/src`. Its flag table (`scrml migrate`, `--dry`, `--check`, `--force`) describes a verb that is actually the deprecated-syntax codemod (`scrml migrate --help`: "Apply automated source rewrites…") — so a reader following §39.8 runs a source rewriter. The schema applier is `scrml db-migrate` with `--dry-run`, `--allow-destructive`, and no `--check`. The subsections are also numbered 38.8.x under 39.8. Direction: rewrite §39.8 around `db-migrate` and either implement or strike the artifact SHALL. SPEC text only — nothing here changes the compiler.
+
+### g-inline-onsubmit-block-omits-preventdefault — `onsubmit=${ … }` gets no `event.preventDefault()`, so the form natively submits and the page reloads; `onsubmit=fn()` gets it — `NEW S441; HIGH; ruling-gated`
+<!-- @gap id=g-inline-onsubmit-block-omits-preventdefault sev=HIGH status=ruling-gated locus=compiler/src/codegen/emit-event-wiring.ts:~1262(`preventLine` is added on the call-ref arm only; the inline-block arm builds the handler without it) prov=empirical:S441-onramp-k-bug-onsubmit-inline -->
+Reproducer `repro/inline-onsubmit-block-no-preventdefault.scrml`. Submit registry: `"_scrml_attr_onsubmit_1": function(event) { event.preventDefault(); _scrml_go_5(); }` versus `"_scrml_attr_onsubmit_3": function(event) { _scrml_cs_reactive_set("n", …); }`. In the onboarding login form (`onsubmit=${ @token = login(@email, @password) }`) the navigation cuts off the async server call, so login never completes. Exit 0, no diagnostic. **Governing-sentence gate:** searched §5.2.1, §5.2.3, §41.14.3 — no SPEC sentence says the compiler auto-prevents a submit (§5.2.1 describes the closure wrap only, and one SPEC example calls `event.preventDefault()` by hand). The auto-inject is compiler convention (`emit-event-wiring.ts` "For submit events on forms, auto-inject event.preventDefault()"), already relied on by G-EACH-MOUNT-FORM-SUBMIT-NO-PREVENTDEFAULT for the `<each>` path. The fix direction is not in doubt; the SPEC owes the sentence.
+
+### g-server-helper-env-secret-reaches-client-via-public-route — a server-escalated helper returning `process.env` values gets a public POST route and a client stub; an outside caller reads the secret (HTTP 200) — `NEW S441; HIGH (SECURITY); ruling-gated`
+<!-- @gap id=g-server-helper-env-secret-reaches-client-via-public-route sev=HIGH status=ruling-gated locus=compiler/src/route-inference.ts(every escalated function gets a `__ri_route_*`; Step 5c caller-context placement)+searched:compiler/src/egress-field-scan.ts(E-CG-006 does not follow a value returned across the route) prov=empirical:S441-onramp-k-bug-helper-route+r1121 -->
+Reproducer `repro/server-helper-returning-env-secret-gets-public-route.scrml`: `function secretConfig() { return { apiKey: process.env.API_SECRET } }`, called by a client-placed `keyLength()` → `secretConfig().apiKey.length`. server.js exports route `/_scrml/__ri_route_secretConfig_1` returning `{apiKey: process.env.API_SECRET}`; client.js has `return (await _scrml_fetch_secretConfig_4()).apiKey.length;`. **Executed** as an outside caller (its own double-submit cookie + matching `X-CSRF-Token`, body `{}`): **HTTP 200 `{"apiKey":"sk-live-TOPSECRET"}`**. The CSRF check does not help — it stops cross-site requests, not a direct one. The OAuth onboarding shape (`onramp/k/r1121.scrml`) is worse in reach: `oauthConfig()` (returns `googleConfig({ clientSecret: process.env.GOOGLE_CLIENT_SECRET, … })`, whose result carries `clientSecret`) and the storage helpers `kvPut/kvGet/kvDel` each get a public route although the client never calls them — only `googleSigninStart` is called from client code. So anyone can POST `kvPut` to write arbitrary Redis keys. (The `oauthConfig` route itself crashes when executed — `kvPut is not defined` server-side, a separate emission defect — so the secret did not leak on that path; the kv routes were not executed.)
+**Governing-sentence gate — the implementation follows the SPEC; this is design.** §12.5 *"Server-escalated functions MAY return values to the client. The compiler generates serialization on the server and deserialization on the client automatically."* §12.2 opens *"The compiler SHALL escalate a function to a server route if ANY of the following conditions is true"* — escalation is defined as getting a route — and Trigger 5 keeps a function with any client-classified caller client-side, so `keyLength` stays on the client and must fetch `secretConfig` across the wire. **For bryan:** (a) min-cut placement — move `keyLength` to the server when its only server-touching dependency returns env-derived data, so only the scalar crosses; (b) an egress rule — a value derived from `process.env` (or a server-only module) may not be returned across a route without an explicit declassification, the §14.8.9 `reveal` pattern applied to env; (c) route only what the client calls — a server function with no client-classified caller gets no public route. (c) is cheap and closes the kv/oauth reach; (b) closes the leak itself. Recommend (b)+(c).
+
+### g-retired-debounced-decorator-silently-dropped — the S79-deleted `@debounced(300) <x> = @q` form compiles and the declaration vanishes; a read inside an arrow body then reads an undeclared cell with no error — `NEW S441; HIGH; open`
+<!-- @gap id=g-retired-debounced-decorator-silently-dropped sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(the `@name(args) <decl>` statement is swallowed with no node),compiler/src/type-system.ts(E-STATE-UNDECLARED skips reads inside arrow bodies) prov=empirical:S441-onramp-k0-k43 -->
+Reproducer `repro/retired-debounced-decorator-silently-dropped.scrml`. The declaration is never emitted and gets no diagnostic of its own. With the only read inside an arrow body (the onboarding k43 shape, `words.filter(w => w.includes(@slow))`) the compile is exit 0 with zero diagnostics and client.js reads a cell nobody declares (`_scrml_cs_reactive_get("slow")` → `undefined`; k43's `.toLowerCase()` on it throws). With a direct read the build fails `E-STATE-UNDECLARED`, which names the wrong cause. Two defects: the swallowed statement, and E-STATE-UNDECLARED's blindness to arrow-body reads. Governing: §6.13 — `debounced=` *"Supersedes the pre-v0.next `@debounced(N) name = expr` keyword-form modifier surface (deleted at S79 …)"*; a deleted form must be rejected, not discarded. Direction: a named error pointing at `<x debounced=300ms> = …`.
+
+### g-worker-send-dropped-from-bare-program-body-fn — `<#w>.send(…)` is deleted from a function declared bare in the `<program>` body; the same function inside `${ }` keeps it — `NEW S441; HIGH; open`
+<!-- @gap id=g-worker-send-dropped-from-bare-program-body-fn sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(default-logic function-body statement parse — a `<#name>.send(…)` statement is read as markup and dropped)—not-traced prov=empirical:S441-onramp-k-bug-send-dropped-bare-fn -->
+Reproducer `repro/worker-send-dropped-from-bare-program-fn.scrml`: two identical functions, one bare, one in `${ }`. Emitted: `function _scrml_startBare_4() { _scrml_cs_reactive_set("busy", true); }` versus `… _scrml_worker_stats.send({n: _scrml_cs_reactive_get("n")}); }`. Exit 0, no diagnostic; the button sets busy and never sends. Governing: §43.5.2 *"`<#name>.send(data)` — send to nested program"*; §40.8 makes the bare `<program>` body default-logic, mode-equivalent to `${ }` (the wrapper is flagged W-PROGRAM-REDUNDANT-LOGIC, so the canonical form is the broken one). Even when sent, the message's reply is lost to g-worker-send-overwrites-the-when-message-handler, and the worker file is missing (g-nested-program-emits-artifacts-it-never-produces).
+
+### g-nested-program-local-collides-with-parent-cell — a `let total` inside a nested worker `<program>` fails `E-NAME-COLLIDES-STATE` against the PARENT's `<total>` — `NEW S441; MED; open`
+<!-- @gap id=g-nested-program-local-collides-with-parent-cell sev=MED status=open locus=searched:compiler/src/symbol-table(E-NAME-COLLIDES-STATE — the state-cell registry is file-wide, not per compilation unit) prov=empirical:S441-onramp-k-bug-worker-scope -->
+Reproducer `repro/nested-program-local-collides-with-parent-cell.scrml` → exit 1, `E-NAME-COLLIDES-STATE: local \`let total\` shadows registered state cell \`<total>\``, twice, stage SYM. Governing: §4.12.1 *"No lexical binding, reactive variable, or type declaration from the parent `<program>` SHALL be accessible inside a nested `<program>`"* and *"A nested `<program>` SHALL be a separate compilation unit"*; §43.3 shared-nothing. The parent's cell is not in the worker's scope, so there is nothing to shadow. Loud, on a supported form. Same missing boundary as g-nested-program-is-accepted-and-silently-flattened-into-the-parent, seen from the symbol table.
+
+### g-supervision-attrs-reject-unquoted-numbers — `max-restarts=3 within=60` on a nested `<program>` fails `E-SCOPE-001`, though §46.3's own example writes them unquoted — `NEW S441; MED; open`
+<!-- @gap id=g-supervision-attrs-reject-unquoted-numbers sev=MED status=open locus=compiler/src/type-system.ts(visitAttr bare-literal exemption — the S209 spec-typed structural-attr list does not include max-restarts/within) prov=empirical:S441-onramp-k-bug-worker-scope -->
+Reproducer `repro/supervision-attrs-unquoted-number-e-scope-001.scrml` → `E-SCOPE-001: Unquoted identifier \`3\` in attribute \`max-restarts\` … use \`@\` for a reactive variable (\`@3\`)?`, and the same for `within`. Quoting compiles. Governing: §46.3 shows `<program name="tracker" restart="on-error" max-restarts=3 within=60>`. Same class as the resolved G-BARE-LITERAL-ATTR-VALUE (S209 fixed it per attribute for `<poll>`/`<timer>`); these two attributes were not in that list. The suggestion `@3` is itself nonsense.
+
+### g-lin-binding-loses-call-return-type — `lin t = f()` types `t` as `asIs`, so `match t` fails `E-TYPE-025`; `let t = f()` compiles — `NEW S441; MED; open`
+<!-- @gap id=g-lin-binding-loses-call-return-type sev=MED status=open locus=searched:compiler/src/type-system.ts(lin-decl initializer typing — the declared `-> T` call return is not propagated as it is for let/const) prov=empirical:S441-onramp-lin-m1 -->
+Reproducer `repro/lin-binding-loses-call-return-type.scrml` (`function nextTicket() -> Ticket`, `lin ticket = nextTicket()`, `return match ticket {…}`) → exit 1, `E-TYPE-025: Cannot match on \`asIs\`-typed subject`. Changing `lin` to `let` compiles clean. Governing: §18.12 *"Matching a `lin` variable is a consumption event. The expression `match token { ... }` consumes `token`."* — matching a lin binding is the specified use, and the E-TYPE-025 advice (annotate with `let x: T`) steers the user away from `lin`.
+
+### g-protected-column-escapes-redaction-as-scalar — `return u.passwordHash` ships the protected value: the tag lives on the row, the returned string is untagged, and I-PROTECT-STRIP-001 says it was stripped — `NEW S441; HIGH (SECURITY); open`
+<!-- @gap id=g-protected-column-escapes-redaction-as-scalar sev=HIGH status=open locus=searched:compiler/src/codegen/emit-server.ts(`_scrml_protect_tag(row, [cols])` + `_scrml_protect_redact` — provenance is carried by the row object, so a member read off it escapes)—agent-located-verify prov=empirical:S441-site-fix-fork-p-S9g -->
+Reproducer `repro/site-protected-column-escapes-redaction-as-scalar.scrml`. server.js: `const u = _scrml_protect_tag((await _scrml_sql\`SELECT passwordHash FROM users WHERE id = 1\`)[0] ?? null, ["passwordHash"]); return u.passwordHash;`. The build reports `I-PROTECT-STRIP-001: the egress floor strips protected column(s) \`passwordHash\`…` — false. **Executed** with a seeded row, an authenticated session and a valid CSRF token: the handler returns **HTTP 200, body `"SECRET-HASH-123"`**. Governing: §14.8.9 — every client-egress serializer *"SHALL strip, by construction, every column whose provenance origin is a `protect=` field … keys on the column's resolved source `(table, column)` origin … sound by construction"*. Not sound: provenance does not survive a member read. (The missing named-SELECT diagnostic the site probe also reported is by design — §14.8.7 defers it; this scalar path is the hole.) Related: G-PROTECT-TAG-TOJSON-HOOK-DROPPED-BY-OBJECT-SPREAD (same tag-on-the-container mechanism); G-SQL-ROW-PROTECT-LEAK (S175) is the pre-floor ancestor.
+
+### g-validationerror-match-never-matches — `match` over the `ValidationError` values in `@form.errors` never matches: the runtime builds `{tag:…}` objects, the arms compare a string or read `.variant` — `NEW S441; HIGH; open`
+<!-- @gap id=g-validationerror-match-never-matches sev=HIGH status=open locus=searched:compiler/src/codegen/emit-control-flow.ts(match lowering for the built-in ValidationError enum)+the runtime `_scrml_validator_fire` error shape—agent-located-verify prov=empirical:S441-site-fix-p-v5b-v5d -->
+Reproducer `repro/site-validationerror-match-never-matches.scrml`. The runtime builds `{tag:"Required"}`; tag-only arms lower to `=== "Required"` (object vs string) and payload arms read `.variant` (the runtime writes `.tag`) and emit `cannot positionally bind 'p'`. **Executed** over three real error objects: both forms give `["email-other" ×3]` — every error falls through to `else`. Exit 0. Governing: §55.9 *"`@signup.errors` arrays contain these enum values. Render via `messageFor` (§55.10) or via `match` over `ValidationError`"*. The unbound-payload half is the missing field-order table of g-tool-context-match-loses-enum-field-order, here for a built-in enum.
+
+### g-nested-for-lift-inserts-a-wrapper-div — REGRESSION: a nested `${ for … lift }` inside a lifted element now wraps the inner list in a `<div>`, changing the emitted DOM (`.code-line > span` stops matching) — `NEW S441; HIGH; open`
+<!-- @gap id=g-nested-for-lift-inserts-a-wrapper-div sev=HIGH status=open locus=compiler/src/codegen/emit-lift.js(emitForStmtWithContainer — the `_scrml_list_wrapper` element added by 52585b257, #197) prov=empirical:S441-site-fix-p-nest+pin-50478f0e-vs-current -->
+Reproducer `repro/site-nested-for-lift-inserts-wrapper-div.scrml`. Current output creates a `_scrml_list_wrapper` `<div>` and appends it to the lifted element (9 `list_wrapper` references in the reproducer's client.js); the site's pinned build (`50478f0e`) appended the spans directly, with zero nested wrappers. scrml.dev's code-showcase CSS (`.code-line > span`) breaks. Introduced by `52585b257` "fix(lift): nested for-lift re-reconciles inner list on outer cell REPLACE (#197)". Governing: §10.6 *"A `lift` call inside a nested `${}` block SHALL append to the nearest enclosing element created by the outer `lift`"*; §10.8 *"…SHALL append to that element's children list"*. Silent structural change to existing programs' DOM. Direction: keep #197's re-reconcile but anchor the inner list with a comment-node range, not an element.
+
+### g-top-level-cell-validators-emit-no-validity-surface — `<amount gt(0)> = -5` / `<nm req length(>=2)> = ""` at top level get no validity surface; `@amount.isValid` lowers to `(-5).isValid` — `NEW S441; HIGH; open`
+<!-- @gap id=g-top-level-cell-validators-emit-no-validity-surface sev=HIGH status=open locus=searched:compiler/src/codegen(validity-surface synthesis walks compound children only)—agent-located-verify prov=empirical:S441-site-fix-p-issome-S3b -->
+Reproducer `repro/site-top-level-cell-validators-no-validity-surface.scrml`. No `_scrml_validator_fire`, no `.errors`/`.isValid` for a top-level validated cell; `@amount.isValid` emits `(-5).isValid` → `undefined`, so any gate on it is silently open. The same cell as a compound child gets `derived_declare("form1.amount.errors", …)`. Governing: §55.1 *"Validators on Shape-1 plain cells and Shape-2 form-coupled cells fire identically"*. (The narrower site claim — "not checked even on the initial value" — is by design: §55.1 validators are a reactive gate, not an initializer check.)
+
+### g-function-after-state-type-instance-dropped — a `function` declared after a `<Card> @cards` state-type instance line is emitted to neither bundle; the click wiring still calls it — `NEW S441; HIGH; open`
+<!-- @gap id=g-function-after-state-type-instance-dropped sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(the `<T> @x` instance line over-consumes the following declaration)—agent-located-verify prov=empirical:S441-site-fix-fork-p-cas-a -->
+Reproducer `repro/site-function-after-state-type-instance-dropped.scrml`. Exit 0; the function (with its `UPDATE cards`) is in neither client.js nor server.js, but the click handler still calls bare `renameCard(c.id, "x")` → ReferenceError on click. Moving the function above the instance line fixes it; called from an inline `${}` handler the drop surfaces as a misleading E-SCOPE-001. Governing: §52.3.5's "Valid" worked example declares `<Card> @cards` / `<EditState> @ui` and then `function createCard(…)` in the same `${}` — the SPEC's own shape.
+
+### g-helper-called-in-sql-interpolation-not-emitted-server-side — a helper used only inside a `?{…${helper(x)}…}` interpolation is left out of server.js (the route throws ReferenceError) and gets a false W-DEAD-FUNCTION — `NEW S441; HIGH; open`
+<!-- @gap id=g-helper-called-in-sql-interpolation-not-emitted-server-side sev=HIGH status=open locus=searched:compiler/src/codegen/rewrite.ts:~387(SQL interpolation captured as raw text — same class as the resolved g-session-not-rewritten-inside-sql-interpolation),compiler/src/route-inference.ts(caller scan)—agent-located-verify prov=empirical:S441-site-fix-fork-p-S9b -->
+Reproducer `repro/site-helper-in-sql-interpolation-missing-server-side.scrml`. server.js interpolates `${norm(name)}` with no `norm` defined (it is only in client.js). **Executed** with a valid CSRF pair: `ReferenceError: norm is not defined` — every call fails. Governing: §12.2 Trigger 5 — a function *"called only from server-classified callers … SHALL escalate to server by inheritance"*; the SQL interpolation is a server-classified call site.
+
+### g-server-param-length-predicate-unenforced — a server-function parameter typed `string(.length > 2)` gets no boundary guard; `number(>0 && <100)` and `string(email)` do — `NEW S441; HIGH; open`
+<!-- @gap id=g-server-param-length-predicate-unenforced sev=HIGH status=open locus=searched:compiler/src/codegen/emit-server.ts(E-CONTRACT-001-RT boundary-guard emitter — `.member` predicates skipped)—agent-located-verify prov=empirical:S441-site-fix-fork-p-S9c -->
+Reproducer `repro/site-server-param-length-predicate-unenforced.scrml`: server.js carries the `E-CONTRACT-001-RT` guard for the `qty` parameter only. Governing: §53.9.4 *"Inline predicate constraints on server function parameters SHALL be enforced at the server boundary … cannot be bypassed by raw HTTP requests."* A raw request with a 1-character value reaches the body. (The broad site claim "parameter predicates are not enforced" did not reproduce; the `.length` form did.)
+
+### g-is-some-cell-validator-drops-the-declaration — `<mid is some> = ""` (a §55.1 validator) never registers the cell; the reads then fail E-SCOPE-001 / E-STATE-UNDECLARED — `NEW S441; MED; open`
+<!-- @gap id=g-is-some-cell-validator-drops-the-declaration sev=MED status=open locus=searched:compiler/src/ast-builder.js(structural-decl lookahead — the two-token `is some` validator)—agent-located-verify prov=empirical:S441-site-fix-p-issome -->
+Reproducer `repro/site-is-some-cell-validator-drops-decl.scrml`. No diagnostic at the declaration; every read blames the read site. Same with `<mid: string is some>`. Governing: §55.1's validator table lists `is some` (example `<x is some>`, error `.NotSome`).
+
+### g-reflect-in-for-of-header-not-rewritten — `for (const f of reflect(Signup).fields)` in `^{}` fails `E-META-EVAL-001: Signup is not defined`; `const info = reflect(Signup)` works — `NEW S441; MED; open`
+<!-- @gap id=g-reflect-in-for-of-header-not-rewritten sev=MED status=open locus=searched:compiler/src/meta-eval.ts(rewriteReflectCalls not applied to a for-of iterable)—agent-located-verify prov=empirical:S441-site-fix-p-mt2-mt3 -->
+Reproducer `repro/site-reflect-in-for-of-header-not-rewritten.scrml`. Governing: §22.4.2 *"The programmer always writes `reflect(expr)` regardless of whether the argument is known at compile time"* — the call position must not matter.
+
+### g-pre-body-line-starting-match-parsed-as-code — a `<pre>` line beginning `match @phase {` fails `E-TYPE-026` — `NEW S441; MED; open`
+<!-- @gap id=g-pre-body-line-starting-match-parsed-as-code sev=MED status=open locus=compiler/src/type-system.ts:~10109(the E-TYPE-026 regex scans raw-content text too)—root-shared-with-g-e-type-026-text-regex-rejects-prose-and-teaches-arrow-arms prov=empirical:S441-site-fix-p-S6a -->
+Reproducer `repro/site-pre-body-line-starting-match-parsed-as-code.scrml`. Governing: §4.17 — for a raw-content element *"the block splitter SHALL scan the body as a single text run terminated only by the matching close tag"*; a later TS-stage regex re-reads that text as code. Same regex as the prose case (g-e-type-026-text-regex-rejects-prose-and-teaches-arrow-arms); filed separately because §4.17 makes this one a hard contract.
+
+### g-slash-between-inline-elements-read-as-bare-closer — `<b>x</b>/<b>y</b>` in prose fails `E-SYNTAX-050` (legacy bare-`/` closer) — `NEW S441; MED; ruling-gated`
+<!-- @gap id=g-slash-between-inline-elements-read-as-bare-closer sev=MED status=ruling-gated locus=compiler/src/block-splitter.js(looksLikeCloser — a `/` before a new opener still fires, kept deliberately by the S177 bug-4 fix) prov=empirical:S441-site-fix-p-S6b -->
+Reproducer `repro/site-slash-between-inline-elements-bare-closer.scrml`: `<p>read <b>x</b>/<b>y</b> here</p>` and `<code>a</code>/<code>b</code>` fail; inside `<pre>` it compiles. Appendix E says both *"The bare `/` no longer has syntactic significance as a block delimiter"* and that legacy bare-`/` closers *"SHALL be rejected"* — which wins for a `/` that is plainly text between two elements is a ruling. Recommendation: text (reject only a `/` standing alone as a closer).
+
+### g-decl-if-expression-initializer-reaches-codegen — `const <message> = if (…) { lift … } else …` emits `derived_declare("message", () => if (…)` and fails `E-CODEGEN-INVALID-LOGIC` — `NEW S441; MED; ruling-gated`
+<!-- @gap id=g-decl-if-expression-initializer-reaches-codegen sev=MED status=ruling-gated locus=searched:compiler/src/codegen(derived-cell RHS lowering of an if-expression) prov=empirical:S441-site-fix-p-lf3 -->
+From the scrml.dev reference pages (site-fix probe `lf3`). §17.6.3 names only `const`/`let` as if-as-expression binding sites, so whether a derived cell may bind one needs a ruling; either way the answer must be a user-level diagnostic or a lowering, not a "compiler defect" (§2.2.1). Sibling (different root) of g-decl-rhs-interp-wrapped-uncaught-outside-a-logic-block. The site's third shape — `if (@phase == .Error msg)` (probe `imp2`) — also reaches codegen (`=== "Error" msg )`) and is the loud twin of g-match-arm-bare-identifier-binding-lowers-to-undefined: §18.17 *"No payload is bound"* by `is`/`==`, so the parser should reject the bare binding.
+
+### g-e-route-003-misses-inferred-return-type — a server function whose inferred return is a function (`return () => r`) compiles clean and the client receives `null` — `NEW S441; MED; open`
+<!-- @gap id=g-e-route-003-misses-inferred-return-type sev=MED status=open locus=searched:compiler/src/type-system.ts:~4831-5036(E-ROUTE-003 reads only the declared return type)—agent-located-verify prov=empirical:S441-site-fix-fork-p-S9d -->
+Reproducer `repro/site-e-route-003-misses-inferred-function-return.scrml`: exit 0; `JSON.stringify` turns the function into `null`. Governing: §12.5.3 *"If absent, the compiler infers the return type from the body."* and *"Return types that are not JSON-serializable SHALL be a compile error (E-ROUTE-003 …)"*. (That it fires when the type is declared is the site agent's claim, not re-run here.)
+
+### g-build-truncates-warning-messages-at-120-chars — `scrml build` cuts every warning at 120 characters, so fix-it text never prints — `NEW S441; LOW; open`
+<!-- @gap id=g-build-truncates-warning-messages-at-120-chars sev=LOW status=open locus=compiler/src/commands/build.js:1002(`w.message.slice(0, 120)`) prov=empirical:S441-site-fix-S8 -->
+Reproducer `repro/site-build-truncates-warning-messages.scrml`: `W-PROGRAM-SPA-INFERRED` ends mid-word. `compile` prints full messages. No SPEC sentence (CLI formatting).
+
+### g-state-block-body-decl-and-function-silently-dropped — a cell declaration and a `function` written directly in a `<db>` body are dropped, along with the markup after them, exit 0 — `NEW S441; HIGH; open`
+<!-- @gap id=g-state-block-body-decl-and-function-silently-dropped sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(state-block body handling — the scanStateBlockBareWriteDecls domain; `<count> = 7` is likely read as an unclosed markup opener)—agent-located-verify prov=empirical:S441-tutorial-fix-06-failable -->
+Reproducer `repro/tut-db-body-decls-silently-dropped.scrml`. `<count> = 7` and a `function` written directly inside a `<db>` body: exit 0, zero diagnostics. The HTML body holds only the two `<script>` tags, client.js contains neither the cell nor the function, and the `<button>`/`<p>` that follow are gone. Control: the same body wrapped in `${ }` emits everything. A lone `function …{}` line is instead emitted as literal page text. `W-STATE-BLOCK-BARE-WRITE-DECL` catches only `@x = init`. The old tutorial 06-failable passed CI this way as an empty app. Governing: §34 E-STATE-BLOCK-STATEMENT-FORM — *"A state-block body is markup context, NOT a `default-logic` locus (§4.18.1)"* — and S375 ruling 1 (logic at a state-block locus is refused, recorded on g-state-block-statement-form-misses-a-wrapped-statement). This form should be refused; it is discarded.
+
+### g-component-at-prop-read-unchecked-when-lifted — `@prop` inside a component body compiles clean when the component is `lift`ed, then throws at runtime — `NEW S441; HIGH; open`
+<!-- @gap id=g-component-at-prop-read-unchecked-when-lifted sev=HIGH status=open locus=searched:compiler/src/type-system.ts(read-side E-STATE-UNDECLARED — component bodies expanded inside `lift` are not checked)—agent-located-verify prov=empirical:S441-tutorial-fix-T2 -->
+Reproducer `repro/tut-component-prop-at-read-in-lift-throws.scrml`. A component reading its prop as `@item.body`, `lift`ed from a `for`: exit 0; client.js `_scrml_lift_tn_10.textContent = String((_scrml_cs_reactive_get("item").body) ?? "");`. **Executed** (happy-dom): `TypeError: undefined is not an object (evaluating '_scrml_cs_reactive_get("item").body')`, and the `<ul>` stays empty. The same component used directly (`<TodoRow item=@one/>`) fails loud with E-STATE-UNDECLARED, so only the lift path is silent. Governing: §15 — *"Props declared via `props` are in scope throughout the entire component body"*, read by bare name (the §15 example `${name}`). A residual of the resolved Bug 12.a (g-readside-undeclared-postce).
+
+### g-match-arm-lift-skips-render-by-tag-and-lands-outside-host — a multi-line `lift` of a form in a JS-style `match` arm emits raw `<name>`/`<errors of="null">` elements, no submit binding, outside its host — `NEW S441; HIGH; open`
+<!-- @gap id=g-match-arm-lift-skips-render-by-tag-and-lands-outside-host sev=HIGH status=open locus=searched:compiler/src/codegen/emit-lift.js,compiler/src/codegen/emit-control-flow.ts(lift inside a value-`match` arm — render-by-tag / `<errors of=>` expansion and the mount anchor are skipped)—agent-located-verify prov=empirical:S441-tutorial-fix-T3 -->
+Reproducer `repro/tut-match-lift-multiline-form-garbage-dom.scrml`. **Executed** (happy-dom) body: `<div class="host"> <span data-scrml-logic=…></span> </div> <form><label>Name<name></name><errors of="null"></errors></label><label>Email<email></email></label><button type="submit">Go</button></form>` — decl-coupled fields render as unknown `<name>`/`<email>` elements instead of inputs, the errors anchor is `of="null"`, there is no onsubmit binding, the space after "Name" is lost, and the form lands after the host div. The block-form `<match>` control renders correct inputs, errors anchor and binding inside `.host`. Exit 0, no diagnostic. Governing: §17.6.10's lift-equivalence (a lifted fragment renders as the same markup in place) and the §55 / §41.14 render-by-tag expansion the block form performs. The single-line whitespace half (`lift <p>Got ${n} rows.</p>` → `Got42rows.`) is g-ast-markup-text-interp-adjacent-space-dropped.
+
+### g-compound-opener-trailing-line-comment-breaks-compound — a trailing `// comment` on a compound-state opener line (`<form1>   // fields`) fails `E-MARKUP-001` + `E-STATE-UNDECLARED` — `NEW S441; MED; open`
+<!-- @gap id=g-compound-opener-trailing-line-comment-breaks-compound sev=MED status=open locus=searched:compiler/src/block-splitter.js(compound-opener recognition does not skip a trailing line comment)—agent-located-verify prov=empirical:S441-tutorial-fix-T5 -->
+Reproducer `repro/tut-compound-opener-trailing-comment.scrml` → exit 1, `E-MARKUP-001: <form1> is not a known HTML element…` plus E-STATE-UNDECLARED on `@form1`. The comment on its own line above the opener compiles. Governing: §27.1 *"`//` is a single-line comment. It is valid in all scrml contexts."* Related to, but a different symptom from, g-line-comment-truncates-the-rest-of-a-default-logic-body.
+
+### g-e-type-026-text-regex-rejects-prose-and-teaches-arrow-arms — a `<p>` whose text line starts with "match " fails `E-TYPE-026`, and the fix-it shows the deprecated `=>` arm separator — `NEW S441; MED; open`
+<!-- @gap id=g-e-type-026-text-regex-rejects-prose-and-teaches-arrow-arms sev=MED status=open locus=compiler/src/type-system.ts:~10109(regex `/(?:^|\n)\s*(?:partial\s+)?match\s+/` over markup text; message ~10113) prov=empirical:S441-tutorial-fix-T6a -->
+Reproducer `repro/tut-e-type-026-prose-and-stale-arrow.scrml`: `<p>` containing the prose line `match starts at noon` → exit 1, E-TYPE-026. The message's suggested fix is `${ match subject { .A => <p>a</> else => <p>b</> } }` — the `=>` separator §18.2 deprecates (*"New code SHALL use `:>`"*). Governing: §4.18.1 free-text mode — *"A bare run is display text"*. Probably the same regex as the site-fix finding that a `<pre>` line starting with "match" parses as code.
+
+### g-component-prop-type-not-checked-at-call-site — `<Badge count="five"/>` against `props={ count: number }` compiles exit 0; `count=true` reports `E-SCOPE-001` instead of `E-TYPE-031` — `NEW S441; MED; open`
+<!-- @gap id=g-component-prop-type-not-checked-at-call-site sev=MED status=open locus=searched:compiler/src/type-system.ts(component call-site checks — E-COMPONENT-010/011 fire, no assignability check)—agent-located-verify prov=empirical:S441-tutorial-fix-T6c -->
+Reproducer `repro/tut-component-prop-type-unchecked.scrml`. `count="five"` renders `<span data-scrml="Badge" count="five">five </span>`, no diagnostic; `count=true` gives `E-SCOPE-001: Unquoted identifier true…`. Governing: §15 — *"Prop types SHALL be verified at the call site. A prop value that is not assignable to the declared prop type SHALL be a compile error (E-TYPE-031)."* (The census on g-e-type-031-is-blind-to-boolean-literals lists component props as unspecified; §15 does specify them.)
+
+### g-e-type-041-misses-reactive-cells — `<name>: string = not` and `@name = not` compile clean; only a `let`/`const` initializer fires `E-TYPE-041` — `NEW S441; MED; open`
+<!-- @gap id=g-e-type-041-misses-reactive-cells sev=MED status=open locus=compiler/src/type-system.ts:~11000(E-TYPE-041 checks only a let/const initializer's raw text) prov=empirical:S441-tutorial-fix-T8 -->
+Reproducer `repro/tut-e-type-041-cell-not-assign.scrml`: both forms exit 0 with zero diagnostics, emitting `_scrml_cs_reactive_set("name", null);`. Control: `${ let x: string = not }` fires E-TYPE-041. Governing: §42.3.1 (`${ let x: string = not }  // compile error E-TYPE-041`) and the §34 row (SPEC.md:~21095) *"`not` … assigned to a variable of non-optional type `T`. `not` is only assignable to `T | not` optional types."* — a typed cell is such a variable.
+
+### g-spec-6-5-1-dq-2-paragraph-contradicts-its-normative-rule — §6.5.1 still says array mutators "do NOT trigger reactivity" beside the rule that they do — `NEW S441; LOW; open`
+<!-- @gap id=g-spec-6-5-1-dq-2-paragraph-contradicts-its-normative-rule sev=LOW status=open locus=compiler/SPEC.md(§6.5.1 ~L2527 DQ-2 paragraph vs ~L2536 rewrite rule) prov=empirical:S441-tutorial-fix-T7 -->
+Reproducer `repro/tut-spec-6-5-1-push-reactivity.scrml`. SPEC.md ~L2527: *"Array mutation methods (`.push()`, `.splice()`, `.pop()`, etc.) do NOT trigger reactivity on their own."* The same subsection, ~L2536: the compiler *"SHALL rewrite the call to: 1. Clone … 3. Write the clone back to `@name` via `_scrml_reactive_set`, which triggers all subscribers."* The §6.5 header note and §66.11 call the DQ-2 paragraph superseded, but it is still inline and unstruck. **Executed:** the page shows 1 before a click and 2 after — push does update (emitted in place, no clone, which is g-cell-mutators-skip-clone-then-write-back). SPEC text only: strike the DQ-2 paragraph.
+
+### g-ontransition-body-keeps-only-first-statement — an `<onTransition>` body `${ @a = …; @b = … }` emits only the first statement, exit 0 — `NEW S441; HIGH; open`
+<!-- @gap id=g-ontransition-body-keeps-only-first-statement sev=HIGH status=open locus=searched:compiler/src/codegen/emit-engine.ts(onTransition body lowering)—not-traced prov=empirical:S441-cell12-review-s1b-ontrans3 -->
+Reproducer `repro/ontransition-body-keeps-only-first-statement.scrml`. The transition hook contains `_scrml_cs_reactive_set("score", _scrml_cs_reactive_get("score") + 5);` and nothing else — the `@seen = "t:" + @score` write is gone. No diagnostic. Governing: §51 `<onTransition>` bodies are logic bodies; §2.2.1's companion principle (no silent stub) — no sentence permits truncation.
+
+### g-error-handler-in-inline-handler-or-arrow-emits-raw-bang-brace — `onclick=${@out = risky(2) !{…}}` and a `!{}` inside a `const g = () => {…}` arrow reach the emit as raw `!{` — `NEW S441; MED; open`
+<!-- @gap id=g-error-handler-in-inline-handler-or-arrow-emits-raw-bang-brace sev=MED status=open locus=searched:compiler/src/codegen/emit-event-wiring.ts(inline-handler body),compiler/src/codegen(arrow-body statements — `!{}` handler lowering applied to `function` bodies only)—not-traced prov=empirical:S441-cell12-review-s7-finline+farrowconst -->
+Reproducer `repro/error-handler-in-inline-handler-leaks-raw-bang-brace.scrml`. With the emit gate off (`--no-validate-emit`) the output shows both leaks: `_scrml_reactive_set("out", _scrml_risky_5 ( 2 ) !{` (arrow) and `"_scrml_attr_onclick_1": function(event) { _scrml_reactive_set("out", _scrml_risky_5(2) !{ | { variant: "Boom", … } :> 0 }); }` (inline). **On `cf62b4154` with the default gate the build fails loud** — `E-CODEGEN-INVALID-LOGIC … This is a compiler defect`, no artifacts — so the review's "no compile error, SyntaxError kills the page" holds only with the gate disabled; filed MED (loud "compiler defect" on a supported form), not HIGH. Governing: §19 `expr !{ | .V :> … }` — the same statement lowers correctly inside a named `function`; §2.2.1 (a user construct must not surface as a compiler defect). Same family as g-server-call-in-inline-handler-condition-unawaited / g-onmount-and-inline-handler-bodies-skip-the-language-checks: inline and arrow bodies do not get the function-body statement pipeline.
+
+### g-error-handler-in-when-body-dropped — a `!{}` handler on a cell assignment inside `when @x changes { … }` is dropped with only a "statement boundary not detected" warning; the error envelope lands in the cell — `NEW S441; MED; open`
+<!-- @gap id=g-error-handler-in-when-body-dropped sev=MED status=open locus=searched:compiler/src/codegen(when-handler body statement split — `!{` is not a recognised continuation)—not-traced prov=empirical:S441-cell12-review-s7-fwhen -->
+Reproducer `repro/error-handler-in-when-body-dropped.scrml`. Build: exit 0 with `[scrml] warning: statement boundary not detected — trailing content would be silently dropped: "!{ | .Boom(m) :> …"`. client.js: `_scrml_cs_reactive_set("out", _scrml_risky_3(_scrml_cs_reactive_get("n")))` — no handler, so a failure writes the `{__scrml_error…}` envelope into a `number` cell. Governing: §19 handler semantics, as lowered in a `function` body. The warning is not in `result.warnings` form (no code), so tooling cannot see it.
+
+### g-derived-cell-rhs-server-call-renders-promise — `const <d> = qtyOf(@n)` where `qtyOf` runs `?{}` renders `[object Promise]`, exit 0 — `NEW S441; HIGH; ruling-gated`
+<!-- @gap id=g-derived-cell-rhs-server-call-renders-promise sev=HIGH status=ruling-gated locus=compiler/src/route-inference.ts(§6.6.19 E-DERIVED-SERVER-ONLY-REACH fires for Trigger-3 imports only; a Trigger-1 server-escalated function reached from a derived RHS is not checked) prov=empirical:S441-cell12-review-R5 -->
+Reproducer `repro/derived-cell-server-call-renders-promise.scrml`. client.js: `_scrml_cs_derived_declare("d", () => _scrml_fetch_qtyOf_3(_scrml_cs_reactive_get("n")));` — the derived value is the pending fetch Promise. No diagnostic. **Governing-sentence gate:** §6.6.19's normative SHALL covers only a reach into a Trigger-3 server-only *import*. Its rationale covers this case exactly — *"A derived cell is a **synchronous** reactive recompute … Escalating its RHS would make every recompute a server round trip — asynchronous — which the derived model has no way to express … The compiler therefore **refuses** rather than relocating"* — but no SHALL extends it to a function escalated by Trigger 1 (`?{}`) or Trigger 5. The unlanded derived-transitive arc (g-derived-server-only-reach-transitive-still-writes-the-promise-bundle) is the planned extension; g-5c-caller-context-promotes-a-derived-read-helper-to-the-server is the same Promise-in-a-derived-cell symptom from caller-context placement. Recommendation: extend the §6.6.19 SHALL to any server-placed callee.
+
+### g-top-level-fail-emits-script-level-return — `fail .X` outside any function compiles and emits a top-level `return {…}`, which kills the page script — `NEW S441; HIGH; open`
+<!-- @gap id=g-top-level-fail-emits-script-level-return sev=HIGH status=open locus=searched:compiler/src/type-system.ts(E-ERROR-* checks assume an enclosing `!` function),compiler/src/codegen/validate-emit.ts(the parse gate accepts a top-level `return`)—not-traced prov=empirical:S441-fail-shorthand-review-p20 -->
+Reproducer `repro/top-level-fail-emits-module-return.scrml`. client.js at script top level: `return { __scrml_error: true, type: "", variant: "X", data: null };` (`type:""` — there is no function error type). A top-level `return` in a classic `<script>` is a SyntaxError in the browser, so nothing on the page runs; the emitted-JS parse gate does not catch it (and `node --check`, CommonJS-wrapped, also accepts it). The review filed this MED; it is HIGH because the page is dead at exit 0. Governing: §19 — `fail` produces the error of the enclosing `!` function; outside one it has no meaning and needs a diagnostic. §2.2.1 (the gate SHALL catch unparseable output — this output is unparseable as a script).
+
+### g-fail-in-arrow-or-statement-match-arm-not-lowered — `fail` inside an arrow body or a statement-position `match` arm is emitted as the identifier `fail` and never validated — `NEW S441; HIGH; open`
+<!-- @gap id=g-fail-in-arrow-or-statement-match-arm-not-lowered sev=HIGH status=open locus=searched:compiler/src/codegen(fail lowering walks function-body statements only),compiler/src/type-system.ts(E-ERROR-009 walk)—not-traced prov=empirical:S441-fail-shorthand-review-p06-p19-p21 -->
+Reproducer `repro/fail-in-arrow-or-match-arm-not-lowered.scrml`. Exit 0; client.js `[1].forEach(( v ) => { fail.X });` and `if (_scrml_match_5 === "a") return fail.X; else return fail.Nope;` — a ReferenceError when reached, and `.Nope` (not a variant of `A`) is never checked. The qualified `fail A.X` in an arrow instead fails `E-CODEGEN-INVALID-LOGIC` ("compiler defect"). The canonical `return match n { … :> fail … }` IS validated. Governing: §19 `fail` semantics + §34 E-ERROR-009 (a `fail` must name a variant of the declared error type). Whether `fail` may propagate out of an arrow at all is a design question; either way it must not emit a bare identifier.
+
+### g-fail-in-expression-position-miscompiles — `n == 1 && fail A.X` emits `n === 1 &&;` then an unconditional `return {error}`; `c ? fail .X : 2` reports "Undeclared identifier `fail`" — `NEW S441; MED; open`
+<!-- @gap id=g-fail-in-expression-position-miscompiles sev=MED status=open locus=searched:compiler/src/ast-builder.js(`fail` recognised only in statement position; the `&&` RHS is split into a separate fail statement) prov=empirical:S441-fail-shorthand-review-r8Fq -->
+Reproducer `repro/fail-in-expression-position.scrml`. With the default gate the build fails (`E-SCOPE-001: Undeclared identifier \`fail\`` for the ternary; the `&&` form alone gives `E-CODEGEN-INVALID-LOGIC`, "compiler defect"). With `--no-validate-emit` the `&&` form shows `n === 1 &&;` followed by `return { __scrml_error: true, type: "A", variant: "X", data: null };` — unconditional: had it parsed, every call would fail. Loud on main (the review's "no diagnostic" needs the gate off), hence MED. Governing: §19 — `fail` is a statement; an expression-position `fail` needs a user-level diagnostic naming that rule (§2.2.1: not a compiler defect, not a scope error).
+
+### g-nested-failable-function-body-dropped — a nested `function inner(k) ! B { … }` loses its body (`function inner(k) {}` + a stray `B;`); the `! -> B` spelling loses its error type — `NEW S441; HIGH; open`
+<!-- @gap id=g-nested-failable-function-body-dropped sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(nested function-decl header parse — the `! B` error-type clause is not consumed, so the body split lands on `B`)—not-traced prov=empirical:S441-fail-shorthand-review-n21-n12-n32-p04 -->
+Reproducer `repro/nested-failable-function-body-dropped.scrml`: exit 0, client.js `function inner(k) {\n}` then `B;` — the `if (k == 1) fail .Z` body is gone, and the caller's `inner(1) !{…}` handler never sees an error. Variants (probes `rv-fail-out/p/`): `! -> B` → `E-ERROR-009: 'fail' names variant 'B.Z' which is not a valid variant of the declared error type 'Error' for function 'inner'. Valid variants: Generic.` (n12/n32); p04 → a false E-ERROR-009 on the OUTER function's valid `fail .X`. Governing: §19 `!` functions; nested function declarations are ordinary declarations (§6/§48) — nothing restricts a nested function from being failable.
+
+### g-error-type-union-silently-truncated — `function f() ! A | B` keeps only `A`; `fail .Z` (a B variant) fails E-ERROR-009 listing A's variants — `NEW S441; MED; open`
+<!-- @gap id=g-error-type-union-silently-truncated sev=MED status=open locus=searched:compiler/src/ast-builder.js(function-header error-type clause parses one type name) prov=empirical:S441-fail-shorthand-review-p08 -->
+Reproducer `repro/error-type-union-truncated-to-first.scrml` → `E-ERROR-009 … declared error type 'A' … Valid variants: X, Y.` — `| B` vanished from the declaration without a diagnostic. Governing: searched §19.3/§19.4 for a union error type — the grammar names a single error type; so the fix is either support or a parse error on `|`. Silent truncation is wrong under either.
+
+### g-fail-payload-variant-argument-unchecked — `fail E.A(E2.Nope)` compiles although `E2` has no `Nope` — `NEW S441; LOW; open`
+<!-- @gap id=g-fail-payload-variant-argument-unchecked sev=LOW status=open locus=searched:compiler/src/type-system.ts(E-ERROR-009 checks the outer variant only) prov=empirical:S441-fail-shorthand-review-q7q -->
+Reproducer `repro/fail-payload-variant-argument-unchecked.scrml`: exit 0, `data: { inner: E2.Nope }` → `undefined` at runtime. The bare `.A(.Nope)` form fails E-ERROR-009 (probe q7), though its message blames the outer variant. Governing: §14.10 enum variant references must name a declared variant.
+
+### g-failable-single-field-payload-server-raw-client-keyed — a server-side `fail A.Y("m")` ships `data: "m"` but the client handler reads `data.msg` — `NEW S441; HIGH; in-progress`
+<!-- @gap id=g-failable-single-field-payload-server-raw-client-keyed sev=HIGH status=in-progress locus=compiler/src/codegen/emit-server.ts(fail envelope — single-field payload emitted raw)+compiler/src/codegen/emit-logic.ts(handler arm binding reads field-keyed) prov=empirical:S441-fail-shorthand-review-P7 -->
+Reproducer `repro/failable-single-field-payload-shape-mismatch.scrml`. server.js: `return { __scrml_error: true, type: "A", variant: "Y", data: "missing" };`; client.js: `const m = _scrml__scrml_result_6.data.msg;` → `undefined`. Exit 0. Governing: §19 payload binding — `.Y(m)` binds the variant's single field. **A live S441 agent is fixing this** (PA addendum 5); status in-progress so it counts as open until that lands.
+
+### g-imported-name-redeclared-by-local-struct-accepted — `import { AppErr }` followed by `type AppErr:struct = {…}` compiles with no duplicate-declaration error — `NEW S441; LOW; open`
+<!-- @gap id=g-imported-name-redeclared-by-local-struct-accepted sev=LOW status=open locus=searched:compiler/src/type-system.ts(type registry — a local type-decl silently replaces an imported binding) prov=empirical:S441-fail-shorthand-review-m4 -->
+Reproducer `repro/import-shadowed-by-local-struct.scrml` (+ `repro/n3-errs.scrml`). Exit 0; the struct wins, so `! AppErr` has no variants and `fail .Nope` emits `{ __scrml_error: true, type: "", variant: "Nope", data: null }` unchecked. Governing: searched §21 (imports) — no sentence on a local redeclaring an imported name; the adjacent rules (E-NAME-COLLIDES-*) reject analogous collisions, so this reads as an omission, not a design.
+
+### g-handler-level-rejection-bypasses-scrml-logging — an event handler that awaits a failing server call has no `.catch`; the rejection escapes to the host unlogged — `NEW S441; LOW; ruling-gated`
+<!-- @gap id=g-handler-level-rejection-bypasses-scrml-logging sev=LOW status=ruling-gated locus=compiler/src/codegen/emit-event-wiring.ts(handler registry wraps `fn()` with no rejection routing) prov=empirical:S441-cell12-review-s3-reject -->
+Reproducer `repro/handler-rejection-bypasses-logging.scrml`: `async function _scrml_go2_5() { const a = await _scrml_fetch_double_4(1); … }` is wired as `function(event) { _scrml_go2_5(); }`. The detached `@out = double(21)` form does route to `_scrml_error_boundary_log`. Governing: searched §19.6.8, §20.6 — the B5 "no silent swallow; route to scrml's logging surface" rule is scoped to an `<errorBoundary>` backstop; nothing specifies a handler-level backstop. Ruling: extend B5 to event handlers (recommended — one `.catch(log)` per handler).
+
+### g-run-result-field-read-compiles-silently — reading `.changes` / `.lastInsertRowid` / `.count` off the VOID result of `?{}.run()` compiles with no diagnostic; the flagship example 23 shipped three replay-open one-time-token guards on it — `NEW S441; MED; open`
+<!-- @gap id=g-run-result-field-read-compiles-silently sev=MED status=open locus=compiler/src/type-system.ts:~8983(resolveSqlRowType — `.run()` sets wrap="void" then `return tAsIs()`, the escape hatch, so every member read is unchecked)+compiler/src/codegen(`.run()` emits a bare `await _scrml_sql\`…\`` whose value is Bun.SQL's result array, not void) prov=empirical:S441-ex23-run-changes-executed-on-5c366fe15 -->
+Reproducer `docs/changes/s441-ex23-run-changes/repro/run-field-and-error-status.scrml` (+ `.run.ts`): `const result = ?{\`UPDATE items … WHERE id = ${id} AND used_at IS NULL\`}.run()` then `if (result.changes == 0) …` and `result.lastInsertRowid`. Compiles exit 0; the only diagnostics are unrelated (`W-PROGRAM-SPA-INFERRED`, two `W-TYPE-031-UNPROVEN` on the caller). **Executed:** the same row consumed twice → both `200 {"ok":true,"rowid":0}` — the `changes == 0` branch never fires because `.changes` is `undefined`. Governing: §8.3 table *"`.run()` | `void` | Execute without returning rows"*; §8.5.1 *"The return value is `void` per §44.3 … Source code that previously read `result.changes` or `result.lastInsertRowid` no longer works on `?{}.run()`. Use a `RETURNING` clause … if the write outcome is needed"* and *"The return value SHALL be `void`; the compiler SHALL NOT synthesize a `RunResult` shim."* Two defects, one root: (1) the typer resolves `.run()` to `asIs` rather than `void`, so a field read on it is not an error — a compile-time rejection naming §8.5.1 and the `RETURNING` idiom is what the SPEC's "no longer works" needs; (2) the runtime value is **not** void — it is Bun.SQL's result array, which carries `count` (affected rows), `command`, `lastInsertRowid` (`0` on UPDATE) and `affectedRows` (`null` on sqlite), so `.count` *works by accident* and `.lastInsertRowid` returns a plausible-looking `0`: host-shape leakage contradicting "SHALL be void", and the reason the silent reads look half-right. **Adopter impact, measured:** `examples/23-trucking-dispatch` gated its three `lin` single-use tokens (rate-confirmation acceptance, BOL, invoice payment) on `result.changes == 0`; against the real compiled handlers a replayed BOL token logged a second BOL, a never-issued token was accepted by all three, and a concurrent double-submit of the acceptance and payment tokens succeeded twice. Fixed in the example by s441-ex23-run-changes (`UPDATE … AND consumed_at IS NULL RETURNING token` + `.get()` + `is not`); the compiler hole is open. Sweep hits outside examples/docs (listed, not fixed): `samples/blog-cms.scrml:336` (`return result.lastInsertRowid` — returns `0`), `samples/api-dashboard.scrml:260` (comment claims `.run()` "returns { changes, lastInsertRowid }"), `samples/compilation-tests/gauntlet-s20-sql/sql-run-001.scrml:7` (binds + returns the void result), `samples/compilation-tests/gauntlet-r10-bun-admin.scrml:169-187,700` (friction comments asking whether `RunResult` exposes `lastInsertRowid`). SPEC note: §8.5.1's parenthetical steers SQLite to a follow-up `SELECT changes()` / `SELECT last_insert_rowid()`; SQLite has supported `RETURNING` since 3.35, and a follow-up `changes()` read is connection-scoped and not atomic with the write when handlers interleave on the shared handle — the parenthetical should point SQLite at `RETURNING` too.
+
+### g-server-error-envelope-returns-http-200 — a server `!` function that `fail`s responds HTTP 200 with the `__scrml_error` envelope; §19.9.2 specifies 400 / 401 / 403 / 404 / 500 — `NEW S441; MED; open`
+<!-- @gap id=g-server-error-envelope-returns-http-200 sev=MED status=open locus=compiler/src/codegen/emit-server.ts(the handler response tail — `new Response(JSON.stringify(_scrml_result ?? null), { status: 200 … })` emitted unconditionally, ~3363/3400/4872/5195/5410/5783; no `__scrml_error` → status mapping exists) prov=empirical:S441-ex23-run-changes-executed-on-5c366fe15 -->
+Reproducer `docs/changes/s441-ex23-run-changes/repro/run-field-and-error-status.scrml` (+ `.run.ts`): `function findItem(id: number) ! ItemError` with `NotFound(id: number)`, `InvalidInput`, `Forbidden`, called through the compiled route handler. **Executed:** success → `200 {"id":1,"name":"a"}`; `NotFound` → `200 {"__scrml_error":true,…,"variant":"NotFound","data":2}`; `InvalidInput` → `200 …`; `Forbidden` → `200 …`. The emitted handler returns the envelope object from the body IIFE and wraps every non-`Response` result in `status: 200`. Governing: §19.9.1 step 2 *"The HTTP response carries an appropriate status code (see §19.9.2)."*; §19.9.2 *"The compiler SHALL generate HTTP status codes for server `!` function error responses"* — Success 200, validation 400, auth 401/403, not-found 404, all others 500 — with the name heuristic (`NotFound` → 404; `Auth`/`Forbidden`/`Unauthorized` → 403; `Validation`/`Invalid` → 400; else 500); §19.9.4 *"The HTTP status code SHALL be determined by the `httpStatus` attribute on the variant, or by the heuristic in §19.9.2, or by the default of 500."* Expected here: 404 / 400 / 403. **Severity MED, not HIGH:** the scrml client reads the envelope out of the body, so the in-app `!{}` round-trip is correct; the breakage is at the wire — any non-scrml consumer, `fetch().ok`, proxy/CDN caching, uptime monitoring and retry logic see every failure as success. Fix note: the CPS client wrapper must keep reading the envelope from a non-2xx body once the status changes (check it does not treat non-2xx as a transport failure first). Adjacent defect in the same section filed separately: [[g-enum-variant-httpstatus-attribute-drops-variant]] — the §19.9.2 override syntax does not parse today, so even the explicit form cannot set a status.
+
+### g-enum-variant-httpstatus-attribute-drops-variant — a variant written with the §19.9.2 `httpStatus(N)` attribute silently disappears from its enum; a later `fail E.B` reports "not a valid variant" — `NEW S441; MED; open`
+<!-- @gap id=g-enum-variant-httpstatus-attribute-drops-variant sev=MED status=open locus=searched:compiler/src(enum-body variant parse — `httpStatus` appears nowhere in compiler/src outside a naming-helper comment at type-system.ts:6820)—not-traced prov=empirical:S441-ex23-run-changes-executed-on-5c366fe15 -->
+Reproducer `docs/changes/s441-ex23-run-changes/repro/httpstatus-attribute-drops-variant.scrml`: `type E:enum = { A  B httpStatus(404)  C }` then `fail E.B` → `error [E-ERROR-009]: 'fail' names variant 'B' which is not a valid variant of the declared error type 'E' for function 'f'. Valid variants: A, C.` The declaration is accepted with no diagnostic and variant `B` is dropped; the error surfaces only at a use site and blames the use. (Also seen with `Forbidden httpStatus(403)` as the last variant.) Governing: §19.9.2 *"The developer MAY override the status code on a per-variant basis using an `httpStatus` attribute on the variant"*, worked example `NotFound(resource: string) httpStatus(404)`; §19.9.4 names `httpStatus` as the first source of the status. A diagnostic that names the use rather than the dropped declaration is itself the bug class (the declaration is where the information was lost).
+
+### g-const-batch-parallelizes-side-effecting-server-calls — `const x = addRow(5); const y = countRows()` runs the INSERT and the SELECT concurrently, so the count may not see the row — `NEW S441; MED; open`
+<!-- @gap id=g-const-batch-parallelizes-side-effecting-server-calls sev=MED status=open locus=compiler/src/codegen/scheduling.ts(scheduleStatements const/let-decl Promise.all grouping — no read-only / side-effect test on the callees) prov=review:S441-cell12-rereview-finding-8-reproduced -->
+Reproduced on the s441-cell-assign-server-call-awaited branch and on main (the const-form batch is main behaviour, untouched there): `docs/changes/s441-cell-assign-server-call-awaited/repro/r3/inselc.scrml` emits `const [x, y] = await Promise.all([addRow(5), countRows()])` — both requests are in flight together, so whether `countRows` observes the INSERT depends on server arrival order. §13.2 parallelizes calls with no DATA dependency; a write-then-read through the database is a dependency the client-side DG cannot see. The whole-result cell-write batch added in s441 already applies bryan's S441 rule ("parallelize only calls proven read-only": `isProvablyReadOnlyServerFn` in scheduling.ts, fail-closed); the fix direction is to apply the same test to the const/let-decl members, keeping any batch that contains a non-provably-read-only callee sequential. Pinned as KNOWN by `compiler/tests/integration/cell-assign-server-call-awaited.test.js` ("the pre-existing CONST-form batch still parallelizes INSERT + SELECT") — flip that assertion when this is fixed.
+
+### g-reset-server-init-not-awaited-before-next-read — `reset(@x)` whose init is a server call settles in the background, so the next statement reads the pre-reset value — `NEW S441; LOW; open`
+<!-- @gap id=g-reset-server-init-not-awaited-before-next-read sev=LOW status=open locus=compiler/src/runtime-template.js(_scrml_reset_apply fire-and-forget thenable settle)+codegen(reset emitted as a sync statement) prov=review:S441-cell12-rereview-r3-N1 -->
+Reviewer-reported on the s441-cell-assign-server-call-awaited branch (probes `rstread.scrml` / `rstread2.scrml` in the S441 scratch `rv-cell12-r3-out/b/`), not fixed there. `_scrml_reset` stays synchronous and `_scrml_reset_apply` settles a promise-returning init/default thunk with `.then(...)`, so `reset(@x); @y = @x` inside an async function reads the value from before the reset; the cell becomes the re-fetched value only later. §6.8.1: "If `default=` is absent, `reset(@cell)` SHALL re-evaluate the init expression at reset time and write the result to the cell", and §13.2 sequences dependent operations with `await`. Fix direction: in an async host, emit `await` on a reset whose thunk can return a promise (the reset of a server-call init), mirroring the s441 cell-write fix; keep the sync form elsewhere.
+
+### g-block-comment-early-close-leaks-logic-as-page-text — a `*/` inside a `/** … */` comment in a `${}` block closes it early; the rest of the block becomes page text, and no diagnostic names the comment — `NEW S441; MED; open`
+<!-- @gap id=g-block-comment-early-close-leaks-logic-as-page-text sev=MED status=open locus=compiler/src/block-splitter.js(~L2597 §27.1 `/* */` skip inside brace contexts — ends at the first `*/`, correct JS semantics; nothing records that a comment which closed mid-line left doc-comment prose behind)+compiler/src/api.js(STDLIB-EXPORT-SEED `_parseStdlibExports` swallows every parse error by design) prov=empirical:S441-stdlib-http-comment-leak -->
+Reproducer `docs/changes/s441-stdlib-http-comment-leak/repro/block-comment-early-close-leaks-logic-as-page-text.scrml`: a doc comment containing `{ headers: { /* none */ } }`. The inner `*/` ends the comment (block comments do not nest — §27.2 gives logic `/* */` JS semantics), the leftover ` } })` closes the `${` block, and `function bump()` onward is emitted INTO `app.html` as text. The compile does fail — two `E-CTX-001` "Unexpected '}' … Check for a missing context opener above this line" — so a user file is not silent, but the message points at a brace and never mentions the comment; the same class via a string (`"*/15 * * * *"` in the stdlib/cron doc comment) fails as `E-CODEGEN-INVALID-LOGIC` "compiler defect" instead. **On the stdlib import path it IS silent:** STDLIB-EXPORT-SEED parses a stdlib module TAB-only and swallows errors, so the leaked exports just vanish from the export table. Two stdlib modules shipped this way and are FIXED in this change (stdlib/http lost `multipart` + `uploadFile` — a client `const r = uploadFile(url, f)` was not auto-awaited, `r` was a Promise; stdlib/cron lost all three exports); `compiler/tests/unit/stdlib-source-no-logic-leak.test.js` now gates every stdlib module. What stays open is the DIAGNOSTIC: when a block comment ends on a line that continues with non-comment text and the following lines look like doc-comment continuation (`^\s*\*`), the unbalanced-brace / invalid-logic error should name the early-closed comment (e.g. "the `*/` on line 5 closed the `/**` opened on line 4 — block comments do not nest"). Governing: §27.2 (per-context native comments; nesting is not specified — searched, no sentence); §2.2.1 no-silent-stub principle for the seed path. ⚑ SPEC drift noticed alongside: §4.7 says the block splitter "SHALL NOT handle `/* */`", but block-splitter.js has skipped `/* */` inside brace contexts since jwt-auth-bypass (2026-07-11) — the SPEC sentence is stale and should be amended to the shipped rule.
+
+## §S440b — JS-WAT gauntlet + dPA DD defects (2026-09-28/29)
+
+Sources: the JS-WAT gauntlet (`scrml-support/docs/deep-dives/js-wat-gauntlet-2026-09-28/` — `REPORT.md` "Compiler bugs (impl#1)" + the `A/B/C/D-*-results.md` rows, finder-executed at `7e4bc8155` under happy-dom / in-process server fetch), the dpa-052/054/055/056 DD defect lists (DD-executed at `048df04db`), and PA finds. "PA-reproduced" and "re-executed on `5e5c952cd`" are execution, not relay; everything else is finder- or DD-executed and says so. Skipped as already fixed by #1137: Date `==` always true, Date-in-cell breaks boot, typed arrays through the deep-reactive Proxy (dpa-055 D4). Skipped as already filed: E-EQ-001 on typed cells.
+
+### g-cell-increment-on-string-concatenates — `@s++` on a string cell concatenates (`"5"` → `"51"`) — `NEW S440; HIGH; open`
+<!-- @gap id=g-cell-increment-on-string-concatenates sev=HIGH status=open locus=searched:compiler/src/codegen(the `@x++`/`@x--` desugar to `set(x, get(x) + 1)`)—not-traced prov=empirical:S440-JS-WAT-A92-PA-reproduced -->
+PA-reproduced: `<s> = "5"`, `@s++` in a function → `@s` = `"51"`; the local control `let loc = "5"; loc++` gives `6`. Silent wrong value, and a wat JS itself does not have — `++` means two things by sigil. Fix direction: lower to a numeric increment (or reject on a non-number cell once `int`/operator typing lands).
+
+### g-bigint-literal-truncates-the-rest-of-the-expression — a BigInt literal drops its `n` AND everything after it: `10n / 3n + 100` → `10` — `NEW S440; HIGH; open; RULED`
+<!-- @gap id=g-bigint-literal-truncates-the-rest-of-the-expression sev=HIGH status=open locus=searched:compiler/src/tokenizer.ts(numeric literal ends at the `n` suffix)—not-traced prov=ruling:user-voice-scrml.md-S440-JS-WAT-decisions-4-12-#4 -->
+PA-reproduced (and re-seen by dpa-054 M6 at `048df04db`): `let big = 10n / 3n + 100` emits `let big = 10;`; `<v> = 1n + 1` → `set("v", 1)`. Exit 0, zero diagnostics. RULED S440 JS-WAT #4: BigInt literals are rejected (an `E-*-NOT-IN-SCRML` code) until designed — the fix is the rejection, not a lowering.
+
+### g-prefix-increment-statement-deleted-in-function-body — a line-leading `++x` / `--x` statement in a `function` body is deleted from the emit — `NEW S440; HIGH; open`
+<!-- @gap id=g-prefix-increment-statement-deleted-in-function-body sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(function-body statement splitter — newline before a prefix update)—not-traced prov=empirical:S440-JS-WAT-C21-C21b-PA-reproduced -->
+PA-reproduced: `let b = 1` / `++b` / `let c = 1` / `c++` / `--d` on separate lines → `"1|2|1"`; emitted body has `c++;` but no `++b;`/`--d;`. Works with an explicit `;`, in `on mount`, in inline handlers, and in expression position (`let y = ++x`). JS keeps the statement (ASI restricted production), so this is scrml-own. Near relatives, not duplicates: g-bare-block-statement-is-silently-dropped, g-double-unary-minus-emit-decrement.
+
+### g-regex-literal-initializer-without-semicolon-swallows-the-next-statement — a regex-literal initializer with no trailing `;` deletes the following statement — `NEW S440; HIGH; open`
+<!-- @gap id=g-regex-literal-initializer-without-semicolon-swallows-the-next-statement sev=HIGH status=open locus=searched:compiler/src/tokenizer.ts,compiler/src/ast-builder.js(statement boundary after a regex-literal RHS)—not-traced prov=empirical:S440-JS-WAT-D-BUG-1+re-executed-on-5e5c952cd -->
+Re-executed on `5e5c952cd` (after the F18 fence landed): in a function, `const re = /a/g` / `console.log("one")` / `@out = "done"` emits `const re = /a/g;` then the `@out` write — `console.log("one")` is gone, exit 0. At the TOP LEVEL (the PA's S440 find): `<v> = /ab+c/i` / `<r> = @v.test("x")` swallows the second declaration → a false `E-STATE-UNDECLARED` on `@r`. One defect, two positions (silent in a body, misleading at top level). With `;` both work.
+
+### g-regex-with-colon-in-array-literal-lowers-as-a-map-literal — `[/a:b/]` compiles to a §59 map — `NEW S440; HIGH; open`
+<!-- @gap id=g-regex-with-colon-in-array-literal-lowers-as-a-map-literal sev=HIGH status=open locus=compiler/src/expression-parser.ts(preprocessMapLiterals — the S411 regex fence does not cover a regex that is a bracket-literal ELEMENT) prov=empirical:S440-f18-final-check+re-executed-on-5e5c952cd -->
+Re-executed on `5e5c952cd`: `const xs = [/a:b/]` emits `const xs = _scrml_map_from_entries([[/a, b/]], false);` at exit 0 (only a `W-TYPE-031-UNPROVEN` "inference stopped at map literal"). `[/a:b/, /c/]` fails loud instead (`E-MAP-LITERAL-MALFORMED` on `/c/`). A residual of the RESOLVED g-regex-char-class-colon-mislowered-as-map-literal (S411 fenced regex interiors, but not a regex whose `:` sits at array-element level).
+
+### g-nested-helper-in-sync-callback-accept-all — a server call wrapped in a helper declared INSIDE the handler and used in `.some`/`.filter` is un-awaited → `.some` true for every input — `NEW S440; HIGH (SECURITY); open`
+<!-- @gap id=g-nested-helper-in-sync-callback-accept-all sev=HIGH status=open locus=searched:compiler/src/codegen(sync-callback async rewrite — a nested async helper call site stays `.some((x) => inner(x))`)—fix-on-unmerged-branch prov=empirical:S440-JS-WAT-D65-PA-reproduced -->
+PA-reproduced (#65): server `function inner(x) { return isOk(x) } return [1,2,3].some(x => inner(x))` and the client twin both return **true** (expected false). `inner` is emitted `async … return await isOk(x)` but the call site is not rewritten. A file-scope helper is handled. This is the accept-all E-SERVER-FN-IN-SYNC-CALLBACK exists to fail closed on (`hashes.some(h => verifyPassword(pw, h))`). Fix built, NOT on main at `5e5c952cd`: `eb964a2c6` + fix round `7db49187c` (`worktree-agent-ab13d4ede5a9719a8`), in PR #1139. Residuals are filed as F4/F5 below; two fail-closed false positives the fix introduces are filed as g-sync-callback-rawtext-scan-false-positives and g-sync-local-with-async-name-treated-async.
+
+### g-async-helper-escaping-as-a-value-accept-all — an async-colored helper passed or stored as a VALUE (`drive(inner)`, an alias, inside an array/object, `Array.from(xs, inner)`) reaches a sync consumer un-awaited → accept-all — `NEW S440; HIGH (SECURITY); open; RULED`
+<!-- @gap id=g-async-helper-escaping-as-a-value-accept-all sev=HIGH status=open locus=searched:compiler/src/codegen(async coloring — no escape analysis on function VALUES) prov=ruling:user-voice-scrml.md-S440-F4 -->
+F4, surfaced by the S440 nested-helper review; pre-existing (not introduced by #1139). With `m` wrapping `verifyPassword`: `const g = m; g("wrong")`, `{f: m}.f(…)`, `[m][0](…)` and a user HOF `drive(m)` are all ACCEPTED with real hashing (reviewer-executed). RULED S440 (F4): an async-colored function may not escape as a value, except into the awaited combinators (`.some`, `.filter`, …); everything else is a compile error (fail closed). Queued.
+
+### g-sync-callback-rawtext-scan-false-positives — the server raw-text nested-async scan (#1139) keys a per-FILE name map with no scope, string or member awareness, so valid code fails `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` — `NEW S440; MED; open`
+<!-- @gap id=g-sync-callback-rawtext-scan-false-positives sev=MED status=open locus=compiler/src/codegen/emit-server.ts(nested-async raw-text check)+compiler/src/codegen/local-async-fns.ts prov=review:S440-PR-1139-review-coordinator-relayed -->
+BRANCH-conditional: exists only once PR #1139 (g-nested-helper-in-sync-callback-accept-all) lands. Reviewer-found, RELAYED-UNVERIFIED by this filer: `[1].map(x => { return "m(" + x })` (string text), `o.m(x)` (a member), template text `` `call m(${pw})` ``, and a DIFFERENT server fn's own sync `m` all fire the error on valid code. Fail-closed, so no security cost; the cost is false rejections. Fix direction: key the map per enclosing server fn, skip matches preceded by `.`, skip string/template text.
+
+### g-sync-local-with-async-name-treated-async — a SYNC local function that shares a name with an async one (`function verifyPassword(a, b) { return a - b }` then `.sort(verifyPassword)`) now fails to compile — `NEW S440; LOW; open`
+<!-- @gap id=g-sync-local-with-async-name-treated-async sev=LOW status=open locus=compiler/src/codegen/local-async-fns.ts prov=review:S440-PR-1139-review-coordinator-relayed -->
+BRANCH-conditional on PR #1139 (compiled before it). Reviewer-found, RELAYED-UNVERIFIED by this filer. Fail-closed false rejection: the local-async name set is keyed by name, not by the binding that is actually in scope.
+
+### g-server-call-in-inline-handler-condition-unawaited — `onclick=${ if (isOk(1)) {…} }` tests a Promise, and `on mount` `.some`/nested helpers leave server calls un-awaited → accept-all — `NEW S440; HIGH (SECURITY); open`
+<!-- @gap id=g-server-call-in-inline-handler-condition-unawaited sev=HIGH status=open locus=searched:compiler/src/codegen/emit-event-wiring.ts,compiler/src/codegen/emit-reactive-wiring.ts(inline-handler + on-mount bodies skip the auto-await rewrite)—not-traced prov=empirical:S440-F5-PA-reproduced -->
+F5, PA-reproduced: `onclick=${ if (isOk(1)) {…} }` emits `if (_scrml_fetch_isOk_4(1))` — a Promise is always truthy, so the branch is taken for every input. The same class in `on mount` bodies with `.some` and nested helpers. Member of g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources, filed separately because the condition position makes it an authorization bypass rather than a stale value.
+
+### g-cell-assign-server-call-fired-detached — `@cell = serverFn()` is emitted as a fire-and-forget IIFE: the next statement reads the old value and successive writes race — `NEW S440; HIGH; open; RULED`
+<!-- @gap id=g-cell-assign-server-call-fired-detached sev=HIGH status=open locus=searched:compiler/src/codegen/emit-client.ts(the whole-result `_scrml_reactive_set(name, await stub())` → async-IIFE rewrite)—not-traced prov=ruling:user-voice-scrml.md-S440-JS-WAT-decisions-4-12-#12 -->
+PA-reproduced (D#59): `@out = double(21); console.log(@out)` logs `0`; `@out = double(1); @out = double(2); @out = @out + 100` logs `100` and ends `4` (arrival order decides). Emitted `(async () => _scrml_cs_reactive_set("out", await _scrml_fetch_double_5(1)))().catch(…)` inside an already-async function; `const a = double(1)` IS awaited. Violates §13.2's SHALLs. RULED S440 JS-WAT #12: fix in impl#1 as a §13.2 conformance restoration (explicit S435-policy exception). Siblings: g-failable-cell-load-fire-and-forget-stale-read-dead-return (the `!{}` form), g-reactive-write-member-server-call-no-autoawait.
+
+### g-refinement-contract-unchecked-on-cell-write — a §53 refinement is checked at the declaration initializer only; writes to the cell are unchecked, even a static-zone literal — `NEW S440; HIGH; open`
+<!-- @gap id=g-refinement-contract-unchecked-on-cell-write sev=HIGH status=open locus=searched:compiler/src/codegen(reactive-cell write emit — no E-CONTRACT-001-RT guard),compiler/src/type-system.ts(static-zone fold at write sites)—not-traced prov=empirical:S440-JS-WAT-B45-finder-executed -->
+Finder-executed: `<c>: number(>0) = 5` then `@c = -5` (a literal) → accepted, emitted `_scrml_cs_reactive_set("c", -5)`; `@c = @zero / @zero` → NaN accepted; `<pct>: number(>=0 && <=100)` accepts `0/0`. Control: `<c>: number(>0) = -5` fires E-CONTRACT-001, and a refinement LOCAL (`let r: number(>0) = …`) does get a runtime guard. Undercuts §53.4/§53.6's three-zone contract.
+
+### g-int-annotation-unenforced — `int` accepts any number: `<q>: int = 7 / 2` holds `3.5`, even the literal `1.5` is accepted — `NEW S440; HIGH; open; RULED`
+<!-- @gap id=g-int-annotation-unenforced sev=HIGH status=open locus=searched:compiler/src/type-system.ts(int ≡ integer ≡ number assignability; §7.5.1 excludes `int` from the checked set)—not-traced prov=ruling:user-voice-scrml.md-S440-JS-WAT-decisions-4-12-#7a -->
+Finder-executed (B#4/#44) and DD-reconfirmed (dpa-054 M4: `const <taxC>: int = @cents*@rateBp/10000` holds `164.9175`): cells, locals, fn params/returns and cell writes all accept non-integers with zero diagnostics. RULED S440 JS-WAT #7(a): enforce `int` (bootstrap typer); `7 / 2` into `int` is an error; integer division is explicit (dpa-054 #3: `div(a, b, mode)`). Lane: bootstrap; impl#1 carries per S435 unless ruled otherwise.
+
+### g-derived-value-mutate-bypassed-by-non-syntactic-routes — `Object.assign(@d, …)`, `mutate(@d)`, `[@d][0].push()`, `{arr: @d}.arr.push()` mutate a derived cell in place with no E-DERIVED-VALUE-MUTATE — `NEW S440; HIGH; open`
+<!-- @gap id=g-derived-value-mutate-bypassed-by-non-syntactic-routes sev=HIGH status=open locus=searched:compiler/src/type-system.ts(§6.6.18 checker — method-on-`@d` + direct alias chain only) prov=empirical:S440-JS-WAT-D14-finder-executed -->
+Finder-executed (p07_2..5): all four compile clean; `@d` then reads `[3,1,2,42]` while the DOM still shows `3,1,2`, and the next upstream write silently discards the mutation — the exact hazard §6.6.18 exists to prevent. The direct forms (`@d.push`, `const a = @d; a.push`, 2-hop alias) ARE rejected. The error's own fix-it ("`[...@d]` breaks the alias chain") is true only one level deep (D#17).
+
+### g-derived-rhs-mutator-mutates-the-upstream-cell — `const <s> = @src.sort()` sorts `@src` in place every time the derived cell evaluates — `NEW S440; HIGH; open`
+<!-- @gap id=g-derived-rhs-mutator-mutates-the-upstream-cell sev=HIGH status=open locus=searched:compiler/src/type-system.ts(§6.6 derived-RHS purity — no rule that a derived RHS must not mutate) prov=empirical:S440-JS-WAT-D15-finder-executed -->
+Finder-executed: after `@src = [9,8,7]`, `@src` reads `[7,8,9]`; `const <s> = @src.reverse().length` likewise. No diagnostic. Fix direction: reject an in-place mutator on a cell read inside a derived RHS (the §6.5.1 mutator set).
+
+### g-fn-purity-misses-mutator-methods — `fn f() { @xs.sort() }` / `@xs.push(4)` write the cell though `@xs = …` in a `fn` is E-FN-003; I-FN-PROMOTABLE recommends the violation — `NEW S440; HIGH; open`
+<!-- @gap id=g-fn-purity-misses-mutator-methods sev=HIGH status=open locus=searched:compiler/src/type-system.ts(checkOuterScopeMutation — assignment only, not the §6.5.1 mutators the compiler itself lowers to a reactive set) prov=empirical:S440-JS-WAT-D75-D12-finder-executed -->
+Finder-executed (D#75): both compile clean and write the cell (DOM updates); `@xs = [1]` in the same `fn` is rejected. `I-FN-PROMOTABLE` actively recommends promoting `function go() { @xs.sort() }` to `fn`. Also (D#12): a `fn` mutating its PARAMETER (`arr.push(7)` on a passed cell) is accepted and writes the caller's cell.
+
+### g-cell-mutators-skip-clone-then-write-back — `@xs.sort()`/`push`/`reverse` mutate the live array in place, not the §6.5.1 clone → mutate → write-back — `NEW S440; HIGH; open`
+<!-- @gap id=g-cell-mutators-skip-clone-then-write-back sev=HIGH status=open locus=searched:compiler/src/codegen/rewrite.ts,compiler/src/codegen/emit-logic.ts(the §6.5.1 mutating-method lowering) prov=spec:§6.5.1-SHALL-clone-apply-write-back+empirical:S440-JS-WAT-D16 -->
+Finder-executed (D#16): emitted `_scrml_cs_reactive_get("xs").sort(); _scrml_cs_reactive_set("xs", <same ref>)`. An alias taken earlier (`const before = @xs`) is sorted too; `const r = @ys.reverse(); r.push(100)` writes the cell (`[2,1,3,100]`) while the DOM stays `2,1,3`. §6.5.1: "SHALL rewrite … 1. Clone the current array value 2. apply to the clone 3. write back". Distinct from the carried §66.10 alias divergence: this one violates a SHALL impl#1 claims to implement.
+
+### g-onmount-and-inline-handler-bodies-skip-the-language-checks — `on mount` (and partly inline `{ }` handlers) accept `switch`, `var`, `try`/`finally`, `null`, `undefined`, `async`, `throw`, method shorthand and `for…in` — `NEW S440; HIGH; open; RULED`
+<!-- @gap id=g-onmount-and-inline-handler-bodies-skip-the-language-checks sev=HIGH status=open locus=searched:compiler/src/ast-builder.js,compiler/src/codegen(on-mount body emitted as raw escape-hatch text — root shared with g-onmount-multistatement-bypasses-statement-codegen) prov=ruling:user-voice-scrml.md-S440-JS-WAT-decisions-4-12-#11 -->
+Finder-executed (C65) and PA-reproduced (`on mount` accepting `null` + `switch`): each construct compiles and RUNS in `on mount`; the same statement in a `function` body or top-level `${ }` is rejected with its proper code. Inline `onclick={ … }` lets through `null`, `try/finally`, keywordless `for (k in …)`. Only `class` and `===` are caught. RULED S440 JS-WAT #11: a §6.7.1a conformance bug; every rule (incl. S440 #4 truthiness and JS-WAT #4–#6) must be enforced in these bodies or it leaks there.
+
+### g-worker-send-overwrites-the-when-message-handler — the emitted `.send()` sets `worker.onmessage = resolve` on every call, killing every `when message from <#w>` handler — `NEW S440; HIGH; open`
+<!-- @gap id=g-worker-send-overwrites-the-when-message-handler sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts:2411-2417(at-048df04db — the send wrapper assigns onmessage) prov=empirical:S440-dpa-056-D2-DD-executed -->
+DD-executed in headless Chromium (dpa-056 M2): with the worker bundle hand-supplied, `examples/13-worker.scrml`'s worker replies correctly (`count = 168`) but the button stays on "Computing…"; `onmessage` is the `when` handler before the click and the promise resolver after it. Silent at exit 0; violates §46.6's first SHALL. With g-nested-program-emits-artifacts-it-never-produces, the shipped worker example is broken twice.
+
+### g-pg-numeric-and-bigint-arrive-as-strings-so-arithmetic-concatenates — Postgres `NUMERIC`/`DECIMAL`/`BIGINT` values reach scrml as JS strings; `row.total + 1` → `"64.921"` — `NEW S440; HIGH; open; RULED`
+<!-- @gap id=g-pg-numeric-and-bigint-arrive-as-strings-so-arithmetic-concatenates sev=HIGH status=open locus=searched:compiler/src/codegen/emit-server.ts(SQL row decode — Bun.SQL returns numeric/int8 as strings, no coercion or typing) prov=ruling:user-voice-scrml.md-S440-dpa-054-§8-#1 -->
+DD-executed live against Postgres (dpa-054 M9/M11): `orders(total NUMERIC(12,2), big BIGINT)` → wire `{"total":"64.92","big":"9007199254740993"}`; `addTip(1)` → `"64.921"`, `addTip(0.1)` → `"64.920.1"`; `row.total == 64.92` is false at runtime; zero diagnostics (row type UNPROVEN). NUMERIC-typed expressions (`int4 + 0.5`) arrive as strings too. RULED S440 dpa-054 #1 = (B), an impl#1 exception: `int8`/`bigint` → `int` decoded to a number with a LOUD runtime error past 2^53 naming the column; `numeric`/`decimal` → `string` plus a schema-time diagnostic. Queued.
+
+### g-map-field-write-through-bracket-bypasses-e-map-bracket-write — `@m["a"].x = 5` (map cell inferred from its literal) and nested `@s.m["a"] = 5` compile clean and write a stray own key instead of the entry — `NEW S440; HIGH; open`
+<!-- @gap id=g-map-field-write-through-bracket-bypasses-e-map-bracket-write sev=HIGH status=open locus=searched:compiler/src/type-system.ts(E-MAP-BRACKET-WRITE fires only when the cell's map type is ANNOTATED and the map is the root receiver),compiler/src/codegen(emits `_scrml_deep_set(get("m"), ["a","x"], 5)` on a HAMT map) prov=empirical:S440-PA-find+compile-re-executed-on-5e5c952cd -->
+Compile re-executed on `5e5c952cd`: `<m> = ["a": {x: 1}]` + `@m["a"].x = 5` → exit 0, `_scrml_deep_set(_scrml_cs_reactive_get("m"), ["a", "x"], 5)`; `<s> = { m: ["a": 1] }` + `@s.m["a"] = 5` → exit 0, `_scrml_deep_set(…, ["m", "a"], 5)`. With the map ANNOTATED (`<m>: [string: {x: number}] = …`) the first form IS rejected E-MAP-BRACKET-WRITE. Runtime effect (PA-observed, not re-run here): a silent no-op on the entry plus a stray own key on the map object, and the nested form renders the stray key.
+
+### g-no-dependency-derived-cell-never-displays — `const <k> = 5 + 1` is emitted as a JS local but every `@k` read goes through `_scrml_derived_get` → `""` on screen, `@k + 1` is NaN — `NEW S440; MED; open`
+<!-- @gap id=g-no-dependency-derived-cell-never-displays sev=MED status=open locus=searched:compiler/src/codegen(§6.6.11 const-lowering of a no-dep derived cell — the read side was not updated) prov=empirical:S440-JS-WAT-B-BUG-1+A-bug-5-finder-executed -->
+Finder-executed twice (A `p/der.scrml`, B `p/bug1b.scrml`) and hit again by dpa-054 (`const <fixed> = (1.005).toFixed(2)`): `${@k}` renders `""`; `<m> = @k + 1` is NaN. §6.6.11 says it "SHALL still compile as a const" — the declare side does, the reads do not. `W-DERIVED-001` says "will never re-evaluate after initial computation … use `const k` instead" — wrong (it never displays at all) and confused (the author did write `const`).
+
+### g-local-shadow-of-file-scope-fn-misresolved-as-call-argument — a local `const helper = 41` is used correctly in `helper + 1` but rewritten to the file-scope FUNCTION when passed as a call argument — `NEW S440; MED; open`
+<!-- @gap id=g-local-shadow-of-file-scope-fn-misresolved-as-call-argument sev=MED status=open locus=searched:compiler/src/codegen(user-fn mangling of call-argument identifiers ignores local shadowing)—not-traced prov=empirical:S440-JS-WAT-D-BUG-2-finder-executed -->
+Finder-executed (`bug01.scrml`): with a file-scope `function helper()`, `String(helper)` inside a function holding `const helper = 41` emits `String(_scrml_helper_2)`. Found via `Object.create(proto)` beside a `function proto()`. Silent wrong value. Same family as g-user-fn-rename-rewrites-emitted-helper-locals.
+
+### g-point-free-server-fn-reference-throws-referenceerror — `.some(isOk)` / `.map(double)` with a server fn passed by name compile clean and throw `ReferenceError: isOk is not defined` — `NEW S440; MED; open`
+<!-- @gap id=g-point-free-server-fn-reference-throws-referenceerror sev=MED status=open locus=searched:compiler/src/codegen(async-combinator rewrite applied — `_scrml_someAsync([1,2,3], isOk)` — but the bare name is never mangled to the route stub) prov=empirical:S440-JS-WAT-D66-finder-executed -->
+Finder-executed client AND server (`bug05-pointfree-serverfn-ref.scrml`). `const f = isOk; f(1)` works. Loud at runtime, clean at compile. Interacts with the F4 ruling (a server fn escaping as a value into an awaited combinator stays legal, so this must lower, not reject).
+
+### g-discarded-map-set-method-result-is-a-silent-noop — `@m.insert(k, v)` / `@s.add(k)` / `@xs.concat([4])` as bare statements do nothing, with no diagnostic — `NEW S440; MED; open`
+<!-- @gap id=g-discarded-map-set-method-result-is-a-silent-noop sev=MED status=open locus=searched:compiler/src/type-system.ts(no unused-result check for §59 reassignment-canonical methods) prov=empirical:S440-JS-WAT-D68-finder-executed -->
+> **S441 re-verified (site-fix S7, at `cf62b4154`):** `@m.insert("a", 1)` as a statement emits `_scrml_map_insert(...)` with the result discarded, exit 0, no diagnostic.
+Finder-executed (p23): size stays 0, 0, `[1,2,3]`. §59.7 makes map/set writes reassignment-canonical (`@m = @m.insert(k, v)`), so a discarded result from a method that exists ONLY to return a new value is always a bug; a must-use diagnostic would close it.
+
+### g-promise-not-rejected-despite-13-1 — `new Promise(…)`, `Promise.all([…])` compile and run though §13.1 says the developer SHALL NOT write them — `NEW S440; MED; open; RULED`
+<!-- @gap id=g-promise-not-rejected-despite-13-1 sev=MED status=open locus=searched:compiler/src/type-system.ts(scope allowlist admits Promise; `async`/`await` are enforced, `Promise` is not) prov=ruling:user-voice-scrml.md-S440-JS-WAT-decisions-4-12-#4 -->
+Finder-executed (D#60): `typeof p` = "object"; SPEC.md:7896 "The developer SHALL NOT write `async`, `await`, `Promise`, `Promise.all` …". RULED S440 JS-WAT #4: reject `Promise` / `new Promise` / `Promise.all` with an `E-*-NOT-IN-SCRML` code (newly rejecting; measure the corpus before landing). Note dpa-056 D5: §43.5.1 still types cross-program calls `Promise<T>` — see g-spec-2-4-and-43-5-1-restatements-owed.
+
+### g-js-constructs-not-rejected-with-named-codes — `var`, `this`, `void`, `delete`, `with`, `globalThis.eval`/`new Function`, `arguments`, getters/setters/method shorthand compile, or fail under a misleading code — `NEW S440; MED; open; RULED`
+<!-- @gap id=g-js-constructs-not-rejected-with-named-codes sev=MED status=open locus=searched:compiler/src/type-system.ts,compiler/src/ast-builder.js(§7.2.1 not-scrml table + its enforcement) prov=ruling:user-voice-scrml.md-S440-JS-WAT-decisions-4-12-#4 -->
+> **S441 re-verified (cell-12 review R6, at `cf62b4154`):** object-literal method shorthand `const o = { run() { return 7 } }` still fails `E-CODEGEN-INVALID-LOGIC` ("compiler defect"; the emit is `{run: }`) rather than the ruled `E-*-NOT-IN-SCRML`. Reproducer `docs/changes/s441-audit-gap-filing/repro/object-method-shorthand-emits-invalid-js.scrml`.
+Finder-executed (C1/C2/C7/C12/C29/C30/C32/C33/C39/C40): `for (var i…)` accepted, a bare `var x` reported as `E-STMT-MISSING-SEMICOLON` (emit contains `var;`); `this` works with sloppy-mode semantics (the chunk has no `"use strict"`); `void 0` mints `undefined`; `with` and `delete local` are refused as "compiler defect" (the validator parses strict while the chunk runs sloppy); `globalThis.eval("1+2")` runs; `{ get v() {} }` / `{ m() {} }` emit `{v: , m: }` → `E-CODEGEN-INVALID-LOGIC`. RULED S440 JS-WAT #4: each gets an `E-*-NOT-IN-SCRML` code (labels kept), measured against the corpus before landing.
+
+### g-arithmetic-and-relational-operators-accept-non-numbers — `"5" + 2`, `true + true`, `@a * @b` on `number[]`, `"10" < "9"`, `not + 1` all compile — `NEW S440; MED; open; RULED`
+<!-- @gap id=g-arithmetic-and-relational-operators-accept-non-numbers sev=MED status=open locus=searched:compiler/src/type-system.ts(no operand typing for binary operators) prov=ruling:user-voice-scrml.md-S440-JS-WAT-1-3-Gotcha-Q1-Q3 -->
+Status note for a ruled rule, with its evidence: 273 of 352 gauntlet probes leak silently, most through operators; dpa-055 M8 (Chromium): `@a + @b` on `number[]` cells renders `"1,2,34,5,6"`, `@a * @b` and `@a * 2` render `NaN`. RULED S440 (Gotcha Q1–Q3): arithmetic and relational operators take numbers only, `+` takes two numbers or two strings; `!`/`&&`/`||` take booleans (defaults via `??`); a `T | not` operand is narrowed first. dpa-055 R6: no operators on tapes. Bootstrap enforces (provable-or-silent); impl#1 keeps today's behaviour.
+
+### g-appendix-d-disagrees-with-the-scope-allowlist — 17 of Appendix D's 45 promised globals are E-SCOPE-001 in source (`Uint8Array`, `ArrayBuffer`, `DataView`, all typed arrays, …) while `Math` is admitted though §41.18 says there is no ambient `Math` — `NEW S440; MED; open; RULED`
+<!-- @gap id=g-appendix-d-disagrees-with-the-scope-allowlist sev=MED status=open locus=compiler/src/type-system.ts(LOGIC_SCOPE_GLOBAL_ALLOWLIST)+compiler/SPEC.md(Appendix-D-~L16070 vs §41.18-~L25540) prov=ruling:user-voice-scrml.md-S440-dpa-055-R1 -->
+DD-executed (dpa-055 M1/M2, dpa-056 P1) and PA-found: `new Float32Array(4)` / `new Int32Array(4)` → `E-SCOPE-001` in a function, a cell and a `fn`; missing: all 8 typed arrays, `ArrayBuffer`, `DataView`, `WeakRef`, `BigInt`, `Intl`, `Reflect`, `Proxy`, `structuredClone`, `queueMicrotask` (while Node's `Buffer` IS allowlisted). SPEC self-contradiction (dpa-055 D7): §41.18 "There is no ambient `Math` global" vs Appendix D + the allowlist. RULED S440 dpa-055 R1: rewrite Appendix D to what the language admits (IN: typed arrays incl. `Float16Array`, `ArrayBuffer`, `DataView`, …) and make the compiler match; (i) no ambient `Math`.
+
+### g-stdlib-crypto-source-does-not-compile-standalone — `stdlib/crypto/index.scrml` fails 6 errors under the language it ships with — `NEW S440; MED; open`
+<!-- @gap id=g-stdlib-crypto-source-does-not-compile-standalone sev=MED status=open locus=stdlib/crypto/index.scrml prov=empirical:S440-dpa-055-M3-DD-executed -->
+DD-executed (dpa-055 M3, `048df04db`): `Uint8Array` ×2, `TextEncoder`, `Bun` ×2, `throw`. Unknown which one adopters actually get (the runtime shim or this source); either way the source is not valid scrml. Partly downstream of g-appendix-d-disagrees-with-the-scope-allowlist.
+
+### g-typed-array-server-return-arrives-as-an-index-keyed-object — a server fn declared `-> number[]` returning a `Float32Array` delivers `{"0":0.1…,"1":…}` to the client — `NEW S440; MED; open; RULED`
+<!-- @gap id=g-typed-array-server-return-arrives-as-an-index-keyed-object sev=MED status=open locus=searched:compiler/src/codegen/emit-server.ts(`JSON.stringify(_scrml_result ?? null)` — no binary encoding, declared return type unchecked at the boundary) prov=ruling:user-voice-scrml.md-S440-dpa-055-R4 -->
+DD-executed in Chromium (dpa-055 M5), exit 0. The declared return type is not enforced at the `_={}` value boundary and there is no wire encoding for binary data. Same wire family as JS-WAT D#73 (NaN/Infinity arrive as `not`, a JS `Map` as `{}`). RULED S440 dpa-055 R4: base64-in-envelope + a size warning; binary frames later.
+
+### g-tofixed-and-formatcurrency-round-the-same-value-differently — `1.005.toFixed(2)` → `"1.00"`, `formatCurrency(1.005, "USD")` → `"$1.01"`, `round(x*100)/100` → `1` — `NEW S440; MED; open`
+<!-- @gap id=g-tofixed-and-formatcurrency-round-the-same-value-differently sev=MED status=open locus=stdlib/format(formatCurrency via Intl)+docs(PRIMER §6.4 teaches `@price.toFixed(2)`) prov=empirical:S440-dpa-054-M2-D3-DD-executed -->
+DD-executed (dpa-054 M2): also `0.615` → `"0.61"` / `"$0.62"` / `0.62`. The language's own three display paths disagree on one value (Intl rounds the shortest decimal repr, `toFixed` the binary value), and the PRIMER teaches the worst one. Superseded in part by dpa-054 #2 (core `decimal`, bootstrap), but the PRIMER text and `scrml:format` disagree today.
+
+### g-client-server-call-in-sync-callback-reports-the-stdlib-code-at-1-1 — on the client, a peer server fn in `forEach` / a `sort` comparator / a stored lambda / an `Array.from` mapFn fires `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` at span `1:1` with a wrong example list — `NEW S440; LOW; open`
+<!-- @gap id=g-client-server-call-in-sync-callback-reports-the-stdlib-code-at-1-1 sev=LOW status=open locus=searched:compiler/src/codegen(client-side sync-callback guard — server side correctly uses E-SERVER-FN-IN-SYNC-CALLBACK) prov=empirical:S440-JS-WAT-D57-D58-finder-executed -->
+Finder-executed (p17_1/4/6/13): fails closed (good) but under the stdlib-named code, pointing at `<program>` line 1, and its examples (`.map`/`.filter`/`.some`) are exactly the ones the client DOES rewrite; for `forEach` the hazard is ordering, not a consumed return value. The server side uses the correct code for the same shape.
+
+### g-template-literal-not-interpolation-emitted-unlowered — `` `${not}` `` inside a logic template literal compiles clean and throws `ReferenceError: not is not defined` — `NEW S440; MED; open`
+<!-- @gap id=g-template-literal-not-interpolation-emitted-unlowered sev=MED status=open locus=searched:compiler/src/expression-parser.ts(esTreeToExprNode TemplateLiteral multi-quasi `raw` — the §42 `not` lowering never reaches interpolations) prov=empirical:S440-JS-WAT-A71-finder-executed -->
+Finder-executed: `` <i3> = `${not}` `` is emitted verbatim. The REPORT listed it LOW; filed MED because it compiles at exit 0 and crashes at runtime — the same shape as g-tilde-keyword-inside-template-interpolation-leaks-placeholder (HIGH), and likely the same `raw` path. Once fixed it must render per the S440 `${not}` ruling (nothing), see g-interpolation-renders-not-as-literal-null.
+
+### g-double-bang-object-literal-read-as-error-handler — `!!{}` crashes codegen: `!{` is lexed as the §19 error-handler sigil and the `{}` is eaten — `NEW S440; LOW; open`
+<!-- @gap id=g-double-bang-object-literal-read-as-error-handler sev=LOW status=open locus=searched:compiler/src/tokenizer.ts,compiler/src/ast-builder.js(`!{` handler-sigil recognition after a unary `!`)—not-traced prov=empirical:S440-JS-WAT-A38-finder-executed -->
+Finder-executed: `<t3> = !!{}` → `E-CODEGEN-INVALID-LOGIC` (`_scrml_reactive_set("t3", !);`). `!!({})` compiles. Loud; at minimum the error should name the `!{` collision. Moot for `!` on a non-boolean once Gotcha Q2 (booleans only) is enforced, but the sigil collision remains for any `!{…}` object operand.
+
+### g-number-literal-member-access-codegen-defects — `(255).toString(16)`, `1..toString()` and octal `010` reach the output validator as generic "compiler defects" — `NEW S440; LOW; open`
+<!-- @gap id=g-number-literal-member-access-codegen-defects sev=LOW status=open locus=searched:compiler/src/codegen/emit-expr.ts(parens dropped around an integer-literal receiver),compiler/src/tokenizer.ts(`1.`+`.` split; leading-zero literal passed through) prov=empirical:S440-JS-WAT-B78-B83-B84-finder-executed -->
+Finder-executed: `(255).toString(16)` emits `255.toString(16)` ("Identifier directly after number"; `(1e21)` / `(1.005)` survive because the literal has `.`/`e`); `1..toString()` emits `1 .. toString ( )`; `<v> = 010` passes to strict-mode JS. All fail closed as `E-CODEGEN-INVALID-LOGIC` with no source line. The first is ordinary code; the octal form wants a parse-time error naming the literal.
+
+### g-prefix-increment-on-cell-lowers-to-rvalue — `++@n` emits `++_scrml_reactive_get("n")` → `E-CODEGEN-INVALID-LOGIC "Assigning to rvalue"` — `NEW S440; LOW; open`
+<!-- @gap id=g-prefix-increment-on-cell-lowers-to-rvalue sev=LOW status=open locus=searched:compiler/src/codegen(prefix update on a `@` cell lowered as a read, postfix `@n++` lowered as a set) prov=empirical:S440-JS-WAT-C22-finder-executed -->
+Finder-executed. Fails closed, blamed on the compiler. Postfix `@n++` lowers (but see g-cell-increment-on-string-concatenates).
+
+### g-tilde-diagnostic-explains-accumulator-for-bitwise-not — `~x` / `~~x` get `E-CG-TILDE-UNRESOLVED`, which explains the §32 accumulator and never says bitwise NOT is not scrml — `NEW S440; LOW; open`
+<!-- @gap id=g-tilde-diagnostic-explains-accumulator-for-bitwise-not sev=LOW status=open locus=searched:compiler/src/codegen(E-CG-TILDE-UNRESOLVED message)+compiler/SPEC.md(no bitwise-operator text at all) prov=empirical:S440-JS-WAT-B26-finder-executed -->
+Finder-executed: `<bw2> = ~~3000000000.7`, `@bw2 = ~@n`. Net effect is prevention (bitwise NOT is inexpressible, since §32 owns the glyph), but the SPEC is silent on bitwise operators entirely, so neither the prevention nor the rest of the bitwise set (`|`, `>>`, `<<` pass through; `>>>` see g-multi-ops-first-match-shadows-the-longer-operator) is written down.
+
+### g-w-dead-function-false-fires-on-default-param-and-value-references — `W-DEAD-FUNCTION` fires for a function called only from a default-parameter expression or referenced only as a value — `NEW S440; LOW; open`
+<!-- @gap id=g-w-dead-function-false-fires-on-default-param-and-value-references sev=LOW status=open locus=compiler/src/route-inference.ts(the W-DEAD-FUNCTION caller scan — misses default-param expressions and value references) prov=empirical:S440-JS-WAT-C14-C19-finder-executed -->
+Finder-executed: `function f(a = tick())` → "`tick` has no callers … will be tree-shaken"; a tagged-template tag referenced as a value likewise. Neither is removed. A new fire-condition miss beside the resolved `<each>` one (g-usage-analyzer-blind-to-each-in-collection-fn-ref); the false "tree-shaken" sentence is g-wdead-function-tree-shaken-claim-is-false.
+
+### g-call-char-return-spurious-e-scope-001 — `r{ dot(...) }` in a `return` expression fires a spurious E-SCOPE-001 on `r` beside E-WASM-NOMINAL — `NEW S440; LOW; open`
+<!-- @gap id=g-call-char-return-spurious-e-scope-001 sev=LOW status=open locus=searched:compiler/src/type-system.ts(scope check on the call-char `r`) prov=empirical:S440-dpa-055-M7-D6-DD-executed -->
+DD-executed (dpa-055 M7, `extern r dot(...)` + `r{ dot(...) }`): E-WASM-NOMINAL fires as documented, plus E-SCOPE-001 on `r` — contradicting §23.3's note that the misleading E-SCOPE-001 was retired at S231.
+
+### g-worker-send-passes-no-transfer-list — `postMessage(data)` never passes a transfer list, so every send is a structured-clone copy — `NEW S440; LOW; open; RULED`
+<!-- @gap id=g-worker-send-passes-no-transfer-list sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(the worker send wrapper) prov=ruling:user-voice-scrml.md-S440-dpa-056-R3 -->
+DD-measured (dpa-056 M5, Bun, 128 MB): copy 75–79 ms vs transfer 11 ms. RULED S440 dpa-056 R3: `send(lin x)` is a TRANSFER. Perf only.
+
+### g-spec-2-4-and-43-5-1-restatements-owed — §2.4's "SHALL use SharedArrayBuffer and Atomics" is unimplemented, and §43.5.1 types cross-program calls `Promise<T>` while S440 rejects `Promise` in source — `NEW S440; LOW; open; RULED`
+<!-- @gap id=g-spec-2-4-and-43-5-1-restatements-owed sev=LOW status=open locus=compiler/SPEC.md(§2.4,§43.5.1) prov=ruling:user-voice-scrml.md-S440-dpa-056-R7 -->
+> **S441 re-verified (audit item 19):** the R7 restatement has not been written — SPEC §43.5.1 (~L26050) still reads *"Cross-program calls return `Promise<T>`. Unawaited cross-program calls SHALL be compile error E-PROG-004."* over the `await` example. The public NERDME now points here.
+dpa-056 D4/D5 (grep reach: no `SharedArrayBuffer`/`Atomics` anywhere in `compiler/` or `stdlib/`). RULED S440 dpa-056 R7: restate §2.4 as non-normative implementation guidance; restate §43.5.1's cross-program call as returning `T` (compiler-awaited). SPEC edit only.
+
+### g-spec-secdef-example-uses-illegal-schema-types — SPEC's §S4 SECDEF worked example declares `amount: decimal` / `id: uuid`, which fail `E-SCHEMA-004` — `NEW S440; LOW; open`
+<!-- @gap id=g-spec-secdef-example-uses-illegal-schema-types sev=LOW status=open locus=compiler/SPEC.md(§S4-SECDEF-example-~L9617 at 048df04db) prov=empirical:S440-dpa-054-M8-D4-DD-executed -->
+DD-executed on Postgres and SQLite `db=`. The ~L9375 note covers the db-authoritative example but not this one. Doc fix now; revisit when dpa-054 #2's core `decimal` lands.
+
+### g-sqlite-numeric-affinity-silently-lossy — a `NUMERIC(10,2)`/`DECIMAL(10,2)` column on SQLite stores `"1.005"` as REAL and `"12345678901234567.89"` as integer `12345678901234568`, with no warning — `NEW S440; LOW; open`
+<!-- @gap id=g-sqlite-numeric-affinity-silently-lossy sev=LOW status=open locus=searched:compiler/src(schema-time — no W- for NUMERIC/DECIMAL CREATE TABLE targeting SQLite) prov=empirical:S440-dpa-054-M12-D5-DD-executed -->
+DD-executed via Bun.SQL. §14.8.3 rule 5 types it `number`, honest about the runtime and silently lossy. Proposed: a schema-time `W-` when a NUMERIC/DECIMAL table targets SQLite.
+
+### g-postgres-unix-socket-db-url-ignored — `db="postgres:///db?host=/var/run/postgresql"` is emitted verbatim to `new SQL(url)`, which ignores `host=` and connects over TCP — `NEW S440; LOW; open`
+<!-- @gap id=g-postgres-unix-socket-db-url-ignored sev=LOW status=open locus=compiler/src/codegen/emit-server.ts(`new SQL(connStr)` emit) prov=empirical:S440-dpa-054-D6-DD-executed -->
+DD-observed while running dpa-054 M9 (the harness replaced only that constructor line with the socket-path option form). Environment-dependent: a unix-socket `db=` URL does not work.
+
+### g-spec-20-5-1-page-limb-names-sessionexpiry — §20.5.1 resolution step 2 still reads the unit's raw `<page>` attribute for `sessionExpiry=`, which is outside §40.8's `<page>` attribute set — `NEW S440; LOW; open`
+<!-- @gap id=g-spec-20-5-1-page-limb-names-sessionexpiry sev=LOW status=open locus=compiler/SPEC.md:16728(§20.5.1 resolution order step 2) prov=spec:§40.8-page-attribute-set-PA-found-S440 -->
+PA-found. S440 #13 struck the `<page>` limb for `session-secure=` only; for `sessionExpiry=` the limb is dead (a `<page>` cannot carry the attribute). SPEC text: strike it for `sessionExpiry=` too, or add the attribute to §40.8 — the former matches S440 #13's reasoning.
+
+### g-tuple-shapes-report-map-literal-diagnostics — a tuple-shaped literal or type reports `E-MAP-LITERAL-MALFORMED` / `E-MAP-KEY-NOT-COMPARABLE` — `NEW S440; LOW; open`
+<!-- @gap id=g-tuple-shapes-report-map-literal-diagnostics sev=LOW status=open locus=searched:compiler/src/expression-parser.ts,compiler/src/type-system.ts(tuple syntax falls into the §59 map path) prov=empirical:S440-dpa-052-D4-DD-executed -->
+DD-executed (dpa-052 p11/p12). Until §66.12.5 lands, "tuples are not yet implemented (§66.12.5)" would be accurate.
+
+### g-value-semantics-divergence-conformance-under-covers — the §66.10 impl#1 alias divergence has five routes (both directions, structs and sequences) but its conformance note covers one; lifecycle writes are unchecked with no case — `NEW S440; LOW; open`
+<!-- @gap id=g-value-semantics-divergence-conformance-under-covers sev=LOW status=open locus=conformance(§66.10 impl#1-divergence case; §66.11.6 lifecycle-write case) prov=empirical:S440-dpa-052-D2-D3-D5-DD-executed -->
+dpa-052 D2/D3/D5: the mechanism is `_scrml_deep_reactive` proxies handed out on read (JS-WAT D#9–#12/#17/#72 are the same class). Carried by design (§66.10, §66.11.6); owed: conformance cases covering all five routes and the unchecked lifecycle write. `samples/gauntlet-s19-phase4/nested-comments.scrml` depends on the reference leak and a `@comments = [...@comments]` re-render nudge — a §66 migration test case as it stands. RULED S440 dpa-052 Q1: a dead-snapshot write becomes a compile error + `scrml fix`.
+
+### g-spec-66-tape-rulings-not-yet-written — S440's `tape` name and the dpa-052 rulings are not in §66.12 (SPEC has zero `tape` hits at `5e5c952cd`) — `NEW S440; LOW; open; RULED`
+<!-- @gap id=g-spec-66-tape-rulings-not-yet-written sev=LOW status=open locus=compiler/SPEC.md(§66.12,§66.19.5,§66.21) prov=ruling:user-voice-scrml.md-S440-sequence-kind-is-named-tape+dpa-052-Q1-Q10 -->
+dpa-052 D6: (a) `tape` is absent from §66.12; (b) §66.19.5's comment gives two reasons for one error; (c) §66.21's codemod rule must collapse `replace`-containing grant sets (Q7). SPEC pass owed.
+
+## §S440 — coercion inventory + bootstrap runtime (2026-09-28; PA-reproduced unless marked)
+
+### g-eq-001-misses-typed-cell-operands — `==` between cross-type typed CELLS compiles clean; only literal operands fire E-EQ-001 — `NEW S440; MED; open`
+<!-- @gap id=g-eq-001-misses-typed-cell-operands sev=MED status=open locus=compiler/src/gauntlet-phase3-eq-checks.js(PA-located-verify — the §34 row names it as the emitter; not traced) prov=spec:§45.3-"==-between-incompatible-types-is-a-compile-error" -->
+PA-reproduced S440 on `d244a6f3b`: `<n>: int = 3` · `<s>: string = "8"` · `${ @n == @s }` compiles with no diagnostic, while `${ 0 == false }` and `${ 3 == "3" }` in the same file each fire E-EQ-001. §45.3: *"`==` between incompatible types is a compile error. `0 == false` is E-EQ-001. The type system prevents cross-type comparison before the operator is evaluated."* Conformance restoration (newly-rejecting); the S440 truthiness measurement counts the corpus sites the fix would newly reject. Under the S435 TS policy impl#1 carries unless the bootstrap needs it; the bootstrap typer implements §45.3.
+
+### g-interpolation-renders-not-as-literal-null — `${expr}` whose value is `not` renders the text `"null"` — `NEW S440; MED; open; RULED`
+<!-- @gap id=g-interpolation-renders-not-as-literal-null sev=MED status=open locus=searched:SPEC §7.4.2(~L6228 "String() coercion … `null` and `undefined` produce the literal strings")—the SPEC itself specifies it prov=ruling:user-voice-scrml.md-S440-coercion-follow-ups-#3 -->
+The SPEC sentence at §7.4.2's interpolation rules says interpolation uses JS `String()`, so `not` (JS `null`) renders `"null"`. RULED S440 (#3): `${not}` renders NOTHING (consistent with S89 and with `class=` treating `not` as remove-the-attribute). Owed: the SPEC amendment (next S440 SPEC pass) and the bootstrap emitter; impl#1 carries (S435 policy).
+
+### g-select-enum-bind-stores-raw-string — `bind:value` on a `<select>` bound to an enum cell stores the raw string when no variant matches — `NEW S440; MED; open; RULED`
+<!-- @gap id=g-select-enum-bind-stores-raw-string sev=MED status=open locus=searched:SPEC §5.4(~L1641 "`(EnumTypeName_toEnum[event.target.value] ?? event.target.value)`")—the SPEC itself specifies the fallback prov=ruling:user-voice-scrml.md-S440-coercion-follow-ups-#4 -->
+The SPEC's generated `onchange` coercion for an enum cell is `toEnum[value] ?? value`, so an unmatched `<option value>` writes a string into an enum-typed cell. RULED S440 (#4, PA reading flagged for veto): if the cell admits `not`, an unmatched value writes `not`; otherwise the write is refused (cell unchanged) and static `<option value=>` literals are checked against the variant set at compile time. Owed: SPEC amendment + bootstrap; impl#1 carries.
+
+### g-bootstrap-runtime-flush-not-exception-safe — slice runtime `flush()` stops on a throwing effect, leaving queued effects stale — `NEW S440; MED; open`
+<!-- @gap id=g-bootstrap-runtime-flush-not-exception-safe sev=MED status=open locus=compiler/self-host-v2/slice-m1/runtime/runtime.js(flush) prov=empirical:S440-reland-r2-review-zzr2e-A1-A2 -->
+Reviewer-executed (S440 re-review of the #1109 re-land, probe `zzr2e.test.js` A1/A2): a watcher hole that makes an illegal transition throws during the Commit's flush; the stored state is fully applied (`{note:"x", phase:"Live"}`) but the rendered text shows `G: Draft/Draft/x` — effects queued after the throwing one never ran. Not a partial apply of the Commit; a stale-view failure. Fix direction: run every queued effect (collect errors, rethrow after the loop), per the dpa-051 §8.5 new runtime core.
+
+## §S438b — pre-existing defects surfaced by the S239 review of the F12–F14 fix (2026-09-27; reviewer-reproduced, reproducers in the S438 session scratch `rv-arms/`; NOT caused by the F12–F14 branch)
+
+### g-handler-alt-arm-body-only-last — a `!{}` handler arm `| ::B | ::C :> "bc"` gives the body only to the LAST alternate; `::B` yields null — `NEW S438; HIGH; open`
+<!-- @gap id=g-handler-alt-arm-body-only-last sev=HIGH status=open locus=searched:compiler/src/codegen/emit-control-flow.ts(error-handler arm lowering)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Silent wrong value: the alternation in an error-handler arm is not lowered as an OR-chain; the earlier alternates fall through with no body. Sibling of the value-`match` alternation class fixed by g-impl1-match-miscompiles F12 (that fix covers JS-style `match` arms only).
+
+### g-engine-msg-arm-alternation-emits-arms-as-text — an engine `accepts=` message arm with alternation (`| .End | .Drop(_) :> .Idle`) turns the state-child's WHOLE arm list into display text; no handler for that state — `NEW S440; HIGH; open`
+<!-- @gap id=g-engine-msg-arm-alternation-emits-arms-as-text sev=HIGH status=open locus=searched:compiler/src/codegen(engine state-child render / §51.0.S message-arm recognition)—not-traced prov=empirical:S440-review-of-#1119-e_c1-reproducer-PA-reproduced -->
+Silent wrong output (compiles clean). Reproducer (PA-reproduced S440 on `d244a6f3b`): `<engine for=DragPhase initial=.Idle accepts=DragMsg>` with `<Dragging(id) rule=.Idle>` containing `| .End | .Drop(_) :> .Idle` and `| _ :> @dragPhase` — the emitted client.js has no message handler for `Dragging` and instead `return "\n    | .End | .Drop(_) :> .Idle\n    | _ :> @dragPhase\n  ";` (the wildcard is lost with it). A binding alternation (`| .Start(id) | .Restart(id) :>`) behaves the same; the no-alternation control emits handlers correctly; a `${}`-wrapped variant instead raises a spurious E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE despite a `| _` arm. Pre-existing (identical on `fb21983a^1`). §51.0.S.2.3 says the message-arm grammar reuses the match arm grammar "verbatim", so the fix direction is lower-or-reject (E-MATCH-ALT-BINDING's §18.2 scope is JS-style `match` only). Sibling: g-handler-alt-arm-body-only-last (the `!{}` locus of the same alternation class). Under the S435 TS policy impl#1 carries this unless it serves the bootstrap; the bootstrap must implement §51.0.S arms from one arm grammar.
+
+### g-stmt-match-block-return-falls-through — a statement-position `match` whose arms are `{ return "a" }` blocks returns the fall-through value, not the arm's — `NEW S438; HIGH; open`
+<!-- @gap id=g-stmt-match-block-return-falls-through sev=HIGH status=open locus=searched:compiler/src/codegen/emit-control-flow.ts(match-stmt structuredBody IIFE — a `return` inside the arm returns from the IIFE, not the function)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Silent wrong value; direction unverified (the arm body is emitted inside the match IIFE, so its `return` exits the IIFE).
+
+### g-lib-positional-payload-binding-throws — library-mode (`${}` + `export function`) positional payload binding (`.W(a, b) :> a`) throws ReferenceError at runtime ("field order unknown") — `NEW S438; MED; open`
+<!-- @gap id=g-lib-positional-payload-binding-throws sev=MED status=open locus=compiler/src/codegen/emit-library.ts(never calls setVariantFieldsForFile — the per-file variant registry is empty in library mode) prov=empirical:S438-peter-and-S239-review -->
+Named binding works. Tag-only arms over a payload enum in library mode also compare the raw object to a string (the F16 shape, same-file). The parallel branch `fix/s438-impl1-imported-enum-match` (F11/F16 — TS-resolved subject variants) is expected to cover this; re-verify after it lands.
+
+### g-false-e-type-023-alt-arm-qualified-result — `.B | .C :> M.A` raises a false E-TYPE-023 (duplicate arm) — `NEW S438; MED; open`
+<!-- @gap id=g-false-e-type-023-alt-arm-qualified-result sev=MED status=open locus=searched:compiler/src/type-system.ts(splitMatchArms / parseArmPattern — the qualified `M.A` in the arm RESULT is read as another arm head)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Loud false rejection of a valid program.
+
+### g-arm-body-string-with-pipe-or-arrow-invalid-logic — a string containing `|` or `:>` in a match arm BODY yields E-CODEGEN-INVALID-LOGIC — `NEW S438; MED; open`
+<!-- @gap id=g-arm-body-string-with-pipe-or-arrow-invalid-logic sev=MED status=open locus=searched:compiler/src/codegen/emit-control-flow.ts(splitMultiArmString / parseMatchArm text re-split of bare-expr arms)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Loud. The text-based arm re-splitter sees the string content.
+
+### g-block-comment-brace-in-logic-ctx-001 — `/* } */` inside `${}` gives E-CTX-001 — `NEW S438; LOW; open`
+<!-- @gap id=g-block-comment-brace-in-logic-ctx-001 sev=LOW status=open locus=searched:compiler/src/block-splitter.js(block-comment containment pre-scan — a `}` in the comment reads as the context closer)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Loud; pre-existing (base identical).
+
+### g-regex-with-brace-in-logic-ctx-003 — a regex literal holding a brace (`/"{/`) inside `${}` gives E-CTX-003 — `NEW S438; LOW; open`
+<!-- @gap id=g-regex-with-brace-in-logic-ctx-003 sev=LOW status=open locus=searched:compiler/src/block-splitter.js(brace counting has no regex awareness; the F14 probe consults the tokenizer for QUOTE strings only)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Loud; pre-existing (base identical).
+
+### g-false-e-type-023-bare-variant-arm-body — a match arm whose BODY is a bare variant (`.Z :> .P(1)` / `.Q(_) | .R :> .Z` / `_ :> .R`) raises a false E-TYPE-023 "Duplicate match arm" — `NEW S438; MED; open`
+<!-- @gap id=g-false-e-type-023-bare-variant-arm-body sev=MED status=open locus=searched:compiler/src/type-system.ts(splitMatchArms — a `.Variant` in an arm RESULT is read as a new arm pattern)—not-traced prov=empirical:S438-final-review-rv-arms2-q11 -->
+Loud false rejection, before and after the F12–F14 branch. Same family as g-false-e-type-023-alt-arm-qualified-result (the typer's text arm splitter treats a variant-valued body as a pattern).
+
+## §S438c — gaps filed at the S438 wrap (2026-09-27, Peter; reviewer-executed unless marked)
+
+### g-bootstrap-m2-spread-overrides-write-in-sequence — slice M2 lowers `@p = { ...@p, x: @p.y, y: @p.x }` to sequential field writes with no temporaries, so later overrides read post-write state (1,2 → 2,2; genuine replace → 2,1) — `NEW S438-peter`; **HIGH**; open
+**PA-RE-EXECUTED on `072741ca`.** Also `{ ...@p, y: @p.x + 10, x: @p.y }` → 11,11 (want 2,11). No diagnostic; `checkCore` clean. §66.11.3 item 1 ("compiles exactly as the equivalent genuine replace does") and §66.10 item 1. Found by the S438 S239 review of #1109. Fix pre-built on **`hold/s438-1109-review-fixes` @ `eb3de63d`** (binds each override to a `Let` before the writes; PA re-ran slice-m2 89/0, lowered slice-m1 73/0). Open question for bryan: a spread's writes are still separate, so a runtime-refused later write leaves earlier ones applied — all-or-nothing? Lane: bryan (bootstrap).
+<!-- @gap id=g-bootstrap-m2-spread-overrides-write-in-sequence sev=HIGH status=open locus=compiler/self-host-v2/lower.scrml(spreadStmts) prov=empirical:PA-re-executed-probe3-swap-on-072741ca -->
+
+### g-bootstrap-m2-direct-handle-refused-inside-own-given — a direct `@color.value` read or write inside `given c = @color :> { … }` over a conditional handle is rejected E-DECL-HANDLE-NOT-NARROWED — `NEW S438-peter`; **MED**; open
+§66.7.5 (O56 RULED S435; reads amendment S437 #1108): "A direct `@handle.field = …` inside the narrowed block is legal". The `c.value` form works. Reviewer-executed. Fix on the same hold ref (`Env.narrows`). Lane: bryan.
+<!-- @gap id=g-bootstrap-m2-direct-handle-refused-inside-own-given sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(writeGuards/resolveAtRead) prov=review:S438-S239-of-1109-reviewer-executed -->
+
+### g-bootstrap-m2-spec-drift-guard-fails-on-crlf — slice-m2 `parse.test.js`'s §66.19 drift guard matches ```` ```scrml
+ ```` on raw text, so it finds nothing on a CRLF checkout (2 fails on Windows), and it checks "some block anywhere" not the §66.19.1/.3 blocks — `NEW S438-peter`; **LOW**; open
+Fix on the same hold ref (normalise CRLF, section-scoped). Lane: bryan.
+<!-- @gap id=g-bootstrap-m2-spec-drift-guard-fails-on-crlf sev=LOW status=open locus=compiler/self-host-v2/slice-m2/parse.test.js prov=review:S438-S239-of-1109-reviewer-executed -->
+
+### g-renamed-onion-entry-refuses-every-rebuild — after renaming a source that declares the request onion, every rebuild fails E-MW-007 until dist/ is cleared by hand (the old `.server.js` unit stays in dist and counts as a second onion) — `NEW S438-peter`; **MED**; open
+Reviewer-executed on `072741ca` (build `index.scrml` with `log="minimal"`, rename to `main.scrml`, rebuild). Neither base nor any branch deletes stale dist files. Pre-existing.
+<!-- @gap id=g-renamed-onion-entry-refuses-every-rebuild sev=MED status=open locus=compiler/src/commands/build.js(E-MW-007 over dist units incl. stale) prov=review:S438-dist-refusal-review-probe3 -->
+
+### g-compile-never-checks-e-mw-007 — `scrml compile --output-dir` accepts two request onions at exit 0 with no diagnostic (E-MW-007 is checked only where a server entry is generated, which `compile` never does) — `NEW S438-peter`; **MED**; open
+Reviewer-executed on `072741ca`. `scrml build` refuses the same input.
+<!-- @gap id=g-compile-never-checks-e-mw-007 sev=MED status=open locus=compiler/src/commands/compile.js prov=review:S438-dist-refusal-agent-repro -->
+
+### g-compile-output-dir-dot-eexist — `scrml compile app.scrml --output-dir .` crashes `EEXIST: file already exists, mkdir '.'` — `NEW S438-peter`; **LOW**; open
+Reviewer-executed on `072741ca`. Pre-existing.
+<!-- @gap id=g-compile-output-dir-dot-eexist sev=LOW status=open locus=compiler/src/api.js(mkdirSync(outputDir)) prov=review:S438-dist-refusal-review-F4 -->
+
+### g-derived-circular-dep-still-writes-output — §6.6.10 "A file with a circular derived dependency SHALL NOT produce compiled output", but E-DERIVED-CIRCULAR-DEP builds exit 1 and still write html/client/css/runtime — `NEW S438-peter`; **MED**; open
+Agent-executed on `072741ca` (also E-STATE-UNDECLARED writes). Every hard error writes artifacts today except the §2.2.1 emit gate; the §34 E-CG-TILDE-UNRESOLVED row records the family-wide write gate as deliberately deferred. Conformance defect against an existing SHALL; its fix is the "fail-closed on all hard errors" option in the dist-refusal ruling note to bryan.
+<!-- @gap id=g-derived-circular-dep-still-writes-output sev=MED status=open locus=compiler/src/api.js(write phase gates only on emitGateFailed) prov=spec:§6.6.10-SHALL-NOT-produce-compiled-output -->
+
+### g-types-gate-cannot-find-tsc-on-windows — `scripts/types-gate.ts` looks for `node_modules/.bin/tsc` and fails on this Windows clone (only `tsc.exe`) — `NEW S438-peter`; **LOW**; open
+Seen by two S438 reviewers; running tsc directly with the gate's arguments works. Tooling only.
+<!-- @gap id=g-types-gate-cannot-find-tsc-on-windows sev=LOW status=open locus=scripts/types-gate.ts prov=empirical:S438-two-reviewers -->
+
+### g-match-preprocess-rewrites-match-inside-string-literals — `preprocessMatchExprs` scans raw text with `/\bmatch\s+/` and no literal fence, so a string literal whose content reads `match x { … }` is rewritten and TRUNCATED — `NEW S440`; **HIGH** (silent wrong output); open
+Executed on `d9f183c41` (s440-f18 dispatch): `function g() { return "match x { .A => 1 }" }` emits `return "__scrml_match__(x, ";`. Same unfenced-text-pass class as f18 (`~`), but the pass is a multi-line balanced-brace scanner (its brace walk also ignores quoting), not a one-line `s.replace`, so it was NOT fenced in the f18 change; the fix is to skip string/template/regex/comment interiors in both the `match` search and the brace walk (e.g. find candidate `match` positions via `rewriteCodeSegments`-style segmenting).
+<!-- @gap id=g-match-preprocess-rewrites-match-inside-string-literals sev=HIGH status=open locus=compiler/src/expression-parser.ts(preprocessMatchExprs) prov=empirical:S440-f18-sibling-probe -->
+
+### g-tilde-keyword-inside-template-interpolation-leaks-placeholder — a §32 `~` read inside a template-literal interpolation (`` `v=${~}` ``) emits the raw placeholder `${__scrml_tilde__}` (a ReferenceError at run time) — `NEW S440`; **HIGH** (compiles exit 0, crashes at run time); open
+Executed on `d9f183c41` both before and after the f18 fix (pre-existing, not introduced): `inc(1)\nreturn \`v=${~}\`` → `` return `v=${__scrml_tilde__}`; ``. The multi-quasi `TemplateLiteral` arm of `esTreeToExprNode` keeps the template as `raw` sliced from the PREPROCESSED source, so every preprocess placeholder inside an interpolation survives into `raw`; the structural `__scrml_tilde__` → `~` reverse mapping (Identifier arm) never sees it, and the tilde-slot resolution in codegen never runs on it. Likely affects other preprocess placeholders inside interpolations too (not probed).
+<!-- @gap id=g-tilde-keyword-inside-template-interpolation-leaks-placeholder sev=HIGH status=open locus=compiler/src/expression-parser.ts(esTreeToExprNode TemplateLiteral multi-quasi raw) prov=empirical:S440-f18-keyword-probe -->
+
+### g-emit-lift-render-strip-is-unfenced-text-replace — `emit-lift.js` strips `render name(` and `__scrml_render_NAME__` back out of emitted code with whole-string regexes that do not skip string literals — `NEW S440`; **LOW** (unreproduced); open
+Found by reading during s440-f18 (the reverse direction of the `render` rewrite that f18 fenced in `preprocessForAcorn`). A user string containing `render foo(` or `__scrml_render_foo__` reaching these helpers would be rewritten to `foo(`. NOT reproduced end-to-end: the plain-logic probe (`return "render foo("`) does not route through emit-lift, so reach is unmeasured.
+<!-- @gap id=g-emit-lift-render-strip-is-unfenced-text-replace sev=LOW status=open locus=compiler/src/codegen/emit-lift.js(cleanRenderPlaceholder + render-strip helper above it) prov=code-read:S440-f18 -->
+
+### g-codegen-enum-colon-rewrite-unfenced — a regex literal whose body starts with `::Upper` (`/::A/`) is emitted as `/"A"/` — `NEW S440`; **MED** (silent wrong output, narrow trigger); open
+Executed on `d9f183c41` (pre-f18, pre-existing) and on the s440-f18 tip: `function k(s) { return /::A/.test(s) }` → `return /"A"/.test(s);`. The expression parser keeps the regex raw (`parseExprToNode("/::A/.test(s)")` gives a Literal escape-hatch with raw `/::A/`), so the corruption is in codegen: `rewriteEnumVariantAccess` runs unfenced whole-string `expr.replace` passes for `Enum::Variant` / `::Variant` → `"Variant"` (and `.Variant` → `"Variant"`), which do not skip string/regex/template/comment interiors. `/x::A/` survives only because the `(?<![A-Za-z0-9_$])` lookbehind happens to exclude it. Fix shape: route those replaces through `rewriteCodeSegments`, as preprocessForAcorn's passes now are.
+<!-- @gap id=g-codegen-enum-colon-rewrite-unfenced sev=MED status=open locus=compiler/src/codegen/rewrite.ts(rewriteEnumVariantAccess ::/.Variant string-tag replaces) prov=empirical:S440-f18-fix-round -->
+
+### g-tokenizer-regex-after-plus-minus-lexed-as-division-body-space-padded — a regex literal directly after a binary or unary `+` / `-` is lexed as PUNCT + code tokens and re-joined SPACE-PADDED: a different regex, exit 0, no diagnostic — `NEW S440`; **MED** (silent wrong output); open
+Executed on the s440-f18 fix-round-3 tip (pre-existing — the tokenizer is untouched by f18): `function p1() { return "a" + /x or y/.source }` → `return "a" + / x or y /.source;` (the source string gains two spaces); `function p2() { return 1 + +/a or b/.test("a or b") }` → `return 1 + +/ a or b /.test("a or b");` (evaluates to 1, not 2 — the padded pattern no longer matches). Control: `return /x or y/.source` is emitted verbatim. Cause: `isRegexContext` in the tokenizer deliberately omits `+ - * %` from `REGEX_PUNCT` ("to avoid false positives like x * /foo/.test()"), so a `/` after a binary/unary `+`/`-` lexes as division, the regex body lexes as ordinary tokens, and statement re-joining space-pads them (whitespace and `\` are significant inside a regex — the same mechanism the S412 `)`-limb comment in that function documents). Fix direction: after an operator token that cannot end a value (`+`, `-`, `*`, `%`, and the rest of the binary set) a `/` opens a regex in JS; the stated `x * /foo/` "false positive" is in fact a regex in JS too. Must stay consistent with `regexAllowedAfter` in `codegen/code-segments.ts` (which already treats a trailing `+`/`-` as regex context).
+<!-- @gap id=g-tokenizer-regex-after-plus-minus-lexed-as-division-body-space-padded sev=MED status=open locus=compiler/src/tokenizer.ts(isRegexContext REGEX_PUNCT omits + - * %) prov=review:S440-f18-rereview-P1-reproduced -->
+
+## §S441 — impl#1 stylesheet defects surfaced by the bootstrap CSS + `<theme>` T3 branch and its S441 review (2026-09-29; every entry re-executed at `aedcc6d61`+ in the s441-land-bootstrap-css-t3 worktree; reproducers in `docs/changes/s441-land-bootstrap-css-t3/repro/`)
+
+### g-impl1-each-row-css-block-dropped — a `#{}` inside an `<each>` row (`<li class="row">#{ .row { padding-left: 7px; } }…</li>`) is silently dropped: no CSS, no diagnostic — `NEW S441`; **HIGH** (silent wrong output — author CSS vanishes); open
+Executed: `repro/each.scrml` → the stylesheet holds only the reset layer; `padding-left` appears in no output field. The css oracle (`slice-m3/bench/css-oracle-both.js`) measures it in Chromium on `css-oracle/element-level-global`: `.row` 0px, SPEC 7px. Mechanism (read, not traced): `collectCssBlocks` (collect.ts) walks `children` and `logic.body` only, and an each-block holds its row under `bodyChildren`/`templateChildren`, so the block is never collected. Under ruling S440 all recs #2 item 4 (§9.1 DQ-6) the block is program-global.
+<!-- @gap id=g-impl1-each-row-css-block-dropped sev=HIGH status=open locus=compiler/src/codegen/collect.ts(collectCssBlocks — no descent into each-block bodyChildren/templateChildren) prov=review:S441-css-t3-review -->
+
+### g-impl1-flat-css-block-on-plain-element-emits-dead-css — a flat-declaration `#{ color: blue; padding: 4px; }` in a plain (non-component) element is emitted as bare declarations inside `@layer global { … }` with no selector — invalid CSS the browser discards; no diagnostic — `NEW S441`; **MED** (silent no-op); open
+Executed: `repro/el.scrml` → `@layer global {\n.box p { color: red; }\ncolor: blue; padding: 4px;\n}`, no `style=` on the `<section>`. The flat-block case is UNRULED (§9.1 DQ-6 ⚑ OPEN note, S441): whatever the ruling, emitting dead CSS silently is wrong — a diagnostic until it is ruled. Emit site: the program/global path of `emit-css.ts` renders a flat block's declarations verbatim (only the component path skips `isFlatDeclarationBlock`); `emit-html.ts` inlines a flat block only when the element carries `_expandedFrom`.
+<!-- @gap id=g-impl1-flat-css-block-on-plain-element-emits-dead-css sev=MED status=open locus=compiler/src/codegen/emit-css.ts(global inline-block path; no isFlatDeclarationBlock check) prov=review:S441-css-t3-review -->
+
+### g-impl1-flat-css-block-nested-in-component-dropped — a flat-declaration `#{ padding: 3px; }` on an element NESTED inside a component (not the constructor root) is silently dropped: no `style=`, no CSS, no diagnostic — `NEW S441`; **MED** (silent wrong output); open
+Executed: `repro/flat.scrml` → the root's `#{ color: red; }` becomes `style="color: red;"` as DQ-7 says; the nested `3px` appears in no output field. SPEC DQ-7 says a flat block in a constructor scope inlines "on the containing element", but whether that covers a nested element is UNRULED (§9.1 DQ-6 ⚑ OPEN note, S441). Mechanism: `emit-html.ts` pre-scans for flat blocks only when `node._expandedFrom` is set (the root), and `emit-css.ts` skips every flat component block — so a nested one falls through both. The bootstrap shim refuses it (not-yet) since S441.
+<!-- @gap id=g-impl1-flat-css-block-nested-in-component-dropped sev=MED status=open locus=compiler/src/codegen/emit-html.ts(DQ-7 flat pre-scan gated on node._expandedFrom)+compiler/src/codegen/emit-css.ts(component path skips isFlatDeclarationBlock) prov=review:S441-css-t3-review -->
+
+### g-impl1-line-comment-in-css-block-becomes-css — a `//` comment inside `#{}` is not a comment: between declarations its words become garbage declarations; before a rule it is glued onto the selector — `NEW S441`; **HIGH** (silent wrong output; §27.1 "`//` is valid in all scrml contexts", §27.2 lists `//` for CSS); open
+Executed: `repro/comment2.scrml` (`.panel { color: red; // subtle scanline overlay\n padding: 4px; }`) → `.panel { color: red; subtle: ; scanline: ; overlay: ; padding: 4px; }`; `repro/comment.scrml` (a component, `// a comment` above `.card { … }`) → `:where(a comment\n .card) { color: red; }` — a selector that matches nothing, so the rule is silently dead. First seen S440 on `gauntlet-s79-calculator` (s440-bootstrap-css-theme-t3 progress.md); the bootstrap shim fails closed on it. Locus not traced: the `#{}` CSS tokenizer/rule parser drops the `//` marker but keeps the comment text.
+<!-- @gap id=g-impl1-line-comment-in-css-block-becomes-css sev=HIGH status=open locus=searched:compiler/src/tokenizer.ts(the css-inline rule/declaration tokenizer — not traced) prov=review:S441-css-t3-review -->
+
+### g-impl1-universal-selector-not-a-floor — a component `#{ .btn { padding: 16px; } * { padding: 0; } }` gives `.btn` 0px: `*` is emitted as a same-level `:where(*)` rule after `:where(.btn)`, so source order wins, not the §65.2.4 R1 floor — `NEW S441`; **MED** (silent wrong cascade vs SPEC); open
+Executed: `repro` source = `compiler/self-host-v2/slice-m3/css-oracle/sources/r1-floor-order.scrml` → `@scope ([data-scrml="Card"]) to ([data-scrml]) {\n:where(.btn) { padding: 16px; } :where(*) { padding: 0; }\n}`; `bun compiler/self-host-v2/slice-m3/bench/css-oracle-both.js --filter r1-floor` → `impl#1: step 1: #b[0] padding-top = "0px", SPEC says "16px"` (the CSS-swapped hybrid passes). SPEC §65.2.4 R1: a user-authored `*` / `html` / `body` rule is an author-reset floor "resolved **below** class/id/specific author rules in the §65.5 precedence order". impl#1 uses R1 only to silence `E-STYLE-CONFLICT`; the emitter never places the rule below.
+<!-- @gap id=g-impl1-universal-selector-not-a-floor sev=MED status=open locus=compiler/src/codegen/emit-css.ts(component @scope emission — `*` / html / body rules not layered below) prov=review:S441-css-t3-review -->
+
+
+## §S441c — async-escape (F4/F5) review residuals (2026-09-29; review:S441-f4f5-review, reviewer-executed at `3807f2df7`; every reproducer re-compiled on the fix-round tree — reproducers in `docs/changes/s441-async-escape-f4-f5/review-repro/`, run with `bun docs/changes/s441-async-escape-f4-f5/review-repro/run.ts <compilerRoot>`)
+
+The s441-async-escape-f4-f5 branch closed F4/F5 and the #1139 false positives; its review found the holes below. They are the remaining positions where a server / async call's Promise reaches a synchronous consumer. SPEC §13.2 lists them as carried impl#1 gaps.
+
+### g-promise-all-batch-puts-unawaited-call-under-sync-operator — in a client function, the §13.2 parallel batch (`const [a, b] = await Promise.all([...])`) puts an un-awaited server call under `?` / `!` / `&&` / an object or array literal, so the operator tests the Promise — `NEW S441`; **HIGH** (SECURITY: accept-all); open
+Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/c-batch-ternary`, `c-batch-not`, `c-batch-and`, `c-batch-obj`, `c-batch-arr`: `const b = isOk(2) ? "accepted" : "rejected"` beside an independent `const a = isOk(1)` emits `const [a, b] = await Promise.all([_scrml_fetch_isOk(1), _scrml_fetch_isOk(2) ? "accepted" : "rejected"])` — the element is the ternary over a PROMISE, always "accepted". Compiles clean on base and on the fix round. The batch elements must be the bare calls (await the call, then apply the operator), or a statement whose server call sits under an operator must not be batched. Governing: §13.2 SHALL await every server call site. Scheduler: `compiler/src/codegen/scheduling.ts` (the Promise.all batch builder).
+<!-- @gap id=g-promise-all-batch-puts-unawaited-call-under-sync-operator sev=HIGH status=open locus=compiler/src/codegen/scheduling.ts(Promise.all batch — elements are whole initializers, not the server calls) prov=review:S441-f4f5-review -->
+
+### g-markup-gate-tests-server-call-promise — a markup gate or attribute over a server call (`if=(isOk(1))`, `show=(isOk(1))`, `disabled=(isOk(1))`, `${isOk(1) ? … : …}`) tests / renders a Promise: the gate is always open — `NEW S441`; **HIGH** (SECURITY: a gated element always shows); open — **next to be fixed**
+Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/mk-if`, `mk-show`, `mk-disabled`, `mk-interp`: `<p if=(isOk(1))>SECRET</p>` emits `if ((_scrml_fetch_isOk(1))) _scrml_if_mount…` — mounted for every answer. `${isOk(1) ? "a" : "b"}` wraps the whole ternary in `await (…)`, so the ternary still tests the Promise. Compiles clean. The display/attribute predicate lowering (`emit-event-wiring.ts` `computeDisplayToggleCondition` and the attribute effect writers) never went through §13.2. Fix direction: a gate that reads a server call awaits it (async effect with a stale-guard) or is refused with a diagnostic pointing at a cell (`<ok> = isOk(1)` then `if=@ok`).
+<!-- @gap id=g-markup-gate-tests-server-call-promise sev=HIGH status=open locus=compiler/src/codegen/emit-event-wiring.ts(display / attribute predicate lowering)+compiler/src/codegen/emit-html.ts prov=review:S441-f4f5-review -->
+
+### g-top-level-async-closure-called-later-accept-all — a TOP-LEVEL `const check = (n) => isOk(n)` (or a function expression, or an object method wrapping a server call) is emitted sync, and a later `check(1) ? … : …` tests its Promise — accept-all, no diagnostic — `NEW S441`; **HIGH** (SECURITY); open
+Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/tl-arrow-const`, `tl-arrow-handler`, `tl-fnexpr-const`, `tl-obj-method`. The async coloring (`computeAsyncFnNames`) and the escape check (E-ASYNC-FN-ESCAPES-AS-VALUE) see `function` declarations only; a top-level arrow / function expression / method bound to a name is neither colored async nor treated as async-colored at its call sites. Fix direction: color a top-level `const f = <lambda>` like a function declaration (it is one in every respect that matters here), or refuse a server call inside a top-level lambda.
+<!-- @gap id=g-top-level-async-closure-called-later-accept-all sev=HIGH status=open locus=compiler/src/codegen/emit-library-shared.ts(computeAsyncFnNames — function-decl only)+compiler/src/codegen/emit-reactive-wiring.ts(top-level lambda emission) prov=review:S441-f4f5-review -->
+
+### g-cross-file-async-helper-called-unawaited — an imported helper that calls a server function (`export function check(n) { return isOk(n) }` in `lib.scrml`) is emitted `async` in its module but the importer calls it un-awaited; aliasing it raises no E-ASYNC-FN-ESCAPES-AS-VALUE — `NEW S441`; **HIGH** (SECURITY: accept-all across a module boundary); open
+Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/xf-call-fn`, `xf-call-handler`, `xf-alias-fn`, `xf-alias-handler`, `xf-obj-fn`, `xf-toplevel-obj` (each with its `lib.scrml`). The importer's async facts come from `_asyncImportedLocals` / `asyncExportNamesOf`, which do not carry "calls a server function in its own module" for this shape; both the await and the escape rule key on those facts. Related: g-crossmodule-async-in-markup-position-not-awaited (S317, the markup position).
+<!-- @gap id=g-cross-file-async-helper-called-unawaited sev=HIGH status=open locus=searched:compiler/src/codegen/emit-functions.ts(_asyncImportedLocals seed)+module-resolver(asyncExportNamesOf)—not-traced prov=review:S441-f4f5-review -->
+
+### g-top-level-derived-from-async-helper-holds-promise — a top-level `const ok = isOk(1)` / `<ok> = m(1)` (with `m` a client async helper) stores the Promise; a handler's `ok ? … : …` / `@ok ? … : …` is always "accepted" — `NEW S441`; **MED**; open
+Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/t2-const-derived`, `t2-derived-helper`. `<ok> = isOk(1)` (a direct server call) is lifted and awaited; the CLIENT-helper form and the plain top-level `const` are not. Module-init positions are outside the function-body await machinery (§13.2). MED: a derived constant, not a check written against a call; still a wrong value.
+<!-- @gap id=g-top-level-derived-from-async-helper-holds-promise sev=MED status=open locus=searched:compiler/src/codegen/emit-client.ts(post-server-fn-iife-wrap keys on fetch stubs, not async client helpers)+emit-reactive-wiring.ts(top-level const) prov=review:S441-f4f5-review -->
+
+### g-handler-local-shadowing-server-fn-renamed-to-fetch — a handler-local binding named like a server function (`onclick=${ const isOk = (n) => false; @v = isOk(1) ? … }`) is rewritten by the scope-blind post-emit renamer to the fetch stub: the analysis sees the local, the renamer does not — `NEW S441`; **MED**; open
+Reproducer `docs/changes/s441-async-escape-f4-f5/review-repro/h-shadow-local` (also `srv-s-shadow-name.scrml`). The js-async-analysis resolves `isOk` to the local (no await), then the fnNameMap mangle (`emit-client.ts` post-fn-name-mangle, a text pass) renames `isOk(1)` to `_scrml_fetch_isOk_N(1)` — an un-awaited fetch in a condition. Same class as g-mangler-scope-blind-shorthand-key-rename (S325): the renamer needs scope, or the analysis must run after it.
+<!-- @gap id=g-handler-local-shadowing-server-fn-renamed-to-fetch sev=MED status=open locus=compiler/src/codegen/emit-client.ts(post-fn-name-mangle — scope-blind) prov=review:S441-f4f5-review -->
+
+### g-handler-independent-server-calls-serialized — in an inline handler / `on mount` body, independent server calls are awaited one after another; §13.2 requires parallelization — `NEW S441`; **LOW** (correct values, extra latency); open
+Reproducer `docs/changes/s441-async-escape-f4-f5/review-repro/par-par.scrml`: `onclick=${ a(3); b(4) }` emits `await a(3); await b(4);`. Function bodies get the `Promise.all` scheduler; handler / mount bodies (analysed as emitted text since s441) do not.
+<!-- @gap id=g-handler-independent-server-calls-serialized sev=LOW status=open locus=compiler/src/codegen/js-async-analysis.ts(transform adds awaits in order; no batching) prov=review:S441-f4f5-review -->
+
+### g-promise-method-on-awaited-call-through-a-binding-not-caught — `const p = isOk(1); p.then(…)` in a handler / `on mount` body is not E-ASYNC-CALL-PROMISE-METHOD: `p` holds the awaited value and `.then` throws a TypeError at run time — `NEW S441`; **LOW** (loud runtime TypeError, not silent); open
+From the round-2 review probes (session scratch `rv-f4f5-r2-out/{ev,pm}/`): `pm/alias-then.scrml`. The check reads `.then`/`.catch`/`.finally` only directly off the awaited call (`isOk(1).then`, `isOk(1)["then"]` since round 3). A binding that holds the awaited value is not followed. Fix direction: follow simple `const` bindings of an awaited call as the event-control check follows event aliases.
+<!-- @gap id=g-promise-method-on-awaited-call-through-a-binding-not-caught sev=LOW status=open locus=compiler/src/codegen/js-async-analysis.ts(checkPromiseMethod — direct parent only) prov=review:S441-f4f5-review-r2 -->
+
+### g-promise-method-check-fires-on-a-then-field-read — `String(getRec().then)` (a server fn returning a record with a `then` FIELD) is rejected by E-ASYNC-CALL-PROMISE-METHOD — `NEW S441`; **LOW** (false positive, loud); open
+From the round-2 review probes (session scratch `rv-f4f5-r2-out/{ev,pm}/`): `pm/field-named-then.scrml`. The check fires on any member read named `then`/`catch`/`finally` off an awaited call, not only a CALL of it. Narrowing to a call (`parent` is the callee of a CallExpression) would clear it; a record field named `then` is also a thenable hazard under `await`, so the right rule is a design question (flag the field at the type).
+<!-- @gap id=g-promise-method-check-fires-on-a-then-field-read sev=LOW status=open locus=compiler/src/codegen/js-async-analysis.ts(checkPromiseMethod) prov=review:S441-f4f5-review-r2 -->
+
+### g-event-control-after-await-in-a-named-handler-function — `onsubmit=handle(event)` where `function handle(e) { … server call … ; e.preventDefault() }` compiles clean: the preventDefault runs after the function's first await — `NEW S441`; **MED** (the form submits); open
+From the round-2 review probes (session scratch `rv-f4f5-r2-out/{ev,pm}/`): `ev/named-fn.scrml`. E-EVENT-CONTROL-AFTER-AWAIT covers handler TEXT (inline / block / row / lift handlers); a named function reached through a call-ref handler is an ordinary async function body and was async on main too (not a regression of this branch). Fix direction: in a function passed the event by a call-ref handler, apply the same rule to the parameter the event is bound to.
+<!-- @gap id=g-event-control-after-await-in-a-named-handler-function sev=MED status=open locus=compiler/src/codegen/emit-functions.ts+compiler/src/codegen/emit-event-wiring.ts(call-ref handlers) prov=review:S441-f4f5-review-r2 -->
+> **S441 round 4 (review:S441-f4f5-review-r3, cases `h01`, `h02`, `h04`, `h09`, `c02` in the round-3 review scratch `f4f5-rr3/cases/`):** still open after the handler-body rule became binding poisoning. The handler text passes `event` to a named function (`onsubmit=h(event)`, `onclick=h(event)`, or `${ h(event) }` where the call itself is awaited, so the argument is evaluated before the handler yields); the named function awaits and then calls `e.preventDefault()` / `e.stopPropagation()` on its parameter. Not a regression of the branch (the function body was async on main). Fix direction: apply the same poisoning to the parameter of a function that a handler calls with its event, or refuse passing the event to an async function.
+
+> **Round-3 residuals of E-EVENT-CONTROL-AFTER-AWAIT (review N2/N3), conservative by design, SPEC §13.2 names them:** "after" is source order, so `if (c) { … await … } else { event.preventDefault() }` (`ev/else-branch.scrml`) and a call after an `await` in a branch that was not taken (`ev/first-await-in-untaken-if.scrml`) are rejected though they would run in time. A closure passed elsewhere (not invoked by name after the await) is not traced.
+
+> **Not filed, pre-existing, noted for the fix of E-ASYNC-CALL-PROMISE-METHOD's reach:** `docs/changes/s441-async-escape-f4-f5/review-repro/then-fn` — `isOk(1).then(…)` inside an ordinary FUNCTION body emits `(await f(1)).then(…)` (a TypeError) on base `cf62b4154` too; the new code covers handler and `on mount` bodies only. Carried under g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources.
+
+## §S441c — security-review findings at the S441 wrap (2026-09-29; PA-reproduced where marked, otherwise reviewer-executed; reproducers in the S441 session scratch `protect-rr3/`, `protect-rr4/`, `static-rr/`, `csrf-rr3/`, `f4f5-rr4/`)
+
+### g-protect-origin-match-case-sensitive — `protect=` origin matching is case-sensitive; SQLite identifiers are not: `SELECT * FROM USERS …` emits no `_scrml_protect_tag`, so even the whole-row strip is gone — `NEW S441`; **HIGH** (security, fail-open); open
+PA-reproduced on main `3c4e6cf47`: `getUser` returning `?{\`SELECT * FROM USERS WHERE id = ${id}\`}.get()…` served `{"id":1,"name":"bob","passwordHash":"SECRET-HASH-123"}`. Also `SELECT PASSWORDHASH`, `passwordhash AS x`, `u.PasswordHash`. A fix is on the held branch `worktree-agent-a8aefdb4c19a10c1a` but the round-4 review found it half-done: tags record the SURFACE spelling (`["PASSWORDHASH"]`) and the runtime redactor compares keys exact-case, so `SELECT PASSWORDHASH … return u` still ships. Fix: normalise case at tag, redactor and flow.
+<!-- @gap id=g-protect-origin-match-case-sensitive sev=HIGH status=open locus=compiler/src(resolveProtectedOutputColumns + runtime _scrml_protect redactor key compare) prov=empirical:S441-PA-f3main -->
+
+### g-protect-sql-expression-column-no-descriptor — an output column that is a SQL EXPRESSION over a protected column (or quoted/bracketed/subquery) gets no protect descriptor, so the value ships — `NEW S441`; **HIGH** (security, fail-open); open
+Reviewer-executed (round-4 review, served over HTTP): `passwordHash || '' AS x`, `CAST(passwordHash AS TEXT)`, `substr(…)`, `coalesce(…)`, `lower(…)`, `hex(…)`, `json_object('h', passwordHash)`, `group_concat(…)`, `"passwordhash" AS x`, `[passwordHash] AS x`, `(SELECT passwordHash FROM users LIMIT 1) AS q`, `pin + 0 AS x` — all return the value from a plain `return u`. Pre-existing on main. SPEC §14.8.9 requires an unresolvable origin to degrade to the wholesale strip. Fix: any output column whose expression references a protected column (case-insensitively) or cannot be resolved gets `cols:"*"`.
+<!-- @gap id=g-protect-sql-expression-column-no-descriptor sev=HIGH status=open locus=compiler/src(resolveProtectedOutputColumns — expression output columns) prov=review:S441-protect-r4-review -->
+
+### g-sql-get-trailing-member-dropped — `return ?{…}.get().passwordHash` emits code returning the WHOLE ROW; the trailing member read is dropped — `NEW S441`; **MED** (silent wrong output; masked for protected columns by the row strip); open
+PA-observed on main `3c4e6cf47` (the f3main probe returned the whole row, not the field). Needs a non-protected-column reproducer to confirm scope.
+<!-- @gap id=g-sql-get-trailing-member-dropped sev=MED status=open locus=searched:compiler/src/codegen(SQL chain .get() member continuation) prov=empirical:S441-PA-f3main -->
+
+### g-reexport-only-module-emits-no-server-js — a `.scrml` that only re-exports (`export { nm } from './b.scrml'`) emits no `.server.js`, so an importer's `./c.server.js` import dangles — `NEW S441`; **MED** (broken output; fails closed under protect); open
+Reported by the protect round-3 agent (case X1c). Needs PA reproduction.
+<!-- @gap id=g-reexport-only-module-emits-no-server-js sev=MED status=open locus=searched:compiler/src/codegen(server module emission for re-export-only files) prov=review:S441-protect-r3 -->
+
+### g-static-manifest-closure-steerable-by-string-literal — the client-asset manifest's import closure regex-scans raw bundle text, so a client string literal can admit an arbitrary dist file (e.g. a non-`.db`-named database) — `NEW S441`; **MED** (security; needs author-written string); open
+Reviewer-reproduced on #1162's merged tip `7cff98bb9`: 03-contact-book with `<db src="contacts.data">` plus a client fn returning `"see import './contacts.data'"`, rebuilt in place → manifest lists `contacts.data`, `GET /contacts.data` = 200 with the database. Fix: follow closure targets ending `.js`/`.mjs` only (parse imports with acorn) and add every declared `<db src>` path to the denied set.
+<!-- @gap id=g-static-manifest-closure-steerable-by-string-literal sev=MED status=open locus=compiler/src/static-serve-policy.js(collectClientAssets) prov=review:S441-static-review -->
+
+### g-static-no-public-dir-convention — author-placed static files (`robots.txt`, `site.webmanifest`, PDFs, `.well-known/acme-challenge/*`, JSON, vendored JS) now 404 with no way to admit them — `NEW S441`; **LOW** (design gap, fail-closed by §47.13); ruling-gated
+Intended by §47.13 (#1162), which admits only build outputs plus passive media. A declared `public/` directory (copied into dist and added to the manifest) is a LANGUAGE decision for bryan. Operator cost: ACME/TLS and security.txt break.
+<!-- @gap id=g-static-no-public-dir-convention sev=LOW status=ruling-gated locus=compiler/SPEC.md(§47.13) prov=review:S441-static-review -->
+
+### g-static-svg-served-without-csp — passive-media SVG is served with no CSP; an SVG opened as a document runs its own script, contradicting §47.13's "none of these types runs as script" — `NEW S441`; **LOW**; open
+Fix: send `Content-Security-Policy: script-src 'none'` (or `sandbox`) on `.svg`, or drop the claim.
+<!-- @gap id=g-static-svg-served-without-csp sev=LOW status=open locus=compiler/src/static-serve-policy-emitted.js prov=review:S441-static-review -->
+
+### g-static-manifest-worker-bundles-not-seeded — the manifest seeds only `.html`/`.css`/`.client*.js`; when worker bundles are written (they are not yet — dpa-056 D1) they will 404 — `NEW S441`; **LOW**; open
+<!-- @gap id=g-static-manifest-worker-bundles-not-seeded sev=LOW status=open locus=compiler/src/static-serve-policy.js(collectClientAssets seeds) prov=review:S441-static-review -->
+
+### g-static-manifest-written-on-failed-build — a failed build (E-PA-002) still writes `.scrml-client-assets.json` — `NEW S441`; **LOW** (fails closed); open
+<!-- @gap id=g-static-manifest-written-on-failed-build sev=LOW status=open locus=compiler/src/api.js(compileScrml manifest write) prov=review:S441-static-review -->
+
+### g-precommit-runtime-tests-silently-skip-under-happy-dom — in-process runtime tests guarded by `typeof globalThis.document !== "undefined"` return early when the pre-commit hook runs unit+integration+conformance in ONE bun process (happy-dom globals leak in from sibling browser tests), so a red test passes; and `compiler/tests/commands/` is not in the hook set at all — `NEW S441`; **MED** (test-gate hole; a green hook overstates coverage); open
+Found by the CSRF agent: `csrf-canonical-delivery.test.js` failed alone (8 pass/1 fail) but passed after `stdlib-client-registry.test.js` (46/0), which is how a red commit got through. `auth-protected-document-served` (commands/) never runs in the hook. Fix: run such runtime tests in a child process (as the new CSRF/WS/static tests do) or reset globals; add `compiler/tests/commands` to the hook.
+<!-- @gap id=g-precommit-runtime-tests-silently-skip-under-happy-dom sev=MED status=open locus=.git-hooks pre-commit + compiler/tests/integration(runtime-guarded tests) prov=empirical:S441-csrf-r3 -->
+
+### g-csrf-compose-meta-dev-prod-parity — prod fills the CSRF meta only on the compose route's exact path (`/`); authenticated `GET /index` and `/index.html` get `meta=""` and no SSR seed, so the first mutation costs a 403 + retry; dev fills every path that resolves to the document — `NEW S441`; **LOW**; open
+<!-- @gap id=g-csrf-compose-meta-dev-prod-parity sev=LOW status=open locus=compiler/src/commands/build.js(generateServerEntry compose routing) prov=review:S441-csrf-r3-review -->
+
+### g-dev-hotreload-stale-server-module-keeps-guard — dev never cleans its output dir; after a recompile removes auth AND the server fns, the stale `index.server.js` keeps its guard and the now-public page stays 302 — `NEW S441`; **LOW** (fails closed; prod `scrml build` has the same stale-output exposure); open
+<!-- @gap id=g-dev-hotreload-stale-server-module-keeps-guard sev=LOW status=open locus=compiler/src/commands/dev.js(output-dir staleness) prov=review:S441-csrf-r3-review -->
+
+### g-example23-login-redirect-404 — 23-trucking-dispatch's auth gate redirects to `/login` but the page lives at `/auth/login`, so the prod server 404s — `NEW S441`; **LOW** (flagship example); open
+<!-- @gap id=g-example23-login-redirect-404 sev=LOW status=open locus=examples/23-trucking-dispatch(auth loginPath) prov=review:S441-static-review -->
+
+### g-event-control-after-await-loop-back-edge — E-EVENT-CONTROL-AFTER-AWAIT orders by SOURCE position, so a control call that sits BEFORE the await in a loop body but runs on the next pass is missed — `NEW S441` (#1163); **MED** (regression vs the pre-#1163 sync handler: the form submits natively); open
+Reviewer-executed (`f4f5-rr4/c/b07-loop`, `b08-while`): `onsubmit=${ for (let i = 0; i < 2; i++) { if (i > 0) { event.preventDefault() } @verdict = isOk(i) ? "a" : "r" } }` builds. Fix: inside any loop whose body has an own-level await, every use in the loop counts as after it.
+<!-- @gap id=g-event-control-after-await-loop-back-edge sev=MED status=open locus=compiler/src/js-async-analysis.ts(event poisoning — await ordering) prov=review:S441-f4f5-r4-review -->
+
+### g-event-taint-container-mutation — mutating an EXISTING container with the event is not a taint source: `box.push(event)`, `o.e = event`, `arr[0] = event`, `m.set("e", event)`, `Object.defineProperty(o,"e",{value:event})`, `o.f = () => event.preventDefault()`, `window.pd = …` all ship control after an await — `NEW S441` (#1163); **MED** (regression vs the sync handler); open
+Reviewer-executed (`f4f5-rr4/c/b01,b02,b03,b04,b14,b15,b21,b24`). Fix: a tainted value on the right of a member write, or as an argument to any call before the await, taints the root object and the receiver.
+<!-- @gap id=g-event-taint-container-mutation sev=MED status=open locus=compiler/src/js-async-analysis.ts(event taint fixpoint) prov=review:S441-f4f5-r4-review -->
+
+### g-event-taint-arguments — `const a = arguments; …await…; a[0].preventDefault()` builds: `arguments` in the root handler is not tainted — `NEW S441` (#1163); **LOW**; open
+<!-- @gap id=g-event-taint-arguments sev=LOW status=open locus=compiler/src/js-async-analysis.ts prov=review:S441-f4f5-r4-review -->
+
+### g-scheduler-exemption-per-file-not-per-build — the global-scheduler exemption is decided per FILE; a helper module that writes `globalThis.setTimeout = (f)=>f(1)` (in an exported fn or at top level) leaves the app's `setTimeout(isOk) ? "a" : "r"` exempt → accept-all — `NEW S441` (#1163); **MED** (security; a polyfill/fake-timer shim is a plausible source); open
+Reviewer-executed (`f4f5-rr4/c/a17-xmod`, `a19-xmod-sideeffect`). Fix: withdraw the exemption for any name ANY module in the build withdraws.
+<!-- @gap id=g-scheduler-exemption-per-file-not-per-build sev=MED status=open locus=compiler/src/js-async-analysis.ts(schedulerNamesNotProvablyGlobal) prov=review:S441-f4f5-r4-review -->
+
+### g-scheduler-computed-reflective-global-write — non-literal computed or reflective writes onto `globalThis`/`window` (`globalThis["set"+"Timeout"]=`, `` globalThis[`setTimeout`]= ``, `globalThis[k]=`, `Object.defineProperty(globalThis,"set"+"Timeout",…)`) do not withdraw the exemption — `NEW S441` (#1163); **LOW**; open
+Fix: a non-literal-key write or reflective write onto a global object withdraws every scheduler name.
+<!-- @gap id=g-scheduler-computed-reflective-global-write sev=LOW status=open locus=compiler/src/js-async-analysis.ts(schedulerNamesNotProvablyGlobal) prov=review:S441-f4f5-r4-review -->
+
+### g-async-escape-rules-false-positives — fail-closed false positives from #1163: an object key named `setTimeout` (`{setTimeout:5}`) withdraws the exemption file-wide; a nested plain-value destructure `const {target:{value}} = event` before an await is rejected; `typeof event` after an await is rejected — `NEW S441` (#1163); **LOW**; open
+<!-- @gap id=g-async-escape-rules-false-positives sev=LOW status=open locus=compiler/src/js-async-analysis.ts prov=review:S441-f4f5-r4-review -->
+
+## §S442 — dpa-058 (O25 renders/bind/validators) defects D1-D9 (2026-09-29; D1 fixed in impl#1 per bryan S442 ruling item 1(6); D2-D9 each re-executed on `650c47c2` in the s442-textarea-d1 worktree; probe sources = the repro lines below, compiled with `bun run compiler/src/cli.js compile <file> -o <dir>`)
+
+### g-emit-html-self-closed-non-void-element — a self-closed non-void element (`<textarea bind:value=@x/>`, `<div/>`, `<span/>`, an unknown `<card/>`) was emitted as `<tag … />`; the HTML parser ignores the `/`, so a textarea swallowed the rest of the document as text and a div reparented every following sibling — `NEW S442 (dpa-058 D1)`; **HIGH**; resolved
+Repro: `<program>${ @x = "" }<main><form><textarea bind:value=@x/><select>…</select><input/>×4</form></main></program>` → Chromium: `selects: 0, inputs: 0`, textarea.value = the following markup. Governing rule: HTML Living Standard parse error `non-void-html-element-start-tag-with-trailing-solidus` ("The parser behaves as if the U+002F (/) is not present"); no scrml SPEC sentence covers emitted-HTML void handling (searched §24, §4.14, §4.17/§24.3.1, §15). Fix: `emit-html.ts` emits `/>` only where `utils.ts:htmlParserHonorsSelfClose` says the parser honours it (HTML void elements; svg/math foreign content); everything else gets `</tag>`. Recompile of examples/ + samples/compilation-tests/ (839 units): 5 HTML files changed, all self-closed non-void; JS byte-identical. examples/23 was NOT affected at `650c47c2` (its textarea render sites already write `</textarea>`; the 3 Shape-2 `= <textarea/>` decls are never rendered by tag). Tests: `compiler/tests/unit/html-self-close-non-void-d1.test.js`.
+<!-- @gap id=g-emit-html-self-closed-non-void-element sev=HIGH status=resolved locus=compiler/src/codegen/emit-html.ts(the `isVoid || isSelfClosing` open-tag close)+compiler/src/codegen/utils.ts(htmlParserHonorsSelfClose) prov=dd:scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md -->
+
+### g-render-by-tag-req-with-message-drops-required — `req("msg")` on a Shape-2 decl lowers to NO `required` attribute; bareword `req` does — `NEW S442 (dpa-058 D2)`; **MED** (native validation silently missing; example 30's `name`/`agree` hit it); open
+Repro: `<program><f><n req("msg")> = <input type="text"/><m req> = <input type="text"/></><main><f><n/></><f><m/></></main></program>` → `<input type="text" data-scrml-render-by-tag=…_1 />` (no `required`) vs `<input type="text" required="" data-scrml-render-by-tag=…_2 />`. Expected: both carry `required` (§6.4.2 step 4; the message is the §55.10 L1 override, not a different predicate). Cause (read): `_validatorAttrsForCell` lowers `req` only when `args === null`.
+<!-- @gap id=g-render-by-tag-req-with-message-drops-required sev=MED status=open locus=compiler/src/codegen/emit-html.ts(_validatorAttrsForCell — `name === "req" && args === null`) prov=dd:scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md -->
+
+### g-render-by-tag-explicit-bind-in-render-spec-silently-dropped — an explicit `bind:value=@other` inside a Shape-2 render-spec emits its marker but is never wired; only the implicit render-by-tag bind to the cell runs, `@other` is never written, exit 0, no diagnostic — `NEW S442 (dpa-058 D3)`; **MED** (silent wrong output); open
+Repro: `<program><other> = ""<f><e req> = <input bind:value=@other/></><main><f><e/></><p>${@other}</p></main></program>` → HTML `<input data-scrml-bind-value="_scrml_bind_bind_value_2" required="" data-scrml-render-by-tag="_scrml_render_by_tag_1" />`; client.js has 0 references to `_scrml_bind_bind_value_2` and exactly one `_scrml_cs_reactive_set("other"` (the initializer); the input listener writes `f.e`. Expected: either the explicit bind is honoured (dpa-058 P2b "validators follow the bind") or a diagnostic — never a silent drop.
+<!-- @gap id=g-render-by-tag-explicit-bind-in-render-spec-silently-dropped sev=MED status=open locus=compiler/src/codegen/emit-html.ts(render-by-tag expansion — baseAttrs carries bind:value into emitNode but no bind registration reaches the wiring) prov=dd:scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md -->
+
+### g-render-by-tag-component-render-spec-emits-literal-tag — a Shape-2 render-spec that is a component (`<e req> = <Field/>`) compiles exit 0 and the use site emits a literal `<e></e>` element: no input, no bind, no diagnostic — `NEW S442 (dpa-058 D4)`; **MED** (silent miscompile); open
+Repro: `<program>const Field = <input/><f><e req> = <Field/></><main><f><e/></><p id="after">after</p></main></program>` → `<main><e></e><p id="after">after</p></main>` (pre-S442-D1 it was `<e />`, which additionally swallowed the `<p>`). Expected: expand the component root if it is bindable, else `E-CELL-RENDER-SPEC-NOT-BINDABLE` as for a `<div>`/`<span>` render-spec (dpa-058 M3).
+<!-- @gap id=g-render-by-tag-component-render-spec-emits-literal-tag sev=MED status=open locus=compiler/src/codegen/emit-html.ts(render-by-tag branch — requires a bindable cell with `renderSpec.element.kind === "markup"`, else falls through to literal emission)+searched:compiler/src/symbol-table.ts(B6 E-CELL-RENDER-SPEC-NOT-BINDABLE admissibility does not see the component RHS — not traced) prov=dd:scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md -->
+
+### g-render-by-tag-use-site-attrs-silently-dropped — a use-site attribute on a render-by-tag reference (`<signup><name class="x"/></>`, taught by example 30) is dropped from the emitted input, no diagnostic — `NEW S442 (dpa-058 D5)`; **MED** (dPA: LOW-MED; silent drop in a shipped example); open
+Repro: `<program><signup><name req> = <input type="text"/></><main><signup><name class="x"/></></main></program>` → `<input type="text" required="" data-scrml-render-by-tag="_scrml_render_by_tag_1" />` (no `class`). §6.4.4 forbids use-site overrides, so the expected behaviour is a compile error naming the attribute, not a drop; examples/30-validated-form.scrml then needs migrating (its `class="p-2 border …"` on four fields is dead today).
+<!-- @gap id=g-render-by-tag-use-site-attrs-silently-dropped sev=MED status=open locus=compiler/src/codegen/emit-html.ts(render-by-tag expansion — `expanded.attributes` is built from the render-spec only; the use-site node's attrs are ignored) prov=dd:scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md -->
+
+### g-pattern-validator-html-lowering-drops-flags-and-anchoring — `pattern(/abc/i)` lowers to `pattern="abc"`: the flag is lost and HTML's implicit `^(?:…)$` anchoring is ignored, so the native constraint and the scrml surface disagree and the native side can block a submit scrml calls valid — `NEW S442 (dpa-058 D6)`; **MED**; open
+Repro: `<program><f><a pattern(/abc/i)> = <input type="text"/><b pattern(/abc/)> = <input type="text"/></><main><f><a/></><f><b/></></main></program>` → both inputs emit `pattern="abc"`. dPA runtime (Chromium): "ABC" / "xxabcxx" → surface valid, native `patternMismatch=true`. Expected: a lowering that preserves the surface's semantics (or omits the attribute when it cannot be expressed) — the two oracles must agree.
+<!-- @gap id=g-pattern-validator-html-lowering-drops-flags-and-anchoring sev=MED status=open locus=compiler/src/codegen/emit-html.ts(_validatorAttrsForCell — the `pattern` branch strips `/…/flags` to the bare source) prov=dd:scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md -->
+
+### g-top-level-scalar-validators-dead — validators on a top-level scalar cell (`<email req> = ""`) never fire; `${@email.isValid}` compiles to `_scrml_cs_reactive_get("email").isValid` (a string's `.isValid`, renders empty), `<errors of=@email/>` renders nothing, no diagnostic — `NEW S442 (dpa-058 D7)`; **MED** (silent dead surface); open
+Repro: `<program><email req> = ""<main><input bind:value=@email/><p>${@email.isValid}</p><errors of=@email/></main></program>` → exit 0; client.js contains 0 `_scrml_validator_fire`. Expected (§55.5 Edge A gives a top-level scalar no surface): either synthesize the surface or reject the validator / the `.isValid` read with a diagnostic.
+<!-- @gap id=g-top-level-scalar-validators-dead sev=MED status=open locus=searched:compiler/src/symbol-table.ts,compiler/src/codegen/emit-logic.ts(validity-surface synthesis is compound-only; the top-level scalar path was not traced) prov=dd:scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md -->
+
+### g-formfor-inputs-carry-no-validator-attrs — `<formFor for=S>` emits every field input with an explicit bind and NO HTML validator attributes, while §41.14.2 says formFor produces "Shape 2 sub-cells" (which §6.4.2 step 4 would give attributes) — `NEW S442 (dpa-058 D8)`; **LOW** (spec drift; the scrml surface is wired); open
+Repro: `${ import { formFor } from 'scrml:data'` + `type S:struct = { name: string req length(>=2)` / `email: string req }` + `function go(values: S) { } }` then `<program><main><formFor for=S onsubmit=go/></main></program>` → inputs `<input type="text" data-scrml-bind-value=… data-scrml-formfor-input="name" />`; 0 `required` / `minlength` in the HTML. Resolution depends on the dpa-058 pole ruling (P2b vs P3) — either formFor gains the attributes or §41.14.2 is amended.
+<!-- @gap id=g-formfor-inputs-carry-no-validator-attrs sev=LOW status=open locus=compiler/src/codegen/emit-form-for.ts(field emission — explicit bind:value path, not render-by-tag; buildShape2StateDecl carries the validators but they are not lowered to attrs) prov=dd:scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md -->
+
+### g-shape2-member-initializes-to-absence-not-kind-default — a Shape-2 compound member with no initializer starts as absence (`_scrml_cs_reactive_set("f.ok", null)`, the lowering of `not`) even when its render-spec is a checkbox (a boolean) — `NEW S442 (dpa-058 D9)`; **LOW**; open
+Repro: `<program><f><ok req> = <input type="checkbox"/></><main><f><ok/></></main></program>` → `_scrml_cs_reactive_set("f.ok", null);`. Refinement vs the dPA: NOT checkbox-specific — `<n> = <input type="text"/>` also emits `_scrml_cs_reactive_set("f.n", null)`; and emitted-JS `null` is the documented lowering of `not` (M-7C-D-12 / S90 OQ-5(a)), so dpa-058's "breaks the §42.1 no-null rule" framing is imprecise. The live question is whether a Shape-2 member defaults to its render-spec kind (checkbox → `false`, text → `""`), which interacts with `req` (`not` fails `req`) — ruling-shaped, filed LOW.
+<!-- @gap id=g-shape2-member-initializes-to-absence-not-kind-default sev=LOW status=open locus=searched:compiler/src/codegen/emit-logic.ts(the missing-init sentinel `initStr === "" && !node.initExpr` → "null" is the top-level analog; the compound-member `_scrml_cs_reactive_set` init site was not traced) prov=dd:scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md -->
+
+## §S443 — findings from the S443 dispatches and their S239 / post-merge reviews (2026-09-29; PA-reproduced where marked, otherwise reviewer- or agent-executed; reviewer scratch harnesses were cleaned up after each run)
+
+### g-engine-write-in-error-arm-bypasses-engine-setter — an engine-cell write inside a `!{}` handler arm compiles to a plain cell write: `rule=` is not checked and the target state's `<onTimeout>` / `<onTransition>` never fire
+<!-- @gap id=g-engine-write-in-error-arm-bypasses-engine-setter sev=HIGH status=open locus=searched:compiler/src/codegen/emit-logic.ts(the !{} arm body lowering emits _scrml_cs_reactive_set where the enclosing fn body emits _scrml_cs_engine_direct_set) prov=empirical:S443-README-flagship-dogfood -->
+**PA-REPRODUCED on `6dccbd6cf`:** `function go(x){ @phase = .Saving; const r = risky(x) !{ | ::Bad :> { @phase = .Rejected; return } }; @phase = .Idle }` with `<engine for=Phase>` → the two outer writes emit `_scrml_cs_engine_direct_set("phase", …, transitions)`, the arm write emits `_scrml_cs_reactive_set("phase", "Rejected")`. Found when the README flagship's `Rejected` state's 3s `<onTimeout>` never fired. Governing: §51.0.F — `rule=` is enforced on every write. Errors-routed-into-engine-states is the canonical pattern the README demos. S435 policy: filed, impl#1 carries unless ruled otherwise.
+
+### g-layout-and-library-server-fns-reachable-anonymously — `pages/_layout.scrml` is served at `/_layout(.html)` and its server fns run anonymously; a library module's exported server fn imported by a gated page runs anonymously
+<!-- @gap id=g-layout-and-library-server-fns-reachable-anonymously sev=HIGH status=open locus=compiler/src/route-inference.ts(Step 8c skips _layout.scrml; auth entries are per-FILE, so a pure-module's server-fn routes get no entry) prov=review:S443-auth-r2-re-review-F3 -->
+Reviewer-executed on the S443 auth branch r2 and on main (pre-existing): `/_layout` → 200 with its markup; `POST /_scrml/__ri_route_layoutSecret_1` → 200 `"layout-ran:null"`; a `srvonly.scrml` exporting a server fn that a `<page auth="required">` imports → its route runs anonymously. So "every server function its file declares" is sidestepped by moving the fn to a library file; a fn doing a plain `?{SELECT…}` would leak data. Fix direction: gate a module's server-fn routes when any gated route imports them, or whenever a required application program exists.
+
+### g-two-top-level-programs-one-file-second-auth-dropped — `<program>…</program><program auth="required">…</program>` in one file: the second program's `auth=` is silently ignored (anonymous GET 200 + server fn runs)
+> **RESOLVED S443** — fix/s443-e-program-002-same-file: two top-level `<program>`s in one file are E-PROGRAM-002 (ruling S443 item 3). PA-verified both parsers; corpus 0 of 30 multi-`<program` files hit.
+<!-- @gap id=g-two-top-level-programs-one-file-second-auth-dropped sev=HIGH status=resolved locus=compiler/src/compute-program-config.ts(reads auth= from the first <program> only) prov=review:S443-auth-r1-review-F4 -->
+Reviewer-executed (main and the S443 auth branch). §40.8 "declare its top-level `<program>` exactly ONCE" has no code; §20.5.1 reserves `E-PROGRAM-002` for the same-file shape but does not define it. **RULING for bryan:** rule that E-PROGRAM-002 covers the same-file case (measured: 0 corpus files with 2+ top-level `<program>` nodes; the conf-SESSION-8B sibling fixtures use the shape deliberately).
+
+### g-compose-route-export-name-collision-mounts-one-page — in a multi-page build only ONE page's compose (SSR) route is mounted; the rest fall to the guarded static branch
+<!-- @gap id=g-compose-route-export-name-collision-mounts-one-page sev=MED status=open locus=compiler/src/commands/build.js(generateServerEntry imports each route export name once across modules — first importer wins) prov=empirical:S443-auth-agent -->
+Every page module exports its compose route as `_scrml_route___ssr` (different paths). No leak (the static branch is guarded), but those pages lose the csrf meta-token fill and the §52.8 SSR seed; the client recovers via 403-then-retry. Hits every page of examples/23 but one.
+
+### g-example-23-login-creates-no-session — examples/23-trucking-dispatch cannot be used end-to-end: login never creates a framework session, so every gated route still redirects after a real login
+> **RESOLVED S443** — fix/s443-example-23: login/register call `session.set`; 18 pages read `session.userId`; logout → `session.destroy()`; loginRedirect=/auth/login; dispatch.db pre-seeded; the `scrml generate auth` template also fixed. PA-verified in Chromium for all three roles (docs/changes/s443-example-23/progress.md).
+<!-- @gap id=g-example-23-login-creates-no-session sev=MED status=resolved locus=examples/23-trucking-dispatch/pages/auth/login.scrml(loginServer writes createSessionStore KV only; never session.set("userId",…)) prov=review:S443-post-merge-1155-P1 -->
+Reviewer-executed; PA-corroborated by source; served in Chromium by the README agent (login → client moves to /customer 404; only cookie set is `scrml_csrf`; gated pages still 302 → `/login`, which 404s — the page is `/auth/login`). Also: the seeded `dispatch.db` has zero `users` rows, so the README-documented credentials cannot log in. The framework API is `session.set("userId", id)` (§20.5.1; `emit-server.ts` `_scrml_session_begin`/`_commit`). **Same defect in `stdlib/auth/templates/login.scrml`** (the `scrml generate auth` scaffold §52.13 recommends) — agent-reported, not yet PA-verified.
+
+### g-example-23-any-driver-reads-any-bol-token — examples/23: any driver can read any load's BOL token and submit a BOL for a load they are not assigned to
+> **RESOLVED S443** — fix/s443-example-23: `assignedDriverFor` guards token read + BOL + POD. PA-verified over HTTP (unassigned driver refused on all three; assigned driver ok; replay refused). README:233 guard text + ex09 SubmitFailed also fixed; stale-token-after-remint (LOW) NOT addressed.
+<!-- @gap id=g-example-23-any-driver-reads-any-bol-token sev=MED status=resolved locus=examples/23-trucking-dispatch(getActiveBolTokenServer checks role only; uploadBolServer has no assignment check — transitionLoadServer does) prov=review:S443-post-merge-1155-P2 -->
+Reviewer-executed on base and merge of #1155: driver B, not assigned to load 12, read its token and submitted → ok; consumes the real driver's single-use token and writes a `bol_received` row under B. Also (LOW): older unconsumed tokens stay valid after a re-mint; `examples/23-trucking-dispatch/README.md:233` still teaches the broken `changes == 0` guard; examples/09's `SubmitFailed` can never fire (INSERT…RETURNING returns a row or throws — uncaught SQLiteError on a CHECK reject) and its new comment says otherwise.
+
+### g-imported-types-invisible-to-lsp — the LSP runs the typer without `importedTypesByFile`, so the editor never sees imported types (shows the false E-ERROR-009 the CLI no longer does)
+<!-- @gap id=g-imported-types-invisible-to-lsp sev=MED status=open locus=lsp/handlers.js:386(runTS called without importedTypesByFile) prov=review:S443-builtin-shadow-review-N1 -->
+Reviewer-executed: `analyzeText` on a file importing `AuthError` + bare `fail .Missing` returns E-ERROR-009 on both base and head of #1172; an aliased import's invalid `fail AE.Nope` shows nothing in the editor while the CLI reports it. Related LOW: E-TYPE-050 is still name-keyed (`type-system.ts` `!BUILTIN_TYPES.has(generatedName)`), so a user `type AuthError:enum` + a db table `auth_error` gives no E-TYPE-050; and a user enum `AuthError` and the built-in runtime class both emit `type:"AuthError"`, so a `::AuthError` arm cannot tell them apart (UNVERIFIED at runtime).
+
+### g-protect-egress-round-6-residuals — §14.8.9 residual leak classes after #1171 (all PRE-EXISTING — main shipped strictly more)
+<!-- @gap id=g-protect-egress-round-6-residuals sev=HIGH status=resolved locus=compiler/src/codegen/protect-flow.ts(opaqueCallbacks; `arguments` binding in instanceFor; GLOBAL_CELL readGlobal/globalStore; SYMKEY_LABEL; isStdlibDeriver)+compiler/src/codegen/protect-egress.ts(returningAsSelect; knownTablesCI; opaque projection star; _scrml_protect_descriptor/_attach)+compiler/src/codegen/rewrite.ts+emit-logic.ts(every terminator tagged)+compiler/src/protect-analyzer.ts(declaredTables)+compiler/src/codegen/emit-server.ts(_cpsErrorMessage)+compiler/src/commands/build.js(generateServerEntry error handler) prov=review:S443-protect-r5-review -->
+> **RESOLVED S443 round 6 (`docs/changes/s443-protect-egress-r6/`) — every class reproduced over HTTP on base `c53b297a7` first, then re-probed after the fix (served probe: compile, seed SQLite with `SECRET-HASH-123` / pin `4321`, serve the emitted routes with `Bun.serve`, POST, scan body + headers; P3 on a real `scrml build` prod `_server.js`, NODE_ENV unset).** L1 (callback params; also the callback's RETURN, `"x".replace("x", () => h)`), L2 (`arguments[0]`, `return arguments`), L3 (`globalThis.x`, `globalThis[k]`, `process.env.X`, across two server fns), L4 (`delete u[Symbol.for(…)]`, `.revealed.push`, `getOwnPropertySymbols` + delete, and on a spread copy) and H1 (`hash("md5"|"sha256", …)`) → now `E-PROTECT-006`. P1 (`UPDATE/INSERT/DELETE … RETURNING`, plus the untagged `.run()` / bare `?{}` terminators found in the same round), P2 (`users . *`, `users .*`, `x . *`), P4 (runtime view) → rows now stripped (`{id,name}` / `{}`). P3 → CPS envelope message fixed under `protect=` (logged server-side), prod entry `error:` handler → fixed 500. Mechanism, not recognizers: callbacks of any unmodelled call take the join of receiver + all arguments; every free name is one compile-wide global cell (provenance on read + a non-row write is an egress); ~~a possible descriptor-Symbol key is a pseudo-label that makes any row it meets ship every column~~ *(FALSE as landed — the round-6b review showed it was a Symbol-source recognizer that aliases walked past; see the 6b note)*; any table the compile does not declare strips wholesale. RULING S443 #7 applied (SPEC §14.8.9 amended, superseded S441 allowlist sentence struck). Migration: 0 new `E-PROTECT-006` and 0 new strip-all tags across examples/ samples/ conformance/cases/ docs/readme-snippets/ stdlib/ (2180 files). Residuals → [[g-protect-egress-round-7-residuals]].
+> **ROUND 6b (S239 review of 28a7bce00 = DO-NOT-LAND; each item reproduced over HTTP first, `docs/changes/s443-protect-egress-r6/progress.md`).** MUST 1 (INTRODUCED): `Symbol.for(u.passwordHash).description` / `.toString()` / `Symbol.keyFor` / `getOwnPropertySymbols(…)[0].description` / `String(Symbol.for(h))` / `Symbol.for(u.pin)` served the value — round 6's Symbol-source special case dropped the arguments' provenance; removed → `E-PROTECT-006`. MUST 2 (pre-existing): the round-6 L4 claim was false — aliases (`const S = Symbol`, `globalThis.Symbol.for`, `const O = Object`, `.bind`, `const {for: sf} = Symbol`) served the full row. Mechanism changed: the runtime floor is one Symbol marker per protected column read by PRESENCE (writes can't under-strip), and the compile rule flags any REMOVAL by a non-literal key from a row-bearing value, whatever produced the key → `E-PROTECT-006`. MUST 3 (pre-existing): `{...a, ...b}` / `Object.assign({}, a, b)` / `{...a, ...b.reveal("pin")}` shipped the hash — markers now union → `{id,name}`. MUST 4 (INTRODUCED): `Object.assign(rowA, rowB)` 500 → 200 stripped. SHOULD 5: global-stored functions are applied only through the name they were stored under (fp1: 0 errors, was 2 blaming `_scrml_session_middleware` + `setup`). SHOULD 6: g2-deep-32 0.99 s (round 6 89 s, base 0.88 s). RULING S445 #4: `hmac(<compile-time constant key>, …)` stays protected. Not a leak by design: `{...b, ...a}.reveal("pin")` ships pin (an explicit reveal AT the value).
+> **ROUND 6c (re-review of 31a405f00 = LAND-WITH-NITS; reproduced first).** (1) S445 #4 compliance, introduced in 6b: constant hmac keys built through a call declassified (`String.fromCharCode(107,101,121)`, `JSON.parse('"key"')`, `String(Math.PI)`, and `"k" + process.env.K`) — the key rule now needs POSITIVE runtime evidence (`process.env` / `Bun.env` / `import.meta.env`, a DB value, a host config/secret call) and NO constant part → all four `E-PROTECT-006`; a constant imported from another module is constant. (2) HIGH, pre-existing on base: `toJSON` re-introduced the stripped row after the redact walk (J1 `{ toJSON: () => u }`, J3, J4, J5 served the full row) — the sink now invokes `toJSON` itself, redacts the result, and drops function-valued properties → `{id,name}`. (3) LOW: a removal keyed by a `const`-bound literal is literal (`const gone = 1; delete byId[gone]`, `const k = "name"; delete c[k]`); a truly computed key still fails closed and the message names the fix.
+> **ROUND 6d (re-review of e7da35826 = DO-NOT-LAND; reproduced first).** MUST 1 (introduced in 6c): a getter answering `"ok"` on the first read and the row on the second, on a non-plain prototype (J9, J10), shipped the full row — 6c walked the object once, then handed it to `JSON.stringify`, which read the getter again. STOP condition → mechanism changed: the sink OWNS serialization — `_scrml_protect_redact` returns a plain-data SNAPSHOT (each property read once, `toJSON` once, functions / Symbols / accessors dropped, markers stripped) and only that is serialized; the CPS error envelope goes through it too. J9 / J10 / a plain-object getter / a Proxy trap → `{"x":"ok"}`; J15 (Date with an own `toJSON`) now 200 stripped instead of 500. MUST 2 (S445 #4): pure stdlib helpers of constants (`normalize`, `basename`, `capitalize`, `truncate`, `padLeft`, `hash`) and `process.env.K ?? normalize("dev")` declassified — host calls are now a runtime source only in the enumerated I/O / secret / entropy set (`scrml:process` `env` / `argv`, `scrml:fs` reads, `scrml:http`, `scrml:redis` reads, `scrml:random`, `scrml:crypto` `generateToken` / `generateUUID`); anything else carries its arguments' constness → all `E-PROTECT-006`.
+> **ROUND 6e (re-review of 8473756a9 = DO-NOT-LAND; reproduced first).** Introduced in 6c: `u.toJSON = function () { return { pw: this.passwordHash } }` (T1) and the per-row array form (T5) served the hash — the snapshot invoked `toJSON` with `this` = the tagged row. PRE-EXISTING (base too): a `defineProperty` getter reading `this.passwordHash` (T6) shipped through the server-fn response, `/__mountHydrate` and the SSR state script. Both layers fixed: the runtime invokes every author `toJSON` / getter with `this` = a marker-stripped copy; the compile models `this` in a function stored on an object → T1–T6 `E-PROTECT-006`, and with the emitted module forced to run all three sinks strip. `import.meta.env.K` (E1) is NOT an analysis false positive: scrml miscompiles it (emits `String(String ( import . meta . env.K ).env.K)` for `String(import.meta.env.K)`) — filed below.
+Reviewer-executed over HTTP on `review/s443-protect-r5` (≈230 shapes); each reproduces on main too. **L1 HIGH** callback params of unmodelled methods/host calls are clean: `u.passwordHash.replace(/.+/, m => { s = m })`, `JSON.stringify(u, replacer)` → the hash. **L2 HIGH** `arguments[0]` / `return arguments`. **L3 MED-HIGH** `globalThis.x` / `process.env.X` stores, incl. across server fns. **L4 MED** descriptor tampering: the key is `Symbol.for("scrml.protect.origin")` (global registry) and `revealed` is mutable → `delete u[Symbol.for(…)]` or `.revealed.push(…)` declassifies without `reveal` (fix: module-private Symbol + freeze). **P1 HIGH** `RETURNING` rows are never tagged (`UPDATE/INSERT/DELETE … RETURNING *|passwordHash`). **P2 HIGH** `SELECT users . * FROM users` (spaced dot) returns the full row. **P3 HIGH** error messages bypass the floor: the CPS error envelope serializes `String(err.message)` (`json_extract('{}', passwordHash)` → message carries the value); non-CPS prod entry has no `error:` handler so Bun's dev error page returns message + source unless NODE_ENV=production. **P4 MED** a runtime-created view over a protected table: unknown table resolves to "no protected columns" instead of strip-all. Three new §14.8.9 SHALL sentences (provenance-by-default, reveal-is-the-only-path) are false until L1/L2/L4 are fixed. **SPEC contradiction H1 (MED, ruling):** §14.8.9 excludes `Bun.hash` as brute-forceable on low-entropy columns but allowlists `scrml:crypto` `hash` for every algorithm incl. md5/unsalted sha256 (`hash('md5', u.pin)` → reversible in 10⁴ tries) — PA rec: only verifyPassword/verifyHash/keyed-hmac/argon2 derive; a bare digest stays protected. Deferred by the r5 agent: Postgres key casing for `omit`; `rowid` exposing an INTEGER PRIMARY KEY protected column; views (per-table protect=).
+
+### g-protect-egress-round-7-residuals — §14.8.9 items round 6 did not close (carried + newly surfaced)
+<!-- @gap id=g-protect-egress-round-7-residuals sev=HIGH status=open locus=compiler/src/codegen/protect-flow.ts(implicit invocation unmodelled: TaggedTemplateExpression tag, toString/valueOf/Symbol.toPrimitive coercion, Symbol.iterator via spread/for-of/destructuring; ThisExpression reads clean; isStdlibDeriver matches any `_scrml/<mod>.js` path)+compiler/src/commands/dev.js(route-handler catch returns `detail: err.message`) prov=review:S443-protect-r6b-review -->
+**HIGH — writes through `this` (review-executed S445 on 45e964d9a; ALSO on base c53b297a7 — pre-existing, disclosed by 6e):** a function stored on an object that WRITES a protected value through `this` creates a brand-new, marker-less column, so the runtime floor has nothing to strip and every sink ships it at exit 0 — W1 `u.stash = function () { this.x = this.passwordHash }; u.stash(); return u` → `{"id":1,"name":"ada","x":"SECRET-HASH-123"}`; W5 the ordinary setter `const o = { h: "" }; o.set = function (r) { this.h = r.passwordHash }; o.set(u); return o` → `{"h":"SECRET-HASH-123"}`; W7 overwrite of a non-protected column. Leaks via fn response, `/__mountHydrate` and the SSR state script. Fix direction: model `this.p = v` inside a function stored on an object as a write INTO that object (join `v` into the object's provenance, as `o.p = v` is) WITHOUT unifying alias classes (that caused the ex23 login false positive). Also: object-literal method `{ ...u, stash() { this.y = … } }` compiles to invalid JS (`{...u, stash: }`) — fails closed.
+
+**HIGH — implicit invocation (review-executed on 28a7bce00; contradicts §14.8.9's "provenance is preserved by default … getters and `toJSON` the serializer invokes" SHALL):** the flow does not model functions the LANGUAGE calls implicitly — a tagged template's tag (I1 `` tag`${h}` ``, I12 tag via method), coercion hooks `toString` / `valueOf` / `Symbol.toPrimitive` (I2 `` `${o}` ``, I3 `o + 0`, I7), and `[Symbol.iterator]` generators consumed by spread / `for…of` / destructuring (I4, I8, I9) — each served the value. Fix direction: treat an object literal holding a function under those keys (and any tag) as invoked wherever the language would invoke it. **MED:** G2 `globalThis.valueOf().x = h` / `process.env.valueOf().X = h` — a global-rooted METHOD result does not alias the global heap (a deliberate performance bound: aliasing it made examples/23 not finish); G8 `performance.mark(h)` then `performance.getEntriesByType("mark")` in another request — global state held inside an unmodelled platform object. **MED:** a user file at `./_scrml/auth.js` posing as stdlib gets the `verifyPassword` deriver allowlist (`isStdlibDeriver` matches the path shape, not the compiler's own stdlib bundle). **MED (re-confirmed on `scrml dev` port 4513):** `scrml dev` answers an uncaught route error with `{"detail": err.message}` (the SQLite `json_extract` message carries the value); a plain (non-CPS) handler also rethrows to any host that mounts `routes` / the WinterCG `fetch` — only the compiler's prod entry catches. **LOW / disclosed (round 6e):** READS through `this` are modelled (a function stored on an object sees its provenance — no `_{}` needed to reach this: `u.toJSON = function () { … this.passwordHash … }` is plain scrml), but WRITES through `this` (`this.x = h` inside such a function) are not — modelling them aliased the compiler's own session object to every protected value (false `E-PROTECT-006` on examples/23 login); the runtime stripped-`this` backstop still applies at the sink. **LOW (review-measured, round 6e):** `readFileSync("/etc/hostname")` and `String(randomInt(0, 1))` declassify as hmac keys — enumerated runtime sources, but world-readable / low-entropy. **MED (compiler, round 6e):** `import.meta.env.K` in scrml source is miscompiled (`String(String ( import . meta . env.K ).env.K)`), so it cannot be used as a key at all; the column markers use REGISTRY Symbols (`Symbol.for("scrml.protect.col:<c>")`) because a row tagged in one server module is redacted by another module's sink — a per-module Symbol would fail open; integrity rests on non-removable markers on the query's row + the compile-time removal rule. **LOW (review-measured):** `delete byId[rs[0].id]` (RM4 — a removal keyed by a column value) is rejected by the fail-closed removal rule; the message names the fix (a literal key, or `filter` / a `Map`). **LOW (contrived, review-measured):** the generated g2 deep-chain file at N=128 takes 11.9 s vs base 1.4 s (N≤32 is at base speed). Carried from round 5 (RELAYED, not re-probed): Postgres key casing for `omit`; `rowid` exposing an `INTEGER PRIMARY KEY` protected column; a view listed in `tables=` gets `protect=` by column NAME only.
+
+### g-worker-supervision-and-program-shape-gaps — §46.3/§46.4 supervision has no codegen, and several nested-program shapes miscompile silently
+<!-- @gap id=g-worker-supervision-and-program-shape-gaps sev=HIGH status=open locus=searched:compiler/src/codegen/emit-worker.ts,emit-client.ts,emit-logic.ts(0 hits for restart=/max-restarts=/within=/when terminate from/.restart()) prov=empirical:S443-worker-d1-d2-agent -->
+Agent-executed on the S443 worker branch: (1) `restart=`, `max-restarts=`, `within=`, `when terminate from`, `.restart()` compile to nothing — three §46.6 SHALLs unimplemented. (2) A top-level `<program name="P">` is spliced out as a worker: the whole app vanishes from the main output; §4.12.2 "MUST NOT have a `name=`" has no diagnostic. (3) A nested `<program lang="ts">` without `port=` is treated as a worker (§4.12.3: `lang=` means sidecar). (4) `send()` in a worker helper function (outside `when message`) is not rewritten → ReferenceError. (5) A worker crash during a send leaves that send's promise pending forever. (6) `@x = <#w>.send(9)` — §4.12.4's own example — stores a Promise and renders "[object Promise]" (dpa-056 D5, live). (7) LOW: a trailing-slash page URL (`/tools/calc/`) 404s the page's script + runtime. (8) LOW (PA-probed): SQL inside a worker helper compiles silently to `return null; // SQL — client cannot evaluate` — no diagnostic; a non-identifier worker `name=` fails with an unhelpful E-CODEGEN-INVALID-LOGIC.
+
+### g-body-top-invariant-bypassed-by-raw-text-nodes — (S441 declared-prose branch, round 4, NOT on main) import/type/export nodes "cover" trailing tokens they never emit; native `;` fires E-INTERNAL; native label lines vanish
+<!-- @gap id=g-body-top-invariant-bypassed-by-raw-text-nodes sev=HIGH status=resolved resolved-by=s445-declared-prose-r5 locus=compiler/src/ast-builder.js(assertBodyTopCoverage credits statement-node token spans, not emitted tokens)+compiler/native-parser/parse-markup.js(assertBodyTopCoverageNative: `;` never formatting; label statements) prov=review:S443-prose-r4-review -->
+The round-4 review (DO-NOT-LAND) of `review/s443-prose-r4` (94cd0ae58). Round 5 was dispatched and died on the sub-agent quota before committing; the branch `worktree-agent-a2f3ca098c5412926` stays at round 4. **A** (default + native, pre-existing behaviour, refutes the claim): `import { a } from "./a.js" -` ⏎ `log("side effect")` drops the call; `type Color = "red" | "blue" zq…` drops trailing words and can swallow the next line; `export 3.14 zqF` etc. — reviewer fuzz: 36/66 clean default compiles dropped a marker. **B** (native, introduced): any body-top `;` → E-INTERNAL-BODY-TOP-DROPPED. **C** (native, introduced): `Total: 42` / `Step1: "…"` label lines vanish. **D** (native, pre-existing): tagged templates dropped entirely. Fix direction for A (also settles bryan's #7 by construction): a node covers only the tokens it compiles; import/export/type reject trailing tokens on their line. Pre-existing, also filed from the round-4 run: E-SYNTAX-050 fires on a body-top `/* */` comment on both parsers (§34 says it does not fire in code-default bodies; block-splitter locus); native E-CODEGEN-INVALID-LOGIC on templates with `${}` in logic.
+
+### g-s443-gate-and-test-infra-residuals — gate/test-infrastructure findings from the S443 post-merge reviews (all LOW)
+<!-- @gap id=g-s443-gate-and-test-infra-residuals sev=LOW status=open locus=scripts/snippet-drift.js+compiler/tests/unit/stdlib-source-no-logic-leak.test.js+compiler/tests/conformance/parser-conformance-within-node-allowlist.json+scripts/claim-gate.js prov=review:S443-post-merge-1145-1152 -->
+Reviewer-executed. **#1145 snippet-drift gate:** no floor on the checked-block count (removing a range marker or a stray fence drops 18→17, still green); `~~~scrml` fences escape the completeness check; a marker targeting `..`-traversal or a non-`.scrml` file passes without compiling; `--drift-only` + an explicit path exits 0 silently. **#1152 stdlib leak gate:** misses a brace-free early close (`/* nested */ trailing prose` in a doc comment) — only a TAB warning fires; within-node allowlist rows were set to max(old,new) not raw (http COUNT-LENGTH 5>4, cron KIND-NAME 3>2, EXTRA-FIELD 12>8 — 6 units of headroom). **Other:** `scripts/claim-gate.js` is broken (`existsSync` not defined) and unwired; nothing (CLI or API `testMode`) runs `~{}` inline tests — a false `assert` compiles clean.
+
+### g-s443-readme-dogfood-compiler-residuals — compiler defects the README flagship dog-food hit (agent-executed in Chromium; the flagship was rewritten around them)
+<!-- @gap id=g-s443-readme-dogfood-compiler-residuals sev=MED status=open locus=searched:compiler/src/codegen/emit-reset.ts,emit-each.ts,emit-synth-surface.ts prov=empirical:S443-readme-agent-dogfood -->
+(1) `reset(@x)` on a Shape-2 input-bound cell with no initializer does nothing (the input keeps its text). (2) `checked=${…}` inside an `<each>` row renders wrong (active rows showed checked). (3) `@newTask.isValid` on a top-level input cell compiles silently, reading `.isValid` off the string — dpa-058 #5 (S442) ruled this an error; no diagnostic yet. (4) False `W-DEAD-FUNCTION` for a function called only from an engine opener `effect=`.
+
+### g-auth-login-redirect-residuals — relative / query-bearing `loginRedirect=` values (LOW)
+<!-- @gap id=g-auth-login-redirect-residuals sev=LOW status=open locus=compiler/src/route-inference.ts+compiler/src/auth-graph.ts prov=review:S443-auth-r2-re-review-F4 -->
+Reviewer-executed: a relative `loginRedirect="signin"` is emitted as-is and resolves against the page's own directory; `/signin?next=1` and `/signin/` redirect correctly but false-fire I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-LOGIN-MISSING. Also: a `<page auth="required">`'s client chunk is served anonymously and carries static lift template text (no data; same under program auth); `<endpoint>` routes in an auth-required scope run anonymously per §61.7 (author-in-arm auth) — §40.2 / §52.13 "every request to this scope" need an §61.7 carve-out sentence.
+
+## §S444 — dpa-045 follow-up filings (2026-09-30; every entry re-executed on `108ca89be` with `bun compiler/bin/scrml.js compile <file> --output-dir <dir>`; change `docs/changes/s444-dpa045-spec-followups/`)
+
+### G-LIFT-SEGMENT-TRIM-DELETES-INTERP-ADJACENT-SPACES — markup built from logic (`lift`, markup-as-value) trims every text segment, so the spaces next to `${…}` vanish: `   lifted   ${it}   li` renders `liftedali`
+<!-- @gap id=g-lift-segment-trim-deletes-interp-adjacent-spaces sev=HIGH status=open locus=searched:compiler/src/codegen/emit-lift.js(the text-child createTextNode emission — the content already arrives trimmed),compiler/src/tokenizer.ts,compiler/src/ast-builder.js(text-child construction) — the deciding site was NOT traced prov=spec:SPEC.md-§4.18.5-"Whitespace is kept exactly"+ruling:user-voice-scrml.md-S442-dpa-045-follow-ups-scope-note+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.**
+
+```scrml
+<program>
+  <items> = ["a", "b"]
+  <ul>
+    ${ for (let it of @items) { lift <li>   lifted   ${it}   li   </li> } }
+  </ul>
+</program>
+```
+`bun compiler/bin/scrml.js compile lift.scrml --output-dir out` → exit 0, zero diagnostics. The client JS builds
+`createTextNode("lifted")`, the interpolation node, `createTextNode("li")`. Rendered: **`liftedali`**.
+Expected (§4.18.5, *"No stage SHALL collapse runs, strip leading or trailing whitespace, or drop the whitespace
+adjacent to a `${…}` interpolation"*): `   lifted   a   li   `. Markup-as-value does the same:
+`${ const frag = <p>   value   ${@n}   end   </p>  lift frag }` → `createTextNode("value")`, interp,
+`createTextNode("end")` → renders `value1end`.
+
+**Why HIGH:** silent wrong output on the most common `lift` shape (`Hello ${name}!` → `Helloname!`) — words merge in
+the rendered page, exit 0, no diagnostic. The static-HTML path keeps the same text byte for byte (S442 E(a) rows 1-3),
+so the author cannot see it from the markup they wrote.
+
+**Same class as** [[g-ast-markup-text-interp-adjacent-space-dropped]] (MED, open; its "whitespace-model fork belongs
+to bryan" is now RULED — S442: whitespace is kept exactly) and [[g-lift-markup-adjacent-text-leading-space-dropped]]
+(LOW). This entry records the full measured form (trim + collapse per segment, both `lift` and markup-as-value) against
+the ruled rule. ⚑ Disposition per the S442 ruling: *"fixed in impl#1 only if the S435 policy admits them"*; the
+bootstrap builds the rule.
+— `NEW S444 (dpa-045 E(a) measurement row 12/13, re-executed)`; **HIGH**; open
+
+### G-COMPONENT-BODY-WHITESPACE-COLLAPSED — a component-definition body's text is collapsed and de-indented (`comp   body   ${@n}   tail` renders `comp body … tail`), contradicting §4.18.5 "kept exactly"
+<!-- @gap id=g-component-body-whitespace-collapsed sev=LOW status=open locus=searched:compiler/src/component-expander.ts,compiler/src/ast-builder.js — the component-definition RHS markup is rebuilt from token text; the collapsing site was NOT traced prov=spec:SPEC.md-§4.18.5-"Whitespace is kept exactly"+ruling:user-voice-scrml.md-S442-dpa-045-follow-ups-scope-note+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.**
+
+```scrml
+<program>
+  <n> = 1
+  const Box = <div class="box">
+      comp   body   ${@n}   tail
+  </>
+  <Box/>
+</program>
+```
+`bun compiler/bin/scrml.js compile comp.scrml --output-dir out` → exit 0. HTML: `comp body <span data-scrml-logic=…></span> tail`
+(indentation stripped, each run collapsed to one space). Expected (§4.18.5): the body's text byte for byte —
+`\n      comp   body   ` … `   tail\n  `. S442 E(a) rows 8-11 also measured tab → space and, for a single-line body, an
+ADDED trailing space (`<section>WSC-single-line  two  spaces</section>` → `WSC-single-line two spaces </section>`).
+
+**Why LOW:** under the browser's default `white-space: normal` the rendering is identical; the difference shows only
+under `white-space: pre*`, in `textContent` reads, and in the added trailing space. No content is lost.
+⚑ Disposition per the S442 ruling: impl#1 fix only if the S435 policy admits it; the bootstrap builds the rule.
+— `NEW S444 (dpa-045 E(a) measurement rows 8-11, re-executed)`; **LOW**; open
+
+### G-FOREIGN-BLOCK-IN-MARKUP-BODY-RENDERED-AS-TEXT — a `_{ … }` / `_={ … }=` block in a markup element body ships as page text with no diagnostic instead of `E-FOREIGN-004`
+<!-- @gap id=g-foreign-block-in-markup-body-rendered-as-text sev=MED status=open locus=compiler/src/block-splitter.js(matchForeignOpener is consulted only inside brace contexts and orphan-brace bodies — :3019 and :3299; the markup-body text scan never tests for a foreign opener) prov=spec:SPEC.md-§23.2.4+SPEC.md-§4.18.1b+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.**
+
+```scrml
+<program>
+<p>before _{ console.log(1) } after</p>
+<div>x _={ let y = 1 }= z</div>
+</>
+```
+`bun compiler/bin/scrml.js compile fa.scrml --output-dir out` → exit 0 (a W-LINT-007 lint only). HTML:
+`<p>before _{ console.log(1) } after</p>` and `<div>x _={ let y = 1 }= z</div>`. Also with the block inside a
+`<program name="svc" lang="ts">`. Expected: `E-FOREIGN-004` — §23.2.4: *"A `_{}` block in any OTHER context — … or a
+markup element body — SHALL be a compile error"*; §4.18.1b: *"in a markup body it is an ERROR, `E-FOREIGN-004`"*.
+`my_{` (an identifier character before `_`) is content and must stay so (§23.2 identifier guard, S444).
+
+**Why MED:** silent acceptance of a SHALL-error. An author who writes foreign code in a markup body gets that source
+shipped verbatim in the client HTML — visible, but also a disclosure path for code the author meant to run on the
+server. ⚑ PA to judge whether that makes it security under the S435 policy. The dpa-045 bootstrap branch
+(`feat/s442-dpa045-bootstrap`, 898f5cd06) implements the error; main's bootstrap does not recognize `_{` at all.
+— `NEW S444 (§4.18.1b "as today" was false; PA-directed)`; **MED**; open
+
+### G-SVG-OR-MATH-COMPOUND-CELL-PUSHES-FOREIGN-TAG-ON-ANCESTOR-STACK — a compound-parent cell named `svg`/`math` is a transparent wrapper but pushes its name as an ancestor, so a self-closed non-void child keeps `/>` and swallows its siblings
+<!-- @gap id=g-svg-or-math-compound-cell-pushes-foreign-tag-on-ancestor-stack sev=LOW status=open locus=compiler/src/codegen/emit-html.ts(the compound-parent wrapper branch — `markupParentStack.push(tag)` with no DOM element emitted; locate by `wrapperKind === "compound-parent"`)+compiler/src/codegen/utils.ts(htmlParserHonorsSelfClose reads that stack) prov=review:S442-dpa-058-D1-review-follow-up(#1160 commit message)+empirical:S444-reproduced-on-108ca89be-with-a-one-variable-control -->
+**Reproduced on `108ca89be`, one-variable control.** ⚑ The brief filed this against the bootstrap; it is impl#1 — the
+D1 fix (#1160) is in `emit-html.ts` / `utils.ts`, and main's bootstrap has no svg/math handling.
+
+```scrml
+<svg>
+    <label> = "x"
+</>
+
+<main>
+  <svg>
+    <div/>
+    <p>after</p>
+  </svg>
+</main>
+```
+`bun compiler/bin/scrml.js compile svgcell.scrml --output-dir out` → exit 0; HTML `<main> <div /> <p>after</p> </main>`
+(the wrapper emits no element). The same file with the cell named `box` emits `<div></div>`. A browser parses
+`<div />` in HTML content as an OPEN `<div>`, so `<p>after</p>` becomes its child. Expected: `<div></div>` — the
+ancestor stack should hold only elements that are emitted.
+
+**Why LOW:** needs a compound cell named after a foreign root, which also shadows an HTML element name; corpus use
+not measured. Silent when it hits.
+— `NEW S444 (D1 review follow-up, pre-existing)`; **LOW**; open
+
+### G-HTML-BREAKOUT-TAG-IN-FOREIGN-CONTENT-KEEPS-SELF-CLOSE — `<svg><div/>…</svg>` emits `<div />`; a browser treats `<div>` in SVG as a breakout tag, leaves foreign content and opens a `<div>` that swallows the siblings
+<!-- @gap id=g-html-breakout-tag-in-foreign-content-keeps-self-close sev=LOW status=open locus=compiler/src/codegen/utils.ts(htmlParserHonorsSelfClose — returns true for any tag under an svg/math ancestor; no breakout-tag list) prov=review:S442-dpa-058-D1-review-follow-up(#1160 commit message)+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.** ⚑ The brief filed this against the bootstrap; it is impl#1 (see the entry above).
+
+```scrml
+<program>
+  <svg viewBox="0 0 10 10">
+    <div/>
+    <p>after</p>
+  </svg>
+</program>
+```
+`bun compiler/bin/scrml.js compile breakout.scrml --output-dir out` → exit 0; HTML `<svg viewBox="0 0 10 10"> <div /> <p>after</p> </svg>`.
+HTML Living Standard, "in foreign content": a start tag named `div`, `p`, `b`, `br`, `ul`, … (the breakout list) pops
+out of foreign content and is reprocessed as HTML, where the trailing `/` is ignored. Expected: `<div></div>` for a
+breakout tag under svg/math.
+
+**Why LOW:** the input is malformed (HTML elements inside `<svg>` break out whatever the emitter writes); the
+difference is only whether the stray `<div>` also swallows its siblings.
+— `NEW S444 (D1 review follow-up, pre-existing, malformed input)`; **LOW**; open
+
+### G-UNTERMINATED-DISPLAY-TEXT-LITERAL-NOT-E-CTX-001 — an unterminated display-text literal does not raise `E-CTX-001`: impl#1 accepts it silently, main's bootstrap reports other codes
+<!-- @gap id=g-unterminated-display-text-literal-not-e-ctx-001 sev=LOW status=open locus=searched:compiler/src/engine-statechild-parser.ts,compiler/src/block-splitter.js(impl#1),compiler/self-host-v2/parse.scrml(the state-child body parser — bootstrap) — the deciding sites were NOT traced prov=spec:SPEC.md-§4.18.3+SPEC.md-§4.18.7-"Recovery (unterminated literal)"+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.**
+
+```scrml
+<program>
+type Phase:enum = { Idle, Busy }
+<engine for=Phase initial=.Idle>
+    <Idle>"never closed</>
+    <Busy>"plain"</>
+</>
+</>
+```
+impl#1: `bun compiler/bin/scrml.js compile unterm.scrml --output-dir out` → exit 0, zero diagnostics; renders
+`"never closed` (the opening quote as content). Main's bootstrap (`slice-m2` `frontEnd`, same body under
+`<phase:Phase=.Idle single>`): block-form → `E-UNQUOTED-DISPLAY-TEXT` + `E-PARSE-UNCLOSED` ×3; `:`-shorthand
+`<Idle rule=.Busy : "never closed>` → `E-PARSE-TRAILING`, `E-PARSE-SHORTHAND`, `E-PARSE-UNCLOSED` ×2.
+Expected (§4.18.3): *"A display-text literal that reaches end-of-file (or the body's closer) before its closing `"` is
+an unterminated literal — `E-CTX-001` against the opening `"`, recovered per §4.18.7."*
+
+**Why LOW:** the bootstrap is loud (wrong code); impl#1 is silent but the stray `"` shows on the page.
+Related: [[g-no-unterminated-delimiter-diagnostic-exists-anywhere]].
+— `NEW S444 (PA-directed)`; **LOW**; open
+
+### g-markup-call-interpolation-emitted-as-module-statement — a markup `${fn(@x.field)}` interpolation is ALSO emitted as a bare module-level statement, evaluated once at load; it throws when `@x` is `not` and kills the page script (handlers never wire)
+<!-- @gap id=g-markup-call-interpolation-emitted-as-module-statement sev=HIGH status=open locus=searched:compiler/src/codegen/emit-client.ts,emit-logic.ts(the top-level statement stream receives the interpolation's call expression) prov=empirical:S443-example-23-dogfood -->
+**PA-REPRODUCED on main (b3419e6d8):** `<program>${ <cur> = not; fn lab(s) { return s } }<div><span>${lab(@cur.status)}</span></div></program>` → the client JS contains a top-level `_scrml_lab_N(_scrml_cs_reactive_get("cur").status);`; in happy-dom: `null is not an object (evaluating '_scrml_cs_reactive_get("cur").status')` and the script stops. A plain `${@cur.status}` is NOT duplicated. Holds with or without an enclosing `if=`, same-line or own-line. This is why examples/23's driver/customer home pages crashed and their Logout buttons were dead. Workaround used in ex23: `${@x is some ? fn(@x.f) : ""}`. Also (same family): attribute expressions like `disabled=(@x.f == "A")` compile to eager effects that run while an enclosing `if=` hides the element.
+
+### g-class-attr-template-does-not-lower-scrml-exprs — inside a `class="…${…}"` template interpolation, scrml expressions are not lowered (`is some`, `?.` emitted raw) → invalid client JS → E-CG-001
+<!-- @gap id=g-class-attr-template-does-not-lower-scrml-exprs sev=MED status=open locus=searched:compiler/src/codegen/emit-html.ts,emit-event-wiring.ts(template-attr class path emits the raw expression into a JS template literal) prov=empirical:S443-example-23-dogfood -->
+**PA-REPRODUCED on main:** `<span class="a ${f(@x is some ? @x.k : "")}">` → emitted `` `a ${_scrml_f_2(_scrml_reactive_get("x") is some ? …)}` `` (raw `is some`) → the protect-egress verifier fails to parse the bundle → E-CG-001 ("compiler defect (malformed client emit)"). `?.` in the same position also fails. Workaround used in ex23: a helper taking the whole record (`accountStatusClassesOf(@currentCustomer)`).
+
+### g-prod-static-no-directory-index — prod `_server.js` static serving tries `path` and `path.html` only; `/x` does not serve `x/index.html` (a `pages/x/index.scrml` route 404s at `/x` in a build)
+<!-- @gap id=g-prod-static-no-directory-index sev=MED status=open locus=compiler/src/commands/build.js(generateServerEntry static candidates: join(SERVE_DIR, pathname) + `${pathname}.html`) prov=empirical:S443-example-23-dogfood -->
+PA-executed: examples/23 with `pages/dispatch/index.scrml` → `GET /dispatch` 404 (the file is `dispatch/index.html`). The compose-route path may cover it where mounted (see g-compose-route-export-name-collision-mounts-one-page). Workaround used: link to the real page paths.
+
+## §S444b — defects surfaced by the dpa-059 / dpa-060 / dpa-061 deep dives (2026-09-30; every entry re-executed on `5b1d0dab0` with `bun compiler/bin/scrml.js compile <f> --output-dir <tmp>` in the s444-gaps-dd059-061 worktree; emitted JS inspected for the runtime shapes; reproducer sources are the inline snippets below or the named files under the dpa-060 session scratch `dd060/repro/`)
+
+### g-bang-brace-in-when-changes-body-invalid-logic — a `!{}` error handler (bare or bound) inside a `when @x changes { … }` body fails with E-CODEGEN-INVALID-LOGIC; the multi-line form also prints "statement boundary not detected — trailing content would be silently dropped"
+<!-- @gap id=g-bang-brace-in-when-changes-body-invalid-logic sev=MED status=open locus=compiler/src/codegen/emit-logic.ts:4067(case "when-effect" lowers bodyRaw via rewriteBlockBody, which passes the `!{ … }` arm through as raw text) prov=dd:browser-persisted-state-dpa-061-2026-09-30-C4-P2 -->
+**Reproduced on `5b1d0dab0`.** `<program>${ import { safeCall } from "scrml:host"  <n> = 0  when @n changes { safeCall(() => localStorage.setItem("n", "x")) !{ | ::Thrown(message, name) :> { } } } }<button onclick=${@n = @n + 1}>${@n}</button></program>` → exit 1, `E-CODEGEN-INVALID-LOGIC … Unexpected token … ) !{ | ::Thrown(message, name) :…` (the `!{}` reaches the client JS unlowered). **Expected:** the body lowers like a function body does. The bound form `const r: asIs = safeCall(…) !{…}` fails the same way, and it also leaks the `: asIs` annotation into the JS. When the arm spans several lines, the compile also prints `[scrml] warning: statement boundary not detected — trailing content would be silently dropped` (twice). **Control:** the same `safeCall(…) !{…}` inside a named `function save()` that the `when` body calls compiles clean (exit 0). This is the workaround dpa-061's Approach B/C examples use. It differs from [[g-when-body-not-validated-garbage-compiles-to-a-client-syntax-error]], where invalid text is accepted without a diagnostic. Here valid scrml error handling is refused, and no existing `g-when*` entry covers it. It also blocks the hardened form of the §6.7.4 persistence recipe ([[g-spec-6-7-4-localstorage-recipe-lossy-for-non-string-cells]]).
+
+### g-spec-6-7-4-localstorage-recipe-lossy-for-non-string-cells — SPEC §6.7.4's idiom-table row `when @var changes { localStorage.setItem(key, @var) }` compiles clean but silently corrupts every non-string cell (`string[]` → `"a,b"`, object → `"[object Object]"`, `not` → `"null"`) — `RESOLVED S444 (1b53395d6)`
+<!-- @gap id=g-spec-6-7-4-localstorage-recipe-lossy-for-non-string-cells sev=MED status=resolved resolved-by=S444-1b53395d6 locus=compiler/SPEC.md:4516(§6.7.4 idiom table, "Sync to localStorage on change") prov=dd:browser-persisted-state-dpa-061-2026-09-30-C4-P1 -->
+**RESOLVED S444 (`1b53395d6`, SPEC-text only).** The §6.7.4 idiom row is struck and replaced: browser persistence is now the `persist=` lifetime attribute (§6.14, Nominal / spec-ahead — the bootstrap builds it), and a correction note states that the struck recipe is correct only for a `string` cell and gives the hand-written encode/decode requirements until §6.14 lands. Ruled "land now": user-voice S444 dpa-061 call 8. The `!{}`-in-`when` codegen defect it cites stays open as [[g-bang-brace-in-when-changes-body-invalid-logic]].
+
+**SPEC-currency gap, reproduced on `5b1d0dab0`.** The SPEC's idiom-table row "Sync to localStorage on change" teaches `when @var changes { localStorage.setItem(key, @var) }` verbatim. `<program>${ <recent>: string[] = []  when @recent changes { localStorage.setItem("recent", @recent) } }<button onclick=${@recent = [...@recent, "a"]}>add</button></program>` → exit 0 with no diagnostic. The emitted client code is `_scrml_when_changes(…, function() { localStorage.setItem("recent", _scrml_cs_reactive_get("recent")); });`. Web Storage coerces the value with `String(v)`, so `["a","b"]` is stored as `"a,b"`, `{x:1}` as `"[object Object]"`, and scrml `not` (`null`) as the present string `"null"`. A Map or Date also fails to revive. **Expected:** the canonical recipe round-trips the cell. Either the row shows the encode step (`JSON.stringify`), the decode half and the failure guard, or it names the restriction to string cells. The SPEC also gives no read half of the recipe. A companion lint for a non-string second argument to `localStorage.setItem` is optional (dpa-061 c4). Hardening the recipe inside the `when` body is blocked by [[g-bang-brace-in-when-changes-body-invalid-logic]].
+
+### g-unknown-decl-attr-silently-undeclares-cell — an unknown attribute on a state declaration (`<recent persist="local">: string[] = []`) silently stops the line being a declaration, so every use reports a misleading E-STATE-UNDECLARED
+<!-- @gap id=g-unknown-decl-attr-silently-undeclares-cell sev=LOW status=open locus=compiler/src/ast-builder.js:8590(scanStructuralDeclLookahead's "Anything else: decline" return null — an unrecognised IDENT attribute falls through to the markup dispatch with no diagnostic) prov=dd:browser-persisted-state-dpa-061-2026-09-30-C4-P6 -->
+**Reproduced on `5b1d0dab0`.** `<program>${ <recent persist="local">: string[] = []  <theme authority="browser"> = "light" }<p>${@recent.length} ${@theme}</p></program>` → exit 1 with `E-STATE-UNDECLARED` on both `@recent` and `@theme`. The message ends "Fix: add a `<theme> = <init>` declaration". The author already wrote that declaration, so the suggested fix is wrong. A nonsense name (`<recent zzbogus="1">: string[] = []`) fails the same way. **Expected:** a diagnostic at the declaration that names the unknown attribute and lists the accepted ones (`default=`, `debounced=`, `throttled=`, `pinned`, `server`, `auth=`, validators …). Filed LOW because the compile fails loudly (it is not a silent miscompile), but it points the author at the wrong line and the wrong fix. dpa-061's `persist=` / `authority="browser"` poles are hypothetical syntax, and this entry does not request them.
+
+### g-request-deps-attr-ignored-both-forms — `deps=[…]` on `<request>` is ignored in BOTH forms: a `url=` request is a one-shot fetch that never re-fetches when a listed dep changes, and a body-form request's explicit `deps=` is replaced by the inferred deps — `RESOLVED S444 (#1191)`
+<!-- @gap id=g-request-deps-attr-ignored-both-forms sev=HIGH status=resolved resolved-by=#1191 locus=compiler/src/codegen/emit-reactive-wiring.ts:2525(emitRequestNode url= deps reader)+compiler/src/codegen/reactive-deps.ts:1102(explicitDeps body form; both accept only an array-kind value or a string value.value, but the attr arrives as kind=expr with refs and an exprNode, so both return the empty list) prov=dd:request-supersede-abort-dpa-059-2026-09-30-open-questions-last-bullet;dd:request-caching-dpa-060-2026-09-30-C5.3 -->
+**RESOLVED S444 (#1191, `f851be3a6`).** Re-executed on `29eb80c31`. The `url=` reproducer (a) now emits `_scrml_effect(function() { var _d = [_scrml_cs_reactive_get("page")]; if (_scrml_request_rows_mounted) _scrml_untracked(_scrml_request_rows_fetch); });`. The body form (b) emits `var _scrml_deps = [_scrml_cs_reactive_get("q"), _scrml_cs_reactive_get("ver")];`. Both readers now go through one shared reader (`readRequestDepsAttr`, reactive-deps.ts), which reads the `kind:"expr"` value. E-LIFECYCLE-022 refuses any entry the reader cannot use. Residuals: [[g-request-two-inferred-deps-one-write-double-fetch]], [[g-request-deps-bare-name-double-diagnostic]].
+**Reproduced on `5b1d0dab0`, and one root explains both forms.** (a) **`url=` form:** `<program>${ <page> = 1 }<request id="rows" url="/api/rows" deps=[@page]></><p>${<#rows>.loading}</p><button onclick=${@page = @page + 1}>next</button></program>` → exit 0. The emitted fetch function ends with a bare `_scrml_request_rows_fetch();`. There is no `_scrml_effect` over `page`, so clicking next never re-fetches. (b) **Body form:** `dd060/repro/d1.scrml` (`<request id="hunt" deps=[@q, @ver]>${ @hits = suggest(@q) }</>`) → exit 0 and `var _scrml_deps = [_scrml_cs_reactive_get("q")];`. `@ver` is missing, so bumping `@ver` (the manual invalidate-after-write idiom) does nothing, and an explicit `deps=[]` presumably cannot suppress inference either. **Root, measured by an AST dump:** the attribute value is `{kind:"expr", raw:"[@q, @ver]", refs:["q","ver"], exprNode:{kind:"array", elements:[{kind:"ident",…}]}}`. Both readers look for `value.kind === "array"` with `variable-ref` elements, or for a string `value.value`, so neither matches and both return `[]`. Without deps, (a) falls to its one-shot `else` branch and (b) falls back to inference. **Governing text, SPEC §6.7.7:** *"When present, `deps` overrides inference."* and *"**Re-execution:** The fetch re-executes when: … Any `@variable` in `deps=` changes, OR `<#id>.refetch()` is called."* The same SPEC example `<request id="results" deps=[@page, @filter]>` is annotated "re-fetches when @page or @filter changes". The body form does re-fire on its INFERRED deps (the effect above), so the defect is specific to the explicit attribute. `url=` itself rides §60 and is outside the §6.7.7 grammar. E-LIFECYCLE-022 (an undeclared `deps=` entry) is probably also unreachable through this reader, but that is not verified.
+
+### g-request-body-client-wrapper-unawaited-one-shot — a `<request>` body that calls a CLIENT function which wraps a server fn loses all request machinery: the cell receives an unawaited Promise once at module init, with no seq, no loading/data settle, and no dep effect — `RESOLVED S444 (#1191)`
+<!-- @gap id=g-request-body-client-wrapper-unawaited-one-shot sev=HIGH status=resolved resolved-by=#1191 locus=compiler/src/codegen/emit-client.ts:3284(post-server-fn-iife-wrap / collectRequestBodyCells — the settle machine is built only when the body's RHS is a DIRECT server-fn stub call) prov=dd:request-caching-dpa-060-2026-09-30-C5.1 -->
+**RESOLVED S444 (#1191, `f851be3a6`).** Re-executed on `29eb80c31`. The `wrap(@q)` body now emits `_scrml_request_hunt_fetch` containing `var _scrml_data = await _scrml_wrap_5(_scrml_cs_reactive_get("q"));`. `refetch` is wired, and a `_scrml_effect` dep effect calls the fetch through `_scrml_untracked`.
+**Reproduced on `5b1d0dab0`.** `dd060/repro/wrap.scrml` declares `function wrap(q: string) -> Hit[] { return suggest(q) }` (where `suggest` is a server fn with `?{}`) and `<request id="hunt">${ @hits = wrap(@q) }</>`. It compiles at exit 0 with no diagnostic. The emitted code is `async function _scrml_wrap_8(q) { return await _scrml_fetch_suggest_7(q); }`, then at module init `_scrml_cs_reactive_set("hits", _scrml_wrap_8(_scrml_cs_derived_get("q")));`, which puts a **Promise** into `@hits`. The "request async fetch initialization" section is empty: there is no `_scrml_request_hunt_fetch`, no seq, and no `_scrml_effect` over `q`. The hoisted `_scrml_request_hunt` stays `{loading: true, …}` forever. **Control:** `dd060/repro/r1.scrml` (`${ @hits = suggest(@q) }`, a direct call) emits the full §6.7.7 settle machine with a `_scrml_effect` dep effect. **Expected:** a body that transitively reaches a server fn gets the same machinery, or a diagnostic refuses the shape. Governing: §6.7.7 (the body is "a `${}` logic block containing the fetch expression", EC-2 sequence-number SHALL) and §13 (the author writes no asynchrony).
+
+### g-request-refetch-statement-dropped — `<#id>.refetch()` written as a STATEMENT (in a function body, or as a later statement of a multi-statement handler) emits nothing; only the single-expression inline handler form works — `RESOLVED S444 (#1191)`
+<!-- @gap id=g-request-refetch-statement-dropped sev=HIGH status=resolved resolved-by=#1191 locus=searched:compiler/src/ast-builder.js,compiler/src/codegen/emit-logic.ts(a `<#id>`-leading statement in a function body is dropped before emit; site not traced) prov=dd:request-caching-dpa-060-2026-09-30-C5.2 -->
+**RESOLVED S444 (#1191, `f851be3a6`).** Re-executed on `29eb80c31`. `function again() { @raw = "a"  <#hunt>.refetch() }` now emits `_scrml_request_hunt.refetch();` in the function body. The inline handler `${ @raw = "b"; <#hunt>.refetch() }` emits both statements. The locus was block-splitter.js, whose `<#` branch flushed the open text run (traced in the #1191 commit message). A multi-statement handler on LIFT markup is a separate defect and is still open: [[g-lift-markup-handler-multi-statement-drops-all-but-first]].
+**Reproduced on `5b1d0dab0`.** `dd060/repro/r2.scrml` has `function again() { <#hunt>.refetch() }` and `<button onclick=again()>`. It compiles at exit 0 and emits `function _scrml_again_9() {\n}`, an empty body with zero `refetch` call sites. `dd060/repro/r30.scrml` has `function again() { @raw = "a"  <#hunt>.refetch() }` and emits only `_scrml_cs_reactive_set("raw", "a");`, with the refetch dropped. dpa-060 reports the same drop for the second statement of an inline handler (`join(x); <#hunt>.refetch()`). That case was not re-run here. **Control:** `dd060/repro/r1.scrml` `onclick=${ <#hunt>.refetch() }` emits `_scrml_request_hunt.refetch();`. **Expected:** SPEC §6.7.7 lists `<#id>.refetch()` as `() -> void`, "Imperatively re-execute the fetch body". It is the manual invalidate-after-write primitive (EC-7: "write directly to the `@variable` before calling `refetch()`"), and it vanishes silently in the one position where that idiom is written.
+
+### g-request-unknown-attribute-accepted-silently — an unknown attribute on `<request>` (`cache="30s"`, `zzbogus="1"`) compiles clean with no diagnostic and no effect
+<!-- @gap id=g-request-unknown-attribute-accepted-silently sev=LOW status=open locus=searched:compiler/src/codegen/emit-reactive-wiring.ts(emitRequestNode reads attrMap by name — id/url/api/deps/method/args — and never rejects the rest),compiler/src/ast-builder.js prov=dd:request-caching-dpa-060-2026-09-30-C5.4 -->
+**Reproduced on `5b1d0dab0`.** `<program>${ <page> = 1  <rows> = []  server function load(p: number) -> number[] { return [p] } }<request id="hunt" cache="30s" zzbogus="1">${ @rows = load(@page) }</><p>${@rows.length}</p></program>` → exit 0 with only the unrelated W-PROGRAM-REDUNDANT-LOGIC warning, and neither attribute appears in the output. **Expected:** §6.7.7's grammar is `request-attrs ::= id-attr (deps-attr)?` (plus the §60 `url=`/`api=`/`method=` riders), so an unknown attribute gets a diagnostic. An adopter who guesses TanStack-style `cache=` gets no cache and no warning. (Unquoted `cache=30s` fails as E-SCOPE-001, per dpa-060. Not re-run.)
+
+### g-bare-brace-in-markup-text-swallows-child-elements-and-interpolations-as-literal-text — a bare `{` in free text turns everything up to its matching `}` (or EOF) into literal page text: child tags, `${…}` and cell declarations ship verbatim at exit 0, contradicting §4.18.1b's closed exit set; at a file root it also suppresses W-PROGRAM-001
+<!-- @gap id=g-bare-brace-in-markup-text-swallows-child-elements-and-interpolations-as-literal-text sev=HIGH status=open locus=compiler/src/block-splitter.js(orphanBraceDepth — the bare-`{` counter meant for `type X:enum = { … }`, applied in markup/file-root free text) prov=adopter:2026-08-22-1542-flint-to-scrml-two-silent-wrong-output-cases.md -->
+**PA-REPRODUCED on 4953ff135:** `<program><count> = 0 <div>note { <p>${@count}</p> }</div></program>` → emitted HTML `<div>note { <p>${@count}</p> }</div>` literally (the `<p>` and the interpolation never compile; only W-PROGRAM-SPA-INFERRED). Triage-agent-executed: a file root `component App { ${ <count> = 0 } <div>Hi ${@count}</div> }` makes splitBlocks return ONE text block — the whole file ships as body text, zero diagnostics (no W-PROGRAM-001); remove the leading `component App {` and it compiles with W-PROGRAM-001. Expected per §4.18.1b: `{` is content; `<`+letter and `${` still exit text. flint: 8/11 react-component-keyword mutations silent.
+
+### g-jsx-style-brace-interpolation-in-markup-text-ships-literal-with-no-lint — `<p>{@count}</p>` renders the literal text `{@count}` at exit 0 with no diagnostic; conformant per §4.18.1b (a bare `{` is content), but it is the most likely mistyping of `${@count}` and nothing flags it
+<!-- @gap id=g-jsx-style-brace-interpolation-in-markup-text-ships-literal-with-no-lint sev=MED status=open locus=searched:compiler/src/lint-w-interp-in-raw-content.js,compiler/src/lint-ghost-patterns.js prov=adopter:2026-08-22-1542-flint-to-scrml-two-silent-wrong-output-cases.md -->
+Triage-agent-executed on 4953ff135: `<p>B: {@count}</p>` ships literally beside a reactive `${@count}`. Expected: a W- lint on a bare `{…}` in free text whose body is an `@`-sigil or a known cell name (flint suggested W-BRACE-LOOKS-LIKE-INTERPOLATION). flint's eval: 0/10 jsx-interpolation mutations caught.
+
+### g-app-root-route-prefix-matched-on-absolute-path — a `/pages/` or `/routes/` directory anywhere in the project's ABSOLUTE path turns every file into a "route file", so no application `<program>` is identified and member pages of a required app are served anonymously
+<!-- @gap id=g-app-root-route-prefix-matched-on-absolute-path sev=HIGH status=resolved resolved-by=s445-app-root-build-relative-93b3ca286 locus=compiler/src/route-inference.ts(resolveBuildRoot + makeRouteClassifier — the one build-root rule, SPEC §40.8 "The build root": a given compileScrml buildRoot, else the directory of the entry file; feeds Step 8 rootCandidates, the 8e loop URL and buildPageRouteTree)+compiler/src/api.js(compileScrml buildRoot option) prov=review:S443-post-merge-1173b-F1 -->
+Reviewer-executed over HTTP (prod + `scrml dev`) on b3419e6d8; PA-confirmed by source (`findRoutePrefix` = `filePath.indexOf(prefix)` on the absolute path). Project at `…/fx/pages/f2/` with `app.scrml` `<program auth="required">` + `pages/about.scrml` (no auth=) → `/about` 200 with body (expected 302); same under `…/routes/…`; no diagnostic, and W-AUTH-LOGIN-MISSING fires falsely. Fix: match the route prefix relative to the BUILD ROOT. Fail-open introduced-in-effect by #1173's inheritance (not a regression vs base, where member pages were always open).
+**RESOLVED S445 (`s445-app-root-build-relative`, 93b3ca286).** HTTP-measured, project at `…/pages/f2/`: `scrml build` + `bun _server.js` anonymous `GET /about` 200-with-body → 302 `/login`; `/login` 200 both; authenticated `/about` 200; `scrml dev` the same (also after a watch recompile); W-AUTH-LOGIN-MISSING no longer false-fires. examples/ + samples/ + conformance/cases/ (1223 units, 2117 outputs) emit byte-identical output and identical diagnostics before/after. **Final rule (S445 review round 3), SPEC §40.8 "The build root":** with no `buildRoot` given (every CLI form, file lists) the build root is the directory of the entry file — the one web-application `<program>` file with no `pages/`/`routes/` anywhere in its path, else the shallowest `<program>` file; route files are classified below it (or, for a flat directory itself named `pages`/`routes`, the files directly in it). Zero or several candidates keep the pre-S445 absolute classification (no inheritance possible with zero; §40.2 fail-closed with several). Rounds 1-2 inferred the root from directory SHAPE and each round found a new edge (flat app in a `pages` dir served `/about` 200 by file list; legacy `routes/*.scrml` sets and lone nested pages lost their URLs); the entry-file anchor replaced it. Round 4: once the root is inferred the application `<program>`s are re-read against it by §40.2's definition, so a second non-route `<program>` fails closed wherever the project lives (`…/pages/deep/{scratch.scrml,src/app.scrml}` had served `/src/pages/about` 200; its control 302). Residual (warning only, not auth): with SEVERAL application `<program>`s under a `pages`/`routes` ancestor no root is inferred, so route URLs keep the absolute reading and W-AUTH-LOGIN-MISSING false-fires there (reviewer p3 `a-none`/`a-pub`/`a-req`/`mono`; gating matches the control). Measured: every `.scrml` under examples/ and samples/ compiled single-file + every examples/samples directory + every conformance case (2109 units, 3107 outputs) byte-identical with identical diagnostics vs c53b297a7.
+
+### g-required-program-with-no-identified-app-root-is-silent — (#1173 by-spec, fail-open) a required `<program>` exists but no application root is identified (entry file itself under `pages/`; or entry under `pages/` + a public `lib/` program becomes the only root) → member pages served anonymously, no warning
+<!-- @gap id=g-required-program-with-no-identified-app-root-is-silent sev=MED status=resolved resolved-by=s445-app-root-build-relative-93b3ca286 locus=compiler/src/route-inference.ts(Step 8c-warn — W-AUTH-REQUIRED-NOT-INHERITED, after 8d; shares isUnannotatedMember with 8c) prov=review:S443-post-merge-1173b-F2 -->
+Reviewer-executed. Recommendation: warn (or fail closed) when a required `<program>` is present but no application root is identified.
+**RESOLVED S445 (warn, not fail-closed):** `W-AUTH-REQUIRED-NOT-INHERITED` (§34) fires on a route file's own `<program auth="required">` when no required application `<program>` covers the build's member pages — none identified, or the identified one (e.g. the public `lib/` program) is not required — and names the pages served without authentication (and the build root). Not fail-closed because §40.2 fixes the outcome in two sentences ("zero such files … nothing below is inherited"; a route file's `<program>` "governs that file only"); inheriting would contradict them. With no `buildRoot` given, the §40.8 build-root rule takes a lone `<program>` file under `pages/` as the entry file (it is the shallowest `<program>`), so that shape is now gated rather than warned; the warning fires when a root is given, or when a public entry outside `pages/`/`routes/` exists beside a required route-file `<program>`. The F3/F4/F5/B1/B2 items below remain open. Also from the same review (all reviewer-executed): **F3 LOW** a nested `<page auth="none">` inside an unannotated member page opens the whole route under a required app (collectFileAuthDecls counts nested pages; the nested `<page>` compiles without error); **F4 LOW** W-AUTH-FILE-CONFLICT calls a typo'd value (`auth="Optional"`) a "laxer declaration" (`lax` filter = `value !== "required"`); **F5 LOW** W-AUTH-REDIRECT-LOOP false-fires for `pages/login/index.scrml` + `loginRedirect="/login/"` (actually a dead target: served at `/login/index`, `/login/` 404); **B1** an unannotated `pages/login.scrml` under a required app is now 302-to-itself — login unreachable — with only a warning at exit 0 (reviewer recommends an error; corpus has none); **B2** in an ambiguous multi-program build a bare-markup file is gated because of ANOTHER program, silently.
+
+### g-wrapped-program-auth-silently-dropped — a `<program auth="required">` under a non-program element (`<div>`, `<main>`) has its `auth=` silently dropped: its server fns run for anonymous callers; none of E-PROGRAM-NESTED-AUTH / E-PROGRAM-002 / compute-program-config sees it
+<!-- @gap id=g-wrapped-program-auth-silently-dropped sev=HIGH status=open locus=compiler/src/codegen/index.ts(detectNestedProgramAuth counts only <program>/<page> ancestors; the E-PROGRAM-002 count reads direct top-level nodes)+compiler/src/compute-program-config.ts(reads a top-level <program> only) prov=review:S443-post-merge-1177-F1 -->
+Reviewer-executed on base and merge (both parsers): `<program><p>public</p></program><div><program auth="required">${ server function secret() { return "s3cret" } }<button onclick=secret()>go</button></program></div>` → anonymous POST (self-minted double-submit pair) `/_scrml/__ri_route_secret_1` → **200 "s3cret"**; the emitted server.js has zero auth code; 0 errors. Also with `<main>`, and a single `<div>`-wrapped auth program with no top-level program (only W-PROGRAM-001 on default, nothing under native). Pre-existing, not introduced by #1177 — the sibling of the gap #1177 closed. Fix: treat "top-level" as "no `<program>`/`<page>` ancestor" in both detectors, or make a `<program>` under a non-program ancestor an error.
+> **Also from the #1177 review (introduced, LOW):** the E-PROGRAM-002 message + §34 row + §40.8 bullet say a second program's session attributes are ignored ("routes run with the FIRST program's settings") — for SESSION attributes the LAST program wins (`g-two-programs-one-file-session-attr-last-wins`), i.e. a silent cookie downgrade; and the new §20.5.1 note "only the nested case below remains reachable" is false (a `<div>`-wrapped second program still reaches step-2 last-wins: `scrml_sid` / 2592000 with 0 errors). Pre-existing note: `compile`/`build` exit 1 on E-PROGRAM-002 / E-PROGRAM-NESTED-AUTH but still WRITE all artifacts incl. the fail-open server.js.
+
+### g-example-23-residuals-after-1180 — examples/23 after #1180 (post-merge review, reviewer-executed): pre-existing authz/routing/runtime holes newly reachable now that login works
+<!-- @gap id=g-example-23-residuals-after-1180 sev=MED status=open locus=examples/23-trucking-dispatch/pages/driver/load-detail.scrml(fetchLoadDetail/fetchLogServer/logBreakdownServer/logFuelStopServer — no assignment check)+examples/23-trucking-dispatch(all loads/:id links)+compiler/src/commands/build.js(generateServerEntry WS handler merge) prov=review:S443-post-merge-1180 -->
+**MED** any driver reads and writes ANY load: `fetchLoadDetail` / `fetchLogServer` return another driver's load (customer name, contact, phone, rate, log); `logBreakdownServer` / `logFuelStopServer` write to it (customer B saw another driver's "breakdown"); payload JSON is string-built → injectable (`engine fire","injected":"1` stored an extra field; same for BOL/POD `filename`). **MED** every load-detail link/route (`/{driver,customer,dispatch}/loads/:id`, `/driver/loads/:id/log`, `/dispatch/loads/new`) 404s — the pages serve only at `…/load-detail` and read the id from the last path segment → assign / transition / BOL / rate-confirm / booking unusable in a browser. **MED** the customer load-detail page crashes on load (`tractor_unit` — the markup call-interpolation compiler defect; the #1180 guard sweep missed it). **MED (compiler)** the built `_server.js` wires ONE page's `_scrml_ws_handlers` 12× — every `customer-events` sync delivered 12×, other channels' syncs silently dropped; any authenticated user can broadcast forged cell syncs to all customers. **LOW (introduced by #1180, fixed by the follow-up PR)**: `getCurrentUser(userId)` / `assignedDriverFor` helpers were public routes (user enumeration / assignment oracle). **LOW (introduced)**: `/auth/login?logout=1` is a cross-site forced-logout link (login-page on-load `endSessionServer`); action buttons enabled before the load arrives (`@currentLoad is some && …` → false while `not`). **LOW**: literal `${@channelId}` in `<code>` on driver messages / profiles; first server call after login 403s on CSRF then retries; HOS "-6h"; register accepts a case variant of an existing email; ex09 duplicate check is SELECT-then-INSERT (racy); seeded users share one argon2 salt; `runSeeds` route exposed (writes `:memory:`, 500s); no regression test for the BOL/POD guard.
+
+## §S444c — impl#1 divergences from the S444 dpa-045 residue rulings (2026-09-30; ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes"; every entry executed on `12aae48a1` with `bun compiler/bin/scrml.js compile <f> -o <dir>`, the output loaded in happy-dom; change `docs/changes/s444-comment-and-escapes/`). impl#1 is NOT changed for these (S435 policy: the TS compiler serves the bootstrap + security only); the bootstrap implements both rules.
+
+### g-impl1-free-text-slash-slash-is-a-comment-without-a-preceding-space — impl#1 treats a free-text `//` as a comment even when no whitespace precedes it (`a//b`, `</b>// x`), silently deleting the rest of the line
+<!-- @gap id=g-impl1-free-text-slash-slash-comment-without-preceding-whitespace sev=MED status=open locus=compiler/src/block-splitter.js(the markup-text `//` branch — locate by `_urlExemptCtx && urlSlashesAt(source, curPos)`; urlSlashesAt exempts only a `:`-preceded `//` or one inside `url(`) prov=ruling:user-voice-scrml.md-S444-"yes on // revised"+spec:SPEC.md-§4.18.1b-exit-(2)+empirical:S444-executed-on-12aae48a1 -->
+**Executed on `12aae48a1`.** SPEC §4.18.1b exit (2) (S444): in free text a `//` opens a comment ONLY at the start of a
+line or immediately after whitespace; `http://x`, `https://x.y`, `a//b`, `</b>// x` are text.
+
+```scrml
+<program>
+    <main>
+        <p id="u">see http://x ok
+        </p>
+        <p id="w">a//b ok
+        </p>
+        <p id="t"><b>y</b>// x
+        </p>
+    </main>
+</program>
+```
+→ exit 0, HTML `<p id="u">see http://x ok …</p>` (agrees — impl#1's `urlSlashesAt` exempts a `:`-preceded `//`),
+**`<p id="w">a        </p>`** (`//b ok` deleted) and **`<p id="t"><b>y</b>        </p>`** (`// x` deleted). With the
+closer on the SAME line (`<p>a//b ok</p>`) the comment also swallows the `</p>`: `E-CTX-001` + `E-CTX-003` cascade.
+Expected (bootstrap): `a//b ok` and `<b>y</b>// x` rendered as text.
+
+**Corpus:** 0 affected — a grep of `examples/ samples/ conformance/` for `\S//` finds 55 hits, every one in an
+attribute value, a logic string or a comment; none in a free-text body. The bootstrap front end over the same corpus
+(2,130 files) produces an identical parse (diagnostics + every Text node) on base and branch.
+**Why MED:** silent content loss at exit 0 in a shape (`a//b`, a path with doubled slashes) that SPEC now says is
+text. Not security. — `NEW S444 (s444-comment-and-escapes)`; **MED**; open
+
+### g-impl1-display-text-literal-escapes-diverge-from-the-restored-catalog — impl#1 does not implement the §4.18.3 escapes as restored S444: `\${` still interpolates, `\q` is silent, and an engine state-child literal renders its raw source with the quotes
+<!-- @gap id=g-impl1-display-text-literal-escapes-diverge-from-restored-catalog sev=MED status=open locus=compiler/src/block-splitter.js(splits `"lit \${x}"` into text + a live `${x}` logic block — no display-literal escape awareness)+compiler/src/engine-statechild-parser.ts(the state-child display literal is handed on raw, quotes included)+searched:compiler/src/ast-builder.js(no E-PARSE-001 on a malformed display-text escape) prov=ruling:user-voice-scrml.md-S444-"A for escapes"+spec:SPEC.md-§4.18.3-Amendment-S444+empirical:S444-executed-on-12aae48a1 -->
+**Executed on `12aae48a1`** (happy-dom, rendered `textContent`). SPEC §4.18.3 (S444): `\"` → `"`, `\\` → `\`,
+`\${` → literal `${` (no interpolation); any other `\` + char → `E-PARSE-001`.
+
+| source | impl#1 renders | expected |
+|---|---|---|
+| `<p : "She said \"hi\" ok">` | `She said "hi" ok` | same ✓ |
+| `<p : "C:\\">` | `C:\` | same ✓ |
+| `<p : "bad \q ok">` | `bad \q ok`, **no diagnostic** | `E-PARSE-001` |
+| `<p : "lit \${@x} ok">` (`<x> = 7`) | **`lit 7 ok`** — the `\` dropped, the interpolation LIVE | `lit ${@x} ok` |
+| engine state-child `<A>"She said \"hi\" C:\\ lit \${@x} bad \q ok"</>` | **`"She said \"hi\" C:\\ lit \7 bad \q ok"`** — the raw source, quotes and backslashes included; `\${` = `\` + a live interpolation; no diagnostic | `She said "hi" C:\ lit ${@x} bad \q ok` + `E-PARSE-001` for `\q` |
+
+The engine row's quote-rendering is the pin-4 "cooked" divergence SPEC §4.18.1b already records (`parse-file.js`
+hands codegen the verbatim source); the escapes make it visible. **Corpus:** 0 uses of `\"` / `\\` / `\${` in a
+display-text literal (S442 E measurement). **Why MED:** silent wrong output at exit 0 for a SPEC-normative escape;
+`\${` renders live data where the author asked for literal text. Not security. — `NEW S444 (s444-comment-and-escapes)`;
+**MED**; open
+
+## §S445 — app-root / build-root review findings (2026-09-30; reviewer-executed over HTTP across four S239 rounds of `s445-app-root-build-relative`; harness in the S445 session scratch `rev-approot-work/`)
+
+### g-served-url-root-ignores-build-root — served URLs and the dist layout come from codegen's outputBaseDir (common dir of ALL outputs incl. gathered imports), not the §40.8 build root; an import from outside the project moves every page URL and makes /login 404 silently
+<!-- @gap id=g-served-url-root-ignores-build-root sev=MED status=open locus=compiler/src/codegen/utils.ts:stripPagesPrefix+compiler/src/codegen/emit-server.ts:computeServedPath+compiler/src/api.js:pathFor prov=review:S445-approot-r1-F4 -->
+Reviewer-executed (base and S445 identical): std project `proj/` whose app.scrml imports `../shared/banner.scrml`; `scrml build proj` → pages served at `/proj/pages/about`, `/login` 404, and W-AUTH-LOGIN-MISSING silent because route inference believes `/login` exists. Fails closed (login unreachable) but the app is broken with no diagnostic. Fix: one build-root concept for BOTH route classification and served-URL computation.
+
+### g-legacy-all-program-route-sets-absolute-url-reading — when every application `<program>` lies under a `pages/`/`routes/` directory and several tie, no root is inferred and URLs keep the absolute-path reading → false W-AUTH-LOGIN-MISSING and redirects to `/login` where the login page serves at `/a/pages/login`
+<!-- @gap id=g-legacy-all-program-route-sets-absolute-url-reading sev=LOW status=open locus=compiler/src/route-inference.ts:resolveBuildRoot prov=review:S445-approot-r3/r4 -->
+Gating is correct (fails closed, matches the controls). Agent's suggested fix (not built, per stop-patching): when all candidates share one directory, take it as the root.
+
+### g-serve-listens-all-interfaces-unauthenticated — `scrml serve` (the hot compile server, default :3100) binds every interface with no authentication; POST /compile accepts arbitrary inputFiles and outputDir → arbitrary file read/write for anyone who can reach the port
+<!-- @gap id=g-serve-listens-all-interfaces-unauthenticated sev=HIGH status=open locus=compiler/src/commands/serve.js(Bun.serve with no hostname; /compile body) prov=review:S445-approot-r2-d -->
+Reviewer-executed: `ss` shows `*:<port>`. Fix direction: bind 127.0.0.1 by default; reject inputFiles/outputDir outside the served project root.
+
+### g-auth-warning-lib-root-mislabel — W-AUTH-REQUIRED-NOT-INHERITED when a public `lib/x.scrml` `<program>` is the only one outside `pages/`: the inferred root is `lib/`, and the warning calls `pages/index.scrml` "the route file" (true only by the old absolute reading)
+<!-- @gap id=g-auth-warning-lib-root-mislabel sev=LOW status=open locus=compiler/src/route-inference.ts(W-AUTH-REQUIRED-NOT-INHERITED message) prov=review:S445-approot-r4 -->
+Also: that project gates differently in place (control: about open + warning, as base) vs under a `pages` ancestor (guarded, candidates tie → fail closed). LOW, fails closed.
+
+### g-no-effect-default-parser-marker-text-escape — (S445 prose r5d, introduced, LOW) on the default parser a pure atom the expression parser can't model (`this`) makes the fallback node carry the enclosing text incl. scrml's operator rewrite markers (`__scrml_is_some__(@a)`), which acorn reads as a call → "effect"; unparsable text also answers "effect"
+<!-- @gap id=g-no-effect-default-parser-marker-text-escape sev=LOW status=open locus=compiler/src/ast-builder.js(liveExprHasEffect unmodelled-text branch) prov=review:S445-prose-r5d -->
+Reviewer-executed: `[this, @a is some]`, `this.x is some`, `this ? @a is not : 1`, `this is not`, `({ x: this }) is some` compile CLEAN on default (native: E-STMT-NO-EFFECT). Same channel for `match` → `__scrml_match__(…)` (a pure `match @e { .A :> 1 .B :> 2 }` statement is clean on default). Fix: strip/reject rewrite markers before the acorn check (or build the fallback text from original source); a pure atom's unparsable text answers "no effect". Also: `(function named() { return 1 })` is clean on both parsers — the named-function-as-declaration rule covers a parenthesised function EXPRESSION, which binds nothing.
+
+### g-no-effect-native-match-arm-false-positive — (S445 prose r5d, introduced, MED on the opt-in native parser) `match @e { .A :> f() .B :> f() }` and `match @e { .A :> @c = 1 … }` at body top → E-STMT-NO-EFFECT on `--parser=scrml-native`; clean on default (calls emitted)
+<!-- @gap id=g-no-effect-native-match-arm-false-positive sev=MED status=open locus=compiler/native-parser/parse-markup.js(no-effect walk does not search native match arm bodies; match-expr removed from effect kinds in 5d) prov=review:S445-prose-r5d -->
+
+### g-body-top-next-line-continuation-runtime-crash — at a `<program>` body top, a line starting with `(`, `[`, `-` or a template literal directly after a declaration CONTINUES the previous expression (JS ASI) instead of being checked: `<a> = 0⏎(@a)` → `_scrml_cs_reactive_set("a", 0(…))` (TypeError at runtime); `-@a` silently makes the initial value `0 - @a`
+<!-- @gap id=g-body-top-next-line-continuation-runtime-crash sev=HIGH status=open locus=compiler/src/ast-builder.js(collectExprAfterLead continuation)+compiler/native-parser/parse-markup.js prov=review:S445-prose-r5c · design:dpa-063 -->
+Reviewer-executed (both rounds 5c/5d). The no-effect rule never sees these statements. Blocked on dpa-063 (statement termination, banked S445) — do not patch per-shape.
+
+### g-prose-r5-pre-existing-residuals — pre-existing defects surfaced by the S441/S445 declared-prose review rounds (reviewer-executed; not introduced)
+<!-- @gap id=g-prose-r5-pre-existing-residuals sev=HIGH status=open locus=searched:ast-builder.js,emit-logic.ts,native-parser/translate-expr.js prov=review:S445-prose-r5..r5d -->
+**HIGH** `fail .Bad` at body top (and inside `${}`) on the default parser compiles to a top-level `return` inside the chunk wrapper → event wiring after it never runs, page silently dead. **HIGH** `go((step(), 7))` on default emits `_scrml_go_3(_scrml_go_3(…))` (double call). **MED** `<` with spaces at body top (`for (let i = 0; i < 3; i++)`, `if (@a < 3)`) → E-CTX-001 from the block splitter. **MED** labelled `break`/`continue` → E-CODEGEN-INVALID-LOGIC (label dropped from the loop), both parsers, inside `${}` too. **Silent runtime crashes** (both parsers): `zqf?.()` emits the unmangled name; `@x = tag\`hi\`` and default-parser tagged templates emit the unmangled tag. **Native only**: default parameter values dropped silently (`function zg(a = 3)` → `function _scrml_zg_2(a)`); C-style `for` init dropped (`for (; …)`, now fails closed E-INTERNAL); `when message(d) {…}` doesn't parse; `function f(): T` return type doesn't parse. **Open ruling question**: does S445 #2 (no-effect is an error) reach expression statements inside explicit `${ … }` blocks, or only the body top? Today `${ type N = number zqxone; import stuff; 404 }` and `${ @count }` compile silently on default.
+
+### g-bare-block-statement-dropped — a bare `{ … }` block statement is dropped from the emitted output with no diagnostic: `let s = "a"; { s = "b" }; return s` returns "a" (base c53b297a7 and every S445 protect round)
+<!-- @gap id=g-bare-block-statement-dropped sev=HIGH status=open locus=searched:emit-logic.ts,ast-builder.js prov=review:S445-protect-r6c-S3 -->
+Silent semantics change (the block's writes vanish). Found by the protect-egress reviewer outside the protect surface.
+
+## §S444d — S444 review residuals: `<request>` (#1191), lift/attr codegen, bootstrap display literals (#1195), bootstrap typer (#1189), SPEC wording (#1184) (2026-09-30; every entry re-executed on `29eb80c31`. impl#1 probes use `bun compiler/bin/scrml.js compile <f> --output-dir <dir>`, with runtime counts from a happy-dom mount + stubbed `fetch` (the `request-deps-attr-s444.test.js` §C harness). Bootstrap probes use `frontEnd(loadM2().mods, [{path:"t.scrml", src}])` from `compiler/self-host-v2/slice-m4/harness.js`, with the `P` / `state` / `stateLast` wrappers of `slice-m4/comment-escapes.test.js`)
+
+### g-request-two-inferred-deps-one-write-double-fetch — a `<request>` body with two inferred deps that change on ONE write (a derived cell plus its input, `suggest(@da, @a)`) fires TWO fetches per write
+<!-- @gap id=g-request-two-inferred-deps-one-write-double-fetch sev=LOW status=open locus=compiler/src/codegen/reactive-deps.ts:1168(the body-form dep effect lists `_scrml_cs_derived_get("da")` and `_scrml_cs_reactive_get("a")` as independent subscriptions, and nothing coalesces two notifications from one write) prov=review:#1191 -->
+**Reproduced on `29eb80c31`.** Source: `<a> = "x"`, `const <da> = @a + "!"`, `server function suggest(d: string, a: string) -> string[]`, `<request id="hunt">${ @hits = suggest(@da, @a) }</>`. It compiles at exit 0. The emitted effect is `_scrml_untracked(function() { _scrml_cs_derived_get("da"); }); var _scrml_deps = [_scrml_cs_derived_get("da"), _scrml_cs_reactive_get("a")]; … _scrml_untracked(_scrml_request_hunt_fetch);`. Mounted with a stubbed `fetch`, the mount makes 1 call, and three `set("a", …)` writes bring the total to **3 → 5 → 7** (2 per write). **Control:** the same body with `suggest(@da, "k")` (the derived dep only) makes exactly 1 call per write. **Expected:** one write re-executes the fetch once. The superseded fetch is discarded by the seq guard, so the data is correct, but each write costs one wasted round-trip. #1191's §E test pins one fetch per write for a single derived dep only.
+
+### g-request-deps-bare-name-double-diagnostic — `deps=[page]` (a cell name without its `@`) reports BOTH E-SCOPE-001 and E-LIFECYCLE-022 for the same token
+<!-- @gap id=g-request-deps-bare-name-double-diagnostic sev=LOW status=open locus=compiler/src/codegen/emit-html.ts:2688(E-LIFECYCLE-022 for a non-`@` entry)+the E-SCOPE-001 bare-reactive-identifier check, which also sees the attribute's `refs` prov=review:#1191 -->
+**Reproduced on `29eb80c31`.** `<program>\n<page> = 1\n<request id="rows" url="/api/rows" deps=[page]></>\n<p>${<#rows>.loading} ${@page}</p>\n</program>` → exit 1 with `E-SCOPE-001: Bare identifier \`page\` … references the reactive variable \`@page\` without its \`@\` sigil` and `E-LIFECYCLE-022: … \`deps=\` entry \`page\` is not a reactive cell … Fix: write the cell with its sigil — \`@page\``. **Expected:** one diagnostic. E-LIFECYCLE-022 is the specific one, so E-SCOPE-001 should stand down for a `deps=` entry. This is cosmetic: both errors give the same correct fix.
+
+### g-lift-markup-handler-multi-statement-drops-all-but-first — a multi-statement event handler on markup inside `${ for … lift <el onclick=${ a; b }> }` silently keeps only the FIRST statement (exit 0)
+<!-- @gap id=g-lift-markup-handler-multi-statement-drops-all-but-first sev=HIGH status=open locus=compiler/src/codegen/emit-lift.js:1291(the `on*` attribute branch of the lift emitter lowers the handler value as ONE expression field; lift markup never gets the statement-list parse the non-lift handler path does) prov=review:#1191 -->
+**Reproduced on `29eb80c31` (silent).** `<program>\n<a> = 0\n<b> = 0\n<items> = [1, 2, 3]\n<ul>\n${ for (x of @items) { lift <li><button onclick=${ @a = @a + 1; @b = @b + 10 }>go</button></li> } }\n</ul>\n<p id="out">${@a} ${@b}</p>\n</program>` → exit 0, no diagnostic. The emitted listener is `_scrml_lift_el_10.addEventListener("click", function(event) { _scrml_cs_reactive_set("a", _scrml_cs_reactive_get("a") + 1); });`, and `@b = @b + 10` is gone. **Control:** the same two statements on a non-lift `<button>` (and in an `<each>` row) emit both. **Expected:** every statement of the handler runs (§5.2.2). A click does half of what the author wrote, with nothing in the output to say so. This was deferred from the #1191 review. The `<#id>.refetch()` variant is one instance, also executed: `onclick=${ @x = 1; <#r>.refetch() }` on lift markup emits only `_scrml_cs_reactive_set("x", 1);`. It loses the refetch that [[g-request-refetch-statement-dropped]] restored elsewhere.
+
+### g-lone-at-sigil-reaches-codegen-as-invalid-logic — a lone `@` (no name, not the `<each>` `@.` sigil) in a logic expression passes every source check and fails as E-CODEGEN-INVALID-LOGIC ("compiler defect")
+<!-- @gap id=g-lone-at-sigil-reaches-codegen-as-invalid-logic sev=LOW status=open locus=searched:compiler/src/expression-parser.ts,compiler/src/codegen/emit-expr.ts(no source-level check rejects a bare `@` token, so it is emitted verbatim) prov=review:#1191 -->
+**Reproduced on `29eb80c31`.** The brief framed this as "a bare `@` item in a multi-statement `<each>` row handler". Execution shows a broader shape. (a) `<each in=@items><li onclick=${ @sel = @; @n = @n + 1 }>` → exit 1, `E-CODEGEN-INVALID-LOGIC … Unexpected character '@' … _scrml_reactive_set("sel", @); …`. (b) The single-statement `onclick=${ @sel = @ }` fails the same way. (c) So does `onclick=pick(@)`. (d) Outside any `<each>`, `<button onclick=${ @sel = @ }>` fails the same way. (e) So does display `<each in=@items><li>${@}</li></each>` (`textContent = String(@)`). **Control:** the SPEC's item sigil `@.` compiles and lowers correctly in every one of these positions, including a multi-statement row handler (`_scrml_cs_reactive_set("sel", _scrml_each_item); _scrml_cs_reactive_set("n", …)`). **Expected:** a source diagnostic at the `@` (inside `<each>`, a hint toward `@.`), not a "compiler defect" blame. The failure is loud, so this is LOW.
+
+### g-request-lifecycle-diagnostics-without-emitters — seven SHALL-emit codes of SPEC §6.7.7 (`<request>`) have NO emitter in impl#1: E-LIFECYCLE-019/020/021 and W-LIFECYCLE-011/012/013/014
+<!-- @gap id=g-request-lifecycle-diagnostics-without-emitters sev=MED status=open locus=searched:compiler/src(`grep -rn -- "<code>" compiler/src` returns 0 hits for each listed code; E-LIFECYCLE-018 and -022 are emitted at compiler/src/codegen/emit-html.ts:2665/:2688) prov=review:#1191 -->
+**Reproduced on `29eb80c31`, both by grep and by execution.** SPEC §6.7.7 Normative Statements (SPEC.md ~:5028-5037) say "The compiler SHALL emit …" for eight `<request>` codes plus E-LIN-006. A grep of `compiler/src` finds **zero** mentions of E-LIFECYCLE-019, -020, -021 or W-LIFECYCLE-011, -012, -013, -014. E-LIFECYCLE-018, E-LIFECYCLE-022 and E-LIN-006 do have emitters. Each probe (a server fn `f`, cells `@a @b @x`) compiled with no LIFECYCLE code: **019** `<request id="r"/>` → exit 0; **020** a body `${ @a = f(@x)\n @b = f(@x) }` (two assignments) → exit 0, clean; **021** `${ f(@x) }` (no assignment) → exit 0; **013** `${ @a = f(1) }` (no reactive deps, no `deps=`) → exit 0; **011** `@a` assigned and never read in markup → exit 0; **014** `<request>` inside `${ for … lift }` → exit 0 with only W-EACH-PROMOTABLE; **012** `<#r>.refetch()` in a `<timer>` body → exit 0. **Control:** a `<request>` with no `id` gives E-LIFECYCLE-018 (exit 1). **Adjacent (§6.7.9, not §6.7.7):** E-LIFECYCLE-013 (`animationFrame()` inside `<timer>`/`<poll>`) and E-LIFECYCLE-014 (`animationFrame()` in a server-escalated body) also have zero mentions in `compiler/src`. A `<timer interval=1000>${ animationFrame(draw) }</>` probe compiled at exit 0. A wider sweep found more E-/W-LIFECYCLE codes that SPEC names with no emitter site (E-LIFECYCLE-003/005/006/008/011/016 and W-LIFECYCLE-001/003/004/005/006/008/009/010). That sweep did not check whether each of those is a SHALL-emit, so they are listed here as a lead and not filed. The 020 and 021 cases are the ones with consequence, because a body shape the SPEC refuses compiles to something.
+
+### g-state-ref-rewrite-inside-string-literal — `preprocessWorkerAndStateRefs` rewrites a `<#id>` that sits inside a STRING LITERAL in a handler (`"press <#k> now"`), so the emitted JS is malformed
+<!-- @gap id=g-state-ref-rewrite-inside-string-literal sev=LOW status=open locus=compiler/src/ast-builder.js:570(preprocessWorkerAndStateRefs — a raw-text regex rewrite with no string-literal awareness) prov=review:#1191 -->
+**Reproduced on `29eb80c31`.** With `<request id="k">…</>` declared, `<button onclick=${ @msg = "press <#k> now" }>` → exit 1, `E-CODEGEN-INVALID-LOGIC … Unexpected token … _scrml_input_state_registry.get("k") now"); …`: the `<#k>` inside the string was replaced by a registry lookup, which split the literal. **Expected:** string contents are opaque, and the handler sets `@msg` to the text `press <#k> now`. The failure is loud, so this is LOW. The routing is also wrong, because `k` is a `<request>`, not an input-state element.
+
+### g-request-ref-in-attr-template-left-raw — any `<#request>` read inside a quoted attribute template (`class="${<#hunt>.stale ? 'dim' : ''}"`, and even `class="${<#hunt>.stale}"`) reaches the JS unrouted → E-CODEGEN-INVALID-LOGIC
+<!-- @gap id=g-request-ref-in-attr-template-left-raw sev=MED status=open locus=compiler/src/codegen/emit-bindings.ts:423(lowerAttrTemplateValue → rewriteTemplateAttrValue, the raw-string rewriter, which never routes a `<#id>` ref) prov=review:#1191 -->
+**Reproduced on `29eb80c31`.** `<request id="hunt">${ @hits = suggest(@q) }</>` + `<p class="${<#hunt>.stale ? 'dim' : ''}">` → exit 1, `E-CODEGEN-INVALID-LOGIC … Unexpected token … _p_5.setAttribute("class", \`${<#hunt>.stale ? 'dim' : ''}\`);`. The plain `class="${<#hunt>.stale}"` fails identically. **Controls:** the same ternary over a cell (`class="${@hits.length > 0 ? 'dim' : ''}"`) → exit 0, and `class:dim=${<#hunt>.stale}` plus a text interpolation `${<#hunt>.stale ? "dim" : ""}` → exit 0. The workaround is `class:dim=`. This widens [[g-request-is-some-in-mixed-text-attr-template-misroute]] (filed for `is some` in MIXED text). The root looks the same: the template path never builds an ExprNode, so `<#id>` is never routed, and ANY `<#request>` read in ANY quoted-template attribute fails. Fixing that entry's root probably closes this one too.
+
+### g-bootstrap-code-body-several-display-literals-refused — bootstrap: SPEC §4.18.3 (S444) lets a code-default body hold SEVERAL standalone display literals, but `"a"` then `"b"`, or `"a";`, is refused with E-UNQUOTED-DISPLAY-TEXT
+<!-- @gap id=g-bootstrap-code-body-several-display-literals-refused sev=MED status=open locus=compiler/self-host-v2/parse.scrml:1037(isStandaloneDisplay requires the region's display-mode lex to be EXACTLY one `"` token, `toks.length != 2` → false, so a second literal or a `;` re-lexes the region with display off) prov=review:#1195 -->
+**Reproduced on `29eb80c31` (bootstrap).** A state-child body (the `state()` wrapper, `<A rule=.B>…</>`): (a) `"a"` newline `"b"` → `E-UNQUOTED-DISPLAY-TEXT … did you mean \`""a"\n "b""\`?` over the whole run. (b) `"a";` → the same, suggesting `""a";"`. (c) `"a"; "b"` → the same. **Control:** a single `"a"` → no diagnostics. **Governing:** SPEC §4.18.3 (S444, SPEC.md:1447) says *"a display-text literal only when it stands alone as a body statement — the whole statement is the one `"…"` (a body may hold several such statements; a `:`-shorthand body is one)"*. The suggested fix is also wrong, because wrapping the run in another pair of quotes does not produce valid source. **Expected:** each standalone `"…"` statement becomes its own display node, and a trailing `;` is accepted as a statement terminator (or the SPEC says it is not).
+
+### g-bootstrap-nested-interp-string-message-says-display-literal — bootstrap: a nested `"a ${@n} b"` inside an expression gets E-BOOTSTRAP-UNSUPPORTED, and the message still calls it "a display-text literal"
+<!-- @gap id=g-bootstrap-nested-interp-string-message-says-display-literal sev=LOW status=open locus=compiler/self-host-v2/parse.scrml:1348 prov=review:#1195 -->
+**Reproduced on `29eb80c31` (bootstrap).** `<p : @n == 5 ? "a ${@n} b" : "c">` → `E-BOOTSTRAP-UNSUPPORTED "a display-text literal carrying an interpolation (§4.18.4) inside a larger expression is not in the bootstrap — make it the whole body"`. Since the S444 "standalone only" ruling (§4.18.3), a `"…"` operand inside an expression is an **ordinary string**, not a display-text literal. The refusal itself stands (interpolation in an ordinary string is unsupported in the bootstrap), but the wording names the wrong construct. **Expected:** e.g. "an interpolating string (`\"…${…}…\"`) inside an expression is not in the bootstrap", which drops the §4.18.4 display citation.
+
+### g-bootstrap-runaway-display-literal-cascades-before-closer — bootstrap: an unterminated display literal followed later in the file by another `"` swallows the body closer and cascades (E-UNQUOTED-DISPLAY-TEXT + three E-PARSE-UNCLOSED) instead of §4.18.3's E-CTX-001 at the body's closer
+<!-- @gap id=g-bootstrap-runaway-display-literal-cascades-before-closer sev=MED status=open locus=compiler/self-host-v2/parse.scrml:1641(displayCloseAt reports "unterminated" only when the scan reaches EOF; any later `"` in the file counts as the closer) prov=review:#1195 -->
+**Reproduced on `29eb80c31` (bootstrap).** The `state()` wrapper with idle body `"C:\"` (an escaped quote, so the literal is unterminated), followed by `<B rule=.A : "B">`, which supplies a later `"`. The result is `E-UNQUOTED-DISPLAY-TEXT` spanning from `"C:\"</>` to EOF, then `E-PARSE-UNCLOSED` for `<A>`, `<ph>` and `<program>`, with the suggested fix quoting the rest of the file. **Control:** the same idle body as the LAST state child (`stateLast`, no later `"` in the file) → exactly `E-CTX-001 … read up to the \`<A>\` body's closer`. **Expected (§4.18.3 / §4.18.7):** E-CTX-001 at the opening `"`, recovered at the body's `</>`, whether or not a `"` occurs later in the file. The closed-literal-content rule (a closed literal's content is never searched for closers) leaves no direct way to tell the two cases apart. A recovery heuristic is needed, for example preferring the body closer when the "closed" literal would span it. Reachable by a one-character typo (`"C:\"` for `"C:\\"`).
+
+### g-bootstrap-unterminated-shorthand-display-literal-meets-later-quote — bootstrap: an unterminated `:`-shorthand display literal that meets a later `"` cannot be told apart from a finished one (`>` is legal display text), so it cascades with no E-CTX-001
+<!-- @gap id=g-bootstrap-unterminated-shorthand-display-literal-meets-later-quote sev=LOW status=open locus=compiler/self-host-v2/parse.scrml:1279(parseShorthand; the literal extent is displayCloseAt's, :1641) prov=review:#1195 -->
+**Reproduced on `29eb80c31` (bootstrap).** `<p : "abc>` newline `<i : "x">` → the literal runs from `"abc>` to the `"` of `"x"`. The result is `E-PARSE-TRAILING` (unexpected `x`), `E-PARSE-SHORTHAND` (expected the `>`), `E-PARSE-UNCLOSED` for `<main>`, and `E-PARSE-UNCLOSED` for `<program>`. No E-CTX-001 names the real mistake. **Control:** `<p : "abc">` → clean. This is the `:`-shorthand sibling of [[g-bootstrap-runaway-display-literal-cascades-before-closer]]. It is harder, because the shorthand has no body closer to anchor on and `>` is legal inside the literal. At most a hint is possible (e.g. "a display literal spans a newline and a `<tag` — missing `\"`?"). LOW because the compile fails loudly.
+
+### g-bootstrap-typer-int-into-string-bool-initializer-unchecked — bootstrap typer: an `int`-typed local or cell read into a `string` / `boolean` local's initializer is not checked (`let a: int = 1  let s: string = a` → no error)
+<!-- @gap id=g-bootstrap-typer-int-into-string-bool-initializer-unchecked sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml:6097(checkMaybeNot — "no ruling widens those positions for other type mismatches": a non-literal initializer is checked only for an `int`-bearing target or the `T | not` rule) prov=review:#1189 -->
+**Reproduced on `29eb80c31` (bootstrap).** Inside `function f() { … }` in the `P` wrapper (cell `<let n:int=5/>`): (a) `let a: int = 1` then `let s: string = a` → no diagnostics. (b) `let t: boolean = a` → no diagnostics. (c) `let s: string = @n` → no diagnostics. **Controls:** `let a: string = "x"` then `let k: int = a` → `E-TYPE-031 \`k\` expects \`int\`, and this value is \`string\``, because an int-bearing target IS checked. `let s: string = 1` → E-TYPE-031 (literal initializer, §7.5.1 position 1). The asymmetry is deliberate under the scoped S442 ruling (analyze.scrml ~:6027-6097: "the ruling widens `int`, not those positions in general"). It is filed because §7.5.1 positions 1/2 (annotated initializers) read as covering any primitive mismatch that is provable, and `int` → `string` is provable from the declared types. A ruling decides whether to widen the check or to note the limit in §7.5.1.
+
+### g-spec-async-escape-unawaited-promise-overcertain — SPEC §13.2 prose and the §34 row for E-ASYNC-FN-ESCAPES-AS-VALUE still assert every caller "receives an unawaited Promise", which is over-certain under the fail-closed rule (#1184 softened the impl message only)
+<!-- @gap id=g-spec-async-escape-unawaited-promise-overcertain sev=LOW status=open locus=compiler/SPEC.md:8372(§13.2 "Every such position would hand a caller an unawaited Promise")+compiler/SPEC.md:21206(§34 row "Whoever calls it through that value receives an unawaited Promise") prov=review:#1184 -->
+**Reproduced on `29eb80c31` (grep).** `grep -n 'unawaited Promise' compiler/SPEC.md` finds both sentences unchanged. #1184 (`7e445b2c6`) rewrote the diagnostic in `compiler/src/codegen/emit-library-shared.ts` to say what the rule actually knows: scrml cannot prove the receiver awaits, so the value is refused, and the hazard is conditional. The SPEC still states the hazard as a certainty. The flogence S50 case (a receiver that DID await) shows it is not certain. **Expected:** both sentences say the compiler cannot prove the receiver awaits the result, and that a receiver which does not await gets an always-truthy Promise. The rule, code, severity and sites are unchanged.
+
+## §S444e — first-paint gaps routed out of the dpa-062 deep dive (2026-09-30; route-to-PA R1 and R3 of `scrml-support/docs/deep-dives/prepaint-opt-in-dpa-062-2026-09-30.md`; both re-executed on `a83fd90ac` with `bun compiler/bin/scrml.js compile p4.scrml --output-dir <dir>`, where `p4.scrml` is the program quoted in the first entry; change `docs/changes/s444-spec-dpa062/`)
+
+### g-client-local-static-html-no-initial-value — SPEC §52.8 and §6.14.2 rule 7 say a client-local cell shows its declared initial value before hydration, but impl#1's static HTML carries NO value for any client-local read (empty text span, absent `class:` even when the default is `true`, inert `<template>` for `if=`, `show=` region visible whatever the value, empty `<each>` mount)
+<!-- @gap id=g-client-local-static-html-no-initial-value sev=LOW status=open locus=compiler/SPEC.md:34745(§52.8 "Client-local variables SHALL NOT be pre-rendered. They use their declared initial value until client-side hydration runs.")+compiler/SPEC.md:6453(§6.14.2 rule 7 "SSR output renders its default") prov=dd:prepaint-opt-in-dpa-062-2026-09-30 -->
+**Reproduced on `a83fd90ac`.** `p4.scrml`: `<program>` with `type SidebarMode:enum = { Open, Collapsed }`, cells `<sidebar>: SidebarMode = .Collapsed`, `<wide> = true`, `<hidden> = false`, `<username> = "bryan"`, `<recent>: string[] = ["a", "b"]`, and markup `<aside class:collapsed=(@sidebar == .Collapsed) class:wide=@wide>nav</aside>`, `<div if=(@sidebar == .Collapsed)>collapsed panel</div>`, `<div show=@hidden>hidden panel</div>`, `<p>Hello ${@username}</p>`, `<ul><each in=@recent as s key=__index__><li>${s}</li></each></ul>` → exit 0 (1 info, W-PROGRAM-SPA-INFERRED). The emitted `p4.html` body, verbatim in part: `<aside data-scrml-class-collapsed="…" data-scrml-class-wide="…">nav</aside>` (no `class` attribute, although both classes apply at the initial values), `<template id="_scrml_scrml_tpl_3"><div>collapsed panel</div></template><!--scrml-if-marker:…-->` (inert, although the condition is true initially), `<div data-scrml-bind-show="…">hidden panel</div>` (no `display:none`, and `p4.css` has no rule for it), `<p>Hello <span data-scrml-logic="…"></span></p>` (empty, not `bryan`), and an empty `<!--scrml-each:…--><!--/scrml-each:…-->` mount. Both scripts are classic `<script src>` at the end of `<body>`; `show=` / `if=` / text wiring runs in `_scrml_boot` (client.js L101, on `DOMContentLoaded`). **So before JS runs the page shows *unbound* markup, not the initial values.** **Governing:** §52.8 (SPEC.md:34745) *"Client-local variables SHALL NOT be pre-rendered. They use their declared initial value until client-side hydration runs."*; §6.14.2 rule 7 *"SSR output renders its default (§52.8)"*. **Open question, not a verdict:** is this a SPEC-currency fix (the text should say client-local reads are unbound before the client runs) or is impl#1 behind an intended static-emit strategy (defaults in the static HTML)? The answer decides dpa-062's F3: SPEC §6.14.4.2 rule 6 makes an uncovered `prepaint` read an Info *because* such reads are "empty before JS, never wrong"; if defaults are emitted statically, those reads would paint a wrong default and rule 6 must be revisited (SPEC O-062-9). Filed LOW: no wrong value is shown today, only late pop-in — but see [[g-client-local-attr-reads-wrong-state-pre-js]] for the reads that ARE wrong.
+
+### g-client-local-attr-reads-wrong-state-pre-js — every client-local `show=` / `class:` read paints the WRONG state before JS on a slow network (a `show=` whose initial value is `false` is visible; a `class:` whose initial value is `true` is absent), persisted or not
+<!-- @gap id=g-client-local-attr-reads-wrong-state-pre-js sev=MED status=open locus=compiler/src/codegen/emit-html.ts(the static emit writes only the `data-scrml-bind-show` / `data-scrml-class-*` markers, never the initial value's `display:none` or class) prov=dd:prepaint-opt-in-dpa-062-2026-09-30 -->
+**Reproduced on `a83fd90ac`** (the same `p4.scrml` and emit as [[g-client-local-static-html-no-initial-value]]). `<div show=@hidden>` with `<hidden> = false` is emitted as `<div data-scrml-bind-show="_scrml_attr_show_5">hidden panel</div>` with no `display:none` and no CSS rule (`grep -c 'show\|collapsed\|wide' p4.css` → 0), so it is **visible** until `_scrml_boot` runs on `DOMContentLoaded`. `<aside class:wide=@wide>` with `<wide> = true` has no `class="wide"`, and `class:collapsed=(@sidebar == .Collapsed)` with `<sidebar> = .Collapsed` has no `class="collapsed"`, so the aside paints unstyled until the client script runs. Unlike text / `<each>` / `if=` (empty before JS), these attribute-shaped reads show a **wrong-then-right flash**. The dd measured it in headless Chromium with the 150 KB runtime delayed 2000 ms (hand-edited copy of the real emit): first paint at ~20–280 ms, client JS at ~2 s; a `show=` panel `display:block` and an aside `200px` wide in frames 1–4, then corrected (dd B10, B13). On localhost the client runs before first paint, so it does not show in local dev (dd F1/B17). **Scope:** dpa-062 (SPEC §6.14.4) fixes this only for a **persisted** `prepaint` cell, whose stored value the head script reflects; the same flash for every non-persisted client-local cell is outside it (dd route-to-PA R3). A compile-time fix is available in principle, because a client-local cell's initial value is often a compile-time constant (e.g. emitting the initial `class` / `display:none` into the static markup). **Expected (pending a ruling):** an attribute-shaped read of a client-local cell with a constant initializer paints its initial state from the first frame. Related to [[g-client-local-static-html-no-initial-value]] (the §52.8 wording question).
+
+## §S444f — `--emit-per-route` chunk activation under `headers="strict"` (2026-09-30; route R2 of the dpa-062 pre-paint deep dive; change `docs/changes/s444-csp-inline-chunks/`. Probe: the A-5.1 fixture `compiler/tests/integration/fixtures/a5/multipage-multirole/routes/*.scrml` with `headers="strict"` added to each `<program>`, compiled with `bun compiler/bin/scrml.js compile <routes> --emit-per-route -o <dir>`, served by a Bun static server sending the compiler's own `Content-Security-Policy: default-src 'self'`, loaded in headless Chromium via the repo's Playwright with a `scrml_role` cookie)
+
+### g-emit-per-route-inline-chunk-scripts-refused-under-strict-csp — `--emit-per-route` put the `_SCRML_CHUNKS` manifest and the role-detection bootstrap in two INLINE `<script>`s, which `headers="strict"`'s `default-src 'self'` refuses, so no role chunk ever loaded — `RESOLVED S444 (s444-csp-inline-chunks)`
+<!-- @gap id=g-emit-per-route-inline-chunk-scripts-refused-under-strict-csp sev=MED status=resolved resolved-by=s444-csp-inline-chunks locus=compiler/src/codegen/emit-html.ts(augmentHtmlForChunks — emitted `<script>window._SCRML_CHUNKS = …</script>` + an inline bootstrap IIFE into <head>)+compiler/src/codegen/emit-server.ts(_scrml_apply_security_headers pins `default-src 'self'` with no nonce/hash/'unsafe-inline') prov=dd:prepaint-opt-in-dpa-062-2026-09-30-route-R2 -->
+**RESOLVED S444 (s444-csp-inline-chunks).** The manifest and the bootstrap now ship as ONE build-wide, content-addressed, same-origin file, `scrml-chunks.<hash>.js` (`buildChunksBootJs`). It is written by api.js at the dist root and listed in `clientAssets` and `hashedAssets`. Each page carries `<script src="/scrml-chunks.<hash>.js" data-scrml-route="<route>">` in `<head>`, the same parse position the inline scripts had. The bootstrap reads its route off `document.currentScript`. Nothing is inline, so the CSP is not widened, and no nonce or hash is needed (the S441 hot-reload / SSR-seed precedent). **After, same probe:** 0 CSP violations, `_SCRML_CHUNKS` holds `/admin,/,/loads`, and `/index/Admin.initial.<hash>.js` is fetched for `scrml_role=Admin`. Pinned by `codegen-html-augmentation.test.js` §5: the CSP string the compiler pins is `default-src 'self'`, and the page has zero executable inline scripts.
+**Reproduced on `a83fd90ac` (real Chromium, CSP enforced).** With the compiler's own `default-src 'self'`: 2 console errors, `Executing inline script violates … 'default-src 'self''` (one for each inline script). `window._SCRML_CHUNKS` was the runtime's empty scaffold, and the request log had NO `/index/<Role>.initial.*.js`. **Control:** the same build under `default-src * 'unsafe-inline'` fetched `/index/Admin.initial.015oese3.js`. **Not fail-open:** the per-file `.client.js` loads either way, so the page still works in the pre-chunk shape. The role chunks only register mounts and wire tier-2 hover prefetch. `<auth role>` markup is not withheld by the split in the first place (W-AUTH-CONTENT-NOT-GATED; content gating is server-side). So the impact is that chunk activation and prefetch were dead under strict headers, plus console CSP violations (and CSP reports, if the author adds a report endpoint). No exposure.
+
+### g-chunk-bootstrap-anonymous-fallback-misses-role-enum-anonymous-key — the chunk bootstrap's no-hint fallback role is the literal `"_anonymous"`, but an app with a role enum keys its anonymous chunks by the enum variant (`"Anonymous"`), so a visitor with no role hint never gets a chunk
+<!-- @gap id=g-chunk-bootstrap-anonymous-fallback-misses-role-enum-anonymous-key sev=LOW status=open locus=compiler/src/codegen/emit-html.ts(buildChunksBootJs getRole — `return "_anonymous"`)+compiler/src/codegen/route-splitter.ts:1153(initial-chunk tier-2 hover wiring — the same `"_anonymous"` roleFn fallback) prov=empirical:s444-csp-inline-chunks-chromium-probe -->
+**Reproduced on `a83fd90ac` and unchanged by the fix above (real Chromium, no role cookie, CSP relaxed so the scripts run).** The A-5.1 fixture declares `type UserRole:enum = { Anonymous, Driver, Admin }`, so `_SCRML_CHUNKS["/"]` has the keys `Anonymous` / `Driver` / `Admin`. With no localStorage, no cookie and no `<meta name="scrml-role">`, `getRole()` returns `"_anonymous"`, which logs `scrml: no chunk for role '_anonymous' at route '/'` and loads nothing. Apps WITHOUT a role enum key their chunks `_anonymous` (the RS A-2.5 floor sentinel; see the `chunks.json` excerpt under [[g-chunks-json-names-chunk-urls-that-are-never-written]]) and do match. Impact is the same class as the entry above: anonymous visitors get the pre-chunk shape and no hover prefetch, and no content is exposed. **Fix direction (not ruled):** the bootstrap falls back to the enum's anonymous variant when the manifest has no `_anonymous` key, or the splitter keys the anonymous variant as `_anonymous`.
+
+## §S444g — S444 final residuals: the impl#1 conformance-adapter happy-dom leak (#1200), impl#1 text-scan / string-rewrite defects found by the #1202 build agent, the filename-into-markup escape (#1200), and the bootstrap items deferred from #1202 (2026-10-01; every entry re-executed on `464c9ab4d`. impl#1 probes use `bun compiler/bin/scrml.js compile <f> --output-dir <dir>`. Bootstrap probes use `frontEnd(loadM2().mods, [{path, src}])` from `compiler/self-host-v2/slice-m4/harness.js` with the `P` / `F` wrappers of `slice-m4/validators.test.js`, mounted through `slice-m1/load-program.js`. Probe files were temporary and are not committed; change `docs/changes/s444-gaps-final/`)
+
+### g-conformance-adapter-happy-dom-globals-leak-into-later-http-tests — `conformance/adapters/impl1-ts.ts` `run()` / `runServer()` register happy-dom's globals and never unregister them, so a later test file in the same `bun test` process that serves real HTTP gets happy-dom's `Response` / `fetch` and fails, depending on file order
+<!-- @gap id=g-conformance-adapter-happy-dom-globals-leak-into-later-http-tests sev=MED status=open locus=conformance/adapters/impl1-ts.ts:534(run — `GlobalRegistrator.register()` with no matching unregister on exit)+conformance/adapters/impl1-ts.ts:1024(runServer — the same)+compiler/tests/integration/protect-error-egress.test.js:35(the per-file beforeAll workaround) prov=review:#1200 -->
+**Reproduced on `464c9ab4d` with a minimal pairing.** The probe was a one-test file: `Bun.serve({ port: 0, fetch: () => new Response("ok") })` and then `await fetch(\`http://localhost:${port}/\`)`. On its own it passes (1 pass), and the globals are native (`GlobalRegistrator.isRegistered=false`, no `window`). Run as `bun test compiler/tests/integration/cell-assign-server-call-awaited.test.js <probe>`, it gives **46 pass / 1 fail**. Inside the probe, `isRegistered=true` and `window` is defined. `Bun.serve` throws `Expected a Response object, but received 'Response { … happy-dom window … }'`, and the client `fetch` fails with `Parse Error: Duplicate Content-Length`. cell-assign calls `run()` (`:38`, `:164`), and `run()` re-registers on entry (`:534`) but leaves the registration in place when it returns. **Class, not one file:** protect-error-egress.test.js hit this and now guards itself with a `beforeAll` unregister. Nine other existing Bun.serve + `fetch` test files paired after cell-assign all still passed (authed-server-fn-response-http, csrf-default-under-auth, ws-upgrade-origin-check, app-root-build-relative, program-auth-required-gates-member-pages, page-auth-required-gates-page, ratelimit-per-route-scope, cors-preflight-pipeline-position, dev-compile-failure-serves-error). So no live failure is open today. The hazard is latent: the next HTTP test that builds a `Response` with test-side globals fails only when it runs after an adapter user, which shows up as a flaky full-suite run. **Expected:** the adapter restores the native globals when `run()` / `runServer()` exits (a `finally` with `await GlobalRegistrator.unregister()`), so no caller needs a per-file guard.
+
+### g-match-arm-string-literal-fn-rewritten-to-function — a string literal in a `match` arm has every whole word `fn` rewritten to `function` (`"a pure \`fn\` body"` ships as `"a pure \`function\` body"`), with no diagnostic
+<!-- @gap id=g-match-arm-string-literal-fn-rewritten-to-function sev=HIGH status=open locus=compiler/src/codegen/rewrite.ts:2003(rewriteFnKeyword — `expr.replace(/\bfn\b/g, "function")` over the whole expression text, string literals included; reached by match-arm results through the string-rewrite path, emitMatchExpr → rewriteExpr) prov=review:#1202 -->
+**Reproduced on `464c9ab4d` (silent, exit 0).** `type H:enum = { A, B }`, `fn msg(s: string) -> string { return s }`, `fn a(h: H) -> string { return match h { .A :> msg("a pure \`fn\` body") .B :> "b" } }` → `.client.js` has `if (_scrml_match_4 === "A") return _scrml_msg_2 ( "a pure \`function\` body" );`. **Wider than reported:** the enclosing function does not need to be a `fn`, and the word does not need backticks. `function a(h: H) -> string { return match h { .A :> "my fn here" .B :> "b" } }` emits `return "my function here";`. **Control:** the same literal returned outside a `match` (`fn a(x: number) -> string { return "a pure \`fn\` body" }`) is emitted unchanged. **Expected:** a string literal's content is never rewritten. **Severity HIGH:** the compiler silently changes text that the author wrote and the user sees, and nothing in the build output says so. The trigger is narrow (the word `fn` in a match-arm string), but the word is common in scrml's own docs, tutorials and error text. The other regex passes on the same string-rewrite path have the same exposure; see [[g-match-arm-string-literal-paren-dot-capital-rewritten-as-enum-variant]] for one that reached a codegen failure.
+
+### g-fn-004-text-scan-fires-on-string-literal — E-FN-004 ("non-deterministic call") fires on the text `Date.now()` inside a STRING LITERAL in a `fn` body
+<!-- @gap id=g-fn-004-text-scan-fires-on-string-literal sev=LOW status=open locus=compiler/src/type-system.ts:26565(the E-FN-004 loop — `txt.includes(nd)` over `nodeText(stmt)`, which includes string-literal content; the E-FN-001 `/\?\{/` and E-FN-003 CALL_RE checks at :26533/:26546 scan the same text) prov=review:#1202 -->
+**Reproduced on `464c9ab4d`.** `fn a(x: number) -> string { return "call Date.now() for time" }` → exit 1, `E-FN-004: \`fn a\` body calls \`Date.now()\`, which is non-deterministic.` **Control:** `"call Date.today for time"` compiles clean. **Expected:** only a real call is flagged, not text inside a string. The false positive is loud and the workaround is easy (split the string), so this is LOW. E-FN-001 (`?{` in a string) and E-FN-003 (`name(` in a string, where `name` is a `function`) use the same `nodeText` scan and very likely have the same false positive. They were not executed separately.
+
+### g-match-arm-string-literal-paren-dot-capital-rewritten-as-enum-variant — a match-arm string containing `). Capital` (`"see (a). Call it"`) has `. Call` rewritten as a bare enum variant `"Call"`, and the emitted JS fails to parse (E-CODEGEN-INVALID-LOGIC)
+<!-- @gap id=g-match-arm-string-literal-paren-dot-capital-rewritten-as-enum-variant sev=MED status=open locus=compiler/src/codegen/rewrite.ts:2247(rewriteEnumVariantAccess unit-variant regex `(?<![A-Za-z0-9_$.])\.\s*([A-Z][A-Za-z0-9_]*)\b(?!\s*\()` → `"$1"`; `)` is not in the lookbehind, `\s*` spans the space, and string literals are not skipped) prov=review:#1202 -->
+**Reproduced on `464c9ab4d`.** `type H:enum = { A, B }`, `fn a(h: H) -> string { return match h { .A :> "see (a). Call it" .B :> "b" } }` → exit 1: `E-CODEGEN-INVALID-LOGIC … Unexpected token … return "see (a)"Call" it"; … This is a compiler defect`. **Controls (all exit 0):** `"see a. Call it"` (a letter before the dot is in the lookbehind), `"see (a) Call it"` (no dot), and `"see (a). Call it"` returned outside a `match` (that path does not use the string rewrite). **Expected:** string content is not rewritten. The failure is loud, but it blames the compiler for ordinary prose, and the "fix" an author would find is to reword the sentence. Any `)` or `]` (or a space-led `.` after another non-identifier byte) followed by `. Capital` in a match-arm string hits it. This is the same root cause as [[g-match-arm-string-literal-fn-rewritten-to-function]]: regex passes over expression text that contains string literals.
+
+### g-emitted-page-source-filename-not-html-escaped — the `<link rel="stylesheet" href>` and `<script src>` of each emitted page are built from the SOURCE FILENAME without HTML-escaping, so a filename with `"` and `>` injects markup
+<!-- @gap id=g-emitted-page-source-filename-not-html-escaped sev=LOW status=open locus=compiler/src/codegen/index.ts:2826(`<link rel="stylesheet" href="${base}.css">`)+compiler/src/codegen/index.ts:2872(`<script… src="${base}.client.js">`), where `base = basename(filePath, ".scrml")` (:2733); not emit-html.ts prov=review:#1200 -->
+**Reproduced on `464c9ab4d`.** A source file named `a"><img src=x onerror=alert(1)>.scrml` (body `<program>\n<n> = 1\n<p>${@n}</p>\n</program>`) → exit 0. The emitted `.html` contains `<link rel="stylesheet" href="a"><img src=x onerror=alert(1)>.css">` and `<script src="a"><img src=x onerror=alert(1)>.client.js"></script>`, so a real `<img onerror>` element ends up in the document. Under `headers="strict"`, `default-src 'self'` blocks the inline handler, so the strict CSP stops it by accident rather than by design. **Severity LOW:** filenames are written by the author, so there is no attacker-controlled input in the normal workflow. It matters only for tools that compile files named by someone else, and the page is wrong in any case (the stylesheet and script 404). **Expected:** the attribute values are HTML-attribute-escaped (and URL-encoded), or a filename that cannot be emitted safely is refused with a diagnostic.
+
+### g-bootstrap-fn-writes-outer-cells-not-refused — bootstrap: a `fn` body that WRITES outer cells (`@n = 1`, `@xs.push`, `@xs.pop()`, `@rows[0].qty = 2`) compiles clean; only the call half of §48.3.3 / E-FN-003 is enforced
+<!-- @gap id=g-bootstrap-fn-writes-outer-cells-not-refused sev=MED status=open locus=compiler/self-host-v2/analyze.scrml:2844(E-FN-003 is raised only for a `fn` calling a `function`; no check covers a reactive-cell write inside a `fn` body) prov=review:#1202 -->
+**Reproduced on `464c9ab4d`.** Cells: `<let n:int=0/>`, `<xs:int[free, append, pop]=([1])/>`, `type Row:struct = { let qty: int }`, `<rows:Row[]=([{ qty: 1 }])/>`. Each of these compiles with **zero diagnostics**: `fn f() -> int { @n = 1\n return 1 }`, `fn f() -> int { @xs.push(2)\n return 1 }`, `fn f() -> int { @xs.pop()\n return 1 }`, and `fn f() -> int { @rows[0].qty = 2\n return 1 }`. (With an ungranted `int[]`, push and pop give E-WRITE-NOT-GRANTED. That is the grant check, not purity.) **Expected:** each is refused as an impure `fn` (§48.3.3, the write half of E-FN-003). Calling a `function` from a `fn` is already refused (core-additions.test.js :167-182). **Impact:** the bootstrap accepts a `fn` that mutates state, so the purity guarantee that `fn` advertises (and that memoization or reordering may rely on) does not hold, and nothing reports it.
+
+### g-bootstrap-two-validators-same-html-attr-first-wins — bootstrap: when two validators lower to the same HTML attribute, the FIRST one is kept, not the intersection (`length(>2) length(==4)` → `minlength="3" maxlength="4"`, looser than `==4`)
+<!-- @gap id=g-bootstrap-two-validators-same-html-attr-first-wins sev=MED status=open locus=compiler/self-host-v2/analyze.scrml:4928(bindValAttrs — `else if (!hasPairNamed(out, h.name)) out = out.concat([h])`: a second pair of the same name is dropped)+compiler/self-host-v2/slice-m4/validators.test.js:123(pins the looser result) prov=review:#1202 -->
+**Reproduced on `464c9ab4d` (silent).** The validated field `<let v:string="" length(>2) length(==4)/>`, bound with `<input bind:value=@v/>` in a `<form>`, compiles clean. Mounted, the input carries `{"minlength":"3","maxlength":"4"}`. **Control:** `length(==4)` alone gives `{"minlength":"4","maxlength":"4"}`. **Expected:** the intersection, `minlength = max`, `maxlength = min` (here 4/4). The existing test `validators.test.js:123` ("the length comparisons, exactly") pins `length(>2) length(<9) length(==4)` → `{ minlength: "3", maxlength: "8" }`. That is the same defect in its three-validator form, and the correct value is 4/4. **Impact:** the browser accepts a 3-character value that the declaration forbids. Any server-side or `@v.isValid` check still applies the real rule. But the native constraint that the ruling says should "follow the bind" is wrong, and nothing reports it. A contradictory pair (`length(>5) length(<3)`) should probably be a diagnostic rather than an empty intersection.
+
+### g-bootstrap-bind-value-with-hand-written-value-accepted — bootstrap: `bind:value` together with a hand-written `value="z"` on the same element is accepted; the static attribute stays in the markup while the bind sets the live value
+<!-- @gap id=g-bootstrap-bind-value-with-hand-written-value-accepted sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml:4855-4866(the Attr.Bind checks — E-ATTR-011 covers the target name and element; there is no check for a same-named static attribute) prov=review:#1202 -->
+**Reproduced on `464c9ab4d`.** `<let s:string="a"/>` with `<input value="z" bind:value=@s/>` → zero diagnostics. Mounted, the element has the attribute `value="z"`, and `.value` is `"a"` (the bind wins at runtime). **Expected:** a diagnostic, because the two state different initial values. This matches the r2 F6 rule for hand-written attributes that conflict with a lowered validator (`handAttrConflict`, analyze.scrml:4943), which refuses a contradiction instead of silently letting one side win. The only visible effect is a stale `value` attribute (form reset restores `"z"`), so this is LOW.
+
+### g-bootstrap-bound-top-level-validated-scalar-ruling-owed — bootstrap: a BOUND top-level scalar with validators is refused E-VALIDATOR-DEAD; the PA reads S442 ruling (2) "validators follow the bind" as saying it should lower its attributes instead — ruling owed (dpa-058 B3)
+<!-- @gap id=g-bootstrap-bound-top-level-validated-scalar-ruling-owed sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml:1297(`fn topLevelValidatorsLower() -> boolean { return false }` — the one switch; consumed at :1269 and :8320) prov=ruling-owed:dpa-058-B3 -->
+**Reproduced on `464c9ab4d` (the current, deliberate behaviour).** `<let email:string="" req/>` with `<input bind:value=@email/>` → `["E-VALIDATOR-DEAD"]`. validators.test.js:226 pins this ("bound or not"). **The question for bryan:** S442 ruling (5) ("silently dead validators become errors") clearly covers an UNBOUND top-level scalar. For a BOUND one, the PA's reading of ruling (2) ("validators follow the bind") is that the validators are not dead: their HTML-native subset should land on the bound input, as a child field's does. If that reading is confirmed, the change is one line: `topLevelValidatorsLower()` returns `true`, and the bound case lowers while the unbound case stays E-VALIDATOR-DEAD. `@email.isValid` stays refused either way (§55.5 Edge A: no validity surface). Filed so the open ruling is tracked. It is not a defect until the ruling is made.

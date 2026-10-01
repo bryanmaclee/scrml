@@ -1,0 +1,24 @@
+// NERDME.md "Errors as states" — gated by scripts/snippet-gate.js.
+<program>
+type SignupError:enum = { EmptyName, TooShort(min: number) }
+<name> = ""
+<status> = ""
+
+function checkName(n: string)! -> SignupError {
+    if (n == "") { fail SignupError.EmptyName }
+    if (n.length < 3) { fail SignupError.TooShort(3) }
+    return n
+}
+
+function submit() {
+    const ok = checkName(@name) !{
+        | ::EmptyName :> { @status = "Name is required"; return }
+        | ::TooShort min :> { @status = "At least " + min + " characters"; return }
+    }
+    @status = "Welcome, " + ok
+}
+
+<input bind:value=@name/>
+<button onclick=submit()>Sign up</button>
+<p>${@status}</p>
+</>

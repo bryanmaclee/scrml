@@ -90,11 +90,14 @@ const NEW_SHIM_MANIFEST = [
 function fixtureFor(symbol, moduleName) {
   // Use the symbol as a side-effecting reference so DG keeps the import.
   // The server function forces server.js emission so the rewrite fires.
+  // s441 — `typeof`, not the bare value: returning an async stdlib function
+  // (`scrml:http` `get`, `scrml:redis` `set`) as a value is E-ASYNC-FN-ESCAPES-AS-VALUE
+  // (S440 F4); `typeof` reads it without calling it.
   return [
     "${",
     `    import { ${symbol} } from 'scrml:${moduleName}'`,
     `    server function _useStdlib() {`,
-    `        return ${symbol}`,
+    `        return typeof ${symbol}`,
     `    }`,
     "}",
     'h1 "shim-resolution smoke"',

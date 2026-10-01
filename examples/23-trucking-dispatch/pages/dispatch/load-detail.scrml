@@ -38,16 +38,12 @@
   <db src="../../dispatch.db" protect="password_hash" tables="users, loads, customers, assignments, drivers, tractors, trailers, log_entries, lin_tokens">
 
     ${
-        function getCurrentUser(sessionToken) {
-            if (sessionToken is not) return not
-            const store = createSessionStore(SESSION_DB_PATH)
-            const userId = store.get(sessionToken)
-            if (userId is not) return not
-            return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
-        }
 
         function fetchDetail(sessionToken, loadId) {
-            const user = getCurrentUser(sessionToken)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
@@ -103,7 +99,10 @@
         }
 
         function transitionStatusServer(sessionToken, loadId, newStatus) {
-            const user = getCurrentUser(sessionToken)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
@@ -146,7 +145,10 @@
         // M6: query the most recent unconsumed acceptance token for a load
         // (used by the dispatcher page to display "rate confirmation pending").
         function getActiveAcceptanceTokenServer(sessionToken, loadId) {
-            const user = getCurrentUser(sessionToken)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
@@ -163,7 +165,10 @@
         }
 
         function assignServer(sessionToken, loadId, driverId, tractorId, trailerId) {
-            const user = getCurrentUser(sessionToken)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
@@ -218,7 +223,7 @@
             const loadId = getLoadId()
             const data = fetchDetail(tok, loadId)
             if (data.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             if (data.notFound) {
@@ -252,7 +257,7 @@
             const loadId = @currentLoad.id
             const result = transitionStatusServer(tok, loadId, target)
             if (result.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             if (result.error) {
@@ -280,7 +285,7 @@
             const loadId = @currentLoad.id
             const result = assignServer(tok, loadId, driverId, tractorId, trailerId)
             if (result.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             if (result.error) {
@@ -351,11 +356,11 @@
     <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">
       <header class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
           <div class="flex items-center gap-3">
-              <a href="/dispatch" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
+              <a href="/dispatch/board" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
               <span class="text-xs uppercase tracking-wider text-slate-400">Load detail</span>
           </div>
           <nav class="flex items-center gap-4 text-sm">
-              <a href="/dispatch" class="hover:text-blue-300">Board</a>
+              <a href="/dispatch/board" class="hover:text-blue-300">Board</a>
               <a href="/dispatch/drivers" class="hover:text-blue-300">Drivers</a>
               <a href="/dispatch/customers" class="hover:text-blue-300">Customers</a>
               <a href="/dispatch/billing" class="hover:text-blue-300">Billing</a>
@@ -402,7 +407,7 @@
                       </div>
                       <div class="text-right">
                           ${ lift <div><LoadStatusBadge status=@currentLoad.status/></div> }
-                          <div class="text-lg font-bold text-slate-900 mt-2">${formatRate(@currentLoad.rate_dollars)}</div>
+                          <div class="text-lg font-bold text-slate-900 mt-2">${@currentLoad is some ? formatRate(@currentLoad.rate_dollars) : ""}</div>
                       </div>
                   </div>
 
@@ -410,18 +415,18 @@
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Customer</div>
                           <div class="font-semibold text-slate-900">${@currentLoad.customer_name}</div>
-                          <div class="text-slate-600">${@currentLoad.customer_contact ? @currentLoad.customer_contact : ""}</div>
-                          <div class="text-slate-500 text-xs">${@currentLoad.customer_phone ? @currentLoad.customer_phone : ""}</div>
+                          <div class="text-slate-600">${@currentLoad is some ? @currentLoad.customer_contact ? @currentLoad.customer_contact : "" : ""}</div>
+                          <div class="text-slate-500 text-xs">${@currentLoad is some ? @currentLoad.customer_phone ? @currentLoad.customer_phone : "" : ""}</div>
                       </div>
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Pickup</div>
-                          <div class="text-slate-900">${formatPickupAt(@currentLoad.pickup_at)}</div>
-                          <div class="text-xs text-slate-500">${@currentLoad.origin_address ? @currentLoad.origin_address : ""}</div>
+                          <div class="text-slate-900">${@currentLoad is some ? formatPickupAt(@currentLoad.pickup_at) : ""}</div>
+                          <div class="text-xs text-slate-500">${@currentLoad is some ? @currentLoad.origin_address ? @currentLoad.origin_address : "" : ""}</div>
                       </div>
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Deliver</div>
-                          <div class="text-slate-900">${formatPickupAt(@currentLoad.deliver_by)}</div>
-                          <div class="text-xs text-slate-500">${@currentLoad.destination_address ? @currentLoad.destination_address : ""}</div>
+                          <div class="text-slate-900">${@currentLoad is some ? formatPickupAt(@currentLoad.deliver_by) : ""}</div>
+                          <div class="text-xs text-slate-500">${@currentLoad is some ? @currentLoad.destination_address ? @currentLoad.destination_address : "" : ""}</div>
                       </div>
                   </div>
               </section>
@@ -446,11 +451,12 @@
                    is unconsumed, show "rate confirmation pending" pill. The
                    customer redeems the token on /customer/loads/:id by
                    clicking "Sign rate confirmation". The DB-side single-use
-                   guard (consumed_at IS NULL → ok; affected rows = 0 means
-                   already consumed) provides the durable lin enforcement,
+                   guard (UPDATE … WHERE consumed_at IS NULL RETURNING token;
+                   no returned row means already consumed or never issued)
+                   provides the durable lin enforcement,
                    and at the call site each fn declares its lin parameter
                    exactly once per §35.2.1. -->
-              <section if=(@currentLoad.status == "Booked" && @acceptanceToken != "") class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+              <section if=(@currentLoad is some && (@currentLoad.status == "Booked" && @acceptanceToken != "")) class="bg-amber-50 border border-amber-200 rounded-lg p-4">
                   <div class="flex items-center justify-between text-sm">
                       <div class="text-amber-900">
                           <strong>Rate confirmation pending.</strong>

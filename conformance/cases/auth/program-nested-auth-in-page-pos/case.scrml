@@ -1,0 +1,8 @@
+<page>
+<program auth="required">
+function who() {
+    return "server-ran:" + session.userId
+}
+<p>inner</p>
+</program>
+</page>

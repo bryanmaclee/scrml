@@ -1,0 +1,17 @@
+// NERDME.md "Engines, matches & iteration" (Tier 2) — gated by scripts/snippet-gate.js.
+<program>
+type Door:enum = { Closed, Opening, Open }
+
+<engine for=Door initial=.Closed>
+    <Closed rule=.Opening>
+        <button onclick={ @door = .Opening }>Open</button>
+    </>
+    <Opening rule=.Open>
+        Opening...
+        <onTimeout after=1s to=.Open/>
+    </>
+    <Open rule=.Closed>
+        <button onclick={ @door = .Closed }>Close</button>
+    </>
+</>
+</program>

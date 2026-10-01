@@ -1,0 +1,5 @@
+<program>
+careful, world
+"a,b".split(",").forEach(x => console.log(x))
+<p id="z">end</p>
+</program>

@@ -54,7 +54,7 @@ const RUNTIME_FILENAME_PLACEHOLDER = "__SCRML_RUNTIME_FILENAME_PLACEHOLDER__";
 import { resetVarCounter } from "./var-counter.ts";
 import { enableSrcmapProvenance, disableSrcmapProvenance } from "./srcmap-provenance.ts";
 import { escapeHtmlAttr } from "./utils.ts";
-import { generateHtml, augmentHtmlForChunks } from "./emit-html.ts";
+import { generateHtml, augmentHtmlForChunks, buildChunksBootJs } from "./emit-html.ts";
 import { generateCss } from "./emit-css.ts";
 import { collectUsedTransitions, renderTransitionCss } from "./emit-transition-css.ts";
 import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
@@ -74,6 +74,7 @@ import { generateWorkerJs } from "./emit-worker.ts";
 import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
 import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding } from "./log-loc.ts";
+import { resetUnattributableSessionUnits, drainUnattributableSessionUnits } from "./session-config-resolve.ts";
 import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive, resetTildeUnresolvedErrors, drainTildeUnresolvedErrors, setCurrentFileRequestIds, setServerAsyncClassifier, resetSessionValueUseErrors } from "./emit-expr.ts";
 import {
   buildChunkNamespaceState,
@@ -87,7 +88,7 @@ import {
 import { renameCellAccessors, CS_PREFIX } from "./cell-accessor-rename.ts";
 
 import { EncodingContext } from "./type-encoding.ts";
-import { collectDerivedVarNames, collectReactiveVarNames, collectStructuralDeclNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
+import { collectDerivedVarNames, collectReactiveVarNames, collectStructuralDeclNames, collectSynthCellKeys, stampCompoundDeepSetTargets, findWhenDepsOnReadOnlyCells } from "./reactive-deps.ts";
 // s430-emit-state-leak — module-state install / reset seams (resetCodegenModuleState).
 import { beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
 import { resetEachModuleState, resetEachLocalIdCounter } from "./emit-each.ts";
@@ -144,6 +145,8 @@ export interface CgDepGraph {
 
 export interface CgProtectAnalysis {
   views?: Map<string, object>;
+  /** §14.8.9 — base tables whose columns the compile knows (see ProtectAnalysis). */
+  declaredTables?: Set<string>;
 }
 
 export interface CgInput {
@@ -278,6 +281,13 @@ export interface CgInput {
    * test harnesses + the CLI verbose-buffer share a single sink.
    */
   log?: (msg: string) => void;
+  /**
+   * s440-bootstrap-css-theme-t3 — the CSS sub-seam (pipeline-seam.ts `CSS`). api.js passes
+   * `seams.pick("CSS", generateCss)`: `generateCss` itself unless a bootstrap stylesheet emitter is
+   * swapped in. Called once per file for the user stylesheet; Tailwind + §38 keyframes are appended
+   * after it as before. Absent → `generateCss`.
+   */
+  generateCss?: typeof generateCss;
 }
 
 export interface CgFileOutput {
@@ -323,7 +333,21 @@ export interface CgOutput {
    * Absent (undefined) when the splitter is not invoked.
    */
   chunksManifest?: ChunksManifest;
+  /**
+   * s444-csp-inline-chunks — the build's chunk-activation script
+   * (`window._SCRML_CHUNKS` manifest + role-detection bootstrap), referenced by
+   * every augmented page as `<script src="/<chunksBootFilename>">`. The caller
+   * writes it to `<outputDir>/<chunksBootFilename>`.
+   *
+   * Absent when no page was augmented (splitter not invoked / no chunks).
+   */
+  chunksBootJs?: string;
+  /** Content-addressed dist-root filename: `scrml-chunks.<hash>.js`. */
+  chunksBootFilename?: string;
 }
+
+/** Basename of the build's chunk-activation script (`<base>.<hash>.js`). */
+export const CHUNKS_BOOT_BASENAME = "scrml-chunks";
 
 /**
  * Source path → the POSIX path the artifact ACTUALLY occupies relative to the
@@ -1167,6 +1191,8 @@ export function runCG(input: CgInput): CgOutput {
     // assembled runtime into an ES module (see the `!embedRuntime` path below).
     moduleFormat = "classic",
     log = console.log,
+    // s440 — the CSS sub-seam's pick (identity when nothing is swapped).
+    generateCss: userStylesheet = generateCss,
   } = input;
 
   // §20.6 — fresh per-compile log() file:line source registry.
@@ -1598,6 +1624,70 @@ export function runCG(input: CgInput): CgOutput {
     }
     detectNestedDocAttrs(nodes, 0);
 
+    // §4.12.2 (S443, g-nested-program-auth-attr-silently-ignored) — `auth=` is NOT
+    // a nested-valid `<program>` attribute. Auth config is read from the file's
+    // FIRST top-level `<program>` only (compute-program-config.ts), so a nested
+    // `<program auth="required">` compiled with no auth at all: its server
+    // functions ran for anonymous callers (MEASURED S441: an anonymous POST wrote
+    // a row). "Nested" here is any `<program>` with a `<program>` OR `<page>`
+    // ancestor — a `<page>` is a per-route container inside the application's one
+    // `<program>` (§40.8), so a `<program>` under it is nested too, and its `auth=`
+    // was dropped the same way (MEASURED S443: 200 for an anonymous GET). Fail
+    // closed: any `auth=` there, whatever its value, is an error, never a no-op.
+    function detectNestedProgramAuth(parentChildren: any[], nested: boolean): void {
+      for (const node of parentChildren) {
+        if (!node || typeof node !== "object" || node.kind !== "markup") continue;
+        if (node.tag === "program" && nested) {
+          const attrs: any[] = node.attributes ?? node.attrs ?? [];
+          const authAttr = attrs.find((a: any) => a && a.name === "auth");
+          if (authAttr) {
+            const span = (authAttr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+            errors.push(new CGError(
+              "E-PROGRAM-NESTED-AUTH",
+              "E-PROGRAM-NESTED-AUTH: `auth=` is not valid on a nested <program> — a nested " +
+              "<program> is not an auth scope, so its server functions would run unauthenticated. " +
+              "Put `auth=` on the top-level <program> (the whole application) or on the " +
+              "<page> that needs it, and remove it from the nested <program>. (§4.12.2, §52.13)",
+              { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+              "error",
+            ));
+          }
+        }
+        if (Array.isArray(node.children) && node.children.length > 0) {
+          detectNestedProgramAuth(node.children, nested || node.tag === "program" || node.tag === "page");
+        }
+      }
+    }
+    detectNestedProgramAuth(nodes, false);
+
+    // §40.8 / §20.5.1 (S443, ruled by bryan — user-voice S443 item 3): a file declares
+    // its top-level `<program>` exactly once. Two or more top-level `<program>`
+    // elements in ONE file is `E-PROGRAM-002`. Before S443 the second one was
+    // silently mis-read: compute-program-config reads auth= from the FIRST
+    // top-level `<program>` only, so `<program>…</program><program auth="required">`
+    // served the second program's routes to anonymous callers
+    // (g-two-top-level-programs-one-file-second-auth-dropped). NARROW: same-file
+    // only — the §40.8 cross-file case stays reserved (library-shape.js,
+    // type-system.ts and the session-config comments above depend on it).
+    {
+      const topPrograms = (Array.isArray(nodes) ? nodes : []).filter(
+        (n: any) => n && typeof n === "object" && n.kind === "markup" && n.tag === "program",
+      );
+      for (const extra of topPrograms.slice(1)) {
+        const span = extra.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
+        errors.push(new CGError(
+          "E-PROGRAM-002",
+          "E-PROGRAM-002: a file declares its top-level <program> exactly once, but this file " +
+          `has ${topPrograms.length}. Everything after the first is mis-read — its auth=, ` +
+          "session and middleware attributes are ignored, so its routes run with the FIRST " +
+          "program's settings. Merge them into one <program>, or move the second into its own " +
+          "file (a nested <program> inside the first is a worker or scoped-db context, §4.12). (§40.8)",
+          { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+          "error",
+        ));
+      }
+    }
+
     extractWorkerPrograms(nodes);
 
     if (workerDefs.size > 0) {
@@ -1838,6 +1928,241 @@ export function runCG(input: CgInput): CgOutput {
   const _programAnySessionWrite = files.some((f) => astUsesSessionWrite(f));
   for (const f of files) (f as any)._programAnySessionWrite = _programAnySessionWrite;
 
+  // §20.5 / §20.5.1 (S433) — TWO MORE SESSION FACTS THAT ARE PROGRAM-SCOPED AND WERE
+  // BEING READ PER-UNIT, the same defect shape as #282 immediately above.
+  //
+  // `sessionExpiry` (the session cookie Max-Age + durable-store TTL) and
+  // `session-secure` (which decides the cookie NAME: `__Host-scrml_sid` vs plain
+  // `scrml_sid`) are declared ONCE, on the `<program>` opener. But emit-server read
+  // both from PER-UNIT sources — `authMiddlewareEntry` (this unit's route-inference
+  // output) and a node walk over THIS file's own nodes — so a unit that declares
+  // neither fell to the DEFAULT no matter what the program said. Measured on a
+  // two-unit program (`<program auth="required" sessionExpiry="7d"
+  // session-secure="false">` + a separate `pages/login.scrml` that mints):
+  //   - Max-Age: `604800` on the program unit, `3600` on the MINTING unit
+  //     (g-program-sessionexpiry-inert-on-separate-login-unit; operator ruling
+  //     S385 B5 = "(a) PROPAGATE the program setting to the minting unit");
+  //   - cookie name: `scrml_sid` on the program unit, `__Host-scrml_sid` on the
+  //     minting unit — the writer set one name and the reader matched the other.
+  // Pre-scan ALL units once here, exactly as #282 does, and stash the program-wide
+  // answer on each fileAST; emit-server consults it as the LAST fallback, so a unit
+  // that already resolves the value is byte-identical.
+  //
+  // Read from the RAW `<program>` attributes rather than `authConfig`, because
+  // `authConfig` is built ONLY when `auth=` is present (compute-program-config.ts)
+  // and a session-only program has none. Note the two attributes are spelled
+  // INCONSISTENTLY on purpose-by-accident — `sessionExpiry` is camelCase,
+  // `session-secure` is kebab — and `compute-program-config.ts` reads them exactly
+  // that way; this scan mirrors it rather than "fixing" the surface.
+  //
+  // ⛔ SCOPED TO A SINGLE-PROGRAM COMPILE SET (S436) — AND THE COMMENT THIS REPLACES
+  // WAS WRONG IN THE SECURITY DIRECTION. The `session-secure` fallback in emit-server
+  // used to be annotated "strictly ADDITIVE: it is reached only where the answer today
+  // is 'nothing declared → default secure'". That sentence names exactly the case it
+  // breaks: the ONLY reachable effect of a `session-secure` fallback is to turn a
+  // secure default INTO a weaker one. `session-secure="false"` is the sole value that
+  // changes anything, so "additive" here means "additively downgrades".
+  //
+  // Concretely, MEASURED on `c46ebbf8` in BOTH input orders, zero hard errors and an
+  // identical diagnostic set in every run — so nothing told the adopter:
+  //   program B (`<program auth="optional" csrf="off">`, declares NEITHER attribute)
+  //     compiled ALONE          → `__Host-scrml_sid`, Max-Age 3600   (correct)
+  //     compiled beside program A (`session-secure="false" sessionExpiry="7d"`)
+  //                             → `scrml_sid`,        Max-Age 604800 (A's settings)
+  // `__Host-` is BROWSER-ENFORCED hardening (no Domain attribute, Path must be `/`,
+  // always Secure), so an unrelated program in the same compile set silently stripped
+  // B's cookie hardening. This loop walked the WHOLE `files` array with no
+  // program-membership test, so "program-wide" was in fact BUILD-wide.
+  //
+  // There is no reliable unit → owning-`<program>` relation to key this on. The
+  // compiler says so itself at the shell-composition post-pass below: per SPEC §40.8
+  // the entry file is "the file resolved by the build root" — a BUILD fact — this
+  // pipeline infers it from file CONTENT and takes the first match, `E-PROGRAM-002`
+  // is reserved-not-implemented, so a second top-level `<program>` in a compile unit
+  // is silently tolerated. Inventing a membership notion here (by directory, by
+  // import graph) would be guessing at the language.
+  //
+  // So FAIL CLOSED ON THE COUNT, which needs no membership notion to be sound:
+  //   - 0 or 1 `<program>` declaration → inherit exactly as before. This IS the
+  //     #282 / S433 case the pre-scan exists for (ONE program spread over several
+  //     emitted units, where the minting unit carries no declaration of its own and
+  //     MUST pick up the program's, or the writer sets one cookie name while the
+  //     reader's compile-time-specialized regex matches another). Byte-identical.
+  //   - 2 or more                      → NO cross-unit inheritance at all. A unit
+  //     that does not itself declare the attribute falls to the LANGUAGE DEFAULT
+  //     (secure / `__Host-`, 1h expiry), exactly as if compiled alone. A unit that
+  //     DOES declare it still resolves its own, via emit-server's per-unit raw read.
+  //
+  // ⚑ THE PRICE, STATED HONESTLY (S436 fix-round, F1). This is a TRADE, not a
+  // hardening, and an earlier draft of this comment got that wrong — it claimed a
+  // genuine multi-unit program caught by the 2+ branch "gets the HARDENED default".
+  // It does not get a USABLE default: it gets a hardened cookie ITS OWN PROGRAM
+  // CANNOT READ. MEASURED, both input orders, zero diagnostics:
+  //   index.scrml        (program A, `session-secure="false" sessionExpiry="7d"`)
+  //                                                → `scrml_sid`        / 604800
+  //   pages/minter.scrml (A's OWN member, declares nothing, MINTS)
+  //                                                → `__Host-scrml_sid` / 3600
+  //   other/zzz.scrml    (unrelated program B)     → `__Host-scrml_sid` / 3600  ✓
+  // The emitted readers are compile-time specialized to ONE name
+  // (`/(?:^|;\s*)scrml_sid=/` vs `/(?:^|;\s*)__Host-scrml_sid=/`) and are disjoint,
+  // so a login at one of A's routes leaves A's other route logged out. That is the
+  // #282 writer/reader split reached through a new door: the shape WORKED before
+  // this guard and breaks after it. Corpus population 0 of 1137 and 0 in the adopter
+  // clone — but a functional regression at population zero is still a regression.
+  //
+  // ⛔ …AND THAT COST IS NOW REFUSED, NOT PAID — `E-MW-008` below (S436 round 3,
+  // operator ruling: option A of `docs/changes/s436-program-session-config-scope/
+  // fork-f1.md`). The three options were (A) refuse the configuration, (B) warn at
+  // each unit whose answer the suppression changed, (C) revert to build-wide. A was
+  // chosen: it is the only one that CLOSES the split rather than narrating it, and
+  // it extends a settled rule rather than setting one — SPEC §40 (`:23763`) already
+  // makes "two applications in one compiled server" an Error via `E-MW-007`, with
+  // the same remedy, and explicitly frames `E-MW-007` as the emitted-server
+  // consequence of the reserved `E-PROGRAM-002` shape. Contested session config is
+  // the same class of application-scope conflict.
+  //
+  // ⚑ THE INVARIANT THIS BUYS, and it is why the suppression below is now
+  // belt-and-braces rather than the mechanism: after `E-MW-008`, the 2+ branch is
+  // only ever REACHED in a compile set where NO `<program>` declares either
+  // attribute — and in such a set `_readProgramAttr` would answer `undefined`
+  // anyway. So suppression can no longer change any unit's answer, and the F1 split
+  // is unreachable by construction rather than merely unpopulated. The suppression
+  // stays because errors do not necessarily halt emission on every caller path.
+  //
+  // ── the scan itself ──────────────────────────────────────────────────────────
+  // ONE recursive collection of `<program>` NODES, shared by the count and the read.
+  //
+  // NODES, not FILES (S436 fix-round, F2). Counting program-bearing FILES let one
+  // file holding TWO top-level `<program>` nodes count as ONE, so the 2+ branch never
+  // fired and the original cross-program leak survived the guard untouched. MEASURED
+  // on the file-counting version: `ddd.scrml` (two top-level programs, the first
+  // declaring `session-secure="false"`) plus a plain minting `pages/other.scrml` →
+  // `other` emitted `scrml_sid`/604800, identical to the unfixed compiler, while the
+  // same page compiled alone emitted `__Host-`/3600. Note the irony recorded above:
+  // `E-PROGRAM-002` being reserved-not-implemented is exactly WHY a second top-level
+  // `<program>` can sit in one file, so the file-granular count was blind to the very
+  // shape its own rationale cited.
+  //
+  // RECURSIVE (S436 fix-round, F3). A top-level-only scan cannot see a `<program>`
+  // nested inside other markup, but `_readRawProgramAttr` in emit-server — the reader
+  // that actually decides each unit's answer — DOES recurse. That divergence is not
+  // only a stale comment: it is a live PRE-EXISTING #282-class split, measured on
+  // `origin/main` and unchanged by the file-counting guard. A single-program compile
+  // set whose `<program session-secure="false">` sits inside a `<div>`, plus a member
+  // page, emitted `scrml_sid` on the program unit and `__Host-scrml_sid` on the
+  // member — writer and reader disagreeing inside ONE program, which is precisely
+  // what the pre-scan exists to prevent. Recursing here closes that.
+  // Sites, not bare nodes: `E-MW-008` mirrors `E-MW-007` in NAMING every competing
+  // source, so the owning file travels with each declaration.
+  //
+  // A file EMITTED AS A TOOL contributes no site at all (S438,
+  // `g-mw008-counts-headless-tool-programs`). The count exists to find programs that
+  // can own cookie-session units, and a tool cannot: it emits no page (E-TOOL-003),
+  // `session.*` is E-SESSION-CONTEXT there, and a `serve=` tool refuses cookie auth
+  // (E-TOOL-SERVE-AUTH-UNSUPPORTED). Counting it made one web app plus a
+  // `tools/seed.scrml` read as two applications: the member units lost the program's
+  // declarations (the F1 split) and the build was refused with a false E-MW-008.
+  //
+  // ⚑ PER FILE, BY THE EMIT DISPATCH'S OWN PREDICATE — not per `<program>` node. The
+  // first cut skipped nodes whose `kind` was "tool", but the emitter decides
+  // tool-vs-web per FILE (`isToolProgram`, the dispatch below: the file's first
+  // top-level `<program>`). So a tool file carrying a second top-level `<program
+  // session-secure="false" sessionExpiry="7d">` — emitted nowhere, since the whole
+  // file goes to the tool path — became the build's ONE program, and its
+  // declaration was stamped onto every web unit: a previously REFUSED set compiled
+  // clean with `scrml_sid`/604800 (S438 review F1). Asking the dispatch closes that,
+  // and keeps a web file with a misplaced `kind="tool"` node (E-TOOL-002 anyway)
+  // counted exactly as `readRawUnitSessionAttr` reads it.
+  const _collectProgramSites = (f: any): Array<{ node: any; filePath: string }> => {
+    const acc: Array<{ node: any; filePath: string }> = [];
+    if (isToolProgram(f)) return acc;
+    const filePath = (f?.filePath as string) ?? "";
+    const visit = (ns: any[]): void => {
+      if (!Array.isArray(ns)) return;
+      for (const n of ns) {
+        if (!n || n.kind !== "markup") continue;
+        if (n.tag === "program") acc.push({ node: n, filePath });
+        if (Array.isArray(n.children)) visit(n.children);
+      }
+    };
+    visit((getNodes(f as never) as any[]) ?? []);
+    return acc;
+  };
+  const _programSites = files.flatMap(_collectProgramSites);
+  const _programDecls = _programSites.map((s) => s.node);
+  const _multiProgramCompileSet = _programDecls.length >= 2;
+
+  // ── E-MW-008 (S436 round 3, option A) ────────────────────────────────────────
+  // A compile set holding 2+ `<program>` declarations is refused WHEN, for either
+  // session attribute, some `<program>` declares it AND some compilation unit cannot
+  // resolve it for itself — i.e. exactly when the compiler would otherwise have to
+  // GUESS that unit's owner. Scoped EXACTLY there, and deliberately NOT to the
+  // general second-`<program>` shape: that is `E-PROGRAM-002`, still reserved, and
+  // implementing it would reject a MEASURED 75 of 1137 corpus compile sets — a
+  // separate and much larger arc.
+  //
+  // ⛔ THE DRIVER NO LONGER COMPUTES THIS PREDICATE (S436 round 4). It ASKS.
+  //
+  // Rounds 1-3 each re-derived "can this unit resolve the attribute for itself?"
+  // here, a little better each time — count program-bearing files, then count
+  // `<program>` nodes recursively, then add a resolves-for-itself limb — and each
+  // one was wrong somewhere new, because each was a MIRROR of a dispatch
+  // `emit-server` already performs. #1066's review named the general lesson:
+  // *mirroring a predicate is not mirroring a dispatch, and getting it wrong
+  // INVERTS the defect.* Round 3's mirror was measured wrong in two ways:
+  //   F-A — it ranged `files.some(f => !resolvesForItself(f))` over EVERY file, but
+  //         only a `<program>`-bearing file can carry the remedy the message
+  //         advertises. So adding any plain `<page>`, library or `<component>` to a
+  //         set of otherwise-correctly-declaring programs re-triggered the error and
+  //         made the advertised escape unreachable — 17 of 1137 corpus sets.
+  //   F-B — it did not know that route-inference registers `sessionExpiry` and
+  //         `sessionSecure` defaults for every `auth="required"` program, so such a
+  //         unit answers from `authMiddlewareEntry` and NEVER reaches the stash. The
+  //         mirror called it unattributable and refused builds that could not bleed.
+  //
+  // The order now lives once, in `./session-config-resolve.ts`, and `emit-server`
+  // RECORDS a unit whose real resolution actually falls through to the stash while
+  // session infrastructure is being emitted. That last clause is the half no driver
+  // mirror could compute — `_needsSessionInfra` depends on route-inference output,
+  // server-load gates, `@currentUser` queries, session builtins and channel auth,
+  // all derived deep inside `emit-server` — and it is what makes "a second program
+  // that emits no session infrastructure" correctly not a conflict.
+  //
+  // The sink is drained AFTER the emission loop; see the `E-MW-008` block there.
+  // Nothing in this pre-scan decides the diagnostic any more.
+  resetUnattributableSessionUnits();
+  const _readProgramAttr = (name: string): string | undefined => {
+    if (_multiProgramCompileSet) return undefined;
+    for (const prog of _programDecls) {
+      const a = ((prog.attrs ?? []) as any[]).find((x: any) => x && x.name === name);
+      if (a && a.value && a.value.kind === "string-literal") return a.value.value;
+    }
+    return undefined;
+  };
+  // ⚑ WHAT "CANNOT DRIFT" DOES AND DOES NOT MEAN HERE (S436 fix-round, F3). The count
+  // and the read above share ONE node list, so those two cannot disagree. They are
+  // NOT identical to emit-server's `_readRawProgramAttr`, and claiming they were was
+  // wrong. Two deliberate differences remain, both stated rather than asserted away:
+  //   1. `_readRawProgramAttr` also accepts a `<page>`-level attribute as a lower
+  //      priority fallback. This scan counts and reads `<program>` ONLY. Counting
+  //      `<page>` would be actively harmful: every ordinary multi-page app has many
+  //      `<page>` units, so the 2+ branch would fire on essentially every composed
+  //      app and suppress the inheritance #282 needs. And a `<page>` attribute is a
+  //      per-page declaration by construction — it is not a program-wide fact and has
+  //      no business propagating to a sibling unit.
+  //   2. `_readRawProgramAttr` takes the LAST matching `<program>` in its file; this
+  //      takes the FIRST in the set. That divergence is UNREACHABLE: the read is
+  //      gated on `!_multiProgramCompileSet`, i.e. on there being at most ONE
+  //      `<program>` node in the whole compile set, and with one node first and last
+  //      are the same node. The orders can only differ in exactly the case where this
+  //      function has already returned `undefined`.
+  const _programSessionExpiry = _readProgramAttr("sessionExpiry") ?? null;
+  const _programSessionSecure = _readProgramAttr("session-secure");
+  for (const f of files) {
+    (f as any)._programSessionExpiry = _programSessionExpiry;
+    (f as any)._programSessionSecure = _programSessionSecure;
+  }
+
   // §38 transition keyframes — the APP-WIDE union + the shell entry that carries it.
   //
   // A §20.8.2 soft navigation swaps the target route's markup into the SHELL's
@@ -1958,6 +2283,22 @@ export function runCG(input: CgInput): CgOutput {
         }
       }
 
+      // §6.7.4 EC-1 — E-LIFECYCLE-007: a `when` dep naming only read-only
+      // (`const <name>`) cells is a dead effect. Resolved over the post-CE tree
+      // by the runtime cell key — see findWhenDepsOnReadOnlyCells.
+      for (const { node: whenNode, dep } of findWhenDepsOnReadOnlyCells(fileAST as Record<string, unknown>)) {
+        const sp = (whenNode.span as Record<string, unknown> | undefined) ?? {};
+        errors.push(new CGError(
+          "E-LIFECYCLE-007",
+          `E-LIFECYCLE-007: \`when\` dep-list entry \`@${dep}\` is a \`const <${dep}>\` cell, ` +
+          `not a mutable \`@variable\`. It is never written — a derived cell re-evaluates from ` +
+          `the cells it reads — so it cannot trigger a \`when\` effect (SPEC §6.7.4 EC-1). ` +
+          `Fix: list the mutable \`@variables\` \`@${dep}\` is computed from, and read ` +
+          `\`@${dep}\` inside the body.`,
+          { file: filePath, ...sp },
+        ));
+      }
+
       // Resolve auth middleware for this file (from RI output)
       const authMW = safeRouteMap.authMiddleware?.get(filePath) ?? null;
       // g-markup-session-read-undeclared (S228 ruling) — the `@session` window-
@@ -2072,7 +2413,7 @@ export function runCG(input: CgInput): CgOutput {
       // Generate CSS — emitted in both modes.
       // ---------------------------------------------------------------------------
       const userCss: string = codegenStage("emit-css", () =>
-        generateCss(nodes, analysis?.cssBlocks, errors, fileAST as Record<string, unknown>)
+        userStylesheet(nodes, analysis?.cssBlocks, errors, fileAST as Record<string, unknown>, { filePath, mode })
       ) || "";
 
       // ---------------------------------------------------------------------------
@@ -2759,6 +3100,93 @@ export function runCG(input: CgInput): CgOutput {
     // a WRONG OFFSET upstream, which no amount of line/col resolution can repair.
     // Filed; not fixed here. Do not restore the stronger claim.
     for (const e of drainTildeUnresolvedErrors()) errors.push(e);
+  }
+
+  // -------------------------------------------------------------------------
+  // E-MW-008 (§20.5.1, S436) — a build that contests application-scope session
+  // configuration and cannot say which `<program>` governs a unit.
+  //
+  // Emitted HERE, after the emission loop, because the facts it needs are produced
+  // BY the emission: `session-config-resolve.ts` records a unit whose real
+  // three-step resolution fell through to the build-wide stash while session
+  // infrastructure was actually being emitted. The driver does not re-derive that
+  // (rounds 1-3 did, and each mirror was wrong somewhere new — see the pre-scan).
+  //
+  // Refuse iff BOTH halves hold:
+  //   (a) some `<program>` in the set declares the attribute — otherwise there is
+  //       nothing to contest and the language default governs everyone; and
+  //   (b) some unit could not be attributed for THAT attribute — otherwise every
+  //       unit already answers for itself and nothing is guessed (the shape S433
+  //       ruled valid, and the escape this diagnostic's message advertises).
+  // Per attribute, because the two are independent: `aaa` declaring only
+  // `sessionExpiry` and `zzz` only `session-secure` leaves each inheriting the
+  // other's, which is the leak.
+  {
+    const _unattributable = drainUnattributableSessionUnits();
+    if (_multiProgramCompileSet && _unattributable.length > 0) {
+      const _declaresAttr = (node: any, name: string): boolean =>
+        ((node?.attrs ?? []) as any[]).some((x: any) =>
+          x && x.name === name && x.value && x.value.kind === "string-literal");
+      const _conflicts = _unattributable.filter((u) =>
+        _programSites.some((s) => _declaresAttr(s.node, u.attr)));
+      if (_conflicts.length > 0) {
+        const _attrs = [...new Set(_conflicts.map((u) => u.attr))].sort();
+        // `E-MW-007` prints BASENAMES; match its sibling (review finding F-E).
+        const _base = (p: string): string => (p ?? "").replace(/\\/g, "/").split("/").pop() || p;
+        // Count NODES but list each distinct source once, and say so — a file may
+        // hold more than one `<program>`, which made the old wording claim
+        // "2 <program>s (ddd.scrml)" (F-E).
+        const _declaringSites = _programSites.filter((s) => _attrs.some((a) => _declaresAttr(s.node, a)));
+        const _declaringFiles = [...new Set(_declaringSites.map((s) => _base(s.filePath)).filter(Boolean))];
+        const _allFiles = [...new Set(_programSites.map((s) => _base(s.filePath)).filter(Boolean))];
+        const _blocked = [...new Set(_conflicts.map((u) => _base(u.filePath)).filter(Boolean))];
+        const _nProg = _programDecls.length;
+        const _nDecl = _declaringSites.length;
+        const _span = (_declaringSites[0]?.node?.span ?? {}) as any;
+        const _plural = (n: number, s: string, p: string) => (n === 1 ? s : p);
+        errors.push(new CGError(
+          "E-MW-008",
+          // ⚑ THE FIRST ~110 CHARACTERS MUST CARRY THE REMEDY, AND THAT IS NOT A STYLE
+          // CHOICE (S436 round-4 review, F1). `commands/build.js` and `commands/dev.js`
+          // both print a CG error as `…slice(0, 120)`, so everything past that is never
+          // seen through the real CLI. The first cut of this message opened with the
+          // program/file census and was cut mid-word at "…declares session configuration (",
+          // destroying every actionable part: the contested attributes, the blocked units,
+          // and the remedy. The truncation itself is PRE-EXISTING and applies to every
+          // diagnostic — filed separately as `g-cli-truncates-diagnostics-at-120-chars`;
+          // this message is written to survive it rather than to wait for it.
+          // If you reorder this text, re-measure the first 120 characters.
+          `E-MW-008: two applications in one build contest one session cookie; ` +
+          `build one application per output directory.\n` +
+          `  This build declares ${_nProg} <program>s across ` +
+          `${_allFiles.length} ${_plural(_allFiles.length, "file", "files")} ` +
+          `(${_allFiles.join(", ")}), and ${_nDecl} of ${_plural(_nDecl, "them declares", "them declare")} ` +
+          `session configuration (${_attrs.join(" / ")}) in ${_declaringFiles.join(", ")}.\n` +
+          `  The session cookie NAME and lifetime are APPLICATION-scope (§20.5.1): a ` +
+          `compiled server mints exactly ONE cookie name, and every unit's session ` +
+          `reader is compile-time specialized to that one name, so two applications in ` +
+          `one build cannot each carry their own.\n` +
+          `  ${_blocked.length} ${_plural(_blocked.length, "unit emits a session cookie", "units emit a session cookie")} ` +
+          `but ${_plural(_blocked.length, "does", "do")} not resolve ${_attrs.join(" / ")} ` +
+          `${_plural(_blocked.length, "itself", "themselves")}: ${_blocked.join(", ")}. ` +
+          `The compiler cannot attribute ${_plural(_blocked.length, "it", "them")} to an owning ` +
+          `<program> — §40.8 makes entry identity a BUILD fact, not a file fact, and ` +
+          `E-PROGRAM-002 is reserved-not-implemented. Applying one program's declaration ` +
+          `build-wide silently strips __Host- and Secure from the other's cookie; ` +
+          `withholding it splits one program's own units across two disjoint readers, ` +
+          `so a login on one route leaves that program's other routes logged out.\n` +
+          `  Fix: build one application per output directory, so each unit has exactly ` +
+          `one <program>. Declaring ${_attrs.join(" / ")} on every <program> is enough ` +
+          `ONLY if no other unit emits a session cookie — the ` +
+          `${_plural(_blocked.length, "unit", "units")} named above would still be unattributable.`,
+          {
+            file: _declaringSites[0]?.filePath ?? "",
+            start: _span.start ?? 0, end: _span.end ?? 0,
+            line: _span.line ?? 1, col: _span.col ?? 1,
+          },
+        ));
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -3481,6 +3909,10 @@ export function runCG(input: CgInput): CgOutput {
   // -------------------------------------------------------------------------
   let chunks: Map<ChunkKey, ChunkOutput> | undefined;
   let chunksManifest: ChunksManifest | undefined;
+  // s444-csp-inline-chunks — the build's chunk-activation script + its
+  // content-addressed dist-root filename (set by the A-4.7 augmentation pass).
+  let chunksBootJs: string | undefined;
+  let chunksBootFilename: string | undefined;
   if (emitPerRoute && reachabilityRecordInput) {
     const splitterResult = emitPerRouteChunks({
       reachabilityRecord: reachabilityRecordInput,
@@ -3538,12 +3970,14 @@ export function runCG(input: CgInput): CgOutput {
     // with the chunk-activation scaffolding emitted by
     // `emit-html.ts:augmentHtmlForChunks`:
     //
-    //   - Inline `<script>window._SCRML_CHUNKS = { ... }</script>` (route-
-    //     keyed manifest for runtime `_scrml_prefetch_tier2` lookup +
-    //     bootstrap dispatch).
     //   - `<link rel="modulepreload">` for non-empty tier-1 chunks.
-    //   - Role-detection bootstrap `<script>` (localStorage > cookie >
-    //     <meta name="scrml-role"> > "_anonymous").
+    //   - `<script src="/scrml-chunks.<hash>.js" data-scrml-route="…">` — the
+    //     build's same-origin chunk-activation script (`buildChunksBootJs`):
+    //     the route-keyed `_SCRML_CHUNKS` manifest (runtime
+    //     `_scrml_prefetch_tier2` lookup + bootstrap dispatch) and the
+    //     role-detection bootstrap (localStorage > cookie >
+    //     <meta name="scrml-role"> > "_anonymous"). NOT inline — see
+    //     s444-csp-inline-chunks in `buildChunksBootJs`.
     //
     // Per OQ-A4-E ratification (S91): ONE HTML per route + role-detection
     // bootstrap loads the per-role initial chunk. No per-(route, role)
@@ -3628,6 +4062,15 @@ export function runCG(input: CgInput): CgOutput {
         if (!list.includes(epId)) list.push(epId);
       }
 
+      // s444-csp-inline-chunks — the manifest + role-detection bootstrap ship
+      // as ONE same-origin, content-addressed file at the dist root (never an
+      // inline `<script>`: `headers="strict"` pins `default-src 'self'`, which
+      // refuses inline script). Every page references it by root-absolute URL
+      // — the manifest's own chunk URLs are root-absolute already.
+      chunksBootJs = buildChunksBootJs({ chunks, epIdToRoutePath, moduleFormat });
+      chunksBootFilename = `${CHUNKS_BOOT_BASENAME}.${fnv1aHash(chunksBootJs)}.js`;
+      const chunksBootSrc = `/${chunksBootFilename}`;
+
       // Augment each file's HTML in place. Files without HTML
       // (library mode, worker bundles, fixture files with no markup)
       // are skipped — the augmenter would have nothing to inject into.
@@ -3640,7 +4083,7 @@ export function runCG(input: CgInput): CgOutput {
           chunks,
           fileEntryPointIds: fileEpIds,
           epIdToRoutePath,
-          moduleFormat,
+          chunksBootSrc,
         });
         // Avoid mutating the existing output object reference; replace
         // the HTML field on a fresh shallow copy. (`output` is the
@@ -3716,6 +4159,7 @@ export function runCG(input: CgInput): CgOutput {
     runtimeFilename,
     ...(chunks !== undefined && { chunks }),
     ...(chunksManifest !== undefined && { chunksManifest }),
+    ...(chunksBootJs !== undefined && { chunksBootJs, chunksBootFilename }),
   };
 }
 

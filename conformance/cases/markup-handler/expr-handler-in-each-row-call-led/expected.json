@@ -1,0 +1,22 @@
+{
+  "id": "markup-handler-expr-handler-in-each-row-call-led",
+  "description": "The `${s1; s2}` handler form inside an `<each>` row, call-led and reading the row item, runs both statements in order: `last` is `a:5`, `count` ends 0. Pre-S437 impl#1 kept only the first statement (the each-row gap covered the `${…}` form and the inline block alike; the call-led gap covered it at top level).",
+  "language-version": "1.0",
+  "spec": "§5.2.1",
+  "source-test": "compiler/src/codegen/emit-each.ts",
+  "rationale": "The top-level sibling `expr-handler-call-first-multi-stmt` pins \"both run\" for `${f(); g()}`; §5.2.3 (amended S435): \"a statement's effect SHALL NOT depend on whether an earlier statement is a call or an assignment, or on whether the handler sits at top level … or inside an `<each>` row (§17.7).\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MULTI-STATEMENT-HANDLER"],
+    "input": [
+      { "click": ".row" }
+    ],
+    "state": {
+      "count": 0,
+      "last": "a:5"
+    },
+    "domAnchored": [
+      { "selector": "#out", "text": "0 a:5" }
+    ]
+  }
+}

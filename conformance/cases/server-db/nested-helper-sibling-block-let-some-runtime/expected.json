@@ -1,0 +1,16 @@
+{
+  "id": "server-db-nested-helper-sibling-block-let-some-runtime",
+  "description": "SECURITY (s440 fix round, F3). A `let inner = 5` inside a sibling block `if (true) { … }` is visible only inside that block; the `.some` callback outside it calls the nested async helper `inner` (which calls a server fn). The server answers false for every element, so the verdict MUST be \"rejected\". Treating the sibling-block `let` as a function-scope binding hid the helper's asyncness: `.some` received an always-truthy Promise per element and answered \"accepted\" for every input.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s440-nested-helper-async-sync-callback.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2: every server call site is awaited, and any function containing a server call is async. Lexical block scope decides that `inner(x)` names the nested helper (not the block-local `let`), so the helper's calls are server call sites; the `.some` callback is lifted to an awaited combinator and the server's answer decides the verdict.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SERVER-FN-IN-SYNC-CALLBACK", "E-ASYNC-STDLIB-IN-SYNC-CALLBACK"],
+    "serverStub": { "isOk": false },
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": { "verdict": "rejected" },
+    "domAnchored": [{ "selector": "#out", "text": "rejected" }]
+  }
+}

@@ -1,0 +1,20 @@
+// repro s441-fail-bare-variant @ base cf62b4154 — bare `fail .V` against a canonical `type E:enum`
+<program>
+${
+    type E:enum = { EmptyName, Bad(reason: string) }
+    <out> = ""
+    function check(n: string) ! E {
+        if (n == "") fail E.EmptyName
+        if (n == "x") fail E.Bad("no x")
+    }
+    function run() {
+        check("") !{
+            | .EmptyName :> { @out = "empty"; return }
+            | .Bad(reason) :> { @out = reason; return }
+        }
+        @out = "ok"
+    }
+}
+<button onclick=run()>go</>
+<p>${@out}</p>
+</program>

@@ -1,0 +1,21 @@
+{
+  "id": "control-flow-s437-r5-value-form-if-else-line-comment",
+  "description": "Value-form `${ if @a {\"A\"} // note⏎ else {\"B\"} }`: the comment between `}` and `else` is whitespace; with `@a` false the value is \"B\". Round 3 accepted this; round 4 rejected it; base failed E-CODEGEN-INVALID-LOGIC.",
+  "language-version": "1.0",
+  "spec": "§17.6",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "JS and scrml treat a comment between an `if` body's `}` and `else` as whitespace; only a `;` ends the `if` (S437 round 4 #4). §17: `else` belongs to the `if` whose body it follows.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-STMT-UNEXPECTED-TOKEN",
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "B"
+      }
+    ]
+  }
+}

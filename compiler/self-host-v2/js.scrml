@@ -1,0 +1,302 @@
+// =============================================================================
+// self-host-v2 / js.scrml — the JS output TREE and its one-shot text printer.
+//
+// dpa-051 §3.6: emitted text is WRITE-ONLY. The Core printer (print.scrml)
+// builds a JsStmt tree; `printModule` turns it into text exactly once. Nothing
+// ever reads emitted text back, and nothing here parses. Precedence is decided
+// from the tree (parentheses are inserted by operator precedence, never by
+// inspecting a printed string).
+// =============================================================================
+${
+    export type JsOp:enum = {
+        Plus, Minus, Times, Div, Mod,
+        Lt, Le, Gt, Ge,
+        StrictEq, StrictNe, LooseEq, LooseNe,
+        And, Or, Nullish,
+    }
+    export type JsUnOp:enum = { Not, Neg }
+
+    export type JsProp:struct = { key: string, value: JsExpr }
+
+    export type JsExpr:enum = {
+        JId(name: string),
+        JNum(text: string),
+        JStr(value: string),
+        JBool(value: boolean),
+        JNull,
+        JUndefined,
+        JMember(obj: JsExpr, prop: string),
+        JIndex(obj: JsExpr, index: JsExpr),
+        JCall(callee: JsExpr, args: JsExpr[]),
+        JArrow(params: string[], body: JsStmt[]),
+        JArrowE(params: string[], e: JsExpr),
+        JBin(op: JsOp, l: JsExpr, r: JsExpr),
+        JUn(op: JsUnOp, e: JsExpr),
+        JCond(test: JsExpr, a: JsExpr, b: JsExpr),
+        JArray(elems: JsExpr[]),
+        JObject(props: JsProp[]),
+        JAnnot(e: JsExpr, note: string),
+    }
+
+    export type JsStmt:enum = {
+        SConst(name: string, e: JsExpr),
+        SLet(name: string, e: JsExpr),
+        SAssign(target: JsExpr, e: JsExpr),
+        SExpr(e: JsExpr),
+        SExprNote(e: JsExpr, note: string),
+        SReturn(e: JsExpr),
+        SIf(test: JsExpr, thenB: JsStmt[], elseB: JsStmt[]),
+        SFunc(name: string, params: string[], body: JsStmt[]),
+        SComment(text: string),
+        SImportAll(name: string, from: string),
+        SBlank,
+    }
+
+    // ---- shorthands used by the Core printer ---------------------------------
+    export fn jid(n: string) -> JsExpr { return JsExpr.JId(n) }
+    export fn jstr(s: string) -> JsExpr { return JsExpr.JStr(s) }
+    export fn jnum(n: int) -> JsExpr { return JsExpr.JNum("" + n) }
+    export fn jmember(o: JsExpr, p: string) -> JsExpr { return JsExpr.JMember(o, p) }
+    export fn jcall(f: JsExpr, args: JsExpr[]) -> JsExpr { return JsExpr.JCall(f, args) }
+    // `obj.method(args)`
+    export fn jmcall(o: JsExpr, m: string, args: JsExpr[]) -> JsExpr { return JsExpr.JCall(JsExpr.JMember(o, m), args) }
+    export fn jthunk(e: JsExpr) -> JsExpr { return JsExpr.JArrowE([], e) }
+    export fn sexpr(e: JsExpr) -> JsStmt { return JsStmt.SExpr(e) }
+
+    // ---- precedence ----------------------------------------------------------
+    fn opPrec(op: JsOp) -> int {
+        return match op {
+            .Times :> 13
+            .Div :> 13
+            .Mod :> 13
+            .Plus :> 12
+            .Minus :> 12
+            .Lt :> 10
+            .Le :> 10
+            .Gt :> 10
+            .Ge :> 10
+            .StrictEq :> 9
+            .StrictNe :> 9
+            .LooseEq :> 9
+            .LooseNe :> 9
+            .And :> 5
+            .Or :> 4
+            .Nullish :> 4
+        }
+    }
+
+    fn opText(op: JsOp) -> string {
+        return match op {
+            .Plus :> "+"
+            .Minus :> "-"
+            .Times :> "*"
+            .Div :> "/"
+            .Mod :> "%"
+            .Lt :> "<"
+            .Le :> "<="
+            .Gt :> ">"
+            .Ge :> ">="
+            .StrictEq :> "==="
+            .StrictNe :> "!=="
+            .LooseEq :> "=="
+            .LooseNe :> "!="
+            .And :> "&&"
+            .Or :> "||"
+            .Nullish :> "??"
+        }
+    }
+
+    fn unText(op: JsUnOp) -> string {
+        return match op {
+            .Not :> "!"
+            .Neg :> "-"
+        }
+    }
+
+    // 20 primary · 19 member/call · 15 unary · 13..4 binary · 3 conditional · 2 arrow
+    fn prec(e: JsExpr) -> int {
+        return match e {
+            .JId :> 20
+            .JNum :> 20
+            .JStr :> 20
+            .JBool :> 20
+            .JNull :> 20
+            .JUndefined :> 20
+            .JArray :> 20
+            .JObject :> 20
+            .JMember :> 19
+            .JIndex :> 19
+            .JCall :> 19
+            .JUn :> 15
+            .JBin(op: op) :> opPrec(op)
+            .JCond :> 3
+            .JArrow :> 2
+            .JArrowE :> 2
+            .JAnnot(e: inner) :> prec(inner)
+        }
+    }
+
+    fn wrap(e: JsExpr, minPrec: int, ind: string) -> string {
+        const s: string = expr(e, ind)
+        if (prec(e) < minPrec) return "(" + s + ")"
+        return s
+    }
+
+    fn joinExprs(es: JsExpr[], minPrec: int, ind: string) -> string {
+        let out = ""
+        let first = true
+        for (const e of es) {
+            if (!first) out = out + ", "
+            out = out + wrap(e, minPrec, ind)
+            first = false
+        }
+        return out
+    }
+
+    fn paramList(ps: string[]) -> string {
+        if (ps.length == 1) return ps[0]
+        return "(" + ps.join(", ") + ")"
+    }
+
+    fn isObject(e: JsExpr) -> boolean {
+        return match e {
+            .JObject :> true
+            .JId :> false
+            .JNum :> false
+            .JStr :> false
+            .JBool :> false
+            .JNull :> false
+            .JUndefined :> false
+            .JMember :> false
+            .JIndex :> false
+            .JCall :> false
+            .JArrow :> false
+            .JArrowE :> false
+            .JBin :> false
+            .JUn :> false
+            .JCond :> false
+            .JArray :> false
+            .JAnnot :> false
+        }
+    }
+
+    // An expression's text. `ind` is the indentation of the line it sits on,
+    // so a multi-line arrow body can indent relative to it.
+    export fn expr(e: JsExpr, ind: string) -> string {
+        return match e {
+            .JId(name: n) :> n
+            .JNum(text: t) :> t
+            .JStr(value: v) :> quote(v)
+            .JBool(value: b) :> boolText(b)
+            .JNull :> "null"
+            .JUndefined :> "undefined"
+            .JMember(obj: o, prop: p) :> wrap(o, 19, ind) + "." + p
+            .JIndex(obj: o, index: i) :> wrap(o, 19, ind) + "[" + expr(i, ind) + "]"
+            .JCall(callee: f, args: args) :> wrap(f, 19, ind) + "(" + joinExprs(args, 2, ind) + ")"
+            .JArrow(params: ps, body: body) :> arrowBlock(ps, body, ind)
+            .JArrowE(params: ps, e: body) :> arrowExpr(ps, body, ind)
+            .JBin(op: op, l: l, r: r) :> wrap(l, opPrec(op), ind) + " " + opText(op) + " " + wrap(r, opPrec(op) + 1, ind)
+            .JUn(op: op, e: x) :> unText(op) + wrap(x, 15, ind)
+            .JCond(test: t, a: a, b: b) :> wrap(t, 4, ind) + " ? " + wrap(a, 3, ind) + " : " + wrap(b, 3, ind)
+            .JArray(elems: es) :> "[" + joinExprs(es, 2, ind) + "]"
+            .JObject(props: ps) :> objectText(ps, ind)
+            .JAnnot(e: x, note: n) :> expr(x, ind) + " /* " + n + " */"
+        }
+    }
+
+    fn boolText(b: boolean) -> string {
+        if (b) return "true"
+        return "false"
+    }
+
+    fn quote(s: string) -> string {
+        const q: string = JSON.stringify(s)
+        return q
+    }
+
+    fn arrowExpr(ps: string[], body: JsExpr, ind: string) -> string {
+        if (isObject(body)) return paramList(ps) + " => (" + expr(body, ind) + ")"
+        return paramList(ps) + " => " + wrap(body, 2, ind)
+    }
+
+    fn arrowBlock(ps: string[], body: JsStmt[], ind: string) -> string {
+        if (body.length == 0) return paramList(ps) + " => {}"
+        return paramList(ps) + " => {\n" + stmts(body, ind + "  ") + ind + "}"
+    }
+
+    fn objectText(ps: JsProp[], ind: string) -> string {
+        if (ps.length == 0) return "{}"
+        let out: string = "{ "
+        let first = true
+        for (const p of ps) {
+            if (!first) out = out + ", "
+            out = out + propKey(p.key) + ": " + wrap(p.value, 2, ind)
+            first = false
+        }
+        return out + " }"
+    }
+
+    // A property key: bare when it is a plain identifier, else quoted.
+    fn propKey(k: string) -> string {
+        if (isPlainIdent(k)) return k
+        return quote(k)
+    }
+
+    fn isIdentCode(c: int, first: boolean) -> boolean {
+        if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 || c == 36) return true
+        if (first) return false
+        return c >= 48 && c <= 57
+    }
+
+    fn isPlainIdent(k: string) -> boolean {
+        if (k.length == 0) return false
+        let i = 0
+        while (i < k.length) {
+            const c: int = k.charCodeAt(i)
+            if (!isIdentCode(c, i == 0)) return false
+            i = i + 1
+        }
+        return true
+    }
+
+    // ---- statements ----------------------------------------------------------
+    export fn stmts(ss: JsStmt[], ind: string) -> string {
+        let out = ""
+        for (const s of ss) { out = out + stmt(s, ind) }
+        return out
+    }
+
+    fn stmt(s: JsStmt, ind: string) -> string {
+        return match s {
+            .SConst(name: n, e: e) :> ind + "const " + n + " = " + expr(e, ind) + ";\n"
+            .SLet(name: n, e: e) :> ind + "let " + n + " = " + expr(e, ind) + ";\n"
+            .SAssign(target: t, e: e) :> ind + expr(t, ind) + " = " + expr(e, ind) + ";\n"
+            .SExpr(e: e) :> ind + exprStmtText(e, ind) + ";\n"
+            .SExprNote(e: e, note: n) :> ind + exprStmtText(e, ind) + "; // " + n + "\n"
+            .SReturn(e: e) :> ind + "return " + expr(e, ind) + ";\n"
+            .SIf(test: t, thenB: a, elseB: b) :> ifText(t, a, b, ind)
+            .SFunc(name: n, params: ps, body: body) :>
+                ind + "function " + n + "(" + ps.join(", ") + ") {\n" + stmts(body, ind + "  ") + ind + "}\n"
+            .SComment(text: t) :> ind + "// " + t + "\n"
+            .SImportAll(name: n, from: f) :> ind + "import * as " + n + " from " + quote(f) + ";\n"
+            .SBlank :> "\n"
+        }
+    }
+
+    // An expression statement may not start with `{` (or `function`).
+    fn exprStmtText(e: JsExpr, ind: string) -> string {
+        if (isObject(e)) return "(" + expr(e, ind) + ")"
+        return expr(e, ind)
+    }
+
+    fn ifText(t: JsExpr, a: JsStmt[], b: JsStmt[], ind: string) -> string {
+        const head: string = ind + "if (" + expr(t, ind) + ") {\n" + stmts(a, ind + "  ") + ind + "}"
+        if (b.length == 0) return head + "\n"
+        return head + " else {\n" + stmts(b, ind + "  ") + ind + "}\n"
+    }
+
+    // A whole module: the statement list printed once.
+    export fn printModule(body: JsStmt[]) -> string {
+        return stmts(body, "")
+    }
+}

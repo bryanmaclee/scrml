@@ -1,0 +1,14 @@
+// S441 reproducer — addendum-2 S6b: prose `x/y` written between inline elements fires the legacy bare-`/`
+// closer diagnostic.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/site-slash-between-inline-elements-bare-closer.scrml --output-dir <scratch>
+// Expected: Appendix E "The bare `/` no longer has syntactic significance as a block delimiter" — the `/`
+//           between `</b>` and `<b>` is text. (Appendix E also says legacy bare-`/` closers "SHALL be
+//           rejected", which is what the heuristic is guessing at — scope of that heuristic is the question.)
+// Actual:   exit 1 `error [E-SYNTAX-050]: Bare '/' is no longer a valid closer. Use '</>' to close '<p>', or
+//           use the explicit form '</p>'.` Same for `<code>a</code>/<code>b</code>`. Inside `<pre>` the same
+//           bytes compile (raw content). Residual of bug-4 (RESOLVED S177), whose fix deliberately kept the
+//           heuristic firing on a `/` "before a NEW OPENER (`<name`)" — exactly this prose shape.
+<program>
+<p>read <b>x</b>/<b>y</b> here</p>
+</program>

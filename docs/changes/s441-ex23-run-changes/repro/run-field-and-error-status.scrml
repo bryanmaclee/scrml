@@ -1,0 +1,45 @@
+<program db="app.db">
+
+<db src="app.db" tables="items">
+
+  ${
+    type ItemError:enum = {
+        NotFound(id: number)
+        InvalidInput
+        Forbidden
+    }
+
+    // (a) field read off the VOID result of .run() — §8.5.1
+    function consume(id: number) {
+        const result = ?{`UPDATE items SET used_at = CURRENT_TIMESTAMP WHERE id = ${id} AND used_at IS NULL`}.run()
+        if (result.changes == 0) {
+            return { error: "already used" }
+        }
+        return { ok: true, rowid: result.lastInsertRowid }
+    }
+
+    // (b) failable server fn — §19.9.2 status mapping
+    function findItem(id: number) ! ItemError {
+        if (id < 0) fail ItemError.InvalidInput
+        if (id == 99) fail ItemError.Forbidden
+        const row = ?{`SELECT id, name FROM items WHERE id = ${id}`}.get()
+        if (row is not) fail ItemError.NotFound(id)
+        return row
+    }
+
+    <msg> = ""
+
+    function go() {
+        const r = consume(1)
+        const item = findItem(2) !{
+            | err :> { @msg = "failed"; return }
+        }
+        @msg = item.name
+    }
+  }
+
+  <p>${@msg}</p>
+  <button onclick=go()>go</button>
+</db>
+
+</program>

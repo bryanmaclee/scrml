@@ -24,6 +24,10 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+// A live-PG CREATE DATABASE waits for a checkpoint (PG <15 FILE_COPY) and was measured at
+// ~24s on a dev machine; bun's 5s default hook timeout then fails the suite and leaks the
+// scratch DB/role. The hooks get real headroom instead.
+const PG_HOOK_TIMEOUT_MS = 120_000;
 import { existsSync } from "fs";
 import { SQL } from "bun";
 import {
@@ -105,14 +109,14 @@ d("§14.8.11 DB-authoritative reads (live Postgres negative test)", () => {
     // can already; for a non-superuser table-owner, grant membership (idempotent).
     const who = (await sql`SELECT current_user AS u`)[0].u;
     await sql.unsafe(`GRANT scrml_app TO "${who}"`).catch(() => {});
-  });
+  }, PG_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     if (sql) await sql.close().catch(() => {});
     const admin = new SQL({ path: SOCK, database: "postgres", username: PG_USER });
     await admin.unsafe(`DROP DATABASE IF EXISTS ${SCRATCH_DB}`).catch(() => {});
     await admin.close().catch(() => {});
-  });
+  }, PG_HOOK_TIMEOUT_MS);
 
   test("emitted DDL matches the spike-validated S1/S6 shape", () => {
     const joined = dbauthDDL.join("\n");

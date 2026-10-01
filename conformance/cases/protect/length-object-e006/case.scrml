@@ -1,0 +1,15 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, pin INTEGER)`}
+  </schema>
+  <db src="app.db" protect="pin" tables="users">
+    ${
+      function getLen(id) {
+        const u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        return new Array(u.pin).length
+      }
+    }
+  </db>
+  <n> = 0
+  <button id="load" onclick=${ @n = getLen(1) }>load</button>
+</program>

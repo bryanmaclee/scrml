@@ -1,0 +1,63 @@
+${
+    type LoadError:enum = { Boom(msg: string) }
+    <a> : number = 0
+    <b> : number = 0
+    <seen> : string = ""
+    <out> : number = 0
+    <final> : number = -1
+    server fn one(n: number) : number {
+        return n
+    }
+    server fn two(n: number) : number {
+        return n
+    }
+    server function risky(n: number)! LoadError {
+        if (n < 0) { fail LoadError.Boom("neg") }
+        return n
+    }
+    // independent: batched (Promise.all), writes in source order
+    function indep() {
+        @a = one(1)
+        @b = two(2)
+        @seen = "indep:" + @a + "," + @b
+    }
+    // data dependency: two(@a) reads the first write -> sequential
+    function dep() {
+        @a = one(1)
+        @b = two(@a)
+        @seen = "dep:" + @b
+    }
+    // an intervening statement ends the batch -> sequential
+    function between() {
+        @a = one(1)
+        @seen = "mid:" + @a
+        @b = two(2)
+    }
+    // a decl reading the first write ends the batch -> sequential
+    function declReads() {
+        @a = one(1)
+        const z = @a + 1
+        @b = two(z)
+    }
+    // same cell twice then a read: batched, last write wins, read sees it
+    function sameCell() {
+        @out = one(1)
+        @out = two(2)
+        @out = @out + 100
+        @final = @out
+    }
+    // a failable load whose arm can return: control-dependent -> sequential
+    function failable() {
+        @a = risky(1) !{
+            | .Boom(m) :> { @seen = "boom"; return }
+        }
+        @b = two(2)
+    }
+}
+<button id="indep" onclick=indep()>i</>
+<button id="dep" onclick=dep()>d</>
+<button id="between" onclick=between()>b</>
+<button id="declReads" onclick=declReads()>r</>
+<button id="sameCell" onclick=sameCell()>s</>
+<button id="failable" onclick=failable()>f</>
+<p id="seen">${@seen}</>

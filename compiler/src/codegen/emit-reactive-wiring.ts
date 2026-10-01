@@ -16,11 +16,15 @@ import {
   collectServerAuthorityTypes,
   serverVarDeclLoadKind,
 } from "./collect.ts";
-import { collectDerivedVarNames, buildFunctionBodyRegistry, collectReactiveVarNames, collectStructuralDeclNames, type FunctionBodyRegistry } from "./reactive-deps.ts";
+import { collectDerivedVarNames, buildFunctionBodyRegistry, collectReactiveVarNames, collectStructuralDeclNames, readRequestDepsAttr, requestDepReadLines, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelClientJs, parseChannelReconnect } from "./emit-channel.ts";
 import { emitInitialLoad, emitUnifiedMountHydrate, emitServerAuthorityLoad, emitDeclRhsSqlLoad } from "./emit-sync.ts";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
-import { liftEmittedStatementAwaits, emittedCodeCallsServerFn } from "./scheduling.ts";
+import { liftEmittedStatementAwaits, emittedCodeCallsServerFn, _clientServerFnNames } from "./scheduling.ts";
+import type { AsyncNameFacts } from "./async-combinators.ts";
+import { colorAsyncStatements, analyzeRawJsFragment } from "./js-async-analysis.ts";
+import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
+import { clientAsyncFactsOf } from "./emit-functions.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import type { LogicBinding, NestedLiftGroup } from "./binding-registry.ts";
@@ -966,7 +970,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     if (typeDecls && typeRegistry) {
       const { BUILTIN_TYPES } = require("../type-system.ts");
       for (const [name, type] of typeRegistry) {
-        if (BUILTIN_TYPES.has(name)) continue;
+        if (type === BUILTIN_TYPES.get(name)) continue; // identity: a user enum named like a built-in still gets its table (S443)
         if (type.kind === "enum" && type.transitionRules && type.transitionRules.length > 0) {
           lines.push("");
           for (const l of emitTransitionTable(`__scrml_transitions_${name}`, type.transitionRules)) {
@@ -1093,6 +1097,13 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // so far (SPEC §7.6 file scope). See `groupNames` below.
   const fileScopeNames = new Set<string>();
 
+  // §6.7.4 / §13.2 (S429) — a `when … changes` body is a CPS host: its server
+  // calls are awaited inside an async wrapper (emit-logic.ts `when-effect`). The
+  // file-filtered server-fn names reach it under a key ONLY that branch reads, so
+  // no other top-level statement's lowering changes.
+  const whenServerFnNames = ctx.routeMap ? _clientServerFnNames(ctx.routeMap, ctx.filePath ?? "") : null;
+  const whenEmitSpread = whenServerFnNames && whenServerFnNames.size > 0 ? { whenServerFnNames } : {};
+
   for (const group of drainGroups()) {
     const { pid, stmts } = group;
     const codes: string[] = [];
@@ -1131,8 +1142,8 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     const groupNames = liftScopeDeclaredNames(fileScopeNames);
     seedOwnConsts(fileScopeNames, groupNames, true); // chunk scope, if the group lands there (declared-name-marks.ts)
     const groupEmitOpts = groupTildeCtx
-      ? { ...emitOpts, tildeContext: groupTildeCtx, declaredNames: groupNames }
-      : { ...emitOpts, declaredNames: groupNames };
+      ? { ...emitOpts, ...whenEmitSpread, tildeContext: groupTildeCtx, declaredNames: groupNames }
+      : { ...emitOpts, ...whenEmitSpread, declaredNames: groupNames };
     // Per-statement ranges of the side-channel lists a statement's emission appends
     // to, so a statement re-emitted by the mixed-hoist guard below leaves no
     // duplicate behind.
@@ -1175,6 +1186,24 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       const _errsBefore = errors.length;
       const _seededBefore = seededConstFallbackCount();
       const code = emitLogicNode(stmt, groupEmitOpts);
+      // s441 (S440 F4) — a top-level logic statement is module-init code, outside
+      // every function body the lexical escape check walks: `${ const checks =
+      // [isOk] }` then `checks[0](x)` in a fn handed out a Promise-returning server
+      // fn as a plain value. Report every async-colored fn this statement uses as a
+      // value (calls here are owned by the module-init await paths, unchanged).
+      // Only the user's own declarations / expression statements: a `lift` (or any
+      // other markup-lowering node) emits compiler-built DOM code — a component's
+      // callback prop lowered to `el.setAttribute("onX", fn)` is not the user's
+      // value flow, and the recognizer must not read compiler text as user intent.
+      const _tlKind = (stmt as any).kind as string | undefined;
+      const _tlUserStmt = _tlKind === "let-decl" || _tlKind === "const-decl" || _tlKind === "tilde-decl" ||
+        _tlKind === "lin-decl" || _tlKind === "state-decl" || _tlKind === "bare-expr";
+      if (code && _tlUserStmt && (stmt as any)._onMountEffect !== true) {
+        const _tlUses = analyzeRawJsFragment(code, freeAsyncResolverFromFacts(clientAsyncFactsOf(ctx)));
+        if (_tlUses && _tlUses.escapes.length > 0) {
+          for (const err of jsAsyncUsesErrors({ calls: [], escapes: _tlUses.escapes }, (stmt as any).span, ctx.filePath)) errors.push(err);
+        }
+      }
       const _sideRange = {
         nested: [_nestedBefore, nestedListRef ? nestedListRef.length : 0] as [number, number],
         errs: [_errsBefore, errors.length] as [number, number],
@@ -1208,6 +1237,43 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       // reference them: the wrap changes no visible binding. Gated on the body
       // actually calling a server fn — a mount block without one emits
       // byte-identically to before.
+      // s441 (g-server-call-in-inline-handler-condition-unawaited) — the lift above
+      // awaited only DIRECT server-fn calls in statement positions: a server call
+      // in a `.some` callback, a nested helper wrapping one (`function inner(x) {
+      // return isOk(x) }` then `if (inner(1))`), and a call to a transitively-async
+      // CLIENT fn all stayed bare — a Promise tested as a boolean, true for every
+      // input. The body is now analysed with acorn against the SAME async facts the
+      // client function bodies use: every async call in an await-legal position is
+      // awaited (the block becomes async), a nested helper that reaches one is
+      // emitted `async`, a clean-family callback is lifted to its awaited
+      // combinator, and what cannot be awaited — or an async fn used as a value
+      // (S440 F4) — fails closed. A body that does not parse keeps the old lift.
+      if (code && (stmt as any)._onMountEffect === true) {
+        const _mountFacts = clientAsyncFactsOf(ctx);
+        const colored = colorAsyncStatements(code, freeAsyncResolverFromFacts(_mountFacts));
+        if (colored) {
+          for (const err of jsAsyncUsesErrors(colored, (stmt as any).span, ctx.filePath)) errors.push(err);
+          if (colored.rootAsync) {
+            const indented = colored.code
+              .split("\n")
+              .map((l) => (l.length ? "  " + l : l))
+              .join("\n");
+            codes.push(
+              `// §6.7.1a \`on mount\` — async scope for the server calls in this block (§13.2).\n` +
+              `(async () => {\n${indented}\n})().catch(_scrml_async_err => _scrml_error_boundary_log("on mount", _scrml_async_err));`,
+            );
+            codeStmts.push(stmt);
+            stmtSideRanges.push({ ..._sideRange, onMount: true } as any);
+            continue;
+          }
+          if (colored.code !== code) {
+            codes.push(colored.code);
+            codeStmts.push(stmt);
+            stmtSideRanges.push({ ..._sideRange, onMount: true } as any);
+            continue;
+          }
+        }
+      }
       if (code && (stmt as any)._onMountEffect === true && ctx.routeMap && emittedCodeCallsServerFn(code, ctx.routeMap)) {
         const awaited = liftEmittedStatementAwaits(code, ctx.routeMap, ctx.filePath ?? "");
         const indented = awaited
@@ -1626,7 +1692,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       }
       const emitted = kind === "lifecycle"
         ? emitLifecycleNode(node, errors, fileAST.filePath ?? "")
-        : emitRequestNode(node, errors, fileAST.filePath ?? "", apiEndpoints);
+        : emitRequestNode(node, errors, fileAST.filePath ?? "", apiEndpoints, collectDerivedVarNames(fileAST));
       for (const l of emitted) lines.push(l);
     }
   };
@@ -2312,7 +2378,7 @@ function extractRequestId(node: any): string | null {
   return null;
 }
 
-function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndpoints: Map<string, ApiEndpointForEmit>): string[] {
+function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndpoints: Map<string, ApiEndpointForEmit>, derivedNames: ReadonlySet<string> = new Set()): string[] {
   const lines: string[] = [];
   const attrs: any[] = node.attrs ?? node.attributes ?? [];
 
@@ -2426,10 +2492,11 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
     lines.push(`_scrml_register_cleanup(function() { ${mountedVar} = false; });`);
     // Re-fetch when the args cell changes (the request's reactive dependency,
     // §6.7.7 — mirrors the url-mode deps= effect, but the dep is the args cell).
+    // The fetch runs UNTRACKED: see the url-mode effect below.
     if (argsVarName !== null) {
       lines.push(`_scrml_effect(function() {`);
       lines.push(`  var _d = _scrml_reactive_get(${JSON.stringify(argsVarName)});`);
-      lines.push(`  if (${mountedVar}) ${fetchFn}();`);
+      lines.push(`  if (${mountedVar}) _scrml_untracked(${fetchFn});`);
       lines.push(`});`);
     } else {
       lines.push(`${fetchFn}();`);
@@ -2456,19 +2523,10 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
   // when url= is absent.
   if (!hasUrl) return lines;
 
-  const depsAttr = attrMap.get("deps");
-  const depsVars: string[] = [];
-  if (depsAttr) {
-    const v = depsAttr.value;
-    if (v?.kind === "array" && Array.isArray(v.elements)) {
-      for (const el of v.elements) {
-        if (el?.kind === "variable-ref") depsVars.push((el.name ?? "").replace(/^@/, ""));
-      }
-    } else if (typeof v?.value === "string") {
-      const matches = v.value.matchAll(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
-      for (const m of matches) depsVars.push(m[1]);
-    }
-  }
+  // §6.7.7 — "Any `@variable` in `deps=` changes" re-executes the fetch. The
+  // shared reader (g-request-deps-attr-ignored-both-forms) understands the
+  // parsed `kind:"expr"` attribute shape; absent or `deps=[]` → mount-only.
+  const depsVars: string[] = readRequestDepsAttr(node) ?? [];
 
   const methodAttr = attrMap.get("method");
   let method = "GET";
@@ -2510,10 +2568,14 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
   lines.push(`_scrml_register_cleanup(function() { ${mountedVar} = false; });`);
 
   if (depsVars.length > 0) {
-    const depsJs = depsVars.map(d => `_scrml_reactive_get(${JSON.stringify(d)})`).join(", ");
+    // The effect SUBSCRIBES only to the listed deps (the `_d` reads) and runs the
+    // fetch UNTRACKED. The fetch fn's synchronous prologue reads
+    // `${stateVar}.data` (the stale check) — tracked, that read subscribed this
+    // effect to its own result, so every settle (`.data = …`) re-fired it: an
+    // endless refetch loop (S444, measured in a happy-dom mount).
     lines.push(`_scrml_effect(function() {`);
-    lines.push(`  var _d = [${depsJs}];`);
-    lines.push(`  if (${mountedVar}) ${fetchFn}();`);
+    lines.push(...requestDepReadLines(depsVars, derivedNames, "_d"));
+    lines.push(`  if (${mountedVar}) _scrml_untracked(${fetchFn});`);
     lines.push(`});`);
   } else {
     lines.push(`${fetchFn}();`);

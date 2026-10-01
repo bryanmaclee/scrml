@@ -23,8 +23,8 @@
  *   - Singleton-form arms (`.A => x; .B => y`) remain unchanged (regression-free).
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
-import { emitMatchExpr } from "../../src/codegen/emit-control-flow.js";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { emitMatchExpr, setVariantFieldsForFile } from "../../src/codegen/emit-control-flow.js";
 import { rewriteMatchExpr } from "../../src/codegen/rewrite.js";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
 
@@ -97,6 +97,14 @@ describe("rewriteMatchExpr — pipe-alternation arms (§18 follow-on)", () => {
 // ---------------------------------------------------------------------------
 
 describe("emitMatchExpr — pipe-alternation arms in block-form match", () => {
+  // A real program-mode compile always installs the file's variant registry
+  // before emitting; these arms name only UNIT variants, so install an empty
+  // registry (no payload variants) to model that. With NO registry at all
+  // (library mode) an alternation arm extracts the `.variant` tag instead
+  // (S438 — g-impl1-match-miscompiles F12 review F1b).
+  beforeEach(() => { setVariantFieldsForFile(new Map(), null); });
+  afterEach(() => { setVariantFieldsForFile(null, null); });
+
   it("compiles .A | .B => result as a single if with OR-chain", () => {
     const node = {
       header: "@c",

@@ -1,0 +1,12 @@
+{
+  "id": "program-nested-auth-in-page-pos",
+  "description": "§4.12.2 (S443) — a `<program auth=\"required\">` inside a `<page>` is nested too (a `<page>` is a per-route container inside the application's one `<program>`, §40.8) and fires E-PROGRAM-NESTED-AUTH. Before S443 its auth= was dropped the same way: an anonymous GET of the page served it at 200.",
+  "language-version": "1.0",
+  "spec": "§4.12.2, §40.8, §52.13",
+  "rationale": "§4.12.2 (S443): 'An `auth=` attribute on a nested `<program>` — any `<program>` with a `<program>` or `<page>` ancestor — SHALL be a compile error (`E-PROGRAM-NESTED-AUTH`)'. The fix the error names is `<page auth=\"required\">`.",
+  "expect": {
+    "codes": ["E-PROGRAM-NESTED-AUTH"],
+    "severity": { "E-PROGRAM-NESTED-AUTH": "error" },
+    "codeCounts": { "E-PROGRAM-NESTED-AUTH": 1 }
+  }
+}

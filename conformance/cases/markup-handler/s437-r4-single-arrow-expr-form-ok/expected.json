@@ -1,0 +1,31 @@
+{
+  "id": "markup-handler-s437-r4-single-arrow-expr-form-ok",
+  "description": "Control for #2 — `${() => @count = @count + 1}` is ONE arrow expression (no top-level `;`), so it is NOT reported even though the statement grammar rejects it; it keeps the expression path and runs.",
+  "language-version": "1.0",
+  "spec": "§5.2.1",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§5.2.1: `onclick=${expr}` SHALL use the `${...}` expression directly as the event handler.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-STMT-MISSING-SEMICOLON"
+    ],
+    "input": [
+      {
+        "click": "#inc"
+      },
+      {
+        "click": "#inc"
+      }
+    ],
+    "state": {
+      "count": 2
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "2"
+      }
+    ]
+  }
+}

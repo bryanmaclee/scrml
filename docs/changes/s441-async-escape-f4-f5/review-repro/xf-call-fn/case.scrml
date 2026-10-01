@@ -1,0 +1,9 @@
+<program>
+${
+  import { check } from './lib.scrml'
+}
+<verdict> = "unset"
+function go() { @verdict = check(1) ? "accepted" : "rejected" }
+<button id="go" onclick=go()>go</button>
+<p id="out">${@verdict}</p>
+</program>

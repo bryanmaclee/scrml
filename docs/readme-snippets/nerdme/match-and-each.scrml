@@ -1,0 +1,22 @@
+// NERDME.md "Engines, matches & iteration" (Tier 1) — gated by scripts/snippet-gate.js.
+<program>
+type Load:enum = { Idle, Loading, Loaded(rows: number), Failed(msg: string) }
+type Item:struct = { id: number, name: string }
+
+<phase>: Load = .Idle
+<items>: Item[] = [{ id: 1, name: "first" }, { id: 2, name: "second" }]
+
+<match for=Load on=@phase>
+    <Idle><button onclick={ @phase = .Loading; @phase = Load.Loaded(2) }>Load</button></>
+    <Loading><p>Loading...</p></>
+    <Loaded rows><p>Got ${rows} rows</p></>
+    <Failed msg><p>${msg}</p></>
+</match>
+
+<ul>
+    <each in=@items key=@.id>
+        <li>${@.name}</li>
+        <empty>Nothing yet.</>
+    </each>
+</ul>
+</program>

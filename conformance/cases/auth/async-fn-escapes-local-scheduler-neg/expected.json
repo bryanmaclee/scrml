@@ -1,0 +1,12 @@
+{
+  "id": "auth-async-fn-escapes-local-scheduler-neg",
+  "description": "SECURITY (s441 fix round, review:S441-f4f5-review). The fire-and-forget exemption (`setTimeout(fn)` discards fn's return, so passing an async fn is not an escape) was keyed on the callee NAME: a server function that declares its own `function setTimeout(f) { return f(hash) }` and hands it a helper wrapping scrml:auth `verifyPassword` got the exemption, and the check returned the helper's Promise — always truthy, every password accepted (reviewer-executed). Only the GLOBAL scheduler discards the return; a program-bound name is an ordinary function, and the value use fails closed.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2: the fire-and-forget exemption applies only to the global scheduler; passing an async-colored function to a program-bound function named like one SHALL be E-ASYNC-FN-ESCAPES-AS-VALUE (§34).",
+  "expect": {
+    "codes": ["E-ASYNC-FN-ESCAPES-AS-VALUE"],
+    "severity": { "E-ASYNC-FN-ESCAPES-AS-VALUE": "error" }
+  }
+}

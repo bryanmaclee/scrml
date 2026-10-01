@@ -2,8 +2,9 @@ ${
     type LoadError:enum = { Empty }
     function plain() { return 1 }
     function caller()! -> LoadError { const r = plain()?; return r }
+    <msg> = ""
 }
 <program>
-<p id="s">propagate</p>
-<button id="b" onclick=caller()>go</button>
+<p id="s">propagate ${@msg}</p>
+<button id="b" onclick={ caller() !{ | .Empty :> @msg = "empty" } }>go</button>
 </program>

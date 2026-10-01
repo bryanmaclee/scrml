@@ -24,19 +24,18 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
-const TMP_ROOT = resolve(testDir, "_tmp_auth_csrf_sync");
+// Per-run scratch (S438) — see helpers/per-run-tmp.js (Windows EBUSY residue).
+const _tmp = perRunTmp(resolve(testDir, "_tmp_auth_csrf_sync"));
+const TMP_ROOT = _tmp.root;
 let tmpCounter = 0;
 
-beforeAll(() => {
-  if (!existsSync(TMP_ROOT)) mkdirSync(TMP_ROOT, { recursive: true });
-});
-afterAll(() => {
-  if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
-});
+beforeAll(_tmp.setup);
+afterAll(_tmp.teardown);
 
 function compile(scrmlSource, testName, seedFiles = {}) {
   const tag = `${testName}-${++tmpCounter}`;

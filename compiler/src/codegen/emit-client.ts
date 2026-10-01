@@ -6,15 +6,18 @@ import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTop
 import { isMetaKind } from "../types/ast.ts";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk } from "./runtime-chunks.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
-import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, collectStructuralDeclNames, type RequestBodyCell } from "./reactive-deps.ts";
+import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, collectStructuralDeclNames, collectDerivedVarNames, requestDepReadLines, type RequestBodyCell } from "./reactive-deps.ts";
 import { setCurrentFileRequestIds } from "./emit-expr.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex, maskStringLiteralSpans } from "./utils.ts";
 import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments.ts";
 import { scanClientEgress } from "./egress-field-scan.ts";
-import { emitFunctions } from "./emit-functions.ts";
+import { emitFunctions, clientAsyncFactsOf } from "./emit-functions.ts";
+import { setActiveClientAsync } from "./js-async-analysis.ts";
+import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { getNodes, isServerOnlyNode } from "./collect.ts";
 import { emitLogicNode, beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
+import { workerBundleFilename } from "./emit-worker.ts";
 import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring, fileHasOutlet } from "./emit-reactive-wiring.ts";
 import { filterChannelImportSpecifiers } from "./emit-channel.ts";
@@ -24,6 +27,7 @@ import { isEscalationServerOnlyModule } from "../route-inference.ts";
 import { exportIsUserComponent } from "../component-expander.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineServerSourceHydrationsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
+import { _clientServerFnNames } from "./scheduling.ts";
 import { setVariantFieldsForFile } from "./emit-control-flow.ts";
 import { setVariantFieldsForRewriter } from "./rewrite.js";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
@@ -2323,6 +2327,19 @@ export function generateClientJs(ctx: CompileContext): string {
   //
   // See SCOPE-AND-DECOMPOSITION.md §3.4 (Option C-prime, RATIFIED) and
   // PHASE-0-SURVEY §7.3 finalized helper signature.
+  // s441 — compute the client async facts BEFORE any body-render stage and make
+  // them the ACTIVE client emission: the `<each>` row and lift handler emitters
+  // (deep call chains with no ctx) color their handlers against them (F5).
+  {
+    const _facts = clientAsyncFactsOf(ctx);
+    const _resolveFree = freeAsyncResolverFromFacts(_facts);
+    setActiveClientAsync({
+      resolveFree: _resolveFree,
+      report: (uses, span) => {
+        for (const err of jsAsyncUsesErrors(uses, span, ctx.filePath)) errors.push(err);
+      },
+    });
+  }
   const c12BodyRender = clientStage(ctx, "emit-engine-body-render", () => emitEngineBodyRenderForFile(fileAST, ctx));
   const c14BodyRender = clientStage(ctx, "emit-derived-engine-body-render", () => emitDerivedEngineBodyRenderForFile(fileAST, ctx));
   // S108 Phase 3 — match-block body render (SPEC §18.0.1). Mirrors C12/C14
@@ -2405,14 +2422,38 @@ export function generateClientJs(ctx: CompileContext): string {
   }
 
   // §4.12.4: Worker instantiation — new Worker() + Promise-based .send()
+  //
+  // Wire format (see emit-worker.ts): the parent posts `{ id, data }`, the worker
+  // replies `{ replyTo, data }`. `.send(data)` resolves with the `data` of the
+  // FIRST reply naming its id, so concurrent sends each get their own reply.
+  //
+  // Nothing here assigns `worker.onmessage`: the reply router is one
+  // `addEventListener("message")`, and each `when message from <#name>` /
+  // `when error from <#name>` hook (emit-logic.ts) adds its own listener. A
+  // send therefore never displaces a declared hook (§46.6: `when message from`
+  // SHALL fire on every `send(data)` of the nested program, a reply included),
+  // and several hooks on one worker all run, in source order (§46.2).
   if (workerNames && workerNames.length > 0) {
     lines.push("// --- worker instantiation (compiler-generated, §4.12.4) ---");
+    lines.push("// To the worker: { id, data }. From the worker: { replyTo, data }; a reply resolves");
+    lines.push("// the .send() whose id it names. `when message from` hooks see every message.");
     for (const name of workerNames) {
-      lines.push(`const _scrml_worker_${name} = new Worker("${name}.worker.js");`);
-      lines.push(`_scrml_worker_${name}.send = function(data) {`);
+      const w = `_scrml_worker_${name}`;
+      lines.push(`const ${w} = new Worker(${JSON.stringify(workerBundleFilename(ctx.filePath, name))});`);
+      lines.push(`${w}._scrml_next_id = 0;`);
+      lines.push(`${w}._scrml_pending = new Map(); // id -> resolve of an unanswered .send()`);
+      lines.push(`${w}.addEventListener("message", function(event) {`);
+      lines.push(`  const resolve = ${w}._scrml_pending.get(event.data.replyTo);`);
+      lines.push(`  if (resolve) {`);
+      lines.push(`    ${w}._scrml_pending.delete(event.data.replyTo);`);
+      lines.push(`    resolve(event.data.data);`);
+      lines.push(`  }`);
+      lines.push(`});`);
+      lines.push(`${w}.send = function(data) {`);
+      lines.push(`  const id = ++${w}._scrml_next_id;`);
       lines.push(`  return new Promise(function(resolve) {`);
-      lines.push(`    _scrml_worker_${name}.onmessage = function(e) { resolve(e.data); };`);
-      lines.push(`    _scrml_worker_${name}.postMessage(data);`);
+      lines.push(`    ${w}._scrml_pending.set(id, resolve);`);
+      lines.push(`    ${w}.postMessage({ id: id, data: data });`);
       lines.push(`  });`);
       lines.push(`};`);
     }
@@ -2481,6 +2522,9 @@ export function generateClientJs(ctx: CompileContext): string {
   // `_scrml_fetch_with_csrf_retry` CALL (emit-functions.ts) without this DEF →
   // `ReferenceError` at load. It now emits whenever `csrfEnabled`.
   if (csrfEnabled) {
+    // The §39.2.3 meta tag is emitted exactly for an auth entry with csrf="auto"
+    // (codegen/index.ts), the same predicate the server's meta fill uses.
+    const _csrfMetaPresent = authMiddlewareEntry?.csrf === "auto";
     lines.push("// --- CSRF token helper (compiler-generated) ---");
     lines.push("function _scrml_get_csrf_token() {");
     // §39.2.3 canonical delivery — PREFER the <meta name="csrf-token"> element the
@@ -2534,6 +2578,28 @@ export function generateClientJs(ctx: CompileContext): string {
         }
       }
     }
+    // S441 review F3 — an auth + `csrf="auto"` page carries the §39.2.3
+    // `<meta name="csrf-token">`, and `_scrml_get_csrf_token()` prefers it. When
+    // that first-paint token is STALE (the session changed after the page was
+    // composed — re-login in another tab, a server restart), the server's CSRF 403
+    // plants THIS session's token in the readable `scrml_csrf` cookie, but the
+    // retry would re-read the stale meta and 403 again until a reload. Before the
+    // one retry, copy the freshly planted cookie token into the meta so the retry
+    // (and every later mutation on this page) sends the current token. Emitted only
+    // where the meta exists (the baseline double-submit path has no meta tag) and a
+    // retry exists to call it (both retry sites — the wrapper below and the
+    // Idempotency-Key branch in emit-functions.ts — exist only for a mutating fn).
+    if (_csrfMetaPresent && hasMutatingCsrfServerFn) {
+      lines.push("// After a CSRF 403: the response planted the current session token in the");
+      lines.push("// scrml_csrf cookie; make the meta tag agree so the retry does not resend a stale one.");
+      lines.push("function _scrml_csrf_sync_meta_from_cookie() {");
+      lines.push("  const _scrml_meta = (typeof document !== 'undefined' && document.querySelector) ? document.querySelector('meta[name=\"csrf-token\"]') : null;");
+      lines.push("  if (!_scrml_meta) return;");
+      lines.push("  const _scrml_fresh = document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/);");
+      lines.push("  if (_scrml_fresh) _scrml_meta.setAttribute('content', decodeURIComponent(_scrml_fresh[1]));");
+      lines.push("}");
+      lines.push("");
+    }
     if (hasMutatingCsrfServerFn) {
       // Cookie-less first POST receives a 403 with Set-Cookie (server plants
       // a fresh token). We retry exactly once, re-reading document.cookie
@@ -2547,6 +2613,7 @@ export function generateClientJs(ctx: CompileContext): string {
       lines.push("    body,");
       lines.push("  });");
       lines.push("  if (_scrml_resp.status === 403) {");
+      if (_csrfMetaPresent) lines.push("    _scrml_csrf_sync_meta_from_cookie();");
       lines.push("    _scrml_resp = await fetch(path, {");
       lines.push("      method,");
       lines.push('      headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_get_csrf_token() },');
@@ -2675,7 +2742,10 @@ export function generateClientJs(ctx: CompileContext): string {
   // watchdog per §51.0.R rule 2 (falls out of the standard write rewrite \u2014
   // no watchdog reset is special-cased for the boot edge). Tree-shake: empty
   // when no engine declares an opener effect=.
-  const engineOpenerEffectLines = clientStage(ctx, "emit-engine-opener-effects", () => emitEngineOpenerEffectsForFile(fileAST));
+  // s441 — the file's server-fn names (the SAME file-filtered set the §6.7.4
+  // `when` body uses) so a server call in the effect body is awaited in place.
+  const engineOpenerEffectLines = clientStage(ctx, "emit-engine-opener-effects", () =>
+    emitEngineOpenerEffectsForFile(fileAST, ctx.routeMap ? _clientServerFnNames(ctx.routeMap, ctx.filePath ?? "") : null));
   if (engineOpenerEffectLines.length > 0) {
     lines.push("");
     lines.push("// --- engine opener effect= boot-init effects (compiler-generated, §51.0.H Form 3) ---");
@@ -3224,6 +3294,7 @@ export function generateClientJs(ctx: CompileContext): string {
     // now throws on a non-`{__scrml_error}` non-2xx (emit-functions.ts), so a
     // transport/host failure routes to `.error` here, never the success cell.
     const requestBodyCells: Map<string, RequestBodyCell> = collectRequestBodyCells(fileAST);
+    const requestDerivedNames: Set<string> = requestBodyCells.size > 0 ? collectDerivedVarNames(fileAST) : new Set<string>();
     // A request-body cell's mount-fetch is emitted ONCE at module-init (before
     // the DOMContentLoaded wiring), so it is the FIRST occurrence in the client.
     // Convert only that first occurrence per request id; any later reassignment
@@ -3274,12 +3345,18 @@ export function generateClientJs(ctx: CompileContext): string {
         // Re-fetch on any declared/inferred `@var` dependency change (§6.7.7).
         // The reads inside the effect establish the reactive subscription; the
         // effect also fires once on registration → the mount fetch.
-        const depsJs = info.depsVars
-          .map((d) => `_scrml_reactive_get(${JSON.stringify(d)})`)
-          .join(", ");
+        //
+        // The fetch itself runs UNTRACKED (S444). Its synchronous prologue — up
+        // to the first `await` — reads `${stateVar}.data` (the stale check) and
+        // evaluates the call's ARGUMENTS. Tracked, the first read subscribed the
+        // effect to its own result (every settle re-fired it: an endless refetch
+        // loop), and the argument reads added the body's `@var`s as deps even
+        // under an explicit `deps=[…]`, which §6.7.7 says "overrides inference".
+        // A DERIVED dep is read through requestDepReadLines' untracked settle so
+        // one upstream write re-fires the fetch once, not 2x (S444 review).
         lines.push(`_scrml_effect(function() {`);
-        lines.push(`  var _scrml_deps = [${depsJs}];`);
-        lines.push(`  if (${mountedVar}) ${fetchFn}();`);
+        lines.push(...requestDepReadLines(info.depsVars, requestDerivedNames, "_scrml_deps"));
+        lines.push(`  if (${mountedVar}) _scrml_untracked(${fetchFn});`);
         lines.push(`});`);
       } else {
         lines.push(`${fetchFn}();`);
@@ -3312,8 +3389,19 @@ export function generateClientJs(ctx: CompileContext): string {
       }
       return depth === 0 ? j : -1;
     };
-    for (const [, mangledName] of fnNameMap) {
-      if (!/^_scrml_(fetch|cps)_/.test(mangledName)) continue;
+    // g-request-body-client-wrapper-unawaited-one-shot (S444) — the callee set is
+    // every ASYNC-COLORED function, not only the server stubs. A client fn that
+    // reaches a server fn (`function wrap(q) { return suggest(q) }`) is emitted
+    // `async` by the same coloring (`clientAsyncFactsOf` — the analysis the
+    // E-ASYNC-FN-ESCAPES-AS-VALUE / sync-callback checks consult), so a
+    // module-init `_scrml_reactive_set("hits", _scrml_wrap_8(…))` stored a
+    // PROMISE in the cell. For a `<request>` body it also skipped the §6.7.7
+    // settle machine below — no fetch fn, no seq, no dep effect, `.loading`
+    // stuck `true`. Keyed by SOURCE name (fnNameMap's key), so a user name that
+    // merely looks like a stub is never swept in.
+    const asyncClientFnNames = clientAsyncFactsOf(ctx).asyncFnNames ?? new Set<string>();
+    for (const [sourceName, mangledName] of fnNameMap) {
+      if (!/^_scrml_(fetch|cps)_/.test(mangledName) && !asyncClientFnNames.has(sourceName)) continue;
       // Match _scrml_reactive_set("NAME", <mangledName>( ... );) at statement level.
       // Body args may themselves contain `(`; count parens to find the matching close.
       const setHead = "_scrml_reactive_set(";
@@ -3366,8 +3454,20 @@ export function generateClientJs(ctx: CompileContext): string {
         // definition of done requires of the no-tail case. U1's gain is in the
         // positions this pass never reached (receiver-tail, nested-argument, and
         // the `emitFnShortcutBody` path).
+        //
+        // s441 (g-cell-assign-server-call-fired-detached) — the ABSORB above was
+        // the bug. The emitter's `await` is its PROOF that the host is async and
+        // the position await-legal (`isClientServerFnCall` gates on
+        // `clientAsyncBody` + `peerAwaitable`), and re-emitting the site as a
+        // DETACHED IIFE threw that sequencing away: the next statement read the
+        // pre-fetch value and two successive writes raced. `emitterAwaited`
+        // records the proof; every branch below honors it by awaiting IN PLACE.
+        // The IIFE survives only where the emitter could NOT await (a module-init
+        // statement of a classic script, a sync host) — the case it was built for.
+        let emitterAwaited = false;
         if (clientCode.slice(valStart, valStart + 5) === "await" &&
             /\s/.test(clientCode[valStart + 5] ?? "")) {
+          emitterAwaited = true;
           valStart += 5;
           while (valStart < clientCode.length && /\s/.test(clientCode[valStart])) valStart++;
         }
@@ -3430,7 +3530,7 @@ export function generateClientJs(ctx: CompileContext): string {
         // DEAD CODE (the user's `!{}` handler never fires). Relocate the guard +
         // arm INSIDE the IIFE, after the await, reading the resolved value, with a
         // happy-path `else` that performs the reactive set. The `<resultVar>`
-        // genVar name is REUSED as the in-IIFE `const`, so the existing arm body
+        // genVar name is REUSED as the in-IIFE `let` (s441: an arm assigns it), so the existing arm body
         // (which reads `<resultVar>.variant` / `.data`) is relocated verbatim — no
         // rewrite of the arm interior is needed. ss32's `.catch` is retained as
         // the safety net for a genuine non-envelope rejection.
@@ -3459,14 +3559,44 @@ export function generateClientJs(ctx: CompileContext): string {
                 // `_scrml_init_set(...)` lazy-initializer) stay OUTSIDE the IIFE.
                 const interveningText = clientCode.slice(stmtEnd, ifStart);
                 const ifBlock = clientCode.slice(ifStart, closeIdx + 1);
+                parts.push(clientCode.slice(i, letStart));
+                // s441 (S435 ruling "lift" on g-failable-cell-load-fire-and-
+                // forget-stale-read-dead-return) — in an async host, await IN
+                // PLACE: the statements after the handler see the resolved cell,
+                // and an arm's `return` (or the no-wildcard `else { return R; }`
+                // escalation) returns from the AUTHOR's function, not from an
+                // IIFE nobody awaits. The success path still writes the cell only
+                // in the `else`, so a handled failure never lands the error
+                // envelope in the cell. `let`, not `const`: a value-form arm
+                // assigns its recovery value to `<resultVar>`.
+                if (emitterAwaited || /\bawait\s+$/.test(letMatch[1])) {
+                  // Re-indent the relocated block to the `let` line's own indent
+                  // (the multi-line guarded-expr arrives with only its first line
+                  // indented by the enclosing function emitter).
+                  const lineStart = clientCode.lastIndexOf("\n", letStart - 1) + 1;
+                  const indent = /^[ \t]*/.exec(clientCode.slice(lineStart, letStart))![0];
+                  const inPlace =
+                    `let ${resultVar} = await ${mangledName}(${args});` +
+                    interveningText +
+                    `${ifBlock} else {\n` +
+                    `  _scrml_reactive_set(${nameArg}, ${resultVar});\n` +
+                    `}`;
+                  parts.push(
+                    inPlace
+                      .split("\n")
+                      .map((l, idx) => (idx === 0 || l.length === 0 ? l : indent + l))
+                      .join("\n"),
+                  );
+                  i = closeIdx + 1;
+                  continue;
+                }
                 const indentedIf = ifBlock
                   .split("\n")
                   .map((l) => (l.length ? "  " + l : l))
                   .join("\n");
-                parts.push(clientCode.slice(i, letStart));
                 parts.push(
                   `(async () => {\n` +
-                    `  const ${resultVar} = await ${mangledName}(${args});\n` +
+                    `  let ${resultVar} = await ${mangledName}(${args});\n` +
                     `${indentedIf} else {\n` +
                     `    _scrml_reactive_set(${nameArg}, ${resultVar});\n` +
                     `  }\n` +
@@ -3487,7 +3617,15 @@ export function generateClientJs(ctx: CompileContext): string {
         // machine's own try/catch routes a thrown fetch (a non-2xx surfaced by the
         // stub) to `.error` and leaves the success cell untouched (§6.7.7 failure
         // contract); success sets both `.data` and the cell.
-        if (hadTrailingSemi && requestBodyCells.size > 0) {
+        //
+        // s441 — never for an emitter-awaited site: that proof means the site is
+        // inside an async FUNCTION body (a later reassignment, e.g. a refresh
+        // handler), not the body's module-init mount fetch. Function bodies are
+        // emitted BEFORE module-init statements, so without this gate such a
+        // reassignment was the "first occurrence" and the whole settle machine
+        // (`var` decls, a nested fetch fn, a cleanup registration) was spliced
+        // into the author's function while the real mount fetch stayed plain.
+        if (hadTrailingSemi && !emitterAwaited && requestBodyCells.size > 0) {
           let cellKey: string | null = null;
           try {
             const parsed = JSON.parse(nameArg.trim());
@@ -3503,6 +3641,21 @@ export function generateClientJs(ctx: CompileContext): string {
             i = stmtEnd;
             continue;
           }
+        }
+
+        // s441 (g-cell-assign-server-call-fired-detached, §13.2 "The compiler SHALL
+        // insert `await` at every call site where a server-generated fetch call is
+        // made") — the emitter already awaited this call in an async host, so the
+        // site is ALREADY correct: `_scrml_reactive_set(name, await stub(args))`.
+        // Leave it byte-for-byte as emitted. A rejection now propagates out of the
+        // author's function at the call site — exactly as `const a = serverFn()`
+        // in the same body always has — and the statements after it do not run
+        // on a stale value. (The detached IIFE below logged the rejection and let
+        // the function carry on as if the write had happened.)
+        if (emitterAwaited) {
+          parts.push(clientCode.slice(i, stmtEnd));
+          i = stmtEnd;
+          continue;
         }
 
         parts.push(clientCode.slice(i, setIdx));
@@ -4132,6 +4285,8 @@ export function generateClientJs(ctx: CompileContext): string {
   // registered-request id set so it cannot leak into the next file's emission.
   setCurrentFileRequestIds(null);
   if (_ownsEmitLogicState) endEmitLogicFile();
+  // s441 — end of this file's client emission (see setActiveClientAsync above).
+  setActiveClientAsync(null);
 
   return clientCode;
 }

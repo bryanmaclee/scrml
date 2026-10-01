@@ -1,0 +1,34 @@
+// S441 reproducer — addendum-2 S9g (SECURITY): a `protect=` column returned as a SCALAR (`u.passwordHash`) is
+// served to the client at HTTP 200; the egress floor redacts only tagged rows.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/site-protected-column-escapes-redaction-as-scalar.scrml --output-dir <scratch>
+// Expected: §14.8.9 "Every compiler-emitted client-egress serializer — a server-function response, … — SHALL
+//           **strip, by construction, every column whose provenance origin is a `protect=` field**, before the
+//           value crosses to the client … The strip keys on the column's resolved source `(table, column)`
+//           origin, never its surface name … it is sound *by construction*."
+// Actual:   exit 0; the only protect diagnostic is `info [I-PROTECT-STRIP-001]: the egress floor strips protected
+//           column(s) `passwordHash` from the client response …` — which is false for this return. server.js:
+//           `const u = _scrml_protect_tag((await _scrml_sql`SELECT passwordHash …`)[0] ?? null, ["passwordHash"]);`
+//           `return u.passwordHash;` → `JSON.stringify(_scrml_protect_redact(_scrml_result) ?? null)`; the
+//           redactor sees a plain string with no origin descriptor. EXECUTED (seeded row passwordHash =
+//           'SECRET-HASH-123', authenticated session + synchronizer token, called the emitted route handler):
+//           `status 200 body "SECRET-HASH-123"`. Any value derived from the column (a member read, a
+//           concatenation, a destructure) leaves the tag behind. Sibling of
+//           G-PROTECT-TAG-TOJSON-HOOK-DROPPED-BY-OBJECT-SPREAD (same tag-on-the-row design).
+<program db="./fresh-protect.db">
+<schema>
+  users {
+    id: integer primary key
+    name: text
+    passwordHash: text
+  }
+</schema>
+<db src="./fresh-protect.db" tables="users" protect="passwordHash"/>
+function getHash() {
+    const u = ?{`SELECT passwordHash FROM users WHERE id = 1`}.get()
+    return u.passwordHash
+}
+<h> = ""
+<button onclick=${ @h = getHash() }>x</button>
+<p>${@h}</p>
+</program>

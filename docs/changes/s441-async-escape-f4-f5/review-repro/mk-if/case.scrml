@@ -1,0 +1,6 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+<p id="secret" if=(isOk(1))>SECRET</p>
+<p id="out">${@verdict}</p>
+</program>

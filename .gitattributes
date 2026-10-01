@@ -15,3 +15,19 @@
 # already-absorbed and drops out of the digest. The two changes land together;
 # neither is sufficient alone.
 handOffs/delta-log.md merge=union
+
+# ---------------------------------------------------------------------------
+# hand-off.md — pin the stored line endings to LF (S436)
+#
+# PR #1068 committed this file as CRLF from a Windows clone (raw blob: 4141 CR
+# bytes against 4139 lines). `git diff` then reported ONE hunk covering the whole
+# file with no common context, so that landing had no reviewable diff and `git
+# blame` across it is useless; #1065 flipped it back to LF the next day, producing
+# a second whole-file hunk. Content survived both — verified by normalising the
+# blobs and re-diffing — but the review surface did not, and two lone CRs inside
+# lines corrupted four worktree paths in the S432 pickup (repaired at S436).
+#
+# This file is the one every session reads and appends to, from clones with
+# differing `core.autocrlf` settings, so it is the one that must not depend on
+# the committer's local setting.
+hand-off.md text eol=lf

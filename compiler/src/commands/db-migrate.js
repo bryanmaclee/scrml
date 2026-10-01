@@ -39,7 +39,9 @@ import { readFileSync, statSync } from "fs";
 import { resolve } from "path";
 import { SQL } from "bun";
 import { Database } from "bun:sqlite";
+import { configureSqliteHandle } from "../sqlite-handle-defaults.ts";
 import { resolveDbDriver } from "../codegen/db-driver.ts";
+import { SecretRedactor } from "../diagnostic-secrets.ts";
 import { splitBlocks } from "../block-splitter.js";
 import { buildAST } from "../ast-builder.js";
 import { extractDesiredSchema } from "../codegen/db-authoritative.ts";
@@ -53,6 +55,11 @@ import {
 import { scanDirectory } from "../api.js";
 
 const isTTY = process.stderr.isTTY;
+
+// s432 — every error line that can echo the --db value (its SQLite path, a
+// driver error, the resolver's E-SQL-005) passes the same value-based
+// redactor compileScrml uses. Set once runDbMigrate knows the value.
+let redactDbText = (text) => text;
 const c = {
   red: (s) => (isTTY ? `\x1b[31m${s}\x1b[0m` : s),
   green: (s) => (isTTY ? `\x1b[32m${s}\x1b[0m` : s),
@@ -377,7 +384,7 @@ async function runPgApply({ connectionString, desired, dryRun, allowDestructive,
   try {
     sql = new SQL(connectionString);
   } catch (e) {
-    console.error(c.red("error:") + ` failed to connect to Postgres: ${e.message}`);
+    console.error(redactDbText(c.red("error:") + ` failed to connect to Postgres: ${e.message}`));
     process.exit(1);
   }
 
@@ -461,7 +468,7 @@ async function runPgApply({ connectionString, desired, dryRun, allowDestructive,
           : ""),
     );
   } catch (e) {
-    console.error(c.red("error:") + ` migration failed (rolled back): ${e.message}`);
+    console.error(redactDbText(c.red("error:") + ` migration failed (rolled back): ${e.message}`));
     printFailedStatement(e);
     await closeSql(sql);
     process.exit(1);
@@ -482,9 +489,20 @@ function runSqliteApply({ connectionString, desired, dryRun, allowDestructive })
   try {
     db = new Database(path);
   } catch (e) {
-    console.error(c.red("error:") + ` failed to open SQLite database "${path}": ${e.message}`);
+    console.error(redactDbText(c.red("error:") + ` failed to open SQLite database "${path}": ${e.message}`));
     process.exit(1);
   }
+
+  // §44 (S436) — the CLI half of `g-native-sqlite-connection-lacks-wal-and-busy-timeout-config`.
+  // #1062 configured the handles the compiler EMITS and missed the ones it OPENS, leaving the
+  // gap's own sentence ("that blocked the adopter's DB migration") literally reachable: MEASURED
+  // before this line existed, a migrate against a database another process held `BEGIN IMMEDIATE`
+  // on died `database is locked` in 129 ms — no wait at all. `busy_timeout` is per-connection, so
+  // it MUST be re-set on this handle every run; `journal_mode = WAL` is deliberately NOT set here
+  // (it is a persistent change to a file the ADOPTER owns — see `sqlite-handle-defaults.ts`).
+  // Immediately after the open and before ANY other statement: the pragma only governs statements
+  // issued after it lands, and `readActualSchema` below is already one.
+  configureSqliteHandle(db);
 
   try {
     const actual = readActualSchema(db);
@@ -520,7 +538,7 @@ function runSqliteApply({ connectionString, desired, dryRun, allowDestructive })
     }
     console.log(c.green(`applied ${plan.length} statement(s) in 1 transaction.`));
   } catch (e) {
-    console.error(c.red("error:") + ` migration failed (rolled back): ${e.message}`);
+    console.error(redactDbText(c.red("error:") + ` migration failed (rolled back): ${e.message}`));
     printFailedStatement(e);
     process.exit(1);
   } finally {
@@ -546,9 +564,12 @@ export async function runDbMigrate(args) {
     process.exit(1);
   }
 
+  const dbRedactor = new SecretRedactor([dbUrl]);
+  redactDbText = (text) => dbRedactor.redact(text);
+
   const resolved = resolveDbDriver(dbUrl);
   if (!resolved.ok) {
-    console.error(c.red("error:") + " " + resolved.error.message);
+    console.error(redactDbText(c.red("error:") + " " + resolved.error.message));
     process.exit(1);
   }
   const driver = resolved.info.driver;

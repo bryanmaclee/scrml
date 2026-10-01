@@ -297,7 +297,7 @@ export interface StageSeam {
 }
 
 /**
- * ⚠ THE KNOWN LIMIT OF A BS / TAB SWAP. Eight files re-enter (seven at s430-stage-swap; +1 S430 defer) the TS block splitter / AST builder
+ * ⚠ THE KNOWN LIMIT OF A BS / TAB SWAP. Nine files re-enter (seven at s430-stage-swap; +1 S430 defer; +1 S433 implied-lift) the TS block splitter / AST builder
  * directly — re-parsing a synthesized snippet mid-stage — instead of going through the pipeline's
  * BS / TAB call. A hybrid with BS or TAB substituted still parses THOSE snippets with TS, so its
  * FileASTs are of mixed provenance. Every other stage has exactly one caller (api.js).
@@ -320,6 +320,12 @@ export const PARSE_REENTRY_FILES: readonly string[] = [
   // native parser, lambda / on-mount text) into statement trees so the defer
   // checker reasons about STRUCTURE, never text.
   "compiler/src/validators/defer-structure.ts",
+  // S433 §17.6.10 implied `lift` — recovers a bare-markup control-flow arm's
+  // markup from the file source, because the live TAB flattens such an arm to a
+  // raw `html-fragment` string whose interior whitespace is already lost. (The
+  // native parser keeps the markup tree, and THAT path re-parses nothing — so
+  // this re-entry is the live pipeline's cost, not the pass's.)
+  "compiler/src/implied-lift-desugar.ts",
 ];
 
 const recheckFiles = (label: string, pick: (args: SeamArgs) => unknown): ((args: SeamArgs) => Divergence) =>
@@ -520,6 +526,18 @@ export const STAGE_SEAMS: readonly StageSeam[] = [
     name: "CG", tsModule: "./code-generator.js", pipeline: "Stage 8", entry: "runCG", selfHostKey: "runCG",
     signature: "({ files, routeMap, depGraph, protectAnalysis, batchPlan, … }) -> { outputs: Map<source, FileOutput>, errors }",
     output: obj({ outputs: mapOf(cgFileOutput, str), errors: diagnostics }),
+  },
+  {
+    // s440-bootstrap-css-theme-t3 (dpa-051 §8.4 step 1) — a SUB-SEAM of CG: the user stylesheet part of
+    // `FileOutput.css` (§9.1 `#{}`, §65 reset / layers / `:where()`, `<theme>` tokens). `html`,
+    // `clientJs` and `serverJs` are coupled by binding ids and swap only as the whole CG unit; `css` is
+    // independent, so it has its own seam. CG calls the picked function once per file and still appends
+    // the Tailwind utilities (§26) and the §38 transition keyframes after it. With nothing swapped, the
+    // pick is `generateCss` itself (identity), so CG's output is byte-identical. When CG itself is
+    // swapped this seam is not reached.
+    name: "CSS", tsModule: "./codegen/emit-css.ts", pipeline: "Stage 8 sub-seam (FileOutput.css)", entry: "generateCss",
+    signature: "(nodes, cssBlocks, errors, fileAST, { filePath, mode }) -> string  (the user stylesheet; \"\" = none)",
+    output: str,
   },
 ];
 

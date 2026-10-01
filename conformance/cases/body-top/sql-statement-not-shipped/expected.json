@@ -1,0 +1,21 @@
+{
+  "id": "body-top-sql-statement-not-shipped",
+  "description": "A bare `?{…}` SQL statement at a <program> body-top is code — it never reaches the page (pre-S441 the CREATE TABLE text shipped in the public HTML).",
+  "language-version": "1.0",
+  "spec": "§40.8, §8",
+  "source-test": "compiler/tests/unit/s441-declared-prose-body.test.js",
+  "rationale": "§40.8 S441 bullet (ruling: user-voice-scrml.md S441 \"prose should be declared as such\" + \"declared-prose implementation: yes to all four\"): a `<program>` / `<page>` / `<channel>` body is a code-default body — a bare run there is code, checked exactly as inside `${ … }`, never page text; displayed text is declared by a markup element or a `\"...\"` display-text literal; a bare run that is not valid code is E-UNQUOTED-DISPLAY-TEXT.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "dom": "<p id=\"p\">x</p>",
+    "domAnchored": [
+      {
+        "selector": "#p",
+        "text": "x"
+      }
+    ]
+  }
+}

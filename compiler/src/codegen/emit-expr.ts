@@ -43,6 +43,7 @@ import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExpr
 import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.ts";
 import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts";
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
+import { ARRAY_MUTATING_METHODS } from "../derived-mutation-ops.ts";
 import { CGError } from "./errors.ts";
 import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
@@ -58,8 +59,11 @@ import { emitMarkupValueExpr } from "./emit-lift.js";
 // Phase-2 colorless-async — the async-callback collection-method combinator
 // transform (DD colorless-async-boundaries §2 position 1, FORK 1). Dependency-
 // neutral, so no import cycle.
-import { ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, callbackReachesAsync, isAsyncCalleeName, isServerBoundaryCallee } from "./async-combinators.ts";
+import { ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, callbackReachesAsync, isAsyncCalleeName, isServerBoundaryCallee, isSyncCallbackConsumerCall } from "./async-combinators.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
+// s440 — nested-helper async coloring (lexical resolutions marked by the pre-pass).
+import { localCalleeOf, localFnRefOf, localSyncShadowOf, anchorDiagnosticSpan } from "./local-async-fns.ts";
+import type { AsyncRoot } from "./local-async-fns.ts";
 
 // ---------------------------------------------------------------------------
 // §20.6 (F4=A) — production strip toggle for the log() builtin.
@@ -1613,6 +1617,17 @@ function emitMapLit(node: MapLitExpr, ctx: EmitExprContext): string {
 // ---------------------------------------------------------------------------
 
 function emitUnary(node: UnaryExpr, ctx: EmitExprContext): string {
+  // §6.3 / §6.6.18 — `++` / `--` / `delete` on a FIELD or INDEX of a reactive
+  // cell (`@o.n++`, `--@rows[i].qty`, `delete @o.tmp`) writes the cell's value in
+  // place; notify the cell as a field assignment does (emitAssign).
+  if (node.op === "++" || node.op === "--" || node.op === "delete") {
+    const fieldCell = reactiveFieldWriteCell(node.argument, ctx);
+    if (fieldCell !== null) return wrapReactiveNotify(fieldCell, emitUnaryPlain(node, ctx));
+  }
+  return emitUnaryPlain(node, ctx);
+}
+
+function emitUnaryPlain(node: UnaryExpr, ctx: EmitExprContext): string {
   // W14-BB: postfix `@x++` / `@x--` on a reactive var must lower to the
   // canonical setter form (SPEC §6.1.2 + §5.2.3 line 1385). The naive
   // emission `_scrml_reactive_get("x")++` is invalid JS — `++` cannot be
@@ -2103,6 +2118,42 @@ function combinatorIsAsyncName(name: string, ctx: EmitExprContext): boolean {
 }
 
 /**
+ * s440 — WHY an (unshadowed) outer name is async, for diagnostic-code selection: a
+ * server-boundary fn is `server` (E-SERVER-FN-IN-SYNC-CALLBACK); a stdlib export or
+ * a transitively-async local peer is `stdlib` (E-ASYNC-STDLIB-IN-SYNC-CALLBACK).
+ */
+function outerAsyncRootOf(name: string, ctx: EmitExprContext): AsyncRoot {
+  return isServerBoundaryCallee(name, asyncNameFactsOf(ctx))
+    ? { kind: "server", via: name }
+    : { kind: "stdlib", via: name };
+}
+
+/**
+ * s440 — record an async call site the compiler emitted BARE because `await` is not
+ * legal where it sits (or because the consuming call is not one it can await). The
+ * site carries the root of the callee's asyncness so the drain names the right code,
+ * and a span with a REAL line/col (expression spans are a `1:1` placeholder — the
+ * enclosing statement's span stands in). Server mode drains `syncPeerCalls` in
+ * emit-server; client mode drains it in emit-functions (and the structural
+ * `collectNonAwaitableAsyncCalls` backstop catches the same sites where no sink is
+ * threaded).
+ */
+function recordAsyncSyncCallSite(
+  name: string,
+  root: AsyncRoot | null,
+  span: unknown,
+  ctx: EmitExprContext,
+): void {
+  if (!ctx.syncPeerCalls) return;
+  const site = {
+    name,
+    span: anchorDiagnosticSpan(span, ctx.stmtSpan),
+    ...(root ? { rootKind: root.kind, via: root.via } : {}),
+  };
+  ctx.syncPeerCalls.push(site);
+}
+
+/**
  * Issue #26 — does this call node lower to an `await <stdlibAsync>(...)` form?
  * Mirror of `isAwaitedPeerCall` for the stdlib-import surface: SERVER-mode +
  * an awaitable position (`peerAwaitable !== false`) + an unshadowed ident whose
@@ -2271,7 +2322,9 @@ function emitReceiver(node: ExprNode, ctx: EmitExprContext): string {
     isAwaitedStdlibAsyncCall(node, ctx) ||
     isAwaitedClientAsyncCall(node, ctx) ||
     isAwaitedClientServerFnCall(node, ctx) ||
-    isAwaitedCombinatorCall(node, ctx)
+    isAwaitedCombinatorCall(node, ctx) ||
+    // s440 — an awaited NESTED async helper (`inner(x).ok` → `(await inner(x)).ok`).
+    (node.kind === "call" && localCalleeOf(node)?.async === true && ctx.peerAwaitable !== false)
   ) return `(${s})`;
   return receiverNeedsParens(node) ? `(${s})` : s;
 }
@@ -2728,7 +2781,13 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
   }
 
   const lhs = emitExpr(target, ctx);
-  return `${lhs} ${node.op} ${value}`;
+  const assigned = `${lhs} ${node.op} ${value}`;
+  // §6.5.1 / §6.3 — a write to a FIELD or INDEX of a reactive cell in expression
+  // position (`onclick=${@o.x = @o.x + 1}`, `@o.n += 1`, `@rows[i].done = true`)
+  // notifies the cell, as the statement lowering (`reactive-nested-assign` →
+  // `_scrml_reactive_set(k, _scrml_deep_set(…))`) does. See reactiveFieldWriteCell.
+  const fieldCell = reactiveFieldWriteCell(target, ctx);
+  return fieldCell !== null ? wrapReactiveNotify(fieldCell, assigned) : assigned;
 }
 
 function emitTernary(node: TernaryExpr, ctx: EmitExprContext): string {
@@ -3520,7 +3579,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
         if (ctx.mode === "server") {
           _serverAsyncClassifier?.syncCallSink?.push({
             name: `${method}(…) async-callback combinator`,
-            span: node.span,
+            span: anchorDiagnosticSpan(node.span, ctx.stmtSpan),
           });
         }
         return combinatorCall;
@@ -3573,6 +3632,64 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
 
   const callee = emitReceiver(node.callee, ctx);
   const args = node.args.map(a => emitExpr(a, ctx)).join(", ");
+
+  // s440-sync-callback-async-helper — an async function passed BY REFERENCE to a
+  // collection method that invokes it synchronously, consumes the result, and has no
+  // async combinator (`SYNC_CALLBACK_CONSUMER_METHODS`: `.sort` — DD FORK 2 — and
+  // friends): `xs.sort(inner)` compares Promises. The consuming call is not one the
+  // compiler can await, in ANY position, so the site fails closed. (A user HOF is
+  // NOT flagged — it may await what it is given; see the set's doc.) The client /
+  // library drains catch the same shape structurally; this record covers the server
+  // route-handler bodies, which have no drain of their own.
+  if (isSyncCallbackConsumerCall(node)) {
+    for (const a of node.args) {
+      if (a.kind !== "ident") continue;
+      const local = localFnRefOf(a);
+      if (local) {
+        if (local.async) recordAsyncSyncCallSite(local.name, local.root, a.span, ctx);
+        continue;
+      }
+      // s441 (FP2) — the binding in scope is a SYNC nested fn that merely shares
+      // an async name (`function verifyPassword(a, b) { return a - b }`).
+      if (localSyncShadowOf(a)) continue;
+      const nm = (a as IdentExpr).name;
+      if (combinatorIsAsyncName(nm, ctx)) recordAsyncSyncCallSite(nm, outerAsyncRootOf(nm, ctx), a.span, ctx);
+    }
+  }
+
+  // s440-sync-callback-async-helper — a call to a NESTED helper function. The
+  // file-scope async sets (`clientAsyncFnNames`, `serverFnNames`, the stdlib
+  // classifier) cannot see a function declared inside another; the pre-pass
+  // (`local-async-fns.ts`, run by every emitter before a body is emitted) resolved
+  // this callee lexically and recorded whether the compiler emits it `async`.
+  //   - async, awaitable position     → `await inner(…)` (§13.2: every async call site)
+  //   - async, NON-awaitable position → bare + RECORD → fail closed, with the code the
+  //     helper's root names (a peer server fn → E-SERVER-FN-IN-SYNC-CALLBACK; stdlib
+  //     / `?{}` → E-ASYNC-STDLIB-IN-SYNC-CALLBACK). Before s440 this emitted
+  //     `xs.some(x => inner(x))` bare with no diagnostic: a Promise per element,
+  //     always truthy — `.some` true for EVERY input.
+  // A call resolving to a SYNC nested function carries NO mark (fix round, F1) and
+  // falls through to the name-based branches below: if its name is also an async
+  // outer name it is awaited / failed closed as that name would be. Never demoted
+  // to a plain call — a wrong shadow decision there shipped an unawaited
+  // `verifyPassword` (every password accepted) in the first draft.
+  const _localCallee = localCalleeOf(node);
+  if (_localCallee && _localCallee.async) {
+    if (ctx.peerAwaitable === false) {
+      recordAsyncSyncCallSite(_localCallee.name, _localCallee.root, node.span, ctx);
+      return `${callee}(${args})`;
+    }
+    return `await ${callee}(${args})`;
+  }
+  // s441 (g-sync-local-with-async-name-treated-async) — the callee CERTAINLY
+  // resolves to a SYNC nested function that shares an async outer name. Where
+  // `await` is illegal (a sync callback, a `.sort` comparator) the call is a plain
+  // sync call — nothing to fail closed on. In an awaitable position it keeps the
+  // name-based treatment below (an `await` of a sync value is the same value), so
+  // this mark can never remove an await.
+  if (ctx.peerAwaitable === false && localSyncShadowOf(node)) {
+    return `${callee}(${args})`;
+  }
 
   // §20.5 (S265, i29e) — `session` server-builtin method calls. Inside a
   // server-escalated fn body `session.set(key, value)` / `session.get(key)` /
@@ -3677,7 +3794,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     // (`isAwaitedPeerCall` mirrors this exact condition + `peerAwaitable !==
     // false` so emitReceiver can wrap an await form used as a receiver.)
     if (ctx.peerAwaitable === false) {
-      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: node.span });
+      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
       return `${callee}(${args})`;
     }
     return `await ${callee}(${args})`;
@@ -3694,7 +3811,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   if (isDispatchPeerCall(node, ctx)) {
     if (ctx.peerAwaitable === false) {
       const _objName = ((node.callee as MemberExpr | IndexExpr).object as { name?: string }).name;
-      if (ctx.syncPeerCalls && typeof _objName === "string") ctx.syncPeerCalls.push({ name: _objName, span: node.span });
+      if (ctx.syncPeerCalls && typeof _objName === "string") ctx.syncPeerCalls.push({ name: _objName, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
       return `${callee}(${args})`;
     }
     return `await ${callee}(${args})`;
@@ -3734,7 +3851,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
     !(ctx.declaredNames != null && ctx.declaredNames.has(node.callee.name))
   ) {
     if (ctx.peerAwaitable === false) {
-      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: node.span });
+      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
       return `${callee}(${args})`;
     }
     return `await ${callee}(${args})`;
@@ -3766,7 +3883,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // drives the fail-closed diagnostic rather than shipping a silent leak.
   if (isClientServerFnCall(node, ctx)) {
     if (ctx.peerAwaitable === false) {
-      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name as string, span: node.span });
+      if (ctx.syncPeerCalls) ctx.syncPeerCalls.push({ name: node.callee.name as string, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
       return `${callee}(${args})`;
     }
     return `await ${callee}(${args})`;
@@ -3839,7 +3956,7 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       // level — the artifact IS written on a fatal CG error. See :1281 and
       // `g-cli-emits-artifacts-on-failed-compile`.
       if (ctx.mode === "server") {
-        _serverAsyncClassifier?.syncCallSink?.push({ name: node.callee.name, span: node.span });
+        _serverAsyncClassifier?.syncCallSink?.push({ name: node.callee.name, span: anchorDiagnosticSpan(node.span, ctx.stmtSpan) });
       }
       return `${callee}(${args})`;
     }
@@ -4017,7 +4134,115 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   }
 
   const call = node.optional ? "?.(" : "(";
-  return `${callee}${call}${args})`;
+  const plainCall = `${callee}${call}${args})`;
+
+  // §6.5.1 — an EXPRESSION-position mutating array method on a reactive cell
+  // (`onclick=${@items.push(v)}`, `const n = @items.push(v)`, a ternary / `&&`
+  // arm, an arrow body) SHALL notify the cell, exactly as the STATEMENT lowering
+  // (`case "reactive-array-mutation"` in emit-logic.ts) does: mutate in place,
+  // then `_scrml_reactive_set(k, _scrml_reactive_get(k))` so COARSE subscribers
+  // (`_scrml_reactive_subscribe` — `when @items changes`, §6.7.4) fire. The
+  // in-place mutation alone reaches only the fine-grained Proxy trap effects.
+  // The call's own value is preserved (push/unshift → new length, pop/shift →
+  // the removed item, splice → the removed array, sort/reverse/fill/copyWithin →
+  // the array): the call is evaluated as the argument of an arrow IIFE — in the
+  // ENCLOSING scope, so an `await` in an argument keeps its meaning — which
+  // notifies once and returns it. A statement-position `@arr.push(x)` never
+  // reaches here (ast-builder lowers it to a `reactive-array-mutation` node whose
+  // args alone route through emitExpr), so there is no double notify.
+  const mutatedCell = reactiveArrayMutationCell(node, ctx);
+  return mutatedCell !== null ? wrapReactiveNotify(mutatedCell, plainCall) : plainCall;
+}
+
+/**
+ * Notify reactive cell `bare` once AFTER `expr` (an in-place write to its value)
+ * has run, yielding `expr`'s own value:
+ *
+ *   ((_scrml_m) => (_scrml_reactive_set(k, _scrml_reactive_get(k)), _scrml_m))(<expr>)
+ *
+ * `expr` is the IIFE's argument, so it is evaluated in the ENCLOSING scope (an
+ * `await` inside it keeps its meaning) and exactly once. The in-place write has
+ * already reached the Proxy's fine-grained effects; this set fans out to the
+ * COARSE subscribers (`_scrml_reactive_subscribe` — `when @cell changes`, §6.7.4).
+ * The string pipeline builds the same shape (expression-parser.ts
+ * wrapReactiveNotifyNode).
+ */
+function wrapReactiveNotify(bare: string, expr: string): string {
+  const key = JSON.stringify(bare);
+  return `((_scrml_m) => (_scrml_reactive_set(${key}, _scrml_reactive_get(${key})), _scrml_m))(${expr})`;
+}
+
+/**
+ * §6.3 / §6.6.18 — when `target` (an assignment / update / `delete` operand) is a
+ * FIELD or INDEX path into a plain mutable reactive cell — `@o.x`, `@o.a.b`,
+ * `@rows[i]`, `@rows[i].done` — on the CLIENT, return the cell's bare name;
+ * otherwise null. A bare `@x` target is NOT matched (it lowers to
+ * `_scrml_reactive_set` already), nor is a path whose root is not an `@` cell —
+ * notably a loop alias (`for (const t of @ts) t.done = true`, §6.5.7: mutating
+ * an element obtained from the array does not notify). Optional links (`?.`) are
+ * not assignable and are refused. Same exclusions as the array-method case
+ * (server, derived, `@session`, engine / map / set cells), plus a synthesized
+ * validity-surface key (`@form.submitted`), which emitMember lowers to its own
+ * dotted cell.
+ */
+function reactiveFieldWriteCell(target: ExprNode, ctx: EmitExprContext): string | null {
+  if (ctx.mode !== "client") return null;
+  if (target.kind !== "member" && target.kind !== "index") return null;
+  if (target.kind === "member" && SYNTH_PROPERTY_NAMES.has((target as MemberExpr).property as any)) {
+    const dotted = synthDottedKey(target as MemberExpr);
+    if (dotted !== null && ctx.synthCellKeys?.has(dotted)) return null;
+  }
+  let cursor: ExprNode = target;
+  while (cursor.kind === "member" || cursor.kind === "index") {
+    if ((cursor as MemberExpr | IndexExpr).optional) return null;
+    cursor = (cursor as MemberExpr | IndexExpr).object;
+  }
+  return plainReactiveCellName(cursor, ctx);
+}
+
+/**
+ * The bare name of `node` when it is an `@<cell>` read of a plain mutable
+ * reactive cell on the client; null for anything else (a non-`@` ident, a
+ * derived cell, the ambient `@session` projection, an engine cell, a
+ * value-native map / set cell).
+ */
+function plainReactiveCellName(node: ExprNode, ctx: EmitExprContext): string | null {
+  if (node.kind !== "ident") return null;
+  const name = (node as IdentExpr).name;
+  if (typeof name !== "string" || !name.startsWith("@")) return null;
+  const bare = name.slice(1);
+  if (bare.length === 0) return null;
+  if (ctx.derivedNames && ctx.derivedNames.has(bare)) return null;
+  if (bare === "session" && _sessionProjectionActive) return null;
+  if (ctx.engineVarNames && ctx.engineVarNames.has(bare)) return null;
+  if (mapCellBareName(node, ctx) !== null || setCellBareName(node, ctx) !== null) return null;
+  return bare;
+}
+
+/**
+ * §6.5.1 — when `node` is `@<cell>.<method>(…)` with `<method>` one of the
+ * ARRAY_MUTATING_METHODS and `@<cell>` a plain mutable reactive cell read on the
+ * CLIENT, return the cell's bare name (the key `emitIdent` reads it by);
+ * otherwise null.
+ *
+ * Deliberately NARROW, mirroring the statement lowering's receiver shape (a
+ * single `@name` segment): a deeper receiver (`@obj.list.push(v)`,
+ * `@rows[0].tags.push(v)`) is NOT a write to the cell (§6.5.6 — no implicit deep
+ * reactivity) and the statement form does not notify it either; a local alias
+ * (`const a = @items; a.push(v)`) is an ordinary JS value. Excluded receivers:
+ * server mode (`_scrml_body[...]` — no reactive store), a derived cell
+ * (read-only, E-DERIVED-VALUE-MUTATE), the ambient `@session` projection, an
+ * engine cell (a variant string), a value-native map/set cell (its methods are
+ * lowered to `_scrml_map_*` above), and an optional call/member (`?.`).
+ */
+function reactiveArrayMutationCell(node: CallExpr, ctx: EmitExprContext): string | null {
+  if (ctx.mode !== "client" || node.optional) return null;
+  const callee = node.callee;
+  if (callee.kind !== "member") return null;
+  const member = callee as MemberExpr;
+  if (member.optional || typeof member.property !== "string") return null;
+  if (!ARRAY_MUTATING_METHODS.has(member.property)) return null;
+  return plainReactiveCellName(member.object, ctx);
 }
 
 function emitNew(node: NewExpr, ctx: EmitExprContext): string {
