@@ -1,0 +1,9 @@
+# progress — s447-spec-validity-surface (append-only)
+
+- start: worktree base was bca39b61a; origin/main had advanced to 310eee4c4 (2 unrelated commits) → `git merge --ff-only origin/main` on a clean tree so merge-base == origin/main. BRIEF archived.
+- 78aaaf2e8: §55 header banner, §55.2, §55.5 (Edge A struck) + new §55.5.1 / §55.5.2 / §55.5.3, §55.6, §55.7 (submitted form-scoped; persist/channel bundle), §55.8, §55.13, §55.14.
+- c6a3c2e6a: new §55.17 (S442 (2)/(3) + G2 gate + formnovalidate/submitter + scope + I-FORM-SUBMIT-GATED / data-scrml-gated + formFor relation + example); §55.15 tables; §34 rows E-VALIDATOR-DEAD / E-VALIDITY-NO-SURFACE rewritten, E-VALIDITY-RESERVED-NAME + I-FORM-SUBMIT-GATED added; §6.11 stub rewritten; §53.6.2; §39.5 table; §41.14.3; §6.14.2 r3; §6.8.2 xref; §38.4.
+  post-commit hook: ~179 browser/sample failures (navigate-wave1c, g-if-attr-synth-cell-toggle sample loads) — env (worktree lacks compiled samples/dist), SPEC-only change; to verify vs base.
+- 01f8dda17: §66 minimal (§66.5.5 O25 banner → RULED pointer; §66.22 O25 row; §66 map-table row; §66.2.3 reserved names sentence).
+- next commit: known-gaps (resolve ruling-owed gap; NEW §S447 HIGH bootstrap gap; D7 entry `g-top-level-scalar-validators-dead` UPDATED with S447 expectation instead of a duplicate — F2 re-confirmed on 01f8dda17); PRIMER §8 paragraph; SPEC-INDEX / FACTS / master-list regen; §55.15 rows marked Nominal (s34-census --check-new PASS); unit suite 21269 pass / 0 fail.
+- rebased onto origin/main 31c42fbf0 (#1215); known-gaps conflict = generated count block only (took main + regen); gap-id comm: 0 lost (1501). S447 gate-calls ruling applied: §55.17.2/.3/.4/.5/.7, §55.5.2, §41.14.3 (default button no disabled=), §34 E-VALIDATOR-DEAD + I-FORM-SUBMIT-GATED rows, §55.15 row, §55 banner, §66.5.5 pointer sentence; PRIMER + HIGH gap text. unit/m2/m3/m4 all 0 fail.
