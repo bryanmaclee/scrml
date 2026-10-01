@@ -25,7 +25,7 @@ import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicate
 import { resolveDbDriver } from "./db-driver.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
-import { sqliteFileHandle, ownedDbFilesFor, SQLITE_FILE_HELPER_IMPORT, sqliteFileHelperLines } from "./sqlite-file-target.ts";
+import { sqliteFileHandle, ownedDbFilesFor, noteSqliteHandle, SQLITE_FILE_HELPER_IMPORT, sqliteFileHelperLines } from "./sqlite-file-target.ts";
 import { fileDefaultDbValue } from "../db-ownership.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
@@ -6924,6 +6924,7 @@ export function generateServerJs(
         : null;
       if (sqliteFile !== null) {
         sqliteFileProjectRoot = sqliteFile.projectRoot;
+        noteSqliteHandle(fileAST, sqliteFile.record, "server");
         declLines.push(`const ${ident} = ${sqliteFile.expr};`);
         if (sqliteFile.owns) sqliteConfiguredIdents.push(ident);
         continue;

@@ -40,7 +40,7 @@ import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-server.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
 // s445 — THE SQLite-file handle emission, shared with emit-server.ts.
-import { sqliteFileHandle, ownedDbFilesFor, SQLITE_FILE_HELPER_IMPORT, sqliteFileHelperLines } from "./sqlite-file-target.ts";
+import { sqliteFileHandle, ownedDbFilesFor, noteSqliteHandle, SQLITE_FILE_HELPER_IMPORT, sqliteFileHelperLines } from "./sqlite-file-target.ts";
 import { asyncCombinatorHelperBlock, ASYNC_COMBINATOR_METHOD_ORDER } from "./async-combinators.ts";
 import { emitExprField } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
@@ -181,6 +181,7 @@ function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigu
       : null;
     if (sqliteFile !== null) {
       sqliteFileProjectRoot = sqliteFile.projectRoot;
+      noteSqliteHandle(fileAST, sqliteFile.record, "tool");
       lines.push(`const ${ident} = ${sqliteFile.expr};`);
       if (sqliteFile.owns) sqliteConfiguredIdents.push(ident);
       continue;

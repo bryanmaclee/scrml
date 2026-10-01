@@ -194,6 +194,17 @@ describe("§1 one resolver: the declaring file's directory, never the CWD", () =
       expr: '_scrml_sqlite_referenced("data/app.db", "../../data/app.db", "pages/admin/panel.scrml")',
       owns: false,
       projectRoot: base.split(sep).join("/"),
+      // s447 — what `scrml build` learns about the handle (report / warnings / health check).
+      record: {
+        dbPath: "data/app.db",
+        recordedAbsolute: false,
+        absPath: resolve("/proj/src/data/app.db"),
+        owns: false,
+        declaredAs: "../../data/app.db",
+        declaredIn: src,
+        projectRoot: base.split(sep).join("/"),
+        projectRootFrom: "build",
+      },
     });
     // Owned (this file declares the schema) → opens at load and may create.
     const owned = new Set([resolveDbFilePath(classifyDbTarget("../../data/app.db"), src)]);

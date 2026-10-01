@@ -362,7 +362,9 @@ describe("§K SQLite path normalization — sqlite: prefix added when missing", 
     expect(serverJs).toContain('const _scrml_project_root = "/test";');
     expect(serverJs).toContain('handle = new SQL({ adapter: "sqlite", filename, create: false, readwrite: true });');
     expect(serverJs).toContain("scrml: database file not found: ${filename}");
-    expect(serverJs).toContain("const dataDir = process.env.SCRML_DATA_DIR;");
+    expect(serverJs).toContain("const raw = process.env.SCRML_DATA_DIR;");
+    // s447 R4-1 — an owning handle refuses to create outside SCRML_DATA_DIR.
+    expect(serverJs).toContain("if (dataDir !== null && !_scrml_sqlite_inside(filename, dataDir)) {");
   });
 
   test("a program that declares the table (its own CREATE TABLE) OWNS the db → create allowed", () => {

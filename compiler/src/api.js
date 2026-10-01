@@ -4076,6 +4076,12 @@ function _compileScrmlImpl(options = {}) {
     // wrote. `scrml dev` mounts exactly these; any other `.server.js` under the
     // output dir is a leftover of an earlier compile and is not imported.
     serverModules: [...writtenServerModules],
+    // s447-dev-db-r5 (§47.14) — every SQLite file handle codegen emitted, as noted by
+    // emit-server / emit-tool (`codegen/sqlite-file-target.ts noteSqliteHandle`):
+    // recorded path, ownership, declaring file, project-root provenance, and kind
+    // ("server" | "tool"). `scrml build` reports them, warns on paths the data root
+    // cannot move, and bakes the referencing ones into the server's startup check.
+    sqliteDatabases: (metaFiles ?? []).flatMap((f) => (f && Array.isArray(f._sqliteFileHandles) ? f._sqliteFileHandles : [])),
     // SPEC §47.13 — dist-relative POSIX paths the static servers may serve (the
     // browser artifacts + their import closure). `generateServerEntry` bakes it
     // into `_server.js`; `scrml dev` reads the `.scrml-client-assets.json` copy.

@@ -73,10 +73,28 @@ export function sqliteFileHelperLines(projectRoot: string): string[] {
     "// the database's schema (its own CREATE TABLE or a <schema>) may create it, and says so;",
     "// every other handle opens on first use and never creates — a missing file is an error.",
     `const _scrml_project_root = ${JSON.stringify(projectRoot)};`,
+    "// SCRML_DATA_DIR as an absolute, normalized directory, or null when it is not set.",
+    "// A relative SCRML_DATA_DIR resolves against the server's working directory.",
+    "function _scrml_sqlite_data_dir() {",
+    "  const raw = process.env.SCRML_DATA_DIR;",
+    "  if (!raw) return null;",
+    "  const joined = /^(?:\\/|[A-Za-z]:[\\\\/])/.test(raw) ? raw : process.cwd() + \"/\" + raw;",
+    "  const parts = [];",
+    "  for (const part of joined.split(/[\\\\/]+/)) {",
+    "    if (part === \"\" || part === \".\") continue;",
+    "    if (part === \"..\") parts.pop(); else parts.push(part);",
+    "  }",
+    "  return (/^[A-Za-z]:/.test(joined) ? \"\" : \"/\") + parts.join(\"/\");",
+    "}",
+    "// True when the absolute path `filename` lies inside the absolute directory `dir`.",
+    "function _scrml_sqlite_inside(filename, dir) {",
+    "  const f = filename.replace(/\\\\/g, \"/\");",
+    "  return f === dir || f.startsWith(dir.endsWith(\"/\") ? dir : dir + \"/\");",
+    "}",
     "function _scrml_sqlite_path(dbPath) {",
     "  if (/^(?:\\/|[A-Za-z]:[\\\\/])/.test(dbPath)) return dbPath; // outside the project root: absolute",
-    "  const dataDir = process.env.SCRML_DATA_DIR;",
-    "  if (dataDir) return dataDir.replace(/[\\\\/]+$/, \"\") + \"/\" + dbPath;",
+    "  const dataDir = _scrml_sqlite_data_dir();",
+    "  if (dataDir !== null) return (dataDir === \"/\" ? \"\" : dataDir) + \"/\" + dbPath;",
     "  if (!_scrml_db_file_exists(_scrml_project_root)) {",
     "    throw new Error(",
     "      `scrml: cannot locate database \"${dbPath}\": SCRML_DATA_DIR is not set and the project ` +",
@@ -89,10 +107,31 @@ export function sqliteFileHelperLines(projectRoot: string): string[] {
     "function _scrml_sqlite_owned(dbPath, declaredAs, declaredIn) {",
     "  const filename = _scrml_sqlite_path(dbPath);",
     "  if (!_scrml_db_file_exists(filename)) {",
+    "    // With SCRML_DATA_DIR set, databases belong under it (the deploy adapters point it at",
+    "    // a persistent volume). A path recorded absolute does not move with it, so creating",
+    "    // the file there would put it outside the volume: refuse instead (§47.14).",
+    "    const dataDir = _scrml_sqlite_data_dir();",
+    "    if (dataDir !== null && !_scrml_sqlite_inside(filename, dataDir)) {",
+    "      throw new Error(",
+    "        `scrml: refusing to create database ${filename}: SCRML_DATA_DIR is set (${dataDir}) but ` +",
+    "        `this path is not inside it. \"${declaredAs}\" in ${declaredIn} is outside the project root ` +",
+    "        `(or written absolute), so the build recorded it as an absolute path, and SCRML_DATA_DIR ` +",
+    "        `does not move absolute paths. Created here, the database would live outside the data ` +",
+    "        `volume and be lost on redeploy. Fix: move the database inside the project root so it ` +",
+    "        `resolves under SCRML_DATA_DIR, declare it as an absolute path inside SCRML_DATA_DIR, ` +",
+    "        `or create ${filename} yourself if that location is persistent.`,",
+    "      );",
+    "    }",
     "    _scrml_db_mkdir(filename.replace(/[\\\\/][^\\\\/]*$/, \"\") || \"/\", { recursive: true });",
     "    console.error(`scrml: created new database ${filename} (declared as \"${declaredAs}\" in ${declaredIn})`);",
     "  }",
     '  return { adapter: "sqlite", filename, create: true, readwrite: true };',
+    "}",
+    "// For a missing referenced database: say why SCRML_DATA_DIR did not apply to an absolute path.",
+    "function _scrml_sqlite_absolute_note(dbPath) {",
+    "  const dataDir = _scrml_sqlite_data_dir();",
+    "  if (dataDir === null || !/^(?:\\/|[A-Za-z]:[\\\\/])/.test(dbPath) || _scrml_sqlite_inside(dbPath, dataDir)) return \"\";",
+    "  return ` (SCRML_DATA_DIR=${dataDir} does not apply: the path is outside the project root, so it was recorded absolute.)`;",
     "}",
     "function _scrml_sqlite_referenced(dbPath, declaredAs, declaredIn) {",
     "  let handle = null;",
@@ -105,7 +144,7 @@ export function sqliteFileHelperLines(projectRoot: string): string[] {
     "        `scrml: database file not found: ${filename} — declared as \"${declaredAs}\" in ` +",
     "        `${declaredIn}, which only uses it (it declares no CREATE TABLE or <schema> for it), ` +",
     "        `so it never creates it: create the file, run the program that declares its schema ` +",
-    "        `first, or correct the path.`,",
+    "        `first, or correct the path.` + _scrml_sqlite_absolute_note(dbPath),",
     "      );",
     "    }",
     '    handle = new SQL({ adapter: "sqlite", filename, create: false, readwrite: true });',
@@ -139,10 +178,23 @@ export function sqliteFileHelperLines(projectRoot: string): string[] {
  * record a different root than inside a larger build.
  */
 export function projectRootFor(declaringSourceFile: string, outputBaseDir: string | null | undefined): string {
+  return projectRootInfo(declaringSourceFile, outputBaseDir).root;
+}
+
+/**
+ * Where the project root came from: `"manifest"` (a `scrml.toml` or a `.git`
+ * checkout — a property of the file) or `"build"` (the build root, or the file's own
+ * directory — a property of which files were compiled together, so the recorded
+ * path can change with the build's composition; `scrml build` warns about it).
+ */
+export function projectRootInfo(
+  declaringSourceFile: string,
+  outputBaseDir: string | null | undefined,
+): { root: string; from: "manifest" | "build" } {
   const found = findManifest(declaringSourceFile);
-  if (found && typeof found.projectRoot === "string") return _pathResolve(found.projectRoot);
-  if (outputBaseDir) return _pathResolve(outputBaseDir);
-  return _pathDirname(_pathResolve(declaringSourceFile));
+  if (found && typeof found.projectRoot === "string") return { root: _pathResolve(found.projectRoot), from: "manifest" };
+  if (outputBaseDir) return { root: _pathResolve(outputBaseDir), from: "build" };
+  return { root: _pathDirname(_pathResolve(declaringSourceFile)), from: "build" };
 }
 
 /**
@@ -186,6 +238,31 @@ export interface SqliteFileHandle {
   owns: boolean;
   /** The project root recorded at build (emitted once per module). */
   projectRoot: string;
+  /** What the build learns about this database (`scrml build`'s report and checks). */
+  record: SqliteDbRecord;
+}
+
+/**
+ * One SQLite file handle as `scrml build` sees it. Emitters push these onto the file's
+ * AST (`_sqliteFileHandles`); `compileScrml` returns them as `sqliteDatabases`.
+ */
+export interface SqliteDbRecord {
+  /** The path recorded in the module: project-root-relative POSIX, or absolute. */
+  dbPath: string;
+  /** True when `dbPath` is absolute (outside the project root, or authored absolute). */
+  recordedAbsolute: boolean;
+  /** The file the compile-time schema read opened (absolute). */
+  absPath: string;
+  /** True for an owning handle (this file declares the schema). */
+  owns: boolean;
+  /** The `db=` / `<db src=>` value as written. */
+  declaredAs: string;
+  /** The declaring `.scrml` file (absolute). */
+  declaredIn: string;
+  /** The recorded project root (POSIX, absolute). */
+  projectRoot: string;
+  /** Where the project root came from (see `projectRootInfo`). */
+  projectRootFrom: "manifest" | "build";
 }
 
 /**
@@ -203,13 +280,43 @@ export function sqliteFileHandle(
   // `sqlite::memory:` is the in-memory database spelled with the prefix, not a file.
   if (cls.sqlitePath === ":memory:") return null;
   const absDb = resolveDbFilePath(cls, declaringSourceFile);
-  const projectRoot = projectRootFor(declaringSourceFile, outputBaseDir);
+  const { root: projectRoot, from: projectRootFrom } = projectRootInfo(declaringSourceFile, outputBaseDir);
   const dbPath = runtimeDbPath(absDb, projectRoot, _pathIsAbsolute(cls.sqlitePath));
   const owns = ownedDbFiles.has(absDb);
   const args = `${JSON.stringify(dbPath)}, ${JSON.stringify(cls.trimmed)}, ${JSON.stringify(declaredInLabel(declaringSourceFile, outputBaseDir))}`;
+  const posixRoot = projectRoot.split(_pathSep).join("/");
   return {
     expr: owns ? `new SQL(_scrml_sqlite_owned(${args}))` : `_scrml_sqlite_referenced(${args})`,
     owns,
-    projectRoot: projectRoot.split(_pathSep).join("/"),
+    projectRoot: posixRoot,
+    record: {
+      dbPath,
+      recordedAbsolute: /^(?:\/|[A-Za-z]:[\\/])/.test(dbPath),
+      absPath: absDb,
+      owns,
+      declaredAs: cls.trimmed,
+      declaredIn: _pathResolve(declaringSourceFile),
+      projectRoot: posixRoot,
+      projectRootFrom,
+    },
   };
+}
+
+/** A `SqliteDbRecord` plus the kind of module that opens it. */
+export interface SqliteDbHandleNote extends SqliteDbRecord {
+  /** `"server"` — a `.server.js` (part of a built server); `"tool"` — a `kind="tool"` program. */
+  kind: "server" | "tool";
+}
+
+/**
+ * Note a SQLite file handle on the file's AST (`_sqliteFileHandles`) so `compileScrml`
+ * can report it (`result.sqliteDatabases`). De-duplicated by kind + recorded path +
+ * ownership, so an emitter that runs twice for one file notes each handle once.
+ */
+export function noteSqliteHandle(fileAST: unknown, record: SqliteDbRecord, kind: "server" | "tool"): void {
+  if (!fileAST || typeof fileAST !== "object") return;
+  const holder = fileAST as { _sqliteFileHandles?: SqliteDbHandleNote[] };
+  const list = (holder._sqliteFileHandles ??= []);
+  if (list.some((n) => n.kind === kind && n.dbPath === record.dbPath && n.owns === record.owns)) return;
+  list.push({ ...record, kind });
 }
