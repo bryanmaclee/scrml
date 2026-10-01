@@ -19,7 +19,7 @@
  *   R4-4  `scrml build` lists the databases expected under $SCRML_DATA_DIR.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, setDefaultTimeout } from "bun:test";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, mkdtempSync, cpSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve, dirname, sep } from "path";
@@ -27,6 +27,10 @@ import { fileURLToPath } from "url";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 import { generateServerEntry, sqliteBuildReport } from "../../src/commands/build.js";
+
+// Several tests compile, spawn `scrml build`, or start a real server: under a loaded
+// full-suite run (parallel hooks, other worktrees) the 5 s default is too tight.
+setDefaultTimeout(60_000);
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(testDir, "../../src/cli.js");
