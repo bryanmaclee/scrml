@@ -587,6 +587,13 @@ function emitArmWireFunction(
     };
     const textReads = (text: string): boolean =>
       _readsAny(text.includes("`") ? text : _blankLits(text), armParams);
+    // S446 (S439 #4) — a §5.2.3 statement-list handler (`${f(); @s = note; h()}`)
+    // runs EVERY statement in `handlerBlock.stmts`, but `handlerExprNode` is
+    // the FIRST statement's expression only. Scanning just that left a later
+    // statement's arm-name read unseen: the handler stayed a module-scope
+    // registry entry and threw `ReferenceError: note is not defined` at click.
+    // Scan the parsed statements — the nodes that are actually emitted.
+    if (b.handlerBlock && Array.isArray(b.handlerBlock.stmts) && exprReadsArmName(b.handlerBlock.stmts, null)) return true;
     if (typeof b.handlerExpr === "string" && b.handlerExpr.length > 0) {
       if (b.handlerExprNode) collect(b.handlerExprNode);
       else if (textReads(b.handlerExpr)) return true;
@@ -634,7 +641,8 @@ function emitArmWireFunction(
   // `armLogicFactoryName(id)(_root, ...armParams)` (see its `armCapture`); this
   // function calls it after every arm entry and owns the returned disposer.
   // A binding that reads no arm name is untouched (byte-identical).
-  const exprReadsArmName = (node: unknown, text: unknown): boolean => {
+  // (A hoisted declaration: handlerReadsArmName above also reads statement lists with it.)
+  function exprReadsArmName(node: unknown, text: unknown): boolean {
     if (armParamSet.size === 0) return false;
     let hit = false;
     const collect = (n: any): void => {
@@ -653,7 +661,7 @@ function emitArmWireFunction(
     };
     collect(node);
     return hit || (typeof text === "string" && sourceTextReads(text));
-  };
+  }
   // Source-text read test: string / regex literals blanked (unless a template
   // literal, whose `${…}` IS a read), `@cell` / `@.x` reads blanked (a cell is
   // never an arm name), then an identifier-boundary match (`x.note` is not a read
