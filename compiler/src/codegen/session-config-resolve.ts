@@ -108,8 +108,11 @@ function walkUnitProgramAndPageNodes(nodes: unknown, visit: (n: any) => void): v
 /**
  * How many `<program>` nodes step 2 walks in this unit — top-level AND nested, by the
  * SAME walk `readRawUnitSessionAttr` uses. With 2+, step 2's answer is the LAST
- * declaring `<program>` in document order (g-two-programs-one-file-session-attr-last-wins,
- * a question reserved for `E-PROGRAM-002`), so route-inference Step 8b keeps stamping
+ * declaring `<program>` in document order (g-two-programs-one-file-session-attr-last-wins).
+ * Two TOP-LEVEL programs in one file are `E-PROGRAM-002` (S443; S445: whatever markup
+ * wraps them — program-role.ts) and the build is refused, so the live 2+ case is ONE
+ * top-level program plus nested ones — whose session attributes this walk still reads
+ * (the gap's residual). So route-inference Step 8b keeps stamping
  * the secure §20.5 defaults on such a unit rather than letting it fall through to that
  * last-wins read (S438 review F1). See route-inference.ts Step 8b.
  */

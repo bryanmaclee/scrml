@@ -1,0 +1,12 @@
+{
+  "id": "program-worker-under-div-in-wrapped-app-not-e-program-002-neg",
+  "description": "§4.12 (S445) — a `<div>`-wrapped application `<program auth=\"required\">` holding a named worker `<program>` under another `<div>`: the application program is top-level (no `<program>`/`<page>` ancestor), the worker is nested (it has one). One top-level program → no E-PROGRAM-002; the worker carries no `auth=` → no E-PROGRAM-NESTED-AUTH; the application's `auth=` is honoured, so no error at all.",
+  "language-version": "1.0",
+  "spec": "§4.12, §40.8",
+  "rationale": "§4.12 (S445): top-level = no `<program>` or `<page>` ancestor, whatever markup wraps it; nested = has one. §40.8: only a SECOND top-level program in one file is E-PROGRAM-002.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PROGRAM-002", "E-PROGRAM-NESTED-AUTH", "W-PROGRAM-001"],
+    "notCodePrefixes": ["E-"]
+  }
+}

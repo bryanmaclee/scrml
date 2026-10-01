@@ -303,10 +303,25 @@ describe("r3 F1 — an unrecognized auth= literal on a member page is not a decl
 });
 
 describe("r3 F2 — only the APPLICATION's top-level <program> is inherited", () => {
-  test("a required <program> inside a route file gates its own file only, not the public app's pages", () => {
-    const fx = buildWithDiagnostics("overgate", {
+  // S445 item 1 (ruling:user-voice-scrml.md S445 — "This removes §40.2's 'route file's
+  // own program' sentence"): when an application program exists, a <program> in a
+  // route file is NESTED (implied ancestor, §4.12), so `auth=` on it is
+  // E-PROGRAM-NESTED-AUTH and the build writes nothing. The per-route remedy is
+  // `<page auth="required">` — it gates its own file only, never the public app's pages.
+  test("S445 #1: a required <program> inside a route file is E-PROGRAM-NESTED-AUTH (refused)", () => {
+    const fx = buildWithDiagnostics("overgate-nested", {
       "app.scrml": `<program><p>home-marker</p></program>\n`,
       "pages/admin.scrml": `<program auth="required"><p>admin-marker</p></program>\n`,
+      "pages/about.scrml": `<page>\n<p>about-marker</p>\n</page>\n`,
+    });
+    expect(fx.exitCode).not.toBe(0);
+    expect(fx.out).toContain("E-PROGRAM-NESTED-AUTH");
+  }, 60_000);
+
+  test("a required <page> in a route file gates its own file only, not the public app's pages", () => {
+    const fx = buildWithDiagnostics("overgate", {
+      "app.scrml": `<program><p>home-marker</p></program>\n`,
+      "pages/admin.scrml": `<page auth="required"><p>admin-marker</p></page>\n`,
       "pages/about.scrml": `<page>\n<p>about-marker</p>\n</page>\n`,
       "pages/login.scrml": `<page>\n<p>login-marker</p>\n</page>\n`,
     });
@@ -353,15 +368,27 @@ describe("r3 nit — an unresolvable redirect target is said out loud", () => {
     expect(getProbe(fx, ["/s"])["/s"]).toEqual({ status: 302, location: "/login", marker: null });
   }, 60_000);
 
-  test("an identified application program answers; a route file's own loginRedirect= does not make it ambiguous", () => {
-    const fx = buildWithDiagnostics("root-answers", {
+  test("S445 #1 + #5: a route file's (nested) program's loginRedirect= is E-PROGRAM-NESTED-ATTR, never a competing redirect", () => {
+    // S445 item 1: the route file's `<program>` is nested (implied ancestor); S445 item 5:
+    // `loginRedirect=` is application-level, so on a nested program it fails loudly
+    // instead of being silently ignored.
+    const fx = buildWithDiagnostics("root-answers-nested", {
       "app.scrml": `<program><p>home-marker</p></program>\n`,
-      "pages/admin.scrml": `<program auth="required" loginRedirect="/admin-login"><p>admin-marker</p></program>\n`,
+      "pages/admin.scrml": `<program loginRedirect="/admin-login"><p>admin-marker</p></program>\n`,
+      "pages/s.scrml": `<page auth="required">\n<p>s-marker</p>\n</page>\n`,
+    });
+    expect(fx.exitCode).not.toBe(0);
+    expect(fx.out).toContain("E-PROGRAM-NESTED-ATTR");
+    expect(fx.out).not.toContain("W-AUTH-LOGIN-REDIRECT-AMBIGUOUS");
+  }, 60_000);
+
+  test("an identified application program answers the page scope's redirect", () => {
+    const fx = buildWithDiagnostics("root-answers", {
+      "app.scrml": `<program loginRedirect="/signin"><p>home-marker</p></program>\n`,
       "pages/s.scrml": `<page auth="required">\n<p>s-marker</p>\n</page>\n`,
     });
     expect(fx.out).not.toContain("W-AUTH-LOGIN-REDIRECT-AMBIGUOUS");
-    const res = getProbe(fx, ["/s", "/admin"]);
-    expect(res["/s"]).toEqual({ status: 302, location: "/login", marker: null });
-    expect(res["/admin"].location).toBe("/admin-login");
+    const res = getProbe(fx, ["/s"]);
+    expect(res["/s"]).toEqual({ status: 302, location: "/signin", marker: null });
   }, 60_000);
 });
