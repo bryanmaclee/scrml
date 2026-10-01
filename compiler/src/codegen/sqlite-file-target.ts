@@ -57,7 +57,7 @@ import { findManifest } from "../host-import.js";
 
 /** The import the helpers need, emitted beside `import { SQL } from "bun";`. */
 export const SQLITE_FILE_HELPER_IMPORT =
-  'import { existsSync as _scrml_db_file_exists, mkdirSync as _scrml_db_mkdir } from "node:fs";';
+  'import { existsSync as _scrml_db_file_exists, mkdirSync as _scrml_db_mkdir, realpathSync as _scrml_db_realpath } from "node:fs";';
 
 /**
  * The emitted helpers, as source lines, for a module whose project root (recorded at
@@ -88,10 +88,27 @@ export function sqliteFileHelperLines(projectRoot: string): string[] {
     "  }",
     "  return (/^[A-Za-z]:/.test(joined) ? \"\" : \"/\") + parts.join(\"/\");",
     "}",
-    "// True when the absolute path `filename` lies inside the absolute directory `dir`.",
+    "// The real path of absolute `p` (symlinks resolved). A path that does not exist yet",
+    "// resolves through its nearest existing ancestor. null when even that fails.",
+    "function _scrml_sqlite_real(p) {",
+    "  let head = p.replace(/\\\\/g, \"/\").replace(/\\/+$/, \"\");",
+    "  let tail = \"\";",
+    "  for (;;) {",
+    "    try { return _scrml_db_realpath(head || \"/\").replace(/\\\\/g, \"/\").replace(/\\/+$/, \"\") + tail; } catch { /* not there yet */ }",
+    "    const cut = head.lastIndexOf(\"/\");",
+    "    if (cut < 0 || head === \"\") return null;",
+    "    tail = head.slice(cut) + tail;",
+    "    head = head.slice(0, cut);",
+    "  }",
+    "}",
+    "// True when the absolute path `filename` lies inside the absolute directory `dir`,",
+    "// compared by real path (a symlinked data dir or database counts). Fails closed: a",
+    "// path that cannot be resolved is not inside.",
     "function _scrml_sqlite_inside(filename, dir) {",
-    "  const f = filename.replace(/\\\\/g, \"/\");",
-    "  return f === dir || f.startsWith(dir.endsWith(\"/\") ? dir : dir + \"/\");",
+    "  const f = _scrml_sqlite_real(filename);",
+    "  const d = _scrml_sqlite_real(dir);",
+    "  if (f === null || d === null) return false;",
+    "  return f === d || f.startsWith(d + \"/\");",
     "}",
     "function _scrml_sqlite_path(dbPath) {",
     "  if (/^(?:\\/|[A-Za-z]:[\\\\/])/.test(dbPath)) return dbPath; // outside the project root: absolute",
@@ -119,9 +136,9 @@ export function sqliteFileHelperLines(projectRoot: string): string[] {
     "        `this path is not inside it. \"${declaredAs}\" in ${declaredIn} is outside the project root ` +",
     "        `(or written absolute), so the build recorded it as an absolute path, and SCRML_DATA_DIR ` +",
     "        `does not move absolute paths. Created here, the database would live outside the data ` +",
-    "        `volume and be lost on redeploy. Fix: move the database inside the project root so it ` +",
-    "        `resolves under SCRML_DATA_DIR, declare it as an absolute path inside SCRML_DATA_DIR, ` +",
-    "        `or create ${filename} yourself if that location is persistent.`,",
+    "        `volume and be lost on redeploy. Fix: move the db= path inside the project (so it ` +",
+    "        `resolves under SCRML_DATA_DIR), or set SCRML_DATA_DIR to a directory that contains it, ` +",
+    "        `then rebuild.`,",
     "      );",
     "    }",
     "    _scrml_db_mkdir(filename.replace(/[\\\\/][^\\\\/]*$/, \"\") || \"/\", { recursive: true });",

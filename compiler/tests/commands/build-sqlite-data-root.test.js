@@ -20,7 +20,7 @@
  */
 
 import { describe, test, expect, setDefaultTimeout } from "bun:test";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, mkdtempSync, cpSync, rmSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, mkdtempSync, cpSync, rmSync, symlinkSync, realpathSync } from "fs";
 import { tmpdir } from "os";
 import { join, resolve, dirname, sep } from "path";
 import { fileURLToPath } from "url";
@@ -129,7 +129,10 @@ describe("R4-1 an owning db recorded absolute never gets created outside SCRML_D
     expect(msg).toContain("refusing to create database");
     expect(msg).toContain(outside.split(sep).join("/"));
     expect(msg).toContain(`SCRML_DATA_DIR is set (${data.split(sep).join("/")})`);
-    expect(msg).toContain("move the database inside the project root");
+    // r5b item 4 — the fix is a rebuild, not seeding (the module stops at load).
+    expect(msg).toContain("move the db= path inside the project");
+    expect(msg).toContain("set SCRML_DATA_DIR to a directory that contains it, then rebuild");
+    expect(msg).not.toContain("yourself");
     expect(existsSync(outside)).toBe(false);
     expect(existsSync(dirname(outside))).toBe(false); // not even the directory
   });
@@ -191,6 +194,92 @@ describe("R4-1 an owning db recorded absolute never gets created outside SCRML_D
 });
 
 // ---------------------------------------------------------------------------
+// r5b item 3 — "inside SCRML_DATA_DIR" is decided on real paths
+// ---------------------------------------------------------------------------
+
+describe("r5b-3 the R4-1 containment check resolves symlinks", () => {
+  test("SCRML_DATA_DIR is a SYMLINK to the volume holding the absolute db path: created, not refused", async () => {
+    const vol = realpathSync(mkdtempSync(join(tmpdir(), "s447-realvol-")));
+    const link = join(realpathSync(tmpdir()), `s447-vollink-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    symlinkSync(vol, link);
+    const abs = join(vol, "app.db").split(sep).join("/");
+    const { root } = project("r5b3a", { "app.scrml": OWNING_APP(abs) });
+    compile(root, ["app.scrml"]);
+    await withDataDir(link, () => importFresh(join(copyOf(root), "app.server.js")));
+    expect(existsSync(abs)).toBe(true);
+  });
+
+  test("the db= path goes THROUGH a symlink into SCRML_DATA_DIR: created, not refused", async () => {
+    const vol = realpathSync(mkdtempSync(join(tmpdir(), "s447-realvol2-")));
+    const link = join(realpathSync(tmpdir()), `s447-dblink-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    symlinkSync(vol, link);
+    const viaLink = join(link, "sub", "app.db").split(sep).join("/"); // sub/ does not exist yet
+    const { root } = project("r5b3b", { "app.scrml": OWNING_APP(viaLink) });
+    compile(root, ["app.scrml"]);
+    await withDataDir(vol, () => importFresh(join(copyOf(root), "app.server.js")));
+    expect(existsSync(join(vol, "sub", "app.db"))).toBe(true);
+  });
+
+  test("a symlink pointing OUTSIDE SCRML_DATA_DIR is still refused", async () => {
+    const vol = realpathSync(mkdtempSync(join(tmpdir(), "s447-vol3-")));
+    const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "s447-elsewhere-")));
+    symlinkSync(elsewhere, join(vol, "escape")); // vol/escape -> elsewhere
+    const viaEscape = join(vol, "escape", "app.db").split(sep).join("/");
+    const { root } = project("r5b3c", { "app.scrml": OWNING_APP(viaEscape) });
+    compile(root, ["app.scrml"]);
+    let err = null;
+    try { await withDataDir(vol, () => importFresh(join(copyOf(root), "app.server.js"))); } catch (e) { err = e; }
+    expect(String(err?.message)).toContain("refusing to create database");
+    expect(existsSync(join(elsewhere, "app.db"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// r5b item 1 — two projects in one build
+// ---------------------------------------------------------------------------
+
+describe("r5b-1 a database is a (project root, recorded path) pair", () => {
+  const rec = (projectRoot, owns, declaredIn) => ({
+    kind: "server", dbPath: "src/app.db", recordedAbsolute: false, absPath: projectRoot + "/src/app.db", owns,
+    declaredAs: "./app.db", declaredIn, projectRoot, projectRootFrom: "manifest",
+  });
+
+  test("two roots recording src/app.db stay two databases; the referencing one reaches the health check; SHARED-PATH warns", () => {
+    const r = sqliteBuildReport([
+      rec("/mono/subA", true, "/mono/subA/src/a.scrml"),
+      rec("/mono/subB", false, "/mono/subB/src/b.scrml"),
+    ], undefined);
+    expect(r.databases.map((d) => [d.projectRoot, d.owning])).toEqual([["/mono/subA", true], ["/mono/subB", false]]);
+    expect(r.referencedOnly.map((d) => d.projectRoot)).toEqual(["/mono/subB"]);
+    expect(r.warnings.some((w) => w.startsWith("W-DEPLOY-DB-SHARED-PATH:") && w.includes("/mono/subA") && w.includes("/mono/subB"))).toBe(true);
+    expect(r.lines.some((l) => l.includes("src/app.db  (owning") && l.includes("project /mono/subA"))).toBe(true);
+    expect(r.lines.some((l) => l.includes("src/app.db  (referencing") && l.includes("project /mono/subB"))).toBe(true);
+    // one root: no shared-path warning, no per-project suffix
+    const one = sqliteBuildReport([rec("/p", true, "/p/src/a.scrml"), rec("/p", false, "/p/src/b.scrml")], undefined);
+    expect(one.databases.length).toBe(1);
+    expect(one.warnings).toEqual([]);
+    expect(one.lines.some((l) => l.includes("— project"))).toBe(false);
+  });
+
+  test("end to end: `scrml build mono` bakes subB's referenced db into _server.js", async () => {
+    const mono = mkdtempSync(join(tmpdir(), "s447-mono-"));
+    for (const [sub, file, app] of [["subA", "a.scrml", OWNING_APP("./app.db")], ["subB", "b.scrml", REFERENCING_APP("./app.db")]]) {
+      mkdirSync(join(mono, sub, "src"), { recursive: true });
+      writeFileSync(join(mono, sub, "scrml.toml"), "");
+      writeFileSync(join(mono, sub, "src", file), app);
+    }
+    const out = join(mono, "out");
+    const proc = Bun.spawn(["bun", CLI, "build", mono, "-o", out], { cwd: mono, stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+    expect(await proc.exited).toBe(0);
+    expect(stderr).toContain("W-DEPLOY-DB-SHARED-PATH");
+    const entry = readFileSync(join(out, "_server.js"), "utf8");
+    expect(entry).toContain(`{ path: "src/app.db", root: ${JSON.stringify(realpathSync(join(mono, "subB")).split(sep).join("/"))}`);
+    expect(stdout).toContain("project " + realpathSync(join(mono, "subA")).split(sep).join("/"));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // R4-2 — no project-root anchor
 // ---------------------------------------------------------------------------
 
@@ -246,7 +335,11 @@ describe("R4-3 referenced-only databases: named at startup, /_scrml/health 503 u
       expect(err).toContain(`database file not found: ${join(data, "src", "ref.db")}`);
       expect(err).toContain('declared as "./ref.db" in src/app.scrml');
 
-      mkdirSync(join(data, "src"), { recursive: true });
+      // r5b item 2 — a DIRECTORY at the path is not the database: still 503.
+      mkdirSync(join(data, "src", "ref.db"), { recursive: true });
+      expect((await fetch(`http://localhost:${port}/_scrml/health`)).status).toBe(503);
+      rmSync(join(data, "src", "ref.db"), { recursive: true });
+
       new Database(join(data, "src", "ref.db"), { create: true }).close();
       const ok = await fetch(`http://localhost:${port}/_scrml/health`);
       expect(ok.status).toBe(200);
@@ -291,7 +384,8 @@ describe("R4-4 `scrml build` lists the databases expected under $SCRML_DATA_DIR"
     expect(text).toContain("Databases expected under $SCRML_DATA_DIR");
     expect(text).toContain("a relative SCRML_DATA_DIR resolves against the server's working directory");
     expect(text).toContain("  src/app.db  (owning — created on first run)");
-    expect(text).toContain("  src/ref.db  (referencing — seed it)");
+    // r5b item 6 — a referencing db says the health check is unavailable until seeded.
+    expect(text).toContain("  src/ref.db  (referencing — seed it; /_scrml/health reports unavailable until it is seeded)");
     expect(text).not.toContain("W-DEPLOY-DB-");
     const entry = readFileSync(join(out, "_server.js"), "utf8");
     expect(entry).toContain('{ path: "src/ref.db"');

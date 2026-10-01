@@ -405,7 +405,6 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   lines.push('import { join, relative } from "path";');
   if (Array.isArray(referencedDbs) && referencedDbs.length > 0) {
     // §47.14 — the referenced-database startup + health check (below).
-    lines.push('import { existsSync as _scrml_fs_exists } from "fs";');
     lines.push('import { resolve as _scrml_path_resolve, isAbsolute as _scrml_path_is_absolute } from "path";');
   }
   // MCP V0 Sub-unit D — add scrml:mcp boot import when <program mcp> opted in.
@@ -528,7 +527,10 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
     lines.push("  for (const db of _SCRML_REFERENCED_DBS) {");
     lines.push("    const base = dataDir ? _scrml_path_resolve(dataDir) : db.root;");
     lines.push("    const file = _scrml_path_is_absolute(db.path) ? db.path : _scrml_path_resolve(base, db.path);");
-    lines.push("    if (!_scrml_fs_exists(file)) missing.push({ ...db, file });");
+    lines.push("    // A FILE, not just a path: a directory there passes existsSync but every query fails.");
+    lines.push("    let isFile = false;");
+    lines.push("    try { isFile = statSync(file).isFile(); } catch { /* missing */ }");
+    lines.push("    if (!isFile) missing.push({ ...db, file });");
     lines.push("  }");
     lines.push("  return missing;");
     lines.push("}");
@@ -929,9 +931,14 @@ const DATA_DIR_TARGETS = new Set(["docker", "fly", "render", "railway"]);
  */
 export function sqliteBuildReport(records, target, label = (f) => f) {
   const server = (records ?? []).filter((r) => r && r.kind === "server");
+  // One database = one (project root, recorded path) pair: two projects in one build
+  // that both record `src/app.db` name two different files. An absolute path names
+  // itself whatever the root.
+  const keyOf = (r) => (r.recordedAbsolute === true ? r.dbPath : `${r.projectRoot}\0${r.dbPath}`);
   const byPath = new Map();
   for (const r of server) {
-    let db = byPath.get(r.dbPath);
+    const key = keyOf(r);
+    let db = byPath.get(key);
     if (!db) {
       db = {
         dbPath: r.dbPath,
@@ -942,13 +949,15 @@ export function sqliteBuildReport(records, target, label = (f) => f) {
         projectRoot: r.projectRoot,
         projectRootFrom: r.projectRootFrom,
       };
-      byPath.set(r.dbPath, db);
+      byPath.set(key, db);
     }
     if (r.owns) db.owning = true;
     if (!db.declaredIn.includes(r.declaredIn)) db.declaredIn.push(r.declaredIn);
     if (r.projectRootFrom === "build") db.projectRootFrom = "build";
   }
-  const databases = [...byPath.values()].sort((a, b) => a.dbPath.localeCompare(b.dbPath));
+  const databases = [...byPath.values()].sort(
+    (a, b) => a.dbPath.localeCompare(b.dbPath) || a.projectRoot.localeCompare(b.projectRoot),
+  );
   const referencedOnly = databases.filter((d) => !d.owning);
   const warnings = [];
   const where = (d) => `"${d.declaredAs}" in ${d.declaredIn.map(label).join(", ")}`;
@@ -979,22 +988,43 @@ export function sqliteBuildReport(records, target, label = (f) => f) {
     );
   }
 
+  // Two projects recording the same relative path are two files at compile time and
+  // under their recorded roots, but ONE file under SCRML_DATA_DIR (both resolve to
+  // $SCRML_DATA_DIR/<path>).
+  const relByPath = new Map();
+  for (const d of databases.filter((x) => !x.recordedAbsolute)) {
+    relByPath.set(d.dbPath, [...(relByPath.get(d.dbPath) ?? []), d]);
+  }
+  for (const [dbPath, group] of relByPath) {
+    if (group.length < 2) continue;
+    warnings.push(
+      `W-DEPLOY-DB-SHARED-PATH: ${group.length} projects in this build record the database path ${dbPath} ` +
+      `(${group.map((d) => `${d.projectRoot}: ${where(d)}`).join("; ")}). They are different files at compile ` +
+      `time, but with SCRML_DATA_DIR set they all open $SCRML_DATA_DIR/${dbPath} — one database. Give each ` +
+      `project's database a distinct path, or build the projects separately.`,
+    );
+  }
+
   const lines = [];
   if (databases.length > 0) {
     const roots = [...new Set(databases.map((d) => d.projectRoot))];
+    // With several project roots in one build, say which project each path belongs to.
+    const of = (d) => (roots.length > 1 && !d.recordedAbsolute ? ` — project ${d.projectRoot}` : "");
+    // §47.14 — a built server answers /_scrml/health 503 while a referenced-only db is missing.
+    const unseeded = "referencing — seed it; /_scrml/health reports unavailable until it is seeded";
     lines.push(
       `Databases expected under $SCRML_DATA_DIR (unset: the project root recorded at build, ${roots.join(", ")}; ` +
       `a relative SCRML_DATA_DIR resolves against the server's working directory):`,
     );
     for (const d of databases) {
       if (!d.recordedAbsolute) {
-        lines.push(`  ${d.dbPath}  (${d.owning ? "owning — created on first run" : "referencing — seed it"})`);
+        lines.push(`  ${d.dbPath}  (${d.owning ? "owning — created on first run" : unseeded})${of(d)}`);
       } else {
         lines.push(
           `  ${d.dbPath}  (absolute — NOT under $SCRML_DATA_DIR; ` +
           (d.owning
             ? "owning — created on first run only when SCRML_DATA_DIR is unset or contains it)"
-            : "referencing — seed it at that exact path)"),
+            : "referencing — seed it at that exact path; /_scrml/health reports unavailable until it is seeded)"),
         );
       }
     }
