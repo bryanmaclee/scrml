@@ -45,7 +45,7 @@ ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
              DeclKind, HostCall, SeqFn, BindKind, mkSym, noGrants, replaceGrant, typeDefSym } from "./core.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, ATypeK,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AWhen, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, mkSpan } from "./ast.scrml"
@@ -1768,6 +1768,7 @@ ${
             .Text(text: t) :> noHandles(st)
             .Interp(e: x) :> noHandles(st)
             .DeclNode(d: d) :> noHandles(st)
+            .When(w: w) :> noHandles(st)
         }
     }
 
@@ -2241,6 +2242,7 @@ ${
             .Return(e: e) :> maybeClock(e)
             .If(cond: c, thenB: t, elseB: el) :> exprClock(c) || blockClock(t) || maybeBlockClock(el)
             .Given(name: n, subject: sub, body: b) :> exprClock(sub) || blockClock(b)
+            .WhenStmt(w: w) :> blockClock(w.body)
         }
     }
 
@@ -2333,38 +2335,47 @@ ${
         present: string[],
         host: HostCtx,          // s444: may a host call stand here?
         own: string,            // s444: the child field whose own `renders` this is ("" — none): `@own` is this instance (O54 = (a), RULED S442)
+        inWhen: boolean,        // s446: inside a `when` body (a nested `when` is E-LIFECYCLE-016, §6.7.4)
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inWhen: env.inWhen }
     }
 
     fn withRow(env: Env, row: RowB, name: string, hs: HandleInfo[]) -> Env {
         const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not }
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows.concat([row]),
-                 handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own }
+                 handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inWhen: env.inWhen }
     }
 
     fn withNarrow(env: Env, n: NarrowB) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows.concat([n]), present: env.present, host: env.host, own: env.own }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows.concat([n]), present: env.present, host: env.host, own: env.own, inWhen: env.inWhen }
     }
 
     fn withPresent(env: Env, name: string) -> Env {
         if (name == "") return env
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present.concat([name]), host: env.host, own: env.own }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present.concat([name]), host: env.host, own: env.own, inWhen: env.inWhen }
     }
 
     fn withHost(env: Env, h: HostCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: h, own: env.own }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: h, own: env.own, inWhen: env.inWhen }
     }
 
     fn withOwn(env: Env, name: string) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: name }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: name, inWhen: env.inWhen }
+    }
+
+    // s446: a `when` body — a logic context (§6.7.4 "same rules as `${}`") run
+    // as an effect: a host call may stand in it (as in a handler), and a
+    // `when` inside it is E-LIFECYCLE-016.
+    fn whenBodyEnv(env: Env) -> Env {
+        return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: HostCtx.HostOk, own: env.own, inWhen: true }
     }
 
     // s444 — O54 = (a) (RULED S442: "`@email` inside `email`'s own `renders` …
@@ -4395,7 +4406,309 @@ ${
             .Return(e: e) :> keepEnv(env, resolveMaybeExpr(env, e, st))
             .If(cond: c, thenB: t, elseB: el) :> keepEnv(env, resolveIf(env, c, t, el, st))
             .Given(name: n, subject: sub, body: b) :> keepEnv(env, resolveGiven(env, s, n, sub, b, st))
+            .WhenStmt(w: w) :> keepEnv(env, whenAsStatement(env, w, st))
         }
+    }
+
+    // s446 — a `when` where a statement stands. Inside a `when` body it is
+    // E-LIFECYCLE-016 (§6.7.4: "The compiler SHALL emit E-LIFECYCLE-016 if a
+    // `when` block appears syntactically inside the body of another `when`
+    // block"); in a function or handler body no element scope owns it, and the
+    // bootstrap refuses it rather than guess an owner.
+    fn whenAsStatement(env: Env, w: AWhen, st: AS) -> AS {
+        if (env.inWhen) return addDiag(st, env.file, w.span, "E-LIFECYCLE-016", "a `when` inside another `when`'s body — declare it as its own top-level `when` in the same scope (§6.7.4)")
+        return addDiag(st, env.file, w.span, "E-BOOTSTRAP-UNSUPPORTED", "a `when` inside a function or handler body is not in the bootstrap — write it at the `<program>` body top or in a `${…}` block in markup (§6.7.2: it is owned by an element scope)")
+    }
+
+    // =========================================================================
+    // s446 (U0) — `when <deps> changes { body }` (SPEC §6.7.4), in program
+    // markup: a `<program>` body item, or a `${ when … }` block in the
+    // program's markup (an `if=` element, an `<each>` row). Codes:
+    //   E-LIFECYCLE-007 — a dep is not a declared mutable `@variable` in scope:
+    //     no such name, a locked field, or a derived field ("If a dep-list
+    //     entry names a `const <name>` derived variable … E-LIFECYCLE-007");
+    //   E-LIFECYCLE-006 — the body writes a dep;
+    //   W-LIFECYCLE-010 — an empty body;
+    //   W-LIFECYCLE-006 — the body is exactly one `@v = e`, `e` a pure
+    //     expression of `@variables` (literals and operators over ≥ 1 `@` read).
+    // Refused (E-BOOTSTRAP-UNSUPPORTED): a `when` in a user declaration's
+    // `renders` (which scope owns it — the instance or the render site — is
+    // not settled), and a dep naming a whole instance (`@decl`, `@handle`).
+    // =========================================================================
+    fn resolveWhen(env: Env, w: AWhen, st0: AS) -> AS {
+        let st: AS = st0
+        if (!inProgramCtx(env) || env.own != "") {
+            return addDiag(st, env.file, w.span, "E-BOOTSTRAP-UNSUPPORTED", "a `when` inside a declaration's `renders` is not in the bootstrap — which scope owns it (the instance or the render site) is not settled (§6.7.2 / §66); write it in the program's markup")
+        }
+        let caps: int[] = []
+        for (const d of w.deps) {
+            const r: RDep = resolveWhenDep(env, d, st)
+            st = r.st
+            if (r.cap >= 0) caps = caps.concat([r.cap])
+        }
+        // `reads` is informational (§6.7.4): resolved, so a misspelt name is reported; no semantics.
+        for (const rd of w.reads) { st = resolveExpr(env, rd, not, st).st }
+        if (w.body.stmts.length == 0) {
+            st = addDiag(st, env.file, w.span, "W-LIFECYCLE-010", "this `when` has an empty body — it has no observable effect (§6.7.4)")
+        }
+        st = resolveBlock(whenBodyEnv(env), w.body, st)
+        st = depWrites(env, w.body, caps, st)
+        return derivableWhen(env, w, st)
+    }
+
+    // `cap`: the dep field's write capability id, or -1 (the dep was refused).
+    type RDep:struct = { cap: int, st: AS }
+
+    fn resolveWhenDep(env: Env, d: AExpr, st: AS) -> RDep {
+        const name: string = atName(d)
+        if (name == "") return { cap: -1, st: st }               // the parser reported it
+        const r: RX = resolveExpr(env, d, not, st)
+        if (r.st.diags.length > st.diags.length) {
+            return { cap: -1, st: addDiag(st, env.file, d.span, "E-LIFECYCLE-007", "`@" + name + "` in a `when` dep-list is not a declared `@variable` in scope (§6.7.4)") }
+        }
+        const f: NameFact | not = nameFactIn(r.st, d.nid)
+        if (f is not) return { cap: -1, st: addDiag(st, env.file, d.span, "E-LIFECYCLE-007", "`@" + name + "` in a `when` dep-list is not a declared `@variable` in scope (§6.7.4)") }
+        return depOfFact(env, d, name, f, r.st)
+    }
+
+    // F17: arms return through a constructor, never an object literal.
+    fn depOfFact(env: Env, d: AExpr, name: string, f: NameFact, st: AS) -> RDep {
+        return match f {
+            .NField(decl: ds, inst: i, idx: idx) :> depField(env, d, name, ds, idx, st)
+            .NInst(decl: ds) :> refusedDep(addDiag(st, env.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + "` names a whole instance — a `when` dep-list entry naming one is not in the bootstrap (whether a declaration's value is a \"declared mutable @variable\", §6.7.4, is not settled); list its fields' cells"))
+            .NLocal(sym: s) :> refusedDep(notMutableDep(env, d, name, st))
+            .NStruct(owner: o) :> refusedDep(notMutableDep(env, d, name, st))
+            .NFn(sym: s) :> refusedDep(notMutableDep(env, d, name, st))
+            .NLength :> refusedDep(notMutableDep(env, d, name, st))
+        }
+    }
+
+    fn refusedDep(st: AS) -> RDep { return { cap: -1, st: st } }
+
+    fn notMutableDep(env: Env, d: AExpr, name: string, st: AS) -> AS {
+        return addDiag(st, env.file, d.span, "E-LIFECYCLE-007", "`@" + name + "` in a `when` dep-list is not a declared mutable `@variable` (§6.7.4)")
+    }
+
+    fn depField(env: Env, d: AExpr, name: string, ds: Sym, idx: int, st: AS) -> RDep {
+        const di: DeclInfo | not = declInfoIn(env.g, ds)
+        if (di is not || idx < 0 || idx >= di.fields.length) return { cap: -1, st: st }
+        const fi: FieldInfo = di.fields[idx]
+        const w: Sym | not = fi.wcap
+        if (w is some) return { cap: w.id, st: st }
+        const m: FieldMode = fi.mode
+        const why: string = match m {
+            .Derived :> "a DERIVED cell (its initializer reads cells) — it has no change event of its own; list the `@variables` it is computed from and read `@" + name + "` in the body (§6.7.4 EC-1)"
+            .Locked :> "a LOCKED field (no `let`) — it never changes; declare it `let` to make it a mutable cell"
+            .Let :> "not writable"
+            .Seeded :> "not writable"
+        }
+        return { cap: -1, st: addDiag(st, env.file, d.span, "E-LIFECYCLE-007", "`@" + name + "` in a `when` dep-list is " + why) }
+    }
+
+    fn declInfoIn(g: Globals, s: Sym) -> DeclInfo | not {
+        const ds: DeclSrc | not = findDeclSrc(g, s)
+        if (ds is not) return not
+        return ds.info
+    }
+
+    // E-LIFECYCLE-006: every write the body makes (through its statements'
+    // effect facts — any edit, a reset, a spread, a removal, an element-field
+    // write), at any depth of `if` / `given`, against the deps' capabilities.
+    fn depWrites(env: Env, b: ABlock, caps: int[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const s of b.stmts) { st = stmtDepWrites(env, s, caps, st) }
+        return st
+    }
+
+    fn stmtDepWrites(env: Env, s: AStmt, caps: int[], st: AS) -> AS {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> effectDepWrite(env, e, caps, st)
+            .If(cond: c, thenB: t, elseB: el) :> depWritesElse(env, el, caps, depWrites(env, t, caps, st))
+            .Given(name: n, body: b) :> depWrites(env, b, caps, st)
+            .Local(name: n) :> st
+            .Return(e: e) :> st
+            .WhenStmt(w: w) :> st
+        }
+    }
+
+    fn depWritesElse(env: Env, el: ABlock | not, caps: int[], st: AS) -> AS {
+        if (el is not) return st
+        return depWrites(env, el, caps, st)
+    }
+
+    fn effectDepWrite(env: Env, e: AExpr, caps: int[], st: AS) -> AS {
+        const f: EffectFact | not = effectIn(st, e.nid)
+        if (f is not) return st
+        for (const c of effectCaps(f)) {
+            if (caps.indexOf(c) >= 0) {
+                return addDiag(st, env.file, e.span, "E-LIFECYCLE-006", "this `when` body writes a variable in its own dep-list — the write would re-trigger the effect (§6.7.4); remove it from the dep-list or restructure")
+            }
+        }
+        return st
+    }
+
+    // The effect fact recorded for node `nid` so far (the index is built only
+    // when the binder is done, so this scans).
+    fn effectIn(st: AS, nid: int) -> EffectFact | not {
+        let i: int = 0
+        for (const n of st.facts.effects.nids) {
+            if (n == nid) return st.facts.effects.facts[i]
+            i = i + 1
+        }
+        return not
+    }
+
+    fn effectCaps(f: EffectFact) -> int[] {
+        return match f {
+            .EWrite(w: w) :> [w.cap.id]
+            .ESpread(ws: ws) :> spreadCaps(ws)
+            .EReset(w: w) :> [w.cap.id]
+            .EAssignLocal(sym: s) :> []
+            .EEdits(w: w) :> [w.cap.id]
+            .ERemove(w: w) :> [w.cap.id]
+            .EElemAt(cap: c) :> [c.id]
+        }
+    }
+
+    fn spreadCaps(ws: SpreadWrite[]) -> int[] {
+        let out: int[] = []
+        for (const sw of ws) { out = out.concat([sw.w.cap.id]) }
+        return out
+    }
+
+    // W-LIFECYCLE-006 (§6.7.4): "1. The `when` body's only effect is a single
+    // `@variable` assignment. 2. The right-hand side of that assignment is a
+    // pure expression of `@variables`" — `@v = e` whole (a Replace of a cell),
+    // `e` built from `@` reads, literals and operators only, with ≥ 1 read.
+    fn derivableWhen(env: Env, w: AWhen, st: AS) -> AS {
+        if (w.body.stmts.length != 1) return st
+        const s: AStmt = w.body.stmts[0]
+        const e: AExpr | not = evalExpr(s)
+        if (e is not) return st
+        const tv: AssignParts | not = assignParts(e)
+        if (tv is not) return st
+        if (atName(tv.target) == "") return st
+        const f: EffectFact | not = effectIn(st, e.nid)
+        if (f is not) return st
+        if (!isWholeReplace(f)) return st
+        if (pureCellReads(tv.value) < 1) return st
+        return addDiag(st, env.file, w.span, "W-LIFECYCLE-006", "this `when` body only assigns `@" + atName(tv.target) + "` a pure expression of `@variables` — a derived declaration (`<" + atName(tv.target) + "=(…)/>`) is reactive, runs on mount and cannot fall out of sync (§6.7.4)")
+    }
+
+    type AssignParts:struct = { target: AExpr, value: AExpr }
+
+    fn evalExpr(s: AStmt) -> AExpr | not {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> e
+            .Local(name: n) :> not
+            .Return(e: e) :> not
+            .If(cond: c) :> not
+            .Given(name: n) :> not
+            .WhenStmt(w: w) :> not
+        }
+    }
+
+    fn assignParts(e: AExpr) -> AssignParts | not {
+        const k: AExprK = e.k
+        return match k {
+            .Assign(target: t, value: v) :> mkAssignParts(t, v)
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    fn mkAssignParts(t: AExpr, v: AExpr) -> AssignParts { return { target: t, value: v } }
+
+    fn isWholeReplace(f: EffectFact) -> boolean {
+        return match f {
+            .EWrite(w: w) :> isReplaceEdit(w.edit)
+            .ESpread(ws: ws) :> false
+            .EReset(w: w) :> false
+            .EAssignLocal(sym: s) :> false
+            .EEdits(w: w) :> false
+            .ERemove(w: w) :> false
+            .EElemAt(cap: c) :> false
+        }
+    }
+
+    fn isReplaceEdit(k: EditKind) -> boolean {
+        return match k {
+            .Replace :> true
+            .Append :> false
+            .Prepend :> false
+            .Anywhere :> false
+            .PositionWrite :> false
+            .FieldAt(path: p) :> false
+            .Transition :> false
+            .RemoveEnd :> false
+            .RemoveFront :> false
+            .RemoveAnywhere :> false
+            .ElemAt(index: i) :> false
+        }
+    }
+
+    // The number of `@` reads in `e` when it is a pure expression of them
+    // (`@` reads and their member steps, literals, unary / binary / ternary
+    // operators); -1 when anything else appears (a call, a local, a lambda …).
+    fn pureCellReads(e: AExpr) -> int {
+        const k: AExprK = e.k
+        return match k {
+            .At(name: n) :> 1
+            .Member(obj: o) :> pureMember(o)
+            .Num(raw: r) :> 0
+            .Str(v: s) :> 0
+            .Bool(v: b) :> 0
+            .NotLit :> 0
+            .Variant(name: n) :> 0
+            .Unary(op: o, e: x) :> pureCellReads(x)
+            .Binary(op: o, l: l, r: r) :> pureSum([l, r])
+            .Ternary(test: t, yes: y, no: n) :> pureSum([t, y, n])
+            .Name(name: n) :> -1
+            .AtItem :> -1
+            .Recovered :> -1
+            .Call(callee: c) :> -1
+            .Assign(target: t) :> -1
+            .ArrayLit(elems: es) :> -1
+            .ObjectLit(props: ps) :> -1
+            .Spread(e: x) :> -1
+            .Index(obj: o) :> -1
+            .Lambda(params: ps) :> -1
+        }
+    }
+
+    fn pureMember(o: AExpr) -> int {
+        const n: int = pureCellReads(o)
+        if (n < 1) return -1
+        return n
+    }
+
+    fn pureSum(es: AExpr[]) -> int {
+        let total: int = 0
+        for (const x of es) {
+            const n: int = pureCellReads(x)
+            if (n < 0) return -1
+            total = total + n
+        }
+        return total
     }
 
     // F17: a match arm whose body is an object literal loses its named payload
@@ -4474,6 +4787,7 @@ ${
             .Text(text: t) :> st
             .Interp(e: e) :> resolveExpr(env, e, not, st).st
             .DeclNode(d: d) :> addDiag(st, env.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a declaration inside markup is not in bootstrap slice M2")
+            .When(w: w) :> resolveWhen(env, w, st)
         }
     }
 
@@ -5164,7 +5478,7 @@ ${
     fn declEnv(g: Globals, ds: DeclSrc, inRenders: boolean) -> Env {
         return { g: g, file: ds.file, ctx: CtxK.InDecl(ds.info.sym, ds.isProgram), locals: [], rows: [],
                  handles: handlesOwnedBy(g, ds.info.nid), inRenders: inRenders, narrows: [], present: [],
-                 host: HostCtx.HostNo, own: "" }
+                 host: HostCtx.HostNo, own: "", inWhen: false }
     }
 
     fn phaseB(g: Globals, st0: AS) -> AS {
@@ -5194,7 +5508,7 @@ ${
             if (fs.info.file == g.entry) hs = progHandles
             let host: HostCtx = HostCtx.HostOk
             if (fs.info.pure) host = HostCtx.HostPure
-            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "" }
+            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inWhen: false }
             const fte: TypeEnv = { stubs: g.te.stubs, declNames: g.te.declNames, declSyms: g.te.declSyms, file: fs.info.file }
             for (const p of fs.f.params) {
                 const rs: RSym = mint(st, p.name)
@@ -5535,6 +5849,7 @@ ${
             .Return(e: e) :> ""
             .If(cond: c) :> ""
             .Given(name: n) :> ""
+            .WhenStmt(w: w) :> ""
         }
     }
 
@@ -5546,6 +5861,7 @@ ${
             .Eval(e: e) :> []
             .Local(name: n) :> []
             .Return(e: e) :> []
+            .WhenStmt(w: w) :> []
         }
     }
 
@@ -5593,6 +5909,8 @@ ${
             .Text(text: t) :> []
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
+            // s446: a `when` body is a block like an inline handler's
+            .When(w: w) :> blockRedeclares(file, w.body, [], false)
         }
     }
 
@@ -5929,6 +6247,7 @@ ${
             .Eval(e: e) :> false
             .Local(name: n) :> false
             .Given(name: n) :> false
+            .WhenStmt(w: w) :> false
         }
     }
 
@@ -6038,6 +6357,7 @@ ${
             .Return(e: e) :> aliased(maybeEffects(e), al)
             .If(cond: c, thenB: t, elseB: el) :> aliased(exprEffects(c), al).concat(blockEffects(t, al)).concat(elseEffects(el, al))
             .Given(name: n, subject: sub, body: b) :> aliased(exprEffects(sub), al).concat(blockEffects(b, al.concat([aliasOf(n, sub)])))
+            .WhenStmt(w: w) :> []                // registers an effect; writes nothing when reached (and is refused there)
         }
     }
 
@@ -7445,6 +7765,7 @@ ${
             .Return(e: e) :> keepTEnv(env, typeReturn(env, e, ts))
             .If(cond: c, thenB: tb, elseB: el) :> typeIf(env, c, tb, el, ts)
             .Given(name: n, subject: sub, body: b) :> typeGiven(env, s, sub, b, ts)
+            .WhenStmt(w: w) :> keepTEnv(env, ts)     // refused by the binder (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
         }
     }
 
@@ -7927,7 +8248,17 @@ ${
             .Text(text: x) :> ts
             .Interp(e: x) :> typeInterp(env, x, ts)
             .DeclNode(d: d) :> ts
+            .When(w: w) :> typeWhen(env, w, ts)
         }
+    }
+
+    // s446: a `when`'s deps / reads are typed as reads; its body as a handler
+    // block is (it runs only while its scope is mounted, under the same
+    // narrowing as the markup around it).
+    fn typeWhen(env: TEnv, w: AWhen, ts0: TypeState) -> TypeState {
+        let ts: TypeState = typeExprs(env, w.deps, ts0)
+        ts = typeExprs(env, w.reads, ts)
+        return typeBlock(env, w.body, ts)
     }
 
     fn typeElem(env: TEnv, e: AElem, ts: TypeState) -> TypeState {
@@ -8266,6 +8597,40 @@ ${
                  fnw: env.fnw, rows: env.rows, fret: r }
     }
 
+    // s446: a `when` at FILE level (outside `<program>`) has no element scope
+    // to own it (§6.7.2) — refused, never silently dropped (no pass reaches
+    // file-level markup).
+    fn strayWhens(files: FileAst[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const f of files) {
+            for (const it of f.items) {
+                for (const n of markupOf(it)) {
+                    for (const sp of whenSpans(n)) {
+                        st = addDiag(st, f.path, sp, "E-BOOTSTRAP-UNSUPPORTED", "a `when` outside `<program>` — no element scope owns it (§6.7.2); move it into the program")
+                    }
+                }
+            }
+        }
+        return st
+    }
+
+    fn whenSpans(n: ANode) -> ASpan[] {
+        const k: ANodeK = n.k
+        return match k {
+            .When(w: w) :> [w.span]
+            .Elem(e: e) :> kidWhenSpans(e.kids)
+            .Text(text: t) :> []
+            .Interp(e: x) :> []
+            .DeclNode(d: d) :> []
+        }
+    }
+
+    fn kidWhenSpans(ns: ANode[]) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const n of ns) { out = out.concat(whenSpans(n)) }
+        return out
+    }
+
     // =========================================================================
     // Entry. `files` in LINK ORDER: every file after the files it imports; the
     // entry (the file with `<program>`) last.
@@ -8275,6 +8640,7 @@ ${
         const ra: RGlobals = phaseA(files, entry, st0)
         let st: AS = checkImports(files, ra.g, ra.st)
         st = phaseB(ra.g, st)
+        st = strayWhens(files, st)
         let decls: DeclInfo[] = []
         for (const d of ra.g.decls) { decls = decls.concat([d.info]) }
         let fns: FnInfo[] = []
@@ -8421,6 +8787,7 @@ ${
             .Text(text: x) :> []
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
+            .When(w: w) :> []
         }
     }
 
@@ -8464,6 +8831,7 @@ ${
             .Text(text: x) :> not
             .Interp(e: x) :> not
             .DeclNode(d: d) :> not
+            .When(w: w) :> not
         }
     }
 

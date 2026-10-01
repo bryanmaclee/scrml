@@ -36,7 +36,7 @@
 // =============================================================================
 ${
     import { Token, TokenKind, LexStop, LexRun, lexFrom, lexFromMode } from "./lex.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, ATypeK,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AWhen, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, mkSpan } from "./ast.scrml"
@@ -591,8 +591,130 @@ ${
         }
         if (isWord(tp, "if")) return parseIf(tp)
         if (isWord(tp, "given")) return parseGiven(tp)
+        if (whenAhead(tp)) {
+            const rw: RWhen = parseWhen(tp)
+            return mkS(rw.tp, start, AStmtK.WhenStmt(rw.w))
+        }
         const e: RExpr = parseAssign(tp)
         return mkS(e.tp, start, AStmtK.Eval(e.e))
+    }
+
+    // =========================================================================
+    // s446 (U0) — `when` (SPEC §6.7.4):
+    //   when-stmt ::= 'when' dep-list 'changes' '{' logic-content '}'
+    //   dep-list  ::= '@' identifier | '(' dep-item (',' dep-item)* ')'
+    // plus the optional informational `reads <dep-list>` after `changes`
+    // ("when @price changes reads @qty { … }"). `when` / `changes` / `reads`
+    // are contextual words: `when` starts one only before `@` or before a
+    // parenthesized list followed by `changes` (so a function named `when`
+    // stays a call).
+    // =========================================================================
+    type RWhen:struct = { w: AWhen, tp: TP }
+
+    fn whenAhead(tp: TP) -> boolean {
+        if (!isWord(tp, "when")) return false
+        const nx: PTok = peekAt(tp, 1)
+        if (nx.cls == TC.At) return true
+        if (nx.text != "(" || nx.cls == TC.Str) return false
+        let k: int = 2
+        let depth: int = 1
+        while (depth > 0) {
+            const t: PTok = peekAt(tp, k)
+            if (t.cls == TC.End) return false
+            if (t.cls != TC.Str && t.text == "(") depth = depth + 1
+            if (t.cls != TC.Str && t.text == ")") depth = depth - 1
+            k = k + 1
+        }
+        const after: PTok = peekAt(tp, k)
+        return (after.cls == TC.Ident || after.cls == TC.Keyword) && after.v == "changes"
+    }
+
+    // At `when`.
+    fn parseWhen(tp: TP) -> RWhen {
+        const start: int = cur(tp).start
+        const ds: RExprs = parseDepList(adv(tp))
+        let t: TP = ds.tp
+        if (isWord(t, "changes")) {
+            t = adv(t)
+        } else {
+            t = diagAt(t, "E-PARSE-WHEN", "expected `changes` after the `when` dep-list (§6.7.4: `when @x changes { … }`)", cur(t))
+        }
+        let reads: AExpr[] = []
+        if (isWord(t, "reads")) {
+            const rs: RExprs = parseDepList(adv(t))
+            reads = rs.es
+            t = rs.tp
+        }
+        const body: RBlock = parseBlock(t)
+        const w: AWhen = { nid: body.tp.nid, span: spanFrom(body.tp, start), deps: ds.es, reads: reads, body: body.b }
+        return { w: w, tp: bumpId(body.tp) }
+    }
+
+    // `@x` or `(@a, @b, …)` — at least one entry (§6.7.4: "An empty `dep-list`
+    // is a syntax error").
+    fn parseDepList(tp: TP) -> RExprs {
+        if (!isP(tp, "(")) {
+            const one: RExpr = parseDepItem(tp)
+            return { es: [one.e], tp: one.tp }
+        }
+        let t: TP = adv(tp)
+        if (isP(t, ")")) {
+            t = diagAt(t, "E-PARSE-WHEN", "an empty dep-list `()` is a syntax error — a `when` names at least one `@cell` (§6.7.4)", cur(t))
+            return { es: [], tp: adv(t) }
+        }
+        let es: AExpr[] = []
+        let going = true
+        while (going) {
+            const r: RExpr = parseDepItem(t)
+            es = es.concat([r.e])
+            t = r.tp
+            if (isP(t, ",")) {
+                t = adv(t)
+            } else {
+                going = false
+            }
+        }
+        t = expectP(t, ")")
+        return { es: es, tp: t }
+    }
+
+    // One dep-list entry: `@name` and nothing else (§6.7.4 `dep-item ::= '@' identifier`).
+    fn parseDepItem(tp: TP) -> RExpr {
+        const t: PTok = cur(tp)
+        if (t.cls == TC.At) {
+            const r: RExpr = parseAt(tp)
+            if (isAtName(r.e)) return r
+            const bad: TP = diagAt(r.tp, "E-PARSE-WHEN", "a dep-list entry is `@name` (§6.7.4)", t)
+            return { e: r.e, tp: bad }
+        }
+        const d: TP = diagAt(tp, "E-PARSE-WHEN", "a dep-list entry is `@name` (§6.7.4), found `" + t.text + "`", t)
+        return mkE(adv(d), t.start, AExprK.Recovered)
+    }
+
+    fn isAtName(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .At(name: n) :> true
+            .Name(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: v) :> false
+            .Bool(v: v) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: p) :> false
+        }
     }
 
     fn parseLocal(tp: TP) -> RStmt {
@@ -738,6 +860,13 @@ ${
         if (isWord(t, "type")) return parseTypeDecl(t, start, exported)
         if (isWord(t, "function")) return parseFn(t, start, exported, false)
         if (isWord(t, "fn")) return parseFn(t, start, exported, true)
+        // s446: a `when` at logic-item level (a `<program>` body, a program-level
+        // `${…}`) is a markup-position node — owned by the scope it stands in.
+        if (!exported && whenAhead(t)) {
+            const rw: RWhen = parseWhen(t)
+            const n: ANode = { nid: rw.tp.nid, span: rw.w.span, k: ANodeK.When(rw.w) }
+            return mkItem(bumpId(rw.tp), start, AItemK.MarkupItem(n))
+        }
         const bad: PTok = cur(t)
         const d: TP = diagAt(t, "E-PARSE-ITEM", "expected `import`, `type`, `function` or `fn` in a logic block, found `" + bad.text + "` (statements at logic-block level are not in bootstrap slice M2)", bad)
         return { items: [], tp: skipToLineEnd(d) }
@@ -2087,6 +2216,21 @@ ${
         const start: int = mp.pos
         const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
         let t: TP = expectP(tp, "{")
+        // s446: `${ when … changes { … } }` — a logic block holding a reactive
+        // effect, owned by the nearest enclosing element scope (§6.7.2). One
+        // `when` per block in the bootstrap; anything after it is refused.
+        if (whenAhead(t)) {
+            const rw: RWhen = parseWhen(t)
+            t = rw.tp
+            if (!isP(t, "}")) {
+                t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `${…}` logic block in markup holds exactly one `when` in the bootstrap — give each statement its own block", cur(t))
+                while (!atEnd(t) && !(isP(t, "}") && atEnd(adv(t)))) { t = adv(t) }
+            }
+            t = expectRegionEnd(expectP(t, "}"))
+            const mw: MP = backToMarkup(mp, t)
+            const nw: ANode = { nid: mw.nid, span: mkSpan(start, mw.pos), k: ANodeK.When(rw.w) }
+            return { n: nw, mp: mBump(mw) }
+        }
         const r: RExpr = parseAssign(t)
         t = expectP(r.tp, "}")
         t = expectRegionEnd(t)
@@ -2381,6 +2525,8 @@ ${
             return logicRegionItem(mp, LexStop.Statement)
         }
         if (w.w == "function" || w.w == "fn" || w.w == "type") return logicRegionItem(mp, LexStop.Statement)
+        // s446: `when … changes { … }` at the program body top (§40.8: code; §6.7.11 Example 3)
+        if (w.w == "when") return logicRegionItem(mp, LexStop.Statement)
         if (w.w == "import") return logicRegionItem(mp, LexStop.Line)
         const d: MP = mDiag(mp, "E-PARSE-ITEM", "unexpected text at program level", start, start + 1)
         return { items: [], mp: skipLineComment(d) }

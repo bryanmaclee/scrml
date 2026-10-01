@@ -69,12 +69,22 @@ ${
     export type AStmt:struct = { nid: int, span: ASpan, k: AStmtK }
     export type ABlock:struct = { nid: int, span: ASpan, stmts: AStmt[] }
 
+    // s446 (U0) — `when <deps> changes [reads <reads>] { body }` (SPEC §6.7.4).
+    // `deps` / `reads` are the `@name` entries as written (each an `At`
+    // expression — the grammar admits nothing else); `reads` is informational.
+    export type AWhen:struct = { nid: int, span: ASpan, deps: AExpr[], reads: AExpr[], body: ABlock }
+
     export type AStmtK:enum = {
         Eval(e: AExpr),                                     // an expression statement (incl. an assignment)
         Local(name: string, mutable: boolean, ty: AType | not, init: AExpr), // let / const [: T]
         Return(e: AExpr | not),
         If(cond: AExpr, thenB: ABlock, elseB: ABlock | not),
         Given(name: string, subject: AExpr, body: ABlock),  // given c = @h :> { … }
+        // s446: a `when` written where a STATEMENT stands (a function or
+        // handler body, another `when`'s body). Parsed so analyze can name it
+        // (E-LIFECYCLE-016 inside a `when` body); a `when` item / markup node
+        // is ANodeK.When.
+        WhenStmt(w: AWhen),
     }
 
     // -------------------------------------------------------------------------
@@ -131,6 +141,10 @@ ${
         Text(text: string),        // verbatim (comments removed; whitespace-only runs kept — L13 retired, dpa-045 fu4)
         Interp(e: AExpr),          // ${ expr }
         DeclNode(d: ADecl),        // a declaration where markup may stand (a program body)
+        // s446: a reactive effect where markup may stand — a `<program>` body
+        // item (§40.8: the body top is code) or a `${ when … }` logic block in
+        // markup (§6.7.2: owned by the nearest enclosing element scope).
+        When(w: AWhen),
     }
 
     // -------------------------------------------------------------------------

@@ -10,6 +10,16 @@
 - 2026-10-01 next: DESIGN.md committed before implementation; then Core → walk/measure/check → runtime → print →
   ast/parse → analyze → lower → ingest; tests per layer.
 
+- 2026-10-01 done: Core (View.When / WhenDep / Stmt.Suspend), walk, measure, check C11/C12, print (whenJs /
+  suspendJs), runtime (`when`, `suspend`, Task, Scope.whens = teardown step 1) + slice-m1/when.runtime.test.js
+  (commit 3). Then AST (AWhen, ANodeK.When, AStmtK.WhenStmt), parse (program body item, `${ when }` in markup,
+  statement position), analyze (resolveWhen: 006/007/016/W-010/W-006, refusals), typer, scope pass, lower.
+  Runtime refinement: `when`s run from their own queue AFTER render/structure effects in the same flush, so a
+  batch that both changes a dep and unmounts the arm does not run the arm's when (test added).
+- 2026-10-01 deviation (tooling): walk.scrml's arms were added with a python in-place edit run from Bash (inside the
+  worktree) — the brief says Edit/Write for file edits. Every later edit uses Edit/Write.
+- 2026-10-01 next: e2e tests (slice-m4/when.test.js), ingest mapping, bite proof, gates.
+
 ## Governing sentences (SPEC §6.7.4 / §6.7.2) — quoted, each implemented
 
 1. "when-stmt ::= 'when' dep-list 'changes' '{' logic-content '}' / dep-list ::= '@' identifier | '(' dep-item (',' dep-item)* ')'"

@@ -149,6 +149,24 @@ describe("§6.7.2 teardown — step 1", () => {
     expect(seen).toEqual(["child cleanup sees 1 when(s)", "parent cleanup sees 0 when(s)"]);
   });
 
+  test("a batch that changes a dep AND unmounts the effect's arm does not run it (structure settles first)", () => {
+    // mutation RED: When.markStale() queueing on the render-effect queue (the dep is written first,
+    // so the when would run before the cond effect disposed its arm)
+    const scope = rt.root.child();
+    const div = document.createElement("div");
+    const anchor = document.createComment("a");
+    div.appendChild(anchor);
+    const show = rt.cell(true);
+    const x = rt.cell(0);
+    let runs = 0;
+    rt.cond(scope, anchor, [{ test: () => show.get(), render: (armScope) => { rt.when(armScope, [x], () => { runs++; }); } }]);
+    x.set(1);
+    expect(runs).toBe(1);
+    rt.batch(() => { x.set(2); show.set(false); });
+    expect(runs).toBe(1);
+    scope.dispose();
+  });
+
   test("a remount registers afresh — no double registration", () => {
     const owner = rt.root.child();
     const x = rt.cell(0);

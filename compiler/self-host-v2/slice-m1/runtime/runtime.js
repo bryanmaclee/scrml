@@ -101,6 +101,11 @@ let constructing = 0;
 let owed = [];
 const SEEDING = Symbol("seeding");
 const queue = new Set();
+// `when` effects (§6.7.4) wait until the render / structure effects of the
+// same flush have settled: a conditional arm or <each> row that the same
+// batch unmounts unregisters its `when`s (teardown step 1) BEFORE they could
+// run against a scope that is going away.
+const whenQueue = new Set();
 
 function track(source) {
   if (tracking) {
@@ -128,10 +133,18 @@ export function batch(fn) {
 }
 
 function flush() {
-  while (queue.size > 0) {
-    const [e] = queue;
-    queue.delete(e);
-    if (!e.disposed) e.run();
+  for (;;) {
+    if (queue.size > 0) {
+      const [e] = queue;
+      queue.delete(e);
+      if (!e.disposed) e.run();
+    } else if (whenQueue.size > 0) {
+      const [w] = whenQueue;
+      whenQueue.delete(w);
+      if (!w.disposed) w.run();
+    } else {
+      return;
+    }
   }
 }
 
@@ -271,7 +284,7 @@ class When {
   }
   markStale() {
     if (this.disposed) return;
-    queue.add(this);
+    whenQueue.add(this);
     if (batchDepth === 0) flush();
   }
   run() {
@@ -290,7 +303,7 @@ class When {
   unregister() {
     if (this.disposed) return;
     this.disposed = true;
-    queue.delete(this);
+    whenQueue.delete(this);
     for (const d of this.deps) d.observers.delete(this);
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
