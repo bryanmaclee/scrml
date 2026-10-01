@@ -76,7 +76,8 @@ stats.whens                                            // live `when` registrati
   nearest enclosing element scope"), including inside an `if=` element and an `<each>` row.
 - FAIL CLOSED (E-BOOTSTRAP-UNSUPPORTED): a `when` in a user declaration's `renders` (which scope owns it — the
   instance or the render site — is not settled by §6.7.2/§66; see §5), a `when` in use-site slot content (review
-  F1), a `when` in a function body or a handler,
+  F1), any content inside a declaration's `<slot>…</slot>` (review r2 N2 — §5 question (6)), a `when` in a function
+  body or a handler,
   a dep that names a whole instance (`@decl`, `@handle`), a `${}` block in markup holding anything besides `when`s.
 - Codes: E-LIFECYCLE-006, E-LIFECYCLE-007 (undeclared name, locked field, derived field), E-LIFECYCLE-016 (a `when`
   directly in another's body), W-LIFECYCLE-010 (empty body), W-LIFECYCLE-006 (the body is one `@v = <pure expression
@@ -102,6 +103,23 @@ derived dep is E-LIFECYCLE-007, reported by the shim as a CODE (not a not-yet re
   recursed into; it is marked pending and re-runs ONCE after the current run; a further re-trigger in that re-run is
   dropped and reported (`console.error`, the impl#1 wording) — the page stays alive. Covers a direct self-write
   through a call (not caught statically) and a cycle through another `when`.
+- **The cap counts the CAUSAL CHAIN, continuations included (review r2 N1).** Round 1 counted re-runs inside one
+  synchronous `run()` call. A When is not `running` while a task of it is suspended, so a continuation that wrote its
+  own dep (or closed a cycle through another When) got a fresh `run()` with a fresh count every time — measured:
+  100,000 runs, 0 errors, the microtask queue never drained (the page hangs). Fix: a runtime `Chain` per EXTERNAL
+  event. A When run whose trigger was written outside every When body and continuation (`currentChain === null`)
+  starts a new chain; the body runs with `currentChain` = that chain, every continuation of its task resumes with it
+  (the task carries it), and every When a write under that chain triggers inherits it. The cap is `runs per When per
+  chain ≤ 1 + WHEN_RERUN_CAP`; the next one is dropped and reported with the same text as the synchronous path.
+  Measured after: the self-write-through-a-continuation and the cross-`when` variant both give 2 runs + 1 error —
+  identical to the synchronous control.
+  **Why ruled (b) survives — the distinction.** Newest-wins is about a re-trigger from OUTSIDE the run (the user
+  clicked again; another event wrote the dep): that write happens with no chain current, so it starts a NEW chain
+  with a fresh budget, cancels the suspended task, and is never a cap violation however many times it happens. The
+  cap is about a re-trigger the run CAUSED itself (its body, its continuation, or a When those triggered) — that is
+  the loop the cap exists to stop. A When queued by both an external and a chained write before it runs is treated
+  as external (the external event alone would run it). Every chain is born from an external event, so total runs are
+  bounded by (events × Whens × 2). Tested both ways (slice-m1/when.runtime.test.js "re-entry through a suspension").
 - **U1 BLOCKER (review F3):** a rejected suspension surfaces as an unhandled promise rejection. §6.7.4: "the error
   propagates through the `when` body's error context (§19)" — that context does not exist until U1. Today nothing
   writes and nothing is swallowed.
@@ -110,6 +128,16 @@ derived dep is E-LIFECYCLE-007, reported by the shim as a CODE (not a not-yet re
   (3) E-LIFECYCLE-006 is "the body writes" — direct writes only, or through called functions too? (4) review F1:
   which scope owns a `when` in USE-SITE SLOT CONTENT (§66.15.2) — rendered once per `<slot/>`, possibly zero or
   several times? (refused in the bootstrap) (5) review F2: cross-`when` cycles (A writes B's dep, B writes A's) —
-  SPEC names only the direct self-write; the bootstrap bounds them at runtime like impl#1.
+  SPEC names only the direct self-write; the bootstrap bounds them at runtime like impl#1. (6) review r2 N2: what is
+  content written INSIDE `<slot>…</slot>` in a declaration's `renders` — fallback for a use with no children (§16.2's
+  `${render body() ?? <p>…/}` reading), or an error? §66.15.2 rules only "use-site children → `<slot/>`"; §16 (the
+  superseded component text) has fallback only through `??` on a snippet prop. SPEC is silent, Core `View.Slot` has no
+  fallback, and the bootstrap used to drop the content unvisited — a `when` there ran 0 times and `${@nope}` raised no
+  E-SCOPE-001, against §6.7.4 "A `when` statement is associated with the enclosing element scope". FAIL CLOSED: any
+  non-whitespace content inside `<slot>` is E-BOOTSTRAP-UNSUPPORTED (analyze `resolveSlot`).
 - W-LIFECYCLE-006 amendment (decided S446, SPEC text in flight): not fired when the right-hand side reads the
-  assigned cell (an accumulator — the derived form would be circular).
+  assigned cell (an accumulator — the derived form would be circular). Review r2 N3: "reads the assigned cell"
+  includes reading it THROUGH derived cells (`<dm=(@m + 1)/>`, `@m = @n + @dm`; transitively through further derived
+  fields of the same declaration) — the derived form would be just as circular. Matched by the assigned field's write
+  capability against the derived fields' initializer reads; anything the analysis cannot resolve to a field keeps
+  the warning (conservative side).

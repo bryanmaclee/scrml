@@ -137,3 +137,43 @@ derived flush; `@qty` unlisted never triggers. scoped: the effect stops firing a
 17. §6.7.2: "1. All `when` effects registered in that scope are unregistered … Scope destruction is depth-first: child scopes execute the above four-step teardown sequence before the parent scope begins"
 18. §6.7.4 server functions: "The effect body becomes async at the point of the server call. The compiler inserts `await` automatically (§13.2)." + §19.9.8 "The canonical scrml async surface is the body-split / CPS mechanism".
 - 2026-10-01T13:48:06-06:00 r2: start at /home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-a5a49f48b76659e43, reset to 42641506c
+
+## Review round 2 (findings at 42641506c)
+
+- 2026-10-01T13:48 start (see the line above); bun install + pretest OK (13 samples). BRIEF-r2.md archived (c9c48d932).
+- TOOLING NOTE: with `TMPDIR=<worktree>/.tmp/run` the core gate is NOT green — `compiler/tests/integration/
+  import-host.test.js` "absent manifest => disabled" builds its temp project under TMPDIR, walks up, finds the
+  repo's own `scrml.toml` and reads `self-host-only`. That is an artifact of an in-repo TMPDIR, not of this change;
+  commits therefore run the pre-commit hook with the default TMPDIR (as rounds 0-1 did).
+- N1 REPRODUCED (runtime, .tmp/n1.mjs against the 42641506c runtime): continuation self-write through a call →
+  runs=100000 (guard) errors=0; without the guard the process hangs (timeout 60 s, the microtask queue never
+  drains). Cross-when (A(n) suspends then writes m; B(m) writes n) → A=100000 B=99999 errors=0. Sync control → 2
+  runs + 1 error. External re-triggers x5 during suspension → 5 runs, 1 continuation, 0 errors.
+- N1 FIXED (e03f09132): runtime `Chain` per external event; body + continuations run under `currentChain`; Whens
+  triggered under a chain inherit it; cap = runs per When per chain. After: self-write → 2 runs + 1 error;
+  cross-when → A=2 B=2 + 1 error; sync control unchanged; external x5 → 5 runs, 1 continuation (the newest), 0
+  errors. DESIGN §5 explains the distinction. 6 new runtime tests.
+- N1 BITES (each restored, cmp-verified): base runtime → 3 RED; continuation outside inChain → 4 RED; body outside
+  inChain → 1 RED ("the chain starts at the external run's BODY"); one sticky chain per When → 4 RED.
+- N2 REPRODUCED (real pipeline, .tmp/r2-repro.test.js): `<slot>${ when @n changes { … } }</slot>` → diags [], live
+  whens 0, @hits 0 after a click; `<slot>${@nope}</slot>` → diags []; `<slot><b>default</b></slot>` → diags [] (the
+  content vanishes too). SPEC §6.7.4: "A `when` statement is associated with the enclosing element scope." SPEC
+  §66.15.2 rules only `<slot/>` — silent on fallback; Core View.Slot has none. FIXED (fail closed): analyze
+  `resolveSlot` refuses any non-whitespace content with E-BOOTSTRAP-UNSUPPORTED; DESIGN §5 question (6). After:
+  all three → ["E-BOOTSTRAP-UNSUPPORTED"]; empty / whitespace `<slot></slot>` → [].
+- N3 REPRODUCED: `<dm:int=(@m + 1)/>` + `when @n changes { @m = @n + @dm }` → W-LIFECYCLE-006 (also via `@dd =
+  (@dm * 2)`). FIXED: `readsThroughDerived` (the assigned field's write cap vs derived initializer reads,
+  transitively). After: `@dm`, `@dd` → []; `@n + @other` (other derives from @n) → W; `@n * 2` → W; `@k = @n + @dm`
+  → W.
+- N2/N3 BITES (restored, cmp-verified): slot without resolveSlot → "r2 N2 … refused" RED; no readsThroughDerived →
+  "r2 N3 …" RED.
+- 2026-10-01T14:20 GATES (round 2, at 594dc3a35): core gate via the pre-commit hook of e03f09132 and 594dc3a35 —
+  27342 pass / 0 fail / 27426 tests / 1406 files. The same gate run explicitly with `TMPDIR=<worktree>/.tmp/run`:
+  27340 pass / 2 fail — both in `compiler/tests/integration/import-host.test.js` ("absent manifest => disabled",
+  "decorators and JSX in a .js host"); that file alone: 65/65 with the default TMPDIR, 63/65 with the in-repo one
+  (it walks up from its temp project into the repo's `scrml.toml`) — a TMPDIR artifact, not this change.
+  Top-level `compiler/tests/*.test.js` (14 files) 6387 pass / 13 skip / 0 fail. Bootstrap: lint 58 files 0
+  violations · slice-m1 100/100 (+6) · lowered slice-m1 100/100 · slice-m2 448/448 · slice-m3 64/64 · slice-m4 434
+  + 1 todo (+3) · v2 lexer 337/337. CG footprint: runtime 18/0, codes-only 11/0, crashed 0, not-yet 704, front-end
+  476 (1209 cases) — unchanged from round 1.
+- DONE (round 2). Deferred: F3 (U1 blocker, unchanged); SPEC question (6) slot fallback.
