@@ -5538,6 +5538,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const pushPartSpan = () => partSpans.push(angleDepth > 0 && lastTok && lastTok.span ? lastTok.span : null);
     const startTok = peek();
     let lastTok = startTok;
+    // The token collected BEFORE `lastTok` (null until two are collected) — read
+    // by the ASI-NEWLINE boundary to tell a POSTFIX `++`/`--` (it follows its
+    // operand on the same line) from a prefix one.
+    let prevLastTok = null;
     let depth = 0;
     let angleDepth = 0; // Track < ... > nesting for component tag expressions
     // Cluster-C Bug 2 (S190) — markup-RHS over-consumption boundary.
@@ -6168,7 +6172,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // STRING) while never breaking those declaration heads.
           // (`null`/`undefined` do not exist in scrml.)
           const _lk = lastTok.kind, _lt = lastTok.text;
+          // S446 — a POSTFIX update (`@a++ f()`) is a hard terminal too: the
+          // operand precedes it on the same line, so nothing can continue it.
+          // Pre-S446 `f()` was silently dropped here (the expression view stopped
+          // at `@a++`); it now gets the same E-STMT-MISSING-SEMICOLON as `g() f()`.
+          const _pl = prevLastTok;
+          const _lastIsPostfixUpdate = (_lt === "++" || _lt === "--") &&
+            !!_pl && !!_pl.span && _pl.span.line === lastTok.span.line &&
+            (_pl.kind === "IDENT" || _pl.kind === "AT_IDENT" ||
+             (_pl.kind === "PUNCT" && (_pl.text === ")" || _pl.text === "]")));
           const _lastEndsValue = (
+            _lastIsPostfixUpdate ||
             _lk === "NUMBER" || _lk === "STRING" ||
             (_lk === "KEYWORD" && (_lt === "true" || _lt === "false" || _lt === "this" || _lt === "not")) ||
             (_lk === "PUNCT" && (_lt === ")" || _lt === "]" || _lt === "}"))
@@ -6232,12 +6246,24 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // expression. Pre-S441 this was masked because an `@cell` never
           // started a statement here; once it does (below), counting `and` as
           // value-ending split `@a and` from `@b` (E-CODEGEN-INVALID-LOGIC).
+          // S446 (S439 #4) — a POSTFIX update (`@a++` / `x--`) ends a value too:
+          // it is postfix when it sits on the SAME line right after an operand
+          // (a newline before `++` would make it prefix — JS restricted
+          // production). Pre-S446 `@a++⏎ f()` collected as ONE statement
+          // `@a ++ f ( )` whose expression view stopped at `@a++`, so `f()` was
+          // silently dropped — in every function body and every multi-statement
+          // event handler (both parse with this collector).
+          const _p = prevLastTok;          const lastIsPostfixUpdate = (lastText === "++" || lastText === "--") &&
+            !!_p && !!_p.span && typeof _p.span.line === "number" && _p.span.line === lastTok.span.line &&
+            (_p.kind === "IDENT" || _p.kind === "AT_IDENT" ||
+             (_p.kind === "PUNCT" && (_p.text === ")" || _p.text === "]")));
           const lastEndsValue = (
             (lastKind === "IDENT" && !WORD_INFIX_OPERATORS.has(lastText)) ||
             lastKind === "NUMBER" ||
             lastKind === "STRING" ||
             lastKind === "AT_IDENT" ||
             lastKind === "BLOCK_REF" ||
+            lastIsPostfixUpdate ||
             (lastKind === "KEYWORD" && VALUE_KEYWORDS.has(lastText)) ||
             (lastKind === "PUNCT" && (lastText === ")" || lastText === "]" || lastText === "}"))
           );
@@ -6506,6 +6532,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           continue;
         }
       }
+      // Before anything is collected `lastTok` is the start token itself, so the
+      // token before it is the one preceding the collection (a caller that
+      // consumed `@a` hands `++` in as the start token).
+      prevLastTok = parts.length > 0 ? lastTok : (peek(-1) ?? null);
       lastTok = consume();
       // Re-quote STRING tokens so their delimiters are preserved in the expression
       if (lastTok.kind === "STRING") {
@@ -6844,6 +6874,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           consume(); // =
           const value = _parseLiftAttrValue(attrSpan);
           if (value === null) return null;
+          // S446 (S439 #4) — a `${…}` event handler on lifted markup carries its
+          // §5.2.3 statement list (`value.handlerBlock`) exactly as top-level and
+          // `<each>` markup do (attachHandlerStatementLists): the SAME
+          // function-body statement parser decides the statements. Pre-S446 a
+          // `for … lift` row handler had only the one-expression view, so
+          // every statement after the first was silently dropped.
+          if (value.kind === "expr" && value._liftInnerOffset !== undefined && isEventHandlerAttrName(attrName)) {
+            if (!counter._handlerStmtIds) counter._handlerStmtIds = { next: HANDLER_STMT_ID_BASE };
+            const o = value._liftInnerOffset;
+            attachHandlerStatementList(value, filePath, counter._handlerStmtIds, null, o.start, o.line, o.col, "$", errors);
+          }
+          if (value.kind === "expr") delete value._liftInnerOffset;
           attrs.push({ name: attrName, value, span: attrSpan });
         } else if (tag === "each" && attrName === "as") {
           // §17.7.3 / §59.8 — the `<each … as NAME>` / `as (K, V)` binding is a
@@ -7088,12 +7130,23 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // so the keyword surfaces a diagnostic. baseOffset uses refSpan.start
       // for uniqueness; the inner content starts ~2 chars in (after `${`).
       emitForbiddenSwitchInRaw(inner, refSpan, refSpan?.start ?? 0, filePath, errors);
+      // Where `inner` starts in the file (after `${` + leading whitespace), so a
+      // handler statement list parsed from it keeps file-true spans. Transient:
+      // parseLiftTag reads and deletes it.
+      const _pre = raw.match(/^\$\{\s*/)?.[0] ?? "";
+      const _preNl = (_pre.match(/\n/g) ?? []).length;
+      const _liftInnerOffset = {
+        start: (refSpan?.start ?? 0) + _pre.length,
+        line: (refSpan?.line ?? 1) + _preNl,
+        col: _preNl === 0 ? (refSpan?.col ?? 1) + _pre.length : _pre.length - _pre.lastIndexOf("\n"),
+      };
       return {
         kind: "expr",
         raw: inner,
         refs: [],
         exprNode: safeParseExprToNode(inner, refSpan?.start ?? 0),
         span: refSpan,
+        _liftInnerOffset,
       };
     }
     // Identifier or call: ident / ident.prop / ident(args)
