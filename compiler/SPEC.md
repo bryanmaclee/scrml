@@ -40511,7 +40511,7 @@ contracts**, and the engine is re-expressed as a `single` declaration whose fiel
 | 66.2 | Termination; declaration vs use; field names; opener expressions | §6.1.5 `state-decl` grammar |
 | 66.3 | Own value, inline defaults, inference, uniform form | §6.2 RHS shapes (the `<x> = v` form) |
 | 66.4 | Attributes are data; children are validated fields | §6.3.2 Variant C spelling |
-| 66.5 | `renders` | §6.2 Shape 2 render-spec coupling (the right-hand-side form); §19.2.3 (second contextual position). NOT §6.4.2 steps 3–4 (implicit bind, validator wiring) — O25 |
+| 66.5 | `renders` | §6.2 Shape 2 render-spec coupling (the right-hand-side form); §19.2.3 (second contextual position). NOT §6.4.2 steps 3–4 (implicit bind, validator wiring) — O25, ruled S442: §55.17 |
 | 66.6 | Instances; `<*x>` the existing one | §6.4 render-by-tag |
 | 66.7 | `@name`, `as=`, instances in lists and conditionals | — (new) |
 | 66.8 | Declarations are types; named shared instances | — (new) |
@@ -40629,6 +40629,10 @@ keeps the namespaced-attribute grammar (`bind:value=`, `class:active=`, `style:i
 `on…`) unambiguous against `name:Type`: after `:` in a declaration opener the parser reads a **type
 expression**. Declaring an attribute or child field with one of the five names is `E-DECL-ILLEGAL-FIELD-NAME`
 (§66.20).
+
+`isValid`, `errors`, `touched` and `submitted` are also **illegal attribute and field names** (S447 call 5): they
+would shadow the synthesized validity surface. That is `E-VALIDITY-RESERVED-NAME` (§55.5.3), which also covers a
+field of a struct type used as a validated value's type.
 
 > ⚑ **OPEN (not ruled) — O41: other attribute-name collisions.** Only the five names above are ruled. Whether
 > the stdlib / structural attribute names that are also ordinary words — `as`, `key`, `if`, `slot`,
@@ -40803,16 +40807,11 @@ declaration's markup appears only where an instance is used (`<x …/>`) or the 
 
 #### 66.5.5 Binding and validators inside `renders`
 
-> ⚑ **OPEN (not ruled) — O25: Shape-2's implicit bind and validator wiring — a RECORD GAP.** Today a Shape-2
-> cell's `<input/>` right-hand side is bound implicitly (§6.4.2 step 3) and its validators are wired onto the
-> input as HTML attributes and into the validity surface (§6.4.2 step 4). The DD §7 #5 lean adds "explicit `bind:`
-> inside `renders`", but the PA message bryan answered *"yes"* for #5–#8 (transcript, S435) proposed only lexical
-> `*`, the bare-own-field-tag error and the same-arc `<x/>` → `<*x/>` migration — it did not present the bind
-> half. So neither is ruled: **(a)** whether a `renders` holding a single bindable element keeps an implicit bind,
-> or the bind is always written (`renders <input type="email" bind:value=@email/>`); **(b)** whether validators
-> on a declaration (`<let email:string="" req length(>=5)/>`) reach the `<input>` in its `renders` as HTML
-> attributes (§6.4.2 step 4) and how that meets a `renders` that is not a single input. §66's examples write the
-> bind explicitly and do not rely on (b).
+> **O25 — RULED S442** (ruling:user-voice-scrml.md S442 "RULED — dpa-058 (O25) = all PA recs" items (1)-(3)): **(a)**
+> the bind is always written — `renders <input type="email" bind:value=@email/>`, with no implicit bind, ever;
+> **(b)** validators follow the bind — their HTML-native subset lands on every native control whose `bind:` targets
+> the value, and the compiler adds `novalidate` to any form carrying lowered attributes and gates its submit itself.
+> Normative text: §55.17 (written S447).
 
 > ⚑ **OPEN (not ruled) — O24: markup-typed derived cells.** Today `const <badge> = <span …>…</span>` is a
 > markup-valued derived cell (§6.6.17). Under §66.9 a derived cell is a locked declaration with a reactive
@@ -42312,7 +42311,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O48 | §66.21 | Tier-3 positional: a Stage-1 window that preserves a silent miscompile, vs a §63.4 designer-card removal. |
 | O51 | §66.6.8 | A use or `<*x/>` of a declaration with no `renders`: an error, or a data-only instance (an `as=`-bound instance need not render). |
 | ~~O52~~ RULED | §66.2.2 | How `rule=` state-children fit the declaration/use marker and §66.2.3's "after `:` read a type"; whether the `:`-shorthand body survives there. |
-| O25 | §66.5.5 | Record gap: implicit bind vs explicit `bind:` in `renders`, and whether validators reach the `renders` input (§6.4.2 steps 3–4). |
+| ~~O25~~ | §66.5.5 | **RULED S442** (dpa-058 (1)-(3)); written S447 at §55.17: the bind is always written; validators follow the bind; `novalidate` + the compiler submit gate. |
 | O54 | §66.6.3 | Record gap: whether `@x` inside `x`'s own `renders` names the current instance (DD #8, not in the answered text). |
 | ~~O55~~ RULED S442 = error | §66.13.3 | Whether a plain use of a `single` declaration is an error (DD §5.a) or renders the one instance. RULED: a plain use is `E-DECL-SINGLE-INSTANTIATED`; `<*x/>` is the only way to render it. Provenance: ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"*. |
 | ~~O56~~ RULED narrow (S437: confirmed not re-widened by "identities yes") | §66.7.5 | Scope of the `given` carve-out: instance handles only, or named shared instances / plain `T \| not` cells too; live reads through `c`; `let d = c`; direct `@handle.f = …` inside the block. |

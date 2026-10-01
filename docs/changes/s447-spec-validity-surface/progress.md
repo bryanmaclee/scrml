@@ -1,3 +1,6 @@
 # progress — s447-spec-validity-surface (append-only)
 
 - start: worktree base was bca39b61a; origin/main had advanced to 310eee4c4 (2 unrelated commits) → `git merge --ff-only origin/main` on a clean tree so merge-base == origin/main. BRIEF archived.
+- 78aaaf2e8: §55 header banner, §55.2, §55.5 (Edge A struck) + new §55.5.1 / §55.5.2 / §55.5.3, §55.6, §55.7 (submitted form-scoped; persist/channel bundle), §55.8, §55.13, §55.14.
+- c6a3c2e6a: new §55.17 (S442 (2)/(3) + G2 gate + formnovalidate/submitter + scope + I-FORM-SUBMIT-GATED / data-scrml-gated + formFor relation + example); §55.15 tables; §34 rows E-VALIDATOR-DEAD / E-VALIDITY-NO-SURFACE rewritten, E-VALIDITY-RESERVED-NAME + I-FORM-SUBMIT-GATED added; §6.11 stub rewritten; §53.6.2; §39.5 table; §41.14.3; §6.14.2 r3; §6.8.2 xref; §38.4.
+  post-commit hook: ~179 browser/sample failures (navigate-wave1c, g-if-attr-synth-cell-toggle sample loads) — env (worktree lacks compiled samples/dist), SPEC-only change; to verify vs base.
