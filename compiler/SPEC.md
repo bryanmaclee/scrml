@@ -37007,8 +37007,8 @@ kickstarter disagree on surface syntax, the kickstarter wins (per dispatch autho
 > narrows to "nothing can ever change the value" (§55.5.2); the four surface names are reserved (§55.5.3); the
 > interaction bundle is in §55.7, §55.8, §55.13 and §55.14. **Status: Nominal / spec-ahead on every implementation.**
 > impl#1 compiles a top-level validated Shape-2 cell with native `required` and **no** `novalidate`, so the browser
-> blocks its submit, and reads `@x.isValid` on a top-level cell as a silent `undefined` (§S447 gaps). The bootstrap
-> emits `novalidate` but has no §55 surface and no gate yet. Per §34.0 / S440 #12 both carry the divergence until the
+> blocks its submit, and reads `@x.isValid` on a top-level cell as a silent `undefined` (`g-top-level-scalar-validators-dead`). The bootstrap
+> emits `novalidate` but has no §55 surface and no gate yet (`g-bootstrap-validated-form-fields-fail-open-no-surface-no-gate`, HIGH). Per §34.0 / S440 #12 both carry the divergence until the
 > bootstrap builds this section.
 > **Provenance:** ruling:user-voice-scrml.md S447 "RULED — \"your recs\": validated top-level cells get a validity
 > surface (Edge A reversed) …" (item 1) · ruling:user-voice-scrml.md S447 "RULED — \"your recs on all of them, and
@@ -37650,10 +37650,10 @@ of the original D2 brief for the canonical listing):
 | `E-SYNTHESIZED-WRITE` | Error | Assignment to auto-synthesized property (already in §34 from D1). |
 | `E-VALIDATOR-CIRCULAR-DEP` | Error | Circular dependency via cross-field predicate args (§55.11). |
 | `E-DERIVED-WITH-VALIDATORS` | Error | Validators applied to a derived cell (§55.14). |
-| `E-VALIDATOR-DEAD` | Error | Validators on a value nothing can ever change: no bind, no write grant, not server-loaded (§55.5.2, S447). |
-| `E-VALIDITY-NO-SURFACE` | Error | A surface property read on a top-level value that carries no validators (§55.5.1 rule 2, S447). |
-| `E-VALIDITY-RESERVED-NAME` | Error | `isValid` / `errors` / `touched` / `submitted` as a field / attribute name, or as a field of a validated value's struct type (§55.5.3, S447). |
-| `I-FORM-SUBMIT-GATED` | Info | A form whose submit the compiler gates, naming the gating values (§55.17.6, S447). |
+| `E-VALIDATOR-DEAD` | Error | Validators on a value nothing can ever change: no bind, no write grant, not server-loaded (§55.5.2, S447). Bootstrap emits it under the superseded S444 trigger; the S447 trigger is Nominal — lands with the impl. |
+| `E-VALIDITY-NO-SURFACE` | Error | A surface property read on a top-level value that carries no validators (§55.5.1 rule 2, S447). Bootstrap emits it for every program cell; the S447 narrowing is Nominal — lands with the impl. |
+| `E-VALIDITY-RESERVED-NAME` | Error | `isValid` / `errors` / `touched` / `submitted` as a field / attribute name, or as a field of a validated value's struct type (§55.5.3, S447). Nominal — lands with the impl. |
+| `I-FORM-SUBMIT-GATED` | Info | A form whose submit the compiler gates, naming the gating values (§55.17.6, S447). Nominal — lands with the impl. |
 | `E-VALIDATOR-INLINE-DYNAMIC` | Error | Level-1 inline message override is not a static string literal (§55.10 / L12 Edge F). |
 | `E-VALIDATOR-INLINE-COLON` | Error | Inline message override uses the colon form `req:"…"` (not valid scrml); use the paren form `req("…")` (§55.10). |
 | `W-MATCH-RULE-INERT` | Warning | rule= legal but inert inside a match-block (§18.0.2). |
