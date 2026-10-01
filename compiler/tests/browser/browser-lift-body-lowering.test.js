@@ -20,7 +20,7 @@
  * Emit-shape pins: compiler/tests/unit/lift-body-lowering-s427.test.js.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, mkdirSync } from "fs";
@@ -572,4 +572,11 @@ describe("round 5 — native-parsed loop binders: `let` writes take effect, `con
       }
     });
   }
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

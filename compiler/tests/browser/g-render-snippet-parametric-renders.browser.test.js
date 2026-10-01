@@ -19,7 +19,7 @@
  *
  * BITING: pre-fix the render site is empty. Executes the SHIPPED pruned runtime.
  */
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
@@ -160,4 +160,11 @@ describe("g-render-snippet-slot-renders-empty (parametric, default pipeline)", (
     expect(m.text(".g")).toBe("GOOD"); // the valid sibling still renders
     expect(m.text(".b")).toBe("");     // the mismatch renders empty, no crash
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

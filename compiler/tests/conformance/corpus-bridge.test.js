@@ -32,6 +32,7 @@
  * stable across repeated runs before gating.
  */
 import { describe, test, expect, afterAll } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import {
   loadCases,
   runCase,
@@ -117,4 +118,11 @@ describe("conformance corpus (gated bridge) — impl#1 codes + runtime", () => {
       }
     });
   }
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

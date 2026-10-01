@@ -20,7 +20,7 @@
  * Emit-shape pins: compiler/tests/unit/lift-in-each-row-and-arm.test.js.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, mkdirSync } from "fs";
@@ -508,4 +508,11 @@ describe("match / engine arm — the arm's lift block renders per arm entry", ()
     expect(perUl()).toEqual([["a", "a"], ["b", "b"]]);
     app.done();
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

@@ -21,7 +21,7 @@
  * Requires: bun run compiler/src/index.js samples/compilation-tests/reactive-018-class-binding.scrml --output samples/compilation-tests/dist/
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { readFileSync } from "fs";
@@ -330,4 +330,11 @@ describe("class-binding §13: template literal static 'card' prefix always prese
     const el = document.querySelector("#themed-card");
     expect(el.className).toBe("card card-light");
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });
