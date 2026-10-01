@@ -1750,9 +1750,22 @@ const wsProxyHandlers = {
  * @param {string[]} args — raw argv slice after "dev"
  */
 export async function runDev(args) {
+  // §47.14 / §8.1.1 (ruling:user-voice-scrml.md S445 — "dev / compile keep S445 item 6:
+  // relative to the declaring `.scrml` file") — SCRML_DATA_DIR is the BUILT server's
+  // data root. `scrml dev` opens each database beside its declaring file, so it drops the
+  // variable before any server module loads (the app child inherits this environment).
+  const childFlag = args.indexOf("--__dev-child");
+  if (process.env.SCRML_DATA_DIR !== undefined) {
+    if (childFlag === -1) {
+      console.error(
+        `scrml dev: ignoring SCRML_DATA_DIR=${process.env.SCRML_DATA_DIR} — dev opens each database ` +
+        `beside the .scrml file that declares it; SCRML_DATA_DIR applies to a server built by \`scrml build\`.`,
+      );
+    }
+    delete process.env.SCRML_DATA_DIR;
+  }
   // #724 child-process mode: re-entered by spawnAppChild with a config file path.
   // Run ONLY the app server (no compile/watch/proxy) and return.
-  const childFlag = args.indexOf("--__dev-child");
   if (childFlag !== -1) {
     const cfgPath = args[childFlag + 1];
     const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));

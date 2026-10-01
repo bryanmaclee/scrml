@@ -23,8 +23,10 @@
  *      the project root recorded at build. With neither (a build output moved to a
  *      machine without the project and no `SCRML_DATA_DIR`) the module refuses to
  *      open the database, naming `SCRML_DATA_DIR` — never a create in a guessed place.
- *      `scrml dev`, `scrml build`'s server, a `kind="tool"` program and a
- *      module-with-db-context all follow this one rule.
+ *      `scrml build`'s server, a `kind="tool"` program and a module-with-db-context
+ *      all follow this one rule. `scrml dev` removes SCRML_DATA_DIR from its
+ *      environment (ruling S445: "dev / compile keep S445 item 6"), so under dev the
+ *      recorded root — the declaring file's project — always applies.
  *
  *   2. WHETHER IT MAY CREATE (`db-ownership.ts decideOwnedDbFiles` — ONE function;
  *      ruling S445 "per-file ownership"). Only a file that declares the schema may

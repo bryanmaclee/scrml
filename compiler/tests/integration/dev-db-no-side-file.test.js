@@ -143,9 +143,9 @@ function opensFile(modulePath) {
 }
 
 /** Start `scrml dev <entry> --port 0` from `cwd`; resolve with the port and a log getter. */
-async function startDev(cwd, entryRel) {
+async function startDev(cwd, entryRel, env = process.env) {
   const proc = Bun.spawn(["bun", CLI, "dev", entryRel, "--port", "0"], {
-    cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore",
+    cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore", env,
   });
   let out = "";
   const pump = async (s) => { for await (const c of s) out += new TextDecoder().decode(c); };
@@ -384,6 +384,27 @@ describe("§3 scrml dev run from the project root", () => {
     const db = new Database(join(root, "src", "boot.db"));
     expect(db.query("SELECT n FROM t").all()).toEqual([{ n: 7 }]);
     db.close();
+  }, 90_000);
+
+  test("SCRML_DATA_DIR exported: dev IGNORES it — the owning db is created beside the declaring file (S445: dev keeps item 6)", async () => {
+    const root = join(_tmp.root, "owning-datadir");
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src", "app.scrml"), BOOTSTRAP_APP);
+    const vol = join(root, "devvol");
+    mkdirSync(vol, { recursive: true });
+    const dev = await startDev(root, "src/app.scrml", { ...process.env, SCRML_DATA_DIR: vol });
+    let log;
+    try {
+      // the owning handle opens (and creates) at load; wait for the announcement
+      for (const t0 = Date.now(); Date.now() - t0 < 15_000 && !dev.log().includes("created new database"); await Bun.sleep(100)) { /* wait */ }
+      log = dev.log();
+    } finally {
+      await stopDev(dev);
+    }
+    expect(log).toContain(`scrml dev: ignoring SCRML_DATA_DIR=${vol}`);
+    expect(log).toContain(`scrml: created new database ${join(root, "src", "boot.db")}`);
+    expect(dbFilesUnder(vol)).toEqual([]);
+    expect(existsSync(join(root, "src", "boot.db"))).toBe(true);
   }, 90_000);
 });
 
