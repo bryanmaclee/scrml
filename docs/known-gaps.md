@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 221 | 4 |
-| MED | 440 | 0 |
+| MED | 441 | 0 |
 | LOW | 213 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -21479,6 +21479,15 @@ Reviewer-executed (h2/h3/h4/h5 under `rev-progrole-work/`). Direction (PA): item
 ### g-bootstrap-bound-top-level-validated-scalar-ruling-owed — bootstrap: a BOUND top-level scalar with validators is refused E-VALIDATOR-DEAD; the PA reads S442 ruling (2) "validators follow the bind" as saying it should lower its attributes instead — ruling owed (dpa-058 B3)
 <!-- @gap id=g-bootstrap-bound-top-level-validated-scalar-ruling-owed sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml:1297(`fn topLevelValidatorsLower() -> boolean { return false }` — the one switch; consumed at :1269 and :8320) prov=ruling-owed:dpa-058-B3 -->
 **Reproduced on `464c9ab4d` (the current, deliberate behaviour).** `<let email:string="" req/>` with `<input bind:value=@email/>` → `["E-VALIDATOR-DEAD"]`. validators.test.js:226 pins this ("bound or not"). **The question for bryan:** S442 ruling (5) ("silently dead validators become errors") clearly covers an UNBOUND top-level scalar. For a BOUND one, the PA's reading of ruling (2) ("validators follow the bind") is that the validators are not dead: their HTML-native subset should land on the bound input, as a child field's does. If that reading is confirmed, the change is one line: `topLevelValidatorsLower()` returns `true`, and the bound case lowers while the unbound case stays E-VALIDATOR-DEAD. `@email.isValid` stays refused either way (§55.5 Edge A: no validity surface). Filed so the open ruling is tracked. It is not a defect until the ruling is made.
+
+### g-bootstrap-parser-opener-let-and-unchecked-opener-shapes — bootstrap: the parser still implements the S435 in-opener `let` (migration owed to the S447 ruling (b)); `<let signup>` with no type is taken as a declaration; `<n:int[append]=0/>` and `<let/>` pass silently
+<!-- @gap id=g-bootstrap-parser-opener-let-and-unchecked-opener-shapes sev=MED status=open locus=compiler/self-host-v2/parse.scrml:1192-1194(isDeclOpener — `if (o.isLet) return true`)+compiler/self-host-v2/parse.scrml:1201-1268(parseOpener — `let` + space sets isLet, the next word is the name)+compiler/self-host-v2/parse.scrml:1690-1756(scanAttr — attribute `let` / `export let`) prov=dd:opener-keyword-vs-attribute-2026-10-01 -->
+**Measured by the deep-dive (`scrml-support/docs/deep-dives/opener-keyword-vs-attribute-2026-10-01.md`, side findings SF2/SF3/SF5; scrml main @ be5e36b57).** Four items, one locus (the bootstrap opener parser):
+1. **Migration owed to S447 (b).** The parser implements the S435 spelling: `let` as a prefix INSIDE the opener (`<let x:T=v/>`, `parseOpener` `isLet`) and `let` / `export let` on attributes (`scanAttr`). SPEC §66.2.5 / §66.4 rule 6 (S447) now put `let` / `export` BEFORE the `<` (`let <x:T=v/>`, `export let <x/>`), recognized only in item positions (program body, declaration body), and retire attribute grants (a writable attribute is a child declaration). The S435 form is `E-DECL-LET-IN-OPENER`; `renders` in an opener is `E-DECL-RENDERS-IN-OPENER`; `let`/`export` before a tag outside an item position is `E-DECL-KEYWORD-NOT-ITEM` (all §66.20). Size per the DD: ~25 `isLet` sites (14 parse, 8 analyze, 3 ast, 3 css-ingest) and ~250 test strings (mechanical regex rewrite); zero adopter code.
+2. **`<let signup>` with no type or value is a declaration (SF2).** `isDeclOpener` returns true whenever `isLet` is set. §66.2.2's marker is only an own value or a typed attribute (plus `:struct` / `:Decl`); a pure container is `<name:struct>`. Unratified widening. (Under S447 the `let` leaves the opener, so the fix lands with item 1: the marker must come from the opener alone.)
+3. **`<n:int[append]=0/>` passes with zero diagnostics (SF3).** A scalar initializer for a sequence type is not checked; `<n:int="hello"/>` does get `E-TYPE-031`. The opener initializer check misses sequence types.
+4. **`<let/>` (no name) parses and passes the front end silently (SF5).**
+(SF4 — `E-GRANT-LET-ON-SEQUENCE` emitted but not named in §66.20 — is closed by the S447 SPEC pass, which adds the row.)
 
 ### g-commands-dev-tests-leak-dev-child-servers — `compiler/tests/commands/dev-watcher-churn-starvation.test.js` and `dev-compile-throw-fail-closed.test.js` kill the `scrml dev` parent but not its `--__dev-child`; every full-suite run leaves ~3 bun servers listening (cwd a deleted temp dir)
 <!-- @gap id=g-commands-dev-tests-leak-dev-child-servers sev=MED status=open locus=compiler/tests/commands/dev-watcher-churn-starvation.test.js+compiler/tests/commands/dev-compile-throw-fail-closed.test.js prov=empirical:S445 -->
