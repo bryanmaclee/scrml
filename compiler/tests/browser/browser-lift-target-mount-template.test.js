@@ -21,7 +21,7 @@
  * case below fails on the pre-fix compiler.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, mkdirSync } from "fs";
@@ -517,4 +517,11 @@ describe("round 2: file scope, nested mounts, effect lifetime", () => {
     expect(ticks() - t0).toBe(1); // exactly the live mount's one row effect
     expect(texts("ul li")).toEqual(["AA", "b", "C4"]);
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

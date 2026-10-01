@@ -30,11 +30,115 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 221 | 4 |
-| MED | 440 | 0 |
-| LOW | 213 | 0 |
+| HIGH | 225 | 4 |
+| MED | 442 | 0 |
+| LOW | 214 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-sse-generator-write-in-client-fn-body-awaited-loses-subscription — `function go(){ @feed = ticks(); … }` with a `server function*` emits `await _scrml_sse_ticks()`: the cell holds the EventSource and every message drops — `NEW S446; HIGH; open`
+
+<!-- @gap id=g-sse-generator-write-in-client-fn-body-awaited-loses-subscription sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts(post-sse-reactive-bind — matches only the un-awaited `_scrml_reactive_set(N, _scrml_sse_X(args))`)+compiler/src/codegen/emit-expr.ts(isClientServerFnCall awaits an SSE stub like any server call) prov=empirical:S446-PR1217-review-reproduced-by-compilation-on-31c42fbf -->
+
+On main (31c42fbf), an SSE generator write inside a client FUNCTION body,
+`function go2() { @feed = ticks(); @y = 1 }`, emits
+`_scrml_cs_reactive_set("feed", await _scrml_sse_ticks_3());`. The call-site auto-await (§13.2) treats the SSE
+stub as an ordinary server call. GITI-026's subscription rewrite matches only the un-awaited form, so it never
+fires. The cell then holds the EventSource object and no message reaches it.
+The same shape in a `${…}` statement-list handler was guarded in PR #1217: SSE callees keep the arg1 skip
+(`ColorOpts.reactiveArg1SkipKeep`, `_clientSseFnNames`).
+**Recommended:** the emitter should not await a `route.isSSE` callee, using the same `_clientSseFnNames`
+classification, so that the GITI-026 pass owns the site.
+
+**Scope correction (S446 #1217 re-review):** the handler guard in #1217 covers only a DIRECT
+`@cell = sse()` write, i.e. an SSE stub that is the direct value of the reactive set. An SSE call NESTED in an
+expression still has its stub awaited and its messages dropped. This is true on main and on #1217, in a
+handler (all six positions: top level, `<each>`, `for … lift`, match arm, `<each>`/`for … lift` in a match
+arm). Examples are `@feed = @c ? ticks() : other()` and `@feed = ticks() ?? 0`. GITI-026 never rewrites these
+shapes because it matches only the direct value position, so this is the same defect class as the
+function-body case above.
+
+### g-imported-server-fn-call-in-handler-not-awaited — a server function imported from another `.scrml` file and called from a handler is not awaited at all: the cell holds a Promise (or, for an imported SSE fn, the EventSource) — `NEW S446; HIGH; open`
+
+<!-- @gap id=g-imported-server-fn-call-in-handler-not-awaited sev=HIGH status=open locus=compiler/src/codegen/emit-functions.ts(clientAsyncFactsOf serverFnNames — this file's routes only)+compiler/src/codegen/scheduling.ts(_clientServerFnNames/_clientSseFnNames filter on `${filePath}::`) prov=static:S446-PR1217-re-review-read-from-emit-NOT-run -->
+
+`import { save } from "./lib.scrml"` with a handler `${@x = save(); @y = @x + 1}` emits
+`_scrml_cs_reactive_set("x", save())`. There is no `await` and no detached IIFE, so `@x` holds a Promise, and
+`@y` gets `"[object Promise]1"`. An imported SSE generator likewise leaves the EventSource in the cell.
+The client async facts (`serverFnNames`) and `_clientSseFnNames` are built from THIS file's routes only
+(the `${filePath}::` filter from F5, S239 round 3), so an imported server fn is not treated as a server call
+in a handler.
+This was **read from the emitted code, not run.**
+**A future fix must extend BOTH sets to imported server fns.** The SSE keep-set added by #1217
+(`ColorOpts.reactiveArg1SkipKeep`) must include imported SSE fns too. Otherwise awaiting an imported
+generator call would reproduce the #1217 round-1 subscription loss.
+
+### g-event-control-after-await-misses-currentTarget-and-eventPhase — s441's E-EVENT-CONTROL-AFTER-AWAIT flags preventDefault/stopPropagation after an await, but not `event.currentTarget` / `event.eventPhase`, which are reset after dispatch — `NEW S446; MED; open`
+
+<!-- @gap id=g-event-control-after-await-misses-currentTarget-and-eventPhase sev=MED status=open locus=compiler/src/codegen/js-async-analysis.ts(the eventParam event-control check) prov=empirical:S446-PR1217-review-runtime-probe-happy-dom -->
+
+In an async handler (any handler that awaits a server call), `event.currentTarget` and `event.eventPhase`
+read after the first `await` are already reset: `currentTarget` is `null` and `eventPhase` is 0. The read is
+silently wrong. Example: `${@x = save(); @s = String(event.currentTarget && event.currentTarget.id)}` gives
+`@s = "null"` on PR #1217, where main gave `"b"` in `<each>`/lift (the handler was synchronous there). The
+same is true on main for `save(); … event.currentTarget`.
+`event.target` is not affected; it survives.
+**Recommended:** add `currentTarget` and `eventPhase` to the after-await event-control set, failing closed
+with the same code.
+
+### g-handler-nested-sequence-server-write-stale-read — a 1-statement handler whose body holds a statement sequence (`${ if (c) { @x = save(); @y = @x + 1 } }`, a `for` body, `${() => { … }}`) still reads the pre-fetch value — `NEW S446; HIGH; ruling-gated`
+
+<!-- @gap id=g-handler-nested-sequence-server-write-stale-read sev=HIGH status=ruling-gated owner=bryan locus=compiler/src/codegen/js-async-analysis.ts(analyze arg1Skip)+compiler/src/codegen/emit-event-wiring.ts/emit-each.ts/emit-lift.js(handlerStatementListColor — applies only to a ≥2-statement handlerBlock) prov=empirical:S446-happy-dom-runtime-probe-stale-on-31c42fbf-and-on-PR1217 -->
+
+PR #1217 orders `@x = save(); @y = @x + 1` only when the HANDLER is a statement list of two or more
+statements. A 1-statement handler has no such list, and that includes one whose single statement contains a
+sequence: `if (@c) { @x = save(); @y = @x + 1 }`, a `for` loop body, or a block-bodied arrow
+`() => { @x = save(); @y = @x + 1 }`.
+For those, the write keeps the detached `(async () => …)()` IIFE, and `@y` reads the stale `@x`
+(runtime result y = 1, expected 11; same in all six positions).
+Fixing this changes the emitted code of 1-statement handlers, which PR #1217's stop condition held for a ruling.
+**Recommended rule:** keep the fire-and-forget arg1 skip only when the cell write is the handler's SOLE root
+statement, and await in place everywhere else. This keeps `${@x = save()}` byte-identical.
+
+### g-handled-error-arm-failure-writes-envelope-into-cell — `@x = f() !{ | e :> { … } }` on a handled failure writes the error envelope into `@x` — `NEW S446; HIGH; open`
+
+<!-- @gap id=g-handled-error-arm-failure-writes-envelope-into-cell sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts(§19.4.3 guarded-expr arm emission for a reactive target) prov=empirical:S446-compiled-and-run-on-31c42fbf-function-body-and-handler -->
+
+On main, a statement-form arm (one with no value) emits the arm and then
+`_scrml_cs_reactive_set("x", <result>)` INSIDE the `__scrml_error` branch:
+`if (r && r.__scrml_error) { { …arm… } _scrml_cs_reactive_set("x", r); } else { _scrml_cs_reactive_set("x", r); }`.
+This happens in a function body and in a handler. After a handled failure, `@x` holds
+`{__scrml_error:true, …}`, so a later `@x + 1` gives `"[object Object]1"`.
+This contradicts the s441 comment in emit-client.ts: "a handled failure never lands the error envelope in the cell".
+
+### g-each-block-arrow-handler-never-runs — `onclick=${() => { @y = 5 }}` inside `<each>` never runs — `NEW S446; HIGH; open`
+
+<!-- @gap id=g-each-block-arrow-handler-never-runs sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(buildEachExprHandlerBody — arrow handler path) prov=empirical:S446-happy-dom-runtime-probe-on-31c42fbf -->
+
+A block-bodied arrow handler in an `<each>` row is a dead handler: clicking leaves `@y` at 0, at exit 0 with
+no diagnostic. This also happens for `<each>` inside a match arm.
+The expression arrow `() => @y = 5` works, and the block arrow works at top level, in `for … lift` and in match arms.
+
+### g-fn-shorthand-handler-scope-error — `onclick=${fn() { … }}` is E-SCOPE-001 (`fn` undeclared), or `ReferenceError: fn is not defined` in `for … lift` — `NEW S446; MED; open`
+
+<!-- @gap id=g-fn-shorthand-handler-scope-error sev=MED status=open locus=compiler/src/codegen/emit-event-wiring.ts(Case A fn-shorthand path exists)+the scope checker+compiler/src/codegen/emit-lift.js prov=empirical:S446-happy-dom-runtime-probe-on-31c42fbf -->
+
+emit-event-wiring has a "Case A" path written for the `fn(params) { body }` handler shorthand. Even so, the
+scope checker rejects `fn` with E-SCOPE-001 at top level, in `<each>` and in match arms. In `for … lift` the
+compile passes, and the click throws `ReferenceError: fn is not defined`.
+**Needs a ruling:** is the shorthand legal in a handler? If it is, fix the scope checker and the lift path.
+If it is not, give it one clean diagnostic everywhere.
+
+### g-engine-arm-rewired-handler-skips-async-coloring — engine/match-arm re-wired NON-delegable handlers are never §13.2-colored — `NEW S446; MED; open`
+
+<!-- @gap id=g-engine-arm-rewired-handler-skips-async-coloring sev=MED status=open locus=compiler/src/codegen/emit-variant-guard.ts(buildHandlerExpr → emitArmWireFunction, no colorActiveHandler) prov=static:S446-code-read-not-runtime-verified -->
+
+`emit-variant-guard.ts` `buildHandlerExpr` builds `function(event) { … }` for arm-tagged non-delegable events
+(focus, input, …) and never passes it through `colorActiveHandler`. Every other handler emit site does.
+A server call there, even a bare one, is therefore not awaited, the handler is never `async`, and the
+s441 fail-closed checks do not run.
+This was found by reading the code and is **NOT verified at runtime.** Delegable events (click, submit) in arms
+use the global registry and are colored.
 
 ### g-unbraced-if-for-body-regex-literal-is-space-padded-and-escapes-dropped — a regex literal in an un-braced `if`/`for` body is rewritten into a DIFFERENT regex at exit 0; whitespace and `\` are significant there and the tokenizer's padding is not — `NEW S412; MED; RESOLVED S412`
 
@@ -18623,7 +18727,15 @@ Ruled to BUILD at S430 (P4). The bootstrap's host-module bridge.
 every later `compile` resolves against the source dir, opens the stub, and fails `E-PA-004` naming tables — not the path it
 opened. Two defects: the side-effect create + resolution mismatch, and a diagnostic that does not name the resolved path.
 
-<!-- @gap id=g-dev-creates-empty-db-stubs-that-break-later-compiles sev=HIGH status=open locus=compiler/src/commands/dev.js prov=adopter:flogence-S49 -->
+> **RESOLVED S447 (`docs/changes/s445-dev-db-side-file/` + `docs/changes/s447-dev-db-r5/`).** Rulings S445 item 6 + "a built server's data root; ownership is per declaring file": `db=` resolves against the DECLARING file in dev/compile; only a schema-declaring file owns and may create (prints "created new database <path>"); referencing handles open lazily and fail loudly naming the resolved path; a built server resolves project-root-relative paths against `SCRML_DATA_DIR ?? project root` (adapters set it); `scrml dev` ignores `SCRML_DATA_DIR`. Six S239 review rounds (r1 DO-NOT-LAND … r5b LAND-WITH-NITS, every finding reproduced). flogence must change `./flogence.db` → `../flogence.db` (src/) / `../../flogence.db` (src/ports/). Supersedes the ss19 #9 framing of [[g-db-src-compile-vs-runtime-path]]. Residuals → [[g-dev-db-data-root-residuals]].
+
+<!-- @gap id=g-dev-creates-empty-db-stubs-that-break-later-compiles sev=HIGH status=resolved locus=compiler/src/commands/dev.js+compiler/src/codegen/sqlite-file-target.ts prov=adopter:flogence-S49 -->
+
+### G-DEV-DB-DATA-ROOT-RESIDUALS — S447 r5b re-review residuals of the SQLite data-root arc (all LOW / NIT)
+
+<!-- @gap id=g-dev-db-data-root-residuals sev=LOW status=open locus=compiler/src/codegen/sqlite-file-target.ts(_scrml_sqlite_inside, _scrml_sqlite_owned)+compiler/src/commands/dev.js prov=review:S447-devdb-r5b-review -->
+Reviewer-executed on `1b474db20`. **LOW — a DANGLING symlink inside the data dir escapes containment:** `data/dangling.db -> out/target.db` with `SCRML_DATA_DIR=data` → realpath fails on the dangling link, the check falls back to the parent dir (inside), then SQLite follows the link and creates `out/target.db`. Needs write access to the data dir. Fix: `lstat` the target; a symlink whose realpath fails is refused. **NIT:** a symlink loop at `data/loop1/x.db` surfaces a raw `EEXIST` from mkdir instead of a scrml error. **NIT:** the R4-1 refusal text "…or set SCRML_DATA_DIR to a directory that contains it, then rebuild" reads as though changing SCRML_DATA_DIR needs a rebuild (it does not). **Noted, not built:** TOCTOU between `existsSync` and the create. **Pre-existing:** every full-suite run leaves orphaned generation-1 `scrml dev --__dev-child` processes (a restarted child outlives its killed parent) — compiler/src/commands/dev.js / the commands tests. **Unlisted §34 rows:** `W-DEPLOY-DB-OUTSIDE-DATA-ROOT`, `W-DEPLOY-DB-NO-PROJECT-ROOT`, `W-DEPLOY-DB-SHARED-PATH` (and the older `W-DEPLOY-001`) live only in §47.14 / build.js.
+
 
 ### G-EACH-ROW-STALE-AFTER-AN-AWAITED-SERVER-CALL — a cell reassigned after an async boundary repaints a `${}` but not a keyed `<each>` row
 
@@ -18922,8 +19034,8 @@ same compile also raises a spurious `E-DG-002` ("`@items` … never consumed") a
 (Whether a mutating `sort()` in a render expression should be legal at all is its own question — the pin waits for
 that.) found by: S432 adversarial review of the when-changes branch.
 
-### g-dev-server-binds-all-interfaces — `scrml dev` / `scrml serve` listen on every interface, so the dev server (and its compile-error overlay) is reachable from the LAN — `NEW S432-peter; MED; open — ROUTED to bryan (default-bind is a product decision)`
-<!-- @gap id=g-dev-server-binds-all-interfaces sev=MED status=open locus=compiler/src/commands/dev.js(buildServeConfig,runDevChildServer,the parent proxy Bun.serve),compiler/src/commands/serve.js — no `hostname` passed to Bun.serve prov=empirical:S432-redaction-dev-agent-netstat-0.0.0.0-LISTENING -->
+### g-dev-server-binds-all-interfaces — `scrml dev` / `scrml serve` listen on every interface, so the dev server (and its compile-error overlay) is reachable from the LAN — `NEW S432-peter; MED; RESOLVED S446 (hold/s432-dev-server-localhost-default landed via fix/s446-loopback-default on bryan's S439 ruling)`
+<!-- @gap id=g-dev-server-binds-all-interfaces sev=MED status=resolved locus=compiler/src/commands/dev.js(buildServeConfig,runDevChildServer,the parent proxy Bun.serve),compiler/src/commands/serve.js — no `hostname` passed to Bun.serve prov=empirical:S432-redaction-dev-agent-netstat-0.0.0.0-LISTENING -->
 
 No `Bun.serve` call in `dev.js` or `serve.js` passes `hostname`; on this machine `Bun.serve({port:0})` shows in `netstat`
 as `TCP 0.0.0.0:<port> LISTENING` (while `server.hostname` reports "localhost"). The compile-error overlay renders
@@ -18931,6 +19043,23 @@ diagnostics — which carried db connection secrets until `fix/s432-db-secret-re
 network. Not changed unilaterally: some workflows use LAN access deliberately (phone testing), so the default
 (`localhost` + an opt-in `--host`) is bryan's call; `dev.js` is also in his S430 footprint. Security-adjacent → P7
 criterion 3 once ruled. found by: S432 redaction dev agent while enumerating sinks.
+
+**RESOLVED (S432, gift-wrapped for bryan's ruling).** Every CLI listener now goes through
+`compiler/src/commands/listen.js` `listen(config, host)`, which requires an explicit host. `scrml dev` (parent
+proxy) and `scrml serve` default to loopback on BOTH families — `127.0.0.1` + `::1` on the same port, the `::1` twin
+best-effort (skipped silently without IPv6; one warning line if another process holds it). The `scrml dev` app
+CHILD always binds `127.0.0.1` only (only the parent proxy dials it, by IPv4 literal — pre-fix it too sat on
+`0.0.0.0` on an ephemeral port, un-proxied). `--host <addr>` / `--host=<addr>` opt in; bare `--host` = `0.0.0.0` +
+`::` (ipv6Only twin) and prints one "reachable from the network" line naming the LAN URLs. An unbindable host
+exits 1 naming the host and families tried (not Bun's "Is port 0 in use?" stack). Measured on Windows/Bun 1.3.14:
+`hostname:"localhost"` binds `[::1]` ONLY and `"127.0.0.1"` IPv4 only, hence the explicit pair; `::` is dual-stack
+by default so its pairing with `0.0.0.0` needs `ipv6Only:true`. Pinned by `compiler/tests/unit/cli-listen-host.test.js`
+(incl. a structural check that no other listener — `Bun.serve`/`Bun.listen` in any spelling, `createServer`, or an
+http/https/net/tls/http2/dgram import — exists in compiler/src, and an empirical LAN-address probe with a bare-`--host`
+control) + `compiler/tests/commands/dev-serve-bind-host.test.js` (the real CLIs).
+S446 landing (the CI gate on Linux caught it): `listen()` now refuses inet_aton numeric shorthand (`0`, `127.1`,
+`2130706433`, `0x7f.0.0.1`, `010.0.0.1`) before any bind, on every OS. Linux binds `--host 0` as 0.0.0.0 (every
+interface) while Windows refuses it, so a typo-like value could otherwise expose the server on one OS only.
 
 ### g-native-component-def-with-children-throws-at-boot — under `--parser=scrml-native`, a markup-valued component definition that interpolates `${children}` is emitted as boot-time code that evaluates `children`, so the client throws `ReferenceError: children is not defined` at load — `NEW S432-peter; MED; open`
 <!-- @gap id=g-native-component-def-with-children-throws-at-boot sev=MED status=open locus=searched:compiler/native-parser(the native lowering of a `const X = <markup>` component definition — emits the definition body as a lift)—not-traced prov=empirical:S432-dev-agent-happy-dom-default-vs-native-A-B-on-451296f3-and-4d888293 -->
@@ -21019,10 +21148,17 @@ Reviewer-executed: `analyzeText` on a file importing `AuthError` + bare `fail .M
 Reviewer-executed over HTTP on `review/s443-protect-r5` (≈230 shapes); each reproduces on main too. **L1 HIGH** callback params of unmodelled methods/host calls are clean: `u.passwordHash.replace(/.+/, m => { s = m })`, `JSON.stringify(u, replacer)` → the hash. **L2 HIGH** `arguments[0]` / `return arguments`. **L3 MED-HIGH** `globalThis.x` / `process.env.X` stores, incl. across server fns. **L4 MED** descriptor tampering: the key is `Symbol.for("scrml.protect.origin")` (global registry) and `revealed` is mutable → `delete u[Symbol.for(…)]` or `.revealed.push(…)` declassifies without `reveal` (fix: module-private Symbol + freeze). **P1 HIGH** `RETURNING` rows are never tagged (`UPDATE/INSERT/DELETE … RETURNING *|passwordHash`). **P2 HIGH** `SELECT users . * FROM users` (spaced dot) returns the full row. **P3 HIGH** error messages bypass the floor: the CPS error envelope serializes `String(err.message)` (`json_extract('{}', passwordHash)` → message carries the value); non-CPS prod entry has no `error:` handler so Bun's dev error page returns message + source unless NODE_ENV=production. **P4 MED** a runtime-created view over a protected table: unknown table resolves to "no protected columns" instead of strip-all. Three new §14.8.9 SHALL sentences (provenance-by-default, reveal-is-the-only-path) are false until L1/L2/L4 are fixed. **SPEC contradiction H1 (MED, ruling):** §14.8.9 excludes `Bun.hash` as brute-forceable on low-entropy columns but allowlists `scrml:crypto` `hash` for every algorithm incl. md5/unsalted sha256 (`hash('md5', u.pin)` → reversible in 10⁴ tries) — PA rec: only verifyPassword/verifyHash/keyed-hmac/argon2 derive; a bare digest stays protected. Deferred by the r5 agent: Postgres key casing for `omit`; `rowid` exposing an INTEGER PRIMARY KEY protected column; views (per-table protect=).
 
 ### g-protect-egress-round-7-residuals — §14.8.9 items round 6 did not close (carried + newly surfaced)
-<!-- @gap id=g-protect-egress-round-7-residuals sev=HIGH status=open locus=compiler/src/codegen/protect-flow.ts(implicit invocation unmodelled: TaggedTemplateExpression tag, toString/valueOf/Symbol.toPrimitive coercion, Symbol.iterator via spread/for-of/destructuring; ThisExpression reads clean; isStdlibDeriver matches any `_scrml/<mod>.js` path)+compiler/src/commands/dev.js(route-handler catch returns `detail: err.message`) prov=review:S443-protect-r6b-review -->
+<!-- @gap id=g-protect-egress-round-7-residuals sev=HIGH status=resolved resolved-by=s447-protect-egress-r7 locus=compiler/src/codegen/protect-flow.ts(implicit invocation unmodelled: TaggedTemplateExpression tag, toString/valueOf/Symbol.toPrimitive coercion, Symbol.iterator via spread/for-of/destructuring; ThisExpression reads clean; isStdlibDeriver matches any `_scrml/<mod>.js` path)+compiler/src/commands/dev.js(route-handler catch returns `detail: err.message`) prov=review:S443-protect-r6b-review -->
+> **ROUND 7 — RESOLVED S447 (`docs/changes/s447-protect-egress-r7/`; every item reproduced over HTTP on base `be5e36b57` first — reviewer `probe.mjs`: compile, seed SQLite `SECRET-HASH-123` / `4321`, serve the emitted routes with `Bun.serve`, POST, scan body + headers; item 4 on a REAL `scrml dev`).** **Item 1 (writes through `this`)** — W1 W2 W4 W5 W7 W9 W14 W16 W17 served the hash at exit 0 → all `E-PROTECT-006` (plus raw-JS W8 apply, W10–W12 literal / spread / assign methods, W13 `new F`, W15 `Reflect.apply`, W18 `Object.create`, W20 `setPrototypeOf`). Mechanism: `this` is the RECEIVER, recorded per function from every route that supplies one (stored on an object, method-call receiver, `call`/`apply`/`bind`, array `thisArg`, any opaque/host invocation, `new` → an allocation cell); the recorded value keeps its alias cells, so `this.p = v` writes into the receiver's class exactly like `o.p = v` — with NO class unification. The 6e false positive on examples/23's login was traced (instrumented): the field-insensitive model believes `passwordArg` (read off the request body, which aliases the request, which holds the session object) may BE the session's methods, so `verifyPassword`'s opaque-callback over-approximation called the session's `set(key, value)` with the hash. Fixed by precision, not by dropping writes: allowlisted stdlib derivers are compiler-owned code that calls no function argument and are no longer fed to that over-approximation. examples/23 compiles clean; over HTTP (prod build, fresh `dispatch.db`) login + every route body + every page hash identical to base. **Item 2 (implicit invocation)** — I1–I4 I7–I9 I12 I14 I15 I18 I19 I22 I25 I26, X4 (`new F`), X5 (a server function RETURNING `{ then: (res) => res(h) }`), X9 and X10 (a tag a host call made: `String.raw.bind(String)`) all served → all `E-PROTECT-006`. Mechanism, not a shape list: a function stored where the LANGUAGE may call it — an ECMAScript protocol string key (`then`, `toString`, `valueOf`, `toJSON`, `toLocaleString`, `next`/`return`/`throw`, `__proto__`; string keys cannot be aliased), an accessor, or ANY key the compiler cannot read (every Symbol hook is a computed key, so `const S = Symbol; { [S.toPrimitive]: … }` is covered) — is analysed as invoked with `this` = the object, and its return is part of the object, so coercion / iteration / spread carry it; a spread / `Object.assign` copy re-invokes the copied hooks with `this` = the copy; `await` / `for await` resolve a possible thenable to what its `then` passes to its parameters; a tagged template is a call (strings array first; member tag gets `this`); a tag the analysis holds no function for fails closed unless it IS the compiler's SQL client (by identity: `new SQL` from `bun`, or a `.begin(tx)` handle); `instanceof` calls the hooks with the left operand. **Item 3** — `./_scrml/auth.js` returning its argument served the hash → `E-PROTECT-006`: the flow runs BEFORE `rewriteStdlibImports`, so the genuine stdlib always reaches it as `scrml:NAME` (verified on the pre-write serverJs); only that specifier is the stdlib now (also closes spoofed `crypto` hmac / `process` env key sources and `data` `pick`). **Item 4** — `scrml dev` answered `{"detail":"bad JSON path: 'SECRET-HASH-123'"}` → `{"error":"Internal server error"}`, error logged in full server-side; the dev serve config gained an `error:` handler (Bun's dev error page otherwise prints message + source; `scrml dev` is never NODE_ENV=production). Always, not only under `protect=` (a message can carry a connection string / file contents; the dev server is network-reachable). Also fixed (found while measuring): a host import handed to a host call (`import { a, b } from "lib"; a(b)`) overflowed the analysis stack — the compile crashed — on base. **Migration:** 0 new `E-PROTECT-006`, 0 removed, 0 tag / strip-all changes, 0 changed diagnostic sets across 2238 files (examples/ samples/ conformance/cases/ docs/readme-snippets/ stdlib/; base measured by flipping `protect-flow.ts` in place). **Perf:** examples/23 flow 1.0 s → 1.8 s (whole compile ~3 s); g2-deep N=8/32/128 256/499/4854 ms → 311/602/5093 ms. SPEC §14.8.9 amended (round-6e "disclosed bound" struck; round-7 rule + stdlib-identity sentence). Still open → [[g-protect-egress-round-8-residuals]].
 **HIGH — writes through `this` (review-executed S445 on 45e964d9a; ALSO on base c53b297a7 — pre-existing, disclosed by 6e):** a function stored on an object that WRITES a protected value through `this` creates a brand-new, marker-less column, so the runtime floor has nothing to strip and every sink ships it at exit 0 — W1 `u.stash = function () { this.x = this.passwordHash }; u.stash(); return u` → `{"id":1,"name":"ada","x":"SECRET-HASH-123"}`; W5 the ordinary setter `const o = { h: "" }; o.set = function (r) { this.h = r.passwordHash }; o.set(u); return o` → `{"h":"SECRET-HASH-123"}`; W7 overwrite of a non-protected column. Leaks via fn response, `/__mountHydrate` and the SSR state script. Fix direction: model `this.p = v` inside a function stored on an object as a write INTO that object (join `v` into the object's provenance, as `o.p = v` is) WITHOUT unifying alias classes (that caused the ex23 login false positive). Also: object-literal method `{ ...u, stash() { this.y = … } }` compiles to invalid JS (`{...u, stash: }`) — fails closed.
 
 **HIGH — implicit invocation (review-executed on 28a7bce00; contradicts §14.8.9's "provenance is preserved by default … getters and `toJSON` the serializer invokes" SHALL):** the flow does not model functions the LANGUAGE calls implicitly — a tagged template's tag (I1 `` tag`${h}` ``, I12 tag via method), coercion hooks `toString` / `valueOf` / `Symbol.toPrimitive` (I2 `` `${o}` ``, I3 `o + 0`, I7), and `[Symbol.iterator]` generators consumed by spread / `for…of` / destructuring (I4, I8, I9) — each served the value. Fix direction: treat an object literal holding a function under those keys (and any tag) as invoked wherever the language would invoke it. **MED:** G2 `globalThis.valueOf().x = h` / `process.env.valueOf().X = h` — a global-rooted METHOD result does not alias the global heap (a deliberate performance bound: aliasing it made examples/23 not finish); G8 `performance.mark(h)` then `performance.getEntriesByType("mark")` in another request — global state held inside an unmodelled platform object. **MED:** a user file at `./_scrml/auth.js` posing as stdlib gets the `verifyPassword` deriver allowlist (`isStdlibDeriver` matches the path shape, not the compiler's own stdlib bundle). **MED (re-confirmed on `scrml dev` port 4513):** `scrml dev` answers an uncaught route error with `{"detail": err.message}` (the SQLite `json_extract` message carries the value); a plain (non-CPS) handler also rethrows to any host that mounts `routes` / the WinterCG `fetch` — only the compiler's prod entry catches. **LOW / disclosed (round 6e):** READS through `this` are modelled (a function stored on an object sees its provenance — no `_{}` needed to reach this: `u.toJSON = function () { … this.passwordHash … }` is plain scrml), but WRITES through `this` (`this.x = h` inside such a function) are not — modelling them aliased the compiler's own session object to every protected value (false `E-PROTECT-006` on examples/23 login); the runtime stripped-`this` backstop still applies at the sink. **LOW (review-measured, round 6e):** `readFileSync("/etc/hostname")` and `String(randomInt(0, 1))` declassify as hmac keys — enumerated runtime sources, but world-readable / low-entropy. **MED (compiler, round 6e):** `import.meta.env.K` in scrml source is miscompiled (`String(String ( import . meta . env.K ).env.K)`), so it cannot be used as a key at all; the column markers use REGISTRY Symbols (`Symbol.for("scrml.protect.col:<c>")`) because a row tagged in one server module is redacted by another module's sink — a per-module Symbol would fail open; integrity rests on non-removable markers on the query's row + the compile-time removal rule. **LOW (review-measured):** `delete byId[rs[0].id]` (RM4 — a removal keyed by a column value) is rejected by the fail-closed removal rule; the message names the fix (a literal key, or `filter` / a `Map`). **LOW (contrived, review-measured):** the generated g2 deep-chain file at N=128 takes 11.9 s vs base 1.4 s (N≤32 is at base speed). Carried from round 5 (RELAYED, not re-probed): Postgres key casing for `omit`; `rowid` exposing an `INTEGER PRIMARY KEY` protected column; a view listed in `tables=` gets `protect=` by column NAME only.
+
+### g-protect-egress-round-8-residuals — §14.8.9 items round 7 did not close (new finds + carried)
+<!-- @gap id=g-protect-egress-round-8-residuals sev=HIGH status=open locus=compiler/src/codegen/protect-flow.ts(memberRead: a named read off a value that CONTAINS a row is read as a column of the row; evalCall method path: stored-fn invoke skipped for global receivers + MUTATING/ELEMENT built-in model taken when globalFnsFor is empty; BinaryExpression instanceof: global right operand with no nameable path applies nothing and has no fail-closed fallback; recordThis/storeFns cost on long hook chains and shared this-writing methods; Array species protocol unmodelled; thenable resolve reached only through direct parameter calls)+compiler/src/codegen(searched — not located: `function f() { this.x = … }` declaration miscompile; object-literal method shorthand miscompile) prov=empirical:S447-protect-r7-agent+review:S447-protect-r7-review -->
+**HIGH — pre-existing (base AND round 7, review-reproduced over HTTP): a `this`-write through an ALIASED global whose method name matches a built-in.** `globalThis.box17 = { h: "", set: function (r) { this.h = r.passwordHash } }; const g = globalThis.box17; g.set(u); return g` → `{"h":"SECRET-HASH-123"}`. The same shape with `stash` is rejected, and so is a direct `globalThis.box21.set(…)`. Suspected cause: the stored-function invoke is skipped for global receivers and `globalFnsFor(["set"])` is empty, so the call is modelled only as a Map write. This contradicts the round-7 SPEC §14.8.9 `this` sentence, which carries an inline ⚑ residual note pointing here.
+**HIGH — pre-existing (base AND round 7, review-reproduced): `instanceof` through an aliased global.** `const H = Symbol.hasInstance; globalThis.C14 = { [H]: function (x) { s = x.passwordHash; return true } }; const { C14 } = globalThis; u instanceof C14; return s` serves the hash; so do `const C = globalThis.C10; u instanceof C` and `const P = process; u instanceof P.C24`. When the global path cannot be named, `globalFnsFor([])` is empty and there is no fail-closed `unknownCall` fallback. Direct `u instanceof globalThis.C13` is rejected. SPEC §14.8.9 carries an inline ⚑ residual note.
+**HIGH — NEW, pre-existing on base `be5e36b57` (found by the round-7 agent, NOT fixed — out of the round-7 brief):** a row held in an object FIELD is read as "column `<field>` of the row": `const t = { h: u }; return t.h.passwordHash` and `const t = { h: u }; const { h } = t; return h.passwordHash` serve `"SECRET-HASH-123"` over HTTP at exit 0 (the array form `[u][0].passwordHash` is rejected). Review-widened (S447 r7 review, reproduced): `JSON.stringify(t.h)` (the FULL row), `Object.values(t.h)`, `{ rs }` → `t.rs.map((r) => r.passwordHash)`, nested `t.a.b.pin` → `4321`, and a getter / method reading `this.h.passwordHash` all serve. A row held in a `Map` IS rejected. Cause: `Taint.row` means "is, OR contains, a descriptor-bearing row", and `memberRead` applies column-read semantics to a named key on either. Proposed fix: split the row part into may-BE-the-row / may-CONTAIN-a-row; a named read off a container yields the row (both flags), a named read off the row itself stays a column read. Must be measured for false positives — `normalize(u.name)` / `capitalize(u.name)` must not start carrying the row's protected columns. **MED — NEW:** the Array species protocol — `a.constructor = { [Symbol.species]: function () { return cap } }; a.map((x) => x); return cap` serves the hash: the runtime writes the elements into whatever the species constructor returns; unmodelled (the species function IS analysed as invoked, its result is not written into). **MED — NEW (codegen, fails closed by accident):** a `function` DECLARATION assigning through `this` miscompiles — `function stash() { this.x = this.passwordHash }` emits `this . x = this . passwordHash.x = this . x = this . passwordHash.passwordHash;` (the statement duplicated into its own RHS) and throws a TypeError at runtime (HTTP 500, no leak); object-literal method shorthand / accessors still miscompile to invalid JS (`{ h: "", set: }`, carried from round 7), so those shapes reach the flow only through raw JS (unit-tested there). **LOW (round-7 bounds, disclosed):** a thenable's `resolve` is followed through direct parameter calls (`res(h)`, an inner arrow calling it, `res.call` / `res.apply`), not when stashed and called later (`const r = res; r(h)`) or handed to a host (`setTimeout(res, 0, h)`); `this` is context-insensitive per function (fails closed); `class` is `E-CLASS-NOT-IN-SCRML`, so class methods' `this` (raw JS only) is not modelled — `new C(u)` itself fails closed; the implicit-invocation keys are the ECMAScript protocol's string keys plus every unreadable key — a function stored under a NON-protocol literal key is invoked only by a call the program writes. **Perf (measured):** examples/23 flow 1.0 s → 1.8 s. **LOW — INTRODUCED by round 7 (review-measured): performance cliff.** A chain of 240 objects, each with a `toString` hook holding the previous one, takes 13.7 s vs 0.47 s on base; a shared `this`-writing method on N receivers takes 1.1 / 6.1 / 40.5 s at N = 60 / 120 / 240 vs 0.27 / 0.35 / 0.53 s on base (≈ N^2.7). **LOW — INTRODUCED, fails closed (review-measured):** `this` is context-insensitive, so `a.w("ok"); b.w(u.passwordHash); return a` → `E-PROTECT-006` (a false positive; zero corpus impact). **Untested (review):** Proxy traps (blocked by `E-SCOPE-001` on `Proxy` in scrml source) and a stashed thenable `resolve`. **Carried open from round 7:** G2 `globalThis.valueOf().x = h` (global-rooted method results do not alias the global heap — performance bound); G8 `performance.mark(h)` read back by another request; a plain (non-CPS) handler rethrows to any host that mounts `routes` / the WinterCG `fetch` itself (the compiler's prod entry and, now, `scrml dev` catch); hmac-key LOWs (`readFileSync("/etc/hostname")`, `String(randomInt(0, 1))`); `import.meta.env.K` miscompile; RM4 removal keyed by a column value (fail-closed, message names the fix); g2 deep-chain N=128 ~5 s; registry-Symbol markers (integrity rests on non-removable markers + the removal rule); Postgres `omit` key casing, `rowid` exposing an `INTEGER PRIMARY KEY` protected column, a view in `tables=` protected by column NAME only (round-5 carries, RELAYED).
 
 ### g-worker-supervision-and-program-shape-gaps — §46.3/§46.4 supervision has no codegen, and several nested-program shapes miscompile silently
 <!-- @gap id=g-worker-supervision-and-program-shape-gaps sev=HIGH status=open locus=searched:compiler/src/codegen/emit-worker.ts,emit-client.ts,emit-logic.ts(0 hits for restart=/max-restarts=/within=/when terminate from/.restart()) prov=empirical:S443-worker-d1-d2-agent -->
