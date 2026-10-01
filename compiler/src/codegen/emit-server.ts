@@ -25,7 +25,7 @@ import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicate
 import { resolveDbDriver } from "./db-driver.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
-import { sqliteFileHandleArg, ownedDbFilesFor, SQLITE_FILE_HELPER_IMPORT, SQLITE_FILE_HELPER_LINES } from "./sqlite-file-target.ts";
+import { sqliteFileHandle, ownedDbFilesFor, SQLITE_FILE_HELPER_IMPORT, sqliteFileHelperLines } from "./sqlite-file-target.ts";
 import { fileDefaultDbValue } from "../db-ownership.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
@@ -6844,7 +6844,7 @@ export function generateServerJs(
     // s445 — where the SQLite-file helper (and its `node:fs` import) is spliced in,
     // once the loop below has seen a file-backed handle that needs it.
     const sqliteFileHelperAt = declLines.length;
-    let sqliteFileHandles = false;
+    let sqliteFileProjectRoot: string | null = null;
     // Emit declarations in stable order: default `_scrml_sql` first, then
     // scoped `_scrml_sql_<n>` ascending. The declaration order must precede
     // any code that references the handle (the idempotency / structural-eq
@@ -6904,30 +6904,28 @@ export function generateServerJs(
         declLines.push(`const ${ident} = new SQL(":memory:");`);
         continue;
       }
-      // s445-dev-db-side-file — a SQLite FILE opens through `_scrml_sqlite_file`
-      // (codegen/sqlite-file-target.ts): the path the compile-time schema read
-      // resolved (the declaring file's directory — db-target.ts `resolveDbFilePath`),
-      // written relative to THIS module, created only when the program OWNS it
-      // (§8.1.1 — declares its schema; db-ownership.ts). It replaces the
-      // ss19 #9 literal, which was re-relativized to the compile unit's output base
-      // and then opened CWD-relative — so `scrml dev` started from any other
-      // directory, or an artifact left by an earlier compile with a different base,
-      // made SQLite create an empty database where nobody (or only the compiler)
-      // looked. Every file-backed handle gets the §44 WAL/busy-timeout defaults.
-      const fileArg = scope.driver === "sqlite"
-        ? sqliteFileHandleArg(
+      // s445-dev-db-side-file — a SQLite FILE opens through the helpers in
+      // codegen/sqlite-file-target.ts: the file the compile-time schema read resolved
+      // (the declaring file's directory — §8.1.1), recorded relative to the project
+      // root and resolved at runtime against SCRML_DATA_DIR ?? that root (§47.14).
+      // A file that declares the database's schema OWNS it — its handle opens at load
+      // and may create the file; any other handle is REFERENCING — it opens lazily on
+      // first use and never creates (ruling S445: per-file ownership). Replaces the
+      // ss19 #9 literal, which was re-relativized to the compile unit's output base and
+      // opened CWD-relative. Every file-backed handle gets the §44 WAL/busy-timeout
+      // defaults — an owning one at load (below), a referencing one when it opens.
+      const sqliteFile = scope.driver === "sqlite" && typeof filePath === "string"
+        ? sqliteFileHandle(
             scope.connectionString,
-            typeof filePath === "string" ? filePath : "",
-            (fileAST as any)._outputDir,
+            filePath,
             (fileAST as any)._outputBaseDir,
-            // S445 ruling — create only a database this program declares schema for.
-            ownedDbFilesFor(fileAST, getNodes(fileAST), typeof filePath === "string" ? filePath : ""),
+            ownedDbFilesFor(getNodes(fileAST), filePath),
           )
         : null;
-      if (fileArg !== null) {
-        sqliteFileHandles = true;
-        declLines.push(`const ${ident} = new SQL(${fileArg});`);
-        sqliteConfiguredIdents.push(ident);
+      if (sqliteFile !== null) {
+        sqliteFileProjectRoot = sqliteFile.projectRoot;
+        declLines.push(`const ${ident} = ${sqliteFile.expr};`);
+        if (sqliteFile.owns) sqliteConfiguredIdents.push(ident);
         continue;
       }
       // `:memory:` and the network drivers. SQLite needs the `sqlite:` prefix or
@@ -6951,15 +6949,16 @@ export function generateServerJs(
         sqliteConfiguredIdents.push(ident);
       }
     }
-    if (sqliteFileHandles) {
-      declLines.splice(sqliteFileHelperAt, 0, SQLITE_FILE_HELPER_IMPORT, "", ...SQLITE_FILE_HELPER_LINES, "");
+    if (sqliteFileProjectRoot !== null) {
+      declLines.splice(sqliteFileHelperAt, 0, SQLITE_FILE_HELPER_IMPORT, "", ...sqliteFileHelperLines(sqliteFileProjectRoot), "");
     }
     // §44 (S433) — SQLITE DURABILITY / CONCURRENCY DEFAULTS. The full rationale, the
     // measurements, and the three traps (constructor options are ignored; the `await` is
     // load-bearing; top-level await is forbidden) live in `codegen/sqlite-defaults.ts`,
     // which is SHARED with `emit-tool.ts` — the tool path was missed on the first pass
-    // and left the gap's own symptom reachable for a `kind="tool"` program.
-    if (sqliteConfiguredIdents.length > 0) {
+    // and left the gap's own symptom reachable for a `kind="tool"` program. A
+    // referencing sqlite-file handle calls the helper itself when it opens.
+    if (sqliteConfiguredIdents.length > 0 || sqliteFileProjectRoot !== null) {
       declLines.push("");
       declLines.push(...SQLITE_CONFIGURE_HELPER_LINES);
       for (const ident of sqliteConfiguredIdents) {

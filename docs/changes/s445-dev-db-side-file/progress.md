@@ -64,3 +64,22 @@
 - F8: SPEC drops `scrml serve`; db-target.ts comment cites §8.1.1; `file:` URI → unsupported-scheme → E-SQL-005.
 - Structure: runtime path = sqlite-file-target.ts runtimeDbSpecifier (one function; F2 pending);
   ownership = db-ownership.ts decideOwnedDbFiles (one function; F4 pending).
+
+## Round 4 — bryan ruled F2 (data root) + F4 (per-file ownership)
+- merged origin/main (9d6ba08b6; FACTS theirs + regen).
+- F4: ownership per DECLARING file (decideOwnedDbFiles over one file; program-wide stamp removed from
+  codegen/index.ts and PA). Owning handle: `new SQL(_scrml_sqlite_owned(...))` opens at load, may create, prints
+  the created line. Referencing: `_scrml_sqlite_referenced(...)` — a Proxy that opens on first use (query / method),
+  configures (§44 WAL/busy-timeout) before the first statement, never creates, throws the not-found error at that
+  use. Same module alone vs in a build → identical handle (pinned with examples/23 pages vs `scrml build`).
+- F2: handle records the db path relative to the project root (projectRootFor: scrml.toml dir via findManifest,
+  else .git checkout, else build root) + `_scrml_project_root` (absolute, recorded at build); runtime resolves
+  SCRML_DATA_DIR ?? recorded root (`_scrml_sqlite_path`). Moved build with no env → error naming SCRML_DATA_DIR
+  (owning: at load; referencing: at first use). `scrml dev` follows the same one rule (honours SCRML_DATA_DIR).
+  Outside-root / authored-absolute paths recorded absolute (data root does not move them).
+- Adapters: Dockerfile ENV SCRML_DATA_DIR=/data + VOLUME; fly.toml [env] + [mounts] data→/data; render.yaml envVars +
+  disk /data; railway: build prints "set SCRML_DATA_DIR to your volume mount path" (volumes are dashboard-attached).
+- SPEC §8.1.1 (ownership per file, lazy referencing, supersedes program-wide sentences) + §44.2 step 5 + §39.7 +
+  NEW §47.14 Runtime Data Root, both with the S445 provenance.
+- The round-1..3 outputDir plumbing (api.js → runCG → fileAST._outputDir) is removed: the runtime path no longer
+  depends on the module's output location.

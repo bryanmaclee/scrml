@@ -136,7 +136,7 @@ describe("CONF-SSR-AUTH-SCOPED (runtime-half): the compiled bundle omits the see
     // `import.meta.url` to the emitted app.server.js so the compose reads app.html.
     const src = serverJs
       .replace(/import\s+\{[^}]*\}\s+from\s+["'][^"']+["'];?/g, "")
-      .replace(/const _scrml_sql = new SQL\(.*\);/g, "")
+      .replace(/const _scrml_sql = .*;/g, "")
       .replace(/import\.meta\.url/g, JSON.stringify("file://" + join(outDir, "app.server.js")))
       .replace(/^export\s+/gm, "");
     const factory = new Function(

@@ -21,27 +21,30 @@
  * `*.server.js` under the output dir, so an artifact from an earlier multi-root
  * compile created files exactly where the next compile's schema read looked.
  *
- * THE FIX: one resolver (`db-target.ts resolveDbFilePath`) for both halves; the
- * emitted handle names that file relative to the MODULE (`_scrml_sqlite_file`,
- * codegen/sqlite-file-target.ts). Creation follows ownership (SPEC §8.1.1,
- * ruling:user-voice-scrml.md S445 item 6, `db-ownership.ts`): a program that declares
- * the database's schema (its own CREATE TABLE or a <schema>) may create it; a program
- * that only references it opens with `create: false` and refuses to load — naming the
- * path — when it is absent. At compile time an OWNED database that exists with no
- * tables is read like an absent one.
+ * THE FIX: one resolver (`db-target.ts resolveDbFilePath`) for both halves. The
+ * emitted handle records that file relative to the project root and resolves it at
+ * runtime against SCRML_DATA_DIR ?? the recorded root (SPEC §47.14, S445 data root).
+ * Creation follows PER-FILE ownership (SPEC §8.1.1, S445 per-file ownership,
+ * `db-ownership.ts`): only a file that declares the database's schema (its own CREATE
+ * TABLE or a <schema>) may create it — its handle opens at load; every other handle
+ * opens lazily on first use, never creates, and fails loudly — naming the path — if
+ * the file is still missing then. At compile time an OWNED database that exists with
+ * no tables is read like an absent one.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, mkdtempSync, cpSync, rmSync } from "fs";
+import { tmpdir } from "os";
 import { join, resolve, dirname, relative, sep } from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import { Database } from "bun:sqlite";
 import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { compileScrml } from "../../src/api.js";
 import { classifyDbTarget, resolveDbFilePath } from "../../src/db-target.ts";
-import { runtimeDbSpecifier, sqliteFileHandleArg } from "../../src/codegen/sqlite-file-target.ts";
+import { runtimeDbPath, projectRootFor, sqliteFileHandle } from "../../src/codegen/sqlite-file-target.ts";
 import { decideOwnedDbFiles, fileDefaultDbValue, sqlDeclaresTable } from "../../src/db-ownership.ts";
 import { failedModuleRoutes } from "../../src/commands/dev.js";
+import { emittedDbFile } from "../helpers/self-host-server-import.js";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(testDir, "../../src/cli.js");
@@ -134,10 +137,9 @@ function dbFilesUnder(root) {
 
 /** The absolute file an emitted module's SQLite handle opens (resolved as the helper does at load). */
 function opensFile(modulePath) {
-  const js = readFileSync(modulePath, "utf8");
-  const m = /new SQL\(_scrml_sqlite_file\(("(?:[^"\\]|\\.)*")/.exec(js);
-  if (!m) throw new Error("no _scrml_sqlite_file handle in " + modulePath);
-  return fileURLToPath(new URL(JSON.parse(m[1]), pathToFileURL(modulePath)));
+  const found = emittedDbFile(readFileSync(modulePath, "utf8"));
+  if (!found) throw new Error("no SQLite-file handle in " + modulePath);
+  return found.file;
 }
 
 /** Start `scrml dev <entry> --port 0` from `cwd`; resolve with the port and a log getter. */
@@ -183,45 +185,49 @@ describe("§1 one resolver: the declaring file's directory, never the CWD", () =
     expect(resolveDbFilePath(classifyDbTarget("/var/data/app.db"), f)).toBe(resolve("/var/data/app.db"));
   });
 
-  test("the emitted specifier, resolved against the module, is the same absolute file", () => {
+  test("§47.14 — the handle records the file relative to the PROJECT ROOT (no manifest → the build root)", () => {
     const src = resolve("/proj/src/pages/admin/panel.scrml");
-    const out = resolve("/proj/dist");
     const base = resolve("/proj/src");
-    // pages/ is stripped from the dist layout (api.js pathFor): the module lands in dist/admin/.
-    const arg = sqliteFileHandleArg("../../data/app.db", src, out, base, new Set());
-    expect(arg).toBe('_scrml_sqlite_file("../../src/data/app.db", "../../data/app.db", "pages/admin/panel.scrml", false)');
-    // Owned (the program declares its schema) → the handle may create it.
+    expect(projectRootFor(src, base)).toBe(base); // /proj has no scrml.toml / .git
+    const ref = sqliteFileHandle("../../data/app.db", src, base, new Set());
+    expect(ref).toEqual({
+      expr: '_scrml_sqlite_referenced("data/app.db", "../../data/app.db", "pages/admin/panel.scrml")',
+      owns: false,
+      projectRoot: base.split(sep).join("/"),
+    });
+    // Owned (this file declares the schema) → opens at load and may create.
     const owned = new Set([resolveDbFilePath(classifyDbTarget("../../data/app.db"), src)]);
-    expect(sqliteFileHandleArg("../../data/app.db", src, out, base, owned))
-      .toBe('_scrml_sqlite_file("../../src/data/app.db", "../../data/app.db", "pages/admin/panel.scrml", true)');
-    const spec = JSON.parse(/\("([^"]*)"/.exec(arg)[0].slice(1));
-    const moduleUrl = pathToFileURL(resolve("/proj/dist/admin/panel.server.js"));
-    expect(fileURLToPath(new URL(spec, moduleUrl))).toBe(resolveDbFilePath(classifyDbTarget("../../data/app.db"), src));
+    expect(sqliteFileHandle("../../data/app.db", src, base, owned).expr)
+      .toBe('new SQL(_scrml_sqlite_owned("data/app.db", "../../data/app.db", "pages/admin/panel.scrml"))');
   });
 
-  test("a filename that is not URL-safe survives the round trip", () => {
-    const dir = resolve("/proj/src");
-    const spec = runtimeDbSpecifier(join(dir, "my data #1?.db"), join(dir, "app.scrml"), resolve("/proj/dist"), dir, false);
-    expect(spec).toBe("../src/my%20data%20%231%3F.db");
-    expect(fileURLToPath(new URL(spec, pathToFileURL(resolve("/proj/dist/app.server.js"))))).toBe(join(dir, "my data #1?.db"));
+  test("§47.14 — a scrml.toml makes the project root a property of the FILE, not the build", () => {
+    const root = join(_tmp.root, "manifest-root");
+    mkdirSync(join(root, "src", "pages"), { recursive: true });
+    writeFileSync(join(root, "scrml.toml"), "");
+    const src = join(root, "src", "pages", "p.scrml");
+    writeFileSync(src, "");
+    // Whatever the build root, the manifest wins.
+    expect(projectRootFor(src, join(root, "src", "pages"))).toBe(root);
+    expect(projectRootFor(src, join(root, "src"))).toBe(root);
+    expect(runtimeDbPath(join(root, "src", "app.db"), root, false)).toBe("src/app.db");
   });
 
-  test("no output location known → the absolute file: URL; an authored absolute path stays absolute", () => {
-    const src = resolve("/proj/src/app.scrml");
-    expect(runtimeDbSpecifier(resolve("/proj/src/app.db"), src, null, null, false)).toBe(pathToFileURL(resolve("/proj/src/app.db")).href);
-    expect(runtimeDbSpecifier(resolve("/var/data/app.db"), src, resolve("/proj/dist"), resolve("/proj/src"), true)).toBe(pathToFileURL(resolve("/var/data/app.db")).href);
+  test("§47.14 — outside the project root, or authored absolute: recorded absolute (the data root does not move it)", () => {
+    expect(runtimeDbPath(resolve("/elsewhere/app.db"), resolve("/proj"), false)).toBe(resolve("/elsewhere/app.db").split(sep).join("/"));
+    expect(runtimeDbPath(resolve("/proj/app.db"), resolve("/proj"), true)).toBe(resolve("/proj/app.db").split(sep).join("/"));
   });
 
   test("a `file:` URI is refused (E-SQL-005), never resolved as a file named `file:…` (F8)", () => {
     for (const v of ["file:./x.db", "FILE:x.db", "file:///tmp/x.db"]) {
       expect(classifyDbTarget(v).kind).toBe("unsupported-scheme");
-      expect(sqliteFileHandleArg(v, resolve("/proj/src/app.scrml"), resolve("/proj/dist"), resolve("/proj/src"), new Set())).toBeNull();
+      expect(sqliteFileHandle(v, resolve("/proj/src/app.scrml"), resolve("/proj/src"), new Set())).toBeNull();
     }
   });
 
   test(":memory:, sqlite::memory: and network drivers are not files", () => {
     for (const v of [":memory:", "sqlite::memory:", "postgres://u@h/d", "mysql://u@h/d"]) {
-      expect(sqliteFileHandleArg(v, resolve("/proj/src/app.scrml"), resolve("/proj/dist"), resolve("/proj/src"), new Set())).toBeNull();
+      expect(sqliteFileHandle(v, resolve("/proj/src/app.scrml"), resolve("/proj/src"), new Set())).toBeNull();
     }
   });
 });
@@ -304,17 +310,17 @@ describe("§3 scrml dev run from the project root", () => {
     expect(again.stdout.toString() + again.stderr.toString()).not.toContain("E-PA-004");
   }, 90_000);
 
-  test("REFERENCING program, missing database: a loud error naming the path, nothing created", async () => {
+  test("REFERENCING program, missing database: loads fine, first use is a loud 500 naming the path, nothing created", async () => {
     const root = join(_tmp.root, "missing");
     mkdirSync(join(root, "src"), { recursive: true });
     writeFileSync(join(root, "src", "app.scrml"), REFERENCE_APP);
     const dev = await startDev(root, "src/app.scrml");
     let log, rpc;
     try {
-      log = dev.log();
-      // S445 review F7 — the unavailable server function answers 500 naming the
-      // missing database, not a bare 404.
-      const route = /POST\s+(\/_scrml\/__ri_route_count_\d+)/.exec(log)?.[1];
+      // S445 per-file ownership — a referencing handle does not open at load, so the
+      // module loads and its routes mount; the error comes at first use.
+      expect(dev.log()).not.toContain("Failed to import");
+      const route = /POST\s+(\/_scrml\/__ri_route_count_\d+)/.exec(dev.log())?.[1];
       expect(route).toBeDefined();
       const r = await fetch(`http://localhost:${dev.port}${route}`, {
         method: "POST",
@@ -322,6 +328,7 @@ describe("§3 scrml dev run from the project root", () => {
         body: "{}",
       });
       rpc = { status: r.status, body: await r.text() };
+      log = dev.log();
     } finally {
       await stopDev(dev);
     }
@@ -387,7 +394,7 @@ describe("§4 ownership at compile time (S445 ruling)", () => {
     writeFileSync(join(root, "o.db"), ""); // `touch o.db`
     const r = compileIn(root, "app.scrml", OWNING_DB_BLOCK_APP);
     expect(errorCodes(r)).toEqual([]);
-    expect(readFileSync(join(root, "dist", "app.server.js"), "utf8")).toContain('_scrml_sqlite_file("../o.db", "./o.db", "app.scrml", true)');
+    expect(emittedDbFile(readFileSync(join(root, "dist", "app.server.js"), "utf8"))).toEqual({ file: join(root, "o.db"), owns: true });
   });
 
   test("a REFERENCED database that exists with no tables is still E-PA-004 (EMPTY)", () => {
@@ -399,8 +406,8 @@ describe("§4 ownership at compile time (S445 ruling)", () => {
     expect((r.errors ?? []).map((e) => e.message).join("\n")).toContain("EMPTY");
   });
 
-  test("ownership is program-wide: a file that only reads the db another file declares is an owning handle", () => {
-    const root = join(_tmp.root, "program-wide");
+  test("ownership is PER DECLARING FILE: a file that only reads the db another file declares stays referencing, alone or in a build", () => {
+    const root = join(_tmp.root, "per-file");
     mkdirSync(root, { recursive: true });
     writeFileSync(join(root, "lib.scrml"),
       `<db src="./shared.db" tables="t" />\n\${\nexport function ensure() {\n  ?{\`CREATE TABLE IF NOT EXISTS t (n INTEGER)\`}.run()\n}\n}\n`);
@@ -410,20 +417,51 @@ describe("§4 ownership at compile time (S445 ruling)", () => {
       write: true, outputDir: join(root, "dist"), log: () => {},
     });
     expect(errorCodes(both)).toEqual([]);
-    expect(readFileSync(join(root, "dist", "reader.server.js"), "utf8")).toContain('_scrml_sqlite_file("../shared.db", "./shared.db", "reader.scrml", true)');
-    // Compiled alone, the reader declares nothing for shared.db: referencing.
     const alone = compileScrml({ inputFiles: [join(root, "reader.scrml")], write: true, outputDir: join(root, "dist-alone"), log: () => {} });
     expect(errorCodes(alone)).toEqual([]);
-    expect(readFileSync(join(root, "dist-alone", "reader.server.js"), "utf8")).toContain('_scrml_sqlite_file("../shared.db", "./shared.db", "reader.scrml", false)');
+    const handleLine = (p) => /^const _scrml_sql = .*;$/m.exec(readFileSync(p, "utf8"))[0];
+    const inBuild = handleLine(join(root, "dist", "reader.server.js"));
+    expect(inBuild).toMatch(/^const _scrml_sql = _scrml_sqlite_referenced\(/);
+    // The ruling's point: the answer does not depend on which files are in the build.
+    expect(handleLine(join(root, "dist-alone", "reader.server.js"))).toBe(inBuild);
+    expect(emittedDbFile(readFileSync(join(root, "dist", "reader.server.js"), "utf8"))).toEqual({ file: join(root, "shared.db"), owns: false });
   });
 
-  test("a <schema> block makes its program the owner", () => {
+  test("a <schema> block makes its file the owner", () => {
     const root = join(_tmp.root, "schema-owner");
     const r = compileIn(root, "app.scrml",
       `<program db="./s.db">\n<schema>\n    notes { id: integer primary key\n            body: text }\n</>\n\${\nfunction add(body) {\n    ?{\`INSERT INTO notes (body) VALUES (\${body})\`}.run()\n}\n}\n<button onclick=add("x")>add</button>\n</program>\n`);
     expect(errorCodes(r)).toEqual([]);
-    expect(readFileSync(join(root, "dist", "app.server.js"), "utf8")).toContain('_scrml_sqlite_file("../s.db", "./s.db", "app.scrml", true)');
+    expect(emittedDbFile(readFileSync(join(root, "dist", "app.server.js"), "utf8"))).toEqual({ file: join(root, "s.db"), owns: true });
   });
+
+  test("examples/23: every page module emits the IDENTICAL handle compiled alone and inside `scrml build .` (S445 per-file)", () => {
+    const ex = resolve(testDir, "../../../examples/23-trucking-dispatch");
+    const pages = ["pages/dispatch/board.scrml", "pages/driver/messages.scrml", "pages/customer/home.scrml"];
+    const out = join(_tmp.root, "ex23-build");
+    const b = Bun.spawnSync(["bun", CLI, "build", ex, "-o", out], { stdout: "pipe", stderr: "pipe" });
+    expect(b.exitCode).toBe(0);
+    const handleLine = (p) => /^const _scrml_sql = .*;$/m.exec(readFileSync(p, "utf8"))?.[0];
+    for (const page of pages) {
+      const alone = join(_tmp.root, "ex23-alone", page.replace(/\W/g, "_"));
+      compileScrml({ inputFiles: [join(ex, page)], write: true, outputDir: alone, log: () => {} });
+      // The page's own module (the alone compile may gather imports, so search the tree).
+      const want = page.split("/").pop().replace(/\.scrml$/, ".server.js");
+      const find = (d) => {
+        for (const e of readdirSync(d, { withFileTypes: true })) {
+          const p = join(d, e.name);
+          if (e.isDirectory()) { const f = find(p); if (f) return f; } else if (e.name === want) return p;
+        }
+        return null;
+      };
+      const aloneJs = find(alone);
+      expect(aloneJs).not.toBeNull();
+      const builtJs = join(out, page.replace(/^pages\//, "").replace(/\.scrml$/, ".server.js"));
+      const a = handleLine(aloneJs);
+      expect(a).toMatch(/^const _scrml_sql = _scrml_sqlite_referenced\("examples\/23-trucking-dispatch\/dispatch\.db", /);
+      expect(handleLine(builtJs)).toBe(a);
+    }
+  }, 120_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -462,8 +500,8 @@ describe("§5 S445 review findings", () => {
     // Both statements run on `_scrml_sql` = a.db (the first <db src>) — so a.db is the owned one.
     const all = readdirSync(join(root, "dist")).filter((f) => f.endsWith(".js"))
       .map((f) => readFileSync(join(root, "dist", f), "utf8")).join("\n");
-    expect(all).toContain('_scrml_sqlite_file("../a.db", "./a.db", "lib.scrml", true)');
-    expect(all).not.toContain('"./b.db", "lib.scrml", true');
+    expect(all).toMatch(/new SQL\(_scrml_sqlite_owned\("[^"]*\/a\.db", "\.\/a\.db", "lib\.scrml"\)\)/);
+    expect(all).not.toMatch(/_scrml_sqlite_owned\("[^"]*\/b\.db"/);
   });
 
   test("F1(b) — W-DB-PATH-RESOLVES-ELSEWHERE names both files when the path was written for the CWD", () => {
@@ -522,5 +560,82 @@ describe("§5 S445 review findings", () => {
     expect(fileDefaultDbValue([prog("./p.db")])).toBe("./p.db");
     expect(fileDefaultDbValue([prog("./named.db", [], [{ name: "name", value: { value: "x" } }]), prog("./p.db")])).toBe("./p.db");
     expect(fileDefaultDbValue([])).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §6 — the runtime data root (§47.14, S445 "data root")
+// ---------------------------------------------------------------------------
+
+describe("§6 data root: SCRML_DATA_DIR ?? the project root recorded at build", () => {
+  // Projects OUTSIDE the scrml repo, so the project root is the fixture's own scrml.toml.
+  const fixture = (name, app, seed) => {
+    const root = mkdtempSync(join(tmpdir(), `s445-dataroot-${name}-`));
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "scrml.toml"), "");
+    writeFileSync(join(root, "src", "app.scrml"), app);
+    if (seed) seedDb(join(root, "src", "app.db"));
+    const r = compileScrml({ inputFiles: [join(root, "src", "app.scrml")], write: true, outputDir: join(root, "dist"), log: () => {} });
+    const fatal = (r.errors ?? []).filter((e) => e.severity !== "warning" && !String(e.code).startsWith("W-") && !String(e.code).startsWith("I-"));
+    expect(fatal).toEqual([]);
+    return root;
+  };
+  const call = async (serverPath, routePart) => {
+    const mod = await import(`file://${serverPath}?v=${Date.now()}-${Math.random()}`);
+    const route = Object.values(mod).find((v) => v && typeof v === "object" && typeof v.path === "string" && v.path.includes(routePart));
+    const res = await route.handler(new Request(`http://localhost${route.path}`, {
+      method: route.method,
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": "t", Cookie: "scrml_csrf=t" },
+      body: "{}",
+    }));
+    return { status: res.status, body: await res.text() };
+  };
+  const withDataDir = async (dir, fn) => {
+    const prev = process.env.SCRML_DATA_DIR;
+    if (dir === null) delete process.env.SCRML_DATA_DIR; else process.env.SCRML_DATA_DIR = dir;
+    try { return await fn(); } finally {
+      if (prev === undefined) delete process.env.SCRML_DATA_DIR; else process.env.SCRML_DATA_DIR = prev;
+    }
+  };
+
+  test("the handle records `src/app.db` (project-root-relative) and the project root", () => {
+    const root = fixture("record", APP.replace(/<db src="\.\/app\.db" tables="t">/, "<div>").replace("</db>", "</div>"), true);
+    const js = readFileSync(join(root, "dist", "app.server.js"), "utf8");
+    expect(js).toContain('const _scrml_sql = _scrml_sqlite_referenced("src/app.db", "./app.db", "app.scrml");');
+    expect(js).toContain(`const _scrml_project_root = ${JSON.stringify(root.split(sep).join("/"))};`);
+  });
+
+  test("unset → the project root; set → the same relative path under SCRML_DATA_DIR", async () => {
+    const root = fixture("ref", REFERENCE_APP.replace("./ref.db", "./app.db"), true);
+    const server = join(root, "dist", "app.server.js");
+    expect(await withDataDir(null, () => call(server, "count"))).toEqual({ status: 200, body: "3" });
+    const data = mkdtempSync(join(tmpdir(), "s445-data-"));
+    mkdirSync(join(data, "src"), { recursive: true });
+    const db = new Database(join(data, "src", "app.db"), { create: true });
+    db.run("CREATE TABLE t (n INTEGER)"); db.run("INSERT INTO t VALUES (1)"); db.close();
+    // A second copy of the build: Bun caches a module by path (a `?v=` query does not
+    // give a fresh instance), and the first instance's handle is already open.
+    const copy = mkdtempSync(join(tmpdir(), "s445-copy-"));
+    cpSync(join(root, "dist"), copy, { recursive: true });
+    expect(await withDataDir(data, () => call(join(copy, "app.server.js"), "count"))).toEqual({ status: 200, body: "1" });
+  });
+
+  test("a MOVED build with no SCRML_DATA_DIR refuses to guess — owning handle fails at load naming SCRML_DATA_DIR, nothing created", async () => {
+    const root = fixture("moved", BOOTSTRAP_APP.replace("./boot.db", "./app.db"), false);
+    const moved = mkdtempSync(join(tmpdir(), "s445-moved-"));
+    cpSync(join(root, "dist"), moved, { recursive: true });
+    const moved2 = mkdtempSync(join(tmpdir(), "s445-moved2-")); // a fresh module instance for the second run
+    cpSync(join(root, "dist"), moved2, { recursive: true });
+    rmSync(root, { recursive: true, force: true }); // the deploy target has no project
+    let err = null;
+    try {
+      await withDataDir(null, () => import(`file://${join(moved, "app.server.js")}?v=${Date.now()}-${Math.random()}`));
+    } catch (e) { err = e; }
+    expect(String(err?.message)).toContain("SCRML_DATA_DIR is not set");
+    expect(String(err?.message)).toContain('"src/app.db"');
+    // With the data root set (what the generated Dockerfile does), it creates there.
+    const data = mkdtempSync(join(tmpdir(), "s445-vol-"));
+    expect(await withDataDir(data, () => call(join(moved2, "app.server.js"), "ensure"))).toEqual({ status: 200, body: "1" });
+    expect(existsSync(join(data, "src", "app.db"))).toBe(true);
   });
 });

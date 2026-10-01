@@ -1,20 +1,22 @@
 /**
- * db-ownership.ts — which SQLite database FILES a program OWNS (§8.1.1, S445 ruling).
+ * db-ownership.ts — which SQLite database FILES a `.scrml` file OWNS (§8.1.1).
  *
  * > "A program that declares its own schema (its own `CREATE TABLE`s or a `<schema>`)
  * > owns the database, so the runtime may create the file. A program that only
  * > references a database never creates it and fails loudly if the file is missing."
  * > — ruling:user-voice-scrml.md S445 item 6
+ * > "keep your literal ruling, so only a file that declares the schema may create the
+ * > database. Other modules then open it once it exists, rather than at load time.
+ * > That way the answer doesn't depend on which files are in the build."
+ * > — ruling:user-voice-scrml.md S445 (per-file ownership; supersedes the round-2
+ * > program-wide reading)
  *
- * ⚑ THE OWNERSHIP DECISION IS ONE FUNCTION: `decideOwnedDbFiles`. Its program-wide
- * scope (every file compiled together) is an open design question (S445 review F4 —
- * a file compiled alone can decide differently than the same file compiled with its
- * siblings); keep every consumer on this one entry point so the answer changes in
- * one place.
+ * ⚑ THE OWNERSHIP DECISION IS ONE FUNCTION: `decideOwnedDbFiles`. Every consumer calls
+ * it over ONE declaring file, so a module's answer never depends on which other files
+ * are in the build.
  *
  * THE PREDICATE, per database TARGET (one resolved file, `db-target.ts
- * resolveDbFilePath`): the program owns a target when at least one of its files
- * DECLARES SCHEMA FOR IT —
+ * resolveDbFilePath`): a file owns a target when it DECLARES SCHEMA FOR IT —
  *
  *   - a `?{}` block holding a statement that CREATES A TABLE IN THAT DATABASE
  *     (`sqlDeclaresTable`: `CREATE [VIRTUAL] TABLE`, including `… AS SELECT`; not
@@ -238,8 +240,10 @@ function fileNodes(f: AnyNode): unknown {
 }
 
 /**
- * THE ownership decision: the SQLite files this compile's program owns. `files` is
- * every file compiled together (file ASTs carrying `filePath` + `nodes` / `ast.nodes`).
+ * THE ownership decision: the SQLite files the given files declare schema for (file
+ * ASTs carrying `filePath` + `nodes` / `ast.nodes`). Per the S445 per-file ruling every
+ * consumer passes exactly ONE declaring file — the decision for a module is the
+ * decision for the file that emits it, whatever else is in the build.
  */
 export function decideOwnedDbFiles(files: readonly unknown[]): Set<string> {
   const out = new Set<string>();

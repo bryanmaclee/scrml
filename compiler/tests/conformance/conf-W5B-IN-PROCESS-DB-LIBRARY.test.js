@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { emittedDbFile } from "../helpers/self-host-server-import.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 let _tmp = 0;
@@ -81,7 +82,8 @@ describe("CONF-W5B-IN-PROCESS-DB-LIBRARY: tool imports a db-bound library", () =
       const libJs = readFileSync(join(dist, "dblib.js"), "utf8");
       expect(libJs).toContain("export async function countItems");
       expect(libJs).toContain("await _scrml_sql`");
-      expect(libJs).toContain('new SQL(_scrml_sqlite_file("../conf.db", "sqlite:./conf.db", "dblib.scrml", true))');
+      // S445 — the library declares the table, so it OWNS conf.db (beside the source).
+      expect(emittedDbFile(libJs)).toEqual({ file: join(tmpDir, "conf.db"), owns: true });
       // NOT the client null-stub.
       expect(libJs).not.toContain("= null; // SQL-init");
       // The tool imports the mapped `.js` module.

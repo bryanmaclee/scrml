@@ -104,7 +104,7 @@ describe("§64 tool target — emit shape", () => {
     expect(out.toolJs).toMatch(/import \{ SQL \} from "bun";/);
     // s445 — a SQLite file opens through the helper: resolved against the declaring
     // file's directory, never created.
-    expect(out.toolJs).toMatch(/const _scrml_sql = new SQL\(_scrml_sqlite_file\("[^"]*fleet\.db", "\.\/fleet\.db", "[^"]*", false\)\);/);
+    expect(out.toolJs).toMatch(/const _scrml_sql = _scrml_sqlite_referenced\("[^"]*fleet\.db", "\.\/fleet\.db", "[^"]*"\);/);
     expect(out.toolJs).toMatch(/await _scrml_sql`SELECT id FROM tasks`/);
   });
 

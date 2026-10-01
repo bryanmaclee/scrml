@@ -64,7 +64,6 @@ import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-cl
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
-import { decideOwnedDbFiles } from "../db-ownership.ts";
 import { classifyFileShape } from "../library-shape.js";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
@@ -225,13 +224,6 @@ export interface CgInput {
    * importer + exporter sides. Optional; basename-fallback when absent.
    */
   outputBaseDir?: string | null;
-  /**
-   * s445-dev-db-side-file — the dist WRITE root (api.js `outputDir`). With
-   * `outputBaseDir` it locates each emitted module on disk, so a SQLite handle is
-   * written relative to its own module (codegen/sqlite-file-target.ts). Optional;
-   * absent → the handle carries the database's absolute `file:` URL.
-   */
-  outputDir?: string | null;
   /**
    * S89 A-2.1 — Stage 7.6 Reachability Solver output (SPEC §40.9).
    * Threaded into per-file `CompileContext.reachabilityRecord` so the
@@ -1185,7 +1177,6 @@ export function runCG(input: CgInput): CgOutput {
     exportRegistry: exportRegistryInput = null,
     importGraph: importGraphInput = null,
     outputBaseDir: cgOutputBaseDir = null,
-    outputDir: cgOutputDir = null,
     reachabilityRecord: reachabilityRecordInput = null,
     emitPerRoute = false,
     chunkSizeBudgetBytes,
@@ -1937,14 +1928,6 @@ export function runCG(input: CgInput): CgOutput {
   const _programAnySessionWrite = files.some((f) => astUsesSessionWrite(f));
   for (const f of files) (f as any)._programAnySessionWrite = _programAnySessionWrite;
 
-  // §44.2 (ruling:user-voice-scrml.md S445 item 6) — database OWNERSHIP is also
-  // program-scoped: a SQLite file any unit declares schema for (its own CREATE TABLE
-  // or a <schema>) may be created by EVERY unit's handle on it, so which module loads
-  // first can never decide whether a referencing handle finds the file. Stamped once;
-  // sqlite-file-target.ts reads `_ownedDbFiles` (per-file fallback for direct callers).
-  const _ownedDbFiles = decideOwnedDbFiles(files as unknown[]);
-  for (const f of files) (f as any)._ownedDbFiles = _ownedDbFiles;
-
   // §20.5 / §20.5.1 (S433) — TWO MORE SESSION FACTS THAT ARE PROGRAM-SCOPED AND WERE
   // BEING READ PER-UNIT, the same defect shape as #282 immediately above.
   //
@@ -2368,9 +2351,6 @@ export function runCG(input: CgInput): CgOutput {
       // paths → the subdir page opens a different (empty) file from the project
       // root. null for legacy single-file callers (handled verbatim downstream).
       (fileAST as any)._outputBaseDir = cgOutputBaseDir;
-      // s445-dev-db-side-file — plus the dist WRITE root, so a SQLite handle can be
-      // emitted relative to the module's own output location (sqlite-file-target.ts).
-      (fileAST as any)._outputDir = cgOutputDir;
 
       // W5b (S239) — stash the module's cross-import async seed: the LOCAL names
       // that bind an async fn imported from ANOTHER lib. emit-server's ss1

@@ -19,6 +19,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
+import { emittedDbFile } from "../helpers/self-host-server-import.js";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
@@ -84,7 +85,8 @@ describe("W5b — tool imports a db-bound library (in-process `?{}`)", () => {
       expect(libJs).toContain("export async function insertItem");
       expect(libJs).toContain("export async function countItems");
       expect(libJs).toContain("await _scrml_sql`");
-      expect(libJs).toContain('new SQL(_scrml_sqlite_file("../w5b.db", "sqlite:./w5b.db", "dblib.scrml", true))');
+      // S445 — the library declares the table, so it OWNS w5b.db (beside the source).
+      expect(emittedDbFile(libJs)).toEqual({ file: join(dir, "w5b.db"), owns: true });
       expect(libJs).not.toContain("= null; // SQL-init");
       // A schema-setup `?{}` fn with no return (flogence's ensureFspSchema shape).
       expect(libJs).toMatch(/export async function ensureSchema\(\) \{\s*await _scrml_sql`CREATE TABLE/);

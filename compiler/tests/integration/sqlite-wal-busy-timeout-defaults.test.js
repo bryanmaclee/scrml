@@ -74,11 +74,16 @@ async function waitForJournalMode(dbPath, want, timeoutMs = 5000) {
   }
 }
 
-const appWithDb = (src, table) => `<program db="${src}">
+// S445 (per-file ownership) — `owns` adds the table's own CREATE TABLE, so this file
+// OWNS the database: its handle opens when the module loads and configures it there
+// (the shape these tests were written against). Without it the file only REFERENCES
+// the database: the handle opens on first use and configures it then.
+const appWithDb = (src, table, owns = true) => `<program db="${src}">
   <db src="${src}" tables="${table}">
     \${
       <rows> = []
       function loadRows() { return ?{\`SELECT id FROM ${table}\`}.all() }
+      ${owns ? `function ensureTable() { ?{\`CREATE TABLE IF NOT EXISTS ${table} (id INTEGER PRIMARY KEY, label TEXT)\`}.run() }` : ""}
       on mount { @rows = loadRows() }
     }
     <h1>\${@rows}</h1>
@@ -86,7 +91,7 @@ const appWithDb = (src, table) => `<program db="${src}">
 </program>`;
 
 /** Build a one-file project with a seeded sqlite db and compile it. */
-function build(tag, { dbFile = "m.db", table = "items", src = null, seed = true } = {}) {
+function build(tag, { dbFile = "m.db", table = "items", src = null, seed = true, owns = true } = {}) {
   const root = resolve(TMP_ROOT, `${tag}-${++counter}`);
   mkdirSync(root, { recursive: true });
   if (seed) {
@@ -95,7 +100,7 @@ function build(tag, { dbFile = "m.db", table = "items", src = null, seed = true 
     d.close();
   }
   const appPath = join(root, "app.scrml");
-  writeFileSync(appPath, appWithDb(src ?? `./${dbFile}`, table));
+  writeFileSync(appPath, appWithDb(src ?? `./${dbFile}`, table, owns));
   const out = join(root, "dist");
   mkdirSync(out, { recursive: true });
   const result = compileScrml({ inputFiles: [appPath], write: true, outputDir: out, log: () => {} });
@@ -114,8 +119,8 @@ describe("§44 — a file-backed sqlite handle gets WAL + a 5s busy-timeout by d
     const { errors, serverJs } = build("emit");
     expect(nonWarn(errors)).toEqual([]);
 
-    // s445 — a SQLite file opens through `_scrml_sqlite_file` (declaring-file-relative; this program only references it, so `false`: never created).
-    expect(serverJs).toMatch(/const _scrml_sql = new SQL\(_scrml_sqlite_file\("[^"]*m\.db", "\.\/m\.db", "[^"]*", false\)\);/);
+    // s445 — this file declares the table, so its handle OWNS m.db and opens at load.
+    expect(serverJs).toMatch(/const _scrml_sql = new SQL\(_scrml_sqlite_owned\("[^"]*m\.db", "\.\/m\.db", "[^"]*"\)\);/);
     expect(serverJs).toContain("function _scrml_sqlite_configure(_h)");
     expect(serverJs).toContain("PRAGMA journal_mode = WAL");
     expect(serverJs).toContain("PRAGMA busy_timeout = 5000");
@@ -145,6 +150,37 @@ describe("§44 — a file-backed sqlite handle gets WAL + a 5s busy-timeout by d
       .toBeLessThan(serverJs.indexOf("void _scrml_sqlite_configure(_scrml_sql);"));
   });
 
+  test("a REFERENCING handle (S445 per-file ownership) configures when it first opens, before the first statement", () => {
+    const { errors, serverJs } = build("emit-ref", { owns: false });
+    expect(nonWarn(errors)).toEqual([]);
+    expect(serverJs).toMatch(/const _scrml_sql = _scrml_sqlite_referenced\("[^"]*m\.db", "\.\/m\.db", "[^"]*"\);/);
+    // No load-time configure for a handle that is not open yet …
+    expect(serverJs).not.toContain("void _scrml_sqlite_configure(_scrml_sql);");
+    // … it runs on open, and every statement waits for it.
+    expect(serverJs).toContain("function _scrml_sqlite_configure(_h)");
+    expect(serverJs).toContain("ready = _scrml_sqlite_configure(handle);");
+    expect(serverJs).toContain("return ready.then(() => h(...args));");
+  });
+
+  test("EXECUTED: a REFERENCING module leaves the file alone at import, and its first query puts it into WAL", async () => {
+    const { errors, serverPath, dbPath } = build("exec-ref", { owns: false });
+    expect(nonWarn(errors)).toEqual([]);
+    const mod = await import(`file://${serverPath}?v=${Date.now()}-${Math.random()}`);
+    await new Promise((r) => setTimeout(r, 100));
+    const d0 = new Database(dbPath);
+    expect(d0.query("PRAGMA journal_mode").get().journal_mode).toBe("delete"); // not opened at load
+    d0.close();
+    const route = Object.values(mod).find((v) => v && typeof v === "object" && typeof v.path === "string" && v.path.includes("loadRows"));
+    expect(route).toBeDefined();
+    const resp = await route.handler(new Request(`http://localhost${route.path}`, {
+      method: route.method,
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": "t", Cookie: "scrml_csrf=t" },
+      body: route.method === "GET" ? undefined : "{}",
+    }));
+    expect(resp.status).toBe(200);
+    expect(await waitForJournalMode(dbPath, "wal")).toBe("wal");
+  });
+
   // ⛔ THE REGRESSION GUARD THAT MATTERS MOST HERE. The emitted `.server.js` is not
   // always loaded as an ESM module: the conformance runtime adapter evaluates it with
   // `new Function(...)` (conformance/adapters/impl1-ts.ts), where a top-level `await`
@@ -158,8 +194,8 @@ describe("§44 — a file-backed sqlite handle gets WAL + a 5s busy-timeout by d
     // does. This fails loudly the moment anything reintroduces top-level await.
     const runnable = serverJs
       .replace(/^\s*import\s+\{\s*SQL\s*\}\s+from\s+"bun";\s*$/m, "")
-      .replace(/^\s*import\s+\{\s*existsSync as _scrml_db_file_exists\s*\}\s+from\s+"node:fs";\s*$/m, "")
-      .replace(/^\s*const _scrml_sql = new SQL\(.*\);\s*$/m, "")
+      .replace(/^\s*import\s+\{[^}]*_scrml_db_file_exists[^}]*\}\s+from\s+"node:fs";\s*$/m, "")
+      .replace(/^\s*const _scrml_sql = .*;\s*$/m, "")
       .replace(/^export\s+/gm, "")
       .replace(/import\.meta\.url/g, JSON.stringify("file:///case.scrml"));
     expect(runnable).toContain("_scrml_sqlite_configure");
@@ -308,15 +344,19 @@ function main(args: string[]) -> number {
   test("the emitted tool module carries the configure block and AWAITS it", () => {
     const { errors, toolJs } = buildTool("tool-emit");
     expect(nonWarn(errors)).toEqual([]);
-    expect(toolJs).toMatch(/const _scrml_sql = new SQL\(_scrml_sqlite_file\("[^"]*app\.db", "\.\/app\.db", "[^"]*", false\)\);/);
+    // S445 — this tool only uses app.db (no CREATE TABLE), so its handle is REFERENCING:
+    // it opens on first use and runs the configure block then.
+    expect(toolJs).toMatch(/const _scrml_sql = _scrml_sqlite_referenced\("[^"]*app\.db", "\.\/app\.db", "[^"]*"\);/);
     expect(toolJs).toContain("PRAGMA busy_timeout = 5000");
     expect(toolJs).toContain("PRAGMA journal_mode = WAL");
     // AWAITED, not floating: the §64.3 harness ends with `process.exit(code)`, a hard
     // exit that kills a pending floating promise before the WAL pragma lands.
     // MEASURED with the floating form: journal_mode stayed `delete` even after an
-    // UNCONTENDED tool run. Safe here because that same harness already emits an
-    // unconditional top-level `await main(...)`.
-    expect(toolJs).toContain("await _scrml_sqlite_configure(_scrml_sql);");
+    // UNCONTENDED tool run. A referencing handle gets the same guarantee a different
+    // way: its first statement waits for the configure block (`ready.then(...)`), and
+    // `main` awaits that statement.
+    expect(toolJs).toContain("ready = _scrml_sqlite_configure(handle);");
+    expect(toolJs).toContain("return ready.then(() => h(...args));");
     expect(toolJs).not.toContain("void _scrml_sqlite_configure(_scrml_sql);");
   });
 

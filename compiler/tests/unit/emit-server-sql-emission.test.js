@@ -331,9 +331,9 @@ describe("§J multi-scope: both _scrml_sql_1 and _scrml_sql_2 produce decls when
 
 describe("§K SQLite path normalization — sqlite: prefix added when missing", () => {
   // s445 — a SQLite FILE no longer rides a `sqlite:` literal (opened CWD-relative,
-  // created on open). It opens through `_scrml_sqlite_file`, resolved against the
-  // declaring file's directory; with no output dir threaded (a direct
-  // generateServerJs call) the specifier is the file's absolute `file:` URL.
+  // created on open). The file the declaring file names is recorded relative to the
+  // project root (§47.14; here no manifest and no build root, so the file's own
+  // directory, /test) and resolved at runtime against SCRML_DATA_DIR ?? that root.
   test("bare relative path opens the declaring-file-relative file, never CWD-relative", () => {
     const dbBlock = makeDbStateNode("./testdb.db");
     const fnNode = makeServerFn("getAll", [
@@ -355,12 +355,14 @@ describe("§K SQLite path normalization — sqlite: prefix added when missing", 
     });
     const ast = makeFileAST([programNode]);
     const serverJs = generateServerJs(ast, { functions: fnRouteMap }, [], null, null);
-    expect(serverJs).toContain('new SQL(_scrml_sqlite_file("file:///test/testdb.db", "./testdb.db", "app.scrml", false))');
+    expect(serverJs).toContain('const _scrml_sql = _scrml_sqlite_referenced("testdb.db", "./testdb.db", "app.scrml");');
     expect(serverJs).not.toContain('"sqlite:./testdb.db"');
-    // S445 ruling: `SELECT 1` declares no schema — a REFERENCING program, so the
-    // third argument is `false` (never create; a missing file is a load-time error).
-    expect(serverJs).toContain('return { adapter: "sqlite", filename, create: ownsSchema, readwrite: true };');
-    expect(serverJs).toContain("if (!_scrml_db_file_exists(filename)) {\n    if (!ownsSchema) {");
+    // S445 ruling: `SELECT 1` declares no schema — a REFERENCING handle: opened lazily
+    // on first use, never created, loud when missing.
+    expect(serverJs).toContain('const _scrml_project_root = "/test";');
+    expect(serverJs).toContain('handle = new SQL({ adapter: "sqlite", filename, create: false, readwrite: true });');
+    expect(serverJs).toContain("scrml: database file not found: ${filename}");
+    expect(serverJs).toContain("const dataDir = process.env.SCRML_DATA_DIR;");
   });
 
   test("a program that declares the table (its own CREATE TABLE) OWNS the db → create allowed", () => {
@@ -382,7 +384,7 @@ describe("§K SQLite path normalization — sqlite: prefix added when missing", 
       explicitMethod: "POST",
     });
     const serverJs = generateServerJs(makeFileAST([programNode]), { functions: fnRouteMap }, [], null, null);
-    expect(serverJs).toContain('new SQL(_scrml_sqlite_file("file:///test/testdb.db", "./testdb.db", "app.scrml", true))');
+    expect(serverJs).toContain('const _scrml_sql = new SQL(_scrml_sqlite_owned("testdb.db", "./testdb.db", "app.scrml"));');
   });
 
   test(":memory: passes through WITHOUT sqlite: prefix (Bun.SQL recognizes it)", () => {
@@ -469,7 +471,7 @@ describe("§I declarations precede idempotency helpers (ordering invariant)", ()
 
     if (serverJs.includes("import { SQL }")) {
       const sqlImportIdx = serverJs.indexOf('import { SQL } from "bun"');
-      const sqlDeclIdx = serverJs.indexOf("const _scrml_sql = new SQL(");
+      const sqlDeclIdx = serverJs.indexOf("const _scrml_sql = ");
       expect(sqlImportIdx).toBeGreaterThanOrEqual(0);
       expect(sqlDeclIdx).toBeGreaterThan(sqlImportIdx);
       // If the structural-eq helper or idempotency block also exists, they

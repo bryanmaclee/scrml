@@ -18,17 +18,17 @@
  * when the process is STARTED in the project root.
  *
  * s445 (dev-db-side-file) replaced that: every emitted handle names the file the
- * compiler resolved (the declaring file's directory), written RELATIVE TO THE
- * EMITTED MODULE and opened via `_scrml_sqlite_file` (these programs only reference
- * the db, so without `create`). Both
- * modules now open <root>/m.db from ANY working directory — asserted below by
- * resolving each module's specifier against that module's own URL, and by
- * running the page's route from an unrelated CWD.
+ * compiler resolved (the declaring file's directory, §8.1.1), recorded relative to
+ * the project root and resolved against SCRML_DATA_DIR ?? that root (§47.14). These
+ * programs only reference the db, so their handles open lazily and never create.
+ * Both modules open <root>/m.db from ANY working directory — asserted below from the
+ * recorded path, and by running the page's route from an unrelated CWD.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tmpdir } from "node:os";
+import { emittedDbFile } from "../helpers/self-host-server-import.js";
 import { resolve, dirname, join } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { perRunTmp } from "../helpers/per-run-tmp.js";
@@ -71,9 +71,9 @@ const LOGIN_SRC = `<page auth="optional">
 
 /** The absolute file an emitted module's SQLite handle opens (resolved against the module). */
 function opensFile(serverPath, js) {
-  const m = /new SQL\(_scrml_sqlite_file\(("(?:[^"\\]|\\.)*")/.exec(js);
-  if (!m) throw new Error("no _scrml_sqlite_file handle in " + serverPath);
-  return fileURLToPath(new URL(JSON.parse(m[1]), pathToFileURL(serverPath)));
+  const found = emittedDbFile(js);
+  if (!found) throw new Error("no SQLite-file handle in " + serverPath);
+  return found.file;
 }
 
 /** Build a multi-dir project (app at root + pages/login) and compile it. */
@@ -166,8 +166,8 @@ describe("ss19 #9 — db src= emits a runtime-consistent path across directories
     const result = compileScrml({ inputFiles: [appPath], write: true, outputDir: outDir });
     expect((result.errors ?? []).filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
     const appJs = readFileSync(join(outDir, "app.server.js"), "utf-8");
-    // dist/app.server.js -> ../m.db = <root>/m.db (the declaring file's directory).
-    expect(appJs).toContain('new SQL(_scrml_sqlite_file("../m.db", "./m.db", "app.scrml", false))');
+    // <root>/m.db — the declaring file.s directory.
+    expect(emittedDbFile(appJs)).toEqual({ file: join(root, "m.db"), owns: false }); // referencing (no CREATE TABLE)
     expect(opensFile(join(outDir, "app.server.js"), appJs)).toBe(join(root, "m.db"));
   });
 });

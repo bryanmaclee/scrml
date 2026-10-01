@@ -63,7 +63,10 @@ function compileVariant(name, attrs) {
     dir,
     outDir,
     errors: (result.errors ?? []).filter((e) => !e.code?.startsWith("W-") && !e.code?.startsWith("I-")),
-    serverJs: read("app.server.js"),
+    // §47.14 (S445) — the database handle records the db's path relative to the project
+    // root, which embeds this variant's own directory name; mask it so variants compiled
+    // in different directories compare on what the attribute changes.
+    serverJs: (read("app.server.js") ?? "").replace(/(_scrml_sqlite_(?:owned|referenced)\()"[^"]*"/g, '$1"<db>"'),
     clientJs: read("app.client.js"),
     html: read("app.html"),
   };

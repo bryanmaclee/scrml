@@ -824,11 +824,20 @@ export function generateDockerfile() {
     "FROM oven/bun:1.2",
     "WORKDIR /app",
     "COPY . .",
+    // §47.14 (ruling:user-voice-scrml.md S445 — data root): the server resolves every
+    // SQLite path against SCRML_DATA_DIR. Point it at a volume so the database lives
+    // outside the image and survives a redeploy (`docker run -v app-data:/data …`).
+    "ENV SCRML_DATA_DIR=/data",
+    "RUN mkdir -p /data",
+    'VOLUME ["/data"]',
     "EXPOSE ${PORT:-3000}",
     'CMD ["bun", "_server.js"]',
     "",
   ].join("\n");
 }
+
+/** §47.14 — the data-root mount every server deploy adapter points SCRML_DATA_DIR at. */
+export const DEPLOY_DATA_DIR = "/data";
 
 /**
  * Apply the --target fly adapter.
@@ -847,6 +856,15 @@ export function applyFlyAdapter(outputDir, appName) {
     "[http_service]",
     "  internal_port = 3000",
     "  force_https = true",
+    "",
+    // §47.14 — SQLite databases live on a Fly volume, not in the image:
+    // `fly volumes create data` once, then every deploy mounts it here.
+    "[env]",
+    `  SCRML_DATA_DIR = "${DEPLOY_DATA_DIR}"`,
+    "",
+    "[mounts]",
+    '  source = "data"',
+    `  destination = "${DEPLOY_DATA_DIR}"`,
     "",
     "[checks]",
     "  [checks.health]",
@@ -913,6 +931,14 @@ export function applyRenderAdapter(outputDir) {
     '    buildCommand: ""',
     "    startCommand: bun _server.js",
     "    healthCheckPath: /_scrml/health",
+    // §47.14 — SQLite databases live on a persistent disk, resolved via SCRML_DATA_DIR.
+    "    envVars:",
+    "      - key: SCRML_DATA_DIR",
+    `        value: ${DEPLOY_DATA_DIR}`,
+    "    disk:",
+    "      name: data",
+    `      mountPath: ${DEPLOY_DATA_DIR}`,
+    "      sizeGB: 1",
     "",
   ].join("\n");
 
@@ -1130,10 +1156,15 @@ export async function runBuild(args) {
     console.log(`  ${join(resolvedOutputDir, "Dockerfile")}`);
     console.log(`  ${join(resolvedOutputDir, "fly.toml")}`);
     console.log(`\nReady to deploy:`);
+    console.log(`  fly volumes create data   # once — the volume SCRML_DATA_DIR (${DEPLOY_DATA_DIR}) points at`);
     console.log(`  fly launch --copy-config`);
   } else if (opts.target === "railway") {
     console.log(`\nRailway deploy artifact:`);
     console.log(`  ${join(resolvedOutputDir, "package.json")} (scripts.start set)`);
+    // §47.14 — Railway volumes are attached in the dashboard, at a mount path the user
+    // chooses, so the adapter cannot write it; say what to set instead.
+    console.log(`\nDatabases: attach a Railway volume and set SCRML_DATA_DIR to its mount path`);
+    console.log(`  (e.g. ${DEPLOY_DATA_DIR}). Without it the server looks in the project root recorded at build.`);
     console.log(`\nReady to deploy:`);
     console.log(`  railway up`);
   } else if (opts.target === "render") {
@@ -1146,7 +1177,7 @@ export async function runBuild(args) {
     console.log(`  ${join(resolvedOutputDir, "Dockerfile")}`);
     console.log(`\nReady to build:`);
     console.log(`  docker build -t ${appName} ${resolvedOutputDir}/`);
-    console.log(`  docker run -p 3000:3000 ${appName}`);
+    console.log(`  docker run -p 3000:3000 -v ${appName}-data:${DEPLOY_DATA_DIR} ${appName}`);
   } else {
     console.log(`\nReady to deploy:`);
     console.log(`  bun ${serverEntryPath}`);

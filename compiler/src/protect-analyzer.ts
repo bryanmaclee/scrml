@@ -1299,9 +1299,6 @@ export function runPA(input: PAInput): { protectAnalysis: ProtectAnalysis; error
   const views = new Map<string, DBTypeViews>();
   const errors: PAError[] = [];
   const cache = new SchemaCache(input.onNote);
-  // §44.2 (ruling:user-voice-scrml.md S445 item 6) — the database files this PROGRAM
-  // owns (declares schema for), the same predicate codegen uses to emit `create`.
-  const ownedDbFiles = decideOwnedDbFiles(files as unknown[]);
   const declaredTables = new Set<string>();
 
   try {
@@ -1310,6 +1307,9 @@ export function runPA(input: PAInput): { protectAnalysis: ProtectAnalysis; error
       const nodes: ASTNode[] = fileAST.ast
         ? fileAST.ast.nodes                // { filePath, ast: { nodes }, ... } shape
         : (fileAST.nodes ?? []);           // { filePath, nodes, ... } flat shape
+      // §8.1.1 (ruling:user-voice-scrml.md S445 — per-file ownership) — the databases
+      // THIS file declares schema for; the same decision codegen uses for `create`.
+      const ownedDbFiles = decideOwnedDbFiles([{ filePath, nodes }]);
 
       // Extract CREATE TABLE statements from ?{} SQL nodes before processing
       // < db> blocks. These statements are used to build a shadow in-memory DB

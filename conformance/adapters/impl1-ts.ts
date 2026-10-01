@@ -882,8 +882,8 @@ function evalServerModule(
   const g = globalThis as any;
   const runnable = serverJs
     .replace(/^\s*import\s+\{\s*SQL\s*\}\s+from\s+"bun";\s*$/m, "")
-    .replace(/^\s*import\s+\{\s*existsSync as _scrml_db_file_exists\s*\}\s+from\s+"node:fs";\s*$/m, "")
-    .replace(/^\s*const _scrml_sql = new SQL\(.*\);\s*$/m, "")
+    .replace(/^\s*import\s+\{[^}]*_scrml_db_file_exists[^}]*\}\s+from\s+"node:fs";\s*$/m, "")
+    .replace(/^\s*const _scrml_sql = .*;\s*$/m, "")
     .replace(/^export\s+/gm, "")
     .replace(/import\.meta\.url/g, JSON.stringify("file:///case.scrml"));
   const BunStub = { file: () => ({ text: async () => html }) };

@@ -93,7 +93,7 @@ function compile(scrmlSource, tagBase) {
   const serverJsPath = join(outDir, `${tag}.server.js`);
   // s445: the module opens the seeded file itself (declaring-file-relative, CWD-independent) — assert it.
   // (A program that never reaches the database declares no handle to check.)
-  if (existsSync(serverJsPath) && readFileSync(serverJsPath, "utf-8").includes("new SQL(")) {
+  if (existsSync(serverJsPath) && readFileSync(serverJsPath, "utf-8").includes("_scrml_sqlite_")) {
     assertOpensDb(serverJsPath, dbPath);
   }
   return {
