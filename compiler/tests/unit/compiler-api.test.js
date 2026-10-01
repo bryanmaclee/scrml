@@ -7,7 +7,8 @@
 
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
-import { resolve } from "path";
+import { join, resolve } from "path";
+import { tmpdir } from "os";
 
 const STDLIB_DIR = resolve(import.meta.dir, "../../../stdlib/compiler");
 
@@ -155,7 +156,7 @@ describe("§93 Compiler API — compiled exports are callable", () => {
   test("compileScrml runs a full pipeline", async () => {
     const { compileScrml: compile } = await import("../../src/api.js");
     const { writeFileSync, mkdirSync, rmSync } = await import("fs");
-    const tmpDir = "/tmp/scrml-api-callable-test";
+    const tmpDir = join(tmpdir(), "scrml-api-callable-test");
     mkdirSync(tmpDir, { recursive: true });
     const tmpFile = tmpDir + "/test.scrml";
     writeFileSync(tmpFile, "<p>hello world</p>");
@@ -198,7 +199,7 @@ describe("§94 Compiler API — namespace import codegen", () => {
     });
     // Test via inline source — create a minimal module with namespace import
     const { writeFileSync, mkdirSync, rmSync } = require("fs");
-    const tmpFile = "/tmp/scrml-ns-test.scrml";
+    const tmpFile = join(tmpdir(), "scrml-ns-test.scrml");
     writeFileSync(tmpFile, `<program>
 \${
     ^{

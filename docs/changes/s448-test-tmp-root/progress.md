@@ -1,1 +1,5 @@
 - 2026-10-01T14:01:07-06:00 start at /home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-a680b319fba879f81, base e828d7252
+- 2026-10-01T14:05 baseline (no preload, strace-attributed): pre-commit subset leaves 870 top-level /tmp entries / 6,824 files; 33845 pass / 0 fail.
+- 2026-10-01T14:25 found: bun test 1.4.2 never emits process 'exit'/'beforeExit' on a normal end; --bail skips afterAll; Bun.spawn/spawnSync without env use the STARTUP env (TMPDIR mutation invisible). Preload layers afterAll + exit + signals + detached sh watchdog + stale prune, and routes Bun.spawn default env.
+- 2026-10-01T14:30 preload scenario probe: normal/bail/INT/TERM/HUP/KILL all remove the root (rc 0/1/130/143/129/137); 0 watchdogs left.
+- 2026-10-01T14:32 bunfig preload registered; 15 test files switched from literal /tmp/ writes to os.tmpdir().
