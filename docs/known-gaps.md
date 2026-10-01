@@ -489,9 +489,21 @@ parent gap). — `NEW S438-peter`; **HIGH**; open
 
 ### g-schema-commented-out-declaration-shadows-live-table — a commented-out earlier declaration of the same table (raw or DSL) wins first-wins, so a live `tenant_id` table is silently NOT tenant-scoped
 
-<!-- @gap id=g-schema-commented-out-declaration-shadows-live-table sev=HIGH status=resolved owner=bryan locus=compiler/src/schema-differ.js(the pre-S438 read inside schemaCreateTables — comment-agnostic, first-wins per key)+compiler/src/schema-differ.js(parseSchemaBlock — reads DSL inside /* */) prov=empirical:S438-peter-fix-round-reproduced-by-compilation-on-98d94e96-and-the-fix-branch-identical -->
+<!-- @gap id=g-schema-commented-out-declaration-shadows-live-table sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(the pre-S438 read inside schemaCreateTables — comment-agnostic, first-wins per key)+compiler/src/schema-differ.js(parseSchemaBlock — reads DSL inside /* */) prov=empirical:S438-peter-fix-round-reproduced-by-compilation-on-98d94e96-and-the-fix-branch-identical -->
 
-**⚑ RESOLVED S446 (branch `fix/schema-holes-fail-closed`) — the PA recommendation, taken: UNION.** `extractDesiredSchema` returns `tenantDecls` (every DSL + raw declaration in every body, duplicates kept) and the §14.8.10 tenant floor reads it, so a table is tenant-scoped when ANY same-name declaration carries `tenant_id`. `tables` (schema-diff / migrate) is byte-identical, first-wins. No comment-awareness was added to any harvest (the S438 round-1 regression class). Both rows below now tag. Residual (not changed): the §14.8.9 protect floor's shadow DB is still first-wins per name.
+**⚑ S446 — NOT closed by #1209; ROUTED TO BRYAN.** A union fix was built on #1209 and REMOVED before landing
+(PA decision): `extractDesiredSchema` returned every same-name declaration (`tenantDecls`) and the tenant
+floor scoped a table when ANY of them carried `tenant_id`. That closes the shadow below, but **on its own it
+introduces a silent data loss in the reverse direction** — the S239 review of #1209 (reproduced by the PA by
+compilation and at runtime): a stale commented copy WITH `tenant_id` placed AFTER a live table WITHOUT it
+(`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT)` / `-- old: CREATE TABLE assets (…, tenant_id TEXT)`)
+makes the live table tenant-scoped, so `SELECT * FROM assets` is tagged and `_scrml_tenant_redact` drops every
+row (no `tenant_id` value) → **`[]`, silently** (in-memory SQLite: 2 rows → `[]`); `SELECT id, name` gets
+`tenant_id` added to its projection → runtime `no such column: tenant_id`; `UPDATE assets …` becomes
+E-TENANT-WRITE. **Recommended route (a new code → bryan's ruling):** the union over declarations PLUS a loud
+diagnostic when same-name `<schema>` declarations DISAGREE on `tenant_id` (one carries it, another does not),
+naming both — so neither this shadow nor the over-scope is silent. The table below is still current on #1209
+(pinned by `compiler/tests/unit/schema-holes-fail-closed.test.js` "gap 3 — NOT closed").
 
 **Pre-existing on `98d94e96`, identical on the S438 branch (which deliberately preserves base's
 harvest per key — see the S438 fix-round note above).** The `<schema>` recognizers read declarations
@@ -512,31 +524,6 @@ false positive `g-secdef-fn-body-ddl-false-positive`.) **PA recommendation:** fo
 floor) rather than change which statement feeds the shadow DB — a fix that preserves the harvest ⊇
 base invariant. Not done in S438: it changes base's per-key record, which the fix round held fixed on
 purpose. — `NEW S438-peter`; **HIGH**; open
-
-### g-tenant-union-over-scopes-from-a-stale-commented-copy — a commented-out copy WITH `tenant_id` placed AFTER a live table WITHOUT it makes the live table tenant-scoped: `SELECT *` silently returns `[]`, a named projection fails at runtime, an UPDATE newly hard-fails
-
-<!-- @gap id=g-tenant-union-over-scopes-from-a-stale-commented-copy sev=HIGH status=open owner=bryan locus=compiler/src/codegen/db-authoritative.ts(extractDesiredSchema — tenantDecls, the S446 union)+compiler/src/codegen/emit-server.ts(buildTenantContext reads tenantDecls) prov=review:S446-S239-review-of-#1209+empirical:PA-reproduced-on-the-fix-round-branch-by-compilation-and-runtime -->
-
-**Introduced by #1209 (S446), the deliberate cost of the union that closed
-`g-schema-commented-out-declaration-shadows-live-table`.** The tenant floor now reads EVERY same-name
-declaration, live or commented, so the reverse shadow also counts. Repro (`<schema>`-only SQLite app):
-
-```
-CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT)
--- old: CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)
-```
-
-| query | before #1209 | after |
-|---|---|---|
-| `SELECT * FROM assets` | untagged, rows returned | tagged; at runtime `_scrml_tenant_redact` drops every row (no `tenant_id` value) → **`[]`, silently** |
-| `SELECT id, name FROM assets` | untagged | tagged; the floor adds `tenant_id` to the projection → runtime `no such column: tenant_id` (loud) |
-| `UPDATE assets SET name = 'b'` | compiles | **E-TENANT-WRITE** (newly rejecting) |
-
-Measured by compilation + an in-memory SQLite run of the emitted helpers (reviewer's `rt.mjs`,
-re-run by the PA): `DB rows: 2 | after egress redact: []`. **Reviewer's recommended route (a new
-code → bryan's call):** a diagnostic when same-name `<schema>` declarations DISAGREE on `tenant_id`
-(one carries it, another does not), naming both — loud in both directions, so neither the shadow
-(the closed gap) nor this over-scope is silent. — `NEW S446-peter (S239 review of #1209)`; **HIGH**; open
 
 ### g-schema-create-table-like-template-columns-not-declared — `CREATE TABLE assets (LIKE tmpl INCLUDING ALL)` copies `tenant_id` in Postgres, but the floor reads no columns from it
 
@@ -602,7 +589,7 @@ the latter is a real schema-resolution feature. — `NEW S438-peter`; **MED**; o
 
 <!-- @gap id=g-schema-dsl-qualified-table-head-silently-stripped sev=HIGH status=resolved owner=bryan locus=compiler/src/schema-differ.js(parseSchemaBlock — the "advance one char and resume" recovery slides past `mydb.public.` to match `assets {`) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
 
-**⚑ RESOLVED S446 (branch `fix/schema-holes-fail-closed`) — NOT closed by E-SCHEMA-012 as of `8b87ce2e` (re-reproduced: `mydb.public.assets { … }` accepted as `assets`; `a.assets` + `b.assets` → tag=0, exit 0, no diagnostic).** `parseSchemaBlock` now records a head it read as the TAIL of a longer token; GCP1 reports a `.`-qualified one as **E-SCHEMA-012** and any other glued prefix (`données {` → `es`, `my-assets {`, `app$x {`) as **E-SCHEMA-013**, outside comments/literals. The table is still declared (no cascade). Both rows of the table below are now E-SCHEMA-012 (the second also tags, via the S446 tenant union).
+**⚑ RESOLVED S446 (branch `fix/schema-holes-fail-closed`) — NOT closed by E-SCHEMA-012 as of `8b87ce2e` (re-reproduced: `mydb.public.assets { … }` accepted as `assets`; `a.assets` + `b.assets` → tag=0, exit 0, no diagnostic).** `parseSchemaBlock` now records a head it read as the TAIL of a longer token; GCP1 reports a `.`-qualified one as **E-SCHEMA-012** and any other glued prefix (`données {` → `es`, `my-assets {`, `app$x {`) as **E-SCHEMA-013**, outside comments/literals. The table is still declared (no cascade). Both rows of the table below are now E-SCHEMA-012.
 
 **The DSL twin of the RESOLVED `g-tenant-floor-inert-for-a-two-qualifier-create-table`, found by the
 S438 bite-test; NOT changed by that fix (the S435 ruling names `CREATE TABLE`).** SPEC §39.2's grammar

@@ -9,9 +9,10 @@
  *      was accepted as `assets`; `a.assets` + `b.assets` collapsed, first-wins,
  *      dropping the `tenant_id` one. → E-SCHEMA-012 (and E-SCHEMA-013 for the same
  *      slide into any other glued token: `données {` was read as `es`).
- *   3. g-schema-commented-out-declaration-shadows-live-table — a commented-out
- *      `tenant_id`-less copy (raw or DSL) won first-wins. → the tenant floor reads
- *      EVERY same-name declaration, unioned (only adds floor).
+ *   3. g-schema-commented-out-declaration-shadows-live-table — NOT closed here. The
+ *      union fix was REMOVED from #1209: on its own it over-scoped a live table from a
+ *      stale commented copy placed after it (SELECT * silently []). Routed to bryan;
+ *      the base behaviour is pinned below so the fix that closes it flips the pin.
  *   4. g-schema-no-column-list-heads-declare-nothing — `OF type` / `PARTITION OF` /
  *      `AS query` / `USING` / `INHERITS` / an unclosed column list declared no
  *      columns. → E-SCHEMA-014.
@@ -23,10 +24,7 @@ import { writeFileSync, readFileSync, mkdtempSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
-import { extractDesiredSchema } from "../../src/codegen/db-authoritative.ts";
 import { findRejectedCreateTableHeads, findGluedDslTableHeads } from "../../src/schema-differ.js";
-import { splitBlocks } from "../../src/block-splitter.js";
-import { buildAST } from "../../src/ast-builder.js";
 
 const _tmp = [];
 afterAll(() => { for (const d of _tmp) { try { rmSync(d, { recursive: true, force: true }); } catch {} } });
@@ -228,19 +226,18 @@ describe("gap 2 — a DSL head slid into from a longer token is rejected, not re
     });
   }
 
-  test("a.assets + b.assets: BOTH reported, and the floor is ENGAGED (was: tag=0, exit 0, no diagnostic)", () => {
-    const { r, server } = compileApp(
+  test("a.assets + b.assets: BOTH reported (was: tag=0, exit 0, no diagnostic)", () => {
+    const { r } = compileApp(
       `    a.assets {\n      id: integer primary key\n      name: text\n    }\n    b.assets {\n      id: integer primary key\n      tenant_id: text\n    }`,
     );
     expect(schemaCodes(r)).toEqual(["E-SCHEMA-012", "E-SCHEMA-012"]);
-    expect(tagged(server)).toBe(true);
   });
 
   const ACCEPTED = {
     "adjacent tables `}assets {`": `    notes {\n      id: integer primary key\n    }assets {\n      id: integer primary key\n      name: text\n      tenant_id: text\n    }`,
     "a db-authoritative table before": `    notes {\n      id: integer primary key\n    } db-authoritative\n${DSL_ASSETS}`,
     "digits / underscore in names": `    t_2 {\n      id: integer primary key\n    }\n${DSL_ASSETS}`,
-    "a `--`-commented qualified head": `    -- mydb.assets { id: integer primary key }\n${DSL_ASSETS}`,
+    "a `--`-commented qualified head": `    -- mydb.notes { id: integer primary key }\n${DSL_ASSETS}`,
     // S446 fix round — a `--` comment ending in `.` is not a qualifier (was a false E-SCHEMA-012)
     "`-- The assets table.` above": `    -- The assets table.\n${DSL_ASSETS}`,
     "`-- e.g.` above": `    -- e.g.\n${DSL_ASSETS}`,
@@ -263,39 +260,12 @@ describe("gap 2 — a DSL head slid into from a longer token is rejected, not re
   });
 });
 
-describe("gap 3 — a commented-out declaration no longer shadows the live `tenant_id` table", () => {
-  const SHAPES = {
-    "raw `--` copy before raw live": `    -- CREATE TABLE assets (id INTEGER)\n    CREATE TABLE assets ${C}`,
-    "raw `/* */` copy before raw live": `    /* CREATE TABLE assets (id INTEGER) */\n    CREATE TABLE assets ${C}`,
-    "DSL `/* */` copy before raw live": `    /* assets { id: integer primary key } */\n    CREATE TABLE assets ${C}`,
-    "multi-line DSL `/* */` copy before raw live": `    /* assets {\n      id: integer primary key\n    } */\n    CREATE TABLE assets ${C}`,
-    "DSL `--` copy before DSL live": `    -- assets { id: integer primary key }\n${DSL_ASSETS}`,
-    "case variant: `--` ASSETS before live assets": `    -- create table ASSETS (id integer)\n    CREATE TABLE assets ${C}`,
-  };
-  for (const [label, schema] of Object.entries(SHAPES)) {
-    test(`TAGGED: ${label}`, () => {
-      const { r, server } = compileApp(schema);
-      expect(schemaCodes(r)).toEqual([]);
-      expect(tagged(server)).toBe(true);
-    });
-  }
-
-  test("the migrate view (`tables`) is UNCHANGED — first-wins; only the tenant view unions", () => {
-    const ast = buildAST(splitBlocks("t.scrml", `<program db="./x.db">
-  <schema>
-    /* assets { id: integer primary key } */
-    CREATE TABLE assets ${C}
-  </schema>
-</program>`)).ast;
-    const d = extractDesiredSchema(ast);
-    expect(d.tables.map((t) => t.name)).toEqual(["assets"]);
-    expect(d.tables[0].rawDdl).toBeUndefined();          // the DSL (commented) copy still wins for migrate
-    expect(d.tenantDecls.some((t) => t.columns.some((c) => c.name === "tenant_id"))).toBe(true);
-    for (const t of d.tables) expect(d.tenantDecls).toContain(t);   // tables ⊆ tenantDecls
-  });
-
-  test("no over-fire: a table no declaration gives `tenant_id` stays unscoped", () => {
-    const { server } = compileApp(`    -- CREATE TABLE assets (id INTEGER)\n    CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT)`);
+// gap 3 is OPEN (owner bryan): a commented-out `tenant_id`-less copy BEFORE the live
+// table still shadows it, exactly as on base. Pinned so the eventual fix flips it.
+describe("gap 3 — NOT closed by #1209 (base behaviour pinned)", () => {
+  test("a `--`-commented `tenant_id`-less copy before the live table still shadows it (tag=0, no diagnostic)", () => {
+    const { r, server } = compileApp(`    -- CREATE TABLE assets (id INTEGER)\n    CREATE TABLE assets ${C}`);
+    expect(schemaCodes(r)).toEqual([]);
     expect(tagged(server)).toBe(false);
   });
 });
