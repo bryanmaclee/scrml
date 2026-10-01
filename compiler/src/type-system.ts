@@ -9234,6 +9234,7 @@ function annotateNodes(
     params: Array<{ name: string; type: ResolvedType }>;
     returnType: ResolvedType;
   }>();
+  const fnNamesDeclaredTwice = new Set<string>();
 
   // §14.8.8 (S175 — typed-SQL-row Tranche 3, T3c) — infer an OBJECT-LITERAL
   // return struct type for an UN-ANNOTATED function whose body returns an object
@@ -9376,6 +9377,11 @@ function annotateNodes(
             // fns are NOT touched (this is the `else` of `returnAnnot` present).
             returnType = inferReturnTypeFromBody(n) ?? returnType;
           }
+          // S446 r5 — a name declared as a function more than once in the file
+          // (a nested `fn h` beside a top-level `fn h`) has ONE by-name entry
+          // here, the last one collected — not necessarily the declaration a
+          // given call resolves to. Recorded so the call-argument pass refuses it.
+          if (fnSignatures.has(n.name as string)) fnNamesDeclaredTwice.add(n.name as string);
           fnSignatures.set(n.name as string, { params: sigParams, returnType });
         } catch {
           // Defensive: never break the existing collectFnErrorTypes pass on
@@ -9428,10 +9434,13 @@ function annotateNodes(
   // types, resolved in the exporting file's scope). A local function of the
   // same name wins. Kept separate from `fnSignatures`, whose other readers
   // (return-type propagation, formFor onsubmit) stay file-local.
-  let callArgFnSignatures = fnSignatures;
-  if (importedFnSignatures && importedFnSignatures.size > 0) {
-    callArgFnSignatures = new Map(importedFnSignatures);
-    for (const [name, sig] of fnSignatures) callArgFnSignatures.set(name, sig);
+  // S446 r5 — a name declared as a function more than once in the file has NO
+  // entry (fail closed: its call arguments stay unstamped), and it does not
+  // fall back to an imported signature of the same name either.
+  const callArgFnSignatures: Map<string, FnSignature> = new Map(importedFnSignatures ?? []);
+  for (const [name, sig] of fnSignatures) {
+    if (fnNamesDeclaredTwice.has(name)) callArgFnSignatures.delete(name);
+    else callArgFnSignatures.set(name, sig);
   }
 
   // ---------------------------------------------------------------------------
@@ -17079,7 +17088,9 @@ function inferBareVariantsAtCallArgs(
     if (sig.imported === true) return entry && entry.kind === "import" ? sig : undefined;
     // A local function: an unresolved name (forward reference — a function is
     // bound after its body) keeps its signature; a non-function binding shadows.
-    if (entry && entry.kind !== "function" && entry.kind !== "import") return undefined;
+    // A LOCAL signature never applies to a name that resolves to an import
+    // binding (r5), nor to any non-function binding.
+    if (entry && entry.kind !== "function") return undefined;
     return sig;
   };
 
