@@ -43,7 +43,7 @@ describe("analyzeProtectFlow", () => {
   });
 
   test("a row that never reaches a sink is NOT recorded as stripped", () => {
-    const r = analyzeProtectFlow(mod("const ok = await verifyPassword(pw, u.passwordHash); return { ok };", 'import { verifyPassword } from "./_scrml/auth.js";'));
+    const r = analyzeProtectFlow(mod("const ok = await verifyPassword(pw, u.passwordHash); return { ok };", 'import { verifyPassword } from "scrml:auth";'));
     expect(r.leaks).toEqual([]);
     expect(r.tagSites[0].stripped).toBe(false);
   });
@@ -82,7 +82,7 @@ describe("analyzeProtectFlow", () => {
     expect(leakCols(mod("return u.passwordHash.length;"))).toEqual([]);
     expect(leakCols(mod('return u.passwordHash.startsWith("$");'))).toEqual([]);
     // `verifyPassword` from `scrml:auth` is on the DERIVER allowlist …
-    const AUTH = 'import { verifyPassword } from "./_scrml/auth.js";';
+    const AUTH = 'import { verifyPassword } from "scrml:auth";';
     expect(leakCols(mod("return await verifyPassword(pw, u.passwordHash);", AUTH))).toEqual([]);
   });
 
@@ -112,7 +112,7 @@ describe("analyzeProtectFlow", () => {
 
   test("F6: call-site sensitive — a helper used on the hash does not poison a clean call", () => {
     const helper = "function norm(s) { return s.trim(); }";
-    expect(leakCols(mod("const ok = await verifyPassword(pw, norm(u.passwordHash)); return norm(u.name);", 'import { verifyPassword } from "./_scrml/auth.js";' + helper))).toEqual([]);
+    expect(leakCols(mod("const ok = await verifyPassword(pw, norm(u.passwordHash)); return norm(u.name);", 'import { verifyPassword } from "scrml:auth";' + helper))).toEqual([]);
     expect(leakCols(mod("const a = norm(u.name); return norm(u.passwordHash);", helper))).toEqual(["passwordHash"]);
   });
 
@@ -159,7 +159,7 @@ describe("analyzeProtectFlow", () => {
     expect(leakCols(mod("return { toJSON() { return u.passwordHash; } };"))).toEqual(["passwordHash"]);
     // A clean receiver's method with a protected ARGUMENT is still derived
     // unless the method embeds its argument.
-    expect(leakCols(mod("return await verifyPassword(pw, u.passwordHash);", 'import { verifyPassword } from "./_scrml/auth.js";'))).toEqual([]);
+    expect(leakCols(mod("return await verifyPassword(pw, u.passwordHash);", 'import { verifyPassword } from "scrml:auth";'))).toEqual([]);
     // N6: `Bun.*` is not on the allowlist (unreachable from scrml source; `Bun.hash` is not one-way).
     expect(leakCols(mod("return Bun.hash(u.passwordHash);"))).toEqual(["passwordHash"]);
   });
@@ -230,7 +230,7 @@ describe("analyzeProtectFlow", () => {
   });
 
   test("round 3 N5: Object.keys(row) is column names; scrml:data pick/omit are modelled", () => {
-    const DATA = 'import { pick, omit } from "./_scrml/data.js";';
+    const DATA = 'import { pick, omit } from "scrml:data";';
     expect(leakCols(mod("return Object.keys(u);"))).toEqual([]);
     expect(leakCols(mod('return pick(u, ["id", "name"]);', DATA))).toEqual([]);
     expect(leakCols(mod('return pick(u, ["id", "passwordHash"]);', DATA))).toEqual(["passwordHash"]);
@@ -489,7 +489,7 @@ async function _scrml_handler_setup_2(_scrml_req) {
   });
 
   test("r6 RULING S443 #7: only keyed / password-class hashes derive; a bare digest stays protected", () => {
-    const C = 'import { hash, hmac, verifyHash } from "./_scrml/crypto.js";';
+    const C = 'import { hash, hmac, verifyHash } from "scrml:crypto";';
     expect(leakCols(mod('return hash("md5", u.passwordHash);', C))).toEqual(["passwordHash"]);
     expect(leakCols(mod('return hash("sha256", u.passwordHash);', C))).toEqual(["passwordHash"]);
     expect(leakCols(mod("return hash(alg, u.passwordHash);", C))).toEqual(["passwordHash"]);
@@ -518,7 +518,7 @@ async function _scrml_handler_setup_2(_scrml_req) {
   });
 
   test("r6e: `import.meta.env.X` is positive runtime evidence for an hmac key", () => {
-    const C = 'import { hmac } from "./_scrml/crypto.js";';
+    const C = 'import { hmac } from "scrml:crypto";';
     expect(leakCols(mod("return await hmac(import.meta.env.HMAC_KEY, String(u.passwordHash));", C))).toEqual([]);
   });
 
@@ -543,7 +543,7 @@ async function _scrml_handler_setup_2(_scrml_req) {
     const keys = { filePath: "/p/keys.server.js", js: 'export const HMAC_KEY = "public-key";\nexport const ENV_KEY = process.env.HMAC_KEY;\n' };
     const app = (k) => ({
       filePath: "/p/app.server.js",
-      js: `import { hmac } from "./_scrml/crypto.js";\nimport { ${k} } from "./keys.server.js";\n` + mod(`return await hmac(${k}, String(u.passwordHash));`),
+      js: `import { hmac } from "scrml:crypto";\nimport { ${k} } from "./keys.server.js";\n` + mod(`return await hmac(${k}, String(u.passwordHash));`),
       infos: [],
       spanOf: () => null,
     });
@@ -554,8 +554,8 @@ async function _scrml_handler_setup_2(_scrml_req) {
   });
 
   test("r6b RULING S445 #4: an HMAC keyed by a compile-time CONSTANT is a digest; a runtime key declassifies", () => {
-    const C = 'import { hmac } from "./_scrml/crypto.js";';
-    const CH = 'import { hmac, hash } from "./_scrml/crypto.js";\nimport { normalize, basename } from "./_scrml/path.js";\nimport { capitalize, truncate, padLeft } from "./_scrml/format.js";\nimport { getSecret } from "secret-store";';
+    const C = 'import { hmac } from "scrml:crypto";';
+    const CH = 'import { hmac, hash } from "scrml:crypto";\nimport { normalize, basename } from "scrml:path";\nimport { capitalize, truncate, padLeft } from "scrml:format";\nimport { getSecret } from "secret-store";';
     for (const body of [
       'return await hmac("public-key", String(u.passwordHash));',
       'const K = "public-key"; return await hmac(K, String(u.passwordHash));',
@@ -585,7 +585,7 @@ async function _scrml_handler_setup_2(_scrml_req) {
     ]) {
       expect([body, leakCols(mod(body, CH))]).toEqual([body, ["passwordHash"]]);
     }
-    const CS = C + '\nimport { env } from "./_scrml/process.js";\nimport { get } from "./_scrml/http.js";\nimport { normalize } from "./_scrml/path.js";';
+    const CS = C + '\nimport { env } from "scrml:process";\nimport { get } from "scrml:http";\nimport { normalize } from "scrml:path";';
     for (const body of [
       "return await hmac(process.env.HMAC_KEY, String(u.passwordHash));",
       "return await hmac(Bun.env.HMAC_KEY, String(u.passwordHash));",
@@ -736,6 +736,19 @@ describe("analyzeProtectFlow — round 7: implicit invocation", () => {
   test("a tx handle from the SQL client's .begin() is a query too", () => {
     const body = "return await _scrml_sql.begin(async (tx) => { const r = await tx`SELECT 1 AS x WHERE ${u.passwordHash} != ''`; return r.length; });";
     expect(leakCols(mod(body))).toEqual([]);
+  });
+
+  test("round 7 item 3: only the compiler's own `scrml:` stdlib is a deriver — a look-alike path is not", () => {
+    for (const spec of ["./_scrml/auth.js", "../_scrml/auth.js", "_scrml/auth.js", "/x/_scrml/auth.js", "scrml:auth.js", "my-scrml:auth"]) {
+      const C = `import { verifyPassword, hashPassword } from "${spec}";`;
+      expect([spec, leakCols(mod("return verifyPassword(pw, u.passwordHash);", C))]).toEqual([spec, ["passwordHash"]]);
+      expect([spec, leakCols(mod("return hashPassword(u.passwordHash);", C))]).toEqual([spec, ["passwordHash"]]);
+    }
+    // a spoofed crypto `hmac` / process `env` cannot declassify, nor a spoofed `pick` select
+    expect(leakCols(mod('return await hmac(env("K"), String(u.passwordHash));', 'import { hmac } from "./_scrml/crypto.js";\nimport { env } from "./_scrml/process.js";'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return pick(u, ["id"]);', 'import { pick } from "./_scrml/data.js";'))).toEqual(["passwordHash"]);
+    // the genuine article still derives
+    expect(leakCols(mod("return verifyPassword(pw, u.passwordHash);", 'import { verifyPassword } from "scrml:auth";'))).toEqual([]);
   });
 
   test("a host function handed to a host call does not recurse (base overflowed the stack)", () => {

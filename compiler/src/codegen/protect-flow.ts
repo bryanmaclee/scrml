@@ -473,8 +473,18 @@ const RUNTIME_SOURCE_CALLS: Record<string, Set<string>> = {
   random: new Set(["random", "randomInt"]),
   crypto: new Set(["generateToken", "generateUUID"]),
 };
+/**
+ * The stdlib module a specifier names — ONLY the compiler's own `scrml:NAME`
+ * specifier. The flow runs on the emitted server modules BEFORE the write phase
+ * rewrites `scrml:NAME` to the bundled `./_scrml/NAME.js` (api.js
+ * `rewriteStdlibImports`), so the compiler's stdlib always arrives here as
+ * `scrml:NAME`. S447 round 7: this also matched any `…/_scrml/NAME.js` path, so
+ * an author file at `./_scrml/auth.js` whose `verifyPassword` returned its
+ * argument was treated as the allowlisted deriver and served the hash (measured;
+ * the same held for a spoofed `crypto.js` `hmac` key source or `data.js` `pick`).
+ */
 function stdlibModuleOf(source: string): string | null {
-  const m = /(?:^scrml:|(?:^|\/)_scrml\/)([a-z]+)(?:\.js)?$/.exec(source);
+  const m = /^scrml:([a-z]+)$/.exec(source);
   return m ? m[1] : null;
 }
 function isStdlibDeriver(source: string, imported: string, node?: any, args?: Taint[]): boolean {
@@ -2189,7 +2199,7 @@ class FlowAnalysis {
    * does for `pick(u, ["id", "name"])`. A non-literal key list fails closed.
    */
   private pickOmit(host: { source: string; imported: string }, args: Taint[], node: any, fn: Instance | null): Taint | null {
-    if (!/(?:^scrml:|(?:^|\/)_scrml\/)data(?:\.js)?$/.test(host.source)) return null;
+    if (stdlibModuleOf(host.source) !== "data") return null;
     if (host.imported !== "pick" && host.imported !== "omit") return null;
     const keysNode = node?.arguments?.[1];
     if (!keysNode || keysNode.type !== "ArrayExpression") return null;
