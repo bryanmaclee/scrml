@@ -1105,6 +1105,18 @@ function devClientAssets(serveDir) {
  * @param {object} opts          dev options (entry-candidate resolution)
  * @returns {Promise<Response>}
  */
+/**
+ * The fixed, value-free 500 `scrml dev` answers a failing request with (§14.8.9
+ * error egress — the detail goes to the server log, never the client).
+ * Exported for tests.
+ */
+export function devInternalErrorResponse() {
+  return new Response(
+    JSON.stringify({ error: "Internal server error" }),
+    { status: 500, headers: { "Content-Type": "application/json" } },
+  );
+}
+
 export async function devDispatch(req, server, serveDir, opts) {
   const url = new URL(req.url);
   const pathname = url.pathname;
@@ -1129,11 +1141,17 @@ export async function devDispatch(req, server, serveDir, opts) {
         if (route.isWebSocket) return await route.handler(req, server);
         return await route.handler(req);
       } catch (err) {
-        console.error(`[dev] Route handler error for ${req.method} ${pathname}: ${err.message}`);
-        return new Response(
-          JSON.stringify({ error: "Internal server error", detail: err.message }),
-          { status: 500, headers: { "Content-Type": "application/json" } },
-        );
+        // §14.8.9 error egress (S447 round 7) — the error's MESSAGE never goes to
+        // the client: it is logged here, in full, and the client gets a fixed,
+        // value-free 500 — exactly as the compiler-emitted production server
+        // answers (build.js `generateServerEntry` `error:`). An error a host API
+        // builds can quote server data the compiler cannot see into — measured:
+        // SQLite's `json_extract('{}', passwordHash)` fails with "bad JSON path:
+        // '<the hash>'", and this handler served it as `detail`. Not only under
+        // `protect=`: a message can as well carry a connection string, a file's
+        // contents or a path, and `scrml dev` is reachable from the network.
+        console.error(`[dev] Route handler error for ${req.method} ${pathname}:`, err);
+        return devInternalErrorResponse();
       }
     }
   }
@@ -1315,6 +1333,15 @@ export function buildServeConfig(opts, serveDir) {
     // `--idle-timeout <seconds>`; `?? 120` keeps direct callers (and tests that
     // build opts without the flag) byte-unchanged.
     idleTimeout: opts.idleTimeout ?? 120,
+    // §14.8.9 error egress (S447 round 7) — anything that throws past the route
+    // catch in `devDispatch` (an author `handle()` onion, a WebSocket upgrade
+    // route) would otherwise get Bun's development error page — the message and
+    // a source excerpt — because `scrml dev` does not run with
+    // NODE_ENV=production. Log it; answer the fixed 500 the prod entry answers.
+    error(err) {
+      console.error("[dev] unhandled server error:", err);
+      return devInternalErrorResponse();
+    },
     async fetch(req, server) {
       const url = new URL(req.url);
       const pathname = url.pathname;
