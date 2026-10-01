@@ -1,3 +1,82 @@
+# scrml — Session 444 (bryan · XPS-8950) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. **Concurrent:** S443 (ASUS) was
+> LIVE at boot and WRAPPED mid-session (#1187); **S445-bryan (ASUS) is LIVE as S444's successor** (security pickup:
+> app-root, program-role-by-ancestor, prose r5, protect r6 — #1192 #1194 #1196 #1198 landed) and defers its wrap to S444.
+> **Rulings authority:** `scrml-support/user-voice-scrml.md` §S444 (≈20 entries). **Arc plan for the next bootstrap
+> lane:** `scrml-support/docs/deep-dives/bootstrap-server-boundary-arc-plan-2026-09-30.md`.
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 1. bryan's open calls (surface FIRST)
+- **dpa-058 B3** — a BOUND top-level scalar with validators (`<let email:string="" req/>` + `<input bind:value=@email/>`):
+  PA + reviewer reading of S442 ruling (2) = it lowers its attributes (`required` etc.); today the bootstrap refuses it
+  E-VALIDATOR-DEAD (fail-closed). One switch: `topLevelValidatorsLower()` in `compiler/self-host-v2/analyze.scrml`.
+  Gap filed (ruling-owed). Asked twice this session, unanswered.
+- **dpa-063** (statement termination: `;` vs newline — A ~30k edits vs B ~205 lines, 7 calls) and **dpa-064** (nested
+  `<program>` as an auth scope) — COMPLETE, ADVISORY, banked by **S445**: S445's lane to surface unless bryan takes them here.
+- **SPEC softening** — §34 / §13.2 still say an escaped async fn's caller "receives an unawaited Promise" (over-certain;
+  the impl message was softened in #1184). Gap `g-spec-async-escape-unawaited-promise-overcertain`. Asked; unanswered.
+- **PA readings recorded for veto** (S444): dpa-059 calls 2–5 entailed by "C"; E-PERSIST-WITH-SERVER (from the dd, not
+  ruled); E-LIFECYCLE-022 (`prov=pa-ruled`, governing sentence §6.7.7, corpus 0/948); dpa-045 follow-ups (a)(c)(d)
+  (`_{` in markup E-FOREIGN-004; `my_{` guard; `<schema>` not free text); #1202 decisions D2/D4/B1/B2/B4/B6
+  (`docs/changes/s444-core-additions-dpa058/progress.md`); `</b>// x` / `<p>// x` are TEXT (literal ruling).
+- Older ADVISORY dPA items unchanged: dpa-041 (call 1 BLOCKING), 042, 043 (AXIOM), 047, 048, 049 (`bun scripts/dpa-debt.ts`).
+
+### 2. The next bootstrap arc (all S444 rulings are SPEC-landed, NOT built)
+dpa-059 abort / dpa-060 cache / dpa-061 persist= / dpa-062 prepaint+hold are Nominal SPEC (#1193 #1199). The bootstrap has
+**no server boundary and no async** — order: U0 async core → Uc codec → U1 server boundary → U2 `<request>` → U3 abort →
+U4 cache; U5 persist= after Uc; U6 theme pre-paint. Full plan + 6 SPEC ambiguities (incl. a SPEC DEFECT: §6.7.7 grammar
+admits a self-closing `<request/>` that E-LIFECYCLE-019 forbids): the arc-plan doc above. OPEN lists in SPEC: O-059-*,
+O-060-*, O-061-*, O-062-*.
+
+### 3. Follow-ups filed (docs/known-gaps.md §S444*)
+- HIGH `g-lift-markup-handler-multi-statement-drops-all-but-first` (impl#1, silent).
+- impl#1 string-literal text-scan family (found compiling the bootstrap): `"pure \`fn\`"` → `function` inside a match arm;
+  E-FN-004 on `Date.now()` text in a string; `(a). Call it` → E-CODEGEN-INVALID-LOGIC (§S444g — check the final letter).
+- Test harness: conformance adapter `run()` leaves happy-dom globals installed → order-dependent HTTP-test failures
+  (protect-error-egress now self-guards; the adapter is the root).
+- bootstrap deferrals from #1202: `fn` writing outer cells not refused (§48.3.3); two validators → same attr keep the first.
+
+## 🔭 DURABLE
+**A ratified closed list must be checked against the corpus — and a REVIEWER's finding is still a claim.** This session
+re-learned the second half three times: I told bryan the 55 browser failures were unflagged (they are baselined + gate-checked
+— FAILURE-BASELINE.json), that #1191's post-merge protect failures were a "real interaction" (they were pre-existing
+test-order pollution, reproduced on clean main), and that §20.8 already required aborting `<request>` (it covers only the
+router's page fetch). Each was caught by an agent or a reproduction. **Reproduce before you assert, including your own
+diagnoses.**
+
+**Policy before dispatch.** I dispatched + reviewed impl#1 `<request>` fixes (#1191) without checking the S435 TS policy
+(impl#1 changes only for bootstrap or security). bryan granted an exception ("a"). Check the policy line at dispatch time,
+not at merge time.
+
+**Two sessions landing in parallel makes every PR conflict on generated files.** SPEC-INDEX / FACTS / known-gaps counts
+conflict on EVERY merge; `scratchpad/resolve.sh` + `train.sh` (session scratch — re-create from this description if
+needed) resolved them mechanically (take main + regen; known-gaps keep both sides + gap-id diff = 0 lost). A train must
+stop on DIRTY (it waited forever once) and pause ~60s after a push before reading GitHub's merge state (stale DIRTY).
+Process fix worth a ruling: stop committing generated counts in feature PRs.
+
+**The hook doesn't run the top-level `compiler/tests/*.test.js`, the cloud gate does.** #1191's block-splitter change
+passed every local check and failed the gate's native-parser parity test. Briefs now name those tests explicitly.
+
+## ⚑ MISSES (mine)
+1. ★★ Boot report asserted "agents blocked until Oct 2" from an inherited board note — never verified; first dispatch worked.
+2. ★★ #1191 dispatched against S435 policy (above). bryan ruled an exception.
+3. ★★ Three confident wrong diagnoses (above), each reversed by execution.
+4. ★ Brief for the dpa-045 follow-ups told an agent to write "`\"` stays an error" — contradicted §4.18.3; caught by me mid-run.
+5. ★ `pkill -f` with a pattern that matched my own shell (exit 144) — the S376 hazard, on myself.
+6. ★ Dev server launched from the repo root wrote a stray `users.db` there (removed).
+
+## Gate at close
+- Landed S444 (squash-merged, cloud `gate` green each): #1181 #1182 #1184 #1185 #1186 #1188 #1189 #1190 #1191 #1193 #1195
+  #1197 #1199 #1200 #1202 (+ the maps + final-gaps PRs opened at wrap — see the wrap PR body).
+- Review floor: markers written for all S444 PRs (`docs/pr-reviews.md`).
+- Inbox: flogence S50 drop → read/ (reply delivered: flogence `cdba6ad`).
+- Main checkout on XPS carries an UNCOMMITTED `handOffs/dpa-queue.md` edit from bryan's dPA session — not mine, untouched.
+- Board: S444 WRAPPED; S445 LIVE (successor).
+
+---
+
 # scrml — Session 443 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Concurrent: S442-bryan-xps
