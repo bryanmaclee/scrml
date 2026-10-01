@@ -794,10 +794,10 @@ The following `<program>` attributes are valid in nested positions:
 | `callchar=` | YES | Maps a single character to this nested program for call-char sigils (§23.3) |
 | `story=`  | YES (nested only) | References a build story by name from the `scrml.toml` `[story]` table — compiles this nested `<program>` under that build story (§58). On the top-level `<program>` it emits `W-STORY-ON-TOP-LEVEL` and is ignored. |
 | `capabilities=` | YES (and top-level) | Declares the intended host-capability surface for foreign code (`_{}` / WASM sigil / `use foreign:` sidecar) in this scope — a bracketed list of capability tokens `{ network, fs-read, fs-write, spawn, env, db }` (§23.5). Closest-ancestor-`<program>`-wins (§23.5.4). Advisory in v1.0 (`W-FOREIGN-UNDECLARED-CAPABILITY`); enforcement deferred. |
-| `autostart=` | YES (nested only) | §43.4 lifecycle — `autostart="false"` defers the nested program's start until `<#name>.start()`. |
-| `restart=` | YES (nested only) | §43.4 supervision — `"always"` \| `"never"` \| `"on-error"`. |
-| `max-restarts=` | YES (nested only) | §43.4 supervision — restart-count limit. |
-| `within=` | YES (nested only) | §43.4 supervision — the restart-limit window (seconds). |
+| `autostart=` | YES (nested only) | §43.4 lifecycle (default start; `autostart="false"`) — `autostart="false"` defers the nested program's start until `<#name>.start()`. |
+| `restart=` | YES (nested only) | §46.6 supervision (§46.3 example; "Supervision policy … SHALL be declared as attributes on the `<program>` element") — `"always"` \| `"never"` \| `"on-error"`. |
+| `max-restarts=` | YES (nested only) | §46.6 supervision (§46.3 example; "Supervision policy … SHALL be declared as attributes on the `<program>` element") — restart-count limit. |
+| `within=` | YES (nested only) | §46.6 supervision (§46.3 example; "Supervision policy … SHALL be declared as attributes on the `<program>` element") — the restart-limit window (seconds). |
 
 The top-level `<program>` MUST NOT have a `name=` attribute (it is the implicit root).
 Nested `<program>` elements SHOULD have a `name=` attribute for reference and diagnostics;
@@ -993,9 +993,9 @@ mechanism depends on the execution context type:
 | E-PROGRAM-001 | Circular `<program>` nesting (a `<program>` is a descendant of itself) **(Reserved / spec-ahead, S263 — no fire site: circular `<program>` nesting is unconstructable-by-construction — a lexical tree cannot contain itself and there is no include/inline mechanism; defensive guard, condition unreachable. Excluded from the freeze fireable set.)** | Error |
 | W-PROGRAM-001 | Nested `<program>` has no `name=` attribute | Warning |
 | W-PROGRAM-TITLE-NESTED | Documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>` (see §40.7) | Warning |
-| E-PROGRAM-NESTED-SESSION | A session attribute (`sessionExpiry=`, `session-secure=`) appears on a nested `<program>` (§4.12, including the implied application ancestor); see §4.12.2. | Error |
-| E-PROGRAM-NESTED-ATTR | An application-level `<program>` attribute (any attribute outside the §4.12.2 table, other than `auth=`, the session attributes, the documentary attributes, `kind=` / `serve=`) appears on a nested `<program>`; see §4.12.2. | Error |
-| E-PROGRAM-CONFIG-UNREAD | The file's top-level `<program>` only exists after component expansion, so its configuration was never read; see §4.12. | Error |
+| E-PROGRAM-NESTED-SESSION | A session attribute (`sessionExpiry=`, `session-secure=`) appears on a nested `<program>` (§4.12, including the implied application ancestor); see §4.12.2. Emitted at `compiler/src/codegen/index.ts` (the shared `forEachProgramWithRole` walk). | Error |
+| E-PROGRAM-NESTED-ATTR | An application-level `<program>` attribute (any attribute outside the §4.12.2 table, other than `auth=`, the session attributes, the documentary attributes, `kind=` / `serve=`) appears on a nested `<program>`; see §4.12.2. Emitted at `compiler/src/codegen/index.ts` (verdict `nestedProgramAttrVerdict` in `compiler/src/program-role.ts`). | Error |
+| E-PROGRAM-CONFIG-UNREAD | The file's top-level `<program>` only exists after component expansion, so its configuration was never read; see §4.12. Emitted at `compiler/src/codegen/index.ts` (after the E-PROGRAM-002 count). | Error |
 | E-PROGRAM-NESTED-AUTH | `auth=` appears on a nested `<program>` (one with a `<program>` or `<page>` ancestor, however much markup sits between, or an implied application ancestor — §4.12); see §4.12.2. Emitted at `compiler/src/codegen/index.ts` (the shared `forEachProgramWithRole` walk, `compiler/src/program-role.ts`). | Error |
 | E-STORY-UNKNOWN | `story="<name>"` references a build story not declared in the `scrml.toml` `[story]` table (see §58) | Error |
 | W-STORY-ON-TOP-LEVEL | `story=` appears on the top-level `<program>`; ignored — the top-level build story is owned by `[story] default` (see §58) | Warning |

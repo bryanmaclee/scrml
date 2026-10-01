@@ -68,7 +68,7 @@ export const NESTED_SESSION_ATTRS: ReadonlySet<string> = new Set(["sessionExpiry
  * "Valid in nested?" table (`name=`, `lang=`, `db=`, `mode=`, `build=`, `port=`,
  * `health=`, `route=`, `protect=`, `callchar=`, `story=`, `capabilities=`) plus the
  * §43.4 lifecycle / supervision attributes of a nested execution context
- * (`autostart=`, `restart=`, `max-restarts=`, `within=` — §43.4 declares them on the
+ * (`autostart=`, `restart=`, `max-restarts=`, `within=` — §43.4 (autostart) + §46.3/§46.6 (supervision SHALL) declare them on the
  * nested `<program>`; the §4.12.2 table lists them since S445).
  *
  * Every OTHER registered `<program>` attribute is application-level and is a compile
