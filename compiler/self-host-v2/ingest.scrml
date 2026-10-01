@@ -1196,12 +1196,13 @@ ${
         if (files.length != 1) return { core: empty, why: ["file: a multi-file program (imports)"] }
         const ast: INode = files[0].ast
         // `filePath` is identity (the path arrives as IFile.path); the `has*` flags and
-        // `fileShape` summarize nodes mapped one by one. The hoisted lists (`imports`,
+        // `fileShape` summarize nodes mapped one by one; `precgTopLevelProgramSpan` is
+        // identity (impl#1's PRECG records which <program> node it configured, by span — S445 F2). The hoisted lists (`imports`,
         // `exports`, `components`, `typeDecls`, `machineDecls`, `channelDecls`) and the
         // configs (`authConfig`, `middlewareConfig`, `mcpConfig`) are NOT listed: non-empty,
         // each is a not-yet.
         const fileWhy: string[] = unmapped(ast, "file", ["nodes"], ["filePath", "hasProgramRoot", "hasResetExpr",
-            "hasEqualityExpr", "hasChunkedMarkupTag", "hasForStmt", "fileShape"])
+            "hasEqualityExpr", "hasChunkedMarkupTag", "hasForStmt", "fileShape", "precgTopLevelProgramSpan"])
         const items: Items = collect(nodesAt(ast, "nodes"))
 
         // Pass 1: every declaration gets its Sym before any body is lowered.
