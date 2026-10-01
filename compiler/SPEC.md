@@ -6819,6 +6819,52 @@ shadowing. A `defer` must not change which programs compile (beyond the fail-clo
 in name only** — every program it rejects already failed to compile at codegen (measured on the
 corpus when it landed).
 
+#### 7.3.4 Call checking — arity and argument types (S447)
+
+**Added 2026-10-01 (S447, UFCS sub-call 9). Status: Nominal / spec-ahead — impl#1 emits neither check
+(measured S447: `addOne(@phrase)` with a `string` argument and `addOne(x, 2)` against
+`function addOne(a: number)` both compile at exit 0); impl#1 carries it (§34.0); the bootstrap implements it.**
+
+> **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs on 3-11"*, item 9: *"Argument arity and
+> argument-type checking are specified and emitted FIRST — prerequisite for UFCS's errors."* · origin: bryan S447
+> *"@userStuff.otherNumbers.addOne() //error, wrong number of arguments*/ @useStuff.phrase.addOne() //type error"*
+> · dd:scrml-support/docs/deep-dives/ufcs-method-call-syntax-2026-10-01.md (C2: *"There is no SPEC rule that a
+> plain function call's argument must be assignable to the parameter type."*).
+
+**Why this section is here.** §7.3 owns function declaration and call forms, and already carries the S440
+arity rule; §7.5.1 owns assignability and enumerates the positions it is judged at, with the argument as
+**position 3**. This subsection states the call-site check as one rule and points at both; the assignability
+relation itself is not restated (§7.5.1 is its one home).
+
+A call to a statically resolved scrml function — a `fn` or `function` declared in scope or imported from a
+`.scrml` module, including a server function (§12) — is checked at the call site:
+
+1. **Arity — `E-CALL-ARITY` (§7.3, S440 ruling #2).** More arguments than declared parameters is an error;
+   fewer is an error unless each omitted parameter has a default (§7.3.2). The S440 PA reading on rest
+   parameters, spread arguments and `?`-optional parameters (the §7.3 bullet, *flagged for veto*) applies
+   unchanged — S447 did not address it.
+2. **Argument type — `E-TYPE-031` at §7.5.1 position 3.** An argument whose type the compiler PROVES, and
+   which is not assignable to the parameter's declared type, is `E-TYPE-031`. "Assignable" is §7.5.1's
+   relation (*"a value is assigned to a position whose declared type it does not satisfy"*, the §34 row), as
+   §7.5.1 position 3 now states it.
+3. **An un-annotated parameter accepts any argument.** Type annotations are optional (§7.5 *"Type annotations
+   SHALL be optional on all variable declarations and function parameters"*); a parameter without one
+   imposes no argument-type check. (Arity still applies.)
+4. **An argument whose type is not proven passes.** Provable-or-silent, as everywhere in §7.5.1: where
+   inference is defeated the argument is `unknown` and §7.5.2 governs; an `asIs` argument passes.
+5. **Plain calls AND dot calls.** Both checks apply identically to `f(x, a)` and to its uniform-function-call
+   spelling `x.f(a)` (§67): the receiver is argument 1. So `@n.addOne(5)` is `E-CALL-ARITY`
+   (two arguments to a one-parameter function), and `@userStuff.phrase.addOne()` (a `string` receiver to
+   `a: number`) and `@userStuff.otherNumbers.addOne()` (a `number[]` receiver) are `E-TYPE-031` — the latter
+   is a TYPE error, not an arity error: it passes exactly one argument.
+6. **Order.** The bootstrap SHALL emit both checks before, or together with, the §67 dot-call errors — a
+   dot call that LOOKS checked but is not is the failure S447 ruled out.
+
+Out of scope here (not ruled): calls to host / foreign functions (`_{ }`, `.js` imports, `import:host`) — the
+S440 PA reading's *"the check applies only when the callee is statically resolved"* is the standing text; a
+callee reached through a function-typed value (a callback parameter) is the S440 reopen condition, not this
+rule.
+
 ### 7.4 Markup as Expression in Logic Context
 
 Markup syntax is valid as an expression inside `${ }` logic contexts.
@@ -7011,7 +7057,7 @@ Two things moved, and each states which position it closes per the additivity ru
 |---|---|---|---|
 | 1 | annotated variable declaration | `let n: number = "nope"` | **CHECKED** — E-TYPE-031, all 8 off-diagonal cells of {`number`,`string`,`boolean`} × {`"s"`, `42`, `true`, `` `tpl` ``} |
 | 2 | annotated state-cell declaration | `<n>: number = "nope"` | **CHECKED** — E-TYPE-031, same rule and same 8 cells as position 1 |
-| 3 | argument | `fn f(x: number)` called `f("nope")` | not checked |
+| 3 | argument | `fn f(x: number)` called `f("nope")`; the dot form `"nope".f()` (§67) | **RULED S447 — E-TYPE-031; not yet checked** (measured S447: impl#1 compiles `addOne(@phrase)` with a `string` argument at exit 0) |
 | 4 | return | `fn f() -> number { return "nope" }` | not checked |
 | 5 | operand | `let z = "x" * 2` | not checked |
 | 6 | cell or field write | `<n>: number = 1` then `@n = "nope"`; a `number` field `x` of `@p`, then `@p.x = "nope"` | **RULED S440 — E-TYPE-031; not yet checked** (measured S440: impl#1 compiles both at exit 0 — the cell write in an event-handler value and in a function body, the field write in an event-handler value) |
@@ -7027,6 +7073,36 @@ yet emitted** (the row above); impl#1 carries it (§34.0, S440 #12) and the boot
 > mismatch → E-TYPE-031 + a §66.20 row + a cell-write row in §7.5.1"* · and (the three SPEC-text OPEN items,
 > #1) — *"a typed field is as typed as a typed cell"* → *"a wrong-typed FIELD write is E-TYPE-031 too"* ·
 > supersedes: the round-1 ⚑ OPEN on field writes.
+
+**Position 3 — an argument (S447 UFCS sub-call 9).** A call argument whose type the compiler PROVES and that
+does not satisfy the corresponding parameter's declared type is **E-TYPE-031**, the same code as positions 1, 2
+and 6 (the call-site rule is §7.3.4; it covers plain calls and the §67 dot form, whose receiver is argument 1).
+An argument's type is PROVEN when it is (a) a syntactically-determined literal (the position-1/2 literal set), or
+(b) an expression whose type a resolved declaration fixes — a read of an annotated cell or of a typed field of a
+cell, an annotated `let` / `const` / parameter, or a call to a function with a declared `->` return type.
+"Does not satisfy" is decided, at this position, in exactly these cases:
+
+1. both types are unpredicated primitives from the enumerated set (`number`, `string`, `boolean`) and differ —
+   the position-1/2 rule;
+2. one side is a primitive and the other a sequence (`T[]`, a tuple), a struct, an enum or a map — a
+   **kind** mismatch (bryan's S447 `@userStuff.otherNumbers.addOne()`, a `number[]` into `a: number`; and
+   `@userStuff.phrase.addOne()`, a `string` into `a: number`, is case 1);
+3. the argument is a proven `T | not` and the parameter's type does not admit `not` — ruling S442 #4
+   (*"`T | not` into `T` is an error for EVERY type … A `T | not` isn't a `T`."*).
+
+Every other pair — struct to struct, enum to enum, element types of two sequences, unions, a §53.4 predicate —
+is NOT decided at this position yet and SHALL compile (the additivity rule below). **`int`:** an `int` argument at
+a `number` parameter satisfies it (S404: `int` is a refinement of `number`); a `number` argument at an `int`
+parameter SHALL NOT fire E-TYPE-031 at this position until the S404 text lands — that pair is exactly the
+measured false-positive class of the ⚑ note below. A sequence argument's grants follow §66.12.3 (an argument
+granting MORE than the parameter is accepted). **Nominal on impl#1 — not yet emitted** (the row above);
+impl#1 carries it (§34.0) and the bootstrap implements it.
+
+> **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs on 3-11"* (item 9) · S442 — *"your recs. if the
+> lifecycle says T | not then it can only end as not, yes for all types"* (item 4) · S404 — *"actually I meant a"*
+> (`int` refines `number`) · supersedes: this section's *"Positions 3-5 are NOT YET CHECKED"* on the position-3
+> axis only, and the ⚑ note's *"the normative text lands with the implementation"* on its timing — S447 item 9
+> orders the text FIRST.
 
 **Normative statements.**
 
@@ -7046,8 +7122,11 @@ yet emitted** (the row above); impl#1 carries it (§34.0, S440 #12) and the boot
   OUTSIDE it: `int` is a distinct builtin (§14.1.2) and no section of this specification rules
   `int` / `number` assignability, so firing on `<n>: int = "s"` would invent a rule rather than
   enforce one.
-- Positions 3-5 are **NOT YET CHECKED**. A program that assigns a non-assignable value at those
-  positions SHALL compile. This is a statement about the current provable domain, NOT a claim that
+- The compiler SHALL emit `E-TYPE-031` at position 3 — a call argument, including the receiver of a §67 dot
+  call — in the three cases the position-3 paragraph above enumerates, and in no other (S447 item 9; Nominal
+  on impl#1).
+- Positions 4-5 are **NOT YET CHECKED**, nor are the position-3 pairs the position-3 paragraph leaves
+  undecided. A program that assigns a non-assignable value at those positions SHALL compile. This is a statement about the current provable domain, NOT a claim that
   such a program is well-typed: it is not, and a later widening of this section MAY reject it.
 - The predicated-annotation path (§53.4) and the prop-passing path (§15.3 / §15.10) are governed by
   their own sections and are **not** narrowed by this amendment. In particular, a widening of the
@@ -7090,6 +7169,11 @@ implementation (the bare-`int` desugar plus the §53.4 zone wiring, gated on an 
 the change is `semantics-changed` for a non-literal argument, which no diagnostic delta reveals).
 Until that lands, position 3 remains NOT CHECKED and the row in the table above stands.
 `provenance: ruling:user-voice-scrml.md S404 "actually I meant a"`
+
+⚑ **Amended 2026-10-01 (S447) — position 3 is now WRITTEN (Nominal).** S447 item 9 ruled the argument check
+specified FIRST, ahead of the S404 implementation; the position-3 paragraph above is that text. It is scoped so
+the blocking shape (a `number` argument at an `int` parameter) does NOT fire, so writing it reopens none of the
+false positives this note measures. "Not checked" in the table row now means *not yet emitted by impl#1*.
 
 ### 7.5.2 Unproven types — `asIs` is a signature, not a shrug
 
