@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 221 | 4 |
-| MED | 440 | 0 |
+| MED | 439 | 0 |
 | LOW | 213 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -18922,8 +18922,8 @@ same compile also raises a spurious `E-DG-002` ("`@items` … never consumed") a
 (Whether a mutating `sort()` in a render expression should be legal at all is its own question — the pin waits for
 that.) found by: S432 adversarial review of the when-changes branch.
 
-### g-dev-server-binds-all-interfaces — `scrml dev` / `scrml serve` listen on every interface, so the dev server (and its compile-error overlay) is reachable from the LAN — `NEW S432-peter; MED; open — ROUTED to bryan (default-bind is a product decision)`
-<!-- @gap id=g-dev-server-binds-all-interfaces sev=MED status=open locus=compiler/src/commands/dev.js(buildServeConfig,runDevChildServer,the parent proxy Bun.serve),compiler/src/commands/serve.js — no `hostname` passed to Bun.serve prov=empirical:S432-redaction-dev-agent-netstat-0.0.0.0-LISTENING -->
+### g-dev-server-binds-all-interfaces — `scrml dev` / `scrml serve` listen on every interface, so the dev server (and its compile-error overlay) is reachable from the LAN — `NEW S432-peter; MED; RESOLVED S446 (hold/s432-dev-server-localhost-default landed via fix/s446-loopback-default on bryan's S439 ruling)`
+<!-- @gap id=g-dev-server-binds-all-interfaces sev=MED status=resolved locus=compiler/src/commands/dev.js(buildServeConfig,runDevChildServer,the parent proxy Bun.serve),compiler/src/commands/serve.js — no `hostname` passed to Bun.serve prov=empirical:S432-redaction-dev-agent-netstat-0.0.0.0-LISTENING -->
 
 No `Bun.serve` call in `dev.js` or `serve.js` passes `hostname`; on this machine `Bun.serve({port:0})` shows in `netstat`
 as `TCP 0.0.0.0:<port> LISTENING` (while `server.hostname` reports "localhost"). The compile-error overlay renders
@@ -18931,6 +18931,23 @@ diagnostics — which carried db connection secrets until `fix/s432-db-secret-re
 network. Not changed unilaterally: some workflows use LAN access deliberately (phone testing), so the default
 (`localhost` + an opt-in `--host`) is bryan's call; `dev.js` is also in his S430 footprint. Security-adjacent → P7
 criterion 3 once ruled. found by: S432 redaction dev agent while enumerating sinks.
+
+**RESOLVED (S432, gift-wrapped for bryan's ruling).** Every CLI listener now goes through
+`compiler/src/commands/listen.js` `listen(config, host)`, which requires an explicit host. `scrml dev` (parent
+proxy) and `scrml serve` default to loopback on BOTH families — `127.0.0.1` + `::1` on the same port, the `::1` twin
+best-effort (skipped silently without IPv6; one warning line if another process holds it). The `scrml dev` app
+CHILD always binds `127.0.0.1` only (only the parent proxy dials it, by IPv4 literal — pre-fix it too sat on
+`0.0.0.0` on an ephemeral port, un-proxied). `--host <addr>` / `--host=<addr>` opt in; bare `--host` = `0.0.0.0` +
+`::` (ipv6Only twin) and prints one "reachable from the network" line naming the LAN URLs. An unbindable host
+exits 1 naming the host and families tried (not Bun's "Is port 0 in use?" stack). Measured on Windows/Bun 1.3.14:
+`hostname:"localhost"` binds `[::1]` ONLY and `"127.0.0.1"` IPv4 only, hence the explicit pair; `::` is dual-stack
+by default so its pairing with `0.0.0.0` needs `ipv6Only:true`. Pinned by `compiler/tests/unit/cli-listen-host.test.js`
+(incl. a structural check that no other listener — `Bun.serve`/`Bun.listen` in any spelling, `createServer`, or an
+http/https/net/tls/http2/dgram import — exists in compiler/src, and an empirical LAN-address probe with a bare-`--host`
+control) + `compiler/tests/commands/dev-serve-bind-host.test.js` (the real CLIs).
+S446 landing (the CI gate on Linux caught it): `listen()` now refuses inet_aton numeric shorthand (`0`, `127.1`,
+`2130706433`, `0x7f.0.0.1`, `010.0.0.1`) before any bind, on every OS. Linux binds `--host 0` as 0.0.0.0 (every
+interface) while Windows refuses it, so a typo-like value could otherwise expose the server on one OS only.
 
 ### g-native-component-def-with-children-throws-at-boot — under `--parser=scrml-native`, a markup-valued component definition that interpolates `${children}` is emitted as boot-time code that evaluates `children`, so the client throws `ReferenceError: children is not defined` at load — `NEW S432-peter; MED; open`
 <!-- @gap id=g-native-component-def-with-children-throws-at-boot sev=MED status=open locus=searched:compiler/native-parser(the native lowering of a `const X = <markup>` component definition — emits the definition body as a lift)—not-traced prov=empirical:S432-dev-agent-happy-dom-default-vs-native-A-B-on-451296f3-and-4d888293 -->
