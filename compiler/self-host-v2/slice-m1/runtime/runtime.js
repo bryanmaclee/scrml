@@ -266,18 +266,50 @@ export function effect(scope, fn) {
 // earlier run wrote before it suspended stays written.
 //
 // RE-ENTRY (parity with impl#1's `_scrml_when_changes`, PA-ruled S446): a When
-// re-triggered while its body is RUNNING (its own write, through a function
-// call, or a cycle through another When) is not recursed into: it is marked
-// pending and re-runs ONCE after the current run; a further re-trigger in that
-// re-run is dropped and reported (console.error) — the page stays alive. (SPEC
-// §6.7.4 names only the direct self-write, E-LIFECYCLE-006; cross-`when`
-// cycles are a SPEC question.)
+// re-triggered BY ITS OWN CAUSAL CHAIN (its own write, through a function
+// call, or a cycle through another When — synchronously or from a resumed
+// continuation) re-runs ONCE; a further re-trigger from that chain is dropped
+// and reported (console.error) — the page stays alive. (SPEC §6.7.4 names
+// only the direct self-write, E-LIFECYCLE-006; cross-`when` cycles are a SPEC
+// question.)
+//
+// THE CAUSAL CHAIN (review r2 N1). A Chain is born when a When runs because
+// of a write made OUTSIDE every When body and continuation — a genuine
+// external event (a handler, a host callback). Everything that run causes
+// carries the chain: its body, every continuation of its task (a resumed
+// suspension runs with `currentChain` = the task's chain), and every When a
+// write made under that chain triggers. The cap counts runs PER WHEN PER
+// CHAIN (`Chain.runs`), so a continuation that writes its own dep, or closes a
+// cycle through another When, is bounded and reported exactly like the
+// synchronous path — even though the When is not `running` while suspended.
+//
+// Why this keeps RULED (b) intact: a re-trigger while suspended that comes
+// from OUTSIDE the chain (currentChain null at the write) starts a NEW chain —
+// the newest run wins (cancels the suspended task) and is never counted as a
+// re-run of the old one. Only a re-trigger the When's own run CAUSED counts.
+// A When queued by both an external write and a chained write before it runs
+// is treated as external (the external event alone would run it).
 // ---------------------------------------------------------------------------
 const WHEN_RERUN_CAP = 1;
 
+/** One external event's causal chain: how many times each When ran in it. */
+class Chain {
+  constructor() { this.runs = new Map(); }
+}
+
+// The chain of the When body / continuation executing now; null outside them.
+let currentChain = null;
+
+function inChain(chain, fn) {
+  const saved = currentChain;
+  currentChain = chain;
+  try { return fn(); } finally { currentChain = saved; }
+}
+
 class Task {
-  constructor(owner) {
+  constructor(owner, chain) {
     this.owner = owner;
+    this.chain = chain;
     this.cancelled = false;
     this.pending = 0;
   }
@@ -292,6 +324,8 @@ class When {
     this.tasks = new Set();
     this.running = false;
     this.pending = false;
+    // The chain of the write that queued this When (null: an external write).
+    this.cause = null;
     for (const d of deps) d.observers.add(this);
     stats.whens++;
     scope.ownWhen(() => this.unregister());
@@ -299,34 +333,39 @@ class When {
   markStale() {
     if (this.disposed) return;
     if (this.running) { this.pending = true; return; }
+    // An external trigger wins over a chained one (see THE CAUSAL CHAIN).
+    if (!whenQueue.has(this) || currentChain === null) this.cause = currentChain;
     whenQueue.add(this);
     if (batchDepth === 0) flush();
   }
   run() {
+    const chain = this.cause ?? new Chain();
+    this.cause = null;
     this.running = true;
-    let reruns = 0;
     try {
       do {
         this.pending = false;
-        this.runOnce();
-        if (this.pending && !this.disposed && ++reruns > WHEN_RERUN_CAP) {
+        const n = chain.runs.get(this) ?? 0;
+        if (n > WHEN_RERUN_CAP) {
           console.error("scrml when-effect error: E-LIFECYCLE-006 — re-triggered during its re-run; dropped.");
           break;
         }
+        chain.runs.set(this, n + 1);
+        this.runOnce(chain);
       } while (this.pending && !this.disposed);
     } finally {
       this.running = false;
       this.pending = false;
     }
   }
-  runOnce() {
+  runOnce(chain) {
     // The newest run wins: an earlier run still suspended never resumes.
     for (const t of this.tasks) t.cancel();
     this.tasks.clear();
-    const task = new Task(this);
+    const task = new Task(this, chain);
     this.tasks.add(task);
     try {
-      untrack(() => batch(() => this.body(task)));
+      inChain(chain, () => untrack(() => batch(() => this.body(task))));
     } finally {
       this.settled(task);
     }
@@ -372,7 +411,9 @@ export function suspend(task, value, k) {
       task.pending--;
       if (task.cancelled) return;
       try {
-        untrack(() => batch(() => k(v)));
+        // The continuation is part of its run's causal chain (N1): what it
+        // re-triggers counts against the same re-run cap as the body.
+        inChain(task.chain, () => untrack(() => batch(() => k(v))));
       } finally {
         task.owner.settled(task);
       }

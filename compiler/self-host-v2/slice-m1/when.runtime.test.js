@@ -198,6 +198,129 @@ describe("RULED (b), S446 — a re-trigger while an earlier run is suspended: th
   });
 });
 
+// Review r2 N1: before the causal-chain fix, a When was not `running` while
+// suspended, so a continuation's re-trigger got a fresh run with a fresh cap —
+// unbounded runs, the microtask queue never drained, 0 errors. Each body below
+// stops suspending after GUARD runs so a regression fails instead of hanging.
+describe("re-entry through a suspension — the cap counts the whole causal chain (review r2 N1)", () => {
+  const GUARD = 50;
+  async function withErrors(fn) {
+    const errs = [];
+    const saved = console.error;
+    console.error = (...a) => errs.push(a.join(" "));
+    try { await fn(); } finally { console.error = saved; }
+    return errs;
+  }
+  async function drain() { for (let i = 0; i < 10; i++) await tick(); }
+
+  test("a continuation that writes its own dep (through a call) re-runs once, then is dropped and reported", async () => {
+    // mutation RED: suspend() running k outside inChain(task.chain) (each re-trigger a new chain → GUARD runs, 0 errors)
+    const scope = rt.root.child();
+    const dep = rt.cell(0);
+    let runs = 0;
+    const bump = () => dep.set(dep.peek() + 1);
+    rt.when(scope, [dep], (task) => { runs++; if (runs < GUARD) rt.suspend(task, 1, () => bump()); });
+    const errs = await withErrors(async () => { dep.set(1); await drain(); });
+    expect(runs).toBe(2);                            // exactly like the synchronous path
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toMatch(/E-LIFECYCLE-006 — re-triggered during its re-run; dropped/);
+    // the page is alive: the next external change runs it again, with a fresh budget
+    const errs2 = await withErrors(async () => { dep.set(100); await drain(); });
+    expect(runs).toBe(4);
+    expect(errs2.length).toBe(1);
+    scope.dispose();
+  });
+
+  test("the chain starts at the external run's BODY: a sync write → a suspending when → back is counted from the first run", async () => {
+    // mutation RED: runOnce() running the body outside inChain(chain) (B's first run looks external → A runs 3 times)
+    const scope = rt.root.child();
+    const n = rt.cell(0);
+    const m = rt.cell(0);
+    let runsA = 0, runsB = 0;
+    rt.when(scope, [n], () => { runsA++; m.set(m.peek() + 1); });
+    rt.when(scope, [m], (task) => { runsB++; if (runsB < GUARD) rt.suspend(task, 1, () => n.set(n.peek() + 1)); });
+    const errs = await withErrors(async () => { n.set(1); await drain(); });
+    expect(runsA).toBe(2);
+    expect(runsB).toBe(2);
+    expect(errs.length).toBe(1);
+    scope.dispose();
+  });
+
+  test("a cycle closed through another when from a continuation is bounded and reported", async () => {
+    // mutation RED: suspend() running k outside inChain(task.chain)
+    const scope = rt.root.child();
+    const n = rt.cell(0);
+    const m = rt.cell(0);
+    let runsA = 0, runsB = 0;
+    rt.when(scope, [n], (task) => { runsA++; if (runsA < GUARD) rt.suspend(task, 1, () => m.set(m.peek() + 1)); });
+    rt.when(scope, [m], () => { runsB++; n.set(n.peek() + 1); });
+    const errs = await withErrors(async () => { n.set(1); await drain(); });
+    expect(runsA).toBe(2);
+    expect(runsB).toBe(2);
+    expect(errs.length).toBe(1);
+    scope.dispose();
+  });
+
+  test("a continuation that re-triggers ONCE (no recurrence) runs exactly one more time, silently", async () => {
+    const scope = rt.root.child();
+    const dep = rt.cell(0);
+    let runs = 0;
+    rt.when(scope, [dep], (task) => { runs++; if (runs === 1) rt.suspend(task, 1, () => dep.set(dep.peek() + 1)); });
+    const errs = await withErrors(async () => { dep.set(1); await drain(); });
+    expect(runs).toBe(2);
+    expect(errs).toEqual([]);
+    scope.dispose();
+  });
+
+  test("RULED (b) stays intact: external re-triggers during a suspension are new chains, never cap violations", async () => {
+    // mutation RED: markStale() keeping the old cause for an external trigger / run() reusing one chain per When
+    const scope = rt.root.child();
+    const dep = rt.cell(0);
+    const hosts = [held(), held(), held(), held(), held()];
+    let runs = 0, resumed = [];
+    rt.when(scope, [dep], (task) => {
+      const mine = runs++;
+      rt.suspend(task, hosts[mine].p, () => { resumed.push(mine); });
+    });
+    const errs = await withErrors(async () => {
+      for (let i = 1; i <= 5; i++) { dep.set(i); await tick(); }   // five separate external events
+      for (const h of hosts) h.resolve();
+      await drain();
+    });
+    expect(runs).toBe(5);
+    expect(resumed).toEqual([4]);                    // the newest run wins
+    expect(errs).toEqual([]);
+    scope.dispose();
+  });
+
+  test("an external re-trigger mid-chain starts a fresh budget; the cancelled chain's continuation counts for nothing", async () => {
+    const scope = rt.root.child();
+    const dep = rt.cell(0);
+    const hosts = [held(), held(), held(), held()];
+    let runs = 0;
+    rt.when(scope, [dep], (task) => {
+      const mine = runs++;
+      if (mine < hosts.length) rt.suspend(task, hosts[mine].p, () => dep.set(dep.peek() + 1));
+    });
+    const errs = await withErrors(async () => {
+      dep.set(1);                 // run 0 — chain 1, suspended on hosts[0]
+      await tick();
+      dep.set(10);                // external: run 1 — chain 2, cancels run 0
+      hosts[0].resolve();         // cancelled: no write, no run
+      await drain();
+      expect(runs).toBe(2);
+      hosts[1].resolve();         // chain 2's continuation self-writes → run 2 (chain 2's one re-run)
+      await drain();
+      expect(runs).toBe(3);
+      hosts[2].resolve();         // → chain 2 over its cap: dropped and reported
+      await drain();
+    });
+    expect(runs).toBe(3);
+    expect(errs.length).toBe(1);
+    scope.dispose();
+  });
+});
+
 describe("§6.7.2 teardown — step 1", () => {
   test("disposing the owning scope unregisters the effect; it never fires again", () => {
     // mutation RED: unregister() not removing the observer
