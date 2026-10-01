@@ -324,7 +324,7 @@ class WhenEvent {
   /** Spend one unit; false (and the event stopped, reported once) when exhausted. */
   spend() {
     if (this.stopped) return false;
-    return true;
+    if (++this.spent <= WHEN_EVENT_BUDGET) return true;
     this.stopped = true;
     console.error(`scrml when-effect error: runaway — one change caused more than ${WHEN_EVENT_BUDGET} when runs / registrations; the rest of that chain is stopped.`);
     return false;
