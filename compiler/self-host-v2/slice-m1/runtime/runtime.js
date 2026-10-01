@@ -830,6 +830,18 @@ function lis(arr) {
   return result;
 }
 
+/** A cleanup removing the DOM range `start`..`end` (a row's markers and content). */
+function removeRange(start, end) {
+  return () => {
+    let x = start;
+    while (x) {
+      const nx = x === end ? null : x.nextSibling;
+      if (x.parentNode) x.parentNode.removeChild(x);
+      x = nx;
+    }
+  };
+}
+
 function moveRange(row, before) {
   const parent = before.parentNode;
   let n = row.start;
@@ -888,14 +900,10 @@ function reconcile(scope, anchor, oldRows, items, key, render) {
       before.parentNode.insertBefore(start, before);
       before.parentNode.insertBefore(end, before);
       row = { key: n.key, scope: rowScope, item: new Cell(n.item), start, end };
-      rowScope.own(() => {
-        let x = start;
-        while (x) {
-          const nx = x === end ? null : x.nextSibling;
-          if (x.parentNode) x.parentNode.removeChild(x);
-          x = nx;
-        }
-      });
+      // The cleanup is built OUTSIDE this function: a closure here would capture
+      // reconcile's whole environment (`byKey`, `next`, `items` — O(rows)) for
+      // the row's lifetime, so N rows added one at a time retained O(N²) objects.
+      rowScope.own(removeRange(start, end));
       render(rowScope, row.item, end);
     } else if (!stay.has(i)) {
       moveRange(row, before);
