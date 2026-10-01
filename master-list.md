@@ -124,6 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `bca39b61a` — wrap(s445): four security arcs landed through multi-round adversarial review; eight rulings; dev-db held one fix short (#1206) — **pushed**
 - `fe5cad679` — wrap(s444): a coderlegion port became four rulings, the bootstrap ran §66.19.5 + §66.19.2 from source, and the TS <request> turned out to loop (#1205) — **pushed**
 - `9a3d96ebb` — wrap(s443): the S441 review record was wrong, the auth holes closed, two broken flagship examples work — and the post-merge reviews found the next two fail-opens (#1187) — **pushed**
 - `136ce3e22` — wrap(s442): bootstrap typer + §66.19 programs landed; three rulings (tape grants, dpa-058, dpa-045 axiom) (#1178) — **pushed**
@@ -131,7 +132,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `cf62b4154` — wrap(s440): a JS gotcha gauntlet and four deep-dives turned into ~100 rulings (#1140) — **pushed**
 - `d79d461d4` — wrap(s439): the bootstrap got a typer and its first corpus grade, and a grade is only evidence if breaking the thing breaks it (#1124) — **pushed**
 - `d1df3c64c` — wrap(s438): five landed on green, three hold refs, and every fix re-created its class one level away until a stop condition ended it (#1121) — **pushed**
-- `88a75073c` — wrap(s437): the bootstrap's first slice held its design claim, dpa-051 ruled, §66 rulings written after two PA restatements were caught widening them (#1110) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
