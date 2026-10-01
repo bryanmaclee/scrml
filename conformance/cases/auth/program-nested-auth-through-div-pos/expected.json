@@ -1,0 +1,13 @@
+{
+  "id": "program-nested-auth-through-div-pos",
+  "description": "§4.12 + §4.12.2 (S445 control) — a `<program name=\"svc\" auth=\"required\">` inside the application `<program>` through a `<div>` has a `<program>` ancestor, so it is NESTED and its `auth=` is E-PROGRAM-NESTED-AUTH. The wrapper `<div>` does not make it top-level (so it is not an E-PROGRAM-002 second program either) — a `<program>` may sit anywhere (locality of behaviour), and markup between it and its ancestor program never changes its role.",
+  "language-version": "1.0",
+  "spec": "§4.12, §4.12.2",
+  "rationale": "§4.12 (S445): 'It's nested if it has one [a `<program>` or `<page>` ancestor]. Wrapper `<div>`s never change a program's role.' §4.12.2: an `auth=` on a nested `<program>` SHALL be a compile error (`E-PROGRAM-NESTED-AUTH`).",
+  "expect": {
+    "codes": ["E-PROGRAM-NESTED-AUTH"],
+    "notCodes": ["E-PROGRAM-002"],
+    "severity": { "E-PROGRAM-NESTED-AUTH": "error" },
+    "codeCounts": { "E-PROGRAM-NESTED-AUTH": 1 }
+  }
+}

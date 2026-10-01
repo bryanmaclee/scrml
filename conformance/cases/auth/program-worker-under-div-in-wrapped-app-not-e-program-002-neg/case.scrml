@@ -1,0 +1,10 @@
+<div>
+<program auth="required">
+<div>
+<program name="calc">
+  when message(d) { send(d) }
+</program>
+</div>
+<p>x</p>
+</program>
+</div>

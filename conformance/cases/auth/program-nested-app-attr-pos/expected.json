@@ -1,0 +1,12 @@
+{
+  "id": "program-nested-app-attr-pos",
+  "description": "§4.12.2 (S445 item 5) — application-level attributes (`ratelimit=`, `headers=`) on a nested `<program>` (a worker under a `<div>` inside the application program) are E-PROGRAM-NESTED-ATTR, once per attribute. Before S445 item 5 they were read from the top-level program only and silently ignored here (MEASURED on a route file: `ratelimit=\"1/min\"` stopped limiting, `headers=\"strict\"` stopped sending CSP / X-Frame-Options).",
+  "language-version": "1.0",
+  "spec": "§4.12.2, §4.12",
+  "rationale": "§4.12.2 (S445 item 5): 'Every other `<program>` attribute is application-level and SHALL be a compile error on a nested `<program>` (`E-PROGRAM-NESTED-ATTR`), once per offending attribute.'",
+  "expect": {
+    "codes": ["E-PROGRAM-NESTED-ATTR"],
+    "severity": { "E-PROGRAM-NESTED-ATTR": "error" },
+    "codeCounts": { "E-PROGRAM-NESTED-ATTR": 2 }
+  }
+}

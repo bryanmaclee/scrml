@@ -1,0 +1,8 @@
+<program>
+<p>app</p>
+<div>
+<program name="w" restart="on-error" max-restarts=3 within=60>
+  when message(d) { send(d) }
+</program>
+</div>
+</program>

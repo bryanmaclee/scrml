@@ -1,0 +1,13 @@
+{
+  "id": "program-two-top-level-one-wrapped-pos",
+  "description": "§40.8 + §4.12 (S445, ruling option b) — a plain `<program>` followed by a `<div>`-wrapped `<program auth=\"required\">` is TWO top-level programs in one file (neither has a `<program>` or `<page>` ancestor), so E-PROGRAM-002 fires exactly once, on the second. Before S445 the E-PROGRAM-002 count read only the file's direct nodes: this compiled with 0 errors and the wrapped program's server functions answered anonymous callers (g-wrapped-program-auth-silently-dropped).",
+  "language-version": "1.0",
+  "spec": "§40.8, §4.12",
+  "rationale": "§40.8: 'A second (or later) top-level `<program>` in the SAME file SHALL be `E-PROGRAM-002`.' §4.12 (S445): a `<program>` is top-level when it has no `<program>` or `<page>` ancestor, whatever markup wraps it; both detectors read that one definition.",
+  "expect": {
+    "codes": ["E-PROGRAM-002"],
+    "notCodes": ["E-PROGRAM-NESTED-AUTH"],
+    "severity": { "E-PROGRAM-002": "error" },
+    "codeCounts": { "E-PROGRAM-002": 1 }
+  }
+}

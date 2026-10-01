@@ -1,0 +1,12 @@
+{
+  "id": "program-top-level-session-attr-neg",
+  "description": "§4.12.2 (S445 item 3) control — session attributes on the file's TOP-LEVEL `<program>` (wrapped in a `<div>`, which never changes a program's role, §4.12) are the application's own session configuration: no E-PROGRAM-NESTED-SESSION, no error.",
+  "language-version": "1.0",
+  "spec": "§4.12.2, §4.12, §20.5.1",
+  "rationale": "§4.12.2: only a NESTED `<program>` may not carry a session attribute; §4.12: a `<div>`-wrapped program with no `<program>`/`<page>` ancestor is top-level.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PROGRAM-NESTED-SESSION", "E-PROGRAM-CONFIG-UNREAD"],
+    "notCodePrefixes": ["E-"]
+  }
+}
