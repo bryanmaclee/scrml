@@ -68,13 +68,20 @@ export function ingestFiles(files) {
  */
 export function footprint(cgArgs) {
   const r = ingestFiles(cgArgs.files);
-  return { constructs: r.why.length === 0 ? [...I.footprint(r.core)].sort() : [], notYet: [...r.why] };
+  // s446: `codes` — the CG codes the shim reports itself (a program with any is rejected).
+  return { constructs: r.why.length === 0 ? [...I.footprint(r.core)].sort() : [], notYet: [...r.why], codes: [...new Set(r.codes)] };
 }
 
 /** The CG stage entry: `({ files, … }) -> { outputs: Map<source, FileOutput>, errors }`. */
 export function runCG(args) {
   const r = ingestFiles(args.files);
   if (r.why.length > 0) throw new Error(`ingest: not-yet — ${r.why.join("; ")}`);
+  // s446: a code the shim reports rejects the program — no artifact (as impl#1's CG does).
+  if (r.codes.length > 0) {
+    const file = args.files[0];
+    const src = file.filePath ?? file.ast?.filePath;
+    return { outputs: new Map(), errors: r.codes.map((code) => ({ code, message: `${code} (bootstrap CG, ingest shim)`, severity: "error", filePath: src })) };
+  }
   const problems = mods.check.checkCore(r.core);
   if (problems.length > 0) throw new Error(`ingest produced an ill-formed Core — ${problems.join("; ")}`);
   const outputs = new Map();

@@ -208,6 +208,30 @@ describe("ingest — the not-yet discipline", () => {
   });
 });
 
+describe("s446 — impl#1's `when-effect` (§6.7.4)", () => {
+  test("a dep naming a `const` cell (derived or locked) or no cell: the shim reports E-LIFECYCLE-007 itself", () => {
+    const r = ingestCase("lifecycle/when-dep-derived-error");
+    expect(r.codes).toEqual(["E-LIFECYCLE-007"]);
+    expect(r.why).toEqual([]);                       // a rejected program needs no body mapping
+    const locked = ingestSource(`<program>\n  <p> = 1\n  <log> = 0\n  const <k> = 3\n  when @k changes { @log = 1 }\n  <p>\${@log}</p>\n</program>\n`);
+    expect(locked.codes).toEqual(["E-LIFECYCLE-007"]);
+  });
+
+  test("a valid dep-list: no code, and the body is NOT-YET — impl#1 carries only its first statement as structure", () => {
+    const r = ingestSource(`<program>\n  <a> = 1\n  <b> = 0\n  when @a changes {\n    @b = @b + 1\n    @b = 2\n  }\n  <p>\${@b}</p>\n</program>\n`);
+    expect(r.codes).toEqual([]);
+    expect(r.why.join("\n")).toMatch(/when-effect body: impl#1 carries only its first statement/);
+  });
+
+  test("the substitute's runCG rejects a coded program with the code and prints nothing", async () => {
+    const { runCG } = await import("./substitute.js");
+    const { args } = cgArgsOf(caseSource("lifecycle/when-dep-derived-error"));
+    const out = runCG(args);
+    expect(out.outputs.size).toBe(0);
+    expect(out.errors.map((e) => e.code)).toEqual(["E-LIFECYCLE-007"]);
+  });
+});
+
 describe("footprint — the Core constructs a program uses (dpa-051 §8.2)", () => {
   test("counter-increment's footprint names exactly the constructs its Core contains", () => {
     const core = ok(ingestCase("reactive/counter-increment"));

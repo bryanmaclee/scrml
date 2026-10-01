@@ -713,8 +713,77 @@ ${
             "comment" :> viewsOf([], [])
             "logic" :> interpolation(cx, n)
             "markup" :> element(cx, n)
+            "when-effect" :> whenEffect(cx, n)
             else :> notYetV("markup: " + k)
         }
+    }
+
+    // s446 — impl#1's `when-effect` (§6.7.4): `dependencies` (cell names) and
+    // the body. A dep that is not a mutable cell rejects the program with
+    // E-LIFECYCLE-007 (whenCodes) — no view, and nothing to map. Otherwise the
+    // BODY cannot be mapped: impl#1 carries only its FIRST statement as
+    // structure (`bodyExpr`); the whole body is text (`bodyRaw`), and Rule 7
+    // forbids reading it — so the shim never knows whether `bodyExpr` is the
+    // whole body. Not-yet, never a guess.
+    fn whenEffect(cx: Cx, n: INode) -> LV {
+        const why: string[] = unmapped(n, "when-effect", ["kind", "dependencies", "bodyExpr", "bodyRaw"], ["id"])
+        for (const d of listAt(n, "dependencies")) {
+            const name: string | not = valStr(d)
+            if (name is not) return notYetV("when-effect: a dependency that is not a name")
+            const f: FieldInfo | not = findField(cx, name)
+            if (f is not) return viewsOf([], why)                 // E-LIFECYCLE-007 (whenCodes)
+            if (f.wcap is not) return viewsOf([], why)            // E-LIFECYCLE-007 (whenCodes)
+        }
+        return notYetV("when-effect body: impl#1 carries only its first statement as structure (`bodyExpr`); the body is text (`bodyRaw`)")
+    }
+
+    // s446 — the codes the shim itself reports (the CG stage's own codes, which
+    // impl#1 reports in ITS CG): E-LIFECYCLE-007 for every `when` dep that is
+    // not a declared mutable cell of the program — no such cell, or a `const`
+    // (derived or locked) one (§6.7.4 + EC-1).
+    fn whenCodes(root: INode, fields: FieldInfo[]) -> string[] {
+        let out: string[] = []
+        for (const w of whenNodes(root)) {
+            for (const d of listAt(w, "dependencies")) {
+                const name: string | not = valStr(d)
+                if (name is some) {
+                    if (!mutableField(fields, name)) out = out.concat(["E-LIFECYCLE-007"])
+                }
+            }
+        }
+        return out
+    }
+
+    fn mutableField(fields: FieldInfo[], name: string) -> boolean {
+        for (const f of fields) {
+            if (f.name == name) return f.wcap is some
+        }
+        return false
+    }
+
+    // Every `when-effect` node under `n` (a schema-free walk over the encoding).
+    fn whenNodes(n: INode) -> INode[] {
+        let out: INode[] = []
+        if (kindAt(n) == "when-effect") out = [n]
+        for (const e of n.entries) { out = out.concat(whenNodesIn(e.val)) }
+        return out
+    }
+
+    fn whenNodesIn(v: IVal) -> INode[] {
+        return match v {
+            .VNode(obj: o) :> whenNodes(o)
+            .VList(elems: xs) :> whenNodesInList(xs)
+            .VStr(s: x) :> []
+            .VNum(n: x) :> []
+            .VBool(b: x) :> []
+            .VNull :> []
+        }
+    }
+
+    fn whenNodesInList(xs: IVal[]) -> INode[] {
+        let out: INode[] = []
+        for (const x of xs) { out = out.concat(whenNodesIn(x)) }
+        return out
     }
 
     // L13: whitespace-only text containing a newline is dropped; other text is
@@ -731,11 +800,18 @@ ${
         let why: string[] = unmapped(n, "interpolation", ["kind", "body"], ["id"])
         let out: View[] = []
         for (const s of nodesAt(n, "body")) {
-            if (kindAt(s) != "bare-expr") return notYetV("markup: `${}` block containing " + kindAt(s))
-            why = why.concat(unmapped(s, "bare-expr", ["kind", "exprNode"], ["id", "expr"]))
-            const x: LE = lowerExprAt(cx, s, "exprNode")
-            out = out.concat([View.Dyn(x.e)])
-            why = why.concat(x.why)
+            // s446: `${ when … }` in markup — owned by the enclosing scope (§6.7.2)
+            if (kindAt(s) == "when-effect") {
+                const w: LV = whenEffect(cx, s)
+                out = out.concat(w.views)
+                why = why.concat(w.why)
+            } else {
+                if (kindAt(s) != "bare-expr") return notYetV("markup: `${}` block containing " + kindAt(s))
+                why = why.concat(unmapped(s, "bare-expr", ["kind", "exprNode"], ["id", "expr"]))
+                const x: LE = lowerExprAt(cx, s, "exprNode")
+                out = out.concat([View.Dyn(x.e)])
+                why = why.concat(x.why)
+            }
         }
         return viewsOf(out, why)
     }
@@ -949,6 +1025,10 @@ ${
             "state-decl" :> cellItem(s)
             "function-decl" :> fnItem(s)
             "comment" :> noItems()
+            // s446: a top-level `when` is owned by the program scope — a node of
+            // the program's renders (View.When), exactly as the bootstrap front
+            // end places it.
+            "when-effect" :> itemsMarkup(s)
             else :> itemsWhy("decl: " + k)
         }
     }
@@ -1191,12 +1271,14 @@ ${
 
     // The program: one `single` declaration whose fields are the top-level
     // cells and whose renders is the page (R4 / L14).
-    export type Ingested:struct = { core: CoreProgram, why: string[] }
+    // `codes`: the diagnostics the shim reports itself (s446: E-LIFECYCLE-007) —
+    // a program with any is rejected (no artifact is printed).
+    export type Ingested:struct = { core: CoreProgram, why: string[], codes: string[] }
 
     export fn ingest(files: IFile[]) -> Ingested {
         const prog: Sym = mkSym(0, "program")
         const empty: CoreProgram = { program: prog, decls: [], types: [], fns: [], server: [] }
-        if (files.length != 1) return { core: empty, why: ["file: a multi-file program (imports)"] }
+        if (files.length != 1) return { core: empty, why: ["file: a multi-file program (imports)"], codes: [] }
         const ast: INode = files[0].ast
         // `filePath` is identity (the path arrives as IFile.path); the `has*` flags and
         // `fileShape` summarize nodes mapped one by one; `precgTopLevelProgramSpan` is
@@ -1254,7 +1336,7 @@ ${
             renders: vs.views, wiring: [], handles: [],
         }
         const core: CoreProgram = { program: prog, decls: [decl], types: [], fns: fns, server: [] }
-        return { core: core, why: dedupeStr(why) }
+        return { core: core, why: dedupeStr(why), codes: whenCodes(ast, fs.infos) }
     }
 
     fn dedupeStr(xs: string[]) -> string[] {

@@ -634,7 +634,8 @@ export interface CssSubstitute {
   gradeCssCores?: (x: { only?: ReadonlySet<string> }) => Promise<Array<{ relDir: string; constructs: string[]; pass: boolean; reasons: string[] }>>;
 }
 
-type FootprintFn = (cgArgs: unknown) => { constructs: string[]; notYet: string[] };
+/** `codes` (optional, s446): the CG codes the substitute reports ITSELF for this program. */
+type FootprintFn = (cgArgs: unknown) => { constructs: string[]; notYet: string[]; codes?: string[] };
 
 /**
  * The case directories under `dir` (a directory holding `case.scrml`), by a filesystem glob that
@@ -680,7 +681,7 @@ export async function runFootprintGrade(
   const cases: FootprintCase[] = [];
   for (const c of [...all, ...extras] as typeof all) {
     const dir = mkdtempSync(join(tmpdir(), "scrml-footprint-"));
-    let fp: { constructs: string[]; notYet: string[] } | null = null;
+    let fp: { constructs: string[]; notYet: string[]; codes?: string[] } | null = null;
     let impl1Errors: string[] = [];
     let emitted = new Set<string>();
     let crash: string | null = null;
@@ -720,7 +721,9 @@ export async function runFootprintGrade(
     const f = fp ?? { constructs: [], notYet: crash ? [] : ["CG was never reached"] };
     const ex = c.expected.expect;
     const required = [...new Set([...(ex.codes ?? []), ...Object.keys(ex.severity ?? {})])];
-    const cgCodes = required.filter((code) => !emitted.has(code));
+    // s446: a CG code the SUBSTITUTE reports itself is not owed — the hybrid run's codes half grades it.
+    const own = new Set(f.codes ?? []);
+    const cgCodes = required.filter((code) => !emitted.has(code) && !own.has(code));
     const notYet = [...f.notYet, ...cgCodes.map((code) => `expects code ${code}, not emitted by impl#1's front end (CG/post-CG)`)];
     const cls = classifyFootprint({ impl1Errors, cgCodes, notYet: f.notYet, crash });
     cases.push({ relDir: c.relDir, cls, hasRuntime: hasRuntimeHalf(c), constructs: f.constructs, notYet, impl1Errors, crash });
