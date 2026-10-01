@@ -144,6 +144,50 @@ describe("(3) `novalidate` on any form carrying lowered attributes", () => {
     await loadProgram(clean(P(F("req", `<input bind:value=@v/>`, `<div><*v/></div>`), `        <form><f/></form>`)), "v-novalidate-use");
     expect($("main form").hasAttribute("novalidate")).toBe(true);
   });
+
+  // r2 F1 (S239 review): a `<slot/>` inside a declaration's `<form>` is filled by
+  // the children of its uses — a bound validated input there is in the form.
+  const W = `    <wrap title:string="t">\n    </>\n    renders <form><slot/><button type="submit">go</button></form>`;
+  const FV = F("req length(>=3)", `<input bind:value=@v/>`, `<div><*v/></div>`);
+  test("through a `<slot/>` filled with a Star (`<wrap><*f/></wrap>`)", async () => {
+    await loadProgram(clean(P(FV + "\n" + W, `        <wrap><*f/></wrap>`)), "v-novalidate-slot-star");
+    expect(attrsOf($("main form input"))).toEqual({ required: "", minlength: "3" });
+    expect($("main form").hasAttribute("novalidate")).toBe(true);
+  });
+  test("through a `<slot/>` filled with a bound input written at the use", async () => {
+    await loadProgram(clean(P(FV + "\n" + W, `        <*f/>\n        <wrap><input bind:value=@f.v/></wrap>`)), "v-novalidate-slot-direct");
+    expect(attrsOf($("main form input"))).toEqual({ required: "", minlength: "3" });
+    expect($("main form").hasAttribute("novalidate")).toBe(true);
+  });
+  test("through a slot filled from ANOTHER declaration's slot (`<wrap2>` passes its children on to `<wrap>`)", async () => {
+    const W2 = `    <wrap2 note:string="w">\n    </>\n    renders <section><wrap><slot/></wrap></section>`;
+    await loadProgram(clean(P(FV + "\n" + W + "\n" + W2, `        <wrap2><*f/></wrap2>`)), "v-novalidate-slot-nested");
+    expect($("main section form").hasAttribute("novalidate")).toBe(true);
+  });
+  test("a slot filled with plain markup only → no `novalidate`", async () => {
+    await loadProgram(clean(P(W, `        <wrap><input name="q" required/></wrap>`)), "v-novalidate-slot-plain");
+    expect($("main form").hasAttribute("novalidate")).toBe(false);
+  });
+
+  // r2 F5(a): the state-view look-through — a graph field's state-child body
+  // inside the form holds the bound input.
+  test("through a `<*st/>` state view whose arm body holds the bound input", async () => {
+    const src = P(`    type S:enum = { A, B }
+    <f note:string="n">
+        <let v:string="" req/>
+        renders <input bind:value=@v/>
+        <st:S=.A>
+            <A rule=.B>
+                <*v/>
+            </>
+            <B rule=.A : "b">
+        </>
+    </>
+    renders <form><*st/></form>`, `        <f/>`);
+    await loadProgram(clean(src), "v-novalidate-state-arm");
+    expect(attrsOf($("main form input"))).toEqual({ required: "" });
+    expect($("main form").hasAttribute("novalidate")).toBe(true);
+  });
 });
 
 // ===========================================================================

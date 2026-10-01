@@ -8048,12 +8048,52 @@ ${
                 }
             }
         }
+        // r2 F1: a `<slot/>` in a declaration's markup is filled by the
+        // children of every use of that declaration — collect the use sites.
+        let uses: UseSite[] = []
+        for (const ds of g.decls) {
+            for (const n of declMarkup(ds)) { uses = uses.concat(useSitesIn(t, ds.info.sym.id, n)) }
+        }
         let forms: int[] = []
         for (const ds of g.decls) {
-            for (const n of declMarkup(ds)) { forms = forms.concat(formsIn(g, t, n)) }
+            const cx: CarryCx = { g: g, t: t, uses: uses, seen: [], slot: ds.info.sym.id, slotSeen: [] }
+            for (const n of declMarkup(ds)) { forms = forms.concat(formsIn(cx, n)) }
         }
         return { diags: diags, forms: forms }
     }
+
+    // A use of declaration `decl` (`<decl …>kids</>`) written in `owner`'s
+    // markup: its `kids` fill `decl`'s `<slot/>`.
+    type UseSite:struct = { decl: int, owner: int, kids: ANode[] }
+
+    fn useSitesIn(t: Tables, owner: int, n: ANode) -> UseSite[] {
+        const k: ANodeK = n.k
+        const e: AElem | not = elemOfNode(k)
+        if (e is not) return []
+        let out: UseSite[] = useSiteOf(elemFact(t.elems, e.nid), owner, e.kids)
+        for (const c of e.kids) { out = out.concat(useSitesIn(t, owner, c)) }
+        return out
+    }
+
+    fn useSiteOf(f: ElemFact | not, owner: int, kids: ANode[]) -> UseSite[] {
+        return match f {
+            .MUse(decl: d) :> [{ decl: d.id, owner: owner, kids: kids }]
+            .MStar(decl: d) :> []
+            .MInline(v: v) :> []
+            .MStateView(v: v) :> []
+            .MHtml :> []
+            .MEach(bind: b) :> []
+            .MSlot :> []
+            not :> []
+        }
+    }
+
+    // The traversal context: `seen` — the declarations already being expanded
+    // (a renders may reach itself); `slot` — the declaration whose uses fill a
+    // `<slot/>` met here (-1: none — inside a use's expansion the slot is that
+    // use's own children, which the traversal visits as the use's kids);
+    // `slotSeen` — the declarations whose slot content is being visited.
+    type CarryCx:struct = { g: Globals, t: Tables, uses: UseSite[], seen: int[], slot: int, slotSeen: int[] }
 
     fn bindKeyOf(k: AttrKind) -> BindKey[] {
         return match k {
@@ -8094,22 +8134,22 @@ ${
     }
 
     // The `<form>` elements under `n` that carry lowered attributes.
-    fn formsIn(g: Globals, t: Tables, n: ANode) -> int[] {
+    fn formsIn(cx: CarryCx, n: ANode) -> int[] {
         const k: ANodeK = n.k
         return match k {
-            .Elem(e: e) :> formsInElem(g, t, e)
+            .Elem(e: e) :> formsInElem(cx, e)
             .Text(text: x) :> []
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
         }
     }
 
-    fn formsInElem(g: Globals, t: Tables, e: AElem) -> int[] {
+    fn formsInElem(cx: CarryCx, e: AElem) -> int[] {
         let out: int[] = []
-        if (e.tag == "form" && !e.star && isHtmlFact(elemFact(t.elems, e.nid)) && attrNamed(e.attrs, "novalidate") is not) {
-            if (carries(g, t, [e], [])) out = [e.nid]
+        if (e.tag == "form" && !e.star && isHtmlFact(elemFact(cx.t.elems, e.nid)) && attrNamed(e.attrs, "novalidate") is not) {
+            if (elemCarries(cx, e)) out = [e.nid]
         }
-        for (const k of e.kids) { out = out.concat(formsIn(g, t, k)) }
+        for (const k of e.kids) { out = out.concat(formsIn(cx, k)) }
         return out
     }
 
@@ -8126,21 +8166,13 @@ ${
         }
     }
 
-    // Does this markup hold a bound element with lowered attributes? `seen` —
-    // the declarations already being expanded (a renders may reach itself).
-    fn carries(g: Globals, t: Tables, es: AElem[], seen: int[]) -> boolean {
-        for (const e of es) {
-            if (elemCarries(g, t, e, seen)) return true
-        }
-        return false
-    }
-
-    fn nodesCarry(g: Globals, t: Tables, ns: ANode[], seen: int[]) -> boolean {
+    // Does this markup hold a bound element with lowered attributes?
+    fn nodesCarry(cx: CarryCx, ns: ANode[]) -> boolean {
         for (const n of ns) {
             const k: ANodeK = n.k
             const el: AElem | not = elemOfNode(k)
             if (el is some) {
-                if (elemCarries(g, t, el, seen)) return true
+                if (elemCarries(cx, el)) return true
             }
         }
         return false
@@ -8155,14 +8187,13 @@ ${
         }
     }
 
-    fn elemCarries(g: Globals, t: Tables, e: AElem, seen: int[]) -> boolean {
+    fn elemCarries(cx: CarryCx, e: AElem) -> boolean {
         for (const a of e.attrs) {
-            if (lowersAttrs(attrFact(t.attrs, a.nid))) return true
+            if (lowersAttrs(attrFact(cx.t.attrs, a.nid))) return true
         }
-        const f: ElemFact | not = elemFact(t.elems, e.nid)
-        const via: ANode[] = expansion(g, f, seen)
-        if (nodesCarry(g, t, via, seen.concat(expandedDecl(f)))) return true
-        return nodesCarry(g, t, e.kids, seen)
+        const f: ElemFact | not = elemFact(cx.t.elems, e.nid)
+        if (expansionCarries(cx, f)) return true
+        return nodesCarry(cx, e.kids)
     }
 
     fn lowersAttrs(k: AttrKind | not) -> boolean {
@@ -8182,36 +8213,44 @@ ${
     }
 
     // The markup an element stands for beyond its own children: an inlined
-    // renders, a Star's / a use's declaration renders, state-view arm bodies.
-    fn expansion(g: Globals, f: ElemFact | not, seen: int[]) -> ANode[] {
+    // renders, a Star's / a use's declaration renders, state-view arm bodies,
+    // and (r2 F1) a `<slot/>`'s content — the children of every use of the
+    // declaration whose markup holds it. A form's `novalidate` is one static
+    // attribute of the declaration's markup, so it is added when ANY use's
+    // slot content carries lowered attributes.
+    fn expansionCarries(cx: CarryCx, f: ElemFact | not) -> boolean {
         return match f {
-            .MInline(v: v) :> v.nodes
-            .MStar(decl: d) :> declRendersOnce(g, d, seen)
-            .MUse(decl: d) :> declRendersOnce(g, d, seen)
-            .MStateView(v: v) :> stateArmNodes(v)
-            .MHtml :> []
-            .MEach(bind: b) :> []
-            .MSlot :> []
-            not :> []
+            .MInline(v: v) :> nodesCarry(cx, v.nodes)
+            .MStar(decl: d) :> nodesCarry(intoDecl(cx, d), declRendersOnce(cx, d))
+            .MUse(decl: d) :> nodesCarry(intoDecl(cx, d), declRendersOnce(cx, d))
+            .MStateView(v: v) :> nodesCarry(cx, stateArmNodes(v))
+            .MSlot :> slotCarries(cx)
+            .MHtml :> false
+            .MEach(bind: b) :> false
+            not :> false
         }
     }
 
-    fn expandedDecl(f: ElemFact | not) -> int[] {
-        return match f {
-            .MStar(decl: d) :> [d.id]
-            .MUse(decl: d) :> [d.id]
-            .MInline(v: v) :> []
-            .MStateView(v: v) :> []
-            .MHtml :> []
-            .MEach(bind: b) :> []
-            .MSlot :> []
-            not :> []
-        }
+    // Into a declaration's renders through a Star / a use: that renders' own
+    // `<slot/>` is the use's children (visited as its kids) — no slot owner.
+    fn intoDecl(cx: CarryCx, d: Sym) -> CarryCx {
+        return { g: cx.g, t: cx.t, uses: cx.uses, seen: cx.seen.concat([d.id]), slot: -1, slotSeen: cx.slotSeen }
     }
 
-    fn declRendersOnce(g: Globals, d: Sym, seen: int[]) -> ANode[] {
-        if (seen.indexOf(d.id) >= 0) return []
-        const ds: DeclSrc | not = findDeclSrc(g, d)
+    fn slotCarries(cx: CarryCx) -> boolean {
+        if (cx.slot < 0 || cx.slotSeen.indexOf(cx.slot) >= 0) return false
+        for (const u of cx.uses) {
+            if (u.decl == cx.slot) {
+                const ux: CarryCx = { g: cx.g, t: cx.t, uses: cx.uses, seen: cx.seen, slot: u.owner, slotSeen: cx.slotSeen.concat([cx.slot]) }
+                if (nodesCarry(ux, u.kids)) return true
+            }
+        }
+        return false
+    }
+
+    fn declRendersOnce(cx: CarryCx, d: Sym) -> ANode[] {
+        if (cx.seen.indexOf(d.id) >= 0) return []
+        const ds: DeclSrc | not = findDeclSrc(cx.g, d)
         if (ds is not) return []
         return declMarkup(ds)
     }
