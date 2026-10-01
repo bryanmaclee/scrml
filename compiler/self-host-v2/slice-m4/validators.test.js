@@ -88,8 +88,18 @@ describe("(2) validators follow the bind — wherever it is written", () => {
     await loadProgram(clean(src), "v-two-controls");
     expect([...document.querySelectorAll("main input")].map((i) => [i.getAttribute("required"), i.getAttribute("maxlength")])).toEqual([["", "9"], ["", "9"]]);
   });
-  test("a hand-written attribute of the same name wins (it is the element's markup)", async () => {
-    const core = clean(P(F("req length(>=3)", `<input minlength="1" bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`));
+  // r2 F6 (S239 review): a hand-written attribute that DISAGREES with the
+  // lowered one no longer silently overrides the declaration's contract.
+  test("a hand-written attribute contradicting a lowered one (`minlength=\"1\"` vs `length(>=3)`) → refused at the attribute", () => {
+    const d = run(P(F("req length(>=3)", `<input minlength="1" bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`)).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(d[0].message).toContain("`minlength` is written by hand");
+    expect(d[0].message).toContain("lowers to `minlength=\"3\"`");
+    // a computed value is not provably the same constraint — refused too
+    expect(codes(P(F("req", `<input required=(true) bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("a hand-written attribute SAYING THE SAME (`minlength=\"3\"`, bare `required`) is the same constraint: ONE attribute, the author's", async () => {
+    const core = clean(P(F("req length(>=3)", `<input minlength="3" required bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`));
     const els = [];
     (function walk(n) {
       if (Array.isArray(n)) return n.forEach(walk);
@@ -98,9 +108,17 @@ describe("(2) validators follow the bind — wherever it is written", () => {
       Object.values(n).forEach(walk);
     })(core);
     const mins = els[0].attrs.filter((a) => a.variant === "Static" && a.data.name === "minlength").map((a) => a.data.value);
-    expect(mins).toEqual(["1"]);                                   // ONE minlength in Core — the author's
-    await loadProgram(core, "v-hand-wins");
-    expect(attrsOf($("main input"))).toEqual({ minlength: "1", required: "" });
+    expect(mins).toEqual(["3"]);                                   // ONE minlength in Core
+    await loadProgram(core, "v-hand-same");
+    expect(attrsOf($("main input"))).toEqual({ minlength: "3", required: "" });
+  });
+  test("two `bind:` on one element → refused at the second (one element writes back to one place)", () => {
+    const two = `    <let n:string=""/>\n    <let m:string=""/>`;
+    const d = run(P(two, `        <input bind:value=@n bind:value=@m/>`)).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(d[0].message).toContain("a second `bind:`");
+    expect(codes(P(`    <let ok:bool=false/>\n    <let n:string=""/>`, `        <input type="checkbox" bind:checked=@ok bind:value=@n/>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(two, `        <input bind:value=@n/>\n        <input bind:value=@m/>`))).toEqual([]);
   });
   test("the length comparisons, exactly: `>N` → minlength N+1, `<N` → maxlength N-1, `==N` → both", async () => {
     await loadProgram(clean(P(F("length(>2) length(<9) length(==4)", `<input bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`)), "v-lengths");

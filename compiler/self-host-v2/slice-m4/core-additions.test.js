@@ -298,6 +298,19 @@ describe("4a — removal edits (RemoveEnd / RemoveFront / RemoveAnywhere)", () =
     expect(items()).toEqual(["a", "c"]);
   });
 
+  // r2 F6 (S239 review): the field is not "locked" — it grants `remove`; the
+  // write needs `replace`, and the message says so.
+  test("`@xs = @ys.filter(λ)` on `[free, remove]` (another sequence's filter) → E-WRITE-NOT-GRANTED naming `replace`, not \"locked\"", () => {
+    const src = P(`    <xs:string[free, remove]=(["a"])/>\n    <ys:string[]=(["b"])/>\n    function p() { @xs = @ys.filter(x => x != "a") }`, `        <p>x</p>`);
+    const d = run(src).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-WRITE-NOT-GRANTED"]);
+    expect(d[0].message).not.toContain("locked");
+    expect(d[0].message).toContain("does not grant `replace`");
+    expect(d[0].message).toContain("of its OWN value");
+    // twin: a field with no grant at all is still "locked"
+    expect(run(P(`    <n:string="x"/>\n    function p() { @n = "y" }`, `        <p>x</p>`)).diags[0].message).toContain("is locked");
+  });
+
   test("`@xs = @xs.map(λ)` on `[writable]`: a PositionWrite of the mapped value", async () => {
     const { program } = await loadProgram(coreOf(seq("writable", `    function m() { @xs = @xs.map(x => x + "!") }`)), "rm-map", ["m"]);
     program.m();

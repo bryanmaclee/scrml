@@ -1266,10 +1266,11 @@ ${
     fn fieldVals(file: string, name: string, ty: Type, mode: FieldMode, vals: AValidator[], where: int, st0: AS) -> RVals {
         let st: AS = st0
         if (vals.length == 0) return { vs: [], st: st }
-        if (where == 2) {
+        const topLowers: boolean = where == 2 && topLevelValidatorsLower()
+        if (where == 2 && !topLowers) {
             return { vs: [], st: addDiag(st, file, vals[0].span, "E-VALIDATOR-DEAD", "`" + name + "` is a top-level cell — it has no validity surface (§55.5 Edge A: single-value top-level cells synthesize none), so its validators can never be observed; silently dead validators are errors (dpa-058, RULED S442 (5)) — make it a validated CHILD field of a declaration (`<form><let " + name + "…/></>`, §55.5, §66.4 rule 2) and bind it") }
         }
-        if (where != 1) return { vs: [], st: addDiag(st, file, vals[0].span, "E-BOOTSTRAP-UNSUPPORTED", "validators here are not in the bootstrap (only on a child field of a declaration)") }
+        if (where != 1 && !topLowers) return { vs: [], st: addDiag(st, file, vals[0].span, "E-BOOTSTRAP-UNSUPPORTED", "validators here are not in the bootstrap (only on a child field of a declaration)") }
         const isDerived: boolean = mode == FieldMode.Derived
         if (isDerived) {
             return { vs: [], st: addDiag(st, file, vals[0].span, "E-DERIVED-WITH-VALIDATORS", "`" + name + "` is derived (a locked declaration whose initializer reads cells) — validators on a derived value are rejected (§55.14); constrain it with a refinement type instead") }
@@ -1283,6 +1284,17 @@ ${
         }
         return { vs: out, st: st }
     }
+
+    // ⚑ B3 — PENDING bryan's ruling; THE ONE SITE to flip. RULED S442 (5) reads
+    // "validators on a top-level scalar with no surface … → an error"; the
+    // dpa-058 deep-dive (P2b §55) expected a BOUND top-level scalar to "at
+    // least get `required`" (PA reading: yes). false = as built: every
+    // program cell with validators is E-VALIDATOR-DEAD, bound or not. true =
+    // a program cell's validators lower onto the elements that bind it (the
+    // fieldVals path of a child field), and only an UNBOUND one is
+    // E-VALIDATOR-DEAD (validatorPass). `@cell.isValid` stays
+    // E-VALIDITY-NO-SURFACE either way (§55.5 Edge A).
+    fn topLevelValidatorsLower() -> boolean { return false }
 
     fn noSurfaceMsg(what: string) -> string {
         return what + " — the bootstrap honors a validator only through its exact HTML-native form (dpa-058, RULED S442 (2)); the §55.5 validity surface that would evaluate it is not in the bootstrap yet"
@@ -3456,7 +3468,25 @@ ${
         }
         const isDerived: boolean = f.mode == FieldMode.Derived
         if (isDerived) return { w: not, st: addDiag(st, env.file, span, "E-DERIVED-WRITE", derivedMessage(p, f)) }
+        // r2 F6: a field whose contract grants edits but not `replace` is not
+        // locked — say which grant this whole-value write needs
+        if (f.grants.edits.length > 0) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", replaceNotGrantedMsg(f)) }
         return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` is locked — nothing grants this write (a whole-value replace). Declare it `let " + f.sym.hint + "` to make it writable (§66.9, §66.11).") }
+    }
+
+    fn replaceNotGrantedMsg(f: FieldInfo) -> string {
+        const n: string = f.sym.hint
+        let msg: string = "`@" + n + " = …` is a whole-value replace of `@" + n + "`, and its contract does not grant `replace` — it grants edits only (§66.11.2: a whole-value write is checked against the grants, whatever the spelling)"
+        if (grantsEdit(f.grants.edits, EditKind.RemoveAnywhere)) msg = msg + ". A removal is `@" + n + " = @" + n + ".filter(x => …)` of its OWN value (`remove`)"
+        if (seqElem(f.ty) is some) msg = msg + "; to write any value, add `replace` to the type's grants (§66.12.2)"
+        return msg
+    }
+
+    fn grantsEdit(es: EditKind[], k: EditKind) -> boolean {
+        for (const e of es) {
+            if (e == k) return true
+        }
+        return false
     }
 
     // `@h = { ...@h, f: v, … }` over an instance: one field write per override,
@@ -4791,7 +4821,15 @@ ${
                 st = resolveHandler(withHost(penv, HostCtx.HostOk), a.value, st)
                 st = addAttr(st, a.nid, AttrKind.AOn(ev))
             } else if (a.name.substring(0, 5) == "bind:") {
-                st = resolveBind(penv, e, a, st)
+                // r2 F6: one element writes back to ONE place — a second
+                // `bind:` on it (two cells fed from one input) is refused
+                // (⚑ PA: the SPEC (§5.4) does not say; no code names it).
+                const first: AAttr | not = firstBind(e.attrs)
+                if (first is some && first.nid != a.nid) {
+                    st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is a second `bind:` on this `<" + e.tag + ">` (after `" + first.name + "`) — one element writes back to one place; bind each place on its own element (§5.4)")
+                } else {
+                    st = resolveBind(penv, e, a, st)
+                }
             } else if (a.name.indexOf(":") >= 0) {
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is not in bootstrap slice M2")
             } else if (valueExpr(a.value) is some) {
@@ -4863,6 +4901,13 @@ ${
         return addAttr(m.st, a.nid, AttrKind.ABind(kind, w, p.decl.sym, p.idx, m.s, vattrs))
     }
 
+    fn firstBind(attrs: AAttr[]) -> AAttr | not {
+        for (const a of attrs) {
+            if (a.name.substring(0, 5) == "bind:") return a
+        }
+        return not
+    }
+
     type RPairs:struct = { ps: HtmlAttrPair[], st: AS }
 
     // Each validator's HTML attributes, where they apply to this element (HTML's
@@ -4878,12 +4923,38 @@ ${
             for (const h of v.attrs) {
                 if (!htmlApplies(h.name, e.tag, itype, kind)) {
                     st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`" + f.sym.hint + "`'s validator `" + v.name + "` has no HTML form (`" + h.name + "`) on `<" + e.tag + typeSuffix(e, itype) + ">`"))
-                } else if (attrNamed(e.attrs, h.name) is not && !hasPairNamed(out, h.name)) {
+                } else if (attrNamed(e.attrs, h.name) is some) {
+                    st = handAttrConflict(env, e, f, v.name, h, st)
+                } else if (!hasPairNamed(out, h.name)) {
                     out = out.concat([h])
                 }
             }
         }
         return { ps: out, st: st }
+    }
+
+    // r2 F6: a hand-written attribute of a lowered validator's name. The same
+    // static text is the same constraint (the element's markup renders it); a
+    // different one (`minlength="1"` against `length(>=3)`), or a computed one,
+    // contradicts the declaration's contract on the one element the browser
+    // checks — refused, never silently one or the other (fail-closed; ⚑ PA:
+    // §55 does not say which wins — §53.7.1's analogous `type` rule lets the
+    // derived attribute win with a warning).
+    fn handAttrConflict(env: Env, e: AElem, f: FieldInfo, vname: string, h: HtmlAttrPair, st: AS) -> AS {
+        const ha: AAttr | not = attrNamed(e.attrs, h.name)
+        if (ha is not) return st
+        if (isStaticAttr(ha.value) && staticAttrText(e.attrs, h.name) == h.value) return st
+        return addDiag(st, env.file, ha.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + h.name + "` is written by hand on this `<" + e.tag + ">`, and `" + f.sym.hint + "`'s validator `" + vname + "` lowers to `" + h.name + "=\"" + h.value + "\"` here — the two disagree on the constraint the browser checks; remove the hand-written `" + h.name + "` (the declaration's validator is the contract, dpa-058 RULED S442 (2))")
+    }
+
+    fn isStaticAttr(v: AAttrValue) -> boolean {
+        return match v {
+            .Quoted(v: s) :> true
+            .NoValue :> true
+            .Bare(e: x) :> false
+            .Paren(e: x) :> false
+            .Braced(b: b) :> false
+        }
     }
 
     fn hasPairNamed(ps: HtmlAttrPair[], n: string) -> boolean {
@@ -8246,7 +8317,7 @@ ${
         for (const k of t.attrs.facts) { keys = keys.concat(bindKeyOf(k)) }
         let diags: Diag[] = []
         for (const ds of g.decls) {
-            if (!ds.isProgram) {
+            if (!ds.isProgram || topLevelValidatorsLower()) {
                 let i = 0
                 for (const f of ds.info.fields) {
                     if (f.vals.length > 0 && !hasBindKey(keys, ds.info.sym.id, i)) {
