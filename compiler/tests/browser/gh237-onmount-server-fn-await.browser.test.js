@@ -158,3 +158,10 @@ describe("GH #237 — `on mount` server-fn call into a plain local", () => {
     expect(plain.clientJs).not.toContain("§6.7.1a `on mount` — async scope");
   });
 });
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+});

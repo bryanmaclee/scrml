@@ -24,7 +24,7 @@
  * tier that detects a wiring-to-the-wrong-cell miscompile).
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { mkdtempSync, rmSync, existsSync, writeFileSync } from "fs";
@@ -207,4 +207,11 @@ describe("ss20 g-compound-bind — compound bind:value targets the source field 
     expect(api.get("settings")).toMatchObject({ theme: "light" });
     expect(api.get("settings").theme).toBe("light");
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

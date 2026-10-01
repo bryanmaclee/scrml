@@ -91,12 +91,12 @@ describe("§38.4 echo dedup — runtime behaviour", () => {
   function mount() {
     let sent = [];
     let ws;
-    const prev = {
-      WebSocket: globalThis.WebSocket,
-      location: globalThis.location,
-      window: globalThis.window,
-      document: globalThis.document,
-    };
+    // Save the own-property DESCRIPTORS (not just values): a key that was absent
+    // must be deleted on restore, not left behind as an own `undefined` property.
+    const prev = {};
+    for (const k of ["WebSocket", "location", "window", "document"]) {
+      prev[k] = Object.getOwnPropertyDescriptor(globalThis, k);
+    }
     globalThis.location = { protocol: "http:", host: "localhost" };
     globalThis.WebSocket = class {
       constructor() { this.readyState = 1; ws = this; setTimeout(() => this.onopen && this.onopen(), 0); }
@@ -115,7 +115,12 @@ describe("§38.4 echo dedup — runtime behaviour", () => {
     };
     const cap = `globalThis.__cg = _scrml_cs_reactive_get; globalThis.__cs = _scrml_cs_reactive_set;`;
     new Function(`\n${SCRML_RUNTIME}\n` + captureInsideChunkScope(clientJs, cap)).call({});
-    const restore = () => { Object.assign(globalThis, prev); };
+    const restore = () => {
+      for (const [k, d] of Object.entries(prev)) {
+        if (d) Object.defineProperty(globalThis, k, d);
+        else delete globalThis[k];
+      }
+    };
     return {
       get: (k) => globalThis.__cg(k),
       set: (k, v) => globalThis.__cs(k, v),

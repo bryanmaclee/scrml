@@ -15,7 +15,7 @@
  * Dog-food origin (S377): a `<span class="pri">P${t.priority}</span>` inside a
  * task-board `<each>`-style list rendered the literal `P${t.priority}`.
  */
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { compileScrml } from "../../src/api.js";
@@ -89,4 +89,11 @@ describe("lift prefixed interpolation (S377) — reconciled per-item text child"
   // root, top-level too, its own reds in g-emit-lift-markup-text-interp.browser.test.js).
   // Left as a documented follow-on so this suite does not read as closing the space case.
   test.todo("g-ast-markup-text-interp-adjacent-space-dropped — `Val ${x}` should keep its space");
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });
