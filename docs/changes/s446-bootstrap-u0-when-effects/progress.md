@@ -111,6 +111,10 @@ derived flush; `@qty` unlisted never triggers. scoped: the effect stops firing a
   `@m = @m + 1` and `@m = @n * 2 + @m` → no warning; `@m = @n * 2 + 1` → warning.
 - BITES (each restored, diff checked): runOnce without the cancel loop → "RULED (b)" RED; markStale without the
   running check → 2 runtime re-entry tests + the e2e cycle test RED; resolveUse scanning `[]` → 3 slot tests RED.
+- 2026-10-01 GATES (round 1, at d07bf556e): core gate 27342+ tests / 1404 files, 0 fail (pre-commit hooks of
+  8fdb35e3f and d07bf556e); top-level compiler/tests/*.test.js 6387 pass / 13 skip / 0 fail; lint 58 files 0
+  violations; slice-m1 94/94; lowered slice-m1 94/94; slice-m2 448/448; slice-m3 64/64; slice-m4 431 + 1 todo;
+  v2 lexer 337/337; CG footprint runtime 18/0, codes-only 11/0, crashed 0, not-yet 704, front-end 476.
 
 ## Governing sentences (SPEC §6.7.4 / §6.7.2) — quoted, each implemented
 
