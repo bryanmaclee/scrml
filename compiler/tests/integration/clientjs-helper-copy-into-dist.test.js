@@ -19,10 +19,11 @@
  */
 
 import { describe, test, expect, afterAll } from "bun:test";
-import { tmpdir } from "os";
+import { tmpdir, platform } from "os";
 import { join, dirname, resolve } from "path";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, rmSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { spawnSync } from "child_process";
 
 const made = [];
 afterAll(() => {
@@ -184,6 +185,63 @@ describe("S440 item 16 — client-reachable plain-JS helpers are copied into dis
       expect(manifest(out)).toContain("_scrml_local/lib/x.js");
     }
   });
+});
+
+describe("S440 item 16 fix round — the manifest is seeded from the copy set (review F2)", () => {
+  // The §47.13 closure's text scan wants whitespace around `from`; a minified or
+  // oddly-wrapped helper's dep used to be COPIED but left out of the manifest, so
+  // the server 404'd it and the page died with exit 0.
+  const shapes = {
+    "minified named import": 'import{t as q}from"./dep.js";export function dbl(x){return q(x)}\n',
+    "minified export-star": 'export*from"./dep.js";\nexport function dbl(x){return x*2}\n',
+    "import split across lines": 'import \n{ t }\nfrom\n"./dep.js"\nexport function dbl(x){return t(x)}\n',
+  };
+  for (const [name, minJs] of Object.entries(shapes)) {
+    test(`${name}: every copied helper is in the client-asset manifest`, () => {
+      const root = project({
+        "scrml.toml": "",
+        "lib/min.js": minJs,
+        "lib/dep.js": "export function t(x){return x*2}\n",
+        "app/page.scrml": page('import { dbl } from "../lib/min.js"', "dbl(@n)"),
+      });
+      const { r, out } = build(root, ["app/page.scrml"]);
+      expect(fatal(r)).toEqual([]);
+      const local = files(out).filter((f) => f.startsWith("_scrml_local/"));
+      expect(local).toEqual(["_scrml_local/lib/dep.js", "_scrml_local/lib/min.js"]);
+      for (const f of local) expect(manifest(out)).toContain(f);
+    });
+  }
+});
+
+describe("S440 item 16 fix round — Windows 8.3 short names cannot slip the denied class (review F1)", () => {
+  /** The 8.3 short name of `abs`, or null when the volume does not generate them. */
+  function shortNameOf(abs) {
+    if (platform() !== "win32") return null;
+    const r = spawnSync("cmd", ["/c", "dir", "/x", dirname(abs)], { encoding: "utf8" });
+    const want = abs.split(/[\\/]/).pop();
+    for (const line of (r.stdout || "").split(/\r?\n/)) {
+      const m = line.match(/\s(\S+~\d\S*)\s+(\S+)\s*$/);
+      if (m && m[2] === want) return m[1];
+    }
+    return null;
+  }
+  for (const [label, file] of [["a *.server.js helper", "lib/secret.server.js"], ["a dot-file helper", "lib/.secrets.js"]]) {
+    // SKIPS (passes vacuously, logging why) off Windows or on a volume with 8.3
+    // name generation disabled — there is then no short alias to import by.
+    test(`${label} imported by its 8.3 short name -> E-IMPORT-011, nothing copied`, () => {
+      const root = project({ "scrml.toml": "", [file]: "export function dbl(x){return x*2} // SECRET\n" });
+      const short = shortNameOf(join(root, file));
+      if (!short) {
+        console.log(`[skip] no 8.3 short name for ${file} on this volume/platform — F1 cannot arise here`);
+        return;
+      }
+      mkdirSync(join(root, "app"), { recursive: true });
+      writeFileSync(join(root, "app", "page.scrml"), page(`import { dbl } from "../lib/${short.toLowerCase()}"`, "dbl(@n)"));
+      const { r, out } = build(root, ["app/page.scrml"]);
+      expect(fatal(r)).toContain("E-IMPORT-011");
+      expect(files(out).some((f) => f.startsWith("_scrml_local/"))).toBe(false);
+    });
+  }
 });
 
 describe("S440 item 16 — fail-closed: nothing outside the project, nothing unservable, nothing missing", () => {

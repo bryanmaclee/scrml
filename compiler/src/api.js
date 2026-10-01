@@ -811,7 +811,10 @@ export function createClientHelperRelocator(outputDir, projectRoot) {
   const errors = [];
   const memo = new Map(); // abs target -> abs dest | null
   let realRoot;
-  try { realRoot = realpathSync(projectRoot); } catch { realRoot = resolve(projectRoot); }
+  // `.native` on BOTH sides: Bun's JS `realpathSync` does not expand Windows 8.3
+  // short names, so `secret~1.js` (short name of `secret.server.js`) would be
+  // judged — and copied — under its short name, slipping the §47.13 denied class.
+  try { realRoot = realpathSync.native(projectRoot); } catch { realRoot = resolve(projectRoot); }
   const fail = (code, file, message) => {
     errors.push({ stage: "CG", code, message, file, severity: "error" });
   };
@@ -824,7 +827,7 @@ export function createClientHelperRelocator(outputDir, projectRoot) {
     const via = viaHelper ? ` (imported by the client helper \`${toPosixSpecifier(viaHelper)}\`)` : "";
     let real;
     try {
-      real = realpathSync(absTarget);
+      real = realpathSync.native(absTarget);
       if (!statSync(real).isFile()) throw new Error("not a file");
     } catch {
       fail("E-IMPORT-006", importerFile,
@@ -4185,11 +4188,16 @@ function _compileScrmlImpl(options = {}) {
     }
 
     // S440 item 16 — copy the client-reachable plain-JS helpers into dist
-    // (`_scrml_local/`). Not seeded into the manifest: the §47.13 import closure
-    // admits each copy only because a written client bundle imports it.
+    // (`_scrml_local/`). Every copy is SEEDED into the §47.13 manifest: the
+    // relocator's validated copy set is the one source of truth for what client
+    // JS reaches (it was planned from client imports by acorn). The closure's
+    // text scan cannot be trusted to re-find a minified helper's imports
+    // (`import{t}from"./dep.js"`), which used to leave a copied dep unservable.
+    // `collectClientAssets` still applies the denied-class check to every seed.
     // Fail-closed: a build with any relocation error copies NOTHING.
     if (!emitGateFailed && clientHelperRelocator && clientHelperRelocator.errors.length === 0
       && clientHelperRelocator.copies.size > 0) {
+      for (const dest of clientHelperRelocator.copies.keys()) clientSeeds.add(relFromRoot(outputDir, dest));
       const n = clientHelperRelocator.writeCopies();
       fileCount += n;
       if (verbose) log(`  [CG] Copied ${n} client helper module(s) -> ${CLIENT_HELPER_DIR}/`);
@@ -4304,6 +4312,10 @@ function _compileScrmlImpl(options = {}) {
     // Equal to options.inputFiles when gather is disabled. Includes all
     // transitively-reachable .scrml files when gather is enabled.
     gatheredFiles: inputFiles,
+    // S440 item 16 — absolute SOURCE paths of the plain-JS helpers this build
+    // planned to copy into `_scrml_local/` (client-reachable only). `scrml dev`
+    // adds them to its watched source set so an edited helper is re-copied.
+    clientHelperSources: clientHelperRelocator ? [...clientHelperRelocator.copies.values()] : [],
     batchPlan: bpResult.batchPlan,
     batchPlanJson: () => serializeBatchPlan(bpResult.batchPlan),
     // Stage 7.6 — A-2.1 scaffold. The record is empty until A-2.2+.

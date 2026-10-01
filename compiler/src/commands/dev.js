@@ -611,6 +611,12 @@ function runOnce(opts, gatheredOut) {
   if (gatheredOut && Array.isArray(result.gatheredFiles)) {
     gatheredOut.files = result.gatheredFiles;
   }
+  // S440 item 16 — the client helper modules the compile copied into dist:
+  // watched like sources, so editing one re-runs the compile (and re-copies it)
+  // instead of leaving dev serving the stale copy.
+  if (gatheredOut && Array.isArray(result.clientHelperSources)) {
+    gatheredOut.helpers = result.clientHelperSources;
+  }
 
 
   // Ghost-pattern lint diagnostics (W-LINT-NNN) — non-fatal, adopter-facing.
@@ -2042,6 +2048,7 @@ export async function runDev(args) {
     for (const f of deriveWatchFiles(opts, recomputeGathered.files)) {
       watchFile(f);
     }
+    for (const h of recomputeGathered.helpers || []) watchFile(toPosixSpecifier(h));
     if (success) {
       // #724: respawn the app child so the recompiled server bundle (and its whole
       // cross-file server graph) is re-evaluated in a fresh process. The parent's
@@ -2083,6 +2090,8 @@ export async function runDev(args) {
   for (const file of deriveWatchFiles(opts, gatheredOut.files)) {
     watchFile(file);
   }
+  // S440 item 16 — copied client helpers ride the same stat sweep.
+  for (const h of gatheredOut.helpers || []) watchFile(toPosixSpecifier(h));
 
   // Keep process alive (server already does this, but be explicit)
   await new Promise(() => {});
