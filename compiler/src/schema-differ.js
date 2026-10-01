@@ -33,6 +33,7 @@ export function parseSchemaBlock(schemaBody) {
   const fns = [];
   const gluedHeads = [];
   const fnBodySpans = [];
+  let maskedForGlue = null;
   const text = typeof schemaBody === "string" ? schemaBody : (schemaBody?.body ?? "");
   const n = text.length;
   let i = 0;
@@ -80,7 +81,10 @@ export function parseSchemaBlock(schemaBody) {
       // g-schema-dsl-qualified-table-head-silently-stripped). The table is still
       // declared exactly as before (the floors never lose it); the glued prefix is
       // RECORDED so GCP1 rejects the program (E-SCHEMA-012 / E-SCHEMA-013).
-      const glue = dslHeadGluePrefix(text, i);
+      // S446 fix round: the backward scan reads the comment/literal-BLANKED text, so a
+      // `--` comment ending in `.` (`-- The assets table.`) is not a qualifier.
+      if (maskedForGlue === null) maskedForGlue = blankLiteralBodies(text, { comments: true, backtick: false });
+      const glue = dslHeadGluePrefix(text, maskedForGlue, i);
       if (glue) gluedHeads.push({ name: tableName, ...glue, offset: i });
       i = braceClose + 1;
 
@@ -109,33 +113,28 @@ export function parseSchemaBlock(schemaBody) {
 /**
  * Is the DSL table head that `parseSchemaBlock` matched at `i` really the TAIL of
  * a longer token? Returns null for a clean head, else
- *   · `{ kind: "qualified", prefix }`  — a `.` precedes the name (whitespace and
- *     closed `/* *\/` comments allowed around it): `mydb.public.assets {`;
+ *   · `{ kind: "qualified", prefix }`  — a `.` precedes the name (whitespace, and
+ *     comments, allowed around it): `mydb.public.assets {`;
  *   · `{ kind: "unreadable", prefix }` — an identifier-ish character is glued to
  *     the name (`données {` matched as `es`, `my-assets {` as `assets`,
  *     `app$v2 {` as `v2`, `1assets {` as `assets`).
- * `prefix` is the glued text, for the message.
+ * The scan reads `masked` — `text` with `--` / closed `/* *\/` comments and one-line
+ * literals blanked (`blankLiteralBodies`, comment mode), length-preserving — so a
+ * `.` or a letter inside a comment or a string is never a glued prefix (S446 fix
+ * round: `-- The assets table.` before `assets {` was a false E-SCHEMA-012).
+ * `prefix` is the glued text from `text`, for the message.
  */
-function dslHeadGluePrefix(text, i) {
+function dslHeadGluePrefix(text, masked, i) {
   const GLUE = /[\p{L}\p{N}_$\-]/u;
   let j = i - 1;
-  if (j >= 0 && GLUE.test(text[j])) {
+  if (j >= 0 && GLUE.test(masked[j])) {
     let s = j;
-    while (s > 0 && /[\p{L}\p{N}_$\-.]/u.test(text[s - 1])) s--;
+    while (s > 0 && /[\p{L}\p{N}_$\-.]/u.test(masked[s - 1])) s--;
     return { kind: "unreadable", prefix: text.slice(s, i) };
   }
-  // Back over whitespace and closed block comments to find a `.`.
-  for (;;) {
-    while (j >= 0 && /\s/.test(text[j])) j--;
-    if (j >= 1 && text[j] === "/" && text[j - 1] === "*") {
-      const open = text.lastIndexOf("/*", j - 2);
-      if (open === -1) break;
-      j = open - 1;
-      continue;
-    }
-    break;
-  }
-  if (j >= 0 && text[j] === ".") {
+  // Back over whitespace (blanked comments are whitespace in `masked`) to find a `.`.
+  while (j >= 0 && /\s/.test(masked[j])) j--;
+  if (j >= 0 && masked[j] === ".") {
     let s = j;
     while (s > 0 && /[\p{L}\p{N}_$\-."`[\]\s]/u.test(text[s - 1]) && text[s - 1] !== "\n") s--;
     return { kind: "qualified", prefix: text.slice(s, i).trim() };
@@ -593,9 +592,10 @@ export function findRejectedCreateTableHeads(text) {
   // reported — the documented false positive, gap
   // g-secdef-fn-body-ddl-false-positive (which records the repair).
   //
-  // E-SCHEMA-014 ALONE takes that recorded repair, narrowly (S446): a
-  // `CREATE TEMP TABLE staging … AS SELECT …` inside a SECURITY-DEFINER `fn` body
-  // is ordinary runtime plpgsql, and rejecting it would refuse a valid schema.
+  // E-SCHEMA-014 ALONE takes that recorded repair, narrowly (S446), and ONLY for a
+  // TEMP / TEMPORARY head (fix round): a `CREATE TEMP TABLE staging … AS SELECT …`
+  // inside a SECURITY-DEFINER `fn` body is ordinary runtime plpgsql, and rejecting
+  // it would refuse a valid schema.
   // The span exempted is ONLY the `"""…"""` body of a `fn` the `< schema>` parser
   // itself ACCEPTED (`parseFnDecl` — owner(), balanced block) whose `fn` keyword
   // is LIVE (not in a `--` / `/* */` comment or a string) and starts a word. A
@@ -650,7 +650,11 @@ export function findRejectedCreateTableHeads(text) {
       // list), so a `tenant_id` table spelled this way was silently not
       // tenant-scoped — beside a second table, with no diagnostic at all.
       const reason = notADeclarationReason(text, h);
-      if (reason && !inLiveSecdefBody(h.start)) {
+      // S446 fix round: the fn-body exemption covers a TEMP / TEMPORARY staging
+      // table ONLY — `UNLOGGED`, `GLOBAL TEMPORARY`, a non-temp `AS SELECT` /
+      // `PARTITION OF` … inside a fn body are still reported.
+      const tempOnly = h.modifiers.length > 0 && h.modifiers.every((w) => w === "TEMP" || w === "TEMPORARY");
+      if (reason && !(tempOnly && inLiveSecdefBody(h.start))) {
         out.push({
           kind: "not-a-declaration",
           reason,
@@ -1168,6 +1172,15 @@ function blankLiteralBodies(s, opts = {}) {
         i = close + 2;
         continue;
       }
+    }
+    // S446 fix round: in comment mode a `"""` is NOT a short literal. Read as `""`
+    // then a `"`-to-end-of-line literal, it blanked the rest of the line, so a
+    // top-level `""" CREATE TEMP TABLE assets (…) """` hid its head from
+    // E-SCHEMA-012/013/014. The three quotes stay live, and so does what follows.
+    if (comments && s.startsWith('"""', i)) {
+      out += '"""';
+      i += 3;
+      continue;
     }
     if (ch === "'" || ch === '"' || (ch === "`" && backtick)) {
       out += ch;

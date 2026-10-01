@@ -154,15 +154,36 @@ ${DSL_ASSETS}`;
       """
     }`;
 
-  test("TEMP / CTAS / PARTITION OF inside a parser-accepted fn body are silent", () => {
+  const oneLineFn = (sql) => `    fn stage(id: uuid) security definer owner(invoice_admin) { """ ${sql} """ }`;
+
+  test("a TEMP / TEMPORARY staging head inside a parser-accepted fn body is silent (multi-line and one-line)", () => {
     for (const sql of [
       "CREATE TEMP TABLE staging ON COMMIT DROP AS SELECT * FROM invoices;",
       "CREATE TEMPORARY TABLE s2 (id INTEGER, tenant_id TEXT);",
+    ]) {
+      expect(schemaCodes(compileApp(withFn(realFn(sql)), PG).r)).toEqual([]);
+      expect(schemaCodes(compileApp(withFn(oneLineFn(sql)), PG).r)).toEqual([]);
+    }
+  });
+
+  // S446 fix round — the exemption is TEMP / TEMPORARY ONLY.
+  test("UNLOGGED / GLOBAL TEMPORARY / non-temp CTAS / PARTITION OF inside a fn body are STILL E-SCHEMA-014", () => {
+    for (const sql of [
+      "CREATE UNLOGGED TABLE s (id INTEGER, tenant_id TEXT);",
+      "CREATE GLOBAL TEMPORARY TABLE s3 (id INTEGER);",
+      "CREATE TABLE snap AS SELECT * FROM invoices;",
       "CREATE TABLE archived PARTITION OF invoices DEFAULT;",
     ]) {
-      const { r } = compileApp(withFn(realFn(sql)), PG);
-      expect(schemaCodes(r)).toEqual([]);
+      expect(schemaCodes(compileApp(withFn(realFn(sql)), PG).r)).toEqual(["E-SCHEMA-014"]);
+      expect(schemaCodes(compileApp(withFn(oneLineFn(sql)), PG).r)).toEqual(["E-SCHEMA-014"]);
     }
+  });
+
+  // S446 fix round — a `"""` is not a one-line literal, so a top-level `"""` pair
+  // with no fn does not hide a head (it used to: `""` + `"`-to-end-of-line).
+  test("a top-level `\"\"\" CREATE TEMP TABLE … \"\"\"` with no fn is E-SCHEMA-014", () => {
+    const { r } = compileApp(`    """ CREATE TEMP TABLE assets ${C} """\n    CREATE TABLE notes (id INTEGER PRIMARY KEY)`);
+    expect(schemaCodes(r)).toEqual(["E-SCHEMA-014"]);
   });
 
   const STILL = {
@@ -196,6 +217,9 @@ describe("gap 2 — a DSL head slid into from a longer token is rejected, not re
     "non-ASCII letter (données → `es`)": [`    données ${T}\n${DSL_ASSETS}`, "E-SCHEMA-013"],
     "hyphen": [`    my-assets ${T}${NOTES}`, "E-SCHEMA-013"],
     "`$`": [`    app$assets ${T}${NOTES}`, "E-SCHEMA-013"],
+    // the `--`-comment fix does not hide a REAL qualifier after a comment ending in `.`
+    "a real qualifier under `-- The assets table.`": [`    -- The assets table.\n    mydb.assets ${T}`, "E-SCHEMA-012"],
+    "a qualifier split by a `--` comment": [`    mydb. -- the db\n    assets ${T}${NOTES}`, "E-SCHEMA-012"],
   };
   for (const [label, [schema, code]] of Object.entries(CASES)) {
     test(`REJECTED (${code}): ${label}`, () => {
@@ -217,7 +241,14 @@ describe("gap 2 — a DSL head slid into from a longer token is rejected, not re
     "a db-authoritative table before": `    notes {\n      id: integer primary key\n    } db-authoritative\n${DSL_ASSETS}`,
     "digits / underscore in names": `    t_2 {\n      id: integer primary key\n    }\n${DSL_ASSETS}`,
     "a `--`-commented qualified head": `    -- mydb.assets { id: integer primary key }\n${DSL_ASSETS}`,
-    "a regex with `\\.` and `{2,}` in a column": `    hosts {\n      id: integer primary key\n      h: text pattern(/^[a-z]+\\.[a-z]{2,}$/)\n    }\n${DSL_ASSETS}`,
+    // S446 fix round — a `--` comment ending in `.` is not a qualifier (was a false E-SCHEMA-012)
+    "`-- The assets table.` above": `    -- The assets table.\n${DSL_ASSETS}`,
+    "`-- e.g.` above": `    -- e.g.\n${DSL_ASSETS}`,
+    "`-- schema v1.2.` above": `    -- schema v1.2.\n${DSL_ASSETS}`,
+    "a raw table with a trailing `-- etc.` above": `    CREATE TABLE notes (id INTEGER PRIMARY KEY) -- etc.\n${DSL_ASSETS}`,
+    "a `/* … */` comment ending in `.` above": `    /* old schema v1. */\n${DSL_ASSETS}`,
+    "a quoted default holding `-- x.` above": `    CREATE TABLE notes (id INTEGER PRIMARY KEY, d TEXT DEFAULT '-- x.')\n${DSL_ASSETS}`,
+    "a regex with `\\.` and `{2,}` in a column":`    hosts {\n      id: integer primary key\n      h: text pattern(/^[a-z]+\\.[a-z]{2,}$/)\n    }\n${DSL_ASSETS}`,
   };
   for (const [label, schema] of Object.entries(ACCEPTED)) {
     test(`ACCEPTED: ${label}`, () => {

@@ -824,14 +824,16 @@ ${sql}
     expect(schemaCodes(r)).toEqual(["E-SCHEMA-012"]);
   });
 
-  test("F-A: readable unqualified heads in a SECDEF body stay silent", () => {
-    for (const sql of [
-      "      CREATE TEMP TABLE staging ON COMMIT DROP AS SELECT * FROM invoices;",
-      "      CREATE TABLE archived PARTITION OF invoices DEFAULT;",
-    ]) {
-      const { r } = compileSchemaApp(null, secdef(sql));
-      expect(schemaCodes(r)).toEqual([]);
-    }
+  test("F-A: a TEMP staging head in a SECDEF body stays silent", () => {
+    const { r } = compileSchemaApp(null, secdef("      CREATE TEMP TABLE staging ON COMMIT DROP AS SELECT * FROM invoices;"));
+    expect(schemaCodes(r)).toEqual([]);
+  });
+
+  // ⚑ FLIPPED S446 fix round: the fn-body exemption is TEMP/TEMPORARY-only, so a
+  // non-temp no-column-list head in a SECDEF body is E-SCHEMA-014.
+  test("F-A: a non-temp `PARTITION OF` head in a SECDEF body is E-SCHEMA-014", () => {
+    const { r } = compileSchemaApp(null, secdef("      CREATE TABLE archived PARTITION OF invoices DEFAULT;"));
+    expect(schemaCodes(r)).toEqual(["E-SCHEMA-014"]);
   });
 
   test("F-A: a qualified head AFTER a closed `\"\"\"` body is rejected too", () => {

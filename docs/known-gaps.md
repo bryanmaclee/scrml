@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 220 | 4 |
-| MED | 436 | 0 |
+| HIGH | 221 | 4 |
+| MED | 438 | 0 |
 | LOW | 213 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -512,6 +512,54 @@ false positive `g-secdef-fn-body-ddl-false-positive`.) **PA recommendation:** fo
 floor) rather than change which statement feeds the shadow DB — a fix that preserves the harvest ⊇
 base invariant. Not done in S438: it changes base's per-key record, which the fix round held fixed on
 purpose. — `NEW S438-peter`; **HIGH**; open
+
+### g-tenant-union-over-scopes-from-a-stale-commented-copy — a commented-out copy WITH `tenant_id` placed AFTER a live table WITHOUT it makes the live table tenant-scoped: `SELECT *` silently returns `[]`, a named projection fails at runtime, an UPDATE newly hard-fails
+
+<!-- @gap id=g-tenant-union-over-scopes-from-a-stale-commented-copy sev=HIGH status=open owner=bryan locus=compiler/src/codegen/db-authoritative.ts(extractDesiredSchema — tenantDecls, the S446 union)+compiler/src/codegen/emit-server.ts(buildTenantContext reads tenantDecls) prov=review:S446-S239-review-of-#1209+empirical:PA-reproduced-on-the-fix-round-branch-by-compilation-and-runtime -->
+
+**Introduced by #1209 (S446), the deliberate cost of the union that closed
+`g-schema-commented-out-declaration-shadows-live-table`.** The tenant floor now reads EVERY same-name
+declaration, live or commented, so the reverse shadow also counts. Repro (`<schema>`-only SQLite app):
+
+```
+CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT)
+-- old: CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)
+```
+
+| query | before #1209 | after |
+|---|---|---|
+| `SELECT * FROM assets` | untagged, rows returned | tagged; at runtime `_scrml_tenant_redact` drops every row (no `tenant_id` value) → **`[]`, silently** |
+| `SELECT id, name FROM assets` | untagged | tagged; the floor adds `tenant_id` to the projection → runtime `no such column: tenant_id` (loud) |
+| `UPDATE assets SET name = 'b'` | compiles | **E-TENANT-WRITE** (newly rejecting) |
+
+Measured by compilation + an in-memory SQLite run of the emitted helpers (reviewer's `rt.mjs`,
+re-run by the PA): `DB rows: 2 | after egress redact: []`. **Reviewer's recommended route (a new
+code → bryan's call):** a diagnostic when same-name `<schema>` declarations DISAGREE on `tenant_id`
+(one carries it, another does not), naming both — loud in both directions, so neither the shadow
+(the closed gap) nor this over-scope is silent. — `NEW S446-peter (S239 review of #1209)`; **HIGH**; open
+
+### g-schema-create-table-like-template-columns-not-declared — `CREATE TABLE assets (LIKE tmpl INCLUDING ALL)` copies `tenant_id` in Postgres, but the floor reads no columns from it
+
+<!-- @gap id=g-schema-create-table-like-template-columns-not-declared sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(isTableLevelConstraint — `LIKE x` is skipped as a constraint; columnsFromDdlBody) prov=review:S446-S239-review-of-#1209+empirical:PA-reproduced-by-compilation-on-the-fix-round-branch -->
+
+Same class as the RESOLVED `g-schema-no-column-list-heads-declare-nothing` (columns that live
+elsewhere), one level down — inside the column list. Repro: `CREATE TABLE tmpl (id INTEGER PRIMARY
+KEY, name TEXT, tenant_id TEXT)` then `CREATE TABLE assets (LIKE tmpl INCLUDING ALL)` (also
+`(extra TEXT, LIKE tmpl)`), query on `assets` → no diagnostic, tag=0, on SQLite and Postgres `db=`.
+**Not fixed in #1209:** `LIKE <word>` is indistinguishable from a column named `like` with an
+unquoted type (`like TEXT` — legal in SQLite, where LIKE falls back to an identifier), so rejecting
+it fail-closed needs a ruling: reject an unquoted `like` column-list item (quote the column to keep
+it), or resolve `LIKE tmpl` to `tmpl`'s declared columns. — `NEW S446-peter (S239 review of #1209)`; **MED**; open
+
+### g-schema-alter-table-add-tenant-id-ignored — `ALTER TABLE assets ADD COLUMN tenant_id …` in a `<schema>` is not read, so the table stays un-scoped
+
+<!-- @gap id=g-schema-alter-table-add-tenant-id-ignored sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(the harvest reads CREATE TABLE column lists only) prov=review:S446-S239-review-of-#1209+empirical:PA-reproduced-by-compilation-on-the-fix-round-branch -->
+
+Base-equal (unchanged by #1209). Repro: `CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT);`
+then `ALTER TABLE assets ADD COLUMN tenant_id TEXT;` in the same `<schema>`, query on `assets` →
+no diagnostic, tag=0, tenant floor inactive. Direction is bryan's: reject `ALTER TABLE` in a
+`<schema>` (schema-as-code declares end state, §39.1 "the developer never writes `ALTER TABLE` by
+hand") or fold its `ADD COLUMN` into the declaration. — `NEW S446-peter (S239 review of #1209)`; **MED**; open
 
 ### g-secdef-fn-body-ddl-false-positive — a qualified or unreadable `CREATE TABLE` inside a SECURITY-DEFINER `fn` `"""` body raises E-SCHEMA-012/013 although it is runtime plpgsql, not a declaration
 
