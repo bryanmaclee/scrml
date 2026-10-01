@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 220 | 4 |
-| MED | 441 | 0 |
+| HIGH | 221 | 4 |
+| MED | 440 | 0 |
 | LOW | 214 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -21517,7 +21517,7 @@ Reviewer-executed (h2/h3/h4/h5 under `rev-progrole-work/`). Direction (PA): item
 PA-measured S445: 81 orphaned bun servers (~3 GB RAM) accumulated over ~a day of post-commit full runs + agent runs; two pre-commit gate runs failed on a 300-s "(unnamed)" hang until they were killed (by cwd `(deleted)` / `scrml-dev-*`). Fix: kill the process group (spawn detached + `process.kill(-pid)`) or have `scrml dev` forward SIGTERM to its child; assert no listener survives in an afterAll.
 
 ### g-impl1-ufcs-dot-assign-and-call-checks-fail-open — impl#1: `@n .= addOne()` compiles at exit 0 and calls `addOne()` with NO argument (`@n` becomes `NaN`); `@old.addOne()` on a free `fn` compiles silently to a runtime `TypeError`; `@n |> addOne()` errors without naming `|>`; no arity or argument-type check exists even for plain calls
-<!-- @gap id=g-impl1-ufcs-dot-assign-and-call-checks-fail-open sev=MED status=open locus=searched:compiler/src/ast-builder.js(reactive-nested-assign — `@n .= f()` reaches the `_scrml_deep_set(…, [], f())` emit of compiler/src/codegen/emit-logic.ts with an EMPTY path; PA-located-verify)+compiler/src/type-system.ts(HOST_METHOD_RETURNS / resolveReceiverExprType — a member call on a known-typed receiver is never checked against the member set) prov=empirical:S447-ufcs-dd -->
+<!-- @gap id=g-impl1-ufcs-dot-assign-and-call-checks-fail-open sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(reactive-nested-assign — `@n .= f()` reaches the `_scrml_deep_set(…, [], f())` emit of compiler/src/codegen/emit-logic.ts with an EMPTY path; PA-located-verify)+compiler/src/type-system.ts(HOST_METHOD_RETURNS / resolveReceiverExprType — a member call on a known-typed receiver is never checked against the member set) prov=empirical:S447-ufcs-dd -->
 **Measured S447 (DD §C3, probes `p1`…`p6` compiled with `bun compiler/bin/scrml.js compile`).** (1) `function bump() { @n .= addOne() }` → exit 0, emits `_scrml_cs_reactive_set("n", _scrml_deep_set(_scrml_cs_reactive_get("n"), [], _scrml_addOne_3()))` — `addOne` gets no argument, `@n` becomes `NaN`: a silent wrong-output miscompile of a token the language now gives a meaning (§67.7). (2) `function bump() { @n |> addOne() }` → `E-CODEGEN-INVALID-LOGIC`, fails closed but does not name `|>` (§67.2: `E-PIPE-NOT-IN-SCRML`). (3) `fn addOne(a:number)…; <theNewNum> = @userStuff.oldNum.addOne()` → exit 0, emits `.addOne()` on the number — a runtime `TypeError`; `@userStuff.phrase.notAThing()` likewise (§67.5: UFCS / `E-CALL-UNKNOWN-MEMBER`). (4) `addOne(@userStuff.phrase)` and `addOne(@userStuff.oldNum, 2)` → exit 0, no diagnostic: neither `E-CALL-ARITY` (§7.3) nor position-3 `E-TYPE-031` (§7.3.4 / §7.5.1) is emitted, for plain calls or dot calls. **Policy:** per S435 impl#1 does not implement §67 (new surface); the bootstrap does ([[g-bootstrap-ufcs-dot-assign-call-checks-owed]]). The `.=` miscompile (1) is the fail-open half — if impl#1 ever touches it, the fail-closed fix is to reject `.=` with a named error, not to implement it. Severity MED per the dispatch brief; by the legend's "silent-wrong-output class" (1) alone would read HIGH — PA to confirm.
 
 ### g-bootstrap-ufcs-dot-assign-call-checks-owed — bootstrap: S447 UFCS (§67), the `.=` write form, "`.` never writes" for sequence edits (§66.12 amendment), and call arity + argument-type checking (§7.3.4 / §7.5.1 position 3) are owed — call checks FIRST
