@@ -12,8 +12,9 @@ Branch: worktree-agent-a5679023ec80f2155 · base origin/main 310eee4c4
 - [x] SPEC: stale sites — §7.2 JS-inheritance sentence; §5.2.3 separator sentence; §17.6.1 "§3 ASI rules"; §34 E-INTERNAL-BODY-TOP-DROPPED "A `;` is source formatting"
 - [x] SPEC: §6.7.4 re-trigger subsection + normative bullet; W-LIFECYCLE-006 condition 2 + §6.7.10 row + §34 row + Example 6
 - [x] §34 rows: E-STMT-LEADING-OPERATOR (new), E-STMT-MISSING-SEMICOLON, E-STMT-NO-EFFECT, E-INTERNAL-BODY-TOP-DROPPED, W-LIFECYCLE-006 (touched)
-- [ ] known-gaps §S446
-- [ ] regen SPEC-INDEX / state / facts + Quick Lookup lines
+- [x] known-gaps §S446 (9 entries: 3 HIGH, 6 MED) + cross-note on g-body-top-next-line-continuation-runtime-crash
+- [x] regen SPEC-INDEX / state / facts + 3 Quick Lookup lines; all three --check PASS
+- [x] conformance scan: 5 cases carry leading-operator lines (3 r4 pins flip; s437-handler-shape-ternary-continuation-lines + s437-handler-shape-member-continuation-line must be rewritten) — recorded in §7.2.2 + §34 row
 
 ## R1-R3 reproduction (on 310eee4c4)
 - R1 REPRODUCED: `--parser=scrml-native`, `onclick={ console.log("m")⏎ @n = @n + 1 }` and `onclick={ console.log("k"); @n = @n + 2 }`

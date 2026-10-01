@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 221 | 4 |
-| MED | 440 | 0 |
+| HIGH | 224 | 4 |
+| MED | 446 | 0 |
 | LOW | 213 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -21347,7 +21347,7 @@ Reviewer-executed: `[this, @a is some]`, `this.x is some`, `this ? @a is not : 1
 
 ### g-body-top-next-line-continuation-runtime-crash — at a `<program>` body top, a line starting with `(`, `[`, `-` or a template literal directly after a declaration CONTINUES the previous expression (JS ASI) instead of being checked: `<a> = 0⏎(@a)` → `_scrml_cs_reactive_set("a", 0(…))` (TypeError at runtime); `-@a` silently makes the initial value `0 - @a`
 <!-- @gap id=g-body-top-next-line-continuation-runtime-crash sev=HIGH status=open locus=compiler/src/ast-builder.js(collectExprAfterLead continuation)+compiler/native-parser/parse-markup.js prov=review:S445-prose-r5c · design:dpa-063 -->
-Reviewer-executed (both rounds 5c/5d). The no-effect rule never sees these statements. Blocked on dpa-063 (statement termination, banked S445) — do not patch per-shape.
+Reviewer-executed (both rounds 5c/5d). The no-effect rule never sees these statements. Blocked on dpa-063 (statement termination, banked S445) — do not patch per-shape. *(S446: dpa-063 RULED pole B — SPEC §7.2.2; under it `(@a)` / `[…]` / a template start a new statement and a leading `-` is `E-STMT-LEADING-OPERATOR`. The fix is the §7.2.2 build: `g-dpa063-termination-unbuilt-impl1-legacy` / `…-impl1-native` / `…-bootstrap`.)*
 
 ### g-prose-r5-pre-existing-residuals — pre-existing defects surfaced by the S441/S445 declared-prose review rounds (reviewer-executed; not introduced)
 <!-- @gap id=g-prose-r5-pre-existing-residuals sev=HIGH status=open locus=searched:ast-builder.js,emit-logic.ts,native-parser/translate-expr.js prov=review:S445-prose-r5..r5d -->
@@ -21483,3 +21483,41 @@ Reviewer-executed (h2/h3/h4/h5 under `rev-progrole-work/`). Direction (PA): item
 ### g-commands-dev-tests-leak-dev-child-servers — `compiler/tests/commands/dev-watcher-churn-starvation.test.js` and `dev-compile-throw-fail-closed.test.js` kill the `scrml dev` parent but not its `--__dev-child`; every full-suite run leaves ~3 bun servers listening (cwd a deleted temp dir)
 <!-- @gap id=g-commands-dev-tests-leak-dev-child-servers sev=MED status=open locus=compiler/tests/commands/dev-watcher-churn-starvation.test.js+compiler/tests/commands/dev-compile-throw-fail-closed.test.js prov=empirical:S445 -->
 PA-measured S445: 81 orphaned bun servers (~3 GB RAM) accumulated over ~a day of post-commit full runs + agent runs; two pre-commit gate runs failed on a 300-s "(unnamed)" hang until they were killed (by cwd `(deleted)` / `scrml-dev-*`). Fix: kill the process group (spawn detached + `process.kill(-pid)`) or have `scrml dev` forward SIGTERM to its child; assert no listener survives in an afterAll.
+
+## §S446 — dpa-063 statement termination + `when` re-trigger: front-end defects and build-owed entries (2026-10-01; SPEC §7.2.2 / §40.8 / §6.7.4 landed by change `docs/changes/s446-spec-dpa063-termination/`; R1–R3 are route-to-PA items of `scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md`, each re-executed on `310eee4c4` — impl#1 with `bun compiler/src/cli.js compile <f> [--parser=scrml-native] -o <dir>`, the bootstrap with `loadM2().mods.parse.parseFile("t.scrml", src, 0)` from `compiler/self-host-v2/slice-m4/harness.js`. Probe files were temporary and are not committed)
+
+### g-native-inline-handler-drops-later-statements — on `--parser=scrml-native` an inline handler block `onclick={ … }` emits ONLY its first statement; every later statement is dropped silently, exit 0
+<!-- @gap id=g-native-inline-handler-drops-later-statements sev=HIGH status=open locus=searched:compiler/native-parser/parse-markup.js(inline handler block lowering)—not-traced prov=dd:statement-termination-dpa-063-2026-09-30-R1 · empirical:S446-spec-063-reproduced -->
+**Reproduced on `310eee4c4`.** `<button onclick={⏎ console.log("m")⏎ @n = @n + 1⏎ }>` and `<button onclick={ console.log("k"); @n = @n + 2 }>` → native emits `function(event) { console.log("m"); }` / `function(event) { console.log("k"); }` (the `@n` writes are gone); the default parser emits both statements. Separator-independent (newline and `;` both drop). Violates §5.2.3 *"No statement of the block SHALL be dropped"*. Opt-in parser only, but silent.
+
+### g-native-trailing-operator-ternary-rejected — `--parser=scrml-native` rejects a multi-line conditional written with TRAILING `?` / `:` (the §7.2.2 continuation form), fail-closed
+<!-- @gap id=g-native-trailing-operator-ternary-rejected sev=MED status=open locus=compiler/native-parser/parse-stmt.scrml(canInsertSemicolon / consumeSemicolon ASI at L274–325)+compiler/native-parser/parse-expr.scrml prov=dd:statement-termination-dpa-063-2026-09-30-R2 · empirical:S446-spec-063-reproduced -->
+**Reproduced on `310eee4c4`.** In a function body, `const a = @r ?⏎ "x" :⏎ "y"` → `E-STMT-MISSING-SEMICOLON` + `E-EXPR-UNEXPECTED` (Colon) + `E-STMT-UNEXPECTED-TOKEN`, exit 1. The default parser compiles it. Fails closed, but it rejects the exact spelling §7.2.2 rule 2 makes canonical (and that the codemod will produce from the 105 leading-`?`/`:` corpus lines), so it blocks native parity with the ruling.
+
+### g-bootstrap-two-statements-one-line-accepted — the bootstrap parser accepts two statements on one line with no `;` and no diagnostic
+<!-- @gap id=g-bootstrap-two-statements-one-line-accepted sev=MED status=open locus=compiler/self-host-v2/parse.scrml(parseBlock ~L565 — one optional `;` per statement, no same-line check) prov=dd:statement-termination-dpa-063-2026-09-30-R3 · empirical:S446-spec-063-reproduced -->
+**Reproduced on `310eee4c4`.** `${ function f() { let x = 1 let y = 2 } }` → two `Local` statements, zero diagnostics. §7.2.2 rule 7 (and the S284 ruling "reject") make it `E-STMT-MISSING-SEMICOLON`; impl#1-native already fires it. Silent acceptance of an ill-formed program.
+
+### g-dpa063-termination-unbuilt-bootstrap — the §7.2.2 statement-termination rule is not implemented in the bootstrap (build-owed)
+<!-- @gap id=g-dpa063-termination-unbuilt-bootstrap sev=HIGH status=open locus=compiler/self-host-v2/parse.scrml(parseBinary ~L280, parsePostfixFrom ~L319, parseBlock ~L565, parseStmt ~L580) prov=ruling:user-voice-scrml.md S446 dpa-063 Call 1 "b, your rec" · dd:statement-termination-dpa-063-2026-09-30 -->
+Build owed FIRST (Call 6 order: the bootstrap by construction). Today (dd C3, dd-executed at `29eb80c31`; only the same-line half was re-executed here — R3): `parseBinary` continues across a line break for every operator, so `let s = a⏎-3102` → `Binary(Sub, a, 3102)` and a handler `@n = @n + 1⏎-3102` joins into a write that changes the stored value; a leading `.` continues; `return⏎42` → `Return(∅)` + `Eval(42)` silently; body-top `;` is `E-PARSE-ITEM`. Owed: `E-STMT-LEADING-OPERATOR` when an operator / `.` / `?.` / `?` / `:` token is first on its line at statement level; the same-line `E-STMT-MISSING-SEMICOLON` (see `g-bootstrap-two-statements-one-line-accepted`); `;` accepted as the body-top separator. Silent semantics change until built.
+
+### g-dpa063-termination-unbuilt-impl1-legacy — impl#1's default parser runs its pre-S446 termination heuristic (JS-ASI-shaped joins), not §7.2.2
+<!-- @gap id=g-dpa063-termination-unbuilt-impl1-legacy sev=HIGH status=open locus=compiler/src/ast-builder.js(collectExpr BUG-ASI-NEWLINE continuation ~L6180; return ASI) prov=ruling:user-voice-scrml.md S446 dpa-063 Calls 1, 6 · dd:statement-termination-dpa-063-2026-09-30 C3 -->
+`console.log("m")⏎-3102` compiles as `console.log("m") - 3102` in `${}`, function bodies, handler blocks, the body top and `^{}` (dd probes P1–P4, P13, dd-executed at `29eb80c31`, not re-executed here); `let b = a⏎(a + 1).toString()` joins into a call; leading `.` / `?` / `:` / `&&` / `+` lines continue. Parity is owed under the S435 security/bootstrap exception (S446 Call 6: *"impl#1 parity under the security/bootstrap exception so the two compilers agree"*). Subsumes the S440 JS-WAT #6 non-implementation (dd R4) and closes `g-body-top-next-line-continuation-runtime-crash` when built.
+
+### g-dpa063-termination-unbuilt-impl1-native — `--parser=scrml-native` runs ECMAScript ASI, not §7.2.2
+<!-- @gap id=g-dpa063-termination-unbuilt-impl1-native sev=MED status=open locus=compiler/native-parser/parse-stmt.scrml(canInsertSemicolon / consumeSemicolon L274–325) prov=ruling:user-voice-scrml.md S446 dpa-063 Calls 1, 6 · dd:statement-termination-dpa-063-2026-09-30 C3 -->
+Native inserts a `;` only when the next token cannot continue (ECMAScript ASI rule 1), so every hazard join of the legacy entry above happens here too, then fails in E-CODEGEN on some shapes. Owed alongside `g-native-trailing-operator-ternary-rejected`. Opt-in parser.
+
+### g-stmt-no-effect-language-wide-unbuilt — `E-STMT-NO-EFFECT` fires only at a `<program>` / `<page>` / `<channel>` body top; S446 Call 5 made it language-wide
+<!-- @gap id=g-stmt-no-effect-language-wide-unbuilt sev=MED status=open locus=compiler/native-parser/body-top-coverage.js(liveExprHasEffect — body-top caller only)+compiler/src/ast-builder.js(noEffectError)+compiler/self-host-v2 prov=ruling:user-voice-scrml.md S446 dpa-063 Call 5 "(i), your rec, and yes on +/-" -->
+A bare `@count`, `a == 1` or orphan `(y)` in a function / `fn` body, a handler block, `${}`, `^{}` or a code-default body compiles silently in every front end. §40.8 now states the rule for every statement list, including the `~` exemption (a value the next statement reads through `~` is used). Pole B's safety depends on it: without it a mis-split line in a function body is a silent dead statement. Unbuilt in impl#1 (both parsers) and the bootstrap.
+
+### g-dpa063-migrate-codemod-unbuilt — the `scrml migrate --fix` leading-operator rule (S446 Call 6) does not exist
+<!-- @gap id=g-dpa063-migrate-codemod-unbuilt sev=MED status=open locus=compiler/src/commands/migrate.js(--fix tier) prov=ruling:user-voice-scrml.md S446 "b on retrigger, your recs on 6 and 7" (Call 6) -->
+Owed WITH the termination build (§7.2.2 Migration): move each leading operator to the end of the previous line (before a trailing `//` comment), or paren-wrap a leading-`.` chain; verified by emit diff (identical JS modulo the content hash). Stake: ≈205 lines in 2,489 core files (dd C4) + adopter repos via inboxes. Until it ships, landing the error in any front end breaks those files with no tool.
+
+### g-when-retrigger-newest-wins-unbuilt — a `when` effect re-triggered while an earlier run is suspended at a server call: both runs continue (impl#1); §6.7.4 now rules newest-run-wins
+<!-- @gap id=g-when-retrigger-newest-wins-unbuilt sev=MED status=open locus=searched:compiler/src/codegen(when-effect lowering)—not-traced+bootstrap:no-`when`-on-main(U0-branch-runtime-rt.when/rt.suspend-cancels-only-on-teardown) prov=ruling:user-voice-scrml.md S446 "b on retrigger, your recs on 6 and 7" · design:docs/changes/s446-bootstrap-u0-when-effects/DESIGN.md §5 (unlanded branch) -->
+§6.7.4 "Re-trigger while a run is suspended" (S446 (b)): the earlier run's continuation is cancelled and never resumes. impl#1 behaves as option (a) — each trigger is an independent call, so a stale continuation can write after a newer run. The bootstrap U0 runtime cancels only on teardown (DESIGN.md §5); the ruling *"Must land before U1 ships a server call in a `when` body."* Not reproduced here (no impl change in this unit) — UNVERIFIED for impl#1's exact behaviour beyond the U0 design note's description.
