@@ -74,7 +74,16 @@ derived flush; `@qty` unlisted never triggers. scoped: the effect stops firing a
 (live whens 0, `@hits` frozen at 1 across two incs) and after remount exactly one registration exists — one inc
 → one run, `@hits` 1 → 2, `@last` = 4.)
 
-- 2026-10-01 next: full gates (core, top-level compiler/tests/*.test.js, bootstrap suites, lint, footprint).
+- 2026-10-01 GATES (at b26c93bcb): core gate `bun test compiler/tests/{unit,integration,conformance} --bail` —
+  27342 tests / 1404 files, 0 fail (every pre-commit hook run, last at b26c93bcb). Top-level
+  `compiler/tests/*.test.js` (14 files) — 6387 pass / 13 skip / 0 fail. Bootstrap (the CI step): lint 58 files 0
+  violations · slice-m1 90/90 (was 73 at 464c9ab4d + 17 when.runtime) · slice-m2 448/448 · lowered slice-m1 90/90 ·
+  slice-m3 63/63 (+3 ingest when tests) · slice-m4 427 pass + 1 todo (+24 when.test.js) · v2 lexer 337/337.
+  CG footprint (`bun scripts/hybrid.ts --swap CG=compiler/self-host-v2/slice-m3/substitute.js --footprint`):
+  runtime 18/0 (flat), codes-only 11/0 (+1 = lifecycle/when-dep-derived-error), crashed 0, not-yet 704,
+  front-end 476 (1209 cases; +9 cases arrived with #1201 since the 464c9ab4d baseline of 1200).
+- 2026-10-01 DONE. Open for PA: the re-trigger-while-suspended FORK (DESIGN.md §5), SPEC questions (DESIGN.md §5),
+  W-LIFECYCLE-006 literal rule fires on the accumulate idiom `@hits = @hits + 1` (not derivable — SPEC defect?).
 
 ## Governing sentences (SPEC §6.7.4 / §6.7.2) — quoted, each implemented
 
