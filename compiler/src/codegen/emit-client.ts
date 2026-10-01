@@ -2014,7 +2014,7 @@ export function generateClientJs(ctx: CompileContext): string {
     buildVariantFieldsRegistry(fileAST)
   );
   setVariantFieldsForFile(fields, collisions, imported);
-  setShadowedVariantNames(shadowed);
+  setShadowedVariantNames(shadowed, imported);
   // S438 review N3 — the string-rewrite path (handler bodies) cannot be typed:
   // a local-shadowed name is treated as a collision there (left unlowered →
   // a loud invalid-output error), never guessed.

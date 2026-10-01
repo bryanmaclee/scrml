@@ -2329,12 +2329,12 @@ export function generateServerJs(
   // (event-handler / escape-hatch paths) lower to the canonical
   // `{ variant, data }` tagged-object literal. Mirrors the client setup in
   // emit-client.ts:generateClientJs. Released at the bottom of this function.
-  const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions, shadowed: _scrmlShadowed } =
+  const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions, shadowed: _scrmlShadowed, imported: _scrmlImportedOnly } =
     buildVariantFieldsRegistry(fileAST);
   setVariantFieldsForRewriter(_scrmlVariantFields, new Set([..._scrmlVariantCollisions, ..._scrmlShadowed]));
   // S438 review N1/N3 — the local-shadowed names keep pre-F11 behaviour on the
   // server pass too (match binding + bare-dot constructors).
-  setShadowedVariantNames(_scrmlShadowed);
+  setShadowedVariantNames(_scrmlShadowed, _scrmlImportedOnly);
 
   // §14.8.9 — arm the SERVER SQL-lowering pass to tag protected-origin `?{}`
   // SELECT results with the `_scrml_protect_tag(...)` descriptor. Released

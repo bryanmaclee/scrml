@@ -668,11 +668,23 @@ describe("review N1 — the position stamp survives each-row AST clones", () => 
     "each-row block const": `    <ul><each in=@items key=@.id as it>\${ for (let j of [1]) { const e: Expr = .Neg(it.k)\n lift <li>\${show(e)}</li> } }</each></ul>`,
     "each-row handler": `    <ul><each in=@items key=@.id as it><li><button onclick=\${ @cur = .Neg(it.k); @n = 1 }>b</button></li></each></ul>`,
   };
+  // S446 — the each-row INTERPOLATION re-parses its text (emit-each.ts
+  // parseExprToNode), so the TS position stamp on `show(.Neg(it.k))` never reaches
+  // the node codegen emits (it never did: the S438 pass was the by-name imported
+  // lookup, not the stamp). An unstamped call argument of an imported-only name is
+  // now left unlowered — the pre-F11 loud failure — because codegen cannot tell
+  // `show(e: Expr)` from a callee whose parameter is a different enum.
+  const LOUD_UNSTAMPED_ARG = new Set(["each-row interpolation"]);
   for (const [label, body] of Object.entries(ROWS)) {
-    test(`${label}: imported-only name builds the imported fields`, () => {
+    test(`${label}: imported-only name builds the imported fields${LOUD_UNSTAMPED_ARG.has(label) ? " or stays loud (unstamped call argument)" : ""}`, () => {
       const { errors, clientJs } = build("rn1-" + label.replace(/\W+/g, "-"), { "app.scrml": PAGE(false, body), "core.scrml": NEG_CORE });
       expect(errors).toEqual([]);
       const keys = negKeys(clientJs);
+      if (LOUD_UNSTAMPED_ARG.has(label)) {
+        expect(keys).toEqual([]);
+        expect(clientJs).toContain('"Neg"(');
+        return;
+      }
       expect(keys.length).toBeGreaterThan(0);
       expect(keys.every((k) => k === "x")).toBe(true);
       expect(clientJs).not.toContain('"Neg"(');
@@ -756,5 +768,124 @@ ${body}
     });
     expect(errors.length).toBeGreaterThan(0);
     expect(negKeys(clientJs)).not.toContain("y");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S446 — the HELD loud→silent shape. A bare-dot constructor that is an ARGUMENT
+// of a call takes its PARAMETER's enum, never the enclosing expression's:
+// `fn t() -> Expr { return toExpr(.Neg(6)) }` with `toExpr(o: Other)` in another
+// file and `Expr.Neg(x)` / `Other.Neg(y)`. Pre-S446 the branch stamped the outer
+// `Expr` onto the argument (TS flat walker) or looked `Neg` up by name among the
+// IMPORTED enums (codegen), and `toExpr` silently read `y` as undefined. Main
+// throws `"Neg" is not a function` there. The rule pinned here: such a call
+// returns the right value (TS typed the parameter — same-file callee) or fails
+// LOUDLY; it never returns `Lit(undefined)`.
+// ---------------------------------------------------------------------------
+
+describe("S446 — a bare-dot call argument never takes the outer context's enum", () => {
+  const ENUMS = `    export type Expr:enum = { Lit(n: int), Neg(x: int) }
+    export type Other:enum = { Neg(y: int), Zero }`;
+  const FNS = `    export fn toExpr(o: Other) -> Expr {
+        return match o {
+            .Neg(y) :> Expr.Lit(y)
+            .Zero :> Expr.Lit(0)
+        }
+    }
+    export fn idO(o: Other) -> Other { return o }
+    export fn toExprO(r) -> Expr { return toExpr(r.o) }
+    export fn toExprA(a) -> Expr { return toExpr(a[0]) }`;
+  const LIB = `\${\n${ENUMS}\n${FNS}\n}\n`;
+  const crossFile = (imp, body) => ({
+    "bundle.scrml": ENTRY(`import { t } from "./use.scrml"`),
+    "lib.scrml": LIB,
+    "use.scrml": `import { ${imp} } from "./lib.scrml"\n\${\n${body}\n}\n`,
+  });
+  const sameFile = (body) => ({
+    "bundle.scrml": ENTRY(`import { t } from "./use.scrml"`),
+    "use.scrml": `\${\n${ENUMS}\n${FNS}\n${body}\n}\n`,
+  });
+  const ALL = "Expr, Other, toExpr, idO, toExprO, toExprA";
+  const SHAPES = {
+    "return-type context": `    export fn t() -> Expr { return toExpr(.Neg(6)) }`,
+    "const annotation context": `    export fn t() -> Expr {\n        const e: Expr = toExpr(.Neg(6))\n        return e\n    }`,
+    "nested call": `    export fn t() -> Expr { return toExpr(idO(.Neg(6))) }`,
+    "object-literal argument": `    export fn t() -> Expr { return toExprO({ o: .Neg(6) }) }`,
+    "array-literal argument": `    export fn t() -> Expr { return toExprA([.Neg(6)]) }`,
+    "method call": `    export fn t() -> Expr {\n        const h = { f: toExpr }\n        return h.f(.Neg(6))\n    }`,
+    "no outer context": `    export fn t() {\n        return toExpr(.Neg(6))\n    }`,
+  };
+  const correctOrLoud = (mods) => {
+    let v;
+    try { v = mods.use.t(); } catch (e) { return "loud"; }
+    expect(v).toEqual({ variant: "Lit", data: { n: 6 } });
+    return "correct";
+  };
+  for (const [label, body] of Object.entries(SHAPES)) {
+    test(`cross-file callee, both enums imported — ${label}: correct or loud`, () => {
+      const { mods, errors } = build("s446x-" + label.replace(/\W+/g, "-"), crossFile(ALL, body));
+      if (errors.length === 0) correctOrLoud(mods);
+    });
+    test(`cross-file callee, only Expr imported — ${label}: correct or loud`, () => {
+      const imp = "Expr, toExpr, idO, toExprO, toExprA";
+      const { mods, errors } = build("s446u-" + label.replace(/\W+/g, "-"), crossFile(imp, body));
+      if (errors.length === 0) correctOrLoud(mods);
+    });
+    test(`all in one file — ${label}: correct or loud`, () => {
+      const { mods, errors } = build("s446s-" + label.replace(/\W+/g, "-"), sameFile(body));
+      if (errors.length === 0) correctOrLoud(mods);
+    });
+  }
+  test("same-file callee with a typed parameter is CORRECT (TS stamps the parameter's enum)", () => {
+    for (const label of ["return-type context", "const annotation context", "nested call", "no outer context"]) {
+      const { mods, errors } = build("s446c-" + label.replace(/\W+/g, "-"), sameFile(SHAPES[label]));
+      expect(errors).toEqual([]);
+      expect(correctOrLoud(mods)).toBe("correct");
+    }
+  });
+  test("a typed local passed to the cross-file callee is correct", () => {
+    const { mods, errors } = build("s446-typed-local", crossFile(ALL,
+      `    export fn t() -> Expr {\n        const o: Other = .Neg(6)\n        return toExpr(o)\n    }`));
+    expect(errors).toEqual([]);
+    expect(correctOrLoud(mods)).toBe("correct");
+  });
+  test("a constructor directly at the typed position is still built with the imported fields", () => {
+    const { mods, errors } = build("s446-direct", crossFile("Expr", `    export fn t() -> Expr { return .Neg(6) }`));
+    expect(errors).toEqual([]);
+    expect(mods.use.t()).toEqual({ variant: "Neg", data: { x: 6 } });
+  });
+  test("handler / interpolation / server-function call arguments never emit the outer enum's fields", () => {
+    const PAGE2 = (imp, body, extra = "") => `<program>
+    import { ${imp} } from "./lib.scrml"
+    \${
+        @cur: Expr = Expr.Lit(0)
+        @n = 0
+        ${extra}
+        fn show(e: Expr) -> string {
+            return match e {
+                .Lit(n) :> "lit" + n
+                .Neg(x) :> "neg" + x
+            }
+        }
+    }
+${body}
+</program>
+`;
+    const pages = {
+      handler: PAGE2("Expr, toExpr", `    <button onclick=\${ @cur = toExpr(.Neg(4)); @n = 1 }>b</button>`),
+      interpolation: PAGE2("Expr, toExpr", `    <p>\${ show(toExpr(.Neg(4))) }</p>`),
+      server: PAGE2("Expr, toExpr", `    <p>\${ @n }</p>`, `server function sv() -> Expr { return toExpr(.Neg(5)) }`),
+    };
+    for (const [label, src] of Object.entries(pages)) {
+      const dir = join(TMP, "s446p-" + label);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, "app.scrml"), src);
+      writeFileSync(join(dir, "lib.scrml"), LIB);
+      compileScrml({ inputFiles: [join(dir, "app.scrml"), join(dir, "lib.scrml")], outputDir: join(dir, "out"), write: true, validateEmit: true, log: () => {} });
+      const js = [];
+      const walk = (d) => { for (const e of readdirSync(d, { withFileTypes: true })) { const p = join(d, e.name); if (e.isDirectory()) walk(p); else if (/^app.*\.js$/.test(e.name)) js.push(readFileSync(p, "utf8")); } };
+      walk(join(dir, "out"));
+      expect(negKeys(js.join("\n"))).not.toContain("x");
+    }
   });
 });

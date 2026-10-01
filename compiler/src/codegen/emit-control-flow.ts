@@ -79,13 +79,28 @@ let _localVariantFields: Map<string, string[]> | null = null;
  * enum) would then contradict. Set on BOTH the client and server passes.
  */
 let _shadowedVariantNames: Set<string> | null = null;
+/**
+ * S446 — variant names the by-name registries hold ONLY because an IMPORTED
+ * enum declares them (no local enum does). Read by the bare-dot constructor
+ * lowering (emit-expr.ts emitCall) for an UNSTAMPED constructor that is a call
+ * ARGUMENT: its parameter's enum is unknown to codegen, so a by-name hit on an
+ * imported enum is a guess (`conv(.Neg(6))` with `conv(o: Other)` in another
+ * file and an imported `Expr.Neg(x)` here) — it stays unlowered, the pre-F11
+ * loud failure. Set on BOTH the client and server passes, with the shadowed set.
+ */
+let _importedOnlyVariantNames: Set<string> | null = null;
 
-export function setShadowedVariantNames(names: Set<string> | null): void {
+export function setShadowedVariantNames(names: Set<string> | null, importedOnly?: Set<string> | null): void {
   _shadowedVariantNames = names && names.size > 0 ? names : null;
+  _importedOnlyVariantNames = importedOnly && importedOnly.size > 0 ? importedOnly : null;
 }
 
 export function isShadowedVariantName(variantName: string): boolean {
   return _shadowedVariantNames?.has(variantName) ?? false;
+}
+
+export function isImportedOnlyVariantName(variantName: string): boolean {
+  return _importedOnlyVariantNames?.has(variantName) ?? false;
 }
 
 /**

@@ -15540,6 +15540,14 @@ function inferBareVariantsInExpr(
   errors: TSError[],
 ): void {
   if (!exprNode || typeof exprNode !== "object") return;
+  // S446 — `contextType` is the type of the WHOLE expression. An ident inside a
+  // call's ARGUMENT list sits at the callee's parameter position, whose type is
+  // not `contextType` (`return conv(.Neg(6))` under `-> Expr` passes `.Neg` to
+  // `conv(o: Other)`). Those idents are never stamped from this context: a call
+  // whose parameter types TS knows runs this walker on each argument with the
+  // PARAMETER type as the root context (the call-site passes), and a call TS
+  // cannot type leaves the argument unstamped — the pre-F11 loud lowering.
+  const callArgIdents = collectCallArgumentIdents(exprNode);
   forEachIdentInExprNode(exprNode as any, (ident) => {
     if (typeof ident.name !== "string") return;
     const raw = ident.name;
@@ -15565,7 +15573,7 @@ function inferBareVariantsInExpr(
     // by-variant-NAME lookup that a same-named variant of another enum (a local
     // `Neg(y, z)` beside the annotated imported `Neg(x)`) can shadow (S438
     // review F2). First resolution wins (a later pass may have no context).
-    if (contextType && !Object.prototype.hasOwnProperty.call(ident, "__variantFields")) {
+    if (contextType && !callArgIdents.has(ident) && !Object.prototype.hasOwnProperty.call(ident, "__variantFields")) {
       const resolvedEnum: EnumType | null =
         contextType.kind === "enum" ? contextType as EnumType
         : (contextType.kind === "predicated" && (contextType as PredicatedType).baseType === "enum")
@@ -15751,6 +15759,35 @@ function inferBareVariantsInExpr(
       span,
     ));
   });
+}
+
+/**
+ * S446 — every IdentExpr reachable (by `forEachIdentInExprNode`) from an
+ * ARGUMENT of a `call` / `new` anywhere in `root`. The callee itself is not an
+ * argument: `.Neg(6)` at the root keeps its own ident; `conv(.Neg(6))` puts
+ * `.Neg` in the set. Used only to keep `inferBareVariantsInExpr` from stamping
+ * the whole-expression context onto a parameter position.
+ */
+function collectCallArgumentIdents(root: unknown): Set<unknown> {
+  const out = new Set<unknown>();
+  const seen = new Set<unknown>();
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object" || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) { for (const el of node) visit(el); return; }
+    const n = node as { kind?: unknown; args?: unknown };
+    if ((n.kind === "call" || n.kind === "new") && Array.isArray(n.args)) {
+      for (const arg of n.args) {
+        if (arg && typeof arg === "object") forEachIdentInExprNode(arg as any, (id) => { out.add(id); });
+      }
+    }
+    for (const key of Object.keys(node as object)) {
+      if (key === "span") continue;
+      visit((node as Record<string, unknown>)[key]);
+    }
+  };
+  visit(root);
+  return out;
 }
 
 /**

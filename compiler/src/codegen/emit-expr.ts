@@ -329,6 +329,15 @@ export interface EmitExprContext {
   /** Error accumulator for diagnostics. */
   errors?: any[];
   /**
+   * S446 — true while emitting anything beneath a `call` / `new` node (set by
+   * emitCall / emitNew for their callee and arguments). A bare-dot constructor
+   * reached this way with no TS `__variantFields` stamp sits at a parameter
+   * position whose enum codegen cannot see, so it never takes the by-name
+   * lookup of a variant only an IMPORTED enum declares (see
+   * isImportedOnlyVariantName).
+   */
+  inCallArgument?: boolean;
+  /**
    * C13 (§51.0.G) — engine variable names in the file's scope. When set and
    * the call shape is `@<name>.advance(<arg>)` with `<name>` in this set,
    * `emitCall` dispatches to the C13 runtime hook (`_scrml_engine_advance`)
@@ -3081,6 +3090,10 @@ function emitIndex(node: IndexExpr, ctx: EmitExprContext): string {
 }
 
 function emitCall(node: CallExpr, ctx: EmitExprContext): string {
+  // S446 — whether THIS call sits beneath another call (read by the bare-dot
+  // constructor lowering below); everything emitted beneath it does.
+  const ctorIsCallArgument = ctx.inCallArgument === true;
+  if (!ctorIsCallArgument) ctx = { ...ctx, inCallArgument: true };
   // §14.12.6.3 (S131 — HU-2 hybrid) — `transition(<ident>)` is a compile-time-
   // only marker for lifecycle progression. The type-system walker consumes it
   // symbolically (per checkLifecycleBindingAccess); codegen emits ZERO runtime
@@ -3482,9 +3495,23 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
         ));
         return `undefined /* E-VARIANT-AMBIGUOUS: .${variantName} */`;
       }
+      // S446 — an UNSTAMPED constructor beneath a call: TS did not type its
+      // parameter position (a callee in another file, an untyped parameter, a
+      // method, a nested call). A variant name only an IMPORTED enum declares
+      // is then a guess — the outer expression's enum, not the parameter's —
+      // so it is left unlowered (the pre-F11 loud `"V"(…)`), never a silent
+      // wrong payload. Local enum names keep the pre-F11 by-name lookup.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isImportedOnlyVariantName } = require("./emit-control-flow.ts") as {
+        isImportedOnlyVariantName: (variantName: string) => boolean;
+      };
+      const byNameRefused = !Array.isArray(stamped) && ctorIsCallArgument
+        && isImportedOnlyVariantName(variantName);
       const fieldNames = Array.isArray(stamped)
         ? (stamped as string[])
-        : (getVariantFieldSchema(variantName) ?? getVariantFieldSchemaFromRewriter(variantName));
+        : byNameRefused
+          ? null
+          : (getVariantFieldSchema(variantName) ?? getVariantFieldSchemaFromRewriter(variantName));
       if (fieldNames !== null) {
         // Emit `{ variant: "X", data: { field0: arg0, field1: arg1, ... } }`.
         // Truncate to min(args.length, fieldNames.length) so an over-long
@@ -4273,6 +4300,7 @@ function reactiveArrayMutationCell(node: CallExpr, ctx: EmitExprContext): string
 }
 
 function emitNew(node: NewExpr, ctx: EmitExprContext): string {
+  if (ctx.inCallArgument !== true) ctx = { ...ctx, inCallArgument: true };
   const callee = emitReceiver(node.callee, ctx);
   const args = node.args.map(a => emitExpr(a, ctx)).join(", ");
   return `new ${callee}(${args})`;
