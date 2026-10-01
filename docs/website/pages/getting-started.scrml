@@ -231,6 +231,16 @@ bun install</code></pre>
 
         <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>scrml dev . --port 3100 -o dist/</code></pre>
 
+        <p class="text-slate-700 leading-relaxed mt-3">
+            The dev server listens on this machine only. To open the app
+            from another device on your network (a phone, say), add
+            <code class="font-mono text-sm bg-slate-100 px-1.5 py-0.5 rounded">--host</code>
+            — it then listens on every interface, and anyone on the
+            network can reach it and its compile-error page.
+        </p>
+
+        <pre class="bg-slate-900 text-slate-100 p-4 rounded-md text-sm overflow-x-auto"><code>scrml dev . --host</code></pre>
+
         // ───────────────────────────────────────────────────────────
         // §6 — Build for production
         // ───────────────────────────────────────────────────────────

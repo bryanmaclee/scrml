@@ -861,7 +861,9 @@ async function makeRealSql(source: string, db: ServerDb): Promise<SQL> {
 /**
  * Evaluate the emitted server bundle into its drivable surface. Mirrors the D2
  * browser harness compose wrapper: strip the `import { SQL } from "bun"` + the
- * `new SQL(...)` handle decl (both replaced by the `_scrml_sql` binding param),
+ * `new SQL(...)` handle decl (both replaced by the `_scrml_sql` binding param) +
+ * the `node:fs` import the s445 `_scrml_sqlite_file` helper uses (the helper is a
+ * hoisted declaration, inert once the handle line that calls it is gone),
  * strip `export ` (the wrapper `return`s the bindings instead), and neutralize
  * `import.meta.url` (the compose handler reads a sibling `.html` off it — the
  * `Bun.file` stub answers with the in-memory `html`). The emitted server code is
@@ -880,7 +882,8 @@ function evalServerModule(
   const g = globalThis as any;
   const runnable = serverJs
     .replace(/^\s*import\s+\{\s*SQL\s*\}\s+from\s+"bun";\s*$/m, "")
-    .replace(/^\s*const _scrml_sql = new SQL\([^)]*\);\s*$/m, "")
+    .replace(/^\s*import\s+\{[^}]*_scrml_db_file_exists[^}]*\}\s+from\s+"node:fs";\s*$/m, "")
+    .replace(/^\s*const _scrml_sql = .*;\s*$/m, "")
     .replace(/^export\s+/gm, "")
     .replace(/import\.meta\.url/g, JSON.stringify("file:///case.scrml"));
   const BunStub = { file: () => ({ text: async () => html }) };

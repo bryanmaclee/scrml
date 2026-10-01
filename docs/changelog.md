@@ -2,6 +2,30 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S445 — 2026-09-30 (bryan · ASUS, concurrent with S444 on XPS)
+
+S443's held security pickup, driven through adversarial review until each landing was strictly better than main —
+four security arcs landed, eight rulings, and every one of them reproduced by execution before it entered a brief.
+
+- **App root relative to the build root** (#1194): a project living under any `…/pages/…` or `…/routes/…` directory
+  no longer serves member pages of a `<program auth="required">` app anonymously (`/about` 200 → 302). One rule for the
+  build root (§40.8 "The build root"): the application entry file's directory; `W-AUTH-REQUIRED-NOT-INHERITED`. Four
+  S239 rounds; corpus byte-identical.
+- **Declared prose** (#1196, rulings S441 / S443 #4 / S445 #2): `<program>`/`<page>`/`<channel>` bodies carry no loose
+  prose — every byte compiles or is an error, on both parsers; new `E-STMT-NO-EFFECT` (an expression statement with no
+  effect is an error — `@a == 1`, `"Total: " + @count`, bare `@count`). Enum `renders` bodies now taken verbatim
+  (`No #${id}` → `No #42`; main dropped the `#`). Five rounds.
+- **Protected-column egress round 6** (#1198, rulings S443 #7, S445 #4): nine leak classes closed; per-column markers;
+  the sink builds its own plain-data snapshot (getters/`toJSON` run once, against a stripped `this`); an HMAC key
+  declassifies only with positive runtime evidence. Six rounds; `this`-writes filed HIGH for round 7.
+- **Program role by ancestor** (#1201, rulings S445 (b) + items 1/3/5): a `<div>`-wrapped app program's `auth=` is
+  enforced; route-file programs are nested (implied ancestor); session + every app-level attribute on a nested program
+  are errors (`E-PROGRAM-NESTED-SESSION` / `-NESTED-ATTR` / `-CONFIG-UNREAD`); refused builds write nothing.
+- **In flight at wrap:** dev-db resolution (`db=` relative to the declaring file; ownership-gated creation;
+  `SCRML_DATA_DIR`) — round 4.
+- Banked dpa-063 (statement termination) + dpa-064 (nested program as an auth scope) (#1192). flogence: `@adv` lapsed,
+  carried in the overlay again. Gaps filed §S445 (incl. HIGH `scrml serve` exposure).
+
 ## S442 — 2026-09-29 (bryan · XPS, concurrent with S441)
 
 The bootstrap got the S440 typer rules end to end and grew to the §66.19 worked programs; bryan ruled the tape

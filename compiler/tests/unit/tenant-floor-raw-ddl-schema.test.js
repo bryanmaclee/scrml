@@ -812,7 +812,7 @@ ${sql}
     rows
   }
 </program>`;
-  const schemaCodes = (r) => errCodes(r).filter((c) => /^E-SCHEMA-01[23]$/.test(c));
+  const schemaCodes = (r) => errCodes(r).filter((c) => /^E-SCHEMA-01[234]$/.test(c));
 
   // ⚑ FLIPPED by the S438 FINAL commit. Round 3 made these silent via a fn-body
   // exemption; both exemption attempts opened escapes, so it was REMOVED
@@ -824,14 +824,16 @@ ${sql}
     expect(schemaCodes(r)).toEqual(["E-SCHEMA-012"]);
   });
 
-  test("F-A: readable unqualified heads in a SECDEF body stay silent", () => {
-    for (const sql of [
-      "      CREATE TEMP TABLE staging ON COMMIT DROP AS SELECT * FROM invoices;",
-      "      CREATE TABLE archived PARTITION OF invoices DEFAULT;",
-    ]) {
-      const { r } = compileSchemaApp(null, secdef(sql));
-      expect(schemaCodes(r)).toEqual([]);
-    }
+  test("F-A: a TEMP staging head in a SECDEF body stays silent", () => {
+    const { r } = compileSchemaApp(null, secdef("      CREATE TEMP TABLE staging ON COMMIT DROP AS SELECT * FROM invoices;"));
+    expect(schemaCodes(r)).toEqual([]);
+  });
+
+  // ⚑ FLIPPED S446 fix round: the fn-body exemption is TEMP/TEMPORARY-only, so a
+  // non-temp no-column-list head in a SECDEF body is E-SCHEMA-014.
+  test("F-A: a non-temp `PARTITION OF` head in a SECDEF body is E-SCHEMA-014", () => {
+    const { r } = compileSchemaApp(null, secdef("      CREATE TABLE archived PARTITION OF invoices DEFAULT;"));
+    expect(schemaCodes(r)).toEqual(["E-SCHEMA-014"]);
   });
 
   test("F-A: a qualified head AFTER a closed `\"\"\"` body is rejected too", () => {
@@ -840,7 +842,10 @@ ${sql}
     ).map((h) => h.name)).toEqual(["b", "t"]);
   });
 
-  test("F-B: `PARTITION OF` and `OF type` heads read fine — no error", () => {
+  // ⚑ FLIPPED S446 (bryan RULED S440 #15, gap g-schema-no-column-list-heads-declare-
+  // nothing): these heads READ fine — never E-SCHEMA-013 — but they declare no column
+  // list the floors can see, so at top level they are now E-SCHEMA-014.
+  test("F-B: `PARTITION OF` / `OF type` / TEMP CTAS heads are READABLE (no 012/013) but are E-SCHEMA-014", () => {
     for (const extra of [
       "    CREATE TABLE assets_default PARTITION OF assets DEFAULT",
       "    CREATE TABLE assets_2026 PARTITION OF assets FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
@@ -848,7 +853,7 @@ ${sql}
       "    CREATE TEMP TABLE scratch ON COMMIT DROP AS SELECT 1",
     ]) {
       const { r } = compileSchemaApp(`    CREATE TABLE assets ${COLS}\n${extra}`);
-      expect(schemaCodes(r)).toEqual([]);
+      expect(schemaCodes(r)).toEqual(["E-SCHEMA-014"]);
     }
   });
 
@@ -963,7 +968,9 @@ ${schema}
   });
 
   test("F3: `PARTITION` is a name follower only as `PARTITION OF`", () => {
-    expect(kinds("CREATE TABLE assets_p PARTITION OF assets DEFAULT")).toEqual([]);
+    // S446: a readable `PARTITION OF` head is no longer accepted silently — it has
+    // no column list, so it is E-SCHEMA-014 (not E-SCHEMA-013 "unreadable").
+    expect(kinds("CREATE TABLE assets_p PARTITION OF assets DEFAULT")).toEqual(["not-a-declaration:assets_p"]);
     expect(kinds("CREATE TABLE assets_p PARTITION assets DEFAULT")).toEqual(["unreadable:assets_p"]);
   });
 });

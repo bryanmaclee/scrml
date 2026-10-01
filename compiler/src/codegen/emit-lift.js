@@ -3,7 +3,7 @@ import { colorActiveHandler } from "./js-async-analysis.ts";
 import { emitExprField, reparseRequestRefEscapeHatch } from "./emit-expr.ts";
 import { rewriteExprArrowBody } from "./rewrite.js";
 import { emitStringFromTree } from "../expression-parser.ts";
-import { emitLogicNode, _iterDestructureBindNames } from "./emit-logic.js";
+import { emitLogicNode, _iterDestructureBindNames, emitHandlerStatementList } from "./emit-logic.js";
 import { genVar } from "./var-counter.ts";
 import { VOID_ELEMENTS } from "./utils.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts";
@@ -1711,6 +1711,25 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
       const raw = val.raw ?? val.propsDecl ?? "";
       if (/^on[a-z]/.test(name)) {
         const eventName = name.replace(/^on/, "");
+        // S446 (S439 #4) — a §5.2.3 multi-statement handler (`${a; b}`) carries
+        // its PARSED statement list (`val.handlerBlock.stmts`, ast-builder
+        // parseLiftTag → attachHandlerStatementList). Lower the statement nodes
+        // as a function body through the shared emitHandlerStatementList — the
+        // same lowering top-level, engine-arm and `<each>` handlers use — so
+        // every statement runs (pre-S446 only the first did). The row binding
+        // is a plain JS closure variable here, so no iter-scope rewrite is
+        // needed; Bug-73 live-keying still wraps the body. A 1-statement value
+        // has no handlerBlock and takes the paths below, unchanged.
+        if (val.handlerBlock && Array.isArray(val.handlerBlock.stmts)) {
+          const _liftReqIds = currentLiftRequestIds();
+          const blockBody = emitHandlerStatementList(val.handlerBlock.stmts, {
+            ...(engineCtx?.engineExprCtxExtras ?? {}),
+            engineBindings: engineCtx?.engineRewriteCtx?.engineBindings ?? null,
+            ...(_liftReqIds ? { requestIds: _liftReqIds } : {}),
+          });
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(blockBody)} }`, attr?.span)});`);
+          continue;
+        }
         // Bug 65 (S157) — engine transition `${@engine.advance(.X)}` (CallExpr) /
         // `${@engine = .X}` (AssignExpr) in a lifted handler: lower through the
         // SHARED engine machinery (state / message plane / direct-set) BEFORE the

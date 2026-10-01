@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 223 | 4 |
-| MED | 438 | 0 |
-| LOW | 213 | 0 |
+| HIGH | 220 | 4 |
+| MED | 439 | 0 |
+| LOW | 214 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -462,7 +462,9 @@ cancel each other on exactly this seam (#900 round 3). **Decide the identity mod
 
 ### g-schema-create-temp-table-silently-not-a-declaration — `CREATE TEMP TABLE assets (…, tenant_id)` in a `<schema>` declares nothing; beside a second table the tenant floor is inert with NO diagnostic
 
-<!-- @gap id=g-schema-create-temp-table-silently-not-a-declaration sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(schemaCreateTables — the modifier filter; the head reader already READS TEMP/TEMPORARY/UNLOGGED/GLOBAL/LOCAL)+compiler/src/gauntlet-phase1-checks.js(the <schema> body checks) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+<!-- @gap id=g-schema-create-temp-table-silently-not-a-declaration sev=HIGH status=resolved owner=bryan locus=compiler/src/schema-differ.js(schemaCreateTables — the modifier filter; the head reader already READS TEMP/TEMPORARY/UNLOGGED/GLOBAL/LOCAL)+compiler/src/gauntlet-phase1-checks.js(the <schema> body checks) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+
+**⚑ RESOLVED S446 (branch `fix/schema-holes-fail-closed`) — bryan RULED S440 #15 "fix in TS, fail closed": REJECT.** A modified head (`TEMP`, `TEMPORARY`, `GLOBAL`/`LOCAL TEMPORARY`, `UNLOGGED`, `VIRTUAL`, any word between `CREATE` and `TABLE`) in a `<schema>` is now **E-SCHEMA-014** (new; §34 + §39.2 + §39.12 rows; newly-rejecting). Both rows of the table below now report E-SCHEMA-014 (and the lone-table row no longer also warns `W-SCHEMA-NO-TABLES-DECLARED`). The harvest is unchanged (still never reads a modified head). Narrow exemption for this code only: a head inside the `"""` body of a parser-accepted, live SECURITY-DEFINER `fn` (runtime plpgsql). Corpus: 202-file `<schema>` differential identical. Exemption is TEMP/TEMPORARY-only (S446 fix round; `LOCAL TEMP`, `GLOBAL TEMPORARY`, `UNLOGGED` in a fn body are reported). **Residual LOW (base-equal, not changed):** a head later on the SAME LINE as a `"""` is masked by the one-line `"…"` exemption (`"""` reads as `""` + a `"`-to-end-of-line literal), so a top-level `""" CREATE TEMP TABLE … """` or a one-line fn body `{ """ CREATE UNLOGGED TABLE … """ }` is silent; making `"""` live was tried and reverted (it let `"""a"` / `""""` quoted identifiers hide a following head — a HIGH silent pass). See SPEC §39.2 "Comments and literals".
 
 **Sibling of the RESOLVED `g-tenant-floor-inert-for-a-two-qualifier-create-table`, found by the S438
 bite-test of that fix; NOT changed by it, deliberately.** Same class — a `<schema>` table head the
@@ -489,6 +491,20 @@ parent gap). — `NEW S438-peter`; **HIGH**; open
 
 <!-- @gap id=g-schema-commented-out-declaration-shadows-live-table sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(the pre-S438 read inside schemaCreateTables — comment-agnostic, first-wins per key)+compiler/src/schema-differ.js(parseSchemaBlock — reads DSL inside /* */) prov=empirical:S438-peter-fix-round-reproduced-by-compilation-on-98d94e96-and-the-fix-branch-identical -->
 
+**⚑ S446 — NOT closed by #1209; ROUTED TO BRYAN.** A union fix was built on #1209 and REMOVED before landing
+(PA decision): `extractDesiredSchema` returned every same-name declaration (`tenantDecls`) and the tenant
+floor scoped a table when ANY of them carried `tenant_id`. That closes the shadow below, but **on its own it
+introduces a silent data loss in the reverse direction** — the S239 review of #1209 (reproduced by the PA by
+compilation and at runtime): a stale commented copy WITH `tenant_id` placed AFTER a live table WITHOUT it
+(`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT)` / `-- old: CREATE TABLE assets (…, tenant_id TEXT)`)
+makes the live table tenant-scoped, so `SELECT * FROM assets` is tagged and `_scrml_tenant_redact` drops every
+row (no `tenant_id` value) → **`[]`, silently** (in-memory SQLite: 2 rows → `[]`); `SELECT id, name` gets
+`tenant_id` added to its projection → runtime `no such column: tenant_id`; `UPDATE assets …` becomes
+E-TENANT-WRITE. **Recommended route (a new code → bryan's ruling):** the union over declarations PLUS a loud
+diagnostic when same-name `<schema>` declarations DISAGREE on `tenant_id` (one carries it, another does not),
+naming both — so neither this shadow nor the over-scope is silent. The table below is still current on #1209
+(pinned by `compiler/tests/unit/schema-holes-fail-closed.test.js` "gap 3 — NOT closed").
+
 **Pre-existing on `98d94e96`, identical on the S438 branch (which deliberately preserves base's
 harvest per key — see the S438 fix-round note above).** The `<schema>` recognizers read declarations
 inside comments, and the harvest is first-wins per table name. So:
@@ -508,6 +524,29 @@ false positive `g-secdef-fn-body-ddl-false-positive`.) **PA recommendation:** fo
 floor) rather than change which statement feeds the shadow DB — a fix that preserves the harvest ⊇
 base invariant. Not done in S438: it changes base's per-key record, which the fix round held fixed on
 purpose. — `NEW S438-peter`; **HIGH**; open
+
+### g-schema-create-table-like-template-columns-not-declared — `CREATE TABLE assets (LIKE tmpl INCLUDING ALL)` copies `tenant_id` in Postgres, but the floor reads no columns from it
+
+<!-- @gap id=g-schema-create-table-like-template-columns-not-declared sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(isTableLevelConstraint — `LIKE x` is skipped as a constraint; columnsFromDdlBody) prov=review:S446-S239-review-of-#1209+empirical:PA-reproduced-by-compilation-on-the-fix-round-branch -->
+
+Same class as the RESOLVED `g-schema-no-column-list-heads-declare-nothing` (columns that live
+elsewhere), one level down — inside the column list. Repro: `CREATE TABLE tmpl (id INTEGER PRIMARY
+KEY, name TEXT, tenant_id TEXT)` then `CREATE TABLE assets (LIKE tmpl INCLUDING ALL)` (also
+`(extra TEXT, LIKE tmpl)`), query on `assets` → no diagnostic, tag=0, on SQLite and Postgres `db=`.
+**Not fixed in #1209:** `LIKE <word>` is indistinguishable from a column named `like` with an
+unquoted type (`like TEXT` — legal in SQLite, where LIKE falls back to an identifier), so rejecting
+it fail-closed needs a ruling: reject an unquoted `like` column-list item (quote the column to keep
+it), or resolve `LIKE tmpl` to `tmpl`'s declared columns. — `NEW S446-peter (S239 review of #1209)`; **MED**; open
+
+### g-schema-alter-table-add-tenant-id-ignored — `ALTER TABLE assets ADD COLUMN tenant_id …` in a `<schema>` is not read, so the table stays un-scoped
+
+<!-- @gap id=g-schema-alter-table-add-tenant-id-ignored sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(the harvest reads CREATE TABLE column lists only) prov=review:S446-S239-review-of-#1209+empirical:PA-reproduced-by-compilation-on-the-fix-round-branch -->
+
+Base-equal (unchanged by #1209). Repro: `CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT);`
+then `ALTER TABLE assets ADD COLUMN tenant_id TEXT;` in the same `<schema>`, query on `assets` →
+no diagnostic, tag=0, tenant floor inactive. Direction is bryan's: reject `ALTER TABLE` in a
+`<schema>` (schema-as-code declares end state, §39.1 "the developer never writes `ALTER TABLE` by
+hand") or fold its `ADD COLUMN` into the declaration. — `NEW S446-peter (S239 review of #1209)`; **MED**; open
 
 ### g-secdef-fn-body-ddl-false-positive — a qualified or unreadable `CREATE TABLE` inside a SECURITY-DEFINER `fn` `"""` body raises E-SCHEMA-012/013 although it is runtime plpgsql, not a declaration
 
@@ -531,7 +570,9 @@ on a SQLite program on base. — `NEW S438-peter`; **MED**; open
 
 ### g-schema-no-column-list-heads-declare-nothing — `CREATE TABLE t OF type` / `PARTITION OF parent` / `AS query` in a `<schema>` compile clean and declare no columns, so a `tenant_id` table reached that way is not tenant-scoped
 
-<!-- @gap id=g-schema-no-column-list-heads-declare-nothing sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(the harvest reads a column list only; readCreateTableHead's CREATE_TABLE_NAME_FOLLOWERS accepts OF / PARTITION OF / AS / WITH / ON / TABLESPACE / INHERITS heads without one) prov=review:S438-round-4-F3+empirical:reviewer-compiled-on-38ec0e14-and-base-identical -->
+<!-- @gap id=g-schema-no-column-list-heads-declare-nothing sev=MED status=resolved owner=bryan locus=compiler/src/schema-differ.js(the harvest reads a column list only; readCreateTableHead's CREATE_TABLE_NAME_FOLLOWERS accepts OF / PARTITION OF / AS / WITH / ON / TABLESPACE / INHERITS heads without one) prov=review:S438-round-4-F3+empirical:reviewer-compiled-on-38ec0e14-and-base-identical -->
+
+**⚑ RESOLVED S446 (branch `fix/schema-holes-fail-closed`) — bryan RULED S440 #15: REJECT (fail closed), not resolve.** A readable unqualified head followed by a clause instead of a column list (`AS`, `OF`, `PARTITION OF`, `USING`, `WITH`, `ON COMMIT`, `TABLESPACE`, `INHERITS`), an unclosed column list, or a column list followed by `INHERITS (parent)` is now **E-SCHEMA-014**. Trailing clauses after a column list (`WITHOUT ROWID`, `STRICT`, `PARTITION BY`, `WITH (…)`) are unaffected.
 
 **Pre-existing on base, unchanged by S438 (whose round 4 kept these heads ACCEPTED rather than
 rejecting them).** A raw head with no column list — a typed table `CREATE TABLE assets OF
@@ -546,7 +587,9 @@ the latter is a real schema-resolution feature. — `NEW S438-peter`; **MED**; o
 
 ### g-schema-dsl-qualified-table-head-silently-stripped — the DECLARATIVE `mydb.public.assets { … }` is accepted as `assets`, so `a.assets` + `b.assets` collapse and the second (with `tenant_id`) is silently dropped
 
-<!-- @gap id=g-schema-dsl-qualified-table-head-silently-stripped sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(parseSchemaBlock — the "advance one char and resume" recovery slides past `mydb.public.` to match `assets {`) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+<!-- @gap id=g-schema-dsl-qualified-table-head-silently-stripped sev=HIGH status=resolved owner=bryan locus=compiler/src/schema-differ.js(parseSchemaBlock — the "advance one char and resume" recovery slides past `mydb.public.` to match `assets {`) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+
+**⚑ RESOLVED S446 (branch `fix/schema-holes-fail-closed`) — NOT closed by E-SCHEMA-012 as of `8b87ce2e` (re-reproduced: `mydb.public.assets { … }` accepted as `assets`; `a.assets` + `b.assets` → tag=0, exit 0, no diagnostic).** `parseSchemaBlock` now records a head it read as the TAIL of a longer token; GCP1 reports a `.`-qualified one as **E-SCHEMA-012** and any other glued prefix (`données {` → `es`, `my-assets {`, `app$x {`) as **E-SCHEMA-013**, outside comments/literals. The table is still declared (no cascade). Both rows of the table below are now E-SCHEMA-012.
 
 **The DSL twin of the RESOLVED `g-tenant-floor-inert-for-a-two-qualifier-create-table`, found by the
 S438 bite-test; NOT changed by that fix (the S435 ruling names `CREATE TABLE`).** SPEC §39.2's grammar
@@ -18580,7 +18623,15 @@ Ruled to BUILD at S430 (P4). The bootstrap's host-module bridge.
 every later `compile` resolves against the source dir, opens the stub, and fails `E-PA-004` naming tables — not the path it
 opened. Two defects: the side-effect create + resolution mismatch, and a diagnostic that does not name the resolved path.
 
-<!-- @gap id=g-dev-creates-empty-db-stubs-that-break-later-compiles sev=HIGH status=open locus=compiler/src/commands/dev.js prov=adopter:flogence-S49 -->
+> **RESOLVED S447 (`docs/changes/s445-dev-db-side-file/` + `docs/changes/s447-dev-db-r5/`).** Rulings S445 item 6 + "a built server's data root; ownership is per declaring file": `db=` resolves against the DECLARING file in dev/compile; only a schema-declaring file owns and may create (prints "created new database <path>"); referencing handles open lazily and fail loudly naming the resolved path; a built server resolves project-root-relative paths against `SCRML_DATA_DIR ?? project root` (adapters set it); `scrml dev` ignores `SCRML_DATA_DIR`. Six S239 review rounds (r1 DO-NOT-LAND … r5b LAND-WITH-NITS, every finding reproduced). flogence must change `./flogence.db` → `../flogence.db` (src/) / `../../flogence.db` (src/ports/). Supersedes the ss19 #9 framing of [[g-db-src-compile-vs-runtime-path]]. Residuals → [[g-dev-db-data-root-residuals]].
+
+<!-- @gap id=g-dev-creates-empty-db-stubs-that-break-later-compiles sev=HIGH status=resolved locus=compiler/src/commands/dev.js+compiler/src/codegen/sqlite-file-target.ts prov=adopter:flogence-S49 -->
+
+### G-DEV-DB-DATA-ROOT-RESIDUALS — S447 r5b re-review residuals of the SQLite data-root arc (all LOW / NIT)
+
+<!-- @gap id=g-dev-db-data-root-residuals sev=LOW status=open locus=compiler/src/codegen/sqlite-file-target.ts(_scrml_sqlite_inside, _scrml_sqlite_owned)+compiler/src/commands/dev.js prov=review:S447-devdb-r5b-review -->
+Reviewer-executed on `1b474db20`. **LOW — a DANGLING symlink inside the data dir escapes containment:** `data/dangling.db -> out/target.db` with `SCRML_DATA_DIR=data` → realpath fails on the dangling link, the check falls back to the parent dir (inside), then SQLite follows the link and creates `out/target.db`. Needs write access to the data dir. Fix: `lstat` the target; a symlink whose realpath fails is refused. **NIT:** a symlink loop at `data/loop1/x.db` surfaces a raw `EEXIST` from mkdir instead of a scrml error. **NIT:** the R4-1 refusal text "…or set SCRML_DATA_DIR to a directory that contains it, then rebuild" reads as though changing SCRML_DATA_DIR needs a rebuild (it does not). **Noted, not built:** TOCTOU between `existsSync` and the create. **Pre-existing:** every full-suite run leaves orphaned generation-1 `scrml dev --__dev-child` processes (a restarted child outlives its killed parent) — compiler/src/commands/dev.js / the commands tests. **Unlisted §34 rows:** `W-DEPLOY-DB-OUTSIDE-DATA-ROOT`, `W-DEPLOY-DB-NO-PROJECT-ROOT`, `W-DEPLOY-DB-SHARED-PATH` (and the older `W-DEPLOY-001`) live only in §47.14 / build.js.
+
 
 ### G-EACH-ROW-STALE-AFTER-AN-AWAITED-SERVER-CALL — a cell reassigned after an async boundary repaints a `${}` but not a keyed `<each>` row
 
@@ -18879,8 +18930,8 @@ same compile also raises a spurious `E-DG-002` ("`@items` … never consumed") a
 (Whether a mutating `sort()` in a render expression should be legal at all is its own question — the pin waits for
 that.) found by: S432 adversarial review of the when-changes branch.
 
-### g-dev-server-binds-all-interfaces — `scrml dev` / `scrml serve` listen on every interface, so the dev server (and its compile-error overlay) is reachable from the LAN — `NEW S432-peter; MED; open — ROUTED to bryan (default-bind is a product decision)`
-<!-- @gap id=g-dev-server-binds-all-interfaces sev=MED status=open locus=compiler/src/commands/dev.js(buildServeConfig,runDevChildServer,the parent proxy Bun.serve),compiler/src/commands/serve.js — no `hostname` passed to Bun.serve prov=empirical:S432-redaction-dev-agent-netstat-0.0.0.0-LISTENING -->
+### g-dev-server-binds-all-interfaces — `scrml dev` / `scrml serve` listen on every interface, so the dev server (and its compile-error overlay) is reachable from the LAN — `NEW S432-peter; MED; RESOLVED S446 (hold/s432-dev-server-localhost-default landed via fix/s446-loopback-default on bryan's S439 ruling)`
+<!-- @gap id=g-dev-server-binds-all-interfaces sev=MED status=resolved locus=compiler/src/commands/dev.js(buildServeConfig,runDevChildServer,the parent proxy Bun.serve),compiler/src/commands/serve.js — no `hostname` passed to Bun.serve prov=empirical:S432-redaction-dev-agent-netstat-0.0.0.0-LISTENING -->
 
 No `Bun.serve` call in `dev.js` or `serve.js` passes `hostname`; on this machine `Bun.serve({port:0})` shows in `netstat`
 as `TCP 0.0.0.0:<port> LISTENING` (while `server.hostname` reports "localhost"). The compile-error overlay renders
@@ -18888,6 +18939,23 @@ diagnostics — which carried db connection secrets until `fix/s432-db-secret-re
 network. Not changed unilaterally: some workflows use LAN access deliberately (phone testing), so the default
 (`localhost` + an opt-in `--host`) is bryan's call; `dev.js` is also in his S430 footprint. Security-adjacent → P7
 criterion 3 once ruled. found by: S432 redaction dev agent while enumerating sinks.
+
+**RESOLVED (S432, gift-wrapped for bryan's ruling).** Every CLI listener now goes through
+`compiler/src/commands/listen.js` `listen(config, host)`, which requires an explicit host. `scrml dev` (parent
+proxy) and `scrml serve` default to loopback on BOTH families — `127.0.0.1` + `::1` on the same port, the `::1` twin
+best-effort (skipped silently without IPv6; one warning line if another process holds it). The `scrml dev` app
+CHILD always binds `127.0.0.1` only (only the parent proxy dials it, by IPv4 literal — pre-fix it too sat on
+`0.0.0.0` on an ephemeral port, un-proxied). `--host <addr>` / `--host=<addr>` opt in; bare `--host` = `0.0.0.0` +
+`::` (ipv6Only twin) and prints one "reachable from the network" line naming the LAN URLs. An unbindable host
+exits 1 naming the host and families tried (not Bun's "Is port 0 in use?" stack). Measured on Windows/Bun 1.3.14:
+`hostname:"localhost"` binds `[::1]` ONLY and `"127.0.0.1"` IPv4 only, hence the explicit pair; `::` is dual-stack
+by default so its pairing with `0.0.0.0` needs `ipv6Only:true`. Pinned by `compiler/tests/unit/cli-listen-host.test.js`
+(incl. a structural check that no other listener — `Bun.serve`/`Bun.listen` in any spelling, `createServer`, or an
+http/https/net/tls/http2/dgram import — exists in compiler/src, and an empirical LAN-address probe with a bare-`--host`
+control) + `compiler/tests/commands/dev-serve-bind-host.test.js` (the real CLIs).
+S446 landing (the CI gate on Linux caught it): `listen()` now refuses inet_aton numeric shorthand (`0`, `127.1`,
+`2130706433`, `0x7f.0.0.1`, `010.0.0.1`) before any bind, on every OS. Linux binds `--host 0` as 0.0.0.0 (every
+interface) while Windows refuses it, so a typo-like value could otherwise expose the server on one OS only.
 
 ### g-native-component-def-with-children-throws-at-boot — under `--parser=scrml-native`, a markup-valued component definition that interpolates `${children}` is emitted as boot-time code that evaluates `children`, so the client throws `ReferenceError: children is not defined` at load — `NEW S432-peter; MED; open`
 <!-- @gap id=g-native-component-def-with-children-throws-at-boot sev=MED status=open locus=searched:compiler/native-parser(the native lowering of a `const X = <markup>` component definition — emits the definition body as a lift)—not-traced prov=empirical:S432-dev-agent-happy-dom-default-vs-native-A-B-on-451296f3-and-4d888293 -->
@@ -21445,3 +21513,7 @@ Reviewer-executed (h2/h3/h4/h5 under `rev-progrole-work/`). Direction (PA): item
 ### g-bootstrap-bound-top-level-validated-scalar-ruling-owed — bootstrap: a BOUND top-level scalar with validators is refused E-VALIDATOR-DEAD; the PA reads S442 ruling (2) "validators follow the bind" as saying it should lower its attributes instead — ruling owed (dpa-058 B3)
 <!-- @gap id=g-bootstrap-bound-top-level-validated-scalar-ruling-owed sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml:1297(`fn topLevelValidatorsLower() -> boolean { return false }` — the one switch; consumed at :1269 and :8320) prov=ruling-owed:dpa-058-B3 -->
 **Reproduced on `464c9ab4d` (the current, deliberate behaviour).** `<let email:string="" req/>` with `<input bind:value=@email/>` → `["E-VALIDATOR-DEAD"]`. validators.test.js:226 pins this ("bound or not"). **The question for bryan:** S442 ruling (5) ("silently dead validators become errors") clearly covers an UNBOUND top-level scalar. For a BOUND one, the PA's reading of ruling (2) ("validators follow the bind") is that the validators are not dead: their HTML-native subset should land on the bound input, as a child field's does. If that reading is confirmed, the change is one line: `topLevelValidatorsLower()` returns `true`, and the bound case lowers while the unbound case stays E-VALIDATOR-DEAD. `@email.isValid` stays refused either way (§55.5 Edge A: no validity surface). Filed so the open ruling is tracked. It is not a defect until the ruling is made.
+
+### g-commands-dev-tests-leak-dev-child-servers — `compiler/tests/commands/dev-watcher-churn-starvation.test.js` and `dev-compile-throw-fail-closed.test.js` kill the `scrml dev` parent but not its `--__dev-child`; every full-suite run leaves ~3 bun servers listening (cwd a deleted temp dir)
+<!-- @gap id=g-commands-dev-tests-leak-dev-child-servers sev=MED status=open locus=compiler/tests/commands/dev-watcher-churn-starvation.test.js+compiler/tests/commands/dev-compile-throw-fail-closed.test.js prov=empirical:S445 -->
+PA-measured S445: 81 orphaned bun servers (~3 GB RAM) accumulated over ~a day of post-commit full runs + agent runs; two pre-commit gate runs failed on a 300-s "(unnamed)" hang until they were killed (by cwd `(deleted)` / `scrml-dev-*`). Fix: kill the process group (spawn detached + `process.kill(-pid)`) or have `scrml dev` forward SIGTERM to its child; assert no listener survives in an afterAll.
