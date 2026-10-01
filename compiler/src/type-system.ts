@@ -9234,7 +9234,18 @@ function annotateNodes(
     params: Array<{ name: string; type: ResolvedType }>;
     returnType: ResolvedType;
   }>();
-  const fnNamesDeclaredTwice = new Set<string>();
+  // S446 r5/r6 — names declared as a function more than once ANYWHERE in the
+  // file. `fnSignatures` is one by-name map (the last declaration collected
+  // wins), so for such a name it may describe a declaration other than the one
+  // a call resolves to; the call-argument pass refuses it (fail closed). Counted
+  // by a GENERIC walk over every key of every node — `collectFnErrorTypes`
+  // descends `body`/`children` only and misses declarations inside if/else
+  // blocks, match-arm blocks, if-chain branches, loop bodies, lambda bodies, ….
+  const fnNamesDeclaredTwice = countFnDeclaredTwice(
+    (fileAST.nodes as unknown[] | undefined)
+      ?? ((fileAST.ast as FileAST | undefined)?.nodes as unknown[] | undefined)
+      ?? [],
+  );
 
   // §14.8.8 (S175 — typed-SQL-row Tranche 3, T3c) — infer an OBJECT-LITERAL
   // return struct type for an UN-ANNOTATED function whose body returns an object
@@ -9381,7 +9392,6 @@ function annotateNodes(
           // (a nested `fn h` beside a top-level `fn h`) has ONE by-name entry
           // here, the last one collected — not necessarily the declaration a
           // given call resolves to. Recorded so the call-argument pass refuses it.
-          if (fnSignatures.has(n.name as string)) fnNamesDeclaredTwice.add(n.name as string);
           fnSignatures.set(n.name as string, { params: sigParams, returnType });
         } catch {
           // Defensive: never break the existing collectFnErrorTypes pass on
@@ -15836,6 +15846,36 @@ function inferBareVariantsInExpr(
  * `.Neg` in the set. Used only to keep `inferBareVariantsInExpr` from stamping
  * the whole-expression context onto a parameter position.
  */
+/**
+ * S446 r6 — every function name declared (`function-decl` node, any depth) more
+ * than once in `root`. Generic: descends EVERY own key of every object / array
+ * (a hand-rolled key list misses an if-chain branch, a match-arm block, a
+ * lambda body …), with a visited set for cycles; `span` is skipped (leaf data).
+ */
+function countFnDeclaredTwice(root: unknown): Set<string> {
+  const seenNames = new Set<string>();
+  const twice = new Set<string>();
+  const visited = new Set<unknown>();
+  const stack: unknown[] = [root];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node || typeof node !== "object" || visited.has(node)) continue;
+    visited.add(node);
+    if (Array.isArray(node)) { for (const el of node) stack.push(el); continue; }
+    const n = node as Record<string, unknown>;
+    if (n.kind === "function-decl" && typeof n.name === "string" && n.name.length > 0) {
+      if (seenNames.has(n.name)) twice.add(n.name);
+      else seenNames.add(n.name);
+    }
+    for (const key of Object.keys(n)) {
+      if (key === "span") continue;
+      const v = n[key];
+      if (v && typeof v === "object") stack.push(v);
+    }
+  }
+  return twice;
+}
+
 function collectValueSpineIdents(root: unknown): Set<unknown> {
   const out = new Set<unknown>();
   const visit = (node: unknown): void => {
