@@ -18,7 +18,7 @@
  * emit (a separate language question) — pinned below.
  */
 
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve, join } from "path";
 import { tmpdir } from "os";
@@ -67,6 +67,19 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+});
+
+// DOM-global hygiene (#1219): unregister happy-dom and put back the fetch /
+// EventSource this file stubs, so later files in the same `bun test` process
+// see Bun's natives.
+const _origFetch = Object.getOwnPropertyDescriptor(globalThis, "fetch");
+const _origEventSource = Object.getOwnPropertyDescriptor(globalThis, "EventSource");
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+  if (_origFetch) Object.defineProperty(globalThis, "fetch", _origFetch);
+  else delete globalThis.fetch;
+  if (_origEventSource) Object.defineProperty(globalThis, "EventSource", _origEventSource);
+  else delete globalThis.EventSource;
 });
 
 function mount(source) {

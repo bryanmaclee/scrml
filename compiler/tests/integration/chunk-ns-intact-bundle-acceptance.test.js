@@ -17,7 +17,7 @@
  *     WITHOUT `already been declared` (N3 IIFE isolation), under DISTINCT tokens.
  */
 
-import { describe, test, expect, beforeAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
 import { chunkCellKey, chunkNamespaceToken } from "../helpers/chunk-scope.js";
@@ -130,4 +130,11 @@ describe("BUG-6 intact-bundle acceptance — shipped chunk scope executes correc
     }
     expect(threw).toBeNull();
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

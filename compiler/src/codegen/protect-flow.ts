@@ -127,6 +127,26 @@ function isPseudoLabel(l: string): boolean {
   return l.startsWith("\u0000");
 }
 
+/**
+ * S447 round 7 — the property keys under which the LANGUAGE itself may call a
+ * stored function without the program naming the call (ECMAScript's own
+ * protocol, not a list of author shapes): a thenable's `then` (`await`, promise
+ * resolution, a server function's return), the coercion hooks `toString` /
+ * `valueOf` (templates, `+`, `String()`, property keys), `toJSON` (the
+ * serializer), `toLocaleString`, an iterator's `next` / `return` / `throw`, and
+ * `__proto__` (a literal that sets the prototype hands the new object every
+ * function of it). A STRING key cannot be aliased — the language looks up
+ * exactly these names. Every Symbol-keyed hook (`[Symbol.iterator]`,
+ * `[Symbol.toPrimitive]`, `[Symbol.asyncIterator]`, `[Symbol.hasInstance]`, …)
+ * is stored under a COMPUTED key, and any key the compiler cannot read counts
+ * as possibly one of these — fail closed (`null` below). Accessors (`get` /
+ * `set`) are invoked whatever their key.
+ */
+const LANGUAGE_INVOKED_KEYS = new Set(["then", "toString", "valueOf", "toJSON", "toLocaleString", "next", "return", "throw", "__proto__"]);
+function mayBeInvokedByLanguage(key: string | null): boolean {
+  return key === null || LANGUAGE_INVOKED_KEYS.has(key);
+}
+
 /** The compile-wide binding cell every free (global) name reads and writes (L3). */
 const GLOBAL_CELL = "\u0000global";
 
@@ -212,6 +232,20 @@ interface Taint {
    * and `String(Math.PI)` keys declassified (review, measured).
    */
   k?: number;
+  /**
+   * S447 round 7 — the function values the value may BE (as opposed to merely
+   * CONTAIN: `fns` includes every function reachable from it). UNDEFINED means
+   * "any of `fns`" (the fail-closed default — a field read may be any of its
+   * object's functions); a container built by the program (`containerOf`) is
+   * not a function, so its `own` is empty. Used to decide which functions a
+   * STORE puts under a key (`o[k] = store` stores an object, not its methods).
+   */
+  own?: Set<Closure>;
+}
+
+/** The functions the value may itself be (see `Taint.own`). */
+function ownOf(t: Taint): Set<Closure> {
+  return t.own ?? t.fns;
 }
 
 /** Constness bits of a combined value: the union of its parts' (S445 #4). */
@@ -289,6 +323,11 @@ function join(...ts: Taint[]): Taint {
     }
     if (t.k) out.k = (out.k ?? 0) | t.k;
   }
+  if (out.fns.size > 0 && ts.some((t) => t && t.own !== undefined)) {
+    const own = new Set<Closure>();
+    for (const t of ts) if (t) for (const f of ownOf(t)) own.add(f);
+    out.own = own;
+  }
   // `.length` of a join is whatever `.length` of ANY part reveals.
   if (ts.some((t) => t && t.len !== undefined)) {
     const len = new Map<string, string>();
@@ -309,7 +348,9 @@ function naked(t: Taint): Map<string, string> {
 /** The value, placed inside a fresh container (object / array literal slot). */
 function containerOf(t: Taint): Taint {
   // The container HOLDS the value — if it is an object, the container reaches it.
-  return { row: t.row ? copyRow(t.row) : null, scalar: new Map(), deep: naked(t), fns: new Set(t.fns), refs: new Set(refsOf(t)), ...(t.k ? { k: t.k } : {}) };
+  const c: Taint = { row: t.row ? copyRow(t.row) : null, scalar: new Map(), deep: naked(t), fns: new Set(t.fns), refs: new Set(refsOf(t)), ...(t.k ? { k: t.k } : {}) };
+  if (t.fns.size > 0) c.own = new Set(); // a container is not itself any of the functions it holds
+  return c;
 }
 
 /** An element / field of the value, when WHICH one is not statically known. */
@@ -337,7 +378,8 @@ function taintKey(t: Taint): string {
   const f = [...t.fns].map((c) => c.cid).sort((a, b) => a - b).join(",");
   const a = [...refsOf(t)].sort().join(",");
   const l = t.len ? [...t.len.keys()].sort().join(",") : "~";
-  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${f}#${a}#${l}#${t.k ?? 0}`;
+  const o = t.own ? [...t.own].map((c) => c.cid).sort((x, y) => x - y).join(",") : "~";
+  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${f}#${a}#${l}#${t.k ?? 0}#${o}`;
 }
 
 /** The protected part of a taint's key (no function values). */
@@ -431,8 +473,18 @@ const RUNTIME_SOURCE_CALLS: Record<string, Set<string>> = {
   random: new Set(["random", "randomInt"]),
   crypto: new Set(["generateToken", "generateUUID"]),
 };
+/**
+ * The stdlib module a specifier names — ONLY the compiler's own `scrml:NAME`
+ * specifier. The flow runs on the emitted server modules BEFORE the write phase
+ * rewrites `scrml:NAME` to the bundled `./_scrml/NAME.js` (api.js
+ * `rewriteStdlibImports`), so the compiler's stdlib always arrives here as
+ * `scrml:NAME`. S447 round 7: this also matched any `…/_scrml/NAME.js` path, so
+ * an author file at `./_scrml/auth.js` whose `verifyPassword` returned its
+ * argument was treated as the allowlisted deriver and served the hash (measured;
+ * the same held for a spoofed `crypto.js` `hmac` key source or `data.js` `pick`).
+ */
 function stdlibModuleOf(source: string): string | null {
-  const m = /(?:^scrml:|(?:^|\/)_scrml\/)([a-z]+)(?:\.js)?$/.exec(source);
+  const m = /^scrml:([a-z]+)$/.exec(source);
   return m ? m[1] : null;
 }
 function isStdlibDeriver(source: string, imported: string, node?: any, args?: Taint[]): boolean {
@@ -974,6 +1026,7 @@ class FlowAnalysis {
       if (node.type !== "ArrowFunctionExpression") fnNames.add("arguments");
       for (const p of node.params) this.patternNames(p, fnNames);
       const fnDecls: any[] = [];
+      this.fnOfNames.set(fnNames, node);
       const name = node.id?.name ?? "";
       this.statics.set(node, {
         node, mod, name, names: fnNames, decls: fnDecls, isGen: !!node.generator,
@@ -1465,6 +1518,10 @@ class FlowAnalysis {
         for (const d of node.declarations) {
           const v = d.init ? this.evalExpr(d.init, scope, fn) : clean();
           this.bindPattern(d.id, v, scope, fn);
+          if (d.id?.type === "Identifier" && node.kind === "const" && this.isSqlConstruction(d.init, scope)) {
+            const s = this.resolve(d.id.name, scope);
+            if (s) this.sqlClients.add(`${s.id}:${d.id.name}`);
+          }
         }
         return;
       case "FunctionDeclaration":
@@ -1513,7 +1570,8 @@ class FlowAnalysis {
       case "ForOfStatement":
       case "ForInStatement": {
         const right = this.evalExpr(node.right, scope, fn);
-        const el = node.type === "ForOfStatement" ? elemOf(right) : clean();
+        // `for await` resolves each element as `await` does (round 7).
+        const el = node.type === "ForOfStatement" ? (node.await ? this.settle(elemOf(right)) : elemOf(right)) : clean();
         if (node.left.type === "VariableDeclaration") {
           const id = node.left.declarations[0].id;
           this.bindPattern(id, el, scope, fn);
@@ -1668,12 +1726,13 @@ class FlowAnalysis {
         const freeRoot = !!root && ((root.type === "Identifier" && !this.resolve(root.name, scope)) || root.type === "MetaProperty");
         const propName = p.computed ? staticKey(p.property) : (p.property?.name ?? null);
         const globalName = propName ?? staticNameOf(p.object);
-        if (t.fns.size > 0) {
-          // `o.f = function …` runs with `this` = o (round 6e) — and a `toJSON`
-          // (or a key the compiler cannot read, which may be `toJSON`) is INVOKED
-          // by the serializer: what it returns is part of o.
-          this.recordThis(t.fns, objT);
-          if (propName === "toJSON" || propName === null) t = join(t, containerOf(this.applyFns(t.fns, [], undefined, p, fn)));
+        if (ownOf(t).size > 0) {
+          // `o.f = function …` runs with `this` = o, and — under a key the
+          // language may call it by (a coercion hook, an iterator, a thenable,
+          // `toJSON`, or a key the compiler cannot read) — is analysed as so
+          // invoked: what it returns is part of o (S447 round 7; round 6e did
+          // this for `toJSON` / an unreadable key only).
+          t = join(t, this.storeFns(ownOf(t), objT, p, fn, p.computed ? this.literalKey(p.property, scope) : propName));
         }
         if (freeRoot && globalName !== null && t.fns.size > 0) {
           this.recordGlobalFns(globalName, t.fns);
@@ -1818,15 +1877,39 @@ class FlowAnalysis {
         return r;
       }
       case "TaggedTemplateExpression": {
+        // A tagged template IS a call: `tag(strings, ...values)`. S447 round 7:
+        // the values were bound from the FIRST parameter on, so `(s, v) => v`
+        // saw a clean `v` (measured: `` tag`${u.passwordHash}` `` and a tag
+        // reached through a method served the hash). The first argument is the
+        // literal strings array; a member tag runs with `this` = its object.
+        const tagNode = node.tag?.type === "ChainExpression" ? node.tag.expression : node.tag;
         const tagT = this.evalExpr(node.tag, scope, fn);
-        const args = node.quasi.expressions.map((e: any) => this.evalExpr(e, scope, fn));
-        if (this.hasCallable(tagT)) return this.applyFns(tagT.fns, args, undefined, node, fn);
-        const path = this.globalPath(node.tag, scope);
-        if (path === "String.raw") return tainted(args, this.site(node, fn));
-        // `_scrml_sql`…`` / `tx`…`` — a query. Its interpolations are bound
-        // parameters (server-side use), and its result is a row read from the
-        // database: a DB round trip is outside the egress guarantee (F5).
-        return { ...clean(), k: 2 };
+        const recv = tagNode?.type === "MemberExpression" ? this.evalExpr(tagNode.object, scope, fn) : null;
+        const values = node.quasi.expressions.map((e: any) => this.evalExpr(e, scope, fn));
+        const strings: Taint = { ...clean(), k: 1, len: new Map() };
+        const tagPath = this.globalPath(node.tag, scope);
+        if (tagPath !== null || this.isGlobalValue(tagT)) {
+          // A GLOBAL tag (`String.raw`…``) is a platform function — plus any
+          // function stored in the global heap under a name on its path.
+          const gf = this.carriesProtected(values) ? this.globalFnsFor(tagPath !== null ? tagPath.split(".") : []) : new Set<Closure>();
+          const viaGlobal = gf.size > 0 ? this.applyFns(gf, [strings, ...values], undefined, node, fn) : clean();
+          return join(viaGlobal, this.unknownCall(tagPath, [strings, ...values], node, fn));
+        }
+        if (this.hasCallable(tagT)) {
+          if (recv) this.recordThis(tagT.fns, recv);
+          return this.applyFns(tagT.fns, [strings, ...values], undefined, node, fn);
+        }
+        // `_scrml_sql`…`` / `tx`…`` — the compiler's own SQL client: a query. Its
+        // interpolations are bound parameters (server-side use), and its result is
+        // a row read from the database: a DB round trip is outside the egress
+        // guarantee (F5).
+        if (this.isSqlClient(tagNode, scope)) return { ...clean(), k: 2 };
+        // Any other tag the analysis holds no function for — `String.raw`, a
+        // function a host call made (`String.raw.bind(String)`), a parameter no
+        // caller shows — is code the compiler cannot see into: FAIL CLOSED.
+        // (It used to be assumed to be a query, and a host-made tag served the
+        // hash — round 7, measured.)
+        return this.unknownCall(null, [strings, ...values], node, fn);
       }
       case "ArrayExpression": {
         let r = clean();
@@ -1843,29 +1926,43 @@ class FlowAnalysis {
       }
       case "ObjectExpression": {
         let r = clean();
-        const methods: Array<{ fns: Set<Closure>; invoked: boolean }> = [];
+        // The functions this literal stores, and under which key (null = a key
+        // the compiler cannot read, or one a spread copied in).
+        const stored: Array<{ fns: Set<Closure>; key: string | null; accessor: boolean; copy?: true }> = [];
         for (const pr of node.properties) {
           if (pr.type === "SpreadElement") {
             // `{...row}` copies the enumerable Symbol descriptor: still a row.
-            r = join(r, containerOf(this.evalExpr(pr.argument, scope, fn)));
+            const v = this.evalExpr(pr.argument, scope, fn);
+            r = join(r, containerOf(v));
+            if (v.fns.size > 0) stored.push({ fns: v.fns, key: null, accessor: false, copy: true });
             continue;
           }
           // A protected value used as a KEY is part of the container too —
-          // `{ [h]: 1 }` serializes as `{"SECRET":1}` (S441 round 3, N1).
+          // `{ [h]: 1 }` serializes as `{"SECRET":1}` (S441 round 3, N1) — and a
+          // key OBJECT is coerced to a property key by its own `toString` (its
+          // hooks' results are part of it: see `storeFns`).
           if (pr.computed) r = join(r, containerOf(keyOnly(this.evalExpr(pr.key, scope, fn))));
           const v = this.evalExpr(pr.value, scope, fn);
           r = join(r, containerOf(v));
-          const keyName = pr.key?.type === "Identifier" ? pr.key.name : staticKey(pr.key);
-          if (v.fns.size > 0) methods.push({ fns: v.fns, invoked: pr.kind === "get" || pr.kind === "set" || keyName === "toJSON" });
+          // Only a function the property IS is stored under its key — a nested
+          // object's functions belong to that object (`ownOf`).
+          if (ownOf(v).size > 0) {
+            const key = pr.computed ? this.literalKey(pr.key, scope) : (pr.key?.type === "Identifier" ? pr.key.name : staticKey(pr.key));
+            stored.push({ fns: ownOf(v), key, accessor: pr.kind === "get" || pr.kind === "set" });
+          }
         }
-        // S443 round 6e — a function stored on this object runs with `this` =
-        // the object: `{ ...u, toJSON() { return { pw: this.passwordHash } } }`.
-        for (const m of methods) this.recordThis(m.fns, r);
-        // A getter, or a `toJSON` method, is INVOKED by `JSON.stringify` at the
-        // sink — what it returns is what ships.
-        let invokedRet = clean();
-        for (const m of methods) if (m.invoked) invokedRet = join(invokedRet, this.applyFns(m.fns, [], undefined, node, fn));
-        return methods.some((m) => m.invoked) ? join(r, containerOf(invokedRet)) : r;
+        if (stored.length === 0) return r;
+        // S447 round 7 — an object holding functions is an object their `this`
+        // can name: it gets an allocation cell, so a write through `this`
+        // (`{ h: "", set(r) { this.h = r.passwordHash } }`) lands in it; and a
+        // function it stores where the language may call it (a protocol key, a
+        // computed key, an accessor, a spread-in key) is analysed as so invoked,
+        // with `this` = the object (S443 round 6e: getters and `toJSON` only).
+        const cell = this.allocCell("obj", node);
+        r.refs = new Set([...refsOf(r), cell]);
+        let gained = clean();
+        for (const s of stored) gained = join(gained, s.copy ? this.copyFns(s.fns, r, node, fn) : this.storeFns(s.fns, r, node, fn, s.key, s.accessor));
+        return this.withCellContents(join(r, gained));
       }
       case "FunctionExpression":
       case "ArrowFunctionExpression":
@@ -1900,6 +1997,23 @@ class FlowAnalysis {
       case "BinaryExpression": {
         const l = this.evalExpr(node.left, scope, fn);
         const rr = this.evalExpr(node.right, scope, fn);
+        // `x instanceof C` CALLS `C[Symbol.hasInstance](x)` — a function the
+        // right operand holds receives the LEFT operand (round 7, measured: a
+        // `hasInstance` that copied `x.passwordHash` out served it). The result
+        // is still a boolean; the call's effects are what matter.
+        if (node.operator === "instanceof" && rr.fns.size > 0) {
+          // A GLOBAL right operand (`x instanceof Response`) carries whatever
+          // anything ever stored in the global heap: only the functions stored
+          // under a name on its path are candidates (see `globalFnsByName`).
+          const gpath = this.globalPath(node.right, scope);
+          const hooks = gpath !== null || this.isGlobalValue(rr)
+            ? (this.carriesProtected([l]) ? this.globalFnsFor(gpath !== null ? gpath.split(".") : []) : new Set<Closure>())
+            : rr.fns;
+          if (hooks.size > 0) {
+            this.recordThis(hooks, rr);
+            this.applyFns(hooks, [l], undefined, node, fn);
+          }
+        }
         // Comparisons / relational / membership operators yield a boolean of
         // independent identity — DERIVED.
         if (DERIVED_OPERATORS.has(node.operator)) return clean();
@@ -1944,8 +2058,14 @@ class FlowAnalysis {
         for (const e of node.expressions) last = this.evalExpr(e, scope, fn);
         return last;
       }
-      case "AwaitExpression":
-        return this.evalExpr(node.argument, scope, fn);
+      case "AwaitExpression": {
+        // S447 round 7 — `await v` RESOLVES a thenable: it calls `v.then(resolve,
+        // reject)` and evaluates to what `then` passes to `resolve`. Every server
+        // function's body runs as `await (async () => { … })()`, so a server
+        // function that RETURNS `{ then: (res) => res(u.passwordHash) }` shipped
+        // the hash (measured). See `settle`.
+        return this.settle(this.evalExpr(node.argument, scope, fn));
+      }
       case "YieldExpression": {
         const v = node.argument ? this.evalExpr(node.argument, scope, fn) : clean();
         this.addYield(fn, node.delegate ? elemOf(v) : v);
@@ -2045,8 +2165,16 @@ class FlowAnalysis {
    * unless the callee is an allowlisted DERIVER (a one-way digest / boolean).
    */
   private hostCall(host: { source: string; imported: string }, args: Taint[], node: any, fn: Instance | null): Taint {
-    const cb = this.opaqueCallbacks(null, args, node, fn);
+    // An allowlisted stdlib deriver is the compiler's own code, and it never
+    // calls a function argument: it is not handed to the opaque-callback
+    // over-approximation (a coercion hook on an argument is covered where the
+    // hook was stored — `storeFns`). Round 7: applying every function the
+    // field-insensitive model believes `passwordArg` might be (examples/23's
+    // request body aliases the request, which holds the session object) with the
+    // hash, inside `verifyPassword`, wrote the hash into the session through
+    // `this` — the round-6e false positive on the login.
     if (isStdlibDeriver(host.source, host.imported, node, args)) return clean();
+    const cb = this.opaqueCallbacks(null, args, node, fn);
     const pm = this.pickOmit(host, args, node, fn);
     if (pm) return join(pm, cb);
     // S445 #4 (round 6d): a host call is positive runtime evidence ONLY when it
@@ -2071,7 +2199,7 @@ class FlowAnalysis {
    * does for `pick(u, ["id", "name"])`. A non-literal key list fails closed.
    */
   private pickOmit(host: { source: string; imported: string }, args: Taint[], node: any, fn: Instance | null): Taint | null {
-    if (!/(?:^scrml:|(?:^|\/)_scrml\/)data(?:\.js)?$/.test(host.source)) return null;
+    if (stdlibModuleOf(host.source) !== "data") return null;
     if (host.imported !== "pick" && host.imported !== "omit") return null;
     const keysNode = node?.arguments?.[1];
     if (!keysNode || keysNode.type !== "ArrayExpression") return null;
@@ -2186,8 +2314,8 @@ class FlowAnalysis {
         // redefinition by an unreadable key may HIDE a column marker (a
         // non-enumerable marker is dropped by the next spread) — L4.
         const desc = args[2] ?? clean();
-        this.recordThis(desc.fns, args[0] ?? clean()); // a getter / value function runs with `this` = the target (6e)
-        const got = this.hasCallable(desc) ? this.applyFns(desc.fns, [], undefined, node, fn) : clean();
+        // A getter / setter / value function runs with `this` = the target (6e, round 7).
+        const got = this.storeFns(desc.fns, args[0] ?? clean(), node, fn, this.literalKey(node.arguments[1], scope), true);
         const written = containerOf(join(desc, got, keyOnly(args[1] ?? clean())));
         this.writeThrough(node.arguments[0], args[0] ?? clean(), written, scope);
         if (this.literalKey(node.arguments[1], scope) === null) this.markerRemoved(node.arguments[0], args[0] ?? clean(), node, fn, scope);
@@ -2197,10 +2325,12 @@ class FlowAnalysis {
         // Keys and values of the second argument (or the key + value) are written
         // into the target; a redefinition / removal by an unreadable key may
         // drop a column marker (L4). A function among them runs with `this` = the target (6e).
-        this.recordThis(path === "Reflect.set" ? (args[2] ?? clean()).fns : (args[1] ?? clean()).fns, args[0] ?? clean());
+        const got = path === "Reflect.set"
+          ? this.storeFns(ownOf(args[2] ?? clean()), args[0] ?? clean(), node, fn, this.literalKey(node.arguments[1], scope))
+          : this.storeFns((args[1] ?? clean()).fns, args[0] ?? clean(), node, fn, null, true);
         const written = path === "Object.defineProperties"
-          ? containerOf(join(args[1] ?? clean(), ...(this.hasCallable(args[1] ?? clean()) ? [this.applyFns(args[1].fns, [], undefined, node, fn)] : [])))
-          : containerOf(join(keyOnly(args[1] ?? clean()), args[2] ?? clean()));
+          ? containerOf(join(args[1] ?? clean(), got))
+          : containerOf(join(keyOnly(args[1] ?? clean()), args[2] ?? clean(), got));
         this.writeThrough(node.arguments[0], args[0] ?? clean(), written, scope);
         if (path === "Object.defineProperties" || (path === "Reflect.deleteProperty" && this.literalKey(node.arguments[1], scope) === null)) {
           this.markerRemoved(node.arguments[0], args[0] ?? clean(), node, fn, scope);
@@ -2224,12 +2354,23 @@ class FlowAnalysis {
       const sinkArg = method === "publish" ? 1 : (method === "enqueue" || method === "send") ? 0 : -1;
       if (sinkArg >= 0) this.sink(args[sinkArg] ?? clean(), fn, "serializer");
 
+      // `res.call(x, h)` / `res.apply(x, [h])` on a parameter: what it is handed.
+      if (method === "call" && args.length > 1) this.recordParamCall(m.object, join(...args.slice(1)), scope);
+      if (method === "apply" && args[1]) this.recordParamCall(m.object, elemOf(args[1]), scope);
       if ((method === "call" || method === "apply") && this.hasCallable(recv)) {
+        // The first argument IS `this` (round 7: `stash.call(u)` writing `this.x`).
+        this.recordThis(recv.fns, args[0] ?? clean());
         if (method === "call") return this.applyFns(recv.fns, args.slice(1), undefined, node, fn);
         // `f.apply(this, list)`: every parameter may receive any list element.
         return this.applyFns(recv.fns, [], elemOf(args[1] ?? clean()), node, fn);
       }
-      if (method === "bind" && this.hasCallable(recv)) return { ...clean(), fns: new Set(recv.fns) };
+      if (method === "bind" && this.hasCallable(recv)) {
+        // The bound function runs with `this` = the first argument, and the rest
+        // are its leading arguments (`f.bind(o, h)` is `f(h, …)`).
+        this.recordThis(recv.fns, args[0] ?? clean());
+        if (args.length > 1) this.applyFns(recv.fns, args.slice(1), undefined, node, fn);
+        return { ...clean(), fns: new Set(recv.fns) };
+      }
 
       // `row.reveal("col")` left UNLOWERED — the scrml declassification written
       // inside a `_{}` foreign block. Honour it as a reveal (at runtime a plain
@@ -2244,19 +2385,14 @@ class FlowAnalysis {
       }
 
       if (method !== null && SQL_METHODS.has(method)) return clean();
-      if (method !== null && CALLBACK_METHODS.has(method)) return this.callbackMethod(method, recv, args, node, fn);
-
-      if (method !== null && MUTATING_METHODS.has(method)) {
-        // `m.set(k, v)` stores the KEY too (N1).
-        const written = method === "set" ? join(keyOnly(args[0] ?? clean()), args[1] ?? clean()) : method === "splice" ? join(...args.slice(2)) : join(...args);
-        this.writeThrough(m.object, recv, containerOf(written), scope);
-        const cbm = this.opaqueCallbacks(path === null ? recv : dataOnly(recv), args, node, fn); // `store.update(fn)` calls it
-        return method === "push" || method === "unshift" ? cbm : join(recv, containerOf(written), cbm);
+      // `client.begin((tx) => …)` — `tx` is the client's transaction handle.
+      if (method === "begin" && this.isSqlClient(m.object, scope)) {
+        const cbNode = node.arguments[0];
+        if (isFnNode(cbNode) && cbNode.params[0]?.type === "Identifier") this.sqlParams.set(cbNode, cbNode.params[0].name);
       }
       // A method stored in an object the compile built (`api.f(x)`), or a
       // function value reached through a host namespace.
       const viaField = this.memberRead(recv, method, method === null, node, fn);
-      let r = clean();
       // A method reached from the GLOBAL heap (`Math.abs(…)`, `process.env.x.trim()`,
       // `const O = Object; O.keys(…)`) is a platform API — unless a function was
       // stored in a global under a name on its path (`globalThis.clamp(…)`), which
@@ -2264,11 +2400,38 @@ class FlowAnalysis {
       // the result. See `globalFnsByName`.
       const recvGlobal = path !== null || this.isGlobalValue(recv);
       const gParts = path !== null ? path.split(".") : (method !== null ? [method] : []);
+      // S447 round 7 — a function the compile stored on the receiver is CALLED,
+      // with `this` = the receiver, WHATEVER its name: a user method named like a
+      // built-in (`o.set(u)`, `o.map(f)`, `o.get(k)`) used to take the built-in's
+      // model only, and `o.set = function (r) { this.h = r.passwordHash };
+      // o.set(u); return o` served the hash (measured). The built-in model below
+      // still applies on top (the receiver may be a real Map / array).
+      let own = clean();
+      if (!recvGlobal && this.hasCallable(viaField)) {
+        // `new o.F(…)` constructs; `o.m(…)` runs with `this` = the receiver.
+        if (node.type === "NewExpression") own = this.construct(viaField.fns, args, node, fn);
+        else {
+          this.recordThis(viaField.fns, recv);
+          own = this.applyFns(viaField.fns, args, undefined, node, fn);
+        }
+      }
+
+      if (method !== null && CALLBACK_METHODS.has(method)) return join(own, this.callbackMethod(method, recv, args, node, fn));
+
+      if (method !== null && MUTATING_METHODS.has(method)) {
+        // `m.set(k, v)` stores the KEY too (N1).
+        const written = method === "set" ? join(keyOnly(args[0] ?? clean()), args[1] ?? clean()) : method === "splice" ? join(...args.slice(2)) : join(...args);
+        this.writeThrough(m.object, recv, containerOf(written), scope);
+        const cbm = this.opaqueCallbacks(path === null ? recv : dataOnly(recv), args, node, fn); // `store.update(fn)` calls it
+        return method === "push" || method === "unshift" ? join(own, cbm) : join(own, recv, containerOf(written), cbm);
+      }
+      let r = own;
       if (recvGlobal) {
         const gf = this.globalFnsFor(gParts);
-        if (gf.size > 0 && this.carriesProtected(args)) r = join(r, this.applyFns(gf, args, undefined, node, fn));
-      } else if (this.hasCallable(viaField)) {
-        r = join(r, this.applyFns(viaField.fns, args, undefined, node, fn));
+        if (gf.size > 0 && this.carriesProtected(args)) {
+          this.recordThis(gf, recv);
+          r = join(r, this.applyFns(gf, args, undefined, node, fn));
+        }
       }
       // L1 — a method the analysis has no model for may call any function it is
       // handed (a compile-defined method is walked exactly instead, above).
@@ -2325,6 +2488,7 @@ class FlowAnalysis {
 
     // --- plain calls -------------------------------------------------------------
     const ct = this.evalExpr(callee, scope, fn);
+    if (callee.type === "Identifier" && args.length > 0) this.recordParamCall(callee, join(...args), scope);
     const path = this.globalPath(callee, scope);
     // A GLOBAL callee may be a function something stored in the global heap
     // (L3) — applied — but it is also the platform built-in of that name, which
@@ -2333,7 +2497,9 @@ class FlowAnalysis {
     const viaGlobal = gfPlain !== null && gfPlain.size > 0 && this.carriesProtected(args)
       ? this.applyFns(gfPlain, args, undefined, node, fn)
       : null;
-    if (path === null && this.hasCallable(ct)) return this.applyFns(ct.fns, args, undefined, node, fn);
+    if (path === null && this.hasCallable(ct)) {
+      return node.type === "NewExpression" ? this.construct(ct.fns, args, node, fn) : this.applyFns(ct.fns, args, undefined, node, fn);
+    }
     if (viaGlobal) return join(viaGlobal, this.evalGlobalCall(path!, node, args, fn));
     return this.evalGlobalCall(path, node, args, fn);
   }
@@ -2383,9 +2549,17 @@ class FlowAnalysis {
    */
   private opaqueCallbacks(recv: Taint | null, args: Taint[], node: any, fn: Instance | null): Taint {
     const fns = new Set<Closure>();
-    for (const a of args) for (const f of a.fns) fns.add(f);
+    // A HOST function handed to a host call is not re-applied: what it could
+    // return is already the outer call's fail-closed result (every protected
+    // label of the same values), and re-applying it recursed without bound —
+    // `import { a, b } from "lib"; a(b)` overflowed the stack (round 7, measured
+    // on base: the compile crashed).
+    for (const a of args) for (const f of a.fns) if (!f.host) fns.add(f);
     if (fns.size === 0) return clean();
     const all = join(...(recv ? [recv] : []), ...args);
+    // Code the compiler has no model for may call them with any `this` it holds
+    // (an array method's `thisArg`, `Reflect.apply(f, o, …)`) — round 7.
+    this.recordThis(fns, all);
     const every = everything(all, `${this.site(node, fn)} — handed to a callback of code the compiler has no model for`);
     const param: Taint = {
       row: all.row ? copyRow(all.row) : null,
@@ -2409,27 +2583,204 @@ class FlowAnalysis {
    * object a function was ever stored on joins into its `this` (fail closed).
    */
   private thisOf = new Map<any, Taint>();
+  /**
+   * S447 round 7 — `this` is the RECEIVER. Every route by which a function can
+   * be handed a receiver records it here, per function node (context-insensitive,
+   * fail closed — the union of every receiver it may run with):
+   *   - stored on an object (`o.f = function …`, an object-literal method /
+   *     accessor, a `defineProperty` descriptor, `Object.assign`) — see `storeFns`;
+   *   - a method call `recv.m(…)` — the receiver of the call;
+   *   - `f.call(x, …)`, `f.apply(x, …)`, `f.bind(x)` — `x`;
+   *   - an array callback's `thisArg` (`rows.forEach(fn, x)`);
+   *   - any invocation by code the compiler has no model for (a host / platform
+   *     callee may pass any value it holds as `this`) — see `opaqueCallbacks`;
+   *   - `new F(…)` — the fresh object (an allocation cell) — see `construct`.
+   * The recorded value KEEPS its alias cells (and its function values), so a READ
+   * through `this` sees everything written into the receiver, and a WRITE through
+   * `this` (`this.x = h`) lands in the receiver's alias class exactly as `o.x = h`
+   * does. It never UNITES classes: `this` is not a binding, so nothing is merged —
+   * the round-6e attempt that aliased `this` to its object unified the compiler's
+   * own session object with every protected value (a false E-PROTECT-006 on
+   * examples/23's login). Round 6e modelled reads only; measured at round 7,
+   * `u.stash = function () { this.x = this.passwordHash }; u.stash(); return u` and
+   * `o.set = function (r) { this.h = r.passwordHash }; o.set(u); return o` served
+   * the hash through the response, `/__mountHydrate` and the SSR state script.
+   */
   private recordThis(fns: Set<Closure>, obj: Taint): void {
-    const data = dataOnly(obj);
-    // Data only — no alias cells: a READ through `this` sees what the object
-    // carries; a WRITE through `this` is not modelled (it lands nowhere, as it did
-    // before round 6e). Aliasing `this` to its object made the compiler's own
-    // session object (whose methods run on every opaque-call over-approximation)
-    // collect every protected value in the compile — a false E-PROTECT-006 on
-    // examples/23's login. Disclosed in g-protect-egress-round-7-residuals.
+    if (fns.size === 0) return;
+    let data: Taint | null = null;
+    let key = "";
     for (const c of fns) {
       if (!c.node) continue;
-      const prev = this.thisOf.get(c.node) ?? clean();
-      const next = join(prev, data);
-      if (taintKey(next) !== taintKey(prev)) { this.thisOf.set(c.node, next); this.changed = true; }
+      // An arrow has no `this` of its own (it reads its enclosing function's).
+      if (c.node.type === "ArrowFunctionExpression") continue;
+      if (data === null) {
+        data = { ...dataOnly(obj), fns: new Set(obj.fns) };
+        if (obj.refs && obj.refs.size > 0) data.refs = new Set(obj.refs);
+        key = taintKey(data);
+      }
+      // Each distinct receiver is recorded once per function; the union is
+      // formed when `this` is read (`thisTaint`).
+      let seen = this.thisSeen.get(c.node);
+      if (!seen) { seen = new Map(); this.thisSeen.set(c.node, seen); }
+      if (seen.has(key)) continue;
+      seen.set(key, data);
+      this.thisOf.delete(c.node);
+      this.changed = true;
     }
   }
+  /** Every distinct receiver recorded per function node (key -> value). */
+  private thisSeen = new Map<any, Map<string, Taint>>();
   /** `this` inside the walked function (an arrow's is its enclosing function's). */
   private thisTaint(fn: Instance | null): Taint {
     let node = fn?.stat.node ?? null;
     while (node && node.type === "ArrowFunctionExpression") node = this.fnParent.get(node) ?? null;
-    const t = node ? this.thisOf.get(node) : undefined;
-    return t ? { ...t, refs: t.refs ? new Set(t.refs) : undefined } : clean();
+    if (!node) return clean();
+    let t = this.thisOf.get(node);
+    if (!t) {
+      const seen = this.thisSeen.get(node);
+      if (!seen) return clean();
+      t = join(...seen.values());
+      this.thisOf.set(node, t);
+    }
+    return this.withCellContents(t);
+  }
+
+  /** `t` joined with everything written into the alias classes it may be (a read of the object). */
+  private withCellContents(t: Taint): Taint {
+    let r: Taint = { ...t, refs: t.refs ? new Set(t.refs) : undefined };
+    for (const k of refsOf(t)) {
+      const w = this.classWrites.get(this.find(k));
+      if (w) r = join(r, w);
+    }
+    return r;
+  }
+
+  /** An allocation-site alias cell (an object the program creates at `node`). */
+  private allocCell(kind: string, node: any): string {
+    return `\u0000${kind}:${this.curMod!.idx}:${node.start}`;
+  }
+
+  /**
+   * S447 round 7 — a function STORED ON AN OBJECT may be invoked by the LANGUAGE,
+   * with `this` = the object, wherever the object is used: a coercion hook
+   * (`toString`, `valueOf`, `[Symbol.toPrimitive]` — a template, `+`, `String()`,
+   * a computed key), an iterator (`[Symbol.iterator]`, and the `next` of the
+   * iterator it returns — spread, `for…of`, destructuring, `yield*`), an
+   * accessor (a getter on read or spread, a setter on write), `toJSON` (the
+   * serializer). The rule is the mechanism, not a list of shapes: a function
+   * stored where the language may call it — under a key in
+   * `LANGUAGE_INVOKED_KEYS`, as an accessor, or under a key the compiler cannot
+   * read (every Symbol hook is a computed key; aliasing `Symbol` cannot escape
+   * this) — is analysed as so invoked: `this` = the object, its parameters
+   * receive everything the object holds (whatever is written into it — what a
+   * setter is handed), and what it returns is part of the object. A coercion,
+   * iteration or spread of the object therefore yields its hooks' results
+   * through the ordinary container rules. Every stored function, hook or not,
+   * gets the object as a `this` (`recordThis`). A thenable's `then` is resolved
+   * where the language resolves it — `settle`. Measured before round 7
+   * (served): `` `${{ toString: () => h }}` ``, `o + 0` with a `valueOf`,
+   * `[...{ [Symbol.iterator]: function* () { yield h } }]`, `for…of` and
+   * `const [a] = o` over it each shipped the value.
+   *
+   * Returns what the object gains (the hooks' returns, as contents).
+   */
+  private storeFns(fns: Set<Closure>, obj: Taint, node: any, fn: Instance | null, key: string | null, accessor = false): Taint {
+    if (fns.size === 0) return clean();
+    this.recordThis(fns, obj);
+    if (key === null || key === "then") this.addAll(this.thenFns, fns);
+    if (!accessor && !mayBeInvokedByLanguage(key)) return clean();
+    this.addAll(this.hookFns, fns);
+    return this.invokeHooks(fns, obj, node, fn);
+  }
+
+  /**
+   * A COPY of an object's properties (`{ ...src }`, `Object.assign(o, src)`)
+   * keeps each function under the key it had: it adds no new hook, but every
+   * hook it copies now runs with `this` = the copy (`{ ...proto, secret: h }`
+   * whose `toString` reads `this.secret`).
+   */
+  private copyFns(fns: Set<Closure>, obj: Taint, node: any, fn: Instance | null): Taint {
+    const hooks = new Set<Closure>();
+    for (const c of fns) if (this.hookFns.has(c)) hooks.add(c);
+    if (hooks.size === 0) return clean();
+    this.recordThis(hooks, obj);
+    return this.invokeHooks(hooks, obj, node, fn);
+  }
+
+  /** Invoke `hooks` as the language would, with `this` = `obj`: their returns are part of `obj`. */
+  private invokeHooks(hooks: Set<Closure>, obj: Taint, node: any, fn: Instance | null): Taint {
+    const param = dataOnly(this.withCellContents(obj));
+    return containerOf(dataOnly(this.applyFns(hooks, [], param, node, fn)));
+  }
+
+  private addAll(into: Set<Closure>, fns: Set<Closure>): void {
+    for (const c of fns) if (!into.has(c)) { into.add(c); this.changed = true; }
+  }
+
+  /** Functions stored where the language may invoke them (see `LANGUAGE_INVOKED_KEYS`). */
+  private hookFns = new Set<Closure>();
+
+  /**
+   * What each function passes to calls of its own PARAMETERS (per function
+   * node): for a thenable's `then(resolve, reject)` that is exactly what the
+   * `await` evaluates to. Recorded where the call is written (`res(h)`, an
+   * inner arrow calling it, `res.call(…)`), so no stand-in function value is
+   * threaded through the program — one per `await` site was measured to spread
+   * through examples/23's session object and not finish in 100 s.
+   */
+  private paramCallArgs = new Map<any, Taint>();
+  private recordParamCall(callee: any, args: Taint, scope: Scope): void {
+    if (callee?.type !== "Identifier") return;
+    const s = this.resolve(callee.name, scope);
+    if (!s || s.parent === null) return;
+    const fnNode = this.fnOfNames.get(s.names);
+    if (!fnNode || !fnNode.params.some((p: any) => p.type === "Identifier" && p.name === callee.name)) return;
+    const prev = this.paramCallArgs.get(fnNode) ?? clean();
+    const next = join(prev, args);
+    if (taintKey(next) !== taintKey(prev)) { this.paramCallArgs.set(fnNode, next); this.changed = true; }
+  }
+
+  /**
+   * `await v` (and each element of `for await`) — the language RESOLVES a
+   * thenable: it calls `v.then(resolve, reject)` with `this` = `v`, and the
+   * result is what `then` passes to `resolve`. Every function `v` holds that may
+   * be its `then` (`thenFns`: stored under `then` or under a key the compiler
+   * cannot read) contributes what it passes to its parameters. A resolution to
+   * another thenable resolves again.
+   */
+  private settle(v: Taint): Taint {
+    let out = v;
+    const seen = new Set<Closure>();
+    for (let depth = 0; depth < 4; depth++) {
+      const hooks = new Set<Closure>();
+      for (const c of out.fns) if (this.thenFns.has(c) && !seen.has(c)) { hooks.add(c); seen.add(c); }
+      if (hooks.size === 0) break;
+      this.recordThis(hooks, out);
+      let got = clean();
+      for (const c of hooks) { const a = this.paramCallArgs.get(c.node); if (a) got = join(got, a); }
+      out = join(out, got);
+    }
+    return out;
+  }
+  /**
+   * Functions stored under `then` or under a key the compiler cannot read —
+   * the only ones `await` may call as a thenable's `then`.
+   */
+  private thenFns = new Set<Closure>();
+
+  /**
+   * `new F(…)` of a function the analysis holds: `F` runs with `this` = a fresh
+   * object (an allocation cell per `new` site), and the result is that object
+   * (or what `F` returns). Measured before round 7: `const F = function (r) {
+   * this.h = r.passwordHash }; return new F(u)` served the hash.
+   */
+  private construct(fns: Set<Closure>, args: Taint[], node: any, fn: Instance | null): Taint {
+    const cell = this.allocCell("new", node);
+    const inst: Taint = { ...clean(), refs: new Set([cell]) };
+    this.recordThis(fns, inst);
+    const ret = this.applyFns(fns, args, undefined, node, fn);
+    return join(this.withCellContents(inst), ret);
   }
 
   /** `const` names bound to a string / number literal, per declaring scope's name set. */
@@ -2449,6 +2800,41 @@ class FlowAnalysis {
       if (v !== undefined && v !== "\u0000ambiguous") return v;
     }
     return null;
+  }
+
+  /**
+   * The compiler's own SQL client, by IDENTITY (not by name): a binding
+   * initialized by `new SQL(…)` where `SQL` is the `bun` import, or the
+   * transaction handle a `.begin((tx) => …)` callback on such a client receives.
+   * Only these may be a tag the analysis holds no function for and still read
+   * as a query (round 7).
+   */
+  private sqlClients = new Set<string>();
+  private sqlParams = new Map<any, string>();
+  private fnOfNames = new WeakMap<Set<string>, any>();
+  private isSqlClient(tag: any, scope: Scope, depth = 0): boolean {
+    if (tag?.type !== "Identifier") return false;
+    const s = this.resolve(tag.name, scope);
+    if (!s) return false;
+    if (s.parent === null) {
+      const imp = s.mod.imports.get(tag.name);
+      if (imp) {
+        const local = imp.target && depth < 8 ? imp.target.exports.get(imp.imported) : undefined;
+        return local !== undefined && this.isSqlClient({ type: "Identifier", name: local }, imp.target!.scope, depth + 1);
+      }
+      return this.sqlClients.has(`${s.id}:${tag.name}`);
+    }
+    const fnNode = this.fnOfNames.get(s.names);
+    if (fnNode && this.sqlParams.get(fnNode) === tag.name) return true;
+    return this.sqlClients.has(`${s.id}:${tag.name}`);
+  }
+  /** `new SQL(…)` with `SQL` imported from `bun`. */
+  private isSqlConstruction(init: any, scope: Scope): boolean {
+    if (init?.type !== "NewExpression" || init.callee?.type !== "Identifier") return false;
+    const s = this.resolve(init.callee.name, scope);
+    if (!s || s.parent !== null) return false;
+    const imp = s.mod.imports.get(init.callee.name);
+    return !!imp && imp.source === "bun" && imp.imported === "SQL";
   }
 
   /** `import.meta.env.X` (or `import.meta.env[…]`). */
@@ -2510,8 +2896,10 @@ class FlowAnalysis {
     if (path === "Object.assign" && node?.arguments?.[0]) {
       // Writes every source into the TARGET object (round 4, F2) — methods
       // included, which then run with `this` = the target (round 6e).
-      this.recordThis(join(...args.slice(1)).fns, args[0] ?? clean());
-      this.writeThrough(node.arguments[0], args[0] ?? clean(), containerOf(join(...args.slice(1))), fn?.scope ?? this.curMod!.scope);
+      // `Object.assign` copies every own enumerable property, each under its own
+      // key — the hooks among them now run with `this` = the target.
+      const got = this.copyFns(join(...args.slice(1)).fns, args[0] ?? clean(), node, fn);
+      this.writeThrough(node.arguments[0], args[0] ?? clean(), containerOf(join(...args.slice(1), got)), fn?.scope ?? this.curMod!.scope);
     }
     if (path === "Object.keys") {
       // A row's keys are its column NAMES, not its values. Only a container that
@@ -2535,6 +2923,10 @@ class FlowAnalysis {
     const el = elemOf(recv);
     let cbRet = clean();
     if (this.hasCallable(cb)) {
+      // `rows.forEach(fn, thisArg)` — the second argument is the callback's `this`.
+      if (args[1] && method !== "reduce" && method !== "reduceRight" && method !== "then" && method !== "catch" && method !== "finally") {
+        this.recordThis(cb.fns, args[1]);
+      }
       let params: Taint[];
       if (method === "reduce" || method === "reduceRight") params = [join(args[1] ?? clean()), el, clean(), recv];
       else if (method === "then") params = [recv];

@@ -18,7 +18,7 @@
  *     collected `values` (the compound cell value).
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { mkdtempSync, rmSync, existsSync } from "fs";
@@ -261,4 +261,11 @@ describe("Bug 58 — formFor validity surface drives at runtime (happy-dom)", ()
     expect(body).toHaveProperty("values");
     expect(body.values).toEqual({ name: "Alice", email: "alice@example.com", agree: true });
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

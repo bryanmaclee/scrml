@@ -344,7 +344,12 @@ describe("§3 scrml dev run from the project root", () => {
       await stopDev(dev);
     }
     expect(rpc.status).toBe(500);
-    expect(rpc.body).toContain("database file not found: " + join(root, "src", "ref.db"));
+    // S447 round 7 (§14.8.9 error egress): the CLIENT gets the fixed, value-free 500 —
+    // a server filesystem path is server data (cf. §47 "the health body SHALL NOT name
+    // the paths"), exactly as the prod entry answers. "Fails loudly" is the server log,
+    // asserted below.
+    expect(JSON.parse(rpc.body)).toEqual({ error: "Internal server error" });
+    expect(rpc.body).not.toContain("ref.db");
     expect(dbFilesUnder(root)).toEqual([]);
     expect(log).toContain("database file not found: " + join(root, "src", "ref.db"));
     expect(log).toContain('declared as "./ref.db" in app.scrml');
