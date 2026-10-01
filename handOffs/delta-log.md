@@ -4132,3 +4132,9 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3612] friction · three confident PA diagnoses reversed by execution (browser failures "unflagged" — baselined; post-merge protect failures "real interaction" — pre-existing test-order pollution; §20.8 "already aborts <request>" — router fetch only) + #1191 dispatched against S435 policy; two parallel sessions → every PR conflicts on generated files (resolve/train scripts)
 
 [3613] state · S444 WRAPPED. Open for bryan: dpa-058 B3 (bound top-level scalar lowers attrs? one switch), SPEC "unawaited Promise" softening, dpa-063/064 (S445 lane). S445 LIVE successor (ASUS). Next bootstrap arc: U0 async core.
+
+[3614] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/prepaint-opt-in-dpa-062-2026-09-30.md` · verdict: split the surface — cell-level `prepaint` = REFLECT only; HOLD = author-placed `hold=@cell` region marker with a no-JS CSS failsafe; since RULED S444 — see [3610])**
+
+[3615] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md` · verdict: D rejected, C disfavoured; A (`;` terminator, ~30k edits) vs B (newline terminates, ~205 lines) is bryan's value call, 7 calls one at a time; ADVISORY, awaiting bryan)**
+
+[3616] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/nested-program-auth-scope-dpa-064-2026-09-30.md` · verdict: relax E-PROGRAM-NESTED-AUTH only for auth="required", tighten-only, endpoint-gating; worker/WASM stay errors, db-scope/sidecar/route= until built; 5 fail-open prerequisites first; ADVISORY, awaiting bryan)**
