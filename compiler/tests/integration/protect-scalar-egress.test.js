@@ -26,6 +26,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
+import { assertOpensDb } from "../helpers/self-host-server-import.js";
 
 const HEAD = `<program db="./app.db">
 <schema>
@@ -382,8 +383,8 @@ async function serveAndCall(src, argsJson, { realHash = false } = {}) {
   const result = compileScrml({ inputFiles: [file], write: true, outputDir: outDir, log: () => {} });
   const serverJsPath = join(outDir, "app.server.js");
   expect(existsSync(serverJsPath)).toBe(true);
-  writeFileSync(serverJsPath, readFileSync(serverJsPath, "utf8").replace(
-    'new SQL("sqlite:./app.db")', `new SQL(${JSON.stringify("sqlite:" + dbPath)})`));
+  // s445: the module opens the seeded file itself (declaring-file-relative, CWD-independent) — assert it.
+  assertOpensDb(serverJsPath, dbPath);
   globalThis.__scrml_session_store = new Map([["sid1", { userId: 1, role: "user", csrfToken: "tok1" }]]);
   const mod = await import(`file://${serverJsPath}?v=${Date.now()}-${Math.random()}`);
   const route = mod.routes.find((r) => r.path.startsWith("/_scrml/__ri_route_"));

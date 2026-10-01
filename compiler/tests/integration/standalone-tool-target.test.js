@@ -102,7 +102,9 @@ describe("§64 tool target — emit shape", () => {
   test("db composition — Bun.SQL handle header + lowered ?{}", () => {
     const { out } = compileSource(CLI_TOOL);
     expect(out.toolJs).toMatch(/import \{ SQL \} from "bun";/);
-    expect(out.toolJs).toMatch(/const _scrml_sql = new SQL\("sqlite:\.\/fleet\.db"\);/);
+    // s445 — a SQLite file opens through the helper: resolved against the declaring
+    // file's directory, never created.
+    expect(out.toolJs).toMatch(/const _scrml_sql = _scrml_sqlite_referenced\("[^"]*fleet\.db", "\.\/fleet\.db", "[^"]*"\);/);
     expect(out.toolJs).toMatch(/await _scrml_sql`SELECT id FROM tasks`/);
   });
 
@@ -243,13 +245,15 @@ describe("§64 tool target — R26 (compile → parse → RUN)", () => {
     const fleetJs = join(dist, "fleet.js");
     expect(existsSync(fleetJs)).toBe(true);
 
-    // seed the db (relative to dist, the runtime cwd)
-    const db = new Database(join(dist, "fleet.db"));
+    // seed the db where `db="./fleet.db"` names it: beside fleet.scrml (s445 — the
+    // declaring file's directory, the same file the compile-time schema read opens).
+    const db = new Database(join(dir, "fleet.db"));
     db.run("CREATE TABLE tasks (id INTEGER PRIMARY KEY, name TEXT)");
     db.run("INSERT INTO tasks (name) VALUES ('a'),('b'),('c')");
     db.close();
 
-    const run = (args) => Bun.spawnSync({ cmd: ["bun", "fleet.js", ...args], cwd: dist, stdout: "pipe", stderr: "pipe" });
+    // Run from an UNRELATED working directory: which database opens must not depend on it.
+    const run = (args) => Bun.spawnSync({ cmd: ["bun", fleetJs, ...args], cwd: tmpdir(), stdout: "pipe", stderr: "pipe" });
     expect(run([]).exitCode).toBe(2);            // no args → return 2
     expect(run(["fail"]).exitCode).toBe(7);      // == "fail" → return 7 (structural_eq)
     const ok = run(["count"]);
