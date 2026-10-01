@@ -23934,12 +23934,8 @@ function walkAndExpandTableForNodes(
  * value-returning server-fn-body form; this pass governs the admitted form).
  */
 function resolveProgramLang(fileAST: FileAST): string | null {
-  const nodes = (fileAST.nodes as ASTNodeLike[] | undefined)
-    ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
-    ?? [];
-  const programNode = nodes.find(
-    (node: ASTNodeLike) => node.kind === "markup" && (node as ASTNodeLike).tag === "program",
-  );
+  // The file's top-level <program> by the one role definition (program-role.ts, §4.12, S445).
+  const programNode = findTopLevelProgramNode(fileAST);
   if (!programNode) return null;
   const attrs = (programNode as ASTNodeLike).attrs as Array<{ name: string; value: unknown }> | undefined;
   if (!attrs) return null;

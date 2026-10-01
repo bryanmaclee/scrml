@@ -1,0 +1,12 @@
+{
+  "id": "program-nested-session-attr-pos",
+  "description": "§4.12.2 (S445 item 3) — a session attribute on a nested `<program>` (here a scoped-db program under a `<div>` inside the application program) is E-PROGRAM-NESTED-SESSION, once per offending attribute. The session cookie is application-scope (§20.5.1); before S445 the nested `session-secure=\"false\" sessionExpiry=\"30d\"` reached the step-2 last-wins read and the application minted plain `scrml_sid` / Max-Age=2592000 with no diagnostic (g-two-programs-one-file-session-attr-last-wins).",
+  "language-version": "1.0",
+  "spec": "§4.12.2, §20.5.1, §4.12",
+  "rationale": "§4.12.2 (S445 item 3): 'A session attribute on a nested `<program>` SHALL be a compile error (`E-PROGRAM-NESTED-SESSION`), whatever its value.'",
+  "expect": {
+    "codes": ["E-PROGRAM-NESTED-SESSION"],
+    "severity": { "E-PROGRAM-NESTED-SESSION": "error" },
+    "codeCounts": { "E-PROGRAM-NESTED-SESSION": 2 }
+  }
+}
