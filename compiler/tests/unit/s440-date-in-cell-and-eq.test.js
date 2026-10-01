@@ -39,7 +39,7 @@
  * SAME cases through both copies.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { resolve } from "path";
 import { runInNewContext } from "vm";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
@@ -601,4 +601,11 @@ function edit() {
     expect(page.pageErrors).toEqual([]);
     expect(page.spans().eq).toBe("false");
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

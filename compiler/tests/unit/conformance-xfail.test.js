@@ -23,6 +23,7 @@
  * if it is computed from what the real harness observes.
  */
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -481,4 +482,11 @@ describe("S430 review LOW — the codes signature pins the emitted E-* MULTISET"
     // A PASSING case's signature stays empty whatever it emits.
     expect(failureSignature({ ...base, missing: [], emittedCounts: { "E-Y": 1 } })).toEqual({});
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });
