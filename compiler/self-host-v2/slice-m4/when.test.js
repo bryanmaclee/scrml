@@ -177,6 +177,21 @@ describe("§6.7.4 — forms", () => {
   });
 });
 
+describe("s446 F2 — two whens writing each other's deps (a cycle SPEC is silent on)", () => {
+  test("compiles clean; one click is bounded (no stack overflow), reported loudly, and the page stays alive", async () => {
+    const src = P(`    <let n:int=0/>\n    <let m:int=0/>\n    <let hits:int=0/>\n    when @n changes {\n        @m = @m + 1\n        @hits = @hits + 1\n    }\n    when @m changes {\n        @n = @n + 1\n        @hits = @hits + 1\n    }`,
+      `        <p class="out">\${@hits}</p>\n        <button onclick=(@n = @n + 1)>inc</button>`);
+    await loadProgram(coreOf(src), "when-cycle");
+    const errs = [];
+    const saved = console.error;
+    console.error = (...a) => errs.push(a.join(" "));
+    try { click(btn("inc")); } finally { console.error = saved; }
+    expect(Number($("p.out").textContent)).toBeLessThan(10);
+    expect(errs.some((e) => /E-LIFECYCLE-006 — re-triggered during its re-run; dropped/.test(e))).toBe(true);
+    expect(takePageErrors()).toEqual([]);
+  });
+});
+
 describe("§6.7.4 — codes", () => {
   const D = `    <let n:int=0/>\n    <let m:int=0/>\n    <step=1/>\n    <dbl:int=(@n * 2)/>`;
 
@@ -209,7 +224,10 @@ describe("§6.7.4 — codes", () => {
   });
 
   test("W-LIFECYCLE-006 — the body is one `@v = <pure expression of @variables>`; not otherwise", () => {
-    expect(codes(P(`${D}\n    when @n changes {\n        @m = @n * 2 + @m\n    }`, ""))).toEqual(["W-LIFECYCLE-006"]);
+    expect(codes(P(`${D}\n    when @n changes {\n        @m = @n * 2 + 1\n    }`, ""))).toEqual(["W-LIFECYCLE-006"]);
+    // S446 amendment: an ACCUMULATOR (the right-hand side reads the assigned cell) is not derivable — no warning
+    expect(codes(P(`${D}\n    when @n changes {\n        @m = @m + 1\n    }`, ""))).toEqual([]);
+    expect(codes(P(`${D}\n    when @n changes {\n        @m = @n * 2 + @m\n    }`, ""))).toEqual([]);
     // a constant (no @ read), a call, a second statement: no warning
     expect(codes(P(`${D}\n    when @n changes {\n        @m = 1\n    }`, ""))).toEqual([]);
     expect(codes(P(`${D}\n    fn f(x: int) -> int { return x }\n    when @n changes {\n        @m = f(@n)\n    }`, ""))).toEqual([]);
@@ -248,6 +266,26 @@ describe("fail closed — forms the bootstrap does not lower are refused, never 
     const r = run(src);
     expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(r.diags[0].message).toMatch(/whole instance/);
+  });
+
+  // s446 F1: slot content is rendered once per `<slot/>` in the renders — with none the
+  // effect would be dropped, with two it would run twice per change. Refused.
+  const slotProg = (renders) => `<program>\n    <let n:int=0/>\n    <let hits:int=0/>\n    <let m:int=0/>\n    <card title:string/>\n    renders ${renders}\n    <main>\n        <card title="a"><b>x</b>\${ when @n changes {\n            @hits = @hits + 1\n            @m = @n\n        } }</card>\n    </main>\n</program>\n`;
+
+  test("a `when` in use-site slot content — renders with NO <slot/> (would be dropped)", () => {
+    const r = run(slotProg("<div>card</div>"));
+    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(r.diags[0].message).toMatch(/slot content/);
+  });
+
+  test("a `when` in use-site slot content — renders with TWO <slot/>s (would run twice)", () => {
+    const r = run(slotProg("<div><slot/><slot/></div>"));
+    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+
+  test("a `when` nested deeper in slot content (inside an element) is refused too", () => {
+    const src = slotProg("<div><slot/></div>").replace("<b>x</b>${", "<b>x</b><i>${").replace("} }</card>", "} }</i></card>");
+    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 
   test("a `${…}` block in markup holding anything after its `when`", () => {

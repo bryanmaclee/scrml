@@ -4593,6 +4593,10 @@ ${
         if (f is not) return st
         if (!isWholeReplace(f)) return st
         if (pureCellReads(tv.value) < 1) return st
+        // S446 amendment (ruled; SPEC text in flight): an ACCUMULATOR — the
+        // right-hand side reads the assigned cell (`@hits = @hits + 1`) — is not
+        // derivable (the derived form would be circular): no warning.
+        if (readsAtName(tv.value, atName(tv.target))) return st
         return addDiag(st, env.file, w.span, "W-LIFECYCLE-006", "this `when` body only assigns `@" + atName(tv.target) + "` a pure expression of `@variables` — a derived declaration (`<" + atName(tv.target) + "=(…)/>`) is reactive, runs on mount and cannot fall out of sync (§6.7.4)")
     }
 
@@ -4692,6 +4696,33 @@ ${
             .Spread(e: x) :> -1
             .Index(obj: o) :> -1
             .Lambda(params: ps) :> -1
+        }
+    }
+
+    // Does `e` (a pure expression of `@` reads, pureCellReads) read `@name`?
+    fn readsAtName(e: AExpr, name: string) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .At(name: n) :> n == name
+            .Member(obj: o) :> readsAtName(o, name)
+            .Unary(op: o, e: x) :> readsAtName(x, name)
+            .Binary(op: o, l: l, r: r) :> readsAtName(l, name) || readsAtName(r, name)
+            .Ternary(test: t, yes: y, no: n) :> readsAtName(t, name) || readsAtName(y, name) || readsAtName(n, name)
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Variant(name: n) :> false
+            .Name(name: n) :> false
+            .AtItem :> false
+            .Recovered :> false
+            .Call(callee: c) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
         }
     }
 
@@ -5400,6 +5431,14 @@ ${
             }
         }
         st = addElem(st, e.nid, ElemFact.MUse(d.info.sym, alias))
+        // s446 F1: a `when` in USE-SITE SLOT CONTENT (§66.15.2) is rendered
+        // wherever the declaration's `renders` places `<slot/>` — zero times
+        // (the effect is dropped) or several (it runs once per placement).
+        // Which scope owns slot content is not settled (§6.7.2 / §66.15), so
+        // the bootstrap refuses it, as it refuses a `when` in a `renders`.
+        for (const sp of kidWhenSpans(e.kids)) {
+            st = addDiag(st, env.file, sp, "E-BOOTSTRAP-UNSUPPORTED", "a `when` in the slot content of `<" + e.tag + ">` is not in the bootstrap — slot content is rendered once per `<slot/>` in its `renders` (possibly never, possibly twice), and which scope owns it is not settled (§6.7.2 / §66.15.2); write the `when` outside the use")
+        }
         return resolveNodes(penv, e.kids, st)
     }
 

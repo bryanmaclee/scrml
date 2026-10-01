@@ -259,10 +259,22 @@ export function effect(scope, fn) {
 // Stmt.Suspend) resumes through. Unregistering the When (its scope's teardown,
 // step 1) cancels every task it has in flight: a cancelled task's continuation
 // never runs, so a destroyed scope's effect never resumes and never writes.
-// (⚑ A When re-triggered while an earlier run is suspended: SPEC does not say —
-// see docs/changes/s446-bootstrap-u0-when-effects/DESIGN.md §5. U0 has no
-// source form that suspends; each run's task is independent here.)
+//
+// THE NEWEST RUN WINS (RULED (b), user-voice S446): a run that starts while an
+// earlier run of the SAME When is suspended cancels that earlier run's task —
+// its continuation never resumes. Cancellation is not a rollback: what the
+// earlier run wrote before it suspended stays written.
+//
+// RE-ENTRY (parity with impl#1's `_scrml_when_changes`, PA-ruled S446): a When
+// re-triggered while its body is RUNNING (its own write, through a function
+// call, or a cycle through another When) is not recursed into: it is marked
+// pending and re-runs ONCE after the current run; a further re-trigger in that
+// re-run is dropped and reported (console.error) — the page stays alive. (SPEC
+// §6.7.4 names only the direct self-write, E-LIFECYCLE-006; cross-`when`
+// cycles are a SPEC question.)
 // ---------------------------------------------------------------------------
+const WHEN_RERUN_CAP = 1;
+
 class Task {
   constructor(owner) {
     this.owner = owner;
@@ -278,16 +290,39 @@ class When {
     this.body = body;
     this.disposed = false;
     this.tasks = new Set();
+    this.running = false;
+    this.pending = false;
     for (const d of deps) d.observers.add(this);
     stats.whens++;
     scope.ownWhen(() => this.unregister());
   }
   markStale() {
     if (this.disposed) return;
+    if (this.running) { this.pending = true; return; }
     whenQueue.add(this);
     if (batchDepth === 0) flush();
   }
   run() {
+    this.running = true;
+    let reruns = 0;
+    try {
+      do {
+        this.pending = false;
+        this.runOnce();
+        if (this.pending && !this.disposed && ++reruns > WHEN_RERUN_CAP) {
+          console.error("scrml when-effect error: E-LIFECYCLE-006 — re-triggered during its re-run; dropped.");
+          break;
+        }
+      } while (this.pending && !this.disposed);
+    } finally {
+      this.running = false;
+      this.pending = false;
+    }
+  }
+  runOnce() {
+    // The newest run wins: an earlier run still suspended never resumes.
+    for (const t of this.tasks) t.cancel();
+    this.tasks.clear();
     const task = new Task(this);
     this.tasks.add(task);
     try {

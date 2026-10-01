@@ -118,6 +118,86 @@ describe("§6.7.4 when — triggering", () => {
   });
 });
 
+describe("re-entry — bounded, loud, the page stays alive (parity with impl#1's rerun cap, PA-ruled S446)", () => {
+  function captureErrors(fn) {
+    const errs = [];
+    const saved = console.error;
+    console.error = (...a) => errs.push(a.join(" "));
+    try { fn(); } finally { console.error = saved; }
+    return errs;
+  }
+
+  test("two whens writing each other's deps: no stack overflow; one re-run, then dropped and reported", () => {
+    // mutation RED: markStale() not checking `running` (unbounded recursion → RangeError)
+    const scope = rt.root.child();
+    const n = rt.cell(0);
+    const m = rt.cell(0);
+    let runsA = 0, runsB = 0;
+    rt.when(scope, [n], () => { runsA++; m.set(m.peek() + 1); });
+    rt.when(scope, [m], () => { runsB++; n.set(n.peek() + 1); });
+    const errs = captureErrors(() => n.set(1));
+    expect(runsA).toBe(2);                         // the run + ONE re-run
+    expect(runsB).toBeLessThanOrEqual(3);
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toMatch(/E-LIFECYCLE-006 — re-triggered during its re-run; dropped/);
+    // the effects stay registered and work on the next change
+    const errs2 = captureErrors(() => n.set(100));
+    expect(runsA).toBe(4);
+    expect(errs2.length).toBe(1);
+    scope.dispose();
+  });
+
+  test("a body that writes its own dep (through a call — not caught statically) re-runs once, then is dropped", () => {
+    const scope = rt.root.child();
+    const n = rt.cell(0);
+    let runs = 0;
+    const bump = () => n.set(n.peek() + 1);
+    rt.when(scope, [n], () => { runs++; bump(); });
+    const errs = captureErrors(() => n.set(1));
+    expect(runs).toBe(2);
+    expect(errs.length).toBe(1);
+    scope.dispose();
+  });
+
+  test("a re-trigger while running that does NOT recur runs exactly one more time, silently", () => {
+    const scope = rt.root.child();
+    const n = rt.cell(0);
+    let runs = 0;
+    rt.when(scope, [n], () => { runs++; if (runs === 1) n.set(n.peek() + 1); });
+    const errs = captureErrors(() => n.set(1));
+    expect(runs).toBe(2);
+    expect(errs).toEqual([]);
+    scope.dispose();
+  });
+});
+
+describe("RULED (b), S446 — a re-trigger while an earlier run is suspended: the newest run wins", () => {
+  test("the earlier run's continuation never resumes; the newest one does; cancellation is not a rollback", async () => {
+    // mutation RED: runOnce() not cancelling the earlier tasks
+    const scope = rt.root.child();
+    const dep = rt.cell(0);
+    const before = rt.cell([]);
+    const after = rt.cell([]);
+    const hosts = [held(), held()];
+    let k = 0;
+    rt.when(scope, [dep], (task) => {
+      const mine = k++;
+      before.set([...before.peek(), mine]);         // written before the suspension
+      rt.suspend(task, hosts[mine].p, (v) => { after.set([...after.peek(), v]); });
+    });
+    dep.set(1);                                      // run 0 suspends on hosts[0]
+    dep.set(2);                                      // run 1 starts: run 0 is cancelled
+    hosts[0].resolve("stale");
+    await tick();
+    expect(after.peek()).toEqual([]);                // the stale continuation did not write
+    hosts[1].resolve("fresh");
+    await tick();
+    expect(after.peek()).toEqual(["fresh"]);
+    expect(before.peek()).toEqual([0, 1]);           // run 0's pre-suspension write stays (no rollback)
+    scope.dispose();
+  });
+});
+
 describe("§6.7.2 teardown — step 1", () => {
   test("disposing the owning scope unregisters the effect; it never fires again", () => {
     // mutation RED: unregister() not removing the observer
