@@ -156,3 +156,18 @@
   0 fail. lint-no-default-arm 61 files / 0 violations.
 - U1 handoff note amended: use `{ hostNullPassthrough: true }` only when encoding a server function's
   non-`T | not` RETURN; arguments and every other sink are strict.
+
+## 2026-10-01 — r2 follow-up N1-N3 (r2 re-review CLEAN; Uc landing as PR #1213 @ `40692dd64`) — `e17c92dce`
+All three reproduced by probe before fixing.
+- N1 FIXED. Reproduced: `Object.prototype.hostNullPassthrough = true` made `encodeText(int, null)` ok `"null"` with
+  no opts (and a polluted `canonicalOnly` flipped the decoder). Flags are now read only as OWN properties
+  (`Object.hasOwn`), for both flags. Tests pollute the prototype (restored in `afterEach`) and use an opts object with
+  inherited flags. Bite: reverting to a plain property read → 3 red.
+- N2 FIXED. Reproduced: a getter on opts and a revoked Proxy as opts threw out of encode / decodeText. Opts are now
+  read inside the guarded region → failure of the operation's kind. Tested on all four entry points.
+- N3 FIXED. Reproduced: `encode(Pt, {…, extra: 2})` → ok, key dropped. Encode now refuses an undeclared own
+  enumerable key (kind "value", path `$.extra`), symmetric with decode. A non-enumerable own property is not a key.
+- Header: the "encode ok ⇒ decodes equal" claim now states the one exception, number `-0` → `0`, pointing at Q6
+  (not normalised; Q6 unruled). Pinned by a test.
+- Verification: slice-codec 92/92 (was 83); slice-m1 73/73, lowered 73/73, slice-m2 448/448, slice-m3 60/60,
+  slice-m4 403 + 1 todo; lint 61 files / 0; hook 27258 pass / 0 fail.
