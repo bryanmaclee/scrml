@@ -130,3 +130,33 @@ Left alone: 443349, 892523 (agent-a92d7cfc42e15dd09), 4119655 (rev-approot), and
   `scrml dev --__dev-child /tmp/scrml-dev-child-<pid>-1.json` processes (generation-1 children, i.e. the child a
   dev server respawned after a restart; parent killed by the test → child reparented to the user systemd). This is
   the source of the leaked servers the brief warns about. Killed mine by PID (9 total over the session).
+
+## 2026-10-01 r5b — S239 review of e0692a8ae (LAND-WITH-NITS); each claim reproduced before fixing
+- Item 5 (ruling conformance), e1de8384d. REPRODUCED: `SCRML_DATA_DIR=devvol scrml dev src/app.scrml` (ex09 copy)
+  → `created new database …/ex09/devvol/src/contact.db`. Ruling text: "(dev / compile keep S445 item 6: relative to the
+  declaring `.scrml` file.)". FIX: runDev drops SCRML_DATA_DIR before any module loads (parent prints one
+  "ignoring" line; app child inherits the cleaned env). SPEC §47.14 data-root bullet narrowed + new "`scrml dev` ignores
+  SCRML_DATA_DIR" bullet; provenance records the round-4 reading as superseded. AFTER: `scrml dev: ignoring
+  SCRML_DATA_DIR=devvol …` + `created new database …/ex09/src/contact.db`; devvol/ empty. Test: dev-db §3 "IGNORES".
+  `scrml compile` (the compile step) never read SCRML_DATA_DIR; compile OUTPUT run standalone still honours it
+  (§47.14 "any emitted module run on its own") — flagged to PA as a reading.
+- Item 1, 075b2e2f4. REPRODUCED: mono/subA (owning ./app.db) + mono/subB (referencing ./app.db), each with
+  scrml.toml; `scrml build . -o out` listed one `src/app.db (owning)` with subA's root only; _server.js had no
+  _SCRML_REFERENCED_DBS. FIX: key = (projectRoot, dbPath) (absolute paths key by path); W-DEPLOY-DB-SHARED-PATH when
+  ≥2 roots record the same relative path; report lines suffixed "— project <root>" when the build has >1 root.
+  AFTER: both listed with their project; SHARED-PATH warning; `_SCRML_REFERENCED_DBS` has subB's src/app.db.
+- Item 2, 075b2e2f4. FIX: health/startup check uses statSync(file).isFile(). AFTER (refonly): directory at
+  vol/src/ref.db → 503; replaced with a real db → 200. Test: live server dir → 503 → file → 200.
+- Item 3, 075b2e2f4. FIX: emitted `_scrml_sqlite_real` (realpath, via nearest existing ancestor; null → not inside =
+  fail closed) used by `_scrml_sqlite_inside`; import line gains `realpathSync as _scrml_db_realpath` (harness strip
+  regex still matches). Tests: SCRML_DATA_DIR symlink → created; db path through a symlink into the volume → created;
+  a symlink inside the volume pointing OUT → refused (stricter than before: textual containment would have created).
+- Item 4, 075b2e2f4. Message now: "Fix: move the db= path inside the project (so it resolves under SCRML_DATA_DIR),
+  or set SCRML_DATA_DIR to a directory that contains it, then rebuild." SPEC §47.14 sentence: owning refusal exits
+  (fixed by rebuild / config) vs referenced-missing health 503 (fixed by seeding, possibly into the running server).
+  AFTER (r41): refusal with the new text, shared/ and data/ empty.
+- Item 6, 075b2e2f4. Referencing report line: "(referencing — seed it; /_scrml/health reports unavailable until it
+  is seeded)" — on every server build (the 503 happens whatever the target). examples/23 source untouched.
+- Pre-commit on 075b2e2f4: 33759 pass / 0 fail. Commands + dev-db + emission + wal + ssr + 2 browser: 403/0;
+  build-sqlite-data-root: 17/0. Items 1/2/3/4/6 landed as ONE commit (they share build.js / sqlite-file-target.ts /
+  the one test file); item 5 separately.
