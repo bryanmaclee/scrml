@@ -4597,6 +4597,9 @@ ${
         // right-hand side reads the assigned cell (`@hits = @hits + 1`) — is not
         // derivable (the derived form would be circular): no warning.
         if (readsAtName(tv.value, atName(tv.target))) return st
+        // r2 N3: the same holds when the self-read goes through DERIVED cells
+        // (`<dm=(@m + 1)/>`, `@m = @n + @dm`) — `@m` would derive from itself.
+        if (readsThroughDerived(env, st, tv.value, effectCaps(f)[0])) return st
         return addDiag(st, env.file, w.span, "W-LIFECYCLE-006", "this `when` body only assigns `@" + atName(tv.target) + "` a pure expression of `@variables` — a derived declaration (`<" + atName(tv.target) + "=(…)/>`) is reactive, runs on mount and cannot fall out of sync (§6.7.4)")
     }
 
@@ -4696,6 +4699,100 @@ ${
             .Spread(e: x) :> -1
             .Index(obj: o) :> -1
             .Lambda(params: ps) :> -1
+        }
+    }
+
+    // r2 N3: does `e` (a pure expression of `@` reads) read a DERIVED field
+    // whose initializer reads the assigned field — directly or through further
+    // derived fields of the same declaration? The assigned field is known by
+    // its write capability (`cap`, the EWrite fact's); a read by the field the
+    // binder resolved it to. Both sides are bare `@` names in one env, so one
+    // declaration means one instance. A read that is not a resolved field is
+    // not a self-read (the warning stands — the conservative side).
+    fn readsThroughDerived(env: Env, st: AS, e: AExpr, cap: int) -> boolean {
+        for (const a of atReads(e)) {
+            const af: NameFact | not = nameFactIn(st, a.nid)
+            if (af is some) {
+                const r: DeclField | not = fieldOfFact(af)
+                if (r is some && derivedReaches(env.g, r.decl, r.idx, cap, [])) return true
+            }
+        }
+        return false
+    }
+
+    type DeclField:struct = { decl: Sym, idx: int }
+
+    fn mkDeclField(d: Sym, i: int) -> DeclField { return { decl: d, idx: i } }
+
+    fn fieldOfFact(f: NameFact) -> DeclField | not {
+        return match f {
+            .NField(decl: d, inst: i, idx: idx) :> mkDeclField(d, idx)
+            .NInst(decl: d) :> not
+            .NLocal(sym: s) :> not
+            .NStruct(owner: o) :> not
+            .NFn(sym: s) :> not
+            .NLength :> not
+        }
+    }
+
+    // Is field `idx` of `ds` DERIVED with an initializer that reads the field
+    // whose write capability is `cap`, directly or through further derived
+    // fields of `ds`? (`seen`: the fields already on the path — a derived
+    // cycle is its own error.)
+    fn derivedReaches(g: Globals, ds: Sym, idx: int, cap: int, seen: int[]) -> boolean {
+        const di: DeclInfo | not = declInfoIn(g, ds)
+        if (di is not || idx < 0 || idx >= di.fields.length) return false
+        const f: FieldInfo = di.fields[idx]
+        if (!isDerivedMode(f.mode)) return false
+        for (const r of f.reads) {
+            if (r.length > 1 && r.substring(0, 1) == "@") {
+                const j: int = fieldIndex(di, r.substring(1))
+                if (j >= 0 && hasCap(di.fields[j], cap)) return true
+                if (j >= 0 && j != idx && seen.indexOf(j) < 0 && derivedReaches(g, ds, j, cap, seen.concat([idx]))) return true
+            }
+        }
+        return false
+    }
+
+    fn hasCap(f: FieldInfo, cap: int) -> boolean {
+        const w: Sym | not = f.wcap
+        if (w is not) return false
+        return w.id == cap
+    }
+
+    fn isDerivedMode(m: FieldMode) -> boolean {
+        return match m {
+            .Derived :> true
+            .Locked :> false
+            .Let :> false
+            .Seeded :> false
+        }
+    }
+
+    // The `@` read nodes of a pure expression of them (pureCellReads).
+    fn atReads(e: AExpr) -> AExpr[] {
+        const k: AExprK = e.k
+        return match k {
+            .At(name: n) :> [e]
+            .Member(obj: o) :> atReads(o)
+            .Unary(op: o, e: x) :> atReads(x)
+            .Binary(op: o, l: l, r: r) :> atReads(l).concat(atReads(r))
+            .Ternary(test: t, yes: y, no: n) :> atReads(t).concat(atReads(y)).concat(atReads(n))
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Variant(name: n) :> []
+            .Name(name: n) :> []
+            .AtItem :> []
+            .Recovered :> []
+            .Call(callee: c) :> []
+            .Assign(target: t) :> []
+            .ArrayLit(elems: es) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: x) :> []
+            .Index(obj: o) :> []
+            .Lambda(params: ps) :> []
         }
     }
 
@@ -4832,7 +4929,7 @@ ${
     fn resolveElem(env: Env, e: AElem, st: AS) -> AS {
         if (e.star) return resolveStar(env, e, st)
         if (e.tag == "each") return resolveEach(env, e, st)
-        if (e.tag == "slot") return addElem(st, e.nid, ElemFact.MSlot)
+        if (e.tag == "slot") return resolveSlot(env, e, st)
         // A user declaration in scope wins over every built-in reading of the
         // tag — HTML and (r2 F2) the structural-refusal list alike.
         const d: DeclSrc | not = declNamed(env.g, e.tag)
@@ -4855,6 +4952,32 @@ ${
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
         }
         return resolveHtml(env, e, st)
+    }
+
+    // s446 r2 N2: `<slot>` CONTENT (fallback for a use with no children). SPEC
+    // §66.15.2 rules only "use-site children → `<slot/>`" and says nothing of
+    // content written inside `<slot>…</slot>`; Core `View.Slot` carries no
+    // fallback. It used to be dropped unvisited — a `when` there never ran, an
+    // unresolved `${@nope}` raised nothing. Fail closed: any content other than
+    // whitespace is refused (DESIGN.md §5, SPEC question (6)).
+    fn resolveSlot(env: Env, e: AElem, st: AS) -> AS {
+        for (const k of e.kids) {
+            if (!blankNode(k)) {
+                return addElem(addDiag(st, env.file, k.span, "E-BOOTSTRAP-UNSUPPORTED", "content inside `<slot>…</slot>` (fallback content for a use with no children) is not in the bootstrap — SPEC §66.15.2 rules only `<slot/>`; the content would be dropped silently. Write `<slot/>` and render a default outside it"), e.nid, ElemFact.MSlot)
+            }
+        }
+        return addElem(st, e.nid, ElemFact.MSlot)
+    }
+
+    fn blankNode(n: ANode) -> boolean {
+        const k: ANodeK = n.k
+        return match k {
+            .Text(text: t) :> t.trim() == ""
+            .Elem(e: e) :> false
+            .Interp(e: e) :> false
+            .DeclNode(d: d) :> false
+            .When(w: w) :> false
+        }
     }
 
     // s444 (PA): the scrml structural / directive tags (§4.15, §24.4 and impl#1's

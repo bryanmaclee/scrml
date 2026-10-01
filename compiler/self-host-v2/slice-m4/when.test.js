@@ -234,6 +234,18 @@ describe("§6.7.4 — codes", () => {
     expect(codes(P(`${D}\n    when @n changes {\n        @m = @n\n        @m = @m + 1\n    }`, ""))).toEqual([]);
   });
 
+  test("W-LIFECYCLE-006 — r2 N3: a self-read THROUGH derived cells is an accumulator too; an unrelated derived read is not", () => {
+    // mutation RED: derivableWhen without the readsThroughDerived exclusion
+    const DD = `${D}\n    <dm:int=(@m + 1)/>\n    <dd:int=(@dm * 2)/>`;
+    // `@dm` derives from `@m` (one hop), `@dd` through `@dm` (two hops): the derived form would be circular
+    expect(codes(P(`${DD}\n    when @n changes {\n        @m = @n + @dm\n    }`, ""))).toEqual([]);
+    expect(codes(P(`${DD}\n    when @n changes {\n        @m = @n + @dd\n    }`, ""))).toEqual([]);
+    // `@dbl` derives from `@n`, not `@m` — still derivable, still warned
+    expect(codes(P(`${DD}\n    when @n changes {\n        @m = @n + @dbl\n    }`, ""))).toEqual(["W-LIFECYCLE-006"]);
+    // a derived read of the assigned cell's derived — but assigning a DIFFERENT cell: still warned
+    expect(codes(P(`${DD}\n    <let k:int=0/>\n    when @n changes {\n        @k = @n + @dm\n    }`, ""))).toEqual(["W-LIFECYCLE-006"]);
+  });
+
   test("syntax: an empty dep-list `()` and a missing `changes` are parse errors", () => {
     expect(codes(P(`${D}\n    when () changes {\n        @m = 1\n    }`, ""))).toContain("E-PARSE-WHEN");
     expect(codes(P(`${D}\n    when @n {\n        @m = 1\n    }`, ""))).toContain("E-PARSE-WHEN");
@@ -286,6 +298,25 @@ describe("fail closed — forms the bootstrap does not lower are refused, never 
   test("a `when` nested deeper in slot content (inside an element) is refused too", () => {
     const src = slotProg("<div><slot/></div>").replace("<b>x</b>${", "<b>x</b><i>${").replace("} }</card>", "} }</i></card>");
     expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+
+  // r2 N2: `<slot>` FALLBACK content (written inside the declaration's `<slot>…</slot>`)
+  // has no Core form (View.Slot carries none) and SPEC §66.15.2 rules only `<slot/>`;
+  // it used to be dropped unvisited (a `when` there ran 0 times; `${@nope}` raised nothing).
+  const fallbackProg = (fallback) => `<program>\n    <let n:int=0/>\n    <let hits:int=0/>\n    <card title:string/>\n    renders <div><slot>${fallback}</slot></div>\n    <main>\n        <card title="a"></card>\n    </main>\n</program>\n`;
+
+  test("r2 N2: slot fallback content — a `when`, an unresolved read, plain markup — is refused", () => {
+    // mutation RED: resolveElem returning MSlot for `slot` without resolveSlot
+    for (const fb of ["${ when @n changes { @hits = @hits + 1 } }", "${@nope}", "<b>default</b>", "default"]) {
+      const r = run(fallbackProg(fb));
+      expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(r.diags[0].message).toMatch(/inside `<slot>…<\/slot>`/);
+    }
+  });
+
+  test("r2 N2: an empty or whitespace-only `<slot></slot>` is still a plain slot", () => {
+    expect(codes(fallbackProg(""))).toEqual([]);
+    expect(codes(fallbackProg("\n        "))).toEqual([]);
   });
 
   test("a `${…}` block in markup holding anything after its `when`", () => {
