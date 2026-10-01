@@ -1,12 +1,14 @@
 {
   "id": "match-codes-e-type-026-match-in-markup-pos",
-  "description": "§18.9 — a bare `match ...` written DIRECTLY in markup content (not inside a `${...}` logic interpolation) is kept as text by the block-splitter and SHALL fire E-TYPE-026, steering the author to wrap the match in a logic interpolation. Regression guard: `match` is a statement, not markup text; unwrapped it would render literally.",
+  "description": "§18.9 — a bare `match ...` written DIRECTLY in markup content (a <div> body, not inside a `${...}` logic interpolation) is kept as text by the block-splitter and SHALL fire E-TYPE-026. (S441: moved from the <program> body, which is code now, into a <div>.)",
   "language-version": "1.0",
   "source-test": "compiler/tests/unit/type-system.test.js",
   "spec": "§18.9",
-  "rationale": "§18.9: `match` is not valid directly in markup; wrap it in a logic interpolation (`${ match subject { ... } }`) so the parser recognises it as a statement rather than text content. A bare markup-level `match` fires E-TYPE-026.",
+  "rationale": "§18.9: `match` is not valid directly in markup; wrap it in a logic interpolation (`${ match subject { ... } }`) so the parser recognises it as a statement rather than text content. A bare markup-level `match` fires E-TYPE-026. ⛑ S441: a `<program>` body is no longer markup content (§40.8 S441 bullet — a bare run there is code), so the case now places the match in a <div> body, the markup locus E-TYPE-026 names.",
   "expect": {
-    "codes": ["E-TYPE-026"],
+    "codes": [
+      "E-TYPE-026"
+    ],
     "notCodes": []
   }
 }

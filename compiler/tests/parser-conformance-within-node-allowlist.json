@@ -278,36 +278,36 @@
     "SPAN-COORD": 60
   },
   "examples/23-trucking-dispatch/channels/customer-events.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 35,
-    "FIELD-SHAPE": 24,
     "KIND-NAME": 8,
+    "FIELD-SHAPE": 24,
     "MISSING-FIELD": 48,
-    "SPAN-COORD": 14
+    "EXTRA-FIELD": 35,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 12
   },
   "examples/23-trucking-dispatch/channels/dispatch-board.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 33,
-    "FIELD-SHAPE": 23,
     "KIND-NAME": 8,
+    "FIELD-SHAPE": 23,
     "MISSING-FIELD": 48,
-    "SPAN-COORD": 14
+    "EXTRA-FIELD": 33,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 12
   },
   "examples/23-trucking-dispatch/channels/driver-events.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 37,
-    "FIELD-SHAPE": 25,
     "KIND-NAME": 8,
+    "FIELD-SHAPE": 25,
     "MISSING-FIELD": 48,
-    "SPAN-COORD": 14
+    "EXTRA-FIELD": 37,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 12
   },
   "examples/23-trucking-dispatch/channels/load-events.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 35,
-    "FIELD-SHAPE": 24,
     "KIND-NAME": 8,
+    "FIELD-SHAPE": 24,
     "MISSING-FIELD": 48,
-    "SPAN-COORD": 14
+    "EXTRA-FIELD": 35,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 12
   },
   "examples/23-trucking-dispatch/components/address-form.scrml": {
     "COUNT-LENGTH": 1,
@@ -3384,11 +3384,11 @@
     "SPAN-COORD": 10
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-in-when-guard-093.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 3,
     "FIELD-SHAPE": 1,
     "MISSING-FIELD": 3,
-    "SPAN-COORD": 4
+    "EXTRA-FIELD": 3,
+    "COUNT-LENGTH": 1,
+    "SPAN-COORD": 6
   },
   "samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-is-is-not-not-105.scrml": {
     "FIELD-SHAPE": 3,
@@ -6379,12 +6379,12 @@
     "SPAN-COORD": 2
   },
   "samples/rust-dev-debate-dashboard.scrml": {
+    "KIND-NAME": 17,
+    "FIELD-SHAPE": 48,
+    "MISSING-FIELD": 206,
+    "EXTRA-FIELD": 49,
     "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 55,
-    "FIELD-SHAPE": 47,
-    "KIND-NAME": 18,
-    "MISSING-FIELD": 212,
-    "SPAN-COORD": 118
+    "SPAN-COORD": 114
   },
   "samples/rust-dev-lin-lift-edge-cases.scrml": {
     "COUNT-LENGTH": 1,
@@ -6673,7 +6673,7 @@
     "FIELD-SHAPE": 87,
     "MISSING-FIELD": 341,
     "EXTRA-FIELD": 110,
-    "COUNT-LENGTH": 5,
+    "COUNT-LENGTH": 4,
     "SPAN-COORD": 236
   },
   "stdlib/math/index.scrml": {
@@ -6818,5 +6818,6 @@
     "KIND-NAME": 31,
     "MISSING-FIELD": 407,
     "SPAN-COORD": 63
-  }
+  },
+  "__NOTE_S441__": "S441 declared-prose-body: rows regenerated for fixtures whose <program>/<page>/<channel> body-top runs are now lifted as code in BOTH front ends (rust-dev-debate-dashboard: native now lifts `on mount {}`; the 4 trucking channels: SPAN-COORD improved; stdlib/http: its comment-leaked module tail is now parsed as code; phase3-is-in-when-guard-093: source migrated). [review round: stdlib/http row regenerated after the line-granular prose recovery.]"
 }

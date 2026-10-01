@@ -3,8 +3,10 @@ ${
   <role>: Role = .Admin
 }
 <program>
-  match @role {
-    .Admin :> "admin"
-    .Editor :> "editor"
-  }
+  <div>
+    match @role {
+      .Admin :> "admin"
+      .Editor :> "editor"
+    }
+  </div>
 </program>

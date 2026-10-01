@@ -1,0 +1,5 @@
+<program>
+<count> = 0
+Hello world, this is prose.
+<p>${@count}</p>
+</program>

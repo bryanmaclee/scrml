@@ -41,7 +41,7 @@
     "impl1-ts": {
       "gap": "g-nested-path-method-call-dropped-when-not-first-statement",
       "fails": {
-        "runtime": "sha256:575bcf9b9f174367"
+        "runtime": "sha256:6744fc50e4841499"
       }
     }
   }

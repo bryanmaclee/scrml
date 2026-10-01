@@ -114,6 +114,15 @@ export interface DBTypeViews {
 /** The output of the PA stage. */
 export interface ProtectAnalysis {
   views: Map<string, DBTypeViews>;
+  /**
+   * Every BASE TABLE the compile knows the columns of, lower-cased: each
+   * `CREATE TABLE` a file declares (`?{}`, `<schema>`, `schemaFor`) plus every
+   * table in a database a `<db>` block opened. §14.8.9 (S443 round 6, P4): a
+   * query over a table outside this set — a view created at runtime, a view in
+   * the DB — may carry a protected column under any name, so the egress floor
+   * strips its rows wholesale instead of assuming "no protected columns".
+   */
+  declaredTables?: Set<string>;
 }
 
 /**
@@ -1175,6 +1184,7 @@ export function runPA(input: PAInput): { protectAnalysis: ProtectAnalysis; error
   // §44.2 (ruling:user-voice-scrml.md S445 item 6) — the database files this PROGRAM
   // owns (declares schema for), the same predicate codegen uses to emit `create`.
   const ownedDbFiles = collectProgramOwnedDbFiles(files as unknown[]);
+  const declaredTables = new Set<string>();
 
   try {
     for (const fileAST of files) {
@@ -1213,10 +1223,12 @@ export function runPA(input: PAInput): { protectAnalysis: ProtectAnalysis; error
         if (!createTableMap.has(tableKey)) createTableMap.set(tableKey, createSql);
       }
 
+      for (const tableKey of createTableMap.keys()) declaredTables.add(foldTableName(tableKey));
+
       const dbBlocks = collectDbBlocks(nodes);
 
       for (const block of dbBlocks) {
-        processDbBlock(block, filePath, cache, views, errors, createTableMap, ownedDbFiles);
+        processDbBlock(block, filePath, cache, views, errors, createTableMap, declaredTables, ownedDbFiles);
       }
     }
   } finally {
@@ -1224,9 +1236,16 @@ export function runPA(input: PAInput): { protectAnalysis: ProtectAnalysis; error
   }
 
   return {
-    protectAnalysis: { views },
+    protectAnalysis: { views, declaredTables },
     errors,
   };
+}
+
+/** Lower-cased, schema-qualifier-free table name (SQLite identifiers are case-insensitive). */
+function foldTableName(name: string): string {
+  const unquoted = name.trim().replace(/^["`\[]|["`\]]$/g, "");
+  const dot = unquoted.lastIndexOf(".");
+  return (dot === -1 ? unquoted : unquoted.slice(dot + 1)).replace(/^["`\[]|["`\]]$/g, "").toLowerCase();
 }
 
 // ---------------------------------------------------------------------------
@@ -1244,6 +1263,7 @@ function processDbBlock(
   views: Map<string, DBTypeViews>,
   errors: PAError[],
   createTableMap: Map<string, string>,
+  declaredTables: Set<string> = new Set(),
   ownedDbFiles: ReadonlySet<string> = new Set(),
 ): void {
   const blockSpan = block.span;
@@ -1342,6 +1362,14 @@ function processDbBlock(
   const ownsSchema = srcKind === "file" && ownedDbFiles.has(resolveDbFilePath(srcClass, filePath));
   const db = resolveDb(dbPath, tableNames, createTableMap, cache, blockSpan, errors, isDriverConnectionUri, srcKind === "unsupported", displayPath, ownsSchema);
   if (db === null) return;
+  // §14.8.9 (S443 round 6, P4) — the BASE TABLES this database holds are tables
+  // whose columns the compile can know; a view (or anything else) is not.
+  try {
+    const rows = db.query("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name?: unknown }>;
+    for (const r of rows) if (typeof r?.name === "string") declaredTables.add(foldTableName(r.name));
+  } catch {
+    // Unreadable catalogue: nothing is added, so its tables stay unknown (fail closed).
+  }
 
   // ------------------------------------------------------------------
   // Step 6: Read the full schema for each named table.

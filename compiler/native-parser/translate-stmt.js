@@ -2412,6 +2412,16 @@ function makeExportDecl(stmt, counter) {
         }
     }
 
+    // S441 round 5b — the live export-decl has no DEFAULT export and no
+    // NAMESPACE re-export (`export * as ns from …`): the live ast-builder
+    // records neither (kind and name null), and nothing downstream compiles
+    // them. Say so here instead of dressing one up as a named export — pre-fix
+    // `export default function f() {}` translated as a named `function` export
+    // and compiled clean with `f` never defined (runtime ReferenceError).
+    if (isUnrepresentableExport(stmt)) {
+        exportKind = null;
+        exportedName = null;
+    }
     return {
         id: stampId(counter),
         kind: "export-decl",
@@ -2421,6 +2431,15 @@ function makeExportDecl(stmt, counter) {
         reExportSource,
         span: spanOrZero(stmt.span),
     };
+}
+
+// isUnrepresentableExport — a native `Export` the live export-decl cannot
+// carry: `export default …`, or a namespace re-export `export * as ns from …`.
+export function isUnrepresentableExport(stmt) {
+    if (stmt === undefined || stmt === null) return false;
+    if (stmt.isDefault === true) return true;
+    const specs = Array.isArray(stmt.specifiers) ? stmt.specifiers : [];
+    return specs.some((s) => s && s.specifierKind === "Namespace");
 }
 
 // exportSpecifierName — the exported name of one export-clause specifier.

@@ -1,0 +1,13 @@
+{
+  "id": "protect-callback-param-e006",
+  "description": "§14.8.9 S443 round 6 (L1) — a callback handed to a call the compiler has no model for (here `String.prototype.replace`) receives the protected value; what it stores escapes. E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "§14.8.9 (S441 amendment): \"Provenance is preserved by default. Any step not positively known to produce a value of independent identity preserves it\" and \"Unresolvable callees fail closed.\" A callback's parameters were bound clean, so `u.passwordHash.replace(/.+/, m => { seen = m })` then `return seen` served the hash over HTTP (measured, S443 round 6). The callback of an unmodelled call now receives the join of the receiver and every argument.",
+  "expect": {
+    "codes": ["E-PROTECT-006"],
+    "notCodes": ["I-PROTECT-STRIP-001"],
+    "severity": { "E-PROTECT-006": "error" }
+  }
+}

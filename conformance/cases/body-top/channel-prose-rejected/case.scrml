@@ -1,0 +1,7 @@
+<program>
+<channel name="c">
+  <msgs> = []
+  hello channel prose
+</>
+<p>x</p>
+</program>

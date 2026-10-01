@@ -1,0 +1,16 @@
+{
+  "id": "protect-hmac-constant-key-e006",
+  "description": "§14.8.9 RULING S445 #4 — an HMAC keyed by a compile-time CONSTANT (`hmac(\"public-key\", String(u.pin))`) is a digest of the protected value, reversible by enumeration; returning it is E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "RULING S445 #4 (refines S443 #7): only an HMAC whose key is not a compile-time constant counts as keyed. A literal / const-bound / template-of-literals / concatenation-of-constants key is public, so `hmac(\"public-key\", pin)` of a 4-digit pin falls in 10^4 tries — the bare-digest reasoning. A key from env / config / a secret store / a runtime value still declassifies.",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}
