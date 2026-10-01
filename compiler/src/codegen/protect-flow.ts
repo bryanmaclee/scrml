@@ -161,6 +161,88 @@ interface RowPart {
   all: boolean;
   /** Columns `reveal`ed on EVERY path that reaches here (intersection) — FOLDED names. */
   revealed: Set<string>;
+  /**
+   * S447 round 8 — WHERE in the value the row sits: the set of property paths
+   * from the value to a descriptor-bearing row (see `ROW_SELF` / `ANY_KEY` /
+   * `ROW_ANYWHERE`). `""` = the value IS the row (or an array of rows — what a
+   * query returns); `"h"` = the row is the value's `h` field; `"a\u0001b"` =
+   * `value.a.b`. Round 7 had no such part: "is, OR contains, a row" was one bit,
+   * and a named read applied column semantics to both — so `const t = { h: u };
+   * return t.h.passwordHash` read "column `h` of the row" (not a protected
+   * column), then "column `passwordHash` of nothing", and served the hash
+   * (measured over HTTP on base and round 7, with `JSON.stringify(t.h)`,
+   * `Object.values(t.h)`, `t.rs.map(…)`, `t.a.b.pin` and `this.h.passwordHash`).
+   * Now a named read off a value yields the row wherever a path continues
+   * through that key, and reads a COLUMN only where the value may itself be the
+   * row. A path is precise only where the analysis built the container itself
+   * (an object / array literal, a spread copy); every construction it does not
+   * model exactly — a write into an alias class, the global heap, a host call's
+   * result, a hook's return — yields `ROW_ANYWHERE` (fail closed: the row may
+   * be the value or anything under it, at any depth).
+   */
+  paths: Set<string>;
+}
+
+/** The value IS the row (or an array of rows). */
+const ROW_SELF = "";
+/** Path separator between property names. */
+const PATH_SEP = "\u0001";
+/** A path segment matching ANY property name (an array element, a key the compiler cannot read). */
+const ANY_KEY = "\u0002";
+/** The row may be the value itself or anything reachable from it, at any depth (fail closed). */
+const ROW_ANYWHERE = "\u0003";
+/** Paths longer than this collapse to `ROW_ANYWHERE` (keeps the lattice finite). */
+const MAX_ROW_PATH = 4;
+
+/** `ROW_ANYWHERE` subsumes every other path. */
+function normPaths(paths: Set<string>): Set<string> {
+  return paths.has(ROW_ANYWHERE) && paths.size > 1 ? new Set([ROW_ANYWHERE]) : paths;
+}
+
+/** `paths` one level down: the container now holds them under `seg` (null = same depth — a copy). */
+function prefixPaths(paths: Set<string>, seg: string | null): Set<string> {
+  if (seg === null) return new Set(paths);
+  const out = new Set<string>();
+  for (const p of paths) {
+    if (p === ROW_ANYWHERE) { out.add(ROW_ANYWHERE); continue; }
+    const np = p === ROW_SELF ? seg : seg + PATH_SEP + p;
+    out.add(np.split(PATH_SEP).length > MAX_ROW_PATH ? ROW_ANYWHERE : np);
+  }
+  return normPaths(out);
+}
+
+/**
+ * Reading property `key` (null = a key the compiler cannot read) off a value
+ * whose row sits at `paths`: `column` = the value may itself be the row, so the
+ * read may be a COLUMN of it; `next` = where the row sits in what the read
+ * yields. A numeric / dynamic read of the row itself is an ELEMENT of a row
+ * array (still a row).
+ */
+function readPaths(paths: Set<string>, key: string | null, numeric: boolean): { column: boolean; next: Set<string> } {
+  let column = false;
+  const next = new Set<string>();
+  for (const p of paths) {
+    if (p === ROW_ANYWHERE) { column = true; next.add(ROW_ANYWHERE); continue; }
+    if (p === ROW_SELF) {
+      column = true;
+      if (key === null || numeric) next.add(ROW_SELF);
+      continue;
+    }
+    const i = p.indexOf(PATH_SEP);
+    const seg = i < 0 ? p : p.slice(0, i);
+    if (key === null || seg === ANY_KEY || seg === key) next.add(i < 0 ? ROW_SELF : p.slice(i + 1));
+  }
+  return { column, next: normPaths(next) };
+}
+
+/** The row, placed somewhere the analysis cannot follow: at any depth (fail closed). */
+function rowAnywhere(r: RowPart | null): RowPart | null {
+  return r ? { ...copyRow(r), paths: new Set([ROW_ANYWHERE]) } : null;
+}
+
+/** A copy of `t` whose row (if any) may sit anywhere in it (see `ROW_ANYWHERE`). */
+function anyDepth(t: Taint): Taint {
+  return t.row ? { ...t, row: rowAnywhere(t.row) } : t;
 }
 
 /**
@@ -241,6 +323,35 @@ interface Taint {
    * STORE puts under a key (`o[k] = store` stores an object, not its methods).
    */
   own?: Set<Closure>;
+  /**
+   * S447 round 8 — the GLOBAL NAMES the value was read through: every property
+   * name on the path(s) by which it was reached from the global heap
+   * (`globalThis.box` → {globalThis, box}; `const g = globalThis.box; g` → the
+   * same; `const { C } = globalThis` → {globalThis, C}; `const P = process;
+   * P.C` → {process, C}). The global heap is ONE abstract object, so every
+   * function ever stored in it is a field of every value read from it; a call
+   * through such a value applies only the functions stored under a name on its
+   * path (`globalFnsByName`). Round 7 knew the path only when the call SPELLED
+   * it (`globalThis.box.set(u)`), so an alias dropped the hook: `const g =
+   * globalThis.box; g.set(u)` modelled `set` as a Map write and served the hash,
+   * and `u instanceof C` with `C` aliased called no `hasInstance` (measured on
+   * base and round 7). Names travel with the value — through bindings,
+   * parameters, containers and returns — so an alias resolves to the same
+   * abstract object as its named path.
+   */
+  gn?: Set<string>;
+  /**
+   * The value may have been read from the global heap through a path the
+   * compiler cannot name (a computed key, an unmodelled method's result): a
+   * call through it may reach ANY global-stored function (fail closed).
+   */
+  gnAny?: true;
+}
+
+/** Copy `from`'s global names onto `to` (in place). */
+function carryGlobalNames(from: Taint, to: Taint): void {
+  if (from.gnAny) to.gnAny = true;
+  if (from.gn && from.gn.size > 0) to.gn = new Set(from.gn);
 }
 
 /** The functions the value may itself be (see `Taint.own`). */
@@ -286,6 +397,7 @@ function dataOnly(t: Taint): Taint {
   const r: Taint = { row: t.row ? copyRow(t.row) : null, scalar: new Map(t.scalar), deep: new Map(t.deep), fns: new Set() };
   if (t.len !== undefined) r.len = new Map(t.len);
   if (t.k !== undefined) r.k = t.k;
+  carryGlobalNames(t, r);
   return r;
 }
 
@@ -294,7 +406,7 @@ function refsOf(t: Taint): Set<string> {
 }
 
 function copyRow(r: RowPart): RowPart {
-  return { tags: new Set(r.tags), cols: new Set(r.cols), all: r.all, revealed: new Set(r.revealed) };
+  return { tags: new Set(r.tags), cols: new Set(r.cols), all: r.all, revealed: new Set(r.revealed), paths: new Set(r.paths) };
 }
 
 function joinRow(a: RowPart | null, b: RowPart | null): RowPart | null {
@@ -302,7 +414,8 @@ function joinRow(a: RowPart | null, b: RowPart | null): RowPart | null {
   if (!b) return copyRow(a);
   const revealed = new Set<string>();
   for (const c of a.revealed) if (b.revealed.has(c)) revealed.add(c);
-  return { tags: new Set([...a.tags, ...b.tags]), cols: new Set([...a.cols, ...b.cols]), all: a.all || b.all, revealed };
+  const paths = normPaths(new Set([...a.paths, ...b.paths]));
+  return { tags: new Set([...a.tags, ...b.tags]), cols: new Set([...a.cols, ...b.cols]), all: a.all || b.all, revealed, paths };
 }
 
 function mergeMap(into: Map<string, string>, from: Map<string, string>): void {
@@ -322,6 +435,11 @@ function join(...ts: Taint[]): Taint {
       for (const r of t.refs) out.refs.add(r);
     }
     if (t.k) out.k = (out.k ?? 0) | t.k;
+    if (t.gnAny) out.gnAny = true;
+    if (t.gn && t.gn.size > 0) {
+      if (!out.gn) out.gn = new Set();
+      for (const n of t.gn) out.gn.add(n);
+    }
   }
   if (out.fns.size > 0 && ts.some((t) => t && t.own !== undefined)) {
     const own = new Set<Closure>();
@@ -345,17 +463,26 @@ function naked(t: Taint): Map<string, string> {
   return m;
 }
 
-/** The value, placed inside a fresh container (object / array literal slot). */
-function containerOf(t: Taint): Taint {
+/**
+ * The value, placed inside a fresh container — under property `seg` (an object
+ * literal's key; `ANY_KEY` by default: an array slot, an unknown key), or at the
+ * SAME depth (`null`: a spread copy, which copies the value's own properties).
+ */
+function containerOf(t: Taint, seg: string | null = ANY_KEY): Taint {
   // The container HOLDS the value — if it is an object, the container reaches it.
-  const c: Taint = { row: t.row ? copyRow(t.row) : null, scalar: new Map(), deep: naked(t), fns: new Set(t.fns), refs: new Set(refsOf(t)), ...(t.k ? { k: t.k } : {}) };
+  const row = t.row ? { ...copyRow(t.row), paths: prefixPaths(t.row.paths, seg) } : null;
+  const c: Taint = { row, scalar: new Map(), deep: naked(t), fns: new Set(t.fns), refs: new Set(refsOf(t)), ...(t.k ? { k: t.k } : {}) };
   if (t.fns.size > 0) c.own = new Set(); // a container is not itself any of the functions it holds
+  carryGlobalNames(t, c);
   return c;
 }
 
 /** An element / field of the value, when WHICH one is not statically known. */
 function elemOf(t: Taint): Taint {
-  return { row: t.row ? copyRow(t.row) : null, scalar: naked(t), deep: new Map(t.deep), fns: new Set(t.fns), refs: new Set(refsOf(t)), ...(t.k ? { k: t.k } : {}) };
+  const row = t.row ? { ...copyRow(t.row), paths: readPaths(t.row.paths, null, false).next } : null;
+  const e: Taint = { row: row && row.paths.size > 0 ? row : null, scalar: naked(t), deep: new Map(t.deep), fns: new Set(t.fns), refs: new Set(refsOf(t)), ...(t.k ? { k: t.k } : {}) };
+  carryGlobalNames(t, e);
+  return e;
 }
 
 /** The protected labels a row still carries (not `reveal`ed). */
@@ -373,13 +500,14 @@ function everything(t: Taint, site: string): Map<string, string> {
 
 function taintKey(t: Taint): string {
   const r = t.row
-    ? `${[...t.row.tags].sort().join(",")}|${[...t.row.cols].sort().join(",")}|${t.row.all}|${[...t.row.revealed].sort().join(",")}`
+    ? `${[...t.row.tags].sort().join(",")}|${[...t.row.cols].sort().join(",")}|${t.row.all}|${[...t.row.revealed].sort().join(",")}|${[...t.row.paths].sort().join(",")}`
     : "-";
   const f = [...t.fns].map((c) => c.cid).sort((a, b) => a - b).join(",");
   const a = [...refsOf(t)].sort().join(",");
   const l = t.len ? [...t.len.keys()].sort().join(",") : "~";
   const o = t.own ? [...t.own].map((c) => c.cid).sort((x, y) => x - y).join(",") : "~";
-  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${f}#${a}#${l}#${t.k ?? 0}#${o}`;
+  const g = t.gnAny ? "?" : t.gn ? [...t.gn].sort().join(",") : "";
+  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${f}#${a}#${l}#${t.k ?? 0}#${o}#${g}`;
 }
 
 /** The protected part of a taint's key (no function values). */
@@ -1275,11 +1403,14 @@ class FlowAnalysis {
    * itself an egress (`E-PROTECT-006`, sink kind "global"): code the compiler
    * cannot see — a library, a child process given `process.env` — may read it.
    */
-  private readGlobal(): Taint {
+  private readGlobal(name: string): Taint {
     const own = this.bindings.get(GLOBAL_CELL) ?? clean();
     const writes = this.classWrites.get(this.find(GLOBAL_CELL));
-    const t = writes ? join(own, writes) : own;
-    return { ...t, refs: new Set([GLOBAL_CELL]) };
+    const t = anyDepth(writes ? join(own, writes) : own);
+    // Round 8: the value carries the global name it was read through (`Taint.gn`).
+    const r: Taint = { ...t, refs: new Set([GLOBAL_CELL]), gn: new Set([name]) };
+    delete r.gnAny;
+    return r;
   }
 
   /**
@@ -1306,17 +1437,66 @@ class FlowAnalysis {
       set = this.globalFnsByName.get(name) ?? new Set();
       this.globalFnsByName.set(name, set);
     }
-    for (const f of fns) if (!set.has(f)) { set.add(f); this.changed = true; }
+    for (const f of fns) {
+      if (!set.has(f)) { set.add(f); this.changed = true; }
+      if (name !== null) {
+        let ns = this.globalNamesByFn.get(f);
+        if (!ns) { ns = new Set(); this.globalNamesByFn.set(f, ns); }
+        ns.add(name);
+      }
+    }
   }
-  /** The global-stored functions a call through global `path` may reach. */
-  private globalFnsFor(parts: string[]): Set<Closure> {
+  /** The names each NAMED-global-stored function was stored under (inverse of `globalFnsByName`). */
+  private globalNamesByFn = new Map<Closure, Set<string>>();
+
+  /**
+   * S447 round 8 — the names a call through `t` (a value read from the global
+   * heap) may reach functions under: the names it was read through (`Taint.gn`)
+   * plus `extra` (the called method's name). NULL when the path cannot be named
+   * — a computed key, an unmodelled method's result, or a value that joined the
+   * global heap's alias class without being read from it — and then every
+   * function the value holds is a candidate (fail closed).
+   */
+  private globalNames(t: Taint, extra: Array<string | null>): Set<string> | null {
+    if (t.gnAny || !t.gn) return null;
+    const out = new Set(t.gn);
+    for (const e of extra) if (e !== null) out.add(e);
+    return out;
+  }
+
+  /**
+   * Of the functions `fns` a value read from the global heap holds, the ones a
+   * call through names `names` may reach: every function stored under one of
+   * those names, every function stored where no name was readable, and every
+   * function never recorded as a NAMED global store (it reached the value some
+   * other way — fail closed). `names === null`: all of them.
+   */
+  private globalCandidates(fns: Set<Closure>, names: Set<string> | null): Set<Closure> {
+    if (names === null) return fns;
+    const out = new Set<Closure>();
+    for (const f of fns) {
+      const ns = this.globalNamesByFn.get(f);
+      if (!ns || this.globalFnsUnnamed.has(f)) { out.add(f); continue; }
+      for (const n of ns) if (names.has(n)) { out.add(f); break; }
+    }
+    return out;
+  }
+  /**
+   * The global-stored functions a call through global `path` may reach — every
+   * one when the path cannot be named (`null`, round 8: fail closed).
+   */
+  private globalFnsFor(parts: Iterable<string> | null): Set<Closure> {
     const out = new Set<Closure>(this.globalFnsUnnamed);
+    if (parts === null) {
+      for (const set of this.globalFnsByName.values()) for (const f of set) out.add(f);
+      return out;
+    }
     for (const p of parts) for (const f of this.globalFnsByName.get(p) ?? []) out.add(f);
     return out;
   }
   /** What those functions have returned so far (data only), cached per pass. */
   private globalRetCache = new Map<string, Taint>();
-  private globalFnRetFor(parts: string[]): Taint {
+  private globalFnRetFor(parts: Iterable<string> | null): Taint {
     const fns = this.globalFnsFor(parts);
     if (fns.size === 0) return clean();
     const key = [...fns].map((c) => c.cid).sort((a, b) => a - b).join(",");
@@ -1368,7 +1548,7 @@ class FlowAnalysis {
 
   private getBinding(name: string, scope: Scope, depth = 0): Taint {
     const s = this.resolve(name, scope);
-    if (!s) return this.readGlobal();
+    if (!s) return this.readGlobal(name);
     if (s.parent === null) {
       const imp = s.mod.imports.get(name);
       if (imp) return this.importValue(imp, depth);
@@ -1417,7 +1597,8 @@ class FlowAnalysis {
     const key = resolved ? `${s.id}:${name}` : GLOBAL_CELL;
     // The value may BE another binding's object — join its alias class.
     for (const r of refsOf(t)) this.unite(key, r);
-    const plain = { ...t };
+    // A write INTO an alias class may sit at any depth of its objects (round 8).
+    const plain = isWrite || !resolved ? anyDepth({ ...t }) : { ...t };
     delete plain.refs;
     // A write INTO the object goes to the whole alias class; an assignment of
     // the binding itself stays the binding's own.
@@ -1778,7 +1959,10 @@ class FlowAnalysis {
   /** Merge a container write into the alias class of binding cell `key`. */
   private writeCell(key: string, t: Taint): void {
     for (const r of refsOf(t)) this.unite(key, r);
-    const plain = { ...t };
+    // An alias class holds objects at DIFFERENT depths (a field read aliases
+    // into its container's class), so what is written into it may sit at any
+    // depth of any of them (round 8 — see `RowPart.paths`).
+    const plain = anyDepth({ ...t });
     delete plain.refs;
     const slot = this.find(key);
     this.globalStore(slot, plain);
@@ -1807,14 +1991,21 @@ class FlowAnalysis {
     }
     const numeric = key !== null && /^\d+$/.test(key);
     let columnRead = false;
+    /** The read yields (or may yield) a row — an element of a row array, or a row held in a field. */
+    let rowOut = false;
     if (o.row) {
-      if (dynamic) {
-        // `rows[i]` (an element — still a row) OR `u[k]` (any column): both.
-        r.row = copyRow(o.row);
+      // S447 round 8 — WHERE the row sits decides what a read yields (see
+      // `RowPart.paths`): a COLUMN only where the value may itself be the row;
+      // the row itself wherever a path continues through this key.
+      const { column, next } = readPaths(o.row.paths, dynamic ? null : key, numeric);
+      if (next.size > 0) {
+        r.row = { ...copyRow(o.row), paths: next };
+        rowOut = true;
+      }
+      if (column && dynamic) {
+        // `u[k]` — any column.
         for (const c of unrevealed(o.row)) r.scalar.set(c, this.site(node, fn));
-      } else if (numeric) {
-        r.row = copyRow(o.row);
-      } else if (key !== null) {
+      } else if (column && !numeric && key !== null) {
         // A named protected column keeps its (declared) name; any other column
         // read off a strip-all row (unresolvable SQL) is protected-by-default,
         // labelled `*`. Column names compare case-insensitively (round 5, F2).
@@ -1836,8 +2027,11 @@ class FlowAnalysis {
     // The read may yield an object REACHABLE from `o` (`arr[0]`, `box.m`) — it
     // aliases into `o`'s cell. A named column read off a row is a primitive and
     // does not (a row column cannot alias its row).
-    const namedColumnOffRow = o.row !== null && !dynamic && !numeric && o.deep.size === 0;
+    const namedColumnOffRow = o.row !== null && !dynamic && !numeric && o.deep.size === 0 && !rowOut;
     if (!namedColumnOffRow && refsOf(o).size > 0) r.refs = new Set(refsOf(o));
+    // A field of a value read from the global heap is read through one more name (round 8).
+    if (o.gnAny || (o.gn && dynamic)) r.gnAny = true;
+    else if (o.gn) r.gn = new Set([...o.gn, ...(key !== null ? [key] : [])]);
     // A column read straight off a row is a primitive: its `.length` is the
     // §14.8.9 allowlisted derived count. Anything that merged container
     // contents (`o.deep`) may be an object with its own `length` — default.
@@ -1861,7 +2055,7 @@ class FlowAnalysis {
         return clean();
       case "MetaProperty":
         // `import.meta` is a host-owned object like any global (L3).
-        return this.readGlobal();
+        return this.readGlobal("import.meta");
       case "TemplateLiteral": {
         const r = clean();
         // The string's length is the sum of its parts' lengths (F1).
@@ -1891,7 +2085,11 @@ class FlowAnalysis {
         if (tagPath !== null || this.isGlobalValue(tagT)) {
           // A GLOBAL tag (`String.raw`…``) is a platform function — plus any
           // function stored in the global heap under a name on its path.
-          const gf = this.carriesProtected(values) ? this.globalFnsFor(tagPath !== null ? tagPath.split(".") : []) : new Set<Closure>();
+          // (Round 8: through an alias too — the tag's global names, `Taint.gn`.)
+          const gf = this.carriesProtected(values)
+            ? this.globalCandidates(tagT.fns, tagPath !== null ? new Set(tagPath.split(".")) : this.globalNames(tagT, []))
+            : new Set<Closure>();
+          if (gf.size > 0 && recv) this.recordThis(gf, recv);
           const viaGlobal = gf.size > 0 ? this.applyFns(gf, [strings, ...values], undefined, node, fn) : clean();
           return join(viaGlobal, this.unknownCall(tagPath, [strings, ...values], node, fn));
         }
@@ -1931,9 +2129,10 @@ class FlowAnalysis {
         const stored: Array<{ fns: Set<Closure>; key: string | null; accessor: boolean; copy?: true }> = [];
         for (const pr of node.properties) {
           if (pr.type === "SpreadElement") {
-            // `{...row}` copies the enumerable Symbol descriptor: still a row.
+            // `{...row}` copies the enumerable Symbol descriptor: still a row —
+            // and every own property at the SAME depth (`{ ...t }.h` is `t.h`).
             const v = this.evalExpr(pr.argument, scope, fn);
-            r = join(r, containerOf(v));
+            r = join(r, containerOf(v, null));
             if (v.fns.size > 0) stored.push({ fns: v.fns, key: null, accessor: false, copy: true });
             continue;
           }
@@ -1943,11 +2142,14 @@ class FlowAnalysis {
           // hooks' results are part of it: see `storeFns`).
           if (pr.computed) r = join(r, containerOf(keyOnly(this.evalExpr(pr.key, scope, fn))));
           const v = this.evalExpr(pr.value, scope, fn);
-          r = join(r, containerOf(v));
+          const key = pr.computed ? this.literalKey(pr.key, scope) : (pr.key?.type === "Identifier" ? pr.key.name : staticKey(pr.key));
+          // The value sits under its key (round 8: `{ h: u }.h` is the row). A
+          // key the compiler cannot read may be any name; an accessor's value is
+          // what its getter returns (a hook — see `storeFns`).
+          r = join(r, containerOf(v, key ?? ANY_KEY));
           // Only a function the property IS is stored under its key — a nested
           // object's functions belong to that object (`ownOf`).
           if (ownOf(v).size > 0) {
-            const key = pr.computed ? this.literalKey(pr.key, scope) : (pr.key?.type === "Identifier" ? pr.key.name : staticKey(pr.key));
             stored.push({ fns: ownOf(v), key, accessor: pr.kind === "get" || pr.kind === "set" });
           }
         }
@@ -2005,9 +2207,16 @@ class FlowAnalysis {
           // A GLOBAL right operand (`x instanceof Response`) carries whatever
           // anything ever stored in the global heap: only the functions stored
           // under a name on its path are candidates (see `globalFnsByName`).
+          // Round 8: the right operand's global NAMES travel with it, so an alias
+          // (`const { C } = globalThis`, `const C = globalThis.C`, `P.C` with
+          // `const P = process`) reaches the hook stored under `C` exactly as
+          // `globalThis.C` does — and an operand read through a path that cannot
+          // be named reaches every function it holds (fail closed). Round 7
+          // looked only at a SPELLED global path and called nothing for an alias
+          // (measured: all three served the hash on base and round 7).
           const gpath = this.globalPath(node.right, scope);
           const hooks = gpath !== null || this.isGlobalValue(rr)
-            ? (this.carriesProtected([l]) ? this.globalFnsFor(gpath !== null ? gpath.split(".") : []) : new Set<Closure>())
+            ? (this.carriesProtected([l]) ? this.globalCandidates(rr.fns, gpath !== null ? new Set(gpath.split(".")) : this.globalNames(rr, [])) : new Set<Closure>())
             : rr.fns;
           if (hooks.size > 0) {
             this.recordThis(hooks, rr);
@@ -2255,7 +2464,7 @@ class FlowAnalysis {
         if (!this.tagMeta.has(id)) this.tagMeta.set(id, { mod: this.curMod!, skeleton: this.tagSkeleton(node.arguments[0]), cols });
         return {
           ...clean(),
-          row: { tags: new Set([id]), cols: new Set(cols === "*" ? [] : cols), all: cols === "*", revealed: new Set() },
+          row: { tags: new Set([id]), cols: new Set(cols === "*" ? [] : cols), all: cols === "*", revealed: new Set(), paths: new Set([ROW_SELF]) },
           k: 2,
         };
       }
@@ -2316,7 +2525,7 @@ class FlowAnalysis {
         const desc = args[2] ?? clean();
         // A getter / setter / value function runs with `this` = the target (6e, round 7).
         const got = this.storeFns(desc.fns, args[0] ?? clean(), node, fn, this.literalKey(node.arguments[1], scope), true);
-        const written = containerOf(join(desc, got, keyOnly(args[1] ?? clean())));
+        const written = anyDepth(containerOf(join(desc, got, keyOnly(args[1] ?? clean()))));
         this.writeThrough(node.arguments[0], args[0] ?? clean(), written, scope);
         if (this.literalKey(node.arguments[1], scope) === null) this.markerRemoved(node.arguments[0], args[0] ?? clean(), node, fn, scope);
         return join(args[0] ?? clean(), written);
@@ -2328,9 +2537,9 @@ class FlowAnalysis {
         const got = path === "Reflect.set"
           ? this.storeFns(ownOf(args[2] ?? clean()), args[0] ?? clean(), node, fn, this.literalKey(node.arguments[1], scope))
           : this.storeFns((args[1] ?? clean()).fns, args[0] ?? clean(), node, fn, null, true);
-        const written = path === "Object.defineProperties"
+        const written = anyDepth(path === "Object.defineProperties"
           ? containerOf(join(args[1] ?? clean(), got))
-          : containerOf(join(keyOnly(args[1] ?? clean()), args[2] ?? clean(), got));
+          : containerOf(join(keyOnly(args[1] ?? clean()), args[2] ?? clean(), got)));
         this.writeThrough(node.arguments[0], args[0] ?? clean(), written, scope);
         if (path === "Object.defineProperties" || (path === "Reflect.deleteProperty" && this.literalKey(node.arguments[1], scope) === null)) {
           this.markerRemoved(node.arguments[0], args[0] ?? clean(), node, fn, scope);
@@ -2399,20 +2608,37 @@ class FlowAnalysis {
       // is applied (only when protected data is passed) and whose returns join
       // the result. See `globalFnsByName`.
       const recvGlobal = path !== null || this.isGlobalValue(recv);
-      const gParts = path !== null ? path.split(".") : (method !== null ? [method] : []);
+      // The global names the call reaches functions under (round 8): the spelled
+      // path, or the names the receiver was read through — null when they
+      // cannot be named (then every function it holds is a candidate).
+      const gNames: Set<string> | null = path !== null ? new Set(path.split(".")) : recvGlobal ? this.globalNames(recv, [method]) : null;
       // S447 round 7 — a function the compile stored on the receiver is CALLED,
       // with `this` = the receiver, WHATEVER its name: a user method named like a
       // built-in (`o.set(u)`, `o.map(f)`, `o.get(k)`) used to take the built-in's
       // model only, and `o.set = function (r) { this.h = r.passwordHash };
       // o.set(u); return o` served the hash (measured). The built-in model below
       // still applies on top (the receiver may be a real Map / array).
+      //
+      // S447 round 8 — and so for a receiver in the GLOBAL heap: round 7 skipped
+      // the stored-function call there and reached a global function only from
+      // the generic global block AFTER the built-in models returned, so `const g =
+      // globalThis.box; g.set(u)` was modelled as a Map write alone and served the
+      // hash (measured on base and round 7; `g.map(u)`, `g.forEach(u)` the same).
+      // Every global value holds every global-stored function (one heap), so the
+      // candidates are those stored under a name the call reaches (`gNames`);
+      // applied only when protected data is passed, as before (perf).
       let own = clean();
-      if (!recvGlobal && this.hasCallable(viaField)) {
-        // `new o.F(…)` constructs; `o.m(…)` runs with `this` = the receiver.
-        if (node.type === "NewExpression") own = this.construct(viaField.fns, args, node, fn);
-        else {
-          this.recordThis(viaField.fns, recv);
-          own = this.applyFns(viaField.fns, args, undefined, node, fn);
+      if (this.hasCallable(viaField)) {
+        const cands = recvGlobal
+          ? (this.carriesProtected(args) ? this.globalCandidates(viaField.fns, gNames) : new Set<Closure>())
+          : viaField.fns;
+        if (cands.size > 0) {
+          // `new o.F(…)` constructs; `o.m(…)` runs with `this` = the receiver.
+          if (node.type === "NewExpression") own = this.construct(cands, args, node, fn);
+          else {
+            this.recordThis(cands, recv);
+            own = this.applyFns(cands, args, undefined, node, fn);
+          }
         }
       }
 
@@ -2426,13 +2652,6 @@ class FlowAnalysis {
         return method === "push" || method === "unshift" ? join(own, cbm) : join(own, recv, containerOf(written), cbm);
       }
       let r = own;
-      if (recvGlobal) {
-        const gf = this.globalFnsFor(gParts);
-        if (gf.size > 0 && this.carriesProtected(args)) {
-          this.recordThis(gf, recv);
-          r = join(r, this.applyFns(gf, args, undefined, node, fn));
-        }
-      }
       // L1 — a method the analysis has no model for may call any function it is
       // handed (a compile-defined method is walked exactly instead, above).
       if (recvGlobal || !this.hasCallable(viaField)) r = join(r, this.opaqueCallbacks(recvGlobal ? dataOnly(recv) : recv, args, node, fn));
@@ -2465,7 +2684,8 @@ class FlowAnalysis {
       // (Not for a GLOBAL-rooted callee: the global heap's function values are
       // whatever anything ever stored there, not a model of `Math.max`.)
       if (!recvGlobal && this.hasCallable(viaField) && recv.row === null && recv.scalar.size === 0 && recv.deep.size === 0) return r;
-      const out: Taint = { row: recv.row ? copyRow(recv.row) : null, scalar: new Map(recv.scalar), deep: new Map(recv.deep), fns: new Set() };
+      // (Round 8: it may hand back the receiver or ANY part of it — the row at any depth.)
+      const out: Taint = { row: rowAnywhere(recv.row), scalar: new Map(recv.scalar), deep: new Map(recv.deep), fns: new Set() };
       // …and it may BE (or hand back) an object reachable from the receiver or
       // an argument — `arr.values().next().value`, `it.next().value`, a
       // library `wrap(o)` — so it joins their alias classes (round 5, F4).
@@ -2483,7 +2703,7 @@ class FlowAnalysis {
       for (const a of args) mergeMap(out.scalar, everything(a, this.site(node, fn)));
       if (out.scalar.size > 0) mergeMap(out.deep, out.scalar);
       out.k = opK(recv, ...args);
-      return recvGlobal ? join(r, out, this.globalFnRetFor(gParts)) : join(r, out);
+      return recvGlobal ? join(r, out, this.globalFnRetFor(gNames)) : join(r, out);
     }
 
     // --- plain calls -------------------------------------------------------------
@@ -2562,7 +2782,7 @@ class FlowAnalysis {
     this.recordThis(fns, all);
     const every = everything(all, `${this.site(node, fn)} — handed to a callback of code the compiler has no model for`);
     const param: Taint = {
-      row: all.row ? copyRow(all.row) : null,
+      row: rowAnywhere(all.row), // any part of anything the callee holds (round 8)
       scalar: new Map(every),
       deep: new Map(every),
       fns: new Set(all.fns),
@@ -2710,8 +2930,10 @@ class FlowAnalysis {
 
   /** Invoke `hooks` as the language would, with `this` = `obj`: their returns are part of `obj`. */
   private invokeHooks(hooks: Set<Closure>, obj: Taint, node: any, fn: Instance | null): Taint {
-    const param = dataOnly(this.withCellContents(obj));
-    return containerOf(dataOnly(this.applyFns(hooks, [], param, node, fn)));
+    // The parameters receive anything the object holds, and the returns are
+    // part of the object — at a position the analysis does not follow (round 8).
+    const param = anyDepth(dataOnly(this.withCellContents(obj)));
+    return anyDepth(containerOf(dataOnly(this.applyFns(hooks, [], param, node, fn))));
   }
 
   private addAll(into: Set<Closure>, fns: Set<Closure>): void {
@@ -2875,14 +3097,16 @@ class FlowAnalysis {
       const p = args[1] ?? clean();
       for (const a of refsOf(o)) for (const b of refsOf(p)) this.unite(a, b);
       if (node?.arguments?.[0]) this.writeThrough(node.arguments[0], o, containerOf(p), fn?.scope ?? this.curMod!.scope);
-      return path === "Reflect.setPrototypeOf" ? clean() : o;
+      // The returned object reads through to `p` at any depth (round 8).
+      return path === "Reflect.setPrototypeOf" ? clean() : join(o, anyDepth(containerOf(p)));
     }
     if (path === "Object.create") {
-      // A fresh object whose prototype IS `p`: it reads through to `p`'s class.
-      return lenDefault(join(...args.map(containerOf)));
+      // A fresh object whose prototype IS `p`: it reads through to `p`'s class —
+      // `p`'s own properties are read off it at depth 0 (round 8: any depth).
+      return lenDefault(anyDepth(join(...args.map((a) => containerOf(a)))));
     }
     if (path === "Object.getPrototypeOf" || path === "Reflect.getPrototypeOf") {
-      return lenDefault(elemOf(args[0] ?? clean()));
+      return lenDefault(anyDepth(elemOf(args[0] ?? clean())));
     }
     if (path === "String") {
       // `String(x)` embeds a scalar verbatim; a row stringifies as
@@ -2912,7 +3136,12 @@ class FlowAnalysis {
     if (IDENTITY_BUILTINS.has(path)) {
       // The result's `.length` is NOT the argument's (F1): `new Array(u.pin)`
       // has length `pin`, `Array.from({ length: h })` has length `h`.
-      if (path === "Array.of") return lenDefault(join(...args.map(containerOf)));
+      if (path === "Array.of" || path === "Array") return lenDefault(join(...args.map((a) => containerOf(a))));
+      // A `Map` / `Set` built from entries holds each entry's VALUE one level up
+      // from where the entries list held it — a position the analysis does not
+      // follow (round 8: the row at any depth). The others hand back their
+      // argument (`Object.freeze(o)`, `Promise.resolve(v)`, `Array.from(xs)`).
+      if (path === "Map" || path === "Set" || path === "WeakMap" || path === "Object") return lenDefault(anyDepth(join(...args)));
       return lenDefault(join(...args));
     }
     return null;
@@ -2947,7 +3176,8 @@ class FlowAnalysis {
         // Same element count as the receiver (F1).
         return withLen(containerOf(cbRet), lenOf(recv));
       case "flatMap":
-        return containerOf(cbRet);
+        // Flattening moves the callbacks' array elements up a level (round 8).
+        return anyDepth(containerOf(cbRet));
       case "filter":
       case "sort":
       case "toSorted":

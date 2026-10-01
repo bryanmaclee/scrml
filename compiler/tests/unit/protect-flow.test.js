@@ -757,6 +757,96 @@ describe("analyzeProtectFlow — round 7: implicit invocation", () => {
   });
 });
 
+// S447 round 8 — the two ROOTS (raw JS; every LEAK shape below served or was
+// accepted on base f9cd63d86 — a module with no session middleware, so the
+// global heap's name scoping is not masked by the compiler's own round trip).
+const r8 = (body) => mod(body).replace('["passwordHash"]', '["passwordHash", "pin"]');
+describe("analyzeProtectFlow — round 8: a row held in a field is a row", () => {
+  test("a named read off a value that HOLDS a row yields the row, not a column of it", () => {
+    for (const body of [
+      "const t = { h: u }; return t.h.passwordHash;",
+      "const t = { h: u }; const { h } = t; return h.passwordHash;",
+      "const t = { h: u }; return JSON.stringify(t.h);",
+      "const t = { h: u }; return Object.values(t.h);",
+      "const rs = [u]; const t = { rs }; return t.rs.map((r) => r.passwordHash);",
+      "const t = { a: { b: u } }; return t.a.b.pin;",
+      "const t = { h: u, f() { return this.h.passwordHash; } }; return t.f();",
+      "const t = { h: u }; Object.defineProperty(t, 'z', { get: function () { return this.h.passwordHash; }, enumerable: true }); return { z: t.z };",
+      "const t = {}; t.h = u; return t.h.passwordHash;",
+      "const t = { a: {} }; t.a.b = u; return t.a.b.passwordHash;",
+      "const a = {}; const t = { a }; a.b = u; return t.a.b.passwordHash;",
+      "const t = { h: u }; return { ...t }.h.passwordHash;",
+      "const t = { h: u }; return Object.assign({}, t).h.passwordHash;",
+      "const t = { h: u }; const f = (o) => o.h; return f(t).passwordHash;",
+      "function g() { return { h: u }; } return g().h.passwordHash;",
+      "const o = Object.create({ h: u }); return o.h.passwordHash;",
+      "const p = Promise.resolve({ h: u }); return (await p).h.passwordHash;",
+      "function* g() { yield { h: u }; } for (const x of g()) { return x.h.passwordHash; } return 1;",
+      "const t = { h: [u] }; return t.h[0].passwordHash;",
+      "const t = { h: u }; const o = {}; o.t = t; return o.t.h.passwordHash;",
+      "const t = { h: u }; return [t][0].h.passwordHash;",
+      "const t = { h: u }; const { h: { passwordHash: x } } = t; return x;",
+      "const t = { h: u }; return t?.h?.passwordHash;",
+      "const t = { h: u }; globalThis.st8 = t; return globalThis.st8.h.passwordHash;",
+      // the shapes that already failed closed stay closed
+      "const m = new Map([['k', u]]); return m.get('k').passwordHash;",
+      "const t = [[u]]; return t[0][0].passwordHash;",
+      "return [1].flatMap(() => [u])[0].passwordHash;",
+    ]) {
+      expect([body, leakCols(r8(body)).length > 0]).toEqual([body, true]);
+    }
+  });
+
+  test("a field that does not hold the row stays clean; the row itself is still stripped", () => {
+    for (const body of [
+      "const t = { user: u, n: u.name }; return { n: t.n, id: t.user.id };",
+      "const t = { h: u }; return t;",
+      "const t = { h: u }; return t.h;",
+      "const t = { h: u, meta: { count: 1 } }; return { c: t.meta.count };",
+      "const t = { h: u }; return { id: t.h.id, n: t.h.name };",
+      "const rs = [u]; const t = { rs }; return t.rs.map((r) => ({ id: r.id }));",
+      "const t = { user: u, label: 'x' }; return { l: String(t.label), id: t.user.id };",
+    ]) {
+      expect([body, leakCols(r8(body))]).toEqual([body, []]);
+    }
+  });
+});
+
+describe("analyzeProtectFlow — round 8: an aliased global resolves to its named path", () => {
+  test("a function stored in the global heap is reached through an alias, whatever its name", () => {
+    for (const body of [
+      "globalThis.box17 = { h: '', set: function (r) { this.h = r.passwordHash; } }; const g = globalThis.box17; g.set(u); return g;",
+      "globalThis.box22 = { h: '', set: function (r) { this.h = r.passwordHash; } }; const g = globalThis.box22; g.set(u); return { v: g.h };",
+      "globalThis.C31 = { set: function (x) { return x.passwordHash; } }; const C = globalThis.C31; return C.set(u);",
+      "globalThis.C32 = { map: function (x) { return x.passwordHash; } }; const C = globalThis.C32; return C.map(u);",
+      "globalThis.C34 = { get: function (x) { return x.passwordHash; } }; const P = globalThis; return P.C34.get(u);",
+      "globalThis.box40 = { h: '', set: function (r) { this.h = r.passwordHash; } }; const w = { g: globalThis.box40 }; w.g.set(u); return w.g;",
+      "globalThis.box42 = { forEach: function (r) { return r.passwordHash; } }; const g = globalThis.box42; return g.forEach(u);",
+      "const g = globalThis; g.bx = { set(r) { this.h = r.passwordHash; } }; g.bx.set(u); return { v: globalThis.bx.h };",
+      "globalThis.bx2 = { h: '', set(r) { this.h = r.passwordHash; } }; const k = 'bx2'; globalThis[k].set(u); return { v: 1 };",
+      // instanceof through an alias — destructured, a const, a namespace alias
+      "let s = ''; globalThis.C10 = { [Symbol.hasInstance]: function (x) { s = x.passwordHash; return true; } }; const C = globalThis.C10; const b = u instanceof C; return s;",
+      "let s = ''; globalThis.C14 = { [Symbol.hasInstance]: function (x) { s = x.passwordHash; return true; } }; const { C14 } = globalThis; const b = u instanceof C14; return s;",
+      "let s = ''; process.C24 = { [Symbol.hasInstance]: function (x) { s = x.passwordHash; return true; } }; const P = process; const b = u instanceof P.C24; return s;",
+      // a path the compiler cannot name fails closed
+      "let s = ''; const k = 'C' + '9'; globalThis[k] = { [Symbol.hasInstance]: function (x) { s = x.passwordHash; return true; } }; const C = globalThis[k]; const b = u instanceof C; return s;",
+    ]) {
+      expect([body, leakCols(r8(body)).length > 0]).toEqual([body, true]);
+    }
+  });
+
+  test("a clean value through the same aliases stays clean", () => {
+    for (const body of [
+      "globalThis.box50 = { h: '', set: function (r) { this.h = r.name; } }; const g = globalThis.box50; g.set(u); return { v: g.h };",
+      "const m = new Map(); m.set('k', u.name); return { v: m.get('k') };",
+      "return { n: Math.max(u.id, 1) };",
+      "let s = ''; globalThis.C51 = { [Symbol.hasInstance]: function (x) { s = x.name; return true; } }; const C = globalThis.C51; const b = u instanceof C; return { s };",
+    ]) {
+      expect([body, leakCols(r8(body))]).toEqual([body, []]);
+    }
+  });
+});
+
 describe("sqlSkeleton", () => {
   test("holes replace interpolations (balanced braces), whitespace collapses", () => {
     expect(sqlSkeleton("SELECT *  FROM t\n WHERE a = ${ f({ x: 1 }) } AND b = ${y}"))
