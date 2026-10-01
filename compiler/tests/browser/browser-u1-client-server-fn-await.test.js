@@ -25,7 +25,7 @@
  * round-trip settles; pre-U1 every one of them reads `undefined`.
  */
 
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { mkdtempSync, rmSync, existsSync, writeFileSync } from "fs";
@@ -196,4 +196,11 @@ describe("U1 §13.2 — a CLIENT server-fn call is awaited at its call site (run
     // Pre-U1 this body bypassed scheduleStatements, so the injector never ran.
     expect(api.get("count")).toBe(ROWS.length);
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

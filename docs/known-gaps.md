@@ -30,11 +30,115 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 221 | 4 |
-| MED | 440 | 0 |
+| HIGH | 226 | 4 |
+| MED | 443 | 0 |
 | LOW | 214 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-sse-generator-write-in-client-fn-body-awaited-loses-subscription — `function go(){ @feed = ticks(); … }` with a `server function*` emits `await _scrml_sse_ticks()`: the cell holds the EventSource and every message drops — `NEW S446; HIGH; open`
+
+<!-- @gap id=g-sse-generator-write-in-client-fn-body-awaited-loses-subscription sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts(post-sse-reactive-bind — matches only the un-awaited `_scrml_reactive_set(N, _scrml_sse_X(args))`)+compiler/src/codegen/emit-expr.ts(isClientServerFnCall awaits an SSE stub like any server call) prov=empirical:S446-PR1217-review-reproduced-by-compilation-on-31c42fbf -->
+
+On main (31c42fbf), an SSE generator write inside a client FUNCTION body,
+`function go2() { @feed = ticks(); @y = 1 }`, emits
+`_scrml_cs_reactive_set("feed", await _scrml_sse_ticks_3());`. The call-site auto-await (§13.2) treats the SSE
+stub as an ordinary server call. GITI-026's subscription rewrite matches only the un-awaited form, so it never
+fires. The cell then holds the EventSource object and no message reaches it.
+The same shape in a `${…}` statement-list handler was guarded in PR #1217: SSE callees keep the arg1 skip
+(`ColorOpts.reactiveArg1SkipKeep`, `_clientSseFnNames`).
+**Recommended:** the emitter should not await a `route.isSSE` callee, using the same `_clientSseFnNames`
+classification, so that the GITI-026 pass owns the site.
+
+**Scope correction (S446 #1217 re-review):** the handler guard in #1217 covers only a DIRECT
+`@cell = sse()` write, i.e. an SSE stub that is the direct value of the reactive set. An SSE call NESTED in an
+expression still has its stub awaited and its messages dropped. This is true on main and on #1217, in a
+handler (all six positions: top level, `<each>`, `for … lift`, match arm, `<each>`/`for … lift` in a match
+arm). Examples are `@feed = @c ? ticks() : other()` and `@feed = ticks() ?? 0`. GITI-026 never rewrites these
+shapes because it matches only the direct value position, so this is the same defect class as the
+function-body case above.
+
+### g-imported-server-fn-call-in-handler-not-awaited — a server function imported from another `.scrml` file and called from a handler is not awaited at all: the cell holds a Promise (or, for an imported SSE fn, the EventSource) — `NEW S446; HIGH; open`
+
+<!-- @gap id=g-imported-server-fn-call-in-handler-not-awaited sev=HIGH status=open locus=compiler/src/codegen/emit-functions.ts(clientAsyncFactsOf serverFnNames — this file's routes only)+compiler/src/codegen/scheduling.ts(_clientServerFnNames/_clientSseFnNames filter on `${filePath}::`) prov=static:S446-PR1217-re-review-read-from-emit-NOT-run -->
+
+`import { save } from "./lib.scrml"` with a handler `${@x = save(); @y = @x + 1}` emits
+`_scrml_cs_reactive_set("x", save())`. There is no `await` and no detached IIFE, so `@x` holds a Promise, and
+`@y` gets `"[object Promise]1"`. An imported SSE generator likewise leaves the EventSource in the cell.
+The client async facts (`serverFnNames`) and `_clientSseFnNames` are built from THIS file's routes only
+(the `${filePath}::` filter from F5, S239 round 3), so an imported server fn is not treated as a server call
+in a handler.
+This was **read from the emitted code, not run.**
+**A future fix must extend BOTH sets to imported server fns.** The SSE keep-set added by #1217
+(`ColorOpts.reactiveArg1SkipKeep`) must include imported SSE fns too. Otherwise awaiting an imported
+generator call would reproduce the #1217 round-1 subscription loss.
+
+### g-event-control-after-await-misses-currentTarget-and-eventPhase — s441's E-EVENT-CONTROL-AFTER-AWAIT flags preventDefault/stopPropagation after an await, but not `event.currentTarget` / `event.eventPhase`, which are reset after dispatch — `NEW S446; MED; open`
+
+<!-- @gap id=g-event-control-after-await-misses-currentTarget-and-eventPhase sev=MED status=open locus=compiler/src/codegen/js-async-analysis.ts(the eventParam event-control check) prov=empirical:S446-PR1217-review-runtime-probe-happy-dom -->
+
+In an async handler (any handler that awaits a server call), `event.currentTarget` and `event.eventPhase`
+read after the first `await` are already reset: `currentTarget` is `null` and `eventPhase` is 0. The read is
+silently wrong. Example: `${@x = save(); @s = String(event.currentTarget && event.currentTarget.id)}` gives
+`@s = "null"` on PR #1217, where main gave `"b"` in `<each>`/lift (the handler was synchronous there). The
+same is true on main for `save(); … event.currentTarget`.
+`event.target` is not affected; it survives.
+**Recommended:** add `currentTarget` and `eventPhase` to the after-await event-control set, failing closed
+with the same code.
+
+### g-handler-nested-sequence-server-write-stale-read — a 1-statement handler whose body holds a statement sequence (`${ if (c) { @x = save(); @y = @x + 1 } }`, a `for` body, `${() => { … }}`) still reads the pre-fetch value — `NEW S446; HIGH; ruling-gated`
+
+<!-- @gap id=g-handler-nested-sequence-server-write-stale-read sev=HIGH status=ruling-gated owner=bryan locus=compiler/src/codegen/js-async-analysis.ts(analyze arg1Skip)+compiler/src/codegen/emit-event-wiring.ts/emit-each.ts/emit-lift.js(handlerStatementListColor — applies only to a ≥2-statement handlerBlock) prov=empirical:S446-happy-dom-runtime-probe-stale-on-31c42fbf-and-on-PR1217 -->
+
+PR #1217 orders `@x = save(); @y = @x + 1` only when the HANDLER is a statement list of two or more
+statements. A 1-statement handler has no such list, and that includes one whose single statement contains a
+sequence: `if (@c) { @x = save(); @y = @x + 1 }`, a `for` loop body, or a block-bodied arrow
+`() => { @x = save(); @y = @x + 1 }`.
+For those, the write keeps the detached `(async () => …)()` IIFE, and `@y` reads the stale `@x`
+(runtime result y = 1, expected 11; same in all six positions).
+Fixing this changes the emitted code of 1-statement handlers, which PR #1217's stop condition held for a ruling.
+**Recommended rule:** keep the fire-and-forget arg1 skip only when the cell write is the handler's SOLE root
+statement, and await in place everywhere else. This keeps `${@x = save()}` byte-identical.
+
+### g-handled-error-arm-failure-writes-envelope-into-cell — `@x = f() !{ | e :> { … } }` on a handled failure writes the error envelope into `@x` — `NEW S446; HIGH; open`
+
+<!-- @gap id=g-handled-error-arm-failure-writes-envelope-into-cell sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts(§19.4.3 guarded-expr arm emission for a reactive target) prov=empirical:S446-compiled-and-run-on-31c42fbf-function-body-and-handler -->
+
+On main, a statement-form arm (one with no value) emits the arm and then
+`_scrml_cs_reactive_set("x", <result>)` INSIDE the `__scrml_error` branch:
+`if (r && r.__scrml_error) { { …arm… } _scrml_cs_reactive_set("x", r); } else { _scrml_cs_reactive_set("x", r); }`.
+This happens in a function body and in a handler. After a handled failure, `@x` holds
+`{__scrml_error:true, …}`, so a later `@x + 1` gives `"[object Object]1"`.
+This contradicts the s441 comment in emit-client.ts: "a handled failure never lands the error envelope in the cell".
+
+### g-each-block-arrow-handler-never-runs — `onclick=${() => { @y = 5 }}` inside `<each>` never runs — `NEW S446; HIGH; open`
+
+<!-- @gap id=g-each-block-arrow-handler-never-runs sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(buildEachExprHandlerBody — arrow handler path) prov=empirical:S446-happy-dom-runtime-probe-on-31c42fbf -->
+
+A block-bodied arrow handler in an `<each>` row is a dead handler: clicking leaves `@y` at 0, at exit 0 with
+no diagnostic. This also happens for `<each>` inside a match arm.
+The expression arrow `() => @y = 5` works, and the block arrow works at top level, in `for … lift` and in match arms.
+
+### g-fn-shorthand-handler-scope-error — `onclick=${fn() { … }}` is E-SCOPE-001 (`fn` undeclared), or `ReferenceError: fn is not defined` in `for … lift` — `NEW S446; MED; open`
+
+<!-- @gap id=g-fn-shorthand-handler-scope-error sev=MED status=open locus=compiler/src/codegen/emit-event-wiring.ts(Case A fn-shorthand path exists)+the scope checker+compiler/src/codegen/emit-lift.js prov=empirical:S446-happy-dom-runtime-probe-on-31c42fbf -->
+
+emit-event-wiring has a "Case A" path written for the `fn(params) { body }` handler shorthand. Even so, the
+scope checker rejects `fn` with E-SCOPE-001 at top level, in `<each>` and in match arms. In `for … lift` the
+compile passes, and the click throws `ReferenceError: fn is not defined`.
+**Needs a ruling:** is the shorthand legal in a handler? If it is, fix the scope checker and the lift path.
+If it is not, give it one clean diagnostic everywhere.
+
+### g-engine-arm-rewired-handler-skips-async-coloring — engine/match-arm re-wired NON-delegable handlers are never §13.2-colored — `NEW S446; MED; open`
+
+<!-- @gap id=g-engine-arm-rewired-handler-skips-async-coloring sev=MED status=open locus=compiler/src/codegen/emit-variant-guard.ts(buildHandlerExpr → emitArmWireFunction, no colorActiveHandler) prov=static:S446-code-read-not-runtime-verified -->
+
+`emit-variant-guard.ts` `buildHandlerExpr` builds `function(event) { … }` for arm-tagged non-delegable events
+(focus, input, …) and never passes it through `colorActiveHandler`. Every other handler emit site does.
+A server call there, even a bare one, is therefore not awaited, the handler is never `async`, and the
+s441 fail-closed checks do not run.
+This was found by reading the code and is **NOT verified at runtime.** Delegable events (click, submit) in arms
+use the global registry and are colored.
 
 ### g-unbraced-if-for-body-regex-literal-is-space-padded-and-escapes-dropped — a regex literal in an un-braced `if`/`for` body is rewritten into a DIFFERENT regex at exit 0; whitespace and `\` are significant there and the tokenizer's padding is not — `NEW S412; MED; RESOLVED S412`
 

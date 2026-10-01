@@ -28,6 +28,7 @@
  */
 
 import { describe, test, expect, beforeEach } from "bun:test";
+import { resolve as resolvePath } from "node:path";
 import { runCG } from "../../src/code-generator.js";
 import { resetVarCounter } from "../../src/codegen/var-counter.ts";
 import { collectDbScopes, generateServerJs } from "../../src/codegen/emit-server.ts";
@@ -359,7 +360,10 @@ describe("§K SQLite path normalization — sqlite: prefix added when missing", 
     expect(serverJs).not.toContain('"sqlite:./testdb.db"');
     // S445 ruling: `SELECT 1` declares no schema — a REFERENCING handle: opened lazily
     // on first use, never created, loud when missing.
-    expect(serverJs).toContain('const _scrml_project_root = "/test";');
+    // The fixture's file lives at "/test/app.scrml"; the emitter resolves it to an absolute,
+    // forward-slashed root — "/test" on POSIX, "<drive>:/test" on Windows.
+    const expectedRoot = resolvePath("/test").replace(/\\/g, "/");
+    expect(serverJs).toContain(`const _scrml_project_root = ${JSON.stringify(expectedRoot)};`);
     expect(serverJs).toContain('handle = new SQL({ adapter: "sqlite", filename, create: false, readwrite: true });');
     expect(serverJs).toContain("scrml: database file not found: ${filename}");
     expect(serverJs).toContain("const raw = process.env.SCRML_DATA_DIR;");

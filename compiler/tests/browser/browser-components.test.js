@@ -7,7 +7,7 @@
  * Uses happy-dom GlobalRegistrator to simulate a browser environment.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { readFileSync } from "fs";
@@ -120,4 +120,11 @@ describe("Component Basic (combined-021): reactive props", () => {
     expect(api.get("title")).toBe("My Title");
     expect(api.get("status")).toBe("pending");
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

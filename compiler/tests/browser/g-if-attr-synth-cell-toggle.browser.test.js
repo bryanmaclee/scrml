@@ -33,7 +33,7 @@
  * whether driving the cell TRUE actually MOUNTS the gated subtree.
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
@@ -561,4 +561,11 @@ describe("g-if-attr-per-field-synth-cell — the over-fire guard still holds", (
     expect(document.getElementById("ctl")?.textContent).toBe("true");
     expect(document.body.textContent.includes("GATED")).toBe(true);
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

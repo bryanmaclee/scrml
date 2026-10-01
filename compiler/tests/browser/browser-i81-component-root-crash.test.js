@@ -29,7 +29,7 @@
  * client bundle + fire DOMContentLoaded, then assert (a) no throw and (b) the
  * unrelated `data-n=(@count)` binding actually wired.
  */
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { compileScrml } from "../../src/api.js";
@@ -171,4 +171,11 @@ describe("S378 — a string prop in an `if=(… is some)` condition lowers to th
     expect(canary).not.toBeNull();
     expect(canary.textContent).toContain("CANARY");
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });
