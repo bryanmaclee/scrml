@@ -124,6 +124,7 @@ export function extractDesiredSchema(
   tables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }>;
   fns: Array<{ name: string; [k: string]: unknown }>;
   warnings: string[];
+  tenantDecls: Array<{ name: string; [k: string]: unknown }>;
 } {
   const seen = new WeakSet<object>();
   const bodies: string[] = [];
@@ -235,7 +236,36 @@ export function extractDesiredSchema(
     }
   }
 
-  return { tables, fns, warnings };
+  // ---------------------------------------------------------------------
+  // §14.8.10 — EVERY same-name declaration, UNIONED (S446, bryan RULED S440 #15;
+  // gap g-schema-commented-out-declaration-shadows-live-table).
+  // ---------------------------------------------------------------------
+  // `tables` above is first-wins per name, and the recognizers read declarations
+  // wherever they are — including inside `--` / `/* */` comments (held for
+  // pre-S438 parity: a comment-skipping recognizer that is wrong about a string
+  // or a regex DROPS a live table, the S438 round-1 regression). So a
+  // commented-out `tenant_id`-less copy placed before the live table won, and
+  // the live `tenant_id` table was silently NOT tenant-scoped.
+  //
+  // The tenant floor therefore does not read `tables`: it reads EVERY declaration
+  // — every DSL table and every raw `CREATE TABLE` in every body, duplicates
+  // kept — and a table is tenant-scoped when ANY of them carries `tenant_id`.
+  // This only ADDS floor, never removes it (`tables` ⊆ `tenantDecls`), needs no
+  // comment awareness at all, and leaves `tables` — what `scrml db-migrate` diffs
+  // and what feeds the shadow DB — byte-identical.
+  const tenantDecls: Array<{ name: string; [k: string]: unknown }> = [...tables];
+  for (const body of bodies) {
+    let parsed: { tables?: Array<{ name?: string }> } = {};
+    try { parsed = parseSchemaBlock(body) as any; } catch { parsed = {}; }
+    for (const t of parsed.tables ?? []) {
+      if (t && typeof t.name === "string") tenantDecls.push(t as any);
+    }
+    for (const decl of harvestRawCreateTableDecls(body)) {
+      tenantDecls.push({ name: decl.name, columns: decl.columns, rawDdl: true });
+    }
+  }
+
+  return { tables, fns, warnings, tenantDecls };
 }
 
 /**

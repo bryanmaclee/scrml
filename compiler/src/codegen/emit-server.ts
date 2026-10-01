@@ -1836,7 +1836,10 @@ export function generateServerJs(
   // byte-identically (every redaction site below is a no-op / absent).
   const _tenantCtx: TenantContext = buildTenantContext(
     _protectCtx,
-    extractDesiredSchema(fileAST).tables,
+    // `tenantDecls`, not `tables`: every same-name declaration, unioned — a
+    // commented-out `tenant_id`-less copy must not shadow the live table (gap
+    // g-schema-commented-out-declaration-shadows-live-table; see db-authoritative.ts).
+    extractDesiredSchema(fileAST).tenantDecls,
   );
   const _tenantActive: boolean = _tenantCtx.tenantScopedTables.size > 0;
   // Cross-tenant writes/aggregates found by the hard-fail scan below that carry a

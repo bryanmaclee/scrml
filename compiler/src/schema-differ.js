@@ -31,6 +31,8 @@ import { quoteIdent } from "./codegen/sql-ident.ts";
 export function parseSchemaBlock(schemaBody) {
   const tables = [];
   const fns = [];
+  const gluedHeads = [];
+  const fnBodySpans = [];
   const text = typeof schemaBody === "string" ? schemaBody : (schemaBody?.body ?? "");
   const n = text.length;
   let i = 0;
@@ -48,6 +50,7 @@ export function parseSchemaBlock(schemaBody) {
       const parsed = parseFnDecl(text, i, fnHead);
       if (parsed) {
         fns.push(parsed.fn);
+        if (parsed.bodySpan) fnBodySpans.push({ fnAt: i, ...parsed.bodySpan });
         i = parsed.next;
         continue;
       }
@@ -70,6 +73,15 @@ export function parseSchemaBlock(schemaBody) {
       }
       const columnsText = text.slice(braceOpen + 1, braceClose);
       const table = { name: tableName, columns: parseColumns(columnsText) };
+      // §39.2 — a DSL head is `table-name '{'`. The one-char recovery below can
+      // slide INTO a longer token and match only its tail (`mydb.public.assets {`
+      // → `assets`, `données {` → `es`), silently renaming the table — and two
+      // qualified heads then collapse onto one key, first-wins (gap
+      // g-schema-dsl-qualified-table-head-silently-stripped). The table is still
+      // declared exactly as before (the floors never lose it); the glued prefix is
+      // RECORDED so GCP1 rejects the program (E-SCHEMA-012 / E-SCHEMA-013).
+      const glue = dslHeadGluePrefix(text, i);
+      if (glue) gluedHeads.push({ name: tableName, ...glue, offset: i });
       i = braceClose + 1;
 
       // §14.8.11 opt-in DB-authoritative marker — a bareword `db-authoritative`
@@ -91,7 +103,64 @@ export function parseSchemaBlock(schemaBody) {
     i++;
   }
 
-  return { tables, fns };
+  return { tables, fns, gluedHeads, fnBodySpans };
+}
+
+/**
+ * Is the DSL table head that `parseSchemaBlock` matched at `i` really the TAIL of
+ * a longer token? Returns null for a clean head, else
+ *   · `{ kind: "qualified", prefix }`  — a `.` precedes the name (whitespace and
+ *     closed `/* *\/` comments allowed around it): `mydb.public.assets {`;
+ *   · `{ kind: "unreadable", prefix }` — an identifier-ish character is glued to
+ *     the name (`données {` matched as `es`, `my-assets {` as `assets`,
+ *     `app$v2 {` as `v2`, `1assets {` as `assets`).
+ * `prefix` is the glued text, for the message.
+ */
+function dslHeadGluePrefix(text, i) {
+  const GLUE = /[\p{L}\p{N}_$\-]/u;
+  let j = i - 1;
+  if (j >= 0 && GLUE.test(text[j])) {
+    let s = j;
+    while (s > 0 && /[\p{L}\p{N}_$\-.]/u.test(text[s - 1])) s--;
+    return { kind: "unreadable", prefix: text.slice(s, i) };
+  }
+  // Back over whitespace and closed block comments to find a `.`.
+  for (;;) {
+    while (j >= 0 && /\s/.test(text[j])) j--;
+    if (j >= 1 && text[j] === "/" && text[j - 1] === "*") {
+      const open = text.lastIndexOf("/*", j - 2);
+      if (open === -1) break;
+      j = open - 1;
+      continue;
+    }
+    break;
+  }
+  if (j >= 0 && text[j] === ".") {
+    let s = j;
+    while (s > 0 && /[\p{L}\p{N}_$\-."`[\]\s]/u.test(text[s - 1]) && text[s - 1] !== "\n") s--;
+    return { kind: "qualified", prefix: text.slice(s, i).trim() };
+  }
+  return null;
+}
+
+/**
+ * The DSL table heads of a `< schema>` body that `parseSchemaBlock` read as the
+ * TAIL of a longer token (see `dslHeadGluePrefix`) and that are LIVE — not inside
+ * a `--` / closed `/* *\/` comment or a one-line string / `pattern(/…/)` regex,
+ * the same exemption E-SCHEMA-012 uses. GCP1 reports "qualified" as E-SCHEMA-012
+ * and "unreadable" as E-SCHEMA-013.
+ *
+ * @param {string} text a `< schema>` body
+ * @returns {Array<{kind: "qualified"|"unreadable", name: string, prefix: string, offset: number}>}
+ */
+export function findGluedDslTableHeads(text) {
+  if (typeof text !== "string") return [];
+  let parsed;
+  try { parsed = parseSchemaBlock(text); } catch { return []; }
+  const glued = parsed.gluedHeads ?? [];
+  if (glued.length === 0) return [];
+  const masked = blankLiteralBodies(text, { comments: true, backtick: false });
+  return glued.filter((g) => masked.slice(g.offset, g.offset + g.name.length) === g.name);
 }
 
 /**
@@ -349,8 +418,9 @@ const CREATE_TABLE_MODIFIER_WORDS = new Set([
  * `WITH` (storage parameters), `ON` (ON COMMIT), `TABLESPACE`, `PARTITION` — ONLY
  * as `PARTITION OF parent` (checked at the use site) — `OF` (typed table `OF
  * type`), `INHERITS`. A name followed by anything else was not read as a name
- * (E-SCHEMA-013). A readable head with no column list declares no columns — gap
- * g-schema-no-column-list-heads-declare-nothing.
+ * (E-SCHEMA-013). A readable head with no column list declares no columns, so in a
+ * `< schema>` it is rejected as E-SCHEMA-014 (S446; was gap
+ * g-schema-no-column-list-heads-declare-nothing).
  */
 const CREATE_TABLE_NAME_FOLLOWERS = ["AS", "USING", "WITH", "ON", "TABLESPACE", "PARTITION", "OF", "INHERITS"];
 
@@ -502,8 +572,13 @@ function isLiveHead(masked, h) {
  *     `""`, a fullwidth dot, an unterminated comment) — kind "unreadable",
  *     E-SCHEMA-013. Fail-closed: such a head is an error, never "not a head".
  *
+ *   · is readable and unqualified but NOT a plain table declaration — a
+ *     table-kind modifier, no column list, an unclosed column list, or a trailing
+ *     `INHERITS` — kind "not-a-declaration", E-SCHEMA-014 (bryan RULED S440 #15);
+ *     see `notADeclarationReason`.
+ *
  * @param {string} text a `< schema>` body
- * @returns {Array<{kind: "qualified"|"unreadable", name: string|null, qualifiers: string[], headText: string, offset: number}>}
+ * @returns {Array<{kind: "qualified"|"unreadable"|"not-a-declaration", reason?: string, name: string|null, qualifiers: string[], headText: string, offset: number}>}
  */
 export function findRejectedCreateTableHeads(text) {
   const out = [];
@@ -517,6 +592,30 @@ export function findRejectedCreateTableHeads(text) {
   // fail-closed: a qualified/unreadable head inside a real `fn` `"""` body is now
   // reported — the documented false positive, gap
   // g-secdef-fn-body-ddl-false-positive (which records the repair).
+  //
+  // E-SCHEMA-014 ALONE takes that recorded repair, narrowly (S446): a
+  // `CREATE TEMP TABLE staging … AS SELECT …` inside a SECURITY-DEFINER `fn` body
+  // is ordinary runtime plpgsql, and rejecting it would refuse a valid schema.
+  // The span exempted is ONLY the `"""…"""` body of a `fn` the `< schema>` parser
+  // itself ACCEPTED (`parseFnDecl` — owner(), balanced block) whose `fn` keyword
+  // is LIVE (not in a `--` / `/* */` comment or a string) and starts a word. A
+  // commented `-- fn f() owner(r) {` forges nothing (the S438 escape), and a head
+  // outside the `"""` pair — in the modifier run of a braceless `fn`, or beside
+  // the body inside its braces — is still reported. An escape here can only
+  // return a head to its pre-S446 behaviour: neither harvest reads a modified or
+  // column-list-less head, so no floor is lost relative to base. E-SCHEMA-012 /
+  // E-SCHEMA-013 are deliberately NOT exempted (unchanged).
+  let secdefSpans = null;
+  const inLiveSecdefBody = (at) => {
+    if (secdefSpans === null) {
+      let spans = [];
+      try { spans = parseSchemaBlock(text).fnBodySpans ?? []; } catch { spans = []; }
+      secdefSpans = spans.filter((s) =>
+        masked.slice(s.fnAt, s.fnAt + 2) === "fn" &&
+        (s.fnAt === 0 || !/[\p{L}\p{N}_$]/u.test(text[s.fnAt - 1])));
+    }
+    return secdefSpans.some((s) => at > s.start && at < s.end);
+  };
   for (const h of scanCreateTableHeads(text)) {
     if (!isLiveHead(masked, h)) continue;
     // An unknown modifier word (prose: `create the table for tenants`) counts as a
@@ -543,9 +642,55 @@ export function findRejectedCreateTableHeads(text) {
         headText: headText + (tail ? ` ⟨${tail}⟩` : ""),
         offset: h.start,
       });
+    } else {
+      // E-SCHEMA-014 (S446, bryan RULED S440 #15 "fix in TS, fail closed") — a
+      // readable, unqualified head that is NOT a plain table declaration. Each of
+      // these compiled clean and declared NO columns to the §14.8.9 / §14.8.10
+      // floors (neither harvest reads a modified head or a head with no column
+      // list), so a `tenant_id` table spelled this way was silently not
+      // tenant-scoped — beside a second table, with no diagnostic at all.
+      const reason = notADeclarationReason(text, h);
+      if (reason && !inLiveSecdefBody(h.start)) {
+        out.push({
+          kind: "not-a-declaration",
+          reason,
+          name: h.parts[0].name,
+          qualifiers: [],
+          headText,
+          offset: h.start,
+        });
+      }
     }
   }
   return out;
+}
+
+/**
+ * Why a readable, unqualified `CREATE … TABLE` head is not a plain table
+ * declaration (E-SCHEMA-014), or null when it is one. The ONLY accepted shape is
+ * `CREATE TABLE [IF NOT EXISTS] <name> ( <column list> ) [<trailing clauses>]`:
+ *   · "modifier"   — any word between `CREATE` and `TABLE` (`TEMP`, `TEMPORARY`,
+ *                    `GLOBAL`/`LOCAL TEMPORARY`, `UNLOGGED`, `VIRTUAL`, …). Neither
+ *                    harvest has ever read a modified head (gap
+ *                    g-schema-create-temp-table-silently-not-a-declaration), and a
+ *                    session-scoped / non-durable table has no schema-as-code meaning.
+ *   · "no-columns" — the name is followed by a clause keyword instead of a column
+ *                    list (`AS query`, `OF type`, `PARTITION OF parent`, `USING`,
+ *                    `WITH`, `ON COMMIT`, `TABLESPACE`, `INHERITS`): the columns
+ *                    live elsewhere and the floors cannot see them (gap
+ *                    g-schema-no-column-list-heads-declare-nothing).
+ *   · "unclosed"   — the column list `(` is never closed, so nothing is read.
+ *   · "inherits"   — a column list followed by `INHERITS (parent)`: the parent's
+ *                    columns (a `tenant_id`) are not declared on this table.
+ * Not a recognizer change: the head itself is read by the same `readCreateTableHead`
+ * every other `< schema>` check uses; this only refuses what that read reports.
+ */
+function notADeclarationReason(text, h) {
+  if (h.modifiers.length > 0) return "modifier";
+  if (h.parenAt === -1) return "no-columns";
+  if (h.bodyEnd === -1) return "unclosed";
+  if (readSqlKeyword(text, skipSqlTrivia(text, h.bodyEnd + 1), "INHERITS") !== -1) return "inherits";
+  return null;
 }
 
 /**
@@ -575,7 +720,8 @@ function harvestInto(records, out, overwrite) {
  * The `< schema>` harvest set — legacy ∪ structured, legacy winning per key (see
  * the superset note above). The structured side contributes only keys the legacy
  * side does not have, and only unmodified heads (`TEMP` / `UNLOGGED` / … were
- * never harvested — g-schema-create-temp-table-silently-not-a-declaration). A
+ * never harvested; since S446 such a head is rejected as E-SCHEMA-014 instead of
+ * silently declaring nothing — was g-schema-create-temp-table-silently-not-a-declaration). A
  * qualified head is harvested, qualifiers stripped, although E-SCHEMA-012 rejects
  * the program: the rejected program reports that one error rather than a cascade,
  * and the tenant floor stays ENGAGED on the table.
@@ -928,6 +1074,11 @@ function parseFnDecl(text, startIdx, fnHead) {
   return {
     fn: { name, args, owner, returns, cap, isSecurityDefiner, body },
     next: braceClose + 1,
+    // The `"""…"""` span (delimiters included) in `text`, or null when the block
+    // has none — read by `findRejectedCreateTableHeads` (E-SCHEMA-014 only).
+    bodySpan: bodyMatch
+      ? { start: braceOpen + 1 + bodyMatch.index, end: braceOpen + 1 + bodyMatch.index + bodyMatch[0].length }
+      : null,
   };
 }
 
