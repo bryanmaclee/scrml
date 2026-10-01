@@ -154,12 +154,27 @@ ${
         StateChild(s: AStateChild),
     }
 
+    // s444 Phase B (dpa-058) — a validator in a declaration opener (§55.1, §66.4
+    // rule 3: it binds that declaration's own value), by its argument shape:
+    // `req` (NoArgs) · `length(>=5)` (Cmp: the comparison and its operand) ·
+    // `min(0)` / `eq(@x)` / `oneOf([…])` / `req("msg")` (Exprs) · `pattern(/re/i)`
+    // (Regex: the source between the slashes and the flags).
+    export type AValArg:enum = {
+        NoArgs,
+        Cmp(op: string, e: AExpr),
+        Exprs(es: AExpr[]),
+        Regex(source: string, flags: string),
+    }
+    export type AValidator:struct = { nid: int, span: ASpan, name: string, arg: AValArg }
+
     // `ty` = the own type (`name:Type`); `own` = the own value (NoValue = none);
-    // `mods` = the opener's other words (`single`, validators, …).
+    // `mods` = the opener's other words (`single`, …); `validators` = its
+    // validators, in source order (§55.12: error order is declaration order).
     export type ADecl:struct = {
         nid: int, span: ASpan, exported: boolean, isLet: boolean,
         name: string, ty: AType | not, own: AAttrValue,
         attrs: ADeclAttr[], mods: AAttr[], body: ADeclChild[], renders: AElem | not,
+        validators: AValidator[],
     }
 
     // -------------------------------------------------------------------------

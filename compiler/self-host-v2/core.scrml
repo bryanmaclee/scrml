@@ -51,7 +51,10 @@ ${
     // -------------------------------------------------------------------------
     export type SeqAt:enum = { End, Front, Anywhere }
     export type LengthGrant:enum = { Fixed, Bounded(min: int, max: int), Free }
-    export type SeqGrants:struct = { length: LengthGrant, at: SeqAt[], positionsWritable: boolean }
+    // `at` = the places the sequence may GROW, `shrink` = the places it may
+    // SHRINK (RULED S442 grow/shrink split: `append`/`pop`, `prepend`/`shift`,
+    // `insert`/`remove`; s444: shrink joined Core when removals became edits).
+    export type SeqGrants:struct = { length: LengthGrant, at: SeqAt[], shrink: SeqAt[], positionsWritable: boolean }
 
     export type Type:enum = {
         Int,
@@ -134,6 +137,13 @@ ${
         PWild,
     }
 
+    // s444 — the host calls Core admits (a CLOSED set; see progress.md
+    // "host call surface"): `Date.now()` only — the §66.19.5 timestamp.
+    export type HostCall:enum = { DateNow }
+    // s444 — the sequence functions a lambda is admitted as the argument of.
+    // Each makes a NEW sequence value (R3: values are immutable).
+    export type SeqFn:enum = { Filter, Map }
+
     export type Expr:enum = {
         Lit(lit: Literal),
         Local(sym: Sym),
@@ -149,6 +159,13 @@ ${
         // L6 / §66.9, else the declared default), evaluated again now. What
         // `reset(@x.f)` writes (L4) when the instance may have had a use site.
         InitOf(decl: Sym, inst: InstRef, idx: int),
+        // s444: a host call (the closed HostCall set; never in a pure `fn`).
+        Host(call: HostCall),
+        // s444: a function value — its parameters are binder-minted locals;
+        // the body is ONE expression. Only as a SeqCall's argument.
+        Lambda(params: Sym[], body: Expr),
+        // s444: `seq.filter(f)` / `seq.map(f)` — a new sequence value.
+        SeqCall(op: SeqFn, seq: Expr, f: Expr),
     }
     export type MatchArm:struct = { pat: Pattern, body: Expr }
 
@@ -160,6 +177,13 @@ ${
     // capability symbol, so no Write can name it — see progress.md "grants are
     // symbols".
     // -------------------------------------------------------------------------
+    // s444: the SHRINK edits (a Write's value is the COUNT removed, an Int
+    // literal, for RemoveEnd / RemoveFront — `pop()` / `shift()` remove 1; the
+    // NEW whole value, `SeqCall(Filter, <the field>, λ)`, for RemoveAnywhere —
+    // `@x = @x.filter(λ)`), and ElemAt: a write of struct path `path` inside the
+    // element at position `index` (`@xs[i].f = v`, dpa-052 Q3 — judged by the
+    // ELEMENT field's own contract). In a GrantSet, an element-field grant is
+    // listed as `FieldAt(path)` over the element struct (it names no index).
     export type EditKind:enum = {
         Replace,
         Append,
@@ -168,6 +192,10 @@ ${
         PositionWrite,
         FieldAt(path: FieldRef[]),
         Transition,
+        RemoveEnd,
+        RemoveFront,
+        RemoveAnywhere,
+        ElemAt(index: Expr, path: FieldRef[]),
     }
     // RuntimeEdge: a `rule=` edge whose from-state is not statically known
     // (§6.3). The invariant hook (O36) is deliberately absent until O36 rules.
@@ -195,10 +223,18 @@ ${
     // Views. Every child position is a View LIST (no Fragment variant).
     // Events are attributes of their element (§3.2 had View.On).
     // -------------------------------------------------------------------------
+    // s444 — a two-way bind (§5.4): `read` is shown in the element's `value`
+    // / `checked` property; on the element's input / change event its property
+    // value is bound to `sink` (a binder-minted local) and `write` runs — ONE
+    // capability-checked Write of `Local(sink)` to the place `read` reads
+    // (check.scrml C8). The event-value round trip, with no expression text.
+    export type BindKind:enum = { Value, Checked }
+
     export type Attr:enum = {
         Static(name: string, value: string),
         Bound(name: string, e: Expr),
         On(event: string, body: Block),
+        Bind(kind: BindKind, read: Expr, sink: Sym, write: Block),
     }
     export type ConstructAttr:struct = { field: int, value: Expr }
     export type CondArm:struct = { test: Expr, body: View[] }
@@ -211,6 +247,9 @@ ${
         Each(src: Expr, bind: Sym, key: Expr | not, handles: Sym[], row: View[]),
         Instance(decl: Sym, attrs: ConstructAttr[], slot: View[], alias: Sym | not),
         Slot,
+        // s444 — `<*x/>` (§66.6.2): the EXISTING instance `inst` of `decl`,
+        // rendered with decl's renders; constructs nothing (M1 D4 closed).
+        Star(decl: Sym, inst: InstRef),
     }
 
     // -------------------------------------------------------------------------
