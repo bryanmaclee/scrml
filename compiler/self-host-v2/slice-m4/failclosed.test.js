@@ -39,6 +39,20 @@ describe("(1) a scrml structural element is never an HTML element", () => {
     const main = r.core.decls.find((d) => d.sym.id === r.core.program.id).renders[0];
     expect(JSON.stringify(main)).not.toContain("request");
   });
+  // r2 F2 (S239 review): a USER declaration of that name wins over the refusal
+  // list, exactly as a declaration wins over an HTML element of the same name.
+  for (const name of [...STRUCTURAL, "Page", "Timer"]) {
+    test(`a user declaration named \`${name}\` is used as the declaration, not refused`, () => {
+      const src = `<program>\n    <${name} label:string="x">\n    </>\n    renders <p>\${label}</p>\n    <main>\n        <${name} label="y"/>\n    </main>\n</program>\n`;
+      const r = run(src);
+      expect(r.diags.map((x) => `${x.code}: ${x.message}`)).toEqual([]);
+      expect(mods.check.checkCore(r.core)).toEqual([]);
+    });
+  }
+  test("a `single` program cell named `page` is E-DECL-SINGLE-INSTANTIATED at `<page/>`, not a structural refusal", () => {
+    const src = `<program>\n    type P:enum = { A, B }\n    <page:P=.A single>\n        <A rule=.B : "a">\n        <B rule=.A : "b">\n    </>\n    <main>\n        <page/>\n    </main>\n</program>\n`;
+    expect(run(src).diags.map((x) => x.code)).toEqual(["E-DECL-SINGLE-INSTANTIATED"]);
+  });
   test("twin: HTML elements and the implemented structural elements are unaffected", () => {
     expect(run(inMain(`<section><p>\${@n}</p></section>`)).diags).toEqual([]);
     expect(run(`<program>\n <xs:string[]=(["a"])/>\n <main><each in=@xs as x><p>\${x}</p></each></main>\n</program>\n`).diags).toEqual([]);

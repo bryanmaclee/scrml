@@ -315,6 +315,38 @@ describe("4b — index places (`@xs[i].f = v`, Core ElemAt)", () => {
     expect(texts("main li")).toEqual(["1:1", "2:2"]);
   });
 
+  // r2 F5(b): the boundary is exact — position `length` is outside, `length - 1` is inside.
+  test("the exact boundary: position `length` (2) throws, nothing written; `length - 1` (1) writes", async () => {
+    const { program } = await loadProgram(coreOf(rows("let qty: int")), "elemat-boundary", ["setQ"]);
+    expect(() => program.setQ(2, 9)).toThrow("position 2 is outside the sequence (its positions are 0..1)");
+    expect(texts("main li")).toEqual(["1:1", "2:2"]);
+    expect(() => program.setQ(-1, 9)).toThrow("position -1 is outside the sequence");
+    expect(texts("main li")).toEqual(["1:1", "2:2"]);
+    // reached only past the typer (a caller outside scrml): named as not a position, not as "outside"
+    expect(() => program.setQ(0.5, 9)).toThrow("index 0.5 is not a sequence position (an int)");
+    expect(() => program.setQ("0", 9)).toThrow('index "0" is not a sequence position (an int)');
+    expect(texts("main li")).toEqual(["1:1", "2:2"]);
+    program.setQ(1, 7);
+    expect(texts("main li")).toEqual(["1:1", "2:7"]);
+  });
+
+  // r2 F3: the index is an `int` position. ⚑ No SPEC sentence states the
+  // index type (§66.12.2 "positions" names none); the bootstrap holds it to
+  // `int` (`int` enforced, RULED S440 JS-WAT 7(a)). A negative int is not a
+  // type error — the SPEC says nothing about it — and stays the runtime refusal.
+  test("an index that is not an `int` → E-TYPE-031 (a string param, a string literal, a non-integer, a `number`, an `int | not`)", () => {
+    const at = (params, ix) => P(`    type Row:struct = { let qty: int }\n    <rows:Row[]=([{ qty: 1 }])/>\n    function p(${params}) { @rows[${ix}].qty = 2 }`, `        <p>x</p>`);
+    for (const [params, ix] of [["i: string", "i"], ["", '"0"'], ["", "0.5"], ["n: number", "n"], ["m: int | not", "m"], ["", "true"]]) {
+      const d = run(at(params, ix)).diags;
+      expect(d.map((x) => x.code)).toEqual(["E-TYPE-031"]);
+      expect(d[0].message).toContain("a sequence index is an `int` position");
+    }
+    // twins: an int literal, an int param, an int expression, a negative int literal — no type error
+    for (const [params, ix] of [["", "0"], ["i: int", "i"], ["i: int", "i + 1"], ["", "-1"]]) {
+      expect(run(at(params, ix)).diags).toEqual([]);
+    }
+  });
+
   test("a fixed element field → E-WRITE-NOT-GRANTED; a value of the wrong type → E-TYPE-031", () => {
     expect(codes(rows("qty: int"))).toEqual(["E-WRITE-NOT-GRANTED"]);
     expect(codes(rows("let qty: int").replace("@rows[i].qty = q", "@rows[i].qty = \"x\""))).toEqual(["E-TYPE-031"]);

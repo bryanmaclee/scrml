@@ -4287,14 +4287,8 @@ ${
         if (e.star) return resolveStar(env, e, st)
         if (e.tag == "each") return resolveEach(env, e, st)
         if (e.tag == "slot") return addElem(st, e.nid, ElemFact.MSlot)
-        // s444 (PA): a scrml STRUCTURAL element the bootstrap does not
-        // implement is never an HTML element (§4.15, §24.4 "These element names
-        // SHALL NOT be treated as HTML elements") — refused, not rendered as
-        // markup (it used to fall through to MHtml with no diagnostic).
-        const owner: string = structuralOwner(e.tag)
-        if (owner != "") {
-            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
-        }
+        // A user declaration in scope wins over every built-in reading of the
+        // tag — HTML and (r2 F2) the structural-refusal list alike.
         const d: DeclSrc | not = declNamed(env.g, e.tag)
         if (d is some) {
             // O55 RULED (bryan S442): a plain use of a `single` declaration is an
@@ -4305,6 +4299,15 @@ ${
         // the same for a program cell declared `single` (§66.19.6 `<phase/>`)
         const sd: ADecl | not = singleProgramField(env, e.tag)
         if (sd is some) return singleInstantiated(env, e, st)
+        // s444 (PA): a scrml STRUCTURAL element the bootstrap does not
+        // implement is never an HTML element (§4.15, §24.4 "These element names
+        // SHALL NOT be treated as HTML elements") — refused, not rendered as
+        // markup (it used to fall through to MHtml with no diagnostic). Only
+        // when no declaration of that name is in scope (above).
+        const owner: string = structuralOwner(e.tag)
+        if (owner != "") {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
+        }
         return resolveHtml(env, e, st)
     }
 
@@ -7397,6 +7400,9 @@ ${
             let ts3: TypeState = typePlace(env, target, VType.Unknown, r0.ts)
             const tt: Type | not = pathType(env.t, ea)
             if (tt is some) ts3 = checkNotElems(env, value, tt, checkLitFields(env, value, checkValue(env, r0.vt, tt, value.span, placeLabel(target), ts3)))
+            // r2 F3: the index names a POSITION — an `int`
+            const ix: AExpr | not = elemAtIndex(f)
+            if (ix is some) ts3 = checkIndex(env, exprType0(ts3, ix.nid), ix.span, ts3)
             return record(ts3, e.nid, VType.Unknown)
         }
         // s442: a recognized append / prepend shape — each ELEMENT is the written value
@@ -7462,6 +7468,38 @@ ${
     }
 
     fn editsPair(w: WriteFact, es: AExpr[]) -> EditsOf { return { w: w, elems: es } }
+
+    fn elemAtIndex(f: EffectFact | not) -> AExpr | not {
+        return match f {
+            .EElemAt(cap: c, index: x) :> x
+            .EEdits(w: w) :> not
+            .EWrite(w: w) :> not
+            .ESpread(ws: ws) :> not
+            .EReset(w: w) :> not
+            .EAssignLocal(sym: s) :> not
+            .ERemove(w: w) :> not
+            not :> not
+        }
+    }
+
+    // r2 F3 — `@xs[i].f = v`: `i` names a position of the sequence, so it is an
+    // `int` (`int` enforced, RULED S440 JS-WAT 7(a): a `number` is not
+    // implicitly an `int`). ⚑ PA: no SPEC sentence states the index type of a
+    // sequence position (§66.12.2's "positions" axis names no type); the
+    // bootstrap holds it to `int`. Provable-or-silent, as every check here: an
+    // index whose type is unknown is left to the runtime position check.
+    fn checkIndex(env: TEnv, v: VType, span: ASpan, ts: TypeState) -> TypeState {
+        return match v {
+            .Known(t: x) :> checkIndexKnown(env, x, span, ts)
+            .Absent :> report(ts, env, span, "E-TYPE-031", "a sequence index is an `int` position, and this index is `not` (§66.12.2 positions; `int` enforced, ruled S440 JS-WAT 7(a))")
+            .Unknown :> ts
+        }
+    }
+
+    fn checkIndexKnown(env: TEnv, x: Type, span: ASpan, ts: TypeState) -> TypeState {
+        if (!mayBeNot(x, Type.Int) && fitsType(x, Type.Int) != Verdict.Fails) return ts
+        return report(ts, env, span, "E-TYPE-031", "a sequence index is an `int` position, and this index is `" + typeName(x) + "` (§66.12.2 positions; `int` enforced, ruled S440 JS-WAT 7(a): a `number` is not implicitly an `int`)")
+    }
 
     fn elemAtPath(f: EffectFact | not) -> FieldRef[] | not {
         return match f {

@@ -379,8 +379,12 @@ export function removeFront(target, n) { target.set(target.peek().slice(n)); }
  */
 export function setAt(target, index, path, v) {
   const xs = target.peek();
-  if (!Number.isInteger(index) || index < 0 || index >= xs.length) {
-    throw new Error(`position ${String(index)} is outside the sequence (length ${xs.length}) — nothing was written`);
+  if (!Number.isInteger(index)) {
+    throw new Error(`index ${JSON.stringify(index)} is not a sequence position (an int) — nothing was written`);
+  }
+  if (index < 0 || index >= xs.length) {
+    const has = xs.length === 0 ? "the sequence is empty" : `its positions are 0..${xs.length - 1}`;
+    throw new Error(`position ${index} is outside the sequence (${has}) — nothing was written`);
   }
   setIn(target, [index, ...path], v);
 }
