@@ -162,6 +162,45 @@ describe("2 — the host call (Expr.Host: `Date.now()` only)", () => {
     expect($("main > p").textContent).toBe("5");
   });
 
+  // r2 F4 (S239 review): the restriction holds through a helper.
+  const h = `    function h() -> number { return Date.now() + 1 }`;
+  test("a `fn` calling a `function` → E-FN-003 (§48.6.2) — so a `fn` never reaches the clock through a helper", () => {
+    const d = run(P(`${h}\n    fn f() -> number { return h() }`, `        <p>x</p>`)).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-FN-003"]);
+    expect(d[0].message).toContain("§48.6.2");
+    expect(d[0].message).toContain("reads the clock");
+    // two levels: the `fn` calls a `function` that calls the clock helper
+    expect(codes(P(`${h}\n    function g() -> number { return h() }\n    fn f() -> number { return g() }`, `        <p>x</p>`))).toEqual(["E-FN-003"]);
+    // a `function` with no clock is still not callable from a `fn` (§48.6.2: no purity guarantee)
+    const d2 = run(P(`    function k() -> int { return 1 }\n    fn f() -> int { return k() }`, `        <p>x</p>`)).diags;
+    expect(d2.map((x) => x.code)).toEqual(["E-FN-003"]);
+    expect(d2[0].message).not.toContain("reads the clock");
+    // inside a lambda in a `fn` body too
+    expect(codes(P(`    <xs:int[]=([1])/>\n    function k(x: int) -> bool { return true }\n    fn f() -> int { return @xs.filter(x => k(x)).length }`, `        <p>x</p>`))).toEqual(["E-FN-003"]);
+  });
+  test("twin: a `fn` calling a `fn` (§48.6.1), and a `function` calling the clock helper, are clean", () => {
+    expect(codes(P(`    fn k() -> int { return 1 }\n    fn f() -> int { return k() }`, `        <p>x</p>`))).toEqual([]);
+    expect(codes(P(`${h}\n    <let t:number=0/>\n    function mark() { @t = h() }`, `        <button onclick=mark()>m</button>\n        <button onclick=(@t = h())>n</button>`))).toEqual([]);
+  });
+  test("a clock helper in an initializer, markup, an attribute value, a lambda in markup → E-BOOTSTRAP-UNSUPPORTED, as `Date.now()` there is", () => {
+    for (const [decls, main] of [
+      [`${h}\n    <let t:number=(h())/>`, `        <p>\${@t}</p>`],
+      [h, `        <p>\${h()}</p>`],
+      [h, `        <p title=h()>x</p>`],
+      [`${h}\n    <xs:int[]=([1])/>`, `        <p>\${@xs.filter(x => h() > 0).length}</p>`],
+      [`${h}\n    function g() -> number { return h() }`, `        <p>\${g()}</p>`],
+    ]) {
+      const d = run(P(decls, main)).diags;
+      expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(d[0].message).toContain("reads the clock");
+    }
+  });
+  test("the clock set is closed over mutual recursion; a helper with no clock in markup stays clean", () => {
+    const rec = `    function a(n: int) -> number { if (n > 0) { return b(n - 1) }\n return 0 }\n    function b(n: int) -> number { if (n > 5) { return Date.now() }\n return a(n) }`;
+    expect(codes(P(rec, `        <p>\${a(1)}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    function k() -> int { return 1 }`, `        <p>\${k()}</p>`))).toEqual([]);
+  });
+
   test("no other host member call is admitted", () => {
     expect(codes(P(`    <let t:number=0/>\n    function f() { @t = Math.random() }`, `        <p>x</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });

@@ -476,6 +476,7 @@ ${
         fns: FnSrc[],
         handles: HandleInfo[],
         files: FileAst[],
+        clock: string[],        // r2 F4: the functions that read the clock, transitively (clockFns)
     }
 
     type RTypeInfos:struct = { ts: TypeInfo[], st: AS }
@@ -2162,8 +2163,125 @@ ${
             const info: DeclInfo = { nid: ds.nid, span: declSpan(ds), sym: ds.sym, kind: kind, single: single, file: ds.file, fields: fields, handles: own }
             decls = decls.concat([{ info: info, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
         }
-        const g: Globals = { program: program, entry: entry, te: te0, types: rt.ts, decls: decls, fns: rf.fs, handles: handles, files: files }
+        const g: Globals = { program: program, entry: entry, te: te0, types: rt.ts, decls: decls, fns: rf.fs, handles: handles, files: files, clock: clockFns(files) }
         return { g: g, st: st }
+    }
+
+    // r2 F4 — THE CLOCK SET: the functions whose body reads the clock
+    // (`Date.now()`), directly or through a function it calls (closed over the
+    // calls; a fixpoint bounded by the function count + 2). Syntactic and
+    // whole-program, like fnWrites: a call is matched by NAME (the bootstrap
+    // links one namespace), so a local that shadows a function's name
+    // over-approximates — a refusal, never a silence.
+    type FnCalls:struct = { name: string, callees: string[] }
+
+    fn clockFns(files: FileAst[]) -> string[] {
+        let clock: string[] = []
+        let calls: FnCalls[] = []
+        for (const f of files) {
+            for (const af of fnItems(f.items)) {
+                if (blockClock(af.body)) clock = clock.concat([af.name])
+                calls = calls.concat([{ name: af.name, callees: calledNames(blockEffects(af.body, [])) }])
+            }
+        }
+        let changed = true
+        let pass = 0
+        while (changed && pass < calls.length + 2) {
+            changed = false
+            for (const c of calls) {
+                if (clock.indexOf(c.name) < 0 && anyIn(c.callees, clock)) {
+                    clock = clock.concat([c.name])
+                    changed = true
+                }
+            }
+            pass = pass + 1
+        }
+        return clock
+    }
+
+    fn calledNames(keys: string[]) -> string[] {
+        let out: string[] = []
+        for (const k of keys) {
+            if (k.indexOf("()") == 0) out = out.concat([k.substring(2)])
+        }
+        return out
+    }
+
+    fn anyIn(xs: string[], set: string[]) -> boolean {
+        for (const x of xs) {
+            if (set.indexOf(x) >= 0) return true
+        }
+        return false
+    }
+
+    fn blockClock(b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtClock(s)) return true
+        }
+        return false
+    }
+
+    fn stmtClock(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> exprClock(e)
+            .Local(name: n, init: i) :> exprClock(i)
+            .Return(e: e) :> maybeClock(e)
+            .If(cond: c, thenB: t, elseB: el) :> exprClock(c) || blockClock(t) || maybeBlockClock(el)
+            .Given(name: n, subject: sub, body: b) :> exprClock(sub) || blockClock(b)
+        }
+    }
+
+    fn maybeClock(e: AExpr | not) -> boolean {
+        if (e is not) return false
+        return exprClock(e)
+    }
+
+    fn maybeBlockClock(b: ABlock | not) -> boolean {
+        if (b is not) return false
+        return blockClock(b)
+    }
+
+    fn exprClock(e: AExpr) -> boolean {
+        if (isClockCall(e)) return true
+        for (const x of exprKids(e)) {
+            if (exprClock(x)) return true
+        }
+        return false
+    }
+
+    fn isClockCall(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        const c: AExpr | not = calleeOf(k)
+        if (c is not) return false
+        const m: MethodCall | not = memberCall(c)
+        if (m is not) return false
+        return m.method == "now" && exprName(m.obj) == "Date"
+    }
+
+    fn calleeOf(k: AExprK) -> AExpr | not {
+        return match k {
+            .Call(callee: c) :> c
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: x) :> not
+            .Assign(target: x) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: ps) :> not
+        }
     }
 
     // =========================================================================
@@ -2663,7 +2781,60 @@ ${
         }
         const rc: RX = resolveExpr(env, callee, not, st0)
         const st: AS = resolveExprs(env, args, not, rc.st)
+        const cf: FnInfo | not = calledFn(env, nameFactIn(st, callee.nid))
+        if (cf is some) return plain(not, callPurity(env, e, cf, st))
         return plain(not, st)
+    }
+
+    fn calledFn(env: Env, f: NameFact | not) -> FnInfo | not {
+        return match f {
+            .NFn(sym: s) :> fnOfSym(env.g, s)
+            .NField(decl: d) :> not
+            .NLocal(sym: s) :> not
+            .NInst(decl: d) :> not
+            .NStruct(owner: o) :> not
+            .NLength :> not
+            not :> not
+        }
+    }
+
+    fn fnOfSym(g: Globals, s: Sym) -> FnInfo | not {
+        for (const f of g.fns) {
+            if (f.info.sym.id == s.id) return f.info
+        }
+        return not
+    }
+
+    // r2 F4 — a call is judged by where it stands, like `Date.now()` itself:
+    //  - in a pure `fn` body, a call of a `function` is E-FN-003 — §48.6.2 "A
+    //    `fn` body SHALL NOT call a `function`-declared callable (§7.3), because
+    //    `function` declarations carry no purity guarantees … Calling a
+    //    `function` from inside `fn` is E-FN-003". With it, a `fn` reaches the
+    //    clock only by calling it itself (E-FN-004, resolveHost) — §48.6.1's
+    //    "transitivity of `fn` constraints" holds by construction.
+    //  - where the clock is not in the bootstrap (an initializer, markup, an
+    //    attribute value), a call of a function that reads it (clockFns) is
+    //    refused exactly as a direct `Date.now()` there is.
+    fn callPurity(env: Env, e: AExpr, cf: FnInfo, st: AS) -> AS {
+        const h: HostCtx = env.host
+        const clock: boolean = env.g.clock.indexOf(cf.name) >= 0
+        return match h {
+            .HostOk :> st
+            .HostPure :> fnCallsFunction(env, e, cf, clock, st)
+            .HostNo :> clockCallHere(env, e, cf, clock, st)
+        }
+    }
+
+    fn fnCallsFunction(env: Env, e: AExpr, cf: FnInfo, clock: boolean, st: AS) -> AS {
+        if (cf.pure) return st
+        let why: string = ""
+        if (clock) why = " — and `" + cf.name + "` reads the clock (" + dateNowText() + ", non-deterministic, §48.3.4)"
+        return addDiag(st, env.file, e.span, "E-FN-003", "a `fn` body calls `" + cf.name + "`, which is declared `function` — a `function` carries no purity guarantee, so a `fn` may call only another `fn` (§48.6.2)" + why + "; declare `" + cf.name + "` with `fn`, or make the caller a `function`")
+    }
+
+    fn clockCallHere(env: Env, e: AExpr, cf: FnInfo, clock: boolean, st: AS) -> AS {
+        if (!clock) return st
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + cf.name + "()` reads the clock (" + dateNowText() + ", directly or through a function it calls) — here (an initializer, markup, or an attribute value) that is not in the bootstrap; its host-call surface is a `function` body or an event handler")
     }
 
     // s444 — THE HOST-CALL SURFACE (progress.md "host call surface"): exactly
@@ -2685,7 +2856,7 @@ ${
         const h: HostCtx = env.host
         return match h {
             .HostOk :> plain(Type.Num, addValue(st, e.nid, ValueFact.VHost(HostCall.DateNow)))
-            .HostPure :> diagX(env, e, "E-FN-004", dateNowText() + " is non-deterministic — a pure `fn` body cannot call it (§33.3 item 7, §48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter", st)
+            .HostPure :> diagX(env, e, "E-FN-004", dateNowText() + " is non-deterministic — a `fn` body is pure and cannot call it (§33.3 item 7, §48.3.4); call it in a `function` (or an event handler) and pass the time in as a parameter", st)
             .HostNo :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", dateNowText() + " here (an initializer, markup, or an attribute value) is not in the bootstrap — its host-call surface is a `function` body or an event handler", st)
         }
     }
