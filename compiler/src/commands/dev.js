@@ -31,6 +31,7 @@ import { moduleFormatNotices } from "./module-format-notice.js";
 import { hasApplicationScopeRefusal } from "./refusal-gate.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
 import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
+import { listen, listenOrExit, parseHostFlag, networkNotice, displayUrl, DEFAULT_HOST } from "./listen.js";
 import {
   _scrml_static_request_path,
   _scrml_static_servable,
@@ -56,6 +57,12 @@ Arguments:
 Options:
   --output, -o <dir>      Output directory (default: dist/ next to input)
   --port, -p <n>          HTTP port for dev server (default: 3000)
+  --host [addr]           Address to listen on (default: 127.0.0.1 + ::1 — this
+                          machine only). Bare --host listens on every interface
+                          (0.0.0.0 + ::), e.g. to open the app from a phone on
+                          your LAN; the dev server and its compile-error page are
+                          then reachable by anyone on the network. --host=<addr>
+                          for a specific one; 127.0.0.1 / 0.0.0.0 also open ::1 / ::.
   --idle-timeout <n>      Bun.serve idleTimeout in seconds (default: 120; raises
                           the 10s default so long data-layer routes finish)
   --verbose, -v           Show per-stage timing and counts
@@ -72,6 +79,7 @@ Options:
 Examples:
   scrml dev src/app.scrml
   scrml dev src/ --port 8080
+  scrml dev src/app.scrml --host        # reachable from your LAN
 `);
 }
 
@@ -81,15 +89,18 @@ Examples:
  * @param {string[]} args
  * @returns {{ inputFiles: string[], outputDir: string|null, verbose: boolean,
  *             convertLegacyCss: boolean, embedRuntime: boolean, port: number,
- *             idleTimeout: number }}
+ *             host: string, idleTimeout: number }}
  */
-function parseArgs(args) {
+export function parseArgs(args) {
   const inputFiles = [];
   let outputDir = null;
   let verbose = false;
   let convertLegacyCss = false;
   let embedRuntime = false;
   let port = 3000;
+  // g-dev-server-binds-all-interfaces: loopback by default; `--host` opts in to
+  // the network (see ./listen.js for why 127.0.0.1 rather than "localhost").
+  let host = DEFAULT_HOST;
   // ss33 item 3 (g-dev-server-idletimeout-not-configurable): the S221 raise to
   // 120s (so legitimate >10s data-layer routes are not truncated mid-flight) is
   // now an overridable knob, mirroring `--port`. Default stays 120 so unset
@@ -145,6 +156,14 @@ function parseArgs(args) {
         console.error(`Invalid port: ${args[i]}`);
         process.exit(1);
       }
+    } else if (arg === "--host" || arg.startsWith("--host=")) {
+      const parsed = parseHostFlag(args, i, isDevPositional);
+      if (parsed.error) {
+        console.error(parsed.error);
+        process.exit(1);
+      }
+      host = parsed.host;
+      i = parsed.next;
     } else if (arg === "--idle-timeout") {
       idleTimeout = parseInt(args[++i], 10);
       if (isNaN(idleTimeout) || idleTimeout < 0) {
@@ -171,7 +190,20 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, port, idleTimeout, gather, validateEmit, moduleFormat };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, port, host, idleTimeout, gather, validateEmit, moduleFormat };
+}
+
+/**
+ * Whether a token after a bare `--host` is a `scrml dev` positional input (a
+ * `.scrml` file or an existing path) rather than an address — so
+ * `scrml dev --host src/` means "every interface, serve src/".
+ *
+ * @param {string} token
+ * @returns {boolean}
+ */
+function isDevPositional(token) {
+  if (token.endsWith(".scrml")) return true;
+  try { statSync(token); return true; } catch { return false; }
 }
 
 // ---------------------------------------------------------------------------
@@ -1431,7 +1463,10 @@ export function launchingProcessGone(launchPpid) {
  */
 export async function runDevChildServer(serveDir, opts) {
   await loadServerRoutes(serveDir);
-  const server = Bun.serve(buildServeConfig({ ...opts, port: 0 }, serveDir));
+  // The child is INTERNAL: only the parent proxy (which dials the 127.0.0.1
+  // literal) talks to it, so it binds IPv4 loopback only, regardless of
+  // `--host` — the browser-facing parent is the only listener `--host` exposes.
+  const server = listen(buildServeConfig({ ...opts, port: 0 }, serveDir), "127.0.0.1", { ipv6Twin: false });
   // C18 (§38.6): channel `broadcast()` runs in THIS child; publishing on the
   // child server reaches the parent's upstream proxy socket, which forwards to
   // the browser — so realtime survives the proxy.
@@ -1755,7 +1790,8 @@ export async function runDev(args) {
   // The STABLE public server: dev-infra endpoints are served here (so the
   // hot-reload SSE stream survives every child respawn); everything else is
   // reverse-proxied to the current app child.
-  let server = Bun.serve({
+  const host = opts.host ?? DEFAULT_HOST;
+  let server = listenOrExit("[dev]", {
     port: opts.port,
     idleTimeout: opts.idleTimeout ?? 120,
     async fetch(req, srv) {
@@ -1790,7 +1826,7 @@ export async function runDev(args) {
       return proxyHttpToChild(req, url, childPort);
     },
     websocket: wsProxyHandlers,
-  });
+  }, host);
   globalThis._scrml_active_server = server;
 
   // Spawn the initial app child AFTER the parent port is bound (above). A first
@@ -1806,7 +1842,9 @@ export async function runDev(args) {
     console.error(`[dev] serving errors until the next successful recompile.`);
   }
 
-  console.log(`[dev] Serving ${serveDir} at http://localhost:${server.port}`);
+  console.log(`[dev] Serving ${serveDir} at ${displayUrl(host, server.port)}`);
+  const exposed = networkNotice("[dev]", host, server.port);
+  if (exposed) console.log(exposed);
   console.log(`[dev] Watching for changes... (Ctrl+C to stop)\n`);
 
   // Parent-death guard (g-dev-watcher-tests-leak-server-processes): when `scrml
