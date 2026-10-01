@@ -255,7 +255,7 @@ describe("§5b unbindable host → a ListenError naming the host (F2)", () => {
   // "0" and the other inet_aton shorthands are refused BEFORE any bind, on every
   // OS: Linux would bind "0" as 0.0.0.0 (every interface), Windows refuses it —
   // the CI gate (Linux) caught this test assuming the Windows behaviour.
-  for (const host of ["192.168.99.99", "myhost.invalid", "0", "127.1", "2130706433", "0x7f.0.0.1", "010.0.0.1", "00.0.0.0"]) {
+  for (const host of ["192.168.99.99", "myhost.invalid", "0", "127.1", "2130706433", "0x7f.0.0.1", "010.0.0.1", "00.0.0.0", " 0", "0 ", "127.0.0.1 ", "0\t"]) {
     test(`--host ${host}`, () => {
       let err;
       try { listen({ port: 0, fetch: okFetch }, host).stop(true); } catch (e) { err = e; }
@@ -279,6 +279,15 @@ describe("§5b unbindable host → a ListenError naming the host (F2)", () => {
     let err;
     try { listen({ port: 0, fetch: okFetch }, "0").stop(true); } catch (e) { err = e; }
     expect(err.cause.code).toBe("E_SCRML_HOST_SHORTHAND");
+  });
+
+  test("whitespace / control characters are refused (never trimmed) before the shorthand check", () => {
+    for (const h of [" 0", "0 ", "127.0.0.1 ", "0\t", "\n127.0.0.1", "0.0.0.0\x00"]) {
+      let err;
+      try { listen({ port: 0, fetch: okFetch }, h).stop(true); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(ListenError);
+      expect(err.cause.code).toBe("E_SCRML_HOST_WHITESPACE");
+    }
   });
 
   test("a taken port names host, port and both families tried", () => {

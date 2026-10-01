@@ -276,6 +276,18 @@ export function listen(config, host, opts = {}) {
   if (config && Object.prototype.hasOwnProperty.call(config, "hostname")) {
     throw new Error("listen(): pass the host as listen()'s argument, not config.hostname");
   }
+  // Whitespace / control characters are refused, never trimmed: trimming would
+  // silently reinterpret the input, and glibc inet_aton accepts trailing
+  // whitespace ("0 " → 0.0.0.0, every interface) — so this runs BEFORE the
+  // shorthand check, which a padded value would otherwise slip past.
+  if (/[\s\x00-\x1f\x7f]/.test(host)) {
+    const cause = new Error(
+      `${JSON.stringify(host)} contains whitespace or a control character. ` +
+      `It is refused rather than trimmed — write the address exactly (e.g. 127.0.0.1, or 0.0.0.0 for every interface).`,
+    );
+    cause.code = "E_SCRML_HOST_WHITESPACE";
+    throw new ListenError(listenFailureMessage(host, host, config.port ?? 0, null, cause), cause);
+  }
   if (isLegacyNumericIPv4(norm(host))) {
     const cause = new Error(
       `"${host}" is a legacy numeric IPv4 shorthand (inet_aton form), not a dotted-quad address. ` +
