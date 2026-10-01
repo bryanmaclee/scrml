@@ -1232,10 +1232,10 @@ export function setActiveClientAsync(next: ActiveClientAsync | null): ActiveClie
  * client emission (see `colorAsyncFunctionExpr`); unchanged when no emission is
  * active or the text is not a single function expression that parses.
  */
-export function colorActiveHandler(fnText: string, span?: unknown): string {
+export function colorActiveHandler(fnText: string, span?: unknown, opts: ColorOpts = {}): string {
   const active = _activeClientAsync;
   if (!active || !fnText) return fnText;
-  const colored = colorAsyncFunctionExpr(fnText, active.resolveFree);
+  const colored = colorAsyncFunctionExpr(fnText, active.resolveFree, opts);
   if (!colored) {
     const u = unanalyzableHandlerUses(fnText, active.resolveFree);
     if (u) active.report(u, span);
@@ -1264,9 +1264,26 @@ export function unanalyzableHandlerUses(fnText: string, resolveFree: FreeAsyncRe
 }
 
 export interface ColorOpts {
-  /** See AnalyzeOpts.reactiveArg1Skip. Default true. */
+  /**
+   * See AnalyzeOpts.reactiveArg1Skip. Default true.
+   *
+   * S446 (S439 #4 + §13.2) — a §5.2.3 multi-statement handler (`${s1; s2}`, the
+   * `handlerBlock` form) passes `false`, through `HANDLER_STATEMENT_LIST_COLOR`.
+   * Its statements run IN ORDER, so `@x = save(); @y = @x + 1` must await the
+   * write before the next statement reads `@x` — exactly as the same statements
+   * in a function body do. With the skip on, the arg1 call was left to
+   * emit-client's detached `(async () => …)()` IIFE and the next statement read
+   * the pre-fetch value. Off, the call is awaited in place (the handler becomes
+   * `async`, the same lowering a bare `save()` statement already gets), and
+   * emit-client's `emitterAwaited` branch leaves the awaited site as emitted.
+   * A 1-statement handler has no handlerBlock and keeps the default (its
+   * fire-and-forget write is unchanged — a separate language question).
+   */
   reactiveArg1Skip?: boolean;
 }
+
+/** The ColorOpts every §5.2.3 statement-list handler site passes (see ColorOpts). */
+export const HANDLER_STATEMENT_LIST_COLOR: ColorOpts = Object.freeze({ reactiveArg1Skip: false });
 
 /**
  * TRANSFORM an emitted STATEMENT body that will run in a compiler-controlled scope

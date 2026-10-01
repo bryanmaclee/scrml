@@ -37,7 +37,7 @@
  */
 
 import type { CompileContext } from "./context.ts";
-import { colorActiveHandler } from "./js-async-analysis.ts";
+import { colorActiveHandler, HANDLER_STATEMENT_LIST_COLOR } from "./js-async-analysis.ts";
 import type { EncodingContext } from "./context.ts";
 import type { EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
@@ -2528,9 +2528,13 @@ function renderTemplateAttrToJs(
     // await its async calls (the handler becomes `async`), lift clean-family
     // callbacks, fail closed on what cannot be awaited and on an async fn used as
     // a value (S440 F4).
+    // S446 (S439 #4) — a statement-list handler awaits a server-call cell write in
+    // place, so the next statement sees the resolved value (ColorOpts doc).
+    const isStatementList = valKind === "expr" && !!val.handlerBlock && Array.isArray(val.handlerBlock.stmts);
     const handlerFn = colorActiveHandler(
       `function(event) { ${preventLine}${wrappedHandlerBody} }`,
       (attr as { span?: unknown }).span ?? (elNode as { span?: unknown } | null)?.span,
+      isStatementList ? HANDLER_STATEMENT_LIST_COLOR : {},
     );
     lines.push(`${indent}${elVar}.addEventListener(${JSON.stringify(ev)}, ${handlerFn});`);
     return;
