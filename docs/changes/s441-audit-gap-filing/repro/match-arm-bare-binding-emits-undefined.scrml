@@ -1,0 +1,20 @@
+// S441 reproducer — item 16: a match arm `.User u :>` (payload bound by a bare identifier, not in the §18.2
+// grammar) exits 0 and the whole match lowers to `undefined`.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/match-arm-bare-binding-emits-undefined.scrml --output-dir <scratch>
+// Expected: a hard error. §18.2: `variant-pattern ::= ('.' | '::') VariantName ('(' binding-list ')')?`;
+//           §2.2.1: "A codegen path that cannot lower a construct SHALL emit a hard diagnostic (e.g. `E-CG-003`)
+//           rather than a silent stub"; §34 lists E-CG-003 as Error.
+// Actual:   exit 0, only `warning [W-CG-UNDEFINED-INTERPOLATION]`. client.js:
+//           `function _scrml_actorKey_2(a) { return (undefined) /* E-CG-003: match expression had no lowerable arms */; }`
+//           — E-CG-003 appears only as a JS comment in the output.
+<program>
+type Actor:enum = { User(userId: string), Admin(adminId: string) }
+fn actorKey(a: Actor) -> string {
+    return match a {
+      .User u :> u.userId
+      .Admin a2 :> a2.adminId
+    }
+}
+<p>${actorKey(Actor.Admin("a"))}</p>
+</program>

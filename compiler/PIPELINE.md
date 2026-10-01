@@ -211,7 +211,7 @@ any given lock without reading the full stage prose.
 | L16 | Multi-render via existing access paths (no override syntax) | negative-space lock |
 | L17 | Bind-attribute dispatch by render-spec shape | Stage 6 (TS bindable / non-bindable classification) + Stage 8 (CG bind-flavor dispatch table) |
 | L18 | `reset(@cell)` keyword (γ-semantics with `default=` fallback to β init re-eval) | Stage 3 (TAB `default=` capture; `reset` keyword) + Stage 8 (CG `reset(@cell)` expansion) |
-| L19 | Multi-statement event-handler restriction | Stage 3 (TAB `E-MULTI-STATEMENT-HANDLER` at parse time) |
+| L19 | ~~Multi-statement event-handler restriction~~ — **REVERSED S435** (SPEC §5.2.3): the inline block `onclick={ s1; s2 }` is legal and canonical; what survives is the unbraced bare `;` sequence rule | Stage 3 (TAB `E-MULTI-STATEMENT-HANDLER` at parse time — unbraced bare `;` sequence on an event-handler attribute only) |
 | L20 | `derived=expr` on engines | Stage 3 (TAB `derived=` attribute) + Stage 6 (TS engine-type compatibility) + Stage 7 (DG `'engine-derives'` edges + `E-DERIVED-ENGINE-CIRCULAR`) + Stage 8 (CG derived-engine reactive subscription) |
 | L21 | Derived-cell value-mutation forbidden | Stage 6 (TS `E-DERIVED-VALUE-MUTATE`) |
 | L22 | Type-as-argument as first-class primitive (`parseVariant` first member) | Stage 3 (TAB type-token recognition in expression position) + Stage 6 (TS type-as-argument resolution; `E-PARSEVARIANT-001`) + Stage 8 (CG `parseVariant` runtime emission) |
@@ -628,9 +628,10 @@ evaluation of attribute values or content expressions occurs.
   - `E-META-002`: `^{ }` block contains a token sequence that is not valid as compile-time code
     (e.g., a bare HTML tag without a `lift` wrapper inside a meta block).
   - `E-CLOSER-001` (v0.next): `:`-shorthand body with a closer present (SPEC §4.14).
-  - `E-MULTI-STATEMENT-HANDLER` (v0.next): bare-form event-handler attribute value or
-    `:`-shorthand body contains multiple statements (`;` outside expression-internal
-    contexts). Per SPEC §5.2.3, §4.14.
+  - `E-MULTI-STATEMENT-HANDLER` (v0.next; NARROWED S435 — L19 reversed): an UNBRACED
+    bare-form event-handler attribute value, or a `:`-shorthand body, contains multiple
+    statements (`;` outside expression-internal contexts). An inline-block handler value
+    (`onclick={ s1; s2 }`) never fires it. Per SPEC §5.2.3, §4.14.
   - `E-NAME-COLLIDES-RESERVED` (v0.next): user component or state-type name collides with
     a reserved structural-element name (`engine`, `match`, `errors`, `onTransition`). Per
     SPEC §4.15, §24.4.
@@ -2880,11 +2881,17 @@ ReachabilityRecord and produces:
      `serializeChunksManifest` (URL-style filename values for adopter
      cache layer consumption).
   3. Per-file HTML augmentation via `emit-html.ts:augmentHtmlForChunks`
-     (A-4.7): inline `<script>window._SCRML_CHUNKS = { ... }</script>`
-     (route-keyed manifest), `<link rel="modulepreload">` for non-empty
-     tier-1 chunks, and a role-detection bootstrap `<script>` dispatching
-     to the per-role initial chunk (per OQ-A4-E hybrid: ONE HTML per
-     route + role-bootstrap; no per-(route, role) HTML variance).
+     (A-4.7): `<link rel="modulepreload">` for non-empty tier-1 chunks,
+     and `<script src="/scrml-chunks.<hash>.js" data-scrml-route="<route>">`
+     — ONE build-wide, content-addressed, same-origin chunk-activation
+     script (`emit-html.ts:buildChunksBootJs`, returned as
+     `CgOutput.chunksBootJs` / `chunksBootFilename`, written by api.js at
+     the dist root) carrying the route-keyed `window._SCRML_CHUNKS`
+     manifest and the role-detection bootstrap dispatching to the
+     per-role initial chunk (per OQ-A4-E hybrid: ONE HTML per route +
+     role-bootstrap; no per-(route, role) HTML variance). NEVER an inline
+     script: `headers="strict"` pins `default-src 'self'`, which refuses
+     inline script (s444-csp-inline-chunks).
 
 The runtime helpers `_scrml_chunk_mount(id, tag)` and
 `_scrml_vendor_require(unit)` referenced by atom-emitter output live in
@@ -2943,7 +2950,7 @@ tagged inline.
 
 | Failure Mode | Description | Detection Point |
 |---|---|---|
-| Multi-statement bare-form handler (v0.next) | A bare-form event-handler attribute value or `:`-shorthand body contains multiple statements | TAB `E-MULTI-STATEMENT-HANDLER` (parse-time; SPEC §5.2.3, §4.14) |
+| Multi-statement bare-form handler (v0.next; narrowed S435) | An UNBRACED bare-form event-handler attribute value or a `:`-shorthand body contains multiple statements (the braced inline block `onclick={ s1; s2 }` is legal, §5.2.3) | TAB `E-MULTI-STATEMENT-HANDLER` (parse-time; SPEC §5.2.3, §4.14) |
 | Pinned import not engine/cell (v0.next) | A `pinned` import resolves to an export with `category` neither `"engine"` nor a reactive cell | TAB `E-IMPORT-PINNED-INVALID` (parse-time hint) → MOD authoritative (SPEC §21.8.1) |
 | Reserved-name collision (v0.next) | A user component or state-type name collides with a reserved structural-element name (`engine`, `match`, `errors`, `onTransition`) | TAB `E-NAME-COLLIDES-RESERVED` (SPEC §4.15, §24.4) |
 | `:`-shorthand with closer (v0.next) | A `:`-shorthand body has a closer present (`<engine for=T : .X></engine>`) | TAB `E-CLOSER-001` (SPEC §4.14) |

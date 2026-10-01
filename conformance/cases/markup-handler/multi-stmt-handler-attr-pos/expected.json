@@ -1,10 +1,10 @@
 {
   "id": "multi-stmt-handler-attr-pos",
-  "description": "§5.2.3's own invalid worked example verbatim — a bare-form `onclick=` handler whose value is two semicolon-separated expressions fires E-MULTI-STATEMENT-HANDLER. W-DEAD-FUNCTION / W-PROGRAM-001 co-fire incidentally; not asserted.",
+  "description": "§5.2.3's invalid worked example verbatim — a BARE (unbraced) `onclick=` handler whose value is two semicolon-separated expressions fires E-MULTI-STATEMENT-HANDLER. This is the shape the S435 L19 reversal NARROWED the code to (the braced inline block is legal — see `inline-block-handler-runs-every-statement`). W-DEAD-FUNCTION / W-PROGRAM-001 co-fire incidentally; not asserted.",
   "language-version": "1.0",
   "spec": "§5.2.3",
   "source-test": "compiler/src/ast-builder.js",
-  "rationale": "§5.2.3 (L19 normative): \"A bare-form event handler SHALL contain exactly one scrml expression\" and \"Multi-statement intent (two or more semicolon-separated expressions, or a block) SHALL force a named function. The compiler emits E-MULTI-STATEMENT-HANDLER when a bare-form handler attribute value contains a `;` outside of expression-internal contexts.\" The source is §5.2.3's own \"Worked example — invalid (multi-statement inline)\" shape: `<button onclick=startGame(); track(\"start\")>Begin</>`. The `;` sits at top level of the opener's attribute region (not inside a string, paren, brace, bracket, template interpolation, or comment), and its owning attribute `onclick` is in the event-handler family, so the code SHALL fire.",
+  "rationale": "§5.2.3 (amended S435, L19 reversed): \"A BARE (unbraced) event-handler value SHALL contain exactly one scrml expression\" and \"A BARE event-handler value that contains a `;` outside of expression-internal contexts (string literals, template literals, parentheses, brackets, braces, nested function bodies, comments) is compile error `E-MULTI-STATEMENT-HANDLER`. The fix is to wrap the statements in braces\". The source is §5.2.3's own \"Worked example — invalid (unbraced statement sequence)\": `<button onclick=startGame(); track(\"start\")>Begin</>`. The `;` sits at top level of the opener's attribute region, with no braces around the handler, and its owning attribute `onclick` is in the event-handler family, so the code SHALL fire.",
   "expect": {
     "codes": ["E-MULTI-STATEMENT-HANDLER"],
     "notCodes": []

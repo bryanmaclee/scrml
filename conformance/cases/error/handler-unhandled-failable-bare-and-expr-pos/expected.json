@@ -1,0 +1,14 @@
+{
+  "id": "error-handler-unhandled-failable-bare-and-expr-pos",
+  "description": "The bare `onclick=risky()` and the `${}` `onclick=${risky()}` handler forms, each an unhandled call to a `!` function. E-ERROR-002 fires once per handler — twice.",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "provenance": "ruling:user-voice-scrml.md S439 #14 + S440 \"all recs\" (restore conformance)",
+  "rationale": "§19.4.3 / §19.4.4 — an unhandled `!` call SHALL be E-ERROR-002 in every event-handler form. The bare call form is the shape the S439 corpus measure found in use (6 sites, migrated at S440).",
+  "expect": {
+    "codes": ["E-ERROR-002"],
+    "codeCounts": { "E-ERROR-002": 2 },
+    "notCodes": [],
+    "severity": { "E-ERROR-002": "error" }
+  }
+}

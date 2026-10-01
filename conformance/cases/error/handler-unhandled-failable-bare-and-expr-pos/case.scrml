@@ -1,0 +1,10 @@
+${
+    type LoadError:enum = { Empty }
+    function risky()! -> LoadError { fail LoadError.Empty }
+}
+
+<r> = 0
+
+<button id="bare" onclick=risky()>bare</>
+<button id="expr" onclick=${risky()}>expr</>
+<p id="out">${@r}</p>

@@ -1,0 +1,15 @@
+<program db="./app.db">
+${
+    type User:struct = { id: number, name: string }
+    <userId> = 1
+    <userData> : User | not = not
+    function loadUser(id: number) : User | not {
+        return ?{`SELECT id, name FROM users WHERE id = ${id}`}.get()
+    }
+}
+<request id="userReq" deps=[]>
+    ${ @userData = loadUser(@userId) }
+</>
+<button id="again" onclick=${ @userId = 2; <#userReq>.refetch() }>user 2</>
+<p id="who">${@userData?.name}</>
+</program>

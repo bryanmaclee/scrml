@@ -1,0 +1,21 @@
+{
+  "id": "body-top-no-effect-statement-rejected",
+  "description": "An expression statement with no effect at a body top (`@count`, `@count == 1`) is E-STMT-NO-EFFECT, one per statement; the declaration between them survives.",
+  "language-version": "1.0",
+  "spec": "§40.8",
+  "source-test": "compiler/tests/unit/s441-review-r5.test.js",
+  "rationale": "Ruling user-voice-scrml.md S445 item 2: \"Any expression statement with no effect is an error. An effect means a call, an assignment, `++`/`--`, or a `send`. Bare `@count` becomes an error too, which replaces the `@count` example in S441 (3).\"",
+  "expect": {
+    "codes": [
+      "E-STMT-NO-EFFECT"
+    ],
+    "notCodes": [
+      "E-UNQUOTED-DISPLAY-TEXT",
+      "E-INTERNAL-BODY-TOP-DROPPED",
+      "E-STATE-UNDECLARED"
+    ],
+    "codeCounts": {
+      "E-STMT-NO-EFFECT": 2
+    }
+  }
+}

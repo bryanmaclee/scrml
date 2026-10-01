@@ -1,0 +1,119 @@
+// =============================================================================
+// slice-m1 / counter.core.scrml — the HAND-BUILT Core for SPEC §66.19.1.
+//
+// This is the ORACLE milestone M2's `lower` must reproduce (modulo a Sym-id
+// bijection): the Core a correct `lower` produces for the program below. Each
+// lowering decision it embodies is recorded as an L-decision in
+// slice-m1/progress.md.
+//
+//   <program>
+//       <let count:int=0/>
+//       <step=1/>
+//       <doubled:int=(@count * 2)/>
+//       function bump()    { @count = @count + @step }
+//       function restart() { reset(@count) }
+//       <main>
+//           <p>Count ${@count} (doubled ${@doubled})</p>
+//           <button onclick=bump()>+${@step}</button>
+//           <button onclick=restart()>Reset</button>
+//           <!-- onclick=(@doubled = 0) → E-DERIVED-WRITE … -->
+//           <!-- onclick=(@step = 2)    → E-WRITE-NOT-GRANTED … -->
+//       </main>
+//   </program>
+//
+// The two commented-out writes are NOT REPRESENTABLE here: `step` and
+// `doubled` carry no write capability (`wcap: not`), so there is no Sym a
+// `Stmt.Write` could name for them. `lower`/analyze reports them at binding
+// time, exactly as it reports an undeclared name.
+// =============================================================================
+${
+    import { Sym, InstRef, Literal, PrimOp, Expr, EditKind, Check, Stmt, Block, Attr, View,
+             FieldMode, FieldRole, DeclKind, Type, Field, Decl, Fn, CoreProgram,
+             mkSym, block, noGrants, replaceGrant, litInt, readField, prim2, call0,
+             el, textView, dyn, onEvent } from "../core.scrml"
+
+    export fn counterCore() -> CoreProgram {
+        // ---- symbols (dense ids, as the binder mints them) ----
+        const sProgram: Sym = mkSym(0, "program")
+        const sCount: Sym   = mkSym(1, "count")
+        const sStep: Sym    = mkSym(2, "step")
+        const sDoubled: Sym = mkSym(3, "doubled")
+        const wCount: Sym   = mkSym(4, "count")      // the write capability of `count`
+        const sBump: Sym    = mkSym(5, "bump")
+        const sRestart: Sym = mkSym(6, "restart")
+
+        // Field indices of the program declaration (source order).
+        const COUNT: int = 0
+        const STEP: int = 1
+        const DOUBLED: int = 2
+
+        // Inside the program's own declaration and `renders`, its fields are
+        // reached through the lexically enclosing instance (L2). In a top-level
+        // function they are reached through the shared instance (L1).
+        const here: InstRef = InstRef.Lexical(0)
+        const shared: InstRef = InstRef.Shared(sProgram)
+
+        const fCount: Field = {
+            sym: sCount, ty: Type.Int, init: litInt(0),
+            mode: FieldMode.Let, role: FieldRole.Child, grants: replaceGrant(),
+            graph: not, exported: false, wcap: wCount,
+        }
+        const fStep: Field = {
+            sym: sStep, ty: Type.Int, init: litInt(1),
+            mode: FieldMode.Locked, role: FieldRole.Child, grants: noGrants(),
+            graph: not, exported: false, wcap: not,
+        }
+        const fDoubled: Field = {
+            sym: sDoubled, ty: Type.Int,
+            init: prim2(PrimOp.Mul, readField(sProgram, here, COUNT), litInt(2)),
+            mode: FieldMode.Derived, role: FieldRole.Child, grants: noGrants(),
+            graph: not, exported: false, wcap: not,
+        }
+
+        // function bump() { @count = @count + @step }  — a `.Replace` on a `let` scalar.
+        const bump: Fn = {
+            sym: sBump, params: [], pure: false,
+            body: block([
+                Stmt.Write(wCount, shared, EditKind.Replace,
+                    prim2(PrimOp.Add, readField(sProgram, shared, COUNT), readField(sProgram, shared, STEP)),
+                    Check.Static),
+            ]),
+        }
+        // function restart() { reset(@count) }  — `reset` is a `.Replace` with the
+        // field's initializer re-evaluated (L4).
+        const restart: Fn = {
+            sym: sRestart, params: [], pure: false,
+            body: block([Stmt.Write(wCount, shared, EditKind.Replace, litInt(0), Check.Static)]),
+        }
+
+        // dpa-045 follow-up 4 (RULED S442, SPEC §4.18.5): whitespace-only text
+        // between elements is kept exactly — the newline + indentation of the
+        // source (the two `<!-- … -->` comments are dropped; the bytes around
+        // them stay). L13 (which dropped these runs) is retired.
+        const main: View = el("main", [], [
+            textView("\n        "),
+            el("p", [], [
+                textView("Count "),
+                dyn(readField(sProgram, here, COUNT)),
+                textView(" (doubled "),
+                dyn(readField(sProgram, here, DOUBLED)),
+                textView(")"),
+            ]),
+            textView("\n        "),
+            el("button", [onEvent("click", [Stmt.Eval(call0(sBump))])], [
+                textView("+"),
+                dyn(readField(sProgram, here, STEP)),
+            ]),
+            textView("\n        "),
+            el("button", [onEvent("click", [Stmt.Eval(call0(sRestart))])], [textView("Reset")]),
+            textView("\n        \n        \n    "),
+        ])
+
+        const program: Decl = {
+            sym: sProgram, kind: DeclKind.Program, single: true,
+            fields: [fCount, fStep, fDoubled],
+            renders: [main], wiring: [], handles: [],
+        }
+        return { program: sProgram, decls: [program], types: [], fns: [bump, restart], server: [] }
+    }
+}

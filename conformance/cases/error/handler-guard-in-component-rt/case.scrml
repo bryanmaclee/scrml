@@ -1,0 +1,12 @@
+type LoadError:enum = { Empty, Bad }
+
+${
+    function risky()! -> LoadError { fail LoadError.Empty }
+    const Btn = <button id="c" onclick={ risky() !{ | .Empty :> @r = 1 | .Bad :> @r = 2 }; @msg = "y" }>go</>
+}
+
+<r> = 0
+<msg> = ""
+
+<Btn/>
+<p id="out">${@r} ${@msg}</p>

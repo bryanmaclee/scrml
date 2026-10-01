@@ -1,0 +1,35 @@
+{
+  "spec": "§65.3.2, §65.6",
+  "rationale": "§65.3.2: base tokens are `:root` custom properties (`--ink: #0f172a`, `--paper: #ffffff`); §65.6: after `@mode = .Dark` the `.Dark` re-binds hold at `:root`.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "html",
+          "prop": "--ink",
+          "value": "#0f172a"
+        },
+        {
+          "sel": "html",
+          "prop": "--paper",
+          "value": "#ffffff"
+        }
+      ]
+    },
+    {
+      "click": "button",
+      "expect": [
+        {
+          "sel": "html",
+          "prop": "--ink",
+          "value": "#e2e8f0"
+        },
+        {
+          "sel": "html",
+          "prop": "--paper",
+          "value": "#0f172a"
+        }
+      ]
+    }
+  ]
+}

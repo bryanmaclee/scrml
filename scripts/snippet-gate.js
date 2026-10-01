@@ -39,14 +39,27 @@
  * MODES:
  *   `bun scripts/snippet-gate.js`             GATE  — exit 1 on any failure.
  *   `bun scripts/snippet-gate.js --list`      list the discovered corpus, compile nothing.
- *   `bun scripts/snippet-gate.js [paths...]`  override the corpus with explicit paths.
+ *   `bun scripts/snippet-gate.js [paths...]`  override the corpus with explicit paths
+ *                                             (compile only; the drift check needs the full corpus).
+ *   `bun scripts/snippet-gate.js --drift-only` run only the DRIFT check (fast, no compiles).
+ *
+ * DRIFT CHECK (2026-09-29). Real files close the drift hole only when the
+ * document LINKS to the file. docs/tutorial.md instead showed COPIES of its
+ * snippet files, and the copies drifted while the files stayed green (the
+ * tutorial's §2.2 and §5 lost `db=`; §7/§9/§10 never had a file at all). So a
+ * fenced block may now carry a `<!-- snippet: path -->` marker, and the gate
+ * fails if the block is not the file. The contract and mechanics live in
+ * `scripts/snippet-drift.js`. This is not a compile of the fence: the FILE is
+ * compiled (here) and the fence is compared to the file (there).
  *
  * Authored S280 (2026-07-22).
  */
 
 import { existsSync, statSync, readdirSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
-import { join, extname } from "path";
+import { join, extname, dirname, resolve } from "path";
+import { fileURLToPath } from "url";
+import { checkDrift } from "./snippet-drift.js";
 import { execFileSync } from "child_process";
 
 /**
@@ -72,6 +85,7 @@ const SNIPPET_CORPUS = [
 
 const args = process.argv.slice(2);
 const listOnly = args.includes("--list");
+const driftOnly = args.includes("--drift-only");
 const explicit = args.filter((a) => !a.startsWith("--"));
 const corpus = explicit.length > 0 ? explicit : SNIPPET_CORPUS;
 
@@ -124,6 +138,30 @@ if (listOnly) {
   process.exit(0);
 }
 
+// ─── DRIFT: a documented copy must equal its file ──────────────────────────
+// Runs whenever the full corpus is in play (not for an explicit-path compile).
+let driftFailed = false;
+if (explicit.length === 0) {
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  const drift = checkDrift(repoRoot, SNIPPET_CORPUS);
+  for (const f of drift.failures) {
+    console.error(`  DRIFT ${f.doc}:${f.line} — ${f.message}`);
+    if (f.diff) for (const l of f.diff) console.error(`        ${l}`);
+  }
+  console.log(
+    `snippet-gate drift: ${drift.checked} marked block(s) checked across ` +
+      `${drift.docsWithMarkers.length} document(s), ${drift.failures.length} failure(s).`,
+  );
+  driftFailed = drift.failures.length > 0;
+  if (driftFailed) {
+    console.error(
+      "A document shows a copy of a snippet file that no longer matches the file. Make them " +
+        "equal: the FILE is what CI compiles, so decide which side is correct scrml today and copy it to the other.",
+    );
+  }
+}
+if (driftOnly) process.exit(driftFailed ? 1 : 0);
+
 const outDir = mkdtempSync(join(tmpdir(), "snippet-gate-"));
 let passed = 0;
 const failures = [];
@@ -175,4 +213,4 @@ if (failures.length > 0) {
   );
 }
 
-process.exit(failures.length > 0 ? 1 : 0);
+process.exit(failures.length > 0 || driftFailed ? 1 : 0);

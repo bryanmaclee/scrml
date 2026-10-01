@@ -32,13 +32,6 @@
         // window so the demo isn't anchored to a moving target.
         const TODAY_ISO = "2026-04-29"
 
-        function getCurrentUser(sessionToken) {
-            if (sessionToken is not) return not
-            const store = createSessionStore(SESSION_DB_PATH)
-            const userId = store.get(sessionToken)
-            if (userId is not) return not
-            return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
-        }
 
         // F-AUTH-001 fallback: role gate. Returns user + customer + invoices
         // scoped to this customer.
@@ -47,7 +40,10 @@
         // 'payment' kind row in lin_tokens). The customer page uses this to
         // pass the lin token through markPaid().
         function fetchInvoicesServer(sessionToken) {
-            const user = getCurrentUser(sessionToken)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
@@ -87,7 +83,10 @@
         // and double-clicks return error. The lin keyword on the parameter
         // gives a compile-time exactly-once-consume guarantee per §35.2.1.
         function markPaidServer(sessionToken, invoiceId, lin token: string) {
-            const user = getCurrentUser(sessionToken)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
@@ -109,15 +108,20 @@
             // Per F-LIN-001: SQL ?{} interpolation doesn't satisfy lin
             // consume; copy into template literal first.
             const consumeMarker = `consume:${token}`
-            const tokRes = ?{`
+            // Atomic single-use guard: RETURNING yields a row only when this
+            // UPDATE flipped consumed_at from NULL. `.run()` returns void
+            // (§8.5.1), so the outcome is read from RETURNING via `.get()`;
+            // `not` = already consumed (replay / race) or never issued.
+            const consumed = ?{`
                 UPDATE lin_tokens
                 SET consumed_at = CURRENT_TIMESTAMP, consumed_by = ${user.id}
                 WHERE token = ${consumeMarker.substring(8)}
                   AND kind = 'payment'
                   AND load_id = ${inv.load_id}
                   AND consumed_at IS NULL
-            `}.run()
-            if (tokRes.changes == 0) {
+                RETURNING token
+            `}.get()
+            if (consumed is not) {
                 return { error: "Payment token already used or invalid." }
             }
 
@@ -172,7 +176,7 @@
             const tok = getSessionToken()
             const data = fetchInvoicesServer(tok)
             if (data.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             if (data.error) {
@@ -198,7 +202,7 @@
             const tok = getSessionToken()
             const result = markPaidServer(tok, invoiceId, paymentToken)
             if (result.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             if (result.error) {
@@ -218,7 +222,7 @@
 
         function logout() {
             document.cookie = "scrml_session=; Path=/; Max-Age=0"
-            window.location.href = "/login"
+            window.location.href = "/auth/login?logout=1"
         }
 
         // Pure helper — does this invoice match the dropdown filter? `filter` is
@@ -252,11 +256,11 @@
     <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">
       <header class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
           <div class="flex items-center gap-3">
-              <a href="/customer" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
+              <a href="/customer/home" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
               <span class="text-xs uppercase tracking-wider text-slate-400">Invoices</span>
           </div>
           <nav class="flex items-center gap-4 text-sm">
-              <a href="/customer" class="hover:text-blue-300">Home</a>
+              <a href="/customer/home" class="hover:text-blue-300">Home</a>
               <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
               <a href="/customer/invoices" class="hover:text-blue-300">Invoices</a>
               <a href="/customer/profile" class="hover:text-blue-300">Profile</a>
@@ -273,7 +277,7 @@
                   <span class="text-xs text-slate-500">
                       Live: <strong>${@currentCustomerEvents.length}</strong>
                   </span>
-                  <button if=(@currentCustomerEvents.length > @lastSeenCustomerEventCount)
+                  <button if=(@currentCustomerEvents is some && (@currentCustomerEvents.length > @lastSeenCustomerEventCount))
                       onclick=ackCustomerEvents()
                       class="text-xs px-2 py-1 rounded bg-amber-500 hover:bg-amber-600 text-white font-medium">
                       Refresh

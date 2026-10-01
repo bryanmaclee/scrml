@@ -1,0 +1,19 @@
+{
+  "id": "protect-helper-mutates-param-e006",
+  "description": "§14.8.9 S441 round 4 (F2) — a helper that writes into its PARAMETER (`function setv(o, v) { o.x = v }`) writes into the caller's object. The parameter shares the argument's taint cell: E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "MEASURED before the fix: the helper's write updated only its own parameter binding, so the caller's object served the hash (g-protected-column-escapes-redaction-as-scalar, S441 round 4 review).",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "notCodes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}

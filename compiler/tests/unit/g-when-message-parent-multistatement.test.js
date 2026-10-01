@@ -38,13 +38,16 @@ function compileToClient(src) {
   }
 }
 
-// Grab the `<worker>.onmessage = function(event){ … }` handler body text.
+// Grab the `when message from` hook body text. The hook is a listener,
+// `<worker>.addEventListener("message", function(event){ const m = event.data.data; … })`
+// (dpa-056 D2); the `event.data.data` binding anchor skips the `.send()` reply
+// router, which is also a "message" listener.
 function onmessageBody(clientJs) {
-  const m = clientJs.match(/onmessage\s*=\s*function\s*\(event\)\s*\{([\s\S]*?)\};/);
+  const m = clientJs.match(/addEventListener\("message", function\s*\(event\)\s*\{(\s*const \w+ = event\.data\.data;[\s\S]*?)\}\);/);
   return m ? m[1] : "";
 }
 function onerrorBody(clientJs) {
-  const m = clientJs.match(/onerror\s*=\s*function\s*\([^)]*\)\s*\{([\s\S]*?)\};/);
+  const m = clientJs.match(/addEventListener\("error", function\s*\([^)]*\)\s*\{([\s\S]*?)\}\);/);
   return m ? m[1] : "";
 }
 

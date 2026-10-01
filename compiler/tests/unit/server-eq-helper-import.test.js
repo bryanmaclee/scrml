@@ -86,9 +86,9 @@ function compileSource(scrmlSource, testName) {
  * generated module (CSRF wrappers, Request shims, route registration).
  */
 function extractInlinedEq(serverJs) {
-  // Helper definition starts at `function _scrml_structural_eq(a, b) {` and
+  // Helper definition starts at `function _scrml_structural_eq(a, b, seen) {` and
   // ends at the matching closing brace at column 0.
-  const startMarker = "function _scrml_structural_eq(a, b) {";
+  const startMarker = "function _scrml_structural_eq(a, b, seen) {";
   const startIdx = serverJs.indexOf(startMarker);
   if (startIdx === -1) return null;
   // Find the matching close-brace at column-0. The runtime helper template
@@ -253,7 +253,7 @@ describe("fix-server-eq-helper-import — server helper inlining (approach b)", 
     // Approach (a) declined (operands are bare idents, not statically primitive).
     expect(serverJs).toContain("_scrml_structural_eq(u1, u2)");
     // Approach (b) kicks in — helper definition is inlined.
-    expect(serverJs).toContain("function _scrml_structural_eq(a, b)");
+    expect(serverJs).toContain("function _scrml_structural_eq(a, b, seen)");
   });
 
   test("§8 inlined helper computes structural equality correctly", () => {
@@ -278,7 +278,7 @@ describe("fix-server-eq-helper-import — server helper inlining (approach b)", 
 <div></div>
 </program>`;
     const { serverJs } = compileSource(src, "extract-helper");
-    expect(serverJs).toContain("function _scrml_structural_eq(a, b)");
+    expect(serverJs).toContain("function _scrml_structural_eq(a, b, seen)");
     const eq = extractInlinedEq(serverJs);
     expect(typeof eq).toBe("function");
     // Reference identity short-circuit
@@ -330,7 +330,7 @@ describe("fix-server-eq-helper-import — server helper inlining (approach b)", 
 </program>`;
     const { serverJs } = compileSource(src, "enum-tag");
     expect(serverJs).toContain("_scrml_structural_eq(a, b)");
-    expect(serverJs).toContain("function _scrml_structural_eq(a, b)");
+    expect(serverJs).toContain("function _scrml_structural_eq(a, b, seen)");
     // The inlined helper has the enum-tag branch. S93 — switched from strict
     // `!== undefined` to loose `!= null` (covers both null + undefined,
     // avoids the bare `undefined` keyword per M-7C-D-12).
@@ -377,7 +377,7 @@ describe("fix-server-eq-helper-import — no false-positive inlining", () => {
 <div></div>
 </program>`;
     const { serverJs } = compileSource(src, "multi");
-    const matches = (serverJs.match(/^function _scrml_structural_eq\(a, b\) \{$/gm) ?? []).length;
+    const matches = (serverJs.match(/^function _scrml_structural_eq\(a, b, seen\) \{$/gm) ?? []).length;
     expect(matches).toBe(1);
     // Sanity: at least one call site is present.
     expect(serverJs).toContain("_scrml_structural_eq(a, b)");

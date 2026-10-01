@@ -6,7 +6,9 @@
  * server entry point (dist/_server.js) that:
  *  - Imports all *.server.js route handler exports
  *  - Registers routes in a Bun.serve() fetch handler
- *  - Serves static files (HTML, CSS, client.js, runtime) as fallback
+ *  - Serves static files as fallback — ONLY the build's client artifacts and
+ *    passive media (SPEC §47.13 allowlist; never server modules, databases,
+ *    dotfiles, sources or maps)
  *  - Exposes a health check at /_scrml/health
  *  - Respects the PORT env var (default 3000)
  *  - Wires WebSocket channels (_scrml_ws_handlers) into Bun.serve() websocket: option
@@ -14,12 +16,14 @@
  * Usage: scrml build <dir> [--output dist/] [--embed-runtime] [--minify] [--target <platform>]
  */
 
-import { statSync, readdirSync, readFileSync, writeFileSync, existsSync } from "fs";
-import { resolve, join, basename } from "path";
+import { statSync, readdirSync, readFileSync, writeFileSync, existsSync, realpathSync } from "fs";
+import { resolve, join, basename, relative } from "path";
 import { compileScrml, scanDirectory, findOutputFiles } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
 import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
+import { hasApplicationScopeRefusal, noFilesWrittenLine } from "./refusal-gate.js";
+import { STATIC_POLICY_EMIT_SOURCE } from "../static-serve-policy.js";
 
 /** Valid deployment target identifiers. */
 const VALID_TARGETS = ["fly", "railway", "render", "static", "docker"];
@@ -192,68 +196,133 @@ export function discoverServerRoutes(outputDir) {
       continue;
     }
 
-    // Extract all named exports that look like route objects or WS handlers.
-    // _scrml_ws_handlers is the Bun.serve() websocket: option — it is NOT a route.
-    //   export const _scrml_route_... = { path, method, handler }  (HTTP route)
-    //   export const _scrml_session_destroy = { ... }              (auth/session handler)
-    //   export const _scrml_ws_handlers = { open, message, close } (WS handlers — not a route)
-    const routeNames = [];
-    const wsHandlerNames = [];
-    const middlewareNames = [];
-    // §40.3/§40.8 — the `.scrml` source that DECLARES this module's onion.
-    // emit-server.ts stamps it next to the mount point so the entry generator can
-    // NAME the competing sources when a build presents more than one application.
-    let middlewareDeclaredIn = null;
-    const declaredInMatch = /export\s+const\s+_scrml_mw_declared_in\s*=\s*("(?:[^"\\]|\\.)*")/.exec(source);
-    if (declaredInMatch) {
-      try { middlewareDeclaredIn = JSON.parse(declaredInMatch[1]); } catch { middlewareDeclaredIn = null; }
-    }
-    // `_scrml_*` covers routes/session/endpoint/sse/cors/ws; `__ri_route_*` are
-    // the inferred server-function RPC routes (a `?{}`/host-touching function
-    // escalated to a route) — they do NOT carry the `_scrml_` prefix, so without
-    // this alternation `scrml build` silently drops every server-function route
-    // (they 404 in production while working under `scrml dev`).
-    const exportRe = /export\s+const\s+(_scrml_\w+|__ri_route_\w+)\s*=/g;
-    let m;
-    while ((m = exportRe.exec(source)) !== null) {
-      const name = m[1];
-      if (name === "_scrml_ws_handlers") {
-        wsHandlerNames.push(name);
-      } else if (name === "_scrml_mw_pipeline") {
-        // §40.3 — the handle() onion mount point. It is a WRAPPER FUNCTION, not a
-        // `{ path, method, handler }` route: pushing it into `routes` would put a
-        // bare function in the match loop and lose the onion entirely.
-        middlewareNames.push(name);
-      } else if (name === "_scrml_mw_declared_in") {
-        // Provenance for the onion above, not a route. Captured separately.
-      } else if (name === "_scrml_protected_document") {
-        // §52.13 — the served-document auth guard `{ guard }`, NOT a route. It is
-        // captured separately (below) and imported under a unique alias by the
-        // entry generator; leaving it here would push a malformed `{guard}` entry
-        // into the `routes` array and bare-import it alongside its own alias.
-      } else {
-        routeNames.push(name);
-      }
-    }
-
-    // §52.13 — a module that exports `_scrml_protected_document` guards its own
-    // served .html document. Derive that document's SERVE_DIR-relative path from
-    // the module filename (emit-server names `<base>.server.js` beside `<base>.html`
-    // from the same source), normalized to forward slashes to match URL pathnames.
-    // The entry generator mounts the guard in front of that document in the static
-    // dispatch (g-auth-required-does-not-protect-the-served-html-document).
-    const protectedDocument = /export\s+const\s+_scrml_protected_document\s*=/.test(source)
-      ? relPath.replace(/\\/g, "/").replace(/\.server\.js$/, ".html")
-      : null;
-
-    if (routeNames.length > 0 || wsHandlerNames.length > 0 || middlewareNames.length > 0) {
-      // `filename` carries the relative path under outputDir so the generated
-      // `_server.js` can import via `./${filename}` regardless of nesting.
-      result.push({ filename: relPath, routeNames, wsHandlerNames, middlewareNames, middlewareDeclaredIn, protectedDocument });
-    }
+    const unit = describeServerUnit(source, relPath);
+    if (unit) result.push(unit);
   }
 
   return result;
+}
+
+/**
+ * §40.3.4 E-MW-007, decided BEFORE the write over the unit set the dist WILL hold
+ * after it: every `.server.js` already in `outputDir` that this build does not
+ * overwrite, plus every unit this build plans to write. That is exactly the set
+ * `discoverServerRoutes(outputDir)` would read after an in-place write — so a
+ * STALE unit left by an earlier build (e.g. a renamed source) is counted here just
+ * as the post-write check counts it — and it goes through the same parse
+ * (`describeServerUnit`) and the same selector (`selectRequestOnion`).
+ *
+ * Ordered as `findOutputFiles` walks (per-directory sorted, depth-first), which
+ * is segment-wise path order, so the diagnostic names sources in the same order
+ * as the post-write check does.
+ *
+ * @param {string} outputDir
+ * @param {Array<{ relPath: string, source: string }>} plannedServerUnits
+ * @returns {{ onion: object|null, error: object|null }}
+ */
+export function decideOnionBeforeWrite(outputDir, plannedServerUnits) {
+  const posix = (p) => p.replace(/\\/g, "/");
+  const plannedPaths = new Set(plannedServerUnits.map((u) => posix(u.relPath)));
+  // On a case-INSENSITIVE filesystem (Windows / macOS default) a write to
+  // `app.server.js` lands on an existing `App.server.js` and keeps the OLD
+  // spelling — so the unit already on disk is the one this build overwrites, not
+  // a stale survivor. Match it by its REAL on-disk spelling (for every segment,
+  // file and directory alike), exactly as the post-write discovery will see it.
+  // On a case-sensitive filesystem the real path IS the planned path: no-op.
+  if (existsSync(outputDir)) {
+    const rootReal = realpathSync.native(outputDir);
+    for (const u of plannedServerUnits) {
+      const abs = join(outputDir, u.relPath);
+      if (existsSync(abs)) plannedPaths.add(posix(relative(rootReal, realpathSync.native(abs))));
+    }
+  }
+  const surviving = existsSync(outputDir)
+    ? discoverServerRoutes(outputDir).filter((m) => !plannedPaths.has(posix(m.filename)))
+    : [];
+  const planned = plannedServerUnits
+    .map((u) => describeServerUnit(u.source, u.relPath))
+    .filter(Boolean);
+  const bySegments = (a, b) => {
+    const sa = posix(a.filename).split("/"), sb = posix(b.filename).split("/");
+    for (let i = 0; i < Math.min(sa.length, sb.length); i++) {
+      if (sa[i] !== sb[i]) return sa[i] < sb[i] ? -1 : 1;
+    }
+    return sa.length - sb.length;
+  };
+  return selectRequestOnion([...surviving, ...planned].sort(bySegments));
+}
+
+/**
+ * One server unit's route/WS/onion exports, from its SOURCE TEXT. The body of
+ * `discoverServerRoutes`, factored out so the pre-write refusal decision
+ * (`decideOnionBeforeWrite`) reads the build's PLANNED units — which are not on
+ * disk yet — through the exact same parse as the units already in dist/.
+ *
+ * @param {string} source  the `.server.js` text
+ * @param {string} relPath its dist-relative path (the import specifier)
+ * @returns {object|null} the module record, or null when it exports nothing to mount
+ */
+export function describeServerUnit(source, relPath) {
+  // Extract all named exports that look like route objects or WS handlers.
+  // _scrml_ws_handlers is the Bun.serve() websocket: option — it is NOT a route.
+  //   export const _scrml_route_... = { path, method, handler }  (HTTP route)
+  //   export const _scrml_session_destroy = { ... }              (auth/session handler)
+  //   export const _scrml_ws_handlers = { open, message, close } (WS handlers — not a route)
+  const routeNames = [];
+  const wsHandlerNames = [];
+  const middlewareNames = [];
+  // §40.3/§40.8 — the `.scrml` source that DECLARES this module's onion.
+  // emit-server.ts stamps it next to the mount point so the entry generator can
+  // NAME the competing sources when a build presents more than one application.
+  let middlewareDeclaredIn = null;
+  const declaredInMatch = /export\s+const\s+_scrml_mw_declared_in\s*=\s*("(?:[^"\\]|\\.)*")/.exec(source);
+  if (declaredInMatch) {
+    try { middlewareDeclaredIn = JSON.parse(declaredInMatch[1]); } catch { middlewareDeclaredIn = null; }
+  }
+  // `_scrml_*` covers routes/session/endpoint/sse/cors/ws; `__ri_route_*` are
+  // the inferred server-function RPC routes (a `?{}`/host-touching function
+  // escalated to a route) — they do NOT carry the `_scrml_` prefix, so without
+  // this alternation `scrml build` silently drops every server-function route
+  // (they 404 in production while working under `scrml dev`).
+  const exportRe = /export\s+const\s+(_scrml_\w+|__ri_route_\w+)\s*=/g;
+  let m;
+  while ((m = exportRe.exec(source)) !== null) {
+    const name = m[1];
+    if (name === "_scrml_ws_handlers") {
+      wsHandlerNames.push(name);
+    } else if (name === "_scrml_mw_pipeline") {
+      // §40.3 — the handle() onion mount point. It is a WRAPPER FUNCTION, not a
+      // `{ path, method, handler }` route: pushing it into `routes` would put a
+      // bare function in the match loop and lose the onion entirely.
+      middlewareNames.push(name);
+    } else if (name === "_scrml_mw_declared_in") {
+      // Provenance for the onion above, not a route. Captured separately.
+    } else if (name === "_scrml_protected_document") {
+      // §52.13 — the served-document auth guard `{ guard }`, NOT a route. It is
+      // captured separately (below) and imported under a unique alias by the
+      // entry generator; leaving it here would push a malformed `{guard}` entry
+      // into the `routes` array and bare-import it alongside its own alias.
+    } else {
+      routeNames.push(name);
+    }
+  }
+
+  // §52.13 — a module that exports `_scrml_protected_document` guards its own
+  // served .html document. Derive that document's SERVE_DIR-relative path from
+  // the module filename (emit-server names `<base>.server.js` beside `<base>.html`
+  // from the same source), normalized to forward slashes to match URL pathnames.
+  // The entry generator mounts the guard in front of that document in the static
+  // dispatch (g-auth-required-does-not-protect-the-served-html-document).
+  const protectedDocument = /export\s+const\s+_scrml_protected_document\s*=/.test(source)
+    ? relPath.replace(/\\/g, "/").replace(/\.server\.js$/, ".html")
+    : null;
+
+  if (routeNames.length > 0 || wsHandlerNames.length > 0 || middlewareNames.length > 0) {
+    // `filename` carries the relative path under outputDir so the generated
+    // `_server.js` can import via `./${filename}` regardless of nesting.
+    return { filename: relPath, routeNames, wsHandlerNames, middlewareNames, middlewareDeclaredIn, protectedDocument };
+  }
+  return null;
 }
 
 /**
@@ -289,7 +358,7 @@ export function discoverServerRoutes(outputDir) {
  *   build's `--idle-timeout` flag is not set.
  * @returns {string}
  */
-export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout = 120, hashedAssets = []) {
+export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout = 120, hashedAssets = [], clientAssets = []) {
   const lines = [];
 
   // Determine if any module exports _scrml_ws_handlers (WebSocket channels present)
@@ -496,6 +565,19 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   lines.push("}");
   lines.push("");
 
+  // SPEC §47.13 — the static-serving ALLOWLIST (g-static-server-serves-db-and-server-
+  // source). The functions are emitted from the SAME source `scrml dev` imports
+  // (compiler/src/static-serve-policy.js), so the two servers cannot drift. The
+  // allowlist itself is the build's client-asset manifest, baked in here rather
+  // than read from disk at startup: nothing written into the deploy directory
+  // after the build can widen what this server hands out.
+  lines.push("// The client-asset manifest: every file this build wrote for the browser, plus");
+  lines.push("// what those files import. The ONLY non-media files this server hands out.");
+  lines.push(`const _SCRML_CLIENT_ASSETS = new Set(${JSON.stringify([...clientAssets].sort())});`);
+  lines.push("");
+  lines.push(STATIC_POLICY_EMIT_SOURCE);
+  lines.push("");
+
   // §40.3 — the dispatch body is emitted ONCE and mounted two ways: inline in
   // `async fetch()` when the program has no handle() onion (byte-identical to the
   // pre-onion output), or as a standalone `_scrml_dispatch(req, server)` that the
@@ -519,21 +601,25 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   dispatchBody.push("    }");
   dispatchBody.push("  }");
   dispatchBody.push("");
-  dispatchBody.push("  // Static file serving");
-  dispatchBody.push('  const pathname = url.pathname === "/" ? "/index.html" : url.pathname;');
+  dispatchBody.push("  // Static file serving — SPEC §47.13 allowlist (fail-closed)");
+  dispatchBody.push("  const staticPath = _scrml_static_request_path(url.pathname);");
+  dispatchBody.push('  if (staticPath === false) return new Response("Not found", { status: 404 });');
+  dispatchBody.push('  const pathname = staticPath === "/" ? "/index.html" : staticPath;');
   dispatchBody.push("  const candidates = [");
   dispatchBody.push("    join(SERVE_DIR, pathname),");
   dispatchBody.push("    join(SERVE_DIR, `${pathname}.html`),");
   dispatchBody.push("  ];");
   dispatchBody.push("");
   dispatchBody.push("  for (const candidate of candidates) {");
+  dispatchBody.push('    const rel = relative(SERVE_DIR, candidate).split(/[\\\\/]/).join("/");');
+  dispatchBody.push("    // Decided BEFORE the filesystem is touched: a denied path is never even stat'ed.");
+  dispatchBody.push("    if (!_scrml_static_servable(rel, _SCRML_CLIENT_ASSETS)) continue;");
   dispatchBody.push("    try {");
   dispatchBody.push("      const st = statSync(candidate);");
   dispatchBody.push("      if (st.isFile()) {");
   dispatchBody.push("        // adopter-#82 — cache policy: content-hashed artifacts (by exact");
   dispatchBody.push("        // set membership) are immutable; the HTML entry is no-cache; other");
   dispatchBody.push("        // static assets revalidate via ETag / Last-Modified → 304.");
-  dispatchBody.push('        const rel = relative(SERVE_DIR, candidate).split(/[\\\\/]/).join("/");');
   if (protectedDocs.length > 0) {
     // §52.13 — gate an auth-required document BEFORE serving (or 304-ing) it: an
     // unauthenticated request redirects to loginRedirect instead of leaking the
@@ -600,6 +686,17 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   // truncated by Bun's default idleTimeout. ss33 item 3: the baked value is the build's
   // `--idle-timeout` (default 120, so this line is byte-unchanged when the flag is unset).
   lines.push(`  idleTimeout: ${idleTimeout},`);
+  // §14.8.9 (S443 round 6, P3) — an exception a route handler does not catch
+  // must never reach the client as text. With no `error:` handler, Bun answers
+  // it with its development error page (message + source excerpt) unless
+  // NODE_ENV=production — measured: a failing `json_extract('{}', passwordHash)`
+  // put the protected value on the wire. This handler answers every uncaught
+  // error with a fixed 500 and logs the error server-side, regardless of
+  // NODE_ENV.
+  lines.push("  error(err) {");
+  lines.push('    console.error("[scrml] unhandled server error:", err);');
+  lines.push('    return new Response("Internal Server Error", { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8" } });');
+  lines.push("  },");
   lines.push("  async fetch(req, server) {");
   if (hasOnion) {
     if (hasWs) {
@@ -872,9 +969,22 @@ export async function runBuild(args) {
     console.error(line);
   }
 
+  // g-session-config-refusal-still-writes-dist — the application-scope refusal
+  // (E-MW-008 from the compile, E-MW-007 over the post-write unit set) is decided
+  // BEFORE any byte reaches `outputDir`; a refused build leaves it as it was.
+  // (The static target generates no server entry and never raised E-MW-007.)
+  let refusedWrite = false;
+  let onionRefusal = null;
+  const beforeWrite = ({ errors, outputDir: dir, plannedServerUnits }) => {
+    if (opts.target !== "static") onionRefusal = decideOnionBeforeWrite(dir, plannedServerUnits).error;
+    refusedWrite = hasApplicationScopeRefusal(errors) || onionRefusal != null;
+    return !refusedWrite;
+  };
+
   const result = compileScrml({
     inputFiles,
     outputDir,
+    beforeWrite,
     verbose: opts.verbose,
     embedRuntime: opts.embedRuntime,
     write: true,
@@ -894,7 +1004,8 @@ export async function runBuild(args) {
   });
 
   if (result.errors.length > 0) {
-    console.error(`\nBuild failed with ${result.errors.length} error(s):`);
+    const failCount = result.errors.length + (onionRefusal ? 1 : 0);
+    console.error(`\nBuild failed with ${failCount} error(s):`);
     for (const e of result.errors) {
       // Bug 3 fix (S107) — same shape as dev.js error formatter; surface path:line:col.
       // #519 — also read the flat `file` field: the emit gate (E-CODEGEN-INVALID-LOGIC)
@@ -906,6 +1017,8 @@ export async function runBuild(args) {
       const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";
       console.error(`  [${e.stage}] ${rel}${loc} ${e.code}: ${stripRedundantCode(e.code, e.message)?.slice(0, 120)}`);
     }
+    if (onionRefusal) console.error(`  ${formatOnionConflict(onionRefusal)}`);
+    if (refusedWrite) console.error(noFilesWrittenLine(outputDir));
     process.exit(1);
   }
 
@@ -922,6 +1035,16 @@ export async function runBuild(args) {
   }
 
   console.log(`Compiled ${inputFiles.length} file(s) in ${result.durationMs}ms`);
+
+  // §40.3/§40.8 E-MW-007 — decided before the write (see `beforeWrite` above);
+  // reported here, after the warnings, where the post-write check reports it.
+  if (onionRefusal) {
+    console.error(`\nBuild failed with 1 error(s):`);
+    console.error(`  ${formatOnionConflict(onionRefusal)}`);
+    console.error(noFilesWrittenLine(outputDir));
+    process.exitCode = 1;
+    return;
+  }
 
   // Discover server route modules in the output directory.
   // discoverServerRoutes separates regular routes from _scrml_ws_handlers.
@@ -957,7 +1080,7 @@ export async function runBuild(args) {
   // emitted server serves `immutable` by membership, not by filename shape.
   let serverEntry;
   try {
-    serverEntry = generateServerEntry(serverModules, mcpOpts, opts.idleTimeout, result.hashedAssets || []);
+    serverEntry = generateServerEntry(serverModules, mcpOpts, opts.idleTimeout, result.hashedAssets || [], result.clientAssets || []);
   } catch (err) {
     // §40.3/§40.8 E-MW-007 — more than one application declared a request
     // pipeline in this build. Report it as a build failure naming every

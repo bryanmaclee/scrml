@@ -1,0 +1,8 @@
+<program>
+<n> = 0
+<r> = 0
+<r2> = 0
+<items> = [1]
+${ function h() { @r2 = 9 } }
+<ul><each in=@items as it><li><button onclick={ @n = 1; @zz = 3 }>x</button></li></each></ul>
+</program>

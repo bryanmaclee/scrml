@@ -30,6 +30,13 @@ import { compileScrml, scanDirectory, findOutputFiles, toPosixSpecifier } from "
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
 import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
+import {
+  _scrml_static_request_path,
+  _scrml_static_servable,
+  readClientAssetManifest,
+  relFromRoot,
+  CLIENT_ASSET_MANIFEST,
+} from "../static-serve-policy.js";
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -214,6 +221,17 @@ let registeredOnions = [];
 /** @type {Map<string, (req: Request) => (Response | null)>} */
 let registeredProtectedDocs = new Map();
 
+// §52.8 / §39.2.3 — request-time COMPOSE handlers (`_scrml_route___ssr`: the SSR seed
+// and the `<meta name="csrf-token">` fill), keyed like `registeredProtectedDocs` by
+// the SERVE_DIR-relative .html they compose (lowercased). The compose route serves a
+// DOCUMENT, so dev does NOT dispatch it by request path: it is used only when the
+// static loop has resolved a request to that exact .html on disk. Path dispatch made
+// it a second document decider — a `.server.js` that outlived its `.html` (dev never
+// cleans its output dir) kept a compose route at `/` and 302'd a request resolution
+// would have served from a DIFFERENT, public document (S441 review round 3).
+/** @type {Map<string, (req: Request) => Promise<Response>>} */
+let registeredComposeDocs = new Map();
+
 /**
  * Test/introspection accessor for the currently mounted §40.3 onion. Still an
  * ARRAY (of length 0 or 1) so a caller can ask "is one mounted?" without a
@@ -323,6 +341,7 @@ export async function loadServerRoutes(outputDir) {
   registeredWsHandlers = null;
   registeredOnions = [];
   registeredProtectedDocs = new Map();
+  registeredComposeDocs = new Map();
 
   // F-COMPILE-001 Option A: outputDir may be a tree when sources have nested
   // subdirectories. Walk recursively for *.server.js entries.
@@ -377,6 +396,14 @@ export async function loadServerRoutes(outputDir) {
       if (exportName === "_scrml_protected_document" && typeof value.guard === "function") {
         const htmlRel = relPath.replace(/\\/g, "/").replace(/\.server\.js$/, ".html").toLowerCase();
         registeredProtectedDocs.set(htmlRel, value.guard);
+        continue;
+      }
+
+      // §52.8 / §39.2.3 — the document COMPOSE route. Registered against this
+      // module's .html, NOT as a path route (see registeredComposeDocs).
+      if (exportName === "_scrml_route___ssr" && typeof value.handler === "function") {
+        const htmlRel = relPath.replace(/\\/g, "/").replace(/\.server\.js$/, ".html").toLowerCase();
+        registeredComposeDocs.set(htmlRel, value.handler);
         continue;
       }
 
@@ -1034,6 +1061,30 @@ function* staticCandidates(pathname, staticPathname, serveDir, opts) {
 }
 
 /**
+ * SPEC §47.13 — the client-asset manifest of the serve dir, as `compileScrml` last
+ * wrote it (`.scrml-client-assets.json`). Re-read whenever the file's mtime changes,
+ * because `scrml dev` rewrites it on every recompile; a missing manifest is an EMPTY
+ * set (fail closed — only passive media is served).
+ *
+ * The manifest also retires stale output: `scrml dev` never cleans its output dir
+ * (see `rootFallbackCandidates`), and a leftover `.html` from a prior compile is no
+ * longer in the set, so it is no longer served.
+ */
+const devClientAssetCache = new Map(); // serveDir → { stamp, assets }
+function devClientAssets(serveDir) {
+  let stamp = "";
+  try {
+    const st = statSync(join(serveDir, CLIENT_ASSET_MANIFEST));
+    stamp = `${st.mtimeMs}:${st.size}`;
+  } catch { /* no manifest yet */ }
+  const cached = devClientAssetCache.get(serveDir);
+  if (cached && cached.stamp === stamp) return cached.assets;
+  const assets = stamp === "" ? new Set() : readClientAssetManifest(serveDir);
+  devClientAssetCache.set(serveDir, { stamp, assets });
+  return assets;
+}
+
+/**
  * §40.3 — the remainder of the `scrml dev` request pipeline: registered-route
  * match → static file → 404. This is exactly what `resolve(request)` runs
  * inside an author's `handle()`.
@@ -1096,13 +1147,15 @@ export async function devDispatch(req, server, serveDir, opts) {
   // `dist/foo/index.html`) need directory-index resolution for
   // `/foo` to land on the right file.
   // ------------------------------------------------------------------
-  // Normalize trailing slash to fold `/foo/` into `/foo` for the
-  // first probe (the trailing-slash form still resolves via the
-  // directory-index candidate below).
-  const trimmedPathname = (pathname !== "/" && pathname.endsWith("/"))
-    ? pathname.slice(0, -1)
-    : pathname;
-  let staticPathname = trimmedPathname === "/" ? "/index.html" : trimmedPathname;
+  // SPEC §47.13 — decode + normalize the request path through the SAME policy the
+  // production `_server.js` emits. A traversal, dot-path, backslash or undecodable
+  // request is refused here, before any candidate is built. Normalizing also folds
+  // `/foo/` into `/foo` for the first probe (the trailing-slash form still resolves
+  // via the directory-index candidate below).
+  const safePathname = _scrml_static_request_path(pathname);
+  if (safePathname === false) return new Response("Not found", { status: 404 });
+  const staticPathname = safePathname === "/" ? "/index.html" : safePathname;
+  const clientAssets = devClientAssets(serveDir);
 
   // Try, in order: exact file, with .html, as dir/index.html — plus, for `/`, the
   // compiled entry and the first .html in the serve dir.
@@ -1113,7 +1166,13 @@ export async function devDispatch(req, server, serveDir, opts) {
   // `auth="required"` document that was not named `index.html` was served in full to
   // an unauthenticated `GET /`. The fix is not a second gate — it is deleting the
   // second serving path, so `/`'s candidates go through the ONE gated loop.
-  for (const candidate of staticCandidates(pathname, staticPathname, serveDir, opts)) {
+  for (const candidate of staticCandidates(safePathname, staticPathname, serveDir, opts)) {
+    // SPEC §47.13 — the allowlist, decided on the RESOLVED candidate before the
+    // filesystem is touched, exactly as `_server.js` does. Every candidate kind —
+    // exact, clean-URL, directory index, root fallback — passes through here, so no
+    // resolution order can reach a server module, a database or a dotfile.
+    if (!_scrml_static_servable(relFromRoot(serveDir, candidate), clientAssets)) continue;
+
     // Existence probe. A candidate that is not there is the normal case — that is what
     // enumerating candidates means — so this failure is swallowed and we move on.
     let st;
@@ -1141,6 +1200,22 @@ export async function devDispatch(req, server, serveDir, opts) {
     const resolvedDocGate = gateProtectedDoc(req, relative(serveDir, candidate));
     if (resolvedDocGate) return resolvedDocGate;
 
+    // §52.8 / §39.2.3 — this resolved document has a request-time compose handler
+    // (SSR seed / csrf-token meta fill). Run it HERE, on the file resolution chose,
+    // never by raw request path. Outside the tolerant try below, for the same reason
+    // as the gate: a compose handler that throws must be loud, not fall through to a
+    // different file. The handler runs its own §52.13 gate too (a redirect or any
+    // non-200 answer is returned as-is).
+    let composedHtml = null;
+    const composeDoc = candidate.endsWith(".html")
+      ? registeredComposeDocs.get(relative(serveDir, candidate).split(/[\\/]/).join("/").toLowerCase())
+      : undefined;
+    if (composeDoc) {
+      const composed = await composeDoc(req);
+      if (!composed || composed.status !== 200) return composed;
+      composedHtml = await composed.text();
+    }
+
     // Serving IO, and it must stay tolerant. `scrml dev` rewrites `dist/` on every
     // recompile while requests are in flight, so a candidate can be unlinked or
     // replaced between the `statSync` above and the read below. That race has to fall
@@ -1151,7 +1226,7 @@ export async function devDispatch(req, server, serveDir, opts) {
       const file = Bun.file(candidate);
       // Inject hot-reload script into HTML responses
       if (candidate.endsWith(".html")) {
-        const html = await file.text();
+        const html = composedHtml ?? await file.text();
         return new Response(injectHotReloadScript(html), {
           headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
         });
@@ -1487,6 +1562,35 @@ function stripHopByHop(headers) {
  * @param {number} childPort
  * @returns {Response|undefined}
  */
+/**
+ * §40.2 (S441) — the WebSocket upgrade Origin rule, for the dev parent. The SAME rule
+ * the compiler emits as `_scrml_ws_origin_ok` in every web-app server module
+ * (codegen/emit-server.ts); kept byte-for-byte equivalent in behaviour — change both.
+ * No Origin → non-browser client → allowed (the child's channel auth still applies);
+ * `Origin: null` → refused; otherwise host must match and scheme must match, except
+ * an https page on a request that arrived as plain http.
+ *
+ * @param {Request} req
+ * @param {URL} url
+ * @returns {boolean}
+ */
+export function wsOriginAllowed(req, url) {
+  const origin = req.headers.get("origin");
+  if (origin === null) return true;
+  try {
+    const o = new URL(origin);
+    const host = (req.headers.get("x-forwarded-host") || "").split(",")[0].trim() || url.host;
+    const proto = ((req.headers.get("x-forwarded-proto") || "").split(",")[0].trim() || url.protocol.replace(":", ""))
+      .toLowerCase()
+      .replace(/^ws(s?)$/, "http$1");
+    const self = new URL(proto + "://" + host);
+    if (o.host !== self.host) return false;
+    return o.protocol === self.protocol || (o.protocol === "https:" && self.protocol === "http:");
+  } catch {
+    return false;
+  }
+}
+
 function proxyWebSocketToChild(req, srv, url, childPort) {
   // Forward the auth-bearing request headers so a `<channel auth>` upgrade
   // handler's `_scrml_auth_check(req)` sees the browser's session cookie (Bun's
@@ -1497,15 +1601,21 @@ function proxyWebSocketToChild(req, srv, url, childPort) {
   if (cookie) fwd.Cookie = cookie;
   const auth = req.headers.get("authorization");
   if (auth) fwd.Authorization = auth;
+  // §40.2 (S441) — the child's channel upgrade route checks Origin against its OWN
+  // host. Through this proxy the child sees `127.0.0.1:<childPort>`, not the host the
+  // browser used, so forward the browser's Origin plus the host/scheme it connected to
+  // (the same X-Forwarded-* a production proxy sets). A browser cannot set
+  // X-Forwarded-Host on a WebSocket handshake, so an attacker page cannot spoof it.
+  const origin = req.headers.get("origin");
+  if (origin !== null) fwd.Origin = origin;
+  fwd["X-Forwarded-Host"] = req.headers.get("x-forwarded-host") || url.host;
+  fwd["X-Forwarded-Proto"] = req.headers.get("x-forwarded-proto") || url.protocol.replace(":", "");
   // NB: `Sec-WebSocket-Protocol` is deliberately NOT forwarded — scrml channels do
   // not negotiate a subprotocol, and the parent's `srv.upgrade` cannot echo the
   // child's chosen subprotocol back to the browser, so forwarding it would make a
   // subprotocol-requiring browser close on the unconfirmed handshake.
 
-  const upstream = new WebSocket(
-    `ws://127.0.0.1:${childPort}${url.pathname}${url.search}`,
-    Object.keys(fwd).length ? { headers: fwd } : undefined,
-  );
+  const upstream = new WebSocket(`ws://127.0.0.1:${childPort}${url.pathname}${url.search}`, { headers: fwd });
   // Deliver binary channel frames as ArrayBuffer (ServerWebSocket.send accepts
   // ArrayBuffer/TypedArray/string but throws on a Blob — the browser default).
   upstream.binaryType = "arraybuffer";
@@ -1655,6 +1765,13 @@ export async function runDev(args) {
       // HTML body and thrashing its retry loop.
       if ((req.headers.get("upgrade") || "").toLowerCase() === "websocket") {
         if (!childPort) return new Response("[dev] app server is starting…", { status: 503 });
+        // §40.2 (S441) — refuse a cross-origin upgrade HERE, before the browser
+        // socket is accepted. The child's route runs the same check on the forwarded
+        // Origin, but this proxy upgrades the browser side before the child answers,
+        // so without this the cross-origin socket would open and then close.
+        if (!wsOriginAllowed(req, url)) {
+          return new Response("Cross-origin WebSocket upgrade refused", { status: 403 });
+        }
         return proxyWebSocketToChild(req, srv, url, childPort);
       }
       // While the last compile is failing, serve the real error at every app

@@ -2,12 +2,12 @@ import { genVar } from "./var-counter.ts";
 import { emitStringFromTree, exprNodeContainsMemberAccess, parseExprToNode } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
-import { escapeHtmlAttr, VOID_ELEMENTS, HTML_BOOLEAN_ATTRS } from "./utils.ts";
+import { escapeHtmlAttr, VOID_ELEMENTS, HTML_BOOLEAN_ATTRS, htmlParserHonorsSelfClose } from "./utils.ts";
 import { nsId } from "./chunk-namespace.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
 import { validateEmittedArtifact } from "./validate-emit.ts";
 import { emitExprField, reparseRequestRefEscapeHatch, rawReferencesRegisteredRequest } from "./emit-expr.ts";
-import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds } from "./reactive-deps.ts";
+import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds, analyzeRequestDepsAttr } from "./reactive-deps.ts";
 import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement, isHtmlElement, isStandardHtmlRenderElement } from "../html-elements.js";
 import { isAuthorMainTag } from "../landmark-tag.ts";
@@ -703,6 +703,22 @@ function attrIsWiringFree(attr: any, allowName: string | null = null): boolean {
   return true;
 }
 
+/**
+ * §17.1.2 — is this `if=` attribute VALUE one the mount gate accepts?
+ * Mirrors the markup gate's own kind test, so a shape the markup path would
+ * ignore is ignored identically on a structural element.
+ *
+ * MODULE-SCOPE AND EXPORTED (S433) because a SECOND consumer needs the same
+ * answer: `buildSsrEachRenderers` (`emit-ssr-render.ts`) must know whether an
+ * enclosing element lowers to an inert `<template>`, and an each whose mount
+ * lands inside one can never server-render its first paint. A hand-copied
+ * predicate there would drift from this one the next time the gate's accepted
+ * kinds change — the two-spellings/one-lowering hazard. One definition, two
+ * callers.
+ */
+export const isGateableIfValue = (v: any): boolean =>
+  !!v && (v.kind === "variable-ref" || v.kind === "expr" || v.kind === "call-ref");
+
 function isCleanIfNode(node: any): boolean {
   if (!node || typeof node !== "object") return true;
   if (node.kind === "text" || node.kind === "comment") return true;
@@ -1039,6 +1055,57 @@ function checkInputStateDuplicateIds(nodes: any[], errors: CGError[]): void {
 
 // §6.7.8 <timeout> — single-shot timer state type, emits no HTML
 const TIMEOUT_TAGS = new Set(["timeout"]);
+
+/**
+ * Tags whose `emitNode` markup-branch dispatch **`return`s BEFORE the `if=` mount
+ * gate is ever consulted** — so on these, `if=` is SILENTLY IGNORED: no
+ * `<template>` is emitted and whatever they do emit stays in the LIVE first-paint
+ * tree.
+ *
+ * ⚑ EXPORTED, AND THE REASON IS A MEASURED DEFECT (S433). `isGateableIfValue`
+ * answers "would the gate ACCEPT this value" — it does NOT answer "does control
+ * flow REACH the gate for this tag". `buildSsrEachRenderers` (`emit-ssr-render.ts`)
+ * needs the second question: it must suppress an each's server prerender exactly
+ * when the each's mount fence lands inside an inert `<template>`. Keying that on
+ * the gate PREDICATE alone deleted a server first paint that had always worked —
+ * REPRODUCED through `compileScrml` for `<errorBoundary if=…>`, which emits its
+ * children transparently: fence LIVE, yet the renderer was suppressed and a lint
+ * fired whose stated reason was factually false. So the mirror must be of the
+ * DISPATCH, not of the predicate.
+ *
+ * ⛔ DERIVED BY ENUMERATING EVERY `return` IN THE MARKUP BRANCH ABOVE THE GATE,
+ * NOT FROM A REMEMBERED LIST. If you add, remove or REORDER a dispatch in that
+ * branch, this set moves with it. Pinned per-tag — AND as an exact set — by
+ * `compiler/tests/integration/ssr-a-terminus.test.js` describe (g).
+ *
+ * Deliberately ABSENT — verified, not assumed:
+ *   - `outlet` — its dispatch REWRITES the node to `main`/`div` **keeping every
+ *     attribute, `if=` included**, and re-enters `emitNode`, so the generic gate
+ *     DOES fire and an outlet-enclosed subtree IS mount-deferred. (Measured: the
+ *     each fence lands in a `<template>`.)
+ *   - the COMPOUND-PARENT wrapper dispatch, which also returns before the gate
+ *     but is keyed on `lookupStateCell(fileScope, tag) === "compound-parent"` —
+ *     a per-FILE declaration fact no tag set can carry. Its consumer mirrors
+ *     that test directly; see `emit-ssr-render.ts`.
+ */
+export const IF_GATE_BYPASS_TAGS: ReadonlySet<string> = new Set<string>([
+  // §19.6 markup error boundary — emits `<div data-scrml-error-boundary>` and
+  // walks its children LIVE, never consulting `if=`.
+  "errorBoundary", "errorboundary",
+  // §55.8 `<errors of=…/>` — emits its own anchor, returns.
+  "errors",
+  // §19.x `<render of=…/>` — emits its own anchor, returns.
+  "render",
+  // §40.8 default-logic roots — children emitted TRANSPARENTLY (live), no element.
+  "program", "page",
+  // §6.7 lifecycle / input-state / request / timeout state openers — emit no HTML.
+  ...LIFECYCLE_SILENT_TAGS,   // timer, poll
+  ...INPUT_STATE_TAGS,        // keyboard, mouse, gamepad
+  ...REQUEST_TAGS,            // request
+  ...TIMEOUT_TAGS,            // timeout
+  // §4.x `<channel name=…>` — emits no HTML.
+  "channel",
+]);
 
 /**
  * A1c C3 — Lower a state-cell's validators to HTML-native attributes for
@@ -1558,14 +1625,6 @@ export function generateHtml(
       registry.addLogicBinding({ placeholderId: markerId, expr: ifVal.raw, isMountToggle: true, templateId, markerId, condExpr: ifVal.raw, condExprNode: ifVal.exprNode, refs: ifVal.refs, ...transitionFields } as any);
     }
   };
-
-  /**
-   * §17.1.2 — is this `if=` attribute VALUE one the mount gate accepts?
-   * Mirrors the markup gate's own kind test, so a shape the markup path would
-   * ignore is ignored identically on a structural element.
-   */
-  const isGateableIfValue = (v: any): boolean =>
-    !!v && (v.kind === "variable-ref" || v.kind === "expr" || v.kind === "call-ref");
 
   /**
    * §17.1.2 — push a structural element's already-built mount HTML, wrapped in
@@ -2612,6 +2671,45 @@ export function generateHtml(
           }
         }
 
+        // §6.7.7 — `deps-list ::= ('@' identifier (',' '@' identifier)*)?` and
+        // "The compiler SHALL emit E-LIFECYCLE-022 if a `deps=` entry names an
+        // undeclared or non-`@` variable." Every entry that is not a bare
+        // `@identifier` is refused: an explicit list overrides inference, so a
+        // silently-dropped entry would turn the request MOUNT-ONLY. (An
+        // undeclared `@x` entry is already refused by E-STATE-UNDECLARED.)
+        const deps = analyzeRequestDepsAttr(node);
+        if (errors && deps.invalid.length > 0) {
+          const idVal = attrMap.get("id")?.value;
+          const reqLabel = typeof idVal?.value === "string" ? `<request id="${idVal.value}">` : "<request>";
+          if (deps.notList) {
+            const shown = deps.invalid[0];
+            const one = /^@[A-Za-z_$][A-Za-z0-9_$]*$/.test(shown) ? `\`deps=[${shown}]\`` : "`deps=[@page, @filter]`";
+            errors.push(new CGError(
+              "E-LIFECYCLE-022",
+              `E-LIFECYCLE-022: ${reqLabel} \`deps=\` value \`${shown}\` is not a list of reactive cells. ` +
+              `\`deps=\` takes a bracketed list of \`@cell\` names (§6.7.7); the fetch re-executes when a listed cell changes. ` +
+              `Fix: write ${one}, or \`deps=[]\` to fetch on mount only.`,
+              span,
+            ));
+          }
+          for (const entry of deps.notList ? [] : deps.invalid) {
+            const memberBase = /^@([A-Za-z_$][A-Za-z0-9_$]*)[.\[]/.exec(entry);
+            const bareIdent = /^([A-Za-z_$][A-Za-z0-9_$]*)$/.exec(entry);
+            const fix = memberBase
+              ? `list the cell itself — \`deps=[@${memberBase[1]}]\` — the fetch re-runs when \`@${memberBase[1]}\` changes and reads \`${entry}\` from it`
+              : bareIdent
+                ? `write the cell with its sigil — \`@${bareIdent[1]}\``
+                : "list the cells the fetch depends on, each as a bare `@name` inside `[ ]` (e.g. `deps=[@page, @filter]`), or `deps=[]` to fetch on mount only";
+            errors.push(new CGError(
+              "E-LIFECYCLE-022",
+              `E-LIFECYCLE-022: ${reqLabel} \`deps=\` entry \`${entry}\` is not a reactive cell. ` +
+              `\`deps=\` lists \`@cell\` names only (§6.7.7); the fetch re-executes when a listed cell changes. ` +
+              `Fix: ${fix}.`,
+              span,
+            ));
+          }
+        }
+
         return;
       }
 
@@ -3363,6 +3461,9 @@ export function generateHtml(
                 handlerArgs: [],
                 handlerExpr: val.raw,
                 handlerExprNode: val.exprNode,
+                ...(val.handlerBlock ? { handlerBlock: val.handlerBlock } : {}),
+                // s441 — anchors a diagnostic about the handler body (F5 / F4).
+                span: (attr as { span?: unknown }).span ?? (val as { span?: unknown }).span ?? (node as { span?: unknown }).span,
               });
             }
           } else if (REACTIVE_BOOL_ATTRS.has(name)) {
@@ -3600,6 +3701,7 @@ export function generateHtml(
                   handlerName: val.name,
                   handlerArgs: val.args ?? [],
                   handlerArgExprNodes: val.argExprNodes,
+                  span: (attr as { span?: unknown }).span ?? (node as { span?: unknown }).span,
                   // Bug 58 (S140): propagate the formFor compound cell name so the
                   // submit handler sets `@<cell>.submitted = true` + passes `values`
                   // (the collected compound value) into the handler per §41.14.3.
@@ -3694,7 +3796,18 @@ export function generateHtml(
         parts.push(` data-scrml-rcdata="${_rcdataPlaceholderId}"`);
       }
 
-      if (isSelfClosing || isVoid) {
+      // S442 D1 — a source self-close (`<textarea/>`, `<div/>`) means "no
+      // children" (§4.14 body forms; §15 "`<X/>` is equivalent to `<X></X>`"),
+      // but the browser's HTML parser IGNORES a trailing `/` on a non-void
+      // HTML-namespace element: `<textarea />` opens an escapable-raw-text
+      // element that swallows the rest of the document as text, and `<div />`
+      // reparents every following sibling. So `/>` is emitted ONLY where the
+      // parser honours it (void elements; svg/math foreign content — see
+      // `htmlParserHonorsSelfClose`). Every other self-closed element falls
+      // through to the ordinary open + (zero children) + `</tag>` path, so it
+      // is byte-identical to the explicit empty form `<tag></tag>` (incl. the
+      // `<form>` CSRF input and the if= guard bookkeeping).
+      if (isVoid || (isSelfClosing && htmlParserHonorsSelfClose(tag, markupParentStack))) {
         parts.push(" />");
         return;
       }
@@ -3796,7 +3909,10 @@ export function generateHtml(
       // render slot; a logic node that contains a lift-expr keeps its placeholder
       // + lift wiring and falls through to the normal path below.
       const bodyHasLift = (node.body ?? []).some((child: any) => stmtContainsLiftExpr(child));
-      if (inDefaultLogicMode && !bodyHasLift) return;
+      // S441 — a `${...}` INSIDE a body-top `"..."` display-text literal
+      // (§4.18.4) is an interpolation of declared display text: it renders.
+      const isDisplayInterp = (node as any)._displayInterp === true;
+      if (inDefaultLogicMode && !bodyHasLift && !isDisplayInterp) return;
 
       // inline-value-form-interp (§18.0 / §17.6) — VALUE-FORM CONTROL-FLOW AS
       // THE SOLE INTERP CONTENT. A `${ match @x { .A :> v … } }` /
@@ -4000,7 +4116,7 @@ export function generateHtml(
           // `on mount { boot() }` as the tail statement of the big program-body
           // `${...}` block that the `<db>` context wraps.)
           if (child && child.kind === "bare-expr" && (child as any)._onMountEffect) continue;
-          if (inDefaultLogicMode && child && child.kind === "bare-expr") continue;
+          if (inDefaultLogicMode && !isDisplayInterp && child && child.kind === "bare-expr") continue;
           // Phase 4d Step 8: ExprNode-first; runtime-only string fallback (bare-expr.expr TS field deleted)
           if (child && child.kind === "bare-expr" && (child.exprNode || child.expr)) {
             const exprStr = child.exprNode ? emitStringFromTree(child.exprNode) : child.expr;
@@ -4237,22 +4353,20 @@ export interface HtmlAugmentChunk {
   payloadJs: string;
 }
 
-export interface HtmlAugmentInput {
-  /** The already-composed HTML document (full `<!DOCTYPE>` envelope). */
-  html: string;
+/**
+ * Input to `buildChunksBootJs` — the BUILD-WIDE chunk-activation script.
+ *
+ * The manifest half of the script is a function of the whole chunk set (every
+ * route's chunks, not just one file's), so one script serves every page of the
+ * build; the per-page part — which route this document is — travels on the
+ * `<script>` tag as `data-scrml-route` (see `augmentHtmlForChunks`).
+ */
+export interface ChunksBootInput {
   /**
-   * Chunks for the current per-file compilation, keyed by ChunkKey.
+   * Chunks for the current compilation, keyed by ChunkKey.
    * Same map shape as `EmitPerRouteResult.chunks` (route-splitter.ts).
    */
   chunks: Map<string, HtmlAugmentChunk>;
-  /**
-   * EntryPointIds that BELONG to this file. The augmenter picks the
-   * FIRST id as the active-route anchor for the role-bootstrap script.
-   *
-   * Sourced from `reachabilityRecord.closures` filtered by file-path
-   * prefix (mirrors `emit-client.ts:detectRuntimeChunks` matching).
-   */
-  fileEntryPointIds: string[];
   /**
    * Map from EntryPointId → routePath (URL the bootstrap matches on).
    *
@@ -4263,67 +4377,57 @@ export interface HtmlAugmentInput {
    * resolved via RouteMap.pages (positional index).
    *
    * Best-effort — when an EpId cannot be resolved (test fixtures that
-   * bypass RI), it is omitted from the inlined `_SCRML_CHUNKS`. The
-   * augmenter still emits the bootstrap script for the FIRST EpId in
-   * `fileEntryPointIds`; lookup failures degrade to the
-   * `console.warn` path in `_scrml_prefetch_tier2`.
+   * bypass RI), it is omitted from `_SCRML_CHUNKS`; lookup failures
+   * degrade to the `console.warn` path in the bootstrap and in
+   * `_scrml_prefetch_tier2`.
    */
   epIdToRoutePath: Map<string, string>;
   /**
    * ESM chunks arc (Unit 3) — client runtime module format. Under `"esm"` the
    * per-role initial chunk is an ES module, so the role-bootstrap injects a
    * `<script type="module">` (a classic script throws on the chunk's `import`).
-   * Default `"classic"` injects a plain deferred classic script → byte-identical.
+   * Default `"classic"` injects a plain deferred classic script.
    */
   moduleFormat?: "classic" | "esm";
 }
 
+export interface HtmlAugmentInput {
+  /** The already-composed HTML document (full `<!DOCTYPE>` envelope). */
+  html: string;
+  /**
+   * Chunks for the current per-file compilation, keyed by ChunkKey.
+   * Used here only to find the active route's tier-1 chunks for the
+   * `<link rel="modulepreload">` hints.
+   */
+  chunks: Map<string, HtmlAugmentChunk>;
+  /**
+   * EntryPointIds that BELONG to this file. The augmenter picks the
+   * FIRST id as the active-route anchor for the role-bootstrap.
+   *
+   * Sourced from `reachabilityRecord.closures` filtered by file-path
+   * prefix (mirrors `emit-client.ts:detectRuntimeChunks` matching).
+   */
+  fileEntryPointIds: string[];
+  /** EntryPointId → routePath; see `ChunksBootInput.epIdToRoutePath`. */
+  epIdToRoutePath: Map<string, string>;
+  /**
+   * Same-origin URL of the build's chunk-activation script (the file
+   * `buildChunksBootJs` produced, written to the dist root). Referenced by
+   * `<script src>`, never inlined — see `augmentHtmlForChunks`.
+   */
+  chunksBootSrc: string;
+}
+
 /**
- * Augment a per-file HTML document with the A-4.7 chunk-activation
- * scaffolding:
- *
- *   1. `<script>window._SCRML_CHUNKS = { ... }</script>` inline (BEFORE
- *      the role-bootstrap), route-keyed for `_scrml_prefetch_tier2`
- *      compatibility.
- *   2. `<script>` role-detection bootstrap (localStorage > cookie >
- *      <meta name="scrml-role"> > "_anonymous") dispatching to the
- *      per-role initial chunk via dynamic `<script>` injection.
- *   3. `<link rel="modulepreload">` for non-empty tier-1 chunks of the
- *      active entry point (belt-and-suspenders alongside the runtime
- *      `requestIdleCallback` prefetch).
- *
- * Per OQ-A4-E (S91 ratification — hybrid): ONE HTML per route +
- * role-detection bootstrap loads the per-role initial chunk. No
- * per-(route, role) HTML files are emitted.
- *
- * **Determinism (§40.9.8):** the augmented HTML output is a pure
- * function of the input — identical chunks + identical HTML →
- * identical augmented bytes. Map iteration uses the ChunkOutput
- * insertion order, which is canonical per route-splitter.ts
- * (deterministic from RS output).
- *
- * **Tree-shake invariant:** when `chunks` is empty (no entry points
- * for this file), the augmenter returns the input HTML unchanged.
- *
- * @param input HTML + chunks descriptor map + EpId→route lookup.
- * @returns The augmented HTML document (`html` with the
- *   `_SCRML_CHUNKS` inline + role-bootstrap + modulepreload links
- *   injected immediately after `</head>` is opened — or unchanged
- *   when there's nothing to augment).
+ * Route-keyed manifest (`_SCRML_CHUNKS[routePath][role] = ChunkUrlByTier`)
+ * built from the per-(EP, role, tier) chunk descriptors. The on-disk
+ * `chunks.json` is EpId-keyed; the runtime helpers and the bootstrap look up
+ * by routePath, so the translation happens here.
  */
-export function augmentHtmlForChunks(input: HtmlAugmentInput): string {
-  const { html, chunks, fileEntryPointIds, epIdToRoutePath } = input;
-  const moduleFormat = input.moduleFormat ?? "classic";
-
-  // No entry points belong to this file → no augmentation possible.
-  // Return the input HTML unchanged for byte-identity preservation
-  // (matches the pre-A-4.7 no-op behavior for files without entries).
-  if (fileEntryPointIds.length === 0) return html;
-
-  // Build the route-keyed manifest. The runtime helpers
-  // (`_scrml_prefetch_tier2`, the bootstrap script) lookup by
-  // routePath first; the on-disk chunks.json uses EpId keys. We
-  // translate at inline-emit time.
+function buildRouteKeyedChunkManifest(
+  chunks: Map<string, HtmlAugmentChunk>,
+  epIdToRoutePath: Map<string, string>,
+): RouteKeyedChunkManifest {
   const routeKeyedManifest: RouteKeyedChunkManifest = {};
 
   for (const chunk of chunks.values()) {
@@ -4351,58 +4455,178 @@ export function augmentHtmlForChunks(input: HtmlAugmentInput): string {
     }
   }
 
-  // Active route — bootstrap dispatches to the chunk for THIS HTML's
+  return routeKeyedManifest;
+}
+
+/**
+ * The build's chunk-activation script (A-4.7 + OQ-A4-E hybrid), written by
+ * the caller as ONE same-origin file at the dist root and loaded by every
+ * page with `<script src=… data-scrml-route=…>`:
+ *
+ *   1. `window._SCRML_CHUNKS = { ... }` — route-keyed manifest for
+ *      `_scrml_prefetch_tier2` and the bootstrap below. Set before the
+ *      shared runtime loads (the tag is in `<head>`, the runtime at the end
+ *      of `<body>`), and the runtime keeps a pre-existing `_SCRML_CHUNKS`.
+ *   2. The role-detection bootstrap (localStorage > cookie >
+ *      <meta name="scrml-role"> > "_anonymous") dispatching to the per-role
+ *      initial chunk of the active route via dynamic `<script>` injection.
+ *      The active route is read off the loading tag's `data-scrml-route`.
+ *
+ * **Why a file and not an inline `<script>` (s444-csp-inline-chunks).**
+ * `<program headers="strict">` pins `Content-Security-Policy: default-src
+ * 'self'` (§39.2.5). A browser refuses inline script under that policy, so an
+ * inline manifest + bootstrap never ran: measured in Chromium, both were
+ * blocked and no role chunk was ever requested. A same-origin `<script src>`
+ * satisfies `default-src 'self'` with no nonce, no hash and no CSP widening —
+ * the same resolution the SSR state seed, the §38 keyframes and the `scrml dev`
+ * hot-reload client took.
+ *
+ * **Fail-closed.** Nothing is gated on this script running: the page's full
+ * per-file `.client.js` loads regardless, and `<auth role>` markup is not
+ * withheld by the chunk split in the first place (W-AUTH-CONTENT-NOT-GATED —
+ * role gating of content is server-side). If the script is refused or 404s,
+ * the page degrades to the pre-chunk shape; no role's chunk is loaded.
+ *
+ * **Determinism (§40.9.8):** a pure function of the input — identical chunks
+ * → identical bytes (and so an identical content-addressed filename).
+ */
+export function buildChunksBootJs(input: ChunksBootInput): string {
+  const moduleFormat = input.moduleFormat ?? "classic";
+  const routeKeyedManifest = buildRouteKeyedChunkManifest(input.chunks, input.epIdToRoutePath);
+
+  // `JSON.stringify(..., null, 2)` for adopter readability; deterministic
+  // across builds (insertion-order keys; chunks.values() is canonical from
+  // route-splitter).
+  const manifestJson = JSON.stringify(routeKeyedManifest, null, 2);
+
+  // ESM chunks arc (Unit 3): under `--module-format=esm` the chunk is an ES
+  // module, so the injected script is marked `s.type = "module"` (a classic
+  // injected script throws on the chunk's `import`). Module scripts are always
+  // deferred, so `s.defer` is redundant-but-harmless there.
+  const bootstrapModuleTypeLine =
+    moduleFormat === "esm" ? `\n  s.type = "module";` : "";
+
+  // localStorage access is wrapped in a try/catch because Safari private-mode
+  // (and some Chrome shapes) throw on access. The try/catch is HOST-JS (the
+  // bootstrap runs in the adopter browser), NOT scrml — the try/catch ban
+  // applies to scrml source only.
+  //
+  // When no chunk URL is found for the resolved role + active route, the
+  // bootstrap warns to the console and proceeds — the per-file `.client.js`
+  // continues to load, so the page degrades to the pre-chunk shape.
+  return `// scrml chunk activation (A-4.7 + OQ-A4-E hybrid) — generated; one file per build.
+// Loaded by every page as <script src="…" data-scrml-route="<route>"> — a
+// same-origin file, not an inline script, so it runs under
+// <program headers="strict">'s Content-Security-Policy: default-src 'self'.
+
+// Route-keyed chunk manifest: _SCRML_CHUNKS[route][role] = { initial, tier1, ... }.
+window._SCRML_CHUNKS = ${manifestJson};
+
+// Role-detection bootstrap: role hint from localStorage > cookie > <meta> >
+// _anonymous; loads that role's initial chunk for this page's route.
+(function () {
+  function getRole() {
+    try {
+      var ls = localStorage.getItem("scrml_role");
+      if (ls) return ls;
+    } catch (e) {}
+    var cookieMatch = document.cookie.match(/(?:^|;\\s*)scrml_role=([^;]+)/);
+    if (cookieMatch) return decodeURIComponent(cookieMatch[1]);
+    var meta = document.querySelector('meta[name="scrml-role"]');
+    if (meta) return meta.getAttribute("content");
+    return "_anonymous";
+  }
+  var me = document.currentScript;
+  var activeRoute = me ? me.getAttribute("data-scrml-route") : null;
+  if (typeof activeRoute !== "string" || activeRoute === "") {
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("scrml: no active route for chunk bootstrap; skipping");
+    }
+    return;
+  }
+  var role = getRole();
+  var byRoute = window._SCRML_CHUNKS[activeRoute];
+  var byRole = byRoute && byRoute[role];
+  var chunkUrl = byRole && byRole.initial;
+  if (!chunkUrl) {
+    if (typeof console !== "undefined" && console.warn) {
+      console.warn("scrml: no chunk for role '" + role + "' at route '" + activeRoute + "'");
+    }
+    return;
+  }
+  var s = document.createElement("script");
+  s.src = chunkUrl;${bootstrapModuleTypeLine}
+  s.defer = true;
+  document.head.appendChild(s);
+})();
+`;
+}
+
+/**
+ * Augment a per-file HTML document with the A-4.7 chunk-activation
+ * references — NO inline script (s444-csp-inline-chunks; see
+ * `buildChunksBootJs` for why):
+ *
+ *   1. `<link rel="modulepreload">` for non-empty tier-1 chunks of the
+ *      active entry point (belt-and-suspenders alongside the runtime
+ *      `requestIdleCallback` prefetch).
+ *   2. `<script src="<chunksBootSrc>" data-scrml-route="<route>">` — the
+ *      build's same-origin manifest + role-detection bootstrap. A classic,
+ *      synchronous head script, so it runs at the same point in parsing the
+ *      former inline scripts did (before the body's runtime + client.js).
+ *      The attribute is omitted when the active route cannot be resolved;
+ *      the bootstrap then warns and skips.
+ *
+ * Per OQ-A4-E (S91 ratification — hybrid): ONE HTML per route +
+ * role-detection bootstrap loads the per-role initial chunk. No
+ * per-(route, role) HTML files are emitted.
+ *
+ * **Determinism (§40.9.8):** the augmented HTML output is a pure
+ * function of the input.
+ *
+ * **Tree-shake invariant:** when the file owns no entry points, the
+ * augmenter returns the input HTML unchanged.
+ *
+ * @returns The augmented HTML document (injection placed immediately
+ *   before `</head>` — or unchanged when there's nothing to augment).
+ */
+export function augmentHtmlForChunks(input: HtmlAugmentInput): string {
+  const { html, chunks, fileEntryPointIds, epIdToRoutePath, chunksBootSrc } = input;
+
+  // No entry points belong to this file → no augmentation possible.
+  // Return the input HTML unchanged for byte-identity preservation
+  // (matches the pre-A-4.7 no-op behavior for files without entries).
+  if (fileEntryPointIds.length === 0) return html;
+
+  // Active route — the bootstrap dispatches to the chunk for THIS HTML's
   // entry point. Use the FIRST EpId in `fileEntryPointIds` (each file
   // emits ONE HTML in the per-file-emit pipeline; the first EpId is
   // the file's anchor).
   const activeEpId = fileEntryPointIds[0];
   const activeRoute = epIdToRoutePath.get(activeEpId);
+  const hasActiveRoute = typeof activeRoute === "string" && activeRoute !== "";
 
-  // When the active route cannot be resolved (test fixtures without
-  // a RouteMap), the bootstrap still ships but uses a defensive
-  // lookup against the FIRST route key in the manifest. The
-  // bootstrap stays runnable; only the per-role chunk dispatch
-  // degrades to console-warn.
-  const activeRouteLit = typeof activeRoute === "string" && activeRoute !== ""
-    ? JSON.stringify(activeRoute)
-    : "null";
+  const parts: string[] = [];
 
-  // Compose the inline `<script>` blocks.
-  const inlineParts: string[] = [];
-
-  // 1. `_SCRML_CHUNKS` inline manifest.
-  //
-  // Use `JSON.stringify(..., null, 2)` for adopter readability;
-  // adopters inspecting the HTML source can see the chunk URL table
-  // without a debugger round-trip. Deterministic across builds
-  // (object-key iteration order is insertion order; chunks.values()
-  // iteration is canonical from route-splitter).
-  const manifestJson = JSON.stringify(routeKeyedManifest, null, 2);
-  inlineParts.push(`  <script>window._SCRML_CHUNKS = ${manifestJson};</script>`);
-
-  // 2. `<link rel="modulepreload">` belt-and-suspenders prefetch for
+  // 1. `<link rel="modulepreload">` belt-and-suspenders prefetch for
   // the active entry point's tier-1 chunks (one per role variant
   // when non-empty). Browsers that honor modulepreload start
   // fetching immediately on parse; the runtime `requestIdleCallback`
   // call in `_scrml_prefetch_tier1` then schedules the script-side
-  // prefetch after first paint. Both surfaces compose: an early
-  // modulepreload populates the HTTP cache; the idle callback then
-  // exercises the cache hit.
+  // prefetch after first paint.
   //
   // Per SCOPING §3.7 (2): tier-1 fetch is runtime-mediated via
   // requestIdleCallback; modulepreload is the additional surface.
-  if (typeof activeRoute === "string" && activeRoute !== "") {
-    const activeRouteEntry = routeKeyedManifest[activeRoute];
+  if (hasActiveRoute) {
+    const activeRouteEntry = buildRouteKeyedChunkManifest(chunks, epIdToRoutePath)[activeRoute!];
     if (activeRouteEntry) {
-      // Sort role keys for determinism (Object iteration order is
-      // insertion-order which is canonical, but explicit sort guards
-      // against any future Map-iteration-order changes in the
-      // splitter).
+      // Sort role keys for determinism (guards against any future
+      // Map-iteration-order changes in the splitter).
       const roles = Object.keys(activeRouteEntry).sort();
       for (const role of roles) {
         const tier1Url = activeRouteEntry[role].tier1;
         if (typeof tier1Url === "string" && tier1Url !== "") {
-          inlineParts.push(
+          parts.push(
             `  <link rel="modulepreload" href="${escapeHtmlAttr(tier1Url)}">`,
           );
         }
@@ -4410,89 +4634,17 @@ export function augmentHtmlForChunks(input: HtmlAugmentInput): string {
     }
   }
 
-  // 3. Role-detection bootstrap script.
-  //
-  // Order of preference for the role hint: localStorage > cookie >
-  // <meta name="scrml-role"> > "_anonymous" (per OQ-A4-E hybrid +
-  // RS A-2.5 Component 4 sentinel).
-  //
-  // localStorage access is wrapped in a try/catch because Safari
-  // private-mode (and some Chrome shapes) throw on access. The
-  // try/catch is HOST-JS (the bootstrap runs in the adopter
-  // browser), NOT scrml — pa.md try/catch ban applies to scrml
-  // source only.
-  //
-  // The bootstrap dispatches by injecting a `<script defer>` for
-  // the chosen chunk URL. `defer` keeps the chunk evaluation in
-  // document-order alongside any other deferred scripts (the
-  // per-file `.client.js` etc.).
-  //
-  // ESM chunks arc (Unit 3): under `--module-format=esm` the chunk is an ES
-  // module, so the injected script is marked `s.type = "module"` (a classic
-  // injected script throws on the chunk's `import`). Module scripts are always
-  // deferred, so `s.defer` is redundant-but-harmless there. Classic (default)
-  // injects the plain deferred classic script → byte-identical to pre-arc.
-  const bootstrapModuleTypeLine =
-    moduleFormat === "esm" ? `\n      s.type = "module";` : "";
-  //
-  // When no chunk URL is found for the resolved role + active route,
-  // the bootstrap warns to the console and proceeds — the per-file
-  // `.client.js` continues to load, so the page degrades to the
-  // pre-chunk shape (full per-file runtime, no per-role
-  // optimization).
-  inlineParts.push(`  <script>
-    // scrml role-detection bootstrap (A-4.7 + OQ-A4-E hybrid).
-    // Reads role hint from localStorage > cookie > <meta> > _anonymous;
-    // dispatches to the role-appropriate initial chunk via dynamic
-    // <script> injection.
-    (function () {
-      function getRole() {
-        try {
-          var ls = localStorage.getItem("scrml_role");
-          if (ls) return ls;
-        } catch (e) {}
-        var cookieMatch = document.cookie.match(/(?:^|;\\s*)scrml_role=([^;]+)/);
-        if (cookieMatch) return decodeURIComponent(cookieMatch[1]);
-        var meta = document.querySelector('meta[name="scrml-role"]');
-        if (meta) return meta.getAttribute("content");
-        return "_anonymous";
-      }
-      var activeRoute = ${activeRouteLit};
-      if (typeof activeRoute !== "string" || activeRoute === "") {
-        if (typeof console !== "undefined" && console.warn) {
-          console.warn("scrml: no active route for chunk bootstrap; skipping");
-        }
-        return;
-      }
-      var role = getRole();
-      var byRoute = window._SCRML_CHUNKS && window._SCRML_CHUNKS[activeRoute];
-      var byRole = byRoute && byRoute[role];
-      var chunkUrl = byRole && byRole.initial;
-      if (!chunkUrl) {
-        if (typeof console !== "undefined" && console.warn) {
-          console.warn("scrml: no chunk for role '" + role + "' at route '" + activeRoute + "'");
-        }
-        return;
-      }
-      var s = document.createElement("script");
-      s.src = chunkUrl;${bootstrapModuleTypeLine}
-      s.defer = true;
-      document.head.appendChild(s);
-    })();
-  </script>`);
+  // 2. The same-origin chunk-activation script.
+  const routeAttr = hasActiveRoute
+    ? ` data-scrml-route="${escapeHtmlAttr(activeRoute!)}"`
+    : "";
+  parts.push(`  <script src="${escapeHtmlAttr(chunksBootSrc)}"${routeAttr}></script>`);
 
-  const injection = inlineParts.join("\n");
+  const injection = parts.join("\n");
 
-  // Inject BEFORE `</head>` so the manifest + modulepreload + bootstrap
-  // are in the head — same precedence as the per-file `<link rel="stylesheet">`
-  // and (when embed mode is off) the scrml-runtime.js `<script>` tag
-  // emitted by index.ts.
-  //
-  // Defensive: when the input HTML has no `</head>` (degenerate fixture
-  // path), return the HTML unchanged. The augmentation requires a
-  // well-formed head; the no-`</head>` case is a no-op.
+  // Inject BEFORE `</head>`. Defensive: when the input HTML has no
+  // `</head>` (degenerate fixture path), return the HTML unchanged.
   const headCloseIdx = html.indexOf("</head>");
   if (headCloseIdx === -1) return html;
   return html.substring(0, headCloseIdx) + injection + "\n" + html.substring(headCloseIdx);
 }
-

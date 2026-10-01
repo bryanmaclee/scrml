@@ -1,0 +1,18 @@
+${
+    import { AuthError } from './errs.scrml'
+
+    // `Nope` is not a variant of the imported AuthError (Missing / Bad).
+    function check(n: string)! AuthError {
+        if (n == "") fail AuthError.Nope
+        return n
+    }
+
+    function run() {
+        let r = check("") !{
+            | .Missing :> { return }
+            | .Bad(why) :> { return }
+        }
+    }
+}
+
+<button onclick=run()>go</>

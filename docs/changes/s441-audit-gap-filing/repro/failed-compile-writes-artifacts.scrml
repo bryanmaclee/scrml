@@ -1,0 +1,13 @@
+// S441 re-verification — item 13 (existing gap g-cli-emits-artifacts-on-failed-compile), the tutorial §10 shape.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/failed-compile-writes-artifacts.scrml --output-dir <scratch>
+// Expected: exit 1 and no artifacts (RULED S354 (b): compile to a temp dir, swap on success only).
+// Actual:   exit 1 (`E-STATE-UNDECLARED` on `@items`, `FAILED — 1 error`) and the output dir holds
+//           failed-compile-writes-artifacts.client.js + .html + scrml-runtime.<hash>.js. The client.js
+//           parses (`node --check` rc=0) — the audit's "invalid JS" is not what is written; it is runnable JS
+//           for a program that failed (`document.createElement("TodoRow")`).
+<ul>
+  <each in=@items as t key=t.id>
+    <TodoRow item=t/>
+  </each>
+</ul>

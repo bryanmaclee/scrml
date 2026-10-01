@@ -1,0 +1,4 @@
+${
+  server function isOk(n) { return n > 100 }
+  export function check(n) { return isOk(n) }
+}

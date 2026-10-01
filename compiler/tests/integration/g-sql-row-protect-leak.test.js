@@ -127,14 +127,119 @@ describe("§14.8.9 resolveProtectedOutputColumns — alias-safe origin resolutio
     expect(r && "cols" in r && r.cols).toEqual(["h"]);
   });
 
+  test("S441 round 4 F3: origin matching is CASE-INSENSITIVE, as SQLite identifiers are", () => {
+    const cols = (sql) => { const r = resolveProtectedOutputColumns(sql, usersProtect()); return r && "cols" in r ? r.cols : r; };
+    // Output names are the key the row carries. An UNALIASED column comes back
+    // keyed by its DECLARED name (round 5, F2 — measured: `SELECT PASSWORDHASH`
+    // returned `{ passwordHash }`; recording the surface spelling shipped it);
+    // an alias comes back exactly as written.
+    expect(cols("SELECT PASSWORDHASH FROM users")).toEqual(["passwordHash"]);
+    expect(cols("SELECT passwordhash AS x FROM users")).toEqual(["x"]);
+    expect(cols("SELECT u.PasswordHash FROM users u")).toEqual(["passwordHash"]);
+    expect(cols("SELECT PASSWORDHASH AS PH FROM users")).toEqual(["PH"]);
+    // A `*` over an upper-case table expands to the DECLARED name.
+    expect(cols("SELECT * FROM USERS")).toEqual(["passwordHash"]);
+    // A quoted table the projection extractor cannot resolve degrades to the
+    // fail-closed WHOLESALE strip — never to "no protected column".
+    expect(cols('SELECT * FROM "Users"')).toEqual({ all: true });
+    expect(cols("SELECT * FROM main.USERS")).toEqual({ all: true });
+    expect(cols("SELECT ID, NAME FROM USERS")).toBeNull();
+  });
+
+  test("S441 round 5 F3: an EXPRESSION column over a protected column strips the row wholesale", () => {
+    const cols = (sql) => { const r = resolveProtectedOutputColumns(sql, usersProtect()); return r && "cols" in r ? r.cols : r; };
+    for (const sql of [
+      "SELECT id, passwordHash || '' AS x FROM users",
+      "SELECT id, lower(passwordHash) AS x FROM users",
+      "SELECT id, hex(passwordHash) FROM users",
+      "SELECT id, CAST(passwordHash AS TEXT) AS x FROM users",
+      "SELECT id, substr(passwordHash, 1) AS x FROM users",
+      "SELECT id, coalesce(passwordHash, '') AS x FROM users",
+      "SELECT id, json_object('h', passwordHash) AS x FROM users",
+      "SELECT group_concat(passwordHash) AS x FROM users",
+      'SELECT id, "passwordHash" FROM users',
+      'SELECT id, "PASSWORDHASH" || \'\' AS x FROM users',
+      "SELECT id, [passwordHash] AS x FROM users",
+      "SELECT id, `passwordHash` AS x FROM users",
+      "SELECT id, users.PASSWORDHASH || '' AS x FROM users",
+      "SELECT id, (SELECT passwordHash FROM users LIMIT 1) AS x FROM products",
+      "SELECT id, (SELECT * FROM users LIMIT 1) AS x FROM products",
+      "SELECT id, LOWER(PASSWORDHASH) AS x FROM users",
+      // A derived-in-SQL value strips too — the disclosed over-approximation.
+      "SELECT id, length(passwordHash) AS n FROM users",
+    ]) {
+      expect([sql, cols(sql)]).toEqual([sql, { all: true }]);
+    }
+    // Expressions that reference NO protected column carry no descriptor; a
+    // string literal spelling a protected name is data, not a reference.
+    expect(cols("SELECT id, lower(name) AS x FROM users")).toBeNull();
+    expect(cols("SELECT count(*) AS n FROM users")).toBeNull();
+    // A `*` that is not a projection (COUNT(*), multiplication) inside a
+    // subquery is not a hidden column list (trucking-dispatch customers.scrml).
+    expect(cols("SELECT c.id, (SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id) AS n FROM users c")).toBeNull();
+    expect(cols("SELECT id, (SELECT id * 2 FROM products LIMIT 1) AS n FROM users")).toBeNull();
+    // …but a nested projection star is.
+    expect(cols("SELECT id, (SELECT DISTINCT * FROM products LIMIT 1) AS x FROM users")).toEqual({ all: true });
+    expect(cols("SELECT id, (SELECT p.* FROM products p LIMIT 1) AS x FROM users")).toEqual({ all: true });
+    expect(cols("SELECT id, 'passwordHash' AS label FROM users")).toBeNull();
+  });
+
   test("explicit safe projection (no protected column) -> null (no tag)", () => {
     const r = resolveProtectedOutputColumns("SELECT id, name FROM users", usersProtect());
     expect(r).toBeNull();
   });
 
-  test("non-protected table -> null", () => {
-    const r = resolveProtectedOutputColumns("SELECT * FROM products", usersProtect());
+  test("non-protected (but KNOWN) table -> null", () => {
+    const ctx = ctxOf(new Map([["users", new Set(["passwordHash"])]]), new Map([["products", ["id", "name"]]]));
+    const r = resolveProtectedOutputColumns("SELECT * FROM products", ctx);
     expect(r).toBeNull();
+  });
+
+  // S443 round 6 (P4) — a table the compile does not know the columns of (a view
+  // created at runtime over `users`, a table no `<db tables=>` names) may carry a
+  // protected column under any name. MEASURED before the fix: `CREATE VIEW v AS
+  // SELECT * FROM users` then `SELECT * FROM v` served passwordHash over HTTP.
+  test("S443 r6 P4: an UNKNOWN table resolves to strip-all, never 'no protected columns'", () => {
+    const r = resolveProtectedOutputColumns("SELECT * FROM v WHERE id = 1", usersProtect());
+    expect(r && "all" in r && r.all).toBe(true);
+    const j = resolveProtectedOutputColumns("SELECT u.id FROM users u JOIN v ON v.id = u.id", usersProtect());
+    expect(j && "all" in j && j.all).toBe(true);
+    // Case-folded, like every other table comparison.
+    expect(resolveProtectedOutputColumns("SELECT id FROM USERS", usersProtect())).toBeNull();
+  });
+
+  // S443 round 6 (P1) — a write with RETURNING hands back rows. MEASURED before
+  // the fix: UPDATE/INSERT/DELETE … RETURNING * served passwordHash.
+  test("S443 r6 P1: INSERT / UPDATE / DELETE … RETURNING resolve like SELECT <list> FROM <target>", () => {
+    const cols = (sql) => { const r = resolveProtectedOutputColumns(sql, usersProtect()); return r && ("all" in r ? "*" : r.cols); };
+    expect(cols("UPDATE users SET name = ${n} WHERE id = ${id} RETURNING *")).toEqual(["passwordHash"]);
+    expect(cols("UPDATE users SET name = 'b' WHERE id = 1 RETURNING id, passwordHash")).toEqual(["passwordHash"]);
+    expect(cols("UPDATE users SET name = 'b' RETURNING passwordHash AS h")).toEqual(["h"]);
+    expect(cols("INSERT INTO users (name, passwordHash) VALUES (${n}, ${h}) RETURNING *")).toEqual(["passwordHash"]);
+    expect(cols("INSERT OR REPLACE INTO users (name) VALUES ('x') RETURNING id, passwordHash")).toEqual(["passwordHash"]);
+    expect(cols("DELETE FROM users WHERE id = 1 RETURNING *")).toEqual(["passwordHash"]);
+    // A RETURNING list that names no protected column needs no tag.
+    expect(cols("INSERT INTO users (name) VALUES (${n}) RETURNING id")).toBeNull();
+    // An expression over the protected column strips the row wholesale.
+    expect(cols("UPDATE users SET name = 'b' RETURNING lower(passwordHash) AS x")).toBe("*");
+    // The keyword inside a string literal is data, not a clause.
+    expect(cols("UPDATE users SET name = 'RETURNING *' WHERE id = 1")).toBeNull();
+    // UPDATE … FROM joins another table in: fail closed.
+    expect(cols("UPDATE users SET name = o.n FROM other o WHERE o.id = users.id RETURNING *")).toBe("*");
+    // A target the resolver cannot read fails closed.
+    expect(cols('UPDATE "users" SET name = 1 RETURNING *')).toBe("*");
+  });
+
+  // S443 round 6 (P2) — `users . *` (whitespace around the dot) fell to an opaque
+  // entry with no protected identifier. MEASURED: it served the whole row.
+  test("S443 r6 P2: a spaced qualified star is a star, and fails closed", () => {
+    for (const sql of ["SELECT users . * FROM users", "SELECT users .* FROM users", "SELECT x . * FROM users x", "SELECT main.users.* FROM users"]) {
+      const r = resolveProtectedOutputColumns(sql, usersProtect());
+      expect(r && "all" in r && r.all).toBe(true);
+    }
+    // COUNT(*) and multiplication are not projection stars.
+    expect(resolveProtectedOutputColumns("SELECT COUNT(*) AS n FROM users", usersProtect())).toBeNull();
+    expect(resolveProtectedOutputColumns("SELECT id * 2 AS d FROM users", usersProtect())).toBeNull();
   });
 
   test("unresolvable dynamic SELECT -> strip-all (fail-closed)", () => {
@@ -153,7 +258,7 @@ describe("§14.8.9 resolveProtectedOutputColumns — alias-safe origin resolutio
   });
 
   test("aliased JOIN keeps each output column's own origin", () => {
-    const ctx = ctxOf(new Map([["users", new Set(["passwordHash"])]]));
+    const ctx = ctxOf(new Map([["users", new Set(["passwordHash"])]]), new Map([["orders", ["uid", "total"]]]));
     const r = resolveProtectedOutputColumns(
       "SELECT u.id, u.passwordHash AS secret, o.total FROM users u JOIN orders o ON o.uid = u.id",
       ctx,
@@ -196,6 +301,82 @@ describe("§14.8.9 runtime helper — tag/redact/reveal (the shipped block)", ()
     expect(_scrml_protect_redact(revealed)).toEqual({ id: 1, passwordHash: "secret" });
     // the ORIGINAL row (server-retained) is unmutated — still redacts
     expect(_scrml_protect_redact(row)).toEqual({ id: 1 });
+  });
+
+  // S443 round 6 (L4) + 6b — the floor is one MARKER per protected column. On
+  // the tagged row a marker can be neither deleted nor redefined (strict mode
+  // throws); overwriting its value changes nothing (the sink reads presence).
+  test("S443 r6/6b L4: the markers on the tagged row cannot be removed", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact, _scrml_protect_reveal } = loadHelper();
+    const K = Symbol.for("scrml.protect.col:passwordhash");
+    const row = _scrml_protect_tag({ id: 1, passwordHash: "s3cret" }, ["passwordHash"]);
+    expect(() => { delete row[K]; }).toThrow();
+    expect(() => Object.defineProperty(row, K, { enumerable: false })).toThrow();
+    row[K] = false; // allowed, and meaningless
+    expect(_scrml_protect_redact(row)).toEqual({ id: 1 });
+    const copy = { ...row };
+    expect(_scrml_protect_redact(copy)).toEqual({ id: 1 });
+    // A copy whose marker is HIDDEN (non-enumerable) still strips — presence counts.
+    Object.defineProperty(copy, K, { enumerable: false });
+    expect(_scrml_protect_redact(copy)).toEqual({ id: 1 });
+    // reveal admits the named column on a NEW row; the original still strips.
+    const r = _scrml_protect_reveal(row, "passwordHash");
+    expect(_scrml_protect_redact(r)).toEqual({ id: 1, passwordHash: "s3cret" });
+    expect(_scrml_protect_redact(row)).toEqual({ id: 1 });
+    // Re-tagging the same object is harmless and only ever adds.
+    expect(() => _scrml_protect_tag(row, ["passwordHash"])).not.toThrow();
+    _scrml_protect_tag(row, ["id"]);
+    expect(_scrml_protect_redact(row)).toEqual({});
+  });
+
+  // S443 round 6c — `JSON.stringify` invokes `toJSON` AFTER the redact walk, so a
+  // toJSON that returns (a copy of) the row shipped it whole (review, measured,
+  // base and tip). The walk now invokes toJSON itself and redacts the result,
+  // and the rebuilt copy keeps no function-valued property.
+  test("S443 r6c: a toJSON anywhere cannot re-introduce a stripped column", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
+    const U = () => _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "H", pin: 4321 }, ["passwordHash", "pin"]);
+    const ser = (v) => JSON.parse(JSON.stringify(_scrml_protect_redact(v)));
+    const row = { id: 1, name: "ada" };
+    expect(ser({ toJSON: () => U() })).toEqual(row);                        // J1
+    expect(ser({ toJSON() { return { ...U() }; } })).toEqual(row);          // J2
+    const u3 = U(); u3.toJSON = () => ({ ...u3 });
+    expect(ser(u3)).toEqual(row);                                           // J3
+    const u4 = U(); expect(ser({ ...u4, toJSON: () => u4 })).toEqual(row);  // J4
+    expect(ser({ data: { toJSON: () => [U()] } })).toEqual({ data: [row] }); // J5
+    const a = [1]; a.toJSON = () => U();
+    expect(ser({ a })).toEqual({ a: row });                                 // J6
+    class Box { constructor(r) { this.r = r; } toJSON() { return this.r; } }
+    expect(ser({ b: new Box(U()) })).toEqual({ b: row });
+    // A toJSON returning itself does not loop; Dates still serialize.
+    const self = { x: 1, toJSON() { return this; } };
+    expect(ser(self)).toEqual({ x: 1 });
+    const d = new Date(0);
+    expect(ser({ d })).toEqual({ d: d.toISOString() });
+  });
+
+  // S443 round 6b (MUST 3 / MUST 4) — MEASURED on round 6: `{...a, ...b}` and
+  // `Object.assign({}, a, b)` with a = SELECT *, b = SELECT id, pin let b's
+  // descriptor REPLACE a's (passwordHash shipped); `{...a, ...b.reveal("pin")}`
+  // shipped hash + pin; and `Object.assign(a, b)` on two tagged rows threw
+  // (a 500). Markers union on merge, a reveal on one source never un-strips
+  // another's column, and row-onto-row assignment works.
+  test("S443 r6b: merging tagged rows UNIONS their protected columns; row-onto-row assign works", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact, _scrml_protect_reveal } = loadHelper();
+    const A = () => _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "H", pin: 4321 }, ["passwordHash", "pin"]);
+    const B = () => _scrml_protect_tag({ id: 1, pin: 4321 }, ["pin"]);
+    expect(_scrml_protect_redact({ ...A(), ...B() })).toEqual({ id: 1, name: "ada" });
+    expect(_scrml_protect_redact(Object.assign({}, A(), B()))).toEqual({ id: 1, name: "ada" });
+    expect(_scrml_protect_redact({ ...A(), ..._scrml_protect_reveal(B(), "pin") })).toEqual({ id: 1, name: "ada" });
+    const a = A();
+    expect(_scrml_protect_redact({ ...a, ..._scrml_protect_reveal(a, "pin") })).toEqual({ id: 1, name: "ada" });
+    // Refresh in place: no throw, still stripped.
+    const t = A();
+    expect(() => Object.assign(t, A())).not.toThrow();
+    expect(() => Object.assign(t, B())).not.toThrow();
+    expect(_scrml_protect_redact(t)).toEqual({ id: 1, name: "ada" });
+    // A plain object merged over a row keeps the row's markers.
+    expect(_scrml_protect_redact({ ...A(), extra: 1 })).toEqual({ id: 1, name: "ada", extra: 1 });
   });
 
   test("strip-all ('*') drops every column (unresolvable dynamic SQL)", () => {
@@ -241,7 +422,9 @@ describe("§14.8.9 runtime helper — tag/redact/reveal (the shipped block)", ()
   test("a NULL-body Response nested in the payload is NOT refused (nothing to inspect)", () => {
     const { _scrml_protect_redact } = loadHelper();
     const r = new Response(null, { status: 204 });
-    expect(_scrml_protect_redact({ receipt: r, ok: true }).receipt).toBe(r);
+    // Round 6d: the sink returns a data SNAPSHOT — the Response is serialized as
+    // the serializer would (no own data), never handed on as the live object.
+    expect(_scrml_protect_redact({ receipt: r, ok: true })).toEqual({ receipt: {}, ok: true });
   });
 
   // ⚑ MEDIUM 3 — the refusal must be RECOGNIZABLE, not just thrown. The §37 SSE
@@ -371,6 +554,56 @@ describe("§14.8.9 end-to-end — the egress floor strips at compile time", () =
     parseClean(serverJs);
   });
 
+  // S443 round 6 — `.run()`, any other terminator and a bare `?{}` used as a
+  // value are the driver's row array. MEASURED before the fix: `const u =
+  // ?{`SELECT * FROM users`}.run(); return u` (and the bare form, and
+  // `UPDATE … RETURNING *`.run()) served passwordHash — only get/all were tagged.
+  test("S443 r6: .run() / bare ?{} / RETURNING results are tagged like get/all", () => {
+    const cases = [
+      ["let u = ?{`SELECT * FROM users WHERE id = ${id}`}.run()\n        return u", "SELECT * FROM users WHERE id = ${id}`, [\"passwordHash\"])"],
+      ["let u = ?{`SELECT * FROM users WHERE id = ${id}`}\n        return u", "[\"passwordHash\"])"],
+      ["let u = ?{`UPDATE users SET name = 'x' WHERE id = ${id} RETURNING *`}.run()\n        return u", "RETURNING *`, [\"passwordHash\"])"],
+      ["return ?{`DELETE FROM users WHERE id = ${id} RETURNING id, passwordHash`}.get()", "[\"passwordHash\"])"],
+    ];
+    for (const [body, needle] of cases) {
+      const { serverJs } = compileSource(protectProgram(`      function getUser(id) {\n        ${body}\n      }`));
+      expect(serverJs).toContain(needle);
+      parseClean(serverJs);
+    }
+    // A write with no RETURNING stays untagged (no rows come back).
+    const { serverJs } = compileSource(protectProgram(
+      "      function setName(id) {\n        ?{`UPDATE users SET name = 'x' WHERE id = ${id}`}.run()\n        return 1\n      }",
+    ));
+    expect(serverJs).not.toContain("_scrml_protect_tag(await _scrml_sql`UPDATE");
+  });
+
+  // S443 round 6 (P4): a table the compile DECLARES (CREATE TABLE in <schema> /
+  // ?{}) is known even when no `<db tables=>` names it; a table it never saw is
+  // not, and strips wholesale.
+  test("S443 r6 P4: a declared table stays precise; an undeclared one (a view) strips wholesale", () => {
+    const src = `<program>
+  <schema>
+    ?{\`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)\`}
+    ?{\`CREATE TABLE tasks (id INTEGER PRIMARY KEY, text TEXT)\`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    \${
+      function getTasks() {
+        return ?{\`SELECT * FROM tasks\`}.all()
+      }
+      function getView() {
+        return ?{\`SELECT * FROM users_view\`}.all()
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>`;
+    const { serverJs } = compileSource(src);
+    expect(serverJs).not.toContain("_scrml_protect_tag(await _scrml_sql`SELECT * FROM tasks`");
+    expect(serverJs).toContain("_scrml_protect_tag(await _scrml_sql`SELECT * FROM users_view`, \"*\")");
+    parseClean(serverJs);
+  });
+
   test("a non-protect app is byte-unchanged (no protect helpers)", () => {
     const src = `<program>
   <schema>
@@ -433,12 +666,14 @@ describe("§14.8.9 A4 — derived/implicit flows are out of scope (honest bound)
     expect(_scrml_protect_redact(derived)).toEqual({ hasPw: true });
   });
 
-  test("member-extraction into a re-keyed literal `{ secret: row.pw }` is the same boundary", () => {
+  test("member-extraction into a re-keyed literal `{ secret: row.pw }` passes the RUNTIME floor", () => {
     const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
     const row = _scrml_protect_tag({ id: 1, passwordHash: "secret" }, ["passwordHash"]);
-    // A fresh literal that re-keys the column value loses the descriptor — the
-    // derived-flow boundary. The floor catches WHOLE-ROW-IDENTITY flows, not
-    // per-value member extraction (documented; the deferred A-layer / IFC).
+    // A fresh literal that re-keys the column value loses the descriptor, so the
+    // RUNTIME redactor cannot strip it — this pins that the helper alone does
+    // not. ⚑ S441: this is NOT the derived-flow boundary (the value IS the
+    // column) and it no longer ships: the compile-time provenance flow rejects
+    // it as E-PROTECT-006 (protect-flow.ts; protect-scalar-egress.test.js).
     const rekeyed = { secret: row.passwordHash };
     expect(_scrml_protect_redact(rekeyed)).toEqual({ secret: "secret" });
   });
@@ -578,8 +813,8 @@ describe("§14.8.9 every client-egress sink redacts (enumerated over serializers
     const { serverJs } = compileSource(MH_PROGRAM);
     // Lift the shipped helper + the shipped handler and drive them, so this is a
     // wire fact rather than a text assertion.
-    const hStart = serverJs.indexOf("const _SCRML_PROTECT = Symbol.for");
-    const hEnd = serverJs.indexOf("function _scrml_protect_redact");
+    const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
+    const hEnd = serverJs.indexOf("function _scrml_protect_snap");
     const helper = serverJs.slice(hStart, serverJs.indexOf("\n}\n", hEnd) + 3);
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");
     const handler = serverJs.slice(mhStart, serverJs.indexOf("\n}\n", mhStart) + 3);
@@ -673,8 +908,8 @@ return { _scrml_mountHydrate_handler };`)();
     expect(serverJs).toContain("E-CONTRACT-001-RT");
     expect(serverJs).toContain("_scrml_protect_mediated(new Response(");
     // Drive the emitted param check + guard over a violating value.
-    const hStart = serverJs.indexOf("const _SCRML_PROTECT = Symbol.for");
-    const hEnd = serverJs.indexOf("function _scrml_protect_redact");
+    const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
+    const hEnd = serverJs.indexOf("function _scrml_protect_snap");
     const helper = serverJs.slice(hStart, serverJs.indexOf("\n}\n", hEnd) + 3);
     const { probe } = new Function(`${helper}
 function probe(id) {
@@ -731,8 +966,8 @@ return { probe };`)();
     const shallow = _scrml_protect_redact(new Wrap(row()));
     expect(JSON.stringify(shallow)).not.toContain("s3cret");
     expect(JSON.parse(JSON.stringify(shallow))).toEqual({ u: { id: 1, name: "a" } });
-    // the prototype survives the rebuild, so this is preservation AND stripping
-    expect(typeof shallow.greet).toBe("function");
+    // Round 6d: the sink returns a plain-data SNAPSHOT (no prototype, no methods).
+    expect(Object.getPrototypeOf(shallow)).toBe(Object.prototype);
     // class > plain > class > row
     const deep = _scrml_protect_redact(new Wrap({ inner: new Wrap(row()) }));
     expect(JSON.stringify(deep)).not.toContain("s3cret");
@@ -764,6 +999,57 @@ return { probe };`)();
     expect(out).toContain("12.5");
     expect(out).toContain("2020-01-01T00:00:00.000Z");
     expect(out).not.toContain("s3cret");
+  });
+
+  // S443 round 6d — MEASURED on round 6c: an object with a getter returning "ok"
+  // on the first read and the ROW on the second, on a non-plain prototype, was
+  // walked once and then handed as-is to JSON.stringify, which read the getter
+  // again and served the full row. The sink now returns a snapshot: every
+  // property read once, and the serializer sees only plain data.
+  // S443 round 6e — measured on 6c/6d: the snapshot invoked a `toJSON` (and a
+  // getter) with `this` = the ORIGINAL tagged row, so `this.passwordHash` read the
+  // column. Author functions now run with `this` = a marker-stripped copy.
+  test("S443 r6e: toJSON and getters run with `this` = a stripped copy of their object", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
+    const U = () => _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "H", pin: 4321 }, ["passwordHash", "pin"]);
+    const ser = (v) => JSON.stringify(_scrml_protect_redact(v));
+    const u1 = U(); u1.toJSON = function () { return { pw: this.passwordHash, n: this.name }; };
+    expect(ser(u1)).toBe('{"n":"ada"}');                                          // T1
+    const rs = [U(), U()]; for (const r of rs) r.toJSON = function () { return [this.passwordHash]; };
+    expect(ser(rs)).toBe("[[null],[null]]");                                      // T5 (base shape)
+    const u6 = U(); Object.defineProperty(u6, "pw3", { get: function () { return this.passwordHash; }, enumerable: true });
+    expect(ser(u6)).toBe('{"id":1,"name":"ada"}');                                // T6
+    // Nested: `this.data` is stripped too, and methods still resolve via the prototype.
+    class Card { constructor(r) { this.data = r; } label() { return this.data.name; } toJSON() { return { l: this.label(), pw: this.data.passwordHash }; } }
+    expect(ser(new Card(U()))).toBe('{"l":"ada"}');
+  });
+
+  test("S443 r6d: the sink hands the serializer a snapshot — stateful getters / proxies read once", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
+    const U = () => _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "H", pin: 4321 }, ["passwordHash", "pin"]);
+    const flip = (o) => { let n = 0; Object.defineProperty(o, "x", { get: () => { n = n + 1; return n > 1 ? U() : "ok"; }, enumerable: true }); return o; };
+    const ser = (v) => JSON.stringify(_scrml_protect_redact(v));
+    expect(ser(flip(Object.create({ z: 1 })))).toBe('{"x":"ok"}');          // J9
+    expect(ser({ wrap: flip(Object.create({ z: 1 })) })).toBe('{"wrap":{"x":"ok"}}'); // J10
+    expect(ser(flip({}))).toBe('{"x":"ok"}');                              // plain-object getter
+    // A Proxy whose trap answers differently on each read.
+    let reads = 0;
+    const px = new Proxy({ a: 1 }, { get: (t, k) => (k === "a" ? (++reads > 1 ? U() : "ok") : t[k]) });
+    // Round 6e: own properties are read through their DESCRIPTORS (a data value
+    // as stored; a getter once, with a stripped `this`), so a Proxy's `get` trap
+    // is not what decides the value — and nothing is read twice.
+    expect(ser({ p: px })).toBe('{"p":{"a":1}}');
+    expect(reads).toBe(0);
+    // Nothing author-reachable survives into the snapshot.
+    const snap = _scrml_protect_redact({ f: () => 1, s: Symbol("x"), a: [() => 1, undefined], d: new Date(0) });
+    expect(snap).toEqual({ a: [null, null], d: "1970-01-01T00:00:00.000Z" });
+    // A Date whose toJSON was replaced by the author is invoked once and redacted.
+    const d = new Date(0); d.toJSON = () => U();
+    expect(ser({ d })).toBe('{"d":{"id":1,"name":"ada"}}');
+    // JSON's own rules for plain data are kept.
+    expect(ser({ n: new Number(3), s: new String("x"), b: new Boolean(false), m: new Map([[1, 2]]) })).toBe('{"n":3,"s":"x","b":false,"m":{}}');
+    const cyc = { a: 1 }; cyc.self = cyc;
+    expect(() => _scrml_protect_redact(cyc)).toThrow();
   });
 
   test("MEDIUM: a TAGGED non-plain row is STILL redacted (the preservation is fail-closed)", () => {
@@ -859,8 +1145,8 @@ type Op:enum = {
     expect(serverJs).toContain("_scrml_mh_cell instanceof Response");
 
     // Drive the SHIPPED handler with a loader that returns a Response.
-    const hStart = serverJs.indexOf("const _SCRML_PROTECT = Symbol.for");
-    const hEnd = serverJs.indexOf("function _scrml_protect_redact");
+    const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
+    const hEnd = serverJs.indexOf("function _scrml_protect_snap");
     const helper = serverJs.slice(hStart, serverJs.indexOf("\n}\n", hEnd) + 3);
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");
     const handler = serverJs.slice(mhStart, serverJs.indexOf("\n}\n", mhStart) + 3);
@@ -896,8 +1182,8 @@ return { h: _scrml_mountHydrate_handler };`)();
 </main>
 </program>`;
     const { serverJs } = compileSource(src);
-    const hStart = serverJs.indexOf("const _SCRML_PROTECT = Symbol.for");
-    const hEnd = serverJs.indexOf("function _scrml_protect_redact");
+    const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
+    const hEnd = serverJs.indexOf("function _scrml_protect_snap");
     const helper = serverJs.slice(hStart, serverJs.indexOf("\n}\n", hEnd) + 3);
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");
     const handler = serverJs.slice(mhStart, serverJs.indexOf("\n}\n", mhStart) + 3);

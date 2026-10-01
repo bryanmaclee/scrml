@@ -1,0 +1,13 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+function decide() {
+function requestAnimationFrame(f) { return f(1) }
+return requestAnimationFrame(isOk) ? "accepted" : "rejected"
+}
+function go() {
+@verdict = decide()
+}
+<button id="go" onclick=go()>go</button>
+<p id="out">${@verdict}</p>
+</program>

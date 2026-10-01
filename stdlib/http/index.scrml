@@ -288,7 +288,7 @@ ${
      *
      * Examples:
      *   const body = multipart({ name: "alice", file: fileBlob })
-     *   await post("/upload", body, { headers: { /* don't set Content-Type */ } })
+     *   await post("/upload", body)   // do NOT set Content-Type yourself
      *
      * @param fields — object { fieldName: value }; values can be strings,
      *                 numbers, Blobs, or Files

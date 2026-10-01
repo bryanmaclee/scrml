@@ -3,7 +3,10 @@ import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature, paramName, stripPagesPrefix, indentBodyLines } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, queryInterpolationsAreServerAmbientOnly, isServerOnlyNode, containsSqlOrTransaction, containsSql } from "./collect.ts";
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
-import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError } from "./emit-library-shared.ts";
+import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError, serverFnSyncCallbackError, annotateNestedAsyncHelpers, syncCallbackErrorForSite, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
+import type { SyncCallSite } from "./emit-library-shared.ts";
+import { localAsyncDeclRoot, rawAsyncUsesOf } from "./local-async-fns.ts";
+import type { AsyncRoot, AsyncEscapeSite } from "./local-async-fns.ts";
 import { getNodes } from "./collect.ts";
 import { collectReactiveVarNames, collectLocalMapSetNames, buildFnReturnMapKinds } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
@@ -11,9 +14,17 @@ import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextFor
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUseErrors, drainSessionValueUseErrors, type EmitExprContext } from "./emit-expr.ts";
+import {
+  readRawUnitSessionAttr,
+  resolveUnitSessionAttr,
+  recordUnattributableSessionUnit,
+  type SessionAttrName,
+} from "./session-config-resolve.ts";
 import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
+// §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
+import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
@@ -28,6 +39,7 @@ import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-pa
 import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
 import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgress, findAuthoredResponseConstruction, SERVER_PROTECT_HELPER, type ProtectContext, type ScanSliceKind } from "./protect-egress.ts";
+import { registerProtectModule } from "./protect-flow.ts";
 import {
   buildTenantContext,
   resolveTenantScoping,
@@ -43,7 +55,7 @@ import { buildSsrEachRenderers, SSR_RENDER_HELPER } from "./emit-ssr-render.ts";
 // `.server.js` that references `_scrml_map_*` (reachability-gated below). Without
 // it a server fn building/returning a map or set throws `ReferenceError:
 // _scrml_map_from_entries is not defined` at request time (green compile).
-import { SERVER_VALUE_NATIVE_MAP_HELPER } from "../runtime-template.js";
+import { SERVER_VALUE_NATIVE_MAP_HELPER, SERVER_STRUCTURAL_EQ_SOURCE } from "../runtime-template.js";
 
 // g-pure-module-server-emit (S207): sentinel line marking where deferred
 // local-`.scrml` server imports are re-injected after usage-pruning. Pruned by
@@ -61,46 +73,15 @@ const LOCAL_SERVER_IMPORT_SENTINEL = "// __SCRML_LOCAL_SERVER_IMPORTS__";
 // route-handler path (generateServerJs) and the value-only path
 // (generateValueOnlyServerJs, g-const-only-module-no-server-emit) inline the
 // IDENTICAL helper — no drift.
-export const SERVER_STRUCTURAL_EQ_HELPER = [
-  "",
-  "// --- §45 Structural equality helper (inlined for server, no client runtime here) ---",
-  "function _scrml_structural_eq(a, b) {",
-  "  if (a === b) return true;",
-  "  if (a === null || b === null || a === undefined || b === undefined) return false;",
-  "  if (typeof a !== typeof b) return false;",
-  "  if (typeof a !== \"object\") return a === b;",
-  "  if (Array.isArray(a)) {",
-  "    if (!Array.isArray(b) || a.length !== b.length) return false;",
-  "    for (let i = 0; i < a.length; i++) {",
-  "      if (!_scrml_structural_eq(a[i], b[i])) return false;",
-  "    }",
-  "    return true;",
-  "  }",
-  // Enum-variant check: `_tag` is a discriminator string set by the
-  // emitter. `!= null` (loose) covers both null + undefined absence,
-  // avoiding the bare `undefined` keyword (W-CG-UNDEFINED-INTERPOLATION).
-  "  if (a._tag != null && b._tag != null) {",
-  "    if (a._tag !== b._tag) return false;",
-  "    const aKeys = Object.keys(a);",
-  "    const bKeys = Object.keys(b);",
-  "    if (aKeys.length !== bKeys.length) return false;",
-  "    for (const key of aKeys) {",
-  "      if (key === \"_tag\") continue;",
-  "      if (!_scrml_structural_eq(a[key], b[key])) return false;",
-  "    }",
-  "    return true;",
-  "  }",
-  "  const aKeys = Object.keys(a);",
-  "  const bKeys = Object.keys(b);",
-  "  if (aKeys.length !== bKeys.length) return false;",
-  "  for (const key of aKeys) {",
-  "    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;",
-  "    if (!_scrml_structural_eq(a[key], b[key])) return false;",
-  "  }",
-  "  return true;",
-  "}",
-  "",
-].join("\n");
+//
+// s440-date-in-cell-and-eq: the function body is now SLICED from the client
+// runtime (SERVER_STRUCTURAL_EQ_SOURCE) instead of hand-copied here. The old
+// copy had drifted (no §59 map branch, no cycle guard, and every Date == every
+// other Date), so client and server could disagree on the same `==`.
+export const SERVER_STRUCTURAL_EQ_HELPER =
+  "\n// --- §45 Structural equality helper (inlined for server, no client runtime here) ---\n" +
+  SERVER_STRUCTURAL_EQ_SOURCE +
+  "\n";
 
 // Re-indenting a server-fn body without corrupting a multi-line template literal is
 // now the ONE shared `indentBodyLines` in ./utils.ts (S361 — it also gained regex
@@ -188,6 +169,54 @@ function distLocalPathOf(relSource: string, targetExt: string): string {
   const dir = stripPagesPrefix(_pathDirname(relSource));
   const file = _pathBasename(relSource, ".scrml") + targetExt;
   return dir === "." || dir === "" ? file : dir + "/" + file;
+}
+
+/**
+ * §20.5 (S433, g-session-store-keyed-per-compilation-unit-not-per-program) — the
+ * `../` ascent that takes an emitted `.server.js` unit from its OWN directory back
+ * to the DIST ROOT, as a `/`-separated chain (`""` for a unit that already lands at
+ * the dist root).
+ *
+ * WHY THIS EXISTS. The durable session store is keyed by its file path, and that
+ * path was built from `import.meta.dir` — the EMITTING MODULE's own directory. But
+ * §20.5 scopes the store to the PROGRAM: *"The READ middleware and the WRITE path
+ * SHALL consult the SAME durable store (a login that mints a cookie the middleware
+ * cannot resolve is a defect)."* A nested page emits to `dist/admin/` (api.js
+ * `pathFor`: `targetDir = join(outputDir, relDir)`), so it opened a SECOND
+ * `.scrml-sessions.db` with its own session namespace — a user logged in on the
+ * root unit read `session.isAuth === false` forever, at HTTP 200, with zero
+ * diagnostics. Anchoring every unit at the dist root restores ONE store per
+ * program while KEEPING the S239 FIX 9 property that made `import.meta.dir` the
+ * base in the first place: the store sits beside the build output, never at the
+ * launch CWD (which "vanishes"/collides).
+ *
+ * This is the session-store instance of the SAME defect `_outputBaseDir` was
+ * introduced for on the `<db src=>` side (ss19 #9,
+ * `g-db-src-compile-vs-runtime-path`: "a <page> in a subdir and the root entry
+ * reference the same physical db at compile time but emit DIFFERENT runtime
+ * paths"). Both answers are now dist-root-anchored.
+ *
+ * Mirrors api.js `pathFor` through the SHARED `stripPagesPrefix`, so the ascent
+ * counts the unit's TRUE dist depth: `pages/login.scrml` lands at
+ * `dist/login.server.js` (the `pages/` segment is stripped) and therefore ascends
+ * ZERO levels, while `admin/panel.scrml` lands at `dist/admin/panel.server.js` and
+ * ascends one. Counting SOURCE depth instead would overshoot by exactly one segment
+ * for every file under `pages/` and hoist the store ABOVE the dist root.
+ *
+ * Returns `""` (no ascent) for the two cases with no dist coordinate to express:
+ * no `outputBaseDir` (legacy single-file callers) and a source OUTSIDE the output
+ * base (no artifact is written for it). Both degrade to the pre-fix "beside my own
+ * bundle" answer, which for a single-unit build is the same directory anyway.
+ */
+function distRootAscentOf(filePath: string, outputBaseDir: string | null | undefined): string {
+  if (!outputBaseDir || !filePath) return "";
+  const relSource = _pathRelative(outputBaseDir, filePath);
+  if (isOutsideBase(relSource)) return "";
+  const relDir = stripPagesPrefix(_pathDirname(relSource));
+  if (relDir === "." || relDir === "") return "";
+  const depth = relDir.split("/").filter((s) => s.length > 0 && s !== ".").length;
+  if (depth === 0) return "";
+  return new Array(depth).fill("..").join("/");
 }
 
 /**
@@ -1019,6 +1048,23 @@ function emitModuleValueExportLines(
     _veCalleeMap,
     exportRegistry ?? null,
   );
+  // s440 — nested helpers inside a value-exported fn (same facts as the lowering).
+  // s441 — the same pass collects every async fn used as a VALUE (S440 F4).
+  const _veEscapes: AsyncEscapeSite[] = [];
+  {
+    const _veReg = exportRegistry ?? null;
+    const _veNestedFacts = {
+      boundNames: fileBoundNamesOf(fileAST),
+      asyncFnNames,
+      isStdlibAsync: (_veReg && _veReg.size > 0)
+        ? (n: string): boolean => {
+            const src = _veCalleeMap.get(n);
+            return !!src && isPromiseReturningStdlibFn(n, src, _veReg);
+          }
+        : null,
+    };
+    for (const _vfn of fnDeclByName.values()) annotateNestedAsyncHelpers(_vfn, _veNestedFacts, /*sqlIsAsync*/ true, _veEscapes);
+  }
   // W5b (S239) — E-FOREIGN-006 crossing-shadow diagnostics from lowering an
   // async ss1 fn body surface via this sink (parity with the tool path — the
   // pre-consolidation server path dropped them silently). Drained into `errors`
@@ -1175,12 +1221,13 @@ function emitModuleValueExportLines(
       const nm = fnNode?.name as string | undefined;
       if (!nm) continue;
       for (const site of collectNonAwaitableAsyncCalls(fnNode.body, _veCalleeMap, exportRegistry ?? null, asyncFnNames, fnNode.params, fnNode.span)) {
-        _pushVeDeduped(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
+        _pushVeDeduped(syncCallbackErrorForSite(site, null, filePath));
       }
       for (const a of collectAliasedAsyncCalls(fnNode.body, _veCalleeMap, exportRegistry ?? null, asyncFnNames)) {
         _pushVeDeduped(aliasedAsyncCallError(a.alias, a.resolved, a.span, filePath));
       }
     }
+    for (const err of asyncEscapeErrors(_veEscapes, filePath)) _pushVeDeduped(err);
   }
 
   if (constLines.length === 0 && fnBlocks.length === 0) return [];
@@ -1754,6 +1801,29 @@ export function generateServerJs(
     (ctxForCache as { protectAnalysis?: unknown } | null)?.protectAnalysis ?? protectAnalysisLegacy ?? null;
   const _protectCtx: ProtectContext = buildProtectContext(_protectAnalysis);
   const _protectActive: boolean = _protectCtx.protectedByTable.size > 0;
+  // §14.8.9 × §19.9.5 (S443 round 6, P3) — the CPS error envelope's
+  // `ServerError.message`. It was `String(err.message)` of whatever the body
+  // threw, and a thrown message can carry a protected VALUE: SQLite's
+  // `json_extract('{}', passwordHash)` fails with "bad JSON path: '<the hash>'",
+  // a `JSON.parse(u.passwordHash)` SyntaxError quotes its input — measured, the
+  // hash crossed the wire in an error. The provenance flow cannot see into an
+  // exception a host API constructs, so under `protect=` the message is a fixed
+  // string (fail closed) and the real error is logged SERVER-side. §19.9.5 types
+  // the variant as `ServerError(message: string, fn: string)` and leaves the
+  // message text to the implementation; `fn` is unchanged, and a typed scrml
+  // failure (`__scrml_error`) still passes through — the flow analyses those.
+  const _cpsErrorPrologue = (fnName: string): string[] => _protectActive
+    ? [`    if (!(_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)) console.error(${JSON.stringify(`[scrml] server function \`${fnName}\` failed:`)}, _scrml_cps_err);`]
+    : [];
+  // …and the envelope itself is a client egress: a typed scrml failure thrown
+  // with a row in its payload goes through the same snapshot + strip as a
+  // return value (S443 round 6d — the sink owns serialization everywhere).
+  const _cpsErrorPayloadExpr: string = _protectActive
+    ? "_scrml_protect_redact(_scrml_error_payload)"
+    : "_scrml_error_payload";
+  const _cpsErrorMessage: string = _protectActive
+    ? `"the server could not complete this call (details are in the server log)"`
+    : `String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err)`;
 
   // §14.8.10 — tenant-row isolation floor context. Built from BOTH the §14.8.9
   // `<db>`-derived schema registry AND the app's own `<schema>` declarations —
@@ -2580,30 +2650,75 @@ export function generateServerJs(
   // `session-secure=` attribute on the `<program>` (preferred) or a `<page>` node.
   // `!== false` and `!== "false"` both default a missing / typo'd value to the
   // safe secure mode.
-  const _readRawSessionSecure = (): string | undefined => {
-    let progVal: string | undefined;
-    let pageVal: string | undefined;
-    const visit = (ns: any[]): void => {
-      if (!Array.isArray(ns)) return;
-      for (const n of ns) {
-        if (!n || n.kind !== "markup") continue;
-        if (n.tag === "program" || n.tag === "page") {
-          const a = (n.attrs ?? []).find((x: any) => x && x.name === "session-secure");
-          if (a && a.value && a.value.kind === "string-literal") {
-            if (n.tag === "program") progVal = a.value.value;
-            else if (pageVal === undefined) pageVal = a.value.value;
-          }
-        }
-        if (Array.isArray(n.children)) visit(n.children);
-      }
-    };
-    visit(getNodes(fileAST));
-    return progVal ?? pageVal; // program-level wins over page-level
+  // §20.5 / §20.5.1 (S433 fix-round, F1-1) — GENERALIZED from the `session-secure`-only
+  // reader this used to be. `sessionExpiry` needs the IDENTICAL per-unit raw step and
+  // did not have it, and the asymmetry was a live defect rather than a tidiness
+  // question: with two `<program>` files in one compile, a unit that declares its OWN
+  // `sessionExpiry` but carries no `auth=` has no auth-middleware entry, so resolution
+  // skipped straight to the program-wide stash — which answers with the FIRST file
+  // carrying the attribute. MEASURED before this fix: `aaa.scrml` declaring `30m` and
+  // `zzz.scrml` declaring `7d` BOTH emitted `maxAge=1800`, order-insensitively, so
+  // `zzz`'s own declaration was governed by its sibling's. The control in the same
+  // measurement was the cookie name, which came out correct per unit precisely
+  // because `session-secure` already had this step. Two readers, one shape.
+  // ⛔ MOVED, NOT REWRITTEN (S436 round 4). The body of this reader, and the whole
+  // three-step order it sat in, now live in `./session-config-resolve.ts` so the
+  // driver can ASK the real resolver instead of re-deriving a fourth approximation
+  // of it. Rounds 1-3 each mirrored this dispatch in `codegen/index.ts` and each
+  // mirror was wrong somewhere new.
+  // ⚑ The local `_readRawProgramAttr` shim that used to sit here is DELETED (round 4
+  // review, F5). After both call sites moved to `_resolveSessionAttr` it had zero
+  // callers while its own comment still claimed it "keeps the local call sites
+  // reading the same as before" — a dead reader next to a live one is exactly what
+  // makes "is there really only ONE resolution path?" hard to answer by reading.
+  // There is one: `resolveUnitSessionAttr`, via `_resolveSessionAttr` below.
+  // Resolve one attribute through the shared order AND record a fall-through, but
+  // only from the session-infra emission path below — an attribute nobody emits is
+  // not a conflict. See `_resolveSessionAttr` uses.
+  const _resolveSessionAttr = (attr: SessionAttrName, stash: unknown, record: boolean) => {
+    const r = resolveUnitSessionAttr(attr, authMiddlewareEntry, getNodes(fileAST), stash);
+    if (record && r.source === "stash") recordUnattributableSessionUnit(filePath, attr);
+    return r;
   };
-  const _sessionSecureSetting =
-    (authMiddlewareEntry && authMiddlewareEntry.sessionSecure !== undefined)
-      ? authMiddlewareEntry.sessionSecure
-      : _readRawSessionSecure();
+  // §20.5.1 (S433) — THE COOKIE NAME IS A PROGRAM FACT TOO, and this was the third
+  // member of the per-unit/per-program class found while probing the store-keying
+  // defect (measured on a two-unit program: `<program session-secure="false">`
+  // emitted `scrml_sid` on the program unit and `__Host-scrml_sid` on the separate
+  // minting unit). It is the WORST of the three, because it defeats the store fix on
+  // its own: `_scrml_read_session_id`'s regex is compile-time specialized to ONE
+  // name, so the writer set `scrml_sid` while the reader matched `__Host-scrml_sid`
+  // and the session was unresolvable even with a single shared store. Both earlier
+  // sources are per-unit — `authMiddlewareEntry` is this unit's route-inference
+  // output, `_readRawSessionSecure()` walks only THIS file's nodes — so a unit with
+  // neither fell to the secure DEFAULT regardless of what the program declared.
+  // The program-wide value the driver pre-scanned is consulted LAST.
+  //
+  // ⛔ THIS FALLBACK IS NOT "STRICTLY ADDITIVE" (S436 correction). The comment here
+  // used to claim it was — "it is reached only where the answer today is 'nothing
+  // declared → default secure'" — and that sentence names exactly the case it
+  // breaks. `session-secure="false"` is the ONLY value that changes anything, so the
+  // only reachable effect of this fallback is to turn a secure default into a weaker
+  // one. It is additive in the DOWNGRADE direction, which is the direction that
+  // needed the scrutiny. MEASURED on `c46ebbf8`: a program declaring neither
+  // attribute emitted `__Host-scrml_sid` alone and plain `scrml_sid` when an
+  // unrelated `<program session-secure="false">` shared its compile set — zero hard
+  // errors, identical diagnostics, both input orders. `_programSessionSecure` is
+  // therefore now stamped ONLY for a single-`<program>` compile set (see the guarded
+  // pre-scan in codegen/index.ts); with 2+ declarations it arrives `undefined` and
+  // this expression falls to the secure default, as if the unit were compiled alone.
+  // The genuine multi-unit single-program case (#282 / S433) is unchanged.
+  //
+  // The three steps now run in `session-config-resolve.ts`. `record` is gated on
+  // `_needsSessionInfra && _webAppShape` — the same condition that decides whether
+  // the middleware below is emitted at all — so a unit that never mints or reads a
+  // cookie is never reported as unattributable (review finding F-B). The cookie NAME
+  // is computed unconditionally because non-session code paths below still reference
+  // it; only the RECORDING is gated.
+  const _sessionSecureSetting = _resolveSessionAttr(
+    "session-secure",
+    (fileAST as any)._programSessionSecure,
+    _needsSessionInfra && _webAppShape,
+  ).value;
   const _secureCookieMode = _sessionSecureSetting !== false && _sessionSecureSetting !== "false";
   const _sessionCookieName = _secureCookieMode ? "__Host-scrml_sid" : "scrml_sid";
 
@@ -2730,8 +2845,54 @@ export function generateServerJs(
     // When csrf is auto the middleware mints + surfaces it (see below); otherwise
     // the middleware is byte-identical to a non-CSRF session-infra app.
     const _csrfAuto = authMiddlewareEntry?.csrf === "auto";
+    // §20.5 (S433) — the compile-time `../` ascent from THIS unit's emitted
+    // directory to the dist root, so every unit of one program keys the durable
+    // session store on the SAME path. See `distRootAscentOf`.
+    const _sessionStoreDistAscent = distRootAscentOf(filePath, (fileAST as any)._outputBaseDir);
     // §20.5 (S265, i29e) — session cookie Max-Age + durable-store TTL, in seconds.
-    const _sessionMaxAgeSec = parseSessionExpirySeconds(authMiddlewareEntry?.sessionExpiry ?? null);
+    //
+    // §20.5 (S433, g-program-sessionexpiry-inert-on-separate-login-unit; operator
+    // ruling S385 B5 = "(a) PROPAGATE the program setting to the minting unit") —
+    // `authMiddlewareEntry` is this unit's OWN route-inference output, and a minting
+    // unit carries none (a login page declares no `auth=`; the guard it feeds lives
+    // on another unit). So `<program sessionExpiry="7d">` silently yielded a 1h
+    // cookie on exactly the unit that MINTS it — measured: the `<program>` unit
+    // emitted `604800`, the login unit `3600`. The fallback consults the PROGRAM-wide
+    // value the driver pre-scanned (`_programSessionExpiry`). Additive for a unit
+    // with its own entry — those are byte-identical — but see the S436 note below:
+    // "additive" was never a safety argument, it just says the fallback is last.
+    //
+    // ⛔ THREE STEPS, NOT TWO (S433 fix-round, F1-1) — and the middle one is the fix.
+    // The per-unit RAW read must come BEFORE the program-wide stash, exactly as
+    // `session-secure` already did, because `_programSessionExpiry` answers with the
+    // FIRST file in the compile set carrying the attribute. Without this step, a unit
+    // declaring its own `<program sessionExpiry=>` but no `auth=` (so: no
+    // auth-middleware entry) had its declaration governed by a SIBLING program's.
+    // MEASURED before the fix: `aaa.scrml` (`30m`) and `zzz.scrml` (`7d`) both emitted
+    // `maxAge=1800`, in BOTH input orders. That is a worse failure to read than the
+    // original defect — "your own declaration is inert" became "another program's
+    // declaration governs you" — so the middle step is not optional politeness.
+    //
+    // ⛔ AND THE MIDDLE STEP WAS NOT ENOUGH (S436). It rescues a unit that declares
+    // its OWN `<program sessionExpiry=>`; it does nothing for a unit that declares
+    // NEITHER attribute, which still inherited the first sibling program's value.
+    // MEASURED on `c46ebbf8`: `<program auth="optional" csrf="off">` compiled alone
+    // emitted 3600 and, beside `<program … sessionExpiry="7d">`, emitted 604800 —
+    // both input orders, zero hard errors. Same mechanism as the `session-secure`
+    // downgrade above, so the SAME guard fixes it: `_programSessionExpiry` is now
+    // stamped only for a single-`<program>` compile set, and arrives `null` when 2+
+    // programs share one. See the guarded pre-scan in codegen/index.ts.
+    // The three steps now run in `session-config-resolve.ts` (S436 round 4). This
+    // whole block is already inside `if (_needsSessionInfra && _webAppShape)`, so a
+    // fall-through here is a REAL one — the unit genuinely emits a session cookie it
+    // cannot attribute to a `<program>` — and is recorded unconditionally.
+    const _sessionMaxAgeSec = parseSessionExpirySeconds(
+      (_resolveSessionAttr(
+        "sessionExpiry",
+        (fileAST as any)._programSessionExpiry,
+        true,
+      ).value as string | null | undefined) ?? null,
+    );
     lines.push("// --- §52 / §20.5 Session store + request-context middleware (compiler-generated) ---");
     if (_anySessionWrite) {
       // §20.5 (S265, i29e) — the RULED-durable session store (emitted ONLY for an
@@ -2754,8 +2915,34 @@ export function generateServerJs(
       // build output — a REBUILD re-creates it (a deploy logs users out); a
       // RESTART reuses it (the durability that matters). A `session-store=`
       // attribute to point it at a data dir is a follow-up (SPEC §20.5).
+      //
+      // §20.5 (S433, g-session-store-keyed-per-compilation-unit-not-per-program) —
+      // the base is the DIST ROOT, not this unit's own directory, and it is reached
+      // by a COMPILE-TIME ascent (`distRootAscentOf`). `import.meta.dir` is a
+      // PER-MODULE fact; the store is normatively PER-PROGRAM (§20.5: "the READ
+      // middleware and the WRITE path SHALL consult the SAME durable store"). A
+      // nested page emits to `dist/admin/`, so the old per-unit base opened a SECOND
+      // `.scrml-sessions.db` and `session.isAuth` read false forever after a
+      // successful login — HTTP 200, zero diagnostics.
+      //
+      // AND THE KEY IS NOW NORMALIZED, WHICH IS A SECOND FIX IN THE SAME LINE. The
+      // old expression CONCATENATED a literal `/` onto `import.meta.dir`, so on
+      // Windows the cache key came out MIXED-SEPARATOR (`C:\…\dist/.scrml-sessions.db`)
+      // and no consumer computing the same path with `path.join` — every test that
+      // reaches into `globalThis.__scrml_session_stores` does — could ever find it.
+      // `path.resolve` yields the platform-native normal form, so the emitted key and
+      // a `join(distRoot, ".scrml-sessions.db")` key are the SAME string. That
+      // mismatch is why `session-secure-b4b5-roundtrip.test.js`'s `B5 runtime guard`
+      // case died at its SETUP assertion on Windows while passing on Linux CI — its
+      // CSRF-pinning assertion never executed. A path key must be compared in ONE
+      // normal form; string concatenation cannot promise that.
+      lines.push('import { resolve as _scrmlSessionPathResolve } from "node:path";');
       lines.push('import { Database as _ScrmlSessionDatabase } from "bun:sqlite";');
-      lines.push('const _scrml_session_db_path = ((import.meta && import.meta.dir) ? import.meta.dir : ".") + "/.scrml-sessions.db";');
+      lines.push(
+        `const _scrml_session_db_path = _scrmlSessionPathResolve(` +
+        `(import.meta && import.meta.dir) ? import.meta.dir : ".", ` +
+        `${JSON.stringify(_sessionStoreDistAscent)}, ".scrml-sessions.db");`,
+      );
       lines.push("const _scrml_session_store = (((globalThis.__scrml_session_stores ??= {}))[_scrml_session_db_path] ??= (() => {");
       lines.push("  const _db = new _ScrmlSessionDatabase(_scrml_session_db_path);");
       lines.push('  _db.run("CREATE TABLE IF NOT EXISTS kv_store (namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, expires_at INTEGER, PRIMARY KEY (namespace, key))");');
@@ -3129,7 +3316,18 @@ export function generateServerJs(
   // and NO reserved `_scrml_session_destroy` / `_scrml_session_projection` HTTP
   // routes leak into a headless `routes` array. Headless auth is bearer (later unit).
   if (authMiddlewareEntry && _webAppShape) {
-    const { loginRedirect, csrf, sessionExpiry } = authMiddlewareEntry;
+    const { loginRedirect, csrf } = authMiddlewareEntry;
+    // §20.5 (S438) — through the ONE resolver, never `authMiddlewareEntry.sessionExpiry`
+    // directly: an auto-escalated / `<page auth="required">` entry carries no expiry
+    // of its own (route-inference Step 8b), so a direct read emitted `undefined`
+    // where the program's declared value governs the cookie's Max-Age. Same call as
+    // the Max-Age computation above (not recorded again — that one records); the
+    // `"1h"` is the §20.5 language default `parseSessionExpirySeconds` also lands on.
+    const sessionExpiry =
+      (_resolveSessionAttr("sessionExpiry", (fileAST as any)._programSessionExpiry, false).value as
+        | string
+        | null
+        | undefined) ?? "1h";
 
     lines.push("// --- Session expiry (compiler-generated) ---");
     lines.push(`const _scrml_session_expiry = ${JSON.stringify(sessionExpiry)};`);
@@ -3701,19 +3899,11 @@ export function generateServerJs(
   // those here.
   // Shared E-SERVER-FN-IN-SYNC-CALLBACK emitter — used by the escape-hatch walk
   // below AND by the post-emission `_syncPeerCalls` drain (structured lambdas).
-  const _diagSyncCb = (peerName: string, span: any): void => {
-    const _sp = (span ?? {}) as { file?: string; start?: number; end?: number; line?: number; col?: number };
-    errors.push(new CGError(
-      "E-SERVER-FN-IN-SYNC-CALLBACK",
-      `E-SERVER-FN-IN-SYNC-CALLBACK: server function \`${peerName}\` is called inside a ` +
-      `synchronous callback. A server function runs asynchronously, but \`await\` is ` +
-      `not valid in a non-async callback (and making the callback async would make ` +
-      `\`.map\`/\`.forEach\` yield Promises instead of values). Refactor to a \`for\` loop ` +
-      `so the call runs in the server function's async body, e.g. ` +
-      `\`for (const x of xs) { ... ${peerName}(x) ... }\`.`,
-      { file: filePath ?? _sp.file ?? "", start: _sp.start ?? 0, end: _sp.end ?? 0, line: _sp.line ?? 1, col: _sp.col ?? 1 },
-      "error",
-    ));
+  // s440 — delegates to the SHARED builder (emit-library-shared
+  // `serverFnSyncCallbackError`), so the client drain reports the same wording;
+  // `via` names the peer a NESTED helper is async through.
+  const _diagSyncCb = (peerName: string, span: any, via?: string | null): void => {
+    errors.push(serverFnSyncCallbackError(peerName, span, filePath, via ?? null));
   };
   // Issue #26 Finding-2 (S239 adversarial review) — the async-stdlib sibling of
   // `_diagSyncCb`. Shared E-ASYNC-STDLIB-IN-SYNC-CALLBACK emitter, used by BOTH
@@ -3727,8 +3917,8 @@ export function generateServerJs(
   // Cleanup 7 (S239) — delegate to the SHARED single-wording builder
   // (emit-library-shared.asyncStdlibSyncCallbackError) so the route-handler,
   // ss1, library, and client paths all emit one identical message.
-  const _diagAsyncStdlibSyncCb = (calleeName: string, span: any): void => {
-    errors.push(asyncStdlibSyncCallbackError(calleeName, span, filePath));
+  const _diagAsyncStdlibSyncCb = (calleeName: string, span: any, via?: string | null): void => {
+    errors.push(asyncStdlibSyncCallbackError(calleeName, span, filePath, via ?? null));
   };
   // Issue #26 Finding-2 — does a bare callee `name` resolve to a Promise-returning
   // stdlib export? Mirrors emit-expr's `isStdlibAsyncCallee` using the file's
@@ -3741,6 +3931,60 @@ export function generateServerJs(
     if (!_src) return false;
     return isPromiseReturningStdlibFn(name, _src, _asyncExportRegistry);
   };
+  // s440-sync-callback-async-helper — resolve every helper function declared INSIDE
+  // a server fn against the SAME facts emit-expr uses here (peer server fns + the
+  // stdlib classifier; a `?{}` body lowers to an `await` on this side). The peer set
+  // is file-scope, so a nested helper wrapping a peer / async-stdlib call was emitted
+  // `async` and then called as if sync — `[…].some(x => inner(x))` true for every
+  // input. The marks drive the await / combinator lift / fail-closed decision at
+  // every call site in the handler and peer-callable bodies emitted below.
+  {
+    const _nestedFacts = {
+      boundNames: fileBoundNamesOf(fileAST),
+      serverFnNames: _serverFnPeerNames,
+      isStdlibAsync: _isAsyncStdlibName,
+    };
+    // s441 (S440 F4) — the same lexical pass reports every async-colored function
+    // (a peer, an async stdlib export, a nested async helper) used as a VALUE.
+    const _escapes: AsyncEscapeSite[] = [];
+    // The ESCAPE rule's outer facts are narrower than the await facts: every
+    // in-process peer is emitted `async` and awaited, including a plain helper
+    // route inference placed here only because a server fn references it
+    // (`const t = { d: doubleIt }` — #284). Such a helper is not an async-colored
+    // function in the ruling's sense; the ones that ARE: a server fn with a real
+    // escalation reason (`server`, a `?{}` / server-only resource, a protected
+    // field, a channel / middleware handler), plus every peer that transitively
+    // calls one, an async stdlib export, or has a `?{}` body.
+    const _genuineSeed = new Set<string>();
+    for (const { fnNode: _gf, route: _gr } of serverFns) {
+      const _gn = _gf?.name;
+      const _reasons = (_gr as { escalationReasons?: Array<{ kind?: string; resourceType?: string }> } | undefined)?.escalationReasons;
+      // `caller-context-propagation` is the PLACEMENT reason (route inference moved
+      // the helper to its only callers' side) — not a reason the fn is async.
+      const _real = Array.isArray(_reasons)
+        ? _reasons.filter((r) => !(r && r.kind === "server-only-resource" && r.resourceType === "caller-context-propagation"))
+        : [];
+      if (typeof _gn === "string" && _gn && _real.length > 0) _genuineSeed.add(_gn);
+    }
+    const _genuineAsync = computeAsyncFnNames(
+      serverFns.map((s) => s.fnNode).filter(Boolean) as any[],
+      null,
+      _genuineSeed,
+      _asyncCalleeMap,
+      _asyncExportRegistry,
+      _genuineSeed,
+    );
+    const _escapeFacts = {
+      serverFnNames: new Set([..._serverFnPeerNames].filter((n) => _genuineAsync.has(n))),
+      isStdlibAsync: _isAsyncStdlibName,
+    };
+    for (const { fnNode: _nfn } of serverFns) annotateNestedAsyncHelpers(_nfn, _nestedFacts, /*sqlIsAsync*/ true, _escapes, _escapeFacts);
+    for (const err of asyncEscapeErrors(_escapes, filePath)) {
+      const es = err.span as { start?: number };
+      const dup = errors.some((x: any) => x.code === err.code && (x.span as { start?: number })?.start === es?.start);
+      if (!dup) errors.push(err);
+    }
+  }
   const _calledPeerNames = new Set<string>();
   {
     const _seen = new WeakSet<object>();
@@ -3796,17 +4040,49 @@ export function generateServerJs(
       if (n.kind === "escape-hatch" && typeof n.raw === "string"
           && (n.nativeKind === "ArrowFunctionExpression" || n.nativeKind === "FunctionExpression")
           && !/^\s*async\b/.test(n.raw)) {
-        const _callees = extractCalleeNames(n.raw);
-        const _hit = _callees.find((c) => _serverFnPeerNames.has(c));
-        if (_hit) _diagSyncCb(_hit, n.span);
-        // Issue #26 Finding-2 — the async-stdlib sibling of the peer diagnostic
-        // above. A BLOCK-body callback's async-stdlib call (`verifyPassword` /
-        // `hashPassword` / crypto / redis / http …) emits as raw text VERBATIM
-        // (bare, unawaited) — emit-expr's structured `syncCallSink` never sees it.
-        // A bare async-stdlib call in a sync callback ships a truthy Promise (an
-        // accept-all auth bypass), so FAIL CLOSED here too.
-        const _asyncHit = _callees.find((c) => _isAsyncStdlibName(c));
-        if (_asyncHit) _diagAsyncStdlibSyncCb(_asyncHit, n.span);
+        // s441 (g-sync-callback-rawtext-scan-false-positives) — the raw text is
+        // analysed with acorn and resolved against the scrml scope it sits in
+        // (`local-async-fns` → `RAW_ASYNC_MARK`): a string `"m(" + x`, a member
+        // call `o.m(x)`, template TEXT and a same-named binding that is in scope
+        // (another server fn's own sync `m`) are no longer calls to `m`. Every
+        // async call left in the verbatim body is bare → FAIL CLOSED with the code
+        // its root names (a peer → E-SERVER-FN-IN-SYNC-CALLBACK; an async stdlib
+        // export or a nested helper rooted in one → E-ASYNC-STDLIB-IN-SYNC-CALLBACK;
+        // Issue #26 Finding-2 + s440 F2). The name scans below remain only for a
+        // fragment the analysis could not parse — fail closed, never silent.
+        const _uses = rawAsyncUsesOf(n);
+        if (_uses) {
+          for (const c of _uses.calls) {
+            const via = c.local ? c.root.via : null;
+            if (c.root.kind === "stdlib") _diagAsyncStdlibSyncCb(c.name, n.span, via);
+            else _diagSyncCb(c.name, n.span, via);
+          }
+        } else {
+          const _callees = extractCalleeNames(n.raw);
+          const _hit = _callees.find((c) => _serverFnPeerNames.has(c));
+          if (_hit) _diagSyncCb(_hit, n.span);
+          const _asyncHit = _callees.find((c) => _isAsyncStdlibName(c));
+          if (_asyncHit) _diagAsyncStdlibSyncCb(_asyncHit, n.span);
+          _diagNestedAsyncRaw(_callees, n.span);
+        }
+      }
+      // s440 fix round (F2) — a template literal's `${…}` interpolation is re-parsed
+      // from raw text at emit time (emitServerTemplateLit), which awaits PEER calls
+      // but has no nested-helper resolution: `${inner(1)}` rendered
+      // `[object Promise]`. Fail closed. s441 — only a call INSIDE an interpolation
+      // that resolves to a nested async helper counts (template text does not).
+      if (n.kind === "lit" && n.litType === "template" && typeof n.raw === "string"
+          && n.raw.includes("${")) {
+        const _uses = rawAsyncUsesOf(n);
+        if (_uses) {
+          for (const c of _uses.calls) {
+            if (!c.local) continue;
+            if (c.root.kind === "stdlib") _diagAsyncStdlibSyncCb(c.name, n.span, c.root.via);
+            else _diagSyncCb(c.name, n.span, c.root.via);
+          }
+        } else {
+          _diagNestedAsyncRaw(extractCalleeNames(n.raw), n.span);
+        }
       }
 
       // ss19 #12 (g-sql-in-arrow-body-invalid-js) — DIAGNOSTIC. A `?{}` SQL
@@ -3840,12 +4116,74 @@ export function generateServerJs(
         ));
       }
 
+      // s440 — DIAGNOSTIC. A NESTED function's parameter default is spliced as RAW
+      // TEXT by `paramSignature` and evaluated eagerly, outside any async body
+      // (`await` is illegal in a default even in an async fn), so an async call
+      // there — a peer, an async-stdlib export, or a nested async helper — can never
+      // be awaited, and emit-expr never sees it. Fail closed.
+      if (n.kind === "function-decl" && Array.isArray(n.params)) {
+        for (const _p of n.params) {
+          const _dv = _p && typeof _p === "object" ? (_p as { defaultValue?: unknown }).defaultValue : undefined;
+          if (typeof _dv !== "string" || _dv.length === 0) continue;
+          // s441 — the scope-aware analysis of the default text, when the pre-pass made one.
+          const _pUses = rawAsyncUsesOf(_p);
+          if (_pUses) {
+            for (const c of _pUses.calls) {
+              const via = c.local ? c.root.via : null;
+              if (c.root.kind === "stdlib") _diagAsyncStdlibSyncCb(c.name, n.span, via);
+              else _diagSyncCb(c.name, n.span, via);
+            }
+            continue;
+          }
+          for (const c of extractCalleeNames(_dv)) {
+            const _local = _nestedAsyncByName.get(c);
+            if (_local) {
+              if (_local.kind === "stdlib") _diagAsyncStdlibSyncCb(c, n.span, _local.via);
+              else _diagSyncCb(c, n.span, _local.via);
+            } else if (_serverFnPeerNames.has(c)) {
+              _diagSyncCb(c, n.span);
+            } else if (_isAsyncStdlibName(c)) {
+              _diagAsyncStdlibSyncCb(c, n.span);
+            }
+          }
+        }
+      }
+
       for (const k in n) {
         const v = n[k];
         if (Array.isArray(v)) { for (const ch of v) _walk(ch); }
         else if (v && typeof v === "object") _walk(v);
       }
     };
+    // s440 — the nested async helpers of every server fn, by name (for the raw-text
+    // scans above — block-body callbacks, template interpolations, param defaults —
+    // which have no structure to resolve lexically).
+    const _nestedAsyncByName = new Map<string, AsyncRoot>();
+    function _diagNestedAsyncRaw(callees: Iterable<string>, span: any): void {
+      for (const c of callees) {
+        const _local = _nestedAsyncByName.get(c);
+        if (!_local) continue;
+        if (_local.kind === "stdlib") _diagAsyncStdlibSyncCb(c, span, _local.via);
+        else _diagSyncCb(c, span, _local.via);
+      }
+    }
+    {
+      const _seenN = new WeakSet<object>();
+      const _gather = (n: any): void => {
+        if (!n || typeof n !== "object" || _seenN.has(n)) return;
+        _seenN.add(n);
+        if (n.kind === "function-decl" && typeof n.name === "string") {
+          const _r = localAsyncDeclRoot(n);
+          if (_r) _nestedAsyncByName.set(n.name, _r);
+        }
+        for (const k in n) {
+          if (k === "span") continue;
+          const v = n[k];
+          if (v && typeof v === "object") _gather(v);
+        }
+      };
+      for (const { fnNode: _sfn } of serverFns) _gather(_sfn?.body);
+    }
     for (const { fnNode: _sfn } of serverFns) {
       for (const _stmt of (_sfn?.body ?? [])) _walk(_stmt);
     }
@@ -4658,10 +4996,11 @@ export function generateServerJs(
       // serialize as a tagged scrml-error variant (per §19.9.1).
       if (_ext4Wrap) {
         lines.push(`  } catch (_scrml_cps_err) {`);
+        for (const l of _cpsErrorPrologue(name)) lines.push(l);
         lines.push(`    const _scrml_error_payload = (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)`);
         lines.push(`      ? _scrml_cps_err`);
-        lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} } };`);
-        lines.push(`    return new Response(JSON.stringify(_scrml_error_payload), {`);
+        lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: ${_cpsErrorMessage}, fn: ${JSON.stringify(name)} } };`);
+        lines.push(`    return new Response(JSON.stringify(${_cpsErrorPayloadExpr}), {`);
         lines.push(`      status: 500,`);
         lines.push(`      headers: {`);
         lines.push(`        "Content-Type": "application/json",`);
@@ -4960,10 +5299,11 @@ export function generateServerJs(
       // shape so the client CPS wrapper observes a consistent §19.9.1 envelope.
       if (_ext4WrapNonCsrf) {
         lines.push(`  } catch (_scrml_cps_err) {`);
+        for (const l of _cpsErrorPrologue(name)) lines.push(l);
         lines.push(`    const _scrml_error_payload = (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)`);
         lines.push(`      ? _scrml_cps_err`);
-        lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} } };`);
-        lines.push(`    return new Response(JSON.stringify(_scrml_error_payload), {`);
+        lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: ${_cpsErrorMessage}, fn: ${JSON.stringify(name)} } };`);
+        lines.push(`    return new Response(JSON.stringify(${_cpsErrorPayloadExpr}), {`);
         lines.push(`      status: 500,`);
         lines.push(`      headers: { "Content-Type": "application/json" },`);
         lines.push(`    });`);
@@ -5447,7 +5787,16 @@ export function generateServerJs(
       const _key = `${_spc.name}@${_sp.start ?? -1}`;
       if (_seenSync.has(_key)) continue;
       _seenSync.add(_key);
-      _diagSyncCb(_spc.name, _spc.span);
+      // s440 — a site recorded for a NESTED helper carries the root of its
+      // asyncness: one async through a stdlib call / `?{}` is the stdlib code;
+      // one through a peer server fn (and every legacy peer / alias / dispatch
+      // record, which carries no root) is E-SERVER-FN-IN-SYNC-CALLBACK.
+      const _site = _spc as SyncCallSite;
+      if (_site.rootKind === "stdlib") {
+        _diagAsyncStdlibSyncCb(_site.name, _site.span, _site.via);
+      } else {
+        _diagSyncCb(_site.name, _site.span, _site.via);
+      }
     }
   }
 
@@ -5848,6 +6197,20 @@ export function generateServerJs(
         );
       }
       lines.push(`async function _scrml_ssr_compose_handler(_scrml_req) {`);
+      // §52.13 — this route SERVES the page document, so under `auth="required"` it
+      // runs the same gate as `_scrml_protected_document.guard` (the host's static
+      // branch). It is mounted as a route and dispatched BEFORE that static branch,
+      // so without this an anonymous GET of the page path got the markup at 200
+      // (S441 review F1 — reopened g-auth-required-does-not-protect-the-served-html-
+      // document once csrf="auto", which always emits this route, became the default
+      // under auth=). The gate runs first: no seed query executes for an anonymous
+      // request. `authMiddlewareEntry` here is always an auth="required" entry (the
+      // only mode route-inference registers), and `_scrml_auth_check` is emitted for
+      // every such web-app unit — the same condition this route is emitted under.
+      if (authMiddlewareEntry) {
+        lines.push(`  const _scrml_doc_auth = _scrml_auth_check(_scrml_req);`);
+        lines.push(`  if (_scrml_doc_auth) return _scrml_doc_auth;`);
+      }
       if (_hasSsrSeed) {
         lines.push(`  const _scrml_ssr_state = {};`);
       }
@@ -6042,6 +6405,40 @@ export function generateServerJs(
   if (channelNodes.length > 0) {
     const wsHandlerLines = emitChannelWsHandlers(channelNodes, errors, filePath ?? "");
     for (const l of wsHandlerLines) lines.push(l);
+
+    // §40.2 (S441 ruling "yes on origin check") — the WebSocket upgrade is a GET,
+    // outside the CSRF token mechanism, and a browser attaches the session cookie to
+    // it. Without an Origin check a page on ANOTHER origin could open this socket as
+    // the signed-in viewer (cross-site WebSocket hijacking): measured, it drove the
+    // author's onserver:message handler and relayed a `__sync` write to every
+    // subscriber. One helper per server module; every channel upgrade route calls it.
+    // Web-app shape only: a headless program's channels carry no cookie credential.
+    if (_webAppShape) {
+      lines.push("// --- §40.2 WebSocket upgrade Origin check (compiler-generated) ---");
+      lines.push("// A browser always sends Origin on a WebSocket handshake. Accept the upgrade only when it");
+      lines.push("// names THIS server: the same host (X-Forwarded-Host when a proxy sets it, else the");
+      lines.push("// request's own host) and the same scheme (X-Forwarded-Proto, else the request's), except");
+      lines.push("// that an https page is accepted on a request that reached us as plain http (TLS ended at");
+      lines.push("// a proxy that sets no X-Forwarded-Proto). `Origin: null` (an opaque origin) is refused.");
+      lines.push("// No Origin header at all is a non-browser client, which cannot carry a victim's ambient");
+      lines.push("// cookie — allowed; the channel's auth check below still applies to it.");
+      lines.push("function _scrml_ws_origin_ok(req) {");
+      lines.push("  const origin = req.headers.get('origin');");
+      lines.push("  if (origin === null) return true;");
+      lines.push("  try {");
+      lines.push("    const _o = new URL(origin);");
+      lines.push("    const _u = new URL(req.url);");
+      lines.push("    const _host = (req.headers.get('x-forwarded-host') || '').split(',')[0].trim() || _u.host;");
+      lines.push("    const _proto = ((req.headers.get('x-forwarded-proto') || '').split(',')[0].trim() || _u.protocol.replace(':', '')).toLowerCase().replace(/^ws(s?)$/, 'http$1');");
+      lines.push("    const _self = new URL(_proto + '://' + _host);");
+      lines.push("    if (_o.host !== _self.host) return false;");
+      lines.push("    return _o.protocol === _self.protocol || (_o.protocol === 'https:' && _self.protocol === 'http:');");
+      lines.push("  } catch {");
+      lines.push("    return false;");
+      lines.push("  }");
+      lines.push("}");
+      lines.push("");
+    }
 
     for (const chNode of channelNodes) {
       const chServerLines = emitChannelServerJs(
@@ -6457,6 +6854,10 @@ export function generateServerJs(
     // avoids mislabeling it E-SQL-004. Computed once; the error is file-level.
     const eSqlFireEligible = containsSql(fileAST) && !isLibraryShapedFile(fileAST);
     let eSql004Fired = false;
+    // §44 (S433) — the FILE-backed sqlite handles that get the WAL + busy-timeout
+    // defaults, collected as the declarations are emitted and configured in one
+    // block after them.
+    const sqliteConfiguredIdents: string[] = [];
     const declLines: string[] = [];
     declLines.push("");
     declLines.push("// --- Bug 3a (§44.2): Bun.SQL handle declarations (compiler-generated) ---");
@@ -6558,6 +6959,29 @@ export function generateServerJs(
         connStr = "sqlite:" + connStr;
       }
       declLines.push(`const ${ident} = new SQL(${JSON.stringify(connStr)});`);
+      // §44 (S433, g-native-sqlite-connection-lacks-wal-and-busy-timeout-config;
+      // operator ruling S385 A1 = "(c) BOTH … WAL + 5s busy-timeout as the safe
+      // default", grounded in what the adopter's own `db.js` already does) — a
+      // FILE-backed sqlite handle gets the durability/concurrency defaults. See
+      // `codegen/sqlite-defaults.ts` for why these are awaited STATEMENTS rather than
+      // constructor options, and why `busy_timeout` must come first.
+      if (sqliteWantsDefaults(scope.driver, connStr)) {
+        sqliteConfiguredIdents.push(ident);
+      }
+    }
+    // §44 (S433) — SQLITE DURABILITY / CONCURRENCY DEFAULTS. The full rationale, the
+    // measurements, and the three traps (constructor options are ignored; the `await` is
+    // load-bearing; top-level await is forbidden) live in `codegen/sqlite-defaults.ts`,
+    // which is SHARED with `emit-tool.ts` — the tool path was missed on the first pass
+    // and left the gap's own symptom reachable for a `kind="tool"` program.
+    if (sqliteConfiguredIdents.length > 0) {
+      declLines.push("");
+      declLines.push(...SQLITE_CONFIGURE_HELPER_LINES);
+      for (const ident of sqliteConfiguredIdents) {
+        // `void` marks the floating promise deliberate; the helper already swallows
+        // every rejection, so there is no unhandled-rejection path.
+        declLines.push(`void _scrml_sqlite_configure(${ident});`);
+      }
     }
     declLines.push("");
     const declBlock = declLines.join("\n");
@@ -6572,26 +6996,19 @@ export function generateServerJs(
     }
   }
 
-  // §14.8.9 — drain the protected-column strip records the SQL-lowering pass
-  // collected, and surface one deduped `I-PROTECT-STRIP-001` (Info) per query so
-  // the redaction is never silent: the dev sees exactly which protected columns
-  // the egress floor removed. A `"*"` record is the wholesale strip of an
-  // unresolvable dynamic-SQL row. Routed into the `errors` stream with severity
-  // "info" — api.js partitions W-/I- info into result.warnings (non-fatal).
+  // §14.8.9 — the protected-column PROVENANCE FLOW (S441, `protect-flow.ts`)
+  // runs ONCE per compile, over EVERY emitted server module with the imports
+  // between them resolved (api.js, after codegen) — a per-file run cannot see a
+  // helper in another file. Here this file only REGISTERS its per-query strip
+  // records and its span lookup. That pass raises `E-PROTECT-006` (a protected
+  // value reaching a client egress outside its row) and `I-PROTECT-STRIP-001`
+  // (only for a query whose row a redact sink actually stripped).
   if (_protectActive) {
-    for (const info of drainProtectInfosFromRewriter()) {
-      const _what = info.cols === "*"
-        ? "ALL columns (the query's column origins are not statically resolvable — fail-closed wholesale strip)"
-        : `protected column(s) ${info.cols.map((c) => `\`${c}\``).join(", ")}`;
-      errors.push(new CGError(
-        "I-PROTECT-STRIP-001",
-        `I-PROTECT-STRIP-001: the egress floor strips ${_what} from the client response of \`${info.sql}\` ` +
-        `(§14.8.9 — a \`protect=\` column never crosses the wire unredacted). To send a protected column ` +
-        `deliberately, declassify it at the value with \`reveal("col")\`; to silence this, project the column out of the SELECT.`,
-        { file: filePath, start: 0, end: 0 } as any,
-        "info",
-      ));
-    }
+    registerProtectModule(
+      filePath,
+      drainProtectInfosFromRewriter(),
+      (name) => (fnNodes.find((f: any) => f?.name === name)?.span as any) ?? null,
+    );
   }
   // §14.8.9 — release the protect context (mirrors the variant-fields release).
   setProtectContextForRewriter(null);

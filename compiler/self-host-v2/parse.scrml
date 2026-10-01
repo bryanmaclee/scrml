@@ -1,0 +1,2443 @@
+// =============================================================================
+// self-host-v2 / parse.scrml — source → FileAst (bootstrap impl#2, slice M2).
+//
+// Design authority: dpa-051 §3.1, §4; R1 (a) the S233 re-cut (lex · parse ·
+// analyze · lower), ruled S437. Grammar: SPEC §66.2 (declaration openers,
+// termination, the declaration/use marker), §66.5 (`renders`), §66.6 (`<*x>`),
+// §66.7 (`as=`), §17.7 (`<each in= key= as name>`), §27 (comments), §4.14.
+//
+// TWO SCANNERS, ONE LEXER. A scrml file is markup with logic regions in it.
+//   - The MARKUP scanner (this file, char level) reads tags, attribute names,
+//     text and comments — none of which are tokens.
+//   - Every LOGIC region — a `${…}` block or interpolation, a parenthesized /
+//     braced / bare attribute value, an opener value, a `function` / `type` /
+//     `import` declaration — is lexed by lex.scrml's `lexFrom` (the same fold as
+//     `lex`, started at the region's offset and stopped by a rule) and parsed
+//     here from tokens. There is no second lexer.
+//   The opener TYPE (`:string[]`, `:Openness`) is read by the markup scanner: it
+//   is a name + optional bracket grant list and ends at the opener's `=` / space
+//   / `/>`, which no logic-region stop rule sees.
+//
+// OUTPUT: a FileAst whose every node carries a NodeId (`nid`), dense from the
+// `firstId` the driver passes (so the files of one linked program get disjoint
+// ranges), and whose bodies are trees (§4). Diagnostics are data, never thrown.
+//
+// Parse-level diagnostics (codes named in SPEC §66.20 where one exists):
+//   E-DECL-OPENER-EXPR-UNPARENTHESIZED (§66.2.4), E-DECL-ILLEGAL-FIELD-NAME
+//   (§66.2.3), and E-PARSE-* for plain syntax errors (no §34 code is named for
+//   them yet — the house rule is that §34 rows land with the implementation).
+//
+// impl#1 workarounds: F4 (qualified variants in argument / field / element
+// position), F5 (host-method results annotated), F11 (named payload binding),
+// F16 (a match over an imported payload enum binds a field in at least one
+// arm). (F12 — an alternation arm only first — and F14 — a brace in a string
+// literal — are fixed in impl#1 by #1119; braces are plain string literals
+// again, S440.)
+// =============================================================================
+${
+    import { Token, TokenKind, LexStop, LexRun, lexFrom, lexFromMode } from "./lex.scrml"
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, ATypeK,
+             ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
+             AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
+             AProgram, AItem, AItemK, FileAst, Diag, mkSpan } from "./ast.scrml"
+
+    // =========================================================================
+    // Tokens, as the parser sees them: one TOTAL classification of TokenKind
+    // (the only match over it), then text-directed parsing.
+    // =========================================================================
+    type TC:enum = { Punct, Ident, Keyword, Num, Str, Variant, At, Other, End }
+
+    // `v` = the payload the parser needs: a name, a cooked string, a raw number.
+    type PTok:struct = { cls: TC, v: string, text: string, start: int, end: int, line: int }
+
+    fn tokClass(k: TokenKind) -> TC {
+        return match k {
+            .LParen | .RParen | .LBrace | .RBrace | .LBracket | .RBracket |
+                  .Semicolon | .Comma | .Dot | .Colon | .Arrow | .Question |
+                  .Assign | .Equal | .StrictEqual | .NotEqual | .StrictNotEqual |
+                  .Plus | .Minus | .Star | .Slash | .Percent |
+                  .LessThan | .LessEqual | .GreaterThan | .GreaterEqual |
+                  .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
+                  .LogicalAnd | .LogicalOr | .BitAnd | .BitOr :> TC.Punct
+            .TemplateInterpStart :> TC.Other
+            .TemplateInterpEnd :> TC.Other
+            .Eof :> TC.End
+            .NumberLit(raw: r) :> TC.Num
+            .StringLit(cooked: c) :> TC.Str
+            .RegexLit(pattern: p) :> TC.Other
+            .TemplateChunk(cooked: c) :> TC.Other
+            .BareVariant(name: n) :> TC.Variant
+            .Ident(name: n) :> TC.Ident
+            .Keyword(name: n) :> TC.Keyword
+            .Unknown(ch: c) :> unknownClass(c)
+        }
+    }
+
+    fn unknownClass(c: string) -> TC {
+        if (c == "@") return TC.At
+        return TC.Other
+    }
+
+    fn tokPayload(k: TokenKind) -> string {
+        return match k {
+            .LParen | .RParen | .LBrace | .RBrace | .LBracket | .RBracket |
+                  .Semicolon | .Comma | .Dot | .Colon | .Arrow | .Question |
+                  .Assign | .Equal | .StrictEqual | .NotEqual | .StrictNotEqual |
+                  .Plus | .Minus | .Star | .Slash | .Percent |
+                  .LessThan | .LessEqual | .GreaterThan | .GreaterEqual |
+                  .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
+                  .LogicalAnd | .LogicalOr | .BitAnd | .BitOr |
+                  .TemplateInterpStart | .TemplateInterpEnd | .Eof :> ""
+            .NumberLit(raw: r) :> r
+            .StringLit(cooked: c) :> c
+            .BareVariant(name: n) :> n
+            .Ident(name: n) :> n
+            .Keyword(name: n) :> n
+            .Unknown(ch: c) :> c
+            .RegexLit(pattern: p) :> p
+            .TemplateChunk(cooked: c) :> c
+        }
+    }
+
+    fn toPTok(t: Token) -> PTok {
+        return { cls: tokClass(t.kind), v: tokPayload(t.kind), text: t.text,
+                 start: t.span.start, end: t.span.end, line: t.span.line }
+    }
+
+    fn toPToks(ts: Token[]) -> PTok[] {
+        let out: PTok[] = []
+        for (const t of ts) { out = out.concat([toPTok(t)]) }
+        return out
+    }
+
+    // =========================================================================
+    // The token-level parser state: a value threaded through every function.
+    // =========================================================================
+    type TP:struct = { toks: PTok[], i: int, nid: int, diags: Diag[], file: string }
+
+    type RExpr:struct  = { e: AExpr, tp: TP }
+    type RExprs:struct = { es: AExpr[], tp: TP }
+    type RStmt:struct  = { s: AStmt, tp: TP }
+    type RBlock:struct = { b: ABlock, tp: TP }
+    type RType:struct  = { t: AType, tp: TP }
+    type RItems:struct = { items: AItem[], tp: TP }
+    type RName:struct  = { name: string, tp: TP }
+
+    fn cur(tp: TP) -> PTok {
+        if (tp.i < tp.toks.length) return tp.toks[tp.i]
+        return tp.toks[tp.toks.length - 1]
+    }
+
+    fn peekAt(tp: TP, k: int) -> PTok {
+        const j: int = tp.i + k
+        if (j < tp.toks.length) return tp.toks[j]
+        return tp.toks[tp.toks.length - 1]
+    }
+
+    fn adv(tp: TP) -> TP {
+        if (tp.i >= tp.toks.length - 1) return tp
+        return { toks: tp.toks, i: tp.i + 1, nid: tp.nid, diags: tp.diags, file: tp.file }
+    }
+
+    fn bumpId(tp: TP) -> TP {
+        return { toks: tp.toks, i: tp.i, nid: tp.nid + 1, diags: tp.diags, file: tp.file }
+    }
+
+    fn diagAt(tp: TP, code: string, msg: string, t: PTok) -> TP {
+        const d: Diag = { code: code, message: msg, file: tp.file, span: mkSpan(t.start, t.end) }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+    }
+
+    fn atEnd(tp: TP) -> boolean { return cur(tp).cls == TC.End }
+
+    // Is the current token the punctuation / word `s`?
+    fn isP(tp: TP, s: string) -> boolean {
+        const t: PTok = cur(tp)
+        if (t.cls == TC.Str) return false
+        return t.text == s
+    }
+
+    fn isWord(tp: TP, s: string) -> boolean {
+        const t: PTok = cur(tp)
+        if (t.cls == TC.Ident || t.cls == TC.Keyword) return t.v == s
+        return false
+    }
+
+    fn expectP(tp: TP, s: string) -> TP {
+        if (isP(tp, s)) return adv(tp)
+        const t: PTok = cur(tp)
+        return diagAt(tp, "E-PARSE-EXPECTED", "expected `" + s + "`, found `" + t.text + "`", t)
+    }
+
+    // Two tokens that touch (no trivia between them): `:>`, `@x`, `->`.
+    fn touching(a: PTok, b: PTok) -> boolean { return a.end == b.start }
+
+    fn spanFrom(tp: TP, start: int) -> ASpan {
+        let end: int = start
+        if (tp.i > 0) end = tp.toks[tp.i - 1].end
+        if (end < start) end = start
+        return mkSpan(start, end)
+    }
+
+    fn mkE(tp: TP, start: int, k: AExprK) -> RExpr {
+        const e: AExpr = { nid: tp.nid, span: spanFrom(tp, start), k: k }
+        return { e: e, tp: bumpId(tp) }
+    }
+
+    // =========================================================================
+    // Expressions — precedence climbing.
+    //   assignment (right) < ternary < `||` < `&&` < `|` < `==` `!=` < relational
+    //   < additive < multiplicative < unary (`!` `-`) < postfix (`.name`, call)
+    // =========================================================================
+    fn binPrec(tp: TP) -> int {
+        const t: PTok = cur(tp)
+        if (t.cls != TC.Punct) return 0
+        if (isCompoundAssign(tp)) return 0
+        return match t.text {
+            "||"  :> 1
+            "&&"  :> 2
+            "|"   :> 3
+            "=="  :> 4
+            "!="  :> 4
+            "===" :> 4
+            "!==" :> 4
+            "<"   :> 5
+            "<="  :> 5
+            ">"   :> 5
+            ">="  :> 5
+            "+"   :> 6
+            "-"   :> 6
+            "*"   :> 7
+            "/"   :> 7
+            "%"   :> 7
+            _     :> 0
+        }
+    }
+
+    fn binOpOf(text: string) -> BinOp {
+        return match text {
+            "||" :> BinOp.Or
+            "&&" :> BinOp.And
+            "|"  :> BinOp.Pipe
+            "==" :> BinOp.Eq
+            "!=" :> BinOp.Ne
+            "<"  :> BinOp.Lt
+            "<=" :> BinOp.Le
+            ">"  :> BinOp.Gt
+            ">=" :> BinOp.Ge
+            "+"  :> BinOp.Add
+            "-"  :> BinOp.Sub
+            "*"  :> BinOp.Mul
+            "/"  :> BinOp.Div
+            "%"  :> BinOp.Mod
+            "===" :> BinOp.Eq
+            "!==" :> BinOp.Ne
+            _    :> BinOp.Eq
+        }
+    }
+
+    // `x += v` — the lexer has no compound-assignment token, so it is an
+    // arithmetic operator TOUCHING a following `=`.
+    fn isCompoundAssign(tp: TP) -> boolean {
+        const t: PTok = cur(tp)
+        const n: PTok = peekAt(tp, 1)
+        if (t.cls != TC.Punct || n.text != "=" || !touching(t, n)) return false
+        return t.text == "+" || t.text == "-" || t.text == "*" || t.text == "/" || t.text == "%"
+    }
+
+    export fn parseAssign(tp: TP) -> RExpr {
+        const start: int = cur(tp).start
+        const lhs: RExpr = parseTernary(tp)
+        if (isP(lhs.tp, "=")) {
+            const rhs: RExpr = parseAssign(adv(lhs.tp))
+            return mkE(rhs.tp, start, AExprK.Assign(lhs.e, rhs.e))
+        }
+        if (isCompoundAssign(lhs.tp)) {
+            const op: PTok = cur(lhs.tp)
+            const d: TP = diagAt(lhs.tp, "E-BOOTSTRAP-UNSUPPORTED", "compound assignment `" + op.text + "=` is not in bootstrap slice M2 — write `x = x " + op.text + " …`", op)
+            const rhs2: RExpr = parseAssign(adv(adv(d)))
+            // reported above; recovered as a placeholder, never typed as `x = v`
+            return mkE(rhs2.tp, start, AExprK.Recovered)
+        }
+        if (isP(lhs.tp, "++") || isP(lhs.tp, "--")) {
+            const inc: PTok = cur(lhs.tp)
+            const d2: TP = diagAt(lhs.tp, "E-BOOTSTRAP-UNSUPPORTED", "`" + inc.text + "` is not in bootstrap slice M2 — write `x = x " + inc.text.substring(0, 1) + " 1`", inc)
+            return { e: lhs.e, tp: adv(d2) }
+        }
+        return lhs
+    }
+
+    fn parseTernary(tp: TP) -> RExpr {
+        const start: int = cur(tp).start
+        const test: RExpr = parseBinary(tp, 1)
+        if (!isP(test.tp, "?")) return test
+        const yes: RExpr = parseTernary(adv(test.tp))
+        const t2: TP = expectP(yes.tp, ":")
+        const no: RExpr = parseTernary(t2)
+        return mkE(no.tp, start, AExprK.Ternary(test.e, yes.e, no.e))
+    }
+
+    fn parseBinary(tp: TP, minPrec: int) -> RExpr {
+        const start: int = cur(tp).start
+        let left: RExpr = parseUnary(tp)
+        let going = true
+        while (going) {
+            const prec: int = binPrec(left.tp)
+            if (prec == 0 || prec < minPrec) {
+                going = false
+            } else {
+                const opTok: PTok = cur(left.tp)
+                let t1: TP = left.tp
+                if (opTok.text == "===" || opTok.text == "!==") {
+                    t1 = diagAt(t1, "E-PARSE-STRICT-EQ", "`" + opTok.text + "` is not scrml — `==` is already strict and structural (§45)", opTok)
+                }
+                const right: RExpr = parseBinary(adv(t1), prec + 1)
+                left = mkE(right.tp, start, AExprK.Binary(binOpOf(opTok.text), left.e, right.e))
+            }
+        }
+        return left
+    }
+
+    fn parseUnary(tp: TP) -> RExpr {
+        const start: int = cur(tp).start
+        if (isP(tp, "!")) {
+            const inner: RExpr = parseUnary(adv(tp))
+            return mkE(inner.tp, start, AExprK.Unary(UnOp.Not, inner.e))
+        }
+        if (isP(tp, "-")) {
+            const inner: RExpr = parseUnary(adv(tp))
+            return mkE(inner.tp, start, AExprK.Unary(UnOp.Neg, inner.e))
+        }
+        return parsePostfix(tp)
+    }
+
+    fn parsePostfix(tp: TP) -> RExpr {
+        const start: int = cur(tp).start
+        return parsePostfixFrom(parsePrimary(tp), start)
+    }
+
+    fn parsePostfixFrom(first: RExpr, start: int) -> RExpr {
+        let r: RExpr = first
+        let going = true
+        while (going) {
+            const t: PTok = cur(r.tp)
+            const prev: PTok = peekAt(r.tp, -1)
+            if (t.cls == TC.Punct && t.text == "." && peekAt(r.tp, 1).cls == TC.Ident) {
+                const name: string = peekAt(r.tp, 1).v
+                r = mkE(adv(adv(r.tp)), start, AExprK.Member(r.e, name))
+            } else if (t.cls == TC.Punct && t.text == "." && peekAt(r.tp, 1).cls == TC.Keyword) {
+                const kname: string = peekAt(r.tp, 1).v
+                r = mkE(adv(adv(r.tp)), start, AExprK.Member(r.e, kname))
+            } else if (t.cls == TC.Punct && t.text == "(" && t.line == prev.line) {
+                const args: RExprs = parseList(adv(r.tp), ")")
+                r = mkE(args.tp, start, AExprK.Call(r.e, args.es))
+            } else if (t.cls == TC.Punct && t.text == "[" && touching(prev, t)) {
+                // `a[i]` — the `[` touches what it indexes (a spaced `[` starts a new expression)
+                const ix: RExpr = parseAssign(adv(r.tp))
+                r = mkE(expectP(ix.tp, "]"), start, AExprK.Index(r.e, ix.e))
+            } else {
+                going = false
+            }
+        }
+        return r
+    }
+
+    // Comma-separated expressions up to (and consuming) `close`.
+    fn parseList(tp: TP, close: string) -> RExprs {
+        let t: TP = tp
+        let out: AExpr[] = []
+        let going = !isP(t, close) && !atEnd(t)
+        while (going) {
+            const r: RExpr = parseAssign(t)
+            out = out.concat([r.e])
+            t = r.tp
+            if (isP(t, ",")) {
+                t = adv(t)
+                if (isP(t, close)) going = false
+            } else {
+                going = false
+            }
+        }
+        return { es: out, tp: expectP(t, close) }
+    }
+
+    fn parsePrimary(tp: TP) -> RExpr {
+        const t: PTok = cur(tp)
+        const start: int = t.start
+        if (t.cls == TC.Num) return mkE(adv(tp), start, AExprK.Num(t.v))
+        if (t.cls == TC.Str) return mkE(adv(tp), start, AExprK.Str(t.v))
+        if (t.cls == TC.Variant) return mkE(adv(tp), start, AExprK.Variant(t.v))
+        if (t.cls == TC.At) return parseAt(tp)
+        if (t.cls == TC.Keyword) return parseKeywordPrimary(tp)
+        if (t.cls == TC.Ident) {
+            if (t.v == "not") return mkE(adv(tp), start, AExprK.NotLit)
+            if (peekAt(tp, 1).text == "=>") return parseLambda(adv(tp), start, [t.v])
+            return mkE(adv(tp), start, AExprK.Name(t.v))
+        }
+        if (isP(tp, "(")) {
+            const ps: string[] | not = lambdaParams(tp)
+            if (ps is some) return parseLambda(skipParams(tp), start, ps)
+            const inner: RExpr = parseAssign(adv(tp))
+            return { e: inner.e, tp: expectP(inner.tp, ")") }
+        }
+        if (isP(tp, "[")) {
+            const elems: RExprs = parseArrayElems(adv(tp))
+            return mkE(elems.tp, start, AExprK.ArrayLit(elems.es))
+        }
+        if (isP(tp, "{")) return parseObject(tp)
+        const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`", t)
+        return mkE(adv(bad), start, AExprK.Recovered)
+    }
+
+    // s442: array elements up to (and consuming) `]`; `...e` is a Spread element.
+    fn parseArrayElems(tp: TP) -> RExprs {
+        let t: TP = tp
+        let out: AExpr[] = []
+        let going = !isP(t, "]") && !atEnd(t)
+        while (going) {
+            if (isSpread(t)) {
+                const sstart: int = cur(t).start
+                const sv: RExpr = parseSpreadValue(t)
+                const sp: RExpr = mkE(sv.tp, sstart, AExprK.Spread(sv.e))
+                out = out.concat([sp.e])
+                t = sp.tp
+            } else {
+                const r: RExpr = parseAssign(t)
+                out = out.concat([r.e])
+                t = r.tp
+            }
+            if (isP(t, ",")) {
+                t = adv(t)
+                if (isP(t, "]")) going = false
+            } else {
+                going = false
+            }
+        }
+        return { es: out, tp: expectP(t, "]") }
+    }
+
+    // s442: `(a, b) =>` — the parameter names when the parenthesis at `tp` is a
+    // lambda's parameter list (only names and commas, then `=>`), else `not`.
+    fn lambdaParams(tp: TP) -> string[] | not {
+        let k: int = 1
+        let names: string[] = []
+        let going = true
+        while (going) {
+            const x: PTok = peekAt(tp, k)
+            if (x.cls == TC.Ident) {
+                names = names.concat([x.v])
+                k = k + 1
+                const sep: PTok = peekAt(tp, k)
+                if (sep.text == ",") {
+                    k = k + 1
+                } else if (sep.text == ")") {
+                    going = false
+                } else {
+                    return not
+                }
+            } else if (x.text == ")" && names.length == 0) {
+                going = false
+            } else {
+                return not
+            }
+        }
+        if (peekAt(tp, k + 1).text != "=>") return not
+        return names
+    }
+
+    // Past a lambda's `( … )` (lambdaParams said it is one), at its `=>`.
+    fn skipParams(tp: TP) -> TP {
+        let t: TP = adv(tp)
+        while (!isP(t, ")") && !atEnd(t)) { t = adv(t) }
+        return adv(t)
+    }
+
+    // At `=>`: the lambda's expression body (§7.2 arrow functions; a braced
+    // body is not in the bootstrap — reported).
+    fn parseLambda(tp: TP, start: int, params: string[]) -> RExpr {
+        const t: TP = adv(tp)
+        if (isP(t, "{")) {
+            const d: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function with a braced body is not in the bootstrap — write an expression body", cur(t))
+            const b: RBlock = parseBlock(d)
+            return mkE(b.tp, start, AExprK.Recovered)
+        }
+        const body: RExpr = parseAssign(t)
+        return mkE(body.tp, start, AExprK.Lambda(params, body.e))
+    }
+
+    fn parseKeywordPrimary(tp: TP) -> RExpr {
+        const t: PTok = cur(tp)
+        const start: int = t.start
+        if (t.v == "true") return mkE(adv(tp), start, AExprK.Bool(true))
+        if (t.v == "false") return mkE(adv(tp), start, AExprK.Bool(false))
+        if (t.v == "not") return mkE(adv(tp), start, AExprK.NotLit)
+        if (t.v == "null" || t.v == "undefined") {
+            const d: TP = diagAt(tp, "E-PARSE-NO-NULL", "`" + t.v + "` does not exist in scrml — absence is `not` (§42)", t)
+            return mkE(adv(d), start, AExprK.Recovered)
+        }
+        return mkE(adv(tp), start, AExprK.Name(t.v))
+    }
+
+    // `@name` (a cell / handle / declaration reference) or `@.` (the current
+    // <each> item). The `@` must touch what follows it.
+    fn parseAt(tp: TP) -> RExpr {
+        const at: PTok = cur(tp)
+        const nx: PTok = peekAt(tp, 1)
+        if (touching(at, nx) && (nx.cls == TC.Ident || nx.cls == TC.Keyword)) {
+            return mkE(adv(adv(tp)), at.start, AExprK.At(nx.v))
+        }
+        if (touching(at, nx) && nx.cls == TC.Punct && nx.text == ".") {
+            return mkE(adv(tp), at.start, AExprK.AtItem)
+        }
+        const bad: TP = diagAt(tp, "E-PARSE-AT", "`@` must be followed by a name (`@count`) or `.` (`@.field`)", at)
+        return mkE(adv(bad), at.start, AExprK.Recovered)
+    }
+
+    fn isSpread(tp: TP) -> boolean {
+        const a: PTok = cur(tp)
+        const b: PTok = peekAt(tp, 1)
+        const c: PTok = peekAt(tp, 2)
+        if (a.text != "." || b.text != ".") return false
+        if (c.text != "." && c.cls != TC.Variant) return false
+        return touching(a, b) && touching(b, c)
+    }
+
+    // The spread's value: after `..` + `.x` (a bare-variant token, when the
+    // spread names a local) or after `...`.
+    fn parseSpreadValue(tp: TP) -> RExpr {
+        const t2: TP = adv(adv(tp))
+        const c: PTok = cur(t2)
+        if (c.cls == TC.Variant) {
+            const base: RExpr = mkE(adv(t2), c.start, AExprK.Name(c.v))
+            return parsePostfixFrom(base, c.start)
+        }
+        return parseAssign(adv(t2))
+    }
+
+    fn parseObject(tp: TP) -> RExpr {
+        const start: int = cur(tp).start
+        let t: TP = adv(tp)
+        let props: AProp[] = []
+        let going = !isP(t, "}") && !atEnd(t)
+        while (going) {
+            const nameTok: PTok = cur(t)
+            const pstart: int = nameTok.start
+            if (isSpread(t)) {
+                // `...value` — the lexer has no Ellipsis token yet (lex.scrml: deferred), so a
+                // spread is three touching `.` tokens.
+                const sv: RExpr = parseSpreadValue(t)
+                t = sv.tp
+                props = props.concat([{ nid: t.nid, span: spanFrom(t, pstart), spread: true, name: "", value: sv.e }])
+            } else {
+                if (nameTok.cls != TC.Ident && nameTok.cls != TC.Keyword && nameTok.cls != TC.Str) {
+                    t = diagAt(t, "E-PARSE-OBJECT", "expected a field name, found `" + nameTok.text + "`", nameTok)
+                }
+                t = expectP(adv(t), ":")
+                const v: RExpr = parseAssign(t)
+                t = v.tp
+                props = props.concat([{ nid: t.nid, span: spanFrom(t, pstart), spread: false, name: nameTok.v, value: v.e }])
+            }
+            t = bumpId(t)
+            if (isP(t, ",")) {
+                t = adv(t)
+                if (isP(t, "}")) going = false
+            } else {
+                going = false
+            }
+        }
+        t = expectP(t, "}")
+        return mkE(t, start, AExprK.ObjectLit(props))
+    }
+
+    // =========================================================================
+    // Statements and blocks.
+    // =========================================================================
+    fn mkS(tp: TP, start: int, k: AStmtK) -> RStmt {
+        const s: AStmt = { nid: tp.nid, span: spanFrom(tp, start), k: k }
+        return { s: s, tp: bumpId(tp) }
+    }
+
+    // `{ stmt* }`
+    export fn parseBlock(tp: TP) -> RBlock {
+        const start: int = cur(tp).start
+        let t: TP = expectP(tp, "{")
+        let stmts: AStmt[] = []
+        while (!isP(t, "}") && !atEnd(t)) {
+            const before: int = t.i
+            const r: RStmt = parseStmt(t)
+            stmts = stmts.concat([r.s])
+            t = r.tp
+            if (isP(t, ";")) t = adv(t)
+            if (t.i == before) t = adv(t)
+        }
+        t = expectP(t, "}")
+        const b: ABlock = { nid: t.nid, span: spanFrom(t, start), stmts: stmts }
+        return { b: b, tp: bumpId(t) }
+    }
+
+    // A block's statements when the region holds them WITHOUT braces (an
+    // attribute handler written `{ … }` is lexed with its braces — parseBlock).
+    fn parseStmt(tp: TP) -> RStmt {
+        const t: PTok = cur(tp)
+        const start: int = t.start
+        if (isWord(tp, "let") || isWord(tp, "const")) return parseLocal(tp)
+        if (isWord(tp, "return")) {
+            const nx: PTok = peekAt(tp, 1)
+            if (nx.cls == TC.End || nx.line != t.line || nx.text == "}" || nx.text == ";") {
+                return mkS(adv(tp), start, AStmtK.Return(not))
+            }
+            const v: RExpr = parseAssign(adv(tp))
+            return mkS(v.tp, start, AStmtK.Return(v.e))
+        }
+        if (isWord(tp, "if")) return parseIf(tp)
+        if (isWord(tp, "given")) return parseGiven(tp)
+        const e: RExpr = parseAssign(tp)
+        return mkS(e.tp, start, AStmtK.Eval(e.e))
+    }
+
+    fn parseLocal(tp: TP) -> RStmt {
+        const start: int = cur(tp).start
+        const mutable: boolean = isWord(tp, "let")
+        let t: TP = adv(tp)
+        const nameTok: PTok = cur(t)
+        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-LOCAL", "expected a name after `let` / `const`", nameTok)
+        t = adv(t)
+        let aty: AType | not = not
+        if (isP(t, ":")) {
+            const ty: RType = parseType(adv(t))
+            aty = ty.t
+            t = ty.tp
+        }
+        t = expectP(t, "=")
+        const init: RExpr = parseAssign(t)
+        return mkS(init.tp, start, AStmtK.Local(nameTok.v, mutable, aty, init.e))
+    }
+
+    fn parseIf(tp: TP) -> RStmt {
+        const start: int = cur(tp).start
+        let t: TP = expectP(adv(tp), "(")
+        const cond: RExpr = parseAssign(t)
+        t = expectP(cond.tp, ")")
+        const thenB: RBlock = parseBlockOrStmt(t)
+        t = thenB.tp
+        if (isWord(t, "else")) {
+            t = adv(t)
+            if (isWord(t, "if")) {
+                const inner: RStmt = parseIf(t)
+                const eb: ABlock = { nid: inner.tp.nid, span: inner.s.span, stmts: [inner.s] }
+                return mkS(bumpId(inner.tp), start, AStmtK.If(cond.e, thenB.b, eb))
+            }
+            const elseB: RBlock = parseBlockOrStmt(t)
+            return mkS(elseB.tp, start, AStmtK.If(cond.e, thenB.b, elseB.b))
+        }
+        return mkS(t, start, AStmtK.If(cond.e, thenB.b, not))
+    }
+
+    // `if (c) stmt` without braces is one statement in a block of its own.
+    fn parseBlockOrStmt(tp: TP) -> RBlock {
+        if (isP(tp, "{")) return parseBlock(tp)
+        const start: int = cur(tp).start
+        const s: RStmt = parseStmt(tp)
+        const b: ABlock = { nid: s.tp.nid, span: spanFrom(s.tp, start), stmts: [s.s] }
+        return { b: b, tp: bumpId(s.tp) }
+    }
+
+    // `given c = @h :> { … }` (§66.7.5)
+    fn parseGiven(tp: TP) -> RStmt {
+        const start: int = cur(tp).start
+        let t: TP = adv(tp)
+        const nameTok: PTok = cur(t)
+        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-GIVEN", "expected a name after `given`", nameTok)
+        t = expectP(adv(t), "=")
+        const subj: RExpr = parseTernary(t)
+        t = subj.tp
+        const c: PTok = cur(t)
+        const g: PTok = peekAt(t, 1)
+        if (c.text == ":" && g.text == ">" && touching(c, g)) {
+            t = adv(adv(t))
+        } else {
+            t = diagAt(t, "E-PARSE-GIVEN", "expected `:>` after the `given` subject", c)
+        }
+        const body: RBlock = parseBlock(t)
+        return mkS(body.tp, start, AStmtK.Given(nameTok.v, subj.e, body.b))
+    }
+
+    // =========================================================================
+    // Types (in logic): `Name`, `T[]`, `T[g1, g2]`, `T | not`.
+    // =========================================================================
+    fn mkT(tp: TP, start: int, k: ATypeK) -> RType {
+        const ty: AType = { nid: tp.nid, span: spanFrom(tp, start), k: k }
+        return { t: ty, tp: bumpId(tp) }
+    }
+
+    fn parseType(tp: TP) -> RType {
+        const start: int = cur(tp).start
+        const nameTok: PTok = cur(tp)
+        let t: TP = tp
+        if (nameTok.cls != TC.Ident && nameTok.cls != TC.Keyword) {
+            t = diagAt(t, "E-PARSE-TYPE", "expected a type, found `" + nameTok.text + "`", nameTok)
+        }
+        let r: RType = mkT(adv(t), start, ATypeK.TName(nameTok.v))
+        while (isP(r.tp, "[")) {
+            let g: TP = adv(r.tp)
+            let grants: string[] = []
+            while (!isP(g, "]") && !atEnd(g)) {
+                const w: PTok = cur(g)
+                if (w.cls == TC.Ident || w.cls == TC.Keyword) grants = grants.concat([w.v])
+                g = adv(g)
+            }
+            g = expectP(g, "]")
+            r = mkT(g, start, ATypeK.TSeq(r.t, grants))
+        }
+        if (isP(r.tp, "|") && isWord(adv(r.tp), "not")) {
+            r = mkT(adv(adv(r.tp)), start, ATypeK.TMaybe(r.t))
+        }
+        return r
+    }
+
+    // =========================================================================
+    // Logic items: import / type / function / fn, optionally `export`ed.
+    // =========================================================================
+    fn mkItem(tp: TP, start: int, k: AItemK) -> RItems {
+        const it: AItem = { nid: tp.nid, span: spanFrom(tp, start), k: k }
+        return { items: [it], tp: bumpId(tp) }
+    }
+
+    // Items until the end of the token run (or `close`, when not "").
+    export fn parseLogicItems(tp: TP, close: string) -> RItems {
+        let t: TP = tp
+        let out: AItem[] = []
+        let going = true
+        while (going) {
+            if (atEnd(t)) {
+                going = false
+            } else if (close != "" && isP(t, close)) {
+                going = false
+            } else if (isP(t, ";")) {
+                t = adv(t)
+            } else {
+                const before: int = t.i
+                const r: RItems = parseLogicItem(t)
+                out = out.concat(r.items)
+                t = r.tp
+                if (t.i == before) t = adv(t)
+            }
+        }
+        return { items: out, tp: t }
+    }
+
+    fn parseLogicItem(tp: TP) -> RItems {
+        const start: int = cur(tp).start
+        let exported = false
+        let t: TP = tp
+        if (isWord(t, "export")) {
+            exported = true
+            t = adv(t)
+        }
+        if (isWord(t, "import")) return parseImport(t, start)
+        if (isWord(t, "type")) return parseTypeDecl(t, start, exported)
+        if (isWord(t, "function")) return parseFn(t, start, exported, false)
+        if (isWord(t, "fn")) return parseFn(t, start, exported, true)
+        const bad: PTok = cur(t)
+        const d: TP = diagAt(t, "E-PARSE-ITEM", "expected `import`, `type`, `function` or `fn` in a logic block, found `" + bad.text + "` (statements at logic-block level are not in bootstrap slice M2)", bad)
+        return { items: [], tp: skipToLineEnd(d) }
+    }
+
+    // Skip the rest of the current token's line (error recovery).
+    fn skipToLineEnd(tp: TP) -> TP {
+        const line: int = cur(tp).line
+        let t: TP = adv(tp)
+        while (!atEnd(t) && cur(t).line == line) { t = adv(t) }
+        return t
+    }
+
+    fn parseImport(tp: TP, start: int) -> RItems {
+        let t: TP = expectP(adv(tp), "{")
+        let names: AImportName[] = []
+        while (!isP(t, "}") && !atEnd(t)) {
+            const n: PTok = cur(t)
+            if (n.cls == TC.Ident || n.cls == TC.Keyword) {
+                names = names.concat([{ nid: t.nid, span: mkSpan(n.start, n.end), name: n.v }])
+                t = bumpId(t)
+            } else if (n.text != ",") {
+                t = diagAt(t, "E-PARSE-IMPORT", "expected an imported name, found `" + n.text + "`", n)
+            }
+            t = adv(t)
+        }
+        t = expectP(t, "}")
+        if (!isWord(t, "from")) t = diagAt(t, "E-PARSE-IMPORT", "expected `from` after the import list", cur(t))
+        t = adv(t)
+        const src: PTok = cur(t)
+        if (src.cls != TC.Str) t = diagAt(t, "E-PARSE-IMPORT", "expected the import source string", src)
+        t = adv(t)
+        const imp: AImport = { nid: t.nid, span: spanFrom(t, start), names: names, from: src.v }
+        return mkItem(bumpId(t), start, AItemK.ImportItem(imp))
+    }
+
+    // `type Name:enum = { A, B(f: T) }` / `type Name:struct = { [let] f: T, … }`
+    fn parseTypeDecl(tp: TP, start: int, exported: boolean) -> RItems {
+        let t: TP = adv(tp)
+        const nameTok: PTok = cur(t)
+        t = expectP(adv(t), ":")
+        const kind: PTok = cur(t)
+        t = adv(t)
+        t = expectP(t, "=")
+        let body: ATypeBody = ATypeBody.StructBody([])
+        if (kind.v == "enum") {
+            const r: RVariants = parseVariants(t)
+            body = ATypeBody.EnumBody(r.vs)
+            t = r.tp
+        } else if (kind.v == "struct") {
+            const r2: RFields = parseTypeFields(expectP(t, "{"), "}")
+            body = ATypeBody.StructBody(r2.fs)
+            t = expectP(r2.tp, "}")
+        } else {
+            t = diagAt(t, "E-PARSE-TYPE", "expected `:enum` or `:struct`, found `:" + kind.text + "`", kind)
+        }
+        const td: ATypeDecl = { nid: t.nid, span: spanFrom(t, start), exported: exported, name: nameTok.v, body: body }
+        return mkItem(bumpId(t), start, AItemK.TypeItem(td))
+    }
+
+    type RVariants:struct = { vs: AVariant[], tp: TP }
+    type RFields:struct = { fs: ATypeField[], tp: TP }
+
+    fn parseVariants(tp: TP) -> RVariants {
+        let t: TP = expectP(tp, "{")
+        let vs: AVariant[] = []
+        while (!isP(t, "}") && !atEnd(t)) {
+            const n: PTok = cur(t)
+            if (n.cls == TC.Ident || n.cls == TC.Keyword) {
+                t = adv(t)
+                let fields: ATypeField[] = []
+                if (isP(t, "(")) {
+                    const r: RFields = parseTypeFields(adv(t), ")")
+                    fields = r.fs
+                    t = expectP(r.tp, ")")
+                }
+                vs = vs.concat([{ nid: t.nid, span: spanFrom(t, n.start), name: n.v, fields: fields }])
+                t = bumpId(t)
+            } else {
+                if (n.text != ",") t = diagAt(t, "E-PARSE-TYPE", "expected a variant name, found `" + n.text + "`", n)
+                t = adv(t)
+            }
+        }
+        return { vs: vs, tp: expectP(t, "}") }
+    }
+
+    // `[let] name: Type` separated by commas, up to (not consuming) `close`.
+    fn parseTypeFields(tp: TP, close: string) -> RFields {
+        let t: TP = tp
+        let fs: ATypeField[] = []
+        while (!isP(t, close) && !atEnd(t)) {
+            const fstart: int = cur(t).start
+            let isLet = false
+            if (isWord(t, "let")) {
+                isLet = true
+                t = adv(t)
+            }
+            const n: PTok = cur(t)
+            if (n.cls != TC.Ident && n.cls != TC.Keyword) {
+                t = diagAt(t, "E-PARSE-TYPE", "expected a field name, found `" + n.text + "`", n)
+                t = adv(t)
+            } else {
+                t = expectP(adv(t), ":")
+                const ty: RType = parseType(t)
+                t = ty.tp
+                fs = fs.concat([{ nid: t.nid, span: spanFrom(t, fstart), isLet: isLet, name: n.v, ty: ty.t }])
+                t = bumpId(t)
+            }
+            if (isP(t, ",")) t = adv(t)
+        }
+        return { fs: fs, tp: t }
+    }
+
+    // `function name(p, q: T) { … }` / `fn name(p: T) -> T { … }`
+    fn parseFn(tp: TP, start: int, exported: boolean, pure: boolean) -> RItems {
+        let t: TP = adv(tp)
+        const nameTok: PTok = cur(t)
+        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-FN", "expected a function name", nameTok)
+        t = expectP(adv(t), "(")
+        let params: AParam[] = []
+        while (!isP(t, ")") && !atEnd(t)) {
+            const p: PTok = cur(t)
+            t = adv(t)
+            let ty: AType | not = not
+            if (isP(t, ":")) {
+                const r: RType = parseType(adv(t))
+                ty = r.t
+                t = r.tp
+            }
+            params = params.concat([{ nid: t.nid, span: spanFrom(t, p.start), name: p.v, ty: ty }])
+            t = bumpId(t)
+            if (isP(t, ",")) t = adv(t)
+        }
+        t = expectP(t, ")")
+        let ret: AType | not = not
+        const a: PTok = cur(t)
+        const b: PTok = peekAt(t, 1)
+        if (a.text == "-" && b.text == ">" && touching(a, b)) {
+            const r2: RType = parseType(adv(adv(t)))
+            ret = r2.t
+            t = r2.tp
+        }
+        const body: RBlock = parseBlock(t)
+        t = body.tp
+        const f: AFn = { nid: t.nid, span: spanFrom(t, start), exported: exported, pure: pure,
+                         name: nameTok.v, params: params, ret: ret, body: body.b }
+        return mkItem(bumpId(t), start, AItemK.FnItem(f))
+    }
+
+    // =========================================================================
+    // The MARKUP scanner (char level). State threaded like TP.
+    // =========================================================================
+    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string }
+
+    type RNodes:struct  = { nodes: ANode[], mp: MP }
+    type RMItems:struct = { items: AItem[], mp: MP }
+    type RValue:struct  = { v: AAttrValue, mp: MP }
+    type RMType:struct  = { t: AType, mp: MP }
+    type RWord:struct   = { w: string, mp: MP }
+
+    fn chAt(mp: MP, k: int) -> string {
+        const s: string = mp.src.charAt(mp.pos + k)
+        return s
+    }
+
+    fn mEof(mp: MP) -> boolean { return mp.pos >= mp.src.length }
+
+    // `#` followed by an opening brace: a CSS block (§5.6).
+    fn atCss(mp: MP) -> boolean { return chAt(mp, 0) == "#" && chAt(mp, 1) == "{" }
+
+    // A `#{…}` block is out of bootstrap slice M2: report it and skip it whole
+    // (balanced by the lexer), never let it through as text.
+    fn skipCss(mp: MP) -> MP {
+        const start: int = mp.pos
+        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
+        const m: MP = backToMarkup(mp, tp)
+        return mDiag(mAt(m, lastEnd(tp)), "E-BOOTSTRAP-UNSUPPORTED", "a `#{…}` CSS block is not in bootstrap slice M2", start, lastEnd(tp))
+    }
+
+    fn lastEnd(tp: TP) -> int {
+        const eof: PTok = tp.toks[tp.toks.length - 1]
+        return eof.start
+    }
+
+    // `$` followed by an opening brace: a logic block / interpolation.
+    fn atInterp(mp: MP) -> boolean { return chAt(mp, 0) == "$" && chAt(mp, 1) == "{" }
+
+    fn mAdv(mp: MP, n: int) -> MP {
+        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file }
+    }
+
+    fn mAt(mp: MP, pos: int) -> MP {
+        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file }
+    }
+
+    fn mBump(mp: MP) -> MP {
+        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file }
+    }
+
+    fn mDiag(mp: MP, code: string, msg: string, start: int, end: int) -> MP {
+        const d: Diag = { code: code, message: msg, file: mp.file, span: mkSpan(start, end) }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file }
+    }
+
+    fn mLooking(mp: MP, s: string) -> boolean {
+        const got: string = mp.src.substring(mp.pos, mp.pos + s.length)
+        return got == s
+    }
+
+    fn isSpaceCh(c: string) -> boolean {
+        return c == " " || c == "\t" || c == "\n" || c == "\r"
+    }
+
+    fn isNameCh(c: string) -> boolean {
+        if (c == "") return false
+        if (c >= "a" && c <= "z") return true
+        if (c >= "A" && c <= "Z") return true
+        if (c >= "0" && c <= "9") return true
+        return c == "_" || c == "-" || c == "$"
+    }
+
+    fn isNameStart(c: string) -> boolean {
+        if (c == "") return false
+        if (c >= "a" && c <= "z") return true
+        if (c >= "A" && c <= "Z") return true
+        return c == "_"
+    }
+
+    // Skip whitespace, `//` line comments and `<!-- … -->` comments (§27).
+    fn skipTrivia(mp: MP) -> MP {
+        let m: MP = mp
+        let going = true
+        while (going && !mEof(m)) {
+            if (isSpaceCh(chAt(m, 0))) {
+                m = mAdv(m, 1)
+            } else if (mLooking(m, "//")) {
+                m = skipLineComment(m)
+            } else if (mLooking(m, "<!--")) {
+                m = skipMarkupComment(m)
+            } else {
+                going = false
+            }
+        }
+        return m
+    }
+
+    // `//` to (not including) the line terminator — LF or CR (§4.7: "the next
+    // `\n` or `\r\n`"; S444: in free text the terminator is content, §4.18.5).
+    fn skipLineComment(mp: MP) -> MP {
+        let m: MP = mp
+        while (!mEof(m) && chAt(m, 0) != "\n" && chAt(m, 0) != "\r") { m = mAdv(m, 1) }
+        return m
+    }
+
+    fn skipMarkupComment(mp: MP) -> MP {
+        const close: int = mp.src.indexOf("-->", mp.pos + 4)
+        if (close < 0) {
+            const d: MP = mDiag(mp, "E-PARSE-COMMENT", "unterminated `<!--` comment", mp.pos, mp.src.length)
+            return mAt(d, mp.src.length)
+        }
+        return mAt(mp, close + 3)
+    }
+
+    fn readName(mp: MP) -> RWord {
+        let m: MP = mp
+        while (!mEof(m) && isNameCh(chAt(m, 0))) { m = mAdv(m, 1) }
+        return { w: mp.src.substring(mp.pos, m.pos), mp: m }
+    }
+
+    // Skip spaces/tabs/newlines only (inside an opener).
+    fn skipSpace(mp: MP) -> MP {
+        let m: MP = mp
+        while (!mEof(m) && isSpaceCh(chAt(m, 0))) { m = mAdv(m, 1) }
+        return m
+    }
+
+    // ---- lexing a logic region --------------------------------------------
+    fn regionTP(mp: MP, stop: LexStop) -> TP {
+        const run: LexRun = lexFrom(mp.src, mp.pos, stop)
+        return { toks: toPToks(run.tokens), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file }
+    }
+
+    // A CODE-DEFAULT region (a `:`-shorthand body, a state-child body run).
+    // RULED S444 ("standalone only, your rec"; SPEC §4.18.1 / §4.18.3): a `"…"`
+    // is a display-text literal ONLY when it stands alone as the body statement
+    // — the display-mode lex of the region is exactly one `"` string token.
+    // Any other region (`@n == 5 ? "a\n" : "b"`, `f("x")`, `"a" + @b`) is
+    // re-lexed with display off: its strings are ordinary strings with the
+    // ordinary logic-string escapes.
+    fn codeRegionTP(mp: MP, stop: LexStop) -> TP {
+        const d: TP = regionTP(mp, stop)
+        if (isStandaloneDisplay(d)) return d
+        const run: LexRun = lexFromMode(mp.src, mp.pos, stop, false)
+        return { toks: toPToks(run.tokens), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file }
+    }
+
+    fn isStandaloneDisplay(tp: TP) -> boolean {
+        if (tp.toks.length != 2) return false
+        const t: PTok = tp.toks[0]
+        return t.cls == TC.Str && t.text.substring(0, 1) == "\""
+    }
+
+    // Back to markup after a region: the position after the region's last
+    // consumed token (the Eof sentinel's start = where the lexer stopped).
+    fn backToMarkup(mp: MP, tp: TP) -> MP {
+        const eof: PTok = tp.toks[tp.toks.length - 1]
+        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file }
+    }
+
+    // After a region's expression: anything left before the Eof is an error.
+    fn expectRegionEnd(tp: TP) -> TP {
+        if (atEnd(tp)) return tp
+        const t: PTok = cur(tp)
+        return diagAt(tp, "E-PARSE-TRAILING", "unexpected `" + t.text + "` after the expression", t)
+    }
+
+    // ---- attribute values ---------------------------------------------------
+    // At the char after `=`: "…" / '…' · ( expr ) · { stmts } · bare.
+    fn parseAttrValue(mp: MP) -> RValue {
+        const c: string = chAt(mp, 0)
+        if (c == "\"" || c == "'") return parseQuoted(mp, c)
+        if (c == "(") {
+            const tp: TP = regionTP(mp, LexStop.Balanced)
+            const r: RExpr = parsePrimary(tp)
+            const t2: TP = expectRegionEnd(r.tp)
+            return { v: AAttrValue.Paren(r.e), mp: backToMarkup(mp, t2) }
+        }
+        if (c == "{") {
+            const tp2: TP = regionTP(mp, LexStop.Balanced)
+            const b: RBlock = parseBlock(tp2)
+            const t3: TP = expectRegionEnd(b.tp)
+            return { v: AAttrValue.Braced(b.b), mp: backToMarkup(mp, t3) }
+        }
+        const tp3: TP = regionTP(mp, LexStop.BareValue)
+        if (atEnd(tp3)) {
+            const d: MP = mDiag(mp, "E-PARSE-ATTR", "expected an attribute value after `=`", mp.pos, mp.pos + 1)
+            return { v: AAttrValue.NoValue, mp: d }
+        }
+        const r3: RExpr = parseTernary(tp3)
+        const t4: TP = expectRegionEnd(r3.tp)
+        return { v: AAttrValue.Bare(r3.e), mp: backToMarkup(mp, t4) }
+    }
+
+    fn parseQuoted(mp: MP, q: string) -> RValue {
+        let m: MP = mAdv(mp, 1)
+        let text: string = ""
+        while (!mEof(m) && chAt(m, 0) != q) {
+            if (chAt(m, 0) == "\\" && !mEof(mAdv(m, 1))) {
+                text = text + chAt(m, 1)
+                m = mAdv(m, 2)
+            } else {
+                text = text + chAt(m, 0)
+                m = mAdv(m, 1)
+            }
+        }
+        if (mEof(m)) {
+            const d: MP = mDiag(m, "E-PARSE-ATTR", "unterminated attribute string", mp.pos, m.pos)
+            return { v: AAttrValue.Quoted(text), mp: d }
+        }
+        return { v: AAttrValue.Quoted(text), mp: mAdv(m, 1) }
+    }
+
+    // ---- opener types (char level): Name, Name[g, …][…], Name | not -------------
+    fn parseOpenerType(mp: MP) -> RMType {
+        const start: int = mp.pos
+        const nm: RWord = readName(mp)
+        let m: MP = nm.mp
+        if (nm.w == "") {
+            m = mDiag(m, "E-PARSE-TYPE", "expected a type after `:`", start, start + 1)
+        }
+        let ty: AType = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TName(nm.w) }
+        m = mBump(m)
+        while (chAt(m, 0) == "[") {
+            const close: int = mp.src.indexOf("]", m.pos)
+            let inner: string = ""
+            if (close < 0) {
+                m = mDiag(m, "E-PARSE-TYPE", "unterminated `[` in a type", m.pos, m.pos + 1)
+                m = mAt(m, mp.src.length)
+            } else {
+                inner = mp.src.substring(m.pos + 1, close)
+                m = mAt(m, close + 1)
+            }
+            ty = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TSeq(ty, grantWords(inner)) }
+            m = mBump(m)
+        }
+        // The type's SPAN runs to the end of the type TEXT: a continuation the
+        // slice cannot read (`int|not`, `fn()`) stays inside it, so the tag
+        // scanner's error on it lies within this type's span and the typer
+        // does not trust the type (the value that follows is not part of it).
+        const end: int = typeTextEnd(mp.src, m.pos)
+        if (end > m.pos) ty = { nid: ty.nid, span: mkSpan(start, end), k: ty.k }
+        return { t: ty, mp: m }
+    }
+
+    // The first index at or after `pos` that ends an opener type's text:
+    // whitespace, `=`, `/`, `>`, or the end of the source.
+    fn typeTextEnd(src: string, pos: int) -> int {
+        let i: int = pos
+        while (i < src.length) {
+            const c: string = src.substring(i, i + 1)
+            if (isSpaceCh(c) || c == "=" || c == "/" || c == ">") return i
+            i = i + 1
+        }
+        return i
+    }
+
+    fn grantWords(inner: string) -> string[] {
+        let out: string[] = []
+        for (const part of inner.split(",")) {
+            const w: string = part.trim()
+            if (w != "") out = out.concat([w])
+        }
+        return out
+    }
+
+    // =========================================================================
+    // Openers. One scanner reads every opener; the parser then classifies it
+    // (§66.2.2): a DECLARATION iff it has an own value (`=` after the name or
+    // `name:Type`), an own type, a `let` prefix, or at least one typed
+    // attribute; otherwise a USE (or, in a declaration body, a STATE-CHILD —
+    // O52 ruled).
+    // =========================================================================
+    type Opener:struct = {
+        start: int,
+        star: boolean,
+        isLet: boolean,
+        name: string,
+        ty: AType | not,
+        own: AAttrValue,
+        typed: ADeclAttr[],
+        attrs: AAttr[],
+        selfClosing: boolean,
+        short: ANode[] | not,
+        vals: AValidator[],     // s444 Phase B: validator CALLS (`length(>=5)`); bare `req` stays in `attrs` until finishDecl
+    }
+    type ROpener:struct = { o: Opener, mp: MP }
+
+    fn isNamespace(w: string) -> boolean {
+        return w == "bind" || w == "class" || w == "style" || w == "internal" || w == "on"
+    }
+
+    fn hasOwn(v: AAttrValue) -> boolean {
+        return match v {
+            .NoValue :> false
+            .Quoted(v: s) :> true
+            .Bare(e: e) :> true
+            .Paren(e: e) :> true
+            .Braced(b: b) :> true
+        }
+    }
+
+    fn isDeclOpener(o: Opener) -> boolean {
+        if (o.star) return false
+        if (o.isLet) return true
+        if (o.ty is some) return true
+        if (hasOwn(o.own)) return true
+        return o.typed.length > 0
+    }
+
+    // At `<` (not `</`, not `<!--`).
+    fn parseOpener(mp: MP) -> ROpener {
+        const start: int = mp.pos
+        let m: MP = mAdv(mp, 1)
+        let star = false
+        if (chAt(m, 0) == "*") {
+            star = true
+            m = mAdv(m, 1)
+        }
+        let isLet = false
+        let nm: RWord = readName(m)
+        if (nm.w == "let" && isSpaceCh(chAt(nm.mp, 0))) {
+            isLet = true
+            nm = readName(skipSpace(nm.mp))
+        }
+        m = nm.mp
+        if (nm.w == "") m = mDiag(m, "E-PARSE-TAG", "expected a tag name after `<`", start, start + 1)
+        let ty: AType | not = not
+        if (chAt(m, 0) == ":") {
+            const rt: RMType = parseOpenerType(mAdv(m, 1))
+            ty = rt.t
+            m = rt.mp
+        }
+        let own: AAttrValue = AAttrValue.NoValue
+        m = checkSpacedEq(m)
+        if (chAt(m, 0) == "=") {
+            const rv: RValue = parseAttrValue(mAdv(m, 1))
+            own = rv.v
+            m = rv.mp
+        }
+        let typed: ADeclAttr[] = []
+        let attrs: AAttr[] = []
+        let selfClosing = false
+        let short: ANode[] | not = not
+        let vals: AValidator[] = []
+        let going = true
+        while (going) {
+            m = skipSpace(m)
+            if (mEof(m)) {
+                m = mDiag(m, "E-PARSE-TAG", "unterminated tag `<" + nm.w + "`", start, m.pos)
+                going = false
+            } else if (chAt(m, 0) == ":" && isSpaceCh(chAt(m, -1))) {
+                // §4.14: a whitespace-preceded `:` opens the `:`-shorthand body —
+                // one expression, running to the `>` that ends the opener.
+                const rs: RNodes = parseShorthand(m, nm.w)
+                short = rs.nodes
+                m = rs.mp
+                going = false
+            } else if (mLooking(m, "/>")) {
+                selfClosing = true
+                m = mAdv(m, 2)
+                going = false
+            } else if (chAt(m, 0) == ">") {
+                m = mAdv(m, 1)
+                going = false
+            } else {
+                const before: int = m.pos
+                const ra: RAttrScan = scanAttr(m)
+                m = ra.mp
+                typed = typed.concat(ra.typed)
+                attrs = attrs.concat(ra.attrs)
+                vals = vals.concat(ra.vals)
+                if (m.pos == before) {
+                    m = mDiag(m, "E-PARSE-TAG", "unexpected `" + chAt(m, 0) + "` in the tag `<" + nm.w + "`", m.pos, m.pos + 1)
+                    m = mAdv(m, 1)
+                }
+            }
+        }
+        const o: Opener = { start: start, star: star, isLet: isLet, name: nm.w, ty: ty, own: own,
+                            typed: typed, attrs: attrs, selfClosing: selfClosing, short: short, vals: vals }
+        return { o: o, mp: m }
+    }
+
+    // At the `:` of a `:`-shorthand body (§4.14): the single expression, as an
+    // Interp node — or a nested element (markup-as-value, §1.4) — then the
+    // opener's `>` (consumed). There is no closer: a `/>` here, or a closer
+    // written right after the `>` (`<p : x></>`), is E-CLOSER-001 (§4.14).
+    // The expression ends at the first depth-0 `>` that is not `>=`.
+    // r1 F3 (PA ruling, fail-closed): a bare `>` COMPARISON cannot be told from
+    // the opener's end — when the rest of the line after that `>` holds
+    // another `>`, the body was a comparison: E-PARSE-SHORTHAND-GT (parenthesize
+    // it, `(@n > 3)`), and the tail is consumed, never rendered as text.
+    fn parseShorthand(mp: MP, tag: string) -> RNodes {
+        const start: int = mp.pos
+        const at: MP = skipSpace(mAdv(mp, 1))
+        if (chAt(at, 0) == "<" && isNameStart(chAt(at, 1))) {
+            const inner: RNodeOne = parseMarkupNode(at)
+            let m0: MP = skipSpace(inner.mp)
+            if (chAt(m0, 0) == ">") {
+                m0 = mAdv(m0, 1)
+            } else {
+                m0 = mDiag(m0, "E-PARSE-SHORTHAND", "expected the `>` that ends the opener after a `:`-shorthand body (§4.14)", m0.pos, m0.pos + 1)
+            }
+            return { nodes: [inner.n], mp: closerAfterShorthand(m0, tag) }
+        }
+        if (chAt(at, 0) == ">") {
+            // an empty `:`-shorthand body: one diagnostic, the opener still ends
+            const em: MP = mDiag(mAdv(at, 1), "E-PARSE-SHORTHAND", "a `:`-shorthand body needs one expression before the `>` (§4.14)", start, at.pos + 1)
+            const en: ANode = { nid: em.nid, span: mkSpan(start, em.pos), k: ANodeK.Text("") }
+            return { nodes: [en], mp: mBump(em) }
+        }
+        const tp: TP = codeRegionTP(mAdv(mp, 1), LexStop.Shorthand)
+        if (chAt(at, 0) == "\"" && displayCloseAt(mp.src, at.pos) < 0) {
+            // SPEC §4.18.3: a display-text literal with no closing `"` before
+            // end of file is E-CTX-001 against the opening `"` (recovered per
+            // §4.18.7: a `:`-shorthand has no body closer, so its content is
+            // the text to end of file).
+            const em: MP = mDiag(mAt(mp, mp.src.length), "E-CTX-001", "unterminated display-text literal: the `\"` opened here has no closing `\"` before the end of the file (§4.18.3)", at.pos, at.pos + 1)
+            const ck: RCook = cookRecovered(em, at.pos + 1, mp.src.length)
+            const en: ANode = textNode(ck.mp, at.pos + 1, ck.text)
+            return { nodes: [en], mp: mBump(ck.mp) }
+        }
+        let t: TP = tp
+        let e: AExpr = { nid: t.nid, span: mkSpan(start, start + 1), k: AExprK.Recovered }
+        if (atEnd(t)) {
+            t = diagAt(t, "E-PARSE-SHORTHAND", "a `:`-shorthand body needs one expression before the `>` (§4.14)", cur(t))
+            t = bumpId(t)
+        } else {
+            const r: RExpr = parseTernary(t)
+            e = r.e
+            t = expectRegionEnd(r.tp)
+        }
+        let m: MP = skipSpace(backToMarkup(mp, t))
+        if (isStandaloneDisplay(tp)) m = displayEscapeDiags(m, tp.toks)
+        if (mLooking(m, "/>")) {
+            m = mAdv(mDiag(m, "E-CLOSER-001", "a `:`-shorthand body has no closer — drop the `/` (`<tag … : expr>`, §4.14)", m.pos, m.pos + 2), 2)
+        } else if (chAt(m, 0) == ">") {
+            m = mAdv(m, 1)
+            m = comparisonTail(m, start)
+            m = closerAfterShorthand(m, tag)
+        } else {
+            m = mDiag(m, "E-PARSE-SHORTHAND", "expected the `>` that ends the opener after a `:`-shorthand body (§4.14)", m.pos, m.pos + 1)
+        }
+        // §4.18.4: a display-text literal carrying `${…}` is one literal of
+        // literal segments and interpolations — rendered as its segments
+        return displayNodes(m, e, start, tp)
+    }
+
+    // The body nodes of a code-default expression `e` (spanning from `start`):
+    // one Interp — or, when `e` is a display-text literal carrying `${ … }`
+    // (§4.18.4), its literal segments (Text) and interpolations (Interp), in
+    // order. A `${`-carrying display-text literal nested inside a larger
+    // expression is not built (reported).
+    fn displayNodes(m: MP, e: AExpr, start: int, tp: TP) -> RNodes {
+        if (isStandaloneDisplay(tp) && isDisplayTemplate(m.src, e)) {
+            const split: RNodes = splitDisplay(m, e.span.start, e.span.end)
+            return { nodes: split.nodes, mp: mAt(split.mp, m.pos) }
+        }
+        let mm: MP = m
+        for (const t of tp.toks) {
+            if (t.cls == TC.Str && t.text.substring(0, 1) == "\"" && hasLiveInterp(m.src, t.start, t.end)) {
+                mm = mDiag(mm, "E-BOOTSTRAP-UNSUPPORTED", "a display-text literal carrying an interpolation (§4.18.4) inside a larger expression is not in the bootstrap — make it the whole body", t.start, t.end)
+            }
+        }
+        const n: ANode = { nid: mm.nid, span: mkSpan(start, mm.pos), k: ANodeK.Interp(e) }
+        return { nodes: [n], mp: mBump(mm) }
+    }
+
+    // F9: a literal `$`+`{` in a scrml string is interpolation under impl#1 —
+    // the two characters are joined at run time.
+    fn interpOpen() -> string { return "$" + "{" }
+
+    fn isDisplayTemplate(src: string, e: AExpr) -> boolean {
+        if (src.substring(e.span.start, e.span.start + 1) != "\"") return false
+        const v: string = strLit(e)
+        return v.indexOf(interpOpen()) >= 0
+    }
+
+    fn strLit(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Str(v: x) :> x
+            .Name(name: n) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: x) :> ""
+            .Index(obj: o) :> ""
+            .Lambda(params: ps) :> ""
+        }
+    }
+
+    // A display-text literal's source span (quotes included) → Text segments +
+    // Interp nodes. The three escapes (SPEC §4.18.3, restored S444) decode
+    // here — a `\${` is literal `${` text, never an interpolation; a malformed
+    // `\x` keeps both characters (E-PARSE-001 is displayEscapeDiags'). Each
+    // `${`'s extent is the canonical walker's (parseInterp → lexFrom Balanced).
+    fn splitDisplay(mp: MP, start: int, end: int) -> RNodes {
+        let m: MP = mAt(mp, start + 1)
+        let out: ANode[] = []
+        let text: string = ""
+        let textStart: int = m.pos
+        while (m.pos < end - 1) {
+            const esc: int = displayEscLen(m.src, m.pos)
+            if (esc > 0) {
+                if (text == "") textStart = m.pos
+                text = text + displayEscText(m.src, m.pos)
+                m = mAdv(m, esc)
+            } else if (atInterp(m)) {
+                if (text != "") {
+                    out = out.concat([textNode(m, textStart, text)])
+                    m = mBump(m)
+                    text = ""
+                }
+                const ri: RNodeOne = parseInterp(m)
+                out = out.concat([ri.n])
+                m = ri.mp
+                textStart = m.pos
+            } else {
+                if (text == "") textStart = m.pos
+                text = text + chAt(m, 0)
+                m = mAdv(m, 1)
+            }
+        }
+        if (text != "") {
+            out = out.concat([textNode(m, textStart, text)])
+            m = mBump(m)
+        }
+        return { nodes: out, mp: m }
+    }
+
+    // SPEC §4.18.3 (RULED S444 — "A for escapes", superseding S442 B(3) /
+    // B(2)): a display-text literal has exactly three escapes — `\"` (a
+    // literal `"`), `\\` (a literal `\`), `\${` (a literal `${`, not an
+    // interpolation) — and a `\` + any other character is malformed:
+    // E-PARSE-001, the S111 catalog's rule restored exactly. The lexer (display
+    // mode) decodes; these helpers are the one escape table the parser's own
+    // scans (displayCloseAt, splitDisplay, displayEscapeDiags) share.
+
+    // The length of the escape at `i` (a `\`): 2 for `\"` / `\\`, 3 for
+    // `\${`, 0 when `i` is not a well-formed escape.
+    fn displayEscLen(src: string, i: int) -> int {
+        if (src.substring(i, i + 1) != "\\") return 0
+        const n: string = src.substring(i + 1, i + 2)
+        if (n == "\"" || n == "\\") return 2
+        if (src.substring(i + 1, i + 3) == interpOpen()) return 3
+        return 0
+    }
+
+    // The decoded text of the well-formed escape at `i`.
+    fn displayEscText(src: string, i: int) -> string {
+        const n: string = src.substring(i + 1, i + 2)
+        if (n == "$") return interpOpen()
+        return n
+    }
+
+    // E-PARSE-001 for every malformed escape in the display-text literals of a
+    // code-default region's tokens (every `"` string the display-mode lexer
+    // made). A `${ … }` inside the literal is the expression's own (skipped
+    // whole by the canonical walker — its strings have logic escapes).
+    fn displayEscapeDiags(mp: MP, toks: PTok[]) -> MP {
+        let m: MP = mp
+        for (const t of toks) {
+            if (t.cls == TC.Str && t.text.substring(0, 1) == "\"") {
+                let i: int = t.start + 1
+                while (i < t.end) {
+                    const c: string = m.src.substring(i, i + 1)
+                    if (c == "\\") {
+                        const esc: int = displayEscLen(m.src, i)
+                        if (esc > 0) {
+                            i = i + esc
+                        } else {
+                            if (i + 1 < t.end) {
+                                m = mDiag(m, "E-PARSE-001", malformedEscMsg(m.src.substring(i, i + 2)), i, i + 2)
+                            }
+                            i = i + 2
+                        }
+                    } else if (m.src.substring(i, i + 2) == interpOpen()) {
+                        const e: int = lexFrom(m.src, i + 1, LexStop.Balanced).end
+                        i = e > i + 1 ? e : i + 2
+                    } else {
+                        i = i + 1
+                    }
+                }
+            }
+        }
+        return m
+    }
+
+    fn malformedEscMsg(esc: string) -> string {
+        return "malformed escape `" + esc + "` in a display-text literal: the escapes are `\\\"`, `\\\\` and `\\" + interpOpen() + "` — write `\\\\` for a literal backslash (§4.18.3)"
+    }
+
+    type RCook:struct = { text: string, mp: MP }
+
+    // An UNTERMINATED literal's recovered content [from, to) (SPEC §4.18.3):
+    // cooked with the same escape table, and every malformed escape in it
+    // reported E-PARSE-001 — including a lone `\` right at the recovery point
+    // (end of file or the body's closer). A `${` here is text: the literal
+    // never closed, so its interpolations are not walked (a runaway `${` must
+    // not eat the closer).
+    fn cookRecovered(mp: MP, from: int, to: int) -> RCook {
+        let m: MP = mp
+        let out: string = ""
+        let i: int = from
+        while (i < to) {
+            const c: string = m.src.substring(i, i + 1)
+            const esc: int = displayEscLen(m.src, i)
+            if (esc > 0 && i + esc <= to) {
+                out = out + displayEscText(m.src, i)
+                i = i + esc
+            } else if (c == "\\") {
+                const e: int = i + 2 <= to ? i + 2 : to
+                m = mDiag(m, "E-PARSE-001", malformedEscMsg(m.src.substring(i, e)), i, e)
+                out = out + m.src.substring(i, e)
+                i = e
+            } else {
+                out = out + c
+                i = i + 1
+            }
+        }
+        return { text: out, mp: m }
+    }
+
+    // Whether the display-text literal spanning [start, end) carries a LIVE
+    // interpolation — a `${` that is not the `\${` escape.
+    fn hasLiveInterp(src: string, start: int, end: int) -> boolean {
+        let i: int = start + 1
+        while (i < end) {
+            const esc: int = displayEscLen(src, i)
+            if (esc > 0) {
+                i = i + esc
+            } else if (src.substring(i, i + 2) == interpOpen()) {
+                return true
+            } else {
+                i = i + 1
+            }
+        }
+        return false
+    }
+
+    // r1 F3: after the shorthand's `>`: another `>` later on the same line
+    // (before any `<`) means the first one was a comparison operator.
+    fn comparisonTail(mp: MP, start: int) -> MP {
+        let i: int = mp.pos
+        let content = false
+        while (i < mp.src.length) {
+            const c: string = mp.src.substring(i, i + 1)
+            if (c == "\n" || c == "<") return mp
+            // a `>` right after this one (only spaces between) ends an OUTER
+            // opener (`<div : <p : "x">>`) — not a comparison
+            if (c == ">" && !content) return mp
+            if (c != " " && c != "\t") content = true
+            if (c == ">") {
+                const d: MP = mDiag(mp, "E-PARSE-SHORTHAND-GT", "a `>` inside a `:`-shorthand body ends the opener — this body reads as a comparison; parenthesize it: `: (a > b)` (§4.14; §66.2.4's rule for opener values)", start, i + 1)
+                return mAt(d, i + 1)
+            }
+            i = i + 1
+        }
+        return mp
+    }
+
+    // nit: `<p : x></>` / `<p : x></p>` written right after the opener.
+    fn closerAfterShorthand(mp: MP, tag: string) -> MP {
+        let m: MP = mp
+        while (chAt(m, 0) == " " || chAt(m, 0) == "\t") { m = mAdv(m, 1) }
+        let n: int = 0
+        if (mLooking(m, "</>")) n = 3
+        if (tag != "" && mLooking(m, "</" + tag + ">")) n = tag.length + 3
+        if (n == 0) return mp
+        return mAdv(mDiag(m, "E-CLOSER-001", "a `:`-shorthand body has no closer — drop the `" + m.src.substring(m.pos, m.pos + n) + "` (§4.14)", m.pos, m.pos + n), n)
+    }
+
+    // ---- r1 F4: a CODE-DEFAULT body (§4.18.1) — an engine state-child body ----
+    // A bare run is CODE (an expression, §4.18.2); display text is a "…"
+    // literal; a nested tag is markup (a free-text body of its own); `${…}` is
+    // an interpolation. A run that is not ONE valid expression is
+    // E-UNQUOTED-DISPLAY-TEXT (§4.18.7), suggesting the quoted literal.
+    fn parseCodeBody(mp: MP, tag: string) -> RNodes {
+        let m: MP = mp
+        let out: ANode[] = []
+        let going = true
+        while (going) {
+            m = skipTrivia(m)
+            if (mEof(m)) {
+                m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos)
+                going = false
+            } else if (mLooking(m, "</")) {
+                going = false
+            } else if (atInterp(m)) {
+                const ri: RNodeOne = parseInterp(m)
+                out = out.concat([ri.n])
+                m = ri.mp
+            } else if (chAt(m, 0) == "<") {
+                const tagNode: RNodeOne = parseMarkupNode(m)
+                out = out.concat([tagNode.n])
+                m = tagNode.mp
+            } else if (chAt(m, 0) == "\"" && displayCloseAt(m.src, m.pos) < 0) {
+                // SPEC §4.18.3 / §4.18.7 (PA ruling, s444 r3): a display-text
+                // literal is UNTERMINATED only when the scan from its `"`
+                // reaches end of file with no closing `"` — a closed literal's
+                // content is content, never searched for closers (§4.18.1b pin
+                // 3). Then: E-CTX-001 against the opening `"`, the literal's
+                // content ends at the first body closer after it (or end of
+                // file), and parsing goes on from that closer.
+                const stop: int = firstBodyCloser(m.src, m.pos + 1, tag)
+                const open: int = m.pos
+                m = mDiag(m, "E-CTX-001", "unterminated display-text literal: the `\"` opened here has no closing `\"` before the end of the file (§4.18.3) — read up to " + (stop >= m.src.length ? "the end of the file" : "the `<" + tag + ">` body's closer"), open, open + 1)
+                const ck: RCook = cookRecovered(mAt(m, stop), open + 1, stop)
+                out = out.concat([textNode(ck.mp, open + 1, ck.text)])
+                m = mBump(ck.mp)
+            } else {
+                const before: int = m.pos
+                const tp0: TP = codeRegionTP(m, LexStop.CodeBody)
+                const tp: TP = { toks: tp0.toks, i: tp0.i, nid: tp0.nid, diags: m.diags, file: tp0.file }
+                const runEnd: int = lastEnd(tp)
+                if (isStandaloneDisplay(tp)) m = displayEscapeDiags(m, tp.toks)
+                const r: RExpr = parseAssign({ toks: tp.toks, i: tp.i, nid: tp.nid, diags: m.diags, file: tp.file })
+                if (atEnd(r.tp) && r.tp.diags.length == m.diags.length) {
+                    const back: MP = backToMarkup(m, r.tp)
+                    // §4.18.4: a `${`-carrying display-text literal renders as its segments
+                    const dn: RNodes = displayNodes(back, r.e, before, tp)
+                    out = out.concat(dn.nodes)
+                    m = dn.mp
+                } else {
+                    const text: string = m.src.substring(before, runEnd).trim()
+                    m = mDiag(mAt(m, runEnd), "E-UNQUOTED-DISPLAY-TEXT", "display text in a `<" + tag + ">` state-child body must be a quoted display-text literal — did you mean `\"" + text + "\"`? (a code-default body, §4.18.1 / §4.18.7)", before, runEnd)
+                }
+                if (m.pos == before) m = mAdv(m, 1)
+            }
+        }
+        if (mLooking(m, "</")) m = parseCloser(m, tag)
+        return { nodes: out, mp: m }
+    }
+
+    // The position of the closing `"` of the display-text literal whose
+    // opening `"` is at `pos`, or -1 when it has none (it runs to end of
+    // file). The scan is the lexer's display mode: an escape (§4.18.3,
+    // restored S444) is stepped over whole — `\"` does not close, `\\` does
+    // not escape what follows it (so `"C:\\"` closes) — and a `${…}` is skipped
+    // whole by the canonical walker (token depth — a `"` or `}` inside it, e.g.
+    // in a nested string, does not close the literal).
+    fn displayCloseAt(src: string, pos: int) -> int {
+        let i: int = pos + 1
+        while (i < src.length) {
+            const c: string = src.substring(i, i + 1)
+            const esc: int = displayEscLen(src, i)
+            if (esc > 0) {
+                i = i + esc
+            } else if (c == "\"") {
+                return i
+            } else if (src.substring(i, i + 2) == interpOpen()) {
+                const e: int = lexFrom(src, i + 1, LexStop.Balanced).end
+                i = e > i + 1 ? e : i + 2
+            } else {
+                i = i + 1
+            }
+        }
+        return -1
+    }
+
+    // Recovery point for an unterminated literal in a `<tag>` body: the first
+    // `</>` or `</tag>` at or after `from` (raw bytes — the literal never
+    // closed, so there is no structure left to respect), else end of file.
+    fn firstBodyCloser(src: string, from: int, tag: string) -> int {
+        let i: int = from
+        while (i < src.length) {
+            if (src.substring(i, i + 3) == "</>") return i
+            if (src.substring(i, i + tag.length + 3) == "</" + tag + ">") return i
+            i = i + 1
+        }
+        return src.length
+    }
+
+    type RAttrScan:struct = { typed: ADeclAttr[], attrs: AAttr[], vals: AValidator[], mp: MP }
+
+    // SPEC §66.2.2 (i): "an own value — `=` immediately after the name, or after
+    // `name:Type`". A spaced `=` (`<let count:int = 0/>`) is reported, then read
+    // as the value (so one diagnostic, not a cascade).
+    fn checkSpacedEq(mp: MP) -> MP {
+        if (!isSpaceCh(chAt(mp, 0))) return mp
+        const after: MP = skipSpace(mp)
+        if (chAt(after, 0) != "=") return mp
+        return mDiag(after, "E-PARSE-OPENER-EQ-SPACED", "§66.2.2: an own value / default is `=` IMMEDIATELY after the name or `name:Type` — remove the space", mp.pos, after.pos + 1)
+    }
+
+    // One opener entry: `[export] [let] name:Type[=v]` (typed), `ns:name=v`
+    // (namespaced), `name=v`, `as name` / `as=name`, or a flag.
+    fn scanAttr(mp: MP) -> RAttrScan {
+        const start: int = mp.pos
+        let m: MP = mp
+        let exported = false
+        let isLet = false
+        let nm: RWord = readName(m)
+        if (nm.w == "export" && isSpaceCh(chAt(nm.mp, 0))) {
+            exported = true
+            nm = readName(skipSpace(nm.mp))
+        }
+        if (nm.w == "let" && isSpaceCh(chAt(nm.mp, 0))) {
+            isLet = true
+            nm = readName(skipSpace(nm.mp))
+        }
+        m = nm.mp
+        if (nm.w == "") return { typed: [], attrs: [], vals: [], mp: mp }
+        // name:…
+        if (chAt(m, 0) == ":" && !isNamespace(nm.w)) {
+            const rt: RMType = parseOpenerType(mAdv(m, 1))
+            m = rt.mp
+            let dflt: AAttrValue = AAttrValue.NoValue
+            m = checkSpacedEq(m)
+            if (chAt(m, 0) == "=") {
+                const rv: RValue = parseAttrValue(mAdv(m, 1))
+                dflt = rv.v
+                m = rv.mp
+            }
+            const da: ADeclAttr = { nid: m.nid, span: mkSpan(start, m.pos), exported: exported, isLet: isLet,
+                                    name: nm.w, ty: rt.t, dflt: dflt }
+            return { typed: [da], attrs: [], vals: [], mp: mBump(m) }
+        }
+        let name: string = nm.w
+        if (chAt(m, 0) == "(") {
+            const vt: TP = regionTP(m, LexStop.Balanced)
+            if (!isValidatorWord(nm.w)) {
+                // a call that is not a validator (§55.1's vocabulary): skipped whole, reported
+                const vm: MP = backToMarkup(m, vt)
+                const d: MP = mDiag(vm, "E-PARSE-ATTR", "`" + nm.w + "(…)` in a tag — only a validator (§55.1: `req`, `length`, `pattern`, `min`, `max`, `gt`, `lt`, `gte`, `lte`, `eq`, `neq`, `oneOf`, `notIn`) takes arguments here", start, vm.pos)
+                return { typed: [], attrs: [], vals: [], mp: d }
+            }
+            // s444 Phase B (dpa-058): a validator call in an opener (§55.1, §66.4 rule 3)
+            const rv: RValArg = parseValArg(vt)
+            const vm2: MP = backToMarkup(m, rv.tp)
+            const va: AValidator = { nid: vm2.nid, span: mkSpan(start, vm2.pos), name: nm.w, arg: rv.arg }
+            return { typed: [], attrs: [], vals: [va], mp: mBump(vm2) }
+        }
+        if (chAt(m, 0) == ":") {
+            const sub: RWord = readName(mAdv(m, 1))
+            name = nm.w + ":" + sub.w
+            m = sub.mp
+        }
+        let v: AAttrValue = AAttrValue.NoValue
+        if (chAt(m, 0) == "=") {
+            const rv2: RValue = parseAttrValue(mAdv(m, 1))
+            v = rv2.v
+            m = rv2.mp
+        } else if (name == "as" && isSpaceCh(chAt(m, 0))) {
+            // `<each … as name>` (§17.7): the binding name follows after a space.
+            const m2: MP = skipSpace(m)
+            const bn: RWord = readName(m2)
+            if (bn.w != "") {
+                const e: AExpr = { nid: bn.mp.nid, span: mkSpan(m2.pos, bn.mp.pos), k: AExprK.Name(bn.w) }
+                v = AAttrValue.Bare(e)
+                m = mBump(bn.mp)
+            }
+        }
+        if (exported || isLet) m = mDiag(m, "E-PARSE-ATTR", "`export` / `let` apply only to a typed attribute (`let " + name + ":Type=…`)", start, m.pos)
+        const a: AAttr = { nid: m.nid, span: mkSpan(start, m.pos), name: name, value: v }
+        return { typed: [], attrs: [a], vals: [], mp: mBump(m) }
+    }
+
+    // s444 Phase B — a validator's arguments, at its `(`: a comparison and its
+    // operand (`>=5`), a regex literal (`/re/flags`), or a list of expressions.
+    type RValArg:struct = { arg: AValArg, tp: TP }
+
+    fn parseValArg(tp0: TP) -> RValArg {
+        let t: TP = expectP(tp0, "(")
+        if (isP(t, ")")) return { arg: AValArg.Exprs([]), tp: expectRegionEnd(adv(t)) }
+        const op: string = cur(t).text
+        if (cur(t).cls == TC.Punct && (op == ">=" || op == "<=" || op == ">" || op == "<" || op == "==" || op == "!=")) {
+            const r: RExpr = parseTernary(adv(t))
+            return { arg: AValArg.Cmp(op, r.e), tp: expectRegionEnd(expectP(r.tp, ")")) }
+        }
+        const rt: PTok = cur(t)
+        if (rt.cls == TC.Other && rt.text.length > 1 && rt.text.substring(0, 1) == "/") {
+            const last: int = rt.text.lastIndexOf("/")
+            const src: string = rt.text.substring(1, last)
+            const flags: string = rt.text.substring(last + 1)
+            return { arg: AValArg.Regex(src, flags), tp: expectRegionEnd(expectP(adv(t), ")")) }
+        }
+        const rl: RExprs = parseList(t, ")")
+        return { arg: AValArg.Exprs(rl.es), tp: expectRegionEnd(rl.tp) }
+    }
+
+    // s442: validators (§6.4, kickstarter §6.1's shared vocabulary) are outside
+    // the bootstrap — they imply the synthesized validity surface, and whether
+    // they reach a `renders` input as HTML attributes is ⚑ O25 (OPEN).
+    fn isValidatorWord(w: string) -> boolean {
+        return w == "req" || w == "length" || w == "pattern" || w == "min" || w == "max" || w == "gt" || w == "lt" ||
+               w == "gte" || w == "lte" || w == "eq" || w == "neq" || w == "oneOf" || w == "notIn"
+    }
+
+    fn isNoValue(v: AAttrValue) -> boolean {
+        return match v {
+            .NoValue :> true
+            .Quoted(v: x) :> false
+            .Bare(e: x) :> false
+            .Paren(e: x) :> false
+            .Braced(b: x) :> false
+        }
+    }
+
+    // Validators in SOURCE order (a bare word and a call interleave, §55.12).
+    fn bySource(vs: AValidator[]) -> AValidator[] {
+        let out: AValidator[] = []
+        let rest: AValidator[] = vs
+        while (rest.length > 0) {
+            let k = 0
+            let j = 1
+            while (j < rest.length) {
+                if (rest[j].span.start < rest[k].span.start) k = j
+                j = j + 1
+            }
+            out = out.concat([rest[k]])
+            let next: AValidator[] = []
+            let i = 0
+            for (const v of rest) {
+                if (i != k) next = next.concat([v])
+                i = i + 1
+            }
+            rest = next
+        }
+        return out
+    }
+
+    // =========================================================================
+    // Elements, declarations, programs.
+    // =========================================================================
+    type RElem:struct = { e: AElem, mp: MP }
+    type RDecl:struct = { d: ADecl, mp: MP }
+    type RChild:struct = { c: ADeclChild, mp: MP }
+
+    // What a tag at `<` turned out to be.
+    type TagKind:enum = { IsElem, IsDecl, IsProgram }
+
+    fn tagKind(o: Opener) -> TagKind {
+        if (!o.star && o.name == "program") return TagKind.IsProgram
+        if (isDeclOpener(o)) return TagKind.IsDecl
+        return TagKind.IsElem
+    }
+
+    fn isVoidTag(t: string) -> boolean {
+        return match t {
+            "input" :> true
+            "br"    :> true
+            "hr"    :> true
+            "img"   :> true
+            "meta"  :> true
+            "link"  :> true
+            _       :> false
+        }
+    }
+
+    // At `</`: consume `</>` or `</name>`; `name` must match the open tag.
+    fn parseCloser(mp: MP, tag: string) -> MP {
+        const start: int = mp.pos
+        let m: MP = mAdv(mp, 2)
+        const nm: RWord = readName(m)
+        m = skipSpace(nm.mp)
+        if (chAt(m, 0) != ">") {
+            m = mDiag(m, "E-PARSE-CLOSER", "expected `>` to end the closer", start, m.pos)
+            return m
+        }
+        m = mAdv(m, 1)
+        if (nm.w != "" && nm.w != tag) {
+            m = mDiag(m, "E-PARSE-CLOSER", "`</" + nm.w + ">` closes `<" + tag + ">`", start, m.pos)
+        }
+        return m
+    }
+
+    fn elemFrom(o: Opener, kids: ANode[], mp: MP) -> RElem {
+        const e: AElem = { nid: mp.nid, span: mkSpan(o.start, mp.pos), star: o.star, tag: o.name, attrs: o.attrs, kids: kids }
+        return { e: e, mp: mBump(mp) }
+    }
+
+    // An element after its opener: children until its closer.
+    fn finishElem(o: Opener, mp: MP) -> RElem {
+        if (o.vals.length > 0) {
+            // s444 Phase B: a validator binds a DECLARATION's own value (§66.4 rule 3) — an element has none
+            return finishElem(noVals(o), mDiag(mp, "E-PARSE-ATTR", "the validator `" + o.vals[0].name + "(…)` is on the element `<" + o.name + ">` — a validator belongs in a declaration's opener, binding its own value (§66.4 rule 3, §55.2)", o.vals[0].span.start, o.vals[0].span.end))
+        }
+        if (o.typed.length > 0 && o.star) {
+            // a typed attribute on `<*x …>` is meaningless — a reference declares nothing
+            return elemFrom(o, [], mDiag(mp, "E-PARSE-TAG", "a `<*" + o.name + ">` reference cannot declare typed attributes", o.start, mp.pos))
+        }
+        const sh: ANode[] | not = o.short
+        if (sh is some) {
+            // §4.14 / §24: a non-void element's `:`-shorthand body IS its one child
+            if (isVoidTag(o.name)) {
+                return elemFrom(o, [], mDiag(mp, "E-COLON-SHORTHAND-ON-VOID", "`<" + o.name + ">` is a void element — it has no body for a `:`-shorthand (bind a value through an attribute, §4.14)", o.start, mp.pos))
+            }
+            return elemFrom(o, sh, mp)
+        }
+        if (o.selfClosing || isVoidTag(o.name)) return elemFrom(o, [], mp)
+        const kids: RNodes = parseKids(mp, o.name)
+        return elemFrom(o, kids.nodes, kids.mp)
+    }
+
+    fn noVals(o: Opener) -> Opener {
+        return { start: o.start, star: o.star, isLet: o.isLet, name: o.name, ty: o.ty, own: o.own,
+                 typed: o.typed, attrs: o.attrs, selfClosing: o.selfClosing, short: o.short, vals: [] }
+    }
+
+    // Markup children until `</…>` (consumed).
+    fn parseKids(mp: MP, tag: string) -> RNodes {
+        let m: MP = mp
+        let out: ANode[] = []
+        let text: string = ""
+        let textStart: int = m.pos
+        let going = true
+        while (going) {
+            if (mEof(m)) {
+                m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos)
+                going = false
+            } else if (mLooking(m, "</")) {
+                going = false
+            } else if (mLooking(m, "<!--")) {
+                m = skipMarkupComment(m)
+            } else if (mLooking(m, "//") && freeTextCommentAt(m)) {
+                m = skipLineComment(m)
+            } else if (atCss(m)) {
+                if (text != "") {
+                    out = out.concat([textNode(m, textStart, text)])
+                    m = mBump(m)
+                    text = ""
+                }
+                m = skipCss(m)
+                textStart = m.pos
+            } else if (foreignLevel(m) >= 0) {
+                if (text != "") {
+                    out = out.concat([textNode(m, textStart, text)])
+                    m = mBump(m)
+                    text = ""
+                }
+                m = skipForeign(m)
+                textStart = m.pos
+            } else if (atOtherSigil(m)) {
+                if (text != "") {
+                    out = out.concat([textNode(m, textStart, text)])
+                    m = mBump(m)
+                    text = ""
+                }
+                m = skipSigil(m)
+                textStart = m.pos
+            } else if (atInterp(m)) {
+                if (text != "") {
+                    out = out.concat([textNode(m, textStart, text)])
+                    m = mBump(m)
+                    text = ""
+                }
+                const ri: RNodeOne = parseInterp(m)
+                out = out.concat([ri.n])
+                m = ri.mp
+                textStart = m.pos
+            } else if (chAt(m, 0) == "<" && opensTag(chAt(m, 1))) {
+                if (text != "") {
+                    out = out.concat([textNode(m, textStart, text)])
+                    m = mBump(m)
+                    text = ""
+                }
+                const rn: RNodeOne = parseMarkupNode(m)
+                out = out.concat([rn.n])
+                m = rn.mp
+                textStart = m.pos
+            } else {
+                if (text == "") textStart = m.pos
+                text = text + chAt(m, 0)
+                m = mAdv(m, 1)
+            }
+        }
+        if (text != "") {
+            out = out.concat([textNode(m, textStart, text)])
+            m = mBump(m)
+        }
+        if (mLooking(m, "</")) m = parseCloser(m, tag)
+        return { nodes: out, mp: m }
+    }
+
+    // SPEC §4.18.1b exit (2) (RULED S444 — "yes on // revised"): in free text
+    // a `//` opens a comment ONLY when the byte right before it is whitespace —
+    // space, tab, LF, CR; these four and no others (a line start and a line's
+    // indentation are both that). Any other `//` is content: `http://x`,
+    // `a//b`, `</b>// x`. (A free-text body always follows its opener's `>`,
+    // so there is always a byte before the `//`.) The comment itself is opaque
+    // to end of line (skipLineComment — a `</p>` in it is comment text).
+    fn freeTextCommentAt(mp: MP) -> boolean {
+        const before: string = chAt(mp, -1)
+        return before == " " || before == "\t" || before == "\n" || before == "\r"
+    }
+
+    // dpa-045 D (RULED S442): free text has exactly two ways out — `${` opens
+    // logic, and `<` IMMEDIATELY followed by a letter, `!`, `/` or `?` opens a
+    // tag. Any other `<` (`a < b`, `5 <7`) is content, not an error.
+    // ⚑ `*` is admitted too: `<*x/>` is §66.6's existing-instance reference,
+    // which the ruled class (HTML5-derived) does not list — flagged for the PA.
+    // RULED S442 (dpa-045 follow-ups): the class is a letter, `!`, `/`, `?`,
+    // `*`, `_`, `.` — `*` / `_` / `.` are scrml's own tag forms (`<*x/>`,
+    // `<_ …>`, `<.Variant …>`). That list, and no others.
+    fn opensTag(c: string) -> boolean {
+        if (c >= "a" && c <= "z") return true
+        if (c >= "A" && c <= "Z") return true
+        return c == "!" || c == "/" || c == "?" || c == "*" || c == "_" || c == "."
+    }
+
+    // RULED S442 (dpa-045 follow-up 1): the context sigils are exits of free
+    // text — `${` (an interpolation), `#{` (CSS), and `^{` (meta, §22.2), `!{`
+    // (error context, §19) and `~{` (test context, §19.12 — SPEC §4.18.1b, PA
+    // reading S442), which the bootstrap does not build: skipped whole by the
+    // canonical walker and reported. NOT an exit: `?{` — its §3.1 parent is
+    // Logic only, so in a markup body it is content (§4.18.1b, §8.1).
+    fn atOtherSigil(mp: MP) -> boolean {
+        if (chAt(mp, 1) != "{") return false
+        const c: string = chAt(mp, 0)
+        return c == "^" || c == "!" || c == "~"
+    }
+
+    // `_` + zero or more `=` + `{` (§23.2) whose `_` does not end an
+    // identifier (`my_{x}` is content): the level (count of `=`), else -1.
+    fn foreignLevel(mp: MP) -> int {
+        if (chAt(mp, 0) != "_") return -1
+        if (isIdentTail(chAt(mp, -1))) return -1
+        let k: int = 1
+        while (chAt(mp, k) == "=") { k = k + 1 }
+        if (chAt(mp, k) != "{") return -1
+        return k - 1
+    }
+
+    fn isIdentTail(c: string) -> boolean {
+        if (c == "") return false
+        if (c >= "a" && c <= "z") return true
+        if (c >= "A" && c <= "Z") return true
+        if (c >= "0" && c <= "9") return true
+        return c == "_" || c == "$"
+    }
+
+    // SPEC §4.18.1b (PA reading S442): `_{` in a markup body is NEITHER an exit
+    // NOR content — it stays an ERROR, E-FOREIGN-004 (§23.2.4: a markup element
+    // body is not a valid foreign-code context). Its extent is §23.2's: opaque
+    // up to `}` + the opener's `=` count (level 0: brace depth) — never text.
+    // Unclosed → E-FOREIGN-002 (§23.2).
+    fn skipForeign(mp: MP) -> MP {
+        const start: int = mp.pos
+        const lvl: int = foreignLevel(mp)
+        let m: MP = mAdv(mp, lvl + 2)
+        let depth: int = 0
+        let closed = false
+        while (!closed && !mEof(m)) {
+            const c: string = chAt(m, 0)
+            if (c == "}" && depth == 0 && closesForeign(m, lvl)) {
+                m = mAdv(m, lvl + 1)
+                closed = true
+            } else {
+                if (lvl == 0 && c == "{") depth = depth + 1
+                if (lvl == 0 && c == "}") depth = depth - 1
+                m = mAdv(m, 1)
+            }
+        }
+        if (!closed) {
+            return mDiag(m, "E-FOREIGN-002", "unclosed foreign code block — a `_{` / `_={` opener needs its matching `}` / `}=` closer (§23.2)", start, m.pos)
+        }
+        return mDiag(m, "E-FOREIGN-004", "a `_{…}` foreign code block is not valid in a markup body (§23.2.4) — bind its value with `const x = _={ … }=` in a server `function` body, or use a `use foreign:` sidecar (§23.4)", start, m.pos)
+    }
+
+    fn closesForeign(mp: MP, lvl: int) -> boolean {
+        let k: int = 1
+        while (k <= lvl) {
+            if (chAt(mp, k) != "=") return false
+            k = k + 1
+        }
+        return true
+    }
+
+    fn skipSigil(mp: MP) -> MP {
+        const start: int = mp.pos
+        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
+        const m: MP = backToMarkup(mp, tp)
+        return mDiag(mAt(m, lastEnd(tp)), "E-BOOTSTRAP-UNSUPPORTED", "a `" + chAt(mp, 0) + "{…}` context in markup is not in the bootstrap (§3.1)", start, lastEnd(tp))
+    }
+
+    fn textNode(mp: MP, start: int, text: string) -> ANode {
+        return { nid: mp.nid, span: mkSpan(start, mp.pos), k: ANodeK.Text(text) }
+    }
+
+    type RNodeOne:struct = { n: ANode, mp: MP }
+
+    // `${ expr }` in markup.
+    fn parseInterp(mp: MP) -> RNodeOne {
+        const start: int = mp.pos
+        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
+        let t: TP = expectP(tp, "{")
+        const r: RExpr = parseAssign(t)
+        t = expectP(r.tp, "}")
+        t = expectRegionEnd(t)
+        const m: MP = backToMarkup(mp, t)
+        const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Interp(r.e) }
+        return { n: n, mp: mBump(m) }
+    }
+
+    // A tag in markup position: an element, a `<*x>` reference, or a declaration.
+    fn parseMarkupNode(mp: MP) -> RNodeOne {
+        const ro: ROpener = parseOpener(mp)
+        if (isThemeOpener(ro.o)) {
+            const m: MP = refuseTheme(ro.o, ro.mp)
+            const t: ANode = { nid: m.nid, span: mkSpan(ro.o.start, m.pos), k: ANodeK.Text("") }
+            return { n: t, mp: mBump(m) }
+        }
+        const k: TagKind = tagKind(ro.o)
+        return match k {
+            .IsDecl :> declNode(finishDecl(ro.o, ro.mp, false))
+            .IsElem :> elemNode(finishElem(ro.o, ro.mp))
+            .IsProgram :> elemNode(finishElem(ro.o, mDiag(ro.mp, "E-PARSE-PROGRAM", "`<program>` inside markup", ro.o.start, ro.mp.pos)))
+        }
+    }
+
+    // s442: `<theme>` (§66.17) — its declarations are tokens that lower to CSS
+    // custom properties (`:root { --brand: … }`, a `data-scrml-theme-mode`
+    // attribute per mode). The bootstrap has no CSS emission in this slice (the
+    // slice-m3 CSS files are held by another session), so the element is
+    // consumed whole and REPORTED — never parsed as markup (its token
+    // declarations would otherwise vanish silently).
+    fn isThemeOpener(o: Opener) -> boolean { return !o.star && o.name == "theme" }
+
+    fn refuseTheme(o: Opener, mp: MP) -> MP {
+        let m: MP = mp
+        if (!o.selfClosing) {
+            const kids: RNodes = parseKids(mp, o.name)
+            m = kids.mp
+        }
+        return mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`<theme>` (§66.17 — tokens lower to CSS custom properties) is not in the bootstrap: it has no CSS emission in this slice", o.start, m.pos)
+    }
+
+    fn declNode(r: RDecl) -> RNodeOne {
+        const n: ANode = { nid: r.mp.nid, span: r.d.span, k: ANodeK.DeclNode(r.d) }
+        return { n: n, mp: mBump(r.mp) }
+    }
+
+    fn elemNode(r: RElem) -> RNodeOne {
+        const n: ANode = { nid: r.mp.nid, span: r.e.span, k: ANodeK.Elem(r.e) }
+        return { n: n, mp: mBump(r.mp) }
+    }
+
+    // ---- declarations -------------------------------------------------------
+    // After the opener: the body (child fields + state-children), the closer,
+    // then an optional `renders <element>`.
+    fn finishDecl(o: Opener, mp: MP, exported: boolean) -> RDecl {
+        let m: MP = mp
+        if (isNamespace(o.name)) {
+            m = mDiag(m, "E-DECL-ILLEGAL-FIELD-NAME", "`" + o.name + "` cannot name a declaration or field — it is reserved for namespaced attributes (`" + o.name + ":…`, §66.2.3)", o.start, m.pos)
+        }
+        for (const ta of o.typed) {
+            if (isNamespace(ta.name)) {
+                m = mDiag(m, "E-DECL-ILLEGAL-FIELD-NAME", "`" + ta.name + "` cannot name an attribute of a declaration (§66.2.3)", ta.span.start, ta.span.end)
+            }
+            m = checkOpenerValue(m, ta.dflt)
+        }
+        m = checkOpenerValue(m, o.own)
+        // s444 Phase B: a BARE validator word (`req`) is a validator, not a modifier
+        let mods: AAttr[] = []
+        let bare: AValidator[] = []
+        for (const a of o.attrs) {
+            if (isValidatorWord(a.name) && isNoValue(a.value)) {
+                bare = bare.concat([{ nid: a.nid, span: a.span, name: a.name, arg: AValArg.NoArgs }])
+            } else {
+                mods = mods.concat([a])
+            }
+            if (a.name.indexOf(":") >= 0) {
+                m = mDiag(m, "E-DECL-ILLEGAL-FIELD-NAME", "a declaration opener cannot carry `" + a.name + "` — `bind:` / `class:` / `style:` / `internal:` / `on…` are markup attributes; a declaration's markup is its `renders` (§66.2.3, §66.4)", a.span.start, a.span.end)
+            }
+        }
+        let body: ADeclChild[] = []
+        if (o.short is some) {
+            m = mDiag(m, "E-PARSE-SHORTHAND", "a declaration has no `:`-shorthand body — its markup is its `renders` (§66.5); a `:`-shorthand body belongs to an element or a state-child (§4.14)", o.start, m.pos)
+        } else if (!o.selfClosing) {
+            const rb: RChildren = parseDeclBody(m, o.name)
+            body = rb.cs
+            m = rb.mp
+        }
+        const declEnd: int = m.pos
+        // `renders` follows the closer (§66.5.1).
+        let renders: AElem | not = not
+        const after: MP = skipTrivia(m)
+        const rw: RWord = readName(after)
+        if (rw.w == "renders") {
+            const at: MP = skipTrivia(rw.mp)
+            if (chAt(at, 0) == "<" && !mLooking(at, "</")) {
+                const ro: ROpener = parseOpener(at)
+                const re: RElem = finishElem(ro.o, ro.mp)
+                renders = re.e
+                m = re.mp
+            } else {
+                m = mDiag(at, "E-PARSE-RENDERS", "`renders` must be followed by one markup element (§66.5.1)", rw.mp.pos - 7, rw.mp.pos)
+            }
+        }
+        const d: ADecl = {
+            nid: m.nid, span: mkSpan(o.start, declEnd), exported: exported, isLet: o.isLet,
+            name: o.name, ty: o.ty, own: o.own, attrs: o.typed, mods: mods, body: body, renders: renders,
+            validators: bySource(bare.concat(o.vals)),
+        }
+        return { d: d, mp: mBump(m) }
+    }
+
+    // §66.2.4: an own value / attribute default is a literal or a plain `@ref`
+    // written bare — anything else must be parenthesized.
+    fn checkOpenerValue(mp: MP, v: AAttrValue) -> MP {
+        return match v {
+            .Bare(e: e) :> checkBareOpenerExpr(mp, e)
+            .NoValue :> mp
+            .Quoted(v: s) :> mp
+            .Paren(e: e) :> mp
+            .Braced(b: b) :> mDiag(mp, "E-DECL-OPENER-EXPR-UNPARENTHESIZED", "a declaration's value cannot be a braced block — write an expression, parenthesized (§66.2.4)", b.span.start, b.span.end)
+        }
+    }
+
+    fn checkBareOpenerExpr(mp: MP, e: AExpr) -> MP {
+        if (isBareOpenerExpr(e)) return mp
+        return mDiag(mp, "E-DECL-OPENER-EXPR-UNPARENTHESIZED", "an opener value that is not a literal or a plain `@ref` must be parenthesized (§66.2.4)", e.span.start, e.span.end)
+    }
+
+    fn isBareOpenerExpr(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Num(raw: r) :> true
+            .Str(v: s) :> true
+            .Bool(v: b) :> true
+            .NotLit :> true
+            .Recovered :> true
+            .Variant(name: n) :> true
+            .At(name: n) :> true
+            .ArrayLit(elems: es) :> es.length == 0
+            .Unary(op: o, e: inner) :> isNegNum(o, inner)
+            .Name(name: n) :> false
+            .AtItem :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: sx) :> false
+            .Index(obj: ix) :> false
+            .Lambda(params: lp) :> false
+        }
+    }
+
+    fn isNegNum(o: UnOp, inner: AExpr) -> boolean {
+        const k: AExprK = inner.k
+        const isNeg: boolean = o == UnOp.Neg
+        return match k {
+            .Num(raw: r) :> isNeg
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: x) :> false
+            .Call(callee: x) :> false
+            .Unary(op: x) :> false
+            .Binary(op: x) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+            .Spread(e: sx) :> false
+            .Index(obj: ix) :> false
+            .Lambda(params: lp) :> false
+        }
+    }
+
+    type RChildren:struct = { cs: ADeclChild[], mp: MP }
+
+    // A declaration body: child declarations and state-children (O52), up to
+    // the closer (consumed). A body holds no uses and no text.
+    fn parseDeclBody(mp: MP, tag: string) -> RChildren {
+        let m: MP = mp
+        let out: ADeclChild[] = []
+        let going = true
+        while (going) {
+            m = skipTrivia(m)
+            if (mEof(m)) {
+                m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos)
+                going = false
+            } else if (mLooking(m, "</")) {
+                m = parseCloser(m, tag)
+                going = false
+            } else {
+                let exported = false
+                const w: RWord = readName(m)
+                if (w.w == "export") {
+                    exported = true
+                    m = skipTrivia(w.mp)
+                }
+                if (chAt(m, 0) == "<") {
+                    const rc: RChild = parseDeclChild(m, exported)
+                    out = out.concat([rc.c])
+                    m = rc.mp
+                } else {
+                    const bad: int = m.pos
+                    m = mDiag(m, "E-PARSE-DECL-BODY", "a declaration body holds child declarations and state-children only (§66.4 rule 4, O52)", bad, bad + 1)
+                    m = skipLineComment(mAdv(m, 1))
+                }
+            }
+        }
+        return { cs: out, mp: m }
+    }
+
+    fn parseDeclChild(mp: MP, exported: boolean) -> RChild {
+        const ro: ROpener = parseOpener(mp)
+        const o: Opener = ro.o
+        if (isDeclOpener(o)) {
+            const rd: RDecl = finishDecl(o, ro.mp, exported)
+            return { c: ADeclChild.ChildField(rd.d), mp: rd.mp }
+        }
+        let m: MP = ro.mp
+        // O5 RULED (1i): a state-child's body is that variant's markup — a
+        // `:`-shorthand expression (§4.14) or a bare body up to its closer.
+        let body: ANode[] = []
+        const sh: ANode[] | not = o.short
+        if (sh is some) {
+            body = sh
+        } else if (!o.selfClosing) {
+            // r1 F4: a state-child body is CODE-DEFAULT (§4.18.1)
+            const kids: RNodes = parseCodeBody(m, o.name)
+            body = kids.nodes
+            m = kids.mp
+        }
+        const sc: AStateChild = { nid: m.nid, span: mkSpan(o.start, m.pos), name: o.name, attrs: o.attrs, body: body }
+        return { c: ADeclChild.StateChild(sc), mp: mBump(m) }
+    }
+
+    // ---- items: a file or `<program>` body ----------------------------------
+    // Items until EOF or a closer (consumed when `tag` != "").
+    fn parseMarkupItems(mp: MP, tag: string) -> RMItems {
+        let m: MP = mp
+        let out: AItem[] = []
+        let going = true
+        while (going) {
+            m = skipTrivia(m)
+            if (mEof(m)) {
+                if (tag != "") m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos)
+                going = false
+            } else if (mLooking(m, "</")) {
+                if (tag == "") {
+                    m = mDiag(m, "E-PARSE-CLOSER", "a closer with nothing open", m.pos, m.pos + 2)
+                    m = mAdv(m, 2)
+                } else {
+                    m = parseCloser(m, tag)
+                    going = false
+                }
+            } else {
+                const before: int = m.pos
+                const r: RMItems = parseMarkupItem(m)
+                out = out.concat(r.items)
+                m = r.mp
+                if (m.pos == before) m = mAdv(m, 1)
+            }
+        }
+        return { items: out, mp: m }
+    }
+
+    fn mItem(mp: MP, start: int, k: AItemK) -> RMItems {
+        const it: AItem = { nid: mp.nid, span: mkSpan(start, mp.pos), k: k }
+        return { items: [it], mp: mBump(mp) }
+    }
+
+    fn parseMarkupItem(mp: MP) -> RMItems {
+        const start: int = mp.pos
+        if (atCss(mp)) return { items: [], mp: skipCss(mp) }
+        if (atInterp(mp)) {
+            const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
+            const inner: RItems = parseLogicItems(expectP(tp, "{"), "}")
+            const t2: TP = expectRegionEnd(expectP(inner.tp, "}"))
+            return { items: inner.items, mp: backToMarkup(mp, t2) }
+        }
+        if (chAt(mp, 0) == "<") return parseTagItem(mp, false)
+        const w: RWord = readName(mp)
+        if (w.w == "export") {
+            const after: MP = skipTrivia(w.mp)
+            if (chAt(after, 0) == "<") return parseTagItem(after, true)
+            return logicRegionItem(mp, LexStop.Statement)
+        }
+        if (w.w == "function" || w.w == "fn" || w.w == "type") return logicRegionItem(mp, LexStop.Statement)
+        if (w.w == "import") return logicRegionItem(mp, LexStop.Line)
+        const d: MP = mDiag(mp, "E-PARSE-ITEM", "unexpected text at program level", start, start + 1)
+        return { items: [], mp: skipLineComment(d) }
+    }
+
+    fn logicRegionItem(mp: MP, stop: LexStop) -> RMItems {
+        const tp: TP = regionTP(mp, stop)
+        const r: RItems = parseLogicItems(tp, "")
+        return { items: r.items, mp: backToMarkup(mp, r.tp) }
+    }
+
+    fn parseTagItem(mp: MP, exported: boolean) -> RMItems {
+        const ro: ROpener = parseOpener(mp)
+        const o: Opener = ro.o
+        if (isThemeOpener(o)) return { items: [], mp: refuseTheme(o, ro.mp) }
+        const k: TagKind = tagKind(o)
+        return match k {
+            .IsProgram :> programItem(o, ro.mp)
+            .IsDecl :> declItem(finishDecl(o, ro.mp, exported))
+            .IsElem :> elemItem(finishElem(o, ro.mp), exported)
+        }
+    }
+
+    fn declItem(r: RDecl) -> RMItems {
+        return mItem(r.mp, r.d.span.start, AItemK.DeclItem(r.d))
+    }
+
+    fn elemItem(r: RElem, exported: boolean) -> RMItems {
+        let m: MP = r.mp
+        if (exported) m = mDiag(m, "E-PARSE-EXPORT", "`export` applies to a declaration, not to markup", r.e.span.start, r.e.span.end)
+        const n: ANode = { nid: m.nid, span: r.e.span, k: ANodeK.Elem(r.e) }
+        return mItem(mBump(m), r.e.span.start, AItemK.MarkupItem(n))
+    }
+
+    fn programItem(o: Opener, mp: MP) -> RMItems {
+        let items: AItem[] = []
+        let m: MP = mp
+        if (!o.selfClosing) {
+            const r: RMItems = parseMarkupItems(mp, "program")
+            items = r.items
+            m = r.mp
+        }
+        const p: AProgram = { nid: m.nid, span: mkSpan(o.start, m.pos), attrs: o.attrs, items: items }
+        return mItem(mBump(m), o.start, AItemK.ProgramItem(p))
+    }
+
+    // =========================================================================
+    // Entry.
+    // =========================================================================
+    export type Parsed:struct = { ast: FileAst, diags: Diag[], nextId: int }
+
+    // Parse one file. NodeIds start at `firstId`; `nextId` is the first unused.
+    export fn parseFile(path: string, src: string, firstId: int) -> Parsed {
+        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path }
+        const r: RMItems = parseMarkupItems(m0, "")
+        let errs: ASpan[] = []
+        for (const d of r.mp.diags) { errs = errs.concat([d.span]) }
+        return { ast: { path: path, items: r.items, errs: errs }, diags: r.mp.diags, nextId: r.mp.nid }
+    }
+}

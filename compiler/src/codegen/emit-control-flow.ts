@@ -8,6 +8,7 @@ import { emitStringFromTree } from "../expression-parser.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { CGError } from "./errors.ts";
+import { fnTextHasOwnAwait } from "./js-async-analysis.ts";
 
 // ---------------------------------------------------------------------------
 // Module-level Tier 2 hoist registry (§8.10)
@@ -151,7 +152,7 @@ interface IfOpts {
    * don't emit a `_scrml_init_set` sidecar (which would clobber the cell's
    * canonical declaration-time init thunk).
    */
-  insideFunctionBody?: boolean;
+  insideFunctionBody?: boolean; returnExitsWrapper?: boolean;
   /**
    * S144 (GITI-020) — emission boundary, threaded so a channel-cell write
    * `@cell = expr` nested inside an if/else body on the SERVER boundary reaches
@@ -451,6 +452,7 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
     synthCellKeys: opts.synthCellKeys,
     declaredNames: opts.declaredNames,
     insideFunctionBody: opts.insideFunctionBody,
+    returnExitsWrapper: opts.returnExitsWrapper,
     // S144 (GITI-020): thread boundary + channelOwnedCells so a nested
     // `@cell = expr` on the server boundary reaches the broadcast-wire arm.
     boundary: opts.boundary,
@@ -549,7 +551,7 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
  */
 export function emitForStmt(
   node: any,
-  opts?: { dbVar?: string; declaredNames?: Set<string>; insideFunctionBody?: boolean; fnBodyRegistry?: FunctionBodyRegistry | null; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null;
+  opts?: { dbVar?: string; declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; fnBodyRegistry?: FunctionBodyRegistry | null; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null;
     // Bug 65 (S157) — engine codegen extras for lifted engine-transition
     // handlers (`@engine.advance(.X)` / `@engine = .X` inside `${for…lift}`).
     // The if-stmt dispatch already threads these (emit-logic.ts:2358); the
@@ -630,7 +632,7 @@ function _emitForStmtInner(
       lines.push(`for (${init}; ${cond}; ${update}) {`);
 
       const body: any[] = node.body ?? [];
-      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, /* U1 F4 — host-async flag travels with serverFnNames */ ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, /* U1 F4 — host-async flag travels with serverFnNames */ ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
         lines.push(`  ${code}`);
       }
       lines.push(`}`);
@@ -834,7 +836,7 @@ function _emitForStmtInner(
         lines.push(`  ${liftCode}`);
       }
     } else {
-      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(_plainNames), insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(_plainNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), /* s441 r4 — host-async flag even without asyncRouteMap (engine effect= bodies) */ ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
         lines.push(`  ${code}`);
       }
     }
@@ -1041,7 +1043,7 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: {
 /**
  * Emit a while statement, optionally with a label prefix.
  */
-export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null }): string {
+export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; clientAsyncBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null }): string {
   // R25-Bug-42 (S138): thread `boundary` through to the body emission so
   // SQL-bearing statements (`yield ?{...}`, `return ?{...}`, etc.) inside a
   // `while` body parse-time-attached sqlNode are emitted via the server
@@ -1056,7 +1058,7 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _whileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}while (${condition}) {`);
-  for (const code of emitLogicBody(node.body ?? [], { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), /* s441 r4 */ ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`}`);
@@ -1070,7 +1072,7 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
 /**
  * Emit a do-while statement.
  */
-export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null }): string {
+export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; clientAsyncBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null }): string {
   // R25-Bug-42 (S138): thread `boundary` through to body emission. See
   // emitWhileStmt comment above.
   const lines: string[] = [];
@@ -1078,7 +1080,7 @@ export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>;
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _doWhileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}do {`);
-  for (const code of emitLogicBody(node.body ?? [], { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), /* s441 r4 */ ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`} while (${condition});`);
@@ -1391,23 +1393,47 @@ export function normalizeMatchArmArrow(text: string): string {
 export function parseMatchArm(rawTrimmed: string): MatchArm | null {
   // C2 (R27): repair the rejoin-spaced `- >` arrow alias before pattern-match.
   const trimmed = normalizeMatchArmArrow(rawTrimmed);
+  // Form 0w — an alternation with a WILDCARD alternate (`_ | .A :> r`,
+  // `.A | _ :> r`, `.A | else :> r`). A wildcard alternate matches every value,
+  // so the arm IS the wildcard arm (the typer's parseArmPattern classifies it
+  // the same way — the two must agree, or exhaustiveness and emitted dispatch
+  // diverge). g-impl1-match-miscompiles F12: before this form an arm led by
+  // `_ |` matched NO form below and was silently dropped (`f(.A)` returned
+  // undefined with no diagnostic), defeating E-TYPE-020.
+  {
+    const ALT = String.raw`(?:\.\s*[A-Z][A-Za-z0-9_]*(?:\s*\([^()]*\))?|::\s*[A-Z][A-Za-z0-9_]*(?:\s*\([^()]*\))?|_|else|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|-?\s*\d[\w.]*|true|false)`;
+    const wildAlt = trimmed.match(new RegExp(String.raw`^(${ALT}(?:\s*\|\s*${ALT})+)\s*(?:=>|:>|->)\s*([\s\S]+)$`));
+    if (wildAlt) {
+      // Enumerate the alternates atomically (a string alternate may itself
+      // contain `|` / `_`), then ask whether any IS a wildcard.
+      const alts = [...wildAlt[1].matchAll(new RegExp(String.raw`(?:^|\|)\s*(${ALT})\s*`, "g"))].map(m => m[1]);
+      if (alts.some(a => a === "_" || a === "else")) {
+        return { kind: "wildcard", test: null, binding: null, result: wildAlt[2].trim() };
+      }
+    }
+  }
   // NEW Form 0 (§18 pipe-alternation): `.A | .B | .C => result` (or `:>`).
   // Tried BEFORE the single-variant regex so the alternation chain wins.
   // Alternation alternates MAY carry a payload-DISCARD tail (`.Ident(_) | .Num(_)`
   // — g-match-lowering-arm-drop F6). The parens are matched then stripped: a `_`
   // discard binds nothing, so the OR-chain compares .variant tags alone. Payload
   // BINDINGS in alternation remain unsupported (SPEC §51.3.2 / §18.0.3
-  // same-binding-shape, E-ENGINE-016 at the typer) — the restricted `[_\s,]*`
-  // payload class matches ONLY discards, so a binding-bearing alternate declines
-  // here and surfaces the typer error rather than mis-lowering.
+  // same-binding-shape) — the restricted `[_\s,]*` payload class matches ONLY
+  // discards. A binding-bearing alternation never reaches here in a successful
+  // compile: the parser rejects it with E-MATCH-ALT-BINDING (ast-builder.js
+  // collectExpr). (This comment previously claimed a typer error surfaced; none
+  // did — the arm was silently dropped. S438 review F1a.)
   const altMatch = trimmed.match(
-    /^\.\s*([A-Z][A-Za-z0-9_]*)(?:\s*\(\s*[_\s,]*\))?((?:\s*\|\s*\.\s*[A-Z][A-Za-z0-9_]*(?:\s*\(\s*[_\s,]*\))?)+)\s*(?:=>|:>|->)\s*([\s\S]+)$/,
+    // `::Variant` (the §18.2 alias prefix) is accepted in every alternate, as it
+    // is for a singleton arm — `::B | ::C :>` otherwise matched no form and was
+    // silently dropped (g-impl1-match-miscompiles F12 sibling).
+    /^(?:\.|::)\s*([A-Z][A-Za-z0-9_]*)(?:\s*\(\s*[_\s,]*\))?((?:\s*\|\s*(?:\.|::)\s*[A-Z][A-Za-z0-9_]*(?:\s*\(\s*[_\s,]*\))?)+)\s*(?:=>|:>|->)\s*([\s\S]+)$/,
   );
   if (altMatch) {
     const first = altMatch[1];
     const rest = altMatch[2]
       .split("|")
-      .map(s => s.trim().replace(/^\.\s*/, "").replace(/\s*\(\s*[_\s,]*\)\s*$/, "").trim())
+      .map(s => s.trim().replace(/^(?:\.|::)\s*/, "").replace(/\s*\(\s*[_\s,]*\)\s*$/, "").trim())
       .filter(s => s.length > 0);
     const tests = [first, ...rest];
     return {
@@ -1433,12 +1459,20 @@ export function parseMatchArm(rawTrimmed: string): MatchArm | null {
   // `|`-chain wins. Lowers to an OR-chain of `=== "…"` over `tests` (§18.16
   // literal-arm-pattern + §18 alternation). A bare `"a" | "b"` value expression
   // has no meaning as a match subject, so this never shadows a real value form.
-  const strAltMatch = trimmed.match(
-    /^((?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')(?:\s*\|\s*(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'))+)\s*(?:=>|:>|->)\s*([\s\S]+)$/,
-  );
-  if (strAltMatch) {
-    const tests = strAltMatch[1].split("|").map(s => s.trim()).filter(s => s.length > 0);
-    return { kind: "string", test: tests[0], tests, binding: null, result: strAltMatch[2].trim() };
+  // Extended (g-impl1-match-miscompiles F12 siblings) to the §18.16 number and
+  // boolean literals — `1 | 2 :> r`, `-1 | -2 :> r`, `true | false :> r` had NO
+  // form and were silently dropped — and the alternates are now enumerated
+  // ATOMICALLY: the former `.split("|")` cut a string alternate that itself
+  // contains `|` (`"x|y" | "z" :>` compared against `"x` and `y"`).
+  {
+    const LIT = String.raw`(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|-?\s*(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)|true|false)`;
+    const litAltMatch = trimmed.match(new RegExp(String.raw`^(${LIT}(?:\s*\|\s*${LIT})+)\s*(?:=>|:>|->)\s*([\s\S]+)$`));
+    if (litAltMatch) {
+      const tests = [...litAltMatch[1].matchAll(new RegExp(String.raw`(?:^|\|)\s*(${LIT})\s*`, "g"))]
+        .map(m => (/^["']/.test(m[1]) ? m[1] : m[1].replace(/\s+/g, "")));
+      const allStrings = tests.every(t => /^["']/.test(t));
+      return { kind: allStrings ? "string" : "literal", test: tests[0], tests, binding: null, result: litAltMatch[2].trim() };
+    }
   }
 
   // NEW Form 3: "string" => expr (or :>)
@@ -2292,9 +2326,7 @@ function emitMultiScrutineeMatch(
   // any `await` in code position makes the IIFE `await (async function(){…})()`.
   // Fail-safe direction matches the sibling scan — a false positive is a needless
   // (valid) async IIFE; a false negative is a broken bundle.
-  const _multiBodyHasAwait = lines
-    .slice(1)
-    .some((l) => /\bawait\b/.test(_stripStringLiteralsForAwaitScan(l)));
+  const _multiBodyHasAwait = _iifeHasOwnAwait(lines);
   lines[0] = (matchMode === "server" || _multiBodyHasAwait)
     ? `await (async function() {`
     : `(function() {`;
@@ -2465,7 +2497,13 @@ export function emitMatchExpr(node: any, opts?: any): string {
     // (B20 fixed parse + typer for this shape at S69; this closes the CG gap.)
     if (child.kind === "match-arm-block") {
       const payloadBindings = Array.isArray(child.payloadBindings) ? child.payloadBindings : [];
-      const binding = payloadBindings.length > 0 ? payloadBindings.join(", ") : null;
+      // Prefer the raw paren text (`binding`, ast-builder Form 1b) — it keeps the
+      // `field: local` pairing, so a NAMED binding reads its own field. The local
+      // names alone (`payloadBindings`) are positional: `.W(e: x) :> { x }` bound
+      // `x` to the FIRST field instead of `e` (silent wrong value).
+      const binding = typeof child.binding === "string" && child.binding.trim()
+        ? child.binding
+        : (payloadBindings.length > 0 ? payloadBindings.join(", ") : null);
       const arm: MatchArm = {
         kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
         test: child.variant ?? null,
@@ -2740,13 +2778,25 @@ export function emitMatchExpr(node: any, opts?: any): string {
   // callback never reaches here: `emitLambda` sets `peerAwaitable = false`, so
   // `emitCall` emits bare and the body has no `await` → the IIFE stays sync and
   // emission is byte-identical to pre-U1.
-  const _bodyHasAwait = iifeLines
-    .slice(1)
-    .some((l) => /\bawait\b/.test(_stripStringLiteralsForAwaitScan(l)));
+  const _bodyHasAwait = _iifeHasOwnAwait(iifeLines);
   iifeLines[0] = (_matchMode === "server" || _bodyHasAwait)
     ? `await (async function() {`
     : `(function() {`;
   return iifeLines.join("\n");
+}
+
+/**
+ * Does this match IIFE's body await at the IIFE's OWN level? (s441) The body is
+ * parsed and an `await` inside a NESTED function — an `async function(event)`
+ * handler lifted inside an arm — does not count: it belongs to the handler, and
+ * counting it made the IIFE `await (async function() {…})()` inside a synchronous
+ * `_scrml_effect` (invalid JS). When the text does not parse, the token scan
+ * below decides, erring toward async exactly as before.
+ */
+function _iifeHasOwnAwait(iifeLines: string[]): boolean {
+  const precise = fnTextHasOwnAwait("(async function() {\n" + iifeLines.slice(1).join("\n"));
+  if (precise !== null) return precise;
+  return iifeLines.slice(1).some((l) => /\bawait\b/.test(_stripStringLiteralsForAwaitScan(l)));
 }
 
 /**
@@ -2859,7 +2909,7 @@ function _soleBareExprValue(stmts: any[] | null, ctx: EmitExprContext): string |
  * the match emitter decided to extract a normalized `.variant` tag (tagVar) or
  * is still comparing the raw subject (tmpVar).
  */
-function armCondition(arm: MatchArm, tmpVar: string, tagVar: string): string {
+export function armCondition(arm: MatchArm, tmpVar: string, tagVar: string): string {
   if (arm.kind === "not") {
     return `${tmpVar} === null || ${tmpVar} === undefined`;
   }
@@ -2908,8 +2958,17 @@ export function hasPayloadBindingOrTaggedVariant(arms: MatchArm[]): boolean {
     // §18 alternation arms: any alternate that names a payload-bearing variant
     // (in _variantFields) requires tagVar normalization so the OR-chain compares
     // .variant strings rather than the tagged-object value itself.
+    // An alternation arm extracts the `.variant` tag UNCONDITIONALLY when no
+    // variant registry is installed (library mode, and program-mode SERVER
+    // functions, which are emitted before setVariantFieldsForFile runs) — the
+    // tag is correct for unit values too — because `.P(_) | .Q(_)` / `.P | .Q`
+    // over a payload enum otherwise compared the raw object against "P" and
+    // never matched, silently, with E-TYPE-020 satisfied
+    // (g-impl1-match-miscompiles F12 review F1b). With a registry installed it
+    // extracts only when some alternate is a registered PAYLOAD variant (the
+    // registry records payload variants only), as for a singleton arm.
     if (a.tests && a.tests.length > 1) {
-      return a.tests.some(t => _variantFields?.has(t));
+      return _variantFields ? a.tests.some(t => _variantFields!.has(t)) : true;
     }
     return _variantFields?.has(a.test ?? "") ?? false;
   });

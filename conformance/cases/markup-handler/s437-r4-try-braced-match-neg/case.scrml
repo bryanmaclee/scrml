@@ -1,0 +1,12 @@
+<program>
+type Phase:enum = { Idle, Busy }
+<ph>: Phase = .Idle
+<n> = 0
+<r> = 0
+<r2> = 0
+${ function h() { @r2 = 9 } }
+<match on=@ph>
+  <Idle><button onclick={ try { h() } catch (e) { h() }; h() }>x</button></>
+  <Busy><p>b</p></>
+</>
+</program>

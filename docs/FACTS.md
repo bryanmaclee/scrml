@@ -20,17 +20,17 @@ Also absent: the §34 diagnostic-code total. It is load-bearing but not reliably
 <!-- @generated:facts-table START (do not edit — `bun scripts/facts.ts --write`) -->
 | fact | value |
 |---|---|
-| compiler version | `0.7.1` |
-| live compiler source (`compiler/src`) | 263,682 lines across 207 files |
-| test files | 1,503 |
-| specification lines (`compiler/SPEC.md`) | 38,507 |
-| conformance cases | 971 |
+| compiler version | `0.8.0` |
+| live compiler source (`compiler/src`) | 277,974 lines across 216 files |
+| test files | 1,551 |
+| specification lines (`compiler/SPEC.md`) | 41,807 |
+| conformance cases | 1208 |
 | standard-library modules | 21 |
 | CLI verbs | 11 |
 | LSP capabilities | 7 |
 | editor integrations | 2 |
 | deploy targets | 4 |
-| public code samples under the compile gate | 12 |
+| public code samples under the compile gate | 24 |
 <!-- @generated:facts-table END -->
 
 ## Detail

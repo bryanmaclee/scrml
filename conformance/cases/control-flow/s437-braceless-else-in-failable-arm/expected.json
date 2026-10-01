@@ -1,0 +1,28 @@
+{
+  "id": "control-flow-s437-braceless-else-in-failable-arm",
+  "description": "A braceless `if (c) a; else b` inside a `!{}` handler-arm body keeps its `else` (S437: the shared statement parser's braceless-else fix). With `mid == \"missing\"` the `yes` branch runs, not `no`, then the following statement appends `!`.",
+  "language-version": "1.0",
+  "spec": "§17",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§17 if/else — an `else` belongs to the nearest unmatched braceless `if`; §19 `!{}` arm bodies are logic statement lists.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "r": "yes!"
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "yes!"
+      }
+    ]
+  }
+}

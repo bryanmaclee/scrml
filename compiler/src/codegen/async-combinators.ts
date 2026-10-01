@@ -22,10 +22,13 @@
  * merge-sort is O(n log n) async compares with no native reuse; it stays
  * fail-closed via the existing `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` backstop.
  *
- * Dependency-neutral (no codegen imports) so both the emit-expr lowering site and
+ * Dependency-neutral (its only codegen import is the equally leaf `local-async-fns.ts`,
+ * s440) so both the emit-expr lowering site and
  * the emit-library-shared fail-closed drain can share the method set + the
  * `callbackReachesAsync` detector without an import cycle.
  */
+
+import { localCalleeOf, localFnRefOf, BOUND_CALLEE_MARK } from "./local-async-fns.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -71,6 +74,15 @@ export interface AsyncNameFacts {
    * already is. Absent → no stdlib classifier in scope (test harness / no imports).
    */
   isStdlibAsync?: ((name: string) => boolean) | null;
+  /**
+   * s441 fix round — every name the FILE itself binds (a file-scope function, a
+   * top-level `let`/`const`, an import). A fire-and-forget scheduler exemption
+   * (`setTimeout(fn)` discards fn's return) is only sound for the GLOBAL
+   * scheduler: a user `function setTimeout(f) { return f(x) }` hands the Promise
+   * straight back. Absent → no file bindings known (no exemption is then taken on
+   * a name the lexical pass can see bound; the file scope is unknown).
+   */
+  boundNames?: ReadonlySet<string> | null;
 }
 
 /**
@@ -149,6 +161,37 @@ export const ASYNC_COMBINATOR_METHOD_ORDER = [
 export const ASYNC_COMBINATOR_METHODS: ReadonlySet<string> = new Set(ASYNC_COMBINATOR_METHOD_ORDER);
 
 /**
+ * s440 — collection methods that invoke a callback SYNCHRONOUSLY and CONSUME its
+ * return value, and that have NO async combinator: `.sort`/`.toSorted` (DD FORK 2 —
+ * no async merge-sort) and the from-the-end searches/folds outside the clean family.
+ * An async function passed to one BY REFERENCE (`xs.sort(inner)`) hands it Promises
+ * — every comparison / predicate sees an always-truthy value — so the site fails
+ * closed. (A lambda there already fails closed: its body is a sync callback.)
+ *
+ * Deliberately NOT "any call argument": a user higher-order function may well await
+ * the function it is given (a foreign `_={ … await run() … }=` thunk driver does),
+ * and the compiler cannot see which — that is the deferred user-HOF case, and
+ * rejecting it would refuse correct programs.
+ */
+export const SYNC_CALLBACK_CONSUMER_METHODS: ReadonlySet<string> = new Set([
+  "sort",
+  "toSorted",
+  "findLast",
+  "findLastIndex",
+  "reduceRight",
+]);
+
+/** Is `node` a `recv.<m>(…)` call to a `SYNC_CALLBACK_CONSUMER_METHODS` member? */
+export function isSyncCallbackConsumerCall(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  const n = node as ASTNode;
+  if (n.kind !== "call") return false;
+  const callee = n.callee as ASTNode | undefined;
+  return !!callee && callee.kind === "member" && typeof callee.property === "string" &&
+    SYNC_CALLBACK_CONSUMER_METHODS.has(callee.property);
+}
+
+/**
  * The KNOWN-DISCARD-HOF set (S279) — global callables that STRUCTURALLY DISCARD
  * their callback's return value. A fire-and-forget timer / scheduler runs the
  * callback for its side effects and throws the return away, so the value-coercion
@@ -196,6 +239,10 @@ export function isKnownDiscardHofCall(
   const callee = n.callee as ASTNode | undefined;
   if (!callee || callee.kind !== "ident" || typeof callee.name !== "string") return false;
   if (!KNOWN_DISCARD_HOF.has(callee.name)) return false;
+  // s441 fix round — a scheduler NAME bound by the program (a local or file-scope
+  // `function setTimeout(f) { return f() }`, an import, a param) is not the global
+  // scheduler and does not discard the return (marked by the lexical pre-pass).
+  if (n[BOUND_CALLEE_MARK] === true) return false;
   const args = n.args as unknown[] | undefined;
   if (!Array.isArray(args) || args.length < 1) return false;
   return args.some(
@@ -231,6 +278,10 @@ export function callbackReachesAsync(
   if (!cbNode || typeof cbNode !== "object") return false;
   const cb = cbNode as ASTNode;
   if (cb.kind === "ident" && typeof cb.name === "string") {
+    // s440 — a by-reference NESTED helper (`xs.some(inner)`) carries its own
+    // resolution; the name-based sets only know file-scope functions.
+    const local = localFnRefOf(cb);
+    if (local) return local.async;
     return isAsyncName(cb.name);
   }
   if (cb.kind !== "lambda") return false;
@@ -246,10 +297,17 @@ export function callbackReachesAsync(
     if (Array.isArray(node)) { for (const c of node) walk(c); return; }
     const n = node as ASTNode;
     if (n.kind === "call") {
-      const callee = n.callee as ASTNode | undefined;
-      const nm = (typeof n.name === "string" ? n.name : undefined)
-        ?? ((callee && callee.kind === "ident" && typeof callee.name === "string") ? callee.name : undefined);
-      if (typeof nm === "string" && !shadow.has(nm) && isAsyncName(nm)) { found = true; return; }
+      // s440 — a call to a NESTED helper answers from its lexical resolution
+      // (`localCalleeOf`), which the file-scope async sets cannot see.
+      const local = localCalleeOf(n);
+      if (local) {
+        if (local.async) { found = true; return; }
+      } else {
+        const callee = n.callee as ASTNode | undefined;
+        const nm = (typeof n.name === "string" ? n.name : undefined)
+          ?? ((callee && callee.kind === "ident" && typeof callee.name === "string") ? callee.name : undefined);
+        if (typeof nm === "string" && !shadow.has(nm) && isAsyncName(nm)) { found = true; return; }
+      }
     }
     for (const key of Object.keys(n)) {
       if (key === "span") continue;

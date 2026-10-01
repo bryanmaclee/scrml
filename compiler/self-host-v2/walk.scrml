@@ -1,0 +1,402 @@
+// =============================================================================
+// self-host-v2 / walk.scrml — the ONE structural traversal of Core (dpa-051 §3.4).
+//
+// `kids(n)` is the single place that knows which Core nodes contain which. It
+// is a total `match` over every Core enum with no default arm, so adding a
+// variant anywhere in core.scrml fails THIS file at compile time (E-TYPE-020)
+// until its children are declared — and every fold built on `allNodes` sees
+// the new node automatically. Passes never hand-write their own recursion
+// over Core (the TS compiler's F1 "walker misses a position" family).
+// =============================================================================
+${
+    import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block,
+             Attr, View, CondArm, ConstructAttr, Field, Decl, Fn, ServerFn, CoreProgram } from "./core.scrml"
+
+    // Every Core node kind, as one sum. Types, Syms and Literals are leaves of
+    // the walk (they carry no Expr/Stmt/View below them).
+    export type Node:enum = {
+        NProgram(p: CoreProgram),
+        NDecl(d: Decl),
+        NField(f: Field),
+        NFn(f: Fn),
+        NServerFn(f: ServerFn),
+        NBlock(b: Block),
+        NStmt(s: Stmt),
+        NExpr(e: Expr),
+        NPlace(pl: Place),
+        NInst(i: InstRef),
+        NPattern(pat: Pattern),
+        NEdit(k: EditKind),
+        NView(v: View),
+        NAttr(a: Attr),
+    }
+
+    fn exprNodes(es: Expr[]) -> Node[] {
+        let out: Node[] = []
+        for (const e of es) { out = out.concat([Node.NExpr(e)]) }
+        return out
+    }
+
+    fn viewNodes(vs: View[]) -> Node[] {
+        let out: Node[] = []
+        for (const v of vs) { out = out.concat([Node.NView(v)]) }
+        return out
+    }
+
+    fn stmtNodes(ss: Stmt[]) -> Node[] {
+        let out: Node[] = []
+        for (const s of ss) { out = out.concat([Node.NStmt(s)]) }
+        return out
+    }
+
+    fn maybeExpr(e: Expr | not) -> Node[] {
+        if (e is not) return []
+        return [Node.NExpr(e)]
+    }
+
+    fn maybeBlock(b: Block | not) -> Node[] {
+        if (b is not) return []
+        return [Node.NBlock(b)]
+    }
+
+    fn maybeViews(vs: View[] | not) -> Node[] {
+        if (vs is not) return []
+        return viewNodes(vs)
+    }
+
+    fn armNodes(arms: MatchArm[]) -> Node[] {
+        let out: Node[] = []
+        for (const a of arms) { out = out.concat([Node.NPattern(a.pat), Node.NExpr(a.body)]) }
+        return out
+    }
+
+    fn condArmNodes(arms: CondArm[]) -> Node[] {
+        let out: Node[] = []
+        for (const a of arms) { out = out.concat([Node.NExpr(a.test)]).concat(viewNodes(a.body)) }
+        return out
+    }
+
+    fn constructNodes(attrs: ConstructAttr[]) -> Node[] {
+        let out: Node[] = []
+        for (const a of attrs) { out = out.concat([Node.NExpr(a.value)]) }
+        return out
+    }
+
+    fn attrNodes(attrs: Attr[]) -> Node[] {
+        let out: Node[] = []
+        for (const a of attrs) { out = out.concat([Node.NAttr(a)]) }
+        return out
+    }
+
+    // The direct children of a node, in source order.
+    export fn kids(n: Node) -> Node[] {
+        return match n {
+            .NProgram(p: p) :> programKids(p)
+            .NDecl(d: d) :> declKids(d)
+            .NField(f: f) :> maybeExpr(f.init)
+            .NFn(f: f) :> [Node.NBlock(f.body)]
+            .NServerFn(f: f) :> [Node.NBlock(f.body)]
+            .NBlock(b: b) :> stmtNodes(b.stmts)
+            .NStmt(s: s) :> stmtKids(s)
+            .NExpr(e: e) :> exprKids(e)
+            .NPlace(pl: pl) :> placeKids(pl)
+            .NInst(i: i) :> []
+            .NPattern(pat: pat) :> []
+            .NEdit(k: k) :> editKids(k)
+            .NView(v: v) :> viewKids(v)
+            .NAttr(a: a) :> attrKids(a)
+        }
+    }
+
+    fn programKids(p: CoreProgram) -> Node[] {
+        let out: Node[] = []
+        for (const d of p.decls) { out = out.concat([Node.NDecl(d)]) }
+        for (const f of p.fns) { out = out.concat([Node.NFn(f)]) }
+        for (const s of p.server) { out = out.concat([Node.NServerFn(s)]) }
+        return out
+    }
+
+    fn declKids(d: Decl) -> Node[] {
+        let out: Node[] = []
+        for (const f of d.fields) { out = out.concat([Node.NField(f)]) }
+        return out.concat(maybeViews(d.renders))
+    }
+
+    fn stmtKids(s: Stmt) -> Node[] {
+        return match s {
+            .Let(sym: sym, init: init) :> [Node.NExpr(init)]
+            .Assign(local: local, value: value) :> [Node.NExpr(value)]
+            .Write(inst: inst, edit: edit, value: value) :>
+                [Node.NInst(inst), Node.NEdit(edit), Node.NExpr(value)]
+            .Commit(writes: ws) :> stmtNodes(ws)
+            .If(cond: cond, thenB: thenB, elseB: elseB) :>
+                [Node.NExpr(cond), Node.NBlock(thenB)].concat(maybeBlock(elseB))
+            .Return(e: e) :> [Node.NExpr(e)]
+            .Eval(e: e) :> [Node.NExpr(e)]
+        }
+    }
+
+    fn exprKids(e: Expr) -> Node[] {
+        return match e {
+            .Lit(lit: lit) :> []
+            .Local(sym: sym) :> []
+            .Read(place: place) :> [Node.NPlace(place)]
+            .Call(callee: callee, args: args) :> exprNodes(args)
+            .Prim(op: op, args: args) :> exprNodes(args)
+            .Match(scrut: scrut, arms: arms) :> [Node.NExpr(scrut)].concat(armNodes(arms))
+            .ArrayOf(elems: elems) :> exprNodes(elems)
+            .StructOf(ty: ty, fields: fields) :> exprNodes(fields)
+            .Handle(inst: inst) :> [Node.NInst(inst)]
+            .InitOf(decl: d, inst: inst) :> [Node.NInst(inst)]
+            .Host(call: c) :> []
+            .Lambda(params: ps, body: b) :> [Node.NExpr(b)]
+            .SeqCall(op: o, seq: sq, f: f) :> [Node.NExpr(sq), Node.NExpr(f)]
+        }
+    }
+
+    // s444: an ElemAt edit holds its index expression.
+    fn editKids(k: EditKind) -> Node[] {
+        return match k {
+            .ElemAt(index: i, path: p) :> [Node.NExpr(i)]
+            .Replace :> []
+            .Append :> []
+            .Prepend :> []
+            .Anywhere :> []
+            .PositionWrite :> []
+            .FieldAt(path: p) :> []
+            .Transition :> []
+            .RemoveEnd :> []
+            .RemoveFront :> []
+            .RemoveAnywhere :> []
+        }
+    }
+
+    fn placeKids(pl: Place) -> Node[] {
+        return match pl {
+            .Cell(decl: decl, inst: inst, path: path) :> [Node.NInst(inst)]
+            .LocalPath(sym: sym, path: path) :> []
+        }
+    }
+
+    fn viewKids(v: View) -> Node[] {
+        return match v {
+            .El(tag: tag, attrs: attrs, kids: ks) :> attrNodes(attrs).concat(viewNodes(ks))
+            .Text(text: t) :> []
+            .Dyn(e: e) :> [Node.NExpr(e)]
+            .Cond(arms: arms) :> condArmNodes(arms)
+            .Each(src: src, key: key, row: row) :>
+                [Node.NExpr(src)].concat(maybeExpr(key)).concat(viewNodes(row))
+            .Instance(decl: decl, attrs: attrs, slot: slot, alias: alias) :>
+                constructNodes(attrs).concat(viewNodes(slot))
+            .Slot :> []
+            .Star(decl: d, inst: inst) :> [Node.NInst(inst)]
+        }
+    }
+
+    fn attrKids(a: Attr) -> Node[] {
+        return match a {
+            .Static(name: name, value: value) :> []
+            .Bound(name: name, e: e) :> [Node.NExpr(e)]
+            .On(event: event, body: body) :> [Node.NBlock(body)]
+            .Bind(kind: k, read: r, sink: sk, write: w) :> [Node.NExpr(r), Node.NBlock(w)]
+        }
+    }
+
+    // Every node under (and including) `root`, preorder.
+    export fn allNodes(root: Node) -> Node[] {
+        let out: Node[] = []
+        let stack: Node[] = [root]
+        while (stack.length > 0) {
+            const n: Node = stack[stack.length - 1]
+            stack = stack.slice(0, stack.length - 1)
+            out = out.concat([n])
+            const ks: Node[] = kids(n)
+            let i: int = ks.length - 1
+            while (i >= 0) {
+                stack = stack.concat([ks[i]])
+                i = i - 1
+            }
+        }
+        return out
+    }
+
+    // -------------------------------------------------------------------------
+    // Folds built on allNodes — each a total match over Node.
+    // -------------------------------------------------------------------------
+
+    // The declarations whose SHARED instance is referenced under `root`
+    // (dpa-051 §5.2 (4): `shared_<decl>` is emitted only if `.Shared(decl)`
+    // appears in Core — lazy by construction). May contain duplicates.
+    export fn sharedRefs(root: Node) -> Sym[] {
+        let out: Sym[] = []
+        for (const n of allNodes(root)) {
+            const s: Sym | not = sharedOf(n)
+            if (s is some) out = out.concat([s])
+        }
+        return out
+    }
+
+    fn sharedOf(n: Node) -> Sym | not {
+        return match n {
+            .NInst(i: i) :> sharedDecl(i)
+            .NProgram(p: p) :> not
+            .NDecl(d: d) :> not
+            .NField(f: f) :> not
+            .NFn(f: f) :> not
+            .NServerFn(f: f) :> not
+            .NBlock(b: b) :> not
+            .NStmt(s: s) :> not
+            .NExpr(e: e) :> not
+            .NPlace(pl: pl) :> not
+            .NPattern(pat: pat) :> not
+            .NEdit(k: k) :> not
+            .NView(v: v) :> not
+            .NAttr(a: a) :> not
+        }
+    }
+
+    fn sharedDecl(i: InstRef) -> Sym | not {
+        return match i {
+            .Shared(decl: d) :> d
+            .Lexical(depth: depth) :> not
+            .Alias(sym: s) :> not
+            .Narrowed(sym: s) :> not
+        }
+    }
+
+    // The locals a Stmt-bearing node BINDS (Let, <each> binds and row handles,
+    // pattern binders) — the name requests the printer's NameSupply mints.
+    export fn boundSyms(root: Node) -> Sym[] {
+        let out: Sym[] = []
+        for (const n of allNodes(root)) { out = out.concat(bindsOf(n)) }
+        return out
+    }
+
+    fn bindsOf(n: Node) -> Sym[] {
+        return match n {
+            .NStmt(s: s) :> stmtBinds(s)
+            .NView(v: v) :> viewBinds(v)
+            .NPattern(pat: pat) :> patternBinds(pat)
+            .NFn(f: f) :> paramSyms(f)
+            .NExpr(e: e) :> exprBinds(e)
+            .NAttr(a: a) :> attrBinds(a)
+            .NProgram(p: p) :> []
+            .NDecl(d: d) :> []
+            .NField(f: f) :> []
+            .NServerFn(f: f) :> []
+            .NBlock(b: b) :> []
+            .NPlace(pl: pl) :> []
+            .NInst(i: i) :> []
+            .NEdit(k: k) :> []
+        }
+    }
+
+    // s444: a lambda binds its parameters; a bind binds its event-value sink.
+    fn exprBinds(e: Expr) -> Sym[] {
+        return match e {
+            .Lambda(params: ps) :> ps
+            .Lit(lit: x) :> []
+            .Local(sym: x) :> []
+            .Read(place: x) :> []
+            .Call(callee: x) :> []
+            .Prim(op: x) :> []
+            .Match(scrut: x) :> []
+            .ArrayOf(elems: x) :> []
+            .StructOf(ty: x) :> []
+            .Handle(inst: x) :> []
+            .InitOf(decl: x) :> []
+            .Host(call: x) :> []
+            .SeqCall(op: x) :> []
+        }
+    }
+
+    fn attrBinds(a: Attr) -> Sym[] {
+        return match a {
+            .Bind(sink: s) :> [s]
+            .Static(name: x) :> []
+            .Bound(name: x) :> []
+            .On(event: x) :> []
+        }
+    }
+
+    fn paramSyms(f: Fn) -> Sym[] {
+        let out: Sym[] = []
+        for (const p of f.params) { out = out.concat([p.sym]) }
+        return out
+    }
+
+    fn stmtBinds(s: Stmt) -> Sym[] {
+        return match s {
+            .Let(sym: sym, init: init) :> [sym]
+            .Assign(local: local, value: value) :> []
+            .Write :> []
+            .Commit :> []
+            .If(cond: cond, thenB: thenB, elseB: elseB) :> []
+            .Return(e: e) :> []
+            .Eval(e: e) :> []
+        }
+    }
+
+    fn viewBinds(v: View) -> Sym[] {
+        return match v {
+            .Each(bind: bind, handles: handles) :> [bind].concat(handles)
+            .El(tag: tag, attrs: attrs, kids: ks) :> []
+            .Text(text: t) :> []
+            .Dyn(e: e) :> []
+            .Cond(arms: arms) :> []
+            .Instance(decl: decl, attrs: attrs, slot: slot, alias: alias) :> []
+            .Slot :> []
+            .Star(decl: d) :> []
+        }
+    }
+
+    fn patternBinds(pat: Pattern) -> Sym[] {
+        return match pat {
+            .PVariant(enumSym: e, idx: idx, binds: binds) :> binds
+            .PLit(lit: lit) :> []
+            .PWild :> []
+        }
+    }
+
+    // The locals ASSIGNED (not merely bound) under `root` — a Let whose sym is
+    // later Assigned prints as `let`, otherwise `const`.
+    export fn assignedSyms(root: Node) -> int[] {
+        let out: int[] = []
+        for (const n of allNodes(root)) {
+            const id: int = assignedOf(n)
+            if (id >= 0) out = out.concat([id])
+        }
+        return out
+    }
+
+    fn assignedOf(n: Node) -> int {
+        return match n {
+            .NStmt(s: s) :> assignedInStmt(s)
+            .NProgram(p: p) :> -1
+            .NDecl(d: d) :> -1
+            .NField(f: f) :> -1
+            .NFn(f: f) :> -1
+            .NServerFn(f: f) :> -1
+            .NBlock(b: b) :> -1
+            .NExpr(e: e) :> -1
+            .NPlace(pl: pl) :> -1
+            .NInst(i: i) :> -1
+            .NPattern(pat: pat) :> -1
+            .NEdit(k: k) :> -1
+            .NView(v: v) :> -1
+            .NAttr(a: a) :> -1
+        }
+    }
+
+    fn assignedInStmt(s: Stmt) -> int {
+        return match s {
+            .Assign(local: local, value: value) :> local.id
+            .Let(sym: sym, init: init) :> -1
+            .Write :> -1
+            .Commit :> -1
+            .If(cond: cond, thenB: thenB, elseB: elseB) :> -1
+            .Return(e: e) :> -1
+            .Eval(e: e) :> -1
+        }
+    }
+}

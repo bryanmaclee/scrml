@@ -1,0 +1,52 @@
+{
+  "core": "t3TwoCells",
+  "spec": "§66.17 item 3, §65.6",
+  "rationale": "Tokens matched over two different enum cells key on two different attributes (`data-scrml-theme-mode`, `data-scrml-theme-contrast`) and switch independently.",
+  "html": "<div data-scrml=\"Box\"><div class=\"box\">x</div></div>",
+  "steps": [
+    {
+      "rootAttr": [
+        "data-scrml-theme-mode",
+        "Dark"
+      ],
+      "expect": [
+        {
+          "sel": ".box",
+          "prop": "color",
+          "value": "rgb(238, 238, 238)"
+        }
+      ]
+    },
+    {
+      "rootAttr": [
+        "data-scrml-theme-contrast",
+        "High"
+      ],
+      "expect": [
+        {
+          "sel": ".box",
+          "prop": "border-top-width",
+          "value": "3px"
+        },
+        {
+          "sel": ".box",
+          "prop": "color",
+          "value": "rgb(238, 238, 238)"
+        }
+      ]
+    },
+    {
+      "rootAttr": [
+        "data-scrml-theme-contrast",
+        "Normal"
+      ],
+      "expect": [
+        {
+          "sel": ".box",
+          "prop": "border-top-width",
+          "value": "1px"
+        }
+      ]
+    }
+  ]
+}

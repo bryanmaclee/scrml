@@ -1,0 +1,4 @@
+<program>
+import("./x.js")
+<p>x</p>
+</program>

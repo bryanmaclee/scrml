@@ -1,0 +1,20 @@
+// =============================================================================
+// self-host-v2 / slice-m1 / bundle.scrml — the compile ENTRY for slice M1.
+//
+// impl#1 lowers a `${}` library module's `match` correctly only when the
+// compile set contains a `<program>` entry (progress.md F1 / F11). This file is
+// that entry: it imports every slice-M1 module so one `compileScrml` call emits
+// them all as chunks registering into `_scrml_modules[...]`. It renders nothing.
+// =============================================================================
+<program>
+    import { mkSym } from "../core.scrml"
+    import { allNodes } from "../walk.scrml"
+    import { printProgram } from "../print.scrml"
+    import { checkCore } from "../check.scrml"
+    import { countNodes } from "../measure.scrml"
+    import { counterCore } from "./counter.core.scrml"
+    import { dropdownCore } from "./dropdown.core.scrml"
+    import { valuesemCore } from "./valuesem.core.scrml"
+
+    fn bundleProbe() -> int { return mkSym(0, "probe").id }
+</program>

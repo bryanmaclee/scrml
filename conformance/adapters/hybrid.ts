@@ -11,17 +11,24 @@
  * P5: a bootstrap module is DONE when the hybrid with that one stage swapped passes the FULL
  * conformance suite. Driver: `bun scripts/hybrid.ts --swap <STAGE>=<module> --conformance`.
  *
+ * A substitute whose artifacts are not impl#1-shaped (the bootstrap CG: an ES module over the
+ * bootstrap runtime) also passes its client EXECUTOR (s439-bootstrap-m3-ingest); `run()` then
+ * hands execution of the artifact to it. With no executor, `run()` executes impl#1's artifact.
+ *
  * Because the overlay is module state in impl#1, installing a hybrid affects every importer of
  * impl#1 in the same process. `uninstallHybrid()` restores pure impl#1.
  */
-import { setCompileOverlay } from "./impl1-ts.ts";
+import { setClientExecutor, setCompileOverlay, type ClientExecutor } from "./impl1-ts.ts";
 
 export { compile, run, runServer, runTool } from "./impl1-ts.ts";
+export type { ClientExecutor } from "./impl1-ts.ts";
 
-export function installHybrid(stageOverrides: Record<string, unknown>): void {
+export function installHybrid(stageOverrides: Record<string, unknown>, executor: ClientExecutor | null = null): void {
   setCompileOverlay({ stageOverrides });
+  setClientExecutor(executor);
 }
 
 export function uninstallHybrid(): void {
   setCompileOverlay(null);
+  setClientExecutor(null);
 }

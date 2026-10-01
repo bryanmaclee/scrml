@@ -1,0 +1,22 @@
+// lib/brand-theme.scrml   — ⚑ O17(d): a `<theme>` in a library file (§65.9 places it at program scope)
+export type Mode:enum = { Light, Dark }
+export <let mode:Mode=.Light/>
+
+<theme>                                                        // a MARKER: these declarations lower to CSS custom properties
+    export <brand:string="#338967"/>                           // locked literal → :root { --brand: #338967 }
+    export <danger:string="#dc2626"/>
+    export <ink:string=(match @mode { .Light :> "#0f172a"  .Dark :> "#e2e8f0" })/>     // recognized match over an enum →
+    export <paper:string=(match @mode { .Light :> "#ffffff"  .Dark :> "#0f172a" })/>   //   :root[data-scrml-theme-mode="Dark"] {…}
+</theme>
+
+export <swatch let label:string="Brand" let hex:string=@brand/>   // `let` + reactive initializer = SEEDED (§66.9)
+renders <span class="chip"><i style="background:${hex}"></i> ${label}</span>
+
+export <accent:swatch label="Accent" hex=@brand/>              // named shared instances (§66.8.2) (a declaration per the #16 ruling, §66.2.2)
+export <warn:swatch label="Warn" hex="#FF6600"/>
+
+export function toggleMode() { @mode = @mode == .Dark ? .Light : .Dark }   // writes stay in the defining file (§66.14; ⚑ O39)
+export function useWarnAsAccent() {
+    @accent.label = "Warn"
+    @accent.hex = "#FF6600"
+}

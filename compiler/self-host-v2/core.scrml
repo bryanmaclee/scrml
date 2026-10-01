@@ -1,0 +1,475 @@
+// =============================================================================
+// self-host-v2 / core.scrml — the Core IR (bootstrap impl#2, slice M1).
+//
+// Design authority: dpa-051 §3.2 (the proposal), §3.3–§3.6, §4, §5, §6 — R2
+// (thin Core) ruled S437. Everything in this file is DATA: enums and structs,
+// plus pure constructor/lookup `fn`s. There are no methods and no classes
+// (S430 P1), no module state (§3.5), and every traversal elsewhere is a total
+// `match` with NO default arm (§3.4 — enforced by
+// scripts/lint-no-default-arm.js).
+//
+// The §4 invariant: `string` appears ONLY in literal values (Literal.Str,
+// Attr.Static.value, View.Text.text), identifiers (Sym.hint, El.tag,
+// Attr names, On.event) — never as a body, an expression, or a code fragment.
+// Every body is a Block or a View list.
+//
+// Deviations from the §3.2 proposal are listed in
+// compiler/self-host-v2/slice-m1/progress.md ("§3.2 deviations").
+//
+// impl#1 workarounds used here: F11 — every `match` on a payload variant uses
+// NAMED binding (`.Lit(lit: l)`), because positional binding over an enum
+// imported from another file is silently dropped.
+// =============================================================================
+${
+    // -------------------------------------------------------------------------
+    // Identity. A Sym is minted by the binder (analyze) — Core holds Syms,
+    // never names (§3.3). `hint` is the source identifier; the printer's ONE
+    // NameSupply turns hints into emitted names. Sym ids are dense per program.
+    //
+    // THE BINDER'S OBLIGATION (unforgeability of write capabilities). A Sym id
+    // is only meaningful because the binder is the ONLY minter of Syms: every
+    // id is issued once, from one counter, to one declaration site. Write
+    // capabilities (Field.wcap) rest on that: a data IR cannot stop a pass from
+    // constructing `Stmt.Write` with an integer it made up, so `analyze`/`lower`
+    // MUST NOT construct a Sym except through the binder, and MUST NOT reuse a
+    // field's read Sym as a capability. check.scrml's C2 catches a capability
+    // that no field owns; it cannot catch a pass that mints a capability for a
+    // field whose contract grants nothing AND edits that field's `wcap` — that
+    // is C1's job, and C1 is only as good as the Field record. By design
+    // (review F6): unforgeability is binder discipline, not a type-system fact.
+    //
+    // A NodeId keys analyze side-tables (DepSet, certification); M1 needs no
+    // side-table, so no Core node carries one yet (see progress.md).
+    // -------------------------------------------------------------------------
+    export type Sym:struct = { id: int, hint: string }
+    export type NodeId:struct = { n: int }
+
+    // -------------------------------------------------------------------------
+    // Types. Permissions live on the TYPE (§66.12.3): a sequence type carries
+    // its axis grants. Named(sym) names a TypeDef or a declaration (every
+    // declaration registers a type, §66.8.1).
+    // -------------------------------------------------------------------------
+    export type SeqAt:enum = { End, Front, Anywhere }
+    export type LengthGrant:enum = { Fixed, Bounded(min: int, max: int), Free }
+    // `at` = the places the sequence may GROW, `shrink` = the places it may
+    // SHRINK (RULED S442 grow/shrink split: `append`/`pop`, `prepend`/`shift`,
+    // `insert`/`remove`; s444: shrink joined Core when removals became edits).
+    export type SeqGrants:struct = { length: LengthGrant, at: SeqAt[], shrink: SeqAt[], positionsWritable: boolean }
+
+    export type Type:enum = {
+        Int,
+        Num,
+        Str,
+        Bool,
+        Named(sym: Sym),
+        Seq(elem: Type, grants: SeqGrants),
+        Maybe(inner: Type),
+    }
+
+    // A struct field carries its OWN write contract (O3 ruled: struct fields take
+    // per-field `let`; §66.11.4: a field with no contract is fixed). Variant
+    // payload fields carry `noGrants()` (a payload is a value, never written in
+    // place). A `rule=` graph lives on a DECLARATION field (Field.graph); no
+    // source form declares one on a `type … :struct` field, so FieldDef has none
+    // (the M2 fix round removed the unfillable `FieldDef.graph` — progress.md).
+    export type FieldDef:struct   = { sym: Sym, ty: Type, grants: GrantSet }
+    export type VariantDef:struct = { sym: Sym, fields: FieldDef[] }
+    export type TypeDef:enum = {
+        EnumDef(sym: Sym, variants: VariantDef[]),
+        StructDef(sym: Sym, fields: FieldDef[]),
+    }
+
+    // -------------------------------------------------------------------------
+    // Places. A path step names the struct/declaration that owns the field, so
+    // the printer never needs a type environment to turn an index into a
+    // property name (§3.2 had `path:[FieldIdx]`).
+    // -------------------------------------------------------------------------
+    export type FieldRef:struct = { owner: Sym, idx: int }
+
+    // Which instance a cell read/write addresses (§5.2): the lazily-created
+    // shared instance of a declaration; the lexically enclosing instance
+    // (depth 0 = nearest, O54 (a)); an `as=` handle; or a `given`-narrowed
+    // local holding an instance identity (O56 narrow).
+    export type InstRef:enum = {
+        Shared(decl: Sym),
+        Lexical(depth: int),
+        Alias(sym: Sym),
+        Narrowed(sym: Sym),
+    }
+
+    // A read location. `Cell.path` empty = the whole instance value (a struct
+    // snapshot, §66.7.1); `path[0]` indexes the declaration's fields; later
+    // steps index into struct values. `LocalPath.path` is NON-EMPTY — a whole
+    // local is `Expr.Local` (one spelling per shape).
+    export type Place:enum = {
+        Cell(decl: Sym, inst: InstRef, path: FieldRef[]),
+        LocalPath(sym: Sym, path: FieldRef[]),
+    }
+
+    // -------------------------------------------------------------------------
+    // Expressions.
+    // -------------------------------------------------------------------------
+    // A nullary enum variant is `Variant(enumSym, idx)` — the tag is data.
+    export type Literal:enum = {
+        Int(v: int),
+        Num(v: number),
+        Str(v: string),
+        Bool(v: boolean),
+        Variant(enumSym: Sym, idx: int),
+        Absent,
+    }
+
+    // Primitive operators, RESOLVED by analyze: `==` on scalars/nullary enums
+    // is EqPrim, on structs/sequences EqStruct (§45) — the printer never
+    // re-derives an operand's type.
+    export type PrimOp:enum = {
+        Add, Sub, Mul, Div, Mod, Neg,
+        Not, And, Or,
+        Lt, Le, Gt, Ge,
+        EqPrim, NeqPrim, EqStruct, NeqStruct,
+        IsSome, IsNot,
+        Concat, Length,
+    }
+
+    export type Pattern:enum = {
+        PVariant(enumSym: Sym, idx: int, binds: Sym[]),
+        PLit(lit: Literal),
+        PWild,
+    }
+
+    // s444 — the host calls Core admits (a CLOSED set; see progress.md
+    // "host call surface"): `Date.now()` only — the §66.19.5 timestamp.
+    export type HostCall:enum = { DateNow }
+    // s444 — the sequence functions a lambda is admitted as the argument of.
+    // Each makes a NEW sequence value (R3: values are immutable).
+    export type SeqFn:enum = { Filter, Map }
+
+    export type Expr:enum = {
+        Lit(lit: Literal),
+        Local(sym: Sym),
+        Read(place: Place),
+        Call(callee: Sym, args: Expr[]),
+        Prim(op: PrimOp, args: Expr[]),
+        Match(scrut: Expr, arms: MatchArm[]),
+        ArrayOf(elems: Expr[]),
+        StructOf(ty: Sym, fields: Expr[]),
+        Handle(inst: InstRef),
+        // D15 (M2 fix round, F-B): the value field `idx` of `inst` was
+        // CONSTRUCTED with — that instance's own initializer (a use-site value,
+        // L6 / §66.9, else the declared default), evaluated again now. What
+        // `reset(@x.f)` writes (L4) when the instance may have had a use site.
+        InitOf(decl: Sym, inst: InstRef, idx: int),
+        // s444: a host call (the closed HostCall set; never in a pure `fn`).
+        Host(call: HostCall),
+        // s444: a function value — its parameters are binder-minted locals;
+        // the body is ONE expression. Only as a SeqCall's argument.
+        Lambda(params: Sym[], body: Expr),
+        // s444: `seq.filter(f)` / `seq.map(f)` — a new sequence value.
+        SeqCall(op: SeqFn, seq: Expr, f: Expr),
+    }
+    export type MatchArm:struct = { pat: Pattern, body: Expr }
+
+    // -------------------------------------------------------------------------
+    // Statements. `Let` and `Assign` are DIFFERENT nodes (§3.3 — the
+    // `const n = n + 1` family is unrepresentable). A cell write is a `Write`
+    // naming a WRITE CAPABILITY symbol (`cap`): a field has a capability iff its
+    // contract grants some write (Field.wcap). A locked or derived field has no
+    // capability symbol, so no Write can name it — see progress.md "grants are
+    // symbols".
+    // -------------------------------------------------------------------------
+    // s444: the SHRINK edits (a Write's value is the COUNT removed, an Int
+    // literal, for RemoveEnd / RemoveFront — `pop()` / `shift()` remove 1; the
+    // NEW whole value, `SeqCall(Filter, <the field>, λ)`, for RemoveAnywhere —
+    // `@x = @x.filter(λ)`), and ElemAt: a write of struct path `path` inside the
+    // element at position `index` (`@xs[i].f = v`, dpa-052 Q3 — judged by the
+    // ELEMENT field's own contract). In a GrantSet, an element-field grant is
+    // listed as `FieldAt(path)` over the element struct (it names no index).
+    export type EditKind:enum = {
+        Replace,
+        Append,
+        Prepend,
+        Anywhere,
+        PositionWrite,
+        FieldAt(path: FieldRef[]),
+        Transition,
+        RemoveEnd,
+        RemoveFront,
+        RemoveAnywhere,
+        ElemAt(index: Expr, path: FieldRef[]),
+    }
+    // RuntimeEdge: a `rule=` edge whose from-state is not statically known
+    // (§6.3). The invariant hook (O36) is deliberately absent until O36 rules.
+    export type Check:enum = { Static, RuntimeEdge }
+
+    // Commit: an ALL-OR-NOTHING group of Writes — the spread-override field
+    // edit `@x = { ...@x, f: v, g: w }` (§66.11.3 item 1; RULED S440: "Should a
+    // spread write be all-or-nothing on a runtime refusal? Yes."). Every
+    // Write's contract is checked first; only if every check passes are the
+    // Writes applied, in order; on a refusal NONE is applied. Its Writes' values
+    // are Locals — the one snapshot, evaluated by the Lets before it (check.scrml
+    // C7), so checking and applying never re-evaluate a value.
+    export type Stmt:enum = {
+        Let(sym: Sym, init: Expr),
+        Assign(local: Sym, value: Expr),
+        Write(cap: Sym, inst: InstRef, edit: EditKind, value: Expr, check: Check),
+        Commit(writes: Stmt[]),
+        If(cond: Expr, thenB: Block, elseB: Block | not),
+        Return(e: Expr),
+        Eval(e: Expr),
+    }
+    export type Block:struct = { stmts: Stmt[] }
+
+    // -------------------------------------------------------------------------
+    // Views. Every child position is a View LIST (no Fragment variant).
+    // Events are attributes of their element (§3.2 had View.On).
+    // -------------------------------------------------------------------------
+    // s444 — a two-way bind (§5.4): `read` is shown in the element's `value`
+    // / `checked` property; on the element's input / change event its property
+    // value is bound to `sink` (a binder-minted local) and `write` runs — ONE
+    // capability-checked Write of `Local(sink)` to the place `read` reads
+    // (check.scrml C8). The event-value round trip, with no expression text.
+    export type BindKind:enum = { Value, Checked }
+
+    export type Attr:enum = {
+        Static(name: string, value: string),
+        Bound(name: string, e: Expr),
+        On(event: string, body: Block),
+        Bind(kind: BindKind, read: Expr, sink: Sym, write: Block),
+    }
+    export type ConstructAttr:struct = { field: int, value: Expr }
+    export type CondArm:struct = { test: Expr, body: View[] }
+
+    export type View:enum = {
+        El(tag: string, attrs: Attr[], kids: View[]),
+        Text(text: string),
+        Dyn(e: Expr),
+        Cond(arms: CondArm[]),
+        Each(src: Expr, bind: Sym, key: Expr | not, handles: Sym[], row: View[]),
+        Instance(decl: Sym, attrs: ConstructAttr[], slot: View[], alias: Sym | not),
+        Slot,
+        // s444 — `<*x/>` (§66.6.2): the EXISTING instance `inst` of `decl`,
+        // rendered with decl's renders; constructs nothing (M1 D4 closed).
+        Star(decl: Sym, inst: InstRef),
+    }
+
+    // -------------------------------------------------------------------------
+    // Declarations (§5). The program is itself a `single` declaration (R4):
+    // top-level cells are its fields; its `renders` is the page view.
+    // -------------------------------------------------------------------------
+    export type FieldMode:enum = { Locked, Let, Derived, Seeded }
+    // Attribute = constructible at a use site (§66.14 rule 4); Child = a child
+    // declaration (use-site value setting is O43, not ruled).
+    export type FieldRole:enum = { Attribute, Child }
+
+    // A resolved grant set: `replace` (from `let`, §66.9) plus the non-replace
+    // edits the field's type/contract grants (sequence axes, a transition graph).
+    export type GrantSet:struct = { replace: boolean, edits: EditKind[] }
+
+    // A `rule=` graph over an enum's variants, by variant index (§66.13.2).
+    export type Edge:struct = { origin: int, targets: int[] }
+    export type TransitionGraph:struct = { enumSym: Sym, edges: Edge[] }
+
+    // `init` is `not` for an attribute declared without a default (O33).
+    export type Field:struct = {
+        sym: Sym,
+        ty: Type,
+        init: Expr | not,
+        mode: FieldMode,
+        role: FieldRole,
+        grants: GrantSet,
+        graph: TransitionGraph | not,
+        exported: boolean,
+        wcap: Sym | not,
+    }
+
+    export type DeclKind:enum = { Program, User, Predefined }
+    // O8 (ruled): a function-typed attribute is wiring, not a field.
+    export type WiringAttr:struct = { sym: Sym, ty: Type }
+
+    // `handles` = the `as=` aliases whose cells live on THIS declaration's
+    // instances (aliases inside an `<each>` row live on the row: Each.handles).
+    export type Decl:struct = {
+        sym: Sym,
+        kind: DeclKind,
+        single: boolean,
+        fields: Field[],
+        renders: View[] | not,
+        wiring: WiringAttr[],
+        handles: Sym[],
+    }
+
+    export type Param:struct    = { sym: Sym, ty: Type }
+    export type Fn:struct       = { sym: Sym, params: Param[], body: Block, pure: boolean }
+    export type ServerFn:struct = { sym: Sym, params: Param[], body: Block }
+
+    // One CoreProgram per linked program (a library's declarations appear in
+    // the consumer's Core). `program` names the program declaration.
+    export type CoreProgram:struct = {
+        program: Sym,
+        decls: Decl[],
+        types: TypeDef[],
+        fns: Fn[],
+        server: ServerFn[],
+    }
+
+    // -------------------------------------------------------------------------
+    // Constructors — pure shorthands used by the hand-built Core oracles and
+    // (in M2) by `lower`. Qualified variant construction resolves in every
+    // position under impl#1; these exist for readability, not as a workaround.
+    // -------------------------------------------------------------------------
+    export fn mkSym(id: int, hint: string) -> Sym { return { id: id, hint: hint } }
+
+    export fn block(stmts: Stmt[]) -> Block { return { stmts: stmts } }
+    export fn noGrants() -> GrantSet { return { replace: false, edits: [] } }
+    export fn replaceGrant() -> GrantSet { return { replace: true, edits: [] } }
+
+    export fn litInt(v: int) -> Expr { return Expr.Lit(Literal.Int(v)) }
+    export fn litStr(v: string) -> Expr { return Expr.Lit(Literal.Str(v)) }
+    export fn litBool(v: boolean) -> Expr { return Expr.Lit(Literal.Bool(v)) }
+    export fn litVariant(enumSym: Sym, idx: int) -> Expr { return Expr.Lit(Literal.Variant(enumSym, idx)) }
+
+    export fn fref(owner: Sym, idx: int) -> FieldRef { return { owner: owner, idx: idx } }
+
+    // A read of field `idx` of declaration `decl` through `inst`.
+    export fn readField(decl: Sym, inst: InstRef, idx: int) -> Expr {
+        return Expr.Read(Place.Cell(decl, inst, [fref(decl, idx)]))
+    }
+
+    // A read of struct field `idx` (of struct type `owner`) of a local.
+    export fn readLocalField(local: Sym, owner: Sym, idx: int) -> Expr {
+        return Expr.Read(Place.LocalPath(local, [fref(owner, idx)]))
+    }
+
+    export fn prim2(op: PrimOp, a: Expr, b: Expr) -> Expr { return Expr.Prim(op, [a, b]) }
+    export fn prim1(op: PrimOp, a: Expr) -> Expr { return Expr.Prim(op, [a]) }
+    export fn call0(callee: Sym) -> Expr { return Expr.Call(callee, []) }
+
+    export fn el(tag: string, attrs: Attr[], kids: View[]) -> View { return View.El(tag, attrs, kids) }
+    export fn textView(t: string) -> View { return View.Text(t) }
+    export fn dyn(e: Expr) -> View { return View.Dyn(e) }
+    export fn staticAttr(name: string, value: string) -> Attr { return Attr.Static(name, value) }
+    export fn onEvent(event: string, stmts: Stmt[]) -> Attr { return Attr.On(event, block(stmts)) }
+    export fn construct(field: int, value: Expr) -> ConstructAttr { return { field: field, value: value } }
+
+    // -------------------------------------------------------------------------
+    // Lookups — pure, derived from the program (never hand-kept lists).
+    // -------------------------------------------------------------------------
+    export fn sameSym(a: Sym, b: Sym) -> boolean { return a.id == b.id }
+
+    export fn findDecl(p: CoreProgram, s: Sym) -> Decl | not {
+        for (const d of p.decls) {
+            if (d.sym.id == s.id) return d
+        }
+        return not
+    }
+
+    export fn findTypeDef(p: CoreProgram, s: Sym) -> TypeDef | not {
+        for (const t of p.types) {
+            if (typeDefSym(t).id == s.id) return t
+        }
+        return not
+    }
+
+    export fn typeDefSym(t: TypeDef) -> Sym {
+        return match t {
+            .EnumDef(sym: s, variants: vs)  :> s
+            .StructDef(sym: s, fields: fs)  :> s
+        }
+    }
+
+    export fn findFn(p: CoreProgram, s: Sym) -> Fn | not {
+        for (const f of p.fns) {
+            if (f.sym.id == s.id) return f
+        }
+        return not
+    }
+
+    // The declaration + field index a write capability belongs to.
+    export type CapOwner:struct = { decl: Decl, idx: int }
+
+    export fn capOwner(p: CoreProgram, cap: Sym) -> CapOwner | not {
+        for (const d of p.decls) {
+            let i = 0
+            for (const f of d.fields) {
+                const w: Sym | not = f.wcap
+                if (w is some) {
+                    if (w.id == cap.id) return { decl: d, idx: i }
+                }
+                i = i + 1
+            }
+        }
+        return not
+    }
+
+    // Does a field's contract grant ANY write? (the wcap invariant, §66.11.1)
+    export fn grantsAnyWrite(f: Field) -> boolean {
+        if (f.grants.replace) return true
+        return f.grants.edits.length > 0
+    }
+
+    // -------------------------------------------------------------------------
+    // CSS (s440-bootstrap-css-theme-t3; dpa-051 §8.4 step 1). The per-file
+    // STYLESHEET Core — a root of its own, NOT a CoreProgram field: FileOutput.css
+    // is an independent sub-seam (dpa-051 §8.4), so the stylesheet pass (css.scrml)
+    // consumes only this. Its strings are CSS-language LITERALS (a selector's
+    // names, an attribute test, a declaration's literal text) or identifiers;
+    // every `@` reference is a node (TokenVar / CellVar), never text the emitter
+    // re-reads (§3.6, §4).
+    // -------------------------------------------------------------------------
+    export type SimpleSel:enum = {
+        Universal,
+        TagSel(name: string),
+        ClassSel(name: string),
+        IdSel(name: string),
+        AttrSel(test: string),                        // the text between `[` and `]`
+        PseudoClass(name: string, arg: string | not), // `:hover`, `:not(.a)` (arg = `.a`)
+        PseudoElement(name: string),                  // `::before`
+    }
+    export type Combinator:enum = { Descendant, DirectChild, NextSibling, LaterSibling }
+    export type Compound:struct = { parts: SimpleSel[] }
+    export type SelLink:struct = { comb: Combinator, target: Compound }
+    // One arm of a selector list: `head (combinator compound)*`.
+    export type ComplexSel:struct = { head: Compound, links: SelLink[] }
+
+    // A declaration value: literal CSS text, with the `@` references resolved.
+    export type CssPart:enum = {
+        CssText(text: string),
+        TokenVar(token: Sym),   // §65.3.2 / §25.7: `@name` of a theme token → var(--name)
+        CellVar(cell: Sym),     // §25.7: `@name` of a reactive cell → var(--scrml-name)
+    }
+    export type CssDecl:struct = { prop: string, value: CssPart[] }
+    export type StyleRule:struct = { sel: ComplexSel[], decls: CssDecl[] }
+
+    // §66.17 (T3) — a theme token is a LOCKED declaration (`<theme>` is a marker).
+    // Its initializer decides its CSS:
+    //   Constant     — a literal (item 2) → static `:root { --t: v }`.
+    //   OnVariant    — a `match` over an enum-typed cell, every arm a constant
+    //                  (item 3, RECOGNIZED) → one `:root[data-scrml-theme-<cell>="<V>"]`
+    //                  block per arm; `otherwise` = a wildcard arm (→ `:root`).
+    //   ScriptWrites — a `match` over an enum cell NOT recognized (item 7) → per-token
+    //                  `:root` writes from script; NO stylesheet contribution.
+    // A reactive token of any other shape is O47 (OPEN) and has no variant here:
+    // the producer reports it not-yet.
+    export type TokenArm:struct = { variant: string, value: CssPart[] }
+    export type TokenInit:enum = {
+        Constant(value: CssPart[]),
+        OnVariant(cell: Sym, arms: TokenArm[], otherwise: CssPart[] | not),
+        ScriptWrites(cell: Sym),
+    }
+    export type ThemeToken:struct = { sym: Sym, init: TokenInit }
+
+    export type CssImport:struct = { url: string, conditions: string }
+    export type ScopeSheet:struct = { component: string, rules: StyleRule[] }
+
+    // One file's stylesheet. `reset` = the §65.3.4 built-in reset is on (opt out:
+    // `<program reset="none">`). `global` = program-level `#{}` rules (§9.1, the
+    // §65.5 `global` layer); `scopes` = component-scope `#{}` rules (§9.1 DQ-7).
+    export type CssUnit:struct = {
+        charsets: string[],
+        imports: CssImport[],
+        reset: boolean,
+        tokens: ThemeToken[],
+        global: StyleRule[],
+        scopes: ScopeSheet[],
+    }
+}

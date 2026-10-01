@@ -1,3 +1,5 @@
+// s441 — §13.2 for per-element event handlers (see colorActiveHandler).
+import { colorActiveHandler } from "./js-async-analysis.ts";
 import { emitExprField, reparseRequestRefEscapeHatch } from "./emit-expr.ts";
 import { rewriteExprArrowBody } from "./rewrite.js";
 import { emitStringFromTree } from "../expression-parser.ts";
@@ -8,6 +10,29 @@ import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts"
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { liftScopeDeclaredNames, markDeclaredMutable } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
+import * as acorn from "acorn";
+
+/**
+ * True when emitted-JS `text` is, in its ENTIRETY, one arrow function or function
+ * expression — a value addEventListener can take as-is. Decided by parsing, not by a
+ * prefix regex: the §6.5.1 notify wrapper `((_scrml_m) => (set(k), _scrml_m))(call())`
+ * STARTS like an arrow but is an immediately-invoked call, and the old prefix test
+ * (`\([^)]*\)\s*=>` — `[^)]*` happily eats the leading `(`) called it callable, so a
+ * lift row ran the mutation at RENDER time and registered its return value as the
+ * listener (S432, regression from #1054). Emitted JS only — scrml source (`@x`) does
+ * not parse as JS; the source-side checks keep their own heuristics.
+ */
+function isCallableJsExprText(text) {
+  const t = String(text).trim();
+  if (!/^(?:async\b|function\b|\(|[A-Za-z_$])/.test(t)) return false;
+  try {
+    const n = acorn.parseExpressionAt(t, 0, { ecmaVersion: "latest" });
+    if (!/^[\s;]*$/.test(t.slice(n.end))) return false;
+    return n.type === "ArrowFunctionExpression" || n.type === "FunctionExpression";
+  } catch {
+    return false;
+  }
+}
 import { detectPredicateShapeBind } from "./predicate-bind-detector.js";
 
 // ---------------------------------------------------------------------------
@@ -1277,7 +1302,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
       if (engineLoweredAttr !== null) {
         // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredAttr};`)} });`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredAttr};`)} }`, attr?.span)});`);
         continue;
       }
       // SPEC §5.2.2 normative: `onclick=fn()` SHALL emit
@@ -1324,22 +1349,20 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
       // issue was misdiagnosed. Mirrors the emit-event-wiring.ts Case A/B
       // dispatch for top-level event handlers.
       const trimmedHandler = handlerExpr.trim();
-      const isCallable =
-        /^function\s*\(/.test(trimmedHandler) ||
-        /^(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/.test(trimmedHandler);
+      const isCallable = isCallableJsExprText(trimmedHandler);
       if (isCallable) {
         // Bug 73 — callable-direct per-item handler (string-AST path). Inline the
         // arrow inside a re-resolving wrapper (lexical shadow) so it fires against
         // the LIVE item; null → emit the arrow directly (byte-identical to pre-fix).
         const _shadowH = maybeWrapLiftCallableHandler(handlerExpr);
         if (_shadowH !== null) {
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${_shadowH});`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${_shadowH}`, attr?.span)});`);
         } else {
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${handlerExpr});`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${handlerExpr}`, attr?.span)});`);
         }
       } else {
         // Bug 73 — per-item handler live-keying. Re-resolve the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${handlerExpr};`)} });`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${handlerExpr};`)} }`, attr?.span)});`);
       }
     } else {
       // Check if the value contains interpolation (compact or tokenizer-spaced)
@@ -1642,7 +1665,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         // Bug 73 — per-item handler live-keying. A bare cell ref (`onclick=@cell`)
         // does not read the item (the iter-scope scan gates it out → stays plain);
         // an item-held handler (`onclick=@.handler`) re-resolves the live item.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten}(event);`)} });`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten}(event);`)} }`, attr?.span)});`);
       } else {
         pushLiftAttrSet(lines, `${elVar}.setAttribute(${JSON.stringify(name)}, ${rewritten});`);
       }
@@ -1668,12 +1691,12 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         if (engineLoweredCall !== null) {
           // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredCall};`)} });`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredCall};`)} }`, attr?.span)});`);
         } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
         // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${callExpr};`)} });`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${callExpr};`)} }`, attr?.span)});`);
         }
       } else {
         const callExpr = `${rewrittenName}(${rewrittenArgs})`;
@@ -1699,7 +1722,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         if (engineLoweredExpr !== null) {
           // Bug 73 — per-item handler live-keying (see helper above). Wrap the
         // inner body so the handler re-resolves the live item at fire time.
-        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredExpr};`)} });`);
+        lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${engineLoweredExpr};`)} }`, attr?.span)});`);
           continue;
         }
         // S140 Bug 59 — when this onevent value is a synth arrow-string with
@@ -1743,9 +1766,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         // (closure-capture-in-iteration) is the same root cause as Bug 11;
         // both collapsed to this single fix at the AST-attrs path.
         const trimmedExpr = rewritten.trim();
-        const isCallable =
-          /^function\s*\(/.test(trimmedExpr) ||
-          /^(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/.test(trimmedExpr);
+        const isCallable = isCallableJsExprText(trimmedExpr);
         if (isCallable) {
           // Bug 73 — callable-direct per-item handler: a separately-defined arrow
           // keeps its create-time closure, so a runtime "rebind" does nothing. The
@@ -1754,13 +1775,13 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
           // Returns null (→ emit the arrow directly, byte-identical) when no wrap applies.
           const _shadow = maybeWrapLiftCallableHandler(rewritten);
           if (_shadow !== null) {
-            lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${_shadow});`);
+            lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${_shadow}`, attr?.span)});`);
           } else {
-            lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${rewritten});`);
+            lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`${rewritten}`, attr?.span)});`);
           }
         } else {
           // Bug 73 — function-body per-item handler: re-resolve the live item at fire time.
-          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} });`);
+          lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, attr?.span)});`);
         }
       } else {
         const rewritten = emitExprField(reparseLiftAttrRequestRef(val.exprNode, raw), raw, liftExprCtx());
@@ -3210,7 +3231,7 @@ export function emitConsolidatedLift(body, opts = {}) {
                 if (/^on[a-z]/.test(attrName)) {
                   const eventName = attrName.replace(/^on/, "");
                   // Bug 73 — per-item handler live-keying (BLOCK_REF-split attr path).
-                  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} });`);
+                  lines.push(`${elVar}.addEventListener(${JSON.stringify(eventName)}, ${colorActiveHandler(`function(event) { ${maybeWrapLiftPerItemHandler(`${rewritten};`)} }`, logicChild.span)});`);
                 } else {
                   lines.push(`${elVar}.setAttribute(${JSON.stringify(attrName)}, String(${rewritten} ?? ""));`);
                 }

@@ -1,0 +1,155 @@
+// =============================================================================
+// self-host-v2 / names.scrml — the ONE NameSupply (dpa-051 §3.3).
+//
+// Emitted identifiers are MINTED, never rewritten: every Sym and every
+// printer-made module-level name (factory, render, shared getter, declaration
+// descriptor, edge table, the runtime import) is requested up front and gets a
+// name from its hint plus a disambiguator on collision. There is no rename pass,
+// so a helper cannot collide with a user name (the TS compiler's
+// `g-user-fn-rename-rewrites-emitted-helper-locals` family).
+//
+// The one reserved sub-namespace: minted names NEVER contain `$` (a `$` in a
+// hint becomes `_`). Printer-internal locals inside emitted function bodies
+// (`inst$`, `scope$`, `n$0_2`, …) ALWAYS contain `$` and are derived from tree
+// position, so they are collision-free by construction without threading a
+// counter through the printer.
+// =============================================================================
+${
+    // What a name is FOR. Keyed by Sym id / declaration Sym id.
+    export type NameKey:enum = {
+        OfSym(id: int),
+        Factory(decl: int),
+        Render(decl: int),
+        SharedGet(decl: int),
+        DeclInfo(decl: int),
+        Edges(decl: int, field: int),
+        Runtime,
+    }
+
+    export type NameEntry:struct = { key: string, name: string }
+    export type NameTable:struct = { entries: NameEntry[] }
+
+    // A total, injective encoding of a key (compared as a string).
+    export fn keyText(k: NameKey) -> string {
+        return match k {
+            .OfSym(id: id) :> "sym:" + id
+            .Factory(decl: d) :> "mk:" + d
+            .Render(decl: d) :> "render:" + d
+            .SharedGet(decl: d) :> "shared:" + d
+            .DeclInfo(decl: d) :> "decl:" + d
+            .Edges(decl: d, field: f) :> "edges:" + d + "." + f
+            .Runtime :> "rt"
+        }
+    }
+
+    export fn emptyNames() -> NameTable { return { entries: [] } }
+
+    // JavaScript reserved words + the globals emitted code references.
+    export fn isReserved(n: string) -> boolean {
+        return match n {
+            "break" :> true
+            "case" :> true
+            "catch" :> true
+            "class" :> true
+            "const" :> true
+            "continue" :> true
+            "debugger" :> true
+            "default" :> true
+            "delete" :> true
+            "do" :> true
+            "else" :> true
+            "enum" :> true
+            "export" :> true
+            "extends" :> true
+            "false" :> true
+            "finally" :> true
+            "for" :> true
+            "function" :> true
+            "if" :> true
+            "import" :> true
+            "in" :> true
+            "instanceof" :> true
+            "new" :> true
+            "null" :> true
+            "return" :> true
+            "super" :> true
+            "switch" :> true
+            "this" :> true
+            "throw" :> true
+            "true" :> true
+            "try" :> true
+            "typeof" :> true
+            "var" :> true
+            "void" :> true
+            "while" :> true
+            "with" :> true
+            "yield" :> true
+            "let" :> true
+            "static" :> true
+            "await" :> true
+            "async" :> true
+            "arguments" :> true
+            "eval" :> true
+            "undefined" :> true
+            "NaN" :> true
+            "Infinity" :> true
+            "document" :> true
+            "window" :> true
+            "globalThis" :> true
+            "Object" :> true
+            "Array" :> true
+            "JSON" :> true
+            "Math" :> true
+            "String" :> true
+            "Number" :> true
+            "Date" :> true
+            _ :> false
+        }
+    }
+
+    fn sanitize(hint: string) -> string {
+        const s: string = hint.replaceAll("$", "_")
+        if (s.length == 0) return "x"
+        const c: int = s.charCodeAt(0)
+        if (c >= 48 && c <= 57) return "_" + s
+        return s
+    }
+
+    fn taken(t: NameTable, n: string) -> boolean {
+        for (const e of t.entries) {
+            if (e.name == n) return true
+        }
+        return false
+    }
+
+    fn hasKey(t: NameTable, k: string) -> boolean {
+        for (const e of t.entries) {
+            if (e.key == k) return true
+        }
+        return false
+    }
+
+    // Mint a name for `key` from `hint` (idempotent per key).
+    export fn mint(t: NameTable, key: NameKey, hint: string) -> NameTable {
+        const k: string = keyText(key)
+        if (hasKey(t, k)) return t
+        const base: string = sanitize(hint)
+        let cand: string = base
+        let n = 1
+        while (isReserved(cand) || taken(t, cand)) {
+            cand = base + "_" + n
+            n = n + 1
+        }
+        return { entries: t.entries.concat([{ key: k, name: cand }]) }
+    }
+
+    // The minted name for `key`. An unminted key is a printer bug; it prints as
+    // a name that cannot be a minted one and will fail loudly when run.
+    export fn nameOf(t: NameTable, key: NameKey) -> string {
+        const k: string = keyText(key)
+        for (const e of t.entries) {
+            if (e.key == k) return e.name
+        }
+        return "unminted$" + k.replaceAll(":", "_").replaceAll(".", "_")
+    }
+}

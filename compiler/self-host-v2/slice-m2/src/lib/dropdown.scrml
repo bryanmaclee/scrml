@@ -1,0 +1,19 @@
+// lib/dropdown.scrml
+export type Openness:enum = { Closed, Opened }
+
+export <dropdown label:string options:string[] export let value:string="">   // `value`: exported, writable (E2)
+    export <open:Openness=.Closed>                            // a per-instance transition-graph field (§66.13.2), exported
+        <Closed rule=.Opened/>              // ⚑ O52: state-child marker
+        <Opened rule=.Closed/>
+    </>
+</>
+renders <div class="dropdown">
+    <button class="dropdown__toggle"
+            onclick=(@dropdown.open = open == .Closed ? .Opened : .Closed)>${label}: ${value}</button>
+    <ul class="dropdown__menu" if=(open == .Opened)>
+        <each in=options as opt>
+            <li onclick={ @dropdown.value = opt; @dropdown.open = .Closed }>${opt}</li>
+        </each>
+    </ul>
+    <slot/>                                                   // use-site children, if any (§66.15.2)
+</div>

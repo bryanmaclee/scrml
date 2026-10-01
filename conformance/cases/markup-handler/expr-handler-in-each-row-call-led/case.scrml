@@ -1,0 +1,12 @@
+<items> = [{ id: 1, name: "a" }, { id: 2, name: "b" }]
+<count> = 5
+<last> = ""
+
+${ function track(n) { @last = n + ":" + @count } }
+
+<ul>
+    <each in=@items key=@.id>
+        <li><button class="row" onclick=${track(@.name); @count = 0}>${@.name}</></>
+    </each>
+</>
+<p id="out">${@count} ${@last}</p>

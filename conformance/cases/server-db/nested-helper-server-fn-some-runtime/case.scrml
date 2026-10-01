@@ -1,0 +1,11 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+function go() {
+  function inner(x) { return isOk(x) }
+  const any = [1, 2, 3].some(x => inner(x))
+  @verdict = any ? "accepted" : "rejected"
+}
+<p id="out">${@verdict}</p>
+<button id="go" onclick=go()>go</button>
+</program>

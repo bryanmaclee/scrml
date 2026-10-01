@@ -1,0 +1,20 @@
+{
+  "spec": "§65.2.2, §65.2.5",
+  "rationale": "§65.2.5: the unconditional `.card .btn` is `:where()`-flat (0,0,0); §65.2.2: the conditional `button[disabled]` is a deterministic layer that wins WHILE its condition holds — so the disabled button is gray and the enabled one red, whatever the source order.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "#on",
+          "prop": "color",
+          "value": "rgb(255, 0, 0)"
+        },
+        {
+          "sel": "#off",
+          "prop": "color",
+          "value": "rgb(128, 128, 128)"
+        }
+      ]
+    }
+  ]
+}

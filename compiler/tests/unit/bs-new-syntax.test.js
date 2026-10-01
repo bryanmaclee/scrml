@@ -152,6 +152,26 @@ describe("reference syntax <#ref>", () => {
     expect(blocks[1].raw).toBe("<#b>");
   });
 
+  // S444 (g-request-refetch-statement-dropped): the REFERENCE form `<#name>.`
+  // CONTINUES the open text run instead of flushing it. The split used to cut
+  // `function f() { <#r>.refetch() }` at a <program> default-logic body into two
+  // blocks, lifting an empty function and shipping the rest as page text. Only
+  // the `<#name>.` form continues; other `<#…` forms keep the split (native
+  // parser parity).
+  test("the <#name> element form still starts its own text block", () => {
+    const blocks = split("<p>x</p><#tick when @s is .Active />");
+    const last = blocks[blocks.length - 1];
+    expect(last.type).toBe("text");
+    expect(last.raw.startsWith("<#tick")).toBe(true);
+  });
+
+  test("text before a <#name>.member reference is the same run as the ref", () => {
+    const blocks = split("function f() {\n  <#r>.refetch()\n}");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0].type).toBe("text");
+    expect(blocks[0].raw).toBe("function f() {\n  <#r>.refetch()\n}");
+  });
+
   test("<# does not conflict with #{} css context", () => {
     // <# produces text, #{ produces css — they don't interfere
     const blocks = split("#{ color: red }<#myRef>");

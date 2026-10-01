@@ -1,0 +1,14 @@
+<program>
+<out> = ""
+server function double(n) { return n * 2 }
+server function isOk(n) { return n > 100 }
+server function outer() {
+  function inner(x) { return isOk(x) } return [1, 2, 3].some(x => inner(x))
+}
+function go() {
+  const r = outer()
+  console.log("result", JSON.stringify(r))
+}
+<p>${@out}</p>
+<button onclick=go()>go</button>
+</program>

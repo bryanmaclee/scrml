@@ -1,0 +1,20 @@
+{
+  "spec": "§65.2.4 R1, §65.5",
+  "rationale": "R1: a universal `*` rule is an author-reset FLOOR that resolves below class rules, so `.btn { padding: 16px }` wins over `* { padding: 0 }` on the button.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": ".btn",
+          "prop": "padding-top",
+          "value": "16px"
+        },
+        {
+          "sel": ".btn",
+          "prop": "padding-left",
+          "value": "16px"
+        }
+      ]
+    }
+  ]
+}

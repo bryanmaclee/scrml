@@ -1621,7 +1621,11 @@ function preprocessForAcorn(
   // Standalone `::Variant` (shorthand, no enum-type prefix) also normalizes
   // to `.Variant`, which then falls into the existing bare-dot variant
   // placeholder path below.
-  s = s.replace(/::(?=\s*[A-Z])/g, ".");
+  //
+  // S440 (f18 sibling): fenced via rewriteCodeSegments so a string / template /
+  // regex literal containing `::Upper` (`"a::B"`) passes through verbatim —
+  // previously emitted as `"a.B"`.
+  s = rewriteCodeSegments(s, (code) => code.replace(/::(?=\s*[A-Z])/g, "."));
 
   // S142 gate-tail: collapse the BS tokenizer's space-padded optional-chaining
   // operator `? .` back to `?.` so acorn parses `file.ast?.filePath` as an
@@ -1637,7 +1641,10 @@ function preprocessForAcorn(
   // (`cond ? .Active : .Idle`) — its leading char after `.` is UPPERCASE — so
   // gating the collapse on a non-uppercase following char preserves ternaries
   // with bare-variant arms.
-  s = s.replace(/\?\s*\.\s*(?=[a-z_$[(])/g, "?.");
+  //
+  // S440 (f18 sibling): fenced via rewriteCodeSegments so literal content like
+  // `"why? .x"` is not collapsed to `"why?.x"`.
+  s = rewriteCodeSegments(s, (code) => code.replace(/\?\s*\.\s*(?=[a-z_$[(])/g, "?."));
 
   // Replace `match expr { arms }` with placeholder
   // This is processed first because match may contain `is` operators inside arms.
@@ -1876,9 +1883,16 @@ function preprocessForAcorn(
   });
 
   // §14.9/§16.6: render name() → __scrml_render_name__()
-  s = s.replace(
-    /(?<![A-Za-z0-9_$])render\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g,
-    '__scrml_render_$1__('
+  //
+  // S440 (f18 sibling): fenced via rewriteCodeSegments — previously an unfenced
+  // whole-string replace, so the string literal `"render foo("` was emitted as
+  // `"__scrml_render_foo__("` (silent data corruption, same class as the
+  // bare-variant / `not` / `~` passes).
+  s = rewriteCodeSegments(s, (code) =>
+    code.replace(
+      /(?<![A-Za-z0-9_$])render\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g,
+      '__scrml_render_$1__('
+    )
   );
 
   // §32 tilde accumulator: replace standalone `~` with placeholder identifier.
@@ -1900,7 +1914,23 @@ function preprocessForAcorn(
   // The `opts?.tildeActive` parameter is retained in the signature for backward
   // compatibility and to allow future tilde-scope-aware diagnostics, but is no
   // longer load-bearing for this substitution.
-  s = s.replace(/(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/g, "__scrml_tilde__");
+  //
+  // S440 f18: fenced via rewriteCodeSegments. This preprocess runs on raw text
+  // BEFORE acorn tokenizes, so there are no tokens to ask yet; the shared
+  // literal/comment-aware splitter is the existing lexer-level fence (the same
+  // one the bare-variant / `not` / `or`/`and` passes above use). Previously the
+  // substitution ran over the WHOLE string, so a string / template / regex
+  // literal whose content was a standalone `~` (`"~"`, `'~'`, `` `~` ``,
+  // `` `a${x}~` ``, `/~/`) was silently emitted as `__scrml_tilde__`. Template
+  // `${…}` interpolations are still descended into as code, so a `~` keyword
+  // inside an interpolation is still the accumulator.
+  //
+  // The reverse mapping (esTreeToExprNode, Identifier arm) is structural — it
+  // fires only on an acorn Identifier node — so a user string literal that
+  // contains the text `__scrml_tilde__` is never turned into `~`.
+  s = rewriteCodeSegments(s, (code) =>
+    code.replace(/(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/g, "__scrml_tilde__")
+  );
 
   return s;
 }
@@ -3111,6 +3141,41 @@ function convertParams(params: ESNode[], filePath: string, baseOffset: number): 
  * @param offset - Byte offset of the expression start in the preprocessed source file
  * @returns A structured ExprNode. Returns EscapeHatchExpr on parse failure.
  */
+/**
+ * S437 round 4 — the "statement boundary not detected" console warning is a
+ * guard against a SILENT drop. For a §5.2.3 event-handler value the drop no
+ * longer happens once the value carries its parsed statement list
+ * (`handlerBlock`), and whether it will is only known AFTER the value's
+ * expression is parsed. `captureTrailingContentWarnings` runs `fn` with the
+ * warning HELD instead of printed and returns it, so the caller (ast-builder)
+ * prints it only when nothing handles the trailing statements.
+ */
+let _trailingWarningSink: string[] | null = null;
+export function captureTrailingContentWarnings<T>(fn: () => T): { result: T; warnings: string[] } {
+  const prev = _trailingWarningSink;
+  const sink: string[] = [];
+  _trailingWarningSink = sink;
+  try {
+    return { result: fn(), warnings: sink };
+  } finally {
+    _trailingWarningSink = prev;
+  }
+}
+
+/**
+ * S441 — the body-top strictness oracle (SPEC §40.8 S441 bullet, §4.18.7).
+ * A `<program>` / `<page>` / `<channel>` body-top run is a statement sequence;
+ * an expression the lenient statement collector handed over that acorn can only
+ * parse by DROPPING trailing content (`parseExpressionAt` stops early —
+ * `Welcome to the dashboard.` keeps `Welcome`) is not valid code. The returned
+ * ExprNode then carries a NON-enumerable `_s441Trailing` flag (invisible to
+ * serialization and structural equality); ast-builder's body-top check reads it
+ * through `hasLostTrailingContent`.
+ */
+export function hasLostTrailingContent(node: unknown): boolean {
+  return !!node && typeof node === "object" && (node as Record<string, unknown>)._s441Trailing === true;
+}
+
 export function parseExprToNode(raw: string, filePath: string, offset: number, opts?: { tildeActive?: boolean }): ExprNode {
   // §42.10 ENFORCEMENT (S188 g-not-negation-enforce): a detector object captures
   // whether preprocessForAcorn lowered a prefix-`not`-as-negation (bare `not @x`
@@ -3125,8 +3190,17 @@ export function parseExprToNode(raw: string, filePath: string, offset: number, o
   // sanctioned absence/presence keyword nor a `.Variant` pattern. When it fires
   // we stamp `_isValueRhsOnIs`; the gauntlet-phase3 §45 harvest fires E-EQ-005
   // (once per stamped node) BEFORE codegen, steering the author to `==`.
-  const _detector = { notPrefixNegation: false, valueRhsOnIs: false };
+  const _detector: { notPrefixNegation: boolean; valueRhsOnIs: boolean; lostTrailing?: boolean; lostTrailingText?: string; lostTrailingLine?: number } = { notPrefixNegation: false, valueRhsOnIs: false };
   const _node = _parseExprToNodeInner(raw, filePath, offset, opts, _detector);
+  if (_node && typeof _node === "object" && _detector.lostTrailing) {
+    Object.defineProperty(_node, "_s441Trailing", { value: true, enumerable: false, configurable: true, writable: true });
+    // S441 round 4 — WHAT was lost and on which line of the expression it
+    // starts (0 = the expression's first line), so the body-top check can
+    // keep the valid prefix and re-parse / report the lost tail at its own
+    // position instead of dropping it.
+    Object.defineProperty(_node, "_s441TrailingText", { value: _detector.lostTrailingText ?? "", enumerable: false, configurable: true, writable: true });
+    Object.defineProperty(_node, "_s441TrailingLine", { value: _detector.lostTrailingLine ?? 0, enumerable: false, configurable: true, writable: true });
+  }
   if (_node && typeof _node === "object") {
     if (_detector.notPrefixNegation) (_node as Record<string, unknown>)._notPrefixNegation = true;
     if (_detector.valueRhsOnIs) (_node as Record<string, unknown>)._isValueRhsOnIs = true;
@@ -3199,9 +3273,38 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
   // followed by code — this is the signature of the ASI merge bug.
   // Single-line trailing content (e.g., tokenizer-spaced "header ( )") is typically
   // from the space-separated token stream, not from merged statements.
+  if (estree && trailingContent && _notDetector) {
+    // acorn reports a parenthesized expression's node WITHOUT its wrapping
+    // parens, so `(1)` "trails" `)`. Discount one `)` per `(` that precedes
+    // the node's start; anything left over was genuinely dropped.
+    let wrap = 0;
+    const lead = processed.slice(0, (estree as { start?: number }).start ?? 0);
+    for (const ch of lead) if (ch === "(") wrap++;
+    // Untrimmed tail, so the line the lost content starts on is known.
+    const endAt = (estree as { end?: number }).end ?? 0;
+    let rest = processed.slice(endAt);
+    let consumed = 0;
+    while (wrap > 0) {
+      const m = /^\s*\)/.exec(rest);
+      if (!m) break;
+      consumed += m[0].length;
+      rest = rest.slice(m[0].length);
+      wrap--;
+    }
+    if (rest.trim() !== "") {
+      const det = _notDetector as { lostTrailing?: boolean; lostTrailingText?: string; lostTrailingLine?: number };
+      det.lostTrailing = true;
+      det.lostTrailingText = rest.trim();
+      // 0-based line (within the trimmed expression text) of the first lost char.
+      const leadWs = (/^\s*/.exec(rest) || [""])[0];
+      det.lostTrailingLine = (processed.slice(0, endAt + consumed) + leadWs).split("\n").length - 1;
+    }
+  }
   if (estree && trailingContent && trailingContent.includes("\n") && /[a-zA-Z_$@]/.test(trailingContent)) {
     const preview = trailingContent.length > 60 ? trailingContent.slice(0, 60) + "..." : trailingContent;
-    console.warn(`[scrml] warning: statement boundary not detected — trailing content would be silently dropped: "${preview}" (in ${filePath} near offset ${offset})`);
+    const msg = `[scrml] warning: statement boundary not detected — trailing content would be silently dropped: "${preview}" (in ${filePath} near offset ${offset})`;
+    if (_trailingWarningSink) _trailingWarningSink.push(msg);
+    else console.warn(msg);
   }
 
   if (!estree) {

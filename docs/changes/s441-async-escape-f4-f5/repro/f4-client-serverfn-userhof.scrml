@@ -1,0 +1,13 @@
+<program>
+<verdict> = "unset"
+server function m(n) { return n > 100 }
+function decide() {
+  function drive(f) { return f(1) }
+  return drive(m) ? "accepted" : "rejected"
+}
+function go() {
+  @verdict = decide()
+}
+<p id="out">${@verdict}</p>
+<button id="go" onclick=go()>go</button>
+</program>

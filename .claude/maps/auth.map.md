@@ -1,6 +1,233 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# updated: 2026-10-01T14:31:06Z  commit: 464c9ab4d
+# ⛑ **S445 STAMP — `5b1d0dab0` -> `464c9ab4d`. 20 COMMITS (S443 wrap #1187, S444 #1182-#1202, S445 #1192/#1194/#1196/#1198),
+# incremental refresh, branch `maps/s444-wrap`.** MAP-STAMP RULE at write time: `git log --oneline 5b1d0dab0..464c9ab4d` -> 20;
+# `git merge-base HEAD origin/main` == `origin/main` == `464c9ab4d` (no fork). (The dispatch brief named `108ca89be` as the stamp;
+# line 3 actually read `5b1d0dab0` — the S444b refresh rode in #1187 — so the window starts there.) Source-relevant:
+# #1196 (§40.8 S441: `<program>`/`<page>`/`<channel>` bodies are CODE — catch-all body-top lift, `"…"` declared display text,
+# `E-STMT-NO-EFFECT`, `E-INTERNAL-BODY-TOP-DROPPED`; `E-WRITE-NOT-IN-LOGIC-CONTEXT` RETIRED; `default-logic-exemption.ts` +
+# `unit-cc-exemption-list.json` DELETED; NEW `native-parser/body-top-prose.js` + `body-top-coverage.js`), #1194 (route
+# inference: app root relative to the BUILD ROOT — `resolveBuildRoot` / `makeRouteClassifier`; `W-AUTH-REQUIRED-NOT-INHERITED`),
+# #1198 (§14.8.9 protect egress round 6 — RETURNING / every `?{}` terminator / spaced star / undeclared tables /
+# opaque callbacks / `arguments` / global stores / descriptor Symbol keys / bare digests; CPS `ServerError` message fixed
+# under `protect=`; prod `Bun.serve` `error:` handler), #1200 (`--emit-per-route`: chunk manifest + role bootstrap moved
+# from inline `<script>` to ONE same-origin `scrml-chunks.<hash>.js`), #1191 (`<request>` `deps=`, `refetch()` statements,
+# client-async bodies, re-fire loop; `E-LIFECYCLE-022` now FIRES), #1184 (`E-ASYNC-FN-ESCAPES-AS-VALUE` wording), #1182
+# (CI runs `slice-m4/`; live-PG hook timeouts 120 s). BOOTSTRAP: #1189 (typer r8), #1190 + #1195 (dpa-045 plain-markup
+# text grammar, `//` comment only after whitespace, display-text escapes), #1202 (Core additions: `Attr.Bind`, `Expr.Host`
+# (`Date.now`), `Expr.Lambda`, `Expr.SeqCall`, `View.Star`, removals, `ElemAt`; dpa-058 validators; fail-closed refusal of
+# unimplemented elements). SPEC-only: #1186/#1193 (§6.7.7.1 abort reads, §6.7.7.2 `<request cache>`, §6.14 `persist=`),
+# #1199 (§6.14.4 prepaint / `hold=@cell`). #1183 = example 23 helper routes removed. Rest: gaps / dpa-queue / wrap.
+# ⛑ **FIGURES RE-EXECUTED AT `464c9ab4d`** (`bun scripts/facts.ts --check` PASS): version **0.8.0** · `compiler/src`
+# **277,537 lines / 216 files** (+2,521 lines, -1 file) · test files **1,546** (+11) · `compiler/SPEC.md` **41,760** lines
+# (+546) · conformance **1200** cases (+49); `bun conformance/run.ts` -> **1192/1200 pass + 8 xfail** · §34 census
+# (`bun scripts/s34-census.ts`) **863 rows** (`SPEC.md:21341..22288`): PINNED 374 · IMPL-SITES 314 · DECLARED-AHEAD 32 ·
+# RUNTIME-SURFACED 3 · FALSE-CLAIM 106 · STRUCK 34 · unique `^| [EWIH]-` codes **817 -> 831** (+14, removed none) · known-gaps
+# open HIGH 215 -> **222**, MED 420 -> 433, LOW 190 -> 209, Nominal 7.
+# ⛑ **BOOTSTRAP RE-RUN AT `464c9ab4d`:** lint-no-default-arm 58 files / 0 violations · `slice-m1/` 73/73 · lowered `slice-m1/`
+# 73/73 · `slice-m2/` **448/448** (7 files) · `slice-m3/` 60/60 (5 files) · `slice-m4/` **403 pass + 1 todo / 404** (16 files;
+# NOW IN CI, `ci.yml:157`) · CG footprint runtime 18/0, codes-only 10/0, crashed 0, not-yet 697, front-end 475 · CSS
+# footprint runtime 335/0, codes-only 280/0, CSS half 38/38.
+# ⚑ `file:line` citations in S445 sections are grep-derived at `464c9ab4d`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S444b HEADER (stamp `5b1d0dab0`), CARRIED FOR PROVENANCE. ━━━━━━━
+# ⛑ **S444b STAMP — `108ca89be` -> `5b1d0dab0`. 2 COMMITS (#1180, #1181), incremental refresh.** MAP-STAMP RULE at
+# write time: `git log --oneline 108ca89be..5b1d0dab0` -> 2; HEAD `5b1d0dab0` == `origin/main`. Source-relevant: #1180 (S443
+# example 23 end-to-end — login/register call `session.set("userId", …)`, pages read `session.userId`, logout calls
+# `session.destroy()`, `<program … loginRedirect="/auth/login">`, driver BOL/POD/token reads guarded by `assignedDriverFor`,
+# `dispatch.db` ships pre-seeded (the `on mount { runSeeds() }` is gone); `stdlib/auth/templates/login.scrml` now calls
+# `session.set("userId", row.id)`; trucking smoke baseline drops `I-AUTH-REDIRECT-UNRESOLVED` / `W-AUTH-LOGIN-MISSING` /
+# `W-CG-CHUNK-PREFETCH-UNRESOLVED`, `W-TYPE-031-UNPROVEN` 321 -> 287). #1181 is the S444 map refresh itself.
+# ⛑ **`compiler/src` UNCHANGED over the window** (`git diff --stat 108ca89be..5b1d0dab0 -- compiler/src` empty) -> every S444
+# figure below stands; `bun scripts/facts.ts --check` PASS at `5b1d0dab0`. Known-gaps HIGH open 214 -> 215.
+# ⛑ **S444b ADDS S443 LOCI the reviews found missing** (grep-derived at `5b1d0dab0`; locate by SYMBOL after later commits):
+# route-inference Step 8 table + `appRoot` / `rootCandidates` / `findRoutePrefix` (matches on the ABSOLUTE path) ->
+# auth.map.md; `detectNestedProgramAuth`, E-PROGRAM-002 -> auth / error maps; `protect-flow.ts`, `emit-worker.ts`, worker
+# bundle writes in `api.js`, the §47.13 static-serve allowlist in `build.js` `generateServerEntry` -> structure / build maps.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S444 HEADER (stamp `108ca89be`), CARRIED FOR PROVENANCE. ━━━━━━━
+# ⛑ **S444 STAMP — `cf62b415` -> `108ca89be`. 37 COMMITS (#1141-#1179), SESSIONS S441 / S442 / S443 (incremental
+# refresh, branch `maps/s444-refresh`).** MAP-STAMP RULE at write time: `git log --oneline cf62b415..108ca89be` -> 37
+# commits; `git merge-base HEAD origin/main` == `origin/main` == `108ca89be` (no fork). Source-relevant: #1161 (CSRF
+# `auto` by default under `auth=`; compose route gated; WebSocket Origin check), #1162 (static serving is a client-asset
+# ALLOWLIST, §47.13), #1163 (async fn escaping as a value / event control after an await, S440 F4/F5), #1171
+# (protected-column egress `E-PROTECT-006`, §14.8.9), #1173 (`<page auth="required">` gates its page;
+# `E-PROGRAM-NESTED-AUTH`), #1177 (two top-level `<program>`s in one file = `E-PROGRAM-002`), #1174 (worker bundles
+# written + served, dpa-056 D1/D2), #1172 (user enum named like a built-in error type), #1150 (E-ERROR-002 handler
+# conformance), #1147 (bare `fail .Variant`), #1158 (`@cell = serverFn()` awaited in place), #1160 (self-closed non-void
+# element gets an end tag), #1153 (W-LINT-007/013 inline block handlers), #1152 (stdlib http/cron doc-comment leak),
+# #1155 (example 23 token guards). BOOTSTRAP: #1149 (CSS + `<theme>` T3 — `css.scrml`, `css-ingest.scrml`, CSS sub-seam),
+# #1151/#1157/#1159/#1167/#1169 (typer rounds), #1164 (the §66.19 worked programs — `slice-m4/`). SPEC-only: #1156
+# (tape grow/shrink, §66.x), #1170 (§4.18 dpa-045). The rest are docs / wrap / dpa-queue / gaps / ledger / @generated.
+# ⛑ **FIGURES RE-EXECUTED AT `108ca89be`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **275,016 lines / 217 files** per FACTS (+6,622 lines, +4 files:
+# `codegen/js-async-analysis.ts`, `codegen/protect-flow.ts`, `static-serve-policy.js`, `static-serve-policy-emitted.js`)
+# · test files **1,535** (+20) · `compiler/SPEC.md` **41,214** lines (+551) · conformance **1151** cases (+97) · §34
+# catalog **849** rows (+10), range `20832..21764`. `bun conformance/run.ts` (impl#1) -> **1144/1151 pass + 7 xfail**.
+# Census: PINNED 370 · IMPL-SITES 314 · DECLARED-AHEAD 21 · RUNTIME-SURFACED 3 · FALSE-CLAIM 107 · STRUCK 34.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **952 -> 960** · W **183 -> 186** · I 10 · H 2 FLAT ·
+# unique codes **807 -> 817**. **ADDED = {`E-ASYNC-CALL-PROMISE-METHOD`, `E-ASYNC-FN-ESCAPES-AS-VALUE`,
+# `E-ASYNC-HANDLER-UNANALYZABLE`, `E-EVENT-CONTROL-AFTER-AWAIT`, `E-PROGRAM-002`, `E-PROGRAM-NESTED-AUTH`,
+# `E-PROTECT-006`, `W-AUTH-FILE-CONFLICT`, `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS`, `W-AUTH-REDIRECT-LOOP`} — every one has a
+# live emitter in `compiler/src` (grep-verified); REMOVED = EMPTY.**
+# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `108ca89be` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
+# **58** files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **443/443** (7 files)
+# · `slice-m3/` **60/60** (5 files) · `slice-m4/` **130 pass + 1 todo / 131** (11 files; NOT in the CI gate — see
+# build.map.md) · CG footprint (`--swap CG=…/slice-m3/substitute.js --footprint`) -> runtime **18/0**, codes-only 10/0,
+# crashed 0, not-yet 666, front-end 457 · CSS footprint (`--swap CSS=…/slice-m3/css-substitute.js --footprint`) ->
+# runtime 320/0, codes-only 278/0, **CSS half 38/38** (conformance 17 · source 15 · core 6).
+# ⚑ `file:line` citations in S444 sections were grep-derived at `108ca89be`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S440 HEADER (stamp `cf62b415`), CARRIED FOR PROVENANCE. ━━━━━━━
+# ⛑ **S440 STAMP — `fb21983a` -> `cf62b415`. 23 COMMITS (#1117-#1140), SESSIONS S438-tail / S439 / S440 (incremental
+# refresh).** MAP-STAMP RULE at write time: `git log --oneline fb21983a..cf62b415` -> 23 commits; inbound `git merge-base
+# --is-ancestor fb21983a cf62b415` -> 0; outbound `git merge-base --is-ancestor cf62b415 origin/main` -> 0; HEAD `cf62b415`
+# == `origin/main` (`git fetch --dry-run`: main not advanced; no fork). Source-relevant: #1117 (bootstrap M3 typer + scope pass), #1118 (ingest shim + footprint
+# grader + bite matrix), #1122 (analyze facts -> six NodeId-indexed family tables), #1129 (re-land #1109 review fixes +
+# spread all-or-nothing `Stmt.Commit` + strict snapshot + E-BOOTSTRAP-DUP-OVERRIDE), #1125 (E-MW-007/008 refused build
+# writes no dist), #1131 ("~" + 3 sibling rewrites fenced out of literals), #1137 (Date/built-ins in cells; `==` on
+# built-ins), #1139 (nested async helpers vs sync-callback guards, SECURITY). SPEC-only: #1120 (S439 rulings), #1133
+# (S440 rulings). The rest are wrap / inbox / dpa-queue / gaps / review / @generated bookkeeping.
+# ⛑ **FIGURES RE-EXECUTED AT `cf62b415`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **268,394 lines / 213 files** per FACTS (+1,450 lines, +2 files:
+# `codegen/local-async-fns.ts`, `commands/refusal-gate.js`) · test files **1,515** (+6) · `compiler/SPEC.md` **40,663**
+# lines (+264) · conformance **1054** cases (+7) · §34 catalog **839** rows (+4), range `20443..21365`.
+# `bun conformance/run.ts` (impl#1) -> **1047/1054 pass + 7 xfail**.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **948 -> 952** · W 183 · I 10 · H 2 FLAT · unique codes
+# **803 -> 807**. **ADDED = {`E-CALL-ARITY`, `E-EACH-NOT-SEQUENCE`, `E-SELECT-OPTION-NOT-VARIANT`,
+# `E-STRUCT-DUPLICATE-KEY`} — all four rows say "Nominal / not yet emitted" (impl pending); REMOVED = EMPTY.**
+# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `cf62b415` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
+# 28 files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **325/325** (6 files) ·
+# `slice-m3/` **24/24** (3 files) · footprint grade (`bun scripts/hybrid.ts --swap CG=compiler/self-host-v2/slice-m3/substitute.js
+# --footprint`) -> runtime **18 pass / 0 fail**, codes-only 10/0, crashed 0, not-yet 579, front-end 447. The S438 CRLF
+# drift-guard failures are gone (the guard is CRLF-safe since #1129, and this clone is LF).
+# ⚑ `file:line` citations in S440 sections were grep-derived at `cf62b415`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S438 HEADER (stamp `fb21983a`), CARRIED FOR PROVENANCE. ━━━━━━━
+# ⛑ **S438 STAMP — `9941a504c` -> `fb21983a`. 9 COMMITS (#1109-#1119), SESSION S438 (incremental refresh, branch
+# `wrap/s438`).** MAP-STAMP RULE at write time: `git log --oneline 9941a504c..fb21983a` -> 9 commits; `git
+# merge-base --is-ancestor 9941a504c fb21983a` -> exit 0 (inbound ancestor check satisfied); HEAD `fb21983a` ==
+# `origin/main` at fetch (no fork this pass). Of the 9 commits, **3 are the PRIOR session's own maps/wrap
+# commits** (`c65f54b4` #1111 maps-refresh-to-9941a504c, `88a75073` #1110 wrap, and the inbox commit `0fc87bf9`
+# #1115 is bookkeeping only) — **6 are source-relevant**: `072741ca` #1109, `98d94e96` #1112, `b7c86323` #1113,
+# `8c55f518` #1114, `afc2308b` #1116, `fb21983a` #1119.
+# ⛑ **FIGURES RE-EXECUTED AT `fb21983a`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat — `package.json` untouched this window) · `compiler/src` **266,944 lines / 211 files**
+# per FACTS (+939 lines, files FLAT vs `9941a504c`'s 266,005/211) · test files **1,509** (+3:
+# `conf-SESSION-8B-DEFERS-TO-PROGRAM.test.js`, `clientjs-import-disk-rebase-gate-eq-write.test.js`,
+# `match-arm-shapes-f12-f14.test.js`, all under `compiler/tests/` — `compiler/self-host-v2/slice-m2` gained 4
+# more `*.test.js` OUTSIDE this count, per FACTS' own stated scope exclusion) · `compiler/SPEC.md` **40,399**
+# lines (+51) · conformance **1047** cases (FLAT) · §34 catalog **835** rows (+3), range `20331..21237`.
+# `bun conformance/run.ts` (impl#1) -> **1040/1047 pass + 7 xfail** — FLAT vs `9941a504c`.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **943 -> 948** · W 183 FLAT · I 10 FLAT · H 2
+# FLAT · unique codes **800 -> 803**. **ADDED = {`E-MATCH-ALT-BINDING`, `E-SCHEMA-012`, `E-SCHEMA-013`}; REMOVED
+# = EMPTY.**
+# ⛑ **WINDOW HEADLINES (verify in source, not here):**
+#   · **#1119** (`g-impl1-match-miscompiles` F12/F13/F14) — a `match` alternation arm (`.A | .B :> r`) is now
+#     recognised at ANY arm position, not only first (`ast-builder.js` `armPatternChainArrowOffset` /
+#     `scanArmPatternAlternate`; `emit-control-flow.ts` Form 0w/0/2 + `armCondition` shared by `emit-logic.ts`);
+#     a NAMED-field payload arm binding 5+ fields is no longer truncated by the old 20-token paren-scan cap
+#     (`scanPastBalancedParens`, and the native-parser mirror `scanPastPayloadParen`); a brace inside a CLOSED
+#     quoted string on the same line no longer mis-scopes a block (`block-splitter.js`
+#     `braceIsQuotedStringContent`, tokenizer-backed, cached per line). A payload-BEARING alternation
+#     (a binding, a named field even when discarded, a nested/literal pattern) now FAILS CLOSED —
+#     **`E-MATCH-ALT-BINDING`** — instead of silently dropping the arm or gluing it onto its neighbor.
+#   · **#1116** (§39.2/§14.8.10 tenant floor) — a `<schema>` raw `CREATE TABLE` head naming a
+#     schema/database-qualified table is rejected (**`E-SCHEMA-012`**); a known-kind head whose name the
+#     compiler cannot read through to a follower is rejected (**`E-SCHEMA-013`**) — both were previously
+#     silent, tenant-isolation-inert gaps (`schema-differ.js` `findRejectedCreateTableHeads`,
+#     `gauntlet-phase1-checks.js` `<schema>` body checks).
+#   · **#1114** (§20.5.1) — route-inference Step 8b (protect= auto-escalation / `<page auth="required">`) no
+#     longer stamps secure session defaults that outrank a unit's OWN `<program>`'s declared session config
+#     (`g-route-inference-8b-session-defaults-outrank-program-declaration`); the session-field resolution order
+#     is unchanged, but Step 8b now leaves its fields undefined unless the unit itself declares them
+#     (`session-config-resolve.ts` `countUnitProgramNodes`, `route-inference.ts`, `emit-server.ts` now reads the
+#     ONE resolver instead of `authMiddlewareEntry.sessionExpiry` directly).
+#   · **#1112** (§20.5.1) — `E-MW-008`'s program-site count no longer counts a `kind="tool"` file as a
+#     competing web application (`g-mw008-counts-headless-tool-programs`; `codegen/index.ts`
+#     `_collectProgramSites` now asks the emit dispatch's own `isToolProgram` per FILE, not per node).
+#   · **#1113** (#1045 F1) — client JS relative-import re-basing now applied in BOTH the gate and the write
+#     phase (`compiler/tests/integration/clientjs-import-disk-rebase-gate-eq-write.test.js`, NEW).
+#   · **#1109** (dpa-051 bootstrap slice M2, `compiler/self-host-v2/`) — the front end (`parse.scrml` 1641L,
+#     `lower.scrml` 993L NEW) proves the lowered Core EQUALS M1's hand-built oracle (Fork-A proof); `ast.scrml`
+#     (175L NEW) is the parser's own AST; `core/check/print/lex/walk/measure.scrml` and
+#     `slice-m1/runtime/runtime.js` all took matching edits; `slice-m2/` (16 files, harness + fixtures +
+#     4 `*.test.js`) is the M2 test bed; CI `gate`'s bootstrap step now also runs `slice-m2/` and re-runs the M1
+#     suite over LOWERED programs (`SLICE_CORE=lowered`).
+# ⚑ **RE-RUN AT THIS SHA ON THIS (WINDOWS) CLONE:** `bun test ./compiler/self-host-v2/slice-m1/` -> 73/73 pass;
+# `SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/` -> 73/73 pass; `bun scripts/lint-no-default-arm.js`
+# -> 26 files, 0 violations; `bun test ./compiler/self-host-v2/slice-m2/` -> **72/74 pass, 2 FAIL** — both in
+# `parse.test.js`'s "the §66.19 sources are the SPEC's code blocks, verbatim (drift guard)" (`counter.scrml`,
+# `lib/dropdown.scrml`+`app.scrml`), comparing a `\r\n`-checked-out fixture against a bare-`\n` SPEC extract —
+# a WINDOWS-CRLF-CHECKOUT artifact of this clone (same class as the known `scrml-regen-scripts-crlf-broken-on-windows`
+# pattern), NOT a landed defect and NOT reproduced by this session; see test.map.md. Not filed as a new gap (no
+# code moved to cause it; a checkout-line-ending property, orthogonal to #1109's content).
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`). Do not reformat it.
+# ⚑ `file:line` citations in this S438 block were grep-derived at `fb21983a`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S437b HEADER (stamp `9941a504c`, 2026-09-27), CARRIED FOR PROVENANCE. ITS FIGURES ARE `9941a504c`-ERA. ━━━━━━━
+# ⛑ **S437b STAMP — `d02738767` -> `9941a504c`. 7 COMMITS (#1102-#1108), SAME SESSION (S437, second wrap-6c pass).**
+# MAP-STAMP RULE at write time: `git fetch origin && git merge --ff-only origin/main` -> HEAD **`9941a504c`** (== `origin/main` at fetch;
+# `origin/main` then advanced to `072741ca9` mid-pass — see ⏳);
+# inbound: `d02738767` is an ancestor of `9941a504c`. Pass ran in worktree `agent-a311ef56e25c9326a`; HEAD advances past
+# the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `9941a504c`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **266,005 lines / 211 files** per FACTS (+790 lines, files FLAT;
+# `git ls-files compiler/src | wc -l` = 213, flat) · test files **1,506** (+1) · `compiler/SPEC.md` **40,348** lines (+216) ·
+# conformance **1,047** cases (+74) in **55** dirs (flat) · §34 catalog **832** rows FLAT, range `20294..21197` ·
+# `docs/changes/` 777. PREFIX SERIES set-diffed at both ends: E 943 · W 183 · I 10 · H 2 · unique 800 — ADDED = REMOVED = EMPTY.
+# impl#1 conformance: `bun conformance/run.ts` -> **1040/1047 pass + 7 xfail** (was 967/973 + 6 at `d02738767`).
+# ⛑ **WINDOW HEADLINES (verify in source, not here):** #1106 §5.2.3 handler fix — a multi-statement handler value is PARSED
+# with the function-body statement parser into `value.handlerBlock.stmts` and lowered from those nodes by every emitter;
+# a BARE `;`-sequence is `E-MULTI-STATEMENT-HANDLER` in every position (incl. `<each>`/engine/`<match>` sub-builds);
+# braceless `else` (`if (c) a; else b`) no longer runs `b` unconditionally; a dangling `else` after `};` is
+# `E-STMT-UNEXPECTED-TOKEN`. #1105 bootstrap slice M1 — `compiler/self-host-v2/` Core IR + walk + JS/HTML trees + printer +
+# checker; `slice-m1/` instance-record runtime + 68 tests; new CI step. #1104 — `compiler/self-host/` FROZEN (reference
+# only). #1107/#1108 — SPEC §66 rulings (L6, L12, identities, O57-O60, O21/O43; reads through an un-narrowed handle are
+# `E-DECL-HANDLE-NOT-NARROWED`); §66 stays NOMINAL — impl#1 implements none of it.
+# ⏳ **NOT MAPPED — bootstrap M2 (#1109, `072741ca9`, parse / analyze / lower) LANDED ON `origin/main` MID-PASS, AFTER
+# this stamp.** It adds `compiler/self-host-v2/{parse,lower}.scrml` + `slice-m2/`, MODIFIES `core/check/print/lex/walk/measure.scrml`,
+# `slice-m1/runtime/runtime.js` + its tests, and `ci.yml` (+7/-). This map is deliberately stamped `9941a504c` (the brief's
+# target); `state.ts` will read it 1 commit behind until the next refresh maps M2.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`). Do not reformat it.
+# ⚑ `file:line` citations in this S437b block were grep-derived at `9941a504c`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S437 HEADER (stamp `d02738767`, 2026-09-27 AM), CARRIED FOR PROVENANCE. ITS FIGURES ARE `d02738767`-ERA. ━━━━━━━
+# ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
+# `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
+# `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
+# `git merge-base --is-ancestor 787d4cb4 d02738767` -> **exit 0**. Pass ran in worktree `agent-a081239793c7872e1`;
+# `HEAD` advances past the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `d02738767`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (was 0.7.1 — `8cd1e0223` #1099, "the impl#1 floor tag") · `compiler/src` **265,215 lines / 211 files**
+# per FACTS (+11,696 lines, +16 files; `git ls-files compiler/src | wc -l` = 213, 197 at `787d4cb4` — same +16) ·
+# test files **1,505** (+46) · `compiler/SPEC.md` **40,132** lines (+2,139) · conformance **973** cases (+68) in **55**
+# category dirs (+1: `defer/`, 44 cases) · §34 catalog **832** rows (+13), range `20294..21197` · `docs/changes/` 775.
+# ⛑ **PREFIX SERIES SET-DIFFED (`^| X-` rows, both ends):** E **922 -> 943** · W **182 -> 183** · I 10 · H 2 · unique
+# **787 -> 800**. ADDED = {`E-CLASS-NOT-IN-SCRML`, `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, `E-DEFER-CONTROL-FLOW`,
+# `E-DEFER-DUPLICATE-FUNCTION`, `E-DEFER-LATER-SHADOW`, `E-DEFER-NESTED`, `E-DEFER-OUTSIDE-FUNCTION`,
+# `E-DEFER-SERVER-IN-SPLIT`, `E-DEFER-UNHANDLED-FAILABLE`, `E-DEFER-UNSUPPORTED-SITE`, `E-MW-008`, `E-SCOPE-REDECLARE`,
+# `W-ENGINE-MATCH-IN-STATE-CHILD`}; REMOVED = EMPTY.
+# ⛔ **N-S405-1 STILL LIVE, SIX SESSIONS ON:** `E-CG-ENUM-BINDING-COLLISION` (`codegen/emit-library.ts:1517`) and
+# `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (`:713`) still have **0** mentions in `compiler/SPEC.md` (`grep -c` re-run).
+# ⛑ **THE LANGUAGE-LEVEL HEADLINES OF THE WINDOW (verify in SPEC, not here):** `defer` (§19.16) shipped in impl#1;
+# `class` and dynamic `import(...)` are not scrml (§7.2.1 / §21.3.2); `import:host` (§21.3.1 + manifest §22.13) built;
+# L19 REVERSED — inline block handlers `onclick={ a; b }` legal and canonical (§5.2.3, S435); **§66 Declarations,
+# Instances, and Value Contracts added as NOMINAL / SPEC-AHEAD — impl#1 does NOT implement it** (§66 banner at
+# `SPEC.md:38624`); the TS compiler is fixed "only for cause" (bootstrap-blocking / adopter-reported / security), every
+# other divergence is `status=carried` + a conformance `xfail` (S430 P7). impl#1 conformance at this SHA:
+# `bun conformance/run.ts` -> **967/973 pass + 6 xfail**.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`, re-read at `:795`). Do not reformat it.
+# ⚑ `file:line` citations in this S437 block were re-derived by grep at `d02738767`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ S437 AUTH DELTA ━━━━━━━
+# NOT a zero-diff row. Keyed surface moved: `codegen/emit-server.ts` (session store + cookie resolution),
+# NEW `codegen/session-config-resolve.ts`, `codegen/index.ts` (`E-MW-008`), `protect-analyzer.ts` (+ NEW
+# `diagnostic-secrets.ts`, `db-target.ts`, `db-uri-redact.ts`), `type-system.ts` (`E-AUTH-005` application scope).
+# `stdlib/auth*` / `stdlib/oauth*`: only `stdlib/oauth/google.scrml` (2-line edit). Detail in `## S437 — SESSION + SECRETS` below.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S422 HEADER (stamp `787d4cb4`, 2026-09-18), CARRIED FOR PROVENANCE. ITS FIGURES ARE S422-ERA. ━━━━━━━
 # ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
 # 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
 # executed at write time, not carried:
@@ -262,6 +489,174 @@
 #
 
 scrml has THREE distinct auth-adjacent surfaces: (1) the compiler's own `<program auth=...>` declarative config that the codegen wires into emitted apps, (2) the `scrml:auth` / `scrml:oauth` stdlib modules an author imports for flow logic, and (3) the §20.5 `session` server builtin (NEW this window — the write half of the session model, landed in two passes). This map covers all three, plus the §14.8.9 protect-floor that backstops them, plus the §64.9 headless-target auth carve-out.
+
+## S445 — AUTH-RELEVANT DELTA (`5b1d0dab0..464c9ab4d`)
+### Route-file classification is BUILD-ROOT-relative (#1194) — supersedes the S444b `findRoutePrefix` locus below
+- `resolveBuildRoot(files, givenRoot?)` — `compiler/src/route-inference.ts:7028` → `BuildRootResolution` (`:6983`):
+  `origin: "given" | "inferred" | "none"`, `root`, `candidates` (application `<program>` files), `entry?`,
+  `entryBasis?: "outside-route-dirs" | "shallowest"`.
+- `makeRouteClassifier(res)` (`:7076`) — classifies `pages/` / `routes/` on the path RELATIVE to the build root; used as
+  `findRoutePrefix` inside `runRI` (`:4495`). `buildPageRouteTree(files, buildRootRes)` (`:7126`).
+- Step 8: `rootCandidates = buildRootRes.candidates` (`:6409`); `appRoot` = the single candidate or null (`:6410`).
+- `W-AUTH-REQUIRED-NOT-INHERITED` (`:6745`) — a route file's own `<program auth="required">` gates only that file.
+- Input: `RIInput.buildRoot?` (`:4477`); `api.js:2233-2236` passes `options.buildRoot` (resolved) to RI. The CLI does not pass
+  one (inferred root).
+- Gaps `g-app-root-route-prefix-matched-on-absolute-path` (HIGH) and `g-required-program-with-no-identified-app-root-is-silent`
+  are `status=resolved` in `docs/known-gaps.md`.
+### Protected-column egress round 6 (#1198, §14.8.9)
+- `codegen/protect-egress.ts`: RETURNING rows resolve as `SELECT <list> FROM <target>`; every `?{}` terminator is tagged
+  (`.run()`, bare `?{}`); a spaced star in an unresolved entry fails closed; a table outside `declaredTables` strips wholesale.
+- `protect-analyzer.ts`: `ProtectAnalysis.declaredTables?: Set<string>` (`:124`, built `:1152`).
+- `codegen/protect-flow.ts`: opaque callbacks applied with every param bound to the join of receiver + args; `arguments`;
+  one compile-wide global cell for free names; descriptor-Symbol-key reach ships every column; `DERIVER_CALLS` (`:398`),
+  `STDLIB_DERIVERS` (`:415`: `auth` verifyPassword/hashPassword/verifyTotp, `crypto` verifyHash), `RUNTIME_SOURCE_CALLS`
+  (`:426`, ruling S445 #4: an `hmac` key built only from `process.env`/`argv` declassifies). A bare digest stays protected
+  (RULING S443 #7).
+- Error egress: CPS `ServerError.message` fixed under `protect=` (`emit-server.ts:1824`); prod `Bun.serve` `error:` handler
+  (`commands/build.js:696`).
+### CSP (#1200)
+- With `--emit-per-route`, the role-detection bootstrap + `window._SCRML_CHUNKS` manifest live in the same-origin
+  `scrml-chunks.<hash>.js` (`buildChunksBootJs`, `emit-html.ts:4493`), not an inline `<script>` — `headers="strict"`
+  (`default-src 'self'`) no longer refuses them.
+
+## S444b — AUTH LOCI (grep at `5b1d0dab0`; `compiler/src` unchanged since `108ca89be`)
+
+### `route-inference.ts` Step 8 — auth-middleware collection, inside `runRI` (`:4481`)
+All steps write one `authMiddleware: Map<filePath, AuthMiddleware>`; emit-server consumes the one entry per file.
+| step | line | what it does |
+|---|---|---|
+| 8a | `:6357` | `<program auth="required">` registers its own file |
+| 8a-page | `:6375` | every `<page auth="required">` registers via `pageAuthRequiredEntry` (`:4439`) — same gate a required `<program>` gets (S443) |
+| app root | `:6393-6398` | `rootCandidates` = files that are NOT `isToolProgram`, NOT a route file (`findRoutePrefix(filePath)` null), and have a top-level `<program>` (`findTopLevelProgramNode`); `appRoot` = the single candidate, else `null` |
+| redirect | `:6408-6425` | `programLoginRedirect` = `appRoot`'s `loginRedirect=` else `"/login"`; no `appRoot` -> the one distinct value declared across non-tool files, else `"/login"` + `ambiguousRedirects` (feeds 8f) |
+| 8b | `:6437` | protect= auto-escalation; explicit `auth=` honoured via `getExplicitAuthDeclaration` (`:4283`); 2+-`<program>` files (`countUnitProgramNodes`) keep the pre-S438 stamped defaults |
+| 8c | `:6565` | member-page inheritance. `rootCfg` = `appRoot`'s `authConfig`; with several candidates, ANY candidate declaring `auth="required"` (fail closed). When required: every file with `fileShape` `non-entry-page` or `bare-markup`, not `_layout.scrml`, with no recognized (`required`/`optional`/`none`) decl from `collectFileAuthDecls` (`:4393`) gets `pageAuthRequiredEntry` |
+| 8d | `:6632` | `W-AUTH-FILE-CONFLICT` — one file declares `required` and a laxer value; stricter wins |
+| 8e | `:6663` | `W-AUTH-REDIRECT-LOOP` — entry's `loginRedirect` equals the route's own URL (route file: `pages.get(filePath).urlPattern`; else `/<basename>`, `index` also `/`); case-sensitive; strips trailing `/`, `.html`, query/fragment |
+| 8f | `:6700` | `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS` — only when `ambiguousRedirects` is non-empty AND some entry is a page scope |
+
+`findRoutePrefix` (`:6856`) — `filePath.indexOf(prefix)` over `ROUTE_PREFIXES = ["/routes/", "/pages/"]` (`:6845`); first
+hit wins. ⚠ **It matches anywhere in the path, and `runRI` receives ABSOLUTE paths** (`api.js:1160`
+`resolvedInputFiles = inputFiles.map(f => resolve(f))`). A project checked out under any directory named `pages` or
+`routes` makes every file a "route file": `rootCandidates` is empty, `appRoot` is `null`, 8c inherits nothing, and 8e
+uses the route-pattern branch. PA-named gap `g-app-root-route-prefix-matched-on-absolute-path` — ⚠ **the ID is not in
+`docs/known-gaps.md` at `5b1d0dab0`** (grep empty). Other callers of `findRoutePrefix` in this file: `:6395`, `:6679`,
+`:6912` (`buildPageRouteTree`).
+
+### `codegen/index.ts` — nested-program auth + two-program files, inside `runCG` (`:1147`)
+- `detectNestedProgramAuth(parentChildren, nested)` `:1621`, called `:1645`. Recursive markup walk; `nested` becomes
+  true under a `<program>` OR `<page>`. Any `auth=` on a nested `<program>` (any value) -> `E-PROGRAM-NESTED-AUTH`
+  (`CGError`, severity error). Reason in source: auth config is read only from the file's FIRST top-level `<program>`
+  (`compute-program-config.ts`).
+- `E-PROGRAM-002` block `:1647-1672`: top-level `<program>` markup nodes of ONE file; each after the first is an error.
+  Same-file only; the cross-file §40.8 case stays reserved (comment `:1655`).
+- ⚠ The session-config diagnostic message at `:3158` still prints "E-PROGRAM-002 is reserved-not-implemented" (see
+  non-compliance U-S444b-1). Comments `:1964`, `:2005`, `:2026`, `:2084`, `:3241` say the same.
+
+### Example 23 + `scrml generate auth` template (#1180)
+- `examples/23-trucking-dispatch/app.scrml:35` — `<program db="./dispatch.db" auth="required" loginRedirect="/auth/login">`.
+  Login/register call `session.set("userId", …)`; pages read `session.userId`; logout `session.destroy()`.
+- `examples/23-trucking-dispatch/pages/driver/load-detail.scrml:182` — `assignedDriverFor(user, loadId)`; guards the
+  token read, BOL and POD server fns (`:203`, `:228`, `:263`).
+- `stdlib/auth/templates/login.scrml` — `loginServer` calls `session.set("userId", row.id)` after the password check.
+
+## S444 — AUTH-RELEVANT DELTA (`cf62b415..108ca89be`) — S441 security landings
+
+| PR | change | where |
+|---|---|---|
+| #1161 | `csrf="auto"` is the DEFAULT under `auth=`; only `csrf="off"` opts out; invalid values fail closed to `auto` | `compute-program-config.ts` `effectiveCsrfUnderAuth` |
+| #1161 | the compose route is gated like the page | `codegen/emit-server.ts`, `route-inference.ts` |
+| #1161 | WebSocket upgrade refuses cross-origin requests (403) | `codegen/emit-channel.ts` (`_scrml_ws_origin_ok(req)`), `commands/dev.js` |
+| #1162 | static serving is a client-asset allowlist — the DB, server source and session store are not downloadable | `static-serve-policy.js`, `static-serve-policy-emitted.js` (§47.13) |
+| #1163 | an async-colored fn (incl. `verifyPassword`) can no longer escape as a value into a sync slot (the accept-all shape left open at S440); event control after an `await` is an error | `codegen/js-async-analysis.ts`, `emit-library-shared.ts` (4 `E-ASYNC-*` / `E-EVENT-*` codes) |
+| #1171 | protected-column egress: a scalar extracted from a `protect=` row cannot reach a client sink; origin match case-insensitive; computed columns stripped | `codegen/protect-flow.ts`, `protect-egress.ts` (`E-PROTECT-006`) |
+| #1173 | `<page auth="required">` gates its page (document, compose route, server fns); member pages inherit the application `<program>`'s gate | `route-inference.ts` Step 8a-page, `pageAuthRequiredEntry` |
+| #1173 | `auth=` on a nested `<program>` is `E-PROGRAM-NESTED-AUTH` | `codegen/index.ts` `detectNestedProgramAuth` |
+| #1177 | a second top-level `<program>` in one file is `E-PROGRAM-002` (its `auth=` could previously be dropped) | `codegen/index.ts` |
+| #1173 | warnings `W-AUTH-FILE-CONFLICT`, `W-AUTH-REDIRECT-LOOP`, `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS` | `route-inference.ts` |
+| #1155 | example 23 one-time-token guards read `.changes` off a void `.run()` — fixed in the example pages | `examples/23-trucking-dispatch/pages/**` |
+
+
+## S440 — AUTH-RELEVANT DELTA (`fb21983a..cf62b415`)
+
+**#1139 (SECURITY) — accept-all via a nested async helper is closed.** Before: a `function` declared inside another
+function whose body awaited `verifyPassword` / a server fn was emitted `async` but called as sync, so
+`hashes.some(h => inner(h))`, `if (inner(pw))`, `.sort(inner)` and similar evaluated a Promise (always truthy) —
+every password accepted, with no diagnostic. After: `codegen/local-async-fns.ts` marks nested async helpers per
+top-level fn (block-scoped; only ASYNC resolutions are marked, so a mark can only add an await or a rejection); every
+emitter (client, server route/peer + value exports, library, tool) consumes the marks. Pinned by
+`compiler/tests/unit/s440-nested-helper-async-sync-callback.test.js` and conformance `auth/nested-helper-*-neg`,
+`server-db/nested-helper-*`. Still OPEN (ruled, not built): an async helper escaping as a VALUE (`const g = m`,
+object/array, user HOF, `Array.from(xs, m)`) and inline-handler / `on mount` server calls — both accept-all shapes.
+
+No change to session, CSRF, `protect=`, or token handling this window.
+
+
+## S438 — SESSION-CONFIG RESOLUTION DELTA (`9941a504c..fb21983a`)
+
+**Not zero-diff for this map** (the prior S437b window was). Two landed fixes, both §20.5/§20.5.1:
+
+### #1114 — route-inference Step 8b no longer outranks a unit's OWN `<program>` declaration
+`AuthMiddleware.sessionExpiry` is now **optional** (was required, defaulted at the type level). The resolution
+order in `codegen/session-config-resolve.ts` is UNCHANGED (still: 1. this unit's route-inference entry, 2. the
+unit's own raw `<program>`/`<page>` read, 3. the program-wide stash, 4. the language default) — what changed is
+WHO FILLS STEP 1:
+- **Step 8a** (`<program auth="required">`) still fills BOTH `sessionExpiry`/`sessionSecure` — the program's own
+  declaration, or the §20.5 secure defaults when it declares none; that answer legitimately IS the program's own.
+- **Step 8b** (protect= auto-escalation, and the `<page auth="required">` limb) now sets a field **ONLY when the
+  unit itself declares it**. Previously it ALSO stamped the `"1h"`/secure default here, which — for a protect=
+  unit belonging to a `<program>` that declared a DIFFERENT `sessionExpiry`/`session-secure` — outranked the
+  program's own value at step 1 before step 2/3 ever ran. Regression example: a `<program sessionExpiry="7d"
+  session-secure="false">` with a protect= `<db>` used to emit `__Host-scrml_sid` / 3600s instead of the
+  program's `scrml_sid` / 604800s (`g-route-inference-8b-session-defaults-outrank-program-declaration`).
+- **Exception, deliberately kept byte-identical:** a file holding 2+ `<program>` nodes (top-level or nested) is
+  a case `E-PROGRAM-002` (still reserved, not implemented) would need to rule on — for THOSE files, step 2 reads
+  the LAST declaring `<program>` in document order
+  (`g-two-programs-one-file-session-attr-last-wins`), so Step 8b keeps stamping the pre-S438 secure defaults
+  rather than falling through to that ambiguous read. Counted by `session-config-resolve.ts`'s **NEW export**
+  `countUnitProgramNodes`, which walks the SAME `<program>`/`<page>` nodes `readRawUnitSessionAttr` does (shared,
+  not mirrored).
+- `codegen/emit-server.ts`'s cookie Max-Age emission now reads `sessionExpiry` through the ONE resolver
+  (`_resolveSessionAttr`) rather than `authMiddlewareEntry.sessionExpiry` directly, since an auto-escalated entry
+  may legitimately carry no expiry of its own.
+
+### #1112 — `E-MW-008`'s program-site count no longer counts a headless tool
+`codegen/index.ts`'s `_collectProgramSites` (the pre-scan behind `E-MW-008`, "a session-emitting unit cannot be
+attributed to one program") now asks the EMIT DISPATCH's own `isToolProgram(file)` PER FILE before counting a
+`<program>` node as a site — not per-node `kind="tool"` check. A `tools/seed.scrml` beside one real web app
+previously contributed a false site: the tool file's SECOND top-level `<program session-secure="false"
+sessionExpiry="7d">` (emitted nowhere — the whole file routes to the tool path) became the build's "only"
+attributable program and its declaration got stamped onto every web unit (`g-mw008-counts-headless-tool-programs`,
+found in the S438 review of #1114). A web file with a MISPLACED `kind="tool"` node is still counted (that shape
+is `E-TOOL-002` anyway).
+
+Neither change alters the STANDING §20.5 resolution order documented below, or the cookie-name /
+`__Host-`/secure-mode mechanics — read those sections as still current.
+
+
+## S437b — ZERO-DIFF FOR THIS MAP (`d02738767..9941a504c`)
+
+Verified at `9941a504c`: `git diff --stat d02738767 origin/main -- stdlib/auth compiler/src/codegen/session-config-resolve.ts
+compiler/src/diagnostic-secrets.ts` is EMPTY; the window's `compiler/src` diff is the §5.2.3 handler fix only (no session,
+auth, CSRF or redaction code touched). Open gaps named in-window that sit on this surface (filed #1102, still `open`):
+`g-mw008-counts-headless-tool-programs`, `g-route-inference-8b-session-defaults-outrank-program-declaration`,
+`g-session-config-refusal-still-writes-dist`. Content below stands as of `d02738767`.
+
+## S437 — SESSION + SECRETS (`787d4cb4..d02738767`)
+
+### §20.5 session — ONE store and ONE cookie per APPLICATION, not per emitted unit (#1062, #1094)
+- **Store path** (`codegen/emit-server.ts`, `_sessionStoreDistAscent = distRootAscentOf(...)` at `:2837`, used in the `.scrml-sessions.db` emission at `:2930`): anchored at the DIST ROOT via a compile-time ascent, keyed with `path.resolve`. Before: string-concatenated off each unit's `import.meta.dir`, so two units of one program opened two stores and a nested unit answered `auth:false` for a cookie the root had minted (HTTP 200, zero diagnostics); on Windows the key was mixed-separator.
+- **Cookie name + expiry** (`session-secure` → `__Host-scrml_sid` vs `scrml_sid`; `sessionExpiry`) resolve per unit through **`codegen/session-config-resolve.ts`** — ONE three-step order: auth-middleware entry → the unit's own `<program>`/`<page>` raw attr → the build-wide stash. `emit-server` calls `resolveUnitSessionAttr`; a stash fall-through is RECORDED (`recordUnattributableSessionUnit`) and `codegen/index.ts` drains it after emission.
+- **`E-MW-008` (§20.5.1)** — a build with more than one `<program>` where a session-emitting unit can only resolve via the stash is REFUSED rather than guessed. The module header records why the driver must not re-derive the order ("mirroring a predicate is not mirroring a dispatch").
+
+### §52.11 `E-AUTH-005` is APPLICATION-scoped (#995, closes #770)
+`hasProgramDbAttr` ("does THIS FILE declare `<program db=>`?") is retired for an application-scope answer computed once in `runTS`; before, every page file of a canonical multi-file app false-fired, making §52.4.2 `<var server>` unreachable.
+
+### DB connection secrets never reach compiler output (#1047, #1055)
+`diagnostic-secrets.ts` `SecretRedactor` is installed at the `compileScrml` chokepoint (see error.map.md); `protect-analyzer.ts` displays a db target through `redactDbUri`/`displayConnectionValue` and classifies it through `db-target.ts` `classifyDbTarget` (the SAME classifier as `codegen/db-driver.ts`). `E-PA-004` names the file it opened; the PA no longer creates db side files. `lsp/handlers.js` redacts editor diagnostics and PA notes with the same redactor.
+
+### Not changed
+CSRF, `auth="required"` gating, `@currentUser`, protect egress (§14.8.9) and tenant isolation (§14.8.10) sections below are carried; a stat diff over `787d4cb4..d02738767` of `codegen/protect-egress.ts`, `codegen/tenant-egress.ts`, `auth-graph.ts`, `compiler/runtime/`, `stdlib/auth/` is EMPTY.
 
 ## Strategy
 Type: session-cookie auth (declarative, `<program>`-attribute driven, now backed by a compiler-owned `session` server builtin) + stdlib JWT (HS256 self-signed) + JWKS RS256 (external-IdP verification) + OAuth2 (5 providers) + magic-link/email-verify/password-reset (token-store flows).
@@ -696,9 +1091,10 @@ Expiry: `sessionExpiry` on `<program>` for the session cookie `Max-Age` + durabl
 Magic-link/verify/reset tokens: TTL-bound (caller-supplied, embedded in the stored record as an authoritative `expiresAt`), single-use, namespace-scoped.
 
 ## Tags
-#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller #request-onion #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #scrml-onion-dispatch #mw-pipeline-export #mw-declared-in #cors-preflight-stage-1 #preflight-carries-no-credentials #ratelimit-route-scoped #filename-sorted-precedence-hazard #csp-default-src-self #ssr-seed-application-json #transition-css-stylesheet #dev-prod-onion-parity #onion-dispatch-is-in-build-js #wrong-file-not-drifted-line #zero-diff-is-not-correctness #§52.13 #protected-document #scrml-protected-document #auth-required-document-guard #g-auth-required-does-not-protect-the-served-html-document #protecteddocs #scrml-pd-alias #case-insensitive-doc-guard #dev-prod-guard-parity #s380-incremental #s738-dev-rewrite #dev-child-process #dev-parent-proxy #run-dev-child-server #serve-dev-infra #child-ready-prefix #issue-724
+#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller #request-onion #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #scrml-onion-dispatch #mw-pipeline-export #mw-declared-in #cors-preflight-stage-1 #preflight-carries-no-credentials #ratelimit-route-scoped #filename-sorted-precedence-hazard #csp-default-src-self #ssr-seed-application-json #transition-css-stylesheet #dev-prod-onion-parity #onion-dispatch-is-in-build-js #wrong-file-not-drifted-line #zero-diff-is-not-correctness #§52.13 #protected-document #scrml-protected-document #auth-required-document-guard #g-auth-required-does-not-protect-the-served-html-document #protecteddocs #scrml-pd-alias #case-insensitive-doc-guard #dev-prod-guard-parity #s380-incremental #s738-dev-rewrite #dev-child-process #dev-parent-proxy #run-dev-child-server #serve-dev-infra #child-ready-prefix #issue-724 #s437b #9941a504c #zero-diff #s440 #cf62b415 #nested-async-helper #accept-all-closed
 #fourth-consecutive-zero-diff #anchors-carry-by-measurement
 #s405 #auth-surface-non-empty #protect-analyzer-deleted-its-regex #import-direction-invariant #e-pa-003-shadow-db #§14.8.9-three-limbs #e-protect-004-is-a-lint #e-protect-005 #runtime-refusal-is-the-guarantee #the-unit-is-the-body #status-and-headers-not-the-body #mediation-mark #provenance-vs-shape #w-protect-005 #zero-byte-readablestream #mounthydrate-was-unguarded #serverload-safe-for-a-reason #enumerate-over-the-serializer #tagged-refusal #soundness-bound-by-origin #§14.8.10-tenant-floor #four-app-matrix #cross-tenant-escape-executed #tenanttableset #w-schema-no-tables-declared #foreign-opener-two-of-five-are-security-floors
+#s437 #d02738767 #session-store-dist-root #session-config-resolve #e-mw-008 #e-auth-005-application-scope #secret-redactor #db-target #cookie-name-per-application
 
 ## Links
 - [primary.map.md](./primary.map.md)

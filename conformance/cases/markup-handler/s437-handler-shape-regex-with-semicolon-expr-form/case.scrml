@@ -1,0 +1,33 @@
+type Phase:enum = { Idle, Loading }
+
+<ph>: Phase = .Idle
+<log> = ""
+<n> = 0
+<s> = "a;b"
+<items> = [{ id: 1, name: "r" }]
+
+${ function t(x) { @log = @log + x + "," } }
+
+<p id="out">${@log}</p>
+
+<button id="top" onclick=${ /;/.test(@s) && t("T") }>top</button>
+
+<engine for=Phase initial=.Idle>
+    <Idle>
+        <button id="eng" onclick=${ /;/.test(@s) && t("E") }>engine</button>
+    </>
+    <Loading : "Loading…">
+</>
+
+<match on=@ph>
+    <Idle>
+        <button id="mat" onclick=${ /;/.test(@s) && t("M") }>match</button>
+    </>
+    <Loading><p>Loading…</p></>
+</>
+
+<ul>
+    <each in=@items key=@.id>
+        <li><button class="row" onclick=${ /;/.test(@s) && t("R") }>${@.name}</button></li>
+    </each>
+</ul>

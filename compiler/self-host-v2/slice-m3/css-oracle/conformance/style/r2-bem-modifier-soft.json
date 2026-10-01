@@ -1,0 +1,20 @@
+{
+  "spec": "§65.3.4",
+  "rationale": "§65.3.4: the built-in reset ships default-on — `margin` zeroed on `body`, `box-sizing: border-box` on every element. (The `.btn` × `.btn-op` value is the Wave-1 soft case — not asserted.)",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "body",
+          "prop": "margin-top",
+          "value": "0px"
+        },
+        {
+          "sel": "body > *",
+          "prop": "box-sizing",
+          "value": "border-box"
+        }
+      ]
+    }
+  ]
+}

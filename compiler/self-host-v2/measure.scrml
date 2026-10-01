@@ -1,0 +1,146 @@
+// =============================================================================
+// self-host-v2 / measure.scrml — Core size by node kind (dpa-051 §10: "the size
+// of Core after full desugaring" is one of the three numbers the build owes).
+//
+// Built on walk.allNodes — the same traversal every pass uses — so the count
+// sees exactly the nodes a pass sees. `kindOf` is total over every Core enum.
+// =============================================================================
+${
+    import { Stmt, Expr, View, Attr, InstRef, Place, Pattern, EditKind, CoreProgram } from "./core.scrml"
+    import { Node, allNodes } from "./walk.scrml"
+
+    export type KindCount:struct = { kind: string, count: int }
+
+    export fn countNodes(p: CoreProgram) -> KindCount[] {
+        let out: KindCount[] = []
+        for (const n of allNodes(Node.NProgram(p))) { out = bump(out, kindOf(n)) }
+        return out
+    }
+
+    fn bump(xs: KindCount[], k: string) -> KindCount[] {
+        let out: KindCount[] = []
+        let found = false
+        for (const x of xs) {
+            if (x.kind == k) {
+                out = out.concat([{ kind: k, count: x.count + 1 }])
+                found = true
+            } else {
+                out = out.concat([x])
+            }
+        }
+        if (!found) out = out.concat([{ kind: k, count: 1 }])
+        return out
+    }
+
+    // "Family.Variant" for every node.
+    export fn kindOf(n: Node) -> string {
+        return match n {
+            .NProgram(p: p) :> "Program"
+            .NDecl(d: d) :> "Decl"
+            .NField(f: f) :> "Field"
+            .NFn(f: f) :> "Fn"
+            .NServerFn(f: f) :> "ServerFn"
+            .NBlock(b: b) :> "Block"
+            .NStmt(s: s) :> "Stmt." + stmtKind(s)
+            .NExpr(e: e) :> "Expr." + exprKind(e)
+            .NPlace(pl: pl) :> "Place." + placeKind(pl)
+            .NInst(i: i) :> "InstRef." + instKind(i)
+            .NPattern(pat: pat) :> "Pattern." + patKind(pat)
+            .NEdit(k: k) :> "EditKind." + editKind(k)
+            .NView(v: v) :> "View." + viewKind(v)
+            .NAttr(a: a) :> "Attr." + attrKind(a)
+        }
+    }
+
+    fn stmtKind(s: Stmt) -> string {
+        return match s {
+            .Let(sym: x) :> "Let"
+            .Assign(local: x) :> "Assign"
+            .Write(cap: x) :> "Write"
+            .Commit(writes: x) :> "Commit"
+            .If(cond: x) :> "If"
+            .Return(e: x) :> "Return"
+            .Eval(e: x) :> "Eval"
+        }
+    }
+
+    fn exprKind(e: Expr) -> string {
+        return match e {
+            .Lit(lit: x) :> "Lit"
+            .Local(sym: x) :> "Local"
+            .Read(place: x) :> "Read"
+            .Call(callee: x) :> "Call"
+            .Prim(op: x) :> "Prim"
+            .Match(scrut: x) :> "Match"
+            .ArrayOf(elems: x) :> "ArrayOf"
+            .StructOf(ty: x) :> "StructOf"
+            .Handle(inst: x) :> "Handle"
+            .InitOf(decl: x) :> "InitOf"
+            .Host(call: x) :> "Host"
+            .Lambda(params: x) :> "Lambda"
+            .SeqCall(op: x) :> "SeqCall"
+        }
+    }
+
+    fn placeKind(p: Place) -> string {
+        return match p {
+            .Cell(decl: x) :> "Cell"
+            .LocalPath(sym: x) :> "LocalPath"
+        }
+    }
+
+    fn instKind(i: InstRef) -> string {
+        return match i {
+            .Shared(decl: x) :> "Shared"
+            .Lexical(depth: x) :> "Lexical"
+            .Alias(sym: x) :> "Alias"
+            .Narrowed(sym: x) :> "Narrowed"
+        }
+    }
+
+    fn patKind(p: Pattern) -> string {
+        return match p {
+            .PVariant(enumSym: x) :> "PVariant"
+            .PLit(lit: x) :> "PLit"
+            .PWild :> "PWild"
+        }
+    }
+
+    fn editKind(k: EditKind) -> string {
+        return match k {
+            .Replace :> "Replace"
+            .Append :> "Append"
+            .Prepend :> "Prepend"
+            .Anywhere :> "Anywhere"
+            .PositionWrite :> "PositionWrite"
+            .FieldAt(path: x) :> "FieldAt"
+            .Transition :> "Transition"
+            .RemoveEnd :> "RemoveEnd"
+            .RemoveFront :> "RemoveFront"
+            .RemoveAnywhere :> "RemoveAnywhere"
+            .ElemAt(index: x) :> "ElemAt"
+        }
+    }
+
+    fn viewKind(v: View) -> string {
+        return match v {
+            .El(tag: x) :> "El"
+            .Text(text: x) :> "Text"
+            .Dyn(e: x) :> "Dyn"
+            .Cond(arms: x) :> "Cond"
+            .Each(src: x) :> "Each"
+            .Instance(decl: x) :> "Instance"
+            .Slot :> "Slot"
+            .Star(decl: x) :> "Star"
+        }
+    }
+
+    fn attrKind(a: Attr) -> string {
+        return match a {
+            .Static(name: x) :> "Static"
+            .Bound(name: x) :> "Bound"
+            .On(event: x) :> "On"
+            .Bind(kind: x) :> "Bind"
+        }
+    }
+}

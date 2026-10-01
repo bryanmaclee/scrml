@@ -1,0 +1,12 @@
+{
+  "id": "markup-handler-multi-stmt-handler-in-match-arm-pos",
+  "description": "§5.2.3 — a BARE `;`-sequence handler on a button inside a `<match>` arm body fires E-MULTI-STATEMENT-HANDLER. Pre-S437 impl#1 re-parsed arm bodies with a nested buildAST whose errors were dropped, so the code never fired inside a match arm.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§5.2.3: \"A BARE event-handler value that contains a `;` outside of expression-internal contexts … is compile error `E-MULTI-STATEMENT-HANDLER`.\" The rule has no positional exemption.",
+  "expect": {
+    "codes": ["E-MULTI-STATEMENT-HANDLER"],
+    "notCodes": []
+  }
+}

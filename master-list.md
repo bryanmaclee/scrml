@@ -124,14 +124,14 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `15e60e4b` — wrap(s428): the decision is BOTH tracks — and the four prerequisites turn out to have been open in SPEC since S117 (#1040) — **pushed**
-- `26dca726` — wrap(s429b): two landed, four held — two of the holds were the spec saying no; Q5–Q7 to bryan (#1039) — **pushed**
-- `45749bb1` — wrap(s425): four adopter reports triaged by execution, and the two best findings were corrections to my own work (#1028) — **pushed**
-- `92f40bd4` — wrap(s427): five merged and one held — the held fix's own review found it compiling a const reassignment into a dead page (#1023) — **pushed**
-- `8fbeaf00` — wrap(s426-addendum2): door 3 is built and HELD, and the reviewer's best finding was already in my own output (#1015) — **pushed**
-- `60f8b1fc` — wrap(s424-addendum): correct the wrap's own closing state — five PRs, not three, and two landed after it (#1005) — **pushed**
-- `27a0bb17` — wrap(s423): the detector the tier exists for fires for the first time, after four wrong fix directions and four adversarial passes (#998) — **pushed**
-- `344dd9fe` — wrap(s422): three rulings that redefine what a binding is, and five gates that each caught something real (#997) — **pushed**
+- `9a3d96ebb` — wrap(s443): the S441 review record was wrong, the auth holes closed, two broken flagship examples work — and the post-merge reviews found the next two fail-opens (#1187) — **pushed**
+- `136ce3e22` — wrap(s442): bootstrap typer + §66.19 programs landed; three rulings (tape grants, dpa-058, dpa-045 axiom) (#1178) — **pushed**
+- `7b77eecd6` — wrap(s441): the spotlight audit found the security holes — four closed, two HIGHs filed for S442 (#1165) — **pushed**
+- `cf62b4154` — wrap(s440): a JS gotcha gauntlet and four deep-dives turned into ~100 rulings (#1140) — **pushed**
+- `d79d461d4` — wrap(s439): the bootstrap got a typer and its first corpus grade, and a grade is only evidence if breaking the thing breaks it (#1124) — **pushed**
+- `d1df3c64c` — wrap(s438): five landed on green, three hold refs, and every fix re-created its class one level away until a stop condition ended it (#1121) — **pushed**
+- `88a75073c` — wrap(s437): the bootstrap's first slice held its design claim, dpa-051 ruled, §66 rulings written after two PA restatements were caught widening them (#1110) — **pushed**
+- `d02738767` — wrap(s435): dpa-050 and dpa-052 ruled through and written into SPEC §66; L19 reversed; the TS compiler now serves the bootstrap and security only, with v0.8.0 as the adopter safety net (#1101) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

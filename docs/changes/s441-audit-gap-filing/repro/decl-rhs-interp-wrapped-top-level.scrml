@@ -1,0 +1,15 @@
+// S441 reproducer — item 15: `const <x> = ${ … }` at <program> top level reaches codegen and fails as a
+// "compiler defect" instead of the S190 user-level E-DECL-RHS-INTERP-WRAPPED.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/decl-rhs-interp-wrapped-top-level.scrml --output-dir <scratch>
+// Expected: E-DECL-RHS-INTERP-WRAPPED (§34; §6.2 "RHS is a bare expression") naming the `${}` wrapper.
+// Actual:   exit 1 `error [E-CODEGEN-INVALID-LOGIC]: … Unexpected token … const label = ; "Clicked " + …
+//           This is a compiler defect`. The S190 fix fires only when the decl sits INSIDE a `${ }` block
+//           (compiler/tests/unit/cluster-c-decl-boundary.test.js); a `<page>` root without the block fails
+//           the same way. This is the shape scrml.dev's reference pages (contexts/logic, keywords/lift) teach.
+<program>
+<count> = 0
+const <label> = ${ "Clicked " + @count + " times" }
+<button onclick=${@count = @count + 1}>go</button>
+<p>${@label}</p>
+</>

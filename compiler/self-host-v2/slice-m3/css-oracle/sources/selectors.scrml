@@ -1,0 +1,21 @@
+<program>
+  const List = <div props={}>
+      #{
+          .q::before   { content: ">"; }
+          .box > p     { color: red; }
+          h2 + p       { color: blue; }
+          h2 ~ span    { color: green; }
+          #special     { color: rgb(1, 2, 3); }
+          li:not(.x)   { background-color: yellow; }
+      }
+      <span class="q">q</span>
+      <div class="box"><p id="direct">d</p><div><p id="deep">deep</p></div></div>
+      <h2>h</h2>
+      <p id="next">n</p>
+      <p id="notnext">nn</p>
+      <span id="later">l</span>
+      <div id="special">s</div>
+      <ul><li id="li1">a</li><li class="x" id="li2">b</li></ul>
+  </>
+  <List/>
+</program>

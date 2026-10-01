@@ -1,0 +1,25 @@
+// S441 reproducer — addendum-5 P2: a nested `function inner(k) ! B { … }` inside a failable function loses its body.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/nested-failable-function-body-dropped.scrml --output-dir <scratch>
+// Expected: `inner` keeps its body and its declared error type (§19 `!` functions; nested functions are ordinary).
+// Actual:   exit 0. client.js: `function inner(k) {\n}` followed by a stray statement `B;` — the `if (k == 1) fail .Z`
+//           body is gone. The `! -> B` spelling instead loses the error type: `E-ERROR-009: 'fail' names variant 'B.Z'
+//           which is not a valid variant of the declared error type 'Error' for function 'inner'. Valid variants: Generic.`
+//           (probes rv-fail-out/p/n21, n12, n32; p04 shows a false E-ERROR-009 on the OUTER function's valid `fail .X`).
+<program>
+${
+    type A:enum = { X, Y(msg: string) }
+    type B:enum = { Z, X }
+    <out> = ""
+    function f(n: string) ! A {
+        function inner(k: number) ! B { if (k == 1) fail .Z }
+        inner(1) !{ | _ :> { @out = "inner" } }
+        if (n == "") fail A.X
+    }
+    function run() {
+        f("") !{ | .X :> { @out = "x" } | _ :> { @out = "o" } }
+    }
+}
+<button onclick=run()>go</button>
+<p>${@out}</p>
+</program>

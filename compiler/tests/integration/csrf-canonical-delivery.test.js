@@ -30,21 +30,20 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
-const TMP_ROOT = resolve(testDir, "_tmp_csrf_canonical");
+// Per-run scratch (S438) — see helpers/per-run-tmp.js. Recurrence-proof isolation
+// (a killed / --bail'd prior run skips afterAll) now comes from the fresh per-run dir;
+// the old sweep-then-reuse threw EBUSY on Windows when a prior handle was still live.
+const _tmp = perRunTmp(resolve(testDir, "_tmp_csrf_canonical"));
+const TMP_ROOT = _tmp.root;
 let tmpCounter = 0;
 
-beforeAll(() => {
-  // Recurrence-proof isolation (a killed / --bail'd prior run skips afterAll).
-  if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
-  mkdirSync(TMP_ROOT, { recursive: true });
-});
-afterAll(() => {
-  if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
-});
+beforeAll(_tmp.setup);
+afterAll(_tmp.teardown);
 
 const ITEMS_SEED = {
   "items.db": ["CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)"],
@@ -254,9 +253,14 @@ describe("end-to-end — first POST with the delivered token PASSES (no 403); fa
     // No SSR-state scaffolding on a csrf-only compose route.
     expect(html).not.toContain("window.__scrml_ssr_state");
 
-    // Anonymous first paint → the meta stays empty (no session token to inject).
+    // Anonymous request for the document → redirected, never composed (§52.13; §40.2
+    // compose-route bullet, S441). This used to assert an empty meta on an anonymous
+    // 200 — i.e. it pinned the compose route serving an auth="required" page to an
+    // unauthenticated viewer, which was the bug.
     const anonCompose = await composeRoute.handler(new Request(`http://localhost${composeRoute.path}`, {}));
-    expect(await anonCompose.text()).toContain('<meta name="csrf-token" content="">');
+    expect(anonCompose.status).toBe(302);
+    expect(anonCompose.headers.get("Location")).toBe("/login");
+    expect(await anonCompose.text()).not.toContain("csrf-token");
 
     // D3 integration — a first POST carrying the delivered token PASSES (no 403).
     const postWith = (headers) => new Request(`http://localhost${mutRoute.path}`, { method: "POST", headers, body: JSON.stringify({ name: "delivered" }) });

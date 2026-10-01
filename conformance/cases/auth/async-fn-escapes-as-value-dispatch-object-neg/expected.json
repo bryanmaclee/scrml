@@ -1,0 +1,12 @@
+{
+  "id": "auth-async-fn-escapes-as-value-dispatch-object-neg",
+  "description": "SECURITY (s441, S440 F4). The Promise-returning stdlib function `verifyPassword` is stored in an object and called through it (`checks.password(pw, hash)`). The compiler inserts `await` only at call sites it can see, and a call through a property is not one: the check tests an unawaited Promise, always truthy — every password accepted. Ruled S440 (F4): storing an async-colored function in an object is a compile error.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2: an async-colored function SHALL NOT be used as a value; storing it in an array or object SHALL be a compile error (E-ASYNC-FN-ESCAPES-AS-VALUE, §34). The rejected alternative — implicitly awaiting every call of a function-typed value — is named in the same ruling.",
+  "expect": {
+    "codes": ["E-ASYNC-FN-ESCAPES-AS-VALUE"],
+    "severity": { "E-ASYNC-FN-ESCAPES-AS-VALUE": "error" }
+  }
+}

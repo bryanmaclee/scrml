@@ -1,0 +1,17 @@
+<program>
+    // §66.19.1 in the nearest form impl#1 compiles today (pre-§66 spelling):
+    // a Shape-1 cell, a derived `const <x>`, a plain constant for `step`.
+    ${
+        <count> = 0
+        const <step> = 1
+        const <doubled> = @count * 2
+
+        function bump() { @count = @count + @step }
+        function restart() { reset(@count) }
+    }
+    <main>
+        <p>Count ${@count} (doubled ${@doubled})</p>
+        <button onclick=bump()>+${@step}</button>
+        <button onclick=restart()>Reset</button>
+    </main>
+</program>

@@ -1,0 +1,6 @@
+# progress — s435-dpa050-defects (append-only)
+
+- 2026-09-26 start; worktree cut at ea55368da (== origin/main); WIP commit landed; BRIEF.md saved.
+- 2026-09-26 reproduced on HEAD ea55368da: D1 (3 `<ul>` after 1 click), D2 (E-COMPONENT-035 x3), D3 (JS comma expr), D4 (`<*count/>` literal in HTML), D5 (E-ATTR-011 / E-SCOPE-001), D6 (`style="background:@accent.hex"`), D7 (p31 exit 0, CSS `var(--brand)`). Next: loci + stale comment + filing.
+- 2026-09-26 filed 9 entries at the end of docs/known-gaps.md (D5 split into two: bind-prop vs each-literal-prop, different roots). Counts HIGH 141->144, MED 311->314, LOW 115->118. `state.ts --write` + `--check`: gap-counts PASS. `@generated:recent-sessions` in master-list.md reports STALE on HEAD independent of this change (the regen differs only in SHA abbrev length, 9 vs 8 chars, environment-dependent); the regen was reverted, not committed, to avoid churn.
+- 2026-09-26 incidental (NOT filed, outside brief): in dpa-050 cur-ii-dropdown, a callback prop `onpick` called inside a component's `${ for … lift }` body is emitted unsubstituted (`onpick(opt)`), so a click would ReferenceError. The rt.mjs harness also throws `_scrml_lift_target is not defined` because indirect eval scopes the runtime's `let`; that is a harness artifact.
