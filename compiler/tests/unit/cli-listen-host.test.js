@@ -37,6 +37,7 @@ import {
   lanIPv4Addresses,
   bindPlan,
   ListenError,
+  isLegacyNumericIPv4,
   _setIPv6AvailableForTest,
   DEFAULT_HOST,
   ALL_INTERFACES_HOST,
@@ -57,7 +58,15 @@ function tcpProbe(host, port, timeoutMs = 1500) {
   });
 }
 
-const okFetch = () => new Response("ok");
+// Bun's NATIVE Response, independent of the global: several browser-tier unit
+// files register happy-dom globally and never unregister, so by the time this
+// file runs in a full `bun test` process `globalThis.Response` can be
+// happy-dom's. Bun.serve rejects that object ("Expected a Response object") and
+// answers with its own fallback page — which is what made "the ::1 twin serves
+// the same handler" red on CI (Linux + Windows). `Bun.fetch` is not replaced by
+// the registrator, so the constructor of its result is the native class.
+const NativeResponse = (await Bun.fetch("data:text/plain,x")).constructor;
+const okFetch = () => new NativeResponse("ok");
 
 let HAS_V6 = false;
 try { const p = Bun.serve({ port: 0, hostname: "::1", fetch: okFetch }); p.stop(true); HAS_V6 = true; } catch { /* no IPv6 */ }
@@ -243,7 +252,10 @@ describe("§5 listen() contract", () => {
 });
 
 describe("§5b unbindable host → a ListenError naming the host (F2)", () => {
-  for (const host of ["192.168.99.99", "myhost.invalid", "0"]) {
+  // "0" and the other inet_aton shorthands are refused BEFORE any bind, on every
+  // OS: Linux would bind "0" as 0.0.0.0 (every interface), Windows refuses it —
+  // the CI gate (Linux) caught this test assuming the Windows behaviour.
+  for (const host of ["192.168.99.99", "myhost.invalid", "0", "127.1", "2130706433", "0x7f.0.0.1", "010.0.0.1", "00.0.0.0"]) {
     test(`--host ${host}`, () => {
       let err;
       try { listen({ port: 0, fetch: okFetch }, host).stop(true); } catch (e) { err = e; }
@@ -257,6 +269,18 @@ describe("§5b unbindable host → a ListenError naming the host (F2)", () => {
       expect(err.message).toContain(err.cause.message);
     });
   }
+  test("numeric shorthand is refused by classification, not by an OS bind failure", () => {
+    for (const h of ["0", "127.1", "2130706433", "0x7f.0.0.1", "010.0.0.1", "00.0.0.0", "1.2.3.4.5", "0x7f000001"]) {
+      expect(isLegacyNumericIPv4(h)).toBe(true);
+    }
+    for (const h of ["127.0.0.1", "0.0.0.0", "192.168.1.10", "255.255.255.255", "localhost", "::1", "::", "deadbeef", "my-host.local"]) {
+      expect(isLegacyNumericIPv4(h)).toBe(false);
+    }
+    let err;
+    try { listen({ port: 0, fetch: okFetch }, "0").stop(true); } catch (e) { err = e; }
+    expect(err.cause.code).toBe("E_SCRML_HOST_SHORTHAND");
+  });
+
   test("a taken port names host, port and both families tried", () => {
     const hog = listen({ port: 0, fetch: okFetch }, "127.0.0.1", { ipv6Twin: false });
     try {
@@ -351,11 +375,17 @@ describe("§6 empirical: loopback on both families by default, never the network
     expect(await tcpProbe("::1", port)).not.toBe("connected");
   });
 
+  // Skipped only when this machine cannot bind ::1 at all (HAS_V6 probe above).
   test.skipIf(!HAS_V6)("the ::1 twin serves the same handler", async () => {
-    const s = listen({ port: 0, fetch: () => new Response("same-handler") }, DEFAULT_HOST);
+    // A per-run nonce: a foreign responder on [::1]:<port> (another process, or
+    // Bun's own fallback page) can never produce it.
+    const nonce = `same-handler-${crypto.randomUUID()}`;
+    const s = listen({ port: 0, fetch: () => new NativeResponse(nonce) }, DEFAULT_HOST);
     try {
-      expect(await rawGet("::1", s.port)).toContain("same-handler");
-      expect(await rawGet("127.0.0.1", s.port)).toContain("same-handler");
+      // Both sockets are OURS — not a best-effort twin that silently failed.
+      expect(s.scrmlListeners?.length).toBe(2);
+      expect(await rawGet("::1", s.port)).toContain(nonce);
+      expect(await rawGet("127.0.0.1", s.port)).toContain(nonce);
     } finally {
       s.stop(true);
     }

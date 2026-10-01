@@ -18902,6 +18902,9 @@ by default so its pairing with `0.0.0.0` needs `ipv6Only:true`. Pinned by `compi
 (incl. a structural check that no other listener — `Bun.serve`/`Bun.listen` in any spelling, `createServer`, or an
 http/https/net/tls/http2/dgram import — exists in compiler/src, and an empirical LAN-address probe with a bare-`--host`
 control) + `compiler/tests/commands/dev-serve-bind-host.test.js` (the real CLIs).
+S446 landing (the CI gate on Linux caught it): `listen()` now refuses inet_aton numeric shorthand (`0`, `127.1`,
+`2130706433`, `0x7f.0.0.1`, `010.0.0.1`) before any bind, on every OS. Linux binds `--host 0` as 0.0.0.0 (every
+interface) while Windows refuses it, so a typo-like value could otherwise expose the server on one OS only.
 
 ### g-native-component-def-with-children-throws-at-boot — under `--parser=scrml-native`, a markup-valued component definition that interpolates `${children}` is emitted as boot-time code that evaluates `children`, so the client throws `ReferenceError: children is not defined` at load — `NEW S432-peter; MED; open`
 <!-- @gap id=g-native-component-def-with-children-throws-at-boot sev=MED status=open locus=searched:compiler/native-parser(the native lowering of a `const X = <markup>` component definition — emits the definition body as a lift)—not-traced prov=empirical:S432-dev-agent-happy-dom-default-vs-native-A-B-on-451296f3-and-4d888293 -->

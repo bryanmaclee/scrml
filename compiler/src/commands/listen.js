@@ -97,6 +97,24 @@ export function isLoopbackHost(host) {
   return h === "localhost" || h === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
 }
 
+const CANONICAL_IPV4_OCTET = "(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
+const CANONICAL_IPV4 = new RegExp(`^${CANONICAL_IPV4_OCTET}(?:\\.${CANONICAL_IPV4_OCTET}){3}$`);
+const NUMERIC_IPV4_LIKE = /^(?:0x[0-9a-f]*|\d+)(?:\.(?:0x[0-9a-f]*|\d+))*$/i;
+
+/**
+ * True for an all-numeric host that is NOT a canonical dotted quad: `0`,
+ * `127.1`, `2130706433`, `0x7f.1`, `010.0.0.1` (octal), `1.2.3.4.5`. The OS
+ * resolver reads these inet_aton-style forms differently per platform (Linux
+ * binds `0` as 0.0.0.0 — every interface; Windows refuses it), so a value the
+ * user may have meant as a typo could silently expose the server. Refused.
+ *
+ * @param {string} h   normalized host
+ * @returns {boolean}
+ */
+export function isLegacyNumericIPv4(h) {
+  return NUMERIC_IPV4_LIKE.test(h) && !CANONICAL_IPV4.test(h);
+}
+
 function isWildcardHost(host) {
   const h = norm(host);
   return h === "0.0.0.0" || h === "::";
@@ -257,6 +275,15 @@ export function listen(config, host, opts = {}) {
   }
   if (config && Object.prototype.hasOwnProperty.call(config, "hostname")) {
     throw new Error("listen(): pass the host as listen()'s argument, not config.hostname");
+  }
+  if (isLegacyNumericIPv4(norm(host))) {
+    const cause = new Error(
+      `"${host}" is a legacy numeric IPv4 shorthand (inet_aton form), not a dotted-quad address. ` +
+      `Its meaning is platform-dependent — on Linux "0" binds every interface — so it is refused on every OS. ` +
+      `Write the full address (e.g. 127.0.0.1, or 0.0.0.0 for every interface).`,
+    );
+    cause.code = "E_SCRML_HOST_SHORTHAND";
+    throw new ListenError(listenFailureMessage(host, norm(host), config.port ?? 0, null, cause), cause);
   }
   const warn = opts.warn ?? ((m) => console.warn(m));
   const plan = bindPlan(host);
