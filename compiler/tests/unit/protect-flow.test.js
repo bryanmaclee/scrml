@@ -7,10 +7,15 @@
 import { describe, test, expect } from "bun:test";
 import { analyzeProtectFlow, analyzeCompileProtectFlow, buildProtectFlowDiagnostics, sqlSkeleton } from "../../src/codegen/protect-flow.ts";
 
-// A minimal module in the emitted shape: a tagged row, a handler whose capture
-// IIFE returns `ret`, and the compiler's redact-then-serialize envelope.
+// A minimal module in the emitted shape: the compiler's SQL client, a tagged
+// row, a handler whose capture IIFE returns `ret`, and the compiler's
+// redact-then-serialize envelope. (S447 round 7: a tag is read as a query only
+// when it IS that client — `new SQL(…)` from "bun" — so the fixture declares it,
+// as every emitted server module does.)
 const mod = (body, extra = "") => `
+import { SQL } from "bun";
 ${extra}
+const _scrml_sql = new SQL("sqlite:./app.db");
 async function _scrml_handler_getIt_1(_scrml_req) {
   const _scrml_result = await (async () => {
     const u = _scrml_protect_tag((await _scrml_sql\`SELECT * FROM users WHERE id = \${1}\`)[0] ?? null, ["passwordHash"]);
@@ -38,7 +43,7 @@ describe("analyzeProtectFlow", () => {
   });
 
   test("a row that never reaches a sink is NOT recorded as stripped", () => {
-    const r = analyzeProtectFlow(mod("const ok = await verifyPassword(pw, u.passwordHash); return { ok };", 'import { verifyPassword } from "./_scrml/auth.js";'));
+    const r = analyzeProtectFlow(mod("const ok = await verifyPassword(pw, u.passwordHash); return { ok };", 'import { verifyPassword } from "scrml:auth";'));
     expect(r.leaks).toEqual([]);
     expect(r.tagSites[0].stripped).toBe(false);
   });
@@ -77,7 +82,7 @@ describe("analyzeProtectFlow", () => {
     expect(leakCols(mod("return u.passwordHash.length;"))).toEqual([]);
     expect(leakCols(mod('return u.passwordHash.startsWith("$");'))).toEqual([]);
     // `verifyPassword` from `scrml:auth` is on the DERIVER allowlist …
-    const AUTH = 'import { verifyPassword } from "./_scrml/auth.js";';
+    const AUTH = 'import { verifyPassword } from "scrml:auth";';
     expect(leakCols(mod("return await verifyPassword(pw, u.passwordHash);", AUTH))).toEqual([]);
   });
 
@@ -107,7 +112,7 @@ describe("analyzeProtectFlow", () => {
 
   test("F6: call-site sensitive — a helper used on the hash does not poison a clean call", () => {
     const helper = "function norm(s) { return s.trim(); }";
-    expect(leakCols(mod("const ok = await verifyPassword(pw, norm(u.passwordHash)); return norm(u.name);", 'import { verifyPassword } from "./_scrml/auth.js";' + helper))).toEqual([]);
+    expect(leakCols(mod("const ok = await verifyPassword(pw, norm(u.passwordHash)); return norm(u.name);", 'import { verifyPassword } from "scrml:auth";' + helper))).toEqual([]);
     expect(leakCols(mod("const a = norm(u.name); return norm(u.passwordHash);", helper))).toEqual(["passwordHash"]);
   });
 
@@ -154,7 +159,7 @@ describe("analyzeProtectFlow", () => {
     expect(leakCols(mod("return { toJSON() { return u.passwordHash; } };"))).toEqual(["passwordHash"]);
     // A clean receiver's method with a protected ARGUMENT is still derived
     // unless the method embeds its argument.
-    expect(leakCols(mod("return await verifyPassword(pw, u.passwordHash);", 'import { verifyPassword } from "./_scrml/auth.js";'))).toEqual([]);
+    expect(leakCols(mod("return await verifyPassword(pw, u.passwordHash);", 'import { verifyPassword } from "scrml:auth";'))).toEqual([]);
     // N6: `Bun.*` is not on the allowlist (unreachable from scrml source; `Bun.hash` is not one-way).
     expect(leakCols(mod("return Bun.hash(u.passwordHash);"))).toEqual(["passwordHash"]);
   });
@@ -225,7 +230,7 @@ describe("analyzeProtectFlow", () => {
   });
 
   test("round 3 N5: Object.keys(row) is column names; scrml:data pick/omit are modelled", () => {
-    const DATA = 'import { pick, omit } from "./_scrml/data.js";';
+    const DATA = 'import { pick, omit } from "scrml:data";';
     expect(leakCols(mod("return Object.keys(u);"))).toEqual([]);
     expect(leakCols(mod('return pick(u, ["id", "name"]);', DATA))).toEqual([]);
     expect(leakCols(mod('return pick(u, ["id", "passwordHash"]);', DATA))).toEqual(["passwordHash"]);
@@ -484,7 +489,7 @@ async function _scrml_handler_setup_2(_scrml_req) {
   });
 
   test("r6 RULING S443 #7: only keyed / password-class hashes derive; a bare digest stays protected", () => {
-    const C = 'import { hash, hmac, verifyHash } from "./_scrml/crypto.js";';
+    const C = 'import { hash, hmac, verifyHash } from "scrml:crypto";';
     expect(leakCols(mod('return hash("md5", u.passwordHash);', C))).toEqual(["passwordHash"]);
     expect(leakCols(mod('return hash("sha256", u.passwordHash);', C))).toEqual(["passwordHash"]);
     expect(leakCols(mod("return hash(alg, u.passwordHash);", C))).toEqual(["passwordHash"]);
@@ -513,7 +518,7 @@ async function _scrml_handler_setup_2(_scrml_req) {
   });
 
   test("r6e: `import.meta.env.X` is positive runtime evidence for an hmac key", () => {
-    const C = 'import { hmac } from "./_scrml/crypto.js";';
+    const C = 'import { hmac } from "scrml:crypto";';
     expect(leakCols(mod("return await hmac(import.meta.env.HMAC_KEY, String(u.passwordHash));", C))).toEqual([]);
   });
 
@@ -538,7 +543,7 @@ async function _scrml_handler_setup_2(_scrml_req) {
     const keys = { filePath: "/p/keys.server.js", js: 'export const HMAC_KEY = "public-key";\nexport const ENV_KEY = process.env.HMAC_KEY;\n' };
     const app = (k) => ({
       filePath: "/p/app.server.js",
-      js: `import { hmac } from "./_scrml/crypto.js";\nimport { ${k} } from "./keys.server.js";\n` + mod(`return await hmac(${k}, String(u.passwordHash));`),
+      js: `import { hmac } from "scrml:crypto";\nimport { ${k} } from "./keys.server.js";\n` + mod(`return await hmac(${k}, String(u.passwordHash));`),
       infos: [],
       spanOf: () => null,
     });
@@ -549,8 +554,8 @@ async function _scrml_handler_setup_2(_scrml_req) {
   });
 
   test("r6b RULING S445 #4: an HMAC keyed by a compile-time CONSTANT is a digest; a runtime key declassifies", () => {
-    const C = 'import { hmac } from "./_scrml/crypto.js";';
-    const CH = 'import { hmac, hash } from "./_scrml/crypto.js";\nimport { normalize, basename } from "./_scrml/path.js";\nimport { capitalize, truncate, padLeft } from "./_scrml/format.js";\nimport { getSecret } from "secret-store";';
+    const C = 'import { hmac } from "scrml:crypto";';
+    const CH = 'import { hmac, hash } from "scrml:crypto";\nimport { normalize, basename } from "scrml:path";\nimport { capitalize, truncate, padLeft } from "scrml:format";\nimport { getSecret } from "secret-store";';
     for (const body of [
       'return await hmac("public-key", String(u.passwordHash));',
       'const K = "public-key"; return await hmac(K, String(u.passwordHash));',
@@ -580,7 +585,7 @@ async function _scrml_handler_setup_2(_scrml_req) {
     ]) {
       expect([body, leakCols(mod(body, CH))]).toEqual([body, ["passwordHash"]]);
     }
-    const CS = C + '\nimport { env } from "./_scrml/process.js";\nimport { get } from "./_scrml/http.js";\nimport { normalize } from "./_scrml/path.js";';
+    const CS = C + '\nimport { env } from "scrml:process";\nimport { get } from "scrml:http";\nimport { normalize } from "scrml:path";';
     for (const body of [
       "return await hmac(process.env.HMAC_KEY, String(u.passwordHash));",
       "return await hmac(Bun.env.HMAC_KEY, String(u.passwordHash));",
@@ -620,6 +625,135 @@ describe("buildProtectFlowDiagnostics", () => {
 async function _scrml_ssr() { const v = await (async () => { const u = 0; })(); }`;
     const d = buildProtectFlowDiagnostics(js, [], "a.scrml", () => null);
     expect(d.filter((x) => x.code === "E-PROTECT-006")).toHaveLength(1);
+  });
+});
+
+// S447 round 7 — the MECHANISMS, driven on raw JS (several of these shapes —
+// object-literal method shorthand, accessors — do not survive scrml codegen
+// today, so only raw JS reaches them; the flow must still be right on them).
+describe("analyzeProtectFlow — round 7: `this` is the receiver", () => {
+  test("a write through `this` lands in the receiver, whichever route supplied it", () => {
+    for (const body of [
+      // stored on the object, called as a method
+      "u.stash = function () { this.x = this.passwordHash; }; u.stash(); return u;",
+      "const c = { ...u }; c.stash = function () { this.x = this.passwordHash; }; c.stash(); return c;",
+      "const rs = [u]; for (const r of rs) { r.stash = function () { this.x = this.passwordHash; }; r.stash(); } return rs;",
+      "u.stash = function () { this.name = this.passwordHash; }; u.stash(); return u;",
+      // a user method named like a built-in mutator (`set`) is still CALLED
+      'const o = { h: "" }; o.set = function (r) { this.h = r.passwordHash; }; o.set(u); return o;',
+      'const o = { h: "" }; o.set = function (r) { const self = this; self.h = r.passwordHash; }; o.set(u); return o;',
+      "const o = { inner: {} }; o.set = function (r) { this.inner.h = r.passwordHash; }; o.set(u); return o.inner;",
+      // object-literal method / spread-copied / assigned / inherited
+      'const o = { h: "", set(r) { this.h = r.passwordHash; } }; o.set(u); return o;',
+      'const p = { set(r) { this.h = r.passwordHash; } }; const o = { ...p, h: "" }; o.set(u); return o;',
+      'const p = { set(r) { this.h = r.passwordHash; } }; const o = Object.assign({ h: "" }, p); o.set(u); return o;',
+      "const p = { set(r) { this.h = r.passwordHash; } }; const o = Object.create(p); o.set(u); return o;",
+      'const o = { h: "" }; Object.setPrototypeOf(o, { set(r) { this.h = r.passwordHash; } }); o.set(u); return o;',
+      // call / apply / bind / Reflect.apply / an array callback's thisArg
+      "function stash() { this.x = this.passwordHash; } stash.call(u); return u;",
+      'const o = { h: "" }; function st(r) { this.h = r.passwordHash; } st.apply(o, [u]); return o;',
+      'const o = { h: "" }; const st = function (r) { this.h = r.passwordHash; }.bind(o); st(u); return o;',
+      'const o = { h: "" }; function st(r) { this.h = r.passwordHash; } Reflect.apply(st, o, [u]); return o;',
+      'const o = { h: "" }; [u].forEach(function (r) { this.h = r.passwordHash; }, o); return o;',
+      // `new`
+      "const F = function (r) { this.h = r.passwordHash; }; return new F(u);",
+      "function F(r) { this.h = r.passwordHash; } const x = new F(u); return x;",
+    ]) {
+      expect([body, leakCols(mod(body)).length > 0]).toEqual([body, true]);
+    }
+  });
+
+  test("clean writes through `this` stay clean (no alias unification)", () => {
+    for (const body of [
+      'u.greet = function () { this.label = "hi " + this.name; }; u.greet(); return u;',
+      "const c = { n: 0, inc() { this.n = this.n + 1; } }; c.inc(); return { id: u.id, n: c.n };",
+      "const o = { n: u.name, show() { return this.n; } }; return o.show();",
+      // a setter-named method on an object that never sees protected data
+      'const store = { m: {}, set(k, v) { this.m[k] = v; } }; store.set("a", u.name); return { a: store.m.a, id: u.id };',
+    ]) {
+      expect([body, leakCols(mod(body))]).toEqual([body, []]);
+    }
+  });
+});
+
+describe("analyzeProtectFlow — round 7: implicit invocation", () => {
+  test("a function stored where the language calls it is analysed as called", () => {
+    for (const body of [
+      // tagged templates (the strings array is the first argument)
+      "const tag = (s, v) => v; return tag`${u.passwordHash}`;",
+      "const t = { f: (s, v) => v }; return t.f`${u.passwordHash}`;",
+      "const t = { f(s) { return this.p; } }; t.p = u.passwordHash; return t.f`x`;",
+      // coercion hooks
+      "const o = { toString: () => u.passwordHash }; return `${o}`;",
+      "const o = { valueOf: () => u.pin }; return o + 0;",
+      "const o = { valueOf: () => u.pin }; return +o;",
+      "const o = { [Symbol.toPrimitive]: () => u.passwordHash }; return `${o}`;",
+      "const S = Symbol; const o = { [S.toPrimitive]: () => u.passwordHash }; return `${o}`;",
+      "u.toString = function () { return this.passwordHash; }; return `${u}`;",
+      "u.valueOf = function () { return this.pin; }; return u + 0;",
+      "const k = { toString: () => u.passwordHash }; const o = {}; o[k] = 1; return o;",
+      "const o = { toString() { globalThis.q1 = u.passwordHash; return 'x'; } }; const s = `${o}`; return 1;",
+      "let s = ''; const o = { valueOf() { s = u.passwordHash; return 1; } }; const b = o == 1; return s;",
+      // iterators
+      "const o = { [Symbol.iterator]: function* () { yield u.passwordHash; } }; return [...o];",
+      "const o = { [Symbol.iterator]: function* () { yield u.passwordHash; } }; let s = ''; for (const x of o) { s = x; } return s;",
+      "const o = { [Symbol.iterator]: function* () { yield u.passwordHash; } }; const [a] = o; return a;",
+      "const o = { [Symbol.iterator]: function* () { yield u.passwordHash; } }; const id = (a) => a; return id(...o);",
+      "const o = { [Symbol.iterator]: function* () { yield u.passwordHash; } }; function* g() { yield* o; } return [...g()];",
+      "let i = 0; const o = { [Symbol.iterator]() { return { next: () => ({ value: u.passwordHash, done: i++ > 0 }) }; } }; return [...o];",
+      "u[Symbol.iterator] = function* () { yield this.passwordHash; }; return [...u];",
+      // accessors
+      "const o = { get x() { return u.passwordHash; } }; return { ...o };",
+      "const o = { set x(v) { globalThis.k9 = v; } }; o.x = u.passwordHash; return 1;",
+      // instanceof → Symbol.hasInstance(left)
+      "let s = ''; const C = { [Symbol.hasInstance]: (x) => { s = x.passwordHash; return true; } }; const b = u instanceof C; return s;",
+      // thenables — `await` resolves them, and so does a server function's own return
+      "const o = { then: (res) => res(u.passwordHash) }; const v = await o; return v;",
+      "u.then = function (res) { res(this.passwordHash); }; return await u;",
+      "async function mk() { return { then: (res) => res(u.passwordHash) }; } return await mk();",
+      // a tag the analysis holds no function for (a host-made function) fails closed
+      "const t = String.raw.bind(String); return t`${u.passwordHash}`;",
+      "return String.raw`${u.passwordHash}`;",
+    ]) {
+      // `pin` is protected here too (the numeric coercion shapes read it).
+      const js = mod(body).replace('["passwordHash"]', '["passwordHash", "pin"]');
+      expect([body, leakCols(js).length > 0]).toEqual([body, true]);
+    }
+  });
+
+  test("the compiler's SQL client stays a query; unrelated hooks and methods stay clean", () => {
+    for (const body of [
+      "const tag = (s, v) => s[0] + v; return tag`id ${u.id}`;",
+      "const o = { toString: () => u.name }; return `${o}`;",
+      "const o = { [Symbol.iterator]: function* () { yield u.name; } }; return [...o];",
+      "const o = { describe: () => u.passwordHash }; return { id: u.id };", // a non-hook method nobody calls
+      "const r = await _scrml_sql`SELECT name FROM users WHERE passwordHash = ${u.passwordHash}`; return r.length;",
+    ]) {
+      expect([body, leakCols(mod(body))]).toEqual([body, []]);
+    }
+  });
+
+  test("a tx handle from the SQL client's .begin() is a query too", () => {
+    const body = "return await _scrml_sql.begin(async (tx) => { const r = await tx`SELECT 1 AS x WHERE ${u.passwordHash} != ''`; return r.length; });";
+    expect(leakCols(mod(body))).toEqual([]);
+  });
+
+  test("round 7 item 3: only the compiler's own `scrml:` stdlib is a deriver — a look-alike path is not", () => {
+    for (const spec of ["./_scrml/auth.js", "../_scrml/auth.js", "_scrml/auth.js", "/x/_scrml/auth.js", "scrml:auth.js", "my-scrml:auth"]) {
+      const C = `import { verifyPassword, hashPassword } from "${spec}";`;
+      expect([spec, leakCols(mod("return verifyPassword(pw, u.passwordHash);", C))]).toEqual([spec, ["passwordHash"]]);
+      expect([spec, leakCols(mod("return hashPassword(u.passwordHash);", C))]).toEqual([spec, ["passwordHash"]]);
+    }
+    // a spoofed crypto `hmac` / process `env` cannot declassify, nor a spoofed `pick` select
+    expect(leakCols(mod('return await hmac(env("K"), String(u.passwordHash));', 'import { hmac } from "./_scrml/crypto.js";\nimport { env } from "./_scrml/process.js";'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return pick(u, ["id"]);', 'import { pick } from "./_scrml/data.js";'))).toEqual(["passwordHash"]);
+    // the genuine article still derives
+    expect(leakCols(mod("return verifyPassword(pw, u.passwordHash);", 'import { verifyPassword } from "scrml:auth";'))).toEqual([]);
+  });
+
+  test("a host function handed to a host call does not recurse (base overflowed the stack)", () => {
+    const r = analyzeProtectFlow(`import { a, b } from "some-npm";\nexport async function f() { return a(b); }\n`);
+    expect(r.saturated).toBe(false);
   });
 });
 
