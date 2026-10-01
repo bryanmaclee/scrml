@@ -2017,8 +2017,11 @@ export function generateClientJs(ctx: CompileContext): string {
   setShadowedVariantNames(shadowed, imported);
   // S438 review N3 — the string-rewrite path (handler bodies) cannot be typed:
   // a local-shadowed name is treated as a collision there (left unlowered →
-  // a loud invalid-output error), never guessed.
-  setVariantFieldsForRewriter(fields, new Set([...collisions, ...shadowed]));
+  // a loud invalid-output error), never guessed. S446 — so is an IMPORTED-ONLY
+  // name: the string path never sees a TS position stamp, and a by-name hit on
+  // an imported enum (`.Lit(n) :> yOf(.Neg(n))`, `yOf(o: Other)` elsewhere,
+  // `Expr.Neg(x)` imported) is a silent guess; it stays the pre-F11 loud form.
+  setVariantFieldsForRewriter(fields, new Set([...collisions, ...shadowed, ...imported]));
 
   // g-request-ref-nested-in-lift-misroute (CONVERGENCE, S349-peter) — establish
   // the file's registered-`<request>` id set ONCE, here at the per-file client-

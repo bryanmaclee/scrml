@@ -1022,6 +1022,13 @@ interface ScopeEntry {
    * the render fence inspects it; never type-driving.
    */
   declNode?: ASTNodeLike;
+  /**
+   * §14.10 — the binding's `resolvedType` comes from a written TYPE ANNOTATION
+   * (`let e: Expr = …`), so a later reassignment `e = .V` has a declared
+   * position type ("a previously-declared … local with a known type").
+   * Not set when the type was merely inferred from an initializer.
+   */
+  annotated?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -8913,6 +8920,8 @@ function annotateNodes(
    * Consumed by the `E-AUTH-005` check in the `state-decl` case.
    */
   appHasServerContext: boolean,
+  /** §14.10 — imported functions' declared parameter types, for call-arg bare variants only. */
+  importedFnSignatures?: Map<string, FnSignature>,
 ): Map<string, ResolvedType> {
   const nodeTypes = new Map<string, ResolvedType>();
   const filePath = fileAST.filePath;
@@ -9413,6 +9422,17 @@ function annotateNodes(
     ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
     ?? []
   );
+
+  // §14.10 — the call-argument bare-variant walker's signature table: this
+  // file's functions PLUS the functions it imports (their DECLARED parameter
+  // types, resolved in the exporting file's scope). A local function of the
+  // same name wins. Kept separate from `fnSignatures`, whose other readers
+  // (return-type propagation, formFor onsubmit) stay file-local.
+  let callArgFnSignatures = fnSignatures;
+  if (importedFnSignatures && importedFnSignatures.size > 0) {
+    callArgFnSignatures = new Map(importedFnSignatures);
+    for (const [name, sig] of fnSignatures) callArgFnSignatures.set(name, sig);
+  }
 
   // ---------------------------------------------------------------------------
   // §41.13 / §53.10 — parseVariant call-site recognition pass.
@@ -11299,7 +11319,7 @@ function annotateNodes(
             // ordering rationale as comparison-site: resolve bare variants
             // at typed-function call-arg positions before the LHS-driven
             // walk runs, so the no-context branch doesn't fire on them.
-            inferBareVariantsAtCallArgs(initExprForScope, fnSignatures, letSpan, errors);
+            inferBareVariantsAtCallArgs(initExprForScope, callArgFnSignatures, letSpan, errors);
             // §59.4 / §14.10 — map-KEY-arg pre-pass. `const x = @m.getOr(.City, 0)`
             // / `@m[.City]` — the bare KEY variant resolves against the map's
             // declared key enum (`[City:int]`) BEFORE the LHS-driven flat walker
@@ -11419,11 +11439,15 @@ function annotateNodes(
             kind: "variable",
             resolvedType,
             ...(_isConstBinding ? { isConst: true } : {}),
+            ...(letAnnot ? { annotated: true } : {}),
           });
         }
         // S19 Phase 2: visit embedded match-expr so exhaustiveness/arm checks fire.
         const mxn = (n as { matchExpr?: ASTNodeLike }).matchExpr;
         if (mxn && typeof mxn === "object") {
+          // §14.10 — `const e: Expr = match …`: each arm result sits at the
+          // annotated declaration's position (see stampArmResultVariants).
+          if (letAnnot) stampArmResultVariants(mxn, resolvedType);
           visitNode(mxn);
         }
         break;
@@ -11854,7 +11878,7 @@ function annotateNodes(
             // where `wrap(b: Bra) -> Tok` — `.Paren` belongs to `Bra`, not
             // `Tok`). Was ordered AFTER struct-nav → the cross-enum call-arg
             // resolved too late.
-            inferBareVariantsAtCallArgs(reactInitExprNode, fnSignatures, reactSpan, errors);
+            inferBareVariantsAtCallArgs(reactInitExprNode, callArgFnSignatures, reactSpan, errors);
             // §59.4 / §14.10 — map-KEY-arg pre-pass. `@m = @m.insert(.City, v)` —
             // the bare KEY variant resolves against the map's declared key enum
             // BEFORE the struct-nav/flat walker runs (bvCtxType is null for a map
@@ -12258,7 +12282,7 @@ function annotateNodes(
             checkEqPayloadVariantOperands(beExprNode, typeRegistry, beSpan, errors);
             // S84 v0.2.4 #5-followon (Gap B.4) — call-arg inference at
             // bare-expr top-level (e.g. `applyState(.V)` as its own stmt).
-            inferBareVariantsAtCallArgs(beExprNode, fnSignatures, beSpan, errors);
+            inferBareVariantsAtCallArgs(beExprNode, callArgFnSignatures, beSpan, errors);
             // §59.4 / §14.10 — map-KEY-arg pre-pass at bare-expr (`@m.update(.City,
             // f)` / `@m.has(.City)` as a statement). Resolves the bare KEY variant
             // against the map's declared key enum + stamps.
@@ -12779,7 +12803,7 @@ function annotateNodes(
             // call-arg walker would correctly resolve. Each helper stamps
             // `_bareVariantInferredAtBinaryExpr` on resolved idents so the
             // downstream walkers can deduplicate.
-            inferBareVariantsAtCallArgs(ifCondExpr, fnSignatures, ifCondSpan, errors);
+            inferBareVariantsAtCallArgs(ifCondExpr, callArgFnSignatures, ifCondSpan, errors);
             // §59.4 / §14.10 — map-KEY-arg pre-pass inside an if/while condition
             // (`if (@m.has(.City))`). Resolves the bare KEY variant against the
             // map's declared key enum + stamps.
@@ -13067,6 +13091,11 @@ function annotateNodes(
         // value-return match was silently accepted.
         const retMatchExpr = (n as { matchExpr?: ASTNodeLike }).matchExpr;
         if (retMatchExpr && typeof retMatchExpr === "object") {
+          // §14.10 — each arm RESULT of a returned match sits at the function's
+          // declared return position (see stampArmResultVariants).
+          stampArmResultVariants(retMatchExpr, enclosingFnReturnTypeStack.length > 0
+            ? enclosingFnReturnTypeStack[enclosingFnReturnTypeStack.length - 1]
+            : null);
           visitNode(retMatchExpr);
         }
         // GITI-038 — a returned function expression (`return function name(){…}`)
@@ -13130,7 +13159,7 @@ function annotateNodes(
           // E-VARIANT-AMBIGUOUS on a call-arg whose param enum differs from
           // the fn's return type (`return wrap(.Paren)` where
           // `wrap(b: Bra) -> Tok` — `.Paren` belongs to `Bra`, not `Tok`).
-          inferBareVariantsAtCallArgs(retExprNode, fnSignatures, retSpan, errors);
+          inferBareVariantsAtCallArgs(retExprNode, callArgFnSignatures, retSpan, errors);
           // §59.4 / §14.10 — map-KEY-arg pre-pass in a return value
           // (`return @m.getOr(.City, 0)`). Resolves the bare KEY variant against
           // the map's declared key enum + stamps, so the return-type-context
@@ -13210,6 +13239,20 @@ function annotateNodes(
         const tildInitExpr = (n as Record<string, unknown>).initExpr;
         if (tildInitExpr) {
           checkLogicExprIdents(tildInitExpr, tildSpan, scopeChain, typeRegistry, errors, n.name as string | undefined, fnAllDeclared);
+          // §14.10 — bare variants in the assigned value. A call argument takes
+          // its callee's DECLARED parameter type (same pre-pass, same ordering as
+          // let/return); a reassignment of a local whose type was WRITTEN
+          // (`let e: Expr = …; e = .Neg(k)`) takes that declared type. Any other
+          // position stays unstamped — codegen then never guesses the enum.
+          inferBareVariantsAtCallArgs(tildInitExpr, callArgFnSignatures, tildSpan, errors);
+          if (typeof n.name === "string") {
+            const prior = scopeChain.lookup(n.name) as ScopeEntry | undefined;
+            const rt = prior && prior.kind === "variable" && prior.annotated === true ? prior.resolvedType : null;
+            if (rt && (rt.kind === "enum" || rt.kind === "union"
+                || (rt.kind === "predicated" && (rt as PredicatedType).baseType === "enum"))) {
+              inferBareVariantsInExpr(tildInitExpr, rt, tildSpan, errors);
+            }
+          }
         }
         // §50.8.5 E-ASSIGN-004 — STATEMENT-form `const` reassignment.
         //
@@ -16214,6 +16257,18 @@ function inferReactiveSiteBareVariants(
     ) {
       const ctx = resolveReactiveCellType(target.name);
       if (ctx) inferBareVariantsInExpr(value, ctx, span, errors);
+    } else if (target && target.kind === "ident" && typeof target.name === "string") {
+      // §14.10 — "a previously-declared cell or LOCAL with a known type": a
+      // reassignment of a local whose type was WRITTEN (`let e: Expr = …;
+      // e = .Neg(k)`) resolves its bare variants against that declared type. A
+      // local whose type was only inferred from its initializer is not a
+      // declared position and is left alone.
+      const entry = scopeChain.lookup(target.name) as ScopeEntry | undefined;
+      const rt = entry && entry.kind === "variable" && entry.annotated === true ? entry.resolvedType : null;
+      if (rt && (rt.kind === "enum" || rt.kind === "union"
+          || (rt.kind === "predicated" && (rt as PredicatedType).baseType === "enum"))) {
+        inferBareVariantsInExpr(value, rt, span, errors);
+      }
     }
     return;
   }
@@ -19135,6 +19190,24 @@ function matchSubjectVariantsOf(subjectType: ResolvedType | null | undefined): M
     name: v.name,
     fields: v.payload instanceof Map ? Array.from(v.payload.keys()) : null,
   }));
+}
+
+/**
+ * §14.10 — a `match` whose VALUE flows into a declared enum position (the
+ * return of a `-> T` function, a `: T`-annotated let/const initializer): each
+ * arm's RESULT sits at that position, so a bare-dot constructor that IS an arm's
+ * whole result resolves against `T`. Arm results are lowered from their source
+ * TEXT (no TS-visited ExprNode exists for literal-test arms), so the position
+ * type is stamped on the MATCH node as plain data (the `__matchSubjectVariants`
+ * shape) and codegen applies it to a whole-result constructor only — a
+ * constructor nested inside an arm result (a call argument, a payload argument)
+ * is at a different position and is never typed from this stamp.
+ * `T` not an enum (or enum-subset) → no stamp.
+ */
+function stampArmResultVariants(matchNode: ASTNodeLike, positionType: ResolvedType | null | undefined): void {
+  if (!matchNode || typeof matchNode !== "object" || matchNode.kind !== "match-expr") return;
+  const schema = matchSubjectVariantsOf(positionType ?? null);
+  if (schema) (matchNode as { __armResultVariants?: MatchSubjectVariant[] }).__armResultVariants = schema;
 }
 
 /**
@@ -25385,6 +25458,8 @@ function processFile(
    * the very over-fire this parameter exists to end.
    */
   appHasServerContext?: boolean,
+  /** §14.10 — imported functions' declared parameter types (resolveImportedFnSignatures). */
+  importedFnSignatures?: Map<string, FnSignature>,
 ): { typedAst: TypedFileAST; errors: TSError[]; stateTypeRegistry: Map<string, ResolvedType> } {
   const errors: TSError[] = [];
   const hasServerContext = appHasServerContext ?? fileEstablishesServerContext(fileAST);
@@ -25568,6 +25643,7 @@ function processFile(
     stateTypeRegistry,
     machineRegistry,
     hasServerContext,
+    importedFnSignatures,
   );
 
   // §14.12.4 — Engine-cell carve-out for lifecycle annotation
@@ -26139,6 +26215,81 @@ function annotateWatchesRowChange(nodes: ASTNodeLike[] | undefined): void {
   }
 }
 
+/**
+ * One imported function's DECLARATION, as api.js reads it off the import graph:
+ * the exporting file's `function-decl` node, that file's path, and its type
+ * declarations (the scope its parameter annotations are written in).
+ */
+export interface ImportedFnDecl {
+  fnNode: ASTNodeLike;
+  depFilePath: string;
+  depTypeDecls: ASTNodeLike[];
+}
+
+type FnSignature = { params: Array<{ name: string; type: ResolvedType }>; returnType: ResolvedType };
+
+/**
+ * §14.10 — "a function parameter type (`fn(.V)` where the parameter is typed
+ * `T`)". The position type of a bare variant passed to an IMPORTED function is
+ * that function's DECLARED parameter type. Resolve each imported function's
+ * parameter ANNOTATIONS in the scope they were written in — the exporting
+ * file's own type declarations plus the types IT imports (the same
+ * `importedTypesByFile` map, same local-wins seeding rule as processFile) — so
+ * `yOf(.Neg(n))` with `yOf(o: Other)` in another file stamps `.Neg` with
+ * `Other`'s fields even when the importer never imports `Other`.
+ *
+ * Read-only over declarations: no body is inspected, nothing is inferred. A
+ * parameter with no annotation, or whose annotation does not resolve to an
+ * enum / union / enum-subset, is `asIs` — the call-arg walker skips it and a
+ * bare variant there is unstamped (codegen then never guesses its enum). The
+ * return type is always `asIs`: these signatures feed ONLY the call-argument
+ * bare-variant walker, never return-type propagation or other checks.
+ */
+function resolveImportedFnSignatures(
+  decls: Map<string, ImportedFnDecl> | undefined,
+  importedTypesByFile: Map<string, Map<string, ResolvedType>> | undefined,
+  registryCache: Map<string, Map<string, ResolvedType>>,
+): Map<string, FnSignature> | undefined {
+  if (!decls || decls.size === 0) return undefined;
+  const out = new Map<string, FnSignature>();
+  for (const [localName, d] of decls) {
+    try {
+      let reg = registryCache.get(d.depFilePath);
+      if (!reg) {
+        reg = buildTypeRegistry(d.depTypeDecls ?? [], [], { file: d.depFilePath, start: 0, end: 0, line: 1, col: 1 });
+        const depImports = importedTypesByFile?.get(d.depFilePath);
+        if (depImports) {
+          for (const [name, type] of depImports) {
+            const existing = reg.get(name);
+            if (!existing || existing.kind === "unknown" || existing === BUILTIN_TYPES.get(name)) reg.set(name, type);
+          }
+        }
+        registryCache.set(d.depFilePath, reg);
+      }
+      const params: Array<{ name: string; type: ResolvedType }> = [];
+      for (const param of (Array.isArray(d.fnNode.params) ? d.fnNode.params as unknown[] : [])) {
+        const paramName = typeof param === "string" ? param : (param as ASTNodeLike)?.name as string | undefined;
+        if (!paramName) continue;
+        const annot = (typeof param === "object" && param !== null)
+          ? (param as ASTNodeLike).typeAnnotation as string | undefined
+          : undefined;
+        let type: ResolvedType = tAsIs();
+        if (typeof annot === "string" && annot.trim().length > 0) {
+          const t = resolveTypeExpr(annot, reg);
+          if (t.kind === "enum" || t.kind === "union"
+              || (t.kind === "predicated" && (t as PredicatedType).baseType === "enum")) type = t;
+        }
+        params.push({ name: paramName, type });
+      }
+      out.set(localName, { params, returnType: tAsIs() });
+    } catch {
+      // A signature that cannot be read is simply absent: its call arguments stay
+      // unstamped (the codegen side then refuses to guess) — never a crash.
+    }
+  }
+  return out.size > 0 ? out : undefined;
+}
+
 export function runTS(input: {
   files: FileAST[];
   protectAnalysis: ProtectAnalysis;
@@ -26147,13 +26298,18 @@ export function runTS(input: {
    * Built in api.js from already-processed dependency files in topo order.
    * Keys are absolute file paths. Values are the exported type entries from that file. */
   importedTypesByFile?: Map<string, Map<string, ResolvedType>>;
+  /** Imported function declarations per importing file (local name → decl),
+   * built in api.js from the import graph. See resolveImportedFnSignatures. */
+  importedFnDeclsByFile?: { get(filePath: string): Map<string, ImportedFnDecl> | undefined };
 }): { files: TypedFileAST[]; errors: TSError[]; stateTypeRegistry?: Map<string, ResolvedType> } {
   const {
     files = [],
     protectAnalysis = { views: new Map() },
     routeMap = { functions: new Map() },
     importedTypesByFile,
+    importedFnDeclsByFile,
   } = input;
+  const importedFnRegistryCache = new Map<string, Map<string, ResolvedType>>();
 
   const typedFiles: TypedFileAST[] = [];
   const allErrors: TSError[] = [];
@@ -26181,7 +26337,12 @@ export function runTS(input: {
     // when an importing file is processed. If not provided, cross-file types are absent
     // (pre-import-system behavior — single-file compilation still works correctly).
     const importedTypes = importedTypesByFile?.get(fileAST.filePath as string);
-    const { typedAst, errors, stateTypeRegistry } = processFile(fileAST, protectAnalysis, routeMap, importedTypes, appHasServerContext);
+    const importedFnSignatures = resolveImportedFnSignatures(
+      importedFnDeclsByFile?.get(fileAST.filePath as string),
+      importedTypesByFile,
+      importedFnRegistryCache,
+    );
+    const { typedAst, errors, stateTypeRegistry } = processFile(fileAST, protectAnalysis, routeMap, importedTypes, appHasServerContext, importedFnSignatures);
     typedFiles.push(typedAst);
     allErrors.push(...errors);
     lastStateTypeRegistry = stateTypeRegistry;

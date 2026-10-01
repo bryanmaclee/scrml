@@ -2309,9 +2309,10 @@ export function generateServerJs(
   // emit-client.ts:generateClientJs. Released at the bottom of this function.
   const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions, shadowed: _scrmlShadowed, imported: _scrmlImportedOnly } =
     buildVariantFieldsRegistry(fileAST);
-  setVariantFieldsForRewriter(_scrmlVariantFields, new Set([..._scrmlVariantCollisions, ..._scrmlShadowed]));
+  setVariantFieldsForRewriter(_scrmlVariantFields, new Set([..._scrmlVariantCollisions, ..._scrmlShadowed, ..._scrmlImportedOnly]));
   // S438 review N1/N3 — the local-shadowed names keep pre-F11 behaviour on the
-  // server pass too (match binding + bare-dot constructors).
+  // server pass too (match binding + bare-dot constructors). S446 — imported-only
+  // names are refused by the (untypeable) string-rewrite constructor path too.
   setShadowedVariantNames(_scrmlShadowed, _scrmlImportedOnly);
 
   // §14.8.9 — arm the SERVER SQL-lowering pass to tag protected-origin `?{}`

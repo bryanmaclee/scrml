@@ -82,11 +82,12 @@ let _shadowedVariantNames: Set<string> | null = null;
 /**
  * S446 — variant names the by-name registries hold ONLY because an IMPORTED
  * enum declares them (no local enum does). Read by the bare-dot constructor
- * lowering (emit-expr.ts emitCall) for an UNSTAMPED constructor that is a call
- * ARGUMENT: its parameter's enum is unknown to codegen, so a by-name hit on an
- * imported enum is a guess (`conv(.Neg(6))` with `conv(o: Other)` in another
- * file and an imported `Expr.Neg(x)` here) — it stays unlowered, the pre-F11
- * loud failure. Set on BOTH the client and server passes, with the shadowed set.
+ * lowering (emit-expr.ts emitCall): an UNSTAMPED constructor of such a name —
+ * a position TS did not type, whose destination enum codegen cannot see — is
+ * never built by name (`conv(.Neg(6))` with `conv(o: Other)` in another file
+ * and an imported `Expr.Neg(x)` here); it stays unlowered, the pre-F11 loud
+ * failure. The string-rewrite path refuses the same names (they ride its
+ * collision set). Set on BOTH the client and server passes, with the shadowed set.
  */
 let _importedOnlyVariantNames: Set<string> | null = null;
 
@@ -2812,8 +2813,8 @@ export function emitMatchExpr(node: any, opts?: any): string {
       : inlineEngineWrite
         ? `{ ${bindingPrelude}${inlineEngineWrite.guardLines.join("\n")} }`
         : (bindingPrelude
-            ? `{ ${bindingPrelude}return ${emitExprField(null, arm.result, _matchCtx)}; }`
-            : `return ${emitExprField(null, arm.result, _matchCtx)};`);
+            ? `{ ${bindingPrelude}return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitExprField(null, arm.result, _matchCtx))}; }`
+            : `return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitExprField(null, arm.result, _matchCtx))};`);
 
     if (arm.kind === "wildcard") {
       if (arm.binding) {
@@ -2823,7 +2824,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
           // block-body / errarm-refail re-`fail` cases).
           iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; ${emitResult} }`);
         } else {
-          iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; return ${emitExprField(null, arm.result, _matchCtx)}; }`);
+          iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitExprField(null, arm.result, _matchCtx))}; }`);
         }
       } else {
         iifeLines.push(`  else ${emitResult}`);
@@ -3092,6 +3093,44 @@ export type SubjectVariantFields = Map<string, string[] | null>;
 export function isMatchSubjectFailable(node: any): boolean {
   return node?.__matchSubjectFailable === true;
 }
+/**
+ * §14.10 — lower a match-arm RESULT that is, as a whole, a bare-dot payload
+ * constructor (`.Neg(k)`), against the enum TS stamped as the match VALUE's
+ * declared position type (`__armResultVariants`: the return of a `-> T`
+ * function, a `: T`-annotated let/const initializer). The constructor's ident is
+ * stamped with `T`'s field list and emitted through the ordinary AST path —
+ * the same `__variantFields` lowering every TS-typed position uses — so the
+ * variant is never looked up by name.
+ *
+ * Returns null (caller keeps its existing string lowering) unless: the match
+ * carries the stamp, the result parses to ONE call whose callee is a bare-dot
+ * variant, and `T` declares that variant with a payload. A constructor nested
+ * inside a result (a call argument, a payload argument) is at another position
+ * and is never typed from this stamp.
+ */
+export function emitTypedArmResultCtor(result: string, matchNode: any, ctx: EmitExprContext): string | null {
+  const schema = matchNode?.__armResultVariants;
+  if (!Array.isArray(schema) || schema.length === 0 || typeof result !== "string") return null;
+  const trimmed = result.trim();
+  if (!/^\.\s*[A-Z][A-Za-z0-9_]*\s*\(/.test(trimmed) || !trimmed.endsWith(")")) return null;
+  let node: any = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { parseExprToNode } = require("../expression-parser.ts") as {
+      parseExprToNode: (r: string, f: string, o: number) => any;
+    };
+    node = parseExprToNode(trimmed, "", 0);
+  } catch { node = null; }
+  if (!node || node.kind !== "call" || !node.callee || node.callee.kind !== "ident") return null;
+  const calleeName: unknown = node.callee.name;
+  if (typeof calleeName !== "string" || !/^\.[A-Z]/.test(calleeName)) return null;
+  const variantName = calleeName.slice(1);
+  const v = schema.find((x: any) => x && x.name === variantName);
+  if (!v || !Array.isArray(v.fields)) return null;
+  node.callee.__variantFields = [...v.fields];
+  return emitExpr(node, ctx);
+}
+
 export function getMatchSubjectVariantFields(node: any): SubjectVariantFields | null {
   const list = node?.__matchSubjectVariants;
   if (!Array.isArray(list) || list.length === 0) return null;

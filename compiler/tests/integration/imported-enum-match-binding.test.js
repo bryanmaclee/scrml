@@ -754,12 +754,18 @@ ${body}
       expect(errors).toEqual([]);
       expect(mods.use.t(3)).toBe("neg3");
     });
-    test(`${label}: beside a local Mine.Neg(y, z) it is a compile error`, () => {
-      const { errors, clientJs } = build("rn3d-" + label.replace(/\W+/g, "-"), {
+    // S446 r3 — both shapes are now TYPED positions (§14.10: a reassigned local
+    // with a written type; an arm result of a match returned under `-> Expr`),
+    // so the local same-named `Mine.Neg(y, z)` cannot shadow them: the declared
+    // type builds the imported fields. (Before r3 they were untyped and failed
+    // loud here; the rule pinned is unchanged — never the local's fields.)
+    test(`${label}: beside a local Mine.Neg(y, z) the declared type wins, never the local`, () => {
+      const { mods, errors, clientJs } = build("rn3d-" + label.replace(/\W+/g, "-"), {
         "bundle.scrml": ENTRY(`import { t } from "./use.scrml"`), "core.scrml": NEG_CORE, "use.scrml": USE(true, body),
       });
-      expect(errors.length).toBeGreaterThan(0);
+      expect(errors).toEqual([]);
       expect(negKeys(clientJs)).not.toContain("y");
+      expect(mods.use.t(3)).toBe("neg3");
     });
   }
   test("a handler attribute beside a local Mine.Neg(y, z) is a compile error, not a local-field ctor", () => {
