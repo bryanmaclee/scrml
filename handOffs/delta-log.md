@@ -4132,3 +4132,13 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3612] friction · three confident PA diagnoses reversed by execution (browser failures "unflagged" — baselined; post-merge protect failures "real interaction" — pre-existing test-order pollution; §20.8 "already aborts <request>" — router fetch only) + #1191 dispatched against S435 policy; two parallel sessions → every PR conflicts on generated files (resolve/train scripts)
 
 [3613] state · S444 WRAPPED. Open for bryan: dpa-058 B3 (bound top-level scalar lowers attrs? one switch), SPEC "unawaited Promise" softening, dpa-063/064 (S445 lane). S445 LIVE successor (ASUS). Next bootstrap arc: U0 async core.
+
+[3614] rule · S445 (user-voice S445): top-level <program> = no <program>/<page> ancestor (b); route-file programs nested (item 1); no-effect statement is an error (item 2); nested session attrs error (3); constant-key HMAC protected (4); nested app attrs error (5); db= relative to declaring file + ownership-gated create (6); SCRML_DATA_DIR + per-file ownership · → scrml-support/user-voice-scrml.md §S445 · @adv:g-wrapped-program-auth-silently-dropped,g-dev-creates-empty-db-stubs-that-break-later-compiles
+
+[3615] land · S445: #1194 app root build-relative · #1196 declared prose + E-STMT-NO-EFFECT · #1198 protect egress r6 · #1201 program role by ancestor · #1192 bank dpa-063/064 · → docs/changelog.md S445 · @adv:g-app-root-route-prefix-matched-on-absolute-path,g-body-top-invariant-bypassed-by-raw-text-nodes,g-protect-egress-round-6-residuals,g-wrapped-program-auth-silently-dropped
+
+[3616] find · S445 reviews: protect 6c/6d regressions of their own round (toJSON this-leak); writes through `this` leak on base (HIGH, round 7); `scrml serve` binds *:3100 unauthenticated with arbitrary file r/w (HIGH); server fn in `${ lift }` ships to client; named top-level program = public worker · → docs/known-gaps.md §S445 · @adv:g-protect-egress-round-7-residuals,g-serve-listens-all-interfaces-unauthenticated
+
+[3617] friction · two flaky 300-s pre-commit hangs = 81 orphaned bun servers (commands dev tests leak --__dev-child; old review servers), ~3 GB; killed by cwd (deleted) · → hand-off S445 DURABLE
+
+[3618] state · S445 held: dev-db r4 reviewed LAND-WITH-NITS — round 5 owes R4-1 (outside-root owning db ignores SCRML_DATA_DIR) then land + flogence path heads-up; protect round 7; dpa-063/064 COMPLETE ADVISORY, surface to bryan first · → hand-off.md S445 · @adv:g-dev-creates-empty-db-stubs-that-break-later-compiles,dpa-063,dpa-064
