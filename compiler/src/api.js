@@ -7,8 +7,8 @@
  * servers can all drive compilation without spawning a subprocess.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, lstatSync, existsSync, copyFileSync } from "fs";
-import { resolve, extname, dirname, basename, join, relative, posix as pathPosix } from "path";
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, lstatSync, existsSync, copyFileSync, realpathSync } from "fs";
+import { resolve, extname, dirname, basename, join, relative, isAbsolute, posix as pathPosix } from "path";
 import { fileURLToPath } from "url";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST } from "./ast-builder.js";
@@ -48,7 +48,7 @@ import { fnv1aHash } from "./codegen/fnv1a-hash.ts";
 import { checkCssConflicts } from "./codegen/css-conflict-check.ts";
 import { generateCss } from "./codegen/emit-css.ts";
 import { stripPagesPrefix } from "./codegen/utils.ts";
-import { collectClientAssets, relFromRoot, CLIENT_ASSET_MANIFEST } from "./static-serve-policy.js";
+import { collectClientAssets, relFromRoot, CLIENT_ASSET_MANIFEST, _scrml_static_denied } from "./static-serve-policy.js";
 import { runMetaEval } from "./meta-eval.ts";
 import { resolveModules, resolveModulePath, resolveModulePathNative } from "./module-resolver.js";
 import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
@@ -56,7 +56,7 @@ import { runNRBatch } from "./name-resolver.ts";
 import { runTCBatch } from "./tag-canonicalizer.ts";
 import { runSYMBatch } from "./symbol-table.ts";
 import { setBPPOverrides, getBPPOverrides } from "./codegen/compat/parser-workarounds.js";
-import { clearProjectRootCache } from "./codegen/chunk-namespace.ts";
+import { clearProjectRootCache, resolveProjectRoot } from "./codegen/chunk-namespace.ts";
 import { resetMarkupValueExprIdCounter } from "../native-parser/translate-expr.js";
 import { lintGhostPatterns } from "./lint-ghost-patterns.js";
 import { runIMatchPromotable } from "./lint-i-match-promotable.js";
@@ -591,9 +591,15 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
  *   header imports `./scrml-runtime.<hash>.js`, a `.js` relative specifier the
  *   emitter computed in DIST space, which re-basing as if it were source-relative
  *   would break.
+ * @param {((absImportPath: string, importerFile: string) => string|null)|null} [relocate]
+ *   — CLIENT JS only (S440 item 16): maps a source-space helper target to the
+ *   absolute path of its COPY inside dist (`createClientHelperRelocator`), so the
+ *   specifier is re-based to a file the browser can fetch. Called with the target
+ *   THIS function resolved — there is one resolver, not two. Null (or a null
+ *   return) keeps the on-disk re-base to the source file.
  * @returns {string} — JS code with rewritten import paths
  */
-export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, emittedScrmlSources = null, outputBaseDir = null, distSpaceTargets = null) {
+export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, emittedScrmlSources = null, outputBaseDir = null, distSpaceTargets = null, relocate = null) {
   if (!jsCode || !sourceFilePath || !outputDir) return jsCode;
   const sourceDir = dirname(resolve(sourceFilePath));
   const outDir = resolve(outputDir);
@@ -668,7 +674,9 @@ export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, em
     // from `<out>/`, one level short, and failed at runtime. This becomes an
     // emitted import specifier, so posix-normalize it (GitHub #18) — a raw
     // Windows `relative()` result would embed `\` and break the import.
-    let newRelPath = toPosixSpecifier(relative(outDir, absImportPath));
+    // Client JS: point at the dist COPY when the relocator takes the target.
+    const relocated = relocate ? relocate(absImportPath, sourceFilePath) : null;
+    let newRelPath = toPosixSpecifier(relative(outDir, relocated ?? absImportPath));
     // Ensure it starts with ./ or ../
     if (!newRelPath.startsWith('.')) newRelPath = './' + newRelPath;
     return newRelPath;
@@ -729,6 +737,151 @@ function staticImportSources(jsCode) {
     }
   }
   return out;
+}
+
+/**
+ * The dist subdirectory that holds copies of the author's plain-JS helper
+ * modules that client JS imports (SPEC §21.3). Separate from `_scrml/` (the
+ * stdlib shims), so a project-root-level `math.js` can never land on a shim.
+ */
+export const CLIENT_HELPER_DIR = "_scrml_local";
+
+/** Helper extensions a browser can load as an ES module, so are copied. */
+const CLIENT_HELPER_EXT_RE = /\.(?:js|mjs)$/;
+
+/**
+ * Relative-module specifiers of a helper module (static import, `export … from`,
+ * and literal dynamic `import()`), or null when it does not parse as a module.
+ * @param {string} code
+ */
+function helperModuleSpecifiers(code) {
+  let program;
+  try {
+    program = acornParse(code, { ecmaVersion: "latest", sourceType: "module", allowHashBang: true });
+  } catch {
+    return null;
+  }
+  const out = [];
+  const visit = (node) => {
+    if (!node || typeof node.type !== "string") return;
+    if ((node.type === "ImportDeclaration" || node.type === "ExportNamedDeclaration" || node.type === "ExportAllDeclaration")
+      && node.source && typeof node.source.value === "string") {
+      out.push(node.source.value);
+    } else if (node.type === "ImportExpression" && node.source && node.source.type === "Literal"
+      && typeof node.source.value === "string") {
+      out.push(node.source.value);
+    }
+    for (const key of Object.keys(node)) {
+      const v = node[key];
+      if (Array.isArray(v)) { for (const c of v) if (c && typeof c.type === "string") visit(c); }
+      else if (v && typeof v.type === "string") visit(v);
+    }
+  };
+  visit(program);
+  return out;
+}
+
+/**
+ * S440 item 16 (bryan) — the browser half of the client-JS relative-import
+ * re-base: a plain `.js` helper that a page imports client-side is LEGAL
+ * (SPEC §21.3), so the build copies it into dist and re-bases the specifier to
+ * the copy. Re-basing alone (#1113) pointed the specifier back into the SOURCE
+ * tree, which a browser served from the output dir cannot reach.
+ *
+ * Layout: `<outputDir>/_scrml_local/<path relative to the project root>`. The
+ * mirror keeps every helper-to-helper relative specifier valid, so copies are
+ * byte-for-byte; a helper imported by N pages is one file.
+ *
+ * Fail-closed: a target outside the project root (symlinks resolved), a target
+ * whose dist path falls in a §47.13 denied class (it could never be served, and
+ * may be confidential — `*.server.*`, a database, a dot-path), and a missing
+ * target are compile errors; nothing is copied for them. Only `.js` / `.mjs`
+ * are copied — a `.ts` `import:host` target keeps the on-disk re-base.
+ *
+ * The relocator is called by `rewriteRelativeImportPaths` with the target THAT
+ * function resolved, so there is one resolution algorithm, and is memoized, so
+ * the gate phase and the write phase see identical answers.
+ *
+ * @param {string} outputDir — absolute dist root
+ * @param {string} projectRoot — absolute project root (the copy boundary)
+ */
+export function createClientHelperRelocator(outputDir, projectRoot) {
+  const copies = new Map(); // abs dest -> real abs source
+  const errors = [];
+  const memo = new Map(); // abs target -> abs dest | null
+  let realRoot;
+  try { realRoot = realpathSync(projectRoot); } catch { realRoot = resolve(projectRoot); }
+  const fail = (code, file, message) => {
+    errors.push({ stage: "CG", code, message, file, severity: "error" });
+  };
+
+  /** Validate + plan one target; returns the abs dest or null (error recorded). */
+  const plan = (absTarget, importerFile, viaHelper) => {
+    if (memo.has(absTarget)) return memo.get(absTarget);
+    memo.set(absTarget, null);
+    const shown = toPosixSpecifier(absTarget);
+    const via = viaHelper ? ` (imported by the client helper \`${toPosixSpecifier(viaHelper)}\`)` : "";
+    let real;
+    try {
+      real = realpathSync(absTarget);
+      if (!statSync(real).isFile()) throw new Error("not a file");
+    } catch {
+      fail("E-IMPORT-006", importerFile,
+        `E-IMPORT-006: \`${shown}\`${via} is imported by client code but does not exist on disk, ` +
+        `so it cannot be copied into the build output for the browser to load.`);
+      return null;
+    }
+    const rel = relative(realRoot, real);
+    if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) {
+      fail("E-IMPORT-011", importerFile,
+        `E-IMPORT-011: \`${shown}\`${via} is imported by client code but resolves outside the project root ` +
+        `\`${toPosixSpecifier(realRoot)}\`. The compiler copies client-reachable helper modules into the build ` +
+        `output so the browser can load them, and will not copy files from outside the project. ` +
+        `Move the helper inside the project (or add a scrml.toml at the directory that should be the project root).`);
+      return null;
+    }
+    const distRel = `${CLIENT_HELPER_DIR}/${toPosixSpecifier(rel)}`;
+    if (_scrml_static_denied(distRel)) {
+      fail("E-IMPORT-011", importerFile,
+        `E-IMPORT-011: \`${shown}\`${via} is imported by client code, but its path is in a class the server never ` +
+        `serves (SPEC §47.13: \`*.server.*\`, databases, dot-paths, \`.scrml\`, \`.map\`). It is not copied into the ` +
+        `build output: a browser could never load it, and such files may be server-only. Rename or move the helper.`);
+      return null;
+    }
+    const dest = join(resolve(outputDir), CLIENT_HELPER_DIR, rel);
+    memo.set(absTarget, dest);
+    copies.set(dest, real);
+    // Transitive: the copy's own relative imports must exist beside it too.
+    let code = null;
+    try { code = readFileSync(real, "utf8"); } catch { /* unreadable — the stat above passed; leave */ }
+    const specs = code === null ? null : helperModuleSpecifiers(code);
+    if (specs) {
+      for (const spec of specs) {
+        if (!(spec.startsWith("./") || spec.startsWith("../"))) continue;
+        if (!CLIENT_HELPER_EXT_RE.test(spec)) continue;
+        plan(resolve(dirname(real), spec), importerFile, real);
+      }
+    }
+    return dest;
+  };
+
+  return {
+    copies,
+    errors,
+    /** The `relocate` hook for `rewriteRelativeImportPaths`. */
+    relocate(absImportPath, importerFile) {
+      if (!CLIENT_HELPER_EXT_RE.test(absImportPath)) return null;
+      return plan(absImportPath, importerFile, null);
+    },
+    /** Copy every planned helper into dist. Returns the number copied. */
+    writeCopies() {
+      for (const [dest, src] of copies) {
+        mkdirSync(dirname(dest), { recursive: true });
+        copyFileSync(src, dest);
+      }
+      return copies.size;
+    },
+  };
 }
 
 /**
@@ -3229,6 +3382,36 @@ function _compileScrmlImpl(options = {}) {
     for (const [fp, errs] of byFile) collectErrors("CG", errs, fp);
   }
 
+  // S440 item 16 — plain-JS helpers that client JS imports are copied into
+  // `<outputDir>/_scrml_local/` and the client specifier re-based to the copy
+  // (see createClientHelperRelocator). Planned HERE, before the commit decision
+  // and the emit gate, so its diagnostics reach both and the gate phase and the
+  // write phase consult one memoized answer. The plan walks every client output
+  // from its own dist dir (the `pathFor` computation), exactly as the gate and
+  // write limbs do — an output whose dist dir IS its source dir needs no re-base
+  // and so no copy (the helper already sits beside it in the served tree).
+  // #1045 F1 — the dist artifacts the compiler itself writes that client JS
+  // may name by a relative specifier already in DIST space (the esm-format
+  // runtime import); `rewriteRelativeImportPaths` must leave those alone.
+  // Shared by the plan, the gate phase and the write phase so all rewrite identically.
+  const clientDistSpaceTargets = (outputDir && mode !== "library" && cgResult?.runtimeFilename)
+    ? new Set([resolve(outputDir, cgResult.runtimeFilename)])
+    : null;
+  const clientHelperRelocator = (outputDir && cgOutputBaseDir && cgResult?.outputs)
+    ? createClientHelperRelocator(outputDir, resolveProjectRoot(cgOutputBaseDir) ?? cgOutputBaseDir)
+    : null;
+  const clientRelocate = clientHelperRelocator ? clientHelperRelocator.relocate : null;
+  if (clientHelperRelocator) {
+    const planScrmlSources = new Set(cgResult.outputs.keys());
+    for (const [filePath, output] of cgResult.outputs) {
+      if (!output.clientJs) continue;
+      const relDir = stripPagesPrefix(dirname(relative(cgOutputBaseDir, filePath)));
+      const distDir = (relDir === "." || relDir === "") ? outputDir : join(outputDir, relDir);
+      rewriteRelativeImportPaths(output.clientJs, filePath, distDir, planScrmlSources, cgOutputBaseDir, clientDistSpaceTargets, clientRelocate);
+    }
+    for (const e of clientHelperRelocator.errors) allErrors.push(e);
+  }
+
   // Pre-write commit decision — see the `beforeWrite` option. The planned
   // `.server.js` set is read off `distServerKeyToSource` (the forward index built
   // through the write phase's `pathFor` transform), never re-derived here.
@@ -3314,13 +3497,8 @@ function _compileScrmlImpl(options = {}) {
     // it) and no artifacts are written. We use the same fatal/non-fatal
     // partition as the final result split below (`isNonFatal`): only W-/I-
     // prefixes and warning/info severities are non-fatal.
-    // #1045 F1 — the dist artifacts the compiler itself writes that client JS
-    // may name by a relative specifier already in DIST space (the esm-format
-    // runtime import); `rewriteRelativeImportPaths` must leave those alone.
-    // Shared by the gate phase and the write phase so both rewrite identically.
-    const clientDistSpaceTargets = (outputDir && mode !== "library" && cgResult?.runtimeFilename)
-      ? new Set([resolve(outputDir, cgResult.runtimeFilename)])
-      : null;
+    // (`clientDistSpaceTargets` / `clientRelocate` are computed above the
+    // commit decision — shared by the plan, the gate phase and the write phase.)
     const hasPriorFatalError = allErrors.some((e) =>
       !(e.code?.startsWith("W-")
         || e.code?.startsWith("I-")
@@ -3378,7 +3556,7 @@ function _compileScrmlImpl(options = {}) {
         // so the gated bytes are the written bytes (an `import:host` binding or a
         // plain `.js` helper used client-side lands a source-space specifier here).
         if (output.clientJs) {
-          let c = rewriteRelativeImportPaths(output.clientJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets);
+          let c = rewriteRelativeImportPaths(output.clientJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets, clientRelocate);
           c = rewriteStdlibImports(c, gateDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.client.js`, c);
           // §4.12.4 — the page's nested-program worker bundles are browser JS too.
@@ -3593,7 +3771,7 @@ function _compileScrmlImpl(options = {}) {
         for (const [filePath, output] of cgResult.outputs) {
           if (output.clientJs) {
             const { targetDir, fullPath } = pathFor(filePath, ".client.js");
-            let c = rewriteRelativeImportPaths(output.clientJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets);
+            let c = rewriteRelativeImportPaths(output.clientJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets, clientRelocate);
             c = rewriteStdlibImports(c, targetDir, outputDir, bundledStdlib);
             const hash = fnv1aHash(c);
             finalClientByFile.set(filePath, { contents: c, hash });
@@ -3637,6 +3815,46 @@ function _compileScrmlImpl(options = {}) {
             return `${pre}${posixRelFrom(htmlDir, hashed)}${post}`;
           },
         );
+      };
+
+      // S440 item 16 — classic format: a client bundle that carries a top-level
+      // ES `import` (a plain-JS helper used client-side, now copied into dist)
+      // is a SyntaxError as a classic `<script>`, so the page was dead on
+      // arrival whatever the specifier. Such a page's client-bundle tags load as
+      // `type="module"` instead. ALL of the page's bundle tags flip, not just
+      // the importing one: module scripts run deferred, in document order, so
+      // flipping one would make it run AFTER a classic bundle that reads its
+      // `_scrml_modules[...]` registration. The shared runtime (and the
+      // per-route chunk activation script) stay classic and still run first.
+      // Pages with no importing bundle — every page before this fix that
+      // worked — are byte-identical. esm already tags every script as a module.
+      const importingClientBundles = new Set(); // dist-relative POSIX, unhashed AND hashed
+      if (moduleFormat !== "esm") {
+        for (const [filePath, output] of cgResult.outputs) {
+          if (!output.clientJs) continue;
+          const srcs = staticImportSources(output.clientJs);
+          if (!srcs || srcs.length === 0) continue;
+          const relUn = toPosixRel(pathFor(filePath, ".client.js").fullPath);
+          importingClientBundles.add(relUn);
+          if (assetHashMap.has(relUn)) importingClientBundles.add(assetHashMap.get(relUn));
+        }
+      }
+      const CLIENT_BUNDLE_TAG_RE = /<script src="([^"]+?\.client(?:\.[0-9a-z]+)?\.js)"><\/script>/g;
+      const promoteClassicModuleBundles = (html, htmlFilePath) => {
+        if (importingClientBundles.size === 0 || !html) return html;
+        const { targetDir } = pathFor(htmlFilePath, ".html");
+        const htmlDir = toPosixRel(targetDir);
+        let needsModule = false;
+        for (const m of html.matchAll(CLIENT_BUNDLE_TAG_RE)) {
+          const ref = m[1];
+          if (/^[a-z][a-z0-9+.-]*:/i.test(ref) || ref.startsWith("//") || ref.startsWith("/")) continue;
+          if (importingClientBundles.has(posixNormalize(htmlDir ? `${htmlDir}/${ref}` : ref))) {
+            needsModule = true;
+            break;
+          }
+        }
+        if (!needsModule) return html;
+        return html.replace(CLIENT_BUNDLE_TAG_RE, (m, ref) => `<script type="module" src="${ref}"></script>`);
       };
 
       // ESM chunks arc (Unit 3) — content-hash the in-chunk ES `import` URLs.
@@ -3744,7 +3962,7 @@ function _compileScrmlImpl(options = {}) {
             }
             if (writeOutput(filePath, `.client.${cached.hash}.js`, c)) fileCount++;
           } else {
-            let c = rewriteRelativeImportPaths(output.clientJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets);
+            let c = rewriteRelativeImportPaths(output.clientJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets, clientRelocate);
             c = rewriteStdlibImports(c, targetDir, outputDir, bundledStdlib);
             if (writeOutput(filePath, ".client.js", c)) fileCount++;
           }
@@ -3763,7 +3981,7 @@ function _compileScrmlImpl(options = {}) {
         if (output.html) {
           // #82 — rewrite `.client.js`/`.css` refs to their hashed names
           // (no-op when hashAssets is off).
-          const htmlOut = rewriteHtmlAssetRefs(output.html, filePath);
+          const htmlOut = promoteClassicModuleBundles(rewriteHtmlAssetRefs(output.html, filePath), filePath);
           if (writeOutput(filePath, ".html", htmlOut)) fileCount++;
         }
         if (output.css) {
@@ -3949,6 +4167,17 @@ function _compileScrmlImpl(options = {}) {
         // fetches OTHER routes' INITIAL chunks — not files counted here.
         log(`  [CG] Tier-2 intra-route prefetch chunks: ${tier2Count} file(s), ${tier2Bytes} B total`);
       }
+    }
+
+    // S440 item 16 — copy the client-reachable plain-JS helpers into dist
+    // (`_scrml_local/`). Not seeded into the manifest: the §47.13 import closure
+    // admits each copy only because a written client bundle imports it.
+    // Fail-closed: a build with any relocation error copies NOTHING.
+    if (!emitGateFailed && clientHelperRelocator && clientHelperRelocator.errors.length === 0
+      && clientHelperRelocator.copies.size > 0) {
+      const n = clientHelperRelocator.writeCopies();
+      fileCount += n;
+      if (verbose) log(`  [CG] Copied ${n} client helper module(s) -> ${CLIENT_HELPER_DIR}/`);
     }
 
     // SPEC §47.13 — close the browser artifacts over their relative imports and
