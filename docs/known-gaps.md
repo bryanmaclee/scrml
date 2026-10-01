@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 221 | 4 |
+| HIGH | 220 | 4 |
 | MED | 439 | 0 |
-| LOW | 213 | 0 |
+| LOW | 214 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -18623,7 +18623,15 @@ Ruled to BUILD at S430 (P4). The bootstrap's host-module bridge.
 every later `compile` resolves against the source dir, opens the stub, and fails `E-PA-004` naming tables — not the path it
 opened. Two defects: the side-effect create + resolution mismatch, and a diagnostic that does not name the resolved path.
 
-<!-- @gap id=g-dev-creates-empty-db-stubs-that-break-later-compiles sev=HIGH status=open locus=compiler/src/commands/dev.js prov=adopter:flogence-S49 -->
+> **RESOLVED S447 (`docs/changes/s445-dev-db-side-file/` + `docs/changes/s447-dev-db-r5/`).** Rulings S445 item 6 + "a built server's data root; ownership is per declaring file": `db=` resolves against the DECLARING file in dev/compile; only a schema-declaring file owns and may create (prints "created new database <path>"); referencing handles open lazily and fail loudly naming the resolved path; a built server resolves project-root-relative paths against `SCRML_DATA_DIR ?? project root` (adapters set it); `scrml dev` ignores `SCRML_DATA_DIR`. Six S239 review rounds (r1 DO-NOT-LAND … r5b LAND-WITH-NITS, every finding reproduced). flogence must change `./flogence.db` → `../flogence.db` (src/) / `../../flogence.db` (src/ports/). Supersedes the ss19 #9 framing of [[g-db-src-compile-vs-runtime-path]]. Residuals → [[g-dev-db-data-root-residuals]].
+
+<!-- @gap id=g-dev-creates-empty-db-stubs-that-break-later-compiles sev=HIGH status=resolved locus=compiler/src/commands/dev.js+compiler/src/codegen/sqlite-file-target.ts prov=adopter:flogence-S49 -->
+
+### G-DEV-DB-DATA-ROOT-RESIDUALS — S447 r5b re-review residuals of the SQLite data-root arc (all LOW / NIT)
+
+<!-- @gap id=g-dev-db-data-root-residuals sev=LOW status=open locus=compiler/src/codegen/sqlite-file-target.ts(_scrml_sqlite_inside, _scrml_sqlite_owned)+compiler/src/commands/dev.js prov=review:S447-devdb-r5b-review -->
+Reviewer-executed on `1b474db20`. **LOW — a DANGLING symlink inside the data dir escapes containment:** `data/dangling.db -> out/target.db` with `SCRML_DATA_DIR=data` → realpath fails on the dangling link, the check falls back to the parent dir (inside), then SQLite follows the link and creates `out/target.db`. Needs write access to the data dir. Fix: `lstat` the target; a symlink whose realpath fails is refused. **NIT:** a symlink loop at `data/loop1/x.db` surfaces a raw `EEXIST` from mkdir instead of a scrml error. **NIT:** the R4-1 refusal text "…or set SCRML_DATA_DIR to a directory that contains it, then rebuild" reads as though changing SCRML_DATA_DIR needs a rebuild (it does not). **Noted, not built:** TOCTOU between `existsSync` and the create. **Pre-existing:** every full-suite run leaves orphaned generation-1 `scrml dev --__dev-child` processes (a restarted child outlives its killed parent) — compiler/src/commands/dev.js / the commands tests. **Unlisted §34 rows:** `W-DEPLOY-DB-OUTSIDE-DATA-ROOT`, `W-DEPLOY-DB-NO-PROJECT-ROOT`, `W-DEPLOY-DB-SHARED-PATH` (and the older `W-DEPLOY-001`) live only in §47.14 / build.js.
+
 
 ### G-EACH-ROW-STALE-AFTER-AN-AWAITED-SERVER-CALL — a cell reassigned after an async boundary repaints a `${}` but not a keyed `<each>` row
 

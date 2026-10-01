@@ -128,6 +128,32 @@ describe("generateDockerfile", () => {
 // applyFlyAdapter
 // ---------------------------------------------------------------------------
 
+describe("§47.14 — every server deploy adapter points SCRML_DATA_DIR at a volume (S445 data root)", () => {
+  beforeEach(setupTmp);
+  afterEach(teardownTmp);
+
+  test("Dockerfile sets SCRML_DATA_DIR=/data and declares the volume", () => {
+    const content = generateDockerfile();
+    expect(content).toContain("ENV SCRML_DATA_DIR=/data");
+    expect(content).toContain('VOLUME ["/data"]');
+    expect(content.indexOf("ENV SCRML_DATA_DIR=/data")).toBeLessThan(content.indexOf("CMD"));
+  });
+
+  test("fly.toml sets SCRML_DATA_DIR and mounts the `data` volume there", () => {
+    applyFlyAdapter(tmpDir, "my-app");
+    const content = readFileSync(join(tmpDir, "fly.toml"), "utf8");
+    expect(content).toContain('[env]\n  SCRML_DATA_DIR = "/data"');
+    expect(content).toContain('[mounts]\n  source = "data"\n  destination = "/data"');
+  });
+
+  test("render.yaml sets SCRML_DATA_DIR and a persistent disk at /data", () => {
+    applyRenderAdapter(tmpDir);
+    const content = readFileSync(join(tmpDir, "render.yaml"), "utf8");
+    expect(content).toContain("- key: SCRML_DATA_DIR\n        value: /data");
+    expect(content).toContain("mountPath: /data");
+  });
+});
+
 describe("applyFlyAdapter", () => {
   beforeEach(setupTmp);
   afterEach(teardownTmp);

@@ -94,8 +94,11 @@ function buildFixture(label) {
   const r = Bun.spawnSync(["bun", CLI, "build", src, "-o", dist], { stdout: "pipe", stderr: "pipe" });
   if (r.exitCode !== 0) throw new Error(`scrml build failed:\n${r.stdout}\n${r.stderr}`);
 
-  // A REAL sqlite database, so the server's own db open succeeds and the leak probe
-  // is the file an adopter would actually have beside the bundle.
+  // The server's own database: `db="app.db"` names src/app.db — beside app.scrml,
+  // the declaring file (s445) — and the server never creates it.
+  new Database(join(src, "app.db")).close();
+  // A REAL sqlite database in dist/ as the leak probe: the file an adopter who keeps
+  // a database beside the bundle would have there.
   const db = new Database(join(dist, "app.db"));
   db.run("CREATE TABLE users (email TEXT, password_hash TEXT)");
   db.run("INSERT INTO users VALUES ('a@b.c', 'SECRET-HASH')");

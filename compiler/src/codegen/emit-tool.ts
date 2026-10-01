@@ -39,6 +39,8 @@ import type { ToolServeConfig } from "../tool-program.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-server.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
+// s445 — THE SQLite-file handle emission, shared with emit-server.ts.
+import { sqliteFileHandle, ownedDbFilesFor, noteSqliteHandle, SQLITE_FILE_HELPER_IMPORT, sqliteFileHelperLines } from "./sqlite-file-target.ts";
 import { asyncCombinatorHelperBlock, ASYNC_COMBINATOR_METHOD_ORDER } from "./async-combinators.ts";
 import { emitExprField } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
@@ -152,10 +154,36 @@ function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigu
   // §44 (S433 fix-round, F2-2) — the file-backed sqlite handles this module declares,
   // collected as they are emitted and configured in one block after them.
   const sqliteConfiguredIdents: string[] = [];
+  // s445-dev-db-side-file — the SAME SQLite-file emission as the server half
+  // (codegen/sqlite-file-target.ts): the file the compile-time schema read resolved,
+  // recorded relative to the project root and resolved at runtime against
+  // SCRML_DATA_DIR ?? that root (§47.14); an owning handle (this file declares the
+  // schema) opens at load and may create, a referencing one opens lazily and never
+  // creates (§8.1.1). A tool is run from wherever the user's shell is (`bun
+  // src/ports/dist/tick-tool.js` from the repo root), so a CWD-relative literal opened
+  // — and created — a different file than the compiler read.
+  const sourceFile = typeof fileAST.filePath === "string" ? fileAST.filePath : "";
+  const sqliteFileHelperAt = lines.length;
+  let sqliteFileProjectRoot: string | null = null;
   for (const ident of sorted) {
     const scope = dbScopes.get(ident);
     if (!scope) {
       lines.push(`const ${ident} = new SQL(":memory:"); // no <program db=> found (likely upstream E-SQL-004)`);
+      continue;
+    }
+    const sqliteFile = scope.driver === "sqlite" && sourceFile
+      ? sqliteFileHandle(
+          scope.connectionString,
+          sourceFile,
+          (fileAST as any)._outputBaseDir,
+          ownedDbFilesFor(getNodes(fileAST as never), sourceFile),
+        )
+      : null;
+    if (sqliteFile !== null) {
+      sqliteFileProjectRoot = sqliteFile.projectRoot;
+      noteSqliteHandle(fileAST, sqliteFile.record, "tool");
+      lines.push(`const ${ident} = ${sqliteFile.expr};`);
+      if (sqliteFile.owns) sqliteConfiguredIdents.push(ident);
       continue;
     }
     let connStr = scope.connectionString;
@@ -199,7 +227,11 @@ function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigu
   // subprocess; only `.server.js` goes through `evalServerModule`). The LIBRARY caller
   // keeps the floating form — it is long-lived enough not to need the barrier and it is
   // imported by other modules, so it gets no top-level await it did not already have.
-  if (sqliteConfiguredIdents.length > 0) {
+  if (sqliteFileProjectRoot !== null) {
+    lines.splice(sqliteFileHelperAt, 0, SQLITE_FILE_HELPER_IMPORT, "", ...sqliteFileHelperLines(sqliteFileProjectRoot), "");
+  }
+  // A referencing sqlite-file handle calls `_scrml_sqlite_configure` itself when it opens.
+  if (sqliteConfiguredIdents.length > 0 || sqliteFileProjectRoot !== null) {
     lines.push("");
     lines.push(...SQLITE_CONFIGURE_HELPER_LINES);
     for (const ident of sqliteConfiguredIdents) {
