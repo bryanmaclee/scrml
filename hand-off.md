@@ -69,10 +69,11 @@ passed every local check and failed the gate's native-parser parity test. Briefs
 
 ## Gate at close
 - Landed S444 (squash-merged, cloud `gate` green each): #1181 #1182 #1184 #1185 #1186 #1188 #1189 #1190 #1191 #1193 #1195
-  #1197 #1199 #1200 #1202 (+ the maps + final-gaps PRs opened at wrap — see the wrap PR body).
+  #1197 #1199 #1200 #1202 #1203 (maps → 464c9ab4d) #1204 (§S444g final gaps).
 - Review floor: markers written for all S444 PRs (`docs/pr-reviews.md`).
 - Inbox: flogence S50 drop → read/ (reply delivered: flogence `cdba6ad`).
 - Main checkout on XPS carries an UNCOMMITTED `handOffs/dpa-queue.md` edit from bryan's dPA session — not mine, untouched.
+- Worktrees: all S444 worktrees removed at wrap (6b); local merged branches deleted.
 - Board: S444 WRAPPED; S445 LIVE (successor).
 
 ---
