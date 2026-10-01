@@ -7361,6 +7361,56 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
   string prefix; valid prefixes are `sqlite:`, `postgres:`, `postgresql:`, `mysql:`,
   `mongo:`, `mongodb:`).
 - A plain path without prefix (e.g., `db="./app.db"`) SHALL be treated as `sqlite:./app.db`.
+- **Resolution base.** A relative SQLite file path in a `db=` or `<db src=>` value (with or
+  without the `sqlite:` prefix) SHALL resolve against the directory of the `.scrml` file that
+  declares it. The process working directory SHALL NOT affect which file it names. The
+  compile-time schema read (§14.8, E-PA-001..007) reads that file. The running program
+  (`scrml dev`, a server built by `scrml build`, a `kind="tool"` program, a §44.7.1
+  module-with-db-context) SHALL open the same file when no data root is set; the data root
+  (§47.14) relocates it as a whole. An absolute path names itself. A `file:` URI is not a
+  path and SHALL be E-SQL-005; write the path itself or `sqlite:<path>`.
+- **Ownership.** A `.scrml` file *owns* a SQLite database file when it declares schema for
+  that database: it has a `?{}` block holding a statement that creates a table in that
+  database, or a `<schema>` block (in any form, including raw DDL and `schemaFor(T)`) for
+  that database. Ownership belongs to the declaring FILE, not to the build. A module's
+  answer SHALL NOT depend on which other files are compiled with it, and a module SHALL
+  emit the same database handle whether it is compiled alone or inside any build.
+  - *Creates a table* means a `CREATE TABLE` or `CREATE VIRTUAL TABLE` statement (with a
+    column list, `AS SELECT …`, or `USING module(…)`) that is not inside a SQL comment or
+    string literal. A `TEMP` / `TEMPORARY` table does not count (it lives in the
+    connection's temp schema, not the file). A table qualified to another attached schema
+    (`other.t`) does not count; `main.t` does.
+  - *That database* for a `?{}` block is the database the block runs against: every `?{}` in
+    a file runs on the file's default database — its first `<db src=>` in document order,
+    else its first `<program db=>`. A `<schema>` block declares for its innermost enclosing
+    `<program db=>` or `<db src=>`, else for the file's default database.
+  - Ownership is decided at compile time, per declaring file and per database file.
+- **Creation.** Only an owning file's handle SHALL create a SQLite database file. An owning
+  handle opens when its module loads. When it creates the file, it SHALL say so in one line
+  on standard error, naming the absolute path, the `db=` / `src=` value and the declaring
+  file. Every other handle is *referencing*. A referencing handle SHALL NOT create the file
+  and SHALL NOT open it when its module loads. It opens on first use (its first query or
+  method call), so the order in which modules load never decides whether it finds the file.
+  When the file is still missing at that point, that use SHALL fail loudly, naming the
+  resolved absolute path, the `db=` / `src=` value and the declaring file. An empty
+  stand-in database is never created.
+- **A path written for another base.** When a relative SQLite path resolves to a file that is
+  missing or holds no tables, but the same path resolved from the working directory, the
+  build root (the deepest directory containing every compiled file) or the project root (the
+  nearest enclosing directory holding `scrml.toml`, else the enclosing `.git` checkout) names
+  a database that has tables, the compiler SHALL warn
+  (W-DB-PATH-RESOLVES-ELSEWHERE). The warning names both files and states which one the
+  program uses.
+- **An owned, empty database at compile time.** For a database the reading file owns, a
+  file that exists but holds no tables or views (e.g. created by `touch`, or created by a run
+  that has not reached its `CREATE TABLE` yet) SHALL be read at compile time as if it were
+  absent. The schema then comes from that file's own declarations (the shadow schema, as for
+  a missing file). A database with at least one table is read as it is. For a file that only
+  references the database, an empty file is reported under E-PA-004 as before.
+
+> **Provenance:** ruling:user-voice-scrml.md S445 item 6 — *"A `db=` path resolves against the directory of the `.scrml` file that declares it, and I'd add that sentence to SPEC. A program that declares its own schema (its own `CREATE TABLE`s or a `<schema>`) owns the database, so the runtime may create the file. A program that only references a database never creates it and fails loudly if the file is missing."* · supersedes: the ss19 #9 emission (a `sqlite:` literal re-relativized to the compile unit's output base and opened relative to the process CWD), which had no governing sentence. The "created" line, the W-DB-PATH-RESOLVES-ELSEWHERE warning, the statement-level reading of *creates a table*, the default-database rule for a `?{}`, and the `file:` rejection were added by the S445 review (findings F1, F5, F6, F8). They are mechanical consequences of the ruling, not new rulings.
+
+> **Provenance:** ruling:user-voice-scrml.md S445 (data root; per-file ownership) — *"keep your literal ruling, so only a file that declares the schema may create the database. Other modules then open it once it exists, rather than at load time. That way the answer doesn't depend on which files are in the build."* (review F4) and *"At build time, record each database path relative to the project root. At runtime, resolve those paths against a single data root. That root is the `SCRML_DATA_DIR` environment variable if set, otherwise the project root. The Docker/Fly adapters set `SCRML_DATA_DIR` to their volume."* (review F2; normative text in §47.14) · supersedes: the round-2 sentences "*Program* means the set of `.scrml` files compiled together" and "Every handle a program opens on a file it owns is an owning handle, whichever file declares it" (program-wide ownership), and "the program SHALL fail when the module that opens it loads" (a referencing handle now opens lazily, on first use).
 - The bound parameter security rule of §8.1 (E-SQL-001) applies regardless of driver.
   All `${}` interpolations inside `?{}` blocks SHALL be bound parameters, never string
   interpolation, across all drivers.
@@ -21609,6 +21659,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-PA-005 | §11.5 | `tables=` attribute absent from `<db>` block | Error |
 | E-PA-006 | §11.5 | `src=` attribute absent from `<db>` block | Error |
 | E-PA-007 | §11.3 | `protect=` field name matches no table column | Error |
+| W-DB-PATH-RESOLVES-ELSEWHERE | §8.1.1 | A relative SQLite `db=` / `<db src=>` path resolves (against the declaring file's directory) to a file that is missing or holds no tables, while the same path resolved from the working directory, the build root or the project root names a database WITH tables. The path was probably written for the old CWD-relative runtime. An owning program would now create and use a new empty database, and the owned-empty rule no longer raises E-PA-004 for it. The message names both files, says which one the program uses, and suggests the path relative to the declaring file. Warning only: an unrelated database of the same name elsewhere is legitimate. Partitions into `result.warnings`. (Catalog addition S445 review F1; provenance: ruling:user-voice-scrml.md S445 item 6; emitted at `compiler/src/protect-analyzer.ts` `checkDbPathsResolvingElsewhere`.) | Warning |
 | E-PROTECT-001 | §11.3.2 | Protected field accessed on client type | Error |
 | W-SQL-ROW-UNTYPED | §14.8.7 | A `?{ ... }` SQL query result (or one of its projection columns) could not be typed from the §14.8 generated table types and falls back to `asIs`. Info-level. Fires for the deferred v1 SQL surface long tail: a computed / expression / function-call projection column (that ONE field is `asIs`; the rest of the row stays typed), `SELECT *` over a JOIN, a CTE / `WITH`, a `UNION`, a subquery-in-FROM, or a query whose FROM table has no generated type in scope (no enclosing `<db>` block). NEVER fatal — the build always completes; the row's untyped fields are simply not statically checked. Single-table SELECTs and qualified-column JOINs with an explicit projection list (incl. `AS` aliases) DO get a typed projection row and fire no lint. (Catalog addition: typed-sql-row Tranche 1; emitted at `compiler/src/type-system.ts` `resolveSqlRowType`.) | Info |
 | E-SQL-ROW-CONTRACT-MISMATCH | §14.8.8 | A SQL-projection-row value (a Tranche-1 typed `?{ SELECT ... }` row, or its per-item element) is passed to a component prop whose declared type is a developer-authored `:struct` contract, and the row does NOT structurally width-subtype into that contract: either (a) the contract requires a field the row does not project (`missing`), or (b) the row projects the field but its type is not assignable to the contract's declared type (`incompatible`). One diagnostic fires PER unsatisfied field, naming the field + the contract type. BOUNDED: this is the ONLY structural-subtyping path — it applies solely when the SOURCE is a SQL-projection row (`<sql-row>` provenance) and the TARGET is a declared `:struct` prop contract. General struct-to-struct assignment stays NOMINAL (§14.8.1) and never triggers this code. EXTRA columns in the row are allowed (width-subtyping). (Catalog addition: typed-sql-row Tranche 2 — Shape C, ratified S175; emitted at `compiler/src/type-system.ts` `checkPropContract` via `checkSqlRowWidthSubtype`; the call-site descriptor is recorded by `compiler/src/component-expander.ts` as `__propContractChecks`.) | Error |
@@ -24653,6 +24704,10 @@ The compiler cannot automatically distinguish between these two cases when a col
 
 - At compile time, the compiler SHALL validate the `<schema>` block against itself for internal consistency: all `references` targets exist, no duplicate column names within a table, no duplicate table names.
 - The compiler SHALL NOT fail compilation when the database file does not exist. If the database file is absent, the diff is "all tables need to be created" and the compiler SHALL generate a full `CREATE TABLE` migration. This supports the workflow where the schema is written before the database file is created.
+  A `<schema>` block makes its file the database's *owner* (§8.1.1 *Ownership*). That file's
+  handle may therefore create the database at runtime, and a database file that exists with
+  no tables yet is read like an absent one (§8.1.1, ruling:user-voice-scrml.md S445 item 6;
+  per-file ownership).
 - The compiler SHALL fail compilation if the database file exists but is not a valid SQLite file (E-SCHEMA-009).
 - The compiler SHALL fail compilation if a `<schema>` column type differs from the actual database column affinity in a way that is not auto-migrated (i.e., the diff requires a type change but the database is production-mode-locked). See §38.8 for `--check` mode.
 
@@ -27159,6 +27214,12 @@ A nested `<program db="...">` creates its own database driver scope. `?{}` block
 2. First `<program>` with `db=` determines the driver.
 3. Parse the connection string prefix.
 4. If no `db=` found, emit E-SQL-004.
+5. A SQLite file path resolves against the directory of the declaring `.scrml` file, and is
+   created at runtime only by a handle in the file that declares its schema. Every other
+   handle opens lazily and fails loudly on a missing file. A running program resolves the
+   path against the data root (`SCRML_DATA_DIR`, else the project root). Normative text:
+   §8.1.1 *Resolution base* / *Ownership* / *Creation* and §47.14 (ruling:user-voice-scrml.md
+   S445 item 6; S445 data root; per-file ownership).
 
 | `db=` prefix | Driver |
 |---|---|
@@ -28064,6 +28125,29 @@ Every other request that reaches the static fallback SHALL receive `404 Not Foun
 **Passive media.** A file with one of the following extensions is served without a manifest entry, provided it is not in a denied class: `png`, `jpg`, `jpeg`, `gif`, `webp`, `avif`, `svg`, `ico`, `bmp`, `woff`, `woff2`, `ttf`, `otf`, `eot`, `mp3`, `mp4`, `webm`, `ogg`, `wav`. These are the images, icons, fonts, and audio/video an author places beside the build output. The SPEC defines no `public/` or assets directory. Any other file the build did not write for the browser is refused, including `.json`, `.txt`, and author `.js`.
 
 **One policy, both servers.** `scrml dev` and the production `_server.js` SHALL apply the identical decision. Implementation: `compiler/src/static-serve-policy-emitted.js` holds the policy functions. Dev imports them, and `generateServerEntry` copies their source text verbatim into `_server.js`. `collectClientAssets` in `compiler/src/static-serve-policy.js` computes the manifest.
+
+### 47.14 Runtime Data Root — `SCRML_DATA_DIR`
+
+**Added:** S445 (ruling:user-voice-scrml.md S445, data root). Completes §8.1.1 for a running program.
+
+§8.1.1 names a SQLite database file by its path relative to the `.scrml` file that declares it. That is the file the compile-time schema read opens. A running program has to find the same file, and a built server or tool is often run on another machine, from another directory, with its output copied somewhere else (e.g. `COPY dist/ /app` in a container). The process working directory and the build output's own location therefore cannot name it.
+
+**Normative statements:**
+
+- **Project root.** The *project root* of a `.scrml` file is the directory holding its nearest enclosing `scrml.toml`, else the root of its enclosing `.git` checkout, else the build root (the deepest directory containing every compiled file). With a `scrml.toml` or a `.git` checkout, the project root is a property of the file. Without either, it depends on which files are compiled together.
+- **Recorded at build.** For each SQLite file handle, the compiler SHALL record the database's path relative to the project root, together with the project root itself as an absolute path. A database outside the project root, or one the author wrote as an absolute path, SHALL be recorded as an absolute path. The data root does not move it.
+- **Data root.** At runtime the program SHALL resolve each recorded relative path against ONE data root: the `SCRML_DATA_DIR` environment variable when it is set, otherwise the recorded project root. This rule applies to every running form: `scrml dev`, `scrml compile` output, a server built by `scrml build`, a `kind="tool"` program and a §44.7.1 module-with-db-context. With `SCRML_DATA_DIR` unset, it opens exactly the file §8.1.1 names. `SCRML_DATA_DIR` affects only the running program. The compile-time schema read always reads the §8.1.1 file.
+- **A moved build.** When `SCRML_DATA_DIR` is not set and the recorded project root does not exist where the program runs, the program SHALL NOT guess a location and SHALL NOT create a database anywhere. Opening the database SHALL fail with an error that names `SCRML_DATA_DIR` and the database's recorded path. For an owning handle (§8.1.1 *Creation*) this happens when the module loads. For a referencing handle it happens on first use.
+- **Deploy adapters.** Every `scrml build --target` adapter that produces a server SHALL point `SCRML_DATA_DIR` at a persistent volume:
+  - the Dockerfile (`--target docker`, and the one `--target fly` writes) sets `ENV SCRML_DATA_DIR=/data` and declares `VOLUME ["/data"]`;
+  - `fly.toml` sets `[env] SCRML_DATA_DIR = "/data"` and mounts a volume named `data` at `/data`;
+  - `render.yaml` sets `SCRML_DATA_DIR=/data` and a persistent disk mounted at `/data`.
+  - Railway volumes are attached in its dashboard at a mount path the user chooses, so `--target railway` cannot write one. It SHALL tell the user to set `SCRML_DATA_DIR` to that mount path.
+  - `--target static` produces no server and is unaffected.
+
+**Worked example.** `scrml.toml` sits at `/home/ana/shop`, and `/home/ana/shop/src/app.scrml` declares `db="./app.db"`. The schema read opens `/home/ana/shop/src/app.db`. The built server records `src/app.db` and `/home/ana/shop`. Run on the build machine with no `SCRML_DATA_DIR`, it opens `/home/ana/shop/src/app.db`. In the container `--target docker` writes, with `SCRML_DATA_DIR=/data`, it opens `/data/src/app.db`. The same container with the variable removed fails, naming `SCRML_DATA_DIR`, because `/home/ana/shop` does not exist there.
+
+> **Provenance:** ruling:user-voice-scrml.md S445 (data root; per-file ownership) — *"At build time, record each database path relative to the project root. At runtime, resolve those paths against a single data root. That root is the `SCRML_DATA_DIR` environment variable if set, otherwise the project root. The Docker/Fly adapters set `SCRML_DATA_DIR` to their volume."* · `scrml dev` honouring `SCRML_DATA_DIR` (one rule for every running form), the project-root definition, the moved-build error and the Render / Railway adapter handling are the implementation's reading of that ruling (S445 review round 4), surfaced to PA. · Implementation: `compiler/src/codegen/sqlite-file-target.ts` (`projectRootFor`, `runtimeDbPath`, the emitted `_scrml_sqlite_path`); adapters in `compiler/src/commands/build.js`.
 
 ---
 
