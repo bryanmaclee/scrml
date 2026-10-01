@@ -20,6 +20,62 @@
   worktree) — the brief says Edit/Write for file edits. Every later edit uses Edit/Write.
 - 2026-10-01 next: e2e tests (slice-m4/when.test.js), ingest mapping, bite proof, gates.
 
+- 2026-10-01 done: slice-m4/when.test.js (24 tests: two e2e programs, multi-dep, reads, each rows, host call,
+  every code, every refusal, C11/C12, Suspend through the printer + cancel) — commit 765e06354.
+- 2026-10-01 done: ingest shim maps impl#1 `when-effect`. FINDING: impl#1's FileAST carries a `when` body as
+  `bodyExpr` = its FIRST statement only (a 2-statement body's second statement is text in `bodyRaw`; impl#1's CG
+  re-parses the text). So the shim can never prove it has the whole body (Rule 7) → the body is NOT-YET, always.
+  A dep that is not a mutable cell is E-LIFECYCLE-007 reported by the shim itself (`Ingested.codes`), and the
+  substitute's runCG rejects with it; scripts/hybrid.ts stops counting a code the substitute reports as "owed".
+  `lifecycle/when-dep-derived-error` now GRADES and PASSES under `--swap CG=…/substitute.js` (bite: runCG
+  returning `errors: []` → FAIL "missing required codes: E-LIFECYCLE-007"; restored).
+- 2026-10-01 BITE PROOFS (each restored, `git diff` empty after):
+  - analyze `effectDepWrite` condition `&& false` → slice-m4/when.test.js "E-LIFECYCLE-006 …" RED
+    (`expected ["E-LIFECYCLE-006"], received []`).
+  - runtime `suspend` ignoring `task.cancelled` → 3 RED (two runtime cancel tests + the printer cancel test).
+  - runtime `Scope.dispose` running cleanups before `whens` → "step 1 runs before the scope's other cleanups" RED.
+
+### Empirical — two real programs through the bootstrap (sources: derived.scrml, scoped.scrml here)
+
+```
+$ bun docs/changes/s446-bootstrap-u0-when-effects/empirical.js
+
+=== derived.scrml
+diagnostics: []
+checkCore:   []
+emitted (the when registration):
+      rt.when(scope$, [inst$.fields[0 /* price */]], () => {
+        inst$.fields[3 /* lastTotal */].set(inst$.fields[2 /* total */].get());
+        inst$.fields[4 /* runs */].set(inst$.fields[4 /* runs */].get() + 1);
+      });
+  mounted                            p.out = "0 0"  live whens = 1
+  click price (price 11 → @total 22 read in the body) p.out = "1 22"  live whens = 1
+  click qty (@qty is unlisted: no run) p.out = "1 22"  live whens = 1
+  click price (price 12, qty 3 → 36) p.out = "2 36"  live whens = 1
+
+=== scoped.scrml
+diagnostics: []
+checkCore:   []
+emitted (the when registration):
+        rt.when(scope$, [inst$.fields[0 /* n */]], () => {
+          inst$.fields[1 /* hits */].set(inst$.fields[1 /* hits */].get() + 1);
+          inst$.fields[2 /* last */].set(inst$.fields[0 /* n */].get());
+        });
+  mounted                            p.out = "0 0"  live whens = 1
+  click inc (fires while mounted)    p.out = "1 1"  live whens = 1
+  click toggle (destroy the if= scope) p.out = "1 1"  live whens = 0
+  click inc (stopped firing)         p.out = "1 1"  live whens = 0
+  click inc (stopped firing)         p.out = "1 1"  live whens = 0
+  click toggle (remount)             p.out = "1 1"  live whens = 1
+  click inc (ONE run per change)     p.out = "2 4"  live whens = 1
+```
+(derived: the body never ran on mount; `@total` read in the body is the post-change value 22 / 36 — the
+derived flush; `@qty` unlisted never triggers. scoped: the effect stops firing after the `if=` scope is destroyed
+(live whens 0, `@hits` frozen at 1 across two incs) and after remount exactly one registration exists — one inc
+→ one run, `@hits` 1 → 2, `@last` = 4.)
+
+- 2026-10-01 next: full gates (core, top-level compiler/tests/*.test.js, bootstrap suites, lint, footprint).
+
 ## Governing sentences (SPEC §6.7.4 / §6.7.2) — quoted, each implemented
 
 1. "when-stmt ::= 'when' dep-list 'changes' '{' logic-content '}' / dep-list ::= '@' identifier | '(' dep-item (',' dep-item)* ')'"

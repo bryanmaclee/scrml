@@ -1,0 +1,18 @@
+<program>
+    <let price:int=10/>
+    <let qty:int=2/>
+    <total:int=(@price * @qty)/>
+    <let lastTotal:int=0/>
+    <let runs:int=0/>
+
+    when @price changes {
+        @lastTotal = @total
+        @runs = @runs + 1
+    }
+
+    <main>
+        <p class="out">${@runs} ${@lastTotal}</p>
+        <button onclick=(@price = @price + 1)>price</button>
+        <button onclick=(@qty = @qty + 1)>qty</button>
+    </main>
+</program>

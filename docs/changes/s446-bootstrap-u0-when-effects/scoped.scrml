@@ -1,0 +1,16 @@
+<program>
+    <let n:int=0/>
+    <let hits:int=0/>
+    <let last:int=0/>
+    <let show:bool=true/>
+
+    <main>
+        <section if=@show>${ when @n changes {
+            @hits = @hits + 1
+            @last = @n
+        } }<b>mounted</b></section>
+        <p class="out">${@hits} ${@last}</p>
+        <button onclick=(@n = @n + 1)>inc</button>
+        <button onclick=(@show = !@show)>toggle</button>
+    </main>
+</program>
