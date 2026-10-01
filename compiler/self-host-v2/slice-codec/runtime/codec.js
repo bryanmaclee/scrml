@@ -22,9 +22,17 @@
 //   §57.3  the encoder emits the envelope for absence in a `T | not` position,
 //          the plain value otherwise (no wrapping of presence).
 //          The encoder is STRICT by default: it encodes only values that inhabit
-//          the type, so `encode` ok ⇒ `decode` of its output ok and equal. A
-//          null/undefined at a NON-`T | not` position, a sequence hole, or a
-//          length outside a `Bounded` range is a "value" failure.
+//          the type, so `encode` ok ⇒ `decode` of its output ok and equal — with
+//          ONE exception: a `number` `-0` encodes as `0` (JSON has no negative
+//          zero), so it decodes as `0`. Not normalised here: the wire treatment
+//          of `-0` is unruled (SPEC question Q6, progress.md). A null/undefined
+//          at a NON-`T | not` position, a sequence hole, a length outside a
+//          `Bounded` range, or a struct value with an own enumerable key the
+//          type does not declare is a "value" failure (the decoder refuses an
+//          extra key too, so the two directions are symmetric).
+//          Option flags are read as OWN properties only (a polluted
+//          `Object.prototype` cannot switch them on), inside the guarded region
+//          (a throwing opts object is a failure, not a throw).
 //          §57.3's server-function-RETURN sentence — "For declared return types
 //          that are NOT `T | not` … the encoder continues to use raw JSON `null`
 //          for any JS-host `null` that may slip through" — is the explicit
@@ -160,6 +168,11 @@ function enc(table, ty, v, path, opts) {
         return fail("value", path, `expected a ${d.name} variant, got ${show(v)}`);
       }
       if (!isPlainObject(v)) return fail("value", path, `expected a ${d.name}, got ${show(v)}`);
+      // An undeclared own key is refused, not dropped — the decoder refuses it too.
+      const declared = new Set(d.fields.map((f) => f.name));
+      for (const k of Object.keys(v)) {
+        if (!declared.has(k)) return fail("value", `${path}.${k}`, `${d.name} has no field ${k}`);
+      }
       const out = {};
       for (const f of d.fields) {
         if (!hasOwn(v, f.name)) return fail("value", path, `${d.name} value has no field ${f.name}`);
@@ -179,8 +192,15 @@ function enc(table, ty, v, path, opts) {
  * `opts.hostNullPassthrough` (default false): §57.3's server-fn-return raw-null rule.
  */
 export function encode(table, value, opts) {
-  const o = { hostNullPassthrough: (opts ?? {}).hostNullPassthrough === true };
-  return guarded("value", () => enc(table, table.root, value, "$", o));
+  return guarded("value", () => enc(table, table.root, value, "$", { hostNullPassthrough: flag(opts, "hostNullPassthrough") }));
+}
+
+// An option flag: `true` only as an OWN property whose value is `true` — never
+// inherited (prototype pollution must not flip a fail-closed default). Called
+// inside `guarded`, so a throwing getter / revoked Proxy as opts is a failure.
+function flag(opts, name) {
+  if (opts === null || opts === undefined) return false;
+  return Object.hasOwn(opts, name) && opts[name] === true;
 }
 
 /** Encode to JSON text → `{ ok, text }` or a failure. */
@@ -271,8 +291,7 @@ function dec(table, ty, w, path, opts) {
  * `opts.canonicalOnly` (default false): refuse raw `null` as absence (§57.5).
  */
 export function decode(table, wire, opts) {
-  const o = { canonicalOnly: (opts ?? {}).canonicalOnly === true };
-  return guarded("malformed", () => dec(table, table.root, wire, "$", o));
+  return guarded("malformed", () => dec(table, table.root, wire, "$", { canonicalOnly: flag(opts, "canonicalOnly") }));
 }
 
 /** Decode JSON text → `{ ok, value }` or a failure (`kind: "parse"` for non-JSON text). */
