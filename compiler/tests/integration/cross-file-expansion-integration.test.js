@@ -477,7 +477,7 @@ describe("FX-2 — initial-chunk emission + content-addressing", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §8 — Per-route HTML augmentation (A-4.7 — _SCRML_CHUNKS + role-bootstrap)
+// §8 — Per-route HTML augmentation (A-4.7 — chunk-activation script: _SCRML_CHUNKS + role-bootstrap)
 // ---------------------------------------------------------------------------
 
 describe("FX-2 — per-route HTML augmentation", () => {
@@ -497,21 +497,24 @@ describe("FX-2 — per-route HTML augmentation", () => {
     expect(htmlFor(result, "cross-file/app.scrml")).toBeDefined();
   });
 
-  test("entry file's HTML carries `window._SCRML_CHUNKS` inline manifest + role-bootstrap", () => {
+  test("entry file's HTML loads the chunk-activation script by same-origin src (no inline script)", () => {
     const result = compileFx2();
     const html = htmlFor(result, "cross-file/app.scrml");
-    expect(html).toContain("window._SCRML_CHUNKS");
-    expect(html).toContain('localStorage.getItem("scrml_role")');
-    expect(html).toContain('"_anonymous"');
-    expect(html).toContain('document.createElement("script")');
+    // s444-csp-inline-chunks — manifest + role-bootstrap ship as one
+    // same-origin file (inline script is refused under headers="strict").
+    expect(html).toContain(`<script src="/${result.chunksBootFilename}" data-scrml-route="/"></script>`);
+    expect(html).not.toContain("window._SCRML_CHUNKS");
+    expect(result.chunksBootJs).toContain("window._SCRML_CHUNKS");
+    expect(result.chunksBootJs).toContain('localStorage.getItem("scrml_role")');
+    expect(result.chunksBootJs).toContain('"_anonymous"');
+    expect(result.chunksBootJs).toContain('document.createElement("script")');
   });
 
-  test("HTML inline manifest references all three role variants — Admin/Driver/Anonymous", () => {
+  test("chunk manifest references all three role variants — Admin/Driver/Anonymous", () => {
     const result = compileFx2();
-    const html = htmlFor(result, "cross-file/app.scrml");
-    expect(html).toContain('"Admin"');
-    expect(html).toContain('"Driver"');
-    expect(html).toContain('"Anonymous"');
+    expect(result.chunksBootJs).toContain('"Admin"');
+    expect(result.chunksBootJs).toContain('"Driver"');
+    expect(result.chunksBootJs).toContain('"Anonymous"');
   });
 });
 

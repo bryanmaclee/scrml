@@ -2881,11 +2881,17 @@ ReachabilityRecord and produces:
      `serializeChunksManifest` (URL-style filename values for adopter
      cache layer consumption).
   3. Per-file HTML augmentation via `emit-html.ts:augmentHtmlForChunks`
-     (A-4.7): inline `<script>window._SCRML_CHUNKS = { ... }</script>`
-     (route-keyed manifest), `<link rel="modulepreload">` for non-empty
-     tier-1 chunks, and a role-detection bootstrap `<script>` dispatching
-     to the per-role initial chunk (per OQ-A4-E hybrid: ONE HTML per
-     route + role-bootstrap; no per-(route, role) HTML variance).
+     (A-4.7): `<link rel="modulepreload">` for non-empty tier-1 chunks,
+     and `<script src="/scrml-chunks.<hash>.js" data-scrml-route="<route>">`
+     — ONE build-wide, content-addressed, same-origin chunk-activation
+     script (`emit-html.ts:buildChunksBootJs`, returned as
+     `CgOutput.chunksBootJs` / `chunksBootFilename`, written by api.js at
+     the dist root) carrying the route-keyed `window._SCRML_CHUNKS`
+     manifest and the role-detection bootstrap dispatching to the
+     per-role initial chunk (per OQ-A4-E hybrid: ONE HTML per route +
+     role-bootstrap; no per-(route, role) HTML variance). NEVER an inline
+     script: `headers="strict"` pins `default-src 'self'`, which refuses
+     inline script (s444-csp-inline-chunks).
 
 The runtime helpers `_scrml_chunk_mount(id, tag)` and
 `_scrml_vendor_require(unit)` referenced by atom-emitter output live in
