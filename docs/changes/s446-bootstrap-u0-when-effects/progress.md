@@ -136,3 +136,4 @@ derived flush; `@qty` unlisted never triggers. scoped: the effect stops firing a
 16. "`when @var changes { body }` SHALL execute `body` after the `_scrml_reactive_set` call completes and before the next microtask boundary."
 17. §6.7.2: "1. All `when` effects registered in that scope are unregistered … Scope destruction is depth-first: child scopes execute the above four-step teardown sequence before the parent scope begins"
 18. §6.7.4 server functions: "The effect body becomes async at the point of the server call. The compiler inserts `await` automatically (§13.2)." + §19.9.8 "The canonical scrml async surface is the body-split / CPS mechanism".
+- 2026-10-01T13:48:06-06:00 r2: start at /home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-a5a49f48b76659e43, reset to 42641506c
