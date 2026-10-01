@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 223 | 4 |
-| MED | 437 | 0 |
+| MED | 438 | 0 |
 | LOW | 213 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -21417,3 +21417,7 @@ Silent semantics change (the block's writes vanish). Found by the protect-egress
 ### g-bootstrap-bound-top-level-validated-scalar-ruling-owed — bootstrap: a BOUND top-level scalar with validators is refused E-VALIDATOR-DEAD; the PA reads S442 ruling (2) "validators follow the bind" as saying it should lower its attributes instead — ruling owed (dpa-058 B3)
 <!-- @gap id=g-bootstrap-bound-top-level-validated-scalar-ruling-owed sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml:1297(`fn topLevelValidatorsLower() -> boolean { return false }` — the one switch; consumed at :1269 and :8320) prov=ruling-owed:dpa-058-B3 -->
 **Reproduced on `464c9ab4d` (the current, deliberate behaviour).** `<let email:string="" req/>` with `<input bind:value=@email/>` → `["E-VALIDATOR-DEAD"]`. validators.test.js:226 pins this ("bound or not"). **The question for bryan:** S442 ruling (5) ("silently dead validators become errors") clearly covers an UNBOUND top-level scalar. For a BOUND one, the PA's reading of ruling (2) ("validators follow the bind") is that the validators are not dead: their HTML-native subset should land on the bound input, as a child field's does. If that reading is confirmed, the change is one line: `topLevelValidatorsLower()` returns `true`, and the bound case lowers while the unbound case stays E-VALIDATOR-DEAD. `@email.isValid` stays refused either way (§55.5 Edge A: no validity surface). Filed so the open ruling is tracked. It is not a defect until the ruling is made.
+
+### g-commands-dev-tests-leak-dev-child-servers — `compiler/tests/commands/dev-watcher-churn-starvation.test.js` and `dev-compile-throw-fail-closed.test.js` kill the `scrml dev` parent but not its `--__dev-child`; every full-suite run leaves ~3 bun servers listening (cwd a deleted temp dir)
+<!-- @gap id=g-commands-dev-tests-leak-dev-child-servers sev=MED status=open locus=compiler/tests/commands/dev-watcher-churn-starvation.test.js+compiler/tests/commands/dev-compile-throw-fail-closed.test.js prov=empirical:S445 -->
+PA-measured S445: 81 orphaned bun servers (~3 GB RAM) accumulated over ~a day of post-commit full runs + agent runs; two pre-commit gate runs failed on a 300-s "(unnamed)" hang until they were killed (by cwd `(deleted)` / `scrml-dev-*`). Fix: kill the process group (spawn detached + `process.kill(-pid)`) or have `scrml dev` forward SIGTERM to its child; assert no listener survives in an afterAll.
