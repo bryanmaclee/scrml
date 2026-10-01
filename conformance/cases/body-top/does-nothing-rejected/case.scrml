@@ -1,0 +1,12 @@
+<program>
+404
+<c1> = 1
+import stuff
+<c2> = 2
+type here
+<c3> = 3
+export data
+<c4> = 4
+fn heading
+<p id="z">${@c1} ${@c2} ${@c3} ${@c4}</p>
+</program>

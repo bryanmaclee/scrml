@@ -1,0 +1,20 @@
+{
+  "id": "body-top-does-nothing-rejected",
+  "description": "Body-top code that does nothing is a compile error: a bare literal statement (`404`) and a declaration whose grammar is not satisfied (`import stuff`, `type here`, `export data`, `fn heading`) compile nothing, so each is E-UNQUOTED-DISPLAY-TEXT at its own line; the declarations between them survive.",
+  "language-version": "1.0",
+  "spec": "§40.8",
+  "source-test": "compiler/tests/unit/s441-review-r5.test.js",
+  "rationale": "Ruling user-voice-scrml.md S443 item 4 — compile error (the declared-prose coverage rule: a node covers only tokens it compiles). Round 4 compiled all five silently on the default front end.",
+  "expect": {
+    "codes": [
+      "E-UNQUOTED-DISPLAY-TEXT"
+    ],
+    "notCodes": [
+      "E-INTERNAL-BODY-TOP-DROPPED",
+      "E-STATE-UNDECLARED"
+    ],
+    "codeCounts": {
+      "E-UNQUOTED-DISPLAY-TEXT": 5
+    }
+  }
+}

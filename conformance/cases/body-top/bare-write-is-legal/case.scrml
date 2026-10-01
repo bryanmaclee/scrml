@@ -1,0 +1,5 @@
+<program>
+<count> = 0
+@count = 5
+<p id="c">${@count}</p>
+</program>

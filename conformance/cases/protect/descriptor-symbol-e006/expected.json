@@ -1,0 +1,12 @@
+{
+  "id": "protect-descriptor-symbol-e006",
+  "description": "§14.8.9 S443 round 6 (L4) — deleting a row copy's Symbol-keyed properties removes the protected-column descriptor; returning the copy is E-PROTECT-006 (every protected column of the row may ship).",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "§14.8.9: \"`reveal` is the only path that re-admits a protected-origin column\". The descriptor lives on the row under a Symbol key; `{...u}` then `delete c[k]` for each of `Object.getOwnPropertySymbols(c)` served the full row over HTTP (measured, S443 round 6). The runtime descriptor is now frozen and non-configurable on the tagged row; on a copy, a property write or delete by a key that may be that Symbol makes the compiler treat every column of the row as shipping.",
+  "expect": {
+    "codes": ["E-PROTECT-006"],
+    "severity": { "E-PROTECT-006": "error" }
+  }
+}

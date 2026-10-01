@@ -1,0 +1,22 @@
+{
+  "id": "protect-run-terminator-strip-runtime",
+  "description": "§14.8.9 S443 round 6 — a `.run()` result used as a value is the driver's row array; it is tagged like `.all()` and the sink strips the protected column.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9: the tag is attached \"at `?{}` query-lowering\" to every output row. Only `.get()` / `.all()` were tagged; `let rows = ?{`SELECT * FROM users`}.run(); return rows` (and a bare `?{}` used as a value) served passwordHash over HTTP (measured, S443 round 6).",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-PROTECT-STRIP-001": "info" },
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice", "passwordHash": "SECRET_HASH_ALICE" }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": { "users": [{ "id": 1, "name": "Alice" }] }
+  }
+}

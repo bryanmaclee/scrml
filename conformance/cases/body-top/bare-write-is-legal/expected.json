@@ -1,0 +1,26 @@
+{
+  "id": "body-top-bare-write-is-legal",
+  "description": "A bare write at a <program> body-top is ordinary logic (E-WRITE-NOT-IN-LOGIC-CONTEXT retired, ruled S441 item 4): it compiles clean and runs.",
+  "language-version": "1.0",
+  "spec": "§40.8, §4.18.1, §4.18.7",
+  "source-test": "compiler/tests/unit/s441-declared-prose-body.test.js",
+  "rationale": "§40.8 S441 bullet (ruling: user-voice-scrml.md S441 \"prose should be declared as such\" + \"declared-prose implementation: yes to all four\"): a `<program>` / `<page>` / `<channel>` body is a code-default body — a bare run there is code, checked exactly as inside `${ … }`, never page text; displayed text is declared by a markup element or a `\"...\"` display-text literal; a bare run that is not valid code is E-UNQUOTED-DISPLAY-TEXT.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-WRITE-NOT-IN-LOGIC-CONTEXT"
+    ],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "state": {
+      "count": 5
+    },
+    "domAnchored": [
+      {
+        "selector": "#c",
+        "text": "5"
+      }
+    ]
+  }
+}

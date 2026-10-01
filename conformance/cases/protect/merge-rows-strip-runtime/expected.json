@@ -1,0 +1,44 @@
+{
+  "id": "protect-merge-rows-strip-runtime",
+  "description": "§14.8.9 S443 round 6b — merging two protect-tagged rows UNIONS their protected columns, and a reveal on one source never un-strips a column another source protects: `{...a, ...b.reveal(\"pin\")}` ships {id, name} only.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "§14.8.9: the floor strips every column whose origin is protected unless `reveal`-declassified AT THE VALUE. Round 6 kept one descriptor per object, so the second spread REPLACED the first: `{...a, ...b}` shipped passwordHash and `{...a, ...b.reveal(\"pin\")}` shipped hash + pin (review, measured over HTTP). One marker per column unions by construction.",
+  "expect": {
+    "codes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "Alice",
+          "passwordHash": "SECRET_HASH_ALICE",
+          "pin": 4321
+        }
+      ]
+    },
+    "input": [
+      {
+        "click": "#load"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "user": {
+        "id": 1,
+        "name": "Alice"
+      }
+    },
+    "severity": {
+      "I-PROTECT-STRIP-001": "info"
+    }
+  }
+}

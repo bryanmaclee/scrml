@@ -86,6 +86,18 @@ function checkModule(filePath, src) {
     })(tab.ast.nodes);
     for (const t of texts) problems.push(`page text in a logic module: ${JSON.stringify(t.slice(0, 80))}`);
   }
+  // S441 (declared-prose-body): a `<program>` body carries no loose prose, so a
+  // leaked tail is no longer silent page text — it is parsed as body-top code
+  // and fails loudly (E-PARSE-001 / E-UNQUOTED-DISPLAY-TEXT). A parse error in a
+  // stdlib module is the same defect class, so it is a problem too. Only the
+  // two codes that mean "this is not code at all" count: the legacy
+  // try/throw codes (E-*-NOT-IN-SCRML) some stdlib sources still carry are a
+  // separate, pre-existing migration and are out of this gate's scope.
+  for (const e of tab.errors || []) {
+    if ((e.severity ?? "error") === "error" && (e.code === "E-PARSE-001" || e.code === "E-UNQUOTED-DISPLAY-TEXT")) {
+      problems.push(`parse error in a logic module: ${e.code}`);
+    }
+  }
   return { declared, problems };
 }
 
@@ -174,8 +186,12 @@ describe("§3 instrument integrity — the checker reports the pre-fix shapes", 
       "</program>",
     ].join("\n");
     const { problems } = checkModule("/virtual/http-prefix.scrml", src);
-    expect(problems.some((p) => p.includes("`multipart`"))).toBe(true);
-    expect(problems.some((p) => p.startsWith("page text"))).toBe(true);
+    // Pre-S441 the leaked tail was silent page text and `multipart` was lost.
+    // Since S441 (declared-prose-body) the tail is parsed as body-top code: the
+    // leftover doc-comment prose is a loud parse error and `multipart` is
+    // recovered. Either way the checker must REPORT the shape.
+    expect(problems.length).toBeGreaterThan(0);
+    expect(problems.some((p) => p.startsWith("parse error") || p.startsWith("page text") || p.includes("`multipart`"))).toBe(true);
   });
 
   test("a `*/` inside a string in a doc comment (pre-fix cron) is reported", () => {
