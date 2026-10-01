@@ -26,7 +26,7 @@
  * pre-fix base (the `if=` / else / static-VCF slots render empty).
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
@@ -125,4 +125,11 @@ describe("static ${expr} inside an if= / if-chain branch (g-call-expression-inte
     );
     expect(document.querySelector("#pplain").textContent).toContain("PLAIN_FN_OK");
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });
