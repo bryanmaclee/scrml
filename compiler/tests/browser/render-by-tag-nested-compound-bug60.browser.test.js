@@ -15,7 +15,7 @@
  * tags, ZERO <input> appeared, and nothing bound to the runtime cells.
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { mkdtempSync, rmSync, existsSync, writeFileSync } from "fs";
@@ -120,4 +120,11 @@ describe("Bug 60 — nested compound render-by-tag drives at runtime (happy-dom)
     // The render-by-tag _scrml_effect keeps the DOM element synced to the cell.
     expect(textInput.value).toBe("Bob");
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

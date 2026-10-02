@@ -123,7 +123,9 @@ const PROBE = `
 import { Database } from "bun:sqlite";
 const dist = process.argv[2];
 process.chdir(dist);
-{ const d = new Database("c.db"); d.run("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)"); d.close(); }
+// db="./c.db" names src/c.db — beside app.scrml, the declaring file (s445) — and
+// the server never creates it, so seed it there.
+{ const d = new Database("../src/c.db"); d.run("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)"); d.close(); }
 const store = (globalThis.__scrml_session_store ??= new Map());
 store.set("sid-alice", { userId: 1, role: "user" });
 const s0 = Bun.serve({ port: 0, fetch: () => new Response("") });
@@ -139,7 +141,7 @@ const post = async (headers, body) => {
   const r = await fetch(base + route, { method: "POST", redirect: "manual", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ body }) });
   return { status: r.status, location: r.headers.get("location") };
 };
-const rows = () => new Database("c.db").query("SELECT body FROM notes ORDER BY id").all().map((r) => r.body);
+const rows = () => new Database("../src/c.db").query("SELECT body FROM notes ORDER BY id").all().map((r) => r.body);
 const anon = await post({ "X-CSRF-Token": "anon-token", Cookie: "scrml_csrf=anon-token" }, "anon-write");
 const afterAnon = rows();
 const doc = await fetch(base + "/app", { redirect: "manual", headers: { Cookie: sess } });

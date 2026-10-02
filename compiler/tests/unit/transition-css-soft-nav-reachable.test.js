@@ -35,7 +35,7 @@
  *     actually live in the document.
  */
 
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, readFileSync, existsSync, mkdtempSync } from "fs";
@@ -256,4 +256,11 @@ describe("§38 transition keyframes survive a §20.8.2 soft navigation", () => {
     expect(animation).toContain("scrml-fade-in");
     expect(liveKeyframeNames()).toContain("scrml-fade-in");
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });
