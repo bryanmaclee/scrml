@@ -1,6 +1,5 @@
 ${
     <n>: int = 5
-    <phase>: string = "idle"
 
     type LoadError:enum = {
         NotFound(id: string)
@@ -26,7 +25,7 @@ ${
     function bindlessRecoveryInArm() {
         const label = if (@n > 0) {
             load("ok") !{
-                | .NotFound(mid) :> @phase = mid
+                | .NotFound(mid) :> console.warn("not found", mid)
             }
             lift "found"
         } else {
