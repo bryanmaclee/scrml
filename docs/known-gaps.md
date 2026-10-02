@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 229 | 4 |
-| MED | 454 | 0 |
+| HIGH | 230 | 4 |
+| MED | 455 | 0 |
 | LOW | 216 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -21624,6 +21624,19 @@ Reviewer-executed (h2/h3/h4/h5 under `rev-progrole-work/`). Direction (PA): item
 ### g-commands-dev-tests-leak-dev-child-servers — `compiler/tests/commands/dev-watcher-churn-starvation.test.js` and `dev-compile-throw-fail-closed.test.js` kill the `scrml dev` parent but not its `--__dev-child`; every full-suite run leaves ~3 bun servers listening (cwd a deleted temp dir)
 <!-- @gap id=g-commands-dev-tests-leak-dev-child-servers sev=MED status=open locus=compiler/tests/commands/dev-watcher-churn-starvation.test.js+compiler/tests/commands/dev-compile-throw-fail-closed.test.js prov=empirical:S445 -->
 PA-measured S445: 81 orphaned bun servers (~3 GB RAM) accumulated over ~a day of post-commit full runs + agent runs; two pre-commit gate runs failed on a 300-s "(unnamed)" hang until they were killed (by cwd `(deleted)` / `scrml-dev-*`). Fix: kill the process group (spawn detached + `process.kill(-pid)`) or have `scrml dev` forward SIGTERM to its child; assert no listener survives in an afterAll.
+
+### g-impl1-call-checks-and-member-calls-fail-open — impl#1: no arity / argument-type check on plain calls; a call of a non-existent member compiles to a runtime `TypeError`; `@n .= addOne()` (not scrml) compiles at exit 0 to `NaN`; `@n |> addOne()` errors without naming `|>`
+<!-- @gap id=g-impl1-call-checks-and-member-calls-fail-open sev=HIGH status=open locus=searched:compiler/src/type-system.ts(no call-site arity / argument-type check; HOST_METHOD_RETURNS / resolveReceiverExprType — a member call on a known-typed receiver is never checked against the member set)+compiler/src/ast-builder.js(reactive-nested-assign — `@n .= f()` reaches the `_scrml_deep_set(…, [], f())` emit of compiler/src/codegen/emit-logic.ts with an EMPTY path; PA-located-verify) prov=empirical:S447-ufcs-dd -->
+**Measured S447 (probes `p1`…`p6` of the UFCS deep-dive §C3, compiled with `bun compiler/bin/scrml.js compile`).** Four impl#1 defects, each fail-open independent of any syntax future (the UFCS package is PARKED, S447):
+(a) **No call checks.** `addOne(@userStuff.phrase)` (a `string` into `a: number`) and `addOne(@userStuff.oldNum, 2)` → exit 0, no diagnostic: neither `E-CALL-ARITY` (§7.3) nor position-3 `E-TYPE-031` (§7.3.4 / §7.5.1) is emitted. SPEC §7.3.4 (S447 call 9, kept).
+(b) **A call of a member the value does not have** — `@userStuff.oldNum.addOne()` where `addOne` is a free `fn`, or `@userStuff.phrase.notAThing()` — → exit 0, emitted raw: a runtime `TypeError`. Fail-open: the receiver's type is known and has no such member.
+(c) **`@n .= addOne()` is not scrml**, yet `function bump() { @n .= addOne() }` → exit 0, emits `_scrml_cs_reactive_set("n", _scrml_deep_set(_scrml_cs_reactive_get("n"), [], _scrml_addOne_3()))` — `addOne` gets no argument, `@n` becomes `NaN`. A silent wrong-output miscompile of an unrecognized token; it should be rejected with a named error.
+(d) `function bump() { @n |> addOne() }` → `E-CODEGEN-INVALID-LOGIC`: fails closed, but the diagnostic does not name `|>`.
+Bootstrap counterpart for (a): [[g-bootstrap-call-arity-and-argument-type-checks-owed]].
+
+### g-bootstrap-call-arity-and-argument-type-checks-owed — bootstrap: call arity + argument-type checks owed (§7.3.4)
+<!-- @gap id=g-bootstrap-call-arity-and-argument-type-checks-owed sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(call-site checks — no E-CALL-ARITY, no position-3 E-TYPE-031) prov=ruling:user-voice-scrml.md-S447-"UFCS PARKED; keep only the argument checks" -->
+SPEC §7.3.4 + §7.5.1 position 3 (Nominal): `E-CALL-ARITY` for too many / too few arguments (defaults per §7.3.2), and `E-TYPE-031` for a proven argument type not assignable to the parameter's declared type in the three position-3 cases (primitive mismatch; kind mismatch; `T | not` into `T`). Plain calls only. S447 ordered these checks specified and emitted FIRST.
 
 ## §S446-peter — filed at wrap (S446, Peter · P-Tech1)
 
