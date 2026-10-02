@@ -126,6 +126,31 @@ function save(body: string) {
 <button onclick=save("x")>save</>
 </program>
 `,
+    "an `<endpoint>` arm body": `<program auth="required">
+type FspMethod:enum = {
+  FleetStatus
+  Who
+}
+<endpoint path="/fsp" method="POST" accepts=FspMethod>
+  <FleetStatus : { jsonrpc: "2.0", result: { active: 3, note: "ops@session.example" } }>
+  <Who : { jsonrpc: "2.0", result: { who: @session.userId } }>
+</endpoint>
+</program>
+`,
+    "a channel `onserver:` handler": `<program db="sqlite:./app.db" auth="required">
+  <db src="sqlite:./app.db" tables="msgs">
+    \${ ?{\`CREATE TABLE IF NOT EXISTS msgs (id INTEGER PRIMARY KEY, sid TEXT, body TEXT)\`}.run() }
+    <channel name="chat" onserver:message=handleMessage(msg)>
+      \${
+        function handleMessage(msg) {
+          ?{\`INSERT INTO msgs (sid, body) VALUES (\${@session.userId}, \${msg})\`}.run()
+        }
+      }
+    </channel>
+    <p>x</p>
+  </db>
+</program>
+`,
     "a `<cell server>` load query": `<program auth="required" db="sqlite:./c.db">
   \${
     ?{\`CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY, user_id TEXT, item TEXT)\`}.run()

@@ -2515,6 +2515,22 @@ export function detectServerAmbientSessionReads(
   return out;
 }
 
+/**
+ * `@session` reads in RAW scrml expression text the AST keeps unparsed — an
+ * `<endpoint>` arm body (`bodyRaw`, §61). Quoted '…' / "…" string literals are
+ * blanked first so `"ops@session.example"` is not a read; anything the text scan
+ * misses is still refused by the codegen backstop (server-session-guard.ts).
+ */
+export function detectServerAmbientSessionReadsInText(text: string): Array<{ member: string | null }> {
+  const out: Array<{ member: string | null }> = [];
+  if (typeof text !== "string" || !text.includes("@session")) return out;
+  const code = text.replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, (m) => " ".repeat(m.length));
+  const re = /(?<![\w$@.])@session\b(?:\s*\??\.\s*([A-Za-z_$][A-Za-z0-9_$]*))?/g;
+  let r: RegExpExecArray | null;
+  while ((r = re.exec(code)) !== null) out.push({ member: r[1] ?? null });
+  return out;
+}
+
 /** The author-facing E-SESSION-AMBIENT-SERVER message for one server `@session` read. */
 export function sessionAmbientServerMessage(where: string, member: string | null): string {
   const fix = member ? `\`session.${member}\`` : "`session.userId` / `session.role` / `session.isAuth` / `session.get(key)`";
@@ -6087,6 +6103,27 @@ export function runRI(input: RIInput): RIOutput {
               sessionAmbientServerMessage(`The server cell \`<${node.name} server>\`'s load query`, _r.member),
               _sp,
             ));
+          }
+        }
+        // An `<endpoint>` arm body (§61) runs on the server; it is kept as raw text.
+        if (node.kind === "endpoint-decl" && Array.isArray(node.arms)) {
+          for (const arm of node.arms) {
+            if (!arm || typeof arm.bodyRaw !== "string") continue;
+            for (const _r of detectServerAmbientSessionReadsInText(arm.bodyRaw)) {
+              const _start = typeof arm.spanStart === "number" ? arm.spanStart : (node.span?.start ?? -1);
+              const _key = `${fileAST.filePath}:endpoint:${_start}:${_r.member ?? ""}`;
+              if (_sessionAmbientSeen.has(_key)) continue;
+              _sessionAmbientSeen.add(_key);
+              const _sp = { ...(node.span ?? {}), ...(typeof arm.spanStart === "number" ? { start: arm.spanStart } : {}), ...(typeof arm.spanEnd === "number" ? { end: arm.spanEnd } : {}) } as Span;
+              errors.push(new RIError(
+                "E-SESSION-AMBIENT-SERVER",
+                sessionAmbientServerMessage(
+                  `The \`<endpoint path="${node.path ?? ""}">\` arm \`${arm.variantName ?? (arm.isWildcard ? "_" : "?")}\``,
+                  _r.member,
+                ),
+                _sp,
+              ));
+            }
           }
         }
         if (node.kind === "logic" && Array.isArray(node.body)) visitDecls(node.body);
