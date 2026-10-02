@@ -10560,7 +10560,13 @@ halves, and a conformant implementation SHALL enforce both:
      descriptor and is stripped wherever it later leaves — except through the compiler's own durable
      session store (§20.5), which keeps `JSON.stringify` of what it is given: a row stored by
      `session.set` comes back without its markers, so every unrevealed column it carries is written
-     there outside a row (S449 round 9; the store is modelled exactly, not walked). (Measured before round 6: a value stored in
+     there outside a row (S449 round 9). An implementation MAY analyse that store by a summary of
+     its own `get` / `set` / `delete` instead of walking it, but ONLY for a compile in which the
+     program reaches the store solely through those three calls on its binding; any other use —
+     the binding as a value, a member write or computed member on it, the registry on the global
+     object, or the global object itself used as a value — SHALL make the store analysed as any
+     global object is. (S449 re-review: a summary applied regardless served the hash three ways —
+     a copied record, an alias route, an overwritten `get`.) (Measured before round 6: a value stored in
      `globalThis` / `process.env` by one server function and returned by another served the hash.)
      A FUNCTION kept in a global is analysed at the calls that name it (`globalThis.clamp(…)`,
      `clamp(…)`) — with the call's arguments whenever they carry protected data OR hand it a
