@@ -21870,7 +21870,9 @@ The S447 rulings are written into SPEC §6.7.4 (`<effect>`), §6.8.4 (`reset-on=
 - **The no-write rule** — a per-function write summary over the binder's facts (direct writes, refused writes by
   shape, resolved calls, function values), closed to a fixed point with a witness chain: E-EFFECT-WRITES-STATE names
   the chain and the fix by shape; E-EFFECT-WRITE-UNPROVEN for a call through a non-function name. Core C11 restates
-  it (no Write in an effect body, directly or through a called Fn). The keyword form carries it.
+  it (no Write in an effect body, directly or through a called Fn). The keyword form carries it. A read of a
+  user declaration's SHARED instance counts as a call of its CONSTRUCTION (its initializers run on first read) — found
+  by measurement: such a read wrote `@a` through a writing `let` seed before the fix.
 - **`reset-on=[…]`** on program cells — Core `View.ResetOn`, runtime `rt.resetOn` (resets drained in rank order
   inside the writer's batch: one change for every dependent); E-RESET-ON-INVALID-ENTRY, E-RESET-ON-CYCLE,
   E-RESET-ON-NOT-WRITABLE, E-RESET-ON-ENGINE-REFUSED (each refusing state named); Core C13.
@@ -21903,6 +21905,11 @@ The S447 rulings are written into SPEC §6.7.4 (`<effect>`), §6.8.4 (`reset-on=
   `renders` or in use-site slot content (which scope owns it), a whole-instance dependency, `reset-on=` on a
   declaration field (per-instance resets, ⚑ OPEN §6.8.4), an effect in a function / handler body (no §34 code names
   it).
+- **⚑ PA question — may an initializer write reactive state?** A declaration initializer (a `let` seed) may call a
+  `function` that writes another cell, and the bootstrap accepts it; SPEC is silent. It is how an effect's READ of a
+  lazily-constructed shared instance wrote state, and how a `reset-on=` reset value re-wrote its own trigger in an
+  endless loop (both measured, both closed: the first as E-EFFECT-WRITES-STATE through the construction, the second
+  fail-closed E-BOOTSTRAP-UNSUPPORTED — §34 has no code for it). A language-wide rule would subsume both.
 - **Route regions** (§6.7.4 "route region" owner) — the bootstrap has no routes / `<page>`.
 - **`lin` in an effect body (E-LIN-004)** — the bootstrap has no `lin`.
 - **An effect body's §19 error context** (`!{}` on a rejected suspension) — arrives with server calls (U1); today a

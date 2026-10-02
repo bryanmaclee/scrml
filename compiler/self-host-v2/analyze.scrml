@@ -8502,6 +8502,16 @@ ${
     //     parsed in a bootstrap logic body at all, so it never reaches here.)
     //  5. a host call (`Date.now()`, the closed HostCall set) is outside scrml's
     //     state and is not a write.
+    //  +  rule 2's "any call the SPEC defines as writing a cell on the caller's
+    //     behalf", the bootstrap's implicit one: READING a user declaration's
+    //     SHARED instance (`@box`, `@box.k`) constructs it on first reference
+    //     (§66.6.4) — running its field initializers (which may call writers)
+    //     and constructing the instances its renders mounts unconditionally. So
+    //     such a read refers to the declaration's CONSTRUCTION, summarized like a
+    //     function over its initializers and the declarations its renders uses
+    //     (over-approximate: whether this read is the first one is not static).
+    //     Found by measurement: an effect reading `@box.k`, where `box`'s `let`
+    //     seed calls a writer, wrote `@a` at run time with no diagnostic.
     // The message names the fix by shape (S447 1a): a write back to the cell's
     // initializer (or `reset(@x)`) → `reset-on=[…]` on the cell; a write of a
     // call's result → a `<request>`; otherwise → move the write to the writer,
@@ -8512,11 +8522,13 @@ ${
     type WSite:struct = { cell: string, span: ASpan, file: string, fix: FixShape }
     // A call the analysis cannot resolve, and why.
     type USite:struct = { what: string, span: ASpan, file: string }
-    // A scrml function the body calls (`asValue` = false) or hands on as a value.
+    // A scrml function the body calls (`asValue` = false) or hands on as a value
+    // — or a user declaration whose shared instance it reads (constructed on
+    // first reference; `sym` is the declaration's, `name` its display label).
     type FnRef:struct = { sym: int, name: string, span: ASpan, file: string, asValue: boolean }
     type BodyScan:struct = { writes: WSite[], refs: FnRef[], unproven: USite[] }
-    // The first chain (function names, outermost first) down to a write / an
-    // unresolvable call.
+    // The first chain (display labels — `f()`, `construction of <box>` —
+    // outermost first) down to a write / an unresolvable call.
     type Witness:struct = { chain: string[], site: WSite }
     type UWitness:struct = { chain: string[], site: USite }
     type FnSummary:struct = { sym: int, name: string, scan: BodyScan, w: Witness | not, u: UWitness | not }
@@ -8575,10 +8587,45 @@ ${
     fn scanExpr(cx: WCx, e: AExpr, acc0: BodyScan) -> BodyScan {
         const c: AExpr | not = calleeOf(e.k)
         if (c is some) return scanExprs(cx, exprKids(e).slice(1), scanCall(cx, e, c, acc0))
-        let acc: BodyScan = fnValueRef(cx, e, acc0)
+        let acc: BodyScan = constructionRef(cx, e, fnValueRef(cx, e, acc0))
         for (const x of exprKids(e)) { acc = scanExpr(cx, x, acc) }
         return acc
     }
+
+    // A read of a user declaration's SHARED instance may construct it (see the
+    // banner): a reference to that declaration's construction summary.
+    fn constructionRef(cx: WCx, e: AExpr, acc: BodyScan) -> BodyScan {
+        const d: Sym | not = sharedDeclRead(nameFact(cx.t.names, e.nid))
+        if (d is not) return acc
+        if (d.id == cx.t.program.id) return acc       // the program is constructed at boot, never by a read
+        for (const r of acc.refs) {
+            if (r.sym == d.id) return acc             // `@box.k` resolves `@box` too: one reference per body
+        }
+        return addRef(acc, { sym: d.id, name: constructionLabel(d.hint), span: e.span, file: cx.file, asValue: false })
+    }
+
+    fn sharedDeclRead(f: NameFact | not) -> Sym | not {
+        return match f {
+            .NField(decl: d, inst: i) :> sharedOf(i)
+            .NInst(decl: d, inst: i) :> sharedOf(i)
+            .NLocal(sym: s) :> not
+            .NStruct(owner: o) :> not
+            .NFn(sym: s) :> not
+            .NLength :> not
+            not :> not
+        }
+    }
+
+    fn sharedOf(i: InstRef) -> Sym | not {
+        return match i {
+            .Shared(decl: d) :> d
+            .Lexical(depth: n) :> not
+            .Alias(sym: s) :> not
+            .Narrowed(sym: s) :> not
+        }
+    }
+
+    fn constructionLabel(name: string) -> string { return "construction of <" + name + ">" }
 
     fn scanCall(cx: WCx, e: AExpr, callee: AExpr, acc: BodyScan) -> BodyScan {
         // an edit / removal / `reset` call is a WRITE, recorded at its statement
@@ -8589,7 +8636,7 @@ ${
         if (isHostOrSeq(valueFact(cx.t.values, e.nid))) return scanExprs(cx, receiverOf(callee), acc)
         const f: NameFact | not = nameFact(cx.t.names, callee.nid)
         const s: Sym | not = fnSymOf(f)
-        if (s is some) return addRef(acc, { sym: s.id, name: s.hint, span: e.span, file: cx.file, asValue: false })
+        if (s is some) return addRef(acc, { sym: s.id, name: s.hint + "()", span: e.span, file: cx.file, asValue: false })
         // A callee name with no fact was already reported (E-SCOPE-001), and any
         // other callee shape is refused by the binder — only a NAME that resolves
         // to something other than a function reaches here: a local, a parameter,
@@ -8954,11 +9001,20 @@ ${
     }
 
     // ---- the summaries: one scan per function, closed over references ---------
+    // Plus one per user declaration: its CONSTRUCTION (see the banner).
     fn fnSummaries(g: Globals, t: Tables) -> FnSummary[] {
         let out: FnSummary[] = []
         for (const fs of g.fns) {
+            const label: string = fs.info.name + "()"
             const scan: BodyScan = scanBlock({ t: t, file: fs.info.file }, fs.f.body, emptyScan())
-            out = out.concat([{ sym: fs.info.sym.id, name: fs.info.name, scan: scan, w: directWitness(fs.info.name, scan), u: directUWitness(fs.info.name, scan) }])
+            out = out.concat([{ sym: fs.info.sym.id, name: label, scan: scan, w: directWitness(label, scan), u: directUWitness(label, scan) }])
+        }
+        for (const ds of g.decls) {
+            if (!ds.isProgram) {
+                const label: string = constructionLabel(ds.info.sym.hint)
+                const scan: BodyScan = constructionScan(t, ds)
+                out = out.concat([{ sym: ds.info.sym.id, name: label, scan: scan, w: directWitness(label, scan), u: directUWitness(label, scan) }])
+            }
         }
         // the fixed point: a pass adds a witness to a function whose callee has
         // one; a witness, once found, is kept (each function gains at most two),
@@ -8977,6 +9033,59 @@ ${
             pass = pass + 1
         }
         return out
+    }
+
+    // What constructing a declaration's instance runs: every field initializer
+    // (the declared defaults — a use-site value is evaluated where the use
+    // renders, not by a read), and the construction of each declaration its
+    // renders uses (L12 (b) builds the unconditional ones with it; every use is
+    // counted — over-approximate).
+    fn constructionScan(t: Tables, ds: DeclSrc) -> BodyScan {
+        const cx: WCx = { t: t, file: ds.file }
+        let acc: BodyScan = emptyScan()
+        for (const f of ds.info.fields) { acc = scanValue(cx, f.init, acc) }
+        const d: ADecl | not = ds.d
+        if (d is some) {
+            const r: AElem | not = d.renders
+            if (r is some) acc = usedDecls(cx, r.kids, acc)
+        }
+        return acc
+    }
+
+    fn scanValue(cx: WCx, v: AAttrValue, acc: BodyScan) -> BodyScan {
+        return match v {
+            .Bare(e: e) :> scanExpr(cx, e, acc)
+            .Paren(e: e) :> scanExpr(cx, e, acc)
+            .Braced(b: b) :> scanBlock(cx, b, acc)
+            .Quoted(v: s) :> acc
+            .NoValue :> acc
+        }
+    }
+
+    fn usedDecls(cx: WCx, ns: ANode[], acc0: BodyScan) -> BodyScan {
+        let acc: BodyScan = acc0
+        for (const n of ns) {
+            const e: AElem | not = elemOfNode(n.k)
+            if (e is some) {
+                const used: Sym | not = useOf(elemFact(cx.t.elems, e.nid))
+                if (used is some) acc = addRef(acc, { sym: used.id, name: constructionLabel(used.hint), span: e.span, file: cx.file, asValue: false })
+                acc = usedDecls(cx, e.kids, acc)
+            }
+        }
+        return acc
+    }
+
+    fn useOf(f: ElemFact | not) -> Sym | not {
+        return match f {
+            .MUse(decl: d) :> d
+            .MStar(decl: d) :> d
+            .MHtml :> not
+            .MEach(bind: b) :> not
+            .MSlot :> not
+            .MStateView(v: v) :> not
+            .MInline(v: v) :> not
+            not :> not
+        }
     }
 
     fn directWitness(name: string, scan: BodyScan) -> Witness | not {
@@ -9021,8 +9130,9 @@ ${
     }
 
     // ---- the pass: every accepted effect's body against the summaries ---------
+    // (and every accepted `reset-on=` rule's reset value — see resetValueDiags)
     fn effectPass(g: Globals, t: Tables, effects: EffectSrc[]) -> Diag[] {
-        if (effects.length == 0) return []
+        if (effects.length == 0 && t.resets.length == 0) return []
         const sums: FnSummary[] = fnSummaries(g, t)
         let out: Diag[] = []
         for (const es of effects) {
@@ -9030,6 +9140,43 @@ ${
             for (const w of scan.writes) { out = out.concat([writesDirect(es.w, w)]) }
             for (const r of scan.refs) { out = out.concat(refDiags(es.w, r, summaryOf(sums, r.sym))) }
             for (const u of scan.unproven) { out = out.concat([unprovenDirect(u)]) }
+        }
+        return out.concat(resetValueDiags(g, t, sums))
+    }
+
+    // s449 — a `reset-on=` reset evaluates the cell's initializer (§6.8.1) at
+    // every reset. §6.8.4: "`reset-on=` performs exactly one write —
+    // `reset(@self)` (§6.8.2) — and nothing else", and rule 3's termination
+    // argument ("Because the graph is static and acyclic, a chain of resets
+    // terminates by construction") holds only if evaluating the reset value
+    // writes no cell. Found by measurement: `<let page:int=(bump()) reset-on=[@q]/>`
+    // with `bump()` writing `@q` compiled clean — at run time every reset wrote
+    // the trigger again, an endless reset loop. §34 names no code for it, so the
+    // bootstrap refuses it (E-BOOTSTRAP-UNSUPPORTED, fail closed) by the same
+    // write summary the no-write rule uses — an unprovable value is refused too.
+    fn resetValueDiags(g: Globals, t: Tables, sums: FnSummary[]) -> Diag[] {
+        const prog: DeclSrc | not = findDeclSrc(g, t.program)
+        if (prog is not) return []
+        let out: Diag[] = []
+        for (const r of t.resets) {
+            const f: FieldInfo = prog.info.fields[r.target]
+            const scan: BodyScan = scanValue({ t: t, file: prog.file }, f.init, emptyScan())
+            let why: string = ""
+            if (scan.writes.length > 0) why = "writes `" + scan.writes[0].cell + "`"
+            for (const ref of scan.refs) {
+                const s: FnSummary | not = summaryOf(sums, ref.sym)
+                if (why == "" && s is some) {
+                    const sw: Witness | not = s.w
+                    const su: UWitness | not = s.u
+                    if (sw is some) why = "writes `" + sw.site.cell + "` (`" + chainText(sw.chain) + " → " + sw.site.cell + "`)"
+                    if (why == "" && su is some) why = "may write — it reaches a call the compiler cannot resolve (`" + chainText(su.chain) + "`: " + su.site.what + ")"
+                }
+            }
+            if (why == "" && scan.unproven.length > 0) why = "may write — " + scan.unproven[0].what
+            if (why != "") {
+                out = out.concat([{ code: "E-BOOTSTRAP-UNSUPPORTED", file: prog.file, span: f.span,
+                                    message: "`reset-on=` on `@" + f.sym.hint + "` re-evaluates its initializer at every reset, and that initializer " + why + " — a reset must write its own cell and nothing else (§6.8.4: \"performs exactly one write … and nothing else\"), or the reset chain need not end; §34 names no code for this, so it is refused. Give the cell an initializer that writes nothing" }])
+            }
         }
         return out
     }
@@ -9056,7 +9203,8 @@ ${
     fn writesThrough(w: AEffect, r: FnRef, wit: Witness) -> Diag {
         const chain: string = chainText(wit.chain) + " → " + wit.site.cell
         let how: string = " writes `" + wit.site.cell + "` through a call: `" + chain + "`"
-        if (r.asValue) how = " hands `" + r.name + "` on as a function value — whatever receives it may call it (§6.7.4 rule 3) — and it writes `" + wit.site.cell + "`: `" + chain + "`"
+        if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value — whatever receives it may call it (§6.7.4 rule 3) — and it writes `" + wit.site.cell + "`: `" + chain + "`"
+        if (r.name.indexOf("construction of ") == 0) how = " reads a shared instance that its first read CONSTRUCTS, running initializers that write `" + wit.site.cell + "`: `" + chain + "`"
         const msg: string = effectWord(w) + how + ". An effect drives the outside world and may not write reactive state, directly or through a called function (§6.7.4). " + fixText(w, wit.site)
         return { code: "E-EFFECT-WRITES-STATE", message: msg, file: r.file, span: r.span }
     }
@@ -9071,10 +9219,8 @@ ${
         return { code: "E-EFFECT-WRITE-UNPROVEN", message: msg, file: r.file, span: r.span }
     }
 
-    fn chainText(names: string[]) -> string {
-        let parts: string[] = []
-        for (const n of names) { parts = parts.concat([n + "()"]) }
-        return parts.join(" → ")
+    fn chainText(labels: string[]) -> string {
+        return labels.join(" → ")
     }
 
     // The fix the message names, by the write's shape (S447 1a).

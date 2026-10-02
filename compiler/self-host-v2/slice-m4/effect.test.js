@@ -319,6 +319,22 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
     expect(frontEnd(mods, files("readCount()")).diags.map((d) => d.code)).toEqual([]);
   });
 
+  test("a read that CONSTRUCTS a shared instance runs its initializers — a `let` seed calling a writer is a write of the effect", async () => {
+    // Found by measurement (s449): this program compiled clean, and one click wrote `@a` from inside the
+    // effect body (`shared_box()` constructed `box` on first read; its seed ran `bumpA()`).
+    const decls = `    <let a:int=0/>\n    function bumpA() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <box let k:int=(bumpA())/>\n    renders <div>\${k}</div>`;
+    const ds = writes(decls, `<effect deps=[@query]>\${\n        const v = @box.k\n    }</>`);
+    expect(W(ds)).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(ds[0].message).toContain("`construction of <box> → bumpA() → @a`");
+    // …and through a function that reads it
+    expect(W(writes(`${decls}\n    function peek() -> int { return @box.k }`, `<effect deps=[@query]>\${\n        const v = peek()\n    }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    // …and through a declaration the constructed one renders (built with it)
+    const nested = `    <let a:int=0/>\n    function bumpA() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <inner let k:int=(bumpA())/>\n    renders <i>\${k}</i>\n    <outer let j:int=0/>\n    renders <div><inner/></div>`;
+    expect(W(writes(nested, `<effect deps=[@query]>\${\n        const v = @outer.j\n    }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    // negative: a shared instance whose initializers write nothing
+    expect(W(writes(`    <box let k:int=3/>\n    renders <div>\${k}</div>`, `<effect deps=[@query]>\${\n        const v = @box.k\n    }</>`))).toEqual([]);
+  });
+
   test("recursion: the summary is a fixed point — mutual recursion that writes is found; that does not, is clean", () => {
     const rec = `    function a(k: int) {\n        if (k > 0) {\n            b(k - 1)\n        }\n    }\n    function b(k: int) {\n        a(k)\n        @hits = k\n    }`;
     expect(W(writes(rec, `<effect deps=[@query]>\${ a(3) }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
@@ -456,6 +472,16 @@ describe("Core checks — C11 (Effect) and C12 (Suspend placement)", () => {
     const through = clone(core);
     effects(through)[0].body = clone(handler);
     expect(mods.check.checkCore(through).join("\n")).toMatch(/C11: an Effect body writes reactive state — through `bump\(\)`: a Write of <program>\.m/);
+  });
+
+  test("C11: a body that reads a shared instance whose construction writes (a seed calling a writer) — through a call", () => {
+    const cons = P(`    <let n:int=0/>\n    <let a:int=0/>\n${PING}\n    function bumpA() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <box let k:int=(bumpA())/>\n    renders <div>\${k}</div>\n    function peek() {\n        const v = @box.k\n    }`,
+      `        <div><effect deps=[@n]>\${ ping() }</></div>\n        <button onclick=peek()>p</button>`);
+    const core = coreOf(cons);
+    const handler = walkCore(core, (n) => n.variant === "On")[0].data.body;
+    const grafted = clone(core);
+    effects(grafted)[0].body = clone(handler);
+    expect(mods.check.checkCore(grafted).join("\n")).toMatch(/C11: an Effect body writes reactive state — through `peek\(\)`: through the construction of <box>: through `bumpA\(\)`: a Write of <program>\.a/);
   });
 
   test("C12: a Suspend at the tail of an Effect body is legal; anywhere else it is not", () => {

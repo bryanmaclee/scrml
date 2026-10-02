@@ -174,6 +174,18 @@ describe("§6.8.4 — codes", () => {
     expect(codes(engine(`        <Draft rule=.Placed/>\n        <Placed rule=(.Shipped | .Draft)/>\n        <Shipped rule=(.Delivered | .Draft)/>\n        <Delivered rule=.Draft/>`))).toEqual([]);
   });
 
+  test("a reset value that WRITES (an initializer calling a writer) is refused — the reset chain need not end (no §34 code: fail closed)", () => {
+    // Found by measurement (s449): this compiled clean, and each reset re-ran bump(), which wrote the
+    // trigger @q again — an endless reset loop at run time.
+    const loop = diagsOf(P(`    <let q:int=0/>\n    function bump() -> int {\n        @q = @q + 1\n        return 1\n    }\n    <let page:int=(bump()) reset-on=[@q]/>`, ""));
+    expect(loop.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(loop[0].message).toContain("re-evaluates its initializer at every reset, and that initializer writes `@q` (`bump() → @q`)");
+    // a writer of an UNRELATED cell is refused too (the reset must write its own cell and nothing else)
+    expect(codes(P(`    <let q:int=0/>\n    <let other:int=0/>\n    function note() -> int {\n        @other = 1\n        return 1\n    }\n    <let page:int=(note()) reset-on=[@q]/>`, ""))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // negative: an initializer that calls a write-free function
+    expect(codes(P(`    <let q:int=0/>\n    fn one() -> int { return 1 }\n    <let page:int=(one()) reset-on=[@q]/>`, ""))).toEqual([]);
+  });
+
   test("a `reset-on=` on a declaration's field is refused — per-instance resets are OPEN (§6.8.4)", () => {
     const src = `<program>\n    <let query:string=""/>\n    <panel title:string>\n        <let page:int=1 reset-on=[@query]/>\n    </>\n    renders <div>\${page}</div>\n    <main><panel title="a"/></main>\n</program>\n`;
     const ds = diagsOf(src);

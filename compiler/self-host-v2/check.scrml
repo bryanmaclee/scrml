@@ -341,11 +341,90 @@ ${
             .NServerFn(f: f) :> ""
             .NBlock(b: b) :> ""
             .NPlace(pl: pl) :> ""
-            .NInst(i: i) :> ""
+            .NInst(i: i) :> constructWriteWitness(p, i, seen)
             .NPattern(pat: pat) :> ""
             .NEdit(k: k) :> ""
             .NView(v: v) :> ""
             .NAttr(a: a) :> ""
+        }
+    }
+
+    // A read through `.Shared(d)` may CONSTRUCT d's shared instance (first
+    // reference, §66.6.4): its field initializers run, and the instances its
+    // renders uses are built with it (L12 (b); every use counted — the
+    // front end's construction summary, restated over Core).
+    fn constructWriteWitness(p: CoreProgram, i: InstRef, seen: int[]) -> string {
+        const ds: Sym | not = sharedDeclOf(i)
+        if (ds is not) return ""
+        if (ds.id == p.program.id || seen.indexOf(ds.id) >= 0) return ""
+        const d: Decl | not = findDecl(p, ds)
+        if (d is not) return ""
+        const inner: string = declConstructWitness(p, d, seen.concat([ds.id]))
+        if (inner == "") return ""
+        return "through the construction of <" + ds.hint + ">: " + inner
+    }
+
+    fn declConstructWitness(p: CoreProgram, d: Decl, seen: int[]) -> string {
+        for (const f of d.fields) {
+            for (const n of allNodes(Node.NField(f))) {
+                const w: string = nodeWriteWitness(p, n, seen)
+                if (w != "") return w
+            }
+        }
+        const r: View[] | not = d.renders
+        if (r is not) return ""
+        for (const v of r) {
+            for (const n of allNodes(Node.NView(v))) {
+                const used: Sym | not = instanceDeclOf(n)
+                if (used is some) {
+                    const w2: string = constructWriteWitness(p, InstRef.Shared(used), seen)
+                    if (w2 != "") return w2
+                }
+            }
+        }
+        return ""
+    }
+
+    fn sharedDeclOf(i: InstRef) -> Sym | not {
+        return match i {
+            .Shared(decl: d) :> d
+            .Lexical(depth: n) :> not
+            .Alias(sym: s) :> not
+            .Narrowed(sym: s) :> not
+        }
+    }
+
+    fn instanceDeclOf(n: Node) -> Sym | not {
+        return match n {
+            .NView(v: v) :> viewInstanceDecl(v)
+            .NProgram(p: q) :> not
+            .NDecl(d: d) :> not
+            .NField(f: f) :> not
+            .NFn(f: f) :> not
+            .NServerFn(f: f) :> not
+            .NBlock(b: b) :> not
+            .NStmt(s: s) :> not
+            .NExpr(e: e) :> not
+            .NPlace(pl: pl) :> not
+            .NInst(i: i) :> not
+            .NPattern(pat: pat) :> not
+            .NEdit(k: k) :> not
+            .NAttr(a: a) :> not
+        }
+    }
+
+    fn viewInstanceDecl(v: View) -> Sym | not {
+        return match v {
+            .Instance(decl: d) :> d
+            .El(tag: x) :> not
+            .Text(text: x) :> not
+            .Dyn(e: x) :> not
+            .Cond(arms: x) :> not
+            .Each(src: x) :> not
+            .Slot :> not
+            .Star(decl: x) :> not
+            .Effect(deps: x) :> not
+            .ResetOn(triggers: x) :> not
         }
     }
 

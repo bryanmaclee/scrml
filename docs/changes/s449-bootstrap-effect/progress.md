@@ -184,3 +184,36 @@ that triggered it" without a second mechanism.
 - `docs/known-gaps.md`: `g-bootstrap-effect-reset-on-owed` rewritten as LANDED / REMAINS; new carried gap (HIGH; the
   §0 Carried HIGH count 4 → 5). `docs/FACTS.md` conformance count regenerated (1209 → 1238, `facts.ts --write`).
   `compiler/self-host-v2/progress.md` gains the s449 section.
+
+## 2026-10-02 — adversarial pass: two holes found by MEASUREMENT, both closed at compile time
+
+Probing where the "impossible by construction" claims could leak (no runtime limit was added — per the STOP
+condition, each hole is closed in the compile-time rule):
+
+1. **An effect that READS a lazily-constructed shared instance wrote state.** `<box let k:int=(bumpA())/>` (a `let`
+   seed calling a writer) + `<effect deps=[@q]>${ const v = @box.k }</>` compiled clean; one click ran
+   `shared_box()` inside the effect body, whose construction ran `bumpA()`, which wrote `@a` (measured: `@a` 0 → 1).
+   **Fix:** a read through `.Shared(decl)` (decl ≠ the program, which is built at boot) refers to the declaration's
+   CONSTRUCTION, summarized like a function over its field initializers + the declarations its renders uses
+   (over-approximate: whether a read is the first is not static). E-EFFECT-WRITES-STATE now names
+   `construction of <box> → bumpA() → @a`. Core C11 restates it (`.NInst(Shared)` → the declaration's field inits +
+   its renders' Instances). Tests: effect.test.js "a read that CONSTRUCTS a shared instance…" (direct, through a
+   function, through a rendered declaration, + negative) and C11 "…whose construction writes"; bite: construction
+   refs off → RED.
+2. **A `reset-on=` whose reset value writes looped forever.** `<let page:int=(bump()) reset-on=[@q]/>` with `bump()`
+   writing `@q` compiled clean; at run time every reset re-ran the initializer, which wrote the trigger again — an
+   endless drain. §6.8.4's termination argument (rule 3) assumes "exactly one write … and nothing else". **Fix:** the
+   reset value (the cell's initializer) is run through the same write summary; any write (or an unprovable call) is
+   refused — E-BOOTSTRAP-UNSUPPORTED, because §34 names no code (PA question below). Test: reset-on.test.js "a reset
+   value that WRITES…" (trigger writer, unrelated writer, + negative).
+
+### PA readings for veto / questions (adversarial pass)
+- **Q-A — initializers that write state.** Both holes share a root: a declaration initializer (a `let` seed) may call
+  a `function` that writes another cell, and the bootstrap accepts it. Seeds run at construction (or on lazy first
+  read, or at every `reset-on=` reset). SPEC is silent on whether an initializer may write reactive state at all.
+  Recommendation: a language-wide compile error (an initializer is a value, and a write hidden in it is invisible at
+  every read that triggers it) — that would make both fixes above special cases of one rule. Until ruled: the effect
+  limb is E-EFFECT-WRITES-STATE (it IS the effect writing), the `reset-on=` limb is fail-closed
+  E-BOOTSTRAP-UNSUPPORTED.
+- **A §66 field path as an effect dependency** (`deps=[@box.k]`, ⚑ OPEN in §6.7.4) → E-LIFECYCLE-007 (only `@name`
+  entries are accepted — fail closed).
