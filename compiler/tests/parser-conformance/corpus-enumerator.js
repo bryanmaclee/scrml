@@ -30,7 +30,18 @@ export const SCRML_CORPUS_SOURCES = [
   { name: "samples", root: join(REPO_ROOT, "samples") },
   { name: "examples", root: join(REPO_ROOT, "examples") },
   { name: "stdlib", root: join(REPO_ROOT, "stdlib") },
-  { name: "self-host", root: join(REPO_ROOT, "compiler", "self-host") },
+  // The bootstrap compiler (impl #2) — real hand-written scrml. Replaced the
+  // frozen v1 `compiler/self-host/` tree when it was retired (S447,
+  // s447-retire-self-host-v1); the corpus keeps a compiler-in-scrml source.
+  //
+  // `driftGated: false` — this tree is under ACTIVE development (it changes
+  // most weeks), unlike the frozen v1 tree it replaced. The within-node parity
+  // gate pins EXACT per-file divergence counts, so gating an actively edited
+  // tree would make every bootstrap source edit re-baseline an unrelated
+  // parser-parity allowlist. Its files still run through every corpus test,
+  // and the within-node canary still requires BOTH pipelines to parse each one
+  // (no PARSE-FAILURE); only the exact-count drift gate skips them.
+  { name: "self-host-v2", root: join(REPO_ROOT, "compiler", "self-host-v2"), driftGated: false },
 ];
 
 /** Bench corpus directory — .js single-feature fixtures. */
@@ -64,7 +75,7 @@ function walkDir(dir, ext, out) {
 
 /**
  * Enumerate every .scrml file under each source.
- * @returns {Array<{ source: string, path: string, relpath: string }>}
+ * @returns {Array<{ source: string, driftGated: boolean, path: string, relpath: string }>}
  */
 export function enumerateScrmlCorpus() {
   const out = [];
@@ -74,6 +85,7 @@ export function enumerateScrmlCorpus() {
     for (const f of files) {
       out.push({
         source: src.name,
+        driftGated: src.driftGated !== false,
         path: f,
         // Normalize to POSIX separators so `relpath` matches the forward-slash
         // allowlist keys on EVERY OS. `path.relative` returns backslash-
@@ -118,12 +130,12 @@ export function enumerateBenchCorpus() {
 
 /**
  * Per-source counts for the DONE report and for spotting drift over time.
- * @returns {{ samples: number, examples: number, stdlib: number, "self-host": number, bench: number, total: number }}
+ * @returns {{ samples: number, examples: number, stdlib: number, "self-host-v2": number, bench: number, total: number }}
  */
 export function corpusSizes() {
   const scrml = enumerateScrmlCorpus();
   const bench = enumerateBenchCorpus();
-  const counts = { samples: 0, examples: 0, stdlib: 0, "self-host": 0, bench: bench.length, total: 0 };
+  const counts = { samples: 0, examples: 0, stdlib: 0, "self-host-v2": 0, bench: bench.length, total: 0 };
   for (const e of scrml) counts[e.source]++;
   counts.total = scrml.length + bench.length;
   return counts;
