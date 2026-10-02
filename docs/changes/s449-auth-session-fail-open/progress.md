@@ -32,3 +32,29 @@ Worked example:
                                            // (b): gated (302 /login) + W-ATTR-002
 ```
 Why (a) over (b): the author's intent behind `auth=@mode` is unknowable at compile time (it might be "none"); an error makes them say it. Corpus cost of (a) measured now: the only corpus program with a non-recognized `<program auth>` is `conformance/cases/reactive/server-fn-ambient-identity-clean` (bare `auth`) — 1 file.
+
+## Item 2 — g-session-ambient-unlowered-trust-boundary-inversion — 2026-10-02T14:06-06:00
+
+- VERIFIED LIVE on 2d6d8cd43. Reproducer (`<program db=…>` + `function saveNote(body)` doing `?{INSERT INTO notes (sid, body) VALUES (${@session.userId}, ${body})}`): compile exit 0, zero diagnostics; server.js emits `INSERT … VALUES (${_scrml_body["session"].userId}, ${body})`. HTTP (scrml build + _server.js): anonymous POST `{"body":"spoofed","session":{"userId":"victim"}}` (+ double-submit token) -> 200; notes row written `{"sid":"victim","body":"spoofed"}`.
+- GOVERNING-SENTENCE GATE:
+  - §6.6.9 exclusions: "`@session` is server-only identity and SHALL NEVER be marshalled from the client — doing so would be a spoofing hole." -> the emitted `_scrml_body["session"]` read violates a SHALL NEVER. The client-body read is unambiguously a bug.
+  - But WHAT `@session.<f>` means server-side is NOT settled: §6.6.9 calls `@session` a "compiler-provided server-side singleton" (§20.5 / §52), while the compiler (type-system `RESERVED_AMBIENT_PROJECTION_NAMES`, emit-expr `_sessionProjectionActive`) and the SPEC's own cross-refs — §20.5 "the client `@session`-projection logout path", §52.15.1 "the `@session` projection precedent, §20.5" — treat `@session` as the CLIENT window projection `{ current, destroy() }`, a different shape from the server `session` object (`userId / isAuth / role / get / set / destroy`). §20.5 defines no server shape for `@session`. => the shape choice is a RULING.
+  - Per brief, the interim fail-closed fix is "reject `@session` in a server context with an error naming `session.<field>`" = NEWLY-REJECTING.
+- CORPUS for the interim reject (measured: grep of every `@session` in examples/ samples/ conformance/cases/ docs/readme-snippets/ stdlib/ — 2 hits): 1 server-context use — `conformance/cases/reactive/server-fn-ambient-identity-clean/case.scrml:4` (the green case that certifies the broken emit; it also writes a BARE `<program … auth>`, so its app has no auth at all). The other hit, `samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-reactive-028.scrml:6`, is client markup. NON-ZERO (1) -> per brief this item STOPS -> RULING R2. Not landed.
+
+### RULINGS NEEDED (bryan) — R2: what `@session` means in a server context
+
+The client-body read must become impossible whichever way this goes. Options:
+- (a) RECOMMENDED interim, fail closed: a `@session` read in any server context (a server-escalated fn body, CPS-split or not, including inside `?{}`) is a compile error (new code, e.g. `E-SESSION-AMBIENT-SERVER`) that names the replacement `session.<field>` (§20.5), unless the file declares its own `<session>` cell (then it is an ordinary client cell and E-REACTIVE-003 governs). Migration: 1 file. Rewrite the conformance case to `session.userId`, and make it assert that the emitted artifact does not read `_scrml_body["session"]`.
+- (b) Lower `@session.<f>` server-side to the §20.5 server session (`_scrml_session_bind(_scrml_req._scrml_sess).<f>`), so `@session` and `session` become two spellings of one server accessor. Semantics change, no rejection. But `@session` then has two different shapes: the client `{current, destroy}` and the server `{userId, role, …}`. That confusion is what this gap grew from.
+- (c) Settle the SPEC the other way: `@session` is client-only (the projection), and a server read is an E-REACTIVE-003-class "client value not transported" error that is never marshalled.
+Worked example:
+```scrml
+function saveNote(body: string) {
+    ?{`INSERT INTO notes (sid, body) VALUES (${@session.userId}, ${body})`}.run()
+}
+// today: compiles; writes the attacker's body.session.userId — measured 200 + row sid="victim"
+// (a):   E-SESSION-AMBIENT-SERVER: "`@session` is not available in a server function; use `session.userId` (§20.5)"
+// (b):   writes the server session's userId (NULL when anonymous)
+```
+Why (a): one spelling per meaning. `session.x` already exists, is bound by the server prologue (Direction B, S316) and is the documented §20.5 surface. (a) can later be relaxed to (b) without breaking anyone; going from (b) back to (a) would break code.
