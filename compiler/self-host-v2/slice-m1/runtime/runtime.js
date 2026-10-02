@@ -300,25 +300,29 @@ export function effect(scope, fn) {
 // earlier run wrote before it suspended stays written.
 //
 // RE-ENTRY — CYCLES (PA-ruled S446 after impl#1's `_scrml_when_changes`;
-// mechanism re-done in review round 3). Every run carries its CAUSE: a
-// provenance link (`Cause`) naming the When that ran and the cause of THAT
-// run, back to an external write (null). The body, every continuation of the
-// run's task, and every write made under them carry that link
-// (`currentCause`). A trigger is CYCLIC iff its cause's ancestry already
-// contains the triggered When — the When caused its own re-trigger, directly
-// (a self-write through a call, synchronous or from a resumed continuation) or
-// through other Whens. A cyclic trigger re-runs once; when the ancestry
-// already holds the When twice it is dropped and reported (console.error, the
-// impl#1 wording) — the page stays alive. A NON-cyclic trigger always runs
-// (§6.7.4 "The body executes whenever any listed dependency changes value"):
-// a downstream When that a run's continuations re-trigger three times runs
-// three times. (SPEC §6.7.4 names only the direct self-write,
-// E-LIFECYCLE-006; cross-`when` cycles are a SPEC question.)
-// DIVERGENCE from impl#1 (review r3b F4; SPEC question (8)): impl#1's re-run
-// guard covers only the synchronous body, so a When that re-triggers itself
-// from a CONTINUATION (a polling loop: suspend, then write its own dep) runs
-// on in impl#1; here that re-trigger is cyclic by ancestry — one re-run, then
-// dropped. Kept pending a ruling.
+// mechanism re-done in review round 3; suspension boundary ruled S447 Q8).
+// Every run carries its CAUSE: a provenance link (`Cause`) naming the When
+// that ran and the cause of THAT run, back to an external write (null). The
+// body and every write it makes run under that link (`currentCause`); a
+// resumed continuation runs under a BOUNDARY link (no When; parent = its run's
+// link). A trigger is CYCLIC iff the ancestry of its cause, back to the
+// nearest suspension boundary, already contains the triggered When — the When
+// re-triggered itself SYNCHRONOUSLY, directly (a self-write through a call) or
+// through other Whens. A cyclic trigger re-runs once; a further one is dropped
+// and reported (console.error, the impl#1 wording) — the page stays alive. A
+// NON-cyclic trigger always runs (§6.7.4 "The body executes whenever any
+// listed dependency changes value"): a downstream When that a run's
+// continuations re-trigger three times runs three times. (SPEC §6.7.4 names
+// only the direct self-write, E-LIFECYCLE-006; cross-`when` cycles are a SPEC
+// question.)
+//
+// ACROSS A SUSPENSION — ALLOWED (RULED S447 Q8; matches impl#1, whose guard
+// is synchronous only). A When that re-triggers itself from a continuation (a
+// polling loop: suspend, then write its own dep), or a cycle closed through
+// another When's continuation, is not capped: the boundary ends the cycle
+// check. It is bounded by the depth limit below — every poll is one more run
+// in the chain. ⚑ OPEN within the ruling: whether WHEN_DEPTH_LIMIT polls is
+// enough, or polling needs its own allowance.
 //
 // RULED (b) is unaffected: an external write has no cause (empty ancestry),
 // so a re-trigger from outside a suspended run is never cyclic — it runs and
@@ -326,43 +330,38 @@ export function effect(scope, fn) {
 // before it runs keeps the least cyclic cause (an external one if any): that
 // trigger alone would have run it.
 //
-// THE BACKSTOP (review round 3, R2-2; r3b F2/F3). A chain can grow without
-// ever being cyclic: a row `when` that appends a row creates a NEW When whose
-// ancestry does not contain it. Each external event (one outermost flush, and
-// every continuation of the runs it caused) owns a budget, WHEN_EVENT_BUDGET
-// (PROVISIONAL — SPEC question (7)), spent by every When RUN that some When
-// CAUSED (a non-null cause). Registrations are NOT charged (r3b F2): a runaway
-// only grows by running, so counting runs alone still stops it, while one run
-// that creates 12,000 rows is never stopped. The direct fan-out of the external
-// write itself is bounded by the Whens that exist and is free. When the budget
-// is spent the event is STOPPED: every further run or continuation it caused is
-// dropped, and that is reported LOUDLY (see reportStop) — the page's state may
-// now be inconsistent. The report says which kind it was: GROWTH (the event
-// created Whens — the only unbounded shape) or a bounded-but-too-large cascade
-// (no Whens created: cycles and fan-out are finite, just over budget, r3b F3).
+// THE BACKSTOP — ANCESTRY DEPTH (RULED S447 Q7; PROVISIONAL value). A chain
+// can grow without ever being cyclic: a row `when` that appends a row creates
+// a NEW When whose ancestry does not contain it, so every new run is one link
+// deeper. Legitimate fan-out (one write watched by 12,000 rows) and long
+// streams (one run's continuation chain writing 12,000 times) stay at depth
+// ~2 however large they are — a run COUNT cannot tell these apart, depth can
+// (measured r3b). So: a caused run whose link would be deeper than
+// WHEN_DEPTH_LIMIT is not run; its event is STOPPED (every further run or
+// continuation it caused is dropped) and that is reported LOUDLY (reportStop)
+// — the page's state may now be inconsistent. No quarantine: the Whens a
+// stopped event created stay registered (ruled). Depth counts RUNS in the
+// chain; a suspension boundary adds none.
 // It never crashes: When runs are flushed iteratively (a When triggered inside
-// another's body waits for the outer flush loop), so a long chain is a loop,
-// not a recursion.
+// another's body waits for the outer flush loop), so a chain is a loop, not a
+// recursion.
 // ---------------------------------------------------------------------------
 const WHEN_RERUN_CAP = 1;
-const WHEN_EVENT_BUDGET = 5000;   // PROVISIONAL (SPEC question (7)); see DESIGN §5 for the trade-off table
+const WHEN_DEPTH_LIMIT = 256;   // PROVISIONAL (RULED S447 Q7: the unit is depth; the value is provisional)
 
-/** One external event: its budget of caused When runs; the Whens its runs created (for the report). */
+/** One external event (one outermost flush, plus every continuation of the runs it caused). */
 class WhenEvent {
   constructor() {
-    this.spent = 0;
-    this.created = 0;
+    this.created = 0;              // Whens registered by runs of this event (labels the report)
     this.stopped = false;
     this.cycleReported = false;
-    this.cyclicRuns = new Map();   // When → cyclic re-runs admitted in this event
+    this.cyclicRuns = null;        // When → cyclic re-runs admitted in the event's first synchronous segment
   }
-  /** Spend one run; false (and the event stopped, reported once) when exhausted. */
-  spend() {
-    if (this.stopped) return false;
-    if (++this.spent <= WHEN_EVENT_BUDGET) return true;
+  /** Stop the event (reported once). */
+  stop(depth) {
+    if (this.stopped) return;
     this.stopped = true;
-    reportStop(this);
-    return false;
+    reportStop(this, depth);
   }
 }
 
@@ -374,11 +373,15 @@ class WhenEvent {
  * uncaught-error channel — a window `error` event (what page code and error
  * monitors listen to) — and to the console. Not `reportError`: under a
  * Bun-hosted test DOM it is the process's own global and kills the process.
+ * The label (re-derived for depth): the event CREATED Whens → runaway growth
+ * (the unbounded shape); none created → a chain of more than the limit through
+ * existing Whens — a repeating cycle through suspensions (a poll / async
+ * ping-pong) or a chain of that many distinct Whens.
  */
-function reportStop(event) {
+function reportStop(event, depth) {
   const kind = event.created > 0
-    ? `runaway growth — one change made more than ${WHEN_EVENT_BUDGET} when runs while creating ${event.created} new whens`
-    : `when cascade over budget — one change made more than ${WHEN_EVENT_BUDGET} when runs (a bounded cascade or cycle; no whens were created, so it is not runaway growth)`;
+    ? `runaway growth — one change's causal chain passed ${WHEN_DEPTH_LIMIT} when runs deep (depth ${depth}) while creating ${event.created} new whens`
+    : `when chain too deep — one change's causal chain passed ${WHEN_DEPTH_LIMIT} when runs deep (depth ${depth}) with no whens created: a cycle repeating through suspensions (polling / async ping-pong) or that many distinct whens in a row — not runaway growth`;
   const message = `scrml when-effect error: ${kind}; the rest of that change's when runs and continuations are STOPPED — page state may now be inconsistent.`;
   console.error(message);
   if (typeof window !== "undefined" && typeof window.dispatchEvent === "function" && typeof ErrorEvent === "function") {
@@ -386,32 +389,44 @@ function reportStop(event) {
   }
 }
 
-/** A provenance link: a run of `when`, caused by `parent` (null = an external write), in `event`. */
+/**
+ * A provenance link: a run of `when`, caused by `parent` (null = an external
+ * write), in `event`. A BOUNDARY link (`when` null) marks a resumed
+ * continuation: it ends the synchronous cycle check and adds no depth.
+ */
 class Cause {
-  constructor(when, parent, event) {
+  constructor(when, parent, event, depth) {
     this.when = when;
     this.parent = parent;
     this.event = event;
+    this.depth = depth;       // the LONGEST causal chain of runs ending here (see markStale)
+    this.cyclicRuns = null;   // on a boundary link: its segment's When → cyclic re-runs
   }
 }
 
-// How many times each When ran in the ancestry ending at a cause — built once
-// per WRITING cause (one walk of the chain) and reused for every observer that
-// write marks (r3b: a per-observer walk made a long growing chain cubic — R2-2
-// at 2,000 runs took 9.6 s). Every write of one body / continuation shares its
-// cause, so a one-slot cache suffices.
+// How many times each When ran in the ancestry ending at a cause, back to the
+// nearest suspension boundary — built once per WRITING cause and reused for
+// every observer that write marks (r3b: a per-observer walk made a long chain
+// cubic). Every write of one body / continuation shares its cause, so a
+// one-slot cache suffices.
 let countsCause = null;
 let counts = null;
 
-/** How many times `w` ran in the ancestry ending at `cause` (null: an external write — 0). */
+/** How many times `w` ran in the synchronous ancestry ending at `cause` (null: an external write — 0). */
 function timesIn(cause, w) {
   if (cause === null) return 0;
   if (cause !== countsCause) {
     counts = new Map();
-    for (let c = cause; c !== null; c = c.parent) counts.set(c.when, (counts.get(c.when) ?? 0) + 1);
+    for (let c = cause; c !== null && c.when !== null; c = c.parent) counts.set(c.when, (counts.get(c.when) ?? 0) + 1);
     countsCause = cause;
   }
   return counts.get(w) ?? 0;
+}
+
+/** The synchronous segment `cause` belongs to: its nearest boundary link, or (none) its event. */
+function segmentOf(cause) {
+  for (let c = cause; c !== null; c = c.parent) if (c.when === null) return c;
+  return cause.event;
 }
 
 // The cause the executing When body / continuation runs under; null outside them.
@@ -448,6 +463,14 @@ class When {
     this.causeTimes = 0;
     this.pendingCause = null;
     this.pendingTimes = 0;
+    // The DEPTH of the trigger(s): the longest causal chain among every write
+    // that queued it — not the chain of the kept (least cyclic) cause. A When
+    // queued by an external write AND re-triggered by a caused one before it
+    // runs is as deep as the caused chain: otherwise breadth hides depth (r3c:
+    // a stopped runaway's leftovers, re-triggered by one click, kept depth 0 and
+    // grew to 60,000 whens unreported; dense cycles likewise).
+    this.causeDepth = 0;
+    this.pendingDepth = 0;
     for (const d of deps) d.observers.add(this);
     stats.whens++;
     scope.ownWhen(() => this.unregister());
@@ -458,27 +481,38 @@ class When {
     if (this.disposed) return;
     const cause = currentCause;
     const times = timesIn(cause, this);
-    // Of several triggers before a run, keep the least cyclic one (an external one if any).
+    const depth = cause === null ? 0 : cause.depth;
+    // Of several triggers before a run, keep the least cyclic one (an external one if any) for the
+    // cycle check, and the deepest one for the depth backstop.
     if (this.running) {
       if (!this.pending || times < this.pendingTimes) { this.pendingCause = cause; this.pendingTimes = times; }
+      this.pendingDepth = this.pending ? Math.max(this.pendingDepth, depth) : depth;
       this.pending = true;
       return;
     }
-    if (!whenQueue.has(this) || times < this.causeTimes) { this.cause = cause; this.causeTimes = times; }
+    const queued = whenQueue.has(this);
+    if (!queued || times < this.causeTimes) { this.cause = cause; this.causeTimes = times; }
+    this.causeDepth = queued ? Math.max(this.causeDepth, depth) : depth;
     whenQueue.add(this);
     if (batchDepth === 0) flush();
   }
   /** May a trigger with `cause` (this When `times` times in its ancestry) run? (cycle cap, then the event budget) */
-  admit(cause, times) {
-    if (cause === null) return true;
+  admit(cause, times, depth) {
+    if (cause === null) {
+      // Kept cause external — but a caused write may have re-triggered it too (depth > 0): still bounded.
+      if (depth + 1 > WHEN_DEPTH_LIMIT) { (flushEvent ??= new WhenEvent()).stop(depth + 1); return false; }
+      return true;
+    }
     if (cause.event.stopped) return false;
-    // A CYCLIC trigger (the ancestry holds this When) re-runs at most
-    // WHEN_RERUN_CAP times per When per event — counted per When, not per
-    // ancestry path: in a dense cycle (n row whens all writing their shared dep)
-    // every interleaving is a distinct path, and a per-path cap admitted an
-    // exponential number of re-runs (r3b F3). Non-cyclic triggers are never
-    // counted (R2-1).
-    const cyclicRuns = times > 0 ? (cause.event.cyclicRuns.get(this) ?? 0) : 0;
+    // A CYCLIC trigger (the synchronous ancestry holds this When) re-runs at
+    // most WHEN_RERUN_CAP times per When per SYNCHRONOUS SEGMENT — counted per
+    // When, not per ancestry path: in a dense cycle (n row whens all writing
+    // their shared dep) every interleaving is a distinct path, and a per-path
+    // cap admitted an exponential number of re-runs (r3b F3). Per segment, not
+    // per event: impl#1's guard is per synchronous run, and a poll (S447 Q8)
+    // gets a fresh segment every cycle. Non-cyclic triggers are never counted.
+    const seg = times > 0 ? segmentOf(cause) : null;
+    const cyclicRuns = seg === null ? 0 : (seg.cyclicRuns?.get(this) ?? 0);
     if (times > WHEN_RERUN_CAP || cyclicRuns >= WHEN_RERUN_CAP) {
       // reported once per external event (a runaway can drop thousands)
       if (!cause.event.cycleReported) {
@@ -487,8 +521,9 @@ class When {
       }
       return false;
     }
-    if (!cause.event.spend()) return false;
-    if (times > 0) cause.event.cyclicRuns.set(this, cyclicRuns + 1);
+    // The depth backstop: this run would be depth + 1 runs deep.
+    if (depth + 1 > WHEN_DEPTH_LIMIT) { cause.event.stop(depth + 1); return false; }
+    if (seg !== null) (seg.cyclicRuns ??= new Map()).set(this, cyclicRuns + 1);
     return true;
   }
   /** A run from `whenQueue`. */
@@ -496,23 +531,23 @@ class When {
     const cause = this.cause;
     this.cause = null;
     this.running = true;
-    this.step(cause, this.causeTimes);
+    this.step(cause, this.causeTimes, this.causeDepth);
   }
   /** The pending re-run, popped from `rerunStack` once `whenQueue` is empty (see ORDER at flush). */
   rerun() {
     const cause = this.pendingCause;
     this.pendingCause = null;
     if (this.disposed) { this.running = false; this.pending = false; return; }
-    this.step(cause, this.pendingTimes);
+    this.step(cause, this.pendingTimes, this.pendingDepth);
   }
   /** One admitted run; a re-trigger during it parks the When on `rerunStack` (still `running`). */
-  step(cause, times) {
+  step(cause, times, depth) {
     let again = false;
     try {
       this.pending = false;
-      if (!this.admit(cause, times)) return;
+      if (!this.admit(cause, times, depth)) return;
       const event = cause === null ? (flushEvent ??= new WhenEvent()) : cause.event;
-      this.runOnce(new Cause(this, cause, event));
+      this.runOnce(new Cause(this, cause, event, depth + 1));
       again = this.pending && !this.disposed;
     } finally {
       if (again) {
@@ -580,7 +615,7 @@ export function suspend(task, value, k) {
       try {
         // The continuation runs under its run's cause: what it re-triggers has
         // that run in its ancestry (a self re-trigger is cyclic).
-        underCause(task.cause, () => untrack(() => batch(() => k(v))));
+        underCause(new Cause(null, task.cause, task.cause.event, task.cause.depth), () => untrack(() => batch(() => k(v))));
       } finally {
         task.owner.settled(task);
       }

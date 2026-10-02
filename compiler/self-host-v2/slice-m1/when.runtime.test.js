@@ -198,12 +198,13 @@ describe("RULED (b), S446 — a re-trigger while an earlier run is suspended: th
   });
 });
 
-// Review r2 N1 (mechanism re-done r3: provenance): a When is not `running` while
-// suspended; before r2 a continuation's re-trigger got a fresh run with a fresh cap —
-// unbounded runs, the microtask queue never drained, 0 errors. Each body below
-// stops suspending after GUARD runs so a regression fails instead of hanging.
-describe("re-entry through a suspension — the cap counts the whole causal chain (review r2 N1)", () => {
-  const GUARD = 50;
+// Review r2 N1, re-ruled S447 Q8: a re-trigger that crosses a suspension is
+// ALLOWED (polling; impl#1's guard is synchronous only) and bounded by the
+// ancestry-depth limit (Q7). Before r2 such a chain was unbounded — the
+// microtask queue never drained, 0 errors; each body below stops after GUARD
+// runs so a regression of the depth bound fails instead of hanging.
+describe("re-entry through a suspension — polling allowed, bounded by ancestry depth (r2 N1; RULED S447 Q7/Q8)", () => {
+  const GUARD = 1000;
   async function withErrors(fn) {
     const errs = [];
     const saved = console.error;
@@ -211,53 +212,66 @@ describe("re-entry through a suspension — the cap counts the whole causal chai
     try { await fn(); } finally { console.error = saved; }
     return errs;
   }
-  async function drain() { for (let i = 0; i < 10; i++) await tick(); }
+  async function drain(n = 10) { for (let i = 0; i < n; i++) await tick(); }
 
-  test("a continuation that writes its own dep (through a call) re-runs once, then is dropped and reported", async () => {
-    // mutation RED: suspend() running k outside underCause(task.cause) (each re-trigger looks external → GUARD runs, 0 errors)
+  test("Q8: a poll — a continuation that writes its own dep — keeps re-running to its own condition (t reaches 5), no E-LIFECYCLE-006", async () => {
+    // mutation RED: suspend() running k under the run's own link instead of a boundary (the poll is cyclic → runs=2, t=3, E-LIFECYCLE-006)
     const scope = rt.root.child();
-    const dep = rt.cell(0);
+    const t = rt.cell(0);
     let runs = 0;
-    const bump = () => dep.set(dep.peek() + 1);
-    rt.when(scope, [dep], (task) => { runs++; if (runs < GUARD) rt.suspend(task, 1, () => bump()); });
-    const errs = await withErrors(async () => { dep.set(1); await drain(); });
-    expect(runs).toBe(2);                            // exactly like the synchronous path
-    expect(errs.length).toBe(1);
-    expect(errs[0]).toMatch(/E-LIFECYCLE-006 — re-triggered during its re-run; dropped/);
-    // the page is alive: the next external change runs it again, with a fresh budget
-    const errs2 = await withErrors(async () => { dep.set(100); await drain(); });
-    expect(runs).toBe(4);
-    expect(errs2.length).toBe(1);
+    rt.when(scope, [t], (task) => { runs++; rt.suspend(task, 1, () => { if (t.peek() < 5) t.set(t.peek() + 1); }); });
+    const errs = await withErrors(async () => { t.set(1); await drain(); });
+    expect(t.peek()).toBe(5);
+    expect(runs).toBe(5);
+    expect(errs).toEqual([]);
     scope.dispose();
   });
 
-  test("the chain starts at the external run's BODY: a sync write → a suspending when → back is counted from the first run", async () => {
-    // mutation RED: runOnce() running the body outside underCause(link) (B's first run looks external → A runs 3 times)
+  test("Q7/Q8: a poll that never stops is stopped at depth 256 — reported as a chain too deep, not runaway growth", async () => {
+    // mutation RED: admit() without the depth check → GUARD runs, no report
+    const scope = rt.root.child();
+    const t = rt.cell(0);
+    let runs = 0;
+    rt.when(scope, [t], (task) => { runs++; if (runs < GUARD) rt.suspend(task, 1, () => t.set(t.peek() + 1)); });
+    const errs = await withErrors(async () => { t.set(1); for (let i = 0; i < 2000; i++) await null; await drain(); });
+    expect(runs).toBe(256);
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toMatch(/when chain too deep — one change's causal chain passed 256 when runs deep \(depth 257\) with no whens created/);
+    expect(errs[0]).toMatch(/page state may now be inconsistent/);
+    // the page is alive: the next external change polls again from depth 1
+    const before = runs;
+    await withErrors(async () => { t.set(-100); for (let i = 0; i < 2000; i++) await null; await drain(); });
+    expect(runs - before).toBe(256);
+    scope.dispose();
+  });
+
+  test("the chain starts at the external run's BODY: a sync write → a suspending when → back is one chain, bounded by depth", async () => {
+    // mutation RED: runOnce() running the body outside underCause(link) (every cycle looks external → GUARD runs, no report)
     const scope = rt.root.child();
     const n = rt.cell(0);
     const m = rt.cell(0);
     let runsA = 0, runsB = 0;
     rt.when(scope, [n], () => { runsA++; m.set(m.peek() + 1); });
     rt.when(scope, [m], (task) => { runsB++; if (runsB < GUARD) rt.suspend(task, 1, () => n.set(n.peek() + 1)); });
-    const errs = await withErrors(async () => { n.set(1); await drain(); });
-    expect(runsA).toBe(2);
-    expect(runsB).toBe(2);
+    const errs = await withErrors(async () => { n.set(1); for (let i = 0; i < 2000; i++) await null; await drain(); });
+    expect(runsA + runsB).toBe(256);
     expect(errs.length).toBe(1);
+    expect(errs[0]).toMatch(/when chain too deep/);
     scope.dispose();
   });
 
-  test("a cycle closed through another when from a continuation is bounded and reported", async () => {
-    // mutation RED: suspend() running k outside underCause(task.cause)
+  test("a cycle closed through another when from a continuation is bounded by depth and reported", async () => {
+    // mutation RED: suspend() running k outside the run's ancestry (underCause(null)) → GUARD runs, no report
     const scope = rt.root.child();
     const n = rt.cell(0);
     const m = rt.cell(0);
     let runsA = 0, runsB = 0;
     rt.when(scope, [n], (task) => { runsA++; if (runsA < GUARD) rt.suspend(task, 1, () => m.set(m.peek() + 1)); });
     rt.when(scope, [m], () => { runsB++; n.set(n.peek() + 1); });
-    const errs = await withErrors(async () => { n.set(1); await drain(); });
-    expect(runsA).toBe(2);
-    expect(runsB).toBe(2);
+    const errs = await withErrors(async () => { n.set(1); for (let i = 0; i < 2000; i++) await null; await drain(); });
+    expect(runsA + runsB).toBe(256);
     expect(errs.length).toBe(1);
+    expect(errs[0]).toMatch(/when chain too deep/);
     scope.dispose();
   });
 
@@ -293,7 +307,7 @@ describe("re-entry through a suspension — the cap counts the whole causal chai
     scope.dispose();
   });
 
-  test("an external re-trigger mid-chain starts a fresh budget; the cancelled chain's continuation counts for nothing", async () => {
+  test("an external re-trigger mid-poll cancels the old poll; the new one polls on; the cancelled continuation writes nothing", async () => {
     const scope = rt.root.child();
     const dep = rt.cell(0);
     const hosts = [held(), held(), held(), held()];
@@ -303,20 +317,23 @@ describe("re-entry through a suspension — the cap counts the whole causal chai
       if (mine < hosts.length) rt.suspend(task, hosts[mine].p, () => dep.set(dep.peek() + 1));
     });
     const errs = await withErrors(async () => {
-      dep.set(1);                 // run 0 — chain 1, suspended on hosts[0]
+      dep.set(1);                 // run 0, suspended on hosts[0]
       await tick();
-      dep.set(10);                // external: run 1 — chain 2, cancels run 0
+      dep.set(10);                // external: run 1, cancels run 0
       hosts[0].resolve();         // cancelled: no write, no run
       await drain();
       expect(runs).toBe(2);
-      hosts[1].resolve();         // chain 2's continuation self-writes → run 2 (chain 2's one re-run)
+      expect(dep.peek()).toBe(10);
+      hosts[1].resolve();         // run 1's continuation self-writes → run 2 (a poll: allowed)
       await drain();
       expect(runs).toBe(3);
-      hosts[2].resolve();         // → chain 2 over its cap: dropped and reported
+      hosts[2].resolve();         // → run 3
+      await drain();
+      hosts[3].resolve();         // → run 4 (does not suspend)
       await drain();
     });
-    expect(runs).toBe(3);
-    expect(errs.length).toBe(1);
+    expect(runs).toBe(5);
+    expect(errs).toEqual([]);
     scope.dispose();
   });
 });
@@ -372,8 +389,8 @@ describe("provenance — only CYCLIC re-triggers are capped; runaway growth is b
     scope.dispose();
   });
 
-  test("R2-2 (runtime): a when that keeps registering new whens is stopped by the event budget — reported, no crash, page alive", async () => {
-    // mutation RED: WhenEvent.spend() always true (no budget) → "Maximum call stack size exceeded" or no report
+  test("R2-2 (runtime): a when that keeps registering new whens is stopped at ancestry depth 256 — reported as runaway growth, no crash, page alive", async () => {
+    // mutation RED: admit() without the depth check (RULED S447 Q7) → 15,000 runs (the guard), no report
     const scope = rt.root.child();
     const k = rt.cell(0);
     let runs = 0;
@@ -387,8 +404,8 @@ describe("provenance — only CYCLIC re-triggers are capped; runaway growth is b
     });
     expect(thrown).toBe(null);
     expect(runs).toBeGreaterThan(100);              // it ran: the budget is not a cycle cap
-    expect(runs).toBeLessThanOrEqual(5001);         // and it stopped (5,000 caused runs + the external one)
-    expect(errs.some((e) => /runaway growth — one change made more than 5000 when runs while creating \d+ new whens/.test(e))).toBe(true);
+    expect(runs).toBe(256);                         // and it stopped: the run at depth 257 never ran
+    expect(errs.some((e) => /runaway growth — one change's causal chain passed 256 when runs deep \(depth 257\) while creating 256 new whens/.test(e))).toBe(true);
     expect(errs.some((e) => /page state may now be inconsistent/.test(e))).toBe(true);
     // the page is alive: the next external change runs the registered whens again (within a fresh budget)
     const before = runs;
@@ -413,16 +430,29 @@ describe("provenance — only CYCLIC re-triggers are capped; runaway growth is b
     scope.dispose();
   });
 
-  test("a long NON-cyclic chain of distinct whens runs iteratively — no stack overflow below the budget", () => {
-    // mutation RED: flush() running Whens re-entrantly (no `whenRunning` guard) → RangeError at a few thousand
-    const scope = rt.root.child();
-    // (4,900 links: under the 5,000 caused-run budget; the re-entrant flush overflowed well below that)
-    const N = 4900;
-    const cells = Array.from({ length: N + 1 }, () => rt.cell(0));
-    for (let i = 0; i < N; i++) rt.when(scope, [cells[i]], () => cells[i + 1].set(1));
-    cells[0].set(1);
-    expect(cells[N].peek()).toBe(1);
-    scope.dispose();
+  test("a chain of distinct whens: 250 links complete; one longer than the depth limit stops at 256 — reported as too deep, not growth, no stack overflow", () => {
+    // mutation RED: admit() without the depth check → all 4,900 links run, no report
+    const chain = (N) => {
+      const scope = rt.root.child();
+      const cells = Array.from({ length: N + 1 }, () => rt.cell(0));
+      for (let i = 0; i < N; i++) rt.when(scope, [cells[i]], () => cells[i + 1].set(1));
+      const errs = [];
+      const saved = console.error;
+      console.error = (...a) => errs.push(a.join(" "));
+      try { cells[0].set(1); } finally { console.error = saved; }
+      let reached = 0;
+      for (let i = 0; i <= N; i++) if (cells[i].peek() === 1) reached = i;
+      scope.dispose();
+      return { reached, errs };
+    };
+    const short = chain(250);
+    expect(short.reached).toBe(250);
+    expect(short.errs).toEqual([]);
+    // RULED S447 Q7 cost: a legitimate chain of more than 256 distinct whens is stopped
+    const long = chain(4900);
+    expect(long.reached).toBe(256);
+    expect(long.errs.length).toBe(1);
+    expect(long.errs[0]).toMatch(/when chain too deep .* with no whens created/);
   });
 });
 
@@ -470,7 +500,7 @@ describe("review r3b — re-run order, runs-only budget, honest stop report", ()
   });
 
   test("F2: an async loader that creates 12,000 row whens in one continuation completes — `loading` ends false, no report", async () => {
-    // mutation RED: a When registration charging the event budget (r3) → the second continuation is dropped
+    // regression guard (r3 charged registrations and dropped the second continuation); the depth unit charges none
     const scope = rt.root.child();
     const page = rt.cell(0), loading = rt.cell(false), tickc = rt.cell(0);
     let doneSeen = 0;
@@ -490,21 +520,6 @@ describe("review r3b — re-run order, runs-only budget, honest stop report", ()
     scope.dispose();
   });
 
-  test("F3: a BOUNDED cascade over budget (n whens all writing their shared dep; no whens created) is reported as such — not as runaway growth", () => {
-    // mutation RED: reportStop ignoring `created` (every stop called "runaway growth")
-    const scope = rt.root.child();
-    const k = rt.cell(0);
-    let runs = 0;
-    for (let i = 0; i < 60; i++) rt.when(scope, [k], () => { runs++; k.set(k.peek() + 1); });
-    const errs = [];
-    const saved = console.error;
-    console.error = (...a) => errs.push(a.join(" "));
-    try { k.set(1); } finally { console.error = saved; }
-    expect(runs).toBeLessThanOrEqual(5060);
-    expect(errs.some((e) => /when cascade over budget .* no whens were created, so it is not runaway growth/.test(e))).toBe(true);
-    expect(errs.some((e) => /runaway growth — one change/.test(e))).toBe(false);
-    scope.dispose();
-  });
 
   test("F3: a cyclic re-trigger is capped per When per event, not per ancestry path (3 whens sharing a dep stay small)", () => {
     // mutation RED: admit() without the per-When cyclicRuns cap (per-path cap) → hundreds of runs at n=6
@@ -726,6 +741,102 @@ describe("the suspendable task layer (Core Stmt.Suspend)", () => {
     expect(log).toEqual(["sync"]);
     await tick();
     expect(log).toEqual(["sync", 7]);
+    scope.dispose();
+  });
+});
+
+// RULED S447 Q7: the backstop's unit is ancestry DEPTH (provisional 256), not a
+// run count. Depth = the LONGEST causal chain of runs reaching a run (every
+// write that queued it counts), so breadth cannot hide depth.
+describe("RULED S447 Q7 — the depth backstop: legitimate breadth and length run; runaways stop fast", () => {
+  const quiet = (fn) => {
+    const errs = [];
+    const saved = console.error;
+    console.error = (...a) => errs.push(a.join(" "));
+    try { fn(); } finally { console.error = saved; }
+    return errs;
+  };
+
+  test("a caused write watched by 5,100 row whens: every row runs, the downstream when runs, no report", () => {
+    // regression guard: r3b's 5,000-run budget stopped this at row 5,000
+    const scope = rt.root.child();
+    const page = rt.cell(0), sel = rt.cell(-1), after = rt.cell(0);
+    let rowRuns = 0, afterRuns = 0;
+    rt.when(scope, [page], () => { for (let i = 0; i < 5100; i++) rt.when(scope, [sel], () => rowRuns++); sel.set(0); after.set(1); });
+    rt.when(scope, [after], () => afterRuns++);
+    const errs = quiet(() => page.set(1));
+    expect(rowRuns).toBe(5100);
+    expect(afterRuns).toBe(1);
+    expect(errs).toEqual([]);
+    scope.dispose();
+  });
+
+  test("a 12,000-update continuation stream from one change: the observer sees every update, no report", async () => {
+    // regression guard: a run count stops a long stream; its depth stays at 2
+    const scope = rt.root.child();
+    const go = rt.cell(0), st = rt.cell(0);
+    let seen = 0;
+    const N = 12000;
+    rt.when(scope, [go], (t) => {
+      const step = (i) => { st.set(i); if (i < N) rt.suspend(t, 0, () => step(i + 1)); };
+      rt.suspend(t, 0, () => step(1));
+    });
+    rt.when(scope, [st], () => seen++);
+    const errs = [];
+    const saved = console.error;
+    console.error = (...a) => errs.push(a.join(" "));
+    try { go.set(1); for (let i = 0; i < N + 50; i++) await null; await tick(); } finally { console.error = saved; }
+    expect(seen).toBe(N);
+    expect(st.peek()).toBe(N);
+    expect(errs).toEqual([]);
+    scope.dispose();
+  });
+
+  test("a stopped runaway's leftovers, re-triggered by the next click, are stopped again at depth 256 (breadth does not hide depth)", () => {
+    // mutation RED: a queued when keeping the depth of its least-cyclic (external) cause, not the deepest → tens of thousands of whens, no report
+    const scope = rt.root.child();
+    const k = rt.cell(0);
+    let runs = 0;
+    const mk = () => rt.when(scope, [k], () => { runs++; if (rt.stats.whens < 20000) { k.set(k.peek() + 1); mk(); } });
+    mk();
+    const e1 = quiet(() => k.set(1));
+    expect(runs).toBe(256);
+    expect(e1.some((e) => /runaway growth/.test(e))).toBe(true);
+    const before = runs;
+    const e2 = quiet(() => k.set(k.peek() + 1));
+    expect(runs - before).toBe(256);
+    expect(rt.stats.whens).toBeLessThan(1000);
+    expect(e2.some((e) => /runaway growth — one change's causal chain passed 256 when runs deep/.test(e))).toBe(true);
+    scope.dispose();
+  });
+
+  test("a dense cycle — 60 whens all writing the dep they all watch — stops at depth 256, fast, reported as too deep (not growth)", () => {
+    // mutation RED: least-cyclic depth (as above) → exponentially many runs (n=60: millions)
+    const scope = rt.root.child();
+    const k = rt.cell(0);
+    let runs = 0;
+    for (let i = 0; i < 60; i++) rt.when(scope, [k], () => { runs++; if (runs < 100000) k.set(k.peek() + 1); });
+    const t0 = performance.now();
+    const errs = quiet(() => k.set(1));
+    expect(performance.now() - t0).toBeLessThan(1000);
+    expect(runs).toBe(256);
+    expect(errs.some((e) => /when chain too deep .* with no whens created/.test(e))).toBe(true);
+    scope.dispose();
+  });
+
+  test("⚑ OPEN (Q8): a 300-cycle poll is stopped at 256 polls — measured and pinned until the ruling on a polling allowance", async () => {
+    const scope = rt.root.child();
+    const t = rt.cell(0);
+    let runs = 0;
+    rt.when(scope, [t], (task) => { runs++; rt.suspend(task, 1, () => { if (t.peek() < 300) t.set(t.peek() + 1); }); });
+    const errs = [];
+    const saved = console.error;
+    console.error = (...a) => errs.push(a.join(" "));
+    try { t.set(1); for (let i = 0; i < 2000; i++) await null; await tick(); } finally { console.error = saved; }
+    expect(runs).toBe(256);
+    expect(t.peek()).toBe(257);
+    expect(errs.length).toBe(1);
+    expect(errs[0]).toMatch(/when chain too deep/);
     scope.dispose();
   });
 });

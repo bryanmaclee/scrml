@@ -193,9 +193,10 @@ describe("s446 F2 — two whens writing each other's deps (a cycle SPEC is silen
 
   // review round 3, R2-2: a row `when` that grows its own collection creates a NEW when per run —
   // never a cycle by provenance. It used to recurse to "Maximum call stack size exceeded" (4189
-  // whens, an uncaught page error, no diagnostic). Now the per-event runaway budget stops it.
+  // whens, an uncaught page error, no diagnostic). Now the ancestry-depth backstop (RULED S447 Q7,
+  // provisional 256) stops it.
   test("R2-2: a row `when` that grows its own <each> — bounded by the runaway budget, reported loudly (one page error), no crash, page alive", async () => {
-    // mutation RED: WhenEvent.spend() always true (no budget)
+    // mutation RED: admit() without the depth check (RULED S447 Q7) → the page never stops growing
     const src = P(`    type Row:struct = { id: int }\n    <rows:Row[replace, free]=([{ id: 1 }])/>\n    <let k:int=0/>\n    <let hits:int=0/>\n    <let pokes:int=0/>\n    function grow() {\n        @k = @k + 1\n        @rows.push({ id: @k + 1 })\n    }`,
       `        <ul><each in=@rows key=@.id as r><li>\${ when @k changes {\n            @hits = @hits + 1\n            grow()\n        } }</li></each></ul>\n        <p class="out">\${@hits}</p>\n        <p class="pokes">\${@pokes}</p>\n        <button onclick=(@k = @k + 1)>go</button>\n        <button onclick=(@pokes = @pokes + 1)>poke</button>`);
     const { rt } = await loadProgram(coreOf(src), "when-runaway");   // compiles clean (no diagnostic governs it — DESIGN §5 (7))
@@ -207,16 +208,22 @@ describe("s446 F2 — two whens writing each other's deps (a cycle SPEC is silen
     // exactly ONE page error: the backstop's own loud report (r3b F2) — no crash, no stack overflow
     const pageErrs = takePageErrors().map((e) => String(e && e.message ? e.message : e));
     expect(pageErrs.length).toBe(1);
-    expect(pageErrs[0]).toMatch(/runaway growth — one change made more than 5000 when runs .* page state may now be inconsistent/);
-    expect(errs.some((e) => /runaway growth — one change made more than 5000 when runs/.test(e))).toBe(true);
+    expect(pageErrs[0]).toMatch(/runaway growth — one change's causal chain passed 256 when runs deep .* page state may now be inconsistent/);
+    expect(errs.some((e) => /runaway growth — one change's causal chain passed 256 when runs deep/.test(e))).toBe(true);
     const hits = Number($("p.out").textContent);
-    expect(hits).toBeGreaterThan(100);
-    expect(hits).toBeLessThanOrEqual(5001);
-    expect(rt.stats.whens).toBeLessThanOrEqual(5002);
-    // the page is alive: the DOM agrees with the state, and an unrelated handler still runs and renders.
-    // (A second `go` is bounded the same way — the runtime test covers a second event; here it would
-    // cost tens of seconds of <each> reconciles over the leftover rows: the program's own cost, not the backstop's.)
+    expect(hits).toBe(256);
+    expect(rt.stats.whens).toBe(257);
+    // the page is alive: the DOM agrees with the state; a SECOND `go` — whose leftover row whens all
+    // re-run — is stopped at depth 256 again (depth = the longest causal chain, so breadth cannot hide
+    // it); and an unrelated handler still runs and renders.
     expect(document.querySelectorAll("li").length).toBe(rt.stats.whens);
+    console.error = () => {};
+    try { btn("go").dispatchEvent(new window.MouseEvent("click", { bubbles: true })); } finally { console.error = saved; }
+    const pageErrs2 = takePageErrors().map((e) => String(e && e.message ? e.message : e));
+    expect(pageErrs2.length).toBe(1);
+    expect(pageErrs2[0]).toMatch(/runaway growth — one change's causal chain passed 256 when runs deep/);
+    expect(rt.stats.whens).toBe(513);
+    expect(document.querySelectorAll("li").length).toBe(513);
     click(btn("poke"));
     expect($("p.pokes").textContent).toBe("1");
     expect(takePageErrors()).toEqual([]);
