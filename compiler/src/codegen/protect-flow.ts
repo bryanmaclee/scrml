@@ -2732,7 +2732,7 @@ class FlowAnalysis {
         // non-enumerable marker is dropped by the next spread) — L4.
         const desc = args[2] ?? clean();
         // A getter / setter / value function runs with `this` = the target (6e, round 7).
-        const got = this.storeFns(desc.fns, args[0] ?? clean(), node, fn, this.literalKey(node.arguments[1], scope), true);
+        const got = this.storeDescriptors(desc, args[0] ?? clean(), node, fn, this.literalKey(node.arguments[1], scope));
         const written = anyDepth(containerOf(join(desc, got, keyOnly(args[1] ?? clean()))));
         this.writeThrough(node.arguments[0], args[0] ?? clean(), written, scope);
         if (this.literalKey(node.arguments[1], scope) === null) this.markerRemoved(node.arguments[0], args[0] ?? clean(), node, fn, scope);
@@ -2744,7 +2744,7 @@ class FlowAnalysis {
         // drop a column marker (L4). A function among them runs with `this` = the target (6e).
         const got = path === "Reflect.set"
           ? this.storeFns(ownOf(args[2] ?? clean()), args[0] ?? clean(), node, fn, this.literalKey(node.arguments[1], scope))
-          : this.storeFns((args[1] ?? clean()).fns, args[0] ?? clean(), node, fn, null, true);
+          : this.storeDescriptors(args[1] ?? clean(), args[0] ?? clean(), node, fn, null);
         const written = anyDepth(path === "Object.defineProperties"
           ? containerOf(join(args[1] ?? clean(), got))
           : containerOf(join(keyOnly(args[1] ?? clean()), args[2] ?? clean(), got)));
@@ -3156,6 +3156,18 @@ class FlowAnalysis {
   }
 
   /**
+   * THE descriptor path (r8c): a property-descriptor (or a map of them) applied to
+   * `target` — `Object.defineProperty` / `Reflect.defineProperty` (one key),
+   * `Object.defineProperties` and `Object.create`'s second argument (any key).
+   * Every function a descriptor holds — `get`, `set`, `value` — is stored as an
+   * accessor would be: `this` = the target, invoked as the language would, and a
+   * function a getter RETURNS is stored under the key in its own right.
+   */
+  private storeDescriptors(descs: Taint, target: Taint, node: any, fn: Instance | null, key: string | null): Taint {
+    return this.storeFns(descs.fns, target, node, fn, key, true);
+  }
+
+  /**
    * A COPY of an object's properties (`{ ...src }`, `Object.assign(o, src)`)
    * keeps each function under the key it had: it adds no new hook, but every
    * hook it copies now runs with `this` = the copy (`{ ...proto, secret: h }`
@@ -3355,7 +3367,20 @@ class FlowAnalysis {
     if (path === "Object.create") {
       // A fresh object whose prototype IS `p`: it reads through to `p`'s class —
       // `p`'s own properties are read off it at depth 0 (round 8: any depth).
-      return lenDefault(anyDepth(join(...args.map((a) => containerOf(a)))));
+      const proto = containerOf(args[0] ?? clean());
+      if (!args[1]) return lenDefault(anyDepth(proto));
+      // r8c: the second argument is a property-DESCRIPTOR map, exactly as for
+      // `Object.defineProperties` — its getters / setters / values are stored on
+      // the new object (an allocation cell) through the one descriptor path, so
+      // a getter-returned `toString` is a hook with `this` = the object. Round 8
+      // read it as plain data and, with coercions no longer opaque, served
+      // `Object.create({}, { toString: { get: () => function () { s = this.h } } … })`
+      // (S239 re-review, measured over HTTP; base rejected it).
+      const cell = this.allocCell("create", node);
+      const obj: Taint = { ...clean(), refs: new Set([cell]) };
+      const got = this.storeDescriptors(args[1], obj, node, fn, null);
+      this.writeCell(cell, anyDepth(containerOf(join(args[1], got))));
+      return lenDefault(anyDepth(join(proto, this.withCellContents(obj))));
     }
     if (path === "Object.getPrototypeOf" || path === "Reflect.getPrototypeOf") {
       return lenDefault(anyDepth(elemOf(args[0] ?? clean())));

@@ -954,6 +954,22 @@ describe("analyzeProtectFlow — r8b: pre-existing HIGHs closed (callback to a g
   });
 });
 
+describe("analyzeProtectFlow — r8c: Object.create's descriptor map goes through the descriptor path", () => {
+  test("a getter-returned hook in Object.create's descriptors is a hook (introduced by round 8, re-review measured)", () => {
+    const G = "{ get: function () { return function () { s = this.h; return ''; }; } }";
+    for (const body of [
+      `const o = Object.create({}, { toString: ${G}, h: { value: u.passwordHash } }); const z = String(o); return { v: s };`,
+      `const o = Object.create(null, { toString: ${G}, h: { value: u.passwordHash } }); const z = String(o); return { v: s };`,
+      `const o = Object.create({}, { toString: ${G} }); o.h = u.passwordHash; const z = String(o); return { v: s };`,
+      `const d = { toString: ${G}, h: { value: u.passwordHash } }; const o = Object.create({}, d); const z = String(o); return { v: s };`,
+      `const o = Object.create({}, { m: ${G}, h: { value: u.passwordHash } }); o.m(); return { v: s };`,
+    ]) {
+      expect([body, leakCols(r8("let s = ''; " + body)).length > 0]).toEqual([body, true]);
+    }
+    expect(leakCols(r8(`let s = ''; const o = Object.create({}, { toString: ${G}, h: { value: u.name } }); const z = String(o); return { v: s, id: u.id };`))).toEqual([]);
+  });
+});
+
 describe("analyzeProtectFlow — round 8: the round-7 performance cliff", () => {
   // Review-measured on round 7: a 240-object `toString` chain took 13.7 s
   // (0.47 s on base); a shared `this`-writing method on 240 receivers 40.5 s.
