@@ -51,3 +51,63 @@ not regressed. Flag for the PA: three §34 rows now read FALSE-CLAIM in the cens
 | parser-conformance-stmt.test.js | KEEP | `parseProgram` — defer lint + forbidden-JS in production |
 | parser-conformance.test.js | DELETE | acorn vs acorn-stub; never touched the native parser |
 | parser-conformance-within-node.test.js | DELETE | the parity test the ruling names |
+
+## Batch 3 — retire the full-pipeline `--parser=scrml-native` flag, the flip harness, and the flag-only walkers; sort the flag-driven tests
+
+Code:
+- compiler/src/api.js: TAB routing branch + native forbidden-JS branch + I-PARSER-NATIVE-SHADOW block removed; imports of nativeParseFile / the two walkers dropped. `parser` option kept ONLY to throw a retirement error on any non-null value (a caller asking for the native front end is told, not silently given the default one).
+- compiler/src/commands/compile.js: `--parser` → retirement error (exit 1); help line + plumbing removed. compiler/src/cli.js: help line removed.
+- DELETE compiler/src/native-walker/attrvalue-exprnode-walker.ts (226) + exprtext-backfill-walker.ts (200): their only caller was the flag branch in api.js.
+- DELETE scripts/native-parser-flip-harness.ts (617): the M6 flip meter (patches the api.js flag; S402 meter ruled VOID).
+- scripts/facts.ts: comment corrected (native-parser is a frozen impl#1 component; flag retired). Count definition unchanged.
+- NEW compiler/tests/helpers/native-ast.js (nativeAst / liveAst / findNodes / withoutPositions / errorsOf) for the re-points.
+- NEW compiler/tests/unit/parser-flag-retired.test.js (3 tests: api throws; null/absent accepted; CLI exits 1 with the message, both flag shapes).
+
+### Bite checks (empirical, not assumed)
+- emit-each's exprNode branch broken on purpose → native-each-promotion stayed GREEN. Finding: impl#1 NEVER routes an each-bearing body through the native parser (emit-match.ts and component-expander.ts both fall back to splitBlocks+buildAST on `<each`). The native `<each>` promotion and the emit-each `expr:""`+exprNode path were reachable only through the retired flag. Comments in native-each-promotion / engine-statechild-closer-stack corrected to say so.
+- translate-stmt.js makeSqlStmt `kind:"sql"` broken on purpose → the new component-body SQL test (m65-b4) went RED on W-CG-001. Confirms a component body with `?{}` IS re-parsed natively in production and that test guards it.
+
+### The 29 flag-driven files (pack grep) + 10 more found by `["scrml-native"` variable use
+| file | disposition | reason |
+|---|---|---|
+| browser/each-as-tuple-destructure-d2c.browser | RE-POINT | loop → default only |
+| browser/each-contextual-sigil-native.browser | DELETE | native-only render canary for `<each>` `@.`; impl#1 never routes each-bearing bodies natively; the `@.` lexer/bridge stays tested directly (parser-conformance-each-contextual-sigil §1–§3) |
+| integration/import-host | RE-POINT | PARSERS → default; the native end-to-end case → `validateHostImports` on the `nativeParseFile` tree + a default-pipeline case. DIVERGENCE found: default fires only E-IMPORT-003 (no E-IMPORT-008) for an in-function `import:host` on a disabled project — filed, not fixed |
+| integration/m6.4a-native-p2-form1 | RE-POINT | default pipeline; file-level export is never native in impl#1 |
+| integration/m65-b4-sql-leak | RE-POINT | (1) native tree promotes bare + chained `?{}` to `kind:"sql"`; (2) NEW production-path case: component body with `?{}` (bite-verified); (3) default top-level shapes |
+| integration/m6-5-parser-workarounds-noop-under-native | DELETE | M6 migration evidence only (workarounds are no-ops under the flag) |
+| integration/tilde-snapshot-codegen-fix | KEEP | comment mention only |
+| parser-conformance-corpus | RE-POINT | see batch 2 |
+| parser-conformance/dual-pipeline-canary.js | DELETE | see batch 2 |
+| parser-conformance-each-contextual-sigil | RE-POINT | see batch 2 |
+| unit/class-dynamic-import-reject | RE-POINT | default pipeline decides this family on the native tree (production); native arm + native-only meta/quoted cases dropped; block-body diagnostic case → `nativeParseFile` |
+| unit/defer-statement | RE-POINT | §8 live==native parity → default compile; native defer parse already tested directly in the file |
+| unit/export-state-cell-reject | RE-POINT | native arm dropped (file-level export) |
+| unit/forbidden-js-attr-callref-placement | RE-POINT | native arm dropped; default path runs nativeForbiddenJsAttrDiagnostics |
+| unit/lifecycle-field-comment-leak | RE-POINT | parity describe dropped (fix is in live collectBracedBody) |
+| unit/m67-c1-component-parity | RE-POINT | default only; direct `nativeParseFile` raw tests kept |
+| unit/m67-c2-codegen-output-parity | RE-POINT | §1 → native tree (no cascade; state-decl{isServer} equals default's); §2–§4 default |
+| unit/multistatement-line-call-drop | KEEP | comment mention only |
+| unit/native-attrvalue-exprnode-population | DELETE | tests a walker whose only caller was the flag |
+| unit/native-blockstub-verbatim-body | RE-POINT | native tree: raw arm bodies + lambda escape-hatch carry every statement; default emit |
+| unit/native-each-promotion | RE-POINT | §1–§7, §11 direct kept; §8–§10 compile → default (see bite check) |
+| unit/native-engine-substrate-instance-share | RE-POINT | native tree: machineDecls entries ARE the nodes engine-decl instances (outer + nested); default substrate emit |
+| unit/native-exprtext-backfill | DELETE | tests a walker whose only caller was the flag |
+| unit/native-lift-markup-closetag-span | RE-POINT | `nativeParseFile` clean per shape + existing tree tests; default compile |
+| unit/native-map-literal-d2b | KEEP | direct lex/parseExpr/translateExpr |
+| unit/native-reactive-write-deepset-mutation | RE-POINT | native tree: node kinds + structured fields equal the default parser's |
+| unit/native-tablefor-struct-field-drop | RE-POINT | native type-decl raw byte-equals default's; default tableFor columns |
+| unit/s441-declared-prose-body | RE-POINT | loop → default |
+| unit/struct-fn-field-reject | RE-POINT | parity describe dropped |
+| unit/async-await-reject | RE-POINT | native arm → `nativeParseFile` codes |
+| unit/each-as-tuple-destructure-d2c | RE-POINT | loops → default; §2 direct native capture kept |
+| unit/engine-statechild-closer-stack | RE-POINT | loop → default |
+| unit/native-destructured-param-structuring | RE-POINT | native params structurally equal default's |
+| unit/native-lex-regex-after-statement-closer | RE-POINT | native arm dropped; default decides on native lexer |
+| unit/native-vardecl-type-annotation-thread | RE-POINT | native const/let typeAnnotation equals default's; E-CONTRACT-001 on default |
+| unit/s441-coverage-invariant | RE-POINT | loops → default; native-only cases → `nativeParseFile` |
+| unit/s441-review-fixes | RE-POINT | loops → default; native tail case → native tree |
+| unit/s441-review-r4 | RE-POINT | loop → default; #7 → `nativeParseFile` |
+| unit/s441-review-r5 | RE-POINT | loops → default; D / N1 / R1 native fail-closed cases → `nativeParseFile` |
+
+Full gate after batch 3 (unit+integration+conformance+root glob): 29425 pass · 58 skip · 12 todo · 0 fail · 1419 files.

@@ -24,6 +24,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
+import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { isStdlibFile } from "../../src/validators/lint-async-user-source.ts";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,7 +32,7 @@ import { join, resolve } from "node:path";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 /** Compile a one-file program and return the async/await NOT-IN-SCRML codes. */
-function rejectCodes(src, parser) {
+function rejectCodes(src) {
   const dir = mkdtempSync(join(tmpdir(), "aareject-"));
   const f = join(dir, "case.scrml");
   writeFileSync(f, src);
@@ -40,10 +41,17 @@ function rejectCodes(src, parser) {
     outputDir: join(dir, "dist"),
     write: false,
     log: () => {},
-    ...(parser ? { parser } : {}),
   });
   const diags = [...(r.errors || []), ...(r.warnings || [])];
   return diags.map((d) => d.code).filter((c) => /-(ASYNC|AWAIT|FOR-AWAIT)-NOT-IN-SCRML$/.test(c));
+}
+
+/** The same codes from the native parser directly — `nativeParseFile` is the
+ *  entry impl#1 calls to re-parse component bodies, `^{}` emit and `<match>`
+ *  arm markup, and component-expander passes its errors through unchanged. */
+function nativeRejectCodes(src) {
+  const r = nativeParseFile("/aareject/case.scrml", src);
+  return (r.errors || []).map((d) => d.code).filter((c) => /-(ASYNC|AWAIT|FOR-AWAIT)-NOT-IN-SCRML$/.test(c));
 }
 
 // ---------------------------------------------------------------------------
@@ -137,7 +145,9 @@ describe("§13.1 stdlib carve-out — isStdlibFile predicate", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Native-parser parity — the default path now matches `--parser scrml-native`
+// Native-parser parity — the default path matches the native parser.
+// S449 re-point: the native arm used the retired full-pipeline
+// `--parser=scrml-native` flag; it now calls `nativeParseFile` directly.
 // ---------------------------------------------------------------------------
 
 describe("§19.9.8 default ↔ native parser parity", () => {
@@ -148,8 +158,8 @@ describe("§19.9.8 default ↔ native parser parity", () => {
   ];
   for (const [label, src, expected] of cases) {
     test(`${label}: both parsers fire ${expected}`, () => {
-      expect(rejectCodes(src, undefined)).toContain(expected);
-      expect(rejectCodes(src, "scrml-native")).toContain(expected);
+      expect(rejectCodes(src)).toContain(expected);
+      expect(nativeRejectCodes(src)).toContain(expected);
     });
   }
 });
