@@ -78,3 +78,13 @@ Why (a): one spelling per meaning. `session.x` already exists, is bound by the s
 - Test: compiler/tests/integration/session-store-sqlite-defaults.test.js (3 tests; 2 fail on the base emitter). 123 existing session-store tests pass.
 - Locus emit-server.ts `_anySessionWrite` branch: HELD.
 - Side observation (NOT filed, out of scope): `<program auth="optional" csrf="off">` still emits the baseline double-submit gate on its session-write route (a tokenless POST -> 403). It errs in the fail-closed direction, but `csrf="off"` is documented as the opt-out under `auth=` (§40.2). Worth a PA look.
+
+## Item 6 — g-session-destroy-route-has-no-csrf-check — 2026-10-02T14:45-06:00
+
+- VERIFIED LIVE on 2d6d8cd43 (base emitter, `<program auth="required">`, shipped _server.js, seeded in-memory session): forged destroy (cookie only) -> 200, record deleted; wrong token -> 200, deleted.
+- GOVERNING: §40.2 "When a `<program>` declares `auth=` and carries no `csrf=` attribute, the compiler SHALL treat it exactly as if it declared `csrf="auto"`"; §39.2.3 csrf="auto" generates "A server-side validator that checks the `X-CSRF-Token` header on state-mutating routes and returns `403 Forbidden` if the token is missing or invalid".
+- FIX (fits cleanly; both halves): server — destroy handler under csrf="auto" runs the synchronizer check (403 + token cookie) when a record exists; client — `session.destroy()` sends meta/cookie token, retries once on 403 with the planted cookie token. REFINED vs the gap text: retry inlined in the projection (not via `_scrml_fetch_with_csrf_retry`) because the helper is per-file and the build mounts ONE destroy handler app-wide (first module wins).
+- AFTER: forged -> 403 kept; wrong -> 403; correct -> 200 deleted; no-record cookie -> 200; emitted destroy() from a stale-meta page -> 403 then 200, logged out. csrf="off" -> ungated.
+- Direction: semantics-changed (runtime refusal of a token-less destroy). No compile-result change. Did not touch the in-memory Map line.
+- Test: compiler/tests/integration/session-destroy-csrf.test.js (6; 3 fail on base). 154 related tests pass; conformance 1204/1212 + 8 xfail.
+- Known residual (pre-existing, not introduced): which unit's destroy handler is mounted is first-module-wins; in an app mixing csrf="auto" and csrf="off" units the gate depends on module order. The client works either way.

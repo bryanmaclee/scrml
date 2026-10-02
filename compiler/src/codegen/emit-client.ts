@@ -2497,11 +2497,32 @@ export function generateClientJs(ctx: CompileContext): string {
     lines.push("    }");
     lines.push("    const session = {");
     lines.push("      get current() { return _scrml_session; },");
+    // §40.2 / §39.2.3 (S449, g-session-destroy-route-has-no-csrf-check) — the
+    // destroy route is CSRF-gated under `csrf="auto"`, so logout carries the
+    // session's synchronizer token and retries ONCE on a 403 (whose Set-Cookie
+    // plants the current token), the same shape as `_scrml_fetch_with_csrf_retry`.
+    // Self-contained ON PURPOSE rather than a call to that helper: the helper is
+    // emitted only for a file with a mutating server fn and only where csrf is on,
+    // but this projection is a window singleton any auth page's script may build,
+    // and the build mounts ONE destroy handler for the whole app (first module
+    // wins, commands/build.js) — so logout must work whichever handler is mounted,
+    // gated or not. First try: the first-paint `<meta name="csrf-token">`, else the
+    // readable `scrml_csrf` cookie. Retry: the cookie the 403 just planted (the meta
+    // may be stale), copied into the meta so later mutations agree.
     lines.push("      async destroy() {");
-    lines.push("        await fetch('/_scrml/session/destroy', {");
+    lines.push("        const _scrml_cookie_tok = () => { const m = document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/); return m ? decodeURIComponent(m[1]) : ''; };");
+    lines.push("        const _scrml_meta = document.querySelector ? document.querySelector('meta[name=\"csrf-token\"]') : null;");
+    lines.push("        const _scrml_post = (tok) => fetch('/_scrml/session/destroy', {");
     lines.push("          method: 'POST',");
     lines.push("          credentials: 'include',");
+    lines.push("          headers: tok ? { 'X-CSRF-Token': tok } : {},");
     lines.push("        });");
+    lines.push("        let _scrml_resp = await _scrml_post((_scrml_meta && _scrml_meta.getAttribute('content')) || _scrml_cookie_tok());");
+    lines.push("        if (_scrml_resp.status === 403) {");
+    lines.push("          const _scrml_fresh = _scrml_cookie_tok();");
+    lines.push("          if (_scrml_meta && _scrml_fresh) _scrml_meta.setAttribute('content', _scrml_fresh);");
+    lines.push("          _scrml_resp = await _scrml_post(_scrml_fresh);");
+    lines.push("        }");
     lines.push("        _scrml_session = null;");
     lines.push(`        window.location.href = ${JSON.stringify(loginRedirect)};`);
     lines.push("      },");
