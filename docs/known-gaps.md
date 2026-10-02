@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 235 | 5 |
-| MED | 463 | 0 |
-| LOW | 217 | 0 |
+| HIGH | 234 | 5 |
+| MED | 463 | 1 |
+| LOW | 221 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -21923,7 +21923,11 @@ The S447 rulings are written into SPEC §6.7.4 (`<effect>`), §6.8.4 (`reset-on=
   `renders` or in use-site slot content (which scope owns it), a whole-instance dependency, `reset-on=` on a
   declaration field (per-instance resets, ⚑ OPEN §6.8.4), an effect in a function / handler body (no §34 code names
   it).
-- **⚑ PA question — may an initializer write reactive state?** A declaration initializer (a `let` seed) may call a
+- **~~⚑ PA question — may an initializer write reactive state?~~ RULED S449 item 3 = no (SPEC §6.15); built by
+  s449-bootstrap-no-write-formulas** — every initializer / formula / render position is judged at its source
+  (E-VALUE-WRITES-STATE / E-VALUE-WRITE-UNPROVEN); the reset-value E-BOOTSTRAP-UNSUPPORTED is removed (superseded,
+  §6.15); the construction / formula read routes stay in the effect summary as defence in depth, their echo dropped
+  while the root is reported. Original text: A declaration initializer (a `let` seed) may call a
   `function` that writes another cell, and the bootstrap accepts it; SPEC is silent. It is how an effect's READ of a
   lazily-constructed shared instance wrote state, and how a `reset-on=` reset value re-wrote its own trigger in an
   endless loop (both measured, both closed: the first as E-EFFECT-WRITES-STATE through the construction, the second
@@ -21936,8 +21940,16 @@ The S447 rulings are written into SPEC §6.7.4 (`<effect>`), §6.8.4 (`reset-on=
   the outside world (a host call); the bootstrap's host surface is `Date.now()` alone, so no portable runtime case
   pins an effect run yet (the bootstrap's own e2e counts clock reads).
 
-### g-bootstrap-render-writer-call-hangs — bootstrap: a compile-clean render self-write (`<p>${g(@a)}</p>` where `g()` writes `@a`; any render↔render write cycle) now HANGS synchronously at mount — `NEW S449; MED; open`
-<!-- @gap id=g-bootstrap-render-writer-call-hangs sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(render positions — interpolations / attribute values — may call a `function` that writes a cell; nothing refuses it)+compiler/self-host-v2/slice-m1/runtime/runtime.js(flush — the s449 `flushing` guard turns the old recursion into an endless loop) prov=review:S449-effect-rereview -->
+### g-bootstrap-render-writer-call-hangs — bootstrap: a compile-clean render self-write (`<p>${g(@a)}</p>` where `g()` writes `@a`; any render↔render write cycle) now HANGS synchronously at mount — `NEW S449; MED; RESOLVED S449 (s449-bootstrap-no-write-formulas)`
+<!-- @gap id=g-bootstrap-render-writer-call-hangs sev=MED status=resolved resolved-by=s449-bootstrap-no-write-formulas locus=compiler/self-host-v2/analyze.scrml(render positions — interpolations / attribute values — may call a `function` that writes a cell; nothing refuses it)+compiler/self-host-v2/slice-m1/runtime/runtime.js(flush — the s449 `flushing` guard turns the old recursion into an endless loop) prov=review:S449-effect-rereview -->
+
+**RESOLVED S449 (s449-bootstrap-no-write-formulas) — rejected at compile time.** SPEC §6.15 (S449 item 3): a render
+expression is a value position and may not write. The bootstrap now judges every render position (interpolation,
+every non-handler / non-`bind:` attribute value, `if=`, `<each in=>` / `key=`, in the program body, a `renders`, a
+state-child body) by the shared write summary: `<p>${g(@a)}</p>` with `g` writing `@a` is **E-VALUE-WRITES-STATE**
+naming `g() → @a`; a render ↔ render cycle is rejected at both holes. Evidence: `compiler/self-host-v2/slice-m4/
+value-positions.test.js` "closes g-bootstrap-render-writer-call-hangs" (the writer is rejected; its write-free twin
+mounts and renders `0`); conformance `reactive/no-write-interp-pos`. No runtime counter was added (the S447 posture).
 
 A render position may call a writer: `<p>${g(@a)}</p>` with `function g(x) { @a = @a + 1 … }` compiles clean, and
 so does any cycle where one render effect writes a cell another render effect (or itself) reads. **Before s449**
@@ -22072,3 +22084,56 @@ Re-executed on `ba37b1a10`: `<program auth="optional"><button onclick=session.de
 ### g-auth-optional-csrf-off-still-emits-baseline-double-submit — `<program auth="optional" csrf="off">` still gates its session-write route with the baseline double-submit check — `NEW S449; LOW; open`
 <!-- @gap id=g-auth-optional-csrf-off-still-emits-baseline-double-submit sev=LOW status=open locus=compiler/src/codegen/emit-server.ts(useBaselineCsrf predicate — no auth-middleware entry for auth="optional", so the no-auth baseline arm applies) prov=review:S449-auth-review -->
 Observed by the change agent on `2d6d8cd43` while building item 5: a two-unit app with `<program auth="optional" csrf="off">` whose `login()` calls `session.set(...)` emitted `_scrml_ensure_csrf_cookie` / `_scrml_validate_csrf` on the login route, and a tokenless POST answered 403. §40.2 / §39.2.3 name `csrf="off"` as the opt-out under `auth=`. This errs in the fail-closed direction, but the declared opt-out is not honoured. Likely the same root as the entry above: `auth="optional"` produces no auth-middleware entry, so the unit falls to the no-auth baseline arm.
+
+## §S449-bootstrap-no-write-formulas — SPEC §6.15 "Value Positions Do Not Write Reactive State" in the bootstrap (2026-10-02; ruling:user-voice-scrml.md S449 item 3 — "your recs."; SPEC §6.15 read on `wip/s449-spec-lifecycle-rulings` @ a8aba4380; change `docs/changes/s449-bootstrap-no-write-formulas/`)
+
+### g-bootstrap-value-writes-state-owed — bootstrap: SPEC §6.15 value positions may not write reactive state (E-VALUE-WRITES-STATE / E-VALUE-WRITE-UNPROVEN) — `NEW S449; MED; RESOLVED S449 (s449-bootstrap-no-write-formulas)`
+<!-- @gap id=g-bootstrap-value-writes-state-owed sev=MED status=resolved resolved-by=s449-bootstrap-no-write-formulas locus=compiler/self-host-v2/analyze.scrml(valuePositions / valueDiags; effectPass) prov=ruling:user-voice-scrml.md-S449-item-3-"your-recs" -->
+
+**RESOLVED for every value position the bootstrap has.** `valuePositions` collects §6.15's list as the bootstrap has
+it — (1) initializers: a program cell's own value, a user declaration's own value, every attribute-field default and
+child-field initializer (any depth), a use-site construction value; (2) derived formulas (a locked initializer that
+reads cells — a call counts, as `valueReads` decides the mode); (3) render expressions: every markup interpolation and
+every markup attribute value except `on*=` / `bind:` / `as=` (decided by NAME — a refused attribute is still judged),
+in the program body, a `renders`, a state-child body. Each is scanned with the effect rule's `scanValue` and judged
+against the SAME `fnSummaries` fixed point: a write or write chain → E-VALUE-WRITES-STATE naming the position, the
+cell, the chain and §6.15's fix by shape (initializer / formula / render); an unresolvable or unsummarized call →
+E-VALUE-WRITE-UNPROVEN. `scanExpr` now records a write at any depth (an interpolation has no statement). Not value
+positions, per §6.15: handlers, `bind:`, function bodies, `<effect>` bodies (skipped), and a body-top `${ }` (a logic
+block of items in the bootstrap — never an interpolation). **Defence in depth (§6.15: "the check stays"):** the effect
+summary still follows reads into formulas / constructions; a chain through one only echoes the value position's own
+report, so it is dropped while a root is reported, and fires if the value-position check ever misses one (bite:
+value-position check off → the effect-hole programs report E-EFFECT-WRITES-STATE through the formula / construction).
+**Removed:** the reset-value E-BOOTSTRAP-UNSUPPORTED refusal (superseded, §6.15). Evidence:
+`compiler/self-host-v2/slice-m4/value-positions.test.js` (39 — every position class writer / write-free twin, chain,
+recursion, UNPROVEN, handlers / `bind:` legal, the render-hang closure, and the 14 conformance cases executed),
+`effect.test.js` / `reset-on.test.js` (the four s449 holes: one diagnostic each, at the source); bite: positions off →
+24 RED. **When these land in the bootstrap they are value positions and must be added to `valuePositions`:** §6.8.1
+`default=`, a multi-statement `${ }` in markup, a Tier-0 `${ for … lift … }`, a display-text `${ }` (§4.18.4),
+`<match on=>`.
+
+### g-impl1-value-writes-state-codes-unimplemented-s449 — impl#1 emits neither E-VALUE-WRITES-STATE nor E-VALUE-WRITE-UNPROVEN (and does not parse the §66 opener form the §6.15 cases are written in); pinned as expected-to-fail by the 7 positive `conformance/cases/reactive/no-write-*-pos` cases — `NEW S449; MED; carried`
+<!-- @gap id=g-impl1-value-writes-state-codes-unimplemented-s449 sev=MED status=carried locus=compiler/src/(no write-summary analysis; the §66 opener `<let x:T=v/>` / `<box let k:int=(…)/>` reports E-MARKUP-001 / E-STATE-UNDECLARED) prov=empirical:s449-xfail-signatures-captured-by-conformance/run.ts---xfail-signature;ruling:user-voice-scrml.md-S447-TS-accounting -->
+
+**Classification: CARRIED** (S430 P7; S447 TS accounting: language-semantics rulings get SPEC text + a bootstrap
+build; impl#1 divergence is FILED, not fixed). The bootstrap builds §6.15 (`g-bootstrap-value-writes-state-owed`,
+resolved above) and executes all 14 cases green (value-positions.test.js). Each positive's xfail signature was captured
+with `bun conformance/run.ts --xfail-signature <id>`: impl#1 reports `E-MARKUP-001` / `E-STATE-UNDECLARED` /
+`E-SCOPE-001` on the §66 opener form and never the §6.15 code. The 7 negatives pass on impl#1 vacuously (they assert
+absence; impl#1 emits neither code). Related, not duplicated: the SPEC change's `g-impl1-value-writes-state-s449`
+(open — the impl#1 divergence measured on legacy-dialect programs, incl. the one positive impl#1 conformance case
+§6.15 rejects, `control-flow/ctrl-027-arm-body-tilde-read-and-recovery-pos`).
+
+### g-bootstrap-slice-m2-render-hole-write-tests-s449 — bootstrap slice-m2: 5 `front.test.js` tests compile programs that WRITE from a render hole on purpose; §6.15 now rejects them, so the slice-m2 gate is red — `NEW S449; MED; open`
+<!-- @gap id=g-bootstrap-slice-m2-render-hole-write-tests-s449 sev=MED status=open locus=compiler/self-host-v2/slice-m2/front.test.js(describe "S440 N1 — the spread snapshot…" — the two "side-effecting override in a render hole" tests; describe "S440 F-A — a Commit outside a handler batch…" — cases A, B and "REFUSED") prov=empirical:s449-bootstrap-no-write-formulas-slice-m2-run -->
+
+`<p>${e1()}</p>` / `<p>${e2()}</p>` (N1: e1 writes `@h` by spread, e2 writes `@h.c`; a render-hole write loop's
+convergence) and `<p>${react()}</p>` (F-A: `react()` commits `@g` by spread from a render hole — outside a handler
+batch — and the test asserts the Commit is atomic to observers). Each now reports E-VALUE-WRITES-STATE instead of
+compiling, so `expect(codes(r)).toEqual([])` fails. The write is the PURPOSE of each test, so it was NOT migrated (the
+change brief: migrate only when incidental). Both runtime properties are now unreachable from source — no value
+position or effect body may write, and `reset-on=` resets drain inside the writer's batch. **PA fork:** (a) recommended
+— keep the runtime guarantees as runtime tests by compiling the write-free twin and grafting the writing body into the
+lowered Core (the effect.test.js C11 pattern), plus one assertion that the source program is now E-VALUE-WRITES-STATE;
+(b) delete the five as obsolete (the `rt.batch` wrap and spread snapshot stay, as unreachable defence); (c) keep them
+red until a writer-in-render path is re-legalized (none is planned).

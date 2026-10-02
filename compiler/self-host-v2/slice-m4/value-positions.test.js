@@ -17,6 +17,8 @@
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors } from "../slice-m1/load-program.js";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const CODE = "E-VALUE-WRITES-STATE";
 const UNPROVEN = "E-VALUE-WRITE-UNPROVEN";
@@ -143,4 +145,27 @@ describe("closes g-bootstrap-render-writer-call-hangs — the render self-write 
     const fns = `    <let b:int=0/>\n    function wa() -> int {\n        @a = @b + 1\n        return @a\n    }\n    function wb() -> int {\n        @b = @a + 1\n        return @b\n    }`;
     expect(codes(P(`    <let a:int=0/>\n${fns}`, `        <p>\${wa()}</p>\n        <p>\${wb()}</p>`))).toEqual([CODE, CODE]);
   });
+});
+
+// The §6.15 conformance cases (conformance/cases/reactive/no-write-*) are written in the §66 opener form,
+// which impl#1 does not parse (their positives xfail there under
+// g-impl1-value-writes-state-codes-unimplemented-s449). The bootstrap IS the implementation that executes
+// them: each case's codes half, judged here exactly as the conformance runner judges it (superset / disjoint).
+describe("§6.15 conformance cases, executed by the bootstrap", () => {
+  const CASES_DIR = join(import.meta.dir, "..", "..", "..", "conformance", "cases", "reactive");
+  const ids = readdirSync(CASES_DIR).filter((d) => d.startsWith("no-write-")).sort();
+  test("the case set is present: 6 position classes × pos / neg, an UNPROVEN positive, a handler negative", () => {
+    expect(ids.length).toBe(14);
+  });
+  for (const id of ids) {
+    test(id, () => {
+      const src = readFileSync(join(CASES_DIR, id, "case.scrml"), "utf8");
+      const exp = JSON.parse(readFileSync(join(CASES_DIR, id, "expected.json"), "utf8")).expect;
+      const got = codes(src);
+      for (const c of exp.codes ?? []) expect(got).toContain(c);
+      for (const c of exp.notCodes ?? []) expect(got).not.toContain(c);
+      // a negative twin is a CLEAN program on the bootstrap, not merely one without these two codes
+      if (!exp.codes) expect(got).toEqual([]);
+    });
+  }
 });
