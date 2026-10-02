@@ -36,3 +36,29 @@ Classes: (a) parse/compile corpus · (b) tests self-host v1 behaviour · (c) reb
 | compiler/SPEC.md :18678 ("and the frozen `compiler/self-host/` tree") | docs | update (same-line edit, no SPEC-INDEX drift) |
 | docs/known-gaps.md open gaps located in compiler/self-host/ | docs | close as moot (separate commit — PA-owned doc) |
 | handOffs/*, docs/changes/*, docs/audits/*, docs/changelog.md, spa-lists/*, hand-off.md | history | LEAVE |
+
+## Step 1 addendum — decisions taken during removal
+
+- self-compilation.test.js IS partly v1: its "Bootstrap: compiler compiles compiler" (10 tests) and describe.skip "Bootstrap L3" (13) swapped every v1 stage in → (b), deleted. Its stdlib/compiler MR/MC sections stay.
+- self-host-v2 joins the corpus with `driftGated: false`: the within-node gate pins EXACT per-file counts; v2 changed in 20 commits over the last 2 weeks, so exact-count gating would make every bootstrap edit re-baseline the parser-parity allowlist (measured: all 61 v2 files diverge, 52,245 total residual). v2 runs parse-only in within-node; every other corpus test runs it fully.
+- canary bs.scrml guard: the minimal `name: not` shape classifies EXACT, and so does the historical `name: null` spelling — the inline guard pins today's verdict; it is not a bite-proven repro.
+- `selfHostModules` API option (api.js / pipeline-seam.ts) KEPT — generic stage-substitution API with live non-v1 callers. Its `tokenizer` and `bpp` keys now have no in-repo caller that passes a compiled module (bpp still reaches setBPPOverrides; m6-5 calls setBPPOverrides directly).
+
+## Step 2-3 — landed commits
+
+d334f06a1 corpus re-point · d7d27a061 canary inline fixtures · 81407b22f (b) test deletions · 23f31eace loader/build/rebuild-script strip · be3ac2cf5 rm compiler/self-host · aec13c0a6 code comments · d1795706b ci.yml comments · 49d9b9053 master-list/PRIMER/SPEC · d527668e2 known-gaps moot closures (PA-owned doc; separate commit) · e55f09a1e FACTS regen
+
+## Step 4 — gates (before = 4fd980bc6 worktree base, after = e55f09a1e)
+
+| tier | before | after |
+|---|---|---|
+| unit+integration+conformance | 27473 pass / 71 skip / 12 todo / 0 fail (27556) | 27455 / 58 / 12 / 0 (27525) — −31 = 8 smoke §B/§C + 10 bootstrap + 13 skipped L3 |
+| root compiler/tests/*.test.js | 6387 / 13 skip / 0 fail | 6576 / 24 skip / 0 fail |
+| commands + lsp | 492 / 3 skip / 0 | 492 / 3 / 0 |
+| e2e-render-map | 259 / 0 | 259 / 0 |
+| bootstrap slices (7 runs) + lint-no-default-arm | all 0 fail | identical counts, 0 fail |
+| browser (vs FAILURE-BASELINE.json) | — | 48 fail = baseline 48, set-identical |
+| facts / s34-census / compile-floor / snippet / spec-index | PASS | PASS |
+| types-gate | exit 1 (2 stale-baseline entries, pre-existing) | identical output |
+
+Failing-test NAME set: empty before, empty after, every tier.
