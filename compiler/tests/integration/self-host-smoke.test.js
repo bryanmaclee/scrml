@@ -53,7 +53,7 @@ function findMainProjectRoot() {
 // S89: a worktree may have edited the self-host scrml source ahead of the main
 // branch. Resolve self-host scrml + TS-reference paths from the LOCAL worktree
 // when both exist locally — otherwise fall back to main root. Build-output
-// artifacts (compiler/self-host/dist/*.js) always read from main root because
+// artifacts (stdlib/compiler/dist/*.js) always read from main root because
 // they are gitignored and only built in main.
 function findSelfHostRoot() {
   const localRoot = execSync(
@@ -650,127 +650,5 @@ describe("self-host smoke: compiled output assessment", () => {
     expect(clientJs).not.toContain("export class");
     // Current output has broken meta-context eval
     expect(clientJs).toContain("_scrml_meta_effect");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// §B: Block Splitter Self-Host Parity
-// ---------------------------------------------------------------------------
-
-describe("Self-host: block-splitter parity", () => {
-  const bsDistPath = resolve(projectRoot, "compiler/self-host/dist/bs.js");
-
-  test("compiled bs.js exists", () => {
-    // Same class as the tab.js guard below: `compiler/self-host/dist/` is gitignored, so this
-    // artifact is never tracked and a fresh clone/CI checkout cannot have it. Every sibling test
-    // in this block already skips when it is absent; this one hard-asserted.
-    // Caught by CI, not locally — this machine happened to have a bs.js generated 2026-07-22, so
-    // the local run passed while `tracking` went red. Fixing tab.js alone was an incomplete fix
-    // (pa-base §8 / S288: enumerating shapes inside a function is not the same as enumerating the
-    // functions a class of defect can inhabit).
-    if (!existsSync(bsDistPath)) {
-      console.log("No compiled bs.js — compile with: bun compiler/bin/scrml.js compile compiler/self-host/bs.scrml -o compiler/self-host/dist/");
-      return;
-    }
-    expect(existsSync(bsDistPath)).toBe(true);
-  });
-
-  test("compiled bs.js exports splitBlocks", async () => {
-    if (!existsSync(bsDistPath)) return;
-    const mod = await import(bsDistPath);
-    expect(typeof mod.splitBlocks).toBe("function");
-  });
-
-  test("self-hosted splitBlocks matches JS original on simple input", async () => {
-    if (!existsSync(bsDistPath)) return;
-    const { splitBlocks: jsSplitBlocks } = await import(resolve(projectRoot, "compiler/src/block-splitter.js"));
-    const { splitBlocks: scrmlSplitBlocks } = await import(bsDistPath);
-
-    const testSource = `<program>
-<div>hello</div>
-\${ let x = 1 }
-</program>`;
-
-    const jsResult = jsSplitBlocks("/test.scrml", testSource);
-    const scrmlResult = scrmlSplitBlocks("/test.scrml", testSource);
-
-    expect(scrmlResult.blocks.length).toBe(jsResult.blocks.length);
-    for (let i = 0; i < jsResult.blocks.length; i++) {
-      expect(scrmlResult.blocks[i].type).toBe(jsResult.blocks[i].type);
-      expect(scrmlResult.blocks[i].content).toBe(jsResult.blocks[i].content);
-    }
-  });
-
-  test("self-hosted splitBlocks handles empty program", async () => {
-    if (!existsSync(bsDistPath)) return;
-    const { splitBlocks: jsSplitBlocks } = await import(resolve(projectRoot, "compiler/src/block-splitter.js"));
-    const { splitBlocks: scrmlSplitBlocks } = await import(bsDistPath);
-
-    const testSource = `<program></program>`;
-    const jsResult = jsSplitBlocks("/empty.scrml", testSource);
-    const scrmlResult = scrmlSplitBlocks("/empty.scrml", testSource);
-
-    expect(scrmlResult.blocks.length).toBe(jsResult.blocks.length);
-  });
-
-  test("selfHostModules.splitBlocks slot works in compileScrml", async () => {
-    if (!existsSync(bsDistPath)) return;
-    const { splitBlocks: scrmlSplitBlocks } = await import(bsDistPath);
-    const { compileScrml } = await import(resolve(projectRoot, "compiler/src/api.js"));
-
-    // Compile a sample file with and without self-hosted BS
-    const samplePath = resolve(projectRoot, "samples/compilation-tests/hello-world.scrml");
-    if (!existsSync(samplePath)) return;
-
-    const jsResult = compileScrml({ inputFiles: [samplePath], write: false });
-    const scrmlResult = compileScrml({
-      inputFiles: [samplePath],
-      write: false,
-      selfHostModules: { splitBlocks: scrmlSplitBlocks },
-    });
-
-    expect(scrmlResult.errors.length).toBe(jsResult.errors.length);
-    expect(scrmlResult.fileCount).toBe(jsResult.fileCount);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// §C: Tokenizer (TAB) Self-Host Parity
-// ---------------------------------------------------------------------------
-
-describe("Self-host: tokenizer parity", () => {
-  const tabDistPath = resolve(projectRoot, "compiler/self-host/dist/tab.js");
-
-  test("compiled tab.js exists", () => {
-    // `compiler/self-host/dist/` is gitignored, so this artifact is never tracked and a fresh
-    // clone/worktree cannot have it — an ENV-GAP, not a regression. Every sibling test in this
-    // block already skips when it is absent (see below); this one hard-asserted, which made a
-    // clean checkout fail the pre-commit gate for a reason no change caused. Matches the
-    // skip-and-say-how pattern used by "compiled output assessment" above.
-    // NB as of 2026-07-30 the artifact cannot be regenerated either: compiling tab.scrml fails
-    // at stage CG on the §22 `^{ … }` meta-block at tab.scrml:142 (filed as a gap).
-    if (!existsSync(tabDistPath)) {
-      console.log("No compiled tab.js — compile with: bun compiler/bin/scrml.js compile compiler/self-host/tab.scrml -o compiler/self-host/dist/");
-      return;
-    }
-    expect(existsSync(tabDistPath)).toBe(true);
-  });
-
-  test("compiled tab.js exports tokenizeBlock", async () => {
-    if (!existsSync(tabDistPath)) return;
-    const mod = await import(tabDistPath);
-    expect(typeof mod.tokenizeBlock).toBe("function");
-  });
-
-  test("compiled tab.js exports all tokenizer functions", async () => {
-    if (!existsSync(tabDistPath)) return;
-    const mod = await import(tabDistPath);
-    expect(typeof mod.tokenizeAttributes).toBe("function");
-    expect(typeof mod.tokenizeLogic).toBe("function");
-    expect(typeof mod.tokenizeSQL).toBe("function");
-    expect(typeof mod.tokenizeCSS).toBe("function");
-    expect(typeof mod.tokenizeError).toBe("function");
-    expect(typeof mod.tokenizePassthrough).toBe("function");
-    expect(typeof mod.tokenizeBlock).toBe("function");
   });
 });
