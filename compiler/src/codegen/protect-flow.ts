@@ -1566,6 +1566,22 @@ class FlowAnalysis {
   }
 
   /**
+   * The names a SPELLED global path reaches functions under — null when any
+   * segment is an element position (a literal index: `globalThis.arr[0].m`).
+   * r8b: `globalPath` names a literal index, and the spelled-path branches used
+   * those segments as names, so a function stored in an element (`globalFnsSlot`,
+   * reached by no name) was skipped at `globalThis.arr[0].m(u)`, at
+   * `` globalThis.arr[0]`${u}` `` and through `[Symbol.iterator]()` — all three
+   * served the hash (S239 review of round 8, measured). One rule, as in
+   * `memberRead`: an element is not a name.
+   */
+  private pathNames(path: string): Set<string> | null {
+    const parts = path.split(".");
+    for (const p of parts) if (/^\d+$/.test(p)) return null;
+    return new Set(parts);
+  }
+
+  /**
    * Of the functions `fns` a value read from the global heap holds, the ones a
    * call through names `names` may reach: every function stored under one of
    * those names, every function stored where no name was readable, and every
@@ -1573,8 +1589,13 @@ class FlowAnalysis {
    * other way — fail closed). `names === null`: all of them.
    */
   private globalCandidates(fns: Set<Closure>, names: Set<string> | null): Set<Closure> {
-    if (names === null) return fns;
-    const out = new Set<Closure>();
+    // r8b: plus every function the global heap holds under those names (all of
+    // them when the path cannot be named) — a global value whose own function
+    // set lost them (an unmodelled method's result: `it.next().value(u)` after
+    // `globalThis.arr[Symbol.iterator]()`) still reaches them.
+    const reach = this.globalFnsFor(names);
+    if (names === null) return new Set([...fns, ...reach]);
+    const out = new Set<Closure>(reach);
     for (const f of fns) {
       const ns = this.globalNamesByFn.get(f);
       if (this.globalFnsUnnamed.has(f)) { out.add(f); continue; }
@@ -2229,7 +2250,7 @@ class FlowAnalysis {
           // function stored in the global heap under a name on its path.
           // (Round 8: through an alias too — the tag's global names, `Taint.gn`.)
           const gf = this.carriesProtected(values)
-            ? this.globalCandidates(tagT.fns, tagPath !== null ? new Set(tagPath.split(".")) : this.globalNames(tagT, []))
+            ? this.globalCandidates(tagT.fns, tagPath !== null ? this.pathNames(tagPath) : this.globalNames(tagT, []))
             : new Set<Closure>();
           if (gf.size > 0 && recv) this.recordThis(gf, recv);
           const viaGlobal = gf.size > 0 ? this.applyFns(gf, [strings, ...values], undefined, node, fn) : clean();
@@ -2347,7 +2368,7 @@ class FlowAnalysis {
         // right operand holds receives the LEFT operand (round 7, measured: a
         // `hasInstance` that copied `x.passwordHash` out served it). The result
         // is still a boolean; the call's effects are what matter.
-        if (node.operator === "instanceof" && rr.fns.size > 0) {
+        if (node.operator === "instanceof" && (rr.fns.size > 0 || this.isGlobalValue(rr))) {
           // A GLOBAL right operand (`x instanceof Response`) carries whatever
           // anything ever stored in the global heap: only the functions stored
           // under a name on its path are candidates (see `globalFnsByName`).
@@ -2360,7 +2381,7 @@ class FlowAnalysis {
           // (measured: all three served the hash on base and round 7).
           const gpath = this.globalPath(node.right, scope);
           const hooks = gpath !== null || this.isGlobalValue(rr)
-            ? (this.carriesProtected([l]) ? this.globalCandidates(rr.fns, gpath !== null ? new Set(gpath.split(".")) : this.globalNames(rr, [])) : new Set<Closure>())
+            ? (this.carriesProtected([l]) ? this.globalCandidates(rr.fns, gpath !== null ? this.pathNames(gpath) : this.globalNames(rr, [])) : new Set<Closure>())
             : rr.fns;
           if (hooks.size > 0) {
             this.recordThis(hooks, rr);
@@ -2784,8 +2805,9 @@ class FlowAnalysis {
       // path, or the names the receiver was read through — null when they
       // cannot be named (then every function it holds is a candidate).
       // (An index is an element, not a name: `globalThis.fs[0](u)` — unknown.)
-      const gNames: Set<string> | null = method !== null && /^\d+$/.test(method) ? null
-        : path !== null ? new Set(path.split(".")) : recvGlobal ? this.globalNames(recv, [method]) : null;
+      // (An element — an index, a computed key such as `[Symbol.iterator]` — is not a name: unknown.)
+      const gNames: Set<string> | null = method === null || /^\d+$/.test(method) ? null
+        : path !== null ? this.pathNames(path) : recvGlobal ? this.globalNames(recv, [method]) : null;
       // S447 round 7 — a function the compile stored on the receiver is CALLED,
       // with `this` = the receiver, WHATEVER its name: a user method named like a
       // built-in (`o.set(u)`, `o.map(f)`, `o.get(k)`) used to take the built-in's
@@ -2802,7 +2824,7 @@ class FlowAnalysis {
       // candidates are those stored under a name the call reaches (`gNames`);
       // applied only when protected data is passed, as before (perf).
       let own = clean();
-      if (this.hasCallable(viaField)) {
+      if (this.hasCallable(viaField) || recvGlobal) {
         const cands = recvGlobal
           ? (this.carriesProtected(args) ? this.globalCandidates(viaField.fns, gNames) : new Set<Closure>())
           : viaField.fns;

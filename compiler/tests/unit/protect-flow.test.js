@@ -911,6 +911,22 @@ describe("analyzeProtectFlow — round 8: logical assignment and element positio
   });
 });
 
+describe("analyzeProtectFlow — r8b: a spelled path through an element is not a name", () => {
+  test("functions stored in global array elements are reached by spelled index paths, iterators and tags", () => {
+    // S239 review of round 8 (DO-NOT-LAND): all served the hash at the round-8 head.
+    for (const body of [
+      "globalThis.arrA = []; globalThis.arrA.push({ m: function (r) { s = r.passwordHash; } }); globalThis.arrA[0].m(u); return { v: s };",
+      "globalThis.arrB = []; globalThis.arrB.push({ m: function (r) { return r.passwordHash; } }); return { v: globalThis.arrB[0].m(u) };",
+      "globalThis.arrC = []; globalThis.arrC.push(function (r) { s = r.passwordHash; }); const it = globalThis.arrC[Symbol.iterator](); it.next().value(u); return { v: s };",
+      "globalThis.arrD = []; globalThis.arrD.push(function (strs, r) { s = r.passwordHash; }); globalThis.arrD[0]`${u}`; return { v: s };",
+      "globalThis.a8 = []; globalThis.a8.push({ m: { n: function (r) { s = r.passwordHash; } } }); globalThis.a8[0].m.n(u); return { v: s };",
+      "const loc = { m: function (r) { s = r.passwordHash; } }; globalThis.a19 = []; globalThis.a19.push(loc); globalThis.a19[0].m(u); return { v: s };",
+    ]) {
+      expect([body, leakCols(r8("let s = ''; " + body)).length > 0]).toEqual([body, true]);
+    }
+  });
+});
+
 describe("analyzeProtectFlow — round 8: the round-7 performance cliff", () => {
   // Review-measured on round 7: a 240-object `toString` chain took 13.7 s
   // (0.47 s on base); a shared `this`-writing method on 240 receivers 40.5 s.
