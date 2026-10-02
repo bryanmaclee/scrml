@@ -126,3 +126,19 @@ may write). Fork for the PA (final report).
   hole-write-tests-s449` filed open (the PA fork).
 - Final slice gates: lint 0 · m1 99/0 · m2 443/5 (the filed five) · m3 60/0 · m4 504/0 (+1 todo) · codec 92/0 ·
   m1 lowered 99/0 · lexer 337/0.
+
+## 2026-10-02 — PA round: fork (a), merge, two filings (commits 43b6df6f6, b4bad1b44)
+- Merged `origin/main` (#1236 protect r9, #1237 SPEC §6.15; main's migrated ctrl-027 taken). Conflicts: FACTS.md
+  (took main's, regenerated → 1256), known-gaps.md (counts hunk regenerated; the tail hunk kept BOTH sections —
+  §S449-spec-lifecycle then §S449-bootstrap-no-write-formulas). `@gap id=` union proof: ours 1555 · main 1558 ·
+  union 1561 · merged 1561, missing 0, extra 0. master-list.md left untouched (state.ts's rewrite reverted; its
+  recent-sessions block is stale on main itself).
+- slice-m2 fork (a): the five N1 / F-A tests assert the original source is E-VALUE-WRITES-STATE, compile the
+  write-free twin, graft `<name>W`'s lowered body into `<name>` (`graftWriters`), checkCore, and keep the S440
+  runtime assertions unchanged. slice-m2 448/0; bite (graft off) → exactly those five RED.
+  `g-bootstrap-slice-m2-render-hole-write-tests-s449` resolved.
+- Filed `g-impl1-client-mangler-renames-local-shadow-in-match-arm` (MED; re-executed on 43b6df6f6 — the two-file
+  reproducer returns the mangled fn from both arms; one-file compile is correct) and
+  `g-spec-6-15-validator-argument-value-position-silent` (LOW).
+- Final: slices lint 0 · m1 99 · m2 448 · m3 60 · m4 504 (+1 todo) · codec 92 · m1-lowered 99 · lexer 337, all 0 fail;
+  unit+integration+conformance 27548 pass / 58 skip / 0 fail; conformance/run.ts 1222/1256 + 34 xfail, 0 fail.
