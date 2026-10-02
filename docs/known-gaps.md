@@ -19357,7 +19357,9 @@ the fallback is to weaken a secure default.
 `.scrml-sessions.db` and one `"session"` namespace) — different mechanism, disclosed in SPEC §20.5, separate entry.
 Fix in flight at S436; fails CLOSED (a unit that declares nothing gets the secure default when the set holds 2+ programs).
 
-<!-- @gap id=g-session-config-bleeds-from-a-sibling-program-and-drops-the-host-prefix sev=HIGH status=open locus=compiler/src/codegen/index.ts:1867 prov=review:S436-pr-1062-F2 -->
+<!-- @gap id=g-session-config-bleeds-from-a-sibling-program-and-drops-the-host-prefix sev=HIGH status=resolved locus=compiler/src/codegen/index.ts:2226(_readProgramAttr — was :1867) prov=review:S436-pr-1062-F2 -->
+
+> **STALE-MARKER VERIFY-CLOSE — S449 (change-id `s449-auth-session-fail-open`).** Fixed by `75d16f137` (#1094, 2026-09-26: *"session config resolves through ONE shared resolver, and an unattributable unit is refused (E-MW-008)"*); marker never flipped. Re-verified by EXECUTION on `2d6d8cd43` with this entry's own table: program B ALONE (declares nothing, calls `session.set`) → `scrml build` + `_server.js`, POST → 200 with `__Host-scrml_sid=…; Secure` (correct secure default). Program A (`session-secure="false" sessionExpiry="7d"`) + program B in ONE compile set → **`E-MW-008`** naming `b.scrml` as the unattributable unit, exit 1, **no output directory written** (so no downgraded cookie can be served). `_readProgramAttr` (now `codegen/index.ts:2226`) returns `undefined` whenever the compile set holds 2+ `<program>` nodes, and the resolution order lives once in `codegen/session-config-resolve.ts`. Governing §20.5.1 step 3: *"With two or more web-application `<program>`s, step 3 answers nothing and `E-MW-008` governs (S436, S438)."* Pins: `compiler/tests/conformance/conf-SESSION-PROGRAM-ATTR-SCOPE.test.js`, `compiler/tests/commands/refusal-writes-no-dist.test.js`, `compiler/tests/commands/mw008-does-not-mask-mw007.test.js`.
 
 ### G-EMITTED-SESSION-STORE-OPENS-SQLITE-WITH-NO-BUSY-TIMEOUT-OR-WAL — the one sqlite handle #1062's sweep did not reach
 

@@ -63,3 +63,7 @@ Why (a): one spelling per meaning. `session.x` already exists, is bound by the s
 
 - ALREADY CLOSED by `bf3b111dc` (#1062, 2026-09-26); stale `status=open` marker. Verified by execution on 2d6d8cd43: two-unit fixture (index.scrml session.set + pages/admin/panel.scrml reading session.userId), scrml build + _server.js: both units resolve `<dist>/.scrml-sessions.db`; POST login -> 200 + `__Host-scrml_sid`; POST nested whoami with that cookie -> 200 "user=alice". Governing §20.5.1: "The default store location is `.scrml-sessions.db` at the **DIST ROOT** of the build, shared by every emitted server unit regardless of the subdirectory that unit lands in". Existing pin: compiler/tests/integration/session-program-scope-multi-unit.test.js (7 pass). Marker flipped to resolved. Direction: none (docs only).
 - Locus (emit-server.ts `_scrml_session_db_path` emit): HELD as the historical locus.
+
+## Item 4 — g-session-config-bleeds-from-a-sibling-program-and-drops-the-host-prefix — 2026-10-02T14:13-06:00
+
+- ALREADY CLOSED by `75d16f137` (#1094); stale marker. Verified on 2d6d8cd43: B alone -> build + HTTP POST 200 `__Host-scrml_sid … Secure`; A(session-secure="false") + B -> E-MW-008 naming b.scrml, exit 1, no dist/build dir written. Governing §20.5.1 step 3 "With two or more web-application `<program>`s, step 3 answers nothing and `E-MW-008` governs". Locus index.ts:1867 -> REFINED: now :2226 `_readProgramAttr` (returns undefined for a multi-program set) + `session-config-resolve.ts`. Marker flipped to resolved. Direction: none (docs only).
