@@ -192,6 +192,7 @@ ${
             .Slot :> []
             .Star(decl: d, inst: inst) :> [Node.NInst(inst)]
             .Effect(deps: ds, body: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
+            .ResetOn(triggers: ds, reset: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
         }
     }
 
@@ -359,6 +360,7 @@ ${
             .Slot :> []
             .Star(decl: d) :> []
             .Effect(deps: ds) :> []
+            .ResetOn(triggers: ds) :> []
         }
     }
 

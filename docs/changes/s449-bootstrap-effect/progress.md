@@ -110,3 +110,41 @@ Measured: 0 runs at mount; 1 per `inc`; 0 after the section closes; re-opening r
   literal; "request" = a write whose value is a call; else "move / derive". The reset hint lists the effect's own
   deps as the `reset-on=` entries.
 - **U0's E-LIFECYCLE-006 / W-LIFECYCLE-006 front-end checks are deleted** (subsumed / retired by §6.7.4).
+
+## 2026-10-02 — Phase C: `reset-on=[…]` (§6.8.4)
+
+**Core** `View.ResetOn(triggers: EffectDep[], reset: Block, rank: int)` — a program cell's rule, registered with the
+program scope ahead of its markup (lower `resetOnViews`); the reset is ONE Write of the cell's initializer (Replace,
+or a Static Transition on a `rule=` graph cell — C6 re-proves the every-state-admits condition). check **C13**
+(≥ 1 mutable trigger; exactly one Write; not listing its own cell). print `rt.resetOn(scope$, [cells], () => { … }, rank)`.
+
+**Runtime** `ResetOn` + `drainResets`: `Cell.set` marks every observer, then drains the pending resets lowest rank
+first, all inside the writer's own batch — so the trigger and its resets are ONE change for every render effect and
+`<effect>` (rule 4), and code that writes the trigger reads the reset value right after. No counter / bound: the
+graph is acyclic by construction (E-RESET-ON-CYCLE). `slice-m1/reset-on.runtime.test.js` (6).
+
+**analyze** `resetOnPass` (program cells): E-RESET-ON-INVALID-ENTRY (empty, non-list, undeclared, non-`@`, derived,
+locked) · E-RESET-ON-CYCLE (self / pair / triangle, naming the cells) · E-RESET-ON-NOT-WRITABLE (locked / derived) ·
+E-RESET-ON-ENGINE-REFUSED (every non-target state must admit the target; each refusing state named with its `rule=`;
+a non-literal initializer = every variant is a target, fail closed); `rank` = depth in the static graph. Tables gains
+`resets: ResetOnInfo[]`. `slice-m4/reset-on.test.js` (11): the search page (one keystroke → one effect run, already
+on page 1), a chain, an engine reset back to `.Idle`, every code +/-, the field refusal, C13.
+
+**Bites:** rank order off (insertion order) → the diamond test RED; drain moved outside the writer's batch → the
+"ONE change" + diamond runtime tests RED (the SOURCE-level search test stays green under that mutation — a handler is
+already an outer batch; the runtime test is the guard). Restored → GREEN.
+
+**Gates:** slice-m1 99/0 · m2 448/0 · m3 60/0 · m4 457/0 (+1 todo) · codec 92/0 · m1 lowered 99/0 · lexer 337/0 · lint 0.
+
+### PA readings for veto (Phase C)
+- **`reset-on=` on a declaration's FIELD → E-BOOTSTRAP-UNSUPPORTED** (⚑ OPEN "Per-instance resets"): read on
+  program cells only. Fail closed.
+- **The reset value is the initializer** — `default=` is not in the bootstrap (an unknown opener word, already
+  refused), so §6.8.1's `default=` branch has nothing to read.
+- **The engine reset "fires `<onTransition>`"** — the bootstrap has no `<onTransition>` (refused as a structural
+  element) and no state-child `effect=`: nothing exists to fire. Filed in the known-gaps update.
+- **Compositions (rule 7)** — `debounced=` / `throttled=`, lifecycle `(A to B)`, the §55 surface, `persist=`: none is
+  in the bootstrap, so there is nothing to cancel / revert / clear / store. Filed.
+- **Server / channel cells under `reset-on=` (⚑ OPEN)** — no §52 / `<channel>` cells exist in the bootstrap.
+- **`rule=*`** (admits every variant) does not parse in the bootstrap; the engine check reads explicit `rule=` lists.
+- **A cycle is reported once** (at the first rule found on it) and every rule on it is dropped from the accepted set.

@@ -639,6 +639,7 @@ ${
             .Star(decl: d) :> hole(HNode.HComment("*" + d.hint), path, v)
             // s449: an `<effect>` renders no DOM; its comment keeps child-index paths positional
             .Effect :> hole(HNode.HComment("effect"), path, v)
+            .ResetOn :> hole(HNode.HComment("reset-on"), path, v)
         }
     }
 
@@ -733,6 +734,7 @@ ${
             .Slot :> false
             .Star :> false
             .Effect :> false
+            .ResetOn :> false
         }
     }
 
@@ -740,6 +742,7 @@ ${
     fn holeNeedsNode(v: View) -> boolean {
         return match v {
             .Effect(deps: ds) :> false
+            .ResetOn(triggers: ds) :> false
             .El(tag: t) :> true
             .Text(text: t) :> true
             .Dyn(e: e) :> true
@@ -772,6 +775,7 @@ ${
             .Slot :> []
             .Star :> []
             .Effect :> []
+            .ResetOn :> []
         }
     }
 
@@ -788,15 +792,18 @@ ${
             .Slot :> only([sexpr(rtCall(ctx, "slot", [scopeVar(), node, ctx.slot]))])
             .Star(decl: d, inst: i) :> starJs(ctx, d, i, node)
             .Effect(deps: ds, body: b) :> effectJs(ctx, ds, b)
+            .ResetOn(triggers: ds, reset: b, rank: r) :> resetOnJs(ctx, ds, b, r)
         }
     }
 
-    // s449 — `rt.effectOn(scope$, [<dependency cells>], (task$) => { <body> })`
-    // (§6.7.4): registered into the scope this view list renders into, so it is
-    // unregistered with that scope (teardown step 1). The dependencies are the
-    // cells themselves — the effect subscribes to exactly those. `task$` is
-    // bound only when the body suspends (C12).
-    fn effectJs(ctx: Ctx, deps: EffectDep[], body: Block) -> Rendered {
+    // s449 — `rt.resetOn(scope$, [<trigger cells>], () => { <the reset write> }, rank)`
+    // (§6.8.4): the cell resets itself in the flush of the triggering write,
+    // a chain in rank order, before any render or effect reads it.
+    fn resetOnJs(ctx: Ctx, triggers: EffectDep[], reset: Block, rank: int) -> Rendered {
+        return only([sexpr(rtCall(ctx, "resetOn", [scopeVar(), JsExpr.JArray(depCells(ctx, triggers)), JsExpr.JArrow([], blockJs(ctx, reset)), jnum(rank)]))])
+    }
+
+    fn depCells(ctx: Ctx, deps: EffectDep[]) -> JsExpr[] {
         let cells: JsExpr[] = []
         for (const dep of deps) {
             const d: Decl | not = findDecl(ctx.p, dep.decl)
@@ -806,9 +813,18 @@ ${
                 cells = cells.concat([jid("unboundDecl$" + dep.decl.id)])
             }
         }
+        return cells
+    }
+
+    // s449 — `rt.effectOn(scope$, [<dependency cells>], (task$) => { <body> })`
+    // (§6.7.4): registered into the scope this view list renders into, so it is
+    // unregistered with that scope (teardown step 1). The dependencies are the
+    // cells themselves — the effect subscribes to exactly those. `task$` is
+    // bound only when the body suspends (C12).
+    fn effectJs(ctx: Ctx, deps: EffectDep[], body: Block) -> Rendered {
         let params: string[] = []
         if (suspends(body)) params = ["task$"]
-        return only([sexpr(rtCall(ctx, "effectOn", [scopeVar(), JsExpr.JArray(cells), JsExpr.JArrow(params, blockJs(ctx, body))]))])
+        return only([sexpr(rtCall(ctx, "effectOn", [scopeVar(), JsExpr.JArray(depCells(ctx, deps)), JsExpr.JArrow(params, blockJs(ctx, body))]))])
     }
 
     fn suspends(b: Block) -> boolean {
@@ -984,6 +1000,7 @@ ${
             .Slot :> false
             .Star(decl: d) :> false
             .Effect(deps: ds) :> false
+            .ResetOn(triggers: ds) :> false
         }
     }
 
@@ -1263,6 +1280,7 @@ ${
             .Slot :> []
             .Star :> []
             .Effect :> []
+            .ResetOn :> []
         }
     }
 

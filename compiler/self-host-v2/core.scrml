@@ -277,6 +277,17 @@ ${
         // C11). Nesting is unrepresentable (a body is a Block; no Stmt holds a
         // View).
         Effect(deps: EffectDep[], body: Block),
+        // s449 — `reset-on=[@a, @b]` on a program cell (§6.8.4): when any
+        // `triggers` cell changes, run `reset` — exactly ONE Write of the cell's
+        // reset value to the cell (its initializer; a transition for a cell with
+        // a `rule=` graph) — in the SAME flush as the triggering write, before
+        // any render or effect reads the cell. `rank` is the cell's depth in the
+        // static reset-on graph (0 = no trigger is itself reset); a chain applies
+        // in rank order, so a reset chain is one change for every dependent. The
+        // graph is acyclic by construction (E-RESET-ON-CYCLE), so a chain
+        // terminates without any runtime bound. Registered with the program's
+        // scope; renders no DOM.
+        ResetOn(triggers: EffectDep[], reset: Block, rank: int),
     }
 
     // -------------------------------------------------------------------------

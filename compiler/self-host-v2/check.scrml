@@ -45,6 +45,9 @@
 //       transitively (§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE)
 //   C12 (s449) a Suspend stands only at the tail of an effect body (an Effect
 //       body, or the `then` of another Suspend) — the CPS split point
+//   C13 (s449) a ResetOn has ≥ 1 trigger, each a MUTABLE field (C11's rule);
+//       its reset is exactly ONE Write, to a cell that is not one of its own
+//       triggers (§6.8.4 rules 1-3; C3 / C6 judge that Write's contract)
 //   (C3 covers the s444 edits: the removals by the field's grants; ElemAt by
 //   the ELEMENT field's own contract, dpa-052 Q3.)
 // A diagnostic is a message string (§4 permits strings as text).
@@ -233,6 +236,7 @@ ${
         return match v {
             .Star(decl: d, inst: i) :> checkStar(p, encl, d, i)
             .Effect(deps: ds, body: b) :> checkEffect(p, encl, ds, b)
+            .ResetOn(triggers: ds, reset: b) :> checkResetOn(p, encl, ds, b)
             .El(tag: x) :> []
             .Text(text: x) :> []
             .Dyn(e: x) :> []
@@ -263,6 +267,45 @@ ${
         const w: string = blockWriteWitness(p, body, [])
         if (w != "") out = out.concat(["C11: an Effect body writes reactive state — " + w + " (§6.7.4: an effect may not write any reactive cell, directly or through a called function)"])
         return out
+    }
+
+    // -------------------------------------------------------------------------
+    // C13 (s449) — a ResetOn (§6.8.4): at least one trigger (rule 2, "an empty
+    // list … is the same error"); every trigger a mutable cell (C11's rule —
+    // rule 2's E-LIFECYCLE-007 condition); the reset is exactly ONE Write
+    // (rule 1: "performs exactly one write — reset(@self)"), and its cell is
+    // not among its own triggers (rule 3: "a cell listing itself" is a cycle).
+    // The Write's contract — replace granted, or a Static transition every
+    // state admits (rules 5-6) — is C3 / C6's, as for any Write.
+    // -------------------------------------------------------------------------
+    fn checkResetOn(p: CoreProgram, encl: Decl[], triggers: EffectDep[], reset: Block) -> string[] {
+        let out: string[] = []
+        if (triggers.length == 0) out = out.concat(["C13: a ResetOn has no trigger (§6.8.4 rule 2)"])
+        for (const t of triggers) {
+            for (const m of checkEffectDep(p, encl, t)) { out = out.concat([m.replace("C11: an Effect dependency", "C13: a ResetOn trigger")]) }
+        }
+        if (reset.stmts.length != 1) return out.concat(["C13: a ResetOn's reset is " + reset.stmts.length + " statements — it is exactly one Write (§6.8.4 rule 1)"])
+        const cap: Sym | not = writeCapOf(reset.stmts[0])
+        if (cap is not) return out.concat(["C13: a ResetOn's reset is not a Write (§6.8.4 rule 1)"])
+        const o: CapOwner | not = capOwner(p, cap)
+        if (o is not) return out
+        for (const t of triggers) {
+            if (t.decl.id == o.decl.sym.id && t.idx == o.idx) out = out.concat(["C13: a ResetOn on <" + o.decl.sym.hint + ">." + o.decl.fields[o.idx].sym.hint + " lists its own cell as a trigger (§6.8.4 rule 3, a cycle)"])
+        }
+        return out
+    }
+
+    fn writeCapOf(s: Stmt) -> Sym | not {
+        return match s {
+            .Write(cap: c) :> c
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
+        }
     }
 
     fn checkEffectDep(p: CoreProgram, encl: Decl[], dep: EffectDep) -> string[] {
@@ -433,6 +476,7 @@ ${
     fn viewEffectTails(v: View) -> int {
         return match v {
             .Effect(body: b) :> tailChain(b)
+            .ResetOn(triggers: x) :> 0
             .El(tag: x) :> 0
             .Text(text: x) :> 0
             .Dyn(e: x) :> 0
@@ -811,6 +855,7 @@ ${
             .Slot :> not
             .Star(decl: d) :> not
             .Effect(deps: ds) :> not
+            .ResetOn(triggers: ds) :> not
         }
     }
 

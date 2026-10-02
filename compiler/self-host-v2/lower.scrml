@@ -37,7 +37,7 @@ ${
              mkSpan } from "./ast.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair,
-             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram,
+             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest } from "./analyze.scrml"
 
     export type Lowered:struct = { core: CoreProgram, diags: Diag[] }
@@ -817,6 +817,36 @@ ${
         return [Stmt.Write(w.cap, target, w.edit, init, w.check)]
     }
 
+    // s449 — one View.ResetOn per accepted `reset-on=` rule (§6.8.4): the
+    // triggers as cells of the program instance, and the reset as ONE Write of
+    // the cell's initializer — a replace, or a Static transition for a cell with
+    // a `rule=` graph (analyze proved every state admits the target, rule 6).
+    fn resetOnViews(c: LC, d: DeclInfo) -> View[] {
+        let out: View[] = []
+        for (const r of c.t.resets) {
+            const reset: Stmt[] = resetWrite(c, d, r.target)
+            if (reset.length == 1) {
+                let triggers: EffectDep[] = []
+                for (const t of r.triggers) { triggers = triggers.concat([mkEffectDep(d.sym, InstRef.Lexical(0), t)]) }
+                out = out.concat([View.ResetOn(triggers, block(reset), r.rank)])
+            }
+        }
+        return out
+    }
+
+    fn resetWrite(c: LC, d: DeclInfo, idx: int) -> Stmt[] {
+        if (idx < 0 || idx >= d.fields.length) return []
+        const f: FieldInfo = d.fields[idx]
+        const cap: Sym | not = f.wcap
+        if (cap is not) return []
+        const ic: LC = { t: c.t, file: c.file, subst: InstRef.Lexical(0), snap: not }
+        const init: Expr | not = lowerValue(ic, f.init)
+        if (init is not) return []
+        let edit: EditKind = EditKind.Replace
+        if (f.graph is some) edit = EditKind.Transition
+        return [Stmt.Write(cap, InstRef.Lexical(0), edit, init, Check.Static)]
+    }
+
     fn isProgramKind(k: DeclKind) -> boolean {
         return match k {
             .Program :> true
@@ -1231,6 +1261,12 @@ ${
         let renders: View[] | not = not
         const s: DeclSyntax | not = syntaxOf(ss, d.nid)
         if (s is some) renders = lowerRenders(c, s)
+        // s449: the program cells' `reset-on=` rules are registered with the
+        // program's scope, ahead of its markup (§6.8.4)
+        if (isProgramKind(d.kind)) {
+            const rv: View[] | not = renders
+            if (rv is some) renders = resetOnViews(c, d).concat(rv)
+        }
         const wiring: WiringAttr[] = []
         return { sym: d.sym, kind: d.kind, single: d.single, fields: fields, renders: renders, wiring: wiring, handles: d.handles }
     }

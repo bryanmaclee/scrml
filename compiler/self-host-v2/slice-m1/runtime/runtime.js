@@ -167,7 +167,10 @@ export class Cell {
     this.pending = null;
     if (Object.is(v, this.value)) return;
     this.value = v;
-    batch(() => invalidate(this));
+    // Every observer is marked first, then the `reset-on=` resets this write
+    // triggered are applied — all of them, in rank order — still inside this
+    // batch, so its flush sees the trigger and the resets as one change.
+    batch(() => { invalidate(this); drainResets(); });
   }
   /** Run an owed seed now (on first demand, or when construction ends). */
   settle() {
@@ -369,6 +372,78 @@ export function suspend(task, value, k) {
       throw e;
     },
   );
+}
+
+// ---------------------------------------------------------------------------
+// `reset-on=[@a, @b]` on a cell (SPEC §6.8.4).
+//
+// A ResetOn observes its trigger cells. When one changes, the reset is
+// applied AT ONCE — right after the write has marked every observer, inside
+// the writing cell's own batch, before that batch flushes — so every render
+// effect and every `<effect>` that the trigger and the reset both reach is
+// queued once and runs once, after both, seeing the reset value (rule 4: "The
+// triggering write and the resets it causes are ONE change for every
+// dependent"). A handler that reads the reset cell after writing the trigger
+// sees the reset value too.
+//
+// A chain (`a` resets on `b`, `b` resets on `c`) is applied in RANK order —
+// the cell's depth in the static reset-on graph, computed by the compiler —
+// so every reset in one drain runs after the resets it depends on, and each
+// cell is reset at most once per drain. The graph is acyclic (E-RESET-ON-CYCLE,
+// a compile-time error), so a drain ends by construction: there is no counter
+// or bound here, and one would mean the compile-time rule had a hole.
+// ---------------------------------------------------------------------------
+const pendingResets = new Set();
+let drainingResets = false;
+
+class ResetOn {
+  constructor(scope, triggers, reset, rank) {
+    this.triggers = triggers;
+    this.reset = reset;
+    this.rank = rank;
+    this.disposed = false;
+    for (const t of triggers) t.observers.add(this);
+    scope.own(() => {
+      this.disposed = true;
+      pendingResets.delete(this);
+      for (const t of this.triggers) t.observers.delete(this);
+    });
+  }
+  markStale() {
+    if (!this.disposed) pendingResets.add(this);
+  }
+}
+
+// Apply the pending resets, lowest rank first (Cell.set calls it once every
+// observer of the write is marked). A reset's own write queues the resets
+// downstream of it (higher ranks) into the same loop.
+function drainResets() {
+  if (drainingResets || pendingResets.size === 0) return;
+  drainingResets = true;
+  try {
+    while (pendingResets.size > 0) {
+      let next = null;
+      for (const r of pendingResets) if (next === null || r.rank < next.rank) next = r;
+      pendingResets.delete(next);
+      if (!next.disposed) batch(() => untrack(next.reset));
+    }
+  } finally {
+    drainingResets = false;
+  }
+}
+
+/**
+ * Register a cell's `reset-on=` rule in `scope` (§6.8.4): when a `triggers`
+ * cell changes, `reset()` writes the cell's reset value, in rank order within
+ * the triggering write's flush.
+ */
+export function resetOn(scope, triggers, reset, rank) {
+  requireScope(scope, "a reset-on= rule");
+  if (triggers.length === 0) throw new Error("reset-on= needs at least one cell (§6.8.4, E-RESET-ON-INVALID-ENTRY)");
+  for (const t of triggers) {
+    if (!(t instanceof Cell)) throw new Error("a reset-on= entry must be a mutable cell (§6.8.4, E-RESET-ON-INVALID-ENTRY)");
+  }
+  new ResetOn(scope, triggers, reset, rank);
 }
 
 /** A writable cell holding `v`. */

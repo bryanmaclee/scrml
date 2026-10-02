@@ -281,9 +281,16 @@ ${
         unresolved: Unresolved,
         typing: Typing,
         novalidate: int[],      // s444 Phase B (RULED S442 (3)): the `<form>` elements the compiler adds `novalidate` to
+        resets: ResetOnInfo[],  // s449: the program cells' accepted `reset-on=` rules (§6.8.4)
     }
 
     export type TypedProgram:struct = { files: FileAst[], tables: Tables, diags: Diag[] }
+
+    // s449 — one `reset-on=[…]` rule of a program cell (§6.8.4), as the
+    // analysis accepted it: field `target` of the program resets when any field
+    // in `triggers` changes; `rank` is its depth in the static reset-on graph
+    // (the order a chain is applied in). `lower` turns it into View.ResetOn.
+    export type ResetOnInfo:struct = { target: int, triggers: int[], rank: int }
 
     // ---- the NodeId index ------------------------------------------------------
     // The position `at` holds for `nid` (-1: none).
@@ -2017,7 +2024,7 @@ ${
                     st = addDiag(st, s.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ":" + n + " …/>` is a named shared instance of `<" + n + ">` (§66.8.2) — not in the bootstrap")
                 } else {
                     st = o19Diags(s.file, d, st)
-                    st = openerWordDiags(s.file, fileErrs(files, s.file), d, st)
+                    st = openerWordDiags(s.file, fileErrs(files, s.file), d, false, st)
                     // s444 Phase B: a user declaration's OWN validators, and a field's below depth 1
                     if (d.validators.length > 0) st = addDiag(st, s.file, d.validators[0].span, "E-BOOTSTRAP-UNSUPPORTED", "validators on `<" + d.name + ">`'s own opener bind its own value (§66.4 rule 3) — a user declaration's own value is not bindable in the bootstrap; put them on a child field")
                     for (const c of childFields(d.body)) { st = deepValidatorDiags(s.file, c.body, st) }
@@ -2028,7 +2035,7 @@ ${
                 // the program's cells (a nested user declaration is its own stub)
                 for (const it of p.items) {
                     for (const c of declsOfItem(it)) {
-                        if (!isNestedUserDecl(c) && declNames.indexOf(ownTypeName(c)) < 0) st = openerWordDiags(s.file, fileErrs(files, s.file), c, st)
+                        if (!isNestedUserDecl(c) && declNames.indexOf(ownTypeName(c)) < 0) st = openerWordDiags(s.file, fileErrs(files, s.file), c, s.isProgram, st)
                         if (!isNestedUserDecl(c)) st = deepValidatorDiags(s.file, c.body, st)
                     }
                 }
@@ -2055,15 +2062,19 @@ ${
     }
 
     // A declaration holding a parse error is recovery debris there (Rule C).
-    fn openerWordDiags(file: string, errs: ASpan[], d: ADecl, st0: AS) -> AS {
+    // `cell`: `d` is a program cell (the only place the bootstrap reads
+    // `reset-on=`, s449 — resetOnPass).
+    fn openerWordDiags(file: string, errs: ASpan[], d: ADecl, cell: boolean, st0: AS) -> AS {
         let st: AS = st0
         if (hasErrIn(errs, d.span)) return st
         for (const a of d.mods) {
-            if (!isKnownOpenerWord(a.name) && a.name.indexOf(":") < 0) {
+            if (a.name == "reset-on" && !cell) {
+                st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset-on=` on `<" + d.name + ">`, a field of a declaration, is not in the bootstrap — whether a field's `reset-on=` may name a sibling field of the same instance (a per-instance reset) is OPEN (§6.8.4); it is read on a program cell")
+            } else if (!isKnownOpenerWord(a.name) && a.name.indexOf(":") < 0) {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", unknownOpenerMessage(a.name))
             }
         }
-        for (const c of childFields(d.body)) { st = openerWordDiags(file, errs, c, st) }
+        for (const c of childFields(d.body)) { st = openerWordDiags(file, errs, c, false, st) }
         return st
     }
 
@@ -2071,7 +2082,7 @@ ${
     // attributes and the own value): `single` (§66.13.3); the validator words
     // are the parser's (it reports them, validatorMessage).
     fn isKnownOpenerWord(w: string) -> boolean {
-        return w == "single" || isValidatorName(w)
+        return w == "single" || w == "reset-on" || isValidatorName(w)
     }
 
     fn isValidatorName(w: string) -> boolean {
@@ -9085,6 +9096,271 @@ ${
         return out
     }
 
+    // =========================================================================
+    // s449 — `reset-on=[@a, @b]` (SPEC §6.8.4): "When any listed cell changes
+    // … the runtime SHALL perform `reset(@self)`". The static rules — "Rules 2,
+    // 3, 5 and 6 are compile-time errors; none of them is deferred to run time":
+    //   2  every entry "a declared, mutable, non-derived reactive cell in scope
+    //      at the declaration" (an empty list too) — E-RESET-ON-INVALID-ENTRY;
+    //   3  the entry → reset-cell graph is acyclic ("including a cell listing
+    //      itself") — E-RESET-ON-CYCLE, naming the cells on the cycle;
+    //   5  the cell's contract admits the reset write (`reset(@x)` is a replace)
+    //      — a locked or derived cell is E-RESET-ON-NOT-WRITABLE;
+    //   6  on a cell with a `rule=` graph, "Every state other than the target
+    //      itself SHALL admit the target in its `rule=`" — else
+    //      E-RESET-ON-ENGINE-REFUSED naming every refusing state and the target;
+    //      a non-literal target means every variant is a target (fail closed).
+    // The bootstrap reads `reset-on=` on PROGRAM cells (a field of a user
+    // declaration is refused — per-instance resets are OPEN, openerWordDiags).
+    // A rule that passes is a ResetOnInfo; `rank` orders a chain (rule 4).
+    // =========================================================================
+    type RResets:struct = { infos: ResetOnInfo[], st: AS }
+    type ResetEdge:struct = { target: int, triggers: int[], span: ASpan }
+
+    fn resetOnPass(g: Globals, st0: AS) -> RResets {
+        let st: AS = st0
+        const prog: DeclSrc | not = findDeclSrc(g, g.program)
+        if (prog is not) return { infos: [], st: st }
+        const p: AProgram | not = prog.p
+        if (p is not) return { infos: [], st: st }
+        let edges: ResetEdge[] = []
+        for (const it of p.items) {
+            for (const d of declsOfItem(it)) {
+                if (!isNestedUserDecl(d)) {
+                    for (const a of d.mods) {
+                        if (a.name == "reset-on") {
+                            const r: RResetEdge = resetEdgeOf(g, prog, d, a, st)
+                            st = r.st
+                            const e: ResetEdge | not = r.e
+                            if (e is some) edges = edges.concat([e])
+                        }
+                    }
+                }
+            }
+        }
+        // rule 3 — an edge on a cycle is refused (reported once per cycle)
+        let onCycle: int[] = []
+        for (const e of edges) {
+            if (onCycle.indexOf(e.target) < 0) {
+                const cyc: int[] = cycleFrom(edges, e.target, e.target, [])
+                if (cyc.length > 0) {
+                    st = addDiag(st, prog.file, e.span, "E-RESET-ON-CYCLE", "the `reset-on=` rules form a cycle: " + cycleText(prog.info, cyc) + " — a reset chain must end; drop one of these entries (§6.8.4 rule 3)")
+                    onCycle = onCycle.concat(cyc)
+                }
+            }
+        }
+        let infos: ResetOnInfo[] = []
+        for (const e of edges) {
+            if (onCycle.indexOf(e.target) < 0) infos = infos.concat([{ target: e.target, triggers: e.triggers, rank: rankOf(edges, e.target, []) }])
+        }
+        return { infos: infos, st: st }
+    }
+
+    type RResetEdge:struct = { e: ResetEdge | not, st: AS }
+
+    fn resetEdgeOf(g: Globals, prog: DeclSrc, d: ADecl, a: AAttr, st0: AS) -> RResetEdge {
+        let st: AS = st0
+        const target: int = fieldIndex(prog.info, d.name)
+        if (target < 0) return { e: not, st: st }
+        const es: AExpr[] | not = resetEntries(a.value)
+        if (es is not) return { e: not, st: addDiag(st, prog.file, a.span, "E-RESET-ON-INVALID-ENTRY", "`reset-on=` takes a bracketed list of cells, `reset-on=[@a, @b]` (§6.8.4)") }
+        if (es.length == 0) return { e: not, st: addDiag(st, prog.file, a.span, "E-RESET-ON-INVALID-ENTRY", "`reset-on=[]` lists no cell — the reset would never happen; list the cells whose changes reset `@" + d.name + "` (§6.8.4 rule 2)") }
+        let triggers: int[] = []
+        let ok = true
+        for (const x of es) {
+            const why: string = entryProblem(prog.info, x)
+            if (why != "") {
+                st = addDiag(st, prog.file, x.span, "E-RESET-ON-INVALID-ENTRY", why + " (§6.8.4 rule 2: every entry is a declared, mutable, non-derived reactive cell in scope)")
+                ok = false
+            } else {
+                triggers = triggers.concat([fieldIndex(prog.info, atName(x))])
+            }
+        }
+        const f: FieldInfo = prog.info.fields[target]
+        const gr: TransitionGraph | not = f.graph
+        if (gr is some) {
+            const refused: string = engineRefusals(g, gr, f.init)
+            if (refused != "") {
+                st = addDiag(st, prog.file, a.span, "E-RESET-ON-ENGINE-REFUSED", "`reset-on=` on `@" + d.name + "` resets it along its `rule=` graph, and every state other than the reset target must admit the target: " + refused + " (§6.8.4 rule 6) — add the target to those states' `rule=`")
+                ok = false
+            }
+        } else if (!f.grants.replace) {
+            st = addDiag(st, prog.file, a.span, "E-RESET-ON-NOT-WRITABLE", notWritableMessage(d.name, f.mode))
+            ok = false
+        }
+        if (!ok) return { e: not, st: st }
+        return { e: { target: target, triggers: triggers, span: a.span }, st: st }
+    }
+
+    fn resetEntries(v: AAttrValue) -> AExpr[] | not {
+        return match v {
+            .Bare(e: e) :> arrayItems(e)
+            .Paren(e: e) :> not
+            .NoValue :> not
+            .Quoted(v: s) :> not
+            .Braced(b: b) :> not
+        }
+    }
+
+    fn arrayItems(e: AExpr) -> AExpr[] | not {
+        const es: AExpr[] = arrayElems(e)
+        if (es.length > 0) return es
+        const k: AExprK = e.k
+        return match k {
+            .ArrayLit(elems: xs) :> xs
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    // Why `x` is not a valid entry ("" — it is one).
+    fn entryProblem(pi: DeclInfo, x: AExpr) -> string {
+        const n: string = atName(x)
+        if (n == "") return "a `reset-on=` entry is a cell written `@name` — this entry is not one"
+        const i: int = fieldIndex(pi, n)
+        if (i < 0) return "`@" + n + "` is not a declared cell in scope"
+        const f: FieldInfo = pi.fields[i]
+        const w: Sym | not = f.wcap
+        if (w is some) return ""
+        const m: FieldMode = f.mode
+        return match m {
+            .Derived :> "`@" + n + "` is a DERIVED cell — it has no change event of its own; list the cells it is computed from"
+            .Locked :> "`@" + n + "` is a LOCKED cell — it never changes"
+            .Let :> "`@" + n + "` is not a mutable cell"
+            .Seeded :> "`@" + n + "` is not a mutable cell"
+        }
+    }
+
+    fn notWritableMessage(name: string, m: FieldMode) -> string {
+        const what: string = match m {
+            .Derived :> "a DERIVED cell (its value is computed from other cells)"
+            .Locked :> "a LOCKED cell (no `let`, so no write is granted)"
+            .Let :> "a cell whose contract grants no replace"
+            .Seeded :> "a cell whose contract grants no replace"
+        }
+        return "`reset-on=` on `@" + name + "` — the reset is a write, `reset(@" + name + ")`, a replace (§66.11), and `@" + name + "` is " + what + "; make it writable (`let`) or drop `reset-on=` (§6.8.4 rule 5)"
+    }
+
+    // Rule 6: the states that refuse the reset target(s), as a message ("" — none).
+    // The target is the initializer's variant; a non-literal initializer makes
+    // every variant a possible target (fail closed).
+    fn engineRefusals(g: Globals, gr: TransitionGraph, init: AAttrValue) -> string {
+        const ti: TypeInfo | not = typeInfoOf(g.types, gr.enumSym)
+        if (ti is not) return ""
+        const vs: VariantDef[] = enumVariants(ti.def)
+        let targets: int[] = []
+        const lit: string = initVariant(init)
+        const t: int = variantIndex(g.types, gr.enumSym, lit)
+        if (lit != "" && t >= 0) {
+            targets = [t]
+        } else {
+            let i = 0
+            for (const v of vs) {
+                targets = targets.concat([i])
+                i = i + 1
+            }
+        }
+        let out: string[] = []
+        let s = 0
+        for (const v of vs) {
+            const admits: int[] = edgeTargets(gr, s)
+            for (const tgt of targets) {
+                if (tgt != s && admits.indexOf(tgt) < 0) {
+                    out = out.concat(["`." + v.sym.hint + "` has " + ruleText(vs, admits) + "; it does not admit the reset target `." + vs[tgt].sym.hint + "`"])
+                }
+            }
+            s = s + 1
+        }
+        return out.join("; ")
+    }
+
+    fn initVariant(v: AAttrValue) -> string {
+        return match v {
+            .Bare(e: e) :> variantLitName(e.k)
+            .Paren(e: e) :> variantLitName(e.k)
+            .NoValue :> ""
+            .Quoted(v: s) :> ""
+            .Braced(b: b) :> ""
+        }
+    }
+
+    fn edgeTargets(gr: TransitionGraph, origin: int) -> int[] {
+        for (const e of gr.edges) {
+            if (e.origin == origin) return e.targets
+        }
+        return []
+    }
+
+    fn ruleText(vs: VariantDef[], targets: int[]) -> string {
+        if (targets.length == 0) return "no `rule=` (no outgoing edge)"
+        let names: string[] = []
+        for (const t of targets) { names = names.concat(["." + vs[t].sym.hint]) }
+        return "`rule=" + names.join(" | ") + "`"
+    }
+
+    // A cycle through `at` back to `start` in the reset-on graph (trigger →
+    // reset cell): the cells on it, in order, or [] when there is none.
+    fn cycleFrom(edges: ResetEdge[], start: int, at: int, path: int[]) -> int[] {
+        for (const e of edges) {
+            if (e.triggers.indexOf(at) >= 0) {
+                if (e.target == start) return path.concat([at])
+                if (path.indexOf(e.target) < 0 && e.target != at) {
+                    const c: int[] = cycleFrom(edges, start, e.target, path.concat([at]))
+                    if (c.length > 0) return c
+                }
+            }
+        }
+        return []
+    }
+
+    fn cycleText(pi: DeclInfo, cyc: int[]) -> string {
+        let parts: string[] = []
+        for (const i of cyc) { parts = parts.concat(["`@" + pi.fields[i].sym.hint + "`"]) }
+        if (cyc.length == 1) return parts[0] + " lists itself"
+        return parts.join(" → ") + " → " + parts[0]
+    }
+
+    // A cell's depth in the (acyclic) reset-on graph: 0 when none of its
+    // triggers is itself reset, else one more than the deepest trigger.
+    fn rankOf(edges: ResetEdge[], target: int, seen: int[]) -> int {
+        let best: int = 0
+        for (const e of edges) {
+            if (e.target == target) {
+                for (const t of e.triggers) {
+                    if (seen.indexOf(t) < 0 && isResetTarget(edges, t)) {
+                        const r: int = rankOf(edges, t, seen.concat([target])) + 1
+                        if (r > best) best = r
+                    }
+                }
+            }
+        }
+        return best
+    }
+
+    fn isResetTarget(edges: ResetEdge[], i: int) -> boolean {
+        for (const e of edges) {
+            if (e.target == i) return true
+        }
+        return false
+    }
+
     // s449: an effect at FILE level (outside `<program>`) has no element scope to
     // own it — refused, never silently dropped (no pass reaches file-level markup).
     fn strayEffects(files: FileAst[], st0: AS) -> AS {
@@ -9128,6 +9404,8 @@ ${
         let st: AS = checkImports(files, ra.g, ra.st)
         st = phaseB(ra.g, st)
         st = strayEffects(files, st)
+        const rr: RResets = resetOnPass(ra.g, st)
+        st = rr.st
         let decls: DeclInfo[] = []
         for (const d of ra.g.decls) { decls = decls.concat([d.info]) }
         let fns: FnInfo[] = []
@@ -9139,7 +9417,7 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
-                                novalidate: [] }
+                                novalidate: [], resets: rr.infos }
         const scopeDiags: Diag[] = checkScopes(files, bound)
         // s449: the no-write rule over every accepted effect (§6.7.4)
         const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects)
@@ -9149,7 +9427,7 @@ ${
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms }
+                            novalidate: vp.forms, resets: bound.resets }
         return { files: files, tables: t, diags: st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags) }
     }
 

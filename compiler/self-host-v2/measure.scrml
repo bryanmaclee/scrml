@@ -134,6 +134,7 @@ ${
             .Slot :> "Slot"
             .Star(decl: x) :> "Star"
             .Effect(deps: x) :> "Effect"
+            .ResetOn(triggers: x) :> "ResetOn"
         }
     }
 
