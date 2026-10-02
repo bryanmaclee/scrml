@@ -4754,11 +4754,16 @@ dep-list  ::= '@' identifier | '(' '@' identifier (',' '@' identifier)* ')'
 - **Parses identically (§63.1).** During the window a `when … changes { }` statement IS an `<effect>`: same
   trigger, same no-mount-run, same scope association (its enclosing element scope), same newest-run-wins rule,
   and **the same no-write rule** — a writing `when` body is E-EFFECT-WRITES-STATE in the bootstrap now, not at
-  the end of the window. *PA reading of S447, recorded for veto:* Call 1 limits what a reactive effect may do
-  (*"supersedes: §6.7.4 'MAY read and write `@variables`'"*) and is a semantic ruling, not a deprecation; Call 2
-  retires only the *spelling* through §63. Keeping writes legal under the old spelling would keep the runtime
-  cascade net alive, which 1b ruled unnecessary. §63.5's "runtime identical to the canonical form" holds only
-  if the two spellings carry one meaning.
+  the end of the window. **RULED S447.** Call 1 limits what a reactive effect may do (*"supersedes: §6.7.4 'MAY
+  read and write `@variables`'"*) and is a semantic ruling, not a deprecation; Call 2 retires only the *spelling*
+  through §63. Keeping writes legal under the old spelling would keep the runtime cascade net alive, which 1b
+  ruled unnecessary, and §63.5's "runtime identical to the canonical form" holds only if the two spellings carry
+  one meaning. **Direction of change: newly-rejecting** — the 4 sample sites whose `when` body writes state.
+  > **Provenance:** ruling:user-voice-scrml.md S447 "⭐⭐ RULED — \"accept and your rec (d)\": the keyword `when`
+  > carries the no-write rule now; autosave 3c = (d)" — *"accept and your rec (d)."* (item 1: *"the no-write rule
+  > applies to the legacy `when … changes` spelling IMMEDIATELY, not only to `<effect>` — §63 Stage 1 governs the
+  > SPELLING only; Call 1 is semantic, and §63.5 requires both forms to mean the same thing."*) · **supersedes:**
+  > this bullet's earlier status "PA reading of S447, recorded for veto".
 - **The `reads` clause retires with no window.** `when @a changes reads @b { }` never parsed in any
   implementation (DD §2 row 1), so it was never in the contract. It is a syntax error whose message SHALL say
   that `reads` is retired and that reading an unlisted cell needs no annotation. **H-LIFECYCLE-001** (the
@@ -4812,7 +4817,7 @@ effects across engines is not covered by the no-write rule.
 | Persist a cell across reloads | `<x persist="local" key="app.x"> = init` (§6.14 — **Nominal**, lands with the bootstrap). Until it lands, a hand-written recipe SHALL encode on write and decode + check on read: see the note below. |
 | Reset a cell when other cells change (page → 1 on a new search) | `let <page:int=1 reset-on=[@query, @category]/>` (§6.8.4) |
 | Reset a cell on a specific transition (clear the cart on logout) | engine `<onTransition>` (§51.0.H) |
-| Auto-save with a saving / saved indicator | a write `<request id="autosave" deps=[@note]>${ @savedAt = saveNote(@note) }</>` (§6.7.7) — ⚑ OPEN (S447 3c): a `<request>` runs on mount, so this saves once per page load; whether `<request>` gets a skip-the-mount-run flag waits on a look at real autosave UIs |
+| Auto-save with a saving / saved indicator | a write `<request id="autosave" deps=[@note]>${ @savedAt = saveNote(@note) }</>` (§6.7.7) — it provably writes, so it does not run on mount, fires only on the user's own edits (the load's write re-baselines it), and skips a save equal to its baseline (§6.7.7.3, S447 3c = (d)). One save in flight and flush-on-leave are still OPEN (§6.7.7.3 rule 7). |
 | Fire-and-forget save with no status shown | `<effect deps=[@note]>${ saveNote(@note) }</>` |
 | Analytics, scroll, focus, document title, a third-party widget, a canvas | `<effect deps=[…]>${ … }</>` |
 | Polling | `<poll>` (§6.7.6) |
@@ -5086,7 +5091,7 @@ All normative statements for `<timer>` (§6.7.5) apply to `<poll>`.
 
 `<request>` is a distinct built-in state type from `<poll>` for the following reasons:
 
-1. **Trigger model:** `<poll>` executes on an interval. `<request>` executes once on mount, then re-executes only when its declared reactive dependencies change. Unifying them on a single element would require a mandatory `interval` attribute that means nothing for one-shot fetches, or an optional `interval` that bifurcates `<poll>` semantics.
+1. **Trigger model:** `<poll>` executes on an interval. `<request>` executes once on mount, then re-executes only when its declared reactive dependencies change. *(S447 3c: a provably-writing request does not run on mount and fires only on the user's own edits — §6.7.7.3.)* Unifying them on a single element would require a mandatory `interval` attribute that means nothing for one-shot fetches, or an optional `interval` that bifurcates `<poll>` semantics.
 2. **Four first-class state attributes:** `loading`, `data`, `error`, and `stale` are meaningful only for a one-shot fetch with a defined "settled" condition. `<poll>` has no notion of settled state — it perpetually re-fetches.
 3. **Rendering tier split:** The compiler uses `<request>` declarations to identify the boundary between a loading-tier render and a data-tier render. `<poll>` does not create this boundary because a `<poll>` value is always available.
 
@@ -5134,7 +5139,7 @@ The `cache` attribute is optional and bare (S444, dpa-060 — **Nominal / spec-a
 
 #### Semantics
 
-**Mount behavior:** When a `<request>` mounts, in order:
+**Mount behavior:** When a `<request>` mounts, in order *(S447 3c: except a request that provably writes, which does not run on mount unless `deps=[]` — §6.7.7.3)*:
 
 1. `<#id>.loading` is set to `true`.
 2. `<#id>.data` retains its previous value if one exists, or is `not` on first mount.
@@ -5162,11 +5167,14 @@ The `cache` attribute is optional and bare (S444, dpa-060 — **Nominal / spec-a
 - Any `@variable` in `deps=` changes, OR
 - `<#id>.refetch()` is called.
 
+*(S447 3c: for a request that provably writes, only a LOCAL write to a dependency is a change; a server-origin write
+re-baselines it, and a save equal to its baseline is skipped — §6.7.7.3.)*
+
 On re-execution, `<#id>.data` is NOT cleared. `stale` is `true` during re-fetch if prior data exists.
 
 **Destroy behavior:** On scope destroy, in-flight results are discarded. The compiler SHALL generate a cancellation guard. **Amended S444 (dpa-059):** on scope destroy an in-flight fetch's result is never applied, and a request the compiler classifies **READ** additionally has its transport **aborted**; a **WRITE** request is **discarded** — its result is not applied and its transport runs to completion (§6.7.7.1).
 
-**`<request>` is not a loop.** Unlike `<timer>` and `<poll>`, the body executes once on mount, then only on dependency change or `refetch()`.
+**`<request>` is not a loop.** Unlike `<timer>` and `<poll>`, the body executes once on mount, then only on dependency change or `refetch()`. *(S447 3c: a provably-writing request does not — §6.7.7.3.)*
 
 #### Properties
 
@@ -5204,7 +5212,8 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 
 #### Normative Statements
 
-- A `<request>` SHALL start its fetch automatically on mount.
+- A `<request>` SHALL start its fetch automatically on mount — **unless it provably writes** (§6.7.7.3 rule 1) and has no explicit `deps=[]`, in which case it SHALL NOT run on mount (S447 3c).
+- *(S447 3c — Nominal.)* A provably-writing `<request>` SHALL be triggered only by local writes to its dependencies and by `refetch()`; a server-origin write SHALL re-baseline the dependency and SHALL NOT trigger it; a triggered save whose every dependency equals its baseline (§45) SHALL be skipped; server-origin writes SHALL bypass `debounced=` / `throttled=` (§6.7.7.3).
 - A `<request>` SHALL discard in-flight results on scope destroy.
 - The compiler SHALL generate a mounted-guard check in every `<request>` resolution.
 - The compiler SHALL generate a sequence number for every `<request>` instance (EC-2, EC-4).
@@ -5305,6 +5314,7 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
    - **Body form** (`${ @x = call }`): **READ** iff (a) no non-`SELECT` SQL (`?{}`) is reachable anywhere in the call graph of the body's call expression — transitively, through every server function the call reaches — **and** (b) the call lowers to a single server batch (not a §19.9.9 multi-batch CPS body).
    - **`url=` / `api=` form** (§60): **READ** iff the HTTP method is `GET` or `HEAD`.
    - **Every other request is WRITE — including any request the compiler cannot classify.** Unclassifiable = write: the classification fails closed to discard.
+   - **Scope of this classification (S447 3c).** READ / WRITE here governs abort vs discard only. Whether a request runs on mount and which writes trigger it is decided by a SEPARATE test, **provably writes** (§6.7.7.3 rule 1), which fails the opposite way: an unclassifiable request is WRITE here but is NOT provably writing, so it keeps running on mount. *(Provenance: ruling:user-voice-scrml.md S447 "\"accept and your rec (d)\"" — sub-call 2: *"\"provably writes\" is its own test, NOT dpa-059's unclassifiable=write rule"*.)*
 2. **Supersede** (EC-2, EC-4). When an in-flight fetch is superseded, a **READ** request's superseded transport SHALL be **aborted**. A **WRITE** request's superseded fetch SHALL be **discarded**: its result SHALL NOT be applied, and its transport SHALL NOT be aborted — it runs to completion.
 3. **Teardown** (EC-3 scope destroy; §20.8.8 step 2.3 route-leave). The same rule applies: a **READ** request's in-flight transport SHALL be aborted; a **WRITE** request's in-flight fetch SHALL be discarded (result not applied, transport completes).
 4. **Abort is transport-only.** An abort closes the client's side of the in-flight HTTP request and discards any response. It is **not a rollback**: an abort SHALL NOT imply that the server did not execute, commit, or partially commit the call — **the server may have committed**. (§8.9.2 / §19.10.5's only ROLLBACK trigger remains an exception inside the handler.) An aborted fetch SHALL NOT set `<#id>.error`, and SHALL NOT be treated as a failure settle.
@@ -5343,6 +5353,153 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 - **O-060-7** — **`cache` on a WRITE-classified request** (§6.7.7.1). Whether it is legal (revalidate-on-hit still runs the write) or an error.
 - **O-060-8** — Whether the result of a superseded, aborted or discarded fetch is ever stored in the cache.
 - **O-060-9** — The diagnostic for a valued `cache=…` (for example `cache=30s`, an author TTL): which code fires.
+
+#### 6.7.7.3 Write requests — no mount run, user edits only, baseline (S447 3c)
+
+> **Status: Nominal / spec-ahead.** NORMATIVE; **not implemented by impl#1** (frozen for language semantics, S447
+> TS accounting — the divergence is filed: `g-impl1-autosave-request-mount-save-wipes-record`) and **owed by the
+> bootstrap** (`g-bootstrap-effect-reset-on-owed`).
+>
+> **Provenance:** ruling:user-voice-scrml.md S447 "⭐⭐ RULED — \"accept and your rec (d)\": the keyword `when`
+> carries the no-write rule now; autosave 3c = (d)" — *"accept and your rec (d)."* (item 2: *"a `<request>` that
+> PROVABLY writes never runs on mount; writes that ORIGINATE from the server (a load, a poll, a channel push,
+> another tab's sync) reset the request's baseline instead of triggering it — only the user's own edits fire a
+> write request. No new syntax."*; the PA scope note reads sub-calls 2–6 as included: *"(2) "provably writes" is
+> its own test, NOT dpa-059's unclassifiable=write rule; (3) a write request with `deps=[]` still runs once on
+> mount; (4) server-originated writes skip the `debounced=` delay; (5) bank two gaps — one save in flight at a
+> time, flush or warn on page leave; (6) skip a save whose value equals its baseline."*) ·
+> dd:`scrml-support/docs/deep-dives/autosave-request-mount-3c-2026-10-02.md` (§2 the measured mount save that
+> wiped a record; §3 survey; §4 option (v); §7 calls 1–6) · **supersedes:** for provably-writing requests only, §6.7.7
+> "Mount behavior", the Complexity-Budget sentence *"`<request>` executes once on mount, then re-executes only when
+> its declared reactive dependencies change"*, the normative *"A `<request>` SHALL start its fetch automatically on
+> mount"*, and *"Any `@variable` in `deps=` changes"* as a trigger; and the S447 §6.7.4 autosave row's
+> *"⚑ OPEN (S447 3c)"*. **Direction of change: meaning-changing** — a provably-writing `<request>` no longer
+> fires on mount or on server-originated changes; no program's acceptance changes.
+
+**The defect this closes (measured, DD §2).** The autosave idiom
+`<note debounced=800ms> = ""` + `<request id="load" deps=[]>${ @note = loadNote() }</>` +
+`<request id="autosave" deps=[@note]>${ @savedAt = saveNote(@note) }</>` sent `saveNote("")` — the cell's
+default — at mount, racing the load; in one run the record was wiped for good. Skipping the mount run alone is
+not enough: the load's write to `@note` is itself a change, so the request saved the loaded text straight back
+about 800 ms later, and the debounce delayed showing the loaded text by the same 800 ms.
+
+**1. "Provably writes" — its own test.** A `<request>` **provably writes** iff the compiler can SEE a write
+reachable from it:
+
+- **Body form** (`${ @x = call }`): the call graph of the body's call expression — transitively, through every
+  scrml and server function the call reaches (the same walk as §6.7.7.1 rule 1(a)) — contains at least one of:
+  - a `?{}` SQL statement whose statement verb (the first keyword after any leading `WITH …` clause) is a
+    data-modifying or schema verb: `INSERT`, `UPDATE`, `DELETE`, `REPLACE`, `MERGE`, `UPSERT`, `CREATE`, `ALTER`,
+    `DROP`, `TRUNCATE`;
+  - a write to a §52 server-authoritative cell performed on the server.
+
+  A write on any path counts — a write behind an `if` makes the request provably writing: "provably" means the
+  write is visible in the code, not that every run executes it.
+- **`url=` / `api=` form** (§60): the HTTP method is statically known and is not a safe method of RFC 9110
+  (`GET`, `HEAD`, `OPTIONS`, `TRACE`) — i.e. `POST`, `PUT`, `PATCH`, `DELETE`, or another statically known unsafe
+  method.
+
+Nothing else makes a request provably writing. In particular a request is NOT provably writing merely because the
+compiler cannot classify it — a host (`.js`) call, a `_{}` / `^{}` block, a stdlib call with unknown effects
+(O-059-3), a computed HTTP method, or a multi-batch read body (§6.7.7.1 rule 1(b)). **This test is deliberately
+the opposite of §6.7.7.1 rule 1's fail-closed direction.** For abort, *"unclassifiable = write"* errs toward the
+safe side (don't abort). For mount, the same default would err toward the unsafe side: a read the compiler cannot
+classify would stop loading on mount and render an empty page. The three classes:
+
+| Class | Mount run | Server-origin dep writes | Supersede / teardown (§6.7.7.1) |
+|---|---|---|---|
+| READ (§6.7.7.1 rule 1 — provably read-only) | runs | trigger | abort |
+| unclassifiable (neither) | runs (unchanged) | trigger (unchanged) | discard |
+| **provably writes** (this rule) | **does not run** (unless `deps=[]`, rule 2) | **re-baseline, do not trigger** (rule 4) | discard |
+
+A provably-writing request is always WRITE under §6.7.7.1; READ and provably-writing are disjoint. The class SHALL
+be surfaced by `scrml explain` beside the READ / WRITE classification (§6.7.7.1 rule 5; O-059-1), e.g.
+*"autosave: provably writes; fires on your edits to @note; writes from request `load` re-baseline"*. It SHALL NOT
+be reported as a lint.
+
+**2. No mount run — except `deps=[]`.** A provably-writing `<request>` SHALL NOT start a fetch when its scope
+mounts or remounts. Until its first trigger, `.loading` is `false`, `.data` is `not` (or its retained value) and
+`.error` is `not`. **Exception:** a provably-writing request with an explicit `deps=[]` has written "mount is my
+only trigger" and SHALL run once on each mount, as today (*mark as read on open*, *record a view*, *claim a
+ticket*). `<#id>.refetch()` always starts a fetch (it is an explicit user-code trigger and is not subject to rule
+5). A provably-writing request with neither `deps=` nor any reactive read in its body never runs on its own; the
+W-LIFECYCLE-013 condition (§6.7.7 EC-5) applies to it unchanged.
+
+**3. Triggers — the user's own edits only.** A provably-writing request re-executes on a **local write** to one
+of its dependencies (its `deps=` cells, or its inferred dependencies when `deps=` is absent), and on `refetch()`.
+Every write to a cell is either **server-origin** or **local**:
+
+- **Server-origin** — a closed list, every member of which is a write the compiler itself emits:
+  - the settle assignment of any `<request>` (a load / read request; also a write request's own result);
+  - a `<poll>` tick's assignment (§6.7.6);
+  - a `<channel>` push into a synced cell (§38);
+  - a `persist=` cross-tab `storage`-event sync write (§6.14.2; a restore at construction is not a write at all);
+  - a §52 server-authority load or server push into a server-authoritative cell (§52).
+- **Local** — every other write: an input binding (`bind:value`), an event handler, `on mount` code and bare
+  mount expressions, a `<timer>` / `<timeout>` body, plain logic, and a §52 server cell's own client-side
+  assignment (it is user code, §52.6.2).
+- **A `reset-on=` reset inherits the origin of the write that triggered it** (§6.8.4): a reset caused by a
+  server-origin write is server-origin; one caused by a local write is local. *(Entailed by rule 3's purpose — a
+  load that writes `@query` must not fire a save through `@page`'s reset; PA reading, recorded for veto.)*
+
+Because every server-origin writer is a compiler-emitted site, the origin is known statically at each write site;
+no runtime "inside a user event" flag and no call-graph analysis of the writer is needed.
+
+**4. Baseline.** A provably-writing request keeps, for each dependency, a **baseline** value:
+
+- the initial baseline is the dependency's value when the request mounts (after construction, including any
+  `persist=` restore);
+- a **server-origin write** to a dependency sets that dependency's baseline to the written value and SHALL NOT
+  trigger the request;
+- when a fetch of the request **settles successfully**, each dependency's baseline becomes the value that fetch
+  was started with; a failed or superseded fetch leaves the baselines unchanged.
+
+**5. A save equal to its baseline is skipped.** When a local write triggers a provably-writing request (after any
+`debounced=` / `throttled=` delay), the request SHALL compare each dependency's current value with its baseline
+using scrml equality (§45 — structural `==`: primitives by value, structs and enums deeply, maps
+order-independently, §59.9). Absence follows §42: two absent values are equal; an absent and a present value are
+not. If **every** dependency equals its baseline, the fetch is skipped — no request is sent and `.loading`,
+`.data`, `.error` are unchanged ("typed, then undid back to the saved text" is clean). Where §45 defines no
+equality for a dependency's type (a type §45.2 makes non-comparable; an `asIs` value, whose `==` is identity,
+W-EQ-001), the comparison SHALL count as unequal — the rule fails toward sending the save, never toward dropping
+one.
+
+**6. Server-origin writes skip the timing wrappers.** A `debounced=` / `throttled=` cell (§6.13) delays **local**
+writes only. A server-origin write SHALL be applied to the cell at once, bypassing the wrapper, so loaded data is
+shown when it arrives (the DD measured an 800 ms delay). ⚑ OPEN (not ruled): when a server-origin write lands
+while a local debounced write to the same cell is still pending, whether the pending local write is cancelled or
+still lands afterwards (and is then compared with the new baseline).
+
+**7. ⚑ OPEN — banked, not decided (S447 sub-call 5).** Neither is decided by 3c; both are needed before autosave is
+safe, and both are filed as owed work:
+- **One save in flight at a time** — a newer trigger waits for the in-flight save and then sends the latest
+  value, instead of racing it (§6.7.7.1 rule 2 lets a superseded WRITE's transport complete, so an older save can
+  reach the server after a newer one). `g-request-write-one-save-in-flight-owed`.
+- **Flush or warn on page leave** — a pending `debounced=` write to a provably-writing request's dependency either
+  goes out on `pagehide`, or triggers a leave warning; today the timer dies and up to one debounce window of
+  typing is lost. `g-request-write-flush-or-warn-on-leave-owed`.
+
+Other open questions carried from the DD (§8), not decided here: a `persist="session"` local draft vs the server
+load at boot (which wins; whether to offer "restore"); conflict detection (version / etag) stays developer-level.
+
+**Worked example — autosave with status.**
+
+```scrml
+let <issueId:int=42/>
+let <body:string="" debounced=800ms/>
+let <savedAt:string=""/>
+
+<request id="load" deps=[@issueId]>${ @body = loadIssueBody(@issueId) }</>      // READ: runs on mount
+<request id="save" deps=[@body]>${ @savedAt = saveIssueBody(@issueId, @body) }</>  // provably writes (UPDATE)
+
+<textarea bind:value=@body/>
+<p>${ <#save>.error ? "Not saved" : <#save>.loading ? "Saving…" : "Saved " + @savedAt }</p>
+```
+
+On page load, `load` runs and `save` does not (rule 2). `load`'s settle writes `@body`: a server-origin write, so it
+lands at once despite `debounced=` (rule 6), becomes `@body`'s baseline and does not trigger `save` (rules 3–4). A
+viewer who never types never writes. Typing is a local write: 800 ms after the last keystroke `save` runs, unless
+the text is back to the baseline (rule 5). A successful save moves the baseline.
 
 ### 6.7.8 `<timeout>` — Single-Shot Timer State Type
 
@@ -6680,6 +6837,15 @@ State-cell declarations (§6.2 Shape 1 and Shape 2) MAY carry one of two reactiv
 ```
 
 Writes to `@searchTerm` are coalesced into a single trailing write that fires `DURATION` after the most recent write request. Each new write within the window restarts the timer; the cell's value updates exactly once, after the window of silence. Subscribers (`when @searchTerm changes {}`, derived cells, render-by-tag, etc.) fire on the debounced write.
+
+**Server-origin writes bypass the wrapper (S447 3c).** `debounced=` and `throttled=` delay LOCAL writes only. A
+server-origin write (§6.7.7.3 rule 3 — a `<request>` settle, a `<poll>` tick, a `<channel>` push, a `persist=`
+cross-tab sync, a §52 server-authority load) SHALL be applied to the cell at once, so loaded data is shown when it
+arrives rather than one window late. *(Nominal / spec-ahead; impl#1 debounces every write — filed under
+`g-impl1-autosave-request-mount-save-wipes-record`. Provenance: ruling:user-voice-scrml.md S447 "\"accept and your
+rec (d)\"" — sub-call 4: *"server-originated writes skip the `debounced=` delay"* · dd:`scrml-support/docs/deep-dives/autosave-request-mount-3c-2026-10-02.md`
+§2.3 point 3 · supersedes: the unqualified "wrap the cell's write path" for server-origin writes.)* The
+pending-local-write case is OPEN (§6.7.7.3 rule 6).
 
 #### 6.13.2 `throttled=DURATION` — Throttled Writes
 
@@ -40303,7 +40469,7 @@ Applying the machine to the existing corpus:
   is verified-landed (§63.4). The rule is mechanical only for a body that writes no reactive cell; a writing
   body has no mechanical rewrite (the fix reports the E-EFFECT-WRITES-STATE fix text). The window governs the
   SPELLING only: the no-write rule applies to both spellings at once (§6.7.4 "The retiring keyword form"), so
-  §63.1's "parses identically" holds. The never-parsed `reads` clause is not in the window (it was never in the
+  §63.1's "parses identically" holds (RULED S447 — "accept and your rec (d)", item 1). The never-parsed `reads` clause is not in the window (it was never in the
   contract). *(Provenance: ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled
   `<effect>`" — Call 2: *"The keyword `when (…) changes reads … { }` form retires through §63."*)*
 

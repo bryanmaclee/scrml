@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 234 | 4 |
-| MED | 462 | 0 |
+| HIGH | 235 | 4 |
+| MED | 464 | 0 |
 | LOW | 216 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -21870,4 +21870,58 @@ bootstrap owes:
   Polling goes to `<poll>`.
 - Open items the build must not decide silently are listed in SPEC §6.7.4 and §6.8.4 (⚑ OPEN): cross-module write
   summaries, `navigate()` in an effect, `lift` in an effect body, server/channel cells under `reset-on=`, per-instance
-  resets, cascades through engine transition effects, and the autosave mount-run question (S447 3c).
+  resets, and cascades through engine transition effects.
+- **Write requests (S447 3c = (d), SPEC §6.7.7.3):** the "provably writes" classification (its own test — not
+  §6.7.7.1's unclassifiable=write); no mount run except `deps=[]`; server-origin writes (request settle, `<poll>`,
+  channel push, `persist=` cross-tab sync, §52 loads) tagged at their emit sites — they re-baseline instead of
+  triggering and bypass `debounced=` / `throttled=`; `reset-on=` resets inherit their trigger's origin; skip a save
+  whose deps all `==` (§45) their baselines; baseline moves on a successful save. Still OPEN and filed separately:
+  `g-request-write-one-save-in-flight-owed`, `g-request-write-flush-or-warn-on-leave-owed`.
+
+### g-impl1-autosave-request-mount-save-wipes-record — impl#1 DIVERGENCE (filed, not fixed — S447 TS accounting): the documented autosave idiom sends `saveNote("")` on page load, racing the load, and can wipe the record; it also saves the loaded text back and shows it 800 ms late — `NEW S447; HIGH; open`
+<!-- @gap id=g-impl1-autosave-request-mount-save-wipes-record sev=HIGH status=open locus=compiler/src/codegen(the <request> lowering registers every request as an immediately-run effect — the autosave's first run is the mount save)+compiler/src/runtime-template.js(_scrml_reactive_set routes EVERY write, a request's settle assignment included, through the debounce wrapper); PA-located-verify from the DD §2 prov=dd:autosave-request-mount-3c-2026-10-02 -->
+
+**Classification: DIVERGENCE.** SPEC §6.7.7.3 (S447 3c = (d), Nominal) says a provably-writing `<request>` does not
+run on mount (unless `deps=[]`), is triggered only by local writes, is re-baselined by server-origin writes, skips a
+save equal to its baseline, and that server-origin writes bypass `debounced=` (§6.13). impl#1 is frozen for language
+semantics (S447 TS accounting) and does none of it. The bootstrap owes it (`g-bootstrap-effect-reset-on-owed`).
+
+**Measured by the DD on main `4fd980bc6`** (`scrml-support/docs/deep-dives/autosave-request-mount-3c-2026-10-02.md`
+§2; happy-dom with a stubbed fetch; the stub DB starts as `"REAL ISSUE BODY"`). Not re-run for this entry:
+`<note debounced=800ms> = ""` + `<request id="load" deps=[]>${ @note = loadNote() }</>` +
+`<request id="autosave" deps=[@note]>${ @savedAt = saveNote(@note) }</>`:
+1. **Mount save of the default — data loss.** At mount the autosave sends `saveNote("")` together with the load.
+   Run A (save 30 ms, load 60 ms): the blank write landed first, the load read back `""`, the record was **wiped for
+   good**. Run B (load 5 ms): blank on the server from about 34 ms to 816 ms on every page load, for every viewer; a
+   viewer who closes the tab inside that window leaves it blank (§6.7.7.1 lets the in-flight WRITE complete). A
+   viewer without edit rights gets a failing save on load.
+2. **Load echo.** The load's assignment is an ordinary write, so it triggers the autosave and the loaded text is
+   saved back about 800 ms after load — one wasted write per page load, overwriting any concurrent edit.
+3. **Display delay.** The load result goes through the 800 ms debounce, so the editor shows `""` for 800 ms after
+   the data arrives.
+
+**Security exception — not a candidate.** This is data LOSS (an integrity defect against the author's own record,
+triggered by any viewer opening the page), not a disclosure: no value crosses a trust boundary and no
+unauthorized party reads anything. The S447 exception to the impl#1 freeze covers security, so this divergence is
+filed, not fixed. ⚑ For the PA: the destructive, any-viewer trigger makes it the strongest non-security candidate
+for a for-cause fix (S430 P7 "adopter reported it") if an adopter hits it; it is not within the exception as ruled.
+**Workaround on impl#1:** do not use a `<request>` for autosave; save from the input's handler instead.
+
+### g-request-write-one-save-in-flight-owed — a provably-writing `<request>` can have two saves in flight; an older save can reach the server after a newer one — `NEW S447; MED; open`
+<!-- @gap id=g-request-write-one-save-in-flight-owed sev=MED status=open locus=searched:compiler/SPEC.md(§6.7.7.1 rule 2 — a superseded WRITE is discarded but its transport completes; no in-flight serialization anywhere in §6.7.7)+compiler/src/codegen(request lowering — sequence-number guard only) prov=dd:autosave-request-mount-3c-2026-10-02 -->
+
+Banked OPEN by S447 3c sub-call 5 (*"bank two gaps — one save in flight at a time, flush or warn on page leave"*);
+SPEC §6.7.7.3 rule 7. Under §6.7.7.1 rule 2 a superseded WRITE fetch is discarded but its transport runs to
+completion, so with two saves in flight the older can land after the newer and the server keeps stale text (the
+Payload CMS #18348 hazard; Discourse `draftSaving` and WordPress `tempBlockSave` serialize). Owed: a design, then a
+ruling — e.g. a newer trigger waits for the in-flight save and then sends the latest value. Not decided by 3c.
+Applies to both implementations (spec-level gap; no front end serializes).
+
+### g-request-write-flush-or-warn-on-leave-owed — a pending `debounced=` write behind a provably-writing `<request>` dies with the page; up to one debounce window of typing is lost — `NEW S447; MED; open`
+<!-- @gap id=g-request-write-flush-or-warn-on-leave-owed sev=MED status=open locus=searched:compiler/SPEC.md(no beforeunload / pagehide rule anywhere; §6.13 — a pending debounce timer is not flushed on teardown)+compiler/src/runtime-template.js(debounce timers — no page-hide flush) prov=dd:autosave-request-mount-3c-2026-10-02 -->
+
+Banked OPEN by S447 3c sub-call 5; SPEC §6.7.7.3 rule 7. When the tab closes or navigates while a `debounced=`
+write is pending, the timer dies, the write never lands, and the request it would have triggered never runs. Prior
+art protects the last edit with a leave warning (react-admin, Google Docs, Figma), a page-hide flush, or a local
+backup (WordPress sessionStorage, VS Code hot exit). Owed: a design (flush on `pagehide`, warn, or both), then a
+ruling. Not decided by 3c. Applies to both implementations.
