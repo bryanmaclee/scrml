@@ -45,3 +45,68 @@ Worktree: `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-acf9feeb
 `View.When` / `Stmt.Suspend` shape, its parse of the keyword form, the analyze dep resolution (E-LIFECYCLE-007 /
 E-LIFECYCLE-016 / W-LIFECYCLE-010), lower, print and check C11/C12, and the runtime registration / task /
 newest-run-wins / teardown-step-1 core of `When` minus everything listed above.
+
+## 2026-10-02 — Phase B: `<effect deps=[…]>` + the no-write rule
+
+**Runtime (commit 177c09abb).** `effectOn(scope, deps, body)` / `DepEffect` + `suspend(task, value, k)` in
+`slice-m1/runtime/runtime.js`; `Scope.ownEffect` = teardown step 1; `effectQueue` drained after the render queue.
+No guard, counter, depth or budget anywhere (STOP condition respected): an effect body cannot write, so it queues
+nothing. Transport: the task layer discards a superseded / torn-down continuation and never aborts (§6.7.7.1: abort
+is "MAY" for a READ only, "SHALL NOT" otherwise — discard everywhere is the conforming choice with no run-time
+classification). `slice-m1/effect.runtime.test.js` (19 tests).
+
+**Front end.** `ast.scrml` AEffect (`keyword` flag) + ANodeK.Effect + AStmtK.EffectStmt; `parse.scrml` the keyword
+form (from U0, `reads` now a retired-clause syntax error), `<effect deps=[…]>${ … }</>` at the char level
+(finishEffect / effectBody — E-PARSE-EFFECT for any other attribute, a non-list `deps=`, or body content other than
+one `${ }` block), and at the token level where a statement stands (parseEffectTokens — so a nested effect is
+E-LIFECYCLE-016, not parse noise; binPrec stops reading a next-line `<effect` as a comparison). `core.scrml`
+EffectDep + View.Effect + Stmt.Suspend; walk / measure / lower / print (`rt.effectOn(scope$, [cells], () => {…})`,
+`rt.suspend(task$, …)`); `check.scrml` C11 (non-empty deps, mutable deps, NO write in the body — directly or through
+a Core Fn call, transitively) and C12 (Suspend only at an effect-body tail).
+
+**analyze.scrml.** resolveEffect: E-EFFECT-NO-DEPS · E-LIFECYCLE-007 (undeclared / non-`@` / locked / derived) ·
+W-LIFECYCLE-010 · W-WHEN-EFFECT-DEPRECATED · E-LIFECYCLE-016 (effectAsStatement) · fail-closed refusals (in a
+declaration's renders, a whole-instance dep, slot content, slot fallback, outside `<program>`, an effect in a
+function / handler body). The NO-WRITE PASS (effectPass) runs after binding over `AS.effects` (the effects the
+binder accepted): one BodyScan per function (direct writes from the binder's effect facts + by shape for a refused
+write; scrml functions called or named as values; calls through a non-function name), closed over references to a
+fixed point keeping a WITNESS chain; each effect body is scanned the same way and judged against the summaries.
+
+**Gates:** slice-m1 93/0 · slice-m2 448/0 · slice-m3 60/0 · slice-m4 445/0 (+1 todo) · codec 92/0 · m1 lowered
+93/0 · lexer 337/0 · lint-no-default-arm 0 violations. `slice-m4/effect.test.js` 42 tests.
+
+**Bite (no-write rule through a called function):** `propagated` made to return its input unchanged → RED: "rule 2
+… one level and two" (`track() → logFilter() → @hits` not found) and "recursion: the summary is a fixed point";
+restored → GREEN.
+
+**Empirical (SCOPED_PROGRAM, effect.test.js) — printed JS of the `if=` region:**
+```js
+  rt.cond(scope$, n$0_1, [{ test: () => inst$.fields[1 /* show */].get(), render: (scope$, anchor$) => {
+    const root$ = rt.template("scrml:program/0_1.0");
+    rt.effectOn(scope$, [inst$.fields[0 /* n */]], () => {
+      ping();
+    });
+    rt.insert(scope$, root$, anchor$);
+  } }]);
+```
+Measured: 0 runs at mount; 1 per `inc`; 0 after the section closes; re-opening registers one effect and runs nothing.
+
+### PA readings for veto (Phase B)
+- **An effect in a function / handler body** → `E-BOOTSTRAP-UNSUPPORTED`. SPEC §6.7.4: "An `<effect>` SHALL appear
+  where a `<request>` may: as a child element of an element scope" — §34 names no code for the violation. Fail-closed
+  reject; the message cites the sentence. (Inside another effect's body it is E-LIFECYCLE-016, which §34 does name.)
+- **`lift` in an effect body (⚑ OPEN (iii))** — not decided: the bootstrap has no `lift` at all (E-SCOPE-001 /
+  parse error), so no choice was forced.
+- **`navigate()` in an effect (⚑ OPEN (ii))** — not decided: no `navigate` in the bootstrap (an undeclared name).
+- **Cross-module write summaries (⚑ OPEN (i))** — the bootstrap links every imported `.scrml` module into the one
+  compilation (FnSrc covers every file), so every callee body is present and the summary reaches across modules; an
+  unresolvable import is already an import error. No module-without-body case exists to fail closed on.
+- **A call through a local / parameter** (`const g = ping; g()`) → E-EFFECT-WRITE-UNPROVEN (rule 4). The bootstrap
+  has no function types, so a function value can only be bound to an untyped local; that path is now closed by the
+  rule.
+- **A refused write still counts.** A write the binder rejects (`@locked = 4` → E-WRITE-NOT-GRANTED, no fact) is
+  also E-EFFECT-WRITES-STATE in an effect body (detected by shape) — the author's intent was a write.
+- **Fix-by-shape "reset" detection** = `reset(@x)` or a write of a literal equal to the cell's own initializer
+  literal; "request" = a write whose value is a call; else "move / derive". The reset hint lists the effect's own
+  deps as the `reset-on=` entries.
+- **U0's E-LIFECYCLE-006 / W-LIFECYCLE-006 front-end checks are deleted** (subsumed / retired by §6.7.4).

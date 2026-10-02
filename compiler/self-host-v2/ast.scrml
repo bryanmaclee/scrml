@@ -69,12 +69,26 @@ ${
     export type AStmt:struct = { nid: int, span: ASpan, k: AStmtK }
     export type ABlock:struct = { nid: int, span: ASpan, stmts: AStmt[] }
 
+    // s449 — a reactive effect (SPEC §6.7.4): `<effect deps=[@a, @b]>${ body }</>`,
+    // or its soft-deprecated keyword spelling `when @a changes { body }` /
+    // `when (@a, @b) changes { body }` (`keyword` = true; §6.7.4 "Parses
+    // identically"). `deps` are the entries as written — analyze decides what
+    // each names (E-LIFECYCLE-007 for anything but a mutable cell); an empty
+    // list on the markup form is E-EFFECT-NO-DEPS (the keyword form's empty
+    // list is a parse error). A self-closing `<effect …/>` has an empty body.
+    export type AEffect:struct = { nid: int, span: ASpan, deps: AExpr[], body: ABlock, keyword: boolean }
+
     export type AStmtK:enum = {
         Eval(e: AExpr),                                     // an expression statement (incl. an assignment)
         Local(name: string, mutable: boolean, ty: AType | not, init: AExpr), // let / const [: T]
         Return(e: AExpr | not),
         If(cond: AExpr, thenB: ABlock, elseB: ABlock | not),
         Given(name: string, subject: AExpr, body: ABlock),  // given c = @h :> { … }
+        // s449: an effect written where a STATEMENT stands (a function or
+        // handler body, another effect's body). Parsed so analyze can name it
+        // (E-LIFECYCLE-016 inside an effect body); an effect where markup
+        // stands is ANodeK.Effect.
+        EffectStmt(w: AEffect),
     }
 
     // -------------------------------------------------------------------------
@@ -131,6 +145,10 @@ ${
         Text(text: string),        // verbatim (comments removed; whitespace-only runs kept — L13 retired, dpa-045 fu4)
         Interp(e: AExpr),          // ${ expr }
         DeclNode(d: ADecl),        // a declaration where markup may stand (a program body)
+        // s449: a reactive effect where markup stands — owned, by its position in
+        // the tree, by the nearest enclosing element scope (§6.7.4 "Scope and
+        // teardown"): the program, an `if=` element, an `<each>` row.
+        Effect(w: AEffect),
     }
 
     // -------------------------------------------------------------------------

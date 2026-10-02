@@ -29,10 +29,10 @@
 // =============================================================================
 ${
     import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
-             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, FieldMode, FieldRole,
+             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram,
              block, litStr } from "./core.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, AParam, AFn,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag,
              mkSpan } from "./ast.scrml"
     import { Node, allNodes } from "./walk.scrml"
@@ -520,6 +520,7 @@ ${
             .Return(e: e) :> [Stmt.Return(returnValue(c, e))]
             .If(cond: x, thenB: t, elseB: el) :> [Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))]
             .Given(name: n, subject: sub, body: b) :> givenStmts(c, s, b)
+            .EffectStmt(w: w) :> []              // analyze refused it (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
         }
     }
 
@@ -840,8 +841,33 @@ ${
             .Interp(e: e) :> [View.Dyn(lowerExpr(c, e))]
             .Elem(e: e) :> lowerElem(c, e)
             .DeclNode(d: d) :> []
+            .Effect(w: w) :> [effectView(c, w)]
         }
     }
+
+    // s449 — an effect → View.Effect: each dependency's field fact (analyze
+    // resolved it, or reported E-LIFECYCLE-007 and left no fact — then the
+    // program does not run). Both spellings lower alike (§6.7.4 "Parses
+    // identically").
+    fn effectView(c: LC, w: AEffect) -> View {
+        let deps: EffectDep[] = []
+        for (const d of w.deps) { deps = deps.concat(effectDep(c, nameFact(c.t.names, d.nid))) }
+        return View.Effect(deps, lowerBlock(c, w.body))
+    }
+
+    fn effectDep(c: LC, f: NameFact | not) -> EffectDep[] {
+        return match f {
+            .NField(decl: d, inst: i, idx: x) :> [mkEffectDep(d, instOf(c, i), x)]
+            .NLocal(sym: s) :> []
+            .NInst(decl: d) :> []
+            .NStruct(owner: o) :> []
+            .NFn(sym: s) :> []
+            .NLength :> []
+            not :> []
+        }
+    }
+
+    fn mkEffectDep(d: Sym, i: InstRef, x: int) -> EffectDep { return { decl: d, inst: i, idx: x } }
 
     // dpa-045 follow-up 4 (RULED S442; SPEC §4.18.5 "whitespace-only text
     // between elements is kept exactly too"): a Text node is free-text content

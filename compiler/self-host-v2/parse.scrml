@@ -36,7 +36,7 @@
 // =============================================================================
 ${
     import { Token, TokenKind, LexStop, LexRun, lexFrom, lexFromMode } from "./lex.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, ATypeK,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, mkSpan } from "./ast.scrml"
@@ -193,6 +193,8 @@ ${
         const t: PTok = cur(tp)
         if (t.cls != TC.Punct) return 0
         if (isCompoundAssign(tp)) return 0
+        // s449: `<effect deps=…` on the next line opens an element, not a comparison
+        if (effectTagAhead(tp) && tp.i > 0 && tp.toks[tp.i - 1].line != t.line) return 0
         return match t.text {
             "||"  :> 1
             "&&"  :> 2
@@ -591,8 +593,196 @@ ${
         }
         if (isWord(tp, "if")) return parseIf(tp)
         if (isWord(tp, "given")) return parseGiven(tp)
+        if (whenAhead(tp)) {
+            const rw: REffect = parseWhen(tp)
+            return mkS(rw.tp, start, AStmtK.EffectStmt(rw.w))
+        }
+        if (effectTagAhead(tp)) {
+            const re: REffect = parseEffectTokens(tp)
+            return mkS(re.tp, start, AStmtK.EffectStmt(re.w))
+        }
         const e: RExpr = parseAssign(tp)
         return mkS(e.tp, start, AStmtK.Eval(e.e))
+    }
+
+    // =========================================================================
+    // s449 — reactive effects (SPEC §6.7.4).
+    //
+    // The keyword spelling (soft-deprecated, §63 Stage 1 — it parses
+    // identically to `<effect>`):
+    //   when-stmt ::= 'when' dep-list 'changes' '{' logic-content '}'
+    //   dep-list  ::= '@' identifier | '(' '@' identifier (',' '@' identifier)* ')'
+    // `when` / `changes` are contextual words: `when` starts one only before
+    // `@` or before a parenthesized list followed by `changes` (a function
+    // named `when` stays a call). The `reads` clause RETIRES with no window —
+    // a syntax error saying so (§6.7.4 "The `reads` clause retires").
+    //
+    // The markup spelling `<effect deps=[…]>${ … }</>` is parsed at the char
+    // level (finishEffect) where markup stands; where a STATEMENT stands (a
+    // function body, another effect's body) it is read from the tokens here
+    // (parseEffectTokens), so analyze can name the position (E-LIFECYCLE-016
+    // inside an effect body).
+    // =========================================================================
+    type REffect:struct = { w: AEffect, tp: TP }
+
+    fn whenAhead(tp: TP) -> boolean {
+        if (!isWord(tp, "when")) return false
+        const nx: PTok = peekAt(tp, 1)
+        if (nx.cls == TC.At) return true
+        if (nx.text != "(" || nx.cls == TC.Str) return false
+        let k: int = 2
+        let depth: int = 1
+        while (depth > 0) {
+            const t: PTok = peekAt(tp, k)
+            if (t.cls == TC.End) return false
+            if (t.cls != TC.Str && t.text == "(") depth = depth + 1
+            if (t.cls != TC.Str && t.text == ")") depth = depth - 1
+            k = k + 1
+        }
+        const after: PTok = peekAt(tp, k)
+        return (after.cls == TC.Ident || after.cls == TC.Keyword) && after.v == "changes"
+    }
+
+    // At `when`.
+    fn parseWhen(tp: TP) -> REffect {
+        const start: int = cur(tp).start
+        const ds: RExprs = parseDepList(adv(tp))
+        let t: TP = ds.tp
+        if (isWord(t, "changes")) {
+            t = adv(t)
+        } else {
+            t = diagAt(t, "E-PARSE-WHEN", "expected `changes` after the `when` dep-list (§6.7.4: `when @x changes { … }` — or write `<effect deps=[@x]>" + interpOpen() + " … }</>`)", cur(t))
+        }
+        if (isWord(t, "reads")) {
+            const r: PTok = cur(t)
+            t = diagAt(t, "E-PARSE-WHEN", "the `reads` clause is retired (§6.7.4): reading a cell the effect does not list needs no annotation — the body reads its current value when it runs; delete `reads …`", r)
+            const rs: RExprs = parseDepList(adv(t))
+            t = rs.tp
+        }
+        const body: RBlock = parseBlock(t)
+        const w: AEffect = { nid: body.tp.nid, span: spanFrom(body.tp, start), deps: ds.es, body: body.b, keyword: true }
+        return { w: w, tp: bumpId(body.tp) }
+    }
+
+    // `@x` or `(@a, @b, …)` — at least one entry (the keyword form's empty
+    // dep-list was a syntax error; the markup form names it E-EFFECT-NO-DEPS).
+    fn parseDepList(tp: TP) -> RExprs {
+        if (!isP(tp, "(")) {
+            const one: RExpr = parseDepItem(tp)
+            return { es: [one.e], tp: one.tp }
+        }
+        let t: TP = adv(tp)
+        if (isP(t, ")")) {
+            t = diagAt(t, "E-PARSE-WHEN", "an empty dep-list `()` is a syntax error — an effect names at least one `@cell` (§6.7.4)", cur(t))
+            return { es: [], tp: adv(t) }
+        }
+        let es: AExpr[] = []
+        let going = true
+        while (going) {
+            const r: RExpr = parseDepItem(t)
+            es = es.concat([r.e])
+            t = r.tp
+            if (isP(t, ",")) {
+                t = adv(t)
+            } else {
+                going = false
+            }
+        }
+        t = expectP(t, ")")
+        return { es: es, tp: t }
+    }
+
+    // One keyword dep-list entry: `@name` and nothing else (the grammar's
+    // `'@' identifier`).
+    fn parseDepItem(tp: TP) -> RExpr {
+        const t: PTok = cur(tp)
+        if (t.cls == TC.At) {
+            const r: RExpr = parseAt(tp)
+            if (isAtName(r.e)) return r
+            const bad: TP = diagAt(r.tp, "E-PARSE-WHEN", "a dep-list entry is `@name` (§6.7.4)", t)
+            return { e: r.e, tp: bad }
+        }
+        const d: TP = diagAt(tp, "E-PARSE-WHEN", "a dep-list entry is `@name` (§6.7.4), found `" + t.text + "`", t)
+        return mkE(adv(d), t.start, AExprK.Recovered)
+    }
+
+    fn isAtName(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .At(name: n) :> true
+            .Name(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: v) :> false
+            .Bool(v: v) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: p) :> false
+        }
+    }
+
+    // `<effect` where a statement stands: `<` touching the word `effect`.
+    fn effectTagAhead(tp: TP) -> boolean {
+        if (!isP(tp, "<")) return false
+        const nx: PTok = peekAt(tp, 1)
+        return touching(cur(tp), nx) && nx.cls == TC.Ident && nx.v == "effect"
+    }
+
+    // At `<effect` in a token run: `deps=[…]`, then `/>` or `>` `${ … }` `</>`
+    // (or `</effect>`). Anything else is E-PARSE-EFFECT and recovery skips to
+    // the end of the run's statement.
+    fn parseEffectTokens(tp: TP) -> REffect {
+        const start: int = cur(tp).start
+        let t: TP = adv(adv(tp))
+        let deps: AExpr[] = []
+        if (isWord(t, "deps") && isP(adv(t), "=") && isP(adv(adv(t)), "[")) {
+            const rl: RExprs = parseList(adv(adv(adv(t))), "]")
+            deps = rl.es
+            t = rl.tp
+        }
+        let body: ABlock = { nid: t.nid, span: spanFrom(t, start), stmts: [] }
+        if (isP(t, "/") && isP(adv(t), ">")) {
+            t = adv(adv(t))
+        } else if (isP(t, ">")) {
+            t = adv(t)
+            if (cur(t).text == "$" && isP(adv(t), "{")) {
+                const b: RBlock = parseBlock(adv(t))
+                body = b.b
+                t = b.tp
+            }
+            if (isP(t, "<") && isP(adv(t), "/")) {
+                t = adv(adv(t))
+                if (isWord(t, "effect")) t = adv(t)
+                t = expectP(t, ">")
+            } else if (isP(t, "<") && closerAsRegex(peekAt(t, 1))) {
+                // after `<` the lexer reads a `/` as a regex opener: `</>` / `</effect>`
+                // at the end of a line arrives as one unterminated regex token
+                t = adv(adv(t))
+            } else {
+                t = diagAt(t, "E-PARSE-EFFECT", "expected `" + interpOpen() + " … }</>` after `<effect deps=[…]>` (§6.7.4: an effect body is one `" + interpOpen() + " }` logic block)", cur(t))
+            }
+        } else {
+            t = diagAt(t, "E-PARSE-EFFECT", "expected `deps=[…]` then `>` or `/>` in `<effect …>` (§6.7.4)", cur(t))
+        }
+        const w: AEffect = { nid: t.nid, span: spanFrom(t, start), deps: deps, body: body, keyword: false }
+        return { w: w, tp: bumpId(t) }
+    }
+
+    // A closer the logic lexer read as a regex (`/>` or `/effect>`, alone to the end of its line).
+    fn closerAsRegex(t: PTok) -> boolean {
+        const s: string = t.text.trim()
+        return s == "/>" || s == "/effect>"
     }
 
     fn parseLocal(tp: TP) -> RStmt {
@@ -738,6 +928,14 @@ ${
         if (isWord(t, "type")) return parseTypeDecl(t, start, exported)
         if (isWord(t, "function")) return parseFn(t, start, exported, false)
         if (isWord(t, "fn")) return parseFn(t, start, exported, true)
+        // s449: a keyword `when` at logic-item level (a `<program>` body, a
+        // program-level `${…}`) is an effect where markup stands — owned by the
+        // scope it stands in, exactly as an `<effect>` element there is.
+        if (!exported && whenAhead(t)) {
+            const rw: REffect = parseWhen(t)
+            const n: ANode = { nid: rw.tp.nid, span: rw.w.span, k: ANodeK.Effect(rw.w) }
+            return mkItem(bumpId(rw.tp), start, AItemK.MarkupItem(n))
+        }
         const bad: PTok = cur(t)
         const d: TP = diagAt(t, "E-PARSE-ITEM", "expected `import`, `type`, `function` or `fn` in a logic block, found `" + bad.text + "` (statements at logic-block level are not in bootstrap slice M2)", bad)
         return { items: [], tp: skipToLineEnd(d) }
@@ -2087,6 +2285,22 @@ ${
         const start: int = mp.pos
         const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
         let t: TP = expectP(tp, "{")
+        // s449: `${ when … changes { … } }` — a logic block in markup holding a
+        // keyword-spelled effect, owned by the nearest enclosing element scope
+        // (§6.7.4). One effect per block in the bootstrap; anything after it is
+        // refused (the canonical spelling there is an `<effect>` element).
+        if (whenAhead(t)) {
+            const rw: REffect = parseWhen(t)
+            t = rw.tp
+            if (!isP(t, "}")) {
+                t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a `" + interpOpen() + "…}` logic block in markup holds exactly one `when` in the bootstrap — give each statement its own block, or write `<effect deps=[…]>" + interpOpen() + " … }</>`", cur(t))
+                while (!atEnd(t) && !(isP(t, "}") && atEnd(adv(t)))) { t = adv(t) }
+            }
+            t = expectRegionEnd(expectP(t, "}"))
+            const mw: MP = backToMarkup(mp, t)
+            const nw: ANode = { nid: mw.nid, span: mkSpan(start, mw.pos), k: ANodeK.Effect(rw.w) }
+            return { n: nw, mp: mBump(mw) }
+        }
         const r: RExpr = parseAssign(t)
         t = expectP(r.tp, "}")
         t = expectRegionEnd(t)
@@ -2103,6 +2317,7 @@ ${
             const t: ANode = { nid: m.nid, span: mkSpan(ro.o.start, m.pos), k: ANodeK.Text("") }
             return { n: t, mp: mBump(m) }
         }
+        if (isEffectOpener(ro.o)) return effectNode(finishEffect(ro.o, ro.mp))
         const k: TagKind = tagKind(ro.o)
         return match k {
             .IsDecl :> declNode(finishDecl(ro.o, ro.mp, false))
@@ -2126,6 +2341,118 @@ ${
             m = kids.mp
         }
         return mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`<theme>` (§66.17 — tokens lower to CSS custom properties) is not in the bootstrap: it has no CSS emission in this slice", o.start, m.pos)
+    }
+
+    // ---- s449: `<effect deps=[…]>${ … }</>` (SPEC §6.7.4) ---------------------
+    //   effect-decl ::= '<effect' deps-attr '>' effect-body '</' 'effect'? '>'
+    //                 | '<effect' deps-attr '/>'          (empty — W-LIFECYCLE-010)
+    //   deps-attr   ::= 'deps=' '[' dep-item (',' dep-item)* ']'
+    //   effect-body ::= '$' '{' logic-content '}'
+    // A lifecycle element (the family of `<request>`): it renders nothing; its
+    // trigger is `deps=`, its body ONE `${ }` logic block, its lifetime its
+    // position in the tree. The entries are kept as written — analyze decides
+    // what each names (a non-`@` entry is E-LIFECYCLE-007, §6.7.4); a missing
+    // `deps=` or `deps=[]` is analyze's E-EFFECT-NO-DEPS.
+    type REffectNode:struct = { w: AEffect, mp: MP }
+
+    fn isEffectOpener(o: Opener) -> boolean { return !o.star && o.name == "effect" }
+
+    fn finishEffect(o: Opener, mp: MP) -> REffectNode {
+        let m: MP = mp
+        let deps: AExpr[] = []
+        for (const a of o.attrs) {
+            if (a.name == "deps") {
+                const es: AExpr[] | not = depsList(a.value)
+                if (es is some) {
+                    deps = es
+                } else {
+                    m = mDiag(m, "E-PARSE-EFFECT", "`deps=` takes a bracketed list of cells, `deps=[@a, @b]` (§6.7.4)", a.span.start, a.span.end)
+                }
+            } else {
+                m = mDiag(m, "E-PARSE-EFFECT", "`<effect>` takes one attribute, `deps=[…]` — `" + a.name + "` is not one (§6.7.4)", a.span.start, a.span.end)
+            }
+        }
+        const ownTy: AType | not = o.ty
+        if (o.typed.length > 0 || o.vals.length > 0 || hasOwn(o.own) || ownTy is some || o.isLet) {
+            m = mDiag(m, "E-PARSE-EFFECT", "`<effect>` declares nothing — it takes only `deps=[…]` (§6.7.4)", o.start, m.pos)
+        }
+        let body: ABlock = { nid: m.nid, span: mkSpan(m.pos, m.pos), stmts: [] }
+        m = mBump(m)
+        const sh: ANode[] | not = o.short
+        if (sh is some) {
+            m = mDiag(m, "E-PARSE-EFFECT", "an `<effect>` body is a `" + interpOpen() + " … }` logic block, not a `:`-shorthand (§6.7.4)", o.start, m.pos)
+        } else if (!o.selfClosing) {
+            const rb: RBodyBlock = effectBody(m)
+            body = rb.b
+            m = rb.mp
+        }
+        const w: AEffect = { nid: m.nid, span: mkSpan(o.start, m.pos), deps: deps, body: body, keyword: false }
+        return { w: w, mp: mBump(m) }
+    }
+
+    // `deps=[…]`: the list's entries, or `not` when the value is not a bracketed list.
+    fn depsList(v: AAttrValue) -> AExpr[] | not {
+        return match v {
+            .Bare(e: e) :> arrayEntries(e)
+            .NoValue :> not
+            .Quoted(v: s) :> not
+            .Paren(e: e) :> not
+            .Braced(b: b) :> not
+        }
+    }
+
+    fn arrayEntries(e: AExpr) -> AExpr[] | not {
+        const k: AExprK = e.k
+        return match k {
+            .ArrayLit(elems: es) :> es
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    type RBodyBlock:struct = { b: ABlock, mp: MP }
+
+    // After `<effect …>`: whitespace, ONE `${ … }` block (statements), whitespace,
+    // the closer. Any other content is E-PARSE-EFFECT (consumed to the closer,
+    // never rendered — an effect renders nothing).
+    fn effectBody(mp: MP) -> RBodyBlock {
+        let m: MP = skipTrivia(mp)
+        let body: ABlock = { nid: m.nid, span: mkSpan(m.pos, m.pos), stmts: [] }
+        m = mBump(m)
+        if (atInterp(m)) {
+            const tp: TP = regionTP(mAdv(m, 1), LexStop.Balanced)
+            const b: RBlock = parseBlock(tp)
+            body = b.b
+            m = skipTrivia(backToMarkup(m, expectRegionEnd(b.tp)))
+        }
+        if (!mLooking(m, "</")) {
+            const from: int = m.pos
+            const rest: RNodes = parseKids(m, "effect")
+            return { b: body, mp: mDiag(rest.mp, "E-PARSE-EFFECT", "an `<effect>` body is exactly one `" + interpOpen() + " … }` logic block (§6.7.4) — it renders nothing, so markup or text in it is an error", from, rest.mp.pos) }
+        }
+        return { b: body, mp: parseCloser(m, "effect") }
+    }
+
+    fn effectNode(r: REffectNode) -> RNodeOne {
+        const n: ANode = { nid: r.mp.nid, span: r.w.span, k: ANodeK.Effect(r.w) }
+        return { n: n, mp: mBump(r.mp) }
     }
 
     fn declNode(r: RDecl) -> RNodeOne {
@@ -2381,6 +2708,8 @@ ${
             return logicRegionItem(mp, LexStop.Statement)
         }
         if (w.w == "function" || w.w == "fn" || w.w == "type") return logicRegionItem(mp, LexStop.Statement)
+        // s449: the keyword `when … changes { … }` at the program body top (§40.8: code)
+        if (w.w == "when") return logicRegionItem(mp, LexStop.Statement)
         if (w.w == "import") return logicRegionItem(mp, LexStop.Line)
         const d: MP = mDiag(mp, "E-PARSE-ITEM", "unexpected text at program level", start, start + 1)
         return { items: [], mp: skipLineComment(d) }
@@ -2396,6 +2725,14 @@ ${
         const ro: ROpener = parseOpener(mp)
         const o: Opener = ro.o
         if (isThemeOpener(o)) return { items: [], mp: refuseTheme(o, ro.mp) }
+        if (isEffectOpener(o)) {
+            // s449: an `<effect>` at the program body top — owned by the program scope
+            const re: REffectNode = finishEffect(o, ro.mp)
+            let em: MP = re.mp
+            if (exported) em = mDiag(em, "E-PARSE-EXPORT", "`export` applies to a declaration, not to an `<effect>`", re.w.span.start, re.w.span.end)
+            const n: ANode = { nid: em.nid, span: re.w.span, k: ANodeK.Effect(re.w) }
+            return mItem(mBump(em), re.w.span.start, AItemK.MarkupItem(n))
+        }
         const k: TagKind = tagKind(o)
         return match k {
             .IsProgram :> programItem(o, ro.mp)

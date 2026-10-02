@@ -28,7 +28,7 @@
 ${
     import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
              HostCall, SeqFn, BindKind,
-             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, FieldRole, Field,
+             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
              Decl, Fn, CoreProgram, CapOwner,
              findDecl, findTypeDef, typeDefSym, capOwner } from "./core.scrml"
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
@@ -458,7 +458,17 @@ ${
             .If(cond: c, thenB: t, elseB: e) :> [JsStmt.SIf(exprJs(ctx, c), blockJs(ctx, t), elseJs(ctx, e))]
             .Return(e: e) :> [JsStmt.SReturn(exprJs(ctx, e))]
             .Eval(e: e) :> [sexpr(exprJs(ctx, e))]
+            .Suspend(bind: b, on: on, then: t) :> [suspendJs(ctx, b, on, t)]
         }
+    }
+
+    // s449 — `rt.suspend(task$, <on>, (x) => { <then> })`: the CPS split
+    // (§19.9.8). The continuation never runs if the effect that owns `task$`
+    // was re-run (newest run wins) or torn down while the value was pending.
+    // C12 puts a Suspend only at the tail of an effect body, whose arrow binds
+    // `task$`.
+    fn suspendJs(ctx: Ctx, b: Sym, on: Expr, t: Block) -> JsStmt {
+        return sexpr(rtCall(ctx, "suspend", [jid("task$"), exprJs(ctx, on), JsExpr.JArrow([symName(ctx, b)], blockJs(ctx, t))]))
     }
 
     fn letJs(ctx: Ctx, sym: Sym, init: Expr, assigned: int[]) -> JsStmt {
@@ -512,6 +522,7 @@ ${
             .If :> []
             .Return :> []
             .Eval :> []
+            .Suspend :> []
         }
     }
 
@@ -524,6 +535,7 @@ ${
             .If :> []
             .Return :> []
             .Eval :> []
+            .Suspend :> []
         }
     }
 
@@ -625,6 +637,8 @@ ${
             .Instance(decl: d) :> hole(HNode.HComment(d.hint), path, v)
             .Slot :> hole(HNode.HComment("slot"), path, v)
             .Star(decl: d) :> hole(HNode.HComment("*" + d.hint), path, v)
+            // s449: an `<effect>` renders no DOM; its comment keeps child-index paths positional
+            .Effect :> hole(HNode.HComment("effect"), path, v)
         }
     }
 
@@ -677,9 +691,11 @@ ${
         const built: Built = buildNodes(ctx, views, [])
         let stmts: JsStmt[] = [JsStmt.SConst("root$", rtCall(ctx, "template", [jstr(tid)]))]
         for (const h of built.holes) {
-            let args: JsExpr[] = [jid("root$")]
-            for (const i of h.path) { args = args.concat([jnum(i)]) }
-            stmts = stmts.concat([JsStmt.SConst(nodeVar(h.path), rtCall(ctx, "at", args))])
+            if (holeNeedsNode(h.v)) {
+                let args: JsExpr[] = [jid("root$")]
+                for (const i of h.path) { args = args.concat([jnum(i)]) }
+                stmts = stmts.concat([JsStmt.SConst(nodeVar(h.path), rtCall(ctx, "at", args))])
+            }
         }
         let templates: Template[] = [{ id: tid, nodes: built.nodes }]
         // Instance holes are numbered in document order — the order in which
@@ -716,6 +732,22 @@ ${
             .Each :> false
             .Slot :> false
             .Star :> false
+            .Effect :> false
+        }
+    }
+
+    // s449: an `<effect>` hole is wired from its Core alone — it has no node to look up.
+    fn holeNeedsNode(v: View) -> boolean {
+        return match v {
+            .Effect(deps: ds) :> false
+            .El(tag: t) :> true
+            .Text(text: t) :> true
+            .Dyn(e: e) :> true
+            .Cond(arms: a) :> true
+            .Each(src: s) :> true
+            .Instance(decl: d) :> true
+            .Slot :> true
+            .Star(decl: d) :> true
         }
     }
 
@@ -739,6 +771,7 @@ ${
             .Each :> []
             .Slot :> []
             .Star :> []
+            .Effect :> []
         }
     }
 
@@ -754,6 +787,47 @@ ${
             .Instance(decl: d, attrs: attrs, slot: slot, alias: alias) :> instanceJs(ctx, d, attrs, slot, alias, node, h.path, tid, kid)
             .Slot :> only([sexpr(rtCall(ctx, "slot", [scopeVar(), node, ctx.slot]))])
             .Star(decl: d, inst: i) :> starJs(ctx, d, i, node)
+            .Effect(deps: ds, body: b) :> effectJs(ctx, ds, b)
+        }
+    }
+
+    // s449 — `rt.effectOn(scope$, [<dependency cells>], (task$) => { <body> })`
+    // (§6.7.4): registered into the scope this view list renders into, so it is
+    // unregistered with that scope (teardown step 1). The dependencies are the
+    // cells themselves — the effect subscribes to exactly those. `task$` is
+    // bound only when the body suspends (C12).
+    fn effectJs(ctx: Ctx, deps: EffectDep[], body: Block) -> Rendered {
+        let cells: JsExpr[] = []
+        for (const dep of deps) {
+            const d: Decl | not = findDecl(ctx.p, dep.decl)
+            if (d is some) {
+                cells = cells.concat([fieldCell(instJs(ctx, dep.inst), d, dep.idx)])
+            } else {
+                cells = cells.concat([jid("unboundDecl$" + dep.decl.id)])
+            }
+        }
+        let params: string[] = []
+        if (suspends(body)) params = ["task$"]
+        return only([sexpr(rtCall(ctx, "effectOn", [scopeVar(), JsExpr.JArray(cells), JsExpr.JArrow(params, blockJs(ctx, body))]))])
+    }
+
+    fn suspends(b: Block) -> boolean {
+        for (const s of b.stmts) {
+            if (isSuspend(s)) return true
+        }
+        return false
+    }
+
+    fn isSuspend(s: Stmt) -> boolean {
+        return match s {
+            .Suspend(bind: b) :> true
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Write(cap: x) :> false
+            .Commit(writes: x) :> false
+            .If(cond: x) :> false
+            .Return(e: x) :> false
+            .Eval(e: x) :> false
         }
     }
 
@@ -909,6 +983,7 @@ ${
             .Each(src: s) :> false
             .Slot :> false
             .Star(decl: d) :> false
+            .Effect(deps: ds) :> false
         }
     }
 
@@ -1187,6 +1262,7 @@ ${
             .Each :> []
             .Slot :> []
             .Star :> []
+            .Effect :> []
         }
     }
 
