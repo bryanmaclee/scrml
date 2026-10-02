@@ -231,3 +231,45 @@ derived flush; `@qty` unlisted never triggers. scoped: the effect stops firing a
   v2 lexer 337/337. Full suite via the commit hooks of 0d1edcc46 / 5eecc60ec: 33,847 pass / 84 skip / 0 fail
   (33,943 tests / 1,422 files).
 - DONE (round 3). Deferred: F3 (U1 blocker, unchanged); SPEC questions (3), (6), (7) — (7) owns the provisional budget.
+
+## Fix round r3b (S239 review of 71acdd81c: LAND-WITH-NITS, no fourth shape) — 2026-10-01T18:30–19:05-06:00
+
+- Probes: the reviewer's p1/p3/p4 (scratchpad rev-u0-r3/), copied and retargeted at this worktree; runtime-r2.js for
+  comparison. All four findings REPRODUCED on 71acdd81c before any change:
+  F1 order-selfrerun r3 ["A1","A2","B2"] vs r2 ["A1","B1","A2","B2"]. F2 loader N=10001/12000 → loadingAfter=true,
+  doneSeen=0 + "runaway"; rows-observe-sel N=5100 → rowRuns=4900, afterRuns=0. F3 rowcycle n=60 → runs=10060 +
+  "runaway". F4 async self-poll → runs=2, t=3 + E-LIFECYCLE-006.
+- F1 FIXED: pending re-runs park on a LIFO `rerunStack` popped only when `whenQueue` is empty (r2 nested-flush order,
+  iterative). After: ["A1","B1","A2","B2"]; three-level test A1 B1 C1 B10 C2 A2 B11 C3. DESIGN "Order is unchanged"
+  replaced by the ORDER entry.
+- SIDE EFFECT FOUND + FIXED: with the r2 order, the per-ancestry-path cyclic cap went exponential on dense cycles
+  (rowcycle n=6: 92 → 307; n=10: 272 → over budget). Added a per-When-per-event cap on CYCLIC re-runs (non-cyclic
+  never counted). After: n=3/6/10/12/14 → 10/59/453/1205/3177, over budget from n=16 (r2: 12/42/110/156/210). The
+  remaining growth is NON-cyclic re-runs along every simple path — escalated (DESIGN §5 ESCALATION), not patched.
+- PERF FOUND + FIXED: ancestry counted per observer per write (chain walk) → R2-2 cubic (runtime: 500 → 0.11 s,
+  1,000 → 1.0 s, 2,000 → 9.6 s; the e2e sweep at 5,000 timed out at 300 s). One-slot counts cache per writing cause +
+  the count stored beside each queued cause → 1,000 → 28 ms, 2,000 → 112 ms, 5,000 → 0.73 s, 10,000 → 2.9 s.
+- F2 FIXED: budget charges caused RUNS only (registrations counted for the label). After: loader N=9000/10001/12000 →
+  loadingAfter=false, doneSeen=1, 0 errors; rows-observe-sel N=5100 → 5100/afterRuns=1 at budget 10,000 — BUT at the
+  re-tuned 5,000 that example is stopped again (5,100 caused runs > 5,000): stated in the trade-off table.
+  Re-tune: WHEN_EVENT_BUDGET 10000 → 5000, PROVISIONAL. R2-2 from source: 1,000 → 0.22 s, 2,000 → 0.71 s, 5,000 →
+  4.0 s, 10,000 → 19.7 s (round 3: 5.2 s at 10,000 runs+registrations ≈ 5,000 runs). Runtime-only figures above.
+  Stop report now says "STOPPED — page state may now be inconsistent", names runaway growth vs bounded cascade, and is
+  dispatched as a window `error` event as well as console.error (§19.6.8 B3/B5 analog; `reportError` is the Bun
+  process global under the test DOM and kills the process — measured).
+- F3 FIXED (label): rowcycle n=60 → "when cascade over budget — … (a bounded cascade or cycle; no whens were created,
+  so it is not runaway growth)". R2-2 → "runaway growth — … while creating N new whens".
+- F4: behaviour UNCHANGED (measured after: runs=2, t=3, E-LIFECYCLE-006). DESIGN: "impl#1 parity" wording replaced by
+  an explicit DIVERGENCE note; SPEC question (8) added. Runtime comment updated the same way.
+- NEW ESCALATION (DESIGN §5): a per-event RUN budget cannot separate (1) dense cycles, (2) legitimate caused fan-out
+  > budget, (3) legitimate long continuation streams (measured: 12,000 updates from one event → stopped at 5,000,
+  st=5,001; not source-expressible until U1). An ancestry-DEPTH bound would separate them; not implemented — it is the
+  (7) ruling's unit, not a fix-round call.
+- Tests: when.runtime.test.js new describe "review r3b …" (6 tests); R2-2 runtime test → new message / 5,001 bound;
+  chain test 6,000 → 4,900 links (under budget); slice-m4 R2-2 e2e → exactly ONE page error (the report), raw dispatch.
+- BITES (each RED, runtime restored byte-identical — cmp): f1 order (rerun before whenQueue) → 3 RED; FIFO rerunStack
+  → 2 RED; registration charging → loader RED; label ignoring `created` → F3 label RED; no per-When cyclic cap → cap
+  test RED; no window dispatch → loud test RED; stale counts cache → 6 RED; re-entrant flush → 4,900-chain RangeError.
+- Code + tests → e99edda17 (pre-commit hook: 33,847 pass / 84 skip / 0 fail, 33,943 tests / 1,422 files).
+- GATES (final runtime): lint 61 files 0 violations · slice-m1 112/112 · lowered slice-m1 112/112 · slice-m2 448/448 ·
+  slice-m3 64/64 · slice-m4 435 + 1 todo / 0 fail · slice-codec 92/92 · v2 lexer 337/337.
