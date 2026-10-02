@@ -2517,14 +2517,36 @@ export function generateClientJs(ctx: CompileContext): string {
     lines.push("          credentials: 'include',");
     lines.push("          headers: tok ? { 'X-CSRF-Token': tok } : {},");
     lines.push("        });");
-    lines.push("        let _scrml_resp = await _scrml_post((_scrml_meta && _scrml_meta.getAttribute('content')) || _scrml_cookie_tok());");
-    lines.push("        if (_scrml_resp.status === 403) {");
-    lines.push("          const _scrml_fresh = _scrml_cookie_tok();");
-    lines.push("          if (_scrml_meta && _scrml_fresh) _scrml_meta.setAttribute('content', _scrml_fresh);");
-    lines.push("          _scrml_resp = await _scrml_post(_scrml_fresh);");
+    // S449 review fix — fail HONESTLY. Only a 2xx clears the projection and
+    // redirects: on a final non-2xx (e.g. 403 after the one retry) or a network
+    // failure the server session may still be alive, so redirecting to the login
+    // page would tell the user they are logged out when they are not (the
+    // shared-computer hazard). Instead the projection is left intact and the
+    // failure is reported through the scrml client error surface
+    // `_scrml_error_boundary_log` (the always-included 'errors' runtime chunk —
+    // the same reporter the server-fn call IIFEs route rejections to). destroy()
+    // resolves `true` on logout, `false` on failure; it does not reject, because
+    // `onclick=session.destroy()` is wired without a `.catch` and a rejection
+    // would be a silent browser-level unhandledrejection.
+    lines.push("        let _scrml_resp;");
+    lines.push("        try {");
+    lines.push("          _scrml_resp = await _scrml_post((_scrml_meta && _scrml_meta.getAttribute('content')) || _scrml_cookie_tok());");
+    lines.push("          if (_scrml_resp.status === 403) {");
+    lines.push("            const _scrml_fresh = _scrml_cookie_tok();");
+    lines.push("            if (_scrml_meta && _scrml_fresh) _scrml_meta.setAttribute('content', _scrml_fresh);");
+    lines.push("            _scrml_resp = await _scrml_post(_scrml_fresh);");
+    lines.push("          }");
+    lines.push("        } catch (_scrml_err) {");
+    lines.push("          _scrml_error_boundary_log('session.destroy', _scrml_err);");
+    lines.push("          return false;");
+    lines.push("        }");
+    lines.push("        if (!_scrml_resp.ok) {");
+    lines.push("          _scrml_error_boundary_log('session.destroy', new Error('session.destroy() failed: the server answered ' + _scrml_resp.status + ' — the session was NOT ended'));");
+    lines.push("          return false;");
     lines.push("        }");
     lines.push("        _scrml_session = null;");
     lines.push(`        window.location.href = ${JSON.stringify(loginRedirect)};`);
+    lines.push("        return true;");
     lines.push("      },");
     lines.push("    };");
     lines.push("    _scrml_session_init();");

@@ -95,3 +95,10 @@ Why (a): one spelling per meaning. `session.x` already exists, is bound by the s
 - Final corpus vs base (2204 units): newly failing 0; warn-set changes only the 4 listed under item 1.
 - RULINGS NEEDED: R1 (item 1 error escalation), R2 (item 2 @session meaning + interim reject; corpus 1).
 - SPEC follow-ups (not edited — not the agent's authority): §52.13.2 should mention W-ATTR-002 for a NON-literal auth=; the S385 A1 WAL/busy-timeout ruling has no SPEC sentence.
+
+## Fix round (S239 review of fab618461, LAND-WITH-NITS) — 2026-10-02T15:30-06:00
+
+### F1 (MUST FIX, introduced by item 6) — session.destroy() ignored the final status
+- Before: a 403 on the retry still nulled `_scrml_session` and redirected to loginRedirect, so the user believed they were logged out while the server session lived.
+- Now: only `resp.ok` clears the projection and redirects (resolves `true`). On a final non-2xx, or a network rejection, the projection is left intact, the call resolves `false`, and the failure is reported through `_scrml_error_boundary_log('session.destroy', err)`. That is the existing client error surface: it lives in the always-included 'errors' runtime chunk and is the reporter the server-fn call IIFEs already route rejections to. destroy() does not reject, because `onclick=session.destroy()` is wired without a `.catch`; a rejection there would be a silent unhandledrejection.
+- Test: session-destroy-csrf.test.js now 8 tests: 403->200 logs out, direct 200 logs out (1 POST), stubbed 403x2 -> no redirect, projection unchanged, one logged failure naming 403, resolves false. 3 fail on the previous emitter.

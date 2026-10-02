@@ -87,31 +87,60 @@ out.none = { status: none.status };
 
 // Client half: run the EMITTED @session projection against the real server, with a
 // cookie jar standing in for the browser (the HttpOnly session cookie is sent but not
-// visible to document.cookie; scrml_csrf is both).
-store.set("sid-b", { userId: "bob" });
-const jar = new Map([[ck, "sid-b"]]);
-const visible = () => [...jar].filter(([k]) => k === "scrml_csrf").map(([k, v]) => k + "=" + v).join("; ");
-const calls = [];
-globalThis.fetch = (orig => async (path, init = {}) => {
-  const headers = { ...(init.headers || {}), Cookie: [...jar].map(([k, v]) => k + "=" + v).join("; ") };
-  const r = await orig(base + path, { ...init, headers });
-  calls.push({ path, method: init.method || "GET", tok: (init.headers || {})["X-CSRF-Token"] || null, status: r.status });
-  const sc = r.headers.get("set-cookie") || "";
-  const m = sc.match(/^([^=;]+)=([^;]*)/);
-  if (m) { if (/Expires=Thu, 01 Jan 1970/.test(sc)) jar.delete(m[1]); else jar.set(m[1], m[2]); }
-  return r;
-})(globalThis.fetch);
-const meta = { content: "stale-token-from-first-paint", getAttribute() { return this.content; }, setAttribute(_, v) { this.content = v; } };
-globalThis.document = { get cookie() { return visible(); }, querySelector: (s) => (s.includes("csrf-token") ? meta : null) };
-globalThis.window = { location: { href: "/" } };
+// visible to document.cookie; scrml_csrf is both). Each scenario builds a FRESH
+// projection (no window singleton carried over). "deny" stubs the destroy route to
+// answer 403 every time (the server is never reached for it).
+const realFetch = globalThis.fetch;
 const clientSrc = await Bun.file(clientPath).text();
 const start = clientSrc.indexOf("// --- @session reactive projection");
 const end = clientSrc.indexOf("\\n  })();", start) + "\\n  })();".length;
 const block = clientSrc.slice(start, end);
-const session = new Function(block + "\\nreturn session;")();
-await new Promise((r) => setTimeout(r, 50));
-await session.destroy();
-out.client = { kept: store.has("sid-b"), redirect: globalThis.window.location.href, posts: calls.filter((c) => c.method === "POST").map((c) => ({ status: c.status, tok: c.tok })) };
+async function runClient(sid, metaToken, deny) {
+  const jar = new Map([[ck, sid]]);
+  const visible = () => [...jar].filter(([k]) => k === "scrml_csrf").map(([k, v]) => k + "=" + v).join("; ");
+  const calls = [];
+  const logged = [];
+  globalThis.fetch = async (path, init = {}) => {
+    const method = init.method || "GET";
+    const tok = (init.headers || {})["X-CSRF-Token"] || null;
+    if (deny && method === "POST") {
+      calls.push({ method, tok, status: 403 });
+      return new Response(JSON.stringify({ error: "CSRF validation failed" }), { status: 403 });
+    }
+    const headers = { ...(init.headers || {}), Cookie: [...jar].map(([k, v]) => k + "=" + v).join("; ") };
+    const r = await realFetch(base + path, { ...init, headers });
+    calls.push({ method, tok, status: r.status });
+    const sc = r.headers.get("set-cookie") || "";
+    const m = sc.match(/^([^=;]+)=([^;]*)/);
+    if (m) { if (/Expires=Thu, 01 Jan 1970/.test(sc)) jar.delete(m[1]); else jar.set(m[1], m[2]); }
+    return r;
+  };
+  globalThis._scrml_error_boundary_log = (id, err) => logged.push(id + ": " + String((err && err.message) || err));
+  const meta = { content: metaToken, getAttribute() { return this.content; }, setAttribute(_, v) { this.content = v; } };
+  globalThis.document = { get cookie() { return visible(); }, querySelector: (s) => (s.includes("csrf-token") ? meta : null) };
+  globalThis.window = { location: { href: "/" } };
+  const session = new Function(block + "\\nreturn session;")();
+  await new Promise((r) => setTimeout(r, 50));
+  const before = JSON.stringify(session.current);
+  const result = await session.destroy();
+  return {
+    result, kept: store.has(sid), redirect: globalThis.window.location.href,
+    projectionUnchanged: JSON.stringify(session.current) === before, projectionNull: session.current === null,
+    logged, posts: calls.filter((c) => c.method === "POST").map((c) => ({ status: c.status, tok: c.tok })),
+  };
+}
+// 403 -> retry -> 200: a stale first-paint meta token.
+store.set("sid-b", { userId: "bob" });
+out.client = await runClient("sid-b", "stale-token-from-first-paint", false);
+// 200 directly: the meta already carries this session's token (the middleware mints it
+// on the projection GET; read back from the store after it).
+store.set("sid-c", { userId: "carol" });
+const _warm = await realFetch(base + "/_scrml/session", { headers: { Cookie: ck + "=sid-c" } });
+await _warm.text();
+out.direct = await runClient("sid-c", (store.get("sid-c") || {}).csrfToken || "", false);
+// 403 twice (stubbed): no redirect, projection unchanged, failure reported.
+store.set("sid-d", { userId: "dave" });
+out.denied = await runClient("sid-d", "whatever", true);
 console.log(JSON.stringify(out));
 process.exit(0);
 `;
@@ -144,12 +173,33 @@ describe("csrf=\"auto\" (the default under auth=) — the destroy route is gated
     expect(res.none.status).toBe(200);
   });
   test("the generated session.destroy() logs out from a stale-meta page: 403, one retry with the planted token, 200", () => {
+    expect(res.client.result).toBe(true);
     expect(res.client.kept).toBe(false);
     expect(res.client.redirect).toBe("/login");
+    expect(res.client.projectionNull).toBe(true);
+    expect(res.client.logged).toEqual([]);
     expect(res.client.posts.length).toBe(2);
     expect(res.client.posts[0]).toEqual({ status: 403, tok: "stale-token-from-first-paint" });
     expect(res.client.posts[1].status).toBe(200);
     expect(res.client.posts[1].tok).not.toBe("stale-token-from-first-paint");
+  });
+  test("a current meta token logs out on the FIRST post (200, no retry)", () => {
+    expect(res.direct.result).toBe(true);
+    expect(res.direct.kept).toBe(false);
+    expect(res.direct.redirect).toBe("/login");
+    expect(res.direct.posts.length).toBe(1);
+    expect(res.direct.posts[0].status).toBe(200);
+  });
+  test("a destroy route answering 403 twice: NO redirect, projection unchanged, failure reported, resolves false", () => {
+    expect(res.denied.posts.map((p) => p.status)).toEqual([403, 403]);
+    expect(res.denied.result).toBe(false);
+    expect(res.denied.redirect).toBe("/");
+    expect(res.denied.projectionUnchanged).toBe(true);
+    expect(res.denied.projectionNull).toBe(false);
+    expect(res.denied.kept).toBe(true);
+    expect(res.denied.logged.length).toBe(1);
+    expect(res.denied.logged[0]).toContain("session.destroy");
+    expect(res.denied.logged[0]).toContain("403");
   });
 });
 
