@@ -1614,6 +1614,7 @@ A display-text literal is a **sequence of literal-text segments and `${expr}` in
   interpolation) is written with the `\${` escape — see §4.18.3 for the full escape catalog. `"Cost: \${5}"` renders
   `Cost: ${5}`; `"Cost: ${5}"` renders `Cost: 5`.
   > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
+- **(S449) An interpolation is a render expression and SHALL NOT write reactive state** — §6.15 (E-VALUE-WRITES-STATE), the rule's one home. *(Provenance: ruling:user-voice-scrml.md S449 item 3.)*
 
 **Worked example — interpolation inside the literal:**
 
@@ -3800,6 +3801,7 @@ const <x> = 5 + 3    // W-DERIVED-001: no reactive dependencies; this is equival
 | E-REACTIVE-005 | Circular dependency in the derived reactive graph | Error |
 | W-DERIVED-001 | `const <name> = expr` has no `@variable` references; value never re-evaluates | Warning |
 | E-DERIVED-SERVER-ONLY-REACH | The RHS of a `const <name>` derived cell reaches a binding imported from a §12.2 Trigger 3 server-only stdlib module. Refused, not escalated — a derived recompute is synchronous (§6.6.3) and cannot become a round trip. See §6.6.19. (S331; emitted at `compiler/src/route-inference.ts` Step 3b.) | Error |
+| E-VALUE-WRITES-STATE | Evaluating a derived formula (or any other value position) writes a reactive cell, directly or through a called function — the one home of the rule is §6.15 (S449 — Nominal / not yet emitted) | Error |
 
 ---
 
@@ -3983,6 +3985,11 @@ The client stub sends `{ "total": _scrml_derived_get("total") }`; the server rea
   normative statements in §6.3 about dependents re-evaluating when an upstream `@variable`
   changes apply to derived values. §6.6 specifies the mechanism (lazy pull, dirty flags);
   §6.3 specifies the intent.
+
+- **§6.15 (Value positions do not write — S449):** A derived formula SHALL NOT write any reactive cell,
+  directly or through a called function (E-VALUE-WRITES-STATE / E-VALUE-WRITE-UNPROVEN). The rule's one home is
+  §6.15; it is what makes "a derived value is lazy pull, no side effects" (§6.7.12) a compile-time guarantee.
+  *(Provenance: ruling:user-voice-scrml.md S449 item 3.)*
 
 - **§22 (`^{}` meta blocks):** Expressions inside `^{}` use runtime auto-tracking (§6.6.6)
   rather than static graph construction. This is the only case where the evaluation
@@ -4956,6 +4963,13 @@ rather than trusting a declaration. Then, for an effect body:
    server push later writes a synced cell the effect lists — is a later write by a different writer (the push),
    not a write by the effect. It is possible, it is not a compile-time cascade, and no compile-time rule can see
    it (DD §5 (b), "Loses").
+
+**Reads that evaluate a value position (S449).** A read of a derived cell evaluates its formula, and a read
+that may construct a lazily-materialized shared instance (§66.6.4) evaluates its construction; each such read
+carries that value position's write summary (the bootstrap found both routes — the derived-read and the
+construction-read — writing state from an effect that only read). §6.15 forbids any value position to write, so
+for a well-formed program those summaries are empty and both routes are closed by construction; the summary
+still follows the read, as defence in depth. *(Provenance: ruling:user-voice-scrml.md S449 item 3.)*
 
 ⚑ OPEN (not ruled): (i) whether the write-summary reaches across a module boundary into an imported `.scrml`
 module whose body is not in the compilation (DD §12 Q1 — impl#1's cross-file E-FN-003 reach is unverified; the
@@ -6678,6 +6692,7 @@ When `default=` is present, calling `reset(@cell)` evaluates the `default=` expr
 - `default=` is an attribute-value-bearing form (`default=<expr>`); the attribute REQUIRES a value. The canonical scrml form for "reset to absence" is `default=not` (§42 Optional bare-sentinel form). The tokens `null` and `undefined` are NOT valid values for `default=` — they are rejected via `E-SYNTAX-042` and surfaced informationally via `W-ABSENCE-IN-SCRML-SOURCE` (§34).
 - The `default=` expression SHALL be evaluated AT RESET TIME, not at declaration time. The attribute stores the expression, not a snapshot.
 - If `default=` is absent, `reset(@cell)` SHALL re-evaluate the init expression at reset time and write the result to the cell.
+- (S449) Evaluating a `default=` expression, or the re-evaluated init expression, SHALL NOT write any reactive cell, directly or through a called function — both are value positions (§6.15, E-VALUE-WRITES-STATE; ruling:user-voice-scrml.md S449 item 3). A `reset` therefore performs exactly one write: the reset cell's own.
 - `default=` on a `const` derived declaration is **E-DERIVED-WRITE** (assigning to a derived cell is always a write error; reset on derived cells is also an error for the same reason).
 
 #### 6.8.2 The `reset(@cell)` Keyword
@@ -6824,6 +6839,12 @@ child declaration carrying its own `reset-on=` (§66.4 rule 2).
    time. A cycle — including a cell listing itself — is **E-RESET-ON-CYCLE**, naming the cells on the cycle.
    Chains (`a` resets on `b`, `b` resets on `c`) are legal; a write to `c` resets `b`, which resets `a`. Because
    the graph is static and acyclic, a chain of resets terminates by construction; no runtime bound is needed.
+   *(S449.)* The argument also needs the reset value itself to write nothing: an initializer or `default=` that
+   wrote the trigger would re-trigger the reset without end, and one that wrote any other cell would make the
+   reset more than "exactly one write". §6.15 makes both impossible — a reset value is a value position, and a
+   writing one is **E-VALUE-WRITES-STATE**, reported at the initializer / `default=` (this supersedes the
+   bootstrap's interim fail-closed `E-BOOTSTRAP-UNSUPPORTED` for that case). *(Provenance:
+   ruling:user-voice-scrml.md S449 item 3.)*
 4. **One flush, before readers.** The resets a write triggers — the whole chain, in topological order — SHALL be
    applied in the same flush as the triggering write, **before** any `<effect>`, `<request>` or render reads the
    reset cells. The triggering write and the resets it causes are ONE change for every dependent: a `<request>`
@@ -7352,6 +7373,143 @@ Named here; each §34 row is **Nominal / spec-ahead — not yet emitted; lands w
 
 ---
 
+### 6.15 Value Positions Do Not Write Reactive State — E-VALUE-WRITES-STATE
+
+> **Status: Nominal / spec-ahead (S449).** NORMATIVE; **impl#1 does not implement it** and is not changed for it
+> (frozen for language semantics, S447 TS accounting — the divergence is filed: `docs/known-gaps.md`
+> `g-impl1-value-writes-state-s449`). The bootstrap builds it (in flight in parallel at this writing; see the
+> §S449-spec-lifecycle section of `docs/known-gaps.md` for the bootstrap entry it references).
+>
+> **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" —
+> *"your recs."* — item 3: *"**Initializers / derived formulas / markup interpolations may NOT write reactive state
+> = (a)** — a compile error everywhere, directly or through a called function (language-wide; closes the four S449
+> bootstrap holes + the render self-write hang by construction). ⚑ PA note: this is the language-wide item the PA
+> flagged as deserving its own answer; recorded as ruled on \"your recs.\" — flag \"Q3 hold\" to reopen."* · the
+> four holes: `docs/changes/s449-bootstrap-effect/progress.md` (an effect read that constructs a shared instance
+> whose initializer writes; a `reset-on=` reset value that writes its own trigger; a read of a derived cell whose
+> formula writes; `g-bootstrap-render-writer-call-hangs`) · **supersedes:** nothing written — the SPEC was silent on
+> whether a value position may write (the bootstrap's "Q-A"); it closes by construction the routes §6.7.4 and
+> §6.8.4 had to guard case by case (below). **Direction of change (pa-base §8): newly-rejecting.** Measured impl#1
+> corpus impact (a filing aid, not a migration): see `g-impl1-value-writes-state-s449`.
+
+**This is the one home of the rule.** §6.6 (derived cells), §66.9 (initializers), §6.8 (reset values), §7.4.2 and
+§4.18.4 (interpolation) cross-reference it; none restates it.
+
+**The rule.** Evaluating a **value position** SHALL NOT write any reactive cell, directly or through a called
+function. A write found by the analysis below is **E-VALUE-WRITES-STATE**; a value position the analysis cannot
+prove write-free is **E-VALUE-WRITE-UNPROVEN**. Both are compile errors.
+
+**Value positions** — code evaluated to produce a value, not to perform an action:
+
+1. **An initializer** — a cell's own-value initializer (`<x> = expr`, `<let x:T=expr/>`, `const <x> = expr`, a
+   locked `<x:T=(expr)/>`), a field / attribute default of a §66 declaration, a use-site construction value
+   (§66.9 rule 8), and a `default=` expression (§6.8.1). An initializer runs at construction, on a lazy first read
+   of a shared instance (§66.6.4), at a remount or row creation, and at every `reset` / `reset-on=` reset
+   (§6.8.1–§6.8.4).
+2. **A derived formula** — the initializer of a derived cell (§6.6; §66.9 rule 3: a locked declaration whose
+   initializer reads cells), evaluated on every recompute. *(A derived formula is an initializer; it is listed
+   separately only because it re-runs.)*
+3. **A render expression** — every expression the runtime evaluates to produce or update rendered output: a
+   `${ … }` interpolation in a markup body (§7.4.2), including a multi-statement `${ … }` there and a Tier-0
+   `${ for … lift … }` block (§17.4); a `${ … }` inside a display-text literal (§4.18.4); a `renders` body
+   (§66.5); and a markup attribute value expression (`class=${…}`, `if=(…)`, `show=`, `value=${…}`, `<each in=…
+   key=…>`, `<match on=…>`, …).
+
+**Not value positions** (they are action positions, governed elsewhere): an event-handler attribute value
+(`onclick=…`, any `on*=`) and a `bind:` binding; a function body (it is judged where it is CALLED from); the body
+of a lifecycle element — `<request>` (whose body assigns its cell by design, §6.7.7), `<effect>` (§6.7.4),
+`<onMount>` (§6.7.1a), `<timer>` / `<poll>` / `<timeout>`; engine `effect=` and `<onTransition>` (§51.0.H); and a
+statement list at a `<program>` / `<page>` / `<channel>` body top (§40.8 — a `${ … }` written there is
+**evaluated, not rendered**). Whether a `${ … }` is a render expression is decided by the body it sits in: in a
+markup (free-text) body it is one; at a default-logic / code-default body top it is a statement list.
+
+**What counts as a write, and the analysis — §6.7.4's, unchanged.** The write list (assignment, sequence edit,
+`reset(@x)`, engine write / `.advance`, `<#id>.refetch()`) and the write summary (per function, transitive over the
+static call graph, a fixed point; one summary shared by every rule that uses it) are §6.7.4's. For a value position
+§6.7.4 rules 1–6 apply **as written**:
+- a direct write is E-VALUE-WRITES-STATE;
+- a call to a statically resolved scrml function (same file or an imported `.scrml` module, server functions
+  included) whose summary is non-empty is E-VALUE-WRITES-STATE, the message naming the chain;
+- **a function value appearing in the expression counts as if it were called** (rule 3) — a receiver such as
+  `.map` / `.filter` / a host library may call it during the evaluation. One carve-out follows from the position
+  list above: a function value that is the value of an event-handler attribute (`on*=`) in markup the expression
+  produces is a handler, not part of the evaluation;
+- an unresolvable call site, or a reachable `^{ }` meta block, is E-VALUE-WRITE-UNPROVEN (fail closed);
+- host JS and platform calls are not writes (rule 5).
+
+Each value position is summarized like a function, so a READ of something that evaluates a value position carries
+that position's summary: a read of a derived cell carries its formula's summary; a read that may construct a shared
+instance (§66.6.4) carries the summary of that declaration's construction (its field initializers and the
+declarations its `renders` uses). Under this section every such summary is empty — that is the point.
+
+**The message names the position and the fix.** E-VALUE-WRITES-STATE SHALL name the position (*"the initializer
+of `@page`"*, *"the formula of derived `@total`"*, *"the interpolation at line 12"*, *"the `class=` value at line
+12"*), the written cell, and the call chain, and SHALL name the fix by shape where the compiler can tell:
+- in an initializer: *"an initializer computes the cell's starting value and may not change other cells; load
+  with a `<request>` (§6.7.7), prepare the outside world in an `<onMount>` (§6.7.1a), or move the write into the
+  handler that should cause it"*;
+- in a derived formula: *"a derived value is computed from other cells and may not change them; derive the other
+  value too (§6.6), or move the write into the handler that writes the formula's inputs"*;
+- in a render expression: *"rendering shows state and may not change it; move the write into a handler, or derive
+  the displayed value (§6.6)"*.
+
+```scrml
+let <count:int=0/>
+function bump() { @count = @count + 1; return @count }
+
+let <seed:int=bump()/>                 // E-VALUE-WRITES-STATE — the initializer of `@seed` writes `@count` (bump())
+<total:int=(bump() * 2)/>              // E-VALUE-WRITES-STATE — the formula of derived `@total` writes `@count`
+<p>${bump()}</p>                       // E-VALUE-WRITES-STATE — the interpolation writes `@count` (it would loop)
+<button onclick=bump()>+</button>      // legal: a handler is an action position
+```
+
+**Why one code with a position-naming message, not one code per position.** The positions overlap: a derived
+formula IS an initializer (§66.9 rule 3); a use-site construction value is an initializer AND is evaluated by
+rendering the use (§66.9 rule 8); a `reset-on=` reset re-evaluates an initializer. Per-position codes would make the
+compiler pick among overlapping categories for one rule; one code with the position in its message does not. The
+fail-closed half keeps its own code, mirroring E-EFFECT-WRITE-UNPROVEN / E-MOUNT-WRITE-UNPROVEN, so the unproven
+case reads the same in all three rules.
+
+**What this makes impossible by construction.**
+- **§6.7.4 — an effect that writes through a read.** An `<effect>` body that only READS could still write state
+  in two routes the bootstrap found and closed case by case: reading a derived cell whose formula writes (the
+  derived-read route, s449 review HIGH-1) and reading a lazily-constructed shared instance whose field initializer
+  writes (the construction-read route). Both routes run a value position; under this section a value position
+  writes nothing, so neither route exists. §6.7.4's write summary still follows reads into formulas and
+  constructions — it now finds nothing there for a well-formed program, and the check stays as defence in depth.
+- **§6.8.4 — a reset value that writes.** A `reset-on=` reset evaluates the cell's initializer (or `default=`). An
+  initializer that wrote the reset's own trigger looped forever (the bootstrap's endless drain); one that wrote any
+  other cell broke rule 3's *"exactly one write … and nothing else"*. Under this section the reset value writes
+  nothing, so §6.8.4's termination argument holds without a special case. **The bootstrap's fail-closed
+  `E-BOOTSTRAP-UNSUPPORTED` for a writing reset value is superseded by E-VALUE-WRITES-STATE** (reported at the
+  initializer, whether or not the cell carries `reset-on=`).
+- **The render self-write hang.** `<p>${g(@a)}</p>` where `g()` writes `@a` re-queued its own render forever
+  (`g-bootstrap-render-writer-call-hangs`); any render ↔ render write cycle did the same. A render expression now
+  writes nothing, so no render can trigger another render, and no runtime re-run counter is needed (the S447
+  posture: a runtime bound would mean the compile-time rule had a hole).
+
+**Outside the analysis, stated.** As for effects (§6.7.4 rule 6): a value position that calls the server, whose
+server-side code later causes a push into a synced cell, is a later write by a different writer, not a write by the
+evaluation.
+
+#### Normative statements
+
+- Evaluating an initializer (own value, field or attribute default, use-site construction value, `default=`), a
+  derived formula, or a render expression SHALL NOT write any reactive cell, directly or through a called function
+  (E-VALUE-WRITES-STATE).
+- A value position the write-summary analysis (§6.7.4) cannot prove write-free SHALL be rejected
+  (E-VALUE-WRITE-UNPROVEN).
+- Event-handler attribute values, `bind:` bindings, function bodies (judged at their call sites), lifecycle element
+  bodies, engine `effect=` / `<onTransition>` bodies and body-top statement lists are not value positions.
+- E-VALUE-WRITES-STATE SHALL name the position, the written cell, the call chain and the fix by shape.
+
+**Cross-references:** §6.6 (derived cells) · §6.7.1a (`<onMount>` — the mount-time sibling rule) · §6.7.4 (the
+write summary; the `<effect>` rule) · §6.8.1–§6.8.4 (reset values) · §7.4.2 / §4.18.4 (interpolation) · §17.4
+(Tier-0 iteration) · §40.8 (body-top statement lists) · §66.5 (`renders`) · §66.6.4 (lazy shared instance) ·
+§66.9 (initializers) · §34 (E-VALUE-WRITES-STATE, E-VALUE-WRITE-UNPROVEN).
+
+---
+
 
 ## 7. Logic Contexts
 
@@ -7696,6 +7854,7 @@ const VERSION = "v0.3.0"
 - When `expr` references NO reactive cells AND the expression collapses to a compile-time-known constant value (literal, `const`-bound to a literal, simple arithmetic on constants), the compiler MAY inline the string value directly into the emitted HTML at that position. This is a permitted optimization — the rendered output is observationally equivalent.
 - When `expr` references NO reactive cells AND does NOT collapse to a compile-time constant (e.g., `${Date.now()}`, `${Math.random()}`, `${someJsLibCall()}`), the compiler SHALL emit a one-shot evaluation at module initialization that writes the result to the interpolation site. The site SHALL NOT re-evaluate after initial render.
 - The reactive case (deps present) and the non-reactive non-constant case (deps absent, expression not foldable) SHALL be observationally distinguished only by whether subsequent state changes trigger re-render — both produce the value at module init.
+- **(S449) Evaluating `expr` SHALL NOT write any reactive cell, directly or through a called function** — an interpolation, a multi-statement `${ … }` in a markup body and a markup attribute value are render expressions, and the rule's one home is §6.15 (E-VALUE-WRITES-STATE / E-VALUE-WRITE-UNPROVEN). Without it a render that writes a cell it reads re-renders itself without end. *(Provenance: ruling:user-voice-scrml.md S449 item 3.)*
 - When `expr` does NOT resolve in scope, the compiler SHALL emit `E-NAME-NOT-FOUND` (or the applicable lookup-failure diagnostic per the resolver's normal contract). Interpolation does NOT bypass normal name resolution.
 - The string conversion rule SHALL be JavaScript's standard `String()` coercion. ~~`null` and `undefined` produce the literal strings `"null"` and `"undefined"` respectively (cross-ref §42 absence-value handling — adopters writing `${@maybe-empty-cell}` should use `${@cell ?? "default"}` or rely on the validator surface).~~ *(superseded S440 — next bullet)*
 - **`${not}` renders NOTHING (S440 ruling).** When `expr` evaluates to `not` (§42), the interpolation site renders nothing — not the literal text `"null"` (or `"undefined"`). impl#1 currently renders the text `"null"` (gap `g-interpolation-renders-not-as-literal-null`); impl#1 carries the divergence (§34.0).
@@ -14008,6 +14167,13 @@ ${ loadItems() }
 - This calls `loadItems()` once, at initial mount.
 - It does NOT re-execute on reactive re-renders unless a reactive dependency (`@variable`) is read inside `loadItems()` and that dependency changes.
 - The compiler tracks reactive dependencies automatically via the dependency graph (Section 30). Explicit re-execution declarations are not required for reactive functions.
+
+> **Amended S449 — position matters.** A `${ … }` written in a markup (free-text) body is a **render
+> expression**: it may not write reactive state (§6.15, E-VALUE-WRITES-STATE), so a `${ loadItems() }` there whose
+> callee writes a cell is an error. A `${ … }` at a `<program>` / `<page>` / `<channel>` body top is a statement list,
+> evaluated, not rendered (§40.8); that is the position this section's "runs once at mount" describes. Outside-world
+> work that must run after the DOM exists is an `<onMount>` (§6.7.1a), which no longer desugars to this position.
+> **Provenance:** ruling:user-voice-scrml.md S449 items 2 (1d) and 3.
 
 **SPEC ISSUE:** Whether bare expressions re-execute on every reactive re-render or only on initial mount is tracked in SPEC-ISSUE-009. The current spec position is: bare expression = once on mount. Re-execution on dependency change is inferred from the dependency graph.
 
@@ -23131,6 +23297,8 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MOUNT-WRITE-UNPROVEN | §6.7.1a, §6.7.4 | An `<onMount>` (or `on mount`) body reaches code whose reactive writes the compiler cannot determine — a `^{ }` meta block, a call through a function-typed binding not resolvable to a known set of scrml functions, or any call site the write-summary analysis cannot resolve (§6.7.4 rule 4, applied to mount bodies by §6.7.1a). The rule fails CLOSED. A host / platform call is not this code. The message SHALL name the unresolvable site and why. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 2: *"the body may not write reactive state during the mount (directly or through a called function)"* — the fail-closed half mirrors E-EFFECT-WRITE-UNPROVEN so the two rules are one mechanism). **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-onmount-owed`). | Error |
 | W-ON-MOUNT-DEPRECATED | §6.7.1a, §63.7 | The keyword statement `on mount { … }` — SOFT-DEPRECATED (§63.1 Stage 1) in favour of `<onMount>${ … }</>`. It parses identically to the `<onMount>` (same timing — after the first render and after `ref=` binds —, owner association, remount re-run, and the same no-write rule). The message names the canonical form, `scrml fix`, and §6.7.1a. The `scrml fix` rule rewrites mechanically when the body writes no reactive cell; a writing body is `E-MOUNT-WRITES-STATE` and has no mechanical rewrite (the fix reports the site with that code's fix text). **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 2: *"2b `on mount {}` soft-deprecates through §63 with a `scrml fix` rule"*). **Nominal / not yet emitted** — impl#1 compiles the keyword form unchanged (frozen); lands with the bootstrap. | Warning |
 | E-ON-MOUNT-DEPRECATED | §6.7.1a, §63.7 | **Reserved** (§63.2) end-of-window code for the `on mount { }` keyword statement. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 2, 2b). | Error |
+| E-VALUE-WRITES-STATE | §6.15, §6.6, §6.8, §7.4.2, §66.9 | Evaluating a **value position** writes a reactive cell, directly or through a called function: an initializer (own value, field / attribute default, use-site construction value, `default=`), a derived formula, or a render expression (a markup `${ … }` interpolation incl. a multi-statement or Tier-0 `for/lift` block, a display-text-literal interpolation, a `renders` body, a markup attribute value). Writes are the §6.7.4 list; the analysis is the §6.7.4 write summary, rules 1–6 as written (a function value in the expression counts as called, except the value of an `on*=` handler attribute in produced markup). Not value positions: `on*=` handlers, `bind:`, function bodies (judged at their call site), lifecycle element bodies (`<request>`, `<effect>`, `<onMount>`, `<timer>` / `<poll>` / `<timeout>`), engine `effect=` / `<onTransition>`, body-top statement lists (§40.8). The message SHALL name the position, the written cell, the call chain and the fix by shape (initializer → `<request>` / `<onMount>` / the handler; formula → derive it / the handler; render → the handler / derive it). One code for every position, because the positions overlap (a formula is an initializer; a use-site value is an initializer that rendering evaluates). Closes by construction the derived-read and construction-read routes into an effect's writes (§6.7.4) and the writing reset value (§6.8.4 rule 3 — supersedes the bootstrap's interim fail-closed refusal of it). **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 3: *"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function (language-wide; closes the four S449 bootstrap holes + the render self-write hang by construction)."*). Newly-rejecting; impl#1 corpus impact measured as a filing aid in `g-impl1-value-writes-state-s449`. **Nominal / not yet emitted**; impl#1 frozen. | Error |
+| E-VALUE-WRITE-UNPROVEN | §6.15, §6.7.4 | A value position (§6.15) reaches code whose reactive writes the compiler cannot determine — a `^{ }` meta block, a call through a function-typed binding not resolvable to a known set of scrml functions, or any call site the write-summary analysis cannot resolve (§6.7.4 rule 4). Fails CLOSED; the fail-closed half mirrors `E-EFFECT-WRITE-UNPROVEN` / `E-MOUNT-WRITE-UNPROVEN`. A host / platform call is not this code. The message SHALL name the position, the unresolvable site and why. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 3: *"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function (language-wide; closes the four S449 bootstrap holes + the render self-write hang by construction)."*). **Nominal / not yet emitted**. | Error |
 | E-LIFECYCLE-011 | §28.1 | The `<timer>` or `<poll>` `running` attribute references an undeclared or non-`@` variable. The `running=@flag` form must point at a declared reactive variable to be meaningful. (Catalog addition S84 Wave 2 #5; full prose at §28.1 line 3639.) | Error |
 | E-LIFECYCLE-013 | §28.5 | `animationFrame()` called inside a `<timer>` or `<poll>` body. The two scheduling primitives compose pathologically — `animationFrame()` runs once per frame while the parent `<timer>`/`<poll>` runs on its own interval; the resulting cadence is undefined. Resolution: move `animationFrame()` out of the `<timer>`/`<poll>` body, or remove the parent if the per-frame work is the intent. (Catalog addition S84 Wave 2 #5; full prose at §28.5 line 4286.) | Error |
 | E-LIFECYCLE-014 | §28.5 | `animationFrame()` called inside a server-escalated function. The function is run per-frame on the client; there is no server-side `animationFrame` analogue. (Catalog addition S84 Wave 2 #5; full prose at §28.5 line 4288.) | Error |
@@ -42148,6 +42316,14 @@ library is therefore **declarations + named instances — no new construct** (§
        //          never reset by the use site
    </each>
    ```
+
+9. **(S449) An initializer writes nothing.** Every initializer this section names — an own value, a field or
+   attribute default, a derived formula (rule 3), a seed (rule 4), a use-site construction value (rule 8) — is a
+   value position: evaluating it SHALL NOT write any reactive cell, directly or through a called function. The
+   rule's one home is §6.15 (E-VALUE-WRITES-STATE / E-VALUE-WRITE-UNPROVEN). Construction (§66.7.6) therefore
+   changes no cell other than the one being constructed, whenever it runs (at program construction, on a lazy
+   first read of a shared instance, at a remount or row creation, at a reset). *(Provenance:
+   ruling:user-voice-scrml.md S449 item 3.)*
 
 > ⚑ **OPEN (not ruled) — O13: logic-local `const`.** The ruling retires `const` as the prefix of a CELL
 > declaration. Whether the logic-local `const x = …` binding (and the §50.8.5 rule that a keywordless `x = v`
