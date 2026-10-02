@@ -2046,3 +2046,4 @@ that the ledger is *substantively* wrong; a consumer of it can.
 <!-- @review pr=1223 verdict=carve-out by=S447-bryan date=2026-10-02 probe=wrap-only note=docs -->
 <!-- @review pr=1224 verdict=carve-out by=S447-bryan date=2026-10-02 probe=wrap-only (S448) note=docs -->
 <!-- @review pr=1230 verdict=finding by=S447-bryan date=2026-10-02 probe=S239 at frozen 7733b0bcf: LAND-WITH-NITS — every tier failing-name set empty; F1 (a mooted gap is a live impl#1 meta-block defect) re-pointed+open; F2 (11 v2 corpus skips) ledgered; canary bs guard vacuous on main too; parse-only bites on crash only note=fixed-8bc09e9fa -->
+<!-- @review pr=1231 verdict=carve-out by=S449-bryan date=2026-10-02 probe=diff-read: wrap-only (maps/hand-off/changelog/delta-log/pr-reviews/inbox moves) + one SPEC §19.16.7 prose note (v1 tree retired) — no code path note=docs -->

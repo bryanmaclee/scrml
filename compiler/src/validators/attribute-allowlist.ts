@@ -55,6 +55,16 @@ function attrLiteralValue(value: unknown): string | null {
   return v.value;
 }
 
+/** A short author-facing name for a non-string-literal attribute value. */
+function describeNonLiteral(value: unknown): string {
+  const k = value && typeof value === "object" ? (value as { kind?: string }).kind : undefined;
+  if (!value || k === "absent") return "it has no value";
+  if (k === "variable-ref") return "it is a reactive/variable reference";
+  if (k === "expr") return "it is a `${…}` expression";
+  if (k === "call-ref") return "it is a call";
+  return "it is not a quoted string";
+}
+
 function valueIsRecognized(
   literal: string,
   allowedValues: string[],
@@ -142,7 +152,34 @@ function validateMarkup(
 
     if (spec.allowedValues && spec.allowedValues.length > 0) {
       const literal = attrLiteralValue(attr.value);
-      if (literal === null) continue;
+      if (literal === null) {
+        // §52.13: `auth=` "accepts exactly three literal values". A NON-literal
+        // `auth=` on a `<program>` / `<page>` — `auth=${mode}`, `auth=@mode`, a
+        // bare `auth` — is not one of them, and nothing reads it as a gate: the
+        // program applies no auth check and a page declares nothing (§52.13.2,
+        // §40.2). Before S449 this was the one shape with NO diagnostic at all
+        // (g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth), against
+        // §52.13.2's "silent acceptance of attribute values that have no
+        // compile-time effect is itself a P0 finding". Warn exactly as an
+        // unrecognized literal does, stating the real effect. (`<channel>` is
+        // excluded: any `auth=` there already gates the upgrade, §52.13.2.)
+        if (name === "auth" && (tag === "program" || tag === "page")) {
+          const span = attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          const recognized = spec.allowedValues.map((v) => `"${v}"`).join(" | ");
+          warnings.push({
+            code: "W-ATTR-002",
+            message:
+              `W-ATTR-002: \`auth=\` on \`<${tag}>\` is not a string literal ` +
+              `(${describeNonLiteral(attr.value)}). \`auth=\` accepts exactly three literal ` +
+              `values — ${recognized} — and is not interpolable: its value must be known at ` +
+              `compile time because it decides which routes are gated. ` +
+              authUnrecognizedEffect(tag),
+            span,
+            severity: "warning",
+          });
+        }
+        continue;
+      }
       if (literal === "") continue; // boolean-attribute idiom — recognized.
       if (valueIsRecognized(literal, spec.allowedValues, spec.allowSubvalueColon)) continue;
       const span = attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };

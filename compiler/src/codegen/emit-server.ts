@@ -2924,6 +2924,7 @@ export function generateServerJs(
       );
       // The store declaration is ONE shared constant: the §14.8.9 provenance flow
       // recognizes it by its exact text and models it by summary (session-store-emit.ts).
+      // It carries the #1234 WAL + busy_timeout pragmas (rationale beside the lines there).
       for (const l of SESSION_STORE_SQLITE_LINES) lines.push(l);
     } else {
       // S239 FIX 8 — no `session.set`/`.destroy` in this app: keep the prior
@@ -3337,6 +3338,29 @@ export function generateServerJs(
     lines.push(`  path: "/_scrml/session/destroy",`);
     lines.push(`  method: "POST",`);
     lines.push("  handler: async function(_scrml_req) {");
+    // §40.2 / §39.2.3 (S449, g-session-destroy-route-has-no-csrf-check) — destroying
+    // a session is a state-mutating POST, so under `csrf="auto"` (the default under
+    // `auth=`) it gets the SAME session-synchronizer check every mutating server-fn
+    // route gets: §39.2.3 "A server-side validator that checks the `X-CSRF-Token`
+    // header on state-mutating routes and returns `403 Forbidden` if the token is
+    // missing or invalid". Before S449 a cross-site POST carrying the cookie logged
+    // the viewer out. Gated only when a session RECORD exists (`csrfToken` is minted
+    // for every record by the middleware): with no record there is nothing to
+    // destroy, and the stale-cookie clear below stays reachable. The 403 plants the
+    // session's token in the readable `scrml_csrf` cookie, exactly as the server-fn
+    // gate does, so the client's `session.destroy()` retries once and succeeds.
+    if (csrf === "auto") {
+      lines.push("    const _scrml_sessionForCsrf = _scrml_session_middleware(_scrml_req);");
+      lines.push("    if (_scrml_sessionForCsrf.csrfToken && !_scrml_validate_csrf(_scrml_req, _scrml_sessionForCsrf)) {");
+      lines.push("      return new Response(JSON.stringify({ error: \"CSRF validation failed\" }), {");
+      lines.push("        status: 403,");
+      lines.push("        headers: {");
+      lines.push("          \"Content-Type\": \"application/json\",");
+      lines.push("          \"Set-Cookie\": `scrml_csrf=${_scrml_sessionForCsrf.csrfToken}; Path=/; SameSite=Strict`,");
+      lines.push("        },");
+      lines.push("      });");
+      lines.push("    }");
+    }
     // S239 FIX 1 (logout half) — DELETE the server-side record, not just the
     // cookie, so a planted/leaked sid is not resurrectable after logout.
     // B1 (S266) — name-anchored parse; B4a (S266) — resolve either cookie name.

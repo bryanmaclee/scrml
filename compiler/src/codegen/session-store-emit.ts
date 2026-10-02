@@ -20,10 +20,28 @@
  *     `globalThis.__scrml_session_store`.
  */
 
+import { SQLITE_BUSY_TIMEOUT_MS } from "../sqlite-handle-defaults.ts";
+
 /** The SQLite-backed store declaration (one element per emitted line). */
 export const SESSION_STORE_SQLITE_LINES: readonly string[] = [
   "const _scrml_session_store = (((globalThis.__scrml_session_stores ??= {}))[_scrml_session_db_path] ??= (() => {",
   "  const _db = new _ScrmlSessionDatabase(_scrml_session_db_path);",
+  // §44 / operator ruling S385 A1 ("WAL + 5s busy-timeout as the safe default", #1234) —
+  // the session store is the one emitted sqlite handle #1062's sweep did not reach
+  // (g-emitted-session-store-opens-sqlite-with-no-busy-timeout-or-wal): a raw
+  // `bun:sqlite` Database under an ALIASED constructor, not a `Bun.SQL` template.
+  // MEASURED before: `journal_mode=delete busy_timeout=0`, and a login under a
+  // competing writer failed `database is locked` in ~1 ms (HTTP 500). The SAME two
+  // pragmas `sqlite-defaults.ts` emits for `Bun.SQL` handles, with the same rules:
+  // busy_timeout FIRST and each in its OWN try (a WAL upgrade needs a momentary
+  // EXCLUSIVE lock, throws under contention, and must not take busy_timeout with
+  // it); silent catches (a failure falls back to the pre-fix settings). WAL is right
+  // here and NOT on a CLI-opened handle (`sqlite-handle-defaults.ts`): the emitted
+  // server is the long-lived OWNER of `.scrml-sessions.db`, a file no adopter
+  // authors. Both run BEFORE the CREATE TABLE, so the init itself waits a held lock
+  // out instead of throwing at module load.
+  `  try { _db.run("PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}"); } catch { /* exotic VFS — sqlite's own settings */ }`,
+  '  try { _db.run("PRAGMA journal_mode = WAL"); } catch { /* contended or read-only — persists on a later init */ }',
   '  _db.run("CREATE TABLE IF NOT EXISTS kv_store (namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, expires_at INTEGER, PRIMARY KEY (namespace, key))");',
   '  const _ns = "session";',
   '  const _stmtGet = _db.prepare("SELECT value, expires_at FROM kv_store WHERE namespace = ? AND key = ?");',

@@ -70,7 +70,9 @@
  *   - `codegen/emit-server.ts` — the §20.5 durable session store,
  *     `new _ScrmlSessionDatabase(_scrml_session_db_path)`. The ALIASED constructor is why a
  *     `new Database(` grep does not find it. Measured: the emitted store reads back
- *     `busy_timeout=0 journal_mode=delete`.
+ *     `busy_timeout=0 journal_mode=delete`. ⛑ CLOSED S449: the store now runs the emitted
+ *     half's two pragmas (busy_timeout first, WAL second, own `try` each) right after the
+ *     open — it is the server-owned file, so WAL applies (contrast the CLI rule above).
  *   - `compiler/runtime/stdlib/store.js` (and its `.scrml` reference, `stdlib/store/kv.scrml`)
  *     — copied VERBATIM into `dist/_scrml/store.js` by `runtime-template.js`. Measured: under
  *     a foreign `BEGIN IMMEDIATE`, `store.set(...)` throws `database is locked` in **0 ms**.
