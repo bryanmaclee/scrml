@@ -3055,22 +3055,37 @@ class FlowAnalysis {
       const path = this.globalPath(m, scope);
       const store = node.type === "CallExpression" ? this.sessionStoreOf(m, scope) : null;
       if (store !== null) return this.sessionStoreCall(store, m, args, node, fn);
+      // S449 round 9 — a function the PROGRAM stored on a global path is applied
+      // BEFORE any built-in model of that path returns (when the call matters): the
+      // built-in may have been replaced through a route the platform-write rule
+      // cannot name (`function patch(J) { J.stringify = f } patch(JSON)` served the
+      // hash on base — the SERIALIZING model returned first). Unnamed stores reach
+      // every global call; named ones the calls that name them (`globalCandidates`).
+      const recvEarly = path !== null ? this.evalExpr(m.object, scope, fn) : null;
+      let pathOwn = clean();
+      if (path !== null && this.globalCallMatters(args)) {
+        const cands = this.globalCandidates(new Set(), this.pathNames(path));
+        if (cands.size > 0) {
+          this.recordThis(cands, recvEarly ?? clean());
+          pathOwn = this.applyFns(cands, args, undefined, node, fn);
+        }
+      }
       if (path === "Response.json") {
         this.sink(args[0] ?? clean(), fn, "serializer-json");
         for (const a of args.slice(1)) this.sink(a, fn, "serializer");
-        return clean();
+        return pathOwn;
       }
       if (path === "Response.redirect") {
         for (const a of args) this.sink(a, fn, "serializer");
-        return clean();
+        return pathOwn;
       }
       if (path === "Array.from" && args[1] && this.hasCallable(args[1])) {
         // `Array.from(rows, r => r.passwordHash)` — the mapper is a `.map`.
-        return this.callbackMethod("map", args[0] ?? clean(), [args[1]], node, fn);
+        return join(pathOwn, this.callbackMethod("map", args[0] ?? clean(), [args[1]], node, fn));
       }
       if (path === "Promise.reject") {
         this.addThrown(args[0] ?? clean());
-        return clean();
+        return pathOwn;
       }
       if (path === "Object.defineProperty" || path === "Reflect.defineProperty") {
         // The descriptor's `value` / getter become a field of the target, and a
@@ -3083,7 +3098,7 @@ class FlowAnalysis {
         if (this.isGlobalObject(args[0] ?? clean())) this.globalRebind(this.literalKey(node.arguments[1], scope), node, fn);
         this.writeThrough(node.arguments[0], args[0] ?? clean(), written, scope, { node, fn });
         if (this.literalKey(node.arguments[1], scope) === null) this.markerRemoved(node.arguments[0], args[0] ?? clean(), node, fn, scope);
-        return join(args[0] ?? clean(), written);
+        return join(pathOwn, args[0] ?? clean(), written);
       }
       if (path === "Object.defineProperties" || path === "Reflect.set" || path === "Reflect.deleteProperty") {
         // Keys and values of the second argument (or the key + value) are written
@@ -3102,17 +3117,17 @@ class FlowAnalysis {
         if (path === "Object.defineProperties" || (path === "Reflect.deleteProperty" && this.literalKey(node.arguments[1], scope) === null)) {
           this.markerRemoved(node.arguments[0], args[0] ?? clean(), node, fn, scope);
         }
-        return path === "Object.defineProperties" ? join(args[0] ?? clean(), written) : clean();
+        return path === "Object.defineProperties" ? join(pathOwn, args[0] ?? clean(), written) : pathOwn;
       }
       if (path !== null) {
         const b = this.builtin(path, args, node, fn);
-        if (b) return join(b, this.opaqueCallbacks(null, args, node, fn));
+        if (b) return join(pathOwn, b, this.opaqueCallbacks(null, args, node, fn));
         if (DERIVER_CALLS.has(path)) {
           this.opaqueCallbacks(null, args, node, fn); // side effects only: the result is derived
-          return clean();
+          return pathOwn;
         }
       }
-      const recv = this.evalExpr(m.object, scope, fn);
+      const recv = recvEarly ?? this.evalExpr(m.object, scope, fn);
       let method: string | null = null;
       if (m.computed) { this.evalExpr(m.property, scope, fn); method = staticKey(m.property); }
       else if (m.property.type === "Identifier") method = m.property.name;
@@ -3209,7 +3224,7 @@ class FlowAnalysis {
       // Every global value holds every global-stored function (one heap), so the
       // candidates are those stored under a name the call reaches (`gNames`);
       // applied only when protected data is passed, as before (perf).
-      let own = selfCall;
+      let own = join(pathOwn, selfCall);
       if (this.hasCallable(viaField) || recvGlobal) {
         const cands = recvGlobal
           ? (this.globalCallMatters(args) ? this.globalCandidates(viaField.fns, gNames) : new Set<Closure>())

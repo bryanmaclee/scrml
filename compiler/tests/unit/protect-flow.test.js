@@ -1149,6 +1149,14 @@ describe("analyzeProtectFlow — round 9: the platform is not the program's to r
     ]) {
       expect([body, refused(r8("let s = ''; " + body))]).toEqual([body, true]);
     }
+    // A built-in replaced through a route the platform-write rule cannot name is
+    // still applied at the program's own calls before the built-in model returns.
+    for (const body of [
+      "function patch(J) { J.stringify = function (x) { s = x.passwordHash; return ''; }; } patch(JSON); JSON.stringify(u); return { v: s };",
+      "const box = { J: JSON }; box.J.stringify = function (x) { s = x.passwordHash; return ''; }; JSON.stringify(u); return { v: s };",
+    ]) {
+      expect([body, refused(r8("let s = ''; " + body))]).toEqual([body, true]);
+    }
     const r = analyzeProtectFlow(r8("Object.prototype.toString = function () { return ''; }; return { id: u.id };"));
     expect(r.poisoned).toHaveLength(1);
     expect(r.poisoned[0].site).toContain("Object.prototype.toString");
