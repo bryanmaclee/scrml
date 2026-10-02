@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 235 | 4 |
-| MED | 464 | 0 |
-| LOW | 216 | 0 |
+| MED | 462 | 0 |
+| LOW | 215 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -10884,8 +10884,8 @@ The scheduled `cloud-maps` workflow keeps `.claude/maps/` current automatically.
 
 Sites: `compiler/tests/integration/endpoint-conformance-integration.test.js` · `…/export-enum-library-emit.test.js` · `compiler/tests/unit/endpoint-private-arm-reachability.test.js` · `…/endpoint-decl-codegen.test.js`. Class is the S276/S296 **"the oracle inherits the implementation's assumption"** shape, and the §8 **non-deterministic-input** gate shape (red for reasons no change caused → gets bypassed → gets deleted). — `NEW S301 (bryan); MED; resolved`
 
-**MOOT S447 — the locus no longer exists:** `compiler/self-host/` was retired (s447-retire-self-host-v1, bryan ruling S447); the file survives only in git history. Closed without a fix.
-<!-- @gap id=g-selfhost-tab-scrml-cg-meta-block-unexpected-token sev=MED status=resolved -->
+**NOT MOOT — re-pointed S447 (S239 review of s447-retire-self-host-v1, F1).** The v1 file is gone, but the defect was always in the TS compiler: a `^{}` meta-block in VALUE position leaks verbatim into emitted JS. Repro (reviewer-executed on 7733b0bcf, library + browser mode): `${ export function enc(name, typeExpr) { let payload = ^{ JSON.stringify({ name, typeExpr }) }; return payload } }` → `E-CODEGEN-INVALID-LOGIC … let payload = ^{ JSON.stringify(…` ("This is a compiler defect"). Distinct from the `_{}` statement-position gap. impl#1 is frozen for semantics (S447) — carried as a divergence unless the bootstrap needs it.
+<!-- @gap id=g-selfhost-tab-scrml-cg-meta-block-unexpected-token sev=MED status=open locus=searched:compiler/src/codegen(meta-block value-position lowering; PA-located-verify) prov=review:S447-retire-self-host-r1 -->
 **`compiler/self-host/tab.scrml` does not compile on main — stage CG rejects a §22 `^{ … }` meta-block.** `bun compiler/bin/scrml.js compile compiler/self-host/tab.scrml -o compiler/self-host/dist/` fails with a codegen error (`Unexpected token`, `--> compiler/self-host/tab.scrml:142:16`) pointing at `let payload = ^{ JSON.stringify({ name, type… }` — the compiler's own "this is a compiler defect (codegen produced malformed output)" message, so it is self-classified as a defect rather than a source error. No artifacts written.
 
 **Found via a harness, not a dogfood run:** `self-host-smoke.test.js` §C asserted `compiler/self-host/dist/tab.js` exists. That path is **gitignored** (`.gitignore:2:dist/`), so it is never tracked and a fresh clone cannot have it, while every *sibling* test in the same describe block already skipped when absent — one test diverged from its own block and hard-failed the pre-commit gate on a clean checkout. Harness aligned to the file's own skip-and-say-how precedent at S301; **the compile defect itself is untouched and is what this gap tracks.**
@@ -21929,3 +21929,7 @@ write is pending, the timer dies, the write never lands, and the request it woul
 art protects the last edit with a leave warning (react-admin, Google Docs, Figma), a page-hide flush, or a local
 backup (WordPress sessionStorage, VS Code hot exit). Owed: a design (flush on `pagehide`, warn, or both), then a
 ruling. Not decided by 3c. Applies to both implementations.
+
+### G-SELF-HOST-V2-CORPUS-PARSER-DIVERGENCE-SKIPS — 11 bootstrap `.scrml` files are `[gap]`-skipped in parser-conformance-corpus (the two parsers disagree) after the S447 corpus re-point
+<!-- @gap id=g-self-host-v2-corpus-parser-divergence-skips sev=LOW status=open locus=compiler/tests/parser-conformance-corpus.test.js prov=review:S447-retire-self-host-r1 -->
+Re-pointing the parser-conformance corpus from v1 (11 files) to `compiler/self-host-v2` (61 files) added 11 `test.skip` `[gap]` rows: `self-host-v2/js.scrml` (GAP-mixed — native exports 0 vs live 16, typeDecls 0 vs 5), `parse.scrml`, 8 css-oracle sources, and `brand-theme.scrml` (theme-decl, live only). Ledgered so they are not silent. The native parser's fate is an open bryan call (S447 TS accounting item 3) — these resolve with that decision.
