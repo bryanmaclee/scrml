@@ -24,7 +24,7 @@ import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
-import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults, SQLITE_BUSY_TIMEOUT_MS } from "./sqlite-defaults.ts";
+import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
 import { sqliteFileHandle, ownedDbFilesFor, noteSqliteHandle, SQLITE_FILE_HELPER_IMPORT, sqliteFileHelperLines } from "./sqlite-file-target.ts";
 import { fileDefaultDbValue } from "../db-ownership.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
@@ -42,6 +42,7 @@ import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
 import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgress, findAuthoredResponseConstruction, SERVER_PROTECT_HELPER, type ProtectContext, type ScanSliceKind } from "./protect-egress.ts";
 import { registerProtectModule } from "./protect-flow.ts";
+import { SESSION_STORE_SQLITE_LINES, SESSION_STORE_MEMORY_LINE } from "./session-store-emit.ts";
 import {
   buildTenantContext,
   resolveTenantScoping,
@@ -2921,47 +2922,14 @@ export function generateServerJs(
         `(import.meta && import.meta.dir) ? import.meta.dir : ".", ` +
         `${JSON.stringify(_sessionStoreDistAscent)}, ".scrml-sessions.db");`,
       );
-      lines.push("const _scrml_session_store = (((globalThis.__scrml_session_stores ??= {}))[_scrml_session_db_path] ??= (() => {");
-      lines.push("  const _db = new _ScrmlSessionDatabase(_scrml_session_db_path);");
-      // §44 / operator ruling S385 A1 ("WAL + 5s busy-timeout as the safe default") —
-      // the session store is the one emitted sqlite handle #1062's sweep did not reach
-      // (g-emitted-session-store-opens-sqlite-with-no-busy-timeout-or-wal): it is a raw
-      // `bun:sqlite` Database under an ALIASED constructor, not a `Bun.SQL` template.
-      // MEASURED before: `journal_mode=delete busy_timeout=0`, and a login under a
-      // competing writer failed `database is locked` in ~1 ms (HTTP 500). The SAME two
-      // pragmas `sqlite-defaults.ts` emits for `Bun.SQL` handles, with the same rules:
-      // busy_timeout FIRST and each in its OWN try (a WAL upgrade needs a momentary
-      // EXCLUSIVE lock, throws under contention, and must not take busy_timeout with
-      // it); silent catches (a failure falls back to the pre-fix settings). WAL is
-      // right here and NOT on a CLI-opened handle (`sqlite-handle-defaults.ts`): the
-      // emitted server is the long-lived OWNER of `.scrml-sessions.db`, a file no
-      // adopter authors. Both run BEFORE the CREATE TABLE, so the init itself waits a
-      // held lock out instead of throwing at module load.
-      lines.push(`  try { _db.run("PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}"); } catch { /* exotic VFS — sqlite's own settings */ }`);
-      lines.push('  try { _db.run("PRAGMA journal_mode = WAL"); } catch { /* contended or read-only — persists on a later init */ }');
-      lines.push('  _db.run("CREATE TABLE IF NOT EXISTS kv_store (namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, expires_at INTEGER, PRIMARY KEY (namespace, key))");');
-      lines.push('  const _ns = "session";');
-      lines.push('  const _stmtGet = _db.prepare("SELECT value, expires_at FROM kv_store WHERE namespace = ? AND key = ?");');
-      lines.push('  const _stmtSet = _db.prepare("INSERT OR REPLACE INTO kv_store (namespace, key, value, expires_at) VALUES (?, ?, ?, ?)");');
-      lines.push('  const _stmtDel = _db.prepare("DELETE FROM kv_store WHERE namespace = ? AND key = ?");');
-      lines.push("  return {");
-      lines.push("    get(key) {");
-      lines.push("      const row = _stmtGet.get(_ns, key);");
-      lines.push("      if (!row) return null;");
-      lines.push("      if (row.expires_at !== null && row.expires_at <= Date.now()) { _stmtDel.run(_ns, key); return null; }");
-      lines.push("      try { return JSON.parse(row.value); } catch { return row.value; }");
-      lines.push("    },");
-      lines.push("    set(key, value, ttl) {");
-      lines.push("      const expiresAt = ttl ? Date.now() + ttl * 1000 : null;");
-      lines.push("      _stmtSet.run(_ns, key, JSON.stringify(value), expiresAt);");
-      lines.push("    },");
-      lines.push("    delete(key) { _stmtDel.run(_ns, key); },");
-      lines.push("  };");
-      lines.push("})());");
+      // The store declaration is ONE shared constant: the §14.8.9 provenance flow
+      // recognizes it by its exact text and models it by summary (session-store-emit.ts).
+      // It carries the #1234 WAL + busy_timeout pragmas (rationale beside the lines there).
+      for (const l of SESSION_STORE_SQLITE_LINES) lines.push(l);
     } else {
       // S239 FIX 8 — no `session.set`/`.destroy` in this app: keep the prior
       // in-memory read-only store (byte-identical to the pre-i29e read-side infra).
-      lines.push("const _scrml_session_store = (globalThis.__scrml_session_store ??= new Map());");
+      lines.push(SESSION_STORE_MEMORY_LINE);
     }
     lines.push(`const _scrml_session_max_age = ${_sessionMaxAgeSec};`);
     lines.push("");
