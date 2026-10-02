@@ -36,6 +36,23 @@ describe("runtime contracts", () => {
     scope.dispose();
   });
 
+  test("<each> rows added one at a time retain O(rows), not O(rows²) — a row's cleanup does not hold its reconcile", () => {
+    // mutation RED: the row cleanup closure built inside reconcile() (it captured that call's
+    // byKey/next/items: 2000 rows → ~4,000,000 retained objects; fixed → ~10,000).
+    // Salvaged from the S446 U0 branch (5eecc60ec), where the r3 R2-2 e2e found it (4+ GB).
+    const { heapStats } = require("bun:jsc");
+    const objects = () => { Bun.gc(true); return heapStats().objectTypeCounts.Object ?? 0; };
+    const scope = rt.root.child();
+    const { anchor } = host();
+    const items = rt.cell([]);
+    rt.each(scope, anchor, () => items.get(), (it) => it.id, () => {});
+    const before = objects();
+    for (let i = 0; i < 2000; i++) rt.append(items, { id: i });
+    const grown = objects() - before;
+    expect(grown).toBeLessThan(400000);
+    scope.dispose();
+  });
+
   test("a conditional arm renders UNTRACKED — only the arm tests are the cond's dependencies", () => {
     const scope = rt.root.child();
     const { anchor } = host();
