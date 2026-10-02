@@ -1,0 +1,7 @@
+// §6.8.4 — valid entries.
+<program>
+  <query> = ""
+  <category> = "all"
+  <page reset-on=[@query, @category]> = 1
+  <p>${@page}</p>
+</program>

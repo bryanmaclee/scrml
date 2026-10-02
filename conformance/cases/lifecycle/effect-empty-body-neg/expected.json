@@ -1,0 +1,12 @@
+{
+  "id": "lifecycle-effect-empty-body-neg",
+  "description": "§6.7.4 negative twin: an effect with a body is NOT W-LIFECYCLE-010.",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4: W-LIFECYCLE-010 is for an empty body only. ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "notCodes": [
+      "W-LIFECYCLE-010"
+    ]
+  }
+}

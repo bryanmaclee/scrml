@@ -1,0 +1,9 @@
+// §6.7.4 — an <effect> with no deps= attribute.
+<program>
+  <n> = 0
+  function beacon(v) {
+    return v
+  }
+  <effect>${ beacon(@n) }</>
+  <p>${@n}</p>
+</program>

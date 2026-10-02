@@ -1,0 +1,6 @@
+// §6.8.4 rule 5 — a writable cell.
+<program>
+  <query> = ""
+  <page reset-on=[@query]> = 1
+  <p>${@page}</p>
+</program>

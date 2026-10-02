@@ -1,0 +1,14 @@
+{
+  "id": "lifecycle-reset-on-invalid-entry-neg",
+  "description": "§6.8.4 negative twin: entries that are declared mutable cells are valid — NOT E-RESET-ON-INVALID-ENTRY.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "rationale": "§6.8.4 rule 2. ruling:user-voice-scrml.md S447 \"3b: `reset-on=` IS allowed on engine cells, checked against `rule=`\" — \"the new rec for engine reset, yes.\"",
+  "expect": {
+    "notCodes": [
+      "E-RESET-ON-INVALID-ENTRY",
+      "E-RESET-ON-CYCLE",
+      "E-RESET-ON-NOT-WRITABLE"
+    ]
+  }
+}

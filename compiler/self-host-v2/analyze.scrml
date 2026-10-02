@@ -45,7 +45,7 @@ ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
              DeclKind, HostCall, SeqFn, BindKind, mkSym, noGrants, replaceGrant, typeDefSym } from "./core.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, ATypeK,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, mkSpan } from "./ast.scrml"
@@ -281,9 +281,16 @@ ${
         unresolved: Unresolved,
         typing: Typing,
         novalidate: int[],      // s444 Phase B (RULED S442 (3)): the `<form>` elements the compiler adds `novalidate` to
+        resets: ResetOnInfo[],  // s449: the program cells' accepted `reset-on=` rules (§6.8.4)
     }
 
     export type TypedProgram:struct = { files: FileAst[], tables: Tables, diags: Diag[] }
+
+    // s449 — one `reset-on=[…]` rule of a program cell (§6.8.4), as the
+    // analysis accepted it: field `target` of the program resets when any field
+    // in `triggers` changes; `rank` is its depth in the static reset-on graph
+    // (the order a chain is applied in). `lower` turns it into View.ResetOn.
+    export type ResetOnInfo:struct = { target: int, triggers: int[], rank: int }
 
     // ---- the NodeId index ------------------------------------------------------
     // The position `at` holds for `nid` (-1: none).
@@ -377,7 +384,11 @@ ${
     type NodeFacts:struct = { names: NameTable, values: ValueTable, effects: EffectTable, binds: BindTable,
                               elems: ElemTable, attrs: AttrTable }
     // `bad`: the declared types that did not resolve (r8 — see Unresolved).
-    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved }
+    // `effects` (s449): the reactive effects the binder accepted in an element
+    // scope, in order, with their file — the input of the no-write pass
+    // (effectPass), which runs once every function body is bound.
+    type EffectSrc:struct = { w: AEffect, file: string }
+    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[] }
     type RSym:struct = { s: Sym, st: AS }
 
     fn noFacts() -> NodeFacts {
@@ -398,11 +409,11 @@ ${
     }
 
     fn mint(st: AS, hint: string) -> RSym {
-        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad } }
+        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects } }
     }
 
     fn withFacts(st: AS, fs: NodeFacts) -> AS {
-        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad }
+        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects }
     }
 
     fn addName(st: AS, nid: int, f: NameFact) -> AS {
@@ -442,21 +453,27 @@ ${
     }
     fn addDiag(st: AS, file: string, span: ASpan, code: string, msg: string) -> AS {
         const d: Diag = { code: code, message: msg, file: file, span: span }
-        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad }
+        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects }
     }
 
     fn addAnnot(st: AS, s: Sym, ty: Type) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects }
     }
 
     fn badParam(st: AS, nid: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields } }
+                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects }
     }
 
     fn badField(st: AS, id: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) } }
+                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects }
+    }
+
+    // s449: record an effect the binder accepted (the no-write pass's input).
+    fn addEffectSrc(st: AS, w: AEffect, file: string) -> AS {
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad,
+                 effects: st.effects.concat([{ w: w, file: file }]) }
     }
 
     // =========================================================================
@@ -1768,6 +1785,7 @@ ${
             .Text(text: t) :> noHandles(st)
             .Interp(e: x) :> noHandles(st)
             .DeclNode(d: d) :> noHandles(st)
+            .Effect(w: w) :> noHandles(st)
         }
     }
 
@@ -2006,7 +2024,7 @@ ${
                     st = addDiag(st, s.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ":" + n + " …/>` is a named shared instance of `<" + n + ">` (§66.8.2) — not in the bootstrap")
                 } else {
                     st = o19Diags(s.file, d, st)
-                    st = openerWordDiags(s.file, fileErrs(files, s.file), d, st)
+                    st = openerWordDiags(s.file, fileErrs(files, s.file), d, false, st)
                     // s444 Phase B: a user declaration's OWN validators, and a field's below depth 1
                     if (d.validators.length > 0) st = addDiag(st, s.file, d.validators[0].span, "E-BOOTSTRAP-UNSUPPORTED", "validators on `<" + d.name + ">`'s own opener bind its own value (§66.4 rule 3) — a user declaration's own value is not bindable in the bootstrap; put them on a child field")
                     for (const c of childFields(d.body)) { st = deepValidatorDiags(s.file, c.body, st) }
@@ -2017,7 +2035,7 @@ ${
                 // the program's cells (a nested user declaration is its own stub)
                 for (const it of p.items) {
                     for (const c of declsOfItem(it)) {
-                        if (!isNestedUserDecl(c) && declNames.indexOf(ownTypeName(c)) < 0) st = openerWordDiags(s.file, fileErrs(files, s.file), c, st)
+                        if (!isNestedUserDecl(c) && declNames.indexOf(ownTypeName(c)) < 0) st = openerWordDiags(s.file, fileErrs(files, s.file), c, s.isProgram, st)
                         if (!isNestedUserDecl(c)) st = deepValidatorDiags(s.file, c.body, st)
                     }
                 }
@@ -2044,15 +2062,19 @@ ${
     }
 
     // A declaration holding a parse error is recovery debris there (Rule C).
-    fn openerWordDiags(file: string, errs: ASpan[], d: ADecl, st0: AS) -> AS {
+    // `cell`: `d` is a program cell (the only place the bootstrap reads
+    // `reset-on=`, s449 — resetOnPass).
+    fn openerWordDiags(file: string, errs: ASpan[], d: ADecl, cell: boolean, st0: AS) -> AS {
         let st: AS = st0
         if (hasErrIn(errs, d.span)) return st
         for (const a of d.mods) {
-            if (!isKnownOpenerWord(a.name) && a.name.indexOf(":") < 0) {
+            if (a.name == "reset-on" && !cell) {
+                st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset-on=` on `<" + d.name + ">`, a field of a declaration, is not in the bootstrap — whether a field's `reset-on=` may name a sibling field of the same instance (a per-instance reset) is OPEN (§6.8.4); it is read on a program cell")
+            } else if (!isKnownOpenerWord(a.name) && a.name.indexOf(":") < 0) {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", unknownOpenerMessage(a.name))
             }
         }
-        for (const c of childFields(d.body)) { st = openerWordDiags(file, errs, c, st) }
+        for (const c of childFields(d.body)) { st = openerWordDiags(file, errs, c, false, st) }
         return st
     }
 
@@ -2060,7 +2082,7 @@ ${
     // attributes and the own value): `single` (§66.13.3); the validator words
     // are the parser's (it reports them, validatorMessage).
     fn isKnownOpenerWord(w: string) -> boolean {
-        return w == "single" || isValidatorName(w)
+        return w == "single" || w == "reset-on" || isValidatorName(w)
     }
 
     fn isValidatorName(w: string) -> boolean {
@@ -2241,6 +2263,7 @@ ${
             .Return(e: e) :> maybeClock(e)
             .If(cond: c, thenB: t, elseB: el) :> exprClock(c) || blockClock(t) || maybeBlockClock(el)
             .Given(name: n, subject: sub, body: b) :> exprClock(sub) || blockClock(b)
+            .EffectStmt(w: w) :> blockClock(w.body)
         }
     }
 
@@ -2333,38 +2356,48 @@ ${
         present: string[],
         host: HostCtx,          // s444: may a host call stand here?
         own: string,            // s444: the child field whose own `renders` this is ("" — none): `@own` is this instance (O54 = (a), RULED S442)
+        inEffect: boolean,      // s449: inside an effect body (an effect there is E-LIFECYCLE-016, §6.7.4)
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect }
     }
 
     fn withRow(env: Env, row: RowB, name: string, hs: HandleInfo[]) -> Env {
         const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not }
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows.concat([row]),
-                 handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own }
+                 handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect }
     }
 
     fn withNarrow(env: Env, n: NarrowB) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows.concat([n]), present: env.present, host: env.host, own: env.own }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows.concat([n]), present: env.present, host: env.host, own: env.own, inEffect: env.inEffect }
     }
 
     fn withPresent(env: Env, name: string) -> Env {
         if (name == "") return env
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present.concat([name]), host: env.host, own: env.own }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present.concat([name]), host: env.host, own: env.own, inEffect: env.inEffect }
     }
 
     fn withHost(env: Env, h: HostCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: h, own: env.own }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: h, own: env.own, inEffect: env.inEffect }
     }
 
     fn withOwn(env: Env, name: string) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: name }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: name, inEffect: env.inEffect }
+    }
+
+    // s449: an effect body — a logic context (§6.7.4 "same rules as `${}`") run
+    // on a change: a host call may stand in it, as in a handler (it is the
+    // effect's job to call the outside world), and an effect inside it is
+    // E-LIFECYCLE-016.
+    fn effectBodyEnv(env: Env) -> Env {
+        return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: HostCtx.HostOk, own: env.own, inEffect: true }
     }
 
     // s444 — O54 = (a) (RULED S442: "`@email` inside `email`'s own `renders` …
@@ -4395,7 +4428,126 @@ ${
             .Return(e: e) :> keepEnv(env, resolveMaybeExpr(env, e, st))
             .If(cond: c, thenB: t, elseB: el) :> keepEnv(env, resolveIf(env, c, t, el, st))
             .Given(name: n, subject: sub, body: b) :> keepEnv(env, resolveGiven(env, s, n, sub, b, st))
+            .EffectStmt(w: w) :> keepEnv(env, effectAsStatement(env, w, st))
         }
+    }
+
+    // s449 — an effect where a STATEMENT stands. Inside an effect body it is
+    // E-LIFECYCLE-016 (§6.7.4: "An `<effect>` — or a retiring keyword `when …
+    // changes { }` — inside the body of another `<effect>` is E-LIFECYCLE-016").
+    // In a function or handler body there is no position in the tree to own it
+    // (§6.7.4: an `<effect>` "SHALL appear where a `<request>` may: as a child
+    // element of an element scope"); §34 names no code for that, so the
+    // bootstrap refuses it rather than guess an owner.
+    fn effectAsStatement(env: Env, w: AEffect, st: AS) -> AS {
+        if (env.inEffect) return addDiag(st, env.file, w.span, "E-LIFECYCLE-016", "an effect inside another effect's body — an effect body is logic, not a markup position; declare the inner effect as a sibling `<effect>` with its own `deps=` (§6.7.4)")
+        return addDiag(st, env.file, w.span, "E-BOOTSTRAP-UNSUPPORTED", "an effect inside a function or handler body has no position in the tree to own it (§6.7.4: an `<effect>` stands where a `<request>` may — a child of an element scope); write it in the program's markup")
+    }
+
+    // =========================================================================
+    // s449 — a reactive effect (SPEC §6.7.4), `<effect deps=[…]>${ … }</>` or
+    // its soft-deprecated keyword spelling, where markup stands: the `<program>`
+    // body, an `if=` element, an `<each>` row. Codes here:
+    //   E-EFFECT-NO-DEPS — "An `<effect>` with no `deps=`, or with `deps=[]`,
+    //     never runs (it does not run on mount) and is E-EFFECT-NO-DEPS";
+    //   E-LIFECYCLE-007 — "Every `deps=` entry SHALL be a declared, mutable
+    //     reactive cell in scope at the `<effect>`. An undeclared name, a
+    //     non-`@` name, or a derived cell … is E-LIFECYCLE-007";
+    //   W-LIFECYCLE-010 — "An empty body … is W-LIFECYCLE-010";
+    //   W-WHEN-EFFECT-DEPRECATED — the keyword spelling, "with
+    //     W-WHEN-EFFECT-DEPRECATED at every site".
+    // The no-write rule (E-EFFECT-WRITES-STATE / E-EFFECT-WRITE-UNPROVEN) needs
+    // every function's write summary, so the effect is recorded here and judged
+    // by effectPass once all bodies are bound.
+    // Refused (E-BOOTSTRAP-UNSUPPORTED, fail closed): an effect in a user
+    // declaration's `renders` (which scope owns it — the instance or the render
+    // site — is not settled), and a dependency naming a whole instance.
+    // =========================================================================
+    fn resolveEffect(env: Env, w: AEffect, st0: AS) -> AS {
+        let st: AS = st0
+        if (!inProgramCtx(env) || env.own != "") {
+            return addDiag(st, env.file, w.span, "E-BOOTSTRAP-UNSUPPORTED", "an effect inside a declaration's `renders` is not in the bootstrap — which scope owns it (the instance or the render site) is not settled (§6.7.4 / §66); write it in the program's markup")
+        }
+        if (w.keyword) {
+            st = addDiag(st, env.file, w.span, "W-WHEN-EFFECT-DEPRECATED", "`when … changes { … }` is the soft-deprecated spelling of an `<effect>` — write " + effectSpelling(w) + " (`scrml fix` rewrites a body that writes no reactive cell; §6.7.4, §63)")
+        }
+        if (w.deps.length == 0 && !w.keyword) {
+            st = addDiag(st, env.file, w.span, "E-EFFECT-NO-DEPS", "this `<effect>` lists no dependency — an effect does not run on mount, so with no `deps=[…]` it never runs (§6.7.4); list the cells whose changes should run it, and put logic that runs once in `on mount { }` or a bare expression")
+        }
+        for (const d of w.deps) { st = resolveEffectDep(env, d, st) }
+        if (w.body.stmts.length == 0) {
+            st = addDiag(st, env.file, w.span, "W-LIFECYCLE-010", "this effect has an empty body — its trigger fires and does nothing (§6.7.4); add a body or remove it")
+        }
+        st = resolveBlock(effectBodyEnv(env), w.body, st)
+        return addEffectSrc(st, w, env.file)
+    }
+
+    // `<effect deps=[@a, @b]>` — the canonical spelling of an effect, for a message.
+    fn effectSpelling(w: AEffect) -> string {
+        let names: string[] = []
+        for (const d of w.deps) {
+            const n: string = atName(d)
+            if (n != "") names = names.concat(["@" + n])
+        }
+        return "`<effect deps=[" + names.join(", ") + "]>" + interpOpen() + " … }</>`"
+    }
+
+    // `$` + `{` — never written whole in a string literal here (it would open
+    // an interpolation, progress.md F9).
+    fn interpOpen() -> string { return "$" + "{" }
+
+    fn resolveEffectDep(env: Env, d: AExpr, st: AS) -> AS {
+        const name: string = atName(d)
+        // fix round (LOW b): a field path (`@signup.email`) is ⚑ OPEN in §6.7.4 — refused, not decided
+        if (name == "" && memberName(d.k) != "" && isReactiveRoot(placeRoot(d))) {
+            return addDiag(st, env.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a field path as an effect dependency is not in the bootstrap — whether a §66 field path (`@signup.email`) may be a dep entry is OPEN (§6.7.4); list a cell `@name`")
+        }
+        if (name == "") return addDiag(st, env.file, d.span, "E-LIFECYCLE-007", "an effect dependency is a cell written `@name` (§6.7.4) — this entry is not one")
+        const r: RX = resolveExpr(env, d, not, st)
+        if (r.st.diags.length > st.diags.length) {
+            return addDiag(st, env.file, d.span, "E-LIFECYCLE-007", "`@" + name + "` in an effect's dependency list is not a declared `@variable` in scope (§6.7.4)")
+        }
+        const f: NameFact | not = nameFactIn(r.st, d.nid)
+        if (f is not) return addDiag(st, env.file, d.span, "E-LIFECYCLE-007", "`@" + name + "` in an effect's dependency list is not a declared `@variable` in scope (§6.7.4)")
+        return depOfFact(env, d, name, f, r.st)
+    }
+
+    // F17: arms return through a function, never an object literal.
+    fn depOfFact(env: Env, d: AExpr, name: string, f: NameFact, st: AS) -> AS {
+        return match f {
+            .NField(decl: ds, inst: i, idx: idx) :> depField(env, d, name, ds, idx, st)
+            .NInst(decl: ds) :> addDiag(st, env.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + "` names a whole instance — an effect dependency naming one is not in the bootstrap (whether a declaration's value is a \"declared mutable reactive cell\", §6.7.4, is not settled); list its fields' cells")
+            .NLocal(sym: s) :> notMutableDep(env, d, name, st)
+            .NStruct(owner: o) :> notMutableDep(env, d, name, st)
+            .NFn(sym: s) :> notMutableDep(env, d, name, st)
+            .NLength :> notMutableDep(env, d, name, st)
+        }
+    }
+
+    fn notMutableDep(env: Env, d: AExpr, name: string, st: AS) -> AS {
+        return addDiag(st, env.file, d.span, "E-LIFECYCLE-007", "`@" + name + "` in an effect's dependency list is not a declared mutable `@variable` (§6.7.4)")
+    }
+
+    fn depField(env: Env, d: AExpr, name: string, ds: Sym, idx: int, st: AS) -> AS {
+        const di: DeclInfo | not = declInfoIn(env.g, ds)
+        if (di is not || idx < 0 || idx >= di.fields.length) return st
+        const fi: FieldInfo = di.fields[idx]
+        const w: Sym | not = fi.wcap
+        if (w is some) return st
+        const m: FieldMode = fi.mode
+        const why: string = match m {
+            .Derived :> "a DERIVED cell (its initializer reads cells) — it has no change event of its own; list the `@variables` it is computed from and read `@" + name + "` in the body (§6.7.4)"
+            .Locked :> "a LOCKED field (no `let`) — it never changes; declare it `let` to make it a mutable cell"
+            .Let :> "not writable"
+            .Seeded :> "not writable"
+        }
+        return addDiag(st, env.file, d.span, "E-LIFECYCLE-007", "`@" + name + "` in an effect's dependency list is " + why)
+    }
+
+    fn declInfoIn(g: Globals, s: Sym) -> DeclInfo | not {
+        const ds: DeclSrc | not = findDeclSrc(g, s)
+        if (ds is not) return not
+        return ds.info
     }
 
     // F17: a match arm whose body is an object literal loses its named payload
@@ -4474,6 +4626,7 @@ ${
             .Text(text: t) :> st
             .Interp(e: e) :> resolveExpr(env, e, not, st).st
             .DeclNode(d: d) :> addDiag(st, env.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a declaration inside markup is not in bootstrap slice M2")
+            .Effect(w: w) :> resolveEffect(env, w, st)
         }
     }
 
@@ -4487,7 +4640,7 @@ ${
     fn resolveElem(env: Env, e: AElem, st: AS) -> AS {
         if (e.star) return resolveStar(env, e, st)
         if (e.tag == "each") return resolveEach(env, e, st)
-        if (e.tag == "slot") return addElem(st, e.nid, ElemFact.MSlot)
+        if (e.tag == "slot") return resolveSlot(env, e, st)
         // A user declaration in scope wins over every built-in reading of the
         // tag — HTML and (r2 F2) the structural-refusal list alike.
         const d: DeclSrc | not = declNamed(env.g, e.tag)
@@ -4510,6 +4663,32 @@ ${
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
         }
         return resolveHtml(env, e, st)
+    }
+
+    // s449 (from U0 review r2 N2): `<slot>` CONTENT (fallback for a use with no
+    // children). SPEC §66.15.2 rules only "use-site children → `<slot/>`" and
+    // says nothing of content written inside `<slot>…</slot>`; Core `View.Slot`
+    // carries no fallback. It used to be dropped unvisited — an effect there
+    // never ran, an unresolved `${@nope}` raised nothing. Fail closed: any
+    // content other than whitespace is refused.
+    fn resolveSlot(env: Env, e: AElem, st: AS) -> AS {
+        for (const k of e.kids) {
+            if (!blankNode(k)) {
+                return addElem(addDiag(st, env.file, k.span, "E-BOOTSTRAP-UNSUPPORTED", "content inside `<slot>…</slot>` (fallback content for a use with no children) is not in the bootstrap — SPEC §66.15.2 rules only `<slot/>`; the content would be dropped silently. Write `<slot/>` and render a default outside it"), e.nid, ElemFact.MSlot)
+            }
+        }
+        return addElem(st, e.nid, ElemFact.MSlot)
+    }
+
+    fn blankNode(n: ANode) -> boolean {
+        const k: ANodeK = n.k
+        return match k {
+            .Text(text: t) :> t.trim() == ""
+            .Elem(e: e) :> false
+            .Interp(e: e) :> false
+            .DeclNode(d: d) :> false
+            .Effect(w: w) :> false
+        }
     }
 
     // s444 (PA): the scrml structural / directive tags (§4.15, §24.4 and impl#1's
@@ -5086,6 +5265,14 @@ ${
             }
         }
         st = addElem(st, e.nid, ElemFact.MUse(d.info.sym, alias))
+        // s449 (from U0 review F1): an effect in USE-SITE SLOT CONTENT (§66.15.2)
+        // is rendered wherever the declaration's `renders` places `<slot/>` —
+        // zero times (the effect would be dropped) or several (it would run once
+        // per placement). Which scope owns slot content is not settled, so the
+        // bootstrap refuses it, as it refuses an effect in a `renders`.
+        for (const sp of kidEffectSpans(e.kids)) {
+            st = addDiag(st, env.file, sp, "E-BOOTSTRAP-UNSUPPORTED", "an effect in the slot content of `<" + e.tag + ">` is not in the bootstrap — slot content is rendered once per `<slot/>` in its `renders` (possibly never, possibly twice), and which scope owns it is not settled (§6.7.4 / §66.15.2); write the effect outside the use")
+        }
         return resolveNodes(penv, e.kids, st)
     }
 
@@ -5164,7 +5351,7 @@ ${
     fn declEnv(g: Globals, ds: DeclSrc, inRenders: boolean) -> Env {
         return { g: g, file: ds.file, ctx: CtxK.InDecl(ds.info.sym, ds.isProgram), locals: [], rows: [],
                  handles: handlesOwnedBy(g, ds.info.nid), inRenders: inRenders, narrows: [], present: [],
-                 host: HostCtx.HostNo, own: "" }
+                 host: HostCtx.HostNo, own: "", inEffect: false }
     }
 
     fn phaseB(g: Globals, st0: AS) -> AS {
@@ -5194,7 +5381,7 @@ ${
             if (fs.info.file == g.entry) hs = progHandles
             let host: HostCtx = HostCtx.HostOk
             if (fs.info.pure) host = HostCtx.HostPure
-            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "" }
+            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false }
             const fte: TypeEnv = { stubs: g.te.stubs, declNames: g.te.declNames, declSyms: g.te.declSyms, file: fs.info.file }
             for (const p of fs.f.params) {
                 const rs: RSym = mint(st, p.name)
@@ -5535,6 +5722,7 @@ ${
             .Return(e: e) :> ""
             .If(cond: c) :> ""
             .Given(name: n) :> ""
+            .EffectStmt(w: w) :> ""
         }
     }
 
@@ -5543,6 +5731,7 @@ ${
         return match k {
             .If(cond: c, thenB: t, elseB: el) :> thenElse(t, el)
             .Given(name: n, body: b) :> [b]
+            .EffectStmt(w: w) :> []
             .Eval(e: e) :> []
             .Local(name: n) :> []
             .Return(e: e) :> []
@@ -5593,6 +5782,8 @@ ${
             .Text(text: t) :> []
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
+            // s449: an effect body is a block like an inline handler's
+            .Effect(w: w) :> blockRedeclares(file, w.body, [], false)
         }
     }
 
@@ -5929,6 +6120,7 @@ ${
             .Eval(e: e) :> false
             .Local(name: n) :> false
             .Given(name: n) :> false
+            .EffectStmt(w: w) :> false
         }
     }
 
@@ -6038,6 +6230,7 @@ ${
             .Return(e: e) :> aliased(maybeEffects(e), al)
             .If(cond: c, thenB: t, elseB: el) :> aliased(exprEffects(c), al).concat(blockEffects(t, al)).concat(elseEffects(el, al))
             .Given(name: n, subject: sub, body: b) :> aliased(exprEffects(sub), al).concat(blockEffects(b, al.concat([aliasOf(n, sub)])))
+            .EffectStmt(w: w) :> []              // registers nothing where it stands (refused there) and writes nothing
         }
     }
 
@@ -7445,6 +7638,7 @@ ${
             .Return(e: e) :> keepTEnv(env, typeReturn(env, e, ts))
             .If(cond: c, thenB: tb, elseB: el) :> typeIf(env, c, tb, el, ts)
             .Given(name: n, subject: sub, body: b) :> typeGiven(env, s, sub, b, ts)
+            .EffectStmt(w: w) :> keepTEnv(env, ts)     // refused by the binder (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
         }
     }
 
@@ -7927,7 +8121,16 @@ ${
             .Text(text: x) :> ts
             .Interp(e: x) :> typeInterp(env, x, ts)
             .DeclNode(d: d) :> ts
+            .Effect(w: w) :> typeEffect(env, w, ts)
         }
+    }
+
+    // s449: an effect's dependencies are typed as reads; its body as a handler
+    // block is (it runs only while its scope is mounted, under the same
+    // narrowing as the markup around it).
+    fn typeEffect(env: TEnv, w: AEffect, ts0: TypeState) -> TypeState {
+        const ts: TypeState = typeExprs(env, w.deps, ts0)
+        return typeBlock(env, w.body, ts)
     }
 
     fn typeElem(env: TEnv, e: AElem, ts: TypeState) -> TypeState {
@@ -8267,14 +8470,1159 @@ ${
     }
 
     // =========================================================================
+    // s449 — THE NO-WRITE RULE (SPEC §6.7.4, "The no-write rule —
+    // E-EFFECT-WRITES-STATE"): "An effect body SHALL NOT write any reactive
+    // cell, directly or through a called function. A write found by the
+    // analysis below is E-EFFECT-WRITES-STATE; a body the analysis cannot prove
+    // write-free is E-EFFECT-WRITE-UNPROVEN."
+    //
+    // THE WRITE SUMMARY. "The compiler computes, for every scrml function, a
+    // write summary: the set of reactive cells its body may write, closed
+    // transitively over the static call graph (a fixed point, so recursion is
+    // handled)." Here each function's body is SCANNED once over the binder's
+    // facts (BodyScan: its direct writes, the scrml functions it calls or hands
+    // on as values, and the call sites nothing resolves), then the summaries are
+    // closed over those references to a fixed point. What a summary keeps is a
+    // WITNESS — the first call chain down to a write (or to an unresolvable
+    // call) — because the message "SHALL name the call chain down to the write".
+    //
+    // The rules, as the bootstrap meets them:
+    //  1. a direct write in the body — any write the binder classified (an
+    //     assignment to `@x` or a field / element of it, an edit or removal
+    //     call, a spread write, `reset(@x)`, an engine transition) and, by its
+    //     shape, a write the binder refused and reported (`@x = …`, `reset(…)`,
+    //     `@x.push(…)` with no fact) — is E-EFFECT-WRITES-STATE;
+    //  2. a call to a statically resolved scrml function (`function` or `fn`,
+    //     same file or imported — the bootstrap links every imported module, so
+    //     every body is in the compilation) whose summary is non-empty is
+    //     E-EFFECT-WRITES-STATE, naming the chain. (The bootstrap has no server
+    //     functions and no §52 cells yet: that limb is vacuous here.)
+    //  3. a function VALUE — a scrml function named without being called —
+    //     counts as called: its summary is added (the receiver may call it). An
+    //     arrow function's body is scanned in place (it can only stand as a
+    //     `.filter` / `.map` argument in the bootstrap).
+    //  4. a call the analysis cannot resolve fails closed, E-EFFECT-WRITE-
+    //     UNPROVEN: a call through a local / parameter / field. (`^{ }` is not
+    //     parsed in a bootstrap logic body at all, so it never reaches here.)
+    //  5. a host call (`Date.now()`, the closed HostCall set) is outside scrml's
+    //     state and is not a write.
+    //  +  rule 2's "any call the SPEC defines as writing a cell on the caller's
+    //     behalf", the bootstrap's implicit one: READING a user declaration's
+    //     SHARED instance (`@box`, `@box.k`) constructs it on first reference
+    //     (§66.6.4) — running its field initializers (which may call writers)
+    //     and constructing the instances its renders mounts unconditionally. So
+    //     such a read refers to the declaration's CONSTRUCTION, summarized like a
+    //     function over its initializers and the declarations its renders uses
+    //     (over-approximate: whether this read is the first one is not static).
+    //     Found by measurement: an effect reading `@box.k`, where `box`'s `let`
+    //     seed calls a writer, wrote `@a` at run time with no diagnostic.
+    // The message names the fix by shape (S447 1a): a write back to the cell's
+    // initializer (or `reset(@x)`) → `reset-on=[…]` on the cell; a write of a
+    // call's result → a `<request>`; otherwise → move the write to the writer,
+    // or derive the value.
+    // =========================================================================
+    type FixShape:enum = { ResetFix, RequestFix, OtherFix }
+    // A write: the cell (`@x`, `@decl.field`), where, and the fix its shape names.
+    type WSite:struct = { cell: string, span: ASpan, file: string, fix: FixShape }
+    // A call the analysis cannot resolve, and why.
+    type USite:struct = { what: string, span: ASpan, file: string }
+    // A scrml function the body calls (`asValue` = false) or hands on as a value
+    // — or a user declaration whose shared instance it reads (constructed on
+    // first reference; `sym` is the declaration's, `name` its display label).
+    type FnRef:struct = { sym: int, name: string, span: ASpan, file: string, asValue: boolean }
+    type BodyScan:struct = { writes: WSite[], refs: FnRef[], unproven: USite[] }
+    // The first chain (display labels — `f()`, `construction of <box>` —
+    // outermost first) down to a write / an unresolvable call.
+    type Witness:struct = { chain: string[], site: WSite }
+    type UWitness:struct = { chain: string[], site: USite }
+    type FnSummary:struct = { sym: int, name: string, scan: BodyScan, w: Witness | not, u: UWitness | not }
+    type WCx:struct = { t: Tables, file: string }
+
+    fn emptyScan() -> BodyScan { return { writes: [], refs: [], unproven: [] } }
+
+    fn addWrite(acc: BodyScan, w: WSite) -> BodyScan {
+        return { writes: acc.writes.concat([w]), refs: acc.refs, unproven: acc.unproven }
+    }
+
+    fn addRef(acc: BodyScan, r: FnRef) -> BodyScan {
+        return { writes: acc.writes, refs: acc.refs.concat([r]), unproven: acc.unproven }
+    }
+
+    fn addUnproven(acc: BodyScan, u: USite) -> BodyScan {
+        return { writes: acc.writes, refs: acc.refs, unproven: acc.unproven.concat([u]) }
+    }
+
+    fn scanBlock(cx: WCx, b: ABlock, acc0: BodyScan) -> BodyScan {
+        let acc: BodyScan = acc0
+        for (const s of b.stmts) { acc = scanStmt(cx, s, acc) }
+        return acc
+    }
+
+    fn scanStmt(cx: WCx, s: AStmt, acc: BodyScan) -> BodyScan {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> scanExpr(cx, e, stmtWrite(cx, e, acc))
+            .Local(name: n, init: i) :> scanExpr(cx, i, acc)
+            .Return(e: e) :> scanMaybe(cx, e, acc)
+            .If(cond: c, thenB: t, elseB: el) :> scanElse(cx, el, scanBlock(cx, t, scanExpr(cx, c, acc)))
+            .Given(name: n, subject: sub, body: b) :> scanBlock(cx, b, scanExpr(cx, sub, acc))
+            .EffectStmt(w: w) :> acc                // refused where it stands (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
+        }
+    }
+
+    fn scanMaybe(cx: WCx, e: AExpr | not, acc: BodyScan) -> BodyScan {
+        if (e is not) return acc
+        return scanExpr(cx, e, acc)
+    }
+
+    fn scanElse(cx: WCx, el: ABlock | not, acc: BodyScan) -> BodyScan {
+        if (el is not) return acc
+        return scanBlock(cx, el, acc)
+    }
+
+    fn scanExprs(cx: WCx, es: AExpr[], acc0: BodyScan) -> BodyScan {
+        let acc: BodyScan = acc0
+        for (const e of es) { acc = scanExpr(cx, e, acc) }
+        return acc
+    }
+
+    // Every call and every function value in `e`, at any depth (an arrow
+    // function's body included — rule 3).
+    fn scanExpr(cx: WCx, e: AExpr, acc0: BodyScan) -> BodyScan {
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is some) return scanExprs(cx, exprKids(e).slice(1), scanCall(cx, e, c, acc0))
+        let acc: BodyScan = formulaRef(cx, e, constructionRef(cx, e, fnValueRef(cx, e, acc0)))
+        for (const x of exprKids(e)) { acc = scanExpr(cx, x, acc) }
+        return acc
+    }
+
+    // A read of a user declaration's SHARED instance may construct it (see the
+    // banner): a reference to that declaration's construction summary.
+    fn constructionRef(cx: WCx, e: AExpr, acc: BodyScan) -> BodyScan {
+        const d: Sym | not = sharedDeclRead(nameFact(cx.t.names, e.nid))
+        if (d is not) return acc
+        if (d.id == cx.t.program.id) return acc       // the program is constructed at boot, never by a read
+        for (const r of acc.refs) {
+            if (r.sym == d.id) return acc             // `@box.k` resolves `@box` too: one reference per body
+        }
+        return addRef(acc, { sym: d.id, name: constructionLabel(d.hint), span: e.span, file: cx.file, asValue: false })
+    }
+
+    // s449 fix round (HIGH-1) — a read of a field with NO write capability (a
+    // derived cell, or a locked one whose initializer the printer turns into a
+    // `rt.derived` — print `fieldCtor`) RUNS ITS FORMULA on the read (lazy pull,
+    // §6.6): a reference to that formula's summary. Program-level cells
+    // included — `constructionRef` skips the program because it is built at
+    // boot, but a derived program cell is still recomputed at its read.
+    // Reviewer-measured: `<d:int=(@n + g())/>` read in an effect wrote `@a`.
+    fn formulaRef(cx: WCx, e: AExpr, acc: BodyScan) -> BodyScan {
+        const fi: FieldInfo | not = formulaFieldRead(cx.t, nameFact(cx.t.names, e.nid))
+        if (fi is not) return acc
+        for (const r of acc.refs) {
+            if (r.sym == fi.sym.id) return acc            // one reference per body
+        }
+        return addRef(acc, { sym: fi.sym.id, name: formulaLabel(cx.t, fi), span: e.span, file: cx.file, asValue: false })
+    }
+
+    fn formulaFieldRead(t: Tables, f: NameFact | not) -> FieldInfo | not {
+        const df: DeclField | not = readField(f)
+        if (df is not) return not
+        const di: DeclInfo | not = declInfo(t, df.decl)
+        if (di is not || df.idx < 0 || df.idx >= di.fields.length) return not
+        const fi: FieldInfo = di.fields[df.idx]
+        const w: Sym | not = fi.wcap
+        if (w is some) return not                        // a cell: seeded once, at construction
+        return fi
+    }
+
+    type DeclField:struct = { decl: Sym, idx: int }
+
+    fn mkDeclField(d: Sym, i: int) -> DeclField { return { decl: d, idx: i } }
+
+    fn readField(f: NameFact | not) -> DeclField | not {
+        return match f {
+            .NField(decl: d, inst: i, idx: x) :> mkDeclField(d, x)
+            .NInst(decl: d) :> not
+            .NLocal(sym: s) :> not
+            .NStruct(owner: o) :> not
+            .NFn(sym: s) :> not
+            .NLength :> not
+            not :> not
+        }
+    }
+
+    fn formulaLabel(t: Tables, fi: FieldInfo) -> string {
+        for (const d of t.decls) {
+            for (const f of d.fields) {
+                if (f.sym.id == fi.sym.id) {
+                    if (d.kind == DeclKind.Program) return "formula of @" + fi.sym.hint
+                    return "formula of @" + d.sym.hint + "." + fi.sym.hint
+                }
+            }
+        }
+        return "formula of @" + fi.sym.hint
+    }
+
+    fn sharedDeclRead(f: NameFact | not) -> Sym | not {
+        return match f {
+            .NField(decl: d, inst: i) :> sharedOf(i)
+            .NInst(decl: d, inst: i) :> sharedOf(i)
+            .NLocal(sym: s) :> not
+            .NStruct(owner: o) :> not
+            .NFn(sym: s) :> not
+            .NLength :> not
+            not :> not
+        }
+    }
+
+    fn sharedOf(i: InstRef) -> Sym | not {
+        return match i {
+            .Shared(decl: d) :> d
+            .Lexical(depth: n) :> not
+            .Alias(sym: s) :> not
+            .Narrowed(sym: s) :> not
+        }
+    }
+
+    fn constructionLabel(name: string) -> string { return "construction of <" + name + ">" }
+
+    fn scanCall(cx: WCx, e: AExpr, callee: AExpr, acc: BodyScan) -> BodyScan {
+        // an edit / removal / `reset` call is a WRITE, recorded at its statement
+        // (stmtWrite); its receiver is only read
+        if (effectFact(cx.t.effects, e.nid) is some || exprName(callee) == "reset" || isEditCallee(callee)) return scanExprs(cx, receiverOf(callee), acc)
+        // a host call (`Date.now()`) or a sequence call (`xs.filter(λ)`): the
+        // receiver is read; the arrow function is an argument (scanned by the caller)
+        if (isHostOrSeq(valueFact(cx.t.values, e.nid))) return scanExprs(cx, receiverOf(callee), acc)
+        const f: NameFact | not = nameFact(cx.t.names, callee.nid)
+        const s: Sym | not = fnSymOf(f)
+        if (s is some) return addRef(acc, { sym: s.id, name: s.hint + "()", span: e.span, file: cx.file, asValue: false })
+        // A callee name with no fact was already reported (E-SCOPE-001), and any
+        // other callee shape is refused by the binder — only a NAME that resolves
+        // to something other than a function reaches here: a local, a parameter,
+        // a field. Rule 4: fail closed.
+        if (f is some && exprName(callee) != "") {
+            return addUnproven(acc, { what: "`" + exprName(callee) + "(…)` calls through `" + exprName(callee) + "`, which is " + calleeKind(f) + ", not a declared scrml function", span: e.span, file: cx.file })
+        }
+        return scanExprs(cx, receiverOf(callee), acc)
+    }
+
+    // Rule 3: a scrml function NAMED without being called.
+    fn fnValueRef(cx: WCx, e: AExpr, acc: BodyScan) -> BodyScan {
+        if (exprName(e) == "") return acc
+        const s: Sym | not = fnSymOf(nameFact(cx.t.names, e.nid))
+        if (s is not) return acc
+        return addRef(acc, { sym: s.id, name: s.hint, span: e.span, file: cx.file, asValue: true })
+    }
+
+    fn fnSymOf(f: NameFact | not) -> Sym | not {
+        return match f {
+            .NFn(sym: s) :> s
+            .NLocal(sym: s) :> not
+            .NField(decl: d) :> not
+            .NInst(decl: d) :> not
+            .NStruct(owner: o) :> not
+            .NLength :> not
+            not :> not
+        }
+    }
+
+    fn calleeKind(f: NameFact) -> string {
+        return match f {
+            .NLocal(sym: s) :> "a local or a parameter (a function value the compiler cannot resolve to a known set of scrml functions)"
+            .NField(decl: d) :> "a cell"
+            .NInst(decl: d) :> "an instance"
+            .NStruct(owner: o) :> "a struct field"
+            .NLength :> "a length"
+            .NFn(sym: s) :> "a function"
+        }
+    }
+
+    fn isHostOrSeq(v: ValueFact | not) -> boolean {
+        return match v {
+            .VHost(call: c) :> true
+            .VSeqCall(op: o) :> true
+            .VLit(lit: l) :> false
+            .VVariant(enumSym: s) :> false
+            .VOp(op: o) :> false
+            .VStructOf(ty: t) :> false
+            .VLambda(params: ps) :> false
+            not :> false
+        }
+    }
+
+    // `@x.push(…)` / `.unshift` / `.pop` / `.shift` on a reactive place — an edit
+    // or removal by its method (§66.11.2), whether or not the binder accepted it.
+    fn isEditCallee(callee: AExpr) -> boolean {
+        const k: AExprK = callee.k
+        const n: string = memberName(k)
+        if (n != "push" && n != "unshift" && n != "pop" && n != "shift") return false
+        const r: AExpr[] = receiverOf(callee)
+        if (r.length == 0) return false
+        return isReactiveRoot(placeRoot(r[0]))
+    }
+
+    fn memberName(k: AExprK) -> string {
+        return match k {
+            .Member(obj: o, name: n) :> n
+            .Name(name: n) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: x) :> ""
+            .Index(obj: o) :> ""
+            .Lambda(params: ps) :> ""
+        }
+    }
+
+    // The receiver of a member callee (`xs` of `xs.filter`), else nothing.
+    fn receiverOf(callee: AExpr) -> AExpr[] {
+        const k: AExprK = callee.k
+        return match k {
+            .Member(obj: o) :> [o]
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Call(callee: c) :> []
+            .Unary(op: o) :> []
+            .Binary(op: o) :> []
+            .Ternary(test: t) :> []
+            .Assign(target: t) :> []
+            .ArrayLit(elems: es) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: x) :> []
+            .Index(obj: o) :> []
+            .Lambda(params: ps) :> []
+        }
+    }
+
+    // The base of a place expression: `@x` → "@x", `@.` → "@.", a name → the
+    // name, anything else → "".
+    fn placeRoot(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .At(name: n) :> "@" + n
+            .AtItem :> "@."
+            .Name(name: n) :> n
+            .Member(obj: o) :> placeRoot(o)
+            .Index(obj: o) :> placeRoot(o)
+            .Num(raw: r) :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: x) :> ""
+            .Lambda(params: ps) :> ""
+        }
+    }
+
+    fn isReactiveRoot(root: string) -> boolean { return root.indexOf("@") == 0 }
+
+    // Rule 1 at a statement: the write the binder classified, else a write by
+    // its shape that the binder refused (and reported) — still a write.
+    fn stmtWrite(cx: WCx, e: AExpr, acc: BodyScan) -> BodyScan {
+        const f: EffectFact | not = effectFact(cx.t.effects, e.nid)
+        const cap: Sym | not = writtenCap(f)
+        if (cap is some) return addWrite(acc, { cell: cellLabel(cx.t, cap), span: e.span, file: cx.file, fix: factFix(cx.t, e, f, cap) })
+        const syn: string = syntacticWrite(e)
+        if (syn != "") return addWrite(acc, { cell: syn, span: e.span, file: cx.file, fix: shapeFix(e, "") })
+        return acc
+    }
+
+    // The capability a reactive write uses (`not` for a local rebinding / no write).
+    fn writtenCap(f: EffectFact | not) -> Sym | not {
+        return match f {
+            .EWrite(w: w) :> w.cap
+            .ESpread(ws: ws) :> firstSpreadCap(ws)
+            .EReset(w: w) :> w.cap
+            .EEdits(w: w) :> w.cap
+            .ERemove(w: w) :> w.cap
+            .EElemAt(cap: c) :> c
+            .EAssignLocal(sym: s) :> not
+            not :> not
+        }
+    }
+
+    fn firstSpreadCap(ws: SpreadWrite[]) -> Sym | not {
+        if (ws.length == 0) return not
+        return ws[0].w.cap
+    }
+
+    fn isResetFact(f: EffectFact | not) -> boolean {
+        return match f {
+            .EReset(w: w) :> true
+            .EWrite(w: w) :> false
+            .ESpread(ws: ws) :> false
+            .EEdits(w: w) :> false
+            .ERemove(w: w) :> false
+            .EElemAt(cap: c) :> false
+            .EAssignLocal(sym: s) :> false
+            not :> false
+        }
+    }
+
+    // The cell a capability writes, as the author spells it: `@x` for a program
+    // cell, `@decl.field` for a declaration's field.
+    fn cellLabel(t: Tables, cap: Sym) -> string {
+        for (const d of t.decls) {
+            for (const f of d.fields) {
+                const w: Sym | not = f.wcap
+                if (w is some && w.id == cap.id) {
+                    if (d.kind == DeclKind.Program) return "@" + f.sym.hint
+                    return "@" + d.sym.hint + "." + f.sym.hint
+                }
+            }
+        }
+        return "`" + cap.hint + "`"
+    }
+
+    fn fieldOfCap(t: Tables, cap: Sym) -> FieldInfo | not {
+        for (const d of t.decls) {
+            for (const f of d.fields) {
+                const w: Sym | not = f.wcap
+                if (w is some && w.id == cap.id) return f
+            }
+        }
+        return not
+    }
+
+    fn factFix(t: Tables, e: AExpr, f: EffectFact | not, cap: Sym) -> FixShape {
+        if (isResetFact(f)) return FixShape.ResetFix
+        let init: string = ""
+        const fi: FieldInfo | not = fieldOfCap(t, cap)
+        if (fi is some) init = initKey(fi.init)
+        return shapeFix(e, init)
+    }
+
+    // The fix a write's SHAPE names: `reset(…)` or a write of the cell's own
+    // initializer literal → reset-on=; a write of a call's result → <request>;
+    // otherwise → move / derive.
+    fn shapeFix(e: AExpr, init: string) -> FixShape {
+        if (exprName(callTarget(e)) == "reset") return FixShape.ResetFix
+        const v: AExpr | not = assignedValue(e)
+        if (v is not) return FixShape.OtherFix
+        if (calleeOf(v.k) is some) return FixShape.RequestFix
+        if (init != "" && litKey(v) == init) return FixShape.ResetFix
+        return FixShape.OtherFix
+    }
+
+    fn callTarget(e: AExpr) -> AExpr {
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is some) return c
+        return e
+    }
+
+    fn assignedValue(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Assign(target: t, value: v) :> v
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    fn assignedTarget(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Assign(target: t, value: v) :> t
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    // A literal's identity ("" — not a literal), to compare a written value
+    // with a cell's initializer.
+    fn litKey(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Num(raw: r) :> "n:" + r
+            .Str(v: s) :> "s:" + s
+            .Bool(v: b) :> boolKey(b)
+            .NotLit :> "not"
+            .Variant(name: n) :> "v:" + n
+            .Unary(op: o, e: x) :> negKey(o, x)
+            .Name(name: n) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Recovered :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: x) :> ""
+            .Index(obj: o) :> ""
+            .Lambda(params: ps) :> ""
+        }
+    }
+
+    fn boolKey(b: boolean) -> string {
+        if (b) return "b:true"
+        return "b:false"
+    }
+
+    fn negKey(o: UnOp, x: AExpr) -> string {
+        if (o != UnOp.Neg) return ""
+        const inner: string = litKey(x)
+        if (inner.indexOf("n:") != 0) return ""
+        return "n:-" + inner.substring(2)
+    }
+
+    fn initKey(v: AAttrValue) -> string {
+        return match v {
+            .Bare(e: e) :> litKey(e)
+            .Paren(e: e) :> litKey(e)
+            .Quoted(v: s) :> "s:" + s
+            .NoValue :> ""
+            .Braced(b: b) :> ""
+        }
+    }
+
+    // A write by its SHAPE alone (the cell it names, "" — not a write):
+    // `@x… = v`, `reset(@x…)`, `@x….push(v)` and the other edit / removal calls.
+    fn syntacticWrite(e: AExpr) -> string {
+        const t: AExpr | not = assignedTarget(e)
+        if (t is some) {
+            const root: string = placeRoot(t)
+            if (isReactiveRoot(root)) return root
+            return ""
+        }
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is not) return ""
+        if (exprName(c) == "reset") {
+            const args: AExpr[] = exprKids(e).slice(1)
+            if (args.length == 1 && isReactiveRoot(placeRoot(args[0]))) return placeRoot(args[0])
+            return ""
+        }
+        if (isEditCallee(c)) return placeRoot(receiverOf(c)[0])
+        return ""
+    }
+
+    // ---- the summaries: one scan per function, closed over references ---------
+    // Plus one per user declaration: its CONSTRUCTION (see the banner).
+    fn fnSummaries(g: Globals, t: Tables) -> FnSummary[] {
+        let out: FnSummary[] = []
+        for (const fs of g.fns) {
+            const label: string = fs.info.name + "()"
+            const scan: BodyScan = scanBlock({ t: t, file: fs.info.file }, fs.f.body, emptyScan())
+            out = out.concat([{ sym: fs.info.sym.id, name: label, scan: scan, w: directWitness(label, scan), u: directUWitness(label, scan) }])
+        }
+        for (const ds of g.decls) {
+            if (!ds.isProgram) {
+                const label: string = constructionLabel(ds.info.sym.hint)
+                const scan: BodyScan = constructionScan(t, ds)
+                out = out.concat([{ sym: ds.info.sym.id, name: label, scan: scan, w: directWitness(label, scan), u: directUWitness(label, scan) }])
+            }
+            // HIGH-1: one summary per formula — a field computed on its read
+            for (const fi of ds.info.fields) {
+                const w: Sym | not = fi.wcap
+                if (w is not) {
+                    const flabel: string = formulaLabel(t, fi)
+                    const fscan: BodyScan = scanValue({ t: t, file: ds.file }, fi.init, emptyScan())
+                    out = out.concat([{ sym: fi.sym.id, name: flabel, scan: fscan, w: directWitness(flabel, fscan), u: directUWitness(flabel, fscan) }])
+                }
+            }
+        }
+        // the fixed point: a pass adds a witness to a function whose callee has
+        // one; a witness, once found, is kept (each function gains at most two),
+        // so it ends within (function count + 2) passes
+        let changed = true
+        let pass = 0
+        while (changed && pass < out.length + 2) {
+            changed = false
+            let next: FnSummary[] = []
+            for (const s of out) {
+                const r: FnSummary = propagated(s, out)
+                if (gainedWitness(s, r)) changed = true
+                next = next.concat([r])
+            }
+            out = next
+            pass = pass + 1
+        }
+        return out
+    }
+
+    // What constructing a declaration's instance runs: every field initializer
+    // (the declared defaults — a use-site value is evaluated where the use
+    // renders, not by a read), and the construction of each declaration its
+    // renders uses (L12 (b) builds the unconditional ones with it; every use is
+    // counted — over-approximate).
+    fn constructionScan(t: Tables, ds: DeclSrc) -> BodyScan {
+        const cx: WCx = { t: t, file: ds.file }
+        let acc: BodyScan = emptyScan()
+        for (const f of ds.info.fields) { acc = scanValue(cx, f.init, acc) }
+        const d: ADecl | not = ds.d
+        if (d is some) {
+            const r: AElem | not = d.renders
+            if (r is some) acc = usedDecls(cx, r.kids, acc)
+        }
+        return acc
+    }
+
+    fn scanValue(cx: WCx, v: AAttrValue, acc: BodyScan) -> BodyScan {
+        return match v {
+            .Bare(e: e) :> scanExpr(cx, e, acc)
+            .Paren(e: e) :> scanExpr(cx, e, acc)
+            .Braced(b: b) :> scanBlock(cx, b, acc)
+            .Quoted(v: s) :> acc
+            .NoValue :> acc
+        }
+    }
+
+    fn usedDecls(cx: WCx, ns: ANode[], acc0: BodyScan) -> BodyScan {
+        let acc: BodyScan = acc0
+        for (const n of ns) {
+            const e: AElem | not = elemOfNode(n.k)
+            if (e is some) {
+                const used: Sym | not = useOf(elemFact(cx.t.elems, e.nid))
+                if (used is some) acc = addRef(acc, { sym: used.id, name: constructionLabel(used.hint), span: e.span, file: cx.file, asValue: false })
+                acc = usedDecls(cx, e.kids, acc)
+            }
+        }
+        return acc
+    }
+
+    fn useOf(f: ElemFact | not) -> Sym | not {
+        return match f {
+            .MUse(decl: d) :> d
+            .MStar(decl: d) :> d
+            .MHtml :> not
+            .MEach(bind: b) :> not
+            .MSlot :> not
+            .MStateView(v: v) :> not
+            .MInline(v: v) :> not
+            not :> not
+        }
+    }
+
+    fn directWitness(name: string, scan: BodyScan) -> Witness | not {
+        if (scan.writes.length == 0) return not
+        return { chain: [name], site: scan.writes[0] }
+    }
+
+    fn directUWitness(name: string, scan: BodyScan) -> UWitness | not {
+        if (scan.unproven.length == 0) return not
+        return { chain: [name], site: scan.unproven[0] }
+    }
+
+    // `s` with a witness taken from the first callee (or function value) that has one.
+    fn propagated(s: FnSummary, all: FnSummary[]) -> FnSummary {
+        let w: Witness | not = s.w
+        let u: UWitness | not = s.u
+        for (const r of s.scan.refs) {
+            const c: FnSummary | not = summaryOf(all, r.sym)
+            if (c is some) {
+                const cw: Witness | not = c.w
+                const cu: UWitness | not = c.u
+                if (w is not && cw is some) w = { chain: [s.name].concat(cw.chain), site: cw.site }
+                if (u is not && cu is some) u = { chain: [s.name].concat(cu.chain), site: cu.site }
+            }
+        }
+        return { sym: s.sym, name: s.name, scan: s.scan, w: w, u: u }
+    }
+
+    fn gainedWitness(before: FnSummary, after: FnSummary) -> boolean {
+        const bw: Witness | not = before.w
+        const aw: Witness | not = after.w
+        const bu: UWitness | not = before.u
+        const au: UWitness | not = after.u
+        return (bw is not && aw is some) || (bu is not && au is some)
+    }
+
+    fn summaryOf(all: FnSummary[], sym: int) -> FnSummary | not {
+        for (const s of all) {
+            if (s.sym == sym) return s
+        }
+        return not
+    }
+
+    // ---- the pass: every accepted effect's body against the summaries ---------
+    // (and every accepted `reset-on=` rule's reset value — see resetValueDiags)
+    fn effectPass(g: Globals, t: Tables, effects: EffectSrc[]) -> Diag[] {
+        if (effects.length == 0 && t.resets.length == 0) return []
+        const sums: FnSummary[] = fnSummaries(g, t)
+        let out: Diag[] = []
+        for (const es of effects) {
+            const scan: BodyScan = scanBlock({ t: t, file: es.file }, es.w.body, emptyScan())
+            for (const w of scan.writes) { out = out.concat([writesDirect(es.w, w)]) }
+            for (const r of scan.refs) { out = out.concat(refDiags(es.w, r, summaryOf(sums, r.sym))) }
+            for (const u of scan.unproven) { out = out.concat([unprovenDirect(u)]) }
+        }
+        return out.concat(resetValueDiags(g, t, sums))
+    }
+
+    // s449 — a `reset-on=` reset evaluates the cell's initializer (§6.8.1) at
+    // every reset. §6.8.4: "`reset-on=` performs exactly one write —
+    // `reset(@self)` (§6.8.2) — and nothing else", and rule 3's termination
+    // argument ("Because the graph is static and acyclic, a chain of resets
+    // terminates by construction") holds only if evaluating the reset value
+    // writes no cell. Found by measurement: `<let page:int=(bump()) reset-on=[@q]/>`
+    // with `bump()` writing `@q` compiled clean — at run time every reset wrote
+    // the trigger again, an endless reset loop. §34 names no code for it, so the
+    // bootstrap refuses it (E-BOOTSTRAP-UNSUPPORTED, fail closed) by the same
+    // write summary the no-write rule uses — an unprovable value is refused too.
+    fn resetValueDiags(g: Globals, t: Tables, sums: FnSummary[]) -> Diag[] {
+        const prog: DeclSrc | not = findDeclSrc(g, t.program)
+        if (prog is not) return []
+        let out: Diag[] = []
+        for (const r of t.resets) {
+            const f: FieldInfo = prog.info.fields[r.target]
+            const scan: BodyScan = scanValue({ t: t, file: prog.file }, f.init, emptyScan())
+            let why: string = ""
+            if (scan.writes.length > 0) why = "writes `" + scan.writes[0].cell + "`"
+            for (const ref of scan.refs) {
+                const s: FnSummary | not = summaryOf(sums, ref.sym)
+                if (why == "" && s is not) why = "may write — it reaches `" + ref.name + "`, which has no write summary"
+                if (why == "" && s is some) {
+                    const sw: Witness | not = s.w
+                    const su: UWitness | not = s.u
+                    if (sw is some) why = "writes `" + sw.site.cell + "` (`" + chainText(sw.chain) + " → " + sw.site.cell + "`)"
+                    if (why == "" && su is some) why = "may write — it reaches a call the compiler cannot resolve (`" + chainText(su.chain) + "`: " + su.site.what + ")"
+                }
+            }
+            if (why == "" && scan.unproven.length > 0) why = "may write — " + scan.unproven[0].what
+            if (why != "") {
+                out = out.concat([{ code: "E-BOOTSTRAP-UNSUPPORTED", file: prog.file, span: f.span,
+                                    message: "`reset-on=` on `@" + f.sym.hint + "` re-evaluates its initializer at every reset, and that initializer " + why + " — a reset must write its own cell and nothing else (§6.8.4: \"performs exactly one write … and nothing else\"), or the reset chain need not end; §34 names no code for this, so it is refused. Give the cell an initializer that writes nothing" }])
+            }
+        }
+        return out
+    }
+
+    fn refDiags(w: AEffect, r: FnRef, s: FnSummary | not) -> Diag[] {
+        // fix round (LOW a): a reference with no summary is unresolved — fail closed
+        if (s is not) return [{ code: "E-EFFECT-WRITE-UNPROVEN", file: r.file, span: r.span, message: "this effect reaches `" + r.name + "`, which has no write summary — the compiler cannot prove it writes no reactive cell, and the rule fails closed (§6.7.4 rule 4)" }]
+        const sw: Witness | not = s.w
+        if (sw is some) return [writesThrough(w, r, sw)]
+        const su: UWitness | not = s.u
+        if (su is some) return [unprovenThrough(r, su)]
+        return []
+    }
+
+    fn effectWord(w: AEffect) -> string {
+        if (w.keyword) return "this `when … changes` effect"
+        return "this `<effect>`"
+    }
+
+    fn writesDirect(w: AEffect, site: WSite) -> Diag {
+        const msg: string = effectWord(w) + " writes `" + site.cell + "`. An effect drives the outside world and may not write reactive state, directly or through a called function (§6.7.4). " + fixText(w, site)
+        return { code: "E-EFFECT-WRITES-STATE", message: msg, file: site.file, span: site.span }
+    }
+
+    fn writesThrough(w: AEffect, r: FnRef, wit: Witness) -> Diag {
+        const chain: string = chainText(wit.chain) + " → " + wit.site.cell
+        let how: string = " writes `" + wit.site.cell + "` through a call: `" + chain + "`"
+        if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value — whatever receives it may call it (§6.7.4 rule 3) — and it writes `" + wit.site.cell + "`: `" + chain + "`"
+        if (r.name.indexOf("formula of ") == 0) how = " reads a value computed on its read — its formula runs inside the effect and writes `" + wit.site.cell + "`: `" + chain + "`"
+        if (r.name.indexOf("construction of ") == 0) how = " reads a shared instance that its first read CONSTRUCTS, running initializers that write `" + wit.site.cell + "`: `" + chain + "`"
+        const msg: string = effectWord(w) + how + ". An effect drives the outside world and may not write reactive state, directly or through a called function (§6.7.4). " + fixText(w, wit.site)
+        return { code: "E-EFFECT-WRITES-STATE", message: msg, file: r.file, span: r.span }
+    }
+
+    fn unprovenDirect(u: USite) -> Diag {
+        const msg: string = u.what + " — the compiler cannot prove this effect writes no reactive cell, and the rule fails closed (§6.7.4 rule 4). Call a declared scrml function by its name"
+        return { code: "E-EFFECT-WRITE-UNPROVEN", message: msg, file: u.file, span: u.span }
+    }
+
+    fn unprovenThrough(r: FnRef, wit: UWitness) -> Diag {
+        const msg: string = "this effect reaches a call the compiler cannot resolve, through `" + chainText(wit.chain) + "`: " + wit.site.what + " — it cannot prove the effect writes no reactive cell, and the rule fails closed (§6.7.4 rule 4)"
+        return { code: "E-EFFECT-WRITE-UNPROVEN", message: msg, file: r.file, span: r.span }
+    }
+
+    fn chainText(labels: string[]) -> string {
+        return labels.join(" → ")
+    }
+
+    // The fix the message names, by the write's shape (S447 1a).
+    fn fixText(w: AEffect, site: WSite) -> string {
+        const f: FixShape = site.fix
+        return match f {
+            .ResetFix :> "To reset `" + site.cell + "` when this effect's dependencies change, declare it on the cell: `reset-on=[" + depNames(w).join(", ") + "]` (§6.8.4)."
+            .RequestFix :> "A call result that must land in state is a `<request>`'s job — it owns the result, loading and errors (§6.7.7)."
+            .OtherFix :> "Move the write into the code that writes the trigger (the handler or function), or derive the value (§6.6)."
+        }
+    }
+
+    fn depNames(w: AEffect) -> string[] {
+        let out: string[] = []
+        for (const d of w.deps) {
+            const n: string = atName(d)
+            if (n != "") out = out.concat(["@" + n])
+        }
+        return out
+    }
+
+    // =========================================================================
+    // s449 — `reset-on=[@a, @b]` (SPEC §6.8.4): "When any listed cell changes
+    // … the runtime SHALL perform `reset(@self)`". The static rules — "Rules 2,
+    // 3, 5 and 6 are compile-time errors; none of them is deferred to run time":
+    //   2  every entry "a declared, mutable, non-derived reactive cell in scope
+    //      at the declaration" (an empty list too) — E-RESET-ON-INVALID-ENTRY;
+    //   3  the entry → reset-cell graph is acyclic ("including a cell listing
+    //      itself") — E-RESET-ON-CYCLE, naming the cells on the cycle;
+    //   5  the cell's contract admits the reset write (`reset(@x)` is a replace)
+    //      — a locked or derived cell is E-RESET-ON-NOT-WRITABLE;
+    //   6  on a cell with a `rule=` graph, "Every state other than the target
+    //      itself SHALL admit the target in its `rule=`" — else
+    //      E-RESET-ON-ENGINE-REFUSED naming every refusing state and the target;
+    //      a non-literal target means every variant is a target (fail closed).
+    // The bootstrap reads `reset-on=` on PROGRAM cells (a field of a user
+    // declaration is refused — per-instance resets are OPEN, openerWordDiags).
+    // A rule that passes is a ResetOnInfo; `rank` orders a chain (rule 4).
+    // =========================================================================
+    type RResets:struct = { infos: ResetOnInfo[], st: AS }
+    type ResetEdge:struct = { target: int, triggers: int[], span: ASpan }
+
+    fn resetOnPass(g: Globals, st0: AS) -> RResets {
+        let st: AS = st0
+        const prog: DeclSrc | not = findDeclSrc(g, g.program)
+        if (prog is not) return { infos: [], st: st }
+        const p: AProgram | not = prog.p
+        if (p is not) return { infos: [], st: st }
+        let edges: ResetEdge[] = []
+        for (const it of p.items) {
+            for (const d of declsOfItem(it)) {
+                if (!isNestedUserDecl(d)) {
+                    for (const a of d.mods) {
+                        if (a.name == "reset-on") {
+                            const r: RResetEdge = resetEdgeOf(g, prog, d, a, st)
+                            st = r.st
+                            const e: ResetEdge | not = r.e
+                            if (e is some) edges = edges.concat([e])
+                        }
+                    }
+                }
+            }
+        }
+        // rule 3 — an edge on a cycle is refused (reported once per cycle)
+        let onCycle: int[] = []
+        for (const e of edges) {
+            if (onCycle.indexOf(e.target) < 0) {
+                const cyc: int[] = cycleFrom(edges, e.target, e.target, [])
+                if (cyc.length > 0) {
+                    st = addDiag(st, prog.file, e.span, "E-RESET-ON-CYCLE", "the `reset-on=` rules form a cycle: " + cycleText(prog.info, cyc) + " — a reset chain must end; drop one of these entries (§6.8.4 rule 3)")
+                    onCycle = onCycle.concat(cyc)
+                }
+            }
+        }
+        let infos: ResetOnInfo[] = []
+        for (const e of edges) {
+            if (onCycle.indexOf(e.target) < 0) infos = infos.concat([{ target: e.target, triggers: e.triggers, rank: rankOf(edges, e.target, []) }])
+        }
+        return { infos: infos, st: st }
+    }
+
+    type RResetEdge:struct = { e: ResetEdge | not, st: AS }
+
+    fn resetEdgeOf(g: Globals, prog: DeclSrc, d: ADecl, a: AAttr, st0: AS) -> RResetEdge {
+        let st: AS = st0
+        const target: int = fieldIndex(prog.info, d.name)
+        if (target < 0) return { e: not, st: st }
+        const es: AExpr[] | not = resetEntries(a.value)
+        if (es is not) return { e: not, st: addDiag(st, prog.file, a.span, "E-RESET-ON-INVALID-ENTRY", "`reset-on=` takes a bracketed list of cells, `reset-on=[@a, @b]` (§6.8.4)") }
+        if (es.length == 0) return { e: not, st: addDiag(st, prog.file, a.span, "E-RESET-ON-INVALID-ENTRY", "`reset-on=[]` lists no cell — the reset would never happen; list the cells whose changes reset `@" + d.name + "` (§6.8.4 rule 2)") }
+        let triggers: int[] = []
+        let ok = true
+        for (const x of es) {
+            const why: string = entryProblem(prog.info, x)
+            if (why != "") {
+                st = addDiag(st, prog.file, x.span, "E-RESET-ON-INVALID-ENTRY", why + " (§6.8.4 rule 2: every entry is a declared, mutable, non-derived reactive cell in scope)")
+                ok = false
+            } else {
+                triggers = triggers.concat([fieldIndex(prog.info, atName(x))])
+            }
+        }
+        const f: FieldInfo = prog.info.fields[target]
+        const gr: TransitionGraph | not = f.graph
+        if (gr is some) {
+            const refused: string = engineRefusals(g, gr, f.init)
+            if (refused != "") {
+                st = addDiag(st, prog.file, a.span, "E-RESET-ON-ENGINE-REFUSED", "`reset-on=` on `@" + d.name + "` resets it along its `rule=` graph, and every state other than the reset target must admit the target: " + refused + " (§6.8.4 rule 6) — add the target to those states' `rule=`")
+                ok = false
+            }
+        } else if (!f.grants.replace) {
+            st = addDiag(st, prog.file, a.span, "E-RESET-ON-NOT-WRITABLE", notWritableMessage(d.name, f.mode))
+            ok = false
+        }
+        if (!ok) return { e: not, st: st }
+        return { e: { target: target, triggers: triggers, span: a.span }, st: st }
+    }
+
+    fn resetEntries(v: AAttrValue) -> AExpr[] | not {
+        return match v {
+            .Bare(e: e) :> arrayItems(e)
+            .Paren(e: e) :> not
+            .NoValue :> not
+            .Quoted(v: s) :> not
+            .Braced(b: b) :> not
+        }
+    }
+
+    fn arrayItems(e: AExpr) -> AExpr[] | not {
+        const es: AExpr[] = arrayElems(e)
+        if (es.length > 0) return es
+        const k: AExprK = e.k
+        return match k {
+            .ArrayLit(elems: xs) :> xs
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    // Why `x` is not a valid entry ("" — it is one).
+    fn entryProblem(pi: DeclInfo, x: AExpr) -> string {
+        const n: string = atName(x)
+        if (n == "") return "a `reset-on=` entry is a cell written `@name` — this entry is not one"
+        const i: int = fieldIndex(pi, n)
+        if (i < 0) return "`@" + n + "` is not a declared cell in scope"
+        const f: FieldInfo = pi.fields[i]
+        const w: Sym | not = f.wcap
+        if (w is some) return ""
+        const m: FieldMode = f.mode
+        return match m {
+            .Derived :> "`@" + n + "` is a DERIVED cell — it has no change event of its own; list the cells it is computed from"
+            .Locked :> "`@" + n + "` is a LOCKED cell — it never changes"
+            .Let :> "`@" + n + "` is not a mutable cell"
+            .Seeded :> "`@" + n + "` is not a mutable cell"
+        }
+    }
+
+    fn notWritableMessage(name: string, m: FieldMode) -> string {
+        const what: string = match m {
+            .Derived :> "a DERIVED cell (its value is computed from other cells)"
+            .Locked :> "a LOCKED cell (no `let`, so no write is granted)"
+            .Let :> "a cell whose contract grants no replace"
+            .Seeded :> "a cell whose contract grants no replace"
+        }
+        return "`reset-on=` on `@" + name + "` — the reset is a write, `reset(@" + name + ")`, a replace (§66.11), and `@" + name + "` is " + what + "; make it writable (`let`) or drop `reset-on=` (§6.8.4 rule 5)"
+    }
+
+    // Rule 6: the states that refuse the reset target(s), as a message ("" — none).
+    // The target is the initializer's variant; a non-literal initializer makes
+    // every variant a possible target (fail closed).
+    fn engineRefusals(g: Globals, gr: TransitionGraph, init: AAttrValue) -> string {
+        const ti: TypeInfo | not = typeInfoOf(g.types, gr.enumSym)
+        if (ti is not) return ""
+        const vs: VariantDef[] = enumVariants(ti.def)
+        let targets: int[] = []
+        const lit: string = initVariant(init)
+        const t: int = variantIndex(g.types, gr.enumSym, lit)
+        if (lit != "" && t >= 0) {
+            targets = [t]
+        } else {
+            let i = 0
+            for (const v of vs) {
+                targets = targets.concat([i])
+                i = i + 1
+            }
+        }
+        let out: string[] = []
+        let s = 0
+        for (const v of vs) {
+            const admits: int[] = edgeTargets(gr, s)
+            for (const tgt of targets) {
+                if (tgt != s && admits.indexOf(tgt) < 0) {
+                    out = out.concat(["`." + v.sym.hint + "` has " + ruleText(vs, admits) + "; it does not admit the reset target `." + vs[tgt].sym.hint + "`"])
+                }
+            }
+            s = s + 1
+        }
+        return out.join("; ")
+    }
+
+    fn initVariant(v: AAttrValue) -> string {
+        return match v {
+            .Bare(e: e) :> variantLitName(e.k)
+            .Paren(e: e) :> variantLitName(e.k)
+            .NoValue :> ""
+            .Quoted(v: s) :> ""
+            .Braced(b: b) :> ""
+        }
+    }
+
+    fn edgeTargets(gr: TransitionGraph, origin: int) -> int[] {
+        for (const e of gr.edges) {
+            if (e.origin == origin) return e.targets
+        }
+        return []
+    }
+
+    fn ruleText(vs: VariantDef[], targets: int[]) -> string {
+        if (targets.length == 0) return "no `rule=` (no outgoing edge)"
+        let names: string[] = []
+        for (const t of targets) { names = names.concat(["." + vs[t].sym.hint]) }
+        return "`rule=" + names.join(" | ") + "`"
+    }
+
+    // A cycle through `at` back to `start` in the reset-on graph (trigger →
+    // reset cell): the cells on it, in order, or [] when there is none.
+    fn cycleFrom(edges: ResetEdge[], start: int, at: int, path: int[]) -> int[] {
+        for (const e of edges) {
+            if (e.triggers.indexOf(at) >= 0) {
+                if (e.target == start) return path.concat([at])
+                if (path.indexOf(e.target) < 0 && e.target != at) {
+                    const c: int[] = cycleFrom(edges, start, e.target, path.concat([at]))
+                    if (c.length > 0) return c
+                }
+            }
+        }
+        return []
+    }
+
+    fn cycleText(pi: DeclInfo, cyc: int[]) -> string {
+        let parts: string[] = []
+        for (const i of cyc) { parts = parts.concat(["`@" + pi.fields[i].sym.hint + "`"]) }
+        if (cyc.length == 1) return parts[0] + " lists itself"
+        return parts.join(" → ") + " → " + parts[0]
+    }
+
+    // A cell's depth in the (acyclic) reset-on graph: 0 when none of its
+    // triggers is itself reset, else one more than the deepest trigger.
+    fn rankOf(edges: ResetEdge[], target: int, seen: int[]) -> int {
+        let best: int = 0
+        for (const e of edges) {
+            if (e.target == target) {
+                for (const t of e.triggers) {
+                    if (seen.indexOf(t) < 0 && isResetTarget(edges, t)) {
+                        const r: int = rankOf(edges, t, seen.concat([target])) + 1
+                        if (r > best) best = r
+                    }
+                }
+            }
+        }
+        return best
+    }
+
+    fn isResetTarget(edges: ResetEdge[], i: int) -> boolean {
+        for (const e of edges) {
+            if (e.target == i) return true
+        }
+        return false
+    }
+
+    // s449: an effect at FILE level (outside `<program>`) has no element scope to
+    // own it — refused, never silently dropped (no pass reaches file-level markup).
+    fn strayEffects(files: FileAst[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const f of files) {
+            for (const it of f.items) {
+                for (const n of markupOf(it)) {
+                    for (const sp of effectSpans(n)) {
+                        st = addDiag(st, f.path, sp, "E-BOOTSTRAP-UNSUPPORTED", "an effect outside `<program>` — no element scope owns it (§6.7.4); move it into the program")
+                    }
+                }
+            }
+        }
+        return st
+    }
+
+    fn effectSpans(n: ANode) -> ASpan[] {
+        const k: ANodeK = n.k
+        return match k {
+            .Effect(w: w) :> [w.span]
+            .Elem(e: e) :> kidEffectSpans(e.kids)
+            .Text(text: t) :> []
+            .Interp(e: x) :> []
+            .DeclNode(d: d) :> []
+        }
+    }
+
+    fn kidEffectSpans(ns: ANode[]) -> ASpan[] {
+        let out: ASpan[] = []
+        for (const n of ns) { out = out.concat(effectSpans(n)) }
+        return out
+    }
+
+    // =========================================================================
     // Entry. `files` in LINK ORDER: every file after the files it imports; the
     // entry (the file with `<program>`) last.
     // =========================================================================
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram {
-        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] } }
+        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [] }
         const ra: RGlobals = phaseA(files, entry, st0)
         let st: AS = checkImports(files, ra.g, ra.st)
         st = phaseB(ra.g, st)
+        st = strayEffects(files, st)
+        const rr: RResets = resetOnPass(ra.g, st)
+        st = rr.st
         let decls: DeclInfo[] = []
         for (const d of ra.g.decls) { decls = decls.concat([d.info]) }
         let fns: FnInfo[] = []
@@ -8286,16 +9634,18 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
-                                novalidate: [] }
+                                novalidate: [], resets: rr.infos }
         const scopeDiags: Diag[] = checkScopes(files, bound)
+        // s449: the no-write rule over every accepted effect (§6.7.4)
+        const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects)
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound)
         const typed: RTyping = typeProgram(files, bound)
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms }
-        return { files: files, tables: t, diags: st.diags.concat(scopeDiags).concat(vp.diags).concat(typed.diags) }
+                            novalidate: vp.forms, resets: bound.resets }
+        return { files: files, tables: t, diags: st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags) }
     }
 
     // =========================================================================
@@ -8421,6 +9771,7 @@ ${
             .Text(text: x) :> []
             .Interp(e: x) :> []
             .DeclNode(d: d) :> []
+            .Effect(w: w) :> []
         }
     }
 
@@ -8464,6 +9815,7 @@ ${
             .Text(text: x) :> not
             .Interp(e: x) :> not
             .DeclNode(d: d) :> not
+            .Effect(w: w) :> not
         }
     }
 

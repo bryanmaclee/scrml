@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 235 | 4 |
-| MED | 462 | 0 |
-| LOW | 215 | 0 |
+| HIGH | 235 | 5 |
+| MED | 463 | 0 |
+| LOW | 217 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -18986,8 +18986,13 @@ silently dropped at exit 0 has been filed HIGH (`g-struct-construction-silently-
 Reproduces identically on `fix/s432-when-changes-dep-list` (reviewer), so that branch does not fix it. Open question
 for the fix, not for the pin: with N rows, is the effect registered once or per row (§6.7.2.1 — an `<each>` row is
 not a scope)? The case uses ONE row so it is ruling-neutral. **Exposure: 0** (no `when … changes` in any `${}` inside
-markup across the repo corpus, assetManagement or flogenceP). Pinned by `conformance/cases/each/when-changes-in-row-body`
-(impl#1: `hits` stays 0). found by: S432 adversarial review of the when-changes branch; PA re-verified.
+markup across the repo corpus, assetManagement or flogenceP). Pinned by `conformance/cases/each/when-changes-in-row-body-no-write`
+(impl#1: the row effect's `#beacon` `data-ran` attribute stays unset; the case also asserts the keyword spelling's W-WHEN-EFFECT-DEPRECATED, which impl#1 does not emit). **Re-pinned S449:** the original pin,
+`each/when-changes-in-row-body`, observed the run through a write to `@hits` — S447 made a writing effect body
+E-EFFECT-WRITES-STATE (the keyword spelling included), so that case now asserts the S447 codes (carried under
+`g-impl1-effect-reset-on-codes-unimplemented-s447`) and the drop is pinned by a non-writing row effect observed
+through the DOM it touches (verified: the same body at program top level passes on impl#1). found by: S432
+adversarial review of the when-changes branch; PA re-verified.
 
 ### g-when-in-if-region-never-unregistered-on-unmount — a `when` declared inside an `if=` region is hoisted to file scope and keeps firing after the region unmounts — `NEW S432-peter; MED; open`
 <!-- @gap id=g-when-in-if-region-never-unregistered-on-unmount sev=MED status=open locus=compiler/src/codegen/emit-logic.ts(case "when-effect" — emitted at file scope, never inside the if= region's mount scope, so `_scrml_mount_track` never sees it) prov=review:S432-adversarial-review-of-the-when-changes-branch;empirical:PA-verified-by-emit-on-280ecbdd -->
@@ -21866,32 +21871,115 @@ the impl#1 freeze does not apply. impl#1's behaviour is what adopters get until 
 ### g-bootstrap-effect-reset-on-owed — bootstrap: owes `<effect deps=[…]>`, the no-write rule (write summary, fail closed), and `reset-on=` (incl. the engine `rule=` check); U0's runtime cascade layer becomes deletable — `NEW S447; MED; open`
 <!-- @gap id=g-bootstrap-effect-reset-on-owed sev=MED status=open locus=compiler/self-host-v2/(effect element parse + scope association; the write-summary analysis; reset-on modifier + static cycle check + engine rule= check; the U0 when runtime on branch s447-u0-r3, unlanded) prov=ruling:user-voice-scrml.md-S447-"when → outside-world effects only, spelled <effect>"+"3b: reset-on= IS allowed on engine cells" -->
 
-The S447 rulings are written into SPEC §6.7.4 (`<effect>`), §6.8.4 (`reset-on=`) and §34 as Nominal text. The
-bootstrap owes:
+The S447 rulings are written into SPEC §6.7.4 (`<effect>`), §6.8.4 (`reset-on=`) and §34 as Nominal text.
 
-- **`<effect deps=[…]>`** — a markup lifecycle element; no mount run; `E-EFFECT-NO-DEPS`; scope by tree position
-  (`if=` teardown, one per `<each>` row, route regions); newest-run-wins on re-trigger with the §6.7.7.1 transport
-  rule; derived flush before effect bodies.
-- **The no-write rule** — `E-EFFECT-WRITES-STATE` from a transitive per-function write summary (direct writes,
-  resolved scrml calls incl. server functions, function values in the body); `E-EFFECT-WRITE-UNPROVEN` for `^{}` /
-  unresolvable calls; message names the fix by shape. The keyword `when … changes` spelling carries the same rule
-  and `W-WHEN-EFFECT-DEPRECATED`.
-- **`reset-on=[…]`** — `reset(@self)` in the triggering flush before readers (one change for dependents);
-  `E-RESET-ON-INVALID-ENTRY`, `E-RESET-ON-CYCLE` (static), `E-RESET-ON-NOT-WRITABLE`; on a transition-graph cell
-  `E-RESET-ON-ENGINE-REFUSED` (every non-target state must admit the target), and the reset fires `<onTransition>`.
-- **Deletable:** the U0 runtime cascade layer (branch `s447-u0-r3`, `docs/changes/s446-bootstrap-u0-when-effects/DESIGN.md`
-  §5 — the provenance `Cause` links, the per-segment cyclic check, the LIFO re-run stack, the depth-256 backstop).
-  Q7 (depth 256) and Q8 (polling) LAPSED (S447 1b): with no effect able to write, no effect can trigger another.
-  Polling goes to `<poll>`.
-- Open items the build must not decide silently are listed in SPEC §6.7.4 and §6.8.4 (⚑ OPEN): cross-module write
-  summaries, `navigate()` in an effect, `lift` in an effect body, server/channel cells under `reset-on=`, per-instance
-  resets, and cascades through engine transition effects.
-- **Write requests (S447 3c = (d), SPEC §6.7.7.3):** the "provably writes" classification (its own test — not
-  §6.7.7.1's unclassifiable=write); no mount run except `deps=[]`; server-origin writes (request settle, `<poll>`,
-  channel push, `persist=` cross-tab sync, §52 loads) tagged at their emit sites — they re-baseline instead of
-  triggering and bypass `debounced=` / `throttled=`; `reset-on=` resets inherit their trigger's origin; skip a save
-  whose deps all `==` (§45) their baselines; baseline moves on a successful save. Still OPEN and filed separately:
+**LANDED — s449-bootstrap-effect (branch `wip/s449-bootstrap-effect`; progress
+`docs/changes/s449-bootstrap-effect/progress.md`, which carries the PA readings for veto):**
+
+- **`<effect deps=[…]>`** — parsed where markup stands (and where a statement stands, so a nested one is
+  E-LIFECYCLE-016); Core `View.Effect`; runtime `rt.effectOn` — no mount run, owned by its tree position (`if=` region
+  teardown + re-register without running, one per `<each>` row), unregistered at teardown step 1; effect bodies run
+  after the same flush's render effects; derived values fresh by lazy pull; newest run wins via per-run tasks
+  (`rt.suspend`), the §6.7.7.1 transport rule met by discarding (never aborting). Codes: E-EFFECT-NO-DEPS,
+  E-LIFECYCLE-007 (`<effect>` limb), E-LIFECYCLE-016, W-LIFECYCLE-010, W-WHEN-EFFECT-DEPRECATED (the keyword spelling
+  lowers to the same Core).
+- **The no-write rule** — a per-function write summary over the binder's facts (direct writes, refused writes by
+  shape, resolved calls, function values), closed to a fixed point with a witness chain: E-EFFECT-WRITES-STATE names
+  the chain and the fix by shape; E-EFFECT-WRITE-UNPROVEN for a call through a non-function name. Core C11 restates
+  it (no Write in an effect body, directly or through a called Fn). The keyword form carries it. A read of a
+  user declaration's SHARED instance counts as a call of its CONSTRUCTION (its initializers run on first read) — found
+  by measurement: such a read wrote `@a` through a writing `let` seed before the fix. Likewise a read of a value
+  computed on its read (a derived cell — program-level included — or any field with no write capability) counts as a
+  call of its formula (s449 fix round, review HIGH-1: `<d:int=(@n + g())/>` read in an effect wrote `@a`).
+- **`reset-on=[…]`** on program cells — Core `View.ResetOn`, runtime `rt.resetOn` (resets drained in rank order
+  inside the writer's batch: one change for every dependent); E-RESET-ON-INVALID-ENTRY, E-RESET-ON-CYCLE,
+  E-RESET-ON-NOT-WRITABLE, E-RESET-ON-ENGINE-REFUSED (each refusing state named); Core C13.
+- **Deleted, not brought:** U0's runtime cascade layer (Cause links, cyclic cap, LIFO re-run stack, depth-256
+  backstop). Kept from U0: the `<each>` row-cleanup O(rows²) leak fix.
+- Conformance: 29 cases `conformance/cases/lifecycle/{effect-*,when-effect-*,reset-on-*}` (positive +/- negative per
+  code, one runtime case) — the positives xfail on impl#1 under `g-impl1-effect-reset-on-codes-unimplemented-s447`.
+
+**REMAINS (owed; what blocks each):**
+
+- **Write requests (S447 3c = (d), SPEC §6.7.7.3) — BLOCKED: the bootstrap has no `<request>` (refused as a
+  structural element), no server functions, no `?{}` SQL, no `<poll>`, `<channel>`, `persist=` or §52 cells**
+  (bootstrap arc plan units U1 server boundary → U2 `<request>` → U3 classifier). What each piece needs when they land:
+  (U1) record each `?{}` statement's verb (first keyword after a leading `WITH …`) — "provably writes" = a reachable
+  INSERT / UPDATE / DELETE / REPLACE / MERGE / UPSERT / CREATE / ALTER / DROP / TRUNCATE, or a §52 server-cell write;
+  `url=` / `api=` with a statically unsafe method — its OWN test, unclassifiable is NOT provably writing (§6.7.7.3
+  rule 1); (U2) no mount run unless `deps=[]`, `refetch()` always runs, a per-dependency baseline (set at mount,
+  moved by a successful settle, untouched by a failed / superseded one), a triggered save skipped when every dep `==`
+  its baseline (§45 via `rt.eq`; non-comparable / `asIs` counts as unequal); server-origin writes tagged at their
+  compiler-emitted sites (a request's settle assignment, a `<poll>` tick, a channel push, a `persist=` storage-event
+  sync, a §52 load / push) re-baseline instead of triggering and bypass `debounced=` / `throttled=`; a `reset-on=`
+  reset inherits its trigger's origin — the runtime drains resets inside the triggering `Cell.set`, so the origin is
+  in hand there (a write-origin parameter threaded into `drainResets`). Also filed separately:
   `g-request-write-one-save-in-flight-owed`, `g-request-write-flush-or-warn-on-leave-owed`.
+- **`reset-on=` compositions** (§6.8.4 rule 7) — `debounced=` / `throttled=` cancel, lifecycle revert, §55 surface
+  clear, `persist=` write: none of those features exists in the bootstrap yet; each owes its `reset-on=` limb when it
+  lands. **The engine reset "fires `<onTransition>`"** (rule 6): the bootstrap has no `<onTransition>` / state-child
+  `effect=` — owed with them. `default=` (the §6.8.1 reset value) is not in the bootstrap; the initializer is used.
+- **Fail-closed refusals standing in for OPEN questions** (E-BOOTSTRAP-UNSUPPORTED): an effect in a declaration's
+  `renders` or in use-site slot content (which scope owns it), a whole-instance dependency, `reset-on=` on a
+  declaration field (per-instance resets, ⚑ OPEN §6.8.4), an effect in a function / handler body (no §34 code names
+  it).
+- **⚑ PA question — may an initializer write reactive state?** A declaration initializer (a `let` seed) may call a
+  `function` that writes another cell, and the bootstrap accepts it; SPEC is silent. It is how an effect's READ of a
+  lazily-constructed shared instance wrote state, and how a `reset-on=` reset value re-wrote its own trigger in an
+  endless loop (both measured, both closed: the first as E-EFFECT-WRITES-STATE through the construction, the second
+  fail-closed E-BOOTSTRAP-UNSUPPORTED — §34 has no code for it). A language-wide rule would subsume both.
+- **Route regions** (§6.7.4 "route region" owner) — the bootstrap has no routes / `<page>`.
+- **`lin` in an effect body (E-LIN-004)** — the bootstrap has no `lin`.
+- **An effect body's §19 error context** (`!{}` on a rejected suspension) — arrives with server calls (U1); today a
+  rejection on a live task is re-raised, never swallowed.
+- **Runtime-half conformance for `<effect>`** — an effect cannot write state, so its run is observable only through
+  the outside world (a host call); the bootstrap's host surface is `Date.now()` alone, so no portable runtime case
+  pins an effect run yet (the bootstrap's own e2e counts clock reads).
+
+### g-bootstrap-render-writer-call-hangs — bootstrap: a compile-clean render self-write (`<p>${g(@a)}</p>` where `g()` writes `@a`; any render↔render write cycle) now HANGS synchronously at mount — `NEW S449; MED; open`
+<!-- @gap id=g-bootstrap-render-writer-call-hangs sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(render positions — interpolations / attribute values — may call a `function` that writes a cell; nothing refuses it)+compiler/self-host-v2/slice-m1/runtime/runtime.js(flush — the s449 `flushing` guard turns the old recursion into an endless loop) prov=review:S449-effect-rereview -->
+
+A render position may call a writer: `<p>${g(@a)}</p>` with `function g(x) { @a = @a + 1 … }` compiles clean, and
+so does any cycle where one render effect writes a cell another render effect (or itself) reads. **Before s449**
+the nested flush recursed and the mount threw "Maximum call stack size exceeded". **With the s449 one-flush-at-a-time
+guard** (the MEDIUM-1 fix that stopped an `<each>` row's `<effect>` from running mid-reconcile) the running loop keeps
+re-queuing the render effect, and the mount hangs synchronously forever (`loadProgram` never returns; a CI run would
+time out). The root is pre-existing — render positions may call writers; the guard worsened the failure mode from a
+loud throw to a silent hang. **Fix direction:** a compile-time refusal of writer calls in render positions, using the
+s449 write summary — tied to bryan's pending fork on whether initializers, derived formulas and render
+interpolations may write state at all (the same class as the three s449 effect / `reset-on=` holes). A runtime
+detector (a re-run counter in `flush`) is rejected by the S447 posture: a bound would mean the compile-time rule had
+a hole. **Landed with this filed** (PA call, S449 re-review): the bootstrap is not adopter-shipped.
+
+### g-bootstrap-c11-ignores-function-values — bootstrap Core check C11 does not count a function handed on as a value (`const h = peek`) toward an effect's writes — `NEW S449; LOW; open`
+<!-- @gap id=g-bootstrap-c11-ignores-function-values sev=LOW status=open locus=compiler/self-host-v2/check.scrml(blockWriteWitness / callWriteWitness — only Expr.Call is followed) prov=review:S449-effect-rereview -->
+
+§6.7.4 rule 3 ("A function value … counts as if it were called"). The front end applies it (analyze `fnValueRef`:
+`const h = peek` where `peek` writes is E-EFFECT-WRITES-STATE), so no program reaches Core with it; but C11, which
+restates the no-write rule over Core, follows only `Expr.Call`. Core has no function value outside a SeqCall Lambda
+today, so the restatement is incomplete rather than exploitable; close it when Core gains function values.
+
+### g-bootstrap-flush-leftovers-after-throw — bootstrap runtime: after a flush throws, the items still queued run on the next unrelated write, so an `<effect>` can fire on a cell it does not list — `NEW S449; LOW; open`
+<!-- @gap id=g-bootstrap-flush-leftovers-after-throw sev=LOW status=open locus=compiler/self-host-v2/slice-m1/runtime/runtime.js(flush / drainQueues — an exception leaves `queue` / `effectQueue` populated) prov=review:S449-effect-rereview -->
+
+Pre-existing in shape (the render queue always behaved so); the s449 effect queue inherits it. If a render effect or
+an effect body throws during a flush, the remaining queued items stay queued and run at the next flush, which a write
+to an unrelated cell starts — so an `<effect>` runs in response to a change of a cell outside its `deps=` (§6.7.4:
+"Only the listed cells trigger the effect"). Fix direction: decide the flush's exception contract (drop or re-run the
+rest of the batch at once) alongside the §19 error context of effect bodies.
+
+### g-impl1-effect-reset-on-codes-unimplemented-s447 — impl#1 emits none of the S447 `<effect>` / `reset-on=` codes and runs none of their semantics; pinned as expected-to-fail by the 18 positive `conformance/cases/lifecycle/{effect-*,when-effect-*,reset-on-*}` cases and `each/when-changes-in-row-body` — `NEW S449; HIGH; carried`
+<!-- @gap id=g-impl1-effect-reset-on-codes-unimplemented-s447 sev=HIGH status=carried locus=compiler/src/(no <effect> element — it reports E-MARKUP-001; no reset-on= modifier — the attribute is not read; no write summary; the keyword when … changes compiles with writes allowed) prov=empirical:s449-xfail-signatures-captured-by-conformance/run.ts---xfail-signature;ruling:user-voice-scrml.md-S447-TS-accounting -->
+
+**Classification: CARRIED** (S430 P7; S447 TS accounting: *"Language-semantics rulings stop generating impl#1 work:
+a ruling gets SPEC text + a bootstrap build; impl#1 divergence is FILED, not fixed"*). The bootstrap builds §6.7.4 /
+§6.8.4 (`g-bootstrap-effect-reset-on-owed`, landed s449); impl#1 is not changed. Each positive case's xfail signature
+was captured mechanically (`bun conformance/run.ts --xfail-signature <id>`): `<effect …>` reports `E-MARKUP-001`
+instead of the §6.7.4 code; `reset-on=` cells report `E-STATE-UNDECLARED` / `E-UNQUOTED-DISPLAY-TEXT` (the legacy
+opener with an attribute is not read as a cell) instead of the §6.8.4 code; the keyword `when … changes` compiles
+with no `W-WHEN-EFFECT-DEPRECATED` and no `E-EFFECT-WRITES-STATE`; the runtime case leaves `@page` unreset. The
+negative twins pass on impl#1 (they assert absence). Related, not duplicated: `g-impl1-when-effect-divergence-s447`
+(impl#1's `when` scoping defects and wrong diagnostics, measured by the DD).
 
 ### g-impl1-autosave-request-mount-save-wipes-record — impl#1 DIVERGENCE (filed, not fixed — S447 TS accounting): the documented autosave idiom sends `saveNote("")` on page load, racing the load, and can wipe the record; it also saves the loaded text back and shows it 800 ms late — `NEW S447; HIGH; open`
 <!-- @gap id=g-impl1-autosave-request-mount-save-wipes-record sev=HIGH status=open locus=compiler/src/codegen(the <request> lowering registers every request as an immediately-run effect — the autosave's first run is the mount save)+compiler/src/runtime-template.js(_scrml_reactive_set routes EVERY write, a request's settle assignment included, through the debounce wrapper); PA-located-verify from the DD §2 prov=dd:autosave-request-mount-3c-2026-10-02 -->

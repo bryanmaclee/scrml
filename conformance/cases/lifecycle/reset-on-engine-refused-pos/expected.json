@@ -1,0 +1,25 @@
+{
+  "id": "lifecycle-reset-on-engine-refused-pos",
+  "description": "§6.8.4 rule 6: `reset-on=` on a `rule=` graph cell where a non-target state does not admit the reset target is E-RESET-ON-ENGINE-REFUSED.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "rationale": "§6.8.4 rule 6: \"**Every state other than the target itself SHALL admit the target in its `rule=`** … A state that does not is **E-RESET-ON-ENGINE-REFUSED**, and the diagnostic SHALL name every refusing state and the target (\\\"`.Shipped` has `rule=.Delivered`; it does not admit the reset target `.Draft`\\\").\" ruling:user-voice-scrml.md S447 \"3b: `reset-on=` IS allowed on engine cells, checked against `rule=`\" — \"the new rec for engine reset, yes.\"",
+  "expect": {
+    "codes": [
+      "E-RESET-ON-ENGINE-REFUSED"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": {
+        "codes": [
+          "emitted:E-ATTR-001=3",
+          "emitted:E-COMPONENT-035=4",
+          "emitted:E-MARKUP-001=1",
+          "missing:E-RESET-ON-ENGINE-REFUSED"
+        ]
+      }
+    }
+  }
+}
