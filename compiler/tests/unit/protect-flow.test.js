@@ -927,6 +927,33 @@ describe("analyzeProtectFlow — r8b: a spelled path through an element is not a
   });
 });
 
+describe("analyzeProtectFlow — r8b: pre-existing HIGHs closed (callback to a global callee, assignment value, accessor-returned functions)", () => {
+  test("each served the hash on base and round 8", () => {
+    for (const body of [
+      // P1b — a global function handed a callback may call it with protected data in scope
+      "globalThis.run2 = function (f) { f(u.passwordHash); }; globalThis.run2(function (x) { s = x; }); return { v: s };",
+      "globalThis.run1 = function (f) { return f(u.passwordHash); }; return { v: run1(function (x) { return x; }) };",
+      // P2 — `x = (target = v)` is in the target's alias class
+      "const x = (globalThis.k94 = {}); x.h = u.passwordHash; return { v: globalThis.k94.h };",
+      "let y; const x = (y = {}); x.h = u.passwordHash; return { v: y.h };",
+      "const o = {}; const x = (o.k = {}); x.h = u.passwordHash; return o;",
+      // P4 — a function an accessor returns is the property's value
+      "const o = { h: u.passwordHash }; Object.defineProperty(o, 'toString', { get: function () { return function () { s = this.h; return ''; }; } }); const z = String(o); return { v: s };",
+      "const o = { h: u.passwordHash, get toString() { return function () { s = this.h; return ''; }; } }; const z = `${o}`; return { v: s };",
+      "const o = {}; Object.defineProperty(o, 'm', { get: function () { return function (r) { s = r.passwordHash; }; } }); o.m(u); return { v: s };",
+    ]) {
+      expect([body, leakCols(r8("let s = ''; " + body)).length > 0]).toEqual([body, true]);
+    }
+    for (const body of [
+      "const o = {}; const x = (o.k = {}); x.h = u.name; return { o, id: u.id };",
+      "const o = { h: u.name, get toString() { return function () { return this.h; }; } }; return { v: `${o}`, id: u.id };",
+      "globalThis.run3 = function (f) { return f(1); }; return { v: run3(function (x) { return x; }), id: u.id };",
+    ]) {
+      expect([body, leakCols(r8(body))]).toEqual([body, []]);
+    }
+  });
+});
+
 describe("analyzeProtectFlow — round 8: the round-7 performance cliff", () => {
   // Review-measured on round 7: a 240-object `toString` chain took 13.7 s
   // (0.47 s on base); a shared `this`-writing method on 240 receivers 40.5 s.

@@ -1636,6 +1636,20 @@ class FlowAnalysis {
   }
 
   /** Does any argument carry protected data (a row, or a value outside one)? */
+  /**
+   * r8b — should a call through the global heap apply the global functions it
+   * may reach? When an argument carries protected data, OR when an argument is
+   * (or holds) a compile function: the callee may invoke it with protected data
+   * of its own in scope (`globalThis.run = function (f) { f(u.passwordHash) };
+   * globalThis.run(function (x) { s = x })` served the hash on base and round 8 —
+   * the callback carried nothing, so `run` was never applied with it).
+   */
+  private globalCallMatters(args: Taint[]): boolean {
+    if (this.carriesProtected(args)) return true;
+    for (const a of args) for (const f of a.fns) if (!f.host) return true;
+    return false;
+  }
+
   private carriesProtected(args: Taint[]): boolean {
     return args.some((a) => [...everything(a, "").keys()].some((l) => !isPseudoLabel(l)));
   }
@@ -2441,6 +2455,14 @@ class FlowAnalysis {
           if (this.isGlobalValue(lv)) { lv = { ...lv }; delete lv.refs; }
           return join(lv, rv);
         }
+        // r8b: `x = (target = v)` — the value IS the object the target now holds,
+        // so it is in the target's alias class: `const x = (globalThis.k = {});
+        // x.h = u.passwordHash` wrote into the global heap and served the hash
+        // (base and round 8, measured) — the literal had no alias cell to unite.
+        if (node.operator === "=" && (node.left.type === "MemberExpression" || node.left.type === "Identifier")) {
+          const target = this.evalExpr(node.left, scope, fn);
+          if (target.refs && target.refs.size > 0) return { ...v, refs: new Set([...refsOf(v), ...target.refs]) };
+        }
         return v;
       }
       case "SequenceExpression": {
@@ -2826,7 +2848,7 @@ class FlowAnalysis {
       let own = clean();
       if (this.hasCallable(viaField) || recvGlobal) {
         const cands = recvGlobal
-          ? (this.carriesProtected(args) ? this.globalCandidates(viaField.fns, gNames) : new Set<Closure>())
+          ? (this.globalCallMatters(args) ? this.globalCandidates(viaField.fns, gNames) : new Set<Closure>())
           : viaField.fns;
         if (cands.size > 0) {
           // `new o.F(…)` constructs; `o.m(…)` runs with `this` = the receiver.
@@ -2913,7 +2935,7 @@ class FlowAnalysis {
     // (L3) — applied — but it is also the platform built-in of that name, which
     // keeps its own (fail-closed) model below.
     const gfPlain = path !== null ? this.globalFnsFor(path.split(".")) : null;
-    const viaGlobal = gfPlain !== null && gfPlain.size > 0 && this.carriesProtected(args)
+    const viaGlobal = gfPlain !== null && gfPlain.size > 0 && this.globalCallMatters(args)
       ? this.applyFns(gfPlain, args, undefined, node, fn)
       : null;
     if (path === null && this.hasCallable(ct)) {
@@ -3115,7 +3137,22 @@ class FlowAnalysis {
     if (key === null || key === "then") this.addAll(this.thenFns, fns);
     if (!accessor && !mayBeInvokedByLanguage(key)) return clean();
     this.addAll(this.hookFns, fns);
-    return this.invokeHooks(fns, obj, node, fn);
+    if (!accessor) return this.invokeHooks(fns, obj, node, fn);
+    // r8b: an ACCESSOR's return IS the property's value — a function it returns
+    // is a function stored under that key: callable as a method (`o.m(u)` with
+    // `get m() { return function (r) { … } }`) and, under a key the language
+    // may call (`toString` …), a hook in its own right. Both served the hash on
+    // base and round 8 (the getter's return was kept as data only).
+    const param = anyDepth(dataOnly(this.withCellContents(obj)));
+    const ret = this.applyFns(fns, [], param, node, fn);
+    let gained = anyDepth(containerOf(dataOnly(ret)));
+    const retFns = new Set<Closure>();
+    for (const f of ownOf(ret)) if (!fns.has(f)) retFns.add(f);
+    if (retFns.size > 0) {
+      gained = join(gained, { ...clean(), fns: retFns, own: new Set() });
+      gained = join(gained, this.storeFns(retFns, obj, node, fn, key, false));
+    }
+    return gained;
   }
 
   /**
