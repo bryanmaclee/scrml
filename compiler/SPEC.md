@@ -9900,7 +9900,8 @@ every column a marker is PRESENT for. Consequences a conformant implementation S
   template through such a value reaches to those stored under a name on the path by which the
   value was read — whether the program spells the path (`globalThis.box.set(u)`) or reads it
   through an alias (a binding, a destructure, a parameter, a container, `this`) — and SHALL NOT
-  narrow when that path cannot be named (a computed key, a reflective read such as
+  narrow when that path cannot be named (a computed key, an element position — an index, a `Map`
+  / `Set` entry, iteration — a reflective read such as
   `Reflect.get(globalThis, k)` or `Object.values(globalThis)`, an object that joined the global
   heap without being read from it, or any value joined with one): every function the value holds
   is then a candidate, fail closed. A function the program stored on such a receiver is called
