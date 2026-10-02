@@ -38,6 +38,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // --- repro A: bind:value=@name on an input INSIDE a <match for=Phase> arm. ---
 // @phase starts .Editing so the Editing arm mounts at load; @name is the bound
@@ -82,7 +83,7 @@ const ENGINE_SRC = `<program>
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-bindvalue-arm-wiring");
+const tmpRoot = resolve(tmpdir(), "scrml-bindvalue-arm-wiring");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

@@ -21,9 +21,10 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 const clone = (x) => JSON.parse(JSON.stringify(x));
-const tmpRoot = resolve("/tmp", "scrml-gap-lift-if-directive");
+const tmpRoot = resolve(tmpdir(), "scrml-gap-lift-if-directive");
 function compileOut(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const tmpDir = resolve(tmpRoot, `case-${uniq}`);

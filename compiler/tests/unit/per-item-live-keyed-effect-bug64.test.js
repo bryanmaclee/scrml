@@ -15,8 +15,9 @@ import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
 
-const tmpRoot = resolve("/tmp", "scrml-per-item-live-keyed-unit");
+const tmpRoot = resolve(tmpdir(), "scrml-per-item-live-keyed-unit");
 
 function compileClient(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

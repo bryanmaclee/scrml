@@ -38,11 +38,12 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { execFileSync } from "child_process";
 import { compileScrml } from "../../src/api.js";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 function compileToOutputs(source, suffix = "bug65") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
@@ -76,7 +77,7 @@ function liftHandlerBodies(clientJs) {
 // pattern (e.g. not-return-statement-glue.test.js).
 function nodeCheck(source) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const f = resolve("/tmp", `scrml-bug65-check-${uniq}.js`);
+  const f = resolve(tmpdir(), `scrml-bug65-check-${uniq}.js`);
   writeFileSync(f, source);
   try {
     execFileSync("node", ["--check", f], { stdio: "pipe" });

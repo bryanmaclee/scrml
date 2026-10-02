@@ -36,6 +36,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync, readdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { chunkCellKey } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // Faithful flogence drawer shape: visible header reads p.name (key field); drawer is
 // hidden-at-mount (static `hidden` class) + reactive `class:hidden` gated on a SEPARATE
@@ -57,7 +58,7 @@ type Row:struct = { name: string, deltas: int }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-each-hidden-text-reconcile");
+const tmpRoot = resolve(tmpdir(), "scrml-each-hidden-text-reconcile");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

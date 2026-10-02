@@ -39,10 +39,11 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
-const TMP_ROOT = resolve("/tmp", "scrml-if-attr-synth-toggle");
+const TMP_ROOT = resolve(tmpdir(), "scrml-if-attr-synth-toggle");
 
 /**
  * A fresh document per test. Every mount registers its own `DOMContentLoaded`

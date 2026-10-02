@@ -38,6 +38,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // repro: TWO outer projects, each with a nested `<each in=@shared>`. `@shared` is
 // EMPTY at outer-render time and populated post-mount by `load()` (the
@@ -75,7 +76,7 @@ const PREPOPULATED_SRC = `<div>
 </div>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-nested-each-no-sub");
+const tmpRoot = resolve(tmpdir(), "scrml-nested-each-no-sub");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

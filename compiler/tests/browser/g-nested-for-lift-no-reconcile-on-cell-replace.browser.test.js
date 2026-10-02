@@ -15,6 +15,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 const SRC = `<program>
 type Engine:struct = { name: string, states: string[] }
@@ -40,7 +41,7 @@ const TRIAGE = [
 // the shared MARIO/TRIAGE fixtures for later tests (test isolation).
 const clone = (x) => JSON.parse(JSON.stringify(x));
 
-const tmpRoot = resolve("/tmp", "scrml-gap2-nested-for-lift");
+const tmpRoot = resolve(tmpdir(), "scrml-gap2-nested-for-lift");
 function compileOut(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const tmpDir = resolve(tmpRoot, `case-${uniq}`);

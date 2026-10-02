@@ -50,7 +50,7 @@ import {
 import { REPO_ROOT } from "./render-corpus-enumerator.js";
 
 // ⛑ S419 residuals (g-e2e-render-map-baseline-keys-have-drifted-and-orphan-cells-are-never-flagged)
-// — the staging root was `resolve("/tmp", "scrml-e2e-render-map")`, which is `C:\tmp\…` on
+// — the staging root was `resolve(tmpdir(), "scrml-e2e-render-map")`, which is `C:\tmp\…` on
 // Windows (a directory nothing else owns or cleans; 1495 leaked case dirs were found there).
 // Each case now gets its own `mkdtemp` directory directly under the OS temp dir, so there is
 // no shared root left behind, and the directory is removed on every exit path (compileApp

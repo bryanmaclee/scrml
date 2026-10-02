@@ -25,8 +25,9 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
-const tmpRoot = resolve("/tmp", "scrml-match-per-item-reconcile");
+const tmpRoot = resolve(tmpdir(), "scrml-match-per-item-reconcile");
 
 beforeEach(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();

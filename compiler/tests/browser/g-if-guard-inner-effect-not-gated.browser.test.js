@@ -32,6 +32,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // `@cell` starts `not` (null) and is NEVER auto-populated — the test drives the
 // null→obj→null→obj transitions itself, so the DOMContentLoaded mount runs with
@@ -54,7 +55,7 @@ const SRC = `<program>
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-g-if-guard-effect");
+const tmpRoot = resolve(tmpdir(), "scrml-g-if-guard-effect");
 
 function compileCase(src = SRC) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

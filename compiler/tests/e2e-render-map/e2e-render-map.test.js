@@ -561,7 +561,7 @@ describe("e2e-render-map — multi-file apps compile their own tree", () => {
     expect(existsSync(thrown.harnessTmpDir)).toBe(false);
   });
 
-  // ⛑ S419 residuals — the staging root was `resolve("/tmp", …)`, i.e. `C:\tmp\…` on Windows.
+  // ⛑ S419 residuals — the staging root was `resolve(tmpdir(), …)`, i.e. `C:\tmp\…` on Windows.
   test("compileApp stages under the OS temp dir, not a hard-coded /tmp", () => {
     expect(TMP_PREFIX.startsWith(join(tmpdir(), "scrml-e2e-render-map-"))).toBe(true);
     const app = {
