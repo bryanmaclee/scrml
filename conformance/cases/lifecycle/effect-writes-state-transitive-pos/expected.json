@@ -1,0 +1,24 @@
+{
+  "id": "lifecycle-effect-writes-state-transitive-pos",
+  "description": "§6.7.4 the no-write rule through called functions: `track() → logFilter() → @lastFilter = …` is E-EFFECT-WRITES-STATE (the transitive write summary).",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4 rule 2: \"A **call to a statically resolved scrml function** … whose write summary is non-empty is E-EFFECT-WRITES-STATE. The message SHALL name the call chain down to the write (`track() → logFilter() → @lastFilter = …`).\" The summary is \"closed transitively over the static call graph\". ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "codes": [
+      "E-EFFECT-WRITES-STATE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": {
+        "codes": [
+          "emitted:E-DG-002=1",
+          "emitted:E-MARKUP-001=1",
+          "missing:E-EFFECT-WRITES-STATE"
+        ]
+      }
+    }
+  }
+}

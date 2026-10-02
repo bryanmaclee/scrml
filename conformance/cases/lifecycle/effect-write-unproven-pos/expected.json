@@ -1,0 +1,23 @@
+{
+  "id": "lifecycle-effect-write-unproven-pos",
+  "description": "§6.7.4 rule 4: a call through a binding the compiler cannot resolve to a known set of scrml functions fails closed — E-EFFECT-WRITE-UNPROVEN.",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4 rule 4: \"**Code whose writes the compiler cannot determine fails closed, as E-EFFECT-WRITE-UNPROVEN:** … a call through a function-typed binding the compiler cannot resolve to a known set of scrml functions\". ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "codes": [
+      "E-EFFECT-WRITE-UNPROVEN"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "missing:E-EFFECT-WRITE-UNPROVEN"
+        ]
+      }
+    }
+  }
+}

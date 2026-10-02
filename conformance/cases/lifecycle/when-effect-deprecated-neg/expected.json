@@ -1,0 +1,12 @@
+{
+  "id": "lifecycle-when-effect-deprecated-neg",
+  "description": "§6.7.4 negative twin: the canonical `<effect deps=[…]>` spelling is NOT W-WHEN-EFFECT-DEPRECATED.",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4: the W- lint is for the keyword spelling only. ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "notCodes": [
+      "W-WHEN-EFFECT-DEPRECATED"
+    ]
+  }
+}

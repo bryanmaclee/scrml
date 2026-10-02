@@ -1,0 +1,9 @@
+// §6.7.4 — a non-empty effect.
+<program>
+  <n> = 0
+  function beacon(v) {
+    return v
+  }
+  <effect deps=[@n]>${ beacon(@n) }</>
+  <p>${@n}</p>
+</program>

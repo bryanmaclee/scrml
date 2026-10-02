@@ -755,3 +755,27 @@ new finding. Re-used: F1 `<program>` wrapper; F6 single-literal `match` arms.
 - Still deferred (separate token classes, orthogonal to this slice, unchanged from
   5a): leading-dot `NumberLit` (`.5`), `Ellipsis` (`...`), the `@`/ScrmlAt sigil
   (full `@.field` → one ScrmlAt).
+
+---
+
+# s449 — `<effect deps=[…]>`, the no-write rule, `reset-on=` (SPEC §6.7.4 / §6.8.4, S447)
+
+Change `docs/changes/s449-bootstrap-effect/` (BRIEF + progress, with the PA readings for veto). Re-scopes bootstrap
+unit U0 (the S446 `when … changes` runtime, branch `wip/s447-bootstrap-u0-r3`, never landed): under S447 a reactive
+effect may not write any reactive cell, so U0's runtime cascade layer (provenance `Cause` links, cyclic cap, LIFO
+re-run stack, depth-256 backstop) is DELETED, not brought; U0's `<each>` row-cleanup leak fix is kept.
+
+- **Front end** — `ast` AEffect (+ `keyword`), `parse` (`<effect deps=[…]>${ … }</>` at char + token level; the
+  soft-deprecated keyword form; `reset-on=[…]` rides the opener's modifier list), `analyze` (resolveEffect; the
+  NO-WRITE PASS over a per-function write summary closed to a fixed point; resetOnPass), `lower` (View.Effect,
+  View.ResetOn).
+- **Core** — `View.Effect(deps, body)`, `View.ResetOn(triggers, reset, rank)`, `Stmt.Suspend(bind, on, then)`,
+  `EffectDep`; check C11 (effect deps + no write in the body, transitively through Fns), C12 (Suspend placement),
+  C13 (ResetOn shape).
+- **Runtime** — `effectOn` / `suspend` (no mount run, effect queue after the render queue, newest run wins,
+  teardown step 1); `resetOn` (resets drained in rank order inside the writer's batch). No counter, depth or budget.
+- **Gates** — slice-m1 (+ `effect.runtime.test.js`, `reset-on.runtime.test.js`), slice-m4 (+ `effect.test.js` 43,
+  `reset-on.test.js` 11); `bun conformance/run.ts` 1212/1238 + 26 xfail (29 new `lifecycle/` cases).
+- **Not built (blocked — see `docs/known-gaps.md` `g-bootstrap-effect-reset-on-owed`)** — §6.7.7.3 write requests
+  (no `<request>` / server boundary yet: units U1–U3), `reset-on=` compositions, `<onTransition>` on an engine reset,
+  route-region owners.

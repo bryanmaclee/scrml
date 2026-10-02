@@ -1,0 +1,25 @@
+{
+  "id": "lifecycle-when-effect-writes-state-pos",
+  "description": "§6.7.4 the keyword `when … changes` carries the SAME no-write rule now (RULED S447): a writing keyword body is E-EFFECT-WRITES-STATE, plus W-WHEN-EFFECT-DEPRECATED.",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4 \"The retiring keyword form\": \"During the window a `when … changes { }` statement IS an `<effect>`: … and **the same no-write rule** — a writing `when` body is E-EFFECT-WRITES-STATE in the bootstrap now\". ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "codes": [
+      "E-EFFECT-WRITES-STATE",
+      "W-WHEN-EFFECT-DEPRECATED"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": {
+        "codes": [
+          "emitted:E-DG-002=1",
+          "missing:E-EFFECT-WRITES-STATE",
+          "missing:W-WHEN-EFFECT-DEPRECATED"
+        ]
+      }
+    }
+  }
+}

@@ -148,3 +148,39 @@ already an outer batch; the runtime test is the guard). Restored → GREEN.
 - **Server / channel cells under `reset-on=` (⚑ OPEN)** — no §52 / `<channel>` cells exist in the bootstrap.
 - **`rule=*`** (admits every variant) does not parse in the bootstrap; the engine check reads explicit `rule=` lists.
 - **A cycle is reported once** (at the first rule found on it) and every rule on it is dropped from the accepted set.
+
+## 2026-10-02 — Phase D: write requests (§6.7.7.3) — BLOCKED, filed precisely
+
+The bootstrap has NO `<request>` (refused as a structural element, analyze `structuralOwner`), no server functions,
+no `?{}` SQL, no `<poll>`, `<channel>`, `persist=` or §52 cells, no `debounced=` / `throttled=`. Every §6.7.7.3 rule
+attaches to one of those: "provably writes" reads `?{}` statement verbs / a §52 server write / a `url=`-`api=` method;
+the mount-run, baseline and skip rules live on a `<request>`; every server-origin writer is one of the absent
+features. Nothing was built speculatively (the runtime carries no origin machinery with no consumer). What each
+piece needs, and where it attaches when arc units U1 (server boundary) → U2 (`<request>`) → U3 (classifier) land, is
+written into `docs/known-gaps.md` `g-bootstrap-effect-reset-on-owed` "REMAINS" — including the one hook this
+dispatch's runtime already provides: `reset-on=` resets are drained inside the triggering `Cell.set`, so a write
+origin threaded into `drainResets` gives the §6.7.7.3 rule 3 "a `reset-on=` reset inherits the origin of the write
+that triggered it" without a second mechanism.
+
+## 2026-10-02 — conformance + docs
+
+- 29 cases `conformance/cases/lifecycle/{effect-*,when-effect-*,reset-on-*}`: a positive and a negative per code
+  (E-EFFECT-NO-DEPS ×2 pos, E-EFFECT-WRITES-STATE ×3 pos incl. transitive + function value, E-EFFECT-WRITE-UNPROVEN,
+  E-LIFECYCLE-016, W-LIFECYCLE-010, E-LIFECYCLE-007 `<effect>` limb, W-WHEN-EFFECT-DEPRECATED, the keyword form's
+  E-EFFECT-WRITES-STATE, E-RESET-ON-INVALID-ENTRY ×2 pos, E-RESET-ON-CYCLE ×2 pos, E-RESET-ON-NOT-WRITABLE,
+  E-RESET-ON-ENGINE-REFUSED) + one runtime case (`reset-on-resets-on-trigger-rt`). Positives xfail on impl#1 under
+  the NEW carried gap `g-impl1-effect-reset-on-codes-unimplemented-s447` (signatures captured with
+  `run.ts --xfail-signature`); negatives pass on impl#1. `bun conformance/run.ts`: 1212/1238 pass + 26 xfail, 0 fail.
+- **Honest limit:** the cases are in the corpus's legacy dialect (`<n> = 0`), which SPEC §6.8.4's own example uses;
+  the BOOTSTRAP front end parses only §66 (`<let n:int=0/>`), and the hybrid's impl#1 parser does not know
+  `<effect>` — so no implementation executes these 29 green yet. Each expectation is derived from the SPEC sentence
+  its `rationale` quotes; the executed proof of the same rules is the bootstrap's slice-m4 `effect.test.js` /
+  `reset-on.test.js` in §66 dialect. (Measured: the bootstrap on these files reports parse errors on the legacy cells
+  plus the §6.7.4 / §6.8.4 code where the effect / modifier still parses.)
+- **Not touched — PA decision:** `conformance/cases/each/when-changes-in-row-body` expects `codes: []` and `hits`
+  1 for a `when` body that WRITES `@hits` — under S447 that program is E-EFFECT-WRITES-STATE + W-WHEN-EFFECT-DEPRECATED,
+  so the case now contradicts SPEC. It is the xfail pin of the carried `g-when-changes-in-each-row-body-dropped`, so
+  rewriting it moves that gap's pin; left for the PA (fork in the final report).
+- `docs/known-gaps.md`: `g-bootstrap-effect-reset-on-owed` rewritten as LANDED / REMAINS; new carried gap (HIGH; the
+  §0 Carried HIGH count 4 → 5). `docs/FACTS.md` conformance count regenerated (1209 → 1238, `facts.ts --write`).
+  `compiler/self-host-v2/progress.md` gains the s449 section.
