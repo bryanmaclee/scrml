@@ -1,0 +1,12 @@
+{
+  "id": "lifecycle-reset-on-engine-refused-neg",
+  "description": "§6.8.4 negative twin: every non-target state admits the reset target — NOT E-RESET-ON-ENGINE-REFUSED.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "rationale": "§6.8.4 rule 6: \"The target state itself needs no self-edge\"; every other state admits `.Draft`. ruling:user-voice-scrml.md S447 \"3b: `reset-on=` IS allowed on engine cells, checked against `rule=`\" — \"the new rec for engine reset, yes.\"",
+  "expect": {
+    "notCodes": [
+      "E-RESET-ON-ENGINE-REFUSED"
+    ]
+  }
+}

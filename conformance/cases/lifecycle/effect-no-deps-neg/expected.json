@@ -1,0 +1,12 @@
+{
+  "id": "lifecycle-effect-no-deps-neg",
+  "description": "§6.7.4 negative twin: an `<effect deps=[@n]>` that lists a cell is NOT E-EFFECT-NO-DEPS.",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4: \"`deps=` is REQUIRED and SHALL list at least one cell\" — one listed cell satisfies it. ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "notCodes": [
+      "E-EFFECT-NO-DEPS"
+    ]
+  }
+}

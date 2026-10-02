@@ -1,0 +1,9 @@
+// §6.7.4 — the retiring keyword form (its body writes nothing).
+<program>
+  <n> = 0
+  function beacon(v) {
+    return v
+  }
+  when @n changes { beacon(@n) }
+  <p>${@n}</p>
+</program>

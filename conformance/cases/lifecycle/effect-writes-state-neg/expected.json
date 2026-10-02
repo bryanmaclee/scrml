@@ -1,0 +1,13 @@
+{
+  "id": "lifecycle-effect-writes-state-neg",
+  "description": "§6.7.4 negative twin: an effect body that reads cells (listed or not), writes only a local, and calls a write-free function is NOT E-EFFECT-WRITES-STATE nor E-EFFECT-WRITE-UNPROVEN.",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4: \"Reading an unlisted cell in the body is valid and is the dominant pattern\"; \"Writes to the body's own locals, and to plain non-reactive variables, are not reactive writes.\" A function with an empty write summary certifies. ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "notCodes": [
+      "E-EFFECT-WRITES-STATE",
+      "E-EFFECT-WRITE-UNPROVEN"
+    ]
+  }
+}

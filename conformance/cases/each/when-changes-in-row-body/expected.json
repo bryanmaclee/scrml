@@ -1,38 +1,16 @@
 {
   "id": "each-when-changes-in-row-body",
-  "description": "§6.7.4 a `${ when @n changes { … } }` written inside an `<each>` row body is a registered effect, not dropped. One row; #inc bumps @n once, the effect bumps @hits once. Carried on impl#1 (S432, P7): the block is dropped from the row render (\"empty logic interpolation skipped\"), silently.",
+  "description": "§6.7.4 (S447) a `${ when @n changes { @hits = @hits + 1 } }` in an `<each>` row body WRITES a reactive cell — under S447 that is E-EFFECT-WRITES-STATE, and the keyword spelling also carries W-WHEN-EFFECT-DEPRECATED. Migrated S449: this case used to pin the row-body drop (`g-when-changes-in-each-row-body-dropped`) through the write, which S447 made an error; that pin moved to each/when-changes-in-row-body-no-write.",
   "language-version": "1.0",
   "spec": "§6.7.4",
-  "rationale": "§6.7.4: \"A `when` statement declares a reactive effect. The body executes whenever any listed dependency changes value.\" and \"The body does NOT execute on initial mount.\" §6.7.2: every `${}` logic block is associated at compile time with the nearest enclosing element scope — an `<each>` row is inside the `<program>` scope, so the effect is live for the program's lifetime. With exactly one row the effect is registered once: no run at mount (@hits 0), one #inc → @hits 1.",
+  "rationale": "§6.7.4 \"The retiring keyword form\": \"During the window a `when … changes { }` statement IS an `<effect>`: … and **the same no-write rule** — a writing `when` body is E-EFFECT-WRITES-STATE in the bootstrap now, not at the end of the window. **RULED S447.**\"; Normative Statements: \"`when … changes { }` SHALL be accepted during its §63 window as a spelling of `<effect>` with identical semantics, with W-WHEN-EFFECT-DEPRECATED at every site.\" Provenance: ruling:user-voice-scrml.md S447 \"accept and your rec (d)\" (item 1: the no-write rule applies to the legacy spelling immediately).",
   "expect": {
-    "codes": [],
-    "notCodes": [],
-    "input": [
-      {
-        "click": "#inc"
-      }
-    ],
-    "state": {
-      "n": 1,
-      "hits": 1
-    },
-    "domAnchored": [
-      {
-        "selector": ".row",
-        "count": 1
-      },
-      {
-        "selector": "#hits",
-        "text": "1"
-      }
-    ]
+    "codes": ["E-EFFECT-WRITES-STATE", "W-WHEN-EFFECT-DEPRECATED"]
   },
   "xfail": {
     "impl1-ts": {
-      "gap": "g-when-changes-in-each-row-body-dropped",
-      "fails": {
-        "runtime": "sha256:37867431ae47d23b"
-      }
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": { "codes": ["missing:E-EFFECT-WRITES-STATE", "missing:W-WHEN-EFFECT-DEPRECATED"] }
     }
   }
 }

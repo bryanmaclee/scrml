@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 234 | 4 |
-| MED | 462 | 0 |
-| LOW | 219 | 0 |
+| HIGH | 234 | 5 |
+| MED | 463 | 0 |
+| LOW | 221 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -18986,8 +18986,13 @@ silently dropped at exit 0 has been filed HIGH (`g-struct-construction-silently-
 Reproduces identically on `fix/s432-when-changes-dep-list` (reviewer), so that branch does not fix it. Open question
 for the fix, not for the pin: with N rows, is the effect registered once or per row (§6.7.2.1 — an `<each>` row is
 not a scope)? The case uses ONE row so it is ruling-neutral. **Exposure: 0** (no `when … changes` in any `${}` inside
-markup across the repo corpus, assetManagement or flogenceP). Pinned by `conformance/cases/each/when-changes-in-row-body`
-(impl#1: `hits` stays 0). found by: S432 adversarial review of the when-changes branch; PA re-verified.
+markup across the repo corpus, assetManagement or flogenceP). Pinned by `conformance/cases/each/when-changes-in-row-body-no-write`
+(impl#1: the row effect's `#beacon` `data-ran` attribute stays unset; the case also asserts the keyword spelling's W-WHEN-EFFECT-DEPRECATED, which impl#1 does not emit). **Re-pinned S449:** the original pin,
+`each/when-changes-in-row-body`, observed the run through a write to `@hits` — S447 made a writing effect body
+E-EFFECT-WRITES-STATE (the keyword spelling included), so that case now asserts the S447 codes (carried under
+`g-impl1-effect-reset-on-codes-unimplemented-s447`) and the drop is pinned by a non-writing row effect observed
+through the DOM it touches (verified: the same body at program top level passes on impl#1). found by: S432
+adversarial review of the when-changes branch; PA re-verified.
 
 ### g-when-in-if-region-never-unregistered-on-unmount — a `when` declared inside an `if=` region is hoisted to file scope and keeps firing after the region unmounts — `NEW S432-peter; MED; open`
 <!-- @gap id=g-when-in-if-region-never-unregistered-on-unmount sev=MED status=open locus=compiler/src/codegen/emit-logic.ts(case "when-effect" — emitted at file scope, never inside the if= region's mount scope, so `_scrml_mount_track` never sees it) prov=review:S432-adversarial-review-of-the-when-changes-branch;empirical:PA-verified-by-emit-on-280ecbdd -->
@@ -21190,7 +21195,7 @@ Reviewer-executed over HTTP on `review/s443-protect-r5` (≈230 shapes); each re
 
 ### g-protect-egress-round-10-residuals — §14.8.9 items round 9 did not close (new finds + carried)
 <!-- @gap id=g-protect-egress-round-10-residuals sev=HIGH status=open locus=compiler/src/codegen/protect-flow.ts(platformTarget/namesPlatform: a platform object reached through a call result, a conditional / logical, an array destructure or a collection element is not refused — and the compiler runtime (protect-egress.ts SERVER_PROTECT_HELPER) calls platform built-ins at request time; evalCall "any other method": an unmodelled platform method result drops the receiver's functions; the global logical-assignment write-through + function-bearing records perf; memberRead: a dynamic key read (`o[k]`) never sets the intrinsic-link mark; CALLBACK_METHODS L1: a callback position holding a known function AND an unknown one is treated as known; MUTATING `set`: Map key held → field-insensitive heap precision; recordThis context-insensitive per function node; settle reaches a thenable's resolve only through direct parameter calls)+compiler/src/codegen(searched — not located: `function f() { this.x = … }` declaration miscompile; object-literal method shorthand / accessor miscompile) prov=empirical:S449-protect-r9-agent -->
-**HIGH (scrml-source reachable; re-filed by the S239 review of round 9 — round 9's own filing had the wrong routes) — H1: the compiler's runtime is reachable through a platform object the rule cannot NAME.** Round 9 refuses a function stored onto a platform object named by its path or by a binding of one; a parameter, a container field and a program-stored replacement are covered too (the program's own calls apply program-stored candidates first). NOT refused, review-measured: `function g() { return Object }; g().getOwnPropertySymbols = f`, `(c ? Object : Object).X = f`, `(Object || u).X = f`, `const [O] = [Object]; O.X = f`, `new Map([["O", Object]]).get("O").X = f`, `g().keyFor = f` (Symbol) — and `I-PROTECT-STRIP-001` then falsely claims the row stripped. The compiler's runtime (the §14.8.9 redactor reads every row through `Object.keys`, `Object.getOwnPropertySymbols`, `Symbol.keyFor`, `Array.isArray`, `for…of` / spread / `new Set`, …) calls `f` with the row, protected columns still on it, and `f` can stash them in the global heap for another request to return. ROOT FIX (not cheap — evaluated in the r9 fix round and deferred): the runtime captures every built-in it calls at module load and calls them through the captures, with index loops instead of the iterator protocol (≈25 explicit built-in uses and 13 implicit protocol uses in the 260-line `SERVER_PROTECT_HELPER`; the redactor already captures `Date.prototype.toJSON` and the boxed-primitive `valueOf`s this way). A name-widening of the refusal rule (the target's own global names, through calls / conditionals / elements) is a shape list and was not attempted. **HIGH (pre-existing) — H2: an unmodelled platform method's result drops the receiver's functions.** `Object.groupBy(L, …).a[0](u.passwordHash)`, `Map.groupBy`, `Array.prototype.slice.call(L)[0](…)`, `new Map().getOrInsert(1, g)(…)` (review-measured). Round 9 added the element-returning built-ins as a KNOWN list; the default for every other method still drops functions. Candidate fix: flip the default for non-global receivers (an unknown method's result holds the receiver's elements and functions), keeping global receivers on names (perf — round 7's `Date.now()` cliff); measure first. **LOW — perf (RELAYED, review-measured, not re-run): P1** `const c = (globalThis.__appCache ??= new Map())` holding function-bearing records: 222 ms → 31.4 s at n = 200 — the faithful global logical assignment (round 9 item 1) puts the cache in the global heap's alias class, and every function a record holds is then a global function. **LOW — fail-closed false positives of the r9 fix round (S449 re-review, measured):** (a) `const key = "cache_" + u.id; globalThis[key] = …` is `E-PROTECT-006` ("a global binding under a key the compiler cannot read") while the inline `globalThis["cache_" + u.id] = …` compiles — the static-prefix rule reads only the key expression written in place, not a `const` bound to one; (b) `Object.getPrototypeOf(x).extra = 1` is `E-PROTECT-006` when `x`'s program-set prototype (`pproto`) is lost on the way — through a helper's return (`function mk(p) { return Object.create(p) }; Object.getPrototypeOf(mk({…}))`: the helper's default instance, with a clean `p`, contributes a non-`pproto` part to the AND-join) or a container element (`[new Pt()][0]`); the direct forms compile. **MED — perf of the fail-closed session-store precondition (by design, S449 re-review):** the summary applies only while the program reaches the store solely through `B.get / .set / .delete(…)`; ONE other touch anywhere in the compile — e.g. `Object.keys(globalThis)` in any server function — makes the store analysed faithfully: examples/23 flow 0.95 s → 78 s (measured; correct, 0 diagnostics), g2-deep-32 0.37 s → 0.47 s. Corpus: 54 compiles apply the summary, 0 fall back. **LOW (shared with the global model, not the summary):** an npm / host function that RETURNS the global object (`getGlobal()[k]`) reaches the registry without naming it or `globalThis`; host results never alias the global heap in the model, so neither the precondition nor the faithful model sees writes through it. **LOW (raw JS):** prototype pollution through a DYNAMIC key (`o[k1][k2] = v` with `k1 = "__proto__"`) is not refused (a literal `o["__proto__"]` is); a callback position holding both a known function and an unknown one (`xs.forEach(c ? f : Function.prototype.call.bind(…))`) skips the opaque-callback rule; string-evaluated code reached other than through `Function` / `eval` / `.constructor` (`setTimeout("…")`) is not refused; species through a class `static [Symbol.species]` (classes are raw JS only). **LOW — precision (fails closed):** `globalThis.box = { set(r) { … } }; globalThis.box.set(u)` is `E-PROTECT-006` (a `Map` holds its key; the field-insensitive global heap then hands the row the heap's functions) — the two-argument `set("k", u)` and `put(u)` were already; `Object.prototype.hasOwnProperty.call(u, "id")` is `E-PROTECT-006` (pre-existing: the unknown-call result). **Carried from round 9 (not touched):** MED codegen miscompiles (a `function` declaration assigning through `this` duplicates the statement into its own RHS → HTTP 500; object-literal method shorthand / accessors compile to invalid JS — raw JS reaches the flow only); LOW `this` context-insensitive per function; LOW a thenable's `resolve` stashed or handed to a host; LOW class methods' `this`; LOW `ROW_ANYWHERE` makes every field read off an object written through an alias row-bearing; LOW perf: shared `this`-writer N = 240 ≈ 2 s; untested: Proxy traps (`E-SCOPE-001` in scrml source). **Carried from rounds 7–8:** G8 `performance.mark(h)` read back by another request; a plain (non-CPS) handler rethrows to any host that mounts `routes` / the WinterCG `fetch` itself; hmac-key LOWs (`readFileSync("/etc/hostname")`, `String(randomInt(0, 1))`); `import.meta.env.K` miscompile; RM4 removal keyed by a column value; registry-Symbol markers; Postgres `omit` key casing, `rowid` exposing an `INTEGER PRIMARY KEY` protected column, a view in `tables=` protected by column NAME only (round-5 carries, RELAYED).
+**HIGH (scrml-source reachable; re-filed by the S239 review of round 9 — round 9's own filing had the wrong routes) — H1: the compiler's runtime is reachable through a platform object the rule cannot NAME.** Round 9 refuses a function stored onto a platform object named by its path or by a binding of one; a parameter, a container field and a program-stored replacement are covered too (the program's own calls apply program-stored candidates first). NOT refused, review-measured: `function g() { return Object }; g().getOwnPropertySymbols = f`, `(c ? Object : Object).X = f`, `(Object || u).X = f`, `const [O] = [Object]; O.X = f`, `new Map([["O", Object]]).get("O").X = f`, `g().keyFor = f` (Symbol) — and `I-PROTECT-STRIP-001` then falsely claims the row stripped. The compiler's runtime (the §14.8.9 redactor reads every row through `Object.keys`, `Object.getOwnPropertySymbols`, `Symbol.keyFor`, `Array.isArray`, `for…of` / spread / `new Set`, …) calls `f` with the row, protected columns still on it, and `f` can stash them in the global heap for another request to return. ROOT FIX (not cheap — evaluated in the r9 fix round and deferred): the runtime captures every built-in it calls at module load and calls them through the captures, with index loops instead of the iterator protocol (≈25 explicit built-in uses and 13 implicit protocol uses in the 260-line `SERVER_PROTECT_HELPER`; the redactor already captures `Date.prototype.toJSON` and the boxed-primitive `valueOf`s this way). A name-widening of the refusal rule (the target's own global names, through calls / conditionals / elements) is a shape list and was not attempted. **HIGH (pre-existing) — H2: an unmodelled platform method's result drops the receiver's functions.** `Object.groupBy(L, …).a[0](u.passwordHash)`, `Map.groupBy`, `Array.prototype.slice.call(L)[0](…)`, `new Map().getOrInsert(1, g)(…)` (review-measured). Round 9 added the element-returning built-ins as a KNOWN list; the default for every other method still drops functions. Candidate fix: flip the default for non-global receivers (an unknown method's result holds the receiver's elements and functions), keeping global receivers on names (perf — round 7's `Date.now()` cliff); measure first. **LOW — perf (RELAYED, review-measured, not re-run): P1** `const c = (globalThis.__appCache ??= new Map())` holding function-bearing records: 222 ms → 31.4 s at n = 200 — the faithful global logical assignment (round 9 item 1) puts the cache in the global heap's alias class, and every function a record holds is then a global function. **LOW — fail-closed false positives of the r9 fix round (S449 re-review, measured):** (a) `const key = "cache_" + u.id; globalThis[key] = …` is `E-PROTECT-006` ("a global binding under a key the compiler cannot read") while the inline `globalThis["cache_" + u.id] = …` compiles — the static-prefix rule reads only the key expression written in place, not a `const` bound to one; (b) `Object.getPrototypeOf(x).extra = 1` is `E-PROTECT-006` when `x`'s program-set prototype (`pproto`) is lost on the way — through a helper's return (`function mk(p) { return Object.create(p) }; Object.getPrototypeOf(mk({…}))`: the helper's default instance, with a clean `p`, contributes a non-`pproto` part to the AND-join) or a container element (`[new Pt()][0]`); the direct forms compile. **MED — perf of the fail-closed session-store precondition (by design, S449 re-review):** the summary applies only while the program reaches the store solely through `B.get / .set / .delete(…)`; ONE other touch anywhere in the compile — e.g. `Object.keys(globalThis)` in any server function — makes the store analysed faithfully: examples/23 flow 0.95 s → 78 s (measured; correct, 0 diagnostics), g2-deep-32 0.37 s → 0.47 s. Corpus: 54 compiles apply the summary, 0 fall back. The fallback is reached by IDIOMATIC, legitimate code, not only by attacks (re-review #3 nit): `const g = globalThis`, `Object.keys(globalThis)`, `{ ...globalThis }` — any one of them anywhere in a server function costs the whole compile the faithful walk (examples/23: ~80 s). A finer precondition (e.g. the global object as a value only where its registry slot cannot be read) or a cheaper faithful model is the follow-up. **LOW (shared with the global model, not the summary):** an npm / host function that RETURNS the global object (`getGlobal()[k]`) reaches the registry without naming it or `globalThis`; host results never alias the global heap in the model, so neither the precondition nor the faithful model sees writes through it. **LOW (raw JS):** prototype pollution through a DYNAMIC key (`o[k1][k2] = v` with `k1 = "__proto__"`) is not refused (a literal `o["__proto__"]` is); a callback position holding both a known function and an unknown one (`xs.forEach(c ? f : Function.prototype.call.bind(…))`) skips the opaque-callback rule; string-evaluated code reached other than through `Function` / `eval` / `.constructor` (`setTimeout("…")`) is not refused; species through a class `static [Symbol.species]` (classes are raw JS only). **LOW — precision (fails closed):** `globalThis.box = { set(r) { … } }; globalThis.box.set(u)` is `E-PROTECT-006` (a `Map` holds its key; the field-insensitive global heap then hands the row the heap's functions) — the two-argument `set("k", u)` and `put(u)` were already; `Object.prototype.hasOwnProperty.call(u, "id")` is `E-PROTECT-006` (pre-existing: the unknown-call result). **Carried from round 9 (not touched):** MED codegen miscompiles (a `function` declaration assigning through `this` duplicates the statement into its own RHS → HTTP 500; object-literal method shorthand / accessors compile to invalid JS — raw JS reaches the flow only); LOW `this` context-insensitive per function; LOW a thenable's `resolve` stashed or handed to a host; LOW class methods' `this`; LOW `ROW_ANYWHERE` makes every field read off an object written through an alias row-bearing; LOW perf: shared `this`-writer N = 240 ≈ 2 s; untested: Proxy traps (`E-SCOPE-001` in scrml source). **Carried from rounds 7–8:** G8 `performance.mark(h)` read back by another request; a plain (non-CPS) handler rethrows to any host that mounts `routes` / the WinterCG `fetch` itself; hmac-key LOWs (`readFileSync("/etc/hostname")`, `String(randomInt(0, 1))`); `import.meta.env.K` miscompile; RM4 removal keyed by a column value; registry-Symbol markers; Postgres `omit` key casing, `rowid` exposing an `INTEGER PRIMARY KEY` protected column, a view in `tables=` protected by column NAME only (round-5 carries, RELAYED).
 
 ### g-worker-supervision-and-program-shape-gaps — §46.3/§46.4 supervision has no codegen, and several nested-program shapes miscompile silently
 <!-- @gap id=g-worker-supervision-and-program-shape-gaps sev=HIGH status=open locus=searched:compiler/src/codegen/emit-worker.ts,emit-client.ts,emit-logic.ts(0 hits for restart=/max-restarts=/within=/when terminate from/.restart()) prov=empirical:S443-worker-d1-d2-agent -->
@@ -21872,32 +21877,115 @@ the impl#1 freeze does not apply. impl#1's behaviour is what adopters get until 
 ### g-bootstrap-effect-reset-on-owed — bootstrap: owes `<effect deps=[…]>`, the no-write rule (write summary, fail closed), and `reset-on=` (incl. the engine `rule=` check); U0's runtime cascade layer becomes deletable — `NEW S447; MED; open`
 <!-- @gap id=g-bootstrap-effect-reset-on-owed sev=MED status=open locus=compiler/self-host-v2/(effect element parse + scope association; the write-summary analysis; reset-on modifier + static cycle check + engine rule= check; the U0 when runtime on branch s447-u0-r3, unlanded) prov=ruling:user-voice-scrml.md-S447-"when → outside-world effects only, spelled <effect>"+"3b: reset-on= IS allowed on engine cells" -->
 
-The S447 rulings are written into SPEC §6.7.4 (`<effect>`), §6.8.4 (`reset-on=`) and §34 as Nominal text. The
-bootstrap owes:
+The S447 rulings are written into SPEC §6.7.4 (`<effect>`), §6.8.4 (`reset-on=`) and §34 as Nominal text.
 
-- **`<effect deps=[…]>`** — a markup lifecycle element; no mount run; `E-EFFECT-NO-DEPS`; scope by tree position
-  (`if=` teardown, one per `<each>` row, route regions); newest-run-wins on re-trigger with the §6.7.7.1 transport
-  rule; derived flush before effect bodies.
-- **The no-write rule** — `E-EFFECT-WRITES-STATE` from a transitive per-function write summary (direct writes,
-  resolved scrml calls incl. server functions, function values in the body); `E-EFFECT-WRITE-UNPROVEN` for `^{}` /
-  unresolvable calls; message names the fix by shape. The keyword `when … changes` spelling carries the same rule
-  and `W-WHEN-EFFECT-DEPRECATED`.
-- **`reset-on=[…]`** — `reset(@self)` in the triggering flush before readers (one change for dependents);
-  `E-RESET-ON-INVALID-ENTRY`, `E-RESET-ON-CYCLE` (static), `E-RESET-ON-NOT-WRITABLE`; on a transition-graph cell
-  `E-RESET-ON-ENGINE-REFUSED` (every non-target state must admit the target), and the reset fires `<onTransition>`.
-- **Deletable:** the U0 runtime cascade layer (branch `s447-u0-r3`, `docs/changes/s446-bootstrap-u0-when-effects/DESIGN.md`
-  §5 — the provenance `Cause` links, the per-segment cyclic check, the LIFO re-run stack, the depth-256 backstop).
-  Q7 (depth 256) and Q8 (polling) LAPSED (S447 1b): with no effect able to write, no effect can trigger another.
-  Polling goes to `<poll>`.
-- Open items the build must not decide silently are listed in SPEC §6.7.4 and §6.8.4 (⚑ OPEN): cross-module write
-  summaries, `navigate()` in an effect, `lift` in an effect body, server/channel cells under `reset-on=`, per-instance
-  resets, and cascades through engine transition effects.
-- **Write requests (S447 3c = (d), SPEC §6.7.7.3):** the "provably writes" classification (its own test — not
-  §6.7.7.1's unclassifiable=write); no mount run except `deps=[]`; server-origin writes (request settle, `<poll>`,
-  channel push, `persist=` cross-tab sync, §52 loads) tagged at their emit sites — they re-baseline instead of
-  triggering and bypass `debounced=` / `throttled=`; `reset-on=` resets inherit their trigger's origin; skip a save
-  whose deps all `==` (§45) their baselines; baseline moves on a successful save. Still OPEN and filed separately:
+**LANDED — s449-bootstrap-effect (branch `wip/s449-bootstrap-effect`; progress
+`docs/changes/s449-bootstrap-effect/progress.md`, which carries the PA readings for veto):**
+
+- **`<effect deps=[…]>`** — parsed where markup stands (and where a statement stands, so a nested one is
+  E-LIFECYCLE-016); Core `View.Effect`; runtime `rt.effectOn` — no mount run, owned by its tree position (`if=` region
+  teardown + re-register without running, one per `<each>` row), unregistered at teardown step 1; effect bodies run
+  after the same flush's render effects; derived values fresh by lazy pull; newest run wins via per-run tasks
+  (`rt.suspend`), the §6.7.7.1 transport rule met by discarding (never aborting). Codes: E-EFFECT-NO-DEPS,
+  E-LIFECYCLE-007 (`<effect>` limb), E-LIFECYCLE-016, W-LIFECYCLE-010, W-WHEN-EFFECT-DEPRECATED (the keyword spelling
+  lowers to the same Core).
+- **The no-write rule** — a per-function write summary over the binder's facts (direct writes, refused writes by
+  shape, resolved calls, function values), closed to a fixed point with a witness chain: E-EFFECT-WRITES-STATE names
+  the chain and the fix by shape; E-EFFECT-WRITE-UNPROVEN for a call through a non-function name. Core C11 restates
+  it (no Write in an effect body, directly or through a called Fn). The keyword form carries it. A read of a
+  user declaration's SHARED instance counts as a call of its CONSTRUCTION (its initializers run on first read) — found
+  by measurement: such a read wrote `@a` through a writing `let` seed before the fix. Likewise a read of a value
+  computed on its read (a derived cell — program-level included — or any field with no write capability) counts as a
+  call of its formula (s449 fix round, review HIGH-1: `<d:int=(@n + g())/>` read in an effect wrote `@a`).
+- **`reset-on=[…]`** on program cells — Core `View.ResetOn`, runtime `rt.resetOn` (resets drained in rank order
+  inside the writer's batch: one change for every dependent); E-RESET-ON-INVALID-ENTRY, E-RESET-ON-CYCLE,
+  E-RESET-ON-NOT-WRITABLE, E-RESET-ON-ENGINE-REFUSED (each refusing state named); Core C13.
+- **Deleted, not brought:** U0's runtime cascade layer (Cause links, cyclic cap, LIFO re-run stack, depth-256
+  backstop). Kept from U0: the `<each>` row-cleanup O(rows²) leak fix.
+- Conformance: 29 cases `conformance/cases/lifecycle/{effect-*,when-effect-*,reset-on-*}` (positive +/- negative per
+  code, one runtime case) — the positives xfail on impl#1 under `g-impl1-effect-reset-on-codes-unimplemented-s447`.
+
+**REMAINS (owed; what blocks each):**
+
+- **Write requests (S447 3c = (d), SPEC §6.7.7.3) — BLOCKED: the bootstrap has no `<request>` (refused as a
+  structural element), no server functions, no `?{}` SQL, no `<poll>`, `<channel>`, `persist=` or §52 cells**
+  (bootstrap arc plan units U1 server boundary → U2 `<request>` → U3 classifier). What each piece needs when they land:
+  (U1) record each `?{}` statement's verb (first keyword after a leading `WITH …`) — "provably writes" = a reachable
+  INSERT / UPDATE / DELETE / REPLACE / MERGE / UPSERT / CREATE / ALTER / DROP / TRUNCATE, or a §52 server-cell write;
+  `url=` / `api=` with a statically unsafe method — its OWN test, unclassifiable is NOT provably writing (§6.7.7.3
+  rule 1); (U2) no mount run unless `deps=[]`, `refetch()` always runs, a per-dependency baseline (set at mount,
+  moved by a successful settle, untouched by a failed / superseded one), a triggered save skipped when every dep `==`
+  its baseline (§45 via `rt.eq`; non-comparable / `asIs` counts as unequal); server-origin writes tagged at their
+  compiler-emitted sites (a request's settle assignment, a `<poll>` tick, a channel push, a `persist=` storage-event
+  sync, a §52 load / push) re-baseline instead of triggering and bypass `debounced=` / `throttled=`; a `reset-on=`
+  reset inherits its trigger's origin — the runtime drains resets inside the triggering `Cell.set`, so the origin is
+  in hand there (a write-origin parameter threaded into `drainResets`). Also filed separately:
   `g-request-write-one-save-in-flight-owed`, `g-request-write-flush-or-warn-on-leave-owed`.
+- **`reset-on=` compositions** (§6.8.4 rule 7) — `debounced=` / `throttled=` cancel, lifecycle revert, §55 surface
+  clear, `persist=` write: none of those features exists in the bootstrap yet; each owes its `reset-on=` limb when it
+  lands. **The engine reset "fires `<onTransition>`"** (rule 6): the bootstrap has no `<onTransition>` / state-child
+  `effect=` — owed with them. `default=` (the §6.8.1 reset value) is not in the bootstrap; the initializer is used.
+- **Fail-closed refusals standing in for OPEN questions** (E-BOOTSTRAP-UNSUPPORTED): an effect in a declaration's
+  `renders` or in use-site slot content (which scope owns it), a whole-instance dependency, `reset-on=` on a
+  declaration field (per-instance resets, ⚑ OPEN §6.8.4), an effect in a function / handler body (no §34 code names
+  it).
+- **⚑ PA question — may an initializer write reactive state?** A declaration initializer (a `let` seed) may call a
+  `function` that writes another cell, and the bootstrap accepts it; SPEC is silent. It is how an effect's READ of a
+  lazily-constructed shared instance wrote state, and how a `reset-on=` reset value re-wrote its own trigger in an
+  endless loop (both measured, both closed: the first as E-EFFECT-WRITES-STATE through the construction, the second
+  fail-closed E-BOOTSTRAP-UNSUPPORTED — §34 has no code for it). A language-wide rule would subsume both.
+- **Route regions** (§6.7.4 "route region" owner) — the bootstrap has no routes / `<page>`.
+- **`lin` in an effect body (E-LIN-004)** — the bootstrap has no `lin`.
+- **An effect body's §19 error context** (`!{}` on a rejected suspension) — arrives with server calls (U1); today a
+  rejection on a live task is re-raised, never swallowed.
+- **Runtime-half conformance for `<effect>`** — an effect cannot write state, so its run is observable only through
+  the outside world (a host call); the bootstrap's host surface is `Date.now()` alone, so no portable runtime case
+  pins an effect run yet (the bootstrap's own e2e counts clock reads).
+
+### g-bootstrap-render-writer-call-hangs — bootstrap: a compile-clean render self-write (`<p>${g(@a)}</p>` where `g()` writes `@a`; any render↔render write cycle) now HANGS synchronously at mount — `NEW S449; MED; open`
+<!-- @gap id=g-bootstrap-render-writer-call-hangs sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(render positions — interpolations / attribute values — may call a `function` that writes a cell; nothing refuses it)+compiler/self-host-v2/slice-m1/runtime/runtime.js(flush — the s449 `flushing` guard turns the old recursion into an endless loop) prov=review:S449-effect-rereview -->
+
+A render position may call a writer: `<p>${g(@a)}</p>` with `function g(x) { @a = @a + 1 … }` compiles clean, and
+so does any cycle where one render effect writes a cell another render effect (or itself) reads. **Before s449**
+the nested flush recursed and the mount threw "Maximum call stack size exceeded". **With the s449 one-flush-at-a-time
+guard** (the MEDIUM-1 fix that stopped an `<each>` row's `<effect>` from running mid-reconcile) the running loop keeps
+re-queuing the render effect, and the mount hangs synchronously forever (`loadProgram` never returns; a CI run would
+time out). The root is pre-existing — render positions may call writers; the guard worsened the failure mode from a
+loud throw to a silent hang. **Fix direction:** a compile-time refusal of writer calls in render positions, using the
+s449 write summary — tied to bryan's pending fork on whether initializers, derived formulas and render
+interpolations may write state at all (the same class as the three s449 effect / `reset-on=` holes). A runtime
+detector (a re-run counter in `flush`) is rejected by the S447 posture: a bound would mean the compile-time rule had
+a hole. **Landed with this filed** (PA call, S449 re-review): the bootstrap is not adopter-shipped.
+
+### g-bootstrap-c11-ignores-function-values — bootstrap Core check C11 does not count a function handed on as a value (`const h = peek`) toward an effect's writes — `NEW S449; LOW; open`
+<!-- @gap id=g-bootstrap-c11-ignores-function-values sev=LOW status=open locus=compiler/self-host-v2/check.scrml(blockWriteWitness / callWriteWitness — only Expr.Call is followed) prov=review:S449-effect-rereview -->
+
+§6.7.4 rule 3 ("A function value … counts as if it were called"). The front end applies it (analyze `fnValueRef`:
+`const h = peek` where `peek` writes is E-EFFECT-WRITES-STATE), so no program reaches Core with it; but C11, which
+restates the no-write rule over Core, follows only `Expr.Call`. Core has no function value outside a SeqCall Lambda
+today, so the restatement is incomplete rather than exploitable; close it when Core gains function values.
+
+### g-bootstrap-flush-leftovers-after-throw — bootstrap runtime: after a flush throws, the items still queued run on the next unrelated write, so an `<effect>` can fire on a cell it does not list — `NEW S449; LOW; open`
+<!-- @gap id=g-bootstrap-flush-leftovers-after-throw sev=LOW status=open locus=compiler/self-host-v2/slice-m1/runtime/runtime.js(flush / drainQueues — an exception leaves `queue` / `effectQueue` populated) prov=review:S449-effect-rereview -->
+
+Pre-existing in shape (the render queue always behaved so); the s449 effect queue inherits it. If a render effect or
+an effect body throws during a flush, the remaining queued items stay queued and run at the next flush, which a write
+to an unrelated cell starts — so an `<effect>` runs in response to a change of a cell outside its `deps=` (§6.7.4:
+"Only the listed cells trigger the effect"). Fix direction: decide the flush's exception contract (drop or re-run the
+rest of the batch at once) alongside the §19 error context of effect bodies.
+
+### g-impl1-effect-reset-on-codes-unimplemented-s447 — impl#1 emits none of the S447 `<effect>` / `reset-on=` codes and runs none of their semantics; pinned as expected-to-fail by the 18 positive `conformance/cases/lifecycle/{effect-*,when-effect-*,reset-on-*}` cases and `each/when-changes-in-row-body` — `NEW S449; HIGH; carried`
+<!-- @gap id=g-impl1-effect-reset-on-codes-unimplemented-s447 sev=HIGH status=carried locus=compiler/src/(no <effect> element — it reports E-MARKUP-001; no reset-on= modifier — the attribute is not read; no write summary; the keyword when … changes compiles with writes allowed) prov=empirical:s449-xfail-signatures-captured-by-conformance/run.ts---xfail-signature;ruling:user-voice-scrml.md-S447-TS-accounting -->
+
+**Classification: CARRIED** (S430 P7; S447 TS accounting: *"Language-semantics rulings stop generating impl#1 work:
+a ruling gets SPEC text + a bootstrap build; impl#1 divergence is FILED, not fixed"*). The bootstrap builds §6.7.4 /
+§6.8.4 (`g-bootstrap-effect-reset-on-owed`, landed s449); impl#1 is not changed. Each positive case's xfail signature
+was captured mechanically (`bun conformance/run.ts --xfail-signature <id>`): `<effect …>` reports `E-MARKUP-001`
+instead of the §6.7.4 code; `reset-on=` cells report `E-STATE-UNDECLARED` / `E-UNQUOTED-DISPLAY-TEXT` (the legacy
+opener with an attribute is not read as a cell) instead of the §6.8.4 code; the keyword `when … changes` compiles
+with no `W-WHEN-EFFECT-DEPRECATED` and no `E-EFFECT-WRITES-STATE`; the runtime case leaves `@page` unreset. The
+negative twins pass on impl#1 (they assert absence). Related, not duplicated: `g-impl1-when-effect-divergence-s447`
+(impl#1's `when` scoping defects and wrong diagnostics, measured by the DD).
 
 ### g-impl1-autosave-request-mount-save-wipes-record — impl#1 DIVERGENCE (filed, not fixed — S447 TS accounting): the documented autosave idiom sends `saveNote("")` on page load, racing the load, and can wipe the record; it also saves the loaded text back and shows it 800 ms late — `NEW S447; HIGH; open`
 <!-- @gap id=g-impl1-autosave-request-mount-save-wipes-record sev=HIGH status=open locus=compiler/src/codegen(the <request> lowering registers every request as an immediately-run effect — the autosave's first run is the mount save)+compiler/src/runtime-template.js(_scrml_reactive_set routes EVERY write, a request's settle assignment included, through the debounce wrapper); PA-located-verify from the DD §2 prov=dd:autosave-request-mount-3c-2026-10-02 -->
