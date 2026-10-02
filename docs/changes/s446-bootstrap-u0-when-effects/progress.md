@@ -273,3 +273,38 @@ derived flush; `@qty` unlisted never triggers. scoped: the effect stops firing a
 - Code + tests → e99edda17 (pre-commit hook: 33,847 pass / 84 skip / 0 fail, 33,943 tests / 1,422 files).
 - GATES (final runtime): lint 61 files 0 violations · slice-m1 112/112 · lowered slice-m1 112/112 · slice-m2 448/448 ·
   slice-m3 64/64 · slice-m4 435 + 1 todo / 0 fail · slice-codec 92/92 · v2 lexer 337/337.
+
+## Round r3c — implementing RULED S447 Q7 / Q8 (user-voice-scrml.md S447 "your recs on all of them", items 2-3, read verbatim) — 2026-10-01
+
+- Q7 IMPLEMENTED: per-event run budget removed; `WHEN_DEPTH_LIMIT = 256` (**PROVISIONAL** — the unit is ruled, the
+  value is not); a caused run deeper than 256 is not run, its event stopped and reported (console + window `error`
+  event, "page state may now be inconsistent"); labels re-derived: "runaway growth … while creating N new whens" vs
+  "when chain too deep … with no whens created … not runaway growth". No quarantine.
+- FOUND while implementing — the literal single-parent depth does NOT bound two shapes (measured): (a) a stopped
+  runaway's leftovers re-triggered by the next click kept the external (depth 0) cause → 60,000 whens / 36 s / no
+  report (guarded probe); (b) dense cycles: runs ×1.6 per When (n=12/16/20/24 → 1,205/8,343/57,291/392,809; n=60 >
+  2,000,000 runs, 3 GB). My r3b premise "dense cycles bounded by 2 × n" held for depth, not runs — wrong. FIX (flagged
+  for veto): depth = the LONGEST causal chain reaching a run (max over every write that queued it). Both now stop at
+  256 in ms; no legitimate row changed.
+- Q8 IMPLEMENTED: continuations run under a boundary link (no When, no depth) that ends the synchronous cycle check →
+  a poll runs to its condition: runs=5, t=5, no E-LIFECYCLE-006 (was runs=2, t=3 + E-006). DESIGN divergence note →
+  "matches impl#1 (ruled S447 Q8)". ⚑ OPEN (recorded): whether 256 polls is enough or polling needs its own allowance —
+  measured: a 300-cycle poll runs 256 cycles (t=257), then "when chain too deep".
+- Per-When cyclic cap: KEPT (now per synchronous segment, so a poll's per-cycle sync re-run is not starved) —
+  measured necessary: without it a 6-When dense cycle is stopped at 256 with an inconsistent-state report instead of
+  settling in 59 runs + one E-006. Counts cache: KEPT — no longer needed for boundedness (walks ≤ 256), measured 5×
+  on R2-2 (26 ms vs 140 ms).
+- MATRIX (final runtime): R2-1 ✓ 0 errors · R2-2 runtime ev1 256 runs 26 ms 144 MB stopped(runaway) · ev2 256 runs
+  6 ms stopped(runaway) · R2-2 from source click1 33 ms 544 MB / click2 44 ms 568 MB, one page error each · 12k loader
+  loading=false ✓ · 5,100 @sel watchers 5,100 + downstream ✓ · dense n=6 59 runs + E-006 (settles) · dense n=10/16/60
+  256 runs stopped (too deep) 0 ms · 12k stream 12,000 seen ✓ · poll t=5 ✓ · 300-cycle poll stopped at 256 (⚑ OPEN)
+  · 250-link chain ✓ · 4,900-link chain stopped at 256 (the ruled cost).
+- Tests: N1 block rewritten to Q8; R2-2 runtime/e2e to depth 256 (e2e restores the SECOND click — now 44 ms); chain
+  test → 250 completes / 4,900 stopped; F3 60-When budget test removed (superseded by the dense n=60 depth test); new
+  describe "RULED S447 Q7 — the depth backstop" (5 tests).
+- BITES (runtime restored byte-identical, cmp): no depth check → 9 RED (R2-2 runs to the 15,000 guard); no boundary
+  (polling change reverted) → 6 RED; least-cyclic depth instead of longest → 3 RED (R2-2 second event, leftovers,
+  dense n=60); no per-When cap → 1 RED.
+- Code + tests → 3e94935b3 (pre-commit hook 33,847 pass / 84 skip / 0 fail). GATES: lint 61 files 0 violations ·
+  slice-m1 117/117 · lowered 117/117 · slice-m2 448/448 · slice-m3 64/64 · slice-m4 435 + 1 todo / 0 fail ·
+  slice-codec 92/92 · v2 lexer 337/337.
