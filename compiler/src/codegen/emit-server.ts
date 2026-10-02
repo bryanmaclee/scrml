@@ -24,7 +24,7 @@ import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
-import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
+import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults, SQLITE_BUSY_TIMEOUT_MS } from "./sqlite-defaults.ts";
 import { sqliteFileHandle, ownedDbFilesFor, noteSqliteHandle, SQLITE_FILE_HELPER_IMPORT, sqliteFileHelperLines } from "./sqlite-file-target.ts";
 import { fileDefaultDbValue } from "../db-ownership.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
@@ -2923,6 +2923,22 @@ export function generateServerJs(
       );
       lines.push("const _scrml_session_store = (((globalThis.__scrml_session_stores ??= {}))[_scrml_session_db_path] ??= (() => {");
       lines.push("  const _db = new _ScrmlSessionDatabase(_scrml_session_db_path);");
+      // §44 / operator ruling S385 A1 ("WAL + 5s busy-timeout as the safe default") —
+      // the session store is the one emitted sqlite handle #1062's sweep did not reach
+      // (g-emitted-session-store-opens-sqlite-with-no-busy-timeout-or-wal): it is a raw
+      // `bun:sqlite` Database under an ALIASED constructor, not a `Bun.SQL` template.
+      // MEASURED before: `journal_mode=delete busy_timeout=0`, and a login under a
+      // competing writer failed `database is locked` in ~1 ms (HTTP 500). The SAME two
+      // pragmas `sqlite-defaults.ts` emits for `Bun.SQL` handles, with the same rules:
+      // busy_timeout FIRST and each in its OWN try (a WAL upgrade needs a momentary
+      // EXCLUSIVE lock, throws under contention, and must not take busy_timeout with
+      // it); silent catches (a failure falls back to the pre-fix settings). WAL is
+      // right here and NOT on a CLI-opened handle (`sqlite-handle-defaults.ts`): the
+      // emitted server is the long-lived OWNER of `.scrml-sessions.db`, a file no
+      // adopter authors. Both run BEFORE the CREATE TABLE, so the init itself waits a
+      // held lock out instead of throwing at module load.
+      lines.push(`  try { _db.run("PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}"); } catch { /* exotic VFS — sqlite's own settings */ }`);
+      lines.push('  try { _db.run("PRAGMA journal_mode = WAL"); } catch { /* contended or read-only — persists on a later init */ }');
       lines.push('  _db.run("CREATE TABLE IF NOT EXISTS kv_store (namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, expires_at INTEGER, PRIMARY KEY (namespace, key))");');
       lines.push('  const _ns = "session";');
       lines.push('  const _stmtGet = _db.prepare("SELECT value, expires_at FROM kv_store WHERE namespace = ? AND key = ?");');
@@ -3354,6 +3370,29 @@ export function generateServerJs(
     lines.push(`  path: "/_scrml/session/destroy",`);
     lines.push(`  method: "POST",`);
     lines.push("  handler: async function(_scrml_req) {");
+    // §40.2 / §39.2.3 (S449, g-session-destroy-route-has-no-csrf-check) — destroying
+    // a session is a state-mutating POST, so under `csrf="auto"` (the default under
+    // `auth=`) it gets the SAME session-synchronizer check every mutating server-fn
+    // route gets: §39.2.3 "A server-side validator that checks the `X-CSRF-Token`
+    // header on state-mutating routes and returns `403 Forbidden` if the token is
+    // missing or invalid". Before S449 a cross-site POST carrying the cookie logged
+    // the viewer out. Gated only when a session RECORD exists (`csrfToken` is minted
+    // for every record by the middleware): with no record there is nothing to
+    // destroy, and the stale-cookie clear below stays reachable. The 403 plants the
+    // session's token in the readable `scrml_csrf` cookie, exactly as the server-fn
+    // gate does, so the client's `session.destroy()` retries once and succeeds.
+    if (csrf === "auto") {
+      lines.push("    const _scrml_sessionForCsrf = _scrml_session_middleware(_scrml_req);");
+      lines.push("    if (_scrml_sessionForCsrf.csrfToken && !_scrml_validate_csrf(_scrml_req, _scrml_sessionForCsrf)) {");
+      lines.push("      return new Response(JSON.stringify({ error: \"CSRF validation failed\" }), {");
+      lines.push("        status: 403,");
+      lines.push("        headers: {");
+      lines.push("          \"Content-Type\": \"application/json\",");
+      lines.push("          \"Set-Cookie\": `scrml_csrf=${_scrml_sessionForCsrf.csrfToken}; Path=/; SameSite=Strict`,");
+      lines.push("        },");
+      lines.push("      });");
+      lines.push("    }");
+    }
     // S239 FIX 1 (logout half) — DELETE the server-side record, not just the
     // cookie, so a planted/leaked sid is not resurrectable after logout.
     // B1 (S266) — name-anchored parse; B4a (S266) — resolve either cookie name.
