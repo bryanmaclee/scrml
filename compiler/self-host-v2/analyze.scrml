@@ -8506,16 +8506,15 @@ ${
     //     parsed in a bootstrap logic body at all, so it never reaches here.)
     //  5. a host call (`Date.now()`, the closed HostCall set) is outside scrml's
     //     state and is not a write.
-    //  +  rule 2's "any call the SPEC defines as writing a cell on the caller's
-    //     behalf", the bootstrap's implicit one: READING a user declaration's
-    //     SHARED instance (`@box`, `@box.k`) constructs it on first reference
-    //     (§66.6.4) — running its field initializers (which may call writers)
-    //     and constructing the instances its renders mounts unconditionally. So
-    //     such a read refers to the declaration's CONSTRUCTION, summarized like a
-    //     function over its initializers and the declarations its renders uses
-    //     (over-approximate: whether this read is the first one is not static).
-    //     Found by measurement: an effect reading `@box.k`, where `box`'s `let`
-    //     seed calls a writer, wrote `@a` at run time with no diagnostic.
+    //  +  what a READ can run on the reader's behalf — a shared instance's
+    //     lazy construction (its field initializers, §66.6.4), a derived /
+    //     locked field's formula pulled on its read (§6.6), a `reset-on=` reset
+    //     re-evaluating the initializer — needs no rule here: every initializer
+    //     and formula is proven write-free AT ITS SOURCE (the source-side rule,
+    //     S449 item 3, below), so a read reaches no write. (Until S449 item 3
+    //     the effect pass summarized constructions and formulas itself, and
+    //     refused a writing reset value as E-BOOTSTRAP-UNSUPPORTED — all three
+    //     special cases removed; progress.md has the dead-proof.)
     // The message names the fix by shape (S447 1a): a write back to the cell's
     // initializer (or `reset(@x)`) → `reset-on=[…]` on the cell; a write of a
     // call's result → a `<request>`; otherwise → move the write to the writer,
@@ -8526,13 +8525,11 @@ ${
     type WSite:struct = { cell: string, span: ASpan, file: string, fix: FixShape }
     // A call the analysis cannot resolve, and why.
     type USite:struct = { what: string, span: ASpan, file: string }
-    // A scrml function the body calls (`asValue` = false) or hands on as a value
-    // — or a user declaration whose shared instance it reads (constructed on
-    // first reference; `sym` is the declaration's, `name` its display label).
+    // A scrml function the body calls (`asValue` = false) or hands on as a value.
     type FnRef:struct = { sym: int, name: string, span: ASpan, file: string, asValue: boolean }
     type BodyScan:struct = { writes: WSite[], refs: FnRef[], unproven: USite[] }
-    // The first chain (display labels — `f()`, `construction of <box>` —
-    // outermost first) down to a write / an unresolvable call.
+    // The first chain (display labels — `f()` — outermost first) down to a
+    // write / an unresolvable call.
     type Witness:struct = { chain: string[], site: WSite }
     type UWitness:struct = { chain: string[], site: USite }
     type FnSummary:struct = { sym: int, name: string, scan: BodyScan, w: Witness | not, u: UWitness | not }
@@ -8561,7 +8558,7 @@ ${
     fn scanStmt(cx: WCx, s: AStmt, acc: BodyScan) -> BodyScan {
         const k: AStmtK = s.k
         return match k {
-            .Eval(e: e) :> scanExpr(cx, e, stmtWrite(cx, e, acc))
+            .Eval(e: e) :> scanExpr(cx, e, acc)      // scanExpr records the write (stmtWrite), at any depth
             .Local(name: n, init: i) :> scanExpr(cx, i, acc)
             .Return(e: e) :> scanMaybe(cx, e, acc)
             .If(cond: c, thenB: t, elseB: el) :> scanElse(cx, el, scanBlock(cx, t, scanExpr(cx, c, acc)))
@@ -8586,105 +8583,19 @@ ${
         return acc
     }
 
-    // Every call and every function value in `e`, at any depth (an arrow
-    // function's body included — rule 3).
+    // Every write, call and function value in `e`, at any depth (an arrow
+    // function's body included — rule 3). A write is recorded wherever it
+    // stands, not only as a statement: a markup interpolation or an
+    // initializer (the source-side rule below) has no statement to stand in,
+    // and `${ @xs.push(1) }` is a write all the same.
     fn scanExpr(cx: WCx, e: AExpr, acc0: BodyScan) -> BodyScan {
+        const acc1: BodyScan = stmtWrite(cx, e, acc0)
         const c: AExpr | not = calleeOf(e.k)
-        if (c is some) return scanExprs(cx, exprKids(e).slice(1), scanCall(cx, e, c, acc0))
-        let acc: BodyScan = formulaRef(cx, e, constructionRef(cx, e, fnValueRef(cx, e, acc0)))
+        if (c is some) return scanExprs(cx, exprKids(e).slice(1), scanCall(cx, e, c, acc1))
+        let acc: BodyScan = fnValueRef(cx, e, acc1)
         for (const x of exprKids(e)) { acc = scanExpr(cx, x, acc) }
         return acc
     }
-
-    // A read of a user declaration's SHARED instance may construct it (see the
-    // banner): a reference to that declaration's construction summary.
-    fn constructionRef(cx: WCx, e: AExpr, acc: BodyScan) -> BodyScan {
-        const d: Sym | not = sharedDeclRead(nameFact(cx.t.names, e.nid))
-        if (d is not) return acc
-        if (d.id == cx.t.program.id) return acc       // the program is constructed at boot, never by a read
-        for (const r of acc.refs) {
-            if (r.sym == d.id) return acc             // `@box.k` resolves `@box` too: one reference per body
-        }
-        return addRef(acc, { sym: d.id, name: constructionLabel(d.hint), span: e.span, file: cx.file, asValue: false })
-    }
-
-    // s449 fix round (HIGH-1) — a read of a field with NO write capability (a
-    // derived cell, or a locked one whose initializer the printer turns into a
-    // `rt.derived` — print `fieldCtor`) RUNS ITS FORMULA on the read (lazy pull,
-    // §6.6): a reference to that formula's summary. Program-level cells
-    // included — `constructionRef` skips the program because it is built at
-    // boot, but a derived program cell is still recomputed at its read.
-    // Reviewer-measured: `<d:int=(@n + g())/>` read in an effect wrote `@a`.
-    fn formulaRef(cx: WCx, e: AExpr, acc: BodyScan) -> BodyScan {
-        const fi: FieldInfo | not = formulaFieldRead(cx.t, nameFact(cx.t.names, e.nid))
-        if (fi is not) return acc
-        for (const r of acc.refs) {
-            if (r.sym == fi.sym.id) return acc            // one reference per body
-        }
-        return addRef(acc, { sym: fi.sym.id, name: formulaLabel(cx.t, fi), span: e.span, file: cx.file, asValue: false })
-    }
-
-    fn formulaFieldRead(t: Tables, f: NameFact | not) -> FieldInfo | not {
-        const df: DeclField | not = readField(f)
-        if (df is not) return not
-        const di: DeclInfo | not = declInfo(t, df.decl)
-        if (di is not || df.idx < 0 || df.idx >= di.fields.length) return not
-        const fi: FieldInfo = di.fields[df.idx]
-        const w: Sym | not = fi.wcap
-        if (w is some) return not                        // a cell: seeded once, at construction
-        return fi
-    }
-
-    type DeclField:struct = { decl: Sym, idx: int }
-
-    fn mkDeclField(d: Sym, i: int) -> DeclField { return { decl: d, idx: i } }
-
-    fn readField(f: NameFact | not) -> DeclField | not {
-        return match f {
-            .NField(decl: d, inst: i, idx: x) :> mkDeclField(d, x)
-            .NInst(decl: d) :> not
-            .NLocal(sym: s) :> not
-            .NStruct(owner: o) :> not
-            .NFn(sym: s) :> not
-            .NLength :> not
-            not :> not
-        }
-    }
-
-    fn formulaLabel(t: Tables, fi: FieldInfo) -> string {
-        for (const d of t.decls) {
-            for (const f of d.fields) {
-                if (f.sym.id == fi.sym.id) {
-                    if (d.kind == DeclKind.Program) return "formula of @" + fi.sym.hint
-                    return "formula of @" + d.sym.hint + "." + fi.sym.hint
-                }
-            }
-        }
-        return "formula of @" + fi.sym.hint
-    }
-
-    fn sharedDeclRead(f: NameFact | not) -> Sym | not {
-        return match f {
-            .NField(decl: d, inst: i) :> sharedOf(i)
-            .NInst(decl: d, inst: i) :> sharedOf(i)
-            .NLocal(sym: s) :> not
-            .NStruct(owner: o) :> not
-            .NFn(sym: s) :> not
-            .NLength :> not
-            not :> not
-        }
-    }
-
-    fn sharedOf(i: InstRef) -> Sym | not {
-        return match i {
-            .Shared(decl: d) :> d
-            .Lexical(depth: n) :> not
-            .Alias(sym: s) :> not
-            .Narrowed(sym: s) :> not
-        }
-    }
-
-    fn constructionLabel(name: string) -> string { return "construction of <" + name + ">" }
 
     fn scanCall(cx: WCx, e: AExpr, callee: AExpr, acc: BodyScan) -> BodyScan {
         // an edit / removal / `reset` call is a WRITE, recorded at its statement
@@ -9060,29 +8971,12 @@ ${
     }
 
     // ---- the summaries: one scan per function, closed over references ---------
-    // Plus one per user declaration: its CONSTRUCTION (see the banner).
     fn fnSummaries(g: Globals, t: Tables) -> FnSummary[] {
         let out: FnSummary[] = []
         for (const fs of g.fns) {
             const label: string = fs.info.name + "()"
             const scan: BodyScan = scanBlock({ t: t, file: fs.info.file }, fs.f.body, emptyScan())
             out = out.concat([{ sym: fs.info.sym.id, name: label, scan: scan, w: directWitness(label, scan), u: directUWitness(label, scan) }])
-        }
-        for (const ds of g.decls) {
-            if (!ds.isProgram) {
-                const label: string = constructionLabel(ds.info.sym.hint)
-                const scan: BodyScan = constructionScan(t, ds)
-                out = out.concat([{ sym: ds.info.sym.id, name: label, scan: scan, w: directWitness(label, scan), u: directUWitness(label, scan) }])
-            }
-            // HIGH-1: one summary per formula — a field computed on its read
-            for (const fi of ds.info.fields) {
-                const w: Sym | not = fi.wcap
-                if (w is not) {
-                    const flabel: string = formulaLabel(t, fi)
-                    const fscan: BodyScan = scanValue({ t: t, file: ds.file }, fi.init, emptyScan())
-                    out = out.concat([{ sym: fi.sym.id, name: flabel, scan: fscan, w: directWitness(flabel, fscan), u: directUWitness(flabel, fscan) }])
-                }
-            }
         }
         // the fixed point: a pass adds a witness to a function whose callee has
         // one; a witness, once found, is kept (each function gains at most two),
@@ -9103,23 +8997,6 @@ ${
         return out
     }
 
-    // What constructing a declaration's instance runs: every field initializer
-    // (the declared defaults — a use-site value is evaluated where the use
-    // renders, not by a read), and the construction of each declaration its
-    // renders uses (L12 (b) builds the unconditional ones with it; every use is
-    // counted — over-approximate).
-    fn constructionScan(t: Tables, ds: DeclSrc) -> BodyScan {
-        const cx: WCx = { t: t, file: ds.file }
-        let acc: BodyScan = emptyScan()
-        for (const f of ds.info.fields) { acc = scanValue(cx, f.init, acc) }
-        const d: ADecl | not = ds.d
-        if (d is some) {
-            const r: AElem | not = d.renders
-            if (r is some) acc = usedDecls(cx, r.kids, acc)
-        }
-        return acc
-    }
-
     fn scanValue(cx: WCx, v: AAttrValue, acc: BodyScan) -> BodyScan {
         return match v {
             .Bare(e: e) :> scanExpr(cx, e, acc)
@@ -9127,32 +9004,6 @@ ${
             .Braced(b: b) :> scanBlock(cx, b, acc)
             .Quoted(v: s) :> acc
             .NoValue :> acc
-        }
-    }
-
-    fn usedDecls(cx: WCx, ns: ANode[], acc0: BodyScan) -> BodyScan {
-        let acc: BodyScan = acc0
-        for (const n of ns) {
-            const e: AElem | not = elemOfNode(n.k)
-            if (e is some) {
-                const used: Sym | not = useOf(elemFact(cx.t.elems, e.nid))
-                if (used is some) acc = addRef(acc, { sym: used.id, name: constructionLabel(used.hint), span: e.span, file: cx.file, asValue: false })
-                acc = usedDecls(cx, e.kids, acc)
-            }
-        }
-        return acc
-    }
-
-    fn useOf(f: ElemFact | not) -> Sym | not {
-        return match f {
-            .MUse(decl: d) :> d
-            .MStar(decl: d) :> d
-            .MHtml :> not
-            .MEach(bind: b) :> not
-            .MSlot :> not
-            .MStateView(v: v) :> not
-            .MInline(v: v) :> not
-            not :> not
         }
     }
 
@@ -9198,54 +9049,33 @@ ${
     }
 
     // ---- the pass: every accepted effect's body against the summaries ---------
-    // (and every accepted `reset-on=` rule's reset value — see resetValueDiags)
+    // (and every initializer / render position — the source-side rule, sourceDiags)
     fn effectPass(g: Globals, t: Tables, effects: EffectSrc[]) -> Diag[] {
-        if (effects.length == 0 && t.resets.length == 0) return []
-        const sums: FnSummary[] = fnSummaries(g, t)
+        // the source positions are scanned first: the summaries are built only
+        // when something refers to a function (most initializers are literals)
+        const ps: SrcPos[] = sourcePositions(g, t)
+        let scans: BodyScan[] = []
+        let needSums: boolean = effects.length > 0
+        for (const p of ps) {
+            const ps1: BodyScan = scanValue({ t: t, file: p.file }, p.v, emptyScan())
+            if (ps1.refs.length > 0) needSums = true
+            scans = scans.concat([ps1])
+        }
+        let sums: FnSummary[] = []
+        if (needSums) sums = fnSummaries(g, t)
+        // the source-side errors first: each is the root cause of whatever a
+        // consumer of that value would report
         let out: Diag[] = []
+        let i: int = 0
+        for (const p of ps) {
+            out = out.concat(sourceDiags(p, scans[i], sums))
+            i = i + 1
+        }
         for (const es of effects) {
             const scan: BodyScan = scanBlock({ t: t, file: es.file }, es.w.body, emptyScan())
             for (const w of scan.writes) { out = out.concat([writesDirect(es.w, w)]) }
             for (const r of scan.refs) { out = out.concat(refDiags(es.w, r, summaryOf(sums, r.sym))) }
             for (const u of scan.unproven) { out = out.concat([unprovenDirect(u)]) }
-        }
-        return out.concat(resetValueDiags(g, t, sums))
-    }
-
-    // s449 — a `reset-on=` reset evaluates the cell's initializer (§6.8.1) at
-    // every reset. §6.8.4: "`reset-on=` performs exactly one write —
-    // `reset(@self)` (§6.8.2) — and nothing else", and rule 3's termination
-    // argument ("Because the graph is static and acyclic, a chain of resets
-    // terminates by construction") holds only if evaluating the reset value
-    // writes no cell. Found by measurement: `<let page:int=(bump()) reset-on=[@q]/>`
-    // with `bump()` writing `@q` compiled clean — at run time every reset wrote
-    // the trigger again, an endless reset loop. §34 names no code for it, so the
-    // bootstrap refuses it (E-BOOTSTRAP-UNSUPPORTED, fail closed) by the same
-    // write summary the no-write rule uses — an unprovable value is refused too.
-    fn resetValueDiags(g: Globals, t: Tables, sums: FnSummary[]) -> Diag[] {
-        const prog: DeclSrc | not = findDeclSrc(g, t.program)
-        if (prog is not) return []
-        let out: Diag[] = []
-        for (const r of t.resets) {
-            const f: FieldInfo = prog.info.fields[r.target]
-            const scan: BodyScan = scanValue({ t: t, file: prog.file }, f.init, emptyScan())
-            let why: string = ""
-            if (scan.writes.length > 0) why = "writes `" + scan.writes[0].cell + "`"
-            for (const ref of scan.refs) {
-                const s: FnSummary | not = summaryOf(sums, ref.sym)
-                if (why == "" && s is not) why = "may write — it reaches `" + ref.name + "`, which has no write summary"
-                if (why == "" && s is some) {
-                    const sw: Witness | not = s.w
-                    const su: UWitness | not = s.u
-                    if (sw is some) why = "writes `" + sw.site.cell + "` (`" + chainText(sw.chain) + " → " + sw.site.cell + "`)"
-                    if (why == "" && su is some) why = "may write — it reaches a call the compiler cannot resolve (`" + chainText(su.chain) + "`: " + su.site.what + ")"
-                }
-            }
-            if (why == "" && scan.unproven.length > 0) why = "may write — " + scan.unproven[0].what
-            if (why != "") {
-                out = out.concat([{ code: "E-BOOTSTRAP-UNSUPPORTED", file: prog.file, span: f.span,
-                                    message: "`reset-on=` on `@" + f.sym.hint + "` re-evaluates its initializer at every reset, and that initializer " + why + " — a reset must write its own cell and nothing else (§6.8.4: \"performs exactly one write … and nothing else\"), or the reset chain need not end; §34 names no code for this, so it is refused. Give the cell an initializer that writes nothing" }])
-            }
         }
         return out
     }
@@ -9274,8 +9104,6 @@ ${
         const chain: string = chainText(wit.chain) + " → " + wit.site.cell
         let how: string = " writes `" + wit.site.cell + "` through a call: `" + chain + "`"
         if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value — whatever receives it may call it (§6.7.4 rule 3) — and it writes `" + wit.site.cell + "`: `" + chain + "`"
-        if (r.name.indexOf("formula of ") == 0) how = " reads a value computed on its read — its formula runs inside the effect and writes `" + wit.site.cell + "`: `" + chain + "`"
-        if (r.name.indexOf("construction of ") == 0) how = " reads a shared instance that its first read CONSTRUCTS, running initializers that write `" + wit.site.cell + "`: `" + chain + "`"
         const msg: string = effectWord(w) + how + ". An effect drives the outside world and may not write reactive state, directly or through a called function (§6.7.4). " + fixText(w, wit.site)
         return { code: "E-EFFECT-WRITES-STATE", message: msg, file: r.file, span: r.span }
     }
@@ -9311,6 +9139,177 @@ ${
             if (n != "") out = out.concat(["@" + n])
         }
         return out
+    }
+
+    // =========================================================================
+    // s449 — THE SOURCE-SIDE NO-WRITE RULE. bryan, S449 (user-voice-scrml.md
+    // §S449 item 3): "Initializers / derived formulas / markup interpolations
+    // may NOT write reactive state = (a) — a compile error everywhere, directly
+    // or through a called function". Restated for the SPEC: evaluating a
+    // declaration's initializer (own value or field), a derived / locked
+    // formula, or a markup interpolation SHALL NOT write any reactive cell.
+    // ⚑ The SPEC text and its code(s) are being written in parallel; until they
+    // land the two codes below are PROVISIONAL, each named in exactly one place.
+    //
+    // A value the runtime computes on its own schedule is judged at its SOURCE,
+    // by the write summary the effect rule uses (the same fixed point):
+    //   - every declaration initializer — a program cell's, a user
+    //     declaration's own value, every field initializer (attribute or child
+    //     field, seeded `let`, derived or locked), every use-site value;
+    //   - every render position — a markup interpolation, a bound attribute
+    //     value, an `if=` condition, an `<each in=…>` sequence and its `key=`,
+    //     wherever they stand (the program body, a `renders`, a state-child
+    //     body).
+    // A write in one, directly or through a called function, is
+    // formulaWritesCode(); a call the summary cannot resolve fails closed,
+    // formulaUnprovenCode(). An event handler (`on…=`) and a two-way `bind:` are
+    // NOT such positions: they run on the user's action, which may write.
+    // With every such value write-free, nothing a READ can trigger — a lazy
+    // construction, a derived formula pulled on its read, a `reset-on=` reset
+    // re-evaluating the initializer, a render — can write.
+    // =========================================================================
+    fn formulaWritesCode() -> string { return "E-FORMULA-WRITES-STATE" }
+    fn formulaUnprovenCode() -> string { return "E-FORMULA-WRITE-UNPROVEN" }
+
+    // A position whose evaluation may not write: what it is (for the message),
+    // its value, where it is written.
+    type SrcPos:struct = { what: string, v: AAttrValue, span: ASpan, file: string }
+
+    fn sourcePositions(g: Globals, t: Tables) -> SrcPos[] {
+        let out: SrcPos[] = []
+        for (const ds of g.decls) {
+            const p: AProgram | not = ds.p
+            const d: ADecl | not = ds.d
+            if (p is some) {
+                for (const fd of fieldDecls(ds)) { out = out.concat(declInits(fd, "@" + fd.name, ds.file)) }
+            } else if (d is some) {
+                out = out.concat(declInits(d, "@" + d.name, ds.file))
+            }
+            for (const n of declMarkup(ds)) { out = out.concat(nodePositions(t, n, ds.file)) }
+        }
+        return out
+    }
+
+    // A declaration's own value, its attribute fields' defaults and its child
+    // fields' initializers (at any depth); `path` is the cell as the author
+    // spells it (`@x`, `@box.k`).
+    fn declInits(d: ADecl, path: string, file: string) -> SrcPos[] {
+        let out: SrcPos[] = []
+        if (computedValue(d.own)) out = out.concat([initPos(d.isLet, d.own, path, d.span, file)])
+        for (const a of d.attrs) {
+            if (computedValue(a.dflt)) out = out.concat([initPos(a.isLet, a.dflt, path + "." + a.name, a.span, file)])
+        }
+        for (const c of childFields(d.body)) { out = out.concat(declInits(c, path + "." + c.name, file)) }
+        return out
+    }
+
+    // A value with something to evaluate (a quoted string is a literal).
+    fn computedValue(v: AAttrValue) -> boolean {
+        return match v {
+            .Bare(e: e) :> true
+            .Paren(e: e) :> true
+            .Braced(b: b) :> true
+            .Quoted(v: s) :> false
+            .NoValue :> false
+        }
+    }
+
+    // A locked initializer that reads cells is a FORMULA (§66.9: derived);
+    // anything else is an initializer (a `let` seed, a literal default).
+    fn initPos(isLet: boolean, v: AAttrValue, path: string, span: ASpan, file: string) -> SrcPos {
+        let what: string = "the initializer of `" + path + "`"
+        if (!isLet && valueReads(v).length > 0) what = "the formula of `" + path + "`"
+        return { what: what, v: v, span: span, file: file }
+    }
+
+    fn nodePositions(t: Tables, n: ANode, file: string) -> SrcPos[] {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> elemPositions(t, e, file)
+            .Interp(e: x) :> [interpPos(x, n.span, file)]
+            .Text(text: s) :> []
+            .DeclNode(d: d) :> []          // refused where it stands
+            .Effect(w: w) :> []            // its body is the effect rule's (effectPass)
+        }
+    }
+
+    fn interpPos(x: AExpr, span: ASpan, file: string) -> SrcPos {
+        return { what: "this markup interpolation", v: AAttrValue.Bare(x), span: span, file: file }
+    }
+
+    fn elemPositions(t: Tables, e: AElem, file: string) -> SrcPos[] {
+        let out: SrcPos[] = []
+        for (const a of e.attrs) {
+            if (isRenderAttr(a.name) && computedValue(a.value)) {
+                out = out.concat([{ what: attrWhat(attrFact(t.attrs, a.nid), e.tag, a.name), v: a.value, span: a.span, file: file }])
+            }
+        }
+        for (const k of e.kids) { out = out.concat(nodePositions(t, k, file)) }
+        return out
+    }
+
+    // An attribute evaluated when its element renders: every one but an event
+    // handler (it runs on the event), a two-way `bind:` (its write is the
+    // user's input) and an `as=` name. Decided by the NAME, not the binder's
+    // fact, so an attribute the binder refused is still judged (fail closed).
+    fn isRenderAttr(name: string) -> boolean {
+        if (eventName(name) != "") return false
+        if (name.substring(0, 5) == "bind:") return false
+        return name != "as"
+    }
+
+    fn attrWhat(k: AttrKind | not, tag: string, name: string) -> string {
+        const plainWhat: string = "the value of `" + name + "=` on `<" + tag + ">`"
+        return match k {
+            .AIf :> "the `if=` condition on `<" + tag + ">`"
+            .AConstruct(field: i) :> "the use-site value `" + name + "=` of `<" + tag + ">`"
+            .AEachIn :> "the `<each in=…>` sequence"
+            .AEachKey :> "the `<each key=…>` key"
+            .AStatic :> plainWhat
+            .ABound :> plainWhat
+            .AOn(event: ev) :> plainWhat
+            .AAs :> plainWhat
+            .AEachAs :> plainWhat
+            .ABind(kind: b) :> plainWhat
+            not :> plainWhat
+        }
+    }
+
+    // Every write / write chain / unresolvable call a position's scan reaches.
+    fn sourceDiags(p: SrcPos, scan: BodyScan, sums: FnSummary[]) -> Diag[] {
+        let out: Diag[] = []
+        for (const w of scan.writes) { out = out.concat([srcWrites(p, "writes `" + w.cell + "`", w.span, w.file)]) }
+        for (const r of scan.refs) { out = out.concat(srcRefDiags(p, r, summaryOf(sums, r.sym))) }
+        for (const u of scan.unproven) { out = out.concat([srcUnproven(p, u.what, u.span, u.file)]) }
+        return out
+    }
+
+    fn srcRefDiags(p: SrcPos, r: FnRef, s: FnSummary | not) -> Diag[] {
+        if (s is not) return [srcUnproven(p, "it reaches `" + r.name + "`, which has no write summary", r.span, r.file)]
+        const sw: Witness | not = s.w
+        if (sw is some) {
+            const chain: string = chainText(sw.chain) + " → " + sw.site.cell
+            let how: string = "calls `" + r.name + "`, which writes `" + sw.site.cell + "`: `" + chain + "`"
+            if (r.asValue) how = "hands `" + r.name + "` on as a function value — whatever receives it may call it — and it writes `" + sw.site.cell + "`: `" + chain + "`"
+            return [srcWrites(p, how, r.span, r.file)]
+        }
+        const su: UWitness | not = s.u
+        if (su is some) return [srcUnproven(p, "it reaches a call the compiler cannot resolve, through `" + chainText(su.chain) + "`: " + su.site.what, r.span, r.file)]
+        return []
+    }
+
+    fn srcRuleText() -> string {
+        return "An initializer, a derived formula and a markup interpolation are evaluated whenever the runtime computes the value or renders the markup — a write there is invisible at every read that triggers it — so they may not write reactive state, directly or through a called function (S449)"
+    }
+
+    fn srcWrites(p: SrcPos, how: string, span: ASpan, file: string) -> Diag {
+        const msg: string = p.what + " " + how + ". " + srcRuleText() + ". Move the write into an event handler or a function the user's action calls (they may write), or derive the value (§6.6)."
+        return { code: formulaWritesCode(), message: msg, file: file, span: span }
+    }
+
+    fn srcUnproven(p: SrcPos, why: string, span: ASpan, file: string) -> Diag {
+        const msg: string = p.what + ": " + why + " — the compiler cannot prove it writes no reactive cell, and the rule fails closed. " + srcRuleText() + ". Call a declared scrml function by its name."
+        return { code: formulaUnprovenCode(), message: msg, file: file, span: span }
     }
 
     // =========================================================================
