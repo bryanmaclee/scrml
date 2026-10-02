@@ -1235,6 +1235,77 @@ describe("analyzeProtectFlow — round 9: Array species", () => {
   });
 });
 
+describe("analyzeProtectFlow — r9 fix round (S239 review of round 9)", () => {
+  const memory = `${SESSION_STORE_MEMORY_TEXT}
+function putIt(u) { _scrml_session_store.set("k", {}); _scrml_session_store.get("k").h = u.passwordHash; }`;
+  const sqlite = `import { Database as _ScrmlSessionDatabase } from "bun:sqlite";
+const _scrml_session_db_path = "a";
+${SESSION_STORE_SQLITE_TEXT}
+function mw(sid) { return _scrml_session_store.get(sid); }`;
+  const S = (body, extra) => r8(body).replace("const _scrml_sql =", `${extra}\nconst _scrml_sql =`);
+
+  test("R1 — the MEMORY store hands back the LIVE stored object (served the hash cross-request on round 9)", () => {
+    for (const body of [
+      'putIt(u); return { v: _scrml_session_store.get("k").h };',
+      '_scrml_session_store.set("k", {}); const r = _scrml_session_store.get("k"); r.h = u.passwordHash; return { v: 1 };',
+      '_scrml_session_store.set("k", []); _scrml_session_store.get("k").push(u.passwordHash); return { v: 1 };',
+      "let s = ''; _scrml_session_store.set(\"x\", { f: function (y) { s = y; } }); _scrml_session_store.get(\"x\").f(u.passwordHash); return { v: s };",
+      "let s = ''; _scrml_session_store.set(\"x\", (y) => { s = y; }); _scrml_session_store.get(\"x\")(u.passwordHash); return { v: s };",
+      '_scrml_session_store.set("x", { h: "" }); for (const [k, o] of _scrml_session_store) o.h = u.passwordHash; return { v: 1 };',
+    ]) {
+      expect([body, refused(S(body, memory))]).toEqual([body, true]);
+    }
+    expect(refused(S('_scrml_session_store.set("k", { n: 1 }); return { v: _scrml_session_store.get("k").n, id: u.id };', memory))).toBe(false);
+  });
+
+  test("R4 — whatever reaches the store by any route is what `.get` returns", () => {
+    for (const body of [
+      'const s2 = _scrml_session_store; s2.set("k", u); return { v: mw("k").passwordHash };',
+      '_scrml_session_store["set"]("k", u); return { v: mw("k").passwordHash };',
+      'globalThis.__scrml_session_stores.a.set("k", u); return { v: mw("k").passwordHash };',
+      'Object.values(globalThis.__scrml_session_stores)[0].set("k", u); return { v: mw("k").passwordHash };',
+    ]) {
+      expect([body, refused(S(body, sqlite))]).toEqual([body, true]);
+    }
+    // A row kept in an unrelated global does not reach the store.
+    expect(refused(S('globalThis.rowCache = u; return { v: mw("k"), id: u.id };', sqlite))).toBe(false);
+  });
+
+  test("R2 — bind keeps the global candidates whatever its own arguments", () => {
+    for (const body of [
+      "let s = ''; globalThis.a1 = { f: function (x) { s = x; } }; const b = globalThis.a1.f.bind({}); b(u.passwordHash); return { v: s };",
+      "globalThis.a2 = { f: function () { return u.passwordHash; } }; return { v: globalThis.a2.f.bind({})() };",
+      "let s = ''; globalThis.a3 = []; globalThis.a3.push({ f: function (x) { s = x; } }); const b = globalThis.a3[0].f.bind({}); b(u.passwordHash); return { v: s };",
+    ]) {
+      expect([body, refused(r8(body))]).toEqual([body, true]);
+    }
+  });
+
+  test("R3 — the program's own prototypes and constructors MUST compile; the built-ins' stay refused", () => {
+    for (const body of [
+      "const Pt = function (x) { this.x = x; }; Pt.prototype.norm = function () { return this.x * 2; }; const p = new Pt(u.id); return { v: p.norm() };",
+      "const Pt = function (x) { this.x = x; }; Pt.prototype.kind = 'pt'; return { v: new Pt(1).kind, id: u.id };",
+      "const o = { a: 1 }; const c = new o.constructor(); return { c, id: u.id };",
+      "const Pt = function () {}; const p = new Pt(); const q = new p.constructor(); return { id: u.id };",
+      "globalThis['cache_' + u.id] = { n: 1 }; return { id: u.id };",
+      "globalThis[`cache_${u.id}`] = { n: 1 }; return { id: u.id };",
+      "const proto = { kind: 'x' }; const ownObj = Object.create(proto); Object.getPrototypeOf(ownObj).extra = 1; return { id: u.id };",
+      "const Pt = function () {}; const ownObj = new Pt(); Object.getPrototypeOf(ownObj).extra = 1; return { id: u.id };",
+      "const proto = { kind: 'x' }; const o2 = { __proto__: proto, a: 1 }; o2.__proto__.extra = 1; return { id: u.id };",
+    ]) {
+      expect([body, refused(r8(body))]).toEqual([body, false]);
+    }
+    for (const body of [
+      "Object.getPrototypeOf({ a: 1 }).extra = u.passwordHash; return { v: ({}).extra };",
+      "({ a: 1 }).constructor.prototype.x = 1; return { id: u.id };",
+      "globalThis['Str' + 'ing'] = function () { return ''; }; return { id: u.id };",
+      "const g = (function () {}).constructor('return this')(); return { id: u.id };",
+    ]) {
+      expect([body, refused(r8(body))]).toEqual([body, true]);
+    }
+  });
+});
+
 describe("sqlSkeleton", () => {
   test("holes replace interpolations (balanced braces), whitespace collapses", () => {
     expect(sqlSkeleton("SELECT *  FROM t\n WHERE a = ${ f({ x: 1 }) } AND b = ${y}"))

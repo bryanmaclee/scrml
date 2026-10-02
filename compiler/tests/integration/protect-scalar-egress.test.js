@@ -588,3 +588,22 @@ describe("S449 round 9 — the session store the emitter writes is the one the f
     expect(codes).toContain("E-PROTECT-006");
   });
 });
+
+// r9 fix round (R3) — round 9 marked every `.prototype` / `.constructor` /
+// `getPrototypeOf` as platform-owned and refused legitimate scrml (no `class`:
+// this IS how adopters build types). Each MUST compile.
+describe("S449 r9 fix round — the program's own prototypes compile", () => {
+  const MUST_COMPILE = {
+    "a method on a function's prototype": fnBody([ONE, "const Pt = function (x) { this.x = x }", "Pt.prototype.norm = function () { return this.x * 2 }", "const p = new Pt(u.id)", "return { v: p.norm() }"]),
+    "data on a function's prototype": fnBody([ONE, "const Pt = function (x) { this.x = x }", "Pt.prototype.kind = \"pt\"", "return { v: new Pt(1).kind, id: u.id }"]),
+    "new o.constructor() of a program object": fnBody([ONE, "const o = { a: 1 }", "const c = new o.constructor()", "return { id: u.id }"]),
+    "a global cache key with a static prefix": fnBody([ONE, "globalThis[\"cache_\" + u.id] = { n: 1 }", "return { id: u.id }"]),
+    "getPrototypeOf of a program instance": fnBody([ONE, "const Pt = function () { }", "const ownObj = new Pt()", "Object.getPrototypeOf(ownObj).extra = 1", "return { id: u.id }"]),
+  };
+  for (const [name, body] of Object.entries(MUST_COMPILE)) {
+    test(name, () => {
+      const { result } = compileMem(prog(body));
+      expect((result.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? ""))).toEqual([]);
+    });
+  }
+});

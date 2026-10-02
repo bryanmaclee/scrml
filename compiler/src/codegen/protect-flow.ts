@@ -150,6 +150,8 @@ function mayBeInvokedByLanguage(key: string | null): boolean {
 
 /** The compile-wide binding cell every free (global) name reads and writes (L3). */
 const GLOBAL_CELL = "\u0000global";
+/** The compiler-owned session store — one object of the global heap shared by every module (r9 fix round). */
+const SESSION_STORE_CELL = "\u0000session-store";
 
 type SinkKind = "redact" | "frame" | "serializer" | "serializer-json" | "global";
 
@@ -357,6 +359,20 @@ interface Taint {
   plat?: true;
   /** The value may CONTAIN such a value (a field or element of it may be one). */
   platIn?: true;
+  /**
+   * r9 fix round (R3) — EVERY object the value may be has a prototype the PROGRAM
+   * set: `new F(…)` of a compile function, `Object.create(p)` / a literal's
+   * `__proto__: p` with `p` program-made. Its `.__proto__`, `.constructor` and
+   * `Object.getPrototypeOf` are then the program's, not a built-in's. Unlike every
+   * other mark this one is an AND over a join (see `join`): any part that may be
+   * an ordinary object (prototype `Object.prototype`) clears it — fail closed.
+   */
+  pproto?: true;
+}
+
+/** Does `t` carry any information (a part that may be some value), so it counts in an AND-join? */
+function informative(t: Taint): boolean {
+  return !!(t.pproto || t.row || t.fns.size > 0 || (t.refs && t.refs.size > 0) || t.scalar.size > 0 || t.deep.size > 0 || t.k);
 }
 
 /** Copy `from`'s global names (and the intrinsic-link marks) onto `to` — the same value (in place). */
@@ -411,6 +427,7 @@ function dataOnly(t: Taint): Taint {
   if (t.len !== undefined) r.len = new Map(t.len);
   if (t.k !== undefined) r.k = t.k;
   carryGlobalNames(t, r);
+  if (t.pproto) r.pproto = true;
   return r;
 }
 
@@ -460,6 +477,12 @@ function join(...ts: Taint[]): Taint {
     } else if (!t.gnAny && t.refs && t.refs.size > 0) {
       anonymous = true;
     }
+  }
+  // r9 fix round: `pproto` holds only if every informative part has it.
+  {
+    let any = false, all = true;
+    for (const t of ts) if (t && informative(t)) { if (t.pproto) any = true; else all = false; }
+    if (any && all) out.pproto = true;
   }
   // Round 8: names are a precision filter for values read from the global heap
   // (`Taint.gn`). A part with alias cells and NO names may be a global object
@@ -536,7 +559,7 @@ function taintKey(t: Taint): string {
   const l = t.len ? [...t.len.keys()].sort().join(",") : "~";
   const o = t.own ? [...t.own].map((c) => c.cid).sort((x, y) => x - y).join(",") : "~";
   const g = t.gnAny ? "?" : t.gn ? [...t.gn].sort().join(",") : "";
-  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${f}#${a}#${l}#${t.k ?? 0}#${o}#${g}${t.plat ? "#P" : ""}${t.platIn ? "#Q" : ""}`;
+  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${f}#${a}#${l}#${t.k ?? 0}#${o}#${g}${t.plat ? "#P" : ""}${t.platIn ? "#Q" : ""}${t.pproto ? "#O" : ""}`;
 }
 
 function subsetOf<T>(a: Iterable<T>, b: Set<T>): boolean {
@@ -571,6 +594,8 @@ function subsumes(prev: Taint, t: Taint): boolean {
   if (t.gnAny && !prev.gnAny) return false;
   if (t.plat && !prev.plat) return false;
   if (t.platIn && !prev.platIn) return false;
+  if (prev.pproto && !t.pproto && informative(t)) return false; // the AND-join would clear it
+  if (t.pproto && !prev.pproto && !informative(prev)) return false;
   if (t.gn && t.gn.size > 0 && (!prev.gn || !subsetOf(t.gn, prev.gn))) return false;
   // `.length`: undefined is the fail-closed default (`naked`).
   if (t.len !== undefined || prev.len !== undefined) {
@@ -1202,6 +1227,20 @@ function staticKey(node: any): string | null {
     return node.quasis[0].value.cooked ?? null;
   }
   return null;
+}
+
+/** The static string every value of a computed key starts with (`"cache_" + id`, `` `cache_${id}` ``), or "". */
+function keyPrefix(node: any): string {
+  if (!node) return "";
+  if (node.type === "Literal" && typeof node.value === "string") return node.value;
+  if (node.type === "TemplateLiteral") return node.quasis[0]?.value?.cooked ?? "";
+  // `a + b`: a's prefix — and, when `a` is wholly a string literal, b's after it.
+  if (node.type === "BinaryExpression" && node.operator === "+") {
+    const l = keyPrefix(node.left);
+    const leftIsWholeString = node.left.type === "Literal" && typeof node.left.value === "string";
+    return leftIsWholeString ? l + keyPrefix(node.right) : l;
+  }
+  return "";
 }
 
 function isFnNode(n: any): boolean {
@@ -1839,14 +1878,23 @@ class FlowAnalysis {
   /** Does this value belong to the global heap's alias class? */
   private isGlobalValue(t: Taint): boolean {
     const g = this.find(GLOBAL_CELL);
-    for (const r of refsOf(t)) if (this.find(r) === g) return true;
+    const st = this.find(SESSION_STORE_CELL);
+    for (const r of refsOf(t)) { const c = this.find(r); if (c === g || c === st) return true; }
     return false;
   }
 
   /** A write landed in the global heap's alias class: a value outside a row is an egress. */
   private globalStore(slot: string, t: Taint): void {
-    if (this.find(slot) !== this.find(GLOBAL_CELL)) return;
+    const c = this.find(slot);
+    const g = this.find(GLOBAL_CELL);
+    if (c !== g && c !== this.find(SESSION_STORE_CELL)) return;
     if ([...naked(t).keys()].some((l) => !isPseudoLabel(l))) this.sink(t, this.curInst, "global");
+    // A function written into the session store (not the global heap proper) is
+    // reached only by reading the store — `elemOf` of its contents carries it — so
+    // it is not registered as a global function callable by NAME (r9 fix round:
+    // registering it made every session-touching function "unnamed", applied at
+    // every global call — g2-deep 0.3 s → 20 s and a false E-PROTECT-006).
+    if (c !== g) return;
     if (this.namedGlobalWrite) return;
     if (this.slotWrite) this.addAll(this.globalFnsSlot, t.fns);
     else this.recordGlobalFns(null, t.fns);
@@ -1900,7 +1948,6 @@ class FlowAnalysis {
   // use of the binding (a field write, passing it on) sees it as what it is: a
   // value read from the global heap.
   private sessionStores = new Map<string, "sqlite" | "memory">();
-  private sessionStored: Taint = clean();
 
   /** A module-scope `const _scrml_session_store = …` the compiler emitted: bind it (see above). */
   private sessionStoreDecl(node: any, scope: Scope): boolean {
@@ -1910,7 +1957,19 @@ class FlowAnalysis {
     if (variant === null) return false;
     const name = node.declarations[0].id.name;
     this.sessionStores.set(`${scope.id}:${name}`, variant);
-    const held = variant === "sqlite" ? elemOf(this.readGlobal("__scrml_session_stores")) : this.readGlobal("__scrml_session_store");
+    // r9 fix round (R1/R4): the binding IS the store — ONE object of the global
+    // heap, given its own alias cell (`SESSION_STORE_CELL`, shared by every module).
+    // Whatever reaches it by any route — a summarised `.set`, an alias of the
+    // binding (`const s2 = _scrml_session_store; s2.set(…)`), a computed member
+    // (`store["set"]`), the global registry (`globalThis.__scrml_session_stores[p]`,
+    // `Object.values(globalThis…)`) — is written into that cell, and every `.get`
+    // reads it back. It also carries what the global heap holds (an author object
+    // may sit in the slot) but not the global heap's alias cell: uniting the two is
+    // the round-9 performance cliff.
+    const g = this.readGlobal(variant === "sqlite" ? "__scrml_session_stores" : "__scrml_session_store");
+    const held = dataOnly(variant === "sqlite" ? elemOf(g) : g);
+    held.fns = new Set(g.fns);
+    held.refs = new Set([SESSION_STORE_CELL]);
     this.mergeBinding(name, scope, held);
     return true;
   }
@@ -1922,6 +1981,22 @@ class FlowAnalysis {
     const s = this.resolve(m.object.name, scope);
     if (!s || s.parent !== null) return null;
     return this.sessionStores.get(`${s.id}:${m.object.name}`) ?? null;
+  }
+
+  /**
+   * Is `fn` the compiler's own `_scrml_session_middleware` — a module-top-level
+   * function declaration of that name in a module that declares the recognized
+   * store? (An author's same-named top-level declaration there is a duplicate
+   * declaration: the module does not parse, and the flow fails closed.)
+   */
+  private inSessionMiddleware(fn: Instance | null): boolean {
+    const n = fn?.stat.node;
+    return !!n && n.type === "FunctionDeclaration" && fn!.stat.name === "_scrml_session_middleware" && !this.fnParent.get(n);
+  }
+
+  /** Everything that has reached the store, by any route (r9 fix round). */
+  private sessionStoreContents(): Taint {
+    return this.withCellContents({ ...clean(), refs: new Set([SESSION_STORE_CELL]) });
   }
 
   private sessionStoreCall(variant: "sqlite" | "memory", m: any, args: Taint[], node: any, fn: Instance | null): Taint {
@@ -1937,23 +2012,38 @@ class FlowAnalysis {
     const method = m.property.name;
     if (method === "set") {
       const v = args[1] ?? clean();
-      // JSON keeps no function, no marker: every unrevealed column of a row comes back naked.
-      const stored = variant === "sqlite"
-        ? { ...clean(), scalar: everything(v, this.site(node, fn)), deep: everything(v, this.site(node, fn)) }
-        : anyDepth(dataOnly(v));
-      const next = join(this.sessionStored, stored);
-      if (taintKey(next) !== taintKey(this.sessionStored)) { this.sessionStored = next; this.changed = true; }
-      this.writeCell(GLOBAL_CELL, anyDepth(containerOf(stored)));
+      // SQLite: JSON keeps no function, no marker — every unrevealed column of a row
+      // comes back naked. MEMORY: a `Map` keeps the very object (r9 fix round R1:
+      // round 9 stored a data-only copy, so `store.get("k").h = h` in one request and
+      // `store.get("k").h` in the next served the hash — the second read never saw
+      // the first write).
+      if (variant === "sqlite") {
+        const json: Taint = { ...clean(), scalar: everything(v, this.site(node, fn)), deep: everything(v, this.site(node, fn)) };
+        this.writeCell(SESSION_STORE_CELL, anyDepth(containerOf(json)));
+      } else {
+        this.writeCell(SESSION_STORE_CELL, this.inSessionMiddleware(fn) ? anyDepth(containerOf(dataOnly(v))) : containerOf(v));
+      }
       return authored;
     }
     if (method === "get") {
+      const contents = this.sessionStoreContents();
       if (variant === "sqlite") {
-        const got: Taint = { ...clean(), scalar: naked(this.sessionStored), deep: naked(this.sessionStored), k: 2 };
-        return join(got, authored);
+        // A fresh object parsed from JSON: everything the store holds, naked.
+        const all = everything(contents, this.site(node, fn));
+        return join({ ...clean(), scalar: all, deep: new Map(all), k: 2 }, authored);
       }
-      const el = elemOf(dataOnly(this.readGlobal("__scrml_session_store")));
-      delete el.refs;
-      return join(el, anyDepth(dataOnly(this.sessionStored)), authored);
+      // A `Map` hands back the LIVE stored object — its alias cells and functions
+      // with it (R1) — except to the compiler's own middleware, which only reads
+      // the record's fields and writes back a clean CSRF token: there a copy of the
+      // data is exact for every protected flow, and the live reference would make
+      // every request and session object it touches one alias class with the store
+      // (measured: g2-deep 0.3 s → 20 s and a false E-PROTECT-006).
+      if (this.inSessionMiddleware(fn)) {
+        const el = elemOf(dataOnly(contents));
+        delete el.refs;
+        return join(el, authored);
+      }
+      return join(elemOf(contents), authored);
     }
     return authored;
   }
@@ -1969,7 +2059,10 @@ class FlowAnalysis {
     const own = this.bindings.get(key) ?? clean();
     const writes = this.classWrites.get(this.find(key));
     const t = writes ? join(own, writes) : own;
-    return { ...t, refs: new Set([key]) };
+    // What is written INTO the object does not change its prototype (r9 fix round).
+    const r: Taint = { ...t, refs: new Set([key]) };
+    if (own.pproto) r.pproto = true; else delete r.pproto;
+    return r;
   }
 
   /** The value of an imported binding: the exporting module's binding, or a host function. */
@@ -2334,7 +2427,7 @@ class FlowAnalysis {
           t = join(t, this.storeFns(ownOf(t), objT, p, fn, p.computed ? this.literalKey(p.property, scope) : propName));
         }
         // Round 9: writing a property OF the global object rebinds a global name.
-        if (this.isGlobalObject(objT)) this.globalRebind(p.computed ? this.literalKey(p.property, scope) : propName, p, fn);
+        if (this.isGlobalObject(objT)) this.globalRebind(p.computed ? this.literalKey(p.property, scope) : propName, p, fn, p.computed ? p.property : undefined);
         const at = { node: p, fn };
         if (freeRoot && globalName !== null && t.fns.size > 0) {
           this.recordGlobalFns(globalName, t.fns);
@@ -2429,6 +2522,23 @@ class FlowAnalysis {
     }
     return false;
   }
+  /** A function value the PROGRAM made (every function it may be is a compile closure, none read from the global heap). */
+  private isProgramFunction(t: Taint): boolean {
+    const own = ownOf(t);
+    if (own.size === 0 || t.plat || this.isGlobalValue(t)) return false;
+    for (const c of own) if (!c.node) return false;
+    return true;
+  }
+  /** An object the PROGRAM made (no built-in, no global value, and something is known of it). */
+  private isProgramObject(t: Taint): boolean {
+    return !t.plat && !t.platIn && informative(t) && !this.isGlobalValue(t);
+  }
+  /** May `t` be a function — one the program holds, a built-in, or a value the analysis knows nothing of? */
+  private mayBeFunction(t: Taint): boolean {
+    if (ownOf(t).size > 0 || t.plat || this.isGlobalValue(t)) return true;
+    // No information at all (a host result, a parameter no caller shows): fail closed.
+    return !t.row && t.fns.size === 0 && refsOf(t).size === 0 && t.scalar.size === 0 && t.deep.size === 0 && !t.k;
+  }
   /** Is `t` the global object itself (`globalThis`, `self`, an alias of it)? */
   private isGlobalObject(t: Taint): boolean {
     if (!this.isGlobalValue(t) || t.gnAny || !t.gn || t.gn.size === 0) return false;
@@ -2436,7 +2546,13 @@ class FlowAnalysis {
     return true;
   }
   /** A write of global binding `key` (null = a key the compiler cannot read): rebinding a platform name is refused. */
-  private globalRebind(key: string | null, node: any, fn: Instance | null): void {
+  private globalRebind(key: string | null, node: any, fn: Instance | null, keyNode?: any): void {
+    // (r9 fix round R3: a computed key whose STATIC PREFIX no platform name starts
+    // with — `globalThis["cache_" + id]` — cannot rebind one.)
+    if (key === null && keyNode) {
+      const pre = keyPrefix(keyNode);
+      if (pre && ![...PLATFORM_GLOBALS].some((n) => n.startsWith(pre))) return;
+    }
     if (key === null || PLATFORM_GLOBALS.has(key)) {
       this.poison(node, fn, key === null
         ? "writes a global binding under a key the compiler cannot read (it may rebind a platform built-in such as `String` or `Object`)"
@@ -2519,6 +2635,11 @@ class FlowAnalysis {
     // does not (a row column cannot alias its row).
     const namedColumnOffRow = o.row !== null && !dynamic && !numeric && o.deep.size === 0 && !rowOut;
     if (!namedColumnOffRow && refsOf(o).size > 0) r.refs = new Set(refsOf(o));
+    // r9 fix round (R4): the session-store REGISTRY on the global object reaches the
+    // store — by its name, or by a key the compiler cannot read on the global object.
+    if ((key === "__scrml_session_stores" || key === "__scrml_session_store" || (dynamic && this.isGlobalObject(o))) && this.isGlobalValue(o)) {
+      r.refs = new Set([...refsOf(r), SESSION_STORE_CELL]);
+    }
     // A field of a value read from the global heap is read through one more name (round 8).
     // An element (an index, or a key the compiler cannot read) is not a name.
     if (o.gnAny || (o.gn && (dynamic || numeric))) r.gnAny = true;
@@ -2532,9 +2653,16 @@ class FlowAnalysis {
     // prototype or constructor (`({}).constructor.prototype` IS Object.prototype),
     // and a field of a container that holds one may be it. (A field OF a
     // prototype — `Object.prototype.toString` — is a function, not a prototype.)
-    if (o.platIn || (!dynamic && key !== null && INTRINSIC_LINK_KEYS.has(key))) r.plat = true;
+    // (r9 fix round R3: only when the owner may be a BUILT-IN — `.prototype` of a
+    // function the program made, and `.__proto__` / `.constructor` of an object
+    // whose prototype the program set (`pproto`), are the program's own: scrml has
+    // no `class`, so `Pt.prototype.norm = function …` IS how adopters build types.)
+    if (o.platIn || (!dynamic && key !== null && INTRINSIC_LINK_KEYS.has(key)
+        && (key === "prototype" ? !this.isProgramFunction(o) : !o.pproto))) r.plat = true;
     // …and `.constructor` may be `Function`; `globalThis.eval` is `eval` (round 9 — see `evaluator`).
-    if (!dynamic && (key === "constructor" || (key !== null && CODE_EVALUATORS.has(key) && (o.gn || o.gnAny)))) r.fns.add(this.evaluator);
+    // (r9 fix round R3: a `.constructor` is `Function` only when its owner may be a
+    // FUNCTION — `new o.constructor()` of a program object is not code evaluation.)
+    if (!dynamic && ((key === "constructor" && this.mayBeFunction(o)) || (key !== null && CODE_EVALUATORS.has(key) && (o.gn || o.gnAny)))) r.fns.add(this.evaluator);
     return r;
   }
 
@@ -2626,6 +2754,8 @@ class FlowAnalysis {
         // The functions this literal stores, and under which key (null = a key
         // the compiler cannot read, or one a spread copied in).
         const stored: Array<{ fns: Set<Closure>; key: string | null; accessor: boolean; copy?: true }> = [];
+        // r9 fix round: a literal `__proto__: p` with `p` program-made sets a program prototype.
+        let protoSet = false;
         for (const pr of node.properties) {
           if (pr.type === "SpreadElement") {
             // `{...row}` copies the enumerable Symbol descriptor: still a row —
@@ -2647,6 +2777,7 @@ class FlowAnalysis {
           // what its getter returns (a hook — see `storeFns`).
           // `__proto__: p` (a plain, non-computed key) SETS THE PROTOTYPE: `p`'s
           // properties are read off the object itself — the row at any depth.
+          if (!pr.computed && !pr.shorthand && key === "__proto__") protoSet = this.isProgramObject(v) || (pr.value?.type === "Literal" && pr.value.value === null);
           r = join(r, !pr.computed && !pr.shorthand && key === "__proto__" ? anyDepth(containerOf(v, null)) : containerOf(v, key ?? ANY_KEY));
           // Only a function the property IS is stored under its key — a nested
           // object's functions belong to that object (`ownOf`).
@@ -2654,7 +2785,7 @@ class FlowAnalysis {
             stored.push({ fns: ownOf(v), key, accessor: pr.kind === "get" || pr.kind === "set" });
           }
         }
-        if (stored.length === 0) return r;
+        if (stored.length === 0) { if (protoSet) r.pproto = true; return r; }
         // S447 round 7 — an object holding functions is an object their `this`
         // can name: it gets an allocation cell, so a write through `this`
         // (`{ h: "", set(r) { this.h = r.passwordHash } }`) lands in it; and a
@@ -2665,7 +2796,9 @@ class FlowAnalysis {
         r.refs = new Set([...refsOf(r), cell]);
         let gained = clean();
         for (const s of stored) gained = join(gained, s.copy ? this.copyFns(s.fns, r, node, fn) : this.storeFns(s.fns, r, node, fn, s.key, s.accessor));
-        return this.withCellContents(join(r, gained));
+        const lit = this.withCellContents(join(r, gained));
+        if (protoSet) lit.pproto = true;
+        return lit;
       }
       case "FunctionExpression":
       case "ArrowFunctionExpression":
@@ -3158,8 +3291,12 @@ class FlowAnalysis {
       let selfCall = clean();
       if ((method === "call" || method === "apply" || method === "bind") && this.hasCallable(recv)) {
         const recvIsGlobal = path !== null || this.isGlobalValue(recv);
+        // (r9 fix round R2: `bind` CALLS nothing — the arguments that matter are those of
+        // the later call of what it returns, so its candidates are never gated on its
+        // own arguments. Gated, `globalThis.a.f.bind({})` came back function-less and
+        // `b(u.passwordHash)` served the hash — main rejected it.)
         const selfFns = !recvIsGlobal ? recv.fns
-          : this.globalCallMatters(args) ? this.globalCandidates(recv.fns, this.calleeNames(m.object, recv, scope)) : new Set<Closure>();
+          : method === "bind" || this.globalCallMatters(args) ? this.globalCandidates(recv.fns, this.calleeNames(m.object, recv, scope)) : new Set<Closure>();
         if (selfFns.size > 0) {
           // The first argument IS `this` (round 7: `stash.call(u)` writing `this.x`).
           this.recordThis(selfFns, args[0] ?? clean());
@@ -3514,7 +3651,10 @@ class FlowAnalysis {
       if (w) parts.push(w);
     }
     if (parts.length === 1) return parts[0];
-    return join(...parts);
+    const out = join(...parts);
+    // Contents do not change the object's prototype (r9 fix round).
+    if (t.pproto) out.pproto = true; else delete out.pproto;
+    return out;
   }
 
   /** An allocation-site alias cell (an object the program creates at `node`). */
@@ -3667,7 +3807,10 @@ class FlowAnalysis {
    */
   private construct(fns: Set<Closure>, args: Taint[], node: any, fn: Instance | null): Taint {
     const cell = this.allocCell("new", node);
-    const inst: Taint = { ...clean(), refs: new Set([cell]) };
+    // The fresh object is not a function, and — when every constructor is one the
+    // program made — its prototype is that function's `.prototype` (r9 fix round).
+    const inst: Taint = { ...clean(), refs: new Set([cell]), own: new Set() };
+    if ([...fns].every((c) => !!c.node)) inst.pproto = true;
     this.recordThis(fns, inst);
     const ret = this.applyFns(fns, args, undefined, node, fn);
     return join(this.withCellContents(inst), ret);
@@ -3821,6 +3964,8 @@ class FlowAnalysis {
       if (ELEMENT_ALIASING_BUILTINS.has(path)) {
         const aliases = new Set<string>();
         for (const a of args) for (const x of refsOf(a)) aliases.add(x);
+        // r9 fix round (R4): enumerating the global object reaches the session store too.
+        if (args.some((a) => this.isGlobalObject(a))) aliases.add(SESSION_STORE_CELL);
         if (aliases.size > 0) r.refs = aliases;
         // Round 8: …and those members' FUNCTIONS (`Reflect.get(o, "set")` is
         // the method; `Object.values(globalThis)[0].set(u)` calls a stored one).
@@ -3874,7 +4019,10 @@ class FlowAnalysis {
       // A fresh object whose prototype IS `p`: it reads through to `p`'s class —
       // `p`'s own properties are read off it at depth 0 (round 8: any depth).
       const proto = containerOf(args[0] ?? clean());
-      if (!args[1]) return lenDefault(anyDepth(proto));
+      // r9 fix round: its prototype is the PROGRAM's when `p` is (or `null`).
+      const progProto = (node?.arguments?.[0]?.type === "Literal" && node.arguments[0].value === null) || this.isProgramObject(args[0] ?? clean());
+      const mark = (t: Taint): Taint => { if (progProto) t.pproto = true; return t; };
+      if (!args[1]) return mark(lenDefault(anyDepth(proto)));
       // r8c: the second argument is a property-DESCRIPTOR map, exactly as for
       // `Object.defineProperties` — its getters / setters / values are stored on
       // the new object (an allocation cell) through the one descriptor path, so
@@ -3886,11 +4034,14 @@ class FlowAnalysis {
       const obj: Taint = { ...clean(), refs: new Set([cell]) };
       const got = this.storeDescriptors(args[1], obj, node, fn, null);
       this.writeCell(cell, anyDepth(containerOf(join(args[1], got))));
-      return lenDefault(anyDepth(join(proto, this.withCellContents(obj))));
+      return mark(lenDefault(anyDepth(join(proto, this.withCellContents(obj)))));
     }
     if (path === "Object.getPrototypeOf" || path === "Reflect.getPrototypeOf") {
       // …and the prototype of an ordinary value IS a built-in's (round 9).
-      return { ...lenDefault(anyDepth(elemOf(args[0] ?? clean()))), plat: true };
+      // (r9 fix round R3: unless the program set it — `pproto`.)
+      const pr = lenDefault(anyDepth(elemOf(args[0] ?? clean())));
+      if (!args[0]?.pproto) pr.plat = true;
+      return pr;
     }
     if (path === "String") {
       // `String(x)` embeds a scalar verbatim; a row stringifies as
