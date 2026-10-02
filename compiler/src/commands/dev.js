@@ -1928,12 +1928,13 @@ export async function runDev(args) {
     return run;
   }
   // Reap EVERY spawned child (starting / live / in grace — see spawnedAppChildren)
-  // on every exit path: a normal exit, Ctrl+C, a harness's SIGTERM, a closed
-  // terminal's SIGHUP. (SIGKILL can't be caught — the child's own orphan guard
-  // covers that.)
+  // on the exit paths this process owns: a normal exit, Ctrl+C, a harness's SIGTERM.
+  // SIGHUP is deliberately NOT handled: a listener would override `nohup`'s
+  // inherited ignore (a nohup-started dev server would then die on HUP). A parent
+  // that dies of an unhandled HUP — or of SIGKILL — is covered by each child's own
+  // orphan guard, which exits within one 2 s poll of the parent's death.
   process.on("exit", killAllAppChildren);
-  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-    if (process.platform === "win32" && sig === "SIGHUP") continue;
+  for (const sig of ["SIGINT", "SIGTERM"]) {
     process.on(sig, () => { killAllAppChildren(); process.exit(0); });
   }
 
