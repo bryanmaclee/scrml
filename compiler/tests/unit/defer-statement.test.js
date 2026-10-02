@@ -34,6 +34,7 @@ import { runRedeclareChecks } from "../../src/validators/lint-redeclare.ts";
 import { lowerDeferList, lowerDefers, isDeferLoweredTry } from "../../src/codegen/lower-defer.ts";
 import { deferStackRunnerLines } from "../../src/codegen/emit-control-flow.ts";
 import { normalizeChunkToken } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -68,7 +69,7 @@ function fnBody(ast, name) {
 
 function compile(src, opts = {}) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const tmpDir = resolve("/tmp", `scrml-defer-${uniq}`);
+  const tmpDir = resolve(tmpdir(), `scrml-defer-${uniq}`);
   const input = resolve(tmpDir, `app.scrml`);
   mkdirSync(tmpDir, { recursive: true });
   writeFileSync(input, src);

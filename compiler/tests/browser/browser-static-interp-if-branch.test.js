@@ -32,10 +32,11 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
-const tmpRoot = resolve("/tmp", "scrml-static-interp-if-branch");
+const tmpRoot = resolve(tmpdir(), "scrml-static-interp-if-branch");
 
 function compileAndMount(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

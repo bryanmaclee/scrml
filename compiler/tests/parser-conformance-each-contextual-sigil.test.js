@@ -37,6 +37,7 @@ import { translateExpr } from "../native-parser/translate-expr.js";
 import { TokenKind } from "../native-parser/token.js";
 import { compileScrml } from "../src/api.js";
 import { normalizeChunkToken } from "./helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -58,7 +59,7 @@ function liveExprNode(source) {
 function compileWith(source, parser, suffix) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-sigil-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-sigil-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });

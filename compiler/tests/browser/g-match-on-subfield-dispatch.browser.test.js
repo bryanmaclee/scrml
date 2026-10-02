@@ -45,6 +45,7 @@ import {
 } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // Single-level sub-path: `<cell> = { state: P.Idle, n: 0 }` + `on=@cell.state`.
 const SRC = `<program>
@@ -62,7 +63,7 @@ type P:enum = { Idle, Ok }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-giti-031");
+const tmpRoot = resolve(tmpdir(), "scrml-giti-031");
 
 function compileToOutputs(source, baseName = "app") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

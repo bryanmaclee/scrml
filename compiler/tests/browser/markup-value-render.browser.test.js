@@ -36,8 +36,9 @@ import {
 } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
-const tmpRoot = resolve("/tmp", "scrml-mv-render");
+const tmpRoot = resolve(tmpdir(), "scrml-mv-render");
 
 /**
  * Compile `source` via the real compile path (write:true) and return the

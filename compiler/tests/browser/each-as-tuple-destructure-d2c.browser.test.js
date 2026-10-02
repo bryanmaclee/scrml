@@ -17,6 +17,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
 
 // {key,value} struct array — the destructure derives `.key`/`.value` regardless
 // of whether the source is a real map (parser/codegen are field-name-agnostic).
@@ -42,7 +43,7 @@ type Entry:struct = { key: string, value: number }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-d2c-browser");
+const tmpRoot = resolve(tmpdir(), "scrml-d2c-browser");
 
 function compileToOutputs(source, baseName, parser) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

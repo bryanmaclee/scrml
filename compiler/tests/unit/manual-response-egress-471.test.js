@@ -22,10 +22,11 @@ import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync, rmSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
 
 function compileServer(source, suffix = "resp-egress") {
   const name = `${suffix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const tmpDir = resolve("/tmp", `scrml-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-${name}`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
   const srcFile = resolve(tmpDir, `${name}.scrml`);

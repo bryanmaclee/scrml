@@ -45,6 +45,7 @@ import { compileScrml } from "../../src/api.js";
 import { join, resolve, relative } from "path";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
+import { tmpdir } from "os";
 
 const REPO_ROOT = resolve(import.meta.dir, "..", "..", "..");
 const STDLIB_ROOT = join(REPO_ROOT, "stdlib");
@@ -129,7 +130,7 @@ describe("stdlib sources — logic is parsed as logic (no early-closed block com
 
 describe("observable consequence — an importer of scrml:http", () => {
   test("`uploadFile` (declared after the pre-fix early close) is auto-awaited like `retry`", () => {
-    const tmpDir = join("/tmp", `scrml-s441-http-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+    const tmpDir = join(tmpdir(), `scrml-s441-http-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
     mkdirSync(tmpDir, { recursive: true });
     const input = join(tmpDir, "app.scrml");
     writeFileSync(input, [

@@ -30,6 +30,7 @@ import { resolve, dirname } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../../src/api.js";
 import { foldChunkNamespacing } from "../../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 
@@ -42,7 +43,7 @@ function compileAndInspect(source, label = "s26-guard") {
   // files into the test tree causes bun test to re-glob them and spuriously
   // re-execute the suite, which observably changes compiler output on the
   // second pass.
-  const tmpDir = resolve("/tmp", `scrml-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });

@@ -36,6 +36,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -68,7 +69,7 @@ const SRC = `<program>
 
 function compile(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const dir = resolve("/tmp", "scrml-gh237", `case-${uniq}`);
+  const dir = resolve(tmpdir(), "scrml-gh237", `case-${uniq}`);
   mkdirSync(dir, { recursive: true });
   const input = resolve(dir, `${baseName}.scrml`);
   writeFileSync(input, source);
