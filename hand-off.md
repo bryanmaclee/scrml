@@ -1,3 +1,111 @@
+# scrml — Session 447 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Concurrent: S446-bryan-xps (died in the
+> 11:21 reboot; S448 took its lane and wrapped, moving to ASUS — S447 then took the bootstrap lane) · S446-peter (wrapped, #1223).
+> **Rulings authority:** `scrml-support/user-voice-scrml.md` §S447 (≈25 entries). Board: `S447-bryan.md`.
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 0. bryan's calls — surface FIRST
+- **⚑ The "your recs on all of them" accept (S447) may have been an ACCIDENTAL autocomplete.** bryan: *"pretty sure I accepted an
+  auto suggestion … possibly even on accident."* Its five items: (1) dpa-063 ten readings — **CONFIRMED** intentional, landed #1227;
+  (2) Q7 depth-256 / (3) Q8 polling — **LAPSED** (superseded by the `<effect>` no-write ruling); (4) post-commit hook backgrounded —
+  **UNCONFIRMED** (local `.git/hooks/post-commit`, backup at the S447 scratchpad `post-commit.bak`; flock single-run lock added);
+  (5) §14.8.9 coercion carve-out — **UNCONFIRMED but merged** (#1228; reviewer: SOUND). Ask bryan to confirm 4 and 5 or revert.
+- **Native parser fate** (TS accounting call 3, ruled "decide it"): compiler/native-parser 50k lines, M6 migration stalled, CI runs
+  within-node parity tests on it. Options to bring: finish the migration vs freeze + stop running parity in CI vs delete.
+- **Two `<effect>` SPEC readings for veto** (#1229): a `reset-on=` reset inherits the ORIGIN of its triggering write (a server load
+  writing `@query` must not fire an autosave through `@page`'s reset); H-LIFECYCLE-001 retires with `reads`.
+- **~10 `<effect>` OPEN items** in SPEC §6.7.4/§6.8.4/§6.7.7.3 — batch them: write summary across imported modules; `navigate()` as a
+  write?; `lift` in an effect body; §66 field paths / `<#id>.prop` as deps; `reset-on=` on server/channel cells; per-instance resets;
+  cascades through engine transition effects; pending local debounced write vs a server-origin write; persist="session" draft vs load;
+  O-061-8; respell §43/§46 worker `when` hooks and §4.11.3 `when expr is .V`.
+- Older carried: dpa-064 (nested `<program>` auth scope) ADVISORY · README #1176 · SPEC "unawaited Promise" softening · dpa-058 B3 is
+  now RESOLVED (validity surface ruling).
+
+### 0b. In flight at wrap
+- **`on mount` deep-dive — DONE, awaiting bryan** (`scrml-support/docs/deep-dives/on-mount-fit-2026-10-02.md`, committed). Rec: (b) keep
+  `on mount` for OUTSIDE-WORLD setup only — the body may not write reactive state during mount (it may hand callbacks that write later);
+  respell `<onMount>${…}</>` (medium-low); keep `cleanup()` inside; retire `on dismount` (no SPEC section, doesn't compile). Evidence: 35
+  real statements, 34 write state and every one has a better home (request / initializer / engine boot effect); 0 do DOM work; a mount
+  write fires a 3c save at load and repaints after first render. impl#1 defects found (divergences): body runs before render and before
+  `ref=` binds and never re-runs on remount; a markup-position mount ships as page text; `cleanup()` in a mount body throws ReferenceError;
+  a `!{}` wildcard arm silently dropped; `var`/`switch`/`for…in`/`throw` compile there; §51.0.H Form 3's own example doesn't compile.
+  Calls §15: 1 = a/b/c/d (rec b) · 2 = K/M/E/R (rec M) · sub-calls 1a-1d, 2a-2b, 3a-3c. Persona poll was leading — weight low.
+- **Doorbell rollout (RULED S447, one rule all repos):** every repo gets an `inbox` branch siblings push to; the doorbell watches
+  `origin/inbox`. scrml's `inbox` branch exists; hooks wired in scrml `.claude/settings.local.json` (backup in the S447 scratchpad).
+  flogence asked to roll out to every repo + flobase module (`flogence/handOffs/incoming/2026-10-02-from-scrml-S447-doorbell-…`).
+  pa-base v2.18 §10 carries the rule. **ROLLOUT DONE by flogence S53:** `inbox` branches on flogence, scrml-support, giti, 6nz,
+  scrml-site, flint, scrml-native (+ scrml); poller watches `origin/inbox` AND main (legacy drops); notify-inbox.sh retired; senders use
+  `bun <flogence>/scripts/msg-doorbell.ts send <repo> <file.md>`. A message is HANDLED once its name is under
+  `handOffs/incoming/read/` on main (pa-base §10). **⚑ bryan's calls:** flogenceP (Peter's fork) not given an inbox — q57 ruled forks out
+  of scope; and 6nz / giti / scrml-site / scrml-native / scrml are PUBLIC repos, so an `inbox` message there is public (same exposure as
+  committing to main). Doorbell bug notes: hooks now use CLAUDE_PROJECT_DIR (the S386 ring in this session was mis-routed scrml-support
+  mail); a failed plain `git pull` mid-S447 ("Cannot rebase onto multiple branches") was the poller's FETCH_HEAD — fixed.
+- Unread sibling records the doorbell found: scrml-site `2026-09-21-from-scrml-S425-…` (ours, unread there), flint
+  `2026-09-30-from-S443-scrml-…`, scrml-support `handOffs/incoming/S386-peter-routes.md` (peter → bryan, 3 routed rulings — READ IT).
+
+### 1. Bootstrap lane (S447 owns it after S448)
+- **U0 re-scope — do NOT land as built.** Branch `wip/s447-bootstrap-u0-r3` @ `9835b80a4` (rounds r3/r3b/r3c, reviewed LAND-WITH-NITS
+  + design escalation E1 breadth growth). Its runaway-backstop layer (depth limit, polling, budget) is for the OLD `when`; under the
+  S447 ruling (`<effect>` may not write reactive state → cascades impossible by construction) it is mostly DELETABLE. Re-scope U0 to:
+  `<effect deps=[…]>` + the compile-time no-write rule (transitive write summary, fail-closed `E-EFFECT-WRITE-UNPROVEN`) + `reset-on=`
+  + write-request mount/baseline rules (SPEC §6.7.4 / §6.8.4 / §6.7.7.3, #1229). Keep: provenance order (F1), the `<each>` O(rows²)
+  leak fix (5eecc60ec — real, independent), iterative flush. Gap `g-bootstrap-effect-reset-on-owed`.
+- **#1214 opener keywords (`let <x/>`) — HELD.** SPEC text + bootstrap parser migration must land TOGETHER (the bootstrap slices parse
+  the §66.19 blocks). Do it after U0 lands (both touch parse.scrml). Gap `g-bootstrap-parser-opener-let-and-unchecked-opener-shapes`.
+- Then U1 (server boundary), the §55 validity surface + submit gate (`g-bootstrap-validated-form-fields-fail-open-no-surface-no-gate`
+  HIGH — the bootstrap emits `novalidate` with no surface/gate), §7.3.4 call checks (`g-bootstrap-call-arity-and-argument-type-checks-owed`).
+
+### 2. Security
+- **Protect round 9** — `g-protect-egress-round-9-residuals`: HIGH global `??=`/`||=`/`&&=` write-through (needs the session store
+  modelled as a compiler-owned helper, or one heap cell per top-level global name — modelling it naively made ex23 analysis 16 s);
+  HIGH element-returning built-ins (`[...m.values()][0](u)`, `.slice()[0](u)`, iterators) need built-in return models; raw-JS
+  reflective/prototype-hook forms; MED partial-arg `bind`; LOW per-function `this`.
+- dev-db residuals `g-dev-db-data-root-residuals`: MED (flogence-observed, RELAYED) a compiled tool run OUTSIDE any project created
+  its db in the CWD — reproduce first; LOW dangling-symlink containment escape; nits.
+
+### 3. TS-side (S447 ruling: tooling carve-out; impl#1 semantics frozen except security; rulings no longer generate impl#1 work)
+- dpa-063's "impl#1 parity" clause must be re-read under the new ruling (the codemod is tooling and stays).
+- `selfHostModules` tokenizer/bpp keys in api.js / pipeline-seam.ts have no in-repo caller after the v1 removal — an API narrowing call.
+
+## 🔭 DURABLE
+**A review gate catches what the author cannot see in their own fix — even a good fix.** Protect round 8 closed both root causes by
+mechanism and still introduced FOUR HIGH leaks through precision narrowings (element writes "not unnamed"; the coercion carve-out removing
+a safety net an `Object.create` getter had relied on). Every one was caught at review, none shipped. Narrowing a check is where leaks come
+back — the reviewer must count what each narrowing stops inspecting.
+
+**A runtime safety net is the signature of an under-designed axis (S322 test, witnessed).** Three rounds of `when` runaway tuning (run
+budget → depth → per-burst) each found a new shape. What ended it was a language ruling — effects may not write state — that makes the
+hazard impossible by construction. When tuning a runtime limit keeps escalating, ask what rule would make the limit unnecessary.
+
+**Re-surface before you rely on a terse accept.** bryan's "your recs on all of them" covered five items and may have been an accidental
+autocomplete. A one-line accept of a multi-item list is the weakest form of consent — re-surface load-bearing items individually,
+especially before a PR auto-merges on it.
+
+**Measure the claim, not the plan.** The autosave form a deep-dive proposed as "the home today" WIPED a record when actually run
+(`saveNote("")` raced the load). Real-product survey + one execution reversed it.
+
+## ⚑ MISSES (mine)
+1. ★★ Wrote `<let email … renders <input/>/>` — `renders` INSIDE an opener is not valid scrml; bryan reacted to my own malformed line.
+2. ★★ My S447 call-11 rec (sequence edits → `.=`) was wrong; I retracted it only when bryan asked to see the worst-case syntax.
+3. ★★ Leaned on "your recs on all of them" without noticing it bundled five unrelated items; it may have been an accidental accept.
+4. ★ #1215's test hardcoded a POSIX path → main windows CI red; Peter fixed it (#1220).
+5. ★ Reported `when` corpus usage from a grep that counted comments (examples 2 / flogence 1 → real: 0 / 0).
+6. ★ Wrote a merge log into the MAIN checkout's `.claude/` via a relative path from a worktree (removed immediately).
+7. ★ Pulled bryan into deep runtime-tuning detail on a construct with ~zero adopter usage before checking usage.
+
+## Landed S447 (squash-merged, cloud `gate` green)
+#1215 dev-db data root · #1216 §55 validity surface + submit gate · #1218 protect r7 · #1222 §7.3.4 call checks · #1225 inbox ·
+#1226 test temp root + dev-child orphans · #1227 dpa-063 termination · #1228 protect r8 · #1229 `<effect>`/`reset-on=`/3c ·
+#1230 retire frozen `compiler/self-host` v1 (22.4k lines).
+Parked: UFCS / `.=` (DD `ufcs-method-call-syntax-2026-10-01.md`, status historical). Held: #1214.
+
+## Worktrees
+Removed at wrap: S447 dispatch + review worktrees whose work landed. Retained: `agent-a7c65fefac89c3297` (U0 r3c — re-scope source).
+
+---
+
 # scrml — Session 448 (bryan · XPS-8950) — WRAP (moving to ASUS)
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. S448 = **successor to S446-bryan-xps**,

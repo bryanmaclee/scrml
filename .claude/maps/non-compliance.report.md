@@ -1,6 +1,12 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-10-01T21:45:00Z  commit: 78e4ddad
+# generated: 2026-10-02T19:15:50Z  commit: 6a592ed5c
+# ⛑ **S447 STAMP — `78e4ddad` -> `6a592ed5c`. 12 COMMITS, incremental refresh, main checkout on `wrap/s447` == `origin/main`.**
+# MAP-STAMP RULE at write time: `git log --oneline 78e4ddad..HEAD` -> 12; `bun scripts/state.ts --check` reported
+# `maps: 12 commits behind HEAD (watermark 78e4ddad, HEAD 6a592ed5c)` at pass start; `maps: current` after line-3 restamp.
+# Full PR list and source-relevant detail: see any map's own S447 stamp (identical text, broadcast to all 12 maps).
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S446 HEADER (stamp `78e4ddad`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S446 STAMP — `464c9ab4d` -> `78e4ddad`. 13 COMMITS, incremental refresh, branch `wrap/s446-peter`.**
 # MAP-STAMP RULE at write time: `git log --oneline 464c9ab4d..78e4ddad` -> 13; `bun scripts/state.ts --check` reports
 # `maps: 13 commits behind HEAD (watermark 464c9ab4d, HEAD 78e4ddad)` at pass start — confirms the window exactly.
@@ -196,7 +202,7 @@
 # a BARE `;`-sequence is `E-MULTI-STATEMENT-HANDLER` in every position (incl. `<each>`/engine/`<match>` sub-builds);
 # braceless `else` (`if (c) a; else b`) no longer runs `b` unconditionally; a dangling `else` after `};` is
 # `E-STMT-UNEXPECTED-TOKEN`. #1105 bootstrap slice M1 — `compiler/self-host-v2/` Core IR + walk + JS/HTML trees + printer +
-# checker; `slice-m1/` instance-record runtime + 68 tests; new CI step. #1104 — `compiler/self-host/` FROZEN (reference
+# checker; `slice-m1/` instance-record runtime + 68 tests; new CI step. #1104 — `compiler/self-host/` FROZEN [REMOVED S447 #1230] (reference
 # only). #1107/#1108 — SPEC §66 rulings (L6, L12, identities, O57-O60, O21/O43; reads through an un-narrowed handle are
 # `E-DECL-HANDLE-NOT-NARROWED`); §66 stays NOMINAL — impl#1 implements none of it.
 # ⏳ **NOT MAPPED — bootstrap M2 (#1109, `072741ca9`, parse / analyze / lower) LANDED ON `origin/main` MID-PASS, AFTER
@@ -299,6 +305,43 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S447 pass (this pass, stamp `6a592ed5c`)
+
+**Scope: INCREMENTAL** over `78e4ddad..6a592ed5c` (12 commits). In-scope docs changed in-window: `compiler/SPEC.md`
+(+1,052), `compiler/SPEC-INDEX.md`, `docs/FACTS.md`, `docs/PA-SCRML-PRIMER.md`, `docs/changelog.md`,
+`docs/known-gaps.md`, `docs/pr-reviews.md`, `hand-off.md`, `master-list.md`, `compiler/tests/self-host/README.md`,
+`compiler/self-host-v2/slice-codec/*` (no .md), and 18 `docs/changes/{s446-bootstrap-uc-codec,s446-spec-dpa063-termination,
+s447-protect-egress-r8,s447-retire-self-host-v1,s447-spec-effect-reset-on,s447-spec-ufcs,s447-spec-validity-surface,
+s448-test-tmp-root}/{BRIEF,progress}.md` dispatch artifacts. Out of scope: `handOffs/**`, `.claude/maps/**`, untracked
+`spotLightReply.txt`. Checked: 28. Compliant: 27. Non-compliant: 1 (minor, stale path). Uncertain: 0. Gates at
+`6a592ed5c`: `facts.ts --check` PASS · `regen-spec-index.ts --check` OK (72/72) · `state.ts --check` `maps: current`
+after restamp + WARN known-gaps heading/marker drift **55** (+1 vs 54 at the S446 stamp).
+
+| doc | verdict |
+|---|---|
+| `compiler/SPEC.md` (+1,052) | compliant except N-S447-1 — all 12 new §34 rows (`E-EFFECT-*` ×3, `E-RESET-ON-*` ×4, `E-STMT-LEADING-OPERATOR`, `E-VALIDITY-RESERVED-NAME`, `E-/W-WHEN-EFFECT-DEPRECATED`, `I-FORM-SUBMIT-GATED`) self-label Nominal / not yet emitted; grep confirms 0 `compiler/src` emitters, so the label is true |
+| `compiler/SPEC-INDEX.md` | compliant (`--check` OK) |
+| `docs/FACTS.md` | compliant (`--check` PASS) |
+| `docs/PA-SCRML-PRIMER.md` | compliant — S447 edits re-scope the BPP hook and the self-host references to current state |
+| `docs/known-gaps.md` | compliant for the window's edits — v1-locus gaps closed MOOT S447; counts HIGH 235 / MED 462 / LOW 215 match `@generated`; drift WARN 55 |
+| `docs/pr-reviews.md` | compliant for its content; **CURRENCY NOTE** — newest rows are #1207/#1209/#1212/#1213/#1217/#1219/#1220/#1221; no `@review` row yet for #1215/#1216/#1218/#1222/#1226/#1227/#1228/#1229/#1230 |
+| `compiler/tests/self-host/README.md` | compliant — records the S447 tree removal |
+| `hand-off.md` · `master-list.md` · `docs/changelog.md` | compliant (ledgers; master-list self-host lines updated by #1230) |
+| `docs/changes/*` (18) | compliant — dispatch artifacts, historical by design |
+
+### N-S447-1. `compiler/SPEC.md` §19.16.7 worked example cites a REMOVED file
+**Reason:** grep-mismatch. **Detail:** `SPEC.md:18094` — "The motivating host-code site (`compiler/self-host/pa.scrml`,
+`runPA`) was written as a `try … finally` …". That file was deleted by #1230; the retirement progress log updated
+`SPEC.md:18678` but missed this line. Non-normative motivation text; the rule itself is unaffected.
+**Suggested disposition:** update to match current — e.g. append "(retired S447; see git history)" or drop the path.
+
+### Carried — status at `6a592ed5c`
+| item | result |
+|---|---|
+| N-S446-1 `scripts/s34-census.ts` Windows path-separator bug | **NOT RE-PROBED ON WINDOWS** (this pass ran on Linux, where the split is reliable: IMPL-SITES 317 · STRUCK 35 · PINNED 377 · 881 rows). Script zero-diff in logic (only the removed dir dropped from SCAN) — defect presumed still live on win32 |
+| U-S445-1 / U-S445-2 / U-S445-3 / U-S444-1 | no related commit in-window — CARRIED, UNCHANGED (not re-probed) |
+| `docs/known-gaps.md:7483` (`bug-17h`, status=resolved) mentions `compiler/self-host/meta-checker.scrml` | historical text inside a resolved entry — not a finding |
 
 ## Summary — S446 pass (this pass, stamp `78e4ddad`)
 
@@ -655,7 +698,7 @@ predates #1106. `scanForTopLevelSemicolon` is still the scan primitive, so the s
 |---|---|
 | `compiler/SPEC.md` · `compiler/SPEC-INDEX.md` | compliant (authoritative; §66 amendments self-label NOMINAL and carry provenance; `--check` OK) |
 | `compiler/PIPELINE.md` | compliant for the window's edits (L19 row) |
-| `compiler/self-host/README.md` | compliant — FROZEN marker matches the #1104 ruling and `scripts/hybrid.ts` header |
+| `compiler/self-host/README.md` | REMOVED S447 (#1230) with the whole v1 tree — row is historical |
 | `compiler/self-host-v2/slice-m1/progress.md` | compliant (append-only dispatch log, by design) |
 | `docs/FACTS.md` | compliant (`--check` PASS) |
 | `docs/PA-SCRML-PRIMER.md` · `docs/tutorial.md` | compliant (N-S437-1/2/3 resolved) |
@@ -3956,7 +3999,7 @@ consecutive passes have recommended a deterministic map-currency gate; nothing h
 
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #spec-stale-table #stale-locus #symbol-not-line #self-contradicting-map #routing-hole #reproduce-dont-relay #docs-changes-are-evidence-not-spec #line-ref-drift #merge-base-not-tip #fail-open-predicate #w-dead-function-wrong-locus #usage-analyzer-is-not-the-locus #routing-omission #chunk-pruning-blind-spot #ternary-markup-giti033 #off-by-nine-line-citation #tree-shaken-claim-false #not-on-main-exclusion-rot #routing-gap #section-40-8 #e-control-flow-in-markup #spec-vs-code-drift #sum-never-executed #branch-vanished-mid-pass #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement #wrong-file-not-drifted-line #internally-contradictory-figure #one-sha-on-two-lines #zero-diff-is-not-correctness #generated-maps-regenerated #symbol-locus-not-line-locus #invariant-71 #invariant-72 #s440 #cf62b415 #u-s440-1 #u-s440-2
+#non-compliance #project-mapper #cleanup #scrml #spec-stale-table #stale-locus #symbol-not-line #self-contradicting-map #routing-hole #reproduce-dont-relay #docs-changes-are-evidence-not-spec #line-ref-drift #merge-base-not-tip #fail-open-predicate #w-dead-function-wrong-locus #usage-analyzer-is-not-the-locus #routing-omission #chunk-pruning-blind-spot #ternary-markup-giti033 #off-by-nine-line-citation #tree-shaken-claim-false #not-on-main-exclusion-rot #routing-gap #section-40-8 #e-control-flow-in-markup #spec-vs-code-drift #sum-never-executed #branch-vanished-mid-pass #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement #wrong-file-not-drifted-line #internally-contradictory-figure #one-sha-on-two-lines #zero-diff-is-not-correctness #generated-maps-regenerated #symbol-locus-not-line-locus #invariant-71 #invariant-72 #s440 #cf62b415 #u-s440-1 #u-s440-2 #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8
 #plan-block-arm-lift-two-callsites #leaf-predicate-not-segmenter #§12.2-per-function-scope
 #§12.6-wrong-module-set #spec-internal-contradiction #escalation-vs-async-set #gap-ledger-stale-open
 #three-gaps-open-but-landed #s248-no-op-dispatch-class #cross-operator-ledger-blindness

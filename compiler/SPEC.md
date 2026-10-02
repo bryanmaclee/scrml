@@ -18091,7 +18091,7 @@ unaffected.
 
 #### 19.16.7 Worked example
 
-The motivating host-code site (`compiler/self-host/pa.scrml`, `runPA`) was written as a `try … finally`,
+The motivating host-code site (`compiler/self-host/pa.scrml`, `runPA` — that v1 tree was retired S447, PR 1230; the example stands as motivation) was written as a `try … finally`,
 which scrml does not have. With `defer`:
 
 ```scrml
