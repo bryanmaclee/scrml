@@ -1109,6 +1109,106 @@ describe("analyzeProtectFlow — round 9: element-returning built-ins hand back 
   });
 });
 
+// Round 9 — a body is refused if the flow reports a leak OR a platform write.
+const refused = (js) => { const r = analyzeProtectFlow(js); return r.leaks.length > 0 || r.poisoned.length > 0; };
+
+describe("analyzeProtectFlow — round 9: Reflect.apply and call / apply / bind on a platform function", () => {
+  test("each served the hash on base (every shape executed first)", () => {
+    const F = "function (r) { s = r.passwordHash; }";
+    for (const body of [
+      `globalThis.arr20 = []; globalThis.arr20.push(${F}); Reflect.apply(globalThis.arr20[0], null, [u]); return { v: s };`,
+      `globalThis.arr21 = []; globalThis.arr21.push(${F}); const f = globalThis.arr21[0]; Reflect.apply(f, {}, [u]); return { v: s };`,
+      "const arr = [function (a) { s = a.u.passwordHash; }]; arr.u = u; arr.forEach(Function.prototype.call.bind(Function.prototype.call)); return { v: s };",
+    ]) {
+      expect([body, refused(r8("let s = ''; " + body))]).toEqual([body, true]);
+    }
+    expect(refused(r8("const has = Object.prototype.toString.call(u.id); return { has, id: u.id };"))).toBe(false);
+  });
+});
+
+describe("analyzeProtectFlow — round 9: the platform is not the program's to replace", () => {
+  test("writes into built-in prototypes, functions stored onto built-ins, and rebound built-in names are refused", () => {
+    for (const body of [
+      "Object.prototype.toString = function () { s = this.h; return ''; }; String({ h: u.passwordHash }); return { v: s };",
+      "Array.prototype.join = function () { s = this[0]; return ''; }; String([u.passwordHash]); return { v: s };",
+      "const P = Object.prototype; P.toString = function () { s = this.h; return ''; }; String({ h: u.passwordHash }); return { v: s };",
+      "Object.defineProperty(Object.prototype, 'toString', { value: function () { s = this.h; return ''; } }); String({ h: u.passwordHash }); return { v: s };",
+      "Object.assign(Array.prototype, { join() { s = this[0]; return ''; } }); String([u.passwordHash]); return { v: s };",
+      "({}).__proto__.toString = function () { s = this.h; return ''; }; String({ h: u.passwordHash }); return { v: s };",
+      "Object.getPrototypeOf({}).toString = function () { s = this.h; return ''; }; String({ h: u.passwordHash }); return { v: s };",
+      "({}).constructor.prototype.toString = function () { s = this.h; return ''; }; String({ h: u.passwordHash }); return { v: s };",
+      "({}).__proto__.leak = u.passwordHash; return { v: ({}).leak };",
+      "const ps = [Array.prototype]; ps[0].join = function () { s = this[0]; return ''; }; String([u.passwordHash]); return { v: s };",
+      "Object.setPrototypeOf(Array.prototype, { toJSON() { s = this[0]; return 1; } }); JSON.stringify([u.passwordHash]); return { v: s };",
+      "globalThis.String = function (f) { Reflect.apply(f, null, [u.passwordHash]); return ''; }; String(function (x) { s = x; return ''; }); return { v: s };",
+      "String = function (f) { f(u.passwordHash); return ''; }; String(function (x) { s = x; return ''; }); return { v: s };",
+      "Object.assign(globalThis, { String: function (f) { f(u.passwordHash); return ''; } }); String(function (x) { s = x; return ''; }); return { v: s };",
+      "globalThis['Str' + 'ing'] = function (f) { f(u.passwordHash); return ''; }; String(function (x) { s = x; return ''; }); return { v: s };",
+      "console.log = function (x) { s = x; }; console.log(u.passwordHash); return { v: s };",
+      "const J = JSON; J.stringify = function (x) { s = x.passwordHash; return ''; }; JSON.stringify(u); return { v: s };",
+    ]) {
+      expect([body, refused(r8("let s = ''; " + body))]).toEqual([body, true]);
+    }
+    const r = analyzeProtectFlow(r8("Object.prototype.toString = function () { return ''; }; return { id: u.id };"));
+    expect(r.poisoned).toHaveLength(1);
+    expect(r.poisoned[0].site).toContain("Object.prototype.toString");
+    for (const body of [
+      "const name = ({}).constructor.name; return { name, id: u.id };",
+      "const t = { kind: ({}).constructor.name }; t.extra = 1; return { t, id: u.id };",
+      "globalThis.myApp = { fmt: function (x) { return String(x); } }; return { v: globalThis.myApp.fmt(u.id) };",
+      "process.env.APP_MODE = 'x'; return { id: u.id };",
+    ]) {
+      expect([body, refused(r8(body))]).toEqual([body, false]);
+    }
+  });
+
+  test("the diagnostic names the write and the resolution", () => {
+    const errs = buildProtectFlowDiagnostics(r8("Array.prototype.join = function () { return ''; }; return { id: u.id };"), [], "app.server.js", () => null);
+    const e = errs.find((x) => x.code === "E-PROTECT-006");
+    expect(e).toBeDefined();
+    expect(e.message).toContain("Array.prototype.join");
+    expect(e.message).toMatch(/platform-owned object/);
+    expect(e.message).toMatch(/Resolution:/);
+  });
+});
+
+describe("analyzeProtectFlow — round 9: Object.fromEntries stores its functions under keys from data", () => {
+  test("a hook built by fromEntries is a hook", () => {
+    for (const body of [
+      "const o = Object.fromEntries([['toString', function () { s = this.h.passwordHash; return ''; }], ['h', u]]); String(o); return { v: s };",
+      "const o = Object.fromEntries([['valueOf', function () { s = this.h.passwordHash; return 0; }], ['h', u]]); Number(o); return { v: s };",
+      "const o = Object.fromEntries(new Map([['toString', function () { s = this.h; return ''; }], ['h', u.passwordHash]])); String(o); return { v: s };",
+    ]) {
+      expect([body, refused(r8("let s = ''; " + body))]).toEqual([body, true]);
+    }
+  });
+});
+
+describe("analyzeProtectFlow — round 9: bind with leading arguments shifts the parameters", () => {
+  test("a bound function prepends its bound arguments", () => {
+    for (const body of [
+      "const g = function (y, x) { s = x; }; const b = g.bind(null, 1); b(u.passwordHash); return { v: s };",
+      "globalThis.c3 = function (f) { f(u.passwordHash); }; const g = function (y, x) { s = x; }; globalThis.c3(g.bind(null, 1)); return { v: s };",
+      "const g = function (a, b, x) { s = x; }; const b1 = g.bind(null, 1); const b2 = b1.bind(null, 2); b2(u.passwordHash); return { v: s };",
+      "const g = function (y, x) { s = x; }; [u.passwordHash].forEach(g.bind(null, 0)); return { v: s };",
+      "let b = function (y, x) { s = x; }; b = b.bind(null, 1); b(u.passwordHash); return { v: s };",
+    ]) {
+      expect([body, refused(r8("let s = ''; " + body))]).toEqual([body, true]);
+    }
+    expect(refused(r8("const g = function (y, x) { return y + x; }; const b = g.bind(null, 1); return { v: b(u.id) };"))).toBe(false);
+  });
+});
+
+describe("analyzeProtectFlow — round 9: Array species", () => {
+  test("a species constructor receives the result's elements", () => {
+    for (const m of ["map((x) => x)", "filter(() => true)", "slice()", "concat([])"]) {
+      const body = `const cap = []; const a = [u.passwordHash]; a.constructor = { [Symbol.species]: function () { return cap; } }; a.${m}; return { v: cap };`;
+      expect([body, refused(r8(body))]).toEqual([body, true]);
+    }
+    expect(refused(r8("const a = [u.id, 2]; return { v: a.map((x) => x + 1).filter((x) => x > 1).slice(0, 1) };"))).toBe(false);
+  });
+});
+
 describe("sqlSkeleton", () => {
   test("holes replace interpolations (balanced braces), whitespace collapses", () => {
     expect(sqlSkeleton("SELECT *  FROM t\n WHERE a = ${ f({ x: 1 }) } AND b = ${y}"))
