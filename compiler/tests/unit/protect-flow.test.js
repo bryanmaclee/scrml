@@ -1172,6 +1172,24 @@ describe("analyzeProtectFlow — round 9: the platform is not the program's to r
   });
 });
 
+describe("analyzeProtectFlow — round 9: code evaluators and receiver-returning built-ins", () => {
+  test("Function / eval / a .constructor called by any route is refused; valueOf returns its receiver", () => {
+    const ST = "function (r) { this.h = r.passwordHash; }";
+    for (const body of [
+      `globalThis.box14 = { h: '', set: ${ST} }; const g = Function('return this')(); g.box14.set(u); return globalThis.box14;`,
+      `globalThis.box16 = { h: '', set: ${ST} }; const F = Function; const g = F('return this')(); g.box16.set(u); return globalThis.box16;`,
+      `globalThis.box18 = { h: '', set: ${ST} }; const g = ({}).constructor.constructor('return this')(); g.box18.set(u); return globalThis.box18;`,
+      `globalThis.box19 = { h: '', set: ${ST} }; const g = globalThis.eval('globalThis'); g.box19.set(u); return globalThis.box19;`,
+      `globalThis.box20 = { h: '', set: ${ST} }; const g = Function.call(null, 'return this')(); g.box20.set(u); return globalThis.box20;`,
+      "globalThis.valueOf().x = u.passwordHash; return { v: globalThis.x };",
+      "const e = process.env.valueOf(); e.K = u.passwordHash; return { v: process.env.K };",
+    ]) {
+      expect([body, refused(r8(body))]).toEqual([body, true]);
+    }
+    expect(refused(r8("const kind = ({}).constructor.name; return { kind, id: u.id };"))).toBe(false);
+  });
+});
+
 describe("analyzeProtectFlow — round 9: Object.fromEntries stores its functions under keys from data", () => {
   test("a hook built by fromEntries is a hook", () => {
     for (const body of [

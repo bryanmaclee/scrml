@@ -765,6 +765,8 @@ const PLATFORM_GLOBALS = new Set([
   "WritableStream", "TransformStream", "EventTarget", "Event", "AbortController", "AbortSignal", "WebSocket",
   "navigator",
 ]);
+/** The global names of the platform's code evaluators (round 9 — see `FlowAnalysis.evaluator`). */
+const CODE_EVALUATORS = new Set(["Function", "eval"]);
 /** Property keys that lead from a value to a PROTOTYPE or CONSTRUCTOR (an intrinsic link). */
 const INTRINSIC_LINK_KEYS = new Set(["prototype", "__proto__", "constructor"]);
 
@@ -877,6 +879,8 @@ interface Closure {
   host?: { source: string; imported: string };
   /** A function `bind` made with leading arguments (round 9 — see `bindFns`). */
   bound?: true;
+  /** The platform's code evaluators — `Function` / `eval` (round 9 — see `evaluator`). */
+  evaluator?: true;
 }
 
 /** One analysed instance of a function: a closure called with one argument signature. */
@@ -1288,7 +1292,7 @@ class FlowAnalysis {
     }
     if (!converged) this.saturated = true;
     if (process.env.SCRML_PROTECT_FLOW_DEBUG) {
-      console.error(`[protect-flow] modules=${this.mods.length} instances=${this.instanceList.length} closures=${this.closures.size} converged=${converged} passes=${passes} ms=${Math.round(performance.now() - this.t0)}`);
+      console.error(`[protect-flow] modules=${this.mods.length} instances=${this.instanceList.length} closures=${this.closures.size} converged=${converged} passes=${passes} globalFns=${[...this.globalFnsByName.values()].reduce((n, s) => n + s.size, 0)}named/${this.globalFnsUnnamed.size}unnamed/${this.globalFnsSlot.size}slot ms=${Math.round(performance.now() - this.t0)}`);
     }
     const leaks: ProtectFlowLeak[] = [];
     const seen = new Set<string>();
@@ -1640,7 +1644,27 @@ class FlowAnalysis {
     // Round 8: the value carries the global name it was read through (`Taint.gn`).
     const r: Taint = { ...t, refs: new Set([GLOBAL_CELL]), gn: new Set([name]) };
     delete r.gnAny;
+    if (CODE_EVALUATORS.has(name)) {
+      r.fns = new Set([...r.fns, this.evaluator]);
+      if (r.own) r.own = new Set([...r.own, this.evaluator]); // it IS the evaluator
+    }
     return r;
+  }
+
+  /**
+   * S449 round 9 — `Function` and `eval` run code built from a STRING: code the
+   * compile does not contain, with every global in reach (`Function("return
+   * this")()` IS `globalThis`, and its body may be anything). They are a function
+   * value of their own (one pseudo-closure), held by every read that may be one —
+   * the global names `Function` / `eval`, and any `.constructor` (a function's
+   * constructor is `Function`; an async / generator function's, its kin) — and
+   * CALLING it, by any route, is `E-PROTECT-006` in a `protect=` compile.
+   * (Round 8: `const g = Function("return this")(); g.k.set(u)` read `g` as
+   * clean — carried LOW since round 6.)
+   */
+  private evaluator: Closure = { cid: -2, evaluator: true };
+  private evaluated(fns: Set<Closure>, node: any, fn: Instance | null): void {
+    if (fns.has(this.evaluator)) this.poison(node, fn, "evaluates code built at runtime (`Function`, `eval`, or a `.constructor` that may be `Function`): the compiler cannot see what that code does with the values in reach");
   }
 
   /**
@@ -2509,6 +2533,8 @@ class FlowAnalysis {
     // and a field of a container that holds one may be it. (A field OF a
     // prototype — `Object.prototype.toString` — is a function, not a prototype.)
     if (o.platIn || (!dynamic && key !== null && INTRINSIC_LINK_KEYS.has(key))) r.plat = true;
+    // …and `.constructor` may be `Function`; `globalThis.eval` is `eval` (round 9 — see `evaluator`).
+    if (!dynamic && (key === "constructor" || (key !== null && CODE_EVALUATORS.has(key) && (o.gn || o.gnAny)))) r.fns.add(this.evaluator);
     return r;
   }
 
@@ -2550,6 +2576,7 @@ class FlowAnalysis {
         // literal strings array; a member tag runs with `this` = its object.
         const tagNode = node.tag?.type === "ChainExpression" ? node.tag.expression : node.tag;
         const tagT = this.evalExpr(node.tag, scope, fn);
+        this.evaluated(tagT.fns, node, fn); // `Function`…`` (round 9)
         const recv = tagNode?.type === "MemberExpression" ? this.evalExpr(tagNode.object, scope, fn) : null;
         const values = node.quasi.expressions.map((e: any) => this.evalExpr(e, scope, fn));
         const strings: Taint = { ...clean(), k: 1, len: new Map() };
@@ -2864,6 +2891,7 @@ class FlowAnalysis {
         continue;
       }
       if (c.rejecter) { this.addThrown(everyParam ?? args[0] ?? clean()); continue; }
+      if (c.evaluator) { this.evaluated(fns, node, fn); continue; }
       if (c.bound) {
         // A bound function calls its target with the bound arguments FIRST (round 9).
         // (A bound function re-bound into itself — `b = b.bind(null, 1)` read
@@ -3150,6 +3178,9 @@ class FlowAnalysis {
       // A method stored in an object the compile built (`api.f(x)`), or a
       // function value reached through a host namespace.
       const viaField = this.memberRead(recv, method, method === null, node, fn);
+      // Round 9: `x.constructor(…)`, `globalThis.eval(…)`, `Function.call(…)` — the code evaluators.
+      if (method === "constructor" || (method !== null && CODE_EVALUATORS.has(method))) this.evaluated(viaField.fns, node, fn);
+      if (method === "call" || method === "apply" || method === "bind") this.evaluated(ownOf(recv), node, fn);
       // A method reached from the GLOBAL heap (`Math.abs(…)`, `process.env.x.trim()`,
       // `const O = Object; O.keys(…)`) is a platform API — unless a function was
       // stored in a global under a name on its path (`globalThis.clamp(…)`), which
@@ -3290,6 +3321,7 @@ class FlowAnalysis {
 
     // --- plain calls -------------------------------------------------------------
     const ct = this.evalExpr(callee, scope, fn);
+    this.evaluated(ct.fns, node, fn);
     if (callee.type === "Identifier" && args.length > 0) this.recordParamCall(callee, join(...args), scope);
     const path = this.globalPath(callee, scope);
     // A GLOBAL callee may be a function something stored in the global heap
