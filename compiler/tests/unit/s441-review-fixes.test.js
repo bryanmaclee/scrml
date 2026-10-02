@@ -7,8 +7,9 @@ import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 
-const DIR = "/tmp/s441-review-fixes-fixtures";
+const DIR = join(tmpdir(), "s441-review-fixes-fixtures");
 mkdirSync(DIR, { recursive: true });
 let n = 0;
 function compile(source, parser) {

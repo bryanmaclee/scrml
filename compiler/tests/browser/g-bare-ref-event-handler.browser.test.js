@@ -34,6 +34,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // Delegable (onclick) + non-delegable (onmousedown) bare-ref forms, side-by-side
 // with the call form (onclick=bump()) and expr form (onmousedown=${(e)=>...}).
@@ -52,7 +53,7 @@ const SRC = `<program>
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-g-bare-ref-handler");
+const tmpRoot = resolve(tmpdir(), "scrml-g-bare-ref-handler");
 
 function compileCase(src = SRC) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

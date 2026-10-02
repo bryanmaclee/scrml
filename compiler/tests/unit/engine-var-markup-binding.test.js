@@ -34,6 +34,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { collectReactiveVarNames } from "../../src/codegen/reactive-deps.ts";
 import { compileScrml } from "../../src/api.js";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // ---------------------------------------------------------------------------
 // helpers — file-based pipeline compile (mirrors computed-delay.test.js)
@@ -42,7 +43,7 @@ import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 function compileToClientJs(source, suffix = "engine-var-markup") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });

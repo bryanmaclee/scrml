@@ -31,6 +31,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { chunkCellKey } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // Innermost: a component with its OWN `export fn` helper used in its body.
 const BADGE = `\${
@@ -76,7 +77,7 @@ function PAGE(loopForm) {
 `;
 }
 
-const tmpRoot = resolve("/tmp", "scrml-g-each-transitive");
+const tmpRoot = resolve(tmpdir(), "scrml-g-each-transitive");
 
 function compileCase(loopForm) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

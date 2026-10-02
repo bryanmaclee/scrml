@@ -26,6 +26,7 @@ import { compileScrml } from "../../src/api.js";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { resolve } from "path";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 function runUpToSYM(source, filePath = "msg-codegen.scrml") {
   const bs = splitBlocks(filePath, source);
@@ -76,7 +77,7 @@ function emitClient(source) {
 // at markup-attribute handler sites must be observed through the real compile).
 function compileFullClient(source, baseName = "msg-route") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const tmpDir = resolve("/tmp", "scrml-msg-route", `case-${uniq}`);
+  const tmpDir = resolve(tmpdir(), "scrml-msg-route", `case-${uniq}`);
   const tmpInput = resolve(tmpDir, `${baseName}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });

@@ -46,6 +46,7 @@ import {
 } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // Minimal Tier-1-`<each>`-only repro (BRIEF.md). No Tier-0 `${for…lift}`, so
 // the ONLY `reconciliation` trigger is the each-block. `<empty>` exercises the
@@ -62,7 +63,7 @@ type Contact:struct = { id: string, name: string }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-bug57");
+const tmpRoot = resolve(tmpdir(), "scrml-bug57");
 
 /**
  * Compile `source` via the real compile path (write:true) and return the

@@ -24,6 +24,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // The brief reproducer: per-item class: binding + event handler + ${} interp,
 // with a toggle() that flips the clicked item's `done` flag in @items.
@@ -44,7 +45,7 @@ function toggle(id) {
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-each-l2");
+const tmpRoot = resolve(tmpdir(), "scrml-each-l2");
 
 function compileToOutputs(source, baseName = "each-l2") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

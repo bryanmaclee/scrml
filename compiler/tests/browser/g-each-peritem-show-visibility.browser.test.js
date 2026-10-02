@@ -25,9 +25,10 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 if (!globalThis.document) GlobalRegistrator.register();
-const TMP_ROOT = resolve("/tmp", "scrml-each-peritem-show");
+const TMP_ROOT = resolve(tmpdir(), "scrml-each-peritem-show");
 
 beforeEach(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();

@@ -20,8 +20,9 @@ import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 
-const DIR = "/tmp/s441-review-r5-fixtures";
+const DIR = join(tmpdir(), "s441-review-r5-fixtures");
 mkdirSync(DIR, { recursive: true });
 writeFileSync(join(DIR, "a.js"), "export const a = 1; export default 2;\n");
 let n = 0;

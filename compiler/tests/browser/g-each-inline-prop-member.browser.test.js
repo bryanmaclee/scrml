@@ -39,6 +39,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { chunkCellKey } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // Transitive inner component — a status pill whose ROOT class carries a ${}
 // interp referencing its OWN prop `status` (the case-c shape: g-inlined-
@@ -103,7 +104,7 @@ const PAGE_EACH = `<program>
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-g-each-inline-prop-member");
+const tmpRoot = resolve(tmpdir(), "scrml-g-each-inline-prop-member");
 
 function compileCase(pageSrc) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

@@ -43,10 +43,11 @@ import { writeFileSync, readFileSync, existsSync, mkdirSync, rmSync, readdirSync
 import { compileScrml } from "../../src/api.js";
 import { RUNTIME_CHUNK_ORDER } from "../../src/codegen/runtime-chunks.ts";
 import { isEscalationServerOnlyModule } from "../../src/route-inference.ts";
+import { tmpdir } from "os";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
-const tmpRoot = resolve("/tmp", "scrml-stdlib-client-registry");
+const tmpRoot = resolve(tmpdir(), "scrml-stdlib-client-registry");
 
 /** Compile one source string; return its errors + the emitted client/runtime text. */
 function compile(source, baseName) {

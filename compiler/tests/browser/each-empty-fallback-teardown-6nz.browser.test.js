@@ -28,6 +28,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // The 6nz repro: <each in=@items key=__index__> with an <empty> fallback.
 const REPRO_SRC = `<program>
@@ -90,7 +91,7 @@ type Group:struct = { id: string, name: string, tags: string[] }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-each-empty-fallback-6nz");
+const tmpRoot = resolve(tmpdir(), "scrml-each-empty-fallback-6nz");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

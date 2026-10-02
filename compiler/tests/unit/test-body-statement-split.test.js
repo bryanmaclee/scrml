@@ -38,6 +38,7 @@ import { buildAST } from "../../src/ast-builder.js";
 import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 
 // ---------------------------------------------------------------------------
@@ -258,7 +259,7 @@ describe("test-body §6.5: string literals preserved across all token-joiners", 
 
 describe("test-body §7: emitted JS loads + passes under bun:test", () => {
   test("compileScrml on multi-let test body emits valid runnable JS", () => {
-    const dir = `/tmp/scrml-s77-stmt-split-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const dir = join(tmpdir(), `scrml-s77-stmt-split-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
     mkdirSync(dir, { recursive: true });
     const appPath = join(dir, "app.scrml");
     writeFileSync(

@@ -25,9 +25,10 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { writeFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 
-const TMP_ROOT = "/tmp/scrml-reexport-tests";
+const TMP_ROOT = join(tmpdir(), "scrml-reexport-tests");
 
 function setupDir(name) {
   const dir = join(TMP_ROOT, name);
