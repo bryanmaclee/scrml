@@ -560,3 +560,31 @@ describe("S447 round 7 — no false positives", () => {
     expect(JSON.parse(body)).toEqual({ id: 1, name: "ada", label: "hi ada" });
   });
 });
+
+// ---------------------------------------------------------------------------
+// S449 round 9 — the §14.8.9 flow models the compiler-owned session store by
+// SUMMARY, recognizing its declaration by EXACT text (session-store-emit.ts). If
+// the emitter drifted from that constant the flow would silently fall back to
+// walking the store (sound, but examples/23's analysis goes from ~1 s to ~100 s),
+// so pin the seam: what the emitter writes IS the recognized text.
+// ---------------------------------------------------------------------------
+import { SESSION_STORE_SQLITE_TEXT, SESSION_STORE_MEMORY_TEXT } from "../../src/codegen/session-store-emit.ts";
+
+describe("S449 round 9 — the session store the emitter writes is the one the flow recognizes", () => {
+  const serverJsOf = (src) => {
+    const { result } = compileMem(src);
+    return [...(result.outputs?.values?.() ?? [])].map((o) => o?.serverJs ?? "").join("\n");
+  };
+  test("a session-writing app emits the SQLite store text verbatim", () => {
+    const js = serverJsOf(prog(fnBody([ONE, 'session.set("seen", 1)', "return { id: u.id }"])));
+    expect(js).toContain(SESSION_STORE_SQLITE_TEXT);
+  });
+  test("a session-reading app emits the in-memory store text verbatim", () => {
+    const js = serverJsOf(prog(fnBody([ONE, "return { id: u.id, me: session.userId }"])));
+    expect(js).toContain(SESSION_STORE_MEMORY_TEXT);
+  });
+  test("a session write of a protected column is E-PROTECT-006 (the store is in the global heap)", () => {
+    const { codes } = compileMem(prog(fnBody([ONE, 'session.set("pw", u.passwordHash)', "return { id: u.id }"])));
+    expect(codes).toContain("E-PROTECT-006");
+  });
+});

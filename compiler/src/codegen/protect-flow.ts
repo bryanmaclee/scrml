@@ -95,6 +95,7 @@
 // @ts-ignore — acorn ships its own types but the compiler imports it untyped elsewhere.
 import * as acorn from "acorn";
 import { CGError } from "./errors.ts";
+import { SESSION_STORE_SQLITE_TEXT, SESSION_STORE_MEMORY_TEXT } from "./session-store-emit.ts";
 
 /** Label used for a row whose SQL origins could not be resolved (strip-all). */
 export const ALL_COLUMNS_LABEL = "*";
@@ -720,7 +721,28 @@ const CALLBACK_METHODS = new Set([
 /** Methods that write their arguments INTO the receiver. */
 const MUTATING_METHODS = new Set(["push", "unshift", "splice", "set", "add", "fill", "append", "update", "write"]);
 /** Methods that return a single element of the receiver. */
-const ELEMENT_METHODS = new Set(["at", "pop", "shift", "get", "charAt"]);
+const ELEMENT_METHODS = new Set(["at", "pop", "shift", "get", "charAt", "deref"]);
+/**
+ * S449 round 9 — ECMAScript built-in methods whose result HOLDS the receiver's
+ * ELEMENTS (and, for the combining ones, their arguments' elements): the
+ * iterators (`values`, `keys`, `entries`, an iterator's `next` → `{ value }`,
+ * the iterator helpers `toArray` / `drop` / `take`), the copies (`slice`,
+ * `concat`, `flat`, `toReversed`, `toSorted`, `toSpliced`, `with`) and the `Set`
+ * algebra (`union`, `intersection`, `difference`, `symmetricDifference`). Round 7
+ * modelled every method it had no entry for as returning the receiver's DATA
+ * only — its function values dropped — so a function kept in a collection walked
+ * out through any of these and was called unseen: `globalThis.arr.slice()[0](u)`,
+ * `[...globalThis.m.values()][0](u)`, `m.values().next().value(u)` (global AND
+ * local receivers — measured on base, served the hash). A method reached by a
+ * COMPUTED key (`x[Symbol.iterator]()`) may be any of these (fail closed).
+ */
+const ELEMENT_RESULT_METHODS = new Set([
+  "values", "keys", "entries", "next", "toArray", "drop", "take",
+  "slice", "concat", "flat", "toReversed", "toSorted", "toSpliced", "with",
+  "union", "intersection", "difference", "symmetricDifference",
+]);
+/** Built-in methods that RETURN THE RECEIVER itself (`Object.prototype.valueOf`, the in-place array reorders). */
+const RECEIVER_RESULT_METHODS = new Set(["valueOf", "reverse", "copyWithin"]);
 /**
  * Methods whose result is a predicate / position / comparison / digest over the
  * receiver — a DERIVED value of independent identity (§14.8.9 bound). NOT
@@ -1717,6 +1739,94 @@ class FlowAnalysis {
   /** Set while an element-position write (a MUTATING method's) is recorded. */
   private slotWrite = false;
 
+  // ---- THE COMPILER-OWNED SESSION STORE, BY SUMMARY (S449 round 9) ----------
+  // Every server module that serves a session declares `_scrml_session_store`
+  // (`session-store-emit.ts`): an object kept in the GLOBAL heap
+  // (`globalThis.__scrml_session_stores[path]`, or the `globalThis
+  // .__scrml_session_store` Map). Walked, it is faithful but ruinous: the store
+  // is ONE object shared by every module, so its alias class unites every
+  // module's session machinery — and, through the element model of `get`, every
+  // request and record that touches it — into one class (examples/23: 1.6 s →
+  // 100 s at round 9; one class of 3,429 cells and 323 functions). Separating the
+  // global heap by top-level name (round 9 direction b) does not help: the store
+  // is genuinely one object, and the session class alone was 3,161 cells / 300
+  // functions / 85 s (measured). So, like the `_scrml_protect_*` helpers, it is
+  // modelled — recognized by its EXACT emitted text (an author who writes the same
+  // text gets the same code, so the summary stays exact), and only its own three
+  // calls are summarized:
+  //   - `.set(k, v)` — the SQLite variant stores `JSON.stringify(v)`: Symbol-keyed
+  //     column markers do not survive, so a row is stored with every unrevealed
+  //     column NAKED (the memory variant keeps `v` as is). The store is in the
+  //     global heap, so what it holds is written there (the global-store rule:
+  //     protected data outside a row is `E-PROTECT-006`).
+  //   - `.get(k)` — what any `.set` stored (SQLite: as JSON — fresh, naked), or
+  //     (memory) an element of the global heap's data.
+  //   - `.delete(k)` — nothing.
+  // The global slot may hold an AUTHOR's object instead (written there first, or
+  // its methods overwritten): each call also applies every function the global
+  // heap holds when the arguments matter, and joins what those functions return —
+  // the ordinary global-receiver rule, with names unknown (fail closed). Any OTHER
+  // use of the binding (a field write, passing it on) sees it as what it is: a
+  // value read from the global heap.
+  private sessionStores = new Map<string, "sqlite" | "memory">();
+  private sessionStored: Taint = clean();
+
+  /** A module-scope `const _scrml_session_store = …` the compiler emitted: bind it (see above). */
+  private sessionStoreDecl(node: any, scope: Scope): boolean {
+    if (node.declarations.length !== 1 || node.declarations[0].id?.type !== "Identifier") return false;
+    const text = this.curMod!.src.slice(node.start, node.end);
+    const variant = text === SESSION_STORE_SQLITE_TEXT ? "sqlite" : text === SESSION_STORE_MEMORY_TEXT ? "memory" : null;
+    if (variant === null) return false;
+    const name = node.declarations[0].id.name;
+    this.sessionStores.set(`${scope.id}:${name}`, variant);
+    const held = variant === "sqlite" ? elemOf(this.readGlobal("__scrml_session_stores")) : this.readGlobal("__scrml_session_store");
+    this.mergeBinding(name, scope, held);
+    return true;
+  }
+
+  /** `<store>.get / .set / .delete` on a recognized session-store binding: its variant, else null. */
+  private sessionStoreOf(m: any, scope: Scope): "sqlite" | "memory" | null {
+    if (m.computed || m.object?.type !== "Identifier" || m.property?.type !== "Identifier") return null;
+    if (m.property.name !== "get" && m.property.name !== "set" && m.property.name !== "delete") return null;
+    const s = this.resolve(m.object.name, scope);
+    if (!s || s.parent !== null) return null;
+    return this.sessionStores.get(`${s.id}:${m.object.name}`) ?? null;
+  }
+
+  private sessionStoreCall(variant: "sqlite" | "memory", m: any, args: Taint[], node: any, fn: Instance | null): Taint {
+    const recv = this.getBinding(m.object.name, fn?.scope ?? this.curMod!.scope);
+    // An author's object may sit in the slot (fail closed — see above).
+    let own = clean();
+    const cands = this.globalCallMatters(args) ? this.globalCandidates(new Set(), null) : new Set<Closure>();
+    if (cands.size > 0) {
+      this.recordThis(cands, recv);
+      own = this.applyFns(cands, args, undefined, node, fn);
+    }
+    const authored = join(own, this.globalFnRetFor(null));
+    const method = m.property.name;
+    if (method === "set") {
+      const v = args[1] ?? clean();
+      // JSON keeps no function, no marker: every unrevealed column of a row comes back naked.
+      const stored = variant === "sqlite"
+        ? { ...clean(), scalar: everything(v, this.site(node, fn)), deep: everything(v, this.site(node, fn)) }
+        : anyDepth(dataOnly(v));
+      const next = join(this.sessionStored, stored);
+      if (taintKey(next) !== taintKey(this.sessionStored)) { this.sessionStored = next; this.changed = true; }
+      this.writeCell(GLOBAL_CELL, anyDepth(containerOf(stored)));
+      return authored;
+    }
+    if (method === "get") {
+      if (variant === "sqlite") {
+        const got: Taint = { ...clean(), scalar: naked(this.sessionStored), deep: naked(this.sessionStored), k: 2 };
+        return join(got, authored);
+      }
+      const el = elemOf(dataOnly(this.readGlobal("__scrml_session_store")));
+      delete el.refs;
+      return join(el, anyDepth(dataOnly(this.sessionStored)), authored);
+    }
+    return authored;
+  }
+
   private getBinding(name: string, scope: Scope, depth = 0): Taint {
     const s = this.resolve(name, scope);
     if (!s) return this.readGlobal(name);
@@ -1870,6 +1980,7 @@ class FlowAnalysis {
     if (!node) return;
     switch (node.type) {
       case "VariableDeclaration":
+        if (scope.parent === null && this.sessionStoreDecl(node, scope)) return;
         for (const d of node.declarations) {
           const v = d.init ? this.evalExpr(d.init, scope, fn) : clean();
           this.bindPattern(d.id, v, scope, fn);
@@ -2442,18 +2553,20 @@ class FlowAnalysis {
         // Round 8: `a ??= b` / `a ||= b` / `a &&= b` evaluates to `a`'s CURRENT value
         // when it does not assign — `let a = u; (a ||= 1).passwordHash` and
         // `(t.h ??= 1).passwordHash` served the hash on base (measured over HTTP);
-        // it read as `b` alone. ⚑ For a left operand in the GLOBAL heap the value
-        // keeps `a`'s data and functions but not its alias cells: joining them
-        // makes the compiler's own `(globalThis.__scrml_session_store ??= new
-        // Map())` — copied into every server module — one alias class with the
-        // global heap, and examples/23's analysis went from ~1 s to 16 s
-        // (measured). A write THROUGH such a result is therefore not seen as a
-        // global store — the pre-existing state, filed in
-        // g-protect-egress-round-9-residuals.
+        // it read as `b` alone. S449 round 9: the current value keeps its ALIAS
+        // CELLS, wherever it lives — it IS the object the target holds. Round 8
+        // dropped them for a left operand in the global heap, so `const x =
+        // (globalThis.k ??= {}); x.h = u.passwordHash; return { v: globalThis.k.h }`
+        // (and `||=`, `&&=`, an aliased / nested / computed-key / `process` target,
+        // an array `push`, a `Map` `set`) served the hash over all three sinks
+        // (measured on base). Round 8 dropped them because the compiler's own
+        // session-store declaration — `(globalThis.__scrml_session_stores ??= {})
+        // [path] ??= (…)()`, in every server module — then made every module's
+        // session machinery one alias class (examples/23: 1.6 s → 100 s, measured
+        // again at round 9). That declaration is now modelled by summary and never
+        // reaches this rule (`sessionStoreDecl`), so the rule is exact everywhere.
         if (node.operator === "||=" || node.operator === "&&=" || node.operator === "??=") {
-          let lv = this.evalExpr(node.left, scope, fn);
-          if (this.isGlobalValue(lv)) { lv = { ...lv }; delete lv.refs; }
-          return join(lv, rv);
+          return join(this.evalExpr(node.left, scope, fn), rv);
         }
         // r8b: `x = (target = v)` — the value IS the object the target now holds,
         // so it is in the target's alias class: `const x = (globalThis.k = {});
@@ -2709,6 +2822,8 @@ class FlowAnalysis {
     if (callee.type === "MemberExpression" || (callee.type === "ChainExpression" && callee.expression.type === "MemberExpression")) {
       const m = callee.type === "ChainExpression" ? callee.expression : callee;
       const path = this.globalPath(m, scope);
+      const store = node.type === "CallExpression" ? this.sessionStoreOf(m, scope) : null;
+      if (store !== null) return this.sessionStoreCall(store, m, args, node, fn);
       if (path === "Response.json") {
         this.sink(args[0] ?? clean(), fn, "serializer-json");
         for (const a of args.slice(1)) this.sink(a, fn, "serializer");
@@ -2863,8 +2978,11 @@ class FlowAnalysis {
       if (method !== null && CALLBACK_METHODS.has(method)) return join(own, this.callbackMethod(method, recv, args, node, fn));
 
       if (method !== null && MUTATING_METHODS.has(method)) {
-        // `m.set(k, v)` stores the KEY too (N1).
-        const written = method === "set" ? join(keyOnly(args[0] ?? clean()), args[1] ?? clean()) : method === "splice" ? join(...args.slice(2)) : join(...args);
+        // `m.set(k, v)` stores the KEY too (N1) — and a `Map` holds the key VALUE
+        // itself, not its string form: `keys()`, `entries()` and iteration hand back
+        // the very object / function (S449 round 9: `m.set(f, 1); for (const [g] of
+        // m) g(u)` served the hash — the key was kept as labels only).
+        const written = method === "set" ? join(args[0] ?? clean(), args[1] ?? clean()) : method === "splice" ? join(...args.slice(2)) : join(...args);
         // An ELEMENT position (round 8 — see `globalFnsSlot`).
         const prevSlot = this.slotWrite;
         this.slotWrite = true;
@@ -2878,6 +2996,18 @@ class FlowAnalysis {
       if (recvGlobal || !this.hasCallable(viaField)) r = join(r, this.opaqueCallbacks(recvGlobal ? dataOnly(recv) : recv, args, node, fn));
       // L4 — reflection reached from the global heap may remove a row's marker.
       if (recvGlobal) this.reflectionMayRemoveMarkers(args, node, fn, scope);
+
+      // S449 round 9 — an element-returning built-in hands back the receiver's
+      // ELEMENTS, functions and alias cells included (an element of a global
+      // collection IS a global-heap value, reached by no name — `elemOf` sets
+      // `gnAny`), plus what its arguments place in the result. A computed method
+      // key may name any method (fail closed). See `ELEMENT_RESULT_METHODS`.
+      if (method === null || ELEMENT_RESULT_METHODS.has(method)) {
+        const placed = args.map((a) => join(a, elemOf(a)));
+        r = join(r, anyDepth(containerOf(join(elemOf(recv), ...placed))));
+      }
+      // …and one that returns the receiver itself IS the receiver.
+      if (method !== null && RECEIVER_RESULT_METHODS.has(method)) r = join(r, recv);
 
       // A predicate / position method is DERIVED only on a string-like receiver.
       // An OBJECT receiver carrying protected data (`new Box(h).test()`, a
@@ -2970,6 +3100,13 @@ class FlowAnalysis {
       if (b) return LANGUAGE_COERCIONS.has(path) ? b : join(b, this.opaqueCallbacks(null, args, node, fn));
       // L4 — an unmodelled global (reflection) handed a row may remove a marker.
       if (!DERIVER_CALLS.has(path)) this.reflectionMayRemoveMarkers(args, node, fn, fn?.scope ?? this.curMod!.scope);
+      // S449 round 9 — an unmodelled platform CONSTRUCTOR may keep what it is
+      // handed (`new WeakRef(o)`, `new WeakSet([o])`, an error's `cause`): the new
+      // object holds its arguments — functions and alias cells included — and
+      // hands them back (`w.deref().m(u)` served the hash: the result held none).
+      if (node.type === "NewExpression" && !DERIVER_CALLS.has(path)) {
+        return join(this.unknownCall(path, args, node, fn), lenDefault(containerOf(join(...args))));
+      }
     }
     return this.unknownCall(path, args, node, fn);
   }

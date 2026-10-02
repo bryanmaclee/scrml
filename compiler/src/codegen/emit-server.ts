@@ -42,6 +42,7 @@ import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
 import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgress, findAuthoredResponseConstruction, SERVER_PROTECT_HELPER, type ProtectContext, type ScanSliceKind } from "./protect-egress.ts";
 import { registerProtectModule } from "./protect-flow.ts";
+import { SESSION_STORE_SQLITE_LINES, SESSION_STORE_MEMORY_LINE } from "./session-store-emit.ts";
 import {
   buildTenantContext,
   resolveTenantScoping,
@@ -2921,31 +2922,13 @@ export function generateServerJs(
         `(import.meta && import.meta.dir) ? import.meta.dir : ".", ` +
         `${JSON.stringify(_sessionStoreDistAscent)}, ".scrml-sessions.db");`,
       );
-      lines.push("const _scrml_session_store = (((globalThis.__scrml_session_stores ??= {}))[_scrml_session_db_path] ??= (() => {");
-      lines.push("  const _db = new _ScrmlSessionDatabase(_scrml_session_db_path);");
-      lines.push('  _db.run("CREATE TABLE IF NOT EXISTS kv_store (namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, expires_at INTEGER, PRIMARY KEY (namespace, key))");');
-      lines.push('  const _ns = "session";');
-      lines.push('  const _stmtGet = _db.prepare("SELECT value, expires_at FROM kv_store WHERE namespace = ? AND key = ?");');
-      lines.push('  const _stmtSet = _db.prepare("INSERT OR REPLACE INTO kv_store (namespace, key, value, expires_at) VALUES (?, ?, ?, ?)");');
-      lines.push('  const _stmtDel = _db.prepare("DELETE FROM kv_store WHERE namespace = ? AND key = ?");');
-      lines.push("  return {");
-      lines.push("    get(key) {");
-      lines.push("      const row = _stmtGet.get(_ns, key);");
-      lines.push("      if (!row) return null;");
-      lines.push("      if (row.expires_at !== null && row.expires_at <= Date.now()) { _stmtDel.run(_ns, key); return null; }");
-      lines.push("      try { return JSON.parse(row.value); } catch { return row.value; }");
-      lines.push("    },");
-      lines.push("    set(key, value, ttl) {");
-      lines.push("      const expiresAt = ttl ? Date.now() + ttl * 1000 : null;");
-      lines.push("      _stmtSet.run(_ns, key, JSON.stringify(value), expiresAt);");
-      lines.push("    },");
-      lines.push("    delete(key) { _stmtDel.run(_ns, key); },");
-      lines.push("  };");
-      lines.push("})());");
+      // The store declaration is ONE shared constant: the §14.8.9 provenance flow
+      // recognizes it by its exact text and models it by summary (session-store-emit.ts).
+      for (const l of SESSION_STORE_SQLITE_LINES) lines.push(l);
     } else {
       // S239 FIX 8 — no `session.set`/`.destroy` in this app: keep the prior
       // in-memory read-only store (byte-identical to the pre-i29e read-side infra).
-      lines.push("const _scrml_session_store = (globalThis.__scrml_session_store ??= new Map());");
+      lines.push(SESSION_STORE_MEMORY_LINE);
     }
     lines.push(`const _scrml_session_max_age = ${_sessionMaxAgeSec};`);
     lines.push("");
