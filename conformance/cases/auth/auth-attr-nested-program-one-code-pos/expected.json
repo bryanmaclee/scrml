@@ -1,0 +1,20 @@
+{
+  "id": "auth-attr-nested-program-one-code-pos",
+  "description": "§4.12.2 / §52.13.2 (S449 ruling item 4) — `auth=` on a NESTED `<program>` is E-PROGRAM-NESTED-AUTH whatever its value, and that is its ONE diagnostic: an unrecognized value there does not also raise E-AUTH-ATTR-INVALID or W-ATTR-002 (no stacked messages for one declaration).",
+  "language-version": "1.0",
+  "spec": "§4.12.2, §52.13.2",
+  "source-test": "compiler/tests/integration/auth-attr-invalid-or-dynamic-value.test.js",
+  "rationale": "§34 E-PROGRAM-NESTED-AUTH: 'Fires for any value (a literal, an interpolation, or bare)'. §52.13.2 as amended S449 excludes the nested `<program>`. Ruling: user-voice-scrml.md S449 \"RULED — 'your recs.'\" item 4 — 'Unrecognized / non-literal `auth=` (incl. `\"\"`) = (a): compile error; amend §52.13.2 (supersedes its W-ATTR-002 + \"no auth gate\" SHALL).'",
+  "expect": {
+    "codes": [
+      "E-PROGRAM-NESTED-AUTH"
+    ],
+    "notCodes": [
+      "W-ATTR-002"
+    ],
+    "codeCounts": {
+      "E-PROGRAM-NESTED-AUTH": 1,
+      "E-AUTH-ATTR-INVALID": 0
+    }
+  }
+}

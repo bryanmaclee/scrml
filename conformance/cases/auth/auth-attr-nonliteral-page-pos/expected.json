@@ -1,12 +1,22 @@
 {
   "id": "auth-attr-nonliteral-page-pos",
-  "description": "§52.13 (S449) — a NON-literal `<page auth=${mode}>` declares nothing (§40.2: 'a non-literal value declares nothing'); it now emits W-ATTR-002 saying so. Before S449 it compiled with no diagnostic at all.",
+  "description": "§52.13.2 (S449 ruling item 4) — a NON-literal `<page auth=${mode}>` is E-AUTH-ATTR-INVALID: `auth=` must be one of three quoted literals known at compile time. History: before #1234 it compiled with no diagnostic (the page declared nothing); #1234 made it W-ATTR-002; the ruling makes it an error. No W-ATTR-002 beside it.",
   "language-version": "1.0",
-  "spec": "§52.13, §52.13.2, §40.2",
+  "spec": "§52.13, §52.13.2",
   "source-test": "compiler/tests/integration/auth-attr-invalid-or-dynamic-value.test.js",
-  "rationale": "§52.13: `auth=` 'accepts exactly three literal values'. §40.2 member pages: 'an unrecognized literal … or a non-literal value declares nothing, and the page inherits'. §52.13.2: silent acceptance of an attribute value with no compile-time effect is a P0 finding.",
+  "rationale": "§52.13.2 as amended S449: an `auth=` on a `<page>` or `<program>` that is not exactly `\"required\"`, `\"optional\"` or `\"none\"` — including a `${…}` expression — SHALL be E-AUTH-ATTR-INVALID. Ruling: user-voice-scrml.md S449 \"RULED — 'your recs.'\" item 4 — 'Unrecognized / non-literal `auth=` (incl. `\"\"`) = (a): compile error; amend §52.13.2 (supersedes its W-ATTR-002 + \"no auth gate\" SHALL).'",
   "expect": {
-    "codes": ["W-ATTR-002"],
-    "severity": { "W-ATTR-002": "warning" }
+    "codes": [
+      "E-AUTH-ATTR-INVALID"
+    ],
+    "notCodes": [
+      "W-ATTR-002"
+    ],
+    "severity": {
+      "E-AUTH-ATTR-INVALID": "error"
+    },
+    "codeCounts": {
+      "E-AUTH-ATTR-INVALID": 1
+    }
   }
 }

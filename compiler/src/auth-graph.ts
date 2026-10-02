@@ -219,7 +219,8 @@ export function runAuthGraph(
 // ---------------------------------------------------------------------------
 
 /** The `<program auth=>` literals that gate (§52.13): `"required"` and `"optional"`.
- *  `"none"` and every unrecognized literal (W-ATTR-002) apply no gate. */
+ *  `"none"` applies no gate. An unrecognized literal is E-AUTH-ATTR-INVALID (S449,
+ *  §52.13.2 — the build is refused); it is not treated as a gate here either. */
 const PROGRAM_GATING_AUTH: ReadonlySet<string> = new Set(["required", "optional"]);
 
 /**

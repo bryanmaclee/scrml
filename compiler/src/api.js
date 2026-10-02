@@ -2181,7 +2181,9 @@ function _compileScrmlImpl(options = {}) {
   // VP-3 — attribute interpolation: `${...}` in non-interpolating attribute
   //        values (e.g. `<channel name=>`) becomes E-CHANNEL-007.
   // VP-1 — attribute allowlist: unknown attributes on scrml-special elements
-  //        (or `auth="role:X"`) emit W-ATTR-001 / W-ATTR-002 (warnings).
+  //        (or an unrecognized value) emit W-ATTR-001 / W-ATTR-002 (warnings); an
+  //        `auth=` on <program>/<page> outside the three literals is the ERROR
+  //        E-AUTH-ATTR-INVALID (§52.13.2, S449).
   // Run all three on the post-CE AST set so downstream stages see consistent
   // diagnostics. Errors fail the run; warnings continue.
   const postCEResult = stage("VP-2", () => seams.pick("VP-2", runPostCEInvariant)({ files: ceResults }));

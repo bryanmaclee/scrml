@@ -6777,8 +6777,10 @@ export function runRI(input: RIInput): RIOutput {
     : (rootCandidates.map(cfgOf).find((c: any) => c && c.auth === "required") ?? null);
   // S443 round 3 (review F1): only a RECOGNIZED literal (§52.13's three values) is an
   // auth declaration. `auth="Required"`, `"requird"`, `" required"`, `"off"`,
-  // `auth=${…}` / `auth=@x` declare nothing (W-ATTR-002 says so) and the page
-  // inherits — fail closed, like §40.2's unknown csrf= literal resolving to "auto".
+  // `auth=${…}` / `auth=@x` declare nothing and the page inherits — fail closed, like
+  // §40.2's unknown csrf= literal resolving to "auto". Since S449 (ruling item 4) every
+  // such value is ALSO E-AUTH-ATTR-INVALID (VP-1), which refuses the build; this
+  // inheritance is the defense-in-depth floor under that error, not a supported shape.
   const RECOGNIZED_AUTH = new Set(["required", "optional", "none"]);
   // An unregistered member page of the application that declares no recognized
   // `auth=` of its own — the unit 8c gates (and, when nothing is inherited, the

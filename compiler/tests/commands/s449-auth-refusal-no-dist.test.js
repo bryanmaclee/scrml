@@ -57,6 +57,29 @@ function saveNote(body: string) {
     expect(existsSync(p.dist)).toBe(false);
   });
 
+  for (const attr of [' auth="Required"', ' auth=""', " auth", ' auth="role:admin"']) {
+    test(`E-AUTH-ATTR-INVALID — <program${attr}>`, () => {
+      const p = project(`<program${attr}>\n<p>home</p>\n</program>\n`);
+      const r = build(p);
+      expect(r.code).not.toBe(0);
+      expect(r.out).toContain("E-AUTH-ATTR-INVALID");
+      expect(r.out).toContain("No files were written");
+      expect(existsSync(p.dist)).toBe(false);
+    });
+  }
+
+  test('E-AUTH-ATTR-INVALID — <page auth="Required"> in an application', () => {
+    const root = join(TMP, `p${n++}`);
+    const src = join(root, "src");
+    mkdirSync(join(src, "pages"), { recursive: true });
+    writeFileSync(join(src, "app.scrml"), `<program auth="required">\n<p>home</p>\n</program>\n`);
+    writeFileSync(join(src, "pages", "login.scrml"), `<page auth="Required">\n<p>login</p>\n</page>\n`);
+    const r = build({ root, src, dist: join(root, "dist") });
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("E-AUTH-ATTR-INVALID");
+    expect(existsSync(join(root, "dist"))).toBe(false);
+  });
+
   test("the migrated `session.userId` form builds", () => {
     const p = project(`<program db="./notes.db" auth="required">
 function saveNote(body: string) {

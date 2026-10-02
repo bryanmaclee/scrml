@@ -1,29 +1,27 @@
 /**
- * §52.13 — `auth=` accepts exactly three literal values (S449,
- * g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth, governed half).
+ * §52.13.2 — an `auth=` on `<program>` / `<page>` that is not exactly `"required"`,
+ * `"optional"` or `"none"` is E-AUTH-ATTR-INVALID (S449 ruling item 4 —
+ * ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 4: "Unrecognized /
+ * non-literal `auth=` (incl. `""`) = (a): compile error; amend §52.13.2 (supersedes
+ * its W-ATTR-002 + 'no auth gate' SHALL)").
  *
- * Governing:
- *   §52.13   "The `auth=` attribute on `<page>`, `<program>`, and `<channel>` accepts
- *            exactly three literal values".
- *   §52.13.2 "Any literal value not in the recognized set SHALL emit `W-ATTR-002`." …
- *            "On a `<program>`, an unrecognized value applies no auth gate at all — the
- *            program and its pages are public" … "silent acceptance of attribute values
- *            that have no compile-time effect is itself a P0 finding".
- *   §52.13   Login-page requirement: "When `auth="required"` is declared … the compiler
- *            SHALL emit `W-AUTH-LOGIN-MISSING`".
+ * Closes g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth and
+ * g-auth-attr-empty-string-is-silent-and-public. Before: an unrecognized literal
+ * warned (W-ATTR-002) and a non-literal / `""` said nothing, and the program compiled
+ * PUBLIC (measured S449 on 2d6d8cd43: `<program auth="Required">`, anonymous GET
+ * /app.html -> 200). History: #1234 (S449, governed half) made the non-literals warn
+ * and stopped the login lints treating an unrecognized literal as a gate; this file
+ * pinned that and now pins the ruled error.
  *
  * Pinned:
- *   1. a NON-literal `auth=` (`${mode}`, `@mode`, bare `auth`) on `<program>` / `<page>`
- *      now emits W-ATTR-002 stating the real effect (before: NO diagnostic at all);
- *   2. an unrecognized literal (`"Required"`, `" required"`) on `<program>` no longer
- *      drives W-AUTH-LOGIN-MISSING / I-AUTH-REDIRECT-UNRESOLVED — those treated it AS
- *      an auth gate while no auth check was emitted;
- *   3. controls: `auth="required"` still emits the auth check AND the login lint;
- *      a non-literal `<channel auth=>` gets no new warning (it already gates).
- *
- * NOT pinned here (RULINGS NEEDED, docs/changes/s449-auth-session-fail-open/progress.md):
- * whether such a value should be a compile ERROR — §52.13.2 currently ratifies the
- * warning + public-program behaviour.
+ *   1. every non-legal value on `<program>` / `<page>` — wrong case, padded, `""`,
+ *      `"role:admin"`, `"true"`, bare `auth`, `${…}`, `@x` — is ONE E-AUTH-ATTR-INVALID
+ *      (severity error) whose message lists the three legal values; no W-ATTR-002 beside it;
+ *   2. the login lints still do not treat it as a gate (no W-AUTH-LOGIN-MISSING /
+ *      I-AUTH-REDIRECT-UNRESOLVED);
+ *   3. a NESTED `<program>`'s `auth=` keeps E-PROGRAM-NESTED-AUTH as its one code;
+ *   4. controls: the three legal values compile; `<channel>` keeps W-ATTR-002 (any
+ *      `auth=` there gates the upgrade) and a non-literal there stays silent.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -50,13 +48,13 @@ function compileFiles(files) {
   }
   const outDir = join(root, "dist");
   mkdirSync(outDir, { recursive: true });
-  const r = compileScrml({ inputFiles: inputs, write: true, outputDir: outDir });
+  const r = compileScrml({ inputFiles: inputs, write: true, outputDir: outDir, log: () => {} });
   const diags = [...(r.errors ?? []), ...(r.warnings ?? [])];
   const serverJs = readdirSync(outDir, { recursive: true })
     .filter((f) => String(f).endsWith(".server.js"))
     .map((f) => readFileSync(join(outDir, String(f)), "utf-8"))
     .join("\n");
-  return { diags, codes: diags.map((d) => d.code), serverJs };
+  return { diags, codes: diags.map((d) => d.code), errors: r.errors ?? [], serverJs };
 }
 
 const program = (attr, prelude = "", cell = "") => ({
@@ -74,66 +72,101 @@ function add(body) {
 });
 
 const AUTH_CHECK = "_scrml_auth_check(_scrml_req)";
+const LEGAL = '`auth="required"`, `auth="optional"`, `auth="none"`';
 
-describe("§52.13 — a non-literal <program auth=> is no longer silent", () => {
+function expectOneInvalid(c, fragment) {
+  const e = c.errors.filter((d) => d.code === "E-AUTH-ATTR-INVALID");
+  expect(e.length).toBe(1);
+  expect(e[0].severity).toBe("error");
+  expect(e[0].message).toContain(LEGAL);
+  if (fragment) expect(e[0].message).toContain(fragment);
+  expect(c.codes).not.toContain("W-ATTR-002");
+  expect(c.codes).not.toContain("W-AUTH-LOGIN-MISSING");
+  expect(c.codes).not.toContain("I-AUTH-REDIRECT-UNRESOLVED");
+  return e[0];
+}
+
+describe("§52.13.2 — <program auth=…> that is not one of the three literals", () => {
   const cases = [
-    ["auth=${mode}", program(" auth=${mode}", '${ const mode = "required" }\n')],
-    ["auth=@mode", program(" auth=@mode", "", '<mode> = "required"\n')],
-    ["bare auth", program(" auth")],
+    ['auth="Required"', program(' auth="Required"'), 'Did you mean `auth="required"`?'],
+    ['auth=" required"', program(' auth=" required"'), 'Did you mean `auth="required"`?'],
+    ['auth="role:admin"', program(' auth="role:admin"'), "Role-based access"],
+    ['auth="true"', program(' auth="true"'), '`"true"`'],
+    ['auth=""', program(' auth=""'), "the empty string"],
+    ["bare auth", program(" auth"), "it has no value"],
+    ["auth=${mode}", program(" auth=${mode}", '${ const mode = "required" }\n'), "`${…}` expression"],
+    ["auth=@mode", program(" auth=@mode", "", '<mode> = "required"\n'), "reactive/variable reference"],
   ];
-  for (const [label, files] of cases) {
-    test(`${label} → W-ATTR-002 naming the real effect; still no auth check (unchanged)`, () => {
+  for (const [label, files, fragment] of cases) {
+    test(`${label} → E-AUTH-ATTR-INVALID`, () => {
       const c = compileFiles(files);
-      const w = c.diags.filter((d) => d.code === "W-ATTR-002");
-      expect(w.length).toBe(1);
-      expect(w[0].message).toContain("not a string literal");
-      expect(w[0].message).toContain("applies NO auth gate");
-      expect(c.serverJs).not.toContain(AUTH_CHECK);
-      expect(c.codes).not.toContain("W-AUTH-LOGIN-MISSING");
+      const e = expectOneInvalid(c, fragment);
+      expect(e.message).toContain("`<program>`");
     });
   }
-});
 
-describe("§52.13.2 — an unrecognized <program auth=> literal is not treated as a gate by the lints", () => {
-  for (const lit of ["Required", " required"]) {
-    test(`auth="${lit}" → W-ATTR-002 only; no W-AUTH-LOGIN-MISSING / I-AUTH-REDIRECT-UNRESOLVED`, () => {
+  for (const lit of ["required", "optional", "none"]) {
+    test(`control: auth="${lit}" compiles without E-AUTH-ATTR-INVALID`, () => {
       const c = compileFiles(program(` auth="${lit}"`));
-      expect(c.codes).toContain("W-ATTR-002");
-      expect(c.codes).not.toContain("W-AUTH-LOGIN-MISSING");
-      expect(c.codes).not.toContain("I-AUTH-REDIRECT-UNRESOLVED");
-      expect(c.serverJs).not.toContain(AUTH_CHECK);
+      expect(c.codes).not.toContain("E-AUTH-ATTR-INVALID");
+      expect(c.codes).not.toContain("W-ATTR-002");
+      if (lit === "required") {
+        expect(c.serverJs).toContain(AUTH_CHECK);
+        expect(c.codes).toContain("W-AUTH-LOGIN-MISSING");
+      }
     });
   }
-
-  test('control: auth="required" keeps the auth check AND the login lint', () => {
-    const c = compileFiles(program(' auth="required"'));
-    expect(c.serverJs).toContain(AUTH_CHECK);
-    expect(c.codes).toContain("W-AUTH-LOGIN-MISSING");
-    expect(c.codes).not.toContain("W-ATTR-002");
-  });
 });
 
-describe("§52.13 — the <page> forms", () => {
+describe("§52.13.2 — the <page> forms", () => {
   const app = { "app.scrml": "<program><p>home</p></program>\n" };
   const page = (open, prelude = "") => ({
     ...app,
     "pages/secret.scrml": `${prelude}${open}\n<p>secret-marker</p>\n</page>\n`,
   });
-  test("<page auth=${mode}> → W-ATTR-002 (page declares nothing)", () => {
-    const c = compileFiles(page("<page auth=${mode}>", '${ const mode = "required" }\n'));
-    const w = c.diags.filter((d) => d.code === "W-ATTR-002");
-    expect(w.length).toBe(1);
-    expect(w[0].message).toContain("not a string literal");
-    expect(w[0].message).toContain("not an auth declaration");
-  });
-  test('control: <page auth="required"> → no W-ATTR-002', () => {
+  const cases = [
+    ['<page auth="Required">', page('<page auth="Required">')],
+    ['<page auth="">', page('<page auth="">')],
+    ["<page auth>", page("<page auth>")],
+    ["<page auth=${mode}>", page("<page auth=${mode}>", '${ const mode = "required" }\n')],
+    ['<page auth="role:driver">', page('<page auth="role:driver">')],
+  ];
+  for (const [label, files] of cases) {
+    test(`${label} → E-AUTH-ATTR-INVALID`, () => {
+      const c = compileFiles(files);
+      const e = expectOneInvalid(c);
+      expect(e.message).toContain("`<page>`");
+    });
+  }
+  test('control: <page auth="required"> → no E-AUTH-ATTR-INVALID', () => {
     const c = compileFiles(page('<page auth="required">'));
+    expect(c.codes).not.toContain("E-AUTH-ATTR-INVALID");
     expect(c.codes).not.toContain("W-ATTR-002");
   });
 });
 
-describe("<channel> — a non-literal auth= gets no new warning (it already gates the upgrade)", () => {
-  test("<channel name=\"c\" auth=${m}> emits no W-ATTR-002", () => {
+describe("a nested <program>'s auth= keeps E-PROGRAM-NESTED-AUTH as its only code", () => {
+  for (const attr of [' auth="Bogus"', " auth", ' auth="required"']) {
+    test(`<program name="w"${attr}> inside <program auth="required">`, () => {
+      const c = compileFiles({
+        "app.scrml": `<program auth="required">\n<program name="w"${attr}>\n<p>w</p>\n</program>\n<p>home</p>\n</program>\n`,
+      });
+      expect(c.codes).toContain("E-PROGRAM-NESTED-AUTH");
+      expect(c.codes).not.toContain("E-AUTH-ATTR-INVALID");
+      expect(c.codes).not.toContain("W-ATTR-002");
+    });
+  }
+});
+
+describe("<channel> is unchanged — any auth= there gates the upgrade", () => {
+  test('<channel auth="Bogus"> keeps W-ATTR-002, no E-AUTH-ATTR-INVALID', () => {
+    const c = compileFiles({
+      "app.scrml": `<program>\n<channel name="c" auth="Bogus">\n</>\n<p>x</p>\n</program>\n`,
+    });
+    expect(c.codes).toContain("W-ATTR-002");
+    expect(c.codes).not.toContain("E-AUTH-ATTR-INVALID");
+  });
+  test("<channel name=\"c\" auth=${m}> emits nothing new", () => {
     const c = compileFiles({
       "app.scrml": `\${ const m = "required" }
 <program>
@@ -144,5 +177,6 @@ describe("<channel> — a non-literal auth= gets no new warning (it already gate
 `,
     });
     expect(c.codes).not.toContain("W-ATTR-002");
+    expect(c.codes).not.toContain("E-AUTH-ATTR-INVALID");
   });
 });

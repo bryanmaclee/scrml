@@ -1,0 +1,15 @@
+{
+  "id": "auth-attr-legal-values-neg",
+  "description": "§52.13 (S449 ruling item 4) — the clean control: the three legal literals on `<program>`, `<page>` and `<channel>` raise neither E-AUTH-ATTR-INVALID nor W-ATTR-002.",
+  "language-version": "1.0",
+  "spec": "§52.13",
+  "source-test": "compiler/tests/integration/auth-attr-invalid-or-dynamic-value.test.js",
+  "rationale": "§52.13: `auth=` accepts exactly `\"required\"`, `\"optional\"`, `\"none\"`. Ruling: user-voice-scrml.md S449 \"RULED — 'your recs.'\" item 4 — 'Unrecognized / non-literal `auth=` (incl. `\"\"`) = (a): compile error; amend §52.13.2 (supersedes its W-ATTR-002 + \"no auth gate\" SHALL).'",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-AUTH-ATTR-INVALID",
+      "W-ATTR-002"
+    ]
+  }
+}
