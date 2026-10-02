@@ -6,7 +6,7 @@
  * then replaces the `/` at those source positions with `</>`.
  *
  * Usage: bun scripts/migrate-closers.js [--dry-run] [dir1 dir2 ...]
- * Default dirs: samples/ examples/ benchmarks/ compiler/self-host/ stdlib/
+ * Default dirs: samples/ examples/ benchmarks/ stdlib/
  */
 
 import { splitBlocks } from "../compiler/src/block-splitter.js";
@@ -18,7 +18,7 @@ const dryRun = args.includes("--dry-run");
 const dirs = args.filter(a => !a.startsWith("--"));
 
 if (dirs.length === 0) {
-  dirs.push("samples", "examples", "benchmarks", "compiler/self-host", "stdlib");
+  dirs.push("samples", "examples", "benchmarks", "stdlib");
 }
 
 function findScrmlFiles(dir) {

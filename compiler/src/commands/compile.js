@@ -7,7 +7,7 @@
  * Pretty error output with colors and source locations.
  */
 
-import { statSync, watch, readFileSync, existsSync, writeFileSync } from "fs";
+import { statSync, watch, readFileSync, writeFileSync } from "fs";
 import { resolve, dirname, join, relative, basename } from "path";
 import { fileURLToPath } from "url";
 import { compileScrml, scanDirectory } from "../api.js";
@@ -71,7 +71,7 @@ Options:
                           runs in a browser but esm is EXPERIMENTAL/opt-in — classic
                           is the only conformance-tested path. Emitted-JS shape
                           only; adopter source unchanged.
-  --self-host             Use compiled scrml modules (requires build-self-host.js)
+  --self-host             Use the compiled scrml module-resolver + meta-checker (requires build-self-host.js)
   --parser=scrml-native   Opt-in native-parser routing (M5-swap C2). When set,
                           the per-file parse is driven by the native parser
                           (nativeParseFile) instead of the live BS+TAB path;
@@ -770,8 +770,14 @@ function runOnce(opts, selfHostModules = null) {
 
 /**
  * Dynamically load compiled self-hosted scrml modules from dist/self-host/.
- * Returns an object with { resolveModules, runMetaChecker } from the compiled JS.
+ * Returns an object with { resolveModules, runMetaChecker } from the compiled JS
+ * (sources: stdlib/compiler/{module-resolver,meta-checker}.scrml).
  * Throws if the compiled modules do not exist (run build-self-host.js first).
+ *
+ * S447: the frozen v1 self-host (compiler/self-host/ — bs/bpp/tab/ast/pa/ri/ts/
+ * dg/cg) was retired, so the optional per-stage swap-ins it supplied are gone.
+ * The bootstrap compiler (compiler/self-host-v2/) is exercised through
+ * scripts/hybrid.ts, not through this flag.
  *
  * @param {string} compilerSrcDir — absolute path to compiler/src/
  * @returns {Promise<{resolveModules: Function, runMetaChecker: Function}>}
@@ -781,13 +787,8 @@ async function loadSelfHostModules(compilerSrcDir) {
   const distSelfHostDir = resolve(compilerSrcDir, "..", "dist", "self-host");
   const moduleResolverPath = join(distSelfHostDir, "module-resolver.js");
   const metaCheckerPath = join(distSelfHostDir, "meta-checker.js");
-  // Try both names: tokenizer.js (expected) and tab.js (build script output name)
-  let tokenizerPath = join(distSelfHostDir, "tokenizer.js");
-  if (!existsSync(tokenizerPath)) {
-    tokenizerPath = join(distSelfHostDir, "tab.js");
-  }
 
-  let moduleResolverMod, metaCheckerMod, tokenizerMod;
+  let moduleResolverMod, metaCheckerMod;
   try {
     moduleResolverMod = await import(moduleResolverPath);
   } catch (err) {
@@ -828,62 +829,7 @@ async function loadSelfHostModules(compilerSrcDir) {
     );
   }
 
-  // Tokenizer — optional (only loaded if compiled module exists)
-  let tokenizer = null;
-  try {
-    tokenizerMod = await import(tokenizerPath);
-    if (typeof tokenizerMod.tokenizeBlock === "function") {
-      tokenizer = {
-        tokenizeBlock: tokenizerMod.tokenizeBlock,
-        tokenizeAttributes: tokenizerMod.tokenizeAttributes,
-        tokenizeLogic: tokenizerMod.tokenizeLogic,
-        tokenizeSQL: tokenizerMod.tokenizeSQL,
-        tokenizeCSS: tokenizerMod.tokenizeCSS,
-        tokenizeError: tokenizerMod.tokenizeError,
-        tokenizePassthrough: tokenizerMod.tokenizePassthrough,
-      };
-    }
-  } catch {
-    // Tokenizer self-host module not available — use JS original
-  }
-
-  // Load remaining self-hosted stages (optional — each loaded if available)
-  const result = { resolveModules, runMetaChecker, tokenizer };
-
-  const optionalModules = [
-    { file: "bs.js", key: "splitBlocks", exportName: "splitBlocks" },
-    { file: "ast.js", key: "buildAST", exportName: "buildAST" },
-    { file: "bpp.js", key: "bpp", loader: (mod) => ({
-        splitBareExprStatements: mod.splitBareExprStatements,
-        splitMergedStatements: mod.splitMergedStatements,
-        isLeakedComment: mod.isLeakedComment,
-        stripLeakedComments: mod.stripLeakedComments,
-      })
-    },
-    { file: "pa.js", key: "runPA", exportName: "runPA" },
-    { file: "ri.js", key: "runRI", exportName: "runRI" },
-    { file: "ts.js", key: "runTS", exportName: "runTS" },
-    { file: "dg.js", key: "runDG", exportName: "runDG" },
-    { file: "cg.js", key: "runCG", exportName: "runCG" },
-  ];
-
-  for (const { file, key, exportName, loader } of optionalModules) {
-    const modPath = join(distSelfHostDir, file);
-    try {
-      if (existsSync(modPath)) {
-        const mod = await import(modPath);
-        if (loader) {
-          result[key] = loader(mod);
-        } else if (typeof mod[exportName] === "function") {
-          result[key] = mod[exportName];
-        }
-      }
-    } catch {
-      // Optional module not available — use JS original
-    }
-  }
-
-  return result;
+  return { resolveModules, runMetaChecker };
 }
 
 // ---------------------------------------------------------------------------
@@ -912,7 +858,7 @@ export async function runCompile(args) {
     console.error("  --watch, -w             Watch mode (recompile on changes)");
     console.error("  --convert-legacy-css    Convert <style> blocks to #{...}");
     console.error("  --mode <mode>           Output mode: browser (default) or library");
-    console.error("  --self-host             Use compiled scrml modules for all pipeline stages");
+    console.error("  --self-host             Use the compiled scrml module-resolver + meta-checker (stdlib/compiler/)");
     console.error("                          Requires: bun run compiler/scripts/build-self-host.js");
     process.exit(1);
   }
@@ -924,15 +870,6 @@ export async function runCompile(args) {
     try {
       selfHostModules = await loadSelfHostModules(compilerSrcDir);
       const loadedModules = ["module-resolver", "meta-checker"];
-      if (selfHostModules.tokenizer) loadedModules.push("tokenizer");
-      if (selfHostModules.splitBlocks) loadedModules.push("block-splitter");
-      if (selfHostModules.buildAST) loadedModules.push("ast-builder");
-      if (selfHostModules.bpp) loadedModules.push("body-pre-parser");
-      if (selfHostModules.runPA) loadedModules.push("protect-analyzer");
-      if (selfHostModules.runRI) loadedModules.push("route-inference");
-      if (selfHostModules.runTS) loadedModules.push("type-system");
-      if (selfHostModules.runDG) loadedModules.push("dependency-graph");
-      if (selfHostModules.runCG) loadedModules.push("codegen");
       console.log(c.dim(`self-host: loaded ${loadedModules.length} compiled scrml modules (${loadedModules.join(", ")})`));
     } catch (err) {
       console.error(c.red("error:") + ` ${err.message}`);
