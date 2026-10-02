@@ -11088,16 +11088,58 @@ halves, and a conformant implementation SHALL enforce both:
      results still carry their arguments' provenance. (Treating them as opaque applied every
      function reachable from the argument at every coercion: a chain of 240 objects, each with a
      `toString` returning `String(this.prev)`, took 13.7 s against 0.47 s before round 7 —
-     review-measured.) A function the PROGRAM stores in the global heap under one of these names
-     (`globalThis.String = …`) is not the coercion: it is applied as any global function is.
+     review-measured.) ~~A function the PROGRAM stores in the global heap under one of these names
+     (`globalThis.String = …`) is not the coercion: it is applied as any global function is.~~
+     *(round-8 wording, SUPERSEDED S449 round 9: rebinding one of these names is refused — see
+     "The platform is not the program's" below. Applied "as any global function", `globalThis.String
+     = function (f) { Reflect.apply(f, null, [h]) }` still served the hash on base: the carve-out is
+     sound only while the names denote the platform's coercions, so a program that rebinds them is
+     not analysed.)*
      > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 5 (conditional; reviewer: SOUND)
+   - **The platform is not the program's (S449 round 9).** The language and the compiler's own
+     runtime call platform built-ins at request time with values the analysis never sees — a
+     coercion calls the INHERITED `toString` / `valueOf`, `String([…])` calls
+     `Array.prototype.join`, `JSON.stringify` an inherited `toJSON`, and the §14.8.9 redactor reads
+     every row (protected columns still on it) through `Object.keys`, `Array.isArray`, `Set`, ….
+     In a compile that declares `protect=` columns, therefore, each of the following SHALL be
+     `E-PROTECT-006`, naming the write: a write INTO a built-in prototype or constructor — however
+     it is reached (`Object.prototype.x = …`, `const P = Array.prototype; P.join = …`,
+     `({}).__proto__.x = …`, `Object.getPrototypeOf(o).x = …`, `({}).constructor.prototype.x = …`,
+     `Object.defineProperty` / `Object.assign` / `Reflect.set` onto one, `Object.setPrototypeOf` of
+     one); a FUNCTION stored onto a platform object named by its path or by a binding of one
+     (`JSON.stringify = f`, `const J = JSON; J.stringify = f`, `console.log = f`); rebinding a
+     platform global name (`globalThis.String = f`, `String = f`, `Object.assign(globalThis, {
+     String: f })`, or a global write under a key the compiler cannot read and whose static prefix
+     no platform name starts with); and calling a code evaluator — `Function`, `eval`, or the
+     `.constructor` of a value that may be a function — by any route (`Function("return this")()`
+     IS `globalThis`, and its body may be anything). The PROGRAM's own prototypes are not the
+     platform's and SHALL compile: the `.prototype` of a function the program made (scrml has no
+     `class` — `const Pt = function (x) { this.x = x }; Pt.prototype.norm = function () { … }` IS
+     how a type is built), and the `.__proto__` / `.constructor` / `Object.getPrototypeOf` of an
+     object whose prototype the program set (`new Pt()`, `Object.create(p)` / a literal's
+     `__proto__: p` with `p` its own). (S449 r9 fix round: round 9 refused all of these — review
+     measured.) (Measured on
+     base, each served the hash: `Object.prototype.toString = function () { s = this.h }; String({
+     h })`, `Array.prototype.join = …; String([h])`, `({}).__proto__.leak = h; return ({}).leak`,
+     `JSON.stringify = function (x) { s = x.passwordHash }; JSON.stringify(u)`, the `globalThis.String`
+     form above, and a `Function("return this")()` alias of the global heap.) Measured corpus impact
+     at round 9: zero such sites in every emitted server module of the corpus.
    - **Global stores.** Every name the compile does not bind (`globalThis`, `process`, `Bun`, …) and
      `import.meta` denote ONE global heap shared by every server module and every request. A value
      whose provenance includes a `protect=` column, written into it outside a descriptor-bearing row
      (`globalThis.x = h`, `process.env.X = h`, through an alias of a global object), IS an egress —
      `E-PROTECT-006` — because other requests and code the compiler cannot see can read it; and
      what any code writes there is what any read of it carries. A row written there keeps its
-     descriptor and is stripped wherever it later leaves. (Measured before round 6: a value stored in
+     descriptor and is stripped wherever it later leaves — except through the compiler's own durable
+     session store (§20.5), which keeps `JSON.stringify` of what it is given: a row stored by
+     `session.set` comes back without its markers, so every unrevealed column it carries is written
+     there outside a row (S449 round 9). An implementation MAY analyse that store by a summary of
+     its own `get` / `set` / `delete` instead of walking it, but ONLY for a compile in which the
+     program reaches the store solely through those three calls on its binding; any other use —
+     the binding as a value, a member write or computed member on it, the registry on the global
+     object, or the global object itself used as a value — SHALL make the store analysed as any
+     global object is. (S449 re-review: a summary applied regardless served the hash three ways —
+     a copied record, an alias route, an overwritten `get`.) (Measured before round 6: a value stored in
      `globalThis` / `process.env` by one server function and returned by another served the hash.)
      A FUNCTION kept in a global is analysed at the calls that name it (`globalThis.clamp(…)`,
      `clamp(…)`) — with the call's arguments whenever they carry protected data OR hand it a
@@ -11316,7 +11358,9 @@ named-codes-land-with-impl precedent — Rule 4):
 - **`E-PROTECT-006`** (Error) — a value whose provenance includes a `protect=` column reaches a
   compiler-emitted client-egress sink outside a descriptor-bearing row (the S441 amendment above),
   or is written into a global store (S443 round 6). Names the column, the extraction site and the
-  egress. Also raised, fail-closed, when the emitted server module cannot be analysed.
+  egress. Also raised, fail-closed, when the emitted server module cannot be analysed — including
+  a program that replaces part of the platform or evaluates code built at runtime (S449 round 9:
+  "The platform is not the program's"), where it names the write instead of a column.
 - **`E-PROTECT-004`** (Error) — a protected-origin column co-occurs, in one function body, with a
   compiler-unanalyzable egress (a `_{}` foreign block or an `asIs` value) where strip-by-origin
   cannot be guaranteed, and it is not `reveal`-declassified for every protected output column of
