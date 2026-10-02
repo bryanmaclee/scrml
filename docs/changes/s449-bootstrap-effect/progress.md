@@ -250,3 +250,16 @@ condition, each hole is closed in the compile-time rule):
   `each/when-changes-in-row-body-no-write` (a non-writing row `when` that sets `data-ran` on `#beacon`; the same body
   at program top level PASSES on impl#1 — verified with a throwaway probe case, deleted — so the row case fails on
   impl#1 for the drop alone). `g-when-changes-in-each-row-body-dropped` entry updated. Conformance 1212/1239 + 27 xfail.
+
+## 2026-10-02 — landing round (re-review at e1e75a5af: LAND-WITH-NITS)
+
+- Merged `origin/main` (a107940a0); the only conflict, `docs/FACTS.md`, was regenerated with `facts.ts --write`
+  (`--check` PASS), not hand-resolved.
+- Filed, NOT fixed (`docs/known-gaps.md`, prov=review:S449-effect-rereview): `g-bootstrap-render-writer-call-hangs`
+  (MED — a render self-write used to overflow the stack at mount; with the `flushing` guard it now hangs; fix
+  direction = compile-time refusal of writer calls in render positions, tied to bryan's initializer / formula /
+  interpolation fork; landed with this filed because the bootstrap is not adopter-shipped),
+  `g-bootstrap-c11-ignores-function-values` (LOW), `g-bootstrap-flush-leftovers-after-throw` (LOW, pre-existing).
+  §0 Open counts: MED 462 → 463, LOW 215 → 217.
+- NIT: `each/when-changes-in-row-body-no-write` now also asserts W-WHEN-EFFECT-DEPRECATED; its impl#1 xfail signature
+  was recomputed with `run.ts --xfail-signature` (`missing:W-WHEN-EFFECT-DEPRECATED` + the same runtime digest).

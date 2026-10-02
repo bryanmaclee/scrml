@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 235 | 5 |
-| MED | 462 | 0 |
-| LOW | 215 | 0 |
+| MED | 463 | 0 |
+| LOW | 217 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -18987,7 +18987,7 @@ Reproduces identically on `fix/s432-when-changes-dep-list` (reviewer), so that b
 for the fix, not for the pin: with N rows, is the effect registered once or per row (§6.7.2.1 — an `<each>` row is
 not a scope)? The case uses ONE row so it is ruling-neutral. **Exposure: 0** (no `when … changes` in any `${}` inside
 markup across the repo corpus, assetManagement or flogenceP). Pinned by `conformance/cases/each/when-changes-in-row-body-no-write`
-(impl#1: the row effect's `#beacon` `data-ran` attribute stays unset). **Re-pinned S449:** the original pin,
+(impl#1: the row effect's `#beacon` `data-ran` attribute stays unset; the case also asserts the keyword spelling's W-WHEN-EFFECT-DEPRECATED, which impl#1 does not emit). **Re-pinned S449:** the original pin,
 `each/when-changes-in-row-body`, observed the run through a write to `@hits` — S447 made a writing effect body
 E-EFFECT-WRITES-STATE (the keyword spelling included), so that case now asserts the S447 codes (carried under
 `g-impl1-effect-reset-on-codes-unimplemented-s447`) and the drop is pinned by a non-writing row effect observed
@@ -21935,6 +21935,38 @@ The S447 rulings are written into SPEC §6.7.4 (`<effect>`), §6.8.4 (`reset-on=
 - **Runtime-half conformance for `<effect>`** — an effect cannot write state, so its run is observable only through
   the outside world (a host call); the bootstrap's host surface is `Date.now()` alone, so no portable runtime case
   pins an effect run yet (the bootstrap's own e2e counts clock reads).
+
+### g-bootstrap-render-writer-call-hangs — bootstrap: a compile-clean render self-write (`<p>${g(@a)}</p>` where `g()` writes `@a`; any render↔render write cycle) now HANGS synchronously at mount — `NEW S449; MED; open`
+<!-- @gap id=g-bootstrap-render-writer-call-hangs sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(render positions — interpolations / attribute values — may call a `function` that writes a cell; nothing refuses it)+compiler/self-host-v2/slice-m1/runtime/runtime.js(flush — the s449 `flushing` guard turns the old recursion into an endless loop) prov=review:S449-effect-rereview -->
+
+A render position may call a writer: `<p>${g(@a)}</p>` with `function g(x) { @a = @a + 1 … }` compiles clean, and
+so does any cycle where one render effect writes a cell another render effect (or itself) reads. **Before s449**
+the nested flush recursed and the mount threw "Maximum call stack size exceeded". **With the s449 one-flush-at-a-time
+guard** (the MEDIUM-1 fix that stopped an `<each>` row's `<effect>` from running mid-reconcile) the running loop keeps
+re-queuing the render effect, and the mount hangs synchronously forever (`loadProgram` never returns; a CI run would
+time out). The root is pre-existing — render positions may call writers; the guard worsened the failure mode from a
+loud throw to a silent hang. **Fix direction:** a compile-time refusal of writer calls in render positions, using the
+s449 write summary — tied to bryan's pending fork on whether initializers, derived formulas and render
+interpolations may write state at all (the same class as the three s449 effect / `reset-on=` holes). A runtime
+detector (a re-run counter in `flush`) is rejected by the S447 posture: a bound would mean the compile-time rule had
+a hole. **Landed with this filed** (PA call, S449 re-review): the bootstrap is not adopter-shipped.
+
+### g-bootstrap-c11-ignores-function-values — bootstrap Core check C11 does not count a function handed on as a value (`const h = peek`) toward an effect's writes — `NEW S449; LOW; open`
+<!-- @gap id=g-bootstrap-c11-ignores-function-values sev=LOW status=open locus=compiler/self-host-v2/check.scrml(blockWriteWitness / callWriteWitness — only Expr.Call is followed) prov=review:S449-effect-rereview -->
+
+§6.7.4 rule 3 ("A function value … counts as if it were called"). The front end applies it (analyze `fnValueRef`:
+`const h = peek` where `peek` writes is E-EFFECT-WRITES-STATE), so no program reaches Core with it; but C11, which
+restates the no-write rule over Core, follows only `Expr.Call`. Core has no function value outside a SeqCall Lambda
+today, so the restatement is incomplete rather than exploitable; close it when Core gains function values.
+
+### g-bootstrap-flush-leftovers-after-throw — bootstrap runtime: after a flush throws, the items still queued run on the next unrelated write, so an `<effect>` can fire on a cell it does not list — `NEW S449; LOW; open`
+<!-- @gap id=g-bootstrap-flush-leftovers-after-throw sev=LOW status=open locus=compiler/self-host-v2/slice-m1/runtime/runtime.js(flush / drainQueues — an exception leaves `queue` / `effectQueue` populated) prov=review:S449-effect-rereview -->
+
+Pre-existing in shape (the render queue always behaved so); the s449 effect queue inherits it. If a render effect or
+an effect body throws during a flush, the remaining queued items stay queued and run at the next flush, which a write
+to an unrelated cell starts — so an `<effect>` runs in response to a change of a cell outside its `deps=` (§6.7.4:
+"Only the listed cells trigger the effect"). Fix direction: decide the flush's exception contract (drop or re-run the
+rest of the batch at once) alongside the §19 error context of effect bodies.
 
 ### g-impl1-effect-reset-on-codes-unimplemented-s447 — impl#1 emits none of the S447 `<effect>` / `reset-on=` codes and runs none of their semantics; pinned as expected-to-fail by the 18 positive `conformance/cases/lifecycle/{effect-*,when-effect-*,reset-on-*}` cases and `each/when-changes-in-row-body` — `NEW S449; HIGH; carried`
 <!-- @gap id=g-impl1-effect-reset-on-codes-unimplemented-s447 sev=HIGH status=carried locus=compiler/src/(no <effect> element — it reports E-MARKUP-001; no reset-on= modifier — the attribute is not read; no write summary; the keyword when … changes compiles with writes allowed) prov=empirical:s449-xfail-signatures-captured-by-conformance/run.ts---xfail-signature;ruling:user-voice-scrml.md-S447-TS-accounting -->

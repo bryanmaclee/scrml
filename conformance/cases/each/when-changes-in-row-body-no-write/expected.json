@@ -5,7 +5,7 @@
   "spec": "§6.7.4",
   "rationale": "§6.7.4 Scope and teardown: \"**An `<effect>` inside an `<each>` row is one effect per row**, registered when the row is created and unregistered when the row is removed\"; the keyword `when … changes { }` \"IS an `<effect>`\" during its §63 window. Not on mount (beacon untouched until #inc); a call to a platform API is not a reactive write (§6.7.4 rule 5).",
   "expect": {
-    "codes": [],
+    "codes": ["W-WHEN-EFFECT-DEPRECATED"],
     "notCodes": ["E-EFFECT-WRITES-STATE"],
     "input": [
       { "click": "#inc" }
@@ -21,7 +21,7 @@
   "xfail": {
     "impl1-ts": {
       "gap": "g-when-changes-in-each-row-body-dropped",
-      "fails": { "runtime": "sha256:6c062089c961df35" }
+      "fails": { "codes": ["missing:W-WHEN-EFFECT-DEPRECATED"], "runtime": "sha256:6c062089c961df35" }
     }
   }
 }
