@@ -4391,7 +4391,8 @@ onmount-body  ::= '$' '{' logic-content '}'
 #### Semantics
 
 - **Timing (S449 1c).** The body SHALL run once per mount of its owner, **after the owner's first render and after
-  every `ref=` binding (§5) in that owner has bound**, whether or not the body contains a server call. A DOM read
+  every `ref=` binding in that owner has bound** (an element-reference binding `ref=@cell`, used by §6.7.9 and
+  here; this SPEC has no section of its own for `ref=` — noted, not added by S449), whether or not the body contains a server call. A DOM read
   or a `ref=`-bound element in the body therefore sees the rendered DOM. *(impl#1 runs a mount body before both,
   and whether the DOM is ready flips with the first `await` — DD §2 rows 8 / 8b.)*
 - **Not reactive.** The body SHALL NOT re-run on a reactive change. It reads current values when it runs; nothing
