@@ -2925,7 +2925,16 @@ function _compileScrmlImpl(options = {}) {
     debugPerf,
     log,
   }));
-  collectErrors("CG", cgResult.errors);
+  // §6.6.9 / §20.5 (S449) — the codegen backstop E-INTERNAL-SESSION-AMBIENT-SERVER
+  // reports a server `@session` lowering the front end MISSED. When route
+  // inference already reported E-SESSION-AMBIENT-SERVER the backstop's hits are
+  // the same reads, refused twice: report the author-facing code only (the
+  // E-INTERNAL-BODY-TOP-DROPPED precedent — an internal floor does not fire when
+  // the run already carries the real error).
+  const _riRefusedSession = (riResult.errors ?? []).some((e) => e && e.code === "E-SESSION-AMBIENT-SERVER");
+  collectErrors("CG", _riRefusedSession
+    ? (cgResult.errors ?? []).filter((e) => !(e && e.code === "E-INTERNAL-SESSION-AMBIENT-SERVER"))
+    : cgResult.errors);
 
   const durationMs = parseFloat((performance.now() - pipelineStart).toFixed(1));
 

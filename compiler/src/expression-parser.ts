@@ -24,6 +24,7 @@ import { ARRAY_MUTATING_METHODS } from "./derived-mutation-ops.ts";
 // (ECMA preceding-token rule), reused by rewriteIsPredicates (S252, #1) to skip
 // the word `is` inside regex-literal interiors without fragmenting its LHS scan.
 import { rewriteCodeSegments, regexAllowedAfter } from "./codegen/code-segments.ts";
+import { isServerAmbientSession, refuseServerAmbientSession } from "./codegen/server-session-guard.ts";
 
 import type {
   ExprNode, ExprSpan,
@@ -1069,6 +1070,15 @@ export function rewriteServerReactiveRefsAST(expr: string): RewriteResult {
     if (varName === "currentUser" && _currentUserAmbientActive) {
       node.type = "Identifier";
       node.name = "_scrml_currentUser";
+      modified = true;
+      return;
+    }
+
+    // §6.6.9 / §20.5 (S449) — an ambient `@session` is never lowered to the
+    // request body (fail-closed backstop, codegen/server-session-guard.ts).
+    if (isServerAmbientSession(varName)) {
+      node.type = "Identifier";
+      node.name = refuseServerAmbientSession("expression-parser rewriteServerReactiveRefsAST");
       modified = true;
       return;
     }

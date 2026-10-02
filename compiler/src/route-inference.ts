@@ -2455,6 +2455,78 @@ function detectServerFreeClientCellReads(
   return out;
 }
 
+/**
+ * §6.6.9 / §20.5 (S449 ruling item 1) — every `@session` read in a SERVER
+ * context, for E-SESSION-AMBIENT-SERVER. Returns one entry per read (in order)
+ * with the member it names, if any (`@session.userId` → `"userId"`, a bare
+ * `@session` → null).
+ *
+ * Why the read is refused rather than lowered: every server lowering of an
+ * `@name` read produces `_scrml_body["name"]` — the CLIENT request body — so a
+ * server `@session.userId` took its value from whatever the caller sent
+ * (MEASURED S449: `{"session":{"userId":"victim"}}` wrote a row as "victim").
+ * §6.6.9: "`@session` is server-only identity and SHALL NEVER be marshalled
+ * from the client". The server's own session is the §20.5 `session` object.
+ *
+ * Surfaces, matching `detectServerFreeClientCellReads` (verified against real
+ * parser output): ExprNode `{kind:"ident", name:"@session"}` anywhere by
+ * full-node recursion, and the `${…}` interpolations of a `sql` node's query
+ * text (a `?{}` keeps its interpolations as text). Unlike that detector this
+ * one DOES descend into nested `function-decl` / lambda bodies: they are
+ * emitted inside the server body, so a read there is a server read too.
+ * SQL text outside `${…}` is SQL, not scrml, and is never scanned.
+ */
+export function detectServerAmbientSessionReads(
+  body: unknown,
+): Array<{ member: string | null; span: Span | undefined }> {
+  const out: Array<{ member: string | null; span: Span | undefined }> = [];
+  const visited = new WeakSet<object>();
+  const scanSql = (text: string, span: Span | undefined): void => {
+    const interp = /\$\{([^}]*)\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = interp.exec(text)) !== null) {
+      const inner = /@session\b(?:\s*\??\.\s*([A-Za-z_$][A-Za-z0-9_$]*))?/g;
+      let r: RegExpExecArray | null;
+      while ((r = inner.exec(m[1])) !== null) out.push({ member: r[1] ?? null, span });
+    }
+  };
+  const visit = (node: any, inherited: Span | undefined, parent: any): void => {
+    if (!node || typeof node !== "object" || visited.has(node)) return;
+    visited.add(node);
+    const sp: Span | undefined = (node.span && typeof node.span === "object") ? node.span : inherited;
+    if (node.kind === "ident" && node.name === "@session") {
+      const member = parent && parent.kind === "member" && parent.object === node
+        && typeof parent.property === "string" ? parent.property as string : null;
+      out.push({ member, span: sp });
+    }
+    if (node.kind === "sql" && typeof node.query === "string") scanSql(node.query, sp);
+    for (const key of Object.keys(node)) {
+      if (key === "span") continue;
+      const val = node[key];
+      if (Array.isArray(val)) { for (const c of val) visit(c, sp, node); }
+      else if (val && typeof val === "object") visit(val, sp, node);
+    }
+  };
+  if (Array.isArray(body)) {
+    for (const stmt of body) visit(stmt, (stmt && typeof stmt === "object") ? (stmt as any).span : undefined, null);
+  } else {
+    visit(body, undefined, null);
+  }
+  return out;
+}
+
+/** The author-facing E-SESSION-AMBIENT-SERVER message for one server `@session` read. */
+export function sessionAmbientServerMessage(where: string, member: string | null): string {
+  const fix = member ? `\`session.${member}\`` : "`session.userId` / `session.role` / `session.isAuth` / `session.get(key)`";
+  const read = member ? `\`@session.${member}\`` : "`@session`";
+  return `E-SESSION-AMBIENT-SERVER: ${where} reads ${read}, but \`@session\` is not read on the ` +
+    `server. \`@session\` is the client-side session projection (§20.5); on the server it ` +
+    `would be taken from the request body the client sends, so any caller could claim any ` +
+    `identity — \`@session\` is server-only identity and is never marshalled from the client ` +
+    `(§6.6.9). Use the server's own session object instead: ${fix} (§20.5). ` +
+    `(\`session\` is available in a web-app server function body; see §20.5.1 for where it is not.)`;
+}
+
 // ---------------------------------------------------------------------------
 // §12.4 E-ROUTE-002 — client-pin body scan.
 // ---------------------------------------------------------------------------
@@ -5991,12 +6063,75 @@ export function runRI(input: RIInput): RIOutput {
   // Step 6: Finalize RouteMap entries, apply CPS analysis, collect errors.
   // ------------------------------------------------------------------
 
+  // E-SESSION-AMBIENT-SERVER de-dup key set (a nested function can be both its
+  // own record and part of its server parent's body).
+  const _sessionAmbientSeen = new Set<string>();
+  // §6.6.9 / §20.5 (S449 ruling item 1) — the other server context that can
+  // name `@session`: a `<cell server> = ?{…}` declaration, whose inline query
+  // runs on the server (§52.6.5 Pattern C). Same refusal, same reason.
+  for (const fileAST of files) {
+    if (perFileClientReactiveCells.get(fileAST.filePath)?.has("session") === true) continue;
+    const nodes: any[] = (fileAST as any).nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []);
+    const visitDecls = (list: any[]): void => {
+      if (!Array.isArray(list)) return;
+      for (const node of list) {
+        if (!node || typeof node !== "object") continue;
+        if (node.kind === "state-decl" && node.isServer === true && node.sqlNode) {
+          for (const _r of detectServerAmbientSessionReads([node.sqlNode])) {
+            const _sp = (_r.span ?? node.span) as Span;
+            const _key = `${fileAST.filePath}:${_sp?.start ?? -1}:${_r.member ?? ""}`;
+            if (_sessionAmbientSeen.has(_key)) continue;
+            _sessionAmbientSeen.add(_key);
+            errors.push(new RIError(
+              "E-SESSION-AMBIENT-SERVER",
+              sessionAmbientServerMessage(`The server cell \`<${node.name} server>\`'s load query`, _r.member),
+              _sp,
+            ));
+          }
+        }
+        if (node.kind === "logic" && Array.isArray(node.body)) visitDecls(node.body);
+        if (Array.isArray(node.children)) visitDecls(node.children);
+      }
+    };
+    visitDecls(nodes);
+  }
+
   for (const [fnNodeId, record] of analysisMap) {
     // Accumulate E-ROUTE-001 warnings (with severity propagated).
     for (const w of record.warnings) {
       const riErr = new RIError(w.code, w.message, w.span);
       if (w.severity) riErr.severity = w.severity;
       errors.push(riErr);
+    }
+
+    // §6.6.9 / §20.5 (S449 ruling item 1) — E-SESSION-AMBIENT-SERVER: an
+    // `@session` read anywhere in a server-placed function body (wholly server,
+    // CPS-split, an SSE generator, a handle() middleware, a channel server
+    // handler — any function with a server escalation reason). Every server
+    // lowering of `@name` reads the CLIENT request body, so a server `@session`
+    // was client-controlled identity. Refused here, before codegen, so no
+    // lowering path can emit it (codegen keeps a fail-closed E-INTERNAL backstop).
+    // A file that declares its OWN `<session>` cell owns the name: `@session` is
+    // then that ordinary client cell and E-REACTIVE-003 / the CPS marshal govern.
+    {
+      const _escR = escalationResults.get(fnNodeId);
+      const _serverPlaced = (record.fnNode as any).isHandleEscapeHatch === true
+        || (_escR ? _escR.allReasons.length > 0 : false);
+      const _userSessionCell = perFileClientReactiveCells.get(record.filePath)?.has("session") === true;
+      if (_serverPlaced && !_userSessionCell) {
+        const _fnName = record.fnNode.name ?? "<anonymous>";
+        for (const _r of detectServerAmbientSessionReads(record.fnNode.body)) {
+          const _sp = (_r.span ?? record.fnNode.span) as Span;
+          const _key = `${record.filePath}:${_sp?.start ?? -1}:${_r.member ?? ""}`;
+          if (_sessionAmbientSeen.has(_key)) continue;
+          _sessionAmbientSeen.add(_key);
+          errors.push(new RIError(
+            "E-SESSION-AMBIENT-SERVER",
+            sessionAmbientServerMessage(`Server function \`${_fnName}\``, _r.member),
+            _sp,
+          ));
+        }
+      }
     }
 
     // §39.3: handle() escape hatch — treat as middleware boundary.

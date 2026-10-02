@@ -13,6 +13,7 @@ import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitCh
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
+import { drainServerAmbientSessionRefusalErrors } from "./server-session-guard.ts";
 import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUseErrors, drainSessionValueUseErrors, type EmitExprContext } from "./emit-expr.ts";
 import {
   readRawUnitSessionAttr,
@@ -7376,6 +7377,10 @@ export function generateServerJs(
   // file path so it reports against the right source, then clears the sink for the
   // next file. Build-blocking (severity "error"), restoring the invariant that no
   // bare `session` identifier ever reaches emitted JS.
+  // §6.6.9 / §20.5 (S449) — drain the server-session-guard backstop (a server
+  // `@session` lowering that was refused instead of reading the request body).
+  for (const _e of drainServerAmbientSessionRefusalErrors(filePath)) errors.push(_e);
+
   for (const _svErr of drainSessionValueUseErrors()) {
     const _span = (_svErr.span && typeof _svErr.span === "object") ? _svErr.span as Record<string, unknown> : {};
     errors.push(new CGError(

@@ -1,0 +1,14 @@
+{
+  "id": "auth-session-ambient-server-pos",
+  "description": "§6.6.9 / §20.5 (S449 ruling item 1) — `@session.userId` read inside a server function is E-SESSION-AMBIENT-SERVER. Before S449 it lowered to `_scrml_body[\"session\"].userId` — the CLIENT request body — so a caller could write any identity (measured: POST {\"session\":{\"userId\":\"victim\"}} wrote a row as \"victim\"). Exactly one report per read: the codegen backstop E-INTERNAL-SESSION-AMBIENT-SERVER does not stack on top.",
+  "language-version": "1.0",
+  "spec": "§6.6.9, §20.5",
+  "source-test": "compiler/tests/integration/session-ambient-server-refused.test.js",
+  "rationale": "§6.6.9: '`@session` is server-only identity and SHALL NEVER be marshalled from the client — doing so would be a spoofing hole.' Ruling (user-voice-scrml.md S449 item 1): interim compile error naming `session.<field>`.",
+  "expect": {
+    "codes": ["E-SESSION-AMBIENT-SERVER"],
+    "notCodes": ["E-INTERNAL-SESSION-AMBIENT-SERVER", "E-REACTIVE-003"],
+    "severity": { "E-SESSION-AMBIENT-SERVER": "error" },
+    "codeCounts": { "E-SESSION-AMBIENT-SERVER": 1 }
+  }
+}

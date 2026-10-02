@@ -33,6 +33,14 @@
  * reason: the units that would be written are the ones whose declared settings the
  * compiler could not honour.
  *
+ * E-AUTH-ATTR-INVALID (§52.13.2, S449 ruling item 4 — an `auth=` on a `<program>` /
+ * `<page>` that is not one of the three literals) and E-SESSION-AMBIENT-SERVER /
+ * E-INTERNAL-SESSION-AMBIENT-SERVER (§6.6.9 / §20.5, S449 ruling item 1 — a server
+ * `@session` read) refuse it for the same reason: before S449 both shapes compiled
+ * to fail-open units (a PUBLIC server for `auth="Required"`; a server that took the
+ * caller's identity from the request body for `@session.userId`), so the units that
+ * would be written are exactly the ones whose declared auth the compiler cannot honour.
+ *
  * NARROW SCOPE: only these codes refuse the write. Every other hard error keeps
  * the pre-existing posture (artifacts land, exit 1); widening it is an open ruling.
  */
@@ -50,6 +58,9 @@ export const APPLICATION_SCOPE_REFUSALS = new Set([
   "E-PROGRAM-NESTED-SESSION",
   "E-PROGRAM-NESTED-ATTR",
   "E-PROGRAM-CONFIG-UNREAD",
+  "E-AUTH-ATTR-INVALID",
+  "E-SESSION-AMBIENT-SERVER",
+  "E-INTERNAL-SESSION-AMBIENT-SERVER",
 ]);
 
 /** True when any diagnostic in `errors` is an application-scope refusal. */

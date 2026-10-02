@@ -45,6 +45,7 @@ import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { ARRAY_MUTATING_METHODS } from "../derived-mutation-ops.ts";
 import { CGError } from "./errors.ts";
+import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
 import { parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
@@ -1221,6 +1222,10 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
       // Gated on `_currentUserAmbientActive` (no user `<currentUser>` cell shadows
       // the name) so a corpus cell named `currentUser` keeps the request-body form.
       if (bare === "currentUser" && _currentUserAmbientActive) return `${_m}_scrml_currentUser`;
+      // §6.6.9 / §20.5 (S449) — fail-closed backstop: an ambient `@session` is
+      // never lowered to the request body (server-session-guard.ts). The front
+      // end refuses it first (E-SESSION-AMBIENT-SERVER).
+      if (isServerAmbientSession(bare)) return `${_m}${refuseServerAmbientSession("emit-expr emitIdent", node.span)}`;
       return `${_m}_scrml_body["${bare}"]`;
     }
     // g-markup-session-read-undeclared (S228 ruling) — the `@session` window-
