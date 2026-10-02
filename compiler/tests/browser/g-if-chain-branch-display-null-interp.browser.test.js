@@ -39,6 +39,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // A 3-branch chain (if=/else-if=/else), each branch over a DIFFERENT cell that
 // starts `not` (null). The else also carries a NESTED field chain
@@ -69,7 +70,7 @@ const SRC = `<program>
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-g-if-chain-branch-null");
+const tmpRoot = resolve(tmpdir(), "scrml-g-if-chain-branch-null");
 
 function compileCase(src = SRC) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

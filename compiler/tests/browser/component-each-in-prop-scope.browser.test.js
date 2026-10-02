@@ -39,6 +39,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // repro: a component with a typed prop iterated by <each>, instantiated with @todos.
 const COMPONENT_SRC = `<program>
@@ -53,7 +54,7 @@ const TodoList = <ul props={ items: Todo[] }>
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-component-each");
+const tmpRoot = resolve(tmpdir(), "scrml-component-each");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

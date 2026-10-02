@@ -37,6 +37,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // repro: an OUTSIDE reactive style template + INSIDE-arm reactive style template
 // + INSIDE-arm class:hidden directive. @phase starts .Ready so the Ready arm
@@ -75,7 +76,7 @@ const STATIC_ARM_SRC = `<program>
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-match-arm-attr-effects");
+const tmpRoot = resolve(tmpdir(), "scrml-match-arm-attr-effects");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

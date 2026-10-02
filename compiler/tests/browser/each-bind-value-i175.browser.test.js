@@ -23,6 +23,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
 
 const REPRO_SRC = `<program>
 type Item:struct = { id: string, name: string }
@@ -39,7 +40,7 @@ type Item:struct = { id: string, name: string }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-each-bind-i175");
+const tmpRoot = resolve(tmpdir(), "scrml-each-bind-i175");
 
 function compileToOutputs(source, baseName = "each-bind-i175") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

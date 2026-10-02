@@ -25,9 +25,10 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 if (!globalThis.document) GlobalRegistrator.register();
-const TMP = resolve("/tmp", "scrml-render-snippet-parametric");
+const TMP = resolve(tmpdir(), "scrml-render-snippet-parametric");
 beforeEach(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
   await GlobalRegistrator.register();

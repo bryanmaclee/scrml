@@ -22,9 +22,10 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { compileScrml } from "../../src/api.js";
 import { readFileSync, existsSync, mkdirSync, rmSync } from "fs";
 import { resolve, dirname } from "path";
+import { tmpdir } from "os";
 
 const APP = resolve(import.meta.dir, "../../../examples/22-multifile/app.scrml");
-const tmpRoot = resolve("/tmp", "scrml-multifile-import-browser");
+const tmpRoot = resolve(tmpdir(), "scrml-multifile-import-browser");
 
 /**
  * Compile examples/22-multifile/app.scrml (auto-gathers types.scrml +

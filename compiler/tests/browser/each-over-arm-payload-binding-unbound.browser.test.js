@@ -43,6 +43,7 @@ import {
 } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // ---------------------------------------------------------------------------
 // Repros — minimal single-file each-over-arm-payload-binding shapes.
@@ -99,7 +100,7 @@ type ItemsPhase:enum = {
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-each-arm-payload");
+const tmpRoot = resolve(tmpdir(), "scrml-each-arm-payload");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

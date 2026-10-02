@@ -32,6 +32,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // repro-1: one outer group whose items render as nested <li>s. The inner each's
 // source `g.items` references the OUTER alias `g`, bound only in the outer factory.
@@ -70,7 +71,7 @@ type Group:struct = { id: string, items: Item[] }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-nested-each");
+const tmpRoot = resolve(tmpdir(), "scrml-nested-each");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
