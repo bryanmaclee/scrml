@@ -847,6 +847,40 @@ describe("analyzeProtectFlow — round 8: an aliased global resolves to its name
   });
 });
 
+describe("analyzeProtectFlow — round 8: adversarial follow-ups (self-review)", () => {
+  test("prototypes, platform mutators with an explicit receiver, element-aliasing built-ins, mixed global names", () => {
+    for (const body of [
+      // `__proto__:` in a literal sets the prototype — its properties are read off the object
+      "return { __proto__: { h: u } }.h.passwordHash;",
+      "const p = { h: u }; const o = { __proto__: p }; return o.h.passwordHash;",
+      // a platform method run with an explicit receiver writes into it
+      "const arr = []; Array.prototype.push.call(arr, u); return arr[0].passwordHash;",
+      "const arr = []; arr.push.call(arr, u); return arr[0].passwordHash;",
+      "const arr = []; Reflect.apply(Array.prototype.push, arr, [u]); return arr[0].passwordHash;",
+      // `Reflect.get` / `Object.values` hand back members WITH their functions
+      "globalThis.box60 = { h: '', set(r) { this.h = r.passwordHash; } }; Reflect.get(globalThis, 'box60').set(u); return { v: globalThis.box60.h };",
+      "globalThis.box61 = { h: '', set(r) { this.h = r.passwordHash; } }; Object.values(globalThis)[0].set(u); return { v: globalThis.box61.h };",
+      // a global object reached WITHOUT a name, joined with a named one: the names no longer cover it
+      "const o = { h: '', stash(r) { this.h = r.passwordHash; } }; globalThis.box62 = o; const p = u.id > 0 ? o : globalThis.other62; p.stash(u); return o;",
+      // further row-in-field shapes
+      "const o = {}; o.__proto__ = { h: u }; return o.h.passwordHash;",
+      "const o = { get h() { return u; } }; return o.h.passwordHash;",
+      "return Object.defineProperty({}, 'h', { value: u }).h.passwordHash;",
+      "const t = { h: u }; for (const k in t) { return t[k].passwordHash; } return 1;",
+      "const t = { h: u }; return [t].concat([])[0].h.passwordHash;",
+      "try { throw { h: u }; } catch (e) { return e.h.passwordHash; }",
+      "function f() { return arguments[0].h; } return f({ h: u }).passwordHash;",
+      "const t = { 1: u }; return t[1].passwordHash;",
+      "const t = { h: u }; const k = 'h'; const { [k]: v } = t; return v.passwordHash;",
+      "const t = { a: { b: { c: { d: { e: { f: u } } } } } }; return t.a.b.c.d.e.f.passwordHash;",
+      "const t = { h: u }; return t.h.PASSWORDHASH;",
+    ]) {
+      expect([body, leakCols(r8(body)).length > 0]).toEqual([body, true]);
+    }
+    expect(leakCols(r8("const t = { h: u }; t.h = null; return { id: 1 };"))).toEqual([]);
+  });
+});
+
 describe("analyzeProtectFlow — round 8: the round-7 performance cliff", () => {
   // Review-measured on round 7: a 240-object `toString` chain took 13.7 s
   // (0.47 s on base); a shared `this`-writing method on 240 receivers 40.5 s.

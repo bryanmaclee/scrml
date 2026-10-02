@@ -424,6 +424,8 @@ function mergeMap(into: Map<string, string>, from: Map<string, string>): void {
 
 function join(...ts: Taint[]): Taint {
   const out = clean();
+  let named = false;
+  let anonymous = false;
   for (const t of ts) {
     if (!t) continue;
     out.row = t.row ? joinRow(out.row, t.row) : out.row;
@@ -437,10 +439,18 @@ function join(...ts: Taint[]): Taint {
     if (t.k) out.k = (out.k ?? 0) | t.k;
     if (t.gnAny) out.gnAny = true;
     if (t.gn && t.gn.size > 0) {
+      named = true;
       if (!out.gn) out.gn = new Set();
       for (const n of t.gn) out.gn.add(n);
+    } else if (!t.gnAny && t.refs && t.refs.size > 0) {
+      anonymous = true;
     }
   }
+  // Round 8: names are a precision filter for values read from the global heap
+  // (`Taint.gn`). A part with alias cells and NO names may be a global object
+  // reached without a nameable path (a local object stored into a global, say):
+  // joined with a named part, the names no longer cover it — fail closed.
+  if (named && anonymous) out.gnAny = true;
   if (out.fns.size > 0 && ts.some((t) => t && t.own !== undefined)) {
     const own = new Set<Closure>();
     for (const t of ts) if (t) for (const f of ownOf(t)) own.add(f);
@@ -1456,6 +1466,20 @@ class FlowAnalysis {
     this.unitedPairs.add(k);
     this.unite(a, b);
   }
+  /**
+   * Unite `key` with every cell of `refs`. Afterwards every cell of that SET is in
+   * one class, for good — so the next binding handed the same set (one
+   * `arguments` object bound into every callee of a call) unites with one
+   * representative instead of walking the set again (round 8, perf).
+   */
+  private unitedSets = new WeakMap<Set<string>, { rep: string; size: number }>();
+  private uniteAll(key: string, refs: Set<string> | undefined): void {
+    if (!refs || refs.size === 0) return;
+    const seen = this.unitedSets.get(refs);
+    if (seen !== undefined && seen.size === refs.size) { this.uniteOnce(key, seen.rep); return; }
+    for (const r of refs) this.uniteOnce(key, r);
+    this.unitedSets.set(refs, { rep: key, size: refs.size });
+  }
   /** Two bindings may hold the same object: from now on they are ONE alias class. */
   private unite(a: string, b: string): void {
     const ra = this.find(a), rb = this.find(b);
@@ -1608,6 +1632,17 @@ class FlowAnalysis {
     });
   }
 
+  /**
+   * May this callee value be a PLATFORM function (code the compile does not
+   * contain): no function value known, one read from the global heap, or a
+   * host import.
+   */
+  private mayBePlatformFunction(t: Taint): boolean {
+    if (t.fns.size === 0 || this.isGlobalValue(t)) return true;
+    for (const f of t.fns) if (f.host) return true;
+    return false;
+  }
+
   /** Does this value belong to the global heap's alias class? */
   private isGlobalValue(t: Taint): boolean {
     const g = this.find(GLOBAL_CELL);
@@ -1672,7 +1707,7 @@ class FlowAnalysis {
     // A free name is the global heap (L3).
     const key = resolved ? `${s.id}:${name}` : GLOBAL_CELL;
     // The value may BE another binding's object — join its alias class.
-    for (const r of refsOf(t)) this.uniteOnce(key, r);
+    this.uniteAll(key, t.refs);
     // A write INTO an alias class may sit at any depth of its objects (round 8).
     const plain = isWrite || !resolved ? anyDepth({ ...t }) : { ...t };
     delete plain.refs;
@@ -2037,7 +2072,7 @@ class FlowAnalysis {
 
   /** Merge a container write into the alias class of binding cell `key`. */
   private writeCell(key: string, t: Taint): void {
-    for (const r of refsOf(t)) this.uniteOnce(key, r);
+    this.uniteAll(key, t.refs);
     // An alias class holds objects at DIFFERENT depths (a field read aliases
     // into its container's class), so what is written into it may sit at any
     // depth of any of them (round 8 — see `RowPart.paths`).
@@ -2227,7 +2262,9 @@ class FlowAnalysis {
           // The value sits under its key (round 8: `{ h: u }.h` is the row). A
           // key the compiler cannot read may be any name; an accessor's value is
           // what its getter returns (a hook — see `storeFns`).
-          r = join(r, containerOf(v, key ?? ANY_KEY));
+          // `__proto__: p` (a plain, non-computed key) SETS THE PROTOTYPE: `p`'s
+          // properties are read off the object itself — the row at any depth.
+          r = join(r, !pr.computed && !pr.shorthand && key === "__proto__" ? anyDepth(containerOf(v, null)) : containerOf(v, key ?? ANY_KEY));
           // Only a function the property IS is stored under its key — a nested
           // object's functions belong to that object (`ownOf`).
           if (ownOf(v).size > 0) {
@@ -2652,6 +2689,13 @@ class FlowAnalysis {
       // `res.call(x, h)` / `res.apply(x, [h])` on a parameter: what it is handed.
       if (method === "call" && args.length > 1) this.recordParamCall(m.object, join(...args.slice(1)), scope);
       if (method === "apply" && args[1]) this.recordParamCall(m.object, elemOf(args[1]), scope);
+      if ((method === "call" || method === "apply") && this.mayBePlatformFunction(recv) && node.arguments[0] && node.arguments[0].type !== "SpreadElement") {
+        // Round 8: `Array.prototype.push.call(arr, u)` — a PLATFORM method run
+        // with an explicit receiver may write its arguments INTO it (push,
+        // splice, set, Object.assign …); which one is not followed: fail closed.
+        const written = method === "call" ? join(...args.slice(1)) : elemOf(args[1] ?? clean());
+        this.writeThrough(node.arguments[0], args[0] ?? clean(), anyDepth(containerOf(written)), scope);
+      }
       if ((method === "call" || method === "apply") && this.hasCallable(recv)) {
         // The first argument IS `this` (round 7: `stash.call(u)` writing `this.x`).
         this.recordThis(recv.fns, args[0] ?? clean());
@@ -3177,8 +3221,19 @@ class FlowAnalysis {
         const aliases = new Set<string>();
         for (const a of args) for (const x of refsOf(a)) aliases.add(x);
         if (aliases.size > 0) r.refs = aliases;
+        // Round 8: …and those members' FUNCTIONS (`Reflect.get(o, "set")` is
+        // the method; `Object.values(globalThis)[0].set(u)` calls a stored one).
+        // Reached through a key list the compiler does not follow, so a global
+        // member's names are unknown (fail closed).
+        for (const a of args) for (const f of a.fns) r.fns.add(f);
+        if (r.fns.size > 0 && args.some((a) => this.isGlobalValue(a))) r.gnAny = true;
       }
       return r;
+    }
+    if (path === "Reflect.apply" && node?.arguments?.[1] && node.arguments[1].type !== "SpreadElement" && this.mayBePlatformFunction(args[0] ?? clean())) {
+      // Round 8: a platform function run with an explicit receiver may write its
+      // arguments into it (`Reflect.apply(Array.prototype.push, arr, [u])`).
+      this.writeThrough(node.arguments[1], args[1] ?? clean(), anyDepth(containerOf(elemOf(args[2] ?? clean()))), fn?.scope ?? this.curMod!.scope);
     }
     if (path === "Object.setPrototypeOf" || path === "Reflect.setPrototypeOf") {
       // `o` now INHERITS everything `p` holds, and every later write into `p`
