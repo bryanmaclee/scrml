@@ -9876,11 +9876,11 @@ every column a marker is PRESENT for. Consequences a conformant implementation S
     receiver of a method call, the first argument of `call` / `apply` / `bind`, an array method's
     `thisArg`, the fresh object of `new`, and anything code the compiler has no model for holds —
     and a write through `this` as a write INTO that receiver (as `o.p = v` is), visible through
-    the bindings that hold that receiver. ⚑ Known residual
-    ([[g-protect-egress-round-8-residuals]]): this does NOT yet hold for a receiver held in the
-    GLOBAL heap and reached through an alias, when the called method's name matches a modelled
-    built-in (`globalThis.box = { set: function (r) { this.h = r.passwordHash } }; const g =
-    globalThis.box; g.set(u); return g` serves the hash — measured on base and round 7);
+    the bindings that hold that receiver — including a receiver held in the GLOBAL heap,
+    reached by name or through an alias, whatever the called method is named (S447 round 8:
+    `globalThis.box = { set: function (r) { this.h = r.passwordHash } }; const g =
+    globalThis.box; g.set(u); return g` was modelled as a `Map` write only and served the hash —
+    measured on base and round 7; see the global-names bullet below);
   - a function stored where the language may call it — under `then`, `toString`, `valueOf`,
     `toJSON`, `toLocaleString`, an iterator's `next` / `return` / `throw`, `__proto__`, as an
     accessor, or under a key the compiler cannot read (every Symbol-keyed hook is a computed key)
@@ -9890,11 +9890,21 @@ every column a marker is PRESENT for. Consequences a conformant implementation S
   - a tagged template as a call of its tag with the strings array first; a tag the analysis holds
     no function for is code the compiler cannot see into (fail closed), unless it IS the
     compiler's own SQL client;
-  - `x instanceof C` as a call of `C`'s hooks with `x` when `C` is not held in the global heap,
-    or is named by a global path (`u instanceof globalThis.C`). ⚑ Known residual
-    ([[g-protect-egress-round-8-residuals]]): a hook object stored in the global heap and reached
-    through an alias (`const { C } = globalThis`, `const C = globalThis.C`, `P.C` with
-    `const P = process`) is not called — measured to serve the hash on base and round 7.
+  - `x instanceof C` as a call of `C`'s hooks with `x` — whether `C` is a local value, is named
+    by a global path (`u instanceof globalThis.C`), or is a hook object stored in the global heap
+    and reached through an alias (`const { C } = globalThis`, `const C = globalThis.C`, `P.C` with
+    `const P = process`; S447 round 8 — each of the three served the hash on base and round 7).
+- **A value read from the global heap resolves to its named path (S447 round 8).** The global
+  heap (below) is ONE abstract object, so every function stored in it is reachable from every
+  value read from it. The analysis MAY narrow the functions a call, `instanceof` or tagged
+  template through such a value reaches to those stored under a name on the path by which the
+  value was read — whether the program spells the path (`globalThis.box.set(u)`) or reads it
+  through an alias (a binding, a destructure, a parameter, a container, `this`) — and SHALL NOT
+  narrow when that path cannot be named (a computed key, a reflective read such as
+  `Reflect.get(globalThis, k)` or `Object.values(globalThis)`, an object that joined the global
+  heap without being read from it, or any value joined with one): every function the value holds
+  is then a candidate, fail closed. A function the program stored on such a receiver is called
+  whatever its name, exactly as on a local receiver (the `this` bullet above).
 (Measured before round 6: `delete u[Symbol.for("scrml.protect.origin")]`, pushing onto the
 descriptor's reveal list, and deleting a copy's Symbol-keyed properties each served the full row.)
 
@@ -9952,11 +9962,22 @@ halves, and a conformant implementation SHALL enforce both:
      (`const o2 = o; o2.x = h`, `setv(o, h)`, `box.m.set(h, 1)`: every binding that may hold the
      same object sees the write), a write into an element a collection hands back
      (`arr.find(…).x = h`, `arr.at(0).x = h`, `m.get(k).x = h`, `Object.values(o)[0].x = h`, an
-     iterator's `.next().value`), and a write into a prototype (`Object.setPrototypeOf(o, p)`,
-     `Object.create(p)`) — string
+     iterator's `.next().value`), a write into a prototype (`Object.setPrototypeOf(o, p)`,
+     `Object.create(p)`, a literal's `__proto__: p`), and a platform method run with an explicit
+     receiver, which may write its arguments into it (`Array.prototype.push.call(arr, h)`,
+     `Reflect.apply(Array.prototype.push, arr, [h])` — S447 round 8, measured on base) — string
      concatenation and template interpolation, conditional and logical operators, `await`, array
      callbacks, getters and `toJSON` the serializer invokes, `throw` → `catch`, promise resolution,
      encodings (`Buffer`, `btoa`, `encodeURIComponent`, character codes), and serializing built-ins.
+     ⚑ **A row held in a FIELD is still that row (S447 round 8).** `const t = { h: u }; return
+     t.h.passwordHash`, its destructured form, `JSON.stringify(t.h)` (the FULL row),
+     `Object.values(t.h)`, `t.rs.map((r) => r.passwordHash)`, `t.a.b.pin` and a method reading
+     `this.h.passwordHash` each served the value at exit 0 on base and round 7 (all three sinks,
+     measured): the analysis read `t.h` as "column `h` of the row" — "is, or contains, a row" was
+     one fact. A field read off a value SHALL yield the row wherever the row may sit under that
+     field, and a column of it only where the value may itself be the row; a construction the
+     analysis does not follow exactly (a write through an alias, the global heap, a host or
+     unmodelled call's result, a hook's return) places the row at ANY depth, fail closed.
    - **Unresolvable callees fail closed.** A call into code the compile does not contain — a host,
      stdlib or npm import, or a platform API — that receives a protected value (a scalar OR a whole
      row) returns a protected value, unless the callee is on the deriver allowlist. ⚑ S443 round 6:
@@ -9965,7 +9986,16 @@ halves, and a conformant implementation SHALL enforce both:
      bound to everything the receiver and all arguments carry, row columns included as values, and
      what it returns is part of the call's result (measured: a `replace` callback,
      `JSON.stringify(u, replacer)` and `"x".replace("x", () => h)` each served the hash). A function's
-     `arguments` object carries every argument passed to it.
+     `arguments` object carries every argument passed to it. ⚑ S447 round 8 — the language
+     COERCIONS `String`, `Number`, `Boolean`, `BigInt` and `Symbol` are not such callees: ECMAScript
+     fixes what they call — their argument's coercion hooks (`[Symbol.toPrimitive]`, `toString`,
+     `valueOf`, and the accessors read on the way), never another function value they are handed
+     (`Boolean` calls nothing) — and those hooks are already analysed as invoked where they are
+     stored (the round-7 implicit-invocation rule above), exactly as for a template or `+`. Their
+     results still carry their arguments' provenance. (Treating them as opaque applied every
+     function reachable from the argument at every coercion: a chain of 240 objects, each with a
+     `toString` returning `String(this.prev)`, took 13.7 s against 0.47 s before round 7 —
+     review-measured.)
    - **Global stores.** Every name the compile does not bind (`globalThis`, `process`, `Bun`, …) and
      `import.meta` denote ONE global heap shared by every server module and every request. A value
      whose provenance includes a `protect=` column, written into it outside a descriptor-bearing row
