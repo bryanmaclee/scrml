@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 233 | 4 |
-| MED | 461 | 0 |
+| HIGH | 235 | 4 |
+| MED | 464 | 0 |
 | LOW | 216 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -21669,6 +21669,7 @@ Owed WITH the termination build (§7.2.2 Migration): move each leading operator 
 ### g-when-retrigger-newest-wins-unbuilt — a `when` effect re-triggered while an earlier run is suspended at a server call: both runs continue (impl#1); §6.7.4 now rules newest-run-wins
 <!-- @gap id=g-when-retrigger-newest-wins-unbuilt sev=MED status=open locus=searched:compiler/src/codegen(when-effect lowering)—not-traced+bootstrap:no-`when`-on-main(U0-branch-runtime-rt.when/rt.suspend-cancels-only-on-teardown) prov=ruling:user-voice-scrml.md S446 "b on retrigger, your recs on 6 and 7" · design:docs/changes/s446-bootstrap-u0-when-effects/DESIGN.md §5 (unlanded branch) -->
 §6.7.4 "Re-trigger while a run is suspended" (S446 (b)): the earlier run's continuation is cancelled and never resumes. impl#1 behaves as option (a) — each trigger is an independent call, so a stale continuation can write after a newer run. The bootstrap U0 runtime cancels only on teardown (DESIGN.md §5); the ruling *"Must land before U1 ships a server call in a `when` body."* Not reproduced here (no impl change in this unit) — UNVERIFIED for impl#1's exact behaviour beyond the U0 design note's description.
+> **S447 update (s447-spec-effect-reset-on):** the rule now lives on `<effect>` (SPEC §6.7.4 "Semantics", re-trigger bullet); the `when` subsection this entry cites was superseded when `when … changes` became a soft-deprecated spelling of `<effect>`. The divergence is unchanged and also listed under `g-impl1-when-effect-divergence-s447`. Under the no-write rule a cancelled run can no longer leave scrml state half-written, so the stale-write hazard reduces to a duplicated outside-world action.
 
 ### g-impl1-call-checks-and-member-calls-fail-open — impl#1: no arity / argument-type check on plain calls; a call of a non-existent member compiles to a runtime `TypeError`; `@n .= addOne()` (not scrml) compiles at exit 0 to `NaN`; `@n |> addOne()` errors without naming `|>`
 <!-- @gap id=g-impl1-call-checks-and-member-calls-fail-open sev=HIGH status=open locus=searched:compiler/src/type-system.ts(no call-site arity / argument-type check; HOST_METHOD_RETURNS / resolveReceiverExprType — a member call on a known-typed receiver is never checked against the member set)+compiler/src/ast-builder.js(reactive-nested-assign — `@n .= f()` reaches the `_scrml_deep_set(…, [], f())` emit of compiler/src/codegen/emit-logic.ts with an EMPTY path; PA-located-verify) prov=empirical:S447-ufcs-dd -->
@@ -21799,3 +21800,128 @@ Measured on `main` after #1212. A postfix update followed by a line that starts 
 ### g-bootstrap-validated-form-fields-fail-open-no-surface-no-gate — bootstrap: emits `novalidate` on every form carrying lowered validator attributes (S442 (3)) while it has NO §55 validity surface and NO submit gate, so a validated child field inside a `<form>` gates nothing: the browser's block is removed and nothing replaces it
 <!-- @gap id=g-bootstrap-validated-form-fields-fail-open-no-surface-no-gate sev=HIGH status=open locus=compiler/self-host-v2/analyze.scrml(validatorPass :8315 + formsInElem :8429 collect the novalidate forms; resolveMember :2704 refuses a child field's surface read E-BOOTSTRAP-UNSUPPORTED; topLevelValidatorsLower :1297 = false refuses every top-level validator E-VALIDATOR-DEAD)+compiler/self-host-v2/lower.scrml(noValidate :872) prov=ruling:S447 -->
 **Read on `01f8dda17` (not run in a browser — dpa-058c F5/F6 derived it the same way).** `validatorPass` collects the forms that get `novalidate`, and `lower.scrml`'s `noValidate` emits it; the HTML-native attributes on a bound child field are therefore disarmed. The surface read `@signup.email.isValid` is `E-BOOTSTRAP-UNSUPPORTED` (:2704), so the author cannot write the check either, and no compiler gate exists. **Consequence:** a `<form onsubmit=save()>` with `<let email:string="" req/>` bound inside it runs `save()` with `""` — fail-open on the language's documented form-validation path. **Build owed (SPEC as amended S447):** (1) the §55 surface — compound (§55.5), per-field (§55.6), and validated top-level values (§55.5.1: flip `topLevelValidatorsLower()`, drop the E-VALIDITY-NO-SURFACE arm for validated cells); `submitted` scoped to a form that binds the value (§55.7); (2) the §55.17 submit gate (touch → submitted → cancel + skip `onsubmit` if invalid; `formnovalidate` on `SubmitEvent.submitter` bypasses) on every form that binds a validated value, with or without `novalidate` (S447 gate-calls item 1; a `formnovalidate` bypass still sets `submitted`, item 2); (3) `I-FORM-SUBMIT-GATED` + `data-scrml-gated` (§55.17.6); (4) `E-VALIDITY-RESERVED-NAME` (§55.5.3); (5) E-VALIDATOR-DEAD narrowed to §55.5.2 (no bind + locked + not server + no use-site seed + no `persist=`). `slice-m4/validators.test.js` :226 / :230 / :235 pin the superseded readings and flip. **Interim option (PA's call, dpa-058c "PA action requested"):** hold `novalidate` emission until (1)+(2) land, which restores the browser's block meanwhile.
+
+
+## §S447-effect — `when` → `<effect>` + `reset-on=` (2026-10-02; ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`; the TS accounting calls" + "3b: `reset-on=` IS allowed on engine cells, checked against `rule=`"; SPEC §6.7.4 / §6.8.4 — Nominal; change `docs/changes/s447-spec-effect-reset-on/`)
+
+### g-impl1-when-effect-divergence-s447 — impl#1 DIVERGENCE (filed, not fixed — S447 TS accounting): impl#1 compiles only the retiring keyword `when … changes { }` with writes allowed, and its `when` has two FAIL-OPEN scoping defects plus nine wrong/missing diagnostics measured by the S447 DD — `NEW S447; HIGH; open`
+<!-- @gap id=g-impl1-when-effect-divergence-s447 sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(row-body logic-interpolation arm — the row `when` is lowered as a text interpolation and dropped)+compiler/src/codegen/emit-logic.ts(case "when-effect" — emitted at file scope, never inside the if= region's mount scope)+compiler/src/ast-builder.js(the when-effect parse — no `reads` branch; dep-list accepts only AT_IDENT)+compiler/src/runtime-template.js(the when re-run cap — the only E-LIFECYCLE-006 guard)+compiler/src/codegen/index.ts(E-LIFECYCLE-007 is the only §6.7.4 diagnostic emitted); PA-located-verify from the DD §2 prov=dd:when-reactive-effect-fit-2026-10-02 -->
+
+**Classification: DIVERGENCE.** Under the S447 TS accounting ruling (*"Language-semantics rulings stop generating
+impl#1 work: a ruling gets SPEC text + a bootstrap build; impl#1 divergence is FILED, not fixed"*), impl#1 is not
+changed to the S447 `<effect>` / no-write / `reset-on=` semantics. It still compiles the pre-S447 keyword form
+`when @x changes { … }` with writes allowed, and has no `<effect>` and no `reset-on=`. The bootstrap owes them
+(`g-bootstrap-effect-reset-on-owed`).
+
+**Measured by the DD on main `4fd980bc6`** (`scrml-support/docs/deep-dives/when-reactive-effect-fit-2026-10-02.md`
+§2; probes in the S447 session scratchpad `when-dd/`). Not re-run for this entry; loci are PA-located-verify:
+
+1. **FAIL-OPEN — a `when` inside an `<each>` row is silently dropped** (DD row 7): the row's `${}` is lowered as a
+   text interpolation of its first statement; `grep -c` of the effect's marker in the output is 0. No diagnostic.
+   Pre-existing entry: `g-when-changes-in-each-row-body-dropped` (carried).
+2. **FAIL-OPEN — a `when` inside an `if=` element is never torn down** (DD row 8, happy-dom): it is registered at
+   module init and keeps firing after the element closes (toggled closed, 2 writes → hits 1→3; reopened → 4),
+   violating §6.7.2 step 1. Pre-existing entry: `g-when-in-if-region-never-unregistered-on-unmount` (filed MED; the
+   DD's measurement makes it fail-open).
+3. `when @a changes reads @b { }` does not parse, with a misleading message — `E-UNQUOTED-DISPLAY-TEXT` calls the
+   code line "displayed text" + `E-PARSE-001` (DD row 1; `g-when-reads-clause-not-parsed-e-scope-001`). Under S447
+   `reads` retires; the message should say so.
+4. `E-LIFECYCLE-006` never fires at compile time — a self-writing `when` compiles clean and is capped at run time
+   with a `console.error` (DD row 2). Under S447 the case is `E-EFFECT-WRITES-STATE`.
+5. `W-LIFECYCLE-006` is not emitted (DD row 4). Retired S447 (moot).
+6. A false "statement boundary not detected — trailing content would be silently dropped" warning on a `when` body
+   containing a server call; the emitted JS is correct (DD row 11).
+7. A `lin` read in a `when` body reports `E-LIN-001` ("never consumed") instead of `E-LIN-004` (DD row 6).
+8. A false `E-DG-002` ("declared but never consumed") for a cell read only in a `when` body (DD row 4).
+9. A nested `when` reports `E-CODEGEN-INVALID-LOGIC` (fails closed, wrong code) instead of `E-LIFECYCLE-016` (DD
+   row 9).
+10. A `when`-driven page reset beside a `<request deps=[@query, @page]>` sends **2 identical server calls per
+    keystroke**, even when the page was already 1 (DD row 12; the handler-reset form also sends 2, the first with a
+    stale page). `reset-on=` (§6.8.4 rule 4) is the S447 fix.
+11. A reactive `<title>` renders its `<span data-scrml-logic>` wrapper as literal text — `<title>` is RCDATA (DD
+    p10). Not `when`-specific; it removes one outside-world home.
+(Also from DD row 10: an empty `when` body emits no `W-LIFECYCLE-010`.)
+
+**Security exception — not a candidate.** Neither fail-open row leaks data across a trust boundary: an effect body
+runs with the page's own client privileges, a dropped row effect fails to perform an action, and an un-torn-down
+effect keeps performing the page's own action (an analytics call, a scroll, a call to the app's own server with
+values the client already holds). Both are correctness defects, not disclosures, so the S447 security exception to
+the impl#1 freeze does not apply. impl#1's behaviour is what adopters get until the bootstrap passes its gate.
+
+### g-bootstrap-effect-reset-on-owed — bootstrap: owes `<effect deps=[…]>`, the no-write rule (write summary, fail closed), and `reset-on=` (incl. the engine `rule=` check); U0's runtime cascade layer becomes deletable — `NEW S447; MED; open`
+<!-- @gap id=g-bootstrap-effect-reset-on-owed sev=MED status=open locus=compiler/self-host-v2/(effect element parse + scope association; the write-summary analysis; reset-on modifier + static cycle check + engine rule= check; the U0 when runtime on branch s447-u0-r3, unlanded) prov=ruling:user-voice-scrml.md-S447-"when → outside-world effects only, spelled <effect>"+"3b: reset-on= IS allowed on engine cells" -->
+
+The S447 rulings are written into SPEC §6.7.4 (`<effect>`), §6.8.4 (`reset-on=`) and §34 as Nominal text. The
+bootstrap owes:
+
+- **`<effect deps=[…]>`** — a markup lifecycle element; no mount run; `E-EFFECT-NO-DEPS`; scope by tree position
+  (`if=` teardown, one per `<each>` row, route regions); newest-run-wins on re-trigger with the §6.7.7.1 transport
+  rule; derived flush before effect bodies.
+- **The no-write rule** — `E-EFFECT-WRITES-STATE` from a transitive per-function write summary (direct writes,
+  resolved scrml calls incl. server functions, function values in the body); `E-EFFECT-WRITE-UNPROVEN` for `^{}` /
+  unresolvable calls; message names the fix by shape. The keyword `when … changes` spelling carries the same rule
+  and `W-WHEN-EFFECT-DEPRECATED`.
+- **`reset-on=[…]`** — `reset(@self)` in the triggering flush before readers (one change for dependents);
+  `E-RESET-ON-INVALID-ENTRY`, `E-RESET-ON-CYCLE` (static), `E-RESET-ON-NOT-WRITABLE`; on a transition-graph cell
+  `E-RESET-ON-ENGINE-REFUSED` (every non-target state must admit the target), and the reset fires `<onTransition>`.
+- **Deletable:** the U0 runtime cascade layer (branch `s447-u0-r3`, `docs/changes/s446-bootstrap-u0-when-effects/DESIGN.md`
+  §5 — the provenance `Cause` links, the per-segment cyclic check, the LIFO re-run stack, the depth-256 backstop).
+  Q7 (depth 256) and Q8 (polling) LAPSED (S447 1b): with no effect able to write, no effect can trigger another.
+  Polling goes to `<poll>`.
+- Open items the build must not decide silently are listed in SPEC §6.7.4 and §6.8.4 (⚑ OPEN): cross-module write
+  summaries, `navigate()` in an effect, `lift` in an effect body, server/channel cells under `reset-on=`, per-instance
+  resets, and cascades through engine transition effects.
+- **Write requests (S447 3c = (d), SPEC §6.7.7.3):** the "provably writes" classification (its own test — not
+  §6.7.7.1's unclassifiable=write); no mount run except `deps=[]`; server-origin writes (request settle, `<poll>`,
+  channel push, `persist=` cross-tab sync, §52 loads) tagged at their emit sites — they re-baseline instead of
+  triggering and bypass `debounced=` / `throttled=`; `reset-on=` resets inherit their trigger's origin; skip a save
+  whose deps all `==` (§45) their baselines; baseline moves on a successful save. Still OPEN and filed separately:
+  `g-request-write-one-save-in-flight-owed`, `g-request-write-flush-or-warn-on-leave-owed`.
+
+### g-impl1-autosave-request-mount-save-wipes-record — impl#1 DIVERGENCE (filed, not fixed — S447 TS accounting): the documented autosave idiom sends `saveNote("")` on page load, racing the load, and can wipe the record; it also saves the loaded text back and shows it 800 ms late — `NEW S447; HIGH; open`
+<!-- @gap id=g-impl1-autosave-request-mount-save-wipes-record sev=HIGH status=open locus=compiler/src/codegen(the <request> lowering registers every request as an immediately-run effect — the autosave's first run is the mount save)+compiler/src/runtime-template.js(_scrml_reactive_set routes EVERY write, a request's settle assignment included, through the debounce wrapper); PA-located-verify from the DD §2 prov=dd:autosave-request-mount-3c-2026-10-02 -->
+
+**Classification: DIVERGENCE.** SPEC §6.7.7.3 (S447 3c = (d), Nominal) says a provably-writing `<request>` does not
+run on mount (unless `deps=[]`), is triggered only by local writes, is re-baselined by server-origin writes, skips a
+save equal to its baseline, and that server-origin writes bypass `debounced=` (§6.13). impl#1 is frozen for language
+semantics (S447 TS accounting) and does none of it. The bootstrap owes it (`g-bootstrap-effect-reset-on-owed`).
+
+**Measured by the DD on main `4fd980bc6`** (`scrml-support/docs/deep-dives/autosave-request-mount-3c-2026-10-02.md`
+§2; happy-dom with a stubbed fetch; the stub DB starts as `"REAL ISSUE BODY"`). Not re-run for this entry:
+`<note debounced=800ms> = ""` + `<request id="load" deps=[]>${ @note = loadNote() }</>` +
+`<request id="autosave" deps=[@note]>${ @savedAt = saveNote(@note) }</>`:
+1. **Mount save of the default — data loss.** At mount the autosave sends `saveNote("")` together with the load.
+   Run A (save 30 ms, load 60 ms): the blank write landed first, the load read back `""`, the record was **wiped for
+   good**. Run B (load 5 ms): blank on the server from about 34 ms to 816 ms on every page load, for every viewer; a
+   viewer who closes the tab inside that window leaves it blank (§6.7.7.1 lets the in-flight WRITE complete). A
+   viewer without edit rights gets a failing save on load.
+2. **Load echo.** The load's assignment is an ordinary write, so it triggers the autosave and the loaded text is
+   saved back about 800 ms after load — one wasted write per page load, overwriting any concurrent edit.
+3. **Display delay.** The load result goes through the 800 ms debounce, so the editor shows `""` for 800 ms after
+   the data arrives.
+
+**Security exception — not a candidate.** This is data LOSS (an integrity defect against the author's own record,
+triggered by any viewer opening the page), not a disclosure: no value crosses a trust boundary and no
+unauthorized party reads anything. The S447 exception to the impl#1 freeze covers security, so this divergence is
+filed, not fixed. ⚑ For the PA: the destructive, any-viewer trigger makes it the strongest non-security candidate
+for a for-cause fix (S430 P7 "adopter reported it") if an adopter hits it; it is not within the exception as ruled.
+**Workaround on impl#1:** do not use a `<request>` for autosave; save from the input's handler instead.
+
+### g-request-write-one-save-in-flight-owed — a provably-writing `<request>` can have two saves in flight; an older save can reach the server after a newer one — `NEW S447; MED; open`
+<!-- @gap id=g-request-write-one-save-in-flight-owed sev=MED status=open locus=searched:compiler/SPEC.md(§6.7.7.1 rule 2 — a superseded WRITE is discarded but its transport completes; no in-flight serialization anywhere in §6.7.7)+compiler/src/codegen(request lowering — sequence-number guard only) prov=dd:autosave-request-mount-3c-2026-10-02 -->
+
+Banked OPEN by S447 3c sub-call 5 (*"bank two gaps — one save in flight at a time, flush or warn on page leave"*);
+SPEC §6.7.7.3 rule 7. Under §6.7.7.1 rule 2 a superseded WRITE fetch is discarded but its transport runs to
+completion, so with two saves in flight the older can land after the newer and the server keeps stale text (the
+Payload CMS #18348 hazard; Discourse `draftSaving` and WordPress `tempBlockSave` serialize). Owed: a design, then a
+ruling — e.g. a newer trigger waits for the in-flight save and then sends the latest value. Not decided by 3c.
+Applies to both implementations (spec-level gap; no front end serializes).
+
+### g-request-write-flush-or-warn-on-leave-owed — a pending `debounced=` write behind a provably-writing `<request>` dies with the page; up to one debounce window of typing is lost — `NEW S447; MED; open`
+<!-- @gap id=g-request-write-flush-or-warn-on-leave-owed sev=MED status=open locus=searched:compiler/SPEC.md(no beforeunload / pagehide rule anywhere; §6.13 — a pending debounce timer is not flushed on teardown)+compiler/src/runtime-template.js(debounce timers — no page-hide flush) prov=dd:autosave-request-mount-3c-2026-10-02 -->
+
+Banked OPEN by S447 3c sub-call 5; SPEC §6.7.7.3 rule 7. When the tab closes or navigates while a `debounced=`
+write is pending, the timer dies, the write never lands, and the request it would have triggered never runs. Prior
+art protects the last edit with a leave warning (react-admin, Google Docs, Figma), a page-hide flush, or a local
+backup (WordPress sessionStorage, VS Code hot exit). Owed: a design (flush on `pagehide`, warn, or both), then a
+ruling. Not decided by 3c. Applies to both implementations.
