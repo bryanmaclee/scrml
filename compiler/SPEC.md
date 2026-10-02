@@ -6229,7 +6229,7 @@ teardown function. Instead of `cleanup(() => close())`, the developer writes:
 
 ---
 
-### 6.8 The `default=` Attribute and `reset(@cell)` Keyword
+### 6.8 The `default=` Attribute, the `reset(@cell)` Keyword, and `reset-on=`
 
 #### 6.8.1 The `default=` Attribute
 
@@ -6292,6 +6292,7 @@ reset(@compound)          // reset all fields of a compound cell
 - §6.13 — Reactivity attributes (`debounced=` / `throttled=`); reset cancels pending timed writes.
 - §55.13 — reset clears the validity surface's `touched` / `submitted` (for a compound, a field, and — S447 — a validated top-level value).
 - §14.12 — Lifecycle annotation; reset reverts per-access transition state per §6.8.3.
+- §6.8.4 — `reset-on=[…]`: a cell that resets itself when listed cells change (S447).
 - §34 — E-RESERVED-IDENTIFIER, E-RESET-NO-ARG, E-RESET-INVALID-TARGET
 
 #### 6.8.3 Interaction with lifecycle annotation (`(A to B)`)
@@ -6341,6 +6342,124 @@ reset(@state)                        // writes default (.Active); post-type → 
 - §14.12.10 — Normative statements (this section's reciprocal cross-ref bullet)
 - §6.8.2 — Reset semantics this section extends
 - `~/.claude/design-insights.md` — S134 const-deep-freeze ratification block
+
+#### 6.8.4 `reset-on=[@a, @b]` — reset a cell when other cells change
+
+> **Status: Nominal / spec-ahead (S447).** NORMATIVE; **not implemented by impl#1** (frozen for language
+> semantics under the S447 TS accounting ruling — the divergence is filed, `g-impl1-when-effect-divergence-s447`)
+> and **owed by the bootstrap** (`g-bootstrap-effect-reset-on-owed`).
+>
+> **Provenance:** ruling:user-voice-scrml.md S447 "⭐⭐⭐ RULED — \"your recs, except expound 3b\": `when` →
+> outside-world effects only, spelled `<effect>`" — Call 1 = (b): *"Page-reset → a `reset-on=[@a, @b]` modifier
+> on the cell being reset"* · 3a: *"spelling `reset-on=` (kebab)"* · ruling:user-voice-scrml.md S447 "⭐ RULED —
+> 3b: `reset-on=` IS allowed on engine cells, checked against `rule=`; 3c → look at real autosave first" — *"the
+> new rec for engine reset, yes."* (*"`reset-on=` is legal on an engine cell; the reset is checked like ANY write
+> against the cell's contract (§66.11 one transition axis) — EVERY state must admit the reset target in its
+> `rule=`, else a compile error naming the refusing state; the reset is a real transition, so `<onTransition>`
+> handlers fire. … The rest of 3b stands: `reset-on=` cycles are a compile error; legal only on writable
+> cells."*) · dd:`scrml-support/docs/deep-dives/when-reactive-effect-fit-2026-10-02.md` §4 (semantics 1–5; where
+> the DD proposes *"forbid"* on engine cells, the 3b ruling overrides it) · **supersedes:** nothing in this
+> section (new surface); it is the replacement home for the reset job the pre-S447 §6.7.4 sent to `when`
+> (*"Use `when` when you need a side effect (… resetting unrelated state …)"*). **Direction of change:
+> newly-accepting** (a new modifier).
+
+**Why it lives here.** `reset-on=` performs exactly one write — `reset(@self)` (§6.8.2) — and nothing else.
+Its meaning is §6.8's: the reset value is §6.8.1's, and every composition rule (debounced cancel, lifecycle
+revert, the §55 surface) is a rule of `reset`. It is placed beside `default=` and `reset` rather than with the
+write-path attributes of §6.13 / §6.14 because those change *how* writes reach the cell, while this one *is* a
+write, of one fixed kind. It is deliberately not a general "when X changes, set Y = expr" hook — that would be
+`when` again, relocated (DD §4, limit-vs-widen).
+
+**Syntax.** A valued modifier on a cell declaration:
+
+```scrml
+<page reset-on=[@query, @category]> = 1                    // legacy cell form (§6.2)
+let <page:int=1 reset-on=[@query, @category]/>             // §66 form
+```
+
+```
+reset-on-attr ::= 'reset-on=' '[' '@' identifier (',' '@' identifier)* ']'
+```
+
+In the §66 opener it is a **modifier** — the same class as `debounced=` (§6.13), `persist=` (§6.14) and
+validators — and so it stays INSIDE the opener under the S447 opener-keyword rule (*"inside the opener only the
+name, type, value, typed attributes, and flags"*; keywords such as `let` / `export` go before the `<`). Like
+every modifier in an opener it binds that declaration's own value (§66.4 rule 3); a CHILD field that resets is a
+child declaration carrying its own `reset-on=` (§66.4 rule 2).
+
+**Rules.**
+
+1. **The write.** When any listed cell changes (the reactive notify of §6.3, as for `<effect>`, §6.7.4), the
+   runtime SHALL perform `reset(@self)`: if the cell carries `default=`, evaluate that expression at reset time
+   and write the result; otherwise re-evaluate the cell's initializer (its own value / init expression) and write
+   the result (§6.8.1, §6.8.2). For a compound cell this is `reset(@compound)` — every field.
+2. **Entries.** Every entry SHALL be a declared, mutable, non-derived reactive cell in scope at the declaration
+   — the rule `<effect deps=[…]>` entries follow (E-LIFECYCLE-007's condition). An undeclared name, a non-`@`
+   name or a derived cell is **E-RESET-ON-INVALID-ENTRY**; an empty list (`reset-on=[]`) is the same error.
+3. **Acyclic, statically.** The reset-on edges (entry → reset cell) form a graph the compiler builds at compile
+   time. A cycle — including a cell listing itself — is **E-RESET-ON-CYCLE**, naming the cells on the cycle.
+   Chains (`a` resets on `b`, `b` resets on `c`) are legal; a write to `c` resets `b`, which resets `a`. Because
+   the graph is static and acyclic, a chain of resets terminates by construction; no runtime bound is needed.
+4. **One flush, before readers.** The resets a write triggers — the whole chain, in topological order — SHALL be
+   applied in the same flush as the triggering write, **before** any `<effect>`, `<request>` or render reads the
+   reset cells. The triggering write and the resets it causes are ONE change for every dependent: a `<request>`
+   or `<effect>` whose dependencies include both the trigger and a reset cell runs ONCE for it, and sees the
+   reset value. (One keystroke in a search box → one search, already on page 1 — DD §2 row 12 measured two for
+   both pre-S447 shapes.)
+5. **Writable cells only.** The reset is a write and is checked against the cell's write contract like any
+   write (§66.11: `reset(@x)` is a `replace`). `reset-on=` is legal on a cell whose contract admits that write:
+   a writable (`let`) scalar; a sequence, tuple or struct whose type grants `replace`; a cell with a lifecycle
+   `(A to B)` (the reset follows §6.8.3); an engine / transition-graph cell (rule 6); a legacy-form cell (§6.2),
+   which carries the transitional all-permissions grant (§66.12.4). On a **locked** or **derived** cell
+   (`const <x>`, a §66 locked cell, a `derived=` engine) it is **E-RESET-ON-NOT-WRITABLE**.
+6. **Engine cells — allowed, checked against `rule=` (S447 3b).** On a cell that carries a transition graph
+   (`<engine for=T initial=.X>`'s variable, §51.0; a §66.13.2 enum value with `rule=` state-children), the reset
+   target is computed by rule 1 (`default=` if present, else the initial value). **Every state other than the
+   target itself SHALL admit the target in its `rule=`** (`rule=*` admits every variant). A state that does not
+   is **E-RESET-ON-ENGINE-REFUSED**, and the diagnostic SHALL name every refusing state and the target
+   (*"`.Shipped` has `rule=.Delivered`; it does not admit the reset target `.Draft`"*). The target state itself
+   needs no self-edge: a reset while already in the target is a self-write, a no-op (§51.0.F.1). When the reset
+   target is not a single statically known variant (a `default=` expression), every variant the expression's type
+   admits is a possible target and every state SHALL admit each of them — fail closed.
+   **The reset is a real transition:** the `<onTransition>` handlers for that edge fire (`to=` the target in the
+   from-state, `from=` the from-state in the target state), a single-target state-child `effect=` whose `rule=`
+   is the target fires, and the §51.7.1 order holds (transition effects, then `<effect>`s). A composite state is
+   left by an ordinary external transition (§51.0.O / §51.0.Q). *Why allowed (the ratified reasoning):* under the
+   no-write rule an `<effect>` cannot write, so banning `reset-on=` on engines would leave an engine NO way to
+   react to an outside change; `reset-on=` is a write trigger, not a second progression model.
+7. **Composition — all of it is `reset`'s.**
+   - **`debounced=` / `throttled=` (§6.13):** a pending timed write on the reset cell is cancelled before the
+     reset value is applied (§6.8.2). A debounced TRIGGER cell triggers the reset when its debounced write lands
+     on the cell, not at each keystroke.
+   - **Lifecycle (§14.12):** the per-access transition state reverts per §6.8.3.
+   - **Validators and the validity surface (§55):** the reset clears the surface exactly as `reset(@x)` does —
+     `touched` and `submitted` become `false` and `errors` / `isValid` recompute (§55.13; S447 "validity calls
+     2-6" bundle (ii) — *"`reset(@x)` clears `touched` + `submitted`"*). A reset form field therefore shows no
+     stale errors.
+   - **`persist=` (§6.14):** the reset value is written to storage like any write. A construction-time restore
+     of a TRIGGER cell is not a change and triggers no reset (nothing fires at construction — consistent with
+     `<effect>`, §6.7.4); whether a cross-tab `storage`-event write to a trigger is a change follows O-061-5.
+     ⚑ OPEN (O-061-8, unchanged): whether a reset removes the storage key or writes the default.
+8. **Static check location.** Rules 2, 3, 5 and 6 are compile-time errors; none of them is deferred to run time.
+
+⚑ OPEN (not ruled):
+- **Server / channel cells.** Whether `reset-on=` is legal on a §52 server-authoritative cell or a `<channel>`-
+  synced cell, and if so which client performs the reset when the trigger change reaches every client (a
+  locally-originated trigger resets once; a synced trigger would reset once per client). Until ruled, the
+  conservative reading is that the reset is legal exactly where `reset(@x)` is legal on that cell; the
+  multi-client question is open.
+- **Per-instance resets.** Whether a child field's `reset-on=` may name a sibling field of the same instance or
+  an `<each>` row alias, giving a per-instance reset (DD §4 open item).
+- **Cascades through transition effects.** Rule 3 makes the reset-on graph acyclic; a transition handler fired
+  by an engine reset (rule 6) may itself write cells. Whether that needs its own static check is the same open
+  question as cascades through engine effects generally (DD §12 Q6).
+
+**Cross-references:** §6.7.4 (`<effect>` — the construct that may NOT write; its error names `reset-on=` as the
+fix) · §6.8.1 / §6.8.2 (the reset value and the `reset` write) · §6.8.3 (lifecycle revert) · §6.13 (timed writes
+cancelled) · §6.14 (persisted cells) · §51.0.F / §51.0.F.1 / §51.0.H (`rule=`, self-write no-op, transition
+handlers) · §55.13 (validity surface cleared) · §66.4 rule 3 (modifiers bind the own value) · §66.11 (the write
+is a `replace`) · §34 (E-RESET-ON-INVALID-ENTRY, E-RESET-ON-CYCLE, E-RESET-ON-NOT-WRITABLE,
+E-RESET-ON-ENGINE-REFUSED).
 
 ---
 
@@ -37833,6 +37952,11 @@ resetting the underlying value:
 
 > **Provenance (`reset(@email)` row, added S447):** ruling:user-voice-scrml.md S447 "validity calls 2-6" call 6 (ii)
 > — *"`reset(@x)` clears `touched` + `submitted`"*.
+
+A **`reset-on=[…]`** reset (§6.8.4, S447) IS `reset(@x)` and clears the surface identically — row 3 for a validated
+top-level value, rows 1–2 for a compound or a field. *(Provenance: ruling:user-voice-scrml.md S447 "`when` →
+outside-world effects only, spelled `<effect>`" Call 1 (*"Page-reset → a `reset-on=[@a, @b]` modifier"*) composed
+with S447 "validity calls 2-6" call 6 (ii).)*
 
 `reset` is a language keyword (`E-RESET-NO-ARG` if called with no argument; `E-RESERVED-IDENTIFIER`
 if shadowed); see §6.8 for the underlying semantics. Synthesized-property-side effects
