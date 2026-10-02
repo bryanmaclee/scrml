@@ -36,7 +36,10 @@ Probes: session scratchpad `d063/` (r1.scrml, r2.scrml, r3.js, run.sh) — not c
 - §6.7.4 re-trigger → S446 "b on retrigger".
 - §6.7.4 W-LIFECYCLE-006 exclusion → S446 PA note recorded with the same ruling line.
 
-## PA reading — for veto
+## PA reading — for veto → ALL TEN ACCEPTED S447
+
+> RULED: user-voice-scrml.md S447 "your recs on all of them" item 1. Landed S447 (branch `spec/s447-dpa063-termination`): each reading now carries a `> **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1` line in SPEC §7.2.2 / §40.8 / §6.7.4; reading 9 stays OPEN by ruling; reading 10's transport question settled as "reads may abort, writes never".
+
 1. **END-token closed list** (§7.2.2 rule 2): binary ops incl. `in`/`instanceof`/`is`; `=` + compound assignments; `.` `?.`; `?` `:`; `,`; `=>` `:>` (+ deprecated arm aliases); prefix `!` `typeof` `new`. The ruling names the classes; the exact membership is mine.
 2. **Propagation `?` vs conditional `?` at line end**: a `?` glued to its operand (`load(id)?`) is §19.5 propagation and ENDS the statement; a `?` with whitespace before it continues (conditional). Adjacency decides, by analogy to the §4.14 `:`-shorthand whitespace rule. Without this, the ruled END-list `?` breaks every line-final `f()?` (19 corpus lines incl. §19.5's own example). Alternative for veto: conditional `?` never ends a line (multi-line ternary only inside `( )`).
 3. **Leading `/` and `<` are expression starts** (regex / markup), not leading operators (rule 3a).
