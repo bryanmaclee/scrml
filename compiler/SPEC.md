@@ -3046,7 +3046,7 @@ produce the same key).
 #### 6.5.4 Array Length Reactivity
 
 `@items.length` is a reactive expression. Reading `@items.length` inside a reactive context
-(a template interpolation, a `when` dep-list, or a `const @` derived expression) creates a
+(a template interpolation, an `<effect deps=[…]>` list (§6.7.4; formerly a `when` dep-list), or a `const @` derived expression) creates a
 subscription to `@items`. When `@items` changes, any consumer of `@items.length` re-evaluates.
 
 ```scrml
@@ -3436,7 +3436,7 @@ microtask flush.
   first read of any derived value triggers its initial evaluation.
 - The compiler SHALL track reactive dependencies transitively through function calls that
   appear in reactive positions. A reactive position is any of: a markup interpolation
-  `${expr}`, a `const <name> = expr` derived declaration, or a `when` dep-list entry. If
+  `${expr}`, a `const <name> = expr` derived declaration, or an `<effect deps=[…]>` entry (§6.7.4; formerly a `when` dep-list entry). If
   a function `f()` is called in a reactive position and `f`'s body (as seen by the
   compiler's static call graph) reads one or more `@variable`s, those `@variable`s SHALL
   be recorded as dependencies of the enclosing reactive expression, exactly as if the
@@ -5455,7 +5455,7 @@ when <#paymentGuard>.fired changes {
 ```
 
 **`.fired` is reactive.** The compiler SHALL emit the assignment to `<#id>.fired` through
-the reactive system so that any markup or `when` block that reads `<#id>.fired`
+the reactive system so that any markup or `<effect>` (§6.7.4) that reads `<#id>.fired`
 re-evaluates after the timeout fires.
 
 #### `<timeout>` Inside `for` Iteration
@@ -6892,7 +6892,7 @@ type SidebarMode:enum = { Open, Collapsed }
 - **O-061-3** — The stored **envelope** (e.g. a version marker or a §47.1.4 type-fingerprint field). Under the call-4 ruling a fingerprint mismatch is not by itself a discard trigger, so what, if anything, the envelope carries is open.
 - **O-061-4** — Whether the §55 validators are part of the "full declared contract" a restored value is decoded against, or only type-level contracts (refinements, sequence bounds, lifecycles).
 - **O-061-5** — A cross-tab `storage`-event value: is it judged as a write under the §66.11 write contract (e.g. `rule=` guards) or applied as construction-like hydration? What happens when it fails to decode (keep the current value, or take the default) and when the key is removed in the other tab?
-- **O-061-6** — Whether the restore at construction fires `when @x changes` effects.
+- **O-061-6** — Whether the restore at construction fires `when @x changes` effects. *(S447: effects are now `<effect deps=[…]>` and SHALL NOT run at program construction (§6.7.4); a restore at construction is therefore not observed by any effect, and — by the same rule — triggers no `reset-on=` reset (§6.8.4 rule 7). Read as settled by S447 2b for effects; the PA flags it for confirmation.)*
 - **O-061-7** — Write timing: per-change or coalesced per microtask (the §6.7.4 timing).
 - **O-061-8** — Whether `reset(@x)` also **removes** the storage key, or only writes the default.
 - **O-061-9** — The attribute's **position in a §66 opener**, and `persist=` on a §66 declaration's **non-shared** instances with an author per-instance key expression.
@@ -27875,7 +27875,7 @@ If adopters report friction on either trade-off, harden via extended lookbehind 
 
 ### 46.1 Overview
 
-The parent of a nested `<program>` (§43) observes the child's lifecycle through named event hooks using the `when ... from <#name>` syntax. This extends the existing `when @var changes` pattern (§6.7.4).
+The parent of a nested `<program>` (§43) observes the child's lifecycle through named event hooks using the `when ... from <#name>` syntax. This extends the existing `when @var changes` pattern (§6.7.4). *(S447: the `when @var changes` statement is soft-deprecated in favour of `<effect deps=[…]>` (§6.7.4); these event hooks keep the `when` keyword — they are event handlers, not change effects, and are not retired. Whether they are respelled is OPEN.)*
 
 ### 46.2 Event Hooks
 
@@ -33444,7 +33444,7 @@ ${ function markDelivered() {
 ```
 
 Expected behavior: `@deliveryLog` is updated automatically when `markDelivered()` is called.
-No `when @order changes` block is needed. The effect lives with the transition rule.
+No reactive-effect block is needed. The effect lives with the transition rule. *(S447: an `<effect>` — formerly `when @order changes` — could not write `@deliveryLog` at all, §6.7.4; state changes on a transition belong here.)*
 
 **Example 3 — Auth state machine (invalid: unreachable transition detected at compile time):**
 
@@ -33624,17 +33624,18 @@ effect block SHALL be a compile error (E-ENGINE-008: `event` is not in scope her
 
 ### 51.7 Interaction with Existing Features
 
-#### 51.7.1 Interaction with `when @var changes {}`
+#### 51.7.1 Interaction with `<effect deps=[@var]>` (formerly `when @var changes {}`)
 
-`when @var changes {}` remains the post-assignment reactive effect mechanism (§6.7.4). It
+`<effect deps=[@var]>` (§6.7.4) remains the post-assignment reactive effect mechanism. It
 fires after the assignment is applied, regardless of whether the assignment was a transition
 request.
 
-Transition effect blocks and `when @var changes` blocks are complementary:
+Transition effect blocks and `<effect>`s are complementary:
 
 - Transition effect blocks are attached to specific `From => To` pairs. They fire only
-  when that exact transition occurs.
-- `when @var changes` fires on every change to the variable, regardless of transition path.
+  when that exact transition occurs, and they MAY write state (governed by contracts).
+- An `<effect>` listing the variable fires on every change to it, regardless of transition path, and
+  writes no reactive state (E-EFFECT-WRITES-STATE) — it drives the outside world.
 
 Neither replaces the other. A developer MAY use both. The execution order is:
 
@@ -33642,12 +33643,19 @@ Neither replaces the other. A developer MAY use both. The execution order is:
 2. Assignment applied.
 3. Transition effect blocks fire (in declaration order if multiple rules match, which
    cannot happen in a deterministic machine but could in a degenerate one).
-4. `when @var changes` fires.
+4. `<effect>`s listing the variable fire.
+
+A `reset-on=` reset of an engine cell (§6.8.4 rule 6) is a transition and follows the same order.
 
 **Normative statement:**
 
-- Transition effect blocks SHALL execute before `when @var changes {}` handlers for the
-  same variable.
+- Transition effect blocks SHALL execute before `<effect>`s (and the soft-deprecated `when @var changes {}`
+  spelling) for the same variable.
+
+> **Amended S447** — respelled for `<effect>`; the order is unchanged. **Provenance:** ruling:user-voice-scrml.md
+> S447 "`when` → outside-world effects only, spelled `<effect>`" · ruling:user-voice-scrml.md S447 "3b:
+> `reset-on=` IS allowed on engine cells" · **supersedes:** *"`when @var changes {}` remains the post-assignment
+> reactive effect mechanism"* and the `when` wording of the list and normative statement.
 
 #### 51.7.2 Interaction with `match`
 
@@ -33914,7 +33922,7 @@ The four shadow booleans collapse to one projection. Never-drift by construction
 - Projection rules MAY include `given` guards evaluated at read time. The first matching
   rule (top-to-bottom) wins; an unguarded rule terminates its alternation group.
 - The projected variable SHALL be observable by `match`, `${...}` interpolation,
-  `when @var changes`, and all other reactive-read sites as if it were a normal reactive
+  `<effect deps=[@var]>` (§6.7.4), and all other reactive-read sites as if it were a normal reactive
   variable. The only distinction is write-rejection.
 
 #### 51.9.7 Future Work
@@ -34149,7 +34157,7 @@ XState `after`, SCXML `<send delay>`, Erlang `gen_statem` state timeouts.
 
 A UI that fetches data and shows a "Taking too long? Refresh." banner after
 30s currently requires three coordinated pieces: a `<timeout>` element, a
-`when @var changes` effect to arm and disarm it, and a `cleanup()` to cancel
+`when @var changes` effect (now `<effect>`, §6.7.4) to arm and disarm it, and a `cleanup()` to cancel
 it on scope exit. The pieces are correct-by-case but not correct-by-
 construction — a developer can forget to arm, forget to disarm, or let the
 reactive dep list drift out of sync.
@@ -36303,7 +36311,7 @@ SHALL be:
 1. **Field-level inline predicate evaluated** (stateless, fast — `E-CONTRACT-*`)
 2. If the field check passes, **struct machine guard evaluated** (contextual — `E-ENGINE-*`)
 3. If both checks pass, **assignment applied**
-4. `when @var changes {}` reactive effects fire
+4. `<effect>`s listing the variable fire (§6.7.4; formerly `when @var changes {}`)
 
 This order ensures the cheap, local check runs first. The machine guard is not evaluated if the
 field-level check already rejects the value.
@@ -37321,11 +37329,11 @@ A `lin @sub: Submission` consumed by `@sub = @sub.validate(now)`: the transition
 
 Covered in §54.4. Substate exhaustiveness is enforced identically to enum variant exhaustiveness (E-TYPE-020).
 
-#### 54.7.4 State-local transitions × `when @var changes {}` (§51.7.1)
+#### 54.7.4 State-local transitions × `<effect deps=[@var]>` (§51.7.1)
 
 `@sub.validate(now)` re-assigns `@sub` exactly once.
 
-**Normative:** `when @sub changes {}` SHALL fire exactly once per state-local transition call.
+**Normative:** an `<effect deps=[@sub]>` (formerly `when @sub changes {}`, S447 §6.7.4) SHALL fire exactly once per state-local transition call.
 
 #### 54.7.5 State-local transitions × Audit clause (§51.11)
 
@@ -38240,7 +38248,7 @@ bind top-level values; a `formFor` form is §55.17.7.
 
 The gate exists only on gated forms (§55.17.3). It needs a join between "this action" and "these values", and the
 `<form>` is the only one the compiler can see. **Nothing else is gated:** an `onclick` outside a form, a
-`type="button"` inside one, a `when … changes` auto-save, a timer. Those stay author-gated through the surface:
+`type="button"` inside one, an `<effect>` or write-`<request>` auto-save (formerly `when … changes`, §6.7.4), a timer. Those stay author-gated through the surface:
 `if (!@x.isValid) return`, `disabled=!@x.isValid`. This is possible for every validated value now that top-level
 values have a surface (§55.5.1).
 
@@ -40165,6 +40173,14 @@ Applying the machine to the existing corpus:
   `W-MATCH-ARROW-LEGACY`, `W-GIVEN-ARROW-LEGACY`, `W-COLON-SHORTHAND-LEGACY-PLACEMENT`,
   `W-CONST-AT-DEPRECATED`, `W-PURE-DEPRECATED`): SOFT; eligible to schedule iff their
   `scrml fix` rule is verified-landed AND the corpus is clean — at a first MAJOR, *if ever*.
+- **`W-WHEN-EFFECT-DEPRECATED` (`when … changes { }` → `<effect deps=[…]>`, §6.7.4) — added S447:** SOFT,
+  unscheduled; reserved `E-WHEN-EFFECT-DEPRECATED` named, unfired; **gate-blocked** until its `scrml fix` rule
+  is verified-landed (§63.4). The rule is mechanical only for a body that writes no reactive cell; a writing
+  body has no mechanical rewrite (the fix reports the E-EFFECT-WRITES-STATE fix text). The window governs the
+  SPELLING only: the no-write rule applies to both spellings at once (§6.7.4 "The retiring keyword form"), so
+  §63.1's "parses identically" holds. The never-parsed `reads` clause is not in the window (it was never in the
+  contract). *(Provenance: ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled
+  `<effect>`" — Call 2: *"The keyword `when (…) changes reads … { }` form retires through §63."*)*
 
 ### 63.8 What is NOT a lifecycle deprecation
 
