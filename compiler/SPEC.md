@@ -647,17 +647,26 @@ A newline between `<` and an identifier is whitespace per §4.3: it produces the
 
 #### 4.11.3 `is` Keyword
 
-`is` is a context-sensitive keyword valid in two positions:
+`is` is a context-sensitive keyword valid in ~~two positions~~ one position:
 1. As the variant-check operator in a boolean expression: `expression is .VariantName`
-2. In a `when` guard: `when expression is .VariantName { ... }`
+2. ~~In a `when` guard: `when expression is .VariantName { ... }`~~ *(struck S449)*
 
 In all other contexts, `is` is a valid identifier.
+
+> **Amended S449 — the `when … is` guard is struck.** Position 2 had no grammar anywhere in this SPEC and no
+> implementation: impl#1 rejects `when @shift is .OnDuty { … }` (`is` undeclared, E-SCOPE-001), and its one sample was
+> a malformed fragment S441 rewrote to `<p if=(@s is .Active)>`. Removing it rejects nothing real. A variant check is
+> the position-1 operator in any boolean position (`if=(@shift is .OnDuty)`, `if (…)`); reacting to a change is an
+> `<effect>` (§6.7.4). **Provenance:** ruling:user-voice-scrml.md S449 item 7 — *"7-11 = **(a)** strike §4.11.3 `when
+> x is .V`, keep worker `when … from` hooks for now"* · dd:`scrml-support/docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`
+> item 11 · **supersedes:** position 2 and the normative bullet *"`is` SHALL be recognized as a keyword in `when` guard
+> position."* (struck in place). **Direction of change:** none measurable (the form never compiled).
 
 **Normative statements:**
 
 - `is` SHALL be recognized as a keyword in variant-check position: between an expression
   and a `.VariantName` shorthand.
-- `is` SHALL be recognized as a keyword in `when` guard position.
+- ~~`is` SHALL be recognized as a keyword in `when` guard position.~~ *(struck S449 — above)*
 - In all other syntactic positions, `is` SHALL be treated as a valid identifier.
 - The parser SHALL disambiguate `is` by context: after an expression that has an enum type,
   `is` begins a variant check. Elsewhere, it is an identifier.
@@ -4916,8 +4925,16 @@ effect-body   ::= '$' '{' logic-content '}'
 - **Dependency entries must be mutable cells.** Every `deps=` entry SHALL be a declared, mutable reactive cell
   in scope at the `<effect>`. An undeclared name, a non-`@` name, or a **derived** cell (`const <x>` / a §66
   locked cell with a reactive initializer) is **E-LIFECYCLE-007** — a derived value has no change event of its
-  own; list the cells it reads instead. *(Unchanged from the keyword form, EC-1.)* ⚑ OPEN: whether a §66 field
-  path (`@signup.email`) or a `<#id>.prop` (`<#t>.fired`) may be a dep entry.
+  own; list the cells it reads instead. *(Unchanged from the keyword form, EC-1.)* ~~⚑ OPEN: whether a §66 field
+  path (`@signup.email`) or a `<#id>.prop` (`<#t>.fired`) may be a dep entry.~~ **Closed S449 (rec pack item 4 =
+  (a)): not now.** A §66 field path (`deps=[@signup.email]`) and a compiler-synthesized property
+  (`deps=[<#save>.error]`, `<#t>.fired`) are not cells and are **E-LIFECYCLE-007**; the message SHALL say *"list
+  `@signup`; read `@signup.email` in the body"* (for a field path) or *"list the cell the property reflects"*. A
+  field-path trigger is expressed by listing the parent cell and comparing against a plain non-reactive local in the
+  body (legal: not a reactive write). *Cost, stated:* `<#save>.error` has no clean workaround ("toast when the save
+  fails" is a real outside-world job); it is the first widening to reopen when real code needs it. *(Provenance:
+  ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination, and 7-11 = **(a)** strike §4.11.3 `when x is .V`, keep worker `when … from` hooks for now; the three PA readings in their veto window confirmed."* — pack item 4: *"(a) not now. List the whole cell. Revisit `<#id>.error` if real code needs it"*;
+  supersedes the struck OPEN.)*
 
 #### The no-write rule — E-EFFECT-WRITES-STATE
 
@@ -4971,12 +4988,26 @@ construction-read — writing state from an effect that only read). §6.15 forbi
 for a well-formed program those summaries are empty and both routes are closed by construction; the summary
 still follows the read, as defence in depth. *(Provenance: ruling:user-voice-scrml.md S449 item 3.)*
 
-⚑ OPEN (not ruled): (i) whether the write-summary reaches across a module boundary into an imported `.scrml`
-module whose body is not in the compilation (DD §12 Q1 — impl#1's cross-file E-FN-003 reach is unverified; the
-rule above requires it, and an unreachable body falls under rule 4, fail closed); (ii) whether `navigate()` / a
-soft navigation from an effect body is a write (route parameters are reactive) — lean: not a write (the URL is
-the outside world; a route-enter is a lifecycle edge, §6.7.2.1), unruled; (iii) whether `lift` in an effect body
-is an error (an effect has no render position) — the keyword form allowed it; unruled.
+~~⚑ OPEN (not ruled): (i) whether the write-summary reaches across a module boundary into an imported `.scrml`
+module whose body is not in the compilation …; (ii) whether `navigate()` / a soft navigation from an effect body
+is a write (route parameters are reactive) …; (iii) whether `lift` in an effect body is an error …~~ **Closed S449**
+(provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination, and 7-11 = **(a)** strike §4.11.3 `when x is .V`, keep worker `when … from` hooks for now; the three PA readings in their veto window confirmed."*; supersedes the struck OPEN):
+
+- **(i) Across modules — always (pack item 1 = (a)).** The write summary crosses every `.scrml` import, the
+  standard library included (it ships as `.scrml` source). A callee whose body is not available to the compilation
+  is E-EFFECT-WRITE-UNPROVEN (rule 4) — fail closed, as rule 2 already required. **Obligation on an
+  implementation:** each module's write summaries SHALL be recorded in its exported signatures, so separate
+  compilation and caching preserve them. (The same summaries serve §6.7.1a and §6.15.)
+- **(ii) `navigate()` is not a write (pack item 2 = (a)); allowed in an effect body.** The OPEN's parenthesis
+  *"route parameters are reactive"* was wrong: §20.4's `route` is a plain compiler-provided binding, not a cell
+  (`@route` is E-SCOPE-010). A soft navigation re-seeds the INCOMING route region's cells, which is construction
+  (§20.8.8 rule 5), and route-leave unregisters the outgoing region's effects (§6.7.2 step 1); nothing synchronously
+  re-triggers an effect. *(Not newly-accepting: impl#1 compiles `when @signedIn changes { … navigate("/login") }`.)*
+- **(iii) `lift` in an effect body is an error — E-LIFT-IN-LIFECYCLE-BODY (pack item 3 = (a)).** An `<effect>`
+  renders nothing, and `lift` writes scrml-owned DOM, which is not the outside world. The message SHALL point to
+  `<each in=@…>` (or `if=` / a derived markup cell, §6.6.17). The same code covers an `<onMount>` body (§6.7.1a).
+  *(Newly-rejecting; blast radius measured by the pack: zero `lift`-in-`when` bodies in samples / examples /
+  stdlib / flogence / giti / 6nz.)*
 
 **The message names the fix (S447 1a).** E-EFFECT-WRITES-STATE SHALL name the written cell and the three
 homes for the job, picked by shape where the compiler can tell:
@@ -5031,14 +5062,22 @@ dep-list  ::= '@' identifier | '(' '@' identifier (',' '@' identifier)* ')'
 - **The `reads` clause retires with no window.** `when @a changes reads @b { }` never parsed in any
   implementation (DD §2 row 1), so it was never in the contract. It is a syntax error whose message SHALL say
   that `reads` is retired and that reading an unlisted cell needs no annotation. **H-LIFECYCLE-001** (the
-  off-by-default hint the `reads` clause suppressed) **retires** with it — PA reading, veto window: the pattern
-  it flagged is correct and dominant, and its only suppression mechanism never existed.
+  off-by-default hint the `reads` clause suppressed) **retires** with it — ~~PA reading, veto window~~ **confirmed
+  S449** (ruling:user-voice-scrml.md S449 item 7 (*"the three PA readings in their veto window confirmed"*); rec pack V2): the pattern it flagged is correct and dominant, and its only suppression
+  mechanism never existed.
 - No removal version is named (§63.2). The `scrml fix` rule is owed and unverified; until it is verified-landed
   the form cannot be scheduled (§63.4).
 - **Not retired:** the worker / nested-program event hooks `when message(data) { }` and `when … from <#name>
-  (…) { }` (§43, §46), and the `when expr is .Variant { }` guard of §4.11.3. They share the keyword, not the
-  construct. ⚑ OPEN: with `when … changes` gone, the keyword survives only in those hooks; whether they are
-  respelled is not ruled (DD §6.4).
+  (…) { }` (§43, §46)~~, and the `when expr is .Variant { }` guard of §4.11.3~~. They share the keyword, not the
+  construct. ~~⚑ OPEN: with `when … changes` gone, the keyword survives only in those hooks; whether they are
+  respelled is not ruled (DD §6.4).~~ **Closed S449 (rec pack item 11):** the `when expr is .Variant { }` guard is
+  **struck** — it had no grammar anywhere in this SPEC and no implementation (impl#1 rejects it, `is` undeclared,
+  E-SCOPE-001), so removing it from §4.11.3 and §18.16 rejects nothing real. The worker hooks are **kept for now**:
+  they are event handlers (they may write, like `onclick=`), not effects, so the no-write rule does not touch them;
+  respelling them as `on*` attributes on the `<program>` instance collides (the child's inbound `when message` and
+  the parent's inbound hook would both be `onmessage=` on one element), so a respelling needs its own design pass,
+  triggered by the next real §43 adopter. With the guard struck, the keyword `when` means exactly "a worker event".
+  *(Provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination, and 7-11 = **(a)** strike §4.11.3 `when x is .V`, keep worker `when … from` hooks for now; the three PA readings in their veto window confirmed."*; supersedes the struck guard mention and OPEN.)*
 
 #### Interaction with derived values and engines
 
@@ -5049,8 +5088,46 @@ dep-list  ::= '@' identifier | '(' '@' identifier (',' '@' identifier)* ')'
 | engine `effect=` / `<onTransition>` (§51.0.H) | a transition | No | Yes (governed by contracts) |
 | `<effect deps=[…]>` | a listed cell changes | No | **No** |
 
-⚑ OPEN (DD §12 Q6, not ruled): engine transition effects may still write cells, so a cascade through engine
-effects across engines is not covered by the no-write rule.
+~~⚑ OPEN (DD §12 Q6, not ruled): engine transition effects may still write cells, so a cascade through engine
+effects across engines is not covered by the no-write rule.~~ **Closed S449 (rec pack item 7 = (b)): a static
+cycle check — E-TRANSITION-WRITE-CYCLE.** *(Provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination, and 7-11 = **(a)** strike §4.11.3 `when x is .V`, keep worker `when … from` hooks for now; the three PA readings in their veto window confirmed."* — pack item 7: *"(b) static cycle check. A
+cycle with no time edge is an error, and the fix is `<onTimeout>`"*; supersedes the struck OPEN and the §6.8.4
+"Cascades through transition effects" OPEN.)*
+
+Engine transition handlers may write cells (they are governed by contracts, not by the no-write rule), and a
+`reset-on=` reset of an engine cell is a real transition that fires them (§6.8.4 rule 6). The compiler SHALL build
+the **transition-write graph** and reject a cycle in it:
+
+- **Nodes:** one per state (variant) of every cell that carries a transition graph (an engine variable, §51.0; a
+  §66.13.2 enum value with `rule=` state-children), and one per other reactive cell.
+- **Handler edges:** from state S of engine cell E to every node that a **transition handler** run when E enters S —
+  a state-child `effect=` of S, an `<onTransition>` whose edge ends in S (or leaves S, for a `from=` handler in S's
+  successor) — may write, by its write summary (§6.7.4), **on any path, including after a server call** (fail
+  closed). A write of engine cell F to a statically known variant V targets node (F, V); to an unknown variant, every
+  state of F. A self-write (S → S) is a no-op (§51.0.F.1) and contributes no edge.
+- **Reset edges:** from every node of a cell A to the reset target of every cell B whose `reset-on=` lists A
+  (§6.8.4 rule 1 / rule 6 — the target state for an engine cell, the cell's node otherwise).
+- **Time and user edges break a loop and are not edges here:** a time-driven transition (`<onTimeout>`,
+  `<onIdle>`, §51.0.M / §51.0.R), a `<timer>` / `<timeout>` / `<poll>` body, an event handler. An engine opener
+  `effect=` (§51.0.H Form 3) runs once at module init, not on a transition, and contributes no edge.
+- **A cycle is E-TRANSITION-WRITE-CYCLE**, naming the nodes and the handler or `reset-on=` on each edge; the fix
+  the message names is a time edge — e.g. `<onTimeout after=5s to=.Pushing/>` in the state that retried at once.
+
+```scrml
+type SyncState:enum = { Idle, Pushing, Failed }
+<engine for=SyncState initial=.Idle>
+    <Idle rule=.Pushing/>
+    <Pushing rule=(.Idle | .Failed) effect=${ push() !{ | _ e :> { @syncState = .Failed } } }/>
+    <Failed rule=.Pushing>
+        <onTransition from=.Pushing>${ @syncState = .Pushing }</>   // E-TRANSITION-WRITE-CYCLE: Pushing → Failed → Pushing
+    </>                                                            // fix: <onTimeout after=5s to=.Pushing/> in Failed
+</>
+```
+
+*Cost, stated (the pack's):* a guarded, terminating cycle (`if (@attempts < 3) @syncState = .Pushing`) is a false
+positive; the escape is the time edge, which is the state-shaped spelling of a retry anyway. Because self-writes are
+already no-ops, most ping-pong never forms a cycle. The check is static and fails closed; no runtime depth bound is
+added (the U0 net S447 1b ruled deletable stays deleted).
 
 #### Normative Statements
 
@@ -5061,6 +5138,11 @@ effects across engines is not covered by the no-write rule.
   (E-EFFECT-WRITES-STATE); a body the write-summary analysis cannot prove write-free SHALL be rejected
   (E-EFFECT-WRITE-UNPROVEN).
 - An `<effect>` (or keyword `when`) inside an effect body SHALL be E-LIFECYCLE-016.
+- `lift` in an `<effect>` body SHALL be E-LIFT-IN-LIFECYCLE-BODY (S449).
+- The write summary SHALL cross every `.scrml` module import; an unavailable callee body SHALL be
+  E-EFFECT-WRITE-UNPROVEN (S449).
+- A cycle in the transition-write graph (handler and `reset-on=` edges, no time or user edge) SHALL be
+  E-TRANSITION-WRITE-CYCLE (S449).
 - An empty `<effect>` body SHALL be W-LIFECYCLE-010.
 - An `<effect>` SHALL be unregistered when its owning scope, route region or `<each>` row is destroyed
   (§6.7.2 step 1), and SHALL NOT be unregistered on re-render.
@@ -5081,7 +5163,7 @@ effects across engines is not covered by the no-write rule.
 | Persist a cell across reloads | `<x persist="local" key="app.x"> = init` (§6.14 — **Nominal**, lands with the bootstrap). Until it lands, a hand-written recipe SHALL encode on write and decode + check on read: see the note below. |
 | Reset a cell when other cells change (page → 1 on a new search) | `let <page:int=1 reset-on=[@query, @category]/>` (§6.8.4) |
 | Reset a cell on a specific transition (clear the cart on logout) | engine `<onTransition>` (§51.0.H) |
-| Auto-save with a saving / saved indicator | a write `<request id="autosave" deps=[@note]>${ @savedAt = saveNote(@note) }</>` (§6.7.7) — it provably writes, so it does not run on mount, fires only on the user's own edits (the load's write re-baselines it), and skips a save equal to its baseline (§6.7.7.3, S447 3c = (d)). One save in flight and flush-on-leave are still OPEN (§6.7.7.3 rule 7). |
+| Auto-save with a saving / saved indicator | a write `<request id="autosave" deps=[@note]>${ @savedAt = saveNote(@note) }</>` (§6.7.7) — it provably writes, so it does not run on mount, fires only on the user's own edits (the load's write re-baselines it), and skips a save equal to its baseline (§6.7.7.3, S447 3c = (d)). ~~One save in flight and flush-on-leave are still OPEN (§6.7.7.3 rule 7).~~ One save is in flight at a time, and a pending debounced edit is flushed on page leave (§6.7.7.3 rule 7 — closed S449). |
 | Fire-and-forget save with no status shown | `<effect deps=[@note]>${ saveNote(@note) }</>` |
 | Analytics, scroll, focus, document title, a third-party widget, a canvas | `<effect deps=[…]>${ … }</>` |
 | Polling | `<poll>` (§6.7.6) |
@@ -5708,7 +5790,8 @@ Every write to a cell is either **server-origin** or **local**:
   is therefore unwritable, DD §4.2 item 3.)*
 - **A `reset-on=` reset inherits the origin of the write that triggered it** (§6.8.4): a reset caused by a
   server-origin write is server-origin; one caused by a local write is local. *(Entailed by rule 3's purpose — a
-  load that writes `@query` must not fire a save through `@page`'s reset; PA reading, recorded for veto.)*
+  load that writes `@query` must not fire a save through `@page`'s reset; ~~PA reading, recorded for veto~~
+  **confirmed S449** — rec pack V1; ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination … the three PA readings in their veto window confirmed."*)*
 
 Because every server-origin writer is a compiler-emitted site, the origin is known statically at each write site;
 no runtime "inside a user event" flag and no call-graph analysis of the writer is needed.
@@ -5734,21 +5817,51 @@ one.
 
 **6. Server-origin writes skip the timing wrappers.** A `debounced=` / `throttled=` cell (§6.13) delays **local**
 writes only. A server-origin write SHALL be applied to the cell at once, bypassing the wrapper, so loaded data is
-shown when it arrives (the DD measured an 800 ms delay). ⚑ OPEN (not ruled): when a server-origin write lands
+shown when it arrives (the DD measured an 800 ms delay). ~~⚑ OPEN (not ruled): when a server-origin write lands
 while a local debounced write to the same cell is still pending, whether the pending local write is cancelled or
-still lands afterwards (and is then compared with the new baseline).
+still lands afterwards (and is then compared with the new baseline).~~ **A server-origin write cancels a pending
+local timed write to the same cell (closed S449 — rec pack item 8 = (a)).** When a server-origin write lands while a
+`debounced=` / `throttled=` local write to that cell is pending, the pending write SHALL be cancelled before the
+server-origin value is applied — the cancel-then-apply rule `reset` already has (§6.8.2). One rule covers both: *a
+write that replaces the cell from outside the user's typing cancels the pending timed write.* The loss is visible and
+at most one debounce window of typing; letting the pending write land afterwards would compare it with the new
+baseline and SAVE it, silently wiping the record (the defect 3c closed). Collaborative live text (two people typing)
+needs merge machinery that neither option provides. *(Provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination … the three PA readings in their veto window confirmed."* — pack item 8; supersedes the
+struck OPEN.)*
 
-**7. ⚑ OPEN — banked, not decided (S447 sub-call 5).** Neither is decided by 3c; both are needed before autosave is
-safe, and both are filed as owed work:
-- **One save in flight at a time** — a newer trigger waits for the in-flight save and then sends the latest
-  value, instead of racing it (§6.7.7.1 rule 2 lets a superseded WRITE's transport complete, so an older save can
-  reach the server after a newer one). `g-request-write-one-save-in-flight-owed`.
-- **Flush or warn on page leave** — a pending `debounced=` write to a provably-writing request's dependency either
-  goes out on `pagehide`, or triggers a leave warning; today the timer dies and up to one debounce window of
-  typing is lost. `g-request-write-flush-or-warn-on-leave-owed`.
+**7. One save in flight; flush on leave (closed S449 — rec pack items 12 and 13 = (a)).** ~~⚑ OPEN — banked, not
+decided (S447 sub-call 5). Neither is decided by 3c; both are needed before autosave is safe, and both are filed as
+owed work: one save in flight at a time …; flush or warn on page leave …~~ *(Provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination … the three PA readings in their veto window confirmed."* — pack items
+12 and 13; supersedes the struck OPEN. The two gaps it filed, `g-request-write-one-save-in-flight-owed` and
+`g-request-write-flush-or-warn-on-leave-owed`, are closed as DESIGN; the build stays owed.)*
+- **One save in flight at a time.** A provably-writing `<request>` SHALL have at most one fetch in flight. A
+  trigger that arrives while one is in flight SHALL wait for it to settle and SHALL then send the **latest**
+  value — triggers that arrive meanwhile are coalesced into that one send, and it is skipped when every dependency
+  equals the baseline the settled fetch left (rule 5). This replaces racing for these requests: §6.7.7.1 rule 2
+  lets a superseded WRITE's transport complete, so without it an older save could reach the server after a newer
+  one. `refetch()` follows the same rule. No new syntax; READ and unclassifiable requests are unchanged.
+- **Flush on leave.** On `pagehide`, and on route-leave for a route-region cell (§20.8.8), a pending `debounced=` /
+  `throttled=` local write to a dependency of a provably-writing request SHALL be applied at once, and the save it
+  triggers SHALL be sent with `keepalive` (so the browser may complete it after the document goes away). `pagehide`
+  is used because it is the reliable leave event (a `beforeunload` prompt still loses the typing when the user
+  clicks "leave", and mobile browsers often never show it). A leave warning is not specified; it is a possible later
+  fallback for a save too large for `keepalive`.
 
-Other open questions carried from the DD (§8), not decided here: a `persist="session"` local draft vs the server
-load at boot (which wins; whether to offer "restore"); conflict detection (version / etag) stays developer-level.
+**8. A persisted draft vs the server load — load wins; the silent-loss combination is a compile error (closed S449
+— rec pack item 9 = (a) + (c)).** ~~Other open questions carried from the DD (§8), not decided here: a
+`persist="session"` local draft vs the server load at boot (which wins; whether to offer "restore")~~ *(Provenance:
+ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination … the three PA readings in their veto window confirmed."* — pack item 9; supersedes the struck question.)*
+- **Load wins.** A `persist=` restore is construction (§6.14.2 rule 1); a load's settle that later writes the cell
+  is a server-origin write: it replaces the restored value and becomes the baseline (rules 3–4), and `persist=`
+  then stores the loaded value. This was already entailed by 3c's rules.
+- **E-PERSIST-DRAFT-OVERWRITTEN.** A `persist=` cell that is BOTH assigned by a `<request>`'s settle AND a
+  dependency of a provably-writing `<request>` is a compile error: under "load wins" its restored draft is replaced
+  by the load and silently lost. The message SHALL say: *"keep the draft in its own `persist=` cell, and offer the
+  restore yourself"*. The rule is narrow: a `persist=` cell that a load writes but no write request depends on (a
+  local cache of a server preference) stays legal, and so does a draft cell no load writes. It is reversible: a
+  built-in "restore draft?" surface (a widening) was not chosen; draft-restore UI stays hand-written.
+
+Conflict detection (version / etag) stays developer-level.
 
 **Worked example — autosave with status.**
 
@@ -6133,7 +6246,7 @@ reads inside an `animationFrame` callback body.
 | E-EFFECT-WRITES-STATE | `<effect>` (or `when … changes`) body writes a reactive cell, directly or through a called function (S447, §6.7.4 — Nominal) | Error |
 | E-EFFECT-WRITE-UNPROVEN | `<effect>` body reaches code whose writes cannot be determined (`^{}`, an unresolvable call) — fails closed (S447, §6.7.4 — Nominal) | Error |
 | E-EFFECT-NO-DEPS | `<effect>` has no `deps=` or `deps=[]` (S447, §6.7.4 — Nominal) | Error |
-| E-LIFECYCLE-007 | `<effect deps=[…]>` (or keyword `dep-list`) entry is not a declared mutable `@variable` in scope, OR is a derived cell (the `<effect>` limb is Nominal, S447) | Error |
+| E-LIFECYCLE-007 | `<effect deps=[…]>` (or keyword `dep-list`) entry is not a declared mutable `@variable` in scope, OR is a derived cell, OR (S449) a §66 field path / a `<#id>.prop` (the `<effect>` limb is Nominal, S447) | Error |
 | E-LIFECYCLE-009 | `<timer>` or `<poll>` missing `interval` attribute | Error |
 | E-LIFECYCLE-010 | `interval` attribute is zero or negative | Error |
 | E-LIFECYCLE-011 | `running` attribute references an undeclared or non-`@` variable | Error |
@@ -6160,6 +6273,7 @@ reads inside an `animationFrame` callback body.
 | W-ON-MOUNT-DEPRECATED | `on mount { }` keyword form — soft-deprecated spelling of `<onMount>` (S449, §6.7.1a, §63 — Nominal) | Warning |
 | E-ON-MOUNT-DEPRECATED | reserved end-of-window code for `on mount { }` (§63.2; not scheduled) | Error (reserved) |
 | E-LIFT-IN-LIFECYCLE-BODY | `lift` in an `<effect>` or `<onMount>` body — neither has a render position (S449, §6.7.4 / §6.7.1a — Nominal) | Error |
+| E-TRANSITION-WRITE-CYCLE | a cycle of transition-handler writes and `reset-on=` edges with no time or user edge (S449, §6.7.4 / §6.8.4 — Nominal) | Error |
 | E-LIN-004 | `lin` variable referenced inside a recurring execution context (`<effect>` / `when`, `<timer>`, `<timeout>`, `animationFrame` callback, or an `<onMount>` whose owner can remount — that limb Nominal, S449) — `<poll>` is DEFERRED (E-LIN-006), corrected S263; the `<effect>` limb is Nominal (S447) | Error |
 
 | E-LIFECYCLE-018 | `<request>` has no `id` attribute | Error |
@@ -6178,7 +6292,7 @@ reads inside an `animationFrame` callback body.
 | W-TIMEOUT-001 | `<timeout>` declared inside a `for/lift` loop body | Warning |
 
 **`reset-on=` codes (S447, §6.8.4):** E-RESET-ON-INVALID-ENTRY · E-RESET-ON-NOT-WRITABLE · E-RESET-ON-CYCLE ·
-E-RESET-ON-ENGINE-REFUSED (§34).
+E-RESET-ON-ENGINE-REFUSED · E-RESET-ON-SHARED-CELL (S449) (§34).
 
 **Notes on removed/renamed codes from first draft:**
 - E-LIFECYCLE-003 renamed to W-LIFECYCLE-009 (cleanup-in-for is a warning, not an error).
@@ -6881,30 +6995,50 @@ child declaration carrying its own `reset-on=` (§66.4 rule 2).
      `touched` and `submitted` become `false` and `errors` / `isValid` recompute (§55.13; S447 "validity calls
      2-6" bundle (ii) — *"`reset(@x)` clears `touched` + `submitted`"*). A reset form field therefore shows no
      stale errors.
-   - **`persist=` (§6.14):** the reset value is written to storage like any write. A construction-time restore
+   - **`persist=` (§6.14):** ~~the reset value is written to storage like any write.~~ a reset of a persisted
+     cell **removes its storage key** (§6.14.2 rule 9 — O-061-8 closed S449); the cell holds the reset value in
+     the session either way. A construction-time restore
      of a TRIGGER cell is not a change and triggers no reset (nothing fires at construction — consistent with
-     `<effect>`, §6.7.4); whether a cross-tab `storage`-event write to a trigger is a change follows O-061-5.
-     ⚑ OPEN (O-061-8, unchanged): whether a reset removes the storage key or writes the default.
-8. **Static check location.** Rules 2, 3, 5 and 6 are compile-time errors; none of them is deferred to run time.
+     `<effect>`, §6.7.4 — confirmed S449, rec pack V3); whether a cross-tab `storage`-event write to a trigger is a
+     change follows O-061-5.
+     ~~⚑ OPEN (O-061-8, unchanged): whether a reset removes the storage key or writes the default.~~
+     *(Provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) … the three PA readings in their veto window confirmed."* — pack item 10 = (a), V3; supersedes the struck sentence and OPEN.)*
+8. **Static check location.** Rules 2, 3, 5 and 6 (and, S449, rules 9–11) are compile-time errors; none of them is deferred to run time.
 
-⚑ OPEN (not ruled):
-- **Server / channel cells.** Whether `reset-on=` is legal on a §52 server-authoritative cell or a `<channel>`-
-  synced cell, and if so which client performs the reset when the trigger change reaches every client (a
-  locally-originated trigger resets once; a synced trigger would reset once per client). Until ruled, the
-  conservative reading is that the reset is legal exactly where `reset(@x)` is legal on that cell; the
-  multi-client question is open.
-- **Per-instance resets.** Whether a child field's `reset-on=` may name a sibling field of the same instance or
-  an `<each>` row alias, giving a per-instance reset (DD §4 open item).
-- **Cascades through transition effects.** Rule 3 makes the reset-on graph acyclic; a transition handler fired
-  by an engine reset (rule 6) may itself write cells. Whether that needs its own static check is the same open
-  question as cascades through engine effects generally (DD §12 Q6).
+9. **Shared cells may trigger, not reset — E-RESET-ON-SHARED-CELL (S449, rec pack item 5 = (a)).** `reset-on=` on a
+   cell that is §52 server-authoritative or `<channel>`-synced is **E-RESET-ON-SHARED-CELL**: N clients would each
+   reset (and broadcast) one shared cell. A shared cell MAY be an ENTRY (a trigger) of a client-local cell's
+   `reset-on=`. A reset of shared state belongs in the server function that changes the trigger — the writer.
+   ```scrml
+   <channel name="dispatch" topic="yard-3">
+       <yardFilter> = "all"
+       <boardPage reset-on=[@yardFilter]> = 1    // E-RESET-ON-SHARED-CELL — a synced cell cannot reset itself
+   </>
+   <boardPage reset-on=[@yardFilter]> = 1        // legal: each dispatcher's own page resets on the shared filter
+   ```
+10. **No per-instance resets yet (S449, rec pack item 6 = (a)).** An entry is a cell, never a field path or a row
+   alias (rule 2, as for `<effect>` deps — §6.7.4). A child field's `reset-on=` naming a sibling field
+   (`reset-on=[@lineItem.sku]` names the SHARED instance's field, not this row's) or an `<each>` row alias is
+   **E-RESET-ON-INVALID-ENTRY**. The fix is in the writer: the code that changes a row's SKU also sets that row's
+   quantity. The path forward is instance-self naming (O54 — what `@x` names inside its own instance), which
+   validators (`eq(@signup.password)` in a row) need too; `reset-on=` inherits its answer rather than inventing a
+   reset-only spelling.
+11. **Cascades through transition handlers — E-TRANSITION-WRITE-CYCLE (S449, rec pack item 7 = (b)).** Rule 3 makes
+   the reset-on graph acyclic; a transition handler fired by an engine reset (rule 6) may write cells. Those edges
+   and the reset edges form the transition-write graph of §6.7.4 ("Interaction with derived values and engines"),
+   and a cycle in it with no time or user edge is a compile error.
+
+~~⚑ OPEN (not ruled): Server / channel cells … the conservative reading is that the reset is legal exactly where
+`reset(@x)` is legal on that cell; the multi-client question is open. Per-instance resets … Cascades through
+transition effects …~~ *(Provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) … the three PA readings in their veto window confirmed."* — pack items 5, 6, 7; supersedes the struck OPEN, including its
+interim "conservative reading" for shared cells.)*
 
 **Cross-references:** §6.7.4 (`<effect>` — the construct that may NOT write; its error names `reset-on=` as the
 fix) · §6.8.1 / §6.8.2 (the reset value and the `reset` write) · §6.8.3 (lifecycle revert) · §6.13 (timed writes
 cancelled) · §6.14 (persisted cells) · §51.0.F / §51.0.F.1 / §51.0.H (`rule=`, self-write no-op, transition
 handlers) · §55.13 (validity surface cleared) · §66.4 rule 3 (modifiers bind the own value) · §66.11 (the write
 is a `replace`) · §34 (E-RESET-ON-INVALID-ENTRY, E-RESET-ON-CYCLE, E-RESET-ON-NOT-WRITABLE,
-E-RESET-ON-ENGINE-REFUSED).
+E-RESET-ON-ENGINE-REFUSED, E-RESET-ON-SHARED-CELL, E-TRANSITION-WRITE-CYCLE) · §6.15 (the reset value writes nothing).
 
 ---
 
@@ -7128,7 +7262,8 @@ arrives rather than one window late. *(Nominal / spec-ahead; impl#1 debounces ev
 `g-impl1-autosave-request-mount-save-wipes-record`. Provenance: ruling:user-voice-scrml.md S447 "\"accept and your
 rec (d)\"" — sub-call 4: *"server-originated writes skip the `debounced=` delay"* · dd:`scrml-support/docs/deep-dives/autosave-request-mount-3c-2026-10-02.md`
 §2.3 point 3 · supersedes: the unqualified "wrap the cell's write path" for server-origin writes.)* The
-pending-local-write case is OPEN (§6.7.7.3 rule 6).
+~~pending-local-write case is OPEN (§6.7.7.3 rule 6).~~ A server-origin write cancels a pending local timed
+write to the same cell (§6.7.7.3 rule 6 — closed S449, ruling:user-voice-scrml.md S449 item 7, rec pack item 8).
 
 #### 6.13.2 `throttled=DURATION` — Throttled Writes
 
@@ -7232,6 +7367,13 @@ Browser persistence is a **lifetime** property of a client-owned cell, orthogona
 7. **First paint = default-then-restore.** A persisted cell is client-local, so SSR output renders its default (§52.8), and the restored value appears when client code runs. The pre-paint mechanisms of §6.14.4 (rule 8's theme restore, cell-level `prepaint`, region-level `hold=@cell`) are the exceptions. (⚑ This rule's "renders its default" does not match impl#1's static emit, which carries no value for a client-local read — `g-client-local-static-html-no-initial-value`, §S444e.)
 8. **Pre-paint restore for a theme mode cell — automatic.** When a `persist=` cell is the mode cell of a `<theme for=@cell>` (§65.6; §66.17), the compiler SHALL additionally restore it before first paint: the document's pre-paint script (§6.14.4.1) reads and decodes the stored value (rule 3) and sets the §65.6 root attribute `data-scrml-theme-<cell>` before first paint. This is automatic; there is no author surface for it. The attribute name stays `data-scrml-theme-<cell>` (it is not renamed to the §6.14.4.2 `key=`-derived form). The theme restore is one member of the general pre-paint section §6.14.4, which also governs its placement, per-cell guard, CSP hash and after-boot handling. For cells other than a theme mode cell, the explicit opt-in is §6.14.4 (O-061-2, CLOSED).
    > **Provenance (amended S444):** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30 — rec 7 verbatim: *"Root attribute name → **derived from `key=`**; §6.14.2 r8's `data-scrml-theme-<cell>` left as is."*
+9. **A reset removes the key (S449 — O-061-8 closed).** `reset(@x)` on a persisted cell — including a `reset-on=`
+   reset (§6.8.4), which is a `reset` — SHALL write the reset value to the cell (§6.8.2) and SHALL **remove** the
+   cell's storage key instead of storing that value. The next load finds no key and takes the cell's CURRENT
+   default (rule 3), so a user who pressed "Reset view" follows a later release's new default rather than staying
+   pinned to the old one. In-session behaviour is identical either way (the cell holds the default). Storage holds
+   the user's choices; the default lives in code. *(Provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) … the three PA readings in their veto window confirmed."* — pack item 10 = (a); supersedes
+   O-061-8 in §6.14.5. Coupled, not decided here: how another tab reacts to the key's removal is part of O-061-5.)*
 
 #### 6.14.3 Privacy and ownership — errors
 
@@ -7345,10 +7487,10 @@ type SidebarMode:enum = { Open, Collapsed }
 - ~~**O-061-2** — **Explicit pre-paint opt-in** for cells other than a theme mode cell — bryan's stated preference for option (ii) generally, via an explicit author opt-in; he does not know what that surface would look like. **Banked as dpa-062.**~~ **CLOSED S444 → §6.14.4** (dpa-062 RULED: cell-level `prepaint` = REFLECT only + region-level `hold=@cell`). *ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30*
 - **O-061-3** — The stored **envelope** (e.g. a version marker or a §47.1.4 type-fingerprint field). Under the call-4 ruling a fingerprint mismatch is not by itself a discard trigger, so what, if anything, the envelope carries is open.
 - **O-061-4** — Whether the §55 validators are part of the "full declared contract" a restored value is decoded against, or only type-level contracts (refinements, sequence bounds, lifecycles).
-- **O-061-5** — A cross-tab `storage`-event value: is it judged as a write under the §66.11 write contract (e.g. `rule=` guards) or applied as construction-like hydration? What happens when it fails to decode (keep the current value, or take the default) and when the key is removed in the other tab?
-- **O-061-6** — Whether the restore at construction fires `when @x changes` effects. *(S447: effects are now `<effect deps=[…]>` and SHALL NOT run at program construction (§6.7.4); a restore at construction is therefore not observed by any effect, and — by the same rule — triggers no `reset-on=` reset (§6.8.4 rule 7). Read as settled by S447 2b for effects; the PA flags it for confirmation.)*
+- **O-061-5** — A cross-tab `storage`-event value: is it judged as a write under the §66.11 write contract (e.g. `rule=` guards) or applied as construction-like hydration? What happens when it fails to decode (keep the current value, or take the default) and when the key is removed in the other tab? *(S449: a reset now removes the key, §6.14.2 rule 9, so "the key is removed in the other tab" is the cross-tab face of a reset; the rec pack's lean is that the other tab takes its default, i.e. performs the same reset — recorded, not ruled.)*
+- ~~**O-061-6** — Whether the restore at construction fires `when @x changes` effects. *(S447: … Read as settled by S447 2b for effects; the PA flags it for confirmation.)*~~ **CLOSED S449 (confirmed — rec pack V3):** a restore at construction fires no `<effect>` and no `reset-on=` reset (§6.7.4 "Not on mount"; §6.8.4 rule 7). *ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) … the three PA readings in their veto window confirmed."**
 - **O-061-7** — Write timing: per-change or coalesced per microtask (the §6.7.4 timing).
-- **O-061-8** — Whether `reset(@x)` also **removes** the storage key, or only writes the default.
+- ~~**O-061-8** — Whether `reset(@x)` also **removes** the storage key, or only writes the default.~~ **CLOSED S449 → §6.14.2 rule 9** (a reset removes the key — rec pack item 10 = (a)). *ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) … the three PA readings in their veto window confirmed."**
 - **O-061-9** — The attribute's **position in a §66 opener**, and `persist=` on a §66 declaration's **non-shared** instances with an author per-instance key expression.
 - **O-061-10** — `persist=` on a derived cell, and on a function-typed cell (no codec).
 - **O-061-11** — A persisted `(not to T)` lifecycle cell (§14.12 / §66.11.6): the static state at reads before discrimination.
@@ -7368,6 +7510,7 @@ Named here; each §34 row is **Nominal / spec-ahead — not yet emitted; lands w
 | `E-PREPAINT-WITHOUT-PERSIST` | `prepaint` on a cell without `persist=` (§6.14.4.2 rule 2) — Nominal / spec-ahead, not yet emitted | Error |
 | `E-HOLD-WITHOUT-PERSIST` | `hold=` whose operand is not a `persist=` cell (§6.14.4.3 rule 2) — Nominal / spec-ahead, not yet emitted | Error |
 | `W-PREPAINT-UNCOVERED-READ` | a read of a `prepaint` cell that REFLECT cannot cover (text, `<each>`, `if=`, or failing §6.14.4.2 rule 5), one per site (§6.14.4.2 rule 6) — Nominal / spec-ahead, not yet emitted | Info |
+| `E-PERSIST-DRAFT-OVERWRITTEN` | a `persist=` cell that is both assigned by a `<request>` settle and a dependency of a provably-writing `<request>` — the load would silently replace the restored draft (§6.7.7.3 rule 8, S449) — Nominal / spec-ahead, not yet emitted | Error |
 
 **Cross-references:** §6.7.4 (the corrected localStorage idiom row) · §6.8 (the default value) · §6.13 (the sibling write-path attributes) · §13.2 (auto-await — the planned IndexedDB stdlib) · §14.8.9 (`reveal`) · §35 (`lin`) · §52 (authority — orthogonal) · §55 (synthesized-property precedent) · §57 / §59.10 (codec) · §65.6 / §66.17 (theme mode cell; §66.17 rule 3 is generalized by the §6.14.4.2 CSS-keyed applier) · §66.9 (seed) · §66.16 (shared instance only) · §39.2.5 / §40.2 (the pre-paint script's CSP hash).
 
@@ -16297,7 +16440,8 @@ Error E-TYPE-062 at line 2: `is` operator requires an enum-typed left-hand opera
 - The `is` operator provides NO exhaustiveness guarantee. It is a boolean predicate, not a
   dispatch form.
 - `is` MAY be used in: `if` conditions, `class=` dynamic binding expressions, ternary
-  expressions, `when` guards, and any position where a boolean expression is valid.
+  expressions, ~~`when` guards,~~ and any position where a boolean expression is valid. *(S449: the `when` guard
+  is struck — §4.11.3; ruling:user-voice-scrml.md S449 item 7, rec pack item 11.)*
 
 ---
 
@@ -23006,10 +23150,11 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-SYNTHESIZED-WRITE | §6.11 | Assignment to an auto-synthesized property (e.g., `@signup.isValid = false`). Synthesized validity surface properties are read-only. See §55 for full validity surface specification. | Error |
 | E-RESET-NO-ARG | §6.8 | `reset()` called with no argument. The `reset` keyword requires an explicit cell argument: `reset(@cell)` or `reset(@compound.field)`. | Error |
 | E-RESET-INVALID-TARGET | §6.8.2 | The `reset` keyword target must be one of the three canonical shapes: `reset(@cell)` (top-level cell), `reset(@compound)` (whole compound), or `reset(@compound.field)` (single-level compound nav). Multi-level compound paths (`reset(@a.b.c)`) are also legal when each segment resolves through the compound-scope chain (§6.3.5 recursive composition). Other expression shapes (literals, function-call results, binary / ternary / unary expressions, bare identifiers without `@`, member chains rooted at non-`@` identifiers) are rejected. (Catalog addition S69 — A1b B22.) | Error |
-| E-RESET-ON-INVALID-ENTRY | §6.8.4 | A `reset-on=[…]` entry is not a declared, mutable, non-derived reactive cell in scope at the declaration (an undeclared name, a non-`@` name, a derived cell), or the list is empty (`reset-on=[]`). The same entry rule `<effect deps=[…]>` follows (`E-LIFECYCLE-007`'s condition). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1: *"Page-reset → a `reset-on=[@a, @b]` modifier on the cell being reset"*). **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
+| E-RESET-ON-INVALID-ENTRY | §6.8.4 | A `reset-on=[…]` entry is not a declared, mutable, non-derived reactive cell in scope at the declaration (an undeclared name, a non-`@` name, a derived cell), or the list is empty (`reset-on=[]`). The same entry rule `<effect deps=[…]>` follows (`E-LIFECYCLE-007`'s condition). **Amended S449** (rec pack item 6 = (a), ruling:user-voice-scrml.md S449 item 7): a field path (`reset-on=[@lineItem.sku]` — it names the SHARED instance's field, not this row's) or an `<each>` row alias is this code; per-instance resets wait for instance-self naming (O54). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1: *"Page-reset → a `reset-on=[@a, @b]` modifier on the cell being reset"*). **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
 | E-RESET-ON-CYCLE | §6.8.4 | The static `reset-on=` graph (entry → reset cell) has a cycle — `a` resets on `b` and `b` resets on `a`, or a cell lists itself. The message names every cell on the cycle. Chains are legal; the acyclic graph makes reset chains terminate by construction. **Provenance:** ruling:user-voice-scrml.md S447 "3b: `reset-on=` IS allowed on engine cells, checked against `rule=`" — *"the new rec for engine reset, yes."* (*"The rest of 3b stands: `reset-on=` cycles are a compile error"*). **Nominal / not yet emitted**; lands with the bootstrap. | Error |
 | E-RESET-ON-NOT-WRITABLE | §6.8.4 | `reset-on=` on a cell whose write contract does not admit the reset write — a locked cell (no `replace` grant; §66.11), a derived cell (`const <x>`, a §66 locked cell with a reactive initializer), or a `derived=` engine. The reset is `reset(@self)`, a `replace`. Resolution: make the cell writable (`let`), or drop `reset-on=`. **Provenance:** ruling:user-voice-scrml.md S447 "3b: `reset-on=` IS allowed on engine cells, checked against `rule=`" — *"the new rec for engine reset, yes."* (*"legal only on writable cells"*). **Nominal / not yet emitted**; lands with the bootstrap. | Error |
 | E-RESET-ON-ENGINE-REFUSED | §6.8.4, §51.0.F | `reset-on=` on a cell that carries a transition graph (an engine variable, a §66.13.2 enum value with `rule=` state-children), where some state other than the reset target does not admit the target in its `rule=` (`rule=*` admits all). The reset target is `default=` if present, else the initial value; a non-literal target means every variant its type admits must be admitted (fail closed). The message SHALL name every refusing state and the target. The target state itself needs no self-edge (a self-write is a no-op, §51.0.F.1). When legal, the reset is a real transition: `<onTransition>` handlers fire. **Provenance:** ruling:user-voice-scrml.md S447 "3b: `reset-on=` IS allowed on engine cells, checked against `rule=`" — *"the new rec for engine reset, yes."* (*"EVERY state must admit the reset target in its `rule=`, else a compile error naming the refusing state; the reset is a real transition, so `<onTransition>` handlers fire"*) · supersedes: the DD §14 3b lean *"forbidden on engine cells"* (never ruled). **Nominal / not yet emitted**; lands with the bootstrap. | Error |
+| E-RESET-ON-SHARED-CELL | §6.8.4, §52, §38 | `reset-on=` on a cell that is §52 server-authoritative or `<channel>`-synced — N clients would each reset (and broadcast) one shared cell. A shared cell MAY be an entry (a trigger) of a client-local cell's `reset-on=`. Resolution: reset the shared state in the server function that changes the trigger (the writer), or reset a client-local cell. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 5 = (a)). Supersedes §6.8.4's interim "legal exactly where `reset(@x)` is legal" reading. **Nominal / not yet emitted**; lands with the bootstrap. | Error |
 | W-LIFECYCLE-CANDIDATE | §1.5 | A `<program>` body, component body, or file scope has more than 2 reactive boolean cells gating the same UI region. Consider promoting to a `<match>` block (Tier 1) or `<engine>` (Tier 2) for structural exhaustiveness. | Warning |
 | W-MATCH-RULE-INERT | §18.0.2 | `rule=` declared on a state-child inside a `<match>` block. Rules are legal-but-inert in match (read-only on the matched-on value); promote to `<engine>` (Tier 2) to activate enforcement. | Warning |
 | E-MATCH-EFFECT-FORBIDDEN | §18.0.2 | `effect=` attribute used on a state-child inside a `<match>` block. Effects presuppose transitions; transitions don't occur in match. Use `<engine>` (Tier 2). | Error |
@@ -23078,6 +23223,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-PERSIST-REVEALED | §6.14, §14.8.9 | `persist=` on a cell whose value carries `reveal`-declassified protected provenance. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 7 — *"5, 7, 8 your recs."*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | E-PERSIST-LIN | §6.14, §35 | `persist=` on a `lin` cell — a stored `lin` value would be replayable on every reload. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 7 — *"5, 7, 8 your recs."*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | E-PERSIST-WITH-SERVER | §6.14, §52 | `persist=` on a server-authority cell (`<x server>`, a Tier-1 `authority="server"` type instance). **Provenance:** dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` A2 item 7 (within ruled pole A2, call 1 — *"the persist= attribute"*). **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PERSIST-DRAFT-OVERWRITTEN | §6.7.7.3, §6.14 | A `persist=` cell that is BOTH assigned by a `<request>`'s settle AND a dependency of a provably-writing `<request>` (§6.7.7.3 rule 1). The load is a server-origin write, so it replaces the restored draft and becomes the baseline ("load wins", §6.7.7.3 rule 8) — the draft is lost silently. The message SHALL say: keep the draft in its own `persist=` cell and offer the restore yourself. Narrow by design: a persisted cell a load writes but no write request depends on, and a draft cell no load writes, stay legal. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 9 = (a) + (c)). Newly-rejecting. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | E-PREPAINT-WITHOUT-PERSIST | §6.14.4.2 | `prepaint` (cell-level pre-paint REFLECT) on a state cell that has no `persist=`. Rec 8 verbatim: *"`prepaint` or `hold=` without `persist=` → **both errors in v1**"*. **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | E-HOLD-WITHOUT-PERSIST | §6.14.4.3 | A `hold=@cell` region marker whose operand is not a `persist=` cell. A general "cloak until rendered" marker is a separate question (dd route-to-PA R4). **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | W-PREPAINT-UNCOVERED-READ | §6.14.4.2 | A read of a `prepaint` cell that REFLECT cannot cover — text content (`${@c}`), `<each>`, `if=`, or any read failing the §6.14.4.2 rule 5 coverage rule (non-attribute position, a server-cell or second-`prepaint`-cell input, not compile-time evaluable). Emitted once per read site, naming the site. Rec 2 verbatim: *"an **Info diagnostic naming each site** (not silent; not an error — those reads are empty before JS, never wrong)"*. **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Info |
@@ -23287,7 +23433,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-LIFECYCLE-004 | §6.7.3 | The `cleanup()` first argument is not function-typed. Same family as E-LIFECYCLE-002 but covers non-call non-function shapes (bare values, object literals, etc.). Resolution: pass an arrow function or a function reference. (Catalog addition S84 Wave 2 #5; full prose at §6.7.3 line 3296.) (Implemented S310; emitted at `compiler/src/type-system.ts` — `checkCleanupRegistration`.)| Error |
 | E-LIFECYCLE-005 | §6.7.3 | A `cleanup()` call appears inside a function EXPLICITLY annotated as server-side (§12). Cleanup belongs to client-side scope teardown; server functions have no client-side lifecycle. Resolution: hoist the cleanup registration to the calling client scope, or remove the server annotation if the function is actually client-side. (Catalog addition S84 Wave 2 #5; full prose at §6.7.3 line 3300.) **Not yet emitted (S310).** Deliberately deferred from the S310 `cleanup()` wave: its trigger is a function EXPLICITLY annotated `server`, and that modifier is itself deprecated language-wide (`W-DEPRECATED-SERVER-MODIFIER`, §12.2 makes placement INFERRED) — so this code guards a form on its way out. Revisit if the modifier survives to 1.0.| Error |
 | E-LIFECYCLE-006 | §6.7.4 | **Superseded S447 by `E-EFFECT-WRITES-STATE`** — a reactive-effect body that writes a cell in its own dependency list is one case of an effect writing reactive state, which is now an error for every cell. Pre-S447 meaning: a `when` block body writes to a variable that appears in its own `dep-list` (an immediate re-trigger loop). Retained as a **reserved** code, not a compile diagnostic: no front end emits it at compile time; impl#1's runtime re-run cap prints the string in a console message (`compiler/src/runtime-template.js`), which is impl#1's frozen pre-S447 behaviour, filed as `g-impl1-when-effect-divergence-s447`. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1 = (b); "E-006 … subsumed" per the DD §5 (b) the call adopted) · **supersedes:** the pre-S447 row "A `when` block body writes to a variable that appears in its own `dep-list` … Resolution: remove the variable from the `dep-list`". (Catalog addition S84 Wave 2 #5.) | Error (reserved) |
-| E-LIFECYCLE-007 | §6.7.4 | A dependency entry of a reactive effect — an `<effect deps=[…]>` entry, or a `dep-list` entry of the soft-deprecated `when … changes` form — is not a declared mutable `@variable` in scope at the effect, OR is a derived cell (`const <name>` / a §66 locked cell with a reactive initializer), which has no change event of its own — listing it as a trigger is meaningless. Resolution: drop the entry, or list the mutable cells the derived value reads. (Catalog addition S84 Wave 2 #5.) **Amended S447:** extended from the `when` dep-list to the `<effect deps=[…]>` list (§6.7.4). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* · supersedes: the `when`-only wording. **Status:** emitted for the keyword form's derived-cell limb by impl#1 at `compiler/src/codegen/index.ts` (the §6.7.4 EC-1 check); the `<effect deps=[…]>` surface is **Nominal / not yet emitted** — lands with the bootstrap build (`g-bootstrap-effect-reset-on-owed`). | Error |
+| E-LIFECYCLE-007 | §6.7.4 | A dependency entry of a reactive effect — an `<effect deps=[…]>` entry, or a `dep-list` entry of the soft-deprecated `when … changes` form — is not a declared mutable `@variable` in scope at the effect, OR is a derived cell (`const <name>` / a §66 locked cell with a reactive initializer), which has no change event of its own — listing it as a trigger is meaningless. Resolution: drop the entry, or list the mutable cells the derived value reads. (Catalog addition S84 Wave 2 #5.) **Amended S447:** extended from the `when` dep-list to the `<effect deps=[…]>` list (§6.7.4). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* · supersedes: the `when`-only wording. **Amended S449** (rec pack item 4 = (a), ruling:user-voice-scrml.md S449 item 7): a §66 field path (`deps=[@signup.email]`) or a compiler-synthesized property (`deps=[<#save>.error]`) is this code too — not now a trigger; the message SHALL say "list `@signup`; read `@signup.email` in the body". **Status:** emitted for the keyword form's derived-cell limb by impl#1 at `compiler/src/codegen/index.ts` (the §6.7.4 EC-1 check); the `<effect deps=[…]>` surface is **Nominal / not yet emitted** — lands with the bootstrap build (`g-bootstrap-effect-reset-on-owed`). | Error |
 | E-EFFECT-WRITES-STATE | §6.7.4 | A reactive effect body — an `<effect deps=[…]>` body, or a soft-deprecated `when … changes { }` body — **writes a reactive cell, directly or through a called function**: an `=`-family assignment, a sequence edit, `reset(@x)`, an engine write or `.advance`, `<#id>.refetch()`; or a call to a scrml function (incl. a server function writing a §52 server cell) whose transitive write summary is non-empty; or a function value appearing in the body whose summary is non-empty (§6.7.4 rules 1–3). An effect drives the outside world; cascades between effects are impossible by construction because none can write. The message SHALL name the written cell, the call chain for an indirect write, and the fix by shape: a reset to the default → `reset-on=[…]` on the cell (§6.8.4); a stored call result → a write `<request>` (§6.7.7); otherwise → move the write into the code that changes the trigger, or derive the value (§6.6). Subsumes `E-LIFECYCLE-006`. Direction of change: newly-rejecting (DD-measured migration: 4 sample sites). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1 = (b): *"a reactive effect may NOT write any reactive cell, directly or through a called function — compile error"*; 1a: *"named error + a message naming the fix"*) · dd:`scrml-support/docs/deep-dives/when-reactive-effect-fit-2026-10-02.md` §5 (b). **Nominal / not yet emitted** — impl#1 is frozen for language semantics (S447) and accepts writing `when` bodies (`g-impl1-when-effect-divergence-s447`); lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
 | E-EFFECT-WRITE-UNPROVEN | §6.7.4 | A reactive effect body reaches code whose reactive writes the compiler cannot determine — a `^{ }` meta block (meta code can write cells by name, §22 `meta.set`), a call through a function-typed binding not resolvable to a known set of scrml functions, or any call site the write-summary analysis cannot resolve (§6.7.4 rule 4). The no-write rule fails CLOSED. A host (`.js`/`.ts`) or platform call is NOT this code — host code cannot name a scrml cell (rule 5). The message SHALL name the unresolvable site and why. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1 = (b)) · the fail-closed reading is the PA's, by the §6.7.7.1 rule 1 precedent ("unclassifiable = write"). **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
 | E-EFFECT-NO-DEPS | §6.7.4 | An `<effect>` has no `deps=` attribute, or `deps=[]`. An effect does not run on mount (S447 2b), so without a dependency it can never run. (The keyword form's empty dep-list was a syntax error.) Resolution: list the cells whose changes should run it; outside-world work that runs once at mount belongs in an `<onMount>` (§6.7.1a — S449; formerly `on mount { }` / a bare expression). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (2b: *"`<effect>` does NOT run on mount"*). **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
@@ -23299,6 +23445,8 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ON-MOUNT-DEPRECATED | §6.7.1a, §63.7 | **Reserved** (§63.2) end-of-window code for the `on mount { }` keyword statement. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 2, 2b). | Error |
 | E-VALUE-WRITES-STATE | §6.15, §6.6, §6.8, §7.4.2, §66.9 | Evaluating a **value position** writes a reactive cell, directly or through a called function: an initializer (own value, field / attribute default, use-site construction value, `default=`), a derived formula, or a render expression (a markup `${ … }` interpolation incl. a multi-statement or Tier-0 `for/lift` block, a display-text-literal interpolation, a `renders` body, a markup attribute value). Writes are the §6.7.4 list; the analysis is the §6.7.4 write summary, rules 1–6 as written (a function value in the expression counts as called, except the value of an `on*=` handler attribute in produced markup). Not value positions: `on*=` handlers, `bind:`, function bodies (judged at their call site), lifecycle element bodies (`<request>`, `<effect>`, `<onMount>`, `<timer>` / `<poll>` / `<timeout>`), engine `effect=` / `<onTransition>`, body-top statement lists (§40.8). The message SHALL name the position, the written cell, the call chain and the fix by shape (initializer → `<request>` / `<onMount>` / the handler; formula → derive it / the handler; render → the handler / derive it). One code for every position, because the positions overlap (a formula is an initializer; a use-site value is an initializer that rendering evaluates). Closes by construction the derived-read and construction-read routes into an effect's writes (§6.7.4) and the writing reset value (§6.8.4 rule 3 — supersedes the bootstrap's interim fail-closed refusal of it). **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 3: *"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function (language-wide; closes the four S449 bootstrap holes + the render self-write hang by construction)."*). Newly-rejecting; impl#1 corpus impact measured as a filing aid in `g-impl1-value-writes-state-s449`. **Nominal / not yet emitted**; impl#1 frozen. | Error |
 | E-VALUE-WRITE-UNPROVEN | §6.15, §6.7.4 | A value position (§6.15) reaches code whose reactive writes the compiler cannot determine — a `^{ }` meta block, a call through a function-typed binding not resolvable to a known set of scrml functions, or any call site the write-summary analysis cannot resolve (§6.7.4 rule 4). Fails CLOSED; the fail-closed half mirrors `E-EFFECT-WRITE-UNPROVEN` / `E-MOUNT-WRITE-UNPROVEN`. A host / platform call is not this code. The message SHALL name the position, the unresolvable site and why. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 3: *"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function (language-wide; closes the four S449 bootstrap holes + the render self-write hang by construction)."*). **Nominal / not yet emitted**. | Error |
+| E-LIFT-IN-LIFECYCLE-BODY | §6.7.4, §6.7.1a | `lift` in an `<effect>` body or an `<onMount>` body (or their soft-deprecated keyword spellings). Neither body has a render position: an `<effect>` renders nothing, and `lift` writes scrml-owned DOM, which is not the outside world. The message SHALL point to `<each in=@…>`, `if=`, or a derived markup cell (§6.6.17). Newly-rejecting (the keyword `when` form allowed it; pack-measured blast radius zero). **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 3 = (a); the `<onMount>` limb follows from item 2, the body having no render position). **Nominal / not yet emitted**; impl#1 frozen (`g-impl1-effect-open-items-s449`); lands with the bootstrap. | Error |
+| E-TRANSITION-WRITE-CYCLE | §6.7.4, §6.8.4, §51.0.H | The **transition-write graph** has a cycle: nodes are the states of every transition-graph cell and every other cell; edges run from a state to every node a transition handler run on entering it (a state-child `effect=`, an `<onTransition>`) may write by its write summary, on any path including after a server call, and from a `reset-on=` entry to the reset target. A self-write is a no-op and adds no edge; time-driven transitions (`<onTimeout>`, `<onIdle>`), `<timer>` / `<timeout>` / `<poll>` bodies, event handlers and the engine opener `effect=` add none. The message SHALL name the nodes and the handler or `reset-on=` on each edge, and name a time edge (`<onTimeout after=… to=…/>`) as the fix. A guarded terminating cycle is a stated false positive. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 7 = (b): *"static cycle check. A cycle with no time edge is an error, and the fix is `<onTimeout>`"*). Newly-rejecting. **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-open-items-owed`). | Error |
 | E-LIFECYCLE-011 | §28.1 | The `<timer>` or `<poll>` `running` attribute references an undeclared or non-`@` variable. The `running=@flag` form must point at a declared reactive variable to be meaningful. (Catalog addition S84 Wave 2 #5; full prose at §28.1 line 3639.) | Error |
 | E-LIFECYCLE-013 | §28.5 | `animationFrame()` called inside a `<timer>` or `<poll>` body. The two scheduling primitives compose pathologically — `animationFrame()` runs once per frame while the parent `<timer>`/`<poll>` runs on its own interval; the resulting cadence is undefined. Resolution: move `animationFrame()` out of the `<timer>`/`<poll>` body, or remove the parent if the per-frame work is the intent. (Catalog addition S84 Wave 2 #5; full prose at §28.5 line 4286.) | Error |
 | E-LIFECYCLE-014 | §28.5 | `animationFrame()` called inside a server-escalated function. The function is run per-frame on the client; there is no server-side `animationFrame` analogue. (Catalog addition S84 Wave 2 #5; full prose at §28.5 line 4288.) | Error |
@@ -34385,6 +34533,11 @@ Neither replaces the other. A developer MAY use both. The execution order is:
 4. `<effect>`s listing the variable fire.
 
 A `reset-on=` reset of an engine cell (§6.8.4 rule 6) is a transition and follows the same order.
+
+Because transition effect blocks MAY write, a chain of them (and of `reset-on=` resets) can loop. A cycle of such
+writes with no time edge (`<onTimeout>`, `<onIdle>`) or user edge between them is a compile error,
+**E-TRANSITION-WRITE-CYCLE** (§6.7.4 "Interaction with derived values and engines" — S449, ruling:user-voice-scrml.md
+S449 item 7, rec pack item 7 = (b)).
 
 **Normative statement:**
 
