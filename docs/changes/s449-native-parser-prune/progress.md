@@ -111,3 +111,12 @@ Code:
 | unit/s441-review-r5 | RE-POINT | loops → default; D / N1 / R1 native fail-closed cases → `nativeParseFile` |
 
 Full gate after batch 3 (unit+integration+conformance+root glob): 29425 pass · 58 skip · 12 todo · 0 fail · 1419 files.
+
+## Batch 4 — SPEC §22.12 + §34.1 intro, SPEC-INDEX, known-gaps
+
+- §22.12: the S114 "M6 retirement scope (charter B)" list + "Retirement is **total**" paragraph replaced by a "Front-end status — M6 not pursued (S449)" paragraph: provenance S449 item 6, notes S249 "don't do M5/M6", names impl#1's default front end (BS + Acorn + BPP), the fixed sites where impl#1 runs the native parser, retires `--parser=scrml-native`, and says Approach C itself is unchanged and binds every implementation. Nothing else in §22.12 touched.
+- §34.1 intro: "81 codes" → 82 live rows re-measured (31 expression-grammar · 49 statement-grammar incl. E-THROW/E-TRY · 2 I-NATIVE-BLOCK-*; E-MARKUP-VALUE-UNCLOSED struck); "79" → 80 hard-error codes; restated as impl#1 parse diagnostics emitted via the native parser on the paths impl#1 routes through it, informative for other implementations; the "replaces the legacy pipeline at the M5 swap" / "when M6 deletes the legacy pipeline" / "adopter-visible behind --parser" claims removed; catalog history kept. No row touched.
+- SPEC-INDEX: §22 and §34 summary text updated to match; `regen-spec-index.ts` re-run (line numbers).
+- known-gaps: closed g-parity-canary-outside-every-blocking-gate (HIGH) and g-native-parser-no-tare-mirror (LOW) — marker + heading flipped, reason line added. New section `## §S449-native-parser-prune` (append-only): bulk impl#1-frozen re-label of the 18 open native-locus gaps (pack said 24 with a looser filter), two touched-not-closed notes, the each-never-native finding, and one NEW LOW gap (g-import-host-in-function-default-front-end-omits-e-import-008).
+- `bun scripts/state.ts --check` FAILS on the generated gap-count table and master-list recent-sessions — PRE-EXISTING at HEAD (verified by running --check against HEAD's two files). Left unregenerated on purpose: both are PA-owned shared generated blocks and siblings edit known-gaps in parallel; the PA regenerates at landing.
+- Planning docs NOT moved: all four M5/M6 docs in compiler/native-parser/ are linked (docs/changes/**, handOffs/**, IMPLEMENTATION-ROADMAP, and code comments in parse-*-body.js / engine-statechild-walker.ts); README is the directory's README. Listed for the PA.
