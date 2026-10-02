@@ -64,3 +64,65 @@ migrated (brief: migrate only if incidental):
   — the Commit reached from a render hole (outside a handler batch) must be atomic.
 Both describe runtime properties that are now UNREACHABLE from source (no render hole, initializer, formula or effect
 may write). Fork for the PA (final report).
+
+## 2026-10-02 — the SPEC landed: §6.15, E-VALUE-WRITES-STATE / E-VALUE-WRITE-UNPROVEN (commit 17e272804)
+- PA relayed + I read `wip/s449-spec-lifecycle-rulings` @ a8aba4380 §6.15 in full. Codes renamed from the
+  provisional E-FORMULA-* (still one constant each: `valueWritesCode()` / `valueUnprovenCode()`).
+- **SPEC overrides the brief on one removal (Rule 4).** §6.15: "Each value position is summarized like a function,
+  so a READ of something that evaluates a value position carries that position's summary" and "§6.7.4's write
+  summary still follows reads into formulas and constructions — it now finds nothing there for a well-formed
+  program, and the check stays as defence in depth." So `constructionRef` / `formulaRef` and their summaries were
+  RESTORED (removed in a59e40582). The reset-value E-BOOTSTRAP-UNSUPPORTED stays removed — §6.15 names it
+  superseded.
+- **Echo suppression (PA reading for veto).** With both checks live, an ill-formed program reports its root at the
+  value position AND an echo at every reader (effect body, interpolation reading the derived cell). effectPass
+  computes ROOTS (chains not through a formula / construction label) and, when any root exists, drops chains through
+  a value position; when none exists the echoes are reported — that is the defence in depth firing because the
+  value-position walk missed something. Bite: value-position walk off → slice-m4 24 RED, and the effect-hole
+  programs then report E-EFFECT-WRITES-STATE through the formula / construction (defence in depth seen working).
+  Known imprecision: a function summary keeps only its FIRST witness; if that one runs through a formula while
+  another callee writes directly, the direct chain is hidden until the formula is fixed (the program is rejected
+  either way).
+- Messages: position named per §6.15 ("the initializer of `@page`", "the formula of derived `@d`", "the
+  interpolation", "the `class=` value on `<p>`", "the `if=` condition on `<p>`", "the use-site value `title=` of
+  `<card>`"), cell, chain, and §6.15's fix by shape verbatim (initializer / formula / render). Line numbers are not
+  in the text (the diagnostic span carries the location).
+
+## 2026-10-02 — partition check against §6.15 (match exactly; ambiguities noted, not decided)
+- Value positions covered: initializers (program cell own value, user-decl own value, attribute defaults, child
+  fields any depth, use-site construction values), derived formulas, render expressions (interpolations, every
+  attribute value incl. `class=` / `show=` / `if=` / `<each in=>` / `key=`, in program body / `renders` / state-child
+  bodies). Absent from the bootstrap (nothing to judge): `default=`, multi-statement `${ }` in markup, Tier-0
+  `for … lift`, display-text `${ }`, `<match on=>` — listed as owed in `g-bootstrap-value-writes-state-owed`.
+- NOT value positions honored: `on*=`, `bind:`, function bodies, `<effect>` bodies (skipped by the walk), body-top
+  `${ }` (measured: in the bootstrap a program body-top `${ … }` is a LOGIC BLOCK of items — `${ h(@a) }` there is
+  E-PARSE-ITEM — never an Interp node, so the walk never sees it). `<request>` / `<onMount>` / `<timer>` / engine
+  `effect=` / `<onTransition>` do not exist in the bootstrap.
+- **Ambiguous / readings (not decided by SPEC text):**
+  (a) `as=` — not in either §6.15 list; it binds a handle NAME, nothing is evaluated → excluded.
+  (b) state-child `rule=` values and other non-handler attributes on state children / `<each>` are walked like any
+      attribute (they name variants / cells; scanning finds nothing) — harmless superset.
+  (c) declaration opener modifiers (`reset-on=[…]`, `single`) are not walked — a cell list, not an evaluated value.
+  (d) validator arguments on a declaration opener (`min(…)`, `eq(@x)`) — §6.15 is silent (§55 validators); not
+      judged here. The bootstrap lowers validators to HTML-native attributes only and refuses non-exact forms, so no
+      evaluated validator argument reaches the runtime today. Flag for the SPEC.
+  (e) a locked initializer that CALLS a function but reads no cell is labelled "the formula of derived …" (the
+      bootstrap's `valueReads` counts a call as a read, which decides FieldMode.Derived); its fix text is the formula
+      one.
+- impl#1-dialect conformance case `control-flow/ctrl-027-arm-body-tilde-read-and-recovery-pos` (named by the SPEC
+  change's `g-impl1-value-writes-state-s449` as rejected by §6.15): legacy dialect, not parseable by the bootstrap;
+  NOT touched (impl#1 frozen contract) — noted for the PA.
+
+## 2026-10-02 — conformance + gaps (commit a85e55b5a)
+- 14 cases `conformance/cases/reactive/no-write-*` in the §66 opener form: own-init / field-init / derived / interp /
+  attr / if × pos/neg, `unproven-pos`, `handler-neg`. impl#1 does not parse the §66 opener form; positives xfail under
+  the NEW carried `g-impl1-value-writes-state-codes-unimplemented-s449` (signatures from `run.ts --xfail-signature`).
+  The bootstrap executes all 14 (value-positions.test.js; negatives must be fully clean): 14/14.
+- `bun conformance/run.ts`: 1222/1256 pass + 34 xfail, 0 fail. FACTS regenerated (1242 → 1256); gap counts
+  regenerated (`state.ts --write`; the HIGH/LOW deltas beyond my +1 carried MED are pre-existing drift on main;
+  master-list.md's regenerated recent-sessions block was reverted — PA-owned).
+- known-gaps: `g-bootstrap-value-writes-state-owed` filed RESOLVED; `g-bootstrap-render-writer-call-hangs` RESOLVED in
+  place; the effect entry's "⚑ PA question — may an initializer write" marked RULED; `g-bootstrap-slice-m2-render-
+  hole-write-tests-s449` filed open (the PA fork).
+- Final slice gates: lint 0 · m1 99/0 · m2 443/5 (the filed five) · m3 60/0 · m4 504/0 (+1 todo) · codec 92/0 ·
+  m1 lowered 99/0 · lexer 337/0.
