@@ -2,6 +2,28 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S447 — 2026-10-01/02 (bryan · ASUS, successor to S446-xps; took the bootstrap lane after S448)
+
+**Rulings (user-voice §S447, ~25 entries).** `when` → **`<effect deps=[…]>`, outside-world effects only** — an effect may not write
+reactive state, so cascades are impossible by construction (the bootstrap's runaway net becomes deletable); **`reset-on=`** on the cell
+(engines allowed, checked against `rule=`); **write `<request>`s never run on mount, server-origin writes reset the baseline** (3c — the
+proposed autosave measured to WIPE a record). **Validated top-level cells get a validity surface** (§55.5 Edge A reversed) and the
+**compiler gates every form that binds a validated value** (§55.17). **Keywords go outside the declaration opener** (`let <x/>`; held for
+the bootstrap parser). **Argument arity + type checking** (§7.3.4). **dpa-063 statement termination** — the ten readings confirmed.
+**UFCS / `.=` explored and PARKED.** **TS policy sharpened:** a tooling carve-out (CLI / dev / build / codemods / LSP stay on TS); rulings
+no longer generate impl#1 semantics work; the frozen `compiler/self-host` retired. **Message delivery: an `inbox` branch in every repo**
+(pa-base v2.18), and flogence's cross-machine doorbell wired.
+
+**Landed:** #1215 dev-db data root (six review rounds) · #1216 §55 validity SPEC · #1218 protect egress r7 · #1222 §7.3.4 · #1225 inbox ·
+#1226 test temp root (870 /tmp entries per run → 0) + `scrml dev` children die with their parent (3 orphans/run → 0) · #1227 dpa-063 ·
+#1228 protect egress r8 (rows by path, global names through aliases; review caught 4 regressions it introduced) · #1229 `<effect>` /
+`reset-on=` / write requests · #1230 retire `compiler/self-host` v1 (−22.4k lines). Deep-dives: validity surface, opener keywords, UFCS,
+`when` fit, autosave mount, `on mount` (in flight). Held: #1214. Carried: bootstrap U0 (re-scope to `<effect>`).
+
+**Process:** a possibly-accidental "your recs on all of them" accept was caught and its five items re-surfaced individually; a machine-
+local post-commit hook (full suite, synchronous, 10–15 min per commit) moved to the background with a single-run lock; 45 orphaned dev
+servers (3.5 GB) cleaned up by captured PID.
+
 ## S448 — 2026-10-01 (bryan · XPS, successor to the reboot-killed S446-xps)
 
 A reboot took S446-xps down mid-lane; S448 recovered its three in-flight pieces, landed the bootstrap wire codec, and traced the 1h45m boot to where the /tmp volume actually came from.

@@ -2030,3 +2030,19 @@ that the ledger is *substantively* wrong; a consumer of it can.
 <!-- @review pr=1220 verdict=clean by=S446-peter date=2026-10-01 probe=PA(bite:/elsewhere-red;posix-resolve-identical) note=test-only-inert;main-windows-red-c12b52c2 -->
 <!-- @review pr=1213 verdict=clean by=S446-bryan-xps date=2026-10-01 probe=S239 r1 at 40692dd64 (L1-L4/L7 fixed), re-review clean; merged by S448 after update-branch + fresh gate -->
 <!-- @review pr=1221 verdict=finding by=S448-bryan date=2026-10-01 probe=frozen re-review at 13ebd7bed: N1-N3 hold under hostile probing (proto pollution, revoked Proxy, throwing traps, __proto__ keys), 92/92; 4 LOW nits in PR body -->
+<!-- @review pr=1215 verdict=finding by=S447-bryan date=2026-10-02 probe=S239 multi-round: S445 r1 DO-NOT-LAND→r3→r4 LAND-WITH-NITS; S447 r5 LAND-WITH-NITS (frozen e0692a8ae: path-segment containment, 59 db= files diag-identical, _server.js byte-identical, health 503→200) → r5b fix (dev ignores SCRML_DATA_DIR, (root,path) keying, isFile, realpath) → r5b re-review LAND-WITH-NITS (frozen 1b474db20) note=residuals-filed:g-dev-db-data-root-residuals -->
+<!-- @review pr=1216 verdict=carve-out by=S447-bryan date=2026-10-02 probe=SPEC/docs-only; bootstrap slices m2/m3/m4 (SPEC-parsing) 0 fail; s34-census pass note=spec-text -->
+<!-- @review pr=1218 verdict=finding by=S447-bryan date=2026-10-02 probe=S239 over HTTP three sinks at frozen 51d7cb839: LAND-WITH-NITS, no introduced leak; 2238-file corpus 0 E-PROTECT-006 delta; ex23 HTTP-identical; land-prep narrowed two false SHALLs note=residuals-filed:g-protect-egress-round-8-residuals -->
+<!-- @review pr=1222 verdict=carve-out by=S447-bryan date=2026-10-02 probe=SPEC/docs-only (§7.3.4 call checks; UFCS parked and stripped); slices m2/m3/m4 0 fail note=spec-text -->
+<!-- @review pr=1225 verdict=carve-out by=S447-bryan date=2026-10-02 probe=inbox+gap-note only note=docs -->
+<!-- @review pr=1226 verdict=finding by=S447-bryan date=2026-10-02 probe=S239 at frozen 0eb11044a: LAND-WITH-NITS — new dev-child test bites (old dev.js → 3 orphans), hot restart 320 req/0 err, SIGKILL parent → child dies ~1.4s, concurrent suites never prune a live root; nits fixed (SIGHUP listener dropped, 2 comments restored) note=nits-fixed-cc3f28fcd -->
+<!-- @review pr=1227 verdict=carve-out by=S447-bryan date=2026-10-02 probe=SPEC/docs-only (dpa-063); §34 row-provenance gate fixed (W-LIFECYCLE-006 not-yet-emitted); slices 0 fail note=spec-text -->
+<!-- @review pr=1228 verdict=finding by=S447-bryan date=2026-10-02 probe=S239 r8 DO-NOT-LAND (3 introduced HIGH N1-N3) → r8b LAND-WITH-NITS (1 introduced HIGH Object.create descriptor getter) → r8c narrow re-check LAND (frozen 436947c39); coercion carve-out SOUND (~100 shapes); 2238-file corpus 0 delta; ex23 HTTP-identical note=residuals-filed:g-protect-egress-round-9-residuals -->
+<!-- @review pr=1229 verdict=carve-out by=S447-bryan date=2026-10-02 probe=SPEC/docs-only (<effect>/reset-on/3c); slices 0 fail; s34-census 26 rows pass note=spec-text -->
+<!-- @review pr=1203 verdict=carve-out by=S447-bryan date=2026-10-02 probe=maps-only note=docs -->
+<!-- @review pr=1204 verdict=carve-out by=S447-bryan date=2026-10-02 probe=gap-filings-only note=docs -->
+<!-- @review pr=1205 verdict=carve-out by=S447-bryan date=2026-10-02 probe=wrap-only note=docs -->
+<!-- @review pr=1206 verdict=carve-out by=S447-bryan date=2026-10-02 probe=wrap-only note=docs -->
+<!-- @review pr=1223 verdict=carve-out by=S447-bryan date=2026-10-02 probe=wrap-only note=docs -->
+<!-- @review pr=1224 verdict=carve-out by=S447-bryan date=2026-10-02 probe=wrap-only (S448) note=docs -->
+<!-- @review pr=1230 verdict=finding by=S447-bryan date=2026-10-02 probe=S239 at frozen 7733b0bcf: LAND-WITH-NITS — every tier failing-name set empty; F1 (a mooted gap is a live impl#1 meta-block defect) re-pointed+open; F2 (11 v2 corpus skips) ledgered; canary bs guard vacuous on main too; parse-only bites on crash only note=fixed-8bc09e9fa -->
