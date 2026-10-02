@@ -5655,7 +5655,7 @@ reads inside an `animationFrame` callback body.
 | W-LIFECYCLE-003 | `<timer>` or `<poll>` declared inside a `for/lift` loop body | Warning |
 | W-LIFECYCLE-004 | `<poll>` body contains no function call | Warning |
 | W-LIFECYCLE-005 | `<timer>` or `<poll>` body calls a server function and `interval` < 500ms | Warning |
-| W-LIFECYCLE-006 | `when` body sole effect is a single `@variable` assignment whose RHS is a pure `@variable` expression that does not read the assigned `@variable` (S446 — an accumulator such as `@hits = @hits + 1` is excluded); a derived value is strictly superior | Warning |
+| W-LIFECYCLE-006 | `when` body sole effect is a single `@variable` assignment whose RHS is a pure `@variable` expression that does not read the assigned `@variable` (S446 — an accumulator such as `@hits = @hits + 1` is excluded); a derived value is strictly superior. Not yet emitted (no impl#1 emitter; the bootstrap U0 design lists it). | Warning |
 | W-LIFECYCLE-007 | `running=false` boolean literal on `<timer>` or `<poll>` | Warning |
 | W-LIFECYCLE-008 | `<poll>` body contains multiple assignment expressions (`.value` will be `not` — §42) | Warning |
 | W-LIFECYCLE-009 | `cleanup()` inside a `for` loop body (N registrations will be created) | Warning |
