@@ -10536,9 +10536,16 @@ halves, and a conformant implementation SHALL enforce both:
      one); a FUNCTION stored onto a platform object named by its path or by a binding of one
      (`JSON.stringify = f`, `const J = JSON; J.stringify = f`, `console.log = f`); rebinding a
      platform global name (`globalThis.String = f`, `String = f`, `Object.assign(globalThis, {
-     String: f })`, or a global write under a key the compiler cannot read); and calling a code
-     evaluator — `Function`, `eval`, or a `.constructor` (which may be `Function`) — by any route
-     (`Function("return this")()` IS `globalThis`, and its body may be anything). (Measured on
+     String: f })`, or a global write under a key the compiler cannot read and whose static prefix
+     no platform name starts with); and calling a code evaluator — `Function`, `eval`, or the
+     `.constructor` of a value that may be a function — by any route (`Function("return this")()`
+     IS `globalThis`, and its body may be anything). The PROGRAM's own prototypes are not the
+     platform's and SHALL compile: the `.prototype` of a function the program made (scrml has no
+     `class` — `const Pt = function (x) { this.x = x }; Pt.prototype.norm = function () { … }` IS
+     how a type is built), and the `.__proto__` / `.constructor` / `Object.getPrototypeOf` of an
+     object whose prototype the program set (`new Pt()`, `Object.create(p)` / a literal's
+     `__proto__: p` with `p` its own). (S449 r9 fix round: round 9 refused all of these — review
+     measured.) (Measured on
      base, each served the hash: `Object.prototype.toString = function () { s = this.h }; String({
      h })`, `Array.prototype.join = …; String([h])`, `({}).__proto__.leak = h; return ({}).leak`,
      `JSON.stringify = function (x) { s = x.passwordHash }; JSON.stringify(u)`, the `globalThis.String`
