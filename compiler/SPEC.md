@@ -18675,7 +18675,7 @@ A module's bindings reach scrml source through exactly two forms: the static `im
 **Normative statements:**
 
 - A dynamic `import(specifier)` expression anywhere in scrml logic — a `${ }` body, a function body, a `^{ }` meta body, or an attribute-value expression — SHALL be a compile error (`E-DYNAMIC-IMPORT-NOT-IN-SCRML`), reported at the `import` keyword. There is no stdlib carve-out.
-- The `^{ }` case is not a new restriction: §21.3.1 already states that "the `^{}` body MUST NOT contain dynamic `await import(...)` calls"; this section gives that sentence its diagnostic. The self-host bootstrap's bridge files (`stdlib/compiler/**`, and the frozen `compiler/self-host/` tree) use exactly that pattern today; they are `import:host` migration backlog, not an exception.
+- The `^{ }` case is not a new restriction: §21.3.1 already states that "the `^{}` body MUST NOT contain dynamic `await import(...)` calls"; this section gives that sentence its diagnostic. The self-host bootstrap's bridge files (`stdlib/compiler/**`) use exactly that pattern today (as did the v1 `compiler/self-host/` tree until its S447 retirement); they are `import:host` migration backlog, not an exception.
 - The static `import` declaration (§21.3), `import:host` (§21.3.1), and a member named `import` (`x.import(…)`) are unaffected. `import.meta` is not a dynamic import.
 - Code inside `_{ }` foreign code is opaque (§23.2.3); host JavaScript there may use `import()`.
 - A QUOTED attribute value (`onclick="import('./x.js')"`) is a string literal emitted as data (§5), not scrml source, and SHALL NOT fire this code. An attribute EXPRESSION (`onclick=${…}`, `if=(…)`, `onclick={…}`, a call-ref `onclick=f(…)`) is scrml source and does.
