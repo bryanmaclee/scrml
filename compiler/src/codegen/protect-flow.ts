@@ -1313,6 +1313,7 @@ class FlowAnalysis {
       this.bindDecls(decls, mod.scope);
       this.collectInferredNames(mod.root);
     }
+    this.sessionSummaryOk = this.sessionSummaryPrecondition();
     // Monotone fixpoint over a finite lattice — it terminates; the cap is a guard.
     let converged = false;
     let passes = 0;
@@ -1812,6 +1813,17 @@ class FlowAnalysis {
     for (const p of parts) for (const f of this.globalFnsByName.get(p) ?? []) out.add(f);
     return out;
   }
+  /** What the functions `fns` have returned so far, over every instance (data only), cached per pass (r9 re-review). */
+  private retsOf(fns: Set<Closure>): Taint {
+    const key = "R" + [...fns].map((c) => c.cid).sort((a, b) => a - b).join(",");
+    const hit = this.globalRetCache.get(key);
+    if (hit) return hit;
+    let r = clean();
+    for (const inst of this.instanceList) if (fns.has(inst.closure)) r = join(r, dataOnly(inst.ret));
+    r = dataOnly(r);
+    this.globalRetCache.set(key, r);
+    return r;
+  }
   /** What those functions have returned so far (data only), cached per pass. */
   private globalRetCache = new Map<string, Taint>();
   private globalFnRetFor(parts: Iterable<string> | null): Taint {
@@ -1949,8 +1961,104 @@ class FlowAnalysis {
   // value read from the global heap.
   private sessionStores = new Map<string, "sqlite" | "memory">();
 
+  /**
+   * r9 re-review — THE SUMMARY IS A FAIL-CLOSED PRECONDITION, decided once per
+   * compile. Three bypasses in one round (a copied record, unsummarised routes, an
+   * overwritten method — `_scrml_session_store.get = function (k) { return
+   * u.passwordHash }` served the hash) all came from the summary applying while the
+   * program touched the store some other way. So the summary applies to a compile
+   * ONLY IF every program reference to the store, or to anything it can be reached
+   * through, is in an ALLOWED position; any other reference anywhere disables it and
+   * the store is analysed by the faithful global model (sound — slow only for a
+   * program that reaches into it). The ALLOW-LIST, over every identifier and every
+   * property key / string of the emitted server modules outside the recognized
+   * store declarations:
+   *   1. the store binding `_scrml_session_store` — ONLY as `B.get(…)`, `B.set(…)`,
+   *      `B.delete(…)`: a plain (non-`new`) call whose callee is a non-computed
+   *      member of the bare binding;
+   *   2. the global object's names (`globalThis`, `self`, `global`, `window`) — ONLY
+   *      as the object of a NON-computed member whose name is neither the registry's
+   *      nor one that is the global object again (`globalThis.globalThis`, `.self`,
+   *      …), or as the operand of `typeof` (a string);
+   *   3. the registry names (`__scrml_session_stores`, `__scrml_session_store`) —
+   *      NEVER, as an identifier, a property name or a string.
+   * Why that covers every route to the store object: it lives only in the global
+   * object under a registry name and in the binding. Reaching it needs either the
+   * binding (rule 1: only the three summarised calls), the registry name (rule 3:
+   * spelled anywhere → off), or the global object used as a VALUE — computed key,
+   * enumeration, alias, argument, spread, `in`, `with` (rule 2: any of those → off);
+   * the remaining way to obtain the global object, a code evaluator
+   * (`Function("return this")`), is refused outright. Server modules are strict ESM,
+   * so a bare function's `this` is not the global object.
+   */
+  private sessionSummaryOk = false;
+  private sessionSummaryPrecondition(): boolean {
+    const REGISTRY = new Set(["__scrml_session_stores", "__scrml_session_store"]);
+    // Properties of the global object that are the global object itself.
+    const SELF_REFERENCES = new Set([...GLOBAL_OBJECT_NAMES, "frames", "parent", "top"]);
+    const STORE = "_scrml_session_store";
+    let any = false;
+    let ok = true;
+    for (const mod of this.mods) {
+      // The recognized declarations are the compiler's own text — not program uses.
+      const skip = new Set<any>();
+      for (const st of mod.root.body) {
+        const d = st?.type === "ExportNamedDeclaration" ? st.declaration : st;
+        if (d?.type !== "VariableDeclaration") continue;
+        const text = mod.src.slice(d.start, d.end);
+        if (text === SESSION_STORE_SQLITE_TEXT || text === SESSION_STORE_MEMORY_TEXT) { skip.add(d); any = true; }
+      }
+      const visit = (n: any, parent: any, key: string): void => {
+        if (!ok || !n || typeof n !== "object") return;
+        if (Array.isArray(n)) { for (const c of n) visit(c, parent, key); return; }
+        if (typeof n.type !== "string" || skip.has(n)) return;
+        if (n.type === "Identifier") {
+          // Property / key positions name a property, not a binding.
+          const isKey = (parent?.type === "MemberExpression" && key === "property" && !parent.computed)
+            || ((parent?.type === "Property" || parent?.type === "MethodDefinition" || parent?.type === "PropertyDefinition") && key === "key" && !parent.computed);
+          if (isKey) { if (REGISTRY.has(n.name)) ok = false; return; }
+          if (REGISTRY.has(n.name)) { ok = false; return; }
+          if (n.name === STORE) {
+            const allowed = parent?.type === "MemberExpression" && key === "object" && !parent.computed
+              && (parent.property?.name === "get" || parent.property?.name === "set" || parent.property?.name === "delete")
+              && this.parentOf.get(parent)?.node?.type === "CallExpression" && this.parentOf.get(parent)?.key === "callee";
+            if (!allowed) ok = false;
+            return;
+          }
+          if (GLOBAL_OBJECT_NAMES.has(n.name)) {
+            // (Not a member that IS the global object again: `globalThis.globalThis[k]`.)
+            const allowed = (parent?.type === "MemberExpression" && key === "object" && !parent.computed
+                && !REGISTRY.has(parent.property?.name) && !SELF_REFERENCES.has(parent.property?.name))
+              // `typeof globalThis` yields a string (the compiler's channel broadcast emits it).
+              || (parent?.type === "UnaryExpression" && parent.operator === "typeof");
+            if (!allowed) ok = false;
+            return;
+          }
+          return;
+        }
+        if (n.type === "Literal" && typeof n.value === "string" && REGISTRY.has(n.value)) { ok = false; return; }
+        if (n.type === "TemplateElement" && [...REGISTRY].some((r) => (n.value?.cooked ?? "").includes(r))) { ok = false; return; }
+        for (const k in n) {
+          if (k === "type" || k === "start" || k === "end" || k === "loc" || k === "range") continue;
+          const v = n[k];
+          if (v && typeof v === "object") {
+            if (Array.isArray(v)) { for (const c of v) if (c && typeof c === "object") { this.parentOf.set(c, { node: n, key: k }); visit(c, n, k); } }
+            else { this.parentOf.set(v, { node: n, key: k }); visit(v, n, k); }
+          }
+        }
+      };
+      visit(mod.root, null, "");
+      if (!ok) break;
+    }
+    this.parentOf = new WeakMap();
+    if (process.env.SCRML_PROTECT_FLOW_DEBUG && any) console.error(`[protect-flow] session-store summary ${ok ? "applies" : "DISABLED (a program use outside the allow-list)"}`);
+    return any && ok;
+  }
+  private parentOf = new WeakMap<any, { node: any; key: string }>();
+
   /** A module-scope `const _scrml_session_store = …` the compiler emitted: bind it (see above). */
   private sessionStoreDecl(node: any, scope: Scope): boolean {
+    if (!this.sessionSummaryOk) return false;
     if (node.declarations.length !== 1 || node.declarations[0].id?.type !== "Identifier") return false;
     const text = this.curMod!.src.slice(node.start, node.end);
     const variant = text === SESSION_STORE_SQLITE_TEXT ? "sqlite" : text === SESSION_STORE_MEMORY_TEXT ? "memory" : null;
@@ -1958,14 +2066,12 @@ class FlowAnalysis {
     const name = node.declarations[0].id.name;
     this.sessionStores.set(`${scope.id}:${name}`, variant);
     // r9 fix round (R1/R4): the binding IS the store — ONE object of the global
-    // heap, given its own alias cell (`SESSION_STORE_CELL`, shared by every module).
-    // Whatever reaches it by any route — a summarised `.set`, an alias of the
-    // binding (`const s2 = _scrml_session_store; s2.set(…)`), a computed member
-    // (`store["set"]`), the global registry (`globalThis.__scrml_session_stores[p]`,
-    // `Object.values(globalThis…)`) — is written into that cell, and every `.get`
-    // reads it back. It also carries what the global heap holds (an author object
-    // may sit in the slot) but not the global heap's alias cell: uniting the two is
-    // the round-9 performance cliff.
+    // heap, given its own alias cell (`SESSION_STORE_CELL`, shared by every module):
+    // every summarised `.set` writes it and every `.get` reads it back. (Under the
+    // precondition above those three calls are the ONLY program uses of the store;
+    // any alias, computed member or registry access disables the summary.) It also
+    // carries what the global heap holds but not the global heap's alias cell:
+    // uniting the two is the round-9 performance cliff.
     const g = this.readGlobal(variant === "sqlite" ? "__scrml_session_stores" : "__scrml_session_store");
     const held = dataOnly(variant === "sqlite" ? elemOf(g) : g);
     held.fns = new Set(g.fns);
@@ -2635,11 +2741,6 @@ class FlowAnalysis {
     // does not (a row column cannot alias its row).
     const namedColumnOffRow = o.row !== null && !dynamic && !numeric && o.deep.size === 0 && !rowOut;
     if (!namedColumnOffRow && refsOf(o).size > 0) r.refs = new Set(refsOf(o));
-    // r9 fix round (R4): the session-store REGISTRY on the global object reaches the
-    // store — by its name, or by a key the compiler cannot read on the global object.
-    if ((key === "__scrml_session_stores" || key === "__scrml_session_store" || (dynamic && this.isGlobalObject(o))) && this.isGlobalValue(o)) {
-      r.refs = new Set([...refsOf(r), SESSION_STORE_CELL]);
-    }
     // A field of a value read from the global heap is read through one more name (round 8).
     // An element (an index, or a key the compiler cannot read) is not a name.
     if (o.gnAny || (o.gn && (dynamic || numeric))) r.gnAny = true;
@@ -3196,11 +3297,15 @@ class FlowAnalysis {
       // every global call; named ones the calls that name them (`globalCandidates`).
       const recvEarly = path !== null ? this.evalExpr(m.object, scope, fn) : null;
       let pathOwn = clean();
-      if (path !== null && this.globalCallMatters(args)) {
+      if (path !== null) {
         const cands = this.globalCandidates(new Set(), this.pathNames(path));
-        if (cands.size > 0) {
+        if (cands.size > 0 && this.globalCallMatters(args)) {
           this.recordThis(cands, recvEarly ?? clean());
           pathOwn = this.applyFns(cands, args, undefined, node, fn);
+        } else if (cands.size > 0) {
+          // Not applied (nothing protected or callable is passed) — but what they
+          // RETURN is still the call's result (r9 re-review: see `retsOf`).
+          pathOwn = this.retsOf(cands);
         }
       }
       if (path === "Response.json") {
@@ -3363,9 +3468,16 @@ class FlowAnalysis {
       // applied only when protected data is passed, as before (perf).
       let own = join(pathOwn, selfCall);
       if (this.hasCallable(viaField) || recvGlobal) {
-        const cands = recvGlobal
-          ? (this.globalCallMatters(args) ? this.globalCandidates(viaField.fns, gNames) : new Set<Closure>())
-          : viaField.fns;
+        // r9 re-review: a global receiver's candidates the call does not apply (no
+        // protected or callable argument — the round-6b perf gate) still contribute
+        // what they RETURN. Before, only the "any other method" path joined them, so
+        // a program-stored method named like a built-in (`get`, `set`, `push`, `map`
+        // …) returned nothing: `store.get = function (k) { return u.passwordHash };
+        // store.get("k")` served the hash with the store in the global heap.
+        const matters = !recvGlobal || this.globalCallMatters(args);
+        const all = recvGlobal ? this.globalCandidates(viaField.fns, gNames) : viaField.fns;
+        if (!matters && all.size > 0) own = join(own, this.retsOf(all));
+        const cands = matters ? all : new Set<Closure>();
         if (cands.size > 0) {
           // `new o.F(…)` constructs; `o.m(…)` runs with `this` = the receiver.
           if (node.type === "NewExpression") own = join(own, this.construct(cands, args, node, fn));
@@ -3964,8 +4076,6 @@ class FlowAnalysis {
       if (ELEMENT_ALIASING_BUILTINS.has(path)) {
         const aliases = new Set<string>();
         for (const a of args) for (const x of refsOf(a)) aliases.add(x);
-        // r9 fix round (R4): enumerating the global object reaches the session store too.
-        if (args.some((a) => this.isGlobalObject(a))) aliases.add(SESSION_STORE_CELL);
         if (aliases.size > 0) r.refs = aliases;
         // Round 8: …and those members' FUNCTIONS (`Reflect.get(o, "set")` is
         // the method; `Object.values(globalThis)[0].set(u)` calls a stored one).

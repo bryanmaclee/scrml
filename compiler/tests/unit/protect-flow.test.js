@@ -1306,6 +1306,44 @@ function mw(sid) { return _scrml_session_store.get(sid); }`;
   });
 });
 
+describe("analyzeProtectFlow — r9 re-review: the session-store summary is a fail-closed precondition", () => {
+  // Any program touch of the store outside `B.get / .set / .delete(…)` calls — or of
+  // the registry, or of the global object as a value — disables the summary; the
+  // store is then analysed faithfully. Each shape below served the hash on 79cf49f77.
+  for (const variant of ["sqlite", "memory"]) {
+    const extra = variant === "sqlite"
+      ? `import { Database as _ScrmlSessionDatabase } from "bun:sqlite";\nconst _scrml_session_db_path = "a";\n${SESSION_STORE_SQLITE_TEXT}\nfunction mw(sid) { return _scrml_session_store.get(sid); }`
+      : `${SESSION_STORE_MEMORY_TEXT}\nfunction mw(sid) { return _scrml_session_store.get(sid); }`;
+    const R = variant === "sqlite" ? "globalThis.__scrml_session_stores" : "globalThis.__scrml_session_store";
+    const S = (body) => r8("let s = ''; " + body).replace("const _scrml_sql =", `${extra}\nconst _scrml_sql =`);
+    test(`${variant}: overwriting / registering a store function, by any route`, () => {
+      for (const body of [
+        '_scrml_session_store.get = function (k) { return u.passwordHash; }; return { v: _scrml_session_store.get("k") };',
+        'const box = { v: "" }; _scrml_session_store.get = function (k) { box.v = k; return 1; }; _scrml_session_store.get(u.passwordHash); return { v: box.v };',
+        `_scrml_session_store.zz = function (x) { s = x; }; Object.values(${variant === "sqlite" ? R : "{ a: " + R + " }"})[0].zz(u.passwordHash); return { v: s };`,
+        `_scrml_session_store.zz = function (x) { s = x; }; ${variant === "sqlite" ? R + ".a" : R}.zz(u.passwordHash); return { v: s };`,
+        'const box = { v: "" }; _scrml_session_store.set = function (k, v) { box.v = v; }; _scrml_session_store.set("k", u.passwordHash); return { v: box.v };',
+        'const box = { v: "" }; _scrml_session_store.delete = function (k) { box.v = k; }; _scrml_session_store.delete(u.passwordHash); return { v: box.v };',
+        'const st = _scrml_session_store; st.get = function (k) { return u.passwordHash; }; return { v: _scrml_session_store.get("k") };',
+        '_scrml_session_store["g" + "et"] = function (k) { return u.passwordHash; }; return { v: _scrml_session_store.get("k") };',
+        'Object.defineProperty(_scrml_session_store, "get", { value: function (k) { return u.passwordHash; } }); return { v: _scrml_session_store.get("k") };',
+        'Object.assign(_scrml_session_store, { get(k) { return u.passwordHash; } }); return { v: _scrml_session_store.get("k") };',
+        'const n = "get"; _scrml_session_store[n] = function (k) { return u.passwordHash; }; return { v: _scrml_session_store.get("k") };',
+        `_scrml_session_store.zz = function (x) { s = x; }; for (const k in ${R}) ${R}[k].zz?.(u.passwordHash); return { v: s };`,
+        `_scrml_session_store.zz = function (x) { s = x; }; const g = globalThis; ${variant === "sqlite" ? 'g["__scrml_session_stores"].a' : 'g["__scrml_session_store"]'}.zz(u.passwordHash); return { v: s };`,
+        `_scrml_session_store.zz = function (x) { s = x; }; const k = "__scrml_" + "session_store${variant === "sqlite" ? "s" : ""}"; globalThis.globalThis[k]${variant === "sqlite" ? ".a" : ""}.zz(u.passwordHash); return { v: s };`,
+      ]) {
+        expect([body, refused(S(body))]).toEqual([body, true]);
+      }
+      expect(refused(S('_scrml_session_store.set("k", { n: 1 }); return { v: _scrml_session_store.get("k"), w: mw("s"), id: u.id };'))).toBe(false);
+    });
+  }
+  test("a program-stored global method named like a built-in returns what it returns, even when its arguments do not matter", () => {
+    expect(refused(r8("globalThis.box = { get(k) { return u.passwordHash; } }; return { v: globalThis.box.get('k') };"))).toBe(true);
+    expect(refused(r8("globalThis.box2 = { get(k) { return u.name; } }; return { v: globalThis.box2.get('k'), id: u.id };"))).toBe(false);
+  });
+});
+
 describe("sqlSkeleton", () => {
   test("holes replace interpolations (balanced braces), whitespace collapses", () => {
     expect(sqlSkeleton("SELECT *  FROM t\n WHERE a = ${ f({ x: 1 }) } AND b = ${y}"))
