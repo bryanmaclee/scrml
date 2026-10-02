@@ -491,7 +491,8 @@ function containerOf(t: Taint, seg: string | null = ANY_KEY): Taint {
 function elemOf(t: Taint): Taint {
   const row = t.row ? { ...copyRow(t.row), paths: readPaths(t.row.paths, null, false).next } : null;
   const e: Taint = { row: row && row.paths.size > 0 ? row : null, scalar: naked(t), deep: new Map(t.deep), fns: new Set(t.fns), refs: new Set(refsOf(t)), ...(t.k ? { k: t.k } : {}) };
-  carryGlobalNames(t, e);
+  // An element is reached by no NAME: its global names are unknown (round 8).
+  if (t.gnAny || (t.gn && t.gn.size > 0)) e.gnAny = true;
   return e;
 }
 
@@ -1576,7 +1577,10 @@ class FlowAnalysis {
     const out = new Set<Closure>();
     for (const f of fns) {
       const ns = this.globalNamesByFn.get(f);
-      if (!ns || this.globalFnsUnnamed.has(f)) { out.add(f); continue; }
+      if (this.globalFnsUnnamed.has(f)) { out.add(f); continue; }
+      // Stored only in element positions (no name reaches them) — round 8.
+      if (!ns && this.globalFnsSlot.has(f)) continue;
+      if (!ns) { out.add(f); continue; }
       for (const n of ns) if (names.has(n)) { out.add(f); break; }
     }
     return out;
@@ -1589,6 +1593,7 @@ class FlowAnalysis {
     const out = new Set<Closure>(this.globalFnsUnnamed);
     if (parts === null) {
       for (const set of this.globalFnsByName.values()) for (const f of set) out.add(f);
+      for (const f of this.globalFnsSlot) out.add(f);
       return out;
     }
     for (const p of parts) for (const f of this.globalFnsByName.get(p) ?? []) out.add(f);
@@ -1654,8 +1659,28 @@ class FlowAnalysis {
   private globalStore(slot: string, t: Taint): void {
     if (this.find(slot) !== this.find(GLOBAL_CELL)) return;
     if ([...naked(t).keys()].some((l) => !isPseudoLabel(l))) this.sink(t, this.curInst, "global");
-    if (!this.namedGlobalWrite) this.recordGlobalFns(null, t.fns);
+    if (this.namedGlobalWrite) return;
+    if (this.slotWrite) this.addAll(this.globalFnsSlot, t.fns);
+    else this.recordGlobalFns(null, t.fns);
   }
+  /**
+   * S447 round 8 — functions stored into an ELEMENT position of a global
+   * container (`m.set(k, f)`, `arr.push(f)`, `s.add(f)` …). An element is never
+   * reached by a property NAME — only by an element read (`get` / `at` / an
+   * index / iteration), which yields a value whose global names are unknown
+   * (`gnAny`) and so considers every function it holds. Such a function is
+   * therefore not a candidate of a NAMED call. Round 7 recorded these as
+   * "stored where no name is readable", candidates of EVERY global call — and
+   * the compiler's own session middleware (`_scrml_session_store.set(sid,
+   * _rec)`) writes a value read from the global heap back into it, so every
+   * global function became a candidate of every global call: name scoping was
+   * a no-op in any module with a session (and examples like g2-deep blamed the
+   * compiler's `_scrml_sqlite_data_dir` for a global store — a false E-PROTECT-006
+   * on main — at 100+ s for 32 functions).
+   */
+  private globalFnsSlot = new Set<Closure>();
+  /** Set while an element-position write (a MUTATING method's) is recorded. */
+  private slotWrite = false;
 
   private getBinding(name: string, scope: Scope, depth = 0): Taint {
     const s = this.resolve(name, scope);
@@ -2146,7 +2171,8 @@ class FlowAnalysis {
     const namedColumnOffRow = o.row !== null && !dynamic && !numeric && o.deep.size === 0 && !rowOut;
     if (!namedColumnOffRow && refsOf(o).size > 0) r.refs = new Set(refsOf(o));
     // A field of a value read from the global heap is read through one more name (round 8).
-    if (o.gnAny || (o.gn && dynamic)) r.gnAny = true;
+    // An element (an index, or a key the compiler cannot read) is not a name.
+    if (o.gnAny || (o.gn && (dynamic || numeric))) r.gnAny = true;
     else if (o.gn) r.gn = new Set([...o.gn, ...(key !== null ? [key] : [])]);
     // A column read straight off a row is a primitive: its `.length` is the
     // §14.8.9 allowlisted derived count. Anything that merged container
@@ -2378,6 +2404,22 @@ class FlowAnalysis {
           v.k = opK(lv, rv);
         }
         this.bindPattern(node.left, v, scope, fn);
+        // Round 8: `a ??= b` / `a ||= b` / `a &&= b` evaluates to `a`'s CURRENT value
+        // when it does not assign — `let a = u; (a ||= 1).passwordHash` and
+        // `(t.h ??= 1).passwordHash` served the hash on base (measured over HTTP);
+        // it read as `b` alone. ⚑ For a left operand in the GLOBAL heap the value
+        // keeps `a`'s data and functions but not its alias cells: joining them
+        // makes the compiler's own `(globalThis.__scrml_session_store ??= new
+        // Map())` — copied into every server module — one alias class with the
+        // global heap, and examples/23's analysis went from ~1 s to 16 s
+        // (measured). A write THROUGH such a result is therefore not seen as a
+        // global store — the pre-existing state, filed in
+        // g-protect-egress-round-9-residuals.
+        if (node.operator === "||=" || node.operator === "&&=" || node.operator === "??=") {
+          let lv = this.evalExpr(node.left, scope, fn);
+          if (this.isGlobalValue(lv)) { lv = { ...lv }; delete lv.refs; }
+          return join(lv, rv);
+        }
         return v;
       }
       case "SequenceExpression": {
@@ -2741,7 +2783,9 @@ class FlowAnalysis {
       // The global names the call reaches functions under (round 8): the spelled
       // path, or the names the receiver was read through — null when they
       // cannot be named (then every function it holds is a candidate).
-      const gNames: Set<string> | null = path !== null ? new Set(path.split(".")) : recvGlobal ? this.globalNames(recv, [method]) : null;
+      // (An index is an element, not a name: `globalThis.fs[0](u)` — unknown.)
+      const gNames: Set<string> | null = method !== null && /^\d+$/.test(method) ? null
+        : path !== null ? new Set(path.split(".")) : recvGlobal ? this.globalNames(recv, [method]) : null;
       // S447 round 7 — a function the compile stored on the receiver is CALLED,
       // with `this` = the receiver, WHATEVER its name: a user method named like a
       // built-in (`o.set(u)`, `o.map(f)`, `o.get(k)`) used to take the built-in's
@@ -2777,7 +2821,10 @@ class FlowAnalysis {
       if (method !== null && MUTATING_METHODS.has(method)) {
         // `m.set(k, v)` stores the KEY too (N1).
         const written = method === "set" ? join(keyOnly(args[0] ?? clean()), args[1] ?? clean()) : method === "splice" ? join(...args.slice(2)) : join(...args);
-        this.writeThrough(m.object, recv, containerOf(written), scope);
+        // An ELEMENT position (round 8 — see `globalFnsSlot`).
+        const prevSlot = this.slotWrite;
+        this.slotWrite = true;
+        try { this.writeThrough(m.object, recv, containerOf(written), scope); } finally { this.slotWrite = prevSlot; }
         const cbm = this.opaqueCallbacks(path === null ? recv : dataOnly(recv), args, node, fn); // `store.update(fn)` calls it
         return method === "push" || method === "unshift" ? join(own, cbm) : join(own, recv, containerOf(written), cbm);
       }

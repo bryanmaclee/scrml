@@ -881,6 +881,36 @@ describe("analyzeProtectFlow — round 8: adversarial follow-ups (self-review)",
   });
 });
 
+describe("analyzeProtectFlow — round 8: logical assignment and element positions", () => {
+  test("`a ||= b` / `a ??= b` evaluate to a's current value", () => {
+    for (const body of [
+      "let a = u; const x = (a ||= 1); return x.passwordHash;",
+      "const t = { h: u }; const x = (t.h ??= 1); return x.passwordHash;",
+      "let a = u; const x = (a &&= a); return x.pin;",
+      "globalThis.k70 = u; const x = (globalThis.k70 ??= {}); return x.passwordHash;",
+    ]) {
+      expect([body, leakCols(r8(body)).length > 0]).toEqual([body, true]);
+    }
+  });
+
+  test("a function stored in an ELEMENT of a global container is reached by element reads, not by every named call", () => {
+    // Base: writing a global-derived value into a container recorded every global
+    // function as "stored where no name is readable", so `Math.min(u.pin, 1)`
+    // applied `keep` with the pin — a false global store (g2-deep on main).
+    expect(leakCols(r8('globalThis.keep = function (v) { globalThis.kept = v; }; const S = new Map(); S.set("k", globalThis.cfg); return Math.min(u.pin, 1) == 3;'))).toEqual([]);
+    for (const body of [
+      'globalThis.keep = function (v) { globalThis.kept = v; }; const S = new Map(); S.set("k", globalThis.cfg); globalThis.keep(u.pin); return 1;',
+      'const S = new Map(); S.set("k", globalThis.cfg); S.set("f", function (v) { globalThis.kept = v; }); S.get("f")(u.pin); return 1;',
+      "globalThis.arr = []; globalThis.arr.push(function (v) { return v; }); return globalThis.arr[0](u.passwordHash);",
+      "globalThis.arr2 = []; globalThis.arr2.push({ m(v) { return v; } }); return globalThis.arr2[0].m(u.passwordHash);",
+      'globalThis.m3 = new Map(); globalThis.m3.set("k", { m(v) { return v; } }); const g = globalThis.m3.get("k"); return g.m(u.passwordHash);',
+      "globalThis.arr4 = []; globalThis.arr4.push({ m(v) { return v; } }); for (const g of globalThis.arr4) { return g.m(u.passwordHash); } return 1;",
+    ]) {
+      expect([body, leakCols(r8(body)).length > 0]).toEqual([body, true]);
+    }
+  });
+});
+
 describe("analyzeProtectFlow — round 8: the round-7 performance cliff", () => {
   // Review-measured on round 7: a 240-object `toString` chain took 13.7 s
   // (0.47 s on base); a shared `this`-writing method on 240 receivers 40.5 s.
