@@ -1,0 +1,27 @@
+{
+  "id": "each-when-changes-in-row-body-no-write",
+  "description": "§6.7.4 a reactive effect written inside an `<each>` row body is registered (one per row), not dropped. Its body writes no reactive cell (S447: an effect drives the outside world), so the run is observed through the DOM it touches: one row, #inc bumps @n once, the row's effect sets data-ran on #beacon. Carried on impl#1 (S432 P7; re-pinned S449 from each/when-changes-in-row-body, whose writing body S447 made an error): the block is dropped from the row render, silently.",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4 Scope and teardown: \"**An `<effect>` inside an `<each>` row is one effect per row**, registered when the row is created and unregistered when the row is removed\"; the keyword `when … changes { }` \"IS an `<effect>`\" during its §63 window. Not on mount (beacon untouched until #inc); a call to a platform API is not a reactive write (§6.7.4 rule 5).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-EFFECT-WRITES-STATE"],
+    "input": [
+      { "click": "#inc" }
+    ],
+    "state": {
+      "n": 1
+    },
+    "domAnchored": [
+      { "selector": ".row", "count": 1 },
+      { "selector": "#beacon", "attr": { "data-ran": "yes" } }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-when-changes-in-each-row-body-dropped",
+      "fails": { "runtime": "sha256:6c062089c961df35" }
+    }
+  }
+}

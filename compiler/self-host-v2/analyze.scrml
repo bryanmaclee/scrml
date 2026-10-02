@@ -4498,6 +4498,10 @@ ${
 
     fn resolveEffectDep(env: Env, d: AExpr, st: AS) -> AS {
         const name: string = atName(d)
+        // fix round (LOW b): a field path (`@signup.email`) is ⚑ OPEN in §6.7.4 — refused, not decided
+        if (name == "" && memberName(d.k) != "" && isReactiveRoot(placeRoot(d))) {
+            return addDiag(st, env.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a field path as an effect dependency is not in the bootstrap — whether a §66 field path (`@signup.email`) may be a dep entry is OPEN (§6.7.4); list a cell `@name`")
+        }
         if (name == "") return addDiag(st, env.file, d.span, "E-LIFECYCLE-007", "an effect dependency is a cell written `@name` (§6.7.4) — this entry is not one")
         const r: RX = resolveExpr(env, d, not, st)
         if (r.st.diags.length > st.diags.length) {
@@ -8587,7 +8591,7 @@ ${
     fn scanExpr(cx: WCx, e: AExpr, acc0: BodyScan) -> BodyScan {
         const c: AExpr | not = calleeOf(e.k)
         if (c is some) return scanExprs(cx, exprKids(e).slice(1), scanCall(cx, e, c, acc0))
-        let acc: BodyScan = constructionRef(cx, e, fnValueRef(cx, e, acc0))
+        let acc: BodyScan = formulaRef(cx, e, constructionRef(cx, e, fnValueRef(cx, e, acc0)))
         for (const x of exprKids(e)) { acc = scanExpr(cx, x, acc) }
         return acc
     }
@@ -8602,6 +8606,61 @@ ${
             if (r.sym == d.id) return acc             // `@box.k` resolves `@box` too: one reference per body
         }
         return addRef(acc, { sym: d.id, name: constructionLabel(d.hint), span: e.span, file: cx.file, asValue: false })
+    }
+
+    // s449 fix round (HIGH-1) — a read of a field with NO write capability (a
+    // derived cell, or a locked one whose initializer the printer turns into a
+    // `rt.derived` — print `fieldCtor`) RUNS ITS FORMULA on the read (lazy pull,
+    // §6.6): a reference to that formula's summary. Program-level cells
+    // included — `constructionRef` skips the program because it is built at
+    // boot, but a derived program cell is still recomputed at its read.
+    // Reviewer-measured: `<d:int=(@n + g())/>` read in an effect wrote `@a`.
+    fn formulaRef(cx: WCx, e: AExpr, acc: BodyScan) -> BodyScan {
+        const fi: FieldInfo | not = formulaFieldRead(cx.t, nameFact(cx.t.names, e.nid))
+        if (fi is not) return acc
+        for (const r of acc.refs) {
+            if (r.sym == fi.sym.id) return acc            // one reference per body
+        }
+        return addRef(acc, { sym: fi.sym.id, name: formulaLabel(cx.t, fi), span: e.span, file: cx.file, asValue: false })
+    }
+
+    fn formulaFieldRead(t: Tables, f: NameFact | not) -> FieldInfo | not {
+        const df: DeclField | not = readField(f)
+        if (df is not) return not
+        const di: DeclInfo | not = declInfo(t, df.decl)
+        if (di is not || df.idx < 0 || df.idx >= di.fields.length) return not
+        const fi: FieldInfo = di.fields[df.idx]
+        const w: Sym | not = fi.wcap
+        if (w is some) return not                        // a cell: seeded once, at construction
+        return fi
+    }
+
+    type DeclField:struct = { decl: Sym, idx: int }
+
+    fn mkDeclField(d: Sym, i: int) -> DeclField { return { decl: d, idx: i } }
+
+    fn readField(f: NameFact | not) -> DeclField | not {
+        return match f {
+            .NField(decl: d, inst: i, idx: x) :> mkDeclField(d, x)
+            .NInst(decl: d) :> not
+            .NLocal(sym: s) :> not
+            .NStruct(owner: o) :> not
+            .NFn(sym: s) :> not
+            .NLength :> not
+            not :> not
+        }
+    }
+
+    fn formulaLabel(t: Tables, fi: FieldInfo) -> string {
+        for (const d of t.decls) {
+            for (const f of d.fields) {
+                if (f.sym.id == fi.sym.id) {
+                    if (d.kind == DeclKind.Program) return "formula of @" + fi.sym.hint
+                    return "formula of @" + d.sym.hint + "." + fi.sym.hint
+                }
+            }
+        }
+        return "formula of @" + fi.sym.hint
     }
 
     fn sharedDeclRead(f: NameFact | not) -> Sym | not {
@@ -9015,6 +9074,15 @@ ${
                 const scan: BodyScan = constructionScan(t, ds)
                 out = out.concat([{ sym: ds.info.sym.id, name: label, scan: scan, w: directWitness(label, scan), u: directUWitness(label, scan) }])
             }
+            // HIGH-1: one summary per formula — a field computed on its read
+            for (const fi of ds.info.fields) {
+                const w: Sym | not = fi.wcap
+                if (w is not) {
+                    const flabel: string = formulaLabel(t, fi)
+                    const fscan: BodyScan = scanValue({ t: t, file: ds.file }, fi.init, emptyScan())
+                    out = out.concat([{ sym: fi.sym.id, name: flabel, scan: fscan, w: directWitness(flabel, fscan), u: directUWitness(flabel, fscan) }])
+                }
+            }
         }
         // the fixed point: a pass adds a witness to a function whose callee has
         // one; a witness, once found, is kept (each function gains at most two),
@@ -9165,6 +9233,7 @@ ${
             if (scan.writes.length > 0) why = "writes `" + scan.writes[0].cell + "`"
             for (const ref of scan.refs) {
                 const s: FnSummary | not = summaryOf(sums, ref.sym)
+                if (why == "" && s is not) why = "may write — it reaches `" + ref.name + "`, which has no write summary"
                 if (why == "" && s is some) {
                     const sw: Witness | not = s.w
                     const su: UWitness | not = s.u
@@ -9182,7 +9251,8 @@ ${
     }
 
     fn refDiags(w: AEffect, r: FnRef, s: FnSummary | not) -> Diag[] {
-        if (s is not) return []
+        // fix round (LOW a): a reference with no summary is unresolved — fail closed
+        if (s is not) return [{ code: "E-EFFECT-WRITE-UNPROVEN", file: r.file, span: r.span, message: "this effect reaches `" + r.name + "`, which has no write summary — the compiler cannot prove it writes no reactive cell, and the rule fails closed (§6.7.4 rule 4)" }]
         const sw: Witness | not = s.w
         if (sw is some) return [writesThrough(w, r, sw)]
         const su: UWitness | not = s.u
@@ -9204,6 +9274,7 @@ ${
         const chain: string = chainText(wit.chain) + " → " + wit.site.cell
         let how: string = " writes `" + wit.site.cell + "` through a call: `" + chain + "`"
         if (r.asValue) how = " hands `" + r.name.replace("()", "") + "` on as a function value — whatever receives it may call it (§6.7.4 rule 3) — and it writes `" + wit.site.cell + "`: `" + chain + "`"
+        if (r.name.indexOf("formula of ") == 0) how = " reads a value computed on its read — its formula runs inside the effect and writes `" + wit.site.cell + "`: `" + chain + "`"
         if (r.name.indexOf("construction of ") == 0) how = " reads a shared instance that its first read CONSTRUCTS, running initializers that write `" + wit.site.cell + "`: `" + chain + "`"
         const msg: string = effectWord(w) + how + ". An effect drives the outside world and may not write reactive state, directly or through a called function (§6.7.4). " + fixText(w, wit.site)
         return { code: "E-EFFECT-WRITES-STATE", message: msg, file: r.file, span: r.span }

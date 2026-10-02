@@ -340,7 +340,7 @@ ${
             .NFn(f: f) :> ""
             .NServerFn(f: f) :> ""
             .NBlock(b: b) :> ""
-            .NPlace(pl: pl) :> ""
+            .NPlace(pl: pl) :> formulaWriteWitness(p, pl, seen)
             .NInst(i: i) :> constructWriteWitness(p, i, seen)
             .NPattern(pat: pat) :> ""
             .NEdit(k: k) :> ""
@@ -383,6 +383,38 @@ ${
             }
         }
         return ""
+    }
+
+    // fix round (HIGH-1): a read of a field with no write capability RUNS its
+    // initializer (the printer makes it a `rt.derived`, lazily pulled) — the
+    // program's own derived cells included.
+    fn formulaWriteWitness(p: CoreProgram, pl: Place, seen: int[]) -> string {
+        const ref: FieldRef | not = cellFieldOf(pl)
+        if (ref is not) return ""
+        const d: Decl | not = findDecl(p, ref.owner)
+        if (d is not || ref.idx < 0 || ref.idx >= d.fields.length) return ""
+        const f: Field = d.fields[ref.idx]
+        if (f.wcap is some) return ""
+        if (seen.indexOf(f.sym.id) >= 0) return ""
+        const init: Expr | not = f.init
+        if (init is not) return ""
+        for (const n of allNodes(Node.NExpr(init))) {
+            const w: string = nodeWriteWitness(p, n, seen.concat([f.sym.id]))
+            if (w != "") return "through the formula of <" + d.sym.hint + ">." + f.sym.hint + ": " + w
+        }
+        return ""
+    }
+
+    fn cellFieldOf(pl: Place) -> FieldRef | not {
+        return match pl {
+            .Cell(decl: d, inst: i, path: path) :> firstRef(d, path)
+            .LocalPath(sym: s) :> not
+        }
+    }
+
+    fn firstRef(d: Sym, path: FieldRef[]) -> FieldRef | not {
+        if (path.length == 0) return not
+        return { owner: d, idx: path[0].idx }
     }
 
     fn sharedDeclOf(i: InstRef) -> Sym | not {

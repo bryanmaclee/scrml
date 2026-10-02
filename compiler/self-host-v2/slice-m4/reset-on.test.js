@@ -182,6 +182,10 @@ describe("§6.8.4 — codes", () => {
     expect(loop[0].message).toContain("re-evaluates its initializer at every reset, and that initializer writes `@q` (`bump() → @q`)");
     // a writer of an UNRELATED cell is refused too (the reset must write its own cell and nothing else)
     expect(codes(P(`    <let q:int=0/>\n    <let other:int=0/>\n    function note() -> int {\n        @other = 1\n        return 1\n    }\n    <let page:int=(note()) reset-on=[@q]/>`, ""))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // fix round HIGH-1: the writer reached through a DERIVED cell the initializer reads (its formula runs on the read)
+    const viaDerived = diagsOf(P(`    <let q:int=0/>\n    function g() -> int {\n        @q = @q + 1\n        return 1\n    }\n    <d:int=(@q + g())/>\n    <let page:int=(@d) reset-on=[@q]/>`, ""));
+    expect(viaDerived.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(viaDerived[0].message).toContain("`formula of @d → g() → @q`");
     // negative: an initializer that calls a write-free function
     expect(codes(P(`    <let q:int=0/>\n    fn one() -> int { return 1 }\n    <let page:int=(one()) reset-on=[@q]/>`, ""))).toEqual([]);
   });

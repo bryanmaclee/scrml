@@ -217,3 +217,36 @@ condition, each hole is closed in the compile-time rule):
   E-BOOTSTRAP-UNSUPPORTED.
 - **A §66 field path as an effect dependency** (`deps=[@box.k]`, ⚑ OPEN in §6.7.4) → E-LIFECYCLE-007 (only `@name`
   entries are accepted — fail closed).
+
+## 2026-10-02 — fix round (S239 review at a92b6251e: DO-NOT-LAND on HIGH-1)
+
+- **HIGH-1 — a read of a derived cell never reached its formula** (`constructionRef` skipped the program; nothing
+  linked a derived read to its initializer). Fixed: `formulaRef` — a read of ANY field with no write capability (a
+  derived cell, program-level included, or a locked field the printer builds as `rt.derived`) is a reference to a
+  per-field FORMULA summary (scan of its initializer), in the effect pass, the function summaries, the construction
+  summaries and the reset-value check alike; Core C11 restates it (`.NPlace(Cell)` of a capability-less field →
+  its `init`). Tests, all four review shapes: effect reads `@d`; effect calls write-free `peek()` returning `@d`;
+  `<box let k:int=(@d)/>` read as `@box.k`; `<let page:int=(@d) reset-on=[@q]/>` with `@d`'s formula writing `@q`;
+  plus the reviewer's runtime program (now rejected; its write-free twin runs, `@a` stays 0) and a C11 graft.
+  Bites: `formulaRef` off → the HIGH-1 effect tests RED; C11's formula arm off → the C11 test RED.
+  **4th route?** None found. Checked: owed seeds (settle at the outermost construction's end — covered by the
+  construction summary), use-site construction values and `<each>` row cells (evaluated by rendering, which an effect
+  cannot do), `InitOf` (only in `reset`, itself a write). The locked-field case is the SAME mechanism as HIGH-1
+  (`rt.derived` lazy pull — print `fieldCtor` gives every capability-less field one), so it is covered by the same
+  rule rather than treated as a new route; flagged here for the PA.
+- **MEDIUM-1 — a row `<effect>` ran when the same batch removed its row.** `reconcile()` sets a survivor's item
+  cell before disposing removed rows; that write's batch started a nested flush that drained the effect queue
+  mid-run. Fixed: one flush at a time (`flushing` guard; the running loop picks up everything queued). Test: four
+  handlers (dep-then-rows / rows-then-dep × new object / same object via `filter`) → 1 run each. Bite: guard off → RED.
+- **LOW a** — `refDiags` / the reset-value check: a reference with no summary now fails closed
+  (E-EFFECT-WRITE-UNPROVEN / refused) instead of passing.
+- **LOW b** — `deps=[@box.k]` (a §66 field path, ⚑ OPEN) → E-BOOTSTRAP-UNSUPPORTED (was E-LIFECYCLE-007). Test.
+- **LOW c** — the 11 `notCodes`-only negative conformance cases pass on impl#1 vacuously (it emits none of these
+  codes) and the bootstrap cannot parse their legacy dialect; they are the contract for a future impl#2 adapter. The
+  EXECUTED proof of every negative is the bootstrap's slice-m4 `effect.test.js` / `reset-on.test.js` (each code has
+  a positive and a negative there). Not pairable with a positive code on impl#1 for the same reason.
+- **MIGRATION** — `each/when-changes-in-row-body` now expects E-EFFECT-WRITES-STATE + W-WHEN-EFFECT-DEPRECATED
+  (xfail under `g-impl1-effect-reset-on-codes-unimplemented-s447`); the row-drop pin moved to the new
+  `each/when-changes-in-row-body-no-write` (a non-writing row `when` that sets `data-ran` on `#beacon`; the same body
+  at program top level PASSES on impl#1 — verified with a throwaway probe case, deleted — so the row case fails on
+  impl#1 for the drop alone). `g-when-changes-in-each-row-body-dropped` entry updated. Conformance 1212/1239 + 27 xfail.

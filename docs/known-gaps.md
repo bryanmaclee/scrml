@@ -18982,8 +18982,13 @@ silently dropped at exit 0 has been filed HIGH (`g-struct-construction-silently-
 Reproduces identically on `fix/s432-when-changes-dep-list` (reviewer), so that branch does not fix it. Open question
 for the fix, not for the pin: with N rows, is the effect registered once or per row (§6.7.2.1 — an `<each>` row is
 not a scope)? The case uses ONE row so it is ruling-neutral. **Exposure: 0** (no `when … changes` in any `${}` inside
-markup across the repo corpus, assetManagement or flogenceP). Pinned by `conformance/cases/each/when-changes-in-row-body`
-(impl#1: `hits` stays 0). found by: S432 adversarial review of the when-changes branch; PA re-verified.
+markup across the repo corpus, assetManagement or flogenceP). Pinned by `conformance/cases/each/when-changes-in-row-body-no-write`
+(impl#1: the row effect's `#beacon` `data-ran` attribute stays unset). **Re-pinned S449:** the original pin,
+`each/when-changes-in-row-body`, observed the run through a write to `@hits` — S447 made a writing effect body
+E-EFFECT-WRITES-STATE (the keyword spelling included), so that case now asserts the S447 codes (carried under
+`g-impl1-effect-reset-on-codes-unimplemented-s447`) and the drop is pinned by a non-writing row effect observed
+through the DOM it touches (verified: the same body at program top level passes on impl#1). found by: S432
+adversarial review of the when-changes branch; PA re-verified.
 
 ### g-when-in-if-region-never-unregistered-on-unmount — a `when` declared inside an `if=` region is hoisted to file scope and keeps firing after the region unmounts — `NEW S432-peter; MED; open`
 <!-- @gap id=g-when-in-if-region-never-unregistered-on-unmount sev=MED status=open locus=compiler/src/codegen/emit-logic.ts(case "when-effect" — emitted at file scope, never inside the if= region's mount scope, so `_scrml_mount_track` never sees it) prov=review:S432-adversarial-review-of-the-when-changes-branch;empirical:PA-verified-by-emit-on-280ecbdd -->
@@ -21872,7 +21877,9 @@ The S447 rulings are written into SPEC §6.7.4 (`<effect>`), §6.8.4 (`reset-on=
   the chain and the fix by shape; E-EFFECT-WRITE-UNPROVEN for a call through a non-function name. Core C11 restates
   it (no Write in an effect body, directly or through a called Fn). The keyword form carries it. A read of a
   user declaration's SHARED instance counts as a call of its CONSTRUCTION (its initializers run on first read) — found
-  by measurement: such a read wrote `@a` through a writing `let` seed before the fix.
+  by measurement: such a read wrote `@a` through a writing `let` seed before the fix. Likewise a read of a value
+  computed on its read (a derived cell — program-level included — or any field with no write capability) counts as a
+  call of its formula (s449 fix round, review HIGH-1: `<d:int=(@n + g())/>` read in an effect wrote `@a`).
 - **`reset-on=[…]`** on program cells — Core `View.ResetOn`, runtime `rt.resetOn` (resets drained in rank order
   inside the writer's batch: one change for every dependent); E-RESET-ON-INVALID-ENTRY, E-RESET-ON-CYCLE,
   E-RESET-ON-NOT-WRITABLE, E-RESET-ON-ENGINE-REFUSED (each refusing state named); Core C13.
@@ -21918,7 +21925,7 @@ The S447 rulings are written into SPEC §6.7.4 (`<effect>`), §6.8.4 (`reset-on=
   the outside world (a host call); the bootstrap's host surface is `Date.now()` alone, so no portable runtime case
   pins an effect run yet (the bootstrap's own e2e counts clock reads).
 
-### g-impl1-effect-reset-on-codes-unimplemented-s447 — impl#1 emits none of the S447 `<effect>` / `reset-on=` codes and runs none of their semantics; pinned as expected-to-fail by the 18 positive `conformance/cases/lifecycle/{effect-*,when-effect-*,reset-on-*}` cases — `NEW S449; HIGH; carried`
+### g-impl1-effect-reset-on-codes-unimplemented-s447 — impl#1 emits none of the S447 `<effect>` / `reset-on=` codes and runs none of their semantics; pinned as expected-to-fail by the 18 positive `conformance/cases/lifecycle/{effect-*,when-effect-*,reset-on-*}` cases and `each/when-changes-in-row-body` — `NEW S449; HIGH; carried`
 <!-- @gap id=g-impl1-effect-reset-on-codes-unimplemented-s447 sev=HIGH status=carried locus=compiler/src/(no <effect> element — it reports E-MARKUP-001; no reset-on= modifier — the attribute is not read; no write summary; the keyword when … changes compiles with writes allowed) prov=empirical:s449-xfail-signatures-captured-by-conformance/run.ts---xfail-signature;ruling:user-voice-scrml.md-S447-TS-accounting -->
 
 **Classification: CARRIED** (S430 P7; S447 TS accounting: *"Language-semantics rulings stop generating impl#1 work:

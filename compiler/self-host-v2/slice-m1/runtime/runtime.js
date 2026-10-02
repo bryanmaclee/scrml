@@ -136,7 +136,22 @@ export function batch(fn) {
 // cannot write a reactive cell (§6.7.4 — a compile error, directly or through
 // a called function), so running one queues nothing: there is no cascade to
 // order or bound, and this is a plain loop.
+//
+// One flush at a time (s449 fix round, MEDIUM-1): a render effect that writes
+// while it runs — `<each>`'s reconcile sets a surviving row's item cell before
+// it disposes the removed rows — used to start a NESTED flush from that write's
+// batch, which drained the effect queue mid-run, so an `<effect>` in a row the
+// same batch was removing still ran. A flush started while one is running now
+// returns at once; the running loop picks up everything queued.
+let flushing = false;
+
 function flush() {
+  if (flushing) return;
+  flushing = true;
+  try { drainQueues(); } finally { flushing = false; }
+}
+
+function drainQueues() {
   for (;;) {
     if (queue.size > 0) {
       const [e] = queue;

@@ -172,6 +172,20 @@ describe("§6.7.4 — forms", () => {
     expect(runsOn("inc")).toBe(1);
   });
 
+  test("fix round MEDIUM-1: one batch that changes the dep AND removes a row runs only the surviving row's effect — either order, survivor same object or new", async () => {
+    // mutation RED: flush() without its `flushing` guard (reconcile sets the survivor's item cell before
+    // disposing removed rows; that write's nested flush drained the effect queue mid-run → 2 runs)
+    const src = P(`    type Row:struct = { id: int }\n    <rows:Row[replace, free, remove]=([{ id: 1 }, { id: 2 }])/>\n    <let n:int=0/>\n${PING}\n    function bumpThenNew() {\n        @n = @n + 1\n        @rows = [{ id: 1 }]\n    }\n    function newThenBump() {\n        @rows = [{ id: 1 }]\n        @n = @n + 1\n    }\n    function bumpThenKeep() {\n        @n = @n + 1\n        @rows = @rows.filter(r => r.id == 1)\n    }\n    function keepThenBump() {\n        @rows = @rows.filter(r => r.id == 1)\n        @n = @n + 1\n    }\n    function reset2() { @rows = [{ id: 1 }, { id: 2 }] }`,
+      `        <ul><each in=@rows key=@.id as r><li class="row">\${r.id}<effect deps=[@n]>\${ ping() }</></li></each></ul>\n        <button onclick=bumpThenNew()>a</button>\n        <button onclick=newThenBump()>b</button>\n        <button onclick=bumpThenKeep()>c</button>\n        <button onclick=keepThenBump()>d</button>\n        <button onclick=reset2()>reset</button>`);
+    const { rt } = await loadProgram(coreOf(src), "effect-each-remove");
+    for (const label of ["a", "b", "c", "d"]) {
+      runsOn("reset");
+      expect(rt.stats.depEffects).toBe(2);
+      expect([label, runsOn(label)]).toEqual([label, 1]);
+      expect(rt.stats.depEffects).toBe(1);
+    }
+  });
+
   test("the body may read row bindings, read unlisted cells, call write-free functions and the host", async () => {
     const src = P(`    <let n:int=0/>\n    <let k:int=5/>\n    fn dbl(x: int) -> int { return x * 2 }\n    function stamp(v: int) {\n        const t = Date.now()\n        const w = dbl(v)\n    }\n    <effect deps=[@n]>\${\n        const sum = @n + @k\n        stamp(sum)\n    }</>`,
       `        <button onclick=(@n = @n + 1)>inc</button>`);
@@ -254,6 +268,13 @@ describe("§6.7.4 — codes", () => {
     expect(codes(P(`${D}\n    <effect deps=[@m]${body}`, ""))).toEqual([]);
   });
 
+  test("fix round LOW b: a §66 field path as a dependency (`deps=[@box.k]`, ⚑ OPEN) is refused, not decided", () => {
+    const src = `<program>\n    <box let k:int=0/>\n    renders <div>\${k}</div>\n${PING}\n    <effect deps=[@box.k]>\${ ping() }</>\n    <main></main>\n</program>\n`;
+    const ds = diagsOf(src);
+    expect(ds.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(ds[0].message).toMatch(/field path .* is OPEN/);
+  });
+
   test("E-LIFECYCLE-016 — an effect inside another effect's body, in either spelling", () => {
     expect(codes(P(`${D}\n    <effect deps=[@n]>\${\n        ping()\n        <effect deps=[@m]>\${ ping() }</>\n    }</>`, ""))).toEqual(["E-LIFECYCLE-016"]);
     expect(codes(P(`${D}\n    <effect deps=[@n]>\${\n        ping()\n        when @m changes { ping() }\n    }</>`, ""))).toEqual(["E-LIFECYCLE-016"]);
@@ -333,6 +354,33 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
     expect(W(writes(nested, `<effect deps=[@query]>\${\n        const v = @outer.j\n    }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
     // negative: a shared instance whose initializers write nothing
     expect(W(writes(`    <box let k:int=3/>\n    renders <div>\${k}</div>`, `<effect deps=[@query]>\${\n        const v = @box.k\n    }</>`))).toEqual([]);
+  });
+
+  test("fix round HIGH-1: a read of a value computed on its read (a derived cell, program-level included) runs its formula — a formula calling a writer is a write of the effect", async () => {
+    // Reviewer-measured at a92b6251e: this compiled clean and two clicks took @a 0 → 1 → 2 (the lazy pull ran
+    // the formula inside the effect body).
+    const decls = `    <let n:int=0/>\n    <let a:int=0/>\n    function g() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <d:int=(@n + g())/>`;
+    const eff = (body) => `<effect deps=[@query]>\${\n        ${body}\n    }</>`;
+    const direct = writes(decls, eff("const q = @d"));
+    expect(W(direct)).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(direct[0].message).toContain("`formula of @d → g() → @a`");
+    // through a write-free function that reads it
+    expect(W(writes(`${decls}\n    function peek() -> int { return @d }`, eff("const q = peek()")))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    // through a shared instance whose seed reads it
+    const viaBox = writes(`${decls}\n    <box let k:int=(@d)/>\n    renders <div>\${k}</div>`, eff("const q = @box.k"));
+    expect(W(viaBox)).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(viaBox[0].message).toContain("`construction of <box> → formula of @d → g() → @a`");
+    // negative: a derived cell whose formula writes nothing
+    expect(W(writes(`    <let n:int=0/>\n    <d:int=(@n * 2)/>`, eff("const q = @d")))).toEqual([]);
+  });
+
+  test("fix round HIGH-1, runtime: the reviewer's program is now rejected; its write-free twin runs with no write", async () => {
+    const src = (formula) => P(`    <let n:int=0/>\n    <let a:int=0/>\n    function g() -> int {\n        @a = @a + 1\n        return 1\n    }\n    fn h() -> int { return 1 }\n    <d:int=(${formula})/>\n${PING}\n    <effect deps=[@n]>\${\n        const q = @d\n        ping()\n    }</>`,
+      `        <p class="a">\${@a}</p>\n        <button onclick=(@n = @n + 1)>inc</button>`);
+    expect(codes(src("@n + g()"))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    await loadProgram(coreOf(src("@n + h()")), "effect-derived-clean");
+    expect(runsOn("inc")).toBe(1);
+    expect($("p.a").textContent).toBe("0");
   });
 
   test("recursion: the summary is a fixed point — mutual recursion that writes is found; that does not, is clean", () => {
@@ -482,6 +530,16 @@ describe("Core checks — C11 (Effect) and C12 (Suspend placement)", () => {
     const grafted = clone(core);
     effects(grafted)[0].body = clone(handler);
     expect(mods.check.checkCore(grafted).join("\n")).toMatch(/C11: an Effect body writes reactive state — through `peek\(\)`: through the construction of <box>: through `bumpA\(\)`: a Write of <program>\.a/);
+  });
+
+  test("C11 (fix round HIGH-1): a body that reads a derived program cell whose formula writes", () => {
+    const src = P(`    <let n:int=0/>\n    <let a:int=0/>\n${PING}\n    function g() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <d:int=(@n + g())/>\n    function peek() {\n        const v = @d\n    }`,
+      `        <div><effect deps=[@n]>\${ ping() }</></div>\n        <button onclick=peek()>p</button>`);
+    const core = coreOf(src);
+    const handler = walkCore(core, (n) => n.variant === "On")[0].data.body;
+    const grafted = clone(core);
+    effects(grafted)[0].body = clone(handler);
+    expect(mods.check.checkCore(grafted).join("\n")).toMatch(/C11: an Effect body writes reactive state — through `peek\(\)`: through the formula of <program>\.d: through `g\(\)`: a Write of <program>\.a/);
   });
 
   test("C12: a Suspend at the tail of an Effect body is legal; anywhere else it is not", () => {

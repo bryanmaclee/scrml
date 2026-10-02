@@ -1,0 +1,11 @@
+<rows> = [{ id: 1 }]
+<n> = 0
+<button id="inc" onclick=${@n = @n + 1}>inc</>
+<ul>
+    <each in=@rows key=@.id as r>
+        <li class="row">${r.id}
+            ${ when @n changes { document.getElementById("beacon").setAttribute("data-ran", "yes") } }
+        </li>
+    </each>
+</ul>
+<p id="beacon">beacon</p>
