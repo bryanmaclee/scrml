@@ -133,12 +133,25 @@ derived dep is E-LIFECYCLE-007, reported by the shim as a CODE (not a not-yet re
     resumed continuation's batch carries its own run's event). When the budget is spent the event is STOPPED: reported
     once ("runaway — one change caused more than 10000 when runs / registrations; the rest of that chain is stopped."),
     and every further run or continuation it caused is dropped. Never a crash.
+  - **THE NUMBER IS PROVISIONAL — a ruling is owed (SPEC question (7)).** §6.7.4 is silent on runaway bounds; 10,000
+    is a bootstrap pick, not settled semantics, and neither is the unit (caused runs + caused registrations per external
+    event) or the report text.
   - **Why 10,000 and why only CAUSED work.** The direct fan-out of an external write is bounded by the Whens that
     already exist — it cannot run away — so it is free: 12,000 row `when`s on one cell all run on one click (tested).
-    Only work a When caused can grow without bound. 10,000 caused runs + registrations is far beyond any legitimate
-    effect cascade (a `when` that loads 2,000 rows each carrying a `when` spends 2,000), and small enough to stop a
-    runaway in seconds, not minutes (R2-2 from source: stopped after ~5,000 runs + ~5,000 registrations, about 3.7 s
-    in happy-dom, dominated by rendering 5,000 rows). It is a floor, not a semantics: SPEC question (7).
+    Only work a When caused can grow without bound. The number trades two failure modes:
+    - too LOW falsely stops a legitimate cascade — a `when` that loads N rows, each carrying a `when`, spends N
+      registrations (plus a run per row its writes re-trigger). At 10,000 a legitimate load of more than ~10,000 such
+      rows IS falsely stopped — that is the cost of this number, paid by the adopter with a very large reactive list;
+    - too HIGH lets a runaway freeze the page before it is stopped. Measured R2-2 from source (one click, this
+      machine): stopped after ~5,000 runs + ~5,000 registrations in **~5.2 s** in happy-dom (budget 1,000: 0.09 s;
+      2,000: 0.34 s; 5,000: 1.3 s). The cost is QUADRATIC in the budget for this program, not linear: every `grow()`
+      reconciles every existing row and its `@k` write fans out to every row `when`. The runtime alone (no DOM): 1.4 s.
+  - **Known weakness — the free fan-out of a runaway's leftovers.** After a stopped event, the Whens it created stay
+    registered (they are legitimate registrations). The NEXT external write fans out to all of them free of charge, so
+    a second click of R2-2 does ~5,000 free runs before the budget even starts to bite: 2.5 s in the runtime alone,
+    ~40 s with the `<each>` reconciles in happy-dom. Bounded (never a crash; the page survives), but each further click
+    costs more. A ruling on (7) should decide whether a stopped event should also unregister (or quarantine) the Whens
+    it created; the bootstrap does not, because that would silently delete rows' effects.
   - **When runs are flushed iteratively.** A When triggered inside another When's body (or by an effect that body
     caused) waits for the outermost flush loop instead of recursing (`whenRunning`), so a long chain is a loop, not a
     deep stack: a 6,000-link chain of distinct Whens completes (tested; the re-entrant flush overflowed the stack at a
@@ -151,8 +164,19 @@ derived dep is E-LIFECYCLE-007, reported by the shim as a CODE (not a not-yet re
     "unbounded", "re-entrant" — the only `when` hits are E-LIFECYCLE-006's own rationale, §6.7.5 / the §34 row). So no
     compile-time diagnostic is emitted; the runtime backstop is the floor. If (3) is ruled "through calls", the R2-2
     program becomes an E-LIFECYCLE-006 at compile time (the analysis would need the call graph's write sets).
+  - The R2-2 program ALSO reports one E-LIFECYCLE-006 (runtime): that one is genuine, not a false positive. Each row
+    `when` writes `@k`, its own dep, through `grow()`, so it is a self-cycle through a call (SPEC question (3)) layered
+    on the non-cyclic growth.
+  - **A pre-existing `<each>` leak, found while measuring R2-2 (fixed: it blocked "page alive").** The row cleanup
+    closure was built inside `reconcile()` and captured that call's whole environment (`byKey`, `next`, `items`), so
+    every row retained the O(rows) garbage of the reconcile that created it: rows added one at a time → O(N²) retained
+    objects (2,000 rows: ~4,000,000 objects; the R2-2 e2e reached 4+ GB and was OOM-killed). `removeRange()` now builds
+    the closure outside → ~12,000 objects for 2,000 rows. Regression test: slice-m1/runtime.test.js "rows added one at
+    a time retain O(rows)" (heap-delta bound; bite: 4,024,000 → RED).
   - Tests: slice-m1/when.runtime.test.js "provenance — only CYCLIC re-triggers are capped …" (R2-1, fan-in, R2-2
-    runtime, free fan-out, iterative chain) and slice-m4/when.test.js "R2-2: a row `when` that grows its own <each>".
+    runtime incl. a second event, free fan-out, iterative chain) and slice-m4/when.test.js "R2-2: a row `when` that
+    grows its own <each>" (bounded, reported, no page error; page alive = an unrelated handler still runs and renders —
+    a second `go` click is left to the runtime test because it costs ~40 s of reconciles, see the weakness above).
 - **LOW notes filed from the round-3 re-review (not fixed):**
   - A write made from a HOST microtask / timer callback (`queueMicrotask`, `setTimeout`) inside a When body runs
     with no cause — it escapes the provenance and counts as an external event (new budget, never cyclic). In the

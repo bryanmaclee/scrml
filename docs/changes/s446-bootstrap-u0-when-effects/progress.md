@@ -177,3 +177,57 @@ derived flush; `@qty` unlisted never triggers. scoped: the effect stops firing a
   + 1 todo (+3) · v2 lexer 337/337. CG footprint: runtime 18/0, codes-only 11/0, crashed 0, not-yet 704, front-end
   476 (1209 cases) — unchanged from round 1.
 - DONE (round 2). Deferred: F3 (U1 blocker, unchanged); SPEC question (6) slot fallback.
+
+## Review round 3 (findings at dc348412b) — resumed by S447 after the XPS reboot
+
+- 2026-10-01T17:05-06:00 RESUME. The S448 round-3 agent was killed by a machine reboot mid-round (transcript gone).
+  New worktree `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a7c65fefac89c3297`; `git checkout -B
+  s447-u0-r3` of `origin/wip/s448-bootstrap-u0-r3` (tip 2098bc829, verified); the stopped agent's uncommitted work
+  applied from `scrml-support/handOffs/s448-wip-patches/u0-round3.patch` (`git apply --3way`, clean: runtime.js,
+  when.runtime.test.js, slice-m4/when.test.js, DESIGN §5) → 38c4ea88a. Merged origin/main (f9cd63d86, incl. the Uc
+  codec #1213/#1221) → a856ea0df, no conflicts. TMPDIR: the default (os.tmpdir(), outside every repo); scratch in the
+  session scratchpad. (BRIEF-r3's `/home/bryan/.cache/...` path is the XPS layout; not used on this machine.)
+- FOUND IN THE PATCH: `WhenEvent.spend()` held `return true;` before the budget logic — the stopped agent was
+  mid-bite-proof. Restored `if (++this.spent <= WHEN_EVENT_BUDGET) return true;` → 0d1edcc46.
+- R2-1 REPRODUCED (scratch script against the dc348412b runtime): d = ["loading","parsing"], errors = ["scrml
+  when-effect error: E-LIFECYCLE-006 — re-triggered during its re-run; dropped."]. FIXED (provenance runtime): d =
+  ["loading","parsing","done"], errors = [].
+- R2-2 REPRODUCED (runtime form, dc348412b): runs = 4423, whens = 4424, thrown = "RangeError: Maximum call stack size
+  exceeded.", errors = []. FIXED: runs = 5001, whens = 5002, thrown = null, errors = [one genuine E-LIFECYCLE-006 (each
+  row `when` writes its own dep @k through grow()), "runaway — one change caused more than 10000 when runs /
+  registrations; …"]. Runtime-only: 1.4 s, 149 MB.
+- R2-2 e2e (source program through the bootstrap): the patch's e2e test was OOM-KILLED (exit 137; watchdog: >6 GB).
+  ROOT CAUSE — a PRE-EXISTING `<each>` leak, not the when machinery: the row cleanup closure built inside
+  `reconcile()` captured its whole environment (byKey/next/items), so rows added one at a time retain O(N²) objects.
+  Controls, no `when` at all: 1,000 rows → 1,018,174 retained objects; 2,000 → 4,035,174 (happy-dom), 4,012,027 with a
+  no-op fake DOM (so: the runtime, not happy-dom); pure-JS garbage of the same shape collects to 10. FIXED:
+  `removeRange()` builds the closure outside → 2,000 rows: 12,027 objects (fake DOM), 35,174 (happy-dom). R2-2 e2e
+  after: one click 5.2 s / 691 MB, stopped + reported, 0 page errors (before the leak fix: 8.0 s / 4.27 GB at the same
+  budget). Budget scaling of that one click: 250 → 15 ms, 500 → 26 ms, 1,000 → 92 ms, 2,000 → 336 ms, 5,000 → 1.3 s,
+  10,000 → 5.2 s (quadratic: each grow reconciles every row and fans out to every row when).
+- The e2e test's second `go` click cost ~40 s (all ~5,000 leftover row whens run free as the next event's direct
+  fan-out, each pushing a row through an O(rows) reconcile). Replaced in the e2e by an unrelated `poke` handler (page
+  alive = it runs and renders); the bounded-second-event property stays covered by the runtime test (event 2:
+  8,335 runs, 2.5 s, reported). R2-2 e2e test: 14 s incl. bootstrap load. Recorded as a known weakness in DESIGN §5.
+  Leak fix + regression test + e2e change → 5eecc60ec.
+- BITES (each restored; `git diff` on the runtime empty after):
+  (1) provenance → round 2's per-event run counter in `admit()` → R2-1 RED (+6 cycle tests RED; that counter skips
+      the external first run).
+  (2) `spend()` always true (no budget) → R2-2 runtime RED (hits the 15,000-run guard, no report); the R2-2 e2e has
+      no guard in source and HANGS (an uncapped iterative flush of an unbounded program) — killed by its PID.
+  (3) flush without the `!whenRunning` guard (re-entrant When runs) → 5 RED, "Maximum call stack size exceeded".
+  (4) `admit()` charging an external (null-cause) trigger → "the direct fan-out … is free" RED.
+  (leak) the row cleanup built inside reconcile again → "retain O(rows)" RED (4,024,000 > 400,000).
+- BACKSTOP NUMBER: `WHEN_EVENT_BUDGET = 10000` is **PROVISIONAL — a ruling is owed (DESIGN §5 SPEC question (7))**.
+  Costs named in DESIGN §5: too low falsely stops a legitimate load of >N reactive rows; 10,000 lets a runaway freeze
+  ~5 s before it stops (this machine, R2-2); the leftovers of a stopped event run free on the next event.
+- 4TH SHAPE: none found. Checked: continuation ping-pong across Whens (A's continuation → B → B suspends → B's
+  continuation → A: cyclic by ancestry), interleaved external events (each continuation carries its own run's
+  ancestry), cancelled runs (newest wins drops them), render-layer registrations (charged under the run's cause; the
+  batch flush runs inside `underCause`). Host-deferred writes escaping provenance remain the reviewer's LOW note
+  (not expressible from bootstrap source today; UNVERIFIED for scrml at large) — a known gap, not a new shape.
+- 2026-10-01T18:20-06:00 GATES (round 3, at 5eecc60ec + docs): lint 61 files 0 violations · slice-m1 106/106 ·
+  lowered slice-m1 106/106 · slice-m2 448/448 · slice-m3 64/64 · slice-m4 435 + 1 todo / 0 fail · slice-codec 92/92 ·
+  v2 lexer 337/337. Full suite via the commit hooks of 0d1edcc46 / 5eecc60ec: 33,847 pass / 84 skip / 0 fail
+  (33,943 tests / 1,422 files).
+- DONE (round 3). Deferred: F3 (U1 blocker, unchanged); SPEC questions (3), (6), (7) — (7) owns the provisional budget.
