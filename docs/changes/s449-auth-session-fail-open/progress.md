@@ -88,3 +88,10 @@ Why (a): one spelling per meaning. `session.x` already exists, is bound by the s
 - Direction: semantics-changed (runtime refusal of a token-less destroy). No compile-result change. Did not touch the in-memory Map line.
 - Test: compiler/tests/integration/session-destroy-csrf.test.js (6; 3 fail on base). 154 related tests pass; conformance 1204/1212 + 8 xfail.
 - Known residual (pre-existing, not introduced): which unit's destroy handler is mounted is first-module-wins; in an app mixing csrf="auto" and csrf="off" units the gate depends on module order. The client works either way.
+
+## Final — 2026-10-02T15:05-06:00
+
+- Full gate `bun test compiler/tests/{unit,integration,conformance}`: 27476 pass / 58 skip / 12 todo / 0 fail (27546 tests, 1411 files). `compiler/tests/commands`: 300 pass / 3 skip / 0 fail. Conformance runner: 1204/1212 + 8 xfail.
+- Final corpus vs base (2204 units): newly failing 0; warn-set changes only the 4 listed under item 1.
+- RULINGS NEEDED: R1 (item 1 error escalation), R2 (item 2 @session meaning + interim reject; corpus 1).
+- SPEC follow-ups (not edited — not the agent's authority): §52.13.2 should mention W-ATTR-002 for a NON-literal auth=; the S385 A1 WAL/busy-timeout ruling has no SPEC sentence.
