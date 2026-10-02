@@ -1901,7 +1901,7 @@ An event-handler attribute value takes one of the following shapes:
 
 **Normative statements:**
 
-- An event-handler attribute value MAY be an **inline block**: a `{`, a statement list, and the matching `}`. The statement list is logic context — the same statement grammar as a function body (§7.3): statements are separated by `;` or by a newline, and assignments, calls, `const`/`let` declarations, and `if`/loop statements are all legal. The block MAY span any number of lines.
+- An event-handler attribute value MAY be an **inline block**: a `{`, a statement list, and the matching `}`. The statement list is logic context — the same statement grammar as a function body (§7.3): statements are separated by a newline or by `;`, exactly as §7.2.2 defines for every statement list (a newline ends a statement unless the line ends in a continuation token; a line starting with an operator is `E-STMT-LEADING-OPERATOR`; two statements on one line need a `;`), and assignments, calls, `const`/`let` declarations, and `if`/loop statements are all legal. The block MAY span any number of lines. *(Amended S446, dpa-063: the separator sentence now points at §7.2.2's one rule — **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — "b, your rec" · dd:`scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md` (cross-cutting table, inline-handler row) · **supersedes:** the three S437 round-4 pins that read a leading-`+` / leading-`?`/`:` line as continuing a handler statement — see §7.2.2.)*
 - On each dispatch of the event, the statements of an inline block SHALL run in source order, each one exactly once, with `@var` reads and writes lowered exactly as they are in a function body. No statement of the block SHALL be dropped, whatever its kind or position — in particular, a statement's effect SHALL NOT depend on whether an earlier statement is a call or an assignment, or on whether the handler sits at top level, inside an engine state-child (§51.0.I), or inside an `<each>` row (§17.7).
 - The inline block is NOT invoked at render time; it runs only when the event fires. An inline block holding a single statement (`onclick={@filter = .All}`) is legal and equivalent to the bare shape of the same statement.
 - The inline block and a named function are a **free choice**. `function startOver() { … }` wired as `onclick=startOver()` remains fully valid — choose it when the logic is reused, when it has a meaningful name, or when it is long enough that the element reads better without it. Neither form is a lint target.
@@ -3046,7 +3046,7 @@ produce the same key).
 #### 6.5.4 Array Length Reactivity
 
 `@items.length` is a reactive expression. Reading `@items.length` inside a reactive context
-(a template interpolation, a `when` dep-list, or a `const @` derived expression) creates a
+(a template interpolation, an `<effect deps=[…]>` list (§6.7.4; formerly a `when` dep-list), or a `const @` derived expression) creates a
 subscription to `@items`. When `@items` changes, any consumer of `@items.length` re-evaluates.
 
 ```scrml
@@ -3436,7 +3436,7 @@ microtask flush.
   first read of any derived value triggers its initial evaluation.
 - The compiler SHALL track reactive dependencies transitively through function calls that
   appear in reactive positions. A reactive position is any of: a markup interpolation
-  `${expr}`, a `const <name> = expr` derived declaration, or a `when` dep-list entry. If
+  `${expr}`, a `const <name> = expr` derived declaration, or an `<effect deps=[…]>` entry (§6.7.4; formerly a `when` dep-list entry). If
   a function `f()` is called in a reactive position and `f`'s body (as seen by the
   compiler's static call graph) reads one or more `@variable`s, those `@variable`s SHALL
   be recorded as dependencies of the enclosing reactive expression, exactly as if the
@@ -4269,17 +4269,24 @@ ${ function computeHash(pw) {       // escalates server-side per §12.2 Trigger 
 
 ### 6.7.1 Overview
 
-scrml defines four distinct lifecycle concerns. Each concern has a mechanism matched to its
+scrml defines the distinct lifecycle concerns below. Each concern has a mechanism matched to its
 nature. They are not unified into a single abstraction.
 
 | Concern | Mechanism | Where specified |
 |---------|-----------|-----------------|
 | Mount — code that runs when a scope enters the DOM | Bare expression in `${}` (already spec'd §17.3) | §17.3 |
 | Destroy / cleanup — code that runs when a scope exits the DOM | `cleanup()` (scope-aware; this section) | §6.7.3 |
-| Reactive effect — code that re-runs when named `@variables` change | `when @var changes {}` (this section) | §6.7.4 |
+| Reactive effect — code that drives the outside world when named cells change (it may not write reactive state) | `<effect deps=[@a, @b]>${ … }</>` (this section; the keyword form `when @var changes {}` is soft-deprecated, S447) | §6.7.4 |
+| Reset a cell when other cells change | `reset-on=[@a, @b]` on the cell (S447) | §6.8.4 |
 | Timing — periodic or delayed execution | `<timer>` and `<poll>` state types (this section) | §6.7.5, §6.7.6 |
 
 Animation frame scheduling is addressed separately in §6.7.9 (`animationFrame()`).
+
+> **Amended S447.** The reactive-effect row is respelled and narrowed (§6.7.4), and a reset row added (§6.8.4).
+> **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" —
+> *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1 = (b), Call 2 = S2) ·
+> **supersedes:** the row *"Reactive effect — code that re-runs when named `@variables` change | `when @var
+> changes {}`"*.
 
 The design principle for this section is: each mechanism does exactly one thing, is visible
 in the source, and has no hidden re-execution semantics. A developer reading a `.scrml` file
@@ -4370,7 +4377,7 @@ navigation (a route region).
 > without carving an exception into a normative SHALL. That is the whole reason the region is not modelled
 > as a scope.
 
-- Every `${}` logic block, `on mount` body, `<request>`, `<timer>`, `<poll>`, and `cleanup()`
+- Every `${}` logic block, `on mount` body, `<request>`, `<effect>` (S447), `<timer>`, `<poll>`, and `cleanup()`
   registration is associated **at compile time** with the nearest enclosing element scope **or route
   region** (§6.7.2.1). A body associated with a route region SHALL run on **every route-enter, including
   the first**, and its registered `cleanup()` SHALL run on the matching **route-leave**. §6.7.1a's unity
@@ -4387,8 +4394,11 @@ navigation (a route region).
   > bullet and the memoryless-remount clause above, for declarations in such a block.
 - When a scope destroys, all associated lifecycle resources are torn down in the following
   canonical order:
-  1. All `when` effects registered in that scope are unregistered (no further executions
-     will be triggered).
+  1. All effects (`<effect>`, §6.7.4 — and the soft-deprecated `when … changes` spelling) registered in
+     that scope are unregistered (no further executions will be triggered), and any suspended run of them is
+     cancelled (its continuation never resumes; its transport follows §6.7.7.1 rule 3). *(Renamed S447 from
+     "`when` effects" — provenance: ruling:user-voice-scrml.md S447 "`when` → outside-world effects only,
+     spelled `<effect>`"; supersedes: "All `when` effects registered in that scope are unregistered".)*
   2. All `<timer>` and `<poll>` instances declared in that scope are stopped.
   3. All `cleanup()` callbacks registered in that scope are fired in last-in-first-out
      (LIFO) order.
@@ -4479,8 +4489,8 @@ marked as server-side via a future §12 explicit annotation. It does NOT fire wh
 server-side, because the presence of `cleanup()` overrides that inference to client-side
 before the server-escalation decision is made.
 
-Similarly, `when` blocks and `<timer>`/`<poll>` bodies are always classified as
-client-side constructs. No function that contains them SHALL be server-escalated.
+Similarly, `<effect>` bodies (§6.7.4; formerly `when` blocks) and `<timer>`/`<poll>` bodies are always
+classified as client-side constructs. No function that contains them SHALL be server-escalated.
 
 #### Normative Statements
 
@@ -4508,207 +4518,312 @@ _scrml_scope_cleanup(_scope_id, () => ws.close());
 
 ---
 
-### 6.7.4 `when @var changes {}` — Reactive Effects
+### 6.7.4 `<effect deps=[…]>` — Reactive Effects on the Outside World
+
+> **Status: Nominal / spec-ahead (S447).** This section is NORMATIVE. **impl#1 (the TS compiler) does not
+> implement it** and, under the S447 TS accounting ruling, is not changed for it (language semantics are frozen
+> in impl#1 except for security; its divergence is FILED — `docs/known-gaps.md`
+> `g-impl1-when-effect-divergence-s447`). impl#1 still compiles the retiring keyword form `when … changes { }`
+> with the pre-S447 meaning (writes allowed). **The bootstrap builds this section**
+> (`g-bootstrap-effect-reset-on-owed`).
+>
+> **Provenance:** ruling:user-voice-scrml.md S447 "⭐⭐⭐ RULED — \"your recs, except expound 3b\": `when` →
+> outside-world effects only, spelled `<effect>`; the TS accounting calls" — *"your recs, except expound 3b,
+> specifically why the engine restriction."* — Call 1 = (b): *"a reactive effect may NOT write any reactive cell,
+> directly or through a called function — compile error. Cascades impossible by construction (the bootstrap U0
+> runtime runaway net becomes deletable). Page-reset → a `reset-on=[@a, @b]` modifier on the cell being reset;
+> autosave + status → a write `<request>`; polling → `<poll>`."* · Call 2 = S2: *"spelled as markup,
+> `<effect deps=[@a, @b]>${ … }</>` (sibling of `<request>`; `[ ]` deps). The keyword `when (…) changes reads …
+> { }` form retires through §63."* · 1a: *"named error + a message naming the fix (`reset-on=` / `<request>` /
+> the writer)"* · 1b: *"Q7 (depth 256) and Q8 (polling) LAPSE"* · 2b: *"`<effect>` does NOT run on mount."* ·
+> ruling:user-voice-scrml.md S446 "`when` re-trigger while a prior run is suspended = (b) newest run wins" —
+> *"b on retrigger, your recs on 6 and 7"* (carried onto `<effect>` below) · ruling:user-voice-scrml.md S447
+> "⭐ CONFIRMED — dpa-063 readings were reviewed and intentional" — *"Ok, yes this one I did review and was
+> intentional."* (reading 10: *"`when` re-trigger is not a rollback (writes before the suspension stand; reads may
+> abort, writes never)"* — the source of the transport and not-a-rollback sentences below) ·
+> dd:`scrml-support/docs/deep-dives/when-reactive-effect-fit-2026-10-02.md` (§3 census, §5 Approach (b), §6 S2,
+> §13 recommendation) · **supersedes:** the whole prior §6.7.4 *"`when @var changes {}` — Reactive Effects"* —
+> in particular *"It MAY read and write `@variables`, call functions, and contain `lift` expressions"*, the
+> `when-stmt` grammar, E-LIFECYCLE-006 (subsumed), W-LIFECYCLE-006 (moot), the `reads` annotation and
+> H-LIFECYCLE-001 (retired), the "Interaction with `@derived`" table row *"Can write `@variables`? Yes"*, the
+> Canonical Pattern Statement's *"canonical pattern for localStorage sync, analytics, and auto-save"*, and the
+> canonical-use-case rows for reset and auto-save. **Direction of change (pa-base §8): newly-rejecting** — a
+> reactive effect that writes a reactive cell compiled before and is now an error, in either spelling (see
+> "The retiring keyword form" below). Migration measured by the DD (§1.6): 4 writing sites in `samples/`
+> (when-001 ×2, gauntlet-r10-vue-datatable, gauntlet-r10-go-contacts), 0 in `examples/`, `stdlib/`, flogence,
+> giti, 6nz, RediLedger.
+>
+> **Reconciliation with PR #1227 (dpa-063, open and unmerged at this writing).** #1227 adds a "`when`
+> re-trigger" paragraph and a W-LIFECYCLE-006 accumulator exclusion to the pre-S447 §6.7.4 text. This section
+> supersedes both: the S446 newest-run-wins rule is restated below for `<effect>` (its "writes before the
+> suspension stand" clause has no reactive writes left to govern — only outside-world actions); the W-006
+> exclusion is moot because W-LIFECYCLE-006 retires. No SPEC text on `main` names a runaway bound or
+> polling-through-`when`; Q7/Q8 lapsed before any landed, so there is nothing to strike.
+
+An **effect** is the construct that drives **something scrml does not own** from scrml state — analytics, scroll
+position, focus, the document title, a third-party widget (a map, an editor, a chart), a `<canvas>` redraw, a
+fire-and-forget server call — whichever writer changed that state (a handler, a `<channel>` push, a `<request>`
+result, a cross-tab `persist=` sync, a timer). It is the residue job of the DD's census (§3 job C): every job that
+changes *scrml state* in response to a change has a state-shaped home, and an effect is not it.
+
+| Job | Home |
+|---|---|
+| Fetch when inputs change | `<request deps=[…]>` (§6.7.7) |
+| Persist a cell across reloads | `persist=` (§6.14) |
+| Derive a value | a derived cell (§6.6 / §66.9) |
+| Reset a cell when other cells change | `reset-on=[…]` on that cell (§6.8.4) |
+| State change on a transition | engine `effect=` / `<onTransition>` (§51.0.H) |
+| Periodic work / polling | `<timer>` / `<poll>` / `<timeout>` (§6.7.5–§6.7.8) |
+| Drive the outside world when state changes | **`<effect deps=[…]>` (this section)** |
 
 #### Syntax
 
+`<effect>` is a built-in markup element — a lifecycle element in the same family as `<request>` (§6.7.7),
+`<timer>` (§6.7.5) and `<onTransition>` (§51.0.H): its trigger is an attribute, its body is a `${ }` logic block,
+and its lifetime is its position in the element tree.
+
 ```
-when-stmt     ::= 'when' dep-list 'changes' '{' logic-content '}'
-dep-list      ::= '@' identifier
-               | '(' dep-item (',' dep-item)* ')'
+effect-decl   ::= '<effect' deps-attr '>' effect-body '</' 'effect'? '>'
+               | '<effect' deps-attr '/>'                       (empty — W-LIFECYCLE-010)
+deps-attr     ::= 'deps=' '[' dep-item (',' dep-item)* ']'
 dep-item      ::= '@' identifier
+effect-body   ::= '$' '{' logic-content '}'
 ```
-
-Single-dependency shorthand (no parentheses) is permitted for one dependency:
 
 ```scrml
-when @query changes {
-    @page = 1
-}
+<effect deps=[@category]>${ track("filter", { category: @category, query: @query }) }</>
+<effect deps=[@messages]>${ scrollToBottom(@logEl) }</>
+<effect deps=[@mapCenter, @zoom]>${ leafletMap.setView([@mapCenter.lat, @mapCenter.lng], @zoom) }</>
 ```
 
-Multi-dependency form uses a parenthesized comma-separated list:
-
-```scrml
-when (@query, @minPrice, @maxPrice) changes {
-    @page = 1
-}
-```
-
-**Empty body:** The compiler SHALL emit W-LIFECYCLE-010 if a `when` block has an empty
-body (`when @var changes {}`). An empty `when` block has no observable effect.
-
-**Nested `when` blocks:** Nesting one `when` block directly inside the body of another
-`when` block is not permitted. The compiler SHALL emit E-LIFECYCLE-016 if a `when` block
-appears syntactically inside the body of another `when` block. If reactive logic inside a
-`when` body requires additional reactive triggering, the developer SHALL declare the inner
-effect as a top-level `when` block in the same scope.
+- `deps=` is REQUIRED and SHALL list at least one cell. An `<effect>` with no `deps=`, or with `deps=[]`, never
+  runs (it does not run on mount) and is **E-EFFECT-NO-DEPS**. *(An empty dep-list was a syntax error under the
+  keyword form; the markup form names it.)*
+- The dependency list uses the same `[ … ]` brackets as `<request deps=[…]>` — one spelling for one concept
+  (DD §6.1 fact 2).
+- An empty body (`<effect deps=[@x]/>` or `${ }`) is **W-LIFECYCLE-010**: the trigger fires and does nothing.
+- An `<effect>` SHALL appear where a `<request>` may: as a child element of an element scope (§6.7.7 "Syntax").
+  It renders nothing.
+- **Nesting.** An `<effect>` — or a retiring keyword `when … changes { }` — inside the body of another `<effect>`
+  is **E-LIFECYCLE-016** (re-expressed from the keyword form's "nested `when`"). An effect body is logic, not a
+  markup position, so it cannot hold a tree node; a second trigger is a second sibling `<effect>`.
 
 #### Semantics
 
-- A `when` statement declares a reactive effect. The body executes whenever any listed
-  dependency changes value. Change detection is based on `_scrml_reactive_set` calls — any
-  write to an `@variable` (including array mutations per §6.5, which clone-mutate-replace)
-  triggers the effect. This is reference-identity-based, not deep-equality-based.
-- The body does NOT execute on initial mount. It executes only in response to a change.
-  If initial execution is required, a bare expression calling the same logic SHALL be used
-  alongside the `when` block.
-- The dependency list is **explicit and exhaustive**. The compiler does NOT auto-track
-  `@variable` reads inside the body to infer additional dependencies. Only the variables
-  listed in the `dep-list` trigger the effect.
-- The body of a `when` block is a logic context (same rules as `${}`). It MAY read and
-  write `@variables`, call functions, and contain `lift` expressions.
-- A `when` statement is associated with the enclosing element scope. When that scope
-  destroys, the effect is automatically unregistered as part of the canonical teardown
-  sequence (§6.7.2, step 1). No explicit `cleanup()` is required to unregister a `when`
-  effect.
-- If the body of a `when` block writes to a variable that is also in the dependency list,
-  the compiler SHALL emit E-LIFECYCLE-006. This is an error because it creates an
-  immediate-reaction loop (the effect writes a variable that triggers itself).
+- **Trigger.** An `<effect>` runs its body whenever any cell in its `deps=` list changes. Change detection is
+  the reactive notify of §6.3 / §6.5 (permission-driven under §66.11.7): any write to a listed cell triggers it.
+  It is reference-identity-based, not deep-equality-based.
+- **Not on mount (S447 2b).** The body does NOT run when its scope mounts or remounts, nor at program
+  construction. It runs only in response to a change. *(A sibling inconsistency with `<request>`, which runs on
+  mount, recorded deliberately: "filter changed" analytics must not fire at load. Logic that must also run at
+  mount is called from a bare expression / `on mount { }` beside the effect.)*
+- **Explicit and exhaustive deps.** Only the listed cells trigger the effect. The compiler does NOT auto-track
+  reads in the body (§6.7.14 A.1). **Reading an unlisted cell in the body is valid and is the dominant pattern**
+  — the body reads that cell's current value when it runs, without making it a trigger. No annotation is needed
+  or exists for this (the `reads` clause retires — below).
+- **The body is a logic context** (same rules as `${}`, §7.2) with one restriction: **it may not write any
+  reactive cell** (next subsection).
+- **Server calls are allowed** — calling the outside world is the job. A body that reaches a server-inferred
+  function is CPS-transformed (§13); the compiler inserts the `await` (§13.2). A failure propagates through the
+  body's own error context (§19); it does NOT propagate to the enclosing scope. The call's return value cannot be
+  stored in a reactive cell from inside the body (that is a write); a result that must land in state is a
+  `<request>`'s job.
+- **Re-trigger while suspended — newest run wins (S446 (b)).** If an effect is triggered while an earlier run of
+  the SAME `<effect>` instance is suspended at a server call, the earlier run's continuation is **cancelled and
+  never resumes**; the new run starts at once (not queued, not dropped), and the settled value or failure of the
+  call the cancelled run was suspended at is discarded (its error context does not run). The suspended call's
+  transport: an implementation MAY abort it when §6.7.7.1 rule 1 classifies that call READ, and SHALL NOT abort it
+  otherwise — a WRITE (or unclassifiable) call runs to completion and only its result is discarded. Whether a READ
+  is aborted or merely discarded is not observable to the program. Cancellation is **not a rollback**: an outside-world
+  action the cancelled run already performed before the suspension stands (a sent analytics beacon is sent).
+  Because an effect cannot write reactive state, a cancelled run can never have left scrml state half-updated.
+- **Derived flush ordering.** Before any effect body runs, the reactive scheduler SHALL flush all dirty derived
+  values (§6.6) in the same microtask, so the body reads up-to-date derived values: if `@price` changes,
+  `<total:number=(@price * @qty)/>` is derived, and `<effect deps=[@price]>` reads `@total`, then `@total`
+  reflects the new `@price`. This flush ordering is part of the reactive scheduler contract and SHALL be
+  observable by any conforming implementation. `reset-on=` resets triggered by the same write are applied
+  before any effect body runs (§6.8.4 rule 4).
+- **Timing.** An effect body runs after the triggering write completes and before the next microtask boundary.
+  Engine transition effects for the same write run first (§51.7.1).
+- **Scope and teardown.** An `<effect>` is associated **at compile time, by its position in the tree**, with the
+  nearest enclosing element scope or route region (§6.7.2, §6.7.2.1) — exactly like `<request>`. It is
+  registered when that owner mounts and **unregistered when it destroys** (§6.7.2 teardown step 1); no
+  `cleanup()` is needed. Unregistering also cancels a suspended run (newest-run-wins rule above, transport per
+  §6.7.7.1 rule 3). An `<effect>` inside an `if=` element stops firing when the element closes and is
+  re-registered (without running) when it reopens. **An `<effect>` inside an `<each>` row is one effect per
+  row**, registered when the row is created and unregistered when the row is removed — the per-iteration rule
+  `cleanup()` already follows (§6.7.3). An effect is NOT unregistered on re-render.
+- **Client-side.** Effect bodies are always client-side constructs (§12). They MAY call server functions.
+- **`lin`.** An effect body is a recurring execution context: a `lin` variable read in it is **E-LIN-004**
+  (§6.7.12).
+- **Dependency entries must be mutable cells.** Every `deps=` entry SHALL be a declared, mutable reactive cell
+  in scope at the `<effect>`. An undeclared name, a non-`@` name, or a **derived** cell (`const <x>` / a §66
+  locked cell with a reactive initializer) is **E-LIFECYCLE-007** — a derived value has no change event of its
+  own; list the cells it reads instead. *(Unchanged from the keyword form, EC-1.)* ⚑ OPEN: whether a §66 field
+  path (`@signup.email`) or a `<#id>.prop` (`<#t>.fired`) may be a dep entry.
+
+#### The no-write rule — E-EFFECT-WRITES-STATE
+
+**An effect body SHALL NOT write any reactive cell, directly or through a called function.** A write found by
+the analysis below is **E-EFFECT-WRITES-STATE**; a body the analysis cannot prove write-free is
+**E-EFFECT-WRITE-UNPROVEN**. Both are compile errors. Consequence, by construction: no effect can trigger
+another effect (or itself), so effect cascades and cycles cannot exist and need no runtime bound.
+
+**What counts as a write.** Any operation the SPEC defines as changing a reactive cell: an `=`-family assignment
+to `@x` or to a field / element of it; a sequence edit (§66.12 — `push`, `pop`, a spread-reassignment, …);
+`reset(@x)`; `@engine = .X` / `.advance(.X)`; and any call the SPEC defines as writing a cell on the caller's
+behalf — notably `<#id>.refetch()`, which writes the `<request>`'s assigned cell (an effect that refetches the
+request it depends on would otherwise loop through the network). Writes to the body's own locals, and to plain
+non-reactive variables, are not reactive writes.
+
+**How "through a called function" is decided — a write summary, failing closed.** The compiler computes, for
+every scrml function, a **write summary**: the set of reactive cells its body may write, closed transitively over
+the static call graph (a fixed point, so recursion is handled). This is the same reachable-call-chain analysis
+§48.3.3 (E-FN-003) and §6.7.7.1 rule 1 (the READ/WRITE `<request>` classification, "transitively, through every
+server function the call reaches") already perform; it is the §66.12.3 O37 certification precedent applied to a
+different property — the compiler reads the callee's body once and records a fact about it in its signature,
+rather than trusting a declaration. Then, for an effect body:
+
+1. A **direct write** in the body is E-EFFECT-WRITES-STATE.
+2. A **call to a statically resolved scrml function** — `function`, `fn`, a server function, same file or
+   imported from a `.scrml` module — whose write summary is non-empty is E-EFFECT-WRITES-STATE. The message
+   SHALL name the call chain down to the write (`track() → logFilter() → @lastFilter = …`). A `fn` is
+   write-free by construction (§48.3.3 forbids outer writes), so it certifies trivially. A server function that
+   writes a §52 server-authoritative cell is a write.
+3. A **function value** — a function expression, or a reference to a scrml function used as a value rather than
+   called — appearing anywhere in the body counts as if it were called: its write summary is added to the
+   body's, because the receiver (a host callback, a `setTimeout`, a library) may invoke it. A callback that
+   writes state is therefore E-EFFECT-WRITES-STATE even though nothing in scrml calls it.
+4. **Code whose writes the compiler cannot determine fails closed, as E-EFFECT-WRITE-UNPROVEN:** a `^{ }` meta
+   block reachable from the body (meta code can write cells by name — §22, `meta.set`); a call through a
+   function-typed binding the compiler cannot resolve to a known set of scrml functions; any other call site the
+   write-summary analysis cannot resolve. The message SHALL name the unresolvable site and say why.
+5. **Host JS is outside scrml's state and is not a write.** A call to an imported host (`.js` / `.ts`) function
+   or a platform API (`document`, `window`, `localStorage`, a widget object) cannot name a scrml reactive cell;
+   the only route from host code into a reactive write is a scrml function value handed to it, which rule 3
+   already counts. This is the boundary the rule is stated at, not a gap in it.
+6. **Outside the analysis, stated:** a network echo — the body sends to a `<channel>` or calls the server, and a
+   server push later writes a synced cell the effect lists — is a later write by a different writer (the push),
+   not a write by the effect. It is possible, it is not a compile-time cascade, and no compile-time rule can see
+   it (DD §5 (b), "Loses").
+
+⚑ OPEN (not ruled): (i) whether the write-summary reaches across a module boundary into an imported `.scrml`
+module whose body is not in the compilation (DD §12 Q1 — impl#1's cross-file E-FN-003 reach is unverified; the
+rule above requires it, and an unreachable body falls under rule 4, fail closed); (ii) whether `navigate()` / a
+soft navigation from an effect body is a write (route parameters are reactive) — lean: not a write (the URL is
+the outside world; a route-enter is a lifecycle edge, §6.7.2.1), unruled; (iii) whether `lift` in an effect body
+is an error (an effect has no render position) — the keyword form allowed it; unruled.
+
+**The message names the fix (S447 1a).** E-EFFECT-WRITES-STATE SHALL name the written cell and the three
+homes for the job, picked by shape where the compiler can tell:
+- a write of a cell back to its default / initializer → *"declare `reset-on=[…]` on `@page` (§6.8.4)"*;
+- a write of a call's result (a save, a load) → *"use a `<request>` — it owns the result, loading and errors
+  (§6.7.7)"*;
+- otherwise → *"move the write into the code that writes the trigger (the handler or function), or derive the
+  value (§6.6)"*.
 
 ```scrml
-// Error: @page is both dependency and write target
-when @page changes {
-    @page = 1   // E-LIFECYCLE-006
-}
+let <query:string=""/>
+let <page:int=1/>
+
+<effect deps=[@query]>${ @page = 1 }</>          // E-EFFECT-WRITES-STATE
+// E-EFFECT-WRITES-STATE: this effect writes `@page`. An <effect> drives the outside world and may not write
+// reactive state. To reset `@page` when `@query` changes, declare it on the cell:
+//     let <page:int=1 reset-on=[@query]/>
 ```
 
-#### Reactive Scheduler Flush Ordering
+**E-LIFECYCLE-006 is subsumed.** A body writing a cell in its own `deps=` list is one case of
+E-EFFECT-WRITES-STATE. E-LIFECYCLE-006 is retained in §34 as a superseded, reserved code (impl#1's runtime
+re-run cap still prints it). **W-LIFECYCLE-006 is moot and retires:** it warned that a body whose only effect is
+`@x = <pure expr>` should be a derived value; under the no-write rule that body is an error, and the error's
+third fix ("derive the value") carries the guidance.
 
-Before any `when` effect body executes, the reactive scheduler SHALL flush all dirty
-derived values (`const <name>` expressions declared per §6.6) in the same microtask. This
-means a `when` effect body always reads up-to-date derived values, not stale cached
-values.
+#### The retiring keyword form — `when … changes { }` (§63)
 
-Specifically: if `@price` changes, and `const <total> = @price * @qty` is a derived value,
-and `when @price changes { ... }` reads `@total` inside the body, then `@total` SHALL
-reflect the post-change `@price` value when the `when` body executes.
+The pre-S447 statement form is **SOFT-DEPRECATED** (§63.1 Stage 1):
 
-Cross-reference: §6.6.5 (derived value invalidation and re-computation).
-
-This flush ordering is part of the reactive scheduler contract and SHALL be observable by
-any conforming implementation.
-
-#### Dependency Listing Requirement
-
-The explicit-dependency model is a deliberate design choice. The developer names the
-triggers; the compiler names nothing on their behalf. This ensures:
-
-1. A developer reading the source can determine all triggers without compiler introspection.
-2. The compiler can statically verify that all listed dependencies are `@variable`
-   declarations in scope.
-3. Refactoring a `when` body does not silently change which variables trigger the effect.
-
-The compiler SHALL emit E-LIFECYCLE-007 if a `dep-list` entry names a variable that is
-not a declared `@variable` in scope at the point of the `when` statement.
-
-Reading an unlisted `@variable` inside the `when` body is valid and is the dominant
-pattern: the body reads the current value of that variable at the time the effect fires,
-without making that variable a trigger. The compiler MAY emit H-LIFECYCLE-001 (a compiler
-hint, off by default) if a `@variable` is read inside the `when` body but is not listed in
-the `dep-list`. This hint is disabled by default because the pattern is correct and common.
-
-To suppress H-LIFECYCLE-001 on a per-read basis, annotate the read with the `reads`
-declaration in the `when` header:
-
-```scrml
-// Suppresses H-LIFECYCLE-001 for @qty — intentional non-trigger read
-when @price changes reads @qty {
-    @total = @price * @qty
-}
+```
+when-stmt ::= 'when' dep-list 'changes' '{' logic-content '}'           (deprecated)
+dep-list  ::= '@' identifier | '(' '@' identifier (',' '@' identifier)* ')'
 ```
 
-The `reads` annotation is informational and does not change execution semantics. It
-documents developer intent that `@qty` is read but is not a trigger.
+| Retired form | W-lint (Stage 1) | Reserved E | `scrml fix` rule |
+|---|---|---|---|
+| `when @a changes { body }` / `when (@a, @b) changes { body }` | `W-WHEN-EFFECT-DEPRECATED` | `E-WHEN-EFFECT-DEPRECATED` | When `body` writes no reactive cell (by the analysis above): rewrite mechanically to `<effect deps=[@a, @b]>${ body }</>` in place. When it writes: no mechanical rewrite — the fix reports the site with the E-EFFECT-WRITES-STATE fix text (`reset-on=` / a write `<request>` / the writer) for the author to apply. |
 
-#### Interaction with Server Functions
+- **Parses identically (§63.1).** During the window a `when … changes { }` statement IS an `<effect>`: same
+  trigger, same no-mount-run, same scope association (its enclosing element scope), same newest-run-wins rule,
+  and **the same no-write rule** — a writing `when` body is E-EFFECT-WRITES-STATE in the bootstrap now, not at
+  the end of the window. **RULED S447.** Call 1 limits what a reactive effect may do (*"supersedes: §6.7.4 'MAY
+  read and write `@variables`'"*) and is a semantic ruling, not a deprecation; Call 2 retires only the *spelling*
+  through §63. Keeping writes legal under the old spelling would keep the runtime cascade net alive, which 1b
+  ruled unnecessary, and §63.5's "runtime identical to the canonical form" holds only if the two spellings carry
+  one meaning. **Direction of change: newly-rejecting** — the 4 sample sites whose `when` body writes state.
+  > **Provenance:** ruling:user-voice-scrml.md S447 "⭐⭐ RULED — \"accept and your rec (d)\": the keyword `when`
+  > carries the no-write rule now; autosave 3c = (d)" — *"accept and your rec (d)."* (item 1: *"the no-write rule
+  > applies to the legacy `when … changes` spelling IMMEDIATELY, not only to `<effect>` — §63 Stage 1 governs the
+  > SPELLING only; Call 1 is semantic, and §63.5 requires both forms to mean the same thing."*) · **supersedes:**
+  > this bullet's earlier status "PA reading of S447, recorded for veto".
+- **The `reads` clause retires with no window.** `when @a changes reads @b { }` never parsed in any
+  implementation (DD §2 row 1), so it was never in the contract. It is a syntax error whose message SHALL say
+  that `reads` is retired and that reading an unlisted cell needs no annotation. **H-LIFECYCLE-001** (the
+  off-by-default hint the `reads` clause suppressed) **retires** with it — PA reading, veto window: the pattern
+  it flagged is correct and dominant, and its only suppression mechanism never existed.
+- No removal version is named (§63.2). The `scrml fix` rule is owed and unverified; until it is verified-landed
+  the form cannot be scheduled (§63.4).
+- **Not retired:** the worker / nested-program event hooks `when message(data) { }` and `when … from <#name>
+  (…) { }` (§43, §46), and the `when expr is .Variant { }` guard of §4.11.3. They share the keyword, not the
+  construct. ⚑ OPEN: with `when … changes` gone, the keyword survives only in those hooks; whether they are
+  respelled is not ruled (DD §6.4).
 
-If the body of a `when` block calls a server-inferred function, the CPS transformation
-(§13) applies. The effect body becomes async at the point of the server call. The compiler
-inserts `await` automatically (§13.2). The developer does not write `async` or `await`.
+#### Interaction with derived values and engines
 
-If the server call fails, the error propagates through the `when` body's error context
-(§19). The error does NOT propagate to the enclosing scope automatically; it must be
-handled inside the `when` body or re-thrown explicitly.
+| Construct | Trigger | Runs on mount? | Can write reactive cells? |
+|---|---|---|---|
+| derived cell (`const <total> = …` / `<total:T=(…)/>`) | reads of a dirty value (lazy pull) | n/a — computed on demand | No |
+| `reset-on=[…]` (§6.8.4) | a listed cell changes | No | Only its own cell, only to its default |
+| engine `effect=` / `<onTransition>` (§51.0.H) | a transition | No | Yes (governed by contracts) |
+| `<effect deps=[…]>` | a listed cell changes | No | **No** |
 
-#### Interaction with `@derived` (§6.6)
-
-A `when` block and a `const <name>` derived value are distinct constructs:
-
-| Construct | Trigger | Executes on mount? | Can write `@variables`? |
-|-----------|---------|-------------------|------------------------|
-| `const <total> = @price * @qty` | Any read of `@total` while dirty (lazy pull) | n/a — computed on demand | No — cannot assign inside |
-| `when @price changes { ... }` | `@price` changes (push) | No | Yes |
-
-Use `const <name>` when you are computing a derived value to be read. Use `when` when you
-need a side effect (navigation, resetting unrelated state, calling a server function) in
-response to a state change.
-
-The compiler SHALL emit W-LIFECYCLE-006 if both of the following conditions are true:
-
-1. The `when` body's only effect is a single `@variable` assignment.
-2. The right-hand side of that assignment is a pure expression of `@variables` (whether or
-   not all referenced `@variables` are in the `dep-list`).
-
-When both conditions hold, the pattern is strictly inferior to `const <name> = expr`: the
-derived form is reactive, executes on initial mount, requires no explicit dep-list, and
-cannot fall out of sync. W-LIFECYCLE-006 is a Warning (not an error) and includes a
-suggested replacement.
-
-> Rationale: `when @price changes { @total = @price * @qty }` is semantically inferior to
-> `const <total> = @price * @qty`. The `when` form is push-based and does not execute on
-> mount; the derived form is lazy-pull and self-consistent. W-LIFECYCLE-006 guides
-> developers toward the correct construct. It is a warning rather than an error because
-> there are rare cases (e.g., intentional deferred initialization) where the `when` form is
-> chosen deliberately.
-
-#### Edge Case EC-1: `when` dep-list with a `const <derived>` variable
-
-If a `dep-list` entry names a `const <name>` derived variable (§6.6), the compiler SHALL
-emit E-LIFECYCLE-007. Derived variables are not `@variables` in the sense of mutable
-state; they have no "change event" independent of the underlying `@variables` they depend
-on. To react to a derived value change, list the underlying `@variables` in the `dep-list`
-and read the derived value inside the body.
+⚑ OPEN (DD §12 Q6, not ruled): engine transition effects may still write cells, so a cascade through engine
+effects across engines is not covered by the no-write rule.
 
 #### Normative Statements
 
-- The body of a `when` statement SHALL NOT execute on initial mount.
-- The `dep-list` SHALL contain at least one entry. An empty `dep-list` is a syntax error.
-- The compiler SHALL emit E-LIFECYCLE-007 if any `dep-list` entry is not a declared
-  mutable `@variable` in the enclosing scope.
-- The compiler SHALL emit E-LIFECYCLE-007 if any `dep-list` entry names a `const <name>`
-  derived variable.
-- The compiler SHALL emit E-LIFECYCLE-006 if the body writes to any variable in the
-  `dep-list`.
-- A `when` effect SHALL be automatically unregistered when its enclosing scope destroys
-  (§6.7.2, step 1).
-- A `when` effect SHALL NOT be automatically unregistered on re-render. It persists for
-  the lifetime of its enclosing scope.
-- The reactive scheduler SHALL flush all dirty derived values (§6.6.5) before executing
-  any `when` effect body in the same microtask.
-- The compiler SHALL emit W-LIFECYCLE-010 if a `when` block has an empty body.
-- The compiler SHALL emit E-LIFECYCLE-016 if a `when` block appears syntactically inside
-  the body of another `when` block.
+- An `<effect>` body SHALL NOT execute on initial mount, on remount, or at program construction.
+- `deps=` SHALL be present and SHALL list at least one cell (E-EFFECT-NO-DEPS).
+- Every `deps=` entry SHALL be a declared, mutable, non-derived reactive cell in scope (E-LIFECYCLE-007).
+- An `<effect>` body SHALL NOT write any reactive cell, directly or through a called function
+  (E-EFFECT-WRITES-STATE); a body the write-summary analysis cannot prove write-free SHALL be rejected
+  (E-EFFECT-WRITE-UNPROVEN).
+- An `<effect>` (or keyword `when`) inside an effect body SHALL be E-LIFECYCLE-016.
+- An empty `<effect>` body SHALL be W-LIFECYCLE-010.
+- An `<effect>` SHALL be unregistered when its owning scope, route region or `<each>` row is destroyed
+  (§6.7.2 step 1), and SHALL NOT be unregistered on re-render.
+- A re-trigger while a run of the same `<effect>` instance is suspended SHALL cancel that run's continuation
+  (newest run wins); its in-flight call MAY be aborted only if §6.7.7.1 rule 1 classifies it READ, never otherwise.
+- The reactive scheduler SHALL flush dirty derived values (§6.6) and apply triggered `reset-on=` resets
+  (§6.8.4) before running any effect body.
+- `when … changes { }` SHALL be accepted during its §63 window as a spelling of `<effect>` with identical
+  semantics, with W-WHEN-EFFECT-DEPRECATED at every site.
 
-#### Canonical Pattern Statement
-
-`when (@var) changes { body }` is the canonical mechanism for reactive side effects in scrml. Use it for operations that must occur when a reactive variable changes and that cannot be expressed as derived state.
-
-**Normative statement:**
-
-- `when @var changes { body }` SHALL execute `body` after the `_scrml_reactive_set` call completes and before the next microtask boundary. This is the canonical pattern for localStorage sync, analytics, and auto-save. *(S444: browser persistence of a cell is now §6.14 `persist=`; see the corrected idiom row below.)*
-
-**Canonical use cases:**
+#### Canonical use cases
 
 | Use case | Correct construct |
 |---|---|
-| Derive a value from reactive state | `const <name> = expr` (§6.6) |
-| Run a side effect when state changes | `when @var changes { body }` |
+| Derive a value from reactive state | a derived cell — `const <name> = expr` (§6.6) / `<name:T=(expr)/>` (§66.9) |
+| Fetch / refetch when inputs change | `<request id deps=[…]>` (§6.7.7) |
 | ~~Sync to localStorage on change~~ | ~~`when @var changes { localStorage.setItem(key, @var) }`~~ |
 | Persist a cell across reloads | `<x persist="local" key="app.x"> = init` (§6.14 — **Nominal**, lands with the bootstrap). Until it lands, a hand-written recipe SHALL encode on write and decode + check on read: see the note below. |
-| Auto-save form fields | `when (@field1, @field2) changes { saveForm(@field1, @field2) }` |
+| Reset a cell when other cells change (page → 1 on a new search) | `let <page:int=1 reset-on=[@query, @category]/>` (§6.8.4) |
+| Reset a cell on a specific transition (clear the cart on logout) | engine `<onTransition>` (§51.0.H) |
+| Auto-save with a saving / saved indicator | a write `<request id="autosave" deps=[@note]>${ @savedAt = saveNote(@note) }</>` (§6.7.7) — it provably writes, so it does not run on mount, fires only on the user's own edits (the load's write re-baselines it), and skips a save equal to its baseline (§6.7.7.3, S447 3c = (d)). One save in flight and flush-on-leave are still OPEN (§6.7.7.3 rule 7). |
+| Fire-and-forget save with no status shown | `<effect deps=[@note]>${ saveNote(@note) }</>` |
+| Analytics, scroll, focus, document title, a third-party widget, a canvas | `<effect deps=[…]>${ … }</>` |
+| Polling | `<poll>` (§6.7.6) |
+| Accumulate on change (undo stack, history) | the functions that write the source cell (no effect can write) |
 
-> **Correction S444 (dpa-061 call 8) — the struck row was silently lossy.** Web Storage stores `String(v)`, so the struck recipe stored a `string[]` as `"a,b"`, an object as `"[object Object]"`, and `not` as the present string `"null"`; it covered only the write half. It is correct **only for a `string` cell**. Browser persistence is now the `persist=` lifetime attribute (§6.14), which owns restore, encoding, fail-closed decode, cross-tab sync and write failure. A hand-written recipe for a non-`string` cell, until §6.14 lands, SHALL encode the value (e.g. `JSON.stringify`) in a named function that the `when` body calls, and on load SHALL decode inside a guard and check the decoded value's shape before assigning it (on failure, keep the default). `JSON.stringify` does not round-trip a map (§59.10 — `JSON.stringify(new Map(...))` is `"{}"`). The recipe's `!{}` guard goes in the named function, not in the `when` body (`g-bang-brace-in-when-changes-body-invalid-logic`). **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 calls 5, 7, 8 — *"5, 7, 8 your recs. expound 6"* (8: *"the design-independent fixes land now: the SPEC §6.7.4 lossy localStorage recipe row, the `when`-body `!{}` codegen defect (`g-bang-brace-in-when-changes-body-invalid-logic`), and a PRIMER entry. RULED."*) · dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` C4 P1 · **supersedes:** the struck row above. Resolves `g-spec-6-7-4-localstorage-recipe-lossy-for-non-string-cells`.
+> **Correction S444 (dpa-061 call 8) — the struck row was silently lossy.** Web Storage stores `String(v)`, so the struck recipe stored a `string[]` as `"a,b"`, an object as `"[object Object]"`, and `not` as the present string `"null"`; it covered only the write half. It is correct **only for a `string` cell**. Browser persistence is now the `persist=` lifetime attribute (§6.14), which owns restore, encoding, fail-closed decode, cross-tab sync and write failure. A hand-written recipe for a non-`string` cell, until §6.14 lands, SHALL encode the value (e.g. `JSON.stringify`) in a named function that the effect body calls (a `localStorage` write is a host call, not a reactive write — it is legal in an `<effect>`), and on load SHALL decode inside a guard and check the decoded value's shape before assigning it (on failure, keep the default). `JSON.stringify` does not round-trip a map (§59.10 — `JSON.stringify(new Map(...))` is `"{}"`). The recipe's `!{}` guard goes in the named function, not in the effect body (`g-bang-brace-in-when-changes-body-invalid-logic`). **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 calls 5, 7, 8 — *"5, 7, 8 your recs. expound 6"* (8: *"the design-independent fixes land now: the SPEC §6.7.4 lossy localStorage recipe row, the `when`-body `!{}` codegen defect (`g-bang-brace-in-when-changes-body-invalid-logic`), and a PRIMER entry. RULED."*) · dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` C4 P1 · **supersedes:** the struck row above. Resolves `g-spec-6-7-4-localstorage-recipe-lossy-for-non-string-cells`. *(Respelled S447: "the `when` body" → "the effect body"; the recipe is unchanged.)*
 
 ---
 
@@ -4976,7 +5091,7 @@ All normative statements for `<timer>` (§6.7.5) apply to `<poll>`.
 
 `<request>` is a distinct built-in state type from `<poll>` for the following reasons:
 
-1. **Trigger model:** `<poll>` executes on an interval. `<request>` executes once on mount, then re-executes only when its declared reactive dependencies change. Unifying them on a single element would require a mandatory `interval` attribute that means nothing for one-shot fetches, or an optional `interval` that bifurcates `<poll>` semantics.
+1. **Trigger model:** `<poll>` executes on an interval. `<request>` executes once on mount, then re-executes only when its declared reactive dependencies change. *(S447 3c: a provably-writing request does not run on mount and fires only on the user's own edits — §6.7.7.3.)* Unifying them on a single element would require a mandatory `interval` attribute that means nothing for one-shot fetches, or an optional `interval` that bifurcates `<poll>` semantics.
 2. **Four first-class state attributes:** `loading`, `data`, `error`, and `stale` are meaningful only for a one-shot fetch with a defined "settled" condition. `<poll>` has no notion of settled state — it perpetually re-fetches.
 3. **Rendering tier split:** The compiler uses `<request>` declarations to identify the boundary between a loading-tier render and a data-tier render. `<poll>` does not create this boundary because a `<poll>` value is always available.
 
@@ -5024,7 +5139,7 @@ The `cache` attribute is optional and bare (S444, dpa-060 — **Nominal / spec-a
 
 #### Semantics
 
-**Mount behavior:** When a `<request>` mounts, in order:
+**Mount behavior:** When a `<request>` mounts, in order *(S447 3c: except a request that provably writes, which does not run on mount unless `deps=[]` — §6.7.7.3)*:
 
 1. `<#id>.loading` is set to `true`.
 2. `<#id>.data` retains its previous value if one exists, or is `not` on first mount.
@@ -5052,11 +5167,14 @@ The `cache` attribute is optional and bare (S444, dpa-060 — **Nominal / spec-a
 - Any `@variable` in `deps=` changes, OR
 - `<#id>.refetch()` is called.
 
+*(S447 3c: for a request that provably writes, only a LOCAL write to a dependency is a change; a server-origin write
+re-baselines it, and a save equal to its baseline is skipped — §6.7.7.3.)*
+
 On re-execution, `<#id>.data` is NOT cleared. `stale` is `true` during re-fetch if prior data exists.
 
 **Destroy behavior:** On scope destroy, in-flight results are discarded. The compiler SHALL generate a cancellation guard. **Amended S444 (dpa-059):** on scope destroy an in-flight fetch's result is never applied, and a request the compiler classifies **READ** additionally has its transport **aborted**; a **WRITE** request is **discarded** — its result is not applied and its transport runs to completion (§6.7.7.1).
 
-**`<request>` is not a loop.** Unlike `<timer>` and `<poll>`, the body executes once on mount, then only on dependency change or `refetch()`.
+**`<request>` is not a loop.** Unlike `<timer>` and `<poll>`, the body executes once on mount, then only on dependency change or `refetch()`. *(S447 3c: a provably-writing request does not — §6.7.7.3.)*
 
 #### Properties
 
@@ -5094,7 +5212,8 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 
 #### Normative Statements
 
-- A `<request>` SHALL start its fetch automatically on mount.
+- A `<request>` SHALL start its fetch automatically on mount — **unless it provably writes** (§6.7.7.3 rule 1) and has no explicit `deps=[]`, in which case it SHALL NOT run on mount (S447 3c).
+- *(S447 3c — Nominal.)* A provably-writing `<request>` SHALL be triggered only by local writes to its dependencies and by `refetch()`; a server-origin write SHALL re-baseline the dependency and SHALL NOT trigger it; a triggered save whose every dependency equals its baseline (§45) SHALL be skipped; server-origin writes SHALL bypass `debounced=` / `throttled=` (§6.7.7.3).
 - A `<request>` SHALL discard in-flight results on scope destroy.
 - The compiler SHALL generate a mounted-guard check in every `<request>` resolution.
 - The compiler SHALL generate a sequence number for every `<request>` instance (EC-2, EC-4).
@@ -5195,6 +5314,7 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
    - **Body form** (`${ @x = call }`): **READ** iff (a) no non-`SELECT` SQL (`?{}`) is reachable anywhere in the call graph of the body's call expression — transitively, through every server function the call reaches — **and** (b) the call lowers to a single server batch (not a §19.9.9 multi-batch CPS body).
    - **`url=` / `api=` form** (§60): **READ** iff the HTTP method is `GET` or `HEAD`.
    - **Every other request is WRITE — including any request the compiler cannot classify.** Unclassifiable = write: the classification fails closed to discard.
+   - **Scope of this classification (S447 3c).** READ / WRITE here governs abort vs discard only. Whether a request runs on mount and which writes trigger it is decided by a SEPARATE test, **provably writes** (§6.7.7.3 rule 1), which fails the opposite way: an unclassifiable request is WRITE here but is NOT provably writing, so it keeps running on mount. *(Provenance: ruling:user-voice-scrml.md S447 "\"accept and your rec (d)\"" — sub-call 2: *"\"provably writes\" is its own test, NOT dpa-059's unclassifiable=write rule"*.)*
 2. **Supersede** (EC-2, EC-4). When an in-flight fetch is superseded, a **READ** request's superseded transport SHALL be **aborted**. A **WRITE** request's superseded fetch SHALL be **discarded**: its result SHALL NOT be applied, and its transport SHALL NOT be aborted — it runs to completion.
 3. **Teardown** (EC-3 scope destroy; §20.8.8 step 2.3 route-leave). The same rule applies: a **READ** request's in-flight transport SHALL be aborted; a **WRITE** request's in-flight fetch SHALL be discarded (result not applied, transport completes).
 4. **Abort is transport-only.** An abort closes the client's side of the in-flight HTTP request and discards any response. It is **not a rollback**: an abort SHALL NOT imply that the server did not execute, commit, or partially commit the call — **the server may have committed**. (§8.9.2 / §19.10.5's only ROLLBACK trigger remains an exception inside the handler.) An aborted fetch SHALL NOT set `<#id>.error`, and SHALL NOT be treated as a failure settle.
@@ -5233,6 +5353,153 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 - **O-060-7** — **`cache` on a WRITE-classified request** (§6.7.7.1). Whether it is legal (revalidate-on-hit still runs the write) or an error.
 - **O-060-8** — Whether the result of a superseded, aborted or discarded fetch is ever stored in the cache.
 - **O-060-9** — The diagnostic for a valued `cache=…` (for example `cache=30s`, an author TTL): which code fires.
+
+#### 6.7.7.3 Write requests — no mount run, user edits only, baseline (S447 3c)
+
+> **Status: Nominal / spec-ahead.** NORMATIVE; **not implemented by impl#1** (frozen for language semantics, S447
+> TS accounting — the divergence is filed: `g-impl1-autosave-request-mount-save-wipes-record`) and **owed by the
+> bootstrap** (`g-bootstrap-effect-reset-on-owed`).
+>
+> **Provenance:** ruling:user-voice-scrml.md S447 "⭐⭐ RULED — \"accept and your rec (d)\": the keyword `when`
+> carries the no-write rule now; autosave 3c = (d)" — *"accept and your rec (d)."* (item 2: *"a `<request>` that
+> PROVABLY writes never runs on mount; writes that ORIGINATE from the server (a load, a poll, a channel push,
+> another tab's sync) reset the request's baseline instead of triggering it — only the user's own edits fire a
+> write request. No new syntax."*; the PA scope note reads sub-calls 2–6 as included: *"(2) "provably writes" is
+> its own test, NOT dpa-059's unclassifiable=write rule; (3) a write request with `deps=[]` still runs once on
+> mount; (4) server-originated writes skip the `debounced=` delay; (5) bank two gaps — one save in flight at a
+> time, flush or warn on page leave; (6) skip a save whose value equals its baseline."*) ·
+> dd:`scrml-support/docs/deep-dives/autosave-request-mount-3c-2026-10-02.md` (§2 the measured mount save that
+> wiped a record; §3 survey; §4 option (v); §7 calls 1–6) · **supersedes:** for provably-writing requests only, §6.7.7
+> "Mount behavior", the Complexity-Budget sentence *"`<request>` executes once on mount, then re-executes only when
+> its declared reactive dependencies change"*, the normative *"A `<request>` SHALL start its fetch automatically on
+> mount"*, and *"Any `@variable` in `deps=` changes"* as a trigger; and the S447 §6.7.4 autosave row's
+> *"⚑ OPEN (S447 3c)"*. **Direction of change: meaning-changing** — a provably-writing `<request>` no longer
+> fires on mount or on server-originated changes; no program's acceptance changes.
+
+**The defect this closes (measured, DD §2).** The autosave idiom
+`<note debounced=800ms> = ""` + `<request id="load" deps=[]>${ @note = loadNote() }</>` +
+`<request id="autosave" deps=[@note]>${ @savedAt = saveNote(@note) }</>` sent `saveNote("")` — the cell's
+default — at mount, racing the load; in one run the record was wiped for good. Skipping the mount run alone is
+not enough: the load's write to `@note` is itself a change, so the request saved the loaded text straight back
+about 800 ms later, and the debounce delayed showing the loaded text by the same 800 ms.
+
+**1. "Provably writes" — its own test.** A `<request>` **provably writes** iff the compiler can SEE a write
+reachable from it:
+
+- **Body form** (`${ @x = call }`): the call graph of the body's call expression — transitively, through every
+  scrml and server function the call reaches (the same walk as §6.7.7.1 rule 1(a)) — contains at least one of:
+  - a `?{}` SQL statement whose statement verb (the first keyword after any leading `WITH …` clause) is a
+    data-modifying or schema verb: `INSERT`, `UPDATE`, `DELETE`, `REPLACE`, `MERGE`, `UPSERT`, `CREATE`, `ALTER`,
+    `DROP`, `TRUNCATE`;
+  - a write to a §52 server-authoritative cell performed on the server.
+
+  A write on any path counts — a write behind an `if` makes the request provably writing: "provably" means the
+  write is visible in the code, not that every run executes it.
+- **`url=` / `api=` form** (§60): the HTTP method is statically known and is not a safe method of RFC 9110
+  (`GET`, `HEAD`, `OPTIONS`, `TRACE`) — i.e. `POST`, `PUT`, `PATCH`, `DELETE`, or another statically known unsafe
+  method.
+
+Nothing else makes a request provably writing. In particular a request is NOT provably writing merely because the
+compiler cannot classify it — a host (`.js`) call, a `_{}` / `^{}` block, a stdlib call with unknown effects
+(O-059-3), a computed HTTP method, or a multi-batch read body (§6.7.7.1 rule 1(b)). **This test is deliberately
+the opposite of §6.7.7.1 rule 1's fail-closed direction.** For abort, *"unclassifiable = write"* errs toward the
+safe side (don't abort). For mount, the same default would err toward the unsafe side: a read the compiler cannot
+classify would stop loading on mount and render an empty page. The three classes:
+
+| Class | Mount run | Server-origin dep writes | Supersede / teardown (§6.7.7.1) |
+|---|---|---|---|
+| READ (§6.7.7.1 rule 1 — provably read-only) | runs | trigger | abort |
+| unclassifiable (neither) | runs (unchanged) | trigger (unchanged) | discard |
+| **provably writes** (this rule) | **does not run** (unless `deps=[]`, rule 2) | **re-baseline, do not trigger** (rule 4) | discard |
+
+A provably-writing request is always WRITE under §6.7.7.1; READ and provably-writing are disjoint. The class SHALL
+be surfaced by `scrml explain` beside the READ / WRITE classification (§6.7.7.1 rule 5; O-059-1), e.g.
+*"autosave: provably writes; fires on your edits to @note; writes from request `load` re-baseline"*. It SHALL NOT
+be reported as a lint.
+
+**2. No mount run — except `deps=[]`.** A provably-writing `<request>` SHALL NOT start a fetch when its scope
+mounts or remounts. Until its first trigger, `.loading` is `false`, `.data` is `not` (or its retained value) and
+`.error` is `not`. **Exception:** a provably-writing request with an explicit `deps=[]` has written "mount is my
+only trigger" and SHALL run once on each mount, as today (*mark as read on open*, *record a view*, *claim a
+ticket*). `<#id>.refetch()` always starts a fetch (it is an explicit user-code trigger and is not subject to rule
+5). A provably-writing request with neither `deps=` nor any reactive read in its body never runs on its own; the
+W-LIFECYCLE-013 condition (§6.7.7 EC-5) applies to it unchanged.
+
+**3. Triggers — the user's own edits only.** A provably-writing request re-executes on a **local write** to one
+of its dependencies (its `deps=` cells, or its inferred dependencies when `deps=` is absent), and on `refetch()`.
+Every write to a cell is either **server-origin** or **local**:
+
+- **Server-origin** — a closed list, every member of which is a write the compiler itself emits:
+  - the settle assignment of any `<request>` (a load / read request; also a write request's own result);
+  - a `<poll>` tick's assignment (§6.7.6);
+  - a `<channel>` push into a synced cell (§38);
+  - a `persist=` cross-tab `storage`-event sync write (§6.14.2; a restore at construction is not a write at all);
+  - a §52 server-authority load or server push into a server-authoritative cell (§52).
+- **Local** — every other write: an input binding (`bind:value`), an event handler, `on mount` code and bare
+  mount expressions, a `<timer>` / `<timeout>` body, plain logic, and a §52 server cell's own client-side
+  assignment (it is user code, §52.6.2).
+- **A `reset-on=` reset inherits the origin of the write that triggered it** (§6.8.4): a reset caused by a
+  server-origin write is server-origin; one caused by a local write is local. *(Entailed by rule 3's purpose — a
+  load that writes `@query` must not fire a save through `@page`'s reset; PA reading, recorded for veto.)*
+
+Because every server-origin writer is a compiler-emitted site, the origin is known statically at each write site;
+no runtime "inside a user event" flag and no call-graph analysis of the writer is needed.
+
+**4. Baseline.** A provably-writing request keeps, for each dependency, a **baseline** value:
+
+- the initial baseline is the dependency's value when the request mounts (after construction, including any
+  `persist=` restore);
+- a **server-origin write** to a dependency sets that dependency's baseline to the written value and SHALL NOT
+  trigger the request;
+- when a fetch of the request **settles successfully**, each dependency's baseline becomes the value that fetch
+  was started with; a failed or superseded fetch leaves the baselines unchanged.
+
+**5. A save equal to its baseline is skipped.** When a local write triggers a provably-writing request (after any
+`debounced=` / `throttled=` delay), the request SHALL compare each dependency's current value with its baseline
+using scrml equality (§45 — structural `==`: primitives by value, structs and enums deeply, maps
+order-independently, §59.9). Absence follows §42: two absent values are equal; an absent and a present value are
+not. If **every** dependency equals its baseline, the fetch is skipped — no request is sent and `.loading`,
+`.data`, `.error` are unchanged ("typed, then undid back to the saved text" is clean). Where §45 defines no
+equality for a dependency's type (a type §45.2 makes non-comparable; an `asIs` value, whose `==` is identity,
+W-EQ-001), the comparison SHALL count as unequal — the rule fails toward sending the save, never toward dropping
+one.
+
+**6. Server-origin writes skip the timing wrappers.** A `debounced=` / `throttled=` cell (§6.13) delays **local**
+writes only. A server-origin write SHALL be applied to the cell at once, bypassing the wrapper, so loaded data is
+shown when it arrives (the DD measured an 800 ms delay). ⚑ OPEN (not ruled): when a server-origin write lands
+while a local debounced write to the same cell is still pending, whether the pending local write is cancelled or
+still lands afterwards (and is then compared with the new baseline).
+
+**7. ⚑ OPEN — banked, not decided (S447 sub-call 5).** Neither is decided by 3c; both are needed before autosave is
+safe, and both are filed as owed work:
+- **One save in flight at a time** — a newer trigger waits for the in-flight save and then sends the latest
+  value, instead of racing it (§6.7.7.1 rule 2 lets a superseded WRITE's transport complete, so an older save can
+  reach the server after a newer one). `g-request-write-one-save-in-flight-owed`.
+- **Flush or warn on page leave** — a pending `debounced=` write to a provably-writing request's dependency either
+  goes out on `pagehide`, or triggers a leave warning; today the timer dies and up to one debounce window of
+  typing is lost. `g-request-write-flush-or-warn-on-leave-owed`.
+
+Other open questions carried from the DD (§8), not decided here: a `persist="session"` local draft vs the server
+load at boot (which wins; whether to offer "restore"); conflict detection (version / etag) stays developer-level.
+
+**Worked example — autosave with status.**
+
+```scrml
+let <issueId:int=42/>
+let <body:string="" debounced=800ms/>
+let <savedAt:string=""/>
+
+<request id="load" deps=[@issueId]>${ @body = loadIssueBody(@issueId) }</>      // READ: runs on mount
+<request id="save" deps=[@body]>${ @savedAt = saveIssueBody(@issueId, @body) }</>  // provably writes (UPDATE)
+
+<textarea bind:value=@body/>
+<p>${ <#save>.error ? "Not saved" : <#save>.loading ? "Saving…" : "Saved " + @savedAt }</p>
+```
+
+On page load, `load` runs and `save` does not (rule 2). `load`'s settle writes `@body`: a server-origin write, so it
+lands at once despite `debounced=` (rule 6), becomes `@body`'s baseline and does not trigger `save` (rules 3–4). A
+viewer who never types never writes. Typing is a local write: 800 ms after the last keystroke `save` runs, unless
+the text is back to the baseline (rule 5). A successful save moves the baseline.
 
 ### 6.7.8 `<timeout>` — Single-Shot Timer State Type
 
@@ -5350,7 +5617,7 @@ when <#paymentGuard>.fired changes {
 ```
 
 **`.fired` is reactive.** The compiler SHALL emit the assignment to `<#id>.fired` through
-the reactive system so that any markup or `when` block that reads `<#id>.fired`
+the reactive system so that any markup or `<effect>` (§6.7.4) that reads `<#id>.fired`
 re-evaluates after the timeout fires.
 
 #### `<timeout>` Inside `for` Iteration
@@ -5594,8 +5861,11 @@ reads inside an `animationFrame` callback body.
 | E-LIFECYCLE-002 | `cleanup()` argument is a call expression, not a function expression | Error |
 | E-LIFECYCLE-004 | `cleanup()` first argument is not function-typed | Error |
 | E-LIFECYCLE-005 | `cleanup()` inside a function EXPLICITLY annotated as server-side (§12) | Error |
-| E-LIFECYCLE-006 | `when` body writes to a variable in the `dep-list` | Error |
-| E-LIFECYCLE-007 | `dep-list` entry is not a declared mutable `@variable` in scope, OR is a `const <name>` derived variable | Error |
+| E-LIFECYCLE-006 | *(superseded S447 by E-EFFECT-WRITES-STATE — a write to a dep is one case of a write; reserved, not a compile diagnostic)* `when` body writes to a variable in the `dep-list` | Error (reserved) |
+| E-EFFECT-WRITES-STATE | `<effect>` (or `when … changes`) body writes a reactive cell, directly or through a called function (S447, §6.7.4 — Nominal) | Error |
+| E-EFFECT-WRITE-UNPROVEN | `<effect>` body reaches code whose writes cannot be determined (`^{}`, an unresolvable call) — fails closed (S447, §6.7.4 — Nominal) | Error |
+| E-EFFECT-NO-DEPS | `<effect>` has no `deps=` or `deps=[]` (S447, §6.7.4 — Nominal) | Error |
+| E-LIFECYCLE-007 | `<effect deps=[…]>` (or keyword `dep-list`) entry is not a declared mutable `@variable` in scope, OR is a derived cell (the `<effect>` limb is Nominal, S447) | Error |
 | E-LIFECYCLE-009 | `<timer>` or `<poll>` missing `interval` attribute | Error |
 | E-LIFECYCLE-010 | `interval` attribute is zero or negative | Error |
 | E-LIFECYCLE-011 | `running` attribute references an undeclared or non-`@` variable | Error |
@@ -5603,19 +5873,21 @@ reads inside an `animationFrame` callback body.
 | E-LIFECYCLE-013 | `animationFrame()` called inside a `<timer>` or `<poll>` body | Error |
 | E-LIFECYCLE-014 | `animationFrame()` called inside a server-escalated function | Error |
 | E-LIFECYCLE-015 | `animationFrame()` called with zero arguments or non-function argument | Error |
-| E-LIFECYCLE-016 | `when` block nested inside another `when` block body | Error |
+| E-LIFECYCLE-016 | `<effect>` (or keyword `when`) inside another effect's body (re-expressed S447 — Nominal) | Error |
 | E-LIFECYCLE-017 | `animationFrame()` called outside any element scope | Error |
 | W-LIFECYCLE-002 | `<timer>` has no body (self-closing, no observable effect) | Warning |
 | W-LIFECYCLE-003 | `<timer>` or `<poll>` declared inside a `for/lift` loop body | Warning |
 | W-LIFECYCLE-004 | `<poll>` body contains no function call | Warning |
 | W-LIFECYCLE-005 | `<timer>` or `<poll>` body calls a server function and `interval` < 500ms | Warning |
-| W-LIFECYCLE-006 | `when` body sole effect is a single `@variable` assignment whose RHS is a pure `@variable` expression; a derived value is strictly superior | Warning |
+| ~~W-LIFECYCLE-006~~ | *(retired S447 — moot: any write in an effect body is E-EFFECT-WRITES-STATE)* `when` body sole effect is a single `@variable` assignment whose RHS is a pure `@variable` expression | — |
 | W-LIFECYCLE-007 | `running=false` boolean literal on `<timer>` or `<poll>` | Warning |
 | W-LIFECYCLE-008 | `<poll>` body contains multiple assignment expressions (`.value` will be `not` — §42) | Warning |
 | W-LIFECYCLE-009 | `cleanup()` inside a `for` loop body (N registrations will be created) | Warning |
-| W-LIFECYCLE-010 | `when` block has an empty body | Warning |
-| H-LIFECYCLE-001 | `@variable` read inside `when` body is not in the `dep-list` (off by default; suppressed by `reads @var` annotation) | Hint |
-| E-LIN-004 | `lin` variable referenced inside a recurring execution context (`when`, `<timer>`, `<timeout>`, or `animationFrame` callback) — `<poll>` is DEFERRED (E-LIN-006), corrected S263 | Error |
+| W-LIFECYCLE-010 | `<effect>` (or `when` block) has an empty body (Nominal, S447) | Warning |
+| ~~H-LIFECYCLE-001~~ | *(retired S447 with the never-parsed `reads` clause — reading an unlisted cell is the dominant, correct pattern)* | — |
+| W-WHEN-EFFECT-DEPRECATED | `when … changes { }` keyword form — soft-deprecated spelling of `<effect>` (S447, §6.7.4, §63 — Nominal) | Warning |
+| E-WHEN-EFFECT-DEPRECATED | reserved end-of-window code for `when … changes { }` (§63.2; not scheduled) | Error (reserved) |
+| E-LIN-004 | `lin` variable referenced inside a recurring execution context (`<effect>` / `when`, `<timer>`, `<timeout>`, or `animationFrame` callback) — `<poll>` is DEFERRED (E-LIN-006), corrected S263; the `<effect>` limb is Nominal (S447) | Error |
 
 | E-LIFECYCLE-018 | `<request>` has no `id` attribute | Error |
 | E-LIFECYCLE-019 | `<request>` is self-closing (no body) | Error |
@@ -5631,6 +5903,9 @@ reads inside an `animationFrame` callback body.
 | E-TIMEOUT-002 | `<timeout>` `delay` attribute is zero or negative | Error |
 | E-TIMEOUT-003 | `<timeout>` used outside any element scope | Error |
 | W-TIMEOUT-001 | `<timeout>` declared inside a `for/lift` loop body | Warning |
+
+**`reset-on=` codes (S447, §6.8.4):** E-RESET-ON-INVALID-ENTRY · E-RESET-ON-NOT-WRITABLE · E-RESET-ON-CYCLE ·
+E-RESET-ON-ENGINE-REFUSED (§34).
 
 **Notes on removed/renamed codes from first draft:**
 - E-LIFECYCLE-003 renamed to W-LIFECYCLE-009 (cleanup-in-for is a warning, not an error).
@@ -5713,7 +5988,7 @@ When `@showChat` transitions false → true:
 - The `cleanup()` callback is registered on this scope.
 
 When `@showChat` transitions true → false, the canonical teardown sequence (§6.7.2) fires:
-1. No `when` effects in this scope; step 1 is a no-op.
+1. No effects (`<effect>`) in this scope; step 1 is a no-op.
 2. The `<timer id="poll">` stops (step 2).
 3. `disconnectFromRoom()` fires via the registered `cleanup()` callback (step 3, LIFO).
 4. No `animationFrame` callbacks in this scope; step 4 is a no-op.
@@ -5722,20 +5997,20 @@ When `@showChat` transitions true → false, the canonical teardown sequence (§
 When `@showChat` transitions false → true a second time:
 - All of the above mount behavior repeats exactly.
 
-#### Example 3 — Valid: Multi-Dependency Reactive Effect
+#### Example 3 — Valid: Multi-Dependency Search Page (S447 forms)
 
 ```scrml
 <program>
-    <query>    = ""
-    <minPrice> = 0
-    <maxPrice> = 1000
-    <page>     = 1
-    <results>  = []
+    let <query:string=""/>
+    let <minPrice:number=0/>
+    let <maxPrice:number=1000/>
+    let <page:int=1 reset-on=[@query, @minPrice, @maxPrice]/>
+    let <results:Item[replace]=[]/>
 
-    when (@query, @minPrice, @maxPrice) changes {
-        @page = 1
-        @results = searchItems(@query, @minPrice, @maxPrice)
-    }
+    <request id="search" deps=[@query, @minPrice, @maxPrice, @page]>
+        ${ @results = searchItems(@query, @minPrice, @maxPrice, @page) }
+    </>
+    <effect deps=[@query]>${ track("search", { q: @query }) }</>
 
     <input bind:value=@query placeholder="Search..."/>
     <input bind:value=@minPrice type="number" placeholder="Min price"/>
@@ -5746,34 +6021,43 @@ When `@showChat` transitions false → true a second time:
 </>
 ```
 
-The `when` body does not run on initial mount. The initial `@results = []` is the
-starting state. The body runs only when the user changes an input (via `bind:value`).
+A change to any filter resets `@page` to `1` in the same flush (§6.8.4), before the `<request>` re-runs, so one
+keystroke sends ONE search, already on page 1. The `<request>` runs on mount and owns the result; the `<effect>`
+does not run on mount and writes nothing — it only reports the search to analytics, reading `@query`.
 `searchItems` is a server function; the compiler inserts `await` automatically (§13.2).
 
-Note that `@query`, `@minPrice`, and `@maxPrice` are read inside the body. Because they
-are also in the `dep-list`, H-LIFECYCLE-001 does not fire for them. H-LIFECYCLE-001 would
-only fire (if enabled) for `@variables` read in the body that are NOT in the dep-list.
+> **Rewritten S447.** The prior example wrote `@page = 1` and `@results = searchItems(…)` inside one `when (…)
+> changes` body — both writes are now E-EFFECT-WRITES-STATE. **Provenance:** ruling:user-voice-scrml.md S447
+> "`when` → outside-world effects only, spelled `<effect>`" · dd:`scrml-support/docs/deep-dives/when-reactive-effect-fit-2026-10-02.md`
+> §3 jobs A/B, §2 row 12 (the double fetch the old shape produced) · **supersedes:** the prior Example 3.
 
-#### Example 4 — Invalid: `when` body writes to its own dep-list (E-LIFECYCLE-006)
+#### Example 4 — Invalid: an effect writes state, directly and through a function (E-EFFECT-WRITES-STATE)
 
 ```scrml
 <program>
-    <page> = 1
+    let <page:int=1/>
+    let <lastSeen:string=""/>
 
-    when @page changes {
-        @page = 1   // E-LIFECYCLE-006: writes to dep-list variable @page
-    }
+    ${ function remember(p) { @lastSeen = "page " + p } }
+
+    <effect deps=[@page]>${ @page = 1 }</>             // E-EFFECT-WRITES-STATE (direct; also a self-trigger)
+    <effect deps=[@page]>${ remember(@page) }</>       // E-EFFECT-WRITES-STATE (through remember())
 </>
 ```
 
-Expected compiler error:
+Expected compiler errors:
 
 ```
-E-LIFECYCLE-006: `when` body writes to dependency `@page`, which is also in the dep-list.
-This would trigger the effect immediately after each write, creating an infinite loop.
-  at line 4: @page = 1
-  Dependency listed at: line 3, dep-list entry `@page`
+E-EFFECT-WRITES-STATE: this <effect> writes `@page`. An <effect> drives the outside world and may not write
+reactive state. To reset `@page` when another cell changes, declare `reset-on=[…]` on it (§6.8.4).
+  at line 7: @page = 1
+E-EFFECT-WRITES-STATE: this <effect> writes `@lastSeen` through a call: remember() → @lastSeen = …
+Move the write into the code that changes `@page`, or derive the value (§6.6).
+  at line 8: remember(@page)
 ```
+
+> **Rewritten S447** from *"Example 4 — Invalid: `when` body writes to its own dep-list (E-LIFECYCLE-006)"*,
+> which E-EFFECT-WRITES-STATE subsumes (§6.7.4). **Provenance:** as Example 3. **supersedes:** the prior Example 4.
 
 #### Example 5 — Invalid: `cleanup()` argument is a call expression (E-LIFECYCLE-002)
 
@@ -5792,41 +6076,25 @@ E-LIFECYCLE-002: `cleanup()` argument must be a function expression, not a call 
   Fix: cleanup(() => closeConnection())
 ```
 
-#### Example 6 — Warning: `when` body is derivable (W-LIFECYCLE-006)
+#### Example 6 — Invalid: a value derived inside an effect (E-EFFECT-WRITES-STATE)
 
 ```scrml
 <program>
-    <price> = 10
-    <qty>   = 2
-    <total> = 0
+    let <price:number=10/>
+    let <qty:number=2/>
+    let <total:number=0/>
 
-    when @price changes {
-        @total = @price * @qty   // W-LIFECYCLE-006
-    }
+    <effect deps=[@price]>${ @total = @price * @qty }</>   // E-EFFECT-WRITES-STATE
 </>
 ```
 
-W-LIFECYCLE-006 fires here because:
-1. The body's only effect is a single `@variable` assignment (`@total = ...`).
-2. The RHS (`@price * @qty`) is a pure expression of `@variables`.
+The fix is a derived cell, which is reactive in every input, has a value at mount, and cannot fall out of
+sync: `<total:number=(@price * @qty)/>` (§66.9; legacy form `const <total> = @price * @qty`, §6.6). The error's
+third fix text says so.
 
-Note that `@qty` is NOT in the dep-list (`dep-list` contains only `@price`). The broadened
-condition captures this case: the RHS reads `@variables` (whether or not all are in the
-dep-list), and the result is a pure derivation.
-
-Expected compiler warning:
-
-```
-W-LIFECYCLE-006: `when` body computes a derived value that can be expressed as a derived
-reactive binding. Replace with:
-  const <total> = @price * @qty
-This form is reactive, executes on initial mount, and requires no explicit dep-list.
-  at line 6: when @price changes { @total = @price * @qty }
-```
-
-W-LIFECYCLE-006 fires only when the body is exactly and solely a single derivable
-assignment. If the body also has side effects (server calls, navigation, writing to
-unrelated variables), W-LIFECYCLE-006 does NOT fire.
+> **Rewritten S447** from *"Example 6 — Warning: `when` body is derivable (W-LIFECYCLE-006)"*. W-LIFECYCLE-006
+> retires: under the no-write rule its pattern is an error (§6.7.4). **Provenance:** as Example 3.
+> **supersedes:** the prior Example 6.
 
 #### Example 7 — Valid: `<poll>` with reference properties
 
@@ -5915,29 +6183,36 @@ is not server-escalated. When the `<div if=@connected>` scope destroys, `ws.clos
 The bare expression containing the `if` block runs once on mount. If `@enabled` is `true`
 at mount time, one `cleanup()` is registered. If `@enabled` is `false`, no cleanup is
 registered. The `if` is evaluated once (at mount); `@enabled` is not a trigger for
-re-evaluating this block (that would require a `when @enabled changes` block). The cleanup
+re-evaluating this block (that would require an `<effect deps=[@enabled]>`). The cleanup
 count is determined at mount time by the state of `@enabled` at that moment.
 
-If the developer intends cleanup registration to respond to `@enabled` changes, they must
-use `when @enabled changes { if (@enabled) { cleanup(...) } }`. This is outside the scope
-of this example but is a valid pattern.
+If the developer intends cleanup registration to respond to `@enabled` changes, they may
+use `<effect deps=[@enabled]>${ if (@enabled) { cleanup(...) } }</>` — registering a cleanup is not a reactive
+write, so it is legal in an effect body (§6.7.4). This is outside the scope of this example. *(Respelled S447
+from `when @enabled changes { … }`.)*
 
 ---
 
 ### 6.7.12 Interaction Notes
 
-- **§6.3 (Reactive Semantics):** Writes to `@variables` inside `<timer>` bodies, `<poll>`
-  bodies, and `when` blocks obey all §6.3 reactive rules. A write to `@messages` inside a
-  timer body triggers the same downstream reactive updates as a write from a user event
-  handler.
+> **Amended S447** — every bullet below that named `when` now names `<effect>` (§6.7.4), and the bullets on
+> §6.3, §6.6 and §30 change in substance: an effect writes no reactive cell, so it contributes no write edges and
+> W-LIFECYCLE-006 no longer guards the derive/effect boundary — E-EFFECT-WRITES-STATE does. **Provenance:**
+> ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except
+> expound 3b, specifically why the engine restriction."* · **supersedes:** the pre-S447 wording of these bullets.
 
-- **§6.6 (Derived Reactive Values):** `const <name>` derived values and `when` blocks are
-  complementary, not competing. `const <name>` is for value derivation (lazy pull, no side
-  effects). `when` is for side effects triggered by state change (push, explicit triggers).
-  W-LIFECYCLE-006 enforces this boundary at compile time. Cross-reference §6.6.5 for
-  derived value invalidation and the flush ordering guarantee described in §6.7.4.
+- **§6.3 (Reactive Semantics):** Writes to `@variables` inside `<timer>` and `<poll>` bodies obey all §6.3
+  reactive rules. A write to `@messages` inside a timer body triggers the same downstream reactive updates as a
+  write from a user event handler. An `<effect>` body writes no reactive cell (E-EFFECT-WRITES-STATE, §6.7.4);
+  a `reset-on=` reset (§6.8.4) is a write and obeys §6.3 like any other.
 
-- **§12 (Route Inference):** `cleanup()` and `when` are always client-side constructs. A
+- **§6.6 (Derived Reactive Values):** derived cells and `<effect>`s are complementary, not competing. A
+  derived cell is for value derivation (lazy pull, no side effects). An `<effect>` is for effects on the outside
+  world triggered by state change (push, explicit triggers). E-EFFECT-WRITES-STATE enforces the boundary at
+  compile time (W-LIFECYCLE-006 retired). Cross-reference §6.6.5 for derived value invalidation and the flush
+  ordering guarantee described in §6.7.4.
+
+- **§12 (Route Inference):** `cleanup()` and `<effect>` are always client-side constructs. A
   function containing `cleanup()` SHALL be classified as client-side by RI (§6.7.3).
   `<timer>` and `<poll>` bodies are always client-side; their tick handlers run in the
   browser, though they MAY call server-inferred functions (which the CPS transform handles
@@ -5952,24 +6227,26 @@ of this example but is a valid pattern.
 - **§17.1 (`if=`):** Conditional rendering is the primary mechanism for element-scoped
   lifecycle. When `if=@condition` toggles false → true, the element scope mounts, its
   `<timer>` instances start, and its bare expressions re-run. When it toggles true →
-  false, the scope destroys in canonical order (§6.7.2): when effects, then timers, then
+  false, the scope destroys in canonical order (§6.7.2): effects, then timers, then
   cleanup callbacks (LIFO), then animationFrame cancellations.
 
 - **§17.3 (Lifecycle of Bare Expressions):** Bare expressions in a `${}` block execute
-  on mount. They are the "run once at mount" mechanism. `when` blocks execute on change,
+  on mount. They are the "run once at mount" mechanism. `<effect>`s execute on change,
   not on mount. These two mechanisms are complementary, not redundant. SPEC-ISSUE-010
   (whether bare expressions re-execute on reactive dependency change) remains open and
-  does not affect the `when` construct, which has independent, fully specified trigger
-  semantics.
+  does not affect `<effect>`, which has independent, fully specified trigger semantics.
 
 - **§30 (Dependency Graph):** The compiler adds edges to the dependency graph for:
-  (a) each `@variable` in a `when` dep-list → the `when` effect as a dependent, and
-  (b) each `<timer running=@var>` running attribute → the timer's start/stop behavior.
+  (a) each cell in an `<effect deps=[…]>` list → the effect as a dependent (read-only: an effect adds no
+  write edge, and a cell read in an effect body counts as consumed — no E-DG-002 for it),
+  (b) each `<timer running=@var>` running attribute → the timer's start/stop behavior, and
+  (c) each cell in a `reset-on=[…]` list → the reset cell as a dependent (§6.8.4; this sub-graph is acyclic,
+  E-RESET-ON-CYCLE).
   These edges are constructed in Stage 7 (graph construction) alongside derived value
   edges (§6.6.3). animationFrame callbacks do NOT add edges to the dependency graph
   for `@variable` reads inside the callback.
 
-- **§34 (`lin`):** A `lin` variable SHALL NOT be consumed inside a `when` body, a
+- **§34 (`lin`):** A `lin` variable SHALL NOT be consumed inside an `<effect>` body, a
   `<timer>` body, a `<poll>` body, or an `animationFrame` callback. These contexts may
   execute more than once per scope lifetime, and a `lin` variable must be consumed exactly
   once. The compiler SHALL emit E-LIN-004 if a `lin` variable is read inside any of these
@@ -6031,23 +6308,32 @@ This section records design alternatives that were evaluated and rejected for ea
 mechanism. The rejections are normative: they explain why the current design is correct
 and guard against future re-proposals of the same alternatives.
 
-#### A.1 `when` vs Auto-Tracking Effects
+#### A.1 `<effect>` vs Auto-Tracking Effects
 
-**Alternative:** Omit the explicit `dep-list` from `when`. The compiler auto-tracks every
-`@variable` read inside the effect body, as Svelte 5 does with `$effect()` and Vue 3 does
-with `watchEffect()`.
+**Alternative:** Omit the explicit `deps=` list from `<effect>` (formerly `when`). The compiler auto-tracks
+every `@variable` read inside the effect body, as Svelte 5 does with `$effect()` and Vue 3 does with
+`watchEffect()`.
 
 **Rejected because:**
 1. Auto-tracking violates the readability principle: a developer reading the source cannot
    determine which state changes trigger the effect without compiler introspection.
 2. Auto-tracking makes refactoring dangerous: adding a read of `@variable` inside the
    body silently adds a new trigger.
-3. scrml's explicit-dependency model is consistent with `bind:value` and the dep-list for
-   derived values. Introducing implicit tracking for `when` would create an inconsistency
-   within the language.
-4. The `reads @var` annotation in the explicit model provides a documented escape hatch
+3. An effect's body routinely reads cells that must NOT trigger it — an analytics payload reads `@query` to
+   report a `@category` change. Derived cells and `<request>` can infer their dependencies from their reads
+   because for them every read IS a dependency (the value is computed from exactly those reads); an effect's
+   triggers and its reads are different sets, so only the author can name the triggers.
+4. ~~The `reads @var` annotation in the explicit model provides a documented escape hatch
    for non-trigger reads, which is more explicit than suppression comments in auto-tracking
-   systems.
+   systems.~~ *(Struck S447 — `reads` never parsed and retires; a non-trigger read needs no annotation.)*
+
+> **Amended S447.** The rejection stands, re-stated for `<effect>`. Reason 3 is rewritten because its premise
+> was stale: it claimed consistency with *"the dep-list for derived values"*, but derived values have no dep list
+> (§6.6.3 extracts their dependencies statically) and `<request>` infers its deps when `deps=` is absent
+> (§6.7.7) — DD §1.1. Reason 4 is struck with the `reads` clause. **Provenance:** ruling:user-voice-scrml.md S447
+> "`when` → outside-world effects only, spelled `<effect>`" (Call 2: *"`[ ]` deps"*) ·
+> dd:`scrml-support/docs/deep-dives/when-reactive-effect-fit-2026-10-02.md` §1.1 · **supersedes:** reasons 3
+> and 4 as worded before S447.
 
 #### A.2 `<timer>` vs `setInterval` Passthrough
 
@@ -6084,26 +6370,28 @@ removed.
 teardown function. Instead of `cleanup(() => close())`, the developer writes:
 
 ```
-when @connected changes {
+<effect deps=[@connected]>${
     const ws = new WebSocket(url)
     return () => ws.close()   // teardown function returned from effect body
-}
+}</>
 ```
+
+*(Respelled S447 from the keyword form; the rejected alternative is unchanged.)*
 
 **Rejected because:**
 1. The return-value-as-teardown pattern conflates effect logic with teardown logic in
    a single function body, which is harder to read for non-trivial effects.
 2. `cleanup()` works for mount-time teardown (bare expressions in `${}`), not just
-   `when` effects. A return-value pattern only applies to effect bodies.
+   effects. A return-value pattern only applies to effect bodies.
 3. `cleanup()` is explicit and scopeable: it registers on the enclosing element scope,
-   which may not be the same as the `when` block's immediate context.
+   which may not be the same as the effect's immediate context.
 4. The current `cleanup()` design is already implemented in the compiler (tokenizer,
    AST, codegen). Changing to return-value teardown would require redesign of the
    cleanup pass for marginal readability benefit.
 
 ---
 
-### 6.8 The `default=` Attribute and `reset(@cell)` Keyword
+### 6.8 The `default=` Attribute, the `reset(@cell)` Keyword, and `reset-on=`
 
 #### 6.8.1 The `default=` Attribute
 
@@ -6166,6 +6454,7 @@ reset(@compound)          // reset all fields of a compound cell
 - §6.13 — Reactivity attributes (`debounced=` / `throttled=`); reset cancels pending timed writes.
 - §55.13 — reset clears the validity surface's `touched` / `submitted` (for a compound, a field, and — S447 — a validated top-level value).
 - §14.12 — Lifecycle annotation; reset reverts per-access transition state per §6.8.3.
+- §6.8.4 — `reset-on=[…]`: a cell that resets itself when listed cells change (S447).
 - §34 — E-RESERVED-IDENTIFIER, E-RESET-NO-ARG, E-RESET-INVALID-TARGET
 
 #### 6.8.3 Interaction with lifecycle annotation (`(A to B)`)
@@ -6215,6 +6504,124 @@ reset(@state)                        // writes default (.Active); post-type → 
 - §14.12.10 — Normative statements (this section's reciprocal cross-ref bullet)
 - §6.8.2 — Reset semantics this section extends
 - `~/.claude/design-insights.md` — S134 const-deep-freeze ratification block
+
+#### 6.8.4 `reset-on=[@a, @b]` — reset a cell when other cells change
+
+> **Status: Nominal / spec-ahead (S447).** NORMATIVE; **not implemented by impl#1** (frozen for language
+> semantics under the S447 TS accounting ruling — the divergence is filed, `g-impl1-when-effect-divergence-s447`)
+> and **owed by the bootstrap** (`g-bootstrap-effect-reset-on-owed`).
+>
+> **Provenance:** ruling:user-voice-scrml.md S447 "⭐⭐⭐ RULED — \"your recs, except expound 3b\": `when` →
+> outside-world effects only, spelled `<effect>`" — Call 1 = (b): *"Page-reset → a `reset-on=[@a, @b]` modifier
+> on the cell being reset"* · 3a: *"spelling `reset-on=` (kebab)"* · ruling:user-voice-scrml.md S447 "⭐ RULED —
+> 3b: `reset-on=` IS allowed on engine cells, checked against `rule=`; 3c → look at real autosave first" — *"the
+> new rec for engine reset, yes."* (*"`reset-on=` is legal on an engine cell; the reset is checked like ANY write
+> against the cell's contract (§66.11 one transition axis) — EVERY state must admit the reset target in its
+> `rule=`, else a compile error naming the refusing state; the reset is a real transition, so `<onTransition>`
+> handlers fire. … The rest of 3b stands: `reset-on=` cycles are a compile error; legal only on writable
+> cells."*) · dd:`scrml-support/docs/deep-dives/when-reactive-effect-fit-2026-10-02.md` §4 (semantics 1–5; where
+> the DD proposes *"forbid"* on engine cells, the 3b ruling overrides it) · **supersedes:** nothing in this
+> section (new surface); it is the replacement home for the reset job the pre-S447 §6.7.4 sent to `when`
+> (*"Use `when` when you need a side effect (… resetting unrelated state …)"*). **Direction of change:
+> newly-accepting** (a new modifier).
+
+**Why it lives here.** `reset-on=` performs exactly one write — `reset(@self)` (§6.8.2) — and nothing else.
+Its meaning is §6.8's: the reset value is §6.8.1's, and every composition rule (debounced cancel, lifecycle
+revert, the §55 surface) is a rule of `reset`. It is placed beside `default=` and `reset` rather than with the
+write-path attributes of §6.13 / §6.14 because those change *how* writes reach the cell, while this one *is* a
+write, of one fixed kind. It is deliberately not a general "when X changes, set Y = expr" hook — that would be
+`when` again, relocated (DD §4, limit-vs-widen).
+
+**Syntax.** A valued modifier on a cell declaration:
+
+```scrml
+<page reset-on=[@query, @category]> = 1                    // legacy cell form (§6.2)
+let <page:int=1 reset-on=[@query, @category]/>             // §66 form
+```
+
+```
+reset-on-attr ::= 'reset-on=' '[' '@' identifier (',' '@' identifier)* ']'
+```
+
+In the §66 opener it is a **modifier** — the same class as `debounced=` (§6.13), `persist=` (§6.14) and
+validators — and so it stays INSIDE the opener under the S447 opener-keyword rule (*"inside the opener only the
+name, type, value, typed attributes, and flags"*; keywords such as `let` / `export` go before the `<`). Like
+every modifier in an opener it binds that declaration's own value (§66.4 rule 3); a CHILD field that resets is a
+child declaration carrying its own `reset-on=` (§66.4 rule 2).
+
+**Rules.**
+
+1. **The write.** When any listed cell changes (the reactive notify of §6.3, as for `<effect>`, §6.7.4), the
+   runtime SHALL perform `reset(@self)`: if the cell carries `default=`, evaluate that expression at reset time
+   and write the result; otherwise re-evaluate the cell's initializer (its own value / init expression) and write
+   the result (§6.8.1, §6.8.2). For a compound cell this is `reset(@compound)` — every field.
+2. **Entries.** Every entry SHALL be a declared, mutable, non-derived reactive cell in scope at the declaration
+   — the rule `<effect deps=[…]>` entries follow (E-LIFECYCLE-007's condition). An undeclared name, a non-`@`
+   name or a derived cell is **E-RESET-ON-INVALID-ENTRY**; an empty list (`reset-on=[]`) is the same error.
+3. **Acyclic, statically.** The reset-on edges (entry → reset cell) form a graph the compiler builds at compile
+   time. A cycle — including a cell listing itself — is **E-RESET-ON-CYCLE**, naming the cells on the cycle.
+   Chains (`a` resets on `b`, `b` resets on `c`) are legal; a write to `c` resets `b`, which resets `a`. Because
+   the graph is static and acyclic, a chain of resets terminates by construction; no runtime bound is needed.
+4. **One flush, before readers.** The resets a write triggers — the whole chain, in topological order — SHALL be
+   applied in the same flush as the triggering write, **before** any `<effect>`, `<request>` or render reads the
+   reset cells. The triggering write and the resets it causes are ONE change for every dependent: a `<request>`
+   or `<effect>` whose dependencies include both the trigger and a reset cell runs ONCE for it, and sees the
+   reset value. (One keystroke in a search box → one search, already on page 1 — DD §2 row 12 measured two for
+   both pre-S447 shapes.)
+5. **Writable cells only.** The reset is a write and is checked against the cell's write contract like any
+   write (§66.11: `reset(@x)` is a `replace`). `reset-on=` is legal on a cell whose contract admits that write:
+   a writable (`let`) scalar; a sequence, tuple or struct whose type grants `replace`; a cell with a lifecycle
+   `(A to B)` (the reset follows §6.8.3); an engine / transition-graph cell (rule 6); a legacy-form cell (§6.2),
+   which carries the transitional all-permissions grant (§66.12.4). On a **locked** or **derived** cell
+   (`const <x>`, a §66 locked cell, a `derived=` engine) it is **E-RESET-ON-NOT-WRITABLE**.
+6. **Engine cells — allowed, checked against `rule=` (S447 3b).** On a cell that carries a transition graph
+   (`<engine for=T initial=.X>`'s variable, §51.0; a §66.13.2 enum value with `rule=` state-children), the reset
+   target is computed by rule 1 (`default=` if present, else the initial value). **Every state other than the
+   target itself SHALL admit the target in its `rule=`** (`rule=*` admits every variant). A state that does not
+   is **E-RESET-ON-ENGINE-REFUSED**, and the diagnostic SHALL name every refusing state and the target
+   (*"`.Shipped` has `rule=.Delivered`; it does not admit the reset target `.Draft`"*). The target state itself
+   needs no self-edge: a reset while already in the target is a self-write, a no-op (§51.0.F.1). When the reset
+   target is not a single statically known variant (a `default=` expression), every variant the expression's type
+   admits is a possible target and every state SHALL admit each of them — fail closed.
+   **The reset is a real transition:** the `<onTransition>` handlers for that edge fire (`to=` the target in the
+   from-state, `from=` the from-state in the target state), a single-target state-child `effect=` whose `rule=`
+   is the target fires, and the §51.7.1 order holds (transition effects, then `<effect>`s). A composite state is
+   left by an ordinary external transition (§51.0.O / §51.0.Q). *Why allowed (the ratified reasoning):* under the
+   no-write rule an `<effect>` cannot write, so banning `reset-on=` on engines would leave an engine NO way to
+   react to an outside change; `reset-on=` is a write trigger, not a second progression model.
+7. **Composition — all of it is `reset`'s.**
+   - **`debounced=` / `throttled=` (§6.13):** a pending timed write on the reset cell is cancelled before the
+     reset value is applied (§6.8.2). A debounced TRIGGER cell triggers the reset when its debounced write lands
+     on the cell, not at each keystroke.
+   - **Lifecycle (§14.12):** the per-access transition state reverts per §6.8.3.
+   - **Validators and the validity surface (§55):** the reset clears the surface exactly as `reset(@x)` does —
+     `touched` and `submitted` become `false` and `errors` / `isValid` recompute (§55.13; S447 "validity calls
+     2-6" bundle (ii) — *"`reset(@x)` clears `touched` + `submitted`"*). A reset form field therefore shows no
+     stale errors.
+   - **`persist=` (§6.14):** the reset value is written to storage like any write. A construction-time restore
+     of a TRIGGER cell is not a change and triggers no reset (nothing fires at construction — consistent with
+     `<effect>`, §6.7.4); whether a cross-tab `storage`-event write to a trigger is a change follows O-061-5.
+     ⚑ OPEN (O-061-8, unchanged): whether a reset removes the storage key or writes the default.
+8. **Static check location.** Rules 2, 3, 5 and 6 are compile-time errors; none of them is deferred to run time.
+
+⚑ OPEN (not ruled):
+- **Server / channel cells.** Whether `reset-on=` is legal on a §52 server-authoritative cell or a `<channel>`-
+  synced cell, and if so which client performs the reset when the trigger change reaches every client (a
+  locally-originated trigger resets once; a synced trigger would reset once per client). Until ruled, the
+  conservative reading is that the reset is legal exactly where `reset(@x)` is legal on that cell; the
+  multi-client question is open.
+- **Per-instance resets.** Whether a child field's `reset-on=` may name a sibling field of the same instance or
+  an `<each>` row alias, giving a per-instance reset (DD §4 open item).
+- **Cascades through transition effects.** Rule 3 makes the reset-on graph acyclic; a transition handler fired
+  by an engine reset (rule 6) may itself write cells. Whether that needs its own static check is the same open
+  question as cascades through engine effects generally (DD §12 Q6).
+
+**Cross-references:** §6.7.4 (`<effect>` — the construct that may NOT write; its error names `reset-on=` as the
+fix) · §6.8.1 / §6.8.2 (the reset value and the `reset` write) · §6.8.3 (lifecycle revert) · §6.13 (timed writes
+cancelled) · §6.14 (persisted cells) · §51.0.F / §51.0.F.1 / §51.0.H (`rule=`, self-write no-op, transition
+handlers) · §55.13 (validity surface cleared) · §66.4 rule 3 (modifiers bind the own value) · §66.11 (the write
+is a `replace`) · §34 (E-RESET-ON-INVALID-ENTRY, E-RESET-ON-CYCLE, E-RESET-ON-NOT-WRITABLE,
+E-RESET-ON-ENGINE-REFUSED).
 
 ---
 
@@ -6430,6 +6837,15 @@ State-cell declarations (§6.2 Shape 1 and Shape 2) MAY carry one of two reactiv
 ```
 
 Writes to `@searchTerm` are coalesced into a single trailing write that fires `DURATION` after the most recent write request. Each new write within the window restarts the timer; the cell's value updates exactly once, after the window of silence. Subscribers (`when @searchTerm changes {}`, derived cells, render-by-tag, etc.) fire on the debounced write.
+
+**Server-origin writes bypass the wrapper (S447 3c).** `debounced=` and `throttled=` delay LOCAL writes only. A
+server-origin write (§6.7.7.3 rule 3 — a `<request>` settle, a `<poll>` tick, a `<channel>` push, a `persist=`
+cross-tab sync, a §52 server-authority load) SHALL be applied to the cell at once, so loaded data is shown when it
+arrives rather than one window late. *(Nominal / spec-ahead; impl#1 debounces every write — filed under
+`g-impl1-autosave-request-mount-save-wipes-record`. Provenance: ruling:user-voice-scrml.md S447 "\"accept and your
+rec (d)\"" — sub-call 4: *"server-originated writes skip the `debounced=` delay"* · dd:`scrml-support/docs/deep-dives/autosave-request-mount-3c-2026-10-02.md`
+§2.3 point 3 · supersedes: the unqualified "wrap the cell's write path" for server-origin writes.)* The
+pending-local-write case is OPEN (§6.7.7.3 rule 6).
 
 #### 6.13.2 `throttled=DURATION` — Throttled Writes
 
@@ -6647,7 +7063,7 @@ type SidebarMode:enum = { Open, Collapsed }
 - **O-061-3** — The stored **envelope** (e.g. a version marker or a §47.1.4 type-fingerprint field). Under the call-4 ruling a fingerprint mismatch is not by itself a discard trigger, so what, if anything, the envelope carries is open.
 - **O-061-4** — Whether the §55 validators are part of the "full declared contract" a restored value is decoded against, or only type-level contracts (refinements, sequence bounds, lifecycles).
 - **O-061-5** — A cross-tab `storage`-event value: is it judged as a write under the §66.11 write contract (e.g. `rule=` guards) or applied as construction-like hydration? What happens when it fails to decode (keep the current value, or take the default) and when the key is removed in the other tab?
-- **O-061-6** — Whether the restore at construction fires `when @x changes` effects.
+- **O-061-6** — Whether the restore at construction fires `when @x changes` effects. *(S447: effects are now `<effect deps=[…]>` and SHALL NOT run at program construction (§6.7.4); a restore at construction is therefore not observed by any effect, and — by the same rule — triggers no `reset-on=` reset (§6.8.4 rule 7). Read as settled by S447 2b for effects; the PA flags it for confirmation.)*
 - **O-061-7** — Write timing: per-change or coalesced per microtask (the §6.7.4 timing).
 - **O-061-8** — Whether `reset(@x)` also **removes** the storage key, or only writes the default.
 - **O-061-9** — The attribute's **position in a §66 opener**, and `persist=` on a §66 declaration's **non-shared** instances with an author per-instance key expression.
@@ -6689,7 +7105,7 @@ Logic contexts are valid inside markup contexts and state blocks.
 
 ### 7.2 Content
 
-The content of a `${ }` logic context is JavaScript, passed to the Bun runtime. All JavaScript that is valid in a Bun execution context is valid inside `${ }`, **except the constructs §7.2.1 excludes** — scrml's logic is JavaScript-shaped, but scrml is not a JavaScript superset. scrml-specific extensions to logic context content are:
+The content of a `${ }` logic context is JavaScript, passed to the Bun runtime. All JavaScript that is valid in a Bun execution context is valid inside `${ }`, **except the constructs §7.2.1 excludes** — scrml's logic is JavaScript-shaped, but scrml is not a JavaScript superset. **Statement termination is NOT inherited from JavaScript:** JavaScript's automatic semicolon insertion (ASI) does not apply in scrml; where a statement ends is defined by §7.2.2 (a newline ends a statement; continuation is explicit), in every logic body. *(Amended S446, dpa-063 — see §7.2.2's provenance.)* scrml-specific extensions to logic context content are:
 
 - The `lift` keyword (Section 10)
 - Markup-as-expression syntax (Section 7.4)
@@ -6733,6 +7149,106 @@ c = stepped(c)
 - Both front-ends SHALL fire the code: the default pipeline and `--parser=scrml-native`. The native parser's `E-STMT-CLASS-*` codes (§34.1) remain as the complementary malformed-construct diagnostics guarding its recovery parse; they do not admit `class` (the S117 open decision recorded on `E-STMT-CLASS-NAME` is CLOSED by this section).
 
 **Why this section, not §19 or §21.** §7.2 is where logic content is defined as "all JavaScript" — the exclusion belongs next to the claim it qualifies. `class` is not an error-handling concept (§19, the home of `try`/`throw`/`async`) nor a module concept (§21, the home of the dynamic-import rule).
+
+#### 7.2.2 Statement termination — a newline ends a statement; continuation is explicit (S446, dpa-063)
+
+**Added 2026-10-01 (S446).** This is the ONE statement-termination rule of scrml logic. §7.2's "all JavaScript is valid" sentence does **not** carry JavaScript's automatic semicolon insertion (ASI) into scrml: termination is defined here, not inherited, and it is the same rule in every logic body. Before S446 the SPEC stated no rule; the three front ends each ran a different one (impl#1's default parser a heuristic, `--parser=scrml-native` ECMAScript ASI, the bootstrap a hybrid), and `console.log("m")⏎-3102` silently compiled as `console.log("m") - 3102`.
+
+> **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — *"b, your rec"* · ruling:user-voice-scrml.md S446 "dpa-063 pole (c) eliminated" — *"before I rule on this (c is out) I am not familiar with "rust-style tail expression". expound first."* · ruling:user-voice-scrml.md S446 "dpa-063 Call 4 = PA recs" — *"I do agree with your recs, BUT, every other language that I know allows . chaining to start a line. Its where we look. this is not a decision just a concern. I suppose that code formating could indent the line after a trailing . to make it clear."* · ruling:user-voice-scrml.md S446 "dpa-063 Call 5 = (i)" — *"(i), your rec, and yes on +/-"* · ruling:user-voice-scrml.md S446 "`when` re-trigger … dpa-063 Calls 6 + 7 = PA recs" — *"b on retrigger, your recs on 6 and 7"* · ruling:user-voice-scrml.md S445 "statement termination → dPA" — *"your solution seems reasonable. but a ; really clarifies things. That is huge though. And I am not a fan of specific silent carve-outs like this. lets dpa it"* · dd:`scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md` (Approach B; the cross-cutting locus table; C1 SPEC sites) · **supersedes:** ruling:user-voice-scrml.md S440 JS-WAT #6 (*"ASI: `return` followed by a newline and an expression is an error; scrml's statement splitter stops copying JS's semicolon insertion (a statement-start `(`/`[`/template never silently joins the previous line)"*) — subsumed, never built as its own list (Call 7); the three S437 round-4 conformance pins `markup-handler/s437-r4-continuation-{leading-plus,expr-form-leading-plus,leading-question-colon}` (positive → negative); the body-top-only scope of S445 #2 `E-STMT-NO-EFFECT` (§40.8, widened by rule 9 below); the S441 round-5 "a `;` is source formatting" (§34 `E-INTERNAL-BODY-TOP-DROPPED`) · direction-of-change: **newly-rejecting** (a leading-operator line; two statements on one line in front ends that accepted them) and **meaning-changing** (a line starting with `(`, `[`, a template, a regex, `-` or `+` no longer joins the line above — it now errors or starts a statement).
+
+**Status: Nominal / spec-ahead.** No front end implements this section yet: impl#1 (both parsers) and the bootstrap still run their pre-S446 rules (`docs/known-gaps.md` §S446). Build order (Call 6): the bootstrap by construction first; impl#1 parity under the security/bootstrap exception so the two compilers agree; then the corpus codemod.
+
+**Terms.** A **statement list** is the content of: a `${ … }` logic context; a function or `fn` body; an inline handler block `onclick={ … }` (§5.2.3); a `^{ … }` meta body; a `when … { … }` / `on mount { … }` body; any `{ … }` block of a statement (`if` / `else` / loop / bare block) or of an arrow / function expression; a `{ … }` match or `!{}` arm block; an if-as-expression arm block (§17.6); a `~{ … }` test body; the statements of a code-default body (§4.18 — engine state-child, `<match>` block-form arm) and of a `<program>` / `<page>` / `<channel>` body top (§40.8). Inside a statement list the **statement level** is bracket depth 0 relative to that list. A newline at statement level is a **line break**; a newline anywhere else (rule 4) is whitespace.
+
+**Normative statements:**
+
+1. **A line break ends a statement.** At statement level a statement SHALL end at the first line break that follows a complete statement, unless rule 2 continues it. A statement also ends at a `;` (rule 6) and at the `}` that closes its enclosing statement list. A `//` comment or whitespace between the statement's last token and the line break does not change this.
+2. **Continuation is explicit, at the END of a line.** A statement SHALL continue onto the next line only when the last token of the line (ignoring a trailing `//` comment) is a **continuation token** — exactly this closed list:
+   - a binary (infix) operator: `+` `-` `*` `/` `%` `**` `==` `!=` `===` `!==` `<` `>` `<=` `>=` `&&` `||` `??` `&` `|` `^` `<<` `>>` `>>>` `in` `instanceof`, and scrml's `is` (§42; `@x is not` / `@x is some` are complete — `not` / `some` end the expression);
+   - `=` and every compound assignment operator (`+=` `-=` `*=` `/=` `%=` `**=` `&&=` `||=` `??=` `&=` `|=` `^=` `<<=` `>>=` `>>>=`);
+   - member access `.` and optional chaining `?.`;
+   - the conditional operator's `?` and `:`. A conditional `?` has whitespace before it (`ready ?`). A `?` written directly against the end of its operand, with no whitespace (`load(id)?`), is the §19.5 propagation operator: a complete postfix expression that ends the statement like any other operand. Adjacency decides the role, as the whitespace before a `:`-shorthand `:` does (§4.14);
+   - `,`;
+   - the arrow `=>` and the arm separator `:>` (with its deprecated aliases, §18.2);
+   - a prefix operator that cannot end an expression: `!`, `typeof`, `new`.
+
+   No other token continues a statement across a line break. A statement whose line ends in a token NOT on this list ends there. (The `>` or `/>` that closes a markup tag in a markup-as-value expression, §7.4, is not an operator: markup is delimited by its closer, rule 4.)
+
+   > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 1, ACCEPTED: *"the END-token closed list"* — S446 Call 1 ruled the token CLASSES; the exact membership above is ratified as stated) · (reading 2, ACCEPTED: *"`?` by ADJACENCY (glued = §19.5 propagation, ends the statement; spaced = conditional, continues)"* — the alternative "a conditional `?` never ends a line" is not adopted).
+3. **A line that STARTS with a token that can only continue an expression is an error.** At statement level, a line whose first token is one of: a binary operator other than `/` and `<` (rule 3a), including `+` and `-`; `.`; `?.`; `?`; `:`; `=` or a compound assignment operator; `,`; `=>`; `:>` — SHALL be **`E-STMT-LEADING-OPERATOR`** (§34). It never continues the line above and is never read as a new statement. The message SHALL suggest the fix: *"move the operator to the end of the previous line, or wrap the expression in `( )`"*. This holds for a leading `.` / `?.` (no method-chain exception) and for a leading `+` / `-` (a line-leading `-3102` is the error, not a negation).
+   - 3a. A line-leading `/` is a regex literal and a line-leading `<` is markup (§7.4) — both START an expression (rule 5), so neither is in this set.
+     > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 3, ACCEPTED: *"leading `/` and `<` are expression starts"*).
+   - 3b. A line-leading keyword that continues a STATEMENT (not an expression) is not a leading operator: `else` after the `}` of an `if` body continues that `if` statement (`}⏎else {` and `}⏎else if (…) {` are one `if`).
+     > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 4, ACCEPTED: *"`}⏎else` legal"*).
+4. **Inside an open bracket, newlines are insignificant.** Between an unclosed `(` or `[`, an unclosed expression-position `{` (an object literal, a destructuring pattern), an open template literal (including the `${ … }` interpolations inside it), or an open markup-as-value element (§7.4, delimited by its closer), a newline SHALL be whitespace: a token at the start of such a line is not "line-leading" for rule 3, and rule 1 does not apply. So `(o.items⏎    .map(f)⏎    .reduce(g, 0))` is one expression with leading-dot layout. A `{` that opens a statement-list (a block, an arrow / function body, a handler block) restarts statement level inside it.
+5. **A line that starts with an expression-start token starts a new statement.** A line whose first token can start an expression — `(`, `[`, a template literal, a regex literal, `!`, an identifier, a literal, `@`, `<` (markup), a keyword — SHALL begin a new statement. It SHALL NOT join the line above, whatever that line ends with other than a continuation token (rule 2). (This is S440 JS-WAT #6's "a statement-start `(`/`[`/template never silently joins the previous line", extended from three tokens to every expression start.)
+6. **`;` is the statement separator.** A `;` SHALL end the statement before it. It is legal between two statements on one line (`@a = 1; @b = 2`), and legal at the end of a line (`@a = 1;`) — redundant there, a formatter MAY strip it. A `;` is never text and never "source formatting": at a `<program>` / `<page>` / `<channel>` body top it is this separator (§40.8).
+7. **Two statements on one line need a `;`.** A complete statement followed on the SAME line by a token that neither continues it (rule 2 applies only at line end; on one line the expression grammar decides) nor is a `;` / closing `}` SHALL be **`E-STMT-MISSING-SEMICOLON`** (§34): `let a = 1 let b = 2`. The `}` that closes a block-bodied statement (`if` / `else` / loop / `function` declaration) ends that statement, so a statement after it on the same line needs no `;` (`if (c) { a() } b()`).
+   > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 5, ACCEPTED: *"a block `}` ends its statement"*).
+8. **`return` ends at the line break.** A `return` (likewise `break` / `continue` / `fail` with an optional operand) whose line ends after the keyword is a complete statement; an expression on the next line is a NEW statement (rule 5). `return⏎    @total * 2` is `return` followed by the orphan statement `@total * 2`, which is `E-STMT-NO-EFFECT` (rule 9). S440 JS-WAT #6's `return⏎expr` error is this consequence; there is no separate `return` rule. ⚑ **OPEN:** an orphan that HAS an effect (`return⏎f()`) is not `E-STMT-NO-EFFECT` — it is an unreachable statement after `return`, and no code catches it today (S440 #6 would have). Whether unreachable code after `return` / `fail` / `break` / `continue` is an error is not ruled; the dd measured 0 real `return⏎expr` sites in 2,489 files. This stays OPEN by ruling: S447 accepted the PA reading that leaves it open (reading 9, *"`return⏎f()` stays OPEN"*) — no front end SHALL invent a diagnostic for it until it is ruled.
+   > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 9 — explicitly OPEN).
+9. **An expression statement with no effect is an error in every statement list** — `E-STMT-NO-EFFECT` (§34), defined at §40.8 (S445 #2) and widened by S446 Call 5 to every logic body: function / `fn` bodies, handler blocks, `${ … }`, `^{ … }`, code-default bodies and the body top. It is what makes a mis-split line loud: `console.log("m")⏎-3102` is `E-STMT-LEADING-OPERATOR` on line 2; `f(x)⏎(y)` is `f(x)` followed by the orphan `(y)` → `E-STMT-NO-EFFECT`. The definition of an effect, its exemptions (a value read through `~`) and the value positions that are not expression statements are stated once, at §40.8. The rule reaches every statement list with no carve-out: wherever `${ @count }` is a logic block whose content is read as STATEMENTS, its `@count` is a no-effect statement and is `E-STMT-NO-EFFECT`. Only a value position escapes it — `<p>${ @count }</p>`, a markup interpolation in a render position (§17.6.10), renders `@count` and is not a statement. (This settles S445 #2's reach question: yes, everywhere.)
+
+   > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 7, ACCEPTED: *"value positions are not expression statements (so `${ @count }` as a logic-block STATEMENT is E-STMT-NO-EFFECT — settles the S445 #2 reach question: yes, everywhere)"*).
+
+**Every locus, one rule** (dd cross-cutting table, resolved for pole B):
+
+| Locus | Rule |
+|---|---|
+| `${ … }` logic context; function / `fn` body; `when` / `on mount` body; `~{ }` test | rules 1–9 |
+| inline handler block `onclick={ … }` (§5.2.3) | rules 1–9; "separated by `;` or by a newline" in §5.2.3 is this section |
+| bare handler value `onclick=expr` (§5.2.3) | one expression, unchanged; a top-level `;` stays `E-MULTI-STATEMENT-HANDLER` |
+| `^{ … }` meta (§22) | rules 1–9 (at compile time — `let n = 1⏎-3102` is `E-STMT-LEADING-OPERATOR`, not `-3101`) |
+| code-default body — engine state-child, `<match>` block-form arm (§4.18) | rules 1–9 for its statements. A standalone `"…"` display-text literal and a markup child are items, not statements: a display literal is a `"…"` that stands alone on its line (§40.8 S441 sub-bullet — whose "nothing but whitespace, `;` or a `//` comment follows" now reads `;` as this separator) |
+| `<program>` / `<page>` / `<channel>` body top (§40.8) | rules 1–9; a `;` is the separator (rule 6) |
+| `:`-shorthand body (§4.14) | exactly one expression; newlines between the `:` and the opener's `>` are insignificant (rule 4 — the body is bracket-like). Not a statement list |
+| JS-style `match` arms (§18) and `!{}` arms (§19) | arms are newline-separated (§18.2, unchanged). See "Arm heads" below |
+| `?{ … }` SQL (§8), `_{ … }` foreign code (§23.2.3), `#{ … }` CSS | **exempt** — a foreign grammar; its own newlines and `;` are its own. The block itself is an expression inside a scrml statement and takes this rule after its closing `}` |
+
+**Arm heads — the `.Variant :>` line (structural, not a lookahead).** Directly inside a `match { … }` body or a `!{ … }` handler body, the unit at depth 0 is the **arm**, not a statement (§18.2: arms are juxtaposed, one per line). A line at that level begins an arm, so its first token is an arm pattern (`.Variant`, `::Variant`, `Type.Variant`, `| ::E`, `else`, `_`, a literal or `(` tuple pattern) — a leading `.` there is the arm's pattern, not a leading operator. Which reading applies is decided by **position** (arm level vs statement level), never by looking ahead for `:>`. Inside an arm's `{ … }` block body the level is statement level again, and a line starting with `.` there is `E-STMT-LEADING-OPERATOR`. A single-expression arm body (`.A :> expr`) ends at its line break unless the line ends in a continuation token (rule 2); a following line that starts with `.` at arm level is read as an arm head, and if it does not form an arm (`.map(f)` with no `:>`) it is a parse error whose message SHOULD carry the rule-3 suggestion.
+
+> **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 6, ACCEPTED: *"arm heads by position"* — position, never a `:>` lookahead, decides arm head vs statement; S446 Call 4a (i) already ruled out a `.Variant`-arm vs chain lookahead).
+
+**Leading-dot chains.** Write the dot at the end of the line (`o.items.⏎    map(f).⏎    reduce(g, 0)`), or wrap the chain in parentheses and keep the leading-dot layout (rule 4). A formatter MAY indent the line after a trailing `.` (bryan's S446 Call 4 concern, recorded, not a rule).
+
+**Migration (RULED S446 Call 6): an immediate error, pre-1.0, with a codemod — no §63 warning window.** `E-STMT-LEADING-OPERATOR`, `E-STMT-MISSING-SEMICOLON` and the widened `E-STMT-NO-EFFECT` fire from the landing version; there is no `W-` lint window. This is the §63.7 pre-1.0 route — deciding what language-1.0 contains, not removing a released form. A `scrml migrate --fix` rule SHALL ship with the implementation: it moves each leading operator to the end of the previous line (before any trailing `//` comment there), and MAY instead wrap a leading-`.` chain in `( )`. The rule SHALL be verified by emit diff — every migrated file compiles to identical JS (modulo the content hash). Measured stake (dd C4, ±10%): ≈205 leading-operator lines in 2,489 core `.scrml` files (105 `?`/`:`, 50 `.`/`?.`, 42 `&&`/`||`, 8 `+`), plus the three S437 round-4 conformance pins, which are rewritten as negatives rather than migrated, and two further S437 positive cases whose 12 leading-`?`/`:`/`.` lines are migrated (`markup-handler/s437-handler-shape-ternary-continuation-lines`, 8 lines; `markup-handler/s437-handler-shape-member-continuation-line`, 4 lines — with the `…-leading-question-colon` pin, these are the dd's 16 conformance ternary + 4 conformance `.` lines). Adopter repos (flogence, giti, 6NZ) migrate via their inboxes.
+
+**Worked example:**
+
+```scrml
+<program>
+    <count> = 0
+    function total(o) {
+        return o.items.
+            map(i => i.price * i.qty).
+            reduce((a, b) => a + b, 0)
+    }
+    function label(o) {
+        const tag = o.rush ?
+            "RUSH " :
+            ""
+        return tag + o.id
+    }
+    function chained(o) {
+        return (o.items
+            .map(i => i.qty)
+            .reduce((a, b) => a + b, 0))     // inside ( ): leading dots are fine
+    }
+    <button onclick={
+        @count = @count + 1; console.log("bumped")
+        @count = @count
+            + 1                             // E-STMT-LEADING-OPERATOR — move `+` to the end of the line above
+    }>go</button>
+</program>
+```
+
+```scrml
+<program>
+    console.log("m")
+    -3102                // E-STMT-LEADING-OPERATOR (was: silently `console.log("m") - 3102`)
+    let a = 1 let b = 2  // E-STMT-MISSING-SEMICOLON
+</program>
+```
 
 ### 7.3 Function Declaration Forms
 
@@ -13357,7 +13873,7 @@ arm-body      ::= '{' statement* lift-stmt statement* '}'
                |  '{' expression '}'       -- value-form sugar for `{ lift expression }`; §17.6.10
 
 lift-stmt     ::= 'lift' expression ';'
-               |  'lift' expression        -- semicolon optional per §3 ASI rules
+               |  'lift' expression        -- the `;` is optional: a newline ends the statement (§7.2.2)
 
 if-binding    ::= ('const' | 'let') identifier '=' if-as-expr
 ```
@@ -22048,6 +22564,10 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-SYNTHESIZED-WRITE | §6.11 | Assignment to an auto-synthesized property (e.g., `@signup.isValid = false`). Synthesized validity surface properties are read-only. See §55 for full validity surface specification. | Error |
 | E-RESET-NO-ARG | §6.8 | `reset()` called with no argument. The `reset` keyword requires an explicit cell argument: `reset(@cell)` or `reset(@compound.field)`. | Error |
 | E-RESET-INVALID-TARGET | §6.8.2 | The `reset` keyword target must be one of the three canonical shapes: `reset(@cell)` (top-level cell), `reset(@compound)` (whole compound), or `reset(@compound.field)` (single-level compound nav). Multi-level compound paths (`reset(@a.b.c)`) are also legal when each segment resolves through the compound-scope chain (§6.3.5 recursive composition). Other expression shapes (literals, function-call results, binary / ternary / unary expressions, bare identifiers without `@`, member chains rooted at non-`@` identifiers) are rejected. (Catalog addition S69 — A1b B22.) | Error |
+| E-RESET-ON-INVALID-ENTRY | §6.8.4 | A `reset-on=[…]` entry is not a declared, mutable, non-derived reactive cell in scope at the declaration (an undeclared name, a non-`@` name, a derived cell), or the list is empty (`reset-on=[]`). The same entry rule `<effect deps=[…]>` follows (`E-LIFECYCLE-007`'s condition). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1: *"Page-reset → a `reset-on=[@a, @b]` modifier on the cell being reset"*). **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
+| E-RESET-ON-CYCLE | §6.8.4 | The static `reset-on=` graph (entry → reset cell) has a cycle — `a` resets on `b` and `b` resets on `a`, or a cell lists itself. The message names every cell on the cycle. Chains are legal; the acyclic graph makes reset chains terminate by construction. **Provenance:** ruling:user-voice-scrml.md S447 "3b: `reset-on=` IS allowed on engine cells, checked against `rule=`" — *"the new rec for engine reset, yes."* (*"The rest of 3b stands: `reset-on=` cycles are a compile error"*). **Nominal / not yet emitted**; lands with the bootstrap. | Error |
+| E-RESET-ON-NOT-WRITABLE | §6.8.4 | `reset-on=` on a cell whose write contract does not admit the reset write — a locked cell (no `replace` grant; §66.11), a derived cell (`const <x>`, a §66 locked cell with a reactive initializer), or a `derived=` engine. The reset is `reset(@self)`, a `replace`. Resolution: make the cell writable (`let`), or drop `reset-on=`. **Provenance:** ruling:user-voice-scrml.md S447 "3b: `reset-on=` IS allowed on engine cells, checked against `rule=`" — *"the new rec for engine reset, yes."* (*"legal only on writable cells"*). **Nominal / not yet emitted**; lands with the bootstrap. | Error |
+| E-RESET-ON-ENGINE-REFUSED | §6.8.4, §51.0.F | `reset-on=` on a cell that carries a transition graph (an engine variable, a §66.13.2 enum value with `rule=` state-children), where some state other than the reset target does not admit the target in its `rule=` (`rule=*` admits all). The reset target is `default=` if present, else the initial value; a non-literal target means every variant its type admits must be admitted (fail closed). The message SHALL name every refusing state and the target. The target state itself needs no self-edge (a self-write is a no-op, §51.0.F.1). When legal, the reset is a real transition: `<onTransition>` handlers fire. **Provenance:** ruling:user-voice-scrml.md S447 "3b: `reset-on=` IS allowed on engine cells, checked against `rule=`" — *"the new rec for engine reset, yes."* (*"EVERY state must admit the reset target in its `rule=`, else a compile error naming the refusing state; the reset is a real transition, so `<onTransition>` handlers fire"*) · supersedes: the DD §14 3b lean *"forbidden on engine cells"* (never ruled). **Nominal / not yet emitted**; lands with the bootstrap. | Error |
 | W-LIFECYCLE-CANDIDATE | §1.5 | A `<program>` body, component body, or file scope has more than 2 reactive boolean cells gating the same UI region. Consider promoting to a `<match>` block (Tier 1) or `<engine>` (Tier 2) for structural exhaustiveness. | Warning |
 | W-MATCH-RULE-INERT | §18.0.2 | `rule=` declared on a state-child inside a `<match>` block. Rules are legal-but-inert in match (read-only on the matched-on value); promote to `<engine>` (Tier 2) to activate enforcement. | Warning |
 | E-MATCH-EFFECT-FORBIDDEN | §18.0.2 | `effect=` attribute used on a state-child inside a `<match>` block. Effects presuppose transitions; transitions don't occur in match. Use `<engine>` (Tier 2). | Error |
@@ -22097,7 +22617,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ENGINE-RULE-INVALID-VARIANT | §51.0.F | A `rule=` value references a variant (`rule=.X` or one of `rule=(.A \| .B)`) that is not in the engine's `for=Type` variants. The `rule=` contract is over the engine type's variants; foreign-type variants are rejected. (Catalog addition S68 — A1b B15.) | Error |
 | E-ENGINE-RULE-LEGACY-SYNTAX | §51.0.F, §51.3 | The legacy event-arrow rule grammar appears on the `<engine>` keyword (state-engine form, §51.0.C). TWO fire-sites: **(a) `rule=` attribute** — a `rule=` value uses the legacy event-arrow form (`rule="event -> Variant"`); on `<engine>`, `rule=` must use one of the three §51.0.F target-only forms: single-target (`rule=.NextVariant`), multi-target (`rule=(.A \| .B \| .C)`), or wildcard (`rule=*`). **(b) whole-body arrow form** — the engine body is a machine-style arrow-rule block (`.From => .To`) instead of state-children. This is NOT valid on the `<engine for=T initial=...>` state-engine form: such a body has no state-child opener, so it half-compiles (the `__scrml_transitions` table emits, but the §51.0.C auto-declared cell init does NOT), leaving the governed cell `undefined` at mount and any driven `<match on=@var>` rendering empty. Rewrite each variant as a state-child carrying its outgoing `rule=`. Whole-body event-arrow rules belong to the named/legacy `<machine>` surface (§51.3, deprecated) — declare `<engine name=Name for=T>` (or the deprecated `<machine name=Name for=T>`, W-DEPRECATED-001) and bind a variable to it via `@var: Name` if a machine is intended. Both fire-sites are §51.0.C `<engine>`-keyword-only: the `<machine>` keyword and the `<engine name=...>` named-machine form (§51.3.2) and derived engines (§51.0.J / §51.9 projection bodies) are EXEMPT. (Catalog addition S68 — A1b B15; whole-body fire-site added 6nz B2 2026-06-24.) | Error |
 | E-HISTORY-NO-INNER-ENGINE | §51.0.N, §51.0.Q | The `history` attribute appears on a state-child whose body does not contain a nested `<engine>`. `history` is meaningful only on composite state-children (those with an inner engine to track). Either add a nested `<engine>` to the body, or remove `history`. (Catalog addition S67 — DD-Harel Approach C Hybrid, Insight 23 grammar decision #2.) | Error |
-| E-INTERNAL-BODY-TOP-DROPPED | §40.8 | (S441 round 4 — the body-top coverage invariant.) **Internal compiler error, fail-closed.** After a `<program>` / `<page>` / `<channel>` body-top run is parsed and checked, a non-whitespace, non-comment byte of it is in neither (a) a statement the compiler compiles nor (b) an error diagnostic: the compiler would otherwise have dropped it silently. **Fire condition:** the post-parse coverage check (§40.8 S441 bullet) finds such a byte. The diagnostic names the text and its line, states that this is a compiler bug, and names both declared-prose forms (`<p>…</p>`, `"…"`) in case the text was meant for display. It is never the intended response to a source shape — any occurrence is a defect in the parser path that dropped the text. *(S441 round 5.)* "Compiles" is the statement's own grammar extent (§40.8: an `import` ends at its specifier string, a `type` alias where its type expression ends, …), not the tokens its parse consumed; a statement that compiles nothing (`404`, `import stuff`) is `E-UNQUOTED-DISPLAY-TEXT`, not this code. A `;` is source formatting. **Does NOT fire** when the run already carries an error diagnostic — that error stops the build, so nothing can ship silently. On `--parser=scrml-native` it fires for a statement whose TRANSLATION into the shared AST lost text — an expression the native bridge turns into an empty escape-hatch, e.g. a tagged template (``tag`x` ``) or a comma sequence inside a call argument (`go((a(), 7))`); pre-existing native bridge gaps, so the text would otherwise vanish. Emitted by `compiler/src/ast-builder.js` `assertBodyTopCoverage` (default front end) and `compiler/native-parser/parse-markup.js` `assertBodyTopCoverageNative` (`--parser=scrml-native`). | Error |
+| E-INTERNAL-BODY-TOP-DROPPED | §40.8 | (S441 round 4 — the body-top coverage invariant.) **Internal compiler error, fail-closed.** After a `<program>` / `<page>` / `<channel>` body-top run is parsed and checked, a non-whitespace, non-comment byte of it is in neither (a) a statement the compiler compiles nor (b) an error diagnostic: the compiler would otherwise have dropped it silently. **Fire condition:** the post-parse coverage check (§40.8 S441 bullet) finds such a byte. The diagnostic names the text and its line, states that this is a compiler bug, and names both declared-prose forms (`<p>…</p>`, `"…"`) in case the text was meant for display. It is never the intended response to a source shape — any occurrence is a defect in the parser path that dropped the text. *(S441 round 5.)* "Compiles" is the statement's own grammar extent (§40.8: an `import` ends at its specifier string, a `type` alias where its type expression ends, …), not the tokens its parse consumed; a statement that compiles nothing (`404`, `import stuff`) is `E-UNQUOTED-DISPLAY-TEXT`, not this code. A `;` is the statement separator (§7.2.2 rule 6 — *superseding* the S441 round-5 "a `;` is source formatting"; provenance: ruling:user-voice-scrml.md S446 "dpa-063 Call 4 = PA recs", 4b (i) "a line-final `;` is legal (it is the same-line separator)"); it is a covered byte, never text. **Does NOT fire** when the run already carries an error diagnostic — that error stops the build, so nothing can ship silently. On `--parser=scrml-native` it fires for a statement whose TRANSLATION into the shared AST lost text — an expression the native bridge turns into an empty escape-hatch, e.g. a tagged template (``tag`x` ``) or a comma sequence inside a call argument (`go((a(), 7))`); pre-existing native bridge gaps, so the text would otherwise vanish. Emitted by `compiler/src/ast-builder.js` `assertBodyTopCoverage` (default front end) and `compiler/native-parser/parse-markup.js` `assertBodyTopCoverageNative` (`--parser=scrml-native`). | Error |
 | E-INTERNAL-RULE-NOT-COMPOSITE | §51.0.O, §51.0.Q | The `internal:rule=` prefix appears on a state-child that is not composite (no nested `<engine>` body). The internal-vs-external distinction is meaningful only when there is an inner engine whose lifecycle would be preserved on internal transitions. Use canonical `rule=` on non-composite state-children. (Catalog addition S67 — DD-Harel Approach C Hybrid, Insight 23 grammar decision #4.) | Error |
 | E-ENGINE-PAYLOAD-ON-UNIT-VARIANT | §51.0.B.1 | Payload-binding attributes appear on an engine state-child whose variant is a unit variant (no payload fields per §14.4). Unit variants have no fields to bind; the bindings are a developer mistake (typically a payload field was removed from the variant declaration but the bindings on the state-child were not updated). Either add fields to the variant declaration (`Variant(field:type, ...)` per §14.4) or remove the binding attributes from the state-child opener. (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
 | E-ENGINE-PAYLOAD-ARITY-MISMATCH | §51.0.B.1 | The number of payload-binding attributes on an engine state-child does not match the variant's payload field count (per §14.4). In the bare-attribute and positional-parenthesized forms, all fields MUST be bound; too few or too many bindings fire this code. Also fires when the bare-attribute or named form contains mixed positional + named bindings within the same state-child opener (the §18.7 mixed-form prohibition extends to this locus). Distinct from §18.7's `E-TYPE-021` because the diagnostic surface differs (state-child attribute list vs match arm pattern); in the parenthesized form `E-TYPE-021` fires for arity / mixed-form (per §18.7 inheritance) and `E-ENGINE-PAYLOAD-ARITY-MISMATCH` is reserved for the attribute-list-based forms. Resolution: list all payload field bindings in declaration order, OR use the named form to bind a subset by field name. (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
@@ -22324,12 +22844,17 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-LIFECYCLE-002 | §6.7.3 | The `cleanup()` argument is a call expression (`cleanup(closeConnection())`), not a function expression. `cleanup()` registers a function to run at scope teardown; passing a call expression invokes it eagerly and stores the return value. Resolution: wrap in an arrow function (`cleanup(() => closeConnection())`) or pass a function reference. (Catalog addition S84 Wave 2 #5; full prose at §6.7.3 line 3240.) (Implemented S310; emitted at `compiler/src/type-system.ts` — `checkCleanupRegistration`.)| Error |
 | E-LIFECYCLE-004 | §6.7.3 | The `cleanup()` first argument is not function-typed. Same family as E-LIFECYCLE-002 but covers non-call non-function shapes (bare values, object literals, etc.). Resolution: pass an arrow function or a function reference. (Catalog addition S84 Wave 2 #5; full prose at §6.7.3 line 3296.) (Implemented S310; emitted at `compiler/src/type-system.ts` — `checkCleanupRegistration`.)| Error |
 | E-LIFECYCLE-005 | §6.7.3 | A `cleanup()` call appears inside a function EXPLICITLY annotated as server-side (§12). Cleanup belongs to client-side scope teardown; server functions have no client-side lifecycle. Resolution: hoist the cleanup registration to the calling client scope, or remove the server annotation if the function is actually client-side. (Catalog addition S84 Wave 2 #5; full prose at §6.7.3 line 3300.) **Not yet emitted (S310).** Deliberately deferred from the S310 `cleanup()` wave: its trigger is a function EXPLICITLY annotated `server`, and that modifier is itself deprecated language-wide (`W-DEPRECATED-SERVER-MODIFIER`, §12.2 makes placement INFERRED) — so this code guards a form on its way out. Revisit if the modifier survives to 1.0.| Error |
-| E-LIFECYCLE-006 | §6.7.5 | A `when` block body writes to a variable that appears in its own `dep-list`. This creates an infinite re-trigger loop: writing to the trigger variable would immediately re-fire the effect. Resolution: remove the variable from the `dep-list`, or restructure to avoid the self-write. (Catalog addition S84 Wave 2 #5; full prose at §6.7.5 lines 3374-3380.) | Error |
-| E-LIFECYCLE-007 | §6.7.5 | A `when` block `dep-list` entry is not a declared mutable `@variable` in scope at the point of the `when` statement, OR is a `const <name>` derived variable (which is read-only and re-evaluates implicitly via the dependency graph — listing it as a trigger is meaningless). Resolution: drop the entry, or change the source from a const-derived to a mutable `@variable`. (Catalog addition S84 Wave 2 #5; full prose at §6.7.5 lines 3410, 3476-3489.) | Error |
+| E-LIFECYCLE-006 | §6.7.4 | **Superseded S447 by `E-EFFECT-WRITES-STATE`** — a reactive-effect body that writes a cell in its own dependency list is one case of an effect writing reactive state, which is now an error for every cell. Pre-S447 meaning: a `when` block body writes to a variable that appears in its own `dep-list` (an immediate re-trigger loop). Retained as a **reserved** code, not a compile diagnostic: no front end emits it at compile time; impl#1's runtime re-run cap prints the string in a console message (`compiler/src/runtime-template.js`), which is impl#1's frozen pre-S447 behaviour, filed as `g-impl1-when-effect-divergence-s447`. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1 = (b); "E-006 … subsumed" per the DD §5 (b) the call adopted) · **supersedes:** the pre-S447 row "A `when` block body writes to a variable that appears in its own `dep-list` … Resolution: remove the variable from the `dep-list`". (Catalog addition S84 Wave 2 #5.) | Error (reserved) |
+| E-LIFECYCLE-007 | §6.7.4 | A dependency entry of a reactive effect — an `<effect deps=[…]>` entry, or a `dep-list` entry of the soft-deprecated `when … changes` form — is not a declared mutable `@variable` in scope at the effect, OR is a derived cell (`const <name>` / a §66 locked cell with a reactive initializer), which has no change event of its own — listing it as a trigger is meaningless. Resolution: drop the entry, or list the mutable cells the derived value reads. (Catalog addition S84 Wave 2 #5.) **Amended S447:** extended from the `when` dep-list to the `<effect deps=[…]>` list (§6.7.4). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* · supersedes: the `when`-only wording. **Status:** emitted for the keyword form's derived-cell limb by impl#1 at `compiler/src/codegen/index.ts` (the §6.7.4 EC-1 check); the `<effect deps=[…]>` surface is **Nominal / not yet emitted** — lands with the bootstrap build (`g-bootstrap-effect-reset-on-owed`). | Error |
+| E-EFFECT-WRITES-STATE | §6.7.4 | A reactive effect body — an `<effect deps=[…]>` body, or a soft-deprecated `when … changes { }` body — **writes a reactive cell, directly or through a called function**: an `=`-family assignment, a sequence edit, `reset(@x)`, an engine write or `.advance`, `<#id>.refetch()`; or a call to a scrml function (incl. a server function writing a §52 server cell) whose transitive write summary is non-empty; or a function value appearing in the body whose summary is non-empty (§6.7.4 rules 1–3). An effect drives the outside world; cascades between effects are impossible by construction because none can write. The message SHALL name the written cell, the call chain for an indirect write, and the fix by shape: a reset to the default → `reset-on=[…]` on the cell (§6.8.4); a stored call result → a write `<request>` (§6.7.7); otherwise → move the write into the code that changes the trigger, or derive the value (§6.6). Subsumes `E-LIFECYCLE-006`. Direction of change: newly-rejecting (DD-measured migration: 4 sample sites). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1 = (b): *"a reactive effect may NOT write any reactive cell, directly or through a called function — compile error"*; 1a: *"named error + a message naming the fix"*) · dd:`scrml-support/docs/deep-dives/when-reactive-effect-fit-2026-10-02.md` §5 (b). **Nominal / not yet emitted** — impl#1 is frozen for language semantics (S447) and accepts writing `when` bodies (`g-impl1-when-effect-divergence-s447`); lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
+| E-EFFECT-WRITE-UNPROVEN | §6.7.4 | A reactive effect body reaches code whose reactive writes the compiler cannot determine — a `^{ }` meta block (meta code can write cells by name, §22 `meta.set`), a call through a function-typed binding not resolvable to a known set of scrml functions, or any call site the write-summary analysis cannot resolve (§6.7.4 rule 4). The no-write rule fails CLOSED. A host (`.js`/`.ts`) or platform call is NOT this code — host code cannot name a scrml cell (rule 5). The message SHALL name the unresolvable site and why. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1 = (b)) · the fail-closed reading is the PA's, by the §6.7.7.1 rule 1 precedent ("unclassifiable = write"). **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
+| E-EFFECT-NO-DEPS | §6.7.4 | An `<effect>` has no `deps=` attribute, or `deps=[]`. An effect does not run on mount (S447 2b), so without a dependency it can never run. (The keyword form's empty dep-list was a syntax error.) Resolution: list the cells whose changes should run it; logic that runs once belongs in `on mount { }` / a bare expression. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (2b: *"`<effect>` does NOT run on mount"*). **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
+| W-WHEN-EFFECT-DEPRECATED | §6.7.4, §63.7 | The keyword statement `when @a changes { … }` / `when (@a, @b) changes { … }` — SOFT-DEPRECATED (§63.1 Stage 1) in favour of `<effect deps=[@a, @b]>${ … }</>`. It parses identically to the `<effect>` (same trigger, no mount run, scope, newest-run-wins, and the same no-write rule). The message names the canonical form, `scrml fix`, and §6.7.4. The `scrml fix` rule rewrites mechanically when the body writes no reactive cell; a writing body is `E-EFFECT-WRITES-STATE` and has no mechanical rewrite. Not raised for the worker / nested-program event hooks `when message(…)` / `when … from <#w>` (§43, §46), which are not retired. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 2: *"The keyword `when (…) changes reads … { }` form retires through §63."*). **Nominal / not yet emitted** — impl#1 compiles the keyword form unchanged (frozen); lands with the bootstrap. | Warning |
+| E-WHEN-EFFECT-DEPRECATED | §6.7.4, §63.7 | **Reserved** (§63.2) end-of-window code for the `when … changes { }` keyword statement. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 2). | Error |
 | E-LIFECYCLE-011 | §28.1 | The `<timer>` or `<poll>` `running` attribute references an undeclared or non-`@` variable. The `running=@flag` form must point at a declared reactive variable to be meaningful. (Catalog addition S84 Wave 2 #5; full prose at §28.1 line 3639.) | Error |
 | E-LIFECYCLE-013 | §28.5 | `animationFrame()` called inside a `<timer>` or `<poll>` body. The two scheduling primitives compose pathologically — `animationFrame()` runs once per frame while the parent `<timer>`/`<poll>` runs on its own interval; the resulting cadence is undefined. Resolution: move `animationFrame()` out of the `<timer>`/`<poll>` body, or remove the parent if the per-frame work is the intent. (Catalog addition S84 Wave 2 #5; full prose at §28.5 line 4286.) | Error |
 | E-LIFECYCLE-014 | §28.5 | `animationFrame()` called inside a server-escalated function. The function is run per-frame on the client; there is no server-side `animationFrame` analogue. (Catalog addition S84 Wave 2 #5; full prose at §28.5 line 4288.) | Error |
-| E-LIFECYCLE-016 | §6.7.6 | A `when` block appears syntactically inside another `when` block body. Nested `when` is rejected — the inner block's trigger semantics are not defined. Resolution: hoist the inner `when` to the parent scope, or restructure as a single `when` with a combined `dep-list`. (Catalog addition S84 Wave 2 #5; full prose at §6.7.6 lines 3350, 3498.) | Error |
+| E-LIFECYCLE-016 | §6.7.4 | An `<effect>` — or a soft-deprecated keyword `when … changes { }` — appears inside the body of another reactive effect. An effect body is logic, not a markup position, and an effect inside it would have no defined trigger or lifetime. Resolution: declare the inner effect as a sibling `<effect>` with its own `deps=`. (Catalog addition S84 Wave 2 #5.) **Re-expressed S447** for `<effect>`. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* · supersedes: the pre-S447 "`when` block appears syntactically inside another `when` block body" wording. **Nominal / not yet emitted** — impl#1 fails closed on the keyword shape with `E-CODEGEN-INVALID-LOGIC` instead (`g-impl1-when-effect-divergence-s447`); lands with the bootstrap. | Error |
 | E-LIFECYCLE-019 | §28.4 | A `<request>` element is self-closing (no body). A `<request>` body declares the assignment that captures the fetch result; without a body the element has no observable effect. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3880.) | Error |
 | E-LIFECYCLE-020 | §28.4 | A `<request>` body contains more than one assignment. `<request>` is single-assignment-by-design: the lone `@var = expr` form captures the fetch result; multiple assignments would race. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3881.) | Error |
 | E-LIFECYCLE-021 | §28.4 | A `<request>` body contains logic but no `@var = expr` capture. The fetch result is silently discarded. Resolution: add the assignment (`@var = fetchResult(...)`) or remove the logic. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3882.) | Error |
@@ -22338,15 +22863,15 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-LIFECYCLE-003 | §6.7.10, §28.1 | A `<timer>` or `<poll>` is declared inside a `for`/`lift` loop body. N loop iterations produce N independent ticking instances; the resulting count and lifetime are usually unintended. Resolution: hoist the element to outside the loop, or confirm via a comment that N instances is intentional. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4323.) | Warning |
 | W-LIFECYCLE-004 | §28.1 | A `<poll>` body contains no function call. A poll with a body that mutates only local variables has no observable effect; the warning surfaces probable dead code. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4324.) | Warning |
 | W-LIFECYCLE-005 | §28.1 | A `<timer>` or `<poll>` body calls a server function and the `interval` is shorter than 500 ms. High-frequency server polling is almost always a footgun (latency variance, retry storms, cost). Resolution: relax the interval, switch to `<channel>` for server-push, or annotate the long-polling pattern explicitly. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4325.) | Warning |
-| W-LIFECYCLE-006 | §6.7.5 | A `when` block's sole effect is a single `@variable` assignment whose RHS is a pure `@variable` expression — the pattern is strictly inferior to a derived value (`const <name> = expr`), which the dependency-graph machinery wires automatically. Resolution: convert to a derived const. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4326.) | Warning |
+| ~~W-LIFECYCLE-006~~ | §6.7.4 | **Retired S447 — moot.** It warned that a `when` body whose sole effect is a single `@variable` assignment with a pure `@variable` right-hand side should be a derived value. Under the S447 no-write rule that body is `E-EFFECT-WRITES-STATE`, whose third fix text ("derive the value") carries the guidance. No front end ever emitted it. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* · **supersedes:** the W-LIFECYCLE-006 row (and the S446 accumulator exclusion proposed in PR #1227, unmerged). (Catalog addition S84 Wave 2 #5.) | — |
 | W-LIFECYCLE-008 | §28.1 | A `<poll>` body contains multiple assignment expressions. `<poll>` captures `<#id>.value` from a single assignment; multiple assignments leave `.value` as `not`. Resolution: collapse to a single assignment, or wrap the multi-step computation in a function and assign the result. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4328.) | Warning |
 | W-LIFECYCLE-009 | §6.7.3 | A `cleanup()` registration appears inside a `for` loop body. N loop iterations produce N independent cleanup registrations, all of which fire at scope teardown. Resolution: hoist the `cleanup()` outside the loop, or confirm via a comment that N registrations is intentional. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4329; subsumes the pre-refactor E-LIFECYCLE-003 form.) | Warning |
-| W-LIFECYCLE-010 | §6.7.5 | A `when` block has an empty body. The trigger fires but does no work; the registration has no observable effect. Resolution: add a body or remove the `when` block. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4330.) | Warning |
+| W-LIFECYCLE-010 | §6.7.4 | A reactive effect has an empty body — `<effect deps=[@x]/>`, an empty `${ }`, or a soft-deprecated `when … changes {}`. The trigger fires but does no work. Resolution: add a body or remove the effect. (Catalog addition S84 Wave 2 #5.) **Amended S447** for `<effect>`. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."*. **Nominal / not yet emitted** (no impl#1 emitter; lands with the bootstrap). | Warning |
 | W-LIFECYCLE-011 | §28.4 | A `<request>` body assigns to a `@variable` that is never read in any enclosing markup. The fetch result is effectively dead. Resolution: drop the assignment, or wire it into rendered output. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3885.) | Warning |
 | W-LIFECYCLE-012 | §28.4 | `<#id>.refetch()` called inside a `<timer>` or `<poll>` body. `<request>` already wires re-fetch via `deps=` and auto-runs on mount; manual `.refetch()` from a parallel ticking primitive races against the auto-machinery. Resolution: use `deps=` to drive re-fetches, or remove the parent timer/poll. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3886.) | Warning |
 | W-LIFECYCLE-013 | §28.4 | A `<request>` body has no reactive `@variable` reads on its RHS AND no explicit `deps=[]` annotation. The request will fire once-on-mount with no re-fetch policy — likely under-specified. Resolution: add `deps=[]` to confirm fetch-once intent, or wire a reactive dep into the body. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3887.) | Warning |
 | W-LIFECYCLE-014 | §28.4 | A `<request>` element is declared inside a `for`/`lift` loop body. N loop iterations produce N independent in-flight requests on each re-render. Resolution: hoist outside the loop, or use `<#id>.refetch()` on a single hoisted instance with `deps=` carrying the loop key. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3888.) | Warning |
-| H-LIFECYCLE-001 | §6.7.5 | A `@variable` is read inside a `when` body but is not listed in the block's `dep-list`. Hint only — the pattern is correct and common (the body reads the current value at fire time without making that variable a trigger). Off by default. Suppressed per-read via the `reads @var` annotation in the `when` header. (Catalog addition S84 Wave 2 #5; full prose at §6.7.5 lines 3415-3430.) | Hint |
+| ~~H-LIFECYCLE-001~~ | §6.7.4 | **Retired S447** with the `reads` clause. It was an off-by-default hint that a `@variable` read in a `when` body is not in its `dep-list`, suppressible only by a `reads @var` header clause that never parsed in any implementation. Reading an unlisted cell is the dominant, correct pattern and needs no annotation. Never emitted. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (PA reading, veto window: the retirement follows from `reads` retiring) · **supersedes:** the H-LIFECYCLE-001 row. (Catalog addition S84 Wave 2 #5.) | — |
 | E-TIMEOUT-003 | §28.5 | A `<timeout>` element is used outside any element scope (file level without a `<program>` root, or directly inside a module-level `${}` block with no enclosing element tag). `<timeout>` requires a parent scope to arm/disarm with. (Catalog addition S84 Wave 2 #5; full prose at §28.5 line 4106.) | Error |
 | W-TIMEOUT-001 | §28.5 | A `<timeout>` element is declared inside a `for`/`lift` loop body. N loop iterations produce N independent armed timeouts. Resolution: hoist outside the loop, or confirm via a comment that N timeouts is intentional. (Catalog addition S84 Wave 2 #5; full prose at §28.5 line 4347.) | Warning |
 | E-REACTIVE-006 | §6.5 | A mutating array method (`push`, `pop`, `shift`, `unshift`, `splice`, `sort`, `reverse`, etc.) is called on a non-reactive (non-`@`) array variable. Mutating-method interception is part of the reactive-array contract (§6.5); calling those methods on a plain `let`-bound array silently breaks fine-grained reactivity. Resolution: declare the array as `@items` (reactive cell) or use the non-mutating spread form. (Catalog addition S84 Wave 2 #5; full prose at §6.5 lines 2258-2268.) | Error |
@@ -22361,7 +22886,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-USE-001 | §41.5 | Two `use` declarations bring the same name into markup scope. The later declaration wins; the warning surfaces the silent shadowing so the developer can confirm intent or rename. (Catalog addition S84 Wave 2 #5; full prose at §41.5 lines 17371, 17466.) | Warning |
 | W-IMPORT-001 | §21.3 | Two `import` statements import the same name into logic scope in the same file. The later import wins; the warning surfaces the silent shadowing. Resolution: rename one of the imports, or remove the duplicate. (Catalog addition S84 Wave 2 #5; full prose at §41.5 line 17468.) | Warning |
 | ~~E-EXHAUST-001~~ | §18 | **Retired 2026-03-27 (§18 TS-C-gate review).** The PIPELINE.md Stage 6 alias for the non-exhaustive-match-over-union case is now `E-TYPE-020`. All references replaced. (Catalog addition S84 Wave 2 #5; retirement note at §18 line 10023.) | — |
-| E-LIN-004 | §6.7.12, §35.5 | A `lin` variable is referenced inside a recurring execution context (`when` body, `<timer>` body, `<timeout>` body, `animationFrame` callback). The recurring-context form of E-LIN-002: a single textual reference in a callback that fires N times consumes the binding N times. (`<poll>` and `<request>` are DEFERRED contexts → **E-LIN-006**, not recurring — corrected S263 to match impl `type-system.ts` + §35.5 + the E-LIN-006 row @18321.) (Catalog addition S84 Wave 2 #5; full prose at §6.7.12 line 4332 + §35.5 lines 4689-4690.) (Emitted at `compiler/src/type-system.ts`.)| Error |
+| E-LIN-004 | §6.7.12, §35.5 | A `lin` variable is referenced inside a recurring execution context (an `<effect>` body — formerly a `when` body, S447 §6.7.4 — a `<timer>` body, a `<timeout>` body, an `animationFrame` callback). The recurring-context form of E-LIN-002: a single textual reference in a callback that fires N times consumes the binding N times. (`<poll>` and `<request>` are DEFERRED contexts → **E-LIN-006**, not recurring — corrected S263 to match impl `type-system.ts` + §35.5 + the E-LIN-006 row @18321.) (Catalog addition S84 Wave 2 #5; full prose at §6.7.12 line 4332 + §35.5 lines 4689-4690.) (Emitted at `compiler/src/type-system.ts`.)| Error |
 | E-PROG-001 | §40 | A `<program>` element has an ambiguous attribute combination — the compiler cannot decide the execution context (e.g., a worker-shaped attribute combined with a route-shaped attribute). (Catalog addition S84 Wave 2 #5; full prose at §40 line 18036.) | Error |
 | E-PROG-002 | §40 | A `<program>` element is missing a required attribute for its detected execution context (e.g., a route-context program with no `name=`, a worker-context program with no entry point). (Catalog addition S84 Wave 2 #5; full prose at §40 line 18037.) | Error |
 | E-PROG-003 | §40.4 | A reference inside a nested `<program>` reaches a parent-scope binding. Nested programs are fully isolated — no bindings, types, `use`, or `import` declarations propagate across the `<program>` boundary. Resolution: declare the binding inside the nested program, or import it via a `use foreign:` declaration. (Catalog addition S84 Wave 2 #5; full prose at §40 line 17980.) | Error |
@@ -22516,8 +23041,9 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | Code | Section | Trigger | Severity |
 |---|---|---|---|
 | E-STMT-UNEXPECTED-TOKEN | §4 | Unexpected token — no statement begins here. Core statement-grammar parse error. | Error |
-| E-STMT-MISSING-SEMICOLON | §4 | Expected `;` or a newline to end the statement. | Error |
-| E-STMT-NO-EFFECT | §40.8 | (S445 item 2.) An expression statement at the top of a `<program>` / `<page>` / `<channel>` body has **no effect** — it contains no call, no assignment, no `++` / `--`, no `send` (e.g. bare `@count`, `@a == 1`, `"Total: " + @count`, `x => y`). It is valid code that does nothing, so it is reported as that, not as `E-UNQUOTED-DISPLAY-TEXT`; the message names the declared forms for showing a value (`<span>${@count}</span>`, `"${@count}"`). A literal-only statement (`404`) is `E-UNQUOTED-DISPLAY-TEXT`; an untargeted label is `E-UNQUOTED-DISPLAY-TEXT` on the label. Emitted at `compiler/src/ast-builder.js` via `noEffectError` (default front end) and `compiler/native-parser/parse-markup.js` via `noEffectNativeMessage` (native); the judgment is the shared `compiler/native-parser/body-top-coverage.js` `liveExprHasEffect`. | Error |
+| E-STMT-MISSING-SEMICOLON | §4, §7.2.2 | Expected `;` or a newline to end the statement. *(S446, dpa-063 — §7.2.2 rule 7 makes this THE code for two statements on one line with no `;` between them (`let a = 1 let b = 2`), in every statement list and every front end.)* Emitted at `compiler/native-parser/parse-stmt.scrml` (native) and `compiler/src/ast-builder.js` (default parser — body-top and statement-run cases). **Spec-ahead for the remaining loci** — the bootstrap accepts the same-line pair silently (`g-bootstrap-two-statements-one-line-accepted`); lands with the §7.2.2 build. **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — *"b, your rec"* · ruling:user-voice-scrml.md S284 (conformant reject). | Error |
+| E-STMT-LEADING-OPERATOR | §7.2.2 | (S446, dpa-063.) At statement level, a line STARTS with a token that can only continue an expression — a binary operator (incl. `+` / `-`; not `/`, which starts a regex, nor `<`, which starts markup), `.`, `?.`, `?`, `:`, `=` / a compound assignment, `,`, `=>`, `:>`. The line is never joined to the one above and never read as a new statement. The message SHALL suggest: *"move the operator to the end of the previous line, or wrap the expression in `( )`"*. **Does NOT fire:** inside an open `(` / `[` / expression-position `{` / template literal / markup-as-value element (newlines are whitespace there, §7.2.2 rule 4); on an arm head (`.Variant :>`, `| ::E`) directly inside a `match` / `!{}` body (arm level, decided by position); on a line-leading `else` after an `if` body's `}`; inside `?{}` / `_{}` / `#{}`. **Nominal / spec-ahead — not yet emitted by any front end**; lands with the §7.2.2 build (`g-dpa063-termination-unbuilt-bootstrap`, `…-impl1-legacy`, `…-impl1-native`). Pins that flip to negatives of this code: `conformance/cases/markup-handler/s437-r4-continuation-leading-plus`, `…-expr-form-leading-plus`, `…-leading-question-colon`; two further positive cases carry leading-operator lines and must be rewritten to the trailing form (or flipped) when this lands: `markup-handler/s437-handler-shape-ternary-continuation-lines` (leading `?` / `:`) and `markup-handler/s437-handler-shape-member-continuation-line` (leading `.concat`). **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — *"b, your rec"* · S446 "dpa-063 Call 4" — *"I do agree with your recs, BUT, every other language that I know allows . chaining to start a line. …"* (4a (i): a leading `.` / `?.` is an error, no named exception) · S446 "dpa-063 Call 5" — *"(i), your rec, and yes on +/-"* (leading `+` / `-` in the set) · dd:`scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md`. | Error |
+| E-STMT-NO-EFFECT | §40.8, §7.2.2 rule 9 | (S445 item 2; **language-wide since S446, dpa-063 Call 5**.) An expression statement in ANY statement list (§7.2.2 "Terms": a function / `fn` body, an inline handler block, a `${ … }` logic block, a `^{ … }` body, a `when` / `on mount` body, a code-default body, an arm or if-as-expression block, a `<program>` / `<page>` / `<channel>` body top) has **no effect** — it contains no call (any call, a pure function's too), no assignment, no `++` / `--`, no `send` (nor S445's listed equivalents: `new`, a tagged template, `delete`, a `?{ … }` block, `reset(…)`) — e.g. bare `@count`, `@a == 1`, `"Total: " + @count`, `x => y`. It is valid code that does nothing, so it is reported as that; the message names the declared forms for showing a value (`<span>${@count}</span>`, `"${@count}"`). **Does NOT fire:** on a statement whose value the NEXT statement reads through `~` (§32.2 — used, not dead; `E-TILDE-002` is suppressed on a statement this code fires on); on a value position, which is not an expression statement — a markup `${expr}` interpolation in a render position (§17.6.10), a §18.5 arm result, a value-form arm, a `:`-shorthand body, a bare handler value, a `lift` / `return` / `fail` operand. A `${ @count }` logic block read as statements is NOT a value position and fires (S445 #2's reach: everywhere). **Body top vs elsewhere:** at a `<program>` / `<page>` / `<channel>` body top a literal-only statement (`404`) and an untargeted label are `E-UNQUOTED-DISPLAY-TEXT` (undeclared display text), not this code; in every other statement list both ARE this code (the label is reported on the label). An effectful orphan after `return` (`return⏎f()`) is not this code and stays OPEN (§7.2.2 rule 8). **Status:** emitted at the body top — `compiler/src/ast-builder.js` via `noEffectError` (default front end) and `compiler/native-parser/parse-markup.js` via `noEffectNativeMessage` (native); the judgment is the shared `compiler/native-parser/body-top-coverage.js` `liveExprHasEffect`. **Spec-ahead in every other statement list** — lands with the §7.2.2 build (`g-stmt-no-effect-language-wide-unbuilt`). **Provenance:** ruling:user-voice-scrml.md S445 item 2 · ruling:user-voice-scrml.md S446 "dpa-063 Call 5 = (i)" — *"(i), your rec, and yes on +/-"* (supersedes the body-top-only scope of S445 #2) · ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (readings 7, 8, 9 — value positions incl. the `${ @count }` reach, literal / label outside the body top, `return⏎f()` OPEN). | Error |
 | E-STMT-UNCLOSED-BLOCK | §4 | Expected `}` to close a block statement. | Error |
 | E-STMT-STRAY-ELSE | §4 | `else` with no matching `if`. | Error |
 | E-STMT-BINDING-NAME | §4 | Expected an identifier in a binding position. | Error |
@@ -25468,9 +25994,19 @@ The nested `<program>` carries `title="InnerOops"`. The compiler emits `W-PROGRA
   - A **bare write** at this body-top (`@x = 1`) is an ordinary write in a logic context and is treated exactly as the same write inside an explicit `${ … }` at that position (§6.1 governs a write to an undeclared cell there, as it does in the explicit form). `E-WRITE-NOT-IN-LOGIC-CONTEXT` is **retired** for `<program>` / `<page>` / `<channel>` bodies — the only locus it had.
   - **Coverage invariant (S441 round 4).** Every non-whitespace, non-comment byte of a bare run at this body-top SHALL end up in exactly one of: (a) a statement the compiler compiles, or (b) an error diagnostic. No byte is dropped silently. The compiler SHALL check this after parsing the run (in every front end) rather than rely on the parser having no drop path: a byte that is in neither is `E-INTERNAL-BODY-TOP-DROPPED` (§34), an internal compiler error that stops the build. "Compiled" is measured, not assumed — a byte the tokenizer produced no token for is not compiled even when a statement's span encloses it, and a statement whose head expression was parsed as a valid prefix with the rest discarded is not compiled unless an error reports the discarded text. The per-shape recognizers that turn a run into the right statement or `E-UNQUOTED-DISPLAY-TEXT` are how the common shapes get a precise diagnostic; the check is what makes an unanticipated shape loud instead of lost. *(S441 round 5.)* **A statement covers only the tokens it compiles**, measured by that statement's own grammar, not by the tokens its parse consumed: an `import` ends at its module-specifier string; an `export` ends where what it exports ends (a re-export at its specifier string, a declaration where that declaration ends); a `type` alias ends where its type expression ends (§7.5 `type-expr`, which has no juxtaposition — `type N = number extra` compiles `number` only); a function declaration requires its `{ … }` body, and covers its head (name, parameters, return type, `!` marker) and that body only — a token between the head's end and the body's `{` (`-> number oops {`) is `E-UNQUOTED-DISPLAY-TEXT` *(S441 round 5c)*. The tokens after the end, on the statement's own line, are `E-UNQUOTED-DISPLAY-TEXT`; tokens it consumed from later lines are parsed as the statements that follow it. A statement whose grammar is not satisfied at all (`import stuff`, `import "./x.js"`, `type here`, `export data`, `export default …`, `export * as ns from …`, `fn heading`) compiles nothing and is `E-UNQUOTED-DISPLAY-TEXT` on its line. A type's right-hand side is one type expression whatever its first operand — `type L = { a: number }[]` and `type U = { … } | { … }` read whole — and a function's `-> T` / `: T` return type is read as a type before its `{ … }` body is looked for *(S441 round 5b)*. A front end that builds its own tree and translates it into the shared AST (`--parser=scrml-native`) measures "compiled" on the TRANSLATION: a statement whose translation holds an expression the translation could not carry (an empty escape-hatch — a tagged template, a comma sequence inside a call argument) is not compiled, and fails closed. When the run already carries an error diagnostic the build is stopped by it, and the check adds no `E-INTERNAL-BODY-TOP-DROPPED` beside it.
   - **Body-top code that does nothing is a compile error.** A bare expression statement at this body-top built only from literals and operators — `404`, `-1`, `true`, `[1, 2]`, `"a" + 1` — computes nothing observable, so it compiles nothing: it is `E-UNQUOTED-DISPLAY-TEXT` (it is almost always display text written without its declaration — `<p>404</p>` / `"404"`). So is a label on a statement that is not a loop (`Total: 42`, `Docs: https://…`): a label is meaningful only as a `break` / `continue` target (§49), and the statement it labels (`42`) does nothing. *(The last sentence of this bullet as written in round 5 — "a bare expression statement that names something — `@count`, `step()`, `a.b` — is evaluated … and is not affected" — is superseded by the S445 bullet below for everything but a call.)*
-  - **An expression statement with no effect is a compile error** *(S445)*. *"Any expression statement with no effect is an error. An effect means a call, an assignment, `++`/`--`, or a `send`. Bare `@count` becomes an error too, which replaces the `@count` example in S441 (3), and a label nothing targets is also an error. … Calls always count as effects, even calls to pure functions."* At this body-top a bare expression statement SHALL contain an effect — a call (any call: a pure function, a method, `send(…)`, `new`, a tagged template), an assignment (compound too, anywhere inside the expression), `++` / `--`, `delete`, a `?{ … }` SQL block, or `reset(…)`; a lambda's body is not evaluated by the statement and does not count. Otherwise it is **`E-STMT-NO-EFFECT`** (§34): `@count`, `@o.a`, `@a == 1`, `"Total: " + @count`, `!@x`, `typeof @x`, `@x ? 1 : 2`, `"abc".length`, `x => y`, `this`. A statement built only from literals (`404`) stays `E-UNQUOTED-DISPLAY-TEXT` (the bullet above — it is almost always undeclared display text). A label that no `break` / `continue` targets is an error on the label (`E-UNQUOTED-DISPLAY-TEXT` on `Instructions:` in `Instructions:⏎while (…) { … }`); the loop itself compiles. `reset(…)` is a cell write (§6.8) and counts. An expression the structured parser did not model (a regex literal, `this`, a block-body lambda) is re-parsed with the front end's own expression grammar and has an effect only if it contains one of the above — fail-closed *(S441 round 5d)*: `/abc/` alone is `E-STMT-NO-EFFECT`; text that does not parse whole counts as an effect (it has its own diagnostic). Two or more no-effect statements on one line (`@a; @b`) are one `E-STMT-NO-EFFECT`.
+  - **An expression statement with no effect is a compile error** *(S445)*. *"Any expression statement with no effect is an error. An effect means a call, an assignment, `++`/`--`, or a `send`. Bare `@count` becomes an error too, which replaces the `@count` example in S441 (3), and a label nothing targets is also an error. … Calls always count as effects, even calls to pure functions."* At this body-top *(and, since S446, in every statement list — see the "language-wide" bullet below)* a bare expression statement SHALL contain an effect — a call (any call: a pure function, a method, `send(…)`, `new`, a tagged template), an assignment (compound too, anywhere inside the expression), `++` / `--`, `delete`, a `?{ … }` SQL block, or `reset(…)`; a lambda's body is not evaluated by the statement and does not count. Otherwise it is **`E-STMT-NO-EFFECT`** (§34): `@count`, `@o.a`, `@a == 1`, `"Total: " + @count`, `!@x`, `typeof @x`, `@x ? 1 : 2`, `"abc".length`, `x => y`, `this`. A statement built only from literals (`404`) stays `E-UNQUOTED-DISPLAY-TEXT` (the bullet above — it is almost always undeclared display text). A label that no `break` / `continue` targets is an error on the label (`E-UNQUOTED-DISPLAY-TEXT` on `Instructions:` in `Instructions:⏎while (…) { … }`); the loop itself compiles. `reset(…)` is a cell write (§6.8) and counts. An expression the structured parser did not model (a regex literal, `this`, a block-body lambda) is re-parsed with the front end's own expression grammar and has an effect only if it contains one of the above — fail-closed *(S441 round 5d)*: `/abc/` alone is `E-STMT-NO-EFFECT`; text that does not parse whole counts as an effect (it has its own diagnostic). Two or more no-effect statements on one line (`@a; @b`) are one `E-STMT-NO-EFFECT`.
   > **Provenance:** ruling:user-voice-scrml.md S445 item 2 · supersedes: ruling:user-voice-scrml.md S441 item (3) (the `@count` example only) · direction-of-change: **newly-rejecting** (measured: `docs/changes/s441-declared-prose-body/progress.md`, round 5c).
   > **Provenance:** ruling:user-voice-scrml.md S443 item 4 (*"Body-top code that does nothing (`import stuff`, a bare `404`): should it be an error? I recommend yes."* → RULED: *"compile error (the declared-prose coverage rule: a node covers only tokens it compiles)"*) · direction-of-change: **newly-rejecting** (measured: `docs/changes/s441-declared-prose-body/progress.md`, round 5).
+  - **`E-STMT-NO-EFFECT` is language-wide** *(S446, dpa-063 Call 5)*. The S445 rule above is NOT a body-top rule: it SHALL hold in **every statement list** (§7.2.2 "Terms") — a function or `fn` body, an inline handler block, a `${ … }` logic context, a `^{ … }` meta body, a `when` / `on mount` body, a code-default body (engine state-child, `<match>` block-form arm), an arm or if-as-expression block, and this body top. This is the one home of the rule; §7.2.2 rule 9 and §34 point here.
+    - **Effect** (unchanged from S445): a call — any call, a pure function's too —, an assignment (compound too), `++` / `--`, or a `send`; with S445's listed equivalents (`new`, a tagged template, `delete`, a `?{ … }` SQL block, `reset(…)`). A lambda's body is not evaluated by the statement and does not count.
+    - **Used through `~`, not dead.** An expression statement whose value the NEXT statement reads through `~` (§32.2) is used, and is not `E-STMT-NO-EFFECT`: the rule is "no effect AND its value is never read through `~`". (`@a * 2⏎let d = ~` is legal.) When `E-STMT-NO-EFFECT` fires, `E-TILDE-002` (§32.5) SHALL NOT be reported for the same statement.
+    - **Not expression statements** (value positions — the value IS used, so the rule does not apply): the expression of a markup `${ … }` interpolation in a render position (§17.6.10); a match arm's single-expression body and a block arm's result expression (§18.5); an if-as-expression value-form arm `{ expression }` (§17.6.10); a `:`-shorthand body (§4.14); a bare handler value (§5.2.3); a `lift` / `return` / `fail` operand. *(⚑ S446 also recorded bryan's stated position that implicit tail values are rejected in principle and `lift` is the explicit form; that position is NOT ruled into §18.5 here — this bullet only declines to call a §18.5 result expression dead.)* A `${ … }` is a value position ONLY as a markup interpolation in a render position; a `${ … }` logic block whose content is read as statements is a statement list, so `${ @count }` there is `E-STMT-NO-EFFECT` (S445 #2's reach question — settled: yes, everywhere).
+      > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 7, ACCEPTED: *"value positions are not expression statements (so `${ @count }` as a logic-block STATEMENT is E-STMT-NO-EFFECT — settles the S445 #2 reach question: yes, everywhere)"*).
+    - **Outside this body top**, the body-top-only shapes in the bullets above do not apply: a literal-only statement (`404`, `[]`) is `E-STMT-NO-EFFECT` (there is no undeclared-display-text reading outside a code-default body's display positions), and a label that no `break` / `continue` targets is `E-STMT-NO-EFFECT` on the label. In a code-default body the §4.18 display-literal rule still decides first what is a display item.
+      > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 8, ACCEPTED: *"literal / untargeted label outside the body top = E-STMT-NO-EFFECT"*; at the body top both stay `E-UNQUOTED-DISPLAY-TEXT`, and the `E-TILDE-002` suppression in the "Used through `~`" bullet above is part of the same accepted reading).
+    - **A mis-split line is loud through this rule.** Under §7.2.2 a line never joins the line above unless that line ends in a continuation token, so an orphan — `return⏎    @total * 2`, or `f(x)⏎(y)` — is a statement of its own, and a no-effect orphan is this error. An orphan that HAS an effect (`return⏎f()`) is an unreachable statement after `return`; no code catches it today (OPEN — kept open by ruling, S447 "your recs on all of them" item 1, reading 9; see §7.2.2 rule 8; the dd measured 0 real `return⏎expr` sites in 2,489 files).
+    - **Status: spec-ahead outside the body top.** The body-top limb is emitted (the §34 row); every other statement list lands with the §7.2.2 build (`g-stmt-no-effect-language-wide-unbuilt`).
+  > **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 5 = (i)" — *"(i), your rec, and yes on +/-"* (*"A bare expression statement with no effect … is an error in EVERY logic body (function / `fn` / handler block / `${}` / `^{}` / code-default bodies / body top), not only the §40.8 body top — removes the body-mode-specific scope S445 #2 had. PA refinement ruled with it: an expression statement whose value is read by the next statement through `~` (§32.2) is USED, not dead"*) · dd:`scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md` (Call 5, R7) · **supersedes:** the body-top-only scope of S445 #2 (*"At this body-top a bare expression statement SHALL contain an effect"* — the SHALL now holds in every statement list) · direction-of-change: **newly-rejecting** (a no-effect statement in a function / handler / `${}` body that compiles today).
   - This removes the per-shape question the S378 note (above) left open. Nothing outside the lift set is text at this body-top, so the S439 #2 / S440 #8 grammar-head lifts become special cases of this rule, and the shapes that defeated a text-level recognizer (S383: a braceless statement, `try` with its `{` on the next line, `throw`, `await`, dynamic `import()`) do not arise — the run is parsed, not pattern-matched.
   - A `<page>` body in a route file (a `<page>` with no enclosing `<program>`, §40.8 multi-page apps) and a `<channel>` body (S440 #8's locus) are the same locus and follow the same rule.
   - Unchanged by this bullet: the declaration auto-lift (S123 amendment's recognition list) and `W-PROGRAM-REDUNDANT-LOGIC`. The file top level outside any `<program>` / `<page>` / `<channel>` is NOT this locus.
@@ -27630,7 +28166,7 @@ If adopters report friction on either trade-off, harden via extended lookbehind 
 
 ### 46.1 Overview
 
-The parent of a nested `<program>` (§43) observes the child's lifecycle through named event hooks using the `when ... from <#name>` syntax. This extends the existing `when @var changes` pattern (§6.7.4).
+The parent of a nested `<program>` (§43) observes the child's lifecycle through named event hooks using the `when ... from <#name>` syntax. This extends the existing `when @var changes` pattern (§6.7.4). *(S447: the `when @var changes` statement is soft-deprecated in favour of `<effect deps=[…]>` (§6.7.4); these event hooks keep the `when` keyword — they are event handlers, not change effects, and are not retired. Whether they are respelled is OPEN.)*
 
 ### 46.2 Event Hooks
 
@@ -33199,7 +33735,7 @@ ${ function markDelivered() {
 ```
 
 Expected behavior: `@deliveryLog` is updated automatically when `markDelivered()` is called.
-No `when @order changes` block is needed. The effect lives with the transition rule.
+No reactive-effect block is needed. The effect lives with the transition rule. *(S447: an `<effect>` — formerly `when @order changes` — could not write `@deliveryLog` at all, §6.7.4; state changes on a transition belong here.)*
 
 **Example 3 — Auth state machine (invalid: unreachable transition detected at compile time):**
 
@@ -33379,17 +33915,18 @@ effect block SHALL be a compile error (E-ENGINE-008: `event` is not in scope her
 
 ### 51.7 Interaction with Existing Features
 
-#### 51.7.1 Interaction with `when @var changes {}`
+#### 51.7.1 Interaction with `<effect deps=[@var]>` (formerly `when @var changes {}`)
 
-`when @var changes {}` remains the post-assignment reactive effect mechanism (§6.7.4). It
+`<effect deps=[@var]>` (§6.7.4) remains the post-assignment reactive effect mechanism. It
 fires after the assignment is applied, regardless of whether the assignment was a transition
 request.
 
-Transition effect blocks and `when @var changes` blocks are complementary:
+Transition effect blocks and `<effect>`s are complementary:
 
 - Transition effect blocks are attached to specific `From => To` pairs. They fire only
-  when that exact transition occurs.
-- `when @var changes` fires on every change to the variable, regardless of transition path.
+  when that exact transition occurs, and they MAY write state (governed by contracts).
+- An `<effect>` listing the variable fires on every change to it, regardless of transition path, and
+  writes no reactive state (E-EFFECT-WRITES-STATE) — it drives the outside world.
 
 Neither replaces the other. A developer MAY use both. The execution order is:
 
@@ -33397,12 +33934,19 @@ Neither replaces the other. A developer MAY use both. The execution order is:
 2. Assignment applied.
 3. Transition effect blocks fire (in declaration order if multiple rules match, which
    cannot happen in a deterministic machine but could in a degenerate one).
-4. `when @var changes` fires.
+4. `<effect>`s listing the variable fire.
+
+A `reset-on=` reset of an engine cell (§6.8.4 rule 6) is a transition and follows the same order.
 
 **Normative statement:**
 
-- Transition effect blocks SHALL execute before `when @var changes {}` handlers for the
-  same variable.
+- Transition effect blocks SHALL execute before `<effect>`s (and the soft-deprecated `when @var changes {}`
+  spelling) for the same variable.
+
+> **Amended S447** — respelled for `<effect>`; the order is unchanged. **Provenance:** ruling:user-voice-scrml.md
+> S447 "`when` → outside-world effects only, spelled `<effect>`" · ruling:user-voice-scrml.md S447 "3b:
+> `reset-on=` IS allowed on engine cells" · **supersedes:** *"`when @var changes {}` remains the post-assignment
+> reactive effect mechanism"* and the `when` wording of the list and normative statement.
 
 #### 51.7.2 Interaction with `match`
 
@@ -33669,7 +34213,7 @@ The four shadow booleans collapse to one projection. Never-drift by construction
 - Projection rules MAY include `given` guards evaluated at read time. The first matching
   rule (top-to-bottom) wins; an unguarded rule terminates its alternation group.
 - The projected variable SHALL be observable by `match`, `${...}` interpolation,
-  `when @var changes`, and all other reactive-read sites as if it were a normal reactive
+  `<effect deps=[@var]>` (§6.7.4), and all other reactive-read sites as if it were a normal reactive
   variable. The only distinction is write-rejection.
 
 #### 51.9.7 Future Work
@@ -33904,7 +34448,7 @@ XState `after`, SCXML `<send delay>`, Erlang `gen_statem` state timeouts.
 
 A UI that fetches data and shows a "Taking too long? Refresh." banner after
 30s currently requires three coordinated pieces: a `<timeout>` element, a
-`when @var changes` effect to arm and disarm it, and a `cleanup()` to cancel
+`when @var changes` effect (now `<effect>`, §6.7.4) to arm and disarm it, and a `cleanup()` to cancel
 it on scope exit. The pieces are correct-by-case but not correct-by-
 construction — a developer can forget to arm, forget to disarm, or let the
 reactive dep list drift out of sync.
@@ -36058,7 +36602,7 @@ SHALL be:
 1. **Field-level inline predicate evaluated** (stateless, fast — `E-CONTRACT-*`)
 2. If the field check passes, **struct machine guard evaluated** (contextual — `E-ENGINE-*`)
 3. If both checks pass, **assignment applied**
-4. `when @var changes {}` reactive effects fire
+4. `<effect>`s listing the variable fire (§6.7.4; formerly `when @var changes {}`)
 
 This order ensures the cheap, local check runs first. The machine guard is not evaluated if the
 field-level check already rejects the value.
@@ -37076,11 +37620,11 @@ A `lin @sub: Submission` consumed by `@sub = @sub.validate(now)`: the transition
 
 Covered in §54.4. Substate exhaustiveness is enforced identically to enum variant exhaustiveness (E-TYPE-020).
 
-#### 54.7.4 State-local transitions × `when @var changes {}` (§51.7.1)
+#### 54.7.4 State-local transitions × `<effect deps=[@var]>` (§51.7.1)
 
 `@sub.validate(now)` re-assigns `@sub` exactly once.
 
-**Normative:** `when @sub changes {}` SHALL fire exactly once per state-local transition call.
+**Normative:** an `<effect deps=[@sub]>` (formerly `when @sub changes {}`, S447 §6.7.4) SHALL fire exactly once per state-local transition call.
 
 #### 54.7.5 State-local transitions × Audit clause (§51.11)
 
@@ -37708,6 +38252,11 @@ resetting the underlying value:
 > **Provenance (`reset(@email)` row, added S447):** ruling:user-voice-scrml.md S447 "validity calls 2-6" call 6 (ii)
 > — *"`reset(@x)` clears `touched` + `submitted`"*.
 
+A **`reset-on=[…]`** reset (§6.8.4, S447) IS `reset(@x)` and clears the surface identically — row 3 for a validated
+top-level value, rows 1–2 for a compound or a field. *(Provenance: ruling:user-voice-scrml.md S447 "`when` →
+outside-world effects only, spelled `<effect>`" Call 1 (*"Page-reset → a `reset-on=[@a, @b]` modifier"*) composed
+with S447 "validity calls 2-6" call 6 (ii).)*
+
 `reset` is a language keyword (`E-RESET-NO-ARG` if called with no argument; `E-RESERVED-IDENTIFIER`
 if shadowed); see §6.8 for the underlying semantics. Synthesized-property-side effects
 are part of the reset action — applications don't need to manually clear `errors` or
@@ -37990,7 +38539,7 @@ bind top-level values; a `formFor` form is §55.17.7.
 
 The gate exists only on gated forms (§55.17.3). It needs a join between "this action" and "these values", and the
 `<form>` is the only one the compiler can see. **Nothing else is gated:** an `onclick` outside a form, a
-`type="button"` inside one, a `when … changes` auto-save, a timer. Those stay author-gated through the surface:
+`type="button"` inside one, an `<effect>` or write-`<request>` auto-save (formerly `when … changes`, §6.7.4), a timer. Those stay author-gated through the surface:
 `if (!@x.isValid) return`, `disabled=!@x.isValid`. This is possible for every validated value now that top-level
 values have a surface (§55.5.1).
 
@@ -39915,6 +40464,14 @@ Applying the machine to the existing corpus:
   `W-MATCH-ARROW-LEGACY`, `W-GIVEN-ARROW-LEGACY`, `W-COLON-SHORTHAND-LEGACY-PLACEMENT`,
   `W-CONST-AT-DEPRECATED`, `W-PURE-DEPRECATED`): SOFT; eligible to schedule iff their
   `scrml fix` rule is verified-landed AND the corpus is clean — at a first MAJOR, *if ever*.
+- **`W-WHEN-EFFECT-DEPRECATED` (`when … changes { }` → `<effect deps=[…]>`, §6.7.4) — added S447:** SOFT,
+  unscheduled; reserved `E-WHEN-EFFECT-DEPRECATED` named, unfired; **gate-blocked** until its `scrml fix` rule
+  is verified-landed (§63.4). The rule is mechanical only for a body that writes no reactive cell; a writing
+  body has no mechanical rewrite (the fix reports the E-EFFECT-WRITES-STATE fix text). The window governs the
+  SPELLING only: the no-write rule applies to both spellings at once (§6.7.4 "The retiring keyword form"), so
+  §63.1's "parses identically" holds (RULED S447 — "accept and your rec (d)", item 1). The never-parsed `reads` clause is not in the window (it was never in the
+  contract). *(Provenance: ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled
+  `<effect>`" — Call 2: *"The keyword `when (…) changes reads … { }` form retires through §63."*)*
 
 ### 63.8 What is NOT a lifecycle deprecation
 
