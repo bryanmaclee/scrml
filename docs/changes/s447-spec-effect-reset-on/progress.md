@@ -1,0 +1,5 @@
+# progress — s447-spec-effect-reset-on (append-only)
+
+- start 2bb72e66a: BRIEF committed. Base = origin/main 4fd980bc6. PR #1227 (dpa-063) OPEN/unmerged — its §6.7.4 re-trigger text is NOT on main; reconciled by note in new §6.7.4.
+- a919bfd6b: §6.7.4 rewritten as `<effect>`; §6.7.1 table, §6.7.2 step 1, §6.7.3 client-side sentence.
+- §6.7.10 table, §6.7.11 Ex 2/3/4/6/10, §6.7.12, §6.7.14 A.1/A.4 respelled + amended.

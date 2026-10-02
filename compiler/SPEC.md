@@ -5699,8 +5699,11 @@ reads inside an `animationFrame` callback body.
 | E-LIFECYCLE-002 | `cleanup()` argument is a call expression, not a function expression | Error |
 | E-LIFECYCLE-004 | `cleanup()` first argument is not function-typed | Error |
 | E-LIFECYCLE-005 | `cleanup()` inside a function EXPLICITLY annotated as server-side (§12) | Error |
-| E-LIFECYCLE-006 | `when` body writes to a variable in the `dep-list` | Error |
-| E-LIFECYCLE-007 | `dep-list` entry is not a declared mutable `@variable` in scope, OR is a `const <name>` derived variable | Error |
+| E-LIFECYCLE-006 | *(superseded S447 by E-EFFECT-WRITES-STATE — a write to a dep is one case of a write; reserved, not a compile diagnostic)* `when` body writes to a variable in the `dep-list` | Error (reserved) |
+| E-EFFECT-WRITES-STATE | `<effect>` (or `when … changes`) body writes a reactive cell, directly or through a called function (S447, §6.7.4) | Error |
+| E-EFFECT-WRITE-UNPROVEN | `<effect>` body reaches code whose writes cannot be determined (`^{}`, an unresolvable call) — fails closed (S447, §6.7.4) | Error |
+| E-EFFECT-NO-DEPS | `<effect>` has no `deps=` or `deps=[]` (S447, §6.7.4) | Error |
+| E-LIFECYCLE-007 | `<effect deps=[…]>` (or keyword `dep-list`) entry is not a declared mutable `@variable` in scope, OR is a derived cell | Error |
 | E-LIFECYCLE-009 | `<timer>` or `<poll>` missing `interval` attribute | Error |
 | E-LIFECYCLE-010 | `interval` attribute is zero or negative | Error |
 | E-LIFECYCLE-011 | `running` attribute references an undeclared or non-`@` variable | Error |
@@ -5708,19 +5711,21 @@ reads inside an `animationFrame` callback body.
 | E-LIFECYCLE-013 | `animationFrame()` called inside a `<timer>` or `<poll>` body | Error |
 | E-LIFECYCLE-014 | `animationFrame()` called inside a server-escalated function | Error |
 | E-LIFECYCLE-015 | `animationFrame()` called with zero arguments or non-function argument | Error |
-| E-LIFECYCLE-016 | `when` block nested inside another `when` block body | Error |
+| E-LIFECYCLE-016 | `<effect>` (or keyword `when`) inside another effect's body (re-expressed S447) | Error |
 | E-LIFECYCLE-017 | `animationFrame()` called outside any element scope | Error |
 | W-LIFECYCLE-002 | `<timer>` has no body (self-closing, no observable effect) | Warning |
 | W-LIFECYCLE-003 | `<timer>` or `<poll>` declared inside a `for/lift` loop body | Warning |
 | W-LIFECYCLE-004 | `<poll>` body contains no function call | Warning |
 | W-LIFECYCLE-005 | `<timer>` or `<poll>` body calls a server function and `interval` < 500ms | Warning |
-| W-LIFECYCLE-006 | `when` body sole effect is a single `@variable` assignment whose RHS is a pure `@variable` expression; a derived value is strictly superior | Warning |
+| ~~W-LIFECYCLE-006~~ | *(retired S447 — moot: any write in an effect body is E-EFFECT-WRITES-STATE)* `when` body sole effect is a single `@variable` assignment whose RHS is a pure `@variable` expression | — |
 | W-LIFECYCLE-007 | `running=false` boolean literal on `<timer>` or `<poll>` | Warning |
 | W-LIFECYCLE-008 | `<poll>` body contains multiple assignment expressions (`.value` will be `not` — §42) | Warning |
 | W-LIFECYCLE-009 | `cleanup()` inside a `for` loop body (N registrations will be created) | Warning |
-| W-LIFECYCLE-010 | `when` block has an empty body | Warning |
-| H-LIFECYCLE-001 | `@variable` read inside `when` body is not in the `dep-list` (off by default; suppressed by `reads @var` annotation) | Hint |
-| E-LIN-004 | `lin` variable referenced inside a recurring execution context (`when`, `<timer>`, `<timeout>`, or `animationFrame` callback) — `<poll>` is DEFERRED (E-LIN-006), corrected S263 | Error |
+| W-LIFECYCLE-010 | `<effect>` (or `when` block) has an empty body | Warning |
+| ~~H-LIFECYCLE-001~~ | *(retired S447 with the never-parsed `reads` clause — reading an unlisted cell is the dominant, correct pattern)* | — |
+| W-WHEN-EFFECT-DEPRECATED | `when … changes { }` keyword form — soft-deprecated spelling of `<effect>` (S447, §6.7.4, §63) | Warning |
+| E-WHEN-EFFECT-DEPRECATED | reserved end-of-window code for `when … changes { }` (§63.2; not scheduled) | Error (reserved) |
+| E-LIN-004 | `lin` variable referenced inside a recurring execution context (`<effect>` / `when`, `<timer>`, `<timeout>`, or `animationFrame` callback) — `<poll>` is DEFERRED (E-LIN-006), corrected S263 | Error |
 
 | E-LIFECYCLE-018 | `<request>` has no `id` attribute | Error |
 | E-LIFECYCLE-019 | `<request>` is self-closing (no body) | Error |
@@ -5736,6 +5741,9 @@ reads inside an `animationFrame` callback body.
 | E-TIMEOUT-002 | `<timeout>` `delay` attribute is zero or negative | Error |
 | E-TIMEOUT-003 | `<timeout>` used outside any element scope | Error |
 | W-TIMEOUT-001 | `<timeout>` declared inside a `for/lift` loop body | Warning |
+
+**`reset-on=` codes (S447, §6.8.4):** E-RESET-ON-INVALID-ENTRY · E-RESET-ON-NOT-WRITABLE · E-RESET-ON-CYCLE ·
+E-RESET-ON-ENGINE-REFUSED (§34).
 
 **Notes on removed/renamed codes from first draft:**
 - E-LIFECYCLE-003 renamed to W-LIFECYCLE-009 (cleanup-in-for is a warning, not an error).
@@ -5818,7 +5826,7 @@ When `@showChat` transitions false → true:
 - The `cleanup()` callback is registered on this scope.
 
 When `@showChat` transitions true → false, the canonical teardown sequence (§6.7.2) fires:
-1. No `when` effects in this scope; step 1 is a no-op.
+1. No effects (`<effect>`) in this scope; step 1 is a no-op.
 2. The `<timer id="poll">` stops (step 2).
 3. `disconnectFromRoom()` fires via the registered `cleanup()` callback (step 3, LIFO).
 4. No `animationFrame` callbacks in this scope; step 4 is a no-op.
@@ -5827,20 +5835,20 @@ When `@showChat` transitions true → false, the canonical teardown sequence (§
 When `@showChat` transitions false → true a second time:
 - All of the above mount behavior repeats exactly.
 
-#### Example 3 — Valid: Multi-Dependency Reactive Effect
+#### Example 3 — Valid: Multi-Dependency Search Page (S447 forms)
 
 ```scrml
 <program>
-    <query>    = ""
-    <minPrice> = 0
-    <maxPrice> = 1000
-    <page>     = 1
-    <results>  = []
+    let <query:string=""/>
+    let <minPrice:number=0/>
+    let <maxPrice:number=1000/>
+    let <page:int=1 reset-on=[@query, @minPrice, @maxPrice]/>
+    let <results:Item[replace]=[]/>
 
-    when (@query, @minPrice, @maxPrice) changes {
-        @page = 1
-        @results = searchItems(@query, @minPrice, @maxPrice)
-    }
+    <request id="search" deps=[@query, @minPrice, @maxPrice, @page]>
+        ${ @results = searchItems(@query, @minPrice, @maxPrice, @page) }
+    </>
+    <effect deps=[@query]>${ track("search", { q: @query }) }</>
 
     <input bind:value=@query placeholder="Search..."/>
     <input bind:value=@minPrice type="number" placeholder="Min price"/>
@@ -5851,34 +5859,43 @@ When `@showChat` transitions false → true a second time:
 </>
 ```
 
-The `when` body does not run on initial mount. The initial `@results = []` is the
-starting state. The body runs only when the user changes an input (via `bind:value`).
+A change to any filter resets `@page` to `1` in the same flush (§6.8.4), before the `<request>` re-runs, so one
+keystroke sends ONE search, already on page 1. The `<request>` runs on mount and owns the result; the `<effect>`
+does not run on mount and writes nothing — it only reports the search to analytics, reading `@query`.
 `searchItems` is a server function; the compiler inserts `await` automatically (§13.2).
 
-Note that `@query`, `@minPrice`, and `@maxPrice` are read inside the body. Because they
-are also in the `dep-list`, H-LIFECYCLE-001 does not fire for them. H-LIFECYCLE-001 would
-only fire (if enabled) for `@variables` read in the body that are NOT in the dep-list.
+> **Rewritten S447.** The prior example wrote `@page = 1` and `@results = searchItems(…)` inside one `when (…)
+> changes` body — both writes are now E-EFFECT-WRITES-STATE. **Provenance:** ruling:user-voice-scrml.md S447
+> "`when` → outside-world effects only, spelled `<effect>`" · dd:`scrml-support/docs/deep-dives/when-reactive-effect-fit-2026-10-02.md`
+> §3 jobs A/B, §2 row 12 (the double fetch the old shape produced) · **supersedes:** the prior Example 3.
 
-#### Example 4 — Invalid: `when` body writes to its own dep-list (E-LIFECYCLE-006)
+#### Example 4 — Invalid: an effect writes state, directly and through a function (E-EFFECT-WRITES-STATE)
 
 ```scrml
 <program>
-    <page> = 1
+    let <page:int=1/>
+    let <lastSeen:string=""/>
 
-    when @page changes {
-        @page = 1   // E-LIFECYCLE-006: writes to dep-list variable @page
-    }
+    ${ function remember(p) { @lastSeen = "page " + p } }
+
+    <effect deps=[@page]>${ @page = 1 }</>             // E-EFFECT-WRITES-STATE (direct; also a self-trigger)
+    <effect deps=[@page]>${ remember(@page) }</>       // E-EFFECT-WRITES-STATE (through remember())
 </>
 ```
 
-Expected compiler error:
+Expected compiler errors:
 
 ```
-E-LIFECYCLE-006: `when` body writes to dependency `@page`, which is also in the dep-list.
-This would trigger the effect immediately after each write, creating an infinite loop.
-  at line 4: @page = 1
-  Dependency listed at: line 3, dep-list entry `@page`
+E-EFFECT-WRITES-STATE: this <effect> writes `@page`. An <effect> drives the outside world and may not write
+reactive state. To reset `@page` when another cell changes, declare `reset-on=[…]` on it (§6.8.4).
+  at line 7: @page = 1
+E-EFFECT-WRITES-STATE: this <effect> writes `@lastSeen` through a call: remember() → @lastSeen = …
+Move the write into the code that changes `@page`, or derive the value (§6.6).
+  at line 8: remember(@page)
 ```
+
+> **Rewritten S447** from *"Example 4 — Invalid: `when` body writes to its own dep-list (E-LIFECYCLE-006)"*,
+> which E-EFFECT-WRITES-STATE subsumes (§6.7.4). **Provenance:** as Example 3. **supersedes:** the prior Example 4.
 
 #### Example 5 — Invalid: `cleanup()` argument is a call expression (E-LIFECYCLE-002)
 
@@ -5897,41 +5914,25 @@ E-LIFECYCLE-002: `cleanup()` argument must be a function expression, not a call 
   Fix: cleanup(() => closeConnection())
 ```
 
-#### Example 6 — Warning: `when` body is derivable (W-LIFECYCLE-006)
+#### Example 6 — Invalid: a value derived inside an effect (E-EFFECT-WRITES-STATE)
 
 ```scrml
 <program>
-    <price> = 10
-    <qty>   = 2
-    <total> = 0
+    let <price:number=10/>
+    let <qty:number=2/>
+    let <total:number=0/>
 
-    when @price changes {
-        @total = @price * @qty   // W-LIFECYCLE-006
-    }
+    <effect deps=[@price]>${ @total = @price * @qty }</>   // E-EFFECT-WRITES-STATE
 </>
 ```
 
-W-LIFECYCLE-006 fires here because:
-1. The body's only effect is a single `@variable` assignment (`@total = ...`).
-2. The RHS (`@price * @qty`) is a pure expression of `@variables`.
+The fix is a derived cell, which is reactive in every input, has a value at mount, and cannot fall out of
+sync: `<total:number=(@price * @qty)/>` (§66.9; legacy form `const <total> = @price * @qty`, §6.6). The error's
+third fix text says so.
 
-Note that `@qty` is NOT in the dep-list (`dep-list` contains only `@price`). The broadened
-condition captures this case: the RHS reads `@variables` (whether or not all are in the
-dep-list), and the result is a pure derivation.
-
-Expected compiler warning:
-
-```
-W-LIFECYCLE-006: `when` body computes a derived value that can be expressed as a derived
-reactive binding. Replace with:
-  const <total> = @price * @qty
-This form is reactive, executes on initial mount, and requires no explicit dep-list.
-  at line 6: when @price changes { @total = @price * @qty }
-```
-
-W-LIFECYCLE-006 fires only when the body is exactly and solely a single derivable
-assignment. If the body also has side effects (server calls, navigation, writing to
-unrelated variables), W-LIFECYCLE-006 does NOT fire.
+> **Rewritten S447** from *"Example 6 — Warning: `when` body is derivable (W-LIFECYCLE-006)"*. W-LIFECYCLE-006
+> retires: under the no-write rule its pattern is an error (§6.7.4). **Provenance:** as Example 3.
+> **supersedes:** the prior Example 6.
 
 #### Example 7 — Valid: `<poll>` with reference properties
 
@@ -6020,29 +6021,36 @@ is not server-escalated. When the `<div if=@connected>` scope destroys, `ws.clos
 The bare expression containing the `if` block runs once on mount. If `@enabled` is `true`
 at mount time, one `cleanup()` is registered. If `@enabled` is `false`, no cleanup is
 registered. The `if` is evaluated once (at mount); `@enabled` is not a trigger for
-re-evaluating this block (that would require a `when @enabled changes` block). The cleanup
+re-evaluating this block (that would require an `<effect deps=[@enabled]>`). The cleanup
 count is determined at mount time by the state of `@enabled` at that moment.
 
-If the developer intends cleanup registration to respond to `@enabled` changes, they must
-use `when @enabled changes { if (@enabled) { cleanup(...) } }`. This is outside the scope
-of this example but is a valid pattern.
+If the developer intends cleanup registration to respond to `@enabled` changes, they may
+use `<effect deps=[@enabled]>${ if (@enabled) { cleanup(...) } }</>` — registering a cleanup is not a reactive
+write, so it is legal in an effect body (§6.7.4). This is outside the scope of this example. *(Respelled S447
+from `when @enabled changes { … }`.)*
 
 ---
 
 ### 6.7.12 Interaction Notes
 
-- **§6.3 (Reactive Semantics):** Writes to `@variables` inside `<timer>` bodies, `<poll>`
-  bodies, and `when` blocks obey all §6.3 reactive rules. A write to `@messages` inside a
-  timer body triggers the same downstream reactive updates as a write from a user event
-  handler.
+> **Amended S447** — every bullet below that named `when` now names `<effect>` (§6.7.4), and the bullets on
+> §6.3, §6.6 and §30 change in substance: an effect writes no reactive cell, so it contributes no write edges and
+> W-LIFECYCLE-006 no longer guards the derive/effect boundary — E-EFFECT-WRITES-STATE does. **Provenance:**
+> ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except
+> expound 3b, specifically why the engine restriction."* · **supersedes:** the pre-S447 wording of these bullets.
 
-- **§6.6 (Derived Reactive Values):** `const <name>` derived values and `when` blocks are
-  complementary, not competing. `const <name>` is for value derivation (lazy pull, no side
-  effects). `when` is for side effects triggered by state change (push, explicit triggers).
-  W-LIFECYCLE-006 enforces this boundary at compile time. Cross-reference §6.6.5 for
-  derived value invalidation and the flush ordering guarantee described in §6.7.4.
+- **§6.3 (Reactive Semantics):** Writes to `@variables` inside `<timer>` and `<poll>` bodies obey all §6.3
+  reactive rules. A write to `@messages` inside a timer body triggers the same downstream reactive updates as a
+  write from a user event handler. An `<effect>` body writes no reactive cell (E-EFFECT-WRITES-STATE, §6.7.4);
+  a `reset-on=` reset (§6.8.4) is a write and obeys §6.3 like any other.
 
-- **§12 (Route Inference):** `cleanup()` and `when` are always client-side constructs. A
+- **§6.6 (Derived Reactive Values):** derived cells and `<effect>`s are complementary, not competing. A
+  derived cell is for value derivation (lazy pull, no side effects). An `<effect>` is for effects on the outside
+  world triggered by state change (push, explicit triggers). E-EFFECT-WRITES-STATE enforces the boundary at
+  compile time (W-LIFECYCLE-006 retired). Cross-reference §6.6.5 for derived value invalidation and the flush
+  ordering guarantee described in §6.7.4.
+
+- **§12 (Route Inference):** `cleanup()` and `<effect>` are always client-side constructs. A
   function containing `cleanup()` SHALL be classified as client-side by RI (§6.7.3).
   `<timer>` and `<poll>` bodies are always client-side; their tick handlers run in the
   browser, though they MAY call server-inferred functions (which the CPS transform handles
@@ -6057,24 +6065,26 @@ of this example but is a valid pattern.
 - **§17.1 (`if=`):** Conditional rendering is the primary mechanism for element-scoped
   lifecycle. When `if=@condition` toggles false → true, the element scope mounts, its
   `<timer>` instances start, and its bare expressions re-run. When it toggles true →
-  false, the scope destroys in canonical order (§6.7.2): when effects, then timers, then
+  false, the scope destroys in canonical order (§6.7.2): effects, then timers, then
   cleanup callbacks (LIFO), then animationFrame cancellations.
 
 - **§17.3 (Lifecycle of Bare Expressions):** Bare expressions in a `${}` block execute
-  on mount. They are the "run once at mount" mechanism. `when` blocks execute on change,
+  on mount. They are the "run once at mount" mechanism. `<effect>`s execute on change,
   not on mount. These two mechanisms are complementary, not redundant. SPEC-ISSUE-010
   (whether bare expressions re-execute on reactive dependency change) remains open and
-  does not affect the `when` construct, which has independent, fully specified trigger
-  semantics.
+  does not affect `<effect>`, which has independent, fully specified trigger semantics.
 
 - **§30 (Dependency Graph):** The compiler adds edges to the dependency graph for:
-  (a) each `@variable` in a `when` dep-list → the `when` effect as a dependent, and
-  (b) each `<timer running=@var>` running attribute → the timer's start/stop behavior.
+  (a) each cell in an `<effect deps=[…]>` list → the effect as a dependent (read-only: an effect adds no
+  write edge, and a cell read in an effect body counts as consumed — no E-DG-002 for it),
+  (b) each `<timer running=@var>` running attribute → the timer's start/stop behavior, and
+  (c) each cell in a `reset-on=[…]` list → the reset cell as a dependent (§6.8.4; this sub-graph is acyclic,
+  E-RESET-ON-CYCLE).
   These edges are constructed in Stage 7 (graph construction) alongside derived value
   edges (§6.6.3). animationFrame callbacks do NOT add edges to the dependency graph
   for `@variable` reads inside the callback.
 
-- **§34 (`lin`):** A `lin` variable SHALL NOT be consumed inside a `when` body, a
+- **§34 (`lin`):** A `lin` variable SHALL NOT be consumed inside an `<effect>` body, a
   `<timer>` body, a `<poll>` body, or an `animationFrame` callback. These contexts may
   execute more than once per scope lifetime, and a `lin` variable must be consumed exactly
   once. The compiler SHALL emit E-LIN-004 if a `lin` variable is read inside any of these
@@ -6136,23 +6146,32 @@ This section records design alternatives that were evaluated and rejected for ea
 mechanism. The rejections are normative: they explain why the current design is correct
 and guard against future re-proposals of the same alternatives.
 
-#### A.1 `when` vs Auto-Tracking Effects
+#### A.1 `<effect>` vs Auto-Tracking Effects
 
-**Alternative:** Omit the explicit `dep-list` from `when`. The compiler auto-tracks every
-`@variable` read inside the effect body, as Svelte 5 does with `$effect()` and Vue 3 does
-with `watchEffect()`.
+**Alternative:** Omit the explicit `deps=` list from `<effect>` (formerly `when`). The compiler auto-tracks
+every `@variable` read inside the effect body, as Svelte 5 does with `$effect()` and Vue 3 does with
+`watchEffect()`.
 
 **Rejected because:**
 1. Auto-tracking violates the readability principle: a developer reading the source cannot
    determine which state changes trigger the effect without compiler introspection.
 2. Auto-tracking makes refactoring dangerous: adding a read of `@variable` inside the
    body silently adds a new trigger.
-3. scrml's explicit-dependency model is consistent with `bind:value` and the dep-list for
-   derived values. Introducing implicit tracking for `when` would create an inconsistency
-   within the language.
-4. The `reads @var` annotation in the explicit model provides a documented escape hatch
+3. An effect's body routinely reads cells that must NOT trigger it — an analytics payload reads `@query` to
+   report a `@category` change. Derived cells and `<request>` can infer their dependencies from their reads
+   because for them every read IS a dependency (the value is computed from exactly those reads); an effect's
+   triggers and its reads are different sets, so only the author can name the triggers.
+4. ~~The `reads @var` annotation in the explicit model provides a documented escape hatch
    for non-trigger reads, which is more explicit than suppression comments in auto-tracking
-   systems.
+   systems.~~ *(Struck S447 — `reads` never parsed and retires; a non-trigger read needs no annotation.)*
+
+> **Amended S447.** The rejection stands, re-stated for `<effect>`. Reason 3 is rewritten because its premise
+> was stale: it claimed consistency with *"the dep-list for derived values"*, but derived values have no dep list
+> (§6.6.3 extracts their dependencies statically) and `<request>` infers its deps when `deps=` is absent
+> (§6.7.7) — DD §1.1. Reason 4 is struck with the `reads` clause. **Provenance:** ruling:user-voice-scrml.md S447
+> "`when` → outside-world effects only, spelled `<effect>`" (Call 2: *"`[ ]` deps"*) ·
+> dd:`scrml-support/docs/deep-dives/when-reactive-effect-fit-2026-10-02.md` §1.1 · **supersedes:** reasons 3
+> and 4 as worded before S447.
 
 #### A.2 `<timer>` vs `setInterval` Passthrough
 
@@ -6189,19 +6208,21 @@ removed.
 teardown function. Instead of `cleanup(() => close())`, the developer writes:
 
 ```
-when @connected changes {
+<effect deps=[@connected]>${
     const ws = new WebSocket(url)
     return () => ws.close()   // teardown function returned from effect body
-}
+}</>
 ```
+
+*(Respelled S447 from the keyword form; the rejected alternative is unchanged.)*
 
 **Rejected because:**
 1. The return-value-as-teardown pattern conflates effect logic with teardown logic in
    a single function body, which is harder to read for non-trivial effects.
 2. `cleanup()` works for mount-time teardown (bare expressions in `${}`), not just
-   `when` effects. A return-value pattern only applies to effect bodies.
+   effects. A return-value pattern only applies to effect bodies.
 3. `cleanup()` is explicit and scopeable: it registers on the enclosing element scope,
-   which may not be the same as the `when` block's immediate context.
+   which may not be the same as the effect's immediate context.
 4. The current `cleanup()` design is already implemented in the compiler (tokenizer,
    AST, codegen). Changing to return-value teardown would require redesign of the
    cleanup pass for marginal readability benefit.
