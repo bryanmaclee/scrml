@@ -847,6 +847,45 @@ describe("analyzeProtectFlow — round 8: an aliased global resolves to its name
   });
 });
 
+describe("analyzeProtectFlow — round 8: the round-7 performance cliff", () => {
+  // Review-measured on round 7: a 240-object `toString` chain took 13.7 s
+  // (0.47 s on base); a shared `this`-writing method on 240 receivers 40.5 s.
+  const chain = (n, line) => Array.from({ length: n }, (_, i) => line(i)).join("\n");
+  test("a long toString-hook chain finishes fast and clean", () => {
+    const body = chain(240, (i) => `const o${i} = { f${i}: ${i === 0 ? "u.name" : `o${i - 1}`}, toString: function () { return String(this.f${i}); } };`) +
+      "\nreturn { id: u.id, s: `${o239}` };";
+    const t0 = performance.now();
+    const r = analyzeProtectFlow(r8(body));
+    expect(r.saturated).toBe(false);
+    expect(r.leaks).toEqual([]);
+    expect(performance.now() - t0).toBeLessThan(10000);
+  }, 30000);
+
+  test("a this-writing method shared by many receivers finishes fast and clean", () => {
+    const body = "const w = function (v) { this.x = v; return this; };\n" +
+      chain(240, (i) => `const o${i} = { f${i}: ${i}, toString: function () { return String(this.f${i}); } }; o${i}.w = w; o${i}.w(o${i === 0 ? 0 : i - 1});`) +
+      "\nreturn { id: u.id, s: `${o239}` };";
+    const t0 = performance.now();
+    const r = analyzeProtectFlow(r8(body));
+    expect(r.saturated).toBe(false);
+    expect(r.leaks).toEqual([]);
+    expect(performance.now() - t0).toBeLessThan(10000);
+  }, 30000);
+
+  test("coercions still carry their argument's hooks (they are analysed where stored)", () => {
+    for (const body of [
+      "const o = { toString: function () { return u.passwordHash; } }; return String(o);",
+      "const o = { valueOf: function () { return u.pin; } }; return Number(o);",
+      "const o = { [Symbol.toPrimitive]: function () { return u.pin; } }; return Number(o);",
+      "const o = { toString: function () { return this.s; }, s: '' }; o.s = u.passwordHash; return String(o);",
+      "return String(u.passwordHash);",
+      "return Number(u.pin);",
+    ]) {
+      expect([body, leakCols(r8(body)).length > 0]).toEqual([body, true]);
+    }
+  });
+});
+
 describe("sqlSkeleton", () => {
   test("holes replace interpolations (balanced braces), whitespace collapses", () => {
     expect(sqlSkeleton("SELECT *  FROM t\n WHERE a = ${ f({ x: 1 }) } AND b = ${y}"))

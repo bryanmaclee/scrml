@@ -510,6 +510,50 @@ function taintKey(t: Taint): string {
   return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${f}#${a}#${l}#${t.k ?? 0}#${o}#${g}`;
 }
 
+function subsetOf<T>(a: Iterable<T>, b: Set<T>): boolean {
+  for (const x of a) if (!b.has(x)) return false;
+  return true;
+}
+function keysSubsetOf(a: Map<string, string>, b: Map<string, string>): boolean {
+  for (const k of a.keys()) if (!b.has(k)) return false;
+  return true;
+}
+
+/**
+ * Round 8 (perf) — does joining `t` into `prev` leave `taintKey(prev)`
+ * unchanged? Exactly the test `taintKey(join(prev, t)) === taintKey(prev)`,
+ * decided by set membership instead of by building and sorting both keys (the
+ * dominant cost on long object chains). `refs` are compared as the key does.
+ */
+function subsumes(prev: Taint, t: Taint): boolean {
+  if (t.row) {
+    const a = prev.row;
+    if (!a) return false;
+    if (t.row.all && !a.all) return false;
+    if (!subsetOf(t.row.tags, a.tags) || !subsetOf(t.row.cols, a.cols)) return false;
+    // revealed of a join is the INTERSECTION: unchanged iff prev's ⊆ t's.
+    if (!subsetOf(a.revealed, t.row.revealed)) return false;
+    if (!a.paths.has(ROW_ANYWHERE) && !subsetOf(t.row.paths, a.paths)) return false;
+  }
+  if (!keysSubsetOf(t.scalar, prev.scalar) || !keysSubsetOf(t.deep, prev.deep)) return false;
+  if (!subsetOf(t.fns, prev.fns)) return false;
+  if (t.refs && t.refs.size > 0 && (!prev.refs || !subsetOf(t.refs, prev.refs))) return false;
+  if (t.k && ((prev.k ?? 0) | t.k) !== (prev.k ?? 0)) return false;
+  if (t.gnAny && !prev.gnAny) return false;
+  if (t.gn && t.gn.size > 0 && (!prev.gn || !subsetOf(t.gn, prev.gn))) return false;
+  // `.length`: undefined is the fail-closed default (`naked`).
+  if (t.len !== undefined || prev.len !== undefined) {
+    if (prev.len === undefined) return false; // the joined key would list labels where prev's is "~"
+    if (!keysSubsetOf(lenOf(t), prev.len)) return false;
+  }
+  // `own`: defined on the join iff fns are present and any part defines it.
+  if (prev.fns.size > 0 && (t.own !== undefined || prev.own !== undefined)) {
+    if (prev.own === undefined) return false;
+    if (!subsetOf(ownOf(t), prev.own)) return false;
+  }
+  return true;
+}
+
 /** The protected part of a taint's key (no function values). */
 function protKey(t: Taint): string {
   const r = t.row
@@ -634,6 +678,21 @@ function isStdlibDeriver(source: string, imported: string, node?: any, args?: Ta
   }
   return false;
 }
+
+/**
+ * S447 round 8 — the platform COERCIONS. `String(x)`, `Number(x)`,
+ * `Boolean(x)`, `BigInt(x)` and `Symbol(x)` run no author code except the
+ * coercion hooks of their argument (`toString` / `valueOf` /
+ * `[Symbol.toPrimitive]`; `Boolean` none at all) — never a function value they
+ * are handed. Those hooks are analysed where they are stored (`storeFns`: called
+ * with `this` = the object, their returns part of it), exactly as for a template
+ * or `+`, so these calls are not handed to the opaque-callback rule (L1), which
+ * applied EVERY function reachable from the argument: on a chain of objects each
+ * holding the previous one, `String(this.f)` in each `toString` applied all N
+ * hooks from every hook — the round-7 performance cliff (240 objects: 13.7 s vs
+ * 0.47 s on base, review-measured).
+ */
+const LANGUAGE_COERCIONS = new Set(["String", "Number", "Boolean", "BigInt", "Symbol"]);
 
 /**
  * Binary operators whose result is a boolean of independent identity (DERIVED).
@@ -1297,7 +1356,7 @@ class FlowAnalysis {
     return c;
   }
 
-  private instanceFor(c: Closure, args: Taint[], everyParam: Taint | undefined): Instance | null {
+  private instanceFor(c: Closure, args: Taint[], everyParam: Taint | undefined, argsObjIn?: Taint): Instance | null {
     const stat = this.statics.get(c.node);
     if (!stat || stat.skip) return null;
     if (this.instanceList.length >= MAX_INSTANCES) { this.saturated = true; return null; }
@@ -1340,12 +1399,17 @@ class FlowAnalysis {
     // hash (measured). It is the container of the join of all arguments; its
     // `.length` is the argument COUNT, a value of independent identity.
     if (stat.node.type !== "ArrowFunctionExpression") {
-      const argsObj = containerOf(everyParam ?? join(...args));
-      argsObj.len = new Map();
-      this.mergeBinding("arguments", inst!.scope, argsObj);
+      this.mergeBinding("arguments", inst!.scope, argsObjIn ?? this.argumentsObject(args, everyParam));
     }
     this.curMod = saved;
     return inst;
+  }
+
+  /** The `arguments` object of a call (see `instanceFor`). */
+  private argumentsObject(args: Taint[], everyParam: Taint | undefined): Taint {
+    const argsObj = containerOf(everyParam ?? join(...args));
+    argsObj.len = new Map();
+    return argsObj;
   }
 
   private walkInstance(inst: Instance): void {
@@ -1379,6 +1443,18 @@ class FlowAnalysis {
     let c = k;
     while (this.cellParent.has(c)) { const n = this.cellParent.get(c)!; this.cellParent.set(c, r); c = n; }
     return r;
+  }
+  /**
+   * `unite`, remembering the pair: classes only ever merge, so a pair united
+   * once is united for good (round 8, perf — a binding re-bound every pass to a
+   * value with N cells walked the union-find N times per pass).
+   */
+  private unitedPairs = new Set<string>();
+  private uniteOnce(a: string, b: string): void {
+    const k = a + "\u0000" + b;
+    if (this.unitedPairs.has(k)) return;
+    this.unitedPairs.add(k);
+    this.unite(a, b);
   }
   /** Two bindings may hold the same object: from now on they are ONE alias class. */
   private unite(a: string, b: string): void {
@@ -1596,7 +1672,7 @@ class FlowAnalysis {
     // A free name is the global heap (L3).
     const key = resolved ? `${s.id}:${name}` : GLOBAL_CELL;
     // The value may BE another binding's object — join its alias class.
-    for (const r of refsOf(t)) this.unite(key, r);
+    for (const r of refsOf(t)) this.uniteOnce(key, r);
     // A write INTO an alias class may sit at any depth of its objects (round 8).
     const plain = isWrite || !resolved ? anyDepth({ ...t }) : { ...t };
     delete plain.refs;
@@ -1613,7 +1689,9 @@ class FlowAnalysis {
     } else if (isWrite || key === GLOBAL_CELL) {
       this.globalStore(slot, plain);
     }
-    const prev = store.get(slot) ?? clean();
+    const prevStored = store.get(slot);
+    if (prevStored !== undefined && subsumes(prevStored, plain)) return;
+    const prev = prevStored ?? clean();
     const next = join(prev, plain);
     if (taintKey(prev) !== taintKey(next)) {
       store.set(slot, next);
@@ -1624,6 +1702,7 @@ class FlowAnalysis {
   }
 
   private addRet(inst: Instance, t: Taint): void {
+    if (subsumes(inst.ret, t)) return;
     const next = join(inst.ret, t);
     if (taintKey(next) !== taintKey(inst.ret)) { inst.ret = next; this.changed = true; }
   }
@@ -1958,7 +2037,7 @@ class FlowAnalysis {
 
   /** Merge a container write into the alias class of binding cell `key`. */
   private writeCell(key: string, t: Taint): void {
-    for (const r of refsOf(t)) this.unite(key, r);
+    for (const r of refsOf(t)) this.uniteOnce(key, r);
     // An alias class holds objects at DIFFERENT depths (a field read aliases
     // into its container's class), so what is written into it may sit at any
     // depth of any of them (round 8 — see `RowPart.paths`).
@@ -1966,7 +2045,9 @@ class FlowAnalysis {
     delete plain.refs;
     const slot = this.find(key);
     this.globalStore(slot, plain);
-    const prev = this.classWrites.get(slot) ?? clean();
+    const prevStored = this.classWrites.get(slot);
+    if (prevStored !== undefined && subsumes(prevStored, plain)) return;
+    const prev = prevStored ?? clean();
     const next = join(prev, plain);
     if (taintKey(prev) !== taintKey(next)) {
       this.classWrites.set(slot, next);
@@ -2351,7 +2432,11 @@ class FlowAnalysis {
 
   /** Call every function value in `fns`; the result is the union of their returns. */
   private applyFns(fns: Set<Closure>, args: Taint[], everyParam: Taint | undefined, node: any, fn: Instance | null): Taint {
-    let r = clean();
+    // The returns are joined ONCE (round 8, perf: joining them one at a time
+    // re-copied the growing union per callee — quadratic in a wide call).
+    const parts: Taint[] = [];
+    // One `arguments` object for every callee of this call (round 8, perf).
+    let argsObj: Taint | undefined;
     for (const c of fns) {
       if (c.resolver !== undefined) {
         const prev = this.resolved.get(c.resolver) ?? clean();
@@ -2360,12 +2445,13 @@ class FlowAnalysis {
         continue;
       }
       if (c.rejecter) { this.addThrown(everyParam ?? args[0] ?? clean()); continue; }
-      if (c.host) { r = join(r, this.hostCall(c.host, everyParam ? [everyParam] : args, node, fn)); continue; }
-      const inst = this.instanceFor(c, args, everyParam);
+      if (c.host) { parts.push(this.hostCall(c.host, everyParam ? [everyParam] : args, node, fn)); continue; }
+      if (argsObj === undefined && c.node && c.node.type !== "ArrowFunctionExpression") argsObj = this.argumentsObject(args, everyParam);
+      const inst = this.instanceFor(c, args, everyParam, argsObj);
       if (!inst) continue;
-      r = join(r, inst.stat.isGen ? containerOf(join(inst.yields, inst.ret)) : inst.ret);
+      parts.push(inst.stat.isGen ? containerOf(join(inst.yields, inst.ret)) : inst.ret);
     }
-    return r;
+    return join(...parts);
   }
 
   /**
@@ -2437,7 +2523,7 @@ class FlowAnalysis {
 
   /** A call to a global the analysis has no model for: same fail-closed rule. */
   private unknownCall(path: string | null, args: Taint[], node: any, fn: Instance | null): Taint {
-    let cb = this.opaqueCallbacks(null, args, node, fn);
+    let cb = path !== null && LANGUAGE_COERCIONS.has(path) ? clean() : this.opaqueCallbacks(null, args, node, fn);
     if (path !== null && DERIVER_CALLS.has(path)) return clean();
     if (path !== null) cb = join(cb, this.globalFnRetFor(path.split(".")));
     if (args.every((a) => everything(a, "").size === 0)) return cb;
@@ -2746,7 +2832,7 @@ class FlowAnalysis {
     }
     if (path !== null) {
       const b = this.builtin(path, args, node, fn);
-      if (b) return join(b, this.opaqueCallbacks(null, args, node, fn));
+      if (b) return LANGUAGE_COERCIONS.has(path) ? b : join(b, this.opaqueCallbacks(null, args, node, fn));
       // L4 — an unmodelled global (reflection) handed a row may remove a marker.
       if (!DERIVER_CALLS.has(path)) this.reflectionMayRemoveMarkers(args, node, fn, fn?.scope ?? this.curMod!.scope);
     }
@@ -2868,12 +2954,17 @@ class FlowAnalysis {
 
   /** `t` joined with everything written into the alias classes it may be (a read of the object). */
   private withCellContents(t: Taint): Taint {
-    let r: Taint = { ...t, refs: t.refs ? new Set(t.refs) : undefined };
-    for (const k of refsOf(t)) {
-      const w = this.classWrites.get(this.find(k));
-      if (w) r = join(r, w);
+    // Each alias CLASS once (round 8, perf: a value whose cells have all been
+    // united — a long chain of objects — joined the same class N times).
+    const roots = new Set<string>();
+    for (const k of refsOf(t)) roots.add(this.find(k));
+    const parts: Taint[] = [{ ...t, refs: t.refs ? new Set(t.refs) : undefined }];
+    for (const root of roots) {
+      const w = this.classWrites.get(root);
+      if (w) parts.push(w);
     }
-    return r;
+    if (parts.length === 1) return parts[0];
+    return join(...parts);
   }
 
   /** An allocation-site alias cell (an object the program creates at `node`). */
