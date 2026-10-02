@@ -4495,8 +4495,8 @@ function collectBalancedParenContents(ctx) {
 // `^{ ... }` meta-block at statement position — P5-3.
 //
 // A `^{}` meta block (SPEC §40 — file-/body-top dynamic-import + metadata
-// escape) can open the body of a `${...}` logic escape. The self-host files
-// (`compiler/self-host/{bpp,bs,tab}.scrml`) all do exactly this: the `${...}`
+// escape) can open the body of a `${...}` logic escape. The v1 self-host files
+// (`compiler/self-host/{bpp,bs,tab}.scrml`, retired S447) all did exactly this: the `${...}`
 // body opens with a `^{ const {...} = await import(...) }` meta block, then a
 // run of `export function` declarations follows.
 //
