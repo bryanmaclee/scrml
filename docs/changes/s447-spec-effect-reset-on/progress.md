@@ -7,3 +7,4 @@
 - cross-refs respelled: §6.5.4, §6.6, §6.7.8 .fired, O-061-6, §46.1, §51 ex2, §51.7.1, §51.9, §51.12.1, §53.8, §54.7.4, §55.17.
 - §34 rows: E-LIFECYCLE-006 superseded/reserved, -007/-016/W-010/E-LIN-004 amended, W-006 + H-001 struck; new E-EFFECT-WRITES-STATE, E-EFFECT-WRITE-UNPROVEN, E-EFFECT-NO-DEPS, W-/E-WHEN-EFFECT-DEPRECATED, E-RESET-ON-{INVALID-ENTRY,CYCLE,NOT-WRITABLE,ENGINE-REFUSED}. s34-census --check-new PASS (26 rows).
 - PRIMER §11 row + new §6.6 + 2 inline mentions; known-gaps: g-impl1-when-effect-divergence-s447 (HIGH, DIVERGENCE) + g-bootstrap-effect-reset-on-owed (MED); SPEC-INDEX/FACTS/state regenerated, all --check PASS.
+- provenance: S447 dpa-063 reading 10 (CONFIRMED) cited for transport/not-a-rollback. Tests: unit 21344 pass/0 fail; slice-m2 448/0, m3 60/0, m4 404 (1 todo)/0. Pushing spec/s447-effect-reset-on.

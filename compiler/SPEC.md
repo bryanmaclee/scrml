@@ -4537,7 +4537,10 @@ _scrml_scope_cleanup(_scope_id, () => ws.close());
 > { }` form retires through §63."* · 1a: *"named error + a message naming the fix (`reset-on=` / `<request>` /
 > the writer)"* · 1b: *"Q7 (depth 256) and Q8 (polling) LAPSE"* · 2b: *"`<effect>` does NOT run on mount."* ·
 > ruling:user-voice-scrml.md S446 "`when` re-trigger while a prior run is suspended = (b) newest run wins" —
-> *"b on retrigger, your recs on 6 and 7"* (carried onto `<effect>` below) ·
+> *"b on retrigger, your recs on 6 and 7"* (carried onto `<effect>` below) · ruling:user-voice-scrml.md S447
+> "⭐ CONFIRMED — dpa-063 readings were reviewed and intentional" — *"Ok, yes this one I did review and was
+> intentional."* (reading 10: *"`when` re-trigger is not a rollback (writes before the suspension stand; reads may
+> abort, writes never)"* — the source of the transport and not-a-rollback sentences below) ·
 > dd:`scrml-support/docs/deep-dives/when-reactive-effect-fit-2026-10-02.md` (§3 census, §5 Approach (b), §6 S2,
 > §13 recommendation) · **supersedes:** the whole prior §6.7.4 *"`when @var changes {}` — Reactive Effects"* —
 > in particular *"It MAY read and write `@variables`, call functions, and contain `lift` expressions"*, the
