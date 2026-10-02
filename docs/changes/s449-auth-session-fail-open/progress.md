@@ -67,3 +67,14 @@ Why (a): one spelling per meaning. `session.x` already exists, is bound by the s
 ## Item 4 — g-session-config-bleeds-from-a-sibling-program-and-drops-the-host-prefix — 2026-10-02T14:13-06:00
 
 - ALREADY CLOSED by `75d16f137` (#1094); stale marker. Verified on 2d6d8cd43: B alone -> build + HTTP POST 200 `__Host-scrml_sid … Secure`; A(session-secure="false") + B -> E-MW-008 naming b.scrml, exit 1, no dist/build dir written. Governing §20.5.1 step 3 "With two or more web-application `<program>`s, step 3 answers nothing and `E-MW-008` governs". Locus index.ts:1867 -> REFINED: now :2226 `_readProgramAttr` (returns undefined for a multi-program set) + `session-config-resolve.ts`. Marker flipped to resolved. Direction: none (docs only).
+
+## Item 5 — g-emitted-session-store-opens-sqlite-with-no-busy-timeout-or-wal — 2026-10-02T14:25-06:00
+
+- RELAY REPRODUCED on 2d6d8cd43 (build + _server.js + a second bun:sqlite connection holding BEGIN IMMEDIATE for 400 ms): `journal_mode=delete`; contended login -> 500 after 1 ms; server stderr "database is locked".
+- GOVERNING: no SPEC sentence on WAL / busy_timeout exists (grep: 0). Governing normative ruling = user-voice S385 A1 (user-voice-scrml.md:16276): "WAL + 5s busy-timeout as the safe default". §20.5.1: the store "SHALL be durable (SQLite-backed KV …)". Proceeded on the user-voice ruling + the brief's explicit instruction; flagged as a SPEC follow-up (the ruling never reached the SPEC).
+- FIX: emit-server.ts durable-store IIFE: `PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}` then `PRAGMA journal_mode = WAL`, own try each, before CREATE TABLE. Did NOT touch the in-memory Map line, sqlite-file-target.ts or protect-flow.ts.
+- AFTER: `journal_mode=wal`; contended login -> 200 after 435 ms; no lock error. Cross-page session still works (login 200 -> nested whoami 200 "user=alice").
+- Direction: semantics-changed (a contended write waits up to 5 s instead of failing). Not rejecting — no compile-result change.
+- Test: compiler/tests/integration/session-store-sqlite-defaults.test.js (3 tests; 2 fail on the base emitter). 123 existing session-store tests pass.
+- Locus emit-server.ts `_anySessionWrite` branch: HELD.
+- Side observation (NOT filed, out of scope): `<program auth="optional" csrf="off">` still emits the baseline double-submit gate on its session-write route (a tokenless POST -> 403). It errs in the fail-closed direction, but `csrf="off"` is documented as the opt-out under `auth=` (§40.2). Worth a PA look.
