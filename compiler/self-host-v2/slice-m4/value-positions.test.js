@@ -1,26 +1,25 @@
-// no-write-formulas.test.js — s449 (bryan, user-voice-scrml.md §S449 item 3):
-// "Initializers / derived formulas / markup interpolations may NOT write
-// reactive state — a compile error everywhere, directly or through a called
-// function". The bootstrap judges each such value at its SOURCE (analyze
-// sourcePositions / sourceDiags) by the write summary the `<effect>` rule uses.
+// value-positions.test.js — SPEC §6.15 "Value Positions Do Not Write Reactive
+// State" (bryan, S449, user-voice-scrml.md §S449 item 3): "Evaluating a value
+// position SHALL NOT write any reactive cell, directly or through a called
+// function. A write found by the analysis below is E-VALUE-WRITES-STATE; a
+// value position the analysis cannot prove write-free is
+// E-VALUE-WRITE-UNPROVEN." The bootstrap judges each value position at its
+// SOURCE (analyze valuePositions / valueDiags) by the write summary the
+// `<effect>` rule uses.
 //
 // Positions: a program cell's initializer (a `let` seed), a derived / locked
 // formula, a user declaration's field initializers (attribute and child field),
 // a use-site value, a markup interpolation (program body, a `renders`, a
-// state-child body), a bound attribute value, an `if=` condition, an
-// `<each in=…>` sequence and its `key=`. NOT positions: an event handler, a
-// two-way `bind:` (they run on the user's action, which may write).
-//
-// The codes are PROVISIONAL (the SPEC text is being written in parallel); they
-// are named once, in CODE / UNPROVEN below and in analyze formulaWritesCode() /
-// formulaUnprovenCode().
+// state-child body), every markup attribute value (`title=`, `class=`,
+// `show=`, an `if=` condition, an `<each in=…>` sequence and its `key=`). NOT
+// value positions: an event handler, a two-way `bind:` (action positions).
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors } from "../slice-m1/load-program.js";
 
-const CODE = "E-FORMULA-WRITES-STATE";
-const UNPROVEN = "E-FORMULA-WRITE-UNPROVEN";
+const CODE = "E-VALUE-WRITES-STATE";
+const UNPROVEN = "E-VALUE-WRITE-UNPROVEN";
 
 let mods;
 beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
@@ -52,15 +51,17 @@ describe("S449 item 3 — every position class: a writer is an error at the SOUR
   // [label, src(writer?) , the position's name in the message]
   const CASES = [
     ["a program cell's `let` initializer", (w) => P(with_(`    <let b:int=(${w}(1))/>`), ""), "the initializer of `@b`"],
-    ["a derived formula (a locked cell reading cells)", (w) => P(with_(`    <d:int=(@a + ${w}(1))/>`), ""), "the formula of `@d`"],
-    ["a locked initializer calling a function (a call may read cells: a formula, §66.9)", (w) => P(with_(`    <k:int=(${w}(1))/>`), ""), "the formula of `@k`"],
-    ["a user declaration's attribute-field default (locked, calling a function: a formula)", (w) => P(with_(`    <card title:string=(${w}s())/>\n    renders <b>\${title}</b>`), `        <card/>`), "the formula of `@card.title`"],
+    ["a derived formula (a locked cell reading cells)", (w) => P(with_(`    <d:int=(@a + ${w}(1))/>`), ""), "the formula of derived `@d`"],
+    ["a locked initializer calling a function (a call may read cells: a formula, §66.9)", (w) => P(with_(`    <k:int=(${w}(1))/>`), ""), "the formula of derived `@k`"],
+    ["a user declaration's attribute-field default (locked, calling a function: a formula)", (w) => P(with_(`    <card title:string=(${w}s())/>\n    renders <b>\${title}</b>`), `        <card/>`), "the formula of derived `@card.title`"],
     ["a user declaration's `let` field (a seed)", (w) => P(with_(`    <box let k:int=(${w}(1))/>\n    renders <div>\${k}</div>`), ""), "the initializer of `@box.k`"],
     ["a user declaration's child field", (w) => P(with_(`    <panel title:string>\n        <let page:int=(${w}(1))/>\n    </>\n    renders <div>\${page}</div>`), `        <panel title="p"/>`), "the initializer of `@panel.page`"],
     ["a use-site value", (w) => P(with_(`    <card title:string>\n    </>\n    renders <b>\${title}</b>`), `        <card title=(${w}s())/>`), "the use-site value `title=` of `<card>`"],
-    ["a markup interpolation", (w) => P(W, `        <p>\${${w}(@a)}</p>`), "this markup interpolation"],
-    ["an interpolation in a declaration's `renders`", (w) => P(with_(`    <card title:string>\n    </>\n    renders <b>\${title}\${${w}s()}</b>`), `        <card title="t"/>`), "this markup interpolation"],
-    ["a bound attribute value", (w) => P(W, `        <p title=(${w}s())>x</p>`), "the value of `title=` on `<p>`"],
+    ["a markup interpolation", (w) => P(W, `        <p>\${${w}(@a)}</p>`), "the interpolation"],
+    ["an interpolation in a declaration's `renders`", (w) => P(with_(`    <card title:string>\n    </>\n    renders <b>\${title}\${${w}s()}</b>`), `        <card title="t"/>`), "the interpolation"],
+    ["a bound attribute value", (w) => P(W, `        <p title=(${w}s())>x</p>`), "the `title=` value on `<p>`"],
+    ["a `class=` value", (w) => P(W, `        <p class=(${w}s())>x</p>`), "the `class=` value on `<p>`"],
+    ["a `show=` value", (w) => P(W, `        <p show=(${w}(@a) > 0)>x</p>`), "the `show=` value on `<p>`"],
     ["an `if=` condition", (w) => P(W, `        <p if=(${w}(@a) > 0)>x</p>`), "the `if=` condition on `<p>`"],
     ["an `<each in=…>` sequence", (w) => P(with_(`    <xs:int[]=([1, 2])/>`), `        <ul><each in=@xs.filter(x => ${w}(x) > 0) as x><li>\${x}</li></each></ul>`), "the `<each in=…>` sequence"],
   ];
@@ -79,7 +80,7 @@ describe("S449 item 3 — every position class: a writer is an error at the SOUR
     const src = (w) => P(with_(`    type Ph:enum = { A, B }\n    <ph:Ph=.A single>\n        <A rule=.B>\${${w}s()}</>\n        <B rule=.A : "B">\n    </>`), `        <p><*ph/></p>`);
     const ds = diagsOf(src("g"));
     expect(ds.map((d) => d.code)).toEqual([CODE]);
-    expect(ds[0].message).toContain("this markup interpolation");
+    expect(ds[0].message).toContain("the interpolation");
     clean(src("h"));
   });
 

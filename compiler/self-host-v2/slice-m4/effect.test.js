@@ -340,12 +340,13 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
     expect(frontEnd(mods, files("readCount()")).diags.map((d) => d.code)).toEqual([]);
   });
 
-  // S449 item 3 (initializers / formulas / interpolations may not write) — the DEAD-PROOF for removing the
-  // effect pass's construction and formula summaries. Each program below is a hole the s449 effect review
-  // found (an effect READ that ran a writing initializer / formula lazily); it is now rejected at the
-  // initializer / formula ITSELF, and the effect pass has nothing left to say (no E-EFFECT-WRITES-STATE).
-  // Measured before the removal (progress.md): the source-side error already fired first in every case.
-  const SRC = "E-FORMULA-WRITES-STATE";
+  // SPEC §6.15 (S449 item 3: value positions may not write). Each program below is a hole the s449 effect
+  // review found (an effect READ that ran a writing initializer / formula lazily); it is now rejected at the
+  // initializer / formula ITSELF — E-VALUE-WRITES-STATE, the ONLY diagnostic. The effect pass still follows
+  // the read into the formula / construction (§6.15: "the check stays as defence in depth"), but its report
+  // is that root's echo and is dropped while a root is reported (progress.md: with the value-position check
+  // switched off, these same programs report E-EFFECT-WRITES-STATE through the formula / construction).
+  const SRC = "E-VALUE-WRITES-STATE";
 
   test("S449 item 3: a read that CONSTRUCTS a shared instance whose `let` seed calls a writer — rejected at the seed, not at the effect", async () => {
     // Found by measurement (s449): this program compiled clean, and one click wrote `@a` from inside the
@@ -353,7 +354,7 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
     const decls = `    <let a:int=0/>\n    function bumpA() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <box let k:int=(bumpA())/>\n    renders <div>\${k}</div>`;
     const ds = writes(decls, `<effect deps=[@query]>\${\n        const v = @box.k\n    }</>`);
     expect(W(ds)).toEqual([SRC]);
-    expect(ds[0].message).toContain("the initializer of `@box.k` calls `bumpA()`");
+    expect(ds[0].message).toContain("the initializer of `@box.k` writes `@a` through a call: `bumpA() → @a`");
     // …read through a function, and through a declaration the constructed one renders: the same one error
     expect(W(writes(`${decls}\n    function peek() -> int { return @box.k }`, `<effect deps=[@query]>\${\n        const v = peek()\n    }</>`))).toEqual([SRC]);
     const nested = `    <let a:int=0/>\n    function bumpA() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <inner let k:int=(bumpA())/>\n    renders <i>\${k}</i>\n    <outer let j:int=0/>\n    renders <div><inner/></div>`;
@@ -369,7 +370,7 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
     const eff = (body) => `<effect deps=[@query]>\${\n        ${body}\n    }</>`;
     const direct = writes(decls, eff("const q = @d"));
     expect(W(direct)).toEqual([SRC]);
-    expect(direct[0].message).toContain("the formula of `@d` calls `g()`");
+    expect(direct[0].message).toContain("the formula of derived `@d` writes `@a` through a call: `g() → @a`");
     // through a write-free function that reads it; through a shared instance whose seed reads it
     expect(W(writes(`${decls}\n    function peek() -> int { return @d }`, eff("const q = peek()")))).toEqual([SRC]);
     expect(W(writes(`${decls}\n    <box let k:int=(@d)/>\n    renders <div>\${k}</div>`, eff("const q = @box.k")))).toEqual([SRC]);

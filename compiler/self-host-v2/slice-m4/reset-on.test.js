@@ -179,16 +179,16 @@ describe("§6.8.4 — codes", () => {
     // trigger @q again — an endless reset loop at run time. It was refused here by a reset-specific
     // E-BOOTSTRAP-UNSUPPORTED; S449 item 3 (an initializer may not write) rejects it at its source, so that
     // refusal is removed — the DEAD-PROOF: the source-side error is the only one, for every shape it caught.
-    const SRC = "E-FORMULA-WRITES-STATE";
+    const SRC = "E-VALUE-WRITES-STATE";
     const loop = diagsOf(P(`    <let q:int=0/>\n    function bump() -> int {\n        @q = @q + 1\n        return 1\n    }\n    <let page:int=(bump()) reset-on=[@q]/>`, ""));
     expect(loop.map((d) => d.code)).toEqual([SRC]);
-    expect(loop[0].message).toContain("the initializer of `@page` calls `bump()`, which writes `@q`: `bump() → @q`");
+    expect(loop[0].message).toContain("the initializer of `@page` writes `@q` through a call: `bump() → @q`");
     // a writer of an UNRELATED cell
     expect(codes(P(`    <let q:int=0/>\n    <let other:int=0/>\n    function note() -> int {\n        @other = 1\n        return 1\n    }\n    <let page:int=(note()) reset-on=[@q]/>`, ""))).toEqual([SRC]);
     // the writer reached through a DERIVED cell the initializer reads — rejected at that cell's formula
     const viaDerived = diagsOf(P(`    <let q:int=0/>\n    function g() -> int {\n        @q = @q + 1\n        return 1\n    }\n    <d:int=(@q + g())/>\n    <let page:int=(@d) reset-on=[@q]/>`, ""));
     expect(viaDerived.map((d) => d.code)).toEqual([SRC]);
-    expect(viaDerived[0].message).toContain("the formula of `@d` calls `g()`");
+    expect(viaDerived[0].message).toContain("the formula of derived `@d` writes `@q` through a call: `g() → @q`");
     // negative: an initializer that calls a write-free function
     expect(codes(P(`    <let q:int=0/>\n    fn one() -> int { return 1 }\n    <let page:int=(one()) reset-on=[@q]/>`, ""))).toEqual([]);
   });
