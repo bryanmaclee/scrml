@@ -9966,7 +9966,10 @@ halves, and a conformant implementation SHALL enforce both:
      iterator's `.next().value`), a write into a prototype (`Object.setPrototypeOf(o, p)`,
      `Object.create(p)`, a literal's `__proto__: p`), and a platform method run with an explicit
      receiver, which may write its arguments into it (`Array.prototype.push.call(arr, h)`,
-     `Reflect.apply(Array.prototype.push, arr, [h])` — S447 round 8, measured on base) — string
+     `Reflect.apply(Array.prototype.push, arr, [h])` — S447 round 8, measured on base), the value
+     of an assignment expression (`x = (globalThis.k = {})` IS the object `globalThis.k` now holds),
+     and a function an accessor returns (it is the property's value — callable as a method, and a
+     hook under a key the language calls) — S447 round 8b, each measured on base — string
      concatenation and template interpolation, conditional and logical operators, `await`, array
      callbacks, getters and `toJSON` the serializer invokes, `throw` → `catch`, promise resolution,
      encodings (`Buffer`, `btoa`, `encodeURIComponent`, character codes), and serializing built-ins.
@@ -9996,7 +9999,9 @@ halves, and a conformant implementation SHALL enforce both:
      results still carry their arguments' provenance. (Treating them as opaque applied every
      function reachable from the argument at every coercion: a chain of 240 objects, each with a
      `toString` returning `String(this.prev)`, took 13.7 s against 0.47 s before round 7 —
-     review-measured.)
+     review-measured.) A function the PROGRAM stores in the global heap under one of these names
+     (`globalThis.String = …`) is not the coercion: it is applied as any global function is.
+     > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 5 (conditional; reviewer: SOUND)
    - **Global stores.** Every name the compile does not bind (`globalThis`, `process`, `Bun`, …) and
      `import.meta` denote ONE global heap shared by every server module and every request. A value
      whose provenance includes a `protect=` column, written into it outside a descriptor-bearing row
@@ -10006,7 +10011,11 @@ halves, and a conformant implementation SHALL enforce both:
      descriptor and is stripped wherever it later leaves. (Measured before round 6: a value stored in
      `globalThis` / `process.env` by one server function and returned by another served the hash.)
      A FUNCTION kept in a global is analysed at the calls that name it (`globalThis.clamp(…)`,
-     `clamp(…)`) — or at every global call when it was stored where no name is readable — never at
+     `clamp(…)`) — with the call's arguments whenever they carry protected data OR hand it a
+     function (the callee may call that function with protected data of its own in scope:
+     `globalThis.run = function (f) { f(u.passwordHash) }; globalThis.run(function (x) { s = x })`
+     served the hash before S447 round 8b) — or at every global call when it was stored where no
+     name is readable (or in an element position, at every element read) — never at
      unrelated platform calls (`Math.abs(…)`); a diagnostic SHALL NOT blame code the author did not
      write for a global store the author made.
    - **The derived-flow exemption is an explicit ALLOWLIST, not "any callee the module does not
