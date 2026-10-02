@@ -32,15 +32,23 @@
 // ---------------------------------------------------------------------------
 // Stats — live effect / listener counts, for tests and devtools.
 // ---------------------------------------------------------------------------
-export const stats = { effects: 0, deriveds: 0, listeners: 0, instances: 0 };
+export const stats = { effects: 0, deriveds: 0, listeners: 0, instances: 0, depEffects: 0 };
 
 // ---------------------------------------------------------------------------
 // Scopes.
+//
+// Teardown order (SPEC §6.7.2): depth-first — every child scope is torn down
+// before its parent begins; then, for the scope itself, step 1 unregisters its
+// `<effect>`s, and the remaining cleanups (listeners, render effects, DOM,
+// records) run last-in-first-out. (Steps 2–4 — <timer>/<poll>, cleanup(),
+// animationFrame — have no bootstrap form yet; they join the LIFO list after
+// step 1 when they land.)
 // ---------------------------------------------------------------------------
 export class Scope {
   constructor(parent) {
     this.parent = parent;
     this.children = new Set();
+    this.depEffects = [];
     this.cleanups = [];
     this.disposed = false;
     if (parent) parent.children.add(this);
@@ -50,15 +58,22 @@ export class Scope {
     if (this.disposed) { cleanup(); return; }
     this.cleanups.push(cleanup);
   }
+  /** Register an `<effect>`'s unregistration — teardown step 1 (§6.7.2). */
+  ownEffect(unregister) {
+    if (this.disposed) { unregister(); return; }
+    this.depEffects.push(unregister);
+  }
   child() { return new Scope(this); }
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
     batch(() => {
       for (const c of [...this.children].reverse()) c.dispose();
+      for (const unregister of this.depEffects) unregister();
       for (let i = this.cleanups.length - 1; i >= 0; i--) this.cleanups[i]();
     });
     this.children.clear();
+    this.depEffects = [];
     this.cleanups = [];
     if (this.parent) this.parent.children.delete(this);
   }
@@ -87,6 +102,10 @@ let constructing = 0;
 let owed = [];
 const SEEDING = Symbol("seeding");
 const queue = new Set();
+// `<effect>` bodies (§6.7.4) wait until the render / structure effects of the
+// same flush have settled: an `if=` region or `<each>` row the same batch
+// unmounts unregisters its effects (teardown step 1) BEFORE they could run.
+const effectQueue = new Set();
 
 function track(source) {
   if (tracking) {
@@ -113,11 +132,23 @@ export function batch(fn) {
   }
 }
 
+// Render / structure effects first, then `<effect>` bodies. An effect body
+// cannot write a reactive cell (§6.7.4 — a compile error, directly or through
+// a called function), so running one queues nothing: there is no cascade to
+// order or bound, and this is a plain loop.
 function flush() {
-  while (queue.size > 0) {
-    const [e] = queue;
-    queue.delete(e);
-    if (!e.disposed) e.run();
+  for (;;) {
+    if (queue.size > 0) {
+      const [e] = queue;
+      queue.delete(e);
+      if (!e.disposed) e.run();
+    } else if (effectQueue.size > 0) {
+      const [d] = effectQueue;
+      effectQueue.delete(d);
+      if (!d.disposed) d.run();
+    } else {
+      return;
+    }
   }
 }
 
@@ -214,6 +245,130 @@ class Effect {
 export function effect(scope, fn) {
   requireScope(scope, "an effect");
   return new Effect(scope, fn);
+}
+
+// ---------------------------------------------------------------------------
+// `<effect deps=[…]>${ body }</>` (SPEC §6.7.4) and the suspendable task layer.
+//
+// A DepEffect subscribes to EXACTLY its dependency cells (it is an observer of
+// each — the set every write fans out to) and never tracks its body: reading
+// an unlisted cell in the body is valid and is not a trigger. It does NOT run
+// when it is registered (S447 2b: not on mount, not on remount). A change
+// queues it; it runs once per flush, after the writing batch completes and its
+// render / structure effects have settled — however many of its dependencies
+// that batch changed. Change detection is `Cell.set`'s reference identity.
+// A derived value is recomputed on read (lazy pull), so a derived value the
+// body reads already reflects the change — the §6.7.4 "derived flush before
+// effect bodies" rule holds by construction.
+//
+// The body may not write any reactive cell (E-EFFECT-WRITES-STATE, decided at
+// compile time from a transitive write summary). Nothing here guards against a
+// write: the compile-time rule is the guarantee, and a runtime bound would mean
+// the rule had a hole.
+//
+// Each run gets a TASK — the handle a suspension (`suspend`, Core
+// Stmt.Suspend, the CPS split of §19.9.8) resumes through. THE NEWEST RUN
+// WINS (S446 (b), carried onto <effect> by §6.7.4): a run that starts while an
+// earlier run of the same effect is suspended cancels that run's task, so its
+// continuation never resumes and the value it was waiting for is discarded.
+// Unregistering the effect (its scope's teardown, step 1) cancels its tasks
+// the same way. Transport (§6.7.7.1): the task layer never aborts an in-flight
+// call — it discards the result. Abort is permitted only for a READ call
+// ("MAY"), never required, and never permitted otherwise; discarding everywhere
+// is the conforming choice that needs no classification at run time.
+// ---------------------------------------------------------------------------
+class Task {
+  constructor(owner) {
+    this.owner = owner;
+    this.cancelled = false;
+    this.pending = 0;
+  }
+  cancel() { this.cancelled = true; }
+}
+
+class DepEffect {
+  constructor(scope, deps, body) {
+    this.deps = deps;
+    this.body = body;
+    this.disposed = false;
+    this.tasks = new Set();
+    for (const d of deps) d.observers.add(this);
+    stats.depEffects++;
+    scope.ownEffect(() => this.unregister());
+  }
+  markStale() {
+    if (this.disposed) return;
+    effectQueue.add(this);
+    if (batchDepth === 0) flush();
+  }
+  run() {
+    // The newest run wins: an earlier run still suspended never resumes.
+    for (const t of this.tasks) t.cancel();
+    this.tasks.clear();
+    const task = new Task(this);
+    this.tasks.add(task);
+    try {
+      untrack(() => this.body(task));
+    } finally {
+      this.settled(task);
+    }
+  }
+  /** A task with no suspension pending is finished. */
+  settled(task) {
+    if (task.pending === 0) this.tasks.delete(task);
+  }
+  unregister() {
+    if (this.disposed) return;
+    this.disposed = true;
+    effectQueue.delete(this);
+    for (const d of this.deps) d.observers.delete(this);
+    for (const t of this.tasks) t.cancel();
+    this.tasks.clear();
+    stats.depEffects--;
+  }
+}
+
+/**
+ * Register `<effect deps=[…]>${ body }</>` in `scope` (§6.7.4). `deps` are the
+ * dependency CELLS; `body(task)` is the effect. It never runs at registration;
+ * it is unregistered when `scope` is disposed (teardown step 1).
+ */
+export function effectOn(scope, deps, body) {
+  requireScope(scope, "an <effect>");
+  if (deps.length === 0) throw new Error("an <effect> needs at least one dependency (§6.7.4, E-EFFECT-NO-DEPS)");
+  for (const d of deps) {
+    if (!(d instanceof Cell)) throw new Error("an <effect> dependency must be a mutable cell (§6.7.4, E-LIFECYCLE-007)");
+  }
+  new DepEffect(scope, deps, body);
+}
+
+/**
+ * Suspend `task` on `value` (Core Stmt.Suspend — the CPS split, §19.9.8):
+ * when it settles, run the continuation `k(v)` untracked — unless the task was
+ * cancelled meanwhile (a newer run started, or the effect was unregistered),
+ * in which case nothing runs. A rejection reaching a live task is re-raised
+ * (never swallowed); an effect body's §19 error context arrives with server
+ * calls. A rejection on a cancelled task is dropped with its result.
+ */
+export function suspend(task, value, k) {
+  task.pending++;
+  Promise.resolve(value).then(
+    (v) => {
+      task.pending--;
+      if (task.cancelled) return;
+      try {
+        untrack(() => k(v));
+      } finally {
+        task.owner.settled(task);
+      }
+    },
+    (e) => {
+      task.pending--;
+      if (task.cancelled) return;
+      task.owner.settled(task);
+      throw e;
+    },
+  );
 }
 
 /** A writable cell holding `v`. */
