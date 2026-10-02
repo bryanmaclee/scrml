@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 235 | 5 |
 | MED | 466 | 1 |
-| LOW | 222 | 0 |
+| LOW | 223 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22154,8 +22154,8 @@ absence; impl#1 emits neither code). Related, not duplicated: the SPEC change's 
 (open — the impl#1 divergence measured on legacy-dialect programs, incl. the one positive impl#1 conformance case
 §6.15 rejects, `control-flow/ctrl-027-arm-body-tilde-read-and-recovery-pos`).
 
-### g-bootstrap-slice-m2-render-hole-write-tests-s449 — bootstrap slice-m2: 5 `front.test.js` tests compile programs that WRITE from a render hole on purpose; §6.15 now rejects them, so the slice-m2 gate is red — `NEW S449; MED; open`
-<!-- @gap id=g-bootstrap-slice-m2-render-hole-write-tests-s449 sev=MED status=open locus=compiler/self-host-v2/slice-m2/front.test.js(describe "S440 N1 — the spread snapshot…" — the two "side-effecting override in a render hole" tests; describe "S440 F-A — a Commit outside a handler batch…" — cases A, B and "REFUSED") prov=empirical:s449-bootstrap-no-write-formulas-slice-m2-run -->
+### g-bootstrap-slice-m2-render-hole-write-tests-s449 — bootstrap slice-m2: 5 `front.test.js` tests compile programs that WRITE from a render hole on purpose; §6.15 now rejects them, so the slice-m2 gate is red — `NEW S449; MED; RESOLVED S449 (s449-bootstrap-no-write-formulas, PA fork (a))`
+<!-- @gap id=g-bootstrap-slice-m2-render-hole-write-tests-s449 sev=MED status=resolved resolved-by=s449-bootstrap-no-write-formulas locus=compiler/self-host-v2/slice-m2/front.test.js(describe "S440 N1 — the spread snapshot…" — the two "side-effecting override in a render hole" tests; describe "S440 F-A — a Commit outside a handler batch…" — cases A, B and "REFUSED") prov=empirical:s449-bootstrap-no-write-formulas-slice-m2-run -->
 
 `<p>${e1()}</p>` / `<p>${e2()}</p>` (N1: e1 writes `@h` by spread, e2 writes `@h.c`; a render-hole write loop's
 convergence) and `<p>${react()}</p>` (F-A: `react()` commits `@g` by spread from a render hole — outside a handler
@@ -22167,3 +22167,52 @@ position or effect body may write, and `reset-on=` resets drain inside the write
 lowered Core (the effect.test.js C11 pattern), plus one assertion that the source program is now E-VALUE-WRITES-STATE;
 (b) delete the five as obsolete (the `rt.batch` wrap and spread snapshot stay, as unreachable defence); (c) keep them
 red until a writer-in-render path is re-legalized (none is planned).
+
+**RESOLVED — PA chose (a).** Each of the five now (1) asserts the ORIGINAL source is E-VALUE-WRITES-STATE (N1: one per
+render hole; F-A: every code is E-VALUE-WRITES-STATE), (2) compiles the write-free TWIN (each render-hole function
+returns without writing; its writing body is declared as `<name>W`, called by nothing), (3) grafts `<name>W`'s lowered
+body into `<name>` in the Core (`graftWriters`, the slice-m4 C11 pattern), checks the grafted Core (`checkCore` = [])
+and runs the ORIGINAL runtime assertions unchanged. slice-m2 back to 448/0. Bite: graft disabled → exactly these five
+RED (the runtime guarantees are what they measure).
+
+### g-impl1-client-mangler-renames-local-shadow-in-match-arm — impl#1: a local `const` that shadows a file-scope `fn` is rewritten to the mangled FUNCTION when it is a `match` arm's value, in a client module of a multi-file compile — `NEW S449; MED; open`
+<!-- @gap id=g-impl1-client-mangler-renames-local-shadow-in-match-arm sev=MED status=open locus=compiler/src/codegen/emit-client.ts:3201(combinedRegex — the post-fn-name-mangle whole-buffer rewrite, scope-blind) prov=empirical:S449-bootstrap-agent -->
+Hit while building `compiler/self-host-v2/analyze.scrml` (`attrWhat`: a local `const plain` beside the file's
+`fn plain`; the diagnostic message printed that function's JS source). Minimal reproducer, compiled on `43b6df6f6` with
+`bun compiler/bin/scrml.js compile <dir> --output-dir <dir>/out`:
+```scrml
+// shadow.scrml
+${
+    type K:enum = { A, B }
+    fn plain(n: int) -> int { return n }
+    export fn label(k: K) -> string {
+        const plain: string = "local"
+        return match k {
+            .A :> plain
+            .B :> plain
+        }
+    }
+}
+// entry.scrml
+<program>
+    import { label } from "./shadow.scrml"
+</program>
+```
+`shadow.client.js` emits `function _scrml_plain_1(n)`, keeps `const plain = "local";`, and lowers both arms to
+`return _scrml_plain_1;` — `label(.A)` returns the FUNCTION, not `"local"`. Exit 0, no diagnostic (silent wrong
+value). Compiling `shadow.scrml` ALONE emits the arms correctly (`return plain;`, the fn unmangled), so the defect is
+the mangle a multi-file client compile applies. Same scope-blind family as
+`g-local-shadow-of-file-scope-fn-misresolved-as-call-argument` (call-argument position) and
+`g-mangler-scope-blind-shorthand-key-rename`; this is the `match`-arm-value position. Disposition: impl#1 frozen —
+filed, not fixed; the bootstrap source works around it by not shadowing (`plainWhat`).
+
+### g-spec-6-15-validator-argument-value-position-silent — SPEC §6.15 does not say whether a validator argument (`length(>=f())`, `min(f())`, `eq(@x)`) is a value position — `NEW S449; LOW; open`
+<!-- @gap id=g-spec-6-15-validator-argument-value-position-silent sev=LOW status=open locus=searched:§6.15,§55 prov=empirical:S449-bootstrap-agent -->
+§6.15's value-position list (initializers, derived formulas, render expressions) and its not-value-position list
+(handlers, `bind:`, function bodies, lifecycle bodies, engine `effect=` / `<onTransition>`, body-top statement lists)
+both omit §55 validator arguments, which are expressions evaluated by the validity surface on every check. A writer
+called there (`<let name:string length(>=minLen())/>` with `minLen()` writing a cell) is neither admitted nor refused
+by the text. The bootstrap does not judge them today (`valuePositions` skips validator arguments) and cannot reach
+the case: it lowers validators only to their exact HTML-native attributes and refuses other forms. SPEC decision
+owed; the natural reading (an argument evaluated to produce a value → a value position) would add them to list
+item 1/3.
