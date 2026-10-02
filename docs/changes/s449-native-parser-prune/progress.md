@@ -23,3 +23,31 @@ worktree (gitignored; nothing to delete in git). s34-census after: IMPL-SITES 32
 codes counted as "implemented" ONLY because a mirror `.scrml` named them (the census does not strip
 comments in `.scrml`). The executable `.js` never emitted them, so the census is now more accurate,
 not regressed. Flag for the PA: three §34 rows now read FALSE-CLAIM in the census triage.
+
+## Batch 2 — within-node parity, its allowlist + classifier, the dual-pipeline canary, the CI step
+
+- DELETE compiler/tests/parser-conformance-within-node.test.js (260) + parser-conformance-within-node-allowlist.json (6,736)
+- DELETE compiler/src/native-parser-canary/within-node-classifier.ts (537) — its only importer was the within-node test
+- DELETE compiler/tests/parser-conformance/dual-pipeline-canary.js (919) + parser-conformance-canary.test.js (990, unit tests of the canary's diff functions only) + parser-conformance/live-phantom-fixture.scrml (702, canary fixture)
+- DELETE compiler/tests/parser-conformance.test.js (244) + parser-conformance/parsers.js (141) + parser-conformance/tier-diff.js (340): acorn compared against `scrmlNativeParserStub`, which returns acorn's output — it never exercised the native parser
+- ci.yml `tracking`: "Within-node parser-parity" step removed (comment left in its place); header line updated
+- Root glob after: 2239 pass · 0 skip · 0 fail · 11 files · 2.61 s (was 6600 tests · 25 skip · 11.80 s). The 25 skips were the canary's gap-ledger `test.skip`s.
+- NOT touched (out of brief scope, listed for the PA): 15 tracked `scratch/m65b*.mjs` scripts import the deleted classifier / canary (allowlist regen + phase-0 probes). They are dead now; history keeps them.
+
+### Root-level 14 — disposition
+| file | disposition | reason |
+|---|---|---|
+| native-match-arm-same-line.test.js | KEEP | direct `lex`+`parseExpr` tests; `parseExpr` runs in production via nativeParseFile (`<match>` arm / component / `^{}` re-parse) |
+| native-match-literal-arm.test.js | KEEP | same — `parseMatchArmPattern` literal arms |
+| native-url-comment.test.js | KEEP | `urlSlashesAt` + `parseMarkup` — markup trampoline used by component re-parse |
+| parser-conformance-canary.test.js | DELETE | tests only the dual-pipeline canary's diff/classify functions |
+| parser-conformance-collect-hoisted.test.js | KEEP | `collectHoisted` runs inside every nativeParseFile call; curated live-parity block (§5) is a fixed-input correctness oracle, not a drift ledger |
+| parser-conformance-corpus.test.js | RE-POINT | bench + `parseProgram` no-throw kept; dual-pipeline canary + aggregate + informational histogram removed; the canary's "no corpus file crashes the native pipeline" guarantee kept, asserted on `nativeParseFile` directly |
+| parser-conformance-each-contextual-sigil.test.js | RE-POINT | §1–§3 direct lexer/bridge tests kept; §4 native==default compile parity → default-pipeline compile only |
+| parser-conformance-expr.test.js | KEEP | `parseExpr` vs Acorn as correctness oracle + native-only shapes; production-reached |
+| parser-conformance-lexer.test.js | KEEP | `lex.js` — the bootstrap lexer oracle AND production-reached |
+| parser-conformance-markup.test.js | KEEP | `parseMarkup` and helpers — component re-parse; curated live-parity blocks (MK1.3 markup-bench, F1 tokens, P4-2) kept as fixed-input oracles |
+| parser-conformance-parse-file.test.js | KEEP | `nativeParseFile` assembler — the production entry point |
+| parser-conformance-stmt.test.js | KEEP | `parseProgram` — defer lint + forbidden-JS in production |
+| parser-conformance.test.js | DELETE | acorn vs acorn-stub; never touched the native parser |
+| parser-conformance-within-node.test.js | DELETE | the parity test the ruling names |
