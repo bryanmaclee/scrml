@@ -102,3 +102,18 @@ Why (a): one spelling per meaning. `session.x` already exists, is bound by the s
 - Before: a 403 on the retry still nulled `_scrml_session` and redirected to loginRedirect, so the user believed they were logged out while the server session lived.
 - Now: only `resp.ok` clears the projection and redirects (resolves `true`). On a final non-2xx, or a network rejection, the projection is left intact, the call resolves `false`, and the failure is reported through `_scrml_error_boundary_log('session.destroy', err)`. That is the existing client error surface: it lives in the always-included 'errors' runtime chunk and is the reporter the server-fn call IIFEs already route rejections to. destroy() does not reject, because `onclick=session.destroy()` is wired without a `.catch`; a rejection there would be a silent unhandledrejection.
 - Test: session-destroy-csrf.test.js now 8 tests: 403->200 logs out, direct 200 logs out (1 POST), stubbed 403x2 -> no redirect, projection unchanged, one logged failure naming 403, resolves false. 3 fail on the previous emitter.
+
+### F2 — merged origin/main (ba37b1a10)
+- One conflict, docs/FACTS.md. Resolved by taking main's file and re-running `bun scripts/facts.ts --write`, not by hand (`--check` PASS; the only diff vs main is the three generated figures). known-gaps.md merged clean.
+
+### F3 — filed six review residuals (docs/known-gaps.md, new `## §S449-auth` section, prov=review:S449-auth-review)
+- g-mixed-csrf-build-destroy-gate-depends-on-module-order (LOW; RELAYED from the reviewer)
+- g-auth-attr-empty-string-is-silent-and-public (NIT, filed as sev=LOW since the ledger has no NIT tier; belongs with R1)
+- g-auth-login-lints-fire-for-auth-optional (NIT -> sev=LOW)
+- g-w-attr-002-program-text-wrong-for-nested-program (NIT -> sev=LOW)
+- g-auth-optional-session-destroy-reference-error (MED)
+- g-auth-optional-csrf-off-still-emits-baseline-double-submit (LOW)
+- (b), (c), (d) and (e) were re-executed on ba37b1a10 and all reproduce. Not fixed.
+
+### F4 — CORRECTION to the item-1 entry above
+The item-1 section says "direction = inert to pass/fail (diagnostic set only)". That is wrong about EMITTED output. Removing the auth-graph program gate for an unrecognized literal (`auth="Required"`) also changes what the reachability / client-bundle stages see, so the emitted client bundle changes. Verified on ba37b1a10: `<program auth="Required">` now emits a client.js byte-identical to `<program auth="none">`'s. That is the correct bundle (§52.13.2: "applies no auth gate at all"), but it is an emitted-output change, not diagnostics-only. Pass/fail is still unchanged (0/2204 corpus units newly fail).
