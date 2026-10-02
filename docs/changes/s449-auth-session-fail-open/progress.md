@@ -58,3 +58,8 @@ function saveNote(body: string) {
 // (b):   writes the server session's userId (NULL when anonymous)
 ```
 Why (a): one spelling per meaning. `session.x` already exists, is bound by the server prologue (Direction B, S316) and is the documented §20.5 surface. (a) can later be relaxed to (b) without breaking anyone; going from (b) back to (a) would break code.
+
+## Item 3 — g-session-store-keyed-per-compilation-unit-not-per-program — 2026-10-02T14:10-06:00
+
+- ALREADY CLOSED by `bf3b111dc` (#1062, 2026-09-26); stale `status=open` marker. Verified by execution on 2d6d8cd43: two-unit fixture (index.scrml session.set + pages/admin/panel.scrml reading session.userId), scrml build + _server.js: both units resolve `<dist>/.scrml-sessions.db`; POST login -> 200 + `__Host-scrml_sid`; POST nested whoami with that cookie -> 200 "user=alice". Governing §20.5.1: "The default store location is `.scrml-sessions.db` at the **DIST ROOT** of the build, shared by every emitted server unit regardless of the subdirectory that unit lands in". Existing pin: compiler/tests/integration/session-program-scope-multi-unit.test.js (7 pass). Marker flipped to resolved. Direction: none (docs only).
+- Locus (emit-server.ts `_scrml_session_db_path` emit): HELD as the historical locus.
