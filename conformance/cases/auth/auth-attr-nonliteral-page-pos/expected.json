@@ -1,0 +1,12 @@
+{
+  "id": "auth-attr-nonliteral-page-pos",
+  "description": "§52.13 (S449) — a NON-literal `<page auth=${mode}>` declares nothing (§40.2: 'a non-literal value declares nothing'); it now emits W-ATTR-002 saying so. Before S449 it compiled with no diagnostic at all.",
+  "language-version": "1.0",
+  "spec": "§52.13, §52.13.2, §40.2",
+  "source-test": "compiler/tests/integration/auth-attr-invalid-or-dynamic-value.test.js",
+  "rationale": "§52.13: `auth=` 'accepts exactly three literal values'. §40.2 member pages: 'an unrecognized literal … or a non-literal value declares nothing, and the page inherits'. §52.13.2: silent acceptance of an attribute value with no compile-time effect is a P0 finding.",
+  "expect": {
+    "codes": ["W-ATTR-002"],
+    "severity": { "W-ATTR-002": "warning" }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "auth-attr-nonliteral-program-pos",
+  "description": "§52.13 (S449, g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth) — a NON-literal `<program auth=@mode>` is not one of the three accepted literals and applies no auth gate; it now emits W-ATTR-002 stating that effect. Before S449 this shape (and `auth=${…}`, bare `auth`) compiled with NO diagnostic at all to a public app. It is not treated as a gate: no W-AUTH-LOGIN-MISSING.",
+  "language-version": "1.0",
+  "spec": "§52.13, §52.13.2",
+  "source-test": "compiler/tests/integration/auth-attr-invalid-or-dynamic-value.test.js",
+  "rationale": "§52.13: 'The `auth=` attribute … accepts exactly three literal values'. §52.13.2: 'On a `<program>`, an unrecognized value applies no auth gate at all' and 'silent acceptance of attribute values that have no compile-time effect is itself a P0 finding'. The runtime half (the program serving publicly) is deliberately NOT pinned: whether this should instead be a compile error is an open ruling (docs/changes/s449-auth-session-fail-open/progress.md).",
+  "expect": {
+    "codes": ["W-ATTR-002"],
+    "notCodes": ["W-AUTH-LOGIN-MISSING", "I-AUTH-REDIRECT-UNRESOLVED"],
+    "severity": { "W-ATTR-002": "warning" }
+  }
+}
