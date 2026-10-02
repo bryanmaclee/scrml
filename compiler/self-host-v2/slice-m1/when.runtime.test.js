@@ -387,13 +387,14 @@ describe("provenance — only CYCLIC re-triggers are capped; runaway growth is b
     });
     expect(thrown).toBe(null);
     expect(runs).toBeGreaterThan(100);              // it ran: the budget is not a cycle cap
-    expect(runs).toBeLessThanOrEqual(10000);        // and it stopped
-    expect(errs.some((e) => /runaway — one change caused more than 10000 when runs/.test(e))).toBe(true);
+    expect(runs).toBeLessThanOrEqual(5001);         // and it stopped (5,000 caused runs + the external one)
+    expect(errs.some((e) => /runaway growth — one change made more than 5000 when runs while creating \d+ new whens/.test(e))).toBe(true);
+    expect(errs.some((e) => /page state may now be inconsistent/.test(e))).toBe(true);
     // the page is alive: the next external change runs the registered whens again (within a fresh budget)
     const before = runs;
     const errs2 = await withErrors(async () => { k.set(k.peek() + 1); await drain(); });
     expect(runs).toBeGreaterThan(before);
-    expect(errs2.some((e) => /runaway/.test(e))).toBe(true);
+    expect(errs2.some((e) => /runaway growth/.test(e))).toBe(true);
     scope.dispose();
   });
 
@@ -415,11 +416,126 @@ describe("provenance — only CYCLIC re-triggers are capped; runaway growth is b
   test("a long NON-cyclic chain of distinct whens runs iteratively — no stack overflow below the budget", () => {
     // mutation RED: flush() running Whens re-entrantly (no `whenRunning` guard) → RangeError at a few thousand
     const scope = rt.root.child();
-    const N = 6000;
+    // (4,900 links: under the 5,000 caused-run budget; the re-entrant flush overflowed well below that)
+    const N = 4900;
     const cells = Array.from({ length: N + 1 }, () => rt.cell(0));
     for (let i = 0; i < N; i++) rt.when(scope, [cells[i]], () => cells[i + 1].set(1));
     cells[0].set(1);
     expect(cells[N].peek()).toBe(1);
+    scope.dispose();
+  });
+});
+
+// Review r3b. F1: the iterative flush (r3) ran a When's pending re-run before
+// the Whens its first run had queued, so a downstream When saw only the
+// second run's writes. F2: the budget charged registrations, so a run that
+// created >budget rows was stopped and its later continuations dropped
+// (`loading` stuck true). F3: a bounded cascade was reported as "runaway".
+describe("review r3b — re-run order, runs-only budget, honest stop report", () => {
+  async function withErrors(fn) {
+    const errs = [];
+    const saved = console.error;
+    console.error = (...a) => errs.push(a.join(" "));
+    try { await fn(); } finally { console.error = saved; }
+    return errs;
+  }
+  async function drain() { for (let i = 0; i < 10; i++) await tick(); }
+
+  test("F1: a downstream when observes run 1's write before the upstream's re-run (A1 B1 A2 B2 — the r2 / impl#1 order)", () => {
+    // mutation RED: step() re-running in place instead of parking on rerunStack → ["A1","A2","B2"]
+    const scope = rt.root.child();
+    const x = rt.cell(0);
+    const y = rt.cell(0);
+    const log = [];
+    rt.when(scope, [x], () => { log.push("A" + x.peek()); y.set(y.peek() + 1); if (x.peek() < 2) x.set(x.peek() + 1); });
+    rt.when(scope, [y], () => log.push("B" + y.peek()));
+    x.set(1);
+    expect(log).toEqual(["A1", "B1", "A2", "B2"]);
+    scope.dispose();
+  });
+
+  test("F1: the re-run waits for the whole transitive drain, innermost first (B's own re-run before A's)", () => {
+    // mutation RED: rerunStack popped FIFO (shift) instead of LIFO
+    const scope = rt.root.child();
+    const x = rt.cell(0), y = rt.cell(0), z = rt.cell(0);
+    const log = [];
+    rt.when(scope, [x], () => { log.push("A" + x.peek()); y.set(y.peek() + 1); if (x.peek() < 2) x.set(x.peek() + 1); });
+    rt.when(scope, [y], () => { log.push("B" + y.peek()); z.set(z.peek() + 1); if (y.peek() === 1) y.set(10); });
+    rt.when(scope, [z], () => log.push("C" + z.peek()));
+    x.set(1);
+    // A1 → queues B; A pending. B1 → queues C; B pending (y=10). C1. Queue empty → pop B (innermost): B10 → C2.
+    // Then A2 → y=11 → B11 → C3.
+    expect(log).toEqual(["A1", "B1", "C1", "B10", "C2", "A2", "B11", "C3"]);
+    scope.dispose();
+  });
+
+  test("F2: an async loader that creates 12,000 row whens in one continuation completes — `loading` ends false, no report", async () => {
+    // mutation RED: a When registration charging the event budget (r3) → the second continuation is dropped
+    const scope = rt.root.child();
+    const page = rt.cell(0), loading = rt.cell(false), tickc = rt.cell(0);
+    let doneSeen = 0;
+    rt.when(scope, [page], (t) => {
+      loading.set(true);
+      rt.suspend(t, 1, () => {
+        const rows = scope.child();
+        for (let i = 0; i < 12000; i++) rt.when(rows, [tickc], () => {});
+        rt.suspend(t, 2, () => loading.set(false));
+      });
+    });
+    rt.when(scope, [loading], () => { if (!loading.peek()) doneSeen++; });
+    const errs = await withErrors(async () => { page.set(1); await drain(); });
+    expect(loading.peek()).toBe(false);
+    expect(doneSeen).toBe(1);
+    expect(errs).toEqual([]);
+    scope.dispose();
+  });
+
+  test("F3: a BOUNDED cascade over budget (n whens all writing their shared dep; no whens created) is reported as such — not as runaway growth", () => {
+    // mutation RED: reportStop ignoring `created` (every stop called "runaway growth")
+    const scope = rt.root.child();
+    const k = rt.cell(0);
+    let runs = 0;
+    for (let i = 0; i < 60; i++) rt.when(scope, [k], () => { runs++; k.set(k.peek() + 1); });
+    const errs = [];
+    const saved = console.error;
+    console.error = (...a) => errs.push(a.join(" "));
+    try { k.set(1); } finally { console.error = saved; }
+    expect(runs).toBeLessThanOrEqual(5060);
+    expect(errs.some((e) => /when cascade over budget .* no whens were created, so it is not runaway growth/.test(e))).toBe(true);
+    expect(errs.some((e) => /runaway growth — one change/.test(e))).toBe(false);
+    scope.dispose();
+  });
+
+  test("F3: a cyclic re-trigger is capped per When per event, not per ancestry path (3 whens sharing a dep stay small)", () => {
+    // mutation RED: admit() without the per-When cyclicRuns cap (per-path cap) → hundreds of runs at n=6
+    const scope = rt.root.child();
+    const k = rt.cell(0);
+    let runs = 0;
+    for (let i = 0; i < 6; i++) rt.when(scope, [k], () => { runs++; k.set(k.peek() + 1); });
+    const errs = [];
+    const saved = console.error;
+    console.error = (...a) => errs.push(a.join(" "));
+    try { k.set(1); } finally { console.error = saved; }
+    expect(runs).toBeLessThanOrEqual(100);
+    expect(errs.some((e) => /E-LIFECYCLE-006 — re-triggered during its re-run; dropped/.test(e))).toBe(true);
+    scope.dispose();
+  });
+
+  test("a stopped event is LOUD: a window `error` event (the host's uncaught-error channel) carries the report", () => {
+    // mutation RED: reportStop without the window dispatch (console only)
+    const scope = rt.root.child();
+    const k = rt.cell(0);
+    let runs = 0;
+    const row = () => rt.when(scope, [k], () => { runs++; if (runs < 15000) { k.set(k.peek() + 1); row(); } });
+    row();
+    const seen = [];
+    const onError = (e) => seen.push(e.message);
+    window.addEventListener("error", onError);
+    const saved = console.error;
+    console.error = () => {};
+    try { k.set(1); } finally { console.error = saved; window.removeEventListener("error", onError); }
+    expect(seen.length).toBe(1);
+    expect(seen[0]).toMatch(/runaway growth .* STOPPED — page state may now be inconsistent/);
     scope.dispose();
   });
 });
