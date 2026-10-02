@@ -1,0 +1,13 @@
+{
+  "id": "auth-attr-unrecognized-literal-no-login-lint-pos",
+  "description": "§52.13.2 (S449) — `<program auth=\"Required\">` is an unrecognized literal: W-ATTR-002, and the program applies NO auth gate. The auth lints no longer treat it as a gate — before S449 the auth graph read the raw literal with a `!== \"none\"` test and emitted W-AUTH-LOGIN-MISSING + I-AUTH-REDIRECT-UNRESOLVED for an app that emits no auth check at all.",
+  "language-version": "1.0",
+  "spec": "§52.13, §52.13.2",
+  "source-test": "compiler/tests/integration/auth-attr-invalid-or-dynamic-value.test.js",
+  "rationale": "§52.13.2: 'Any literal value not in the recognized set SHALL emit `W-ATTR-002`' … 'On a `<program>`, an unrecognized value applies no auth gate at all'. §52.13 Login-page requirement fires W-AUTH-LOGIN-MISSING only 'When `auth=\"required\"` is declared'.",
+  "expect": {
+    "codes": ["W-ATTR-002"],
+    "notCodes": ["W-AUTH-LOGIN-MISSING", "I-AUTH-REDIRECT-UNRESOLVED"],
+    "severity": { "W-ATTR-002": "warning" }
+  }
+}
