@@ -1,0 +1,12 @@
+// S449 item 3 — a render position reaches a call through a local (a function value the compiler cannot resolve): fails closed.
+<program>
+    <let hits:int=0/>
+    fn one(x: int) -> int { return x }
+    function viaLocal() -> int {
+        const k = one
+        return k(1)
+    }
+    <main>
+        <p>${viaLocal()}</p>
+    </main>
+</program>

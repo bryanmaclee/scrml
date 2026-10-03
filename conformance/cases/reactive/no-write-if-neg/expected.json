@@ -1,0 +1,13 @@
+{
+  "id": "reactive-no-write-if-neg",
+  "description": "§6.15 negative twin of no-write-if-pos: the same position calling write-free functions is neither E-VALUE-WRITES-STATE nor E-VALUE-WRITE-UNPROVEN.",
+  "language-version": "1.0",
+  "spec": "§6.15",
+  "rationale": "§6.15: \"Evaluating an initializer (own value, field or attribute default, use-site construction value, `default=`), a derived formula, or a render expression SHALL NOT write any reactive cell, directly or through a called function (E-VALUE-WRITES-STATE).\" Reading cells and calling write-free functions is what value positions are for; only a write is refused. ruling:user-voice-scrml.md S449 \"⭐⭐ RULED — \\\"your recs.\\\" on the S449 eight-question queue\" — item 3: \"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function\".",
+  "expect": {
+    "notCodes": [
+      "E-VALUE-WRITES-STATE",
+      "E-VALUE-WRITE-UNPROVEN"
+    ]
+  }
+}
