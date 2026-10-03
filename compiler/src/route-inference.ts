@@ -72,7 +72,7 @@ import type {
 } from "./types/ast.ts";
 
 import type { ProtectAnalysis } from "./protect-analyzer.ts";
-import { exprNodeCollectCallees, emitStringFromTree, forEachIdentInExprNode } from "./expression-parser.ts";
+import { exprNodeCollectCallees, emitStringFromTree, emitCodeOnlyStringFromTree, blankLiteralTextInSource, forEachIdentInExprNode } from "./expression-parser.ts";
 import type { ExprNode } from "./types/ast.ts";
 import { resolveIndirectCallees, indirectResolvedCallees, fnParamNameSet } from "./indirect-callee-resolver.ts";
 // Type-only import — `monotonicity-analyzer.ts` imports `CPSSplit` from this
@@ -455,7 +455,10 @@ interface ServerOnlyPattern {
 
 /**
  * Patterns that indicate server-only resource access.
- * Applied to bare-expr node `expr` strings.
+ * Applied to an expression's CODE-ONLY text (`codeOnlyTextForTrigger`): string
+ * literal, template-quasi and comment text is blanked first, so no entry fires
+ * on a literal's contents (§12.4; s451-ri-string-literal — the bare-`session`
+ * entry server-placed `function label(x) { return "your session ended: " + x }`).
  *
  * NOTE — the `Bun.*` / `process.*` namespace-member signal set is NOT in this
  * string-scanned table. A raw-source regex over `emitStringFromTree(exprNode)`
@@ -907,13 +910,50 @@ function clientOnlyGlobalAccessOfNode(
 }
 
 /**
+ * §12.4 — the text a Trigger-1 text pattern is matched against: `exprString`
+ * with every string literal / template quasi / comment's text blanked.
+ *
+ * When `exprString` IS the tree's rendering (`emitStringFromTree(exprNode)` —
+ * every call site but one), the blanking is done on the TREE
+ * (`emitCodeOnlyStringFromTree`): a `lit` node's text is blanked by kind, no
+ * lexing involved. When the caller scanned text the tree does NOT carry (the
+ * match-arm site passes the raw `.expr` because its `?{}` lives only there), or
+ * there is no tree at all (runtime-string fallback), the ACTUAL text is lexed
+ * with the parser's acorn tokenizer (`blankLiteralTextInSource`). Both are
+ * fail-closed: anything they cannot classify is left unblanked (over-fire,
+ * never a leak) — the scanned text never LOSES code the caller handed in.
+ */
+function codeOnlyTextForTrigger(exprNode: unknown, exprString: string): string {
+  if (exprNode && typeof exprNode === "object") {
+    try {
+      if (emitStringFromTree(exprNode as ExprNode) === exprString) {
+        return emitCodeOnlyStringFromTree(exprNode as ExprNode);
+      }
+    } catch {
+      // fall through to the lexer over the actual text
+    }
+  }
+  return blankLiteralTextInSource(exprString);
+}
+
+/**
  * §12.2 Trigger 1 — unified server-only-resource detection for a statement's
  * expression surface. The SINGLE entry point every trigger scanner routes
  * through so the AST-migrated `Bun.*` / `process.*` namespace set is detected
  * string/comment-safe (via the parsed `exprNode`) at EVERY site, not just the
  * bare-expr one. Order:
- *   1. the reduced string patterns (fs.*, `?{`, env(), session, `new SQL/Database`)
- *      — these have no clean AST form here and keep their prior string behaviour;
+ *   1. the reduced text patterns (fs.*, `?{`, env(), session, `new SQL/Database`)
+ *      — matched against the CODE-ONLY rendering of `exprNode`
+ *      (`emitCodeOnlyStringFromTree`: every string literal / template quasi /
+ *      comment's text blanked), NOT the plain `exprString`. §12.4: route
+ *      inference "SHALL NOT classify a function based on the names of
+ *      identifiers that appear inside string-literal contents of its body" —
+ *      `return "your session ended: " + x` server-placed a pure client fn
+ *      through the bare-`session` entry (s451-ri-string-literal; it broke the
+ *      bootstrap build). The patterns are unchanged, so every REAL code use
+ *      still matches exactly as before; only literal text stops matching. When
+ *      `exprNode` is absent (rare runtime-string path) the raw `exprString` is
+ *      scanned as before (fail-closed: over-fires, never leaks);
  *   2. the namespace set (`Bun.*` / `process.*`) via the AST when `exprNode` is
  *      present (the FP fix), or via the fail-closed string fallback when it is
  *      absent (rare runtime-string path; over-fires but never leaks).
@@ -923,7 +963,7 @@ function detectServerOnlyResourceForNode(
   exprNode: unknown,
   exprString: string,
 ): string | null {
-  const strHit = detectServerOnlyResource(exprString);
+  const strHit = detectServerOnlyResource(codeOnlyTextForTrigger(exprNode, exprString));
   if (strHit !== null) return strHit;
   return exprNode
     ? exprNodeCallsServerOnlyResource(exprNode)
@@ -3149,8 +3189,8 @@ function hasServerOnlyResourceInInit(
   const init = (node as any).initExpr ? emitStringFromTree((node as any).initExpr) : (typeof (node as any).init === "string" ? (node as any).init : "");
   if (!init) return false;
 
-  // Check for SQL sigil (?{`)
-  if (/\?\{`/.test(init)) return true;
+  // Check for SQL sigil (?{`) — in CODE only, never a string literal's text (§12.4).
+  if (/\?\{`/.test(codeOnlyTextForTrigger((node as any).initExpr, init))) return true;
 
   // Check for other server-only resource patterns (Bun.*/process.* via the
   // parsed initExpr — string/comment-safe, S252 — plus the string patterns).
