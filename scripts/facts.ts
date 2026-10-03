@@ -141,8 +141,10 @@ function countFiles(root: string, exts: string[], suffix?: string): { files: num
 
 /**
  * The LIVE compiler — `compiler/src`, the DEFAULT pipeline. Deliberately excludes
- * `compiler/native-parser` (~47k lines, gated behind the opt-in
- * `--parser=scrml-native` flag, so not the default path) and
+ * `compiler/native-parser` (~30k lines of JS; a frozen component of impl#1 that
+ * `compiler/src` calls at fixed sites — component / `^{}` / `<match>` re-parse,
+ * the defer lint, the E-CLASS / E-DYNAMIC-IMPORT pass — not counted here;
+ * its full-pipeline `--parser=scrml-native` flag was retired S449) and
  * `compiler/self-host-v2` (impl #2). Verified hand-written: no file in the tree
  * averages >200 chars/line, and there is no bundled, vendored or generated
  * directory under `src`.

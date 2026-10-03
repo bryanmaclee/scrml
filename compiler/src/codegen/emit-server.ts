@@ -13,6 +13,7 @@ import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitCh
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
+import { setShadowedVariantNames } from "./emit-control-flow.ts";
 import { drainServerAmbientSessionRefusalErrors, setServerSessionContextSpan } from "./server-session-guard.ts";
 import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUseErrors, drainSessionValueUseErrors, type EmitExprContext } from "./emit-expr.ts";
 import {
@@ -2311,9 +2312,13 @@ export function generateServerJs(
   // (event-handler / escape-hatch paths) lower to the canonical
   // `{ variant, data }` tagged-object literal. Mirrors the client setup in
   // emit-client.ts:generateClientJs. Released at the bottom of this function.
-  const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions } =
+  const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions, shadowed: _scrmlShadowed, imported: _scrmlImportedOnly } =
     buildVariantFieldsRegistry(fileAST);
-  setVariantFieldsForRewriter(_scrmlVariantFields, _scrmlVariantCollisions);
+  setVariantFieldsForRewriter(_scrmlVariantFields, new Set([..._scrmlVariantCollisions, ..._scrmlShadowed, ..._scrmlImportedOnly]));
+  // S438 review N1/N3 — the local-shadowed names keep pre-F11 behaviour on the
+  // server pass too (match binding + bare-dot constructors). S446 — imported-only
+  // names are refused by the (untypeable) string-rewrite constructor path too.
+  setShadowedVariantNames(_scrmlShadowed, _scrmlImportedOnly);
 
   // §14.8.9 — arm the SERVER SQL-lowering pass to tag protected-origin `?{}`
   // SELECT results with the `_scrml_protect_tag(...)` descriptor. Released
@@ -7058,6 +7063,7 @@ export function generateServerJs(
   // will re-populate for its own pass; clearing here keeps state from leaking
   // when only the server emit runs (e.g. dry-run / partial pipelines).
   setVariantFieldsForRewriter(null, null);
+  setShadowedVariantNames(null);
 
   // g-pure-module-server-emit (S207): server-import tree-shaking — prune pass.
   // Now that the full server body is assembled, decide which deferred local-

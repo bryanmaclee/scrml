@@ -1,0 +1,13 @@
+{
+  "id": "defer-outside-function-when-body-neg",
+  "description": "§19.16.3 rule 4 — `defer` in a `when @n changes { }` body is E-DEFER-OUTSIDE-FUNCTION, exactly once. A `when` body is a reactive-effect body, not a function-declaration body, and it is lowered as text. Before S432 the default front-end compiled `defer [1, 2].forEach(note)` there CLEAN and emitted `defer[…]` (a runtime ReferenceError); `defer note(\"d\")` / `defer @t = …` crashed codegen (E-CODEGEN-INVALID-LOGIC).",
+  "language-version": "1.0",
+  "spec": "§19.16.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.3 rule 4: `defer` SHALL appear only inside the body of a function DECLARATION (`function`, `fn`, `server function`), including any block nested in one; it is E-DEFER-OUTSIDE-FUNCTION in every other position.",
+  "expect": {
+    "codes": ["E-DEFER-OUTSIDE-FUNCTION"],
+    "codeCounts": { "E-DEFER-OUTSIDE-FUNCTION": 1 },
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"]
+  }
+}

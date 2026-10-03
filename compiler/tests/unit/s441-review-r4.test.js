@@ -8,6 +8,7 @@
  */
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
+import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -27,7 +28,20 @@ function compile(source, parser) {
   return { errors, codes: errors.map((e) => e.code), body: (m ? m[1] : "").replace(/\s+/g, " ").trim(), client: read("client.js") };
 }
 const at = (e) => e.tabSpan ?? e.span ?? {};
-const BOTH = [["default", null], ["scrml-native", "scrml-native"]];
+// S449: the second entry ran each case through the retired full-pipeline
+// `--parser=scrml-native` flag (a parity arm). The native body-top machinery
+// impl#1 can still reach (nativeParseFile at a file's top level) keeps its own
+// direct tests below.
+const BOTH = [["default", null]];
+/** Parse `source` with the native parser alone — `nativeParseFile`, the entry
+ *  impl#1 calls for component / `^{}` / `<match>` re-parse — and return its
+ *  error-severity diagnostics in the same shape as `compile`. */
+function nativeParse(source) {
+  const r = nativeParseFile("/s441-native/c.scrml", source);
+  const errors = (r.errors ?? []).filter((e) => (e.severity ?? "error") === "error");
+  return { errors, codes: errors.map((e) => e.code), ast: r.ast };
+}
+
 
 for (const [label, parser] of BOTH) {
   describe(`#1 — characters the tokenizer has no token for never vanish (${label})`, () => {
@@ -93,7 +107,7 @@ describe("#6 — prose that also parses as a statement shape is E-UNQUOTED-DISPL
 });
 
 test("#7 — native never quotes an empty run", () => {
-  const r = compile("<program>\n<p>start</p>\ndefault settings\n<p id=\"z\">end</p>\n</program>\n", "scrml-native");
+  const r = nativeParse("<program>\n<p>start</p>\ndefault settings\n<p id=\"z\">end</p>\n</program>\n");
   expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
   expect(r.errors[0].message).not.toContain("``");
   expect(r.errors[0].message).toContain("`default settings`");

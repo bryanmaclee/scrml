@@ -20,6 +20,13 @@
  *      can read `exportedName` / `exportKind` / `names` directly. Pre-fix
  *      these silently dropped every native-pipeline cross-file binding.
  *
+ * S449: every case here ran the whole file through the retired full-pipeline
+ * `--parser=scrml-native` flag. A file-level `export` is not a shape impl#1
+ * ever routes through the native parser (its native re-parse sites take
+ * component bodies, `^{}` emit and `<match>` arm markup), so the cases now run
+ * on the default pipeline — they guard the §21.2 Form-1 / cross-file export
+ * behaviour itself. The native fixes described above are frozen with impl#1.
+ *
  * Coverage:
  *   §A1  single-file P2-Form1 (use site = the outer-self-named wrapper)
  *   §A2  cross-file P2-Form1 (consumer imports + renders)
@@ -50,10 +57,9 @@ function fx(relPath, source) {
   return abs;
 }
 
-function compileNative(inputFiles) {
+function compileDefault(inputFiles) {
   return compileScrml({
     inputFiles,
-    parser: "scrml-native",
     write: false,
   });
 }
@@ -62,7 +68,7 @@ function compileNative(inputFiles) {
 // §A1 — single-file P2-Form1 inside <program>
 // ---------------------------------------------------------------------------
 
-describe("M6.4a §A1 — single-file P2-Form1 under --parser=scrml-native", () => {
+describe("M6.4a §A1 — single-file P2-Form1 (default pipeline)", () => {
   test("export <Greeting>...</> inside <program> compiles with 0 errors", () => {
     const appPath = fx("a1/app.scrml",
       "<program>\n" +
@@ -71,7 +77,7 @@ describe("M6.4a §A1 — single-file P2-Form1 under --parser=scrml-native", () =
       "  </>\n" +
       "</program>\n",
     );
-    const result = compileNative([appPath]);
+    const result = compileDefault([appPath]);
     const errors = (result.errors || []).filter(e => !e.severity || e.severity !== "warning");
     expect(errors).toEqual([]);
     // Pre-M6.4a the outer <Greeting> stayed in the markup tree and VP-2
@@ -85,7 +91,7 @@ describe("M6.4a §A1 — single-file P2-Form1 under --parser=scrml-native", () =
 // §A2 — cross-file P2-Form1 import-and-render
 // ---------------------------------------------------------------------------
 
-describe("M6.4a §A2 — cross-file P2-Form1 under --parser=scrml-native", () => {
+describe("M6.4a §A2 — cross-file P2-Form1 (default pipeline)", () => {
   test("exporter Form 1 + consumer use site compiles with 0 errors", () => {
     const compPath = fx("a2/components.scrml",
       "export <X1Badge>\n" +
@@ -100,7 +106,7 @@ describe("M6.4a §A2 — cross-file P2-Form1 under --parser=scrml-native", () =>
       "</div>\n" +
       "</program>\n",
     );
-    const result = compileNative([appPath, compPath]);
+    const result = compileDefault([appPath, compPath]);
     const errors = (result.errors || []).filter(e => !e.severity || e.severity !== "warning");
     expect(errors).toEqual([]);
     const componentErrors = (result.errors || []).filter(e => e.code === "E-COMPONENT-035");
@@ -128,7 +134,7 @@ describe("M6.4a §A3 — non-Form-1 cross-file export still works", () => {
       "<div>Value: ${Foo}</div>\n" +
       "</program>\n",
     );
-    const result = compileNative([conPath, expPath]);
+    const result = compileDefault([conPath, expPath]);
     const errors = (result.errors || []).filter(e => !e.severity || e.severity !== "warning");
     expect(errors).toEqual([]);
     // The synthExportDecl + synthImportDecl translations must NOT regress
@@ -150,7 +156,7 @@ describe("M6.4a §A3 — non-Form-1 cross-file export still works", () => {
       "<div>Sum: ${add(2, 3)}</div>\n" +
       "</program>\n",
     );
-    const result = compileNative([conPath, expPath]);
+    const result = compileDefault([conPath, expPath]);
     const errors = (result.errors || []).filter(e => !e.severity || e.severity !== "warning");
     expect(errors).toEqual([]);
   });
@@ -179,7 +185,7 @@ describe("M6.4a §A3 — non-Form-1 cross-file export still works", () => {
 // 2026-06-05/progress.md.
 // ---------------------------------------------------------------------------
 
-describe("§B — native cross-file export EMITTED-OUTPUT regression", () => {
+describe("§B — cross-file export EMITTED-OUTPUT regression (default pipeline)", () => {
   function outFor(result, suffix) {
     if (!result.outputs) return undefined;
     for (const [filePath, out] of result.outputs) {
@@ -203,7 +209,7 @@ describe("§B — native cross-file export EMITTED-OUTPUT regression", () => {
       "<div><Badge/></div>\n" +
       "</program>\n",
     );
-    const result = compileNative([appPath, compPath]);
+    const result = compileDefault([appPath, compPath]);
     // No cross-file component-resolution failure (the pre-fix surface).
     const componentErrors = (result.errors || []).filter(
       e => e.code === "E-COMPONENT-020" || e.code === "E-COMPONENT-035");

@@ -1,0 +1,20 @@
+${
+    <trace> = ""
+
+    function mk() {
+        let o = { a: 1 }
+        let arr = [1]
+        defer o.a = 2
+        defer arr.push(9)
+        return { o: o, arr: arr }
+    }
+
+    function go() {
+        let r = mk()
+        @trace = @trace + r.o.a + ";" + r.arr.length + ";"
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>
