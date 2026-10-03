@@ -23,10 +23,11 @@
  * `parseComponentBody` re-parse cleanly — the same shape the live ast-builder's
  * token-joined `component-def.raw` resolves to.
  *
- * These tests DRIVE BOTH PIPELINES (live default + parser:"scrml-native") and
- * assert PARITY: native must resolve the component without E-COMPONENT-020/-021/
- * -035, and the expanded HTML must contain the component's content — matching
- * live.
+ * S449: the first block used to DRIVE BOTH PIPELINES (live default + the
+ * retired full-pipeline parser:"scrml-native") and assert parity. It now runs
+ * the default pipeline only; the native fix (collect-hoisted.js
+ * synthComponentDef — reached through `nativeParseFile`) is guarded by the
+ * second block, which asserts the native component-def `raw` directly.
  *
  * SCOPE: same-file component-defs. The cross-file `export const Name = <markup>`
  * path (synthExportDecl `raw` slice) is a DISTINCT sub-cause split to a named
@@ -47,8 +48,8 @@ function compileBoth(source) {
   writeFileSync(file, source);
   try {
     const out = {};
-    for (const parser of [null, "scrml-native"]) {
-      const r = compileScrml({ inputFiles: [file], write: false, outputDir: join(dir, "out"), parser });
+    for (const parser of [null]) {
+      const r = compileScrml({ inputFiles: [file], write: false, outputDir: join(dir, "out") });
       let html = null;
       for (const [fp, output] of r.outputs) {
         if (fp.includes("app")) html = output.html ?? null;
@@ -67,18 +68,14 @@ function compileBoth(source) {
   }
 }
 
-// Assert: native fires no component-registration errors AND its component-error
-// profile matches live (true parity — neither pipeline regresses the other).
-function expectCleanNativeParity(r) {
-  expect(r["scrml-native"].e020).toBe(0);
-  expect(r["scrml-native"].e021).toBe(0);
-  expect(r["scrml-native"].e035).toBe(0);
-  expect(r["scrml-native"].e020).toBe(r.live.e020);
-  expect(r["scrml-native"].e021).toBe(r.live.e021);
-  expect(r["scrml-native"].e035).toBe(r.live.e035);
+// Assert: no component-registration errors on the default pipeline.
+function expectClean(r) {
+  expect(r.live.e020).toBe(0);
+  expect(r.live.e021).toBe(0);
+  expect(r.live.e035).toBe(0);
 }
 
-describe("M6.7-C1 — same-file component-def resolves under native (parity)", () => {
+describe("M6.7-C1 — same-file component-def resolves (default pipeline)", () => {
   test("simple component: const Card = <div class=\"card\">hi</div>", () => {
     const r = compileBoth(`<program>
 \${
@@ -86,9 +83,9 @@ describe("M6.7-C1 — same-file component-def resolves under native (parity)", (
 }
 <div><Card/></div>
 </program>`);
-    expectCleanNativeParity(r);
-    expect(r["scrml-native"].html).toContain("card");
-    expect(r["scrml-native"].html).toContain("hi");
+    expectClean(r);
+    expect(r.live.html).toContain("card");
+    expect(r.live.html).toContain("hi");
   });
 
   test("two sibling components in one logic block both register", () => {
@@ -101,9 +98,9 @@ describe("M6.7-C1 — same-file component-def resolves under native (parity)", (
 <div><Foo/></div>
 <div><Bar/></div>
 </program>`);
-    expectCleanNativeParity(r);
-    expect(r["scrml-native"].html).toContain("foo-body");
-    expect(r["scrml-native"].html).toContain("bar-body");
+    expectClean(r);
+    expect(r.live.html).toContain("foo-body");
+    expect(r.live.html).toContain("bar-body");
   });
 
   test("void element in body + sibling (A7/A8 shape): <div><br></div> + Bar", () => {
@@ -116,8 +113,8 @@ describe("M6.7-C1 — same-file component-def resolves under native (parity)", (
 <div><Foo/></div>
 <div><Bar/></div>
 </program>`);
-    expectCleanNativeParity(r);
-    expect(r["scrml-native"].html).toContain("tail-x");
+    expectClean(r);
+    expect(r.live.html).toContain("tail-x");
   });
 
   test("void element with bind:value + sibling", () => {
@@ -133,8 +130,8 @@ describe("M6.7-C1 — same-file component-def resolves under native (parity)", (
 <div><Foo/></div>
 <div><Bar/></div>
 </program>`);
-    expectCleanNativeParity(r);
-    expect(r["scrml-native"].html).toContain("after-input");
+    expectClean(r);
+    expect(r.live.html).toContain("after-input");
   });
 
   test("multi-line body with nested elements", () => {
@@ -147,9 +144,9 @@ describe("M6.7-C1 — same-file component-def resolves under native (parity)", (
 }
 <div><Card/></div>
 </program>`);
-    expectCleanNativeParity(r);
-    expect(r["scrml-native"].html).toContain("Title");
-    expect(r["scrml-native"].html).toContain("Body text");
+    expectClean(r);
+    expect(r.live.html).toContain("Title");
+    expect(r.live.html).toContain("Body text");
   });
 
   test("component-def NOT at offset-0 block: leading content before the logic block", () => {
@@ -163,8 +160,8 @@ describe("M6.7-C1 — same-file component-def resolves under native (parity)", (
 }
 <div><Card/></div>
 </program>`);
-    expectCleanNativeParity(r);
-    expect(r["scrml-native"].html).toContain("contents-here");
+    expectClean(r);
+    expect(r.live.html).toContain("contents-here");
   });
 
   test("multiple components after a sibling import in same block", () => {
@@ -178,10 +175,10 @@ describe("M6.7-C1 — same-file component-def resolves under native (parity)", (
 <div><Beta/></div>
 <div><Gamma/></div>
 </program>`);
-    expectCleanNativeParity(r);
-    expect(r["scrml-native"].html).toContain("alpha-one");
-    expect(r["scrml-native"].html).toContain("beta-two");
-    expect(r["scrml-native"].html).toContain("gamma-three");
+    expectClean(r);
+    expect(r.live.html).toContain("alpha-one");
+    expect(r.live.html).toContain("beta-two");
+    expect(r.live.html).toContain("gamma-three");
   });
 });
 

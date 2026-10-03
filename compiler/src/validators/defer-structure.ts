@@ -15,6 +15,7 @@
 // The front-end and codegen's arm parser are loaded LAZILY (the emit-logic.ts
 // `_emitNestedGuardedArmBody` precedent): a static import of emit-control-flow
 // from a validator closes an import cycle through the codegen modules.
+import { isEventHandlerAttrName } from "../multi-statement-scan.ts";
 /* eslint-disable @typescript-eslint/no-require-imports */
 function splitBlocks(filePath: string, source: string): unknown {
   return (require("../block-splitter.js") as { splitBlocks: (f: string, s: string) => unknown }).splitBlocks(filePath, source);
@@ -93,7 +94,7 @@ export function parseStatementText(text: string, filePath = "defer-probe.scrml")
 
 /**
  * The text-carried bodies of one node, each as `{ text, label }`:
- *   - `!{}` handler arms (`arms[].handler`);
+ *   - `!{}` handler arms (`arms[].handler` of a `guarded-expr` or a statement `!{ … }` `error-effect`);
  *   - a live `match-expr` / `match-stmt`: its `bare-expr` arms (split by
  *     codegen's own `parseMatchArm`) and `match-arm-inline.result`;
  *   - a native `match-expr`: `rawArms[]` (split by `parseMatchArm`).
@@ -109,7 +110,7 @@ export function textBodiesOf(n: Node): TextBody[] {
       !n._onMountEffect) {
     out.push({ text: n.expr as string, label: "a bare `{ }` block" });
   }
-  if (n.kind === "guarded-expr" && Array.isArray(n.arms)) {
+  if ((n.kind === "guarded-expr" || n.kind === "error-effect") && Array.isArray(n.arms)) {
     for (const a of n.arms as Node[]) {
       if (a && typeof a.handler === "string" && (a.handler as string).trim() !== "") {
         out.push({ text: a.handler as string, label: "a `!{}` handler arm" });
@@ -146,24 +147,13 @@ export function textBodiesOf(n: Node): TextBody[] {
  * function so `yield` is grammatical; `asExpression` parses it as an
  * initializer (a lambda / function-expression / expression escape-hatch),
  * otherwise as statements (an `on mount { }` body, a bare block, an arm body).
- * Unparseable text answers `false`: it is not evidence of the construct, and
- * such text fails codegen's own emitted-JS gate regardless.
+ * Text the lexer / parser cannot process answers `null` (TextProbe): callers
+ * fail closed on it (S432 review A-3).
  */
-export function textContainsNativeKind(text: string, asExpression: boolean, kinds: readonly string[]): boolean {
-  /* eslint-disable @typescript-eslint/no-require-imports */
-  const { lex } = require("../../native-parser/lex.js") as { lex: (s: string) => unknown[] };
-  const { parseProgram } = require("../../native-parser/parse-stmt.js") as {
-    parseProgram: (t: unknown[], s: string) => { body: unknown[]; errors: unknown[] };
-  };
-  /* eslint-enable @typescript-eslint/no-require-imports */
+export function textContainsNativeKind(text: string, asExpression: boolean, kinds: readonly string[]): TextProbe {
   const inner = asExpression ? "let __scrml_probe_value__ = " + text : text;
-  const src = "function* __scrml_probe__() {\n" + inner + "\n}";
-  let tree: { body: unknown[]; errors: unknown[] };
-  try {
-    tree = parseProgram(lex(src), src);
-  } catch {
-    return false;
-  }
+  const body = probeParse("function* __scrml_probe__() {\n" + inner + "\n}");
+  if (body === null) return null;
   const want = new Set(kinds);
   let found = false;
   const seen = new WeakSet<object>();
@@ -174,7 +164,67 @@ export function textContainsNativeKind(text: string, asExpression: boolean, kind
     if (want.has((n as Node).kind as string)) { found = true; return; }
     for (const k of Object.keys(n as object)) if (k !== "span") walk((n as Node)[k]);
   };
-  walk(tree.body);
+  walk(body);
+  return found;
+}
+
+/**
+ * The answer of a text probe: `true` (found), `false` (parsed, not found) or
+ * `null` — the text could not be analysed (the lexer / parser threw). S432
+ * review A-3: callers FAIL CLOSED on `null` (test `!== false`), reporting that
+ * the body could not be verified, never treating it as "no defer here".
+ */
+export type TextProbe = boolean | null;
+
+/**
+ * Test seam (S432 review A-3): run `body` with the probe parser replaced, so a
+ * test can make it throw without mocking the parser module process-wide.
+ */
+let probeParserOverride: ((src: string) => { body: unknown[] }) | null = null;
+export function withProbeParserForTest<T>(parser: (src: string) => { body: unknown[] }, body: () => T): T {
+  const prev = probeParserOverride;
+  probeParserOverride = parser;
+  try { return body(); } finally { probeParserOverride = prev; }
+}
+
+/** Parse probe source with the native statement parser; `null` when it throws. */
+function probeParse(src: string): unknown[] | null {
+  if (probeParserOverride) {
+    try {
+      const t = probeParserOverride(src);
+      return Array.isArray(t?.body) ? t.body : null;
+    } catch {
+      return null;
+    }
+  }
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { lex } = require("../../native-parser/lex.js") as { lex: (s: string) => unknown[] };
+  const { parseProgram } = require("../../native-parser/parse-stmt.js") as {
+    parseProgram: (t: unknown[], s: string) => { body: unknown[]; errors: unknown[] };
+  };
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  try {
+    const tree = parseProgram(lex(src), src);
+    return Array.isArray(tree?.body) ? tree.body : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Find a `Defer` node whose function-nesting depth satisfies `atDepth` (depth 1 = the probe generator). */
+function findDeferAtDepth(body: unknown[], atDepth: (d: number) => boolean): boolean {
+  let found = false;
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown, depth: number): void => {
+    if (found || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c, depth); return; }
+    const k = (n as Node).kind;
+    if (k === "Defer" && atDepth(depth)) { found = true; return; }
+    const d = k === "Arrow" || k === "Function" || k === "FunctionDecl" ? depth + 1 : depth;
+    for (const key of Object.keys(n as object)) if (key !== "span") walk((n as Node)[key], d);
+  };
+  walk(body, 0);
   return found;
 }
 
@@ -185,37 +235,102 @@ export function textContainsNativeKind(text: string, asExpression: boolean, kind
  * text (e.g. the escape-hatch of a bare `{ … }` block) is some other site's
  * concern, not a lambda's (S430 round 6, D).
  */
-export function textLambdaContainsDefer(text: string): boolean {
+export function textLambdaContainsDefer(text: string): TextProbe {
   if (!text.includes("defer")) return false;
-  /* eslint-disable @typescript-eslint/no-require-imports */
-  const { lex } = require("../../native-parser/lex.js") as { lex: (s: string) => unknown[] };
-  const { parseProgram } = require("../../native-parser/parse-stmt.js") as {
-    parseProgram: (t: unknown[], s: string) => { body: unknown[]; errors: unknown[] };
-  };
-  /* eslint-enable @typescript-eslint/no-require-imports */
-  const src = "function* __scrml_probe__() {\nlet __scrml_probe_value__ = " + text + "\n}";
-  let tree: { body: unknown[] };
-  try {
-    tree = parseProgram(lex(src), src);
-  } catch {
-    return false;
-  }
-  let found = false;
-  const seen = new WeakSet<object>();
-  const walk = (n: unknown, depth: number): void => {
-    if (found || !n || typeof n !== "object" || seen.has(n as object)) return;
-    seen.add(n as object);
-    if (Array.isArray(n)) { for (const c of n) walk(c, depth); return; }
-    const k = (n as Node).kind;
-    if (k === "Defer" && depth > 1) { found = true; return; } // depth 1 = the probe generator itself
-    const d = k === "Arrow" || k === "Function" || k === "FunctionDecl" ? depth + 1 : depth;
-    for (const key of Object.keys(n as object)) if (key !== "span") walk((n as Node)[key], d);
-  };
-  walk(tree.body, 0);
-  return found;
+  const body = probeParse("function* __scrml_probe__() {\nlet __scrml_probe_value__ = " + text + "\n}");
+  return body === null ? null : findDeferAtDepth(body, (d) => d > 1);
 }
 
 /** Does TEXT contain a `defer` statement (parsed; see textContainsNativeKind)? */
-export function textContainsDeferStatement(text: string, asExpression: boolean): boolean {
-  return text.includes("defer") && textContainsNativeKind(text, asExpression, ["Defer"]);
+export function textContainsDeferStatement(text: string, asExpression: boolean): TextProbe {
+  return text.includes("defer") ? textContainsNativeKind(text, asExpression, ["Defer"]) : false;
+}
+
+/**
+ * Does statement TEXT contain a `defer` statement that is NOT inside a function
+ * / arrow body nested in that text (parsed with the native statement parser)?
+ * The complement of `textLambdaContainsDefer` for a statement body.
+ */
+export function textContainsDirectDeferStatement(text: string): TextProbe {
+  if (!text.includes("defer")) return false;
+  const body = probeParse("function* __scrml_probe__() {\n" + text + "\n}");
+  return body === null ? null : findDeferAtDepth(body, (d) => d === 1);
+}
+
+/**
+ * §19.16.3 rule 4 (S432, A1) — the statement bodies a node carries as TEXT that
+ * codegen LOWERS AS TEXT (`rewriteBlockBody` / the worker / test emitters)
+ * whatever the enclosing context. None of them is a function-declaration body,
+ * so a `defer` in any of them is E-DEFER-OUTSIDE-FUNCTION — and because the
+ * body is lowered as text, a `defer` inside a function DECLARED in that body
+ * cannot be lowered either (`anyDepth`).
+ *
+ * Enumerated by AST node KIND (every text-lowered statement body of the
+ * live-shaped AST that is not already reached structurally), not by scanning
+ * source:
+ *   - `when-effect`            (`when @x changes { … }`)                     .bodyRaw
+ *   - `when-message`           (worker self-handler `when message(d) { … }`) .bodyRaw
+ *   - `when-worker-message` / `when-worker-error`
+ *                              (`when message from <#w> (d) { … }`)          .bodyRaw
+ *   (`~{ test … }` bodies are NOT listed — see the note in the function, S446 F1)
+ *   - `markup`                 an `on*=${ … }` event-handler attribute value — a
+ *                              statement body (emit-event-wiring Case C), lowered
+ *                              as text including any function / arrow in it
+ *                              (anyDepth; the attribute's own value node is then
+ *                              not re-walked under the lambda rule).
+ *   - `onchange-decl`          a `<channel>` `<onchange>` arm body          .arms[].bodyRaw
+ *   - `component-def.raw` (and an `export const Name = <…>` export-decl's
+ *     markup) is markup text, re-parsed and walked by the checker itself
+ *     (lint-defer.ts) rather than listed here — its bodies are markup.
+ * A non-handler attribute value is an EXPRESSION position, where `defer` is an
+ * ordinary identifier (§19.16.1) — not listed. Match / `!{}` arm bodies and bare
+ * blocks carried as text are `textBodiesOf` (above); `on mount { }` is the
+ * `_onMountEffect` bare-expr; lambda bodies are the escape-hatch / `lambda` check.
+ */
+export type LoweredTextBody = { text: string; label: string; anyDepth: boolean; owner?: unknown };
+
+const WHEN_TEXT_KINDS = new Set(["when-effect", "when-message", "when-worker-message", "when-worker-error"]);
+
+export function isWhenTextKind(kind: unknown): boolean {
+  return typeof kind === "string" && WHEN_TEXT_KINDS.has(kind);
+}
+
+export function textLoweredBodiesOf(n: Node): LoweredTextBody[] {
+  const out: LoweredTextBody[] = [];
+  const k = n.kind;
+  if (isWhenTextKind(k) && typeof n.bodyRaw === "string") {
+    const label = k === "when-effect" ? "a `when … changes { }` body" : "a `when message { }` handler body";
+    out.push({ text: n.bodyRaw as string, label, anyDepth: true });
+  }
+  // `~{ test … }` bodies (and `before` / `after`) are deliberately NOT probed
+  // (S446 review F1): the front-end strips comment openers from
+  // `testGroup.tests[].body`, so a comment mentioning `defer` read as a
+  // statement and was falsely rejected. Test bodies never reach production
+  // output; the comment-stripping defect is filed in known-gaps.
+  // A `<channel>` `<onchange>` arm body (§52 — shorthand `<V(row) : stmt>` or a
+  // block body): codegen splices the text into the change dispatcher as
+  // statements (S446 — a `defer` there reached the client JS verbatim).
+  if (k === "onchange-decl" && Array.isArray(n.arms)) {
+    for (const a of n.arms as Node[]) {
+      if (a && typeof a.bodyRaw === "string" && (a.bodyRaw as string).trim() !== "") {
+        out.push({ text: a.bodyRaw as string, label: "a `<channel>` `<onchange>` arm body", anyDepth: true });
+      }
+    }
+  }
+  if (k === "markup" && Array.isArray(n.attrs)) {
+    for (const a of n.attrs as Node[]) {
+      // The repo's event-handler attribute predicate (multi-statement-scan.ts,
+      // shared with the ast-builder / type-system handler rules). NB: codegen
+      // wires EVERY `on`-prefixed `${ }` attribute as an event binding and
+      // lowers its text as statements (emit-html.ts `name.startsWith("on")` ->
+      // addEventBinding -> emit-event-wiring rewriteBlockBody), so `one=${ … }`
+      // is lowered exactly like `onclick=${ … }`; the predicate matches that.
+      if (!a || typeof a.name !== "string" || !isEventHandlerAttrName(a.name as string)) continue;
+      const v = a.value as Node | undefined;
+      if (v && v.kind === "expr" && typeof v.raw === "string") {
+        out.push({ text: v.raw as string, label: `an event-handler attribute (\`${a.name}=\${ … }\`)`, anyDepth: true, owner: v });
+      }
+    }
+  }
+  return out;
 }

@@ -9,7 +9,9 @@
  * rendered text is byte-identical to the `as e` + `e.key`/`e.value` baseline
  * (the correctness anchor: the terse form is pure sugar).
  *
- * Covers BOTH parsers (legacy BS+TAB and `--parser=scrml-native`).
+ * Covered BOTH parsers (legacy BS+TAB and `--parser=scrml-native`) until S449
+ * retired the full-pipeline flag; the default pipeline remains. (impl#1 never
+ * routes an each-bearing body through the native parser.)
  */
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
@@ -90,7 +92,7 @@ describe("each-as-tuple-destructure §runtime — k/v bind across iteration", ()
     try { await GlobalRegistrator.unregister(); } catch (_) { /* nothing to do */ }
   });
 
-  for (const parser of [null, "scrml-native"]) {
+  for (const parser of [null]) {
     const label = parser ? "native" : "legacy";
 
     test(`(${label}) \`as (k, v)\` renders both bound fields for every entry`, () => {

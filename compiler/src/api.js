@@ -12,9 +12,6 @@ import { resolve, extname, dirname, basename, join, relative, isAbsolute, posix 
 import { fileURLToPath } from "url";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST } from "./ast-builder.js";
-import { nativeParseFile } from "../native-parser/parse-file.js";
-import { populateNativeAttrValueExprNodes } from "./native-walker/attrvalue-exprnode-walker.ts";
-import { backfillNativeExprText } from "./native-walker/exprtext-backfill-walker.ts";
 import { runPRECG } from "./precg.ts";
 import { createStageSeams, StageSeamError } from "./pipeline-seam.ts";
 import { runCE } from "./component-expander.ts";
@@ -78,7 +75,7 @@ import { runAsyncAwaitReject } from "./validators/lint-async-user-source.ts";
 import { runDeferChecks } from "./validators/lint-defer.ts";
 import { runRedeclareChecks } from "./validators/lint-redeclare.ts";
 import { takeProtectRegistry, analyzeCompileProtectFlow } from "./codegen/protect-flow.ts";
-import { forbiddenJsDiagnosticsForDefault, nativeForbiddenJsAttrDiagnostics } from "./native-walker/forbidden-js-native.ts";
+import { forbiddenJsDiagnosticsForDefault } from "./native-walker/forbidden-js-native.ts";
 
 // ---------------------------------------------------------------------------
 // Stdlib runtime directory
@@ -1172,17 +1169,15 @@ function _compileScrmlImpl(options = {}) {
      */
     compilerSettings = {},
     /**
-     * M5-swap C2 (v0.7) — `--parser=scrml-native` ROUTING flag. When set to
-     * the literal "scrml-native", the per-file parse is ROUTED through the
-     * native parser's `nativeParseFile` (compiler/native-parser/parse-file.js)
-     * instead of the live BS+TAB (`splitBlocks` + `buildAST`) path; since
-     * `nativeParseFile` returns the same `{ filePath, ast, errors }` shape,
-     * every downstream stage runs unchanged and pipeline-agnostic. An
-     * I-PARSER-NATIVE-SHADOW routing-confirmation info diagnostic is appended
-     * to result.warnings. The flag is STRICTLY OPT-IN — a no-op when null /
-     * undefined / any other value, in which case the live BS+TAB pipeline is
-     * the unchanged default. Pre-C2 (M5.1) the flag was observability-only;
-     * C2 swapped the no-op for real routing behind the same flag value.
+     * RETIRED (S449, user-voice item 6). This was the `--parser=scrml-native`
+     * routing flag: it sent the whole per-file parse through the native
+     * parser's `nativeParseFile` instead of `splitBlocks` + `buildAST`. The M6
+     * migration it served was stopped (S249) and the native parser is now a
+     * frozen component of impl#1, called only at its fixed internal sites
+     * (component / `^{}` / `<match>` re-parse, the defer lint, the
+     * E-CLASS / E-DYNAMIC-IMPORT pass). Any non-null value throws, so a caller
+     * that still passes it learns the routing is gone instead of silently
+     * compiling with a different parser than it asked for.
      */
     parser = null,
     /**
@@ -1244,6 +1239,14 @@ function _compileScrmlImpl(options = {}) {
      */
     beforeWrite = null,
   } = options;
+
+  // S449 — the full-pipeline `parser` routing option is retired (see its doc above).
+  if (parser !== null && parser !== undefined) {
+    throw new Error(
+      `compileScrml: the \`parser\` option is retired (S449) — got ${JSON.stringify(parser)}. ` +
+      "The native parser is a frozen part of impl#1 and no longer selectable for the whole pipeline; " +
+      "remove the option to compile with the default front end.");
+  }
 
   let { outputDir } = options;
 
@@ -1652,67 +1655,13 @@ function _compileScrmlImpl(options = {}) {
   // When selfHostModules.buildAST is provided (or stageOverrides names the stage), the validated stage seam (pipeline-seam.ts) substitutes it.
   // The self-hosted buildAST bundles its own tokenizer, so no tokenizer override is needed.
   //
-  // M5-swap C2 (v0.7) — `--parser=scrml-native` ROUTING. When the opt-in flag
-  // is set, the per-file parse is driven by the native parser's
-  // `nativeParseFile` (compiler/native-parser/parse-file.js) INSTEAD of the
-  // live BS+TAB (`splitBlocks` + `buildAST`) path. `nativeParseFile` returns
-  // the SAME `{ filePath, ast: FileAST, errors }` shape `buildAST` returns, so
-  // it drops into `tabResults` and every downstream stage (PRECG / GCP1 /
-  // GCP3 / NR / RI / AG / CG) runs unchanged and pipeline-agnostic.
-  //   - BS still runs above (its `bsResults` feed the GCP1 raw-block-tree
-  //     check pass via `bsByTab`); the native path simply does not CONSUME
-  //     the BS block-stream — it re-parses from the file source directly.
-  //   - The flag is STRICTLY OPT-IN. `parser` defaults to `null`; for every
-  //     caller that does not pass "scrml-native" the live BS+TAB path is the
-  //     untouched default, which bounds this routing's blast radius.
-  //   - `nativeParseFile` needs `(filePath, source)`; both are recoverable
-  //     from the paired `bsResult` (`bsResult.filePath`) + `sourceByFile`.
-  const useNativeParser = parser === "scrml-native";
-  if (useNativeParser && seams.has("TAB")) {
-    throw new StageSeamError("TAB", null,
-      'cannot substitute TAB under parser: "scrml-native" — that flag routes the parse through nativeParseFile, not buildAST');
-  }
+  // (S449: the `--parser=scrml-native` full-pipeline routing that branched here
+  // is retired — the native parser is a frozen component of impl#1, reached only
+  // at its fixed internal call sites.)
   const _tabEntry = seams.pick("TAB", buildAST);
-  const _buildAST = useNativeParser
-    ? (bsResult) => {
-        // M5-swap — native attr-value `exprNode` population. `nativeParseFile`
-        // builds markup attr values (`onclick=`/`if=`/`bind:`/props) WITHOUT the
-        // `exprNode` field that codegen (emit-html.ts -> emit-event-wiring /
-        // emit-control-flow / emit-bindings / ...) consumes; the LIVE path sets
-        // it inline in ast-builder.js parseAttributes via safeParseExprToNodeGlobal.
-        // Native-parser modules cannot import the live acorn-backed parser (it
-        // would invert the self-host layering), so the population runs HERE on
-        // the assembled native FileAST, reusing the SAME safeParseExprToNodeGlobal
-        // with the SAME `(raw, span.start)` pairing the live path uses -> the
-        // emitted ExprNode is byte-identical to live's. Parse diagnostics
-        // (E-SQL-008 / E-RESET-NO-ARG) land in `result.errors` so `collectErrors`
-        // picks them up exactly as the live path does. Native-path-ONLY; the
-        // default pipeline is untouched.
-        const result = nativeParseFile(
-          bsResult.filePath,
-          sourceByFile.get(bsResult.filePath) ?? "");
-        if (result && result.ast) {
-          if (Array.isArray(result.errors) === false) result.errors = [];
-          populateNativeAttrValueExprNodes(
-            result.ast, result.filePath || bsResult.filePath, result.errors);
-          // M5-swap — native string-`.expr`/`.init`/`.condition` backfill. The
-          // native make*/translate* builders set these legacy string fields empty
-          // (carrying the structured exprNode/initExpr/condExpr sibling instead).
-          // Codegen is migrated to the structured siblings, but the type-system's
-          // lifecycle / bare-variant / enum-subset enforcement is regex-over-TEXT
-          // (checkLifecycleBindingAccess's statementText reads node.expr/init/
-          // condition) and is un-migrated. Backfill the string fields from the
-          // structured siblings (round-tripped via emitStringFromTree) so those
-          // text-passes see the expression. Inert for codegen (never overwrites a
-          // non-empty string; consumers with the sibling keep reading it).
-          // Native-path-ONLY; the default pipeline is untouched.
-          backfillNativeExprText(result.ast);
-        }
-        return result;
-      }
-    : selfHostModules?.buildAST
-      ? (bsResult) => _tabEntry(bsResult)
-      : (bsResult) => _tabEntry(bsResult, selfHostModules?.tokenizer ?? null);
+  const _buildAST = selfHostModules?.buildAST
+    ? (bsResult) => _tabEntry(bsResult)
+    : (bsResult) => _tabEntry(bsResult, selfHostModules?.tokenizer ?? null);
   const tabResults = [];
   // Keep bsResult alongside tabResult for the Gauntlet Phase 1 check pass
   // (some diagnostics need to inspect the raw block tree before TAB drops
@@ -1750,22 +1699,17 @@ function _compileScrmlImpl(options = {}) {
     // emit-server.ts E-SQL-009 site (the concise gate keeps the two disjoint).
     collectErrors("CG", detectSqlInConciseArrowBody(result.ast, result.filePath || bsResult.filePath), result.filePath || bsResult.filePath);
     // §7.2.1 / §21.3.2 (S430 P1 + P4) — E-CLASS-NOT-IN-SCRML /
-    // E-DYNAMIC-IMPORT-NOT-IN-SCRML are decided on the NATIVE parser's tree in
-    // both pipelines (native-walker/forbidden-js-native.ts). The native path
-    // already carries the parse-level codes in result.errors; attribute
-    // expressions are added here. The default path runs the native parser over
-    // the file for THIS family only (every other native code is discarded).
+    // E-DYNAMIC-IMPORT-NOT-IN-SCRML are decided on the NATIVE parser's tree
+    // (native-walker/forbidden-js-native.ts): the native parser runs over the
+    // file for THIS family only (every other native code is discarded), and
+    // attribute expressions are scanned the same way.
     {
       const _fp = result.filePath || bsResult.filePath;
       const _src = sourceByFile.get(_fp) ?? "";
-      if (useNativeParser) {
-        collectErrors("TAB", nativeForbiddenJsAttrDiagnostics(result.ast, _src, _fp), _fp);
-      } else {
-        const _fj = stage("REJECT-CLASS-DYNAMIC-IMPORT", () => forbiddenJsDiagnosticsForDefault(_fp, _src, result.ast));
-        collectErrors("TAB", _fj.diagnostics, _fp);
-        if (verbose && (_fj.fallbackUsed > 0 || _fj.nativeFailed)) {
-          log(`  [TAB] ${_fp}: E-CLASS/E-DYNAMIC-IMPORT native fallback — ${_fj.nativeFailed ? "native parse threw" : `${_fj.fallbackUsed} statement(s)`}`);
-        }
+      const _fj = stage("REJECT-CLASS-DYNAMIC-IMPORT", () => forbiddenJsDiagnosticsForDefault(_fp, _src, result.ast));
+      collectErrors("TAB", _fj.diagnostics, _fp);
+      if (verbose && (_fj.fallbackUsed > 0 || _fj.nativeFailed)) {
+        log(`  [TAB] ${_fp}: E-CLASS/E-DYNAMIC-IMPORT native fallback — ${_fj.nativeFailed ? "native parse threw" : `${_fj.fallbackUsed} statement(s)`}`);
       }
     }
     // Attach source text for library-mode codegen (export-decl span extraction)
@@ -4242,32 +4186,6 @@ function _compileScrmlImpl(options = {}) {
     }
   }
 
-  // M5-swap C2 (v0.7) — `--parser=scrml-native` ROUTING CONFIRMATION. When the
-  // opt-in flag is set, emit ONE I-PARSER-NATIVE-SHADOW info diagnostic per
-  // compile confirming the per-file parse was ROUTED through the native
-  // parser's `nativeParseFile` (the TAB-stage `_buildAST` override above).
-  // Pre-C2 (M5.1) this flag was observability-only — the live BS+TAB pipeline
-  // still produced the FileAST; C2 swapped the no-op for real routing. The
-  // diagnostic's presence in result.warnings is the evidence the native
-  // pipeline produced the downstream FileAST for this compile.
-  if (parser === "scrml-native") {
-    allErrors.push({
-      code: "I-PARSER-NATIVE-SHADOW",
-      message:
-        "I-PARSER-NATIVE-SHADOW: --parser=scrml-native flag recognized. " +
-        "The per-file parse was ROUTED through the native parser " +
-        "(nativeParseFile, compiler/native-parser/parse-file.js) instead " +
-        "of the live BS+TAB path; the native parser produced the FileAST " +
-        "consumed by every downstream stage for this compile. The flag is " +
-        "strictly opt-in — callers that do not pass it use the unchanged " +
-        "live pipeline.",
-      severity: "info",
-      stage: "PARSER-FLAG",
-      filePath: inputFiles[0] || "",
-      line: 1,
-      column: 1,
-    });
-  }
 
   // Diagnostic-stream partition (S93 fix — info-level no longer fatal).
   //

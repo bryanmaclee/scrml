@@ -11,13 +11,18 @@
  * bryan, S430 P1: "I really want to reject class. ... but the word is not at
  * fault." So only the CONSTRUCT fires — the HTML `class=` attribute, `class`
  * as an object key / struct field / member name, and anything inside `_{}`
- * foreign code stay legal. Every case runs through BOTH front-ends: the
- * default pipeline (ast-builder.js) and `--parser=scrml-native`
- * (native-parser/parse-stmt.js + parse-expr.js).
+ * foreign code stay legal. Every case runs through the default pipeline,
+ * which decides this family on the NATIVE parser's tree
+ * (native-walker/forbidden-js-native.ts — native-parser/parse-stmt.js +
+ * parse-expr.js), so the native functions are exercised on their production
+ * path. (S449: the second front-end arm, `--parser=scrml-native`, was the
+ * full-pipeline flag — retired. The native block-body diagnostic case below is
+ * re-pointed at `nativeParseFile` directly.)
  */
 
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
+import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -47,7 +52,6 @@ function rejectHits(src, parser) {
 
 const PARSERS = [
   ["default", undefined],
-  ["scrml-native", "scrml-native"],
 ];
 
 const prog = (logic) => `<program>\n\${\n${logic}\n}\n<p>x</p>\n</program>`;
@@ -102,14 +106,6 @@ describe("§21.3.1 — dynamic import inside a `^{}` meta body fires", () => {
   test("default parser", () => {
     expect(rejectHits(src)).toEqual(["E-DYNAMIC-IMPORT-NOT-IN-SCRML@2:20"]);
   });
-  test("scrml-native parser", () => {
-    // Line only: the native parser's `^{}` body spans run 2 columns short
-    // (pre-existing, independent of this code — its E-AWAIT-NOT-IN-SCRML on
-    // the same line is short by the same 2).
-    const hits = rejectHits(src, "scrml-native");
-    expect(hits.length).toBe(1);
-    expect(hits[0].startsWith("E-DYNAMIC-IMPORT-NOT-IN-SCRML@2:")).toBe(true);
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -129,16 +125,13 @@ import { S430_REVIEW_PROBES } from "../helpers/s430-class-import-review-probes.j
 
 const hitsWithCol = (src, parser) => rejectHits(src, parser).sort();
 
-describe("S430 review probes — both front-ends, exact codes + positions", () => {
-  for (const [name, src, def, nat] of S430_REVIEW_PROBES) {
+// S449: the probe table's 4th column (the full-pipeline native expectation) is
+// no longer asserted — the `--parser=scrml-native` flag is retired.
+describe("S430 review probes — default pipeline, exact codes + positions", () => {
+  for (const [name, src, def] of S430_REVIEW_PROBES) {
     test(`${name} — default`, () => {
       expect(hitsWithCol(src)).toEqual(def.slice().sort());
     });
-    if (nat !== null) {
-      test(`${name} — scrml-native`, () => {
-        expect(hitsWithCol(src, "scrml-native")).toEqual(nat.slice().sort());
-      });
-    }
   }
 });
 
@@ -151,13 +144,14 @@ describe("S430 review probes — both front-ends, exact codes + positions", () =
 // owns the stub, in that parse's coordinates (parse-stmt.js parseProgram).
 describe("native: a block-body diagnostic is reported once, where it is", () => {
   const src = "<program>\n${\n  function f() {\n    lift <li>${ (() => {\n      const z = 0\n      const q = 1 +;\n      return 1 })() }</li>\n  }\n}\n<p>x</p>\n</program>\n";
+  // S449 re-point: was a full compile under `--parser=scrml-native`; the fix
+  // lives in native-parser/parse-stmt.js parseProgram, reached here through
+  // `nativeParseFile` (the entry impl#1 calls for component / `^{}` / match
+  // re-parse).
   test("an ordinary parse error inside the arrow body", () => {
-    const dir = mkdtempSync(join(tmpdir(), "cdireject-f3-"));
-    const f = join(dir, "case.scrml");
-    writeFileSync(f, src);
-    const r = compileScrml({ inputFiles: [f], outputDir: join(dir, "dist"), write: false, log: () => {}, parser: "scrml-native" });
+    const r = nativeParseFile("/cdireject-f3/case.scrml", src);
     const got = (r.errors || []).filter((e) => e.code === "E-EXPR-UNEXPECTED")
-      .map((e) => `${(e.span || e.tabSpan).line}:${(e.span || e.tabSpan).col}`);
+      .map((e) => `${e.span.line}:${e.span.col}`);
     expect(got).toEqual(["6:20"]);
   });
 });
@@ -165,7 +159,6 @@ describe("native: a block-body diagnostic is reported once, where it is", () => 
 describe("a quoted attribute value is data, not scrml source", () => {
   const src = `<program>\n<button onclick="import('./x.js')">a</button>\n<p title="class Foo extends Bar">b</p>\n</program>`;
   test("default", () => expect(rejectHits(src)).toEqual([]));
-  test("scrml-native", () => expect(rejectHits(src, "scrml-native")).toEqual([]));
 });
 
 // Attribute values never enter a logic token stream (the E-SWITCH-FORBIDDEN

@@ -4,9 +4,11 @@
  * §4.18.7). Ruling: user-voice-scrml.md S441 "prose should be declared as such"
  * + "declared-prose implementation: yes to all four".
  *
- * Every behavioural case runs through BOTH front ends (the default
- * splitBlocks+buildAST pipeline and `--parser=scrml-native`), because the rule
- * is a language rule, not a pipeline feature.
+ * Every behavioural case ran through BOTH front ends (the default
+ * splitBlocks+buildAST pipeline and `--parser=scrml-native`). S449 retired the
+ * full-pipeline flag; the cases now run on the default front end, and the
+ * native body-top behaviour is tested directly in s441-review-r4/-r5 and
+ * s441-coverage-invariant (`nativeParseFile`).
  */
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
@@ -33,7 +35,11 @@ function compile(source, parser) {
   return { errors, codes: errors.map((e) => e.code), body, client };
 }
 
-const PIPELINES = [["default", null], ["scrml-native", "scrml-native"]];
+// S449: the second entry ran each case through the retired full-pipeline
+// `--parser=scrml-native` flag (a parity arm). The native body-top machinery
+// impl#1 can still reach (nativeParseFile at a file's top level) keeps its own
+// direct tests below.
+const PIPELINES = [["default", null]];
 
 describe("S441 — body-top segmenter (shared by both front ends)", () => {
   test("a statement-start `\"...\"` is a literal; the rest is code", () => {

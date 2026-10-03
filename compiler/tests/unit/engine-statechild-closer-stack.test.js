@@ -276,7 +276,11 @@ ${CARD_DECL}`;
 // at page load (blank on every later entry until its on= changes). The warning
 // names the limitation without deciding the open (A)/(B) ruling on
 // g-nested-block-match-in-dispatched-arm-silently-drops: (A) upgrades it to an
-// error, (B) deletes it. Fired from the post-CE AST, so both pipelines.
+// error, (B) deletes it. Fired from the post-CE AST. (S449: the second
+// pipeline arm, the retired full-pipeline `--parser=scrml-native` flag, was
+// dropped. A component body containing `<match` is re-parsed by the default
+// parser — component-expander's live fallback — so no case here routes
+// through the native parser.)
 describe("W-ENGINE-MATCH-IN-STATE-CHILD", () => {
   const W = "W-ENGINE-MATCH-IN-STATE-CHILD";
   const NAMED_ARMS = `<match for=Kind on=@k><X><p>X</p></X><Y><p>Y</p></Y></match>`;
@@ -309,7 +313,7 @@ describe("W-ENGINE-MATCH-IN-STATE-CHILD", () => {
 </program>
 `;
 
-  for (const parser of [undefined, "scrml-native"]) {
+  for (const parser of [undefined]) {
     const label = parser ?? "default";
     describe(`pipeline: ${label}`, () => {
       for (const [shape, body, decl] of [

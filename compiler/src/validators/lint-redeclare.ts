@@ -18,7 +18,9 @@
  * Shadowing in a NESTED block (an `if` / loop / arm body re-declaring an outer
  * name) is legal and untouched. Two `function` declarations of one name in one
  * block are left to the existing checks (JS itself accepts them at a function's
- * top level). File-level duplicates are E-SCOPE-010 (§7.6), not this code.
+ * top level), and so is a `function` declaration named like a PARAMETER (S432,
+ * B1 — JS-legal, compiled and ran before this rule). File-level duplicates are
+ * E-SCOPE-010 (§7.6), not this code.
  *
  * Structural: declared names come from the declaration nodes (every name a
  * destructuring pattern binds, via the type system's `iterDestructuredNames`),
@@ -112,7 +114,14 @@ export function runRedeclareChecks(ast: FileAST | null | undefined): RedeclareDi
         if (prev) {
           // function vs function in one block: left to the existing checks.
           const prevIsFn = prev.node !== null && prev.node.kind === "function-decl";
-          if (!(isFn && prevIsFn)) {
+          // function over a PARAMETER (S432, B1): host-legal — the declaration
+          // replaces the parameter's value for the whole body, and with a `defer`
+          // (the body wrapped in a host `try`) it shadows it from the block's
+          // start, so both lowerings agree. It compiled before §7.3.3, whose
+          // direction of change rejects only programs that already failed at
+          // codegen. The parameter stays bound: a later `let x` still collides.
+          const prevIsParam = prev.node === null;
+          if (!(isFn && (prevIsFn || prevIsParam))) {
             const where = prev.node === null
               ? `a parameter of ${fnName ? "`" + fnName + "`" : "this function"}`
               : `a \`${kwOf(prev.node.kind as string)} ${rawName}\` in the same block (${lineOf(prev.node)})`;

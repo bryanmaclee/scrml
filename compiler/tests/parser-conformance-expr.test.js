@@ -31,9 +31,12 @@
 // documented divergence) — those are exercised natively-only in the dedicated
 // describe-block, not diffed against Acorn.
 //
-// This file MIRRORS parser-conformance-lexer.test.js's structure. It does NOT
-// modify scrmlNativeParserStub in parser-conformance/parsers.js — the full
-// stub wire-in is M2.3/M2.4 (when the expression parser is complete).
+// This file MIRRORS parser-conformance-lexer.test.js's structure. Acorn is the
+// correctness oracle for the JS subset: `parseExpr` is the expression parser
+// impl#1 runs in production (component / `^{}` / `<match>` re-parse through
+// `nativeParseFile`), so these checks cover a live path. (S449: the acorn-vs-
+// acorn-stub harness `parser-conformance.test.js` + `parsers.js` was deleted —
+// it never exercised the native parser.)
 
 import { describe, test, expect } from "bun:test";
 import * as acorn from "acorn";

@@ -15,6 +15,7 @@
  */
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
+import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { assertBodyTopCoverage } from "../../src/ast-builder.js";
 import { assertBodyTopCoverageNative } from "../../native-parser/parse-markup.js";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync } from "fs";
@@ -35,7 +36,20 @@ function compile(source, parser) {
   return { errors, codes: errors.map((e) => e.code), html: read("html"), client: read("client.js") };
 }
 const at = (e) => e.tabSpan ?? e.span ?? {};
-const BOTH = [["default", null], ["scrml-native", "scrml-native"]];
+// S449: the second entry ran each case through the retired full-pipeline
+// `--parser=scrml-native` flag (a parity arm). The native body-top machinery
+// impl#1 can still reach (nativeParseFile at a file's top level) keeps its own
+// direct tests below.
+const BOTH = [["default", null]];
+/** Parse `source` with the native parser alone — `nativeParseFile`, the entry
+ *  impl#1 calls for component / `^{}` / `<match>` re-parse — and return its
+ *  error-severity diagnostics in the same shape as `compile`. */
+function nativeParse(source) {
+  const r = nativeParseFile("/s441-native/c.scrml", source);
+  const errors = (r.errors ?? []).filter((e) => (e.severity ?? "error") === "error");
+  return { errors, codes: errors.map((e) => e.code), ast: r.ast };
+}
+
 const DROPPED = "E-INTERNAL-BODY-TOP-DROPPED";
 
 // ---------------------------------------------------------------------------
@@ -173,11 +187,11 @@ test("§3 native: a declaration at the run's END that compiles nothing is report
   // "a node covers only tokens it compiles"): a declaration that compiles
   // nothing is E-UNQUOTED-DISPLAY-TEXT on its own line, as on the default
   // front end (the native "expected 'from'" is reported at the NEXT token).
-  const r = compile("<program>\nimport stuff\n<p>x</p>\n</program>\n", "scrml-native");
+  const r = nativeParse("<program>\nimport stuff\n<p>x</p>\n</program>\n");
   expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
   expect(r.errors[0].message).toContain("`import stuff`");
   expect(at(r.errors[0]).line).toBe(2);
-  const f = compile("<program>\nfn heading\n<p>x</p>\n</program>\n", "scrml-native");
+  const f = nativeParse("<program>\nfn heading\n<p>x</p>\n</program>\n");
   expect(f.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
   expect(f.errors[0].message).toContain("`fn heading`");
 });

@@ -1,0 +1,16 @@
+${
+    <trace> = ""
+    <n> = 0
+    function note(x) { @trace = @trace + x + ";" }
+    when @n changes {
+        defer [1, 2].forEach(note)
+        @trace = @trace + "w;"
+    }
+    function go() {
+        @n = @n + 1
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>

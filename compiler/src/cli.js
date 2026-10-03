@@ -61,7 +61,6 @@ Options (compile / dev):
   --chunk-size-budget=N   Soft size budget (bytes) for W-CG-CHUNK-LARGE (default 100000)
   --emit-machine-tests    Emit <base>.machine.test.js for each source (§51.13)
   --debug-perf            Sub-stage timing for CG / RS / DG (PGO instrumentation)
-  --parser=scrml-native   M5.1 native-parser observability shadow (opt-in)
   --watch, -w             Watch for changes and recompile (compile command only)
 
 Options (dev):
