@@ -1,0 +1,10 @@
+{
+  "id": "fixture-unsupported",
+  "description": "KNOWN UNSUPPORTED: a `#{…}` CSS block — the bootstrap front end refuses it with E-BOOTSTRAP-UNSUPPORTED.",
+  "language-version": "1.0",
+  "spec": "§25",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": {
+    "codes": []
+  }
+}

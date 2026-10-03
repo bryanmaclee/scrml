@@ -1,0 +1,13 @@
+{
+  "id": "fixture-pass-runtime",
+  "description": "KNOWN PASS (codes + runtime): a §66 counter, two clicks; the bootstrap printer + runtime execute it.",
+  "language-version": "1.0",
+  "spec": "§66.9",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": {
+    "codes": [],
+    "input": [{ "click": "#inc" }, { "click": "#inc" }],
+    "state": { "count": 2 },
+    "domAnchored": [{ "selector": "#out", "text": "Count 2 doubled 4" }]
+  }
+}
