@@ -45,10 +45,82 @@ import { asyncCombinatorHelperBlock, ASYNC_COMBINATOR_METHOD_ORDER } from "./asy
 import { emitExprField } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
+import {
+  isLoopbackHost, isLegacyNumericIPv4, hostRefusal, bindPlan, displayUrlFor, probeIPv6, bindListeners, DEFAULT_HOST,
+} from "../commands/listen.js";
 import { paramSignature, indentBodyLines } from "./utils.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
+
+/**
+ * §64.9 bind address of a headless serve-target (S447 ruling (iv): "generated
+ * headless serve targets default to loopback, prod stays all-interfaces").
+ *
+ * The generated server binds `DEFAULT_HOST` (127.0.0.1 + its ::1 twin) unless
+ * the `SCRML_HOST` environment variable names another address (`0.0.0.0` =
+ * every interface + its `::` twin). The value is validated exactly as
+ * `scrml dev --host` / `scrml serve --host` validate theirs (#1207): whitespace
+ * / control characters and legacy numeric IPv4 shorthand (`0`, `127.1`, …) are
+ * refused, as is an empty value; a refused value or a primary socket that cannot
+ * bind exits 1 with a message on stderr.
+ *
+ * The validation, bind plan, IPv4/IPv6 twin and URL functions are NOT restated:
+ * they are `commands/listen.js`'s own self-contained functions, serialized into
+ * the module (the generated server runs as a plain `bun <file>.js`, with no
+ * compiler beside it to import from).
+ */
+export const SERVE_HOST_ENV = "SCRML_HOST";
+
+const SERVE_BIND_FNS = [
+  isLoopbackHost, isLegacyNumericIPv4, hostRefusal, bindPlan, displayUrlFor, probeIPv6, bindListeners,
+];
+
+function serveBindHelperLines(): string[] {
+  const out: string[] = [];
+  out.push(`// --- §64.9 bind address — loopback by default; ${SERVE_HOST_ENV} opts in (S447 ruling iv) ---`);
+  out.push("// The functions inside are compiler/src/commands/listen.js's own, serialized, so this");
+  out.push("// server validates and binds its host exactly as `scrml dev` / `scrml serve` do.");
+  out.push("const _scrml_bind = (() => {");
+  for (const fn of SERVE_BIND_FNS) {
+    // Not re-indented: a template literal spanning lines must keep its text exactly.
+    out.push(fn.toString().replace(/\r\n/g, "\n"));
+  }
+  out.push(`  function host(raw) {`);
+  out.push(`    if (raw === undefined) return ${JSON.stringify(DEFAULT_HOST)};`);
+  out.push(`    const refused = raw === ""`);
+  out.push(`      ? { message: "is set but empty. Unset it to bind loopback, or name an address (e.g. 0.0.0.0 for every interface)." }`);
+  out.push(`      : hostRefusal(raw);`);
+  out.push(`    if (refused) {`);
+  out.push(`      console.error(\`scrml serve-target: ${SERVE_HOST_ENV} \${refused.message}\`);`);
+  out.push(`      process.exit(1);`);
+  out.push(`    }`);
+  out.push(`    return raw;`);
+  out.push(`  }`);
+  out.push(`  function listen(config, host) {`);
+  out.push(`    const plan = bindPlan(host);`);
+  out.push(`    const serve = (c) => Bun.serve(c);`);
+  out.push(`    const { server, bound } = bindListeners(serve, config, plan, plan.twin, () => probeIPv6(serve), (m) => console.error(m), (err) => {`);
+  out.push(`      const where = config.port === 0 ? "an ephemeral port" : \`port \${config.port}\`;`);
+  out.push(`      console.error(`);
+  out.push(`        \`scrml serve-target: could not listen on host "\${host}" at \${where} — tried \${plan.primary}. \` +`);
+  out.push(`        \`The address is not one of this machine's, the name does not resolve, or the port is already in use. \` +`);
+  out.push(`        \`Set ${SERVE_HOST_ENV} to an address this machine owns (0.0.0.0 = every interface), or change serve=. \` +`);
+  out.push(`        \`Underlying error: \${[err && err.code, err && err.message].filter(Boolean).join(" ")}\`,`);
+  out.push(`      );`);
+  out.push(`      process.exit(1);`);
+  out.push(`    });`);
+  out.push(`    if (isLoopbackHost(host)) {`);
+  out.push(`      console.error(\`scrml serve-target listening on \${displayUrlFor(bound, host, server.port)}\`);`);
+  out.push(`    } else {`);
+  out.push(`      console.error(\`scrml serve-target listening on \${bound.join(" + ")} port \${server.port} — reachable from the network. Anyone who can reach this machine can use it.\`);`);
+  out.push(`    }`);
+  out.push(`    return server;`);
+  out.push(`  }`);
+  out.push(`  return { host, listen };`);
+  out.push(`})();`);
+  return out;
+}
 
 /** Extract the FileAST from a CompileContext-or-fileAST argument. */
 function resolveFileAST(ctxOrFileAST: CompileContext | ASTNode): {
@@ -873,13 +945,17 @@ function generateServeHarnessToolJs(
     // define an empty routes array so the harness references a real binding.
     out.push("const routes = [];");
   }
+  for (const line of serveBindHelperLines()) out.push(line);
+  // §64.9 bind address — resolved + validated BEFORE `main`'s setup runs, so a
+  // refused SCRML_HOST exits before any side effect.
+  out.push(`const _scrml_serve_host = _scrml_bind.host(process.env.${SERVE_HOST_ENV});`);
   if (mainFn) {
     // §64.3 compose — run the no-return setup `main` BEFORE the serve-harness holds
     // the process (a numeric-return main + serve= is E-TOOL-SERVE-MAIN-EXITS at TS).
     out.push("await main(process.argv.slice(2));");
   }
   out.push(`const _scrml_serve_port = ${portJs};`);
-  out.push(`const _scrml_server = Bun.serve({`);
+  out.push(`const _scrml_server = _scrml_bind.listen({`);
   out.push("  port: _scrml_serve_port,");
   // Match the web-app entry's idleTimeout (S221 — a legit >10s route must not be
   // truncated by Bun's 10s default).
@@ -896,15 +972,15 @@ function generateServeHarnessToolJs(
   out.push("    return new Response(\"Not Found\", { status: 404 });");
   out.push("  },");
   if (hasWs) out.push("  websocket: _scrml_ws_handlers,");
-  out.push("});");
+  out.push("}, _scrml_serve_host);");
   // Expose the server handle on globalThis: §38.6 needs it for a channel-scoped
   // `broadcast()` (`_scrml_active_server.publish(topic, msg)`, mirrors build.js),
   // and it is the in-process boot/drive/STOP seam for a harness test (the DD H6
   // conformance shape — `_scrml_active_server.stop(true)`). Unconditional: a
   // headless serve-target has no client, so exposing its own server is harmless.
   out.push("globalThis._scrml_active_server = _scrml_server;");
-  // Operator-visible startup line on STDERR (stdout stays clean for machine output).
-  out.push("console.error(`scrml serve-target listening on http://localhost:${_scrml_serve_port}`);");
+  // The operator-visible startup line (STDERR — stdout stays clean for machine
+  // output) is printed by `_scrml_bind.listen`, naming what actually bound.
   out.push("");
   return out.join("\n");
 }

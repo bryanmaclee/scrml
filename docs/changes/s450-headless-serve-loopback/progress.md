@@ -1,3 +1,6 @@
 # progress — s450-headless-serve-loopback
 
 - 2026-10-02 start: worktree verified at base bc4bca1f (== origin/main); bun install (puppeteer browser postinstall failed, non-blocking); pretest ok, samples/compilation-tests/dist produced.
+- 2026-10-02 inventory: listener-emitting paths = (a) codegen/emit-tool.ts generateServeHarnessToolJs (`kind="tool" serve=`, §64.9 headless serve-target) → CHANGE; (b) commands/build.js generateServerEntry (prod) → UNCHANGED (pinned). dev.js/serve.js already loopback (#1207). No other emitted listener (emit-server headless module has no listener; bootstrap has no serve harness).
+- 2026-10-02 listen.js: validation/bind-plan/twin/URL extracted into self-contained exported fns (isLoopbackHost, isLegacyNumericIPv4, hostRefusal, bindPlan, displayUrlFor, probeIPv6, bindListeners); listen() now composes them. cli-listen-host + dev-serve-bind-host: 62 pass / 0 fail.
+- 2026-10-02 emit-tool.ts: serve-harness binds via `_scrml_bind.listen(config, host)`; host = SCRML_HOST env (default 127.0.0.1), validated before main's setup; the listen.js fns are serialized (fn.toString) into the module. New test headless-serve-bind-host.test.js 15/15; serve-target-tool-emit + r26 updated for the new harness shape 39/39. TYPES-BASELINE += emit-tool TS7016 (../commands/listen.js — repo convention for .js imports).
