@@ -61,3 +61,14 @@ Repro scripts: worktree `.tmp/repro/{app.scrml,seed.ts,client.ts,client2.ts,clie
   guarded declaration, request-scope trailer; 3 also move the node:fs import line below the runtime);
   0 residual. ZERO implicit envelopes in the corpus on either side (the D / body-hoist / PG-BEGIN
   changes reach no corpus file — see g-implicit-envelope-requires-explicit-server-modifier).
+
+## 4. S239 review fix round (review of 9a018219b: LAND-WITH-NITS)
+
+- Merged origin/main (b1e916642): known-gaps hunks resolved as a union (1605 gap ids =
+  ours ∪ theirs, 0 dropped); SPEC-INDEX / FACTS / gap-counts regenerated.
+- F1 SSE stream backstop in the stream `finally`; F3 owned BEGIN/COMMIT/ROLLBACK →
+  SAVEPOINT/RELEASE/ROLLBACK TO; F2 comment-proof classifier + SQLite SAVEPOINT-opens + AND CHAIN;
+  F5 awaited WS handlers; E-SQL-010 span. 97f50b0d3 — gate 29931 pass / 0 fail.
+- Filed: g-tx-lock-held-across-slow-outbound-call (F4), g-tx-scope-residual-sharing (F6),
+  g-channel-onserver-handler-with-server-call-not-async (found while testing F5: an onserver
+  handler that touches the DB does not compile today). SPEC §19.10.6 "Not covered" expanded.

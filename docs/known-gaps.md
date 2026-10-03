@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 238 | 5 |
-| MED | 479 | 1 |
-| LOW | 227 | 0 |
+| MED | 481 | 1 |
+| LOW | 228 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22436,6 +22436,20 @@ Repro: `import { sleep } from 'scrml:time'` · `server function f(n)! -> E { ?{�
 - Documented, not fixed (SPEC §19.10.6 "Not covered"): a transaction that awaits an HTTP request to its OWN server deadlocks under the default (the new request waits for the transaction waiting on it); two requests taking transactions on two databases in opposite orders can deadlock. No lock-wait timeout was added (no SPEC basis for a value; a timeout turns slow-but-legit transactions into failures) — surfaced for a ruling.
 - Seen while verifying examples/23 over HTTP (identical on base a1aac1433 and head — NOT this change): login + its `UPDATE users SET last_login_at` write succeed, but every driver `changeHosServer` call returns 500 — `TypeError: driverNextStates(from).includes is not a function` in the emitted `components/driver-card.server.js` `isValidHosTransition`. The example's HOS-change write path is broken at runtime.
 <!-- @gap id=g-ex23-change-hos-server-500-driver-next-states-not-array sev=MED status=open locus=searched:examples/23-trucking-dispatch/components/driver-card.scrml(driverNextStates)+its-emitted-server-module prov=empirical:s449-shared-connection-tx-ex23-http-base-and-head -->
+
+**S239 review of 9a018219b (LAND-WITH-NITS) — fix round.** FIXED on this branch: F1 (an SSE stream torn down mid-transaction never released the lock → every later statement on the handle hung; the stream's `finally` now runs the backstop), F2 (classifier: leading comments, `SAVEPOINT` with no transaction open, `AND CHAIN`), F3 (a BEGIN while the request already owns a transaction nests as a SAVEPOINT — on Postgres the inner COMMIT had committed the envelope and D silently failed), F5 (WebSocket callbacks await their onserver handler inside the scope), E-SQL-010 now carries the attribute's span. FILED below (not fixed):
+
+### G-TX-LOCK-HELD-ACROSS-SLOW-OUTBOUND-CALL — under the §19.10.6 default, any slow call a transaction awaits stalls every other request's statements on that database
+A transaction (an implicit `!` envelope included) that awaits an outbound call holds the database until the call returns — bounded only by the client's timeout (`scrml:http` 10 s default; a raw `fetch` up to Bun's `idleTimeout`, 120 s in `scrml dev`). A call to the program's OWN server from inside a transaction deadlocks until that timeout. Documented in SPEC §19.10.6 "Not covered". A lock-wait timeout is bryan's open fork (no SPEC basis for a value; a timeout turns slow-but-legit transactions into failures).
+<!-- @gap id=g-tx-lock-held-across-slow-outbound-call sev=MED status=open owner=bryan locus=compiler/src/codegen/sql-tx-guard.ts(acquire — no wait bound) prov=review:S449-S239-review-of-9a018219b-F4 -->
+
+### G-TX-SCOPE-RESIDUAL-SHARING — the request is the transaction owner, so same-request branches, fire-and-forget transactions, `scrml:cron` jobs, and two-handle lock order are not isolated
+(a) Two concurrent branches of ONE request share its scope: one branch's statement can run inside the other's transaction; two branches each beginning a transaction nest instead of queueing (a contrived branch race can deadlock). (b) A fire-and-forget transaction still open when its handler returns is cut in half by the request-end backstop (the rest of its statements autocommit). (c) Code outside any request — module init, `scrml:cron` jobs, timers started at load — shares one scope: jobs are isolated from requests but not from each other, and no backstop ends their transactions. (d) Two requests taking transactions on two handles in opposite orders (ABBA) deadlock. Documented in SPEC §19.10.6 "Not covered".
+<!-- @gap id=g-tx-scope-residual-sharing sev=LOW status=open locus=compiler/src/codegen/sql-tx-guard.ts(_scrml_db_request_scope / _scrml_db_no_scope) prov=review:S449-S239-review-of-9a018219b-F6 -->
+
+### G-CHANNEL-ONSERVER-HANDLER-WITH-SERVER-CALL-NOT-ASYNC — an `onserver:` channel handler that runs a `?{}` or calls a server function is emitted as a NON-async function containing `await` → E-CODEGEN-INVALID-LOGIC
+Repro: `<channel name="chat" topic="lobby" onserver:message=onChat(msg)> ${ function onChat(msg) { const r = leaveOpen(msg) } } </>` with `server function leaveOpen(msg) { ?{…}.run() return 1 }` (or the `?{}` directly in `onChat`) → `function onChat(msg) { … const r = await leaveOpen(msg); }` → build fails "Cannot use keyword 'await' outside an async function". So no onserver handler can touch the database today; the S449 F5 change (callbacks `await` their handler) is in place for when it can.
+<!-- @gap id=g-channel-onserver-handler-with-server-call-not-async sev=MED status=open locus=searched:compiler/src/codegen/emit-server.ts(channelWsHandlerFns plain-function emission) prov=empirical:s449-shared-connection-tx-review-round -->
 
 ## §S449-opener-keywords-land — the S447 opener-keyword SPEC (PR #1214) landed with the bootstrap parser migration (2026-10-03; ruling:user-voice-scrml.md S447 "your recs" item 2; SPEC §66.2.5 / §66.4 rule 6 / §66.5.1 / §66.20; change `docs/changes/s449-opener-keywords-land/`; probes run on the change branch with the slice-m4 harness `frontEnd`, not committed)
 
