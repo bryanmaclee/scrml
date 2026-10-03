@@ -140,7 +140,8 @@ describe("§A <db src=> form emits unscoped _scrml_sql declaration", () => {
     }
     expect(serverJs).toContain('import { SQL } from "bun"');
     // SQLite paths get `sqlite:` prefix to avoid Bun.SQL postgres-default.
-    expect(serverJs).toContain('const _scrml_sql = new SQL("sqlite:./contacts.db")');
+    // §19.10.6 (S449): every handle is wrapped by the transaction mutex.
+    expect(serverJs).toContain('const _scrml_sql = _scrml_db_guard(new SQL("sqlite:./contacts.db"), "sqlite", false);');
   });
 });
 
@@ -356,7 +357,8 @@ describe("§K SQLite path normalization — sqlite: prefix added when missing", 
     });
     const ast = makeFileAST([programNode]);
     const serverJs = generateServerJs(ast, { functions: fnRouteMap }, [], null, null);
-    expect(serverJs).toContain('const _scrml_sql = _scrml_sqlite_referenced("testdb.db", "./testdb.db", "app.scrml");');
+    // §19.10.6 (S449): the handle is wrapped by the transaction mutex.
+    expect(serverJs).toContain('const _scrml_sql = _scrml_db_guard(_scrml_sqlite_referenced("testdb.db", "./testdb.db", "app.scrml"), "sqlite", false);');
     expect(serverJs).not.toContain('"sqlite:./testdb.db"');
     // S445 ruling: `SELECT 1` declares no schema — a REFERENCING handle: opened lazily
     // on first use, never created, loud when missing.
@@ -390,7 +392,8 @@ describe("§K SQLite path normalization — sqlite: prefix added when missing", 
       explicitMethod: "POST",
     });
     const serverJs = generateServerJs(makeFileAST([programNode]), { functions: fnRouteMap }, [], null, null);
-    expect(serverJs).toContain('const _scrml_sql = new SQL(_scrml_sqlite_owned("testdb.db", "./testdb.db", "app.scrml"));');
+    // §19.10.6 (S449): the handle is wrapped by the transaction mutex.
+    expect(serverJs).toContain('const _scrml_sql = _scrml_db_guard(new SQL(_scrml_sqlite_owned("testdb.db", "./testdb.db", "app.scrml")), "sqlite", false);');
   });
 
   test(":memory: passes through WITHOUT sqlite: prefix (Bun.SQL recognizes it)", () => {

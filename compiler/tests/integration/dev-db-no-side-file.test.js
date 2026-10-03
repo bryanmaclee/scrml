@@ -458,7 +458,7 @@ describe("§4 ownership at compile time (S445 ruling)", () => {
     expect(errorCodes(alone)).toEqual([]);
     const handleLine = (p) => /^const _scrml_sql = .*;$/m.exec(readFileSync(p, "utf8"))[0];
     const inBuild = handleLine(join(root, "dist", "reader.server.js"));
-    expect(inBuild).toMatch(/^const _scrml_sql = _scrml_sqlite_referenced\(/);
+    expect(inBuild).toMatch(/^const _scrml_sql = _scrml_db_guard\(_scrml_sqlite_referenced\(/); // §19.10.6 guard
     // The ruling's point: the answer does not depend on which files are in the build.
     expect(handleLine(join(root, "dist-alone", "reader.server.js"))).toBe(inBuild);
     expect(emittedDbFile(readFileSync(join(root, "dist", "reader.server.js"), "utf8"))).toEqual({ file: join(root, "shared.db"), owns: false });
@@ -495,7 +495,7 @@ describe("§4 ownership at compile time (S445 ruling)", () => {
       expect(aloneJs).not.toBeNull();
       const builtJs = join(out, page.replace(/^pages\//, "").replace(/\.scrml$/, ".server.js"));
       const a = handleLine(aloneJs);
-      expect(a).toMatch(/^const _scrml_sql = _scrml_sqlite_referenced\("examples\/23-trucking-dispatch\/dispatch\.db", /);
+      expect(a).toMatch(/^const _scrml_sql = _scrml_db_guard\(_scrml_sqlite_referenced\("examples\/23-trucking-dispatch\/dispatch\.db", /); // §19.10.6 guard
       expect(handleLine(builtJs)).toBe(a);
     }
   }, 120_000);
@@ -638,7 +638,7 @@ describe("§6 data root: SCRML_DATA_DIR ?? the project root recorded at build", 
   test("the handle records `src/app.db` (project-root-relative) and the project root", () => {
     const root = fixture("record", APP.replace(/<db src="\.\/app\.db" tables="t">/, "<div>").replace("</db>", "</div>"), true);
     const js = readFileSync(join(root, "dist", "app.server.js"), "utf8");
-    expect(js).toContain('const _scrml_sql = _scrml_sqlite_referenced("src/app.db", "./app.db", "app.scrml");');
+    expect(js).toContain('const _scrml_sql = _scrml_db_guard(_scrml_sqlite_referenced("src/app.db", "./app.db", "app.scrml"), "sqlite", false);'); // §19.10.6 guard
     expect(js).toContain(`const _scrml_project_root = ${JSON.stringify(root.split(sep).join("/"))};`);
   });
 

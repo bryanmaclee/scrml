@@ -48,7 +48,7 @@ const _openModules = new Set();
  * @returns {{ file: string, owns: boolean } | null}
  */
 export function emittedDbFile(text) {
-  const m = /const _scrml_sql = (?:new SQL\()?_scrml_sqlite_(owned|referenced)\(("(?:[^"\\]|\\.)*")/.exec(text);
+  const m = /const _scrml_sql = (?:_scrml_db_guard\()?(?:new SQL\()?_scrml_sqlite_(owned|referenced)\(("(?:[^"\\]|\\.)*")/.exec(text);
   if (!m) return null;
   const dbPath = JSON.parse(m[2]);
   if (/^(?:\/|[A-Za-z]:[\\/])/.test(dbPath)) return { file: resolve(dbPath), owns: m[1] === "owned" };
@@ -94,7 +94,7 @@ export function assertOpensDb(serverJsPath, absDbPath) {
 export async function patchAndImport(serverJsPath, absDbPath) {
   const text = readFileSync(serverJsPath, "utf-8");
   // A module whose program never reaches the database declares no handle at all.
-  if (/const _scrml_sql = (?:new SQL\()?_scrml_sqlite_/.test(text)) assertOpensDb(serverJsPath, absDbPath);
+  if (/const _scrml_sql = (?:_scrml_db_guard\()?(?:new SQL\()?_scrml_sqlite_/.test(text)) assertOpensDb(serverJsPath, absDbPath);
   const patched = text + `\nexport const __closeSql = async () => { await _scrml_sql.close(); };\n`;
   writeFileSync(serverJsPath, patched);
 

@@ -857,10 +857,22 @@ const DERIVED_METHODS = new Set([
  */
 const SQL_METHODS = new Set(["unsafe"]);
 
+/**
+ * §19.10.6 (S449) — the transaction-mutex runtime (codegen/sql-tx-guard.ts). Never
+ * walked: `_scrml_db_guard` / `_scrml_db_request_scope` are modelled at their call
+ * sites as the identity on data (see `evalCall`); the other two are only called
+ * from inside them. Walking the Proxy + closure + queue bodies took a 25-module
+ * protect build (examples/23) from ~1.4 s to more than 400 s (measured).
+ */
+const TX_GUARD_RUNTIME_NAMES = new Set([
+  "_scrml_db_guard", "_scrml_db_request_scope", "_scrml_db_scope_end", "_scrml_db_stream_end",
+  "_scrml_db_tx_kind", "_scrml_db_sql_head", "_scrml_db_savepoint_name",
+]);
+
 /** Compiler-runtime helpers the analysis models itself (never walked). */
 function isModelledHelperName(name: string): boolean {
   return name.startsWith("_scrml_protect_") || name.startsWith("_scrml_tenant_") || name === "_scrml_active_tenant"
-    || name === "_scrml_structural_eq";
+    || name === "_scrml_structural_eq" || TX_GUARD_RUNTIME_NAMES.has(name);
 }
 
 interface Mod {
@@ -3276,6 +3288,16 @@ class FlowAnalysis {
         // (soundly but uselessly) read as the two operands aliasing each other.
         return clean();
       }
+      if (name === "_scrml_db_guard" || name === "_scrml_db_request_scope") {
+        // §19.10.6 (S449) — the transaction-mutex runtime (codegen/sql-tx-guard.ts),
+        // modelled exactly rather than walked: `_scrml_db_guard(handle, …)` forwards
+        // every query to `handle` and returns its results unchanged, and
+        // `_scrml_db_request_scope(handler)` calls `handler` with the same arguments
+        // and returns its result unchanged — both are the identity on data. Walking
+        // them is not just slow but pathological: their Proxy + closure + queue body
+        // took the fixpoint from milliseconds to ~140 s per compile (measured).
+        return args[0] ?? clean();
+      }
       if (isModelledHelperName(name)) {
         // `_scrml_tenant_redact(v, t)` / `_scrml_tenant_tag(v, …)` preserve the
         // protect descriptor on survivors (§14.8.10 composes inside §14.8.9).
@@ -4043,6 +4065,19 @@ class FlowAnalysis {
   }
   /** `new SQL(…)` with `SQL` imported from `bun`. */
   private isSqlConstruction(init: any, scope: Scope): boolean {
+    // §19.10.6 (S449) — every emitted handle is `_scrml_db_guard(<handle>, …)`, the
+    // compiler's transaction-mutex wrapper (codegen/sql-tx-guard.ts). It forwards every
+    // query to the handle it wraps, so it IS that client: see through it — by identity,
+    // the module-scope compiler function, never a local of the same name.
+    if (
+      init?.type === "CallExpression" && init.callee?.type === "Identifier" &&
+      init.callee.name === "_scrml_db_guard" && init.arguments?.length >= 1
+    ) {
+      const g = this.resolve(init.callee.name, scope);
+      if (g && g.parent === null && !g.mod.imports.has(init.callee.name)) {
+        return this.isSqlConstruction(init.arguments[0], scope);
+      }
+    }
     if (init?.type !== "NewExpression" || init.callee?.type !== "Identifier") return false;
     const s = this.resolve(init.callee.name, scope);
     if (!s || s.parent !== null) return false;

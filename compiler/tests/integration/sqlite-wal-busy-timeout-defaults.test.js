@@ -120,7 +120,7 @@ describe("§44 — a file-backed sqlite handle gets WAL + a 5s busy-timeout by d
     expect(nonWarn(errors)).toEqual([]);
 
     // s445 — this file declares the table, so its handle OWNS m.db and opens at load.
-    expect(serverJs).toMatch(/const _scrml_sql = new SQL\(_scrml_sqlite_owned\("[^"]*m\.db", "\.\/m\.db", "[^"]*"\)\);/);
+    expect(serverJs).toMatch(/const _scrml_sql = _scrml_db_guard\(new SQL\(_scrml_sqlite_owned\("[^"]*m\.db", "\.\/m\.db", "[^"]*"\)\), "sqlite", false\);/); // §19.10.6 guard
     expect(serverJs).toContain("function _scrml_sqlite_configure(_h)");
     expect(serverJs).toContain("PRAGMA journal_mode = WAL");
     expect(serverJs).toContain("PRAGMA busy_timeout = 5000");
@@ -146,14 +146,14 @@ describe("§44 — a file-backed sqlite handle gets WAL + a 5s busy-timeout by d
     expect(serverJs).toMatch(/try \{ await _h`PRAGMA journal_mode = WAL`; \} catch \{/);
 
     // The configure call must come AFTER the declaration it configures.
-    expect(serverJs.indexOf("const _scrml_sql = new SQL("))
+    expect(serverJs.indexOf("const _scrml_sql = _scrml_db_guard(new SQL("))
       .toBeLessThan(serverJs.indexOf("void _scrml_sqlite_configure(_scrml_sql);"));
   });
 
   test("a REFERENCING handle (S445 per-file ownership) configures when it first opens, before the first statement", () => {
     const { errors, serverJs } = build("emit-ref", { owns: false });
     expect(nonWarn(errors)).toEqual([]);
-    expect(serverJs).toMatch(/const _scrml_sql = _scrml_sqlite_referenced\("[^"]*m\.db", "\.\/m\.db", "[^"]*"\);/);
+    expect(serverJs).toMatch(/const _scrml_sql = _scrml_db_guard\(_scrml_sqlite_referenced\("[^"]*m\.db", "\.\/m\.db", "[^"]*"\), "sqlite", false\);/); // §19.10.6 guard
     // No load-time configure for a handle that is not open yet …
     expect(serverJs).not.toContain("void _scrml_sqlite_configure(_scrml_sql);");
     // … it runs on open, and every statement waits for it.

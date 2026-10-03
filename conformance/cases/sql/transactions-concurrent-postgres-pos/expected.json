@@ -1,0 +1,12 @@
+{
+  "id": "sql-transactions-concurrent-postgres-pos",
+  "description": "§19.10.6 positive — `transactions=\"concurrent\"` on a Postgres database is the ruled opt-in: each transaction runs on its own reserved pool connection instead of waiting behind the database's one-at-a-time rule. It compiles clean: no E-SQL-010, and no W-ATTR-002 (the value is recognized).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/sql-shared-connection-tx.test.js",
+  "spec": "§19.10.6",
+  "rationale": "§19.10.6 (ruling:user-voice-scrml.md S449 item C — \"keep (b) as a possible opt in when adopters use PG\"): on a `<program>` whose `db=` names a Postgres or MySQL database, `transactions=\"concurrent\"` SHALL lift the one-at-a-time rule for that database.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SQL-010", "W-ATTR-002"]
+  }
+}
