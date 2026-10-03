@@ -41437,25 +41437,40 @@ shell).
 5. **A route with no listener is an error, not a silent drop** (§64.1) — an `<endpoint>` / SSE route in a
    `kind="tool"` program with NO `serve=` fires `E-TOOL-ROUTE-NEEDS-SERVE` (the non-serve tool emits no
    `Bun.serve`, so the route would be un-hosted).
-6. **The serve-harness binds loopback by default; `SCRML_HOST` opts in to another address.**
+6. **The serve-harness binds loopback by default.**
 
    > **Provenance:** ruling:user-voice-scrml.md S447 "stamp all" — "(iv) generated headless serve targets default to loopback, prod stays all-interfaces."
 
-   A headless serve-target is typically a local tool or agent server, so the generated module binds
-   `127.0.0.1` (plus its `::1` twin, best-effort — so `http://localhost:PORT` reaches it over either
-   family) unless the **`SCRML_HOST`** environment variable names another address when the module is
-   run (`SCRML_HOST=0.0.0.0 bun <emitted>.js` = every interface, plus its `::` twin). The address
-   rules are the ones `scrml dev --host` / `scrml serve --host` apply (S446): a value containing
-   whitespace or a control character is refused (never trimmed), as is a legacy numeric IPv4
-   shorthand (`0`, `127.1`, `2130706433`, …, whose meaning differs by OS) and an empty value. A
-   refused `SCRML_HOST`, or a primary address that cannot be bound, exits the process with status 1
-   and a message on stderr, before a composing `main` (item 3) runs in the refused case. The
-   startup line on stderr names the address actually bound, and a non-loopback bind says that the
-   server is reachable from the network. This is a runtime contract of the emitted module, not a
-   compile-time surface: there is no new attribute and no new diagnostic.
+   **Ruled.** A headless serve-target binds loopback by default: the generated module binds
+   `127.0.0.1`, plus its `::1` twin best-effort, so `http://localhost:PORT` reaches it over either
+   family. The `scrml build` production server is NOT a headless serve-target and is unchanged: it
+   binds every interface. (It is the `<outputDir>/_server.js` entry that §47.12 specifies: "`scrml
+   build` produces a single `<outputDir>/_server.js` entry".)
 
-   The `scrml build` production server (§40.8) is NOT a headless serve-target and is unchanged: it
-   binds every interface.
+   **Implementation's reading, pending bryan's veto: the opt-in.** The ruling does not say how a
+   public bind is requested. The generated module has no CLI flags of its own, because argv belongs
+   to a composing `main`. It therefore reads the **`SCRML_HOST`** environment variable when it
+   starts:
+   - unset → loopback, as ruled above;
+   - `SCRML_HOST=0.0.0.0` → every interface, plus its `::` twin;
+   - any other address → that address;
+   - empty → refused.
+
+   The address checks are the ones `scrml dev --host` / `scrml serve --host` apply (S446). A value
+   containing whitespace or a control character is refused, never trimmed. A legacy numeric IPv4
+   shorthand (`0`, `127.1`, `2130706433`, …), whose meaning differs by OS, is also refused.
+
+   A refused `SCRML_HOST` exits the process with status 1 and a message on stderr. The check runs at
+   the top of the module, before any of the module's own top-level statements and before a composing
+   `main` (item 3). A primary address that cannot be bound also exits with status 1. The startup
+   line on stderr names the address actually bound, and a non-loopback bind says that the server is
+   reachable from the network.
+
+   This is a runtime contract of the emitted module, not a compile-time surface: there is no new
+   attribute and no new diagnostic. `SCRML_HOST` is read ONLY by a generated headless
+   serve-target:
+   - `scrml serve` and `scrml dev` do NOT read it; they take `--host`;
+   - the `scrml build` production server does NOT read it; it always binds every interface.
 
 ## 65. The scrml-native CSS Model — predictable, cascade-free styling
 
