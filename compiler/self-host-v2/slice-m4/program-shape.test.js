@@ -105,7 +105,7 @@ describe("(A) every other top-level attribute: its code, or a refusal — never 
   test("`name=` on the top-level `<program>` (§4.12.2 MUST NOT, no code named) → refused", () => {
     expect(codes(prog(`name="n"`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
-  for (const a of ["title", "description", "reset", "db", "tables", "cors", "log", "headers", "csrf", "loginRedirect",
+  for (const a of ["title", "description", "db", "tables", "cors", "log", "headers", "csrf", "loginRedirect",
                    "sessionExpiry", "session-secure", "lang", "kind", "mcp", "idempotency-store", "transactions"]) {
     test(`\`${a}=\` is not read by the bootstrap → one E-BOOTSTRAP-UNSUPPORTED naming it`, () => {
       const d = run(prog(`${a}="v"`)).diags;
@@ -245,5 +245,39 @@ describe("(B) a second top-level program contributes no names", () => {
   });
   test("bite: the same function declared in the FIRST program resolves", () => {
     expect(codes(`<program>\nfn g() -> int { return 1 }\n<p>\${g()}</p>\n</program>\n`)).toEqual([]);
+  });
+});
+
+// s451 fix round 3: `<program reset="none">` (§65.3.4: "Opt out via
+// `<program reset=\"none\">` — drops the whole `reset` layer") is IMPLEMENTED —
+// the bootstrap printer now ships the built-in reset layer by default and drops
+// it for `reset="none"`. §65.3.4 names no other value, so any other is refused.
+describe("(A) §65.3.4 — `<program reset=…>` switches the built-in reset layer", () => {
+  const page = (src) => {
+    const r = run(src);
+    expect(r.diags).toEqual([]);
+    return { core: r.core, html: mods.print.printProgram(r.core, "t.client.js", "scrml-runtime.js").html };
+  };
+  test("the default program ships the reset layer (`@layer reset`) in its page", () => {
+    const { core, html } = page(prog(""));
+    expect(core.reset).toBe(true);
+    expect(html).toContain("@layer reset");
+    expect(html).toContain("box-sizing: border-box");
+  });
+  test(`\`reset="none"\` compiles clean and drops the whole reset layer`, () => {
+    const { core, html } = page(prog(`reset="none"`));
+    expect(core.reset).toBe(false);
+    expect(html).not.toContain("@layer reset");
+    expect(html).not.toContain("<style>");
+  });
+  for (const [label, attr] of [["another literal", `reset="all"`], ["the empty string", `reset=""`], ["a bare attribute", `reset`], ["a non-literal", `reset=@r`]]) {
+    test(`${label} (${attr}) → refused, naming "none"`, () => {
+      const d = run(prog(attr)).diags;
+      expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(d[0].message).toContain("\"none\"");
+    });
+  }
+  test("`reset=` on a NESTED program is application-level → E-PROGRAM-NESTED-ATTR (§4.12.2 lists it)", () => {
+    expect(codes(`<program>\n<program name="w" reset="none"></program>\n</program>\n`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-PROGRAM-NESTED-ATTR"]);
   });
 });

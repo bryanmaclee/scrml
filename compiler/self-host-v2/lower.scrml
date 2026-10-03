@@ -1533,6 +1533,31 @@ ${
         return not
     }
 
+    // s451 — §65.3.4: "Opt out via `<program reset=\"none\">` — drops the whole
+    // `reset` layer." analyze accepts `reset="none"` and refuses any other value,
+    // so here the program's opener has either no `reset=` or exactly that one.
+    fn resetShips(files: FileAst[], t: Tables) -> boolean {
+        let nid = -1
+        for (const d of t.decls) { if (d.sym.id == t.program.id) nid = d.nid }
+        for (const f of files) {
+            for (const it of f.items) {
+                const k: AItemK = it.k
+                const p: AProgram | not = match k {
+                    .ProgramItem(p: p) :> p
+                    .DeclItem(d: d) :> not
+                    .ImportItem(i: i) :> not
+                    .TypeItem(t: tx) :> not
+                    .FnItem(f: fx) :> not
+                    .MarkupItem(n: n) :> not
+                }
+                if (p is some && p.nid == nid) {
+                    for (const a of p.attrs) { if (a.name == "reset") return false }
+                }
+            }
+        }
+        return true
+    }
+
     export fn lower(tp: TypedProgram) -> Lowered {
         if (hasError(tp)) return { core: not, diags: tp.diags }   // s451: the diagnostics gate
         const t: Tables = tp.tables
@@ -1547,8 +1572,9 @@ ${
             const f: Fn | not = lowerFn(t, fsx, info)
             if (f is some) fns = fns.concat([f])
         }
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: [] }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: [] }
+        const reset: boolean = resetShips(tp.files, t)
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: [], reset: reset }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: [], reset: reset }
         return { core: core, diags: tp.diags }
     }
 

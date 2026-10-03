@@ -1333,6 +1333,8 @@ ${
                 st = capabilitiesDiags(file, a, st)
             } else if (a.name == "story") {
                 st = addDiag(st, file, a.span, "W-STORY-ON-TOP-LEVEL", "`story=` on the top-level `<program>` is ignored — the top-level program's build story is `[story] default` in `scrml.toml`; per-`<program>` build stories are for nested programs (§58.8, §4.12.2)")
+            } else if (a.name == "reset") {
+                st = resetAttrDiag(file, a, st)
             } else if (a.name == "name") {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`name=` on the top-level `<program>` — \"The top-level `<program>` MUST NOT have a `name=` attribute\" (§4.12.2), and the SPEC names no code for it; remove it")
             } else if (isProgramAttrName(a.name)) {
@@ -1342,6 +1344,18 @@ ${
             }
         }
         return st
+    }
+
+    // §65.3.4: "Opt out via `<program reset=\"none\">` — drops the whole `reset`
+    // layer." `"none"` is implemented (lower: CoreProgram.reset = false; print
+    // emits no reset layer). §65.3.4 names no other value and no code for one,
+    // so any other value is refused rather than given a meaning.
+    fn resetAttrDiag(file: string, a: AAttr, st: AS) -> AS {
+        const v: string | not = quotedAttrText(a.value)
+        if (v is some) {
+            if (v == "none") return st
+        }
+        return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset=` is " + attrValueText(a.value) + " — §65.3.4 names one value, \"none\" (drop the built-in reset layer); the bootstrap gives no other value a meaning")
     }
 
     // §52.13.2 (S449): exactly one of the three literals, else E-AUTH-ATTR-INVALID.
@@ -11184,7 +11198,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [] }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], reset: true }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {
