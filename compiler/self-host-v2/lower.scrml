@@ -900,8 +900,137 @@ ${
     // =========================================================================
     fn lowerNodes(c: LC, ns: ANode[]) -> View[] {
         let out: View[] = []
-        for (const n of ns) { out = out.concat(lowerNode(c, n)) }
+        let i = 0
+        while (i < ns.length) {
+            const j: int = chainEnd(ns, i)          // s451: an if-chain (§17.1.1) starting here
+            if (j > i + 1) {
+                out = out.concat([chainView(c, ns, i, j)])
+                i = j
+            } else {
+                out = out.concat(lowerNode(c, ns[i]))
+                i = i + 1
+            }
+        }
         return out
+    }
+
+    // ---- s451: if-chains (§17.1.1) -------------------------------------------
+    // "An if-chain desugars to a single `${ if / else if / else }` block" — ONE
+    // View.Cond whose arms are the members in declaration order (the runtime's
+    // `cond` renders the FIRST arm whose test holds, so exactly one member is
+    // in the DOM, reactively). An `else` arm's test is `true`. Each member is
+    // lowered as the bare element: "the structural attributes are consumed
+    // during desugaring and do not appear on the lifted element". Whitespace-
+    // only text between members is consumed with them (§17.1.1: it does not
+    // break a chain). analyze (chainCheck) refused every malformed chain; a lone
+    // `if=` is not a chain here — condWrap wraps it (L5).
+    fn elemOf(n: ANode) -> AElem | not {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> e
+            .Text(text: t) :> not
+            .Interp(e: e) :> not
+            .DeclNode(d: d) :> not
+            .Effect(w: w) :> not
+        }
+    }
+
+    fn blankText(n: ANode) -> boolean {
+        const k: ANodeK = n.k
+        return match k {
+            .Text(text: t) :> t.trim() == ""
+            .Elem(e: e) :> false
+            .Interp(e: e) :> false
+            .DeclNode(d: d) :> false
+            .Effect(w: w) :> false
+        }
+    }
+
+    fn hasAttrNamed(e: AElem, name: string) -> boolean {
+        for (const a of e.attrs) {
+            if (a.name == name) return true
+        }
+        return false
+    }
+
+    // The index just past the last member of the chain opened by ns[i] (an
+    // element carrying `if=`), or i + 1 when ns[i] opens none.
+    fn chainEnd(ns: ANode[], i: int) -> int {
+        const first: AElem | not = elemOf(ns[i])
+        if (first is not) return i + 1
+        if (!hasAttrNamed(first, "if")) return i + 1
+        let end: int = i + 1
+        let k: int = i + 1
+        let open = true
+        while (open && k < ns.length) {
+            const e: AElem | not = elemOf(ns[k])
+            if (e is some) {
+                if (hasAttrNamed(e, "if")) {
+                    open = false
+                } else if (hasAttrNamed(e, "else-if")) {
+                    end = k + 1
+                } else if (hasAttrNamed(e, "else")) {
+                    end = k + 1
+                    open = false
+                } else {
+                    open = false
+                }
+            } else if (!blankText(ns[k])) {
+                open = false
+            }
+            k = k + 1
+        }
+        return end
+    }
+
+    fn chainView(c: LC, ns: ANode[], i: int, j: int) -> View {
+        let arms: CondArm[] = []
+        let k: int = i
+        while (k < j) {
+            const e: AElem | not = elemOf(ns[k])
+            if (e is some) arms = arms.concat([{ test: chainTest(c, e), body: bareElem(c, e) }])
+            k = k + 1
+        }
+        return View.Cond(arms)
+    }
+
+    // A member's test: its `if=` / `else-if=` condition; `else` → true. A
+    // condition that does not lower (analyze reported it) is `false` — the
+    // branch never renders (fail closed), and the arms after it keep their
+    // place in the order.
+    fn chainTest(c: LC, e: AElem) -> Expr {
+        for (const a of e.attrs) {
+            if (a.name == "if" || a.name == "else-if") {
+                const t: Expr | not = lowerValue(c, a.value)
+                if (t is some) return t
+                return Expr.Lit(Literal.Bool(false))
+            }
+        }
+        return Expr.Lit(Literal.Bool(true))
+    }
+
+    // The element without its condition (the chain's arm carries it).
+    fn bareElem(c: LC, e: AElem) -> View[] {
+        const f: ElemFact | not = elemFact(c.t.elems, e.nid)
+        return match f {
+            .MHtml :> [htmlView(c, e)]
+            .MUse(decl: d, alias: a) :> [useView(c, e, d, a)]
+            .MEach(bind: b, handles: hs) :> lowerElem(c, e)
+            .MSlot :> lowerElem(c, e)
+            .MErrors(of: v, all: a) :> lowerElem(c, e)
+            .MStateView(v: v) :> lowerElem(c, e)
+            .MInline(v: v) :> lowerElem(c, e)
+            .MStar(decl: d, inst: x) :> lowerElem(c, e)
+            not :> []
+        }
+    }
+
+    fn htmlView(c: LC, e: AElem) -> View {
+        return View.El(e.tag, noValidate(c, e).concat(htmlAttrs(c, e.attrs)), lowerNodes(c, e.kids))
+    }
+
+    fn useView(c: LC, e: AElem, d: Sym, a: Sym | not) -> View {
+        return View.Instance(d, constructAttrs(c, e.attrs), lowerNodes(c, e.kids), a)
     }
 
     fn lowerNode(c: LC, n: ANode) -> View[] {
@@ -953,8 +1082,8 @@ ${
     fn lowerElem(c: LC, e: AElem) -> View[] {
         const f: ElemFact | not = elemFact(c.t.elems, e.nid)
         return match f {
-            .MHtml :> condWrap(c, e, [View.El(e.tag, noValidate(c, e).concat(htmlAttrs(c, e.attrs)), lowerNodes(c, e.kids))])
-            .MUse(decl: d, alias: a) :> condWrap(c, e, [View.Instance(d, constructAttrs(c, e.attrs), lowerNodes(c, e.kids), a)])
+            .MHtml :> condWrap(c, e, [htmlView(c, e)])
+            .MUse(decl: d, alias: a) :> condWrap(c, e, [useView(c, e, d, a)])
             .MEach(bind: b, handles: hs) :> [eachView(c, e, b, hs)]
             .MSlot :> [View.Slot]
             .MErrors(of: v, all: a) :> [View.Errors(validityOf(c, v), a)]

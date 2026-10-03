@@ -1,0 +1,11 @@
+{
+  "id": "ctrl-005-else-and-if-same-element-program-pos",
+  "description": "§17.1.1 — `if=` and `else` on the SAME element fire E-CTRL-005. The `<program>` + `let <x/>` twin of ctrl-005-else-and-if-same-element-pos (a `<session { … }` state-opener shape the bootstrap does not parse), so the bootstrap grades it. Severity (Error) is pinned by that legacy-shape twin; it is not asserted here because a bootstrap Diag carries no §34 severity yet.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "rationale": "§17.1.1 Normative Rules: \"`else` and `else-if=` SHALL NOT appear on the same element as `if=`. A single element cannot simultaneously open and continue a chain. The compiler SHALL reject such usage (E-CTRL-005).\"",
+  "expect": {
+    "codes": ["E-CTRL-005"],
+    "notCodes": ["E-CTRL-001", "E-CTRL-002", "E-CTRL-003"]
+  }
+}

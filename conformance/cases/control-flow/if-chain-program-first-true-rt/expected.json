@@ -1,0 +1,31 @@
+{
+  "id": "control-flow-if-chain-program-first-true-rt",
+  "description": "§17.1.1 if / else-if / else chain in the canonical `<program>` + `let <x/>` shape. @step seeds 1; two clicks advance it to 3, so the chain's FIRST true branch is the `else` (#rest): #one and #two are absent (count 0), not hidden. The bootstrap-gradable twin of control-flow/if-chain-inactive-branches-absent (that case is in the legacy rhs-decl shape). XFAIL on impl#1: it does not parse the §66 opener `let <step:number=1/>` (E-STATE-UNDECLARED; the runtime half throws `let is not defined`) — the opener half of the carried gap named below, not its §6.15 half; impl#1's chain itself is pinned by the legacy twin.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "rationale": "§17.1.1: \"An if-chain desugars to a single `${ if / else if / else }` block in the containing markup context.\" and Example 1: \"Only one span exists in the DOM at any time.\" At step 3 neither condition holds, so only the `else` member exists. Closes g-bootstrap-else-if-else-attrs-ignored (the bootstrap rendered every member).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-CTRL-001", "E-CTRL-002", "E-CTRL-003", "E-CTRL-005"],
+    "input": [{ "click": "#go" }, { "click": "#go" }],
+    "state": { "step": 3 },
+    "domAnchored": [
+      { "selector": "#rest", "count": 1 },
+      { "selector": "#rest", "text": "REST" },
+      { "selector": "#one", "count": 0 },
+      { "selector": "#two", "count": 0 }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-value-writes-state-codes-unimplemented-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=3"
+        ],
+        "runtime": "sha256:b7624df35ef5d3f8"
+      }
+    }
+  }
+}
