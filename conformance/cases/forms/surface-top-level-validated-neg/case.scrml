@@ -1,0 +1,7 @@
+// §55.5.1 rules 1, 4 — a top-level value that carries validators has the surface, bound or not; `""` with `req` reads invalid at construction.
+<program>
+    <let email:string="" req length(>=5)/>
+    <main>
+        <p id="v">${@email.isValid}|${@email.touched}|${@email.submitted}</p>
+    </main>
+</program>

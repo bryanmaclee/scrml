@@ -1,0 +1,45 @@
+{
+  "id": "forms-gate-valid-submits",
+  "description": "§55.17.3 step 4: once every bound validated value is valid, the gated form's submit runs the author's onsubmit (calls 1). The twin of forms-gate-invalid-blocks-submit — together they prove the gate blocks on validity, not on every submit.",
+  "language-version": "1.0",
+  "spec": "§55.17.3",
+  "rationale": "§55.17.3: \"4. Otherwise proceed. Run the author's `onsubmit` (if any); the native submission proceeds unless that handler prevents it.\"",
+  "expect": {
+    "codes": [
+      "I-FORM-SUBMIT-GATED"
+    ],
+    "input": [
+      {
+        "input": "#email",
+        "value": "a@b.io"
+      },
+      {
+        "submit": "#f"
+      }
+    ],
+    "state": {
+      "calls": 1,
+      "email": "a@b.io"
+    },
+    "domAnchored": [
+      {
+        "selector": "#calls",
+        "text": "1"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-form-gate-surface-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STATE-UNDECLARED=2",
+          "missing:I-FORM-SUBMIT-GATED"
+        ],
+        "runtime": "sha256:45e8047da0cdd7fe"
+      }
+    }
+  }
+}

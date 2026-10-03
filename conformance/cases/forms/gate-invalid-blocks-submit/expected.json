@@ -1,0 +1,52 @@
+{
+  "id": "forms-gate-invalid-blocks-submit",
+  "description": "§55.17.3: submitting a form that binds a validated top-level value while it is invalid (`\"\"` fails `req`) does NOT run the form's onsubmit (calls stays 0), marks the value touched and submitted, and the compiler reports the gate (I-FORM-SUBMIT-GATED).",
+  "language-version": "1.0",
+  "spec": "§55.17.3",
+  "rationale": "§55.17.3: \"On each gated form's `submit` event, the compiler-emitted gate SHALL run before any author handler and synchronously … 1. Touch … 2. Submitted … 3. Block if invalid. If any of those values has `isValid == false`, cancel the submission: prevent the event's default action (no native navigation, no native POST) and do not run the author's `onsubmit`.\" §55.17.6: \"I-FORM-SUBMIT-GATED (Info, §34) — one per gated form, at the form's opener\". ruling:user-voice-scrml.md S447 \"validity calls 2-6\" call 2 (G2) + \"the four §55.17 OPEN items\" item 1.",
+  "expect": {
+    "codes": [
+      "I-FORM-SUBMIT-GATED"
+    ],
+    "notCodes": [
+      "E-VALIDATOR-DEAD",
+      "E-VALIDITY-NO-SURFACE"
+    ],
+    "severity": {
+      "I-FORM-SUBMIT-GATED": "info"
+    },
+    "input": [
+      {
+        "submit": "#f"
+      }
+    ],
+    "state": {
+      "calls": 0
+    },
+    "domAnchored": [
+      {
+        "selector": "#calls",
+        "text": "0"
+      },
+      {
+        "selector": "#flags",
+        "text": "true|true"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-form-gate-surface-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=2",
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STATE-UNDECLARED=4",
+          "missing:I-FORM-SUBMIT-GATED",
+          "severity:code 'I-FORM-SUBMIT-GATED' did not fire (expected severity info)"
+        ],
+        "runtime": "sha256:587e4bf9eeec3392"
+      }
+    }
+  }
+}

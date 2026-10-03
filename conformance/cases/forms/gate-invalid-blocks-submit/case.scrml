@@ -1,0 +1,16 @@
+// §55.17.3 (S447 G2) — a form that binds a validated top-level value is GATED: an invalid submit runs no handler.
+<program>
+    <let email:string="" req length(>=5)/>
+    <let calls:int=0/>
+
+    function register() { @calls = @calls + 1 }
+
+    <main>
+        <form id="f" onsubmit=register()>
+            <input id="email" type="email" bind:value=@email/>
+            <button id="go" type="submit">Create account</button>
+        </form>
+        <p id="calls">${@calls}</p>
+        <p id="flags">${@email.touched}|${@email.submitted}</p>
+    </main>
+</program>

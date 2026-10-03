@@ -14,6 +14,8 @@
 // `onsubmit`. 4. Otherwise proceed."
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { loadM2, frontEnd } from "./harness.js";
 import { loadProgram, expectNoPageErrors } from "../slice-m1/load-program.js";
 
@@ -338,9 +340,64 @@ describe("diagnostics — the surface is read-only; `<errors>` takes a surface",
     expect(top.infos.map((i) => i.message.split(" — ")[0])).toEqual(["this form's submit is gated by: email"]);
     expect(run(P(`    <let q:string=""/>`, `        <form><input bind:value=@q/></form>`)).infos).toEqual([]);
   });
+  test("E-VALIDITY-RESERVED-NAME (§55.5.3 case 1): a child field or an attribute named `isValid` / `errors` / `touched` / `submitted`", () => {
+    const child = P(`    <f note:string="n">\n        <let errors:string="" req/>\n        renders <input bind:value=@errors/>\n    </>\n    renders <form><*errors/></form>`, `        <*f/>`);
+    expect(codes(child)).toEqual(["E-VALIDITY-RESERVED-NAME"]);
+    const attr = P(`    <f touched:bool=false>\n        <let v:string=""/>\n    </>\n    renders <p>x</p>`, `        <f/>`);
+    expect(codes(attr)).toEqual(["E-VALIDITY-RESERVED-NAME"]);
+    // "Not affected: a top-level declaration whose own name is one of the four"
+    expect(codes(P(`    <let submitted:bool=false/>`, `        <p>\${@submitted}</p>`))).toEqual([]);
+  });
   test("a field of a declaration has no `submitted` of its own (§55.6) — its compound does", () => {
     const d = run(P(F, `        <*f/>\n        <p>\${@f.v.submitted}</p>`)).diags;
     expect(d.map((x) => x.code)).toEqual(["E-SCOPE-001"]);
     expect(d[0].message).toContain("@f.submitted");
   });
+});
+
+// ===========================================================================
+// The s449 conformance cases (conformance/cases/forms/{gate-*, surface-*,
+// validator-dead-locked-pos, validator-live-let-neg, errors-top-level-renders})
+// are written in the §66 opener form, which impl#1 does not parse (they xfail
+// there under g-impl1-form-gate-surface-s449). The bootstrap EXECUTES them
+// here: the codes half exactly as conformance/run.ts judges it (superset /
+// disjoint, over BOTH streams — diags and the I- infos), and the runtime half
+// by driving the case's inputs and checking its `domAnchored` assertions on the
+// live DOM. (The `state` half reads cells through impl#1's conformance hook;
+// the bootstrap has no such hook yet — each runtime case also pins the same
+// facts through `domAnchored`.)
+// ===========================================================================
+describe("s449 conformance cases, executed by the bootstrap", () => {
+  const CASES = join(import.meta.dir, "..", "..", "..", "conformance", "cases", "forms");
+  const IDS = ["gate-invalid-blocks-submit", "gate-valid-submits", "gate-child-field-blocks-submit",
+    "surface-top-level-no-validators-pos", "surface-top-level-validated-neg", "validator-dead-locked-pos",
+    "validator-live-let-neg", "errors-top-level-renders"];
+  const drive = (step) => {
+    if (step.submit) return submit($(step.submit));
+    if (step.input) return type($(step.input), step.value);
+    if (step.click) return clickEl($(step.click));
+    throw new Error("unsupported input verb " + JSON.stringify(step));
+  };
+  for (const id of IDS) {
+    test(id, async () => {
+      const src = readFileSync(join(CASES, id, "case.scrml"), "utf8");
+      const exp = JSON.parse(readFileSync(join(CASES, id, "expected.json"), "utf8")).expect;
+      const r = run(src);
+      const got = r.diags.concat(r.infos).map((d) => d.code);
+      for (const c of exp.codes ?? []) expect(got).toContain(c);
+      for (const c of exp.notCodes ?? []) expect(got).not.toContain(c);
+      for (const [c, sev] of Object.entries(exp.severity ?? {})) {
+        expect([c, sev === "info" ? r.infos.some((d) => d.code === c) : r.diags.some((d) => d.code === c)]).toEqual([c, true]);
+      }
+      if (!exp.domAnchored) return;
+      expect(r.diags).toEqual([]);
+      await loadProgram(r.core, "conf-" + id);
+      for (const step of exp.input ?? []) drive(step);
+      for (const a of exp.domAnchored) {
+        const els = document.querySelectorAll(a.selector);
+        if (a.count !== undefined) expect([a.selector, els.length]).toEqual([a.selector, a.count]);
+        if (a.text !== undefined) expect([a.selector, els[0] && els[0].textContent]).toEqual([a.selector, a.text]);
+      }
+    });
+  }
 });

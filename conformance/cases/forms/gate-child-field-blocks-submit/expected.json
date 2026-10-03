@@ -1,0 +1,45 @@
+{
+  "id": "forms-gate-child-field-blocks-submit",
+  "description": "§55.17.3 over a declaration's child field: the invalid submit runs no handler, sets the COMPOUND's submitted and the field's touched (§55.7); the compound reads invalid (§55.5).",
+  "language-version": "1.0",
+  "spec": "§55.17.3",
+  "rationale": "§55.17.3: the gate marks \"touched = true on every bound validated value of the form — every value that carries validators (a validated top-level value, §55.5.1, or a validated child field of a declaration) …\", then \"Set submitted = true on those values (top-level) and on the compounds that own them (child fields)\", then blocks. \"Declaration forms are gated exactly like forms that bind top-level values\".",
+  "expect": {
+    "codes": [
+      "I-FORM-SUBMIT-GATED"
+    ],
+    "input": [
+      {
+        "submit": "#f"
+      }
+    ],
+    "state": {
+      "calls": 0
+    },
+    "domAnchored": [
+      {
+        "selector": "#calls",
+        "text": "0"
+      },
+      {
+        "selector": "#surface",
+        "text": "false|true|true"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-form-gate-surface-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=3",
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STATE-UNDECLARED=5",
+          "emitted:E-STMT-NO-EFFECT=1",
+          "missing:I-FORM-SUBMIT-GATED"
+        ],
+        "runtime": "sha256:4cc61d97a0a02c2b"
+      }
+    }
+  }
+}

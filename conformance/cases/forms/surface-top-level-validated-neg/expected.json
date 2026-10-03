@@ -1,0 +1,32 @@
+{
+  "id": "forms-surface-top-level-validated-neg",
+  "description": "§55.5.1: a validated top-level value that nothing binds has the full surface (no E-VALIDITY-NO-SURFACE, no E-VALIDATOR-DEAD — it is `let`, §55.5.2); at construction `\"\"` with `req` reads isValid false, touched false, submitted false.",
+  "language-version": "1.0",
+  "spec": "§55.5.1",
+  "rationale": "§55.5.1 rule 1: \"A top-level value that carries validators synthesizes the per-field surface — isValid, errors, touched — plus submitted … This holds always — bound or not\". Rule 4: \"the surface is computed at construction (an initial `\"\"` with `req` reads `isValid == false` before any interaction\". §55.5.2: E-VALIDATOR-DEAD needs \"no write grant — the value is locked\"; a `let` value is live.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-VALIDITY-NO-SURFACE",
+      "E-VALIDATOR-DEAD"
+    ],
+    "domAnchored": [
+      {
+        "selector": "#v",
+        "text": "false|false|false"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-form-gate-surface-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=3"
+        ],
+        "runtime": "sha256:ac7de8fdc2e73e7d"
+      }
+    }
+  }
+}

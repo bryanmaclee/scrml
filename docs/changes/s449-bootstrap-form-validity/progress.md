@@ -57,3 +57,20 @@
 - Superseded pins flipped (validators.test.js (1)/(5), failclosed.test.js `errors`), each with the
   governing sentence in a comment.
 - Gates: m1 99, m2 448, m3 60, m4 535 (was 504), codec 92, m1-lowered 99, lexer 337.
+- Landed `3f2682f6e`; full pre-commit gate green.
+
+## 3. E-VALIDITY-RESERVED-NAME, conformance cases, gaps filed
+
+- §55.5.3 case 1 in `fieldOf` (child field / attribute; a top-level value's own name is "Not
+  affected"); case 2 unreachable in the bootstrap (validators only on string / number values).
+  Verified the silent shadow first (`${@f.errors}` read a field named `errors`).
+- 8 conformance cases in `conformance/cases/forms/` (codes half + runtime half), executed by the
+  bootstrap in gate.test.js; impl#1 xfail under the new carried gap `g-impl1-form-gate-surface-s449`
+  (signatures captured with `--xfail-signature`). `bun conformance/run.ts`: 1244/1286 + 42 xfail,
+  0 FAIL.
+- known-gaps: `g-bootstrap-validated-form-fields-fail-open-no-surface-no-gate` → resolved (marker
+  edited in place in §S447 + a one-line pointer); new section `## §S449-bootstrap-form-validity` at
+  the end: the LANDED summary, `g-bootstrap-validity-errors-value-and-messages-unbuilt` (MED),
+  `g-bootstrap-gate-reach-live-dom-reading` (LOW, PA reading), `g-bootstrap-validity-spec-silences-s449`
+  (LOW), `g-impl1-form-gate-surface-s449` (MED, carried).
+- Gates: m4 544.

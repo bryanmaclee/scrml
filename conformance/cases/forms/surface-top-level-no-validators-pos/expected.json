@@ -1,0 +1,25 @@
+{
+  "id": "forms-surface-top-level-no-validators-pos",
+  "description": "§55.5.1 rule 2: `@count.isValid` on a top-level value that carries no validators is E-VALIDITY-NO-SURFACE.",
+  "language-version": "1.0",
+  "spec": "§55.5.1",
+  "rationale": "§55.5.1 rule 2: \"Only values that carry validators get it. A top-level value with no validators (`let <count:int=0/>`) has no surface, and a read of `@count.isValid` / `.errors` / `.touched` / `.submitted` stays E-VALIDITY-NO-SURFACE (§34).\"",
+  "expect": {
+    "codes": [
+      "E-VALIDITY-NO-SURFACE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-form-gate-surface-s449",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-VALIDITY-NO-SURFACE"
+        ]
+      }
+    }
+  }
+}

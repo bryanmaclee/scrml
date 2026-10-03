@@ -1,0 +1,8 @@
+// §55.8 — `<errors of=@email/>` accepts a validated top-level value: the first error renders, and nothing once it is valid.
+<program>
+    <let email:string="" req length(>=5)/>
+    <main>
+        <input id="email" type="email" bind:value=@email/>
+        <div id="errs"><errors of=@email/></div>
+    </main>
+</program>

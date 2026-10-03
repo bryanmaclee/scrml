@@ -1274,6 +1274,16 @@ ${
             wcap = rw.s
             st = rw.st
         }
+        // s449 — §55.5.3 case 1: "`isValid`, `errors`, `touched` and `submitted`
+        // SHALL NOT be used as … the name of a child field (child declaration) or
+        // an attribute of any declaration — every compound has the surface (Edge
+        // B), so a field by one of these names would shadow it." A top-level
+        // value's own name is "Not affected" (where 2). Case 2 (a field of a
+        // validated value's STRUCT type) cannot arise here: the bootstrap admits
+        // validators only on string / number values (fieldVals).
+        if (where != 2 && isSurfaceProp(name)) {
+            st = addDiag(st, te.file, span, "E-VALIDITY-RESERVED-NAME", "`" + name + "` is a reserved validity-surface name — a field or attribute by this name would hide the declaration's synthesized `." + name + "` (§55.5.3); rename it")
+        }
         const rv: RVals = fieldVals(te.file, name, ty, mode, vals, where, st)
         st = rv.st
         const f: FieldInfo = {
