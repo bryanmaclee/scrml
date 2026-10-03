@@ -48,13 +48,16 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, FileAst, Diag, mkSpan } from "./ast.scrml"
+             AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode, mkSpan } from "./ast.scrml"
 
     // =========================================================================
     // Tokens, as the parser sees them: one TOTAL classification of TokenKind
     // (the only match over it), then text-directed parsing.
     // =========================================================================
-    type TC:enum = { Punct, Ident, Keyword, Num, Str, Variant, At, Other, End }
+    // s451 (U1a): the three template token kinds get their own classes — a
+    // `?{}` SQL template is read from them (TChunk = a literal run, TIStart /
+    // TIEnd = a `${` / its `}`); everywhere else they are still not an expression.
+    type TC:enum = { Punct, Ident, Keyword, Num, Str, Variant, At, Other, End, TChunk, TIStart, TIEnd }
 
     // `v` = the payload the parser needs: a name, a cooked string, a raw number.
     type PTok:struct = { cls: TC, v: string, text: string, start: int, end: int, line: int }
@@ -68,13 +71,13 @@ ${
                   .LessThan | .LessEqual | .GreaterThan | .GreaterEqual |
                   .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
                   .LogicalAnd | .LogicalOr | .BitAnd | .BitOr :> TC.Punct
-            .TemplateInterpStart :> TC.Other
-            .TemplateInterpEnd :> TC.Other
+            .TemplateInterpStart :> TC.TIStart
+            .TemplateInterpEnd :> TC.TIEnd
             .Eof :> TC.End
             .NumberLit(raw: r) :> TC.Num
             .StringLit(cooked: c) :> TC.Str
             .RegexLit(pattern: p) :> TC.Other
-            .TemplateChunk(cooked: c) :> TC.Other
+            .TemplateChunk(cooked: c) :> TC.TChunk
             .BareVariant(name: n) :> TC.Variant
             .Ident(name: n) :> TC.Ident
             .Keyword(name: n) :> TC.Keyword
@@ -282,6 +285,9 @@ ${
         const start: int = cur(tp).start
         const test: RExpr = parseBinary(tp, 1)
         if (!isP(test.tp, "?")) return test
+        // s451: `?{` is the SQL sigil (§8.1), never a ternary's `?` — the
+        // expression ends here and a `?{` statement follows
+        if (isSqlOpen(test.tp)) return test
         const yes: RExpr = parseTernary(adv(test.tp))
         const t2: TP = expectP(yes.tp, ":")
         const no: RExpr = parseTernary(t2)
@@ -346,11 +352,262 @@ ${
                 // `a[i]` — the `[` touches what it indexes (a spaced `[` starts a new expression)
                 const ix: RExpr = parseAssign(adv(r.tp))
                 r = mkE(expectP(ix.tp, "]"), start, AExprK.Index(r.e, ix.e))
+            } else if (isHandlerOpen(r.tp)) {
+                // s451: `expr !{ … }` — a failable handler (§19.4.3 item 3)
+                r = refuseHandler(r)
             } else {
                 going = false
             }
         }
         return r
+    }
+
+    // =========================================================================
+    // s451 (U1a) — the error model's surface forms the bootstrap does not have
+    // yet. Unit Ue ("the error model": `!` signatures, `fail`, `?`, `!{}`,
+    // `match` on a failable result) is not built; each form is REFUSED
+    // (E-BOOTSTRAP-UNSUPPORTED naming Ue), never accepted and ignored — an
+    // ignored handler would drop the error it exists to handle. Each is parsed
+    // past so the rest of the file still reads.
+    // =========================================================================
+    fn ueReason() -> string { return "it arrives with unit Ue (the error model: `!` signatures, `fail`, `?`, `!{}`, and `match` on a failable result), which the bootstrap does not have yet" }
+
+    // `!{` on the line of what precedes it (a `!` that starts a new line starts
+    // a new statement; `!=` is its own token).
+    fn isHandlerOpen(tp: TP) -> boolean {
+        const a: PTok = cur(tp)
+        const b: PTok = peekAt(tp, 1)
+        if (a.cls != TC.Punct || a.text != "!" || b.cls != TC.Punct || b.text != "{") return false
+        if (tp.i == 0) return false
+        return peekAt(tp, -1).line == a.line
+    }
+
+    fn refuseHandler(r: RExpr) -> RExpr {
+        const bang: PTok = cur(r.tp)
+        const d: TP = diagAt(r.tp, "E-BOOTSTRAP-UNSUPPORTED", "a `!{ … }` failable handler is not in the bootstrap — " + ueReason(), bang)
+        const after: TP = skipBraced(adv(d))
+        return { e: handledSql(r.e), tp: after }
+    }
+
+    // A `?{}` a `!{}` handler follows is HANDLED (the handler is refused, but
+    // the query is not also called unhandled — one report per site).
+    fn handledSql(e: AExpr) -> AExpr {
+        const k: AExprK = e.k
+        const q: ASql | not = sqlOf(k)
+        if (q is not) return e
+        return { nid: e.nid, span: e.span, k: AExprK.Sql({ chunks: q.chunks, params: q.params, mode: q.mode, nobatch: q.nobatch, handled: true }) }
+    }
+
+    fn sqlOf(k: AExprK) -> ASql | not {
+        return match k {
+            .Sql(q: q) :> q
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    // At a `{`: past its matching `}` (the error recovery for a refused body).
+    fn skipBraced(tp: TP) -> TP {
+        if (!isP(tp, "{")) return tp
+        let t: TP = adv(tp)
+        let depth: int = 1
+        while (depth > 0 && !atEnd(t)) {
+            const x: PTok = cur(t)
+            if (x.cls == TC.Punct && x.text == "{") depth = depth + 1
+            if (x.cls == TC.Punct && x.text == "}") depth = depth - 1
+            t = adv(t)
+        }
+        return t
+    }
+
+    // =========================================================================
+    // s451 (U1a) — a SQL context `?{ `…` }` (SPEC §8.1, §8.3, §44.8).
+    //
+    // §8.1: "sql-context ::= '?{' sql-template '}' · sql-template ::= '`'
+    // sql-content '`' · bound-param ::= '${' expression '}'"; "`${}` inside a
+    // SQL template SHALL be compiled to a positional bound parameter … SHALL NOT
+    // be compiled to string interpolation under any circumstance."
+    // §44.8: the scanner is BRACKET-MATCHED — "The opening `?{` enters a
+    // JS-expression context with brace-depth = 1 … a backtick opens a
+    // template-literal context … `${` opens a nested JS-expression context with
+    // its own brace-depth counter … The outer `?{...}` ends when the original
+    // JS-context's brace-depth returns to 0." The bootstrap's ONE lexer already
+    // is that scanner (templates, `${…}` frames, strings and brackets are
+    // tracked in its fold — lex.scrml), so the SQL is read here from its tokens:
+    // one TemplateChunk per literal run, TIStart / TIEnd around each `${…}`.
+    // "If the scanner reaches end-of-input with the outer JS-context still open,
+    // the compiler SHALL emit `E-SQL-008` with the source offset of the
+    // offending `?{`."
+    // E-SQL-003 (§8.6): "SQL template content is a runtime expression, not a
+    // literal string template" — content that is not ONE backtick template, or a
+    // template with no literal SQL text (only `${…}`, §8.4's
+    // ``?{`${sql}`}`` example).
+    // The chain (§8.3): `.all()` / `.get()` / `.run()` and `.nobatch()` (§8.9.5)
+    // are absorbed into the node; `.prepare()` is E-SQL-006 ("removed — Bun.SQL
+    // manages prepared-statement caching internally. Calling `.prepare()` on a
+    // `?{}` result SHALL be compile error E-SQL-006").
+    // =========================================================================
+    fn isSqlOpen(tp: TP) -> boolean {
+        const a: PTok = cur(tp)
+        const b: PTok = peekAt(tp, 1)
+        return a.cls == TC.Punct && a.text == "?" && b.cls == TC.Punct && b.text == "{" && touching(a, b)
+    }
+
+    // A template chunk's raw text ends the template when it ends in an
+    // UNESCAPED backtick (the lexer consumes the closing backtick into the last
+    // chunk; an unterminated template's last chunk runs to end-of-input).
+    fn chunkClosed(raw: string) -> boolean {
+        if (raw.length == 0 || raw.substring(raw.length - 1, raw.length) != "`") return false
+        let k: int = raw.length - 2
+        let slashes: int = 0
+        while (k >= 0 && raw.substring(k, k + 1) == "\\") {
+            slashes = slashes + 1
+            k = k - 1
+        }
+        return slashes % 2 == 0
+    }
+
+    fn sql008(tp: TP, open: PTok) -> TP {
+        return diagAt(tp, "E-SQL-008", "this `?{` SQL block has no matching `}` — an unterminated SQL template, an unterminated backtick template, or an unmatched `${` inside the SQL body (§44.8); close the template with a backtick and the block with `}`", open)
+    }
+
+    fn parseSql(tp: TP) -> RExpr {
+        const open: PTok = cur(tp)
+        const start: int = open.start
+        const t0: TP = adv(adv(tp))
+        if (cur(t0).cls != TC.TChunk) return sqlNotTemplate(t0, open, start)
+        let chunks: string[] = [cur(t0).v]
+        let params: AExpr[] = []
+        let closed: boolean = chunkClosed(cur(t0).text)
+        let t: TP = adv(t0)
+        while (!closed) {
+            if (cur(t).cls != TC.TIStart) return mkE(sql008(t, open), start, AExprK.Recovered)
+            const pe: RExpr = parseAssign(adv(t))
+            params = params.concat([pe.e])
+            t = pe.tp
+            if (cur(t).cls != TC.TIEnd) return mkE(sql008(t, open), start, AExprK.Recovered)
+            t = adv(t)
+            if (cur(t).cls != TC.TChunk) return mkE(sql008(t, open), start, AExprK.Recovered)
+            chunks = chunks.concat([cur(t).v])
+            closed = chunkClosed(cur(t).text)
+            t = adv(t)
+        }
+        if (atEnd(t)) return mkE(sql008(t, open), start, AExprK.Recovered)
+        if (!(cur(t).cls == TC.Punct && cur(t).text == "}")) {
+            const extra: PTok = cur(t)
+            const d: TP = diagAt(t, "E-SQL-003", "the content of `?{ … }` must be ONE backtick SQL template — found `" + extra.text + "` after it (§8.1: `?{` `…` `}`). The SQL text is fixed at compile time; bind values with `${…}` inside the template (§8.2), and reuse SQL by extracting a function (§8.4.1)", extra)
+            const past: RSkip = skipToSqlClose(d, open)
+            if (!past.closed) return mkE(past.tp, start, AExprK.Recovered)
+            const rc: RSqlChain = parseSqlChain(past.tp, emptySqlChain())
+            return mkE(rc.tp, start, AExprK.Recovered)
+        }
+        t = adv(t)
+        const rc2: RSqlChain = parseSqlChain(t, emptySqlChain())
+        if (onlyInterp(chunks, params)) {
+            const d2: TP = diagAt(rc2.tp, "E-SQL-003", "this SQL template has no literal SQL text — its whole content is `${…}`, a runtime expression (§8.1, §8.4: the `?{}` body SHALL remain a literal string at compile time, so every value is a bound parameter, never SQL text). Write the SQL inside the backticks and bind values with `${…}`; reuse SQL by extracting a function (§8.4.1)", open)
+            return mkE(d2, start, AExprK.Recovered)
+        }
+        const q: ASql = { chunks: chunks, params: params, mode: rc2.c.mode, nobatch: rc2.c.nobatch, handled: false }
+        return mkE(rc2.tp, start, AExprK.Sql(q))
+    }
+
+    // Every chunk blank and at least one `${…}`.
+    fn onlyInterp(chunks: string[], params: AExpr[]) -> boolean {
+        if (params.length == 0) return false
+        for (const c of chunks) {
+            if (c.trim() != "") return false
+        }
+        return true
+    }
+
+    // `?{` followed by something other than a template.
+    fn sqlNotTemplate(t0: TP, open: PTok, start: int) -> RExpr {
+        if (atEnd(t0)) return mkE(sql008(t0, open), start, AExprK.Recovered)
+        const found: PTok = cur(t0)
+        const past: RSkip = skipToSqlClose(t0, open)
+        if (!past.closed) return mkE(past.tp, start, AExprK.Recovered)
+        const d: TP = diagAt(past.tp, "E-SQL-003", "the content of `?{ … }` must be a backtick SQL template (`?{`SELECT …`}`) — found `" + found.text + "` (§8.1). The SQL text is fixed at compile time; a runtime value is bound with `${…}` inside the template (§8.2), never assembled into the SQL", found)
+        const rc: RSqlChain = parseSqlChain(d, emptySqlChain())
+        return mkE(rc.tp, start, AExprK.Recovered)
+    }
+
+    // Past the `}` that closes a `?{` (brace depth 1 at `tp`); at end-of-input
+    // that is E-SQL-008 (`closed` false).
+    type RSkip:struct = { tp: TP, closed: boolean }
+
+    fn skipToSqlClose(tp: TP, open: PTok) -> RSkip {
+        let t: TP = tp
+        let depth: int = 1
+        while (depth > 0) {
+            if (atEnd(t)) return { tp: sql008(t, open), closed: false }
+            const x: PTok = cur(t)
+            if (x.cls == TC.Punct && x.text == "{") depth = depth + 1
+            if (x.cls == TC.Punct && x.text == "}") depth = depth - 1
+            t = adv(t)
+        }
+        return { tp: t, closed: true }
+    }
+
+    // The chain after a `?{}`: its terminator and `.nobatch()`.
+    type SqlChain:struct = { mode: ASqlMode, terminated: boolean, nobatch: boolean }
+    type RSqlChain:struct = { c: SqlChain, tp: TP }
+
+    fn emptySqlChain() -> SqlChain { return { mode: ASqlMode.SqlAll, terminated: false, nobatch: false } }
+
+    fn isChainWord(w: string) -> boolean {
+        return w == "all" || w == "get" || w == "run" || w == "nobatch" || w == "prepare"
+    }
+
+    fn parseSqlChain(tp: TP, c0: SqlChain) -> RSqlChain {
+        let t: TP = tp
+        let c: SqlChain = c0
+        let going = true
+        while (going) {
+            const dot: PTok = cur(t)
+            const name: PTok = peekAt(t, 1)
+            const paren: PTok = peekAt(t, 2)
+            if (dot.cls == TC.Punct && dot.text == "." && (name.cls == TC.Ident || name.cls == TC.Keyword) && isChainWord(name.v)
+                    && paren.cls == TC.Punct && paren.text == "(" && paren.line == name.line) {
+                const args: RExprs = parseList(adv(adv(adv(t))), ")")
+                t = args.tp
+                if (args.es.length > 0) t = diagAt(t, "E-PARSE-SQL-CHAIN", "`." + name.v + "()` on a `?{}` takes no arguments (§8.3)", name)
+                if (name.v == "prepare") {
+                    t = diagAt(t, "E-SQL-006", "`.prepare()` on a `?{}` is removed (§8.5.2, §44.3) — Bun.SQL manages prepared-statement caching itself; call `.all()`, `.get()` or `.run()` on the query directly", name)
+                } else if (name.v == "nobatch") {
+                    c = { mode: c.mode, terminated: c.terminated, nobatch: true }
+                } else {
+                    if (c.terminated) t = diagAt(t, "E-PARSE-SQL-CHAIN", "a `?{}` takes ONE of `.all()`, `.get()`, `.run()` (§8.3) — `." + name.v + "()` follows another", name)
+                    c = { mode: chainMode(name.v), terminated: true, nobatch: c.nobatch }
+                }
+            } else {
+                going = false
+            }
+        }
+        return { c: c, tp: t }
+    }
+
+    fn chainMode(w: string) -> ASqlMode {
+        if (w == "get") return ASqlMode.SqlGet
+        if (w == "run") return ASqlMode.SqlRun
+        return ASqlMode.SqlAll
     }
 
     // Comma-separated expressions up to (and consuming) `close`.
@@ -396,6 +653,7 @@ ${
             return mkE(elems.tp, start, AExprK.ArrayLit(elems.es))
         }
         if (isP(tp, "{")) return parseObject(tp)
+        if (isSqlOpen(tp)) return parseSql(tp)          // s451 (U1a): `?{ `…` }` (§8.1)
         const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`", t)
         return mkE(adv(bad), start, AExprK.Recovered)
     }
@@ -485,6 +743,13 @@ ${
         if (t.v == "null" || t.v == "undefined") {
             const d: TP = diagAt(tp, "E-PARSE-NO-NULL", "`" + t.v + "` does not exist in scrml — absence is `not` (§42)", t)
             return mkE(adv(d), start, AExprK.Recovered)
+        }
+        // s451 (U1a): `match ?{…} { … }` — a match on a query's failable result
+        // (§19.8.3 item 2) is refused until Ue (the error model)
+        if (t.v == "match" && isSqlOpen(adv(tp))) {
+            const dm: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a `match` on a `?{}` query's result (§19.8.3) is not in the bootstrap — " + ueReason(), t)
+            const subj: RExpr = parsePostfix(adv(dm))
+            return mkE(skipBraced(subj.tp), start, AExprK.Recovered)
         }
         return mkE(adv(tp), start, AExprK.Name(t.v))
     }
@@ -739,6 +1004,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: p) :> false
+            .Sql(q: q) :> false
         }
     }
 
@@ -1003,8 +1269,20 @@ ${
         }
         if (isWord(t, "import")) return parseImport(t, start)
         if (isWord(t, "type")) return parseTypeDecl(t, start, exported)
-        if (isWord(t, "function")) return parseFn(t, start, exported, false)
-        if (isWord(t, "fn")) return parseFn(t, start, exported, true)
+        if (isWord(t, "function")) return parseFn(t, start, exported, false, false)
+        if (isWord(t, "fn")) return parseFn(t, start, exported, true, false)
+        // s451 (U1a): the DEPRECATED `server` modifier (§52.10: "During the
+        // deprecation window, the parser SHALL accept `server function`
+        // declarations and emit `W-DEPRECATED-SERVER-MODIFIER`" — the warning is
+        // analyze's, with route inference; §33.3: `server fn` is valid too)
+        if (isWord(t, "server")) {
+            const ts: TP = adv(t)
+            if (isWord(ts, "function")) return parseFn(ts, start, exported, false, true)
+            if (isWord(ts, "fn")) return parseFn(ts, start, exported, true, true)
+            const bs: PTok = cur(ts)
+            const ds: TP = diagAt(ts, "E-PARSE-ITEM", "`server` here modifies a function declaration (`server function name(…) { … }`, deprecated — §52.10); found `" + bs.text + "`", bs)
+            return { items: [], tp: skipToLineEnd(ds) }
+        }
         // s449: a keyword `when` at logic-item level (a `<program>` body, a
         // program-level `${…}`) is an effect where markup stands — owned by the
         // scope it stands in, exactly as an `<effect>` element there is.
@@ -1127,7 +1405,10 @@ ${
     }
 
     // `function name(p, q: T) { … }` / `fn name(p: T) -> T { … }`
-    fn parseFn(tp: TP, start: int, exported: boolean, pure: boolean) -> RItems {
+    // s451 (U1a): `server` = written with the deprecated modifier; a `!` after
+    // the parameter list (§19.4.1 `'!' (('->' error-type) | error-type)?`) is a
+    // failable function — refused until Ue, recorded as `failable`.
+    fn parseFn(tp: TP, start: int, exported: boolean, pure: boolean, server: boolean) -> RItems {
         let t: TP = adv(tp)
         const nameTok: PTok = cur(t)
         if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-FN", "expected a function name", nameTok)
@@ -1147,6 +1428,15 @@ ${
             if (isP(t, ",")) t = adv(t)
         }
         t = expectP(t, ")")
+        let failable = false
+        if (isP(t, "!")) {
+            failable = true
+            const bang: PTok = cur(t)
+            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a failable function `" + nameTok.v + "(…)!` (§19.4) is not in the bootstrap — " + ueReason(), bang)
+            t = adv(t)
+            // its error type (`-> E` or bare `E`) is skipped with the refusal
+            while (!isP(t, "{") && !atEnd(t)) { t = adv(t) }
+        }
         let ret: AType | not = not
         const a: PTok = cur(t)
         const b: PTok = peekAt(t, 1)
@@ -1158,7 +1448,7 @@ ${
         const body: RBlock = parseBlock(t)
         t = body.tp
         const f: AFn = { nid: t.nid, span: spanFrom(t, start), exported: exported, pure: pure,
-                         name: nameTok.v, params: params, ret: ret, body: body.b }
+                         name: nameTok.v, params: params, ret: ret, body: body.b, server: server, failable: failable }
         return mkItem(bumpId(t), start, AItemK.FnItem(f))
     }
 
@@ -1707,6 +1997,7 @@ ${
             .Spread(e: x) :> ""
             .Index(obj: o) :> ""
             .Lambda(params: ps) :> ""
+            .Sql(q: q) :> ""
         }
     }
 
@@ -2680,6 +2971,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -2821,6 +3113,7 @@ ${
             .Spread(e: sx) :> false
             .Index(obj: ix) :> false
             .Lambda(params: lp) :> false
+            .Sql(q: q) :> false
         }
     }
 
@@ -2848,6 +3141,7 @@ ${
             .Spread(e: sx) :> false
             .Index(obj: ix) :> false
             .Lambda(params: lp) :> false
+            .Sql(q: q) :> false
         }
     }
 
@@ -2985,6 +3279,8 @@ ${
             return logicRegionItem(mp, LexStop.Statement)
         }
         if (w.w == "function" || w.w == "fn" || w.w == "type") return logicRegionItem(mp, LexStop.Statement)
+        // s451 (U1a): `server function …` (the deprecated modifier, §52.10)
+        if (w.w == "server") return logicRegionItem(mp, LexStop.Statement)
         // s449: the keyword `when … changes { … }` at the program body top (§40.8: code)
         if (w.w == "when") return logicRegionItem(mp, LexStop.Statement)
         if (w.w == "import") return logicRegionItem(mp, LexStop.Line)

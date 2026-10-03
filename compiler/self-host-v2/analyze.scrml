@@ -45,6 +45,7 @@ ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
              DeclKind, HostCall, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
+             SqlKind, SqlTables, SqlColumns, Db, Driver,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
@@ -290,7 +291,27 @@ ${
         resets: ResetOnInfo[],  // s449: the program cells' accepted `reset-on=` rules (§6.8.4)
         gated: GateInfo[],      // s449: the `<form>` elements that bind a surfaced value (§55.7), and the values that gate each (§55.17.3)
         persists: PersistInfo[], // s451: the program cells' accepted `persist=` (§6.14)
+        server: ServerFacts,    // s451 (U1a): route placement + the program's queries and databases (placePass)
     }
+
+    // s451 (U1a) — what route inference and the SQL pass decided (placePass).
+    // `servers`: the Sym ids of the functions placed on the SERVER (§12.2) —
+    // lower makes each a Core ServerFn. `sqls`: one fact per `?{}` node (by
+    // NodeId) — the database it runs on and what its SQL does (recorded once,
+    // from the literal text — sql.scrml). `dbs`: the program's databases.
+    export type SqlInfo:struct = { nid: int, db: Sym, kind: SqlKind, reads: SqlTables, writes: SqlTables, columns: SqlColumns }
+    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[] }
+
+    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [] } }
+
+    export fn sqlInfo(t: Tables, nid: int) -> SqlInfo | not {
+        for (const s of t.server.sqls) {
+            if (s.nid == nid) return s
+        }
+        return not
+    }
+
+    export fn isServerPlaced(t: Tables, s: Sym) -> boolean { return t.server.servers.indexOf(s.id) >= 0 }
 
     // s451 — one accepted `persist=` program cell (§6.14): field `sym` of the
     // program and its storage + key. `lower` sets Core Field.persist from it.
@@ -1141,6 +1162,7 @@ ${
             .Spread(e: x) :> exprReads(x)
             .Index(obj: o, idx: i) :> exprReads(o).concat(exprReads(i))
             .Lambda(params: ps2, body: b) :> exprReads(b)
+            .Sql(q: q) :> ["?{}"].concat(listReads(q.params))      // s451: a query reads (like a call)
             .Name(name: n) :> []
             .Num(raw: r) :> []
             .Str(v: s) :> []
@@ -1199,6 +1221,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -1462,6 +1485,7 @@ ${
             .Spread(e: sx) :> -1
             .Index(obj: ix) :> -1
             .Lambda(params: lp) :> -1
+            .Sql(q: q) :> -1
         }
     }
 
@@ -1496,6 +1520,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .Sql(q: q) :> ""
         }
     }
 
@@ -1727,6 +1752,7 @@ ${
             .Spread(e: sx) :> []
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
+            .Sql(q: q) :> []
         }
     }
 
@@ -1867,6 +1893,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .Sql(q: q) :> ""
         }
     }
 
@@ -2419,6 +2446,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: ix) :> not
             .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -2652,6 +2680,7 @@ ${
             .Spread(e: x) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an array spread `...` is in the bootstrap only as a recognized edit shape (`@x = [...@x, e]`, §66.11.2) — Core has no spread value", st)
             .Index(obj: o) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an index `a[i]` is in the bootstrap only as an element-field write target (dpa-052 Q3) — Core has no index read", st)
             .Lambda(params: ps2) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence", st)
+            .Sql(q: q) :> plain(not, resolveExprs(env, q.params, not, st))   // s451: a query's values are bound like any expression; its facts are placePass's
         }
     }
 
@@ -2736,6 +2765,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .Sql(q: q) :> ""
         }
     }
 
@@ -3184,6 +3214,7 @@ ${
         const k: AExprK = e.k
         return match k {
             .Lambda(params: ps) :> ps
+            .Sql(q: q) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -3210,6 +3241,7 @@ ${
         const k: AExprK = e.k
         return match k {
             .Lambda(params: ps, body: b) :> b
+            .Sql(q: q) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -3265,6 +3297,7 @@ ${
             .Spread(e: sx) :> false
             .Index(obj: ix) :> false
             .Lambda(params: lp) :> false
+            .Sql(q: q) :> false
         }
     }
 
@@ -3459,6 +3492,7 @@ ${
             .Spread(e: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Index(obj: o) :> noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "writing an element `a[i]` is in the bootstrap only as an element-FIELD write (`@xs[i].f = v`, dpa-052 Q3) — Core has no position-write place"))
             .Lambda(params: ps2) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Sql(q: q) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
         }
     }
 
@@ -3609,6 +3643,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .Sql(q: q) :> ""
         }
     }
 
@@ -3850,6 +3885,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: ps2) :> false
+            .Sql(q: q) :> false
             .Name(name: n) :> false
             .At(name: n) :> false
             .AtItem :> false
@@ -3908,6 +3944,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .Sql(q: q) :> ""
         }
     }
 
@@ -3977,6 +4014,7 @@ ${
             .Spread(e: sx) :> []
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
+            .Sql(q: q) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -4044,6 +4082,7 @@ ${
             .Spread(e: x) :> resolveExpr(env, e, not, st).st
             .Index(obj: o) :> resolveExpr(env, e, not, st).st
             .Lambda(params: ps2) :> resolveExpr(env, e, not, st).st
+            .Sql(q: q) :> resolveExpr(env, e, not, st).st
         }
     }
 
@@ -4090,6 +4129,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -4203,6 +4243,7 @@ ${
             .Spread(e: x) :> []
             .Index(obj: o) :> []
             .Lambda(params: ps) :> []
+            .Sql(q: q) :> []
         }
     }
 
@@ -4229,6 +4270,7 @@ ${
             .ObjectLit(props: ps) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -4256,6 +4298,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -4282,6 +4325,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -4393,6 +4437,7 @@ ${
             .ObjectLit(props: ps) :> false
             .Spread(e: x) :> false
             .Lambda(params: ps) :> false
+            .Sql(q: q) :> false
         }
     }
 
@@ -4527,6 +4572,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -4553,6 +4599,7 @@ ${
             .ObjectLit(props: ps) :> not
             .Spread(e: x) :> not
             .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -5842,6 +5889,7 @@ ${
             .Spread(e: x) :> false
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
+            .Sql(q: q) :> false
         }
     }
 
@@ -6652,6 +6700,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .Sql(q: q) :> ""
         }
     }
 
@@ -6691,6 +6740,7 @@ ${
             .Spread(e: sx) :> false
             .Index(obj: ix) :> false
             .Lambda(params: lp) :> false
+            .Sql(q: q) :> false
         }
     }
 
@@ -6718,6 +6768,7 @@ ${
             .Spread(e: sx) :> noNarrowing()
             .Index(obj: ix) :> noNarrowing()
             .Lambda(params: lp) :> noNarrowing()
+            .Sql(q: q) :> noNarrowing()
         }
     }
 
@@ -6823,6 +6874,7 @@ ${
             .Spread(e: x) :> [x]
             .Index(obj: o, idx: i) :> [o, i]
             .Lambda(params: lp, body: b) :> [b]
+            .Sql(q: q) :> q.params
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -6871,6 +6923,7 @@ ${
             .Spread(e: sx) :> []
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
+            .Sql(q: q) :> []
         }
     }
 
@@ -7648,6 +7701,7 @@ ${
             .Spread(e: sx) :> -1
             .Index(obj: ix) :> -1
             .Lambda(params: lp) :> -1
+            .Sql(q: q) :> -1
         }
     }
 
@@ -7728,6 +7782,13 @@ ${
         return rvt(r.vt, record(r.ts, e.nid, r.vt))
     }
 
+    // s451: each expression typed in order (a query's bound values).
+    fn typeExprList(env: TEnv, es: AExpr[], ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0
+        for (const e of es) { ts = typeExpr(env, e, ts).ts }
+        return ts
+    }
+
     fn typeExprK(env: TEnv, e: AExpr, ts: TypeState) -> RVT {
         const nf: NameFact | not = nameFact(env.t.names, e.nid)
         const vf: ValueFact | not = valueFact(env.t.values, e.nid)
@@ -7753,6 +7814,7 @@ ${
             .Spread(e: x) :> rvt(VType.Unknown, typeExpr(env, x, ts).ts)
             .Index(obj: o, idx: i) :> rvt(VType.Unknown, typeExpr(env, i, typeExpr(env, o, ts).ts).ts)
             .Lambda(params: ps2, body: b) :> typeLambda(env, e, b, ts)
+            .Sql(q: q) :> rvt(VType.Unknown, typeExprList(env, q.params, ts))   // s451: no row type yet (§14.8 schema types are not in the bootstrap)
         }
     }
 
@@ -8274,6 +8336,7 @@ ${
             .Spread(e: sx) :> []
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
+            .Sql(q: q) :> []
         }
     }
 
@@ -8372,6 +8435,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -8399,6 +8463,7 @@ ${
             .Spread(e: sx) :> ""
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
+            .Sql(q: q) :> ""
         }
     }
 
@@ -8513,6 +8578,7 @@ ${
             .Spread(e: x) :> typeExpr(env, e, ts).ts
             .Index(obj: o) :> typeExpr(env, e, ts).ts
             .Lambda(params: ps2) :> typeExpr(env, e, ts).ts
+            .Sql(q: q) :> typeExpr(env, e, ts).ts
         }
     }
 
@@ -8679,6 +8745,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -8730,6 +8797,7 @@ ${
             .Spread(e: x) :> ts
             .Index(obj: o) :> ts
             .Lambda(params: ps2) :> ts
+            .Sql(q: q) :> ts
             .ArrayLit(elems: es) :> checkLitList(env, es, ts)
             .Ternary(test: x, yes: y, no: n) :> checkLitFields(env, n, checkLitFields(env, y, ts))
             .Name(name: n) :> ts
@@ -9486,6 +9554,7 @@ ${
             .Spread(e: x) :> ""
             .Index(obj: o) :> ""
             .Lambda(params: ps) :> ""
+            .Sql(q: q) :> ""
         }
     }
 
@@ -9513,6 +9582,7 @@ ${
             .Spread(e: x) :> []
             .Index(obj: o) :> []
             .Lambda(params: ps) :> []
+            .Sql(q: q) :> []
         }
     }
 
@@ -9541,6 +9611,7 @@ ${
             .ObjectLit(props: ps) :> ""
             .Spread(e: x) :> ""
             .Lambda(params: ps) :> ""
+            .Sql(q: q) :> ""
         }
     }
 
@@ -9663,6 +9734,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -9689,6 +9761,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -9717,6 +9790,7 @@ ${
             .Spread(e: x) :> ""
             .Index(obj: o) :> ""
             .Lambda(params: ps) :> ""
+            .Sql(q: q) :> ""
         }
     }
 
@@ -10367,6 +10441,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -10683,7 +10758,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [] }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [] }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {
@@ -10859,7 +10934,7 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
-                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos }
+                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts() }
         const scopeDiags: Diag[] = checkScopes(files, bound)
         // s449: the no-write rule over every accepted effect (§6.7.4)
         const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects)
@@ -10869,7 +10944,7 @@ ${
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists }
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: bound.server }
         return { files: files, tables: t, diags: st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags),
                  infos: gatedInfos(vp.gated) }
     }

@@ -31,14 +31,16 @@ ${
     import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
+             ServerFn, SqlMode, Db,
              block, litStr } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
-             AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag,
+             AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
              mkSpan } from "./ast.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair, ValInfo, GateInfo,
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo,
-             nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest } from "./analyze.scrml"
+             SqlInfo,
+             nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced } from "./analyze.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
     // reported an ERROR (an `E-` code — §34: severity is "carried by the `E-`
@@ -170,6 +172,7 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
+            .Sql(q: x) :> not
         }
     }
 
@@ -197,6 +200,7 @@ ${
             .Lambda(params: x) :> op
             .SeqCall(op: x) :> op
             .Validity(of: x) :> op
+            .Sql(q: x) :> op
         }
     }
 
@@ -254,6 +258,7 @@ ${
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
             .Validity(of: x) :> false
+            .Sql(q: x) :> false
         }
     }
 
@@ -337,6 +342,7 @@ ${
             .Spread(e: sx) :> missing()
             .Index(obj: ix) :> missing()
             .Lambda(params: lp, body: lb) :> lambdaExpr(c, valueFact(c.t.values, e.nid), lb)
+            .Sql(q: q) :> sqlExpr(c, e, q)
         }
     }
 
@@ -385,6 +391,7 @@ ${
             .Spread(e: x) :> not
             .Index(obj: x) :> not
             .Lambda(params: ps) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -477,6 +484,7 @@ ${
             .Lambda(params: x) :> missing()
             .SeqCall(op: x) :> missing()
             .Validity(of: x) :> missing()
+            .Sql(q: x) :> missing()
         }
     }
 
@@ -640,6 +648,7 @@ ${
             .Spread(e: sx) :> not
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
         }
     }
 
@@ -800,6 +809,7 @@ ${
             .Lambda(params: x) :> missing()
             .SeqCall(op: x) :> missing()
             .Validity(of: x) :> missing()
+            .Sql(q: x) :> missing()
         }
     }
 
@@ -810,6 +820,7 @@ ${
             .Spread(e: sx) :> []
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
+            .Sql(q: q) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -1533,6 +1544,60 @@ ${
         return not
     }
 
+    // s451 (U1a): a function route inference placed on the server (analyze
+    // placePass — `Tables.server.servers`) lowers to a Core ServerFn. Lower
+    // decides nothing: the placement is analyze's fact.
+    fn lowerServerFn(t: Tables, fs: FnSyntax[], info: FnInfo) -> ServerFn | not {
+        const f: Fn | not = lowerFn(t, fs, info)
+        if (f is not) return not
+        return { sym: f.sym, params: f.params, ret: info.ret, body: f.body }
+    }
+
+    // s451 (U1a) — a `?{}` query: its literal runs and its values, with the
+    // facts analyze recorded (the database, kind, tables, columns —
+    // Tables.server.sqls). §8.2: "If the same expression appears more than once
+    // in a single SQL template, the compiler SHALL assign it a single positional
+    // parameter slot and reuse that slot at every occurrence … in order of first
+    // appearance left-to-right" — the lowered values are compared structurally
+    // (`==` on Core Expr: the same local, the same call, the same literal), so
+    // a repeated value is ONE parameter, evaluated once.
+    fn sqlExpr(c: LC, e: AExpr, q: ASql) -> Expr {
+        const info: SqlInfo | not = sqlInfo(c.t, e.nid)
+        if (info is not) return missing()
+        let params: Expr[] = []
+        let slots: int[] = []
+        for (const p of q.params) {
+            const x: Expr = lowerExpr(c, p)
+            const at: int = exprIndex(params, x)
+            if (at < 0) {
+                params = params.concat([x])
+                slots = slots.concat([params.length - 1])
+            } else {
+                slots = slots.concat([at])
+            }
+        }
+        return Expr.Sql({ db: info.db, chunks: q.chunks, params: params, slots: slots, mode: sqlMode(q.mode),
+                          kind: info.kind, reads: info.reads, writes: info.writes, columns: info.columns,
+                          nobatch: q.nobatch, site: { n: e.nid } })
+    }
+
+    fn exprIndex(es: Expr[], x: Expr) -> int {
+        let i: int = 0
+        for (const y of es) {
+            if (y == x) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    fn sqlMode(m: ASqlMode) -> SqlMode {
+        return match m {
+            .SqlAll :> SqlMode.All
+            .SqlGet :> SqlMode.Get
+            .SqlRun :> SqlMode.Run
+        }
+    }
+
     export fn lower(tp: TypedProgram) -> Lowered {
         if (hasError(tp)) return { core: not, diags: tp.diags }   // s451: the diagnostics gate
         const t: Tables = tp.tables
@@ -1543,12 +1608,19 @@ ${
         for (const ti of t.types) { types = types.concat([ti.def]) }
         const fsx: FnSyntax[] = fnSyntaxes(tp.files)
         let fns: Fn[] = []
+        let server: ServerFn[] = []
         for (const info of t.fns) {
-            const f: Fn | not = lowerFn(t, fsx, info)
-            if (f is some) fns = fns.concat([f])
+            if (isServerPlaced(t, info.sym)) {
+                const sf: ServerFn | not = lowerServerFn(t, fsx, info)
+                if (sf is some) server = server.concat([sf])
+            } else {
+                const f: Fn | not = lowerFn(t, fsx, info)
+                if (f is some) fns = fns.concat([f])
+            }
         }
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: [] }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: [] }
+        const dbs: Db[] = t.server.dbs
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs }
         return { core: core, diags: tp.diags }
     }
 
@@ -1720,6 +1792,7 @@ ${
             .Lambda(params: x) :> []
             .SeqCall(op: x) :> []
             .Validity(of: x) :> []
+            .Sql(q: x) :> []
         }
     }
 
