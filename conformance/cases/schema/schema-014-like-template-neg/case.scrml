@@ -1,0 +1,6 @@
+<program db="./app.db">
+    <schema>
+        CREATE TABLE tmpl (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)
+        CREATE TABLE assets (LIKE tmpl INCLUDING ALL)
+    </>
+</program>

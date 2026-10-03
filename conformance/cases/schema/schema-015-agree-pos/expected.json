@@ -1,0 +1,13 @@
+{
+  "id": "schema-schema-015-agree-pos",
+  "description": "§39.2 positive control for E-SCHEMA-015 — a commented-out copy of `assets` that AGREES with the live declaration on `tenant_id` (both carry it). Agreeing declarations are quiet; the whole E-SCHEMA-* family stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-tenant-union-and-like.test.js",
+  "spec": "§39.2",
+  "rationale": "§39.2: E-SCHEMA-015 fires only when same-name declarations DISAGREE on `tenant_id`; declarations that agree — a commented-out copy included — are not an error. Provenance: ruling:user-voice-scrml.md S447 \"stamp all\" (i).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCHEMA-015"],
+    "notCodePrefixes": ["E-SCHEMA-"]
+  }
+}

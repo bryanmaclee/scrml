@@ -1,0 +1,13 @@
+{
+  "id": "schema-schema-015-disagree-neg",
+  "description": "§39.2 / §14.8.10 — a `<schema>` declares table `assets` twice: a commented-out stale copy WITHOUT `tenant_id` and the live declaration WITH it. Every declaration the compiler reads (a commented-out copy included) counts, and the tenant floor reads their union; same-name declarations that disagree on `tenant_id` are rejected with E-SCHEMA-015 (before S450 the stale copy won first-wins and the live `tenant_id` table was silently not tenant-scoped).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-tenant-union-and-like.test.js",
+  "spec": "§39.2",
+  "rationale": "§39.2 (Comments and literals): same-name `<schema>` declarations that disagree on whether the table carries a `tenant_id` column SHALL be a compile error (E-SCHEMA-015). Provenance: ruling:user-voice-scrml.md S447 \"stamp all\" (i).",
+  "expect": {
+    "codes": ["E-SCHEMA-015"],
+    "codeCounts": { "E-SCHEMA-015": 1 },
+    "notCodes": ["E-SCHEMA-012", "E-SCHEMA-013", "E-SCHEMA-014"]
+  }
+}

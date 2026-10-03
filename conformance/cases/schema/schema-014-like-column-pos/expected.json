@@ -1,0 +1,13 @@
+{
+  "id": "schema-schema-014-like-column-pos",
+  "description": "§39.2 positive control for the E-SCHEMA-014 `LIKE` case — a column NAMED `like`: quoted (`\"like\" TEXT`), or unquoted with its type followed by a constraint (`like TEXT NOT NULL`). Neither is a template reference; the E-SCHEMA-* family stays silent.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-tenant-union-and-like.test.js",
+  "spec": "§39.2",
+  "rationale": "§39.2: only `LIKE <name>` followed by `INCLUDING`, `EXCLUDING`, `,` or `)` is a template reference; a quoted `like` column, or a `like` column whose type is followed by anything else, is an ordinary column. Provenance: ruling:user-voice-scrml.md S447 \"stamp all\" (ii).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCHEMA-014"],
+    "notCodePrefixes": ["E-SCHEMA-"]
+  }
+}
