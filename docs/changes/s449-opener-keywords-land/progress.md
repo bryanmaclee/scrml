@@ -34,3 +34,20 @@
   gap closed. (2) prose = (b): parseKids (free text) no longer reports keywords — they are text; parseCodeBody
   (state-child bodies) still E-DECL-KEYWORD-NOT-ITEM. SPEC §66.0 row / §66.2.5 / §66.5.4 O38 / §66.20 row amended
   with S449 item 2 provenance. Tests: parse.test (prose AST + code-default BITE), core-additions (prose renders).
+- CORRECTION (review F): the codemod migrated 14 conformance cases (reactive/no-write-*), not 16 as written above
+  and in commit 0fc4af9d5's message.
+- phase 5 (review of 873367d0c, LAND-WITH-NITS; commits on top):
+  A. free text: `let`/`export` + tag stay TEXT except before a tag that is a declaration BY ITS OPENER
+     (`<p>let <x:int=0/></p>` → E-DECL-KEYWORD-NOT-ITEM, message names `${"let"}`). PA READING — FOR VETO
+     (recorded in SPEC §66.2.5 as such). Keyword word boundary = markup name rule (isNameCh, `-` included), so
+     `re-let` / `outlet` are not the keyword. (The lexer's identifier rule excludes `-`, which is exactly what made
+     `re-let` fire; the markup rule is the one that fixes it — noted as a deliberate deviation from the review's
+     wording.)
+  B. `renders` reserved only as a `renders <element>` clause in a DECLARATION opener; `<div renders="x">` and a
+     typed attribute `renders:string` are ordinary; a markup element inside a plain element's opener → E-PARSE-TAG.
+  C. ⚑ O61: `<page>` and `<theme>` bodies both report no keyword — both elements are refused whole with
+     E-BOOTSTRAP-UNSUPPORTED (theme in parse, page in analyze's structural-tag check). One fail-closed code.
+  D. `let` inside the opener of a tag that declares nothing (`<input let/>`, `<let div/>`): message says drop it.
+     The refused in-opener `let` keeps its grant (recovery) only when the opener carries a §66.2.2 marker.
+  E. NERDME.md §66 row re-spelled. (hand-off.md / handOffs/dpa-queue.md are PA-owned, left; slice-m2/progress.md
+     is a historical log, left.)

@@ -425,7 +425,7 @@ scrml is converging on its spec. Some features are specified but not built; some
 
 | Feature | Spec | What it is |
 |---------|---|---|
-| **Declarations, instances and value contracts** | §66 | The next declaration model (`<let x:int=0/>`, locked-by-default values, components and engines as declarations). The shipping compiler does not compile it; an in-progress second implementation (`compiler/self-host-v2/`) implements slices. |
+| **Declarations, instances and value contracts** | §66 | The next declaration model (`let <x:int=0/>`, locked-by-default values, components and engines as declarations). The shipping compiler does not compile it; an in-progress second implementation (`compiler/self-host-v2/`) implements slices. |
 | **Foreign code — arbitrary languages + standalone blocks** | §23 | The inline value-returning `_={…}=` **ts/js** block ships (§23.2.4); arbitrary-language inline blocks and standalone library-mode foreign blocks do not. |
 | **WASM call-char sigils** | §23.3 | `r{}` / `c{}` / `z{}` sigils plus `extern` declarations for calling compiled WASM. Refused with `E-WASM-NOMINAL`. |
 | **Sidecar process declarations** | §23.4 | `use foreign:name { fn }` — server-side HTTP/socket sidecar services. Refused with `E-FOREIGN-SIDECAR-NOMINAL`. |

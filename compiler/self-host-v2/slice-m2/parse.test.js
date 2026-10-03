@@ -241,6 +241,38 @@ describe("parse — S447 opener keywords (§66.2.5)", () => {
     expect(codes("<program>\n    let <signup>\n    </>\n</program>")).toEqual(["E-PARSE-LET"]);
     expect(codes("<program>\n    let <signup:struct>\n        let <email:string=\"\"/>\n    </>\n</program>")).toEqual([]);
   });
+
+  // PA reading S449 (for veto) on ruling item 2: free text stays prose UNLESS the tag is a declaration by its opener.
+  test("BITE — free text: `let` before a DECLARATION opener (`<p>let <x:int=0/></p>`) is still E-DECL-KEYWORD-NOT-ITEM, naming the `${\"let\"}` escape", () => {
+    const r = parse("t.scrml", "<program>\n    <main><p>let <x:int=0/></p></main>\n</program>");
+    expect(r.diags.map((d) => d.code)).toEqual(["E-DECL-KEYWORD-NOT-ITEM"]);
+    expect(r.diags[0].message).toContain("free-text body of `<p>`");
+    expect(r.diags[0].message).toContain("${\"let\"}");
+    // a hyphenated or embedded word is not the keyword (markup word boundary)
+    expect(codes("<program>\n    <main><p>re-let <x:int=0/> outlet <y:int=1/></p></main>\n</program>")).toEqual([]);
+  });
+
+  test("`renders` is reserved only as a clause in a DECLARATION opener (§66.5.1): elsewhere it is an ordinary attribute name", () => {
+    expect(codes("<program>\n    <main><div renders=\"x\">a</div></main>\n</program>")).toEqual([]);
+    expect(codes("<program>\n    <card renders:string=\"x\"/>\n    renders <p>${renders}</p>\n</program>")).toEqual([]);
+    // a markup element inside a plain element's opener: a tag error, not the declaration code
+    expect(codes("<program>\n    <main><div renders <b/>>a</div></main>\n</program>")).toEqual(["E-PARSE-TAG"]);
+  });
+
+  test("`let` inside the opener of a tag that declares nothing: the message says drop it, never `let <input/>` (which is E-PARSE-LET)", () => {
+    for (const src of ["<program>\n    <main><input let/></main>\n</program>", "<program>\n    <let div/>\n</program>"]) {
+      const r = parse("t.scrml", src);
+      expect(r.diags.map((d) => d.code)).toEqual(["E-DECL-LET-IN-OPENER"]);
+      expect(r.diags[0].message).toContain("declares nothing");
+      expect(r.diags[0].message).not.toContain("goes BEFORE");
+    }
+    expect(parse("t.scrml", "<program><x:int=0 let/></program>").diags[0].message).toContain("write `let <x…/>`");
+  });
+
+  test("⚑ O61: a `<page>` / `<theme>` body reports no keyword itself — both are refused whole (fail-closed, one code)", () => {
+    expect(codes("<program>\n    <page>\n        let <x:int=0/>\n    </page>\n</program>")).toEqual([]);
+    expect(codes("<program>\n    <theme>\n        export <brand:string=\"#000\"/>\n    </theme>\n</program>")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
 });
 
 describe("fix round — out-of-subset forms are REPORTED by name (F-C, F-D)", () => {
