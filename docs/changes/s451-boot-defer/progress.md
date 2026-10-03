@@ -38,3 +38,47 @@ Source: `function go() { defer { @log = @log + "d" } @log = @log + "b" }` in a �
 - Measured: bootstrap-conformance 0 cases changed (PASS 42 · FAIL 18 · LEGACY 951 · UNSUPPORTED 277).
   Slice suites: 1 test changed (m4 failclosed "nothing of it reaches Core" — now asserts no Core at all).
   New: slice-m4/diag-gate.test.js (4 closed shapes + 2 twins).
+
+## (2) `defer` — FULL implementation for every exit the bootstrap has (2026-10-03)
+Governing sentences (SPEC §19.16, read in full, lines 18563-18933):
+- §19.16.1 syntax + contextual keyword: "It opens a defer statement ONLY at statement start, and ONLY when the next
+  token is on the same source line and can begin a statement — an identifier (other than the word operators
+  `or`/`and`), an `@`-cell, a `?{}` block, a `{`, a `[` SEPARATED from `defer` by whitespace …, or a statement
+  keyword other than `is`/`as`/`of`/`in`/`instanceof`/`else`/`from`/`extends`/`case`/`catch`/`finally`/`default`."
+  (lead set mirrors impl#1 ast-builder.js `isDeferStatementLead`.)
+- §19.16.1 E-DEFER-AMBIGUOUS-LEAD: "Where a binding named `defer` is in scope, a single-statement `defer` led by an
+  array literal SHALL be a compile error naming both spellings".
+- §19.16.2 Registration/Exit/Not-reached/Order/Evaluation time: "every deferred body registered in that block runs
+  exactly once, on EVERY exit path: falling off the end of the block; `return` (after the return value has been
+  evaluated …)"; "reverse registration order (LIFO)"; "evaluated in full at exit".
+- §19.16.2 E-DEFER-UNSUPPORTED-SITE: "a `defer` that is the whole UNBRACED body of an `if` / `else` … SHALL be a
+  compile error".
+- §19.16.2 E-DEFER-LATER-SHADOW: "If the deferred body reads a name that such a later declaration (re)binds, the
+  program SHALL be rejected".
+- §19.16.2 host error: "every remaining one still runs, in LIFO order. After all of them have run, the FIRST host
+  error raised by a deferred body propagates" (runtime.js `runDefers`).
+- §19.16.3 rule 1 E-DEFER-CONTROL-FLOW ("SHALL NOT contain a `return`…"), rule 2 E-DEFER-NESTED, rule 4
+  E-DEFER-OUTSIDE-FUNCTION ("`defer` SHALL appear only inside the body of a function DECLARATION").
+- §19.16.4: the deferred body in a `fn` "is subject to EVERY §48.3 prohibition exactly as if it were written at each
+  exit" (resolved with the function's env → E-FN-003/-004 identical; test pins it).
+- §19.16.6 shape (informative): per-block stack + `try { … } finally { … }` — followed.
+
+Exits the bootstrap does NOT have: loops/`break`/`continue`, `fail`, `?`, `yield`, CPS body-split, server functions,
+failable (`!`) functions, function declarations inside a body. None has a source form the bootstrap parses (each
+is a parse/scope error → no Core, by the s451 gate), so NO defer combination with them can be mis-run, and
+E-DEFER-UNHANDLED-FAILABLE / -DUPLICATE-FUNCTION / -SERVER-IN-SPLIT have no parseable trigger. When any of those
+constructs lands in the bootstrap, its defer interaction must land with it (noted in analyze.scrml's section head).
+
+Files: ast.scrml (AStmtK.Defer), parse.scrml (deferAhead/parseDefer/bareDefer), analyze.scrml (resolveDefer,
+deferChecks pass, tDeferEnv narrowing rule, 8 one-line match arms + 1 call), lower.scrml (Stmt.Defer), core.scrml
+(Stmt.Defer), walk/check(C16)/measure/print/js.scrml (STry), slice-m1/runtime/runtime.js (runDefers).
+
+Narrowing decision: a deferred body is typed with only the narrowings nothing can undo before the exit — `#id`
+locals never rebound (no EAssignLocal); cell narrowings dropped (fail closed). Without this either a narrowed param
+read in a deferred body was falsely rejected (first cut, "narrow it first" message), or a rebound local was trusted.
+
+Measured: bootstrap-conformance buckets unchanged (all 47 defer/* cases are LEGACY — §66.21 `rhs-decl`); 7 cases'
+emitted codes changed (now carry E-DEFER-AMBIGUOUS-LEAD / -LATER-SHADOW / -NESTED / -UNSUPPORTED-SITE in place of
+E-SCOPE-001/E-PARSE-* debris). defer/scope-redeclare-with-defer-neg now emits E-DEFER-LATER-SHADOW alongside
+E-SCOPE-REDECLARE — impl#1 emits the same pair (verified: `scrml compile` → E-DEFER-LATER-SHADOW, E-SCOPE-REDECLARE).
+Slice suites: m4 582/0 (+25 defer.test.js, +6 diag-gate.test.js), all others unchanged.

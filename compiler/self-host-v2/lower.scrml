@@ -548,6 +548,7 @@ ${
             .If(cond: x, thenB: t, elseB: el) :> [Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))]
             .Given(name: n, subject: sub, body: b) :> givenStmts(c, s, b)
             .EffectStmt(w: w) :> []              // analyze refused it (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
+            .Defer(body: b) :> [Stmt.Defer(lowerBlock(c, b))]   // s451 (§19.16)
         }
     }
 
