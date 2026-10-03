@@ -134,6 +134,14 @@ describe("§12.2 Trigger 1 — the same tokens as REAL code still escalate (no f
     expect(boundaryOf(prog("    return [x].map(function(y) { return session.userId + y })"), "f")).toBe("server");
   });
 
+  test("session: a real read inside a block-body ARROW callback escalates", () => {
+    expect(boundaryOf(prog("    return [x].map(y => { return session.userId + y })"), "f")).toBe("server");
+  });
+
+  test("session: only a string mention inside a block-body ARROW callback stays client", () => {
+    expect(boundaryOf(prog("    return [x].map(y => { return \"session \" + y })"), "f")).toBe("client");
+  });
+
   test("the client `@session` projection still does NOT escalate", () => {
     expect(boundaryOf(prog("    return @session.userId + x"), "f")).toBe("client");
   });
