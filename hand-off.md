@@ -1,3 +1,64 @@
+# scrml — Session 449 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Solo session (S446-peter / S447 / S448 wrapped;
+> S450-peter ran concurrently on P-Tech1 and wrapped #1245). **Rulings authority:** `scrml-support/user-voice-scrml.md` §S449.
+> Board: `S449-bryan.md`. Changelog: `docs/changelog.md` §S449. bryan ran most of this session autonomous ("run autonomis for now").
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 0. bryan's open questions — surface FIRST (he said "Ill look at the Qs next session"). All have PA recs; full text in this session's transcript, summaries here
+1. **U1 server-boundary rulings R1–R11** (design: `scrml-support/docs/deep-dives/bootstrap-u1-server-boundary-design-2026-10-03.md`). Language-shaping: **R1** server call in a value position → compile error pointing at `<request>` (rec) · **R4** amend §13.2 "SHALL parallelize" to "independent AND provably read-only" (rec) · **R7** a cell written then read in one batch uses the batch-local value (rec) · **R11** keep §8.7 silent `not`/`[]` outside `!` but require a server log line (rec). Tightenings (all rec yes): R2 any cell access = client-only for E-ROUTE-002 · R3 E-ROUTE-001 = error · R5 confirm C's lock covers every statement (it does — built that way) · R6 manual `?{BEGIN}` left open at return → rollback + report · R8 payload-enum wire shape `{variant,data}` · R9 restate implicit-envelope trigger as "≥2 `?{}` in a `!` body, none `.nobatch()`" · R10 strict decoder on compiler-internal routes. **U1a cannot start until these are ruled.**
+2. **`scrml fix` forks** (branch `wip/s449-scrml-fix-s66-twins`): (a) union-type spelling in an opener (`let <email:string | not=""/>` — rec `|`, bootstrap rejection = parser bug); (b) `<program>` wrap adds the §65.3.4 CSS reset layer impl#1 omits for an implicit program — rec keep plain wrap + per-file note naming `reset="none"`; (c) name `E-DECL-STATE-CHILD` / `E-TYPE-VARIANT` in §66.20 with the legacy codes they supersede (rec) so the counter's mapping is SPEC-backed.
+3. **§55.17 hidden-region field optional?** (`g-spec-55-17-hidden-region-field-cannot-be-optional`) — rec (b) author-written conditional validator (keeps the gate fail-closed).
+4. **Lock-wait timeout** for the transaction guard (`g-tx-lock-held-across-slow-outbound-call`) — measured: a slow outbound call / a self-call inside a `!` envelope stalls ALL SQLite traffic up to the client timeout (scrml:http 10 s; raw fetch → Bun idleTimeout 120 s). Rec: none, documented.
+5. **Veto-able PA readings already landed:** `<program transactions="concurrent">` spelling (#1251); PG/MySQL plain `BEGIN` sentence (#1251).
+6. **SPEC questions filed:** `<page>`/`if=` cell scope (`g-session-ambient-markup-nested-session-cell-flips-exemption`); validator arguments as value positions (`g-spec-6-15-validator-argument-value-position-silent`); `<program>` required in the entry file (140 conformance cases hinge on it — from the counter).
+7. Carried: README #1176 · SPEC "unawaited Promise" softening · dpa-064 (nested `<program>` auth scope) · dpa-065 O35 (banked — fire a dPA).
+
+### 1. In flight at wrap
+- **`scrml fix` + test-time twins** — `wip/s449-scrml-fix-s66-twins` @ `df9f80aab`. r1 review DO-NOT-LAND (the CLI rewrote working apps into §66 that impl#1 can't compile: ex14 6 warn → 34 errors; written cells → locked via cross-file writes / `ref=` / `deps=`) → fix round: default CLI = impl#1-compilable rules only, `--s66` dry-run unless `--write`; project-wide write set; `twin-extra-error` FAIL. **Re-review (frozen `.claude/worktrees/s449-rev-fix` @ df9f80aab) was running at wrap** — if it came back clean, open the PR and land; else route its findings to a fresh agent (the branch + `docs/changes/s449-scrml-fix-s66-twins/progress.md` are the anchor). Counter after it: PASS 76 (62 real) / 138 graded. The agent self-reported one bare `pkill -f` (its own script only).
+
+### 2. Bootstrap lane (critical path = U1)
+Status (measured by `scripts/bootstrap-conformance.ts`, landed #1247): **19 real passes / 52 graded on main**; ~62 real once the twins land. Built this session: `<effect>` + no-write + `reset-on=` (#1235), §6.15 (#1238), opener keywords (#1249), §55 surface + submit gate (#1250). **Next:** R1–R11 rulings → **U1a** (SQL + placement, M) → U1b–U1e per the design's slice plan; note the design found a **missing unit "Ue" (the `!`/`fail`/`?`/`!{}` error model)** that transactions (U1e) need. Disjoint/parallel: **U5 `persist=`**; HIGH bootstrap gaps from the counter/twins: `g-bootstrap-program-attrs-ignored-fail-open` (`<program auth="required">` compiles with no gate — should refuse), `g-bootstrap-entry-content-outside-program-dropped-silently`, `g-bootstrap-else-if-else-attrs-ignored` (all branches render), `g-bootstrap-defer-scope-001-and-runs-anyway`; MED `g-bootstrap-gate-reach-live-dom-reading` (reopened: uses `<f/>`, use-site slot fillers, `as=` handles still fail-open), `g-bootstrap-gate-external-form-owner-control`.
+
+### 3. impl#1 security / integrity (open)
+HIGH `g-implicit-envelope-only-on-baseline-csrf-arm` (auth= / headless / GET routes get NO §8.9.2 envelope) · HIGH `g-implicit-envelope-requires-explicit-server-modifier` · MED `g-channel-onserver-handler-with-server-call-not-async` (no onserver handler can touch the db) · protect round 10 (`g-protect-egress-round-10-residuals`: H1 built-in patched through an unnameable route — scrml-reachable; H2 unmodelled method result drops functions; MED ~80 s fallback reached by idiomatic `const g = globalThis`) · S450-peter's filings (quoted else-if/show ignored, `!` helper via `?` not emitted server-side, single-statement `@x = match` payload, `${children}` duplicated — all HIGH).
+
+### 4. Peter (S450) — told via inbox
+B1 (`hold/s450-transaction-in-function-body`) cleared to land on top of #1251 (nested `transaction {}` now nests as savepoints; his emission is covered unchanged) — he merges main first. A3 (async listener rejections → `_scrml_error_boundary_log`) is his. B2 → bootstrap.
+
+## 🔭 DURABLE
+**A precision shortcut inside a soundness analysis is where the leaks come back — so make its applicability a fail-closed precondition, not a list of handled cases.** Protect round 9 modelled the compiler's session store by summary; each review round found a new HIGH bypass of the summary (a copy vs the live object; unmodelled routes; overwriting a method). The fix that ended it was an ALLOW-LIST of the only uses under which the summary applies — anything else falls back to the faithful model. The same lesson as S447's "a runtime safety net is the signature of an under-designed axis", one level down.
+
+**A rule that closes the class beats four patches.** The bootstrap `<effect>` review found four holes of one shape (a formula/initializer that writes, reached lazily). bryan's §6.15 ("value positions may not write") made all of them — plus a page-freeze bug — compile errors at the source, in one check.
+
+**The honest progress number was 19, not "about a third".** The PA's estimate from an inventory said ~1/3 of the surface; the conformance counter measured 19 real passes of 1278, mostly because 74% of the corpus is in a dialect the bootstrap doesn't parse. Measure before estimating, and flag vacuous passes (15 of the first 34).
+
+**A rewriting tool must be measured against the compiler adopters actually have.** `scrml fix` passed its own meaning-preservation checks and still turned working apps into non-compiling ones — because its target dialect was the bootstrap's, and adopters run impl#1. The review caught it; the default now only applies impl#1-compilable rules.
+
+## ⚑ MISSES (mine)
+1. ★★ Briefed the corpus-dialect codemod as the counter's tool and the adopter CLI in one build without stating which compiler the CLI's output must compile on — the review, not the brief, caught that the default CLI broke impl#1 apps.
+2. ★ Told bryan the bootstrap was "about a third" of the language from an inventory before measuring; the counter said 19/1278.
+3. ★ Briefed the opener-keyword "never text" sub-ruling into the parser without showing bryan the English-prose cost (`Please let <b>me</b> know`); the reviewer surfaced it, bryan narrowed it.
+4. ★ The "informative" wording for §34.1's 82 native-parser codes came from my brief, not the ruling — flagged to bryan after the fact (he didn't veto).
+5. ★ An agent's push was blocked by the auto-mode classifier mid-session; I correctly didn't push it for the agent but had to wait on bryan to retry.
+
+## Landed S449 (squash-merged, cloud `gate` green, each code PR S239-reviewed — review ledger `docs/pr-reviews.md`, 0 owed)
+#1232 · #1233 · #1234 · #1235 · #1236 · #1237 · #1238 · #1239 · #1240 · #1247 · #1248 · #1249 · #1250 · #1251. Closed #1214 (superseded by #1249).
+scrml-support: board S449, user-voice §S449 (8 entries), deep-dives: native-parser-fate, effect-open-items-rec-pack, bootstrap-u1-server-boundary-design, corpus-dialect-codemod-scope.
+
+## /tmp probe (wrap 6b′, ASUS — first ASUS reading)
+**580,260** top-level `/tmp` entries owned by bryan since the 4-day-old boot, and **1,769,808 files / 26 GB** under `/tmp/claude-1000`.
+Measured: it is RESIDUE, not a live leak — e.g. 122,885 `cdireject-*` dirs (class-dynamic-import-reject.test.js) all predate the
+s448 test temp-root preload (landed a85633752, 2026-10-02 01:58Z), and **0** were created since. Top names: cdireject 127k, s443-sweep 84k,
+scrml-protect-floor 35k, scrml-protect-scalar 26k, s432f2/f1, scrml-eroute002, s449m-sweep. ⚑ bryan: a one-time cleanup of `/tmp` +
+old scratchpads needs your hand (the classifier blocks a "shared scratch sweep" by the PA); next ASUS boot will otherwise pay the delete.
+
+## Worktrees
+Spent agent/review worktrees were removed at each landing. Retained at wrap: `agent-a7d956136e3176845` + `.claude/worktrees/s449-rev-fix` (the in-flight `scrml fix` work + its frozen review tree). Superseded, remove next session after confirming: `agent-a7c65fefac89c3297` (old U0 r3, `s447-u0-r3`) and branches `wip/s447-bootstrap-u0-r3`, `wip/s448-bootstrap-u0-r3` (U0 landed in its re-scoped form as #1235). Many older `agent-*` worktrees from prior sessions remain (`git worktree list` — 30); audit with a dry-run listing before removing.
+
+---
+
 # scrml — Session 450 (peter · P-Tech1) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Concurrent: **S449-bryan (ASUS) LIVE

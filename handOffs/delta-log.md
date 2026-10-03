@@ -4177,3 +4177,21 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3639] state · S450 aM: pin app-pinned bumped to scrml main; aM main 156952a carries the Pi-deploy guard (scrml.toml + deploy-pi refusal until SCRML_DATA_DIR + / & sw.js static fixed)
 [3640] friction · S450 dispatched two aM impl#1 fixes before the S435 policy check → parked; autoMode refused a relayed-authorization branch update (Peter ran it); generated churn (known-gaps theirs / master-list) nearly leaked into 3 PRs
 [3641] state · S450-peter WRAPPED.
+[3642] state · S449-bryan booted solo (ASUS); autonomous most of the session · → board S449-bryan.md
+[3643] ruling · S449 eight-question queue "your recs." (@session server ctx error; <onMount>; §6.15 value positions don't write; auth= invalid error; S447 accepts confirmed; native parser frozen+pruned; effect OPENs) · → user-voice §S449 · @adv:g-session-ambient-unlowered-trust-boundary-inversion,g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth
+[3644] land · #1233 data-root symlink containment · @adv:g-dev-db-data-root-residuals
+[3645] land · #1234 session store WAL+busy_timeout, CSRF-gated honest logout · @adv:g-emitted-session-store-opens-sqlite-with-no-busy-timeout-or-wal,g-session-destroy-route-has-no-csrf-check
+[3646] land · #1235 bootstrap <effect> + compile-time no-write + reset-on= (U0 backstop deleted) · @adv:g-bootstrap-effect-reset-on-owed
+[3647] land · #1236 protect egress round 9 (session store by summary under an allow-list precondition) · @adv:g-protect-egress-round-9-residuals
+[3648] land · #1237 SPEC <onMount>, §6.15, effect OPENs closed · @adv:dpa-063
+[3649] land · #1238 bootstrap §6.15 E-VALUE-WRITES-STATE · @adv:g-bootstrap-render-writer-call-hangs
+[3650] land · #1239 E-SESSION-AMBIENT-SERVER + E-AUTH-ATTR-INVALID · @adv:g-session-ambient-unlowered-trust-boundary-inversion,g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth
+[3651] land · #1240 native-parser freeze + prune (−34k) · @adv:g-parity-canary-outside-every-blocking-gate
+[3652] ruling · S450-peter asks: B1 exception (return/break/continue roll back), C shared-connection lock (+PG opt-in), D fail rolls back implicit envelope · → user-voice §S449 · @adv:g-shared-sql-connection-concurrent-handlers-share-transaction,g-implicit-handler-tx-commits-on-fail
+[3653] land · #1247 bootstrap conformance counter (19 real / 1278) · → docs/bootstrap-conformance.md
+[3654] ruling · on-field (a), opener prose (b), dialect (c); dialect rulings 1-6; PA-reading vetoes none · → user-voice §S449
+[3655] land · #1248 dpa-065 O35 banked · @adv:dpa-065
+[3656] land · #1249 §66 opener keywords + bootstrap parser migration (supersedes #1214) · @adv:g-bootstrap-parser-opener-let-and-unchecked-opener-shapes
+[3657] land · #1250 bootstrap §55 validity surface + submit gate · @adv:g-bootstrap-validated-form-fields-fail-open-no-surface-no-gate
+[3658] land · #1251 transaction guard (§19.10.6) + fail rollback (§8.9.2) · @adv:g-shared-sql-connection-concurrent-handlers-share-transaction,g-implicit-handler-tx-commits-on-fail
+[3659] state · S449 in flight at wrap: wip/s449-scrml-fix-s66-twins @df9f80aab under re-review; open Qs R1-R11 + 3 scrml-fix forks + hidden-field + lock timeout · → hand-off.md §S449

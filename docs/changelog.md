@@ -2,6 +2,30 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S449 — 2026-10-02/03 (bryan · ASUS; booted solo, ran autonomous while bryan was out)
+
+**Rulings (user-voice §S449).** Eight-question queue, "your recs.": `@session` in a server context = compile error (interim);
+**`<onMount>`** replaces `on mount` — outside-world setup only, may not write state during the mount; **§6.15: value positions
+(initializers, derived formulas, markup interpolations, attribute values) may not write reactive state** — closes a whole bug class by
+construction; invalid / dynamic `auth=` = compile error; the two possibly-accidental S447 accepts confirmed; **native parser frozen as
+part of impl#1, its unused 34k lines pruned**; the `<effect>` OPEN items closed per the rec pack. S450-peter's routed asks: B1
+exception granted (`return`/`break`/`continue` out of `transaction {}` roll back), **C: concurrent requests never share a transaction**
+(+ connection-per-transaction opt-in for Postgres), **D: `fail` rolls back the implicit envelope**. Opener-keyword follow-ups: `on`
+examples re-spelled, **prose stays prose** (`<p>Please let <b>me</b> know</p>`). Corpus dialect: twins generated at test time, §66.21
+amended, O35 banked as dpa-065, `scrml fix` lives in impl#1.
+
+**Landed (14 PRs, every code PR through an S239 adversarial review — 5 came back DO-NOT-LAND first):** #1232 impl#1 on-mount gaps ·
+#1233 data-root symlink containment · #1234 session store WAL + CSRF-gated honest logout · #1235 bootstrap `<effect>` + no-write rule +
+`reset-on=` (U0's runtime backstop deleted) · #1236 protect egress round 9 (4 review rounds) · #1237 SPEC: `<onMount>`, §6.15, effect
+OPENs · #1238 bootstrap §6.15 · #1239 `@session` identity hole closed (`E-SESSION-AMBIENT-SERVER`), `E-AUTH-ATTR-INVALID` ·
+#1240 native-parser freeze + prune (−34k) · #1247 bootstrap conformance counter (**19 real passes of 1278** — the honest baseline) ·
+#1248 dpa-065 banked · #1249 §66 opener keywords + bootstrap parser migration · #1250 bootstrap §55 validity surface + submit gate ·
+#1251 transaction guard (lost acknowledged writes, PG transactions fixed).
+
+**Found:** the conformance corpus is ~74% legacy dialect the bootstrap can't parse; `scrml fix` (in flight) twins it (~65 real passes).
+**Durable:** a precision shortcut in a soundness analysis is where leaks come back — protect r9's session-store summary opened a new
+HIGH in each of three rounds until its applicability became an allow-list precondition (fail closed to the faithful model).
+
 ## S447 — 2026-10-01/02 (bryan · ASUS, successor to S446-xps; took the bootstrap lane after S448)
 
 **Rulings (user-voice §S447, ~25 entries).** `when` → **`<effect deps=[…]>`, outside-world effects only** — an effect may not write

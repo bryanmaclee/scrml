@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 237 | 5 |
 | MED | 484 | 2 |
-| LOW | 234 | 0 |
+| LOW | 238 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22573,3 +22573,21 @@ Conformance FAILs (3), all fail-closed but with a code that does not name the ro
 ### g-bootstrap-diag-has-no-severity — bootstrap: `Diag` carries no §34 severity, so a conformance `severity` assertion is unobservable
 `ast.scrml:220` `type Diag:struct = { code, message, file, span }`. 397 of 1278 conformance cases assert `severity`. None is graded today (all are LEGACY or UNSUPPORTED, or the code never fires). The counter reports each one that reaches grading as FAIL "severity unobservable", so this family will grow as soon as the bootstrap parses more of the corpus. It also means the bootstrap has no fatal/non-fatal partition: W-/I- codes sit in the same list as errors (a "clean program" test in the slices is `diags == []`). Recommended: add `severity` to `Diag` from the §34 table.
 <!-- @gap id=g-bootstrap-diag-has-no-severity sev=MED status=open locus=compiler/self-host-v2/ast.scrml:220 prov=empirical:S449-bootstrap-conformance-counter -->
+
+## §S449-wrap — review residuals filed at the S449 wrap (2026-10-03; each is a reviewer-executed finding from the named S239 review, RELAYED — the PA did not re-run them unless marked)
+
+### G-DEV-DB-REFUSAL-MESSAGE-ACCURACY — data-root refusal messages name the wrong fix in four shapes (in-volume dangling target, file-as-directory / EACCES, absolute path routed out by a link, SCRML_DATA_DIR itself the dangling link)
+<!-- @gap id=g-dev-db-refusal-message-accuracy sev=LOW status=open locus=compiler/src/codegen/sqlite-file-target.ts(_scrml_sqlite_real/_scrml_sqlite_owned refusal text) prov=review:S449-devdb-r6-review -->
+From the S239 review of #1233 (nits N1–N4): every case fails closed; only the message is wrong (e.g. "repair it to point inside SCRML_DATA_DIR" for a link that already does; "a symbolic link on it" for a regular file used as a directory). Branch the message on `e.code` (ENOTDIR / EACCES / ELOOP / dangling) and on whether the unresolved target lies inside the volume. N5: the `W-DEPLOY-001` §34 row cites §47.14, which only mentions it.
+
+### G-BOOTSTRAP-VALUE-WRITES-EFFECT-SUPPRESSION-GLOBAL — effectPass suppresses every formula/construction echo when ANY source-side value error exists, not per root
+<!-- @gap id=g-bootstrap-value-writes-effect-suppression-global sev=LOW status=open locus=compiler/self-host-v2/analyze.scrml(effectPass `quiet = roots.length > 0`) prov=review:S449-value-writes-review -->
+From the S239 review of #1238. Fail-closed (the program is rejected either way), but if `valuePositions` ever misses a position its defence-in-depth echo is hidden whenever an unrelated value error exists. Scope suppression to chains whose formula/construction is itself a reported root. Same review: the defence-in-depth echo path has no test; no Core-level (C11-style) restatement of §6.15 — `checkCore` passes grafted render-writer Cores; the `-neg` conformance cases assert only `notCodes`; an imported writer called in an interpolation is reported twice.
+
+### G-SESSION-AMBIENT-MARKUP-NESTED-SESSION-CELL-FLIPS-EXEMPTION — a `<session>` cell declared inside plain markup, an `if=` region or a sibling `<page>` still exempts the file, so a top-level server fn reads `_scrml_body["session"]`
+<!-- @gap id=g-session-ambient-markup-nested-session-cell-flips-exemption sev=LOW status=open locus=compiler/src/codegen/server-session-guard.ts(fileScopeDeclaresSessionCell) prov=review:S449-auth-r1r2-rereview -->
+From the re-review of #1239 (R1). Consistent with impl#1's flat-cell divergence (§66.6.1 carried: a component/markup-local cell is one global key), so arguably the author's own cell — but SPEC is silent on whether `<page>` / `if=` regions scope their cells. ⚑ SPEC question for bryan. Same review: R2 a `<session>` inside a nested `<program>` — route inference treats it as owning the name and stays silent, codegen fires E-INTERNAL (both layers disagree; fails closed); R3 explicitly client-marshalled session values (`saveFor(@session.userId)`) are outside "server context" but §6.6.9 "SHALL NEVER be marshalled" strictly needs taint tracking; a CPS `const u = @session.userId; ?{${u}}` never marshals `u` → server ReferenceError (pre-existing); endpoint-arm diagnostics point at the `<endpoint>` tag line; the client projection flag `_sessionProjectionActive` (emit-expr) is still file-wide.
+
+### G-TRACKING-DEV-CHILD-RESPAWN-TEST-FLAKY — `§2 stopping scrml dev mid-respawn leaves no app child behind` failed once in the cloud tracking job (#1234) and passed on rerun
+<!-- @gap id=g-tracking-dev-child-respawn-test-flaky sev=LOW status=open locus=compiler/tests/commands(the scrml dev respawn test) prov=empirical:S449-ci-run-37065092494 -->
+Same family as the orphaned `scrml dev --__dev-child` processes (g-dev-db-data-root-residuals). Non-blocking job; re-run passed.
