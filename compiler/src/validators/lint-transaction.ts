@@ -22,7 +22,12 @@
  *     whether any OTHER exit commits or rolls back is not decided (searched
  *     §19.10, §8.9 — no governing sentence), so the compiler fails closed rather
  *     than pick one. `fail` and `?` (§19.5.2: `?` is a `fail`) are the governed
- *     exits and are allowed.
+ *     exits and are allowed — EXCEPT (S450 fix round) inside an arm of a
+ *     STATEMENT-position `match` within the block: that arm is lowered as a
+ *     nested function, so the exit rolls back but returns from the arm only and
+ *     the statements after the `match` run with no transaction open
+ *     (g-stmt-match-block-return-falls-through). Same code, fail-closed; an
+ *     expression-position `match` arm is unaffected.
  *
  * Top-level (`${}` outside any function) transaction blocks keep their prior
  * behaviour: only the nesting check (E-ERROR-007) applies there. §19.10.4 says
@@ -64,6 +69,8 @@ interface TxnCtx {
   labels: Set<string>;
   /** True when the block is inside a function (exit checks apply). */
   inFunction: boolean;
+  /** True inside the arms of a STATEMENT-position `match` within the block. */
+  inStmtMatchArm: boolean;
 }
 
 interface WalkState {
@@ -107,6 +114,18 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
   };
   const controlFlow = (n: Node, what: string) =>
     report("E-TRANSACTION-CONTROL-FLOW", n, `a \`transaction\` block cannot be left by ${what} — ${CONTROL_FLOW_WHY}`);
+  // S450 fix round — a statement-position `match` arm is lowered into a nested
+  // function (an IIFE), so a `fail` / `?` in it returns from the ARM only, not
+  // from the transaction's function (g-stmt-match-block-return-falls-through).
+  // The rollback runs, but the statements AFTER the `match` then run with no
+  // transaction open and persist (autocommit). Rejected until that lowering is fixed.
+  const failInStmtMatchArm = (n: Node, what: string) =>
+    report("E-TRANSACTION-CONTROL-FLOW", n,
+      `${what} inside a statement-position \`match\` arm cannot leave a \`transaction\` block yet — ` +
+      `the arm is lowered as a nested function, so the ${what} would return from the arm only: the ` +
+      `transaction would be rolled back while the statements after the \`match\` kept running outside it ` +
+      `(g-stmt-match-block-return-falls-through). Use an expression-position \`match\` ` +
+      `(\`let v = match … { .A :> fail … }\`) or an \`if\` / \`else if\` chain, or move the ${what} out of the arm.`);
 
   function walk(node: unknown, st: WalkState): void {
     if (!node || typeof node !== "object") return;
@@ -162,20 +181,26 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
       }
       const inner: WalkState = {
         fn: st.fn,
-        txn: { loopDepth: 0, switchDepth: 0, labels: new Set(), inFunction: st.fn !== null },
+        txn: { loopDepth: 0, switchDepth: 0, labels: new Set(), inFunction: st.fn !== null, inStmtMatchArm: false },
       };
       walk(n.body, inner);
       return;
     }
 
+    const t0 = st.txn;
+    // Entering a STATEMENT-position `match` inside the block: everything under
+    // its arms (structured or text-carried) is walked with inStmtMatchArm set.
+    if (t0 && kind === "match-stmt" && t0.inFunction && !t0.inStmtMatchArm) {
+      st = { fn: st.fn, txn: { ...t0, inStmtMatchArm: true } };
+    }
     const t = st.txn;
     if (t) {
       // Text-carried arm / handler bodies: parse and walk in this context.
       for (const tb of textBodiesOf(n)) {
         // Sound pre-filter: every statement this checker acts on begins with one
-        // of these words, so text without any of them cannot contain one. A hit
-        // is still decided by PARSING below, never by the match.
-        if (tb.text !== null && !/\b(return|break|continue|yield|transaction)\b/.test(tb.text)) continue;
+        // of these words (or is a `?`), so text without any of them cannot contain
+        // one. A hit is still decided by PARSING below, never by the match.
+        if (tb.text !== null && !/\b(return|break|continue|yield|transaction|fail)\b|\?/.test(tb.text)) continue;
         const parsed = tb.text === null ? { ok: false as const } : parseStatementText(tb.text, filePath);
         if (!parsed.ok) {
           if (t.inFunction) {
@@ -202,6 +227,10 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
             : (isBreak ? t.loopDepth + t.switchDepth > 0 : t.loopDepth > 0);
           if (!targetInside) controlFlow(n, isBreak ? "a `break` whose target is outside it" : "a `continue` whose target is outside it");
         }
+        if (t.inStmtMatchArm) {
+          if (kind === "fail-expr" || (kind === "escape-hatch" && n.nativeKind === "Fail")) failInStmtMatchArm(n, "`fail`");
+          else if (kind === "propagate-expr" || (kind === "escape-hatch" && n.nativeKind === "Propagate")) failInStmtMatchArm(n, "`?` propagation");
+        }
       }
 
       if (typeof kind === "string" && (LOOP_KINDS.has(kind) || kind === "switch-stmt")) {
@@ -214,6 +243,7 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
             switchDepth: t.switchDepth + (kind === "switch-stmt" ? 1 : 0),
             labels,
             inFunction: t.inFunction,
+            inStmtMatchArm: t.inStmtMatchArm,
           },
         });
         return;

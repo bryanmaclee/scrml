@@ -4401,12 +4401,15 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       } finally {
         _markTransactionExits(node.body ?? [], null);
       }
-      // A marked `fail` / `?` rolled back but its `return` did not leave the
-      // block (it returned from an arm IIFE instead — g-stmt-match-block-return-
-      // falls-through, a `fail` in a statement-`match` arm). Never COMMIT past a
-      // rollback (on Postgres a COMMIT with no open transaction only WARNS, so the
-      // failure would be silently swallowed): fail loudly. The data is safe — the
-      // transaction was already rolled back.
+      // Defensive backstop ONLY: a marked `fail` / `?` rolled back but its
+      // `return` did not leave the block (it returned from a nested function —
+      // the statement-`match` arm IIFE, g-stmt-match-block-return-falls-through).
+      // That shape is REJECTED at compile time (E-TRANSACTION-CONTROL-FLOW,
+      // validators/lint-transaction.ts) because this guard cannot make it safe:
+      // the statements between the arm and this point have ALREADY run with no
+      // transaction open (autocommit) and persisted. The guard only stops a
+      // COMMIT past a rollback (on Postgres a COMMIT with no open transaction
+      // merely WARNS) if some other nested-function lowering reaches here.
       lines.push(`  if (!${open}) throw new Error("scrml: a \`fail\` inside this \`transaction\` rolled it back but did not leave the block (compiler defect: g-stmt-match-block-return-falls-through)");`);
       lines.push(`  await ${db}.unsafe("COMMIT");`);
       lines.push(`  ${open} = false;`);

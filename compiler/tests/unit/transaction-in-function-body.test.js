@@ -132,6 +132,16 @@ describe("§2 §19.10.4 checks (lint-transaction)", () => {
     const src = `\${ type E:enum = { Bad } function g()! -> E { fail E::Bad } function f()! -> E { transaction { g() !{ | _ :> return 3 } } } }`;
     expect(codes(src)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
   });
+  test("S450 fix round: `fail` / `?` in a STATEMENT-match arm in the block → E-TRANSACTION-CONTROL-FLOW (braced, unbraced/text-carried, in a loop)", () => {
+    const pre = "type M:enum = {\n A\n B\n }\n type E:enum = { Bad }\n function g()! -> E { fail E::Bad }\n";
+    expect(codes(`\${ ${pre} function f(m: M)! -> E { transaction { match m {\n .A :> { fail E::Bad }\n .B :> { log(1) }\n } } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+    expect(codes(`\${ ${pre} function f(m: M)! -> E { transaction { match m {\n .A :> fail E::Bad\n .B :> log(1)\n } } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+    expect(codes(`\${ ${pre} function f(m: M)! -> E { transaction { match m {\n .A :> { let x = g()? }\n .B :> { log(1) }\n } } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+    expect(codes(`\${ ${pre} function f(m: M)! -> E { transaction { while (true) { match m {\n .A :> { if (m) { fail E::Bad } }\n .B :> { log(1) }\n } } } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+    // expression-position match, and a statement match with no fail/?, stay legal
+    expect(codes(`\${ ${pre} function f(m: M)! -> E { transaction { let v = match m {\n .A :> fail E::Bad\n .B :> 2\n }\n match m {\n .A :> { log(1) }\n .B :> { log(2) }\n } } } }`)).toEqual([]);
+  });
+
   test("legal exits: `fail` / `?` at any depth, loop-internal break/continue, `return` after the block, `return` in a nested function", () => {
     const src = `\${ type E:enum = { Bad } function g()! -> E { fail E::Bad }
       function f(a)! -> E {

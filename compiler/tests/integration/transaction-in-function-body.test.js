@@ -63,17 +63,18 @@ const APP = (dbPath) => `<program db="${dbPath}">
     }
   }
 
+  // EXPRESSION-position match: its arm's \`fail\` returns from the function. (A
+  // STATEMENT-position match arm cannot hold a \`fail\` / \`?\` in a transaction —
+  // E-TRANSACTION-CONTROL-FLOW, see the compile-error tests below.)
   function viaMatch(mode: Mode)! -> TransferError {
     transaction {
       ?{\`UPDATE accounts SET balance = 777 WHERE id = 1\`}.run()
-      match mode {
-        .Strict :> {
-          fail TransferError::Rejected
-        }
-        .Normal :> {
-          ?{\`UPDATE accounts SET balance = 778 WHERE id = 2\`}.run()
-        }
+      let next = match mode {
+        .Strict :> fail TransferError::Rejected
+        .Normal :> 778
       }
+      ?{\`UPDATE accounts SET balance = \${next} WHERE id = 2\`}.run()
+      ?{\`INSERT INTO log (msg) VALUES ('after-match')\`}.run()
     }
   }
 
@@ -94,7 +95,16 @@ function seed() {
   db.run("DROP TABLE IF EXISTS accounts");
   db.run("CREATE TABLE accounts (id INTEGER PRIMARY KEY, balance INTEGER NOT NULL)");
   db.run("INSERT INTO accounts (id, balance) VALUES (1, 10), (2, 0)");
+  db.run("DROP TABLE IF EXISTS log");
+  db.run("CREATE TABLE log (id INTEGER PRIMARY KEY, msg TEXT)");
   db.close();
+}
+
+function logRows() {
+  const db = new Database(dbPath, { readonly: true });
+  const rows = db.query("SELECT msg FROM log ORDER BY id").all();
+  db.close();
+  return rows.map((r) => r.msg);
 }
 
 function balances() {
@@ -200,23 +210,17 @@ describe("S450 — transaction { } in a `!` function body, EXECUTED against bun:
     expect(balances()).toEqual({ 1: 555, 2: 556 });
   });
 
-  // ⚑ A `fail` in a STATEMENT-`match` arm does not return from the function at all
-  // today: the arm lowers into an IIFE and the `return` leaves only the IIFE
-  // (g-stmt-match-block-return-falls-through, HIGH, open — pre-existing, NOT this
-  // change; outside a transaction the fail is silently swallowed). Inside a
-  // transaction the rollback still runs FIRST, and the block then refuses to
-  // COMMIT past it and throws — so the data is safe and the failure is loud. This
-  // test pins those SAFETY properties; when that gap is fixed, the call should
-  // return the ::Rejected variant instead of throwing, and this test tightens.
-  test("`fail` in a `match` arm ROLLs BACK (and never commits past it); the other arm COMMITs", async () => {
+  test("`fail` in an EXPRESSION-position `match` arm ROLLs BACK, and nothing after it runs; the other arm COMMITs", async () => {
     if (typeof globalThis.document !== "undefined") return;
     seed();
     const bad = await call("viaMatch", { mode: "Strict" });
-    expect(bad.body?.variant === "Rejected" || /did not leave the block/.test(bad.threw ?? "")).toBe(true);
+    expect(bad.body?.variant).toBe("Rejected");
     expect(balances()).toEqual({ 1: 10, 2: 0 });
+    expect(logRows()).toEqual([]); // the post-match write never ran
     expect(noTransactionLeftOpen()).toBe(true);
     await call("viaMatch", { mode: "Normal" });
     expect(balances()).toEqual({ 1: 777, 2: 778 });
+    expect(logRows()).toEqual(["after-match"]);
   });
 
   test("a SQL error ROLLs BACK before it propagates; no lock is left behind", async () => {
@@ -270,6 +274,29 @@ describe("S450 — §19.10.4 compile errors through the real pipeline", () => {
   test("`return` out of the block → E-TRANSACTION-CONTROL-FLOW", () => {
     const c = compileCodes(PROG("function f(a)! -> E { transaction { if (a) { return 1 } ?{`UPDATE orders SET name = 'a'`}.run() } }"));
     expect(c).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+  });
+
+  // S450 fix round (S239 review): a STATEMENT-position `match` arm lowers into a
+  // nested function, so a `fail` / `?` in it returned from the arm only — the
+  // transaction rolled back and the statements after the `match` then ran with NO
+  // transaction and persisted (measured: log=["after-match"], and
+  // log=["loop","loop","loop"] for a match inside a loop). Rejected at compile time.
+  const M = "type M:enum = {\n        A\n        B\n    }\n    server function h(x)! -> E {\n        if (x > 1) { fail E::Bad }\n        return x\n    }\n";
+  test("`fail` in a statement-match arm, write after the match → E-TRANSACTION-CONTROL-FLOW", () => {
+    const c = compileCodes(PROG(M + "function f(m: M)! -> E { transaction { ?{`UPDATE orders SET name = 'a'`}.run()\n match m {\n .A :> { fail E::Bad }\n .B :> { let y = 1 }\n }\n ?{`UPDATE orders SET name = 'after-match'`}.run() } }"));
+    expect(c).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+  });
+  test("`?` in a statement-match arm → E-TRANSACTION-CONTROL-FLOW", () => {
+    const c = compileCodes(PROG(M + "function f(m: M)! -> E { transaction {\n match m {\n .A :> { let x = h(5)? }\n .B :> { let y = 1 }\n }\n ?{`UPDATE orders SET name = 'after'`}.run() } }"));
+    expect(c).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+  });
+  test("statement-match with a `fail` arm inside a loop in the block → E-TRANSACTION-CONTROL-FLOW", () => {
+    const c = compileCodes(PROG(M + "function f(m: M)! -> E { transaction { for (let i = 0; i < 3; i++) {\n match m {\n .A :> { fail E::Bad }\n .B :> { let z = 0 }\n }\n ?{`UPDATE orders SET name = 'loop'`}.run() } } }"));
+    expect(c).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+  });
+  test("expression-position match with a `fail` arm stays legal; a statement match WITHOUT fail/? stays legal", () => {
+    const c = compileCodes(PROG(M + "function f(m: M)! -> E { transaction {\n let v = match m {\n .A :> fail E::Bad\n .B :> 2\n }\n match m {\n .A :> { ?{`UPDATE orders SET name = 'a'`}.run() }\n .B :> { let y = 1 }\n }\n ?{`UPDATE orders SET name = 'after'`}.run() } }"));
+    expect(c).toEqual([]);
   });
 });
 
