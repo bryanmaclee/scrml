@@ -853,4 +853,12 @@ describe("§13 S239 re-review r5 — every specifier but the bundled stdlib is r
       expect(ev).toContainEqual(["k", "assign"]);
     }
   });
+  test("writeEvents: a `comment` node impl#1's splitter classified is prose — its `@name` is no write (the cell stays locked)", () => {
+    const astOf = (src) => buildAST(splitBlocks("t.scrml", src)).ast;
+    // (a comment that LOOKS like a write — `@s = .B` — is still made `let` by the lexical layer,
+    // which does not strip comments: additional fail-closed, by design)
+    const src = "// the old body carried `<#tick when @s is .A />` here\n${\n    type S:enum = { A, B }\n    <s>:S = .A\n}\n<program>\n    <p if=(@s is .A)>a</p>\n</>\n";
+    expect(writeEvents(astOf(src)).filter((e) => e.name === "s" && e.w !== "div")).toEqual([]);
+    expect(fix(src).output).not.toContain("let <s");
+  });
 });

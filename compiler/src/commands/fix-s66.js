@@ -767,6 +767,9 @@ function walkEvents(root, filePath, push, ownerSpan, stack, fixed = false) {
     seen.add(n);
     if (Array.isArray(n)) { for (const x of n) visit(x, owner); return; }
     const isNode = typeof n.kind === "string";
+    // A `comment` node is text impl#1's block splitter classified as a comment: no stage reads it
+    // as code and emit-html drops it. Its `@name`s are prose (the tree says so — not a text masker).
+    if (isNode && n.kind === "comment") return;
     let own = owner;
     if (!fixed && isNode && !EXPR_KINDS.has(n.kind) && n.span && typeof n.span.start === "number" && typeof n.span.end === "number") own = { start: n.span.start, end: n.span.end };
     if (isNode) nodeEvents(n, (ev) => push({ ...ev, span: own }));
