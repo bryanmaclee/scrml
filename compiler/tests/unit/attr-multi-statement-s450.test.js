@@ -91,6 +91,22 @@ describe("§1 a `;`-separated statement list in a non-handler attribute value fi
     });
   }
 
+  // S450 fix round (S239 review bl01/bl03/bl04): a `${…}` / `{…}` value fires on
+  // ANY clean parse with 2+ statements, however they are separated.
+  test("a block statement then an expression, `${ if (@x) { f() } \"t\" }`", () => {
+    const f = amsOf(compileSource(top(`<p title=\${ if (@x) { f() } "t" }>s</p>`)).errors);
+    expect(f.length).toBe(1);
+    expect(f[0].message).toContain("holds 2 statements");
+  });
+
+  test("the braced form, `{ if (@x) { f() } \"t\" }`", () => {
+    expect(amsOf(compileSource(top(`<p title={ if (@x) { f() } "t" }>s</p>`)).errors).length).toBe(1);
+  });
+
+  test("a declaration and a use on separate lines, `${ let a = f()⏎a }`", () => {
+    expect(amsOf(compileSource(top(`<p title=\${ let a = f()\na }>s</p>`)).errors).length).toBe(1);
+  });
+
   test("three statements are counted", () => {
     const f = amsOf(compileSource(top(`<p title=(f(); g(); "t")>A</p>`)).errors);
     expect(f.length).toBe(1);
@@ -224,6 +240,10 @@ describe("§4 a `;` that is not a statement separator never fires", () => {
     ["a trailing `;` (`${f();}`)", `<p title=\${ f(); }>s</p>`],
     ["a trailing `;` in parens", `<p title=(f();)>s</p>`],
     ["`;` in an object-literal method body", `<p data-o=\${ { m() { f(); return 1 } } }>s</p>`],
+    // S239 review fp27 — the statement grammar splits an anonymous
+    // function-expression IIFE (declaration + `()`); the expression parser
+    // consumes it whole, so it is one expression.
+    ["an unparenthesized anonymous-function IIFE", `<p title=\${ function () { f(); return 1 }() }>s</p>`],
   ];
   for (const [label, body] of ok) {
     test(label, () => {
@@ -241,15 +261,65 @@ describe("§4 a `;` that is not a statement separator never fires", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §5 — §5.2.4 "Not decided" forms are not judged by this code
+// §4b — the S239 review false-positive set (fp01–fp30), every one silent
 // ---------------------------------------------------------------------------
 
-describe("§5 newline-separated values are not judged by E-ATTR-MULTI-STATEMENT (§5.2.4 Not decided)", () => {
-  test("`title=${f()⏎\"u\"}`", () => {
+const REVIEW_FP = [
+  ["fp01", "<p title=${ \"a;b\" }>s</p>"],
+  ["fp02", "<p title=(@msg.replace(/;/g, \",\"))>s</p>"],
+  ["fp03", "<p title=${ @msg.split(/;\\s*/).length }>s</p>"],
+  ["fp04", "<p title=${ @x > 0 ? /a;b/.source : \"n\" }>s</p>"],
+  ["fp05", "<p title=${ `a;${ @x };b` }>s</p>"],
+  ["fp06", "<p title=${ `a${ (() => { f(); return 1 })() }b` }>s</p>"],
+  ["fp07", "<p title=(() => { for (let i = 0; i < 3; i++) { f() } return \"t\" })()>s</p>"],
+  ["fp08", "<p data-o=${ ({ a: 1, b: () => { f(); g() } }) }>s</p>"],
+  ["fp09", "<p style=\"color:red; width:1px\">s</p>"],
+  ["fp10", "<p style=${ \"color:red; width:\" + @x + \"px;\" }>s</p>"],
+  ["fp11", "<p title=${ f() // c; d\n}>s</p>"],
+  ["fp12", "<p title=${ f() /* a; b */ }>s</p>"],
+  ["fp13", "<p class=\"a-${ @x }; b\">s</p>"],
+  ["fp14", "<p title=${ f(); }>s</p>"],
+  ["fp15", "<p title=${ @x / 2 + 1 / 3 }>s</p>"],
+  ["fp16", "<p title=(@x / 2; )>s</p>"],
+  ["fp17", "<p title=${ (@x); }>s</p>"],
+  ["fp18", "<p data-m={<b title=\"a;b\">c; d</b>}>s</p>"],
+  ["fp19", "<p title=${ @x > 0 ? \"a;\" : \";b\" }>s</p>"],
+  ["fp20", "<p title=${ [1,2].map((v) => { const w = v; return w }).join(\";\") }>s</p>"],
+  ["fp21", "<p title=${ @x /2/ 1; }>s</p>"],
+  ["fp22", "<p title=\"${ f(); }\">s</p>"],
+  ["fp23", "<p title=${ \"\\\";\" }>s</p>"],
+  ["fp24", "<p title=${ 'a;b' }>s</p>"],
+  ["fp25", "<p title=${ String.raw`a;b` }>s</p>"],
+  ["fp26", "<p title=(@x < 2 && @x > 0 ? \"a\" : \"b\"; )>s</p>"],
+  ["fp27", "<p title=${ function () { f(); return 1 }() }>s</p>"],
+  ["fp28", "<p title=${ (function named() { f(); return 1 })() }>s</p>"],
+  ["fp29", "<p title=${ (async () => { await f(); })() }>s</p>"],
+  ["fp30", "<p title=${ class { m() { f(); } } }>s</p>"],
+];
+
+describe("§4b the S239 review false-positive set stays silent (full compile)", () => {
+  for (const [id, body] of REVIEW_FP) {
+    test(id, () => {
+      expect(amsOf(compileSource(top(body)).errors).length).toBe(0);
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// §5 — §5.2.4 "Not yet detected" forms (a recorded LIMITATION, gap
+// g-attr-multi-statement-undetected-forms — these pin today's behaviour so a
+// future detector flips them deliberately; they are NOT permitted forms)
+// ---------------------------------------------------------------------------
+
+describe("§5 forms the statement parser reads as ONE statement are not yet detected (§5.2.4)", () => {
+  test("`title=${f()⏎\"u\"}` (newline-separated, parsed as one statement)", () => {
     expect(amsOf(tabErrors(top(`<p title=\${f()\n"u"}>s</p>`))).length).toBe(0);
   });
   test("`title={f()⏎\"v\"}`", () => {
     expect(amsOf(tabErrors(top(`<p title={f()\n"v"}>s</p>`))).length).toBe(0);
+  });
+  test("`title=${ f() g() }` (juxtaposed)", () => {
+    expect(amsOf(tabErrors(top(`<p title=\${ f() g() }>s</p>`))).length).toBe(0);
   });
   test("`title=(f()⏎\"w\")` — newlines inside parens are whitespace (§7.2.2 rule 4)", () => {
     expect(amsOf(tabErrors(top(`<p title=(f()\n"w")>s</p>`))).length).toBe(0);
