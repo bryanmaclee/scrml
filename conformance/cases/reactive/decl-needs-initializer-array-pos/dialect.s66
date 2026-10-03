@@ -1,0 +1,1 @@
+{ "exclude": "the case's subject is a legacy form itself: a `const <x>: T[]` with no right-hand side (E-DECL-NEEDS-INITIALIZER, §6.2 Shape 4 / §6.6) has no §66 spelling to twin; a §66 case for the opener-form replacement is owed (S449 dialect ruling 1, class 2)." }

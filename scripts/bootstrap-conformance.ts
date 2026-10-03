@@ -24,14 +24,19 @@
  *                server (serverStub / serverDb / firstPaint / ssr) or tool (stdout) run. The
  *                bootstrap emits no server or tool artifact, so that half is not attempted.
  *   FAIL         the bootstrap handled the case and got it WRONG: a required code missing, a
- *                forbidden code fired, a severity / count mismatch, or a runtime-half mismatch.
+ *                forbidden code fired, a severity / count mismatch, or a runtime-half mismatch —
+ *                or (a §66 twin only) it emitted an E- code the case does not assert
+ *                (`twin-extra-error`: twins are generated, so a stray error is a defect signal).
  *                A FAIL is a bug or a divergence — the most useful output of this probe.
- *   LEGACY       the case is written in the legacy dialect (§66.21 retired forms — see
- *                LEGACY_MARKERS) AND the bootstrap emitted a code the case does not expect.
- *                The bootstrap front end parses only the §66 dialect; this bucket is NEVER a FAIL.
- *                (Honest note: §66.21 Stage 1 says a retired form "parses identically" with a
- *                W-lint, so this bucket is bootstrap debt, not a free pass — it is just not a
- *                wrong-answer defect.)
+ *   LEGACY       (--no-twins only) the case is written in the legacy dialect (§66.21 retired
+ *                forms — see LEGACY_MARKERS) AND the bootstrap emitted a code the case does not
+ *                expect. The bootstrap front end parses only the §66 dialect; this bucket is NEVER a
+ *                FAIL. (Honest note: §66.21 Stage 1 says a retired form "parses identically" with a
+ *                W-lint, so this bucket is bootstrap debt, not a free pass.)
+ *   NOT-TWINNED  (default) a legacy-dialect case whose §66 twin could not be generated: some
+ *                construct in it (entry or aux file) is not mechanically rewritable by the
+ *                `scrml fix` §66 rules, or a `dialect.s66` override excludes it. The reason is
+ *                printed. All-or-nothing: a half-migrated file is never graded.
  *   UNSUPPORTED  a §66-dialect case the bootstrap refuses: an unexpected E-BOOTSTRAP-UNSUPPORTED
  *                (sub-reason `bootstrap-unsupported`), or an unexpected PARSE-phase diagnostic
  *                (sub-reason `parse-reject` — a construct the bootstrap parser does not know; the
@@ -39,6 +44,20 @@
  *   CRASH        the bootstrap THREW (front end, printer, or the runtime half) — not a verdict.
  *   INVALID      the case's own `expect` block is malformed (S365 container policy) — the
  *                contract cannot be evaluated by ANY implementation.
+ *
+ * ═══ §66 TWINS (S449 corpus-dialect ruling 1 — model M1) ═══
+ *
+ * A LEGACY-dialect case (a LEGACY_MARKERS hit, or any source the §66 fix rules change or cannot
+ * rewrite) is graded on its §66 TWIN, generated AT TEST TIME by the `scrml fix` §66 rules
+ * (compiler/src/commands/fix-s66.js — the single source of truth; nothing generated is
+ * committed). Each twin verdict carries `twin: true`. Two per-case knobs:
+ *   - `dialect.s66` (JSON, next to expected.json): `{ "exclude": "<reason>" }` keeps the case out
+ *     of twinning (NOT-TWINNED), or `{ "expect": { … }, "reason": "<why>" }` replaces the twin's
+ *     expectations (the legacy expected.json stays the contract for the legacy source).
+ *   - SUPERSEDED_CODE_MAP (below; ruling 5): a code a twin's expectations name that §66 superseded
+ *     is mapped to its §66 code — each row cites the SPEC section that superseded it. Applied
+ *     only when the case has no `dialect.s66` expect.
+ * `--no-twins` reproduces the pre-twin measurement (legacy cases graded as written, LEGACY bucket).
  *
  * Severity: the bootstrap's `Diag` (ast.scrml) carries no §34 severity. A case asserting
  * `severity` for a code the bootstrap DID emit fails with "severity unobservable" — it is a real
@@ -54,6 +73,7 @@
  *   bun scripts/bootstrap-conformance.ts --write         also regenerate docs/bootstrap-conformance.md
  *   bun scripts/bootstrap-conformance.ts --check         exit 1 when docs/bootstrap-conformance.md is stale
  *   bun scripts/bootstrap-conformance.ts --fail-on-fail  exit 1 when FAIL or CRASH > 0
+ *   bun scripts/bootstrap-conformance.ts --no-twins      grade legacy cases as written (pre-twin)
  *
  * ═══ EXIT STATUS (separate from the output — pa-base §8) ═══
  *
@@ -75,6 +95,7 @@ import { hasRuntimeHalf, loadCases, validateExpectContainers, type LoadedCase } 
 import { driveInputs, type ConformanceHook, type InputStep } from "../conformance/driver.ts";
 import { FakeClock } from "../conformance/fake-clock.ts";
 import { normalizeDom, runAnchored } from "../conformance/normalize.ts";
+import { fixS66 } from "../compiler/src/commands/fix-s66.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SELF_HOST_V2 = join(REPO_ROOT, "compiler", "self-host-v2");
@@ -82,8 +103,8 @@ const BOOT_RUNTIME = join(SELF_HOST_V2, "slice-m1", "runtime", "runtime.js");
 export const DEFAULT_CASES_DIR = join(REPO_ROOT, "conformance", "cases");
 export const REPORT_PATH = join(REPO_ROOT, "docs", "bootstrap-conformance.md");
 
-export type Bucket = "PASS" | "CODES-ONLY" | "FAIL" | "LEGACY" | "UNSUPPORTED" | "CRASH" | "INVALID";
-export const BUCKETS: readonly Bucket[] = ["PASS", "CODES-ONLY", "FAIL", "LEGACY", "UNSUPPORTED", "CRASH", "INVALID"];
+export type Bucket = "PASS" | "CODES-ONLY" | "FAIL" | "LEGACY" | "NOT-TWINNED" | "UNSUPPORTED" | "CRASH" | "INVALID";
+export const BUCKETS: readonly Bucket[] = ["PASS", "CODES-ONLY", "FAIL", "LEGACY", "NOT-TWINNED", "UNSUPPORTED", "CRASH", "INVALID"];
 
 export interface CaseVerdict {
   relDir: string;
@@ -107,6 +128,14 @@ export interface CaseVerdict {
   unimplementedCodes: string[];
   /** The legacy-dialect markers the source carries (see LEGACY_MARKERS), whatever the bucket. */
   legacyMarkers: string[];
+  /** Graded on the generated §66 twin (not the source as written). */
+  twin: boolean;
+  /** Twin: the fix rules that rewrote it (sorted, distinct). */
+  twinRules: string[];
+  /** Twin: the SUPERSEDED_CODE_MAP rows applied to its expectations (`FROM→TO`). */
+  mapped: string[];
+  /** Twin: a `dialect.s66` override was used ("expect" | "exclude"), else null. */
+  override: "expect" | "exclude" | null;
 }
 
 /** Is a passing verdict vacuous over the bootstrap's known-code set? (see CaseVerdict.vacuous) */
@@ -159,6 +188,153 @@ export function legacyMarkers(source: string): string[] {
 /** Drop `//` line comments and `<!-- -->` blocks so a marker named in a comment does not count. */
 function stripComments(src: string): string {
   return src.replace(/<!--[\s\S]*?-->/g, "").replace(/(^|[^:"'`\\])\/\/[^\n]*/g, "$1");
+}
+
+// ---------------------------------------------------------------------------
+// §66 twins (S449 corpus-dialect rulings 1 + 5)
+// ---------------------------------------------------------------------------
+
+export const DIALECT_OVERRIDE_FILE = "dialect.s66";
+
+export interface DialectOverride {
+  exclude?: string;
+  expect?: Record<string, unknown>;
+  reason?: string;
+}
+
+/** Read a case's `dialect.s66` override, or null. A malformed file is an error, never ignored. */
+export function readDialectOverride(caseDir: string): DialectOverride | null {
+  const p = join(caseDir, DIALECT_OVERRIDE_FILE);
+  if (!existsSync(p)) return null;
+  const o = JSON.parse(readFileSync(p, "utf8")) as DialectOverride;
+  const hasEx = typeof o.exclude === "string" && o.exclude.trim() !== "";
+  const hasExpect = o.expect !== undefined;
+  if (hasEx === hasExpect) throw new Error(`${p}: exactly one of "exclude" (a reason) or "expect" (+ "reason") is required`);
+  if (hasExpect && (typeof o.expect !== "object" || o.expect === null || Array.isArray(o.expect))) throw new Error(`${p}: "expect" must be an object`);
+  if (hasExpect && !(typeof o.reason === "string" && o.reason.trim() !== "")) throw new Error(`${p}: an "expect" override needs a "reason"`);
+  return o;
+}
+
+/**
+ * SUPERSEDED_CODE_MAP (ruling 5) — a code a legacy case asserts whose rule §66 superseded, and the
+ * code the §66 twin answers instead. Each APPLIED row cites the SPEC text that supersedes the old
+ * rule AND names the new code. A row whose new code no SPEC section names is NOT applied (status
+ * "owed"): grading a twin against an unnamed code would make the counter, not the SPEC, the
+ * contract. Engines first; the rest of the superseded families are listed as owed.
+ *
+ * OWED FAMILIES (no rows yet — none of their cases is twinned today, so none is graded): §65 theme
+ * codes (E-THEME-*, §66.17 — the theme body is not mechanically twinned, O17); §15/§16 component +
+ * slot codes (E-COMPONENT-*, §66.15 — components are hand-migrated); §6.6 derived-cell codes whose
+ * subject is the `const <x>` spelling (E-DERIVED-*, §66.9 rule 7); §6.3 compound codes (Tier 2 is
+ * not twinned yet). Each gets rows when the fix rules start twinning its cases.
+ */
+export interface CodeMapRow {
+  from: string;
+  to: string | null;
+  status: "applied" | "owed";
+  spec: string;
+}
+export const SUPERSEDED_CODE_MAP: readonly CodeMapRow[] = [
+  {
+    from: "E-ENGINE-VAR-DUPLICATE",
+    to: "E-SCOPE-010",
+    status: "applied",
+    spec: "§66.20 retires E-ENGINE-VAR-DUPLICATE with the <engine> element and §51.0.C auto-naming; §66.13.3 — the declaration's name IS its variable, so a second declaration of that name is a duplicate file-scope binding, E-SCOPE-010 (§7.6).",
+  },
+  {
+    from: "E-ENGINE-STATE-CHILD-INVALID-VARIANT",
+    to: null,
+    status: "owed",
+    spec: "§66.2.2 O52 (RULED S435): a state-child must name a variant of the enclosing enum-valued field, checked at the type stage — no §66.20 code is named, and §66.20 does not retire this code (so it is retained). The bootstrap answers the unnamed E-DECL-STATE-CHILD.",
+  },
+  {
+    from: "E-ENGINE-RULE-INVALID-VARIANT",
+    to: null,
+    status: "owed",
+    spec: "§66.13.2: a `rule=` names variants of the field's enum — no §66.20 code is named, and §66.20 does not retire this code (retained). The bootstrap answers the unnamed E-DECL-STATE-CHILD.",
+  },
+  {
+    from: "E-ENGINE-INITIAL-INVALID-VARIANT",
+    to: null,
+    status: "owed",
+    spec: "§66.13.3: `initial=.X` becomes the declaration's own value `=.X`; no §66.20 code is named for a variant the type lacks, and §66.20 does not retire this code (retained). The bootstrap answers the unnamed E-TYPE-VARIANT.",
+  },
+  {
+    from: "E-CELL-NO-RENDER-SPEC",
+    to: null,
+    status: "owed",
+    spec: "§66.20: its fire condition under §66 is OPEN (O51, §66.6.8); it polices the legacy Shape-1 `<x/>` during the window.",
+  },
+  {
+    from: "E-CELL-RENDER-SPEC-NOT-BINDABLE",
+    to: null,
+    status: "owed",
+    spec: "§66.20: retires with the right-hand-side form (no §66 successor named).",
+  },
+  {
+    from: "E-DECL-RHS-INTERP-WRAPPED",
+    to: null,
+    status: "owed",
+    spec: "§66.20: retires with the right-hand-side form (no §66 successor named).",
+  },
+  {
+    from: "E-COMPONENT-010",
+    to: null,
+    status: "owed",
+    spec: "§66.20: E-COMPONENT-010..-014 retire with the `props={…}` block (components are not mechanically twinned).",
+  },
+];
+
+/** Apply the APPLIED rows of SUPERSEDED_CODE_MAP to an expect block (codes / notCodes / severity / codeCounts keys). */
+export function mapSupersededCodes(ex: Record<string, any>): { expect: Record<string, any>; mapped: string[] } {
+  const rows = new Map(SUPERSEDED_CODE_MAP.filter((r) => r.status === "applied" && r.to).map((r) => [r.from, r.to as string]));
+  const mapped = new Set<string>();
+  const m = (c: string) => {
+    const to = rows.get(c);
+    if (to) mapped.add(`${c}→${to}`);
+    return to ?? c;
+  };
+  const out: Record<string, any> = { ...ex };
+  if (Array.isArray(ex.codes)) out.codes = ex.codes.map(m);
+  if (Array.isArray(ex.notCodes)) out.notCodes = ex.notCodes.map(m);
+  if (ex.severity && typeof ex.severity === "object") out.severity = Object.fromEntries(Object.entries(ex.severity).map(([k, v]) => [m(k), v]));
+  if (ex.codeCounts && typeof ex.codeCounts === "object") out.codeCounts = Object.fromEntries(Object.entries(ex.codeCounts).map(([k, v]) => [m(k), v]));
+  return { expect: out, mapped: [...mapped].sort() };
+}
+
+export interface Twin {
+  /** The case is legacy-dialect (a marker, or the fix rules change / refuse something). */
+  candidate: boolean;
+  /** Every file rewrote with no blocker. */
+  twinned: boolean;
+  source: string;
+  auxFiles: Record<string, string>;
+  rules: string[];
+  /** `file:line rule: reason` for every blocker (empty when twinned). */
+  blockers: string[];
+}
+
+/** Generate a case's §66 twin with the `scrml fix` §66 rules (entry + every aux file). */
+export function twinOf(c: { source: string; auxFiles: Record<string, string> }): Twin {
+  const rules = new Set<string>();
+  const blockers: string[] = [];
+  let changed = false;
+  const entry = fixS66(c.source, { filePath: "case.scrml", entry: true, auxSources: c.auxFiles });
+  for (const a of entry.applied) rules.add(a.rule);
+  for (const b of entry.blockers) blockers.push(`case.scrml:${b.line} ${b.rule}: ${b.reason}`);
+  changed ||= entry.changed;
+  const auxFiles: Record<string, string> = {};
+  for (const p of Object.keys(c.auxFiles).sort()) {
+    const others = { ...c.auxFiles, "case.scrml": c.source };
+    delete others[p];
+    const r = fixS66(c.auxFiles[p], { filePath: p, entry: false, auxSources: others });
+    for (const a of r.applied) rules.add(a.rule);
+    for (const b of r.blockers) blockers.push(`${p}:${b.line} ${b.rule}: ${b.reason}`);
+    changed ||= r.changed;
+    auxFiles[p] = r.output;
+  }
+  const candidate = legacyMarkers(c.source).length > 0 || changed || blockers.length > 0;
+  return { candidate, twinned: candidate && blockers.length === 0, source: entry.output, auxFiles, rules: [...rules].sort(), blockers };
 }
 
 // ---------------------------------------------------------------------------
@@ -334,11 +510,74 @@ function runtimeHalfFailures(ex: Record<string, any>, r: { dom: string; state: {
 
 const PARSE_PHASE_HINT = /^E-(PARSE|SYNTAX|CLOSER|UNQUOTED)-/;
 
+export interface ClassifyOptions {
+  /** Grade legacy-dialect cases on their generated §66 twin (default true). */
+  twins?: boolean;
+}
+
 /** Classify ONE case on the bootstrap. Never throws (a throw is the CRASH bucket). */
-export async function classifyCase(boot: Bootstrap, c: LoadedCase): Promise<CaseVerdict> {
-  const area = c.relDir.split("/")[0];
-  const ex = c.expected.expect as Record<string, any>;
+export async function classifyCase(boot: Bootstrap, c: LoadedCase, opts: ClassifyOptions = {}): Promise<CaseVerdict> {
+  const ex0 = c.expected.expect as Record<string, any>;
   const legacy = legacyMarkers(c.source);
+  if (opts.twins === false) return gradeCase(boot, c, { source: c.source, auxFiles: c.auxFiles, ex: ex0, legacy });
+  const area = c.relDir.split("/")[0];
+  const notTwinned = (reason: string, failures: string[], override: CaseVerdict["override"] = null): CaseVerdict => ({
+    relDir: c.relDir, area, bucket: "NOT-TWINNED", reason, emitted: [], unexpected: [], failures, runtimeExecuted: false,
+    vacuous: false, unimplementedCodes: [], legacyMarkers: legacy, twin: false, twinRules: [], mapped: [], override,
+  });
+  let tw: Twin;
+  try {
+    tw = twinOf(c);
+  } catch (e) {
+    return notTwinned("fix threw", [String((e as Error)?.message ?? e).split("\n")[0]]);
+  }
+  if (!tw.candidate) return gradeCase(boot, c, { source: c.source, auxFiles: c.auxFiles, ex: ex0, legacy: [] });
+  let ov: DialectOverride | null;
+  try {
+    ov = readDialectOverride(c.dir);
+  } catch (e) {
+    return { ...notTwinned("malformed dialect.s66", [String((e as Error).message)]), bucket: "INVALID" };
+  }
+  if (ov?.exclude) return notTwinned(`excluded (dialect.s66): ${ov.exclude}`, [], "exclude");
+  if (!tw.twinned) return notTwinned(`not mechanical: ${summarizeBlockers(tw.blockers)}`, tw.blockers);
+  const { expect: mappedEx, mapped } = ov?.expect ? { expect: ov.expect as Record<string, any>, mapped: [] } : mapSupersededCodes(ex0);
+  const ex = { codes: [], notCodes: [], ...mappedEx };
+  const verdict = await gradeCase(boot, c, { source: tw.source, auxFiles: tw.auxFiles, ex, legacy: [] });
+  const out: CaseVerdict = { ...verdict, legacyMarkers: legacy, twin: true, twinRules: tw.rules, mapped, override: ov?.expect ? "expect" : null };
+  // A twin is GENERATED: an error the case does not assert is a codemod-defect signal (or a
+  // bootstrap one), never a free pass. A passing twin that emitted one is graded FAIL.
+  const extraErrors = out.unexpected.filter((code) => code.startsWith("E-"));
+  if ((out.bucket === "PASS" || out.bucket === "CODES-ONLY") && extraErrors.length > 0) {
+    return {
+      ...out,
+      bucket: "FAIL",
+      reason: "twin-extra-error",
+      vacuous: false,
+      failures: [`twin emitted unasserted error(s): ${extraErrors.join(", ")}`],
+      unimplementedCodes: unimplementedRequired(ex, boot.knownCodes),
+    };
+  }
+  return out;
+}
+
+/** A blocker list as one short, stable reason (the distinct `rule: reason` texts, first 3). */
+export function summarizeBlockers(blockers: string[]): string {
+  const distinct = [...new Set(blockers.map((b) => b.replace(/^[^ ]+ /, "")))];
+  return distinct.slice(0, 3).join(" · ") + (distinct.length > 3 ? ` · (+${distinct.length - 3} more)` : "");
+}
+
+interface GradeInput {
+  source: string;
+  auxFiles: Record<string, string>;
+  ex: Record<string, any>;
+  legacy: string[];
+}
+
+/** Grade one (source, expectations) pair on the bootstrap. Never throws. */
+async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise<CaseVerdict> {
+  const area = c.relDir.split("/")[0];
+  const ex = g.ex;
+  const legacy = g.legacy;
   const v = (bucket0: Bucket, reason0: string, rest: Partial<CaseVerdict> = {}): CaseVerdict => {
     // A legacy-dialect case is never a FAIL (brief: dialect artefacts are their own bucket) — even
     // when the bootstrap ACCEPTED the legacy form with no unexpected code and then answered wrong.
@@ -358,6 +597,10 @@ export async function classifyCase(boot: Bootstrap, c: LoadedCase): Promise<Case
       vacuous: false,
       unimplementedCodes: [],
       legacyMarkers: legacy,
+      twin: false,
+      twinRules: [],
+      mapped: [],
+      override: null,
       ...rest,
     };
     if (bucket === "PASS" || bucket === "CODES-ONLY") out.vacuous = isVacuousPass(ex, boot.knownCodes, out.runtimeExecuted);
@@ -368,8 +611,8 @@ export async function classifyCase(boot: Bootstrap, c: LoadedCase): Promise<Case
   if (shape.length > 0) return v("INVALID", "malformed expect", { failures: shape });
 
   const files = [
-    ...Object.keys(c.auxFiles).sort().map((p) => ({ path: p, src: c.auxFiles[p] })),
-    { path: "case.scrml", src: c.source },
+    ...Object.keys(g.auxFiles).sort().map((p) => ({ path: p, src: g.auxFiles[p] })),
+    { path: "case.scrml", src: g.source },
   ];
   let fe: ReturnType<typeof frontEnd>;
   try {
@@ -394,10 +637,12 @@ export async function classifyCase(boot: Bootstrap, c: LoadedCase): Promise<Case
   }
 
   const codeFailures = codesHalfFailures(ex, fe.diags, fe.infos);
-  if (!hasRuntimeHalf(c)) {
+  // The runtime-half selectors are read off the EFFECTIVE expectations (a twin's override may differ).
+  const cx = { ...c, expected: { ...c.expected, expect: ex } } as LoadedCase;
+  if (!hasRuntimeHalf(cx)) {
     return codeFailures.length === 0 ? v("PASS", "codes", base) : v("FAIL", "codes", { ...base, failures: codeFailures });
   }
-  const nonClient = nonClientRuntimeKeys(c);
+  const nonClient = nonClientRuntimeKeys(cx);
   if (nonClient.length > 0) {
     return codeFailures.length === 0
       ? v("CODES-ONLY", `runtime half not executable: ${nonClient.join("+")}`, base)
@@ -453,21 +698,36 @@ export interface Report {
   runtimeExecuted: number;
   verdicts: CaseVerdict[];
   ms: number;
+  /** Legacy cases graded on their §66 twin (false = --no-twins). */
+  twins: boolean;
+  /** NOT-TWINNED: cases per distinct blocker reason (a case counts once per reason). */
+  notTwinnedReasons: Record<string, number>;
 }
 
 const zero = (): Record<Bucket, number> => Object.fromEntries(BUCKETS.map((b) => [b, 0])) as Record<Bucket, number>;
 
-export async function runBootstrapConformance(boot: Bootstrap, cases: LoadedCase[], totalInCorpus: number, filter: string | null): Promise<Report> {
+export async function runBootstrapConformance(
+  boot: Bootstrap,
+  cases: LoadedCase[],
+  totalInCorpus: number,
+  filter: string | null,
+  opts: ClassifyOptions = {},
+): Promise<Report> {
   const t0 = performance.now();
   const verdicts: CaseVerdict[] = [];
-  for (const c of cases) verdicts.push(await classifyCase(boot, c));
+  for (const c of cases) verdicts.push(await classifyCase(boot, c, opts));
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
   const counts = zero();
   const byArea = new Map<string, Record<Bucket, number>>();
   const legacyMarkerCounts: Record<string, number> = {};
   const unsupportedReasons: Record<string, number> = {};
+  const notTwinnedReasons: Record<string, number> = {};
   let runtimeExecuted = 0;
   for (const v of verdicts) {
+    if (v.bucket === "NOT-TWINNED") {
+      const keys = v.override === "exclude" ? ["excluded by dialect.s66"] : [...new Set(v.failures.map(normalizeBlocker))];
+      for (const k of keys) notTwinnedReasons[k] = (notTwinnedReasons[k] ?? 0) + 1;
+    }
     counts[v.bucket]++;
     if (!byArea.has(v.area)) byArea.set(v.area, zero());
     byArea.get(v.area)![v.bucket]++;
@@ -486,7 +746,14 @@ export async function runBootstrapConformance(boot: Bootstrap, cases: LoadedCase
     runtimeExecuted,
     verdicts,
     ms: performance.now() - t0,
+    twins: opts.twins !== false,
+    notTwinnedReasons,
   };
+}
+
+/** A blocker line without its file:line and its quoted specifics — the reason FAMILY. */
+export function normalizeBlocker(b: string): string {
+  return b.replace(/^[^ ]+ /, "").replace(/`[^`]*`/g, "`…`").replace(/\.[A-Z][\w]*/g, ".X").replace(/\d+ enums/, "N enums");
 }
 
 const pct = (n: number, d: number) => (d === 0 ? "—" : `${((100 * n) / d).toFixed(1)}%`);
@@ -516,6 +783,30 @@ export function renderReport(r: Report): string {
   L.push(`LEGACY by marker (a case may carry several): ${Object.entries(r.legacyMarkerCounts).sort().map(([k, n]) => `${k} ${n}`).join(" · ") || "none"}.`);
   L.push(`UNSUPPORTED by reason: ${Object.entries(r.unsupportedReasons).sort().map(([k, n]) => `${k} ${n}`).join(" · ") || "none"}.`);
   L.push("");
+  if (r.twins) {
+    const tw = r.verdicts.filter((v) => v.twin);
+    const twBy = (b: Bucket) => tw.filter((v) => v.bucket === b).length;
+    const twHeld = twBy("PASS") + twBy("CODES-ONLY");
+    const twVac = tw.filter((v) => v.vacuous).length;
+    L.push("### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)");
+    L.push("");
+    L.push(`Legacy-dialect cases graded on their generated §66 twin: **${tw.length}** — `
+      + BUCKETS.filter((b) => twBy(b) > 0).map((b) => `${b} ${twBy(b)}`).join(" · ")
+      + `. Twin holds ${twHeld} (non-vacuous ${twHeld - twVac}). Every twin verdict above is included in the bucket table.`);
+    const ovE = r.verdicts.filter((v) => v.override === "expect").length;
+    const ovX = r.verdicts.filter((v) => v.override === "exclude").length;
+    const mapped = r.verdicts.filter((v) => v.mapped.length > 0);
+    L.push(`- \`dialect.s66\` overrides: ${ovE} replace a twin's expectations · ${ovX} exclude a case.`);
+    L.push(`- Superseded-code mappings applied: ${mapped.length} case(s)${mapped.length ? ` (${[...new Set(mapped.flatMap((v) => v.mapped))].sort().join(", ")})` : ""}. `
+      + `Rows: ${SUPERSEDED_CODE_MAP.map((m) => `${m.from}→${m.to ?? "∅"} [${m.status}]`).join(" · ")}.`);
+    L.push("");
+    L.push(`NOT-TWINNED by reason (${r.counts["NOT-TWINNED"]} cases; a case counts once per distinct reason):`);
+    L.push("");
+    const nt = Object.entries(r.notTwinnedReasons).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    if (nt.length === 0) L.push("none");
+    for (const [k, n] of nt) L.push(`- ${n} — ${k}`);
+    L.push("");
+  }
   L.push("### Per area (case directory)");
   L.push("");
   L.push(`| area | cases | ${BUCKETS.join(" | ")} |`);
@@ -533,32 +824,42 @@ export function renderReport(r: Report): string {
     if (vs.length === 0) L.push("none");
     for (const v of vs) {
       const un = v.unimplementedCodes.length ? `; not in the bootstrap: ${v.unimplementedCodes.join(", ")}` : "";
-      L.push(`- \`${v.relDir}\` (${v.reason}${un})`);
+      L.push(`- \`${v.relDir}\` (${v.twin ? "twin · " : ""}${v.reason}${un}${v.mapped.length ? `; mapped ${v.mapped.join(", ")}` : ""})`);
       for (const f of v.failures) L.push(`  - ${f.length > 300 ? f.slice(0, 300) + "…" : f}`);
     }
     L.push("");
   }
   const silent = r.verdicts.filter((v) => v.bucket === "LEGACY" && v.reason.includes("accepted-silently"));
-  L.push(`### LEGACY, accepted silently (${silent.length})`);
-  L.push("");
-  L.push("Legacy-dialect cases the bootstrap compiled with NO unexpected diagnostic and then answered wrong — not a");
-  L.push("dialect parse failure: the bootstrap took a retired / unknown form as something else, with no W-lint (§66.21) and no refusal.");
-  L.push("");
-  if (silent.length === 0) L.push("none");
-  for (const v of silent) L.push(`- \`${v.relDir}\` (${v.reason}): ${v.failures.slice(0, 2).join(" · ")}`);
-  L.push("");
+  if (!r.twins) {
+    // (twin mode has no LEGACY bucket: a legacy case is twinned or NOT-TWINNED)
+    L.push(`### LEGACY, accepted silently (${silent.length})`);
+    L.push("");
+    L.push("Legacy-dialect cases the bootstrap compiled with NO unexpected diagnostic and then answered wrong — not a");
+    L.push("dialect parse failure: the bootstrap took a retired / unknown form as something else, with no W-lint (§66.21) and no refusal.");
+    L.push("");
+    if (silent.length === 0) L.push("none");
+    for (const v of silent) L.push(`- \`${v.relDir}\` (${v.reason}): ${v.failures.slice(0, 2).join(" · ")}`);
+    L.push("");
+  }
   const ps = r.verdicts.filter((v) => v.bucket === "PASS" || v.bucket === "CODES-ONLY");
   L.push(`### PASS / CODES-ONLY (${ps.length})`);
   L.push("");
   for (const v of ps) {
-    L.push(`- \`${v.relDir}\` — ${v.bucket}${v.vacuous ? " · VACUOUS" : ""}${v.unexpected.length ? ` (also emitted, unasserted: ${v.unexpected.join(", ")})` : ""}`);
+    L.push(`- \`${v.relDir}\` — ${v.bucket}${v.twin ? " · TWIN" : ""}${v.vacuous ? " · VACUOUS" : ""}${v.unexpected.length ? ` (also emitted, unasserted: ${v.unexpected.join(", ")})` : ""}`);
   }
   L.push("");
   const pr = r.verdicts.filter((v) => v.bucket === "UNSUPPORTED");
   L.push(`### UNSUPPORTED (${pr.length})`);
   L.push("");
-  for (const v of pr) L.push(`- \`${v.relDir}\` — ${v.reason}: ${(v.failures[0] ?? "").slice(0, 200)}`);
+  for (const v of pr) L.push(`- \`${v.relDir}\` — ${v.twin ? "twin · " : ""}${v.reason}: ${(v.failures[0] ?? "").slice(0, 200)}`);
   L.push("");
+  if (r.twins) {
+    const nt = r.verdicts.filter((v) => v.bucket === "NOT-TWINNED");
+    L.push(`### NOT-TWINNED (${nt.length})`);
+    L.push("");
+    for (const v of nt) L.push(`- \`${v.relDir}\` — ${v.reason.slice(0, 240)}`);
+    L.push("");
+  }
   return L.join("\n");
 }
 
@@ -589,6 +890,7 @@ async function main(): Promise<number> {
   const write = args.includes("--write");
   const failOnFail = args.includes("--fail-on-fail");
   const check = args.includes("--check");
+  const twins = !args.includes("--no-twins");
 
   if (!existsSync(casesDir)) {
     console.error(`bootstrap-conformance: no case root ${casesDir}`);
@@ -609,14 +911,14 @@ async function main(): Promise<number> {
     return 2;
   }
   const loadMs = performance.now() - tLoad;
-  const r = await runBootstrapConformance(boot, cases, all.length, filter);
+  const r = await runBootstrapConformance(boot, cases, all.length, filter, { twins });
   const body = renderReport(r);
   console.log(`bootstrap conformance (pure bootstrap, ${relative(REPO_ROOT, casesDir) || casesDir})\n`);
   console.log(body);
   console.log(`(bundle build ${(loadMs / 1000).toFixed(1)} s · cases ${(r.ms / 1000).toFixed(1)} s)`);
   if (jsonPath) writeFileSync(jsonPath, JSON.stringify({ ...r, byArea: Object.fromEntries(r.byArea) }, null, 2) + "\n");
-  if ((write || check) && (filter || casesDir !== DEFAULT_CASES_DIR)) {
-    console.error("bootstrap-conformance: --write / --check need the full default corpus (no --filter / --cases)");
+  if ((write || check) && (filter || casesDir !== DEFAULT_CASES_DIR || !twins)) {
+    console.error("bootstrap-conformance: --write / --check need the full default corpus with twins (no --filter / --cases / --no-twins)");
     return 2;
   }
   if (write) {

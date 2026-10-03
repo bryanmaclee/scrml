@@ -1,0 +1,8 @@
+{
+  "id": "fixture-twins-mapped",
+  "description": "KNOWN PASS via the superseded-code map: two engines share the auto-derived name; E-ENGINE-VAR-DUPLICATE retires with <engine> (§66.20) and the twin's two `single` declarations of one name answer E-SCOPE-010 (§7.6). Without the map row the twin FAILs (the bite).",
+  "language-version": "1.0",
+  "spec": "§51.0.C",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": { "codes": ["E-ENGINE-VAR-DUPLICATE"] }
+}

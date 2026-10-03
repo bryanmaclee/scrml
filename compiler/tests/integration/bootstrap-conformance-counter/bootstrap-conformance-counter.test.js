@@ -16,8 +16,12 @@ import {
   isVacuousPass,
   legacyMarkers,
   loadBootstrapModules,
+  mapSupersededCodes,
+  readDialectOverride,
   renderReport,
   runBootstrapConformance,
+  SUPERSEDED_CODE_MAP,
+  twinOf,
 } from "../../../../scripts/bootstrap-conformance.ts";
 import { loadCases } from "../../../../conformance/run.ts";
 
@@ -30,6 +34,8 @@ beforeAll(async () => {
   boot = await loadBootstrapModules();
 }, { timeout: 180000 });
 
+// Default (twin) mode. `refused/legacy` is a legacy-dialect case: it is graded on its generated §66
+// twin (and PASSes); with --no-twins it is LEGACY (see the "--no-twins" test).
 const KNOWN = {
   "codes/pass-codes": ["PASS", false],
   "codes/vacuous": ["PASS", true],
@@ -37,8 +43,13 @@ const KNOWN = {
   "runtime/fail-runtime": ["FAIL", false],
   "runtime/codes-only": ["CODES-ONLY", true],
   "refused/unsupported": ["UNSUPPORTED", false],
-  "refused/legacy": ["LEGACY", false],
+  "refused/legacy": ["PASS", false],
   "refused/invalid": ["INVALID", false],
+  "twins/not-twinned": ["NOT-TWINNED", false],
+  "twins/excluded": ["NOT-TWINNED", false],
+  "twins/override-expect": ["PASS", false],
+  "twins/mapped": ["PASS", false],
+  "twins/extra-error": ["FAIL", false],
 };
 
 describe("fixture corpus — each case lands in its known bucket", () => {
@@ -63,14 +74,127 @@ describe("fixture corpus — each case lands in its known bucket", () => {
     expect(fail.failures).toEqual(["state: cell 'count' expected 2, got 1"]);
   }, { timeout: 60000 });
 
-  test("UNSUPPORTED names the refusal; LEGACY names the marker", async () => {
+  test("UNSUPPORTED names the refusal; --no-twins grades a legacy case as written → LEGACY, naming the marker", async () => {
     const cs = loadCases(FIXTURES);
     const u = await classifyCase(boot, cs.find((x) => x.relDir === "refused/unsupported"));
     expect(u.reason).toBe("bootstrap-unsupported");
     expect(u.failures.join(" ")).toContain("#{");
-    const l = await classifyCase(boot, cs.find((x) => x.relDir === "refused/legacy"));
+    const l = await classifyCase(boot, cs.find((x) => x.relDir === "refused/legacy"), { twins: false });
+    expect(l.bucket).toBe("LEGACY");
+    expect(l.twin).toBe(false);
     expect(l.legacyMarkers).toEqual(["rhs-decl", "no-program-root"]);
   }, { timeout: 60000 });
+});
+
+describe("§66 twins (S449 dialect rulings 1 + 5)", () => {
+  const get = (rel) => loadCases(FIXTURES).find((x) => x.relDir === rel);
+
+  test("a legacy case is graded on its generated twin — the runtime half executes on the twin", async () => {
+    const v = await classifyCase(boot, get("refused/legacy"));
+    expect(v.bucket).toBe("PASS");
+    expect(v.twin).toBe(true);
+    expect(v.runtimeExecuted).toBe(true);
+    expect(v.twinRules).toEqual(["program-wrap", "rhs-decl", "unwrap-logic"]);
+    expect(v.legacyMarkers).toEqual(["rhs-decl", "no-program-root"]);
+    // the twin is generated, not committed: it is the scrml fix output
+    const tw = twinOf(get("refused/legacy"));
+    expect(tw.source).toContain("let <count:number=0/>");
+  }, { timeout: 60000 });
+
+  test("a §66-dialect case is NOT twinned (graded as written)", async () => {
+    const v = await classifyCase(boot, get("codes/pass-codes"));
+    expect(v.twin).toBe(false);
+    expect(twinOf(get("codes/pass-codes")).candidate).toBe(false);
+  }, { timeout: 60000 });
+
+  test("NOT-TWINNED is all-or-nothing and names the construct", async () => {
+    const v = await classifyCase(boot, get("twins/not-twinned"));
+    expect(v.bucket).toBe("NOT-TWINNED");
+    expect(v.reason).toContain("Shape 2");
+    expect(v.failures[0]).toMatch(/^case\.scrml:2 rhs-decl: Shape 2/);
+  }, { timeout: 60000 });
+
+  test("dialect.s66 `exclude` → NOT-TWINNED with the reason", async () => {
+    const v = await classifyCase(boot, get("twins/excluded"));
+    expect(v.bucket).toBe("NOT-TWINNED");
+    expect(v.override).toBe("exclude");
+    expect(v.reason).toContain("the case's subject is the legacy form itself");
+  }, { timeout: 60000 });
+
+  test("dialect.s66 `expect` replaces the twin's expectations — BITE: without it the twin FAILs", async () => {
+    const v = await classifyCase(boot, get("twins/override-expect"));
+    expect(v.bucket).toBe("PASS");
+    expect(v.override).toBe("expect");
+    const dir = mkdtempSync(join(tmpdir(), "bootconf-bite-"));
+    try {
+      cpSync(join(FIXTURES, "twins", "override-expect"), join(dir, "bite", "ov"), { recursive: true });
+      rmSync(join(dir, "bite", "ov", "dialect.s66"));
+      const [c] = loadCases(dir);
+      const b = await classifyCase(boot, c);
+      expect(b.bucket).toBe("FAIL");
+      expect(b.failures).toEqual(["missing E-FIXTURE-LEGACY-ONLY"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, { timeout: 60000 });
+
+  test("the superseded-code map rewrites a twin's expectation — BITE: unmapped, the twin FAILs", async () => {
+    const v = await classifyCase(boot, get("twins/mapped"));
+    expect(v.bucket).toBe("PASS");
+    expect(v.mapped).toEqual(["E-ENGINE-VAR-DUPLICATE→E-SCOPE-010"]);
+    expect(v.emitted).toContain("E-SCOPE-010");
+    const dir = mkdtempSync(join(tmpdir(), "bootconf-bite-"));
+    try {
+      cpSync(join(FIXTURES, "twins", "mapped"), join(dir, "bite", "m"), { recursive: true });
+      // An `expect` override with the UNMAPPED legacy code turns the map off for this case.
+      writeFileSync(join(dir, "bite", "m", "dialect.s66"), JSON.stringify({ expect: { codes: ["E-ENGINE-VAR-DUPLICATE"] }, reason: "bite" }));
+      const [c] = loadCases(dir);
+      const b = await classifyCase(boot, c);
+      expect(b.bucket).toBe("FAIL");
+      expect(b.failures).toEqual(["missing E-ENGINE-VAR-DUPLICATE"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, { timeout: 60000 });
+
+  test("a twin that PASSes its assertions but emits an unasserted E- code is a FAIL (twin-extra-error)", async () => {
+    const v = await classifyCase(boot, get("twins/extra-error"));
+    expect(v.bucket).toBe("FAIL");
+    expect(v.reason).toBe("twin-extra-error");
+    expect(v.failures).toEqual(["twin emitted unasserted error(s): E-TYPE-UNKNOWN"]);
+    // the same source graded as written (not a twin) keeps the old rule: unasserted codes are reported, not failed
+    const native = await classifyCase(boot, { ...get("twins/extra-error"), source: "<program>\n<n:integer=5/>\n<p id=\"n\">${@n}</p>\n</program>\n" });
+    expect(native.twin).toBe(false);
+    expect(native.bucket).toBe("PASS");
+  }, { timeout: 60000 });
+
+  test("map rows: every APPLIED row names a target and a SPEC citation; an owed row maps nothing", () => {
+    for (const r of SUPERSEDED_CODE_MAP) {
+      expect(r.spec).toMatch(/§\d/);
+      if (r.status === "applied") expect(typeof r.to).toBe("string");
+      else expect(r.to).toBeNull();
+    }
+    const owed = SUPERSEDED_CODE_MAP.find((r) => r.status === "owed");
+    const m = mapSupersededCodes({ codes: [owed.from], notCodes: [], severity: { [owed.from]: "error" } });
+    expect(m.expect.codes).toEqual([owed.from]);
+    expect(m.mapped).toEqual([]);
+    const a = mapSupersededCodes({ codes: ["E-ENGINE-VAR-DUPLICATE"], notCodes: ["E-ENGINE-VAR-DUPLICATE"], severity: { "E-ENGINE-VAR-DUPLICATE": "error" }, codeCounts: { "E-ENGINE-VAR-DUPLICATE": 1 } });
+    expect(a.expect).toEqual({ codes: ["E-SCOPE-010"], notCodes: ["E-SCOPE-010"], severity: { "E-SCOPE-010": "error" }, codeCounts: { "E-SCOPE-010": 1 } });
+  });
+
+  test("a malformed dialect.s66 is an error, never ignored", () => {
+    const dir = mkdtempSync(join(tmpdir(), "bootconf-ov-"));
+    try {
+      writeFileSync(join(dir, "dialect.s66"), JSON.stringify({ expect: { codes: [] } }));
+      expect(() => readDialectOverride(dir)).toThrow(/needs a "reason"/);
+      writeFileSync(join(dir, "dialect.s66"), JSON.stringify({ exclude: "x", expect: {} }));
+      expect(() => readDialectOverride(dir)).toThrow(/exactly one/);
+      writeFileSync(join(dir, "dialect.s66"), JSON.stringify({ exclude: "a reason" }));
+      expect(readDialectOverride(dir)).toEqual({ exclude: "a reason" });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("BITE — a wrong expected code turns a PASS into a FAIL", () => {
@@ -117,7 +241,7 @@ describe("the report states its own scope", () => {
     const r = await runBootstrapConformance(boot, some, all.length, "runtime/");
     const md = renderReport(r);
     expect(md).toContain(`**3 of ${all.length} cases attempted** (filter: \`runtime/\`)`);
-    for (const b of ["PASS", "CODES-ONLY", "FAIL", "LEGACY", "UNSUPPORTED", "CRASH", "INVALID"]) expect(md).toContain(`| ${b} |`);
+    for (const b of ["PASS", "CODES-ONLY", "FAIL", "LEGACY", "NOT-TWINNED", "UNSUPPORTED", "CRASH", "INVALID"]) expect(md).toContain(`| ${b} |`);
     expect(md).toContain("- `runtime/fail-runtime` (runtime)");
   }, { timeout: 60000 });
 });
@@ -172,7 +296,8 @@ describe("CLI — exit status is separate from the output (pa-base §8)", () => 
     const run = (...a) => Bun.spawnSync(["bun", SCRIPT, "--cases", FIXTURES, ...a], { cwd: REPO, stdout: "pipe", stderr: "pipe" });
     const plain = run();
     expect(plain.exitCode).toBe(0);
-    expect(plain.stdout.toString()).toContain("8 of 8 cases attempted");
+    expect(plain.stdout.toString()).toContain("13 of 13 cases attempted");
+    expect(plain.stdout.toString()).toContain("### §66 twins");
     expect(run("--fail-on-fail").exitCode).toBe(1);
     const none = run("--filter", "no-such-case-anywhere");
     expect(none.exitCode).toBe(2);
