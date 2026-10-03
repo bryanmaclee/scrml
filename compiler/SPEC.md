@@ -42783,6 +42783,26 @@ follows the adopted restatement.)
 <isBig:bool=(@count > 10)/>                // a `>` MUST be inside parens
 ```
 
+> **Amendment S449 — refinement and lifecycle TYPES may stand bare in an opener.**
+> **Provenance:** ruling:user-voice-scrml.md S449 "RULED — \"your recs.\" — corpus-dialect rulings 1–6" — *"your
+> recs."*, dialect ruling (4): *"Bare refinement / lifecycle types MAY stand in an opener (§66.2.4)."* · dd:
+> corpus-dialect-codemod-scope-2026-10-03 §8 Q4.
+
+The parenthesizing rule above governs opener **values**. The **type** after `:` is not a value: a refinement
+type (§53) or a lifecycle type (§14.12) MAY stand bare — `<hp:number(>0)=5/>`, `<p:(.A to .B)=.A/>`. "Bare"
+means written as the type is written anywhere else, with no extra parentheses around it. A `>` or `/` inside
+the type's OWN parentheses (the refinement's `(>0)`, the lifecycle's `(.A to .B)`) does not end the opener;
+the "unparenthesized `>` or `/`" error above applies only at the opener's top level, outside every bracket.
+
+```scrml
+<hp:number(>0)=5/>                         // a refinement type, bare
+<p:(.Draft to .Sent)=.Draft/>              // a lifecycle type, bare (its own parentheses)
+```
+
+This amendment covers refinement and lifecycle types only. A type with whitespace at its top level outside any
+bracket — a union `string | not` — is not covered by it: whether such a type may stand in an opener, and how it
+is spelled there, is not ruled.
+
 > ⚑ **OPEN (not ruled) — O32: which literals count as "literal".** Scalar literals and a bare enum variant
 > (`.Light`) plainly are. Whether compound literals — array (`[1, 2, 3]`), struct (`{ … }`), map (`[k: v]`), and
 > the tuple literal of §66.12.5 — may stand bare in an opener, or must be parenthesized, is not ruled. §66's
@@ -44618,13 +44638,28 @@ named (§63.2); scheduling is a later §62 version event (§63.3), gated on a ve
 
 | Retired form | W-lint (Stage 1) | Reserved E | `scrml fix` rule |
 |---|---|---|---|
-| Right-hand-side declaration `<x> = v`, `<x>: T = v`, and Shape 2 `<x attrs> = <input …/>` | `W-DECL-LEGACY-RHS` — a **hard** deprecation warning with clear deprecation terms (its severity and terms within §63: ⚑ O12); the cell carries the **transitional all-permissions grant** (§66.12.4) | `E-DECL-LEGACY-RHS` | Rewrite to the opener form with the **MINIMAL grant inferred from the cell's actual writes**: never written → locked `<x:T=v/>`; a written scalar → `let <x:T=v/>` (S447 position, §66.2.5); a written sequence → the least set of §66.12 axes its writes use. Shape 2 → a child/own-value declaration with a `renders` (bind and validator wiring: ⚑ O25). |
+| Right-hand-side declaration `<x> = v`, `<x>: T = v`, and Shape 2 `<x attrs> = <input …/>` | `W-DECL-LEGACY-RHS` — a **hard** deprecation warning with clear deprecation terms (its severity and terms within §63: ⚑ O12); the cell carries the **transitional all-permissions grant** (§66.12.4) | `E-DECL-LEGACY-RHS` | Rewrite to the opener form with the **MINIMAL grant inferred from the cell's actual writes**: never written **and its initializer reads no cell** → locked `<x:T=v/>`; a written scalar, **or a never-written scalar whose initializer reads a cell** → `let <x:T=v/>` (S447 position, §66.2.5; amended S449 — below); a written sequence → the least set of §66.12 axes its writes use. Shape 2 → a child/own-value declaration with a `renders` (bind and validator wiring: ⚑ O25). |
 | `const <x> = expr` (top level and in-compound) | `W-CONST-CELL-DEPRECATED` | `E-CONST-CELL-DEPRECATED` | `<x:T=(expr)/>` — the locked declaration; derived exactly when `expr` reads cells (§66.9). (`W-CONST-AT-DEPRECATED` for `const @name` is unchanged.) |
 | Component `const X = <root props={…}>…</>` | `W-COMPONENT-CONST-DEPRECATED` | `E-COMPONENT-CONST-DEPRECATED` | `props={a: T, b?: T, c: T = d}` → typed attributes with inline defaults; the root element → the `renders` clause; `${...}` children → `<slot/>`; `bind` props → `export let <f:T=v/>` CHILD fields (§66.4 rule 6, S447). **Owed (S435):** count the component files the codemod cannot rewrite mechanically (snippet slots, lambda slot-fill — ⚑ O9); those stay soft until a rule or a designer-card waiver covers them (§63.4). |
 | `<engine for=T initial=.X …>` | `W-ENGINE-ELEMENT-DEPRECATED` | `E-ENGINE-ELEMENT-DEPRECATED` | `<engine for=T initial=.X>` → `<t:T=.X single>` with state-children carried verbatim (⚑ O52: how state-children fit the marker, and whether their `:`-shorthand bodies survive). The rule covers only what §66.13 rules; the rest of the §51.0 surface waits on ⚑ O5, so the rule is partial and the form cannot be scheduled (§63.4) until it is complete. |
 | Tier-3 positional `<x>: T = (a, b, c)` | `W-POSITIONAL-STRUCT-DEPRECATED` | `E-POSITIONAL-STRUCT-DEPRECATED` | Rewrite to a by-name struct value in the predefined type's field order. ⚑ O48: impl#1 miscompiles this form today (D3), so "parses identically" preserves a silent miscompile through the window; with ~0 corpus uses a §63.4 designer-card removal is available — whether to use it is not ruled. |
 | `<theme>` `name = value;` body and `.Variant { }` blocks | `W-THEME-BODY-DEPRECATED` | `E-THEME-BODY-DEPRECATED` | Each token line → a token declaration inside `<theme>`; each variant re-binding → a derived `match` over the mode cell (§66.17). Blocked on the narrowed ⚑ O17 (hyphenated names / non-string values, whether `for=` stays permitted, the `@media` auto-bind). |
 | Render-by-tag `<x/>` as a view of a shared cell | **none — SAME-ARC** | none | `<x/>` → `<*x/>`, applied in the SAME arc as the grammar change. There is no window in which `<x/>` silently changes meaning (§66.6.6). |
+
+> **Amendment S449 — the right-hand-side rule: "never written → locked" needs an initializer that reads no cell.**
+> **Provenance:** ruling:user-voice-scrml.md S449 "RULED — \"your recs.\" — corpus-dialect rulings 1–6" — *"your
+> recs."*, dialect ruling (2): *"Amend §66.21: \"never written → locked\" only when the initializer reads no cell;
+> otherwise `let` (a reactive initializer must not silently become derived — 11 sites)."* · dd:
+> corpus-dialect-codemod-scope-2026-10-03 §2 + §8 Q2 · supersedes: this row's prior text *"never written → locked
+> `<x:T=v/>`"* (unconditional).
+
+A legacy Shape-1 cell `<x> = expr` is **seeded once** from its initializer and is independent afterwards (§6.2).
+Rewritten as a LOCKED declaration, a cell whose initializer reads a cell would become **DERIVED** (§66.9 rule 3) —
+it would start tracking its dependencies, a change in behaviour that no diagnostic reports. The meaning-preserving
+rewrite is `let` (**SEEDED**, §66.9 rule 4) whenever the initializer reads a cell, written or not. "Reads a cell"
+is judged conservatively: an initializer the fix cannot prove reads no cell (a call, any `@` reference) is
+treated as reading one, which only ever yields `let` where locked would do — never the reverse. The `const <x>`
+row is unaffected: a legacy `const` cell was already derived (§6.2 Shape 3), and its rewrite stays derived.
 
 **The S435 in-opener `let` (`<let x:T=v/>`, attribute `let a:T` / `export let a:T`) is NOT a §63 retirement.** It
 was a §66 spelling, and §66 is spec-ahead: impl#1 never accepted it and no adopter code uses it (measured S447 by

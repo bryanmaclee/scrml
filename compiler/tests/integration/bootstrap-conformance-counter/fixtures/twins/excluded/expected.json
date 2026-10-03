@@ -1,0 +1,8 @@
+{
+  "id": "fixture-twins-excluded",
+  "description": "KNOWN NOT-TWINNED by override: the case is mechanically twinnable, but its dialect.s66 excludes it.",
+  "language-version": "1.0",
+  "spec": "§66.21",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": { "codes": [] }
+}
