@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 232 | 5 |
+| HIGH | 231 | 5 |
 | MED | 472 | 1 |
 | LOW | 224 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -86,9 +86,9 @@ same is true on main for `save(); … event.currentTarget`.
 **Recommended:** add `currentTarget` and `eventPhase` to the after-await event-control set, failing closed
 with the same code.
 
-### g-handler-nested-sequence-server-write-stale-read — a 1-statement handler whose body holds a statement sequence (`${ if (c) { @x = save(); @y = @x + 1 } }`, a `for` body, `${() => { … }}`) still reads the pre-fetch value — `NEW S446; HIGH; ruling-gated`
+### g-handler-nested-sequence-server-write-stale-read — a 1-statement handler whose body holds a statement sequence (`${ if (c) { @x = save(); @y = @x + 1 } }`, a `for` body, `${() => { … }}`) still reads the pre-fetch value — `NEW S446; RESOLVED S450 (Peter); was HIGH; resolved`
 
-<!-- @gap id=g-handler-nested-sequence-server-write-stale-read sev=HIGH status=ruling-gated owner=bryan locus=compiler/src/codegen/js-async-analysis.ts(analyze arg1Skip)+compiler/src/codegen/emit-event-wiring.ts/emit-each.ts/emit-lift.js(handlerStatementListColor — applies only to a ≥2-statement handlerBlock) prov=empirical:S446-happy-dom-runtime-probe-stale-on-31c42fbf-and-on-PR1217 -->
+<!-- @gap id=g-handler-nested-sequence-server-write-stale-read sev=HIGH status=resolved owner=bryan locus=compiler/src/codegen/js-async-analysis.ts(analyze arg1Skip gated on soleRootWriteCall for handler roots; match-arm IIFE made async+awaited; handlerStatementListColor/colorActiveHandler pass the SSE keep set at every statement count) prov=ruling:user-voice-scrml.md-S447-stamp-all -->
 
 PR #1217 orders `@x = save(); @y = @x + 1` only when the HANDLER is a statement list of two or more
 statements. A 1-statement handler has no such list, and that includes one whose single statement contains a
@@ -99,6 +99,8 @@ For those, the write keeps the detached `(async () => …)()` IIFE, and `@y` rea
 Fixing this changes the emitted code of 1-statement handlers, which PR #1217's stop condition held for a ruling.
 **Recommended rule:** keep the fire-and-forget arg1 skip only when the cell write is the handler's SOLE root
 statement, and await in place everywhere else. This keeps `${@x = save()}` byte-identical.
+
+> **RESOLVED S450 (Peter) — ruling:user-voice-scrml.md S447 "stamp all" item (iii), the recommended rule above.** The fix is at the one root every listener emitter shares: `colorAsyncFunctionExpr` (js-async-analysis.ts) now analyses a handler root with `handlerRoot`, and the reactive-set arg1 skip holds only for the write that is the handler's SOLE root statement (`soleRootWriteCall`: the last statement of the listener body, preceded only by the emitter's item re-resolve / destructure / stale-guard / submit-preventDefault preamble; the guarded `!{}` lowering counts as one statement). Every other write in the handler's own statement sequence is awaited in place. A `match` arm (lowered to an IIFE) that reaches an awaited call is made `async` and awaited. §36 SSE generator writes keep the skip at every position (the keep set now flows at every statement count). Covers the top-level registry (emit-event-wiring.ts, incl. delegated match-arm handlers), `<each>` rows (emit-each.ts) and every `for … lift` row site (emit-lift.js) through `colorActiveHandler` — no per-emitter change. Not covered: engine-arm non-delegable handlers, which get no §13.2 coloring at all ([[g-engine-arm-rewired-handler-skips-async-coloring]], open). `<each>` / `for … lift` `${() => {…}}` closures never run ([[g-each-block-arrow-handler-never-runs]], open). Non-delegable handlers inside a `<match>` element arm are the same family as the engine arm (S450 review F3, extended there). A `match` statement nested inside an `if` / loop / closure / `match` of a handler fails closed (`E-ASYNC-HANDLER-UNANALYZABLE`), it is not awaited (S450 review F4). **Newly rejected (correct under s441):** `onclick=${ if (@c) { @x = save(); event.preventDefault() } }` and the closure form are now `E-EVENT-CONTROL-AFTER-AWAIT`, because the nested write is awaited before the control call (corpus exposure 0; pinned in the gate file). **Disclosed, not fixed:** a newly-awaited write whose server call rejects loses scrml's error routing — see [[g-handler-level-rejection-bypasses-scrml-logging]] (widened by S450). Gate: `compiler/tests/browser/handler-nested-server-write-s450.browser.test.js` (96 tests; base bc4bca1f: 32 pass / 64 fail). SPEC §13.2 + §5.2.3 amended.
 
 ### g-handled-error-arm-failure-writes-envelope-into-cell — `@x = f() !{ | e :> { … } }` on a handled failure writes the error envelope into `@x` — `NEW S446; HIGH; open`
 
@@ -139,6 +141,12 @@ A server call there, even a bare one, is therefore not awaited, the handler is n
 s441 fail-closed checks do not run.
 This was found by reading the code and is **NOT verified at runtime.** Delegable events (click, submit) in arms
 use the global registry and are colored.
+
+**Extended S450 (review F3, prov=review:S450-S239; compiled on fix/s450-handler-nested-server-write-await):** the same
+hole covers a non-delegable handler inside a `<match>` ELEMENT arm, not only an engine arm.
+`<match for=Doc on=@cur> … <Note(note)><input oninput=${ if (@c) { @x = save(); @y = @x + 1 } }/></></match>` still
+emits the detached `(async () => _scrml_cs_reactive_set("x", await …))().catch(…)` write, so `@y` reads the stale `@x`
+(y = 1). The S450 sole-root-statement rule (§13.2) reaches every DELEGABLE position but not this one.
 
 ### g-unbraced-if-for-body-regex-literal-is-space-padded-and-escapes-dropped — a regex literal in an un-braced `if`/`for` body is rewritten into a DIFFERENT regex at exit 0; whitespace and `\` are significant there and the tokenizer's padding is not — `NEW S412; MED; RESOLVED S412`
 
@@ -20633,6 +20641,8 @@ Reproducer `repro/import-shadowed-by-local-struct.scrml` (+ `repro/n3-errs.scrml
 ### g-handler-level-rejection-bypasses-scrml-logging — an event handler that awaits a failing server call has no `.catch`; the rejection escapes to the host unlogged — `NEW S441; LOW; ruling-gated`
 <!-- @gap id=g-handler-level-rejection-bypasses-scrml-logging sev=LOW status=ruling-gated locus=compiler/src/codegen/emit-event-wiring.ts(handler registry wraps `fn()` with no rejection routing) prov=empirical:S441-cell12-review-s3-reject -->
 Reproducer `repro/handler-rejection-bypasses-logging.scrml`: `async function _scrml_go2_5() { const a = await _scrml_fetch_double_4(1); … }` is wired as `function(event) { _scrml_go2_5(); }`. The detached `@out = double(21)` form does route to `_scrml_error_boundary_log`. Governing: searched §19.6.8, §20.6 — the B5 "no silent swallow; route to scrml's logging surface" rule is scoped to an `<errorBoundary>` backstop; nothing specifies a handler-level backstop. Ruling: extend B5 to event handlers (recommended — one `.catch(log)` per handler).
+
+**Widened by S450 (prov=review:S450-S239).** The S447-ruling-(iii) fix awaits a server-call cell write in place everywhere except the handler's sole root statement. A write that used to be the detached `(async () => _scrml_reactive_set("x", await f()))().catch(_scrml_async_err => _scrml_error_boundary_log("x", _scrml_async_err))` (which logged `[scrml errorBoundary x] caught non-! runtime error` and let the later statements run) is now awaited inside an `async` listener with no `.catch`. A rejected call (transport failure, non-envelope 500) therefore escapes to the host as an unhandled rejection, never reaches scrml's error surface, and the statements after it do not run (that part matches function-body semantics). Shapes: `onclick=${ if (@c) { @x = fail(); @y = 5 } }`; a `match`-arm `{ @x = fail(); @y = 5 }`; `void (@x = save())`; `@y = @x = save()`. This re-exposes, in handlers, the class `G-AUTO-AWAIT-REACTIVE-SERVER-NO-ERROR-ARM` closed in S223. Pinned (current behaviour, so a fix shows up as a deliberate change): `compiler/tests/browser/handler-nested-server-write-s450.browser.test.js`, "a rejecting nested write escapes as a rejection, unlogged". The recommended ruling above (one `.catch(log)` per handler) would close both.
 
 ### g-run-result-field-read-compiles-silently — reading `.changes` / `.lastInsertRowid` / `.count` off the VOID result of `?{}.run()` compiles with no diagnostic; the flagship example 23 shipped three replay-open one-time-token guards on it — `NEW S441; MED; open`
 <!-- @gap id=g-run-result-field-read-compiles-silently sev=MED status=open locus=compiler/src/type-system.ts:~8983(resolveSqlRowType — `.run()` sets wrap="void" then `return tAsIs()`, the escape hatch, so every member read is unchecked)+compiler/src/codegen(`.run()` emits a bare `await _scrml_sql\`…\`` whose value is Bun.SQL's result array, not void) prov=empirical:S441-ex23-run-changes-executed-on-5c366fe15 -->
