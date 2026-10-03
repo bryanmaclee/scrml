@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 236 | 5 |
-| MED | 474 | 1 |
-| LOW | 224 | 0 |
+| HIGH | 238 | 5 |
+| MED | 476 | 1 |
+| LOW | 225 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22402,3 +22402,27 @@ Repro (verify batch, unrequested find): a component body containing `${...}` (di
 
 - MED unbraced statement-match arm with `?{…}.run()` compiles clean, throws at runtime `_scrml_sql.unsafe(...).run is not a function` (S450 transaction re-review, agent-executed; no transaction needed) — locus searched: emit for unbraced match-arm text.
 <!-- @gap id=g-unbraced-stmt-match-arm-sql-run-not-a-function sev=MED status=open locus=searched:compiler/src/codegen/emit-control-flow.ts(unbraced-arm-text-lowering) prov=review:S450-S239-transaction-re-review-agent-executed -->
+
+## §S449-bootstrap-conformance-counter — FAIL families from the first pure-bootstrap conformance count (2026-10-03; `bun scripts/bootstrap-conformance.ts` on main `a1aac1433` + this change; report `docs/bootstrap-conformance.md`; agent-executed, and the silent-acceptance claims re-probed directly through the bootstrap front end with one-line sources. Baseline: 1278 cases → PASS 34 (15 vacuous) · FAIL 18 · LEGACY 951 · UNSUPPORTED 275 · CRASH 0)
+
+Every FAIL below is a §66-dialect case the bootstrap ACCEPTED and answered wrong. All 18 have a required code that appears nowhere in the bootstrap's sources, so none is a wrong answer from a check that exists. The defect they share is that the bootstrap accepts the input instead of refusing it. Its own policy is to refuse with `E-BOOTSTRAP-UNSUPPORTED` (analyze.scrml `structuralOwner`, s444), and these shapes get past that policy.
+
+### g-bootstrap-program-attrs-ignored-fail-open — bootstrap: `<program>` attributes are parsed and never read; `auth=` / `capabilities=` / `ratelimit=` / `lang=` / a nested `<program auth=…>` compile with ZERO diagnostics
+Probe: `<program auth="bogus"><p>x</p></program>` and `<program frobnicate="1">…` → no diagnostic (bootstrap front end). `AProgram.attrs` (ast.scrml:201) has no reader in analyze.scrml; the program declaration stub (`declStubs`, ~analyze.scrml:1083) carries the attrs and nothing checks them. Conformance FAILs (11): auth/{auth-attr-empty-string-pos, auth-attr-unrecognized-literal-no-login-lint-pos, auth-attr-nested-program-one-code-pos, i-auth-redirect-unresolved-pos, w-auth-login-missing-pos, w-auth-redirect-loop-pos}, capability/{unknown-token, unknown-token-mixed-with-valid}, middleware/ratelimit-invalid-unit-pos, foreign/foreign-lang-in-program-neg (also hits the next family). FAIL-OPEN: an `auth="required"` program builds with no gate and no refusal. That is the shape S449 R1/R2 made a compile error in impl#1 (E-AUTH-ATTR-INVALID: "compiled to an application with no login gate"). Recommended fix: refuse every `<program>` attribute the bootstrap does not implement (`E-BOOTSTRAP-UNSUPPORTED`, naming the attribute and its §), the same way it refuses unimplemented structural elements.
+<!-- @gap id=g-bootstrap-program-attrs-ignored-fail-open sev=HIGH status=open locus=compiler/self-host-v2/analyze.scrml(declStubs~1083;AProgram.attrs-unread)+compiler/self-host-v2/ast.scrml:201 prov=empirical:S449-bootstrap-conformance-counter -->
+
+### g-bootstrap-entry-content-outside-program-dropped-silently — bootstrap: markup and structural elements before/after the entry's `<program>`, and a second top-level `<program>`, are accepted with no diagnostic
+Probe: `<engine for=P initial=.A></>` placed BEFORE `<program>` → `[]`. Inside `<program>`, the same element → `E-BOOTSTRAP-UNSUPPORTED` (the structural refusal list has `engine`). `<p>stray</p><program>…` → `[]`. Two top-level `<program>`s → `[]`, and `phaseA` (analyze.scrml ~2150) keeps the LAST one (`program = d.sym` in the loop), so the first is dropped. Conformance: auth/program-two-top-level-same-file-pos (FAIL, E-PROGRAM-002), and 7 engine/* `-pos` cases bucketed LEGACY "accepted-silently" (the retired `<engine>` sits outside `<program>`, so neither the §66.21 Stage-1 W-lint nor the refusal fires). This also feeds 15 vacuous PASSes. Recommended: diagnose any non-blank, non-logic top-level content outside `<program>` in the entry file, and refuse a second top-level `<program>` (E-PROGRAM-002 is the SPEC code).
+<!-- @gap id=g-bootstrap-entry-content-outside-program-dropped-silently sev=HIGH status=open locus=compiler/self-host-v2/analyze.scrml(phaseA~2150;program-loop-last-wins)+searched:compiler/self-host-v2/parse.scrml(parseFile-top-level-items) prov=empirical:S449-bootstrap-conformance-counter -->
+
+### g-bootstrap-unknown-tags-resolved-as-html — bootstrap: inside `<program>`, a tag that is neither a declaration nor on the structural list falls through to HTML with no diagnostic
+Probe: `<program><Unknown/></program>` → `[]`. `<program><style>.a{color:red}</style></program>` → `[]`. Conformance FAILs (4): components/post-ce-residual-component-reject (an undeclared Capitalized tag, E-COMPONENT-035), engine/mount-not-engine-pos (`<helper/>` naming an imported FUNCTION, E-ENGINE-MOUNT-NOT-ENGINE), style/style-001-style-block-pos (`<style>`, E-STYLE-001), components/invalid-prop-decl-syntax-reject (`props=` on `<div>`, E-COMPONENT-019). Locus: `resolveElem` (analyze.scrml ~4640) → `resolveHtml` (~4980) with no allow-list check. Recommended: refuse a tag that is not a known HTML element, not a declaration in scope, and not structural. A Capitalized undeclared tag is never HTML. `<style>` belongs on the structural list (§25/§26 own styling).
+<!-- @gap id=g-bootstrap-unknown-tags-resolved-as-html sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(resolveElem~4640→resolveHtml~4980) prov=empirical:S449-bootstrap-conformance-counter -->
+
+### g-bootstrap-unimplemented-construct-reported-as-generic-code — bootstrap: an unimplemented construct is rejected with a generic scope/type code instead of a refusal naming it
+Conformance FAILs (3), all fail-closed but with a code that does not name the root cause: lifecycle/cleanup-error-non-function (`cleanup(42)` → E-SCOPE-001; `cleanup` is unknown to the bootstrap; expected E-LIFECYCLE-004), linear/must-use-unread-pos (→ E-SCOPE-001; expected E-MU-001), type-state-codes/e-type-any-forbidden-pos (`a: any` → E-TYPE-UNKNOWN; expected E-TYPE-ANY-FORBIDDEN). Recommended: when a name or type is a SPEC built-in the bootstrap lacks, emit `E-BOOTSTRAP-UNSUPPORTED` naming it, or implement the SPEC code.
+<!-- @gap id=g-bootstrap-unimplemented-construct-reported-as-generic-code sev=LOW status=open locus=searched:compiler/self-host-v2/analyze.scrml(scope-resolution-E-SCOPE-001;type-resolution-E-TYPE-UNKNOWN) prov=empirical:S449-bootstrap-conformance-counter -->
+
+### g-bootstrap-diag-has-no-severity — bootstrap: `Diag` carries no §34 severity, so a conformance `severity` assertion is unobservable
+`ast.scrml:220` `type Diag:struct = { code, message, file, span }`. 397 of 1278 conformance cases assert `severity`. None is graded today (all are LEGACY or UNSUPPORTED, or the code never fires). The counter reports each one that reaches grading as FAIL "severity unobservable", so this family will grow as soon as the bootstrap parses more of the corpus. It also means the bootstrap has no fatal/non-fatal partition: W-/I- codes sit in the same list as errors (a "clean program" test in the slices is `diags == []`). Recommended: add `severity` to `Diag` from the §34 table.
+<!-- @gap id=g-bootstrap-diag-has-no-severity sev=MED status=open locus=compiler/self-host-v2/ast.scrml:220 prov=empirical:S449-bootstrap-conformance-counter -->
