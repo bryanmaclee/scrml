@@ -21,7 +21,7 @@ import { describe, test, expect } from "bun:test";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, cpSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { fixS66, S66_RULES, astWrites, lexicalWritten, lifecycleNamedCells, importSpecifiers } from "../../src/commands/fix-s66.js";
+import { fixS66, S66_RULES, astWrites, lexicalWritten, lifecycleNamedCells, moduleEdges, writeEvents } from "../../src/commands/fix-s66.js";
 import { runFixCommand, classifyEntry, lineDiff, resolveProject } from "../../src/commands/fix.js";
 import { compileScrml } from "../../src/api.js";
 import { splitBlocks } from "../../src/block-splitter.js";
@@ -526,13 +526,15 @@ describe("§10 S239 re-review — multi-line imports and the `:int` choice", () 
     }
   });
 
-  test("importSpecifiers reads multi-line `import {…} from` and `export {…} from`; an unreadable import is counted", () => {
-    const r = importSpecifiers("${ import {\n  A,\n  B\n} from \"./a.scrml\"\nexport {\n  C\n} from \"./c.scrml\"\nimport D from \"./d.scrml\"\nimport \"./side.scrml\" }");
-    expect(r.specs).toEqual(["./a.scrml", "./c.scrml", "./d.scrml", "./side.scrml"]);
-    expect(r.unextracted).toBe(0);
-    expect(importSpecifiers("${ import { A } from someVariable }").unextracted).toBe(1);
-    // r3: no statement-position list — prose `import` is counted (over-conservative, accepted).
-    expect(importSpecifiers("<p>Please import your data</p>").unextracted).toBe(1);
+  test("moduleEdges (impl#1's reading) has multi-line `import {…} from` and `export {…} from`; an unreadable import is unresolved", () => {
+    const r = moduleEdges("/proj/app.scrml", "${ import {\n  A,\n  B\n} from \"./a.scrml\"\nexport {\n  C\n} from \"./c.scrml\"\nimport D from \"./d.scrml\" }");
+    expect([...r.edges].sort()).toEqual(["/proj/a.scrml", "/proj/c.scrml", "/proj/d.scrml"]);
+    expect(r.unresolved).toEqual([]);
+    expect(moduleEdges("/proj/app.scrml", "${ import { A } from someVariable }").unresolved.length).toBeGreaterThan(0);
+    // impl#1 builds a bare `import "./x.scrml"` with no source → unresolved (fail closed).
+    expect(moduleEdges("/proj/app.scrml", "${ import \"./side.scrml\" }").unresolved.length).toBeGreaterThan(0);
+    // r4: prose is prose — impl#1's tree has no import there (the r3 text scanner counted it).
+    expect(moduleEdges("/proj/app.scrml", "<program>\n<p>Please import your data</p>\n</program>\n")).toEqual({ ok: true, edges: [], unresolved: [] });
   });
 
   test("an import whose specifier cannot be read makes every cell `let`", () => {
@@ -596,30 +598,32 @@ describe("§11 S239 re-review r3 — imports anywhere (fail closed by constructi
     ["`}`", "function g() { return 1 } import { Bump } from \"./bump.scrml\""],
   ]) {
     test(`HIGH 1: an import after ${label} is read — the writer keeps the cell \`let\``, () => {
-      expect(importSpecifiers(appWith(logic)).specs).toEqual(["./bump.scrml"]);
+      expect(moduleEdges("/proj/app.scrml", appWith(logic)).edges).toEqual(["/proj/bump.scrml"]);
       expect(fix(appWith(logic), { auxSources: { "bump.scrml": BUMP } }).output).toContain("let <count:number=0/>");
     });
     // …and the same position with an UNREADABLE specifier is unextracted → every cell `let`.
     test(`HIGH 1: an unreadable import after ${label} is unextracted — every cell \`let\``, () => {
       const bad = logic.replace("\"./bump.scrml\"", "someVariable");
-      expect(importSpecifiers(appWith(bad)).unextracted).toBe(1);
+      expect(moduleEdges("/proj/app.scrml", appWith(bad)).unresolved.length).toBeGreaterThan(0);
       expect(fix(appWith(bad)).output).toContain("let <count:number=0/>");
     });
   }
 
-  test("HIGH 1: an `import` token in a comment / string is not unextracted; a readable one in a comment is still read", () => {
-    expect(importSpecifiers("// we import things here\n<p>\"import\"</p>").unextracted).toBe(0);
-    expect(importSpecifiers("/* import { A } from \"./a.scrml\" */").specs).toEqual(["./a.scrml"]);
-    // an UNCLOSED `/*` is not a comment — the token after it still counts
-    expect(importSpecifiers("<p>a /* b</p>\n${ import { A } from x }").unextracted).toBe(1);
+  test("HIGH 1 (r4): the word `import` in prose / a string is no import; a real one after a `/*` in prose still is", () => {
+    expect(moduleEdges("/proj/app.scrml", "<program>\n<p>we import things \"import\"</p>\n</program>\n").unresolved).toEqual([]);
+    // the r3 masker read `/*` in prose as a comment opener; impl#1 does not
+    const r = moduleEdges("/proj/app.scrml", "<program>\n<p>a /* b</p>\n${ import { A } from x }\n</program>\n");
+    expect(r.unresolved.length).toBeGreaterThan(0);
+    expect(moduleEdges("/proj/app.scrml", "<program>\n<p>see src/*.scrml</p>\n${ import /* ui */ { A } from \"./a.scrml\" }\n</program>\n").edges).toEqual(["/proj/a.scrml"]);
   });
 
-  test("HIGH 1: `export type { X } from` is read; unreadable → unextracted; `import type` too", () => {
-    expect(importSpecifiers("${ export type { X } from \"./t.scrml\" }").specs).toEqual(["./t.scrml"]);
-    expect(importSpecifiers("${ export type { X } from someVar }").unextracted).toBe(1);
-    expect(importSpecifiers("${ export * from someVar }").unextracted).toBe(1);
-    expect(importSpecifiers("${ import type { X } from \"./t.scrml\" }").specs).toEqual(["./t.scrml"]);
-    expect(importSpecifiers("${ export const A = 1\nexport { A } }").unextracted).toBe(0); // not re-exports
+  test("HIGH 1 (r4): an export / import impl#1 builds but cannot read is unresolved (fail closed)", () => {
+    expect(moduleEdges("/proj/app.scrml", "${ export type { X } from \"./t.scrml\" }").unresolved.length).toBeGreaterThan(0);
+    expect(moduleEdges("/proj/app.scrml", "${ export type { X } from someVar }").unresolved.length).toBeGreaterThan(0);
+    expect(moduleEdges("/proj/app.scrml", "${ export * from someVar }").unresolved.length).toBeGreaterThan(0);
+    expect(moduleEdges("/proj/app.scrml", "${ import type { X } from \"./t.scrml\" }").unresolved.length).toBeGreaterThan(0);
+    expect(moduleEdges("/proj/app.scrml", "${ export * from \"./s.scrml\" }").edges).toEqual(["/proj/s.scrml"]);
+    expect(moduleEdges("/proj/app.scrml", "${ export const A = 1\nexport { A } }")).toEqual({ ok: true, edges: [], unresolved: [] }); // not re-exports
   });
 
   const kApp = (extra) => `<program>\n<k> = 0.5\n${extra}<m> = 2\nconst <d>: int = @m * 2\n\${ function f() { @m = @k } }\n<button onclick=f()>go</button>\n<p>\${@m} \${@d}</p>\n</program>\n`;
@@ -656,4 +660,96 @@ describe("§11 S239 re-review r3 — imports anywhere (fail closed by constructi
       reported(r);
     });
   }
+});
+
+describe("§12 S239 re-review r4 — the import graph and the write set come from impl#1's tree", () => {
+  /** Write `files` into a fresh dir, run `scrml fix app.scrml --s66 --write` (the CLI), return app.scrml. */
+  function cli(files) {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-fix-r4-"));
+    try {
+      for (const [p, s] of Object.entries(files)) {
+        mkdirSync(dirname(join(dir, p)), { recursive: true });
+        writeFileSync(join(dir, p), s);
+      }
+      const f = join(dir, "app.scrml");
+      expect(runFixCommand([f, "--s66", "--write"], { out: () => {}, err: () => {} })).toBe(0);
+      return readFileSync(f, "utf8");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const BUMP = "${ export const Bump = <button onclick=${@count = @count + 1}>+</button> }\n";
+  const appA = (prose, sameLine = false) => sameLine
+    ? `<program>\n${prose} \${ import /* ui */ { Bump } from "./bump.scrml" }\n<count> = 0\n<Bump/>\n<p>\${@count}</p>\n</program>\n`
+    : `<program>\n${prose}\n\${ import /* ui */ { Bump } from "./bump.scrml" }\n<count> = 0\n<Bump/>\n<p>\${@count}</p>\n</program>\n`;
+
+  // HIGH A — the r3 masker hid each of these imports (cell LOCKED on 9e72c53d6); impl#1 reads them all.
+  for (const [label, prose, sameLine] of [
+    ["a backtick in prose before the import", "<p>Press the ` key</p>", false],
+    ["`src/*.scrml` in prose before the import", "<p>see src/*.scrml</p>", false],
+    ["an unbalanced `\"` in prose on the import's line", "<p>say \"hi</p>", true],
+  ]) {
+    test(`HIGH A: ${label} — the writer in bump.scrml keeps @count \`let\` (CLI end to end)`, () => {
+      const out = cli({ "bump.scrml": BUMP, "app.scrml": appA(prose, sameLine) });
+      expect(out).toContain("let <count:number=0/>");
+    });
+  }
+  test("HIGH A: and with a READ-only component the cell is still locked (the graph is exact, not blanket)", () => {
+    const out = cli({ "bump.scrml": "${ export const Bump = <span>${@count}</span> }\n", "app.scrml": appA("<p>Press the ` key</p>") });
+    expect(out).toContain("<count:number=0/>");
+    expect(out).not.toContain("let <count");
+  });
+  test("HIGH A: an import impl#1 cannot resolve (missing file) → every cell `let`", () => {
+    const out = cli({ "app.scrml": appA("<p>x</p>") });
+    expect(out).toContain("let <count:number=0/>");
+  });
+
+  // HIGH B — a write impl#1 keeps as raw text / under a key the r3 walk skipped, next to a visible AST write.
+  test("HIGH B2: a `when … changes { @m = 1.5 }` body write rules `:int` out though `@m = 3` is visible (CLI)", () => {
+    const out = cli({ "app.scrml": "<program>\n<k> = 0\n<m> = 2\nconst <d>: int = @m * 2\n${ function f() { @m = 3 } }\nwhen @k changes { @m = 1.5 }\n<button onclick=f()>go</button>\n<p>${@m} ${@d}</p>\n</program>\n" });
+    expect(out).toContain("<m> = 2");
+    expect(out).not.toContain("<m:int");
+  });
+  test("HIGH B1: an imported component's raw `onclick=${@m = 0.5}` rules `:int` out (CLI)", () => {
+    const out = cli({
+      "half.scrml": "${ export const Half = <button onclick=${@m = 0.5}>half</button> }\n",
+      "app.scrml": "<program>\n${ import { Half } from \"./half.scrml\" }\n<m> = 2\nconst <d>: int = @m * 2\n${ function f() { @m = 3 } }\n<button onclick=f()>go</button>\n<Half/>\n<p>${@m} ${@d}</p>\n</program>\n",
+    });
+    expect(out).toContain("<m> = 2");
+    expect(out).not.toContain("<m:int");
+  });
+  test("HIGH B: with only integer writes visible to the tree, `:int` is still chosen", () => {
+    const out = cli({ "app.scrml": "<program>\n<k> = 0\n<m> = 2\nconst <d>: int = @m * 2\n${ function f() { @m = 3 } }\nwhen @k changes { @m = 4 }\n<button onclick=f()>go</button>\n<p>${@m} ${@d}</p>\n</program>\n" });
+    expect(out).toContain("let <m:int=2/>");
+  });
+
+  // LOW C — a destructuring target writes every cell it names (the LOCK path).
+  test("LOW C: `[@a, @b] = [@b, @a]` makes both cells `let` (CLI)", () => {
+    const out = cli({ "app.scrml": "<program>\n<a> = 1\n<b> = 2\n${ function sw() { [@a, @b] = [@b, @a] } }\n<button onclick=sw()>swap</button>\n<p>${@a} ${@b}</p>\n</program>\n" });
+    expect(out).toContain("let <a:number=1/>");
+    expect(out).toContain("let <b:number=2/>");
+  });
+  test("LOW C: astWrites sees array AND object destructuring targets", () => {
+    const astOf = (src) => buildAST(splitBlocks("t.scrml", src)).ast;
+    expect([...astWrites(astOf("<program>\n<a> = 1\n<b> = 2\n${ function sw() { [@a, @b] = [@b, @a] } }\n</program>\n"))].sort()).toEqual(["a", "b"]);
+    expect(astWrites(astOf("<program>\n<a> = 1\n${ function g(o) { ({ k: @a } = o) } }\n</program>\n")).has("a")).toBe(true);
+  });
+
+  test("writeEvents: an exported component body is read with impl#1's component-body parser", () => {
+    const astOf = (src) => buildAST(splitBlocks("t.scrml", src)).ast;
+    const ev = writeEvents(astOf(BUMP)).filter((e) => e.name === "count" && e.w === "assign");
+    expect(ev.length).toBeGreaterThan(0);
+    expect(ev[0].op).toBe("=");
+  });
+
+  test("writeEvents: raw text impl#1's parsers cannot read → every `@name` in it is an `unknown` write", () => {
+    const astOf = (src) => buildAST(splitBlocks("t.scrml", src)).ast;
+    // any node, any key: a string no impl#1 parser reads fails closed per mention
+    const synthetic = { kind: "logic", span: { start: 0, end: 30 }, body: [{ kind: "future-thing", span: { start: 2, end: 28 }, payload: "when ??? @n := 2 and @q" }] };
+    const ev = writeEvents(synthetic);
+    expect(ev.map((e) => [e.name, e.w]).sort()).toEqual([["n", "unknown"], ["q", "unknown"]]);
+    expect(ev[0].span).toEqual({ start: 2, end: 28 });
+    // a pure read is no write event
+    expect(writeEvents(astOf("<program>\n<c> = 0\n<p>${@c + 1}</p>\n</program>\n")).filter((e) => e.name === "c" && e.w !== "div")).toEqual([]);
+  });
 });

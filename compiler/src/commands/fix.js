@@ -45,7 +45,7 @@
 
 import { readFileSync, writeFileSync, statSync, readdirSync, existsSync } from "fs";
 import { resolve, join, relative, sep, dirname } from "path";
-import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES, importSpecifiers } from "./fix-s66.js";
+import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES, moduleEdges } from "./fix-s66.js";
 
 const HELP = `scrml fix <file|dir> [options]
 
@@ -106,9 +106,11 @@ export function classifyEntry(source, relPath) {
 }
 
 /**
- * A file's project, as the compiler resolves it: every `.scrml` reachable through relative imports
- * from the file (transitively, read from disk), plus `extra` if given. Keys are absolute paths. An import that does not resolve is left out — fixS66 sees it
- * as unresolved and treats every cell as written (the safe direction).
+ * A file's project, as the compiler resolves it: every `.scrml` file impl#1 reaches through its
+ * import graph from the file (transitively, read from disk), plus `extra` if given. Edges come from
+ * impl#1 itself — its front end's AST and its module resolver (fix-s66.js `moduleEdges`); no text
+ * scanner (S239 re-review r4). Keys are absolute paths. An import that does not resolve is left
+ * out — fixS66 sees it as unresolved and treats every cell as written (the safe direction).
  */
 const READ_CACHE = new Map();
 function readCached(f) {
@@ -125,12 +127,8 @@ export function resolveProject(file, extra = []) {
     let src;
     try { src = readFileSync(f, "utf8"); } catch { continue; }
     if (f !== resolve(file)) out[f] = src;
-    // Multi-line clauses included (`import {⏎ A⏎ } from "./a.scrml"`), and `export … from` re-exports.
-    for (const spec of importSpecifiers(src).specs) {
-      if (!spec.startsWith(".")) continue;
-      for (const cand of [resolve(dirname(f), spec), resolve(dirname(f), spec + ".scrml")]) {
-        if (!seen.has(cand) && cand.endsWith(".scrml") && existsSync(cand)) { seen.add(cand); queue.push(cand); break; }
-      }
+    for (const target of moduleEdges(f, src).edges) {
+      if (!seen.has(target) && target.endsWith(".scrml") && existsSync(target)) { seen.add(target); queue.push(target); }
     }
     for (const p of extra) seen.add(resolve(p));
   }

@@ -37,11 +37,17 @@
  * program (`@count / 2` becomes E-INT-DIVISION). A bare variant `.X` gets the enum that declares it
  * (exactly one declaring enum, this file or an aux file). Strings and booleans infer.
  *
- * Writes: a cell is WRITTEN if impl#1's AST shows a write (a reactive assignment, an array
- * mutation, an update or assignment expression, a `reset`) OR a conservative lexical scan of
- * every `@x` occurrence cannot prove it a read (assignment / update / `bind:` / `reset(` /
- * a non-pure method on its chain / any bare use of a sequence, which may alias it). The union
- * is used, so a false "never written" needs BOTH to miss a write. Attributes that imply a write
+ * Project: the files whose writes count are the ones impl#1 itself reaches — its front end's AST
+ * and its module resolver (`moduleEdges` → `buildImportGraph`) give the import graph; no text
+ * scanner. A file impl#1 cannot read, an import it cannot resolve, or an edge outside the project
+ * makes every cell `let` (S239 re-review r4).
+ *
+ * Writes: a cell is WRITTEN if impl#1's tree yields a write event for it (`writeEvents`: every
+ * ExprNode wherever it hangs, every raw string read with impl#1's own parsers — statements,
+ * expressions, component bodies — and any string no parser reads counts as an `unknown` write of
+ * every `@name` in it) OR a conservative lexical scan of every `@x` occurrence cannot prove it a
+ * read. The text scan is only ever an ADDITIONAL reason (a union for the lock; a coverage check
+ * for `:int`). Attributes that imply a write
  * (`server`, `pinned`, `persist=`, `reset-on=`, `debounced=`, `throttled=`) count, and a `^{}`
  * meta block makes every cell written. Erring this way only ever yields `let` where locked would
  * do — always meaning-preserving for a legacy cell, which carries the all-permissions grant.
@@ -56,7 +62,9 @@
 
 import { splitBlocks } from "../block-splitter.js";
 import { buildAST } from "../ast-builder.js";
-import { parseExprToNode, deepEqualExprNode, captureTrailingContentWarnings, hasLostTrailingContent } from "../expression-parser.ts";
+import { parseExprToNode, deepEqualExprNode, captureTrailingContentWarnings, hasLostTrailingContent, parseStatements, esTreeToExprNode } from "../expression-parser.ts";
+import { buildImportGraph, resolveModulePathNative } from "../module-resolver.js";
+import { parseComponentBody } from "../component-expander.ts";
 import { isUniversalCorePredicate } from "../validator-catalog.ts";
 import { applyMigrations } from "./migrate.js";
 import { compileScrml } from "../api.js";
@@ -237,23 +245,6 @@ function walkAst(root, fn) {
   visit(root);
 }
 
-/** Visit every ExprNode reachable from an AST node's expression fields. */
-function forEachExprNode(root, fn) {
-  const seen = new WeakSet();
-  const visit = (n, inExpr) => {
-    if (!n || typeof n !== "object" || seen.has(n)) return;
-    seen.add(n);
-    if (Array.isArray(n)) { for (const x of n) visit(x, inExpr); return; }
-    if (inExpr && typeof n.kind === "string") fn(n);
-    for (const k of Object.keys(n)) {
-      if (k === "span") continue;
-      const v = n[k];
-      if (v && typeof v === "object") visit(v, inExpr || SKIP_KEYS.has(k) || k === "value" || k === "args" || k === "init");
-    }
-  };
-  visit(root, false);
-}
-
 /** The cell an lvalue ExprNode is rooted at (`@x`, `@x.a`, `@x[0]`), or null. */
 function lvalueRoot(e) {
   let cur = e;
@@ -286,15 +277,36 @@ function collectEnums(asts) {
   return enums;
 }
 
-/** Parsed ASTs by source text, for the project write scan (one parse per distinct file per process). */
-const AST_MEMO = new Map();
+/**
+ * impl#1's front-end reading of a file (splitBlocks + buildAST), memoized per (path, source): the
+ * AST and the error codes the block splitter / AST builder raised. null when the front end throws
+ * or builds no AST — impl#1 cannot read the file.
+ */
+const FRONT_END_MEMO = new Map();
+function frontEndMemo(filePath, source) {
+  const key = `${filePath}\u0000${source}`;
+  if (FRONT_END_MEMO.has(key)) return FRONT_END_MEMO.get(key);
+  let r = null;
+  try {
+    r = captureTrailingContentWarnings(() => {
+      const bs = splitBlocks(filePath, source);
+      const built = buildAST(bs);
+      if (!built || !built.ast) return null;
+      const errorCodes = [...(bs.errors ?? []), ...(built.errors ?? [])]
+        .filter((e) => e && typeof e.code === "string" && e.code.startsWith("E-") && e.severity !== "warning" && e.severity !== "info")
+        .map((e) => e.code);
+      return { ast: built.ast, errorCodes };
+    }).result;
+  } catch {
+    r = null;
+  }
+  if (FRONT_END_MEMO.size > 4000) FRONT_END_MEMO.clear();
+  FRONT_END_MEMO.set(key, r);
+  return r;
+}
+/** The AST impl#1 builds for a project file, or null when it cannot read it. */
 function parseAstMemo(filePath, source) {
-  if (AST_MEMO.has(source)) return AST_MEMO.get(source);
-  let ast = null;
-  try { ast = parseAst(filePath, source); } catch { ast = null; }
-  if (AST_MEMO.size > 4000) AST_MEMO.clear();
-  AST_MEMO.set(source, ast);
-  return ast;
+  return frontEndMemo(filePath, source)?.ast ?? null;
 }
 
 function parseAst(filePath, source) {
@@ -370,68 +382,61 @@ function commonDir(paths) {
 }
 
 /**
- * The inert regions of a source — comments (`//` to end of line, a CLOSED `/* … *\/`, a CLOSED
- * `<!-- … -->`) and `"…"` / `` `…` `` strings — as a predicate on offsets. Used only to SUPPRESS
- * the "unreadable import" count, never to hide a readable import (see importSpecifiers).
- */
-function inertAt(src) {
-  const ranges = [];
-  let i = 0;
-  while (i < src.length) {
-    const ch = src[i];
-    if (ch === '"' || ch === "`") { const j = skipString(src, i); ranges.push([i, j]); i = j; continue; }
-    let end = -1;
-    if (ch === "/" && src[i + 1] === "/" && src[i - 1] !== ":") { end = src.indexOf("\n", i); if (end === -1) end = src.length; }
-    else if (ch === "/" && src[i + 1] === "*") { const e = src.indexOf("*/", i + 2); end = e === -1 ? -1 : e + 2; }
-    else if (src.startsWith("<!--", i)) { const e = src.indexOf("-->", i + 4); end = e === -1 ? -1 : e + 3; }
-    if (end !== -1) { ranges.push([i, end]); i = end; continue; }
-    i++;
-  }
-  return (off) => ranges.some(([a, b]) => off >= a && off < b);
-}
-
-/**
- * The import specifiers of a source — `import … from "x"`, `import "x"`, and the re-export
- * `export … from "x"` — with every clause allowed to span lines (`import {⏎ A,⏎ B⏎ } from "x"`).
+ * A file's module edges AS IMPL#1 READS THEM (S239 re-review r4 — the root fix): impl#1's front end
+ * builds the file's AST, and impl#1's own module resolver (`buildImportGraph`, the MOD stage's graph
+ * builder) resolves its import declarations. No text scanner decides what a file imports.
  *
- * Fail-closed BY CONSTRUCTION (S239 re-review r3): there is no list of positions where `import`
- * "is a statement". EVERY `import` token in the source is examined; a token that begins a readable
- * import contributes its specifier (wherever it sits — even in a comment or string: loading one
- * more file only adds writes), and every other `import` token outside a comment / string counts as
- * `unextracted` — the caller treats that as an unresolved import (a hidden file that may write a
- * cell → every cell `let`). Known over-conservative cases, accepted: prose (`<p>import your
- * data</p>`), `import.meta`, `x.import`, an apostrophe-quoted `'import'`.
- * A re-export (`export {…} from`, `export * from`, `export type {…} from`) is read the same way;
- * one whose specifier cannot be read is `unextracted` too.
- * @returns {{ specs: string[], unextracted: number }}
+ *   ok          impl#1 read the file: the front end built an AST and raised no `E-` code. A file it
+ *               cannot read may hide an import — the caller treats it as unextracted.
+ *   edges       absolute paths of every relative import / re-export target (impl#1's resolution).
+ *               `scrml:` / `vendor:` modules are not project files and are not edges.
+ *   unresolved  reasons impl#1 could not resolve an import: an `E-IMPORT-*` from the graph builder
+ *               (E-IMPORT-006 missing file, E-IMPORT-005 bare specifier, host-import errors), or an
+ *               import declaration with no readable source. Any → the caller treats every cell as
+ *               possibly written by a file it cannot see.
+ * Every `import-decl` node anywhere in the tree counts, not only the hoisted list impl#1 resolves —
+ * one more edge only adds writes.
+ * @returns {{ ok: boolean, edges: string[], unresolved: string[] }}
  */
-export function importSpecifiers(src) {
-  const specs = [];
-  let unextracted = 0;
-  const NAMED = String.raw`(?:type\s+)?(?:\{[^}]*\}|\*\s*as\s+[\w$]+|[\w$]+(?:\s*,\s*(?:\{[^}]*\}|\*\s*as\s+[\w$]+))?)`;
-  const IMPORT = new RegExp(String.raw`^import\s*(?:${NAMED}\s*from\s*)?["']([^"']+)["']`);
-  const REEXPORT = new RegExp(String.raw`^export\s*(?:type\s+)?(?:\{[^}]*\}|\*(?:\s*as\s+[\w$]+)?)\s*from\s*["']([^"']+)["']`);
-  // An `export` that IS a re-export (has a `from` clause), whether or not its specifier reads.
-  const REEXPORT_SHAPE = /^export\s*(?:type\s+)?(?:\*|\{[^}]*\}\s*from\b)/;
-  const inert = inertAt(src);
-  for (const m of src.matchAll(/\b(import|export)\b/g)) {
-    const rest = src.slice(m.index, m.index + 2000);
-    if (m[1] === "import") {
-      const im = rest.match(IMPORT);
-      if (im) specs.push(im[1]);
-      else if (!inert(m.index)) unextracted++;
-    } else {
-      const ex = rest.match(REEXPORT);
-      if (ex) specs.push(ex[1]);
-      else if (REEXPORT_SHAPE.test(rest) && !inert(m.index)) unextracted++;
-    }
+export function moduleEdges(filePath, source) {
+  const fe = frontEndMemo(filePath, source);
+  if (!fe) return { ok: false, edges: [], unresolved: ["impl#1's front end could not read the file"] };
+  const unresolved = fe.errorCodes.map((c) => `front end ${c}`);
+  const edges = [];
+  const ast = fe.ast;
+  let graph;
+  try {
+    const built = buildImportGraph([{ filePath, ast }]);
+    graph = built.graph;
+    for (const e of built.errors ?? []) if (e && typeof e.code === "string" && e.code.startsWith("E-IMPORT")) unresolved.push(e.code);
+  } catch (e) {
+    return { ok: false, edges: [], unresolved: [`impl#1's module resolver threw: ${String(e?.message ?? e).split("\n")[0]}`] };
   }
-  return { specs, unextracted };
-}
-
-/** Relative `.scrml` import specifiers of a source (`import … from "./x.scrml"`). */
-function relativeImports(src) {
-  return importSpecifiers(src).specs.filter((spec) => spec.startsWith("."));
+  const isProjectSpec = (s) => !/^(?:scrml|vendor):/.test(s);
+  const addSpec = (s) => {
+    if (typeof s !== "string" || s.length === 0) { unresolved.push("an import with no readable source"); return; }
+    if (!isProjectSpec(s)) return;
+    if (!s.startsWith(".")) { unresolved.push(`non-relative import ${s}`); return; }
+    edges.push(resolveModulePathNative(s, filePath));
+  };
+  // impl#1's resolved graph entry (imports it could resolve; E-IMPORT-006 ones are in `unresolved`).
+  const entry = graph?.get(filePath);
+  for (const imp of entry?.imports ?? []) addSpec(imp.source);
+  // The hoisted import list, every `import-decl` in the tree, and every re-export source.
+  const decls = new Set(Array.isArray(ast.imports) ? ast.imports : []);
+  walkAst(ast, (n) => { if (n.kind === "import-decl") decls.add(n); });
+  for (const d of decls) addSpec(d.source);
+  const exportDecls = new Set(Array.isArray(ast.exports) ? ast.exports : []);
+  walkAst(ast, (n) => { if (n.kind === "export-decl") exportDecls.add(n); });
+  for (const ex of exportDecls) {
+    if (!ex) continue;
+    if (ex.reExportSource !== undefined && ex.reExportSource !== null) addSpec(ex.reExportSource);
+    else if (ex.isReExportAll) unresolved.push("a re-export with no readable source");
+    // An export declaration impl#1 built but could not read (`export type {…} from x`,
+    // `export * from someVar`): what it re-exports is unknown — fail closed.
+    else if (!ex.exportedName && !ex.exportKind) unresolved.push("an export declaration impl#1 could not read");
+  }
+  return { ok: fe.errorCodes.length === 0, edges: [...new Set(edges)], unresolved };
 }
 
 /**
@@ -477,59 +482,289 @@ function maskComments(src) {
 
 /** A legacy declaration statement (line-leading), for the after-the-fact safety net. */
 const LEGACY_DECL_LINE = /^[ \t]*(?:export[ \t]+)?(const[ \t]+)?<([A-Za-z_][\w]*)(?:[ \t][^<>\n]*)?>[ \t]*(?::[^=\n]*)?=(?![=>])/gm;
-
 // ---------------------------------------------------------------------------
-// The write set
+// The write set — read from impl#1's tree (S239 re-review r4, the root fix)
+//
+// Every write to a cell is a WRITE EVENT found in impl#1's AST of a file:
+//   { name, w: "assign", op, value }   `@x = v` / `@x += v` … (value: an ExprNode, or null if unknown)
+//   { name, w: "incdec" }              `@x++` / `@x--`
+//   { name, w: "reset" }               `reset(@x)` (back to its initializer)
+//   { name, w: "unknown" }             any write whose value cannot be judged (field / index write,
+//                                      mutating method, destructuring target, bind:, ref=, `@set`,
+//                                      `delete`, a `for (… of …)` target) — or ANY mention of the cell
+//                                      in text impl#1 keeps raw that impl#1's parsers cannot read
+//   { name, w: "div" }                 a READ as an operand of `/` (not a write; rules `int` out)
+// Each event carries `span` — the source extent of the innermost AST node (not ExprNode) it was found
+// in — so a lexical write site can be checked against the tree (see intWriteVerdict).
+//
+// BY CONSTRUCTION there is no list of "where expressions live": the walk visits EVERY object in the
+// AST, classifies every ExprNode by its kind wherever it hangs, and sends EVERY string that mentions
+// `@name` — whatever node and key holds it — through impl#1's own parsers:
+//   1. parseStatements (impl#1's acorn-based ScrmlParser, `@x` identifiers) → the ESTree is classified;
+//   2. else parseExprToNode (impl#1's scrml expression parser) read in full → the ExprNode is
+//      classified the same way (its own strings recurse; the string itself again → unknown);
+//   3. else every `@name` in the string is an `unknown` write (per occurrence, regardless of how
+//      many other writes the cell has).
+// A duplicate (a raw string impl#1 ALSO parsed into a node) only yields the same event twice.
 // ---------------------------------------------------------------------------
 
-/** Cells impl#1's AST shows as written anywhere in the file. */
-export function astWrites(ast) {
-  const w = new Set();
-  walkAst(ast, (n) => {
-    // impl#1's own reading (dependency-graph.ts): a non-structural state-decl that is not the folded
-    // `const @x` derived form is a WRITE (`@x = v` in a function body / handler / logic block).
-    if (n.kind === "state-decl" && n.name && (n._isReactiveAssign || (n.structuralForm === false && n.shape !== "derived"))) w.add(n.name);
-    if ((n.kind === "reactive-array-mutation" || n.kind === "reactive-nested-assign") && n.target) w.add(n.target);
-    // `@set(…)`: the target is named in the raw args — every word there counts (over-approximation).
-    if (n.kind === "reactive-explicit-set" && typeof n.args === "string") for (const m of n.args.matchAll(/[A-Za-z_$][\w$]*/g)) w.add(m[0]);
-    // `bind:attr=@x` on any element writes @x; so does `ref=@el` (the element, at mount).
-    if (n.kind === "markup" && Array.isArray(n.attrs)) {
-      for (const a of n.attrs) {
-        if (!a || typeof a.name !== "string" || !(a.name.startsWith("bind:") || a.name === "ref")) continue;
-        const nm = a.value && typeof a.value.name === "string" ? a.value.name : null;
-        if (nm && nm.startsWith("@")) w.add(nm.slice(1).split(/[.[]/)[0]);
+/** ExprNode kinds (types/ast.ts ExprNode) — never an event's span owner (their spans are relative). */
+const EXPR_KINDS = new Set([
+  "ident", "lit", "array", "object", "spread", "unary", "binary", "assign", "ternary", "member", "index",
+  "call", "new", "lambda", "cast", "match-expr", "map-lit", "sql-ref", "input-state-ref", "escape-hatch",
+  "markup-value", "reset-expr", "update", "prop", "shorthand",
+]);
+const AT_NAME = /@([A-Za-z_$][\w$]*)/g;
+const mentionsIn = (s) => [...s.matchAll(AT_NAME)].map((m) => m[1]);
+/** Every `@name` mentioned in any string inside an object graph. */
+function deepMentions(obj, out = new Set(), seen = new WeakSet()) {
+  if (typeof obj === "string") { for (const n of mentionsIn(obj)) out.add(n); return out; }
+  if (!obj || typeof obj !== "object" || seen.has(obj)) return out;
+  seen.add(obj);
+  for (const [k, v] of Object.entries(obj)) if (k !== "span") deepMentions(v, out, seen);
+  return out;
+}
+
+/** Root `@name` of an ESTree lvalue chain (`@x`, `@x.a`, `@x[i]`), or null. */
+function esRoot(n) {
+  let cur = n;
+  while (cur && (cur.type === "MemberExpression" || cur.type === "ChainExpression")) cur = cur.type === "ChainExpression" ? cur.expression : cur.object;
+  return cur && cur.type === "Identifier" && typeof cur.name === "string" && cur.name.startsWith("@") ? cur.name.slice(1) : null;
+}
+/** Every `@name` identifier in an ESTree subtree. */
+function esMentions(n, out = new Set()) {
+  if (!n || typeof n !== "object") return out;
+  if (Array.isArray(n)) { for (const x of n) esMentions(x, out); return out; }
+  if (n.type === "Identifier" && typeof n.name === "string" && n.name.startsWith("@")) out.add(n.name.slice(1));
+  if (n.type === "Literal" && typeof n.value === "string") for (const m of mentionsIn(n.value)) out.add(m);
+  for (const [k, v] of Object.entries(n)) if (k !== "loc" && k !== "range" && v && typeof v === "object") esMentions(v, out);
+  return out;
+}
+
+/** Write events in an ESTree (impl#1's parseStatements output). */
+function esEvents(root, filePath) {
+  const ev = [];
+  const unknown = (names) => { for (const n of names) if (n) ev.push({ name: n, w: "unknown" }); };
+  const visit = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+    switch (n.type) {
+      case "AssignmentExpression":
+        if (n.left?.type === "Identifier" && n.left.name?.startsWith("@")) {
+          let value = null;
+          try { value = esTreeToExprNode(n.right, filePath, 0); } catch { value = null; }
+          ev.push({ name: n.left.name.slice(1), w: "assign", op: n.operator, value });
+        } else if (n.left?.type === "MemberExpression") unknown([esRoot(n.left)]);
+        else unknown(esMentions(n.left)); // destructuring pattern: every cell named in it
+        break;
+      case "UpdateExpression":
+        if (n.argument?.type === "Identifier" && n.argument.name?.startsWith("@")) ev.push({ name: n.argument.name.slice(1), w: "incdec" });
+        else unknown([esRoot(n.argument)]);
+        break;
+      case "UnaryExpression":
+        if (n.operator === "delete") unknown([esRoot(n.argument)]);
+        break;
+      case "CallExpression": {
+        const c = n.callee?.type === "ChainExpression" ? n.callee.expression : n.callee;
+        if (c?.type === "MemberExpression") {
+          const pure = !c.computed && c.property?.type === "Identifier" && PURE_METHODS.has(c.property.name);
+          if (!pure) unknown([esRoot(c.object)]);
+        } else if (c?.type === "Identifier" && c.name === "reset") {
+          const a = n.arguments?.[0];
+          if (a?.type === "Identifier" && a.name?.startsWith("@") && n.arguments.length === 1) ev.push({ name: a.name.slice(1), w: "reset" });
+          else unknown(esMentions(n.arguments));
+        } else if (c?.type === "Identifier" && c.name === "@set") {
+          unknown(esMentions(n.arguments));
+          for (const a of n.arguments ?? []) if (a?.type === "Identifier") unknown([a.name.replace(/^@/, "")]);
+        }
+        break;
       }
+      case "ForOfStatement":
+      case "ForInStatement":
+        unknown(esMentions(n.left));
+        break;
+      case "BinaryExpression":
+        if (n.operator === "/") for (const o of [n.left, n.right]) if (o?.type === "Identifier" && o.name?.startsWith("@")) ev.push({ name: o.name.slice(1), w: "div" });
+        break;
+      default:
+        break;
     }
-  });
-  forEachExprNode(ast, (e) => {
-    if (e.kind === "assign") { const r = lvalueRoot(e.target ?? e.left); if (r) w.add(r); }
-    if (e.kind === "unary" && (e.op === "++" || e.op === "--")) { const r = lvalueRoot(e.argument); if (r) w.add(r); }
-    if (e.kind === "update") { const r = lvalueRoot(e.argument); if (r) w.add(r); }
-    if (e.kind === "reset-expr") { const r = lvalueRoot(e.target); if (r) w.add(r); }
-    if (e.kind === "call" && e.callee && e.callee.kind === "member" && !PURE_METHODS.has(e.callee.property)) {
-      const r = lvalueRoot(e.callee.object);
-      if (r) w.add(r);
+    for (const [k, v] of Object.entries(n)) if (k !== "loc" && k !== "range" && v && typeof v === "object") visit(v);
+  };
+  visit(root);
+  return ev;
+}
+
+/** Write events of one AST node (AST statement or ExprNode), structurally. */
+function nodeEvents(n, push) {
+  const unknown = (names) => { for (const x of names) if (x) push({ name: x, w: "unknown" }); };
+  // impl#1's own reading (dependency-graph.ts): a non-structural state-decl that is not the folded
+  // `const @x` derived form is a WRITE (`@x = v` in a function body / handler / logic block).
+  if (n.kind === "state-decl" && n.name && (n._isReactiveAssign || (n.structuralForm === false && n.shape !== "derived"))) {
+    push(n.initExpr ? { name: n.name, w: "assign", op: "=", value: n.initExpr } : { name: n.name, w: "unknown" });
+  }
+  if ((n.kind === "reactive-array-mutation" || n.kind === "reactive-nested-assign") && n.target) unknown([String(n.target).replace(/^@/, "")]);
+  // `@set(…)`: the target is named in the raw args — every word there counts (over-approximation).
+  if (n.kind === "reactive-explicit-set") unknown([...deepMentions(n), ...(typeof n.args === "string" ? n.args.match(/[A-Za-z_$][\w$]*/g) ?? [] : [])]);
+  // `bind:attr=…` writes every cell its value names; so does `ref=…` (the element, at mount).
+  if (n.kind === "markup" && Array.isArray(n.attrs)) {
+    for (const a of n.attrs) {
+      if (!a || typeof a.name !== "string" || !(a.name.startsWith("bind:") || a.name === "ref")) continue;
+      unknown(deepMentions(a.value));
+      if (a.value && typeof a.value.name === "string") unknown([a.value.name.replace(/^@/, "").split(/[.[]/)[0]]);
     }
-  });
-  return w;
+  }
+  if (n.kind === "assign") {
+    const t = n.target ?? n.left;
+    if (t && t.kind === "ident" && typeof t.name === "string" && t.name.startsWith("@")) push({ name: t.name.slice(1), w: "assign", op: n.op, value: n.value ?? null });
+    else { const r = lvalueRoot(t); if (r) unknown([r]); else unknown(deepMentions(t)); }
+  }
+  if ((n.kind === "unary" || n.kind === "update") && (n.op === "++" || n.op === "--")) {
+    const a = n.argument;
+    if (a && a.kind === "ident" && typeof a.name === "string" && a.name.startsWith("@")) push({ name: a.name.slice(1), w: "incdec" });
+    else { const r = lvalueRoot(a); if (r) unknown([r]); else unknown(deepMentions(a)); }
+  }
+  if (n.kind === "unary" && n.op === "delete") { const r = lvalueRoot(n.argument); unknown(r ? [r] : deepMentions(n.argument)); }
+  if (n.kind === "reset-expr") {
+    const t = n.target;
+    if (t && t.kind === "ident" && typeof t.name === "string" && t.name.startsWith("@")) push({ name: t.name.slice(1), w: "reset" });
+    else { const r = lvalueRoot(t); unknown(r ? [r] : deepMentions(t)); }
+  }
+  if (n.kind === "call" && n.callee && n.callee.kind === "member" && !PURE_METHODS.has(n.callee.property)) {
+    const r = lvalueRoot(n.callee.object);
+    if (r) unknown([r]);
+  }
+  if (n.kind === "call" && n.callee && n.callee.kind === "ident" && n.callee.name === "@set") unknown(deepMentions(n.args));
+  if (n.kind === "binary" && n.op === "/") {
+    for (const o of [n.left, n.right]) if (o && o.kind === "ident" && typeof o.name === "string" && o.name.startsWith("@")) push({ name: o.name.slice(1), w: "div" });
+  }
+}
+
+/** Events of a raw string impl#1 holds, through impl#1's parsers (see the section header). */
+function rawTextEvents(str, filePath, stack) {
+  const names = [...new Set(mentionsIn(str))];
+  if (names.length === 0) return [];
+  if (stack.has(str)) return names.map((name) => ({ name, w: "unknown" }));
+  // 1. statements (also any single expression)
+  try {
+    const r = parseStatements(str);
+    if (r && r.ast && !r.error) return esEvents(r.ast, filePath);
+  } catch { /* not statements */ }
+  // 2. one scrml expression, read in full
+  try {
+    const e = captureTrailingContentWarnings(() => parseExprToNode(str, filePath, 0)).result;
+    if (e && typeof e === "object" && e.kind !== "escape-hatch" && !hasLostTrailingContent(e)) {
+      const seen = deepMentions(e);
+      const out = names.filter((nm) => !seen.has(nm)).map((name) => ({ name, w: "unknown" })); // a dropped mention
+      stack.add(str);
+      try { walkEvents(e, filePath, (ev) => out.push(ev), null, stack); } finally { stack.delete(str); }
+      return out;
+    }
+  } catch { /* not an expression */ }
+  // 3. unreadable: every mention is a write of unknown kind
+  return names.map((name) => ({ name, w: "unknown" }));
 }
 
 /**
- * Lexical write classification of every `@name` occurrence. Conservative: an occurrence it
- * cannot prove a read is a write. `isSequence` makes any bare use (a possible alias) a write.
- * Comments are NOT stripped — a mention in a comment counting as a write only yields `let`.
+ * The markup body of a component definition, as impl#1's component expander reads it: a
+ * `component-def` node's `raw`, or — for `export const Name = <markup>` — the export-decl `raw` past
+ * its `export const Name =` prefix (component-expander.ts, cross-file path (b)). null otherwise.
  */
-export function lexicalWritten(src, name, isSequence) {
+function componentBodyOf(n) {
+  if (typeof n.raw !== "string") return null;
+  let body = null;
+  if (n.kind === "component-def" && typeof n.name === "string") body = n.raw;
+  else if (n.kind === "export-decl" && n.exportKind === "const" && typeof n.exportedName === "string") {
+    const prefix = `export const ${n.exportedName} =`;
+    const idx = n.raw.indexOf(prefix);
+    if (idx !== -1) body = n.raw.slice(idx + prefix.length).trimStart();
+  }
+  return body !== null && body.trimStart().startsWith("<") ? body : null;
+}
+
+/**
+ * Events of a component body, re-parsed with impl#1's OWN component-body parser
+ * (component-expander.ts `parseComponentBody` — what the expander instantiates). A parse error, or
+ * a `@name` of the body that the re-parsed nodes no longer mention (dropped text), → `unknown`.
+ */
+function componentEvents(body, name, filePath, stack) {
+  const unknownAll = () => [...new Set(mentionsIn(body))].map((nm) => ({ name: nm, w: "unknown" }));
+  let r;
+  try {
+    r = captureTrailingContentWarnings(() => parseComponentBody(body, name, filePath)).result;
+  } catch {
+    return unknownAll();
+  }
+  if (!r || !Array.isArray(r.nodes) || (r.errors ?? []).length > 0) return unknownAll();
+  const seen = new Set();
+  for (const n of r.nodes) deepMentions(n, seen);
+  const out = [...new Set(mentionsIn(body))].filter((nm) => !seen.has(nm)).map((nm) => ({ name: nm, w: "unknown" }));
+  walkEvents(r.nodes, filePath, (ev) => out.push(ev), null, stack, true);
+  return out;
+}
+
+/**
+ * Walk every object under `root`; push every event with its owner span. `fixed`: keep `ownerSpan`
+ * for the whole subtree (a re-parsed body's own spans are relative to the body, not the file).
+ */
+function walkEvents(root, filePath, push, ownerSpan, stack, fixed = false) {
+  const seen = new WeakSet();
+  const visit = (n, owner) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const x of n) visit(x, owner); return; }
+    const isNode = typeof n.kind === "string";
+    let own = owner;
+    if (!fixed && isNode && !EXPR_KINDS.has(n.kind) && n.span && typeof n.span.start === "number" && typeof n.span.end === "number") own = { start: n.span.start, end: n.span.end };
+    if (isNode) nodeEvents(n, (ev) => push({ ...ev, span: own }));
+    // A component definition's markup body is read with impl#1's component-body parser.
+    const body = isNode ? componentBodyOf(n) : null;
+    if (body !== null) for (const ev of componentEvents(body, n.name ?? n.exportedName, filePath, stack)) push({ ...ev, span: own });
+    for (const [k, v] of Object.entries(n)) {
+      if (k === "span" || (body !== null && k === "raw")) continue;
+      if (typeof v === "string") { if (v.includes("@")) for (const ev of rawTextEvents(v, filePath, stack)) push({ ...ev, span: own }); }
+      else if (v && typeof v === "object") visit(v, own);
+    }
+  };
+  visit(root, ownerSpan);
+}
+
+const EVENTS_MEMO = new WeakMap();
+/** Every write event in impl#1's AST of one file (memoized per AST object). */
+export function writeEvents(ast, filePath = "input.scrml") {
+  if (!ast || typeof ast !== "object") return [];
+  if (EVENTS_MEMO.has(ast)) return EVENTS_MEMO.get(ast);
+  const out = [];
+  walkEvents(ast, filePath, (ev) => out.push(ev), null, new Set());
+  EVENTS_MEMO.set(ast, out);
+  return out;
+}
+
+/** Cells impl#1's AST shows as (possibly) written anywhere in the file. */
+export function astWrites(ast, filePath) {
+  return new Set(writeEvents(ast, filePath).filter((e) => e.w !== "div").map((e) => e.name));
+}
+
+/**
+ * Lexical write classification of every `@name` occurrence: the offsets of the occurrences it
+ * cannot prove a read. `isSequence` makes any bare use (a possible alias) a write. Comments are
+ * NOT stripped — a mention in a comment counting as a write only yields `let`.
+ * A TEXT check: it is used ONLY as an additional reason to fail closed (the LOCK path's union; the
+ * `int` path's coverage check), never to clear a write the tree shows.
+ */
+export function lexicalWriteSites(src, name, isSequence) {
+  const hits = [];
   const re = new RegExp(`@${name.replace(/\$/g, "\\$")}(?![\\w$])`, "g");
-  for (const m of src.matchAll(re)) {
+  occ: for (const m of src.matchAll(re)) {
     const at = m.index;
     if (at > 0 && (isIdChar(src[at - 1]) || src[at - 1] === ".")) continue;
+    const hit = () => hits.push(at);
     const before = src.slice(Math.max(0, at - 80), at);
-    if (/(\+\+|--)\s*$/.test(before)) return true;
-    if (/\bbind:[\w-]+\s*=\s*(\$?\{\s*)?$/.test(before)) return true;
-    if (/\bref\s*=\s*(\$?\{\s*)?$/.test(before)) return true;
-    if (/\breset\s*\(\s*$/.test(before)) return true;
-    if (/\bdelete\s+$/.test(before)) return true;
+    if (/(\+\+|--)\s*$/.test(before)) { hit(); continue; }
+    if (/\bbind:[\w-]+\s*=\s*(\$?\{\s*)?$/.test(before)) { hit(); continue; }
+    if (/\bref\s*=\s*(\$?\{\s*)?$/.test(before)) { hit(); continue; }
+    if (/\breset\s*\(\s*$/.test(before)) { hit(); continue; }
+    if (/\bdelete\s+$/.test(before)) { hit(); continue; }
     // walk the member / index / call chain
     let j = at + m[0].length;
     let chainLen = 0;
@@ -546,7 +781,7 @@ export function lexicalWritten(src, name, isSequence) {
         lastWasLength = prop === "length";
         lastWasPureCall = false;
         if (src[j] === "(") {
-          if (!PURE_METHODS.has(prop)) return true;
+          if (!PURE_METHODS.has(prop)) { hit(); continue occ; }
           j = skipBalanced(src, j);
           lastWasPureCall = true;
           lastWasLength = false;
@@ -559,19 +794,24 @@ export function lexicalWritten(src, name, isSequence) {
     let k = j;
     while (src[k] === " " || src[k] === "\t") k++;
     const rest = src.slice(k, k + 4);
-    if (/^(\+\+|--)/.test(rest)) return true;
-    if (/^(\*\*=|>>>=|<<=|>>=|&&=|\|\|=|\?\?=|[+\-*/%&|^]=)/.test(rest)) return true;
-    if (rest[0] === "=" && rest[1] !== "=" && rest[1] !== ">") return true;
+    if (/^(\+\+|--)/.test(rest)) { hit(); continue; }
+    if (/^(\*\*=|>>>=|<<=|>>=|&&=|\|\|=|\?\?=|[+\-*/%&|^]=)/.test(rest)) { hit(); continue; }
+    if (rest[0] === "=" && rest[1] !== "=" && rest[1] !== ">") { hit(); continue; }
     if (isSequence) {
       if (chainLen > 0 && (lastWasLength || lastWasPureCall)) continue;
       if (chainLen === 0) {
         if (/\bin\s*=\s*$/.test(before) || /\bof\s+$/.test(before) || /\.\.\.\s*$/.test(before)) continue;
         if (/\$\{\s*$/.test(before) && /^\s*\}/.test(src.slice(j, j + 3))) continue;
       }
-      return true; // a bare use or element access of a sequence may alias it
+      hit(); // a bare use or element access of a sequence may alias it
     }
   }
-  return false;
+  return hits;
+}
+
+/** Does the lexical scan find any occurrence of `@name` it cannot prove a read? */
+export function lexicalWritten(src, name, isSequence) {
+  return lexicalWriteSites(src, name, isSequence).length > 0;
 }
 
 /**
@@ -690,60 +930,37 @@ function isIntegerExpr(e, isInt, self) {
 }
 
 /**
- * Every write to `@name` across the project ASTs, judged for integer-ness:
+ * Every write to `@name` across the project, judged for integer-ness from the write EVENTS impl#1's
+ * trees yield (writeEvents — structured nodes AND raw text, each event judged on its own):
  *   "int"      — each write is `@x = <integer expr>`, `@x += / -= / *= / %= <integer expr>`, `@x++` /
  *                `@x--`, or `reset(@x)` (back to its integer initializer);
  *   "not-int"  — some write's value is not provably integer, or the cell is an operand of `/`;
- *   "unknown"  — a write the AST does not expose as an assignment (bind:, ref=, a method / field
- *                write, `@set(…)`, a destructuring target, any escape-hatch expression naming the
- *                cell), or a lexical write the AST did not show at all.
- * Writes are gathered by NAME across every project file (over-inclusion only makes the verdict
+ *   "unknown"  — some write is of unknown kind (see writeEvents), OR a lexical write site of `@name`
+ *                in a file lies outside every tree node that yielded a write event for it there (a
+ *                write the tree did not surface — the text check only ever adds this reason).
+ * Events are gathered by NAME across every project file (over-inclusion only makes the verdict
  * stricter); an OPERAND `@x` is `int` only by its own declaration as resolved from the file the
  * write sits in (`resolver.isIntCell`) — unresolvable → not int.
+ * @param {Array<{ path: string, ast: object, source: string }>} files
  */
-function intWriteVerdict(name, files, resolver, sources) {
+function intWriteVerdict(name, files, resolver) {
   let verdict = "int";
-  let astWriteCount = 0;
   const worse = (v) => { if (v === "unknown" || verdict === "int") verdict = verdict === "unknown" ? "unknown" : v; };
-  const mentions = new RegExp(`@${name.replace(/[$]/g, "\\$&")}(?![\\w$])`);
   for (let fi = 0; fi < files.length; fi++) {
-    const ast = files[fi].ast;
-    // An operand `@x` is `int` only by ITS declaration as seen from THIS file (per-cell, r3).
-    const intCells = (x) => resolver.isIntCell(fi, x);
-    walkAst(ast, (n) => {
-      if (n.kind === "state-decl" && n.name === name && (n._isReactiveAssign || (n.structuralForm === false && n.shape !== "derived"))) {
-        astWriteCount++;
-        if (!isIntegerExpr(n.initExpr, intCells, name)) worse("not-int");
-      }
-      if ((n.kind === "reactive-array-mutation" || n.kind === "reactive-nested-assign") && n.target === name) worse("unknown");
-      if (n.kind === "reactive-explicit-set" && typeof n.args === "string" && new RegExp(`\\b${name}\\b`).test(n.args)) worse("unknown");
-      if (n.kind === "markup" && Array.isArray(n.attrs)) {
-        for (const a of n.attrs) {
-          if (a && typeof a.name === "string" && (a.name.startsWith("bind:") || a.name === "ref") && a.value && a.value.name === `@${name}`) worse("unknown");
-        }
-      }
-    });
-    forEachExprNode(ast, (e) => {
-      if (e.kind === "assign" && lvalueRoot(e.target) === name) {
-        astWriteCount++;
-        if (e.target.kind !== "ident") worse("unknown");
-        else if (!["=", "+=", "-=", "*=", "%="].includes(e.op) || !isIntegerExpr(e.value, intCells, name)) worse("not-int");
-      } else if (e.kind === "assign" && lvalueRoot(e.target) === null && mentions.test(JSON.stringify(e.target))) {
-        // A destructuring target (`[@x] = …`, `({k: @x} = …)`) — impl#1 builds it as an escape
-        // hatch: a write whose value cannot be judged → fail closed.
-        astWriteCount++;
-        worse("unknown");
-      }
-      // Any expression impl#1 could not structure (an escape hatch) that mentions the cell may write it.
-      if (e.kind === "escape-hatch" && typeof e.raw === "string" && mentions.test(e.raw)) worse("unknown");
-      if ((e.kind === "unary" || e.kind === "update") && (e.op === "++" || e.op === "--") && lvalueRoot(e.argument) === name) astWriteCount++;
-      if (e.kind === "reset-expr" && lvalueRoot(e.target) === name) astWriteCount++;
-      // A READ as an operand of `/` also rules `int` out: `/` between two ints is E-INT-DIVISION.
-      if (e.kind === "binary" && e.op === "/" && [e.left, e.right].some((o) => o && o.kind === "ident" && o.name === `@${name}`)) worse("not-int");
-      if (e.kind === "call" && e.callee && e.callee.kind === "member" && lvalueRoot(e.callee.object) === name && !PURE_METHODS.has(e.callee.property)) worse("unknown");
-    });
+    const isInt = (x) => resolver.isIntCell(fi, x);
+    const evs = writeEvents(files[fi].ast, files[fi].path).filter((e) => e.name === name);
+    for (const e of evs) {
+      if (e.w === "assign") {
+        if (!["=", "+=", "-=", "*=", "%="].includes(e.op) || !isIntegerExpr(e.value, isInt, name)) worse("not-int");
+      } else if (e.w === "div") worse("not-int");
+      else if (e.w === "unknown") worse("unknown");
+    }
+    // Coverage: every lexical write site must sit inside a tree node that yielded a write event.
+    const covers = evs.filter((e) => e.w !== "div" && e.span).map((e) => e.span);
+    for (const at of lexicalWriteSites(files[fi].source ?? "", name, false)) {
+      if (!covers.some((s) => at >= s.start && at < s.end)) { worse("unknown"); break; }
+    }
   }
-  if (astWriteCount === 0 && sources.some((s) => lexicalWritten(s, name, false))) return "unknown";
   return verdict;
 }
 
@@ -1010,17 +1227,18 @@ export function fixS66(source, opts = {}) {
     scanOnlyAsts.push(a);
     if (a) scanAsts.push(a); else projectUnknown = true;
   }
-  // An import we cannot resolve inside the project hides a file that may write a cell.
+  // The import graph, AS IMPL#1 READS IT (moduleEdges: impl#1's front end + its module resolver).
+  // A file impl#1 cannot read, an import it cannot resolve, or an edge to a file outside the
+  // project hides a file that may write a cell → every cell is `let` (S239 re-review r4).
   const known = new Set([resolve(filePath), ...project.map(([p]) => absKey(filePath, p))]);
+  const unextracted = [];
   for (const [p, s] of [[filePath, src], ...project]) {
     const base = p === filePath ? resolve(filePath) : absKey(filePath, p);
-    const im = importSpecifiers(s);
-    if (im.unextracted > 0) projectUnknown = true; // an import we cannot even read: assume a writer
-    for (const spec of im.specs.filter((x) => x.startsWith("."))) {
-      const target = resolve(dirname(base), spec);
-      if (!known.has(target) && !known.has(target + ".scrml")) projectUnknown = true;
-    }
+    const me = moduleEdges(base, s);
+    if (!me.ok || me.unresolved.length > 0) unextracted.push(`${relative(dirname(resolve(filePath)), base) || basename(base)}: ${me.unresolved.join(", ") || "unreadable"}`);
+    for (const target of me.edges) if (!known.has(target)) unextracted.push(`${relative(dirname(resolve(filePath)), base) || basename(base)}: import of ${target} is outside the project`);
   }
+  if (unextracted.length > 0) projectUnknown = true;
   const enums = collectEnums([ast, ...auxAsts]);
   const block = (rule, off, reason) => {
     const ls = src.lastIndexOf("\n", off - 1) + 1;
@@ -1070,17 +1288,18 @@ export function fixS66(source, opts = {}) {
     }
   }
 
-  const writes = astWrites(ast);
-  for (const a of [...auxAsts, ...scanAsts]) for (const w of astWrites(a)) writes.add(w);
-  const allSources = [src, ...project.map(([, s]) => s), ...scanOnly.map(([, s]) => s)];
-  const lifecycleCells = new Set(allSources.flatMap((s) => [...lifecycleNamedCells(s)]));
   // Per-cell resolution over the project's ASTs (files[0] = this file): which declaration each
   // `@name` in each file refers to. `int`-ness is read from THAT declaration only (S239 r3 HIGH 2).
   const cellFiles = [
-    { path: resolve(filePath), ast },
-    ...project.map(([p], k) => ({ path: absKey(filePath, p), ast: projectAsts[k] })),
-    ...scanOnly.map(([p], k) => ({ path: absKey(filePath, p), ast: scanOnlyAsts[k] })),
+    { path: resolve(filePath), ast, source: src },
+    ...project.map(([p, s], k) => ({ path: absKey(filePath, p), ast: projectAsts[k], source: s })),
+    ...scanOnly.map(([p, s], k) => ({ path: absKey(filePath, p), ast: scanOnlyAsts[k], source: s })),
   ].filter((f) => f.ast);
+  // The write set: every write event impl#1's trees yield, in every project file (writeEvents).
+  const writes = new Set();
+  for (const f of cellFiles) for (const w of astWrites(f.ast, f.path)) writes.add(w);
+  const allSources = [src, ...project.map(([, s]) => s), ...scanOnly.map(([, s]) => s)];
+  const lifecycleCells = new Set(allSources.flatMap((s) => [...lifecycleNamedCells(s)]));
   const resolver = cellResolver(cellFiles);
   const intReaders = intReaderCells(cellFiles, resolver);
 
@@ -1148,7 +1367,7 @@ export function fixS66(source, opts = {}) {
     // integer expression of `int` cells); anything else — or any write the AST cannot classify —
     // leaves int-vs-number not mechanical: reported, untouched.
     if (!site.annotation && type === "number" && cls.kind === "literal" && /^-?\(?-?\d+\)?$/.test(cls.valueText) && intReaders.has(node.name)) {
-      const v = projectUnknown || hasMeta || writeAttr ? "unknown" : intWriteVerdict(node.name, cellFiles, resolver, allSources);
+      const v = projectUnknown || hasMeta || writeAttr ? "unknown" : intWriteVerdict(node.name, cellFiles, resolver);
       if (v !== "int") { block(rule, off, `an untyped integer cell feeds an \`int\`-typed reader, but its writes are ${v === "not-int" ? "not all provably integer" : "not all classifiable"} — \`int\` vs \`number\` is not mechanical`); continue; }
       type = "int";
     }
