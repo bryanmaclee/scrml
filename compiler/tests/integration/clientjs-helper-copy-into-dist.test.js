@@ -240,7 +240,7 @@ describe("S440 item 16 fix round — Windows 8.3 short names cannot slip the den
       const { r, out } = build(root, ["app/page.scrml"]);
       expect(fatal(r)).toContain("E-IMPORT-011");
       expect(files(out).some((f) => f.startsWith("_scrml_local/"))).toBe(false);
-    });
+    }, 30000); // a real `cmd /c dir /x` spawn + a compile: 5 s timed out under co-run load (S450)
   }
 });
 
