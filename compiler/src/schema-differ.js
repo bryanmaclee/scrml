@@ -318,7 +318,7 @@ function legacyScanCreateTables(text) {
     const statement = m[1]
       ? statementRaw.replace(/(CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)["`'[]?\w+["`'\]]?\s*\.\s*/i, "$1")
       : statementRaw;
-    found.push({ key: m[2].toLowerCase(), name: m[2], statement, body: text.slice(bodyStart, bodyEnd), offset: m.index });
+    found.push({ key: m[2].toLowerCase(), name: m[2], statement, body: text.slice(bodyStart, bodyEnd), offset: m.index, end: bodyEnd + 1 });
     re.lastIndex = bodyEnd + 1;
   }
   return found;
@@ -823,11 +823,36 @@ export function harvestRawCreateTables(text, out) {
 }
 
 /**
+ * EVERY raw `CREATE TABLE … (…)` statement in a `< schema>` body — the legacy read
+ * UNION the structured read, de-duplicated by SOURCE SPAN, not by key (S450 fix
+ * round, S239 F1). `schemaCreateTables` drops a structured hit whose KEY the
+ * legacy read already has — right for first-wins, wrong for an all-declarations
+ * list: a live head with a comment inside it (`CREATE TABLE assets /* live *\/ (…)`,
+ * `CREATE /*x*\/ TABLE …`, `assets -- v2⏎(…)`) is read ONLY by the structured
+ * reader, so keying it away hid the live table behind a same-name commented copy
+ * and turned the tenant floor OFF at exit 0. A structured hit is the same
+ * statement as a legacy one only when it starts inside that legacy statement's
+ * raw source span. Modified heads stay out (neither harvest reads them; E-SCHEMA-014).
+ * Used ONLY by `schemaTableDeclarations`; the harvest and first-wins are untouched.
+ */
+function allSchemaCreateTableDecls(text) {
+  const legacy = legacyScanCreateTables(text);
+  const spans = legacy.map((t) => [t.offset, t.end]);
+  const extra = [];
+  for (const t of structuredScanCreateTables(text)) {
+    if (t.modifiers.length !== 0) continue;
+    if (spans.some(([a, b]) => t.offset >= a && t.offset < b)) continue;
+    extra.push(t);
+  }
+  return [...legacy, ...extra];
+}
+
+/**
  * EVERY table declaration in one `< schema>` body that the §14.8.10 tenant floor
  * reads — duplicates INCLUDED, in source order — with whether it carries a
  * `tenant_id` column. The two forms are read by the same recognizers the floor
- * uses: `parseSchemaBlock` for the DSL (`name { … }`) and the raw harvest
- * (`schemaCreateTables`, the legacy ∪ structured read) for `CREATE TABLE … (…)`,
+ * uses: `parseSchemaBlock` for the DSL (`name { … }`) and the raw reads
+ * (`allSchemaCreateTableDecls` — legacy ∪ structured, de-duplicated by span) for `CREATE TABLE … (…)`,
  * minus a raw declaration with no readable column (which `extractDesiredSchema`
  * skips too). Both recognizers are COMMENT-AGNOSTIC (the ⊇-base guarantee above),
  * so a commented-out copy is a declaration here exactly as it is to the floor;
@@ -859,7 +884,7 @@ export function schemaTableDeclarations(text) {
       columns,
     });
   });
-  for (const t of schemaCreateTables(text)) {
+  for (const t of allSchemaCreateTableDecls(text)) {
     const columns = columnsFromDdlBody(t.body);
     if (columns.length === 0) continue;
     out.push({

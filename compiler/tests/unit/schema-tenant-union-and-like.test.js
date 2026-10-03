@@ -88,6 +88,18 @@ describe("(i) same-name declarations that DISAGREE on tenant_id are E-SCHEMA-015
       `    CREATE TABLE assets ${WITHOUT}\n    CREATE TABLE ASSETS ${WITH}`,
     "a live DSL and a live raw declaration":
       `    assets {\n      id: integer primary key\n      name: text\n    }\n    CREATE TABLE assets ${WITH}`,
+    // S450 fix round (S239 F1): a live head with a comment INSIDE it is read only by the
+    // structured reader — it was keyed away behind a same-name legacy-readable copy.
+    "A3: live head with a `/* */` inside, `--` copy WITHOUT tenant_id after (shadow)":
+      `    CREATE TABLE assets /* live */ ${WITH}\n    -- CREATE TABLE assets ${WITHOUT}`,
+    "A16: live head with a `--` comment between name and `(`, copy WITHOUT before (shadow)":
+      `    -- CREATE TABLE assets ${WITHOUT}\n    CREATE TABLE assets -- live\n    ${WITH}`,
+    "D1: live WITHOUT, head with a `/* */` inside, stale copy WITH after (over-scope)":
+      `    CREATE TABLE assets /* live */ ${WITHOUT}\n    -- CREATE TABLE assets ${WITH}`,
+    "D2: live WITHOUT, `--` comment in head, stale copy WITH before (over-scope)":
+      `    -- CREATE TABLE assets ${WITH}\n    CREATE TABLE assets -- v2, tenant column dropped\n    ${WITHOUT}`,
+    "B3: structured-only commented copy WITHOUT after a live WITH":
+      `    CREATE TABLE assets ${WITH}\n    -- CREATE TABLE assets /*old*/ ${WITHOUT}`,
     "beside a second table":
       `    -- CREATE TABLE assets (id INTEGER)\n    CREATE TABLE assets ${WITH}${NOTES}`,
   };
@@ -120,6 +132,18 @@ describe("(i) declarations that AGREE on tenant_id are quiet; the floor reads th
     const { r, server } = compileApp(`    -- CREATE TABLE assets (id INTEGER)\n    CREATE TABLE assets ${WITHOUT}`);
     expect(r.errors ?? []).toEqual([]);
     expect(tagged(server)).toBe(false);
+  });
+  test("a live head with a comment inside it, alone, is unchanged (scoped, no diagnostic)", () => {
+    const a = compileApp(`    CREATE TABLE assets /* live */ ${WITH}`);
+    expect(a.r.errors ?? []).toEqual([]);
+    expect(tagged(a.server)).toBe(true);
+    const b = compileApp(`    CREATE /*x*/ TABLE assets ${WITH}`);
+    expect(b.r.errors ?? []).toEqual([]);
+    expect(tagged(b.server)).toBe(true);
+  });
+  test("a string-embedded head is not a declaration (A10 control)", () => {
+    const { r } = compileApp(`    CREATE TABLE notes (id INTEGER, body TEXT DEFAULT 'CREATE TABLE assets (id INTEGER)')\n    CREATE TABLE assets ${WITH}`);
+    expect(r.errors ?? []).toEqual([]);
   });
   test("a single declaration is unchanged (WITH → scoped, WITHOUT → not)", () => {
     const a = compileApp(`    CREATE TABLE assets ${WITH}`);

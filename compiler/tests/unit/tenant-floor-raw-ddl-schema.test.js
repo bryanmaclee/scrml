@@ -699,7 +699,7 @@ describe("E-SCHEMA-012 — compile level: a qualified or unreadable `<schema>` C
     "a qualified head inside a -- comment is not rejected":
       `    CREATE TABLE assets ${COLS}\n    -- CREATE TABLE old.assets (id INTEGER, tenant_id TEXT)`,
     "a qualified head inside a /* */ comment is not rejected":
-      `    CREATE TABLE assets ${COLS}\n    /* CREATE TABLE old.public.assets (id INTEGER) */`,
+      `    CREATE TABLE assets ${COLS}\n    /* CREATE TABLE old.public.assets (id INTEGER, tenant_id TEXT) */`,
     "a qualified head inside a DSL string is not rejected (was a false positive)":
       `    notes {\n      id: integer primary key\n      body: text default("CREATE TABLE x.y.z (a)")\n    }\n    CREATE TABLE assets ${COLS}`,
     "a DOT INSIDE a quoted name is one identifier, not a qualifier":
