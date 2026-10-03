@@ -32,3 +32,16 @@
 - bun test compiler/tests/{unit,integration,conformance}: 27545 pass / 58 skip / 12 todo / 0 fail (27615 tests, 1412 files).
 - bun test compiler/tests/commands: 314 pass / 3 skip / 0 fail.
 - bun conformance/run.ts: 1221/1248 + 27 xfail (all accounted).
+
+## Merge origin/main (#1236, #1237) — commit 54e3cb542 (known-gaps both sections kept; FACTS/SPEC-INDEX regenerated)
+
+## Fix round — S239 review of 54e3cb542 (LAND-WITH-NITS) — 2026-10-02 evening
+- F2 reproduced first: component-local `${ <session> = {userId:"local"} }` + top-level CPS save() → 0 errors, `_scrml_body["session"].userId`. Root: CE inlines the component body, so the file-wide census saw the cell. Fix: fileScopeDeclaresSessionCell (skips component-def / `_expandedFrom` subtrees / function bodies) in both layers. Now E-SESSION-AMBIENT-SERVER; with the front end disabled the backstop fires too.
+- F1: check moved after the CPS split; scans cpsSplit.serverStmtIndices only (includes reactive-server stmts). Client tail `@msg = @session.userId` compiles, client emits `_scrml_cs_reactive_set("msg", session.userId)`; a server-half read still fires once. Splitting by half IS reliable at this stage (the split is computed in the same loop iteration, before the FunctionRoute is built).
+- F3: template-literal interpolations (nested), reactive-nested-assign, raw-text fields without a parsed counterpart. Lines: expression spans carry placeholder 1:1 and (for re-parsed substrings) relative offsets; resolved from `_sourceText` only when the offset lies inside the enclosing statement, else the statement span.
+- F4: emit-expr update + assignment server paths guarded (verified with the front end disabled: "emit-expr assignment" / "emit-expr update").
+- F5: text scan = rewriteCodeSegments + liveSqlInterpolations.
+- F6: backstop context span set per server fn in emit-server's emission loops; hits resolve to the node line when inside it, else the fn span.
+- Corpus: swept the current sources with the 54e3cb542 compiler and the new one — no unit gains an error. (11 stdlib units lose E-ASYNC/AWAIT-NOT-IN-SCRML under the archived compiler only — that compiler ran from .tmp/prev, outside the repo, so its stdlib-path exemption did not apply; environmental, not this change.)
+- Filed (not fixed): g-api-compile-write-true-ignores-application-scope-refusal (executed), g-server-fn-default-parameter-silently-dropped (RELAYED), g-server-fn-calls-client-only-helper-inside-sql-undefined (RELAYED).
+- Commit 676b08f5f (code+tests+SPEC): pre-commit 34158 pass / 0 fail. commands 314/3 skip/0 fail; conformance 1221/1248 + 27 xfail.

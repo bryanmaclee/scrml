@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 233 | 5 |
-| MED | 466 | 0 |
+| MED | 469 | 0 |
 | LOW | 220 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -22124,3 +22124,15 @@ The ruling names `""` explicitly. Executed: `<program auth="">` → E-AUTH-ATTR-
 ### RESOLVED (moot) g-w-attr-002-program-text-wrong-for-nested-program — no W-ATTR-002 on a `<program>` any more; a nested one gets E-PROGRAM-NESTED-AUTH only
 <!-- gap-resolution id=g-w-attr-002-program-text-wrong-for-nested-program prov=ruling:user-voice-scrml.md S449 item 4 -->
 The per-tag `<program>` W-ATTR-002 effect text is gone (W-ATTR-002 for `auth=` remains only on `<channel>`). VP-1 now asks `program-role.ts` for the program's role and skips a nested `<program>`'s `auth=` entirely. Executed: `<program name="w" auth="Bogus">` inside `<program auth="required">` → exactly one E-PROGRAM-NESTED-AUTH, no E-AUTH-ATTR-INVALID, no W-ATTR-002 (conformance `auth/auth-attr-nested-program-one-code-pos`, `codeCounts`).
+
+### g-api-compile-write-true-ignores-application-scope-refusal — `compileScrml({ write: true })` writes dist even when the build is refused — `NEW S449; MED; open`
+<!-- @gap id=g-api-compile-write-true-ignores-application-scope-refusal sev=MED status=open locus=compiler/src/api.js(compileScrml — the `beforeWrite` refusal hook is supplied only by commands/compile.js + commands/build.js)+compiler/src/commands/refusal-gate.js prov=review:S449-auth-r1-r2-review -->
+Filed from the S239 review of `54e3cb542`. Observed by the change agent too: `compiler/tests/integration/session-ambient-server-refused.test.js` calls `compileScrml({ write: true })` on programs that raise E-SESSION-AMBIENT-SERVER, and the `.server.js` is written. The refusal set (`APPLICATION_SCOPE_REFUSALS` — E-PROGRAM-NESTED-AUTH, E-AUTH-ATTR-INVALID, E-SESSION-AMBIENT-SERVER, …) is enforced only through the CLI's `beforeWrite` callback, so an API caller (a tool, a test harness, an embedding) gets the fail-open units on disk. Since S449 the backstop means a refused `@session` unit contains `_scrml_server_session_refused` (throws at request time), not a body read; an E-AUTH-ATTR-INVALID unit is still a public server. Fix direction: apply the refusal inside `compileScrml` when `write` is true, not in the commands.
+
+### g-server-fn-default-parameter-silently-dropped — a server function's default parameter value (`f(u = …)`) is dropped with no diagnostic — `NEW S449; MED; open`
+<!-- @gap id=g-server-fn-default-parameter-silently-dropped sev=MED status=open locus=compiler/src/codegen/emit-server.ts(param binding `const p = _scrml_body["p"]` — no default) prov=review:S449-auth-r1-r2-review -->
+RELAYED from the S239 review of `54e3cb542` (reviewer-executed; not re-run by the change agent). A server-escalated function declared `function f(u = …)` binds `u` from the request body only; the default is not applied when the caller omits the argument, and nothing is reported.
+
+### g-server-fn-calls-client-only-helper-inside-sql-undefined — a server function calling a client-only helper inside a `?{}` interpolation emits an undefined call with no error — `NEW S449; MED; open`
+<!-- @gap id=g-server-fn-calls-client-only-helper-inside-sql-undefined sev=MED status=open locus=compiler/src/codegen/emit-server.ts(?{} interpolation lowering)+compiler/src/route-inference.ts(no check that a callee named inside a ?{} interpolation is emitted server-side) prov=review:S449-auth-r1-r2-review -->
+RELAYED from the S239 review of `54e3cb542` (reviewer-executed; not re-run). The `?{}` interpolation text names a function that exists only in the client bundle; the server module references it as a free identifier (ReferenceError → 500 at request time), compile clean. Same dangling-reference class as the §20.5 `session` / `@currentUser` binding fixes.
