@@ -7783,6 +7783,29 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   }
 
   /**
+   * Parse a `transaction { body }` block (§19.10.2). Called from both
+   * parseLogicBody's top-level loop and parseOneStatement (nested bodies — a
+   * function body, if/else, loop and match-arm blocks). Assumes peek() is the
+   * `transaction` keyword. The §19.10.4 placement rules (non-`!` function →
+   * E-ERROR-001, nesting → E-ERROR-007) are checked post-TAB by
+   * validators/lint-transaction.ts, not here.
+   */
+  function parseTransactionBlock() {
+    const startTok = consume(); // consume `transaction`
+    let body = [];
+    if (peek().text === "{") {
+      consume(); // consume `{`
+      body = parseRecursiveBody();
+    }
+    return {
+      id: ++counter.next,
+      kind: "transaction-block",
+      body,
+      span: spanOf(startTok, peek()),
+    };
+  }
+
+  /**
    * Parse a `fail` statement — `fail EnumType.Variant(args)` or `fail EnumType::Variant(args)`.
    * Called from both parseLogicBody's top-level loop and parseOneStatement (nested bodies).
    * Assumes peek() is the `fail` keyword.
@@ -9643,6 +9666,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // FAIL: `fail EnumType.Variant(args)` (§19.3)
     if (tok.kind === "KEYWORD" && tok.text === "fail") {
       return parseFailStmt();
+    }
+
+    // TRANSACTION BLOCK: `transaction { body }` (§19.10.2) in a NESTED body — a
+    // function body (every fn-decl site, incl. the `export` re-parse, takes its
+    // body from parseRecursiveBody → here), an if/else / loop / match-arm block.
+    // Without this arm the statement fell through to the expression path, where
+    // `transaction` degraded to an undeclared identifier (E-SCOPE-001) — S450,
+    // g-transaction-block-not-recognized-inside-a-function-body. Gated on a
+    // following `{` so any other use of the word keeps its prior handling.
+    if (tok.kind === "KEYWORD" && tok.text === "transaction" && peek(1)?.text === "{") {
+      return parseTransactionBlock();
     }
 
     // DEFER: `defer <statement>` — §19.16 scope-exit statement (contextual keyword)
@@ -15647,20 +15681,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       continue;
     }
 
-    // TRANSACTION BLOCK: `transaction { body }`
+    // TRANSACTION BLOCK: `transaction { body }` (§19.10.2) — shared with
+    // parseOneStatement (nested bodies) via parseTransactionBlock.
     if (tok.kind === "KEYWORD" && tok.text === "transaction") {
-      const startTok = consume(); // consume `transaction`
-      let body = [];
-      if (peek().text === "{") {
-        consume(); // consume `{`
-        body = parseRecursiveBody();
-      }
-      nodes.push({
-        id: ++counter.next,
-        kind: "transaction-block",
-        body,
-        span: spanOf(startTok, peek()),
-      });
+      nodes.push(parseTransactionBlock());
       continue;
     }
 
