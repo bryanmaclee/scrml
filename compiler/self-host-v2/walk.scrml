@@ -214,8 +214,15 @@ ${
             .Bound(name: name, e: e) :> [Node.NExpr(e)]
             .On(event: event, body: body) :> [Node.NBlock(body)]
             .Bind(kind: k, read: r, sink: sk, write: w) :> [Node.NExpr(r), Node.NBlock(w)]
-            .Gate(values: vs) :> []
+            .Gate(values: vs, fields: fs) :> validityNodes(fs)
         }
+    }
+
+    // s449: a form gate's statically named fields — their instance references are children.
+    fn validityNodes(fs: ValidityOf[]) -> Node[] {
+        let out: Node[] = []
+        for (const f of fs) { out = out.concat([Node.NInst(validityInst(f))]) }
+        return out
     }
 
     // Every node under (and including) `root`, preorder.

@@ -298,6 +298,12 @@ ${
         }
     }
 
+    fn surfacesJs(ctx: Ctx, fs: ValidityOf[]) -> JsExpr[] {
+        let out: JsExpr[] = []
+        for (const f of fs) { out = out.concat([surfaceJs(ctx, f)]) }
+        return out
+    }
+
     fn surfaceMethod(pr: SurfaceProp) -> string {
         return match pr {
             .IsValid :> "isValid"
@@ -686,8 +692,15 @@ ${
             .Bound :> []
             .On :> []
             .Bind :> []
-            .Gate(values: vs) :> [{ name: "data-scrml-gated", value: vs.join(" ") }]
+            .Gate(values: vs) :> gatedMarker(vs)
         }
+    }
+
+    // §55.17.6: `data-scrml-gated` on a GATED form only (a form whose listener
+    // only records the submit, §55.7, gates nothing).
+    fn gatedMarker(vs: string[]) -> HAttr[] {
+        if (vs.length == 0) return []
+        return [{ name: "data-scrml-gated", value: vs.join(" ") }]
     }
 
     fn hasWiredAttr(attrs: Attr[]) -> boolean {
@@ -917,7 +930,7 @@ ${
             .Bound(name: n, e: e) :> [sexpr(rtCall(ctx, "attr", [scopeVar(), node, jstr(n), jthunk(exprJs(ctx, e))]))]
             .On(event: ev, body: body) :> [sexpr(rtCall(ctx, "on", [scopeVar(), node, jstr(ev), JsExpr.JArrow([], blockJs(ctx, body))]))]
             .Bind(kind: k, read: r, sink: sk, write: w) :> [sexpr(rtCall(ctx, "bind", [scopeVar(), node, jstr(bindProp(k)), jthunk(exprJs(ctx, r)), JsExpr.JArrow([symName(ctx, sk)], blockJs(ctx, w))].concat(bindSurface(ctx, r))))]
-            .Gate(values: vs) :> [sexpr(rtCall(ctx, "gate", [scopeVar(), node]))]
+            .Gate(values: vs, fields: fs) :> [sexpr(rtCall(ctx, "gate", [scopeVar(), node, JsExpr.JArrowE([], JsExpr.JArray(surfacesJs(ctx, fs)))]))]
         }
     }
 

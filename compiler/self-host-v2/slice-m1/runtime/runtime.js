@@ -769,11 +769,19 @@ export function errors(scope, marker, messages, all) {
 const boundSurface = new WeakMap();
 
 /**
- * The compiler submit gate (§55.17.3) on a gated `<form>`. Registered BEFORE
- * any author `submit` listener of the form, so it runs first and
- * synchronously. On each submit:
- *   1. touch — `touched` on every validated value a control inside the form binds;
- *   2. submitted — `submitted` on those values (or their compounds);
+ * The form's surface listener (§55.7) and, when a bound value carries
+ * validators, the compiler submit gate (§55.17.3). Registered BEFORE any
+ * author `submit` listener of the form, so it runs first and synchronously.
+ *
+ * The bound values are the union of `named()` — the records of the fields the
+ * form's composed subtree names statically, mounted or not (§55.17.3: the
+ * values bound "inside the form (the §55.17.2 rule 1 composed subtree)") —
+ * and the records of the controls rendered inside the form, which is how an
+ * instance a use, an `<each>` row or a slot creates is reached.
+ *
+ * On each submit:
+ *   1. touch — `touched` on every bound VALIDATED value;
+ *   2. submitted — `submitted` on every bound value (a field's compound);
  *   3. block if invalid — cancel the submission (no native navigation / POST)
  *      and stop the event, so no author handler runs;
  *   4. otherwise the event proceeds to the author's handler.
@@ -781,19 +789,20 @@ const boundSurface = new WeakMap();
  * step 2 still runs. `SubmitEvent.submitter` is null for `requestSubmit()`
  * with no argument — that submit is gated.
  */
-export function gate(scope, form) {
+export function gate(scope, form, named) {
   requireScope(scope, "a submit gate");
   const h = (e) => batch(() => {
-    const recs = new Set();
+    const recs = new Set(named());
     for (const el of form.querySelectorAll("input, textarea, select")) {
       const rec = boundSurface.get(el);
-      if (rec && rec.validated) recs.add(rec);
+      if (rec) recs.add(rec);
     }
     const bypass = e.submitter != null && e.submitter.hasAttribute("formnovalidate");
     for (const r of recs) r.submit();
     if (bypass) return;
     let valid = true;
     for (const r of recs) {
+      if (!r.validated) continue;
       r.touch();
       if (!r.isValid()) valid = false;
     }

@@ -284,20 +284,26 @@ ${
         Bound(name: string, e: Expr),
         On(event: string, body: Block),
         Bind(kind: BindKind, read: Expr, sink: Sym, write: Block),
-        // s449 — the compiler submit gate (§55.17.3) on a GATED `<form>`: one
-        // whose composed subtree binds a value that carries validators. On
-        // each `submit`, BEFORE any author handler and synchronously, it marks
-        // `touched` and `submitted` on every validated value bound by a native
-        // control inside the form, and, if any is invalid, cancels the
-        // submission and runs no author handler; a submitter carrying
-        // `formnovalidate` bypasses the block (§55.17.4: `submitted` still
-        // set). `values` names the gating values in source order (a top-level
-        // value by its name, a child field by `decl.field`) — the
-        // `data-scrml-gated` marker (§55.17.6). Which values gate a given
-        // submit is decided on the live form: the controls inside it whose
-        // `bind:` targets a validated value (so a use, an `<each>` row or a
-        // slot's instance gates exactly the instance it renders).
-        Gate(values: string[]),
+        // s449 — the form's submit listener for the §55 surface, on every
+        // `<form>` whose composed subtree (§55.17.2 rule 1) binds a field that
+        // has a surface. It runs BEFORE any author handler and synchronously.
+        //  - It sets `submitted` (§55.7: "the first submit of a `<form>` that
+        //    binds the value — for a compound, a form that binds any of its
+        //    fields") on every bound value with a surface.
+        //  - When `values` is non-empty the form is GATED (§55.17.3): it also
+        //    marks `touched` on every bound validated value and, if any is
+        //    invalid, cancels the submission and runs no author handler; a
+        //    `formnovalidate` submitter bypasses the touch and the block
+        //    (§55.17.4). `values` names the gating values in source order (a
+        //    top-level value by its name, a child field by `decl.field`) — the
+        //    `data-scrml-gated` marker (§55.17.6).
+        // `fields` are the bound surfaced fields the composed subtree NAMES —
+        // through the form's own markup, `if=` / state-view arms (mounted or
+        // not: §55.17.3 reach is the static subtree), slot content written
+        // here and `<*x/>` Stars. A field the subtree cannot name statically
+        // (an instance a use, an `<each>` row or a slot creates) is found on
+        // the live form, through the control that binds it.
+        Gate(values: string[], fields: ValidityOf[]),
     }
     export type ConstructAttr:struct = { field: int, value: Expr }
     export type CondArm:struct = { test: Expr, body: View[] }

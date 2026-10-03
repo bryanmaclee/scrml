@@ -128,7 +128,21 @@ ${
             .Static(name: x) :> []
             .Bound(name: x) :> []
             .On(event: x) :> []
-            .Gate(values: x) :> []
+            .Gate(values: x, fields: fs) :> checkGateFields(p, encl, fs)
+        }
+    }
+
+    // C14 for a gate's statically named fields: each a field surface that resolves.
+    fn checkGateFields(p: CoreProgram, encl: Decl[], fs: ValidityOf[]) -> string[] {
+        let out: string[] = []
+        for (const f of fs) { out = out.concat(checkGateField(p, encl, f)) }
+        return out
+    }
+
+    fn checkGateField(p: CoreProgram, encl: Decl[], f: ValidityOf) -> string[] {
+        return match f {
+            .OfField(decl: d, inst: i, idx: x) :> checkFieldSurface(p, encl, d, i, x)
+            .OfDecl(decl: d) :> ["C15: a gate names a compound <" + d.hint + ">, not a bound field"]
         }
     }
 

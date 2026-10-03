@@ -74,3 +74,22 @@
   `g-bootstrap-gate-reach-live-dom-reading` (LOW, PA reading), `g-bootstrap-validity-spec-silences-s449`
   (LOW), `g-impl1-form-gate-surface-s449` (MED, carried).
 - Gates: m4 544.
+
+## 4. S239 review round 1 (of `7f58f4b3f`, LAND-WITH-NITS)
+
+- **Gate reach = the SPEC's static subtree** (MED fail-open finding; §55.17.3 "inside the form
+  (the §55.17.2 rule 1 composed subtree)"). `Attr.Gate(values, fields)`: `lower`'s post-pass
+  `gateDecls` names every bound surfaced field the form's subtree reaches statically (own markup,
+  Cond arms mounted or not, slot content written there, `<*x/>` Stars with `.Lexical(0)` → the
+  Star's instance); `rt.gate(scope, form, () => [records])` gates their union with the live
+  controls (uses / `<each>` rows / slot fillers). Closed-`if=` and multi-step cases block; bite:
+  fields emptied → the handler runs.
+- **§55.7 submitted on ANY binding form**: forms binding only unvalidated compound fields carry a
+  Gate with empty `values` (no marker, no I- note, never blocks) that sets the compound's
+  `submitted`.
+- Refusal texts reworded to the real reason; `length` etc. on an element HTML does not apply it to
+  → no attribute (was a refusal); refused validators no longer cascade into E-VALIDITY-NO-SURFACE
+  (`FieldInfo.valsWritten`).
+- Filed: disabled/readonly controls still gate; `form="id"` external controls; infos-vs-warnings
+  note. The live-DOM gap marked resolved.
+- Gates: m4 550; conformance 1244/1286 + 42 xfail.

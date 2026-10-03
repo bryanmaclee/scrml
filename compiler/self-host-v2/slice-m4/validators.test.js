@@ -141,11 +141,16 @@ describe("(2) validators follow the bind — wherever it is written", () => {
     await loadProgram(clean(sel), "v-select");
     expect(attrsOf($("main select"))).toEqual({ required: "" });
   });
-  test("a validator with no HTML form on THIS element is refused (it would be inert there — no surface in the bootstrap)", () => {
-    const sel = P(F("length(>=2)", `<select bind:value=@v><option value="a">a</option></select>`, `<form><*v/></form>`), `        <*f/>`);
-    const d = run(sel).diags;
-    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(d[0].message).toContain("`minlength`");
+  // s449: §55.17.1 "No other validator is lowered" — an attribute HTML does not
+  // apply to THIS element is not written, and the validator is not inert: the
+  // §55 surface evaluates it and the §55.17 gate enforces it. (Was: refused,
+  // when the attribute was the only enforcement.)
+  test("a validator with no HTML form on THIS element: no attribute, but the surface evaluates it and the form is gated", async () => {
+    const sel = P(F("length(>=2)", `<select bind:value=@v><option value="a">a</option></select>`, `<form><*v/></form>`), `        <*f/>\n        <p class="s">\${@f.v.isValid}</p>`);
+    await loadProgram(clean(sel), "v-select-length");
+    expect(attrsOf($("main select"))).toEqual({});
+    expect($("main form").getAttribute("data-scrml-gated")).toBe("f.v");
+    expect($("p.s").textContent).toBe("false");
   });
   test("`pattern` lands ONLY when exact: anchored, no flags, no top-level `|`, the plain subset", async () => {
     await loadProgram(clean(P(F("pattern(/^[a-z0-9_]+@x\\.io$/)", `<input bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`)), "v-pattern");

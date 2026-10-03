@@ -358,7 +358,7 @@ describe("diagnostics — the surface is read-only; `<errors>` takes a surface",
 // ===========================================================================
 // The s449 conformance cases (conformance/cases/forms/{gate-*, surface-*,
 // validator-dead-locked-pos, validator-live-let-neg, errors-top-level-renders})
-// are written in the §66 opener form, which impl#1 does not parse (they xfail
+// are written in the current `<let x/>` spelling (pre-S447 opener form), which impl#1 does not parse (they xfail
 // there under g-impl1-form-gate-surface-s449). The bootstrap EXECUTES them
 // here: the codes half exactly as conformance/run.ts judges it (superset /
 // disjoint, over BOTH streams — diags and the I- infos), and the runtime half
@@ -400,4 +400,141 @@ describe("s449 conformance cases, executed by the bootstrap", () => {
       }
     });
   }
+});
+
+// ===========================================================================
+// S239 review round 1 — the gate's STATIC reach. §55.17.3: "Mark `touched =
+// true` on every bound validated value of the form — every value that carries
+// validators … whose `bind:` is on a native control inside the form (the
+// §55.17.2 rule 1 composed subtree)" — a static subtree, which includes
+// state-view arms (§55.17.2 rule 1). A value bound in a region that is not
+// currently mounted still gates the submit.
+// ===========================================================================
+describe("§55.17.3 static reach — a bound value in an unmounted region still gates", () => {
+  test("a closed `if=` region: the empty `req` value blocks the submit, and touched / `<errors>` show why", async () => {
+    const src = `<program>
+    <let show:bool=false/>
+    <let email:string="" req/>
+    <let calls:int=0/>
+    function register() { @calls = @calls + 1 }
+    <main>
+        <form onsubmit=register()>
+            <div if=@show><input bind:value=@email/></div>
+            <button type="submit">go</button>
+        </form>
+        <p class="calls">\${@calls}</p>
+        <p class="s">\${@email.touched}</p>
+        <div class="why"><errors of=@email/></div>
+    </main>
+</program>
+`;
+    await loadProgram(clean(src), "gate-closed-if");
+    expect(document.querySelectorAll("main input").length).toBe(0);
+    expect($("main form").getAttribute("data-scrml-gated")).toBe("email");
+    submit($("main form"));
+    expect(calls()).toBe("0");
+    expect($("p.s").textContent).toBe("true");
+    expect([...document.querySelectorAll(".why p.scrml-error")].map((p) => p.textContent)).toEqual(["email is required."]);
+    // the bite: with the gate's statically named fields emptied (live lookup only — the
+    // reach before this round) the same submit runs the handler
+    const core = clean(src);
+    (function walk(n) {
+      if (Array.isArray(n)) return n.forEach(walk);
+      if (n === null || typeof n !== "object") return;
+      if (n.variant === "Gate") n.data.fields = [];
+      Object.values(n).forEach(walk);
+    })(core);
+    await loadProgram(core, "gate-closed-if-live-only");
+    submit($("main form"));
+    expect(calls()).toBe("1");
+  });
+
+  const STEPS = `<program>
+    <let step:int=1/>
+    <let email:string="" req/>
+    <let password:string="" req length(>=8)/>
+    <let calls:int=0/>
+    function register() { @calls = @calls + 1 }
+    <main>
+        <form onsubmit=register()>
+            <div if=(@step == 1)><input class="e" bind:value=@email/></div>
+            <div if=(@step == 2)><input class="p" type="password" bind:value=@password/></div>
+            <button type="submit">Create</button>
+        </form>
+        <button class="next" onclick=(@step = 2)>next</button>
+        <p class="calls">\${@calls}</p>
+        <div class="why"><errors of=@email/></div>
+    </main>
+</program>
+`;
+  test("a multi-step form submitted at step 2 with an empty required step-1 field is BLOCKED", async () => {
+    await loadProgram(clean(STEPS), "gate-multistep");
+    clickEl($("button.next"));
+    expect($("input.e")).toBe(null);
+    type($("input.p"), "longenough");
+    submit($("main form"));
+    expect(calls()).toBe("0");
+    expect([...document.querySelectorAll(".why p.scrml-error")].map((p) => p.textContent)).toEqual(["email is required."]);
+  });
+  test("…and the same form with the step-1 field filled submits at step 2", async () => {
+    await loadProgram(clean(STEPS), "gate-multistep-ok");
+    type($("input.e"), "a@b.io");
+    clickEl($("button.next"));
+    type($("input.p"), "longenough");
+    submit($("main form"));
+    expect(calls()).toBe("1");
+  });
+  test("the gate names the step fields statically in Core (both arms), whatever is mounted", () => {
+    const gates = [];
+    (function walk(n) {
+      if (Array.isArray(n)) return n.forEach(walk);
+      if (n === null || typeof n !== "object") return;
+      if (n.variant === "Gate") gates.push(n.data);
+      Object.values(n).forEach(walk);
+    })(clean(STEPS));
+    expect(gates.length).toBe(1);
+    expect(gates[0].values).toEqual(["email", "password"]);
+    expect(gates[0].fields.map((f) => f.data.idx)).toEqual([1, 2]);
+  });
+});
+
+// §55.7: `submitted` "Becomes `true` on the first submit of a `<form>` that binds
+// the value — for a compound, a form that binds any of its fields". A form that
+// binds only an UNVALIDATED field of a compound is not gated, but its submit
+// still sets the compound's `submitted`.
+describe("§55.7 — a compound's submitted is set by a form that binds ANY of its fields", () => {
+  test("a form binding only an unvalidated field: not gated, the handler runs, and @signup.submitted becomes true", async () => {
+    const src = `<program>
+    <let calls:int=0/>
+    <signup note:string="n">
+        <let name:string=""/>
+        renders <input class="nm" bind:value=@name/>
+        <let email:string="" req/>
+    </>
+    renders <form onsubmit=save()><*name/><button type="submit">go</button></form>
+    function save() { @calls = @calls + 1 }
+    <main>
+        <*signup/>
+        <p class="calls">\${@calls}</p>
+        <p class="sub">\${@signup.submitted}</p>
+    </main>
+</program>
+`;
+    const r = run(src);
+    expect(r.diags).toEqual([]);
+    expect(r.infos).toEqual([]);                    // nothing validated is bound here: not gated
+    await loadProgram(r.core, "submitted-unvalidated");
+    expect($("main form").hasAttribute("data-scrml-gated")).toBe(false);
+    expect($("p.sub").textContent).toBe("false");
+    submit($("main form"));
+    expect(calls()).toBe("1");
+    expect($("p.sub").textContent).toBe("true");
+  });
+});
+
+describe("no cascade — a refused validator does not make its surface read a second, false error", () => {
+  test("`min(@n)` (refused: a non-literal bound) then `@a.isValid` → only the refusal", () => {
+    const src = `<program>\n    <let n:int=0/>\n    <let a:int=0 min(@n)/>\n    <main>\n        <p>\${@a.isValid}</p>\n        <errors of=@a/>\n    </main>\n</program>\n`;
+    expect(run(src).diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
 });
