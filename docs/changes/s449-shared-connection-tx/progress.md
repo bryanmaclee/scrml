@@ -43,3 +43,21 @@ Repro scripts: worktree `.tmp/repro/{app.scrml,seed.ts,client.ts,client2.ts,clie
 - HTTP after (same scripts): SYMPTOM 1 0/10 lost; SYMPTOM 2 0/10 failed; SYMPTOM 3 clean read;
   D implicitFail(1) → error returned, balances 10/0.
 - Live PG (local cluster): envelope commits, `fail` rolls back, serialized vs concurrent verified.
+
+## 3. Verification
+
+- Pure-source HTTP repro (no hand patch): `.tmp/repro2` — slowTx/slowOk await a 300 ms local API via
+  `scrml:http get()` INSIDE their envelope. base a1aac1433: S1 write LOST, S2 second envelope 500
+  ("within a transaction" in server log), S3 read returned 999/999 never committed. head: write kept,
+  both 200 (210/200), clean read 10/0.
+- Body read hoisted BEFORE the envelope's BEGIN (a stalled upload must not hold the DB lock).
+- Gate (pre-commit hook on b40cc391f): 29894 pass / 0 fail / 58 skip.
+- compiler/tests/commands: 315 pass / 0 fail / 3 skip. conformance: 1246/1280 + 34 xfail (2 new cases).
+- Live PG (sql-shared-connection-tx-pg): 6/6.
+- examples/23 over HTTP (head and base identical): login 200 + last_login_at write persisted; reads 200;
+  changeHosServer 500 on BOTH (pre-existing app bug, filed).
+- Corpus sweep (examples/ samples/ conformance/cases/, 2245 files, base vs head): 410 server modules;
+  152 byte-identical (no SQL handle); 258 differ ONLY in the S449 emission (guard runtime block,
+  guarded declaration, request-scope trailer; 3 also move the node:fs import line below the runtime);
+  0 residual. ZERO implicit envelopes in the corpus on either side (the D / body-hoist / PG-BEGIN
+  changes reach no corpus file — see g-implicit-envelope-requires-explicit-server-modifier).

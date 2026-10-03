@@ -24,7 +24,7 @@ Also absent: the §34 diagnostic-code total. It is load-bearing but not reliably
 | live compiler source (`compiler/src`) | 284,200 lines across 220 files |
 | test files | 1,572 |
 | specification lines (`compiler/SPEC.md`) | 43,940 |
-| conformance cases | 1278 |
+| conformance cases | 1280 |
 | standard-library modules | 21 |
 | CLI verbs | 11 |
 | LSP capabilities | 7 |

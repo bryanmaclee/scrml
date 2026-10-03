@@ -1,0 +1,9 @@
+<program db="./ledger.db" transactions="concurrent">
+    ${
+        function record(note) {
+            ?{`INSERT INTO entries (note) VALUES (${note})`}.run()
+            return 1
+        }
+    }
+    <button id="add" onclick=record("hello")>Add</>
+</program>
