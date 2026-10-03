@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 238 | 5 |
-| MED | 486 | 2 |
-| LOW | 238 | 0 |
+| MED | 487 | 2 |
+| LOW | 241 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -11378,6 +11378,8 @@ fires** — `gauntlet-teams/round2/team-4/app.scrml` (1), `gauntlet-teams/team-1
 **A variable-stored function reference fires nothing at all.** The doc comment is a coverage claim
 that does not hold — the same shape as the false `error.map.md` coverage claim reopened at S299.
 
+**S451 — (a) ruled (ruling:user-voice-scrml.md S451 "yes on all seven", R3):** E-ROUTE-001 is an ERROR; the §34 row was corrected to match §12.4. impl#1 still emits a warning and is frozen (S447), so this entry stays open as the impl#1 divergence; (b) is unchanged.
+
 **The consequence that decides the ruling: promoting the severity would NOT have caught the adopter's
 bug.** The dangerous shape ([[g-indirect-callee-never-server-placed-server-referenceerror]]) emits no
 E-ROUTE-001 whatsoever. Severity and soundness are orthogonal here — treating (a) as the fix for #284
@@ -22605,3 +22607,21 @@ Governing: SPEC §19.9.9.7 + §6.6.9 (S451 R7). Measured on `b490f3b75`: `<total
 ### g-impl1-sql-unhandled-outside-failable-s451 — impl#1 DIVERGENCE (filed, not fixed): a `?{}` query outside a `!` function that no `!{}` / `match` handles compiles at exit 0 — the S451 R11 E-ERROR-002 trigger is not emitted — `NEW S451; MED; open`
 <!-- @gap id=g-impl1-sql-unhandled-outside-failable-s451 sev=MED status=open locus=compiler/src/type-system.ts(the E-ERROR-002 checker keys on calls to `!` functions; a `sql` node is never treated as failable) prov=ruling:user-voice-scrml.md-S451-"your-recs.-R11-b"-R11 -->
 Governing: SPEC §19.8.3 / §8.7 (S451 R11). Measured on `b490f3b75`: `function loadName(id) { let row = ?{`SELECT name FROM users WHERE id = ${id}`}.get()  return row }` → exit 0, no E-ERROR-002. At run time impl#1 never implemented the struck silent mode either: the emit is `(await _scrml_sql`…`)[0] ?? null` with no catch, so a failed query throws into the route's error path (the run-time half is `g-sql-error-surface-unwired`). **Migration owed with the bootstrap (measured, impl#1-AST walk, `docs/changes/s451-spec-u1-rulings/progress.md`):** 598 newly-rejected sites in 272 files (conformance 162 · samples 77 · examples 28 · docs 4 · stdlib 1), plus up to 133 sites in 94 files the AST walk could not see; 69 sites in 57 of SPEC.md's own code blocks. The 162 conformance cases are listed in progress.md; their expected files are the versioned contract and are not edited by the SPEC change.
+
+## §S451b — impl#1 divergences from the S451 U1 tightenings R2 / R3 / R5 / R6 / R8 / R9 / R10 (2026-10-03; ruling:user-voice-scrml.md S451 "yes on all seven"; SPEC §12.4 / §34 E-ROUTE-001, E-ROUTE-002 / §19.10.6 / §19.9.1 + §57.8 / §8.9.2 + §19.10.5 / §57.4–§57.5 + §12.5.1 — change `docs/changes/s451-spec-u1-rulings/`. impl#1 is frozen for semantics (S447): FILED, not scheduled. R3: the existing `g-e-route-001-severity-contradicts-12-4-and-one-limb-never-fires` (SPEC side now settled: Error). R5: impl#1 conforms — `compiler/src/codegen/sql-tx-guard.ts` already routes every SQLite statement, inside a transaction or not, through the one mutex; nothing filed. R9: a `server function f()! -> SqlError` with a dependent SELECT→UPDATE pair, compiled on `b490f3b75`, already gets `BEGIN DEFERRED`; impl#1's envelope holes against the restated trigger are the existing `g-implicit-envelope-requires-explicit-server-modifier` and `g-implicit-envelope-only-on-baseline-csrf-arm`; nothing new filed)
+
+### g-impl1-route-002-reactive-cell-chain-s451 — impl#1 DIVERGENCE (filed, not fixed): a server function that calls a helper reading a reactive cell compiles at exit 0 with no E-ROUTE-002; the helper is left out of the server module, so the call fails at run time — `NEW S451; MED; open`
+<!-- @gap id=g-impl1-route-002-reactive-cell-chain-s451 sev=MED status=open locus=compiler/src/route-inference.ts(the E-ROUTE-002 client-pin classification keys on DOM roots `document` / `window` only — no reactive-cell limb) prov=ruling:user-voice-scrml.md-S451-"yes-on-all-seven"-R2 -->
+Governing: SPEC §12.4 (S451 R2 bullet) / §34 E-ROUTE-002. Measured on `b490f3b75`: `<x> = 5`, `function helper() { return @x + 1 }`, `function save() { ?{`INSERT INTO t (v) VALUES (${helper()})`}.run() }`, `<button onclick=save()>` → exit 0; `W-DEAD-FUNCTION` on `helper` (the server-side call is not counted as a caller); the server module calls `helper()` and contains no `function helper` (0 matches) — a ReferenceError → 500 at run time (fails closed, wrong stage, no diagnostic naming the chain). Disposition: impl#1 frozen; the bootstrap places it (design §2 / §10 R2).
+
+### g-impl1-manual-begin-open-at-function-return-s451 — impl#1 DIVERGENCE (filed, not fixed): a manual `?{BEGIN}` left open when its function returns stays open until the REQUEST ends — `NEW S451; LOW; open`
+<!-- @gap id=g-impl1-manual-begin-open-at-function-return-s451 sev=LOW status=open locus=compiler/src/codegen/sql-tx-guard.ts(the owner is the request scope; the left-open backstop `abandon` runs only from `_scrml_db_scope_end` at request end) prov=ruling:user-voice-scrml.md-S451-"yes-on-all-seven"-R6 -->
+Governing: SPEC §19.10.6 (S451 R6 bullet). By code reading on `b490f3b75` (not executed): the transaction owner is the request's AsyncLocalStorage scope, so a server function called in-process that issues `?{BEGIN}` and returns without `COMMIT` leaves the transaction open for the caller's remaining statements, which then run inside it; the rollback + log + 500 happen at request end. §19.10.6 R6 bounds it by the function's own invocation (rolled back at that return, reported, the call does not succeed).
+
+### g-impl1-payload-enum-wire-shape-s451 — impl#1 DIVERGENCE (filed, not fixed): a `fail` of a variant whose field schema is not in the file's registry (e.g. an imported error enum) puts the bare argument on `.data` instead of the §57.8 field-keyed object — `NEW S451; LOW; open`
+<!-- @gap id=g-impl1-payload-enum-wire-shape-s451 sev=LOW status=open locus=compiler/src/codegen/emit-logic.ts(fail-envelope `data` — the "raw .data" best-effort branch for a variant with no declared field schema) prov=ruling:user-voice-scrml.md-S451-"yes-on-all-seven"-R8 -->
+Governing: SPEC §57.8 / §19.9.1 (S451 R8). From the emitter's own comment (not executed here): when the variant's declared fields are not in this file's type registry — an imported error type, or a nullary variant given an erroneous payload — a single `fail` argument lowers to the bare value on `.data`. Payload VALUES already use `{"variant", "data": {…}}` (measured S446 by the bootstrap codec change) and same-file `fail` data is field-keyed, so only this branch diverges.
+
+### g-impl1-dual-decoder-on-internal-routes-s451 — impl#1 DIVERGENCE (filed, not fixed): server-function fetch stubs decode with the §57 dual decoder, so a raw JSON `null` on a compiler-internal route is accepted as `not` — `NEW S451; LOW; open`
+<!-- @gap id=g-impl1-dual-decoder-on-internal-routes-s451 sev=LOW status=open locus=compiler/src/runtime-template.js(`_scrml_wire_decode` — accepts raw null; referenced by the fetch stubs emitted from codegen/emit-functions.ts and codegen/atom-emitter.ts) prov=ruling:user-voice-scrml.md-S451-"yes-on-all-seven"-R10 -->
+Governing: SPEC §57.4 Scope / §12.5.1 decoder contract (S451 R10). By code reading on `b490f3b75`: `_scrml_wire_decode(value)` returns `null` for both `null` and the envelope and is the decoder on every server-function fetch stub. No compiler-emitted encoder sends raw `null` in a `T | not` position, so the observable effect is only that bytes this compiler did not write are accepted rather than reported malformed. The bootstrap codec already implements a `canonicalOnly` mode (`docs/changes/s446-bootstrap-uc-codec/` Q4) — R10 makes it the rule on internal routes.

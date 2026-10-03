@@ -505,3 +505,38 @@ Branch `spec/s451-u1-rulings`, base `b490f3b75` (== origin/main at start).
     sql/transactions-concurrent-sqlite-e-sql-010-neg
     ssr/i-ssr-auth-scoped-prerender-omitted-pos
     ssr/i-ssr-auth-scoped-prerender-rowscoped-neg
+
+- 2026-10-03 SET A committed (`445bbf453`, pre-commit full suite green: 29944 pass / 0 fail).
+
+- 2026-10-03 SCOPE EXTENSION from the PA: bryan ruled R2/R3/R5/R6/R8/R9/R10 "yes on all seven" (user-voice §S451,
+  last entry). SPEC text, each with a Provenance line + direction note:
+  - **R2** §12.4 new bullet (reactive cells are client-only; transitive reach from a server body = E-ROUTE-002 with the
+    chain; direct access keeps E-REACTIVE-003 / E-RI-002; `@currentUser`/`@session`, channel cells, CPS marshalled reads
+    excluded) + §34 E-ROUTE-002 row (R2 limb, Nominal). Newly-rejecting. impl#1 probe: server fn calling a helper that
+    reads `@x` → exit 0, W-DEAD-FUNCTION on the helper, helper absent from the server module (run-time ReferenceError).
+    Filed `g-impl1-route-002-reactive-cell-chain-s451`.
+  - **R3** §34 E-ROUTE-001 row → Error (+ a note on §12.4's sentence). Catalog correction; §12.4 unchanged. impl#1 still
+    warns — the existing `g-e-route-001-severity-contradicts-12-4-and-one-limb-never-fires` updated, not duplicated.
+  - **R5** §19.10.6 new bullet: the gate covers every statement on the connection (autocommit, manual BEGIN/COMMIT,
+    outside-request code); a transaction does not begin while another owner's statement executes. impl#1 conforms
+    (`sql-tx-guard.ts` `run()` acquires the mutex for a statement outside any transaction on SQLite) — no gap.
+  - **R6** §19.10.6 new bullet + §19.10.4 and §8.9.2 cross-refs: a manual `?{BEGIN}` is held by the issuing function's
+    invocation; open at return → rolled back, connection released, reported. READING (flagged): "reported" = a server
+    log line naming the function + the call does not report success (mirrors the request-level backstop). impl#1 rolls
+    back only at request end (code reading) — filed `g-impl1-manual-begin-open-at-function-return-s451`.
+  - **R8** new §57.8 + §12.5.1 bullet + §19.9.1 note: unit variant = name string (unchanged); payload variant =
+    `{"variant","data":{declared fields}}`; the `fail` envelope carries the same `variant`/`data` (+ `__scrml_error`,
+    `type`), `data` = `{}` for a fieldless error variant. I did NOT add a strict malformed-`data` rule (that is the codec's
+    open Q3, not ruled). impl#1 matches except the no-schema `fail` branch — filed `g-impl1-payload-enum-wire-shape-s451`.
+  - **R9** §8.9 intro + §8.9.2 + §19.10.5: the implicit envelope fires for ≥2 `?{}` without `.nobatch()` in a `!` server
+    body, independent or not; the §8.9.1 candidate set now governs only prepare/lock sharing. READING: "none `.nobatch()`"
+    read as "count the queries that do not carry `.nobatch()`". impl#1 probe (`server function f()! -> SqlError` with a
+    dependent SELECT→UPDATE) already emits `BEGIN DEFERRED`; its envelope holes are the two existing S449 gaps — none new.
+  - **R10** §57.4 Scope paragraph + bullet scoping + §57.5 note + §12.5.1 decoder contract: strict (canonical-only) on
+    compiler-internal routes now; dual decoder only for `<api>` (§60) responses and `<endpoint>` (§61) requests.
+    Newly-rejecting on internal routes (nothing this compiler emits sends raw null). Filed
+    `g-impl1-dual-decoder-on-internal-routes-s451` (code reading of `_scrml_wire_decode`).
+    UNRECONCILED (left OPEN in §57.5): whether §57.5's v1.0 canonical-only rule still retires raw-null admission on
+    foreign endpoints, given R10 keeps the dual decoder there.
+  - SPEC-INDEX summary notes added for §6, §8, §12, §13, §19, §34, §44, §57 (covering set A and set B); index regenerated
+    + `--check` OK; FACTS regenerated + `--check` PASS; `state.ts --write` / `--check` PASS.
