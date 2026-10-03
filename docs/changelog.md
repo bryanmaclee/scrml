@@ -7811,6 +7811,37 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### S450 (2026-10-02, Peter · P-Tech1) — bryan's "stamp all" built end to end; two reviews found holes live on main; aM pin bumped behind a deploy guard
+
+**The arc.** bryan answered S446's routing note with *"stamp all"*: three held drafts to land and five language rulings to
+build. All eight reached main through the S239 floor and `merge-on-green.sh`. Three of the four new builds came back FIX from
+review, and two of those findings were holes already on main, not regressions: a comment inside a live `CREATE TABLE` header
+hid the table from the tenant floor (closed here), and one shared SQLite connection lets a concurrent request lose a write it
+already acknowledged (routed to bryan). Two aM-driven impl#1 fixes were built and reviewed but sit on hold refs pending a
+policy exception, because bryan's S435 policy retires adopter-reported impl#1 work.
+
+- **#1208** — defer SPEC calls B1/B2/B3/A2 + Part A (E-DEFER-OUTSIDE-FUNCTION widened to the missed bodies).
+- **#1210** — a bare-dot constructor takes the type it flows into, including an imported callee's parameter; 38 positions
+  that silently guessed are now E-VARIANT-AMBIGUOUS (accepted by bryan).
+- **#1211** — client-reachable plain-JS helpers are copied into dist; E-IMPORT-011 for helpers outside the project root or in
+  a denied class; `type="module"` on bundles that import.
+- **#1241** — (iv) generated headless serve targets bind loopback by default (`SCRML_HOST` opts in); the production server
+  still binds every interface.
+- **#1242** — (iii) a server-call cell write nested in a handler is awaited before the next statement; only a sole root
+  statement stays fire-and-forget.
+- **#1243** — (i)+(ii) E-SCHEMA-015 when same-name table declarations disagree on `tenant_id`; a `LIKE` template in a column
+  list fails closed (E-SCHEMA-014); a comment inside a header no longer hides a declaration from the floor.
+- **#1244** — (v) E-ATTR-MULTI-STATEMENT: a multi-statement value in a non-handler attribute is an error (it used to be
+  silently dropped).
+- **Held for bryan:** `transaction {}` inside `!` functions (§19.10.2's own example did not compile; a nested `fail` left the
+  transaction open) and `${a} ${b}` whitespace in `<each>` rows.
+- **Filed (reproduced on main):** quoted `else-if`/`show` conditions ignored; `title=f()` wired as an event listener; a `!`
+  helper reached through `?` from a server function never emitted server-side; a handler `match` value missing payload
+  variants; `${children}` duplicated into earlier siblings; the implicit per-handler transaction committing on `fail`;
+  concurrent requests sharing one transaction. Closed: tilde-in-string corruption, missing WAL/busy_timeout.
+- **assetManagement:** pin bumped to main; a deploy guard refuses Pi builds until `SCRML_DATA_DIR` is set and `/` + `sw.js`
+  are served again under the new static allowlist.
+
 ### S446 (2026-10-01, Peter · P-Tech1) — six landings through scripted merge-on-green, three reviewed drafts for bryan, and the tests had been lying about the network
 
 **The arc.** Peter's ruled queue (bryan's S439/S440 answers to his S432/S438 notes) at full throttle. Every landing went
