@@ -1,1 +1,2 @@
 - 2026-10-03T01:00:48Z start: worktree verified, branch cut from origin/main bc4bca1f, pretest ok
+- 2026-10-03T01:08:26Z impl: E-SCHEMA-015 (union tenantTables + disagreement check) + E-SCHEMA-014 reason like; unit tests 37 new pass; schema/tenant suites 659/0; base probe confirms all REJECT shapes silent on bc4bca1f

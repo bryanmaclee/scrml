@@ -12,7 +12,8 @@
  *   3. g-schema-commented-out-declaration-shadows-live-table — NOT closed here. The
  *      union fix was REMOVED from #1209: on its own it over-scoped a live table from a
  *      stale commented copy placed after it (SELECT * silently []). Routed to bryan;
- *      the base behaviour is pinned below so the fix that closes it flips the pin.
+ *      CLOSED S450 by his S447 "stamp all" (i) ruling — union + E-SCHEMA-015 when
+ *      same-name declarations disagree on `tenant_id` (the pin below is flipped).
  *   4. g-schema-no-column-list-heads-declare-nothing — `OF type` / `PARTITION OF` /
  *      `AS query` / `USING` / `INHERITS` / an unclosed column list declared no
  *      columns. → E-SCHEMA-014.
@@ -288,12 +289,12 @@ describe("gap 2 — a DSL head slid into from a longer token is rejected, not re
   });
 });
 
-// gap 3 is OPEN (owner bryan): a commented-out `tenant_id`-less copy BEFORE the live
-// table still shadows it, exactly as on base. Pinned so the eventual fix flips it.
-describe("gap 3 — NOT closed by #1209 (base behaviour pinned)", () => {
-  test("a `--`-commented `tenant_id`-less copy before the live table still shadows it (tag=0, no diagnostic)", () => {
-    const { r, server } = compileApp(`    -- CREATE TABLE assets (id INTEGER)\n    CREATE TABLE assets ${C}`);
-    expect(schemaCodes(r)).toEqual([]);
-    expect(tagged(server)).toBe(false);
+// gap 3 — CLOSED S450 (bryan RULED S447 "stamp all" (i)): the commented-out `tenant_id`-less
+// copy no longer shadows silently; it DISAGREES with the live table on `tenant_id`, so the
+// program is rejected with E-SCHEMA-015 (full matrix: schema-tenant-union-and-like.test.js).
+describe("gap 3 — closed by S447 'stamp all' (i): E-SCHEMA-015", () => {
+  test("a `--`-commented `tenant_id`-less copy before the live table is E-SCHEMA-015", () => {
+    const { r } = compileApp(`    -- CREATE TABLE assets (id INTEGER)\n    CREATE TABLE assets ${C}`);
+    expect((r.errors ?? []).map((d) => d.code)).toContain("E-SCHEMA-015");
   });
 });

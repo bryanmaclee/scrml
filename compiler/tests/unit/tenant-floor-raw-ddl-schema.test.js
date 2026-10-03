@@ -693,8 +693,11 @@ describe("E-SCHEMA-012 — compile level: a qualified or unreadable `<schema>` C
     "an unqualified head": `    CREATE TABLE assets ${COLS}`,
     "an unqualified quoted head": `    CREATE TABLE "assets" ${COLS}`,
     "an unqualified IF NOT EXISTS head, lowercase": `    create table if not exists assets ${COLS}`,
+    // S450: the commented copy carries `tenant_id` like the live table — a copy that
+    // DISAGREES on `tenant_id` is E-SCHEMA-015 since S447 "stamp all" (i)
+    // (schema-tenant-union-and-like.test.js), which is not what this row pins.
     "a qualified head inside a -- comment is not rejected":
-      `    CREATE TABLE assets ${COLS}\n    -- CREATE TABLE old.assets (id INTEGER)`,
+      `    CREATE TABLE assets ${COLS}\n    -- CREATE TABLE old.assets (id INTEGER, tenant_id TEXT)`,
     "a qualified head inside a /* */ comment is not rejected":
       `    CREATE TABLE assets ${COLS}\n    /* CREATE TABLE old.public.assets (id INTEGER) */`,
     "a qualified head inside a DSL string is not rejected (was a false positive)":

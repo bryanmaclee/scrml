@@ -80,6 +80,7 @@ import {
   harvestRawCreateTables,
   findRejectedCreateTableHeads,
   findGluedDslTableHeads,
+  findTenantDeclarationDisagreements,
 } from "./schema-differ.js";
 // s430 — destructured-pattern name walk (E-SCOPE-010). Self-contained helpers;
 // route-inference.ts imports them the same way.
@@ -805,6 +806,11 @@ function checkSchemaDeclarations(ast, filePath, errors) {
             `columns live elsewhere, where the floors cannot see them`,
           "unclosed": `a column list \`(\` that is never closed, so no column is read`,
           "inherits": `\`INHERITS (…)\` — the parent's columns are not declared on this table`,
+          // S447 "stamp all" (ii) — gap g-schema-create-table-like-template-columns-not-declared.
+          "like": `a \`LIKE <template>\` item in its column list — the template's columns ` +
+            `(a \`tenant_id\`, when the template has one) are copied by the database but not declared on this ` +
+            `table, where the floors cannot see them. Declare the columns explicitly; a column ` +
+            `named \`like\` must be quoted (\`"like" TEXT\`)`,
         }[q.reason] ?? q.reason;
         errors.push(new GauntletError(
           "E-SCHEMA-014",
@@ -885,6 +891,34 @@ function checkSchemaDeclarations(ast, filePath, errors) {
           span,
         ));
       }
+    }
+
+    // E-SCHEMA-015 (bryan RULED S447 "stamp all" (i), gap
+    // g-schema-commented-out-declaration-shadows-live-table) — same-name `<schema>`
+    // declarations that DISAGREE on `tenant_id`. The tenant floor reads the union
+    // over declarations (`extractDesiredSchema` `tenantTables`); the union alone
+    // over-scopes a live table from a stale copy that carries `tenant_id`, and the
+    // old first-wins read let a stale copy without it shadow a live one. Both
+    // directions are rejected, naming every declaration. The declarations are the
+    // ones the floor reads (`schemaTableDeclarations` — comment-agnostic, like the
+    // floor), so a commented-out copy counts and the message says it is commented.
+    const lineOf = (off) => (off >= 0 ? body.slice(0, off).split("\n").length : 0);
+    const describeDecl = (d) =>
+      `${d.form === "raw" ? `\`CREATE TABLE ${d.name} (…)\`` : `\`${d.name} { … }\``} ` +
+      `(line ${lineOf(d.offset)} of the \`<schema>\` body${d.commented ? ", inside a comment" : ""})`;
+    for (const dis of findTenantDeclarationDisagreements(body)) {
+      errors.push(new GauntletError(
+        "E-SCHEMA-015",
+        `E-SCHEMA-015: this \`<schema>\` declares table \`${dis.name}\` more than once, and the ` +
+        `declarations disagree on \`tenant_id\`: WITH it — ${dis.withTenant.map(describeDecl).join("; ")}; ` +
+        `WITHOUT it — ${dis.withoutTenant.map(describeDecl).join("; ")}. Every declaration the ` +
+        `compiler reads — a commented-out copy included — counts, and the §14.8.10 tenant-row ` +
+        `isolation floor reads their union, so the copy that does not match the live table ` +
+        `either silently un-scopes it or tenant-scopes a table whose rows carry no \`tenant_id\` ` +
+        `(every row then redacted away). Delete the stale declaration (or make every declaration ` +
+        `of \`${dis.name}\` agree on \`tenant_id\`). (See SPEC §39.2, §14.8.10.)`,
+        span,
+      ));
     }
 
     let parsed;

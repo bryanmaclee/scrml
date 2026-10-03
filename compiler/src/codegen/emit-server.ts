@@ -1815,9 +1815,11 @@ export function generateServerJs(
   // `buildTenantContext` for the full account. `_tenantActive` remains the master
   // gate: an app with no tenant-scoped table in EITHER registry emits
   // byte-identically (every redaction site below is a no-op / absent).
+  // `tenantTables` = the UNION over every same-name `<schema>` declaration (S447
+  // "stamp all" (i)); disagreeing declarations are rejected at GCP1 (E-SCHEMA-015).
   const _tenantCtx: TenantContext = buildTenantContext(
     _protectCtx,
-    extractDesiredSchema(fileAST).tables,
+    extractDesiredSchema(fileAST).tenantTables,
   );
   const _tenantActive: boolean = _tenantCtx.tenantScopedTables.size > 0;
   // Cross-tenant writes/aggregates found by the hard-fail scan below that carry a
