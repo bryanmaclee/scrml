@@ -90,3 +90,23 @@
 
 ## r3 (S451) — S239 re-review of 8d982ee98: FIX (2 HIGH)
 - 2026-10-03T12:11:39-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-aa5497d684f4e19a8; both repros reproduced pre-fix (count locked; m :int).
+- 2026-10-03 r3 fix landed (36a6fa9c2), both by construction:
+  - HIGH 1: importSpecifiers examines EVERY `import`/`export` token (no statement-start list). Readable
+    import anywhere → specifier (even in a comment/string: loading a file only adds writes); any other
+    `import` token outside a comment/string → unextracted → every cell `let`. Comments/strings only
+    suppress the unextracted count, never hide a readable import; an UNCLOSED `/*` / `<!--` is not a
+    comment. `export type {…} from` / `export * from` read-or-unextracted; `import type` read.
+    Over-conservative cost measured over examples+samples+conformance/cases+stdlib (2308 files):
+    unextracted files 20 → 24; the 4 new are prose (`resolves the import graph`), CSS `@import`, a
+    prose comment — accepted per brief.
+  - HIGH 2: intCells regex deleted. cellResolver(files): `@x` in file i → that file's own
+    declaration, else `import { x }` → the declaring project file (transitive); unresolvable → not
+    int. intReaderCells now from the AST, each read resolved per file to files[0]. Exported cells
+    (`export <k>: int`) are not state-decls in impl#1's AST → unresolvable → not int (fail closed).
+  - LOW: destructuring target / any escape-hatch expression naming the cell → int verdict unknown.
+  - tests: §11 in fix-s66.test.js (18 new; 17 of them + the amended §10 prose case fail on 8d982ee98; the import-resolved-int positive passes on both); 104/104 file; pre-commit
+    29958 pass / 0 fail.
+  - examples default CLI over copies: 71 files · 4 changed · 9 with constructs left; impl#1 compile
+    orig vs fixed: no E- codes either side; only shape lints differ (W-PROGRAM-REDUNDANT-LOGIC /
+    W-PROGRAM-001 → W-PROGRAM-SPA-INFERRED), as before.
+  - counter unchanged: PASS 76 (62 non-vacuous) · FAIL 62 · NOT-TWINNED 500 · UNSUPPORTED 650 · graded 138.
