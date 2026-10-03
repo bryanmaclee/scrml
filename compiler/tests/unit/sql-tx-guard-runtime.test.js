@@ -252,17 +252,20 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
     expect(after[0].n).toBe(2);
   });
 
-  test("backstop: a request that ends with its transaction open is rolled back and the connection freed", async () => {
+  test("backstop: a request that ends with its transaction open is rolled back, FAILS (never acks success), and frees the connection", async () => {
     const errors = [];
     const origError = console.error;
     console.error = (...a) => { errors.push(a.join(" ")); };
     try {
-      const r = await asRequest(async () => {
+      // S449 re-review nit 1 (ack-then-rollback): the handler's own success value must
+      // not reach the client once its writes were rolled back.
+      await expect(asRequest(async () => {
         await sql.unsafe("BEGIN");
         await sql`UPDATE acc SET bal = 555 WHERE id = 1`;
         return "forgot to commit";
-      });
-      expect(r).toBe("forgot to commit");
+      })).rejects.toThrow(/still open.*rolled back.*failed/);
+      // a clean handler keeps its value
+      expect(await asRequest(async () => "clean")).toBe("clean");
     } finally {
       console.error = origError;
     }
@@ -465,7 +468,7 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
         await sql`UPDATE acc SET bal = 321 WHERE id = 1`; // and never commits
       };
       const message = rt._scrml_db_request_scope(async function message() { await onserverHandler(); });
-      await message.call({});
+      await expect(message.call({})).rejects.toThrow(/still open/);
     } finally {
       console.error = origError;
     }
@@ -481,7 +484,8 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
       await asRequest(async () => {
         await sql.unsafe("BEGIN");
         await sql`UPDATE acc SET bal = 777 WHERE id = 1`;
-        await rt._scrml_db_stream_end(); // what the SSE stream's finally runs
+        expect(await rt._scrml_db_stream_end()).toBe(true); // what the SSE stream's finally runs
+        expect(await rt._scrml_db_stream_end()).toBe(false); // nothing left to roll back
       });
     } finally {
       console.error = origError;

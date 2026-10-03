@@ -64,6 +64,28 @@ const APP = (dbPath) => `<program db="${dbPath}">
     return 0
   }
 
+  // an explicit ?{BEGIN} with no COMMIT on its path
+  server function leaveOpen(msg) {
+    ?{BEGIN}
+    ?{\`INSERT INTO log (msg) VALUES (\${msg})\`}.run()
+    return 1
+  }
+
+  // the same, called inside an implicit envelope: the envelope's own COMMIT is
+  // consumed as the nested savepoint's RELEASE, so the envelope is still open at the end
+  server function envelopeLeak(n)! -> E {
+    ?{\`UPDATE accounts SET balance = 300 WHERE id = 1\`}.run()
+    ?{\`UPDATE accounts SET balance = 200 WHERE id = 2\`}.run()
+    const r = leaveOpen("leaked")
+    return 0
+  }
+
+  server function* streamLeak() {
+    ?{BEGIN}
+    ?{\`UPDATE accounts SET balance = 444 WHERE id = 1\`}.run()
+    yield 1
+  }
+
   function plainWrite(msg) {
     ?{\`INSERT INTO log (msg) VALUES (\${msg})\`}.run()
     return 1
@@ -72,7 +94,7 @@ const APP = (dbPath) => `<program db="${dbPath}">
 <p>x</>
 </program>`;
 
-let dir, dbPath, compileErrors, routes, serverJs, holdServer;
+let dir, dbPath, compileErrors, routes, serverJs, holdServer, appServer;
 const holds = new Map();
 function latch() {
   let open;
@@ -142,10 +164,27 @@ beforeAll(async () => {
   serverJs = await Bun.file(join(outDir, "app.server.js")).text();
   const mod = await import(`file://${join(outDir, "app.server.js")}?v=${Date.now()}`);
   routes = mod.routes || [];
+  // the module's own WinterCG `fetch`, served over real HTTP: a thrown handler takes
+  // the host's ordinary server-error path
+  // `error()` mirrors the generated _server.js (build.js): every uncaught handler error
+  // becomes a fixed 500.
+  appServer = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    fetch: async (req) => (await mod.fetch(req)) ?? new Response("not found", { status: 404 }),
+    error: () => new Response("Internal Server Error", { status: 500 }),
+  });
 });
+
+async function httpCall(name, body) {
+  const route = routeFor(name);
+  const res = await fetch(`http://127.0.0.1:${appServer.port}${route.path}`, { method: "POST", headers: HEADERS, body: JSON.stringify(body ?? {}) });
+  return { status: res.status, text: await res.text() };
+}
 
 afterAll(() => {
   try { holdServer?.stop(true); } catch { /* stopped */ }
+  try { appServer?.stop(true); } catch { /* stopped */ }
   try { if (dir) rmSync(dir, { recursive: true, force: true }); } catch { /* EBUSY */ }
 });
 
@@ -162,7 +201,7 @@ describe("S449 review fix round", () => {
     const origError = console.error;
     console.error = (...x) => { errors.push(x.map(String).join(" ")); };
     try {
-      expect(serverJs).toContain("await _scrml_db_stream_end();");
+      expect(serverJs).toContain("if (await _scrml_db_stream_end()) {");
       const h = holdFor("sse");
       const route = routeFor("stream");
       const res = await route.handler(new Request(`http://localhost${route.path}?url=${encodeURIComponent(holdUrl("sse"))}`));
@@ -208,9 +247,51 @@ describe("S449 review fix round", () => {
     expect(await within(call("plainWrite", { msg: "y" }), 3000)).toEqual({ status: 200, body: 1 });
   });
 
+  test("re-review nit 1: a handler that leaves its transaction open FAILS (HTTP 500) — never 200 with its writes rolled back", async () => {
+    if (typeof globalThis.document !== "undefined") return;
+    seed();
+    const origError = console.error;
+    console.error = () => {};
+    try {
+      const r = await httpCall("leaveOpen", { msg: "lost" });
+      expect(r.status).toBe(500); // was: 200 "1", row rolled back
+      expect(committed()).toEqual({ acc: [10, 0], log: [] });
+      const e = await httpCall("envelopeLeak", { n: 0 });
+      expect(e.status).toBe(500); // was: 200 "0", envelope + inner work rolled back
+      expect(committed()).toEqual({ acc: [10, 0], log: [] });
+    } finally {
+      console.error = origError;
+    }
+    const ok = await httpCall("plainWrite", { msg: "clean" }); // a clean handler still answers 200
+    expect(ok.status).toBe(200);
+    expect(committed().log).toEqual(["clean"]);
+  });
+
+  test("re-review nit 1 (SSE): a stream that ends with its transaction open rolls back and sends a terminal `error` event", async () => {
+    if (typeof globalThis.document !== "undefined") return;
+    seed();
+    const origError = console.error;
+    console.error = () => {};
+    try {
+      const route = routeFor("streamLeak");
+      const res = await route.handler(new Request(`http://localhost${route.path}`));
+      expect(res.status).toBe(200); // a stream's status is fixed when it starts
+      const text = await res.text();
+      expect(text).toContain("data: 1");
+      expect(text).toContain("event: error");
+      expect(text).toContain("TransactionLeftOpen");
+    } finally {
+      console.error = origError;
+    }
+    expect(committed().acc).toEqual([10, 0]);
+  });
+
   test("F5: WebSocket callbacks are async and await their onserver handler inside the request scope", () => {
     if (typeof globalThis.document !== "undefined") return;
     expect(serverJs).toContain("async message(ws, raw) {");
+    // re-review nit 4: only a malformed frame (JSON.parse) is swallowed
+    expect(serverJs).toContain("try { d = JSON.parse(raw); } catch (_e) { return; }");
+    expect(serverJs).not.toContain("instanceof SyntaxError");
     expect(serverJs).toContain("await onChat(msg);");
     expect(serverJs).toMatch(/_scrml_ws_handlers\[_scrml_ws_key\] = _scrml_db_request_scope\(_scrml_ws_handlers\[_scrml_ws_key\]\)/);
   });

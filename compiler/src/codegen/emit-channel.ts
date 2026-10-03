@@ -1151,8 +1151,11 @@ export function emitChannelWsHandlers(channelNodes: any[], errors: CGError[], fi
 
   // message
   lines.push(`  async message(ws, raw) {`);
+  // A malformed client frame is ignored silently, as before — and ONLY that: the parse
+  // has its own `try`, so a handler's own SyntaxError is not mistaken for one.
+  lines.push(`    let d;`);
+  lines.push(`    try { d = JSON.parse(raw); } catch (_e) { return; }`);
   lines.push(`    try {`);
-  lines.push(`      const d = JSON.parse(raw);`);
   lines.push(`      const __ch = ws.data.__ch;`);
   for (const node of channelNodes) {
     const { name } = extractChannelAttrs(node);
@@ -1182,10 +1185,10 @@ export function emitChannelWsHandlers(channelNodes: any[], errors: CGError[], fi
 
     lines.push(`      }`);
   }
-  // A malformed client frame (JSON.parse) stays silent, as before; a FAILING handler
-  // — reachable now that it is awaited, previously an unhandled rejection — is logged.
+  // A FAILING handler — reachable now that it is awaited, previously an unhandled
+  // rejection — is logged.
   lines.push(`    } catch (_e) {`);
-  lines.push(`      if (!(_e instanceof SyntaxError)) console.error("[scrml] WebSocket onserver:message handler failed:", _e);`);
+  lines.push(`      console.error("[scrml] WebSocket onserver:message handler failed:", _e);`);
   lines.push(`    }`);
   lines.push(`  },`);
 

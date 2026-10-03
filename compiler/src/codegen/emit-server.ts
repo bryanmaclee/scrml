@@ -33,7 +33,7 @@ import { SQL_TX_GUARD_HELPER_LINES, guardHandleExpr, requestScopeLines, CONCURRE
 /** §19.10.6 (S449 review F1) — the SSE stream's `finally` backstop call. Emitted with
  *  every SSE route; dropped again when the module declares no `?{}` handle (and so
  *  carries no transaction runtime to call). */
-const SSE_STREAM_END_LINE = "        await _scrml_db_stream_end(); // §19.10.6: roll back a transaction the stream left open";
+const SSE_STREAM_END_LINE = "        if (await _scrml_db_stream_end()) { try { _scrml_ctrl.enqueue(_scrml_enc.encode('event: error\\ndata: ' + JSON.stringify({ error: { kind: \"TransactionLeftOpen\", message: \"the stream ended with its database transaction still open; its writes were rolled back (SPEC §19.10.6)\" } }) + '\\n\\n')); } catch (_scrml_enqErr) { /* the client is already gone */ } }";
 import { fileDefaultDbDecl, dbAttrValue } from "../db-ownership.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
