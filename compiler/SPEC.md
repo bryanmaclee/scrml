@@ -7907,6 +7907,13 @@ block, one of the function's parameters. Violation: **E-SCOPE-REDECLARE**, namin
 - Shadowing in a NESTED block (an `if` / loop / `match`-arm body declaring a name the enclosing block
   or the parameter list already binds) is legal and unaffected.
 - Two `function` declarations of one name in one block (of a function body) are outside this rule.
+- A `function` declaration named like one of the function's PARAMETERS is outside this rule (S432;
+  *provenance: ruling:user-voice-scrml.md S439, item 6 — B1*).
+  It is host-legal and replaces the parameter's value for the whole body; with a `defer` in the block
+  (§19.16.6 — the body is wrapped in a host `try`) it shadows the parameter from the block's start, so
+  both lowerings give the same program. It compiled before this rule, which rejects only programs that
+  already failed at codegen (below). The parameter stays bound: a later `let` / `const` / `lin` of the
+  same name is still E-SCOPE-REDECLARE.
 - File-scope duplicates are E-SCOPE-010 (§7.6), not this code — including two top-level `function`
   declarations of one name *(amended S440 #6; provenance: ruling:user-voice-scrml.md S440 (the S440 22-item
   queue, item 6))*.
@@ -18087,10 +18094,11 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-DEFER-CONTROL-FLOW | §19.16.3 | A deferred body contains `return`, `fail`, `?`, or a `break`/`continue` whose target is outside it (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-NESTED | §19.16.3 | A deferred body contains a `defer` (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A failable call inside a deferred body is not handled in place (`!{}` or `match`), or a deferred `!{}` handler has no catch-all `\| _ :>` arm; replaces E-ERROR-002 there (S430; emitted at `compiler/src/type-system.ts` + `compiler/src/validators/lint-defer.ts`.) | Error |
-| E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body (top-level logic, `<onMount>` / `on mount`, markup/state-block body, or — stage 1 — an arrow/function-expression body) (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
+| E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body (top-level logic, `<onMount>` / `on mount`, markup/state-block body, a `when` body, an `on*=${}` handler attribute or a `<channel>` `<onchange>` arm (S446), or — stage 1 — an arrow/function-expression body) (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-SERVER-IN-SPLIT | §19.16.5 | In a body-split (CPS) function: a server-tier deferred body, or a `defer` nested inside a statement the split runs server-side (S430; emitted at `compiler/src/route-inference.ts`.) | Error |
 | E-DEFER-UNSUPPORTED-SITE | §19.16.2 | `defer` in a bare `{ }` block, a single-statement (unbraced) `match` / `!{}` arm, the unbraced body of an `if` / `else` / loop arm, or an arm of a value-producing `match` / `if` / `for` — not a stage-1 defer site (S430; emitted at `compiler/src/validators/lint-defer.ts` + `compiler/native-parser/parse-expr.js`.) | Error |
 | E-DEFER-LATER-SHADOW | §19.16.2 | A deferred body reads a name that a `let` / `const` / `lin` declaration later in its enclosing block chain (re)binds (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
+| E-DEFER-AMBIGUOUS-LEAD | §19.16.1 | `defer` + whitespace + `[` (a single-statement defer led by an array literal) while a binding named `defer` is in scope — ambiguous with an index of that binding; write `defer[…]` to index or `defer { […]… }` to defer (S432; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-DUPLICATE-FUNCTION | §19.16.6 | A block that contains a `defer` declares the same `function` name twice (the lowered block is a host `try` block, where that is not allowed) (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-TEST-006 | §19.12.7 | `~{}` test block: server-function call inside an active `test-bind` context references a server function with no `test-bind` declaration in scope (fail-fast over silent passthrough; design-insight 22, S74). | Test |
 | W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to CPS-implicit-`!` function from non-`!` / non-boundary caller (cycle 1 of A9 Ext 4 deprecation; v0.next). | Warning |
@@ -18499,7 +18507,9 @@ The render-expression REUSES the existing per-variant `renders` machinery (the b
 > reactive-scope teardown — the wrong altitude), and a `using` block. **Direction of change: WIDENING +
 > newly-rejecting only for the new form** — `defer` was not a statement before; every restriction below
 > applies only to source that uses the new statement, and `defer` as an identifier is unchanged
-> (§19.16.1), so no pre-existing program changes acceptance status.
+> (§19.16.1), so no pre-existing program changes acceptance status — with ONE exception (S432): a
+> program that binds the name `defer` AND writes `defer [` (space before the `[`) is newly rejected
+> (E-DEFER-AMBIGUOUS-LEAD, §19.16.1) rather than silently re-read as a defer statement.
 
 scrml has no `try`/`finally` (§19.1, §19.9.8). `defer` is how a function says *"whatever happens from
 here on, do this on the way out"* — close the cache, clear the busy flag, release the lock — without
@@ -18523,6 +18533,37 @@ statement keyword other than `is`/`as`/`of`/`in`/`instanceof`/`else`/`from`/`ext
 call of a function named `defer`, an ADJACENT `defer[0]` indexes it, `defer = 1` / `defer.x = 1` /
 `defer += 1` are writes, a lone `defer` is a read, and `<script defer>` is the HTML boolean attribute, which never reaches the logic grammar
 (ruling P1: *"the word is not at fault"*).
+
+**`defer [` while a binding named `defer` is in scope — E-DEFER-AMBIGUOUS-LEAD** (S432; *provenance:
+ruling:user-voice-scrml.md S439, item 6 — B2*). Before `defer`
+was a statement, `defer [0] = 9` / `defer [0].m()` indexed a binding named `defer`; under the `[` lead
+above the same tokens are a defer statement. Every other lead is unambiguous (`defer` followed on the
+same line by an identifier, an `@`-cell, `{`, `?{` or a statement keyword never parsed as an
+expression), but both readings of a `[` lead are well-formed, so the tokens cannot decide. Where a
+binding named `defer` is in scope, a single-statement `defer` led by an array literal SHALL be a
+compile error naming both spellings: `defer[…]` (no space) indexes the binding, `defer { […]… }`
+defers the statement. Where `defer` is not a defer site at all (§19.16.3 rule 4 — e.g. an arrow or
+function-expression body), the program is rejected with E-DEFER-OUTSIDE-FUNCTION instead; the tokens
+are not silently re-read there either. With no such binding the `[` lead is the defer statement (the identifier
+reading would be an undeclared name). "In scope" means VISIBLE at the `defer` — what the identifier
+reading would resolve to without a temporal-dead-zone error: a parameter of an enclosing function,
+lambda or transition; an enclosing loop binder; a PATTERN binder of an enclosing construct — a `match`
+arm payload (`.A(defer) :> { … }`, including nested / destructured payloads), a `!{}` or error-effect
+arm binder, a `given` binding, a `when message (…)` binding, an `<each … as …>` name (S432 review
+B-1); a `function defer` anywhere in an enclosing block (hoisted); a `let` / `const` / `lin` / `~`
+(or `let x = f()?`) declared EARLIER in an enclosing block; or any file-level declaration or import (a
+function body runs after the file's top level; a declaration inside a top-level statement's block is
+block-scoped and does not count). The binder constructs are one table in the compiler, censused
+against the binder-named fields the front-ends produce over the corpus. The census is by field name,
+so it is not a proof of completeness: a binding carried under another field (a C-style
+`for (let defer = …; …)` initializer), one seen only through a closure (a nested function called after
+a LATER `let defer`), or one inside a function in a component's `${ }` is not yet diagnosed, and there
+the `[` lead is read as the defer statement — an implementation gap, recorded in known-gaps (S446),
+not a rule. A `let defer` written LATER in the block is not visible at the `defer` in straight-line
+code (an identifier read there is in its temporal dead zone), so the statement reading stands
+(`conformance/cases/defer/array-literal-lead`). (Precedent: the §18 `match` contextual keyword — deterministic token
+disambiguation wherever the tokens decide, and a diagnostic, never a silent choice, where a binding
+of the reserved word meets a reserved position.)
 
 ```scrml
 function save(doc) {
@@ -18556,7 +18597,9 @@ function save(doc) {
   the `defer` to the enclosing block.
 - **Exit.** When control leaves the enclosing block, every deferred body registered in that block runs
   exactly once, on EVERY exit path: falling off the end of the block; `return` (after the return value
-  has been evaluated — the deferred body cannot change it); `break` / `continue` out of the block; `fail`
+  has been evaluated — the deferred body cannot rebind WHICH value is returned; the value itself is
+  not frozen, so a deferred mutation of an object or array it references is visible to the caller, as
+  in Go — S432; provenance: ruling:user-voice-scrml.md S439, item 6 — B3); `break` / `continue` out of the block; `fail`
   (§19.3); `?` propagation (§19.5); the implicit CPS failure return of a body-split function (§19.9.5);
   and a non-`!` host/runtime error (§19.6.8) passing through the block, which continues propagating after
   the deferred bodies have run.
@@ -18629,6 +18672,16 @@ return value already computed or an error already in flight — so it SHALL NOT 
      compiler reorders and distributes (§6.9 hoisting, §40.8 auto-lift, §12 placement), so there is no
      single block exit to attach the deferred body to. `defer` in markup is therefore always an error,
      never a silently inert statement.
+   - a reactive-effect or handler body that is not a function declaration (S432): a `when … changes { }`
+     or `when message { }` body, an `on*=${ … }` event-handler attribute (wherever the markup is — a
+     page, a `<match>` block arm, an `<each>` body, a component definition `const C = <…>` or
+     `export const C = <…>`), a `<channel>` `<onchange>` arm body (S446), and a `match` / `!{}` arm or
+     bare block at the top level. These bodies are lowered as text, so a `defer` inside a function or
+     arrow DECLARED in a `when` body or a handler attribute is rejected too — declare the function
+     outside the body and call it. (A `~{}` `test` / `before` / `after` body is not a defer site either,
+     but impl#1 does not diagnose it: the front-end strips comment openers from that text, so the probe
+     falsely rejected comments mentioning `defer` (S446). Test bodies reach only test output, never a
+     production bundle; recorded in known-gaps.)
    - the body of an arrow function or function expression (`() => { … }`, `function () { … }`).
      **Stage-1 limitation, recorded as such:** both front-ends carry a block-bodied function
      expression as host-expression text rather than as a scrml statement list, so there is no list to
@@ -18778,16 +18831,23 @@ function save(id: number) {
 
 #### 19.16.8 Error codes
 
-This section introduces eight codes, catalogued in §19.13 and §34: **E-DEFER-UNSUPPORTED-SITE** and
+This section introduces nine codes, catalogued in §19.13 and §34: **E-DEFER-AMBIGUOUS-LEAD** (§19.16.1), **E-DEFER-UNSUPPORTED-SITE** and
 **E-DEFER-LATER-SHADOW** (§19.16.2), **E-DEFER-CONTROL-FLOW**, **E-DEFER-NESTED**,
 **E-DEFER-UNHANDLED-FAILABLE**, **E-DEFER-OUTSIDE-FUNCTION** (§19.16.3), **E-DEFER-SERVER-IN-SPLIT**
-(§19.16.5) and **E-DEFER-DUPLICATE-FUNCTION** (§19.16.6). All eight are hard errors. The two front-ends share one
+(§19.16.5) and **E-DEFER-DUPLICATE-FUNCTION** (§19.16.6). All nine are hard errors. The two front-ends share one
 structural checker (the live-shaped AST both produce), so for the constructs both front-ends parse
 into the same tree the codes fire identically under `--parser=scrml-native`. **Known divergence (not
 a rule — an implementation gap, recorded S430 round 3):** the native front-end does not currently
 carry `!{}` handler ARMS into the tree (they arrive empty), so the handler-arm checks of rule 1 and the
 totality requirement of rule 3 do not fire identically there; native compiles of such programs fail on
-the missing arms regardless.
+the missing arms regardless. **Second known divergence (S432; recorded per ruling:user-voice-scrml.md S439, item 6 — A2):** the native front-end carries every
+statement-position `match` as a match EXPRESSION with text arms, so a `defer` in a braced `match`
+STATEMENT arm — a §19.16.2 defer site, which the default front-end supports — is rejected there with
+E-DEFER-UNSUPPORTED-SITE (fail closed, never mis-lowered). Pinned both ways:
+`conformance/cases/defer/match-stmt-braced-arm` (the SPEC behaviour) and
+`compiler/tests/unit/defer-outside-function-bodies.test.js` (native rejects). Closing it means
+bridging native statement-position `match` to the structured statement shape for every match, not
+only those with a `defer`.
 
 #### 19.16.9 Interaction with `lin` (§35)
 
@@ -22958,7 +23018,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ATTR-WRITER-CONFLICT | §5.5.3, §5.5.4 | A WHOLESALE reactive value writer — `class=(expr)` / `style=(expr)` (the whole attribute) or `value=(expr)` on a form control (the `.value` property) — shares a physical DOM surface with ANOTHER writer on the SAME element, so the wholesale write would silently erase the other's work on its next reactive evaluation. Detected pairs: `class=(expr)` with `class:name=` or transition classes (`className` surface); `style=(expr)` with `if=`/`show=` or transitions (`style`/`display` surface); `value=(expr)` with `bind:value` (`.value` surface). Axiom ① (bryan's #81 ruling): each physical DOM surface has at most one wholesale owner — the diagnostic names BOTH sites and the author picks one. The conflicting attribute is NOT emitted (byte-identical to pre-#81), so an ignored error degrades to the old behavior rather than a broken one. Generic string attributes (`title=`, `id=`, `alt=`, `data-*`) have no per-token composer form and are always sole writers. (Catalog addition S268 — #81 writer-ownership Axiom ①; emitted at `compiler/src/codegen/emit-html.ts` `analyzeWriterConflict`.) | Error |
 | E-ATTR-UNQUOTED-OPERATOR | §5.1, §17.1 | An unquoted attribute CONDITION (`if=`/`show=`/`else-if=`) contains a bare binary/ternary operator (`>= > < <= == != && \|\| + - * /` or ternary `?:`). An unquoted condition admits only the atomic forms (`@var` / `obj.prop` / `fn()` / prefix `!`); operator conditions SHALL be parenthesized `if=(expr)` or quoted `if="expr"`. Fires ONCE per offending attribute (cluster-A, S188 "reject + parens"). | Error |
 | E-SCOPE-001 | §5.2 | Unquoted identifier not resolvable in scope | Error |
-| E-SCOPE-REDECLARE | §7.3.3 | Inside a function body, a `let` / `const` / `lin` / `function` declaration redeclares a name already bound in the SAME block (another such declaration, or — in the function's top-level block — a parameter). Nested-block shadowing is legal. Before this code the program failed at codegen ("Identifier already declared"); a `defer` in the block made it compile. Direction: newly-rejecting in name only (every rejected program already failed at codegen). (S430 round 5; emitted at `compiler/src/validators/lint-redeclare.ts`.) | Error |
+| E-SCOPE-REDECLARE | §7.3.3 | Inside a function body, a `let` / `const` / `lin` / `function` declaration redeclares a name already bound in the SAME block (another such declaration, or — in the function's top-level block — a parameter). Nested-block shadowing is legal; so are two `function` declarations of one name and a `function` declaration named like a parameter (S432). Before this code the program failed at codegen ("Identifier already declared"); a `defer` in the block made it compile. Direction: newly-rejecting in name only (every rejected program already failed at codegen). (S430 round 5; emitted at `compiler/src/validators/lint-redeclare.ts`.) | Error |
 | E-CALL-ARITY | §7.3 | A call passes more arguments than the function declares parameters, or fewer — unless each omitted parameter has a default (§7.3.2). Reopen condition (ruled): the callback case. **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #2). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles both at exit 0); impl#1 carries it (§34.0). **S447:** the call-site check is restated with the argument-type check in §7.3.4 (plain calls); same Nominal status. **Provenance:** ruling:user-voice-scrml.md S447 (*"RULED — UFCS PARKED; keep only the argument checks"* — call 9 kept). | Error |
 | E-SCOPE-010 | §20.4, §7.6 | Developer declares variable with reserved binding name (`route`, `session`) **(reserved-binding trigger spec-ahead, S265 — not fired; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)**. ALSO (S440 ruling #6, §7.6): two top-level `function` declarations of one name. **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 6). **Named; impl pending — Nominal / not yet emitted for the `function` case** (measured S440: exit 0); impl#1 carries it (§34.0). | Error |
 | E-SCOPE-011 | §20.4 | Access to undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
@@ -23058,10 +23118,11 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-DEFER-CONTROL-FLOW | §19.16.3 | A deferred body (`defer <stmt>`) contains `return`, `fail`, a `?` propagation, or a `break`/`continue` whose target lies outside the deferred body. A deferred body runs while its block is already exiting, so it cannot redirect control. A loop inside the deferred body, and a function nested in it, are their own targets/scopes. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-NESTED | §19.16.3 | A deferred body contains a `defer` statement (outside a nested function). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A bare call to a failable function (declared `!` or CPS-implicit `!`) inside a deferred body is not handled in place with `!{}` (or a `match`). `?` is excluded and an enclosing `!` does not cover it; inside a deferred body this REPLACES E-ERROR-002 / W-CPS-NEEDS-FAILABLE for the same call. **Provenance:** `ruling:user-voice-S430-P3`. ALSO (S430 round 3): a `!{}` handler on a deferred call that has no catch-all `\| _ :>` arm — a transport failure outside the declared enum (a server / CPS callee's `CpsError`) would otherwise propagate out of the `finally`. (S430; emitted at `compiler/src/type-system.ts`, the function-body §19 walker, and — for the totality limb — `compiler/src/validators/lint-defer.ts`.) | Error |
-| E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body: the top level of a `${ }` logic block, an `<onMount>` / `on mount` body, a markup / state-block body — page/module initialisation with no single block exit — or (stage-1 limitation) an arrow-function / function-expression body, which the front-ends carry as host-expression text. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
+| E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body: the top level of a `${ }` logic block, an `<onMount>` / `on mount` body, a markup / state-block body — page/module initialisation with no single block exit — a `when … changes` / `when message` body, an `on*=${ … }` event-handler attribute or a `<channel>` `<onchange>` arm body (S432, S446; lowered as text, so a function declared inside a `when` body cannot hold one either; a `~{}` test body is not diagnosed by impl#1, S446) — or (stage-1 limitation) an arrow-function / function-expression body, which the front-ends carry as host-expression text. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-SERVER-IN-SPLIT | §19.16.5 | A deferred body that is itself server-tier (own `?{}` SQL, a server-only resource, protected-field access, or a call to a server-escalated function) in a function the compiler body-splits (§19.9.9) — OR (S430 review) a `defer` of any tier nested inside a top-level statement the split places on the server (e.g. an `if` whose branch holds a `?{}`). Either way the deferred body would run inside a server batch, which ends before the later batches and client continuations — the premature release §19.16.5 forbids; rejected (fail closed) rather than lowered wrongly. The message names the concrete trigger (query, server-only resource, or the callee the compiler placed server-side). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/route-inference.ts`, the CPS-eligibility caller.) | Error |
 | E-DEFER-UNSUPPORTED-SITE | §19.16.2 | `defer` written in a bare `{ }` block statement, as a single-statement (unbraced) `match` / `!{}` handler arm (`.A :> defer D()`), or as the whole unbraced body of an `if` / `else` / `for` / `while` / `do` arm (S430 round 6 — the live front-end drops an unbraced `else` arm, which would silently attach the defer to the enclosing block). The front-ends carry those bodies as text (the native bridge flattens bare blocks), so the `defer` would never be parsed or lowered — or would silently attach to the enclosing block. Also: a `defer` directly in an arm of a `match` / `if` / `for` used for its VALUE (a value-form expression, or a `match` that is a `fn`'s implicit-return tail) — the defer block would capture the arm's result (measured: the produced value was lost). Rejected in stage 1; supporting bare blocks needs them parsed structurally (a separate arc). **Provenance:** `ruling:user-voice-S430-P3` (S430 round-5 review). (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-LATER-SHADOW | §19.16.2 | A deferred statement reads a name that a `let` / `const` / `lin` declaration LATER in its enclosing block chain (re)binds. The deferred statement runs at the block's exit, where it would capture the later binding (silently shadowing the one in scope at the `defer`) or read it before initialisation. Names the binding and both sites; the author renames one. Fails closed when the deferred statement cannot be analysed as a tree and the chain declares later names. A later `function` declaration is not a later binding (hoisted). **Provenance:** `ruling:user-voice-S430-P3` (S430 round-5 review). (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
+| E-DEFER-AMBIGUOUS-LEAD | §19.16.1 | A single-statement `defer` whose statement is led by an array literal after whitespace (`defer [0].m()`), while a binding named `defer` is visible there (an enclosing parameter or loop binder, a hoisted `function defer`, an earlier `let`/`const`/`lin`/`~` in an enclosing block, or any file-level declaration or import). Before `defer` was a statement the tokens indexed that binding; both readings are well-formed, so the program is rejected naming both spellings: `defer[…]` indexes, `defer { […]… }` defers. Fires only inside a function-declaration body (elsewhere E-DEFER-OUTSIDE-FUNCTION is the error instead); binder coverage is a field-name census with known misses (known-gaps, S446). **Provenance:** `ruling:user-voice-S430-P3`; ruled S439 item 6 (`ruling:user-voice-scrml.md S439`). (S432; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-DUPLICATE-FUNCTION | §19.16.6 | A block that contains a `defer` declares the same `function` name twice. §7.3.3 deliberately leaves duplicate `function` declarations alone, but the defer lowering makes the block a host `try` block, where a second declaration of the same function name is a SyntaxError; the compiler names both declarations instead of failing at codegen. **Provenance:** `ruling:user-voice-S430-P3` (S430 round-6 review). (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute (S196 — render-expression) | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's held enum has no `renders` clause; reuses the §19.6.6 E-ERROR-005 per-variant exhaustiveness logic at the render-expression fire site (S196) | Error |

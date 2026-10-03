@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 232 | 5 |
-| MED | 470 | 1 |
+| MED | 472 | 1 |
 | LOW | 224 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -22267,6 +22267,21 @@ RELAYED from the S239 review of `54e3cb542` (reviewer-executed; not re-run by th
 ### g-server-fn-calls-client-only-helper-inside-sql-undefined — a server function calling a client-only helper inside a `?{}` interpolation emits an undefined call with no error — `NEW S449; MED; open`
 <!-- @gap id=g-server-fn-calls-client-only-helper-inside-sql-undefined sev=MED status=open locus=compiler/src/codegen/emit-server.ts(?{} interpolation lowering)+compiler/src/route-inference.ts(no check that a callee named inside a ?{} interpolation is emitted server-side) prov=review:S449-auth-r1-r2-review -->
 RELAYED from the S239 review of `54e3cb542` (reviewer-executed; not re-run). The `?{}` interpolation text names a function that exists only in the client bundle; the server module references it as a free identifier (ReferenceError → 500 at request time), compile clean. Same dangling-reference class as the §20.5 `session` / `@currentUser` binding fixes.
+
+## §S446d — S446 defer landing (#1208) review residuals: the test-body comment stripping, and the E-DEFER-AMBIGUOUS-LEAD binder census misses (2026-10-01; reproduced on the #1208 branch, whose diff does not touch the test-body or binder-parse paths; probes are the review's `c1`–`c9` cases, not committed)
+
+### g-test-body-comment-openers-stripped-into-invalid-testjs — a `//` or `/* */` comment in a `~{ test … }` / `before {}` body loses its opener, so `--test` output carries the comment text as code and does not parse; no diagnostic
+<!-- @gap id=g-test-body-comment-openers-stripped-into-invalid-testjs sev=MED status=open locus=compiler/src/ast-builder.js:21402(case "test" — `tokenizeLogic(bodyRaw, …)` then `parseTestBody(tokens, …)` rebuilds each body line from token text; the comment's opener is dropped and its words survive as a line) prov=review:#1208-F1 -->
+**Reproduced (silent, exit 0).** `${ function add(x) { return x + 1 } }` and `~{ test "a" { // we defer the save here ⏎ assert add(1) == 2 } }`. The test node's `testGroup.tests[0].body` is `["we defer the save here", "assert add ( 1 ) == 2"]`. With `testMode: true` the emitted `.test.js` contains the line `we defer the save here` inside the `test("a", …)` callback, and it fails to parse (`SyntaxError: Unexpected identifier 'defer'`). `/* defer cleanup */` gives the line `defer cleanup */`. **Control:** a body line `a + b` emits and parses. **Expected:** a comment in a test body is dropped (or kept as a comment). **Consequence found in review:** the #1208 rule-4 probe read the stripped text as a `defer` statement and falsely raised E-DEFER-OUTSIDE-FUNCTION, so test bodies were REMOVED from that probe (#1208, S446). A real `defer` in a test body is therefore not diagnosed, and reaches test output verbatim. Test output only; production bundles are not affected.
+
+### g-defer-ambiguous-lead-binder-census-misses-four-shapes — with a binding named `defer` VISIBLE, `defer [` in four shapes is silently read as a defer statement instead of raising E-DEFER-AMBIGUOUS-LEAD
+<!-- @gap id=g-defer-ambiguous-lead-binder-census-misses-four-shapes sev=MED status=open locus=compiler/src/validators/lint-defer.ts(checkAmbiguousLead + DEFER_BINDER_FIELDS — the binder table is censused by FIELD NAME in compiler/tests/unit/defer-binder-completeness.test.js, so a binder under an unmatched field, a binder reached only through a closure, or a tree the walk never sees, is missed) prov=review:#1208-F2 -->
+**Reproduced on the #1208 branch (each compiles with no E-DEFER-AMBIGUOUS-LEAD; the program is read as a defer statement).** SPEC §19.16.1 (S439 #6, B2) says each SHALL be rejected naming both spellings.
+1. **Closure over a LATER `let`:** `function f() { function g() { defer [0].push(2) ⏎ note("g") } ⏎ let defer = [[1]] ⏎ g() }`. When `g` runs, `defer` is initialised and the identifier reading would be valid. Both front-ends report nothing. The `const` + arrow-call variant behaves the same.
+2. **C-style `for` initializer:** `function f() { for (let defer = [[1]]; defer.length < 0;) { defer [0].push(2) } }`. The binder sits in `for-stmt.iterable` text, which the field-name census does not classify. Both front-ends report nothing.
+3. **A function inside a component's `${ }` (default front-end):** `const C = <div>${ function h(defer) { defer [0].push(2) ⏎ return defer } }<p>${h([[1]]).length}</p></div>`. The default front-end reports nothing; native raises AMBIGUOUS-LEAD.
+4. **An exported function (native):** `export function f(defer) { defer [0] = 9 ⏎ return defer }`. Native reports nothing; the default front-end raises AMBIGUOUS-LEAD.
+(A fifth shape, the rest parameter `function f(...defer) { defer [0].push(9) }`, was fixed in #1208 by stripping `...` in `bindingName`.) Under the #1208 fix round's stop rule, no new binder walk was added; SPEC §19.16.1 was softened to say the census is not a completeness proof and to point here. **Expected:** E-DEFER-AMBIGUOUS-LEAD in all four. The fix direction is a scope-resolution pass over the shared tree, not more table entries.
 
 ## §S449-native-parser-prune — native parser frozen as part of impl#1; migration scaffolding pruned (2026-10-02; ruling:user-voice-scrml.md §S449 item 6 = (b); change `docs/changes/s449-native-parser-prune/`)
 

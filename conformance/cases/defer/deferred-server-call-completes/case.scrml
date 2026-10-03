@@ -1,0 +1,24 @@
+${
+    <trace> = ""
+
+    server function ping(n: number) {
+        return n + 1
+    }
+
+    function work() {
+        defer {
+            let r = ping(1)
+            @trace = @trace + "n" + r + ";"
+        }
+        @trace = @trace + "a;"
+    }
+
+    function go() {
+        work()
+        @trace = @trace + "after;"
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>
