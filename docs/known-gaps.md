@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 233 | 5 |
+| HIGH | 232 | 5 |
 | MED | 469 | 1 |
 | LOW | 221 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -86,9 +86,9 @@ same is true on main for `save(); … event.currentTarget`.
 **Recommended:** add `currentTarget` and `eventPhase` to the after-await event-control set, failing closed
 with the same code.
 
-### g-handler-nested-sequence-server-write-stale-read — a 1-statement handler whose body holds a statement sequence (`${ if (c) { @x = save(); @y = @x + 1 } }`, a `for` body, `${() => { … }}`) still reads the pre-fetch value — `NEW S446; HIGH; ruling-gated`
+### g-handler-nested-sequence-server-write-stale-read — a 1-statement handler whose body holds a statement sequence (`${ if (c) { @x = save(); @y = @x + 1 } }`, a `for` body, `${() => { … }}`) still reads the pre-fetch value — `NEW S446; RESOLVED S450 (Peter); was HIGH; resolved`
 
-<!-- @gap id=g-handler-nested-sequence-server-write-stale-read sev=HIGH status=ruling-gated owner=bryan locus=compiler/src/codegen/js-async-analysis.ts(analyze arg1Skip)+compiler/src/codegen/emit-event-wiring.ts/emit-each.ts/emit-lift.js(handlerStatementListColor — applies only to a ≥2-statement handlerBlock) prov=empirical:S446-happy-dom-runtime-probe-stale-on-31c42fbf-and-on-PR1217 -->
+<!-- @gap id=g-handler-nested-sequence-server-write-stale-read sev=HIGH status=resolved owner=bryan locus=compiler/src/codegen/js-async-analysis.ts(analyze arg1Skip gated on soleRootWriteCall for handler roots; match-arm IIFE made async+awaited; handlerStatementListColor/colorActiveHandler pass the SSE keep set at every statement count) prov=ruling:user-voice-scrml.md-S447-stamp-all -->
 
 PR #1217 orders `@x = save(); @y = @x + 1` only when the HANDLER is a statement list of two or more
 statements. A 1-statement handler has no such list, and that includes one whose single statement contains a
@@ -99,6 +99,8 @@ For those, the write keeps the detached `(async () => …)()` IIFE, and `@y` rea
 Fixing this changes the emitted code of 1-statement handlers, which PR #1217's stop condition held for a ruling.
 **Recommended rule:** keep the fire-and-forget arg1 skip only when the cell write is the handler's SOLE root
 statement, and await in place everywhere else. This keeps `${@x = save()}` byte-identical.
+
+> **RESOLVED S450 (Peter) — ruling:user-voice-scrml.md S447 "stamp all" item (iii), the recommended rule above.** The fix is at the one root every listener emitter shares: `colorAsyncFunctionExpr` (js-async-analysis.ts) now analyses a handler root with `handlerRoot`, and the reactive-set arg1 skip holds only for the write that is the handler's SOLE root statement (`soleRootWriteCall`: the last statement of the listener body, preceded only by the emitter's item re-resolve / destructure / stale-guard / submit-preventDefault preamble; the guarded `!{}` lowering counts as one statement). Every other write in the handler's own statement sequence is awaited in place. A `match` arm (lowered to an IIFE) that reaches an awaited call is made `async` and awaited. §36 SSE generator writes keep the skip at every position (the keep set now flows at every statement count). Covers the top-level registry (emit-event-wiring.ts, incl. delegated match-arm handlers), `<each>` rows (emit-each.ts) and every `for … lift` row site (emit-lift.js) through `colorActiveHandler` — no per-emitter change. Not covered: engine-arm non-delegable handlers, which get no §13.2 coloring at all ([[g-engine-arm-rewired-handler-skips-async-coloring]], open). `<each>` / `for … lift` `${() => {…}}` closures never run ([[g-each-block-arrow-handler-never-runs]], open). Gate: `compiler/tests/browser/handler-nested-server-write-s450.browser.test.js` (96 tests; base bc4bca1f: 32 pass / 64 fail). SPEC §13.2 + §5.2.3 amended.
 
 ### g-handled-error-arm-failure-writes-envelope-into-cell — `@x = f() !{ | e :> { … } }` on a handled failure writes the error envelope into `@x` — `NEW S446; HIGH; open`
 
