@@ -89,6 +89,9 @@ import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 import { countUnitProgramNodes } from "./codegen/session-config-resolve.ts";
 import { effectiveCsrfUnderAuth } from "./compute-program-config.ts";
 import { getNodes } from "./codegen/collect.ts";
+import { fileScopeDeclaresSessionCell, fileNodesOf } from "./codegen/server-session-guard.ts";
+import { rewriteCodeSegments } from "./codegen/code-segments.ts";
+import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
 // §12.4 client-pin shadow (S263 review) — reuse the tested destructuring
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
 // direct deps do not import route-inference.
@@ -2456,6 +2459,21 @@ function detectServerFreeClientCellReads(
 }
 
 /**
+ * Raw-text fields that hold UNPARSED scrml expression text on some AST nodes —
+ * scanned only when the node carries no parsed counterpart for the same field
+ * (`init`/`initExpr`, `expr`/`exprNode`, `value`/`valueExpr`, `result`/
+ * `resultExpr`, `condition`/`conditionExpr`), so a read is never reported twice.
+ */
+const SESSION_RAW_TEXT_FIELDS: ReadonlyArray<[string, readonly string[]]> = [
+  ["init", ["initExpr"]],
+  ["expr", ["exprNode", "exprExpr"]],
+  ["value", ["valueExpr"]],
+  ["result", ["resultExpr"]],
+  ["condition", ["conditionExpr", "condExpr"]],
+  ["bodyRaw", []],
+];
+
+/**
  * §6.6.9 / §20.5 (S449 ruling item 1) — every `@session` read in a SERVER
  * context, for E-SESSION-AMBIENT-SERVER. Returns one entry per read (in order)
  * with the member it names, if any (`@session.userId` → `"userId"`, a bare
@@ -2468,44 +2486,69 @@ function detectServerFreeClientCellReads(
  * §6.6.9: "`@session` is server-only identity and SHALL NEVER be marshalled
  * from the client". The server's own session is the §20.5 `session` object.
  *
- * Surfaces, matching `detectServerFreeClientCellReads` (verified against real
- * parser output): ExprNode `{kind:"ident", name:"@session"}` anywhere by
- * full-node recursion, and the `${…}` interpolations of a `sql` node's query
- * text (a `?{}` keeps its interpolations as text). Unlike that detector this
- * one DOES descend into nested `function-decl` / lambda bodies: they are
+ * Surfaces (verified against real parser output):
+ *   - ExprNode `{kind:"ident", name:"@session"}` anywhere by full-node recursion
+ *     (match arms, conditions, call arguments, lambda bodies…);
+ *   - the LIVE `${…}` interpolations of a `sql` node's query text (`?{}` keeps
+ *     them as text) — `liveSqlInterpolations`, so `${…}` inside SQL strings or
+ *     comments is not a read;
+ *   - a template literal (`lit` with `litType: "template"` keeps its raw text) —
+ *     the interpolations, nested templates included (S449 review F3);
+ *   - a member assignment `@session.userId = …` (`reactive-nested-assign`,
+ *     target "session" — S449 review F3);
+ *   - raw-text expression fields with no parsed counterpart (see
+ *     `SESSION_RAW_TEXT_FIELDS`).
+ * Raw text is scanned with `detectServerAmbientSessionReadsInText` (comment-,
+ * string- and template-aware). Unlike `detectServerFreeClientCellReads` this
+ * walk DOES descend into nested `function-decl` / lambda bodies: they are
  * emitted inside the server body, so a read there is a server read too.
- * SQL text outside `${…}` is SQL, not scrml, and is never scanned.
+ * Whatever this misses is refused by the codegen backstop (server-session-guard.ts).
  */
 export function detectServerAmbientSessionReads(
   body: unknown,
-): Array<{ member: string | null; span: Span | undefined }> {
-  const out: Array<{ member: string | null; span: Span | undefined }> = [];
+): Array<{ member: string | null; span: Span | undefined; anchor: Span | undefined }> {
+  const out: Array<{ member: string | null; span: Span | undefined; anchor: Span | undefined }> = [];
   const visited = new WeakSet<object>();
-  const scanSql = (text: string, span: Span | undefined): void => {
-    const interp = /\$\{([^}]*)\}/g;
-    let m: RegExpExecArray | null;
-    while ((m = interp.exec(text)) !== null) {
-      const inner = /@session\b(?:\s*\??\.\s*([A-Za-z_$][A-Za-z0-9_$]*))?/g;
-      let r: RegExpExecArray | null;
-      while ((r = inner.exec(m[1])) !== null) out.push({ member: r[1] ?? null, span });
-    }
+  // `anchor` = the nearest enclosing span whose line/col were really computed
+  // (statement spans). Expression spans carry a placeholder 1:1, and an
+  // expression re-parsed from a substring carries offsets relative to it.
+  let anchor: Span | undefined;
+  const realLine = (sp: any): boolean => !!sp && typeof sp.line === "number" && !(sp.line === 1 && sp.col === 1);
+  const scanText = (text: string, span: Span | undefined): void => {
+    for (const r of detectServerAmbientSessionReadsInText(text)) out.push({ member: r.member, span, anchor });
   };
   const visit = (node: any, inherited: Span | undefined, parent: any): void => {
     if (!node || typeof node !== "object" || visited.has(node)) return;
     visited.add(node);
     const sp: Span | undefined = (node.span && typeof node.span === "object") ? node.span : inherited;
+    const savedAnchor = anchor;
+    if (realLine(node.span)) anchor = node.span;
     if (node.kind === "ident" && node.name === "@session") {
       const member = parent && parent.kind === "member" && parent.object === node
         && typeof parent.property === "string" ? parent.property as string : null;
-      out.push({ member, span: sp });
+      out.push({ member, span: sp, anchor });
     }
-    if (node.kind === "sql" && typeof node.query === "string") scanSql(node.query, sp);
+    if (node.kind === "sql" && typeof node.query === "string") {
+      for (const interp of liveSqlInterpolations(node.query)) scanText(interp.expr, sp);
+    } else if (node.kind === "lit") {
+      if (node.litType === "template" && typeof node.raw === "string") scanText(node.raw, sp);
+    } else if (node.kind === "reactive-nested-assign" && node.target === "session") {
+      out.push({ member: Array.isArray(node.path) && typeof node.path[0] === "string" ? node.path[0] : null, span: sp, anchor });
+    } else if (node.kind !== "comment" && node.kind !== "text") {
+      for (const [field, parsed] of SESSION_RAW_TEXT_FIELDS) {
+        const v = node[field];
+        if (typeof v !== "string" || !v.includes("@session")) continue;
+        if (parsed.some((pf) => node[pf] && typeof node[pf] === "object")) continue;
+        scanText(v, sp);
+      }
+    }
     for (const key of Object.keys(node)) {
       if (key === "span") continue;
       const val = node[key];
       if (Array.isArray(val)) { for (const c of val) visit(c, sp, node); }
       else if (val && typeof val === "object") visit(val, sp, node);
     }
+    anchor = savedAnchor;
   };
   if (Array.isArray(body)) {
     for (const stmt of body) visit(stmt, (stmt && typeof stmt === "object") ? (stmt as any).span : undefined, null);
@@ -2516,18 +2559,24 @@ export function detectServerAmbientSessionReads(
 }
 
 /**
- * `@session` reads in RAW scrml expression text the AST keeps unparsed — an
- * `<endpoint>` arm body (`bodyRaw`, §61). Quoted '…' / "…" string literals are
- * blanked first so `"ops@session.example"` is not a read; anything the text scan
- * misses is still refused by the codegen backstop (server-session-guard.ts).
+ * `@session` reads in RAW scrml expression text — an `<endpoint>` arm body
+ * (`bodyRaw`, §61), a template literal's raw text, a `?{}` interpolation. Uses
+ * the shared comment / string / regex / template-aware segmenter
+ * (`rewriteCodeSegments`, code-segments.ts): `'…'` / `"…"` strings, `//` and
+ * `/* *\/` comments and template STATIC text are not code, while `${…}`
+ * interpolations (nested templates included) are (S449 review F5 — the earlier
+ * quote-blanker false-fired inside comments and template text, and an apostrophe
+ * in a comment could hide a real read).
  */
 export function detectServerAmbientSessionReadsInText(text: string): Array<{ member: string | null }> {
   const out: Array<{ member: string | null }> = [];
   if (typeof text !== "string" || !text.includes("@session")) return out;
-  const code = text.replace(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/g, (m) => " ".repeat(m.length));
-  const re = /(?<![\w$@.])@session\b(?:\s*\??\.\s*([A-Za-z_$][A-Za-z0-9_$]*))?/g;
-  let r: RegExpExecArray | null;
-  while ((r = re.exec(code)) !== null) out.push({ member: r[1] ?? null });
+  rewriteCodeSegments(text, (code) => {
+    const re = /(?<![\w$@.])@session\b(?:\s*\??\.\s*([A-Za-z_$][A-Za-z0-9_$]*))?/g;
+    let r: RegExpExecArray | null;
+    while ((r = re.exec(code)) !== null) out.push({ member: r[1] ?? null });
+    return code;
+  });
   return out;
 }
 
@@ -6082,11 +6131,55 @@ export function runRI(input: RIInput): RIOutput {
   // E-SESSION-AMBIENT-SERVER de-dup key set (a nested function can be both its
   // own record and part of its server parent's body).
   const _sessionAmbientSeen = new Set<string>();
+  // Only a FILE-SCOPE `<session>` cell owns the name (S449 review F2) — a
+  // component-local one does not: a top-level server read never resolves to it.
+  const _fileScopeSessionCell = new Map<string, boolean>();
+  for (const fileAST of files) {
+    _fileScopeSessionCell.set(fileAST.filePath, fileScopeDeclaresSessionCell(fileNodesOf(fileAST)));
+  }
+  // Expression spans carry byte offsets but no line/col; resolve them against the
+  // file source (CE stamps `_sourceText`) so the diagnostic points at the read
+  // rather than 1:1 (S449 review F3).
+  const _sessionSourceByFile = new Map<string, string>();
+  for (const fileAST of files) {
+    const src = (fileAST as any)._sourceText ?? (fileAST as any).ast?._sourceText;
+    if (typeof src === "string") _sessionSourceByFile.set(fileAST.filePath, src);
+  }
+  const sessionSpanWithLine = (span: Span | undefined, anchor: Span | undefined, filePath: string, fallback: Span): Span => {
+    const sp = span as any;
+    const anc = (anchor ?? fallback) as any;
+    if (sp && typeof sp.line === "number" && !(sp.line === 1 && sp.col === 1)) return sp as Span;
+    const src = _sessionSourceByFile.get(filePath);
+    // Trust the expression's byte offset only when it falls inside its enclosing
+    // statement (an expression re-parsed from a substring has relative offsets).
+    const inside = sp && typeof sp.start === "number" && anc && typeof anc.start === "number"
+      && typeof anc.end === "number" && sp.start >= anc.start && sp.start <= anc.end;
+    if (!inside || typeof src !== "string" || sp.start > src.length) return (anc ?? sp) as Span;
+    let line = 1, lineStart = 0;
+    for (let i = 0; i < sp.start; i++) if (src.charCodeAt(i) === 10) { line++; lineStart = i + 1; }
+    return { ...sp, file: sp.file ?? filePath, line, col: sp.start - lineStart + 1 } as Span;
+  };
+  /** Report every `@session` read in `stmts` — the SERVER part of a function body. */
+  const reportServerSessionReads = (record: AnalysisRecord, stmts: unknown[]): void => {
+    if (_fileScopeSessionCell.get(record.filePath) === true) return;
+    const _fnName = record.fnNode.name ?? "<anonymous>";
+    for (const _r of detectServerAmbientSessionReads(stmts)) {
+      const _sp = sessionSpanWithLine(_r.span, _r.anchor, record.filePath, record.fnNode.span as Span);
+      const _key = `${record.filePath}:${_sp?.start ?? -1}:${_r.member ?? ""}`;
+      if (_sessionAmbientSeen.has(_key)) continue;
+      _sessionAmbientSeen.add(_key);
+      errors.push(new RIError(
+        "E-SESSION-AMBIENT-SERVER",
+        sessionAmbientServerMessage(`Server function \`${_fnName}\``, _r.member),
+        _sp,
+      ));
+    }
+  };
   // §6.6.9 / §20.5 (S449 ruling item 1) — the other server context that can
   // name `@session`: a `<cell server> = ?{…}` declaration, whose inline query
   // runs on the server (§52.6.5 Pattern C). Same refusal, same reason.
   for (const fileAST of files) {
-    if (perFileClientReactiveCells.get(fileAST.filePath)?.has("session") === true) continue;
+    if (_fileScopeSessionCell.get(fileAST.filePath) === true) continue;
     const nodes: any[] = (fileAST as any).nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []);
     const visitDecls = (list: any[]): void => {
       if (!Array.isArray(list)) return;
@@ -6094,7 +6187,7 @@ export function runRI(input: RIInput): RIOutput {
         if (!node || typeof node !== "object") continue;
         if (node.kind === "state-decl" && node.isServer === true && node.sqlNode) {
           for (const _r of detectServerAmbientSessionReads([node.sqlNode])) {
-            const _sp = (_r.span ?? node.span) as Span;
+            const _sp = sessionSpanWithLine(_r.span, _r.anchor, fileAST.filePath, node.span as Span);
             const _key = `${fileAST.filePath}:${_sp?.start ?? -1}:${_r.member ?? ""}`;
             if (_sessionAmbientSeen.has(_key)) continue;
             _sessionAmbientSeen.add(_key);
@@ -6114,7 +6207,9 @@ export function runRI(input: RIInput): RIOutput {
               const _key = `${fileAST.filePath}:endpoint:${_start}:${_r.member ?? ""}`;
               if (_sessionAmbientSeen.has(_key)) continue;
               _sessionAmbientSeen.add(_key);
-              const _sp = { ...(node.span ?? {}), ...(typeof arm.spanStart === "number" ? { start: arm.spanStart } : {}), ...(typeof arm.spanEnd === "number" ? { end: arm.spanEnd } : {}) } as Span;
+              const _sp = typeof arm.spanStart === "number"
+                ? sessionSpanWithLine({ file: fileAST.filePath, start: arm.spanStart, end: typeof arm.spanEnd === "number" ? arm.spanEnd : arm.spanStart } as unknown as Span, node.span as Span, fileAST.filePath, node.span as Span)
+                : node.span as Span;
               errors.push(new RIError(
                 "E-SESSION-AMBIENT-SERVER",
                 sessionAmbientServerMessage(
@@ -6141,34 +6236,12 @@ export function runRI(input: RIInput): RIOutput {
       errors.push(riErr);
     }
 
-    // §6.6.9 / §20.5 (S449 ruling item 1) — E-SESSION-AMBIENT-SERVER: an
-    // `@session` read anywhere in a server-placed function body (wholly server,
-    // CPS-split, an SSE generator, a handle() middleware, a channel server
-    // handler — any function with a server escalation reason). Every server
-    // lowering of `@name` reads the CLIENT request body, so a server `@session`
-    // was client-controlled identity. Refused here, before codegen, so no
-    // lowering path can emit it (codegen keeps a fail-closed E-INTERNAL backstop).
-    // A file that declares its OWN `<session>` cell owns the name: `@session` is
-    // then that ordinary client cell and E-REACTIVE-003 / the CPS marshal govern.
-    {
-      const _escR = escalationResults.get(fnNodeId);
-      const _serverPlaced = (record.fnNode as any).isHandleEscapeHatch === true
-        || (_escR ? _escR.allReasons.length > 0 : false);
-      const _userSessionCell = perFileClientReactiveCells.get(record.filePath)?.has("session") === true;
-      if (_serverPlaced && !_userSessionCell) {
-        const _fnName = record.fnNode.name ?? "<anonymous>";
-        for (const _r of detectServerAmbientSessionReads(record.fnNode.body)) {
-          const _sp = (_r.span ?? record.fnNode.span) as Span;
-          const _key = `${record.filePath}:${_sp?.start ?? -1}:${_r.member ?? ""}`;
-          if (_sessionAmbientSeen.has(_key)) continue;
-          _sessionAmbientSeen.add(_key);
-          errors.push(new RIError(
-            "E-SESSION-AMBIENT-SERVER",
-            sessionAmbientServerMessage(`Server function \`${_fnName}\``, _r.member),
-            _sp,
-          ));
-        }
-      }
+    // §6.6.9 / §20.5 (S449 ruling item 1) — E-SESSION-AMBIENT-SERVER for a
+    // handle() middleware body (wholly server; it leaves this loop just below).
+    // Every other function is checked after its CPS split is known (see
+    // "E-SESSION-AMBIENT-SERVER — the server part" further down).
+    if ((record.fnNode as any).isHandleEscapeHatch === true) {
+      reportServerSessionReads(record, Array.isArray(record.fnNode.body) ? record.fnNode.body : []);
     }
 
     // §39.3: handle() escape hatch — treat as middleware boundary.
@@ -6459,6 +6532,25 @@ export function runRI(input: RIInput): RIOutput {
           }
         }
       }
+    }
+
+    // §6.6.9 / §20.5 (S449 ruling item 1) — E-SESSION-AMBIENT-SERVER: an
+    // `@session` read in a SERVER context. Every server lowering of `@name` reads
+    // the CLIENT request body, so a server `@session` was client-controlled
+    // identity. Refused here, before codegen, so no lowering path can emit it
+    // (codegen keeps a fail-closed E-INTERNAL backstop). The server context of a
+    // server-placed function is its whole body — EXCEPT a CPS-split function,
+    // whose client statements run in the browser, where `@session` is the §20.5
+    // projection (S449 review F1): only the statements of its server batches are
+    // scanned (`serverStmtIndices`, which also holds the reactive-server
+    // statements whose initializer runs on the server). A file-scope `<session>`
+    // cell owns the name (E-REACTIVE-003 / the CPS marshal govern it).
+    if (isServer) {
+      const _body: unknown[] = Array.isArray(record.fnNode.body) ? record.fnNode.body : [];
+      const _serverPart = cpsSplit
+        ? cpsSplit.serverStmtIndices.map((i) => _body[i]).filter((x) => x != null)
+        : _body;
+      reportServerSessionReads(record, _serverPart);
     }
 
     // Build the FunctionRoute entry.

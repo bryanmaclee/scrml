@@ -1654,6 +1654,8 @@ function emitUnaryPlain(node: UnaryExpr, ctx: EmitExprContext): string {
       if (ctx.mode === "server") {
         // Server boundary: @x is `_scrml_body["x"]` (a plain assignment lvalue).
         // Postfix on a member expression IS valid JS, so emit as-is.
+        // §6.6.9 (S449 review F4) — never the request body for an ambient `@session`.
+        if (isServerAmbientSession(bare)) return `${_m}${refuseServerAmbientSession("emit-expr update", node.span)}${node.op}`;
         return `${_m}_scrml_body["${bare}"]${node.op}`;
       }
       const sign = node.op === "++" ? "+" : "-";
@@ -2710,6 +2712,11 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
   if (target.kind === "ident" && target.name.startsWith("@")) {
     const bare = target.name.slice(1);
     if (ctx.mode === "server") {
+      // §6.6.9 (S449 review F4) — `@session = …` / `@session ??= …` never touch
+      // the request body (fail-closed backstop, server-session-guard.ts).
+      if (isServerAmbientSession(bare)) {
+        return `${srcmapMark(node.span, bare)}${refuseServerAmbientSession("emit-expr assignment", node.span)} ${node.op} ${value}`;
+      }
       return `${srcmapMark(node.span, bare)}_scrml_body["${bare}"] ${node.op} ${value}`;
     }
     // §51.0.F (Option A comprehensive engine-routing) — when the LHS is an
