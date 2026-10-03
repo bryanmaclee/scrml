@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 238 | 5 |
 | MED | 481 | 1 |
-| LOW | 228 | 0 |
+| LOW | 230 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22450,6 +22450,13 @@ A transaction (an implicit `!` envelope included) that awaits an outbound call h
 ### G-CHANNEL-ONSERVER-HANDLER-WITH-SERVER-CALL-NOT-ASYNC — an `onserver:` channel handler that runs a `?{}` or calls a server function is emitted as a NON-async function containing `await` → E-CODEGEN-INVALID-LOGIC
 Repro: `<channel name="chat" topic="lobby" onserver:message=onChat(msg)> ${ function onChat(msg) { const r = leaveOpen(msg) } } </>` with `server function leaveOpen(msg) { ?{…}.run() return 1 }` (or the `?{}` directly in `onChat`) → `function onChat(msg) { … const r = await leaveOpen(msg); }` → build fails "Cannot use keyword 'await' outside an async function". So no onserver handler can touch the database today; the S449 F5 change (callbacks `await` their handler) is in place for when it can.
 <!-- @gap id=g-channel-onserver-handler-with-server-call-not-async sev=MED status=open locus=searched:compiler/src/codegen/emit-server.ts(channelWsHandlerFns plain-function emission) prov=empirical:s449-shared-connection-tx-review-round -->
+
+**Re-review of b4b4b85c3 (LAND-WITH-NITS).** FIXED: nit 1 ack-then-rollback — a handler whose transaction the backstop rolls back now fails (the scope wrapper throws → the host's fixed 500) instead of answering 200; an SSE stream ends with a terminal `event: error` (`TransactionLeftOpen`). Nit 4 — the WebSocket `message` callback now swallows only a malformed frame (`JSON.parse` has its own `try`); every handler error is logged. FILED (nits 2–3):
+
+- LOW: a savepoint name reused by the author (`SAVEPOINT a` … `SAVEPOINT a` in a SAVEPOINT-opened SQLite transaction) makes the first `RELEASE a` look like the root's release, so the lock is handed back while SQLite still has the outer savepoint (the transaction) open. Contrived; the root-name match does not track depth.
+<!-- @gap id=g-tx-guard-duplicate-savepoint-name-releases-early sev=LOW status=open locus=compiler/src/codegen/sql-tx-guard.ts(run — tx.root compared by name only) prov=review:S449-re-review-of-b4b4b85c3-nit-2 -->
+- LOW: a multi-statement `unsafe()` string (`"BEGIN; …; COMMIT"`) is classified by its FIRST statement only: it takes the lock as a BEGIN and is never seen to commit, so the connection is held until the request ends (the backstop then fails the request). Nothing is lost; codegen never emits such a string.
+<!-- @gap id=g-tx-guard-multi-statement-string-holds-lock-to-request-end sev=LOW status=open locus=compiler/src/codegen/sql-tx-guard.ts(_scrml_db_tx_kind — first statement only) prov=review:S449-re-review-of-b4b4b85c3-nit-3 -->
 
 ## §S449-opener-keywords-land — the S447 opener-keyword SPEC (PR #1214) landed with the bootstrap parser migration (2026-10-03; ruling:user-voice-scrml.md S447 "your recs" item 2; SPEC §66.2.5 / §66.4 rule 6 / §66.5.1 / §66.20; change `docs/changes/s449-opener-keywords-land/`; probes run on the change branch with the slice-m4 harness `frontEnd`, not committed)
 
