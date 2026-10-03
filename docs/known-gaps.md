@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 233 | 5 |
-| MED | 469 | 1 |
+| MED | 468 | 1 |
 | LOW | 221 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -21792,11 +21792,13 @@ A nested worker `<program>` whose body calls a helper imported at the top of the
 
 This is the protect-floor sibling of g-schema-commented-out-declaration-shadows-live-table (the tenant floor). The same comment-agnostic, first-wins harvest feeds the shadow DB that the protect floor checks against. A commented-out earlier `CREATE TABLE` of the same name therefore decides the columns the protect floor sees, not the live declaration. **Owner: bryan.** Protect egress is the S447-bryan lane, so it is routed rather than fixed here.
 
-### g-generated-headless-and-prod-servers-bind-all-interfaces — the `scrml build` production server and the compiler-generated server for headless serve targets pass no hostname, so they bind every interface — `NEW S446-peter; MED; open (routed: ruling for bryan)`
+### g-generated-headless-and-prod-servers-bind-all-interfaces — the `scrml build` production server and the compiler-generated server for headless serve targets pass no hostname, so they bind every interface — `NEW S446-peter; MED; RESOLVED S450 (ruled S447 item iv: headless → loopback + `SCRML_HOST` opt-in; prod unchanged)`
 
-<!-- @gap id=g-generated-headless-and-prod-servers-bind-all-interfaces sev=MED status=open owner=bryan locus=compiler/src/codegen/emit-tool.ts(generated headless server — no `hostname`)+the `scrml build` production server entry prov=S446-#1207-scope-note -->
+<!-- @gap id=g-generated-headless-and-prod-servers-bind-all-interfaces sev=MED status=resolved locus=compiler/src/codegen/emit-tool.ts(generateServeHarnessToolJs — serveBindHelperLines / `_scrml_bind`)+compiler/src/commands/listen.js(the self-contained hostRefusal/bindPlan/bindListeners it serializes) prov=ruling:user-voice-scrml.md-S447-stamp-all -->
 
 #1207 made `scrml dev` / `scrml serve` loopback-by-default (g-dev-server-binds-all-interfaces, resolved S446). It deliberately left two servers alone: the production server emitted by `scrml build`, and the server the compiler generates for headless serve targets (`emit-tool.ts`). Both still bind all interfaces. That is normal for a production server. **Ruling owed (bryan):** should the headless target (a local tool or agent server) default to loopback, with an explicit opt-in for public binding? The recommended default is loopback for headless and unchanged for the production server.
+
+**RESOLVED S450** (`fix/s450-headless-serve-loopback`; ruling: user-voice-scrml.md S447 "stamp all", item (iv): "generated headless serve targets default to loopback, prod stays all-interfaces"). The `kind="tool" serve=` harness now binds `127.0.0.1` plus its `::1` twin. The `SCRML_HOST` environment variable opts in to another address (`0.0.0.0` = every interface plus `::`). The value is validated by the same functions `scrml dev --host` uses: whitespace, inet_aton shorthand, and an empty value are refused with exit 1 before `main` runs. Those functions are serialized from `commands/listen.js` into the module rather than restated. SPEC §64.9 item 6. The `scrml build` production server is unchanged and still binds every interface; `compiler/tests/unit/headless-serve-bind-host.test.js` §4 pins that half of the ruling.
 
 ### g-test-body-comment-openers-stripped — `~{ test }` body comment openers are stripped, so `// we defer…` becomes code in testMode and the test JS is invalid, yet the run exits 0 — `NEW S446-peter; MED; open`
 
