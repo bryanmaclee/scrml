@@ -86,7 +86,7 @@ describe("R26 — fsp-wire serve= tool compiles + node --check + inspect", () =>
   });
 
   test("the serve-harness is a compiler-owned Bun.serve mounting the endpoint + SSE routes", () => {
-    expect(TOOLJS).toContain("const _scrml_server = Bun.serve({");
+    expect(TOOLJS).toContain("const _scrml_server = _scrml_bind.listen({");
     expect(TOOLJS).toContain("port: _scrml_serve_port,");
     // Both route kinds mounted: the §61 endpoint POST + the §37 SSE GET.
     expect(TOOLJS).toContain('path: "/fsp"');

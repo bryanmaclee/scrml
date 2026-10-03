@@ -1916,6 +1916,7 @@ An event-handler attribute value takes one of the following shapes:
 
 - An event-handler attribute value MAY be an **inline block**: a `{`, a statement list, and the matching `}`. The statement list is logic context — the same statement grammar as a function body (§7.3): statements are separated by a newline or by `;`, exactly as §7.2.2 defines for every statement list (a newline ends a statement unless the line ends in a continuation token; a line starting with an operator is `E-STMT-LEADING-OPERATOR`; two statements on one line need a `;`), and assignments, calls, `const`/`let` declarations, and `if`/loop statements are all legal. The block MAY span any number of lines. *(Amended S446, dpa-063: the separator sentence now points at §7.2.2's one rule — **Provenance:** ruling:user-voice-scrml.md S446 "dpa-063 Call 1 = (b)" — "b, your rec" · dd:`scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md` (cross-cutting table, inline-handler row) · **supersedes:** the three S437 round-4 pins that read a leading-`+` / leading-`?`/`:` line as continuing a handler statement — see §7.2.2.)*
 - On each dispatch of the event, the statements of an inline block SHALL run in source order, each one exactly once, with `@var` reads and writes lowered exactly as they are in a function body. No statement of the block SHALL be dropped, whatever its kind or position — in particular, a statement's effect SHALL NOT depend on whether an earlier statement is a call or an assignment, or on whether the handler sits at top level, inside an engine state-child (§51.0.I), or inside an `<each>` row (§17.7).
+- A cell write from a server call (`@x = save()`) in any handler — inline block, `${…}` value, or nested in an `if` / loop / block / `match` arm of one — is awaited before the next statement runs; only a write that is the handler's SOLE root statement may run fire-and-forget. §13.2 states the rule. *(Added S450 — **Provenance:** ruling:user-voice-scrml.md S447 "stamp all" — "(iii) nested-sequence stale read: keep the fire-and-forget skip only when the cell write is the handler's SOLE root statement, await in place everywhere else.")*
 - The inline block is NOT invoked at render time; it runs only when the event fires. An inline block holding a single statement (`onclick={@filter = .All}`) is legal and equivalent to the bare shape of the same statement.
 - The inline block and a named function are a **free choice**. `function startOver() { … }` wired as `onclick=startOver()` remains fully valid — choose it when the logic is reused, when it has a meaningful name, or when it is long enough that the element reads better without it. Neither form is a lint target.
 - The `${...}` arrow form (`onclick=${() => { stmt1; stmt2 }}`) remains valid (cross-ref §5.2.1) and is the form to reach for when the handler needs the event object or must capture a loop variable per iteration. This amendment does not add an event-object binding to the inline block.
@@ -9791,6 +9792,11 @@ The compiler SHALL:
 - The developer SHALL write flat, synchronous-looking code. The compiler SHALL produce optimal async execution patterns from this code.
 - Independent server calls in the same function body SHALL be parallelized in generated code unless there is a data dependency between them.
 - These statements apply to EVERY body the compiler emits, including an inline event-handler value (`onclick=${…}` / `onclick={…}`) and an `<onMount>` / `on mount` body (§6.7.1a): a server call there SHALL be awaited, and the handler or block SHALL run in an `async` scope when it awaits.
+- **A cell write from a server call in an event handler (S450).** The one exemption from awaiting is the handler whose SOLE root statement is the write: `onclick=@x = save()`, its braced single-statement form `onclick={@x = save()}`, `onclick=${@x = save()}`, and the guarded `@x = f() !{ … }` (§19.4.3) written alone. That write MAY run fire-and-forget — the handler does not wait for it, and no statement of the handler runs after it. In every other position the write SHALL be awaited in place, so the next statement observes the resolved value: when it is one of two or more root statements (`onclick={ @x = save(); @y = @x + 1 }`), and when it is nested at any depth inside an `if` / `else if` / `else` limb, a `for` / `for … of` / `while` body, or a block of a handler (`onclick=${ if (@c) { @x = save(); @y = @x + 1 } }`), or inside a `match` statement written as one of the handler's root statements. A `match` arm or other construct the compiler lowers to an inline function is part of the handler's statement sequence, and is awaited with it. A §36 server generator (SSE) write is a subscription, not a value, and is never awaited at any position. Because the write is now awaited, an event-control call after it in the handler (`onclick=${ if (@c) { @x = save(); event.preventDefault() } }`, and the closure form) is `E-EVENT-CONTROL-AFTER-AWAIT` (above); put the control call before the write. The rule holds for every DELEGABLE handler position (`click`, `submit`, …): top level, an `<each>` row, a `for … lift` row, and a delegable handler inside an engine or `<match>` element arm. A non-delegable handler (`input`, `focus`, …) inside an engine or `<match>` element arm is not yet covered (carried gap below).
+
+> **Provenance:** ruling:user-voice-scrml.md S447 "stamp all" — "(iii) nested-sequence stale read: keep the fire-and-forget skip only when the cell write is the handler's SOLE root statement, await in place everywhere else." · extends the S446 statement-list fix (PR #1217, ruling:user-voice-scrml.md S439 #4) from top-level lists to every position · s450-handler-nested-server-write-await
+>
+> Not decided by the ruling (impl#1 keeps its prior emit, open for a ruling): a `${() => { … }}` closure handler whose body is the single write (impl#1 treats the closure's body statements as the handler's root statements, so a multi-statement closure body IS awaited and a single-write body is not); and a write inside a function the handler hands on (a scheduler callback, a collection-method callback), which runs outside the handler's own statement sequence.
 - An **async-colored function** is one the compiler emits `async`: a server function, a Promise-returning standard-library function, or any function that (transitively) calls one. An async-colored function SHALL NOT be used as a value. It MAY be called directly (the compiler awaits the call), and it MAY be passed as the first argument of an awaited collection method (`.some`, `.every`, `.find`, `.findIndex`, `.filter`, `.map`, `.forEach`, `.reduce`, `.flatMap` — the compiler lowers the call to a combinator that awaits every invocation). Passing it to any other function (a user-written higher-order function, `Array.from(xs, fn)`, `new Promise(fn)`), aliasing it, storing it in an array or object, returning it, or reading it as an object SHALL be a compile error (`E-ASYNC-FN-ESCAPES-AS-VALUE`). Every such position would hand a caller an unawaited Promise, which is always truthy — a check written against it passes for every input. The compiler does NOT insert an implicit `await` at every call of a function-typed value. Two positions are not uses as a value: an argument of a fire-and-forget scheduler (`setTimeout`, `setInterval`, `setImmediate`, `queueMicrotask`, `requestAnimationFrame`, `requestIdleCallback`), which discards the return; and `typeof f`. A synchronous consumer with no awaited form (`.sort(f)`, `.findLast(f)`) keeps its own error (`E-SERVER-FN-IN-SYNC-CALLBACK` / `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`).
 
 > **Provenance:** ruling:user-voice-scrml.md S440 F4 ("async helpers may not escape as values"; rejected alternative: implicit await on every call of a function-typed value) · ruling:user-voice-scrml.md S440 JS-WAT #11 (`on mount` / inline handler bodies are subject to every rule) · s441-async-escape-f4-f5
@@ -9802,7 +9808,7 @@ The compiler SHALL:
 
 > **Provenance:** review:S441-f4f5-review (scheduler shadow bypass; `preventDefault`/`stopPropagation` after the first await; `.then` on an auto-awaited call; fail-closed unanalysable handler) · s441-async-escape-f4-f5 fix round
 
-⚑ **Carried impl#1 gaps — the statements of this section are the language rule; impl#1 does not yet meet them everywhere.** Open holes, each filed in `docs/known-gaps.md`: `g-promise-all-batch-puts-unawaited-call-under-sync-operator` (a client function's parallel batch tests an un-awaited call under `?`/`!`/`&&`, object/array literals); `g-markup-gate-tests-server-call-promise` (`if=`/`show=`/`disabled=`/`${f() ? … }` on a server call); `g-top-level-async-closure-called-later-accept-all` (top-level `const check = (n) => isOk(n)`, function expressions, object methods); `g-cross-file-async-helper-called-unawaited` (an imported helper that calls a server function); `g-top-level-derived-from-async-helper-holds-promise` (`const ok = isOk(1)` / `<ok> = m(1)` at top level); `g-handler-local-shadowing-server-fn-renamed-to-fetch` (a handler local named like a server function); `g-handler-independent-server-calls-serialized` (§13.2 parallelization in handler / `on mount` bodies); and the pre-existing `g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources`.
+⚑ **Carried impl#1 gaps — the statements of this section are the language rule; impl#1 does not yet meet them everywhere.** Open holes, each filed in `docs/known-gaps.md`: `g-promise-all-batch-puts-unawaited-call-under-sync-operator` (a client function's parallel batch tests an un-awaited call under `?`/`!`/`&&`, object/array literals); `g-markup-gate-tests-server-call-promise` (`if=`/`show=`/`disabled=`/`${f() ? … }` on a server call); `g-top-level-async-closure-called-later-accept-all` (top-level `const check = (n) => isOk(n)`, function expressions, object methods); `g-cross-file-async-helper-called-unawaited` (an imported helper that calls a server function); `g-top-level-derived-from-async-helper-holds-promise` (`const ok = isOk(1)` / `<ok> = m(1)` at top level); `g-handler-local-shadowing-server-fn-renamed-to-fetch` (a handler local named like a server function); `g-handler-independent-server-calls-serialized` (§13.2 parallelization in handler / `on mount` bodies); `g-engine-arm-rewired-handler-skips-async-coloring` (a NON-delegable event handler — `oninput`, `onfocus`, … — inside an engine arm OR a `<match>` element arm gets no §13.2 coloring at all, so the S450 sole-root-statement rule does not reach it: a nested server-call write there still runs fire-and-forget and the next statement reads the stale value); a `match` statement nested inside an `if` / loop / closure / another `match` of a handler is not analysed and fails closed (`E-ASYNC-HANDLER-UNANALYZABLE` / `E-CODEGEN-INVALID-LOGIC`) rather than being awaited; `g-handler-level-rejection-bypasses-scrml-logging` (a write the S450 rule now awaits, whose server call rejects, escapes the async listener as an unhandled rejection instead of reaching scrml's error surface); and the pre-existing `g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources`.
 
 ### 13.3 Worked Example
 
@@ -41517,6 +41523,40 @@ shell).
 5. **A route with no listener is an error, not a silent drop** (§64.1) — an `<endpoint>` / SSE route in a
    `kind="tool"` program with NO `serve=` fires `E-TOOL-ROUTE-NEEDS-SERVE` (the non-serve tool emits no
    `Bun.serve`, so the route would be un-hosted).
+6. **The serve-harness binds loopback by default.**
+
+   > **Provenance:** ruling:user-voice-scrml.md S447 "stamp all" — "(iv) generated headless serve targets default to loopback, prod stays all-interfaces."
+
+   **Ruled.** A headless serve-target binds loopback by default: the generated module binds
+   `127.0.0.1`, plus its `::1` twin best-effort, so `http://localhost:PORT` reaches it over either
+   family. The `scrml build` production server is NOT a headless serve-target and is unchanged: it
+   binds every interface. (It is the `<outputDir>/_server.js` entry that §47.12 specifies: "`scrml
+   build` produces a single `<outputDir>/_server.js` entry".)
+
+   **Implementation's reading, pending bryan's veto: the opt-in.** The ruling does not say how a
+   public bind is requested. The generated module has no CLI flags of its own, because argv belongs
+   to a composing `main`. It therefore reads the **`SCRML_HOST`** environment variable when it
+   starts:
+   - unset → loopback, as ruled above;
+   - `SCRML_HOST=0.0.0.0` → every interface, plus its `::` twin;
+   - any other address → that address;
+   - empty → refused.
+
+   The address checks are the ones `scrml dev --host` / `scrml serve --host` apply (S446). A value
+   containing whitespace or a control character is refused, never trimmed. A legacy numeric IPv4
+   shorthand (`0`, `127.1`, `2130706433`, …), whose meaning differs by OS, is also refused.
+
+   A refused `SCRML_HOST` exits the process with status 1 and a message on stderr. The check runs at
+   the top of the module, before any of the module's own top-level statements and before a composing
+   `main` (item 3). A primary address that cannot be bound also exits with status 1. The startup
+   line on stderr names the address actually bound, and a non-loopback bind says that the server is
+   reachable from the network.
+
+   This is a runtime contract of the emitted module, not a compile-time surface: there is no new
+   attribute and no new diagnostic. `SCRML_HOST` is read ONLY by a generated headless
+   serve-target:
+   - `scrml serve` and `scrml dev` do NOT read it; they take `--host`;
+   - the `scrml build` production server does NOT read it; it always binds every interface.
 
 ## 65. The scrml-native CSS Model — predictable, cascade-free styling
 
