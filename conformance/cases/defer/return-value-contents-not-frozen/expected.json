@@ -1,0 +1,15 @@
+{
+  "id": "defer-return-value-contents-not-frozen",
+  "description": "§19.16.2 (S432 B3) — `return` fixes WHICH value is returned before the deferred bodies run, but does not freeze that value's contents: mk() returns { o, arr } and its deferred `o.a = 2` / `arr.push(9)` run after the return value is built, on the same objects the caller receives. trace = \"2;2;\" (as in Go, where a deferred mutation of a returned pointer's target is visible).",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-scrml.md S439 #6 (the four defer SPEC calls, all recs)",
+  "rationale": "§19.16.2 Exit: `return` runs the deferred bodies after the return value has been evaluated; the deferred body cannot rebind what is returned, but an object or array the returned value references is the same object afterwards, so a deferred mutation of it is observable by the caller.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "2;2;" },
+    "domAnchored": [{ "selector": "#out", "text": "2;2;" }]
+  }
+}

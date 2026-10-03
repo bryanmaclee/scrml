@@ -1,0 +1,26 @@
+${
+    <trace> = ""
+    type M:enum = { A, B }
+
+    function f(m: M) {
+        match m {
+            .A :> {
+                defer @trace = @trace + "MA;"
+                @trace = @trace + "ma;"
+            }
+            .B :> {
+                @trace = @trace + "mb;"
+            }
+        }
+        @trace = @trace + "end;"
+    }
+
+    function go() {
+        f(M.A)
+        f(M.B)
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>

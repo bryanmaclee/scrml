@@ -1,0 +1,15 @@
+{
+  "id": "defer-match-stmt-braced-arm",
+  "description": "§19.16.2 — a braced `match` STATEMENT arm block is a defer site: the deferred statement registers against the ARM block and runs when the arm exits, before the statement after the match. f(.A) writes ma, exits the arm (MA), then end; f(.B) takes the arm without a defer: trace = \"ma;MA;end;mb;end;\".",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2 Registration: the enclosing block of a `defer` is the innermost statement list that contains it, and the list names \"a braced match arm block\". Exit: every deferred body registered in that block runs when control leaves it. (The native front-end does not support this site yet — it carries statement-position match arms as text and rejects the `defer` with E-DEFER-UNSUPPORTED-SITE; a documented §19.16.8 divergence pinned by compiler/tests/unit/defer-outside-function-bodies.test.js. The runner exercises impl#1's default front-end.)",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "ma;MA;end;mb;end;" },
+    "domAnchored": [{ "selector": "#out", "text": "ma;MA;end;mb;end;" }]
+  }
+}
