@@ -27,7 +27,11 @@
  *                   §66.21 row 4). The state-children are carried verbatim. A legacy engine renders
  *                   where it is declared; a `single` declaration renders at `<*v/>` (O5 1i), so when
  *                   any state-child has a body, `<*v/>` is written right after the declaration.
- *   program-wrap    an entry file with no `<program>` root → wrapped in `<program>…</program>`.
+ *   program-wrap    an entry file with no `<program>` root → wrapped in `<program reset="none">…</program>`.
+ *                   `reset="none"` (S451 ruling, fork b = 2): impl#1 emits the §65.3.4 reset layer
+ *                   only for a declared `<program>`, so a plain wrap would change the page's styling;
+ *                   the attribute keeps the rendering identical (a codemod changes spelling, never
+ *                   rendering). Deleting it opts the program into the reset.
  *   program-move    items above (or below) the entry's `<program>` → moved inside it.
  *   unwrap-logic    a `${ … }` block at markup depth 0 whose statements are all items → unwrapped
  *                   (§40.8 / S441: a bare run at a program body top means the same as inside `${}`).
@@ -77,6 +81,13 @@ import { join, dirname, basename, resolve, relative, isAbsolute, sep } from "nod
 // ---------------------------------------------------------------------------
 
 /** The rules whose output impl#1 — the compiler adopters run — still compiles (verified per file). */
+/**
+ * The opener program-wrap writes. `reset="none"` (§65.3.4 opt-out) keeps impl#1's output for the
+ * wrapped file rendering-identical: impl#1 adds the built-in reset layer only to a declared
+ * `<program>`, and the unwrapped file had none (S451 ruling, fork b = 2).
+ */
+export const WRAP_OPENER = '<program reset="none">';
+
 export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "program-wrap", "program-move", "unwrap-logic"]);
 /** The §66 declaration rules: their output is the §66 opener dialect, which impl#1 does NOT compile. */
 export const S66_DECL_RULES = Object.freeze(["rhs-decl", "const-cell", "engine-simple"]);
@@ -1604,7 +1615,7 @@ export function fixS66(source, opts = {}) {
     };
     if (st?.kind === "wrap") {
       const body = Ek(0, src.length).replace(/^\s*\n/, "").replace(/\s+$/, "");
-      return `<program>\n${body}\n</program>\n`;
+      return `${WRAP_OPENER}\n${body}\n</program>\n`;
     }
     if (st?.kind === "move") {
       const pre = Ek(0, st.ps).replace(/^\s+/, "").replace(/\s+$/, "");
@@ -1654,7 +1665,7 @@ export function fixS66(source, opts = {}) {
     }
   }
   const output = assemble(() => true, structural);
-  if (structural?.kind === "wrap") applied.push({ rule: "program-wrap", line: 1, detail: "wrapped the file in <program>" });
+  if (structural?.kind === "wrap") applied.push({ rule: "program-wrap", line: 1, detail: `wrapped the file in ${WRAP_OPENER}` });
   if (structural?.kind === "move") applied.push({ rule: "program-move", line: 1, detail: "moved items outside <program> inside it" });
   for (const ed of edits) {
     if (ed.rule === "unwrap-logic" && ed.detail === "}") continue;

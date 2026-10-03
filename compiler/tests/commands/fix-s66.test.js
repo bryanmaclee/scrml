@@ -196,7 +196,7 @@ describe("§3 engine-simple", () => {
 describe("§4 program-wrap / program-move / unwrap-logic", () => {
   test("an entry with no <program> is wrapped; the depth-0 ${} unwraps", () => {
     const out = clean("${\n    <count> = 0\n    function inc() { @count = @count + 1 }\n}\n<button onclick=inc()>+</button>\n");
-    expect(out).toBe("<program>\n    let <count:number=0/>\n    function inc() { @count = @count + 1 }\n<button onclick=inc()>+</button>\n</program>\n");
+    expect(out).toBe("<program reset=\"none\">\n    let <count:number=0/>\n    function inc() { @count = @count + 1 }\n<button onclick=inc()>+</button>\n</program>\n");
   });
 
   test("a non-entry (module) file is never wrapped and its ${} stays", () => {
@@ -233,7 +233,7 @@ describe("§4 program-wrap / program-move / unwrap-logic", () => {
     expect(r.blockers.map((b) => b.reason).join("\n")).toContain("impl#1 reads the restructured file differently (-E-OUTLET-OUTSIDE-SHELL)");
     // BITE: with verify off the wrap goes through — the compile is what caught it
     const r2 = fix(src, { verify: false });
-    expect(r2.output.startsWith("<program>")).toBe(true);
+    expect(r2.output.startsWith('<program reset="none">')).toBe(true);
   });
 
   test("a top-level ${} holding a non-item statement (a logic `const`, a loop) keeps its ${}", () => {
@@ -294,7 +294,7 @@ describe("§6 canonical §66 input is left alone", () => {
   test("a rules subset applies only those rules", () => {
     const r = fix("${\n    <count> = 0\n}\n<p>${@count}</p>\n", { rules: ["program-wrap"] });
     expect(r.output).toContain("<count> = 0");
-    expect(r.output.startsWith("<program>")).toBe(true);
+    expect(r.output.startsWith('<program reset="none">')).toBe(true);
   });
 });
 
@@ -319,7 +319,7 @@ describe("§7 the CLI — default = only rules impl#1 compiles; --s66 is a gated
       const before = impl1Codes(f);
       expect(runFixCommand([f], io().io)).toBe(0);
       const out = readFileSync(f, "utf8");
-      expect(out.startsWith("<program>")).toBe(true);        // program-wrap applied
+      expect(out.startsWith('<program reset="none">')).toBe(true);        // program-wrap applied
       expect(out).toContain("<count> = 0");                    // the declaration is NOT rewritten
       expect(out).not.toContain("let <count");
       expect(impl1Codes(f)).toEqual(before);                   // impl#1 reads it the same
@@ -370,11 +370,40 @@ describe("§7 the CLI — default = only rules impl#1 compiles; --s66 is a gated
       writeFileSync(f, legacy);
       const a = io();
       expect(runFixCommand([f, "--dry-run"], a.io)).toBe(0);
-      expect(a.o.out.join("\n")).toContain("+<program>");
+      expect(a.o.out.join("\n")).toContain('+<program reset="none">');
       expect(readFileSync(f, "utf8")).toBe(legacy);
       expect(runFixCommand([f, "--check"], io().io)).toBe(1);
       expect(runFixCommand([f], io().io)).toBe(0);
       expect(runFixCommand([f, "--check"], io().io)).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("S451 fork (b) = (2): the wrap writes <program reset=\"none\"> — impl#1's CSS is unchanged (no §65.3.4 reset layer appears); the note says how to opt in", () => {
+    const dir = tmp();
+    const css = (f) => {
+      const r = compileScrml({ inputFiles: [f], write: false, outputDir: join(dirname(f), "out"), log: () => {} });
+      const o = [...r.outputs.values()][0];
+      return o?.css ?? "";
+    };
+    try {
+      const styled = "#{ .x { color: red; } }\n<p class=\"x\">hi</p>\n";
+      const f = join(dir, "app.scrml");
+      writeFileSync(f, styled);
+      const before = css(f);
+      expect(before).not.toContain("@layer reset");
+      const a = io();
+      expect(runFixCommand([f], a.io)).toBe(0);
+      const out = readFileSync(f, "utf8");
+      expect(out.startsWith('<program reset="none">\n')).toBe(true);
+      expect(css(f)).toBe(before);
+      const err = a.o.err.join("\n");
+      expect(err).toContain('reset="none" preserves the old styling');
+      expect(err).toContain("delete the attribute to opt into the reset");
+      // BITE: the same wrap without the attribute makes impl#1 add the reset layer
+      writeFileSync(f, out.replace('<program reset="none">', "<program>"));
+      expect(css(f)).toContain("@layer reset");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
