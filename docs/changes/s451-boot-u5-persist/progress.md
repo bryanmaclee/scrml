@@ -80,3 +80,9 @@ Governing sentences (compiler/SPEC.md):
   first draft hit it. Pre-existing, outside U5; reported.
 - facts gate: PASS (no FACTS.md regeneration needed). Slice artifacts: none regenerated (no slice-m*
   generated file depends on this change).
+
+## 2026-10-03 — fix round (S239 review MED-1)
+
+- A word written twice in one opener (any modifier: persist, key, prepaint, reset-on, single, server, …; and a bare validator such as `req req`) → E-BOOTSTRAP-UNSUPPORTED at each repeat (`repeatedWordDiags`, called from `openerWordDiags`, which every opener passes through). Searched §4, §5, §66.2, §34 for a duplicate-attribute code — none governs. Validator CALLS with different arguments (`length(>2) length(<9)`) stay legal — a conjunction, each read (validators.test.js pins it).
+- `key=""` → E-BOOTSTRAP-UNSUPPORTED (SPEC silent on an empty key).
+- Cross-tab decode-failure / removed-key behaviour unchanged (with bryan).

@@ -389,6 +389,34 @@ describe("§6.14 — refused, never accepted-and-ignored (E-BOOTSTRAP-UNSUPPORTE
     expect(codes(P(`    let <a:int=0 persist="local" key="dup"/>\n    let <b:int=0 persist="session" key="dup"/>`, `        <p>x</p>`))).toEqual([]);
   });
 
+  test("fix round (S239 MED-1): a word written twice in one opener is refused, never first-wins — any name", () => {
+    const shapes = [
+      [`    let <x:int=0 persist="local" persist="cookie" key="d1"/>`, "persist"],
+      [`    let <x:int=0 persist="local" key="d2" key="d3"/>`, "key"],
+      [`    let <x:int=0 persist="local" key="d4" prepaint prepaint/>`, "prepaint"],
+      [`    let <q:int=0/>\n    let <x:int=0 reset-on=[@q] reset-on=[@q]/>`, "reset-on"],
+      [`    let <x:string="" req req/>`, "req"],
+    ];
+    for (const [decls, w] of shapes) {
+      const d = diagsOf(P(decls, `        <p>x</p>`));
+      expect([w, d.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("`" + w + "` is written twice"))]).toEqual([w, true]);
+    }
+    // negative: validator CALLS with different arguments are a conjunction, each read — not a repeat
+    expect(codes(P(`    let <x:string="" length(>2) length(<9)/>`, `        <p>x</p>`))).toEqual([]);
+    // `single single` on an engine cell
+    const eng = `<program>\n    type P:enum = { A, B }\n    <p:P=.A single single>\n        <A rule=.B : "a">\n        <B rule=.A : "b">\n    </>\n    <main><*p/></main>\n</program>\n`;
+    expect(diagsOf(eng).some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("`single` is written twice"))).toBe(true);
+    // on a declaration's field too
+    const field = `<program>\n <box a:int=1>\n  let <c:int=0 req req/>\n </>\n renders <p>\${a}</p>\n <main><box/></main>\n</program>\n`;
+    expect(diagsOf(field).some((x) => x.message.includes("`req` is written twice"))).toBe(true);
+    // the program never compiles to a persisted cell from the first `persist=`
+    expect(run(P(`    let <x:int=0 persist="local" persist="cookie" key="d5"/>`, `        <p>x</p>`)).diags.length).toBeGreaterThan(0);
+  });
+
+  test("fix round: `key=\"\"` is refused (SPEC silent on an empty key)", () => {
+    one(`    let <a:int=0 persist="local" key=""/>`, "empty key");
+  });
+
   test("a computed `key=` (O-061-9) and `key=` without `persist=`", () => {
     one(`    let <a:int=0 persist="local" key=(@a)/>`, "O-061-9");
     one(`    let <a:int=0 key="k"/>`, "no `persist=`");

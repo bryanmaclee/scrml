@@ -2103,6 +2103,7 @@ ${
     fn openerWordDiags(file: string, errs: ASpan[], d: ADecl, cell: boolean, st0: AS) -> AS {
         let st: AS = st0
         if (hasErrIn(errs, d.span)) return st
+        st = repeatedWordDiags(file, d, st)
         for (const a of d.mods) {
             if (a.name == "reset-on" && !cell) {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset-on=` on `<" + d.name + ">`, a field of a declaration, is not in the bootstrap — whether a field's `reset-on=` may name a sibling field of the same instance (a per-instance reset) is OPEN (§6.8.4); it is read on a program cell")
@@ -2127,6 +2128,44 @@ ${
     fn isValidatorName(w: string) -> boolean {
         return w == "req" || w == "length" || w == "pattern" || w == "min" || w == "max" || w == "gt" || w == "lt" ||
                w == "gte" || w == "lte" || w == "eq" || w == "neq" || w == "oneOf" || w == "notIn"
+    }
+
+    // s451 fix round (S239 review MED-1) — a word written TWICE in one opener
+    // (`persist="local" persist="cookie"`, `single single`, `req req`,
+    // `reset-on=[@q] reset-on=[@q]`, any modifier or validator) is refused:
+    // every reader takes the first match, so the rest were silently dropped.
+    // Searched §4, §5, §66.2 and §34 for a duplicate-attribute code — none
+    // governs a repeated opener word — so E-BOOTSTRAP-UNSUPPORTED, by
+    // construction for every name, at each repeat.
+    fn repeatedWordDiags(file: string, d: ADecl, st0: AS) -> AS {
+        let st: AS = st0
+        let seen: string[] = []
+        for (const a of d.mods) {
+            if (seen.indexOf(a.name) >= 0) st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", repeatedMessage(d.name, a.name))
+            seen = seen.concat([a.name])
+        }
+        // A validator CALL may repeat with other arguments — `length(>2)
+        // length(<9)` is a conjunction every one of which is read (validators.
+        // test.js pins it); a bare one (`req req`) says nothing twice.
+        for (const v of d.validators) {
+            if (seen.indexOf(v.name) >= 0 && isBareValidator(v)) st = addDiag(st, file, v.span, "E-BOOTSTRAP-UNSUPPORTED", repeatedMessage(d.name, v.name))
+            seen = seen.concat([v.name])
+        }
+        return st
+    }
+
+    fn isBareValidator(v: AValidator) -> boolean {
+        const a: AValArg = v.arg
+        return match a {
+            .NoArgs :> true
+            .Cmp(op: o) :> false
+            .Exprs(es: es) :> false
+            .Regex(source: s) :> false
+        }
+    }
+
+    fn repeatedMessage(decl: string, w: string) -> string {
+        return "`" + w + "` is written twice on `<" + decl + ">` — the bootstrap reads one, so the other would be silently dropped; the SPEC names no code for a repeated opener word, so it is refused: write it once"
     }
 
     // s451 — the `persist=` storage value "session", spelled in pieces: impl#1
@@ -10581,6 +10620,10 @@ ${
             const kv: string | not = quotedOf(km.value)
             if (kv is not) {
                 st = addDiag(st, prog.file, km.span, "E-BOOTSTRAP-UNSUPPORTED", "a computed `key=` on `@" + d.name + "` is not in the bootstrap — a per-instance key expression is OPEN (O-061-9); write the key as a quoted string")
+                ok = false
+            } else if (kv == "") {
+                // SPEC silent on an empty key (§6.14.1 r2 only requires one) — refused
+                st = addDiag(st, prog.file, km.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=\"\"` on `@" + d.name + "` names no storage key — the SPEC does not say whether an empty key is one (§6.14.1 rule 2), so the bootstrap refuses it; write a non-empty key")
                 ok = false
             } else {
                 key = kv
