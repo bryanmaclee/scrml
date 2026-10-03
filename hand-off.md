@@ -1,3 +1,99 @@
+# scrml — Session 450 (peter · P-Tech1) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Concurrent: **S449-bryan (ASUS) LIVE
+> the whole session** (bootstrap U0, protect r9, dev-db, auth rulings — landed #1232–#1240); footprints disjoint (board
+> `scrml-support/handOffs/active-sessions/S450-peter.md`). Operator: *"keeping to the answered only items, and aM specific
+> items, let's go full throttle"* · *"merge on green, and bump the pin after landings"* · *"park both on hold refs for bryan"*.
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 1. bryan's answers to the S450 route note → act on each (one word each)
+Note: pushed to scrml's `inbox` branch — `handOffs/incoming/2026-10-02-from-S450-peter-to-bryan-stamp-all-built.md`.
+- **B. Two S435 policy-exception asks, reviewed + parked:**
+  - `hold/s450-transaction-in-function-body` @69cdaa98 — on "yes": cut `fix/` from the hold, merge origin/main (known-gaps
+    LINE-wise), PR, `merge-on-green.sh`. The last nit commit `a676c61a` (transaction inside a statement-match arm →
+    E-TRANSACTION-CONTROL-FLOW) landed AFTER the narrow re-review — give it a quick read before the PR. Also owes his two
+    rulings: return/break/continue leaving the block (commit or roll back?) and top-level `transaction` (reject? corpus 0).
+  - `hold/s450-each-row-interp-whitespace` @d5500e69 — review LAND-WITH-NITS; on "yes" fix nit 2 first (the citation
+    §17.7.7 → §4.18.1 "Body modes nest" in its expected.json + gap text), then PR.
+- **A. Readings (silence = stands):** SCRML_HOST (#1241) · closure-sole-write fire-and-forget (#1242) · #1242's lost error
+  routing — **if he says "yes" to A3, build it:** route an awaited async listener's rejection to `_scrml_error_boundary_log`
+  (`js-async-analysis.ts` / listener emit), widening fix for `g-handler-level-rejection-bypasses-scrml-logging` · LIKE shape ·
+  schema R1–R3 · (v) undetected forms = errors (`g-attr-multi-statement-undetected-forms`).
+- **C/D. Routed HIGHs:** `g-shared-sql-connection-concurrent-handlers-share-transaction` (data loss — bryan's lane, rec: a
+  per-connection async mutex around every transaction envelope) · `g-implicit-handler-tx-commits-on-fail` (ruling: does
+  `fail` roll back the §8.9.2 envelope? rec yes).
+
+### 2. aM — the pin is BUMPED; two Pi-deploy blockers remain (Peter's, aM repo)
+`scrml-pinned`/`app-pinned` fast-forwarded to scrml main (SHA in "aM" below). aM main `156952a` carries the guard:
+`app/src/scrml.toml` (anchors the db path) + `deploy-pi.sh` REFUSES a new-data-root build unless `S450_PI_READY=1`.
+Before any Pi deploy: (1) add `SCRML_DATA_DIR=/home/pi/app` to the asset-app systemd unit; (2) `/`, `/index.html`, `/sw.js`
+now 404 under scrml's static allowlist (#1162, §47.13) — aM must ship them as build-written assets OR scrml needs a
+sanctioned extra-static mechanism (no config knob found — ask bryan if Peter wants the latter). Peter's click-test list is
+in "aM" below. ⚑ Do NOT migrate aM's `db.js` replace-all to scrml `transaction{}` until the shared-connection HIGH is fixed.
+
+### 3. Peter-lane queue (filed this session, all reproduced on main 865065d8, traced loci)
+HIGH `g-quoted-else-if-and-show-condition-not-parsed` (`tokenizer.ts:782` — one-line class fix, governing §5.2 sentence
+quoted in the entry) · HIGH `g-propagated-failable-helper-not-emitted-on-server` (`route-inference.ts` callee walk misses
+`propagate-expr`; on aM's migration path) · HIGH `g-inline-handler-match-value-payload-variant-never-matches`
+(`rewrite.ts:1906`) · HIGH `g-children-spread-duplicated-into-preceding-siblings` (`component-expander.ts:3613`) · HIGH
+`g-component-children-spread-syntax-rejected-e-component-021` (UNVERIFIED by the PA — repro first) · MED
+`g-call-ref-on-non-event-attr-wired-as-event-listener` · MED `g-unbraced-stmt-match-arm-sql-run-not-a-function`.
+⚑ **Check each against the S435 policy BEFORE dispatching** (impl#1 changes only for security / bootstrap-serving — adopter-
+reported is RETIRED; aM is PARKED). Security-class: none of the above is obviously security; the quoted-condition and
+propagated-helper ones are silent-wrong. Gift-wrap any you want built as an exception ask.
+
+## WHAT LANDED — seven PRs, each through `merge-on-green.sh` (gate + windows green on the CURRENT head; tracking = main's newest COMPLETED run)
+| PR | what | review |
+|---|---|---|
+| **#1208** | defer SPEC calls + Part A (S446 draft, bryan stamped) | S446 S239 + PA read of the #1240 test edits |
+| **#1210** | imported-enum F11/F15/F16/F17, 38 newly-loud rows (stamped) | S446 r1–r6; 284-row matrix re-run after each main merge |
+| **#1211** | client-JS helper copy + E-IMPORT-011 + `type="module"` (stamped) | S446 S239; PA resolved the re-merge + a §34.0 provenance-gate red |
+| **#1241** | (iv) headless serve targets → loopback; prod all-interfaces | S239 LAND-WITH-NITS → nit round |
+| **#1242** | (iii) nested server-call write awaited in place; sole root write fire-and-forget | S239 LAND-WITH-NITS → docs/tests nit round |
+| **#1243** | (i)+(ii) E-SCHEMA-015 same-name tenant_id disagreement; LIKE → E-SCHEMA-014; comment-in-head hole closed | S239 FIX (F1 security hole, live on main) → fix → re-review LAND-WITH-NITS |
+| **#1244** | (v) E-ATTR-MULTI-STATEMENT | S239 FIX → fix → re-review LAND-WITH-NITS → NIT 1 closed (PA read) |
+
+## 🔭 DURABLE
+**The policy check belongs BEFORE the dispatch, not after the build.** I dispatched two aM fixes without checking bryan's
+S435 impl#1 policy (adopter-reported criterion RETIRED; aM PARKED) — the S446 hand-off told me to. Both were built and
+reviewed well, and now sit on hold refs as exception asks. Cost: two agents' work that may not land; it was recoverable only
+because the work is reviewed and parked rather than half-done.
+
+**Every FIX verdict this session was a real defect, and two were live on main.** The schema review found the comment-in-head
+tenant-floor hole (exit 0, floor OFF) — on main today; the transaction review found the shared-connection data loss (a 200
+response whose write is rolled back by another request) — on main today. Neither was the reviewed change's own regression.
+An adversarial review of a narrow fix routinely finds the broad hole it sits in.
+
+**Read what you're about to resolve to.** Twice the PA nearly shipped generated churn: taking main's `known-gaps.md`
+wholesale dropped #1211's own gap entry; `state.ts --write` rewrote `master-list.md` recent-sessions into three PRs. Rule:
+resolve known-gaps by re-creating the conflict (`git checkout -m`) and fixing only the count hunk; always
+`git diff origin/main HEAD -- master-list.md` before pushing.
+
+**An authorization relayed through the PA does not clear autoMode for a subagent.** Peter's "merge on green" reached the
+#1211 agent through me; its `git merge origin/main` was still refused ("Modify Shared Resources"). Other agents' identical
+merges were allowed — the classifier judges per call. Peter ran it himself with `!`. Don't route around it.
+
+## ⚑ MISSES (mine)
+1. ★★ Dispatched the aM transaction + whitespace fixes before checking the S435 policy (see DURABLE).
+2. ★ First pass at #1211's known-gaps conflict took main's whole file → dropped the PR's gap entry; caught on the count.
+3. ★ Let `master-list.md` generated churn into the #1211 and #1241 branches; caught by a two-dot diff before merge.
+4. ★ A python heredoc hung a shell for 2 min on this Windows box (python3 is the Store stub) — use node/bun or Edit.
+
+## Review ledger
+S239 + narrow re-reviews (reports in this session's scratchpad `rv-*/`): #1241 (S239 + PA read of the nit diff), #1242 (S239 +
+PA check `js-async-analysis.ts` unchanged after the nit round), #1243 (S239 FIX → re-review), #1244 (S239 FIX → re-review →
+PA read of NIT 1), transaction hold (S239 FIX → re-review; final nit NOT re-reviewed), whitespace hold (S239). #1208/#1210/
+#1211: S446 reviews + PA checks on the re-merges. Markers appended to `docs/pr-reviews.md`.
+
+## Holds
+New: `hold/s450-transaction-in-function-body` @69cdaa98 · `hold/s450-each-row-interp-whitespace` @d5500e69 (both for bryan).
+Deleted (landed): `hold/s432-defer-spec-calls`, `hold/s438-impl1-imported-enum-match`, `hold/s432-expr-handler-multi-stmt-alt`
+(E-ATTR source, superseded by #1244). Remaining older: `hold/s432-bare-when-body-top{,-alt}`, `hold/s438-1109-review-fixes`,
+`hold/s438-refusal-writes-no-dist`, `hold/s429-mutation-arg-string-quotes` (not touched).
+
+---
+
 # scrml — Session 447 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Concurrent: S446-bryan-xps (died in the
