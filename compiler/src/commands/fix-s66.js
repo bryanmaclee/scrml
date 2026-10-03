@@ -1,0 +1,898 @@
+/**
+ * @module commands/fix-s66
+ * The mechanical §66.21 `scrml fix` rules — legacy declaration dialect → the §66 opener dialect.
+ * change-id: s449-scrml-fix-s66-twins. Ruling: user-voice-scrml.md S449 "RULED — 'your recs.' —
+ * corpus-dialect rulings 1–6" (ruling 6: the mechanical rules are built as the first real
+ * `scrml fix`, in impl#1, because impl#1 has the legacy parser, the types and the writes).
+ *
+ * ═══ WHAT IT DOES ═══
+ *
+ * `fixS66(source, opts)` rewrites ONE file. It drives impl#1's live front end (splitBlocks +
+ * buildAST) to find every legacy construct, and rewrites only at sites the AST located. A text
+ * extent the rewrite needs (where an initializer ends) is re-parsed with impl#1's own expression
+ * parser and compared to the AST's node (`deepEqualExprNode`) before it is used — a mismatch is a
+ * blocker, never a guess.
+ *
+ * Rules (ids are stable; they appear in reports and in the counter's NOT-TWINNED reasons):
+ *
+ *   pre-migrate     the older `scrml migrate` rewrites (`< engine` whitespace, `<machine>`, `pure`,
+ *                   `const @x`) — chained first, unchanged (migrate.js `applyMigrations`).
+ *   rhs-decl        `<x> = v` / `<x>: T = v` / `<x attrs> = v` → `<x:T=v attrs/>` (locked) or
+ *                   `let <x:T=v attrs/>`. §66.21 row 1 as amended S449 (dialect ruling 2): LOCKED
+ *                   only when the cell is never written AND its initializer reads no cell;
+ *                   otherwise `let` (seeded) — a reactive initializer never silently becomes derived.
+ *   const-cell      `const <x> = expr` → `<x:T=(expr)/>` (locked; derived exactly when expr reads
+ *                   cells — §66.9 rule 7, §66.21 row 2).
+ *   engine-simple   `<engine for=T initial=.X [var=|name=]>…</>` → `<v:T=.X single>…</>` (§66.13.3,
+ *                   §66.21 row 4). The state-children are carried verbatim. A legacy engine renders
+ *                   where it is declared; a `single` declaration renders at `<*v/>` (O5 1i), so when
+ *                   any state-child has a body, `<*v/>` is written right after the declaration.
+ *   program-wrap    an entry file with no `<program>` root → wrapped in `<program>…</program>`.
+ *   program-move    items above (or below) the entry's `<program>` → moved inside it.
+ *   unwrap-logic    a `${ … }` block at markup depth 0 whose statements are all items → unwrapped
+ *                   (§40.8 / S441: a bare run at a program body top means the same as inside `${}`).
+ *
+ * Types: an untyped legacy numeric literal is a JS `number` in impl#1 (impl#1 infers no `int`), so
+ * the rewrite spells `:number` — `<count=0/>` would infer `int` under §66.3 rule 3 and change the
+ * program (`@count / 2` becomes E-INT-DIVISION). A bare variant `.X` gets the enum that declares it
+ * (exactly one declaring enum, this file or an aux file). Strings and booleans infer.
+ *
+ * Writes: a cell is WRITTEN if impl#1's AST shows a write (a reactive assignment, an array
+ * mutation, an update or assignment expression, a `reset`) OR a conservative lexical scan of
+ * every `@x` occurrence cannot prove it a read (assignment / update / `bind:` / `reset(` /
+ * a non-pure method on its chain / any bare use of a sequence, which may alias it). The union
+ * is used, so a false "never written" needs BOTH to miss a write. Attributes that imply a write
+ * (`server`, `pinned`, `persist=`, `reset-on=`, `debounced=`, `throttled=`) count, and a `^{}`
+ * meta block makes every cell written. Erring this way only ever yields `let` where locked would
+ * do — always meaning-preserving for a legacy cell, which carries the all-permissions grant.
+ *
+ * Anything else is a BLOCKER: left untouched and reported with a reason (Shape 2, Shape 4,
+ * compound cells, components, written sequences, untyped non-literal initializers (O35),
+ * render-by-tag `<x/>` of a cell, engines beyond the simple rule, exported cells, declarations
+ * in a markup position (O38), top-level prose that a `<program>` body would read as code…).
+ *
+ * Idempotent: the output contains none of the legacy forms, so a second run makes no edit.
+ */
+
+import { splitBlocks } from "../block-splitter.js";
+import { buildAST } from "../ast-builder.js";
+import { parseExprToNode, deepEqualExprNode, captureTrailingContentWarnings, hasLostTrailingContent } from "../expression-parser.ts";
+import { isUniversalCorePredicate } from "../validator-catalog.ts";
+import { applyMigrations } from "./migrate.js";
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+export const S66_RULES = Object.freeze([
+  "pre-migrate",
+  "rhs-decl",
+  "const-cell",
+  "engine-simple",
+  "program-wrap",
+  "program-move",
+  "unwrap-logic",
+]);
+
+/** Opener modifiers carried verbatim into the §66 opener (§66.2.5 zone 2). */
+const CARRIED_ATTRS = new Set(["server", "pinned", "persist", "debounced", "throttled", "reset-on", "default", "key"]);
+/** Of those, the ones under which something other than this file's code writes the cell. */
+const WRITE_IMPLYING_ATTRS = new Set(["server", "pinned", "persist", "reset-on", "debounced", "throttled"]);
+/** Engine opener attributes the simple engine rule covers. */
+const ENGINE_SIMPLE_ATTRS = new Set(["for", "initial", "var", "name"]);
+/** Methods whose call on a cell's value chain provably does not mutate it. */
+const PURE_METHODS = new Set([
+  "map", "filter", "slice", "includes", "indexOf", "lastIndexOf", "find", "findIndex", "findLast",
+  "findLastIndex", "some", "every", "reduce", "reduceRight", "join", "concat", "toString", "at",
+  "flat", "flatMap", "entries", "keys", "values", "forEach", "toUpperCase", "toLowerCase", "trim",
+  "trimStart", "trimEnd", "startsWith", "endsWith", "split", "charAt", "charCodeAt", "padStart",
+  "padEnd", "repeat", "replace", "replaceAll", "substring", "toFixed", "toPrecision", "localeCompare",
+  "toSorted", "toReversed", "toSpliced", "with", "has", "get", "match", "search", "normalize",
+]);
+/** Statement kinds that block unwrapping a depth-0 `${}` (a value that legacy may RENDER, S441). */
+const UNWRAP_BLOCKING_KINDS = new Set(["bare-expr", "markup", "lift-expr", "lift"]);
+/** ExprNode kinds the rewrite may parenthesize as an ordinary expression. */
+const PLAIN_EXPR_KINDS = new Set([
+  "ident", "lit", "member", "index", "call", "binary", "unary", "ternary", "array", "object",
+  "new", "cast", "lambda", "map-lit",
+]);
+
+// ---------------------------------------------------------------------------
+// Small lexical helpers (position-exact; used only at AST-located sites)
+// ---------------------------------------------------------------------------
+
+const isIdStart = (ch) => /[A-Za-z_$]/.test(ch ?? "");
+const isIdChar = (ch) => /[A-Za-z0-9_$]/.test(ch ?? "");
+
+/** Index just past the string/template literal opening at i (src[i] is a quote). */
+function skipString(src, i) {
+  const q = src[i];
+  let j = i + 1;
+  while (j < src.length) {
+    const ch = src[j];
+    if (ch === "\\") { j += 2; continue; }
+    if (q === "`" && ch === "$" && src[j + 1] === "{") {
+      j = skipBalanced(src, j + 1);
+      continue;
+    }
+    if (ch === q) return j + 1;
+    if (q !== "`" && ch === "\n") return j; // unterminated single-line string: stop at EOL
+    j++;
+  }
+  return j;
+}
+
+/** src[i] is an opening bracket; return the index just past its match (strings skipped). */
+function skipBalanced(src, i) {
+  const open = src[i];
+  const close = open === "(" ? ")" : open === "[" ? "]" : "}";
+  let depth = 0;
+  let j = i;
+  while (j < src.length) {
+    const ch = src[j];
+    if (ch === '"' || ch === "'" || ch === "`") { j = skipString(src, j); continue; }
+    if (ch === open) depth++;
+    else if (ch === close) {
+      depth--;
+      if (depth === 0) return j + 1;
+    }
+    j++;
+  }
+  return j;
+}
+
+/**
+ * Scan a tag opener starting at `<` (index i). Returns { nameEnd, end, selfClosing } where `end`
+ * is just past the closing `>` / `/>`, or null when no opener closes on depth 0.
+ */
+function scanOpener(src, i) {
+  if (src[i] !== "<") return null;
+  let j = i + 1;
+  while (j < src.length && /[A-Za-z0-9_$\-]/.test(src[j])) j++;
+  const nameEnd = j;
+  while (j < src.length) {
+    const ch = src[j];
+    if (ch === '"' || ch === "'" || ch === "`") { j = skipString(src, j); continue; }
+    if (ch === "{" || ch === "(" || ch === "[") { j = skipBalanced(src, j); continue; }
+    if (ch === "/" && src[j + 1] === ">") return { nameEnd, end: j + 2, selfClosing: true };
+    if (ch === ">") return { nameEnd, end: j + 1, selfClosing: false };
+    j++;
+  }
+  return null;
+}
+
+/** Split an opener's attribute text into top-level tokens (`name`, `name=value`, `name(args)`). */
+function splitAttrTokens(text) {
+  const out = [];
+  let j = 0;
+  while (j < text.length) {
+    while (j < text.length && /\s/.test(text[j])) j++;
+    if (j >= text.length) break;
+    const start = j;
+    while (j < text.length && !/\s/.test(text[j])) {
+      const ch = text[j];
+      if (ch === '"' || ch === "'" || ch === "`") { j = skipString(text, j); continue; }
+      if (ch === "{" || ch === "(" || ch === "[") { j = skipBalanced(text, j); continue; }
+      j++;
+    }
+    out.push(text.slice(start, j));
+  }
+  return out;
+}
+
+const attrName = (tok) => (tok.match(/^[A-Za-z_$][\w$\-:]*/) ?? [""])[0];
+
+/** 1-based line of an offset. */
+function lineOf(src, off) {
+  let n = 1;
+  for (let k = 0; k < off && k < src.length; k++) if (src[k] === "\n") n++;
+  return n;
+}
+
+// ---------------------------------------------------------------------------
+// AST helpers
+// ---------------------------------------------------------------------------
+
+const SKIP_KEYS = new Set(["span", "initExpr", "exprNode", "argsExpr", "condExpr", "headerExpr", "derivedExprNode"]);
+
+/** Visit every AST node with its ancestor chain (outermost first). */
+function walkAst(root, fn) {
+  const seen = new WeakSet();
+  const stack = [];
+  const visit = (n) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+    const isNode = typeof n.kind === "string";
+    if (isNode) fn(n, stack);
+    if (isNode) stack.push(n);
+    for (const k of Object.keys(n)) {
+      if (SKIP_KEYS.has(k)) continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v);
+    }
+    if (isNode) stack.pop();
+  };
+  visit(root);
+}
+
+/** Visit every ExprNode reachable from an AST node's expression fields. */
+function forEachExprNode(root, fn) {
+  const seen = new WeakSet();
+  const visit = (n, inExpr) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const x of n) visit(x, inExpr); return; }
+    if (inExpr && typeof n.kind === "string") fn(n);
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v, inExpr || SKIP_KEYS.has(k) || k === "value" || k === "args" || k === "init");
+    }
+  };
+  visit(root, false);
+}
+
+/** The cell an lvalue ExprNode is rooted at (`@x`, `@x.a`, `@x[0]`), or null. */
+function lvalueRoot(e) {
+  let cur = e;
+  while (cur && (cur.kind === "member" || cur.kind === "index")) cur = cur.object;
+  if (cur && cur.kind === "ident" && typeof cur.name === "string" && cur.name.startsWith("@")) return cur.name.slice(1);
+  return null;
+}
+
+/** Enum variants by enum name, from every `type X:enum = { … }` in the given ASTs. */
+function collectEnums(asts) {
+  const enums = new Map();
+  for (const ast of asts) {
+    walkAst(ast, (n) => {
+      if (n.kind !== "type-decl" || n.typeKind !== "enum" || typeof n.raw !== "string") return;
+      const body = n.raw.replace(/^\s*\{/, "").replace(/\}\s*$/, "");
+      const variants = [];
+      let depth = 0;
+      let cur = "";
+      for (const ch of body) {
+        if (ch === "(" || ch === "{" || ch === "[") depth++;
+        if (ch === ")" || ch === "}" || ch === "]") depth--;
+        if ((ch === "," || ch === "\n") && depth === 0) { variants.push(cur); cur = ""; continue; }
+        cur += ch;
+      }
+      variants.push(cur);
+      const names = variants.map((v) => (v.trim().match(/^[A-Za-z_$][\w$]*/) ?? [null])[0]).filter(Boolean);
+      enums.set(n.name, new Set(names));
+    });
+  }
+  return enums;
+}
+
+function parseAst(filePath, source) {
+  // The front end's "statement boundary" console warnings are about the INPUT; a fix run reports
+  // through its own blockers, so they are captured here rather than printed.
+  return captureTrailingContentWarnings(() => {
+    const bs = splitBlocks(filePath, source);
+    return buildAST(bs).ast;
+  }).result;
+}
+
+/** The single top-level `<program>` count of a source, per impl#1's front end (-1: no AST). */
+function topLevelProgramCount(filePath, source) {
+  try {
+    const ast = parseAst(filePath, source);
+    const nodes = Array.isArray(ast?.nodes) ? ast.nodes : null;
+    if (!nodes) return -1;
+    return nodes.filter((n) => n.kind === "markup" && n.tag === "program").length;
+  } catch {
+    return -1;
+  }
+}
+
+/** A legacy declaration statement (line-leading), for the after-the-fact safety net. */
+const LEGACY_DECL_LINE = /^[ \t]*(?:export[ \t]+)?(const[ \t]+)?<([A-Za-z_][\w]*)(?:[ \t][^<>\n]*)?>[ \t]*(?::[^=\n]*)?=(?![=>])/gm;
+
+// ---------------------------------------------------------------------------
+// The write set
+// ---------------------------------------------------------------------------
+
+/** Cells impl#1's AST shows as written anywhere in the file. */
+function astWrites(ast) {
+  const w = new Set();
+  walkAst(ast, (n) => {
+    // impl#1's own reading (dependency-graph.ts): a non-structural state-decl that is not the folded
+    // `const @x` derived form is a WRITE (`@x = v` in a function body / handler / logic block).
+    if (n.kind === "state-decl" && n.name && (n._isReactiveAssign || (n.structuralForm === false && n.shape !== "derived"))) w.add(n.name);
+    if ((n.kind === "reactive-array-mutation" || n.kind === "reactive-nested-assign") && n.target) w.add(n.target);
+    // `@set(…)`: the target is named in the raw args — every word there counts (over-approximation).
+    if (n.kind === "reactive-explicit-set" && typeof n.args === "string") for (const m of n.args.matchAll(/[A-Za-z_$][\w$]*/g)) w.add(m[0]);
+    // `bind:attr=@x` on any element writes @x.
+    if (n.kind === "markup" && Array.isArray(n.attrs)) {
+      for (const a of n.attrs) {
+        if (!a || typeof a.name !== "string" || !a.name.startsWith("bind:")) continue;
+        const nm = a.value && typeof a.value.name === "string" ? a.value.name : null;
+        if (nm && nm.startsWith("@")) w.add(nm.slice(1).split(/[.[]/)[0]);
+      }
+    }
+  });
+  forEachExprNode(ast, (e) => {
+    if (e.kind === "assign") { const r = lvalueRoot(e.target ?? e.left); if (r) w.add(r); }
+    if (e.kind === "unary" && (e.op === "++" || e.op === "--")) { const r = lvalueRoot(e.argument); if (r) w.add(r); }
+    if (e.kind === "update") { const r = lvalueRoot(e.argument); if (r) w.add(r); }
+    if (e.kind === "reset-expr") { const r = lvalueRoot(e.target); if (r) w.add(r); }
+    if (e.kind === "call" && e.callee && e.callee.kind === "member" && !PURE_METHODS.has(e.callee.property)) {
+      const r = lvalueRoot(e.callee.object);
+      if (r) w.add(r);
+    }
+  });
+  return w;
+}
+
+/**
+ * Lexical write classification of every `@name` occurrence. Conservative: an occurrence it
+ * cannot prove a read is a write. `isSequence` makes any bare use (a possible alias) a write.
+ * Comments are NOT stripped — a mention in a comment counting as a write only yields `let`.
+ */
+function lexicalWritten(src, name, isSequence) {
+  const re = new RegExp(`@${name.replace(/\$/g, "\\$")}(?![\\w$])`, "g");
+  for (const m of src.matchAll(re)) {
+    const at = m.index;
+    if (at > 0 && (isIdChar(src[at - 1]) || src[at - 1] === ".")) continue;
+    const before = src.slice(Math.max(0, at - 80), at);
+    if (/(\+\+|--)\s*$/.test(before)) return true;
+    if (/\bbind:[\w-]+\s*=\s*(\$\{\s*)?$/.test(before)) return true;
+    if (/\breset\s*\(\s*$/.test(before)) return true;
+    if (/\bdelete\s+$/.test(before)) return true;
+    // walk the member / index / call chain
+    let j = at + m[0].length;
+    let chainLen = 0;
+    let lastWasLength = false;
+    let lastWasPureCall = false;
+    for (;;) {
+      if (src[j] === "?" && src[j + 1] === ".") j++;
+      if (src[j] === "." && isIdStart(src[j + 1])) {
+        let k = j + 1;
+        while (isIdChar(src[k])) k++;
+        const prop = src.slice(j + 1, k);
+        j = k;
+        chainLen++;
+        lastWasLength = prop === "length";
+        lastWasPureCall = false;
+        if (src[j] === "(") {
+          if (!PURE_METHODS.has(prop)) return true;
+          j = skipBalanced(src, j);
+          lastWasPureCall = true;
+          lastWasLength = false;
+        }
+        continue;
+      }
+      if (src[j] === "[") { j = skipBalanced(src, j); chainLen++; lastWasLength = false; lastWasPureCall = false; continue; }
+      break;
+    }
+    let k = j;
+    while (src[k] === " " || src[k] === "\t") k++;
+    const rest = src.slice(k, k + 4);
+    if (/^(\+\+|--)/.test(rest)) return true;
+    if (/^(\*\*=|>>>=|<<=|>>=|&&=|\|\|=|\?\?=|[+\-*/%&|^]=)/.test(rest)) return true;
+    if (rest[0] === "=" && rest[1] !== "=" && rest[1] !== ">") return true;
+    if (isSequence) {
+      if (chainLen > 0 && (lastWasLength || lastWasPureCall)) continue;
+      if (chainLen === 0) {
+        if (/\bin\s*=\s*$/.test(before) || /\bof\s+$/.test(before) || /\.\.\.\s*$/.test(before)) continue;
+        if (/\$\{\s*$/.test(before) && /^\s*\}/.test(src.slice(j, j + 3))) continue;
+      }
+      return true; // a bare use or element access of a sequence may alias it
+    }
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Initializer classification
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify a legacy initializer ExprNode. Returns
+ *   { kind: "literal", type, valueText }      — a literal: reads no cell, no call
+ *   { kind: "expr", valueText }               — any other plain expression (parenthesized)
+ *   { kind: "blocked", reason }
+ */
+function classifyInit(e, text, annotation, enums) {
+  const paren = (t) => `(${t.trim()})`;
+  if (!e) return { kind: "blocked", reason: "initializer not parsed by impl#1" };
+  if (!PLAIN_EXPR_KINDS.has(e.kind)) return { kind: "blocked", reason: `initializer kind '${e.kind}' (positional / escape-hatch form — §66.18)` };
+  if (e.kind === "lit") {
+    if (e.litType === "number") return { kind: "literal", type: annotation ?? "number", valueText: text.trim() };
+    if (e.litType === "string") return { kind: "literal", type: annotation, valueText: text.trim() };
+    if (e.litType === "bool" || e.litType === "boolean") return { kind: "literal", type: annotation, valueText: text.trim() };
+    if (e.litType === "not") {
+      if (!annotation) return { kind: "blocked", reason: "`not` initializer needs a type (CTX — O35)" };
+      return { kind: "literal", type: annotation, valueText: "not" };
+    }
+    if (e.litType === "template") {
+      if (e.hasInterpolation) return { kind: "expr", valueText: paren(text) };
+      return { kind: "literal", type: annotation ?? "string", valueText: paren(text) };
+    }
+    return { kind: "blocked", reason: `literal type '${e.litType}'` };
+  }
+  if (e.kind === "ident" && typeof e.name === "string" && e.name.startsWith(".")) {
+    const v = e.name.slice(1);
+    if (annotation) return { kind: "literal", type: annotation, valueText: e.name };
+    const owners = [...enums].filter(([, vs]) => vs.has(v)).map(([n]) => n);
+    if (owners.length !== 1) return { kind: "blocked", reason: `bare variant ${e.name} declared by ${owners.length} enums (needs a type)` };
+    return { kind: "literal", type: owners[0], valueText: e.name };
+  }
+  if (e.kind === "member" && e.object && e.object.kind === "ident" && enums.has(e.object.name) && enums.get(e.object.name).has(e.property)) {
+    return { kind: "literal", type: annotation ?? e.object.name, valueText: paren(text) };
+  }
+  if (e.kind === "unary" && e.op === "-" && e.argument && e.argument.kind === "lit" && e.argument.litType === "number") {
+    return { kind: "literal", type: annotation ?? "number", valueText: paren(text) };
+  }
+  if (e.kind === "array") {
+    if (e.elements.length === 0) {
+      if (!annotation) return { kind: "blocked", reason: "empty `[]` needs an element type (CTX — O35)" };
+      return { kind: "literal", type: annotation, valueText: "[]", sequence: true };
+    }
+    const kinds = new Set(e.elements.map((x) => (x && x.kind === "lit" ? (x.litType === "boolean" ? "bool" : x.litType) : x && x.kind === "unary" && x.argument?.litType === "number" ? "number" : "other")));
+    if (kinds.size !== 1 || ![...kinds].every((k) => k === "number" || k === "string" || k === "bool")) {
+      if (!annotation) return { kind: "blocked", reason: "array of non-scalar / mixed elements needs a type (CTX — O35)" };
+      return { kind: "expr", valueText: paren(text), sequence: true };
+    }
+    const el = [...kinds][0];
+    return { kind: "literal", type: annotation ?? `${el}[]`, valueText: paren(text), sequence: true };
+  }
+  if (e.kind === "object" || e.kind === "map-lit") {
+    if (!annotation) return { kind: "blocked", reason: "object literal needs a struct type (CTX)" };
+    return { kind: "expr", valueText: paren(text) };
+  }
+  if (e.kind === "ident" && typeof e.name === "string" && e.name.startsWith("@") && /^@[A-Za-z_$][\w$]*$/.test(text.trim())) {
+    if (!annotation) return { kind: "blocked", reason: "non-literal initializer needs a type (CTX — O35)" };
+    return { kind: "expr", valueText: text.trim() };
+  }
+  if (!annotation) return { kind: "blocked", reason: "non-literal initializer needs a type (CTX — O35)" };
+  return { kind: "expr", valueText: paren(text) };
+}
+
+/** Does a type expression contain whitespace outside every bracket (`string | not`)? */
+function hasTopLevelSpace(t) {
+  let depth = 0;
+  const s = t.trim();
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    else if (/\s/.test(ch) && depth === 0) return true;
+  }
+  return false;
+}
+
+const isSequenceType = (t) => typeof t === "string" && /\]\s*$/.test(t.trim());
+
+// ---------------------------------------------------------------------------
+// The declaration site parser
+// ---------------------------------------------------------------------------
+
+/**
+ * Locate and parse the legacy declaration text for a `state-decl` node. Returns
+ * { start, end, attrsText, annotation, exprStart, exprEnd } or { blocked: reason }.
+ */
+function parseDeclSite(src, node, filePath) {
+  const name = node.name;
+  const s0 = node.span?.start ?? -1;
+  const re = new RegExp(`<${name.replace(/\$/g, "\\$")}(?![\\w$\\-])`, "g");
+  let best = -1;
+  for (const m of src.matchAll(re)) {
+    if (Math.abs(m.index - s0) <= 64 && (best === -1 || Math.abs(m.index - s0) < Math.abs(best - s0))) best = m.index;
+  }
+  if (best === -1) return { blocked: "declaration text not found at the AST site" };
+  let start = best;
+  const pre = src.slice(Math.max(0, best - 40), best);
+  const constM = pre.match(/\bconst\s+$/);
+  if (node.isConst) {
+    if (!constM) return { blocked: "`const` keyword not found before the derived declaration" };
+    start = best - constM[0].length;
+  }
+  if (/\bexport\s+(const\s+)?$/.test(pre)) return { blocked: "exported cell (cross-file write set unknown — §66.14)" };
+  const op = scanOpener(src, best);
+  if (!op || op.selfClosing) return { blocked: "declaration opener not closed" };
+  const attrsText = src.slice(op.nameEnd, op.end - 1).trim();
+  let j = op.end;
+  while (src[j] === " " || src[j] === "\t") j++;
+  let annotation = null;
+  if (src[j] === ":") {
+    let k = j + 1;
+    while (k < src.length) {
+      const ch = src[k];
+      if (ch === "\n") break;
+      if (ch === '"' || ch === "'" || ch === "`") { k = skipString(src, k); continue; }
+      if (ch === "(" || ch === "[" || ch === "{") { k = skipBalanced(src, k); continue; }
+      if (ch === "=" && src[k + 1] !== "=" && src[k + 1] !== ">" && !/[<>!]/.test(src[k - 1])) break;
+      k++;
+    }
+    annotation = src.slice(j + 1, k).trim();
+    j = k;
+  }
+  while (src[j] === " " || src[j] === "\t") j++;
+  if (src[j] !== "=" || src[j + 1] === "=") {
+    return { blocked: annotation ? "typed declaration with no initializer (Shape 4 — O31/O33)" : "declaration with no `=` initializer" };
+  }
+  j++;
+  while (src[j] === " " || src[j] === "\t") j++;
+  const exprStart = j;
+  // Candidate ends: each depth-0 newline / `;` / enclosing closer, verified against the AST.
+  const target = node.initExpr;
+  if (!target) return { blocked: "initializer not parsed by impl#1" };
+  let k = exprStart;
+  let depth = 0;
+  let tries = 0;
+  const tryEnd = (end) => {
+    const text = src.slice(exprStart, end).replace(/\s+$/, "");
+    if (!text) return null;
+    try {
+      const { result: parsed } = captureTrailingContentWarnings(() => parseExprToNode(text, filePath, exprStart));
+      if (parsed && !hasLostTrailingContent(parsed) && deepEqualExprNode(parsed, target)) return exprStart + text.length;
+    } catch { /* not this extent */ }
+    return null;
+  };
+  while (k <= src.length && tries < 12) {
+    const ch = src[k];
+    if (k === src.length) { const e = tryEnd(k); if (e !== null) return finish(e); break; }
+    if (ch === '"' || ch === "'" || ch === "`") { k = skipString(src, k); continue; }
+    if (ch === "/" && src[k + 1] === "/" && depth === 0) {
+      const e = tryEnd(k); if (e !== null) return finish(e);
+      tries++;
+      while (k < src.length && src[k] !== "\n") k++;
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") { depth++; k++; continue; }
+    if (ch === ")" || ch === "]" || ch === "}") {
+      if (depth === 0) { const e = tryEnd(k); if (e !== null) return finish(e); break; }
+      depth--; k++; continue;
+    }
+    if ((ch === "\n" || ch === ";") && depth === 0) {
+      const e = tryEnd(k); if (e !== null) return finish(e);
+      tries++;
+    }
+    k++;
+  }
+  return { blocked: "initializer extent could not be verified against impl#1's AST" };
+
+  function finish(exprEnd) {
+    let end = exprEnd;
+    let m = end;
+    while (src[m] === " " || src[m] === "\t") m++;
+    if (src[m] === ";") end = m + 1;
+    return { start, end, attrsText, annotation, exprStart, exprEnd };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// fixS66
+// ---------------------------------------------------------------------------
+
+/**
+ * @param {string} source
+ * @param {{ filePath?: string, entry?: boolean, auxSources?: Record<string,string>, rules?: string[] }} [opts]
+ *   entry       the file is an application entry (program-wrap / program-move apply). Default true.
+ *   auxSources  sibling files (path → source) consulted for enum declarations.
+ *   rules       restrict to a subset of S66_RULES (default: all).
+ * @returns {{ output: string, changed: boolean, applied: Array<{rule:string,line:number,detail:string}>,
+ *             blockers: Array<{rule:string,line:number,reason:string,snippet:string}> }}
+ */
+export function fixS66(source, opts = {}) {
+  const filePath = opts.filePath ?? "input.scrml";
+  const entry = opts.entry !== false;
+  const enabled = new Set(opts.rules ?? S66_RULES);
+  const applied = [];
+  const blockers = [];
+
+  let src = source;
+  if (enabled.has("pre-migrate")) {
+    const pm = applyMigrations(src);
+    if (pm.changed) {
+      src = pm.rewritten;
+      applied.push({ rule: "pre-migrate", line: 0, detail: JSON.stringify(pm.migrations) });
+    }
+  }
+
+  let ast;
+  try {
+    ast = parseAst(filePath, src);
+  } catch (e) {
+    blockers.push({ rule: "parse", line: 0, reason: `impl#1 front end threw: ${String(e?.message ?? e).split("\n")[0]}`, snippet: "" });
+    return { output: source, changed: false, applied: [], blockers };
+  }
+  if (!ast) {
+    blockers.push({ rule: "parse", line: 0, reason: "impl#1 front end built no AST", snippet: "" });
+    return { output: source, changed: false, applied: [], blockers };
+  }
+
+  const auxAsts = [];
+  for (const [p, s] of Object.entries(opts.auxSources ?? {})) {
+    try { auxAsts.push(parseAst(p, s)); } catch { /* an aux file that does not parse contributes no enums */ }
+  }
+  const enums = collectEnums([ast, ...auxAsts]);
+  const block = (rule, off, reason) => {
+    const ls = src.lastIndexOf("\n", off - 1) + 1;
+    const le = src.indexOf("\n", off);
+    blockers.push({ rule, line: lineOf(src, off), reason, snippet: src.slice(ls, le === -1 ? src.length : le).trim().slice(0, 120) });
+  };
+
+  const topNodes = Array.isArray(ast.nodes) ? ast.nodes : [];
+  const programs = topNodes.filter((n) => n.kind === "markup" && n.tag === "program");
+  const program = programs.length === 1 ? programs[0] : null;
+  /** Is this node at markup depth 0 (file root, or a direct child of the single top-level program)? */
+  const atDepth0 = (stack) => {
+    const markups = stack.filter((a) => a.kind === "markup");
+    if (markups.length === 0) return true;
+    return markups.length === 1 && markups[0] === program;
+  };
+
+  // ---- collect the legacy sites --------------------------------------------------------------
+  const decls = [];   // { node, stack }
+  const engines = []; // { node, stack }
+  const edits = [];   // { start, end, text, rule, detail }
+  const tagUses = new Map(); // tag name → first offset (render-by-tag detection)
+  const hasMeta = /\^\{/.test(src);
+  const markupStarts = new Set();
+
+  walkAst(ast, (n, stack) => {
+    const off = n.span?.start ?? 0;
+    if (n.kind === "state-decl" && n.structuralForm && !n._isReactiveAssign) decls.push({ node: n, stack: [...stack] });
+    else if (n.kind === "engine-decl") engines.push({ node: n, stack: [...stack] });
+    else if (n.kind === "component-def") block("component-const", off, "component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)");
+    else if (n.kind === "theme-decl") block("theme-body", off, "`<theme>` body (§66.17 — blocked on O17)");
+    else if (n.kind === "export-decl" && typeof n.raw === "string" && /^export\s+(const\s+)?</.test(n.raw)) block("rhs-decl", off, "exported cell (cross-file write set unknown — §66.14)");
+    else if (n.kind === "markup" && typeof n.tag === "string") {
+      markupStarts.add(off);
+      if (!tagUses.has(n.tag)) tagUses.set(n.tag, off);
+    }
+  });
+
+  const cellNames = new Set(decls.map((d) => d.node.name));
+  const engineNames = new Set(engines.map((e) => e.node.varName).filter(Boolean));
+  for (const [tag, off] of tagUses) {
+    if (cellNames.has(tag) || engineNames.has(tag)) block("render-by-tag", off, `markup tag \`<${tag}>\` shares a cell's name — render-by-tag (→ \`<*${tag}/>\`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)`);
+  }
+  for (const e of engines) {
+    if (e.node.governedType && tagUses.has(e.node.governedType)) {
+      block("render-by-tag", tagUses.get(e.node.governedType), `\`<${e.node.governedType}/>\` mounts an engine by name (→ \`<*${e.node.varName}/>\`, CTX — §66.13.3)`);
+    }
+  }
+
+  const writes = astWrites(ast);
+
+  // ---- declarations ----------------------------------------------------------------------------
+  for (const { node, stack } of decls) {
+    const off = node.span?.start ?? 0;
+    const rule = node.isConst ? "const-cell" : "rhs-decl";
+    if (!enabled.has(rule)) continue;
+    const parentDecl = stack.some((a) => a.kind === "state-decl");
+    if (parentDecl) { block(rule, off, "field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)"); continue; }
+    if (Array.isArray(node.children) && node.children.length > 0) {
+      block(rule, off, "compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed)");
+      continue;
+    }
+    if (stack.some((a) => a.kind === "function-decl" || a.kind === "engine-decl")) { block(rule, off, "declaration inside a function / engine body"); continue; }
+    if (!atDepth0(stack)) { block(rule, off, "declaration in a markup position (⚑ O38)"); continue; }
+    if (node.shape === "decl-with-spec" || node.renderSpec) { block(rule, off, "Shape 2 `<x …> = <input …/>` (→ `renders`, CTX — ⚑ O25)"); continue; }
+    if (node.isConst && node.shape !== "derived") { block(rule, off, `const declaration of shape '${node.shape}'`); continue; }
+    if (!node.isConst && node.shape !== "plain") { block(rule, off, `declaration of shape '${node.shape}'`); continue; }
+    const site = parseDeclSite(src, node, filePath);
+    if (site.blocked) { block(rule, off, site.blocked); continue; }
+    if (node.initExpr && (node.initExpr.kind === "markup" || /^</.test(src.slice(site.exprStart, site.exprStart + 1)))) {
+      block(rule, off, "markup-valued initializer (⚑ O24)");
+      continue;
+    }
+    // attributes
+    const attrToks = splitAttrTokens(site.attrsText);
+    const badAttr = attrToks.find((t) => {
+      const nm = attrName(t);
+      return !(CARRIED_ATTRS.has(nm) || isUniversalCorePredicate(nm));
+    });
+    if (badAttr) { block(rule, off, `opener attribute \`${badAttr}\` has no mechanical §66 spelling`); continue; }
+    const writeAttr = attrToks.some((t) => WRITE_IMPLYING_ATTRS.has(attrName(t)));
+    if (site.annotation && hasTopLevelSpace(site.annotation)) {
+      block(rule, off, `type \`${site.annotation}\` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)`);
+      continue;
+    }
+    if (site.annotation && /^\{/.test(site.annotation.trim())) {
+      block(rule, off, "anonymous record type annotation (no §66 spelling — a named `:struct` is owed)");
+      continue;
+    }
+    const exprText = src.slice(site.exprStart, site.exprEnd);
+    const cls = classifyInit(node.initExpr, exprText, site.annotation, enums);
+    if (cls.kind === "blocked") { block(rule, off, cls.reason); continue; }
+    const sequence = !!cls.sequence || isSequenceType(cls.type ?? site.annotation);
+    let isLet = false;
+    if (!node.isConst) {
+      const written = hasMeta || writeAttr || writes.has(node.name) || lexicalWritten(src, node.name, sequence);
+      const readsNoCell = cls.kind === "literal";
+      isLet = written || !readsNoCell; // S449 dialect ruling 2 (amended §66.21 row 1)
+      if (isLet && sequence) {
+        block(rule, off, written
+          ? "written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)"
+          : "sequence with a reactive / non-literal initializer (`let` on a sequence is E-GRANT-LET-ON-SEQUENCE)");
+        continue;
+      }
+    } else if (cls.kind === "literal" && !cls.type && !site.annotation) {
+      // a literal derived value: the inferred type is fine (string / bool)
+    }
+    const type = cls.type ?? site.annotation ?? null;
+    if (node.isConst && !type && cls.kind !== "literal") { block(rule, off, "derived value needs a type (CTX — O35)"); continue; }
+    const opener = `${isLet ? "let " : ""}<${node.name}${type ? `:${type}` : ""}=${cls.valueText}${attrToks.length ? " " + attrToks.join(" ") : ""}/>`;
+    edits.push({ start: site.start, end: site.end, text: opener, rule, detail: opener });
+  }
+
+  // ---- engines -----------------------------------------------------------------------------------
+  for (const { node, stack } of engines) {
+    if (!enabled.has("engine-simple")) continue;
+    const start = node.span?.start ?? -1;
+    const end = node.span?.end ?? -1;
+    if (start < 0 || !src.startsWith("<engine", start)) { block("engine-simple", start, "engine declaration text not found at the AST site"); continue; }
+    if (!atDepth0(stack) || stack.some((a) => a.kind === "function-decl" || a.kind === "state-decl" || a.kind === "engine-decl")) {
+      block("engine-simple", start, "engine in a nested / markup position (O38 / nested engine)");
+      continue;
+    }
+    const op = scanOpener(src, start);
+    if (!op) { block("engine-simple", start, "engine opener not closed"); continue; }
+    const toks = splitAttrTokens(src.slice(op.nameEnd, op.end - (op.selfClosing ? 2 : 1)));
+    const extra = toks.filter((t) => !ENGINE_SIMPLE_ATTRS.has(attrName(t)));
+    if (extra.length) { block("engine-simple", start, `engine surface beyond the simple rule: ${extra.map(attrName).join(", ")} (⚑ O5 surface)`); continue; }
+    const get = (nm) => { const t = toks.find((x) => attrName(x) === nm); return t ? t.slice(nm.length + 1) : null; };
+    const forT = get("for");
+    const initial = get("initial");
+    if (!forT || !/^[A-Za-z_$][\w$]*$/.test(forT)) { block("engine-simple", start, "engine without a plain `for=Type`"); continue; }
+    if (!initial || !/^\.[A-Za-z_$][\w$]*$/.test(initial)) { block("engine-simple", start, "engine without a bare-variant `initial=.X`"); continue; }
+    const v = node.varName;
+    if (!v || !/^[A-Za-z_$][\w$]*$/.test(v)) { block("engine-simple", start, "engine variable name not derivable"); continue; }
+    if (typeof node.rulesRaw === "string" && /<\s*engine\b/.test(node.rulesRaw)) { block("engine-simple", start, "nested engine (→ enum-valued child field, structural)"); continue; }
+    const declOpen = `<${v}:${forT}=${initial} single`;
+    let text;
+    if (op.selfClosing) {
+      text = `${declOpen}/>`;
+    } else {
+      const whole = src.slice(start, end);
+      const closeM = whole.match(/<\/(engine)?>\s*$/);
+      if (!closeM) { block("engine-simple", start, "engine closer not found at the AST span end"); continue; }
+      const closeStart = start + whole.length - closeM[0].length;
+      const body = src.slice(op.end, closeStart);
+      const renders = (node.bodyChildren ?? []).some((c) =>
+        c && c.kind === "markup" && ((Array.isArray(c.children) && c.children.some((g) => g && (g.kind !== "text" || /\S/.test(g.value ?? ""))))
+          || (typeof c.shorthandBodyRaw === "string" && /\S/.test(c.shorthandBodyRaw.replace(/^\s*:/, "").replace(/^\s*""\s*$/, "")))));
+      text = `${declOpen}>${body}</>${renders ? `\n<*${v}/>` : ""}`;
+    }
+    edits.push({ start, end: start + src.slice(start, end).replace(/\s+$/, "").length, text, rule: "engine-simple", detail: `<engine for=${forT} …> → <${v}:${forT}=${initial} single>` });
+  }
+
+  // ---- program root -----------------------------------------------------------------------------
+  let structural = null; // { kind: "wrap" } | { kind: "move", pre:[a,b], post:[a,b], openEnd, closeStart }
+  if (entry) {
+    if (programs.length > 1) {
+      // Two top-level programs is not a legacy form (E-PROGRAM-002 is a live rule): nothing to restructure.
+    } else if (programs.length === 0) {
+      if (enabled.has("program-wrap")) {
+        const prose = topNodes.find((n) => n.kind === "text" && /\S/.test(n.value ?? ""));
+        const page = topNodes.find((n) => n.kind === "markup" && n.tag === "page");
+        if (page) block("program-wrap", page.span?.start ?? 0, "`<page>` root with no `<program>` (route-file shape — not wrapped)");
+        else if (prose) block("program-wrap", prose.span?.start ?? 0, "top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)");
+        else if (/<program\b/.test(src)) block("program-wrap", 0, "a `<program>` the front end does not recognize as the root (malformed source)");
+        else structural = { kind: "wrap" };
+      }
+    } else if (enabled.has("program-move")) {
+      const ps = program.span.start;
+      const pe = program.span.end;
+      const op = scanOpener(src, ps);
+      const whole = src.slice(ps, pe);
+      const closeM = whole.match(/<\/(program)?>\s*$/);
+      if (op && closeM) {
+        const closeStart = ps + whole.length - closeM[0].length;
+        const outside = topNodes.filter((n) => n !== program);
+        const movable = (n) => n.kind === "logic" || n.kind === "engine-decl" || n.kind === "comment" || (n.kind === "text" && !/\S/.test(n.value ?? ""));
+        const strayMarkup = outside.find((n) => !movable(n));
+        const substantive = outside.some((n) => n.kind === "logic" || n.kind === "engine-decl");
+        if (strayMarkup && substantive) {
+          block("program-move", strayMarkup.span?.start ?? 0, `\`${strayMarkup.kind}${strayMarkup.tag ? ` <${strayMarkup.tag}>` : ""}\` outside \`<program>\` (where it renders is not mechanical)`);
+        } else if (substantive) {
+          structural = { kind: "move", openEnd: op.end, closeStart, closeEnd: ps + whole.replace(/\s+$/, "").length, ps };
+        }
+      }
+    }
+  }
+
+  // ---- depth-0 `${}` unwrap ------------------------------------------------------------------------
+  // Only where the result is a program body: inside the single <program>, the items moved into
+  // it, or a file being wrapped. Elsewhere (a module file, an outside block that stays outside)
+  // an unwrapped run would land in a free-text body and become prose.
+  const unwrapCandidates = structural?.kind === "wrap" ? topNodes
+    : program ? [...(program.children ?? []), ...(structural?.kind === "move" ? topNodes.filter((n) => n !== program) : [])]
+    : [];
+  for (const n of unwrapCandidates) {
+    if (!enabled.has("unwrap-logic")) break;
+    if (n.kind !== "logic" || n._synthetic) continue;
+    const s = n.span?.start ?? -1;
+    const e = n.span?.end ?? -1;
+    if (s < 0 || !src.startsWith("${", s) || src[e - 1] !== "}") continue;
+    const stmts = Array.isArray(n.body) ? n.body : [];
+    const bad = stmts.find((x) => x && (UNWRAP_BLOCKING_KINDS.has(x.kind) || (x.kind === "text" && /\S/.test(x.value ?? ""))));
+    if (bad) {
+      // A block that holds no legacy construct can stay: `${}` at a body top is legal §66 (S441).
+      const holdsLegacy = decls.some((d) => d.stack.includes(n)) || engines.some((d) => d.stack.includes(n));
+      if (holdsLegacy) block("unwrap-logic", s, `top-level \`\${}\` holds a \`${bad.kind}\` statement (rendered in legacy, evaluated in a program body — S441)`);
+      continue;
+    }
+    // Delete the delimiters; a delimiter alone on its line takes the line with it (readability).
+    let os = s, oe = s + 2;
+    const lineStart = src.lastIndexOf("\n", s - 1) + 1;
+    const afterOpen = src.slice(oe).match(/^[ \t]*\n/);
+    if (afterOpen) { oe += afterOpen[0].length; if (/^[ \t]*$/.test(src.slice(lineStart, s))) os = lineStart; }
+    let cs = e - 1, ce = e;
+    const closeLineStart = src.lastIndexOf("\n", cs - 1) + 1;
+    const afterClose = src.slice(ce).match(/^[ \t]*(\n|$)/);
+    if (afterClose && /^[ \t]*$/.test(src.slice(closeLineStart, cs)) && closeLineStart >= oe) { cs = closeLineStart; ce += afterClose[0].length; }
+    edits.push({ start: os, end: oe, text: "", rule: "unwrap-logic", detail: "${" });
+    edits.push({ start: cs, end: ce, text: "", rule: "unwrap-logic", detail: "}" });
+  }
+
+  // ---- safety net: a legacy form impl#1's AST did not surface is reported, never left silently ----
+  const covered = (off) => edits.some((ed) => off >= ed.start && off < ed.end) || blockers.some((b) => b.line === lineOf(src, off));
+  for (const m of src.matchAll(LEGACY_DECL_LINE)) {
+    const tag = m[2];
+    const lt = m.index + m[0].indexOf("<");
+    if (markupStarts.has(lt)) continue; // an element the front end parsed as markup (`<span>=</span>`)
+    const off = m.index + m[0].indexOf(m[1] ? "const" : "<");
+    if (covered(off) || covered(m.index + m[0].indexOf("<"))) continue;
+    block(m[1] ? "const-cell" : "rhs-decl", off, "legacy declaration impl#1's front end did not surface as a declaration (left untouched)");
+  }
+  for (const m of src.matchAll(/<engine\b/g)) {
+    if (!covered(m.index)) block("engine-simple", m.index, "`<engine>` impl#1's front end did not surface as an engine declaration (left untouched)");
+  }
+
+  // ---- apply ------------------------------------------------------------------------------------
+  edits.sort((a, b) => a.start - b.start || a.end - b.end);
+  for (let i = 1; i < edits.length; i++) {
+    if (edits[i].start < edits[i - 1].end) {
+      block("internal", edits[i].start, `overlapping rewrites (${edits[i - 1].rule} / ${edits[i].rule}) — file left untouched`);
+      return { output: source, changed: false, applied: [], blockers };
+    }
+  }
+  /** The text of [a, b) with every edit inside it applied. */
+  const E = (a, b) => {
+    let out = "";
+    let cur = a;
+    for (const ed of edits) {
+      if (ed.start < a || ed.end > b) continue;
+      out += src.slice(cur, ed.start) + ed.text;
+      cur = ed.end;
+    }
+    return out + src.slice(cur, b);
+  };
+  let output;
+  if (structural?.kind === "wrap") {
+    const body = E(0, src.length).replace(/^\s*\n/, "").replace(/\s+$/, "");
+    output = `<program>\n${body}\n</program>\n`;
+    applied.push({ rule: "program-wrap", line: 1, detail: "wrapped the file in <program>" });
+  } else if (structural?.kind === "move") {
+    const pre = E(0, structural.ps).replace(/^\s+/, "").replace(/\s+$/, "");
+    const body = E(structural.openEnd, structural.closeStart).replace(/\s+$/, "");
+    const post = E(structural.closeEnd, src.length).replace(/^\s+/, "").replace(/\s+$/, "");
+    const opener = src.slice(structural.ps, structural.openEnd);
+    const closer = src.slice(structural.closeStart, structural.closeEnd);
+    output = `${opener}\n${pre}${body.startsWith("\n") ? "" : "\n"}${body}${post ? "\n" + post : ""}\n${closer}\n`;
+    applied.push({ rule: "program-move", line: 1, detail: "moved items outside <program> inside it" });
+  } else {
+    output = E(0, src.length);
+  }
+  if (structural && topLevelProgramCount(filePath, output) !== 1) {
+    // The restructured file must parse to exactly one top-level <program>; otherwise (a malformed
+    // source the front end reads differently once wrapped) the structural rewrite is withdrawn.
+    block(structural.kind === "wrap" ? "program-wrap" : "program-move", 0, "the restructured file does not parse to one top-level `<program>` (malformed source) — not restructured");
+    applied.pop();
+    output = E(0, src.length);
+  }
+  for (const ed of edits) {
+    if (ed.rule === "unwrap-logic" && ed.detail === "}") continue;
+    applied.push({ rule: ed.rule, line: lineOf(src, ed.start), detail: ed.detail });
+  }
+  return { output, changed: output !== source, applied, blockers };
+}
+
+/** Convenience: true when the file has nothing left for a human (every legacy site rewrote). */
+export const isMechanical = (r) => r.blockers.length === 0;
