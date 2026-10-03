@@ -41,3 +41,24 @@
 - `scrml fix --dry-run`: conformance/cases 1297 files · 878 would change · 493 with constructs left;
   samples 877 · 776 · 171; examples 71 · 23 · 48; stdlib 53 · 10 · 22.
 - known-gaps §S449-scrml-fix-s66-twins: 9 gaps filed (2 HIGH: else-if/else ignored; defer).
+- merge of origin/main (#1249 #1250 #1251) → 1f9de1f08; counter PASS 84 (65) · graded 137 of 1288.
+- S239 review of 1f9de1f08 = DO-NOT-LAND; fix round:
+  - HIGH 1: CLI default = IMPL1_SAFE_RULES (pre-migrate, program-wrap, program-move, unwrap-logic);
+    the declaration rules only behind `--s66` (dry-run unless `--write`, prints a cannot-compile
+    warning); `--rules=` naming a decl rule without `--s66` is a usage error. Measured: default CLI over
+    COPIES — examples 71 files / 4 changed / 4 with impl#1 diagnostics unchanged; samples 877 / 757 / 757;
+    conformance/cases 1307 / 749 / 749.
+  - HIGH 2: write set spans the project (aux = import closure, scan = other target files); an
+    unresolvable relative import → every cell `let`; `ref=` is a write (both layers); cells named in
+    `deps=[…]` / `reset-on=[…]` / `when … changes` must be `let`; `bind:value={…}` brace form. Separate
+    tests for the AST layer and the lexical layer (each bites alone — verified by removing `ref` from each).
+  - MED: verify compile mirrors the resolved project (absolute layout) — no more import-less copies;
+    `<engine name=…>` left untouched + reported; integer literal feeding an `int` reader → `:int`
+    (divided / fractional → reported); counter: a twin that PASSes but emits an unasserted E- code is
+    FAIL (`twin-extra-error`) — first run found 1 codemod defect (`when @n changes` → @n must be `let`,
+    fixed); the other 9 are bootstrap gaps / the S449 value-write rule.
+  - LOW: `--check` exit 2 when only reported constructs remain; pre-migrate masks comments;
+    decl-needs-initializer-neg exclude dropped (now graded: PASS). Destructuring-write miss filed.
+  - incident: one bare `pkill -f "exall.ts"` used to stop my own runaway scratch script (brief forbids
+    bare pkill -f). It matched only that script; reported.
+  - counter after: PASS 76 (62 non-vacuous) · FAIL 62 · NOT-TWINNED 500 · UNSUPPORTED 650 · graded 138.

@@ -49,6 +49,7 @@ const KNOWN = {
   "twins/excluded": ["NOT-TWINNED", false],
   "twins/override-expect": ["PASS", false],
   "twins/mapped": ["PASS", false],
+  "twins/extra-error": ["FAIL", false],
 };
 
 describe("fixture corpus — each case lands in its known bucket", () => {
@@ -154,6 +155,17 @@ describe("§66 twins (S449 dialect rulings 1 + 5)", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  }, { timeout: 60000 });
+
+  test("a twin that PASSes its assertions but emits an unasserted E- code is a FAIL (twin-extra-error)", async () => {
+    const v = await classifyCase(boot, get("twins/extra-error"));
+    expect(v.bucket).toBe("FAIL");
+    expect(v.reason).toBe("twin-extra-error");
+    expect(v.failures).toEqual(["twin emitted unasserted error(s): E-TYPE-UNKNOWN"]);
+    // the same source graded as written (not a twin) keeps the old rule: unasserted codes are reported, not failed
+    const native = await classifyCase(boot, { ...get("twins/extra-error"), source: "<program>\n<n:integer=5/>\n<p id=\"n\">${@n}</p>\n</program>\n" });
+    expect(native.twin).toBe(false);
+    expect(native.bucket).toBe("PASS");
   }, { timeout: 60000 });
 
   test("map rows: every APPLIED row names a target and a SPEC citation; an owed row maps nothing", () => {
@@ -284,7 +296,7 @@ describe("CLI — exit status is separate from the output (pa-base §8)", () => 
     const run = (...a) => Bun.spawnSync(["bun", SCRIPT, "--cases", FIXTURES, ...a], { cwd: REPO, stdout: "pipe", stderr: "pipe" });
     const plain = run();
     expect(plain.exitCode).toBe(0);
-    expect(plain.stdout.toString()).toContain("12 of 12 cases attempted");
+    expect(plain.stdout.toString()).toContain("13 of 13 cases attempted");
     expect(plain.stdout.toString()).toContain("### §66 twins");
     expect(run("--fail-on-fail").exitCode).toBe(1);
     const none = run("--filter", "no-such-case-anywhere");

@@ -1,1 +1,0 @@
-{ "exclude": "the case's subject is a legacy-form rule: E-DECL-NEEDS-INITIALIZER polices the §6.2 Shape-4 `const <x>: T` with no right-hand side, a form §66.21 retires (rows 1–2). Its §66 twin (`<doubled:int=(@count * 2)/>`) cannot exercise that rule; a §66 case for the opener-form replacement is owed (S449 dialect ruling 1, class 2)." }

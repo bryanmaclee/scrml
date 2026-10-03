@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 239 | 5 |
-| MED | 489 | 2 |
+| MED | 490 | 2 |
 | LOW | 236 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -22627,3 +22627,7 @@ Conformance FAILs (3), all fail-closed but with a code that does not name the ro
 ### g-impl1-front-end-drops-reset-on-decls — impl#1: a legacy declaration carrying `reset-on=` is dropped by the front end (no AST node)
 <!-- @gap id=g-impl1-front-end-drops-reset-on-decls sev=LOW status=open locus=searched:compiler/src/ast-builder.js(state-decl opener attrs — `reset-on=[@c]`) prov=empirical:S449-scrml-fix-s66-twins -->
 **Agent-executed (S449).** `<program>\n<c> = 0\n<b reset-on=[@c]> = 0\n</program>` → impl#1's AST holds `c` and no node for `b` (`reset-on=` is bootstrap-only per §6.8.4, S447, and impl#1 carries the divergence). `scrml fix` cannot rewrite what the AST does not surface, so a line-level safety net reports such a declaration (blocker "did not surface as a declaration") instead of leaving it silently. The `lifecycle/reset-on-*` cases are NOT-TWINNED for this reason.
+
+### g-scrml-fix-write-scan-destructuring — `scrml fix --s66`: a cell written only through a destructuring assignment is not seen as written
+<!-- @gap id=g-scrml-fix-write-scan-destructuring sev=MED status=open locus=compiler/src/commands/fix-s66.js(lexicalWritten + astWrites — no destructuring-target case) prov=review:S239-s449-scrml-fix-s66-twins-1f9de1f08 -->
+**Reviewer-reported (S239 review of `1f9de1f08`), RELAYED — not re-probed.** A write like `[@a, @b] = pair()` or `({ x: @a } = obj)` matches neither the AST layer (an `assign` whose target is an array / object pattern, not an `@x` chain) nor the lexical layer (the occurrence is followed by `,` / `]` / `}`, not an assignment operator). Such a cell would be rewritten LOCKED — the unsafe direction. The default `scrml fix` does not run the declaration rules, so this reaches only `--s66` previews and the counter's twins. Recommended: treat an `@x` inside an assignment pattern as a write in both layers (walk `assign.target` patterns; lexically, an `@x` inside a `[` / `{` group directly followed by `=`). The `bind:value={…}` brace form the same review named is FIXED in this change (lexical pattern + test).

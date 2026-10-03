@@ -1,0 +1,4 @@
+<program>
+<n>: integer = 5
+<p id="n">${@n}</p>
+</program>

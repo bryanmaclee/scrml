@@ -11,30 +11,30 @@ Scope: **1288 of 1288 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 84 | 6.5% |
+| PASS | 76 | 5.9% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 53 | 4.1% |
+| FAIL | 62 | 4.8% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 501 | 38.9% |
+| NOT-TWINNED | 500 | 38.8% |
 | UNSUPPORTED | 650 | 50.5% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 137; of those, 84 hold (61.3%). Runtime half executed on the bootstrap for 33 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 138; of those, 76 hold (55.1%). Runtime half executed on the bootstrap for 34 case(s).
 
-- **Vacuous** passes: 19 of 84 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **65**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 46 of 53; the other 7 are implemented checks that answered wrong.
+- **Vacuous** passes: 14 of 76 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **62**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 46 of 62; the other 16 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
 UNSUPPORTED by reason: bootstrap-unsupported 380 · parse-reject 270.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **590** — PASS 52 · FAIL 38 · UNSUPPORTED 500. Twin holds 52 (non-vacuous 38). Every twin verdict above is included in the bucket table.
-- `dialect.s66` overrides: 0 replace a twin's expectations · 3 exclude a case.
+Legacy-dialect cases graded on their generated §66 twin: **591** — PASS 44 · FAIL 47 · UNSUPPORTED 500. Twin holds 44 (non-vacuous 35). Every twin verdict above is included in the bucket table.
+- `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (501 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (500 cases; a case counts once per distinct reason):
 
 - 60 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 57 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -47,32 +47,32 @@ NOT-TWINNED by reason (501 cases; a case counts once per distinct reason):
 - 32 — const-cell: non-literal initializer needs a type (CTX — O35)
 - 30 — program-wrap: `…` root with no `…` (route-file shape — not wrapped)
 - 26 — unwrap-logic: top-level `…` holding a legacy declaration also holds a `…` statement, which impl#1 reads differently outside `…` (S441) — not unwrapped
-- 23 — engine-simple: engine without a bare-variant `…`
 - 23 — rhs-decl: declaration in a markup position (⚑ O38)
 - 19 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- 18 — engine-simple: `…` names the engine itself (§51.0.X — cross-file `…` mounting); §66.21 row 4 rewrites only `…` / `…` — left untouched
 - 13 — rhs-decl: declaration text not found at the AST site
 - 12 — const-cell: initializer extent could not be verified against impl#1's AST
-- 10 — engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
+- 10 — engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
 - 9 — rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
 - 8 — rhs-decl: initializer not parsed by impl#1
 - 8 — rhs-decl: non-literal initializer needs a type (CTX — O35)
 - 8 — theme-body: `…` body (§66.17 — blocked on O17)
 - 7 — engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - 6 — engine-simple: engine in a nested / markup position (O38 / nested engine)
-- 6 — engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
 - 6 — engine-simple: nested engine (→ enum-valued child field, structural)
 - 6 — program-wrap: impl#1 reads the restructured file differently (+E-FOREIGN-LANG-IN-PROGRAM) — not restructured, no `…` unwrapped
 - 6 — program-wrap: top-level prose (a `…` body reads it as code — §4.18.1 / S441)
 - 6 — rhs-decl: object literal needs a struct type (CTX)
+- 5 — engine-simple: engine without a bare-variant `…`
 - 5 — rhs-decl: bare variant .X declared by N enums (needs a type)
 - 5 — rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
 - 4 — program-wrap: a `…` the front end does not recognize as the root (malformed source)
 - 3 — engine-simple: declaration at the root of a file with no `…` (its §66 opener would be free-text there)
-- 3 — excluded by dialect.s66
 - 3 — rhs-decl: Shape 2 `…` (→ `…`, CTX — ⚑ O25)
 - 2 — const-cell: declaration in a markup position (⚑ O38)
 - 2 — engine-simple: engine surface beyond the simple rule: effect (⚑ O5 surface)
 - 2 — engine-simple: engine surface beyond the simple rule: if (⚑ O5 surface)
+- 2 — excluded by dialect.s66
 - 2 — program-move: `…` outside `…` (where it renders is not mechanical)
 - 2 — program-move: impl#1 reads the restructured file differently (+E-IMPORT-003) — not restructured, no `…` unwrapped
 - 2 — rhs-decl: declaration at the root of a file with no `…` (its §66 opener would be free-text there)
@@ -113,23 +113,23 @@ NOT-TWINNED by reason (501 cases; a case counts once per distinct reason):
 | error | 62 | · | · | 2 | · | 5 | 55 | · | · |
 | error-boundary | 11 | · | · | · | · | 11 | · | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
-| fn | 18 | 1 | · | · | · | 1 | 16 | · | · |
+| fn | 18 | · | · | 1 | · | 1 | 16 | · | · |
 | foreign | 9 | · | · | 1 | · | 7 | 1 | · | · |
 | form-for | 16 | · | · | · | · | · | 16 | · | · |
 | forms | 54 | 12 | · | · | · | 38 | 4 | · | · |
 | hostmethod | 1 | · | · | · | · | · | 1 | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
 | lifecycle | 56 | 5 | · | 2 | · | 32 | 17 | · | · |
-| linear | 15 | 1 | · | 1 | · | · | 13 | · | · |
+| linear | 15 | · | · | 2 | · | · | 13 | · | · |
 | loop | 8 | · | · | · | · | 3 | 5 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
-| markup-handler | 77 | 7 | · | 3 | · | 31 | 36 | · | · |
+| markup-handler | 77 | 6 | · | 4 | · | 31 | 36 | · | · |
 | match-block | 18 | · | · | · | · | 9 | 9 | · | · |
 | match-codes | 25 | · | · | 1 | · | · | 24 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
 | meta | 17 | · | · | · | · | 1 | 16 | · | · |
 | middleware | 4 | 1 | · | 1 | · | · | 2 | · | · |
-| module | 32 | 5 | · | 5 | · | 8 | 14 | · | · |
+| module | 32 | · | · | 10 | · | 8 | 14 | · | · |
 | navigate | 3 | · | · | · | · | · | 3 | · | · |
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | page | 1 | · | · | · | · | 1 | · | · | · |
@@ -137,7 +137,7 @@ NOT-TWINNED by reason (501 cases; a case counts once per distinct reason):
 | parse-variant | 8 | · | · | · | · | · | 8 | · | · |
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 69 | · | · | · | · | 44 | 25 | · | · |
-| reactive | 88 | 25 | · | 3 | · | 41 | 19 | · | · |
+| reactive | 88 | 26 | · | 3 | · | 40 | 19 | · | · |
 | refinement | 10 | · | · | · | · | 3 | 7 | · | · |
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
@@ -148,9 +148,9 @@ NOT-TWINNED by reason (501 cases; a case counts once per distinct reason):
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | · | · | 1 | · | 24 | 2 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
-| type-state-codes | 27 | 4 | · | 1 | · | 2 | 20 | · | · |
+| type-state-codes | 27 | 3 | · | 2 | · | 2 | 20 | · | · |
 
-### FAIL (53)
+### FAIL (62)
 
 - `auth/auth-attr-empty-string-pos` (codes; not in the bootstrap: E-AUTH-ATTR-INVALID)
   - missing E-AUTH-ATTR-INVALID
@@ -255,6 +255,8 @@ NOT-TWINNED by reason (501 cases; a case counts once per distinct reason):
 - `error/throw-not-in-scrml` (twin · codes; not in the bootstrap: E-THROW-NOT-IN-SCRML)
   - missing E-THROW-NOT-IN-SCRML
   - severity: E-THROW-NOT-IN-SCRML did not fire (expected error)
+- `fn/plain-arrow-clean` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-STRUCT-CONTEXT
 - `foreign/foreign-lang-in-program-neg` (codes; not in the bootstrap: E-FOREIGN-LANG-IN-PROGRAM)
   - missing E-FOREIGN-LANG-IN-PROGRAM
   - severity: E-FOREIGN-LANG-IN-PROGRAM did not fire (expected error)
@@ -262,9 +264,13 @@ NOT-TWINNED by reason (501 cases; a case counts once per distinct reason):
   - missing E-LIFECYCLE-004
 - `lifecycle/effect-empty-body-pos` (twin · codes)
   - severity unobservable: W-LIFECYCLE-010 fired but the bootstrap Diag carries no §34 severity (expected warning)
+- `linear/must-use-unread-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-SCOPE-001
 - `linear/must-use-unread-pos` (twin · codes; not in the bootstrap: E-MU-001)
   - missing E-MU-001
   - severity: E-MU-001 did not fire (expected error)
+- `markup-handler/multi-stmt-handler-colon-shorthand-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-VALUE-WRITES-STATE
 - `markup-handler/s437-r4-dangling-else-each-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
   - missing E-STMT-UNEXPECTED-TOKEN
 - `markup-handler/s437-r4-dangling-else-engine-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
@@ -278,12 +284,22 @@ NOT-TWINNED by reason (501 cases; a case counts once per distinct reason):
   - severity: E-MW-002 did not fire (expected error)
 - `module/e-export-003-attr-conflict-reject` (twin · codes; not in the bootstrap: E-EXPORT-003)
   - missing E-EXPORT-003
+- `module/e-export-003-attr-distinct-clean` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-PROGRAM-MISSING
+- `module/e-import-003-import-top-of-logic-clean` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-UNKNOWN
+- `module/e-import-004-name-exported-clean` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-UNKNOWN
 - `module/e-import-004-name-not-exported-reject` (twin · codes; not in the bootstrap: E-IMPORT-004)
   - missing E-IMPORT-004
 - `module/e-import-005-bare-specifier-reject` (twin · codes; not in the bootstrap: E-IMPORT-005)
   - missing E-IMPORT-005
+- `module/e-import-005-relative-specifier-clean` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-UNKNOWN
 - `module/e-import-006-missing-file-reject` (twin · codes; not in the bootstrap: E-IMPORT-006)
   - missing E-IMPORT-006
+- `module/e-import-006-present-file-clean` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-UNKNOWN
 - `module/e-import-pinned-invalid-reject` (twin · codes; not in the bootstrap: E-IMPORT-PINNED-INVALID)
   - missing E-IMPORT-PINNED-INVALID
 - `reactive/dg-002-no-readers-pos` (twin · codes; not in the bootstrap: E-DG-002)
@@ -297,6 +313,8 @@ NOT-TWINNED by reason (501 cases; a case counts once per distinct reason):
   - severity: E-RESERVED-IDENTIFIER did not fire (expected error)
 - `style/style-001-style-block-pos` (codes; not in the bootstrap: E-STYLE-001)
   - missing E-STYLE-001
+- `type-state-codes/e-type-any-forbidden-neg` (twin · twin-extra-error)
+  - twin emitted unasserted error(s): E-TYPE-UNKNOWN
 - `type-state-codes/e-type-any-forbidden-pos` (twin · codes; not in the bootstrap: E-TYPE-ANY-FORBIDDEN)
   - missing E-TYPE-ANY-FORBIDDEN
   - severity: E-TYPE-ANY-FORBIDDEN did not fire (expected error)
@@ -309,7 +327,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (84)
+### PASS / CODES-ONLY (76)
 
 - `auth/i-auth-redirect-unresolved-neg` — PASS · VACUOUS
 - `auth/w-auth-content-not-gated-neg` — PASS · VACUOUS
@@ -334,7 +352,6 @@ none
 - `engine/state-child-invalid-variant-neg` — PASS · TWIN · VACUOUS
 - `engine/state-child-missing-neg` — PASS · TWIN · VACUOUS
 - `files/multifile-import` — PASS · TWIN
-- `fn/plain-arrow-clean` — PASS · TWIN · VACUOUS (also emitted, unasserted: E-TYPE-STRUCT-CONTEXT)
 - `forms/bind-value-input` — PASS · TWIN
 - `forms/bind-value-two-field` — PASS · TWIN
 - `forms/checkbox-check` — PASS · TWIN
@@ -347,26 +364,20 @@ none
 - `forms/surface-top-level-validated-neg` — PASS
 - `forms/validator-dead-locked-pos` — PASS
 - `forms/validator-live-let-neg` — PASS
-- `lifecycle/effect-writes-state-direct-pos` — PASS · TWIN (also emitted, unasserted: E-LIFECYCLE-007)
-- `lifecycle/effect-writes-state-function-value-pos` — PASS · TWIN (also emitted, unasserted: E-LIFECYCLE-007)
-- `lifecycle/reset-on-engine-refused-neg` — PASS · TWIN (also emitted, unasserted: E-RESET-ON-INVALID-ENTRY)
-- `lifecycle/reset-on-engine-refused-pos` — PASS · TWIN (also emitted, unasserted: E-RESET-ON-INVALID-ENTRY)
-- `lifecycle/when-effect-writes-state-pos` — PASS · TWIN (also emitted, unasserted: E-LIFECYCLE-007)
-- `linear/must-use-unread-neg` — PASS · TWIN · VACUOUS (also emitted, unasserted: E-SCOPE-001)
+- `lifecycle/effect-writes-state-direct-pos` — PASS · TWIN
+- `lifecycle/effect-writes-state-function-value-pos` — PASS · TWIN
+- `lifecycle/reset-on-engine-refused-neg` — PASS · TWIN
+- `lifecycle/reset-on-engine-refused-pos` — PASS · TWIN
+- `lifecycle/when-effect-writes-state-pos` — PASS · TWIN
 - `markup-handler/inline-block-handler-multi-line` — PASS · TWIN
 - `markup-handler/multi-stmt-handler-attr-neg` — PASS · TWIN · VACUOUS
-- `markup-handler/multi-stmt-handler-colon-shorthand-neg` — PASS · TWIN · VACUOUS (also emitted, unasserted: E-VALUE-WRITES-STATE)
 - `markup-handler/s437-r4-undeclared-fn-2nd-each-neg` — PASS · TWIN
 - `markup-handler/s437-r4-undeclared-fn-2nd-engine-neg` — PASS · TWIN
 - `markup-handler/s437-r4-undeclared-fn-2nd-top-neg` — PASS · TWIN
 - `markup-handler/s437-r5-braced-else-line-comment-handler` — PASS · TWIN
 - `middleware/ratelimit-invalid-unit-neg` — PASS · VACUOUS
-- `module/e-export-003-attr-distinct-clean` — PASS · TWIN · VACUOUS (also emitted, unasserted: E-PROGRAM-MISSING)
-- `module/e-import-003-import-top-of-logic-clean` — PASS · TWIN (also emitted, unasserted: E-TYPE-UNKNOWN)
-- `module/e-import-004-name-exported-clean` — PASS · TWIN (also emitted, unasserted: E-TYPE-UNKNOWN)
-- `module/e-import-005-relative-specifier-clean` — PASS · TWIN (also emitted, unasserted: E-TYPE-UNKNOWN)
-- `module/e-import-006-present-file-clean` — PASS · TWIN (also emitted, unasserted: E-TYPE-UNKNOWN)
 - `reactive/counter-increment` — PASS · TWIN
+- `reactive/decl-needs-initializer-neg` — PASS · TWIN
 - `reactive/dg-002-no-readers-neg` — PASS · TWIN · VACUOUS
 - `reactive/if-top-level-absent` — PASS · TWIN
 - `reactive/if-wiring-bearing-subtree-absent` — PASS · TWIN
@@ -393,7 +404,6 @@ none
 - `reactive/toggle-show` — PASS · TWIN
 - `type-state-codes/e-state-undeclared-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
-- `type-state-codes/e-type-any-forbidden-neg` — PASS · TWIN · VACUOUS (also emitted, unasserted: E-TYPE-UNKNOWN)
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
 ### UNSUPPORTED (650)
@@ -1049,7 +1059,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (501)
+### NOT-TWINNED (500)
 
 - `auth/auth-001-neg` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
 - `auth/auth-001-pos` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
@@ -1166,22 +1176,22 @@ none
 - `engine/accepts-not-enum-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `engine/component-engine-scope-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · engine-simple: `<engine>` impl#1's front end did not surface as an engine declaration (left untouched)
 - `engine/composite-inner-colon-shorthand` — not mechanical: engine-simple: nested engine (→ enum-valued child field, structural) · engine-simple: engine in a nested / markup position (O38 / nested engine)
-- `engine/derived-engine-circular-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
-- `engine/derived-engine-circular-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
-- `engine/derived-engine-markup-write` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
-- `engine/derived-engine-match-nonexhaustive` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
-- `engine/derived-engine-match-qualified-lhs` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
-- `engine/derived-engine-no-initial-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
-- `engine/derived-engine-no-initial-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
-- `engine/derived-engine-no-rules-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
-- `engine/derived-engine-no-rules-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
-- `engine/derived-engine-statechild-write` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface) · rhs-decl: declaration at the root of a file with no `<program>` (its §66 opener would be free-text there)
-- `engine/derived-machine-no-projection-rules-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X` · engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
-- `engine/derived-machine-no-projection-rules-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X` · engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
-- `engine/derived-machine-unprojected-variant-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X` · engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
-- `engine/derived-machine-unprojected-variant-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X` · engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
-- `engine/derived-machine-write-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X` · engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
-- `engine/derived-machine-write-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X` · engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-engine-circular-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-engine-circular-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-engine-markup-write` — not mechanical: engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-engine-match-nonexhaustive` — not mechanical: engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-engine-match-qualified-lhs` — not mechanical: engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-engine-no-initial-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-engine-no-initial-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-engine-no-rules-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-engine-no-rules-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-engine-statechild-write` — not mechanical: engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface) · rhs-decl: declaration at the root of a file with no `<program>` (its §66 opener would be free-text there)
+- `engine/derived-machine-no-projection-rules-neg` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/derived-machine-no-projection-rules-pos` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/derived-machine-unprojected-variant-neg` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/derived-machine-unprojected-variant-pos` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/derived-machine-write-neg` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/derived-machine-write-pos` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
 - `engine/engine-derived` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
 - `engine/external-transition-resets-rt` — not mechanical: engine-simple: nested engine (→ enum-valued child field, structural) · engine-simple: engine in a nested / markup position (O38 / nested engine)
 - `engine/history-fresh-reset-rt` — not mechanical: engine-simple: nested engine (→ enum-valued child field, structural) · engine-simple: engine in a nested / markup position (O38 / nested engine)
@@ -1192,12 +1202,12 @@ none
 - `engine/initial-cell-undeclared-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
 - `engine/initial-cell-undeclared-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
 - `engine/internal-transition-preserves-rt` — not mechanical: engine-simple: nested engine (→ enum-valued child field, structural) · engine-simple: engine in a nested / markup position (O38 / nested engine)
-- `engine/machine-alternation-binding-parity-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
-- `engine/machine-alternation-binding-parity-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
-- `engine/machine-guard-undefined-self-field-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
-- `engine/machine-guard-undefined-self-field-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
-- `engine/machine-rule-binding-unit-variant-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
-- `engine/machine-rule-binding-unit-variant-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
+- `engine/machine-alternation-binding-parity-neg` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/machine-alternation-binding-parity-pos` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/machine-guard-undefined-self-field-neg` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/machine-guard-undefined-self-field-pos` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/machine-rule-binding-unit-variant-neg` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/machine-rule-binding-unit-variant-pos` — not mechanical: engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
 - `engine/message-dispatch` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `engine/message-effect` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `engine/message-payload` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
@@ -1205,12 +1215,12 @@ none
 - `engine/msg-unknown-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
 - `engine/nested-engine-inner-transition-rt` — not mechanical: engine-simple: nested engine (→ enum-valued child field, structural) · engine-simple: engine in a nested / markup position (O38 / nested engine)
 - `engine/payload-binding-neg` — not mechanical: program-move: `text` outside `<program>` (where it renders is not mechanical)
-- `engine/replay-cross-machine-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine without a bare-variant `initial=.X`
-- `engine/replay-cross-machine-pos` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine without a bare-variant `initial=.X`
-- `engine/replay-log-not-reactive-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine without a bare-variant `initial=.X`
-- `engine/replay-log-not-reactive-pos` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine without a bare-variant `initial=.X`
-- `engine/replay-target-not-machine-bound-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine without a bare-variant `initial=.X`
-- `engine/replay-target-not-machine-bound-pos` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine without a bare-variant `initial=.X`
+- `engine/replay-cross-machine-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/replay-cross-machine-pos` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/replay-log-not-reactive-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/replay-log-not-reactive-pos` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/replay-target-not-machine-bound-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
+- `engine/replay-target-not-machine-bound-pos` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: `name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched
 - `engine/statechild-component-generic-closer-in-element-rt` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `equality/map-key-comparable-clean` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `equality/map-key-function-field-reject` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
@@ -1433,7 +1443,6 @@ none
 - `reactive/debounce-on-derived` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
 - `reactive/decl-array-no-rhs-plain-neg` — not mechanical: rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
 - `reactive/decl-needs-initializer-array-pos` — excluded (dialect.s66): the case's subject is a legacy form itself: a `const <x>: T[]` with no right-hand side (E-DECL-NEEDS-INITIALIZER, §6.2 Shape 4 / §6.6) has no §66 spelling to twin; a §66 case for the opener-form replacement is owed (
-- `reactive/decl-needs-initializer-neg` — excluded (dialect.s66): the case's subject is a legacy-form rule: E-DECL-NEEDS-INITIALIZER polices the §6.2 Shape-4 `const <x>: T` with no right-hand side, a form §66.21 retires (rows 1–2). Its §66 twin (`<doubled:int=(@count * 2)/>`) canno
 - `reactive/decl-needs-initializer-pos` — excluded (dialect.s66): the case's subject is a legacy form itself: `const <doubled>: int` with no right-hand side (E-DECL-NEEDS-INITIALIZER, §6.2 Shape 4 / §6.6) has no §66 spelling to twin; a §66 case for the opener-form replacement is ow
 - `reactive/decl-rhs-interp-wrapped-neg` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35) · const-cell: non-literal initializer needs a type (CTX — O35)
 - `reactive/decl-rhs-interp-wrapped-pos` — not mechanical: rhs-decl: initializer extent could not be verified against impl#1's AST · const-cell: initializer extent could not be verified against impl#1's AST · program-wrap: impl#1 reads the restructured file differently (-E-DECL-RHS-

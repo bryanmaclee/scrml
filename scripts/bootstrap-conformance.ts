@@ -24,7 +24,9 @@
  *                server (serverStub / serverDb / firstPaint / ssr) or tool (stdout) run. The
  *                bootstrap emits no server or tool artifact, so that half is not attempted.
  *   FAIL         the bootstrap handled the case and got it WRONG: a required code missing, a
- *                forbidden code fired, a severity / count mismatch, or a runtime-half mismatch.
+ *                forbidden code fired, a severity / count mismatch, or a runtime-half mismatch —
+ *                or (a §66 twin only) it emitted an E- code the case does not assert
+ *                (`twin-extra-error`: twins are generated, so a stray error is a defect signal).
  *                A FAIL is a bug or a divergence — the most useful output of this probe.
  *   LEGACY       (--no-twins only) the case is written in the legacy dialect (§66.21 retired
  *                forms — see LEGACY_MARKERS) AND the bootstrap emitted a code the case does not
@@ -541,7 +543,21 @@ export async function classifyCase(boot: Bootstrap, c: LoadedCase, opts: Classif
   const { expect: mappedEx, mapped } = ov?.expect ? { expect: ov.expect as Record<string, any>, mapped: [] } : mapSupersededCodes(ex0);
   const ex = { codes: [], notCodes: [], ...mappedEx };
   const verdict = await gradeCase(boot, c, { source: tw.source, auxFiles: tw.auxFiles, ex, legacy: [] });
-  return { ...verdict, legacyMarkers: legacy, twin: true, twinRules: tw.rules, mapped, override: ov?.expect ? "expect" : null };
+  const out: CaseVerdict = { ...verdict, legacyMarkers: legacy, twin: true, twinRules: tw.rules, mapped, override: ov?.expect ? "expect" : null };
+  // A twin is GENERATED: an error the case does not assert is a codemod-defect signal (or a
+  // bootstrap one), never a free pass. A passing twin that emitted one is graded FAIL.
+  const extraErrors = out.unexpected.filter((code) => code.startsWith("E-"));
+  if ((out.bucket === "PASS" || out.bucket === "CODES-ONLY") && extraErrors.length > 0) {
+    return {
+      ...out,
+      bucket: "FAIL",
+      reason: "twin-extra-error",
+      vacuous: false,
+      failures: [`twin emitted unasserted error(s): ${extraErrors.join(", ")}`],
+      unimplementedCodes: unimplementedRequired(ex, boot.knownCodes),
+    };
+  }
+  return out;
 }
 
 /** A blocker list as one short, stable reason (the distinct `rule: reason` texts, first 3). */
