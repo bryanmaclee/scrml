@@ -1,3 +1,4 @@
 # progress — s450-each-row-interp-whitespace
 
 - 2026-10-02 start; worktree C:/Users/pjoli/Documents/GitHub/scrml/.claude/worktrees/agent-aea7ace579695ae11; worktree was cut at bc4bca1f but origin/main had advanced to daca85d8 (#1240 native-parser freeze) — branch created from origin/main daca85d8 so the base check holds. bun install (puppeteer postinstall fails, unrelated) + pretest OK (13 samples).
+- 2026-10-03T01:17:28Z repro'd on daca85d8 (.c1/.li render PeterOliver). Locus HELD: emit-each.ts renderTemplateChildToJs text branch `if (!txt.trim()) return;` dropped every whitespace-only run, nested ones included. Fix: keep WS-only runs verbatim except at each-body top level (isItemRoot — <each> body unclassified by §4.18.1, + reconcile one-node-per-item). <empty> body is free-text per §17.7.4 so its WS kept. Repro now renders 'Peter Oliver'.

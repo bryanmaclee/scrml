@@ -1290,10 +1290,30 @@ function renderTemplateChildToJs(
 ): void {
   if (!child || typeof child !== "object") return;
 
-  // Text children are typically whitespace-only — skip empty / WS-only runs.
   if (child.kind === "text") {
     const txt = String((child as any).value ?? (child as any).text ?? "");
-    if (!txt.trim()) return;
+    if (!txt) return;
+    if (!txt.trim()) {
+      // s450 — SPEC §4.18.5: in a free-text body "whitespace-only text between
+      // elements is kept exactly too" and no stage may "drop the whitespace
+      // adjacent to a `${…}` interpolation". A whitespace-only run NESTED inside
+      // a per-item element (the ` ` in `<td>${r.f} ${r.l}</td>`) is content of
+      // that element's free-text body, so it is emitted verbatim — pre-fix it
+      // was dropped and the row rendered `PeterOliver`.
+      //
+      // The `<empty>` body is a free-text body too (§17.7.4 "its body is a
+      // free-text body"), so its top-level whitespace is kept as well (the empty
+      // fragment is cleared wholesale by `_scrml_each_clear`).
+      //
+      // Deliberately NOT applied to an each-body TOP-LEVEL run (`isItemRoot`):
+      // it sits directly in the `<each>` body, which §4.18.1 does not classify
+      // as either text-mode production, and a top-level text node would become
+      // an extra reconcile-tracked root (one node per item, §17.7.2). It stays
+      // skipped, unchanged — see docs/changes/s450-each-row-interp-whitespace.
+      if (isItemRoot) return;
+      lines.push(`${indent}${fragmentVar}.appendChild(document.createTextNode(${JSON.stringify(txt)}));`);
+      return;
+    }
     // SPEC §4.17 raw-content (`<pre>`/`<code>`) — emit the body VERBATIM. The
     // block splitter captured `${@.id}` as literal text (no logic node), so
     // running `rewriteContextualSigil` here would half-rewrite `@.id` to
