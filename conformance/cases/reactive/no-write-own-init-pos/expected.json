@@ -14,7 +14,7 @@
       "gap": "g-impl1-value-writes-state-codes-unimplemented-s449",
       "fails": {
         "codes": [
-          "emitted:E-MARKUP-001=2",
+          "emitted:E-PAGE-INVALID-ATTR=1",
           "emitted:E-SCOPE-001=1",
           "emitted:E-STATE-UNDECLARED=3",
           "missing:E-VALUE-WRITES-STATE"

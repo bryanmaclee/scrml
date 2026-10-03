@@ -35,7 +35,7 @@ const PROGRAMS = [
   ["a child field's renders with expressions", () => [{ path: "c.scrml", src: [
     "<program>",
     "    <card title:string>",
-    "        <let note:string=\"hi\"/>",
+    "        let <note:string=\"hi\"/>",
     "        renders <em>${note} of ${title}</em>",
     "    </>",
     "    renders <article><*note/></article>",

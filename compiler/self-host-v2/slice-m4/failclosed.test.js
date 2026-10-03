@@ -15,7 +15,7 @@ let mods;
 beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
 
 const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
-const inMain = (markup) => `<program>\n <let n:int=0/>\n <main>${markup}</main>\n</program>\n`;
+const inMain = (markup) => `<program>\n let <n:int=0/>\n <main>${markup}</main>\n</program>\n`;
 
 // s449: `errors` left this list — `<errors of=…/>` (§55.8) is implemented (gate.test.js).
 const STRUCTURAL = [
@@ -62,19 +62,19 @@ describe("(1) a scrml structural element is never an HTML element", () => {
 
 describe("(2) an opener word the bootstrap does not read is refused, never ignored", () => {
   test("§6.14 `persist=\"local\" key=\"…\"` on a program cell → one E-BOOTSTRAP-UNSUPPORTED per word, naming §6.14", () => {
-    const d = run(`<program>\n <let mode:string="light" persist="local" key="app.mode"/>\n <main><p>\${@mode}</p></main>\n</program>\n`).diags;
+    const d = run(`<program>\n let <mode:string="light" persist="local" key="app.mode"/>\n <main><p>\${@mode}</p></main>\n</program>\n`).diags;
     expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
     for (const x of d) expect(x.message).toContain("§6.14 persist= is not in the bootstrap yet");
   });
   test("an unknown word on a user declaration and on a child field at depth", () => {
-    const d = run(`<program>\n <box a:int=1 frob>\n  <let c:int=0 zap/>\n </>\n renders <p>\${a}</p>\n <main><box/></main>\n</program>\n`).diags;
+    const d = run(`<program>\n <box a:int=1 frob>\n  let <c:int=0 zap/>\n </>\n renders <p>\${a}</p>\n <main><box/></main>\n</program>\n`).diags;
     expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
     expect(d[0].message).toContain("`frob`");
     expect(d[1].message).toContain("`zap`");
   });
   test("twin: `single` is read (no diagnostic); a word after a parse error in the same opener is debris, not reported", () => {
     expect(run(`<program>\n type P:enum = { A, B }\n <p:P=.A single>\n  <A rule=.B>\n  <B rule=.A>\n </>\n <main><*p/></main>\n</program>\n`).diags.map((x) => x.code)).not.toContain("E-BOOTSTRAP-UNSUPPORTED");
-    const d = run(`<program>\n <let x:int|not=0/>\n <main><p>x</p></main>\n</program>\n`).diags;
+    const d = run(`<program>\n let <x:int|not=0/>\n <main><p>x</p></main>\n</program>\n`).diags;
     expect(d.map((x) => x.code)).not.toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
 });

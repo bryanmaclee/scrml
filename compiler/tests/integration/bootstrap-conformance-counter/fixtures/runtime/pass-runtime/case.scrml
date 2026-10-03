@@ -1,0 +1,11 @@
+<program>
+    let <count:int=0/>
+    <doubled:int=(@count * 2)/>
+
+    function bump() { @count = @count + 1 }
+
+    <main>
+        <p id="out">Count ${@count} doubled ${@doubled}</p>
+        <button id="inc" onclick=bump()>+</button>
+    </main>
+</program>

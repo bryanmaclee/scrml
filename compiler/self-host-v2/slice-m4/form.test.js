@@ -37,11 +37,11 @@ describe("§66.19.2 — the front end", () => {
     expect(mods.check.checkCore(r.core)).toEqual([]);
   });
 
-  test("`signup` is a user declaration: attribute `agree` (let), child fields `email` / `password` (let)", () => {
+  test("`signup` is a user declaration (`:struct`): child fields `agree` / `email` / `password` (let — a writable field is a child, §66.4 rule 6, S447)", () => {
     const core = compileClean(mods, [{ path: "signup.scrml", src: fixture() }], "§66.19.2 fixture").core;
     const signup = core.decls.find((d) => d.sym.hint === "signup");
     expect(signup.fields.map((f) => [f.sym.hint, f.role, f.mode])).toEqual([
-      ["agree", "Attribute", "Let"], ["email", "Child", "Let"], ["password", "Child", "Let"],
+      ["agree", "Child", "Let"], ["email", "Child", "Let"], ["password", "Child", "Let"],
     ]);
   });
 

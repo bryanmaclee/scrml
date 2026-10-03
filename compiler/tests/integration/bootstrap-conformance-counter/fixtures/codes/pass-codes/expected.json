@@ -1,0 +1,10 @@
+{
+  "id": "fixture-pass-codes",
+  "description": "KNOWN PASS (codes half): a `let` seed calling a writer is E-VALUE-WRITES-STATE on the bootstrap (a copy of conformance/cases/reactive/no-write-own-init-pos).",
+  "language-version": "1.0",
+  "spec": "§6.15",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": {
+    "codes": ["E-VALUE-WRITES-STATE"]
+  }
+}

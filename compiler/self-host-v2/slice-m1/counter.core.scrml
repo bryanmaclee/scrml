@@ -7,7 +7,7 @@
 // slice-m1/progress.md.
 //
 //   <program>
-//       <let count:int=0/>
+//       let <count:int=0/>
 //       <step=1/>
 //       <doubled:int=(@count * 2)/>
 //       function bump()    { @count = @count + @step }

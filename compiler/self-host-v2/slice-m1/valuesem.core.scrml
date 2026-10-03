@@ -9,7 +9,7 @@
 //
 //   <program>
 //       <audit:string[free, append]=([])/>      // append-only (⚑ O10: grant spelling; ⚑ O32: `([])`)
-//       <let seen:int=0/>
+//       let <seen:int=0/>
 //       function log() {
 //           let before = @audit              // a snapshot (§66.10)
 //           @audit.push("x")                 // an end-append edit, granted by [free, end]

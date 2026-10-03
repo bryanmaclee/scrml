@@ -1074,8 +1074,13 @@ ${
     // `<*x/>`; ⚑ O38 — whether a program-level declaration is in "a markup
     // position" — is not decided here). A declaration with neither stays a
     // program field (R4), `single` or not.
+    // S447 (§66.4 rule 6): attributes are always locked data, so a declaration
+    // whose writable fields were attributes now holds them as CHILD
+    // declarations under a `:struct` opener — the marker that replaces its
+    // typed attributes (§66.2.2). `<x:struct>` is therefore a user declaration
+    // too (it was the same kind before the respelling).
     fn isNestedUserDecl(d: ADecl) -> boolean {
-        return d.attrs.length > 0 || d.renders is some
+        return d.attrs.length > 0 || d.renders is some || ownTypeName(d) == "struct"
     }
 
     fn withNestedStubs(r: RDeclStubs, p: AProgram, file: string) -> RDeclStubs {
@@ -3626,7 +3631,7 @@ ${
         // r2 F6: a field whose contract grants edits but not `replace` is not
         // locked — say which grant this whole-value write needs
         if (f.grants.edits.length > 0) return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", replaceNotGrantedMsg(f)) }
-        return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` is locked — nothing grants this write (a whole-value replace). Declare it `let " + f.sym.hint + "` to make it writable (§66.9, §66.11).") }
+        return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` is locked — nothing grants this write (a whole-value replace). Declare it `let <" + f.sym.hint + "…/>` (`let` before the `<`, §66.2.5) to make it writable (§66.9, §66.11).") }
     }
 
     fn replaceNotGrantedMsg(f: FieldInfo) -> string {

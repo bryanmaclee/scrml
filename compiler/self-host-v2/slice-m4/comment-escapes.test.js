@@ -19,7 +19,7 @@ let mods;
 beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
-const P = (body, decls = "") => `<program>\n    type Ph:enum = { A, B }\n    <let n:int=5/>\n${decls}\n    <main>\n        ${body}\n        <b>end</b>\n    </main>\n</program>\n`;
+const P = (body, decls = "") => `<program>\n    type Ph:enum = { A, B }\n    let <n:int=5/>\n${decls}\n    <main>\n        ${body}\n        <b>end</b>\n    </main>\n</program>\n`;
 const W = (inner) => `\n        ${inner}\n        <b>end</b>\n    `;
 const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const codes = (src) => run(src).diags.map((d) => d.code);
@@ -96,7 +96,7 @@ describe("R1 — a free-text `//` is a comment only at line start or after white
     expect(await html(state('"Ready"// note\n'))).toBe(W("<p>Ready<!--if--></p>"));
   });
   test("twin: in a `<program>` body (default-logic) a `//` right after a `>` is still a comment", () => {
-    const src = `<program>\n    <let n:int=5/>// note </program>\n    <main><b>x</b></main>\n</program>\n`;
+    const src = `<program>\n    let <n:int=5/>// note </program>\n    <main><b>x</b></main>\n</program>\n`;
     expect(codes(src)).toEqual([]);
   });
 });
@@ -219,7 +219,7 @@ describe("standalone only — a `\"…\"` inside an expression is an ordinary st
     expect(await html(P('<p : f("a\\"b\\tc")>', "    fn f(s: string) -> string { return s }"))).toBe(W('<p>a"b\tc</p>'));
   });
   test("twin: a concatenation operand `\"a\\tb\" + @s` is an ordinary string", async () => {
-    expect(await html(P('<p : "a\\tb" + @s>', '    <let s:string="Z"/>'))).toBe(W("<p>a\tbZ</p>"));
+    expect(await html(P('<p : "a\\tb" + @s>', '    let <s:string="Z"/>'))).toBe(W("<p>a\tbZ</p>"));
   });
   test("twin: an unknown escape in an ordinary string is NOT E-PARSE-001 (the logic identity escape: `\\q` → `q`)", () => {
     const r = run(P('<p : @n == 5 ? "a\\qb" : "c">'));
