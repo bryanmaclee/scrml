@@ -45,6 +45,7 @@ import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { ARRAY_MUTATING_METHODS } from "../derived-mutation-ops.ts";
 import { CGError } from "./errors.ts";
+import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
 import { parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
@@ -1221,6 +1222,10 @@ function emitIdent(node: IdentExpr, ctx: EmitExprContext): string {
       // Gated on `_currentUserAmbientActive` (no user `<currentUser>` cell shadows
       // the name) so a corpus cell named `currentUser` keeps the request-body form.
       if (bare === "currentUser" && _currentUserAmbientActive) return `${_m}_scrml_currentUser`;
+      // §6.6.9 / §20.5 (S449) — fail-closed backstop: an ambient `@session` is
+      // never lowered to the request body (server-session-guard.ts). The front
+      // end refuses it first (E-SESSION-AMBIENT-SERVER).
+      if (isServerAmbientSession(bare)) return `${_m}${refuseServerAmbientSession("emit-expr emitIdent", node.span)}`;
       return `${_m}_scrml_body["${bare}"]`;
     }
     // g-markup-session-read-undeclared (S228 ruling) — the `@session` window-
@@ -1649,6 +1654,8 @@ function emitUnaryPlain(node: UnaryExpr, ctx: EmitExprContext): string {
       if (ctx.mode === "server") {
         // Server boundary: @x is `_scrml_body["x"]` (a plain assignment lvalue).
         // Postfix on a member expression IS valid JS, so emit as-is.
+        // §6.6.9 (S449 review F4) — never the request body for an ambient `@session`.
+        if (isServerAmbientSession(bare)) return `${_m}${refuseServerAmbientSession("emit-expr update", node.span)}${node.op}`;
         return `${_m}_scrml_body["${bare}"]${node.op}`;
       }
       const sign = node.op === "++" ? "+" : "-";
@@ -2705,6 +2712,11 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
   if (target.kind === "ident" && target.name.startsWith("@")) {
     const bare = target.name.slice(1);
     if (ctx.mode === "server") {
+      // §6.6.9 (S449 review F4) — `@session = …` / `@session ??= …` never touch
+      // the request body (fail-closed backstop, server-session-guard.ts).
+      if (isServerAmbientSession(bare)) {
+        return `${srcmapMark(node.span, bare)}${refuseServerAmbientSession("emit-expr assignment", node.span)} ${node.op} ${value}`;
+      }
       return `${srcmapMark(node.span, bare)}_scrml_body["${bare}"] ${node.op} ${value}`;
     }
     // §51.0.F (Option A comprehensive engine-routing) — when the LHS is an

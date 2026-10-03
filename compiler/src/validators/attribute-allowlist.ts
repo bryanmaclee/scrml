@@ -12,7 +12,12 @@
  *   - F-CHANNEL-005: `<channel auth="role:X">` silently inert at wire level.
  *     (Same surface.)
  *
- * Severity: WARNING (`W-ATTR-001`, `W-ATTR-002`). Per OQ-10 default
+ * One ERROR: `E-AUTH-ATTR-INVALID` (§52.13.2, S449 ruling item 4) — an `auth=` on a
+ * `<program>` / `<page>` that is not exactly `"required"`, `"optional"` or `"none"`.
+ * `auth=` decides which routes require a login, so a value the compiler cannot read
+ * as one of the three is refused rather than compiled to a public application.
+ *
+ * Severity otherwise: WARNING (`W-ATTR-001`, `W-ATTR-002`). Per OQ-10 default
  * (deep-dive §10.10), VP-1 is warn-level because scrml has historically
  * accepted unknown attributes as forwarded HTML. Promoting to error would
  * regress every page that uses a forward-compat attribute (e.g.
@@ -31,6 +36,7 @@ import type { Span, FileAST, MarkupNode } from "../types/ast.ts";
 import { getElementAttrSchema, isOpenAttrPrefix } from "../attribute-registry.js";
 import { walkFileAst } from "./ast-walk.ts";
 import { connectionFragmentAttrs } from "../diagnostic-secrets.ts";
+import { forEachProgramWithRole, programRoleOptionsOf } from "../program-role.ts";
 
 // ---------------------------------------------------------------------------
 // Diagnostic shape
@@ -40,7 +46,7 @@ export interface AttrAllowlistWarning {
   code: string;
   message: string;
   span: Span;
-  severity: "warning";
+  severity: "warning" | "error";
 }
 
 // ---------------------------------------------------------------------------
@@ -88,8 +94,12 @@ function valueIsRecognized(
 function validateMarkup(
   node: MarkupNode,
   filePath: string,
-  warnings: AttrAllowlistWarning[]
+  warnings: AttrAllowlistWarning[],
+  nestedPrograms: ReadonlySet<unknown>,
 ): void {
+  // Errors and warnings share one list; the pipeline partitions them by code
+  // prefix + severity (api.js collectErrors).
+  const errors = warnings;
   const tag = node.tag ?? "";
   if (!tag) return;
   const schema = getElementAttrSchema(tag);
@@ -150,36 +160,34 @@ function validateMarkup(
       continue;
     }
 
+    // §52.13.2 (S449 ruling item 4) — on a `<program>` / `<page>`, an `auth=`
+    // value that is not EXACTLY one of the three quoted literals is a compile
+    // error, E-AUTH-ATTR-INVALID: any other literal (a different case, padding,
+    // `""`, `"role:X"`, `"true"`) and every non-literal (`${…}`, `@x`, a bare
+    // `auth`). Before S449 these warned (W-ATTR-002) or said nothing, and the
+    // application compiled PUBLIC (g-auth-attr-invalid-or-dynamic-value-compiles-
+    // to-no-auth, g-auth-attr-empty-string-is-silent-and-public). A NESTED
+    // `<program>` is skipped: any `auth=` there is E-PROGRAM-NESTED-AUTH (codegen,
+    // §4.12.2), the one code for that build — no second message. `<channel>` keeps
+    // W-ATTR-002 below: any `auth=` there gates the upgrade (fail closed).
+    if (name === "auth" && tag === "program" && nestedPrograms.has(node)) continue;
+    if (name === "auth" && (tag === "page" || tag === "program")) {
+      const literal = attrLiteralValue(attr.value);
+      const allowed = spec.allowedValues ?? [];
+      if (literal !== null && allowed.includes(literal)) continue;
+      const span = attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+      errors.push({
+        code: "E-AUTH-ATTR-INVALID",
+        message: authAttrInvalidMessage(tag, literal, attr.value, allowed),
+        span,
+        severity: "error",
+      });
+      continue;
+    }
+
     if (spec.allowedValues && spec.allowedValues.length > 0) {
       const literal = attrLiteralValue(attr.value);
-      if (literal === null) {
-        // §52.13: `auth=` "accepts exactly three literal values". A NON-literal
-        // `auth=` on a `<program>` / `<page>` — `auth=${mode}`, `auth=@mode`, a
-        // bare `auth` — is not one of them, and nothing reads it as a gate: the
-        // program applies no auth check and a page declares nothing (§52.13.2,
-        // §40.2). Before S449 this was the one shape with NO diagnostic at all
-        // (g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth), against
-        // §52.13.2's "silent acceptance of attribute values that have no
-        // compile-time effect is itself a P0 finding". Warn exactly as an
-        // unrecognized literal does, stating the real effect. (`<channel>` is
-        // excluded: any `auth=` there already gates the upgrade, §52.13.2.)
-        if (name === "auth" && (tag === "program" || tag === "page")) {
-          const span = attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-          const recognized = spec.allowedValues.map((v) => `"${v}"`).join(" | ");
-          warnings.push({
-            code: "W-ATTR-002",
-            message:
-              `W-ATTR-002: \`auth=\` on \`<${tag}>\` is not a string literal ` +
-              `(${describeNonLiteral(attr.value)}). \`auth=\` accepts exactly three literal ` +
-              `values — ${recognized} — and is not interpolable: its value must be known at ` +
-              `compile time because it decides which routes are gated. ` +
-              authUnrecognizedEffect(tag),
-            span,
-            severity: "warning",
-          });
-        }
-        continue;
-      }
+      if (literal === null) continue;
       if (literal === "") continue; // boolean-attribute idiom — recognized.
       if (valueIsRecognized(literal, spec.allowedValues, spec.allowSubvalueColon)) continue;
       const span = attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
@@ -191,7 +199,7 @@ function validateMarkup(
           `\`${name}=\` on \`<${tag}>\`. ` +
           `Recognized values: ${recognized}. ` +
           (name === "auth"
-            ? authUnrecognizedEffect(tag) +
+            ? CHANNEL_AUTH_UNRECOGNIZED_EFFECT +
               (literal.startsWith("role:")
                 ? ` For role-based access control, the \`role:X\` shape is documented in the dispatch ` +
                   `app FRICTION ledger but is NOT yet implemented (see F-AUTH-001); gate roles via a ` +
@@ -207,30 +215,46 @@ function validateMarkup(
 }
 
 /**
- * What an UNRECOGNIZED `auth=` literal does today, per element (S443 r3) — so the
- * warning states the real effect instead of "accepted as-is".
- *   - `<page>`: it is not an auth declaration. The page inherits its application's
- *     `<program auth="required">` gate if the application's top-level `<program>`
- *     declares one (route-inference Step 8c); otherwise it gates nothing.
- *   - `<program>`: no auth gate is applied at all (the value is not "required").
- *   - `<channel>`: any `auth=` attribute gates the WebSocket upgrade as if required.
+ * What an UNRECOGNIZED `auth=` literal does on a `<channel>` (the one element where
+ * it is still a warning): any `auth=` attribute gates the WebSocket upgrade as if
+ * it were `"required"` — fail closed (§52.13.2). On `<program>` / `<page>` an
+ * unrecognized value is E-AUTH-ATTR-INVALID instead (S449 ruling item 4).
  */
-function authUnrecognizedEffect(tag: string): string {
-  if (tag === "page") {
-    return `An unrecognized \`auth=\` value is not an auth declaration: this page inherits ` +
-      `the application's gate if the application's top-level \`<program>\` declares ` +
-      `\`auth="required"\` (it then requires authentication), and otherwise it gates nothing ` +
-      `(the page is public). Write one of the recognized values.`;
+const CHANNEL_AUTH_UNRECOGNIZED_EFFECT =
+  `On a \`<channel>\` any \`auth=\` attribute gates the WebSocket upgrade as if it ` +
+  `were \`auth="required"\`. Write one of the recognized values.`;
+
+/**
+ * The E-AUTH-ATTR-INVALID message (§52.13.2, S449 ruling item 4). Names the value
+ * the author wrote, lists the three legal values, and says why the value is refused.
+ */
+function authAttrInvalidMessage(
+  tag: string,
+  literal: string | null,
+  value: unknown,
+  allowed: readonly string[],
+): string {
+  const legal = allowed.map((v) => `\`auth="${v}"\``).join(", ");
+  const what = literal === null
+    ? `is not a quoted literal (${describeNonLiteral(value)})`
+    : literal === ""
+      ? `is the empty string \`""\``
+      : `is \`"${literal}"\``;
+  let hint = "";
+  if (literal !== null) {
+    const folded = literal.trim().toLowerCase();
+    if (allowed.includes(folded)) {
+      hint = ` Did you mean \`auth="${folded}"\`? The value is matched exactly — case and spaces count.`;
+    } else if (literal.startsWith("role:")) {
+      hint = ` Role-based access (\`role:X\`) is not implemented as an \`auth=\` value (§52.13.1): ` +
+        `write \`auth="required"\` and check the role in a server function or with an \`<auth role=…>\` gate.`;
+    }
   }
-  if (tag === "program") {
-    return `An unrecognized \`auth=\` value applies NO auth gate: this program and its pages ` +
-      `are public. Write \`auth="required"\` if a login is intended.`;
-  }
-  if (tag === "channel") {
-    return `On a \`<channel>\` any \`auth=\` attribute gates the WebSocket upgrade as if it ` +
-      `were \`auth="required"\`. Write one of the recognized values.`;
-  }
-  return `The attribute is currently accepted as-is with no compile-time enforcement.`;
+  return `E-AUTH-ATTR-INVALID: \`auth=\` on \`<${tag}>\` ${what}. \`auth=\` accepts exactly three ` +
+    `values, each written as a quoted literal: ${legal}.${hint} The value decides which routes ` +
+    `require a login, so it must be one of those three at compile time — any other value (another ` +
+    `spelling or case, extra spaces, an empty string, a \`role:\` value, a \`\${…}\` expression, a ` +
+    `cell, a bare \`auth\`) is refused rather than compiled to an application with no login gate. (§52.13.2)`;
 }
 
 // ---------------------------------------------------------------------------
@@ -245,11 +269,20 @@ export function runAttributeAllowlistFile(file: {
   const ast = file.ast;
   if (!ast) return warnings;
 
+  // §4.12 — the NESTED `<program>`s of this file (structural ancestors plus the
+  // build's implied application ancestor, stamped before this stage). Their
+  // `auth=` is E-PROGRAM-NESTED-AUTH (codegen), not this validator's.
+  const nestedPrograms = new Set<unknown>();
+  const nodes = (ast as { nodes?: unknown }).nodes;
+  forEachProgramWithRole(nodes, (p, role) => {
+    if (role === "nested") nestedPrograms.add(p);
+  }, programRoleOptionsOf(file));
+
   walkFileAst(ast, (node) => {
     if (!node || typeof node !== "object") return;
     const n = node as { kind?: string };
     if (n.kind !== "markup") return;
-    validateMarkup(node as MarkupNode, file.filePath, warnings);
+    validateMarkup(node as MarkupNode, file.filePath, warnings, nestedPrograms);
   });
 
   return warnings;

@@ -1,13 +1,24 @@
 {
   "id": "auth-attr-nonliteral-program-pos",
-  "description": "§52.13 (S449, g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth) — a NON-literal `<program auth=@mode>` is not one of the three accepted literals and applies no auth gate; it now emits W-ATTR-002 stating that effect. Before S449 this shape (and `auth=${…}`, bare `auth`) compiled with NO diagnostic at all to a public app. It is not treated as a gate: no W-AUTH-LOGIN-MISSING.",
+  "description": "§52.13.2 (S449 ruling item 4; g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth) — a NON-literal `<program auth=@mode>` is E-AUTH-ATTR-INVALID. Before S449 this shape (and `auth=${…}`, bare `auth`) compiled with no diagnostic to a PUBLIC app; #1234 made it W-ATTR-002; the ruling makes it an error and the build writes nothing. Not treated as a gate by the login lints.",
   "language-version": "1.0",
   "spec": "§52.13, §52.13.2",
   "source-test": "compiler/tests/integration/auth-attr-invalid-or-dynamic-value.test.js",
-  "rationale": "§52.13: 'The `auth=` attribute … accepts exactly three literal values'. §52.13.2: 'On a `<program>`, an unrecognized value applies no auth gate at all' and 'silent acceptance of attribute values that have no compile-time effect is itself a P0 finding'. The runtime half (the program serving publicly) is deliberately NOT pinned: whether this should instead be a compile error is an open ruling (docs/changes/s449-auth-session-fail-open/progress.md).",
+  "rationale": "§52.13.2 as amended S449 (supersedes the W-ATTR-002 + 'no auth gate at all' sentences). Ruling: user-voice-scrml.md S449 \"RULED — 'your recs.'\" item 4 — 'Unrecognized / non-literal `auth=` (incl. `\"\"`) = (a): compile error; amend §52.13.2 (supersedes its W-ATTR-002 + \"no auth gate\" SHALL).'",
   "expect": {
-    "codes": ["W-ATTR-002"],
-    "notCodes": ["W-AUTH-LOGIN-MISSING", "I-AUTH-REDIRECT-UNRESOLVED"],
-    "severity": { "W-ATTR-002": "warning" }
+    "codes": [
+      "E-AUTH-ATTR-INVALID"
+    ],
+    "notCodes": [
+      "W-ATTR-002",
+      "W-AUTH-LOGIN-MISSING",
+      "I-AUTH-REDIRECT-UNRESOLVED"
+    ],
+    "severity": {
+      "E-AUTH-ATTR-INVALID": "error"
+    },
+    "codeCounts": {
+      "E-AUTH-ATTR-INVALID": 1
+    }
   }
 }

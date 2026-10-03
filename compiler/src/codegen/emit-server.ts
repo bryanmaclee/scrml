@@ -13,6 +13,7 @@ import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitCh
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
+import { drainServerAmbientSessionRefusalErrors, setServerSessionContextSpan } from "./server-session-guard.ts";
 import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUseErrors, drainSessionValueUseErrors, type EmitExprContext } from "./emit-expr.ts";
 import {
   readRawUnitSessionAttr,
@@ -30,7 +31,7 @@ import { fileDefaultDbValue } from "../db-ownership.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
-import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
+import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER, resolveSpanLineCol } from "./log-loc.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
 import { parseExprToNode, forEachIdentInExprNode } from "../expression-parser.ts";
@@ -1386,6 +1387,7 @@ function emitEndpointServerHelperLines(
     const start = (fnNode?.span as any)?.start;
     if (typeof start !== "number") continue;
     if (!helperIds.has(`${filePath}::${start}`)) continue;
+    setServerSessionContextSpan({ ...(fnNode.span as object), file: filePath });
     const name: string = fnNode.name;
     if (!name || !Array.isArray(fnNode.body)) continue;
     if (isAlreadyDeclared(name)) continue;
@@ -2357,6 +2359,7 @@ export function generateServerJs(
     const fnNodeId = `${filePath}::${fnNode.span.start}`;
     const route = routeMap.functions.get(fnNodeId);
     if (!route || route.boundary !== "server") continue;
+    setServerSessionContextSpan({ ...(fnNode.span as object), file: filePath });
 
     // Bug 2b: divert onserver:* WS attribute handlers to the plain-function
     // emit path BEFORE the no-route E-CG-002 check (they legitimately have no
@@ -4254,6 +4257,7 @@ export function generateServerJs(
   }
 
   for (const { fnNode, route } of serverFns) {
+    setServerSessionContextSpan({ ...(fnNode.span as object), file: filePath });
     const name: string = fnNode.name ?? "anon";
     const routeName: string = route.generatedRouteName;
     const path: string = route.explicitRoute ? route.explicitRoute : routePath(routeName);
@@ -6330,6 +6334,7 @@ export function generateServerJs(
   // function syncs to subscribers exactly as a channel publisher does.
   if (channelWsHandlerFns.length > 0) {
     for (const { fnNode, route } of channelWsHandlerFns) {
+      setServerSessionContextSpan({ ...(fnNode.span as object), file: filePath });
       const name: string = fnNode.name ?? "anon";
       const params: any[] = fnNode.params ?? [];
       const wsParamNames: string[] = params.map((p: any, i: number) =>
@@ -7344,6 +7349,11 @@ export function generateServerJs(
   // file path so it reports against the right source, then clears the sink for the
   // next file. Build-blocking (severity "error"), restoring the invariant that no
   // bare `session` identifier ever reaches emitted JS.
+  // §6.6.9 / §20.5 (S449) — drain the server-session-guard backstop (a server
+  // `@session` lowering that was refused instead of reading the request body).
+  setServerSessionContextSpan(null);
+  for (const _e of drainServerAmbientSessionRefusalErrors(filePath, resolveSpanLineCol)) errors.push(_e);
+
   for (const _svErr of drainSessionValueUseErrors()) {
     const _span = (_svErr.span && typeof _svErr.span === "object") ? _svErr.span as Record<string, unknown> : {};
     errors.push(new CGError(
