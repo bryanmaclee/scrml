@@ -1,0 +1,13 @@
+{
+  "id": "schema-schema-014-like-template-neg",
+  "description": "§39.2 — `CREATE TABLE assets (LIKE tmpl INCLUDING ALL)` in a `<schema>`: the column list is a template reference whose columns (here a `tenant_id`) the database copies but the floors cannot read, so the table would be silently not tenant-scoped. Fail closed: E-SCHEMA-014.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/schema-tenant-union-and-like.test.js",
+  "spec": "§39.2",
+  "rationale": "§39.2: inside a CREATE TABLE column list, an unquoted `LIKE <name>` followed by `INCLUDING`, `EXCLUDING`, `,` or `)` is a template reference, and a head whose column list holds one SHALL be a compile error (E-SCHEMA-014). Provenance: ruling:user-voice-scrml.md S447 \"stamp all\" (ii).",
+  "expect": {
+    "codes": ["E-SCHEMA-014"],
+    "codeCounts": { "E-SCHEMA-014": 1 },
+    "notCodes": ["E-SCHEMA-012", "E-SCHEMA-013", "E-SCHEMA-015"]
+  }
+}

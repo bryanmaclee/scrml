@@ -1,0 +1,6 @@
+<program db="./app.db">
+    <schema>
+        CREATE TABLE assets (id INTEGER PRIMARY KEY, "like" TEXT, tenant_id TEXT)
+        CREATE TABLE notes (id INTEGER PRIMARY KEY, like TEXT NOT NULL)
+    </>
+</program>

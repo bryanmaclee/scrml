@@ -32,7 +32,7 @@
  * P1-tail follow-on.)
  */
 
-import { parseSchemaBlock, harvestRawCreateTableDecls } from "../schema-differ.js";
+import { parseSchemaBlock, harvestRawCreateTableDecls, schemaTableDeclarations } from "../schema-differ.js";
 import { DBAUTH_ROLE, DBAUTH_TENANT_GUC, DBAUTH_CAPS_GUC } from "../schema-differ.js";
 
 /**
@@ -122,6 +122,7 @@ export function extractDesiredSchema(
   fileAST: unknown,
 ): {
   tables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }>;
+  tenantTables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }>;
   fns: Array<{ name: string; [k: string]: unknown }>;
   warnings: string[];
 } {
@@ -235,7 +236,42 @@ export function extractDesiredSchema(
     }
   }
 
-  return { tables, fns, warnings };
+  // ---------------------------------------------------------------------
+  // §14.8.10 tenant-floor read — the UNION over every same-name declaration
+  // (bryan RULED S447 "stamp all" (i), gap
+  // g-schema-commented-out-declaration-shadows-live-table). `tables` above is
+  // first-wins per name and stays so: it is `scrml db-migrate`'s desired state,
+  // and a union there would change what migrate creates. The tenant floor instead
+  // reads `tenantTables` — `tables` with each entry's column NAMES widened by
+  // every other declaration of the same name (case-insensitive, across bodies and
+  // forms, commented-out copies included, as the recognizers read them), so a
+  // stale copy can no longer shadow a live `tenant_id`. The union alone
+  // over-scopes when the declarations DISAGREE on `tenant_id`; that case is
+  // rejected at GCP1 (E-SCHEMA-015, `findTenantDeclarationDisagreements`), so in
+  // a program that compiles every declaration of a table agrees and the union
+  // decides exactly what each declaration does.
+  // ---------------------------------------------------------------------
+  const unionCols = new Map<string, Array<{ name: string }>>();
+  for (const body of bodies) {
+    for (const d of schemaTableDeclarations(body)) {
+      const cols = unionCols.get(d.key) ?? [];
+      for (const c of d.columns as Array<{ name?: unknown }>) {
+        if (typeof c?.name !== "string") continue;
+        const lower = c.name.toLowerCase();
+        if (!cols.some((x) => x.name.toLowerCase() === lower)) cols.push({ name: c.name });
+      }
+      unionCols.set(d.key, cols);
+    }
+  }
+  const tenantTables = tables.map((t) => {
+    const extra = unionCols.get(String(t.name).toLowerCase()) ?? [];
+    const own = Array.isArray((t as any).columns) ? ((t as any).columns as Array<{ name?: unknown }>) : [];
+    const have = new Set(own.map((c) => (typeof c?.name === "string" ? c.name.toLowerCase() : "")));
+    const added = extra.filter((c) => !have.has(c.name.toLowerCase()));
+    return added.length === 0 ? t : { ...t, columns: [...own, ...added] };
+  });
+
+  return { tables, tenantTables, fns, warnings };
 }
 
 /**
