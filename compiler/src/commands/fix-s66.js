@@ -59,6 +59,10 @@ import { buildAST } from "../ast-builder.js";
 import { parseExprToNode, deepEqualExprNode, captureTrailingContentWarnings, hasLostTrailingContent } from "../expression-parser.ts";
 import { isUniversalCorePredicate } from "../validator-catalog.ts";
 import { applyMigrations } from "./migrate.js";
+import { compileScrml } from "../api.js";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname, basename } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -89,8 +93,17 @@ const PURE_METHODS = new Set([
   "padEnd", "repeat", "replace", "replaceAll", "substring", "toFixed", "toPrecision", "localeCompare",
   "toSorted", "toReversed", "toSpliced", "with", "has", "get", "match", "search", "normalize",
 ]);
-/** Statement kinds that block unwrapping a depth-0 `${}` (a value that legacy may RENDER, S441). */
-const UNWRAP_BLOCKING_KINDS = new Set(["bare-expr", "markup", "lift-expr", "lift"]);
+/**
+ * Statement kinds a depth-0 `${}` may hold and still be unwrapped. S441 makes a bare run at a program
+ * body top mean the same as inside `${}`, but impl#1 — whose behaviour adopters get — parses a
+ * top-level control-flow statement (`while`, `for`, `if`) or a bare expression differently there
+ * (measured: E-LOOP-007 vanishes, E-UNQUOTED-DISPLAY-TEXT appears). Items only; anything else keeps
+ * its `${}` (legal §66).
+ */
+const UNWRAP_ITEM_KINDS = new Set([
+  "state-decl", "function-decl", "type-decl", "import-decl", "export-decl", "engine-decl", "comment",
+  "use-decl", "component-def",
+]);
 /** ExprNode kinds the rewrite may parenthesize as an ordinary expression. */
 const PLAIN_EXPR_KINDS = new Set([
   "ident", "lit", "member", "index", "call", "binary", "unary", "ternary", "array", "object",
@@ -274,15 +287,60 @@ function parseAst(filePath, source) {
   }).result;
 }
 
-/** The single top-level `<program>` count of a source, per impl#1's front end (-1: no AST). */
-function topLevelProgramCount(filePath, source) {
+/** Codes that describe the program SHAPE itself (what the structural rules exist to change). */
+const SHAPE_LINT_CODES = new Set(["W-PROGRAM-001", "W-PROGRAM-REDUNDANT-LOGIC", "W-PROGRAM-SPA-INFERRED"]);
+
+/**
+ * impl#1's full compile of a source (write:false, in a scratch dir with the aux files beside it):
+ * the sorted multiset of diagnostic codes, shape lints excluded. null when the compiler throws.
+ */
+function compiledCodes(filePath, source, auxSources) {
+  const dir = mkdtempSync(join(tmpdir(), "scrml-fix-verify-"));
   try {
-    const ast = parseAst(filePath, source);
-    const nodes = Array.isArray(ast?.nodes) ? ast.nodes : null;
-    if (!nodes) return -1;
-    return nodes.filter((n) => n.kind === "markup" && n.tag === "program").length;
+    const f = join(dir, basename(filePath) || "input.scrml");
+    for (const [p, s] of Object.entries(auxSources ?? {})) {
+      const ap = join(dir, p);
+      if (ap === f) continue;
+      mkdirSync(dirname(ap), { recursive: true });
+      writeFileSync(ap, s);
+    }
+    writeFileSync(f, source);
+    // The verify compile is internal: its terminal output (Note(PA) lines, stage notices) is about
+    // a scratch copy, so it is silenced for the duration and restored in `finally`.
+    const saved = { log: console.log, warn: console.warn, error: console.error, out: process.stdout.write, err: process.stderr.write };
+    let r;
+    try {
+      console.log = console.warn = console.error = () => {};
+      process.stdout.write = process.stderr.write = () => true;
+      r = captureTrailingContentWarnings(() => compileScrml({ inputFiles: [f], write: false, outputDir: join(dir, "out"), log: () => {} })).result;
+    } finally {
+      console.log = saved.log; console.warn = saved.warn; console.error = saved.error;
+      process.stdout.write = saved.out; process.stderr.write = saved.err;
+    }
+    return [...(r.errors ?? []), ...(r.warnings ?? [])].map((d) => d?.code).filter((c) => typeof c === "string" && !SHAPE_LINT_CODES.has(c)).sort();
   } catch {
-    return -1;
+    return null;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * impl#1's front-end reading of a source: its top-level `<program>` count and the diagnostic codes
+ * the block splitter + AST builder raise (shape lints excluded). null when the front end throws.
+ */
+function frontEndReading(filePath, source) {
+  try {
+    return captureTrailingContentWarnings(() => {
+      const bs = splitBlocks(filePath, source);
+      const built = buildAST(bs);
+      const nodes = Array.isArray(built.ast?.nodes) ? built.ast.nodes : [];
+      const codes = new Set();
+      for (const e of [...(bs.errors ?? []), ...(built.errors ?? [])]) if (e && typeof e.code === "string" && !SHAPE_LINT_CODES.has(e.code)) codes.add(e.code);
+      return { programs: nodes.filter((n) => n.kind === "markup" && n.tag === "program").length, codes };
+    }).result;
+  } catch {
+    return null;
   }
 }
 
@@ -569,10 +627,13 @@ function parseDeclSite(src, node, filePath) {
 
 /**
  * @param {string} source
- * @param {{ filePath?: string, entry?: boolean, auxSources?: Record<string,string>, rules?: string[] }} [opts]
+ * @param {{ filePath?: string, entry?: boolean, auxSources?: Record<string,string>, rules?: string[], verify?: boolean }} [opts]
  *   entry       the file is an application entry (program-wrap / program-move apply). Default true.
- *   auxSources  sibling files (path → source) consulted for enum declarations.
+ *   auxSources  sibling files (path → source) consulted for enum declarations, and written beside
+ *               the file for the verify compile.
  *   rules       restrict to a subset of S66_RULES (default: all).
+ *   verify      compile the structural-only rewrite with impl#1 and withdraw it unless the diagnostic
+ *               codes are unchanged (default true).
  * @returns {{ output: string, changed: boolean, applied: Array<{rule:string,line:number,detail:string}>,
  *             blockers: Array<{rule:string,line:number,reason:string,snippet:string}> }}
  */
@@ -763,7 +824,7 @@ export function fixS66(source, opts = {}) {
   }
 
   // ---- program root -----------------------------------------------------------------------------
-  let structural = null; // { kind: "wrap" } | { kind: "move", pre:[a,b], post:[a,b], openEnd, closeStart }
+  let structural = null; // { kind: "wrap" } | { kind: "move", ps, openEnd, closeStart, closeEnd }
   if (entry) {
     if (programs.length > 1) {
       // Two top-level programs is not a legacy form (E-PROGRAM-002 is a live rule): nothing to restructure.
@@ -774,7 +835,10 @@ export function fixS66(source, opts = {}) {
         if (page) block("program-wrap", page.span?.start ?? 0, "`<page>` root with no `<program>` (route-file shape — not wrapped)");
         else if (prose) block("program-wrap", prose.span?.start ?? 0, "top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)");
         else if (/<program\b/.test(src)) block("program-wrap", 0, "a `<program>` the front end does not recognize as the root (malformed source)");
-        else structural = { kind: "wrap" };
+        else if (!topNodes.some((n) => n.kind === "markup")) {
+          // No top-level markup element: impl#1 emits no page for such a file (a module / library, or a
+          // file of only `<match>` / `^{}` / logic) — wrapping would turn it into an application. Not wrapped.
+        } else structural = { kind: "wrap" };
       }
     } else if (enabled.has("program-move")) {
       const ps = program.span.start;
@@ -811,11 +875,11 @@ export function fixS66(source, opts = {}) {
     const e = n.span?.end ?? -1;
     if (s < 0 || !src.startsWith("${", s) || src[e - 1] !== "}") continue;
     const stmts = Array.isArray(n.body) ? n.body : [];
-    const bad = stmts.find((x) => x && (UNWRAP_BLOCKING_KINDS.has(x.kind) || (x.kind === "text" && /\S/.test(x.value ?? ""))));
+    const bad = stmts.find((x) => x && !UNWRAP_ITEM_KINDS.has(x.kind) && !(x.kind === "text" && !/\S/.test(x.value ?? "")));
     if (bad) {
       // A block that holds no legacy construct can stay: `${}` at a body top is legal §66 (S441).
       const holdsLegacy = decls.some((d) => d.stack.includes(n)) || engines.some((d) => d.stack.includes(n));
-      if (holdsLegacy) block("unwrap-logic", s, `top-level \`\${}\` holds a \`${bad.kind}\` statement (rendered in legacy, evaluated in a program body — S441)`);
+      if (holdsLegacy) block("unwrap-logic", s, `top-level \`\${}\` holding a legacy declaration also holds a \`${bad.kind}\` statement, which impl#1 reads differently outside \`\${}\` (S441) — not unwrapped`);
       continue;
     }
     // Delete the delimiters; a delimiter alone on its line takes the line with it (readability).
@@ -845,6 +909,24 @@ export function fixS66(source, opts = {}) {
     if (!covered(m.index)) block("engine-simple", m.index, "`<engine>` impl#1's front end did not surface as an engine declaration (left untouched)");
   }
 
+  // ---- a declaration left at the root of a file that has no <program> after the fix ----------------
+  // A bare legacy declaration at a no-program file root sits in impl#1's synthetic logic; its §66
+  // opener there would be free-text prose. Such a site is reported, and its rewrite withdrawn.
+  if (!program && structural?.kind !== "wrap") {
+    for (let i = edits.length - 1; i >= 0; i--) {
+      const ed = edits[i];
+      if (ed.rule !== "rhs-decl" && ed.rule !== "const-cell" && ed.rule !== "engine-simple") continue;
+      const d = decls.find((x) => x.node.span && lineOf(src, x.node.span.start) === lineOf(src, ed.start))
+        ?? engines.find((x) => x.node.span && x.node.span.start === ed.start);
+      const inSynthetic = d && d.stack.some((a) => a.kind === "logic" && a._synthetic);
+      const atRoot = d && d.stack.filter((a) => a.kind === "logic" && !a._synthetic).length === 0;
+      if (inSynthetic || atRoot) {
+        block(ed.rule, ed.start, "declaration at the root of a file with no `<program>` (its §66 opener would be free-text there)");
+        edits.splice(i, 1);
+      }
+    }
+  }
+
   // ---- apply ------------------------------------------------------------------------------------
   edits.sort((a, b) => a.start - b.start || a.end - b.end);
   for (let i = 1; i < edits.length; i++) {
@@ -853,40 +935,72 @@ export function fixS66(source, opts = {}) {
       return { output: source, changed: false, applied: [], blockers };
     }
   }
-  /** The text of [a, b) with every edit inside it applied. */
-  const E = (a, b) => {
-    let out = "";
-    let cur = a;
-    for (const ed of edits) {
-      if (ed.start < a || ed.end > b) continue;
-      out += src.slice(cur, ed.start) + ed.text;
-      cur = ed.end;
+  /** Assemble the output from the edits `keep` admits, restructured when `st` is given. */
+  const assemble = (keep, st) => {
+    const Ek = (a, b) => {
+      let out = "";
+      let cur = a;
+      for (const ed of edits) {
+        if (!keep(ed) || ed.start < a || ed.end > b) continue;
+        out += src.slice(cur, ed.start) + ed.text;
+        cur = ed.end;
+      }
+      return out + src.slice(cur, b);
+    };
+    if (st?.kind === "wrap") {
+      const body = Ek(0, src.length).replace(/^\s*\n/, "").replace(/\s+$/, "");
+      return `<program>\n${body}\n</program>\n`;
     }
-    return out + src.slice(cur, b);
+    if (st?.kind === "move") {
+      const pre = Ek(0, st.ps).replace(/^\s+/, "").replace(/\s+$/, "");
+      const body = Ek(st.openEnd, st.closeStart).replace(/\s+$/, "");
+      const post = Ek(st.closeEnd, src.length).replace(/^\s+/, "").replace(/\s+$/, "");
+      const opener = src.slice(st.ps, st.openEnd);
+      const closer = src.slice(st.closeStart, st.closeEnd);
+      return `${opener}\n${pre}${body.startsWith("\n") ? "" : "\n"}${body}${post ? "\n" + post : ""}\n${closer}\n`;
+    }
+    return Ek(0, src.length);
   };
-  let output;
-  if (structural?.kind === "wrap") {
-    const body = E(0, src.length).replace(/^\s*\n/, "").replace(/\s+$/, "");
-    output = `<program>\n${body}\n</program>\n`;
-    applied.push({ rule: "program-wrap", line: 1, detail: "wrapped the file in <program>" });
-  } else if (structural?.kind === "move") {
-    const pre = E(0, structural.ps).replace(/^\s+/, "").replace(/\s+$/, "");
-    const body = E(structural.openEnd, structural.closeStart).replace(/\s+$/, "");
-    const post = E(structural.closeEnd, src.length).replace(/^\s+/, "").replace(/\s+$/, "");
-    const opener = src.slice(structural.ps, structural.openEnd);
-    const closer = src.slice(structural.closeStart, structural.closeEnd);
-    output = `${opener}\n${pre}${body.startsWith("\n") ? "" : "\n"}${body}${post ? "\n" + post : ""}\n${closer}\n`;
-    applied.push({ rule: "program-move", line: 1, detail: "moved items outside <program> inside it" });
-  } else {
-    output = E(0, src.length);
+  // Self-check, on the rules impl#1 itself compiles: the structural-only rewrite (program-wrap /
+  // program-move / unwrap-logic, no declaration rewrite) must mean the same TO IMPL#1 — one top-level
+  // <program> when restructured, and (opts.verify, default on) the SAME multiset of diagnostic codes
+  // from a full impl#1 compile (shape lints aside); without verify, no new front-end code. Otherwise
+  // every structural edit is withdrawn and the reason reported (the declaration edits stand).
+  const isStructEdit = (ed) => ed.rule === "unwrap-logic";
+  if (structural || edits.some(isStructEdit)) {
+    const structSrc = assemble(isStructEdit, structural);
+    const before = frontEndReading(filePath, src);
+    const after = frontEndReading(filePath, structSrc);
+    const badCount = structural && (!after || after.programs !== 1);
+    let changedCodes = null;
+    if (before && after && !badCount) {
+      if (opts.verify !== false) {
+        const a = compiledCodes(filePath, src, opts.auxSources);
+        const b = compiledCodes(filePath, structSrc, opts.auxSources);
+        if (!a || !b) changedCodes = ["impl#1 compile threw"];
+        else if (a.join() !== b.join()) {
+          const lost = a.filter((c, i) => a.indexOf(c) === i && a.filter((x) => x === c).length > b.filter((x) => x === c).length);
+          const gained = b.filter((c, i) => b.indexOf(c) === i && b.filter((x) => x === c).length > a.filter((x) => x === c).length);
+          changedCodes = [...lost.map((c) => `-${c}`), ...gained.map((c) => `+${c}`)];
+        }
+      } else {
+        const fresh = [...after.codes].filter((c) => !before.codes.has(c)).sort();
+        if (fresh.length) changedCodes = fresh.map((c) => `+${c}`);
+      }
+    }
+    if (!before || !after || badCount || changedCodes) {
+      const what = structural ? (structural.kind === "wrap" ? "program-wrap" : "program-move") : "unwrap-logic";
+      const why = badCount
+        ? "the restructured file does not parse to one top-level `<program>` (malformed source)"
+        : `impl#1 reads the restructured file differently (${changedCodes ? changedCodes.join(", ") : "front-end failure"})`;
+      block(what, 0, `${why} — not restructured, no \`\${}\` unwrapped`);
+      structural = null;
+      for (let i = edits.length - 1; i >= 0; i--) if (isStructEdit(edits[i])) edits.splice(i, 1);
+    }
   }
-  if (structural && topLevelProgramCount(filePath, output) !== 1) {
-    // The restructured file must parse to exactly one top-level <program>; otherwise (a malformed
-    // source the front end reads differently once wrapped) the structural rewrite is withdrawn.
-    block(structural.kind === "wrap" ? "program-wrap" : "program-move", 0, "the restructured file does not parse to one top-level `<program>` (malformed source) — not restructured");
-    applied.pop();
-    output = E(0, src.length);
-  }
+  const output = assemble(() => true, structural);
+  if (structural?.kind === "wrap") applied.push({ rule: "program-wrap", line: 1, detail: "wrapped the file in <program>" });
+  if (structural?.kind === "move") applied.push({ rule: "program-move", line: 1, detail: "moved items outside <program> inside it" });
   for (const ed of edits) {
     if (ed.rule === "unwrap-logic" && ed.detail === "}") continue;
     applied.push({ rule: ed.rule, line: lineOf(src, ed.start), detail: ed.detail });

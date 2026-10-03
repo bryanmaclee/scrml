@@ -214,6 +214,32 @@ describe("§4 program-wrap / program-move / unwrap-logic", () => {
     blocked("${ <n> = 1 }\nHello there\n<p>\${@n}</p>\n", "top-level prose");
   });
 
+  test("verify: a wrap impl#1 reads differently is WITHDRAWN and reported (an <outlet/> outside a shell)", () => {
+    const src = "<div>\n  <h1>Not a shell</h1>\n  <outlet/>\n</div>\n";
+    const r = fix(src);
+    expect(r.output).toBe(src);
+    expect(r.blockers.map((b) => b.reason).join("\n")).toContain("impl#1 reads the restructured file differently (-E-OUTLET-OUTSIDE-SHELL)");
+    // BITE: with verify off the wrap goes through — the compile is what caught it
+    const r2 = fix(src, { verify: false });
+    expect(r2.output.startsWith("<program>")).toBe(true);
+  });
+
+  test("a top-level ${} holding a non-item statement (a logic `const`, a loop) keeps its ${}", () => {
+    const out = clean("${\n    const k = 3\n}\n<p>${k}</p>\n");
+    expect(out).toContain("${\n    const k = 3\n}");
+  });
+
+  test("a file with no top-level markup element is not wrapped (impl#1 emits no page for it)", () => {
+    const r = fix("${\n    function f() { return 1 }\n}\n");
+    expect(r.output).toBe("${\n    function f() { return 1 }\n}\n");
+    expect(r.blockers).toEqual([]);
+  });
+
+  test("a bare declaration at the root of a file that stays without <program> is reported, not rewritten", () => {
+    const r = blocked("<count> = 0\n<match on=@count>\n</>\n", "root of a file with no `<program>`");
+    expect(r.output).toContain("<count> = 0");
+  });
+
   test("two top-level <program>s (a live E-PROGRAM-002 case) is not restructured and not reported", () => {
     const r = fix("<program>\n<p>a</p>\n</program>\n<program>\n<p>b</p>\n</program>\n");
     expect(r.changed).toBe(false);

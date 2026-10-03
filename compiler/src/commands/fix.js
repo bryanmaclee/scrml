@@ -149,7 +149,12 @@ export function runFixCommand(args, io = { out: (s) => console.log(s), err: (s) 
       report.push({ file: rel, entry: cls.entry, entryWhy: cls.why, changed: r.changed, applied: r.applied, blockers: r.blockers });
       if (!o.json) {
         for (const b of r.blockers) io.err(`${rel}:${b.line} ${b.rule}: ${b.reason}${b.snippet ? `  [${b.snippet}]` : ""}`);
-        if (r.applied.some((a) => a.rule === "program-wrap")) io.err(`${rel}: wrapped in <program> — ${cls.why}`);
+        if (r.applied.some((a) => a.rule === "program-wrap")) {
+          io.err(`${rel}: wrapped in <program> — ${cls.why}`);
+          // Measured (S449): impl#1 emits the §65.3.4 reset layer only for a file that declares a
+          // <program>, so the wrap makes the page pick up the reset. Say so; do not hide it.
+          io.err(`${rel}: note — impl#1 adds the §65.3.4 CSS reset layer to an explicit <program> (it omitted it for this file); write <program reset="none"> to keep the old styling`);
+        }
       }
       if (!r.changed) continue;
       wouldChange++;
