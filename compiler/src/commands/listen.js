@@ -83,7 +83,8 @@ export function parseHostFlag(args, i, isPositional = () => false) {
  * SELF-CONTAINED FUNCTIONS. `isLoopbackHost`, `isLegacyNumericIPv4`,
  * `hostRefusal`, `bindPlan`, `displayUrlFor` and `bindListeners` reference
  * nothing at module scope (each inlines what it needs), because
- * `codegen/emit-tool.ts` serializes their source into every generated headless
+ * `codegen/emit-tool.ts` copies them — as the runtime's `Function.prototype.toString()`
+ * prints them (Bun's re-print, not this file's source text) — into every generated headless
  * serve-target (§64.9 — a `kind="tool" serve=` program, which runs as a plain
  * `bun <file>.js` with no compiler beside it). The generated server and the CLI
  * therefore run the SAME validation and the SAME IPv4/IPv6 bind code; nothing is

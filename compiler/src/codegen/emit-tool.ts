@@ -66,7 +66,8 @@ type ASTNode = Record<string, unknown>;
  * bind exits 1 with a message on stderr.
  *
  * The validation, bind plan, IPv4/IPv6 twin and URL functions are NOT restated:
- * they are `commands/listen.js`'s own self-contained functions, serialized into
+ * they are `commands/listen.js`'s own self-contained functions, re-printed by the
+ * runtime's `Function.prototype.toString()` (Bun's printer, not the source text) into
  * the module (the generated server runs as a plain `bun <file>.js`, with no
  * compiler beside it to import from).
  */
@@ -79,8 +80,9 @@ const SERVE_BIND_FNS = [
 function serveBindHelperLines(): string[] {
   const out: string[] = [];
   out.push(`// --- §64.9 bind address — loopback by default; ${SERVE_HOST_ENV} opts in (S447 ruling iv) ---`);
-  out.push("// The functions inside are compiler/src/commands/listen.js's own, serialized, so this");
-  out.push("// server validates and binds its host exactly as `scrml dev` / `scrml serve` do.");
+  out.push("// The functions inside are compiler/src/commands/listen.js's functions as printed by the");
+  out.push("// runtime's Function.prototype.toString (not its source text), so this server validates");
+  out.push("// and binds its host with the same code `scrml dev` / `scrml serve` run.");
   out.push("const _scrml_bind = (() => {");
   for (const fn of SERVE_BIND_FNS) {
     // Not re-indented: a template literal spanning lines must keep its text exactly.
@@ -100,7 +102,7 @@ function serveBindHelperLines(): string[] {
   out.push(`  function listen(config, host) {`);
   out.push(`    const plan = bindPlan(host);`);
   out.push(`    const serve = (c) => Bun.serve(c);`);
-  out.push(`    const { server, bound } = bindListeners(serve, config, plan, plan.twin, () => probeIPv6(serve), (m) => console.error(m), (err) => {`);
+  out.push(`    const { server, bound } = bindListeners(serve, config, plan, plan.twin, () => probeIPv6(serve), (m) => console.error(m.replace(/^\\[scrml\\]/, "scrml serve-target:")), (err) => {`);
   out.push(`      const where = config.port === 0 ? "an ephemeral port" : \`port \${config.port}\`;`);
   out.push(`      console.error(`);
   out.push(`        \`scrml serve-target: could not listen on host "\${host}" at \${where} — tried \${plan.primary}. \` +`);
@@ -934,6 +936,13 @@ function generateServeHarnessToolJs(
   out.push("// Generated listener-owning tool — scrml compiler output (§64, Fork 1A)");
   out.push(`// Headless serve-target: \`bun <this-file>.js\` starts Bun.serve on the declared port.`);
   out.push("");
+  // §64.9 bind address — resolved + validated FIRST, before any of this module's
+  // own top-level statements (db handles, user consts, a composing `main`), so a
+  // refused SCRML_HOST exits before any user code in this module runs. (Static
+  // ES imports still evaluate first — the language cannot order code ahead of them.)
+  for (const line of serveBindHelperLines()) out.push(line);
+  out.push(`const _scrml_serve_host = _scrml_bind.host(process.env.${SERVE_HOST_ENV});`);
+  out.push("");
   out.push(headlessModule.replace(/\n+$/, ""));
   out.push("");
   if (extraHelperHeader) { out.push(extraHelperHeader.replace(/\n+$/, "")); out.push(""); }
@@ -945,10 +954,6 @@ function generateServeHarnessToolJs(
     // define an empty routes array so the harness references a real binding.
     out.push("const routes = [];");
   }
-  for (const line of serveBindHelperLines()) out.push(line);
-  // §64.9 bind address — resolved + validated BEFORE `main`'s setup runs, so a
-  // refused SCRML_HOST exits before any side effect.
-  out.push(`const _scrml_serve_host = _scrml_bind.host(process.env.${SERVE_HOST_ENV});`);
   if (mainFn) {
     // §64.3 compose — run the no-return setup `main` BEFORE the serve-harness holds
     // the process (a numeric-return main + serve= is E-TOOL-SERVE-MAIN-EXITS at TS).

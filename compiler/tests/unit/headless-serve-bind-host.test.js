@@ -4,11 +4,14 @@
  * all-interfaces." (g-generated-headless-and-prod-servers-bind-all-interfaces)
  *
  *   §1  EMITTED SOURCE — a `kind="tool" serve=` module resolves its host from
- *       SCRML_HOST (default 127.0.0.1) before `main`'s setup runs, and binds
- *       through `_scrml_bind.listen`, whose functions are commands/listen.js's
- *       own (serialized verbatim, so nothing is restated).
- *   §2  SELF-CONTAINED — every serialized listen.js function runs when lifted
- *       out of its module (no module-scope reference).
+ *       SCRML_HOST (default 127.0.0.1) at the TOP of the module, before any of its
+ *       own top-level statements, and binds through `_scrml_bind.listen`, whose
+ *       functions are commands/listen.js's exports as the runtime's
+ *       Function.prototype.toString() prints them (Bun's re-print, not the source
+ *       text — so the copy is checked BEHAVIOURALLY in §2, not textually).
+ *   §2  SELF-CONTAINED + EQUIVALENT — the copied functions, lifted out of their
+ *       module with every other listen.js top-level name shadowed by a trap, run
+ *       and agree with the listen.js originals (no module-scope reference).
  *   §3  RUNTIME — the generated server, run as `bun <file>`: loopback by default
  *       (IPv4 + its ::1 twin; not reachable on a LAN address), SCRML_HOST=0.0.0.0
  *       opts in to every interface, and an invalid SCRML_HOST (empty, padded,
@@ -19,7 +22,7 @@
 
 import { describe, test, expect, afterAll } from "bun:test";
 import { createConnection, createServer } from "net";
-import { writeFileSync, mkdtempSync, rmSync } from "fs";
+import { writeFileSync, mkdtempSync, rmSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import * as acorn from "acorn";
@@ -73,6 +76,12 @@ describe("§1 emitted source — loopback default, SCRML_HOST opt-in, listen.js 
     expect(toolJs).toContain("port: _scrml_serve_port,");
   });
 
+  test("the IPv6-twin collision warning is re-prefixed `scrml serve-target:` like the module's other lines", () => {
+    expect(toolJs).toContain('(m) => console.error(m.replace(/^\\[scrml\\]/, "scrml serve-target:"))');
+    const warn = (m) => m.replace(/^\[scrml\]/, "scrml serve-target:");
+    expect(warn("[scrml] listening on 127.0.0.1:1 only")).toBe("scrml serve-target: listening on 127.0.0.1:1 only");
+  });
+
   test("the default host is DEFAULT_HOST (127.0.0.1), the #1207 loopback literal", () => {
     expect(DEFAULT_HOST).toBe("127.0.0.1");
     expect(toolJs).toContain(`if (raw === undefined) return ${JSON.stringify(DEFAULT_HOST)};`);
@@ -99,18 +108,28 @@ describe("§1 emitted source — loopback default, SCRML_HOST opt-in, listen.js 
     expect(probeIPv6.toString()).toMatch(/hostname: "::1"/);
   });
 
-  test("the serialized functions are listen.js's own source, verbatim", () => {
+  test("the copy mechanism: each copied function is the runtime's toString() of the listen.js export", () => {
+    // This pins HOW the copy is made (Function.prototype.toString, i.e. Bun's
+    // re-print — not listen.js's source text). That the copies BEHAVE like the
+    // originals, with no module-scope reference, is §2.
     for (const [name, fn] of Object.entries(SERIALIZED)) {
       expect({ name, present: toolJs.includes(fn.toString()) }).toEqual({ name, present: true });
     }
   });
 
-  test("the host is validated BEFORE a composing main's setup runs", () => {
-    const { codes: c2, toolJs: js } = compileTool(TOOL(7878, "function main(args) {\n    log(\"setup\")\n  }"));
+  test("the host is validated at the TOP of the module — before user top-level statements and a composing main", () => {
+    const { codes: c2, toolJs: js } = compileTool(
+      TOOL(7878, 'log("TOPLEVEL-RAN")\n  function main(args) {\n    log("setup")\n  }'),
+    );
     expect(c2).toEqual([]);
     const hostAt = js.indexOf("const _scrml_serve_host = _scrml_bind.host(");
     expect(hostAt).toBeGreaterThan(-1);
+    expect(hostAt).toBeLessThan(js.indexOf("TOPLEVEL-RAN"));
     expect(hostAt).toBeLessThan(js.indexOf("await main("));
+    // Nothing but comments, the static imports and the _scrml_bind helper precede it.
+    const ast = acorn.parse(js, { ecmaVersion: "latest", sourceType: "module" });
+    const before = ast.body.filter((n) => n.start < hostAt && n.type !== "ImportDeclaration");
+    expect(before.map((n) => n.declarations?.[0]?.id?.name ?? n.type)).toEqual(["_scrml_bind"]);
   });
 });
 
@@ -118,11 +137,30 @@ describe("§1 emitted source — loopback default, SCRML_HOST opt-in, listen.js 
 // §2 self-contained
 // ---------------------------------------------------------------------------
 
-describe("§2 the serialized listen.js functions are self-contained", () => {
+describe("§2 the copied listen.js functions are self-contained and behave like the originals", () => {
+  // Every OTHER top-level binding of listen.js, shadowed by a trap: a copied
+  // function that reached one of them (a module-scope reference) would throw.
+  const LISTEN_SRC = readFileSync(join(import.meta.dir, "../../src/commands/listen.js"), "utf8");
+  const topNames = [];
+  for (const n of acorn.parse(LISTEN_SRC, { ecmaVersion: "latest", sourceType: "module" }).body) {
+    const d = n.type === "ExportNamedDeclaration" ? n.declaration : n;
+    if (!d) continue;
+    if (d.type === "FunctionDeclaration" || d.type === "ClassDeclaration") topNames.push(d.id.name);
+    if (d.type === "VariableDeclaration") for (const v of d.declarations) if (v.id.type === "Identifier") topNames.push(v.id.name);
+  }
+  const traps = topNames.filter((n) => !(n in SERIALIZED))
+    .map((n) => `const ${n} = new Proxy(function () {}, { get() { throw new Error("module-scope ref: ${n}"); }, apply() { throw new Error("module-scope ref: ${n}"); } });`)
+    .join("\n");
+
+  test("listen.js has other top-level names for the trap to catch (the check bites)", () => {
+    expect(topNames).toContain("norm");
+    expect(topNames).toContain("boundOnPort");
+  });
+
   test("lifted out of their module, they validate + plan exactly as listen.js does", () => {
     const src = Object.values(SERIALIZED).map((f) => f.toString()).join("\n");
     // eslint-disable-next-line no-new-func
-    const lifted = new Function(`${src}\nreturn { isLoopbackHost, hostRefusal, bindPlan, displayUrlFor };`)();
+    const lifted = new Function(`${traps}\n${src}\nreturn { isLoopbackHost, hostRefusal, bindPlan, displayUrlFor, bindListeners, probeIPv6 };`)();
     for (const h of ["127.0.0.1", "localhost", "0.0.0.0", "::1", "[::1]", "192.168.1.5", "0", "127.1", "0 ", "\t127.0.0.1", "0x7f.1"]) {
       expect({ h, r: lifted.hostRefusal(h) }).toEqual({ h, r: hostRefusal(h) });
       expect({ h, p: lifted.bindPlan(h) }).toEqual({ h, p: bindPlan(h) });
@@ -130,6 +168,15 @@ describe("§2 the serialized listen.js functions are self-contained", () => {
     }
     expect(lifted.displayUrlFor(["127.0.0.1", "::1"], "127.0.0.1", 9)).toBe("http://localhost:9");
     expect(lifted.displayUrlFor(["::1"], "::1", 9)).toBe("http://[::1]:9");
+    // bindListeners / probeIPv6 against a fake serve(): same sockets requested.
+    const fake = (log) => (c) => { log.push(`${c.hostname}:${c.port}`); return { port: 4321, stop() {}, publish() {} }; };
+    const a = [], b = [];
+    const ra = lifted.bindListeners(fake(a), { port: 0 }, bindPlan("127.0.0.1"), bindPlan("127.0.0.1").twin, () => true, () => {}, (e) => { throw e; });
+    const rb = bindListeners(fake(b), { port: 0 }, bindPlan("127.0.0.1"), bindPlan("127.0.0.1").twin, () => true, () => {}, (e) => { throw e; });
+    expect(a).toEqual(b);
+    expect(ra.bound).toEqual(rb.bound);
+    expect(lifted.probeIPv6(fake([]))).toBe(true);
+    expect(lifted.probeIPv6(() => { throw new Error("no v6"); })).toBe(false);
   });
 });
 
@@ -160,11 +207,11 @@ const RUNNABLE = (() => {
  * Run the generated server with SCRML_HOST = `host` (undefined = unset). Resolves
  * when it prints its listening line ({ port, line, proc }) or exits ({ code, stderr }).
  */
-async function runServer(host) {
+async function runServer(host, file = RUNNABLE) {
   const env = { ...process.env };
   delete env.SCRML_HOST;
   if (host !== undefined) env.SCRML_HOST = host;
-  const proc = Bun.spawn(["bun", RUNNABLE], { env, stdout: "ignore", stderr: "pipe" });
+  const proc = Bun.spawn(["bun", file], { env, stdout: "pipe", stderr: "pipe" });
   const reader = proc.stderr.getReader();
   const dec = new TextDecoder();
   let err = "";
@@ -182,7 +229,8 @@ async function runServer(host) {
     }
     if (done || proc.exitCode !== null) {
       const code = await proc.exited;
-      return { code, stderr: err };
+      const stdout = await new Response(proc.stdout).text();
+      return { code, stderr: err, stdout };
     }
   }
   proc.kill();
@@ -240,8 +288,29 @@ describe("§3 runtime — the generated server's bind address", () => {
       expect(r.stderr).toContain("scrml serve-target: SCRML_HOST");
       expect(r.stderr).toContain(needle);
       expect(r.stderr).not.toContain("listening on");
+      // The REFUSAL fired — not a bind failure ("could not listen") on an address
+      // the OS rejected (Windows refuses "0" at bind time; the refusal must come first).
+      expect(r.stderr).not.toContain("could not listen");
     }, 30_000);
   }
+
+  test("a refused SCRML_HOST exits before ANY user top-level statement runs (and the statement does run otherwise)", async () => {
+    const { codes, toolJs } = compileTool(TOOL(0, 'log("TOPLEVEL-RAN")'));
+    expect(codes).toEqual([]);
+    const f = join(TMP, "toplevel.mjs");
+    writeFileSync(f, toolJs);
+    const refused = await runServer("127.1", f);
+    if (refused.proc) { await stop(refused.proc); throw new Error("listened on 127.1"); }
+    expect(refused.code).toBe(1);
+    expect(refused.stderr).toContain("legacy numeric IPv4 shorthand");
+    expect(refused.stdout + refused.stderr).not.toContain("TOPLEVEL-RAN");
+    // Positive control: with the default host the same statement runs.
+    const ok = await runServer(undefined, f);
+    expect(ok.code).toBeUndefined();
+    await stop(ok.proc);
+    const out = (await new Response(ok.proc.stdout).text()) + ok.line;
+    expect(out).toContain("TOPLEVEL-RAN");
+  }, 60_000);
 });
 
 // ---------------------------------------------------------------------------
