@@ -79,6 +79,19 @@ export function parseHostFlag(args, i, isPositional = () => false) {
   return { host: peek, next: i + 1 };
 }
 
+/*
+ * SELF-CONTAINED FUNCTIONS. `isLoopbackHost`, `isLegacyNumericIPv4`,
+ * `hostRefusal`, `bindPlan`, `displayUrlFor` and `bindListeners` reference
+ * nothing at module scope (each inlines what it needs), because
+ * `codegen/emit-tool.ts` copies them — as the runtime's `Function.prototype.toString()`
+ * prints them (Bun's re-print, not this file's source text) — into every generated headless
+ * serve-target (§64.9 — a `kind="tool" serve=` program, which runs as a plain
+ * `bun <file>.js` with no compiler beside it). The generated server and the CLI
+ * therefore run the SAME validation and the SAME IPv4/IPv6 bind code; nothing is
+ * restated. `compiler/tests/unit/headless-serve-bind-host.test.js` pins that the
+ * serialized copies stay self-contained.
+ */
+
 /** Strip IPv6 brackets and lowercase. */
 function norm(host) {
   return String(host).toLowerCase().replace(/^\[|\]$/g, "");
@@ -87,19 +100,15 @@ function norm(host) {
 /**
  * True when `host` binds a loopback interface only (not reachable from the
  * network). Unknown names are treated as NOT loopback so the notice errs on
- * the side of telling the user.
+ * the side of telling the user. Self-contained (see above).
  *
  * @param {string} host
  * @returns {boolean}
  */
 export function isLoopbackHost(host) {
-  const h = norm(host);
+  const h = String(host).toLowerCase().replace(/^\[|\]$/g, "");
   return h === "localhost" || h === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
 }
-
-const CANONICAL_IPV4_OCTET = "(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
-const CANONICAL_IPV4 = new RegExp(`^${CANONICAL_IPV4_OCTET}(?:\\.${CANONICAL_IPV4_OCTET}){3}$`);
-const NUMERIC_IPV4_LIKE = /^(?:0x[0-9a-f]*|\d+)(?:\.(?:0x[0-9a-f]*|\d+))*$/i;
 
 /**
  * True for an all-numeric host that is NOT a canonical dotted quad: `0`,
@@ -107,12 +116,53 @@ const NUMERIC_IPV4_LIKE = /^(?:0x[0-9a-f]*|\d+)(?:\.(?:0x[0-9a-f]*|\d+))*$/i;
  * resolver reads these inet_aton-style forms differently per platform (Linux
  * binds `0` as 0.0.0.0 — every interface; Windows refuses it), so a value the
  * user may have meant as a typo could silently expose the server. Refused.
+ * Self-contained (see above).
  *
  * @param {string} h   normalized host
  * @returns {boolean}
  */
 export function isLegacyNumericIPv4(h) {
-  return NUMERIC_IPV4_LIKE.test(h) && !CANONICAL_IPV4.test(h);
+  const octet = "(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)";
+  const canonical = new RegExp(`^${octet}(?:\\.${octet}){3}$`);
+  return /^(?:0x[0-9a-f]*|\d+)(?:\.(?:0x[0-9a-f]*|\d+))*$/i.test(h) && !canonical.test(h);
+}
+
+/**
+ * Why `host` is refused as a bind address, or null when it may be tried.
+ * Calls `isLegacyNumericIPv4` (serialized beside it). Self-contained otherwise.
+ *
+ * - whitespace / control characters are refused, never trimmed: trimming would
+ *   silently reinterpret the input, and glibc inet_aton accepts trailing
+ *   whitespace ("0 " → 0.0.0.0, every interface) — so this runs BEFORE the
+ *   shorthand check, which a padded value would otherwise slip past;
+ * - a legacy numeric IPv4 shorthand (inet_aton form) is refused on every OS.
+ *
+ * @param {string} host
+ * @returns {{ code: string, message: string, primary: string } | null}
+ *   `primary` is the address named in the failure message.
+ */
+export function hostRefusal(host) {
+  if (/[\s\x00-\x1f\x7f]/.test(host)) {
+    return {
+      code: "E_SCRML_HOST_WHITESPACE",
+      primary: host,
+      message:
+        `${JSON.stringify(host)} contains whitespace or a control character. ` +
+        `It is refused rather than trimmed — write the address exactly (e.g. 127.0.0.1, or 0.0.0.0 for every interface).`,
+    };
+  }
+  const h = String(host).toLowerCase().replace(/^\[|\]$/g, "");
+  if (isLegacyNumericIPv4(h)) {
+    return {
+      code: "E_SCRML_HOST_SHORTHAND",
+      primary: h,
+      message:
+        `"${host}" is a legacy numeric IPv4 shorthand (inet_aton form), not a dotted-quad address. ` +
+        `Its meaning is platform-dependent — on Linux "0" binds every interface — so it is refused on every OS. ` +
+        `Write the full address (e.g. 127.0.0.1, or 0.0.0.0 for every interface).`,
+    };
+  }
+  return null;
 }
 
 function isWildcardHost(host) {
@@ -129,12 +179,6 @@ function isWildcardHost(host) {
  */
 const boundOnPort = new Map();
 
-/** Wrap a literal address for a URL (`::1` → `[::1]`). */
-function urlHost(addr) {
-  const h = norm(addr);
-  return h.includes(":") ? `[${h}]` : h;
-}
-
 /**
  * The URL to print for a bound server. `localhost` only when BOTH loopbacks are
  * served by us (127.0.0.1 or 0.0.0.0, AND ::1 or ::) — `localhost` resolves to
@@ -150,14 +194,28 @@ function urlHost(addr) {
  * @returns {string}
  */
 export function displayUrl(host, port, bound) {
-  const addrs = (bound ?? boundOnPort.get(port) ?? plannedAddresses(host)).map(norm);
+  return displayUrlFor(bound ?? boundOnPort.get(port) ?? plannedAddresses(host), host, port);
+}
+
+/**
+ * `displayUrl` over an explicit list of bound addresses. Self-contained (see
+ * the note above `norm`).
+ *
+ * @param {string[]} bound
+ * @param {string} host
+ * @param {number} port
+ * @returns {string}
+ */
+export function displayUrlFor(bound, host, port) {
+  const norm = (x) => String(x).toLowerCase().replace(/^\[|\]$/g, "");
+  const addrs = bound.map(norm);
   const v4Loop = addrs.includes("127.0.0.1") || addrs.includes("0.0.0.0");
   const v6Loop = addrs.includes("::1") || addrs.includes("::");
   if (v4Loop && v6Loop) return `http://localhost:${port}`;
   const a = addrs[0] ?? norm(host);
   if (a === "0.0.0.0") return `http://127.0.0.1:${port}`;
   if (a === "::") return `http://[::1]:${port}`;
-  return `http://${urlHost(a)}:${port}`;
+  return `http://${a.includes(":") ? `[${a}]` : a}:${port}`;
 }
 
 function plannedAddresses(host) {
@@ -218,29 +276,40 @@ export function lanIPv4Addresses(ifaces) {
 
 /**
  * Which sockets a host means: the primary address handed to Bun, and the
- * best-effort IPv6 twin (null when the host has none).
+ * best-effort IPv6 twin (null when the host has none). Self-contained (see the
+ * note above `norm`).
  *
  * @param {string} host
  * @returns {{ primary: string, twin: { host: string, ipv6Only: boolean } | null }}
  */
 export function bindPlan(host) {
-  const h = norm(host);
+  const h = String(host).toLowerCase().replace(/^\[|\]$/g, "");
   if (h === "localhost" || h === "127.0.0.1") return { primary: "127.0.0.1", twin: { host: "::1", ipv6Only: false } };
   if (h === "0.0.0.0") return { primary: "0.0.0.0", twin: { host: "::", ipv6Only: true } };
   return { primary: h, twin: null };
 }
 
+/**
+ * Whether this machine can bind an IPv6 socket at all, using `serve` (a
+ * `Bun.serve`-shaped function). Self-contained (see the note above `norm`).
+ *
+ * @param {(config: object) => import("bun").Server} serve
+ * @returns {boolean}
+ */
+export function probeIPv6(serve) {
+  try {
+    const probe = serve({ port: 0, hostname: "::1", fetch: () => new Response(null) });
+    probe.stop(true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Whether this machine can bind an IPv6 socket at all (probed once). */
 let ipv6Available;
 function canBindIPv6() {
-  if (ipv6Available !== undefined) return ipv6Available;
-  try {
-    const probe = Bun.serve({ port: 0, hostname: "::1", fetch: () => new Response(null) });
-    probe.stop(true);
-    ipv6Available = true;
-  } catch {
-    ipv6Available = false;
-  }
+  if (ipv6Available === undefined) ipv6Available = probeIPv6((c) => Bun.serve(c));
   return ipv6Available;
 }
 
@@ -249,7 +318,68 @@ export function _setIPv6AvailableForTest(v) {
   ipv6Available = v;
 }
 
-const TWIN_RETRIES = 5;
+/**
+ * Open the sockets `plan` names: the REQUIRED primary, and the best-effort IPv6
+ * twin (`twin`, or null for none) on the same port with the same handlers.
+ * Self-contained (see the note above `norm`) — every dependency is a parameter:
+ *
+ * - `serve(config)` opens one socket (`Bun.serve`);
+ * - `canBindIPv6()` says whether IPv6 exists at all (a twin failure on a machine
+ *   without it is not a failure — IPv4 alone is complete);
+ * - `warn(msg)` reports a twin that could not bind on a machine that has IPv6;
+ * - `primaryFailed(err)` is called when the primary cannot bind and MUST throw.
+ *
+ * A requested port of 0 (ephemeral) that is free on IPv4 but taken on IPv6
+ * retries with another pair, up to 5 times. When both sockets bind, the primary
+ * acts for both: `stop()` closes both, `publish()` reaches both, and
+ * `scrmlListeners` lists them.
+ *
+ * @returns {{ server: import("bun").Server, bound: string[] }}
+ */
+export function bindListeners(serve, config, plan, twin, canBindIPv6, warn, primaryFailed) {
+  const requestedPort = config.port ?? 0;
+  for (let attempt = 0; ; attempt++) {
+    let primary;
+    try {
+      primary = serve({ ...config, hostname: plan.primary });
+    } catch (err) {
+      primaryFailed(err);
+      throw err;
+    }
+    if (!twin) return { server: primary, bound: [plan.primary] };
+
+    let second = null;
+    try {
+      second = serve({ ...config, port: primary.port, hostname: twin.host, ipv6Only: twin.ipv6Only });
+    } catch {
+      if (!canBindIPv6()) return { server: primary, bound: [plan.primary] }; // no IPv6 on this machine — IPv4 alone is complete
+      if (requestedPort === 0 && attempt < 5) {
+        // An ephemeral port free on IPv4 but taken on IPv6 — pick another pair.
+        primary.stop(true);
+        continue;
+      }
+      warn(
+        `[scrml] listening on ${plan.primary}:${primary.port} only — could not also listen on ` +
+        `[${twin.host}]:${primary.port} (in use by another process?). http://localhost:${primary.port} ` +
+        `may reach that process over IPv6; use http://127.0.0.1:${primary.port}.`,
+      );
+      return { server: primary, bound: [plan.primary] };
+    }
+    // Make `primary` act for both sockets: stop() closes both, publish() reaches both.
+    const stop1 = primary.stop.bind(primary);
+    const publish1 = primary.publish.bind(primary);
+    primary.stop = (closeActive) => {
+      try { second.stop(closeActive); } catch { /* already stopped */ }
+      return stop1(closeActive);
+    };
+    primary.publish = (...a) => {
+      try { second.publish(...a); } catch { /* no subscribers there */ }
+      return publish1(...a);
+    };
+    primary.scrmlListeners = [primary, second];
+    return { server: primary, bound: [plan.primary, twin.host] };
+  }
+}
 
 /**
  * Open a listening server bound to `host`. The ONLY listener call site for the
@@ -267,7 +397,7 @@ const TWIN_RETRIES = 5;
  * @param {string} host
  * @param {{ ipv6Twin?: boolean, warn?: (msg: string) => void }} [opts]
  * @returns {import("bun").Server}
- * @throws {ListenError} when the required (primary) socket cannot bind
+ * @throws {ListenError} when the host is refused or the required (primary) socket cannot bind
  */
 export function listen(config, host, opts = {}) {
   if (typeof host !== "string" || host.length === 0) {
@@ -276,60 +406,26 @@ export function listen(config, host, opts = {}) {
   if (config && Object.prototype.hasOwnProperty.call(config, "hostname")) {
     throw new Error("listen(): pass the host as listen()'s argument, not config.hostname");
   }
-  // Whitespace / control characters are refused, never trimmed: trimming would
-  // silently reinterpret the input, and glibc inet_aton accepts trailing
-  // whitespace ("0 " → 0.0.0.0, every interface) — so this runs BEFORE the
-  // shorthand check, which a padded value would otherwise slip past.
-  if (/[\s\x00-\x1f\x7f]/.test(host)) {
-    const cause = new Error(
-      `${JSON.stringify(host)} contains whitespace or a control character. ` +
-      `It is refused rather than trimmed — write the address exactly (e.g. 127.0.0.1, or 0.0.0.0 for every interface).`,
-    );
-    cause.code = "E_SCRML_HOST_WHITESPACE";
-    throw new ListenError(listenFailureMessage(host, host, config.port ?? 0, null, cause), cause);
-  }
-  if (isLegacyNumericIPv4(norm(host))) {
-    const cause = new Error(
-      `"${host}" is a legacy numeric IPv4 shorthand (inet_aton form), not a dotted-quad address. ` +
-      `Its meaning is platform-dependent — on Linux "0" binds every interface — so it is refused on every OS. ` +
-      `Write the full address (e.g. 127.0.0.1, or 0.0.0.0 for every interface).`,
-    );
-    cause.code = "E_SCRML_HOST_SHORTHAND";
-    throw new ListenError(listenFailureMessage(host, norm(host), config.port ?? 0, null, cause), cause);
+  const refused = hostRefusal(host);
+  if (refused) {
+    const cause = new Error(refused.message);
+    cause.code = refused.code;
+    throw new ListenError(listenFailureMessage(host, refused.primary, config.port ?? 0, null, cause), cause);
   }
   const warn = opts.warn ?? ((m) => console.warn(m));
   const plan = bindPlan(host);
   const twin = opts.ipv6Twin === false ? null : plan.twin;
   const requestedPort = config.port ?? 0;
-
-  for (let attempt = 0; ; attempt++) {
-    let primary;
-    try {
-      primary = Bun.serve({ ...config, hostname: plan.primary });
-    } catch (err) {
-      throw new ListenError(listenFailureMessage(host, plan.primary, requestedPort, twin, err), err);
-    }
-    if (!twin) return record(primary, [plan.primary]);
-
-    let second = null;
-    try {
-      second = Bun.serve({ ...config, port: primary.port, hostname: twin.host, ipv6Only: twin.ipv6Only });
-    } catch {
-      if (!canBindIPv6()) return record(primary, [plan.primary]); // no IPv6 on this machine — IPv4 alone is complete
-      if (requestedPort === 0 && attempt < TWIN_RETRIES) {
-        // An ephemeral port free on IPv4 but taken on IPv6 — pick another pair.
-        primary.stop(true);
-        continue;
-      }
-      warn(
-        `[scrml] listening on ${plan.primary}:${primary.port} only — could not also listen on ` +
-        `[${twin.host}]:${primary.port} (in use by another process?). http://localhost:${primary.port} ` +
-        `may reach that process over IPv6; use http://127.0.0.1:${primary.port}.`,
-      );
-      return record(primary, [plan.primary]);
-    }
-    return record(joinListeners(primary, second), [plan.primary, twin.host]);
-  }
+  const { server, bound } = bindListeners(
+    (c) => Bun.serve(c),
+    config,
+    plan,
+    twin,
+    canBindIPv6,
+    warn,
+    (err) => { throw new ListenError(listenFailureMessage(host, plan.primary, requestedPort, twin, err), err); },
+  );
+  return record(server, bound);
 }
 
 /** Remember what `server` bound (for displayUrl) until it is stopped. */
@@ -342,22 +438,6 @@ function record(server, addrs) {
     return stop(closeActive);
   };
   return server;
-}
-
-/** Make `primary` act for both sockets: stop() closes both, publish() reaches both. */
-function joinListeners(primary, second) {
-  const stop1 = primary.stop.bind(primary);
-  const publish1 = primary.publish.bind(primary);
-  primary.stop = (closeActive) => {
-    try { second.stop(closeActive); } catch { /* already stopped */ }
-    return stop1(closeActive);
-  };
-  primary.publish = (...a) => {
-    try { second.publish(...a); } catch { /* no subscribers there */ }
-    return publish1(...a);
-  };
-  primary.scrmlListeners = [primary, second];
-  return primary;
 }
 
 function listenFailureMessage(host, primary, port, twin, cause) {
