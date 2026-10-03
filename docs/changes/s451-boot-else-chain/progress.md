@@ -74,3 +74,9 @@
   runtime "let is not defined") under the carried gap g-impl1-value-writes-state-codes-unimplemented-s449
   (whose title names the §66 opener) — PA may re-point to a dedicated impl#1 opener gap.
 - Counter with the twins: PASS 47 · FAIL 18 · graded 65 · non-vacuous 32 (was 42 / 18 / 60 / 27).
+
+## 2026-10-03 — self-review probes
+- `//` line comments (trailing or own-line) and `<!-- -->` between chain members: the bootstrap parser
+  drops them, so they do not break a chain (no false E-CTRL-001). Not asserted in tests (parser behaviour).
+- origin/main had not moved at the end of the work (no rebase needed). FACTS.md regenerated in a separate
+  final commit (conformance case count 1288 → 1293).
