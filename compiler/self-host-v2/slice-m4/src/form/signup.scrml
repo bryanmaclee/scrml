@@ -8,10 +8,11 @@
         <Failed rule=.Saving : "Failed">
     </>
 
-    <signup let agree:bool=false>                             // `agree` is data: an attribute (§66.4)
-        <let email:string="" req length(>=5)/>                // validated fields are CHILD declarations
+    <signup:struct>                                           // no typed attribute remains, so `:struct` marks it (§66.2.2)
+        let <agree:bool=false/>                               // writable: a CHILD declaration (§66.4 rule 6, S447)
+        let <email:string="" req length(>=5)/>                // validated fields are CHILD declarations
         renders <input type="email" bind:value=@email/>       // @email = this field's own instance (⚑ O54); explicit bind (⚑ O25)
-        <let password:string="" req length(>=8)/>
+        let <password:string="" req length(>=8)/>
         renders <input type="password" bind:value=@password/>
     </>
     renders <form>

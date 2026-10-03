@@ -34,7 +34,7 @@ describe("O19 — an own TYPE without an initializer, plus typed attributes, is 
 });
 
 describe("a removal on a SUB-field sequence names the place (`@r.xs`) and is refused like `.push`", () => {
-  const prog = (t) => `<program>\n type R:struct = { xs: ${t} }\n <let r:R=({ xs: [] })/>\n function f() { @r.xs.pop() }\n <main><p>x</p></main>\n</program>\n`;
+  const prog = (t) => `<program>\n type R:struct = { xs: ${t} }\n let <r:R=({ xs: [] })/>\n function f() { @r.xs.pop() }\n <main><p>x</p></main>\n</program>\n`;
   test("`@r.xs.pop()` → E-BOOTSTRAP-UNSUPPORTED naming `@r.xs.pop()` (never judged by `r`'s own `let`)", () => {
     for (const t of ["string[free, pop]", "string[free, append]"]) {
       const d = run(prog(t)).diags;

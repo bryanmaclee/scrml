@@ -73,7 +73,7 @@ describe("§4.14 `:`-shorthand bodies", () => {
   });
 
   test("a declaration opener has no `:`-shorthand body (E-PARSE-SHORTHAND)", () => {
-    expect(codes(`<program><let n:int=0 : "hi"></program>`)).toEqual(["E-PARSE-SHORTHAND"]);
+    expect(codes(`<program>let <n:int=0 : "hi"></program>`)).toEqual(["E-PARSE-SHORTHAND"]);
   });
 });
 
@@ -119,7 +119,7 @@ describe("expressions: spread elements, index, arrow functions", () => {
 
 describe("validators in an opener (s444 Phase B: parsed — O25 RULED S442 as dpa-058)", () => {
   test("`req` and `length(>=5)` parse into the declaration's validators, in source order, with no diagnostic", () => {
-    const r = parse(`<program><let email:string="" req length(>=5) pattern(/^a+$/i) min(-2) eq(@x, 1)/></program>`);
+    const r = parse(`<program>let <email:string="" req length(>=5) pattern(/^a+$/i) min(-2) eq(@x, 1)/></program>`);
     expect(r.diags).toEqual([]);
     const d = find(r.ast, (n) => n.name === "email" && "own" in n);
     expect(d.mods).toEqual([]);

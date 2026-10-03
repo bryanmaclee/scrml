@@ -1,6 +1,6 @@
 // §6.15 (S449 item 3) — a declaration's field initializer calls a function that writes a cell: a compile error at the source.
 <program>
-    <let hits:int=0/>
+    let <hits:int=0/>
     function bump() -> int {
         @hits = @hits + 1
         return 1
@@ -9,7 +9,7 @@
         @hits = @hits + 1
         return "x"
     }
-    <box let k:int=(bump())/>
+    <box:struct> let <k:int=(bump())/> </>
     renders <span>${k}</span>
     <main>
         <box/>
