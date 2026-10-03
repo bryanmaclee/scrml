@@ -142,6 +142,18 @@ describe("§2 §19.10.4 checks (lint-transaction)", () => {
     expect(codes(`\${ ${pre} function f(m: M)! -> E { transaction { let v = match m {\n .A :> fail E::Bad\n .B :> 2\n }\n match m {\n .A :> { log(1) }\n .B :> { log(2) }\n } } } }`)).toEqual([]);
   });
 
+  test("S450 re-review: a `transaction` block INSIDE a statement-match arm → E-TRANSACTION-CONTROL-FLOW (braced, unbraced, nested in an if / loop in the arm)", () => {
+    const pre = "type M:enum = {\n A\n B\n }\n type E:enum = { Bad }\n";
+    const TXF = "transaction { ?{`UPDATE t SET v = 1`}.run() fail E::Bad }";
+    expect(codes(`\${ ${pre} function f(m: M)! -> E { match m {\n .A :> { ${TXF} }\n .B :> { log(1) }\n }\n log(2) } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+    expect(codes(`\${ ${pre} function f(m: M)! -> E { match m {\n .A :> ${TX}\n .B :> log(1)\n } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+    expect(codes(`\${ ${pre} function f(m: M, a)! -> E { match m {\n .A :> { if (a) { for (let i = 0; i < 2; i++) { ${TX} } } }\n .B :> { log(1) }\n } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+    // legal: the transaction outside the match; an expression-position match selecting inside it;
+    // a transaction in a function DECLARED inside an arm (its own scope)
+    expect(codes(`\${ ${pre} function f(m: M)! -> E { transaction { let v = match m {\n .A :> fail E::Bad\n .B :> 2\n } } } }`)).toEqual([]);
+    expect(codes(`\${ ${pre} function f(m: M)! -> E { match m {\n .A :> { function g()! -> E { ${TX} } }\n .B :> { log(1) }\n } } }`)).toEqual([]);
+  });
+
   test("legal exits: `fail` / `?` at any depth, loop-internal break/continue, `return` after the block, `return` in a nested function", () => {
     const src = `\${ type E:enum = { Bad } function g()! -> E { fail E::Bad }
       function f(a)! -> E {

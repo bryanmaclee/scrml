@@ -1,6 +1,6 @@
 {
   "id": "error-transaction-stmt-match-arm-fail-neg",
-  "description": "§19.10.4 interim limitation (S450 fix round, fail-closed) — inside a `transaction` block, a `fail` or `?` in an arm of a STATEMENT-position `match` (at any depth, incl. inside a loop) is E-TRANSACTION-CONTROL-FLOW: impl#1 lowers that arm as a nested function, so the exit rolled the transaction back but returned from the arm only, and the statements after the `match` ran with no transaction open and persisted (g-stmt-match-block-return-falls-through). Three rejected sites → exactly three diagnostics; the EXPRESSION-position `match` with a `fail` arm (expressionMatchOk) is NOT rejected.",
+  "description": "§19.10.4 interim limitation (S450 fix round, fail-closed) — inside a `transaction` block, a `fail` or `?` in an arm of a STATEMENT-position `match` (at any depth, incl. inside a loop) is E-TRANSACTION-CONTROL-FLOW: impl#1 lowers that arm as a nested function, so the exit rolled the transaction back but returned from the arm only, and the statements after the `match` ran with no transaction open and persisted (g-stmt-match-block-return-falls-through). Three rejected sites → three diagnostics, plus (S450 re-review) the converse shape — a `transaction` block INSIDE a statement-match arm (transactionInArm), whose `fail` would be swallowed by the arm IIFE — a fourth; the EXPRESSION-position `match` with a `fail` arm (expressionMatchOk) is NOT rejected.",
   "language-version": "1.0",
   "source-test": "compiler/tests/integration/transaction-in-function-body.test.js",
   "spec": "§19.10.4",
@@ -9,6 +9,6 @@
     "codes": ["E-TRANSACTION-CONTROL-FLOW"],
     "notCodes": ["E-SCOPE-001", "E-ERROR-001", "E-ERROR-007"],
     "severity": { "E-TRANSACTION-CONTROL-FLOW": "error" },
-    "codeCounts": { "E-TRANSACTION-CONTROL-FLOW": 3 }
+    "codeCounts": { "E-TRANSACTION-CONTROL-FLOW": 4 }
   }
 }

@@ -46,6 +46,18 @@
             }
         }
     }
+    function transactionInArm(m: M)! -> E {
+        match m {
+            .A :> {
+                transaction {
+                    ?{`UPDATE orders SET name = 'in-arm'`}.run()
+                    fail E::Rejected
+                }
+            }
+            .B :> { let w = 0 }
+        }
+        ?{`UPDATE orders SET name = 'after-match'`}.run()
+    }
     function expressionMatchOk(m: M)! -> E {
         transaction {
             let v = match m {

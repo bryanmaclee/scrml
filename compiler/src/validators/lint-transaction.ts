@@ -78,6 +78,9 @@ interface WalkState {
   fn: { name: string; canFail: boolean } | null;
   /** Non-null while inside a transaction block (reset at a function boundary). */
   txn: TxnCtx | null;
+  /** Outside any transaction: true under an arm of a statement-position `match`
+   *  in the current function (reset at a function boundary). */
+  inStmtMatchArmOuter?: boolean;
 }
 
 const LOOP_KINDS = new Set(["for-stmt", "while-stmt", "do-while-stmt"]);
@@ -179,6 +182,19 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
           `A 'transaction' block is valid only inside a '!' function (§19.10.4). ` +
           `Add '!' to the function signature: 'function ${name}(...)! -> {ErrorType}'.`);
       }
+      if (st.fn && !st.txn && st.inStmtMatchArmOuter) {
+        // S450 re-review nit — the converse shape: the transaction block itself sits
+        // in a statement-position `match` arm (a nested function / IIFE in impl#1),
+        // so a `fail` / `?` in the block rolls back but returns from the ARM only;
+        // the fail is swallowed and the code after the `match` runs.
+        report("E-TRANSACTION-CONTROL-FLOW", n,
+          "a `transaction` block inside a statement-position `match` arm cannot report its `fail` / `?` yet — " +
+          "the arm is lowered as a nested function, so the block's `fail` / `?` would roll the transaction back " +
+          "but return from the arm only: the failure would be swallowed and the statements after the `match` " +
+          "would keep running (g-stmt-match-block-return-falls-through). Move the `transaction` block outside " +
+          "the `match`, or select with an expression-position `match` (`let v = match … { … }`) or an " +
+          "`if` / `else if` chain.");
+      }
       const inner: WalkState = {
         fn: st.fn,
         txn: { loopDepth: 0, switchDepth: 0, labels: new Set(), inFunction: st.fn !== null, inStmtMatchArm: false },
@@ -191,7 +207,25 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
     // Entering a STATEMENT-position `match` inside the block: everything under
     // its arms (structured or text-carried) is walked with inStmtMatchArm set.
     if (t0 && kind === "match-stmt" && t0.inFunction && !t0.inStmtMatchArm) {
-      st = { fn: st.fn, txn: { ...t0, inStmtMatchArm: true } };
+      st = { ...st, txn: { ...t0, inStmtMatchArm: true } };
+    }
+    // Entering a statement-position `match` in a function OUTSIDE any transaction:
+    // a `transaction` block under its arms is the converse shape (rejected above).
+    // Text-carried (unbraced) arms are parsed so a `transaction` there is seen too.
+    if (!t0 && st.fn && kind === "match-stmt") {
+      st = { ...st, inStmtMatchArmOuter: true };
+      for (const tb of textBodiesOf(n)) {
+        if (tb.text === null || !/\btransaction\b/.test(tb.text)) continue;
+        const parsed = parseStatementText(tb.text, filePath);
+        if (!parsed.ok) {
+          report("E-TRANSACTION-CONTROL-FLOW", n,
+            `${tb.label} mentions \`transaction\` but did not parse as scrml statements, so it cannot be ` +
+            `verified (§19.10.4). Move the \`transaction\` block outside the \`match\`.`);
+          continue;
+        }
+        inText++;
+        try { walk(parsed.stmts, st); } finally { inText--; }
+      }
     }
     const t = st.txn;
     if (t) {
