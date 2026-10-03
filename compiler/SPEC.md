@@ -17850,6 +17850,10 @@ function transferFunds(from, to, amount)! -> TransferError {
 - The compiler SHALL guarantee that every `transaction` block either commits (on success) or rolls back (on `fail` or SQL error). No transaction SHALL be left open.
 - `transaction` blocks SHALL NOT nest. A `transaction` inside another `transaction` SHALL be a compile error: **E-ERROR-007** -- `Nested 'transaction' blocks are not supported. Use savepoints via '?{SAVEPOINT name}' for nested transaction semantics.`
 - Explicit `?{BEGIN}` / `?{COMMIT}` / `?{ROLLBACK}` SHALL remain valid for developers who need manual transaction control (e.g., savepoints, deferred transactions).
+- A `transaction` block MAY appear in any statement position of a `!` function body — directly, or nested in an `if` / `else`, loop, or `match`-arm block. A `?` propagation (§19.5.2: sugar for `fail`) inside the block is a `fail` for the purposes of §19.10.3 and SHALL roll the transaction back before it returns. A `fail` or `?` inside a function declared within the block returns from that function, not from the block, and does not roll the block back.
+- **Interim (S450, fail-closed pending a ruling).** Inside a function, a `return`, a `yield`, or a `break` / `continue` whose target is outside the `transaction` block SHALL be a compile error: **E-TRANSACTION-CONTROL-FLOW** -- `a 'transaction' block cannot be left by {exit}`. §19.10.3 defines only normal completion (COMMIT), `fail`, and a SQL error (ROLLBACK); whether another exit commits or rolls back is not decided (searched §19.10, §8.9 — no governing sentence), so the compiler rejects it rather than choose. A `break` / `continue` whose loop is inside the block, and a `return` after the block, are unaffected. A ruling that decides the commit-or-rollback semantics of these exits replaces this sentence.
+
+> **Provenance:** spec:§19.10.2-§19.10.4 — conformance restoration (S450, `g-transaction-block-not-recognized-inside-a-function-body`): §19.10.2's own normative example is a `transaction` block inside a `!` function. The E-TRANSACTION-CONTROL-FLOW sentence is an interim fail-closed rejection of an undecided shape, not a ruling; the top-level (outside any function) `transaction` block is unchanged by S450 and its §19.10.4 status ("valid only inside `!` functions") is routed separately.
 
 #### 19.10.5 Implicit Per-Handler Transactions
 
@@ -18072,13 +18076,14 @@ The following error codes are introduced by this section. They SHALL be added to
 
 | Code | Section | Trigger | Severity |
 |------|---------|---------|----------|
-| E-ERROR-001 | §19.3.3 | `fail` used in non-`!` function | Error |
+| E-ERROR-001 | §19.3.3, §19.10.4 | `fail` used in non-`!` function; ALSO (S450) a `transaction { }` block inside a non-`!` function (§19.10.4 "E-ERROR-001 applies") (emitted at `compiler/src/type-system.ts` for `fail`, and `compiler/src/validators/lint-transaction.ts` for `transaction`.) | Error |
 | E-ERROR-002 | §19.4.3 | `!` function result not handled (no match, `?`, `!{}`, or boundary). At an event-handler site — a call or a reference to a `!` function (S441) — only `!{}`, `match`, or a handling wrapper applies; `?` and a boundary do not (emitted at `compiler/src/type-system.ts:10892` for a statement-position call, `:14374` for an event-handler call, and `:14547` for an event-handler reference.) | Error |
 | E-ERROR-003 | §19.5.4 | `?` propagation used in non-`!` function | Error |
 | E-ERROR-004 | §19.5.4 | `?` applied to non-`!` function call | Error |
 | E-ERROR-005 | §19.6.3, §41.14.3 | Error variant in markup without `renders` clause or boundary `fallback`; ALSO (S440 #19) a `<formFor>` whose `onsubmit=` error has no enclosing `<errorBoundary>` (§41.14.3; Nominal for that case) | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
-| E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
+| E-ERROR-007 | §19.10.4 | Nested `transaction` blocks — at any depth inside the outer block, in a function or at the top level (S450; emitted at `compiler/src/validators/lint-transaction.ts`.) | Error |
+| E-TRANSACTION-CONTROL-FLOW | §19.10.4 | Interim, fail-closed (S450): inside a function, a `return`, a `yield`, or a `break` / `continue` whose target is outside a `transaction { }` block — §19.10.3 does not decide whether such an exit commits or rolls back (emitted at `compiler/src/validators/lint-transaction.ts`.) | Error |
 | E-ERROR-009 | §19.3.3 | `fail` variant (qualified, or bare `fail .V` resolved against the declared `!` type) not a valid variant of the declared error enum (emitted at `compiler/src/type-system.ts:10629`, `:10637`, `:10644` for a qualified/bare target that is not a variant, and `:10686` for a bare `fail .V` whose declared type is not an enum.) | Error |
 | E-ERROR-010 | §19.5.4 | `?`-propagation: a called function's error variants are incompatible with the enclosing function's declared error type (dedicated code; formerly overloaded on E-TYPE-001) | Error |
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute | Error |
@@ -23046,13 +23051,14 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-MATCH-001 | §18.6 | Unreachable default `else` arm (all variants already covered) | Warning |
 | W-MATCH-002 | §18.16 | Non-exhaustive literal match (string/number/boolean without `_` arm) | Warning |
 | W-DERIVED-001 | §6.6.11 | `const <name> = expr` has no `@variable` references; value never re-evaluates | Warning |
-| E-ERROR-001 | §19.3.3 | `fail` used in non-`!` function | Error |
+| E-ERROR-001 | §19.3.3, §19.10.4 | `fail` used in non-`!` function; ALSO (S450) a `transaction { }` block inside a non-`!` function (§19.10.4 "E-ERROR-001 applies") (emitted at `compiler/src/type-system.ts` for `fail`, and `compiler/src/validators/lint-transaction.ts` for `transaction`.) | Error |
 | E-ERROR-002 | §19.4.3 | `!` function result not handled (no match, `?`, `!{}`, or boundary). At an event-handler site — a call or a reference to a `!` function (S441) — only `!{}`, `match`, or a handling wrapper applies; `?` and a boundary do not (emitted at `compiler/src/type-system.ts:10892` for a statement-position call, `:14374` for an event-handler call, and `:14547` for an event-handler reference.) | Error |
 | E-ERROR-003 | §19.5.4 | `?` propagation used in non-`!` function | Error |
 | E-ERROR-004 | §19.5.4 | `?` applied to non-`!` function call | Error |
 | E-ERROR-005 | §19.6.3, §41.14.3 | Error variant in markup without `renders` clause or boundary `fallback`. ALSO (S440 ruling #19, §41.14.3): a `<formFor>` whose `onsubmit=` handler's error has no enclosing `<errorBoundary>` to route to. **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 19). **Named; impl pending — Nominal / not yet emitted for the `formFor` case** (measured S440: compiles clean); impl#1 carries it (§34.0). | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
-| E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
+| E-ERROR-007 | §19.10.4 | Nested `transaction` blocks — at any depth inside the outer block, in a function or at the top level (S450; emitted at `compiler/src/validators/lint-transaction.ts`.) | Error |
+| E-TRANSACTION-CONTROL-FLOW | §19.10.4 | Interim, fail-closed (S450): inside a function, a `return`, a `yield`, or a `break` / `continue` whose target is outside a `transaction { }` block — §19.10.3 does not decide whether such an exit commits or rolls back (emitted at `compiler/src/validators/lint-transaction.ts`.) | Error |
 | E-ERROR-009 | §19.3.3 | `fail` variant (qualified, or bare `fail .V` resolved against the declared `!` type) not a valid variant of the declared error enum (emitted at `compiler/src/type-system.ts:10629`, `:10637`, `:10644` for a qualified/bare target that is not a variant, and `:10686` for a bare `fail .V` whose declared type is not an enum.) | Error |
 | E-ERROR-010 | §19.5.4 | `?`-propagation: a called function's error variants are incompatible with the enclosing function's declared error type (dedicated code; formerly overloaded on E-TYPE-001) | Error |
 | E-DEFER-CONTROL-FLOW | §19.16.3 | A deferred body (`defer <stmt>`) contains `return`, `fail`, a `?` propagation, or a `break`/`continue` whose target lies outside the deferred body. A deferred body runs while its block is already exiting, so it cannot redirect control. A loop inside the deferred body, and a function nested in it, are their own targets/scopes. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
