@@ -1,0 +1,1 @@
+- 2026-10-03T01:00:39Z start; base bc4bca1f; bun install + pretest ok (puppeteer postinstall fail, unrelated)
