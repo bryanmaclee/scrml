@@ -136,6 +136,7 @@ ${
             .Bind(kind: k, read: r, sink: sk, write: w) :> checkBind(p, r, sk, w)
             .Static(name: x) :> []
             .Bound(name: x) :> []
+            .Show(test: x) :> []
             .On(event: x) :> []
             .Gate(values: x, fields: fs) :> checkGateFields(p, encl, fs)
         }
@@ -361,6 +362,7 @@ ${
             .Gate(values: vs) :> true
             .Static(name: x) :> false
             .Bound(name: x) :> false
+            .Show(test: x) :> false
             .On(event: x) :> false
             .Bind(kind: x) :> false
         }

@@ -962,6 +962,20 @@ export function attr(scope, el, name, fn) {
   });
 }
 
+/**
+ * `show=` (§17.2): the element stays in the DOM; while `fn()` is false its
+ * inline `display` is `none`, while true it is the element's own inline
+ * `display` (from a static `style=`, else none set — the stylesheet decides).
+ * `fn()` is a `bool` (a presence test already lowered to one).
+ */
+export function visibility(scope, el, fn) {
+  const own = el.style.display;
+  effect(scope, () => {
+    const d = fn() === true ? own : "none";
+    if (el.style.display !== d) el.style.display = d;
+  });
+}
+
 /** An event listener owned by `scope`; the handler runs as one batch. */
 export function on(scope, el, event, handler) {
   requireScope(scope, "a listener");

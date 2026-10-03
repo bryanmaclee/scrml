@@ -149,6 +149,7 @@ ${
         ABound,                   // a plain HTML attribute bound to an expression
         AOn(event: string),       // an event handler (onclick → "click")
         AIf,                      // if= (L5)
+        AShow,                    // s451: show= (§17.2) — a visibility condition on an HTML element
         AConstruct(field: int),   // a use-site construction value (§66.14 rule 4)
         AAs,                      // as= on a use (the handle is on the element's MUse)
         AEachIn,
@@ -1678,6 +1679,10 @@ ${
                                 targets = targets.concat([ti])
                             }
                         }
+                    } else {
+                        // s451: any other attribute on a state-child (`show=`,
+                        // `title=`, …) was read by nothing — silently ignored.
+                        st = addDiag(st, te.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` on the state-child `<" + c.name + ">` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored")
                     }
                 }
                 edges = edges.concat([{ origin: origin, targets: targets }])
@@ -5068,6 +5073,7 @@ ${
             }
             if (e is some) {
                 st = chainMember(env, e, prev, st)
+                st = showHostCheck(env, e, st)
                 prev = chainRoleAfter(e)
             } else if (!blankNode(n)) {
                 prev = 0
@@ -5118,6 +5124,37 @@ ${
             st = chainHostRefused(env, e, la, st)
         }
         return st
+    }
+
+    // s451 — `show=` (§17.2) is implemented on an HTML element only
+    // (resolveShow). On a USE §17.1.1 lets a component carry it ("An `else` or
+    // `else-if=` element MAY also carry `show=`"), but a use has no single
+    // element to toggle in the bootstrap (refused in resolveUse, where a field
+    // named `show` is told apart); `<*x/>` and `<slot>` read no attributes at
+    // all. Each would IGNORE it — refused here. `<each>` and `<errors>`
+    // refuse it themselves; a refused element has no fact.
+    fn showHostCheck(env: Env, e: AElem, st: AS) -> AS {
+        const a: AAttr | not = attrNamed(e.attrs, "show")
+        if (a is not) return st
+        const f: ElemFact | not = elemFactNow(st, e.nid)
+        if (f is not) return st
+        if (!showRefusedOn(f)) return st
+        let tag: string = e.tag
+        if (e.star) tag = "*" + e.tag
+        return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`show=` on `<" + tag + ">` is not in the bootstrap — only an HTML element is shown / hidden (§17.2); the attribute would be ignored and the content always visible")
+    }
+
+    fn showRefusedOn(f: ElemFact) -> boolean {
+        return match f {
+            .MHtml :> false
+            .MUse(decl: d) :> false           // resolveUse: a field named `show` constructs; else refused there
+            .MEach(bind: b) :> false          // refuses `show` itself (resolveEach)
+            .MErrors(of: x) :> false          // refuses it itself (resolveErrors)
+            .MSlot :> true
+            .MStateView(v: v) :> true
+            .MInline(v: v) :> true
+            .MStar(decl: d) :> true
+        }
     }
 
     fn chainCondValue(env: Env, e: AElem, a: AAttr | not, st: AS) -> AS {
@@ -5637,6 +5674,8 @@ ${
                 // s451: `if=` / `else-if=` / `else` (§17.1.1) — chain attributes (chainCheck)
                 st = resolveIfValue(env, a.value, st)
                 st = addAttr(st, a.nid, AttrKind.AIf)
+            } else if (a.name == "show") {
+                st = resolveShow(penv, e, a, st)
             } else if (ev != "") {
                 st = resolveHandler(withHost(penv, HostCtx.HostOk), a.value, st)
                 st = addAttr(st, a.nid, AttrKind.AOn(ev))
@@ -5646,7 +5685,11 @@ ${
                 // (⚑ PA: the SPEC (§5.4) does not say; no code names it).
                 const first: AAttr | not = firstBind(e.attrs)
                 if (first is some && first.nid != a.nid) {
-                    st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is a second `bind:` on this `<" + e.tag + ">` (after `" + first.name + "`) — one element writes back to one place; bind each place on its own element (§5.4)")
+                    // s451: the same `bind:` name twice is the parser's
+                    // repeated-attribute refusal — one diagnostic per fault
+                    if (first.name.toLowerCase() != a.name.toLowerCase()) {
+                        st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is a second `bind:` on this `<" + e.tag + ">` (after `" + first.name + "`) — one element writes back to one place; bind each place on its own element (§5.4)")
+                    }
                 } else {
                     st = resolveBind(penv, e, a, st)
                 }
@@ -5660,6 +5703,37 @@ ${
             }
         }
         return resolveNodes(penv, e.kids, st)
+    }
+
+    // s451 — `show=cond` on an HTML element (§17.2): "The element EXISTS in the
+    // DOM regardless of `expr`. When `expr` evaluates to false, the element is
+    // hidden. The compiler generates a CSS `display: none` toggle." It is a
+    // condition like `if=` (the typer's checkCond: a `bool` or a `T | not`
+    // presence test; §5.2's atomic-only-when-bare rule is shared with `if=` —
+    // a bare operator fails in the parser, E-PARSE-TAG, for both, not yet as
+    // E-ATTR-UNQUOTED-OPERATOR), resolved
+    // in the env the element's other attributes see (inside its `if=`). It
+    // does NOT narrow the children — they exist while it is false.
+    // §17.1.1: "`if=`, `else-if=`, and `else` MAY coexist on the same element
+    // with `show=` … The two attributes compose without conflict" — the chain
+    // arm decides presence, this decides visibility (lower: Attr.Show inside
+    // the arm). Fail closed: a quoted / valueless / braced condition is
+    // refused (as for `if=`, #1254). §5.5.4 / E-ATTR-WRITER-CONFLICT: a
+    // WHOLESALE `style=(expr)` "with `if=`/`show=`" shares the `display`
+    // surface — its next write would erase the toggle. On any other host
+    // (`<each>`, a use, `<*x>`, `<errors>`, `<slot>`, a state-child) `show=`
+    // is refused (showHostCheck), never ignored.
+    fn resolveShow(env: Env, e: AElem, a: AAttr, st0: AS) -> AS {
+        let st: AS = st0
+        if (valueExpr(a.value) is not) {
+            return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`show=` on `<" + e.tag + ">` needs a condition expression — `show=@x` or `show=(@n >= 3)`; a quoted, valueless or braced condition is not in the bootstrap (§17.2, §5.2) — it would never hide the element")
+        }
+        const sa: AAttr | not = attrNamed(e.attrs, "style")
+        if (sa is some && !isStaticAttr(sa.value)) {
+            st = addDiag(st, env.file, sa.span, "E-ATTR-WRITER-CONFLICT", "`style=(…)` on `<" + e.tag + ">` writes the whole `style` attribute, and `show=` on the same element toggles its `display` — the wholesale write would erase the toggle on its next evaluation. Keep one: drop `show=` and compute `display` in `style=(…)`, or make `style=` static (§5.5.4)")
+        }
+        st = resolveIfValue(env, a.value, st)
+        return addAttr(st, a.nid, AttrKind.AShow)
     }
 
     // s444 — `bind:value=@place` / `bind:checked=@place` (§5.4): the element
@@ -5894,7 +5968,10 @@ ${
                 st = addAttr(st, a.nid, AttrKind.AIf)
             } else {
                 const i: int = fieldIndex(d.info, a.name)
-                if (i < 0) {
+                if (i < 0 && a.name == "show") {
+                    // s451: §17.2 `show=` on a use — see showHostCheck
+                    st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`show=` on a use of `<" + e.tag + ">` is not in the bootstrap — only an HTML element is shown / hidden (§17.2); wrap the use in one: `<div show=…><" + e.tag + " …/></div>`")
+                } else if (i < 0) {
                     st = addDiag(st, env.file, a.span, "E-DECL-USE-ATTR", "`<" + e.tag + ">` has no attribute `" + a.name + "`")
                 } else {
                     const f: FieldInfo = d.info.fields[i]
@@ -7473,6 +7550,7 @@ ${
             .ABound :> -1
             .AOn(event: ev) :> -1
             .AIf :> -1
+            .AShow :> -1
             .AAs :> -1
             .AEachIn :> -1
             .AEachKey :> -1
@@ -8868,6 +8946,13 @@ ${
         return keepTEnv(tCallUnnarrow(tNarrow(env, condNarrowing(env, x).yes), x), checkCond(env, x, r.vt, "`if=`", r.ts))
     }
 
+    fn typeShowAttr(env: TEnv, a: AAttr, ts: TypeState) -> TypeState {
+        const x: AExpr | not = valueExpr(a.value)
+        if (x is not) return ts
+        const r: RVT = typeExpr(env, x, ts)
+        return checkCond(env, x, r.vt, "`show=`", r.ts)
+    }
+
     fn typeHtml(env: TEnv, e: AElem, ts0: TypeState) -> TypeState {
         const ri: RTEnv = typeIfAttr(env, e, ts0)
         const renv: TEnv = ri.env
@@ -8875,6 +8960,10 @@ ${
         for (const a of e.attrs) {
             if (isChainAttr(a.name)) {
                 // typed above (typeIfAttr); `else` has no value
+            } else if (a.name == "show") {
+                // s451: §17.2 — a condition (checkCond), under the element's
+                // `if=` narrowing; it narrows nothing itself
+                ts = typeShowAttr(renv, a, ts)
             } else if (eventName(a.name) != "") {
                 ts = typeHandlerValue(renv, a.value, ts)
             } else {
@@ -10163,6 +10252,7 @@ ${
         const named: string = "the `" + a.name + "=` value on `<" + tag + ">`"
         const what: string = match k {
             .AIf :> "the `if=` condition on `<" + tag + ">`"
+            .AShow :> "the `show=` condition on `<" + tag + ">`"
             .AConstruct(field: i) :> "the use-site value `" + a.name + "=` of `<" + tag + ">`"
             .AEachIn :> "the `<each in=…>` sequence"
             .AEachKey :> "the `<each key=…>` key"
@@ -10185,6 +10275,7 @@ ${
         return match k {
             .AConstruct(field: i) :> true
             .AIf :> false
+            .AShow :> false
             .AEachIn :> false
             .AEachKey :> false
             .AStatic :> false
@@ -11021,6 +11112,7 @@ ${
             .ABound :> []
             .AOn(event: ev) :> []
             .AIf :> []
+            .AShow :> []
             .AConstruct(field: x) :> []
             .AAs :> []
             .AEachIn :> []
@@ -11106,6 +11198,7 @@ ${
             .ABound :> -1
             .AOn(event: ev) :> -1
             .AIf :> -1
+            .AShow :> -1
             .AAs :> -1
             .AEachIn :> -1
             .AEachKey :> -1
@@ -11156,6 +11249,7 @@ ${
             .ABound :> []
             .AOn(event: ev) :> []
             .AIf :> []
+            .AShow :> []
             .AConstruct(field: x) :> []
             .AAs :> []
             .AEachIn :> []
@@ -11260,6 +11354,7 @@ ${
             .ABound :> false
             .AOn(event: ev) :> false
             .AIf :> false
+            .AShow :> false
             .AConstruct(field: x) :> false
             .AAs :> false
             .AEachIn :> false

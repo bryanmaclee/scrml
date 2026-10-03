@@ -147,6 +147,7 @@ ${
         return match a {
             .Static(name: x) :> "Static"
             .Bound(name: x) :> "Bound"
+            .Show(test: x) :> "Show"
             .On(event: x) :> "On"
             .Bind(kind: x) :> "Bind"
             .Gate(values: x) :> "Gate"

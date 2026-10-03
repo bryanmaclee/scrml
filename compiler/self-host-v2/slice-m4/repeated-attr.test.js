@@ -74,14 +74,17 @@ describe("other openers take the same check", () => {
   });
   test("a state-child of a declaration", () => {
     const src = `<program>
-    <phase:enum={ A, B }=.A>
-        <A title="x" title="y">a</A>
-        <B>b</B>
-    </phase>
-    <main><phase/></main>
+    type Ph:enum = { A, B }
+    <phase:Ph=.A single>
+        <A rule=.B rule=.A : "a">
+        <B : "b">
+    </>
+    <main><p><*phase/></p></main>
 </program>
 `;
-    expect(twice(src).length).toBe(1);
+    const t = twice(src);
+    expect(t.length).toBe(1);
+    expect(t[0].message).toContain("`rule` is written twice on `<A>`");
   });
   test("a `<*x>` reference", () => {
     const src = prog(`        <*step a="1" a="2"/>`);
