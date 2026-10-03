@@ -1634,7 +1634,7 @@ export function persisted(scope, init, store, key, wire) {
 /** §6.14.2 r9: after a reset's Write — remove `cell`'s storage key instead of storing the reset value. */
 export function unpersist(cell) {
   const p = persistedCells.get(cell);
-  if (p === undefined) throw new Error("unpersist of a cell that is not persisted (check.scrml C16)");
+  if (p === undefined) throw new Error("unpersist of a cell that is not persisted (check.scrml C17)");
   p.forget();
 }
 

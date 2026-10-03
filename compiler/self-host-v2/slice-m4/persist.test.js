@@ -64,7 +64,7 @@ const COUNTER = (k) => P(
   `        <p class="out">\${@count}|\${@dbl}|\${@copy}</p>\n        <button onclick=(@count = @count + 1)>inc</button>\n        <button onclick=(reset(@count))>reset</button>`);
 
 describe("§6.14.2 — restore, codec, write on change, reset, cross-tab sync", () => {
-  test("Core: Field.persist on the program cell; the reset's Write is followed by ONE Unpersist (rule 9); C16 holds", () => {
+  test("Core: Field.persist on the program cell; the reset's Write is followed by ONE Unpersist (rule 9); C17 holds", () => {
     const core = coreOf(COUNTER("c0"));
     const f = fieldsOf(core);
     expect(f[0].persist).toEqual({ store: "Local", key: "c0.count" });
@@ -434,21 +434,21 @@ describe("§6.14 — refused, never accepted-and-ignored (E-BOOTSTRAP-UNSUPPORTE
   });
 });
 
-describe("Core check C16 (s451)", () => {
+describe("Core check C17 (s451)", () => {
   test("a persisted field must be a writable program field with a wire descriptor; an Unpersist follows its own reset Write", () => {
     const core = coreOf(COUNTER("k16"));
     // a persisted DERIVED field: no write capability
     const c1 = structuredClone(core);
     fieldsOf(c1)[1].persist = { store: "Local", key: "x" };
-    expect(mods.check.checkCore(c1).some((m) => m.startsWith("C16:") && m.includes("no write capability"))).toBe(true);
+    expect(mods.check.checkCore(c1).some((m) => m.startsWith("C17:") && m.includes("no write capability"))).toBe(true);
     // an Unpersist of a field that is not persisted
     const c2 = structuredClone(core);
     fieldsOf(c2)[0].persist = null;
-    expect(mods.check.checkCore(c2).some((m) => m.startsWith("C16:") && m.includes("not persisted"))).toBe(true);
+    expect(mods.check.checkCore(c2).some((m) => m.startsWith("C17:") && m.includes("not persisted"))).toBe(true);
     // an Unpersist that does not follow its field's Write
     const c3 = structuredClone(core);
     const blocks = walkCore(c3, (n) => Array.isArray(n.stmts) && n.stmts.some((s) => s.variant === "Unpersist"));
     blocks[0].stmts.reverse();
-    expect(mods.check.checkCore(c3).some((m) => m.startsWith("C16:") && m.includes("does not follow"))).toBe(true);
+    expect(mods.check.checkCore(c3).some((m) => m.startsWith("C17:") && m.includes("does not follow"))).toBe(true);
   });
 });

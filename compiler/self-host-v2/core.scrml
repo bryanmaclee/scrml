@@ -277,7 +277,7 @@ ${
         // … and SHALL **remove** the cell's storage key instead of storing
         // that value"). It follows the reset's Write (and its ResetSurface)
         // of that same field: the key is removed and the store the Write
-        // queued is cancelled. Writes no cell (check.scrml C16).
+        // queued is cancelled. Writes no cell (check.scrml C17).
         Unpersist(decl: Sym, inst: InstRef, idx: int),
     }
     export type Block:struct = { stmts: Stmt[] }
@@ -409,7 +409,7 @@ ${
         // s449: the validators the field carries (§55.1), in declaration order.
         vals: Validator[],
         // s451: its browser persistence (§6.14) — only on a field of the
-        // PROGRAM that has a write capability (check.scrml C16).
+        // PROGRAM that has a write capability (check.scrml C17).
         persist: Persist | not,
     }
 

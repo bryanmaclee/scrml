@@ -1527,7 +1527,7 @@ ${
     // `rt.persisted(inst$.scope, <default thunk>, "local" | "session", <key>, <wire table>)`
     // — a seeded cell whose construction value is the stored value decoded
     // against the field's type (the §57 descriptor below), or the default; it
-    // is written on change and (`"local"`) synced across tabs. C16 guarantees
+    // is written on change and (`"local"`) synced across tabs. C17 guarantees
     // the descriptor exists; `unwireable$` marks a Core that skipped check.
     fn persistedJs(ctx: Ctx, f: Field, ps: Persist, init: JsExpr) -> JsExpr {
         const wt: WireTable | not = wireBuild(ctx.p, f.ty).table
