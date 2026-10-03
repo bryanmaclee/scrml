@@ -73,6 +73,7 @@ import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
 import { runTryCatchLint } from "./validators/lint-try-catch.ts";
 import { runAsyncAwaitReject } from "./validators/lint-async-user-source.ts";
 import { runDeferChecks } from "./validators/lint-defer.ts";
+import { runTransactionChecks } from "./validators/lint-transaction.ts";
 import { runRedeclareChecks } from "./validators/lint-redeclare.ts";
 import { takeProtectRegistry, analyzeCompileProtectFlow } from "./codegen/protect-flow.ts";
 import { forbiddenJsDiagnosticsForDefault } from "./native-walker/forbidden-js-native.ts";
@@ -1780,6 +1781,14 @@ function _compileScrmlImpl(options = {}) {
   for (const tabResult of tabResults) {
     const deferDiags = stage("DEFER-CHECKS", () => runDeferChecks(tabResult.ast));
     collectErrors("DEFER-CHECKS", deferDiags);
+  }
+
+  // §19.10.4 (S450) — `transaction { }` placement + exits: E-ERROR-001 (in a
+  // non-`!` function), E-ERROR-007 (nested), E-TRANSACTION-CONTROL-FLOW (a
+  // `return` / `break` / `continue` / `yield` leaving the block in a function).
+  for (const tabResult of tabResults) {
+    const txnDiags = stage("TRANSACTION-CHECKS", () => runTransactionChecks(tabResult.ast));
+    collectErrors("TRANSACTION-CHECKS", txnDiags);
   }
 
   // §7.3.3 (S430 round 5) — a block binds each name once: a `let`/`const`/`lin`/
