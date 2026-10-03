@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 238 | 5 |
 | MED | 477 | 1 |
-| LOW | 226 | 0 |
+| LOW | 227 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22430,6 +22430,12 @@ Repro (verify batch, unrequested find): a component body containing `${...}` (di
 ### g-spec-66-export-alone-on-attribute-unnamed — SPEC: `export` written alone on an attribute (`<box export k:int=0/>`) is illegal under §66.4 rule 6 but no §66.20 code names it
 <!-- @gap id=g-spec-66-export-alone-on-attribute-unnamed sev=LOW status=open locus=compiler/SPEC.md(§66.20 E-DECL-LET-IN-OPENER row — "`let` (or `export let`)"; §66.4 rule 6 — "neither `let` nor `export` may be written on it") prov=empirical:S449-opener-keywords-land -->
 **Agent-executed on the change branch (S449).** §66.4 rule 6 refuses both `let` and `export` on an attribute; `E-DECL-LET-IN-OPENER`'s row covers `let` and `export let` only. The bootstrap reports `export` alone as `E-PARSE-ATTR` with the same fix (a child declaration, `export <k:T=v/>`). Either widen `E-DECL-LET-IN-OPENER`'s row to "`let` or `export`" or name a code; until then the parse code is a placeholder.
+
+### g-bootstrap-shorthand-body-keyword-before-tag-cascades — bootstrap: `let <b/>` in a `:`-shorthand body gives an E-CLOSER-001 cascade, not E-DECL-KEYWORD-NOT-ITEM
+<!-- @gap id=g-bootstrap-shorthand-body-keyword-before-tag-cascades sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(parseShorthand — the one-expression scan meets `let` and the nested `<b/>`; keywordTagAt is consulted only in parseCodeBody / parseKids) prov=review:s449-opener-keywords-land-r2 -->
+**Agent-executed on the change branch (S449, slice-m4 harness `frontEnd`).** `<phase:Phase=.Idle single> <Idle rule=.Busy : let <b/>> <Busy rule=.Idle/> </>` → `E-CLOSER-001` (the `/` of `<b/>` read as a shorthand closer), `E-PARSE-DECL-BODY`, `E-SCOPE-001` × 2 (`let`, `b`). Expected (§66.2.5 / §66.20, S449 item 2: a `:`-shorthand body is code-default): one `E-DECL-KEYWORD-NOT-ITEM`. Fails closed, so LOW — the diagnostic does not name the root cause.
+
+(Second review item — the bootstrap emits an unknown lowercase tag as an element: `<program><main><p><x/></p></main></program>` with `x` undeclared compiles with no diagnostic, re-executed S449 — is the existing `g-bootstrap-unknown-tags-resolved-as-html` (§S449-bootstrap-conformance-counter, #1247); not re-filed.)
 
 ## §S449-bootstrap-conformance-counter — FAIL families from the first pure-bootstrap conformance count (2026-10-03; `bun scripts/bootstrap-conformance.ts` on main `a1aac1433` + this change; report `docs/bootstrap-conformance.md`; agent-executed, and the silent-acceptance claims re-probed directly through the bootstrap front end with one-line sources. Baseline: 1278 cases → PASS 34 (15 vacuous) · FAIL 18 · LEGACY 951 · UNSUPPORTED 275 · CRASH 0)
 

@@ -269,6 +269,26 @@ describe("parse — S447 opener keywords (§66.2.5)", () => {
     expect(parse("t.scrml", "<program><x:int=0 let/></program>").diags[0].message).toContain("write `let <x…/>`");
   });
 
+  test("BITE — `renders<p>…</p>` with NO space inside a declaration opener is E-DECL-RENDERS-IN-OPENER, not a generic error on the `<`", () => {
+    const r = parse("t.scrml", "<program>\n    let <email:string=\"\" req renders<input type=\"email\" bind:value=@email/>/>\n</program>");
+    expect(r.diags.map((d) => d.code)).toEqual(["E-DECL-RENDERS-IN-OPENER"]);
+    expect(r.diags[0].message).toContain("`renders` follows the closer");
+  });
+
+  test("BITE — `export` inside an opener (`<export x/>`, `<export let x/>`, a trailing `export`) is refused, never a tag named `export`", () => {
+    for (const [src, kw] of [["<program>\n    <export x:int=0/>\n</program>", "export"],
+                             ["<program>\n    <export let x:int=0/>\n</program>", "export let"],
+                             ["<program>\n    <x:int=0 export/>\n</program>", "export"]]) {
+      const r = parse("t.scrml", src);
+      expect(r.diags.map((d) => d.code)).toEqual(["E-DECL-LET-IN-OPENER"]);
+      expect(r.diags[0].message).toContain("`" + kw + "` goes BEFORE the `<`");
+      expect(r.diags[0].message).toContain(kw + " <x");
+      const d = r.ast.items[0].k.data.p.items[0];
+      expect(d.k.variant).toBe("DeclItem");
+      expect(d.k.data.d.name).toBe("x");
+    }
+  });
+
   test("⚑ O61: a `<page>` / `<theme>` body reports no keyword itself — both are refused whole (fail-closed, one code)", () => {
     expect(codes("<program>\n    <page>\n        let <x:int=0/>\n    </page>\n</program>")).toEqual([]);
     expect(codes("<program>\n    <theme>\n        export <brand:string=\"#000\"/>\n    </theme>\n</program>")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);

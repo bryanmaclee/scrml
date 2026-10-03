@@ -1423,16 +1423,34 @@ ${
         let isLet = false
         let nm: RWord = readName(m)
         let kws: AAttr[] = []
-        if (nm.w == "let" && !star) {
+        let kwPrefix = false
+        if (nm.w == "export" && !star) {
+            // `<export x…/>` / `<export let x…/>`: the keyword written inside the
+            // opener — refused like `<let x/>` (never a tag named `export`)
+            kwPrefix = true
+            const after: MP = skipSpace(nm.mp)
+            const wl: RWord = readName(after)
+            let kw: string = "export"
+            let endKw: int = nm.mp.pos
+            nm = readName(after)
+            if (wl.w == "let") {
+                isLet = true
+                kw = "export let"
+                endKw = wl.mp.pos
+                nm = readName(skipSpace(wl.mp))
+            }
+            kws = [{ nid: m.nid, span: mkSpan(start, endKw), name: kw, value: AAttrValue.NoValue }]
+        } else if (nm.w == "let" && !star) {
             // S447 (§66.2.5, §66.20): the S435 in-opener prefix `<let x…/>` is
             // refused (reported below, once the opener is classified); `<let/>`
             // (no name) lands here too.
             isLet = true
+            kwPrefix = true
             kws = [{ nid: m.nid, span: mkSpan(start, nm.mp.pos), name: "let", value: AAttrValue.NoValue }]
             nm = readName(skipSpace(nm.mp))
         }
         m = nm.mp
-        if (nm.w == "" && !isLet) m = mDiag(m, "E-PARSE-TAG", "expected a tag name after `<`", start, start + 1)
+        if (nm.w == "" && !kwPrefix) m = mDiag(m, "E-PARSE-TAG", "expected a tag name after `<`", start, start + 1)
         let ty: AType | not = not
         if (chAt(m, 0) == ":") {
             const rt: RMType = parseOpenerType(mAdv(m, 1))
@@ -1999,9 +2017,9 @@ ${
         }
         if (exported || isLet) {
             m = grantInOpener(m, exported, isLet, name, start)
-        } else if (name == "let") {
-            // a trailing flag `<x:int=0 let/>` — the grant written after the name
-            return { typed: [], attrs: [], vals: [], rend: [], kws: [bareKw(m, false, true, start)], mp: m }
+        } else if (name == "let" || name == "export") {
+            // a trailing flag `<x:int=0 let/>` / `<x:int=0 export/>` — the keyword written after the name
+            return { typed: [], attrs: [], vals: [], rend: [], kws: [bareKw(m, name == "export", name == "let", start)], mp: m }
         }
         const a: AAttr = { nid: m.nid, span: mkSpan(start, m.pos), name: name, value: v }
         return { typed: [], attrs: [a], vals: [], rend: [], kws: [], mp: mBump(m) }
@@ -2023,8 +2041,9 @@ ${
     // Any other `renders` (`renders="x"`, `renders:string`) is an ordinary
     // attribute name — §66.5.1: `renders` is not reserved outside its two
     // contextual positions.
+    // `renders<p>…</p>` (no space) is the same clause (§66.5.1: never a generic
+    // parse error about the `<` that follows).
     fn rendersClauseAt(afterWord: MP) -> boolean {
-        if (!isSpaceCh(chAt(afterWord, 0))) return false
         const at: MP = skipSpace(afterWord)
         return chAt(at, 0) == "<" && isNameStart(chAt(at, 1))
     }

@@ -51,3 +51,9 @@
      The refused in-opener `let` keeps its grant (recovery) only when the opener carries a §66.2.2 marker.
   E. NERDME.md §66 row re-spelled. (hand-off.md / handOffs/dpa-queue.md are PA-owned, left; slice-m2/progress.md
      is a historical log, left.)
+- phase 6 (re-review of 6885f9920, LAND-WITH-NITS): merged origin/main (#1247) b111df77d — known-gaps hunk by hunk,
+  @gap id union 1600 = merged 1600; the #1247 bootstrap-conformance-counter fixtures re-spelled to `let <x/>`.
+  Parser: `renders<p>` (no space) in a declaration opener → E-DECL-RENDERS-IN-OPENER; `<export x/>`,
+  `<export let x/>`, trailing `export` flag → E-DECL-LET-IN-OPENER ("`export` goes BEFORE the `<`") — was a tag
+  named `export` (fail-open). Filed LOW g-bootstrap-shorthand-body-keyword-before-tag-cascades; the unknown-tag
+  item is the existing g-bootstrap-unknown-tags-resolved-as-html (#1247). §66.0 row now carries reading A.
