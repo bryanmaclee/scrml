@@ -42,3 +42,7 @@
 - MED-1: parse.scrml `programOpenerDiags` — a `<program>` opener's typed attributes, validator calls, own type, own value, `:`-shorthand body and `export` were dropped (AProgram keeps `o.attrs` only) → each now E-BOOTSTRAP-UNSUPPORTED at parse. Searched §4.12, §40.8, §66.2 — no SPEC code governs a declaration-shaped `<program>` opener.
 - LOW-2: `typeItems` / `fnItems` skip a later top-level program (`isLaterProgram`), so its names cannot mask an unresolved name in the first.
 - Tests: +12 in slice-m4/program-shape.test.js; self-host-v2 1340 pass / 0 fail.
+
+## 2026-10-03 fix round 3 (main #1256 emits `<program reset="none">`)
+- §65.3.4 "Opt out via `<program reset=\"none\">` — drops the whole `reset` layer." Implemented: CoreProgram.reset (core.scrml); lower sets it false for `reset="none"`; print.scrml ships the built-in reset (`<style>` from css.scrml `emitCss`) by default and drops it when false. §65.3.4 names no other value or code → any other value E-BOOTSTRAP-UNSUPPORTED. Nested `reset=` → E-PROGRAM-NESTED-ATTR (§4.12.2 lists it). Hybrid ingest sets reset false (its stylesheet is css-ingest's).
+- Merged origin/main; self-host-v2 1440 pass / 0 fail; counter integration 35/35; counter PASS 89 · FAIL 52 · NOT-TWINNED 511 · UNSUPPORTED 648 (1300 cases); docs/bootstrap-conformance.md regenerated.
