@@ -123,7 +123,7 @@ describe("the report states its own scope", () => {
 
 describe("helpers", () => {
   test("legacyMarkers: the §66.21 retired forms + a missing <program>; comments do not count", () => {
-    expect(legacyMarkers("<program>\n<let n:int=0/>\n</program>")).toEqual([]);
+    expect(legacyMarkers("<program>\nlet <n:int=0/>\n</program>")).toEqual([]);
     expect(legacyMarkers("<program>\n${ <n> = 0 }\n</program>")).toEqual(["rhs-decl"]);
     expect(legacyMarkers("<program>\n<count server> = 0\n</program>")).toEqual(["rhs-decl"]);
     expect(legacyMarkers("<program>\n${ <n>: int = 0 }\n</program>")).toEqual(["rhs-decl"]);

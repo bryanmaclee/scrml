@@ -8,7 +8,8 @@
 //
 // lib/dropdown.scrml:
 //   export type Openness:enum = { Closed, Opened }
-//   export <dropdown label:string options:string[] export let value:string="">
+//   export <dropdown label:string options:string[]>
+//       export let <value:string=""/>                // an exported, writable CHILD (§66.4 rule 6, S447)
 //       export <open:Openness=.Closed>
 //           <Closed rule=.Opened/>              // ⚑ O52 (ruled S435): state-child marker
 //           <Opened rule=.Closed/>
@@ -29,7 +30,7 @@
 //   <program>
 //       type Line:struct = { id: int, name: string }
 //       <lines:Line[]=([{ id: 1, name: "Tea" }, { id: 2, name: "Milk" }])/>
-//       <let showColor:bool=false/>
+//       let <showColor:bool=false/>
 //       function closeCountry() { @country.open = .Closed }
 //       function clearColor() { given c = @color :> { c.value = "" } }
 //       <main class="filters">
@@ -91,7 +92,7 @@ ${
     // A TEST FIXTURE for L12 (b) (ruled S437): the same program plus user code
     // that reads the unconditional handle `@country` BEFORE the first render —
     //   function countryValue() { return @country.value }
-    //   <let firstCountry:string=(countryValue())/>     // seeded at construction
+    //   let <firstCountry:string=(countryValue())/>     // seeded at construction
     //   <p class="early">Early ${countryValue()} / ${@firstCountry}</p>   // placed BEFORE the instances
     // The instance record must exist when the program is CONSTRUCTED, not when
     // its DOM mounts.
@@ -110,7 +111,7 @@ ${
         const sOptions: Sym   = mkSym(8, "options")
         const sValue: Sym     = mkSym(9, "value")
         const sOpen: Sym      = mkSym(10, "open")
-        const wValue: Sym     = mkSym(11, "value")       // write capability: `export let value`
+        const wValue: Sym     = mkSym(11, "value")       // write capability: `export let <value/>`
         const wOpen: Sym      = mkSym(12, "open")        // write capability: the `rule=` graph
         const sProgram: Sym   = mkSym(13, "program")
         const sLines: Sym     = mkSym(14, "lines")
@@ -162,7 +163,7 @@ ${
         }
         const fValue: Field = {
             sym: sValue, ty: Type.Str, init: litStr(""),
-            mode: FieldMode.Let, role: FieldRole.Attribute, grants: replaceGrant(),
+            mode: FieldMode.Let, role: FieldRole.Child, grants: replaceGrant(),      // a child since S447 (§66.4 rule 6)
             graph: not, exported: true, wcap: wValue,
         }
         const fOpen: Field = {

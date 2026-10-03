@@ -1,5 +1,5 @@
 <program>
-    <let count:int=0/>                          // writable: `let` is the replace grant on a scalar (§66.9)
+    let <count:int=0/>                          // writable: `let` is the replace grant on a scalar (§66.9), before the `<`
     <step=1/>                                   // locked constant; the integer literal infers `int` (§66.3)
     <doubled:int=(@count * 2)/>                 // derived: locked + a reactive initializer (§66.9)
 
