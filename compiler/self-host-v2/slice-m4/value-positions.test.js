@@ -41,7 +41,7 @@ const $ = (sel) => document.querySelector(sel);
 
 // `g` writes `@a`; `h` is its write-free twin. `gs` / `hs` return strings.
 const W = [
-  `    <let a:int=0/>`,
+  `    let <a:int=0/>`,
   `    function g(x: int) -> int {\n        @a = @a + 1\n        return x\n    }`,
   `    fn h(x: int) -> int { return x }`,
   `    function gs() -> string {\n        @a = @a + 1\n        return "w"\n    }`,
@@ -52,12 +52,12 @@ const with_ = (decls) => `${W}\n${decls}`;
 describe("S449 item 3 — every position class: a writer is an error at the SOURCE; its write-free twin is clean", () => {
   // [label, src(writer?) , the position's name in the message]
   const CASES = [
-    ["a program cell's `let` initializer", (w) => P(with_(`    <let b:int=(${w}(1))/>`), ""), "the initializer of `@b`"],
+    ["a program cell's `let` initializer", (w) => P(with_(`    let <b:int=(${w}(1))/>`), ""), "the initializer of `@b`"],
     ["a derived formula (a locked cell reading cells)", (w) => P(with_(`    <d:int=(@a + ${w}(1))/>`), ""), "the formula of derived `@d`"],
     ["a locked initializer calling a function (a call may read cells: a formula, §66.9)", (w) => P(with_(`    <k:int=(${w}(1))/>`), ""), "the formula of derived `@k`"],
     ["a user declaration's attribute-field default (locked, calling a function: a formula)", (w) => P(with_(`    <card title:string=(${w}s())/>\n    renders <b>\${title}</b>`), `        <card/>`), "the formula of derived `@card.title`"],
-    ["a user declaration's `let` field (a seed)", (w) => P(with_(`    <box let k:int=(${w}(1))/>\n    renders <div>\${k}</div>`), ""), "the initializer of `@box.k`"],
-    ["a user declaration's child field", (w) => P(with_(`    <panel title:string>\n        <let page:int=(${w}(1))/>\n    </>\n    renders <div>\${page}</div>`), `        <panel title="p"/>`), "the initializer of `@panel.page`"],
+    ["a user declaration's `let` field (a seed)", (w) => P(with_(`    <box:struct> let <k:int=(${w}(1))/> </>\n    renders <div>\${k}</div>`), ""), "the initializer of `@box.k`"],
+    ["a user declaration's child field", (w) => P(with_(`    <panel title:string>\n        let <page:int=(${w}(1))/>\n    </>\n    renders <div>\${page}</div>`), `        <panel title="p"/>`), "the initializer of `@panel.page`"],
     ["a use-site value", (w) => P(with_(`    <card title:string>\n    </>\n    renders <b>\${title}</b>`), `        <card title=(${w}s())/>`), "the use-site value `title=` of `<card>`"],
     ["a markup interpolation", (w) => P(W, `        <p>\${${w}(@a)}</p>`), "the interpolation"],
     ["an interpolation in a declaration's `renders`", (w) => P(with_(`    <card title:string>\n    </>\n    renders <b>\${title}\${${w}s()}</b>`), `        <card title="t"/>`), "the interpolation"],
@@ -121,14 +121,14 @@ describe("S449 item 3 — the write summary, as the effect rule uses it", () => 
   });
 
   test("reading cells and calling write-free functions — clean in every position", () => {
-    clean(P(with_(`    <d:int=(@a * 2 + h(1))/>\n    <let s:int=(h(@a))/>`),
+    clean(P(with_(`    <d:int=(@a * 2 + h(1))/>\n    let <s:int=(h(@a))/>`),
       `        <p title=(hs()) if=(@d > -1)>\${h(@s)} \${h(@d)}</p>`));
   });
 });
 
 describe("S449 item 3 — NOT render positions: an event handler and a two-way bind may write", () => {
   test("`onclick=` calling a writer, a handler block writing, `bind:value` — clean", () => {
-    clean(P(with_(`    <let q:string=""/>`),
+    clean(P(with_(`    let <q:string=""/>`),
       `        <button onclick=g(1)>a</button>\n        <button onclick={ @a = @a + 1 }>b</button>\n        <input bind:value=@q/>\n        <p>\${@a}</p>`));
   });
 });
@@ -142,8 +142,8 @@ describe("closes g-bootstrap-render-writer-call-hangs — the render self-write 
   });
 
   test("a render↔render cycle (each hole writes what the other reads) is rejected at both holes", () => {
-    const fns = `    <let b:int=0/>\n    function wa() -> int {\n        @a = @b + 1\n        return @a\n    }\n    function wb() -> int {\n        @b = @a + 1\n        return @b\n    }`;
-    expect(codes(P(`    <let a:int=0/>\n${fns}`, `        <p>\${wa()}</p>\n        <p>\${wb()}</p>`))).toEqual([CODE, CODE]);
+    const fns = `    let <b:int=0/>\n    function wa() -> int {\n        @a = @b + 1\n        return @a\n    }\n    function wb() -> int {\n        @b = @a + 1\n        return @b\n    }`;
+    expect(codes(P(`    let <a:int=0/>\n${fns}`, `        <p>\${wa()}</p>\n        <p>\${wb()}</p>`))).toEqual([CODE, CODE]);
   });
 });
 

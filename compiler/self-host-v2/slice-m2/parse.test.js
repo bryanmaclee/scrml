@@ -102,15 +102,19 @@ describe("parse — the three sources", () => {
     expect(text).not.toContain("E-DERIVED-WRITE");      // the <!-- --> lines are comments
   });
 
-  test("dropdown: typed attributes, an exported `let` attribute, a state-child graph field, `renders`", () => {
+  test("dropdown: typed (locked) attributes, an exported `let` CHILD (S447), a state-child graph field, `renders`", () => {
     const d = parse("d", source("lib/dropdown.scrml")).ast.items[1].k.data.d;
     expect(d.exported).toBe(true);
+    // §66.4 rule 6 (S447): an attribute is always locked data — no grant on any
     expect(d.attrs.map((a) => [a.name, a.exported, a.isLet, a.ty.k.variant, a.dflt.variant ?? a.dflt])).toEqual([
       ["label", false, false, "TName", "NoValue"],
       ["options", false, false, "TSeq", "NoValue"],
-      ["value", true, true, "TName", "Quoted"],
     ]);
-    const open = d.body[0];
+    // `export let <value:string=""/>` — the writable, exported field is a child declaration
+    const value = d.body[0];
+    expect(value.variant).toBe("ChildField");
+    expect([value.data.d.name, value.data.d.exported, value.data.d.isLet, value.data.d.own.variant]).toEqual(["value", true, true, "Quoted"]);
+    const open = d.body[1];
     expect(open.variant).toBe("ChildField");
     expect(open.data.d.exported).toBe(true);
     expect(open.data.d.body.map((c) => [c.variant, c.data.s.name, c.data.s.attrs[0].value.data.e.k.data.name])).toEqual([
@@ -162,6 +166,115 @@ describe("parse — §66 diagnostics", () => {
   });
 });
 
+// S447 — keywords go OUTSIDE the declaration opener (§66.2.5, §66.4 rule 6,
+// §66.5.1, §66.20; ruling:user-voice-scrml.md S447 "your recs", item 2).
+describe("parse — S447 opener keywords (§66.2.5)", () => {
+  const codes = (src) => parse("t.scrml", src).diags.map((d) => d.code);
+  const decls = (src) => parse("t.scrml", src).ast.items[0].k.data.p.items.filter((i) => i.k.variant === "DeclItem").map((i) => i.k.data.d);
+
+  test("`let <x/>` / `export let <x/>` / `export <x/>` before the `<` in a program body: the grant and the export, no diagnostic", () => {
+    const src = "<program>\n    let <a:int=0/>\n    export let <b:bool=false/>\n    export <c:string=\"k\"/>\n    <d:int=1/>\n</program>";
+    expect(codes(src)).toEqual([]);
+    expect(decls(src).map((d) => [d.name, d.isLet, d.exported])).toEqual([
+      ["a", true, false], ["b", true, true], ["c", false, true], ["d", false, false],
+    ]);
+  });
+
+  test("a declaration body is an item position: `let` / `export let` before a child's `<` make a writable (exported) CHILD", () => {
+    const src = "<program>\n    <box n:int=1>\n        let <k:int=0/>\n        export let <v:string=\"\"/>\n    </>\n</program>";
+    expect(codes(src)).toEqual([]);
+    const box = decls(src)[0];
+    expect(box.attrs.map((a) => [a.name, a.isLet, a.exported])).toEqual([["n", false, false]]);
+    expect(box.body.map((c) => [c.data.d.name, c.data.d.isLet, c.data.d.exported])).toEqual([["k", true, false], ["v", true, true]]);
+  });
+
+  test("BITE — the S435 in-opener `<let x/>` is E-DECL-LET-IN-OPENER, and the message names the S447 spelling", () => {
+    const r = parse("t.scrml", "<program>\n    <let count:int=0/>\n</program>");
+    expect(r.diags.map((d) => d.code)).toEqual(["E-DECL-LET-IN-OPENER"]);
+    expect(r.diags[0].message).toContain("let <count");
+    expect(r.diags[0].message).toContain("§66.2.5");
+    // recovery: still the one declaration (no cascade)
+    expect(decls("<program>\n    <let count:int=0/>\n</program>").map((d) => d.name)).toEqual(["count"]);
+    // `<let/>` (no name, SF5) is refused too — it no longer passes silently
+    expect(codes("<program>\n    <let/>\n</program>")).toEqual(["E-DECL-LET-IN-OPENER"]);
+  });
+
+  test("BITE — `let` anywhere else inside an opener: a trailing flag, or a grant on an attribute (§66.4 rule 6)", () => {
+    expect(codes("<program><x:int=0 let/></program>")).toEqual(["E-DECL-LET-IN-OPENER"]);
+    const attr = parse("t.scrml", "<program><box n:int=1 let k:int=0/></program>").diags;
+    expect(attr.map((d) => d.code)).toEqual(["E-DECL-LET-IN-OPENER"]);
+    expect(attr[0].message).toContain("child declaration");
+    expect(attr[0].message).toContain("let <k:");
+    expect(codes("<program><box n:int=1 export let k:int=0/></program>")).toEqual(["E-DECL-LET-IN-OPENER"]);
+    // `export` alone on an attribute: the same rule (no grant on an attribute); no §66.20 code names it
+    expect(codes("<program><box n:int=1 export k:int=0/></program>")).toEqual(["E-PARSE-ATTR"]);
+  });
+
+  test("BITE — `renders` inside an opener is E-DECL-RENDERS-IN-OPENER (never a generic parse error on the `<` after it)", () => {
+    const r = parse("t.scrml", "<program>\n    let <email:string=\"\" req renders <input type=\"email\" bind:value=@email/>/>\n</program>");
+    expect(r.diags.map((d) => d.code)).toEqual(["E-DECL-RENDERS-IN-OPENER"]);
+    expect(r.diags[0].message).toContain("`renders` follows the closer");
+    // the ruled spelling: after the closer
+    expect(codes("<program>\n    let <email:string=\"\" req/>\n    renders <input type=\"email\" bind:value=@email/>\n</program>")).toEqual([]);
+  });
+
+  // S449 ruling item 2 (§66.2.5, narrowed): in a FREE-TEXT body the words are text; only a CODE-DEFAULT body
+  // that is not an item position (an engine state-child body) reports the misplaced keyword.
+  test("free-text bodies: `let` / `export` before a tag are TEXT (S449) — the words are kept, the tag is an element", () => {
+    const r = parse("t.scrml", "<program>\n    <main><p>Please let <b>me</b> know</p><p>You can export <a href=\"/x\">a CSV</a></p></main>\n</program>");
+    expect(r.diags).toEqual([]);
+    const main = r.ast.items[0].k.data.p.items[0].k.data.n.k.data.e;
+    const ps = main.kids.map((k) => k.k.data.e);
+    expect(ps[0].kids.map((k) => k.k.variant === "Text" ? k.k.data.text : "<" + k.k.data.e.tag + ">")).toEqual(["Please let ", "<b>", " know"]);
+    expect(ps[1].kids.map((k) => k.k.variant === "Text" ? k.k.data.text : "<" + k.k.data.e.tag + ">")).toEqual(["You can export ", "<a>"]);
+  });
+
+  test("BITE — `let` / `export` before a tag in a CODE-DEFAULT body (an engine state-child) is E-DECL-KEYWORD-NOT-ITEM", () => {
+    const eng = (body) => "<program>\n    type Phase:enum = { Idle, Busy }\n    <phase:Phase=.Idle single>\n        <Idle rule=.Busy>" + body + "</>\n        <Busy rule=.Idle/>\n    </>\n</program>";
+    expect(codes(eng("let <y:int=0/>"))).toContain("E-DECL-KEYWORD-NOT-ITEM");
+    expect(codes(eng("export let <y:int=0/>"))).toContain("E-DECL-KEYWORD-NOT-ITEM");
+    // a word that merely ENDS in "let" is not the keyword
+    expect(codes(eng("outlet <b>x</b>"))).not.toContain("E-DECL-KEYWORD-NOT-ITEM");
+  });
+
+  test("BITE — the marker comes from the opener alone: `let <signup>` (no own value, no typed attribute) is not a declaration (SF2)", () => {
+    expect(codes("<program>\n    let <signup>\n    </>\n</program>")).toEqual(["E-PARSE-LET"]);
+    expect(codes("<program>\n    let <signup:struct>\n        let <email:string=\"\"/>\n    </>\n</program>")).toEqual([]);
+  });
+
+  // PA reading S449 (for veto) on ruling item 2: free text stays prose UNLESS the tag is a declaration by its opener.
+  test("BITE — free text: `let` before a DECLARATION opener (`<p>let <x:int=0/></p>`) is still E-DECL-KEYWORD-NOT-ITEM, naming the `${\"let\"}` escape", () => {
+    const r = parse("t.scrml", "<program>\n    <main><p>let <x:int=0/></p></main>\n</program>");
+    expect(r.diags.map((d) => d.code)).toEqual(["E-DECL-KEYWORD-NOT-ITEM"]);
+    expect(r.diags[0].message).toContain("free-text body of `<p>`");
+    expect(r.diags[0].message).toContain("${\"let\"}");
+    // a hyphenated or embedded word is not the keyword (markup word boundary)
+    expect(codes("<program>\n    <main><p>re-let <x:int=0/> outlet <y:int=1/></p></main>\n</program>")).toEqual([]);
+  });
+
+  test("`renders` is reserved only as a clause in a DECLARATION opener (§66.5.1): elsewhere it is an ordinary attribute name", () => {
+    expect(codes("<program>\n    <main><div renders=\"x\">a</div></main>\n</program>")).toEqual([]);
+    expect(codes("<program>\n    <card renders:string=\"x\"/>\n    renders <p>${renders}</p>\n</program>")).toEqual([]);
+    // a markup element inside a plain element's opener: a tag error, not the declaration code
+    expect(codes("<program>\n    <main><div renders <b/>>a</div></main>\n</program>")).toEqual(["E-PARSE-TAG"]);
+  });
+
+  test("`let` inside the opener of a tag that declares nothing: the message says drop it, never `let <input/>` (which is E-PARSE-LET)", () => {
+    for (const src of ["<program>\n    <main><input let/></main>\n</program>", "<program>\n    <let div/>\n</program>"]) {
+      const r = parse("t.scrml", src);
+      expect(r.diags.map((d) => d.code)).toEqual(["E-DECL-LET-IN-OPENER"]);
+      expect(r.diags[0].message).toContain("declares nothing");
+      expect(r.diags[0].message).not.toContain("goes BEFORE");
+    }
+    expect(parse("t.scrml", "<program><x:int=0 let/></program>").diags[0].message).toContain("write `let <x…/>`");
+  });
+
+  test("⚑ O61: a `<page>` / `<theme>` body reports no keyword itself — both are refused whole (fail-closed, one code)", () => {
+    expect(codes("<program>\n    <page>\n        let <x:int=0/>\n    </page>\n</program>")).toEqual([]);
+    expect(codes("<program>\n    <theme>\n        export <brand:string=\"#000\"/>\n    </theme>\n</program>")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+});
+
 describe("fix round — out-of-subset forms are REPORTED by name (F-C, F-D)", () => {
   const codes = (src) => parse("t.scrml", src).diags.map((d) => [d.code, d.message]);
 
@@ -183,9 +296,9 @@ describe("fix round — out-of-subset forms are REPORTED by name (F-C, F-D)", ()
     expect(b[0][1]).toContain("`++`");
   });
 
-  test("F-C: `<let count:int = 0/>` — §66.2.2 says `=` IMMEDIATELY after the name / `name:Type`: one diagnostic each", () => {
-    const r = parse("t.scrml", "<program><let count:int = 0/><card title:string = \"x\"/></program>");
+  test("F-C: `let <count:int = 0/>` — §66.2.2 says `=` IMMEDIATELY after the name / `name:Type`: one diagnostic each", () => {
+    const r = parse("t.scrml", "<program>let <count:int = 0/><card title:string = \"x\"/></program>");
     expect(r.diags.map((d) => d.code)).toEqual(["E-PARSE-OPENER-EQ-SPACED", "E-PARSE-OPENER-EQ-SPACED"]);
-    expect(parse("t.scrml", "<program><let count:int=0/></program>").diags).toEqual([]);
+    expect(parse("t.scrml", "<program>let <count:int=0/></program>").diags).toEqual([]);
   });
 });

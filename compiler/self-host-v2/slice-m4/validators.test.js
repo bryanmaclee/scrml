@@ -33,7 +33,7 @@ const clean = (src) => {
 const P = (decls, main) => `<program>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
 // a declaration `f` with ONE validated child field `v` (validators `vals`, type `ty`, initial `init`) and a renders
 const F = (vals, rendersV, rendersF, { ty = "string", init = '""' } = {}) =>
-  `    <f note:string="n">\n        <let v:${ty}=${init} ${vals}/>\n        renders ${rendersV}\n    </>\n    renders ${rendersF}`;
+  `    <f note:string="n">\n        let <v:${ty}=${init} ${vals}/>\n        renders ${rendersV}\n    </>\n    renders ${rendersF}`;
 const $ = (sel) => document.querySelector(sel);
 const attrsOf = (el) => Object.fromEntries([...el.attributes].map((a) => [a.name, a.value]));
 const type = (el, v) => { el.value = v; el.dispatchEvent(new window.Event("input", { bubbles: true })); };
@@ -113,11 +113,11 @@ describe("(2) validators follow the bind — wherever it is written", () => {
     expect(attrsOf($("main input"))).toEqual({ minlength: "3", required: "" });
   });
   test("two `bind:` on one element → refused at the second (one element writes back to one place)", () => {
-    const two = `    <let n:string=""/>\n    <let m:string=""/>`;
+    const two = `    let <n:string=""/>\n    let <m:string=""/>`;
     const d = run(P(two, `        <input bind:value=@n bind:value=@m/>`)).diags;
     expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(d[0].message).toContain("a second `bind:`");
-    expect(codes(P(`    <let ok:bool=false/>\n    <let n:string=""/>`, `        <input type="checkbox" bind:checked=@ok bind:value=@n/>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    let <ok:bool=false/>\n    let <n:string=""/>`, `        <input type="checkbox" bind:checked=@ok bind:value=@n/>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(P(two, `        <input bind:value=@n/>\n        <input bind:value=@m/>`))).toEqual([]);
   });
   test("the length comparisons, exactly: `>N` → minlength N+1, `<N` → maxlength N-1, `==N` → both", async () => {
@@ -192,7 +192,7 @@ describe("(3) `novalidate` on any form carrying lowered attributes", () => {
   test("through a `<*st/>` state view whose arm body holds the bound input", async () => {
     const src = P(`    type S:enum = { A, B }
     <f note:string="n">
-        <let v:string="" req/>
+        let <v:string="" req/>
         renders <input bind:value=@v/>
         <st:S=.A>
             <A rule=.B>
@@ -224,8 +224,8 @@ describe("(4) O54 = (a): `@v` inside `v`'s own renders is THIS instance", () => 
 // ===========================================================================
 describe("(5) silently dead validators are errors; `@x.isValid` on a no-surface cell is an error", () => {
   test("validators on a top-level scalar (§55.5 Edge A) → E-VALIDATOR-DEAD — bound or not", () => {
-    expect(codes(P(`    <let email:string="" req/>`, `        <input bind:value=@email/>`))).toEqual(["E-VALIDATOR-DEAD"]);
-    expect(codes(P(`    <let email:string="" req length(>=2)/>`, `        <p>x</p>`))).toEqual(["E-VALIDATOR-DEAD"]);
+    expect(codes(P(`    let <email:string="" req/>`, `        <input bind:value=@email/>`))).toEqual(["E-VALIDATOR-DEAD"]);
+    expect(codes(P(`    let <email:string="" req length(>=2)/>`, `        <p>x</p>`))).toEqual(["E-VALIDATOR-DEAD"]);
   });
   test("validators on a child field NOTHING binds → E-VALIDATOR-DEAD at the field (even when logic writes it)", () => {
     const d = run(P(F("req", `<button onclick=(@f.v = "x")>set</button>`, `<div><*v/></div>`), `        <*f/>`)).diags;
@@ -234,7 +234,7 @@ describe("(5) silently dead validators are errors; `@x.isValid` on a no-surface 
   });
   test("`@cell.isValid` / `.errors` / `.touched` / `.submitted` on a top-level cell → E-VALIDITY-NO-SURFACE", () => {
     for (const prop of ["isValid", "errors", "touched", "submitted"]) {
-      expect(codes(P(`    <let q:string=""/>`, `        <p>\${@q.${prop}}</p>`))).toEqual(["E-VALIDITY-NO-SURFACE"]);
+      expect(codes(P(`    let <q:string=""/>`, `        <p>\${@q.${prop}}</p>`))).toEqual(["E-VALIDITY-NO-SURFACE"]);
     }
   });
   test("a declaration's surface (§55.5 / §55.6) exists but is not built in the bootstrap: refused, never read as a field", () => {
@@ -262,22 +262,22 @@ describe("the validator vocabulary the bootstrap honors (§55.1), and what it re
     expect(one(`req("Please fill it in")`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("validators the bootstrap cannot place are refused, never dropped: a user declaration's own opener; a field below a child field", () => {
-    const own = P(`    <f note:string="n" req>\n        <let v:string="" req/>\n        renders <input bind:value=@v/>\n    </>\n    renders <form><*v/></form>`, `        <*f/>`);
+    const own = P(`    <f note:string="n" req>\n        let <v:string="" req/>\n        renders <input bind:value=@v/>\n    </>\n    renders <form><*v/></form>`, `        <*f/>`);
     const d = run(own).diags;
     expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(d[0].message).toContain("own opener");
-    const deep = P(`    <f note:string="n">\n        <g let k:int=0>\n            <let w:string="" req/>\n        </>\n    </>\n    renders <p>x</p>`, `        <*f/>`);
+    const deep = P(`    <f note:string="n">\n        <g:struct> let <k:int=0/>\n            let <w:string="" req/>\n        </>\n    </>\n    renders <p>x</p>`, `        <*f/>`);
     const d2 = run(deep).diags;
     expect(d2.map((x) => x.code)).toContain("E-BOOTSTRAP-UNSUPPORTED");
     expect(d2.some((x) => x.message.includes("nested below a child field"))).toBe(true);
   });
   test("a derived field with validators → E-DERIVED-WITH-VALIDATORS (§55.14)", () => {
-    const src = P(`    <let a:string=""/>\n    <f note:string="n">\n        <d:string=(@a + "!") req/>\n        renders <b>\${d}</b>\n    </>\n    renders <div><*d/></div>`, `        <*f/>`);
+    const src = P(`    let <a:string=""/>\n    <f note:string="n">\n        <d:string=(@a + "!") req/>\n        renders <b>\${d}</b>\n    </>\n    renders <div><*d/></div>`, `        <*f/>`);
     expect(codes(src)).toEqual(["E-DERIVED-WITH-VALIDATORS"]);
   });
   test("shape errors: a validator on an ELEMENT, a non-validator call in a tag, `length` / `pattern` without their argument shape", () => {
-    expect(codes(P(`    <let s:string=""/>`, `        <input length(>=2) bind:value=@s/>`))).toEqual(["E-PARSE-ATTR"]);
-    expect(codes(P(`    <let s:string=""/>`, `        <p foo(1)>x</p>`))).toEqual(["E-PARSE-ATTR"]);
+    expect(codes(P(`    let <s:string=""/>`, `        <input length(>=2) bind:value=@s/>`))).toEqual(["E-PARSE-ATTR"]);
+    expect(codes(P(`    let <s:string=""/>`, `        <p foo(1)>x</p>`))).toEqual(["E-PARSE-ATTR"]);
     expect(one("length")).toEqual(["E-PARSE-ATTR"]);
     expect(one("length(3)")).toEqual(["E-PARSE-ATTR"]);
     expect(one("pattern(\"a\")")).toEqual(["E-PARSE-ATTR"]);

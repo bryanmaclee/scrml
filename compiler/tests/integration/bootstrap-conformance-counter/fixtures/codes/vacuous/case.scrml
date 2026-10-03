@@ -1,5 +1,5 @@
 <program>
-    <let count:int=0/>
+    let <count:int=0/>
     <doubled:int=(@count * 2)/>
 
     function bump() { @count = @count + 1 }

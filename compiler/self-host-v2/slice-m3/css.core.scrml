@@ -26,7 +26,7 @@ ${
 
     // §66.17 items 2 + 3 (the ruled worked example, plus a Card that uses both tokens):
     //   type Mode:enum = { Light, Dark }
-    //   <let mode:Mode=.Light/>
+    //   let <mode:Mode=.Light/>
     //   <theme>
     //       <brand:string="#338967"/>
     //       <ink:string=(match @mode { .Light :> "#0f172a"  .Dark :> "#e2e8f0" })/>

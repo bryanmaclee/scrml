@@ -42,7 +42,7 @@ const walkCore = (core, pred) => {
 
 // ===========================================================================
 describe("1 — bind (Attr.Bind)", () => {
-  const src = P(`    <let name:string="ann"/>\n    <let ok:bool=false/>\n    function shout() { @name = "BOB" }`,
+  const src = P(`    let <name:string="ann"/>\n    let <ok:bool=false/>\n    function shout() { @name = "BOB" }`,
     `        <input bind:value=@name/>\n        <input type="checkbox" bind:checked=@ok/>\n        <p>\${@name}|\${@ok}</p>\n        <button onclick=shout()>shout</button>`);
 
   test("Core: one Bind per bound element — it reads the place and writes `Local(sink)` back through the place's capability", () => {
@@ -78,7 +78,7 @@ describe("1 — bind (Attr.Bind)", () => {
   });
 
   test("§5.4 legality: the element and the attribute name", () => {
-    const one = (el) => codes(P(`    <let s:string=""/>\n    <let b:bool=false/>`, `        ${el}`));
+    const one = (el) => codes(P(`    let <s:string=""/>\n    let <b:bool=false/>`, `        ${el}`));
     expect(one(`<div bind:value=@s></div>`)).toEqual(["E-ATTR-011"]);
     expect(one(`<input type="text" bind:checked=@b/>`)).toEqual(["E-ATTR-011"]);
     expect(one(`<input bind:colour=@s/>`)).toEqual(["E-ATTR-011"]);
@@ -89,30 +89,30 @@ describe("1 — bind (Attr.Bind)", () => {
   });
 
   test("§5.4: the right side must be an `@` place (E-ATTR-010)", () => {
-    expect(codes(P(`    <let s:string=""/>\n    function f() { let t = "x" }`, `        <input bind:value="s"/>`))).toEqual(["E-ATTR-010"]);
-    expect(codes(P(`    <let s:string=""/>`, `        <input bind:value=(1 + 2)/>`))).toEqual(["E-ATTR-010"]);
+    expect(codes(P(`    let <s:string=""/>\n    function f() { let t = "x" }`, `        <input bind:value="s"/>`))).toEqual(["E-ATTR-010"]);
+    expect(codes(P(`    let <s:string=""/>`, `        <input bind:value=(1 + 2)/>`))).toEqual(["E-ATTR-010"]);
   });
 
   test("the write is judged by the place's own contract: a locked cell, a derived cell", () => {
     expect(codes(P(`    <s:string="x"/>`, `        <input bind:value=@s/>`))).toEqual(["E-WRITE-NOT-GRANTED"]);
-    expect(codes(P(`    <let a:string="x"/>\n    <d:string=(@a + "!")/>`, `        <input bind:value=@d/>`))).toEqual(["E-DERIVED-WRITE"]);
+    expect(codes(P(`    let <a:string="x"/>\n    <d:string=(@a + "!")/>`, `        <input bind:value=@d/>`))).toEqual(["E-DERIVED-WRITE"]);
   });
 
   test("the value a bind writes must fit the place: a string (`value`), a boolean (`checked`)", () => {
-    expect(codes(P(`    <let b:bool=false/>`, `        <input bind:value=@b/>`))).toEqual(["E-TYPE-031"]);
-    expect(codes(P(`    <let s:string=""/>`, `        <input type="checkbox" bind:checked=@s/>`))).toEqual(["E-TYPE-031"]);
+    expect(codes(P(`    let <b:bool=false/>`, `        <input bind:value=@b/>`))).toEqual(["E-TYPE-031"]);
+    expect(codes(P(`    let <s:string=""/>`, `        <input type="checkbox" bind:checked=@s/>`))).toEqual(["E-TYPE-031"]);
     // a numeric place needs a coercion the bootstrap does not have (flagged — §5.4 names one only for <select>)
-    expect(codes(P(`    <let n:int=0/>`, `        <input type="number" bind:value=@n/>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    let <n:int=0/>`, `        <input type="number" bind:value=@n/>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 
   test("C8: a Bind whose read and write name different places is refused in Core", () => {
-    const core = coreOf(P(`    <let a:string=""/>\n    <let b:string=""/>`, `        <input bind:value=@a/>\n        <input bind:value=@b/>`));
+    const core = coreOf(P(`    let <a:string=""/>\n    let <b:string=""/>`, `        <input bind:value=@a/>\n        <input bind:value=@b/>`));
     const [b1, b2] = walkCore(core, (n) => n.variant === "Bind").map((n) => n.data);
     b1.read = b2.read;                                   // show `b`, write `a`
     expect(mods.check.checkCore(core).some((m) => m.startsWith("C8: a bind reads"))).toBe(true);
   });
   test("C8: a Bind that writes something other than its sink is refused", () => {
-    const core = coreOf(P(`    <let a:string=""/>`, `        <input bind:value=@a/>`));
+    const core = coreOf(P(`    let <a:string=""/>`, `        <input bind:value=@a/>`));
     const b = walkCore(core, (n) => n.variant === "Bind")[0].data;
     b.write.stmts[0].data.value = { variant: "Lit", data: { lit: { variant: "Str", data: { v: "x" } } } };
     expect(mods.check.checkCore(core).some((m) => m.startsWith("C8: a bind's Write stores"))).toBe(true);
@@ -123,7 +123,7 @@ describe("1 — bind (Attr.Bind)", () => {
 describe("2 — the host call (Expr.Host: `Date.now()` only)", () => {
   const realNow = Date.now;
   afterAll(() => { Date.now = realNow; });
-  const stamp = P(`    <let t:number=0/>\n    function mark() { @t = Date.now() }`, `        <p>\${@t}</p>\n        <button onclick=mark()>mark</button>\n        <button onclick=(@t = Date.now() + 1)>inline</button>`);
+  const stamp = P(`    let <t:number=0/>\n    function mark() { @t = Date.now() }`, `        <p>\${@t}</p>\n        <button onclick=mark()>mark</button>\n        <button onclick=(@t = Date.now() + 1)>inline</button>`);
 
   test("in a `function` body and in an event handler: Core Host(DateNow); printed as the host spells it", async () => {
     const core = coreOf(stamp);
@@ -144,18 +144,18 @@ describe("2 — the host call (Expr.Host: `Date.now()` only)", () => {
   });
 
   test("outside a function / handler body (an initializer, markup) → E-BOOTSTRAP-UNSUPPORTED — the surface is function / handler bodies only", () => {
-    expect(codes(P(`    <let t:number=(Date.now())/>`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(P(`    <let t:number=0/>`, `        <p>\${Date.now()}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    let <t:number=(Date.now())/>`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    let <t:number=0/>`, `        <p>\${Date.now()}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 
   test("it is a `number`: into an `int` cell is E-TYPE-031; with an argument, refused", () => {
-    expect(codes(P(`    <let n:int=0/>\n    function f() { @n = Date.now() }`, `        <p>x</p>`))).toEqual(["E-TYPE-031"]);
-    expect(codes(P(`    <let t:number=0/>\n    function f() { @t = Date.now(1) }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    let <n:int=0/>\n    function f() { @n = Date.now() }`, `        <p>x</p>`))).toEqual(["E-TYPE-031"]);
+    expect(codes(P(`    let <t:number=0/>\n    function f() { @t = Date.now(1) }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 
   test("`Date` is a reserved emitted name: a user function called `Date` never shadows the host's", async () => {
     Date.now = () => 5;
-    const src = P(`    <let t:number=0/>\n    function Date() -> int { return 1 }\n    function mark() { @t = Date.now() }`, `        <p>\${@t}</p>\n        <button onclick=mark()>m</button>`);
+    const src = P(`    let <t:number=0/>\n    function Date() -> int { return 1 }\n    function mark() { @t = Date.now() }`, `        <p>\${@t}</p>\n        <button onclick=mark()>m</button>`);
     const { out } = await loadProgram(coreOf(src), "host-date-name");
     expect(out.js).not.toContain("function Date(");
     click($("main > button"));
@@ -180,11 +180,11 @@ describe("2 — the host call (Expr.Host: `Date.now()` only)", () => {
   });
   test("twin: a `fn` calling a `fn` (§48.6.1), and a `function` calling the clock helper, are clean", () => {
     expect(codes(P(`    fn k() -> int { return 1 }\n    fn f() -> int { return k() }`, `        <p>x</p>`))).toEqual([]);
-    expect(codes(P(`${h}\n    <let t:number=0/>\n    function mark() { @t = h() }`, `        <button onclick=mark()>m</button>\n        <button onclick=(@t = h())>n</button>`))).toEqual([]);
+    expect(codes(P(`${h}\n    let <t:number=0/>\n    function mark() { @t = h() }`, `        <button onclick=mark()>m</button>\n        <button onclick=(@t = h())>n</button>`))).toEqual([]);
   });
   test("a clock helper in an initializer, markup, an attribute value, a lambda in markup → E-BOOTSTRAP-UNSUPPORTED, as `Date.now()` there is", () => {
     for (const [decls, main] of [
-      [`${h}\n    <let t:number=(h())/>`, `        <p>\${@t}</p>`],
+      [`${h}\n    let <t:number=(h())/>`, `        <p>\${@t}</p>`],
       [h, `        <p>\${h()}</p>`],
       [h, `        <p title=h()>x</p>`],
       [`${h}\n    <xs:int[]=([1])/>`, `        <p>\${@xs.filter(x => h() > 0).length}</p>`],
@@ -202,13 +202,13 @@ describe("2 — the host call (Expr.Host: `Date.now()` only)", () => {
   });
 
   test("no other host member call is admitted", () => {
-    expect(codes(P(`    <let t:number=0/>\n    function f() { @t = Math.random() }`, `        <p>x</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(P(`    let <t:number=0/>\n    function f() { @t = Math.random() }`, `        <p>x</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
 });
 
 // ===========================================================================
 describe("3 — View.Star (`<*x/>` is the existing instance)", () => {
-  const src = P(`    <let show:bool=true/>\n    <counter let n:int=0/>\n    renders <span><b>\${n}</b><button onclick=(@counter.n = n + 1)>+</button></span>`,
+  const src = P(`    let <show:bool=true/>\n    <counter:struct> let <n:int=0/> </>\n    renders <span><b>\${n}</b><button onclick=(@counter.n = n + 1)>+</button></span>`,
     `        <div class="a"><*counter/></div>\n        <div class="b" if=@show><*counter/></div>\n        <button onclick=(@show = !@show)>toggle</button>`);
 
   test("Core: two Stars of the SHARED instance; nothing constructed", () => {
@@ -242,7 +242,7 @@ describe("3 — View.Star (`<*x/>` is the existing instance)", () => {
   });
 
   test("a Star of a declaration whose renders holds a CHILD instance: the child's view is the site's too — unmounting disposes it", async () => {
-    const src2 = P(`    <let show:bool=true/>\n    <item let k:int=0/>\n    renders <button onclick=(@item.k = k + 1)>\${k}</button>\n    <box note:string="n"/>\n    renders <div><item/></div>`,
+    const src2 = P(`    let <show:bool=true/>\n    <item:struct> let <k:int=0/> </>\n    renders <button onclick=(@item.k = k + 1)>\${k}</button>\n    <box note:string="n"/>\n    renders <div><item/></div>`,
       `        <section if=@show><*box/></section>\n        <button onclick=(@show = !@show)>toggle</button>`);
     const { rt } = await loadProgram(coreOf(src2), "star-kid-scope");
     const before = { effects: rt.stats.effects, listeners: rt.stats.listeners };
@@ -442,8 +442,19 @@ describe("4c — lambdas as the argument of `.filter` / `.map` (Expr.Lambda, Exp
   });
 
   test("refused: a lambda outside `.filter` / `.map`, two parameters, a non-sequence receiver", () => {
-    expect(codes(P(`    <let n:int=0/>\n    function f() { let g = x => x }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    let <n:int=0/>\n    function f() { let g = x => x }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(P(`    <xs:string[]=(["a"])/>\n    function f() -> int { return @xs.filter((a, b) => true).length }`, `        <p>x</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(P(`    <let n:int=0/>\n    function f() -> int { return @n.filter(x => true).length }`, `        <p>x</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(P(`    let <n:int=0/>\n    function f() -> int { return @n.filter(x => true).length }`, `        <p>x</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  });
+});
+
+// S449 ruling item 2 (§66.2.5, narrowed): in a FREE-TEXT body `let` / `export` before a tag are prose.
+describe("S449 — opener keywords in free text are prose; a real declaration still parses", () => {
+  test("`<p>Please let <b>me</b> know</p>` and `<p>You can export <a …>a CSV</a></p>` compile and render the words", async () => {
+    const src = P("    let <n:int=0/>", `        <p>Please let <b>me</b> know</p>\n        <p>You can export <a href="/x">a CSV</a></p>\n        <p>\${@n}</p>`);
+    await loadProgram(coreOf(src), "prose-keywords");
+    expect(texts("main > p")).toEqual(["Please let me know", "You can export a CSV", "0"]);
+    expect($("main > p > b").textContent).toBe("me");
+    expect($("main > p > a").getAttribute("href")).toBe("/x");
   });
 });

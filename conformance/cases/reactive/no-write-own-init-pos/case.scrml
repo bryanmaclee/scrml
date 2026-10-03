@@ -1,6 +1,6 @@
 // §6.15 (S449 item 3) — a cell's initializer (a `let` seed) calls a function that writes another cell: a compile error at the source.
 <program>
-    <let hits:int=0/>
+    let <hits:int=0/>
     function bump() -> int {
         @hits = @hits + 1
         return 1
@@ -9,7 +9,7 @@
         @hits = @hits + 1
         return "x"
     }
-    <let page:int=(bump())/>
+    let <page:int=(bump())/>
     <main>
         <p>${@page}</p>
     </main>

@@ -1,5 +1,5 @@
 <program>
-    <let count:int=0/>
+    let <count:int=0/>
     #{
         p { color: red; }
     }

@@ -24,8 +24,17 @@
 //
 // Parse-level diagnostics (codes named in SPEC §66.20 where one exists):
 //   E-DECL-OPENER-EXPR-UNPARENTHESIZED (§66.2.4), E-DECL-ILLEGAL-FIELD-NAME
-//   (§66.2.3), and E-PARSE-* for plain syntax errors (no §34 code is named for
-//   them yet — the house rule is that §34 rows land with the implementation).
+//   (§66.2.3), E-DECL-LET-IN-OPENER / E-DECL-RENDERS-IN-OPENER /
+//   E-DECL-KEYWORD-NOT-ITEM (§66.2.5, §66.4 rule 6, §66.5.1 — S447), and
+//   E-PARSE-* for plain syntax errors (no §34 code is named for them yet — the
+//   house rule is that §34 rows land with the implementation).
+//
+// S447 opener keywords (§66.2.5): `export` / `let` stand BEFORE the `<`, in JS
+// order (`let <x:int=0/>`, `export let <checked:bool=false/>`), and are read only
+// where declarations are ITEMS — a program body and a declaration body. Inside
+// an opener stand only the name, `:Type`, `=value`, typed attributes and flags;
+// `renders` follows the closer. An attribute is always locked data: a writable
+// field is a child declaration (§66.4 rule 6).
 //
 // impl#1 workarounds: F4 (qualified variants in argument / field / element
 // position), F5 (host-method results annotated), F11 (named payload binding),
@@ -1354,14 +1363,16 @@ ${
     // =========================================================================
     // Openers. One scanner reads every opener; the parser then classifies it
     // (§66.2.2): a DECLARATION iff it has an own value (`=` after the name or
-    // `name:Type`), an own type, a `let` prefix, or at least one typed
-    // attribute; otherwise a USE (or, in a declaration body, a STATE-CHILD —
-    // O52 ruled).
+    // `name:Type`), an own type, or at least one typed attribute; otherwise a
+    // USE (or, in a declaration body, a STATE-CHILD — O52 ruled). The marker
+    // comes from the opener alone: a `let` written before the `<` (§66.2.5)
+    // is attached AFTER classification (`withLet`), so `let <signup>` is a use
+    // carrying a misplaced `let` (E-PARSE-LET), never a declaration.
     // =========================================================================
     type Opener:struct = {
         start: int,
         star: boolean,
-        isLet: boolean,
+        isLet: boolean,         // the `replace` grant: set by `withLet` from a `let` before the `<`; parseOpener sets it only for the S435 in-opener spelling it refuses (recovery)
         name: string,
         ty: AType | not,
         own: AAttrValue,
@@ -1389,10 +1400,15 @@ ${
 
     fn isDeclOpener(o: Opener) -> boolean {
         if (o.star) return false
-        if (o.isLet) return true
         if (o.ty is some) return true
         if (hasOwn(o.own)) return true
         return o.typed.length > 0
+    }
+
+    // The `replace` grant of a `let` written before the `<` (§66.2.5).
+    fn withLet(o: Opener) -> Opener {
+        return { start: o.start, star: o.star, isLet: true, name: o.name, ty: o.ty, own: o.own,
+                 typed: o.typed, attrs: o.attrs, selfClosing: o.selfClosing, short: o.short, vals: o.vals }
     }
 
     // At `<` (not `</`, not `<!--`).
@@ -1406,12 +1422,17 @@ ${
         }
         let isLet = false
         let nm: RWord = readName(m)
-        if (nm.w == "let" && isSpaceCh(chAt(nm.mp, 0))) {
+        let kws: AAttr[] = []
+        if (nm.w == "let" && !star) {
+            // S447 (§66.2.5, §66.20): the S435 in-opener prefix `<let x…/>` is
+            // refused (reported below, once the opener is classified); `<let/>`
+            // (no name) lands here too.
             isLet = true
+            kws = [{ nid: m.nid, span: mkSpan(start, nm.mp.pos), name: "let", value: AAttrValue.NoValue }]
             nm = readName(skipSpace(nm.mp))
         }
         m = nm.mp
-        if (nm.w == "") m = mDiag(m, "E-PARSE-TAG", "expected a tag name after `<`", start, start + 1)
+        if (nm.w == "" && !isLet) m = mDiag(m, "E-PARSE-TAG", "expected a tag name after `<`", start, start + 1)
         let ty: AType | not = not
         if (chAt(m, 0) == ":") {
             const rt: RMType = parseOpenerType(mAdv(m, 1))
@@ -1430,6 +1451,7 @@ ${
         let selfClosing = false
         let short: ANode[] | not = not
         let vals: AValidator[] = []
+        let rend: ASpan[] = []
         let going = true
         while (going) {
             m = skipSpace(m)
@@ -1457,14 +1479,27 @@ ${
                 typed = typed.concat(ra.typed)
                 attrs = attrs.concat(ra.attrs)
                 vals = vals.concat(ra.vals)
+                rend = rend.concat(ra.rend)
+                kws = kws.concat(ra.kws)
                 if (m.pos == before) {
                     m = mDiag(m, "E-PARSE-TAG", "unexpected `" + chAt(m, 0) + "` in the tag `<" + nm.w + "`", m.pos, m.pos + 1)
                     m = mAdv(m, 1)
                 }
             }
         }
-        const o: Opener = { start: start, star: star, isLet: isLet, name: nm.w, ty: ty, own: own,
+        // the marker comes from the opener alone (§66.2.2): a refused in-opener
+        // `let` keeps its grant (recovery) only on a real declaration
+        const marked: boolean = !star && (ty is some || hasOwn(own) || typed.length > 0)
+        const o: Opener = { start: start, star: star, isLet: isLet && marked, name: nm.w, ty: ty, own: own,
                             typed: typed, attrs: attrs, selfClosing: selfClosing, short: short, vals: vals }
+        for (const k of kws) { m = keywordInOpener(m, k.name, nm.w, marked, k.span) }
+        for (const sp of rend) {
+            if (isDeclOpener(o)) {
+                m = mDiag(m, "E-DECL-RENDERS-IN-OPENER", "`renders` follows the closer (`/>` or `</>`) — close the opener, then write `renders <…>` after it (§66.5.1, S447)", sp.start, sp.end)
+            } else {
+                m = mDiag(m, "E-PARSE-TAG", "a markup element cannot stand inside the opener of `<" + nm.w + ">` — `renders <…>` is a declaration's clause, written after its closer (§66.5.1)", sp.start, sp.end)
+            }
+        }
         return { o: o, mp: m }
     }
 
@@ -1794,6 +1829,8 @@ ${
                 const tagNode: RNodeOne = parseMarkupNode(m)
                 out = out.concat([tagNode.n])
                 m = tagNode.mp
+            } else if (keywordTagAt(m) >= 0) {
+                m = keywordNotItem(m, tag, false)
             } else if (chAt(m, 0) == "\"" && displayCloseAt(m.src, m.pos) < 0) {
                 // SPEC §4.18.3 / §4.18.7 (PA ruling, s444 r3): a display-text
                 // literal is UNTERMINATED only when the scan from its `"`
@@ -1871,7 +1908,7 @@ ${
         return src.length
     }
 
-    type RAttrScan:struct = { typed: ADeclAttr[], attrs: AAttr[], vals: AValidator[], mp: MP }
+    type RAttrScan:struct = { typed: ADeclAttr[], attrs: AAttr[], vals: AValidator[], rend: ASpan[], kws: AAttr[], mp: MP }   // kws: a bare `let` / `export` on the opener itself, judged once the opener is classified   // rend: a `renders <…>` met inside the opener
 
     // SPEC §66.2.2 (i): "an own value — `=` immediately after the name, or after
     // `name:Type`". A spaced `=` (`<let count:int = 0/>`) is reported, then read
@@ -1883,14 +1920,18 @@ ${
         return mDiag(after, "E-PARSE-OPENER-EQ-SPACED", "§66.2.2: an own value / default is `=` IMMEDIATELY after the name or `name:Type` — remove the space", mp.pos, after.pos + 1)
     }
 
-    // One opener entry: `[export] [let] name:Type[=v]` (typed), `ns:name=v`
-    // (namespaced), `name=v`, `as name` / `as=name`, or a flag.
+    // One opener entry: `name:Type[=v]` (typed), `ns:name=v` (namespaced),
+    // `name=v`, `as name` / `as=name`, or a flag. S447 (§66.2.5, §66.4 rule 6):
+    // an attribute is always locked data — `let` / `export` written on one is
+    // refused (still read, so the attribute keeps its grant for recovery and
+    // one error is the only error), and `renders` here is refused whole.
     fn scanAttr(mp: MP) -> RAttrScan {
         const start: int = mp.pos
         let m: MP = mp
         let exported = false
         let isLet = false
         let nm: RWord = readName(m)
+        if (nm.w == "renders" && rendersClauseAt(nm.mp)) return rendersInOpener(mp, nm.mp)
         if (nm.w == "export" && isSpaceCh(chAt(nm.mp, 0))) {
             exported = true
             nm = readName(skipSpace(nm.mp))
@@ -1900,7 +1941,11 @@ ${
             nm = readName(skipSpace(nm.mp))
         }
         m = nm.mp
-        if (nm.w == "") return { typed: [], attrs: [], vals: [], mp: mp }
+        if (nm.w == "" && (exported || isLet)) {
+            // a keyword with nothing after it (`<x:int=0 let />`): the keyword alone
+            return { typed: [], attrs: [], vals: [], rend: [], kws: [bareKw(m, exported, isLet, start)], mp: m }
+        }
+        if (nm.w == "") return { typed: [], attrs: [], vals: [], rend: [], kws: [], mp: mp }
         // name:…
         if (chAt(m, 0) == ":" && !isNamespace(nm.w)) {
             const rt: RMType = parseOpenerType(mAdv(m, 1))
@@ -1912,9 +1957,10 @@ ${
                 dflt = rv.v
                 m = rv.mp
             }
+            if (exported || isLet) m = grantInOpener(m, exported, isLet, nm.w, start)
             const da: ADeclAttr = { nid: m.nid, span: mkSpan(start, m.pos), exported: exported, isLet: isLet,
                                     name: nm.w, ty: rt.t, dflt: dflt }
-            return { typed: [da], attrs: [], vals: [], mp: mBump(m) }
+            return { typed: [da], attrs: [], vals: [], rend: [], kws: [], mp: mBump(m) }
         }
         let name: string = nm.w
         if (chAt(m, 0) == "(") {
@@ -1923,13 +1969,13 @@ ${
                 // a call that is not a validator (§55.1's vocabulary): skipped whole, reported
                 const vm: MP = backToMarkup(m, vt)
                 const d: MP = mDiag(vm, "E-PARSE-ATTR", "`" + nm.w + "(…)` in a tag — only a validator (§55.1: `req`, `length`, `pattern`, `min`, `max`, `gt`, `lt`, `gte`, `lte`, `eq`, `neq`, `oneOf`, `notIn`) takes arguments here", start, vm.pos)
-                return { typed: [], attrs: [], vals: [], mp: d }
+                return { typed: [], attrs: [], vals: [], rend: [], kws: [], mp: d }
             }
             // s444 Phase B (dpa-058): a validator call in an opener (§55.1, §66.4 rule 3)
             const rv: RValArg = parseValArg(vt)
             const vm2: MP = backToMarkup(m, rv.tp)
             const va: AValidator = { nid: vm2.nid, span: mkSpan(start, vm2.pos), name: nm.w, arg: rv.arg }
-            return { typed: [], attrs: [], vals: [va], mp: mBump(vm2) }
+            return { typed: [], attrs: [], vals: [va], rend: [], kws: [], mp: mBump(vm2) }
         }
         if (chAt(m, 0) == ":") {
             const sub: RWord = readName(mAdv(m, 1))
@@ -1951,9 +1997,64 @@ ${
                 m = mBump(bn.mp)
             }
         }
-        if (exported || isLet) m = mDiag(m, "E-PARSE-ATTR", "`export` / `let` apply only to a typed attribute (`let " + name + ":Type=…`)", start, m.pos)
+        if (exported || isLet) {
+            m = grantInOpener(m, exported, isLet, name, start)
+        } else if (name == "let") {
+            // a trailing flag `<x:int=0 let/>` — the grant written after the name
+            return { typed: [], attrs: [], vals: [], rend: [], kws: [bareKw(m, false, true, start)], mp: m }
+        }
         const a: AAttr = { nid: m.nid, span: mkSpan(start, m.pos), name: name, value: v }
-        return { typed: [], attrs: [a], vals: [], mp: mBump(m) }
+        return { typed: [], attrs: [a], vals: [], rend: [], kws: [], mp: mBump(m) }
+    }
+
+    // S447: `let` / `export` inside an opener. `let` (with or without `export`)
+    // is E-DECL-LET-IN-OPENER (§66.20); an `export` alone on an attribute has no
+    // named code — it is the same rule (§66.4 rule 6: an attribute carries no
+    // grant), reported as E-PARSE-ATTR with the same fix. `name` is the
+    // attribute's name ("" when the keyword stands on the declaration itself).
+    fn grantInOpener(mp: MP, exported: boolean, isLet: boolean, name: string, start: int) -> MP {
+        const kw: string = exported && isLet ? "export let" : (isLet ? "let" : "export")
+        const fix: string = "make `" + name + "` a child declaration in the body, `" + kw + " <" + name + ":Type=…/>` (a `:struct` opener when no typed attribute is left) — an attribute is always locked data (§66.4 rule 6, S447)"
+        if (isLet) return mDiag(mp, "E-DECL-LET-IN-OPENER", "`" + kw + "` cannot stand on the attribute `" + name + "`: " + fix, start, mp.pos)
+        return mDiag(mp, "E-PARSE-ATTR", "`export` cannot stand on the attribute `" + name + "`: " + fix, start, mp.pos)
+    }
+
+    // `renders` followed by whitespace and a markup element: the clause shape.
+    // Any other `renders` (`renders="x"`, `renders:string`) is an ordinary
+    // attribute name — §66.5.1: `renders` is not reserved outside its two
+    // contextual positions.
+    fn rendersClauseAt(afterWord: MP) -> boolean {
+        if (!isSpaceCh(chAt(afterWord, 0))) return false
+        const at: MP = skipSpace(afterWord)
+        return chAt(at, 0) == "<" && isNameStart(chAt(at, 1))
+    }
+
+    // A bare grant keyword on the opener itself (`<x:int=0 let/>`), as data: the
+    // message depends on whether the opener declares anything (parseOpener).
+    fn bareKw(mp: MP, exported: boolean, isLet: boolean, start: int) -> AAttr {
+        const kw: string = exported && isLet ? "export let" : (isLet ? "let" : "export")
+        return { nid: mp.nid, span: mkSpan(start, mp.pos), name: kw, value: AAttrValue.NoValue }
+    }
+
+    // S447 (§66.2.5): `let` / `export` inside an opener, on the opener itself —
+    // on a DECLARATION the fix is the keyword before the `<`; on a tag that
+    // declares nothing (`<input let/>`) moving it would only trade this error
+    // for E-PARSE-LET, so the message says to drop it instead.
+    fn keywordInOpener(mp: MP, kw: string, tag: string, isDecl: boolean, sp: ASpan) -> MP {
+        const shown: string = tag == "" ? "name" : tag
+        if (isDecl) return mDiag(mp, "E-DECL-LET-IN-OPENER", "`" + kw + "` goes BEFORE the `<` (S447): write `" + kw + " <" + shown + "…/>`, not `<" + shown + " " + kw + "…/>` or `<" + kw + " " + shown + "…/>` — inside an opener stand only the name, `:Type`, `=value`, typed attributes and flags (§66.2.5)", sp.start, sp.end)
+        return mDiag(mp, "E-DECL-LET-IN-OPENER", "`" + kw + "` is a declaration's keyword, and `<" + shown + ">` declares nothing (no own value `=…`, no `:Type`, no typed attribute — §66.2.2): drop `" + kw + "` (§66.2.5)", sp.start, sp.end)
+    }
+
+    // S447 (§66.5.1): a `renders <element>` clause written inside an opener.
+    // The element is consumed (so the opener's own `/>` / `>` still ends the
+    // tag) and its span returned; parseOpener reports it once the opener is
+    // classified — E-DECL-RENDERS-IN-OPENER on a DECLARATION opener only.
+    fn rendersInOpener(mp: MP, afterWord: MP) -> RAttrScan {
+        const at: MP = skipSpace(afterWord)
+        const ro: ROpener = parseOpener(at)
+        const re: RElem = finishElem(ro.o, ro.mp)
+        return { typed: [], attrs: [], vals: [], rend: [mkSpan(mp.pos, re.mp.pos)], kws: [], mp: re.mp }
     }
 
     // s444 Phase B — a validator's arguments, at its `(`: a comparison and its
@@ -2159,6 +2260,14 @@ ${
                 out = out.concat([rn.n])
                 m = rn.mp
                 textStart = m.pos
+            } else if (!o61Body(tag) && keywordBeforeDeclAt(m)) {
+                if (text != "") {
+                    out = out.concat([textNode(m, textStart, text)])
+                    m = mBump(m)
+                    text = ""
+                }
+                m = keywordNotItem(m, tag, true)
+                textStart = m.pos
             } else {
                 if (text == "") textStart = m.pos
                 text = text + chAt(m, 0)
@@ -2197,6 +2306,64 @@ ${
         if (c >= "a" && c <= "z") return true
         if (c >= "A" && c <= "Z") return true
         return c == "!" || c == "/" || c == "?" || c == "*" || c == "_" || c == "."
+    }
+
+    // S447 sub-ruling 3, narrowed S449 (§66.2.5): in a CODE-DEFAULT body that
+    // is not an item position (an engine state-child body — parseCodeBody)
+    // `let` / `export` / `export let` followed by a tag is
+    // E-DECL-KEYWORD-NOT-ITEM. In a FREE-TEXT body (parseKids — plain markup,
+    // a `renders` element) the words are TEXT and this is never consulted
+    // (`<p>Please let <b>me</b> know</p>`). The keyword must stand as a word
+    // (not the tail of `outlet`). Returns the position of the tag's `<`, or -1.
+    fn keywordTagAt(mp: MP) -> int {
+        const c: string = chAt(mp, 0)
+        if (c != "l" && c != "e") return -1
+        // a word boundary by the markup name rule (isNameCh — `-` included):
+        // `outlet`, `re-let` are not the keyword
+        if (isNameCh(chAt(mp, -1))) return -1
+        const w: RWord = readName(mp)
+        let m: MP = w.mp
+        if (w.w == "export") {
+            const s: MP = skipSpace(m)
+            const wl: RWord = readName(s)
+            if (wl.w == "let") m = wl.mp
+        } else if (w.w != "let") {
+            return -1
+        }
+        const at: MP = skipSpace(m)
+        if (chAt(at, 0) != "<") return -1
+        const n: string = chAt(at, 1)
+        if ((n >= "a" && n <= "z") || (n >= "A" && n <= "Z") || n == "_" || n == "*") return at.pos
+        return -1
+    }
+
+    // PA reading S449 (for veto) on S449 ruling item 2: in a FREE-TEXT body the
+    // words are text UNLESS the tag after them is a declaration BY ITS OPENER
+    // (own value, `:Type`, typed attribute — §66.2.2): `<p>let <x:int=0/></p>`
+    // is the misplaced-declaration mistake, and judging the opener is not a
+    // guess. `<p>Please let <b>me</b> know</p>` stays prose.
+    fn keywordBeforeDeclAt(mp: MP) -> boolean {
+        const lt: int = keywordTagAt(mp)
+        if (lt < 0) return false
+        const ro: ROpener = parseOpener(mAt(mp, lt))
+        return isDeclOpener(ro.o)
+    }
+
+    // ⚑ O61 (§66.2.5, not ruled): whether a `<page>` / `<theme>` body is an
+    // item position. Both elements are refused whole (E-BOOTSTRAP-UNSUPPORTED —
+    // `<theme>` here, `<page>` in analyze's structural-tag check), so their own
+    // body decides nothing and reports no keyword: one fail-closed code for both.
+    fn o61Body(tag: string) -> boolean { return tag == "page" || tag == "theme" }
+
+    // Report the keyword (its span) and resume at the tag, which then parses
+    // as the markup node it is.
+    fn keywordNotItem(mp: MP, tag: string, freeText: boolean) -> MP {
+        const lt: int = keywordTagAt(mp)
+        const kw: string = mp.src.substring(mp.pos, lt).trim()
+        const body: string = freeText ? "free-text" : "code-default"
+        const escape: string = freeText ? " — or, if you meant the word, write `" + interpOpen() + "\"" + kw + "\"}`" : " (display text here is a quoted literal, §4.18.3)"
+        const d: MP = mDiag(mp, "E-DECL-KEYWORD-NOT-ITEM", "`" + kw + "` before a declaration declares an ITEM, and only a program body or a declaration body holds items — not the " + body + " body of `<" + tag + ">` (§66.2.5); move the declaration to the program body or into a declaration's body, or drop `" + kw + "`" + escape, mp.pos, mp.pos + kw.length)
+        return mAt(d, lt)
     }
 
     // RULED S442 (dpa-045 follow-up 1): the context sigils are exits of free
@@ -2337,6 +2504,8 @@ ${
     fn refuseTheme(o: Opener, mp: MP) -> MP {
         let m: MP = mp
         if (!o.selfClosing) {
+            // the refused body is consumed as free text; it reports no keyword
+            // and does not decide ⚑ O61 (o61Body, §66.2.5)
             const kids: RNodes = parseKids(mp, o.name)
             m = kids.mp
         }
@@ -2612,14 +2781,22 @@ ${
                 m = parseCloser(m, tag)
                 going = false
             } else {
+                // a declaration body is an item position (§66.2.5): `export` /
+                // `let` before a child's `<`, in that order
                 let exported = false
+                let isLet = false
                 const w: RWord = readName(m)
                 if (w.w == "export") {
                     exported = true
                     m = skipTrivia(w.mp)
                 }
+                const wl: RWord = readName(m)
+                if (wl.w == "let") {
+                    isLet = true
+                    m = skipTrivia(wl.mp)
+                }
                 if (chAt(m, 0) == "<") {
-                    const rc: RChild = parseDeclChild(m, exported)
+                    const rc: RChild = parseDeclChild(m, exported, isLet)
                     out = out.concat([rc.c])
                     m = rc.mp
                 } else {
@@ -2632,14 +2809,15 @@ ${
         return { cs: out, mp: m }
     }
 
-    fn parseDeclChild(mp: MP, exported: boolean) -> RChild {
+    fn parseDeclChild(mp: MP, exported: boolean, isLet: boolean) -> RChild {
         const ro: ROpener = parseOpener(mp)
         const o: Opener = ro.o
         if (isDeclOpener(o)) {
-            const rd: RDecl = finishDecl(o, ro.mp, exported)
+            const od: Opener = isLet ? withLet(o) : o
+            const rd: RDecl = finishDecl(od, ro.mp, exported)
             return { c: ADeclChild.ChildField(rd.d), mp: rd.mp }
         }
-        let m: MP = ro.mp
+        let m: MP = keywordOnUse(ro.mp, o, exported, isLet)
         // O5 RULED (1i): a state-child's body is that variant's markup — a
         // `:`-shorthand expression (§4.14) or a bare body up to its closer.
         let body: ANode[] = []
@@ -2700,11 +2878,23 @@ ${
             const t2: TP = expectRegionEnd(expectP(inner.tp, "}"))
             return { items: inner.items, mp: backToMarkup(mp, t2) }
         }
-        if (chAt(mp, 0) == "<") return parseTagItem(mp, false)
+        if (chAt(mp, 0) == "<") return parseTagItem(mp, false, false)
         const w: RWord = readName(mp)
+        // a program body is an item position (§66.2.5): `export` / `let` before
+        // a tag's `<`, in JS order. `let` followed by a name stays the logic
+        // binding (no statements at program level in the slice).
+        if (w.w == "let") {
+            const afterLet: MP = skipTrivia(w.mp)
+            if (chAt(afterLet, 0) == "<") return parseTagItem(afterLet, false, true)
+        }
         if (w.w == "export") {
             const after: MP = skipTrivia(w.mp)
-            if (chAt(after, 0) == "<") return parseTagItem(after, true)
+            if (chAt(after, 0) == "<") return parseTagItem(after, true, false)
+            const wl: RWord = readName(after)
+            if (wl.w == "let") {
+                const after2: MP = skipTrivia(wl.mp)
+                if (chAt(after2, 0) == "<") return parseTagItem(after2, true, true)
+            }
             return logicRegionItem(mp, LexStop.Statement)
         }
         if (w.w == "function" || w.w == "fn" || w.w == "type") return logicRegionItem(mp, LexStop.Statement)
@@ -2721,24 +2911,40 @@ ${
         return { items: r.items, mp: backToMarkup(mp, r.tp) }
     }
 
-    fn parseTagItem(mp: MP, exported: boolean) -> RMItems {
+    fn parseTagItem(mp: MP, exported: boolean, isLet: boolean) -> RMItems {
         const ro: ROpener = parseOpener(mp)
         const o: Opener = ro.o
         if (isThemeOpener(o)) return { items: [], mp: refuseTheme(o, ro.mp) }
         if (isEffectOpener(o)) {
             // s449: an `<effect>` at the program body top — owned by the program scope
-            const re: REffectNode = finishEffect(o, ro.mp)
+            const re: REffectNode = finishEffect(o, letOnNonDecl(ro.mp, o, isLet))
             let em: MP = re.mp
             if (exported) em = mDiag(em, "E-PARSE-EXPORT", "`export` applies to a declaration, not to an `<effect>`", re.w.span.start, re.w.span.end)
             const n: ANode = { nid: em.nid, span: re.w.span, k: ANodeK.Effect(re.w) }
             return mItem(mBump(em), re.w.span.start, AItemK.MarkupItem(n))
         }
         const k: TagKind = tagKind(o)
+        const od: Opener = isLet ? withLet(o) : o
         return match k {
-            .IsProgram :> programItem(o, ro.mp)
-            .IsDecl :> declItem(finishDecl(o, ro.mp, exported))
-            .IsElem :> elemItem(finishElem(o, ro.mp), exported)
+            .IsProgram :> programItem(o, letOnNonDecl(ro.mp, o, isLet))
+            .IsDecl :> declItem(finishDecl(od, ro.mp, exported))
+            .IsElem :> elemItem(finishElem(o, letOnNonDecl(ro.mp, o, isLet)), exported)
         }
+    }
+
+    // A `let` before a tag that declares nothing (§66.2.2 — no own value, no
+    // typed attribute, no `:Type`): `let` is a declaration's `replace` grant.
+    fn letOnNonDecl(mp: MP, o: Opener, isLet: boolean) -> MP {
+        if (!isLet) return mp
+        return mDiag(mp, "E-PARSE-LET", "`let` applies to a declaration — `<" + o.name + ">` declares nothing (a declaration has an own value `=…`, a `:Type`, or a typed attribute, §66.2.2; a container is `<" + o.name + ":struct>`)", o.start, o.start + o.name.length + 1)
+    }
+
+    // `export` / `let` before a state-child in a declaration body (O52): a
+    // state-child names a variant; it is not a declaration and takes neither.
+    fn keywordOnUse(mp: MP, o: Opener, exported: boolean, isLet: boolean) -> MP {
+        let m: MP = letOnNonDecl(mp, o, isLet)
+        if (exported) m = mDiag(m, "E-PARSE-EXPORT", "`export` applies to a declaration — `<" + o.name + ">` in a declaration body is a state-child (§66.2.2, O52)", o.start, o.start + o.name.length + 1)
+        return m
     }
 
     fn declItem(r: RDecl) -> RMItems {

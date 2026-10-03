@@ -21,7 +21,7 @@ let mods;
 beforeAll(() => { ({ mods } = loadM2()); }, { timeout: 120000 });
 afterEach(() => expectNoPageErrors());
 
-const P = (body, decls = "") => `<program>\n    type Ph:enum = { A, B }\n    <let n:int=5/>\n${decls}\n    <main>\n        ${body}\n        <b>end</b>\n    </main>\n</program>\n`;
+const P = (body, decls = "") => `<program>\n    type Ph:enum = { A, B }\n    let <n:int=5/>\n${decls}\n    <main>\n        ${body}\n        <b>end</b>\n    </main>\n</program>\n`;
 // dpa-045 follow-up 4 (RULED S442, SPEC §4.18.5): the whitespace between
 // `<main>`'s children is kept exactly — W wraps the expected body in it.
 const W = (inner) => `\n        ${inner}\n        <b>end</b>\n    `;
@@ -306,7 +306,7 @@ describe("an unterminated display-text literal is E-CTX-001 against its opening 
 // elements is kept exactly — L13 (lower dropped whitespace-only text containing
 // a newline) is retired. Code-default formatting whitespace is unchanged.
 describe("follow-up 4 — whitespace-only text between elements is kept exactly", () => {
-  const main = (inner) => `<program>\n    <let n:int=5/>\n    <xs:string[]=(["a", "b"])/>\n    <main>${inner}</main>\n</program>\n`;
+  const main = (inner) => `<program>\n    let <n:int=5/>\n    <xs:string[]=(["a", "b"])/>\n    <main>${inner}</main>\n</program>\n`;
   const mainHtml = async (src) => {
     const r = run(src);
     expect(r.diags.map((d) => d.code)).toEqual([]);
