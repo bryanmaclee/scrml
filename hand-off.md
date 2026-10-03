@@ -25,12 +25,21 @@ Note: pushed to scrml's `inbox` branch — `handOffs/incoming/2026-10-02-from-S4
   `fail` roll back the §8.9.2 envelope? rec yes).
 
 ### 2. aM — the pin is BUMPED; two Pi-deploy blockers remain (Peter's, aM repo)
-`scrml-pinned`/`app-pinned` fast-forwarded to scrml main (SHA in "aM" below). aM main `156952a` carries the guard:
+`scrml-pinned`/`app-pinned` fast-forwarded 8f3c5b74 → **9bafb927** (#1244; re-verified through the pin's own bin: 0 errors,
+the same 204 route names, db path recorded as `app.db`; reversible via the app-pinned reflog). aM main `156952a` carries the guard:
 `app/src/scrml.toml` (anchors the db path) + `deploy-pi.sh` REFUSES a new-data-root build unless `S450_PI_READY=1`.
 Before any Pi deploy: (1) add `SCRML_DATA_DIR=/home/pi/app` to the asset-app systemd unit; (2) `/`, `/index.html`, `/sw.js`
 now 404 under scrml's static allowlist (#1162, §47.13) — aM must ship them as build-written assets OR scrml needs a
-sanctioned extra-static mechanism (no config knob found — ask bryan if Peter wants the latter). Peter's click-test list is
-in "aM" below. ⚑ Do NOT migrate aM's `db.js` replace-all to scrml `transaction{}` until the shared-connection HIGH is fixed.
+sanctioned extra-static mechanism (no config knob found — ask bryan if Peter wants the latter). ⚑ Do NOT migrate aM's
+`db.js` replace-all to scrml `transaction{}` until the shared-connection HIGH is fixed.
+**Peter's click-test list (laptop dev, after the bump):** Fleet — "Show Fleet" loads oil changes once (no double fetch); the
+oil-change "Tier:" line now reads `last → next` (a braceless-`else` miscompile on the old pin hid `last`) · sorts using the
+`~~~` empty-last sentinel put empty rows last · delete/edit/move buttons (doc / fit / part / maint / queue removes, edit
+reading, toggle lock, delete field, tile up/down, remove leg, field-def move/retire) update the list and don't freeze if a
+reload fails — handlers now await their reload, and a failed reload now skips the rest of that function · viewer tile opens
+still log · login / logout / reset-with-PIN, sessions survive a dev-watch restart (session store is WAL now) · `serve.cmd`
+`http://localhost:3000/` will 404 until blocker 2 is solved (`/login` works) · `scrml dev` binds loopback (pass `--host` to
+test from a phone). Full pin→main emit classification: S450 scratchpad `am-bump/`.
 
 ### 3. Peter-lane queue (filed this session, all reproduced on main 865065d8, traced loci)
 HIGH `g-quoted-else-if-and-show-condition-not-parsed` (`tokenizer.ts:782` — one-line class fix, governing §5.2 sentence
@@ -42,6 +51,16 @@ quoted in the entry) · HIGH `g-propagated-failable-helper-not-emitted-on-server
 ⚑ **Check each against the S435 policy BEFORE dispatching** (impl#1 changes only for security / bootstrap-serving — adopter-
 reported is RETIRED; aM is PARKED). Security-class: none of the above is obviously security; the quoted-condition and
 propagated-helper ones are silent-wrong. Gift-wrap any you want built as an exception ask.
+
+### 4. Maps non-compliance from the S450 refresh (stamp 9bafb927) — #1240's tail, bryan's lane (S449 owns the freeze)
+N-S450-1: `compiler/SPEC.md` :7769 and :19967 still say "Both front-ends SHALL fire the code: … `--parser=scrml-native`"
+(and :18879, :2022 — the latter is #1244's own §5.2.4 not-covered list) though the flag is now a hard error; :20918 already
+says "M6 not pursued". N-S450-2: `compiler/native-parser/README.md` still describes the flag + the M6 front-end-deletion plan
+and 15 deleted `.scrml` files; `master-list.md:71` has no freeze note. N-S450-3: present-tense parity-gate references in
+`conformance/README.md:454`, `ast-builder.js:13432/:18655`, `block-splitter.js:3501`, `native-parser/parse-file.js:1728`,
+`e2e-render-map.test.js:5`. U-S450-1: `self-host-v2/progress.md` records slice-m2 443/5 FAIL at #1238
+(`g-bootstrap-slice-m2-render-hole-write-tests-s449`) — unverified whether main is red there. Full report:
+`.claude/maps/non-compliance.report.md`. Route these to bryan's next session; don't edit SPEC ourselves.
 
 ## WHAT LANDED — seven PRs, each through `merge-on-green.sh` (gate + windows green on the CURRENT head; tracking = main's newest COMPLETED run)
 | PR | what | review |
@@ -91,6 +110,23 @@ New: `hold/s450-transaction-in-function-body` @69cdaa98 · `hold/s450-each-row-i
 Deleted (landed): `hold/s432-defer-spec-calls`, `hold/s438-impl1-imported-enum-match`, `hold/s432-expr-handler-multi-stmt-alt`
 (E-ATTR source, superseded by #1244). Remaining older: `hold/s432-bare-when-body-top{,-alt}`, `hold/s438-1109-review-fixes`,
 `hold/s438-refusal-writes-no-dist`, `hold/s429-mutation-arg-string-quotes` (not touched).
+
+
+## Gate at close
+- **Cloud:** main `9bafb927` (#1244, the session's last landing) — `gate` ✅ · `windows` ✅ · `tracking` ✅. Every S450 landing
+  merged via `merge-on-green.sh` (gate + windows green on the PR's current head; tracking's failure-name set == main's newest
+  COMPLETED run). Local full suite not re-run at wrap — the cloud run is the authority; agents' local runs: unit+conformance
+  23,473/0 (#1244 branch), schema suites 666/0, handler/TAB 1,477/0; residual local fails are the known Windows/load set.
+- `facts.ts --check` PASS · `regen-spec-index.ts --check` OK · `state.ts --check`: gap-counts PASS; `recent-sessions`
+  (master-list) stale on main itself — not gated by CI, deliberately not committed (8- vs 9-char SHA churn on this clone).
+- Review floor: S450 markers for #1208 #1210 #1211 #1241–#1244 appended to `docs/pr-reviews.md`. The 27 owed at boot are
+  bryan's (#1203–#1240) — not touched (shared surface, S449 live).
+- Worktrees: every S450 worktree removed (agent + `rv-*` review trees; junctions unlinked first). Older, not this session's:
+  `.claude/worktrees/s438-scratch-*` and the drive-root `C:/b431s`, `C:/b431w`, `C:/r431w`, `C:/w431`, `C:/w431s`,
+  `C:/wtdefer` — Peter's to clear (harness blocks drive-root rm).
+- Temp volume (6b′, Windows): session scratchpad 928 MB / ~48k files at close (reviewers' corpus build outputs) → generated
+  trees deleted → 276 MB / 11.8k files (review scripts + reports kept, cited above).
+- Remote branches: merged S446/S450 `fix/*` branches deleted; holds as listed above.
 
 ---
 
