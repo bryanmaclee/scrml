@@ -3,6 +3,7 @@ import { liveSqlInterpolations } from "./sql-lex.ts";
 import { splitBareExprStatements } from "./compat/parser-workarounds.js";
 import { rewriteReactiveRefsAST, rewriteServerReactiveRefsAST, setParserCurrentUserAmbientActive } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
+import { isServerAmbientSession, refuseServerAmbientSession } from "./server-session-guard.ts";
 // GITI-017 (S125): shared regex/comment/string fence — see code-segments.ts header.
 import { rewriteCodeSegments, regexAllowedAfter } from "./code-segments.ts";
 // §14.8.9 protected-column egress redaction — resolve the protected OUTPUT
@@ -3000,7 +3001,11 @@ function rewriteServerAtRef(segment: string): string {
   return segment.replace(/@([A-Za-z_$][A-Za-z0-9_$]*)/g, (_, name: string) =>
     name === "currentUser" && _currentUserAmbientActive
       ? "_scrml_currentUser"
-      : `_scrml_body["${name}"]`,
+      // §6.6.9 / §20.5 (S449) — never the request body for an ambient
+      // `@session` (fail-closed backstop, server-session-guard.ts).
+      : isServerAmbientSession(name)
+        ? refuseServerAmbientSession("rewrite.ts rewriteServerAtRef")
+        : `_scrml_body["${name}"]`,
   );
 }
 
@@ -3068,9 +3073,13 @@ export function rewriteServerExpr(expr: string, dbVar: string = "_scrml_sql", er
  */
 export function serverRewriteEmitted(code: string): string {
   if (!code) return code;
+  // §6.6.9 / §20.5 (S449) — an ambient `@session` client read lowered for the
+  // server is refused, never re-pointed at the request body (server-session-guard.ts).
+  const toBody = (_: string, name: string): string =>
+    isServerAmbientSession(name) ? refuseServerAmbientSession("rewrite.ts serverRewriteEmitted") : `_scrml_body["${name}"]`;
   return code
-    .replace(/_scrml_reactive_get\("([^"]+)"\)/g, '_scrml_body["$1"]')
-    .replace(/_scrml_derived_get\("([^"]+)"\)/g, '_scrml_body["$1"]');
+    .replace(/_scrml_reactive_get\("([^"]+)"\)/g, toBody)
+    .replace(/_scrml_derived_get\("([^"]+)"\)/g, toBody);
 }
 
 // ---------------------------------------------------------------------------

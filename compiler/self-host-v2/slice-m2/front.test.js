@@ -22,6 +22,24 @@ const LIB = () => ({ path: "lib/dropdown.scrml", src: readSlice("src/lib/dropdow
 const run = (files) => frontEnd(mods, files);
 const codes = (r) => r.diags.map((d) => d.code);
 
+// SPEC §6.15 (S449 item 3): a render expression may not write reactive state — a program whose render hole
+// calls a writer is now E-VALUE-WRITES-STATE. The S440 runtime guarantees below (a render-hole write loop
+// converges; a Commit outside a handler batch is atomic) are no longer reachable from SOURCE, but the runtime
+// still promises them, so they stay tested at the Core level: the test compiles the write-free TWIN (each
+// render-hole function `f` returns without writing; the writing body is declared as `fW`, called by nothing),
+// then grafts `fW`'s lowered body into `f` — the pattern slice-m4 effect.test.js uses for C11.
+const graftWriters = (core, names) => {
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  const out = clone(core);
+  for (const n of names) {
+    const into = out.fns.find((f) => f.sym.hint === n);
+    const from = out.fns.find((f) => f.sym.hint === n + "W");
+    if (!into || !from) throw new Error(`graftWriters: no fn ${n} / ${n}W in the lowered Core`);
+    into.body = clone(from.body);
+  }
+  return out;
+};
+
 // ---------------------------------------------------------------------------
 // The SPEC's negative lines. Each `<!-- … → E-CODE … -->` line names the code
 // its uncommented form must produce; this table is how each is uncommented, and
@@ -566,7 +584,8 @@ describe("S440 N1 — the spread snapshot reads only the fields the override val
 </>
 renders <p class="box">\${a},\${b},\${c}</p>
 `;
-  const loopProgram = (guard) => ({
+  // `twin`: e1 / e2 write nothing; their writing bodies are e1W / e2W (grafted in Core — see graftWriters)
+  const loopProgram = (guard, twin = false) => ({
     path: "n1.scrml",
     src: `${BOX}<program>
     <let n:int=0/>
@@ -575,15 +594,15 @@ renders <p class="box">\${a},\${b},\${c}</p>
         @log.push(1)
         return 1
     }
-    function e1() -> int {
+    function e1${twin ? "W" : ""}() -> int {
         if (@n > 0) { @h = { ...@h, a: stamp() + @h.b * 0 } }
         return 0
     }
-    function e2() -> int {
+    function e2${twin ? "W" : ""}() -> int {
         ${guard ? "if (@log.length < 40) { @h.c = @log.length }" : "@h.c = @log.length"}
         return 0
     }
-    function go() { @n = 1 }
+${twin ? "    function e1() -> int { return 0 }\n    function e2() -> int { return 0 }\n" : ""}    function go() { @n = 1 }
     <main>
         <box as=h title="B"/>
         <p class="e1">\${e1()}</p>
@@ -597,10 +616,13 @@ renders <p class="box">\${a},\${b},\${c}</p>
 
   for (const guard of [true, false]) {
     test(`a side-effecting override in a render hole beside a sibling writer converges (${guard ? "guarded" : "unguarded"}): box=1,0,1, log length 1`, async () => {
-      const r = run([loopProgram(guard)]);
+      // §6.15: the source program is now rejected — both render holes call a writer
+      expect(codes(run([loopProgram(guard)]))).toEqual(["E-VALUE-WRITES-STATE", "E-VALUE-WRITES-STATE"]);
+      const r = run([loopProgram(guard, true)]);
       expect(codes(r)).toEqual([]);
-      expect(mods.check.checkCore(r.core)).toEqual([]);
-      await loadProgram(r.core, guard ? "n1-guarded" : "n1-unguarded");
+      const core = graftWriters(r.core, ["e1", "e2"]);
+      expect(mods.check.checkCore(core)).toEqual([]);
+      await loadProgram(core, guard ? "n1-guarded" : "n1-unguarded");
       click(document.querySelector("button.go"));
       expect(document.querySelector("p.box").textContent).toBe("1,0,1");
       expect(document.querySelector("p.len").textContent).toBe("1");
@@ -663,17 +685,18 @@ describe("RULED S440 — a duplicate override key is a compile error (E-STRUCT-D
 // act on) the half-applied value. The writes now run in one `rt.batch`.
 // ---------------------------------------------------------------------------
 describe("S440 F-A — a Commit outside a handler batch: no observer sees the half-applied value", () => {
-  const REACT = (spread) => `    <let n:int=0/>
-    function react() -> int {
+  // `twin`: react / watch write nothing; their writing bodies are reactW / watchW (grafted in Core)
+  const REACT = (spread, twin) => `    <let n:int=0/>
+    function react${twin ? "W" : ""}() -> int {
         if (@n > 0) { @g = { ...@g, ${spread} } }
         return @n
-    }`;
-  const prog = (spread, fns, view) => ({
+    }${twin ? "\n    function react() -> int { return @n }" : ""}`;
+  const prog = (spread, fns, view, twin = false) => ({
     path: "fa.scrml",
     src: `${GATES}
 <program>
-${REACT(spread)}
-${fns}
+${REACT(spread, twin)}
+${twin ? fns.replace("function watch()", "function watchW()") + (fns ? '\n    function watch() -> string { return "w" }' : "") : fns}
     <main>
         <gate as=g title="G"/>
         <p class="r">\${react()}</p>
@@ -685,10 +708,15 @@ ${view}
   });
 
   async function runFA(tag, spread, fns = "", view = "") {
-    const r = run([prog(spread, fns, view)]);
+    // §6.15: the source program is now rejected — `react()` (and `watch()`) write from a render hole
+    const src = codes(run([prog(spread, fns, view)]));
+    expect(src.length).toBeGreaterThan(0);
+    expect(src.every((c) => c === "E-VALUE-WRITES-STATE")).toBe(true);
+    const r = run([prog(spread, fns, view, true)]);
     expect(codes(r)).toEqual([]);
-    expect(mods.check.checkCore(r.core)).toEqual([]);
-    const { rt } = await loadProgram(r.core, tag);
+    const core = graftWriters(r.core, fns ? ["react", "watch"] : ["react"]);
+    expect(mods.check.checkCore(core)).toEqual([]);
+    const { rt } = await loadProgram(core, tag);
     const g = instancesOf(rt, "gate")[0];
     const pi = g.decl.fields.indexOf("phase"), si = g.decl.fields.indexOf("stage");
     const seen = [];

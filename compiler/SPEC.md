@@ -647,17 +647,26 @@ A newline between `<` and an identifier is whitespace per §4.3: it produces the
 
 #### 4.11.3 `is` Keyword
 
-`is` is a context-sensitive keyword valid in two positions:
+`is` is a context-sensitive keyword valid in ~~two positions~~ one position:
 1. As the variant-check operator in a boolean expression: `expression is .VariantName`
-2. In a `when` guard: `when expression is .VariantName { ... }`
+2. ~~In a `when` guard: `when expression is .VariantName { ... }`~~ *(struck S449)*
 
 In all other contexts, `is` is a valid identifier.
+
+> **Amended S449 — the `when … is` guard is struck.** Position 2 had no grammar anywhere in this SPEC and no
+> implementation: impl#1 rejects `when @shift is .OnDuty { … }` (`is` undeclared, E-SCOPE-001), and its one sample was
+> a malformed fragment S441 rewrote to `<p if=(@s is .Active)>`. Removing it rejects nothing real. A variant check is
+> the position-1 operator in any boolean position (`if=(@shift is .OnDuty)`, `if (…)`); reacting to a change is an
+> `<effect>` (§6.7.4). **Provenance:** ruling:user-voice-scrml.md S449 item 7 — *"7-11 = **(a)** strike §4.11.3 `when
+> x is .V`, keep worker `when … from` hooks for now"* · dd:`scrml-support/docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`
+> item 11 · **supersedes:** position 2 and the normative bullet *"`is` SHALL be recognized as a keyword in `when` guard
+> position."* (struck in place). **Direction of change:** none measurable (the form never compiled).
 
 **Normative statements:**
 
 - `is` SHALL be recognized as a keyword in variant-check position: between an expression
   and a `.VariantName` shorthand.
-- `is` SHALL be recognized as a keyword in `when` guard position.
+- ~~`is` SHALL be recognized as a keyword in `when` guard position.~~ *(struck S449 — above)*
 - In all other syntactic positions, `is` SHALL be treated as a valid identifier.
 - The parser SHALL disambiguate `is` by context: after an expression that has an enum type,
   `is` begins a variant check. Elsewhere, it is an identifier.
@@ -1176,6 +1185,7 @@ Each `:`-shorthand body here is a display-text literal (§4.18.3). `"Loading… 
 | `<onTransition>` | §51.0.H | `to=Variant`, `from=Variant`, `once` (boolean), `if=expr` | bare-body (effect statements) or `:`-shorthand |
 | `<onTimeout>` (S67; `name=` S79) | §51.0.M | `after=DURATION` (required), `to=.Variant` (required), `name=IDENT` (optional, S79 — addressable for `cancelTimer`) | self-closing only |
 | `<onIdle>` (S77) | §51.0.R | `after=DURATION` (required), `to=.Variant` (required) | self-closing only |
+| `<onMount>` (S449, **Nominal**) | §6.7.1a | (none — its trigger is its tree position) | `${ }` logic body (a lifecycle element, sibling of `<effect>` / `<request>`); renders nothing; or self-closing (empty — W-LIFECYCLE-010) |
 | `<page>` (v0.3 Wave 1) | §40 | `db=`, `auth=`, `csrf=`, `ratelimit=` (per-route only; see §40 for canonical value sets) | default-logic body (mode-equivalent to `<program>` body in v0.3) |
 | `<endpoint>` (S219) | §61 | `path=string` (required), `method=HTTP-METHOD` (required), `accepts=:enum` (required) | bare-body (per-variant arms; REUSE §18.0.1 arm + §51.0.B.1 payload binding); each arm body is a **code-default body** (§4.18) |
 | `<onchange>` (§38.13, **Nominal**) | §38.13.3 | (none — arms only) | bare-body (per-variant arms over the synthesized `RowChange`; REUSE §18.0.1 arm + §51.0.B.1 payload binding); each arm body is a **code-default body** (§4.18). Valid ONLY inside a `watches=` `<channel>` body; classification + `attribute-registry.js` wiring land with the §38.13 impl |
@@ -1188,7 +1198,8 @@ Each `:`-shorthand body here is a display-text literal (§4.18.3). `"Loading… 
 - These element names SHALL NOT be treated as HTML elements. The HTML element registry (§24) excludes them; the scrml structural-element registry includes them.
 - (S111 — quoted-text model.) The state-child bodies of `<engine>` and the arm bodies of `<match>` are **code-default bodies** (§4.18.1) — a bare run in those bodies is code; display text is a `"..."` display-text literal (§4.18.3). The `<errors>` override-template body and any plain-markup element body are free-text bodies. The `<page>` body is a distinct **third** body-mode — `default-logic` (§40.8) — neither code-default nor free-text; the §4.18 split does not classify it. The body-mode of a structural element's body is fixed by the element kind per §4.18.
 - Attribute slots listed above are recognised at parse time. Unknown attributes on these elements emit `W-ATTR-001` (attribute allowlist warning, §3.3 / VP-1) and may escalate to error in stricter modes.
-- Component names (PascalCase user types) and these scrml-defined element names are disjoint — registering a user component named `engine`, `match`, `each`, `errors`, `onTransition`, `onTimeout`, `onIdle`, `render`, `page`, `endpoint`, `onchange`, `theme`, or `defaults` is `E-NAME-COLLIDES-RESERVED` (the names are reserved structural-element identifiers).
+- Component names (PascalCase user types) and these scrml-defined element names are disjoint — registering a user component named `engine`, `match`, `each`, `errors`, `onTransition`, `onTimeout`, `onIdle`, `onMount` (S449), `render`, `page`, `endpoint`, `onchange`, `theme`, or `defaults` is `E-NAME-COLLIDES-RESERVED` (the names are reserved structural-element identifiers).
+- (S449, **Nominal / spec-ahead**.) `<onMount>` is registered here as a scrml-defined element (§6.7.1a — ruling:user-voice-scrml.md S449 item 2, 2-2 = (M), 2a). Like `<each>` and `<match>` it is NOT locus-restricted to a parent structural element: it is grammatical as a child of any element scope, where `<effect>` (§6.7.4) is. The block-splitter classification of the `<onMount` opener and its `attribute-registry.js` row land with the bootstrap's `<onMount>` (`g-bootstrap-onmount-owed`); impl#1 does not register it (frozen).
 - These element names are ONLY recognised in their owning loci; e.g., `<onTransition>` is grammatical only as a child of `<engine>`; `<onTimeout>` is grammatical only as a child of an engine state-child; `<onIdle>` is grammatical only at engine root (sibling of state-children); `<page>` is grammatical only as a child of `<program>` in multi-page apps. Use outside the owning locus is `E-STRUCTURAL-ELEMENT-MISPLACED` or the element's specific misplacement code (e.g. `E-IDLE-MISPLACED` per §51.0.R). (`<endpoint>`, like `<match>`/`<each>`, is a top-level declaration — grammatical at program scope where a route declaration goes, NOT locus-restricted to a parent structural element; it is absent from this owning-locus restriction.)
 - `<page>` SHALL NOT carry a `route=` attribute. Routing in scrml is filesystem-inferred (per Pillar 3 — compiler owns the wiring; cross-ref §47.9.2 path-preserve emission); a `route=` attr on `<page>` is `E-PAGE-ROUTE-ATTR-FORBIDDEN` (doubly forbidden: it both regresses against filesystem inference AND collides with the existing nested-program `route=` per §4.12.2). The allowed attribute set on `<page>` is exactly the five PER-ROUTE concerns — `db=`, `auth=`, `csrf=`, `ratelimit=`, `keep-alive` — and any other attribute fires `E-PAGE-INVALID-ATTR` with guidance toward the markup-element alternative or moving the attribute to `<program>` (app-wide concerns).
 - (§65, **Nominal/spec-ahead**.) `<theme>` and `<defaults>` are scrml-defined structural elements (NOT HTML) valid at **program scope** (children of `<program>`, siblings of `<page>`) for v1; page-scope override is **deferred to v1.next** (§65.9). Use outside a valid locus is `E-STRUCTURAL-ELEMENT-MISPLACED`. `<theme>` **reclaims** the identifier from the corpus state-cell usage per the §65.9 keyword-collision principle (the handful of live `<theme>` cells migrate — §65.14); `<base>` is deliberately **NOT** reclaimed (a standard HTML element — element-defaults are `<defaults>`). The compiler SHALL NOT apply HTML attribute validation to `<theme>`/`<defaults>`; their body-forms are defined in §65.3. The block-splitter classification + `attribute-registry.js` wiring land with the §65 impl.
@@ -1201,6 +1212,7 @@ Each `:`-shorthand body here is a display-text literal (§4.18.3). `"Loading… 
 - `<onTransition>` shape, attribute legality, firing rules: §51.0.H.
 - `<onTimeout>` shape, attribute legality, firing rules: §51.0.M (S67 amendment).
 - `<onIdle>` shape, attribute legality, firing rules: §51.0.R (S77 amendment).
+- `<onMount>` shape, timing (after render and `ref=` binding), the no-write rule, the retiring `on mount { }` form: §6.7.1a (S449).
 - `<page>` shape, per-route attribute semantics, multi-page-app placement: §40 (v0.3 Wave 1).
 - `<endpoint>` shape, `path=`/`method=`/`accepts=` attributes, the per-variant arm form, exhaustiveness, the decode + envelope: §61 (S219; the typed-inbound mirror of §60 `<api>`).
 - `<theme>` / `<defaults>` shape, token/variant body-forms, `<defaults>` bare-element rule form, program-scope placement, lowering to §25 custom properties: §65 (the scrml-native CSS model; **Nominal**).
@@ -1611,6 +1623,7 @@ A display-text literal is a **sequence of literal-text segments and `${expr}` in
   interpolation) is written with the `\${` escape — see §4.18.3 for the full escape catalog. `"Cost: \${5}"` renders
   `Cost: ${5}`; `"Cost: ${5}"` renders `Cost: 5`.
   > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
+- **(S449) An interpolation is a render expression and SHALL NOT write reactive state** — §6.15 (E-VALUE-WRITES-STATE), the rule's one home. *(Provenance: ruling:user-voice-scrml.md S449 item 3.)*
 
 **Worked example — interpolation inside the literal:**
 
@@ -3689,6 +3702,27 @@ to a path where the value actually crosses the wire.
   or a §52 cell IS marshalled in CPS; identity is not.) Declared function parameters (bare
   names) are already marshalled. Channel-declared cells are governed by E-CHANNEL-SERVER-CELL-READ
   (§38.4) instead.
+- **`@session` is not read on the server — E-SESSION-AMBIENT-SERVER.** An `@session` read in
+  a server context SHALL be a compile error, E-SESSION-AMBIENT-SERVER (§34). The server
+  contexts are: the whole body of a wholly-server function (an SSE generator, a `handle()`
+  middleware and a function nested in one included); the statements of a CPS-split
+  function's server batches (§19.9.9) — NOT its client statements, which run in the browser
+  where `@session` is the §20.5 projection; an `<endpoint>` arm body; and a `<cell server>`
+  load query. A read in any expression position counts — a `?{}` interpolation, a
+  template-literal interpolation, a condition, a match arm, a member assignment
+  (`@session.userId = …`), an update or (logical) assignment. The message SHALL
+  name the fix, the §20.5 server session object `session.<field>` (`@session.userId` →
+  `session.userId`), and state that `@session` is not read on the server. No server lowering
+  SHALL read `@session` from the request body; a lowering that meets one anyway refuses the
+  build (E-INTERNAL-SESSION-AMBIENT-SERVER). A file that declares its own FILE-SCOPE
+  `<session>` cell owns the name, and the rules above for client cells apply to it instead;
+  a `<session>` declared inside a component is local to that component and does not. The
+  CLIENT `@session` projection (§20.5) is unaffected.
+  > **Provenance:** ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 1 — interim
+  > compile error naming `session.<field>`; whether `@session` should ever mean the server
+  > session (one accessor with two spellings) or stay client-only is still open. Before S449
+  > the server read lowered to `_scrml_body["session"]`, the client's request body, in
+  > breach of the sentence above (gap `g-session-ambient-unlowered-trust-boundary-inversion`).
 - **Retirement of the prior wording.** Earlier drafts scoped E-REACTIVE-003 to `const <name>`
   derived values only and justified it as "the server cannot access client-side reactive
   state." That was imprecise (the marshal machinery is real) and too narrow (a raw `@var`
@@ -3797,6 +3831,7 @@ const <x> = 5 + 3    // W-DERIVED-001: no reactive dependencies; this is equival
 | E-REACTIVE-005 | Circular dependency in the derived reactive graph | Error |
 | W-DERIVED-001 | `const <name> = expr` has no `@variable` references; value never re-evaluates | Warning |
 | E-DERIVED-SERVER-ONLY-REACH | The RHS of a `const <name>` derived cell reaches a binding imported from a §12.2 Trigger 3 server-only stdlib module. Refused, not escalated — a derived recompute is synchronous (§6.6.3) and cannot become a round trip. See §6.6.19. (S331; emitted at `compiler/src/route-inference.ts` Step 3b.) | Error |
+| E-VALUE-WRITES-STATE | Evaluating a derived formula (or any other value position) writes a reactive cell, directly or through a called function — the one home of the rule is §6.15 (S449 — Nominal / not yet emitted) | Error |
 
 ---
 
@@ -3980,6 +4015,11 @@ The client stub sends `{ "total": _scrml_derived_get("total") }`; the server rea
   normative statements in §6.3 about dependents re-evaluating when an upstream `@variable`
   changes apply to derived values. §6.6 specifies the mechanism (lazy pull, dirty flags);
   §6.3 specifies the intent.
+
+- **§6.15 (Value positions do not write — S449):** A derived formula SHALL NOT write any reactive cell,
+  directly or through a called function (E-VALUE-WRITES-STATE / E-VALUE-WRITE-UNPROVEN). The rule's one home is
+  §6.15; it is what makes "a derived value is lazy pull, no side effects" (§6.7.12) a compile-time guarantee.
+  *(Provenance: ruling:user-voice-scrml.md S449 item 3.)*
 
 - **§22 (`^{}` meta blocks):** Expressions inside `^{}` use runtime auto-tracking (§6.6.6)
   rather than static graph construction. This is the only case where the evaluation
@@ -4274,7 +4314,7 @@ nature. They are not unified into a single abstraction.
 
 | Concern | Mechanism | Where specified |
 |---------|-----------|-----------------|
-| Mount — code that runs when a scope enters the DOM | Bare expression in `${}` (already spec'd §17.3) | §17.3 |
+| Mount — prepare the outside world once a scope's DOM exists (it may not write reactive state during the mount) | `<onMount>${ … }</>` (S449; the keyword form `on mount { }` is soft-deprecated) | §6.7.1a |
 | Destroy / cleanup — code that runs when a scope exits the DOM | `cleanup()` (scope-aware; this section) | §6.7.3 |
 | Reactive effect — code that drives the outside world when named cells change (it may not write reactive state) | `<effect deps=[@a, @b]>${ … }</>` (this section; the keyword form `when @var changes {}` is soft-deprecated, S447) | §6.7.4 |
 | Reset a cell when other cells change | `reset-on=[@a, @b]` on the cell (S447) | §6.8.4 |
@@ -4287,53 +4327,290 @@ Animation frame scheduling is addressed separately in §6.7.9 (`animationFrame()
 > *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1 = (b), Call 2 = S2) ·
 > **supersedes:** the row *"Reactive effect — code that re-runs when named `@variables` change | `when @var
 > changes {}`"*.
+>
+> **Amended S449.** The mount row is respelled and narrowed (§6.7.1a); it was missing `on mount` entirely and
+> pointed at the §17.3 bare-expression position. A bare expression statement at a scope's top (§17.3) is still
+> legal; it is no longer the named mount mechanism.
+> **Provenance:** ruling:user-voice-scrml.md S449 item 2 "`on mount`: 2-1 = (b) … 2-2 = (M) spelled
+> `<onMount>${…}</>`" — *"your recs."* · **supersedes:** the row *"Mount — code that runs when a scope enters
+> the DOM | Bare expression in `${}` (already spec'd §17.3) | §17.3"*.
 
 The design principle for this section is: each mechanism does exactly one thing, is visible
 in the source, and has no hidden re-execution semantics. A developer reading a `.scrml` file
 SHALL be able to determine, without compiler introspection, which code runs when.
 
-### 6.7.1a `on mount {}` — Named Mount Block
+### 6.7.1a `<onMount>` — Outside-World Setup at Mount
 
-`on mount { body }` is explicit syntactic sugar for the bare-expression-at-mount pattern documented in §17.3. It exists for discoverability.
-
-**Syntax:** `on-mount-stmt ::= 'on' 'mount' '{' logic-content '}'`
-
-**Normative statements:**
-
-- `on mount { body }` SHALL execute `body` exactly once after the first DOM render of the enclosing `<program>` or component scope.
-- `on mount { body }` SHALL NOT re-execute on reactive state changes.
-- A scope that remounts SHALL re-execute the `on mount` body.
-- Multiple `on mount {}` blocks in the same scope are valid and execute in source order.
-- `on mount { body }` SHALL be desugared, before the TAB pass completes, into the **bare-expression-at-mount position** defined by §17.3 — `body` becomes render-time logic in the enclosing scope rather than a function body. "Bare expression" here names the **lifecycle category** of §7.3 (executes at initial render, as against `function` / `fn`, which execute only when called); it does **NOT** constrain `body` to a single expression. Per the grammar above, `body` is `logic-content` (§7.2).
-- Any construct valid in a `${ }` logic context (§7.2) SHALL be valid in an `on mount { }` body. `on mount` is sugar for that position (see this section's opening sentence) and adds no restriction of its own.
-
-> **Implementation status (2026-08-02, S313).** The sugar-equivalence statement above is **NOT yet met
-> by impl #1**. A mount body is currently lowered by a string-rewriting pipeline that handles plain
-> JavaScript and the `@` sigil, but none of the other §7.2 extensions. Measured on `a4a4d55f`:
-> multi-statement bodies, `const` / `function` declarations, `@` writes and `match` all lower
-> correctly; **`lift`, markup-as-expression, and `?{}` each fail with `E-CODEGEN-INVALID-LOGIC`**, as
-> does a `!{}` error arm (§19). All four fail CLOSED — nothing broken ships. The fix routes the mount
-> body through the same statement/AST codegen path a `function` body uses, tracked at
-> `g-onmount-multistatement-bypasses-statement-codegen` (that gap's name predates this measurement —
-> the discriminator is the §7.2 extension set, not statement count).
+> **Status: Nominal / spec-ahead (S449).** This section is NORMATIVE. **impl#1 (the TS compiler) does not
+> implement it** and, under the S447 TS accounting ruling, is not changed for it (language semantics are frozen in
+> impl#1 except for security; the divergence is FILED — `docs/known-gaps.md` `g-impl1-onmount-element-s449`, beside
+> the DD-measured `g-impl1-on-mount-body-divergences`). impl#1 still compiles the retiring keyword form
+> `on mount { }` with the pre-S449 meaning (writes allowed, run before the first render). **The bootstrap builds
+> this section** (`g-bootstrap-onmount-owed`).
 >
-> **Direction of change (pa-base §8).** This amendment is **clarifying**: it changes no program's
-> meaning and no program's acceptance status under impl #1 today. When the implementation gap closes,
-> the affected programs become newly-**accepted** — a *conformance restoration* rather than a
-> widening, because this section's opening sentence already declares `on mount` to be sugar for the
-> §17.3 position. It is therefore not a §62 version event.
+> **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue"
+> — *"your recs."* — item 2: *"**`on mount`:** 2-1 = **(b)** outside-world setup only — the body may not write
+> reactive state during the mount (directly or through a called function); callbacks handed to outside code may
+> write later. 2-2 = **(M)** spelled `<onMount>${…}</>`. Sub-calls all yes: 1a named error with fix-by-shape
+> message · 1b scheduler callbacks (`setTimeout`, `queueMicrotask`, `Promise.then`, `requestAnimationFrame`) count
+> as mount writes; event subscriptions do not · 1c runs after first render and after `ref=` binds · 1d drop the
+> §6.7.1a "sugar for §17.3" sentence; re-scope `onmount-c-build` · 3a `cleanup()` stays inside · 3b retire `on
+> dismount` · 3c `attach=` gets its own DD later · 2a name `<onMount>` · 2b `on mount {}` soft-deprecates through
+> §63 with a `scrml fix` rule."* · dd:`scrml-support/docs/deep-dives/on-mount-fit-2026-10-02.md` (§2 impl#1
+> measurements, §3 census, §4 the write question, §5 Approach (b), §6.2 option (M), §7 P1, §14 recommendation,
+> §15 calls) · **supersedes:** the whole prior §6.7.1a *"`on mount {}` — Named Mount Block"* — in particular its
+> opening sentence *"`on mount { body }` is explicit syntactic sugar for the bare-expression-at-mount pattern
+> documented in §17.3"*, the desugar-to-§17.3 statement, the statement *"Any construct valid in a `${ }` logic
+> context (§7.2) SHALL be valid in an `on mount { }` body … and adds no restriction of its own"*, the S313
+> implementation-status note's "conformance restoration" direction, and the worked example's caption *"This is the
+> canonical initial data loading pattern"* (all retained struck below). **Direction of change (pa-base §8):
+> newly-rejecting** — a mount body that writes a reactive cell compiled before and is now an error, in either
+> spelling. Migration measured by the DD (§1.5): 34 of 35 production `on mount` statements write state (examples
+> 20, samples 4, flogence 1, giti 9, scrml-site 1); each needs its home chosen by hand (§3 census) — no mechanical
+> rewrite exists for them.
 
-**Worked example:**
+An **`<onMount>`** prepares **something scrml does not own** once a scope's DOM exists: focus an input, mount a
+third-party widget (a map, an editor, a chart) on an element, attach a listener scrml has no element for, log a
+page view, run a fire-and-forget server call. It is the residue job of the DD's census (§3 job J5). Every job that
+puts a value into *scrml state* at mount has a state-shaped home, and a mount body is not it:
 
-```scrml
-<program>
-    <users> = []
-    on mount { @users = fetchUsers() }
-    ${ for (u of @users) { lift <li>${u.name}/ } }
-</>
+| Mount-time job | Home |
+|---|---|
+| Load a server value into a cell | `<request deps=[]>` (§6.7.7) / `<x server>` (§52.4 — SSR-seeded) |
+| A value from the URL, the environment or a constant | the cell's initializer (§6.1, §66.9) |
+| Restore from browser storage | `persist=` (§6.14) |
+| A staged boot with error states | engine opener `effect=` (§51.0.H Form 3) |
+| Re-set a cell each time a scope opens | `reset-on=[@open]` on the cell (§6.8.4) |
+| A mount-time server write ("mark viewed", "claim") | a write `<request deps=[]>` (§6.7.7.3 rule 2), or a fire-and-forget call in an `<onMount>` |
+| Drive the outside world once the DOM exists | **`<onMount>${ … }</>` (this section)** |
+
+#### Syntax
+
+`<onMount>` is a built-in markup element — a lifecycle element in the same family as `<effect>` (§6.7.4),
+`<request>` (§6.7.7) and `<onTransition>` (§51.0.H): its body is a `${ }` logic block and its lifetime is its
+position in the element tree. It takes **no attributes** (its trigger is its position).
+
+```
+onmount-decl  ::= '<onMount>' onmount-body '</' 'onMount'? '>'
+               | '<onMount' '/>'                                 (empty — W-LIFECYCLE-010)
+onmount-body  ::= '$' '{' logic-content '}'
 ```
 
-`fetchUsers()` is called once when the program mounts. This is the canonical initial data loading pattern.
+```scrml
+<onMount>${ @noteBox.focus() }</>
+<onMount>${ track("view", { page: "load-detail", loadId: @loadId }) }</>
+```
+
+- An `<onMount>` SHALL appear where an `<effect>` may: as a child element of an element scope (§6.7.4 "Syntax").
+  It renders nothing. Outside any element scope (§6.7.2 definition) it is **E-LIFECYCLE-001**.
+- An attribute on `<onMount>` is `W-ATTR-001` (§4.15).
+- An empty body (`<onMount/>` or `${ }`) is **W-LIFECYCLE-010**.
+- **Nesting.** An `<onMount>` — or a retiring keyword `on mount { }` — inside the body of an `<effect>` or of
+  another `<onMount>` is **E-LIFECYCLE-016**. A mount body is logic, not a markup position, so it cannot hold a
+  tree node; a second mount job is a second sibling `<onMount>`.
+
+#### Semantics
+
+- **Timing (S449 1c).** The body SHALL run once per mount of its owner, **after the owner's first render and after
+  every `ref=` binding in that owner has bound** (an element-reference binding `ref=@cell`, used by §6.7.9 and
+  here; this SPEC has no section of its own for `ref=` — noted, not added by S449), whether or not the body contains a server call. A DOM read
+  or a `ref=`-bound element in the body therefore sees the rendered DOM. *(impl#1 runs a mount body before both,
+  and whether the DOM is ready flips with the first `await` — DD §2 rows 8 / 8b.)*
+- **Not reactive.** The body SHALL NOT re-run on a reactive change. It reads current values when it runs; nothing
+  it reads is a trigger.
+- **Remount.** An `<onMount>` in a scope that remounts (an `if=` transition false → true, §6.7.2) SHALL run again on
+  each remount, exactly as on the first mount (memoryless remount, §6.7.2.1). One in a route region SHALL run on
+  every route-enter, including the first (§6.7.2.1). **One in an `<each>` row runs once per row**, when the row is
+  created (and again if the row is re-created) — the per-row rule `<effect>` (§6.7.4) and `cleanup()` (§6.7.3)
+  follow.
+- **Order.** Several `<onMount>`s in one owner SHALL run in source order. Because a mount body writes no reactive
+  cell (next subsection), its order relative to the owner's `<request>` mounts and `<effect>` registrations is not
+  observable through scrml state, and this section does not fix one. *(The DD's ordering hazards — a mount write
+  landing before or after a write request's baseline, or firing an `<effect>` at mount — cannot be written; DD §4.2
+  items 3–4.)*
+- **Scope and teardown — `cleanup()` stays inside (S449 3a).** An `<onMount>` is associated **at compile time, by
+  its position in the tree**, with the nearest enclosing element scope, route region or `<each>` row (§6.7.2,
+  §6.7.2.1), like `<effect>`. A `cleanup(fn)` call in the body — or in a function the body calls — registers `fn`
+  on that owner (§6.7.3), and it fires when the owner destroys (route-leave for a route region, row removal for a
+  row), in the §6.7.2 teardown order. Setup and teardown sit together in one closure:
+  `const map = createRouteMap(@mapEl); cleanup(() => map.remove())`.
+- **Server calls are allowed** — calling the outside world is the job. A body that reaches a server-inferred
+  function is CPS-transformed (§13); the compiler inserts the `await` (§13.2). A failure propagates through the
+  body's own error context (§19); it does NOT propagate to the enclosing scope. The call's return value cannot be
+  stored in a reactive cell from inside the body (that is a write); a result that must land in state is a
+  `<request>`'s job.
+- **Client-side.** A mount body is always a client-side construct (§12). It MAY call server functions.
+- **`lift` — E-LIFT-IN-LIFECYCLE-BODY.** A mount body has no render position: `lift` in it (directly, not inside a
+  markup value handed elsewhere) is **E-LIFT-IN-LIFECYCLE-BODY**, as in an `<effect>` body (§6.7.4). Markup that
+  depends on state is declared in the tree (`<each>`, `if=`, a derived markup cell, §6.6.17).
+- **`lin`.** A `lin` variable read in a mount body whose owner can mount more than once (an `if=` scope, an `<each>`
+  row, a route region) is **E-LIN-004** (§6.7.12) — the body is a recurring execution context there. In the
+  `<program>` scope, which mounts exactly once (§6.7.2), it is not.
+
+#### The no-write rule — E-MOUNT-WRITES-STATE
+
+**A mount body SHALL NOT write any reactive cell during the mount, directly or through a called function.** A
+write found by the analysis below is **E-MOUNT-WRITES-STATE**; a body the analysis cannot prove write-free is
+**E-MOUNT-WRITE-UNPROVEN**. Both are compile errors.
+
+**One mechanism with `<effect>`.** "What counts as a write" and the write summary are §6.7.4's, unchanged — the
+same per-function summary, closed transitively over the static call graph, computed once and shared by every rule
+that uses it (§6.7.4 "The no-write rule", §6.15). For a mount body, §6.7.4 rules 1, 2, 4, 5 and 6 apply **as
+written** (a direct write; a call to a statically resolved scrml function with a non-empty summary, the message
+naming the chain; fail closed on `^{ }` and unresolvable calls; host JS is not a write; the network echo is outside
+the analysis). **Rule 3 — function values — is the one difference**, because a mount body cannot be re-triggered
+(DD §4.4):
+
+- **3m. A function value handed to OUTSIDE code is not counted** — an event subscription
+  (`el.addEventListener("keydown", fn)`), a widget callback (`map.on("moveend", fn)`), an observer
+  (`new ResizeObserver(fn)`), any other host / platform receiver. The outside world calls it later, as it would an
+  `onclick=` handler, and a write it makes then is an ordinary local write (§6.7.7.3 rule 3), not a mount write.
+- **3m-sched. A function value handed to a SCHEDULER counts as if it were called during the mount (S449 1b)** —
+  its write summary is added to the body's. The schedulers are: `setTimeout`, `setInterval`, `queueMicrotask`,
+  `requestAnimationFrame`, scrml's `animationFrame()` (§6.7.9), and the continuation methods of a promise
+  (`.then`, `.catch`, `.finally`). A scheduler defers code to "later in this mount", not to an outside event, so
+  `setTimeout(() => @x = v, 0)` is a mount write.
+- **3m-scrml. A function value handed to a scrml function counts as if it were called** — the callee's body is
+  analysable and may call it synchronously (or pass it to a scheduler). A function value appearing anywhere other
+  than as an argument to a host / platform receiver is counted the same way.
+- A write after an `await` (or after a server call the compiler awaits) in the body is still a write of the mount
+  run: the body is one run, whatever its suspensions.
+
+**The message names the fix by shape (S449 1a).** E-MOUNT-WRITES-STATE SHALL name the written cell and the call
+chain down to the write, and SHALL name the home for the job, picked by shape where the compiler can tell:
+- a write of a call's result (a load) → *"use a `<request deps=[]>` — it owns the result, loading and errors
+  (§6.7.7); or declare the cell `server` (§52.4)"*;
+- a write of a value computed from the URL, the environment or constants → *"compute it in the cell's initializer
+  (§66.9)"*;
+- a write of a value read from browser storage → *"declare `persist=` on the cell (§6.14)"*;
+- a walk through phase / error states → *"move the boot into the engine opener's `effect=` (§51.0.H)"*;
+- a write of a cell back to its default / initializer → *"declare `reset-on=[…]` on the cell (§6.8.4)"*;
+- otherwise → *"a mount body prepares the outside world and may not write state; a callback you hand to outside
+  code (an event listener, a widget's `.on`, an observer) may write later"*.
+
+```scrml
+let <mode:DiffMode=.WorkingCopy/>
+<onMount>${ @mode = modeFromParam(changeParam()) }</>      // E-MOUNT-WRITES-STATE
+// E-MOUNT-WRITES-STATE: this mount body writes `@mode`. <onMount> prepares the outside world and may not write
+// reactive state during the mount. A value computed from the URL belongs in the cell's initializer:
+//     let <mode:DiffMode=modeFromParam(changeParam())/>
+```
+
+#### The retiring keyword form — `on mount { }` (§63)
+
+The pre-S449 statement form is **SOFT-DEPRECATED** (§63.1 Stage 1):
+
+```
+on-mount-stmt ::= 'on' 'mount' '{' logic-content '}'           (deprecated)
+```
+
+| Retired form | W-lint (Stage 1) | Reserved E | `scrml fix` rule |
+|---|---|---|---|
+| `on mount { body }` | `W-ON-MOUNT-DEPRECATED` | `E-ON-MOUNT-DEPRECATED` | When `body` writes no reactive cell (by the analysis above): rewrite mechanically to `<onMount>${ body }</>` in place. When it writes: no mechanical rewrite — the fix reports the site with the E-MOUNT-WRITES-STATE fix text (`<request>` / initializer / `persist=` / engine `effect=` / `reset-on=`) for the author to apply. |
+
+- **Parses identically (§63.1).** During the window an `on mount { }` statement IS an `<onMount>`: the same timing
+  (after the first render and after `ref=` binds), the same owner association (its enclosing element scope, route
+  region or row), the same remount re-run, and **the same no-write rule** — a writing `on mount` body is
+  E-MOUNT-WRITES-STATE in the bootstrap now, not at the end of the window. *(PA reading of S449 item 2, recorded
+  for veto: it applies the S447 `when` precedent — *"§63 Stage 1 governs the SPELLING only; Call 1 is semantic, and
+  §63.5 requires both forms to mean the same thing"* (ruling:user-voice-scrml.md S447 "accept and your rec (d)",
+  item 1) — to item 2's 2-1 = (b), which limits what a mount body may do, and to 2b, which retires only the
+  spelling.)*
+- **Not "sugar for §17.3" (S449 1d).** The keyword form desugars to an `<onMount>`, not to the §17.3
+  bare-expression position. The §17.3 position runs at construction in impl#1 and means three things by position
+  (a statement at a program top, a reactive interpolation in markup, a rendered value in a row — DD §2 rows 12–13);
+  a mount body is restricted (the no-write rule), so it cannot be sugar for a position that adds no restriction.
+- No removal version is named (§63.2). The `scrml fix` rule is owed and unverified; until it is verified-landed the
+  form cannot be scheduled (§63.4).
+- **`on dismount { }` is not scrml (S449 3b).** It was never in this SPEC; impl#1 desugars it (to a `cleanup(…)`
+  that then fails E-SCOPE-001, DD §2 row 14). It is a syntax error whose message SHALL say that `on dismount` is
+  retired and that teardown is a `cleanup(fn)` registered inside the `<onMount>` that set the thing up (§6.7.3).
+  It is not in the §63 window: it was never in the contract.
+
+> **Re-scoped: thread `onmount-c-build` (S449 1d).** The S313 note below aimed impl#1 at the sugar-equivalence
+> statement; under the no-write rule that target is gone. Its headline case (`@x = <span>hi</>` in a mount body)
+> is a mount-time write and is now E-MOUNT-WRITES-STATE, not a newly-accepted form. Remaining scope, if the thread
+> is reopened: the bootstrap's `<onMount>` lowering through the ordinary statement codegen path, so that the §7.2
+> extensions a write-free body may use (`?{}` in a fire-and-forget server call, `!{}` arms, `match`) lower
+> correctly.
+
+⚑ OPEN (S449 3c — not decided here; its own deep dive later): element-attached setup, `<div attach=${ fn }>`, where
+`fn` receives the element and returns its teardown (DD §6.2 option (A), §7 P3). It would be newly-accepting surface
+additive to `<onMount>`, covering only element-bound jobs.
+
+#### Worked example — a map widget, focus, a page view
+
+```scrml
+let <center:LatLng={ lat: 35.47, lng: -97.52 }/>
+let <mapEl:HTMLElement|not=not/>
+let <noteBox:HTMLElement|not=not/>
+
+<onMount>${
+    const map = createRouteMap(@mapEl, @center, 9)                // third-party widget, needs the element
+    map.on("moveend", () => { @center = map.getCenter() })        // legal: the widget writes LATER (3m)
+    @noteBox.focus()                                              // the box exists: after render and ref= (1c)
+    track("view", { page: "load-detail", loadId: @loadId })       // analytics page view
+    cleanup(() => map.remove())                                   // teardown beside the setup (3a)
+}</>
+<div ref=@mapEl class="h-64"></div>
+<textarea ref=@noteBox bind:value=@note></textarea>
+```
+
+The body writes no cell during the mount. The `moveend` callback is handed to the widget, so its write is a later,
+local write, like a handler's. The data the page shows comes from a `<request>`, not from the mount body.
+
+#### Normative statements
+
+- An `<onMount>` body SHALL run once per mount of its owner (scope, route region or `<each>` row), after the owner's
+  first render and after its `ref=` bindings, and SHALL NOT run on a reactive change.
+- A remount, a route-enter and the creation of a row SHALL each run the body again.
+- Several `<onMount>`s in one owner SHALL run in source order.
+- An `<onMount>` body SHALL NOT write any reactive cell during the mount, directly or through a called function
+  (E-MOUNT-WRITES-STATE); a body the write-summary analysis cannot prove write-free SHALL be rejected
+  (E-MOUNT-WRITE-UNPROVEN). A function value handed to host / platform code other than a scheduler SHALL NOT be
+  counted; one handed to a scheduler or to a scrml function SHALL be.
+- `cleanup()` in a mount body SHALL register on the body's owner (§6.7.3).
+- `lift` in a mount body SHALL be E-LIFT-IN-LIFECYCLE-BODY.
+- An `<onMount>` (or keyword `on mount`) inside an effect or mount body SHALL be E-LIFECYCLE-016; an empty body
+  SHALL be W-LIFECYCLE-010; one outside any element scope SHALL be E-LIFECYCLE-001.
+- `on mount { }` SHALL be accepted during its §63 window as a spelling of `<onMount>` with identical semantics,
+  with W-ON-MOUNT-DEPRECATED at every site.
+- `on dismount { }` SHALL be a syntax error naming `cleanup()` inside `<onMount>`.
+
+#### Superseded text (retained for the record — S449)
+
+> ~~`on mount { body }` is explicit syntactic sugar for the bare-expression-at-mount pattern documented in §17.3.
+> It exists for discoverability.~~
+>
+> ~~- `on mount { body }` SHALL execute `body` exactly once after the first DOM render of the enclosing `<program>`
+> or component scope.~~ *(restated above for `<onMount>`, with the `ref=` clause added)*
+> ~~- `on mount { body }` SHALL NOT re-execute on reactive state changes.~~ *(restated above)*
+> ~~- A scope that remounts SHALL re-execute the `on mount` body.~~ *(restated above)*
+> ~~- Multiple `on mount {}` blocks in the same scope are valid and execute in source order.~~ *(restated above)*
+> ~~- `on mount { body }` SHALL be desugared, before the TAB pass completes, into the bare-expression-at-mount
+> position defined by §17.3 — `body` becomes render-time logic in the enclosing scope rather than a function body.
+> …~~ *(superseded by S449 1d: the keyword desugars to an `<onMount>`)*
+> ~~- Any construct valid in a `${ }` logic context (§7.2) SHALL be valid in an `on mount { }` body. `on mount` is
+> sugar for that position (see this section's opening sentence) and adds no restriction of its own.~~
+> *(superseded by S449 2-1 = (b): the no-write rule and E-LIFT-IN-LIFECYCLE-BODY restrict the body)*
+>
+> ~~**Implementation status (2026-08-02, S313).** The sugar-equivalence statement above is NOT yet met by impl #1.
+> … `lift`, markup-as-expression, and `?{}` each fail with `E-CODEGEN-INVALID-LOGIC`, as does a `!{}` error arm
+> (§19). All four fail CLOSED … tracked at `g-onmount-multistatement-bypasses-statement-codegen` … Direction of
+> change: clarifying … When the implementation gap closes, the affected programs become newly-accepted — a
+> conformance restoration rather than a widening …~~ *(superseded: `lift` and a markup-value write are now
+> rejected by rule, not by a codegen gap; `?{}` and `!{}` in a write-free body stay owed — the re-scope note above)*
+>
+> ~~```scrml
+> <program>
+>     <users> = []
+>     on mount { @users = fetchUsers() }
+>     ${ for (u of @users) { lift <li>${u.name}/ } }
+> </>
+> ```
+> `fetchUsers()` is called once when the program mounts. This is the canonical initial data loading pattern.~~
+> *(superseded: the write is E-MOUNT-WRITES-STATE; the load is `<request id="users" deps=[]>${ @users =
+> fetchUsers() }</>`, §6.7.7)*
 
 ---
 
@@ -4377,12 +4654,17 @@ navigation (a route region).
 > without carving an exception into a normative SHALL. That is the whole reason the region is not modelled
 > as a scope.
 
-- Every `${}` logic block, `on mount` body, `<request>`, `<effect>` (S447), `<timer>`, `<poll>`, and `cleanup()`
+- Every `${}` logic block, `<onMount>` body (and soft-deprecated `on mount` body), `<request>`, `<effect>` (S447),
+  `<timer>`, `<poll>`, and `cleanup()`
   registration is associated **at compile time** with the nearest enclosing element scope **or route
   region** (§6.7.2.1). A body associated with a route region SHALL run on **every route-enter, including
-  the first**, and its registered `cleanup()` SHALL run on the matching **route-leave**. §6.7.1a's unity
+  the first**, and its registered `cleanup()` SHALL run on the matching **route-leave**. ~~§6.7.1a's unity
   is preserved without exception: `on mount`, bare lifecycle expressions and `<request>` remain one
-  mechanism, differing only in which owner the compiler binds them to. *(Amended S313 — ratified Pole C.)*
+  mechanism, differing only in which owner the compiler binds them to.~~ The owner-association rule is one
+  rule for every construct listed: `<onMount>`, bare lifecycle expressions and `<request>` differ in what they
+  may do (§6.7.1a, §17.3, §6.7.7), not in how the compiler binds them to an owner. *(Amended S313 — ratified Pole C.)*
+  *(Amended S449 — provenance: ruling:user-voice-scrml.md S449 item 2 (1d: *"drop the §6.7.1a 'sugar for §17.3'
+  sentence"*); supersedes: the struck "§6.7.1a's unity … one mechanism" sentence, whose premise was that sentence.)*
   *(narrowed S439 #12 — declarations in a `${…lift…}` block inside an `if=` scope run once at file init; see the next bullet)*
 - **A `${…}` block containing `lift` inside an `if=` scope (S439 ruling #12).** Its DECLARATIONS run ONCE,
   at file init — they are file-scope declarations (§7.6), not per-mount state. Its `lift` statements run
@@ -4406,7 +4688,7 @@ navigation (a route region).
 - Scope destruction is depth-first: child scopes execute the above four-step teardown
   sequence before the parent scope begins its teardown sequence.
 - A scope that remounts (i.e., `if=` transitions false → true a second time) SHALL re-run
-  all bare expressions and re-start all `<timer>` and `<poll>` instances declared in that
+  all bare expressions and `<onMount>` bodies (§6.7.1a, S449) and re-start all `<timer>` and `<poll>` instances declared in that
   scope exactly as if the scope were mounting for the first time. *(narrowed S439 #12 —
   does not re-run declarations in a `${…lift…}` block; see the S439 #12 bullet above)*
 
@@ -4417,7 +4699,7 @@ construct that is inside `<program>` (the root permanent scope) is inside an ele
 `<program>` counts as an element scope for the purposes of this section.
 
 **Error condition:** The compiler SHALL emit E-LIFECYCLE-001 if a `cleanup()` call, a
-`<timer>`, or a `<poll>` appears outside any element scope as defined above.
+`<timer>`, a `<poll>`, or an `<onMount>` (S449, §6.7.1a) appears outside any element scope as defined above.
 
 ---
 
@@ -4448,7 +4730,8 @@ cleanup(closeConnection())   // E-LIFECYCLE-002
 - The callback is called exactly once per scope destruction event. It is NOT called when
   the scope mounts, re-mounts, or at any other lifecycle point.
 - `cleanup()` SHALL be called in a `${}` logic block (bare expression form or inside a
-  function body that is itself called at mount time).
+  function body that is itself called at mount time), or in an `<onMount>` body — the canonical home for a
+  setup / teardown pair (§6.7.1a, S449 3a: *"`cleanup()` stays inside"*).
 - Multiple `cleanup()` calls within a single scope are permitted. Registered callbacks
   SHALL fire in last-in-first-out (LIFO) order — the most recently registered callback
   fires first (consistent with the canonical teardown order in §6.7.2).
@@ -4473,9 +4756,12 @@ export fn setupSocket {
 
 // In app.scrml
 <div class="chat" if=@showChat>
-    ${ setupSocket() }          // cleanup fires when <div if=@showChat> destroys
+    <onMount>${ setupSocket() }</>   // cleanup fires when <div if=@showChat> destroys
 </>
 ```
+
+*(Respelled S449 from `${ setupSocket() }` in the markup body — a render position, whose value would be rendered
+and which may not be a mount hook (§6.15); the setup belongs in an `<onMount>`.)*
 
 #### Route Inference and Server Escalation
 
@@ -4615,8 +4901,10 @@ effect-body   ::= '$' '{' logic-content '}'
   It is reference-identity-based, not deep-equality-based.
 - **Not on mount (S447 2b).** The body does NOT run when its scope mounts or remounts, nor at program
   construction. It runs only in response to a change. *(A sibling inconsistency with `<request>`, which runs on
-  mount, recorded deliberately: "filter changed" analytics must not fire at load. Logic that must also run at
-  mount is called from a bare expression / `on mount { }` beside the effect.)*
+  mount, recorded deliberately: "filter changed" analytics must not fire at load. ~~Logic that must also run at
+  mount is called from a bare expression / `on mount { }` beside the effect.~~ Outside-world work that must also
+  run at mount is called from an `<onMount>` beside the effect (§6.7.1a), which may not write reactive state either.
+  *(Amended S449 — ruling:user-voice-scrml.md S449 item 2; supersedes the struck sentence.)*)*
 - **Explicit and exhaustive deps.** Only the listed cells trigger the effect. The compiler does NOT auto-track
   reads in the body (§6.7.14 A.1). **Reading an unlisted cell in the body is valid and is the dominant pattern**
   — the body reads that cell's current value when it runs, without making it a trigger. No annotation is needed
@@ -4659,8 +4947,16 @@ effect-body   ::= '$' '{' logic-content '}'
 - **Dependency entries must be mutable cells.** Every `deps=` entry SHALL be a declared, mutable reactive cell
   in scope at the `<effect>`. An undeclared name, a non-`@` name, or a **derived** cell (`const <x>` / a §66
   locked cell with a reactive initializer) is **E-LIFECYCLE-007** — a derived value has no change event of its
-  own; list the cells it reads instead. *(Unchanged from the keyword form, EC-1.)* ⚑ OPEN: whether a §66 field
-  path (`@signup.email`) or a `<#id>.prop` (`<#t>.fired`) may be a dep entry.
+  own; list the cells it reads instead. *(Unchanged from the keyword form, EC-1.)* ~~⚑ OPEN: whether a §66 field
+  path (`@signup.email`) or a `<#id>.prop` (`<#t>.fired`) may be a dep entry.~~ **Closed S449 (rec pack item 4 =
+  (a)): not now.** A §66 field path (`deps=[@signup.email]`) and a compiler-synthesized property
+  (`deps=[<#save>.error]`, `<#t>.fired`) are not cells and are **E-LIFECYCLE-007**; the message SHALL say *"list
+  `@signup`; read `@signup.email` in the body"* (for a field path) or *"list the cell the property reflects"*. A
+  field-path trigger is expressed by listing the parent cell and comparing against a plain non-reactive local in the
+  body (legal: not a reactive write). *Cost, stated:* `<#save>.error` has no clean workaround ("toast when the save
+  fails" is a real outside-world job); it is the first widening to reopen when real code needs it. *(Provenance:
+  ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination, and 7-11 = **(a)** strike §4.11.3 `when x is .V`, keep worker `when … from` hooks for now; the three PA readings in their veto window confirmed."* — pack item 4: *"(a) not now. List the whole cell. Revisit `<#id>.error` if real code needs it"*;
+  supersedes the struck OPEN.)*
 
 #### The no-write rule — E-EFFECT-WRITES-STATE
 
@@ -4707,12 +5003,33 @@ rather than trusting a declaration. Then, for an effect body:
    not a write by the effect. It is possible, it is not a compile-time cascade, and no compile-time rule can see
    it (DD §5 (b), "Loses").
 
-⚑ OPEN (not ruled): (i) whether the write-summary reaches across a module boundary into an imported `.scrml`
-module whose body is not in the compilation (DD §12 Q1 — impl#1's cross-file E-FN-003 reach is unverified; the
-rule above requires it, and an unreachable body falls under rule 4, fail closed); (ii) whether `navigate()` / a
-soft navigation from an effect body is a write (route parameters are reactive) — lean: not a write (the URL is
-the outside world; a route-enter is a lifecycle edge, §6.7.2.1), unruled; (iii) whether `lift` in an effect body
-is an error (an effect has no render position) — the keyword form allowed it; unruled.
+**Reads that evaluate a value position (S449).** A read of a derived cell evaluates its formula, and a read
+that may construct a lazily-materialized shared instance (§66.6.4) evaluates its construction; each such read
+carries that value position's write summary (the bootstrap found both routes — the derived-read and the
+construction-read — writing state from an effect that only read). §6.15 forbids any value position to write, so
+for a well-formed program those summaries are empty and both routes are closed by construction; the summary
+still follows the read, as defence in depth. *(Provenance: ruling:user-voice-scrml.md S449 item 3.)*
+
+~~⚑ OPEN (not ruled): (i) whether the write-summary reaches across a module boundary into an imported `.scrml`
+module whose body is not in the compilation …; (ii) whether `navigate()` / a soft navigation from an effect body
+is a write (route parameters are reactive) …; (iii) whether `lift` in an effect body is an error …~~ **Closed S449**
+(provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination, and 7-11 = **(a)** strike §4.11.3 `when x is .V`, keep worker `when … from` hooks for now; the three PA readings in their veto window confirmed."*; supersedes the struck OPEN):
+
+- **(i) Across modules — always (pack item 1 = (a)).** The write summary crosses every `.scrml` import, the
+  standard library included (it ships as `.scrml` source). A callee whose body is not available to the compilation
+  is E-EFFECT-WRITE-UNPROVEN (rule 4) — fail closed, as rule 2 already required. **Obligation on an
+  implementation:** each module's write summaries SHALL be recorded in its exported signatures, so separate
+  compilation and caching preserve them. (The same summaries serve §6.7.1a and §6.15.)
+- **(ii) `navigate()` is not a write (pack item 2 = (a)); allowed in an effect body.** The OPEN's parenthesis
+  *"route parameters are reactive"* was wrong: §20.4's `route` is a plain compiler-provided binding, not a cell
+  (`@route` is E-SCOPE-010). A soft navigation re-seeds the INCOMING route region's cells, which is construction
+  (§20.8.8 rule 5), and route-leave unregisters the outgoing region's effects (§6.7.2 step 1); nothing synchronously
+  re-triggers an effect. *(Not newly-accepting: impl#1 compiles `when @signedIn changes { … navigate("/login") }`.)*
+- **(iii) `lift` in an effect body is an error — E-LIFT-IN-LIFECYCLE-BODY (pack item 3 = (a)).** An `<effect>`
+  renders nothing, and `lift` writes scrml-owned DOM, which is not the outside world. The message SHALL point to
+  `<each in=@…>` (or `if=` / a derived markup cell, §6.6.17). The same code covers an `<onMount>` body (§6.7.1a).
+  *(Newly-rejecting; blast radius measured by the pack: zero `lift`-in-`when` bodies in samples / examples /
+  stdlib / flogence / giti / 6nz.)*
 
 **The message names the fix (S447 1a).** E-EFFECT-WRITES-STATE SHALL name the written cell and the three
 homes for the job, picked by shape where the compiler can tell:
@@ -4767,14 +5084,22 @@ dep-list  ::= '@' identifier | '(' '@' identifier (',' '@' identifier)* ')'
 - **The `reads` clause retires with no window.** `when @a changes reads @b { }` never parsed in any
   implementation (DD §2 row 1), so it was never in the contract. It is a syntax error whose message SHALL say
   that `reads` is retired and that reading an unlisted cell needs no annotation. **H-LIFECYCLE-001** (the
-  off-by-default hint the `reads` clause suppressed) **retires** with it — PA reading, veto window: the pattern
-  it flagged is correct and dominant, and its only suppression mechanism never existed.
+  off-by-default hint the `reads` clause suppressed) **retires** with it — ~~PA reading, veto window~~ **confirmed
+  S449** (ruling:user-voice-scrml.md S449 item 7 (*"the three PA readings in their veto window confirmed"*); rec pack V2): the pattern it flagged is correct and dominant, and its only suppression
+  mechanism never existed.
 - No removal version is named (§63.2). The `scrml fix` rule is owed and unverified; until it is verified-landed
   the form cannot be scheduled (§63.4).
 - **Not retired:** the worker / nested-program event hooks `when message(data) { }` and `when … from <#name>
-  (…) { }` (§43, §46), and the `when expr is .Variant { }` guard of §4.11.3. They share the keyword, not the
-  construct. ⚑ OPEN: with `when … changes` gone, the keyword survives only in those hooks; whether they are
-  respelled is not ruled (DD §6.4).
+  (…) { }` (§43, §46)~~, and the `when expr is .Variant { }` guard of §4.11.3~~. They share the keyword, not the
+  construct. ~~⚑ OPEN: with `when … changes` gone, the keyword survives only in those hooks; whether they are
+  respelled is not ruled (DD §6.4).~~ **Closed S449 (rec pack item 11):** the `when expr is .Variant { }` guard is
+  **struck** — it had no grammar anywhere in this SPEC and no implementation (impl#1 rejects it, `is` undeclared,
+  E-SCOPE-001), so removing it from §4.11.3 and §18.16 rejects nothing real. The worker hooks are **kept for now**:
+  they are event handlers (they may write, like `onclick=`), not effects, so the no-write rule does not touch them;
+  respelling them as `on*` attributes on the `<program>` instance collides (the child's inbound `when message` and
+  the parent's inbound hook would both be `onmessage=` on one element), so a respelling needs its own design pass,
+  triggered by the next real §43 adopter. With the guard struck, the keyword `when` means exactly "a worker event".
+  *(Provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination, and 7-11 = **(a)** strike §4.11.3 `when x is .V`, keep worker `when … from` hooks for now; the three PA readings in their veto window confirmed."*; supersedes the struck guard mention and OPEN.)*
 
 #### Interaction with derived values and engines
 
@@ -4785,8 +5110,46 @@ dep-list  ::= '@' identifier | '(' '@' identifier (',' '@' identifier)* ')'
 | engine `effect=` / `<onTransition>` (§51.0.H) | a transition | No | Yes (governed by contracts) |
 | `<effect deps=[…]>` | a listed cell changes | No | **No** |
 
-⚑ OPEN (DD §12 Q6, not ruled): engine transition effects may still write cells, so a cascade through engine
-effects across engines is not covered by the no-write rule.
+~~⚑ OPEN (DD §12 Q6, not ruled): engine transition effects may still write cells, so a cascade through engine
+effects across engines is not covered by the no-write rule.~~ **Closed S449 (rec pack item 7 = (b)): a static
+cycle check — E-TRANSITION-WRITE-CYCLE.** *(Provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination, and 7-11 = **(a)** strike §4.11.3 `when x is .V`, keep worker `when … from` hooks for now; the three PA readings in their veto window confirmed."* — pack item 7: *"(b) static cycle check. A
+cycle with no time edge is an error, and the fix is `<onTimeout>`"*; supersedes the struck OPEN and the §6.8.4
+"Cascades through transition effects" OPEN.)*
+
+Engine transition handlers may write cells (they are governed by contracts, not by the no-write rule), and a
+`reset-on=` reset of an engine cell is a real transition that fires them (§6.8.4 rule 6). The compiler SHALL build
+the **transition-write graph** and reject a cycle in it:
+
+- **Nodes:** one per state (variant) of every cell that carries a transition graph (an engine variable, §51.0; a
+  §66.13.2 enum value with `rule=` state-children), and one per other reactive cell.
+- **Handler edges:** from state S of engine cell E to every node that a **transition handler** run when E enters S —
+  a state-child `effect=` of S, an `<onTransition>` whose edge ends in S (or leaves S, for a `from=` handler in S's
+  successor) — may write, by its write summary (§6.7.4), **on any path, including after a server call** (fail
+  closed). A write of engine cell F to a statically known variant V targets node (F, V); to an unknown variant, every
+  state of F. A self-write (S → S) is a no-op (§51.0.F.1) and contributes no edge.
+- **Reset edges:** from every node of a cell A to the reset target of every cell B whose `reset-on=` lists A
+  (§6.8.4 rule 1 / rule 6 — the target state for an engine cell, the cell's node otherwise).
+- **Time and user edges break a loop and are not edges here:** a time-driven transition (`<onTimeout>`,
+  `<onIdle>`, §51.0.M / §51.0.R), a `<timer>` / `<timeout>` / `<poll>` body, an event handler. An engine opener
+  `effect=` (§51.0.H Form 3) runs once at module init, not on a transition, and contributes no edge.
+- **A cycle is E-TRANSITION-WRITE-CYCLE**, naming the nodes and the handler or `reset-on=` on each edge; the fix
+  the message names is a time edge — e.g. `<onTimeout after=5s to=.Pushing/>` in the state that retried at once.
+
+```scrml
+type SyncState:enum = { Idle, Pushing, Failed }
+<engine for=SyncState initial=.Idle>
+    <Idle rule=.Pushing/>
+    <Pushing rule=(.Idle | .Failed) effect=${ push() !{ | _ e :> { @syncState = .Failed } } }/>
+    <Failed rule=.Pushing>
+        <onTransition from=.Pushing>${ @syncState = .Pushing }</>   // E-TRANSITION-WRITE-CYCLE: Pushing → Failed → Pushing
+    </>                                                            // fix: <onTimeout after=5s to=.Pushing/> in Failed
+</>
+```
+
+*Cost, stated (the pack's):* a guarded, terminating cycle (`if (@attempts < 3) @syncState = .Pushing`) is a false
+positive; the escape is the time edge, which is the state-shaped spelling of a retry anyway. Because self-writes are
+already no-ops, most ping-pong never forms a cycle. The check is static and fails closed; no runtime depth bound is
+added (the U0 net S447 1b ruled deletable stays deleted).
 
 #### Normative Statements
 
@@ -4797,6 +5160,11 @@ effects across engines is not covered by the no-write rule.
   (E-EFFECT-WRITES-STATE); a body the write-summary analysis cannot prove write-free SHALL be rejected
   (E-EFFECT-WRITE-UNPROVEN).
 - An `<effect>` (or keyword `when`) inside an effect body SHALL be E-LIFECYCLE-016.
+- `lift` in an `<effect>` body SHALL be E-LIFT-IN-LIFECYCLE-BODY (S449).
+- The write summary SHALL cross every `.scrml` module import; an unavailable callee body SHALL be
+  E-EFFECT-WRITE-UNPROVEN (S449).
+- A cycle in the transition-write graph (handler and `reset-on=` edges, no time or user edge) SHALL be
+  E-TRANSITION-WRITE-CYCLE (S449).
 - An empty `<effect>` body SHALL be W-LIFECYCLE-010.
 - An `<effect>` SHALL be unregistered when its owning scope, route region or `<each>` row is destroyed
   (§6.7.2 step 1), and SHALL NOT be unregistered on re-render.
@@ -4817,7 +5185,7 @@ effects across engines is not covered by the no-write rule.
 | Persist a cell across reloads | `<x persist="local" key="app.x"> = init` (§6.14 — **Nominal**, lands with the bootstrap). Until it lands, a hand-written recipe SHALL encode on write and decode + check on read: see the note below. |
 | Reset a cell when other cells change (page → 1 on a new search) | `let <page:int=1 reset-on=[@query, @category]/>` (§6.8.4) |
 | Reset a cell on a specific transition (clear the cart on logout) | engine `<onTransition>` (§51.0.H) |
-| Auto-save with a saving / saved indicator | a write `<request id="autosave" deps=[@note]>${ @savedAt = saveNote(@note) }</>` (§6.7.7) — it provably writes, so it does not run on mount, fires only on the user's own edits (the load's write re-baselines it), and skips a save equal to its baseline (§6.7.7.3, S447 3c = (d)). One save in flight and flush-on-leave are still OPEN (§6.7.7.3 rule 7). |
+| Auto-save with a saving / saved indicator | a write `<request id="autosave" deps=[@note]>${ @savedAt = saveNote(@note) }</>` (§6.7.7) — it provably writes, so it does not run on mount, fires only on the user's own edits (the load's write re-baselines it), and skips a save equal to its baseline (§6.7.7.3, S447 3c = (d)). ~~One save in flight and flush-on-leave are still OPEN (§6.7.7.3 rule 7).~~ One save is in flight at a time, and a pending debounced edit is flushed on page leave (§6.7.7.3 rule 7 — closed S449). |
 | Fire-and-forget save with no status shown | `<effect deps=[@note]>${ saveNote(@note) }</>` |
 | Analytics, scroll, focus, document title, a third-party widget, a canvas | `<effect deps=[…]>${ … }</>` |
 | Polling | `<poll>` (§6.7.6) |
@@ -5435,12 +5803,17 @@ Every write to a cell is either **server-origin** or **local**:
   - a `<channel>` push into a synced cell (§38);
   - a `persist=` cross-tab `storage`-event sync write (§6.14.2; a restore at construction is not a write at all);
   - a §52 server-authority load or server push into a server-authoritative cell (§52).
-- **Local** — every other write: an input binding (`bind:value`), an event handler, `on mount` code and bare
+- **Local** — every other write: an input binding (`bind:value`), an event handler, ~~`on mount` code and~~ bare
   mount expressions, a `<timer>` / `<timeout>` body, plain logic, and a §52 server cell's own client-side
-  assignment (it is user code, §52.6.2).
+  assignment (it is user code, §52.6.2). *(Amended S449: an `<onMount>` / `on mount` body cannot write during the
+  mount (§6.7.1a), so it produces no write at load; a callback it hands to outside code writes later, and that
+  write is local, like a handler's. Provenance: ruling:user-voice-scrml.md S449 item 2 (2-1 = (b)); supersedes:
+  "`on mount` code" in this list. The DD's "save at page load" hazard — a mount write to an autosave dependency —
+  is therefore unwritable, DD §4.2 item 3.)*
 - **A `reset-on=` reset inherits the origin of the write that triggered it** (§6.8.4): a reset caused by a
   server-origin write is server-origin; one caused by a local write is local. *(Entailed by rule 3's purpose — a
-  load that writes `@query` must not fire a save through `@page`'s reset; PA reading, recorded for veto.)*
+  load that writes `@query` must not fire a save through `@page`'s reset; ~~PA reading, recorded for veto~~
+  **confirmed S449** — rec pack V1; ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination … the three PA readings in their veto window confirmed."*)*
 
 Because every server-origin writer is a compiler-emitted site, the origin is known statically at each write site;
 no runtime "inside a user event" flag and no call-graph analysis of the writer is needed.
@@ -5466,21 +5839,51 @@ one.
 
 **6. Server-origin writes skip the timing wrappers.** A `debounced=` / `throttled=` cell (§6.13) delays **local**
 writes only. A server-origin write SHALL be applied to the cell at once, bypassing the wrapper, so loaded data is
-shown when it arrives (the DD measured an 800 ms delay). ⚑ OPEN (not ruled): when a server-origin write lands
+shown when it arrives (the DD measured an 800 ms delay). ~~⚑ OPEN (not ruled): when a server-origin write lands
 while a local debounced write to the same cell is still pending, whether the pending local write is cancelled or
-still lands afterwards (and is then compared with the new baseline).
+still lands afterwards (and is then compared with the new baseline).~~ **A server-origin write cancels a pending
+local timed write to the same cell (closed S449 — rec pack item 8 = (a)).** When a server-origin write lands while a
+`debounced=` / `throttled=` local write to that cell is pending, the pending write SHALL be cancelled before the
+server-origin value is applied — the cancel-then-apply rule `reset` already has (§6.8.2). One rule covers both: *a
+write that replaces the cell from outside the user's typing cancels the pending timed write.* The loss is visible and
+at most one debounce window of typing; letting the pending write land afterwards would compare it with the new
+baseline and SAVE it, silently wiping the record (the defect 3c closed). Collaborative live text (two people typing)
+needs merge machinery that neither option provides. *(Provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination … the three PA readings in their veto window confirmed."* — pack item 8; supersedes the
+struck OPEN.)*
 
-**7. ⚑ OPEN — banked, not decided (S447 sub-call 5).** Neither is decided by 3c; both are needed before autosave is
-safe, and both are filed as owed work:
-- **One save in flight at a time** — a newer trigger waits for the in-flight save and then sends the latest
-  value, instead of racing it (§6.7.7.1 rule 2 lets a superseded WRITE's transport complete, so an older save can
-  reach the server after a newer one). `g-request-write-one-save-in-flight-owed`.
-- **Flush or warn on page leave** — a pending `debounced=` write to a provably-writing request's dependency either
-  goes out on `pagehide`, or triggers a leave warning; today the timer dies and up to one debounce window of
-  typing is lost. `g-request-write-flush-or-warn-on-leave-owed`.
+**7. One save in flight; flush on leave (closed S449 — rec pack items 12 and 13 = (a)).** ~~⚑ OPEN — banked, not
+decided (S447 sub-call 5). Neither is decided by 3c; both are needed before autosave is safe, and both are filed as
+owed work: one save in flight at a time …; flush or warn on page leave …~~ *(Provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination … the three PA readings in their veto window confirmed."* — pack items
+12 and 13; supersedes the struck OPEN. The two gaps it filed, `g-request-write-one-save-in-flight-owed` and
+`g-request-write-flush-or-warn-on-leave-owed`, are closed as DESIGN; the build stays owed.)*
+- **One save in flight at a time.** A provably-writing `<request>` SHALL have at most one fetch in flight. A
+  trigger that arrives while one is in flight SHALL wait for it to settle and SHALL then send the **latest**
+  value — triggers that arrive meanwhile are coalesced into that one send, and it is skipped when every dependency
+  equals the baseline the settled fetch left (rule 5). This replaces racing for these requests: §6.7.7.1 rule 2
+  lets a superseded WRITE's transport complete, so without it an older save could reach the server after a newer
+  one. `refetch()` follows the same rule. No new syntax; READ and unclassifiable requests are unchanged.
+- **Flush on leave.** On `pagehide`, and on route-leave for a route-region cell (§20.8.8), a pending `debounced=` /
+  `throttled=` local write to a dependency of a provably-writing request SHALL be applied at once, and the save it
+  triggers SHALL be sent with `keepalive` (so the browser may complete it after the document goes away). `pagehide`
+  is used because it is the reliable leave event (a `beforeunload` prompt still loses the typing when the user
+  clicks "leave", and mobile browsers often never show it). A leave warning is not specified; it is a possible later
+  fallback for a save too large for `keepalive`.
 
-Other open questions carried from the DD (§8), not decided here: a `persist="session"` local draft vs the server
-load at boot (which wins; whether to offer "restore"); conflict detection (version / etag) stays developer-level.
+**8. A persisted draft vs the server load — load wins; the silent-loss combination is a compile error (closed S449
+— rec pack item 9 = (a) + (c)).** ~~Other open questions carried from the DD (§8), not decided here: a
+`persist="session"` local draft vs the server load at boot (which wins; whether to offer "restore")~~ *(Provenance:
+ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination … the three PA readings in their veto window confirmed."* — pack item 9; supersedes the struck question.)*
+- **Load wins.** A `persist=` restore is construction (§6.14.2 rule 1); a load's settle that later writes the cell
+  is a server-origin write: it replaces the restored value and becomes the baseline (rules 3–4), and `persist=`
+  then stores the loaded value. This was already entailed by 3c's rules.
+- **E-PERSIST-DRAFT-OVERWRITTEN.** A `persist=` cell that is BOTH assigned by a `<request>`'s settle AND a
+  dependency of a provably-writing `<request>` is a compile error: under "load wins" its restored draft is replaced
+  by the load and silently lost. The message SHALL say: *"keep the draft in its own `persist=` cell, and offer the
+  restore yourself"*. The rule is narrow: a `persist=` cell that a load writes but no write request depends on (a
+  local cache of a server preference) stays legal, and so does a draft cell no load writes. It is reversible: a
+  built-in "restore draft?" surface (a widening) was not chosen; draft-restore UI stays hand-written.
+
+Conflict detection (version / etag) stays developer-level.
 
 **Worked example — autosave with status.**
 
@@ -5857,7 +6260,7 @@ reads inside an `animationFrame` callback body.
 
 | Code | Trigger | Severity |
 |------|---------|----------|
-| E-LIFECYCLE-001 | `cleanup()`, `<timer>`, or `<poll>` used outside any element scope | Error |
+| E-LIFECYCLE-001 | `cleanup()`, `<timer>`, `<poll>`, or `<onMount>` (S449 — Nominal) used outside any element scope | Error |
 | E-LIFECYCLE-002 | `cleanup()` argument is a call expression, not a function expression | Error |
 | E-LIFECYCLE-004 | `cleanup()` first argument is not function-typed | Error |
 | E-LIFECYCLE-005 | `cleanup()` inside a function EXPLICITLY annotated as server-side (§12) | Error |
@@ -5865,7 +6268,7 @@ reads inside an `animationFrame` callback body.
 | E-EFFECT-WRITES-STATE | `<effect>` (or `when … changes`) body writes a reactive cell, directly or through a called function (S447, §6.7.4 — Nominal) | Error |
 | E-EFFECT-WRITE-UNPROVEN | `<effect>` body reaches code whose writes cannot be determined (`^{}`, an unresolvable call) — fails closed (S447, §6.7.4 — Nominal) | Error |
 | E-EFFECT-NO-DEPS | `<effect>` has no `deps=` or `deps=[]` (S447, §6.7.4 — Nominal) | Error |
-| E-LIFECYCLE-007 | `<effect deps=[…]>` (or keyword `dep-list`) entry is not a declared mutable `@variable` in scope, OR is a derived cell (the `<effect>` limb is Nominal, S447) | Error |
+| E-LIFECYCLE-007 | `<effect deps=[…]>` (or keyword `dep-list`) entry is not a declared mutable `@variable` in scope, OR is a derived cell, OR (S449) a §66 field path / a `<#id>.prop` (the `<effect>` limb is Nominal, S447) | Error |
 | E-LIFECYCLE-009 | `<timer>` or `<poll>` missing `interval` attribute | Error |
 | E-LIFECYCLE-010 | `interval` attribute is zero or negative | Error |
 | E-LIFECYCLE-011 | `running` attribute references an undeclared or non-`@` variable | Error |
@@ -5873,7 +6276,7 @@ reads inside an `animationFrame` callback body.
 | E-LIFECYCLE-013 | `animationFrame()` called inside a `<timer>` or `<poll>` body | Error |
 | E-LIFECYCLE-014 | `animationFrame()` called inside a server-escalated function | Error |
 | E-LIFECYCLE-015 | `animationFrame()` called with zero arguments or non-function argument | Error |
-| E-LIFECYCLE-016 | `<effect>` (or keyword `when`) inside another effect's body (re-expressed S447 — Nominal) | Error |
+| E-LIFECYCLE-016 | `<effect>` (or keyword `when`) inside another effect's body (re-expressed S447 — Nominal); `<onMount>` (or keyword `on mount`) inside an effect or mount body (S449 — Nominal) | Error |
 | E-LIFECYCLE-017 | `animationFrame()` called outside any element scope | Error |
 | W-LIFECYCLE-002 | `<timer>` has no body (self-closing, no observable effect) | Warning |
 | W-LIFECYCLE-003 | `<timer>` or `<poll>` declared inside a `for/lift` loop body | Warning |
@@ -5883,11 +6286,17 @@ reads inside an `animationFrame` callback body.
 | W-LIFECYCLE-007 | `running=false` boolean literal on `<timer>` or `<poll>` | Warning |
 | W-LIFECYCLE-008 | `<poll>` body contains multiple assignment expressions (`.value` will be `not` — §42) | Warning |
 | W-LIFECYCLE-009 | `cleanup()` inside a `for` loop body (N registrations will be created) | Warning |
-| W-LIFECYCLE-010 | `<effect>` (or `when` block) has an empty body (Nominal, S447) | Warning |
+| W-LIFECYCLE-010 | `<effect>` (or `when` block) has an empty body (Nominal, S447); `<onMount>` has an empty body (Nominal, S449) | Warning |
 | ~~H-LIFECYCLE-001~~ | *(retired S447 with the never-parsed `reads` clause — reading an unlisted cell is the dominant, correct pattern)* | — |
 | W-WHEN-EFFECT-DEPRECATED | `when … changes { }` keyword form — soft-deprecated spelling of `<effect>` (S447, §6.7.4, §63 — Nominal) | Warning |
 | E-WHEN-EFFECT-DEPRECATED | reserved end-of-window code for `when … changes { }` (§63.2; not scheduled) | Error (reserved) |
-| E-LIN-004 | `lin` variable referenced inside a recurring execution context (`<effect>` / `when`, `<timer>`, `<timeout>`, or `animationFrame` callback) — `<poll>` is DEFERRED (E-LIN-006), corrected S263; the `<effect>` limb is Nominal (S447) | Error |
+| E-MOUNT-WRITES-STATE | `<onMount>` (or `on mount`) body writes a reactive cell during the mount, directly or through a called function, or through a function value handed to a scheduler / scrml function (S449, §6.7.1a — Nominal) | Error |
+| E-MOUNT-WRITE-UNPROVEN | `<onMount>` body reaches code whose writes cannot be determined — fails closed (S449, §6.7.1a — Nominal) | Error |
+| W-ON-MOUNT-DEPRECATED | `on mount { }` keyword form — soft-deprecated spelling of `<onMount>` (S449, §6.7.1a, §63 — Nominal) | Warning |
+| E-ON-MOUNT-DEPRECATED | reserved end-of-window code for `on mount { }` (§63.2; not scheduled) | Error (reserved) |
+| E-LIFT-IN-LIFECYCLE-BODY | `lift` in an `<effect>` or `<onMount>` body — neither has a render position (S449, §6.7.4 / §6.7.1a — Nominal) | Error |
+| E-TRANSITION-WRITE-CYCLE | a cycle of transition-handler writes and `reset-on=` edges with no time or user edge (S449, §6.7.4 / §6.8.4 — Nominal) | Error |
+| E-LIN-004 | `lin` variable referenced inside a recurring execution context (`<effect>` / `when`, `<timer>`, `<timeout>`, `animationFrame` callback, or an `<onMount>` whose owner can remount — that limb Nominal, S449) — `<poll>` is DEFERRED (E-LIN-006), corrected S263; the `<effect>` limb is Nominal (S447) | Error |
 
 | E-LIFECYCLE-018 | `<request>` has no `id` attribute | Error |
 | E-LIFECYCLE-019 | `<request>` is self-closing (no body) | Error |
@@ -5905,7 +6314,7 @@ reads inside an `animationFrame` callback body.
 | W-TIMEOUT-001 | `<timeout>` declared inside a `for/lift` loop body | Warning |
 
 **`reset-on=` codes (S447, §6.8.4):** E-RESET-ON-INVALID-ENTRY · E-RESET-ON-NOT-WRITABLE · E-RESET-ON-CYCLE ·
-E-RESET-ON-ENGINE-REFUSED (§34).
+E-RESET-ON-ENGINE-REFUSED · E-RESET-ON-SHARED-CELL (S449) (§34).
 
 **Notes on removed/renamed codes from first draft:**
 - E-LIFECYCLE-003 renamed to W-LIFECYCLE-009 (cleanup-in-for is a warning, not an error).
@@ -6231,7 +6640,9 @@ from `when @enabled changes { … }`.)*
   cleanup callbacks (LIFO), then animationFrame cancellations.
 
 - **§17.3 (Lifecycle of Bare Expressions):** Bare expressions in a `${}` block execute
-  on mount. They are the "run once at mount" mechanism. `<effect>`s execute on change,
+  on mount. ~~They are the "run once at mount" mechanism.~~ The named "run once at mount" mechanism is
+  `<onMount>` (§6.7.1a, S449), which runs after render and `ref=` binding and may not write reactive state.
+  `<effect>`s execute on change,
   not on mount. These two mechanisms are complementary, not redundant. SPEC-ISSUE-010
   (whether bare expressions re-execute on reactive dependency change) remains open and
   does not affect `<effect>`, which has independent, fully specified trigger semantics.
@@ -6247,7 +6658,8 @@ from `when @enabled changes { … }`.)*
   for `@variable` reads inside the callback.
 
 - **§34 (`lin`):** A `lin` variable SHALL NOT be consumed inside an `<effect>` body, a
-  `<timer>` body, a `<poll>` body, or an `animationFrame` callback. These contexts may
+  `<timer>` body, a `<poll>` body, an `animationFrame` callback, or an `<onMount>` body whose owner can mount
+  more than once (an `if=` scope, an `<each>` row, a route region — §6.7.1a, S449). These contexts may
   execute more than once per scope lifetime, and a `lin` variable must be consumed exactly
   once. The compiler SHALL emit E-LIN-004 if a `lin` variable is read inside any of these
   recurring execution contexts. E-LIN-004 is the recurring-context form of E-LIN-002
@@ -6416,6 +6828,7 @@ When `default=` is present, calling `reset(@cell)` evaluates the `default=` expr
 - `default=` is an attribute-value-bearing form (`default=<expr>`); the attribute REQUIRES a value. The canonical scrml form for "reset to absence" is `default=not` (§42 Optional bare-sentinel form). The tokens `null` and `undefined` are NOT valid values for `default=` — they are rejected via `E-SYNTAX-042` and surfaced informationally via `W-ABSENCE-IN-SCRML-SOURCE` (§34).
 - The `default=` expression SHALL be evaluated AT RESET TIME, not at declaration time. The attribute stores the expression, not a snapshot.
 - If `default=` is absent, `reset(@cell)` SHALL re-evaluate the init expression at reset time and write the result to the cell.
+- (S449) Evaluating a `default=` expression, or the re-evaluated init expression, SHALL NOT write any reactive cell, directly or through a called function — both are value positions (§6.15, E-VALUE-WRITES-STATE; ruling:user-voice-scrml.md S449 item 3). A `reset` therefore performs exactly one write: the reset cell's own.
 - `default=` on a `const` derived declaration is **E-DERIVED-WRITE** (assigning to a derived cell is always a write error; reset on derived cells is also an error for the same reason).
 
 #### 6.8.2 The `reset(@cell)` Keyword
@@ -6562,6 +6975,12 @@ child declaration carrying its own `reset-on=` (§66.4 rule 2).
    time. A cycle — including a cell listing itself — is **E-RESET-ON-CYCLE**, naming the cells on the cycle.
    Chains (`a` resets on `b`, `b` resets on `c`) are legal; a write to `c` resets `b`, which resets `a`. Because
    the graph is static and acyclic, a chain of resets terminates by construction; no runtime bound is needed.
+   *(S449.)* The argument also needs the reset value itself to write nothing: an initializer or `default=` that
+   wrote the trigger would re-trigger the reset without end, and one that wrote any other cell would make the
+   reset more than "exactly one write". §6.15 makes both impossible — a reset value is a value position, and a
+   writing one is **E-VALUE-WRITES-STATE**, reported at the initializer / `default=` (this supersedes the
+   bootstrap's interim fail-closed `E-BOOTSTRAP-UNSUPPORTED` for that case). *(Provenance:
+   ruling:user-voice-scrml.md S449 item 3.)*
 4. **One flush, before readers.** The resets a write triggers — the whole chain, in topological order — SHALL be
    applied in the same flush as the triggering write, **before** any `<effect>`, `<request>` or render reads the
    reset cells. The triggering write and the resets it causes are ONE change for every dependent: a `<request>`
@@ -6598,30 +7017,50 @@ child declaration carrying its own `reset-on=` (§66.4 rule 2).
      `touched` and `submitted` become `false` and `errors` / `isValid` recompute (§55.13; S447 "validity calls
      2-6" bundle (ii) — *"`reset(@x)` clears `touched` + `submitted`"*). A reset form field therefore shows no
      stale errors.
-   - **`persist=` (§6.14):** the reset value is written to storage like any write. A construction-time restore
+   - **`persist=` (§6.14):** ~~the reset value is written to storage like any write.~~ a reset of a persisted
+     cell **removes its storage key** (§6.14.2 rule 9 — O-061-8 closed S449); the cell holds the reset value in
+     the session either way. A construction-time restore
      of a TRIGGER cell is not a change and triggers no reset (nothing fires at construction — consistent with
-     `<effect>`, §6.7.4); whether a cross-tab `storage`-event write to a trigger is a change follows O-061-5.
-     ⚑ OPEN (O-061-8, unchanged): whether a reset removes the storage key or writes the default.
-8. **Static check location.** Rules 2, 3, 5 and 6 are compile-time errors; none of them is deferred to run time.
+     `<effect>`, §6.7.4 — confirmed S449, rec pack V3); whether a cross-tab `storage`-event write to a trigger is a
+     change follows O-061-5.
+     ~~⚑ OPEN (O-061-8, unchanged): whether a reset removes the storage key or writes the default.~~
+     *(Provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) … the three PA readings in their veto window confirmed."* — pack item 10 = (a), V3; supersedes the struck sentence and OPEN.)*
+8. **Static check location.** Rules 2, 3, 5 and 6 (and, S449, rules 9–11) are compile-time errors; none of them is deferred to run time.
 
-⚑ OPEN (not ruled):
-- **Server / channel cells.** Whether `reset-on=` is legal on a §52 server-authoritative cell or a `<channel>`-
-  synced cell, and if so which client performs the reset when the trigger change reaches every client (a
-  locally-originated trigger resets once; a synced trigger would reset once per client). Until ruled, the
-  conservative reading is that the reset is legal exactly where `reset(@x)` is legal on that cell; the
-  multi-client question is open.
-- **Per-instance resets.** Whether a child field's `reset-on=` may name a sibling field of the same instance or
-  an `<each>` row alias, giving a per-instance reset (DD §4 open item).
-- **Cascades through transition effects.** Rule 3 makes the reset-on graph acyclic; a transition handler fired
-  by an engine reset (rule 6) may itself write cells. Whether that needs its own static check is the same open
-  question as cascades through engine effects generally (DD §12 Q6).
+9. **Shared cells may trigger, not reset — E-RESET-ON-SHARED-CELL (S449, rec pack item 5 = (a)).** `reset-on=` on a
+   cell that is §52 server-authoritative or `<channel>`-synced is **E-RESET-ON-SHARED-CELL**: N clients would each
+   reset (and broadcast) one shared cell. A shared cell MAY be an ENTRY (a trigger) of a client-local cell's
+   `reset-on=`. A reset of shared state belongs in the server function that changes the trigger — the writer.
+   ```scrml
+   <channel name="dispatch" topic="yard-3">
+       <yardFilter> = "all"
+       <boardPage reset-on=[@yardFilter]> = 1    // E-RESET-ON-SHARED-CELL — a synced cell cannot reset itself
+   </>
+   <boardPage reset-on=[@yardFilter]> = 1        // legal: each dispatcher's own page resets on the shared filter
+   ```
+10. **No per-instance resets yet (S449, rec pack item 6 = (a)).** An entry is a cell, never a field path or a row
+   alias (rule 2, as for `<effect>` deps — §6.7.4). A child field's `reset-on=` naming a sibling field
+   (`reset-on=[@lineItem.sku]` names the SHARED instance's field, not this row's) or an `<each>` row alias is
+   **E-RESET-ON-INVALID-ENTRY**. The fix is in the writer: the code that changes a row's SKU also sets that row's
+   quantity. The path forward is instance-self naming (O54 — what `@x` names inside its own instance), which
+   validators (`eq(@signup.password)` in a row) need too; `reset-on=` inherits its answer rather than inventing a
+   reset-only spelling.
+11. **Cascades through transition handlers — E-TRANSITION-WRITE-CYCLE (S449, rec pack item 7 = (b)).** Rule 3 makes
+   the reset-on graph acyclic; a transition handler fired by an engine reset (rule 6) may write cells. Those edges
+   and the reset edges form the transition-write graph of §6.7.4 ("Interaction with derived values and engines"),
+   and a cycle in it with no time or user edge is a compile error.
+
+~~⚑ OPEN (not ruled): Server / channel cells … the conservative reading is that the reset is legal exactly where
+`reset(@x)` is legal on that cell; the multi-client question is open. Per-instance resets … Cascades through
+transition effects …~~ *(Provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) … the three PA readings in their veto window confirmed."* — pack items 5, 6, 7; supersedes the struck OPEN, including its
+interim "conservative reading" for shared cells.)*
 
 **Cross-references:** §6.7.4 (`<effect>` — the construct that may NOT write; its error names `reset-on=` as the
 fix) · §6.8.1 / §6.8.2 (the reset value and the `reset` write) · §6.8.3 (lifecycle revert) · §6.13 (timed writes
 cancelled) · §6.14 (persisted cells) · §51.0.F / §51.0.F.1 / §51.0.H (`rule=`, self-write no-op, transition
 handlers) · §55.13 (validity surface cleared) · §66.4 rule 3 (modifiers bind the own value) · §66.11 (the write
 is a `replace`) · §34 (E-RESET-ON-INVALID-ENTRY, E-RESET-ON-CYCLE, E-RESET-ON-NOT-WRITABLE,
-E-RESET-ON-ENGINE-REFUSED).
+E-RESET-ON-ENGINE-REFUSED, E-RESET-ON-SHARED-CELL, E-TRANSITION-WRITE-CYCLE) · §6.15 (the reset value writes nothing).
 
 ---
 
@@ -6845,7 +7284,8 @@ arrives rather than one window late. *(Nominal / spec-ahead; impl#1 debounces ev
 `g-impl1-autosave-request-mount-save-wipes-record`. Provenance: ruling:user-voice-scrml.md S447 "\"accept and your
 rec (d)\"" — sub-call 4: *"server-originated writes skip the `debounced=` delay"* · dd:`scrml-support/docs/deep-dives/autosave-request-mount-3c-2026-10-02.md`
 §2.3 point 3 · supersedes: the unqualified "wrap the cell's write path" for server-origin writes.)* The
-pending-local-write case is OPEN (§6.7.7.3 rule 6).
+~~pending-local-write case is OPEN (§6.7.7.3 rule 6).~~ A server-origin write cancels a pending local timed
+write to the same cell (§6.7.7.3 rule 6 — closed S449, ruling:user-voice-scrml.md S449 item 7, rec pack item 8).
 
 #### 6.13.2 `throttled=DURATION` — Throttled Writes
 
@@ -6949,6 +7389,13 @@ Browser persistence is a **lifetime** property of a client-owned cell, orthogona
 7. **First paint = default-then-restore.** A persisted cell is client-local, so SSR output renders its default (§52.8), and the restored value appears when client code runs. The pre-paint mechanisms of §6.14.4 (rule 8's theme restore, cell-level `prepaint`, region-level `hold=@cell`) are the exceptions. (⚑ This rule's "renders its default" does not match impl#1's static emit, which carries no value for a client-local read — `g-client-local-static-html-no-initial-value`, §S444e.)
 8. **Pre-paint restore for a theme mode cell — automatic.** When a `persist=` cell is the mode cell of a `<theme for=@cell>` (§65.6; §66.17), the compiler SHALL additionally restore it before first paint: the document's pre-paint script (§6.14.4.1) reads and decodes the stored value (rule 3) and sets the §65.6 root attribute `data-scrml-theme-<cell>` before first paint. This is automatic; there is no author surface for it. The attribute name stays `data-scrml-theme-<cell>` (it is not renamed to the §6.14.4.2 `key=`-derived form). The theme restore is one member of the general pre-paint section §6.14.4, which also governs its placement, per-cell guard, CSP hash and after-boot handling. For cells other than a theme mode cell, the explicit opt-in is §6.14.4 (O-061-2, CLOSED).
    > **Provenance (amended S444):** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30 — rec 7 verbatim: *"Root attribute name → **derived from `key=`**; §6.14.2 r8's `data-scrml-theme-<cell>` left as is."*
+9. **A reset removes the key (S449 — O-061-8 closed).** `reset(@x)` on a persisted cell — including a `reset-on=`
+   reset (§6.8.4), which is a `reset` — SHALL write the reset value to the cell (§6.8.2) and SHALL **remove** the
+   cell's storage key instead of storing that value. The next load finds no key and takes the cell's CURRENT
+   default (rule 3), so a user who pressed "Reset view" follows a later release's new default rather than staying
+   pinned to the old one. In-session behaviour is identical either way (the cell holds the default). Storage holds
+   the user's choices; the default lives in code. *(Provenance: ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) … the three PA readings in their veto window confirmed."* — pack item 10 = (a); supersedes
+   O-061-8 in §6.14.5. Coupled, not decided here: how another tab reacts to the key's removal is part of O-061-5.)*
 
 #### 6.14.3 Privacy and ownership — errors
 
@@ -7062,10 +7509,10 @@ type SidebarMode:enum = { Open, Collapsed }
 - ~~**O-061-2** — **Explicit pre-paint opt-in** for cells other than a theme mode cell — bryan's stated preference for option (ii) generally, via an explicit author opt-in; he does not know what that surface would look like. **Banked as dpa-062.**~~ **CLOSED S444 → §6.14.4** (dpa-062 RULED: cell-level `prepaint` = REFLECT only + region-level `hold=@cell`). *ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30*
 - **O-061-3** — The stored **envelope** (e.g. a version marker or a §47.1.4 type-fingerprint field). Under the call-4 ruling a fingerprint mismatch is not by itself a discard trigger, so what, if anything, the envelope carries is open.
 - **O-061-4** — Whether the §55 validators are part of the "full declared contract" a restored value is decoded against, or only type-level contracts (refinements, sequence bounds, lifecycles).
-- **O-061-5** — A cross-tab `storage`-event value: is it judged as a write under the §66.11 write contract (e.g. `rule=` guards) or applied as construction-like hydration? What happens when it fails to decode (keep the current value, or take the default) and when the key is removed in the other tab?
-- **O-061-6** — Whether the restore at construction fires `when @x changes` effects. *(S447: effects are now `<effect deps=[…]>` and SHALL NOT run at program construction (§6.7.4); a restore at construction is therefore not observed by any effect, and — by the same rule — triggers no `reset-on=` reset (§6.8.4 rule 7). Read as settled by S447 2b for effects; the PA flags it for confirmation.)*
+- **O-061-5** — A cross-tab `storage`-event value: is it judged as a write under the §66.11 write contract (e.g. `rule=` guards) or applied as construction-like hydration? What happens when it fails to decode (keep the current value, or take the default) and when the key is removed in the other tab? *(S449: a reset now removes the key, §6.14.2 rule 9, so "the key is removed in the other tab" is the cross-tab face of a reset; the rec pack's lean is that the other tab takes its default, i.e. performs the same reset — recorded, not ruled.)*
+- ~~**O-061-6** — Whether the restore at construction fires `when @x changes` effects. *(S447: … Read as settled by S447 2b for effects; the PA flags it for confirmation.)*~~ **CLOSED S449 (confirmed — rec pack V3):** a restore at construction fires no `<effect>` and no `reset-on=` reset (§6.7.4 "Not on mount"; §6.8.4 rule 7). *ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) … the three PA readings in their veto window confirmed."**
 - **O-061-7** — Write timing: per-change or coalesced per microtask (the §6.7.4 timing).
-- **O-061-8** — Whether `reset(@x)` also **removes** the storage key, or only writes the default.
+- ~~**O-061-8** — Whether `reset(@x)` also **removes** the storage key, or only writes the default.~~ **CLOSED S449 → §6.14.2 rule 9** (a reset removes the key — rec pack item 10 = (a)). *ruling:user-voice-scrml.md S449 item 7 — *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) … the three PA readings in their veto window confirmed."**
 - **O-061-9** — The attribute's **position in a §66 opener**, and `persist=` on a §66 declaration's **non-shared** instances with an author per-instance key expression.
 - **O-061-10** — `persist=` on a derived cell, and on a function-typed cell (no codec).
 - **O-061-11** — A persisted `(not to T)` lifecycle cell (§14.12 / §66.11.6): the static state at reads before discrimination.
@@ -7085,8 +7532,146 @@ Named here; each §34 row is **Nominal / spec-ahead — not yet emitted; lands w
 | `E-PREPAINT-WITHOUT-PERSIST` | `prepaint` on a cell without `persist=` (§6.14.4.2 rule 2) — Nominal / spec-ahead, not yet emitted | Error |
 | `E-HOLD-WITHOUT-PERSIST` | `hold=` whose operand is not a `persist=` cell (§6.14.4.3 rule 2) — Nominal / spec-ahead, not yet emitted | Error |
 | `W-PREPAINT-UNCOVERED-READ` | a read of a `prepaint` cell that REFLECT cannot cover (text, `<each>`, `if=`, or failing §6.14.4.2 rule 5), one per site (§6.14.4.2 rule 6) — Nominal / spec-ahead, not yet emitted | Info |
+| `E-PERSIST-DRAFT-OVERWRITTEN` | a `persist=` cell that is both assigned by a `<request>` settle and a dependency of a provably-writing `<request>` — the load would silently replace the restored draft (§6.7.7.3 rule 8, S449) — Nominal / spec-ahead, not yet emitted | Error |
 
 **Cross-references:** §6.7.4 (the corrected localStorage idiom row) · §6.8 (the default value) · §6.13 (the sibling write-path attributes) · §13.2 (auto-await — the planned IndexedDB stdlib) · §14.8.9 (`reveal`) · §35 (`lin`) · §52 (authority — orthogonal) · §55 (synthesized-property precedent) · §57 / §59.10 (codec) · §65.6 / §66.17 (theme mode cell; §66.17 rule 3 is generalized by the §6.14.4.2 CSS-keyed applier) · §66.9 (seed) · §66.16 (shared instance only) · §39.2.5 / §40.2 (the pre-paint script's CSP hash).
+
+---
+
+### 6.15 Value Positions Do Not Write Reactive State — E-VALUE-WRITES-STATE
+
+> **Status: Nominal / spec-ahead (S449).** NORMATIVE; **impl#1 does not implement it** and is not changed for it
+> (frozen for language semantics, S447 TS accounting — the divergence is filed: `docs/known-gaps.md`
+> `g-impl1-value-writes-state-s449`). The bootstrap builds it (in flight in parallel at this writing; see the
+> §S449-spec-lifecycle section of `docs/known-gaps.md` for the bootstrap entry it references).
+>
+> **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" —
+> *"your recs."* — item 3: *"**Initializers / derived formulas / markup interpolations may NOT write reactive state
+> = (a)** — a compile error everywhere, directly or through a called function (language-wide; closes the four S449
+> bootstrap holes + the render self-write hang by construction). ⚑ PA note: this is the language-wide item the PA
+> flagged as deserving its own answer; recorded as ruled on \"your recs.\" — flag \"Q3 hold\" to reopen."* · the
+> four holes: `docs/changes/s449-bootstrap-effect/progress.md` (an effect read that constructs a shared instance
+> whose initializer writes; a `reset-on=` reset value that writes its own trigger; a read of a derived cell whose
+> formula writes; `g-bootstrap-render-writer-call-hangs`) · **supersedes:** nothing written — the SPEC was silent on
+> whether a value position may write (the bootstrap's "Q-A"); it closes by construction the routes §6.7.4 and
+> §6.8.4 had to guard case by case (below). **Direction of change (pa-base §8): newly-rejecting.** Measured impl#1
+> corpus impact (a filing aid, not a migration): see `g-impl1-value-writes-state-s449`.
+
+**This is the one home of the rule.** §6.6 (derived cells), §66.9 (initializers), §6.8 (reset values), §7.4.2 and
+§4.18.4 (interpolation) cross-reference it; none restates it.
+
+**The rule.** Evaluating a **value position** SHALL NOT write any reactive cell, directly or through a called
+function. A write found by the analysis below is **E-VALUE-WRITES-STATE**; a value position the analysis cannot
+prove write-free is **E-VALUE-WRITE-UNPROVEN**. Both are compile errors.
+
+**Value positions** — code evaluated to produce a value, not to perform an action:
+
+1. **An initializer** — a cell's own-value initializer (`<x> = expr`, `<let x:T=expr/>`, `const <x> = expr`, a
+   locked `<x:T=(expr)/>`), a field / attribute default of a §66 declaration, a use-site construction value
+   (§66.9 rule 8), and a `default=` expression (§6.8.1). An initializer runs at construction, on a lazy first read
+   of a shared instance (§66.6.4), at a remount or row creation, and at every `reset` / `reset-on=` reset
+   (§6.8.1–§6.8.4).
+2. **A derived formula** — the initializer of a derived cell (§6.6; §66.9 rule 3: a locked declaration whose
+   initializer reads cells), evaluated on every recompute. *(A derived formula is an initializer; it is listed
+   separately only because it re-runs.)*
+3. **A render expression** — every expression the runtime evaluates to produce or update rendered output: a
+   `${ … }` interpolation in a markup body (§7.4.2), including a multi-statement `${ … }` there and a Tier-0
+   `${ for … lift … }` block (§17.4); a `${ … }` inside a display-text literal (§4.18.4); a `renders` body
+   (§66.5); and a markup attribute value expression (`class=${…}`, `if=(…)`, `show=`, `value=${…}`, `<each in=…
+   key=…>`, `<match on=…>`, …).
+
+**Not value positions** (they are action positions, governed elsewhere): an event-handler attribute value
+(`onclick=…`, any `on*=`) and a `bind:` binding; a function body (it is judged where it is CALLED from); the body
+of a lifecycle element — `<request>` (whose body assigns its cell by design, §6.7.7), `<effect>` (§6.7.4),
+`<onMount>` (§6.7.1a), `<timer>` / `<poll>` / `<timeout>`; engine `effect=` and `<onTransition>` (§51.0.H); and a
+statement list at a `<program>` / `<page>` / `<channel>` body top (§40.8 — a `${ … }` written there is
+**evaluated, not rendered**). Whether a `${ … }` is a render expression is decided by the body it sits in: in a
+markup (free-text) body it is one; at a default-logic / code-default body top it is a statement list.
+
+**What counts as a write, and the analysis — §6.7.4's, unchanged.** The write list (assignment, sequence edit,
+`reset(@x)`, engine write / `.advance`, `<#id>.refetch()`) and the write summary (per function, transitive over the
+static call graph, a fixed point; one summary shared by every rule that uses it) are §6.7.4's. For a value position
+§6.7.4 rules 1–6 apply **as written**:
+- a direct write is E-VALUE-WRITES-STATE;
+- a call to a statically resolved scrml function (same file or an imported `.scrml` module, server functions
+  included) whose summary is non-empty is E-VALUE-WRITES-STATE, the message naming the chain;
+- **a function value appearing in the expression counts as if it were called** (rule 3) — a receiver such as
+  `.map` / `.filter` / a host library may call it during the evaluation. One carve-out follows from the position
+  list above: a function value that is the value of an event-handler attribute (`on*=`) in markup the expression
+  produces is a handler, not part of the evaluation;
+- an unresolvable call site, or a reachable `^{ }` meta block, is E-VALUE-WRITE-UNPROVEN (fail closed);
+- host JS and platform calls are not writes (rule 5).
+
+Each value position is summarized like a function, so a READ of something that evaluates a value position carries
+that position's summary: a read of a derived cell carries its formula's summary; a read that may construct a shared
+instance (§66.6.4) carries the summary of that declaration's construction (its field initializers and the
+declarations its `renders` uses). Under this section every such summary is empty — that is the point.
+
+**The message names the position and the fix.** E-VALUE-WRITES-STATE SHALL name the position (*"the initializer
+of `@page`"*, *"the formula of derived `@total`"*, *"the interpolation at line 12"*, *"the `class=` value at line
+12"*), the written cell, and the call chain, and SHALL name the fix by shape where the compiler can tell:
+- in an initializer: *"an initializer computes the cell's starting value and may not change other cells; load
+  with a `<request>` (§6.7.7), prepare the outside world in an `<onMount>` (§6.7.1a), or move the write into the
+  handler that should cause it"*;
+- in a derived formula: *"a derived value is computed from other cells and may not change them; derive the other
+  value too (§6.6), or move the write into the handler that writes the formula's inputs"*;
+- in a render expression: *"rendering shows state and may not change it; move the write into a handler, or derive
+  the displayed value (§6.6)"*.
+
+```scrml
+let <count:int=0/>
+function bump() { @count = @count + 1; return @count }
+
+let <seed:int=bump()/>                 // E-VALUE-WRITES-STATE — the initializer of `@seed` writes `@count` (bump())
+<total:int=(bump() * 2)/>              // E-VALUE-WRITES-STATE — the formula of derived `@total` writes `@count`
+<p>${bump()}</p>                       // E-VALUE-WRITES-STATE — the interpolation writes `@count` (it would loop)
+<button onclick=bump()>+</button>      // legal: a handler is an action position
+```
+
+**Why one code with a position-naming message, not one code per position.** The positions overlap: a derived
+formula IS an initializer (§66.9 rule 3); a use-site construction value is an initializer AND is evaluated by
+rendering the use (§66.9 rule 8); a `reset-on=` reset re-evaluates an initializer. Per-position codes would make the
+compiler pick among overlapping categories for one rule; one code with the position in its message does not. The
+fail-closed half keeps its own code, mirroring E-EFFECT-WRITE-UNPROVEN / E-MOUNT-WRITE-UNPROVEN, so the unproven
+case reads the same in all three rules.
+
+**What this makes impossible by construction.**
+- **§6.7.4 — an effect that writes through a read.** An `<effect>` body that only READS could still write state
+  in two routes the bootstrap found and closed case by case: reading a derived cell whose formula writes (the
+  derived-read route, s449 review HIGH-1) and reading a lazily-constructed shared instance whose field initializer
+  writes (the construction-read route). Both routes run a value position; under this section a value position
+  writes nothing, so neither route exists. §6.7.4's write summary still follows reads into formulas and
+  constructions — it now finds nothing there for a well-formed program, and the check stays as defence in depth.
+- **§6.8.4 — a reset value that writes.** A `reset-on=` reset evaluates the cell's initializer (or `default=`). An
+  initializer that wrote the reset's own trigger looped forever (the bootstrap's endless drain); one that wrote any
+  other cell broke rule 3's *"exactly one write … and nothing else"*. Under this section the reset value writes
+  nothing, so §6.8.4's termination argument holds without a special case. **The bootstrap's fail-closed
+  `E-BOOTSTRAP-UNSUPPORTED` for a writing reset value is superseded by E-VALUE-WRITES-STATE** (reported at the
+  initializer, whether or not the cell carries `reset-on=`).
+- **The render self-write hang.** `<p>${g(@a)}</p>` where `g()` writes `@a` re-queued its own render forever
+  (`g-bootstrap-render-writer-call-hangs`); any render ↔ render write cycle did the same. A render expression now
+  writes nothing, so no render can trigger another render, and no runtime re-run counter is needed (the S447
+  posture: a runtime bound would mean the compile-time rule had a hole).
+
+**Outside the analysis, stated.** As for effects (§6.7.4 rule 6): a value position that calls the server, whose
+server-side code later causes a push into a synced cell, is a later write by a different writer, not a write by the
+evaluation.
+
+#### Normative statements
+
+- Evaluating an initializer (own value, field or attribute default, use-site construction value, `default=`), a
+  derived formula, or a render expression SHALL NOT write any reactive cell, directly or through a called function
+  (E-VALUE-WRITES-STATE).
+- A value position the write-summary analysis (§6.7.4) cannot prove write-free SHALL be rejected
+  (E-VALUE-WRITE-UNPROVEN).
+- Event-handler attribute values, `bind:` bindings, function bodies (judged at their call sites), lifecycle element
+  bodies, engine `effect=` / `<onTransition>` bodies and body-top statement lists are not value positions.
+- E-VALUE-WRITES-STATE SHALL name the position, the written cell, the call chain and the fix by shape.
+
+**Cross-references:** §6.6 (derived cells) · §6.7.1a (`<onMount>` — the mount-time sibling rule) · §6.7.4 (the
+write summary; the `<effect>` rule) · §6.8.1–§6.8.4 (reset values) · §7.4.2 / §4.18.4 (interpolation) · §17.4
+(Tier-0 iteration) · §40.8 (body-top statement lists) · §66.5 (`renders`) · §66.6.4 (lazy shared instance) ·
+§66.9 (initializers) · §34 (E-VALUE-WRITES-STATE, E-VALUE-WRITE-UNPROVEN).
 
 ---
 
@@ -7434,6 +8019,7 @@ const VERSION = "v0.3.0"
 - When `expr` references NO reactive cells AND the expression collapses to a compile-time-known constant value (literal, `const`-bound to a literal, simple arithmetic on constants), the compiler MAY inline the string value directly into the emitted HTML at that position. This is a permitted optimization — the rendered output is observationally equivalent.
 - When `expr` references NO reactive cells AND does NOT collapse to a compile-time constant (e.g., `${Date.now()}`, `${Math.random()}`, `${someJsLibCall()}`), the compiler SHALL emit a one-shot evaluation at module initialization that writes the result to the interpolation site. The site SHALL NOT re-evaluate after initial render.
 - The reactive case (deps present) and the non-reactive non-constant case (deps absent, expression not foldable) SHALL be observationally distinguished only by whether subsequent state changes trigger re-render — both produce the value at module init.
+- **(S449) Evaluating `expr` SHALL NOT write any reactive cell, directly or through a called function** — an interpolation, a multi-statement `${ … }` in a markup body and a markup attribute value are render expressions, and the rule's one home is §6.15 (E-VALUE-WRITES-STATE / E-VALUE-WRITE-UNPROVEN). Without it a render that writes a cell it reads re-renders itself without end. *(Provenance: ruling:user-voice-scrml.md S449 item 3.)*
 - When `expr` does NOT resolve in scope, the compiler SHALL emit `E-NAME-NOT-FOUND` (or the applicable lookup-failure diagnostic per the resolver's normal contract). Interpolation does NOT bypass normal name resolution.
 - The string conversion rule SHALL be JavaScript's standard `String()` coercion. ~~`null` and `undefined` produce the literal strings `"null"` and `"undefined"` respectively (cross-ref §42 absence-value handling — adopters writing `${@maybe-empty-cell}` should use `${@cell ?? "default"}` or rely on the validator surface).~~ *(superseded S440 — next bullet)*
 - **`${not}` renders NOTHING (S440 ruling).** When `expr` evaluates to `not` (§42), the interpolation site renders nothing — not the literal text `"null"` (or `"undefined"`). impl#1 currently renders the text `"null"` (gap `g-interpolation-renders-not-as-literal-null`); impl#1 carries the divergence (§34.0).
@@ -9197,7 +9783,7 @@ The compiler SHALL:
 - The compiler SHALL wrap any function containing at least one server call in an `async` function in generated code.
 - The developer SHALL write flat, synchronous-looking code. The compiler SHALL produce optimal async execution patterns from this code.
 - Independent server calls in the same function body SHALL be parallelized in generated code unless there is a data dependency between them.
-- These statements apply to EVERY body the compiler emits, including an inline event-handler value (`onclick=${…}` / `onclick={…}`) and an `on mount` block (§6.7.1a): a server call there SHALL be awaited, and the handler or block SHALL run in an `async` scope when it awaits.
+- These statements apply to EVERY body the compiler emits, including an inline event-handler value (`onclick=${…}` / `onclick={…}`) and an `<onMount>` / `on mount` body (§6.7.1a): a server call there SHALL be awaited, and the handler or block SHALL run in an `async` scope when it awaits.
 - An **async-colored function** is one the compiler emits `async`: a server function, a Promise-returning standard-library function, or any function that (transitively) calls one. An async-colored function SHALL NOT be used as a value. It MAY be called directly (the compiler awaits the call), and it MAY be passed as the first argument of an awaited collection method (`.some`, `.every`, `.find`, `.findIndex`, `.filter`, `.map`, `.forEach`, `.reduce`, `.flatMap` — the compiler lowers the call to a combinator that awaits every invocation). Passing it to any other function (a user-written higher-order function, `Array.from(xs, fn)`, `new Promise(fn)`), aliasing it, storing it in an array or object, returning it, or reading it as an object SHALL be a compile error (`E-ASYNC-FN-ESCAPES-AS-VALUE`). Every such position would hand a caller an unawaited Promise, which is always truthy — a check written against it passes for every input. The compiler does NOT insert an implicit `await` at every call of a function-typed value. Two positions are not uses as a value: an argument of a fire-and-forget scheduler (`setTimeout`, `setInterval`, `setImmediate`, `queueMicrotask`, `requestAnimationFrame`, `requestIdleCallback`), which discards the return; and `typeof f`. A synchronous consumer with no awaited form (`.sort(f)`, `.findLast(f)`) keeps its own error (`E-SERVER-FN-IN-SYNC-CALLBACK` / `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`).
 
 > **Provenance:** ruling:user-voice-scrml.md S440 F4 ("async helpers may not escape as values"; rejected alternative: implicit await on every call of a function-typed value) · ruling:user-voice-scrml.md S440 JS-WAT #11 (`on mount` / inline handler bodies are subject to every rule) · s441-async-escape-f4-f5
@@ -9308,7 +9894,7 @@ type UsersState:enum = {
 
 **Why enums, not booleans:** The enum guarantees that the state is in exactly one variant at a time. `@usersState` cannot be both `.Loading` and `.Failed`. The `transitions` block (§51) enforces the legal state graph — the compiler rejects invalid transitions like `.NotAsked => .Ready` (skipping the loading phase).
 
-#### 13.5.3 Worked Example — Data Fetch on Mount
+#### 13.5.3 Worked Example — Data Fetch with a Load State
 
 ```scrml
 <program db="./app.db" tables="users">
@@ -9342,7 +9928,7 @@ ${
     }
 }
 
-on mount { loadUsers() }
+<button onclick=loadUsers()>Load users</>
 
 match @usersState {
     .NotAsked :> {}
@@ -9366,6 +9952,14 @@ match @usersState {
 ```
 
 The `match @usersState` is exhaustive — the compiler verifies every variant is handled. Adding a new variant (e.g., `.Stale(users)`) forces every match site to be updated.
+
+> **Amended S449.** This example and §13.5.5 started their loads from `on mount { loadUsers() }` /
+> `on mount { loadDashboard() }`. A mount body may not write reactive state (§6.7.1a, E-MOUNT-WRITES-STATE), and
+> both functions write the state enum, so the loads now start from a handler, which may write. A load that runs
+> at mount belongs to a `<request deps=[]>` (it owns `.loading` / `.error`, §6.7.7) or, for a staged boot with
+> error states, the engine opener's `effect=` (§51.0.H Form 3). The §13 points these examples make (enum load
+> states; §13.3 parallelisation) are unchanged. **Provenance:** ruling:user-voice-scrml.md S449 item 2 (2-1 =
+> (b)) · **supersedes:** the two `on mount { … }` lines and this subsection's title *"Data Fetch on Mount"*.
 
 #### 13.5.4 Worked Example — Form Submission with Optimistic Update
 
@@ -9442,7 +10036,7 @@ ${
     }
 }
 
-on mount { loadDashboard() }
+<button onclick=loadDashboard()>Refresh</>
 ```
 
 Per §13.3, the compiler detects that `fetchUsers()` and `fetchMetrics()` are independent and parallelizes them with `Promise.all`. Each source transitions independently — users can be `.Ready` while metrics is still `.Loading`.
@@ -10515,16 +11109,58 @@ halves, and a conformant implementation SHALL enforce both:
      results still carry their arguments' provenance. (Treating them as opaque applied every
      function reachable from the argument at every coercion: a chain of 240 objects, each with a
      `toString` returning `String(this.prev)`, took 13.7 s against 0.47 s before round 7 —
-     review-measured.) A function the PROGRAM stores in the global heap under one of these names
-     (`globalThis.String = …`) is not the coercion: it is applied as any global function is.
+     review-measured.) ~~A function the PROGRAM stores in the global heap under one of these names
+     (`globalThis.String = …`) is not the coercion: it is applied as any global function is.~~
+     *(round-8 wording, SUPERSEDED S449 round 9: rebinding one of these names is refused — see
+     "The platform is not the program's" below. Applied "as any global function", `globalThis.String
+     = function (f) { Reflect.apply(f, null, [h]) }` still served the hash on base: the carve-out is
+     sound only while the names denote the platform's coercions, so a program that rebinds them is
+     not analysed.)*
      > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 5 (conditional; reviewer: SOUND)
+   - **The platform is not the program's (S449 round 9).** The language and the compiler's own
+     runtime call platform built-ins at request time with values the analysis never sees — a
+     coercion calls the INHERITED `toString` / `valueOf`, `String([…])` calls
+     `Array.prototype.join`, `JSON.stringify` an inherited `toJSON`, and the §14.8.9 redactor reads
+     every row (protected columns still on it) through `Object.keys`, `Array.isArray`, `Set`, ….
+     In a compile that declares `protect=` columns, therefore, each of the following SHALL be
+     `E-PROTECT-006`, naming the write: a write INTO a built-in prototype or constructor — however
+     it is reached (`Object.prototype.x = …`, `const P = Array.prototype; P.join = …`,
+     `({}).__proto__.x = …`, `Object.getPrototypeOf(o).x = …`, `({}).constructor.prototype.x = …`,
+     `Object.defineProperty` / `Object.assign` / `Reflect.set` onto one, `Object.setPrototypeOf` of
+     one); a FUNCTION stored onto a platform object named by its path or by a binding of one
+     (`JSON.stringify = f`, `const J = JSON; J.stringify = f`, `console.log = f`); rebinding a
+     platform global name (`globalThis.String = f`, `String = f`, `Object.assign(globalThis, {
+     String: f })`, or a global write under a key the compiler cannot read and whose static prefix
+     no platform name starts with); and calling a code evaluator — `Function`, `eval`, or the
+     `.constructor` of a value that may be a function — by any route (`Function("return this")()`
+     IS `globalThis`, and its body may be anything). The PROGRAM's own prototypes are not the
+     platform's and SHALL compile: the `.prototype` of a function the program made (scrml has no
+     `class` — `const Pt = function (x) { this.x = x }; Pt.prototype.norm = function () { … }` IS
+     how a type is built), and the `.__proto__` / `.constructor` / `Object.getPrototypeOf` of an
+     object whose prototype the program set (`new Pt()`, `Object.create(p)` / a literal's
+     `__proto__: p` with `p` its own). (S449 r9 fix round: round 9 refused all of these — review
+     measured.) (Measured on
+     base, each served the hash: `Object.prototype.toString = function () { s = this.h }; String({
+     h })`, `Array.prototype.join = …; String([h])`, `({}).__proto__.leak = h; return ({}).leak`,
+     `JSON.stringify = function (x) { s = x.passwordHash }; JSON.stringify(u)`, the `globalThis.String`
+     form above, and a `Function("return this")()` alias of the global heap.) Measured corpus impact
+     at round 9: zero such sites in every emitted server module of the corpus.
    - **Global stores.** Every name the compile does not bind (`globalThis`, `process`, `Bun`, …) and
      `import.meta` denote ONE global heap shared by every server module and every request. A value
      whose provenance includes a `protect=` column, written into it outside a descriptor-bearing row
      (`globalThis.x = h`, `process.env.X = h`, through an alias of a global object), IS an egress —
      `E-PROTECT-006` — because other requests and code the compiler cannot see can read it; and
      what any code writes there is what any read of it carries. A row written there keeps its
-     descriptor and is stripped wherever it later leaves. (Measured before round 6: a value stored in
+     descriptor and is stripped wherever it later leaves — except through the compiler's own durable
+     session store (§20.5), which keeps `JSON.stringify` of what it is given: a row stored by
+     `session.set` comes back without its markers, so every unrevealed column it carries is written
+     there outside a row (S449 round 9). An implementation MAY analyse that store by a summary of
+     its own `get` / `set` / `delete` instead of walking it, but ONLY for a compile in which the
+     program reaches the store solely through those three calls on its binding; any other use —
+     the binding as a value, a member write or computed member on it, the registry on the global
+     object, or the global object itself used as a value — SHALL make the store analysed as any
+     global object is. (S449 re-review: a summary applied regardless served the hash three ways —
+     a copied record, an alias route, an overwritten `get`.) (Measured before round 6: a value stored in
      `globalThis` / `process.env` by one server function and returned by another served the hash.)
      A FUNCTION kept in a global is analysed at the calls that name it (`globalThis.clamp(…)`,
      `clamp(…)`) — with the call's arguments whenever they carry protected data OR hand it a
@@ -10743,7 +11379,9 @@ named-codes-land-with-impl precedent — Rule 4):
 - **`E-PROTECT-006`** (Error) — a value whose provenance includes a `protect=` column reaches a
   compiler-emitted client-egress sink outside a descriptor-bearing row (the S441 amendment above),
   or is written into a global store (S443 round 6). Names the column, the extraction site and the
-  egress. Also raised, fail-closed, when the emitted server module cannot be analysed.
+  egress. Also raised, fail-closed, when the emitted server module cannot be analysed — including
+  a program that replaces part of the platform or evaluates code built at runtime (S449 round 9:
+  "The platform is not the program's"), where it names the write instead of a column.
 - **`E-PROTECT-004`** (Error) — a protected-origin column co-occurs, in one function body, with a
   compiler-unanalyzable egress (a `_{}` foreign block or an `asIs` value) where strip-by-origin
   cannot be guaranteed, and it is not `reveal`-declassified for every protected output column of
@@ -13739,6 +14377,13 @@ ${ loadItems() }
 - It does NOT re-execute on reactive re-renders unless a reactive dependency (`@variable`) is read inside `loadItems()` and that dependency changes.
 - The compiler tracks reactive dependencies automatically via the dependency graph (Section 30). Explicit re-execution declarations are not required for reactive functions.
 
+> **Amended S449 — position matters.** A `${ … }` written in a markup (free-text) body is a **render
+> expression**: it may not write reactive state (§6.15, E-VALUE-WRITES-STATE), so a `${ loadItems() }` there whose
+> callee writes a cell is an error. A `${ … }` at a `<program>` / `<page>` / `<channel>` body top is a statement list,
+> evaluated, not rendered (§40.8); that is the position this section's "runs once at mount" describes. Outside-world
+> work that must run after the DOM exists is an `<onMount>` (§6.7.1a), which no longer desugars to this position.
+> **Provenance:** ruling:user-voice-scrml.md S449 items 2 (1d) and 3.
+
 **SPEC ISSUE:** Whether bare expressions re-execute on every reactive re-render or only on initial mount is tracked in SPEC-ISSUE-009. The current spec position is: bare expression = once on mount. Re-execution on dependency change is inferred from the dependency graph.
 
 ### 17.4 Iteration — Tier 0 (`${ for/lift }`)
@@ -15861,7 +16506,8 @@ Error E-TYPE-062 at line 2: `is` operator requires an enum-typed left-hand opera
 - The `is` operator provides NO exhaustiveness guarantee. It is a boolean predicate, not a
   dispatch form.
 - `is` MAY be used in: `if` conditions, `class=` dynamic binding expressions, ternary
-  expressions, `when` guards, and any position where a boolean expression is valid.
+  expressions, ~~`when` guards,~~ and any position where a boolean expression is valid. *(S449: the `when` guard
+  is struck — §4.11.3; ruling:user-voice-scrml.md S449 item 7, rec pack item 11.)*
 
 ---
 
@@ -17441,7 +18087,7 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-DEFER-CONTROL-FLOW | §19.16.3 | A deferred body contains `return`, `fail`, `?`, or a `break`/`continue` whose target is outside it (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-NESTED | §19.16.3 | A deferred body contains a `defer` (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A failable call inside a deferred body is not handled in place (`!{}` or `match`), or a deferred `!{}` handler has no catch-all `\| _ :>` arm; replaces E-ERROR-002 there (S430; emitted at `compiler/src/type-system.ts` + `compiler/src/validators/lint-defer.ts`.) | Error |
-| E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body (top-level logic, `on mount`, markup/state-block body, or — stage 1 — an arrow/function-expression body) (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
+| E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body (top-level logic, `<onMount>` / `on mount`, markup/state-block body, or — stage 1 — an arrow/function-expression body) (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-SERVER-IN-SPLIT | §19.16.5 | In a body-split (CPS) function: a server-tier deferred body, or a `defer` nested inside a statement the split runs server-side (S430; emitted at `compiler/src/route-inference.ts`.) | Error |
 | E-DEFER-UNSUPPORTED-SITE | §19.16.2 | `defer` in a bare `{ }` block, a single-statement (unbraced) `match` / `!{}` arm, the unbraced body of an `if` / `else` / loop arm, or an arm of a value-producing `match` / `if` / `for` — not a stage-1 defer site (S430; emitted at `compiler/src/validators/lint-defer.ts` + `compiler/native-parser/parse-expr.js`.) | Error |
 | E-DEFER-LATER-SHADOW | §19.16.2 | A deferred body reads a name that a `let` / `const` / `lin` declaration later in its enclosing block chain (re)binds (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
@@ -17979,7 +18625,7 @@ return value already computed or an error already in flight — so it SHALL NOT 
    the body of a function DECLARATION — `function`, `fn`, `server function` — including any block nested
    in one. It is E-DEFER-OUTSIDE-FUNCTION in every other position:
    - the top level of a `${ }` logic block, a `<program>` / `<page>` / `<channel>` body, a state-block
-     body, or an `on mount { }` body (§6.7.1a). That code is page/module initialisation, which the
+     body, or an `<onMount>` / `on mount { }` body (§6.7.1a). That code is page/module initialisation, which the
      compiler reorders and distributes (§6.9 hoisting, §40.8 auto-lift, §12 placement), so there is no
      single block exit to attach the deferred body to. `defer` in markup is therefore always an error,
      never a silently inert statement.
@@ -18314,6 +18960,10 @@ session.destroy()   // void — end the session (delete the record + clear the c
 - Accessing `session` in a client-side function body SHALL be a compile error
   (E-SCOPE-012: `session` is not available in client-side functions; the function
   must be server-escalated).
+- The converse: `@session` (the client session projection) SHALL NOT be read in a
+  server context — it is E-SESSION-AMBIENT-SERVER (§6.6.9, §34), whose message names
+  `session.<field>`. A server function reads identity through `session`, never
+  `@session`. *(provenance: ruling:user-voice-scrml.md S449 item 1.)*
 - `session.userId` SHALL have type `string | not`. The value is `not` when no
   authenticated session exists.
 - `session.isAuth` SHALL have type `boolean`.
@@ -21040,6 +21690,7 @@ The HTML elements `<pre>` and `<code>` are **raw-content elements** at the scrml
 | `<onTransition>` | §51.0.H | Cross-state effect handler; child of `<engine>` only |
 | `<onTimeout>` (S67) | §51.0.M | Per-state-child time-driven transition declaration; child of an engine state-child only |
 | `<onIdle>` (S77) | §51.0.R | Engine-wide event-timeout watchdog; child of `<engine>` only (sibling of state-children); one per engine maximum |
+| `<onMount>` (S449, **Nominal**) | §6.7.1a | Outside-world setup once its owner's DOM exists (after render and `ref=` binding); no attributes; `${ }` body that may not write reactive state during the mount (E-MOUNT-WRITES-STATE); one run per mount of its scope / route region / `<each>` row; renders nothing; grammatical where `<effect>` is (any element scope) |
 | `<page>` (v0.3 Wave 1) | §40 | Per-route attribute container in multi-page apps; child of `<program>` only; route URL is filesystem-inferred (no `route=` attr); accepts exactly the four per-route concerns `db=`, `auth=`, `csrf=`, `ratelimit=` |
 | `<render>` (S196) | §19.15 | Held-variant render-expression; self-closing, `of=expr` required; fires the held enum value's per-variant `renders` markup (§19.2), exhaustiveness-fenced (§19.15.3) |
 | `<endpoint>` (S219) | §61 | Typed inbound endpoint (the serve-side mirror of §60 `<api>`); `path=`/`method=`/`accepts=:enum`; per-variant arms (REUSE §18.0.1/§51.0.B.1) exhaustive over `accepts=`; compiler owns decode (parseVariant §41.13) + JSON envelope; server-handler-only codegen; Implemented S219 (default-pipeline, W2-W5) |
@@ -21050,8 +21701,8 @@ The HTML elements `<pre>` and `<code>` are **raw-content elements** at the scrml
 **Normative statements:**
 
 - The HTML element registry (§24.1) SHALL NOT include these names. They are scrml-defined structural elements with their own owning-section semantics (cross-ref §4.15).
-- The compiler SHALL NOT apply HTML attribute validation (§24.2) to these elements. Each scrml structural element has its own attribute slot catalog defined in its owning section (§51.0 for `<engine>`, §18.0.1 for `<match>`, §17.7 for `<each>`, §55.8 for `<errors>`, §51.0.H for `<onTransition>`, §51.0.M for `<onTimeout>`, §51.0.R for `<onIdle>`, §40 for `<page>`, §61 for `<endpoint>`, §65.3 for `<theme>`/`<defaults>`).
-- These element names SHALL NOT be valid component names. Defining `const engine = <article>` (lowercase) or `const Engine = <div>` is `E-NAME-COLLIDES-RESERVED` — the names are reserved scrml structural-element identifiers. The same applies to `page` / `Page`, `endpoint` / `Endpoint`, `onchange` / `Onchange`, `theme` / `Theme`, and `defaults` / `Defaults` (`<theme>` reclaims the identifier from corpus state-cell usage per §65.9; `<base>` is NOT reclaimed — a standard HTML element).
+- The compiler SHALL NOT apply HTML attribute validation (§24.2) to these elements. Each scrml structural element has its own attribute slot catalog defined in its owning section (§51.0 for `<engine>`, §18.0.1 for `<match>`, §17.7 for `<each>`, §55.8 for `<errors>`, §51.0.H for `<onTransition>`, §51.0.M for `<onTimeout>`, §51.0.R for `<onIdle>`, §6.7.1a for `<onMount>` (S449 — no attributes), §40 for `<page>`, §61 for `<endpoint>`, §65.3 for `<theme>`/`<defaults>`).
+- These element names SHALL NOT be valid component names. Defining `const engine = <article>` (lowercase) or `const Engine = <div>` is `E-NAME-COLLIDES-RESERVED` — the names are reserved scrml structural-element identifiers. The same applies to `onMount` / `OnMount` (S449, §6.7.1a — Nominal), `page` / `Page`, `endpoint` / `Endpoint`, `onchange` / `Onchange`, `theme` / `Theme`, and `defaults` / `Defaults` (`<theme>` reclaims the identifier from corpus state-cell usage per §65.9; `<base>` is NOT reclaimed — a standard HTML element).
 - The unified state-type registry (§15.15) routes these names per their NR `resolvedCategory`: `<engine>` → `engine`, `<match>` → a dedicated category, `<errors>` → a dedicated category, `<onTransition>` → resolved relative to its parent `<engine>`, `<onTimeout>` → resolved relative to its parent engine state-child, `<onIdle>` → resolved relative to its parent `<engine>`, `<page>` → resolved relative to its parent `<program>`, `<endpoint>` → a dedicated route-declaration category (a top-level endpoint declaration, like `<api>` §60).
 - Validation pass VP-1 (§3.3 attribute allowlist) registers the per-element attribute catalogs for these structural elements in `compiler/src/attribute-registry.js` (cross-ref Stage 3.3 contract).
 
@@ -21063,6 +21714,7 @@ The HTML elements `<pre>` and `<code>` are **raw-content elements** at the scrml
 - §55.8 — `<errors>` element semantics.
 - §51.0.M — `<onTimeout>` semantics (S67 amendment).
 - §51.0.R — `<onIdle>` semantics (S77 amendment).
+- §6.7.1a — `<onMount>` semantics (S449 — outside-world setup at mount; the no-write rule).
 - §40 — `<page>` semantics; per-route attribute set; one-program-per-application rule (v0.3 Wave 1).
 - §61 — `<endpoint>` semantics; `path=`/`method=`/`accepts=` attributes; the arm form + exhaustiveness; the decode + envelope (S219; the typed-inbound mirror of §60 `<api>`).
 - §65 — `<theme>` / `<defaults>` semantics; token/variant body-forms; `<defaults>` bare-element rules; the `@layer` order; program-scope placement; lowering to §25 custom properties (the scrml-native CSS model; **Nominal**).
@@ -22231,7 +22883,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-PROGRAM-NESTED-ATTR | §4.12.2, §4.12 | An application-level `<program>` attribute appears on a nested `<program>` — any `<program>` with a `<program>` or `<page>` ancestor (however much markup sits between), or any `<program>` in a route file of a build that has an application program (the implied ancestor, §4.12). The §4.12.2 table (with its §43.4 lifecycle rows) is the whole nested-valid list; every other registered `<program>` attribute — `loginRedirect=`, `csrf=`, `cors=`, `cors-max-age=`, `log=`, `headers=`, `ratelimit=`, `idempotency-store=`, `idempotency-ttl=`, `batch-in-list-cap=`, `channel-reconnect=`, `mcp`, `html=`, `tables=`, `reset=` — fires once per attribute, any value. `auth=` and the session attributes have their own codes (`E-PROGRAM-NESTED-AUTH`, `E-PROGRAM-NESTED-SESSION`); the documentary attributes keep the warning `W-PROGRAM-TITLE-NESTED`; `kind=` / `serve=` keep `E-TOOL-002` / `E-TOOL-SERVE-MISPLACED`; unknown names keep `W-ATTR-001`. Before S445 item 5 these were silently ignored on a nested program (MEASURED: a route file's nested `ratelimit="1/min"` stopped limiting, 200/429/429 → 200/200/200; `headers="strict"` stopped sending CSP / X-Frame-Options). The build writes no output. Resolution: put the attribute on the top-level `<program>` and remove it from the nested one. Emitted at `compiler/src/codegen/index.ts` (the shared `forEachProgramWithRole` walk; the verdict is `nestedProgramAttrVerdict` in `compiler/src/program-role.ts`). Provenance: ruling:user-voice-scrml.md S445 item 5. | Error |
 | E-PROGRAM-NESTED-SESSION | §4.12.2, §20.5.1 | A session attribute (`sessionExpiry=`, `session-secure=`) appears on a nested `<program>` — any `<program>` with a `<program>` or `<page>` ancestor (however much markup sits between), or any `<program>` in a route file of a build that has an application program (the implied ancestor, §4.12). The session cookie is application-scope (§20.5.1); before S445 a nested declaration reached the step-2 last-wins read and silently downgraded the application cookie (MEASURED: a `session-secure="true" sessionExpiry="15m"` application holding a nested `session-secure="false" sessionExpiry="30d"` program minted plain `scrml_sid` / 2592000). Fires once per offending attribute, any value. The build writes no output. Resolution: declare the session attribute on the top-level `<program>` and remove it from the nested one. Placeholder until dpa-064. Emitted at `compiler/src/codegen/index.ts` (the shared `forEachProgramWithRole` walk, `compiler/src/program-role.ts`). Provenance: ruling:user-voice-scrml.md S445 item 3. | Error |
 | E-PROGRAM-CONFIG-UNREAD | §4.12, §40.8 | The file's top-level `<program>` after component expansion is not the `<program>` whose configuration was read (by source position) — typically a `<program>` produced by a component (`const Svc = <div><program auth="required">…</program></div>` + `<Svc/>`). Its `auth=`, session and middleware attributes were never read, so compiling it would serve its routes without them; the compiler refuses rather than guessing. The build writes no output. Resolution: write the application's `<program>` directly in the file (it may be wrapped in markup), not inside a component. Emitted at `compiler/src/codegen/index.ts` (after the E-PROGRAM-002 count; PRECG records the configured program's span, `precg.ts`). Provenance: S445 review F2 (fail-open, reviewer-executed: 200 "s3cret" to an anonymous POST). | Error |
-| E-PROGRAM-NESTED-AUTH | §4.12.2, §52.13 | An `auth=` attribute appears on a nested `<program>` — any `<program>` with a `<program>` or `<page>` ancestor, however much markup sits between (§4.12, S445 — a wrapper `<div>` never makes a nested `<program>` top-level). `auth=` is not a nested-valid `<program>` attribute (the §4.12.2 table omits it): a nested `<program>` is not an auth scope, and before S443 its `auth=` was silently dropped, so a nested `<program auth="required">`'s server functions ran for anonymous callers (MEASURED S441: an anonymous POST wrote a row). Fires for any value (a literal, an interpolation, or bare) — never a silent no-op. Resolution: put `auth=` on the top-level `<program>` (the whole application) or on the `<page>` that needs it, and remove it from the nested `<program>`. Emitted at `compiler/src/codegen/index.ts` (the `forEachProgramWithRole` walk over `compiler/src/program-role.ts`, shared with `E-PROGRAM-002`); the build writes no output (§40.8). Provenance: spec:§4.12.2 · pa-ruled:S443 (`g-nested-program-auth-attr-silently-ignored`) · ruling:user-voice-scrml.md S445 (option b). | Error |
+| E-PROGRAM-NESTED-AUTH | §4.12.2, §52.13 | An `auth=` attribute appears on a nested `<program>` — any `<program>` with a `<program>` or `<page>` ancestor, however much markup sits between (§4.12, S445 — a wrapper `<div>` never makes a nested `<program>` top-level). `auth=` is not a nested-valid `<program>` attribute (the §4.12.2 table omits it): a nested `<program>` is not an auth scope, and before S443 its `auth=` was silently dropped, so a nested `<program auth="required">`'s server functions ran for anonymous callers (MEASURED S441: an anonymous POST wrote a row). Fires for any value (a literal, an interpolation, or bare) — never a silent no-op — and is that declaration's only diagnostic (E-AUTH-ATTR-INVALID does not also fire, S449). Resolution: put `auth=` on the top-level `<program>` (the whole application) or on the `<page>` that needs it, and remove it from the nested `<program>`. Emitted at `compiler/src/codegen/index.ts` (the `forEachProgramWithRole` walk over `compiler/src/program-role.ts`, shared with `E-PROGRAM-002`); the build writes no output (§40.8). Provenance: spec:§4.12.2 · pa-ruled:S443 (`g-nested-program-auth-attr-silently-ignored`) · ruling:user-voice-scrml.md S445 (option b). | Error |
 | E-STORY-UNKNOWN | §58.9 | A `story="<name>"` attribute on a nested `<program>` references a `<name>` with no corresponding `[story.<name>]` entry in the project manifest (`scrml.toml`). Declare the build story in the manifest's `[story]` table, or correct the name. (S118 — Build Story, §58) | Error |
 | W-STORY-ON-TOP-LEVEL | §58.8 | A `story=` attribute appears on the top-level `<program>` (§40.8). The attribute is ignored — the top-level build story is owned exclusively by `[story] default` in `scrml.toml`. Remove the attribute, or set the project default in the manifest. (S118 — Build Story, §58) | Warning |
 | E-MAP-KEY-NOT-COMPARABLE | §59.4 | A value-native map (§59) key type is not §45-comparable (the general code; cross-references `E-EQ-003` for a function-containing key type). Map keys are identified by structural `==`, so a key type must be comparable. Resolution: use a comparable key type (primitive, struct of comparables, enum). (S168 — Value-Native Maps, §59) | Error |
@@ -22314,6 +22966,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-SESSION-CONTEXT | §20.5.1 | `session.*` used outside a web-app server route handler — an SSE `server function*`, an `<endpoint>` arm, a `<machine>` method, a serverLoad cell, an in-process server-fn helper called by another server function, or a headless `kind="tool"` program. Those contexts have no cookie-session request/response context. **(LIVE, S265/S239 i29e.)** | Error |
 | E-SESSION-VALUE | §20.5 | Bare `session` VALUE-use in a server-escalated body — `session` returned, assigned, passed as an argument, or otherwise read as a first-class value rather than as the object of a member (`session.userId`), index (`session["userId"]`), or call (`session.get`/`.set`/`.destroy`). `session` is a request-scoped accessor, not a value; a bare reference would emit a dangling `session` identifier (ReferenceError at request time). Fix: access a field or call an accessor. **(LIVE, S266 i29e — codegen emit-expr.ts:emitIdent, drained by emit-server.ts:generateServerJs.)** | Error |
 | E-SESSION-RESERVED-KEY | §20.5.1 | A LITERAL `session.set("csrfToken", …)` — `csrfToken` is a compiler-owned session key (the §40.2 server-authoritative CSRF synchronizer token). Writing it would let a caller pin the token to a known value and defeat the double-submit check (mass-assignment). Fix: remove the write; the compiler mints + persists the token (`userId`/`role` and preference keys remain writable). A DYNAMIC-key write with a runtime `csrfToken` key is refused at runtime (a no-op) by the emitted setter guard. **(LIVE, S266 i29e B5 — codegen emit-expr.ts:emitCall, drained by emit-server.ts:generateServerJs; runtime guard in emit-server.ts `_scrml_session_begin`.)** | Error |
+| E-SESSION-AMBIENT-SERVER | §6.6.9, §20.5 | An `@session` read (bare `@session` or `@session.<field>`) in a SERVER context: the whole body of a wholly-server function (an SSE `server function*`, a `handle()` middleware, a function nested inside one), the server-batch statements of a CPS-split function (§19.9.9 — its client statements run in the browser, where `@session` is the §20.5 projection, and are not a server context), an `<endpoint>` arm body (§61), or the load query of a `<cell server>` declaration (§52.6.5) — in any expression position (`?{}` and template-literal interpolations, conditions, match arms, a member assignment `@session.userId = …`, an update or (logical) assignment). `@session` is the CLIENT session projection (§20.5); every server lowering of an `@name` read takes its value from the request body, so a server `@session` read was caller-controlled identity (MEASURED S449: an authenticated POST carrying `{"session":{"userId":"victim"}}` wrote a row as `victim`). Fires once per read. The message names the fix — the server's own session object, `session.<field>` (§20.5) — and states that `@session` is not read on the server. Does NOT fire when the file declares its own FILE-SCOPE `<session>` reactive cell (then `@session` is that ordinary client cell, and E-REACTIVE-003 / the §19.9.9 marshal govern it); a component-local `<session>` does not exempt a top-level server read. The build writes no output (`compiler/src/commands/refusal-gate.js`). Emitted at `compiler/src/route-inference.ts` (`detectServerAmbientSessionReads`; `detectServerAmbientSessionReadsInText` for raw text — the `<endpoint>` arm body, template literals — via the comment-, string- and template-aware segmenter), before code generation. The provenance of the CPS / file-scope / expression-position refinements: S449 review of `54e3cb542` (F1, F2, F3). Provenance: ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 1 (interim; what `@session` means server-side stays open) · spec:§6.6.9 ("`@session` is server-only identity and SHALL NEVER be marshalled from the client") · gap `g-session-ambient-unlowered-trust-boundary-inversion`. | Error |
 | ~~E-REACTIVE-001~~ | §6.2 | **Retired 2026-07-16 (S263).** Reactive cells are declaration-order-independent (hoisted), so `@variable` use-before-declaration is LEGAL, not an error. The reachable "undeclared cell" case is owned by **E-STATE-UNDECLARED**. Triage: `scrml-support/docs/audits/s34-catalog-vs-impl-2026-07-16.md`. | — |
 | E-REACTIVE-002 | §6.6.8 | Assignment to a `const <name>` derived reactive value | Error |
 | E-REACTIVE-003 | §6.6.9 | A WHOLLY server-escalated function reads a free client cell — a mutable `@var`, a `const <name>` derived, OR a §52 `<... server>` cell (all client-held). The server-mode rewrite lowers `@cell` to `_scrml_body["cell"]`, but a non-CPS server-fn client stub sends only declared params, so the value is NOT transported and resolves to `undefined` server-side. Read-side sibling of E-RI-002 (server fn *writes* a `@reactive` cell). Fires once per distinct cell. GATED on `cpsSplit === null` — a CPS-split fn MARSHALS its server-batch reads into the client stub (`emit-functions.ts`), so it is exempt (see W-SERVER-DERIVED-MARSHAL). Excludes: declared params (already marshalled), ambient `@session`/`@currentUser` (server-resolved singletons, §20.5 — never client-supplied), and channel cells (E-CHANNEL-SERVER-CELL-READ owns them). Fix: pass the cell as an explicit argument, or restructure so the server computes the value inside the `?{}`. Broadened S250 from the derived-only, never-fired SPEC-only draft (a fail-open); §52 correction (client-held, not server-resolved) per RULING THE SPLIT. Emitted by RI (`compiler/src/route-inference.ts`, `detectServerFreeClientCellReads`). | Error |
@@ -22405,7 +23058,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-DEFER-CONTROL-FLOW | §19.16.3 | A deferred body (`defer <stmt>`) contains `return`, `fail`, a `?` propagation, or a `break`/`continue` whose target lies outside the deferred body. A deferred body runs while its block is already exiting, so it cannot redirect control. A loop inside the deferred body, and a function nested in it, are their own targets/scopes. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-NESTED | §19.16.3 | A deferred body contains a `defer` statement (outside a nested function). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A bare call to a failable function (declared `!` or CPS-implicit `!`) inside a deferred body is not handled in place with `!{}` (or a `match`). `?` is excluded and an enclosing `!` does not cover it; inside a deferred body this REPLACES E-ERROR-002 / W-CPS-NEEDS-FAILABLE for the same call. **Provenance:** `ruling:user-voice-S430-P3`. ALSO (S430 round 3): a `!{}` handler on a deferred call that has no catch-all `\| _ :>` arm — a transport failure outside the declared enum (a server / CPS callee's `CpsError`) would otherwise propagate out of the `finally`. (S430; emitted at `compiler/src/type-system.ts`, the function-body §19 walker, and — for the totality limb — `compiler/src/validators/lint-defer.ts`.) | Error |
-| E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body: the top level of a `${ }` logic block, an `on mount` body, a markup / state-block body — page/module initialisation with no single block exit — or (stage-1 limitation) an arrow-function / function-expression body, which the front-ends carry as host-expression text. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
+| E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body: the top level of a `${ }` logic block, an `<onMount>` / `on mount` body, a markup / state-block body — page/module initialisation with no single block exit — or (stage-1 limitation) an arrow-function / function-expression body, which the front-ends carry as host-expression text. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-SERVER-IN-SPLIT | §19.16.5 | A deferred body that is itself server-tier (own `?{}` SQL, a server-only resource, protected-field access, or a call to a server-escalated function) in a function the compiler body-splits (§19.9.9) — OR (S430 review) a `defer` of any tier nested inside a top-level statement the split places on the server (e.g. an `if` whose branch holds a `?{}`). Either way the deferred body would run inside a server batch, which ends before the later batches and client continuations — the premature release §19.16.5 forbids; rejected (fail closed) rather than lowered wrongly. The message names the concrete trigger (query, server-only resource, or the callee the compiler placed server-side). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/route-inference.ts`, the CPS-eligibility caller.) | Error |
 | E-DEFER-UNSUPPORTED-SITE | §19.16.2 | `defer` written in a bare `{ }` block statement, as a single-statement (unbraced) `match` / `!{}` handler arm (`.A :> defer D()`), or as the whole unbraced body of an `if` / `else` / `for` / `while` / `do` arm (S430 round 6 — the live front-end drops an unbraced `else` arm, which would silently attach the defer to the enclosing block). The front-ends carry those bodies as text (the native bridge flattens bare blocks), so the `defer` would never be parsed or lowered — or would silently attach to the enclosing block. Also: a `defer` directly in an arm of a `match` / `if` / `for` used for its VALUE (a value-form expression, or a `match` that is a `fn`'s implicit-return tail) — the defer block would capture the arm's result (measured: the produced value was lost). Rejected in stage 1; supporting bare blocks needs them parsed structurally (a separate arc). **Provenance:** `ruling:user-voice-S430-P3` (S430 round-5 review). (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-LATER-SHADOW | §19.16.2 | A deferred statement reads a name that a `let` / `const` / `lin` declaration LATER in its enclosing block chain (re)binds. The deferred statement runs at the block's exit, where it would capture the later binding (silently shadowing the one in scope at the `defer`) or read it before initialisation. Names the binding and both sites; the author renames one. Fails closed when the deferred statement cannot be analysed as a tree and the chain declares later names. A later `function` declaration is not a later binding (hoisted). **Provenance:** `ruling:user-voice-S430-P3` (S430 round-5 review). (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
@@ -22489,12 +23142,13 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-AUTH-004 | §52.11 | Two declarations of the same state type with conflicting `authority=` values | Error |
 | E-AUTH-005 | §52.11 | `<var server>` declared inside a client-only component (no server context) | Error |
 | W-AUTH-001 | §52.11 | `<var server>` has no detectable initial load pattern | Warning |
-| W-AUTH-004 | §52.6.5 | `<var server>` has a PARAM-BEARING inline `?{}` RHS (§52.6.5 Pattern C); param-passing on `/__serverLoad/<var>` is not yet shipped, so the cell will not hydrate — use a param-free query or an `on mount` block | Warning |
+| W-AUTH-004 | §52.6.5 | `<var server>` has a PARAM-BEARING inline `?{}` RHS (§52.6.5 Pattern C); param-passing on `/__serverLoad/<var>` is not yet shipped, so the cell will not hydrate — use a param-free query or a Pattern-B `<request>` (S449: formerly "an `on mount` block", which may no longer write the cell — §6.7.1a; impl#1's message still says `on mount`, filed `g-impl1-onmount-element-s449`). (Emitted at `compiler/src/type-system.ts`.) | Warning |
 | W-SERVERLOAD-UNGATED | §52.15 | A `/__serverLoad/<var>` route is emitted UNGATED (the cell's per-var `auth="none"`/`"optional"`, or no enclosing `auth="required"`) AND the compilation unit declares auth elsewhere (an auth-middleware entry exists) — the route serves server-authority data without the request-context gate the rest of the app enforces. Does NOT fire on a genuinely-public app (no auth anywhere) or an already-gated route. (S233 — server-load authority.) | Warning |
 | I-SSR-AUTH-SCOPED-CLIENT-HYDRATED | §52.15, §52.8 | A server-authority cell is auth-scoped (gated, or under `auth="required"`, and NOT explicitly `auth="none"`/`"optional"`) AND its SSR pre-render would be UNSCOPED — a Tier-1 `SELECT *`, a Pattern-C query with no LIVE `${@currentUser.…}` row-scope interpolation (a literal `@currentUser` in SQL string data or one inside a `--`/`/* */` comment does NOT count — comments are stripped before the scan), or a coalesced callable-init cell (`server @x = loadAll()`, ≥2 → `/__mountHydrate`, whose loader is opaque to the compiler). The compiler AUTO-OMITS it from the SSR seed — no first-paint markup fill, no `window.__scrml_ssr_state` entry — because the compose route (and `/__serverLoad` / `/__mountHydrate`) is anonymous-reachable and seeding an unscoped auth-scoped cell would bake every user's rows into every viewer's first paint (a cross-user leak). The cell instead hydrates client-side behind its gated `/__serverLoad` (or gated `/__mountHydrate`) fetch (401 for anon) — safe by construction. The codegen omission and this lint share ONE structured row-scope predicate, so they provably coincide. Mirrors the §14.8.9 protect-floor auto-redaction shape (route-admission × row-selection axis, §52.15.4). Info-level — never fatal (the auto-omission is never silent). Does NOT fire on a public cell or a row-scoped Pattern-C cell (those are SSR-seeded normally). Restore the first-paint acceleration by row-scoping the cell (§52.15.3). (S233 gate; S255 re-severity + auto-make-safe + callable-cell/comment/literal coverage. Was `W-SSR-PRERENDER-UNSCOPED` — a nudge-only Warning — before S255.) | Info |
 | I-SSR-EACH-CLIENT-RENDERED | §52.8 | A TOP-LEVEL `<each in=@cell>` iterating a server-authority (SSR-seeded) cell FALLS BACK to client-only first-paint render because its per-item template is outside the §52.8 SSR-renderable subset — a multi-root (≥2 root elements) or non-markup-root template, or a row carrying non-field-read interpolation (call / ternary / method / `@cell` read), a non-literal attribute value, `if=`/`show=`/directive/reactive attributes, or nested `<each>`/`<match>`/component rows (each `SsrUnsupported` reason is named in the message). The list ships EMPTY in the server HTML and populates after hydration: no first paint for crawlers or slow connections, and no DOM adoption. Info-level — never fatal; SURFACES the pre-existing conservative fallback (it does NOT change what compiles). Does NOT fire on a client-local cell (never an SSR candidate), a nested each (emitted inline, no mount), or an each already within the subset (server-rendered normally). The accept/decline WIDENING of the subset is the ruling-gated follow-on `g-ssr-each-row-template-subset-blocks-all-prerender` / `g-ssr-each-multi-root-client-only-fallback`. (Catalog addition S339 (peter); emitted at `compiler/src/codegen/emit-ssr-render.ts`, wired at `emit-server.ts:5162`.) | Info |
 | W-ATTR-001 | §52.13 | Attribute name not recognized on a scrml-special element (informational; attribute is forwarded to HTML as-is) | Warning |
-| W-ATTR-002 | §52.13 | Attribute value-shape not recognized (e.g. `auth="role:X"` on `<page>`) — silently accepted but has no compile-time effect | Warning |
+| W-ATTR-002 | §52.13 | Attribute value-shape not recognized (e.g. `auth="role:X"` on `<channel>`, an unknown `csrf=` literal) — silently accepted but has no compile-time effect. Not for `auth=` on `<program>` / `<page>`: that is `E-AUTH-ATTR-INVALID` (S449). (Emitted at `compiler/src/validators/attribute-allowlist.ts` `validateMarkup` — the closed-value branch, VP-1.) | Warning |
+| E-AUTH-ATTR-INVALID | §52.13.2, §52.13.1 | An `auth=` attribute on a `<program>` or `<page>` whose value is not exactly `"required"`, `"optional"` or `"none"`: any other literal (another case `"Required"`, padding `" required"`, the empty string `""`, `"role:admin"`, `"true"`) or any non-literal (a bare `auth`, `auth=${…}`, `auth=@x`). The message names the value written, lists the three legal values (with a did-you-mean when the value differs only in case or spaces, and the role-gate route for `role:X`). Before S449 these compiled to an application with no login gate (W-ATTR-002 for a literal, nothing at all for a non-literal or `""`). Does NOT fire on a nested `<program>` (E-PROGRAM-NESTED-AUTH is that declaration's one diagnostic) nor on `<channel>` (any `auth=` there gates; an unrecognized literal is W-ATTR-002). The build writes no output (`compiler/src/commands/refusal-gate.js`). Emitted at `compiler/src/validators/attribute-allowlist.ts` (VP-1). Provenance: ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 4 ("Unrecognized / non-literal `auth=` (incl. `""`) = (a): compile error; amend §52.13.2") · supersedes: spec:§52.13.2 (W-ATTR-002 + no gate). | Error |
 | E-CONTRACT-001 | §53.11 | Inline predicate violation at compile time (statically provable) | Error |
 | E-CONTRACT-001-RT | §53.11 | Inline predicate violation at runtime | Runtime |
 | E-CONTRACT-002 | §53.11 | Named shape not found in registry | Error |
@@ -22549,7 +23203,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-STATE-UNDECLARED | §6.1.1, §6.1.2, §6.1.3 | S123 V-kill — bare `@name = expr` write inside a `fn`/`function`/user-written `${...}` body without a structural `<name>` declaration in scope. The canonical form `@name = expr` is a WRITE to a pre-declared cell, not a declaration; the auto-synth path (silent phantom-cell creation from bare writes) was retired at S123 per the auto-state-cell-synthesis deep-dive (`scrml-support/docs/deep-dives/auto-state-cell-synthesis-investigation-2026-05-23.md`). Exempts default-logic body-top auto-lift at `<program>`/`<page>`/`<channel>` (§40.8) and meta `^{...}` bodies (BUG-META-6 dependency) — both deferred to follow-up units. Fix: add `<name> = <init>` declaration before the write, or remove the `@` prefix if a local identifier was intended. **Read-side fire WIRED S192 at TS (post-CE relocation).** A bare `@name` read that resolves to NEITHER a reactive cell, NOR an `<each>`/`<tableFor>` loop local, NOR an import binding is also `E-STATE-UNDECLARED` — the silent-bug class that produced the 7 flagship `@currentCustomerEvents`/`@currentDriverEvents` typos at S192. The fire lives at the type-system stage (`compiler/src/type-system.ts`, the logic-expr ident walker), which runs POST-CE and rebuilds a complete `@name` resolution table over the expanded AST. This is the relocation the SYM-stage prototype's failure pointed to: SYM is the WRONG LAYER (it over-fires on `@`-names materialised POST-SYM — `<each>`/`<tableFor>` `@row` loop locals absent from the SYM AST; engine boot-`effect=` cells; cross-FILE channel cells inlined by CE §38.12). TS resolves ALL of these directly: the cross-file channel cell flows through CE inlining into TS's scopeChain (the SYM-stage Class-B channel-body scan is RETIRED — TS reaches the inlined channel decl directly); the engine `<machine name=UI>` lowercased read `${@ui}` resolves via the §51.0.C-canonicalised machineRegistry pre-bind; and the engine boot-`effect=` implicit cell (`@tasks = …` written in the raw-text opener effect, §51.0.H Form 3) resolves via a dedicated openerEffect-write pre-bind. A component-def `${@Name}` read (PascalCase `const Name = <markup>`, instantiated via `<Name/>`) CORRECTLY fires — symmetric with the existing bare-path `E-SCOPE-001`. The §51.0.C engine var-name canonicalisation LANDED S192 (register/read/codegen agree on the one canonical var name); S192 stage-1 closed the same-file registration gaps (legacy `const @name`→`const <name>` + deprecation-lint; `ref=@name` bindings registered; state-block bare-writes migrated). | Error |
 | E-WRITE-NOT-IN-LOGIC-CONTEXT | §40.8, §6.1.1, §6.2 | ⛑ **RETIRED S441 — no longer fires.** A `<program>` / `<page>` / `<channel>` body is code (§40.8 S441 bullet), so a bare `@name = expr` at its body-top is an ordinary write in a logic context, treated exactly as the same write inside an explicit `${ … }` at that position; this code's only locus is gone, and the (now deleted) unit-cc-exemption-list.json + `default-logic-exemption.ts` were removed with it. The `<db>` / `<state>` state-block case keeps `W-STATE-BLOCK-BARE-WRITE-DECL` (unchanged). Provenance: ruling:user-voice-scrml.md S441 "declared-prose implementation: \"yes to all four\"" (item 4). The text below is the S123 history. S123 Unit CC — companion to V-kill (catalog row above). Bare `@name = expr` write at the IMMEDIATE body-top of `<program>` / `<page>` / `<channel>` (the §40.8 default-logic-mode surface). Default-logic mode auto-lifts DECLARATIONS only (structural `<name> = expr`, structural derived `const <name> = expr`, `function`/`fn`, `type`, `let`/`const` locals, `import`); the bare V5-strict WRITE form `@name = expr` is NOT a declaration — writes ARE logic; logic goes in `${...}`. Per the S122 user-voice Option-2 ratification, this shape is normatively rejected. Fix: either (a) wrap in explicit logic block `${ @name = ... }`, or (b) convert to a structural declaration `<name> = ...`. **Discrimination:** Unit CC fires at the IMMEDIATE body-top only; bare writes nested inside a function body (`function f() { @x = 5 }`) or inside an explicit user-written `${...}` block at body-top are governed by V-kill (E-STATE-UNDECLARED above). `<db>` / `<state>` STATE-block bodies are NOT default-logic-mode loci and are NOT affected by THIS (hard) code — a bare `@x = init` directly in a state-block body surfaces the INFO-level `W-STATE-BLOCK-BARE-WRITE-DECL` (catalog row below) instead. **Per-file exemption:** the (now deleted) unit-cc-exemption-list.json provides path-based suppression for the pre-S123 corpus; each adopter source file removes its own entry as migration completes (sunset is per-file, manual — file deletion does not auto-sunset because the files are adopter source, not scheduled deletion targets like V-kill's `compiler/native-parser/*.scrml` exemption). Companion to `E-STATE-UNDECLARED`; emitted at `compiler/src/symbol-table.ts` PASS 3 (`walkResolveAtNames`) state-decl arm on `_isUnitCCWrite`-tagged nodes. | Error |
 | W-STATE-BLOCK-BARE-WRITE-DECL | §38.4, §6, §40.8 | A bare `@name = init` line directly in a `<db>` / `<state>` STATE-block MARKUP body (not inside a `${...}` logic block, not inside a function). A state-block body is markup context (SPEC §4); per §38.4 ("bare names are LOCALS only") + §6 V5-strict, a bare `@name = init` is NOT a declaration — `@name` is a READ/WRITE of a pre-declared cell. In the markup body it is silently DROPPED (inert text — neither registered nor emitted), so the cell never resolves at SYM. The canonical state-block declaration is the STRUCTURAL form inside a `${...}` logic block: `${ <name> = init }` (see `examples/03-contact-book.scrml` / `08-chat.scrml`). The INFO lint steers there; `bun scrml migrate` does not yet auto-fix (the rewrite re-homes the decl into a `${}` block — an AST relocation, not a text swap). The state-block companion to `E-WRITE-NOT-IN-LOGIC-CONTEXT` (Unit CC, the row above — which deliberately EXCLUDES state-block bodies because a hard error there is a bigger call). The end-of-window timing promotes this to a reserved `E-STATE-BLOCK-BARE-WRITE-DECL`. **Fires:** emitted by TAB (`compiler/src/ast-builder.js` `scanStateBlockBareWriteDecls`, called from `liftBareDeclarations`) — covers BOTH the canonical no-space opener `<db>` / `<state>` / `<schema>` (BS-classified `type=markup`, scanned via `_STATE_BLOCK_BARE_WRITE_NAMES` on the markup path) AND the deprecated whitespace opener `< db>` (BS-classified `type=state`, scanned on the state path). (Added 2026-06-13, sym-cell-registration-completeness; canonical-opener coverage added 2026-06-13 fixup.) | Info |
-| E-STATE-BLOCK-STATEMENT-FORM | §38.4, §40.8, §4.18.1 | A **lifecycle STATEMENT** — `on mount { … }` / `on dismount { … }` — written directly in a `<db>` / `<state>` STATE-block MARKUP body (not inside a `${...}` logic block, not inside a function). A state-block body is markup context, NOT a `default-logic` locus (§4.18.1; see `E-WRITE-NOT-IN-LOGIC-CONTEXT` above, which excludes state-block bodies for the same reason), so the §40.8 `on mount` auto-lift that applies at a `<program>` / `<page>` / `<channel>` body-top does NOT reach here. The statement is neither registered nor lifted: it ships into the DOM as **literal page text and never runs**, at exit 0 with zero diagnostics — the "my app doesn't load" failure, not a dropped assignment. Fix: move the lifecycle block out to the `<program>` / `<page>` body, or wrap it in an explicit `${ ... }` logic block. **Scope is ONE named form, and the complement is deliberately refused** — bare calls at this locus stay legal (a MEASURED typestate false-positive class: `validate() => < Validated> { }` in a `type:"state"` block, 4 live conformance cases), control flow is `E-CONTROL-FLOW-IN-MARKUP`, bare writes are the `W-STATE-BLOCK-BARE-WRITE-DECL` deprecation cycle above, and prose must keep compiling. **DISTINCT from the reserved `E-STATE-BLOCK-BARE-WRITE-DECL`**, which is shape-specific to `@name = init` and is that cycle's endpoint — a fresh code was allocated at S376 precisely so one row does not mean two shapes while being simultaneously live and reserved (§63.1 has no such stage). Newly-rejecting; migration MEASURED from the compiler over 2,194 `.scrml` — **1 file** (`samples/htmx-debate-dashboard.scrml`), migrated in the same landing. **Provenance:** `ruling:` user-voice-scrml.md S375 (limb b — refuse, not lint) + S376 (the code-name decision). **Fires:** emitted at `compiler/src/lint-e-state-block-statement-form.js` (`runEStateBlockStatementForm`, scanning block-splitter text children via `scanStateBlockChildren`), wired at `compiler/src/api.js` Stage 2.5c; covers BOTH the canonical `<db>` / `<state>` opener and the deprecated whitespace opener `< db>`. (Added 2026-08-26, db-state-block-locus.) | Error |
+| E-STATE-BLOCK-STATEMENT-FORM | §38.4, §40.8, §4.18.1 | A **lifecycle STATEMENT** — `on mount { … }` (soft-deprecated S449, §6.7.1a) / `on dismount { … }` (not scrml — retired S449, §6.7.1a; it was never specified, and only impl#1 recognizes its head) — written directly in a `<db>` / `<state>` STATE-block MARKUP body (not inside a `${...}` logic block, not inside a function). A state-block body is markup context, NOT a `default-logic` locus (§4.18.1; see `E-WRITE-NOT-IN-LOGIC-CONTEXT` above, which excludes state-block bodies for the same reason), so the §40.8 `on mount` auto-lift that applies at a `<program>` / `<page>` / `<channel>` body-top does NOT reach here. The statement is neither registered nor lifted: it ships into the DOM as **literal page text and never runs**, at exit 0 with zero diagnostics — the "my app doesn't load" failure, not a dropped assignment. Fix: move the lifecycle block out to the `<program>` / `<page>` body, or wrap it in an explicit `${ ... }` logic block. *(S449: the canonical mount form is the markup element `<onMount>${ … }</>` (§6.7.1a), which is a tree node, not a statement, so it is not this shape; teardown is `cleanup()` inside it. Provenance: ruling:user-voice-scrml.md S449 item 2 (2b, 3b).)* **Scope is ONE named form, and the complement is deliberately refused** — bare calls at this locus stay legal (a MEASURED typestate false-positive class: `validate() => < Validated> { }` in a `type:"state"` block, 4 live conformance cases), control flow is `E-CONTROL-FLOW-IN-MARKUP`, bare writes are the `W-STATE-BLOCK-BARE-WRITE-DECL` deprecation cycle above, and prose must keep compiling. **DISTINCT from the reserved `E-STATE-BLOCK-BARE-WRITE-DECL`**, which is shape-specific to `@name = init` and is that cycle's endpoint — a fresh code was allocated at S376 precisely so one row does not mean two shapes while being simultaneously live and reserved (§63.1 has no such stage). Newly-rejecting; migration MEASURED from the compiler over 2,194 `.scrml` — **1 file** (`samples/htmx-debate-dashboard.scrml`), migrated in the same landing. **Provenance:** `ruling:` user-voice-scrml.md S375 (limb b — refuse, not lint) + S376 (the code-name decision). **Fires:** emitted at `compiler/src/lint-e-state-block-statement-form.js` (`runEStateBlockStatementForm`, scanning block-splitter text children via `scanStateBlockChildren`), wired at `compiler/src/api.js` Stage 2.5c; covers BOTH the canonical `<db>` / `<state>` opener and the deprecated whitespace opener `< db>`. (Added 2026-08-26, db-state-block-locus.) | Error |
 | E-DERIVED-WRITE | §6.6, §6.6.8 | Reassignment to a `const`-derived reactive cell. Derived cells are read-only; assignment is not permitted. Example: `const <displayName> = @name.toUpperCase(); @displayName = "x"`. Sibling: in-place mutation is `E-DERIVED-VALUE-MUTATE` (§6.6.18). (Renamed from `E-REACTIVE-002` in S59 lock L21.) | Error |
 | E-DERIVED-VALUE-MUTATE | §6.6.18 | In-place value-mutation of a `const`-derived reactive cell — array mutating methods on a derived array (`@filtered.push(x)`), property assignment / compound-assignment / `delete` on a derived object (`@formCopy.full = "x"`), or the same on an in-compound derived sub-cell. Derived cells are value-immutable from the developer's perspective; mutating one would be silently clobbered when the upstream dependencies next fire. Mutate the upstream cell instead. (S59 lock L21.) | Error |
 | E-DERIVED-SERVER-ONLY-REACH | §6.6.19, §12.2 | The RHS of a `const <name>` derived cell REACHES — by a call or by a bare reference, at any depth, including inside a lambda body, a `match`-arm block body, or an RHS that does not structurally parse — a local binding imported from a module in the §12.2 Trigger 3 `ESCALATION_SERVER_ONLY_MODULES` set (or a submodule of one). §12.2 Trigger 3 escalates the FUNCTION that reaches such a binding, but §12.4 makes route inference per-function and a derived cell is not a function, so the reach was invisible and the module shipped to the browser: measured S331, the reproducer compiled at exit 0 with NO `.server.js`, `const { hashPassword } = _scrml_stdlib.auth;` in the client bundle, and a real `Bun.password.hash` argon2id implementation in the shipped runtime (4 occurrences vs 0 for a program not importing `scrml:auth`) — the exact symptom the Trigger-3 S299 amendment describes. The compiler REFUSES rather than escalating: a derived cell is a synchronous lazy-pull recompute (§6.6.3), so escalation would make each recompute a server round trip, which the derived model cannot express. Resolution: move the call into a `function` (which DOES escalate, §12.2) and write its result to a plain reactive cell. A name bound inside the RHS shadows the import and does not fire; a name inside a string literal is not a reference (§12.4). Carve-out: NOT emitted in a `kind="tool"` program (§64 — no client boundary), mirroring the §20.7 `print()`/`println()` carve-out. Direction-of-change: newly-rejecting, migration measured at ZERO (59 repo files import an escalation server-only module; none reaches one from a derived RHS). **Provenance:** `spec:§12.2 Trigger-3 S299 amendment`. (Catalog addition S331; emitted at `compiler/src/route-inference.ts` Step 3b.) | Error |
@@ -22562,10 +23216,11 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-SYNTHESIZED-WRITE | §6.11 | Assignment to an auto-synthesized property (e.g., `@signup.isValid = false`). Synthesized validity surface properties are read-only. See §55 for full validity surface specification. | Error |
 | E-RESET-NO-ARG | §6.8 | `reset()` called with no argument. The `reset` keyword requires an explicit cell argument: `reset(@cell)` or `reset(@compound.field)`. | Error |
 | E-RESET-INVALID-TARGET | §6.8.2 | The `reset` keyword target must be one of the three canonical shapes: `reset(@cell)` (top-level cell), `reset(@compound)` (whole compound), or `reset(@compound.field)` (single-level compound nav). Multi-level compound paths (`reset(@a.b.c)`) are also legal when each segment resolves through the compound-scope chain (§6.3.5 recursive composition). Other expression shapes (literals, function-call results, binary / ternary / unary expressions, bare identifiers without `@`, member chains rooted at non-`@` identifiers) are rejected. (Catalog addition S69 — A1b B22.) | Error |
-| E-RESET-ON-INVALID-ENTRY | §6.8.4 | A `reset-on=[…]` entry is not a declared, mutable, non-derived reactive cell in scope at the declaration (an undeclared name, a non-`@` name, a derived cell), or the list is empty (`reset-on=[]`). The same entry rule `<effect deps=[…]>` follows (`E-LIFECYCLE-007`'s condition). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1: *"Page-reset → a `reset-on=[@a, @b]` modifier on the cell being reset"*). **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
+| E-RESET-ON-INVALID-ENTRY | §6.8.4 | A `reset-on=[…]` entry is not a declared, mutable, non-derived reactive cell in scope at the declaration (an undeclared name, a non-`@` name, a derived cell), or the list is empty (`reset-on=[]`). The same entry rule `<effect deps=[…]>` follows (`E-LIFECYCLE-007`'s condition). **Amended S449** (rec pack item 6 = (a), ruling:user-voice-scrml.md S449 item 7): a field path (`reset-on=[@lineItem.sku]` — it names the SHARED instance's field, not this row's) or an `<each>` row alias is this code; per-instance resets wait for instance-self naming (O54). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1: *"Page-reset → a `reset-on=[@a, @b]` modifier on the cell being reset"*). **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
 | E-RESET-ON-CYCLE | §6.8.4 | The static `reset-on=` graph (entry → reset cell) has a cycle — `a` resets on `b` and `b` resets on `a`, or a cell lists itself. The message names every cell on the cycle. Chains are legal; the acyclic graph makes reset chains terminate by construction. **Provenance:** ruling:user-voice-scrml.md S447 "3b: `reset-on=` IS allowed on engine cells, checked against `rule=`" — *"the new rec for engine reset, yes."* (*"The rest of 3b stands: `reset-on=` cycles are a compile error"*). **Nominal / not yet emitted**; lands with the bootstrap. | Error |
 | E-RESET-ON-NOT-WRITABLE | §6.8.4 | `reset-on=` on a cell whose write contract does not admit the reset write — a locked cell (no `replace` grant; §66.11), a derived cell (`const <x>`, a §66 locked cell with a reactive initializer), or a `derived=` engine. The reset is `reset(@self)`, a `replace`. Resolution: make the cell writable (`let`), or drop `reset-on=`. **Provenance:** ruling:user-voice-scrml.md S447 "3b: `reset-on=` IS allowed on engine cells, checked against `rule=`" — *"the new rec for engine reset, yes."* (*"legal only on writable cells"*). **Nominal / not yet emitted**; lands with the bootstrap. | Error |
 | E-RESET-ON-ENGINE-REFUSED | §6.8.4, §51.0.F | `reset-on=` on a cell that carries a transition graph (an engine variable, a §66.13.2 enum value with `rule=` state-children), where some state other than the reset target does not admit the target in its `rule=` (`rule=*` admits all). The reset target is `default=` if present, else the initial value; a non-literal target means every variant its type admits must be admitted (fail closed). The message SHALL name every refusing state and the target. The target state itself needs no self-edge (a self-write is a no-op, §51.0.F.1). When legal, the reset is a real transition: `<onTransition>` handlers fire. **Provenance:** ruling:user-voice-scrml.md S447 "3b: `reset-on=` IS allowed on engine cells, checked against `rule=`" — *"the new rec for engine reset, yes."* (*"EVERY state must admit the reset target in its `rule=`, else a compile error naming the refusing state; the reset is a real transition, so `<onTransition>` handlers fire"*) · supersedes: the DD §14 3b lean *"forbidden on engine cells"* (never ruled). **Nominal / not yet emitted**; lands with the bootstrap. | Error |
+| E-RESET-ON-SHARED-CELL | §6.8.4, §52, §38 | `reset-on=` on a cell that is §52 server-authoritative or `<channel>`-synced — N clients would each reset (and broadcast) one shared cell. A shared cell MAY be an entry (a trigger) of a client-local cell's `reset-on=`. Resolution: reset the shared state in the server function that changes the trigger (the writer), or reset a client-local cell. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 5 = (a)). Supersedes §6.8.4's interim "legal exactly where `reset(@x)` is legal" reading. **Nominal / not yet emitted**; lands with the bootstrap. | Error |
 | W-LIFECYCLE-CANDIDATE | §1.5 | A `<program>` body, component body, or file scope has more than 2 reactive boolean cells gating the same UI region. Consider promoting to a `<match>` block (Tier 1) or `<engine>` (Tier 2) for structural exhaustiveness. | Warning |
 | W-MATCH-RULE-INERT | §18.0.2 | `rule=` declared on a state-child inside a `<match>` block. Rules are legal-but-inert in match (read-only on the matched-on value); promote to `<engine>` (Tier 2) to activate enforcement. | Warning |
 | E-MATCH-EFFECT-FORBIDDEN | §18.0.2 | `effect=` attribute used on a state-child inside a `<match>` block. Effects presuppose transitions; transitions don't occur in match. Use `<engine>` (Tier 2). | Error |
@@ -22616,6 +23271,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ENGINE-RULE-LEGACY-SYNTAX | §51.0.F, §51.3 | The legacy event-arrow rule grammar appears on the `<engine>` keyword (state-engine form, §51.0.C). TWO fire-sites: **(a) `rule=` attribute** — a `rule=` value uses the legacy event-arrow form (`rule="event -> Variant"`); on `<engine>`, `rule=` must use one of the three §51.0.F target-only forms: single-target (`rule=.NextVariant`), multi-target (`rule=(.A \| .B \| .C)`), or wildcard (`rule=*`). **(b) whole-body arrow form** — the engine body is a machine-style arrow-rule block (`.From => .To`) instead of state-children. This is NOT valid on the `<engine for=T initial=...>` state-engine form: such a body has no state-child opener, so it half-compiles (the `__scrml_transitions` table emits, but the §51.0.C auto-declared cell init does NOT), leaving the governed cell `undefined` at mount and any driven `<match on=@var>` rendering empty. Rewrite each variant as a state-child carrying its outgoing `rule=`. Whole-body event-arrow rules belong to the named/legacy `<machine>` surface (§51.3, deprecated) — declare `<engine name=Name for=T>` (or the deprecated `<machine name=Name for=T>`, W-DEPRECATED-001) and bind a variable to it via `@var: Name` if a machine is intended. Both fire-sites are §51.0.C `<engine>`-keyword-only: the `<machine>` keyword and the `<engine name=...>` named-machine form (§51.3.2) and derived engines (§51.0.J / §51.9 projection bodies) are EXEMPT. (Catalog addition S68 — A1b B15; whole-body fire-site added 6nz B2 2026-06-24.) | Error |
 | E-HISTORY-NO-INNER-ENGINE | §51.0.N, §51.0.Q | The `history` attribute appears on a state-child whose body does not contain a nested `<engine>`. `history` is meaningful only on composite state-children (those with an inner engine to track). Either add a nested `<engine>` to the body, or remove `history`. (Catalog addition S67 — DD-Harel Approach C Hybrid, Insight 23 grammar decision #2.) | Error |
 | E-INTERNAL-BODY-TOP-DROPPED | §40.8 | (S441 round 4 — the body-top coverage invariant.) **Internal compiler error, fail-closed.** After a `<program>` / `<page>` / `<channel>` body-top run is parsed and checked, a non-whitespace, non-comment byte of it is in neither (a) a statement the compiler compiles nor (b) an error diagnostic: the compiler would otherwise have dropped it silently. **Fire condition:** the post-parse coverage check (§40.8 S441 bullet) finds such a byte. The diagnostic names the text and its line, states that this is a compiler bug, and names both declared-prose forms (`<p>…</p>`, `"…"`) in case the text was meant for display. It is never the intended response to a source shape — any occurrence is a defect in the parser path that dropped the text. *(S441 round 5.)* "Compiles" is the statement's own grammar extent (§40.8: an `import` ends at its specifier string, a `type` alias where its type expression ends, …), not the tokens its parse consumed; a statement that compiles nothing (`404`, `import stuff`) is `E-UNQUOTED-DISPLAY-TEXT`, not this code. A `;` is the statement separator (§7.2.2 rule 6 — *superseding* the S441 round-5 "a `;` is source formatting"; provenance: ruling:user-voice-scrml.md S446 "dpa-063 Call 4 = PA recs", 4b (i) "a line-final `;` is legal (it is the same-line separator)"); it is a covered byte, never text. **Does NOT fire** when the run already carries an error diagnostic — that error stops the build, so nothing can ship silently. On `--parser=scrml-native` it fires for a statement whose TRANSLATION into the shared AST lost text — an expression the native bridge turns into an empty escape-hatch, e.g. a tagged template (``tag`x` ``) or a comma sequence inside a call argument (`go((a(), 7))`); pre-existing native bridge gaps, so the text would otherwise vanish. Emitted by `compiler/src/ast-builder.js` `assertBodyTopCoverage` (default front end) and `compiler/native-parser/parse-markup.js` `assertBodyTopCoverageNative` (`--parser=scrml-native`). | Error |
+| E-INTERNAL-SESSION-AMBIENT-SERVER | §6.6.9, §20.5 | **Internal compiler error, fail-closed.** A server-mode lowering of an expression (structured `emitIdent`, the text rewriter, the post-emit rewrite or the AST rewriter) met an ambient `@session` read that the front end did not refuse with E-SESSION-AMBIENT-SERVER. The read is NOT lowered to the request body: the lowering emits the undefined identifier `_scrml_server_session_refused` instead and the build is refused (no output is written). **Does NOT fire** when the run already carries E-SESSION-AMBIENT-SERVER — those are the same reads. Any occurrence is a compiler defect (a server context the front-end check does not cover). Emitted by `compiler/src/codegen/server-session-guard.ts`, drained by `compiler/src/codegen/emit-server.ts` and `compiler/src/codegen/index.ts`. Provenance: ruling:user-voice-scrml.md S449 item 1 (the brief's fail-closed codegen assertion). | Error |
 | E-INTERNAL-RULE-NOT-COMPOSITE | §51.0.O, §51.0.Q | The `internal:rule=` prefix appears on a state-child that is not composite (no nested `<engine>` body). The internal-vs-external distinction is meaningful only when there is an inner engine whose lifecycle would be preserved on internal transitions. Use canonical `rule=` on non-composite state-children. (Catalog addition S67 — DD-Harel Approach C Hybrid, Insight 23 grammar decision #4.) | Error |
 | E-ENGINE-PAYLOAD-ON-UNIT-VARIANT | §51.0.B.1 | Payload-binding attributes appear on an engine state-child whose variant is a unit variant (no payload fields per §14.4). Unit variants have no fields to bind; the bindings are a developer mistake (typically a payload field was removed from the variant declaration but the bindings on the state-child were not updated). Either add fields to the variant declaration (`Variant(field:type, ...)` per §14.4) or remove the binding attributes from the state-child opener. (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
 | E-ENGINE-PAYLOAD-ARITY-MISMATCH | §51.0.B.1 | The number of payload-binding attributes on an engine state-child does not match the variant's payload field count (per §14.4). In the bare-attribute and positional-parenthesized forms, all fields MUST be bound; too few or too many bindings fire this code. Also fires when the bare-attribute or named form contains mixed positional + named bindings within the same state-child opener (the §18.7 mixed-form prohibition extends to this locus). Distinct from §18.7's `E-TYPE-021` because the diagnostic surface differs (state-child attribute list vs match arm pattern); in the parenthesized form `E-TYPE-021` fires for arity / mixed-form (per §18.7 inheritance) and `E-ENGINE-PAYLOAD-ARITY-MISMATCH` is reserved for the attribute-list-based forms. Resolution: list all payload field bindings in declaration order, OR use the named form to bind a subset by field name. (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
@@ -22634,6 +23290,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-PERSIST-REVEALED | §6.14, §14.8.9 | `persist=` on a cell whose value carries `reveal`-declassified protected provenance. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 7 — *"5, 7, 8 your recs."*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | E-PERSIST-LIN | §6.14, §35 | `persist=` on a `lin` cell — a stored `lin` value would be replayable on every reload. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 7 — *"5, 7, 8 your recs."*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | E-PERSIST-WITH-SERVER | §6.14, §52 | `persist=` on a server-authority cell (`<x server>`, a Tier-1 `authority="server"` type instance). **Provenance:** dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` A2 item 7 (within ruled pole A2, call 1 — *"the persist= attribute"*). **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PERSIST-DRAFT-OVERWRITTEN | §6.7.7.3, §6.14 | A `persist=` cell that is BOTH assigned by a `<request>`'s settle AND a dependency of a provably-writing `<request>` (§6.7.7.3 rule 1). The load is a server-origin write, so it replaces the restored draft and becomes the baseline ("load wins", §6.7.7.3 rule 8) — the draft is lost silently. The message SHALL say: keep the draft in its own `persist=` cell and offer the restore yourself. Narrow by design: a persisted cell a load writes but no write request depends on, and a draft cell no load writes, stay legal. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 9 = (a) + (c)). Newly-rejecting. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | E-PREPAINT-WITHOUT-PERSIST | §6.14.4.2 | `prepaint` (cell-level pre-paint REFLECT) on a state cell that has no `persist=`. Rec 8 verbatim: *"`prepaint` or `hold=` without `persist=` → **both errors in v1**"*. **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | E-HOLD-WITHOUT-PERSIST | §6.14.4.3 | A `hold=@cell` region marker whose operand is not a `persist=` cell. A general "cloak until rendered" marker is a separate question (dd route-to-PA R4). **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | W-PREPAINT-UNCOVERED-READ | §6.14.4.2 | A read of a `prepaint` cell that REFLECT cannot cover — text content (`${@c}`), `<each>`, `if=`, or any read failing the §6.14.4.2 rule 5 coverage rule (non-attribute position, a server-cell or second-`prepaint`-cell input, not compile-time evaluable). Emitted once per read site, naming the site. Rec 2 verbatim: *"an **Info diagnostic naming each site** (not silent; not an error — those reads are empty before JS, never wrong)"*. **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Info |
@@ -22838,21 +23495,29 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | ~~E-MW-001~~ | §40, §52.13 | **Retired 2026-05-11 (S80).** The prior pairing requirement (`csrf="on"` ⟹ `auth=`) was retired alongside the `csrf="on"` value. The canonical value set is `csrf="auto" \| "off"` per §52.13; invalid `csrf=` literals now emit `W-ATTR-002` instead. (Catalog addition S84 Wave 2 #5 — reconciles S78 audit residual.) | — |
 | D-BATCH-001 | §8.6, §8.10.1 | For-loop nearly matches the Tier 2 syntactic batching template but was not rewritten; the diagnostic message lists the specific near-miss reason (e.g., two equality predicates, `.run()` terminator, `.forEach`, tuple-WHERE). Informational only — the loop continues to compile as a row-by-row SQL pattern. Closes the coverage gap between pure-syntactic detection and dataflow-based detection. (Catalog addition S84 Wave 2 #5; emitted at `compiler/src/batch-planner.ts`. SPEC body table at §8.6 line 5752.) | Info |
 | E-SYNTAX-DURATION | §6.13.3, §51.0.M | A `debounced=` or `throttled=` reactivity attribute value (or other `after=`-grammar-shaped duration) is malformed — neither literal-form (`Nms` / `Ns` / `Nm` / `Nh`) nor computed-form (`${expr}<unit>`) parses cleanly. Same grammar as `<onTimeout after=>`; the parser is the shared `parseAfterDuration` helper. (Catalog addition S84 Wave 2 #5; emitted at `compiler/src/type-system.ts`.) | Error |
-| E-LIFECYCLE-001 | §6.7.2 | A `cleanup()` call, `<timer>`, or `<poll>` appears outside any element scope (file level without a `<program>` root, or directly inside a module-level `${}` block with no enclosing element tag). Resolution: wrap inside `<program>` or another element. (Catalog addition S84 Wave 2 #5; full prose at §6.7.2 line 3217. Spec-prose-only — no current src fire-site at v0.2.4.) (Implemented S310; emitted at `compiler/src/type-system.ts` — `checkCleanupRegistration`.) **Scope note:** the `cleanup()` limb fires; the `<timer>`/`<poll>` limbs of this row are element-attribute shapes owned by `emit-html.ts` and are NOT yet wired to this code.| Error |
+| E-LIFECYCLE-001 | §6.7.2, §6.7.1a | A `cleanup()` call, `<timer>`, `<poll>`, or `<onMount>` (S449 — the `<onMount>` limb is **Nominal / not yet emitted**; ruling:user-voice-scrml.md S449 item 2) appears outside any element scope (file level without a `<program>` root, or directly inside a module-level `${}` block with no enclosing element tag). Resolution: wrap inside `<program>` or another element. (Catalog addition S84 Wave 2 #5; full prose at §6.7.2 line 3217. Spec-prose-only — no current src fire-site at v0.2.4.) (Implemented S310; emitted at `compiler/src/type-system.ts` — `checkCleanupRegistration`.) **Scope note:** the `cleanup()` limb fires; the `<timer>`/`<poll>` limbs of this row are element-attribute shapes owned by `emit-html.ts` and are NOT yet wired to this code.| Error |
 | E-LIFECYCLE-002 | §6.7.3 | The `cleanup()` argument is a call expression (`cleanup(closeConnection())`), not a function expression. `cleanup()` registers a function to run at scope teardown; passing a call expression invokes it eagerly and stores the return value. Resolution: wrap in an arrow function (`cleanup(() => closeConnection())`) or pass a function reference. (Catalog addition S84 Wave 2 #5; full prose at §6.7.3 line 3240.) (Implemented S310; emitted at `compiler/src/type-system.ts` — `checkCleanupRegistration`.)| Error |
 | E-LIFECYCLE-004 | §6.7.3 | The `cleanup()` first argument is not function-typed. Same family as E-LIFECYCLE-002 but covers non-call non-function shapes (bare values, object literals, etc.). Resolution: pass an arrow function or a function reference. (Catalog addition S84 Wave 2 #5; full prose at §6.7.3 line 3296.) (Implemented S310; emitted at `compiler/src/type-system.ts` — `checkCleanupRegistration`.)| Error |
 | E-LIFECYCLE-005 | §6.7.3 | A `cleanup()` call appears inside a function EXPLICITLY annotated as server-side (§12). Cleanup belongs to client-side scope teardown; server functions have no client-side lifecycle. Resolution: hoist the cleanup registration to the calling client scope, or remove the server annotation if the function is actually client-side. (Catalog addition S84 Wave 2 #5; full prose at §6.7.3 line 3300.) **Not yet emitted (S310).** Deliberately deferred from the S310 `cleanup()` wave: its trigger is a function EXPLICITLY annotated `server`, and that modifier is itself deprecated language-wide (`W-DEPRECATED-SERVER-MODIFIER`, §12.2 makes placement INFERRED) — so this code guards a form on its way out. Revisit if the modifier survives to 1.0.| Error |
 | E-LIFECYCLE-006 | §6.7.4 | **Superseded S447 by `E-EFFECT-WRITES-STATE`** — a reactive-effect body that writes a cell in its own dependency list is one case of an effect writing reactive state, which is now an error for every cell. Pre-S447 meaning: a `when` block body writes to a variable that appears in its own `dep-list` (an immediate re-trigger loop). Retained as a **reserved** code, not a compile diagnostic: no front end emits it at compile time; impl#1's runtime re-run cap prints the string in a console message (`compiler/src/runtime-template.js`), which is impl#1's frozen pre-S447 behaviour, filed as `g-impl1-when-effect-divergence-s447`. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1 = (b); "E-006 … subsumed" per the DD §5 (b) the call adopted) · **supersedes:** the pre-S447 row "A `when` block body writes to a variable that appears in its own `dep-list` … Resolution: remove the variable from the `dep-list`". (Catalog addition S84 Wave 2 #5.) | Error (reserved) |
-| E-LIFECYCLE-007 | §6.7.4 | A dependency entry of a reactive effect — an `<effect deps=[…]>` entry, or a `dep-list` entry of the soft-deprecated `when … changes` form — is not a declared mutable `@variable` in scope at the effect, OR is a derived cell (`const <name>` / a §66 locked cell with a reactive initializer), which has no change event of its own — listing it as a trigger is meaningless. Resolution: drop the entry, or list the mutable cells the derived value reads. (Catalog addition S84 Wave 2 #5.) **Amended S447:** extended from the `when` dep-list to the `<effect deps=[…]>` list (§6.7.4). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* · supersedes: the `when`-only wording. **Status:** emitted for the keyword form's derived-cell limb by impl#1 at `compiler/src/codegen/index.ts` (the §6.7.4 EC-1 check); the `<effect deps=[…]>` surface is **Nominal / not yet emitted** — lands with the bootstrap build (`g-bootstrap-effect-reset-on-owed`). | Error |
+| E-LIFECYCLE-007 | §6.7.4 | A dependency entry of a reactive effect — an `<effect deps=[…]>` entry, or a `dep-list` entry of the soft-deprecated `when … changes` form — is not a declared mutable `@variable` in scope at the effect, OR is a derived cell (`const <name>` / a §66 locked cell with a reactive initializer), which has no change event of its own — listing it as a trigger is meaningless. Resolution: drop the entry, or list the mutable cells the derived value reads. (Catalog addition S84 Wave 2 #5.) **Amended S447:** extended from the `when` dep-list to the `<effect deps=[…]>` list (§6.7.4). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* · supersedes: the `when`-only wording. **Amended S449** (rec pack item 4 = (a), ruling:user-voice-scrml.md S449 item 7): a §66 field path (`deps=[@signup.email]`) or a compiler-synthesized property (`deps=[<#save>.error]`) is this code too — not now a trigger; the message SHALL say "list `@signup`; read `@signup.email` in the body". **Status:** emitted for the keyword form's derived-cell limb by impl#1 at `compiler/src/codegen/index.ts` (the §6.7.4 EC-1 check); the `<effect deps=[…]>` surface is **Nominal / not yet emitted** — lands with the bootstrap build (`g-bootstrap-effect-reset-on-owed`). | Error |
 | E-EFFECT-WRITES-STATE | §6.7.4 | A reactive effect body — an `<effect deps=[…]>` body, or a soft-deprecated `when … changes { }` body — **writes a reactive cell, directly or through a called function**: an `=`-family assignment, a sequence edit, `reset(@x)`, an engine write or `.advance`, `<#id>.refetch()`; or a call to a scrml function (incl. a server function writing a §52 server cell) whose transitive write summary is non-empty; or a function value appearing in the body whose summary is non-empty (§6.7.4 rules 1–3). An effect drives the outside world; cascades between effects are impossible by construction because none can write. The message SHALL name the written cell, the call chain for an indirect write, and the fix by shape: a reset to the default → `reset-on=[…]` on the cell (§6.8.4); a stored call result → a write `<request>` (§6.7.7); otherwise → move the write into the code that changes the trigger, or derive the value (§6.6). Subsumes `E-LIFECYCLE-006`. Direction of change: newly-rejecting (DD-measured migration: 4 sample sites). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1 = (b): *"a reactive effect may NOT write any reactive cell, directly or through a called function — compile error"*; 1a: *"named error + a message naming the fix"*) · dd:`scrml-support/docs/deep-dives/when-reactive-effect-fit-2026-10-02.md` §5 (b). **Nominal / not yet emitted** — impl#1 is frozen for language semantics (S447) and accepts writing `when` bodies (`g-impl1-when-effect-divergence-s447`); lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
 | E-EFFECT-WRITE-UNPROVEN | §6.7.4 | A reactive effect body reaches code whose reactive writes the compiler cannot determine — a `^{ }` meta block (meta code can write cells by name, §22 `meta.set`), a call through a function-typed binding not resolvable to a known set of scrml functions, or any call site the write-summary analysis cannot resolve (§6.7.4 rule 4). The no-write rule fails CLOSED. A host (`.js`/`.ts`) or platform call is NOT this code — host code cannot name a scrml cell (rule 5). The message SHALL name the unresolvable site and why. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 1 = (b)) · the fail-closed reading is the PA's, by the §6.7.7.1 rule 1 precedent ("unclassifiable = write"). **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
-| E-EFFECT-NO-DEPS | §6.7.4 | An `<effect>` has no `deps=` attribute, or `deps=[]`. An effect does not run on mount (S447 2b), so without a dependency it can never run. (The keyword form's empty dep-list was a syntax error.) Resolution: list the cells whose changes should run it; logic that runs once belongs in `on mount { }` / a bare expression. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (2b: *"`<effect>` does NOT run on mount"*). **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
+| E-EFFECT-NO-DEPS | §6.7.4 | An `<effect>` has no `deps=` attribute, or `deps=[]`. An effect does not run on mount (S447 2b), so without a dependency it can never run. (The keyword form's empty dep-list was a syntax error.) Resolution: list the cells whose changes should run it; outside-world work that runs once at mount belongs in an `<onMount>` (§6.7.1a — S449; formerly `on mount { }` / a bare expression). **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (2b: *"`<effect>` does NOT run on mount"*). **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-reset-on-owed`). | Error |
 | W-WHEN-EFFECT-DEPRECATED | §6.7.4, §63.7 | The keyword statement `when @a changes { … }` / `when (@a, @b) changes { … }` — SOFT-DEPRECATED (§63.1 Stage 1) in favour of `<effect deps=[@a, @b]>${ … }</>`. It parses identically to the `<effect>` (same trigger, no mount run, scope, newest-run-wins, and the same no-write rule). The message names the canonical form, `scrml fix`, and §6.7.4. The `scrml fix` rule rewrites mechanically when the body writes no reactive cell; a writing body is `E-EFFECT-WRITES-STATE` and has no mechanical rewrite. Not raised for the worker / nested-program event hooks `when message(…)` / `when … from <#w>` (§43, §46), which are not retired. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 2: *"The keyword `when (…) changes reads … { }` form retires through §63."*). **Nominal / not yet emitted** — impl#1 compiles the keyword form unchanged (frozen); lands with the bootstrap. | Warning |
 | E-WHEN-EFFECT-DEPRECATED | §6.7.4, §63.7 | **Reserved** (§63.2) end-of-window code for the `when … changes { }` keyword statement. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* (Call 2). | Error |
+| E-MOUNT-WRITES-STATE | §6.7.1a, §6.7.4 | An `<onMount>` body — or a soft-deprecated `on mount { }` body — **writes a reactive cell during the mount, directly or through a called function**: an `=`-family assignment, a sequence edit, `reset(@x)`, an engine write or `.advance`, `<#id>.refetch()` (the §6.7.4 "what counts as a write" list); a call to a scrml function whose transitive write summary is non-empty; a function value handed to a SCHEDULER (`setTimeout`, `setInterval`, `queueMicrotask`, `requestAnimationFrame`, `animationFrame()`, a promise `.then` / `.catch` / `.finally`) or to a scrml function whose summary is non-empty. A function value handed to other host / platform code (an event listener, a widget `.on`, an observer) is NOT counted — it writes later, like a handler (§6.7.1a rule 3m). A write after an `await` in the body still counts. The message SHALL name the written cell, the call chain, and the home by shape: a call result → `<request deps=[]>` / `<x server>`; a URL / environment / constant value → the initializer; storage → `persist=`; a phase walk with error states → engine opener `effect=`; back to the default → `reset-on=`. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 2: *"2-1 = **(b)** outside-world setup only — the body may not write reactive state during the mount (directly or through a called function); callbacks handed to outside code may write later"* · 1a *"named error with fix-by-shape message"* · 1b *"scheduler callbacks (`setTimeout`, `queueMicrotask`, `Promise.then`, `requestAnimationFrame`) count as mount writes; event subscriptions do not"*). Newly-rejecting (DD-measured: 34 of 35 production `on mount` statements write). **Nominal / not yet emitted**; impl#1 frozen (`g-impl1-onmount-element-s449`); lands with the bootstrap (`g-bootstrap-onmount-owed`). | Error |
+| E-MOUNT-WRITE-UNPROVEN | §6.7.1a, §6.7.4 | An `<onMount>` (or `on mount`) body reaches code whose reactive writes the compiler cannot determine — a `^{ }` meta block, a call through a function-typed binding not resolvable to a known set of scrml functions, or any call site the write-summary analysis cannot resolve (§6.7.4 rule 4, applied to mount bodies by §6.7.1a). The rule fails CLOSED. A host / platform call is not this code. The message SHALL name the unresolvable site and why. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 2: *"the body may not write reactive state during the mount (directly or through a called function)"* — the fail-closed half mirrors E-EFFECT-WRITE-UNPROVEN so the two rules are one mechanism). **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-onmount-owed`). | Error |
+| W-ON-MOUNT-DEPRECATED | §6.7.1a, §63.7 | The keyword statement `on mount { … }` — SOFT-DEPRECATED (§63.1 Stage 1) in favour of `<onMount>${ … }</>`. It parses identically to the `<onMount>` (same timing — after the first render and after `ref=` binds —, owner association, remount re-run, and the same no-write rule). The message names the canonical form, `scrml fix`, and §6.7.1a. The `scrml fix` rule rewrites mechanically when the body writes no reactive cell; a writing body is `E-MOUNT-WRITES-STATE` and has no mechanical rewrite (the fix reports the site with that code's fix text). **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 2: *"2b `on mount {}` soft-deprecates through §63 with a `scrml fix` rule"*). **Nominal / not yet emitted** — impl#1 compiles the keyword form unchanged (frozen); lands with the bootstrap. | Warning |
+| E-ON-MOUNT-DEPRECATED | §6.7.1a, §63.7 | **Reserved** (§63.2) end-of-window code for the `on mount { }` keyword statement. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 2, 2b). | Error |
+| E-VALUE-WRITES-STATE | §6.15, §6.6, §6.8, §7.4.2, §66.9 | Evaluating a **value position** writes a reactive cell, directly or through a called function: an initializer (own value, field / attribute default, use-site construction value, `default=`), a derived formula, or a render expression (a markup `${ … }` interpolation incl. a multi-statement or Tier-0 `for/lift` block, a display-text-literal interpolation, a `renders` body, a markup attribute value). Writes are the §6.7.4 list; the analysis is the §6.7.4 write summary, rules 1–6 as written (a function value in the expression counts as called, except the value of an `on*=` handler attribute in produced markup). Not value positions: `on*=` handlers, `bind:`, function bodies (judged at their call site), lifecycle element bodies (`<request>`, `<effect>`, `<onMount>`, `<timer>` / `<poll>` / `<timeout>`), engine `effect=` / `<onTransition>`, body-top statement lists (§40.8). The message SHALL name the position, the written cell, the call chain and the fix by shape (initializer → `<request>` / `<onMount>` / the handler; formula → derive it / the handler; render → the handler / derive it). One code for every position, because the positions overlap (a formula is an initializer; a use-site value is an initializer that rendering evaluates). Closes by construction the derived-read and construction-read routes into an effect's writes (§6.7.4) and the writing reset value (§6.8.4 rule 3 — supersedes the bootstrap's interim fail-closed refusal of it). **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 3: *"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function (language-wide; closes the four S449 bootstrap holes + the render self-write hang by construction)."*). Newly-rejecting; impl#1 corpus impact measured as a filing aid in `g-impl1-value-writes-state-s449`. **Nominal / not yet emitted**; impl#1 frozen. | Error |
+| E-VALUE-WRITE-UNPROVEN | §6.15, §6.7.4 | A value position (§6.15) reaches code whose reactive writes the compiler cannot determine — a `^{ }` meta block, a call through a function-typed binding not resolvable to a known set of scrml functions, or any call site the write-summary analysis cannot resolve (§6.7.4 rule 4). Fails CLOSED; the fail-closed half mirrors `E-EFFECT-WRITE-UNPROVEN` / `E-MOUNT-WRITE-UNPROVEN`. A host / platform call is not this code. The message SHALL name the position, the unresolvable site and why. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 3: *"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function (language-wide; closes the four S449 bootstrap holes + the render self-write hang by construction)."*). **Nominal / not yet emitted**. | Error |
+| E-LIFT-IN-LIFECYCLE-BODY | §6.7.4, §6.7.1a | `lift` in an `<effect>` body or an `<onMount>` body (or their soft-deprecated keyword spellings). Neither body has a render position: an `<effect>` renders nothing, and `lift` writes scrml-owned DOM, which is not the outside world. The message SHALL point to `<each in=@…>`, `if=`, or a derived markup cell (§6.6.17). Newly-rejecting (the keyword `when` form allowed it; pack-measured blast radius zero). **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 3 = (a); the `<onMount>` limb follows from item 2, the body having no render position). **Nominal / not yet emitted**; impl#1 frozen (`g-impl1-effect-open-items-s449`); lands with the bootstrap. | Error |
+| E-TRANSITION-WRITE-CYCLE | §6.7.4, §6.8.4, §51.0.H | The **transition-write graph** has a cycle: nodes are the states of every transition-graph cell and every other cell; edges run from a state to every node a transition handler run on entering it (a state-child `effect=`, an `<onTransition>`) may write by its write summary, on any path including after a server call, and from a `reset-on=` entry to the reset target. A self-write is a no-op and adds no edge; time-driven transitions (`<onTimeout>`, `<onIdle>`), `<timer>` / `<timeout>` / `<poll>` bodies, event handlers and the engine opener `effect=` add none. The message SHALL name the nodes and the handler or `reset-on=` on each edge, and name a time edge (`<onTimeout after=… to=…/>`) as the fix. A guarded terminating cycle is a stated false positive. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 7 = (b): *"static cycle check. A cycle with no time edge is an error, and the fix is `<onTimeout>`"*). Newly-rejecting. **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-open-items-owed`). | Error |
 | E-LIFECYCLE-011 | §28.1 | The `<timer>` or `<poll>` `running` attribute references an undeclared or non-`@` variable. The `running=@flag` form must point at a declared reactive variable to be meaningful. (Catalog addition S84 Wave 2 #5; full prose at §28.1 line 3639.) | Error |
 | E-LIFECYCLE-013 | §28.5 | `animationFrame()` called inside a `<timer>` or `<poll>` body. The two scheduling primitives compose pathologically — `animationFrame()` runs once per frame while the parent `<timer>`/`<poll>` runs on its own interval; the resulting cadence is undefined. Resolution: move `animationFrame()` out of the `<timer>`/`<poll>` body, or remove the parent if the per-frame work is the intent. (Catalog addition S84 Wave 2 #5; full prose at §28.5 line 4286.) | Error |
 | E-LIFECYCLE-014 | §28.5 | `animationFrame()` called inside a server-escalated function. The function is run per-frame on the client; there is no server-side `animationFrame` analogue. (Catalog addition S84 Wave 2 #5; full prose at §28.5 line 4288.) | Error |
-| E-LIFECYCLE-016 | §6.7.4 | An `<effect>` — or a soft-deprecated keyword `when … changes { }` — appears inside the body of another reactive effect. An effect body is logic, not a markup position, and an effect inside it would have no defined trigger or lifetime. Resolution: declare the inner effect as a sibling `<effect>` with its own `deps=`. (Catalog addition S84 Wave 2 #5.) **Re-expressed S447** for `<effect>`. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* · supersedes: the pre-S447 "`when` block appears syntactically inside another `when` block body" wording. **Nominal / not yet emitted** — impl#1 fails closed on the keyword shape with `E-CODEGEN-INVALID-LOGIC` instead (`g-impl1-when-effect-divergence-s447`); lands with the bootstrap. | Error |
+| E-LIFECYCLE-016 | §6.7.4, §6.7.1a | An `<effect>` — or a soft-deprecated keyword `when … changes { }` — appears inside the body of another reactive effect; or (S449 — ruling:user-voice-scrml.md S449 item 2; Nominal) an `<onMount>` — or a soft-deprecated `on mount { }` — appears inside an effect body or another mount body. An effect body is logic, not a markup position, and an effect inside it would have no defined trigger or lifetime. Resolution: declare the inner effect as a sibling `<effect>` with its own `deps=`. (Catalog addition S84 Wave 2 #5.) **Re-expressed S447** for `<effect>`. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* · supersedes: the pre-S447 "`when` block appears syntactically inside another `when` block body" wording. **Nominal / not yet emitted** — impl#1 fails closed on the keyword shape with `E-CODEGEN-INVALID-LOGIC` instead (`g-impl1-when-effect-divergence-s447`); lands with the bootstrap. | Error |
 | E-LIFECYCLE-019 | §28.4 | A `<request>` element is self-closing (no body). A `<request>` body declares the assignment that captures the fetch result; without a body the element has no observable effect. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3880.) | Error |
 | E-LIFECYCLE-020 | §28.4 | A `<request>` body contains more than one assignment. `<request>` is single-assignment-by-design: the lone `@var = expr` form captures the fetch result; multiple assignments would race. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3881.) | Error |
 | E-LIFECYCLE-021 | §28.4 | A `<request>` body contains logic but no `@var = expr` capture. The fetch result is silently discarded. Resolution: add the assignment (`@var = fetchResult(...)`) or remove the logic. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3882.) | Error |
@@ -22864,7 +23529,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | ~~W-LIFECYCLE-006~~ | §6.7.4 | **Retired S447 — moot.** It warned that a `when` body whose sole effect is a single `@variable` assignment with a pure `@variable` right-hand side should be a derived value. Under the S447 no-write rule that body is `E-EFFECT-WRITES-STATE`, whose third fix text ("derive the value") carries the guidance. No front end ever emitted it. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."* · **supersedes:** the W-LIFECYCLE-006 row (and the S446 accumulator exclusion proposed in PR #1227, unmerged). (Catalog addition S84 Wave 2 #5.) | — |
 | W-LIFECYCLE-008 | §28.1 | A `<poll>` body contains multiple assignment expressions. `<poll>` captures `<#id>.value` from a single assignment; multiple assignments leave `.value` as `not`. Resolution: collapse to a single assignment, or wrap the multi-step computation in a function and assign the result. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4328.) | Warning |
 | W-LIFECYCLE-009 | §6.7.3 | A `cleanup()` registration appears inside a `for` loop body. N loop iterations produce N independent cleanup registrations, all of which fire at scope teardown. Resolution: hoist the `cleanup()` outside the loop, or confirm via a comment that N registrations is intentional. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4329; subsumes the pre-refactor E-LIFECYCLE-003 form.) | Warning |
-| W-LIFECYCLE-010 | §6.7.4 | A reactive effect has an empty body — `<effect deps=[@x]/>`, an empty `${ }`, or a soft-deprecated `when … changes {}`. The trigger fires but does no work. Resolution: add a body or remove the effect. (Catalog addition S84 Wave 2 #5.) **Amended S447** for `<effect>`. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."*. **Nominal / not yet emitted** (no impl#1 emitter; lands with the bootstrap). | Warning |
+| W-LIFECYCLE-010 | §6.7.4, §6.7.1a | A reactive effect has an empty body — `<effect deps=[@x]/>`, an empty `${ }`, or a soft-deprecated `when … changes {}`; or (S449, Nominal) an `<onMount>` has an empty body (`<onMount/>`, an empty `${ }`). The trigger fires but does no work. Resolution: add a body or remove the effect. (Catalog addition S84 Wave 2 #5.) **Amended S447** for `<effect>`. **Provenance:** ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled `<effect>`" — *"your recs, except expound 3b, specifically why the engine restriction."*. **Nominal / not yet emitted** (no impl#1 emitter; lands with the bootstrap). | Warning |
 | W-LIFECYCLE-011 | §28.4 | A `<request>` body assigns to a `@variable` that is never read in any enclosing markup. The fetch result is effectively dead. Resolution: drop the assignment, or wire it into rendered output. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3885.) | Warning |
 | W-LIFECYCLE-012 | §28.4 | `<#id>.refetch()` called inside a `<timer>` or `<poll>` body. `<request>` already wires re-fetch via `deps=` and auto-runs on mount; manual `.refetch()` from a parallel ticking primitive races against the auto-machinery. Resolution: use `deps=` to drive re-fetches, or remove the parent timer/poll. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3886.) | Warning |
 | W-LIFECYCLE-013 | §28.4 | A `<request>` body has no reactive `@variable` reads on its RHS AND no explicit `deps=[]` annotation. The request will fire once-on-mount with no re-fetch policy — likely under-specified. Resolution: add `deps=[]` to confirm fetch-once intent, or wire a reactive dep into the body. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3887.) | Warning |
@@ -22884,7 +23549,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-USE-001 | §41.5 | Two `use` declarations bring the same name into markup scope. The later declaration wins; the warning surfaces the silent shadowing so the developer can confirm intent or rename. (Catalog addition S84 Wave 2 #5; full prose at §41.5 lines 17371, 17466.) | Warning |
 | W-IMPORT-001 | §21.3 | Two `import` statements import the same name into logic scope in the same file. The later import wins; the warning surfaces the silent shadowing. Resolution: rename one of the imports, or remove the duplicate. (Catalog addition S84 Wave 2 #5; full prose at §41.5 line 17468.) | Warning |
 | ~~E-EXHAUST-001~~ | §18 | **Retired 2026-03-27 (§18 TS-C-gate review).** The PIPELINE.md Stage 6 alias for the non-exhaustive-match-over-union case is now `E-TYPE-020`. All references replaced. (Catalog addition S84 Wave 2 #5; retirement note at §18 line 10023.) | — |
-| E-LIN-004 | §6.7.12, §35.5 | A `lin` variable is referenced inside a recurring execution context (an `<effect>` body — formerly a `when` body, S447 §6.7.4 — a `<timer>` body, a `<timeout>` body, an `animationFrame` callback). The recurring-context form of E-LIN-002: a single textual reference in a callback that fires N times consumes the binding N times. (`<poll>` and `<request>` are DEFERRED contexts → **E-LIN-006**, not recurring — corrected S263 to match impl `type-system.ts` + §35.5 + the E-LIN-006 row @18321.) (Catalog addition S84 Wave 2 #5; full prose at §6.7.12 line 4332 + §35.5 lines 4689-4690.) (Emitted at `compiler/src/type-system.ts`.)| Error |
+| E-LIN-004 | §6.7.12, §35.5 | A `lin` variable is referenced inside a recurring execution context (an `<effect>` body — formerly a `when` body, S447 §6.7.4 — a `<timer>` body, a `<timeout>` body, an `animationFrame` callback, or — S449 §6.7.1a, Nominal / not yet emitted — an `<onMount>` body whose owner can mount more than once: an `if=` scope, an `<each>` row, a route region). The recurring-context form of E-LIN-002: a single textual reference in a callback that fires N times consumes the binding N times. (`<poll>` and `<request>` are DEFERRED contexts → **E-LIN-006**, not recurring — corrected S263 to match impl `type-system.ts` + §35.5 + the E-LIN-006 row @18321.) (Catalog addition S84 Wave 2 #5; full prose at §6.7.12 line 4332 + §35.5 lines 4689-4690.) (Emitted at `compiler/src/type-system.ts`.)| Error |
 | E-PROG-001 | §40 | A `<program>` element has an ambiguous attribute combination — the compiler cannot decide the execution context (e.g., a worker-shaped attribute combined with a route-shaped attribute). (Catalog addition S84 Wave 2 #5; full prose at §40 line 18036.) | Error |
 | E-PROG-002 | §40 | A `<program>` element is missing a required attribute for its detected execution context (e.g., a route-context program with no `name=`, a worker-context program with no entry point). (Catalog addition S84 Wave 2 #5; full prose at §40 line 18037.) | Error |
 | E-PROG-003 | §40.4 | A reference inside a nested `<program>` reaches a parent-scope binding. Nested programs are fully isolated — no bindings, types, `use`, or `import` declarations propagate across the `<program>` boundary. Resolution: declare the binding inside the nested program, or import it via a `use foreign:` declaration. (Catalog addition S84 Wave 2 #5; full prose at §40 line 17980.) | Error |
@@ -25616,7 +26281,7 @@ The following attributes on `<program>` enable automatic middleware generation:
   > **Provenance:** spec:§40.2 fail-closed-ambiguous rule · review:S443-post-merge-1173b-F2
   > **Provenance:** ruling:user-voice-scrml.md S445 item 1 (re-scoped to the no-application case)
   **The redirect target of a page scope.** `loginRedirect=` is not a `<page>` attribute (`E-PAGE-INVALID-ATTR`), so a page scope's unauthenticated request SHALL be redirected to the `loginRedirect=` declared on the application's top-level `<program>`, or to the §52.13 default `/login` when it declares none. When no application `<program>` is identified, the single `loginRedirect=` value declared by the build's `<program>`s applies; when they declare different values, `/login` applies and the compiler SHALL emit `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS` naming the values. This applies to every page scope: an explicit `<page auth="required">`, an inherited member page (next paragraph), and a `protect=`-escalated unit (§20.5.1). *(Before S443 round 2 every page scope redirected to `/login` whatever the program declared.)* When a gated route's redirect target is that route itself — compared case-sensitively (routing is case-sensitive), ignoring a trailing `/`, a `.html` suffix and any query or fragment — an anonymous request redirects in a loop; the compiler SHALL emit `W-AUTH-REDIRECT-LOOP` for that route.
-  **Member pages of a `<program auth="required">` are inside its scope.** When the application's top-level `<program>` declares `auth="required"`, every member route file of that application that declares no recognized `auth=` value of its own — a file with no `<program>` whose top-level markup is a `<page>` (§40.8), or top-level markup with no `<page>` wrapper, other than a `_layout.scrml` wrapper — SHALL be gated exactly as an explicit `<page auth="required">`: its served document, its compose route and every server function its file declares, with `csrf="auto"`. Only one of §52.13's three literals is a declaration: an unrecognized literal (`auth="Required"`, `auth="off"`, …, which emits `W-ATTR-002`) or a non-literal value declares nothing, and the page inherits — fail closed, as an unknown `csrf=` literal resolves to `"auto"`. A member page that declares `auth="optional"` or `auth="none"` is NOT gated by this rule: an explicit page value relaxes the application program's `auth="required"` for that page (a login or registration page must be reachable anonymously). *(Ruled by bryan, S443: "your recs" — ruling:user-voice-scrml.md S443 item 1.)*
+  **Member pages of a `<program auth="required">` are inside its scope.** When the application's top-level `<program>` declares `auth="required"`, every member route file of that application that declares no recognized `auth=` value of its own — a file with no `<program>` whose top-level markup is a `<page>` (§40.8), or top-level markup with no `<page>` wrapper, other than a `_layout.scrml` wrapper — SHALL be gated exactly as an explicit `<page auth="required">`: its served document, its compose route and every server function its file declares, with `csrf="auto"`. Only one of §52.13's three literals is a declaration: an unrecognized literal (`auth="Required"`, `auth="off"`, …) or a non-literal value is `E-AUTH-ATTR-INVALID` and refuses the build (§52.13.2, S449 — ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 4 ("Unrecognized / non-literal `auth=` (incl. `""`) = (a): compile error; amend §52.13.2")); the compiler still treats such a value as declaring nothing, so the page inherits — fail closed, as an unknown `csrf=` literal resolves to `"auto"` — as a floor under that error, never as a shipped shape. A member page that declares `auth="optional"` or `auth="none"` is NOT gated by this rule: an explicit page value relaxes the application program's `auth="required"` for that page (a login or registration page must be reachable anonymously). *(Ruled by bryan, S443: "your recs" — ruling:user-voice-scrml.md S443 item 1.)*
   > **Provenance:** spec:§52.13 + §34 W-AUTH-PAGE-INFERRED row ("program-level auth still enforces at the request boundary") · pa-ruled:S443 round 2 conformance restoration (before it, the `<program>`'s entry covered only the entry file, and an unannotated member page served its document at 200 and ran its server functions for anonymous callers). The redirect-target paragraph: pa-directed S443 round 2 (the round-1 text named "the page's `loginRedirect=`", which cannot be declared). The application-`<program>` definition, the unrecognized-literal rule, the ambiguity warning and case-sensitive loop comparison: S443 round 3 (adversarial review of 5390820dd, F1/F2/F5 — before it, any `<program auth="required">` anywhere in the build, including one inside a route file, gated every unannotated page of a public application, and a typo'd page `auth=` served the page publicly under a required application).
   > **Provenance:** spec:§52.13 ("every request to this scope SHALL be authenticated"; `<page>` is named among the elements that accept `auth=`) · pa-ruled:S443 conformance restoration (`g-page-auth-required-protects-nothing` — before S443 a `<page auth="required">` without `protect=` fields was not registered as an auth scope at all: an anonymous `GET` served the page at 200 and an anonymous `POST` ran its server function).
 - **The WebSocket upgrade SHALL refuse a cross-origin handshake.** Every compiler-emitted WebSocket upgrade route of a web-application program (the §38 channel route `/_scrml_ws/<name>`) SHALL accept the upgrade only when the request's `Origin` names the server's own origin: the same host — taken from `X-Forwarded-Host` when a proxy sets it, else the request's own host — and the same scheme — `X-Forwarded-Proto`, else the request's — except that an `https` origin SHALL be accepted on a request that arrived as plain `http` (TLS terminated by a proxy that sets no `X-Forwarded-Proto`). Default ports compare equal to their omitted form. A mismatched origin, and the opaque `Origin: null`, SHALL be refused with `403` before the upgrade and before any channel handler runs. A handshake with NO `Origin` header is a non-browser client (a browser always sends one), which cannot carry a victim's ambient cookie; it SHALL be accepted, and the channel's own `auth=` session check (§38.5) SHALL still apply to it. The development server SHALL apply the same rule to the upgrade it proxies, before accepting the browser's socket. Because the check trusts `X-Forwarded-Host` / `X-Forwarded-Proto`, a deployment behind a reverse proxy MUST have that proxy strip or overwrite both headers on every inbound request; a proxy that passes a client-supplied value through lets a non-browser client choose the host the check compares against (a browser cannot set these headers on a WebSocket handshake, so the cross-site case stays closed either way). There is no allow-list for other origins in this version. A headless program (no cookie session) emits no Origin check.
@@ -31562,8 +32227,8 @@ type DriverStatus:enum = { OffDuty, Driving, OnDuty, Sleeper }
 <driver server> : Driver = ?{ `SELECT * FROM drivers WHERE id = 1` }.get()
 <!-- The PARAM-BEARING variant `?{ ... WHERE id = ${@driverId} }` is a bounded
      follow-on (POST-body param-passing on /__serverLoad/<var>, W-AUTH-004 until
-     shipped — §52.6.5 Pattern C). For a param-bearing load today, use an
-     `on mount` block (§52.6.5 Pattern B). -->
+     shipped — §52.6.5 Pattern C). For a param-bearing load today, use a
+     `<request deps=[@driverId]>` (§52.6.5 Pattern B; S449 — formerly an `on mount` block). -->
 
 <engine for=DriverStatus server=@driver.current_status initial=.OffDuty>
   <OffDuty rule=(.Driving | .OnDuty | .Sleeper) : "Off duty">
@@ -33936,6 +34601,11 @@ Neither replaces the other. A developer MAY use both. The execution order is:
 
 A `reset-on=` reset of an engine cell (§6.8.4 rule 6) is a transition and follows the same order.
 
+Because transition effect blocks MAY write, a chain of them (and of `reset-on=` resets) can loop. A cycle of such
+writes with no time edge (`<onTimeout>`, `<onIdle>`) or user edge between them is a compile error,
+**E-TRANSITION-WRITE-CYCLE** (§6.7.4 "Interaction with derived values and engines" — S449, ruling:user-voice-scrml.md
+S449 item 7, rec pack item 7 = (b)).
+
 **Normative statement:**
 
 - Transition effect blocks SHALL execute before `<effect>`s (and the soft-deprecated `when @var changes {}`
@@ -35583,15 +36253,22 @@ ${
 
 The compiler detects that `@cards` is assigned from `loadCards()` — a server function. It uses `loadCards()` as the mount-time initial fetch.
 
-**Pattern B — Explicit `on mount` block (§6.7.1a):**
+**Pattern B — a `<request>` that assigns the cell (§6.7.7):**
 
 ```scrml
 <cards server> = []
 
-on mount {
-    @cards = ?{`SELECT * FROM cards ORDER BY position ASC`}.all()
-}
+function loadCards() { return ?{`SELECT * FROM cards ORDER BY position ASC`}.all() }
+<request id="cardsLoad" deps=[]>${ @cards = loadCards() }</>
 ```
+
+> **Amended S449.** Pattern B was an explicit `on mount { @cards = ?{…}.all() }` block. A mount body may not write
+> reactive state (§6.7.1a, E-MOUNT-WRITES-STATE), and a mount-time load is the `<request>`'s job — it owns
+> `.loading` / `.error`, newest-wins and abort (§6.7.7). A param-bearing load is a `<request>` whose `deps=` names
+> the parameter cell: `<request id="driverLoad" deps=[@driverId]>${ @driver = loadDriver(@driverId) }</>`.
+> impl#1's W-AUTH-001 / W-AUTH-004 detection and messages still name `on mount` (filed:
+> `g-impl1-onmount-element-s449`). **Provenance:** ruling:user-voice-scrml.md S449 item 2 (2-1 = (b)) ·
+> **supersedes:** ~~**Pattern B — Explicit `on mount` block (§6.7.1a):** `on mount { @cards = ?{…}.all() }`~~.
 
 **Pattern C — Inline `?{}` on the declaration RHS:**
 
@@ -35607,15 +36284,15 @@ type Driver:struct = { id: number, current_status: string }
 
 The `server @var = ?{}` form (the `@`-prefixed declaration inside a `${...}` logic block) is identical — both carry the same structured `?{}` query and load the same way.
 
-**Param-passing (PARAM-BEARING SELECT — bounded follow-on, not yet shipped).** A Pattern-C query that interpolates a client-local cell — `?{`SELECT * FROM drivers WHERE id = ${@driverId}`}.get()` — needs the client-local value passed up to `/__serverLoad/<var>` in the POST body (the params are resolved on the client; the built route POSTs an empty body). Until that param-passing mechanism ships, a param-bearing Pattern-C decl emits the info diagnostic **W-AUTH-004** (the cell will NOT hydrate on mount) steering the developer to a param-free query or the Pattern-B `on mount` form (where `${@driverId}` is an ordinary server-fn param boundary). This is distinct from the E-AUTH-001 INSERT/UPDATE/DELETE write-param guard (§52.11) — a SELECT read-param is not a persisted write.
+**Param-passing (PARAM-BEARING SELECT — bounded follow-on, not yet shipped).** A Pattern-C query that interpolates a client-local cell — `?{`SELECT * FROM drivers WHERE id = ${@driverId}`}.get()` — needs the client-local value passed up to `/__serverLoad/<var>` in the POST body (the params are resolved on the client; the built route POSTs an empty body). Until that param-passing mechanism ships, a param-bearing Pattern-C decl emits the info diagnostic **W-AUTH-004** (the cell will NOT hydrate on mount) steering the developer to a param-free query or the Pattern-B `<request>` form (a `<request deps=[@driverId]>` calling a server function, where `@driverId` is an ordinary server-fn param boundary; ~~the Pattern-B `on mount` form~~ — S449). This is distinct from the E-AUTH-001 INSERT/UPDATE/DELETE write-param guard (§52.11) — a SELECT read-param is not a persisted write.
 
 If neither Pattern A, B, nor C is present on a `<var server>` declaration (a bare literal-value placeholder with no detectable load), the compiler SHALL emit a warning (W-AUTH-001) indicating that no initial load was detected. The cell will display its placeholder value until an explicit assignment occurs.
 
 #### 52.6.6 Write Function Convention for Tier 2 `<var server>`
 
 > **Added 2026-06-14 (Q2=WF ruling).** This is the symmetric mirror of the §52.6.5 LOAD convention. Just as
-> §52 does not invent the load query for a scalar cell (the developer supplies `loadCount()` or an `on mount`
-> block), §52 does not invent the persist write either — the developer supplies it. The persist verb is the
+> §52 does not invent the load query for a scalar cell (the developer supplies `loadCount()` or a `<request>`
+> — S449; formerly "an `on mount` block"), §52 does not invent the persist write either — the developer supplies it. The persist verb is the
 > developer's explicit `?{}` server function, at BOTH tiers (this Tier 2 convention mirrors the Tier 1
 > dev-owned write of §52.3 / §52.4.5). There is no synthetic compiler-owned key/value store.
 
@@ -35628,9 +36305,9 @@ authoritative value, assigned to the cell.
 ```scrml
 <count server> = 0                          // placeholder; §52 auto-loads via the §52.6.5 convention
 
-// LOAD (§52.6.5 Pattern A): assigned from a server fn → that fn is the mount load.
+// LOAD (§52.6.5 Pattern B): a <request> assigns the cell → that fn is the mount load.
 function loadCount() { return ?{`SELECT n FROM counters WHERE id = 1`}.get().n }
-on mount { @count = loadCount() }
+<request id="countLoad" deps=[]>${ @count = loadCount() }</>   // S449: was `on mount { @count = loadCount() }`
 
 // WRITE (this convention): the dev's server fn does the ?{}; the assignment lands the result.
 function bumpCount() {
@@ -35867,7 +36544,7 @@ Under the V-kill canon (post-S123), the two constructs are syntactically distinc
 
 | Code | Trigger | Message (normative form) |
 |------|---------|--------------------------|
-| W-AUTH-001 | A `<var server>` declaration has no detectable initial load pattern (no mount assignment, no `on mount` block). | `'<{name} server>' has no detected initial load. The cell will display its placeholder until explicitly assigned. Add an 'on mount' block or assign from a server function.` |
+| W-AUTH-001 | A `<var server>` declaration has no detectable initial load pattern (no mount assignment, no Pattern-B `<request>`). | `'<{name} server>' has no detected initial load. The cell will display its placeholder until explicitly assigned. Load it with a <request deps=[]> or assign from a server function.` *(S449: the message formerly said "Add an 'on mount' block"; a mount body may not write the cell — §6.7.1a. impl#1's message is unchanged, filed `g-impl1-onmount-element-s449`.) (Emitted at `compiler/src/type-system.ts`.)* |
 
 ### 52.12 Open Questions
 
@@ -35918,8 +36595,12 @@ forcing it.
 
 The `role:X` value-shape (e.g. `auth="role:dispatcher"`) appears in the
 2026-03 dispatch-app FRICTION ledger as a documented but unimplemented
-ergonomic. The compiler SHALL emit `W-ATTR-002` when it sees this shape
-to surface the silent-failure window.
+ergonomic. ~~The compiler SHALL emit `W-ATTR-002` when it sees this shape
+to surface the silent-failure window.~~ On a `<program>` or `<page>` it is
+not one of the three values, so it SHALL be `E-AUTH-ATTR-INVALID` (§52.13.2).
+On a `<channel>` the compiler SHALL emit `W-ATTR-002` (any `auth=` there
+gates the WebSocket upgrade, §52.13.2).
+> **Provenance:** ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 4 ("Unrecognized / non-literal `auth=` (incl. `""`) = (a): compile error; amend §52.13.2") — supersedes: spec:§52.13.1 (W-ATTR-002 on `<program>` / `<page>`).
 
 The role-based authorization itself MUST be performed in the page's
 server functions until the ergonomic completion lands. See
@@ -35927,19 +36608,40 @@ server functions until the ergonomic completion lands. See
 
 #### 52.13.2 Other Unrecognized Values
 
-Any literal value not in the recognized set SHALL emit `W-ATTR-002`.
-The attribute is currently passed through to the rendered HTML as-is;
-the warning surfaces the gap without breaking existing behavior.
+**`auth=` on `<program>` and `<page>` — `E-AUTH-ATTR-INVALID`.** An `auth=`
+attribute on a `<program>` or a `<page>` whose value is not exactly one of
+the three literals `"required"`, `"optional"`, `"none"` SHALL be a compile
+error, `E-AUTH-ATTR-INVALID` (§34). This covers every other literal — a
+different case (`"Required"`), padding (`" required"`), the empty string
+(`""`), `"role:admin"` (§52.13.1), `"true"` — and every non-literal value:
+a bare `auth` with no value, an interpolation (`auth=${mode}`) and a cell
+(`auth=@mode`). The value decides at compile time which routes require a
+login, so a value the compiler cannot read as one of the three is refused
+rather than compiled. The message SHALL name the value written and list the
+three legal values. The build writes no output. An `auth=` on a NESTED
+`<program>` is `E-PROGRAM-NESTED-AUTH` whatever its value (§4.12.2), and
+that is its only diagnostic — `E-AUTH-ATTR-INVALID` SHALL NOT also fire for it.
 
-For `auth=` the warning SHALL state the value's actual effect. On a
-`<page>`, an unrecognized value is not an auth declaration: the page
-inherits the application's gate when the application's top-level
-`<program>` declares `auth="required"`, and is otherwise public (§40.2,
-S443). On a `<program>`, an unrecognized value applies no auth gate at
-all — the program and its pages are public (current behaviour; tracked
-as `g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth`). On a
-`<channel>`, any `auth=` attribute gates the WebSocket upgrade as if it
-were `"required"`.
+~~Any literal value not in the recognized set SHALL emit `W-ATTR-002`.~~
+~~For `auth=` the warning SHALL state the value's actual effect. … On a
+`<program>`, an unrecognized value applies no auth gate at all — the program
+and its pages are public.~~ *(Superseded S449 for `<program>` / `<page>` by the
+paragraph above.)*
+
+> **Provenance:** ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 4 ("Unrecognized / non-literal `auth=` (incl. `""`) = (a): compile error; amend §52.13.2") — supersedes: spec:§52.13.2 (W-ATTR-002 + no gate).
+> Before it, `<program auth="Required">` compiled with a warning to a PUBLIC
+> application (measured S449: an anonymous `GET /app.html` answered 200), and a
+> non-literal value or `auth=""` compiled with no diagnostic at all (gaps
+> `g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth`,
+> `g-auth-attr-empty-string-is-silent-and-public`).
+
+**Every other closed-value attribute.** Any literal value not in the
+recognized set of a closed-value attribute — `csrf=` (§52.13), or `auth=`
+on a `<channel>` — SHALL emit `W-ATTR-002`. The attribute is passed through
+to the rendered HTML as-is; the warning surfaces the gap without breaking
+existing behavior. For `auth=` on a `<channel>`, the warning SHALL state the
+value's actual effect: any `auth=` attribute there gates the WebSocket
+upgrade as if it were `"required"`.
 
 This is consistent with the validation principle: silent acceptance of
 attribute values that have no compile-time effect is itself a P0
@@ -40470,6 +41172,14 @@ Applying the machine to the existing corpus:
   §63.1's "parses identically" holds (RULED S447 — "accept and your rec (d)", item 1). The never-parsed `reads` clause is not in the window (it was never in the
   contract). *(Provenance: ruling:user-voice-scrml.md S447 "`when` → outside-world effects only, spelled
   `<effect>`" — Call 2: *"The keyword `when (…) changes reads … { }` form retires through §63."*)*
+- **`W-ON-MOUNT-DEPRECATED` (`on mount { }` → `<onMount>${ … }</>`, §6.7.1a) — added S449:** SOFT, unscheduled;
+  reserved `E-ON-MOUNT-DEPRECATED` named, unfired; **gate-blocked** until its `scrml fix` rule is verified-landed
+  (§63.4). The rule is mechanical only for a body that writes no reactive cell; a writing body has no mechanical
+  rewrite (the fix reports the E-MOUNT-WRITES-STATE fix text — DD-measured, 34 of 35 production sites write). The
+  window governs the SPELLING only: the no-write rule applies to both spellings at once (§6.7.1a, the S447 `when`
+  precedent). `on dismount { }` is not in the window — it was never in the contract. *(Provenance:
+  ruling:user-voice-scrml.md S449 item 2 — *"2b `on mount {}` soft-deprecates through §63 with a `scrml fix`
+  rule"*.)*
 
 ### 63.8 What is NOT a lifecycle deprecation
 
@@ -41851,6 +42561,14 @@ library is therefore **declarations + named instances — no new construct** (§
        //          never reset by the use site
    </each>
    ```
+
+9. **(S449) An initializer writes nothing.** Every initializer this section names — an own value, a field or
+   attribute default, a derived formula (rule 3), a seed (rule 4), a use-site construction value (rule 8) — is a
+   value position: evaluating it SHALL NOT write any reactive cell, directly or through a called function. The
+   rule's one home is §6.15 (E-VALUE-WRITES-STATE / E-VALUE-WRITE-UNPROVEN). Construction (§66.7.6) therefore
+   changes no cell other than the one being constructed, whenever it runs (at program construction, on a lazy
+   first read of a shared instance, at a remount or row creation, at a reset). *(Provenance:
+   ruling:user-voice-scrml.md S449 item 3.)*
 
 > ⚑ **OPEN (not ruled) — O13: logic-local `const`.** The ruling retires `const` as the prefix of a CELL
 > declaration. Whether the logic-local `const x = …` binding (and the §50.8.5 rule that a keywordless `x = v`

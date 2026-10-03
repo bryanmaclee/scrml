@@ -8,7 +8,8 @@
  *   §1  Recognized attribute on registered element → no warning
  *   §2  Unrecognized attribute on registered element → W-ATTR-001
  *   §3  Recognized name + recognized value (auth=optional) → no warning
- *   §4  Recognized name + unrecognized value (auth=role:X) → W-ATTR-002
+ *   §4  Recognized name + unrecognized value (auth=role:X): on <program>/<page>
+ *       → E-AUTH-ATTR-INVALID (S449 ruling item 4, §52.13.2); on <channel> → W-ATTR-002
  *   §5  Plain HTML element (not in registry) → no warning
  *   §6  Open-prefix attrs (bind:, on:, data-, aria-) → no warning
  *   §7  Per-element coverage: <page>, <channel>, <engine>
@@ -126,34 +127,39 @@ describe("VP-1 §2: unrecognized attribute emits W-ATTR-001", () => {
 // §3 + §4: Value-shape validation
 // ---------------------------------------------------------------------------
 
-describe("VP-1 §4: unrecognized value-shape emits W-ATTR-002 (auth=role:X)", () => {
-  test("<program auth=\"role:dispatcher\"> emits W-ATTR-002", () => {
+// S449 ruling item 4 (ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 4,
+// §52.13.2): on <program> / <page> an auth= value outside the three literals —
+// `role:X` included — is the error E-AUTH-ATTR-INVALID, not W-ATTR-002.
+describe("VP-1 §4: unrecognized auth= value — E-AUTH-ATTR-INVALID on <program>/<page>, W-ATTR-002 on <channel>", () => {
+  test("<program auth=\"role:dispatcher\"> emits E-AUTH-ATTR-INVALID (error), no W-ATTR-002", () => {
     const src = `<program auth="role:dispatcher">
 <div>x</div>
 </program>`;
     const { warnings } = compile(src);
-    expect(codes(warnings)).toContain("W-ATTR-002");
-    const w = warnings.find((x) => x.code === "W-ATTR-002");
-    expect(w?.message).toContain("\"role:dispatcher\"");
-    expect(w?.message).toContain("auth=");
-    expect(w?.message).toContain("F-AUTH-001");
-    expect(w?.severity).toBe("warning");
+    expect(codes(warnings)).toContain("E-AUTH-ATTR-INVALID");
+    expect(codes(warnings)).not.toContain("W-ATTR-002");
+    const e = warnings.find((x) => x.code === "E-AUTH-ATTR-INVALID");
+    expect(e?.message).toContain("\"role:dispatcher\"");
+    expect(e?.message).toContain("auth=");
+    expect(e?.message).toContain("Role-based access");
+    expect(e?.severity).toBe("error");
   });
 
-  test("<page auth=\"role:driver\"> emits W-ATTR-002", () => {
+  test("<page auth=\"role:driver\"> emits E-AUTH-ATTR-INVALID", () => {
     const src = `<page route="/x" auth="role:driver">
 <div>x</div>
 </page>`;
     const { warnings } = compile(src);
-    expect(codes(warnings)).toContain("W-ATTR-002");
+    expect(codes(warnings)).toContain("E-AUTH-ATTR-INVALID");
+    expect(codes(warnings)).not.toContain("W-ATTR-002");
   });
 
-  test("<page auth=\"role:customer\"> emits W-ATTR-002", () => {
+  test("<page auth=\"role:customer\"> emits E-AUTH-ATTR-INVALID", () => {
     const src = `<page route="/x" auth="role:customer">
 <div>x</div>
 </page>`;
     const { warnings } = compile(src);
-    expect(codes(warnings)).toContain("W-ATTR-002");
+    expect(codes(warnings)).toContain("E-AUTH-ATTR-INVALID");
   });
 
   test("<channel auth=\"role:dispatcher\"> emits W-ATTR-002 (F-CHANNEL-005)", () => {
@@ -165,12 +171,13 @@ describe("VP-1 §4: unrecognized value-shape emits W-ATTR-002 (auth=role:X)", ()
     expect(codes(warnings)).toContain("W-ATTR-002");
   });
 
-  test("<page auth=\"optional\"> emits no W-ATTR-002 (recognized value)", () => {
+  test("<page auth=\"optional\"> emits nothing (recognized value)", () => {
     const src = `<page route="/x" auth="optional">
 <div>x</div>
 </page>`;
     const { warnings } = compile(src);
     expect(codes(warnings)).not.toContain("W-ATTR-002");
+    expect(codes(warnings)).not.toContain("E-AUTH-ATTR-INVALID");
   });
 });
 
@@ -239,16 +246,16 @@ describe("VP-1 §6: open-prefix attrs (bind:, on:, data-, aria-) pass silently",
 // ---------------------------------------------------------------------------
 
 describe("VP-1 §7: per-element coverage", () => {
-  test("dispatch app coverage: 4 role: warnings on <page>", () => {
+  test("dispatch app coverage: a role: value on <page> is refused", () => {
     const src = `<page route="/dispatch" auth="role:dispatcher">
 <div>a</div>
 </page>`;
     const { warnings } = compile(src);
-    const role = warnings.filter((w) => w.code === "W-ATTR-002");
-    expect(role.length).toBeGreaterThanOrEqual(1);
+    const role = warnings.filter((w) => w.code === "E-AUTH-ATTR-INVALID");
+    expect(role.length).toBe(1);
   });
 
-  test("nested usage: <page>...<channel> both surface", () => {
+  test("nested usage: <page>...<channel> both surface (page = error, channel = warning)", () => {
     const src = `<page route="/x" auth="role:driver">
 <div>
 <channel name="y" auth="role:driver">
@@ -256,8 +263,8 @@ describe("VP-1 §7: per-element coverage", () => {
 </div>
 </page>`;
     const { warnings } = compile(src);
-    const role = warnings.filter((w) => w.code === "W-ATTR-002");
-    // Both <page auth=role:driver> and <channel auth=role:driver>
-    expect(role.length).toBe(2);
+    // <page auth=role:driver> → E-AUTH-ATTR-INVALID; <channel auth=role:driver> → W-ATTR-002
+    expect(warnings.filter((w) => w.code === "E-AUTH-ATTR-INVALID").length).toBe(1);
+    expect(warnings.filter((w) => w.code === "W-ATTR-002").length).toBe(1);
   });
 });

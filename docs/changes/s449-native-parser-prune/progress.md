@@ -130,3 +130,9 @@ Full gate after batch 3 (unit+integration+conformance+root glob): 29425 pass · 
 - `s34-census --check-new --base 8b58ed588`: PASS. `facts.ts --check`: PASS after --write. SPEC-INDEX regenerated.
 - `types-gate --check` (non-blocking tracking): 9 names gone, all in files this change does not touch (emit-control-flow / emit-each / emit-reactive-wiring / symbol-table / type-system) — pre-existing stale baseline, left for the PA.
 - CI wall time saved (local, idle): root-glob gate step −10.9 s; tracking within-node step −4.6 s local (−6.0 s on CI per the pack's log); the 31 flag-driven unit/integration files −3.2 s (10.47 → 7.26 s). ≈ −19 s per CI run plus the same −10.9 s on every pre-commit.
+
+## Post-review (S239 review of 3f8fad56f = LAND-WITH-NITS)
+
+- Merged origin/main (bc4bca1f7). SPEC-INDEX.md / FACTS.md: took main's, re-applied this change's §22/§34 summary text, regenerated (regen-spec-index, facts --write, --check PASS). known-gaps.md: one conflict hunk (both sides appended a section at the file end) — kept both, main's §S449-spec-lifecycle first, then §S449-native-parser-prune. Counts regenerated with state.ts --write (gap-counts PASS); master-list.md change reverted (recent-sessions stays stale — pre-existing, host-dependent).
+- Gap-id check: ours 1555 markers (1553 unique) · main 1568 (1566 unique) · union 1567 · result 1573 markers (1571 unique). Missing from result: 0. Duplicate ids in result: 2, both already duplicated on both sides; new duplicates: 0. Added: the 4 review gaps below. The two closed gaps keep status=resolved.
+- Filed in §S449-native-parser-prune (prov=review:S449-np-review): g-s34-rows-e-type-021-e-error-007-e-sse-001-have-no-emitter (MED) · g-emit-each-native-exprnode-branch-is-dead-in-impl1 (LOW) · g-s449-native-prune-leftover-dead-references (LOW) · g-import-host-native-tree-test-exercises-a-path-production-never-takes (LOW). No code changes.

@@ -340,44 +340,48 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
     expect(frontEnd(mods, files("readCount()")).diags.map((d) => d.code)).toEqual([]);
   });
 
-  test("a read that CONSTRUCTS a shared instance runs its initializers — a `let` seed calling a writer is a write of the effect", async () => {
+  // SPEC §6.15 (S449 item 3: value positions may not write). Each program below is a hole the s449 effect
+  // review found (an effect READ that ran a writing initializer / formula lazily); it is now rejected at the
+  // initializer / formula ITSELF — E-VALUE-WRITES-STATE, the ONLY diagnostic. The effect pass still follows
+  // the read into the formula / construction (§6.15: "the check stays as defence in depth"), but its report
+  // is that root's echo and is dropped while a root is reported (progress.md: with the value-position check
+  // switched off, these same programs report E-EFFECT-WRITES-STATE through the formula / construction).
+  const SRC = "E-VALUE-WRITES-STATE";
+
+  test("S449 item 3: a read that CONSTRUCTS a shared instance whose `let` seed calls a writer — rejected at the seed, not at the effect", async () => {
     // Found by measurement (s449): this program compiled clean, and one click wrote `@a` from inside the
     // effect body (`shared_box()` constructed `box` on first read; its seed ran `bumpA()`).
     const decls = `    <let a:int=0/>\n    function bumpA() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <box let k:int=(bumpA())/>\n    renders <div>\${k}</div>`;
     const ds = writes(decls, `<effect deps=[@query]>\${\n        const v = @box.k\n    }</>`);
-    expect(W(ds)).toEqual(["E-EFFECT-WRITES-STATE"]);
-    expect(ds[0].message).toContain("`construction of <box> → bumpA() → @a`");
-    // …and through a function that reads it
-    expect(W(writes(`${decls}\n    function peek() -> int { return @box.k }`, `<effect deps=[@query]>\${\n        const v = peek()\n    }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
-    // …and through a declaration the constructed one renders (built with it)
+    expect(W(ds)).toEqual([SRC]);
+    expect(ds[0].message).toContain("the initializer of `@box.k` writes `@a` through a call: `bumpA() → @a`");
+    // …read through a function, and through a declaration the constructed one renders: the same one error
+    expect(W(writes(`${decls}\n    function peek() -> int { return @box.k }`, `<effect deps=[@query]>\${\n        const v = peek()\n    }</>`))).toEqual([SRC]);
     const nested = `    <let a:int=0/>\n    function bumpA() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <inner let k:int=(bumpA())/>\n    renders <i>\${k}</i>\n    <outer let j:int=0/>\n    renders <div><inner/></div>`;
-    expect(W(writes(nested, `<effect deps=[@query]>\${\n        const v = @outer.j\n    }</>`))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(W(writes(nested, `<effect deps=[@query]>\${\n        const v = @outer.j\n    }</>`))).toEqual([SRC]);
     // negative: a shared instance whose initializers write nothing
     expect(W(writes(`    <box let k:int=3/>\n    renders <div>\${k}</div>`, `<effect deps=[@query]>\${\n        const v = @box.k\n    }</>`))).toEqual([]);
   });
 
-  test("fix round HIGH-1: a read of a value computed on its read (a derived cell, program-level included) runs its formula — a formula calling a writer is a write of the effect", async () => {
+  test("S449 item 3 (was fix round HIGH-1): a derived cell whose formula calls a writer — rejected at the formula, however the effect reads it", async () => {
     // Reviewer-measured at a92b6251e: this compiled clean and two clicks took @a 0 → 1 → 2 (the lazy pull ran
     // the formula inside the effect body).
     const decls = `    <let n:int=0/>\n    <let a:int=0/>\n    function g() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <d:int=(@n + g())/>`;
     const eff = (body) => `<effect deps=[@query]>\${\n        ${body}\n    }</>`;
     const direct = writes(decls, eff("const q = @d"));
-    expect(W(direct)).toEqual(["E-EFFECT-WRITES-STATE"]);
-    expect(direct[0].message).toContain("`formula of @d → g() → @a`");
-    // through a write-free function that reads it
-    expect(W(writes(`${decls}\n    function peek() -> int { return @d }`, eff("const q = peek()")))).toEqual(["E-EFFECT-WRITES-STATE"]);
-    // through a shared instance whose seed reads it
-    const viaBox = writes(`${decls}\n    <box let k:int=(@d)/>\n    renders <div>\${k}</div>`, eff("const q = @box.k"));
-    expect(W(viaBox)).toEqual(["E-EFFECT-WRITES-STATE"]);
-    expect(viaBox[0].message).toContain("`construction of <box> → formula of @d → g() → @a`");
+    expect(W(direct)).toEqual([SRC]);
+    expect(direct[0].message).toContain("the formula of derived `@d` writes `@a` through a call: `g() → @a`");
+    // through a write-free function that reads it; through a shared instance whose seed reads it
+    expect(W(writes(`${decls}\n    function peek() -> int { return @d }`, eff("const q = peek()")))).toEqual([SRC]);
+    expect(W(writes(`${decls}\n    <box let k:int=(@d)/>\n    renders <div>\${k}</div>`, eff("const q = @box.k")))).toEqual([SRC]);
     // negative: a derived cell whose formula writes nothing
     expect(W(writes(`    <let n:int=0/>\n    <d:int=(@n * 2)/>`, eff("const q = @d")))).toEqual([]);
   });
 
-  test("fix round HIGH-1, runtime: the reviewer's program is now rejected; its write-free twin runs with no write", async () => {
+  test("S449 item 3 (was fix round HIGH-1, runtime): the reviewer's program is rejected at its formula; its write-free twin runs with no write", async () => {
     const src = (formula) => P(`    <let n:int=0/>\n    <let a:int=0/>\n    function g() -> int {\n        @a = @a + 1\n        return 1\n    }\n    fn h() -> int { return 1 }\n    <d:int=(${formula})/>\n${PING}\n    <effect deps=[@n]>\${\n        const q = @d\n        ping()\n    }</>`,
       `        <p class="a">\${@a}</p>\n        <button onclick=(@n = @n + 1)>inc</button>`);
-    expect(codes(src("@n + g()"))).toEqual(["E-EFFECT-WRITES-STATE"]);
+    expect(codes(src("@n + g()"))).toEqual([SRC]);
     await loadProgram(coreOf(src("@n + h()")), "effect-derived-clean");
     expect(runsOn("inc")).toBe(1);
     expect($("p.a").textContent).toBe("0");
@@ -522,22 +526,33 @@ describe("Core checks — C11 (Effect) and C12 (Suspend placement)", () => {
     expect(mods.check.checkCore(through).join("\n")).toMatch(/C11: an Effect body writes reactive state — through `bump\(\)`: a Write of <program>\.m/);
   });
 
+  // S449 item 3: the front end now rejects a writing initializer / formula at its source, so no such program
+  // reaches Core. C11 (the second line of defence) is exercised by GRAFTING the write into Core: the program
+  // compiles clean with a write-free `seed()` / `g()`, then that function's Core body is replaced by the body
+  // of `bumpA()` (a writer the program also declares).
+  const graftFn = (core, into, from) => {
+    const target = core.fns.find((f) => f.sym.hint === into);
+    target.body = clone(core.fns.find((f) => f.sym.hint === from).body);
+  };
+
   test("C11: a body that reads a shared instance whose construction writes (a seed calling a writer) — through a call", () => {
-    const cons = P(`    <let n:int=0/>\n    <let a:int=0/>\n${PING}\n    function bumpA() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <box let k:int=(bumpA())/>\n    renders <div>\${k}</div>\n    function peek() {\n        const v = @box.k\n    }`,
-      `        <div><effect deps=[@n]>\${ ping() }</></div>\n        <button onclick=peek()>p</button>`);
+    const cons = P(`    <let n:int=0/>\n    <let a:int=0/>\n${PING}\n    function bumpA() -> int {\n        @a = @a + 1\n        return 1\n    }\n    function seed() -> int { return 1 }\n    <box let k:int=(seed())/>\n    renders <div>\${k}</div>\n    function peek() {\n        const v = @box.k\n    }`,
+      `        <div><effect deps=[@n]>\${ ping() }</></div>\n        <button onclick=peek()>p</button>\n        <button onclick=bumpA()>b</button>`);
     const core = coreOf(cons);
     const handler = walkCore(core, (n) => n.variant === "On")[0].data.body;
     const grafted = clone(core);
+    graftFn(grafted, "seed", "bumpA");
     effects(grafted)[0].body = clone(handler);
-    expect(mods.check.checkCore(grafted).join("\n")).toMatch(/C11: an Effect body writes reactive state — through `peek\(\)`: through the construction of <box>: through `bumpA\(\)`: a Write of <program>\.a/);
+    expect(mods.check.checkCore(grafted).join("\n")).toMatch(/C11: an Effect body writes reactive state — through `peek\(\)`: through the construction of <box>: through `seed\(\)`: a Write of <program>\.a/);
   });
 
   test("C11 (fix round HIGH-1): a body that reads a derived program cell whose formula writes", () => {
-    const src = P(`    <let n:int=0/>\n    <let a:int=0/>\n${PING}\n    function g() -> int {\n        @a = @a + 1\n        return 1\n    }\n    <d:int=(@n + g())/>\n    function peek() {\n        const v = @d\n    }`,
-      `        <div><effect deps=[@n]>\${ ping() }</></div>\n        <button onclick=peek()>p</button>`);
+    const src = P(`    <let n:int=0/>\n    <let a:int=0/>\n${PING}\n    function bumpA() -> int {\n        @a = @a + 1\n        return 1\n    }\n    function g() -> int { return 1 }\n    <d:int=(@n + g())/>\n    function peek() {\n        const v = @d\n    }`,
+      `        <div><effect deps=[@n]>\${ ping() }</></div>\n        <button onclick=peek()>p</button>\n        <button onclick=bumpA()>b</button>`);
     const core = coreOf(src);
     const handler = walkCore(core, (n) => n.variant === "On")[0].data.body;
     const grafted = clone(core);
+    graftFn(grafted, "g", "bumpA");
     effects(grafted)[0].body = clone(handler);
     expect(mods.check.checkCore(grafted).join("\n")).toMatch(/C11: an Effect body writes reactive state — through `peek\(\)`: through the formula of <program>\.d: through `g\(\)`: a Write of <program>\.a/);
   });

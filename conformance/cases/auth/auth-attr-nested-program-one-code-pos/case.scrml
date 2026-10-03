@@ -1,0 +1,6 @@
+<program auth="required">
+<program name="w" auth="Bogus">
+<p>w</p>
+</program>
+<p>home</p>
+</program>
