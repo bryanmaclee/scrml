@@ -596,6 +596,25 @@ export function noDefault(what) {
   throw new Error(`${what} has no default and no use-site value (SPEC §66.3 O33 is OPEN)`);
 }
 
+/**
+ * s451 — `defer` (SPEC §19.16.2): run a block's deferred bodies at its exit, called from the
+ * `finally` the printer wraps the block in. Last registered runs first (LIFO). A host error in
+ * one does not stop the others; after all have run, the FIRST such error is rethrown — replacing
+ * an error already in flight, as a host `finally` does.
+ */
+export function runDefers(stack) {
+  let failed = false;
+  let first;
+  for (let i = stack.length - 1; i >= 0; i--) {
+    try {
+      stack[i]();
+    } catch (e) {
+      if (!failed) { failed = true; first = e; }
+    }
+  }
+  if (failed) throw first;
+}
+
 // ---------------------------------------------------------------------------
 // The validity surface (SPEC §55.5–§55.8, §55.12, §55.13).
 //

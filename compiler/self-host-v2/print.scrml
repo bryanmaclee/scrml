@@ -472,7 +472,51 @@ ${
         const assigned: int[] = assignedSyms(Node.NBlock(b))
         let out: JsStmt[] = []
         for (const s of b.stmts) { out = out.concat(stmtJs(ctx, s, assigned)) }
+        if (holdsDefer(b)) return deferBlockJs(ctx, out)    // s451
         return out
+    }
+
+    // s451 — `defer` (§19.16.6, the informative shape): a block that holds a
+    // Defer gets its own stack and is wrapped — whole, in place — in a
+    // `try { … } finally { rt.runDefers(defers$) }`. Each Defer pushes its
+    // body as a closure where it stands, so a Defer never reached registers
+    // nothing; the closure is evaluated at exit and sees the bindings in scope
+    // at the `defer`; a `return`'s value is computed before the `finally`
+    // runs; the runtime runs the stack last-first and rethrows the first host
+    // error after all have run (§19.16.2). An inner block's `defers$` shadows
+    // the outer one — a deferred body holds no Defer (C16), so no closure
+    // ever needs the outer stack from inside an inner block.
+    fn holdsDefer(b: Block) -> boolean {
+        for (const s of b.stmts) {
+            if (isDefer(s)) return true
+        }
+        return false
+    }
+
+    fn isDefer(s: Stmt) -> boolean {
+        return match s {
+            .Defer(body: x) :> true
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Write(cap: x) :> false
+            .Commit(writes: x) :> false
+            .If(cond: x) :> false
+            .Return(e: x) :> false
+            .Eval(e: x) :> false
+            .Suspend(bind: x) :> false
+            .ResetSurface(of: x) :> false
+        }
+    }
+
+    fn deferBlockJs(ctx: Ctx, body: JsStmt[]) -> JsStmt[] {
+        return [
+            JsStmt.SConst("defers$", JsExpr.JArray([])),
+            JsStmt.STry(body, [sexpr(rtCall(ctx, "runDefers", [jid("defers$")]))]),
+        ]
+    }
+
+    fn deferJs(ctx: Ctx, body: Block) -> JsStmt {
+        return sexpr(jmcall(jid("defers$"), "push", [JsExpr.JArrow([], blockJs(ctx, body))]))
     }
 
     fn stmtJs(ctx: Ctx, s: Stmt, assigned: int[]) -> JsStmt[] {
@@ -486,6 +530,7 @@ ${
             .Eval(e: e) :> [sexpr(exprJs(ctx, e))]
             .Suspend(bind: b, on: on, then: t) :> [suspendJs(ctx, b, on, t)]
             .ResetSurface(of: v) :> [sexpr(jmcall(surfaceJs(ctx, v), "reset", []))]
+            .Defer(body: d) :> [deferJs(ctx, d)]
         }
     }
 
@@ -551,6 +596,7 @@ ${
             .Eval :> []
             .Suspend :> []
             .ResetSurface :> []
+            .Defer :> []
         }
     }
 
@@ -565,6 +611,7 @@ ${
             .Eval :> []
             .Suspend :> []
             .ResetSurface :> []
+            .Defer :> []
         }
     }
 
@@ -888,6 +935,7 @@ ${
             .Return(e: x) :> false
             .Eval(e: x) :> false
             .ResetSurface(of: x) :> false
+            .Defer(body: x) :> false
         }
     }
 

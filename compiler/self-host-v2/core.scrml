@@ -265,6 +265,13 @@ ${
         // field's compound `submitted` is unchanged (§55.13 row 2). Writes no
         // cell a program can name (the surface is read-only to programs).
         ResetSurface(of: ValidityOf),
+        // s451 — `defer` (§19.16): register `body` against the ENCLOSING block;
+        // when that block is left — falling off its end, a `return` (after the
+        // value is evaluated), or a host error passing through — every body
+        // its executed Defers registered runs once, last registered first
+        // (§19.16.2). A Defer stands only in a function body, and its body holds
+        // no Return / Defer / Suspend (check.scrml C16; §19.16.3 rules 1-2).
+        Defer(body: Block),
     }
     export type Block:struct = { stmts: Stmt[] }
 

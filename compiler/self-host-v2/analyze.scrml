@@ -2375,7 +2375,7 @@ ${
     fn handlesInElem(g0: DeclStub[], e: AElem, w: HWalk, st0: AS) -> RHandles {
         let st: AS = st0
         let out: HandleInfo[] = []
-        const cond: boolean = w.conditional || attrNamed(e.attrs, "if") is some
+        const cond: boolean = w.conditional || attrNamed(e.attrs, "if") is some || attrNamed(e.attrs, "else-if") is some || attrNamed(e.attrs, "else") is some
         if (e.tag == "each" && !e.star) {
             // a row scope: handles inside it live on the row, conditional relative to the row
             const r: RHandles = handlesIn(g0, e.kids, { owner: e.nid, conditional: false, file: w.file }, st)
@@ -2795,6 +2795,7 @@ ${
             .If(cond: c, thenB: t, elseB: el) :> exprClock(c) || blockClock(t) || maybeBlockClock(el)
             .Given(name: n, subject: sub, body: b) :> exprClock(sub) || blockClock(b)
             .EffectStmt(w: w) :> blockClock(w.body)
+            .Defer(body: b) :> blockClock(b)
         }
     }
 
@@ -5057,6 +5058,7 @@ ${
             .If(cond: c, thenB: t, elseB: el) :> keepEnv(env, resolveIf(env, c, t, el, st))
             .Given(name: n, subject: sub, body: b) :> keepEnv(env, resolveGiven(env, s, n, sub, b, st))
             .EffectStmt(w: w) :> keepEnv(env, effectAsStatement(env, w, st))
+            .Defer(body: b, arrayLead: a, bare: bare) :> keepEnv(env, resolveDefer(env, s, b, a, bare, st))
         }
     }
 
@@ -5070,6 +5072,208 @@ ${
     fn effectAsStatement(env: Env, w: AEffect, st: AS) -> AS {
         if (env.inEffect) return addDiag(st, env.file, w.span, "E-LIFECYCLE-016", "an effect inside another effect's body — an effect body is logic, not a markup position; declare the inner effect as a sibling `<effect>` with its own `deps=` (§6.7.4)")
         return addDiag(st, env.file, w.span, "E-BOOTSTRAP-UNSUPPORTED", "an effect inside a function or handler body has no position in the tree to own it (§6.7.4: an `<effect>` stands where a `<request>` may — a child of an element scope); write it in the program's markup")
+    }
+
+    // =========================================================================
+    // s451 — `defer` (SPEC §19.16), the scope-exit statement.
+    //
+    // Exits the bootstrap HAS, all handled by the lowering (print.scrml
+    // deferBlockJs — a `try … finally` per block that holds a defer): falling
+    // off the end of a block; `return` (after its value is evaluated); a host
+    // error passing through. Exits the bootstrap does NOT have — loops and
+    // `break` / `continue`, `fail`, `?`, the CPS split of a function body,
+    // server functions — have no source form here at all (each is a parse or
+    // scope error, so the compile has no Core — lower.scrml's gate), so no
+    // `defer` can meet them and be mis-run. For the same reason the codes
+    // E-DEFER-UNHANDLED-FAILABLE (no failable function), -DUPLICATE-FUNCTION
+    // (no function declaration inside a body) and -SERVER-IN-SPLIT (no split)
+    // have no trigger the bootstrap can parse.
+    //
+    // Here: §19.16.3 rule 4 (E-DEFER-OUTSIDE-FUNCTION: "`defer` SHALL appear
+    // only inside the body of a function DECLARATION … It is
+    // E-DEFER-OUTSIDE-FUNCTION in every other position"), §19.16.2
+    // E-DEFER-UNSUPPORTED-SITE ("a `defer` that is the whole UNBRACED body of
+    // an `if` / `else` … SHALL be a compile error"), §19.16.1
+    // E-DEFER-AMBIGUOUS-LEAD. The block-chain rules (rules 1-2, LATER-SHADOW)
+    // are `deferChecks`, run once per function body.
+    // =========================================================================
+    fn inFnBody(env: Env) -> boolean {
+        const c: CtxK = env.ctx
+        return match c {
+            .InFn :> !env.inEffect
+            .InDecl(owner: o) :> false
+        }
+    }
+
+    fn resolveDefer(env: Env, s: AStmt, body: ABlock, arrayLead: boolean, bare: boolean, st0: AS) -> AS {
+        if (!inFnBody(env)) {
+            return addDiag(st0, env.file, s.span, "E-DEFER-OUTSIDE-FUNCTION", "`defer` stands only in the body of a function declaration (`function` / `fn`) — a handler, an effect or the program has no single block exit to attach the deferred statement to (§19.16.3 rule 4); move the body into a named function and call it")
+        }
+        // §19.16.1: "Where a binding named `defer` is in scope, a single-statement
+        // `defer` led by an array literal SHALL be a compile error naming both spellings"
+        if (arrayLead && deferBound(env)) {
+            return addDiag(st0, env.file, s.span, "E-DEFER-AMBIGUOUS-LEAD", "`defer [` reads two ways while a binding named `defer` is in scope (§19.16.1): write `defer[…]` (no space) to index the binding, or `defer { […]… }` to defer the statement")
+        }
+        let st: AS = st0
+        if (bare) st = addDiag(st, env.file, s.span, "E-DEFER-UNSUPPORTED-SITE", "a `defer` that is the whole unbraced arm of an `if` / `else` has no written block to belong to (§19.16.2) — brace the arm (`{ defer … }`) or move the `defer` to the enclosing block")
+        // The deferred body sees the bindings in scope at the `defer` (§19.16.2
+        // "Evaluation time"); its own locals stay inside it.
+        return resolveBlock(env, body, st)
+    }
+
+    // Is a binding named `defer` VISIBLE here (§19.16.1: a parameter, an
+    // earlier local, a `given` binding, a file-level function)?
+    fn deferBound(env: Env) -> boolean {
+        if (lookupLocal(env, "defer") is some) return true
+        if (lookupHandle(env, "defer") is some) return true
+        return fnNamed(env.g, "defer") is some
+    }
+
+    // A `let` / `const` written AFTER a position in a block of the function.
+    type DeferLater:struct = { name: string, span: ASpan }
+
+    // §19.16.3 rules 1-2 and §19.16.2 E-DEFER-LATER-SHADOW, over one function
+    // body. `later` = the declarations in force at the exit of the block
+    // being walked that were written after the current position — in that
+    // block or in any enclosing block of the same function ("a `let` / `const`
+    // / `lin` declaration written AFTER the `defer` — in its own block or in
+    // any enclosing block of the same function").
+    fn deferChecks(file: string, body: ABlock, st: AS) -> AS {
+        return deferChecksIn(file, body, [], st)
+    }
+
+    fn deferChecksIn(file: string, b: ABlock, outer: DeferLater[], st0: AS) -> AS {
+        let st: AS = st0
+        let i = 0
+        for (const s of b.stmts) {
+            st = deferChecksStmt(file, s, outer.concat(laterLocals(b, i + 1)), st)
+            i = i + 1
+        }
+        return st
+    }
+
+    fn laterLocals(b: ABlock, from: int) -> DeferLater[] {
+        let out: DeferLater[] = []
+        let i = 0
+        for (const s of b.stmts) {
+            if (i >= from) {
+                const n: string = localNameOf(s)
+                if (n != "") out = out.concat([{ name: n, span: s.span }])
+            }
+            i = i + 1
+        }
+        return out
+    }
+
+    fn deferChecksStmt(file: string, s: AStmt, later: DeferLater[], st: AS) -> AS {
+        const k: AStmtK = s.k
+        return match k {
+            .Defer(body: d) :> deferShadow(file, s, d, later, deferBodyRules(file, d, st))
+            .If(cond: c, thenB: t, elseB: el) :> deferChecksElse(file, el, later, deferChecksIn(file, t, later, st))
+            .Given(name: n, body: d) :> deferChecksIn(file, d, later, st)
+            .Eval(e: e) :> st
+            .Local(name: n) :> st
+            .Return(e: e) :> st
+            .EffectStmt(w: w) :> st
+        }
+    }
+
+    fn deferChecksElse(file: string, el: ABlock | not, later: DeferLater[], st: AS) -> AS {
+        if (el is not) return st
+        return deferChecksIn(file, el, later, st)
+    }
+
+    // Rules 1-2 inside a deferred body, at every depth: no `return`
+    // (E-DEFER-CONTROL-FLOW — "A deferred body SHALL NOT contain a `return`"),
+    // no `defer` (E-DEFER-NESTED — "A deferred body SHALL NOT contain a
+    // `defer` statement"). The bootstrap parses no `fail` / `?` / `yield` /
+    // `break` / `continue` and no nested function body (a lambda body is an
+    // expression), so a `return` here always leaves the deferred body.
+    fn deferBodyRules(file: string, b: ABlock, st0: AS) -> AS {
+        let st: AS = st0
+        for (const s of b.stmts) { st = deferBodyRule(file, s, st) }
+        return st
+    }
+
+    fn deferBodyRule(file: string, s: AStmt, st: AS) -> AS {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: e) :> addDiag(st, file, s.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `return` — it runs while its block is already exiting, after the function's return value is computed (§19.16.3 rule 1)")
+            .Defer(body: d) :> addDiag(st, file, s.span, "E-DEFER-NESTED", "a deferred statement cannot contain a `defer` — there is no block to attach it to that is not already exiting (§19.16.3 rule 2)")
+            .If(cond: c, thenB: t, elseB: el) :> deferBodyElse(file, el, deferBodyRules(file, t, st))
+            .Given(name: n, body: d) :> deferBodyRules(file, d, st)
+            .Eval(e: e) :> st
+            .Local(name: n) :> st
+            .EffectStmt(w: w) :> st
+        }
+    }
+
+    fn deferBodyElse(file: string, el: ABlock | not, st: AS) -> AS {
+        if (el is not) return st
+        return deferBodyRules(file, el, st)
+    }
+
+    // E-DEFER-LATER-SHADOW (§19.16.2): "If the deferred body reads a name that
+    // such a later declaration (re)binds, the program SHALL be rejected …
+    // The diagnostic names the binding and both sites". A name the deferred
+    // body binds itself (a local, a `given` name, a lambda parameter) is its
+    // own; every other bare name it mentions — read, written or called — is
+    // resolved at the `defer`, so a later binding of it is the hazard.
+    fn deferShadow(file: string, s: AStmt, body: ABlock, later: DeferLater[], st0: AS) -> AS {
+        let st: AS = st0
+        const used: string[] = blockNameRefs(body, [])
+        let reported: string[] = []
+        for (const l of later) {
+            if (used.indexOf(l.name) >= 0 && reported.indexOf(l.name) < 0) {
+                reported = reported.concat([l.name])
+                st = addDiag(st, file, l.span, "E-DEFER-LATER-SHADOW", "`" + l.name + "` is declared here, after the `defer` at " + offsetOf(s.span) + " whose deferred statement reads `" + l.name + "` — at the block's exit it would read this later binding, not the one in scope at the `defer` (§19.16.2); rename one of them")
+            }
+        }
+        return st
+    }
+
+    // The bare names a block mentions that it does not bind itself.
+    fn blockNameRefs(b: ABlock, bound0: string[]) -> string[] {
+        let bound: string[] = bound0
+        let out: string[] = []
+        for (const s of b.stmts) {
+            out = out.concat(stmtNameRefs(s, bound))
+            const n: string = localNameOf(s)
+            if (n != "") bound = bound.concat([n])
+        }
+        return out
+    }
+
+    fn stmtNameRefs(s: AStmt, bound: string[]) -> string[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> exprNameRefs(e, bound)
+            .Local(name: n, init: i) :> exprNameRefs(i, bound)
+            .Return(e: e) :> maybeNameRefs(e, bound)
+            .If(cond: c, thenB: t, elseB: el) :> exprNameRefs(c, bound).concat(blockNameRefs(t, bound)).concat(elseNameRefs(el, bound))
+            .Given(name: n, subject: sub, body: d) :> exprNameRefs(sub, bound).concat(blockNameRefs(d, bound.concat([n])))
+            .EffectStmt(w: w) :> []
+            .Defer(body: d) :> blockNameRefs(d, bound)
+        }
+    }
+
+    fn maybeNameRefs(e: AExpr | not, bound: string[]) -> string[] {
+        if (e is not) return []
+        return exprNameRefs(e, bound)
+    }
+
+    fn elseNameRefs(el: ABlock | not, bound: string[]) -> string[] {
+        if (el is not) return []
+        return blockNameRefs(el, bound)
+    }
+
+    fn exprNameRefs(e: AExpr, bound0: string[]) -> string[] {
+        const bound: string[] = bound0.concat(lambdaParams(e))
+        let out: string[] = []
+        const n: string = exprName(e)
+        if (n != "" && bound.indexOf(n) < 0) out = [n]
+        for (const x of exprKids(e)) { out = out.concat(exprNameRefs(x, bound)) }
+        return out
     }
 
     // =========================================================================
@@ -5245,7 +5449,144 @@ ${
     fn resolveNodes(env: Env, ns: ANode[], st0: AS) -> AS {
         let st: AS = st0
         for (const n of ns) { st = resolveNode(env, n, st) }
+        return chainCheck(env, ns, st)
+    }
+
+    // ---- s451: `if=` / `else-if=` / `else` chains (§17.1.1) ------------------
+    // A chain is the maximal run of SIBLINGS: one `if=` element, then zero or
+    // more `else-if=` elements, then at most one `else` element; whitespace-only
+    // text between members does not break it (§17.1.1 Syntax). Exactly the
+    // first true branch is in the DOM (lower.scrml `chainView`: ONE View.Cond).
+    // The structure rules are LOCAL — each looks only at the immediately
+    // preceding element at the same level (§17.1.1 Normative Rules):
+    //   E-CTRL-001  `else` not preceded by an `if=` / `else-if=` element
+    //   E-CTRL-002  `else-if=` not preceded by an `if=` / `else-if=` element
+    //   E-CTRL-003  an `else-if=` / `else` element right after an `else` element
+    //               (extends a chain past its terminal `else`; the element is
+    //               also not preceded by `if=` / `else-if=`, so 001/002 fire too)
+    //   E-CTRL-005  `else` / `else-if=` on the same element as `if=`
+    // E-CTRL-004 (a state object opener) cannot arise: no state opener reaches
+    // markup here (a declaration in markup is refused, resolveNode). An `if=`
+    // after an `else` opens a NEW chain (the grammar's `if-element` begins one).
+    // Fail closed (refused, never ignored): a chain attribute on an element the
+    // chain lowering does not wrap (only HTML elements and uses are wrapped); an
+    // `if=` / `else-if=` whose value is not an expression (quoted, valueless or
+    // braced — it used to render unconditionally); `else` with a value; and
+    // `else` + `else-if=` on one element (the SPEC names no rule for it).
+    fn chainCheck(env: Env, ns: ANode[], st0: AS) -> AS {
+        let st: AS = st0
+        let prev: int = 0               // the preceding sibling element: 0 none / not a member, 1 `if=` or `else-if=`, 2 `else`
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            const e: AElem | not = match k {
+                .Elem(e: x) :> x
+                .Text(text: t) :> not
+                .Interp(e: x) :> not
+                .DeclNode(d: d) :> not
+                .Effect(w: w) :> not
+            }
+            if (e is some) {
+                st = chainMember(env, e, prev, st)
+                prev = chainRoleAfter(e)
+            } else if (!blankNode(n)) {
+                prev = 0
+            }
+        }
         return st
+    }
+
+    // What an element is to the NEXT sibling: 1 it carries `if=` or `else-if=`,
+    // 2 it carries `else` (only), 0 neither.
+    fn chainRoleAfter(e: AElem) -> int {
+        if (attrNamed(e.attrs, "if") is some || attrNamed(e.attrs, "else-if") is some) return 1
+        if (attrNamed(e.attrs, "else") is some) return 2
+        return 0
+    }
+
+    fn chainMember(env: Env, e: AElem, prev: int, st0: AS) -> AS {
+        let st: AS = st0
+        const ia: AAttr | not = attrNamed(e.attrs, "if")
+        const ea: AAttr | not = attrNamed(e.attrs, "else-if")
+        const la: AAttr | not = attrNamed(e.attrs, "else")
+        if (ia is not && ea is not && la is not) return st
+        if (ia is some && (ea is some || la is some)) {
+            st = addDiag(st, env.file, e.span, "E-CTRL-005", "`else` (or `else-if=`) and `if=` cannot appear on the same element `<" + e.tag + ">`. An element either opens a new chain (`if=`) or continues one (`else-if=` / `else`), not both (§17.1.1)")
+        } else if (ea is some && la is some) {
+            st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` carries both `else-if=` and `else` — §17.1.1 gives an element one chain role; the bootstrap refuses the combination rather than pick one")
+        } else if (ea is some) {
+            if (prev == 2) st = addDiag(st, env.file, e.span, "E-CTRL-003", "The element `<" + e.tag + " else-if=…>` tries to extend a chain that already ended with `else`. Once `else` appears, no further `else-if=` or `else` is allowed in the same chain (§17.1.1)")
+            if (prev != 1) st = addDiag(st, env.file, ea.span, "E-CTRL-002", "`else-if=` on `<" + e.tag + ">` has no preceding `if=` element at the same level. An `else-if=` block must immediately follow an element with `if=` or `else-if=` (§17.1.1)")
+        } else if (la is some) {
+            if (prev == 2) st = addDiag(st, env.file, e.span, "E-CTRL-003", "The element `<" + e.tag + " else>` tries to extend a chain that already ended with `else`. Once `else` appears, no further `else-if=` or `else` is allowed in the same chain (§17.1.1)")
+            if (prev != 1) st = addDiag(st, env.file, la.span, "E-CTRL-001", "`else` on `<" + e.tag + ">` has no preceding `if=` element at the same level. An `else` block must immediately follow an element with `if=` or `else-if=` (§17.1.1)")
+        }
+        // the condition's value: an expression (a quoted, valueless or braced
+        // condition used to render the element unconditionally — fail-open)
+        st = chainCondValue(env, e, ia, st)
+        st = chainCondValue(env, e, ea, st)
+        if (la is some && !isNoValue(la.value)) {
+            st = addDiag(st, env.file, la.span, "E-BOOTSTRAP-UNSUPPORTED", "`else` on `<" + e.tag + ">` takes no value — it is a bare attribute (§17.1.1)")
+        }
+        // the host: only an HTML element or a use is wrapped by the chain
+        // lowering. `<each>` and `<errors>` refuse the attribute themselves; a
+        // refused element has no fact. Anything else would IGNORE it.
+        const f: ElemFact | not = elemFactNow(st, e.nid)
+        if (f is some && !chainHost(f)) {
+            st = chainHostRefused(env, e, ia, st)
+            st = chainHostRefused(env, e, ea, st)
+            st = chainHostRefused(env, e, la, st)
+        }
+        return st
+    }
+
+    fn chainCondValue(env: Env, e: AElem, a: AAttr | not, st: AS) -> AS {
+        if (a is not) return st
+        if (valueExpr(a.value) is some) return st
+        return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<" + e.tag + ">` needs a condition expression — `" + a.name + "=@x` or `" + a.name + "=(@n >= 3)`; a quoted, valueless or braced condition is not in the bootstrap (§17.1, §5.2) — it would render the element unconditionally")
+    }
+
+    fn chainHostRefused(env: Env, e: AElem, a: AAttr | not, st: AS) -> AS {
+        if (a is not) return st
+        let tag: string = e.tag
+        if (e.star) tag = "*" + e.tag
+        return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` on `<" + tag + ">` is not in the bootstrap — only an HTML element or a use of a declaration is conditionally rendered (§17.1); the attribute would be ignored and the element always rendered")
+    }
+
+    fn chainHost(f: ElemFact) -> boolean {
+        return match f {
+            .MHtml :> true
+            .MUse(decl: d) :> true
+            .MEach(bind: b) :> true          // refuses `if=` / `else-if=` / `else` itself (resolveEach)
+            .MErrors(of: x) :> true          // refuses them itself (resolveErrors)
+            .MSlot :> false
+            .MStateView(v: v) :> false
+            .MInline(v: v) :> false
+            .MStar(decl: d) :> false
+        }
+    }
+
+    // The element fact recorded so far for `nid` (the dense index is built
+    // after resolution, so this scans).
+    fn elemFactNow(st: AS, nid: int) -> ElemFact | not {
+        const t: ElemTable = st.facts.elems
+        let i: int = t.nids.length - 1
+        while (i >= 0) {
+            if (t.nids[i] == nid) return t.facts[i]
+            i = i - 1
+        }
+        return not
+    }
+
+    // An element's condition attribute: its `if=`, else its `else-if=` (the
+    // condition its branch is shown under; an `else` branch has none).
+    fn condAttrOf(attrs: AAttr[]) -> AAttr | not {
+        const a: AAttr | not = attrNamed(attrs, "if")
+        if (a is some) return a
+        return attrNamed(attrs, "else-if")
+    }
+
+    fn isChainAttr(name: string) -> boolean {
+        return name == "if" || name == "else-if" || name == "else"
     }
 
     fn resolveNode(env: Env, n: ANode, st: AS) -> AS {
@@ -5604,6 +5945,16 @@ ${
 
     // Every state-child body of `ds`'s fields, resolved in `ds`'s context (O5
     // (1i): the body is that variant's markup, like the declaration's renders).
+    fn stateBodyLists(ds: DeclSrc) -> ANode[][] {
+        let out: ANode[][] = []
+        for (const fd of fieldDecls(ds)) {
+            for (const c of fd.body) {
+                for (const sc of stateChildOf(c)) { out = out.concat([sc.body]) }
+            }
+        }
+        return out
+    }
+
     fn stateBodies(ds: DeclSrc) -> ANode[] {
         let out: ANode[] = []
         for (const fd of fieldDecls(ds)) {
@@ -5678,7 +6029,7 @@ ${
     }
 
     fn elemPresentEnv(env: Env, e: AElem) -> Env {
-        const a: AAttr | not = attrNamed(e.attrs, "if")
+        const a: AAttr | not = condAttrOf(e.attrs)
         if (a is not) return env
         const x: AExpr | not = valueExpr(a.value)
         if (x is not) return env
@@ -5701,7 +6052,8 @@ ${
         }
         for (const a of e.attrs) {
             const ev: string = eventName(a.name)
-            if (a.name == "if") {
+            if (isChainAttr(a.name)) {
+                // s451: `if=` / `else-if=` / `else` (§17.1.1) — chain attributes (chainCheck)
                 st = resolveIfValue(env, a.value, st)
                 st = addAttr(st, a.nid, AttrKind.AIf)
             } else if (ev != "") {
@@ -5956,7 +6308,7 @@ ${
                 const h: HandleInfo | not = lookupHandle(env, n)
                 if (h is some) alias = h.sym
                 st = addAttr(st, a.nid, AttrKind.AAs)
-            } else if (a.name == "if") {
+            } else if (isChainAttr(a.name)) {
                 st = resolveIfValue(env, a.value, st)
                 st = addAttr(st, a.nid, AttrKind.AIf)
             } else {
@@ -6072,7 +6424,7 @@ ${
             const renv: Env = declEnv(g, ds, true)
             st = resolveNodes(renv, rendersNodes(ds), st)
             // s442: state-child bodies (O5 (1i)), in the same context
-            st = resolveNodes(renv, stateBodies(ds), st)
+            for (const sb of stateBodyLists(ds)) { st = resolveNodes(renv, sb, st) }   // s451: one sibling list each (if-chains)
             // s442: a child field's own renders (§66.4 rule 2), in the same context;
             // s444: with `@<field>` naming that field of this instance (O54 = (a))
             if (ds.p is not) {
@@ -6111,6 +6463,7 @@ ${
                 env = withLocal(env, { name: p.name, s: rs.s, ty: pty, mutable: false, narrowed: not, nDecl: not })
             }
             st = resolveBlock(env, fs.f.body, st)
+            st = deferChecks(fs.info.file, fs.f.body, st)    // s451: §19.16 block-chain rules
         }
         return st
     }
@@ -6429,6 +6782,7 @@ ${
             .If(cond: c) :> ""
             .Given(name: n) :> ""
             .EffectStmt(w: w) :> ""
+            .Defer(body: b) :> ""
         }
     }
 
@@ -6441,6 +6795,7 @@ ${
             .Eval(e: e) :> []
             .Local(name: n) :> []
             .Return(e: e) :> []
+            .Defer(body: b) :> [b]
         }
     }
 
@@ -6623,6 +6978,42 @@ ${
     type Narrowing:struct = { yes: string[], no: string[] }
 
     fn noNarrowing() -> Narrowing { return { yes: [], no: [] } }
+
+    // s451 — a deferred body runs at its block's EXIT (§19.16.2), where a
+    // narrowing in force at the `defer` may no longer hold. It keeps only the
+    // narrowings nothing can undo before that exit: a local (`#id`, not a
+    // place under it) that is never rebound — a parameter, a `const`, a
+    // `let` with no assignment (no EAssignLocal of it anywhere). A cell's
+    // narrowing (`@…`) is dropped: the rest of the block, or any call, may
+    // write the cell. Fail closed — a dropped narrowing makes a read in the
+    // deferred body unproven, never silently `T`.
+    fn tDeferEnv(env: TEnv) -> TEnv {
+        let keep: string[] = []
+        for (const k of env.narrowed) {
+            if (k.indexOf("#") == 0 && k.indexOf(".") < 0 && !reboundLocal(env.t, k.substring(1))) keep = keep.concat([k])
+        }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: keep, fnw: env.fnw, rows: env.rows, fret: env.fret }
+    }
+
+    // Is the local with Sym id `id` rebound (`x = …`) anywhere?
+    fn reboundLocal(t: Tables, id: string) -> boolean {
+        for (const f of t.effects.facts) {
+            if (reboundId(f) == id) return true
+        }
+        return false
+    }
+
+    fn reboundId(f: EffectFact) -> string {
+        return match f {
+            .EAssignLocal(sym: s) :> "" + s.id
+            .EWrite(w: w) :> ""
+            .ESpread(ws: ws) :> ""
+            .EReset(w: w) :> ""
+            .EEdits(w: w) :> ""
+            .ERemove(w: w) :> ""
+            .EElemAt(cap: c) :> ""
+        }
+    }
 
     fn tNarrow(env: TEnv, keys: string[]) -> TEnv {
         let out: string[] = env.narrowed
@@ -6828,6 +7219,7 @@ ${
             .Local(name: n) :> false
             .Given(name: n) :> false
             .EffectStmt(w: w) :> false
+            .Defer(body: b) :> false
         }
     }
 
@@ -6938,6 +7330,7 @@ ${
             .If(cond: c, thenB: t, elseB: el) :> aliased(exprEffects(c), al).concat(blockEffects(t, al)).concat(elseEffects(el, al))
             .Given(name: n, subject: sub, body: b) :> aliased(exprEffects(sub), al).concat(blockEffects(b, al.concat([aliasOf(n, sub)])))
             .EffectStmt(w: w) :> []              // registers nothing where it stands (refused there) and writes nothing
+            .Defer(body: b) :> blockEffects(b, al)   // s451: runs at the block's exit — its writes are the function's
         }
     }
 
@@ -8363,6 +8756,7 @@ ${
             .If(cond: c, thenB: tb, elseB: el) :> typeIf(env, c, tb, el, ts)
             .Given(name: n, subject: sub, body: b) :> typeGiven(env, s, sub, b, ts)
             .EffectStmt(w: w) :> keepTEnv(env, ts)     // refused by the binder (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
+            .Defer(body: b) :> keepTEnv(env, typeBlock(tDeferEnv(env), b, ts))   // s451: typed at its exit, not where it stands
         }
     }
 
@@ -8885,7 +9279,7 @@ ${
     // typed FIRST — the element's other attributes and its children exist
     // only while it holds, so they are typed under its narrowing (`renv`).
     fn typeIfAttr(env: TEnv, e: AElem, ts: TypeState) -> RTEnv {
-        const a: AAttr | not = attrNamed(e.attrs, "if")
+        const a: AAttr | not = condAttrOf(e.attrs)       // s451: an `else-if=` branch too
         if (a is not) return keepTEnv(env, ts)
         const x: AExpr | not = valueExpr(a.value)
         if (x is not) return keepTEnv(env, ts)
@@ -8898,8 +9292,8 @@ ${
         const renv: TEnv = ri.env
         let ts: TypeState = ri.ts
         for (const a of e.attrs) {
-            if (a.name == "if") {
-                // typed above (typeIfAttr)
+            if (isChainAttr(a.name)) {
+                // typed above (typeIfAttr); `else` has no value
             } else if (eventName(a.name) != "") {
                 ts = typeHandlerValue(renv, a.value, ts)
             } else {
@@ -8918,7 +9312,7 @@ ${
         const di: DeclInfo | not = declInfo(env.t, decl)
         for (const a of e.attrs) {
             let av: VType = VType.Unknown
-            if (a.name != "as" && a.name != "if") {
+            if (a.name != "as" && !isChainAttr(a.name)) {
                 const ra: RVT = typeAttrValue(renv, a.value, ts)
                 ts = ra.ts
                 av = ra.vt
@@ -9296,6 +9690,7 @@ ${
             .If(cond: c, thenB: t, elseB: el) :> scanElse(cx, el, scanBlock(cx, t, scanExpr(cx, c, acc)))
             .Given(name: n, subject: sub, body: b) :> scanBlock(cx, b, scanExpr(cx, sub, acc))
             .EffectStmt(w: w) :> acc                // refused where it stands (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
+            .Defer(body: b) :> scanBlock(cx, b, acc)
         }
     }
 

@@ -1,0 +1,13 @@
+// §17.1.1 — an if / else-if / else chain: exactly the first true branch is in the DOM.
+<program>
+    let <step:number=1/>
+
+    function advance() { @step = @step + 1 }
+
+    <main>
+        <button id="go" onclick=advance()>Advance</button>
+        <p id="one" if=(@step == 1)>ONE</p>
+        <p id="two" else-if=(@step == 2)>TWO</p>
+        <p id="rest" else>REST</p>
+    </main>
+</program>
