@@ -4,7 +4,7 @@
   "language-version": "1.0",
   "spec": "§5.2.4",
   "source-test": "compiler/tests/unit/attr-multi-statement-s450.test.js",
-  "rationale": "§5.2.4 (S450): \"A `(…)`, `{…}` or `${…}` value of an attribute that is not an event handler, or a quoted condition, SHALL be exactly one expression. When it holds two or more statements separated by `;`, the compiler SHALL report E-ATTR-MULTI-STATEMENT (an error) — never silently keep one statement or drop the attribute.\" Provenance: ruling:user-voice-scrml.md S447 \"stamp all\" item (v) — \"a multi-statement value in a non-handler attribute is an error.\"",
+  "rationale": "§5.2.4 (S450): \"A `(…)`, `{…}` or `${…}` value of an attribute that is not an event handler, or a quoted condition, SHALL be exactly one expression. When it holds two or more statements, the compiler SHALL report E-ATTR-MULTI-STATEMENT (an error) — never silently keep one statement or drop the attribute.\" Provenance: ruling:user-voice-scrml.md S447 \"stamp all\" item (v) — \"a multi-statement value in a non-handler attribute is an error.\"",
   "expect": {
     "codes": ["E-ATTR-MULTI-STATEMENT"],
     "notCodes": []
