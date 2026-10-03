@@ -1,0 +1,13 @@
+// §6.7.4 rule 2 — the write is two calls deep.
+<program>
+  <category> = "all"
+  <lastFilter> = ""
+  function logFilter(c) {
+    @lastFilter = c
+  }
+  function track(c) {
+    logFilter(c)
+  }
+  <effect deps=[@category]>${ track(@category) }</>
+  <p>${@category}</p>
+</program>

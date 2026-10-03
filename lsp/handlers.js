@@ -1155,6 +1155,9 @@ export const ERROR_DESCRIPTIONS = {
   "E-MW-007": "More than one module in this build declares a request pipeline (a handle(), or a <program> attribute that emits a pipeline stage: cors= / log= other than \"off\" / ratelimit= / headers=\"strict\"). The onion is application-scope — a compiled server mounts exactly one. (SPEC §40.3.4)",
   "W-ATTR-001": "Attribute not recognized on a scrml-special element (informational; forwarded to HTML as-is). (SPEC §52.13)",
   "W-ATTR-002": "Attribute value-shape not recognized — silently accepted but no compile-time effect. (SPEC §52.13)",
+  "E-AUTH-ATTR-INVALID": "auth= on <program>/<page> is not exactly \"required\", \"optional\" or \"none\" (another spelling or case, spaces, \"\", role:X, ${…}, a cell, bare auth). The build is refused. (SPEC §52.13.2)",
+  "E-SESSION-AMBIENT-SERVER": "@session read in a server context. @session is not read on the server (it would come from the client's request body); use session.<field>. (SPEC §6.6.9, §20.5)",
+  "E-INTERNAL-SESSION-AMBIENT-SERVER": "Internal compiler error: a server @session read reached code generation unrefused. It was not lowered to the request body; the build is refused. Use session.<field>. (SPEC §6.6.9)",
   "E-ATTR-013": "class: directive value is invalid (bare identifier, string literal, or empty). class: requires a boolean expression. (SPEC §5.5.2)",
   // SQL / batch / component-overload (v0.2.0)
   "E-SQL-006": ".prepare() called on a ?{} SQL result. .prepare() is removed; Bun.SQL caches internally. Use .get() / .all() / .run(). (SPEC §44.3 / §8.1.1)",

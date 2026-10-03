@@ -1,0 +1,10 @@
+// §6.7.4 — a derived dependency.
+<program>
+  <p> = 1
+  const <d> = @p * 2
+  function beacon(v) {
+    return v
+  }
+  <effect deps=[@d]>${ beacon(@d) }</>
+  <p>${@p}</p>
+</program>

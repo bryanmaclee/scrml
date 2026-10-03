@@ -27,7 +27,7 @@ import { isEscalationServerOnlyModule } from "../route-inference.ts";
 import { exportIsUserComponent } from "../component-expander.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineServerSourceHydrationsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
-import { _clientServerFnNames } from "./scheduling.ts";
+import { _clientServerFnNames, _clientSseFnNames } from "./scheduling.ts";
 import { setVariantFieldsForFile } from "./emit-control-flow.ts";
 import { setVariantFieldsForRewriter } from "./rewrite.js";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
@@ -2338,6 +2338,7 @@ export function generateClientJs(ctx: CompileContext): string {
       report: (uses, span) => {
         for (const err of jsAsyncUsesErrors(uses, span, ctx.filePath)) errors.push(err);
       },
+      sseFnNames: ctx.routeMap ? _clientSseFnNames(ctx.routeMap, ctx.filePath ?? "") : null,
     });
   }
   const c12BodyRender = clientStage(ctx, "emit-engine-body-render", () => emitEngineBodyRenderForFile(fileAST, ctx));
@@ -2496,13 +2497,56 @@ export function generateClientJs(ctx: CompileContext): string {
     lines.push("    }");
     lines.push("    const session = {");
     lines.push("      get current() { return _scrml_session; },");
+    // §40.2 / §39.2.3 (S449, g-session-destroy-route-has-no-csrf-check) — the
+    // destroy route is CSRF-gated under `csrf="auto"`, so logout carries the
+    // session's synchronizer token and retries ONCE on a 403 (whose Set-Cookie
+    // plants the current token), the same shape as `_scrml_fetch_with_csrf_retry`.
+    // Self-contained ON PURPOSE rather than a call to that helper: the helper is
+    // emitted only for a file with a mutating server fn and only where csrf is on,
+    // but this projection is a window singleton any auth page's script may build,
+    // and the build mounts ONE destroy handler for the whole app (first module
+    // wins, commands/build.js) — so logout must work whichever handler is mounted,
+    // gated or not. First try: the first-paint `<meta name="csrf-token">`, else the
+    // readable `scrml_csrf` cookie. Retry: the cookie the 403 just planted (the meta
+    // may be stale), copied into the meta so later mutations agree.
     lines.push("      async destroy() {");
-    lines.push("        await fetch('/_scrml/session/destroy', {");
+    lines.push("        const _scrml_cookie_tok = () => { const m = document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/); return m ? decodeURIComponent(m[1]) : ''; };");
+    lines.push("        const _scrml_meta = document.querySelector ? document.querySelector('meta[name=\"csrf-token\"]') : null;");
+    lines.push("        const _scrml_post = (tok) => fetch('/_scrml/session/destroy', {");
     lines.push("          method: 'POST',");
     lines.push("          credentials: 'include',");
+    lines.push("          headers: tok ? { 'X-CSRF-Token': tok } : {},");
     lines.push("        });");
+    // S449 review fix — fail HONESTLY. Only a 2xx clears the projection and
+    // redirects: on a final non-2xx (e.g. 403 after the one retry) or a network
+    // failure the server session may still be alive, so redirecting to the login
+    // page would tell the user they are logged out when they are not (the
+    // shared-computer hazard). Instead the projection is left intact and the
+    // failure is reported through the scrml client error surface
+    // `_scrml_error_boundary_log` (the always-included 'errors' runtime chunk —
+    // the same reporter the server-fn call IIFEs route rejections to). destroy()
+    // resolves `true` on logout, `false` on failure; it does not reject, because
+    // `onclick=session.destroy()` is wired without a `.catch` and a rejection
+    // would be a silent browser-level unhandledrejection.
+    lines.push("        let _scrml_resp;");
+    lines.push("        try {");
+    lines.push("          _scrml_resp = await _scrml_post((_scrml_meta && _scrml_meta.getAttribute('content')) || _scrml_cookie_tok());");
+    lines.push("          if (_scrml_resp.status === 403) {");
+    lines.push("            const _scrml_fresh = _scrml_cookie_tok();");
+    lines.push("            if (_scrml_meta && _scrml_fresh) _scrml_meta.setAttribute('content', _scrml_fresh);");
+    lines.push("            _scrml_resp = await _scrml_post(_scrml_fresh);");
+    lines.push("          }");
+    lines.push("        } catch (_scrml_err) {");
+    lines.push("          _scrml_error_boundary_log('session.destroy', _scrml_err);");
+    lines.push("          return false;");
+    lines.push("        }");
+    lines.push("        if (!_scrml_resp.ok) {");
+    lines.push("          _scrml_error_boundary_log('session.destroy', new Error('session.destroy() failed: the server answered ' + _scrml_resp.status + ' — the session was NOT ended'));");
+    lines.push("          return false;");
+    lines.push("        }");
     lines.push("        _scrml_session = null;");
     lines.push(`        window.location.href = ${JSON.stringify(loginRedirect)};`);
+    lines.push("        return true;");
     lines.push("      },");
     lines.push("    };");
     lines.push("    _scrml_session_init();");

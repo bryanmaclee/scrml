@@ -17,9 +17,9 @@ import { emitExprField } from "../emit-expr.ts";
 //     would trigger splitMergedStatements.
 //   - splitMergedStatements has ZERO call sites in emit-logic.ts proper —
 //     the import on emit-logic.ts:5 is dead. It is still exported because
-//     compile.js:617 loads the self-host BPP module's version of it for the
-//     self-host pipeline contract, and tests/unit/parser-workarounds.test.js
-//     exercises it directly.
+//     tests/unit/parser-workarounds.test.js exercises it directly. (Until S447
+//     compile.js `--self-host` also loaded the v1 self-host BPP module's
+//     version of it; the v1 tree was retired, so no caller supplies one now.)
 //
 // Empirical verification: tests/integration/m6-5-parser-workarounds-noop-
 // under-native.test.js installs spies via setBPPOverrides() and confirms
@@ -34,16 +34,20 @@ import { emitExprField } from "../emit-expr.ts";
 //   2. Delete this file, including the dead emit-logic.ts:5 import.
 //   3. Delete rewrite.ts:1283's call site in fixBlockBody (or convert
 //      fixBlockBody to a no-op alongside).
-//   4. Strip compile.js:613-621's BPP self-host module loader entry.
+//   4. (DONE S447 — s447-retire-self-host-v1 removed compile.js's v1 BPP
+//      self-host module loader entry along with the v1 tree.)
 //   5. Drop tests/unit/parser-workarounds.test.js (moved from the retired
 //      tests/self-host/bpp.test.js by s430-stage-swap; or migrate any still-meaningful
 //      assertions into native-parser conformance tests).
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Self-host override support
-// When the self-hosted BPP module is available, its functions replace these.
-// Call setBPPOverrides(mod) before codegen to activate.
+// Override hook
+// setBPPOverrides(mod) swaps in replacement implementations for the four
+// helpers below. Originally the v1 self-hosted BPP module's entry point (that
+// tree was retired S447); today its callers are api.js `selfHostModules.bpp`
+// (installed per compile, restored after) and the spy-interception harness in
+// tests/integration/m6-5-parser-workarounds-noop-under-native.test.js.
 // ---------------------------------------------------------------------------
 let _overrides = null;
 export function setBPPOverrides(mod) { _overrides = mod; }
@@ -262,10 +266,10 @@ export function splitBareExprStatements(expr) {
  * emit-logic.ts proper. The import on emit-logic.ts:5 is dead. let-decl
  * (:1391 fast path on initExpr) and const-decl (:1492 fast path on initExpr)
  * never need this helper because the native parser surfaces a structured
- * Expr the codegen can emit directly. Still exported because:
- *   - compile.js:617 loads the self-host BPP module's version of it for the
- *     self-host pipeline contract (selfHostModules.bpp.splitMergedStatements).
- *   - bpp.test.js exercises it directly to lock the self-host contract.
+ * Expr the codegen can emit directly. Still exported because
+ * tests/unit/parser-workarounds.test.js exercises it directly. (Until S447 the
+ * v1 self-host BPP module also supplied a replacement via
+ * selfHostModules.bpp.splitMergedStatements; that tree was retired.)
  * Empirically: zero invocations across the M6.5 representative corpus.
  * Retained until M6.8.
  *

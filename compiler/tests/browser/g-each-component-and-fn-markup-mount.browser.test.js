@@ -25,6 +25,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
 
 // The brief's exact repro (GH #161). c1/c4/c6 are controls (render correctly
 // pre-fix); c2/c3/c5 are the bug cases.
@@ -47,7 +48,7 @@ const SRC = `const Row = <div class="row" props={ name: string }>
 <div id="c6">\${rowMarkup("outside")}</div>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-g-each-component-fn-markup");
+const tmpRoot = resolve(tmpdir(), "scrml-g-each-component-fn-markup");
 
 function compileRepro() {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

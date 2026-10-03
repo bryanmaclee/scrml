@@ -1,0 +1,25 @@
+{
+  "id": "lifecycle-reset-on-invalid-entry-pos",
+  "description": "§6.8.4 rule 2: a `reset-on=` entry that is not a declared, mutable, non-derived cell — here a derived cell — is E-RESET-ON-INVALID-ENTRY.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "rationale": "§6.8.4 rule 2: \"Every entry SHALL be a declared, mutable, non-derived reactive cell in scope at the declaration … An undeclared name, a non-`@` name or a derived cell is **E-RESET-ON-INVALID-ENTRY**; an empty list (`reset-on=[]`) is the same error.\" ruling:user-voice-scrml.md S447 \"3b: `reset-on=` IS allowed on engine cells, checked against `rule=`\" — \"the new rec for engine reset, yes.\"",
+  "expect": {
+    "codes": [
+      "E-RESET-ON-INVALID-ENTRY"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": {
+        "codes": [
+          "emitted:E-DG-002=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "emitted:E-UNQUOTED-DISPLAY-TEXT=1",
+          "missing:E-RESET-ON-INVALID-ENTRY"
+        ]
+      }
+    }
+  }
+}

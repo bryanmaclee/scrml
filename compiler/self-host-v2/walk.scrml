@@ -10,7 +10,7 @@
 // =============================================================================
 ${
     import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block,
-             Attr, View, CondArm, ConstructAttr, Field, Decl, Fn, ServerFn, CoreProgram } from "./core.scrml"
+             Attr, View, CondArm, ConstructAttr, EffectDep, Field, Decl, Fn, ServerFn, CoreProgram } from "./core.scrml"
 
     // Every Core node kind, as one sum. Types, Syms and Literals are leaves of
     // the walk (they carry no Expr/Stmt/View below them).
@@ -133,6 +133,7 @@ ${
                 [Node.NExpr(cond), Node.NBlock(thenB)].concat(maybeBlock(elseB))
             .Return(e: e) :> [Node.NExpr(e)]
             .Eval(e: e) :> [Node.NExpr(e)]
+            .Suspend(bind: b, on: on, then: t) :> [Node.NExpr(on), Node.NBlock(t)]
         }
     }
 
@@ -190,7 +191,17 @@ ${
                 constructNodes(attrs).concat(viewNodes(slot))
             .Slot :> []
             .Star(decl: d, inst: inst) :> [Node.NInst(inst)]
+            .Effect(deps: ds, body: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
+            .ResetOn(triggers: ds, reset: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
         }
+    }
+
+    // s449: an `<effect>` dependency's instance reference is a child (sharedRefs
+    // sees a `.Shared` dep; check.scrml resolves it as it resolves a read's).
+    fn effectDepNodes(ds: EffectDep[]) -> Node[] {
+        let out: Node[] = []
+        for (const d of ds) { out = out.concat([Node.NInst(d.inst)]) }
+        return out
     }
 
     fn attrKids(a: Attr) -> Node[] {
@@ -334,6 +345,7 @@ ${
             .If(cond: cond, thenB: thenB, elseB: elseB) :> []
             .Return(e: e) :> []
             .Eval(e: e) :> []
+            .Suspend(bind: b) :> [b]
         }
     }
 
@@ -347,6 +359,8 @@ ${
             .Instance(decl: decl, attrs: attrs, slot: slot, alias: alias) :> []
             .Slot :> []
             .Star(decl: d) :> []
+            .Effect(deps: ds) :> []
+            .ResetOn(triggers: ds) :> []
         }
     }
 
@@ -397,6 +411,7 @@ ${
             .If(cond: cond, thenB: thenB, elseB: elseB) :> -1
             .Return(e: e) :> -1
             .Eval(e: e) :> -1
+            .Suspend(bind: b) :> -1
         }
     }
 }

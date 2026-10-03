@@ -588,7 +588,7 @@ describe("F3 §5 — native collectHoisted ↔ live collectHoisted parity (curat
 // =============================================================================
 describe("F3 §6 — corpus exemplar audit (~20 .scrml files, no-throw + shape)", () => {
   // Take a deterministic spread across the corpus — every Nth file so the
-  // sample covers samples/, examples/, stdlib/, self-host/.
+  // sample covers samples/, examples/, stdlib/, compiler/self-host-v2/.
   const ALL = enumerateScrmlCorpus();
   const STEP = Math.max(1, Math.floor(ALL.length / 20));
   const SAMPLE = ALL.filter((_, i) => i % STEP === 0).slice(0, 20);

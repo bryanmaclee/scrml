@@ -24,7 +24,7 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdirSync, writeFileSync, readFileSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { perRunTmp } from "../helpers/per-run-tmp.js";
@@ -276,29 +276,35 @@ const typoFiles = (programAttrs) => {
   return files;
 };
 
-describe("r3 F1 — an unrecognized auth= literal on a member page is not a declaration (fail closed)", () => {
-  test("under a required application program, every typo inherits the gate", () => {
+// S449 ruling item 4 (ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 4;
+// supersedes the S443 r3 F1 "an unrecognized literal declares nothing, the page
+// inherits" behaviour these tests used to pin): an `auth=` on a `<page>` that is not
+// exactly one of the three literals is E-AUTH-ATTR-INVALID, and the build writes
+// nothing — under a required application program and without one alike.
+describe("r3 F1 → S449 item 4 — an unrecognized auth= literal on a member page refuses the build", () => {
+  test("under a required application program, every typo is E-AUTH-ATTR-INVALID and nothing is written", () => {
     const fx = buildWithDiagnostics("typo-required", typoFiles(` auth="required"`));
-    expect(fx.exitCode).toBe(0);
-    const res = getProbe(fx, Object.keys(TYPOS).map((k) => `/t${k}`));
-    for (const k of Object.keys(TYPOS)) {
-      const r = res[`/t${k}`];
-      expect(`${k} ${r.status} ${r.location} ${r.marker}`).toBe(`${k} 302 /login null`);
+    expect(fx.exitCode).not.toBe(0);
+    expect(fx.out).toContain("E-AUTH-ATTR-INVALID");
+    expect(fx.out).toContain("No files were written");
+    expect(existsSync(fx.dist)).toBe(false);
+    // One error per typo'd page, and the message names the value and the fix
+    // (read via the API — the CLI truncates messages).
+    for (const [k, v] of Object.entries(TYPOS)) {
+      const r = compileScrml({ inputFiles: [join(fx.root, "src", "pages", `t${k}.scrml`)], write: false, outputDir: join(fx.root, "api-out"), log: () => {} });
+      const errs = (r.errors ?? []).filter((d) => d.code === "E-AUTH-ATTR-INVALID");
+      expect(`${k} ${errs.length}`).toBe(`${k} 1`);
+      expect(errs[0].message).toContain(`\`"${v}"\``);
+      expect(errs[0].message).toContain('`auth="required"`, `auth="optional"`, `auth="none"`');
+      expect([...(r.errors ?? []), ...(r.warnings ?? [])].some((d) => d.code === "W-ATTR-002")).toBe(false);
     }
-    // The W-ATTR-002 text states the real effect on a <page> (read via the API —
-    // the CLI truncates messages).
-    const r = compileScrml({ inputFiles: [join(fx.root, "src", "pages", "tupper.scrml")], write: false, outputDir: join(fx.root, "api-out"), log: () => {} });
-    const w = [...(r.errors ?? []), ...(r.warnings ?? [])].find((d) => d.code === "W-ATTR-002");
-    expect(w).toBeDefined();
-    expect(w.message).toContain("is not an auth declaration");
-    expect(w.message).toContain("inherits");
   }, 60_000);
 
-  test("with no required application program, a typo gates nothing (unchanged)", () => {
+  test("with no required application program, a typo is refused too", () => {
     const fx = buildWithDiagnostics("typo-public", typoFiles(""));
-    const res = getProbe(fx, ["/tupper", "/toff"]);
-    expect(res["/tupper"]).toEqual({ status: 200, location: null, marker: "typo-marker" });
-    expect(res["/toff"]).toEqual({ status: 200, location: null, marker: "typo-marker" });
+    expect(fx.exitCode).not.toBe(0);
+    expect(fx.out).toContain("E-AUTH-ATTR-INVALID");
+    expect(existsSync(fx.dist)).toBe(false);
   }, 60_000);
 });
 

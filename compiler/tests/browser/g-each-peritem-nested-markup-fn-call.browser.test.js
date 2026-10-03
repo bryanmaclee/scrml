@@ -30,6 +30,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { chunkCellKey } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 const DOLLAR = "$";
 
@@ -74,7 +75,7 @@ fn plain(n: string) { return n }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-each-nested-markup-fn-call");
+const tmpRoot = resolve(tmpdir(), "scrml-each-nested-markup-fn-call");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

@@ -31,7 +31,7 @@
  * script), the IIFE survives — that is the case it was built for.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { compileScrml } from "../../src/api.js";
@@ -650,4 +650,11 @@ describe("s441 round 4 — while / for…of inside an engine effect= await in pl
     expect(r.state.cells.seen).toBe("loop:neg");
     expect(r.state.cells.after).toBe("not-run");
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

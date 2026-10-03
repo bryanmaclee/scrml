@@ -30,11 +30,12 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { canonicalElementName } from "../../src/html-elements.js";
 import { runTC } from "../../src/tag-canonicalizer.ts";
+import { tmpdir } from "os";
 
 function compile(source, suffix) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-captag-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-captag-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });

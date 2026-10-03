@@ -1,0 +1,10 @@
+<program>
+    type Pt:struct = { x: int, y: number, label: string, on: boolean }
+    type Color:enum = { Red, Green, Blue }
+    type Box:struct = { p: Pt | not, ps: Pt[], color: Color, note: string | not }
+    type Node:struct = { v: int, kids: Node[], next: Node | not }
+    type Shape:enum = { Circle(r: number), Square }
+    type Holder:struct = { s: Shape }
+    <let n:int=0/>
+    <main><p>${@n}</p></main>
+</program>

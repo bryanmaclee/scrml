@@ -42,6 +42,7 @@ import {
 } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // Block-form `<match>` as a child of `<each>`. The `<empty>` sub-element adds
 // the empty-state guard (the each render fn's `if (!_items || length === 0)`
@@ -67,7 +68,7 @@ const SRC = `<program title="T">
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-r28-1b");
+const tmpRoot = resolve(tmpdir(), "scrml-r28-1b");
 
 function compileToOutputs(source, baseName = "app") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

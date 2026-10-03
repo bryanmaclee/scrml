@@ -356,9 +356,15 @@ export function describeServerUnit(source, relPath) {
  *   ss33 item 3 — Bun.serve idleTimeout (seconds) baked into the emitted prod
  *   server. Defaults to 120 so the emitted server.js is byte-unchanged when the
  *   build's `--idle-timeout` flag is not set.
+ * @param {Array<{ dbPath: string, projectRoot: string, declaredAs: string, declaredIn: string }>} [referencedDbs]
+ *   s447-dev-db-r5 (§47.14, review R4-3) — the SQLite databases this server only
+ *   REFERENCES (`sqliteBuildReport(...).referencedOnly`). No server module creates
+ *   them, so at startup the server says which are missing, and `/_scrml/health`
+ *   answers 503 until they exist — a deploy whose database was never seeded does not
+ *   pass its health check. Empty (the default) leaves the emitted server unchanged.
  * @returns {string}
  */
-export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout = 120, hashedAssets = [], clientAssets = []) {
+export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout = 120, hashedAssets = [], clientAssets = [], referencedDbs = []) {
   const lines = [];
 
   // Determine if any module exports _scrml_ws_handlers (WebSocket channels present)
@@ -397,6 +403,10 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   lines.push("");
   lines.push('import { statSync } from "fs";');
   lines.push('import { join, relative } from "path";');
+  if (Array.isArray(referencedDbs) && referencedDbs.length > 0) {
+    // §47.14 — the referenced-database startup + health check (below).
+    lines.push('import { resolve as _scrml_path_resolve, isAbsolute as _scrml_path_is_absolute } from "path";');
+  }
   // MCP V0 Sub-unit D — add scrml:mcp boot import when <program mcp> opted in.
   const mcpActivated = mcpOpts && mcpOpts.activated === true;
   const mcpMode = mcpActivated ? (mcpOpts.mode || "dev-only") : null;
@@ -493,16 +503,70 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   }
   lines.push("");
 
+  const hasReferencedDbs = Array.isArray(referencedDbs) && referencedDbs.length > 0;
+  if (hasReferencedDbs) {
+    // Why a 503 and not an exit: §8.1.1 lets a referencing handle open "once it
+    // exists" (S445 ruling B), and on a volume-backed deploy the operator often seeds
+    // the database INTO the running machine (e.g. `fly ssh sftp`). A server that exits
+    // at boot crash-loops and cannot be seeded; one that stays up but fails its health
+    // check keeps the deploy from going green and recovers by itself once seeded.
+    // Every database use still fails loudly until then (the handle's own error).
+    lines.push("// §47.14 / §8.1.1 — SQLite databases this server only USES: no server module");
+    lines.push("// declares their schema, so nothing here creates them. Until each exists,");
+    lines.push("// /_scrml/health answers 503. Paths resolve as the modules resolve them:");
+    lines.push("// against SCRML_DATA_DIR when set, else the project root recorded at build.");
+    lines.push("const _SCRML_REFERENCED_DBS = [");
+    for (const db of referencedDbs) {
+      lines.push(`  { path: ${JSON.stringify(db.dbPath)}, root: ${JSON.stringify(db.projectRoot)}, declaredAs: ${JSON.stringify(db.declaredAs)}, declaredIn: ${JSON.stringify(db.declaredIn)} },`);
+    }
+    lines.push("];");
+    lines.push("function _scrml_missing_dbs() {");
+    lines.push("  // A relative SCRML_DATA_DIR resolves against the server's working directory.");
+    lines.push("  const dataDir = process.env.SCRML_DATA_DIR;");
+    lines.push("  const missing = [];");
+    lines.push("  for (const db of _SCRML_REFERENCED_DBS) {");
+    lines.push("    const base = dataDir ? _scrml_path_resolve(dataDir) : db.root;");
+    lines.push("    const file = _scrml_path_is_absolute(db.path) ? db.path : _scrml_path_resolve(base, db.path);");
+    lines.push("    // A FILE, not just a path: a directory there passes existsSync but every query fails.");
+    lines.push("    let isFile = false;");
+    lines.push("    try { isFile = statSync(file).isFile(); } catch { /* missing */ }");
+    lines.push("    if (!isFile) missing.push({ ...db, file });");
+    lines.push("  }");
+    lines.push("  return missing;");
+    lines.push("}");
+    lines.push("for (const db of _scrml_missing_dbs()) {");
+    lines.push("  console.error(");
+    lines.push("    `scrml: database file not found: ${db.file} — declared as \"${db.declaredAs}\" in ${db.declaredIn}, ` +");
+    lines.push("    `which only uses it, so this server never creates it. Seed it (or run the program that ` +");
+    lines.push("    `declares its schema). /_scrml/health answers 503 until it exists.`,");
+    lines.push("  );");
+    lines.push("}");
+    lines.push("");
+  }
+
   // Health check
   lines.push("// Health check (compiler-generated)");
   lines.push("routes.push({");
   lines.push('  path: "/_scrml/health",');
   lines.push('  method: "GET",');
-  lines.push(
-    '  handler: () => new Response(JSON.stringify({ status: "ok", uptime: process.uptime() }), {'
-  );
-  lines.push('    headers: { "Content-Type": "application/json" },');
-  lines.push("  }),");
+  if (hasReferencedDbs) {
+    // The body names a count, not the paths: the health route is public.
+    lines.push("  handler: () => {");
+    lines.push("    const missing = _scrml_missing_dbs().length;");
+    lines.push("    return new Response(JSON.stringify(missing === 0");
+    lines.push('      ? { status: "ok", uptime: process.uptime() }');
+    lines.push('      : { status: "unavailable", reason: `${missing} database file(s) missing — see the server log` }), {');
+    lines.push("      status: missing === 0 ? 200 : 503,");
+    lines.push('      headers: { "Content-Type": "application/json" },');
+    lines.push("    });");
+    lines.push("  },");
+  } else {
+    lines.push(
+      '  handler: () => new Response(JSON.stringify({ status: "ok", uptime: process.uptime() }), {'
+    );
+    lines.push('    headers: { "Content-Type": "application/json" },');
+    lines.push("  }),");
+  }
   lines.push("});");
   lines.push("");
 
@@ -824,10 +888,148 @@ export function generateDockerfile() {
     "FROM oven/bun:1.2",
     "WORKDIR /app",
     "COPY . .",
+    // §47.14 (ruling:user-voice-scrml.md S445 — data root): the server resolves every
+    // SQLite path against SCRML_DATA_DIR. Point it at a volume so the database lives
+    // outside the image and survives a redeploy (`docker run -v app-data:/data …`).
+    "ENV SCRML_DATA_DIR=/data",
+    "RUN mkdir -p /data",
+    'VOLUME ["/data"]',
     "EXPOSE ${PORT:-3000}",
     'CMD ["bun", "_server.js"]',
     "",
   ].join("\n");
+}
+
+/** §47.14 — the data-root mount every server deploy adapter points SCRML_DATA_DIR at. */
+export const DEPLOY_DATA_DIR = "/data";
+
+/** §47.14 — the `--target` adapters that run the server with SCRML_DATA_DIR on a volume. */
+const DATA_DIR_TARGETS = new Set(["docker", "fly", "render", "railway"]);
+
+/**
+ * §47.14 (s447-dev-db-r5, S445 review round 4: R4-1, R4-2, R4-4) — what `scrml build`
+ * says about the SQLite databases its server opens. Pure: the caller prints.
+ *
+ * `records` is `compileScrml`'s `sqliteDatabases` (one per handle; see
+ * `codegen/sqlite-file-target.ts SqliteDbHandleNote`). Only `kind: "server"` handles
+ * belong to the built server; a `kind="tool"` program runs on its own.
+ *
+ * Returns:
+ *   - `databases`: one entry per recorded path the server opens. `owning` is true when
+ *     any server module declares the schema (that module creates it on first run).
+ *   - `referencedOnly`: the subset no server module owns — the server's startup and
+ *     health check look for these (`generateServerEntry`).
+ *   - `warnings`: W-DEPLOY-DB-OUTSIDE-DATA-ROOT (a path recorded absolute, on a target
+ *     whose server resolves databases under SCRML_DATA_DIR) and
+ *     W-DEPLOY-DB-NO-PROJECT-ROOT (no scrml.toml / .git: the recorded path depends on
+ *     which files this build compiles).
+ *   - `lines`: the "databases expected under $SCRML_DATA_DIR" report.
+ *
+ * @param {Array<object>} records
+ * @param {string|null|undefined} target
+ * @param {(absFile: string) => string} [label] — how a declaring file is named
+ */
+export function sqliteBuildReport(records, target, label = (f) => f) {
+  const server = (records ?? []).filter((r) => r && r.kind === "server");
+  // One database = one (project root, recorded path) pair: two projects in one build
+  // that both record `src/app.db` name two different files. An absolute path names
+  // itself whatever the root.
+  const keyOf = (r) => (r.recordedAbsolute === true ? r.dbPath : `${r.projectRoot}\0${r.dbPath}`);
+  const byPath = new Map();
+  for (const r of server) {
+    const key = keyOf(r);
+    let db = byPath.get(key);
+    if (!db) {
+      db = {
+        dbPath: r.dbPath,
+        recordedAbsolute: r.recordedAbsolute === true,
+        owning: false,
+        declaredAs: r.declaredAs,
+        declaredIn: [],
+        projectRoot: r.projectRoot,
+        projectRootFrom: r.projectRootFrom,
+      };
+      byPath.set(key, db);
+    }
+    if (r.owns) db.owning = true;
+    if (!db.declaredIn.includes(r.declaredIn)) db.declaredIn.push(r.declaredIn);
+    if (r.projectRootFrom === "build") db.projectRootFrom = "build";
+  }
+  const databases = [...byPath.values()].sort(
+    (a, b) => a.dbPath.localeCompare(b.dbPath) || a.projectRoot.localeCompare(b.projectRoot),
+  );
+  const referencedOnly = databases.filter((d) => !d.owning);
+  const warnings = [];
+  const where = (d) => `"${d.declaredAs}" in ${d.declaredIn.map(label).join(", ")}`;
+
+  if (DATA_DIR_TARGETS.has(target)) {
+    // An absolute path already under the adapter's data dir (written as `/data/app.db`)
+    // is where it belongs.
+    const underDataDir = (p) => p === DEPLOY_DATA_DIR || p.startsWith(DEPLOY_DATA_DIR + "/");
+    for (const d of databases.filter((x) => x.recordedAbsolute && !underDataDir(x.dbPath))) {
+      warnings.push(
+        `W-DEPLOY-DB-OUTSIDE-DATA-ROOT: ${where(d)} names ${d.dbPath}, outside the project root ` +
+        `(${d.projectRoot}) or written absolute, so it is recorded as that absolute path and SCRML_DATA_DIR ` +
+        `(${DEPLOY_DATA_DIR} on --target ${target}) does not move it. In the deployed server ` +
+        (d.owning
+          ? `the program refuses to create it (it would land outside the data volume and be lost on redeploy). `
+          : `nothing creates it there, so every use fails. `) +
+        `Move the database inside the project root so it resolves under SCRML_DATA_DIR.`,
+      );
+    }
+  }
+  const unanchored = databases.filter((d) => d.projectRootFrom === "build");
+  if (unanchored.length > 0) {
+    warnings.push(
+      `W-DEPLOY-DB-NO-PROJECT-ROOT: no scrml.toml or .git above ${unanchored.flatMap((d) => d.declaredIn).map(label).join(", ")}, ` +
+      `so database paths are recorded relative to this build's root (${unanchored[0].projectRoot}) — ` +
+      `which depends on which files the build compiles: building a different directory can record a ` +
+      `different path for the same database. Add a scrml.toml at your project root to fix the anchor.`,
+    );
+  }
+
+  // Two projects recording the same relative path are two files at compile time and
+  // under their recorded roots, but ONE file under SCRML_DATA_DIR (both resolve to
+  // $SCRML_DATA_DIR/<path>).
+  const relByPath = new Map();
+  for (const d of databases.filter((x) => !x.recordedAbsolute)) {
+    relByPath.set(d.dbPath, [...(relByPath.get(d.dbPath) ?? []), d]);
+  }
+  for (const [dbPath, group] of relByPath) {
+    if (group.length < 2) continue;
+    warnings.push(
+      `W-DEPLOY-DB-SHARED-PATH: ${group.length} projects in this build record the database path ${dbPath} ` +
+      `(${group.map((d) => `${d.projectRoot}: ${where(d)}`).join("; ")}). They are different files at compile ` +
+      `time, but with SCRML_DATA_DIR set they all open $SCRML_DATA_DIR/${dbPath} — one database. Give each ` +
+      `project's database a distinct path, or build the projects separately.`,
+    );
+  }
+
+  const lines = [];
+  if (databases.length > 0) {
+    const roots = [...new Set(databases.map((d) => d.projectRoot))];
+    // With several project roots in one build, say which project each path belongs to.
+    const of = (d) => (roots.length > 1 && !d.recordedAbsolute ? ` — project ${d.projectRoot}` : "");
+    // §47.14 — a built server answers /_scrml/health 503 while a referenced-only db is missing.
+    const unseeded = "referencing — seed it; /_scrml/health reports unavailable until it is seeded";
+    lines.push(
+      `Databases expected under $SCRML_DATA_DIR (unset: the project root recorded at build, ${roots.join(", ")}; ` +
+      `a relative SCRML_DATA_DIR resolves against the server's working directory):`,
+    );
+    for (const d of databases) {
+      if (!d.recordedAbsolute) {
+        lines.push(`  ${d.dbPath}  (${d.owning ? "owning — created on first run" : unseeded})${of(d)}`);
+      } else {
+        lines.push(
+          `  ${d.dbPath}  (absolute — NOT under $SCRML_DATA_DIR; ` +
+          (d.owning
+            ? "owning — created on first run only when SCRML_DATA_DIR is unset or contains it)"
+            : "referencing — seed it at that exact path; /_scrml/health reports unavailable until it is seeded)"),
+        );
+      }
+    }
+  }
+  return { databases, referencedOnly, warnings, lines };
 }
 
 /**
@@ -847,6 +1049,15 @@ export function applyFlyAdapter(outputDir, appName) {
     "[http_service]",
     "  internal_port = 3000",
     "  force_https = true",
+    "",
+    // §47.14 — SQLite databases live on a Fly volume, not in the image:
+    // `fly volumes create data` once, then every deploy mounts it here.
+    "[env]",
+    `  SCRML_DATA_DIR = "${DEPLOY_DATA_DIR}"`,
+    "",
+    "[mounts]",
+    '  source = "data"',
+    `  destination = "${DEPLOY_DATA_DIR}"`,
     "",
     "[checks]",
     "  [checks.health]",
@@ -913,6 +1124,14 @@ export function applyRenderAdapter(outputDir) {
     '    buildCommand: ""',
     "    startCommand: bun _server.js",
     "    healthCheckPath: /_scrml/health",
+    // §47.14 — SQLite databases live on a persistent disk, resolved via SCRML_DATA_DIR.
+    "    envVars:",
+    "      - key: SCRML_DATA_DIR",
+    `        value: ${DEPLOY_DATA_DIR}`,
+    "    disk:",
+    "      name: data",
+    `      mountPath: ${DEPLOY_DATA_DIR}`,
+    "      sizeGB: 1",
     "",
   ].join("\n");
 
@@ -1034,6 +1253,19 @@ export async function runBuild(args) {
     }
   }
 
+  // §47.14 (s447-dev-db-r5) — the SQLite databases the built server opens: build
+  // warnings (R4-1 outside the data root on a volume target, R4-2 no project-root
+  // anchor), the referenced-only set for the server's health check (R4-3), and the
+  // "expected under $SCRML_DATA_DIR" report (R4-4). Nothing to say for a static build.
+  const dbLabel = (f) => {
+    const rel = relative(process.cwd(), f);
+    return rel && !rel.startsWith("..") ? rel.split("\\").join("/") : f;
+  };
+  const dbReport = opts.target === "static"
+    ? { databases: [], referencedOnly: [], warnings: [], lines: [] }
+    : sqliteBuildReport(result.sqliteDatabases, opts.target, dbLabel);
+  for (const w of dbReport.warnings) console.warn(`  [warn] ${w}`);
+
   console.log(`Compiled ${inputFiles.length} file(s) in ${result.durationMs}ms`);
 
   // §40.3/§40.8 E-MW-007 — decided before the write (see `beforeWrite` above);
@@ -1080,7 +1312,15 @@ export async function runBuild(args) {
   // emitted server serves `immutable` by membership, not by filename shape.
   let serverEntry;
   try {
-    serverEntry = generateServerEntry(serverModules, mcpOpts, opts.idleTimeout, result.hashedAssets || [], result.clientAssets || []);
+    serverEntry = generateServerEntry(
+      serverModules, mcpOpts, opts.idleTimeout, result.hashedAssets || [], result.clientAssets || [],
+      dbReport.referencedOnly.map((d) => ({
+        dbPath: d.dbPath,
+        projectRoot: d.projectRoot,
+        declaredAs: d.declaredAs,
+        declaredIn: d.declaredIn.map(dbLabel).join(", "),
+      })),
+    );
   } catch (err) {
     // §40.3/§40.8 E-MW-007 — more than one application declared a request
     // pipeline in this build. Report it as a build failure naming every
@@ -1124,16 +1364,25 @@ export async function runBuild(args) {
     console.log(`WebSocket channels: ${totalWsChannels} channel(s) wired`);
   }
   console.log(`Server: ${serverEntryPath}`);
+  if (dbReport.lines.length > 0) {
+    console.log("");
+    for (const l of dbReport.lines) console.log(l);
+  }
 
   if (opts.target === "fly") {
     console.log(`\nFly.io deploy artifacts:`);
     console.log(`  ${join(resolvedOutputDir, "Dockerfile")}`);
     console.log(`  ${join(resolvedOutputDir, "fly.toml")}`);
     console.log(`\nReady to deploy:`);
+    console.log(`  fly volumes create data   # once — the volume SCRML_DATA_DIR (${DEPLOY_DATA_DIR}) points at`);
     console.log(`  fly launch --copy-config`);
   } else if (opts.target === "railway") {
     console.log(`\nRailway deploy artifact:`);
     console.log(`  ${join(resolvedOutputDir, "package.json")} (scripts.start set)`);
+    // §47.14 — Railway volumes are attached in the dashboard, at a mount path the user
+    // chooses, so the adapter cannot write it; say what to set instead.
+    console.log(`\nDatabases: attach a Railway volume and set SCRML_DATA_DIR to its mount path`);
+    console.log(`  (e.g. ${DEPLOY_DATA_DIR}). Without it the server looks in the project root recorded at build.`);
     console.log(`\nReady to deploy:`);
     console.log(`  railway up`);
   } else if (opts.target === "render") {
@@ -1146,7 +1395,7 @@ export async function runBuild(args) {
     console.log(`  ${join(resolvedOutputDir, "Dockerfile")}`);
     console.log(`\nReady to build:`);
     console.log(`  docker build -t ${appName} ${resolvedOutputDir}/`);
-    console.log(`  docker run -p 3000:3000 ${appName}`);
+    console.log(`  docker run -p 3000:3000 -v ${appName}-data:${DEPLOY_DATA_DIR} ${appName}`);
   } else {
     console.log(`\nReady to deploy:`);
     console.log(`  bun ${serverEntryPath}`);

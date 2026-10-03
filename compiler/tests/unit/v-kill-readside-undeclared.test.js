@@ -31,8 +31,9 @@ import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 
-const FIXTURE_DIR = "/tmp/v-kill-readside-undeclared-fixtures";
+const FIXTURE_DIR = join(tmpdir(), "v-kill-readside-undeclared-fixtures");
 mkdirSync(FIXTURE_DIR, { recursive: true });
 
 function compileSource(source, filename = "test.scrml") {

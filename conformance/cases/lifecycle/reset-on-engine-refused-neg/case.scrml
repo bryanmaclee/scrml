@@ -1,0 +1,12 @@
+// §6.8.4 rule 6 — every state admits .Draft.
+<program>
+  type Order:enum = { Draft, Placed, Shipped, Delivered }
+  <customer> = 0
+  <order:Order=.Draft single reset-on=[@customer]>
+    <Draft rule=.Placed/>
+    <Placed rule=(.Shipped | .Draft)/>
+    <Shipped rule=(.Delivered | .Draft)/>
+    <Delivered rule=.Draft/>
+  </>
+  <p>${@customer}</p>
+</program>

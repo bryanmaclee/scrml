@@ -1,0 +1,12 @@
+{
+  "id": "lifecycle-effect-dep-derived-neg",
+  "description": "§6.7.4 negative twin: an `<effect>` listing the mutable cell a derived value is computed from is NOT E-LIFECYCLE-007.",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4: \"list the cells it reads instead\". ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "notCodes": [
+      "E-LIFECYCLE-007"
+    ]
+  }
+}

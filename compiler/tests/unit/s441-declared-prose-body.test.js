@@ -13,8 +13,9 @@ import { compileScrml } from "../../src/api.js";
 import { segmentBodyTopItems, bodyTopQuoteStartsStatement, scanBodyTopLiteralClose } from "../../native-parser/body-top-prose.js";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 
-const DIR = "/tmp/s441-declared-prose-body-fixtures";
+const DIR = join(tmpdir(), "s441-declared-prose-body-fixtures");
 mkdirSync(DIR, { recursive: true });
 
 let n = 0;

@@ -1,0 +1,23 @@
+{
+  "id": "lifecycle-effect-dep-derived-pos",
+  "description": "§6.7.4 an `<effect deps=[…]>` entry naming a derived cell is E-LIFECYCLE-007 (the `<effect>` limb).",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4 Semantics: \"Every `deps=` entry SHALL be a declared, mutable reactive cell in scope at the `<effect>`. An undeclared name, a non-`@` name, or a **derived** cell … is **E-LIFECYCLE-007** — a derived value has no change event of its own\". ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "codes": [
+      "E-LIFECYCLE-007"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "missing:E-LIFECYCLE-007"
+        ]
+      }
+    }
+  }
+}

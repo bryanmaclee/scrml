@@ -23,8 +23,9 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
-const tmpRoot = resolve("/tmp", "scrml-snippet-is-some-guard");
+const tmpRoot = resolve(tmpdir(), "scrml-snippet-is-some-guard");
 
 beforeEach(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();

@@ -1,0 +1,24 @@
+{
+  "id": "lifecycle-reset-on-cycle-pos",
+  "description": "§6.8.4 rule 3: a cycle in the static `reset-on=` graph — `a` resets on `b`, `b` resets on `a` — is E-RESET-ON-CYCLE.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "rationale": "§6.8.4 rule 3: \"The reset-on edges (entry → reset cell) form a graph the compiler builds at compile time. A cycle — including a cell listing itself — is **E-RESET-ON-CYCLE**, naming the cells on the cycle.\" ruling:user-voice-scrml.md S447 \"3b: `reset-on=` IS allowed on engine cells, checked against `rule=`\" — \"the new rec for engine reset, yes.\"",
+  "expect": {
+    "codes": [
+      "E-RESET-ON-CYCLE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": {
+        "codes": [
+          "emitted:E-STATE-UNDECLARED=2",
+          "emitted:E-UNQUOTED-DISPLAY-TEXT=1",
+          "missing:E-RESET-ON-CYCLE"
+        ]
+      }
+    }
+  }
+}

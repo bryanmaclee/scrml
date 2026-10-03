@@ -32,6 +32,7 @@ import { compileScrml } from "../../src/api.js";
 import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { populateNativeAttrValueExprNodes } from "../../src/native-walker/attrvalue-exprnode-walker.ts";
 import { normalizeChunkToken } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // compileWith — compile `source` under `parser` (null = default live BS+TAB;
 // "scrml-native" = native pipeline). Returns errors + warnings + client.js text.
@@ -39,7 +40,7 @@ import { normalizeChunkToken } from "../helpers/chunk-scope.js";
 function compileWith(source, parser, suffix) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-exprnode-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-exprnode-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });

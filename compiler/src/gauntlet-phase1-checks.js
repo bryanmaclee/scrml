@@ -79,6 +79,7 @@ import {
   referencesHint,
   harvestRawCreateTables,
   findRejectedCreateTableHeads,
+  findGluedDslTableHeads,
 } from "./schema-differ.js";
 // s430 — destructured-pattern name walk (E-SCOPE-010). Self-contained helpers;
 // route-inference.ts imports them the same way.
@@ -788,8 +789,35 @@ function checkSchemaDeclarations(ast, filePath, errors) {
     // body — a DSL table beside a qualified raw one must not mask it.
     // E-SCHEMA-013 (fail-closed) covers a head the reader CANNOT read: an
     // unreadable head used to mean "not a table" — a silently absent floor.
+    let rejectedHeads = 0;
     for (const q of findRejectedCreateTableHeads(body)) {
+      rejectedHeads++;
       const shown = q.name ?? "<name>";
+      if (q.kind === "not-a-declaration") {
+        // E-SCHEMA-014 (S446, bryan RULED S440 #15 "fix in TS, fail closed") — a
+        // readable, unqualified head that declares no columns the floors can read.
+        const why = {
+          "modifier": `a table-kind modifier (\`${q.headText.replace(/^CREATE |TABLE.*$/g, "").trim()}\`) — ` +
+            `a temporary / unlogged / virtual table is not a schema-as-code declaration, and no ` +
+            `\`<schema>\` consumer reads one`,
+          "no-columns": `no column list — the name is followed by a clause (\`AS\`, \`OF\`, ` +
+            `\`PARTITION OF\`, \`USING\`, \`WITH\`, \`ON COMMIT\`, \`TABLESPACE\`, \`INHERITS\`) whose ` +
+            `columns live elsewhere, where the floors cannot see them`,
+          "unclosed": `a column list \`(\` that is never closed, so no column is read`,
+          "inherits": `\`INHERITS (…)\` — the parent's columns are not declared on this table`,
+        }[q.reason] ?? q.reason;
+        errors.push(new GauntletError(
+          "E-SCHEMA-014",
+          `E-SCHEMA-014: this \`<schema>\` has a \`CREATE TABLE\` head that is not a plain table ` +
+          `declaration (\`${q.headText}\`): ${why}. A \`<schema>\` table SHALL be declared as ` +
+          `\`CREATE TABLE ${shown} (…columns…)\` (or the declarative \`${shown} { … }\`). Such a ` +
+          `head declares NO columns to the §14.8.9 / §14.8.10 floors, so a \`tenant_id\` table ` +
+          `spelled this way is silently not tenant-scoped; it is rejected rather than skipped. ` +
+          `(See SPEC §39.2, §14.8.10.)`,
+          span,
+        ));
+        continue;
+      }
       if (q.kind === "unreadable") {
         // E-SCHEMA-013 — a DISTINCT code (S438 round 3, F-B): "the compiler could not
         // read this head" is a different defect from "this head is qualified", and
@@ -822,6 +850,41 @@ function checkSchemaDeclarations(ast, filePath, errors) {
         `connection instead (e.g. the Postgres \`search_path\`). (See SPEC §39.2, §14.8.10.)`,
         span,
       ));
+    }
+
+    // E-SCHEMA-012 / E-SCHEMA-013 on a DECLARATIVE head (S446, bryan RULED S440
+    // #15) — `parseSchemaBlock`'s one-char recovery slid into a longer token and
+    // read only its tail: `mydb.public.assets {` as `assets` (two qualified heads
+    // then collapse, first-wins — gap g-schema-dsl-qualified-table-head-silently-
+    // stripped), `données {` as `es`. §39.2's `table-name '{'` excludes both; the
+    // table is still declared (no floor cascade), the program is rejected.
+    for (const g of findGluedDslTableHeads(body)) {
+      rejectedHeads++;
+      if (g.kind === "qualified") {
+        errors.push(new GauntletError(
+          "E-SCHEMA-012",
+          `E-SCHEMA-012: this \`<schema>\` declares a table with a schema/database qualifier ` +
+          `(\`${g.prefix}${g.name} { … }\`). A \`<schema>\` table head SHALL name an UNQUALIFIED ` +
+          `table. Every \`<schema>\` consumer — the §14.8.10 tenant-row isolation floor, the ` +
+          `§14.8.9 protect floor and the compile-time shadow database — keys a table by its ` +
+          `unqualified name, so the qualifier was silently dropped (two qualified tables ` +
+          `collapsing onto one, the second lost). Write \`${g.name} { … }\` and select the ` +
+          `schema through the connection instead (e.g. the Postgres \`search_path\`). ` +
+          `(See SPEC §39.2, §14.8.10.)`,
+          span,
+        ));
+      } else {
+        errors.push(new GauntletError(
+          "E-SCHEMA-013",
+          `E-SCHEMA-013: this \`<schema>\` has a table head whose name the compiler cannot read ` +
+          `(\`${g.prefix}${g.name} { … }\` was read as \`${g.name}\`). A declarative table name ` +
+          `SHALL be an ASCII identifier — a letter or \`_\`, then letters, digits or \`_\` — ` +
+          `directly followed by \`{\`. A misread name declares the wrong table, and an ` +
+          `undeclared \`tenant_id\` table leaves the §14.8.10 tenant-row isolation floor ` +
+          `silently off, so it is rejected rather than renamed. (See SPEC §39.2, §14.8.10.)`,
+          span,
+        ));
+      }
     }
 
     let parsed;
@@ -866,7 +929,10 @@ function checkSchemaDeclarations(ast, filePath, errors) {
         .trim();
       // A `fn`-only `<schema>` (§14.8.11.2 SECURITY DEFINER) declares no table
       // BY CONSTRUCTION and is legitimate.
-      if (rawTables.size === 0 && fns.length === 0 && substantive.length > 0 && !hasNonTextChild) {
+      // A body whose heads were already REJECTED above (E-SCHEMA-012/013/014)
+      // reports that one error, not a second "declares nothing" cascade.
+      if (rawTables.size === 0 && fns.length === 0 && substantive.length > 0 && !hasNonTextChild &&
+          rejectedHeads === 0) {
         errors.push(new GauntletError(
           "W-SCHEMA-NO-TABLES-DECLARED",
           `W-SCHEMA-NO-TABLES-DECLARED: this \`<schema>\` block has content but declares no ` +

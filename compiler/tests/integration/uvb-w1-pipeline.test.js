@@ -25,10 +25,27 @@ function cleanup(dir) {
 }
 
 describe("UVB-W1 pipeline integration", () => {
-  test("VP-1: <page auth=\"role:dispatcher\"> surfaces W-ATTR-002 in warnings[]", () => {
+  // S449 ruling item 4 (§52.13.2): an auth= value outside the three literals on a
+  // <page> is the error E-AUTH-ATTR-INVALID (was W-ATTR-002).
+  test("VP-1: <page auth=\"role:dispatcher\"> surfaces E-AUTH-ATTR-INVALID in errors[]", () => {
     const { dir, filePath } = withTempFile("page.scrml", `<page route="/x" auth="role:dispatcher">
 <div>x</div>
 </page>`);
+    try {
+      const r = compileScrml({ inputFiles: [filePath], outputDir: join(dir, "out"), write: false });
+      expect(r.errors.some((e) => e.code === "E-AUTH-ATTR-INVALID")).toBe(true);
+      expect(r.warnings.some((w) => w.code === "E-AUTH-ATTR-INVALID")).toBe(false);
+      expect(r.warnings.some((w) => w.code === "W-ATTR-002")).toBe(false);
+    } finally {
+      cleanup(dir);
+    }
+  });
+
+  test("VP-1: <channel auth=\"role:dispatcher\"> still surfaces W-ATTR-002 in warnings[]", () => {
+    const { dir, filePath } = withTempFile("chan.scrml", `<program>
+<channel name="x" auth="role:dispatcher">
+</>
+</program>`);
     try {
       const r = compileScrml({ inputFiles: [filePath], outputDir: join(dir, "out"), write: false });
       expect(r.warnings.some((w) => w.code === "W-ATTR-002")).toBe(true);

@@ -1,0 +1,23 @@
+{
+  "id": "lifecycle-effect-no-deps-empty-list-pos",
+  "description": "§6.7.4 an `<effect deps=[]>` — an empty dependency list — is E-EFFECT-NO-DEPS.",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4 Syntax: \"An `<effect>` with no `deps=`, or with `deps=[]`, never runs … and is **E-EFFECT-NO-DEPS**.\" ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "codes": [
+      "E-EFFECT-NO-DEPS"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "missing:E-EFFECT-NO-DEPS"
+        ]
+      }
+    }
+  }
+}

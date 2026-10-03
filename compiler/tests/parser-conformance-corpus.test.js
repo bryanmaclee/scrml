@@ -12,7 +12,7 @@
  *       parser-conformance-stmt.test.js); this file gates the *combined*
  *       bench-corpus boundary that those per-milestone tests don't cover.
  *
- *   (b) SCRML corpus (samples/, examples/, stdlib/, compiler/self-host/)
+ *   (b) SCRML corpus (samples/, examples/, stdlib/, compiler/self-host-v2/)
  *       — the ~900 .scrml files under the source roots. These are NOT pure
  *       JS — they carry markup + style + JS-block interleavings the JS-only
  *       native parser does not yet understand (MK4 markup↔JS seam is

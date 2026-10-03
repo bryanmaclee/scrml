@@ -49,6 +49,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // repro-1: @. contextual sigil form. Pre-populated @todos; a button click sets
 // @phase = .Browsing, which the match dispatcher subscribes to. The each is
@@ -90,7 +91,7 @@ type Todo:struct = { id: string, name: string }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-each-in-match");
+const tmpRoot = resolve(tmpdir(), "scrml-each-in-match");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

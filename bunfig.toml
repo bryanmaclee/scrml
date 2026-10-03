@@ -1,5 +1,12 @@
 [test]
 root = "compiler/tests/"
+# PER-PROCESS TEMP ROOT (S448). Points TMPDIR/TEMP/TMP at `~/.cache/scrml-test-tmp/<pid>-<rand>`
+# (override the base with SCRML_TEST_TMP_BASE) and removes it when the run ends — so tests that
+# never clean up no longer leak into /tmp (the pre-commit subset alone left ~870 dirs / ~6,800
+# files there per run). The base is deliberately OUTSIDE any git repo / scrml.toml project:
+# tests that compile throwaway projects in tmpdir rely on project-root discovery finding
+# neither. Full rationale + the exit paths covered: compiler/tests/helpers/tmp-root-preload.js.
+preload = ["./compiler/tests/helpers/tmp-root-preload.js"]
 # NO `timeout` KEY HERE — DELIBERATELY (S346, flagship-hos-hermetic).
 #
 # This file carried `timeout = 10000` from the initial split until S346, and bun does not

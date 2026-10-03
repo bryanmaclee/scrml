@@ -1,0 +1,13 @@
+{
+  "id": "reactive-no-write-handler-neg",
+  "description": "§6.15: `onclick=` calling a writer, a handler block that writes, and a two-way `bind:value` are not initializers or render positions — no E-VALUE-WRITES-STATE / E-VALUE-WRITE-UNPROVEN.",
+  "language-version": "1.0",
+  "spec": "§6.15",
+  "rationale": "§6.15: \"Event-handler attribute values, `bind:` bindings, function bodies (judged at their call sites), lifecycle element bodies, engine `effect=` / `<onTransition>` bodies and body-top statement lists are not value positions.\" ruling:user-voice-scrml.md S449 \"⭐⭐ RULED — \\\"your recs.\\\" on the S449 eight-question queue\" — item 3: \"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function\".",
+  "expect": {
+    "notCodes": [
+      "E-VALUE-WRITES-STATE",
+      "E-VALUE-WRITE-UNPROVEN"
+    ]
+  }
+}

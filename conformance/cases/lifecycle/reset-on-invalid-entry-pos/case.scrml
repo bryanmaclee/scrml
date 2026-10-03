@@ -1,0 +1,7 @@
+// §6.8.4 rule 2 — a derived entry.
+<program>
+  <query> = ""
+  const <slug> = @query + "-"
+  <page reset-on=[@slug]> = 1
+  <p>${@page}</p>
+</program>

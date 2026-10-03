@@ -30,6 +30,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // Tier-0 — reactive ${for...lift} with per-item text + class:on.
 const TIER0_SRC = `<program>
@@ -72,7 +73,7 @@ type Line:struct = { id: string, label: string, active: boolean }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-each-per-item-bug64");
+const tmpRoot = resolve(tmpdir(), "scrml-each-per-item-bug64");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

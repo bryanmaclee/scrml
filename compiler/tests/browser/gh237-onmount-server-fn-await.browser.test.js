@@ -36,6 +36,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -68,7 +69,7 @@ const SRC = `<program>
 
 function compile(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const dir = resolve("/tmp", "scrml-gh237", `case-${uniq}`);
+  const dir = resolve(tmpdir(), "scrml-gh237", `case-${uniq}`);
   mkdirSync(dir, { recursive: true });
   const input = resolve(dir, `${baseName}.scrml`);
   writeFileSync(input, source);
@@ -157,4 +158,11 @@ describe("GH #237 — `on mount` server-fn call into a plain local", () => {
     expect(plain.errors).toEqual([]);
     expect(plain.clientJs).not.toContain("§6.7.1a `on mount` — async scope");
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

@@ -11,7 +11,7 @@
 #   • gate     — BLOCKING. The REPRODUCIBLY-GREEN-FROM-SOURCE core: unit + conformance (pure compiler
 #                correctness + the language conformance suite; no dist/env deps) + the TodoMVC gauntlet.
 #                This is the merge-gate. Promote integration/lsp/commands into gate once each confirms
-#                green in `tracking` (integration needs self-host-smoke relocated/dist-guarded first).
+#                green in `tracking` (the v1 self-host dist tests were removed S447 — see KEY FINDING).
 #   • tracking — NON-BLOCKING (continue-on-error). integration (contains the dist-dependent
 #                self-host-smoke) + lsp + commands + browser (REAL fails, e.g. g-emit-lift-markup-text-
 #                interp) + the M6.x within-node parser-parity backlog + canary. Visible, never blocks.
@@ -25,6 +25,10 @@
 # sources don't compile against the current compiler: `null`/`!==`/`try` — the post-v1.0 self-host
 # migration, master-list B4). A trustworthy cloud gate can only include what's reproducibly green from
 # source; self-host + the M6.x within-node backlog + browser env-fails are tracked, not gated.
+# S447 UPDATE: the v1 tree is gone (s447-retire-self-host-v1). compiler/tests/self-host was retired at
+# S430; the v1-dist sections of self-host-smoke (§B bs.js, §C tab.js) and self-compilation (the
+# "compiler compiles compiler" bootstrap) were deleted with compiler/self-host/. What remains of those
+# two files exercises stdlib/compiler/ and skips when its gitignored dist is absent.
 #
 # WHY (S253): the prior ci.yml ran `bun test compiler/tests/` (EVERYTHING) → red on the M6.x within-node
 # backlog + the un-rebuildable self-host dist. A gate red on known backlog can't be trusted to retire
@@ -147,7 +151,8 @@ jobs:
       # lowered Core equals M1's hand-built oracle, its §66.19 negative lines, and the M1 suite run a
       # second time on the LOWERED programs (SLICE_CORE=lowered).
       # S444 — slice-m4 (#1164: the §66.19 programs compiled from source and run) ran in NO job until now.
-      - name: Bootstrap slice (self-host-v2) — no-default-arm lint + M1 slice + M2 front end + M3 ingest/footprint + M4 §66.19 programs + v2 lexer oracle
+      # S446 — slice-codec (arc unit Uc: the §57 wire codec, descriptor + runtime half + cross-impl vs impl#1).
+      - name: Bootstrap slice (self-host-v2) — no-default-arm lint + M1 slice + M2 front end + M3 ingest/footprint + M4 §66.19 programs + §57 codec + v2 lexer oracle
         run: |
           bun scripts/lint-no-default-arm.js
           bun test ./compiler/self-host-v2/slice-m1/
@@ -155,6 +160,7 @@ jobs:
           SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/
           bun test ./compiler/self-host-v2/slice-m3/
           bun test ./compiler/self-host-v2/slice-m4/
+          bun test ./compiler/self-host-v2/slice-codec/
           bun test compiler/tests/integration/self-host-v2-lexer
       - name: Gauntlet quick check (TodoMVC compiles + emitted JS parses)
         run: |
@@ -244,7 +250,7 @@ jobs:
         run: bun scripts/types-gate.ts --check
       - name: Populate browser-test fixtures
         run: bun run pretest
-      - name: integration + lsp + commands (promotion candidates — integration needs self-host-smoke dist-guarded)
+      - name: integration + lsp + commands (promotion candidates)
         run: bun test compiler/tests/integration compiler/tests/lsp compiler/tests/commands
       # S313 (bryan's Q6) — assert the browser tier's failure NAME SET, not its exit code.
       #

@@ -29,15 +29,15 @@
 // =============================================================================
 ${
     import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
-             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, FieldMode, FieldRole,
+             EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram,
              block, litStr } from "./core.scrml"
-    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, AParam, AFn,
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag,
              mkSpan } from "./ast.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair,
-             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram,
+             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest } from "./analyze.scrml"
 
     export type Lowered:struct = { core: CoreProgram, diags: Diag[] }
@@ -520,6 +520,7 @@ ${
             .Return(e: e) :> [Stmt.Return(returnValue(c, e))]
             .If(cond: x, thenB: t, elseB: el) :> [Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))]
             .Given(name: n, subject: sub, body: b) :> givenStmts(c, s, b)
+            .EffectStmt(w: w) :> []              // analyze refused it (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
         }
     }
 
@@ -816,6 +817,36 @@ ${
         return [Stmt.Write(w.cap, target, w.edit, init, w.check)]
     }
 
+    // s449 — one View.ResetOn per accepted `reset-on=` rule (§6.8.4): the
+    // triggers as cells of the program instance, and the reset as ONE Write of
+    // the cell's initializer — a replace, or a Static transition for a cell with
+    // a `rule=` graph (analyze proved every state admits the target, rule 6).
+    fn resetOnViews(c: LC, d: DeclInfo) -> View[] {
+        let out: View[] = []
+        for (const r of c.t.resets) {
+            const reset: Stmt[] = resetWrite(c, d, r.target)
+            if (reset.length == 1) {
+                let triggers: EffectDep[] = []
+                for (const t of r.triggers) { triggers = triggers.concat([mkEffectDep(d.sym, InstRef.Lexical(0), t)]) }
+                out = out.concat([View.ResetOn(triggers, block(reset), r.rank)])
+            }
+        }
+        return out
+    }
+
+    fn resetWrite(c: LC, d: DeclInfo, idx: int) -> Stmt[] {
+        if (idx < 0 || idx >= d.fields.length) return []
+        const f: FieldInfo = d.fields[idx]
+        const cap: Sym | not = f.wcap
+        if (cap is not) return []
+        const ic: LC = { t: c.t, file: c.file, subst: InstRef.Lexical(0), snap: not }
+        const init: Expr | not = lowerValue(ic, f.init)
+        if (init is not) return []
+        let edit: EditKind = EditKind.Replace
+        if (f.graph is some) edit = EditKind.Transition
+        return [Stmt.Write(cap, InstRef.Lexical(0), edit, init, Check.Static)]
+    }
+
     fn isProgramKind(k: DeclKind) -> boolean {
         return match k {
             .Program :> true
@@ -840,8 +871,33 @@ ${
             .Interp(e: e) :> [View.Dyn(lowerExpr(c, e))]
             .Elem(e: e) :> lowerElem(c, e)
             .DeclNode(d: d) :> []
+            .Effect(w: w) :> [effectView(c, w)]
         }
     }
+
+    // s449 — an effect → View.Effect: each dependency's field fact (analyze
+    // resolved it, or reported E-LIFECYCLE-007 and left no fact — then the
+    // program does not run). Both spellings lower alike (§6.7.4 "Parses
+    // identically").
+    fn effectView(c: LC, w: AEffect) -> View {
+        let deps: EffectDep[] = []
+        for (const d of w.deps) { deps = deps.concat(effectDep(c, nameFact(c.t.names, d.nid))) }
+        return View.Effect(deps, lowerBlock(c, w.body))
+    }
+
+    fn effectDep(c: LC, f: NameFact | not) -> EffectDep[] {
+        return match f {
+            .NField(decl: d, inst: i, idx: x) :> [mkEffectDep(d, instOf(c, i), x)]
+            .NLocal(sym: s) :> []
+            .NInst(decl: d) :> []
+            .NStruct(owner: o) :> []
+            .NFn(sym: s) :> []
+            .NLength :> []
+            not :> []
+        }
+    }
+
+    fn mkEffectDep(d: Sym, i: InstRef, x: int) -> EffectDep { return { decl: d, inst: i, idx: x } }
 
     // dpa-045 follow-up 4 (RULED S442; SPEC §4.18.5 "whitespace-only text
     // between elements is kept exactly too"): a Text node is free-text content
@@ -1205,6 +1261,12 @@ ${
         let renders: View[] | not = not
         const s: DeclSyntax | not = syntaxOf(ss, d.nid)
         if (s is some) renders = lowerRenders(c, s)
+        // s449: the program cells' `reset-on=` rules are registered with the
+        // program's scope, ahead of its markup (§6.8.4)
+        if (isProgramKind(d.kind)) {
+            const rv: View[] | not = renders
+            if (rv is some) renders = resetOnViews(c, d).concat(rv)
+        }
         const wiring: WiringAttr[] = []
         return { sym: d.sym, kind: d.kind, single: d.single, fields: fields, renders: renders, wiring: wiring, handles: d.handles }
     }

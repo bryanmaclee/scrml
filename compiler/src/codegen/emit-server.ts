@@ -13,6 +13,7 @@ import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitCh
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
+import { drainServerAmbientSessionRefusalErrors, setServerSessionContextSpan } from "./server-session-guard.ts";
 import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUseErrors, drainSessionValueUseErrors, type EmitExprContext } from "./emit-expr.ts";
 import {
   readRawUnitSessionAttr,
@@ -25,10 +26,12 @@ import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicate
 import { resolveDbDriver } from "./db-driver.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
+import { sqliteFileHandle, ownedDbFilesFor, noteSqliteHandle, SQLITE_FILE_HELPER_IMPORT, sqliteFileHelperLines } from "./sqlite-file-target.ts";
+import { fileDefaultDbValue } from "../db-ownership.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
-import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
+import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER, resolveSpanLineCol } from "./log-loc.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
 import { dirname as _pathDirname, resolve as _pathResolve, relative as _pathRelative, basename as _pathBasename, sep as _pathSep } from "node:path";
 import { parseExprToNode, forEachIdentInExprNode } from "../expression-parser.ts";
@@ -40,6 +43,7 @@ import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
 import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgress, findAuthoredResponseConstruction, SERVER_PROTECT_HELPER, type ProtectContext, type ScanSliceKind } from "./protect-egress.ts";
 import { registerProtectModule } from "./protect-flow.ts";
+import { SESSION_STORE_SQLITE_LINES, SESSION_STORE_MEMORY_LINE } from "./session-store-emit.ts";
 import {
   buildTenantContext,
   resolveTenantScoping,
@@ -793,28 +797,6 @@ export function collectDbScopes(
         }
       }
 
-      // Form 2: `<db src=>` state-block. AST: { kind:"state", stateType:"db", attrs:[...] }.
-      if (node.kind === "state" && node.stateType === "db") {
-        const attrs: any[] = node.attrs ?? node.attributes ?? [];
-        const srcAttr = attrs.find((a: any) => a && a.name === "src");
-        const srcVal: string =
-          srcAttr?.value?.kind === "string-literal"
-            ? srcAttr.value.value
-            : srcAttr?.value?.value ?? srcAttr?.value?.name ?? "";
-        if (typeof srcVal === "string" && srcVal.length > 0) {
-          const driverResult = resolveDbDriver(srcVal);
-          const driver: "sqlite" | "postgres" | "mysql" = driverResult.ok
-            ? driverResult.info.driver
-            : "sqlite";
-          // The default unscoped identifier matches `context.ts:99` and
-          // `rewrite.ts:251` defaults — i.e. what the rewriter already
-          // emitted into the body.
-          if (!scopes.has("_scrml_sql")) {
-            scopes.set("_scrml_sql", { connectionString: srcVal, driver });
-          }
-        }
-      }
-
       // Recurse into markup children + state children.
       if (Array.isArray(node.children) && node.children.length > 0) {
         walk(node.children);
@@ -824,22 +806,20 @@ export function collectDbScopes(
 
   walk(nodes);
 
-  // Fallback aliasing: if the unscoped `_scrml_sql` identifier is referenced
-  // in the body but no `<db src=>` block contributed it, alias it to the
-  // first `<program db=>` scope (the upstream index.ts annotation tags
-  // descendants with the scoped name, but emit-server.ts does not currently
-  // thread that scoped name into per-handler emit-logic opts — so SQL bodies
-  // continue to use the default `_scrml_sql` identifier even when only
-  // `<program db=>` is in scope). Without this aliasing the default
-  // identifier would fall through to the :memory: WARNING fallback even
-  // though a valid program-scoped connection string is available.
-  if (!scopes.has("_scrml_sql")) {
-    for (const [dbVar, info] of scopes) {
-      if (dbVar.startsWith("_scrml_sql_")) {
-        scopes.set("_scrml_sql", info);
-        break;
-      }
-    }
+  // The default unscoped `_scrml_sql` handle — the one EVERY `?{}` in this file is
+  // lowered onto (codegen/index.ts passes `dbVar: "_scrml_sql"`; `context.ts` /
+  // `rewrite.ts` default to it; emit-server does not thread the scoped
+  // `_scrml_sql_<n>` names into per-handler opts). Which database it is comes from
+  // ONE rule shared with the ownership decision (S445 review F6):
+  // `db-ownership.ts fileDefaultDbValue` — the first `<db src=>` in document order,
+  // else the first `<program db=>` (the prior first-`<db src>` / first-scope
+  // aliasing, now in one place). Filed: a `<program db=a>` with a sibling
+  // `<db src=b>` runs every `?{}` on b.
+  const defaultValue = fileDefaultDbValue(nodes);
+  if (defaultValue !== null) {
+    const driverResult = resolveDbDriver(defaultValue);
+    const driver: "sqlite" | "postgres" | "mysql" = driverResult.ok ? driverResult.info.driver : "sqlite";
+    scopes.set("_scrml_sql", { connectionString: defaultValue, driver });
   }
   return scopes;
 }
@@ -1407,6 +1387,7 @@ function emitEndpointServerHelperLines(
     const start = (fnNode?.span as any)?.start;
     if (typeof start !== "number") continue;
     if (!helperIds.has(`${filePath}::${start}`)) continue;
+    setServerSessionContextSpan({ ...(fnNode.span as object), file: filePath });
     const name: string = fnNode.name;
     if (!name || !Array.isArray(fnNode.body)) continue;
     if (isAlreadyDeclared(name)) continue;
@@ -2378,6 +2359,7 @@ export function generateServerJs(
     const fnNodeId = `${filePath}::${fnNode.span.start}`;
     const route = routeMap.functions.get(fnNodeId);
     if (!route || route.boundary !== "server") continue;
+    setServerSessionContextSpan({ ...(fnNode.span as object), file: filePath });
 
     // Bug 2b: divert onserver:* WS attribute handlers to the plain-function
     // emit path BEFORE the no-route E-CG-002 check (they legitimately have no
@@ -2943,31 +2925,14 @@ export function generateServerJs(
         `(import.meta && import.meta.dir) ? import.meta.dir : ".", ` +
         `${JSON.stringify(_sessionStoreDistAscent)}, ".scrml-sessions.db");`,
       );
-      lines.push("const _scrml_session_store = (((globalThis.__scrml_session_stores ??= {}))[_scrml_session_db_path] ??= (() => {");
-      lines.push("  const _db = new _ScrmlSessionDatabase(_scrml_session_db_path);");
-      lines.push('  _db.run("CREATE TABLE IF NOT EXISTS kv_store (namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, expires_at INTEGER, PRIMARY KEY (namespace, key))");');
-      lines.push('  const _ns = "session";');
-      lines.push('  const _stmtGet = _db.prepare("SELECT value, expires_at FROM kv_store WHERE namespace = ? AND key = ?");');
-      lines.push('  const _stmtSet = _db.prepare("INSERT OR REPLACE INTO kv_store (namespace, key, value, expires_at) VALUES (?, ?, ?, ?)");');
-      lines.push('  const _stmtDel = _db.prepare("DELETE FROM kv_store WHERE namespace = ? AND key = ?");');
-      lines.push("  return {");
-      lines.push("    get(key) {");
-      lines.push("      const row = _stmtGet.get(_ns, key);");
-      lines.push("      if (!row) return null;");
-      lines.push("      if (row.expires_at !== null && row.expires_at <= Date.now()) { _stmtDel.run(_ns, key); return null; }");
-      lines.push("      try { return JSON.parse(row.value); } catch { return row.value; }");
-      lines.push("    },");
-      lines.push("    set(key, value, ttl) {");
-      lines.push("      const expiresAt = ttl ? Date.now() + ttl * 1000 : null;");
-      lines.push("      _stmtSet.run(_ns, key, JSON.stringify(value), expiresAt);");
-      lines.push("    },");
-      lines.push("    delete(key) { _stmtDel.run(_ns, key); },");
-      lines.push("  };");
-      lines.push("})());");
+      // The store declaration is ONE shared constant: the §14.8.9 provenance flow
+      // recognizes it by its exact text and models it by summary (session-store-emit.ts).
+      // It carries the #1234 WAL + busy_timeout pragmas (rationale beside the lines there).
+      for (const l of SESSION_STORE_SQLITE_LINES) lines.push(l);
     } else {
       // S239 FIX 8 — no `session.set`/`.destroy` in this app: keep the prior
       // in-memory read-only store (byte-identical to the pre-i29e read-side infra).
-      lines.push("const _scrml_session_store = (globalThis.__scrml_session_store ??= new Map());");
+      lines.push(SESSION_STORE_MEMORY_LINE);
     }
     lines.push(`const _scrml_session_max_age = ${_sessionMaxAgeSec};`);
     lines.push("");
@@ -3376,6 +3341,29 @@ export function generateServerJs(
     lines.push(`  path: "/_scrml/session/destroy",`);
     lines.push(`  method: "POST",`);
     lines.push("  handler: async function(_scrml_req) {");
+    // §40.2 / §39.2.3 (S449, g-session-destroy-route-has-no-csrf-check) — destroying
+    // a session is a state-mutating POST, so under `csrf="auto"` (the default under
+    // `auth=`) it gets the SAME session-synchronizer check every mutating server-fn
+    // route gets: §39.2.3 "A server-side validator that checks the `X-CSRF-Token`
+    // header on state-mutating routes and returns `403 Forbidden` if the token is
+    // missing or invalid". Before S449 a cross-site POST carrying the cookie logged
+    // the viewer out. Gated only when a session RECORD exists (`csrfToken` is minted
+    // for every record by the middleware): with no record there is nothing to
+    // destroy, and the stale-cookie clear below stays reachable. The 403 plants the
+    // session's token in the readable `scrml_csrf` cookie, exactly as the server-fn
+    // gate does, so the client's `session.destroy()` retries once and succeeds.
+    if (csrf === "auto") {
+      lines.push("    const _scrml_sessionForCsrf = _scrml_session_middleware(_scrml_req);");
+      lines.push("    if (_scrml_sessionForCsrf.csrfToken && !_scrml_validate_csrf(_scrml_req, _scrml_sessionForCsrf)) {");
+      lines.push("      return new Response(JSON.stringify({ error: \"CSRF validation failed\" }), {");
+      lines.push("        status: 403,");
+      lines.push("        headers: {");
+      lines.push("          \"Content-Type\": \"application/json\",");
+      lines.push("          \"Set-Cookie\": `scrml_csrf=${_scrml_sessionForCsrf.csrfToken}; Path=/; SameSite=Strict`,");
+      lines.push("        },");
+      lines.push("      });");
+      lines.push("    }");
+    }
     // S239 FIX 1 (logout half) — DELETE the server-side record, not just the
     // cookie, so a planted/leaked sid is not resurrectable after logout.
     // B1 (S266) — name-anchored parse; B4a (S266) — resolve either cookie name.
@@ -4269,6 +4257,7 @@ export function generateServerJs(
   }
 
   for (const { fnNode, route } of serverFns) {
+    setServerSessionContextSpan({ ...(fnNode.span as object), file: filePath });
     const name: string = fnNode.name ?? "anon";
     const routeName: string = route.generatedRouteName;
     const path: string = route.explicitRoute ? route.explicitRoute : routePath(routeName);
@@ -6345,6 +6334,7 @@ export function generateServerJs(
   // function syncs to subscribers exactly as a channel publisher does.
   if (channelWsHandlerFns.length > 0) {
     for (const { fnNode, route } of channelWsHandlerFns) {
+      setServerSessionContextSpan({ ...(fnNode.span as object), file: filePath });
       const name: string = fnNode.name ?? "anon";
       const params: any[] = fnNode.params ?? [];
       const wsParamNames: string[] = params.map((p: any, i: number) =>
@@ -6835,8 +6825,9 @@ export function generateServerJs(
   // already start with `sqlite:`, prepend `sqlite:` before passing to
   // `new SQL(...)`. Postgres / MySQL strings have explicit `postgres://` /
   // `mysql://` prefixes (per `db-driver.ts`) and pass through verbatim.
-  // For SQLite relative paths (e.g. `./contacts.db`) resolution is
-  // relative to CWD at runtime; this matches typical Bun.SQL usage.
+  // A SQLite FILE (e.g. `./contacts.db`) does NOT go through a `sqlite:` literal:
+  // it is resolved against the declaring source file's directory — never the
+  // runtime CWD — and created only by a program that owns it (§8.1.1; codegen/sqlite-file-target.ts).
   const sqlIdentRe = /\b_scrml_sql(?:_\d+)?\b/g;
   const usedIdents = new Set<string>();
   let _m: RegExpExecArray | null;
@@ -6862,6 +6853,10 @@ export function generateServerJs(
     declLines.push("");
     declLines.push("// --- Bug 3a (§44.2): Bun.SQL handle declarations (compiler-generated) ---");
     declLines.push("import { SQL } from \"bun\";");
+    // s445 — where the SQLite-file helper (and its `node:fs` import) is spliced in,
+    // once the loop below has seen a file-backed handle that needs it.
+    const sqliteFileHelperAt = declLines.length;
+    let sqliteFileProjectRoot: string | null = null;
     // Emit declarations in stable order: default `_scrml_sql` first, then
     // scoped `_scrml_sql_<n>` ascending. The declaration order must precede
     // any code that references the handle (the idempotency / structural-eq
@@ -6921,41 +6916,39 @@ export function generateServerJs(
         declLines.push(`const ${ident} = new SQL(":memory:");`);
         continue;
       }
-      // SQLite paths require `sqlite:` prefix or Bun.SQL defaults to
-      // postgres at module init (see comment block above).
+      // s445-dev-db-side-file — a SQLite FILE opens through the helpers in
+      // codegen/sqlite-file-target.ts: the file the compile-time schema read resolved
+      // (the declaring file's directory — §8.1.1), recorded relative to the project
+      // root and resolved at runtime against SCRML_DATA_DIR ?? that root (§47.14).
+      // A file that declares the database's schema OWNS it — its handle opens at load
+      // and may create the file; any other handle is REFERENCING — it opens lazily on
+      // first use and never creates (ruling S445: per-file ownership). Replaces the
+      // ss19 #9 literal, which was re-relativized to the compile unit's output base and
+      // opened CWD-relative. Every file-backed handle gets the §44 WAL/busy-timeout
+      // defaults — an owning one at load (below), a referencing one when it opens.
+      const sqliteFile = scope.driver === "sqlite" && typeof filePath === "string"
+        ? sqliteFileHandle(
+            scope.connectionString,
+            filePath,
+            (fileAST as any)._outputBaseDir,
+            ownedDbFilesFor(getNodes(fileAST), filePath),
+          )
+        : null;
+      if (sqliteFile !== null) {
+        sqliteFileProjectRoot = sqliteFile.projectRoot;
+        noteSqliteHandle(fileAST, sqliteFile.record, "server");
+        declLines.push(`const ${ident} = ${sqliteFile.expr};`);
+        if (sqliteFile.owns) sqliteConfiguredIdents.push(ident);
+        continue;
+      }
+      // `:memory:` and the network drivers. SQLite needs the `sqlite:` prefix or
+      // Bun.SQL defaults to postgres at module init (see comment block above).
       let connStr = scope.connectionString;
       if (
         scope.driver === "sqlite" &&
         !connStr.startsWith("sqlite:") &&
         connStr !== ":memory:"
       ) {
-        // ss19 #9 (g-db-src-compile-vs-runtime-path) — express the emitted path
-        // relative to the project root (the runtime cwd) so every source file
-        // that references the SAME physical db emits the SAME runtime path. The
-        // compiler resolves `src=` file-relative (protect-analyzer), but the
-        // emitted `sqlite:` literal is opened CWD-relative at runtime — so a
-        // <page> in a subdir (`src="../m.db"`) opened a DIFFERENT file than the
-        // root entry (`src="./m.db"`) when both run from the project root →
-        // "no such table". We re-relativize ONLY for files NOT at the project
-        // root; a root-level file keeps its verbatim src (the common single-dir
-        // case stays byte-identical). `relative(root, absDb)` always yields a
-        // path that, from cwd=root, resolves to absDb (a leading `..` for an
-        // out-of-root db is correct, matching the file-relative resolution).
-        const _baseDir = (fileAST as any)._outputBaseDir;
-        if (
-          typeof _baseDir === "string" && _baseDir.length > 0 &&
-          typeof filePath === "string" && filePath.length > 0
-        ) {
-          const _resolvedBase = _pathResolve(_baseDir);
-          const _sourceDir = _pathDirname(_pathResolve(filePath));
-          if (_sourceDir !== _resolvedBase) {
-            const _absDb = _pathResolve(_sourceDir, connStr);
-            const _relToRoot = _pathRelative(_resolvedBase, _absDb);
-            if (_relToRoot.length > 0) {
-              connStr = _relToRoot.replace(/\\/g, "/");
-            }
-          }
-        }
         connStr = "sqlite:" + connStr;
       }
       declLines.push(`const ${ident} = new SQL(${JSON.stringify(connStr)});`);
@@ -6969,12 +6962,16 @@ export function generateServerJs(
         sqliteConfiguredIdents.push(ident);
       }
     }
+    if (sqliteFileProjectRoot !== null) {
+      declLines.splice(sqliteFileHelperAt, 0, SQLITE_FILE_HELPER_IMPORT, "", ...sqliteFileHelperLines(sqliteFileProjectRoot), "");
+    }
     // §44 (S433) — SQLITE DURABILITY / CONCURRENCY DEFAULTS. The full rationale, the
     // measurements, and the three traps (constructor options are ignored; the `await` is
     // load-bearing; top-level await is forbidden) live in `codegen/sqlite-defaults.ts`,
     // which is SHARED with `emit-tool.ts` — the tool path was missed on the first pass
-    // and left the gap's own symptom reachable for a `kind="tool"` program.
-    if (sqliteConfiguredIdents.length > 0) {
+    // and left the gap's own symptom reachable for a `kind="tool"` program. A
+    // referencing sqlite-file handle calls the helper itself when it opens.
+    if (sqliteConfiguredIdents.length > 0 || sqliteFileProjectRoot !== null) {
       declLines.push("");
       declLines.push(...SQLITE_CONFIGURE_HELPER_LINES);
       for (const ident of sqliteConfiguredIdents) {
@@ -7352,6 +7349,11 @@ export function generateServerJs(
   // file path so it reports against the right source, then clears the sink for the
   // next file. Build-blocking (severity "error"), restoring the invariant that no
   // bare `session` identifier ever reaches emitted JS.
+  // §6.6.9 / §20.5 (S449) — drain the server-session-guard backstop (a server
+  // `@session` lowering that was refused instead of reading the request body).
+  setServerSessionContextSpan(null);
+  for (const _e of drainServerAmbientSessionRefusalErrors(filePath, resolveSpanLineCol)) errors.push(_e);
+
   for (const _svErr of drainSessionValueUseErrors()) {
     const _span = (_svErr.span && typeof _svErr.span === "object") ? _svErr.span as Record<string, unknown> : {};
     errors.push(new CGError(

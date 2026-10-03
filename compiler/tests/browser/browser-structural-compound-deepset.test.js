@@ -27,8 +27,9 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { execFileSync } from "child_process";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
-const tmpRoot = resolve("/tmp", "scrml-structural-compound-deepset");
+const tmpRoot = resolve(tmpdir(), "scrml-structural-compound-deepset");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
