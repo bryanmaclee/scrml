@@ -1203,8 +1203,9 @@ export function fixS66(source, opts = {}) {
     }
   }
 
-  let ast;
-  try {
+  // The same memoized front-end reading moduleEdges / the CLI's project walk use (one parse per file).
+  let ast = frontEndMemo(filePath, src)?.ast ?? null;
+  if (!ast) try {
     ast = parseAst(filePath, src);
   } catch (e) {
     blockers.push({ rule: "parse", line: 0, reason: `impl#1 front end threw: ${String(e?.message ?? e).split("\n")[0]}`, snippet: "" });
