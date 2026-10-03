@@ -124,14 +124,14 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `4154bf006` — wrap(s448): took the reboot-killed S446-xps lane, landed the bootstrap codec, and found where a million /tmp files came from (#1224) — **pushed**
-- `5ddd56347` — wrap(s446-peter): six landed through merge-on-green, three reviewed drafts for bryan, and the tests had been lying about the network (#1223) — **pushed**
-- `bca39b61a` — wrap(s445): four security arcs landed through multi-round adversarial review; eight rulings; dev-db held one fix short (#1206) — **pushed**
-- `fe5cad679` — wrap(s444): a coderlegion port became four rulings, the bootstrap ran §66.19.5 + §66.19.2 from source, and the TS <request> turned out to loop (#1205) — **pushed**
-- `9a3d96ebb` — wrap(s443): the S441 review record was wrong, the auth holes closed, two broken flagship examples work — and the post-merge reviews found the next two fail-opens (#1187) — **pushed**
-- `136ce3e22` — wrap(s442): bootstrap typer + §66.19 programs landed; three rulings (tape grants, dpa-058, dpa-045 axiom) (#1178) — **pushed**
-- `7b77eecd6` — wrap(s441): the spotlight audit found the security holes — four closed, two HIGHs filed for S442 (#1165) — **pushed**
-- `cf62b4154` — wrap(s440): a JS gotcha gauntlet and four deep-dives turned into ~100 rulings (#1140) — **pushed**
+- `2d6d8cd4` — wrap(s447): `when` became <effect> that cannot write state, the validity surface and submit gate, keywords outside the opener — and a possibly-accidental "your recs" caught before it shipped (#1231) — **pushed**
+- `4154bf00` — wrap(s448): took the reboot-killed S446-xps lane, landed the bootstrap codec, and found where a million /tmp files came from (#1224) — **pushed**
+- `5ddd5634` — wrap(s446-peter): six landed through merge-on-green, three reviewed drafts for bryan, and the tests had been lying about the network (#1223) — **pushed**
+- `bca39b61` — wrap(s445): four security arcs landed through multi-round adversarial review; eight rulings; dev-db held one fix short (#1206) — **pushed**
+- `fe5cad67` — wrap(s444): a coderlegion port became four rulings, the bootstrap ran §66.19.5 + §66.19.2 from source, and the TS <request> turned out to loop (#1205) — **pushed**
+- `9a3d96eb` — wrap(s443): the S441 review record was wrong, the auth holes closed, two broken flagship examples work — and the post-merge reviews found the next two fail-opens (#1187) — **pushed**
+- `136ce3e2` — wrap(s442): bootstrap typer + §66.19 programs landed; three rulings (tape grants, dpa-058, dpa-045 axiom) (#1178) — **pushed**
+- `7b77eecd` — wrap(s441): the spotlight audit found the security holes — four closed, two HIGHs filed for S442 (#1165) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
