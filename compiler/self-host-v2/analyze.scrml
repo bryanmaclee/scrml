@@ -576,7 +576,7 @@ ${
     // Every TypeItem of a file, the program's included.
     fn typeItems(items: AItem[]) -> ATypeDecl[] {
         let out: ATypeDecl[] = []
-        for (const it of items) { out = out.concat(typeItemOf(it)) }
+        for (const it of items) { if (!isLaterProgram(items, it)) out = out.concat(typeItemOf(it)) }   // s451: a second top-level program is E-PROGRAM-002, not read
         return out
     }
 
@@ -2525,7 +2525,7 @@ ${
 
     fn fnItems(items: AItem[]) -> AFn[] {
         let out: AFn[] = []
-        for (const it of items) { out = out.concat(fnItemOf(it)) }
+        for (const it of items) { if (!isLaterProgram(items, it)) out = out.concat(fnItemOf(it)) }   // s451: a second top-level program is E-PROGRAM-002, not read
         return out
     }
 

@@ -204,3 +204,42 @@ describe("(B) markup at a file's top level, outside any `<program>`", () => {
     expect(codes(`type T:enum = { A, B }\nfn f() -> int { return 1 }\n<program><p>\${f()}</p></program>\n`)).toEqual([]);
   });
 });
+
+// s451 fix round (S239 review MED-1): AProgram keeps only the opener's plain
+// attributes, so everything else a `<program>` opener parses is refused at
+// parse time rather than dropped (no SPEC code governs it — searched §4.12,
+// §40.8, §66.2).
+describe("(A) a `<program>` opener carries plain attributes only", () => {
+  for (const [label, src] of [
+    ["a typed attribute `auth:x=…`", `<program auth:x="required"><p>x</p></program>\n`],
+    ["a typed attribute `auth:string=…`", `<program auth:string="required"><p>x</p></program>\n`],
+    ["a typed attribute `ratelimit:x=…`", `<program ratelimit:x="100/fortnight"><p>x</p></program>\n`],
+    ["a typed attribute `capabilities:x=[…]`", `<program capabilities:x=[teleport]><p>x</p></program>\n`],
+    ["a typed attribute `foo:bar=…`", `<program foo:bar="1"><p>x</p></program>\n`],
+    ["a validator call", `<program min(3)><p>x</p></program>\n`],
+    ["an own value", `<program=5><p>x</p></program>\n`],
+    ["an own type", `<program:int><p>x</p></program>\n`],
+    ["`export`", `export <program><p>x</p></program>\n`],
+  ]) {
+    test(`${label} → refused (was: compiled clean, the attribute never checked)`, () => {
+      const d = run(src).diags;
+      expect(d.some((x) => x.code === "E-BOOTSTRAP-UNSUPPORTED" && x.message.includes("on `<program>` is not in the bootstrap"))).toBe(true);
+    });
+  }
+  test("twin: plain attributes alone add no parse refusal", () => {
+    expect(codes(prog(`capabilities=[db]`))).toEqual([]);
+  });
+});
+
+// s451 fix round (LOW-2): a second top-level program's types and functions are
+// not pulled into the namespace, so they cannot mask an unresolved name in the first.
+describe("(B) a second top-level program contributes no names", () => {
+  test("a function only the SECOND program declares does not resolve in the first", () => {
+    const c = codes(`<program>\n<p>\${g()}</p>\n</program>\n<program>\nfn g() -> int { return 1 }\n<p>y</p>\n</program>\n`);
+    expect(c).toContain("E-PROGRAM-002");
+    expect(c.filter((x) => x !== "E-PROGRAM-002").length).toBeGreaterThan(0);
+  });
+  test("bite: the same function declared in the FIRST program resolves", () => {
+    expect(codes(`<program>\nfn g() -> int { return 1 }\n<p>\${g()}</p>\n</program>\n`)).toEqual([]);
+  });
+});
