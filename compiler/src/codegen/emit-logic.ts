@@ -690,7 +690,7 @@ function emitFailExpr(node: FailExprLike, opts: EmitLogicOpts): string {
  * function declaration or a lambda: their `fail` / `?` return from THAT
  * function, not from the transaction's.
  */
-function _markTransactionExits(body: unknown, rollbackName: string): void {
+function _markTransactionExits(body: unknown, rollbackName: string | null): void {
   const seen = new WeakSet<object>();
   const walk = (n: unknown): void => {
     if (!n || typeof n !== "object") return;
@@ -700,7 +700,10 @@ function _markTransactionExits(body: unknown, rollbackName: string): void {
     const k = (n as { kind?: unknown }).kind;
     if (k === "function-decl" || k === "fn-decl" || k === "lambda") return;
     if (k === "fail-expr" || k === "propagate-expr") {
-      (n as { _scrmlTxnRollback?: string })._scrmlTxnRollback = rollbackName;
+      // null clears the mark after the block is emitted, so it can never leak into
+      // an emission of the same node outside this transaction.
+      if (rollbackName === null) delete (n as { _scrmlTxnRollback?: string })._scrmlTxnRollback;
+      else (n as { _scrmlTxnRollback?: string })._scrmlTxnRollback = rollbackName;
     }
     for (const key of Object.keys(n as object)) {
       if (key === "span" || key === "parent" || key === "_scrmlTxnRollback") continue;
@@ -4386,13 +4389,17 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       lines.push(`let ${threw} = false;`);
       lines.push(`const ${rollback} = async () => { if (${open}) { ${open} = false; await ${db}.unsafe("ROLLBACK"); } };`);
       lines.push(`try {`);
-      for (const stmt of (node.body ?? [])) {
-        const code = emitLogicNode(stmt, opts);
-        if (code) {
-          for (const line of code.split("\n")) {
-            lines.push(`  ${line}`);
+      try {
+        for (const stmt of (node.body ?? [])) {
+          const code = emitLogicNode(stmt, opts);
+          if (code) {
+            for (const line of code.split("\n")) {
+              lines.push(`  ${line}`);
+            }
           }
         }
+      } finally {
+        _markTransactionExits(node.body ?? [], null);
       }
       // A marked `fail` / `?` rolled back but its `return` did not leave the
       // block (it returned from an arm IIFE instead — g-stmt-match-block-return-

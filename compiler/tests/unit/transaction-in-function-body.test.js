@@ -117,13 +117,8 @@ describe("§2 §19.10.4 checks (lint-transaction)", () => {
     expect(codes(`\${ type E:enum = { Bad } function f()! -> E { transaction { function g()! -> E { ${TX} } } } }`)).toEqual([]);
   });
 
-  const exits = [
-    ["return", "if (a) { return 1 }"],
-    ["break out of an enclosing loop", null],
-    ["continue out of an enclosing loop", null],
-  ];
   test("`return` inside the block → E-TRANSACTION-CONTROL-FLOW", () => {
-    expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { transaction { ${exits[0][1]} } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+    expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { transaction { if (a) { return 1 } } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
   });
   test("`break` / `continue` targeting a loop OUTSIDE the block → E-TRANSACTION-CONTROL-FLOW each", () => {
     expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { for (let i = 0; i < 2; i++) { transaction { if (a) { break } } } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
@@ -160,27 +155,30 @@ describe("§3 lowering — rollback before every fail / ? in the block", () => {
     return { code: emitLogicNode(tx, { boundary: "server", dbVar: "_scrml_sql" }), tx };
   }
 
+  // The rollback closure the block declares: `const _scrml_txn_rollback_N = async () => …`.
+  const rollbackName = (code) => (code.match(/const (_scrml_txn_rollback_\d+) = async/) ?? [])[1];
+
   test("a `fail` nested in an if (NOT a direct child) rolls back before it returns", () => {
     const { code, tx } = emitTxIn(`\${ type E:enum = { Bad } function f(a)! -> E { transaction { if (a) { fail E::Bad } } } }`);
-    const fail = collect(tx, "fail-expr")[0];
-    expect(typeof fail._scrmlTxnRollback).toBe("string");
-    expect(code).toContain(`return (await ${fail._scrmlTxnRollback}(), {`);
+    const rb = rollbackName(code);
+    expect(rb).toBeDefined();
+    expect(code).toContain(`return (await ${rb}(), {`);
     // pre-S450 the only rollback before a fail was for a DIRECT child; this one is nested
     expect(tx.body.some((s) => s.kind === "fail-expr")).toBe(false);
+    // the transient mark is cleared once the block is emitted (no leak to other emissions)
+    expect(collect(tx, "fail-expr")[0]._scrmlTxnRollback).toBeUndefined();
   });
 
   test("a `?` propagation in the block rolls back before it returns", () => {
     const { code, tx } = emitTxIn(`\${ type E:enum = { Bad } function g()! -> E { fail E::Bad } function f(a)! -> E { transaction { let v = g()? } } }`);
-    const prop = collect(tx, "propagate-expr")[0];
-    expect(prop).toBeDefined();
-    expect(code).toContain(`return (await ${prop._scrmlTxnRollback}(), `);
+    expect(collect(tx, "propagate-expr").length).toBe(1);
+    expect(code).toContain(`return (await ${rollbackName(code)}(), `);
   });
 
-  test("a `fail` inside a function nested in the block is NOT marked (it returns from that function)", () => {
-    const { tx } = emitTxIn(`\${ type E:enum = { Bad } function f(a)! -> E { transaction { function h()! -> E { fail E::Bad } } } }`);
-    const fail = collect(tx, "fail-expr")[0];
-    expect(fail).toBeDefined();
-    expect(fail._scrmlTxnRollback).toBeUndefined();
+  test("a `fail` inside a function nested in the block is NOT rolled back by the block (it returns from that function)", () => {
+    const { code, tx } = emitTxIn(`\${ type E:enum = { Bad } function f(a)! -> E { transaction { function h()! -> E { fail E::Bad } } } }`);
+    expect(collect(tx, "fail-expr").length).toBe(1);
+    expect(code).not.toContain(`return (await ${rollbackName(code)}(), `);
   });
 
   test("the emitted block is syntactically valid async JS", () => {
