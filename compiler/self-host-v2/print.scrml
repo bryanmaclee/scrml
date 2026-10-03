@@ -37,6 +37,7 @@ ${
     import { HAttr, HNode, Page, printPage } from "./html.scrml"
     import { NameKey, NameTable, emptyNames, mint, nameOf } from "./names.scrml"
     import { WireTable, wireBuild, wireTableJs } from "./codec.scrml"
+    import { emitCss } from "./css.scrml"
 
     export type Template:struct = { id: string, nodes: HNode[] }
     // s451 (U1a): `refused` — why the printer emitted NOTHING (empty `js` /
@@ -1689,6 +1690,13 @@ ${
             ])),
         ])
         let head: HNode[] = [HNode.HElem("script", [{ name: "type", value: "module" }, { name: "src", value: jsFile }], [])]
+        // s451 — §65.3.4: the built-in reset, its own bottom `@layer`, unless
+        // `<program reset="none">`. The fixed reset text holds no `<` / `&`, so
+        // the escaping text node prints it verbatim inside `<style>`.
+        if (p.reset) {
+            const css: string = emitCss({ charsets: [], imports: [], reset: true, tokens: [], global: [], scopes: [] })
+            head = [HNode.HElem("style", [], [HNode.HText(css)])].concat(head)
+        }
         for (const t of templates) {
             head = head.concat([HNode.HElem("template", [{ name: "id", value: t.id }], t.nodes)])
         }

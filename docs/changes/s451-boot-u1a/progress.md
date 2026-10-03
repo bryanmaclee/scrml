@@ -126,3 +126,15 @@ refused, §52 — outside U1); `<db>` (already refused — see "Design divergenc
   SQL placeholder, so a bootstrap message containing the sigil came out as `__scrml_sql_placeholder__`. Workaround: the
   sigil is spelled `"?" + "{"` (`sqlSigil()` in parse / analyze / check / print). Proposed id:
   `g-impl1-sql-placeholder-rewrites-string-literals`.
+
+## Merge with origin/main (#1257 landed: `<program>` attribute checks)
+
+- 2026-10-03 merged origin/main 9e0a4d2ac. Conflicts: CoreProgram gained `reset` (#1257) beside `dbs` (here) — every
+  constructor carries both; `lower` keeps `resetShips` + ServerFn production. Semantic follow-ups: #1257's
+  `topProgramAttrDiags` refused `db=` as unread — it is read now (placePass), so `db` is skipped there and dropped from
+  program-shape.test.js's "not read" list; five new AExprK matches got their `.Sql` arm.
+- Post-merge: `bun test ./compiler/self-host-v2/` 1522 pass / 0 fail; counter test 35/35; lint-no-default-arm 0.
+  Counter: main (post-#1257, docs/bootstrap-conformance.md) PASS 89 · FAIL 52 · UNSUPPORTED 648 (bootstrap-unsupported
+  412 · parse-reject 236) → this branch PASS 90 · FAIL 52 · UNSUPPORTED 647 (449 · 198). The one new PASS:
+  `sql/bare-identifier-body-e-sql-003-neg` (twin). No case left PASS or entered FAIL (pre-merge before/after JSON diff).
+- docs/bootstrap-conformance.md is STALE against this branch (`--check`) — not edited per the brief (PA regenerates).

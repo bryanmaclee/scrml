@@ -390,6 +390,7 @@ ${
             fns: fns,
             server: [],
             dbs: [],
+            reset: true,
         }
     }
 

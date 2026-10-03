@@ -23,6 +23,7 @@ export const MODULES = [
   "js.scrml",
   "codec.scrml",
   "html.scrml",
+  "css.scrml",
   "names.scrml",
   "print.scrml",
   "check.scrml",

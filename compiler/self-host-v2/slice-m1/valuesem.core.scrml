@@ -82,6 +82,6 @@ ${
             sym: sProgram, kind: DeclKind.Program, single: true,
             fields: [fAudit, fSeen], renders: [main], wiring: [], handles: [],
         }
-        return { program: sProgram, decls: [program], types: [], fns: [log], server: [], dbs: [] }
+        return { program: sProgram, decls: [program], types: [], fns: [log], server: [], dbs: [], reset: true }
     }
 }
