@@ -1,6 +1,6 @@
 // §55.5.1 rule 2 — a top-level value with NO validators has no surface: reading `.isValid` on it is an error.
 <program>
-    <let count:int=0/>
+    let <count:int=0/>
     <main>
         <p>${@count.isValid}</p>
     </main>

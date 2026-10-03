@@ -7,21 +7,21 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1278 of 1278 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1286 of 1286 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 34 | 2.7% |
+| PASS | 42 | 3.3% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 18 | 1.4% |
-| LEGACY | 951 | 74.4% |
-| UNSUPPORTED | 275 | 21.5% |
+| LEGACY | 951 | 74.0% |
+| UNSUPPORTED | 275 | 21.4% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 52; of those, 34 hold (65.4%). Runtime half executed on the bootstrap for 0 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 60; of those, 42 hold (70.0%). Runtime half executed on the bootstrap for 6 case(s).
 
-- **Vacuous** passes: 15 of 34 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **19**.
+- **Vacuous** passes: 15 of 42 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **27**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 18 of 18; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): component-const 60 · const-cell 51 · engine-element 113 · no-program-root 411 · rhs-decl 712.
@@ -54,7 +54,7 @@ UNSUPPORTED by reason: bootstrap-unsupported 177 · parse-reject 98.
 | fn | 18 | 1 | · | · | 4 | 13 | · | · |
 | foreign | 9 | · | · | 1 | 8 | · | · | · |
 | form-for | 16 | · | · | · | · | 16 | · | · |
-| forms | 46 | · | · | · | 46 | · | · | · |
+| forms | 54 | 8 | · | · | 46 | · | · | · |
 | hostmethod | 1 | · | · | · | 1 | · | · | · |
 | input | 2 | · | · | · | · | 2 | · | · |
 | lifecycle | 56 | · | · | 1 | 52 | 3 | · | · |
@@ -166,7 +166,7 @@ dialect parse failure: the bootstrap took a retired / unknown form as something 
 - `engine/state-child-invalid-variant-pos` (engine-element · accepted-silently, then codes wrong): missing E-ENGINE-STATE-CHILD-INVALID-VARIANT · severity: E-ENGINE-STATE-CHILD-INVALID-VARIANT did not fire (expected error)
 - `engine/state-child-missing-pos` (engine-element · accepted-silently, then codes wrong): missing E-ENGINE-STATE-CHILD-MISSING · severity: E-ENGINE-STATE-CHILD-MISSING did not fire (expected error)
 
-### PASS / CODES-ONLY (34)
+### PASS / CODES-ONLY (42)
 
 - `auth/i-auth-redirect-unresolved-neg` — PASS · VACUOUS
 - `auth/w-auth-content-not-gated-neg` — PASS · VACUOUS
@@ -184,6 +184,14 @@ dialect parse failure: the bootstrap took a retired / unknown form as something 
 - `engine/state-child-invalid-variant-neg` — PASS · VACUOUS
 - `engine/state-child-missing-neg` — PASS · VACUOUS
 - `fn/plain-arrow-clean` — PASS · VACUOUS (also emitted, unasserted: E-TYPE-STRUCT-CONTEXT)
+- `forms/errors-top-level-renders` — PASS
+- `forms/gate-child-field-blocks-submit` — PASS
+- `forms/gate-invalid-blocks-submit` — PASS
+- `forms/gate-valid-submits` — PASS
+- `forms/surface-top-level-no-validators-pos` — PASS
+- `forms/surface-top-level-validated-neg` — PASS
+- `forms/validator-dead-locked-pos` — PASS
+- `forms/validator-live-let-neg` — PASS
 - `linear/must-use-unread-neg` — PASS · VACUOUS (also emitted, unasserted: E-SCOPE-001)
 - `middleware/ratelimit-invalid-unit-neg` — PASS · VACUOUS
 - `reactive/no-write-attr-neg` — PASS

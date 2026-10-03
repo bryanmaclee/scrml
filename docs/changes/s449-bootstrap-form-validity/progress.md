@@ -109,3 +109,16 @@
   fail-open). Filed `g-bootstrap-gate-marker-over-names-each-row-fields` (LOW) and the SPEC question
   `g-spec-55-17-hidden-region-field-cannot-be-optional` (LOW, for bryan; agent rec: an author-written
   conditional validator). No code changed (the review's verdict stands on `893adc24e`).
+
+## 6. Merge main (opener keywords #1249) + migrate to `let <x/>`
+
+- Merge `1a8429b77`: conflicts resolved (see its message); gap-id union verified (1604).
+- Migrated every `<let x…/>` I wrote to `let <x…/>`: the 8 `conformance/cases/forms/*` cases,
+  gate.test.js, validators.test.js. impl#1 xfail signatures recaptured.
+- `scripts/bootstrap-conformance.ts`: the codes half now unions the bootstrap's `infos` stream (as
+  conformance/run.ts does for impl#1's warnings stream) and observes "info" severity there — without
+  it the three gate cases were counted FAIL for a "missing" I-FORM-SUBMIT-GATED the bootstrap did
+  emit. Tests added (with a bite) to the counter's integration test.
+- Counter (`docs/bootstrap-conformance.md`): PASS 39 → 42, FAIL 21 → 18; all 8 s449 cases PASS.
+- Gates: m1 99, m2 462, m3 60, m4 551, codec 92, m1-lowered 99, lexer 337; conformance
+  1244/1286 + 42 xfail.

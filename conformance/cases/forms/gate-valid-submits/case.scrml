@@ -1,7 +1,7 @@
 // §55.17.3 step 4 — the same gated form with a VALID value: the submit runs the handler.
 <program>
-    <let email:string="" req length(>=5)/>
-    <let calls:int=0/>
+    let <email:string="" req length(>=5)/>
+    let <calls:int=0/>
 
     function register() { @calls = @calls + 1 }
 

@@ -1,8 +1,8 @@
 // §55.17.3 — a declaration's validated child field bound inside its form gates that form; the compound's surface reads it.
 <program>
-    <let calls:int=0/>
+    let <calls:int=0/>
     <signup note:string="n">
-        <let email:string="" req/>
+        let <email:string="" req/>
         renders <input id="email" type="email" bind:value=@email/>
     </>
     renders <form id="f" onsubmit=save()>

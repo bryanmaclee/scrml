@@ -55,9 +55,9 @@ function withoutGates(core) {
 // A declaration `signup` with one validated child field, bound inside a form
 // whose submit handler counts its calls in a program cell.
 const SIGNUP = `<program>
-    <let calls:int=0/>
+    let <calls:int=0/>
     <signup note:string="n">
-        <let email:string="" req length(>=5)/>
+        let <email:string="" req length(>=5)/>
         renders <input type="email" bind:value=@email/>
     </>
     renders <form onsubmit=save()>
@@ -131,8 +131,8 @@ describe("the bite — the same program with the gate removed from Core is fail-
 // worked example's shape, run.
 // ===========================================================================
 const TOP = `<program>
-    <let email:string="" req length(>=5)/>
-    <let calls:int=0/>
+    let <email:string="" req length(>=5)/>
+    let <calls:int=0/>
 
     function register() { @calls = @calls + 1 }
 
@@ -200,11 +200,11 @@ describe("§55.5.1 / §55.17 — a validated TOP-LEVEL value: lowered, surfaced,
 // The compound surface (§55.5) and per-field surface (§55.6) of a declaration.
 // ===========================================================================
 const COMPOUND = `<program>
-    <let calls:int=0/>
+    let <calls:int=0/>
     <signup note:string="n">
-        <let email:string="" req/>
+        let <email:string="" req/>
         renders <input class="e" bind:value=@email/>
-        <let password:string="" req length(>=8)/>
+        let <password:string="" req length(>=8)/>
         renders <input class="p" type="password" bind:value=@password/>
     </>
     renders <form onsubmit=save()>
@@ -282,9 +282,9 @@ describe("§55.17.3 — the gate set and the instance it judges", () => {
   });
   test("two USES of one declaration in a form: each instance gates by its own value", async () => {
     const src = `<program>
-    <let calls:int=0/>
+    let <calls:int=0/>
     <f note:string="n">
-        <let v:string="" req/>
+        let <v:string="" req/>
         renders <input bind:value=@v/>
     </>
     renders <span><*v/></span>
@@ -312,23 +312,23 @@ describe("§55.17.3 — the gate set and the instance it judges", () => {
 describe("diagnostics — the surface is read-only; `<errors>` takes a surface", () => {
   const codes = (src) => run(src).diags.map((d) => d.code);
   const P = (decls, main) => `<program>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
-  const F = `    <f note:string="n">\n        <let v:string="" req/>\n        renders <input bind:value=@v/>\n    </>\n    renders <div><*v/></div>`;
+  const F = `    <f note:string="n">\n        let <v:string="" req/>\n        renders <input bind:value=@v/>\n    </>\n    renders <div><*v/></div>`;
   test("E-SYNTHESIZED-WRITE: writing a top-level value's or a field's surface property (§55.5.1 rule 7, §55.7)", () => {
-    expect(codes(P(`    <let e:string="" req/>\n    function g() { @e.isValid = true }`, `        <input bind:value=@e/>`))).toEqual(["E-SYNTHESIZED-WRITE"]);
+    expect(codes(P(`    let <e:string="" req/>\n    function g() { @e.isValid = true }`, `        <input bind:value=@e/>`))).toEqual(["E-SYNTHESIZED-WRITE"]);
     expect(codes(P(F + `\n    function g() { @f.v.touched = true }`, `        <*f/>`))).toEqual(["E-SYNTHESIZED-WRITE"]);
   });
   test("E-VALIDITY-NO-SURFACE: a top-level value with no validators — read or `<errors of=…/>` (§55.5.1 rule 2, §55.8)", () => {
-    expect(codes(P(`    <let q:string=""/>`, `        <p>\${@q.isValid}</p>`))).toEqual(["E-VALIDITY-NO-SURFACE"]);
-    expect(codes(P(`    <let q:string=""/>`, `        <errors of=@q/>`))).toEqual(["E-VALIDITY-NO-SURFACE"]);
+    expect(codes(P(`    let <q:string=""/>`, `        <p>\${@q.isValid}</p>`))).toEqual(["E-VALIDITY-NO-SURFACE"]);
+    expect(codes(P(`    let <q:string=""/>`, `        <errors of=@q/>`))).toEqual(["E-VALIDITY-NO-SURFACE"]);
   });
   test("E-ERRORS-001 (no `of=`), E-ERRORS-002 (not a `@`-rooted surface)", () => {
-    expect(codes(P(`    <let e:string="" req/>`, `        <input bind:value=@e/>\n        <errors/>`))).toEqual(["E-ERRORS-001"]);
-    expect(codes(P(`    <let e:string="" req/>`, `        <input bind:value=@e/>\n        <errors of="e"/>`))).toEqual(["E-ERRORS-002"]);
+    expect(codes(P(`    let <e:string="" req/>`, `        <input bind:value=@e/>\n        <errors/>`))).toEqual(["E-ERRORS-001"]);
+    expect(codes(P(`    let <e:string="" req/>`, `        <input bind:value=@e/>\n        <errors of="e"/>`))).toEqual(["E-ERRORS-002"]);
   });
   test("refused, never dropped: an `<errors>` body override; an unknown attribute; `errors` read as a value", () => {
-    expect(codes(P(`    <let e:string="" req/>`, `        <input bind:value=@e/>\n        <errors of=@e><b>x</b></errors>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(P(`    <let e:string="" req/>`, `        <input bind:value=@e/>\n        <errors of=@e max="2"/>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(P(`    <let e:string="" req/>`, `        <input bind:value=@e/>\n        <p>\${@e.errors}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    let <e:string="" req/>`, `        <input bind:value=@e/>\n        <errors of=@e><b>x</b></errors>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    let <e:string="" req/>`, `        <input bind:value=@e/>\n        <errors of=@e max="2"/>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`    let <e:string="" req/>`, `        <input bind:value=@e/>\n        <p>\${@e.errors}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("I-FORM-SUBMIT-GATED (§55.17.6): one per gated form, at its opener, naming the values in source order — non-fatal (the infos stream)", () => {
     const r = run(COMPOUND);
@@ -338,15 +338,15 @@ describe("diagnostics — the surface is read-only; `<errors>` takes a surface",
     expect(COMPOUND.slice(r.infos[0].span.start, r.infos[0].span.start + 5)).toBe("<form");
     const top = run(TOP);
     expect(top.infos.map((i) => i.message.split(" — ")[0])).toEqual(["this form's submit is gated by: email"]);
-    expect(run(P(`    <let q:string=""/>`, `        <form><input bind:value=@q/></form>`)).infos).toEqual([]);
+    expect(run(P(`    let <q:string=""/>`, `        <form><input bind:value=@q/></form>`)).infos).toEqual([]);
   });
   test("E-VALIDITY-RESERVED-NAME (§55.5.3 case 1): a child field or an attribute named `isValid` / `errors` / `touched` / `submitted`", () => {
-    const child = P(`    <f note:string="n">\n        <let errors:string="" req/>\n        renders <input bind:value=@errors/>\n    </>\n    renders <form><*errors/></form>`, `        <*f/>`);
+    const child = P(`    <f note:string="n">\n        let <errors:string="" req/>\n        renders <input bind:value=@errors/>\n    </>\n    renders <form><*errors/></form>`, `        <*f/>`);
     expect(codes(child)).toEqual(["E-VALIDITY-RESERVED-NAME"]);
-    const attr = P(`    <f touched:bool=false>\n        <let v:string=""/>\n    </>\n    renders <p>x</p>`, `        <f/>`);
+    const attr = P(`    <f touched:bool=false>\n        let <v:string=""/>\n    </>\n    renders <p>x</p>`, `        <f/>`);
     expect(codes(attr)).toEqual(["E-VALIDITY-RESERVED-NAME"]);
     // "Not affected: a top-level declaration whose own name is one of the four"
-    expect(codes(P(`    <let submitted:bool=false/>`, `        <p>\${@submitted}</p>`))).toEqual([]);
+    expect(codes(P(`    let <submitted:bool=false/>`, `        <p>\${@submitted}</p>`))).toEqual([]);
   });
   test("a field of a declaration has no `submitted` of its own (§55.6) — its compound does", () => {
     const d = run(P(F, `        <*f/>\n        <p>\${@f.v.submitted}</p>`)).diags;
@@ -358,7 +358,7 @@ describe("diagnostics — the surface is read-only; `<errors>` takes a surface",
 // ===========================================================================
 // The s449 conformance cases (conformance/cases/forms/{gate-*, surface-*,
 // validator-dead-locked-pos, validator-live-let-neg, errors-top-level-renders})
-// are written in the current `<let x/>` spelling (pre-S447 opener form), which impl#1 does not parse (they xfail
+// are written in the S447 opener-keyword form (`let <x:T=v/>`), which impl#1 does not parse (they xfail
 // there under g-impl1-form-gate-surface-s449). The bootstrap EXECUTES them
 // here: the codes half exactly as conformance/run.ts judges it (superset /
 // disjoint, over BOTH streams — diags and the I- infos), and the runtime half
@@ -413,9 +413,9 @@ describe("s449 conformance cases, executed by the bootstrap", () => {
 describe("§55.17.3 static reach — a bound value in an unmounted region still gates", () => {
   test("a closed `if=` region: the empty `req` value blocks the submit, and touched / `<errors>` show why", async () => {
     const src = `<program>
-    <let show:bool=false/>
-    <let email:string="" req/>
-    <let calls:int=0/>
+    let <show:bool=false/>
+    let <email:string="" req/>
+    let <calls:int=0/>
     function register() { @calls = @calls + 1 }
     <main>
         <form onsubmit=register()>
@@ -450,10 +450,10 @@ describe("§55.17.3 static reach — a bound value in an unmounted region still 
   });
 
   const STEPS = `<program>
-    <let step:int=1/>
-    <let email:string="" req/>
-    <let password:string="" req length(>=8)/>
-    <let calls:int=0/>
+    let <step:int=1/>
+    let <email:string="" req/>
+    let <password:string="" req length(>=8)/>
+    let <calls:int=0/>
     function register() { @calls = @calls + 1 }
     <main>
         <form onsubmit=register()>
@@ -505,11 +505,11 @@ describe("§55.17.3 static reach — a bound value in an unmounted region still 
 describe("§55.7 — a compound's submitted is set by a form that binds ANY of its fields", () => {
   test("a form binding only an unvalidated field: not gated, the handler runs, and @signup.submitted becomes true", async () => {
     const src = `<program>
-    <let calls:int=0/>
+    let <calls:int=0/>
     <signup note:string="n">
-        <let name:string=""/>
+        let <name:string=""/>
         renders <input class="nm" bind:value=@name/>
-        <let email:string="" req/>
+        let <email:string="" req/>
     </>
     renders <form onsubmit=save()><*name/><button type="submit">go</button></form>
     function save() { @calls = @calls + 1 }
@@ -534,7 +534,7 @@ describe("§55.7 — a compound's submitted is set by a form that binds ANY of i
 
 describe("no cascade — a refused validator does not make its surface read a second, false error", () => {
   test("`min(@n)` (refused: a non-literal bound) then `@a.isValid` → only the refusal", () => {
-    const src = `<program>\n    <let n:int=0/>\n    <let a:int=0 min(@n)/>\n    <main>\n        <p>\${@a.isValid}</p>\n        <errors of=@a/>\n    </main>\n</program>\n`;
+    const src = `<program>\n    let <n:int=0/>\n    let <a:int=0 min(@n)/>\n    <main>\n        <p>\${@a.isValid}</p>\n        <errors of=@a/>\n    </main>\n</program>\n`;
     expect(run(src).diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 });
