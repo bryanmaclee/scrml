@@ -89,6 +89,13 @@ ${
         // (E-LIFECYCLE-016 inside an effect body); an effect where markup
         // stands is ANodeK.Effect.
         EffectStmt(w: AEffect),
+        // s451 — `defer <stmt>` / `defer { … }` (§19.16.1; `defer` is a
+        // contextual keyword — parse.scrml `deferAhead`). `body` is the
+        // deferred statement(s). `arrayLead`: the single-statement form was led
+        // by a `[` (§19.16.1 E-DEFER-AMBIGUOUS-LEAD when a binding named `defer`
+        // is visible). `bare`: the defer is the whole UNBRACED arm of an
+        // `if` / `else` (§19.16.2 E-DEFER-UNSUPPORTED-SITE).
+        Defer(body: ABlock, arrayLead: boolean, bare: boolean),
     }
 
     // -------------------------------------------------------------------------

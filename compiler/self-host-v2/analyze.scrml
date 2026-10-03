@@ -2294,6 +2294,7 @@ ${
             .If(cond: c, thenB: t, elseB: el) :> exprClock(c) || blockClock(t) || maybeBlockClock(el)
             .Given(name: n, subject: sub, body: b) :> exprClock(sub) || blockClock(b)
             .EffectStmt(w: w) :> blockClock(w.body)
+            .Defer(body: b) :> blockClock(b)
         }
     }
 
@@ -4556,6 +4557,7 @@ ${
             .If(cond: c, thenB: t, elseB: el) :> keepEnv(env, resolveIf(env, c, t, el, st))
             .Given(name: n, subject: sub, body: b) :> keepEnv(env, resolveGiven(env, s, n, sub, b, st))
             .EffectStmt(w: w) :> keepEnv(env, effectAsStatement(env, w, st))
+            .Defer(body: b, arrayLead: a, bare: bare) :> keepEnv(env, resolveDefer(env, s, b, a, bare, st))
         }
     }
 
@@ -4569,6 +4571,208 @@ ${
     fn effectAsStatement(env: Env, w: AEffect, st: AS) -> AS {
         if (env.inEffect) return addDiag(st, env.file, w.span, "E-LIFECYCLE-016", "an effect inside another effect's body — an effect body is logic, not a markup position; declare the inner effect as a sibling `<effect>` with its own `deps=` (§6.7.4)")
         return addDiag(st, env.file, w.span, "E-BOOTSTRAP-UNSUPPORTED", "an effect inside a function or handler body has no position in the tree to own it (§6.7.4: an `<effect>` stands where a `<request>` may — a child of an element scope); write it in the program's markup")
+    }
+
+    // =========================================================================
+    // s451 — `defer` (SPEC §19.16), the scope-exit statement.
+    //
+    // Exits the bootstrap HAS, all handled by the lowering (print.scrml
+    // deferBlockJs — a `try … finally` per block that holds a defer): falling
+    // off the end of a block; `return` (after its value is evaluated); a host
+    // error passing through. Exits the bootstrap does NOT have — loops and
+    // `break` / `continue`, `fail`, `?`, the CPS split of a function body,
+    // server functions — have no source form here at all (each is a parse or
+    // scope error, so the compile has no Core — lower.scrml's gate), so no
+    // `defer` can meet them and be mis-run. For the same reason the codes
+    // E-DEFER-UNHANDLED-FAILABLE (no failable function), -DUPLICATE-FUNCTION
+    // (no function declaration inside a body) and -SERVER-IN-SPLIT (no split)
+    // have no trigger the bootstrap can parse.
+    //
+    // Here: §19.16.3 rule 4 (E-DEFER-OUTSIDE-FUNCTION: "`defer` SHALL appear
+    // only inside the body of a function DECLARATION … It is
+    // E-DEFER-OUTSIDE-FUNCTION in every other position"), §19.16.2
+    // E-DEFER-UNSUPPORTED-SITE ("a `defer` that is the whole UNBRACED body of
+    // an `if` / `else` … SHALL be a compile error"), §19.16.1
+    // E-DEFER-AMBIGUOUS-LEAD. The block-chain rules (rules 1-2, LATER-SHADOW)
+    // are `deferChecks`, run once per function body.
+    // =========================================================================
+    fn inFnBody(env: Env) -> boolean {
+        const c: CtxK = env.ctx
+        return match c {
+            .InFn :> !env.inEffect
+            .InDecl(owner: o) :> false
+        }
+    }
+
+    fn resolveDefer(env: Env, s: AStmt, body: ABlock, arrayLead: boolean, bare: boolean, st0: AS) -> AS {
+        if (!inFnBody(env)) {
+            return addDiag(st0, env.file, s.span, "E-DEFER-OUTSIDE-FUNCTION", "`defer` stands only in the body of a function declaration (`function` / `fn`) — a handler, an effect or the program has no single block exit to attach the deferred statement to (§19.16.3 rule 4); move the body into a named function and call it")
+        }
+        // §19.16.1: "Where a binding named `defer` is in scope, a single-statement
+        // `defer` led by an array literal SHALL be a compile error naming both spellings"
+        if (arrayLead && deferBound(env)) {
+            return addDiag(st0, env.file, s.span, "E-DEFER-AMBIGUOUS-LEAD", "`defer [` reads two ways while a binding named `defer` is in scope (§19.16.1): write `defer[…]` (no space) to index the binding, or `defer { […]… }` to defer the statement")
+        }
+        let st: AS = st0
+        if (bare) st = addDiag(st, env.file, s.span, "E-DEFER-UNSUPPORTED-SITE", "a `defer` that is the whole unbraced arm of an `if` / `else` has no written block to belong to (§19.16.2) — brace the arm (`{ defer … }`) or move the `defer` to the enclosing block")
+        // The deferred body sees the bindings in scope at the `defer` (§19.16.2
+        // "Evaluation time"); its own locals stay inside it.
+        return resolveBlock(env, body, st)
+    }
+
+    // Is a binding named `defer` VISIBLE here (§19.16.1: a parameter, an
+    // earlier local, a `given` binding, a file-level function)?
+    fn deferBound(env: Env) -> boolean {
+        if (lookupLocal(env, "defer") is some) return true
+        if (lookupHandle(env, "defer") is some) return true
+        return fnNamed(env.g, "defer") is some
+    }
+
+    // A `let` / `const` written AFTER a position in a block of the function.
+    type DeferLater:struct = { name: string, span: ASpan }
+
+    // §19.16.3 rules 1-2 and §19.16.2 E-DEFER-LATER-SHADOW, over one function
+    // body. `later` = the declarations in force at the exit of the block
+    // being walked that were written after the current position — in that
+    // block or in any enclosing block of the same function ("a `let` / `const`
+    // / `lin` declaration written AFTER the `defer` — in its own block or in
+    // any enclosing block of the same function").
+    fn deferChecks(file: string, body: ABlock, st: AS) -> AS {
+        return deferChecksIn(file, body, [], st)
+    }
+
+    fn deferChecksIn(file: string, b: ABlock, outer: DeferLater[], st0: AS) -> AS {
+        let st: AS = st0
+        let i = 0
+        for (const s of b.stmts) {
+            st = deferChecksStmt(file, s, outer.concat(laterLocals(b, i + 1)), st)
+            i = i + 1
+        }
+        return st
+    }
+
+    fn laterLocals(b: ABlock, from: int) -> DeferLater[] {
+        let out: DeferLater[] = []
+        let i = 0
+        for (const s of b.stmts) {
+            if (i >= from) {
+                const n: string = localNameOf(s)
+                if (n != "") out = out.concat([{ name: n, span: s.span }])
+            }
+            i = i + 1
+        }
+        return out
+    }
+
+    fn deferChecksStmt(file: string, s: AStmt, later: DeferLater[], st: AS) -> AS {
+        const k: AStmtK = s.k
+        return match k {
+            .Defer(body: d) :> deferShadow(file, s, d, later, deferBodyRules(file, d, st))
+            .If(cond: c, thenB: t, elseB: el) :> deferChecksElse(file, el, later, deferChecksIn(file, t, later, st))
+            .Given(name: n, body: d) :> deferChecksIn(file, d, later, st)
+            .Eval(e: e) :> st
+            .Local(name: n) :> st
+            .Return(e: e) :> st
+            .EffectStmt(w: w) :> st
+        }
+    }
+
+    fn deferChecksElse(file: string, el: ABlock | not, later: DeferLater[], st: AS) -> AS {
+        if (el is not) return st
+        return deferChecksIn(file, el, later, st)
+    }
+
+    // Rules 1-2 inside a deferred body, at every depth: no `return`
+    // (E-DEFER-CONTROL-FLOW — "A deferred body SHALL NOT contain a `return`"),
+    // no `defer` (E-DEFER-NESTED — "A deferred body SHALL NOT contain a
+    // `defer` statement"). The bootstrap parses no `fail` / `?` / `yield` /
+    // `break` / `continue` and no nested function body (a lambda body is an
+    // expression), so a `return` here always leaves the deferred body.
+    fn deferBodyRules(file: string, b: ABlock, st0: AS) -> AS {
+        let st: AS = st0
+        for (const s of b.stmts) { st = deferBodyRule(file, s, st) }
+        return st
+    }
+
+    fn deferBodyRule(file: string, s: AStmt, st: AS) -> AS {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: e) :> addDiag(st, file, s.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `return` — it runs while its block is already exiting, after the function's return value is computed (§19.16.3 rule 1)")
+            .Defer(body: d) :> addDiag(st, file, s.span, "E-DEFER-NESTED", "a deferred statement cannot contain a `defer` — there is no block to attach it to that is not already exiting (§19.16.3 rule 2)")
+            .If(cond: c, thenB: t, elseB: el) :> deferBodyElse(file, el, deferBodyRules(file, t, st))
+            .Given(name: n, body: d) :> deferBodyRules(file, d, st)
+            .Eval(e: e) :> st
+            .Local(name: n) :> st
+            .EffectStmt(w: w) :> st
+        }
+    }
+
+    fn deferBodyElse(file: string, el: ABlock | not, st: AS) -> AS {
+        if (el is not) return st
+        return deferBodyRules(file, el, st)
+    }
+
+    // E-DEFER-LATER-SHADOW (§19.16.2): "If the deferred body reads a name that
+    // such a later declaration (re)binds, the program SHALL be rejected …
+    // The diagnostic names the binding and both sites". A name the deferred
+    // body binds itself (a local, a `given` name, a lambda parameter) is its
+    // own; every other bare name it mentions — read, written or called — is
+    // resolved at the `defer`, so a later binding of it is the hazard.
+    fn deferShadow(file: string, s: AStmt, body: ABlock, later: DeferLater[], st0: AS) -> AS {
+        let st: AS = st0
+        const used: string[] = blockNameRefs(body, [])
+        let reported: string[] = []
+        for (const l of later) {
+            if (used.indexOf(l.name) >= 0 && reported.indexOf(l.name) < 0) {
+                reported = reported.concat([l.name])
+                st = addDiag(st, file, l.span, "E-DEFER-LATER-SHADOW", "`" + l.name + "` is declared here, after the `defer` at " + offsetOf(s.span) + " whose deferred statement reads `" + l.name + "` — at the block's exit it would read this later binding, not the one in scope at the `defer` (§19.16.2); rename one of them")
+            }
+        }
+        return st
+    }
+
+    // The bare names a block mentions that it does not bind itself.
+    fn blockNameRefs(b: ABlock, bound0: string[]) -> string[] {
+        let bound: string[] = bound0
+        let out: string[] = []
+        for (const s of b.stmts) {
+            out = out.concat(stmtNameRefs(s, bound))
+            const n: string = localNameOf(s)
+            if (n != "") bound = bound.concat([n])
+        }
+        return out
+    }
+
+    fn stmtNameRefs(s: AStmt, bound: string[]) -> string[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> exprNameRefs(e, bound)
+            .Local(name: n, init: i) :> exprNameRefs(i, bound)
+            .Return(e: e) :> maybeNameRefs(e, bound)
+            .If(cond: c, thenB: t, elseB: el) :> exprNameRefs(c, bound).concat(blockNameRefs(t, bound)).concat(elseNameRefs(el, bound))
+            .Given(name: n, subject: sub, body: d) :> exprNameRefs(sub, bound).concat(blockNameRefs(d, bound.concat([n])))
+            .EffectStmt(w: w) :> []
+            .Defer(body: d) :> blockNameRefs(d, bound)
+        }
+    }
+
+    fn maybeNameRefs(e: AExpr | not, bound: string[]) -> string[] {
+        if (e is not) return []
+        return exprNameRefs(e, bound)
+    }
+
+    fn elseNameRefs(el: ABlock | not, bound: string[]) -> string[] {
+        if (el is not) return []
+        return blockNameRefs(el, bound)
+    }
+
+    fn exprNameRefs(e: AExpr, bound0: string[]) -> string[] {
+        const bound: string[] = bound0.concat(lambdaParams(e))
+        let out: string[] = []
+        const n: string = exprName(e)
+        if (n != "" && bound.indexOf(n) < 0) out = [n]
+        for (const x of exprKids(e)) { out = out.concat(exprNameRefs(x, bound)) }
+        return out
     }
 
     // =========================================================================
@@ -5758,6 +5962,7 @@ ${
                 env = withLocal(env, { name: p.name, s: rs.s, ty: pty, mutable: false, narrowed: not, nDecl: not })
             }
             st = resolveBlock(env, fs.f.body, st)
+            st = deferChecks(fs.info.file, fs.f.body, st)    // s451: §19.16 block-chain rules
         }
         return st
     }
@@ -6076,6 +6281,7 @@ ${
             .If(cond: c) :> ""
             .Given(name: n) :> ""
             .EffectStmt(w: w) :> ""
+            .Defer(body: b) :> ""
         }
     }
 
@@ -6088,6 +6294,7 @@ ${
             .Eval(e: e) :> []
             .Local(name: n) :> []
             .Return(e: e) :> []
+            .Defer(body: b) :> [b]
         }
     }
 
@@ -6270,6 +6477,42 @@ ${
     type Narrowing:struct = { yes: string[], no: string[] }
 
     fn noNarrowing() -> Narrowing { return { yes: [], no: [] } }
+
+    // s451 — a deferred body runs at its block's EXIT (§19.16.2), where a
+    // narrowing in force at the `defer` may no longer hold. It keeps only the
+    // narrowings nothing can undo before that exit: a local (`#id`, not a
+    // place under it) that is never rebound — a parameter, a `const`, a
+    // `let` with no assignment (no EAssignLocal of it anywhere). A cell's
+    // narrowing (`@…`) is dropped: the rest of the block, or any call, may
+    // write the cell. Fail closed — a dropped narrowing makes a read in the
+    // deferred body unproven, never silently `T`.
+    fn tDeferEnv(env: TEnv) -> TEnv {
+        let keep: string[] = []
+        for (const k of env.narrowed) {
+            if (k.indexOf("#") == 0 && k.indexOf(".") < 0 && !reboundLocal(env.t, k.substring(1))) keep = keep.concat([k])
+        }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: keep, fnw: env.fnw, rows: env.rows, fret: env.fret }
+    }
+
+    // Is the local with Sym id `id` rebound (`x = …`) anywhere?
+    fn reboundLocal(t: Tables, id: string) -> boolean {
+        for (const f of t.effects.facts) {
+            if (reboundId(f) == id) return true
+        }
+        return false
+    }
+
+    fn reboundId(f: EffectFact) -> string {
+        return match f {
+            .EAssignLocal(sym: s) :> "" + s.id
+            .EWrite(w: w) :> ""
+            .ESpread(ws: ws) :> ""
+            .EReset(w: w) :> ""
+            .EEdits(w: w) :> ""
+            .ERemove(w: w) :> ""
+            .EElemAt(cap: c) :> ""
+        }
+    }
 
     fn tNarrow(env: TEnv, keys: string[]) -> TEnv {
         let out: string[] = env.narrowed
@@ -6475,6 +6718,7 @@ ${
             .Local(name: n) :> false
             .Given(name: n) :> false
             .EffectStmt(w: w) :> false
+            .Defer(body: b) :> false
         }
     }
 
@@ -6585,6 +6829,7 @@ ${
             .If(cond: c, thenB: t, elseB: el) :> aliased(exprEffects(c), al).concat(blockEffects(t, al)).concat(elseEffects(el, al))
             .Given(name: n, subject: sub, body: b) :> aliased(exprEffects(sub), al).concat(blockEffects(b, al.concat([aliasOf(n, sub)])))
             .EffectStmt(w: w) :> []              // registers nothing where it stands (refused there) and writes nothing
+            .Defer(body: b) :> blockEffects(b, al)   // s451: runs at the block's exit — its writes are the function's
         }
     }
 
@@ -8010,6 +8255,7 @@ ${
             .If(cond: c, thenB: tb, elseB: el) :> typeIf(env, c, tb, el, ts)
             .Given(name: n, subject: sub, body: b) :> typeGiven(env, s, sub, b, ts)
             .EffectStmt(w: w) :> keepTEnv(env, ts)     // refused by the binder (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
+            .Defer(body: b) :> keepTEnv(env, typeBlock(tDeferEnv(env), b, ts))   // s451: typed at its exit, not where it stands
         }
     }
 
@@ -8943,6 +9189,7 @@ ${
             .If(cond: c, thenB: t, elseB: el) :> scanElse(cx, el, scanBlock(cx, t, scanExpr(cx, c, acc)))
             .Given(name: n, subject: sub, body: b) :> scanBlock(cx, b, scanExpr(cx, sub, acc))
             .EffectStmt(w: w) :> acc                // refused where it stands (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
+            .Defer(body: b) :> scanBlock(cx, b, acc)
         }
     }
 
