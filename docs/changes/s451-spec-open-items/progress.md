@@ -76,3 +76,11 @@ Branch: spec/s451-open-items (cut from origin/main 2fb41d8b7, which contains #12
   `bun scripts/state.ts --write` / `--check` PASS.
 - Gates: `regen-spec-index.ts` + `--check` OK (S451 open-items notes added on rows §2, §13, §19, §52, §57);
   `s34-census.ts --check-new --base origin/main` PASS (6 new/changed rows); `facts.ts --write` then `--check` PASS.
+- 2026-10-03 SCOPE ADDITION (PA) — ruling:user-voice-scrml.md S451 "your rec, a" (O-061-5 cross-tab failure halves).
+  §6.14.2 rule 5: an undecodable / contract-failing cross-tab value, or a key removed in another tab (a reset there,
+  rule 9, or `clear()`), → the cell takes its default and never writes back (no store, no remove). Rule 9's "Coupled,
+  not decided here" note updated. §6.14.5 O-061-5: failure halves struck + CLOSED pointer; the write-contract-vs-
+  hydration half stays OPEN (and so does whether the default-taking fires effects / `reset-on=`).
+  O-061-12 restated for consistency with item 4 (no v1.0 retirement remains; storage is neither an internal route nor
+  a foreign endpoint — strict vs dual is the open question); §57.1's pointer to it reworded and its stale "§6.14.4"
+  fixed to §6.14.5. Not decided. Gates: spec-index --check OK, facts PASS, state PASS, census PASS.
