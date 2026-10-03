@@ -52,13 +52,15 @@
  *   bun scripts/bootstrap-conformance.ts --cases <dir>   a different case root (the tests' fixtures)
  *   bun scripts/bootstrap-conformance.ts --json <path>   also write the per-case JSON
  *   bun scripts/bootstrap-conformance.ts --write         also regenerate docs/bootstrap-conformance.md
+ *   bun scripts/bootstrap-conformance.ts --check         exit 1 when docs/bootstrap-conformance.md is stale
  *   bun scripts/bootstrap-conformance.ts --fail-on-fail  exit 1 when FAIL or CRASH > 0
  *
  * ═══ EXIT STATUS (separate from the output — pa-base §8) ═══
  *
  *   0  a VALID measurement was taken (whatever the numbers say). This is a TRACKING probe, not a
  *      gate: a red exit over a known backlog would be the §8 cry-wolf shape.
- *   1  only with --fail-on-fail: the measurement found a FAIL or a CRASH.
+ *   1  only with --fail-on-fail (a FAIL or a CRASH was found) or --check (the report file is stale).
+ *      CI runs `--check` in the NON-BLOCKING `tracking` job only.
  *   2  NOT A VALID RUN — the bootstrap bundle failed to build/load, or zero cases were attempted.
  *
  * The report always states its own scope: "N of M cases attempted" (attempted = reached the
@@ -569,6 +571,7 @@ async function main(): Promise<number> {
   const jsonPath = opt("--json");
   const write = args.includes("--write");
   const failOnFail = args.includes("--fail-on-fail");
+  const check = args.includes("--check");
 
   if (!existsSync(casesDir)) {
     console.error(`bootstrap-conformance: no case root ${casesDir}`);
@@ -595,15 +598,24 @@ async function main(): Promise<number> {
   console.log(body);
   console.log(`(bundle build ${(loadMs / 1000).toFixed(1)} s · cases ${(r.ms / 1000).toFixed(1)} s)`);
   if (jsonPath) writeFileSync(jsonPath, JSON.stringify({ ...r, byArea: Object.fromEntries(r.byArea) }, null, 2) + "\n");
+  if ((write || check) && (filter || casesDir !== DEFAULT_CASES_DIR)) {
+    console.error("bootstrap-conformance: --write / --check need the full default corpus (no --filter / --cases)");
+    return 2;
+  }
   if (write) {
-    if (filter || casesDir !== DEFAULT_CASES_DIR) {
-      console.error("bootstrap-conformance: --write needs the full default corpus (no --filter / --cases)");
-      return 2;
-    }
     writeFileSync(REPORT_PATH, REPORT_HEADER + body);
     console.error(`wrote ${relative(REPO_ROOT, REPORT_PATH)}`);
   }
+  let stale = false;
+  if (check) {
+    const onDisk = existsSync(REPORT_PATH) ? readFileSync(REPORT_PATH, "utf8") : "";
+    stale = onDisk !== REPORT_HEADER + body;
+    console.error(stale
+      ? `bootstrap-conformance: ${relative(REPO_ROOT, REPORT_PATH)} is STALE — regenerate with --write`
+      : `bootstrap-conformance: ${relative(REPO_ROOT, REPORT_PATH)} is current`);
+  }
   if (failOnFail && r.counts.FAIL + r.counts.CRASH > 0) return 1;
+  if (stale) return 1;
   return 0;
 }
 

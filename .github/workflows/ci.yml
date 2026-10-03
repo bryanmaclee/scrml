@@ -249,6 +249,15 @@ jobs:
       - name: Types gate (diagnostic NAME-SET vs compiler/tests/TYPES-BASELINE.json)
         continue-on-error: true
         run: bun scripts/types-gate.ts --check
+      # S449 (s449-bootstrap-conformance-counter) — how many conformance cases the PURE bootstrap
+      # (compiler/self-host-v2/) passes, by bucket and area; ~7 s. TRACKING ONLY, never in `gate`:
+      # the number is a backlog, and a red gate over a backlog is the cry-wolf shape. `--check`
+      # exits 1 only when docs/bootstrap-conformance.md is stale (regenerate with `--write`); the
+      # FAIL count never sets the exit status here. Step-level continue-on-error for the same reason
+      # as the types gate above (a failed step halts the job). Needs no pretest.
+      - name: Bootstrap conformance count (tracking; report staleness)
+        continue-on-error: true
+        run: bun scripts/bootstrap-conformance.ts --check
       - name: Populate browser-test fixtures
         run: bun run pretest
       - name: integration + lsp + commands (promotion candidates)
