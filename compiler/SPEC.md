@@ -42553,6 +42553,22 @@ follows the adopted restatement.)
 > the tuple literal of §66.12.5 — may stand bare in an opener, or must be parenthesized, is not ruled. §66's
 > examples parenthesize every compound literal except the empty `[]`.
 
+**A union type is legal in the opener's type position (S451).** The type after `:` in an opener is any type
+expression, including a union: `T | not` and `T | U` are written with `|`, bare — the rule above parenthesizes
+VALUES, not types, and `|` cannot be confused with the opener's end (only `>` and `/` can).
+
+```scrml
+let <email:string | not=""/>               // `T | not` — legal
+<id:int | string=0/>                       // `T | U` — legal
+```
+
+A front end that rejects a union type in an opener has a parser bug, not a language rule.
+
+> **Provenance:** ruling:user-voice-scrml.md S451 "your recs" (the three S449 `scrml fix` forks, (a): *"a union
+> type in an opener (`let <email:string | not=""/>`) is legal with `|`; a bootstrap rejection of it is a parser
+> bug."*) · supersedes: nothing written — §66.2 was silent on union types in the opener · direction of change:
+> inert (states what the grammar already admits; no program's acceptance changes under the SPEC).
+
 #### 66.2.5 Keywords go outside the opener (S447)
 
 > **Amendment S447 — keywords go OUTSIDE the declaration opener (option (b)).**
@@ -44319,6 +44335,23 @@ struct-literal code whose home is §14.3 and whose row is in §34.
 | **`E-OPERATOR-OPERAND-TYPE`** | Error | An operand of a type its operator does not take: an arithmetic or relational operator on a non-number; `+` on anything but two numbers or two strings (string ordering goes through an explicit compare); `!`, `&&`, `\|\|` (and `and` / `or`) on a non-boolean — defaults use `??` (S440 Gotcha Q1, Q2). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
 | **`E-OPERAND-NOT-NARROWED`** | Error | A `T \| not` operand not narrowed before `+`, arithmetic, comparison, or use in a string template (S440 Gotcha Q3). A markup `${@o.n}` without narrowing stays SILENT (`${not}` renders nothing, S442). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
 | **`E-INT-DIVISION`** | Error | `/` between two `int`s: `/` is float-only (it divides `number`s); integer division is explicit, `div(a, b, .Mode)`, the rounding mode required (S440 dpa-054 #3). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
+
+**Bootstrap codes named, with the legacy codes they supersede (S451).** The bootstrap already emits these two; this
+names them so a per-code mapping between the bootstrap and impl#1 is SPEC-backed. Legacy codes stay with their
+forms through the §66.21 window.
+
+| Code | Severity | Fires when | Supersedes (legacy code, for the same condition) |
+|---|---|---|---|
+| **`E-DECL-STATE-CHILD`** | Error | A §66.13.2 transition-graph state-child is malformed: state-children on a field whose value is not an enum; a state-child that names no variant of the field's enum (O52); a second state-child for the same variant; a `rule=` target that is not a variant of the field's enum. | `E-ENGINE-STATE-CHILD-INVALID-VARIANT` (a state-child tag that is no variant, §51.0.B) · `E-ENGINE-RULE-INVALID-VARIANT` (a `rule=` target that is no variant, §51.0.F) · `E-ENGINE-004` (the `for=` type is not an enum or struct — the non-enum-field limb). The duplicate-state-child limb has no catalogued legacy code. |
+| **`E-TYPE-VARIANT`** | Error | A bare variant `.V` is not a variant of the enum its position expects, or — with no expected type — of any enum in scope. (Ambiguity between two enums is the separate `E-VARIANT-AMBIGUOUS`.) | `E-TYPE-063` (an unknown variant in an `is` expression, §18.17) · `E-ENGINE-INITIAL-INVALID-VARIANT` (`initial=.X` not a variant of `for=`, §51.0.E) — each the instance of this condition in its position. |
+
+Both: **Nominal on impl#1** (impl#1 emits the legacy codes); **the bootstrap emits them** (`compiler/self-host-v2/analyze.scrml` — `graphOf` for `E-DECL-STATE-CHILD`, `resolveVariant` for `E-TYPE-VARIANT`).
+
+> **Provenance:** ruling:user-voice-scrml.md S451 "your recs" (the three S449 `scrml fix` forks, (c): *"§66.20 names
+> `E-DECL-STATE-CHILD` / `E-TYPE-VARIANT` with the legacy codes each supersedes, so the counter's per-code mapping is
+> SPEC-backed."*) · supersedes: nothing written — both codes were emitted by the bootstrap but unnamed in §66.20 ·
+> direction of change: inert (naming; the conditions were already errors under their legacy codes). The legacy
+> mapping is this change's reading of the bootstrap's emit sites against the §34 rows (flagged for the counter owner).
 
 **Retained codes with a restated condition or message**
 

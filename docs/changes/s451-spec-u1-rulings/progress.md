@@ -540,3 +540,10 @@ Branch `spec/s451-u1-rulings`, base `b490f3b75` (== origin/main at start).
     foreign endpoints, given R10 keeps the dual decoder there.
   - SPEC-INDEX summary notes added for §6, §8, §12, §13, §19, §34, §44, §57 (covering set A and set B); index regenerated
     + `--check` OK; FACTS regenerated + `--check` PASS; `state.ts --write` / `--check` PASS.
+
+- 2026-10-03 SCOPE ADDITION 2 (PA): S451 "your recs" — the three S449 `scrml fix` forks, items (a) and (c).
+  - (a) §66.2.4: union types (`T | not`, `T | U`) legal in the opener's type position; examples; direction inert.
+  - (c) §66.20: new table naming E-DECL-STATE-CHILD (supersedes E-ENGINE-STATE-CHILD-INVALID-VARIANT, E-ENGINE-RULE-INVALID-VARIANT,
+    E-ENGINE-004 non-enum limb; duplicate limb has no legacy code) and E-TYPE-VARIANT (supersedes E-TYPE-063, E-ENGINE-INITIAL-INVALID-VARIANT).
+    Meanings read from compiler/self-host-v2/analyze.scrml (graphOf, resolveVariant). The legacy mapping is my reading (flagged).
+  - (b) (scrml fix emits <program reset="none">) is a tool behaviour, not SPEC text here — not in this change's scope.
