@@ -1,1 +1,2 @@
 - 2026-10-03T01:00:39Z start; base bc4bca1f; bun install + pretest ok (puppeteer postinstall fail, unrelated)
+- 2026-10-03T01:10:34Z impl: checkAttrMultiStatement in ast-builder (parseAttributes ATTR_BLOCK/ATTR_EXPR, parseLiftTag, SUBPARSE forward); SPEC §5.2.4 + §34 row; unit test 44 pass (bite-tested: 21 fail with check disabled); conformance pos/neg cases

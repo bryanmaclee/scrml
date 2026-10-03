@@ -4137,6 +4137,8 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
               // so baseOffset = valSpan.start + 1.
               emitForbiddenSwitchInRaw(raw, valSpan, (valSpan?.start ?? 0) + 1, filePath, errors);
               value = { kind: "expr", raw, refs, exprNode: parseHandlerAwareExprNode(name, raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
+              // §5.2.4 (S450) — a `;`-separated statement list on a NON-handler attribute.
+              checkAttrMultiStatement(name, value, filePath, errors);
             }
           } else if (valTok.kind === "ATTR_EXPR") {
             // Boolean expression for if= attribute (e.g. !@var, @a === 1, @a && @b quoted).
@@ -4158,6 +4160,8 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
             // overlap across attributes).
             emitForbiddenSwitchInRaw(raw, valSpan, valSpan?.start ?? 0, filePath, errors);
             value = { kind: "expr", raw, refs, exprNode: parseHandlerAwareExprNode(name, raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
+            // §5.2.4 (S450) — a `;`-separated statement list on a NON-handler attribute.
+            checkAttrMultiStatement(name, value, filePath, errors);
           } else if (valTok.kind === "ATTR_OP_REJECT") {
             // cluster-A (S188 "reject + parens") — an unquoted CONDITION
             // attribute (`if=`/`show=`/`else-if=`) whose value contains a bare
@@ -6886,6 +6890,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             attachHandlerStatementList(value, filePath, counter._handlerStmtIds, null, o.start, o.line, o.col, "$", errors);
           }
           if (value.kind === "expr") delete value._liftInnerOffset;
+          // §5.2.4 (S450) — lifted / `for … lift` markup attributes are parsed
+          // here, not in parseAttributes: the same non-handler check.
+          checkAttrMultiStatement(attrName, value, filePath, errors);
           attrs.push({ name: attrName, value, span: attrSpan });
         } else if (tag === "each" && attrName === "as") {
           // §17.7.3 / §59.8 — the `<each … as NAME>` / `as (K, V)` binding is a
@@ -17579,7 +17586,9 @@ function _rebaseSubparseSpans(nodes, deltaOffset, block) {
 // `<each>` row or an engine state-child compiled at exit 0 with its tail read
 // as HTML attributes (SPEC §5.2.3: "The error is kept so the unbraced sequence
 // can never be silently read the wrong way").
-const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER"]);
+// E-ATTR-MULTI-STATEMENT (§5.2.4, S450) qualifies the same way: decided only in
+// parseAttributes / parseLiftTag, re-derived by nothing downstream.
+const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER", "E-ATTR-MULTI-STATEMENT"]);
 
 /**
  * Forward the SUBPARSE_FORWARDED_CODES errors out of a discarded sub-build
@@ -17926,6 +17935,127 @@ export function parseHandlerStatementsForCheck(value, filePath) {
   if (res.parseErrors.some(isFatalHandlerParseError)) return null;
   if (res.stmts.length === 1 && isCallableOrOpaqueHandlerStmt(res.stmts[0], value)) return null;
   return res.stmts;
+}
+
+/**
+ * S450 — SPEC §5.2.4 (ruling (v), user-voice-scrml.md S447 "stamp all"):
+ * "a multi-statement value in a non-handler attribute is an error."
+ *
+ * A NON-handler attribute value is ONE expression. When its `(…)` / `{…}` /
+ * `${…}` value (or a quoted `if="…"` condition) holds two or more statements
+ * separated by `;`, the expression view (`exprNode`) holds only the first and
+ * the attribute took the wrong value (`title=${f(); "t"}` → `f()`) or was not
+ * emitted at all (`title=(f(); "t")` → W-CG-VALUE-ATTR-UNLOWERABLE). This
+ * returns the statement count when the value is such a list, else 0.
+ *
+ * The decision is STRUCTURAL: the value is parsed with the same function-body
+ * statement parser the handler statement lists use
+ * (`parseHandlerStatementListCore` — `tokenizeLogic` + `parseLogicBody`), and
+ * it is a `;`-separated list when that parse is clean, yields 2+ statements,
+ * and some statement after the first is directly preceded (comments skipped)
+ * by a depth-0 `;` token. So a `;` in a string / template / regex / comment,
+ * in a nested arrow or function body, or in the text of a markup value
+ * (`fallback={<div>failed; retry</div>}`) is never a separator, and a trailing
+ * `;` (`${f();}`) is not a second statement. A value whose statement parse
+ * reports a fatal error is left to the existing paths (no claim is made).
+ *
+ * Statements separated only by a NEWLINE are deliberately NOT judged here:
+ * whether a non-handler `${…}` / `{…}` attribute value is a §7.2.2 statement
+ * list is not decided by the ruling (newlines inside `(…)` are whitespace,
+ * §7.2.2 rule 4) — see §5.2.4 "Not decided".
+ */
+const _attrMultiStmtIds = { next: HANDLER_STMT_ID_BASE + 900_000_000 };
+
+/** Attribute names whose value is a statement position, not a value: exempt. */
+function isStatementPositionAttrName(name) {
+  // §5.2.3 event handlers (inline blocks are legal there; their own rule is
+  // E-MULTI-STATEMENT-HANDLER) and the §51.0.H engine `effect=` logic block.
+  return isEventHandlerAttrName(name) || name === "effect";
+}
+
+function attrValueSemicolonStatementCount(raw, span, filePath) {
+  if (typeof raw !== "string") return 0;
+  // Cheap necessary-condition pre-filter (Rule 7 justification: a `;`
+  // separator token cannot exist without a `;` character; the DECISION below is
+  // made on the parsed statements, never on this text test).
+  if (!raw.includes(";")) return 0;
+  let inner = raw;
+  // A parenthesized value `(…)` keeps its outer parens in `raw` (tokenizer
+  // ATTR_EXPR). Strip them when the FIRST token's `(` is matched by the LAST
+  // token — read from the logic token stream, so a `)` inside a string or
+  // comment is not mistaken for the closer.
+  try {
+    const toks = tokenizeLogic(raw, 0, 1, 1, []).filter((t) => t && t.kind !== "EOF" && t.kind !== "COMMENT");
+    if (toks.length >= 2 && toks[0].kind === "PUNCT" && toks[0].text === "(") {
+      let depth = 0, closeIdx = -1;
+      for (let i = 0; i < toks.length; i++) {
+        const t = toks[i];
+        if (t.kind !== "PUNCT") continue;
+        if (t.text === "(" || t.text === "[" || t.text === "{") depth++;
+        else if (t.text === ")" || t.text === "]" || t.text === "}") {
+          depth--;
+          if (depth === 0) { closeIdx = i; break; }
+        }
+      }
+      if (closeIdx === toks.length - 1) {
+        inner = raw.slice(toks[0].span.start + 1, toks[closeIdx].span.start);
+      }
+    }
+  } catch (_e) {
+    return 0;
+  }
+  if (!inner.includes(";")) return 0;
+  const res = parseHandlerStatementListCore(
+    { raw: inner, span }, filePath, _attrMultiStmtIds, null, 0, 1, 1,
+  );
+  if (!res || !Array.isArray(res.stmts) || res.stmts.length < 2) return 0;
+  if (res.parseErrors.some(isFatalHandlerParseError)) return 0;
+  const toks = Array.isArray(res.tokens)
+    ? res.tokens.filter((t) => t && t.kind !== "EOF" && t.kind !== "COMMENT" && t.span && typeof t.span.start === "number")
+    : [];
+  // Bracket depth of each token, so only a statement-level `;` counts.
+  const depthAt = [];
+  let d = 0;
+  for (const t of toks) {
+    if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) d = Math.max(0, d - 1);
+    depthAt.push(d);
+    if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[" || t.text === "{")) d++;
+  }
+  for (let s = 1; s < res.stmts.length; s++) {
+    const st = res.stmts[s];
+    const at = st && st.span && typeof st.span.start === "number" ? st.span.start : null;
+    if (at === null) continue;
+    // The token immediately before this statement's first token.
+    let prev = -1;
+    for (let i = 0; i < toks.length && toks[i].span.start < at; i++) prev = i;
+    if (prev >= 0 && toks[prev].kind === "PUNCT" && toks[prev].text === ";" && depthAt[prev] === 0) {
+      return res.stmts.length;
+    }
+  }
+  return 0;
+}
+
+/**
+ * Push E-ATTR-MULTI-STATEMENT for a non-handler attribute whose expression
+ * value is a `;`-separated statement list (SPEC §5.2.4). Returns true when it
+ * fired (the caller then drops the value so nothing downstream lowers a
+ * partial reading of it).
+ */
+function checkAttrMultiStatement(name, value, filePath, errors) {
+  if (!Array.isArray(errors) || typeof name !== "string" || isStatementPositionAttrName(name)) return false;
+  if (!value || value.kind !== "expr") return false;
+  const n = attrValueSemicolonStatementCount(value.raw, value.span, filePath);
+  if (n < 2) return false;
+  const msg =
+    `E-ATTR-MULTI-STATEMENT: The value of attribute \`${name}\` holds ${n} statements separated by \`;\`, ` +
+    `but a non-handler attribute value is ONE expression. Write a single expression, or move the ` +
+    `statements into a function and use its result (\`function compute() { … }\` then \`${name}=compute()\`). ` +
+    `Only an event-handler attribute (\`on…=\`) takes a statement list (SPEC §5.2.3, §5.2.4).`;
+  const err = new TABError("E-ATTR-MULTI-STATEMENT", msg, value.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 });
+  // Kept so _forwardSubparseErrors can rebuild it with a file-true span.
+  err.baseMessage = msg;
+  errors.push(err);
+  return true;
 }
 
 /**

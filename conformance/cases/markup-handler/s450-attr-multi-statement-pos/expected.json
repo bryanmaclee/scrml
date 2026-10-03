@@ -1,0 +1,12 @@
+{
+  "id": "s450-attr-multi-statement-pos",
+  "description": "§5.2.4 — a NON-handler attribute value (`title=(…)`) holding two `;`-separated statements is E-ATTR-MULTI-STATEMENT. Before S450 the attribute was not emitted at all (W-CG-VALUE-ATTR-UNLOWERABLE warning, exit 0).",
+  "language-version": "1.0",
+  "spec": "§5.2.4",
+  "source-test": "compiler/tests/unit/attr-multi-statement-s450.test.js",
+  "rationale": "§5.2.4 (S450): \"A `(…)`, `{…}` or `${…}` value of an attribute that is not an event handler, or a quoted condition, SHALL be exactly one expression. When it holds two or more statements separated by `;`, the compiler SHALL report E-ATTR-MULTI-STATEMENT (an error) — never silently keep one statement or drop the attribute.\" Provenance: ruling:user-voice-scrml.md S447 \"stamp all\" item (v) — \"a multi-statement value in a non-handler attribute is an error.\"",
+  "expect": {
+    "codes": ["E-ATTR-MULTI-STATEMENT"],
+    "notCodes": []
+  }
+}

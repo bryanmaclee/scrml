@@ -1990,6 +1990,36 @@ The `@phase = .Loading` is a single assignment-expression (§50) — bare-form i
 
 **Error code:** `E-MULTI-STATEMENT-HANDLER` (§34) — a BARE (unbraced) event-handler attribute value contains a top-level `;` statement sequence, or a `:`-shorthand body (§4.14) contains multiple statements. An inline block (`{ … }`) never fires it.
 
+#### 5.2.4 Statement lists in non-handler attribute values (S450)
+
+**Added:** 2026-10-02 (S450).
+
+> **Provenance:** ruling:user-voice-scrml.md S447 "stamp all" — (v) *"`E-ATTR-MULTI-STATEMENT`: a multi-statement value in a non-handler attribute is an error."* (fail closed) · direction-of-change: **newly-rejecting** (before S450 such a value compiled at exit 0 with a wrong reading — `title=(f(); "t")` was not emitted at all, `title=${f(); "t"}` took the value of `f()`).
+
+Only an event-handler attribute takes a statement list (§5.2.3). Every other attribute value is ONE expression.
+
+**Normative statements:**
+
+- A `(…)`, `{…}` or `${…}` value of an attribute that is not an event handler, or a quoted condition, SHALL be exactly one expression. When it holds two or more statements separated by `;`, the compiler SHALL report E-ATTR-MULTI-STATEMENT (an error) — never silently keep one statement or drop the attribute.
+- The statements are those of the value's own statement list (§7.2.2 rule 6: `;` is the statement separator). A `;` inside a string, template, regex or comment, inside a nested arrow / function body, or in the text of a markup value is not a separator. A trailing `;` after the one expression (`${ f(); }`) does not make a second statement.
+- An event-handler attribute (§5.2.3 — `on<event>=`, `on:<event>=`, `onserver:` / `onclient:`) is not judged by this rule: its inline block and `${…}` statement list are legal, and its bare form keeps `E-MULTI-STATEMENT-HANDLER`. An engine `effect=` value (§51.0.H) is a logic-context block, not an attribute value in this sense, and is not judged either.
+- The rule covers every element and position: page markup, component call-site props, `<each>` rows, `for … lift` rows, engine state-child bodies and `<match>` arm bodies.
+- The diagnostic SHALL name the attribute and SHALL give the fix: write a single expression, or move the statements into a function and use its result (`function compute() { … }` then `title=compute()`).
+
+| Value | Verdict |
+|---|---|
+| `title=(f(); "t")`, `title={f(); "t"}`, `title=${f(); "t"}`, `if="f(); @x"`, `class:on=(f(); @x)` | `E-ATTR-MULTI-STATEMENT` |
+| `title=(() => { f(); return "t" })()`, `title=${ "a;b" }`, `title=${ f(); }` | one expression — legal |
+| `onclick={ f(); g() }`, `onclick=${ f(); g() }` | event handler — §5.2.3, legal |
+
+**Not decided (no diagnostic is defined).** The ruling names a multi-statement value; it does not decide these shapes, and no front end SHALL invent a diagnostic for them until they are ruled:
+
+- **Newline-separated statements in a `${…}` or `{…}` non-handler value** (`title=${f()⏎"t"}`). §7.2.2 lists "a `${ … }` logic context" and the handler block as statement lists but does not say whether a non-handler `${…}` / `{…}` attribute value is one, so it is not decided whether the line break ends a statement there. (Inside `(…)` a newline is whitespace, §7.2.2 rule 4, so `title=(f()⏎"t")` is one malformed expression, not a statement list.)
+- **A statement list inside a `${…}` interpolation of a quoted attribute string** (`class="a-${f(); @x}"`, §5.5.3). The value is a template, not a statement list.
+- **A bare (unquoted, undelimited) non-handler value followed by `;`** (`title=f(); g()`). As §5.2.3 explains for handlers, nothing bounds a bare value, so it is not decided whether `g()` is part of the value.
+
+**Error code:** `E-ATTR-MULTI-STATEMENT` (§34).
+
 ### 5.3 Boolean HTML Attributes
 
 The compiler has full knowledge of which HTML attributes are boolean attributes (e.g., `disabled`, `checked`, `readonly`, `required`, `selected`, `multiple`, `open`, `hidden`).
@@ -22963,6 +22993,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | ~~E-ATTR-012~~ | §5.4 | **Retired (S249-drop, SPEC-cleaned S274)** — `bind:`+same-event-handler is composable by design; see `bind-value.test.js` §12/§13. | Error |
 | E-ATTR-WRITER-CONFLICT | §5.5.3, §5.5.4 | A WHOLESALE reactive value writer — `class=(expr)` / `style=(expr)` (the whole attribute) or `value=(expr)` on a form control (the `.value` property) — shares a physical DOM surface with ANOTHER writer on the SAME element, so the wholesale write would silently erase the other's work on its next reactive evaluation. Detected pairs: `class=(expr)` with `class:name=` or transition classes (`className` surface); `style=(expr)` with `if=`/`show=` or transitions (`style`/`display` surface); `value=(expr)` with `bind:value` (`.value` surface). Axiom ① (bryan's #81 ruling): each physical DOM surface has at most one wholesale owner — the diagnostic names BOTH sites and the author picks one. The conflicting attribute is NOT emitted (byte-identical to pre-#81), so an ignored error degrades to the old behavior rather than a broken one. Generic string attributes (`title=`, `id=`, `alt=`, `data-*`) have no per-token composer form and are always sole writers. (Catalog addition S268 — #81 writer-ownership Axiom ①; emitted at `compiler/src/codegen/emit-html.ts` `analyzeWriterConflict`.) | Error |
 | E-ATTR-UNQUOTED-OPERATOR | §5.1, §17.1 | An unquoted attribute CONDITION (`if=`/`show=`/`else-if=`) contains a bare binary/ternary operator (`>= > < <= == != && \|\| + - * /` or ternary `?:`). An unquoted condition admits only the atomic forms (`@var` / `obj.prop` / `fn()` / prefix `!`); operator conditions SHALL be parenthesized `if=(expr)` or quoted `if="expr"`. Fires ONCE per offending attribute (cluster-A, S188 "reject + parens"). | Error |
+| E-ATTR-MULTI-STATEMENT | §5.2.4 | A `(…)` / `{…}` / `${…}` value (or a quoted condition) of an attribute that is NOT an event handler holds two or more statements separated by `;` (`title=(f(); "t")`, `if=${f(); @x}`). A non-handler attribute value is ONE expression; only an event handler takes a statement list (§5.2.3). Previously the value compiled at exit 0 with a wrong reading: `(…)` was not emitted at all, `${…}` / `{…}` took the first statement's value. Decided on the parsed statement list: a `;` in a string / template / regex / comment / nested function body / markup text, or a trailing `;`, is not a separator. Engine `effect=` (§51.0.H) is exempt. Newline-only separation is NOT judged (§5.2.4 "Not decided"). Fix: a single expression, or move the statements into a function and use its result. **Provenance:** ruling:user-voice-scrml.md S447 "stamp all" — (v) *"`E-ATTR-MULTI-STATEMENT`: a multi-statement value in a non-handler attribute is an error."* Newly-rejecting. (S450; emitted at `compiler/src/ast-builder.js` `checkAttrMultiStatement` — `parseAttributes` and `parseLiftTag`, forwarded out of the `<each>` / engine / `<match>` sub-builds.) | Error |
 | E-SCOPE-001 | §5.2 | Unquoted identifier not resolvable in scope | Error |
 | E-SCOPE-REDECLARE | §7.3.3 | Inside a function body, a `let` / `const` / `lin` / `function` declaration redeclares a name already bound in the SAME block (another such declaration, or — in the function's top-level block — a parameter). Nested-block shadowing is legal. Before this code the program failed at codegen ("Identifier already declared"); a `defer` in the block made it compile. Direction: newly-rejecting in name only (every rejected program already failed at codegen). (S430 round 5; emitted at `compiler/src/validators/lint-redeclare.ts`.) | Error |
 | E-CALL-ARITY | §7.3 | A call passes more arguments than the function declares parameters, or fewer — unless each omitted parameter has a default (§7.3.2). Reopen condition (ruled): the callback case. **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #2). **Named; impl pending — Nominal / not yet emitted** (measured S440: impl#1 compiles both at exit 0); impl#1 carries it (§34.0). **S447:** the call-site check is restated with the argument-type check in §7.3.4 (plain calls); same Nominal status. **Provenance:** ruling:user-voice-scrml.md S447 (*"RULED — UFCS PARKED; keep only the argument checks"* — call 9 kept). | Error |
