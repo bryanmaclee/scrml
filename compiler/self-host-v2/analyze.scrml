@@ -1874,7 +1874,7 @@ ${
     fn handlesInElem(g0: DeclStub[], e: AElem, w: HWalk, st0: AS) -> RHandles {
         let st: AS = st0
         let out: HandleInfo[] = []
-        const cond: boolean = w.conditional || attrNamed(e.attrs, "if") is some
+        const cond: boolean = w.conditional || attrNamed(e.attrs, "if") is some || attrNamed(e.attrs, "else-if") is some || attrNamed(e.attrs, "else") is some
         if (e.tag == "each" && !e.star) {
             // a row scope: handles inside it live on the row, conditional relative to the row
             const r: RHandles = handlesIn(g0, e.kids, { owner: e.nid, conditional: false, file: w.file }, st)
@@ -4744,7 +4744,144 @@ ${
     fn resolveNodes(env: Env, ns: ANode[], st0: AS) -> AS {
         let st: AS = st0
         for (const n of ns) { st = resolveNode(env, n, st) }
+        return chainCheck(env, ns, st)
+    }
+
+    // ---- s451: `if=` / `else-if=` / `else` chains (§17.1.1) ------------------
+    // A chain is the maximal run of SIBLINGS: one `if=` element, then zero or
+    // more `else-if=` elements, then at most one `else` element; whitespace-only
+    // text between members does not break it (§17.1.1 Syntax). Exactly the
+    // first true branch is in the DOM (lower.scrml `chainView`: ONE View.Cond).
+    // The structure rules are LOCAL — each looks only at the immediately
+    // preceding element at the same level (§17.1.1 Normative Rules):
+    //   E-CTRL-001  `else` not preceded by an `if=` / `else-if=` element
+    //   E-CTRL-002  `else-if=` not preceded by an `if=` / `else-if=` element
+    //   E-CTRL-003  an `else-if=` / `else` element right after an `else` element
+    //               (extends a chain past its terminal `else`; the element is
+    //               also not preceded by `if=` / `else-if=`, so 001/002 fire too)
+    //   E-CTRL-005  `else` / `else-if=` on the same element as `if=`
+    // E-CTRL-004 (a state object opener) cannot arise: no state opener reaches
+    // markup here (a declaration in markup is refused, resolveNode). An `if=`
+    // after an `else` opens a NEW chain (the grammar's `if-element` begins one).
+    // Fail closed (refused, never ignored): a chain attribute on an element the
+    // chain lowering does not wrap (only HTML elements and uses are wrapped); an
+    // `if=` / `else-if=` whose value is not an expression (quoted, valueless or
+    // braced — it used to render unconditionally); `else` with a value; and
+    // `else` + `else-if=` on one element (the SPEC names no rule for it).
+    fn chainCheck(env: Env, ns: ANode[], st0: AS) -> AS {
+        let st: AS = st0
+        let prev: int = 0               // the preceding sibling element: 0 none / not a member, 1 `if=` or `else-if=`, 2 `else`
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            const e: AElem | not = match k {
+                .Elem(e: x) :> x
+                .Text(text: t) :> not
+                .Interp(e: x) :> not
+                .DeclNode(d: d) :> not
+                .Effect(w: w) :> not
+            }
+            if (e is some) {
+                st = chainMember(env, e, prev, st)
+                prev = chainRoleAfter(e)
+            } else if (!blankNode(n)) {
+                prev = 0
+            }
+        }
         return st
+    }
+
+    // What an element is to the NEXT sibling: 1 it carries `if=` or `else-if=`,
+    // 2 it carries `else` (only), 0 neither.
+    fn chainRoleAfter(e: AElem) -> int {
+        if (attrNamed(e.attrs, "if") is some || attrNamed(e.attrs, "else-if") is some) return 1
+        if (attrNamed(e.attrs, "else") is some) return 2
+        return 0
+    }
+
+    fn chainMember(env: Env, e: AElem, prev: int, st0: AS) -> AS {
+        let st: AS = st0
+        const ia: AAttr | not = attrNamed(e.attrs, "if")
+        const ea: AAttr | not = attrNamed(e.attrs, "else-if")
+        const la: AAttr | not = attrNamed(e.attrs, "else")
+        if (ia is not && ea is not && la is not) return st
+        if (ia is some && (ea is some || la is some)) {
+            st = addDiag(st, env.file, e.span, "E-CTRL-005", "`else` (or `else-if=`) and `if=` cannot appear on the same element `<" + e.tag + ">`. An element either opens a new chain (`if=`) or continues one (`else-if=` / `else`), not both (§17.1.1)")
+        } else if (ea is some && la is some) {
+            st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` carries both `else-if=` and `else` — §17.1.1 gives an element one chain role; the bootstrap refuses the combination rather than pick one")
+        } else if (ea is some) {
+            if (prev == 2) st = addDiag(st, env.file, e.span, "E-CTRL-003", "The element `<" + e.tag + " else-if=…>` tries to extend a chain that already ended with `else`. Once `else` appears, no further `else-if=` or `else` is allowed in the same chain (§17.1.1)")
+            if (prev != 1) st = addDiag(st, env.file, ea.span, "E-CTRL-002", "`else-if=` on `<" + e.tag + ">` has no preceding `if=` element at the same level. An `else-if=` block must immediately follow an element with `if=` or `else-if=` (§17.1.1)")
+        } else if (la is some) {
+            if (prev == 2) st = addDiag(st, env.file, e.span, "E-CTRL-003", "The element `<" + e.tag + " else>` tries to extend a chain that already ended with `else`. Once `else` appears, no further `else-if=` or `else` is allowed in the same chain (§17.1.1)")
+            if (prev != 1) st = addDiag(st, env.file, la.span, "E-CTRL-001", "`else` on `<" + e.tag + ">` has no preceding `if=` element at the same level. An `else` block must immediately follow an element with `if=` or `else-if=` (§17.1.1)")
+        }
+        // the condition's value: an expression (a quoted, valueless or braced
+        // condition used to render the element unconditionally — fail-open)
+        st = chainCondValue(env, e, ia, st)
+        st = chainCondValue(env, e, ea, st)
+        if (la is some && !isNoValue(la.value)) {
+            st = addDiag(st, env.file, la.span, "E-BOOTSTRAP-UNSUPPORTED", "`else` on `<" + e.tag + ">` takes no value — it is a bare attribute (§17.1.1)")
+        }
+        // the host: only an HTML element or a use is wrapped by the chain
+        // lowering. `<each>` and `<errors>` refuse the attribute themselves; a
+        // refused element has no fact. Anything else would IGNORE it.
+        const f: ElemFact | not = elemFactNow(st, e.nid)
+        if (f is some && !chainHost(f)) {
+            st = chainHostRefused(env, e, ia, st)
+            st = chainHostRefused(env, e, ea, st)
+            st = chainHostRefused(env, e, la, st)
+        }
+        return st
+    }
+
+    fn chainCondValue(env: Env, e: AElem, a: AAttr | not, st: AS) -> AS {
+        if (a is not) return st
+        if (valueExpr(a.value) is some) return st
+        return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<" + e.tag + ">` needs a condition expression — `" + a.name + "=@x` or `" + a.name + "=(@n >= 3)`; a quoted, valueless or braced condition is not in the bootstrap (§17.1, §5.2) — it would render the element unconditionally")
+    }
+
+    fn chainHostRefused(env: Env, e: AElem, a: AAttr | not, st: AS) -> AS {
+        if (a is not) return st
+        let tag: string = e.tag
+        if (e.star) tag = "*" + e.tag
+        return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` on `<" + tag + ">` is not in the bootstrap — only an HTML element or a use of a declaration is conditionally rendered (§17.1); the attribute would be ignored and the element always rendered")
+    }
+
+    fn chainHost(f: ElemFact) -> boolean {
+        return match f {
+            .MHtml :> true
+            .MUse(decl: d) :> true
+            .MEach(bind: b) :> true          // refuses `if=` / `else-if=` / `else` itself (resolveEach)
+            .MErrors(of: x) :> true          // refuses them itself (resolveErrors)
+            .MSlot :> false
+            .MStateView(v: v) :> false
+            .MInline(v: v) :> false
+            .MStar(decl: d) :> false
+        }
+    }
+
+    // The element fact recorded so far for `nid` (the dense index is built
+    // after resolution, so this scans).
+    fn elemFactNow(st: AS, nid: int) -> ElemFact | not {
+        const t: ElemTable = st.facts.elems
+        let i: int = t.nids.length - 1
+        while (i >= 0) {
+            if (t.nids[i] == nid) return t.facts[i]
+            i = i - 1
+        }
+        return not
+    }
+
+    // An element's condition attribute: its `if=`, else its `else-if=` (the
+    // condition its branch is shown under; an `else` branch has none).
+    fn condAttrOf(attrs: AAttr[]) -> AAttr | not {
+        const a: AAttr | not = attrNamed(attrs, "if")
+        if (a is some) return a
+        return attrNamed(attrs, "else-if")
+    }
+
+    fn isChainAttr(name: string) -> boolean {
+        return name == "if" || name == "else-if" || name == "else"
     }
 
     fn resolveNode(env: Env, n: ANode, st: AS) -> AS {
@@ -5103,6 +5240,16 @@ ${
 
     // Every state-child body of `ds`'s fields, resolved in `ds`'s context (O5
     // (1i): the body is that variant's markup, like the declaration's renders).
+    fn stateBodyLists(ds: DeclSrc) -> ANode[][] {
+        let out: ANode[][] = []
+        for (const fd of fieldDecls(ds)) {
+            for (const c of fd.body) {
+                for (const sc of stateChildOf(c)) { out = out.concat([sc.body]) }
+            }
+        }
+        return out
+    }
+
     fn stateBodies(ds: DeclSrc) -> ANode[] {
         let out: ANode[] = []
         for (const fd of fieldDecls(ds)) {
@@ -5177,7 +5324,7 @@ ${
     }
 
     fn elemPresentEnv(env: Env, e: AElem) -> Env {
-        const a: AAttr | not = attrNamed(e.attrs, "if")
+        const a: AAttr | not = condAttrOf(e.attrs)
         if (a is not) return env
         const x: AExpr | not = valueExpr(a.value)
         if (x is not) return env
@@ -5200,7 +5347,8 @@ ${
         }
         for (const a of e.attrs) {
             const ev: string = eventName(a.name)
-            if (a.name == "if") {
+            if (isChainAttr(a.name)) {
+                // s451: `if=` / `else-if=` / `else` (§17.1.1) — chain attributes (chainCheck)
                 st = resolveIfValue(env, a.value, st)
                 st = addAttr(st, a.nid, AttrKind.AIf)
             } else if (ev != "") {
@@ -5455,7 +5603,7 @@ ${
                 const h: HandleInfo | not = lookupHandle(env, n)
                 if (h is some) alias = h.sym
                 st = addAttr(st, a.nid, AttrKind.AAs)
-            } else if (a.name == "if") {
+            } else if (isChainAttr(a.name)) {
                 st = resolveIfValue(env, a.value, st)
                 st = addAttr(st, a.nid, AttrKind.AIf)
             } else {
@@ -5571,7 +5719,7 @@ ${
             const renv: Env = declEnv(g, ds, true)
             st = resolveNodes(renv, rendersNodes(ds), st)
             // s442: state-child bodies (O5 (1i)), in the same context
-            st = resolveNodes(renv, stateBodies(ds), st)
+            for (const sb of stateBodyLists(ds)) { st = resolveNodes(renv, sb, st) }   // s451: one sibling list each (if-chains)
             // s442: a child field's own renders (§66.4 rule 2), in the same context;
             // s444: with `@<field>` naming that field of this instance (O54 = (a))
             if (ds.p is not) {
@@ -8384,7 +8532,7 @@ ${
     // typed FIRST — the element's other attributes and its children exist
     // only while it holds, so they are typed under its narrowing (`renv`).
     fn typeIfAttr(env: TEnv, e: AElem, ts: TypeState) -> RTEnv {
-        const a: AAttr | not = attrNamed(e.attrs, "if")
+        const a: AAttr | not = condAttrOf(e.attrs)       // s451: an `else-if=` branch too
         if (a is not) return keepTEnv(env, ts)
         const x: AExpr | not = valueExpr(a.value)
         if (x is not) return keepTEnv(env, ts)
@@ -8397,8 +8545,8 @@ ${
         const renv: TEnv = ri.env
         let ts: TypeState = ri.ts
         for (const a of e.attrs) {
-            if (a.name == "if") {
-                // typed above (typeIfAttr)
+            if (isChainAttr(a.name)) {
+                // typed above (typeIfAttr); `else` has no value
             } else if (eventName(a.name) != "") {
                 ts = typeHandlerValue(renv, a.value, ts)
             } else {
@@ -8417,7 +8565,7 @@ ${
         const di: DeclInfo | not = declInfo(env.t, decl)
         for (const a of e.attrs) {
             let av: VType = VType.Unknown
-            if (a.name != "as" && a.name != "if") {
+            if (a.name != "as" && !isChainAttr(a.name)) {
                 const ra: RVT = typeAttrValue(renv, a.value, ts)
                 ts = ra.ts
                 av = ra.vt
