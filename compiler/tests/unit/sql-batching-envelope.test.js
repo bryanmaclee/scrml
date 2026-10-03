@@ -131,12 +131,18 @@ describe("§4 envelope structure is correct", () => {
       .join("\n");
     const idxBegin = js.indexOf('await _scrml_sql.unsafe("BEGIN DEFERRED")');
     const idxIife = js.indexOf("const _scrml_result = await (async () =>", idxBegin);
+    // §8.9.2 (S449 D): a `fail` exit — an error-envelope result — ROLLs BACK; only a
+    // successful result COMMITs. Both branches sit between the IIFE and the catch.
+    const idxFailCheck = js.indexOf("_scrml_result.__scrml_error === true", idxIife);
+    const idxFailRollback = js.indexOf('await _scrml_sql.unsafe("ROLLBACK")', idxFailCheck);
     const idxCommit = js.indexOf('await _scrml_sql.unsafe("COMMIT")', idxBegin);
     const idxCatch = js.indexOf("catch (_scrml_batch_err)", idxBegin);
-    const idxRollback = js.indexOf('await _scrml_sql.unsafe("ROLLBACK")', idxBegin);
+    const idxRollback = js.indexOf('await _scrml_sql.unsafe("ROLLBACK")', idxCatch);
     expect(idxBegin).toBeGreaterThan(-1);
     expect(idxIife).toBeGreaterThan(idxBegin);
-    expect(idxCommit).toBeGreaterThan(idxIife);
+    expect(idxFailCheck).toBeGreaterThan(idxIife);
+    expect(idxFailRollback).toBeGreaterThan(idxFailCheck);
+    expect(idxCommit).toBeGreaterThan(idxFailRollback);
     expect(idxCatch).toBeGreaterThan(idxCommit);
     expect(idxRollback).toBeGreaterThan(idxCatch);
   });

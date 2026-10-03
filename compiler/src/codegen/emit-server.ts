@@ -28,7 +28,8 @@ import { resolveDbDriver } from "./db-driver.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
 import { sqliteFileHandle, ownedDbFilesFor, noteSqliteHandle, SQLITE_FILE_HELPER_IMPORT, sqliteFileHelperLines } from "./sqlite-file-target.ts";
-import { fileDefaultDbValue } from "../db-ownership.ts";
+import { SQL_TX_GUARD_HELPER_LINES, guardHandleExpr, requestScopeLines, CONCURRENT_TRANSACTIONS_VALUE } from "./sql-tx-guard.ts";
+import { fileDefaultDbDecl, dbAttrValue } from "../db-ownership.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
@@ -776,10 +777,21 @@ function batchNeedsIdempotencyDedup(monotonicity: string | undefined): boolean {
  *   - SPEC §44.2 (driver resolution), §40.2 (program db= attr)
  *   - `docs/changes/v0.3-bug-3a-sql-emission/progress.md` — dispatch notes
  */
+/**
+ * One declared database handle. `transactions` is the declaring element's
+ * `transactions=` value (§19.10.6 — `"concurrent"` opts a Postgres / MySQL handle into
+ * one reserved connection per transaction; null = the default, serialized).
+ */
+export interface DbScope {
+  connectionString: string;
+  driver: "sqlite" | "postgres" | "mysql";
+  transactions?: string | null;
+}
+
 export function collectDbScopes(
   fileAST: any,
-): Map<string, { connectionString: string; driver: "sqlite" | "postgres" | "mysql" }> {
-  const scopes = new Map<string, { connectionString: string; driver: "sqlite" | "postgres" | "mysql" }>();
+): Map<string, DbScope> {
+  const scopes = new Map<string, DbScope>();
   const nodes: any[] = getNodes(fileAST);
 
   function walk(children: any[]): void {
@@ -794,6 +806,7 @@ export function collectDbScopes(
           scopes.set(ds.dbVar, {
             connectionString: ds.connectionString,
             driver: ds.driver ?? "sqlite",
+            transactions: dbAttrValue(node, "transactions"),
           });
         }
       }
@@ -816,11 +829,12 @@ export function collectDbScopes(
   // else the first `<program db=>` (the prior first-`<db src>` / first-scope
   // aliasing, now in one place). Filed: a `<program db=a>` with a sibling
   // `<db src=b>` runs every `?{}` on b.
-  const defaultValue = fileDefaultDbValue(nodes);
-  if (defaultValue !== null) {
+  const defaultDecl = fileDefaultDbDecl(nodes);
+  if (defaultDecl !== null) {
+    const defaultValue = defaultDecl.value;
     const driverResult = resolveDbDriver(defaultValue);
     const driver: "sqlite" | "postgres" | "mysql" = driverResult.ok ? driverResult.info.driver : "sqlite";
-    scopes.set("_scrml_sql", { connectionString: defaultValue, driver });
+    scopes.set("_scrml_sql", { connectionString: defaultValue, driver, transactions: dbAttrValue(defaultDecl.node, "transactions") });
   }
   return scopes;
 }
@@ -2343,6 +2357,15 @@ export function generateServerJs(
   //   - the Batch Planner (Stage 7.5) recorded ≥ 1 CoalescingGroup with
   //     envelopeKind === "implicit-handler-tx" for this handler, AND
   //   - no E-BATCH-001 composition error fired for this handler.
+  // §8.9.2 — the implicit envelope's opening statement, in the dialect of the
+  // database `_scrml_sql` is bound to. `BEGIN DEFERRED` is SQLite's; Postgres has no
+  // DEFERRED mode and REJECTS it (MEASURED, Bun 1.4.2 / PG16: `ERR_POSTGRES_SYNTAX_ERROR
+  // syntax error at or near "DEFERRED"`), and MySQL's BEGIN takes no mode either —
+  // there a plain `BEGIN` is the same deferred-lock transaction. Before S449 every
+  // implicit envelope on Postgres failed at this statement (and, on a pooled handle,
+  // one step earlier: §19.10.6).
+  const _implicitEnvelopeBegin: string =
+    (collectDbScopes(fileAST).get("_scrml_sql")?.driver ?? "sqlite") === "sqlite" ? "BEGIN DEFERRED" : "BEGIN";
   function needsImplicitEnvelope(funcName: string): boolean {
     if (!batchPlan || !(batchPlan as any).coalescedHandlers) return false;
     const groups = (batchPlan as any).coalescedHandlers.get(funcName);
@@ -4727,24 +4750,31 @@ export function generateServerJs(
         lines.push(`  // A9-Ext-4 D1: CPS server-side error envelope`);
         lines.push(`  try {`);
       }
-      if (_envelope) {
-        lines.push(`  // §8.9.2 implicit per-handler transaction`);
-        lines.push(`  await _scrml_sql.unsafe("BEGIN DEFERRED");`);
-        lines.push(`  try {`);
-      }
-
-      lines.push(`  const _scrml_result = await (async () => {`);
-
       // A no-argument server function does not require a request body: tolerate an
       // empty/absent one (an external, non-scrml-client caller POSTing with no body
       // would otherwise hit an uncaught `await req.json()` throw → 500). `_scrml_body`
       // stays defined for any server-mode `@cell` reads. The arg-bearing path keeps
       // the strict read — a missing body for a call that carries args IS an error.
-      lines.push(
-        paramNames.length === 0
-          ? `    const _scrml_body = await _scrml_req.json().catch(() => ({}));`
-          : `    const _scrml_body = await _scrml_req.json();`,
-      );
+      const _bodyRead = paramNames.length === 0
+        ? `const _scrml_body = await _scrml_req.json().catch(() => ({}));`
+        : `const _scrml_body = await _scrml_req.json();`;
+      if (_envelope) {
+        // §19.10.6 (S449) — read the request body BEFORE the transaction opens. A
+        // transaction now holds its connection until it ends (other requests wait), so
+        // a BEGIN issued ahead of `await _scrml_req.json()` would let one slow or
+        // stalled upload hold the database for every request for as long as the client
+        // chose. Same failure semantics: a body that does not parse still throws into
+        // the same handler (and, for a CPS route, the same error envelope), now with
+        // no transaction to roll back.
+        lines.push(`  ${_bodyRead}`);
+        lines.push(`  // §8.9.2 implicit per-handler transaction`);
+        lines.push(`  await _scrml_sql.unsafe(${JSON.stringify(_implicitEnvelopeBegin)});`);
+        lines.push(`  try {`);
+      }
+
+      lines.push(`  const _scrml_result = await (async () => {`);
+
+      if (!_envelope) lines.push(`    ${_bodyRead}`);
 
       for (let i = 0; i < paramNames.length; i++) {
         lines.push(`    const ${paramNames[i]} = _scrml_body[${JSON.stringify(paramNames[i])}];`);
@@ -4918,7 +4948,19 @@ export function generateServerJs(
 
       lines.push(`  })();`);
       if (_envelope) {
-        lines.push(`  await _scrml_sql.unsafe("COMMIT");`);
+        // §8.9.2 (S449 ruling D) — the envelope ROLLs BACK on a `fail` exit as well as
+        // on an exception; only a successful completion commits. A `fail` (and a `?`
+        // propagating a callee's failure — §19.5.2: `?` IS a `fail`) does not throw: it
+        // RETURNS the error envelope, so the handler's result is the one place every
+        // fail exit, at any depth, is observable. Before S449 this always committed,
+        // and a handler that failed after two UPDATEs persisted both
+        // (g-implicit-handler-tx-commits-on-fail). The error value still goes to the
+        // caller unchanged (the response below).
+        lines.push(`  if (_scrml_result !== null && typeof _scrml_result === "object" && _scrml_result.__scrml_error === true) {`);
+        lines.push(`    await _scrml_sql.unsafe("ROLLBACK"); // §8.9.2: a \`fail\` exit rolls the implicit transaction back`);
+        lines.push(`  } else {`);
+        lines.push(`    await _scrml_sql.unsafe("COMMIT");`);
+        lines.push(`  }`);
       }
       // §12.5 — the OPAQUE-RESULT guard. THIS ARM HAD NONE UNTIL S405: an author
       // `Response` fell straight into `JSON.stringify` below, and a deliberate 403
@@ -6862,6 +6904,12 @@ export function generateServerJs(
     declLines.push("import { SQL } from \"bun\";");
     // s445 — where the SQLite-file helper (and its `node:fs` import) is spliced in,
     // once the loop below has seen a file-backed handle that needs it.
+    // §19.10.6 (S449 C) — the per-handle transaction mutex + request scope runtime
+    // (codegen/sql-tx-guard.ts). BEFORE the declarations: each one calls
+    // `_scrml_db_guard` at module init.
+    declLines.push("");
+    declLines.push(...SQL_TX_GUARD_HELPER_LINES);
+    declLines.push("");
     const sqliteFileHelperAt = declLines.length;
     let sqliteFileProjectRoot: string | null = null;
     // Emit declarations in stable order: default `_scrml_sql` first, then
@@ -6875,6 +6923,27 @@ export function generateServerJs(
       const bn = parseInt(b.replace("_scrml_sql_", ""), 10);
       return an - bn;
     });
+    // §19.10.6 (S449 C, opt-in (b)) — `transactions="concurrent"` on a Postgres / MySQL
+    // database runs each transaction on its own reserved pool connection instead of
+    // serializing them behind the handle's mutex. SQLite is ONE connection: there is
+    // nothing to run a second transaction on, so the opt-in is a compile error there
+    // rather than a silently ignored promise of concurrency. Fired once per handle.
+    const concurrentTransactionsFor = (ident: string, scope: DbScope): boolean => {
+      if (scope.transactions !== CONCURRENT_TRANSACTIONS_VALUE) return false;
+      if (scope.driver === "sqlite") {
+        errors.push(new CGError(
+          "E-SQL-010",
+          `E-SQL-010: \`transactions="concurrent"\` is declared for the SQLite database \`${scope.connectionString}\`. ` +
+          "It runs each transaction on its own connection from a Postgres / MySQL connection pool; a SQLite " +
+          "database is one connection, so its transactions always run one at a time (§19.10.6). " +
+          "Remove the attribute, or use a `postgres://` / `mysql://` database.",
+          { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+          "error",
+        ));
+        return false;
+      }
+      return true;
+    };
     for (const ident of sortedIdents) {
       const scope = dbScopes.get(ident);
       if (!scope) {
@@ -6920,7 +6989,7 @@ export function generateServerJs(
           `// WARNING: ${ident} referenced but no matching <program db=> / <db src=> found ` +
           `(E-SQL-004 fired above); defensive :memory: stub follows.`,
         );
-        declLines.push(`const ${ident} = new SQL(":memory:");`);
+        declLines.push(`const ${ident} = ${guardHandleExpr(`new SQL(":memory:")`, "sqlite", false)};`);
         continue;
       }
       // s445-dev-db-side-file — a SQLite FILE opens through the helpers in
@@ -6944,7 +7013,7 @@ export function generateServerJs(
       if (sqliteFile !== null) {
         sqliteFileProjectRoot = sqliteFile.projectRoot;
         noteSqliteHandle(fileAST, sqliteFile.record, "server");
-        declLines.push(`const ${ident} = ${sqliteFile.expr};`);
+        declLines.push(`const ${ident} = ${guardHandleExpr(sqliteFile.expr, "sqlite", concurrentTransactionsFor(ident, scope))};`);
         if (sqliteFile.owns) sqliteConfiguredIdents.push(ident);
         continue;
       }
@@ -6958,7 +7027,7 @@ export function generateServerJs(
       ) {
         connStr = "sqlite:" + connStr;
       }
-      declLines.push(`const ${ident} = new SQL(${JSON.stringify(connStr)});`);
+      declLines.push(`const ${ident} = ${guardHandleExpr(`new SQL(${JSON.stringify(connStr)})`, scope.driver, concurrentTransactionsFor(ident, scope))};`);
       // §44 (S433, g-native-sqlite-connection-lacks-wal-and-busy-timeout-config;
       // operator ruling S385 A1 = "(c) BOTH … WAL + 5s busy-timeout as the safe
       // default", grounded in what the adopter's own `db.js` already does) — a
@@ -6997,6 +7066,13 @@ export function generateServerJs(
       finalEmitted = declBlock + finalEmitted;
     } else {
       finalEmitted = finalEmitted.slice(0, headerEndIdx) + declBlock + finalEmitted.slice(headerEndIdx);
+    }
+    // §19.10.6 (S449 C) — every route handler (and WebSocket callback) runs in its
+    // own request scope: the OWNER of any transaction it opens on a guarded handle.
+    // Appended LAST, after every route export it names.
+    const _scopeLines = requestScopeLines(collected, /^export const _scrml_ws_handlers = /m.test(finalEmitted));
+    if (_scopeLines.length > 0) {
+      finalEmitted = finalEmitted.replace(/\n*$/, "\n") + _scopeLines.join("\n") + "\n";
     }
   }
 
