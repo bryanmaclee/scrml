@@ -1140,7 +1140,7 @@ ${
     fn mkField(sym: Sym, ty: Type, init: Expr, mode: FieldMode, grants: GrantSet, cap: Sym | not) -> Field {
         return {
             sym: sym, ty: ty, init: init, mode: mode, role: FieldRole.Child, grants: grants,
-            graph: not, exported: false, wcap: cap, vals: [],
+            graph: not, exported: false, wcap: cap, vals: [], persist: not,
         }
     }
 

@@ -1,0 +1,17 @@
+<program db="./app.db">
+${
+    type LoadError:enum = { Timeout, NotFound }
+    <name> = ""
+    function loadName(id: string)! LoadError {
+        rows = ?{`SELECT name FROM users LIMIT 1`}
+        return rows[0].name
+    }
+}
+<h1 class="eb-header">Profile</>
+<request id="nameLoad" deps=[]>
+    ${ @name = loadName("1") }
+</>
+<div class="eb-fallback" if=${<#nameLoad>.error is some}>Could not load profile</>
+<p class="eb-name" if=${<#nameLoad>.data is some}>${@name}</>
+<footer class="eb-footer">End</>
+</program>

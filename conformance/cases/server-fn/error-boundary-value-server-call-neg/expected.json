@@ -1,0 +1,22 @@
+{
+  "id": "server-fn-error-boundary-value-server-call-neg",
+  "description": "S451 (\"your recs on all five\" item 1, R1 wins): the negative case for the pattern server-fn/error-boundary-fallback pins. A render-time call to a server-placed `!` function (loadName touches `?{}`, so it escalates) inside an `<errorBoundary>` is a server call in a value position — a markup `${ … }` interpolation — and is E-VALUE-SERVER-CALL (§13.7). The boundary does not exempt it: a boundary catches render-time failures of CLIENT `!` calls and host throws only (§19.6.1 / §19.6.6). Source is identical to server-fn/error-boundary-fallback. impl#1 does not emit the code (frozen; carried as g-impl1-value-server-call-s451) — it compiles the old pattern at exit 0.",
+  "language-version": "1.0",
+  "spec": "§13.7",
+  "rationale": "§13.7 rule item 1 + normative statement: a call whose callee is server-placed SHALL NOT appear in a value position; an `<errorBoundary>` SHALL NOT exempt a value position from this rule. §19.6.6 Scope (S451): a server call SHALL NOT occur at render time.",
+  "expect": {
+    "codes": ["E-VALUE-SERVER-CALL"],
+    "notCodes": []
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-value-server-call-s451",
+      "fails": {
+        "codes": [
+          "emitted:E-SQL-004=1",
+          "missing:E-VALUE-SERVER-CALL"
+        ]
+      }
+    }
+  }
+}

@@ -60,6 +60,10 @@
 //       initializers / renders / handlers / effects — §19.16.3 rule 4), and
 //       its body holds no Return, no Defer and no Suspend at any depth
 //       (§19.16.3 rules 1-2; a Suspend would split the block's exit)
+//   C17 (s451) a `persist=` field is a writable field of the program whose type
+//       has a wire descriptor (no FIXED-length sequence); `Local` needs a
+//       `replace` grant and no `rule=` graph (O-061-5); an Unpersist names a
+//       persisted field and follows its reset Write (§6.14.2 rule 9)
 //   (C3 covers the s444 edits: the removals by the field's grants; ElemAt by
 //   the ELEMENT field's own contract, dpa-052 Q3.)
 // A diagnostic is a message string (§4 permits strings as text).
@@ -67,14 +71,15 @@
 ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, Attr, Block,
              EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, CoreProgram, CapOwner, TransitionGraph,
-             DeclKind, SurfaceProp, ValidityOf,
+             DeclKind, SurfaceProp, ValidityOf, Persist, PersistStore,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
+    import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
 
     export fn checkCore(p: CoreProgram) -> string[] {
         let out: string[] = []
         for (const d of p.decls) {
-            for (const f of d.fields) { out = out.concat(checkField(d, f)) }
+            for (const f of d.fields) { out = out.concat(checkField(d, f)).concat(checkPersist(p, d, f)) }
         }
         // Context = the lexically enclosing declarations (index 0 = nearest). In
         // Core, declarations do not nest (a child declaration is a Field), so a
@@ -110,7 +115,7 @@ ${
             .NField(f: f) :> []
             .NFn(f: f) :> []
             .NServerFn(f: f) :> []
-            .NBlock(b: b) :> []
+            .NBlock(b: b) :> checkUnpersistOrder(p, b)
             .NInst(i: i) :> []
             .NPattern(pat: pat) :> []
             .NEdit(k: k) :> []
@@ -164,6 +169,7 @@ ${
             .Suspend(bind: x) :> ["C8: a bind's write is not a Write"]
             .ResetSurface(of: x) :> ["C8: a bind's write is not a Write"]
             .Defer(body: x) :> ["C8: a bind's write is not a Write"]
+            .Unpersist(decl: x) :> ["C8: a bind's write is not a Write"]
         }
     }
 
@@ -400,9 +406,14 @@ ${
         // s449: a validated cell's reset also clears its surface (§55.13 — a
         // `reset-on=` reset IS `reset(@x)`): the Write may be followed by ONE
         // ResetSurface of that same field.
+        // s451: a persisted cell's reset then removes its storage key
+        // (§6.14.2 rule 9) — ONE Unpersist, last.
         const n: int = reset.stmts.length
-        if (n != 1 && n != 2) return out.concat(["C13: a ResetOn's reset is " + n + " statements — it is exactly one Write (§6.8.4 rule 1), and its surface's reset (§55.13)"])
-        if (n == 2 && !isResetSurface(reset.stmts[1])) return out.concat(["C13: a ResetOn's reset is 2 statements — one Write, then something other than its surface's reset (§6.8.4 rule 1, §55.13)"])
+        if (n < 1 || n > 3) return out.concat(["C13: a ResetOn's reset is " + n + " statements — it is exactly one Write (§6.8.4 rule 1), its surface's reset (§55.13) and its storage key's removal (§6.14.2 rule 9)"])
+        let k = 1
+        if (k < n && isResetSurface(reset.stmts[k])) k = k + 1
+        if (k < n && isUnpersist(reset.stmts[k])) k = k + 1
+        if (k != n) return out.concat(["C13: a ResetOn's reset is " + n + " statements — one Write, then something other than its surface's reset and its storage key's removal (§6.8.4 rule 1, §55.13, §6.14.2 rule 9)"])
         const cap: Sym | not = writeCapOf(reset.stmts[0])
         if (cap is not) return out.concat(["C13: a ResetOn's reset is not a Write (§6.8.4 rule 1)"])
         const o: CapOwner | not = capOwner(p, cap)
@@ -416,6 +427,7 @@ ${
     fn isResetSurface(s: Stmt) -> boolean {
         return match s {
             .ResetSurface(of: v) :> true
+            .Unpersist(decl: x) :> false
             .Write(cap: x) :> false
             .Let(sym: x) :> false
             .Assign(local: x) :> false
@@ -426,6 +438,103 @@ ${
             .Suspend(bind: x) :> false
             .Defer(body: x) :> false
         }
+    }
+
+    fn isUnpersist(s: Stmt) -> boolean {
+        return match s {
+            .Unpersist(decl: x) :> true
+            .ResetSurface(of: v) :> false
+            .Write(cap: x) :> false
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Commit(writes: x) :> false
+            .If(cond: x) :> false
+            .Return(e: x) :> false
+            .Eval(e: x) :> false
+            .Suspend(bind: x) :> false
+            .Defer(body: x) :> false
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // C17 (s451) — `persist=` (§6.14). A persisted field is a field of the
+    // PROGRAM (§6.14.1 rule 3 — the bootstrap persists program cells; a
+    // declaration's per-instance persistence is O-061-9) with a write
+    // capability (a locked or derived cell is refused: no rule decides it,
+    // O-061-10), whose type has a §57 wire descriptor with no FIXED-length
+    // sequence (restore is construction; no rule fixes a stored length).
+    // `Local` also needs a contract that grants `replace` and no `rule=` graph:
+    // a cross-tab value is applied as one whole-value write, and whether a
+    // contract that refuses one judges it is O-061-5 (OPEN).
+    // An Unpersist resolves (C4's rule) to a persisted field, and stands right
+    // after the reset Write of that same field (and its ResetSurface).
+    // -------------------------------------------------------------------------
+    fn checkPersist(p: CoreProgram, d: Decl, f: Field) -> string[] {
+        const ps: Persist | not = f.persist
+        if (ps is not) return []
+        const at: string = "C17: <" + d.sym.hint + ">." + f.sym.hint + " is persisted (key \"" + ps.key + "\")"
+        if (!isProgramKind(d.kind)) return [at + " but is not a field of the program (§6.14.1 rule 3)"]
+        if (f.wcap is not) return [at + " but has no write capability (a locked or derived cell)"]
+        let out: string[] = []
+        const local: boolean = ps.store == PersistStore.Local
+        if (local && (f.graph is some || !f.grants.replace)) out = out.concat([at + " in localStorage, but its contract refuses a whole-value write — a cross-tab value is one (O-061-5)"])
+        const wb: WireBuild = wireBuild(p, f.ty)
+        const wt: WireTable | not = wb.table
+        if (wt is not) return out.concat([at + " but its type has no wire descriptor: " + wb.why.join("; ")])
+        if (hasFixedLength(wt)) out = out.concat([at + " but its type holds a FIXED-length sequence"])
+        return out
+    }
+
+    fn checkUnpersist(p: CoreProgram, encl: Decl[], dsym: Sym, i: InstRef, idx: int) -> string[] {
+        const read: string[] = checkCellRead(p, encl, dsym, i, [{ owner: dsym, idx: idx }])
+        if (read.length > 0) return ["C17: an Unpersist — " + read[0]]
+        const d: Decl | not = findDecl(p, dsym)
+        if (d is not) return []
+        if (d.fields[idx].persist is not) return ["C17: an Unpersist of <" + d.sym.hint + ">." + d.fields[idx].sym.hint + ", which is not persisted"]
+        return []
+    }
+
+    // C17: each Unpersist in `b` follows the Write of its own field (with
+    // that field's ResetSurface, if any, between them).
+    fn checkUnpersistOrder(p: CoreProgram, b: Block) -> string[] {
+        let out: string[] = []
+        let i = 0
+        for (const s of b.stmts) {
+            const key: string = unpersistKey(s)
+            if (key != "") {
+                let j: int = i - 1
+                if (j >= 0 && isResetSurface(b.stmts[j])) j = j - 1
+                let prev: string = ""
+                if (j >= 0) prev = writeKey(p, b.stmts[j])
+                if (prev != key) out = out.concat(["C17: an Unpersist of " + key + " does not follow the reset Write of that field (§6.14.2 rule 9)"])
+            }
+            i = i + 1
+        }
+        return out
+    }
+
+    fn unpersistKey(s: Stmt) -> string {
+        return match s {
+            .Unpersist(decl: d, idx: x) :> d.hint + "#" + d.id + "." + x
+            .ResetSurface(of: v) :> ""
+            .Write(cap: x) :> ""
+            .Let(sym: x) :> ""
+            .Assign(local: x) :> ""
+            .Commit(writes: x) :> ""
+            .If(cond: x) :> ""
+            .Return(e: x) :> ""
+            .Eval(e: x) :> ""
+            .Suspend(bind: x) :> ""
+            .Defer(body: x) :> ""
+        }
+    }
+
+    fn writeKey(p: CoreProgram, s: Stmt) -> string {
+        const cap: Sym | not = writeCapOf(s)
+        if (cap is not) return ""
+        const o: CapOwner | not = capOwner(p, cap)
+        if (o is not) return ""
+        return o.decl.sym.hint + "#" + o.decl.sym.id + "." + o.idx
     }
 
     fn writeCapOf(s: Stmt) -> Sym | not {
@@ -440,6 +549,7 @@ ${
             .Suspend(bind: x) :> not
             .ResetSurface(of: x) :> not
             .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
         }
     }
 
@@ -608,6 +718,7 @@ ${
             .Suspend(bind: x) :> ""
             .ResetSurface(of: x) :> ""
             .Defer(body: x) :> ""
+            .Unpersist(decl: x) :> ""
         }
     }
 
@@ -695,6 +806,7 @@ ${
         return match s {
             .Suspend(then: t) :> t
             .ResetSurface(of: x) :> not
+            .Unpersist(decl: x) :> not
             .Let(sym: x) :> not
             .Assign(local: x) :> not
             .Write(cap: x) :> not
@@ -772,6 +884,7 @@ ${
             .Suspend(bind: b) :> []
             .ResetSurface(of: v) :> checkSurface(p, encl, v)
             .Defer(body: d) :> checkDefer(encl, d)
+            .Unpersist(decl: d, inst: i, idx: x) :> checkUnpersist(p, encl, d, i, x)
         }
     }
 
@@ -818,6 +931,7 @@ ${
             .If(cond: x) :> ""
             .Eval(e: x) :> ""
             .ResetSurface(of: x) :> ""
+            .Unpersist(decl: x) :> ""
         }
     }
 
@@ -848,6 +962,7 @@ ${
             .Suspend(bind: x) :> "a Suspend inside a Commit"
             .ResetSurface(of: x) :> "a ResetSurface inside a Commit"
             .Defer(body: x) :> "a Defer inside a Commit"
+            .Unpersist(decl: x) :> "an Unpersist inside a Commit"
         }
     }
 
@@ -1212,6 +1327,7 @@ ${
             .Suspend(bind: x) :> not
             .ResetSurface(of: x) :> not
             .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
         }
     }
 

@@ -1,0 +1,4 @@
+<program>
+<who req> = <input type="text"/>
+<p id="w">${@who}</p>
+</program>

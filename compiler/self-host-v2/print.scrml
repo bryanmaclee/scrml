@@ -29,13 +29,14 @@ ${
     import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
              HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
-             Decl, Fn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator,
+             Decl, Fn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
              findDecl, findTypeDef, typeDefSym, capOwner } from "./core.scrml"
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt,
              jid, jstr, jnum, jmember, jcall, jmcall, jthunk, sexpr, printModule } from "./js.scrml"
     import { HAttr, HNode, Page, printPage } from "./html.scrml"
     import { NameKey, NameTable, emptyNames, mint, nameOf } from "./names.scrml"
+    import { WireTable, wireBuild, wireTableJs } from "./codec.scrml"
 
     export type Template:struct = { id: string, nodes: HNode[] }
     export type Output:struct = { js: string, html: string }
@@ -505,6 +506,7 @@ ${
             .Eval(e: x) :> false
             .Suspend(bind: x) :> false
             .ResetSurface(of: x) :> false
+            .Unpersist(decl: x) :> false
         }
     }
 
@@ -531,6 +533,7 @@ ${
             .Suspend(bind: b, on: on, then: t) :> [suspendJs(ctx, b, on, t)]
             .ResetSurface(of: v) :> [sexpr(jmcall(surfaceJs(ctx, v), "reset", []))]
             .Defer(body: d) :> [deferJs(ctx, d)]
+            .Unpersist(decl: d, inst: i, idx: x) :> [unpersistJs(ctx, d, i, x)]
         }
     }
 
@@ -597,6 +600,7 @@ ${
             .Suspend :> []
             .ResetSurface :> []
             .Defer :> []
+            .Unpersist :> []
         }
     }
 
@@ -612,6 +616,7 @@ ${
             .Suspend :> []
             .ResetSurface :> []
             .Defer :> []
+            .Unpersist :> []
         }
     }
 
@@ -936,6 +941,7 @@ ${
             .Eval(e: x) :> false
             .ResetSurface(of: x) :> false
             .Defer(body: x) :> false
+            .Unpersist(decl: x) :> false
         }
     }
 
@@ -1511,8 +1517,42 @@ ${
     }
 
     fn fieldCtor(ctx: Ctx, f: Field, init: JsExpr) -> JsExpr {
+        const ps: Persist | not = f.persist
+        if (ps is some && f.wcap is some) return persistedJs(ctx, f, ps, init)
         if (f.wcap is some) return rtCall(ctx, "seeded", [init])
         return rtCall(ctx, "derived", [jmember(jid("inst$"), "scope"), init])
+    }
+
+    // s451 — a `persist=` field (§6.14.2):
+    // `rt.persisted(inst$.scope, <default thunk>, "local" | "session", <key>, <wire table>)`
+    // — a seeded cell whose construction value is the stored value decoded
+    // against the field's type (the §57 descriptor below), or the default; it
+    // is written on change and (`"local"`) synced across tabs. C17 guarantees
+    // the descriptor exists; `unwireable$` marks a Core that skipped check.
+    fn persistedJs(ctx: Ctx, f: Field, ps: Persist, init: JsExpr) -> JsExpr {
+        const wt: WireTable | not = wireBuild(ctx.p, f.ty).table
+        let wire: JsExpr = jid("unwireable$" + f.sym.id)
+        if (wt is some) wire = wireTableJs(wt)
+        const where: PersistStore = ps.store
+        const store: string = match where {
+            .Local :> "local"
+            .Session :> storeSession()
+        }
+        return rtCall(ctx, "persisted", [jmember(jid("inst$"), "scope"), init, jstr(store), jstr(ps.key), wire])
+    }
+
+    // The runtime's name for sessionStorage, spelled in pieces: impl#1 escalates
+    // a function whose body holds the bare word to the SERVER, string literals
+    // included (route-inference.ts, `/(?<!@)\bsession\b/` — see analyze.scrml
+    // `sessionWord`).
+    fn storeSession() -> string { return "sess" + "ion" }
+
+    // s451 — the storage half of a reset (§6.14.2 rule 9): `rt.unpersist(<cell>)`
+    // removes the key and cancels the store the reset's Write queued.
+    fn unpersistJs(ctx: Ctx, dsym: Sym, inst: InstRef, idx: int) -> JsStmt {
+        const d: Decl | not = findDecl(ctx.p, dsym)
+        if (d is not) return sexpr(jid("unboundDecl$" + dsym.id))
+        return sexpr(rtCall(ctx, "unpersist", [fieldCell(instJs(ctx, inst), d, idx)]))
     }
 
     // -------------------------------------------------------------------------

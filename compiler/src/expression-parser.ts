@@ -3641,6 +3641,129 @@ export function emitStringFromTree(node: ExprNode): string {
   }
 }
 
+// ---------------------------------------------------------------------------
+// emitCodeOnlyStringFromTree — the CODE surface of an expression, with every
+// literal's TEXT blanked (SPEC §12.4, s451-ri-string-literal).
+// ---------------------------------------------------------------------------
+//
+// §12.4: route inference "SHALL NOT classify a function based on the names of
+// identifiers that appear inside string-literal contents of its body." The
+// route-inference Trigger-1 table (`SERVER_ONLY_PATTERNS`: `?{`, `new Database(`,
+// `new SQL(`, `fs.*(`, `readFileSync(`, `env(`, bare `session`) is matched against
+// the expression's rendered text, and `emitStringFromTree` renders a string
+// literal's QUOTED CONTENT — so `"your session ended: " + x` read as a `session`
+// reference and server-placed a pure client function.
+//
+// This renders the same text as `emitStringFromTree` EXCEPT that literal text is
+// blanked, so a text-shaped pattern only ever sees code:
+//   - a string literal renders as `""`; a static template as ``` `` ```;
+//   - an interpolated template keeps its `${ … }` CODE (itself blanked
+//     recursively) and blanks its quasi text;
+//   - an opaque raw-text slot the tree did not structure (an `escape-hatch`
+//     node's `raw` — e.g. a block-body callback — and a `match-expr`'s
+//     `rawArms`) is lexed with the SAME acorn tokenizer the parser uses
+//     (`blankLiteralTextInSource`) and has its string / template-quasi /
+//     comment content blanked.
+//
+// FAIL-CLOSED: where the raw-text lexer cannot lex a slot it returns the slot
+// UNCHANGED (a possible over-fire — a function placed on the server that need
+// not be — never an under-fire that places a server-only resource on the
+// client). Only text inside a token the lexer positively identified as a
+// string / template quasi / comment is ever blanked.
+
+/** Blank the interior of [start, end) in `chars` (replace each char with a space, keep newlines). */
+function blankRange(chars: string[], start: number, end: number): void {
+  for (let k = start; k < end && k < chars.length; k++) {
+    if (chars[k] !== "\n") chars[k] = " ";
+  }
+}
+
+/**
+ * Lex `raw` (scrml/JS expression or statement text) with the parser's acorn
+ * tokenizer and return it with the CONTENT of every string literal, every
+ * template-literal quasi, and every comment replaced by spaces. Code (incl. a
+ * template's `${ … }` interpolations) is preserved. A `?{ … }` SQL block is
+ * preserved as `?{}` (its presence is itself a server signal). Returns `raw`
+ * unchanged when it cannot be lexed (fail-closed — see the section header).
+ */
+export function blankLiteralTextInSource(raw: string): string {
+  if (!raw || typeof raw !== "string") return raw;
+  // Fast path: no quote / backtick / comment opener → nothing to blank.
+  if (!/["'`]|\/\/|\/\*/.test(raw)) return raw;
+  const sqlScan = replaceSqlBlockPlaceholder(raw);
+  if (sqlScan.unbalanced) return raw;
+  const processed = sqlScan.result;
+  const chars = processed.split("");
+  try {
+    // @ts-ignore — the extended parser class inherits acorn's static tokenizer.
+    const tokenizer = ScrmlParser.tokenizer(processed, {
+      ecmaVersion: 2025,
+      sourceType: "module",
+      allowAwaitOutsideFunction: true,
+      allowReturnOutsideFunction: true,
+      onComment: (_block: boolean, _text: string, start: number, end: number) => {
+        blankRange(chars, start, end);
+      },
+    });
+    for (const tok of tokenizer as Iterable<{ type: acorn.TokenType; start: number; end: number }>) {
+      if (tok.type === acorn.tokTypes.string) {
+        // The `::` enum plugin also emits `string` tokens (`Type::Variant`);
+        // only a QUOTED literal is literal text.
+        const q = processed[tok.start];
+        if ((q === "\"" || q === "'") && tok.end - tok.start >= 2) {
+          blankRange(chars, tok.start + 1, tok.end - 1);
+        }
+      } else if (tok.type === acorn.tokTypes.template || tok.type === acorn.tokTypes.invalidTemplate) {
+        blankRange(chars, tok.start, tok.end);
+      }
+    }
+  } catch {
+    return raw;
+  }
+  return chars.join("").replace(/__scrml_sql_placeholder__/g, "?{}");
+}
+
+/** Deep-copy an ExprNode with every literal's text blanked (see section header). */
+function blankLiteralTextInTree(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(blankLiteralTextInTree);
+  if (!node || typeof node !== "object") return node;
+  const n = node as Record<string, unknown>;
+  if (n.kind === "lit") {
+    if (n.litType === "string") return { ...n, raw: "\"\"", value: "" };
+    if (n.litType === "template") {
+      return typeof n.raw === "string" && n.raw.includes("${")
+        ? { ...n, raw: blankLiteralTextInSource(n.raw) }
+        : { ...n, raw: "``", value: "" };
+    }
+    return n;
+  }
+  if (n.kind === "escape-hatch" && typeof n.raw === "string") {
+    return { ...n, raw: blankLiteralTextInSource(n.raw) };
+  }
+  const out: Record<string, unknown> = {};
+  for (const k in n) {
+    const v = n[k];
+    if (k === "span") { out[k] = v; continue; }
+    if (n.kind === "match-expr" && k === "rawArms" && Array.isArray(v)) {
+      out[k] = v.map((a) => (typeof a === "string" ? blankLiteralTextInSource(a) : a));
+      continue;
+    }
+    // A markup-value's `node` / a block lambda's `stmts` are AST, not ExprNode,
+    // and `emitStringFromTree` does not render them — copy by reference.
+    if ((n.kind === "markup-value" && k === "node") || k === "stmts") { out[k] = v; continue; }
+    out[k] = v && typeof v === "object" ? blankLiteralTextInTree(v) : v;
+  }
+  return out;
+}
+
+/**
+ * `emitStringFromTree`, with all literal TEXT blanked — the code-only surface a
+ * text-shaped route-inference pattern may be matched against (§12.4).
+ */
+export function emitCodeOnlyStringFromTree(node: ExprNode): string {
+  return emitStringFromTree(blankLiteralTextInTree(node) as ExprNode);
+}
+
 /**
  * Normalize whitespace in a string for round-trip invariant comparison.
  * Collapses multiple spaces/newlines to single space, trims.

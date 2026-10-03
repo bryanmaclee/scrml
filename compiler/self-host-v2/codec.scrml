@@ -299,4 +299,50 @@ ${
 
     // The literal's text (tests, debugging, and any printer that wants a string).
     export fn wireTableText(t: WireTable) -> string { return expr(wireTableJs(t), "") }
+
+    // s451 (U5): does the descriptor hold a FIXED-length sequence anywhere?
+    // `Fixed` constrains writes against the length the value was CONSTRUCTED
+    // with and has no static length (see WireBound), so a decoder cannot judge
+    // a stored value against it alone — `persist=` refuses such a type.
+    export fn hasFixedLength(t: WireTable) -> boolean {
+        if (tyHasFixed(t.root)) return true
+        for (const d of t.defs) {
+            if (defHasFixed(d)) return true
+        }
+        return false
+    }
+
+    fn tyHasFixed(t: WireTy) -> boolean {
+        return match t {
+            .WInt :> false
+            .WNum :> false
+            .WStr :> false
+            .WBool :> false
+            .WMaybe(inner: i) :> tyHasFixed(i)
+            .WSeq(elem: e, bound: b) :> boundIsFixed(b) || tyHasFixed(e)
+            .WRef(def: d) :> false
+        }
+    }
+
+    fn boundIsFixed(b: WireBound) -> boolean {
+        return match b {
+            .Fixed :> true
+            .Free :> false
+            .Bounded(min: lo) :> false
+        }
+    }
+
+    fn defHasFixed(d: WireDef) -> boolean {
+        return match d {
+            .WStruct(fields: fs) :> fieldsHaveFixed(fs)
+            .WEnum(tags: ts) :> false
+        }
+    }
+
+    fn fieldsHaveFixed(fs: WireField[]) -> boolean {
+        for (const f of fs) {
+            if (tyHasFixed(f.ty)) return true
+        }
+        return false
+    }
 }

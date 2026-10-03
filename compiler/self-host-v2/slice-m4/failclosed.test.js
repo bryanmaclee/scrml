@@ -62,10 +62,16 @@ describe("(1) a scrml structural element is never an HTML element", () => {
 });
 
 describe("(2) an opener word the bootstrap does not read is refused, never ignored", () => {
-  test("§6.14 `persist=\"local\" key=\"…\"` on a program cell → one E-BOOTSTRAP-UNSUPPORTED per word, naming §6.14", () => {
-    const d = run(`<program>\n let <mode:string="light" persist="local" key="app.mode"/>\n <main><p>\${@mode}</p></main>\n</program>\n`).diags;
+  // s451 FLIPPED: §6.14 is built for a PROGRAM cell (persist.test.js) — §6.14.1 rule 1-2 and the
+  // §6.8.4 opener position ("In the §66 opener it is a **modifier** — the same class as `debounced=`
+  // (§6.13), `persist=` (§6.14) and validators"). On a declaration's FIELD it stays refused: §6.14.1
+  // rule 3 "On a §66 declaration it governs the **shared instance only**", position + per-instance
+  // keys OPEN (O-061-9).
+  test("§6.14 `persist=\"local\" key=\"…\"`: read on a program cell; on a declaration's field → one E-BOOTSTRAP-UNSUPPORTED per word, naming O-061-9", () => {
+    expect(run(`<program>\n let <mode:string="light" persist="local" key="app.mode"/>\n <main><p>\${@mode}</p></main>\n</program>\n`).diags).toEqual([]);
+    const d = run(`<program>\n <box a:int=1>\n  let <c:int=0 persist="local" key="app.c"/>\n </>\n renders <p>\${a}</p>\n <main><box/></main>\n</program>\n`).diags;
     expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
-    for (const x of d) expect(x.message).toContain("§6.14 persist= is not in the bootstrap yet");
+    for (const x of d) expect(x.message).toContain("O-061-9");
   });
   test("an unknown word on a user declaration and on a child field at depth", () => {
     const d = run(`<program>\n <box a:int=1 frob>\n  let <c:int=0 zap/>\n </>\n renders <p>\${a}</p>\n <main><box/></main>\n</program>\n`).diags;
