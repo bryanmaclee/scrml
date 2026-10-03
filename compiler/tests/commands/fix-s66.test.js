@@ -18,11 +18,14 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fixS66, S66_RULES } from "../../src/commands/fix-s66.js";
-import { runFixCommand, classifyEntry, lineDiff } from "../../src/commands/fix.js";
+import { join, dirname } from "node:path";
+import { fixS66, S66_RULES, astWrites, lexicalWritten, lifecycleNamedCells } from "../../src/commands/fix-s66.js";
+import { runFixCommand, classifyEntry, lineDiff, resolveProject } from "../../src/commands/fix.js";
+import { compileScrml } from "../../src/api.js";
+import { splitBlocks } from "../../src/block-splitter.js";
+import { buildAST } from "../../src/ast-builder.js";
 
 const fix = (src, opts = {}) => fixS66(src, { filePath: "t.scrml", ...opts });
 
@@ -295,54 +298,121 @@ describe("§6 canonical §66 input is left alone", () => {
   });
 });
 
-describe("§7 the CLI", () => {
-  const legacy = "${\n    <count> = 0\n    function inc() { @count = @count + 1 }\n}\n<button onclick=inc()>+</button>\n";
+describe("§7 the CLI — default = only rules impl#1 compiles; --s66 is a gated preview", () => {
+  const legacy = "${\n    <count> = 0\n    function inc() { @count = @count + 1 }\n}\n<button onclick=inc()>+</button>\n<p>${@count}</p>\n";
   const io = () => {
     const o = { out: [], err: [] };
     return { o, io: { out: (s) => o.out.push(s), err: (s) => o.err.push(s) } };
   };
+  const tmp = () => mkdtempSync(join(tmpdir(), "scrml-fix-"));
+  const impl1Codes = (f) => {
+    const r = compileScrml({ inputFiles: [f], write: false, outputDir: join(dirname(f), "out"), log: () => {} });
+    return [...(r.errors ?? []), ...(r.warnings ?? [])].map((d) => d.code)
+      .filter((c) => !["W-PROGRAM-001", "W-PROGRAM-REDUNDANT-LOGIC", "W-PROGRAM-SPA-INFERRED"].includes(c)).sort();
+  };
 
-  test("--dry-run prints the diff and writes nothing; --check exits 1; a plain run writes in place; a re-run is a no-op", () => {
-    const dir = mkdtempSync(join(tmpdir(), "scrml-fix-"));
+  test("HIGH 1: the DEFAULT run writes only impl#1-compilable rewrites — impl#1's diagnostics are unchanged, no §66 opener appears", () => {
+    const dir = tmp();
+    try {
+      const f = join(dir, "app.scrml");
+      writeFileSync(f, legacy);
+      const before = impl1Codes(f);
+      expect(runFixCommand([f], io().io)).toBe(0);
+      const out = readFileSync(f, "utf8");
+      expect(out.startsWith("<program>")).toBe(true);        // program-wrap applied
+      expect(out).toContain("<count> = 0");                    // the declaration is NOT rewritten
+      expect(out).not.toContain("let <count");
+      expect(impl1Codes(f)).toEqual(before);                   // impl#1 reads it the same
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("HIGH 1: a shipped example (examples/14) through the default run keeps impl#1's diagnostics", () => {
+    const dir = tmp();
+    try {
+      const f = join(dir, "14-mario-state-machine.scrml");
+      cpSync(join(import.meta.dir, "../../../examples/14-mario-state-machine.scrml"), f);
+      const before = impl1Codes(f);
+      runFixCommand([f], io().io);
+      expect(impl1Codes(f)).toEqual(before);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("HIGH 1: --s66 is dry-run by default and warns; --s66 --write writes the §66 dialect", () => {
+    const dir = tmp();
+    try {
+      const f = join(dir, "app.scrml");
+      writeFileSync(f, legacy);
+      const a = io();
+      expect(runFixCommand([f, "--s66"], a.io)).toBe(0);
+      expect(readFileSync(f, "utf8")).toBe(legacy);
+      expect(a.o.err.join("\n")).toContain("cannot compile");
+      expect(a.o.out.join("\n")).toContain("+    let <count:number=0/>");
+      expect(runFixCommand([f, "--s66", "--write"], io().io)).toBe(0);
+      expect(readFileSync(f, "utf8")).toContain("let <count:number=0/>");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the declaration rules need --s66; --write needs --s66", () => {
+    expect(runFixCommand(["x.scrml", "--rules=rhs-decl"], io().io)).toBe(1);
+    expect(runFixCommand(["x.scrml", "--write"], io().io)).toBe(1);
+  });
+
+  test("--dry-run prints the diff and writes nothing; --check exits 1 while a change is pending, 0 after", () => {
+    const dir = tmp();
     try {
       const f = join(dir, "app.scrml");
       writeFileSync(f, legacy);
       const a = io();
       expect(runFixCommand([f, "--dry-run"], a.io)).toBe(0);
-      expect(a.o.out.join("\n")).toContain("+    let <count:number=0/>");
+      expect(a.o.out.join("\n")).toContain("+<program>");
       expect(readFileSync(f, "utf8")).toBe(legacy);
       expect(runFixCommand([f, "--check"], io().io)).toBe(1);
-      expect(readFileSync(f, "utf8")).toBe(legacy);
       expect(runFixCommand([f], io().io)).toBe(0);
-      expect(readFileSync(f, "utf8")).toContain("let <count:number=0/>");
       expect(runFixCommand([f, "--check"], io().io)).toBe(0);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  test("a blocker is reported as path:line rule: reason (and the file is still written for what IS mechanical)", () => {
-    const dir = mkdtempSync(join(tmpdir(), "scrml-fix-"));
+  test("LOW: --check exits 2 when nothing would change but a reported construct remains", () => {
+    const dir = tmp();
     try {
       const f = join(dir, "app.scrml");
-      writeFileSync(f, "<program>\n<a> = 1\n<who req> = <input/>\n</program>\n");
+      writeFileSync(f, "<program>\n<who req> = <input/>\n<p>x</p>\n</program>\n");
       const a = io();
-      runFixCommand([f], a.io);
-      expect(a.o.err.join("\n")).toMatch(/app\.scrml:3 rhs-decl: Shape 2/);
-      expect(readFileSync(f, "utf8")).toContain("<a:number=1/>");
-      expect(readFileSync(f, "utf8")).toContain("<who req> = <input/>");
+      expect(runFixCommand([f, "--s66", "--check"], a.io)).toBe(2);
+      expect(a.o.err.join("\n")).toMatch(/app\.scrml:2 rhs-decl: Shape 2/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("HIGH 2a: a cell written by a component in ANOTHER file is `let` — the CLI resolves the project", () => {
+    const dir = tmp();
+    try {
+      const f = join(dir, "app.scrml");
+      writeFileSync(join(dir, "bump.scrml"), "${ export const Bump = <button onclick=${@count = @count + 1}>+</button> }\n");
+      writeFileSync(f, "<program>\n${ import { Bump } from \"./bump.scrml\" }\n<count> = 0\n<Bump/>\n<p>${@count}</p>\n</program>\n");
+      runFixCommand([f, "--s66", "--write"], io().io);
+      expect(readFileSync(f, "utf8")).toContain("let <count:number=0/>");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
   test("--json reports applied rules and blockers", () => {
-    const dir = mkdtempSync(join(tmpdir(), "scrml-fix-"));
+    const dir = tmp();
     try {
       const f = join(dir, "app.scrml");
       writeFileSync(f, legacy);
       const a = io();
-      runFixCommand([f, "--json", "--dry-run"], a.io);
+      runFixCommand([f, "--json", "--s66"], a.io);
       const j = JSON.parse(a.o.out.join("\n"));
       expect(j.files[0].applied.map((x) => x.rule)).toContain("rhs-decl");
       expect(j.files[0].blockers).toEqual([]);
@@ -363,9 +433,79 @@ describe("§7 the CLI", () => {
     expect(classifyEntry("${ function f() {} }", "app.scrml").entry).toBe(false);
   });
 
+  test("resolveProject follows relative imports transitively; an unresolvable import is left out", () => {
+    const dir = tmp();
+    try {
+      writeFileSync(join(dir, "c.scrml"), "${ export function c() { return 1 } }\n");
+      writeFileSync(join(dir, "b.scrml"), "${ import { c } from \"./c.scrml\" }\n");
+      writeFileSync(join(dir, "a.scrml"), "${ import { b } from \"./b.scrml\"\n import { z } from \"./nope.scrml\" }\n");
+      const p = resolveProject(join(dir, "a.scrml"));
+      expect(Object.keys(p).map((k) => k.slice(dir.length + 1)).sort()).toEqual(["b.scrml", "c.scrml"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("lineDiff marks removals and additions", () => {
     const d = lineDiff("a\nb\nc", "a\nB\nc", "f");
     expect(d).toContain("-b");
     expect(d).toContain("+B");
+  });
+});
+
+describe("§8 the write set (S239 review, HIGH 2) — each layer bites on its own", () => {
+  const astOf = (src) => buildAST(splitBlocks("t.scrml", src)).ast;
+  const cases = [
+    ["assignment in a function", "<program>\n<c> = 0\nfunction f() { @c = 2 }\n</program>\n"],
+    ["field write", "<program>\n<c> = \"a\"\nfunction f() { @c.x = 1 }\n</program>\n"],
+    ["bind:", "<program>\n<c> = \"\"\n<input bind:value=@c/>\n</program>\n"],
+    ["ref= (written at mount)", "<program>\n<c> = 0\n<div ref=@c>x</div>\n</program>\n"],
+  ];
+  for (const [label, src] of cases) {
+    test(`the AST layer alone sees: ${label}`, () => expect(astWrites(astOf(src)).has("c")).toBe(true));
+    test(`the lexical layer alone sees: ${label}`, () => expect(lexicalWritten(src, "c", false)).toBe(true));
+  }
+  test("neither layer calls a pure read a write", () => {
+    const src = "<program>\n<c> = 0\n<p>${@c + 1}</p>\n</program>\n";
+    expect(astWrites(astOf(src)).has("c")).toBe(false);
+    expect(lexicalWritten(src, "c", false)).toBe(false);
+  });
+  test("lexical: `bind:value={@c}` (brace form) is a write", () => {
+    expect(lexicalWritten("<input bind:value={@c}/>", "c", false)).toBe(true);
+  });
+  test("HIGH 2c: a cell named in deps=[…] / reset-on=[…] must be writable", () => {
+    expect([...lifecycleNamedCells("<effect deps=[@a, @b]>x</effect>\n<x reset-on=[@c]> = 0")].sort()).toEqual(["a", "b", "c"]);
+    expect([...lifecycleNamedCells("when @d, @e changes { log(1) }")].sort()).toEqual(["d", "e"]);
+    const out = fix("<program>\n<n> = 0\n<effect deps=[@n]>${ log(1) }</effect>\n<p>${@n}</p>\n</program>\n").output;
+    expect(out).toContain("let <n:number=0/>");
+  });
+  test("HIGH 2b: ref=@x makes the cell `let`", () => {
+    expect(fix("<program>\n<n> = 0\n<div ref=@n>x</div>\n</program>\n").output).toContain("let <n:number=0/>");
+  });
+  test("HIGH 2a: a write in an aux file makes the cell `let`; an unresolvable import makes every cell `let`", () => {
+    const src = "<program>\n${ import { Bump } from \"./bump.scrml\" }\n<count> = 0\n<Bump/>\n<p>${@count}</p>\n</program>\n";
+    expect(fix(src, { auxSources: { "bump.scrml": "${ export const Bump = <button onclick=${@count = @count + 1}>+</button> }\n" } }).output).toContain("let <count:number=0/>");
+    expect(fix(src).output).toContain("let <count:number=0/>"); // ./bump.scrml not in the project → unknown
+    const read = fix(src, { auxSources: { "bump.scrml": "${ export const Bump = <span>${@count}</span> }\n" } }).output;
+    expect(read).toContain("<count:number=0/>");
+    expect(read).not.toContain("let <count");
+  });
+});
+
+describe("§9 S239 review MED / LOW", () => {
+  test("MED b: `<engine name=…>` is left untouched and reported", () => {
+    const r = fix("<program>\ntype L:enum = { A, B }\n<engine name=Signal for=L initial=.A>\n  <A rule=.B></>\n  <B rule=.A></>\n</>\n<p>${@signal}</p>\n</program>\n");
+    expect(r.output).toContain("<engine name=Signal for=L initial=.A>");
+    expect(r.blockers.map((b) => b.reason).join("\n")).toContain("`name=` names the engine itself");
+  });
+  test("MED c: an untyped integer feeding an `int` reader is `:int`; divided too → reported", () => {
+    const ok = fix("${\n    <count> = 2\n    const <doubled>: int = @count * 2\n}\n<p>${@doubled}</p>\n").output;
+    expect(ok).toContain("<count:int=2/>");
+    const r = fix("${\n    <count> = 2\n    const <doubled>: int = @count * 2\n    function h() { return @count / 2 }\n}\n<p>${@doubled}${h()}</p>\n");
+    expect(r.blockers.map((b) => b.reason).join("\n")).toContain("`int` vs `number` is not mechanical");
+  });
+  test("LOW: pre-migrate never rewrites a comment", () => {
+    const src = "<program>\n// legacy note: <machine> and < engine were renamed\n<p>x</p>\n</program>\n";
+    expect(fix(src).output).toBe(src);
   });
 });

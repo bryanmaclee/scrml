@@ -45,7 +45,7 @@ Usage:
   scrml serve [options]                      Start persistent compiler server
   scrml generate <type> [options]            Scaffold adopter-owned source (e.g. \`scrml generate auth\`)
   scrml migrate <file|dir> [options]         Apply automated source rewrites for deprecated patterns
-  scrml fix <file|dir> [options]             Rewrite legacy declarations to the §66 opener dialect (§66.21 / §63.4)
+  scrml fix <file|dir> [options]             §66.21 migration rewrites (§63.4); default keeps files compilable, --s66 previews the rest
   scrml db-migrate <project> --db <url>      Apply a project's <schema> (incl. db-authoritative RLS/role DDL) to a real DB
   scrml promote --match|--engine <file|dir>  Promote tier-1 if-else → <match> or <match> → <engine> (CLI surface; impl pending)
   scrml introspect <postgres-url> [options]  Read a live Postgres schema and emit scrml <schema> source
@@ -88,12 +88,17 @@ Options (migrate):
   --no-default-excludes Disable built-in samples/ + tests/ exclusions
 
 Options (fix):
+  Default rules (pre-migrate, program-wrap, program-move, unwrap-logic) keep the file compilable
+  by today's compiler and are verified per file; --s66 previews the §66 declaration rules, whose
+  output today's compiler CANNOT compile.
   --dry-run             Print a diff without writing
-  --check               Exit non-zero if any file would change (CI-friendly)
+  --check               Exit 1 if a file would change, 2 if a reported construct remains, else 0
+  --s66                 Add the §66 declaration rules (dry-run unless --write)
+  --write               With --s66: write the §66 rewrite
   --entry               Treat every file as an application entry (wrap in <program>)
   --no-program-wrap     Never wrap a file in <program>
-  --rules=<a,b,...>     Restrict to named rules (pre-migrate, rhs-decl, const-cell, engine-simple,
-                        program-wrap, program-move, unwrap-logic)
+  --rules=<a,b,...>     Restrict to named rules (pre-migrate, program-wrap, program-move, unwrap-logic;
+                        with --s66 also rhs-decl, const-cell, engine-simple)
   --json                Print a JSON report (applied rules + constructs left for a human)
   A construct that is not mechanically rewritable is left untouched and reported.
 

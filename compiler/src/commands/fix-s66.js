@@ -62,11 +62,16 @@ import { applyMigrations } from "./migrate.js";
 import { compileScrml } from "../api.js";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, dirname, basename } from "node:path";
+import { join, dirname, basename, resolve, relative, isAbsolute, sep } from "node:path";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
+
+/** The rules whose output impl#1 — the compiler adopters run — still compiles (verified per file). */
+export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "program-wrap", "program-move", "unwrap-logic"]);
+/** The §66 declaration rules: their output is the §66 opener dialect, which impl#1 does NOT compile. */
+export const S66_DECL_RULES = Object.freeze(["rhs-decl", "const-cell", "engine-simple"]);
 
 export const S66_RULES = Object.freeze([
   "pre-migrate",
@@ -83,7 +88,10 @@ const CARRIED_ATTRS = new Set(["server", "pinned", "persist", "debounced", "thro
 /** Of those, the ones under which something other than this file's code writes the cell. */
 const WRITE_IMPLYING_ATTRS = new Set(["server", "pinned", "persist", "reset-on", "debounced", "throttled"]);
 /** Engine opener attributes the simple engine rule covers. */
-const ENGINE_SIMPLE_ATTRS = new Set(["for", "initial", "var", "name"]);
+// `name=` is NOT covered: §51.0.C makes it the engine's NAME (cross-file `<Name/>` mounting), not
+// just its variable, and §66.21 row 4 rewrites only `for=` / `initial=`. `var=` names the variable,
+// which O5 (RULED S435) makes the declaration's name.
+const ENGINE_SIMPLE_ATTRS = new Set(["for", "initial", "var"]);
 /** Methods whose call on a cell's value chain provably does not mutate it. */
 const PURE_METHODS = new Set([
   "map", "filter", "slice", "includes", "indexOf", "lastIndexOf", "find", "findIndex", "findLast",
@@ -278,6 +286,17 @@ function collectEnums(asts) {
   return enums;
 }
 
+/** Parsed ASTs by source text, for the project write scan (one parse per distinct file per process). */
+const AST_MEMO = new Map();
+function parseAstMemo(filePath, source) {
+  if (AST_MEMO.has(source)) return AST_MEMO.get(source);
+  let ast = null;
+  try { ast = parseAst(filePath, source); } catch { ast = null; }
+  if (AST_MEMO.size > 4000) AST_MEMO.clear();
+  AST_MEMO.set(source, ast);
+  return ast;
+}
+
 function parseAst(filePath, source) {
   // The front end's "statement boundary" console warnings are about the INPUT; a fix run reports
   // through its own blockers, so they are captured here rather than printed.
@@ -297,14 +316,22 @@ const SHAPE_LINT_CODES = new Set(["W-PROGRAM-001", "W-PROGRAM-REDUNDANT-LOGIC", 
 function compiledCodes(filePath, source, auxSources) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-fix-verify-"));
   try {
-    const f = join(dir, basename(filePath) || "input.scrml");
+    // Mirror the file and its project (aux keys are absolute, or relative to the file's directory)
+    // under one scratch root, keeping their relative layout so imports resolve as they do on disk.
+    const self = resolve(filePath);
+    const files = new Map([[self, source]]);
     for (const [p, s] of Object.entries(auxSources ?? {})) {
-      const ap = join(dir, p);
-      if (ap === f) continue;
-      mkdirSync(dirname(ap), { recursive: true });
-      writeFileSync(ap, s);
+      const ap = absKey(filePath, p);
+      if (ap !== self) files.set(ap, s);
     }
-    writeFileSync(f, source);
+    const root = commonDir([...files.keys()]);
+    let f = null;
+    for (const [ap, s] of files) {
+      const out = join(dir, relative(root, ap));
+      mkdirSync(dirname(out), { recursive: true });
+      writeFileSync(out, s);
+      if (ap === self) f = out;
+    }
     // The verify compile is internal: its terminal output (Note(PA) lines, stage notices) is about
     // a scratch copy, so it is silenced for the duration and restored in `finally`.
     const saved = { log: console.log, warn: console.warn, error: console.error, out: process.stdout.write, err: process.stderr.write };
@@ -323,6 +350,33 @@ function compiledCodes(filePath, source, auxSources) {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** An aux key as an absolute path: absolute keys stay, relative ones resolve against the file's dir. */
+function absKey(filePath, key) {
+  return isAbsolute(key) ? resolve(key) : resolve(dirname(resolve(filePath)), key);
+}
+
+/** The deepest directory containing every given absolute path. */
+function commonDir(paths) {
+  let parts = dirname(paths[0]).split(sep);
+  for (const p of paths.slice(1)) {
+    const q = dirname(p).split(sep);
+    let i = 0;
+    while (i < parts.length && i < q.length && parts[i] === q[i]) i++;
+    parts = parts.slice(0, i);
+  }
+  return parts.join(sep) || sep;
+}
+
+/** Relative `.scrml` import specifiers of a source (`import … from "./x.scrml"`). */
+function relativeImports(src) {
+  const out = [];
+  for (const m of src.matchAll(/\bimport\b[^\n;]*?\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']/g)) {
+    const spec = m[1] ?? m[2];
+    if (spec && spec.startsWith(".")) out.push(spec);
+  }
+  return out;
 }
 
 /**
@@ -344,6 +398,28 @@ function frontEndReading(filePath, source) {
   }
 }
 
+/**
+ * Replace every comment (`//` to end of line, `/* … *\/`, `<!-- … -->`) with an inert placeholder,
+ * strings skipped. `restore` puts the comments back.
+ */
+function maskComments(src) {
+  const saved = [];
+  let out = "";
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === '"' || ch === "`") { const j = skipString(src, i); out += src.slice(i, j); i = j; continue; }
+    let end = -1;
+    if (ch === "/" && src[i + 1] === "/" && src[i - 1] !== ":") { end = src.indexOf("\n", i); if (end === -1) end = src.length; }
+    else if (ch === "/" && src[i + 1] === "*") { end = src.indexOf("*/", i + 2); end = end === -1 ? src.length : end + 2; }
+    else if (src.startsWith("<!--", i)) { end = src.indexOf("-->", i + 4); end = end === -1 ? src.length : end + 3; }
+    if (end !== -1) { saved.push(src.slice(i, end)); out += `\u0001${saved.length - 1}\u0001`; i = end; continue; }
+    out += ch;
+    i++;
+  }
+  return { text: out, restore: (t) => t.replace(/\u0001(\d+)\u0001/g, (_, n) => saved[Number(n)]) };
+}
+
 /** A legacy declaration statement (line-leading), for the after-the-fact safety net. */
 const LEGACY_DECL_LINE = /^[ \t]*(?:export[ \t]+)?(const[ \t]+)?<([A-Za-z_][\w]*)(?:[ \t][^<>\n]*)?>[ \t]*(?::[^=\n]*)?=(?![=>])/gm;
 
@@ -352,7 +428,7 @@ const LEGACY_DECL_LINE = /^[ \t]*(?:export[ \t]+)?(const[ \t]+)?<([A-Za-z_][\w]*
 // ---------------------------------------------------------------------------
 
 /** Cells impl#1's AST shows as written anywhere in the file. */
-function astWrites(ast) {
+export function astWrites(ast) {
   const w = new Set();
   walkAst(ast, (n) => {
     // impl#1's own reading (dependency-graph.ts): a non-structural state-decl that is not the folded
@@ -361,10 +437,10 @@ function astWrites(ast) {
     if ((n.kind === "reactive-array-mutation" || n.kind === "reactive-nested-assign") && n.target) w.add(n.target);
     // `@set(…)`: the target is named in the raw args — every word there counts (over-approximation).
     if (n.kind === "reactive-explicit-set" && typeof n.args === "string") for (const m of n.args.matchAll(/[A-Za-z_$][\w$]*/g)) w.add(m[0]);
-    // `bind:attr=@x` on any element writes @x.
+    // `bind:attr=@x` on any element writes @x; so does `ref=@el` (the element, at mount).
     if (n.kind === "markup" && Array.isArray(n.attrs)) {
       for (const a of n.attrs) {
-        if (!a || typeof a.name !== "string" || !a.name.startsWith("bind:")) continue;
+        if (!a || typeof a.name !== "string" || !(a.name.startsWith("bind:") || a.name === "ref")) continue;
         const nm = a.value && typeof a.value.name === "string" ? a.value.name : null;
         if (nm && nm.startsWith("@")) w.add(nm.slice(1).split(/[.[]/)[0]);
       }
@@ -388,14 +464,15 @@ function astWrites(ast) {
  * cannot prove a read is a write. `isSequence` makes any bare use (a possible alias) a write.
  * Comments are NOT stripped — a mention in a comment counting as a write only yields `let`.
  */
-function lexicalWritten(src, name, isSequence) {
+export function lexicalWritten(src, name, isSequence) {
   const re = new RegExp(`@${name.replace(/\$/g, "\\$")}(?![\\w$])`, "g");
   for (const m of src.matchAll(re)) {
     const at = m.index;
     if (at > 0 && (isIdChar(src[at - 1]) || src[at - 1] === ".")) continue;
     const before = src.slice(Math.max(0, at - 80), at);
     if (/(\+\+|--)\s*$/.test(before)) return true;
-    if (/\bbind:[\w-]+\s*=\s*(\$\{\s*)?$/.test(before)) return true;
+    if (/\bbind:[\w-]+\s*=\s*(\$?\{\s*)?$/.test(before)) return true;
+    if (/\bref\s*=\s*(\$?\{\s*)?$/.test(before)) return true;
     if (/\breset\s*\(\s*$/.test(before)) return true;
     if (/\bdelete\s+$/.test(before)) return true;
     // walk the member / index / call chain
@@ -440,6 +517,36 @@ function lexicalWritten(src, name, isSequence) {
     }
   }
   return false;
+}
+
+/**
+ * Cells a lifecycle construct requires to be writable: every `@x` named in `deps=[…]`,
+ * `reset-on=[…]` or `when … changes` (§6.7.4 / §6.8.4 — each rejects a non-writable cell,
+ * E-LIFECYCLE-007 / E-RESET-ON-NOT-WRITABLE). Over the raw text,
+ * comments included (a false hit only yields `let`).
+ */
+export function lifecycleNamedCells(src) {
+  const out = new Set();
+  for (const m of src.matchAll(/\b(?:deps|reset-on)\s*=\s*(\[[^\]]*\]|\$?\{[^}]*\}|@[\w$]+)/g)) {
+    for (const r of m[1].matchAll(/@([A-Za-z_$][\w$]*)/g)) out.add(r[1]);
+  }
+  // `when @a, @b changes { … }` — the keyword spelling of an effect's dependency list (§6.7.4).
+  for (const m of src.matchAll(/\bwhen\s+([^{}\n]*?)\s+changes\b/g)) {
+    for (const r of m[1].matchAll(/@([A-Za-z_$][\w$]*)/g)) out.add(r[1]);
+  }
+  return out;
+}
+
+/**
+ * Cells read by an `int`-annotated declaration's initializer (`<d>: int = @x * 2`,
+ * `<d:int=(@x * 2)/>`): an untyped integer cell feeding one must be `int`, not `number`.
+ */
+function intReaderCells(src) {
+  const out = new Set();
+  const grab = (rhs) => { for (const r of rhs.matchAll(/@([A-Za-z_$][\w$]*)/g)) out.add(r[1]); };
+  for (const m of src.matchAll(/<[A-Za-z_][\w]*[^<>\n]*>\s*:\s*(?:int|integer)\s*=([^\n]*)/g)) grab(m[1]);
+  for (const m of src.matchAll(/<[A-Za-z_][\w]*:(?:int|integer)=([^\n]*)/g)) grab(m[1]);
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -631,6 +738,7 @@ function parseDeclSite(src, node, filePath) {
  *   entry       the file is an application entry (program-wrap / program-move apply). Default true.
  *   auxSources  sibling files (path → source) consulted for enum declarations, and written beside
  *               the file for the verify compile.
+ *   scanSources further files (path → source) read only for writes to this file's cells.
  *   rules       restrict to a subset of S66_RULES (default: all).
  *   verify      compile the structural-only rewrite with impl#1 and withdraw it unless the diagnostic
  *               codes are unchanged (default true).
@@ -641,12 +749,19 @@ export function fixS66(source, opts = {}) {
   const filePath = opts.filePath ?? "input.scrml";
   const entry = opts.entry !== false;
   const enabled = new Set(opts.rules ?? S66_RULES);
+  /** Any §66 declaration rule on: legacy-declaration blockers are reported only then. */
+  const declMode = S66_DECL_RULES.some((r) => enabled.has(r));
   const applied = [];
   const blockers = [];
 
   let src = source;
   if (enabled.has("pre-migrate")) {
-    const pm = applyMigrations(src);
+    // The older rules are text rewrites; comments are masked first so prose in a comment
+    // (`// was <machine>`) is never rewritten.
+    const masked = maskComments(src);
+    const pm0 = applyMigrations(masked.text);
+    const pm = { ...pm0, rewritten: masked.restore(pm0.rewritten) };
+    pm.changed = pm.rewritten !== src;
     if (pm.changed) {
       // The older migrate rules are verified the same way as the structural ones: impl#1 must read
       // the migrated file with the same codes, aside from the codes those rules exist to clear (incl.
@@ -676,9 +791,31 @@ export function fixS66(source, opts = {}) {
     return { output: source, changed: false, applied: [], blockers };
   }
 
+  // The project: every other file (aux / resolved imports). Its ASTs feed the enum lookup AND the
+  // write set — a component in another file can write this file's cell (an ambient `@count`).
+  const project = Object.entries(opts.auxSources ?? {}).filter(([p]) => absKey(filePath, p) !== resolve(filePath));
+  // scanSources: further files read ONLY for writes (the CLI passes the rest of the target tree).
+  const projKeys = new Set(project.map(([q]) => absKey(filePath, q)));
+  const scanOnly = Object.entries(opts.scanSources ?? {}).filter(([p]) => absKey(filePath, p) !== resolve(filePath) && !projKeys.has(absKey(filePath, p)));
   const auxAsts = [];
-  for (const [p, s] of Object.entries(opts.auxSources ?? {})) {
-    try { auxAsts.push(parseAst(p, s)); } catch { /* an aux file that does not parse contributes no enums */ }
+  let projectUnknown = false; // a file we cannot read for writes: every cell is then `let`
+  for (const [p, s] of project) {
+    const a = parseAstMemo(p, s);
+    if (a) auxAsts.push(a); else projectUnknown = true;
+  }
+  const scanAsts = [];
+  for (const [p, s] of scanOnly) {
+    const a = parseAstMemo(p, s);
+    if (a) scanAsts.push(a); else projectUnknown = true;
+  }
+  // An import we cannot resolve inside the project hides a file that may write a cell.
+  const known = new Set([resolve(filePath), ...project.map(([p]) => absKey(filePath, p))]);
+  for (const [p, s] of [[filePath, src], ...project]) {
+    const base = p === filePath ? resolve(filePath) : absKey(filePath, p);
+    for (const spec of relativeImports(s)) {
+      const target = resolve(dirname(base), spec);
+      if (!known.has(target) && !known.has(target + ".scrml")) projectUnknown = true;
+    }
   }
   const enums = collectEnums([ast, ...auxAsts]);
   const block = (rule, off, reason) => {
@@ -709,9 +846,9 @@ export function fixS66(source, opts = {}) {
     const off = n.span?.start ?? 0;
     if (n.kind === "state-decl" && n.structuralForm && !n._isReactiveAssign) decls.push({ node: n, stack: [...stack] });
     else if (n.kind === "engine-decl") engines.push({ node: n, stack: [...stack] });
-    else if (n.kind === "component-def") block("component-const", off, "component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)");
-    else if (n.kind === "theme-decl") block("theme-body", off, "`<theme>` body (§66.17 — blocked on O17)");
-    else if (n.kind === "export-decl" && typeof n.raw === "string" && /^export\s+(const\s+)?</.test(n.raw)) block("rhs-decl", off, "exported cell (cross-file write set unknown — §66.14)");
+    else if (n.kind === "component-def" && declMode) block("component-const", off, "component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)");
+    else if (n.kind === "theme-decl" && declMode) block("theme-body", off, "`<theme>` body (§66.17 — blocked on O17)");
+    else if (n.kind === "export-decl" && declMode && typeof n.raw === "string" && /^export\s+(const\s+)?</.test(n.raw)) block("rhs-decl", off, "exported cell (cross-file write set unknown — §66.14)");
     else if (n.kind === "markup" && typeof n.tag === "string") {
       markupStarts.add(off);
       if (!tagUses.has(n.tag)) tagUses.set(n.tag, off);
@@ -720,16 +857,20 @@ export function fixS66(source, opts = {}) {
 
   const cellNames = new Set(decls.map((d) => d.node.name));
   const engineNames = new Set(engines.map((e) => e.node.varName).filter(Boolean));
-  for (const [tag, off] of tagUses) {
+  for (const [tag, off] of declMode ? tagUses : []) {
     if (cellNames.has(tag) || engineNames.has(tag)) block("render-by-tag", off, `markup tag \`<${tag}>\` shares a cell's name — render-by-tag (→ \`<*${tag}/>\`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)`);
   }
-  for (const e of engines) {
+  for (const e of declMode ? engines : []) {
     if (e.node.governedType && tagUses.has(e.node.governedType)) {
       block("render-by-tag", tagUses.get(e.node.governedType), `\`<${e.node.governedType}/>\` mounts an engine by name (→ \`<*${e.node.varName}/>\`, CTX — §66.13.3)`);
     }
   }
 
   const writes = astWrites(ast);
+  for (const a of [...auxAsts, ...scanAsts]) for (const w of astWrites(a)) writes.add(w);
+  const allSources = [src, ...project.map(([, s]) => s), ...scanOnly.map(([, s]) => s)];
+  const lifecycleCells = new Set(allSources.flatMap((s) => [...lifecycleNamedCells(s)]));
+  const intReaders = new Set(allSources.flatMap((s) => [...intReaderCells(s)]));
 
   // ---- declarations ----------------------------------------------------------------------------
   for (const { node, stack } of decls) {
@@ -775,7 +916,8 @@ export function fixS66(source, opts = {}) {
     const sequence = !!cls.sequence || isSequenceType(cls.type ?? site.annotation);
     let isLet = false;
     if (!node.isConst) {
-      const written = hasMeta || writeAttr || writes.has(node.name) || lexicalWritten(src, node.name, sequence);
+      const written = hasMeta || writeAttr || projectUnknown || writes.has(node.name)
+        || lifecycleCells.has(node.name) || allSources.some((s) => lexicalWritten(s, node.name, sequence));
       const readsNoCell = cls.kind === "literal";
       isLet = written || !readsNoCell; // S449 dialect ruling 2 (amended §66.21 row 1)
       if (isLet && sequence) {
@@ -787,7 +929,17 @@ export function fixS66(source, opts = {}) {
     } else if (cls.kind === "literal" && !cls.type && !site.annotation) {
       // a literal derived value: the inferred type is fine (string / bool)
     }
-    const type = cls.type ?? site.annotation ?? null;
+    let type = cls.type ?? site.annotation ?? null;
+    // An untyped integer literal is a JS number in impl#1 (`:number`), but a cell an `int`-typed
+    // declaration reads must be `int` (else E-TYPE-031). `int` is right only if nothing divides the
+    // cell or gives it a fractional value; otherwise int-vs-number is not mechanical — reported.
+    if (!site.annotation && type === "number" && cls.kind === "literal" && /^-?\(?-?\d+\)?$/.test(cls.valueText) && intReaders.has(node.name)) {
+      const nm = node.name.replace(/\$/g, "\\$");
+      const divided = allSources.some((t) => new RegExp(`@${nm}(?![\\w$])\\s*/(?![/*=])|/=?\\s*@${nm}(?![\\w$])`).test(t));
+      const fractional = allSources.some((t) => [...t.matchAll(new RegExp(`@${nm}(?![\\w$])\\s*[-+*]?=(?!=)([^\\n;]*)`, "g"))].some((m) => /\d\.\d|\//.test(m[1])));
+      if (divided || fractional) { block(rule, off, "an untyped integer cell feeds an `int`-typed reader but is also divided / given a fractional value — `int` vs `number` is not mechanical"); continue; }
+      type = "int";
+    }
     if (node.isConst && !type && cls.kind !== "literal") { block(rule, off, "derived value needs a type (CTX — O35)"); continue; }
     const opener = `${isLet ? "let " : ""}<${node.name}${type ? `:${type}` : ""}=${cls.valueText}${attrToks.length ? " " + attrToks.join(" ") : ""}/>`;
     edits.push({ start: site.start, end: site.end, text: opener, rule, detail: opener });
@@ -807,7 +959,8 @@ export function fixS66(source, opts = {}) {
     if (!op) { block("engine-simple", start, "engine opener not closed"); continue; }
     const toks = splitAttrTokens(src.slice(op.nameEnd, op.end - (op.selfClosing ? 2 : 1)));
     const extra = toks.filter((t) => !ENGINE_SIMPLE_ATTRS.has(attrName(t)));
-    if (extra.length) { block("engine-simple", start, `engine surface beyond the simple rule: ${extra.map(attrName).join(", ")} (⚑ O5 surface)`); continue; }
+    if (extra.some((t) => attrName(t) === "name")) { block("engine-simple", start, "`name=` names the engine itself (§51.0.C — cross-file `<Name/>` mounting); §66.21 row 4 rewrites only `for=` / `initial=` — left untouched"); continue; }
+    if (extra.length) { block("engine-simple", start, `engine surface beyond the simple rule: ${extra.map(attrName).filter(Boolean).join(", ")} (⚑ O5 surface)`); continue; }
     const get = (nm) => { const t = toks.find((x) => attrName(x) === nm); return t ? t.slice(nm.length + 1) : null; };
     const forT = get("for");
     const initial = get("initial");
@@ -890,7 +1043,7 @@ export function fixS66(source, opts = {}) {
     if (bad) {
       // A block that holds no legacy construct can stay: `${}` at a body top is legal §66 (S441).
       const holdsLegacy = decls.some((d) => d.stack.includes(n)) || engines.some((d) => d.stack.includes(n));
-      if (holdsLegacy) block("unwrap-logic", s, `top-level \`\${}\` holding a legacy declaration also holds a \`${bad.kind}\` statement, which impl#1 reads differently outside \`\${}\` (S441) — not unwrapped`);
+      if (holdsLegacy && declMode) block("unwrap-logic", s, `top-level \`\${}\` holding a legacy declaration also holds a \`${bad.kind}\` statement, which impl#1 reads differently outside \`\${}\` (S441) — not unwrapped`);
       continue;
     }
     // Delete the delimiters; a delimiter alone on its line takes the line with it (readability).
@@ -908,7 +1061,7 @@ export function fixS66(source, opts = {}) {
 
   // ---- safety net: a legacy form impl#1's AST did not surface is reported, never left silently ----
   const covered = (off) => edits.some((ed) => off >= ed.start && off < ed.end) || blockers.some((b) => b.line === lineOf(src, off));
-  for (const m of src.matchAll(LEGACY_DECL_LINE)) {
+  for (const m of declMode ? src.matchAll(LEGACY_DECL_LINE) : []) {
     const tag = m[2];
     const lt = m.index + m[0].indexOf("<");
     if (markupStarts.has(lt)) continue; // an element the front end parsed as markup (`<span>=</span>`)
@@ -916,7 +1069,7 @@ export function fixS66(source, opts = {}) {
     if (covered(off) || covered(m.index + m[0].indexOf("<"))) continue;
     block(m[1] ? "const-cell" : "rhs-decl", off, "legacy declaration impl#1's front end did not surface as a declaration (left untouched)");
   }
-  for (const m of src.matchAll(/<engine\b/g)) {
+  for (const m of declMode ? src.matchAll(/<engine\b/g) : []) {
     if (!covered(m.index)) block("engine-simple", m.index, "`<engine>` impl#1's front end did not surface as an engine declaration (left untouched)");
   }
 
