@@ -17,9 +17,13 @@
  * structuralForm:false). Codegen is UNTOUCHED (parser-agnostic, per the
  * b.5/b.6/C1 precedent). Live's ast-builder.js:4879 is the oracle.
  *
- * These tests DRIVE BOTH PIPELINES (live `parser:null` + `parser:"scrml-native"`)
- * and assert PARITY. They are LOAD-BEARING: each must FAIL without the fix
- * (native previously emitted parse errors + no mount-hydrate output).
+ * S449 RE-POINT: these tests used to DRIVE BOTH PIPELINES (live + the retired
+ * full-pipeline `parser:"scrml-native"`) and assert parity. The fix lives in
+ * the native parser + bridge, reached in production through `nativeParseFile`,
+ * so §1 now asserts on the native tree directly: no parse-error cascade, and a
+ * `state-decl{isServer:true}` per `server @var` whose structured fields equal
+ * the default parser's (the input the §8.11 collector gates on). §2–§4 keep the
+ * mount-hydrate output assertions on the default pipeline.
  *
  * SCOPE: the `server @var` form + the mount-hydrate output it enables. The
  * SPLIT follow-on root causes (sql-loop-hoist, tableFor clientJs drift,
@@ -32,17 +36,18 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
+import { nativeAst, liveAst, findNodes, withoutPositions, errorsOf } from "../helpers/native-ast.js";
 
-// Compile `source` under both pipelines; return { live, "scrml-native" } each
-// with { serverJs, clientJs, html, errs }.
+// Compile `source` through the default pipeline; return { live } with
+// { serverJs, clientJs, html, errs }. (Name kept from the two-pipeline era.)
 function compileBoth(source) {
   const out = {};
-  for (const parser of [null, "scrml-native"]) {
+  for (const parser of [null]) {
     const dir = mkdtempSync(join(tmpdir(), "m67-c2-"));
     const file = join(dir, "app.scrml");
     writeFileSync(file, source);
     try {
-      const r = compileScrml({ inputFiles: [file], outputDir: null, write: false, log: () => {}, parser });
+      const r = compileScrml({ inputFiles: [file], outputDir: null, write: false, log: () => {} });
       let serverJs = "", clientJs = "", html = "";
       for (const [, v] of (r.outputs ?? [])) {
         serverJs += v.serverJs ?? "";
@@ -73,18 +78,26 @@ const MH2 = [
 // ---------------------------------------------------------------------------
 
 describe("§1 native parses `server @var = expr` without a parse-error cascade", () => {
-  test("no E-EXPR-UNEXPECTED / E-STMT-MISSING-SEMICOLON / E-STMT-UNEXPECTED-TOKEN under native", () => {
-    const r = compileBoth(MH2);
-    // The pre-fix native cascade is gone.
-    expect(r["scrml-native"].errs).not.toContain("E-EXPR-UNEXPECTED");
-    expect(r["scrml-native"].errs).not.toContain("E-STMT-MISSING-SEMICOLON");
-    expect(r["scrml-native"].errs).not.toContain("E-STMT-UNEXPECTED-TOKEN");
+  test("nativeParseFile: no E-EXPR-UNEXPECTED / E-STMT-MISSING-SEMICOLON / E-STMT-UNEXPECTED-TOKEN", () => {
+    const codes = errorsOf(nativeAst(MH2)).map((e) => e.code);
+    expect(codes).not.toContain("E-EXPR-UNEXPECTED");
+    expect(codes).not.toContain("E-STMT-MISSING-SEMICOLON");
+    expect(codes).not.toContain("E-STMT-UNEXPECTED-TOKEN");
+    expect(codes).toEqual([]);
   });
 
-  test("native error profile matches live (no spurious errors introduced)", () => {
-    const r = compileBoth(MH2);
-    expect(r["scrml-native"].errs.sort()).toEqual(r.live.errs.sort());
-    expect(r.live.errs).toEqual([]); // canonical source is error-clean on live
+  test("nativeParseFile: one state-decl{isServer:true} per `server @var`, matching the default parser", () => {
+    const pick = (r) => findNodes(r.ast, (n) => n.kind === "state-decl").map((n) => ({
+      name: n.name, isServer: n.isServer, structuralForm: n.structuralForm, shape: n.shape,
+      initExpr: withoutPositions(n.initExpr),
+    }));
+    const nat = pick(nativeAst(MH2));
+    expect(nat.map((d) => [d.name, d.isServer])).toEqual([["a", true], ["b", true]]);
+    expect(nat).toEqual(pick(liveAst(MH2)));
+  });
+
+  test("the canonical source is error-clean on the default pipeline", () => {
+    expect(compileBoth(MH2).live.errs).toEqual([]);
   });
 });
 
@@ -92,8 +105,8 @@ describe("§1 native parses `server @var = expr` without a parse-error cascade",
 // §2 — §8.11 mount-hydrate server-side output parity
 // ---------------------------------------------------------------------------
 
-describe("§2 mount-hydrate server JS parity (native == live)", () => {
-  test("synthetic __mountHydrate route emitted under native", () => {
+describe("§2 mount-hydrate server JS", () => {
+  test("synthetic __mountHydrate route emitted", () => {
     const r = compileBoth(MH2);
     for (const needle of [
       "_scrml_route___mountHydrate",
@@ -101,8 +114,7 @@ describe("§2 mount-hydrate server JS parity (native == live)", () => {
       'method: "POST"',
       "Promise.all",
     ]) {
-      expect(r.live.serverJs).toContain(needle);          // sanity: live emits it
-      expect(r["scrml-native"].serverJs).toContain(needle); // load-bearing: native too
+      expect(r.live.serverJs).toContain(needle);
     }
   });
 });
@@ -111,8 +123,8 @@ describe("§2 mount-hydrate server JS parity (native == live)", () => {
 // §3 — §8.11 mount-hydrate client-side output parity
 // ---------------------------------------------------------------------------
 
-describe("§3 mount-hydrate client JS parity (native == live)", () => {
-  test("unified fetch + demux + coalesced comment emitted under native", () => {
+describe("§3 mount-hydrate client JS", () => {
+  test("unified fetch + demux + coalesced comment emitted", () => {
     const r = compileBoth(MH2);
     for (const needle of [
       'fetch("/__mountHydrate"',
@@ -121,15 +133,13 @@ describe("§3 mount-hydrate client JS parity (native == live)", () => {
       "coalesced via /__mountHydrate",
     ]) {
       expect(r.live.clientJs).toContain(needle);
-      expect(r["scrml-native"].clientJs).toContain(needle);
     }
   });
 
-  test("per-var initial-load IIFE comments suppressed under native (as live)", () => {
+  test("per-var initial-load IIFE comments suppressed", () => {
     const r = compileBoth(MH2);
-    expect(r["scrml-native"].clientJs).not.toContain("server @a — initial load on mount");
-    expect(r["scrml-native"].clientJs).not.toContain("server @b — initial load on mount");
     expect(r.live.clientJs).not.toContain("server @a — initial load on mount");
+    expect(r.live.clientJs).not.toContain("server @b — initial load on mount");
   });
 });
 
@@ -137,7 +147,7 @@ describe("§3 mount-hydrate client JS parity (native == live)", () => {
 // §4 — 3-callable-server-@var → all three keys coalesced (native == live)
 // ---------------------------------------------------------------------------
 
-describe("§4 three callable server @var coalesce identically under native", () => {
+describe("§4 three callable server @var coalesce", () => {
   const MH3 = [
     '<program db="test.db">',
     "${ server function loadA() { return 1 } }",
@@ -149,11 +159,10 @@ describe("§4 three callable server @var coalesce identically under native", () 
     "</>",
   ].join("\n");
 
-  test("server response object has all three keys under native", () => {
+  test("server response object has all three keys", () => {
     const r = compileBoth(MH3);
     for (const needle of ['"a": _scrml_mh_v0', '"b": _scrml_mh_v1', '"c": _scrml_mh_v2']) {
       expect(r.live.serverJs).toContain(needle);
-      expect(r["scrml-native"].serverJs).toContain(needle);
     }
   });
 });

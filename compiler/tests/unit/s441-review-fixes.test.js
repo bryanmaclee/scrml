@@ -5,6 +5,7 @@
  */
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
+import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -63,7 +64,7 @@ describe("#2 — a bare `@cell` expression statement stops at a statement on the
   });
 });
 
-for (const [label, parser] of [["default", null], ["scrml-native", "scrml-native"]]) {
+for (const [label, parser] of [["default", null]]) { // S449: native full-pipeline arm retired
   describe(`#3/#4/#5 — a prose line that swallows the next line is rejected; the next line survives (${label})`, () => {
     test("`Welcome here.⏎<count> = 0` → ONE E-UNQUOTED-DISPLAY-TEXT, the declaration still exists", () => {
       const r = compile("<program>\nWelcome here.\n<count> = 0\n<p>${@count}</p>\n</program>\n", parser);
@@ -94,7 +95,7 @@ for (const [label, parser] of [["default", null], ["scrml-native", "scrml-native
   });
 }
 
-for (const [label, parser] of [["default", null], ["scrml-native", "scrml-native"]]) {
+for (const [label, parser] of [["default", null]]) { // S449: native full-pipeline arm retired
   describe(`#6 — a comma sequence of bare words is not a scrml expression (${label})`, () => {
     for (const line of ["Hi, there", "Hello, world", "Yes, please", "First, second, third", "Thanks, Bob", "Hello, world, again"]) {
       test(`\`${line}\` → E-UNQUOTED-DISPLAY-TEXT, and nothing ships to the client`, () => {
@@ -120,9 +121,12 @@ describe("#8 — a body-top CODE template literal stays whole (not cut at `${`)"
     // Never the pre-fix shape: the template's tail lifted as code.
     expect(bare.client).not.toContain("units `");
   });
-  test("scrml-native: the tail is not lifted as code (no runtime ReferenceError shape)", () => {
-    const r = compile("<program>\nconst n = 3\nconst msg = `total is ${n + 1} units`\n<p>${msg}</p>\n</program>\n", "scrml-native");
-    expect(r.client).not.toContain("units `");
+  // S449 re-point: was a full compile under `--parser=scrml-native`; asserted on
+  // the native parser's own tree (no statement carries the template's tail).
+  test("native: the tail is not lifted as code (no runtime ReferenceError shape)", () => {
+    const r = nativeParseFile("/s441-native/c.scrml", "<program>\nconst n = 3\nconst msg = `total is ${n + 1} units`\n<p>${msg}</p>\n</program>\n");
+    expect((r.errors ?? []).filter((e) => (e.severity ?? "error") === "error")).toEqual([]);
+    expect(JSON.stringify(r.ast.nodes)).not.toContain("units `");
   });
   test("a stray backtick in prose cannot swallow the next element", () => {
     const r = compile("<program>\nuse `this` wisely\n<p id=\"z\">z</p>\n</program>\n");
@@ -130,7 +134,7 @@ describe("#8 — a body-top CODE template literal stays whole (not cut at `${`)"
   });
 });
 
-for (const [label, parser] of [["default", null], ["scrml-native", "scrml-native"]]) {
+for (const [label, parser] of [["default", null]]) { // S449: native full-pipeline arm retired
   describe(`#9/#10 — a \`"..."\` whose expression continues on the next line is code, not display text (${label})`, () => {
     test("`\"abc\"⏎ .toUpperCase()` is not rendered", () => {
       const r = compile("<program>\n\"abc\"\n  .toUpperCase()\n<p id=\"z\">z</p>\n</program>\n", parser);
@@ -156,7 +160,7 @@ describe("#9 — `@a and⏎ \"d\"`: a word operator at a line end makes the next
   });
 });
 
-for (const [label, parser] of [["default", null], ["scrml-native", "scrml-native"]]) {
+for (const [label, parser] of [["default", null]]) { // S449: native full-pipeline arm retired
   test(`#11 — the suggested display-text literal is itself valid (quotes escaped) (${label})`, () => {
     const r = compile("<program>\nprose then \"quoted\" word\n<p id=\"z\">z</p>\n</program>\n", parser);
     const e = r.errors.find((x) => x.code === "E-UNQUOTED-DISPLAY-TEXT");
