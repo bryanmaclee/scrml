@@ -223,6 +223,31 @@ describe("§3 event-handler attributes keep §5.2.3 behaviour", () => {
     expect(amsOf(r.errors).length).toBe(0);
   });
 
+  // S450 re-review NIT 1 — the exemption is STRUCTURAL: the engine opener and
+  // its DIRECT state-children only. An element nested inside a state-child —
+  // a component (`<Card>`) or a plain element — is judged.
+  test("`effect=` on a component nested inside a state-child fires (review e05)", () => {
+    const f = amsOf(compileSource(top(`\${ const Card = <div class="card">c</div> }
+<engine for=Phase initial=.Idle><Idle rule=.Loading><Card effect=\${ f(); g() }/></><Loading rule=.Idle>l</></engine>`)).errors);
+    expect(f.length).toBe(1);
+  });
+
+  test("`effect=` on a plain element nested inside a state-child fires", () => {
+    const f = amsOf(compileSource(top(`<engine for=Phase initial=.Idle><Idle rule=.Loading><div effect=\${ f(); g() }>d</div></><Loading rule=.Idle>l</></engine>`)).errors);
+    expect(f.length).toBe(1);
+  });
+
+  test("`effect=` on a top-level component fires", () => {
+    const f = amsOf(compileSource(top(`\${ const Card = <div class="card">c</div> }
+<Card effect=\${ f(); g() }/>`)).errors);
+    expect(f.length).toBe(1);
+  });
+
+  test("`effect=` on the opener and a real state-child stays exempt on one line (review e01)", () => {
+    const r = compileSource(top(`<engine for=Phase initial=.Idle effect=\${ f(); g() }><Idle rule=.Loading>i</><Loading rule=.Idle effect=\${ f(); g() }>l</></engine>`));
+    expect(amsOf(r.errors).length).toBe(0);
+  });
+
   test("`effect=` on a non-engine element is a plain attribute and fires (review fn05)", () => {
     const f = amsOf(compileSource(top(`<div effect=\${ f(); g() }>d</div>`)).errors);
     expect(f.length).toBe(1);

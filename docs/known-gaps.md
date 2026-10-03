@@ -21838,6 +21838,7 @@ Found by the S239 review of `fix/s450-attr-multi-statement`, and re-run on the f
 - **Markup inside a component DEFINITION body.** Examples: `${ const Card = <div title=${f(); "c"}>…</div> }` and the bare `const Card = <…>` form. The definition body is re-parsed by component expansion, and that path does not run the check.
 - **Markup values in logic.** Examples: `<p>${ <span title=(f(); "c")>x</span> }</p>` and `${ const m = <span title=${f(); "c"}>x</span> }`.
 - **The `--parser=scrml-native` front end.** The check lives in the default front end's attribute parse only.
+- **A `<match>` arm's `effect=` inside an engine state-child is silently accepted.** This is pre-existing. Outside an engine the same arm `effect=` is E-MATCH-EFFECT-FORBIDDEN (§18.0.2).
 ## §S447 — validity-surface build owed by the S447 rulings (2026-10-01; ruling:user-voice-scrml.md S447 "validated top-level cells get a validity surface (Edge A reversed)" item 1 + "validity calls 2-6"; SPEC §55.5.1-§55.5.3 / §55.7 / §55.17, change `docs/changes/s447-spec-validity-surface/`. Bootstrap loci read at `01f8dda17`; no browser run)
 
 ### g-bootstrap-validated-form-fields-fail-open-no-surface-no-gate — bootstrap: emits `novalidate` on every form carrying lowered validator attributes (S442 (3)) while it has NO §55 validity surface and NO submit gate, so a validated child field inside a `<form>` gates nothing: the browser's block is removed and nothing replaces it

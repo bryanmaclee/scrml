@@ -4055,7 +4055,7 @@ function flushHeldHandlerWarnings(value) {
   if (!value.handlerBlock) for (const w of held) console.warn(w);
 }
 
-function parseAttributes(tokens, filePath, errors, isComponent = false, tagName = null) {
+function parseAttributes(tokens, filePath, errors, isComponent = false, tagName = null, effectIsLogicBlock = false) {
   const attrs = [];
   let i = 0;
   // §23.5.2 — the `capabilities=` attribute is a `<program>` attribute (§4.12.2:
@@ -4138,7 +4138,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
               emitForbiddenSwitchInRaw(raw, valSpan, (valSpan?.start ?? 0) + 1, filePath, errors);
               value = { kind: "expr", raw, refs, exprNode: parseHandlerAwareExprNode(name, raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
               // §5.2.4 (S450) — a statement list on a NON-handler attribute.
-              checkAttrMultiStatement(name, value, filePath, errors, true, tagName);
+              checkAttrMultiStatement(name, value, filePath, errors, true, effectIsLogicBlock);
             }
           } else if (valTok.kind === "ATTR_EXPR") {
             // Boolean expression for if= attribute (e.g. !@var, @a === 1, @a && @b quoted).
@@ -4161,7 +4161,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
             emitForbiddenSwitchInRaw(raw, valSpan, valSpan?.start ?? 0, filePath, errors);
             value = { kind: "expr", raw, refs, exprNode: parseHandlerAwareExprNode(name, raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
             // §5.2.4 (S450) — a statement list on a NON-handler attribute.
-            checkAttrMultiStatement(name, value, filePath, errors, valTok.attrInterp === true, tagName);
+            checkAttrMultiStatement(name, value, filePath, errors, valTok.attrInterp === true, effectIsLogicBlock);
           } else if (valTok.kind === "ATTR_OP_REJECT") {
             // cluster-A (S188 "reject + parens") — an unquoted CONDITION
             // attribute (`if=`/`show=`/`else-if=`) whose value contains a bare
@@ -6895,7 +6895,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           if (value.kind === "expr") delete value._liftInnerOffset;
           // §5.2.4 (S450) — lifted / `for … lift` markup attributes are parsed
           // here, not in parseAttributes: the same non-handler check.
-          checkAttrMultiStatement(attrName, value, filePath, errors, _liftInterp, tag);
+          checkAttrMultiStatement(attrName, value, filePath, errors, _liftInterp, isEngineEffectSite(tag, null));
           attrs.push({ name: attrName, value, span: attrSpan });
         } else if (tag === "each" && attrName === "as") {
           // §17.7.3 / §59.8 — the `<each … as NAME>` / `as (K, V)` binding is a
@@ -17978,11 +17978,23 @@ const _attrMultiStmtIds = { next: HANDLER_STMT_ID_BASE + 900_000_000 };
  * `effect=` on any other element (`<div effect=${ f(); g() }>`) is a plain
  * attribute and is judged (S450 fix round, S239 review fn05).
  */
-function isStatementPositionAttr(name, tagName) {
+function isStatementPositionAttr(name, effectIsLogicBlock) {
   if (isEventHandlerAttrName(name)) return true;
-  if (name !== "effect" || typeof tagName !== "string") return false;
+  return name === "effect" && effectIsLogicBlock === true;
+}
+
+/**
+ * The DIRECT children of an engine body (its state-children), recorded by the
+ * engine-body build before each is built — structural, so a component or any
+ * other element NESTED inside a state-child is not one (S450 re-review NIT 1:
+ * `<Idle><Card effect=${ f(); g() }/></>` was exempt by a PascalCase test).
+ */
+const _engineStateChildBlocks = new WeakSet();
+
+/** Does `effect=` on this element name a §51.0.H logic block? */
+function isEngineEffectSite(tagName, block) {
   if (tagName === "engine" || tagName === "machine") return true;
-  return _engineBodyBuildDepth > 0 && /^[A-Z]/.test(tagName);
+  return !!block && typeof block === "object" && _engineStateChildBlocks.has(block);
 }
 
 function attrValueSemicolonStatementCount(raw, span, filePath, delimited = false) {
@@ -18082,10 +18094,11 @@ function attrValueSemicolonStatementCount(raw, span, filePath, delimited = false
  * value is a statement list (SPEC §5.2.4). Returns true when it fired. The
  * attribute value is left as parsed (the error fails the compile; nothing is
  * dropped here). `delimited` = the value is a `${…}` / `{…}` interior;
- * `tagName` scopes the engine `effect=` exemption.
+ * `effectIsLogicBlock` = the element is an engine opener or one of its
+ * state-children (§51.0.H), where `effect=` is a statement position.
  */
-function checkAttrMultiStatement(name, value, filePath, errors, delimited = false, tagName = null) {
-  if (!Array.isArray(errors) || typeof name !== "string" || isStatementPositionAttr(name, tagName)) return false;
+function checkAttrMultiStatement(name, value, filePath, errors, delimited = false, effectIsLogicBlock = false) {
+  if (!Array.isArray(errors) || typeof name !== "string" || isStatementPositionAttr(name, effectIsLogicBlock)) return false;
   if (!value || value.kind !== "expr") return false;
   const n = attrValueSemicolonStatementCount(value.raw, value.span, filePath, delimited);
   if (n < 2) return false;
@@ -19842,7 +19855,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         block.span.col,
         "markup"
       );
-      const attrs = parseAttributes(attrTokens, filePath, errors, block.isComponent === true, block.name);
+      const attrs = parseAttributes(attrTokens, filePath, errors, block.isComponent === true, block.name, isEngineEffectSite(block.name, block));
       // S437 — §5.2.3 statement-list view of multi-statement handler values.
       attachHandlerStatementLists(attrs, block, filePath, counter, errors);
 
@@ -20691,6 +20704,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           try {
             for (const child of block.children) {
               if (child.raw) rulesRaw += child.raw;
+              // §5.2.4 — a direct child is a state-child: its `effect=` is a
+              // §51.0.H logic block (isEngineEffectSite).
+              if (child && typeof child === "object") _engineStateChildBlocks.add(child);
               // Build the child node. Use parentContextKind="markup" so any
               // nested state-children inside the engine body are walked with
               // markup-tree semantics (consistent with the block-splitter's
