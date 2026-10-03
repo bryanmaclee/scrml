@@ -1,0 +1,12 @@
+{
+  "id": "sql-transactions-concurrent-sqlite-e-sql-010-neg",
+  "description": "§19.10.6 compile-time rejection — `transactions=\"concurrent\"` asks for one pool connection per transaction, but the program's database is a SQLite file: one connection, so its transactions always run one at a time. The opt-in is refused with E-SQL-010 rather than silently ignored.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/sql-shared-connection-tx.test.js",
+  "spec": "§19.10.6",
+  "rationale": "§19.10.6 (ruling:user-voice-scrml.md S449 item C, opt-in (b)): `transactions=\"concurrent\"` on a SQLite database SHALL be a compile error (E-SQL-010). Resolution: remove the attribute, or use a `postgres://` / `mysql://` database.",
+  "expect": {
+    "codes": ["E-SQL-010"],
+    "notCodes": []
+  }
+}

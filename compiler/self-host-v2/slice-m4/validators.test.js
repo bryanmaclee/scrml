@@ -8,11 +8,14 @@
 //       surface only.
 //   (3) "the compiler adds `novalidate` to any form carrying lowered attributes."
 //   (4) O54 = (a): `@email` inside `email`'s own `renders` is this instance.
-//   (5) "Silently dead validators become errors" — validators on a top-level
-//       scalar with no surface (§55.5 Edge A) or on a declaration nothing binds,
-//       and `@x.isValid` on a no-surface cell → an error.
-// The §55.5 validity surface itself is not in the bootstrap: a validator with no
-// exact HTML form is refused (E-BOOTSTRAP-UNSUPPORTED), never kept inert.
+//   (5) "Silently dead validators become errors" — as NARROWED by S447 call 4
+//       (§55.5.2): dead only when nothing can ever change the value (no bind,
+//       locked, not seeded at a use); `@x.isValid` on a top-level value that
+//       carries no validators → E-VALIDITY-NO-SURFACE (§55.5.1 rule 2).
+// s449: the §55 surface and the §55.17 gate are built (gate.test.js); Edge A is
+// reversed (S447, §55.5.1) — a top-level value's validators lower and gate. A
+// validator with no exact HTML form is still refused (E-BOOTSTRAP-UNSUPPORTED):
+// the runtime evaluates only the admitted set.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd, readM4 } from "./harness.js";
@@ -59,9 +62,16 @@ describe("§66.19.2 — the VERBATIM program: compiles clean, validators land (b
 
 // ===========================================================================
 describe("(1) no implicit bind", () => {
-  test("a validated field whose renders is an input WITHOUT `bind:` is not bound — its validators are dead (E-VALIDATOR-DEAD)", () => {
-    const src = P(F("req", `<input type="email"/>`, `<form><*v/></form>`), `        <*f/>`);
-    expect(codes(src)).toEqual(["E-VALIDATOR-DEAD"]);
+  // s449 (§55.5.2, S447 call 4): a `let` field nothing binds is LIVE — logic may
+  // set it and its surface reports it. What (1) still means: the unbound input
+  // gets no attributes, and the form is not gated (nothing in it binds a value).
+  test("a validated field whose renders is an input WITHOUT `bind:` is not bound — no attributes, no gate; its surface still reads", async () => {
+    const src = P(F("req", `<input type="email"/>`, `<form><*v/></form>`), `        <*f/>\n        <p class="s">\${@f.v.isValid}</p>`);
+    await loadProgram(clean(src), "v-unbound-live");
+    expect(attrsOf($("main input"))).toEqual({ type: "email" });
+    expect($("main form").hasAttribute("novalidate")).toBe(false);
+    expect($("main form").hasAttribute("data-scrml-gated")).toBe(false);
+    expect($("p.s").textContent).toBe("false");
   });
   test("…and the same without validators compiles: the input is plain markup (no bind, no attributes)", async () => {
     const core = clean(P(F("", `<input type="email"/>`, `<form><*v/></form>`), `        <*f/>`).replace(" />", "/>"));
@@ -131,11 +141,16 @@ describe("(2) validators follow the bind — wherever it is written", () => {
     await loadProgram(clean(sel), "v-select");
     expect(attrsOf($("main select"))).toEqual({ required: "" });
   });
-  test("a validator with no HTML form on THIS element is refused (it would be inert there — no surface in the bootstrap)", () => {
-    const sel = P(F("length(>=2)", `<select bind:value=@v><option value="a">a</option></select>`, `<form><*v/></form>`), `        <*f/>`);
-    const d = run(sel).diags;
-    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(d[0].message).toContain("`minlength`");
+  // s449: §55.17.1 "No other validator is lowered" — an attribute HTML does not
+  // apply to THIS element is not written, and the validator is not inert: the
+  // §55 surface evaluates it and the §55.17 gate enforces it. (Was: refused,
+  // when the attribute was the only enforcement.)
+  test("a validator with no HTML form on THIS element: no attribute, but the surface evaluates it and the form is gated", async () => {
+    const sel = P(F("length(>=2)", `<select bind:value=@v><option value="a">a</option></select>`, `<form><*v/></form>`), `        <*f/>\n        <p class="s">\${@f.v.isValid}</p>`);
+    await loadProgram(clean(sel), "v-select-length");
+    expect(attrsOf($("main select"))).toEqual({});
+    expect($("main form").getAttribute("data-scrml-gated")).toBe("f.v");
+    expect($("p.s").textContent).toBe("false");
   });
   test("`pattern` lands ONLY when exact: anchored, no flags, no top-level `|`, the plain subset", async () => {
     await loadProgram(clean(P(F("pattern(/^[a-z0-9_]+@x\\.io$/)", `<input bind:value=@v/>`, `<form><*v/></form>`), `        <*f/>`)), "v-pattern");
@@ -222,24 +237,42 @@ describe("(4) O54 = (a): `@v` inside `v`'s own renders is THIS instance", () => 
 });
 
 // ===========================================================================
-describe("(5) silently dead validators are errors; `@x.isValid` on a no-surface cell is an error", () => {
-  test("validators on a top-level scalar (§55.5 Edge A) → E-VALIDATOR-DEAD — bound or not", () => {
-    expect(codes(P(`    let <email:string="" req/>`, `        <input bind:value=@email/>`))).toEqual(["E-VALIDATOR-DEAD"]);
-    expect(codes(P(`    let <email:string="" req length(>=2)/>`, `        <p>x</p>`))).toEqual(["E-VALIDATOR-DEAD"]);
+describe("(5) dead validators (§55.5.2) are errors; `@x.isValid` on a no-surface value is an error", () => {
+  // s449 — Edge A REVERSED (S447 item 1, §55.5.1): "A top-level value that
+  // carries validators synthesizes the per-field surface … This holds always —
+  // bound or not". Was: E-VALIDATOR-DEAD bound or not.
+  test("validators on a top-level value: bound → they lower onto the control; unbound `let` → legal (the surface reads them)", async () => {
+    await loadProgram(clean(P(`    let <email:string="" req/>`, `        <input bind:value=@email/>`)), "v-top-bound");
+    expect(attrsOf($("main input"))).toEqual({ required: "" });
+    expect(codes(P(`    let <email:string="" req length(>=2)/>`, `        <p>\${@email.isValid}</p>`))).toEqual([]);
   });
-  test("validators on a child field NOTHING binds → E-VALIDATOR-DEAD at the field (even when logic writes it)", () => {
-    const d = run(P(F("req", `<button onclick=(@f.v = "x")>set</button>`, `<div><*v/></div>`), `        <*f/>`)).diags;
+  // §55.5.2: "A value set only from logic … is legal, for child fields and
+  // top-level values alike". Was: E-VALIDATOR-DEAD "even when logic writes it".
+  test("validators on a `let` child field nothing binds, set from logic → legal; its surface reports the logic's value", async () => {
+    const src = P(F("req", `<button onclick=(@f.v = "x")>set</button>`, `<div><*v/></div>`), `        <*f/>\n        <p class="s">\${@f.v.isValid}</p>`);
+    await loadProgram(clean(src), "v-logic-set");
+    expect($("p.s").textContent).toBe("false");
+    click($("main button"));
+    expect($("p.s").textContent).toBe("true");
+  });
+  test("§55.5.2: validators on a LOCKED value nothing can change → E-VALIDATOR-DEAD (child field and top-level value)", () => {
+    const child = P(`    <f note:string="n">\n        <v:string="x" req/>\n        renders <b>\${v}</b>\n    </>\n    renders <div><*v/></div>`, `        <*f/>`);
+    const d = run(child).diags;
     expect(d.map((x) => x.code)).toEqual(["E-VALIDATOR-DEAD"]);
-    expect(d[0].message).toContain("no `bind:` targets `@v`");
+    expect(d[0].message).toContain("nothing can ever change its value");
+    expect(codes(P(`    <top:string="x" req/>`, `        <p>\${@top}</p>`))).toEqual(["E-VALIDATOR-DEAD"]);
   });
   test("`@cell.isValid` / `.errors` / `.touched` / `.submitted` on a top-level cell → E-VALIDITY-NO-SURFACE", () => {
     for (const prop of ["isValid", "errors", "touched", "submitted"]) {
       expect(codes(P(`    let <q:string=""/>`, `        <p>\${@q.${prop}}</p>`))).toEqual(["E-VALIDITY-NO-SURFACE"]);
     }
   });
-  test("a declaration's surface (§55.5 / §55.6) exists but is not built in the bootstrap: refused, never read as a field", () => {
+  // s449: the surface is built — `@f.isValid` / `@f.v.isValid` read it; the
+  // `errors` VALUE (a ValidationError array, §55.9) has no type in the
+  // bootstrap yet — refused, never read untyped (`<errors of=…/>` renders it).
+  test("a declaration's surface (§55.5 / §55.6) reads; its `errors` as a value is refused", () => {
     const base = F("req", `<input bind:value=@v/>`, `<div><*v/></div>`);
-    expect(codes(P(base, `        <*f/>\n        <p>\${@f.isValid}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(base, `        <*f/>\n        <p>\${@f.isValid}</p>`))).toEqual([]);
     expect(codes(P(base, `        <*f/>\n        <p>\${@f.v.errors}</p>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
   test("writing a synthesized property → E-SYNTHESIZED-WRITE (§55.5: read-only)", () => {

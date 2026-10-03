@@ -30,13 +30,13 @@
 ${
     import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
-             GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram,
+             GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf,
              block, litStr } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag,
              mkSpan } from "./ast.scrml"
     import { Node, allNodes } from "./walk.scrml"
-    import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair,
+    import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair, ValInfo, GateInfo,
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest } from "./analyze.scrml"
 
@@ -150,6 +150,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Validity(of: x) :> not
         }
     }
 
@@ -176,6 +177,7 @@ ${
             .Host(call: x) :> op
             .Lambda(params: x) :> op
             .SeqCall(op: x) :> op
+            .Validity(of: x) :> op
         }
     }
 
@@ -232,6 +234,7 @@ ${
             .Host(call: x) :> false
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
+            .Validity(of: x) :> false
         }
     }
 
@@ -277,6 +280,7 @@ ${
             .NStruct(owner: o) :> not
             .NFn(sym: s) :> not
             .NLength :> not
+            .NSurface(of: x) :> not
             not :> not
         }
     }
@@ -387,6 +391,7 @@ ${
             .NStruct(owner: o) :> missing()
             .NFn(sym: s) :> missing()
             .NLength :> missing()
+            .NSurface(of: x) :> missing()
             not :> missing()
         }
     }
@@ -425,6 +430,7 @@ ${
     fn memberExpr(c: LC, f: NameFact | not, obj: AExpr) -> Expr {
         return match f {
             .NLength :> Expr.Prim(PrimOp.Length, [lowerExpr(c, obj)])
+            .NSurface(of: v, prop: pr) :> Expr.Validity(validityOf(c, v), pr)
             .NField(decl: d, inst: i, idx: x) :> cellRead(c, d, instOf(c, i), [{ owner: d, idx: x }])
             .NStruct(owner: o, idx: x) :> stepInto(lowerExpr(c, obj), { owner: o, idx: x })
             .NLocal(sym: s) :> missing()
@@ -451,6 +457,7 @@ ${
             .Host(call: x) :> missing()
             .Lambda(params: x) :> missing()
             .SeqCall(op: x) :> missing()
+            .Validity(of: x) :> missing()
         }
     }
 
@@ -470,6 +477,7 @@ ${
             .NInst(decl: d) :> missing()
             .NStruct(owner: o) :> missing()
             .NLength :> missing()
+            .NSurface(of: x) :> missing()
             not :> missing()
         }
     }
@@ -771,6 +779,7 @@ ${
             .Host(call: x) :> missing()
             .Lambda(params: x) :> missing()
             .SeqCall(op: x) :> missing()
+            .Validity(of: x) :> missing()
         }
     }
 
@@ -810,11 +819,22 @@ ${
         const di: DeclInfo | not = declInfo(c.t, d)
         if (di is not) return []
         const target: InstRef = instOf(c, w.inst)
-        if (!isProgramKind(di.kind)) return [Stmt.Write(w.cap, target, w.edit, Expr.InitOf(d, target, idx), w.check)]
+        const surf: Stmt[] = surfaceReset(di, target, idx)
+        if (!isProgramKind(di.kind)) return [Stmt.Write(w.cap, target, w.edit, Expr.InitOf(d, target, idx), w.check)].concat(surf)
         const ic: LC = { t: c.t, file: c.file, subst: target, snap: not }
         const init: Expr | not = lowerValue(ic, di.fields[idx].init)
         if (init is not) return []
-        return [Stmt.Write(w.cap, target, w.edit, init, w.check)]
+        return [Stmt.Write(w.cap, target, w.edit, init, w.check)].concat(surf)
+    }
+
+    // s449 — §55.13: `reset(@x)` "clears synthesized validity state in
+    // addition to resetting the underlying value" — the field's surface, when
+    // it has one (every field of a user declaration, §55.6; a top-level value
+    // that carries validators, §55.5.1).
+    fn surfaceReset(di: DeclInfo, inst: InstRef, idx: int) -> Stmt[] {
+        if (idx < 0 || idx >= di.fields.length) return []
+        if (isProgramKind(di.kind) && di.fields[idx].vals.length == 0) return []
+        return [Stmt.ResetSurface(ValidityOf.OfField(di.sym, inst, idx))]
     }
 
     // s449 — one View.ResetOn per accepted `reset-on=` rule (§6.8.4): the
@@ -825,7 +845,7 @@ ${
         let out: View[] = []
         for (const r of c.t.resets) {
             const reset: Stmt[] = resetWrite(c, d, r.target)
-            if (reset.length == 1) {
+            if (reset.length >= 1) {
                 let triggers: EffectDep[] = []
                 for (const t of r.triggers) { triggers = triggers.concat([mkEffectDep(d.sym, InstRef.Lexical(0), t)]) }
                 out = out.concat([View.ResetOn(triggers, block(reset), r.rank)])
@@ -844,7 +864,7 @@ ${
         if (init is not) return []
         let edit: EditKind = EditKind.Replace
         if (f.graph is some) edit = EditKind.Transition
-        return [Stmt.Write(cap, InstRef.Lexical(0), edit, init, Check.Static)]
+        return [Stmt.Write(cap, InstRef.Lexical(0), edit, init, Check.Static)].concat(surfaceReset(d, InstRef.Lexical(0), idx))
     }
 
     fn isProgramKind(k: DeclKind) -> boolean {
@@ -893,6 +913,7 @@ ${
             .NStruct(owner: o) :> []
             .NFn(sym: s) :> []
             .NLength :> []
+            .NSurface(of: x) :> []
             not :> []
         }
     }
@@ -912,10 +933,11 @@ ${
     fn lowerElem(c: LC, e: AElem) -> View[] {
         const f: ElemFact | not = elemFact(c.t.elems, e.nid)
         return match f {
-            .MHtml :> condWrap(c, e, [View.El(e.tag, htmlAttrs(c, e.attrs).concat(noValidate(c, e)), lowerNodes(c, e.kids))])
+            .MHtml :> condWrap(c, e, [View.El(e.tag, noValidate(c, e).concat(htmlAttrs(c, e.attrs)), lowerNodes(c, e.kids))])
             .MUse(decl: d, alias: a) :> condWrap(c, e, [View.Instance(d, constructAttrs(c, e.attrs), lowerNodes(c, e.kids), a)])
             .MEach(bind: b, handles: hs) :> [eachView(c, e, b, hs)]
             .MSlot :> [View.Slot]
+            .MErrors(of: v, all: a) :> [View.Errors(validityOf(c, v), a)]
             .MStateView(v: v) :> [stateView(c, v)]
             .MInline(v: v) :> inlineViews(c, v)
             .MStar(decl: d, inst: i) :> [View.Star(d, instOf(c, i))]
@@ -923,11 +945,27 @@ ${
         }
     }
 
+    // s449 — a surface analyze resolved, its instance reference made Core's
+    // (the same `instOf` every cell read goes through).
+    fn validityOf(c: LC, v: ValidityOf) -> ValidityOf {
+        return match v {
+            .OfField(decl: d, inst: i, idx: x) :> ValidityOf.OfField(d, instOf(c, i), x)
+            .OfDecl(decl: d, inst: i) :> ValidityOf.OfDecl(d, instOf(c, i))
+        }
+    }
+
     // s444 Phase B (RULED S442 (3): "the compiler adds `novalidate` to any form
     // carrying lowered attributes") — analyze listed the forms.
+    // s449 — and the compiler submit gate (§55.17.3) on every gated form,
+    // first among the form's attributes: analyze listed the gated forms and
+    // the values that gate each (§55.17.6 names them).
     fn noValidate(c: LC, e: AElem) -> Attr[] {
-        if (c.t.novalidate.indexOf(e.nid) >= 0) return [Attr.Static("novalidate", "")]
-        return []
+        let out: Attr[] = []
+        for (const g of c.t.gated) {
+            if (g.form == e.nid) out = out.concat([Attr.Gate(g.values, [])])
+        }
+        if (c.t.novalidate.indexOf(e.nid) >= 0) out = out.concat([Attr.Static("novalidate", "")])
+        return out
     }
 
     // s442 — `<*x/>` by inlining (analyze's InlineView): the markup, lowered in
@@ -1162,8 +1200,15 @@ ${
     fn lowerField(c: LC, f: FieldInfo) -> Field {
         return {
             sym: f.sym, ty: f.ty, init: lowerValue(c, f.init), mode: f.mode, role: f.role,
-            grants: f.grants, graph: f.graph, exported: f.exported, wcap: f.wcap,
+            grants: f.grants, graph: f.graph, exported: f.exported, wcap: f.wcap, vals: valCores(f.vals),
         }
+    }
+
+    // s449 — the field's validators as Core carries them (§55.1, declaration order).
+    fn valCores(vs: ValInfo[]) -> Validator[] {
+        let out: Validator[] = []
+        for (const v of vs) { out = out.concat([v.core]) }
+        return out
     }
 
     // The syntax of every declaration, by nid (user declarations: the ADecl; the
@@ -1334,7 +1379,223 @@ ${
             const f: Fn | not = lowerFn(t, fsx, info)
             if (f is some) fns = fns.concat([f])
         }
-        const core: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: [] }
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: [] }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: [] }
         return { core: core, diags: tp.diags }
+    }
+
+    // =========================================================================
+    // s449 — THE GATE'S STATIC REACH (§55.17.3). "Mark `touched = true` on
+    // every bound validated value of the form — every value that carries
+    // validators … whose `bind:` is on a native control inside the form (the
+    // §55.17.2 rule 1 composed subtree)". The composed subtree is STATIC: a
+    // value bound in an `if=` region or a state-view arm gates the submit
+    // whether or not that region is mounted (a multi-step form submitted at
+    // step 2 is blocked by an empty step-1 field). Once the whole program is
+    // lowered, each form's Gate is given the fields its subtree NAMES — its own
+    // markup, Cond arms, slot content written in it, and `<*x/>` Stars (whose
+    // renders' `.Lexical(0)` is the Star's instance). An `<each>` row, a use's
+    // instance and a slot's filler instance are not nameable here; the runtime
+    // finds them on the live form (runtime.gate).
+    // =========================================================================
+    fn gateDecls(p: CoreProgram) -> Decl[] {
+        let out: Decl[] = []
+        for (const d of p.decls) {
+            const rs: View[] | not = d.renders
+            if (rs is some) {
+                out = out.concat([{ sym: d.sym, kind: d.kind, single: d.single, fields: d.fields, renders: gateViews(p, rs),
+                                    wiring: d.wiring, handles: d.handles }])
+            } else {
+                out = out.concat([d])
+            }
+        }
+        return out
+    }
+
+    fn gateViews(p: CoreProgram, vs: View[]) -> View[] {
+        let out: View[] = []
+        for (const v of vs) { out = out.concat([gateView(p, v)]) }
+        return out
+    }
+
+    fn gateView(p: CoreProgram, v: View) -> View {
+        return match v {
+            .El(tag: tag, attrs: attrs, kids: ks) :> View.El(tag, gateAttrs(p, attrs, ks), gateViews(p, ks))
+            .Cond(arms: arms) :> View.Cond(gateArms(p, arms))
+            .Each(src: s, bind: b, key: k, handles: hs, row: row) :> View.Each(s, b, k, hs, gateViews(p, row))
+            .Instance(decl: d, attrs: a, slot: sl, alias: al) :> View.Instance(d, a, gateViews(p, sl), al)
+            .Text(text: x) :> v
+            .Dyn(e: x) :> v
+            .Slot :> v
+            .Star(decl: x) :> v
+            .Effect(deps: x) :> v
+            .ResetOn(triggers: x) :> v
+            .Errors(of: x) :> v
+        }
+    }
+
+    fn gateArms(p: CoreProgram, arms: CondArm[]) -> CondArm[] {
+        let out: CondArm[] = []
+        for (const a of arms) { out = out.concat([{ test: a.test, body: gateViews(p, a.body) }]) }
+        return out
+    }
+
+    fn gateAttrs(p: CoreProgram, attrs: Attr[], ks: View[]) -> Attr[] {
+        let out: Attr[] = []
+        for (const a of attrs) { out = out.concat([gateAttr(p, a, ks)]) }
+        return out
+    }
+
+    fn gateAttr(p: CoreProgram, a: Attr, ks: View[]) -> Attr {
+        return match a {
+            .Gate(values: vs) :> Attr.Gate(vs, namedFields(p, ks, not, []))
+            .Static(name: x) :> a
+            .Bound(name: x) :> a
+            .On(event: x) :> a
+            .Bind(kind: x) :> a
+        }
+    }
+
+    // The bound surfaced fields `vs` names, each once, in document order.
+    // `subst`: inside a Star's renders, the Star's instance (what `.Lexical(0)`
+    // means there); `seen`: the declarations being expanded (a renders may
+    // reach itself through a Star).
+    fn namedFields(p: CoreProgram, vs: View[], subst: InstRef | not, seen: int[]) -> ValidityOf[] {
+        let out: ValidityOf[] = []
+        for (const v of vs) { out = addFields(out, viewFields(p, v, subst, seen)) }
+        return out
+    }
+
+    fn addFields(xs: ValidityOf[], ys: ValidityOf[]) -> ValidityOf[] {
+        let out: ValidityOf[] = xs
+        for (const y of ys) {
+            let dup = false
+            for (const x of out) {
+                if (fieldKey(x) == fieldKey(y)) dup = true
+            }
+            if (!dup) out = out.concat([y])
+        }
+        return out
+    }
+
+    fn fieldKey(v: ValidityOf) -> string {
+        return match v {
+            .OfField(decl: d, inst: i, idx: x) :> d.id + "/" + instKey(i) + "/" + x
+            .OfDecl(decl: d, inst: i) :> d.id + "/" + instKey(i)
+        }
+    }
+
+    fn viewFields(p: CoreProgram, v: View, subst: InstRef | not, seen: int[]) -> ValidityOf[] {
+        return match v {
+            .El(attrs: attrs, kids: ks) :> addFields(attrFields(p, attrs, subst), namedFields(p, ks, subst, seen))
+            .Cond(arms: arms) :> armFields(p, arms, subst, seen)
+            .Instance(slot: sl) :> namedFields(p, sl, subst, seen)
+            .Star(decl: d, inst: i) :> starFields(p, d, i, subst, seen)
+            .Each(src: x) :> []
+            .Text(text: x) :> []
+            .Dyn(e: x) :> []
+            .Slot :> []
+            .Effect(deps: x) :> []
+            .ResetOn(triggers: x) :> []
+            .Errors(of: x) :> []
+        }
+    }
+
+    fn armFields(p: CoreProgram, arms: CondArm[], subst: InstRef | not, seen: int[]) -> ValidityOf[] {
+        let out: ValidityOf[] = []
+        for (const a of arms) { out = addFields(out, namedFields(p, a.body, subst, seen)) }
+        return out
+    }
+
+    fn starFields(p: CoreProgram, d: Sym, i: InstRef, subst: InstRef | not, seen: int[]) -> ValidityOf[] {
+        if (seen.indexOf(d.id) >= 0) return []
+        const inner: InstRef | not = nameable(i, subst)
+        if (inner is not) return []
+        for (const x of p.decls) {
+            if (x.sym.id == d.id) {
+                const rs: View[] | not = x.renders
+                if (rs is some) return namedFields(p, rs, inner, seen.concat([d.id]))
+            }
+        }
+        return []
+    }
+
+    fn attrFields(p: CoreProgram, attrs: Attr[], subst: InstRef | not) -> ValidityOf[] {
+        let out: ValidityOf[] = []
+        for (const a of attrs) { out = addFields(out, bindField(p, a, subst)) }
+        return out
+    }
+
+    fn bindField(p: CoreProgram, a: Attr, subst: InstRef | not) -> ValidityOf[] {
+        return match a {
+            .Bind(read: r) :> bindReadField(p, r, subst)
+            .Static(name: x) :> []
+            .Bound(name: x) :> []
+            .On(event: x) :> []
+            .Gate(values: x) :> []
+        }
+    }
+
+    fn bindReadField(p: CoreProgram, r: Expr, subst: InstRef | not) -> ValidityOf[] {
+        return match r {
+            .Read(place: pl) :> placeField(p, pl, subst)
+            .Lit(lit: x) :> []
+            .Local(sym: x) :> []
+            .Call(callee: x) :> []
+            .Prim(op: x) :> []
+            .Match(scrut: x) :> []
+            .ArrayOf(elems: x) :> []
+            .StructOf(ty: x) :> []
+            .Handle(inst: x) :> []
+            .InitOf(decl: x) :> []
+            .Host(call: x) :> []
+            .Lambda(params: x) :> []
+            .SeqCall(op: x) :> []
+            .Validity(of: x) :> []
+        }
+    }
+
+    // A bind of a field's WHOLE value, when the field has a surface (every
+    // field of a user declaration; a top-level value only with validators).
+    fn placeField(p: CoreProgram, pl: Place, subst: InstRef | not) -> ValidityOf[] {
+        return match pl {
+            .Cell(decl: d, inst: i, path: path) :> cellField(p, d, i, path, subst)
+            .LocalPath(sym: x) :> []
+        }
+    }
+
+    fn cellField(p: CoreProgram, d: Sym, i: InstRef, path: FieldRef[], subst: InstRef | not) -> ValidityOf[] {
+        if (path.length != 1) return []
+        const inst: InstRef | not = nameable(i, subst)
+        if (inst is not) return []
+        for (const x of p.decls) {
+            if (x.sym.id == d.id) {
+                const idx: int = path[0].idx
+                if (idx < 0 || idx >= x.fields.length) return []
+                if (isProgramKind(x.kind) && x.fields[idx].vals.length == 0) return []
+                return [ValidityOf.OfField(d, inst, idx)]
+            }
+        }
+        return []
+    }
+
+    // An instance reference the form's render can evaluate at submit: a
+    // shared instance, or the enclosing instance. An `as=` handle or a
+    // `given` local may name no instance by then — those binds are found on
+    // the live form instead. Inside a Star's renders, `.Lexical(0)` is the
+    // Star's own instance (`subst`).
+    fn nameable(i: InstRef, subst: InstRef | not) -> InstRef | not {
+        return match i {
+            .Shared(decl: d) :> i
+            .Lexical(depth: k) :> lexicalThrough(k, i, subst)
+            .Alias(sym: s) :> not
+            .Narrowed(sym: s) :> not
+        }
+    }
+
+    fn lexicalThrough(k: int, i: InstRef, subst: InstRef | not) -> InstRef | not {
+        if (subst is not) return i
+        if (k == 0) return subst
+        return not
     }
 }

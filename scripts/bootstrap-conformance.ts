@@ -388,7 +388,9 @@ function frontEnd(mods: Record<string, any>, files: Array<{ path: string; src: s
   }
   const tp = mods.analyze.analyze(asts, files[files.length - 1].path);
   const lowered = mods.lower.lower(tp);
-  return { core: lowered.core, parseDiags, diags: parseDiags.concat(tp.diags as Diag[]) };
+  // `infos`: the bootstrap's non-fatal I- notes (s449 — SPEC §55.17.6 I-FORM-SUBMIT-GATED "reports in
+  // the warnings stream"), kept apart from `diags` by the bootstrap.
+  return { core: lowered.core, parseDiags, diags: parseDiags.concat(tp.diags as Diag[]), infos: ((tp.infos ?? []) as Diag[]) };
 }
 
 /** The runtime half's server/tool selectors — halves the bootstrap emits no artifact for. */
@@ -462,17 +464,24 @@ const stableKey = (v: unknown): string => {
   return "{" + Object.keys(o).sort().map((k) => JSON.stringify(k) + ":" + stableKey(o[k])).join(",") + "}";
 };
 
-/** The codes-half assertions, judged exactly as conformance/run.ts `runCase` judges impl#1. */
-export function codesHalfFailures(ex: Record<string, any>, diags: Diag[]): string[] {
-  const emitted = new Set(diags.map((d) => d.code));
+/**
+ * The codes-half assertions, judged exactly as conformance/run.ts `runCase` judges impl#1: the codes
+ * are the union of BOTH streams (`diags` and the non-fatal `infos`). Severity is observable for the
+ * `infos` stream only — a code there IS an info; a code in `diags` carries no §34 severity.
+ */
+export function codesHalfFailures(ex: Record<string, any>, diags: Diag[], infos: Diag[] = []): string[] {
+  const all = diags.concat(infos);
+  const emitted = new Set(all.map((d) => d.code));
+  const asInfo = new Set(infos.map((d) => d.code));
   const counts: Record<string, number> = {};
-  for (const d of diags) counts[d.code] = (counts[d.code] ?? 0) + 1;
+  for (const d of all) counts[d.code] = (counts[d.code] ?? 0) + 1;
   const out: string[] = [];
   for (const c of ex.codes ?? []) if (!emitted.has(c)) out.push(`missing ${c}`);
   for (const c of ex.notCodes ?? []) if (emitted.has(c)) out.push(`forbidden ${c} fired`);
   for (const p of ex.notCodePrefixes ?? []) for (const c of emitted) if (c.startsWith(p)) out.push(`forbidden family ${p}* fired: ${c}`);
   for (const [c, want] of Object.entries(ex.severity ?? {})) {
     if (!emitted.has(c)) out.push(`severity: ${c} did not fire (expected ${want})`);
+    else if (asInfo.has(c)) { if (want !== "info") out.push(`severity: ${c} fired as info (expected ${want})`); }
     else out.push(`severity unobservable: ${c} fired but the bootstrap Diag carries no §34 severity (expected ${want})`);
   }
   for (const [c, want] of Object.entries(ex.codeCounts ?? {})) {
@@ -611,7 +620,7 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
     return v("UNSUPPORTED", "parse-reject", { ...base, failures: msgs });
   }
 
-  const codeFailures = codesHalfFailures(ex, fe.diags);
+  const codeFailures = codesHalfFailures(ex, fe.diags, fe.infos);
   // The runtime-half selectors are read off the EFFECTIVE expectations (a twin's override may differ).
   const cx = { ...c, expected: { ...c.expected, expect: ex } } as LoadedCase;
   if (!hasRuntimeHalf(cx)) {

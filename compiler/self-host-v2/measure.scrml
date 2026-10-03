@@ -62,6 +62,7 @@ ${
             .Return(e: x) :> "Return"
             .Eval(e: x) :> "Eval"
             .Suspend(bind: x) :> "Suspend"
+            .ResetSurface(of: x) :> "ResetSurface"
         }
     }
 
@@ -80,6 +81,7 @@ ${
             .Host(call: x) :> "Host"
             .Lambda(params: x) :> "Lambda"
             .SeqCall(op: x) :> "SeqCall"
+            .Validity(of: x) :> "Validity"
         }
     }
 
@@ -135,6 +137,7 @@ ${
             .Star(decl: x) :> "Star"
             .Effect(deps: x) :> "Effect"
             .ResetOn(triggers: x) :> "ResetOn"
+            .Errors(of: x) :> "Errors"
         }
     }
 
@@ -144,6 +147,7 @@ ${
             .Bound(name: x) :> "Bound"
             .On(event: x) :> "On"
             .Bind(kind: x) :> "Bind"
+            .Gate(values: x) :> "Gate"
         }
     }
 }

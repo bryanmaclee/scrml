@@ -79,8 +79,18 @@ function hasAttr(node: AnyNode, name: string): boolean {
  * carries no `name=` (a named program is not a db scope — `annotateDbScopes`).
  */
 export function fileDefaultDbValue(nodes: unknown): string | null {
-  let firstDbSrc: string | null = null;
-  let firstProgramDb: string | null = null;
+  return fileDefaultDbDecl(nodes)?.value ?? null;
+}
+
+/**
+ * The node that declares a file's default `_scrml_sql` database (see
+ * `fileDefaultDbValue`, which reads its value) together with that value — so a
+ * per-database attribute on the SAME element (`transactions=`, §19.10.6) is read off
+ * the declaration the handle is actually bound to.
+ */
+export function fileDefaultDbDecl(nodes: unknown): { value: string; node: AnyNode } | null {
+  let firstDbSrc: { value: string; node: AnyNode } | null = null;
+  let firstProgramDb: { value: string; node: AnyNode } | null = null;
   const walk = (children: unknown): void => {
     if (!Array.isArray(children) || firstDbSrc !== null) return;
     for (const n of children) {
@@ -88,11 +98,11 @@ export function fileDefaultDbValue(nodes: unknown): string | null {
       const node = n as AnyNode;
       if (node.kind === "markup" && node.tag === "program" && firstProgramDb === null && !hasAttr(node, "name")) {
         const v = dbAttrValue(node, "db");
-        if (v !== null && v.length > 0) firstProgramDb = v;
+        if (v !== null && v.length > 0) firstProgramDb = { value: v, node };
       }
       if (node.kind === "state" && node.stateType === "db") {
         const v = dbAttrValue(node, "src");
-        if (v !== null && v.length > 0) { firstDbSrc = v; return; }
+        if (v !== null && v.length > 0) { firstDbSrc = { value: v, node }; return; }
       }
       walk(node.children);
     }

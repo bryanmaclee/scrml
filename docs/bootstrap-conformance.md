@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1278 of 1278 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1288 of 1288 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 76 | 5.9% |
+| PASS | 84 | 6.5% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 53 | 4.1% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 501 | 39.2% |
-| UNSUPPORTED | 648 | 50.7% |
+| NOT-TWINNED | 501 | 38.9% |
+| UNSUPPORTED | 650 | 50.5% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 129; of those, 76 hold (58.9%). Runtime half executed on the bootstrap for 27 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 137; of those, 84 hold (61.3%). Runtime half executed on the bootstrap for 33 case(s).
 
-- **Vacuous** passes: 19 of 76 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **57**.
+- **Vacuous** passes: 19 of 84 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **65**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 46 of 53; the other 7 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 378 · parse-reject 270.
+UNSUPPORTED by reason: bootstrap-unsupported 380 · parse-reject 270.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **588** — PASS 52 · FAIL 38 · UNSUPPORTED 498. Twin holds 52 (non-vacuous 38). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **590** — PASS 52 · FAIL 38 · UNSUPPORTED 500. Twin holds 52 (non-vacuous 38). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 3 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -116,7 +116,7 @@ NOT-TWINNED by reason (501 cases; a case counts once per distinct reason):
 | fn | 18 | 1 | · | · | · | 1 | 16 | · | · |
 | foreign | 9 | · | · | 1 | · | 7 | 1 | · | · |
 | form-for | 16 | · | · | · | · | · | 16 | · | · |
-| forms | 46 | 4 | · | · | · | 38 | 4 | · | · |
+| forms | 54 | 12 | · | · | · | 38 | 4 | · | · |
 | hostmethod | 1 | · | · | · | · | · | 1 | · | · |
 | input | 2 | · | · | · | · | · | 2 | · | · |
 | lifecycle | 56 | 5 | · | 2 | · | 32 | 17 | · | · |
@@ -144,7 +144,7 @@ NOT-TWINNED by reason (501 cases; a case counts once per distinct reason):
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
 | server-db | 56 | · | · | · | · | 16 | 40 | · | · |
 | server-fn | 22 | · | · | · | · | 7 | 15 | · | · |
-| sql | 13 | · | · | · | · | 9 | 4 | · | · |
+| sql | 15 | · | · | · | · | 9 | 6 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | · | · | 1 | · | 24 | 2 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
@@ -309,7 +309,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (76)
+### PASS / CODES-ONLY (84)
 
 - `auth/i-auth-redirect-unresolved-neg` — PASS · VACUOUS
 - `auth/w-auth-content-not-gated-neg` — PASS · VACUOUS
@@ -339,6 +339,14 @@ none
 - `forms/bind-value-two-field` — PASS · TWIN
 - `forms/checkbox-check` — PASS · TWIN
 - `forms/checkbox-uncheck` — PASS · TWIN
+- `forms/errors-top-level-renders` — PASS
+- `forms/gate-child-field-blocks-submit` — PASS
+- `forms/gate-invalid-blocks-submit` — PASS
+- `forms/gate-valid-submits` — PASS
+- `forms/surface-top-level-no-validators-pos` — PASS
+- `forms/surface-top-level-validated-neg` — PASS
+- `forms/validator-dead-locked-pos` — PASS
+- `forms/validator-live-let-neg` — PASS
 - `lifecycle/effect-writes-state-direct-pos` — PASS · TWIN (also emitted, unasserted: E-LIFECYCLE-007)
 - `lifecycle/effect-writes-state-function-value-pos` — PASS · TWIN (also emitted, unasserted: E-LIFECYCLE-007)
 - `lifecycle/reset-on-engine-refused-neg` — PASS · TWIN (also emitted, unasserted: E-RESET-ON-INVALID-ENTRY)
@@ -388,7 +396,7 @@ none
 - `type-state-codes/e-type-any-forbidden-neg` — PASS · TWIN · VACUOUS (also emitted, unasserted: E-TYPE-UNKNOWN)
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (648)
+### UNSUPPORTED (650)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -1013,6 +1021,8 @@ none
 - `sql/comment-cloaked-body-e-sql-003-neg` — twin · bootstrap-unsupported: an unannotated parameter `q` — bootstrap slice M2 needs `q: Type` (Core parameters are typed)
 - `sql/prepare-sse-generator-e-sql-006-neg` — twin · bootstrap-unsupported: `<db>` is a scrml structural element (§39 database), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `sql/runtime-expr-body-e-sql-003-neg` — twin · bootstrap-unsupported: an unannotated parameter `q` — bootstrap slice M2 needs `q: Type` (Core parameters are typed)
+- `sql/transactions-concurrent-postgres-pos` — twin · bootstrap-unsupported: an unannotated parameter `note` — bootstrap slice M2 needs `note: Type` (Core parameters are typed)
+- `sql/transactions-concurrent-sqlite-e-sql-010-neg` — twin · bootstrap-unsupported: an unannotated parameter `note` — bootstrap slice M2 needs `note: Type` (Core parameters are typed)
 - `style/program-scope-overlap-soft` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
 - `style/theme-name-collision` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
 - `table-for/tablefor-rows-missing` — twin · bootstrap-unsupported: `<tableFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
