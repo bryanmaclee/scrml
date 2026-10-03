@@ -378,7 +378,12 @@ ${
         for (const t of triggers) {
             for (const m of checkEffectDep(p, encl, t)) { out = out.concat([m.replace("C11: an Effect dependency", "C13: a ResetOn trigger")]) }
         }
-        if (reset.stmts.length != 1) return out.concat(["C13: a ResetOn's reset is " + reset.stmts.length + " statements — it is exactly one Write (§6.8.4 rule 1)"])
+        // s449: a validated cell's reset also clears its surface (§55.13 — a
+        // `reset-on=` reset IS `reset(@x)`): the Write may be followed by ONE
+        // ResetSurface of that same field.
+        const n: int = reset.stmts.length
+        if (n != 1 && n != 2) return out.concat(["C13: a ResetOn's reset is " + n + " statements — it is exactly one Write (§6.8.4 rule 1), and its surface's reset (§55.13)"])
+        if (n == 2 && !isResetSurface(reset.stmts[1])) return out.concat(["C13: a ResetOn's reset is 2 statements — one Write, then something other than its surface's reset (§6.8.4 rule 1, §55.13)"])
         const cap: Sym | not = writeCapOf(reset.stmts[0])
         if (cap is not) return out.concat(["C13: a ResetOn's reset is not a Write (§6.8.4 rule 1)"])
         const o: CapOwner | not = capOwner(p, cap)
@@ -387,6 +392,20 @@ ${
             if (t.decl.id == o.decl.sym.id && t.idx == o.idx) out = out.concat(["C13: a ResetOn on <" + o.decl.sym.hint + ">." + o.decl.fields[o.idx].sym.hint + " lists its own cell as a trigger (§6.8.4 rule 3, a cycle)"])
         }
         return out
+    }
+
+    fn isResetSurface(s: Stmt) -> boolean {
+        return match s {
+            .ResetSurface(of: v) :> true
+            .Write(cap: x) :> false
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Commit(writes: x) :> false
+            .If(cond: x) :> false
+            .Return(e: x) :> false
+            .Eval(e: x) :> false
+            .Suspend(bind: x) :> false
+        }
     }
 
     fn writeCapOf(s: Stmt) -> Sym | not {

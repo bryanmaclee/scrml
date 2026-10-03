@@ -280,6 +280,7 @@ ${
             .NStruct(owner: o) :> not
             .NFn(sym: s) :> not
             .NLength :> not
+            .NSurface(of: x) :> not
             not :> not
         }
     }
@@ -390,6 +391,7 @@ ${
             .NStruct(owner: o) :> missing()
             .NFn(sym: s) :> missing()
             .NLength :> missing()
+            .NSurface(of: x) :> missing()
             not :> missing()
         }
     }
@@ -428,6 +430,7 @@ ${
     fn memberExpr(c: LC, f: NameFact | not, obj: AExpr) -> Expr {
         return match f {
             .NLength :> Expr.Prim(PrimOp.Length, [lowerExpr(c, obj)])
+            .NSurface(of: v, prop: pr) :> Expr.Validity(validityOf(c, v), pr)
             .NField(decl: d, inst: i, idx: x) :> cellRead(c, d, instOf(c, i), [{ owner: d, idx: x }])
             .NStruct(owner: o, idx: x) :> stepInto(lowerExpr(c, obj), { owner: o, idx: x })
             .NLocal(sym: s) :> missing()
@@ -474,6 +477,7 @@ ${
             .NInst(decl: d) :> missing()
             .NStruct(owner: o) :> missing()
             .NLength :> missing()
+            .NSurface(of: x) :> missing()
             not :> missing()
         }
     }
@@ -815,11 +819,22 @@ ${
         const di: DeclInfo | not = declInfo(c.t, d)
         if (di is not) return []
         const target: InstRef = instOf(c, w.inst)
-        if (!isProgramKind(di.kind)) return [Stmt.Write(w.cap, target, w.edit, Expr.InitOf(d, target, idx), w.check)]
+        const surf: Stmt[] = surfaceReset(di, target, idx)
+        if (!isProgramKind(di.kind)) return [Stmt.Write(w.cap, target, w.edit, Expr.InitOf(d, target, idx), w.check)].concat(surf)
         const ic: LC = { t: c.t, file: c.file, subst: target, snap: not }
         const init: Expr | not = lowerValue(ic, di.fields[idx].init)
         if (init is not) return []
-        return [Stmt.Write(w.cap, target, w.edit, init, w.check)]
+        return [Stmt.Write(w.cap, target, w.edit, init, w.check)].concat(surf)
+    }
+
+    // s449 — §55.13: `reset(@x)` "clears synthesized validity state in
+    // addition to resetting the underlying value" — the field's surface, when
+    // it has one (every field of a user declaration, §55.6; a top-level value
+    // that carries validators, §55.5.1).
+    fn surfaceReset(di: DeclInfo, inst: InstRef, idx: int) -> Stmt[] {
+        if (idx < 0 || idx >= di.fields.length) return []
+        if (isProgramKind(di.kind) && di.fields[idx].vals.length == 0) return []
+        return [Stmt.ResetSurface(ValidityOf.OfField(di.sym, inst, idx))]
     }
 
     // s449 — one View.ResetOn per accepted `reset-on=` rule (§6.8.4): the
@@ -830,7 +845,7 @@ ${
         let out: View[] = []
         for (const r of c.t.resets) {
             const reset: Stmt[] = resetWrite(c, d, r.target)
-            if (reset.length == 1) {
+            if (reset.length >= 1) {
                 let triggers: EffectDep[] = []
                 for (const t of r.triggers) { triggers = triggers.concat([mkEffectDep(d.sym, InstRef.Lexical(0), t)]) }
                 out = out.concat([View.ResetOn(triggers, block(reset), r.rank)])
@@ -849,7 +864,7 @@ ${
         if (init is not) return []
         let edit: EditKind = EditKind.Replace
         if (f.graph is some) edit = EditKind.Transition
-        return [Stmt.Write(cap, InstRef.Lexical(0), edit, init, Check.Static)]
+        return [Stmt.Write(cap, InstRef.Lexical(0), edit, init, Check.Static)].concat(surfaceReset(d, InstRef.Lexical(0), idx))
     }
 
     fn isProgramKind(k: DeclKind) -> boolean {
@@ -898,6 +913,7 @@ ${
             .NStruct(owner: o) :> []
             .NFn(sym: s) :> []
             .NLength :> []
+            .NSurface(of: x) :> []
             not :> []
         }
     }
@@ -921,10 +937,20 @@ ${
             .MUse(decl: d, alias: a) :> condWrap(c, e, [View.Instance(d, constructAttrs(c, e.attrs), lowerNodes(c, e.kids), a)])
             .MEach(bind: b, handles: hs) :> [eachView(c, e, b, hs)]
             .MSlot :> [View.Slot]
+            .MErrors(of: v, all: a) :> [View.Errors(validityOf(c, v), a)]
             .MStateView(v: v) :> [stateView(c, v)]
             .MInline(v: v) :> inlineViews(c, v)
             .MStar(decl: d, inst: i) :> [View.Star(d, instOf(c, i))]
             not :> []
+        }
+    }
+
+    // s449 — a surface analyze resolved, its instance reference made Core's
+    // (the same `instOf` every cell read goes through).
+    fn validityOf(c: LC, v: ValidityOf) -> ValidityOf {
+        return match v {
+            .OfField(decl: d, inst: i, idx: x) :> ValidityOf.OfField(d, instOf(c, i), x)
+            .OfDecl(decl: d, inst: i) :> ValidityOf.OfDecl(d, instOf(c, i))
         }
     }
 

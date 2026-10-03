@@ -28,3 +28,32 @@
 - Test: `slice-m4/gate.test.js` — invalid → no submit + defaultPrevented; valid → submit;
   formnovalidate bypass; requestSubmit() gated; BITE: the same Core with the Gate stripped runs
   `save()` on `""`.
+- Landed `fa7abce52`; full pre-commit gate 29857 pass / 58 skip / 12 todo / 0 fail.
+
+## 2. Surface reads, `<errors of=…/>`, Edge A flipped, §55.5.2 dead rule, reset, I-FORM-SUBMIT-GATED
+
+- **analyze**: `NameFact.NSurface(of, prop)`; `resolveMember` — compound `@d.isValid` /
+  `.submitted` (§55.5); field `@x.isValid` / `.touched` (+ `.submitted` on a top-level value)
+  (§55.5.1 / §55.6). Refused, filed: `errors` as a VALUE (no ValidationError type in the
+  bootstrap) and the compound `touched` / `errors` MAPS. `@signup.f.submitted` → E-SCOPE-001
+  (§55.6 "A child field has no `submitted` of its own" — SPEC names no code: agent pick).
+  E-VALIDITY-NO-SURFACE only for a top-level value with no validators (§55.5.1 rule 2).
+  E-SYNTHESIZED-WRITE also for a field surface property (§55.5.1 rule 7).
+- `ElemFact.MErrors` + `resolveErrors` (§55.8): `of=` a field / compound / validated top-level
+  value; `all`; E-ERRORS-001 / -002 (the §34 rows); E-VALIDITY-NO-SURFACE for a no-validator
+  top-level value; body override + unknown attributes refused (E-BOOTSTRAP-UNSUPPORTED). `errors`
+  left the structural-refusal list.
+- **Edge A reversed**: `topLevelValidatorsLower()` removed (S447 ruled) — a program cell's
+  validators take the child-field path; they lower onto every control that binds it and gate.
+- **E-VALIDATOR-DEAD narrowed to §55.5.2**: dead only when locked (no write grant) AND no bind
+  AND no use-site seed (server / persist= are refused where written). A `let` value set from
+  logic is LIVE.
+- **reset** (§55.13): `reset(@x)` and a `reset-on=` reset lower to `Write` + `ResetSurface`
+  (touched → false; a top-level value's submitted → false; a child field's compound submitted
+  unchanged). check C13 admits the trailing ResetSurface.
+- **I-FORM-SUBMIT-GATED** (§55.17.6): in a new non-fatal `TypedProgram.infos` stream (SPEC: "As an
+  `I-` code it is non-fatal and reports in the warnings stream"), so a gated program still
+  compiles clean; `frontEnd` returns it as `infos`. `data-scrml-gated` from `Attr.Gate.values`.
+- Superseded pins flipped (validators.test.js (1)/(5), failclosed.test.js `errors`), each with the
+  governing sentence in a comment.
+- Gates: m1 99, m2 448, m3 60, m4 535 (was 504), codec 92, m1-lowered 99, lexer 337.
