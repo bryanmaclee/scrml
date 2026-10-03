@@ -582,7 +582,7 @@ ${
     // Every TypeItem of a file, the program's included.
     fn typeItems(items: AItem[]) -> ATypeDecl[] {
         let out: ATypeDecl[] = []
-        for (const it of items) { out = out.concat(typeItemOf(it)) }
+        for (const it of items) { if (!isLaterProgram(items, it)) out = out.concat(typeItemOf(it)) }   // s451: a second top-level program is E-PROGRAM-002, not read
         return out
     }
 
@@ -1037,7 +1037,7 @@ ${
         for (const f of files) {
             for (const it of f.items) {
                 const k: AItemK = it.k
-                const r: RDeclStubs = declStubOf(k, f.path, entry, st)
+                const r: RDeclStubs = isLaterProgram(f.items, it) ? noStubs(st) : declStubOf(k, f.path, entry, st)
                 out = out.concat(r.ds)
                 st = r.st
             }
@@ -1109,6 +1109,521 @@ ${
         if (file != entry) st2 = addDiag(st, file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a `<program>` outside the entry file")
         const r: RSym = mint(st2, "program")
         return { ds: [{ sym: r.s, file: file, isProgram: true, d: not, p: p, nid: p.nid }], st: r.st }
+    }
+
+    // ---- s451: the program shape (fail closed) ---------------------------------------
+    // Before s451 every `<program>` attribute was parsed and never read, a
+    // second top-level `<program>` silently won (phaseA kept the LAST), a
+    // `<program>` in a program body was ignored, and markup at a file's top
+    // level, outside any `<program>`, was dropped. Each now gets the SPEC's code
+    // where the rule is static and cheap, else E-BOOTSTRAP-UNSUPPORTED naming
+    // it. The governing sentences are quoted in
+    // docs/changes/s451-boot-program-shape/progress.md.
+
+    // Is this item the second (or later) top-level `<program>` of its file?
+    // §40.8: "A second (or later) top-level `<program>` in the SAME file …
+    // SHALL be `E-PROGRAM-002`" — it is reported (programShapeDiags), and no
+    // stub is minted for it, so its body is not analyzed as the program.
+    fn isLaterProgram(items: AItem[], it: AItem) -> boolean {
+        let seen = 0
+        for (const x of items) {
+            if (x.nid == it.nid) return seen > 0 && programOfItem(x) is some
+            if (programOfItem(x) is some) seen = seen + 1
+        }
+        return false
+    }
+
+    fn programOfItem(it: AItem) -> AProgram | not {
+        const k: AItemK = it.k
+        return match k {
+            .ProgramItem(p: p) :> p
+            .DeclItem(d: d) :> not
+            .ImportItem(i: i) :> not
+            .TypeItem(t: t) :> not
+            .FnItem(f: f) :> not
+            .MarkupItem(n: n) :> not
+        }
+    }
+
+    fn markupOfItem(it: AItem) -> ANode | not {
+        const k: AItemK = it.k
+        return match k {
+            .MarkupItem(n: n) :> n
+            .ProgramItem(p: p) :> not
+            .DeclItem(d: d) :> not
+            .ImportItem(i: i) :> not
+            .TypeItem(t: t) :> not
+            .FnItem(f: f) :> not
+        }
+    }
+
+    fn topElemOf(n: ANode) -> AElem | not {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> e
+            .Text(text: t) :> not
+            .Interp(e: x) :> not
+            .DeclNode(d: d) :> not
+            .Effect(w: w) :> not
+        }
+    }
+
+    // Every file: a second+ top-level `<program>` (E-PROGRAM-002), file-top
+    // markup outside any `<program>`, and — for the entry file's program —
+    // its attributes and the `<program>`s nested in its body.
+    fn programShapeDiags(files: FileAst[], entry: string, st0: AS) -> AS {
+        let st: AS = st0
+        for (const f of files) {
+            let programs = 0
+            for (const it of f.items) {
+                if (programOfItem(it) is some) programs = programs + 1
+            }
+            let seen = 0
+            for (const it of f.items) {
+                const p: AProgram | not = programOfItem(it)
+                if (p is some) {
+                    seen = seen + 1
+                    if (seen > 1) {
+                        st = addDiag(st, f.path, p.span, "E-PROGRAM-002", "a second top-level `<program>` in this file — a file declares its top-level `<program>` exactly once (§40.8), so which program's `auth=`, cookie and middleware settings govern it cannot be told; merge them into one `<program>`, or put a worker / sidecar / scoped-db program INSIDE the first (without `auth=` or cookie attributes)")
+                    } else if (f.path == entry) {
+                        st = topProgramAttrDiags(f.path, p, st)
+                        st = nestedProgramDiags(f.path, p.items, st)
+                    }
+                }
+                const n: ANode | not = markupOfItem(it)
+                if (n is some) st = outsideProgramDiag(f.path, n, programs > 0, st)
+            }
+        }
+        return st
+    }
+
+    // Markup at a file's top level, outside any `<program>`. §38.1, §20.8.1
+    // and §23.6 name three shapes; for the rest the SPEC names no rule (§40.8:
+    // "The file top level outside any `<program>` / `<page>` / `<channel>` is
+    // NOT this locus"), so it is refused — never dropped.
+    fn outsideProgramDiag(file: string, n: ANode, fileHasProgram: boolean, st: AS) -> AS {
+        const e: AElem | not = topElemOf(n)
+        // a file-top `<effect>` is already refused by `strayEffects` (s449)
+        if (e is not) return st
+        const t: string = e.tag.toLowerCase()
+        if (t == "channel" && fileHasProgram) return addDiag(st, file, e.span, "E-CHANNEL-OUTSIDE-PROGRAM", "`<channel>` outside `<program>` in a file that has a `<program>` (§38.1) — move it inside the `<program>`")
+        if (t == "outlet") return addDiag(st, file, e.span, "E-OUTLET-OUTSIDE-SHELL", "`<outlet>` outside a `<program>` shell (§20.8.1) — an outlet is the shell's route-content region; move it inside the `<program>`")
+        if (t == "foreign" && fileHasProgram && attrNamed(e.attrs, "lang") is some) return addDiag(st, file, e.span, "E-FOREIGN-LANG-IN-PROGRAM", "`<foreign lang>` in a file that also declares a top-level `<program>` (§23.6) — `<foreign lang>` is the library-file surface; remove it and set `lang=` on the `<program>`")
+        return addDiag(st, file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`")
+    }
+
+    // The `<program>` attribute set (§52.13.3: a closed set — "unknown
+    // attribute names emit `W-ATTR-001`"): the names §4.12.2, §20.5.1, §23.5,
+    // §40.2, §40.7, §43, §58.8, §64 and §65.3.4 give it.
+    fn isProgramAttrName(a: string) -> boolean {
+        if (isCookieAttr(a)) return true
+        return match a {
+            "kind" :> true
+            "serve" :> true
+            "db" :> true
+            "tables" :> true
+            "html" :> true
+            "name" :> true
+            "auth" :> true
+            "loginRedirect" :> true
+            "csrf" :> true
+            "title" :> true
+            "description" :> true
+            "version" :> true
+            "author" :> true
+            "license" :> true
+            "cors" :> true
+            "cors-max-age" :> true
+            "log" :> true
+            "headers" :> true
+            "ratelimit" :> true
+            "idempotency-store" :> true
+            "idempotency-ttl" :> true
+            "transactions" :> true
+            "batch-in-list-cap" :> true
+            "channel-reconnect" :> true
+            "lang" :> true
+            "mode" :> true
+            "callchar" :> true
+            "build" :> true
+            "port" :> true
+            "health" :> true
+            "route" :> true
+            "protect" :> true
+            "story" :> true
+            "capabilities" :> true
+            "autostart" :> true
+            "restart" :> true
+            "max-restarts" :> true
+            "within" :> true
+            "mcp" :> true
+            "reset" :> true
+            _ :> false
+        }
+    }
+
+    // §4.12.2's table: what a NESTED `<program>` may carry.
+    fn isNestedProgramAttr(a: string) -> boolean {
+        return match a {
+            "name" :> true
+            "lang" :> true
+            "db" :> true
+            "mode" :> true
+            "build" :> true
+            "port" :> true
+            "health" :> true
+            "route" :> true
+            "protect" :> true
+            "callchar" :> true
+            "story" :> true
+            "capabilities" :> true
+            "autostart" :> true
+            "restart" :> true
+            "max-restarts" :> true
+            "within" :> true
+            _ :> false
+        }
+    }
+
+    // The two §20.5.1 cookie attributes (`sessionExpiry=` and the `-secure`
+    // one). The second name is assembled, and no string here holds the bare
+    // word: impl#1's route inference scans raw source for /\bsession\b/
+    // (route-inference.ts SERVER_ONLY_PATTERNS) — a string literal included —
+    // and would place this function, and every function it calls, on the server.
+    fn isCookieAttr(a: string) -> boolean {
+        return a == "sessionExpiry" || a == "sess" + "ion-secure"
+    }
+
+    fn isDocumentaryAttr(a: string) -> boolean {
+        return a == "title" || a == "description" || a == "version" || a == "author" || a == "license"
+    }
+
+    // The value as written, for a message.
+    fn attrValueText(v: AAttrValue) -> string {
+        return match v {
+            .Quoted(v: s) :> "\"" + s + "\""
+            .NoValue :> "no value (a bare attribute)"
+            .Bare(e: x) :> "a non-literal value"
+            .Paren(e: x) :> "a non-literal value"
+            .Braced(b: b) :> "a non-literal value"
+        }
+    }
+
+    fn quotedAttrText(v: AAttrValue) -> string | not {
+        return match v {
+            .Quoted(v: s) :> s
+            .NoValue :> not
+            .Bare(e: x) :> not
+            .Paren(e: x) :> not
+            .Braced(b: b) :> not
+        }
+    }
+
+    // The entry file's top-level `<program>`: no attribute is read by the
+    // bootstrap's build, so each one is checked to its SPEC rule where that
+    // rule is static, and otherwise refused.
+    fn topProgramAttrDiags(file: string, p: AProgram, st0: AS) -> AS {
+        let st: AS = st0
+        for (const a of p.attrs) {
+            if (a.name == "auth") {
+                st = topAuthDiag(file, a, st)
+            } else if (a.name == "ratelimit") {
+                st = ratelimitDiag(file, a, st)
+            } else if (a.name == "capabilities") {
+                st = capabilitiesDiags(file, a, st)
+            } else if (a.name == "story") {
+                st = addDiag(st, file, a.span, "W-STORY-ON-TOP-LEVEL", "`story=` on the top-level `<program>` is ignored — the top-level program's build story is `[story] default` in `scrml.toml`; per-`<program>` build stories are for nested programs (§58.8, §4.12.2)")
+            } else if (a.name == "reset") {
+                st = resetAttrDiag(file, a, st)
+            } else if (a.name == "name") {
+                st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`name=` on the top-level `<program>` — \"The top-level `<program>` MUST NOT have a `name=` attribute\" (§4.12.2), and the SPEC names no code for it; remove it")
+            } else if (isProgramAttrName(a.name)) {
+                st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program " + a.name + "=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement")
+            } else {
+                st = addDiag(st, file, a.span, "W-ATTR-001", "`" + a.name + "` is not a `<program>` attribute (§52.13.3: `<program>` has a closed attribute set)")
+            }
+        }
+        return st
+    }
+
+    // §65.3.4: "Opt out via `<program reset=\"none\">` — drops the whole `reset`
+    // layer." `"none"` is implemented (lower: CoreProgram.reset = false; print
+    // emits no reset layer). §65.3.4 names no other value and no code for one,
+    // so any other value is refused rather than given a meaning.
+    fn resetAttrDiag(file: string, a: AAttr, st: AS) -> AS {
+        const v: string | not = quotedAttrText(a.value)
+        if (v is some) {
+            if (v == "none") return st
+        }
+        return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset=` is " + attrValueText(a.value) + " — §65.3.4 names one value, \"none\" (drop the built-in reset layer); the bootstrap gives no other value a meaning")
+    }
+
+    // §52.13.2 (S449): exactly one of the three literals, else E-AUTH-ATTR-INVALID.
+    // A legal value is REFUSED: the bootstrap emits no server and no login
+    // gate, so compiling it would serve the program ungated.
+    fn topAuthDiag(file: string, a: AAttr, st: AS) -> AS {
+        const v: string | not = quotedAttrText(a.value)
+        if (v is some) {
+            if (v == "required" || v == "optional" || v == "none") return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program auth=\"" + v + "\">` is not in the bootstrap — it emits no server and no login gate (§52.13, §40.2), so the program is refused rather than compiled ungated")
+        }
+        return addDiag(st, file, a.span, "E-AUTH-ATTR-INVALID", "`auth=` on `<program>` is " + attrValueText(a.value) + " — it must be exactly one of the literals \"required\", \"optional\", \"none\" (§52.13.2)")
+    }
+
+    // §39.2.4: `N/unit`, unit ∈ { sec, min, hour }, else E-MW-002. A valid
+    // value is refused: the bootstrap emits no request pipeline.
+    fn ratelimitDiag(file: string, a: AAttr, st: AS) -> AS {
+        const v: string | not = quotedAttrText(a.value)
+        if (v is some) {
+            if (isRatelimitForm(v)) return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program ratelimit=\"" + v + "\">` is not in the bootstrap — it emits no request pipeline (§40.2), so the limit would be dropped")
+        }
+        return addDiag(st, file, a.span, "E-MW-002", "`ratelimit=` is " + attrValueText(a.value) + " — it must be `N/unit` with unit one of sec, min, hour (e.g. ratelimit=\"100/min\", §39.2.4)")
+    }
+
+    fn isRatelimitForm(v: string) -> boolean {
+        const slash: int = v.indexOf("/")
+        if (slash < 1) return false
+        let i = 0
+        while (i < slash) {
+            if ("0123456789".indexOf(v.substring(i, i + 1)) < 0) return false
+            i = i + 1
+        }
+        const unit: string = v.substring(slash + 1, v.length)
+        return unit == "sec" || unit == "min" || unit == "hour"
+    }
+
+    // §23.5.2 / §23.5.3: `capabilities=[tok, …]` over the closed vocabulary.
+    // An unknown token is E-FOREIGN-CAPABILITY-UNKNOWN; a value outside the
+    // §23.5.2 grammar is refused. A valid list is accepted: in v1.0 it is
+    // advisory and governs only foreign code (§23.5.1), which the bootstrap
+    // refuses everywhere — so there is nothing for it to change here.
+    type CapTok:struct = { name: string, ok: boolean }
+
+    fn capabilitiesDiags(file: string, a: AAttr, st0: AS) -> AS {
+        let st: AS = st0
+        const v: AAttrValue = a.value
+        const es: AExpr[] | not = match v {
+            .Bare(e: x) :> capList(x)
+            .Paren(e: x) :> not
+            .Quoted(v: s) :> not
+            .NoValue :> not
+            .Braced(b: b) :> not
+        }
+        if (es is not) return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`capabilities=` is not a bracketed capability list `[tok, …]` (§23.5.2)")
+        for (const e of es) {
+            const t: CapTok = capToken(e)
+            if (t.name != "" && !isCapability(t.name)) {
+                st = addDiag(st, file, e.span, "E-FOREIGN-CAPABILITY-UNKNOWN", "`" + t.name + "` is not a capability — the v1 vocabulary is { network, fs-read, fs-write, spawn, env, db } (§23.5.3)")
+            } else if (t.name == "" || !t.ok || (t.name == "db" && capHasArgs(e))) {
+                st = addDiag(st, file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "this `capabilities=` entry is outside the §23.5.2 grammar (a token, `tok(\"…\", …)` with string-literal arguments, or a bare `db`)")
+            }
+        }
+        return st
+    }
+
+    fn capList(e: AExpr) -> AExpr[] | not {
+        const k: AExprK = e.k
+        return match k {
+            .ArrayLit(elems: xs) :> xs
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    fn isCapability(n: string) -> boolean {
+        return n == "network" || n == "fs-read" || n == "fs-write" || n == "spawn" || n == "env" || n == "db"
+    }
+
+    // A capability token, read back from the expression the attribute value
+    // parsed as: `spawn` (a name), `network("a")` (a call), `fs-read("p")`
+    // (`fs - read("p")`: a subtraction whose right side is the call). name ""
+    // = not a token shape; ok = false = arguments that are not string literals.
+    fn capToken(e: AExpr) -> CapTok {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> { name: n, ok: true }
+            .Call(callee: c, args: args) :> { name: capHyphenName(c), ok: allStrLits(args) }
+            .Binary(op: o, l: l, r: r) :> capHyphenTok(o, l, r)
+            .At(name: n) :> { name: "", ok: false }
+            .AtItem :> { name: "", ok: false }
+            .Num(raw: r) :> { name: "", ok: false }
+            .Str(v: s) :> { name: "", ok: false }
+            .Bool(v: b) :> { name: "", ok: false }
+            .NotLit :> { name: "", ok: false }
+            .Recovered :> { name: "", ok: false }
+            .Variant(name: n) :> { name: "", ok: false }
+            .Member(obj: o) :> { name: "", ok: false }
+            .Unary(op: o) :> { name: "", ok: false }
+            .Ternary(test: t) :> { name: "", ok: false }
+            .Assign(target: t) :> { name: "", ok: false }
+            .ArrayLit(elems: xs) :> { name: "", ok: false }
+            .ObjectLit(props: ps) :> { name: "", ok: false }
+            .Spread(e: x) :> { name: "", ok: false }
+            .Index(obj: o) :> { name: "", ok: false }
+            .Lambda(params: ps) :> { name: "", ok: false }
+        }
+    }
+
+    fn capHyphenTok(o: BinOp, l: AExpr, r: AExpr) -> CapTok {
+        if (o != BinOp.Sub) return { name: "", ok: false }
+        const left: string = capHyphenName(l)
+        if (left == "") return { name: "", ok: false }
+        const t: CapTok = capToken(r)
+        if (t.name == "") return t
+        return { name: left + "-" + t.name, ok: t.ok }
+    }
+
+    // `a` or `a-b-…` (a chain of subtractions of names) → "a" / "a-b-…".
+    fn capHyphenName(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> n
+            .Binary(op: o, l: l, r: r) :> capHyphenPair(o, l, r)
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: x) :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Member(obj: x) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: x) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: xs) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: x) :> ""
+            .Index(obj: x) :> ""
+            .Lambda(params: ps) :> ""
+        }
+    }
+
+    fn capHyphenPair(o: BinOp, l: AExpr, r: AExpr) -> string {
+        if (o != BinOp.Sub) return ""
+        const a: string = capHyphenName(l)
+        const b: string = capHyphenName(r)
+        if (a == "" || b == "") return ""
+        return a + "-" + b
+    }
+
+    fn allStrLits(args: AExpr[]) -> boolean {
+        for (const x of args) {
+            if (!isStrLitExpr(x)) return false
+        }
+        return true
+    }
+
+    fn isStrLitExpr(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Str(v: s) :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: xs) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
+        }
+    }
+
+    // `db(…)`: `db` is presence-only (§23.5.2 grammar: 'db' takes no arguments).
+    fn capHasArgs(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Call(callee: c) :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: xs) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps) :> false
+        }
+    }
+
+    // A `<program>` in a program body is NESTED (§4.12) — an execution
+    // context (worker / sidecar / scoped db) the bootstrap does not build, so
+    // it is refused; its attributes still get §4.12.2's codes (each is an
+    // error whatever the bootstrap builds), and its own body is walked for
+    // deeper programs.
+    fn nestedProgramDiags(file: string, items: AItem[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const it of items) {
+            const p: AProgram | not = programOfItem(it)
+            if (p is some) {
+                st = addDiag(st, file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a nested `<program>` (§4.12 — a worker, sidecar or scoped-db execution context) is not in the bootstrap")
+                st = nestedProgramAttrDiags(file, p, st)
+                st = nestedProgramDiags(file, p.items, st)
+            }
+        }
+        return st
+    }
+
+    fn nestedProgramAttrDiags(file: string, p: AProgram, st0: AS) -> AS {
+        let st: AS = st0
+        for (const a of p.attrs) {
+            if (a.name == "auth") {
+                st = addDiag(st, file, a.span, "E-PROGRAM-NESTED-AUTH", "`auth=` on a nested `<program>` — a nested program is not an auth scope (§4.12.2); put `auth=` on the top-level `<program>` or on the `<page>` that needs it")
+            } else if (isCookieAttr(a.name)) {
+                st = addDiag(st, file, a.span, "E-PROGRAM-NESTED-SESSION", "`" + a.name + "=` on a nested `<program>` — the login cookie belongs to the whole application (§4.12.2, §20.5.1)")
+            } else if (isDocumentaryAttr(a.name)) {
+                st = addDiag(st, file, a.span, "W-PROGRAM-TITLE-NESTED", "`" + a.name + "=` on a nested `<program>` is head metadata with no effect there (§40.7)")
+            } else if (a.name == "capabilities") {
+                st = capabilitiesDiags(file, a, st)
+            } else if (a.name == "kind" || a.name == "serve") {
+                st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on a nested `<program>` (§64) is not in the bootstrap")
+            } else if (isNestedProgramAttr(a.name)) {
+                // §4.12.2's table: valid here (the nested program itself is refused above)
+            } else if (isProgramAttrName(a.name)) {
+                st = addDiag(st, file, a.span, "E-PROGRAM-NESTED-ATTR", "`" + a.name + "=` is application-level and not valid on a nested `<program>` (§4.12.2 lists what a nested program may carry)")
+            } else {
+                st = addDiag(st, file, a.span, "W-ATTR-001", "`" + a.name + "` is not a `<program>` attribute (§52.13.3: `<program>` has a closed attribute set)")
+            }
+        }
+        return st
     }
 
     // ---- fields -------------------------------------------------------------------
@@ -2030,7 +2545,7 @@ ${
 
     fn fnItems(items: AItem[]) -> AFn[] {
         let out: AFn[] = []
-        for (const it of items) { out = out.concat(fnItemOf(it)) }
+        for (const it of items) { if (!isLaterProgram(items, it)) out = out.concat(fnItemOf(it)) }   // s451: a second top-level program is E-PROGRAM-002, not read
         return out
     }
 
@@ -2245,7 +2760,7 @@ ${
         const rs: RStubs = typeStubs(files, st)
         st = rs.st
         const rd: RDeclStubs = declStubs(files, entry, st)
-        st = rd.st
+        st = programShapeDiags(files, entry, rd.st)
         let declNames: string[] = []
         let declSyms: Sym[] = []
         let program: Sym = mkSym(-1, "program")
@@ -10683,7 +11198,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [] }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], reset: true }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {
