@@ -21,7 +21,7 @@ const withFn = (fn, type) => {
   return s.replace("function record(action: string) {", fn + "\n    function record(action: string) {");
 };
 const rows = () => [...document.querySelectorAll("main > ul > li")].map((li) => li.textContent);
-const P = (decls, main) => `<program>\n    type Phase:enum = { Idle, Loading, Done }\n    <let n:int=5/>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
+const P = (decls, main) => `<program>\n    type Phase:enum = { Idle, Loading, Done }\n    let <n:int=5/>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
 
 // ---------------------------------------------------------------------------
 describe("F1 — a sequence shape / edit call on a LOCAL is never deleted", () => {
@@ -153,7 +153,7 @@ describe("F5 / F6 — a sequence shape is ONE value: its elements are evaluated 
 // ---------------------------------------------------------------------------
 describe("nits — type error on a non-sequence, `<*field/>` out of scope", () => {
   test("`@phase = [...@phase, .Done]` on an enum cell → E-TYPE-031", () => {
-    const src = P(`    <let ph:Phase=.Idle/>\n    function x() { @ph = [...@ph, .Done] }`, `        <p>x</p>`);
+    const src = P(`    let <ph:Phase=.Idle/>\n    function x() { @ph = [...@ph, .Done] }`, `        <p>x</p>`);
     expect(codes(src)).toEqual(["E-TYPE-031"]);
   });
   test("`<*status/>` at program level names the declaration that owns `status` (E-SCOPE-001), not an HTML element", () => {
@@ -167,7 +167,7 @@ describe("nits — type error on a non-sequence, `<*field/>` out of scope", () =
 // ---------------------------------------------------------------------------
 // G1 — the guards that carry `<*x/>` soundness (resolveStarShared / resolveStarField)
 describe("G1 — `<*x/>` guards", () => {
-  const box = (renders, main, extra = "") => `<program>\n    <item label:string="i"/>\n    renders <i>\${label}</i>\n    <box note:string="n"${extra}>\n        <let v:int=0/>\n    </>\n    renders ${renders}\n    <main>\n${main}\n    </main>\n</program>\n`;
+  const box = (renders, main, extra = "") => `<program>\n    <item label:string="i"/>\n    renders <i>\${label}</i>\n    <box note:string="n"${extra}>\n        let <v:int=0/>\n    </>\n    renders ${renders}\n    <main>\n${main}\n    </main>\n</program>\n`;
   test("s444 (View.Star): `<*box/>` whose renders USES a declaration renders the existing box — its own child instance included", async () => {
     const r = run(box(`<div><item/></div>`, `        <*box/>\n        <*box/>`));
     expect(r.diags).toEqual([]);

@@ -1,0 +1,10 @@
+{
+  "id": "fixture-invalid",
+  "description": "KNOWN INVALID: a malformed `codes` container (S365) — no implementation can be graded on it.",
+  "language-version": "1.0",
+  "spec": "§34",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": {
+    "codes": {}
+  }
+}

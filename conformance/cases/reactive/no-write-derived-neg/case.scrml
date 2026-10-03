@@ -1,9 +1,9 @@
 // §6.15 negative twin — the same position calling write-free functions.
 <program>
-    <let hits:int=0/>
+    let <hits:int=0/>
     fn bump() -> int { return 1 }
     fn label() -> string { return "x" }
-    <let n:int=0/>
+    let <n:int=0/>
     <d:int=(@n + bump())/>
     <main>
         <p>${@d}</p>

@@ -74,7 +74,7 @@ const SRC = `<program>
     type Pt:struct = { x: int, label: string, on: boolean }
     type Color:enum = { Red, Green, Blue }
     type Pair:struct = { p: Pt | not, c: Color | not }
-    <let n:int=0/>
+    let <n:int=0/>
     <main><p>\${@n}</p></main>
 </program>`;
 const core = frontEnd(mods, [{ path: "x.scrml", src: SRC }]).core;

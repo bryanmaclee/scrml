@@ -52,8 +52,8 @@ function runsOn(label) {
 
 // The S447 search page (DD §2 row 12): one keystroke must be ONE search, already on page 1.
 export const SEARCH_PROGRAM = `<program>
-    <let query:string=""/>
-    <let page:int=1 reset-on=[@query]/>
+    let <query:string=""/>
+    let <page:int=1 reset-on=[@query]/>
     function search() {
         const t = Date.now()
     }
@@ -97,7 +97,7 @@ describe("§6.8.4 — the reset, end to end", () => {
   });
 
   test("rule 3: a chain (`a` resets on `b`, `b` resets on `c`) — ranks 1 and 0; one write of `c` resets both, one change", async () => {
-    const src = P(`    <let c:int=0/>\n    <let b:int=5 reset-on=[@c]/>\n    <let a:int=7 reset-on=[@b]/>\n    function ping() {\n        const t = Date.now()\n    }\n    <effect deps=[@a, @b, @c]>\${ ping() }</>`,
+    const src = P(`    let <c:int=0/>\n    let <b:int=5 reset-on=[@c]/>\n    let <a:int=7 reset-on=[@b]/>\n    function ping() {\n        const t = Date.now()\n    }\n    <effect deps=[@a, @b, @c]>\${ ping() }</>`,
       `        <p class="out">\${@a} \${@b} \${@c}</p>\n        <button onclick=(@a = @a + 1)>a</button>\n        <button onclick=(@b = @b + 1)>b</button>\n        <button onclick=(@c = @c + 1)>c</button>`);
     const core = coreOf(src);
     expect(resets(core).map((r) => r.rank).sort()).toEqual([0, 1]);
@@ -113,7 +113,7 @@ describe("§6.8.4 — the reset, end to end", () => {
   });
 
   test("rule 6: on a `rule=` graph cell the reset is a transition every state admits — `@phase` returns to `.Idle`", async () => {
-    const src = `<program>\n    type Phase:enum = { Idle, Loading, Done }\n    <let q:int=0/>\n    <phase:Phase=.Idle single reset-on=[@q]>\n        <Idle rule=.Loading : "idle">\n        <Loading rule=(.Done | .Idle) : "loading">\n        <Done rule=.Idle : "done">\n    </>\n    <main>\n        <p class="out"><*phase/></p>\n        <button onclick=(@phase = .Loading)>load</button>\n        <button onclick=(@q = @q + 1)>q</button>\n    </main>\n</program>\n`;
+    const src = `<program>\n    type Phase:enum = { Idle, Loading, Done }\n    let <q:int=0/>\n    <phase:Phase=.Idle single reset-on=[@q]>\n        <Idle rule=.Loading : "idle">\n        <Loading rule=(.Done | .Idle) : "loading">\n        <Done rule=.Idle : "done">\n    </>\n    <main>\n        <p class="out"><*phase/></p>\n        <button onclick=(@phase = .Loading)>load</button>\n        <button onclick=(@q = @q + 1)>q</button>\n    </main>\n</program>\n`;
     await loadProgram(coreOf(src), "reset-engine");
     expect($("p.out").textContent).toBe("idle");
     click(btn("load"));
@@ -126,8 +126,8 @@ describe("§6.8.4 — the reset, end to end", () => {
 });
 
 describe("§6.8.4 — codes", () => {
-  const D = `    <let query:string=""/>\n    <let n:int=0/>\n    <step=1/>\n    <dbl:int=(@n * 2)/>`;
-  const page = (attr) => `    <let page:int=1 ${attr}/>`;
+  const D = `    let <query:string=""/>\n    let <n:int=0/>\n    <step=1/>\n    <dbl:int=(@n * 2)/>`;
+  const page = (attr) => `    let <page:int=1 ${attr}/>`;
 
   test("E-RESET-ON-INVALID-ENTRY — an empty list, a non-list, undeclared, non-`@`, derived and locked entries (rule 2)", () => {
     for (const attr of ["reset-on=[]", "reset-on=@query", "reset-on=[@nope]", "reset-on=[query]", "reset-on=[@dbl]", "reset-on=[@step]"]) {
@@ -143,13 +143,13 @@ describe("§6.8.4 — codes", () => {
     const self = diagsOf(P(`${D}\n${page("reset-on=[@page]")}`, ""));
     expect(self.map((d) => d.code)).toEqual(["E-RESET-ON-CYCLE"]);
     expect(self[0].message).toContain("`@page` lists itself");
-    const pair = diagsOf(P(`    <let a:int=0 reset-on=[@b]/>\n    <let b:int=0 reset-on=[@a]/>`, ""));
+    const pair = diagsOf(P(`    let <a:int=0 reset-on=[@b]/>\n    let <b:int=0 reset-on=[@a]/>`, ""));
     expect(pair.map((d) => d.code)).toEqual(["E-RESET-ON-CYCLE"]);
     expect(pair[0].message).toMatch(/`@a` → `@b` → `@a`|`@b` → `@a` → `@b`/);
-    const tri = diagsOf(P(`    <let a:int=0 reset-on=[@c]/>\n    <let b:int=0 reset-on=[@a]/>\n    <let c:int=0 reset-on=[@b]/>`, ""));
+    const tri = diagsOf(P(`    let <a:int=0 reset-on=[@c]/>\n    let <b:int=0 reset-on=[@a]/>\n    let <c:int=0 reset-on=[@b]/>`, ""));
     expect(tri.map((d) => d.code)).toEqual(["E-RESET-ON-CYCLE"]);
     // negative: a chain is legal
-    expect(codes(P(`    <let a:int=0 reset-on=[@b]/>\n    <let b:int=0 reset-on=[@c]/>\n    <let c:int=0/>`, ""))).toEqual([]);
+    expect(codes(P(`    let <a:int=0 reset-on=[@b]/>\n    let <b:int=0 reset-on=[@c]/>\n    let <c:int=0/>`, ""))).toEqual([]);
   });
 
   test("E-RESET-ON-NOT-WRITABLE — a locked or a derived cell cannot be reset (rule 5)", () => {
@@ -161,7 +161,7 @@ describe("§6.8.4 — codes", () => {
     expect(codes(P(`${D}\n    <xs:int[replace]=([1, 2]) reset-on=[@query]/>`, ""))).toEqual([]);
   });
 
-  const engine = (rules) => `<program>\n    type Order:enum = { Draft, Placed, Shipped, Delivered }\n    <let customer:int=0/>\n    <order:Order=.Draft single reset-on=[@customer]>\n${rules}\n    </>\n    <main><p>order</p></main>\n</program>\n`;
+  const engine = (rules) => `<program>\n    type Order:enum = { Draft, Placed, Shipped, Delivered }\n    let <customer:int=0/>\n    <order:Order=.Draft single reset-on=[@customer]>\n${rules}\n    </>\n    <main><p>order</p></main>\n</program>\n`;
 
   test("E-RESET-ON-ENGINE-REFUSED — a state whose `rule=` does not admit the reset target, each named (rule 6)", () => {
     const refused = diagsOf(engine(`        <Draft rule=.Placed/>\n        <Placed rule=(.Shipped | .Draft)/>\n        <Shipped rule=.Delivered/>\n        <Delivered/>`));
@@ -180,21 +180,21 @@ describe("§6.8.4 — codes", () => {
     // E-BOOTSTRAP-UNSUPPORTED; S449 item 3 (an initializer may not write) rejects it at its source, so that
     // refusal is removed — the DEAD-PROOF: the source-side error is the only one, for every shape it caught.
     const SRC = "E-VALUE-WRITES-STATE";
-    const loop = diagsOf(P(`    <let q:int=0/>\n    function bump() -> int {\n        @q = @q + 1\n        return 1\n    }\n    <let page:int=(bump()) reset-on=[@q]/>`, ""));
+    const loop = diagsOf(P(`    let <q:int=0/>\n    function bump() -> int {\n        @q = @q + 1\n        return 1\n    }\n    let <page:int=(bump()) reset-on=[@q]/>`, ""));
     expect(loop.map((d) => d.code)).toEqual([SRC]);
     expect(loop[0].message).toContain("the initializer of `@page` writes `@q` through a call: `bump() → @q`");
     // a writer of an UNRELATED cell
-    expect(codes(P(`    <let q:int=0/>\n    <let other:int=0/>\n    function note() -> int {\n        @other = 1\n        return 1\n    }\n    <let page:int=(note()) reset-on=[@q]/>`, ""))).toEqual([SRC]);
+    expect(codes(P(`    let <q:int=0/>\n    let <other:int=0/>\n    function note() -> int {\n        @other = 1\n        return 1\n    }\n    let <page:int=(note()) reset-on=[@q]/>`, ""))).toEqual([SRC]);
     // the writer reached through a DERIVED cell the initializer reads — rejected at that cell's formula
-    const viaDerived = diagsOf(P(`    <let q:int=0/>\n    function g() -> int {\n        @q = @q + 1\n        return 1\n    }\n    <d:int=(@q + g())/>\n    <let page:int=(@d) reset-on=[@q]/>`, ""));
+    const viaDerived = diagsOf(P(`    let <q:int=0/>\n    function g() -> int {\n        @q = @q + 1\n        return 1\n    }\n    <d:int=(@q + g())/>\n    let <page:int=(@d) reset-on=[@q]/>`, ""));
     expect(viaDerived.map((d) => d.code)).toEqual([SRC]);
     expect(viaDerived[0].message).toContain("the formula of derived `@d` writes `@q` through a call: `g() → @q`");
     // negative: an initializer that calls a write-free function
-    expect(codes(P(`    <let q:int=0/>\n    fn one() -> int { return 1 }\n    <let page:int=(one()) reset-on=[@q]/>`, ""))).toEqual([]);
+    expect(codes(P(`    let <q:int=0/>\n    fn one() -> int { return 1 }\n    let <page:int=(one()) reset-on=[@q]/>`, ""))).toEqual([]);
   });
 
   test("a `reset-on=` on a declaration's field is refused — per-instance resets are OPEN (§6.8.4)", () => {
-    const src = `<program>\n    <let query:string=""/>\n    <panel title:string>\n        <let page:int=1 reset-on=[@query]/>\n    </>\n    renders <div>\${page}</div>\n    <main><panel title="a"/></main>\n</program>\n`;
+    const src = `<program>\n    let <query:string=""/>\n    <panel title:string>\n        let <page:int=1 reset-on=[@query]/>\n    </>\n    renders <div>\${page}</div>\n    <main><panel title="a"/></main>\n</program>\n`;
     const ds = diagsOf(src);
     expect(ds.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(ds[0].message).toMatch(/per-instance reset/);

@@ -94,7 +94,7 @@ describe("§66.19 negative lines — uncommented, each produces its diagnostic",
     expect(d1.message).toContain("declare it `let`");
     expect(d1.message).toContain("SEEDED");
     const d2 = run([{ path: "c.scrml", src: uncomment(readSlice("src/counter.scrml"), NEGATIVE[1].spec, NEGATIVE[1].as) }]).diags[0];
-    expect(d2.message).toContain("let step");
+    expect(d2.message).toContain("let <step");
   });
 });
 
@@ -131,7 +131,7 @@ describe("more §66.20 diagnostics the subset reaches", () => {
   });
 
   test("E-FIELD-PRIVATE-WRITE — a cross-file write to a field that is not exported (§66.14)", () => {
-    const lib = withLibLine("export let value:string=\"\"", "export let value:string=\"\" let note:string=\"\"");
+    const lib = withLibLine("export let <value:string=\"\"/>", "export let <value:string=\"\"/>\n    let <note:string=\"\"/>");
     const app = appWith("<dropdown as=country label=\"a\" options=([\"x\"])/>", "    function f() { @country.note = \"x\" }");
     expect(codes(run([lib, app]))).toEqual(["E-FIELD-PRIVATE-WRITE"]);
     // the same write to the EXPORTED field is fine
@@ -175,7 +175,7 @@ function docProgram(fns) {
     src: `${DOC}
 <program>
     type P:struct = { let x: int, y: int }
-    <let p:P=({ x: 0, y: 0 })/>
+    let <p:P=({ x: 0, y: 0 })/>
 ${fns}
     <main>
         <doc as=d title="Spec"/>
@@ -244,7 +244,7 @@ describe("O58 (b) — `@x = { ...@x, f: v }` is the field edit `@x.f = v`; a gen
 // (review of #1109, F1: sequential per-override writes let a later value read
 // an earlier override's write — a swap yielded 2,2).
 // ---------------------------------------------------------------------------
-const PAIR = `<pair export let a:string="1" export let b:string="2">
+const PAIR = `<pair:struct> export let <a:string="1"/> export let <b:string="2"/>
 </>
 renders <p class="pair">\${a},\${b}</p>
 `;
@@ -255,7 +255,7 @@ function snapshotProgram(fns) {
     src: `${PAIR}
 <program>
     type P:struct = { let x: int, y: int }
-    <let p:P=({ x: 1, y: 2 })/>
+    let <p:P=({ x: 1, y: 2 })/>
 ${fns}
     <main>
         <pair as=pp/>
@@ -337,7 +337,7 @@ describe("O58 (b) — a spread reads ONE snapshot: it means what the genuine rep
 // against the one snapshot first; if any is refused, NOTHING is applied.
 // ---------------------------------------------------------------------------
 const GATES = `type Phase:enum = { Draft, Live, Gone }
-<gate title:string export let note:string="n0">
+<gate title:string> export let <note:string="n0"/>
     export <phase:Phase=.Draft>
         <Draft rule=.Live/>
         <Live rule=.Gone/>
@@ -358,7 +358,7 @@ function gateProgram(fns) {
     src: `${GATES}
 <program>
     type P:struct = { let x: int, y: int }
-    <let p:P=({ x: 1, y: 2 })/>
+    let <p:P=({ x: 1, y: 2 })/>
 ${fns}
     <main>
         <gate as=g title="G"/>
@@ -506,7 +506,7 @@ const TRIPLE = (fns) => ({
   path: "triple.scrml",
   src: `<program>
     type P:struct = { let x: int, let y: int, let z: int }
-    <let p:P=({ x: 1, y: 2, z: 3 })/>
+    let <p:P=({ x: 1, y: 2, z: 3 })/>
     function bump() -> int { @p.z = 99
  return 5 }
     function touch() -> int { @p.x = 99
@@ -580,7 +580,7 @@ describe("RULED S440 — STRICT SNAPSHOT: every `@x` read in a spread-override l
 // read was.
 // ---------------------------------------------------------------------------
 describe("S440 N1 — the spread snapshot reads only the fields the override values read (no widened subscriptions)", () => {
-  const BOX = `<box title:string export let a:int=0 export let b:int=0 export let c:int=0>
+  const BOX = `<box title:string> export let <a:int=0/> export let <b:int=0/> export let <c:int=0/>
 </>
 renders <p class="box">\${a},\${b},\${c}</p>
 `;
@@ -588,7 +588,7 @@ renders <p class="box">\${a},\${b},\${c}</p>
   const loopProgram = (guard, twin = false) => ({
     path: "n1.scrml",
     src: `${BOX}<program>
-    <let n:int=0/>
+    let <n:int=0/>
     <log:int[free, append]=([])/>
     function stamp() -> int {
         @log.push(1)
@@ -686,7 +686,7 @@ describe("RULED S440 — a duplicate override key is a compile error (E-STRUCT-D
 // ---------------------------------------------------------------------------
 describe("S440 F-A — a Commit outside a handler batch: no observer sees the half-applied value", () => {
   // `twin`: react / watch write nothing; their writing bodies are reactW / watchW (grafted in Core)
-  const REACT = (spread, twin) => `    <let n:int=0/>
+  const REACT = (spread, twin) => `    let <n:int=0/>
     function react${twin ? "W" : ""}() -> int {
         if (@n > 0) { @g = { ...@g, ${spread} } }
         return @n
@@ -764,8 +764,8 @@ describe("O59 — construction runs in document order after the cells it reads",
       path: "app.scrml",
       src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
 <program>
-    <let startCountry:string="CA"/>
-    <let title:string="Country"/>
+    let <startCountry:string="CA"/>
+    let <title:string="Country"/>
     <main>
         <dropdown as=country label=(@title) options=(["US", "CA"]) value=(@startCountry)/>
         <p class="ship">\${@country.value}</p>
@@ -792,7 +792,7 @@ describe("O60 — a live use-site value to a LOCKED field that carries a grant S
     path: "app.scrml",
     src: `\${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
 <program>
-    <let startOpen:Openness=.Opened/>
+    let <startOpen:Openness=.Opened/>
     <main>
         <dropdown label="A" options=(["x", "y"]) open=(@startOpen)/>
         <button class="shut" onclick=(@startOpen = .Closed)>shut</button>
@@ -827,11 +827,11 @@ describe("O60 — a live use-site value to a LOCKED field that carries a grant S
 // F-B (review): `reset` restores THAT INSTANCE's initializer (L4 + L6 / §66.9).
 // ---------------------------------------------------------------------------
 describe("F-B — reset(@box.v) restores the instance's own initializer (D15 InitOf)", () => {
-  const src = `<box export let v:string="init"/>
+  const src = `<box:struct> export let <v:string="init"/> </>
 renders <p class="box"><span>\${v}</span><button class="set" onclick=(@box.v = "changed")>s</button><button class="reset" onclick=reset(@box.v)>r</button></p>
 
 <program>
-    <let src:string="live1"/>
+    let <src:string="live1"/>
     <main>
         <box v="start"/>
         <box/>
@@ -876,7 +876,7 @@ renders <p class="box"><span>\${v}</span><button class="set" onclick=(@box.v = "
 describe("reads require narrowing (ruled S437) — E-DECL-HANDLE-NOT-NARROWED", () => {
   const cond = `<div if=@show><dropdown as=color label="C" options=(["red"])/></div>
         <dropdown as=country label="K" options=(["US"]) value="US"/>`;
-  const prog = (extraMarkup, fns = "") => appWith(`${cond}\n${extraMarkup}`, `    <let show:bool=false/>\n${fns}`);
+  const prog = (extraMarkup, fns = "") => appWith(`${cond}\n${extraMarkup}`, `    let <show:bool=false/>\n${fns}`);
 
   test("an un-narrowed read in markup is refused", () => {
     expect(codes(run([LIB(), prog("<p>${@color.value}</p>")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
@@ -889,7 +889,7 @@ describe("reads require narrowing (ruled S437) — E-DECL-HANDLE-NOT-NARROWED", 
   });
 
   test("a narrowed read (`given c = @color :> { … c.value … }`) is accepted", () => {
-    const r = run([LIB(), prog("<p>x</p>", "    <let seen:string=\"\"/>\n    function f() { given c = @color :> { @seen = c.value } }")]);
+    const r = run([LIB(), prog("<p>x</p>", "    let <seen:string=\"\"/>\n    function f() { given c = @color :> { @seen = c.value } }")]);
     expect(codes(r)).toEqual([]);
   });
 
@@ -912,7 +912,7 @@ describe("§66.7.5 — `@h` is narrowed inside its own `given c = @h :> { … }`
   const cond = `<div if=@show><dropdown as=color label="C" options=(["red", "blue"])/></div>
         <dropdown as=country label="K" options=(["US", "CA"]) value="US"/>`;
   const prog = (fns, show = "false", extra = "<p>x</p>") =>
-    appWith(`${cond}\n        ${extra}`, `    <let show:bool=${show}/>\n    <let seen:string=""/>\n${fns}`);
+    appWith(`${cond}\n        ${extra}`, `    let <show:bool=${show}/>\n    let <seen:string=""/>\n${fns}`);
   const fnStmts = (r, name) => r.core.fns.find((f) => f.sym.hint === name).body.stmts;
 
   test("a direct READ `@color.value` inside the block is accepted", () => {

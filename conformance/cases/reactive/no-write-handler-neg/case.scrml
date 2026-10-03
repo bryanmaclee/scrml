@@ -1,6 +1,6 @@
 // S449 item 3 — an event handler is NOT a render position: it runs on the user's action and may write.
 <program>
-    <let hits:int=0/>
+    let <hits:int=0/>
     function bump() -> int {
         @hits = @hits + 1
         return 1
@@ -9,7 +9,7 @@
         @hits = @hits + 1
         return "x"
     }
-    <let q:string=""/>
+    let <q:string=""/>
     <main>
         <button onclick=bump()>a</button>
         <button onclick={ @hits = @hits + 1 }>b</button>
