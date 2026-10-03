@@ -63,3 +63,20 @@ Governing sentences (compiler/SPEC.md):
 - Pin flipped: slice-m4/failclosed.test.js (2) — program cell now reads `persist=`; field still refused.
 - Gates after commit 1: lint 0 violations; m1 99; m2 462; m1-lowered 99; m3 60; m4 551→582 (+31 persist);
   codec 92; full pre-commit 29944 pass / 58 skip / 12 todo / 0 fail.
+
+## 2026-10-03 — conformance cases: DRAFTED, not landed (ledger-blocked)
+
+- conformance/cases xfail rule: an impl#1 xfail must name a `status=carried` gap in docs/known-gaps.md
+  (conformance/run.ts — a dangling gap id is a HARD fail in the gated corpus-bridge). impl#1 fails all five
+  (it parses no §66 cell; `persist=` undeclares the cell), and the brief bars editing known-gaps.md — so the
+  five cases live in `conformance-drafts/persist/` with xfail signatures captured by
+  `bun conformance/run.ts --xfail-signature <id>` and gap id `g-impl1-persist-codes-unimplemented-s451`
+  (PROPOSED; PA files it `status=carried`, then `git mv` the drafts to `conformance/cases/persist/`).
+  Cases: storage-unknown-neg, key-required-neg, prepaint-without-persist-neg, hold-without-persist-neg,
+  counter-persist-local-pos (the §66.19.1 counter variant; runtime half: +,+,Reset,+ → 1).
+- Measured with the drafts copied in (then removed): counter PASS 42 → 47 (5/5 PASS, all non-vacuous;
+  graded 60 → 65; runtime half 6 → 7). Committed corpus: unchanged at PASS 42 / FAIL 18 / graded 60.
+- Note: a cell NAMED `theme` (`let <theme:string=…/>`) is refused as the `<theme>` structural element — the
+  first draft hit it. Pre-existing, outside U5; reported.
+- facts gate: PASS (no FACTS.md regeneration needed). Slice artifacts: none regenerated (no slice-m*
+  generated file depends on this change).

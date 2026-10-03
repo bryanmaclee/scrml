@@ -1,0 +1,27 @@
+{
+  "id": "persist-key-required-neg",
+  "description": "§6.14.1 rule 2: `persist=` without `key=` is E-PERSIST-KEY-REQUIRED — the key is an external storage contract the author writes; the compiler never derives one from the cell's name.",
+  "language-version": "1.0",
+  "spec": "§6.14.1",
+  "rationale": "§6.14.1 rule 2: \"**`key=` is REQUIRED** on every `persist=` cell. `persist=` without `key=` SHALL be `E-PERSIST-KEY-REQUIRED`. The key is an external storage contract, written by the author; the compiler SHALL NOT derive one.\"",
+  "expect": {
+    "codes": [
+      "E-PERSIST-KEY-REQUIRED"
+    ],
+    "notCodes": [
+      "E-PERSIST-STORAGE-UNKNOWN"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-persist-codes-unimplemented-s451",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-PERSIST-KEY-REQUIRED"
+        ]
+      }
+    }
+  }
+}
