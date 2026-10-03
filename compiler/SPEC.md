@@ -2012,7 +2012,7 @@ Only an event-handler attribute takes a statement list (§5.2.3). Every other at
 | `title=(() => { f(); return "t" })()`, `title=${ "a;b" }`, `title=${ f(); }` | one expression — legal |
 | `onclick={ f(); g() }`, `onclick=${ f(); g() }` | event handler — §5.2.3, legal |
 
-**Not decided (no diagnostic is defined).** The ruling names a multi-statement value; it does not decide these shapes, and no front end SHALL invent a diagnostic for them until they are ruled:
+**Not yet detected (open question, routed for ruling).** The compiler does not yet detect a statement list in the shapes below; each is an implementation limitation, not a permitted form:
 
 - **Newline-separated statements in a `${…}` or `{…}` non-handler value** (`title=${f()⏎"t"}`). §7.2.2 lists "a `${ … }` logic context" and the handler block as statement lists but does not say whether a non-handler `${…}` / `{…}` attribute value is one, so it is not decided whether the line break ends a statement there. (Inside `(…)` a newline is whitespace, §7.2.2 rule 4, so `title=(f()⏎"t")` is one malformed expression, not a statement list.)
 - **A statement list inside a `${…}` interpolation of a quoted attribute string** (`class="a-${f(); @x}"`, §5.5.3). The value is a template, not a statement list.
