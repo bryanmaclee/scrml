@@ -1197,7 +1197,8 @@ ${
     // NOT this locus"), so it is refused — never dropped.
     fn outsideProgramDiag(file: string, n: ANode, fileHasProgram: boolean, st: AS) -> AS {
         const e: AElem | not = topElemOf(n)
-        if (e is not) return addDiag(st, file, n.span, "E-BOOTSTRAP-UNSUPPORTED", "an `<effect>` at a file's top level, outside any `<program>`, is not in the bootstrap — no scope owns it; write it in the program's markup")
+        // a file-top `<effect>` is already refused by `strayEffects` (s449)
+        if (e is not) return st
         const t: string = e.tag.toLowerCase()
         if (t == "channel" && fileHasProgram) return addDiag(st, file, e.span, "E-CHANNEL-OUTSIDE-PROGRAM", "`<channel>` outside `<program>` in a file that has a `<program>` (§38.1) — move it inside the `<program>`")
         if (t == "outlet") return addDiag(st, file, e.span, "E-OUTLET-OUTSIDE-SHELL", "`<outlet>` outside a `<program>` shell (§20.8.1) — an outlet is the shell's route-content region; move it inside the `<program>`")
