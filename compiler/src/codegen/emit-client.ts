@@ -15,7 +15,7 @@ import { scanClientEgress } from "./egress-field-scan.ts";
 import { emitFunctions, clientAsyncFactsOf } from "./emit-functions.ts";
 import { setActiveClientAsync } from "./js-async-analysis.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
-import { getNodes, isServerOnlyNode } from "./collect.ts";
+import { getNodes, isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { emitLogicNode, beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
 import { workerBundleFilename } from "./emit-worker.ts";
 import { emitBindings } from "./emit-bindings.ts";
@@ -28,7 +28,7 @@ import { exportIsUserComponent } from "../component-expander.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineServerSourceHydrationsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
 import { _clientServerFnNames, _clientSseFnNames } from "./scheduling.ts";
-import { setVariantFieldsForFile } from "./emit-control-flow.ts";
+import { setVariantFieldsForFile, setShadowedVariantNames } from "./emit-control-flow.ts";
 import { setVariantFieldsForRewriter } from "./rewrite.js";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
 // §65.6 (css-wave1 round-4) — the runtime theme-switch reflection. `collectThemeContext`
@@ -2010,11 +2010,18 @@ export function generateClientJs(ctx: CompileContext): string {
   // escape-hatch expressions, and other legacy emission surfaces lower to
   // the canonical `{ variant, data }` tagged-object literal (matches the
   // structured AST path in emit-expr.ts:emitCall).
-  const { fields, collisions } = clientStage(ctx, "build-variant-fields-registry", () =>
+  const { fields, collisions, imported, shadowed } = clientStage(ctx, "build-variant-fields-registry", () =>
     buildVariantFieldsRegistry(fileAST)
   );
-  setVariantFieldsForFile(fields, collisions);
-  setVariantFieldsForRewriter(fields, collisions);
+  setVariantFieldsForFile(fields, collisions, imported);
+  setShadowedVariantNames(shadowed, imported);
+  // S438 review N3 — the string-rewrite path (handler bodies) cannot be typed:
+  // a local-shadowed name is treated as a collision there (left unlowered →
+  // a loud invalid-output error), never guessed. S446 — so is an IMPORTED-ONLY
+  // name: the string path never sees a TS position stamp, and a by-name hit on
+  // an imported enum (`.Lit(n) :> yOf(.Neg(n))`, `yOf(o: Other)` elsewhere,
+  // `Expr.Neg(x)` imported) is a silent guess; it stays the pre-F11 loud form.
+  setVariantFieldsForRewriter(fields, new Set([...collisions, ...shadowed, ...imported]));
 
   // g-request-ref-nested-in-lift-misroute (CONVERGENCE, S349-peter) — establish
   // the file's registered-`<request>` id set ONCE, here at the per-file client-
@@ -4324,6 +4331,7 @@ export function generateClientJs(ctx: CompileContext): string {
   // S22 §1a slice 2: release the per-file variant registry.
   // S95 Bug 2: also release the rewriter's mirror.
   setVariantFieldsForFile(null, null);
+  setShadowedVariantNames(null);
   setVariantFieldsForRewriter(null, null);
   // g-request-ref-nested-in-lift-misroute (CONVERGENCE) — release the per-file
   // registered-request id set so it cannot leak into the next file's emission.
@@ -4344,20 +4352,85 @@ export function generateClientJs(ctx: CompileContext): string {
 //     flagging positional-binding ambiguity for emitMatchExpr.
 // Uses the same decl.variants / decl.raw fallback logic as emitEnumVariantObjects
 // (the type system may not attach .variants back onto the AST node).
+//
+// g-impl1-match-miscompiles-hit-by-the-bootstrap (F11/F16) — the registry also
+// carries every enum the file IMPORTS. The cross-file source is the SAME map the
+// type system seeds its registry from (api.js `importedTypesByFile`: alias-aware,
+// re-export-chasing, keyed by the importing file), installed once per compile via
+// setImportedTypesForCodegen — so exhaustiveness (E-TYPE-020, which already saw
+// imported enums) and codegen can no longer disagree about which enums exist.
+// Before this, only the CURRENT file's enums were here: a positional binder over
+// an imported enum was dropped (F11) and tag-only arms over an imported payload
+// enum compared the tagged object to a string and never matched (F16).
+//
+// Precedence: a file-local enum's variant always wins over an imported one of the
+// same name (the pre-fix behaviour for every local match is unchanged). Two
+// IMPORTED variants of one name with DIFFERENT field lists are a collision
+// (by-name positional binding over it is refused, exactly as for two local
+// enums); an identical field list (the same enum reached through two import
+// paths) is not. This by-NAME table is the fallback: a match whose subject TS
+// resolved binds against that enum's own schema (getMatchSubjectVariantFields,
+// emit-control-flow.ts), so neither precedence rule can mis-bind it.
 // ---------------------------------------------------------------------------
+
+/** Per-compile cross-file type map: importing file → (local name → ResolvedType). */
+type ImportedTypesByFile = { get(filePath: string): Map<string, any> | undefined } | null;
+let _importedTypesByFile: ImportedTypesByFile = null;
+
+/**
+ * Install (or clear, with null) the per-compile cross-file imported-types map —
+ * api.js's `importedTypesByFile`, the one the TS stage seeds from. Set by runCG
+ * at the head of each compile and cleared by resetCodegenModuleState.
+ */
+export function setImportedTypesForCodegen(map: ImportedTypesByFile): void {
+  _importedTypesByFile = map ?? null;
+}
+
+/**
+ * The enums a file imports, as `{ localName, enumType }` (the resolved EnumType
+ * carries `variants[].payload` as an ordered Map — declaration order). Includes
+ * the base enum of an enum-subset refinement alias. Empty when no cross-file map
+ * is installed (single-file compiles) or the file imports no enum.
+ */
+export function getImportedEnumTypes(fileAST: any): Array<{ localName: string; enumType: any }> {
+  const filePath: string | undefined = fileAST?.filePath ?? fileAST?.ast?.filePath;
+  if (!_importedTypesByFile || !filePath) return [];
+  const imported = _importedTypesByFile.get(filePath);
+  if (!imported) return [];
+  const out: Array<{ localName: string; enumType: any }> = [];
+  for (const [localName, t] of imported) {
+    if (t && t.kind === "enum" && Array.isArray(t.variants)) out.push({ localName, enumType: t });
+  }
+  return out;
+}
+
+function sameFieldList(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((f, i) => f === b[i]);
+}
 
 export function buildVariantFieldsRegistry(fileAST: any): {
   fields: Map<string, string[]>;
   collisions: Set<string>;
+  /** Names in `fields` contributed by an IMPORTED enum (no local declaration). */
+  imported: Set<string>;
+  /** Names a LOCAL enum and an IMPORTED enum both declare with different fields (see setShadowedVariantNames). */
+  shadowed: Set<string>;
 } {
   const fields = new Map<string, string[]>();
   const collisions = new Set<string>();
+  const imported = new Set<string>();
+  const shadowed = new Set<string>();
+  const localShape = new Map<string, string[] | null>();
   const typeDecls: TypeDecl[] = fileAST?.typeDecls ?? fileAST?.ast?.typeDecls ?? [];
 
+  // Every variant name a LOCAL enum declares (unit or payload) — local wins.
+  const localVariantNames = new Set<string>();
   for (const decl of typeDecls) {
     if (decl.kind !== "type-decl" || decl.typeKind !== "enum") continue;
     const info = getAllVariantInfo(decl);
     for (const v of info) {
+      localVariantNames.add(v.name);
+      if (!localShape.has(v.name)) localShape.set(v.name, v.fieldNames);
       if (v.fieldNames === null) continue; // unit variants have no bindings
       if (fields.has(v.name)) {
         // Same variant name used in a second enum → positional ambiguity.
@@ -4367,7 +4440,35 @@ export function buildVariantFieldsRegistry(fileAST: any): {
       }
     }
   }
-  return { fields, collisions };
+
+  // Imported enums (F11/F16). The same enum can arrive under two local names
+  // (an alias beside the plain import) — dedupe by the resolved type object.
+  // A local variant name is never touched here, so every local match / local
+  // constructor resolves exactly as before this registry saw imports; a match
+  // whose TS-resolved subject is an imported enum reads that enum's own schema
+  // instead (getMatchSubjectVariantFields), so a same-named local variant cannot
+  // mis-bind it.
+  const seenEnums = new Set<any>();
+  for (const { localName, enumType } of getImportedEnumTypes(fileAST)) {
+    const info = getAllVariantInfo({ variants: enumType.variants } as unknown as TypeDecl);
+    if (seenEnums.has(enumType)) continue;
+    seenEnums.add(enumType);
+    for (const v of info) {
+      if (localVariantNames.has(v.name)) {
+        const mine = localShape.get(v.name) ?? null;
+        const same = mine === null || v.fieldNames === null
+          ? mine === v.fieldNames
+          : sameFieldList(mine, v.fieldNames);
+        if (!same) shadowed.add(v.name);
+        continue;
+      }
+      if (v.fieldNames === null) continue; // unit variants have no bindings
+      const prev = fields.get(v.name);
+      if (prev === undefined) { fields.set(v.name, v.fieldNames); imported.add(v.name); }
+      else if (!sameFieldList(prev, v.fieldNames)) collisions.add(v.name);
+    }
+  }
+  return { fields, collisions, imported, shadowed };
 }
 
 // ---------------------------------------------------------------------------
@@ -4665,6 +4766,23 @@ export function emitEnumVariantObjects(fileAST: any): string[] {
   const lines: string[] = [];
   const typeDecls: TypeDecl[] = fileAST.typeDecls ?? fileAST.ast?.typeDecls ?? [];
 
+  // F15 (g-impl1-match-miscompiles-hit-by-the-bootstrap) — a payload FIELD named
+  // like a function declared in this file. The whole-buffer fn-name mangle
+  // (post-fn-name-mangle) renames that identifier in the constructor's parameter
+  // list AND in a SHORTHAND `data: { params }` — the shorthand group sits after
+  // `:`, which the mangler's object-literal expansion deliberately does not treat
+  // as an object (code-segments.ts BRACE_OPENS_OBJECT_AFTER) — so the KEY became
+  // `_scrml_params_N` and every `.params` read was undefined. Emitting the
+  // colliding field as an explicit `params: params` pins the KEY (the mangler
+  // never rewrites an identifier followed by `:`) while the parameter and the
+  // value are renamed together and stay bound. Only colliding fields change, so
+  // every other constructor is byte-identical.
+  const fnNames = new Set<string>();
+  for (const fn of collectFunctions(fileAST)) {
+    const n = (fn as { name?: unknown }).name;
+    if (typeof n === "string" && n.length > 0) fnNames.add(n);
+  }
+
   for (const decl of typeDecls) {
     if (decl.kind !== "type-decl" || decl.typeKind !== "enum") continue;
 
@@ -4677,7 +4795,8 @@ export function emitEnumVariantObjects(fileAST: any): string[] {
         entries.push(`${v.name}: "${v.name}"`);
       } else {
         const params = v.fieldNames.join(", ");
-        const dataInit = v.fieldNames.length === 0 ? "{}" : `{ ${params} }`;
+        const dataFields = v.fieldNames.map((f) => (fnNames.has(f) ? `${f}: ${f}` : f)).join(", ");
+        const dataInit = v.fieldNames.length === 0 ? "{}" : `{ ${dataFields} }`;
         entries.push(`${v.name}: function(${params}) { return { variant: "${v.name}", data: ${dataInit} }; }`);
       }
     }
