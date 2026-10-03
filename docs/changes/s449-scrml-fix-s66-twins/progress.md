@@ -113,3 +113,5 @@
 
 ## r4 (S451) — root fix: impl#1 import graph + AST write classification
 - 2026-10-03T12:28:47-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a3f9e2453bd925702, HEAD 9e72c53d6.
+- 2026-10-03T12:50:59-06:00 root fix committed cc3ae6d8a: moduleEdges (impl#1 front end + buildImportGraph) replaces importSpecifiers/inertAt; writeEvents (every object of impl#1's AST, every @-string through parseStatements → parseExprToNode → unknown) replaces astWrites + the zero-AST-write lexical gate; component bodies via component-expander parseComponentBody; int verdict per event + lexical coverage (additional fail-closed only). Repros A×3/B1/B2/C fixed end to end. Pre-commit 29958/0.
+- 2026-10-03T12:50:59-06:00 step 3 of the raw-text cascade: markup fragments (each-block bodyRaw etc.) re-parsed via parseComponentBody; first examples measure showed 1 lock lost (08-chat @authorId, read inside an <each> body) before it, 0 after.

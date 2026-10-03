@@ -742,6 +742,14 @@ describe("§12 S239 re-review r4 — the import graph and the write set come fro
     expect(ev[0].op).toBe("=");
   });
 
+  test("writeEvents: an `<each>` body impl#1 keeps raw is re-parsed as markup — a write is seen, a read is not a write", () => {
+    const astOf = (src) => buildAST(splitBlocks("t.scrml", src)).ast;
+    const src = "<program>\n<items> = [1, 2]\n<sel> = 0\n<owner> = \"a\"\n<each in=@items as it>\n  <button class:mine=(it == @owner) onclick=${@sel = it}>x</button>\n</each>\n<p>${@sel}</p>\n</program>\n";
+    const ev = writeEvents(astOf(src));
+    expect(ev.some((e) => e.name === "sel" && e.w === "assign")).toBe(true);
+    expect(ev.filter((e) => e.name === "owner" && e.w !== "div")).toEqual([]);
+  });
+
   test("writeEvents: raw text impl#1's parsers cannot read → every `@name` in it is an `unknown` write", () => {
     const astOf = (src) => buildAST(splitBlocks("t.scrml", src)).ast;
     // any node, any key: a string no impl#1 parser reads fails closed per mention

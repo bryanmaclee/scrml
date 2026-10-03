@@ -503,7 +503,10 @@ const LEGACY_DECL_LINE = /^[ \t]*(?:export[ \t]+)?(const[ \t]+)?<([A-Za-z_][\w]*
 //   1. parseStatements (impl#1's acorn-based ScrmlParser, `@x` identifiers) → the ESTree is classified;
 //   2. else parseExprToNode (impl#1's scrml expression parser) read in full → the ExprNode is
 //      classified the same way (its own strings recurse; the string itself again → unknown);
-//   3. else every `@name` in the string is an `unknown` write (per occurrence, regardless of how
+//   3. else, markup text (a component body, an `<each>` body, …) → impl#1's markup re-parser
+//      (component-expander `parseComponentBody`); a parse error or a `@name` the re-parsed nodes
+//      no longer mention → `unknown`;
+//   4. else every `@name` in the string is an `unknown` write (per occurrence, regardless of how
 //      many other writes the cell has).
 // A duplicate (a raw string impl#1 ALSO parsed into a node) only yields the same event twice.
 // ---------------------------------------------------------------------------
@@ -661,7 +664,13 @@ function rawTextEvents(str, filePath, stack) {
       return out;
     }
   } catch { /* not an expression */ }
-  // 3. unreadable: every mention is a write of unknown kind
+  // 3. a markup fragment (an `<each>` body, a match arm …): impl#1's markup re-parser (the one the
+  //    component expander uses) — parse errors / dropped mentions fall closed inside componentEvents.
+  if (str.trimStart().startsWith("<")) {
+    stack.add(str);
+    try { return componentEvents(str, "Fragment", filePath, stack); } finally { stack.delete(str); }
+  }
+  // 4. unreadable: every mention is a write of unknown kind
   return names.map((name) => ({ name, w: "unknown" }));
 }
 
