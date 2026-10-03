@@ -34,13 +34,15 @@ function compile(src, opts = {}) {
   }
 }
 const codes = (r) => r.errors.map((e) => e.code);
-const BOTH = [["live", {}], ["native", { parser: "scrml-native" }]];
+// S449 (ruling item 6, #1240): the full-pipeline `--parser=scrml-native` flag is
+// retired (`compileScrml` throws on it); only the default front-end runs here.
+const PIPES = [["live", {}]];
 const page = (logic) => `\${\n    <trace> = ""\n    function note(x) { @trace = @trace + x + ";" }\n${logic}\n}\n<program>\n    <button id="go" onclick=go()>Go</>\n    <p id="out">\${@trace}</p>\n</program>\n`;
 
 
 describe("B1 §7.3.3 — a nested function declaration named like a parameter", () => {
   const fnOverParam = page(`    function f(x) {\n        function x() {\n            return 7\n        }\n        return x()\n    }\n    function go() { @trace = @trace + f(1) + ";" }`);
-  for (const [pipe, opts] of BOTH) {
+  for (const [pipe, opts] of PIPES) {
     test(`is not E-SCOPE-REDECLARE (${pipe})`, () => {
       expect(codes(compile(fnOverParam, opts))).toEqual([]);
     });
@@ -70,7 +72,7 @@ describe("B2 §19.16.1 — `defer [` while `defer` is a binding in scope", () =>
     "method call `defer [0].forEach(note)` (was silently re-read)": `        let defer = [[7], 2]\n        defer [0].forEach(note)\n        @trace = @trace + "a;"`,
   };
   for (const [name, body] of Object.entries(ambiguous)) {
-    for (const [pipe, opts] of BOTH) {
+    for (const [pipe, opts] of PIPES) {
       test(`${name} — E-DEFER-AMBIGUOUS-LEAD (${pipe})`, () => {
         const r = compile(page(`    function go() {\n${body}\n    }`), opts);
         expect(codes(r)).toContain("E-DEFER-AMBIGUOUS-LEAD");
@@ -148,7 +150,7 @@ describe("B2 §19.16.1 — `defer [` while `defer` is a binding in scope", () =>
     "a non-`[` lead with a binding in scope is the defer statement (§19.16.1, unchanged)": `    function go() {\n        let defer = 1\n        defer note("d")\n        note("x")\n    }`,
     "a `let defer` inside a TOP-LEVEL statement's block is not file-level (S446 review F4)": `    for (const k of [1]) {\n        let defer = k\n    }\n    if (true) {\n        const defer = 1\n    }\n    function go() {\n        defer ["a"].forEach(note)\n        note("x")\n    }`,
   };
-  for (const [pipe, opts] of BOTH) {
+  for (const [pipe, opts] of PIPES) {
     test(`outside a function declaration only E-DEFER-OUTSIDE-FUNCTION fires, not both (S446 review F3) (${pipe})`, () => {
       const src = `\${\n    <trace> = ""\n    const defer = [[1]]\n    defer [0].push(2)\n}\n<program>\n    <p id="out">\${@trace}</p>\n</program>\n`;
       const c = codes(compile(src, opts));
@@ -157,7 +159,7 @@ describe("B2 §19.16.1 — `defer [` while `defer` is a binding in scope", () =>
     });
   }
   for (const [name, logic] of Object.entries(unaffected)) {
-    for (const [pipe, opts] of BOTH) {
+    for (const [pipe, opts] of PIPES) {
       test(`${name} — no E-DEFER-AMBIGUOUS-LEAD (${pipe})`, () => {
         expect(codes(compile(page(logic), opts))).not.toContain("E-DEFER-AMBIGUOUS-LEAD");
       });

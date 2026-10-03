@@ -15,6 +15,12 @@
  * front-end gap (native does not parse `when`, drops `~{}` test blocks, and
  * parses only the first expression of `on mount`) — asserted only to fail
  * closed (a compile error, never clean output).
+ *
+ * S449 (ruling item 6, #1240): the full-pipeline `--parser=scrml-native` flag is
+ * retired (`compileScrml` throws on it), so only the `live` column runs; the
+ * `native` column is kept as the record of what the native tree produced. The
+ * native parse impl#1 still reaches is exercised directly through
+ * `nativeParseFile` (defer-binder-completeness / defer-text-body-completeness).
  */
 
 import { describe, test, expect } from "bun:test";
@@ -131,9 +137,9 @@ const ROWS = [
 
 describe("§19.16.3 rule 4 — every non-function body kind × both front-ends", () => {
   for (const row of ROWS) {
-    for (const [pipe, want] of [["live", row.live], ["native", row.native]]) {
+    for (const [pipe, want] of [["live", row.live]]) {
       test(`${row.name} — ${pipe}`, () => {
-        const r = compile(row.src, pipe === "native" ? { parser: "scrml-native" } : {});
+        const r = compile(row.src);
         const c = codes(r);
         // Never a silent pass-through to codegen, on any row.
         expect(c).not.toContain("E-CODEGEN-INVALID-LOGIC");
@@ -164,7 +170,7 @@ describe("§19.16.3 rule 4 — every non-function body kind × both front-ends",
   });
 
   test("a function DECLARED in a handler attribute: the handler-attribute message, anchored on the element (review A-2)", () => {
-    for (const opts of [{}, { parser: "scrml-native" }]) {
+    for (const opts of [{}]) {
       const r = compile(page("", `    <button id="go" onclick=\${ function h() { defer note("d"); note("h") } h() }>Go</>`), opts);
       const hits = r.errors.filter((e) => e.code === OUT);
       expect(hits.length).toBe(1);
@@ -246,7 +252,7 @@ ${arm}
 
 describe("§19.16.3 rule 4 — exported components, <onchange> arms, statement `!{}` catch arms (S446)", () => {
   const app = `\${\n    import { Btn } from "./btn.scrml"\n    <trace> = ""\n}\n<program>\n    <Btn/>\n    <p id="out">\${@trace}</p>\n</program>\n`;
-  for (const [pipe, opts] of [["live", {}], ["native", { parser: "scrml-native" }]]) {
+  for (const [pipe, opts] of [["live", {}]]) {
     test(`an exported component's handler attribute — ${pipe}`, () => {
       const btn = `\${\n    export const Btn = <button id="go" onclick=\${ defer [1].forEach(console.log) }>Go</>\n}\n`;
       const r = compileFiles({ "btn.scrml": btn, "app.scrml": app }, "app.scrml", opts);
@@ -294,9 +300,11 @@ describe("§19.16.3 rule 4 — exported components, <onchange> arms, statement `
 // statement to; it is rejected (E-DEFER-UNSUPPORTED-SITE), never mis-lowered.
 // Documented as a known divergence (SPEC §19.16.8, hold branch); the runtime
 // behaviour is pinned by conformance/cases/defer/match-stmt-braced-arm.
+// S449 (#1240): the full-pipeline native flag is retired, so only the live
+// case runs here.
 // ---------------------------------------------------------------------------
 
-describe("§19.16.2 braced match-statement arm — live supports, native fails closed", () => {
+describe("§19.16.2 braced match-statement arm — the default front-end supports it", () => {
   const src = `\${
     <trace> = ""
     type M:enum = { A, B }
@@ -326,10 +334,5 @@ describe("§19.16.2 braced match-statement arm — live supports, native fails c
     const r = compile(src);
     expect(codes(r)).toEqual([]);
     expect(r.clientJs).toContain("_scrml_defers_");
-  });
-  test("native: E-DEFER-UNSUPPORTED-SITE (documented divergence), no output", () => {
-    const r = compile(src, { parser: "scrml-native" });
-    expect(codes(r)).toContain("E-DEFER-UNSUPPORTED-SITE");
-    expect(codes(r)).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 });

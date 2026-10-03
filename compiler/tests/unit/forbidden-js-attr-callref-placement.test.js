@@ -9,6 +9,11 @@
  * through its fallback, at the start of the value instead of the keyword.
  * Positions now come from the value node's span (its verbatim bytes); a value
  * that cannot be placed is reported at the attribute, never skipped.
+ *
+ * S449: the default pipeline runs this check on the native parser's tree
+ * (forbiddenJsDiagnosticsForDefault → nativeForbiddenJsAttrDiagnostics), so the
+ * default arm exercises the native function on its production path. The second
+ * arm (`--parser=scrml-native`, the retired full-pipeline flag) was dropped.
  */
 
 import { describe, test, expect } from "bun:test";
@@ -20,13 +25,12 @@ import { attrExprSource, nativeForbiddenJsAttrDiagnostics } from "../../src/nati
 
 const CODES = ["E-CLASS-NOT-IN-SCRML", "E-DYNAMIC-IMPORT-NOT-IN-SCRML"];
 
-function hits(src, parser) {
+function hits(src) {
   const dir = mkdtempSync(join(tmpdir(), "s432f2-"));
   const f = join(dir, "case.scrml");
   writeFileSync(f, src);
   const r = compileScrml({
     inputFiles: [f], outputDir: join(dir, "dist"), write: false, log: () => {},
-    ...(parser ? { parser } : {}),
   });
   return [...(r.errors || []), ...(r.warnings || [])]
     .filter((d) => CODES.includes(d.code))
@@ -57,13 +61,11 @@ const CASES = [
   ["member calls .import() / .class", `onclick=go(o.import(1), o.class)`, []],
 ];
 
-describe("call-form attribute values report at the keyword, in both pipelines", () => {
-  for (const [label, parser] of [["default", undefined], ["scrml-native", "scrml-native"]]) {
-    for (const [name, attrs, want] of CASES) {
-      test(`${label}: ${name}`, () => {
-        expect(hits(btn(attrs), parser)).toEqual(want);
-      });
-    }
+describe("call-form attribute values report at the keyword", () => {
+  for (const [name, attrs, want] of CASES) {
+    test(`default: ${name}`, () => {
+      expect(hits(btn(attrs))).toEqual(want);
+    });
   }
 });
 

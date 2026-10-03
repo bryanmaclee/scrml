@@ -17,6 +17,10 @@
 //   §6 — EQUIVALENCE: `as (k, v)` body output == `as e`+e.key/e.value baseline
 //        (the correctness anchor)
 //
+// S449: §3–§6 used to loop over BOTH parsers; the native arm was the retired
+// full-pipeline `--parser=scrml-native` flag, so they run on the default
+// pipeline only. §2 still tests the native parser's capture directly.
+//
 // Scope: the destructure is ENTRIES-SCOPED — it binds the entry struct's
 // fixed `.key`/`.value` fields. A general §14.11 N-field positional destructure
 // on arbitrary struct arrays is OUT of scope (deferred). The tests use a
@@ -150,7 +154,7 @@ describe("each-as-tuple §2 — native parse captures asNames", () => {
 // §3 — CODEGEN bind (both parsers)
 // ===========================================================================
 
-for (const parser of [null, "scrml-native"]) {
+for (const parser of [null]) {
   const label = parser ? "native" : "legacy";
   describe(`each-as-tuple §3 — codegen bind (${label})`, () => {
     test("emits `const k = item.key; const v = item.value;` per-item", () => {
@@ -181,7 +185,7 @@ for (const parser of [null, "scrml-native"]) {
 // ===========================================================================
 
 describe("each-as-tuple §4 — TS scope binds k/v", () => {
-  for (const parser of [null, "scrml-native"]) {
+  for (const parser of [null]) {
     const label = parser ? "native" : "legacy";
     test(`bare \${k} / \${v} body refs do NOT fire E-SCOPE-001 (${label})`, () => {
       const r = compileWith(TUPLE_SRC, parser, `ts-${label}`);
@@ -196,7 +200,7 @@ describe("each-as-tuple §4 — TS scope binds k/v", () => {
 // ===========================================================================
 
 describe("each-as-tuple §5 — single-name `as e` regression", () => {
-  for (const parser of [null, "scrml-native"]) {
+  for (const parser of [null]) {
     const label = parser ? "native" : "legacy";
     test(`\`as e\` + e.key/e.value still compiles + binds (${label})`, () => {
       const { errors, clientJs: __cjRaw } = compileWith(SINGLE_SRC, parser, `single-${label}`); const clientJs = foldChunkNamespacing(__cjRaw);
@@ -216,7 +220,7 @@ describe("each-as-tuple §5 — single-name `as e` regression", () => {
 // ===========================================================================
 
 describe("each-as-tuple §6 — body-output equivalence with `as e` baseline", () => {
-  for (const parser of [null, "scrml-native"]) {
+  for (const parser of [null]) {
     const label = parser ? "native" : "legacy";
     test(`per-item body text-node assignments are equivalent (${label})`, () => {
       const tuple = compileWith(TUPLE_SRC, parser, `eq-t-${label}`);

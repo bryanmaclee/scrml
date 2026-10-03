@@ -6,9 +6,12 @@
  * zero diagnostics and the declaration rendered VERBATIM as page text in the
  * emitted `<body>` (gap g-import-host-is-unimplemented-and-renders-as-page-text).
  *
- * Every case runs through BOTH front-ends (the live block-splitter + TAB path
+ * Every case ran through BOTH front-ends (the live block-splitter + TAB path
  * and `--parser=scrml-native`), since §22.13 names both ("The block-splitter /
- * native parser SHALL consult the entry").
+ * native parser SHALL consult the entry"). S449 retired the full-pipeline flag;
+ * an `import:host` declaration sits at file / logic-block level, which impl#1
+ * never routes through the native parser, so the cases run on the default
+ * front end. (The gate itself, validateHostImports in api.js, is shared.)
  *
  * Fixtures live under the OS temp dir, NOT the repo: the manifest lookup stops
  * at a `.git` project boundary, so a fixture inside the checkout would be
@@ -20,6 +23,7 @@ import { tmpdir } from "os";
 import { join, dirname } from "path";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, symlinkSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { nativeParseFile } from "../../native-parser/parse-file.js";
 import {
   readHostImportCapability,
   parseHostImportEntry,
@@ -28,7 +32,7 @@ import {
   validateHostImports,
 } from "../../src/host-import.js";
 
-const PARSERS = [null, "scrml-native"];
+const PARSERS = [null]; // S449: native full-pipeline arm retired
 const made = [];
 
 afterAll(() => {
@@ -709,17 +713,33 @@ describe("#1045 LOW — an in-function import:host fails closed", () => {
     expect(imp._hostImportRejected).toBe(true);
   });
 
-  test("a disabled project gets E-IMPORT-008 for it (native front-end, end to end)", () => {
-    const root = project({
-      "scrml.toml": '[capabilities]\nhost-import = "disabled"\n',
-      "host/tok.js": HOST_JS,
-      "stdlib/compiler/f.scrml":
-        "${\n  function inner() {\n" +
-        '    import:host { tokenize } from "../../host/tok.js"\n' +
-        "    return 1\n  }\n}\n",
-    });
-    const r = compile(root, "stdlib/compiler/f.scrml", { parser: "scrml-native", mode: "library" });
+  const IN_FN_SRC =
+    "${\n  function inner() {\n" +
+    '    import:host { tokenize } from "../../host/tok.js"\n' +
+    "    return 1\n  }\n}\n";
+  const disabledProject = () => project({
+    "scrml.toml": '[capabilities]\nhost-import = "disabled"\n',
+    "host/tok.js": HOST_JS,
+    "stdlib/compiler/f.scrml": IN_FN_SRC,
+  });
+
+  // S449 re-point: this was an end-to-end compile under the retired
+  // full-pipeline `--parser=scrml-native` flag, asserting E-IMPORT-003 ×1 +
+  // E-IMPORT-008 ×1. The gate (validateHostImports) is run here on the native
+  // parser's tree directly — the same call api.js makes on every TAB result.
+  test("the gate on the native tree: a disabled project gets E-IMPORT-008 for it", () => {
+    const root = disabledProject();
+    const fp = join(root, "stdlib/compiler/f.scrml");
+    const nat = nativeParseFile(fp, IN_FN_SRC);
+    const errs = validateHostImports(nat.ast, fp, readHostImportCapability(fp));
+    expect(errs.filter((e) => e.code === "E-IMPORT-008")).toHaveLength(1);
+  });
+
+  // The default front end fails closed on the same source with E-IMPORT-003
+  // alone (no E-IMPORT-008) — a front-end divergence recorded under
+  // §S449-native-parser-prune in docs/known-gaps.md, not fixed (impl#1 frozen).
+  test("default pipeline, end to end: fails closed with E-IMPORT-003", () => {
+    const r = compile(disabledProject(), "stdlib/compiler/f.scrml", { mode: "library" });
     expect(count(r, "E-IMPORT-003")).toBe(1);
-    expect(count(r, "E-IMPORT-008")).toBe(1);
   });
 });
