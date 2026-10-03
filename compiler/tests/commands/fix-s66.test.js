@@ -18,10 +18,11 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, cpSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, cpSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { resolveModulePathNative } from "../../src/module-resolver.js";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { fixS66, S66_RULES, astWrites, lexicalWritten, lifecycleNamedCells, moduleEdges, writeEvents } from "../../src/commands/fix-s66.js";
+import { fixS66, S66_RULES, astWrites, lexicalWritten, lifecycleNamedCells, moduleEdges, writeEvents, isInside } from "../../src/commands/fix-s66.js";
 import { runFixCommand, classifyEntry, lineDiff, resolveProject } from "../../src/commands/fix.js";
 import { compileScrml } from "../../src/api.js";
 import { splitBlocks } from "../../src/block-splitter.js";
@@ -889,5 +890,82 @@ describe("§13 S239 re-review r5 — every specifier but the bundled stdlib is r
     const src = "// the old body carried `<#tick when @s is .A />` here\n${\n    type S:enum = { A, B }\n    <s>:S = .A\n}\n<program>\n    <p if=(@s is .A)>a</p>\n</>\n";
     expect(writeEvents(astOf(src)).filter((e) => e.name === "s" && e.w !== "div")).toEqual([]);
     expect(fix(src).output).not.toContain("let <s");
+  });
+});
+
+describe("§14 r6 review nits — the stdlib trust guard; isInside", () => {
+  // The write scan does not read the bundled stdlib (moduleEdges: a `scrml:` import is outside the
+  // project, by trust). That trust is sound only while no stdlib module exports a MARKUP COMPONENT —
+  // a component body is expanded into the importer and can write the importer's cells (`@count`).
+  // This guard fails the day one is added; the fix then is to scan the stdlib, not to drop the test.
+  const exportedComponents = (filePath, source) => {
+    const ast = buildAST(splitBlocks(filePath, source)).ast;
+    if (!ast) return [`${filePath}: impl#1's front end built no AST`];
+    const found = new Set();
+    const componentDefs = new Set();
+    const exports = [];
+    const walk = (n) => {
+      if (!n || typeof n !== "object") return;
+      if (Array.isArray(n)) { n.forEach(walk); return; }
+      if (n.kind === "component-def" && typeof n.name === "string") componentDefs.add(n.name);
+      if (n.kind === "export-decl") exports.push(n);
+      for (const v of Object.values(n)) if (v && typeof v === "object") walk(v);
+    };
+    walk(ast);
+    for (const c of ast.components ?? []) if (typeof c?.name === "string") componentDefs.add(c.name);
+    for (const e of [...exports, ...(ast.exports ?? [])]) {
+      const name = typeof e.exportedName === "string" ? e.exportedName : "";
+      const rhs = typeof e.raw === "string" ? e.raw.replace(/^[\s\S]*?=\s*/, "") : "";
+      // A const export whose right-hand side is markup (the shape the component expander instantiates
+      // — fix-s66 componentBodyOf), or an exported / re-exported component-def name. (A capitalised
+      // const alone is NOT one: impl#1's registry stamps category "const" on `export const TSError =
+      // _TSError`, and the expander routes on category first.)
+      if (e.exportKind === "const" && rhs.trimStart().startsWith("<")) found.add(name);
+      for (const s of e.specifiers ?? e.names ?? []) {
+        const local = typeof s === "string" ? s : s?.local ?? s?.imported;
+        const exported = typeof s === "string" ? s : s?.exported ?? s?.local;
+        if (componentDefs.has(local) || componentDefs.has(exported)) found.add(exported);
+        if ((e.exportKind === "re-export" || e.exportKind === "re-export-all") && /^[A-Z]/.test(exported ?? "")) found.add(exported);
+      }
+      if (componentDefs.has(name)) found.add(name);
+    }
+    return [...found].map((n) => `${filePath}: exports component ${n}`);
+  };
+
+  test("detector bites: an exported markup component (every spelling) is found; a const / function export is not", () => {
+    expect(exportedComponents("a.scrml", "${ export const Bump = <button onclick=${@count = @count + 1}>+</button> }\n")).toHaveLength(1);
+    expect(exportedComponents("b.scrml", "export const Tag = <span>hi</span>\n")).toHaveLength(1);
+    expect(exportedComponents("c.scrml", "const Card = <div class=\"c\">x</div>\n${ export { Card } }\n")).toHaveLength(1);
+    expect(exportedComponents("d.scrml", "${ export const helper = 3 }\n")).toEqual([]);
+    expect(exportedComponents("e.scrml", "${ export function slug(s) { return s } }\n")).toEqual([]);
+  });
+
+  test("GUARD: no file under stdlib/ (nor impl#1's bundled stdlib dir) exports a markup component", () => {
+    const roots = new Set([
+      join(import.meta.dir, "../../../stdlib"),
+      dirname(resolveModulePathNative("scrml:__scrml_fix_probe__", "/")),
+    ]);
+    const files = [];
+    const walkDir = (d) => {
+      for (const n of readdirSync(d)) {
+        const p = join(d, n);
+        if (statSync(p).isDirectory()) walkDir(p);
+        else if (p.endsWith(".scrml")) files.push(p);
+      }
+    };
+    for (const r of roots) walkDir(r);
+    expect(files.length).toBeGreaterThan(40);
+    const hits = files.flatMap((f) => exportedComponents(f, readFileSync(f, "utf8")));
+    expect(hits).toEqual([]);
+  });
+
+  test("isInside: segment-based — `..foo` is a directory name, not a parent step", () => {
+    expect(isInside("/a/b", "/a/b")).toBe(true);
+    expect(isInside("/a/b", "/a/b/c.scrml")).toBe(true);
+    expect(isInside("/a/b", "/a/b/..foo/c.scrml")).toBe(true);
+    expect(isInside("/a/b", "/a/b/..")).toBe(false);
+    expect(isInside("/a/b", "/a/c.scrml")).toBe(false);
+    expect(isInside("/a/b", "/a/bc/x.scrml")).toBe(false);
+    expect(isInside("/a/b", "/a/b/../c/x.scrml")).toBe(false);
   });
 });

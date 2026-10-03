@@ -419,10 +419,16 @@ function commonDir(paths) {
  * own resolver, not restated: `scrml:<m>` → `<STDLIB_ROOT>/<m>.scrml` when no `<m>/index.scrml`.
  */
 const STDLIB_DIR = dirname(resolveModulePathNative("scrml:__scrml_fix_probe__", resolve("/")));
-/** Is `p` inside directory `dir` (or equal to it)? */
-function isInside(dir, p) {
-  const r = relative(dir, p);
-  return r === "" || (!r.startsWith("..") && !isAbsolute(r));
+/**
+ * Is `p` inside directory `dir` (or equal to it)? Outside means the relative path's FIRST SEGMENT
+ * is `..` (or it is absolute — another drive/root); a directory literally named `..foo` is inside.
+ */
+export function isInside(dir, p) {
+  const r = relative(resolve(dir), resolve(p));
+  if (r === "") return true;
+  if (isAbsolute(r)) return false;
+  const first = r.split(/[\\/]/)[0];
+  return first !== "..";
 }
 
 export function moduleEdges(filePath, source) {
