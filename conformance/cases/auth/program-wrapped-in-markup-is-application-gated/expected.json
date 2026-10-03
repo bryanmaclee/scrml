@@ -1,0 +1,18 @@
+{
+  "id": "program-wrapped-in-markup-is-application-gated",
+  "description": "§4.12 (S445, ruling option b; g-wrapped-program-auth-silently-dropped) — a `<program auth=\"required\">` wrapped in a `<div>` at the file root has no `<program>` or `<page>` ancestor, so it IS the file's top-level (application) program and its `auth=` is enforced: the ANONYMOUS document request is redirected to /login and never composes the page, while an AUTHENTICATED viewer's first paint carries the body. Before S445 the wrapper made it top-level to nobody — its `auth=` was dropped with no diagnostic, the emitted server carried CSRF only, and an anonymous POST to its server function returned 200 (reviewer- and PA-executed on c53b297a7).",
+  "language-version": "1.0",
+  "spec": "§4.12, §52.13, §40.2",
+  "rationale": "§4.12 (S445): 'A `<program>` is top-level if it has no `<program>` or `<page>` ancestor, whatever markup wraps it … Wrapper `<div>`s never change a program's role.' §52.13: '`auth=\"required\"` — every request to this scope SHALL be authenticated; unauthenticated requests are redirected to `loginRedirect=` (default `/login`).'",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-PROGRAM-001", "E-PROGRAM-002", "E-PROGRAM-NESTED-AUTH"],
+    "notCodePrefixes": ["E-"],
+    "serverDb": {},
+    "firstPaint": {
+      "viewer": "authenticated",
+      "anonymousRedirect": "/login",
+      "contains": ["wrapped-secret-marker"]
+    }
+  }
+}

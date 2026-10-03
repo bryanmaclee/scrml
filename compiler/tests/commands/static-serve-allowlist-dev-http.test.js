@@ -39,6 +39,9 @@ describe("scrml dev serves only the §47.13 allowlist", () => {
     const entry = join(dir, "app.scrml");
     const dist = join(dir, "dist");
     writeFileSync(entry, APP);
+    // The app's own database, beside app.scrml (s445: `db=` is resolved against the
+    // declaring file's directory, and the server never creates it).
+    new Database(join(dir, "app.db")).close();
     // Files an attacker would ask for, placed where the dist dir will be.
     mkdirSync(join(dist, "img"), { recursive: true });
     const db = new Database(join(dist, "app.db"));

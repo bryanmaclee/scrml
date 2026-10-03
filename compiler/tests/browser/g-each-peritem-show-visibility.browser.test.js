@@ -19,15 +19,16 @@
  * Executes the SHIPPED pruned runtime (result.runtimeFilename), not the full
  * SCRML_RUNTIME — the render bug lives in the emitted client + the shipped chunk.
  */
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 if (!globalThis.document) GlobalRegistrator.register();
-const TMP_ROOT = resolve("/tmp", "scrml-each-peritem-show");
+const TMP_ROOT = resolve(tmpdir(), "scrml-each-peritem-show");
 
 beforeEach(async () => {
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
@@ -149,4 +150,11 @@ describe("g-each-peritem-show-emits-literal-attribute (§17.2 inside <each>)", (
     expect(c.errors).toEqual([]); // BITING: pre-#1-fix this was E-CODEGEN-INVALID-LOGIC
     expect(c.clientJs).not.toMatch(/is some/); // the operator lowered, not raw
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

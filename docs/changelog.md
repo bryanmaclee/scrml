@@ -2,6 +2,63 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S447 — 2026-10-01/02 (bryan · ASUS, successor to S446-xps; took the bootstrap lane after S448)
+
+**Rulings (user-voice §S447, ~25 entries).** `when` → **`<effect deps=[…]>`, outside-world effects only** — an effect may not write
+reactive state, so cascades are impossible by construction (the bootstrap's runaway net becomes deletable); **`reset-on=`** on the cell
+(engines allowed, checked against `rule=`); **write `<request>`s never run on mount, server-origin writes reset the baseline** (3c — the
+proposed autosave measured to WIPE a record). **Validated top-level cells get a validity surface** (§55.5 Edge A reversed) and the
+**compiler gates every form that binds a validated value** (§55.17). **Keywords go outside the declaration opener** (`let <x/>`; held for
+the bootstrap parser). **Argument arity + type checking** (§7.3.4). **dpa-063 statement termination** — the ten readings confirmed.
+**UFCS / `.=` explored and PARKED.** **TS policy sharpened:** a tooling carve-out (CLI / dev / build / codemods / LSP stay on TS); rulings
+no longer generate impl#1 semantics work; the frozen `compiler/self-host` retired. **Message delivery: an `inbox` branch in every repo**
+(pa-base v2.18), and flogence's cross-machine doorbell wired.
+
+**Landed:** #1215 dev-db data root (six review rounds) · #1216 §55 validity SPEC · #1218 protect egress r7 · #1222 §7.3.4 · #1225 inbox ·
+#1226 test temp root (870 /tmp entries per run → 0) + `scrml dev` children die with their parent (3 orphans/run → 0) · #1227 dpa-063 ·
+#1228 protect egress r8 (rows by path, global names through aliases; review caught 4 regressions it introduced) · #1229 `<effect>` /
+`reset-on=` / write requests · #1230 retire `compiler/self-host` v1 (−22.4k lines). Deep-dives: validity surface, opener keywords, UFCS,
+`when` fit, autosave mount, `on mount` (in flight). Held: #1214. Carried: bootstrap U0 (re-scope to `<effect>`).
+
+**Process:** a possibly-accidental "your recs on all of them" accept was caught and its five items re-surfaced individually; a machine-
+local post-commit hook (full suite, synchronous, 10–15 min per commit) moved to the background with a single-run lock; 45 orphaned dev
+servers (3.5 GB) cleaned up by captured PID.
+
+## S448 — 2026-10-01 (bryan · XPS, successor to the reboot-killed S446-xps)
+
+A reboot took S446-xps down mid-lane; S448 recovered its three in-flight pieces, landed the bootstrap wire codec, and traced the 1h45m boot to where the /tmp volume actually came from.
+
+- **#1213** — bootstrap §57 wire codec (type-directed encode, fail-closed decode); branch brought up to date + fresh `gate` before merge.
+- **#1221** — codec r2: option flags read as own properties only (a polluted `Object.prototype` can no longer enable raw-null passthrough), no throws on hostile input, undeclared keys refused; re-reviewed on a frozen ref.
+- **dpa-063 SPEC text** (§7.2.2 statement termination, E-STMT-NO-EFFECT language-wide, `when` re-trigger) recovered from the dead session's worktree; on `wip/s448-spec-dpa063`, awaiting bryan's veto of 10 PA readings.
+- **U0 (`when` effects)**: round 2 fixed N1-N3; its re-review found the run-count cap drops non-looping runs and an `<each>`-row runaway reachable from source → round 3 (cycle detection by causal ancestry + backstop) in flight at wrap (`wip/s448-bootstrap-u0-r3` + patch).
+- **/tmp hygiene**: measured the test suite at ~4-7k leaked files per hook run and scratchpad worktrees at ~20.5k files each. Layer 1 (bun test preload owning a per-process temp root outside any repo) in flight (`wip/s448-test-tmp-root` + patch); layer 2 rules in pa-scrml overlay v2.5; layer 3 (`/etc/tmpfiles.d` age-out instead of boot delete) owed by bryan. First wrap probe reading: 6,399 /tmp entries since boot.
+- `handOffs/dpa-queue.md`: dpa-062/064 result rows folded in from a stranded XPS commit; dpa-063 marked RULED S446.
+
+## S445 — 2026-09-30 (bryan · ASUS, concurrent with S444 on XPS)
+
+S443's held security pickup, driven through adversarial review until each landing was strictly better than main —
+four security arcs landed, eight rulings, and every one of them reproduced by execution before it entered a brief.
+
+- **App root relative to the build root** (#1194): a project living under any `…/pages/…` or `…/routes/…` directory
+  no longer serves member pages of a `<program auth="required">` app anonymously (`/about` 200 → 302). One rule for the
+  build root (§40.8 "The build root"): the application entry file's directory; `W-AUTH-REQUIRED-NOT-INHERITED`. Four
+  S239 rounds; corpus byte-identical.
+- **Declared prose** (#1196, rulings S441 / S443 #4 / S445 #2): `<program>`/`<page>`/`<channel>` bodies carry no loose
+  prose — every byte compiles or is an error, on both parsers; new `E-STMT-NO-EFFECT` (an expression statement with no
+  effect is an error — `@a == 1`, `"Total: " + @count`, bare `@count`). Enum `renders` bodies now taken verbatim
+  (`No #${id}` → `No #42`; main dropped the `#`). Five rounds.
+- **Protected-column egress round 6** (#1198, rulings S443 #7, S445 #4): nine leak classes closed; per-column markers;
+  the sink builds its own plain-data snapshot (getters/`toJSON` run once, against a stripped `this`); an HMAC key
+  declassifies only with positive runtime evidence. Six rounds; `this`-writes filed HIGH for round 7.
+- **Program role by ancestor** (#1201, rulings S445 (b) + items 1/3/5): a `<div>`-wrapped app program's `auth=` is
+  enforced; route-file programs are nested (implied ancestor); session + every app-level attribute on a nested program
+  are errors (`E-PROGRAM-NESTED-SESSION` / `-NESTED-ATTR` / `-CONFIG-UNREAD`); refused builds write nothing.
+- **In flight at wrap:** dev-db resolution (`db=` relative to the declaring file; ownership-gated creation;
+  `SCRML_DATA_DIR`) — round 4.
+- Banked dpa-063 (statement termination) + dpa-064 (nested program as an auth scope) (#1192). flogence: `@adv` lapsed,
+  carried in the overlay again. Gaps filed §S445 (incl. HIGH `scrml serve` exposure).
+
 ## S442 — 2026-09-29 (bryan · XPS, concurrent with S441)
 
 The bootstrap got the S440 typer rules end to end and grew to the §66.19 worked programs; bryan ruled the tape
@@ -7753,6 +7810,29 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+
+### S446 (2026-10-01, Peter · P-Tech1) — six landings through scripted merge-on-green, three reviewed drafts for bryan, and the tests had been lying about the network
+
+**The arc.** Peter's ruled queue (bryan's S439/S440 answers to his S432/S438 notes) at full throttle. Every landing went
+through an adversarial (S239) review and, after any fix round, a narrow re-review; several reviews changed the outcome — the
+schema PR shipped WITHOUT its tenant-union (it caused silent data loss) and with a `"""` change reverted (it reopened an S438
+security escape); the loopback PR's two CI reds were real (Linux binds `--host 0` to every interface; 58 test files leaked
+happy-dom's `fetch` into every later test). Three drafts — defer Part A, client-JS helper copy, imported-enum — are reviewed
+and waiting on one word each from bryan.
+
+- **#1212** — handler statement lists: `for … lift` rows run every statement, later statements read match-arm bindings,
+  `@a++`⏎ no longer drops the next statement in any function body (S439 #4).
+- **#1209** — `<schema>` tenant-floor holes fail closed: E-SCHEMA-014 (TEMP / no column list / INHERITS), E-SCHEMA-012/013
+  on qualified and glued DSL heads (S440 #15). The commented-out-shadow hole is routed to bryan.
+- **#1207** — `scrml dev` / `scrml serve` bind loopback by default (`--host` opts in); numeric-shorthand and whitespace hosts
+  refused on every OS (S439 #1).
+- **#1217** — a server-call cell write in a `${s1; s2}` handler is awaited before the next statement; SSE writes keep their
+  subscription; single-statement handlers byte-identical (S439 #4 + §13.2).
+- **#1219** — 58 test files now unregister happy-dom; 9 server-fetch tests (incl. tracking's dev-watcher set) pass.
+- **#1220** — §K test expected a POSIX-only root; main's `windows` job was red since c12b52c2.
+- Held for bryan (drafts, reviewed): **#1208** (defer SPEC calls + Part A), **#1211** (client-JS helpers into dist),
+  **#1210** (imported-enum F11/F15–F17 via callee parameter types). ~30 gaps filed (§S446-peter + PR-filed entries).
+- Outside scrml: flogenceP `db=` paths fixed for #1215 (f3b1b28).
 
 ### S444 (2026-09-30/10-01, bryan · XPS) — a coderlegion port became four rulings, and the TS compiler's `<request>` turned out to loop
 

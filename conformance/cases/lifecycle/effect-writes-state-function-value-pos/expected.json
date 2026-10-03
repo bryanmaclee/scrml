@@ -1,0 +1,23 @@
+{
+  "id": "lifecycle-effect-writes-state-function-value-pos",
+  "description": "§6.7.4 rule 3: a writing scrml function handed on as a VALUE (never called in scrml) counts as called — E-EFFECT-WRITES-STATE.",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4 rule 3: \"A **function value** — … a reference to a scrml function used as a value rather than called — appearing anywhere in the body counts as if it were called … A callback that writes state is therefore E-EFFECT-WRITES-STATE even though nothing in scrml calls it.\" ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "codes": [
+      "E-EFFECT-WRITES-STATE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "missing:E-EFFECT-WRITES-STATE"
+        ]
+      }
+    }
+  }
+}

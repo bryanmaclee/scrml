@@ -224,7 +224,7 @@ for (const f of walk(join(ROOT, "conformance/cases"))) {
 
 // -- emitter scan, every tree (T2, T3) -----------------------------------------------------------
 const SCAN = ["compiler/src", "compiler/native-parser", "compiler/runtime", "compiler/scripts",
-  "compiler/self-host", "compiler/self-host-v2", "lsp", "scripts", "stdlib", "compiler/tests"];
+  "compiler/self-host-v2", "lsp", "scripts", "stdlib", "compiler/tests"];
 const EXT = /\.(ts|js|mjs|scrml)$/;
 const TOKEN = /\b[EWI]-[A-Z0-9]+(?:-[A-Z0-9]+)*\b/g;
 const JSISH = /\.(ts|js|mjs)$/;

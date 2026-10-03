@@ -19,8 +19,9 @@ import { assertBodyTopCoverage } from "../../src/ast-builder.js";
 import { assertBodyTopCoverageNative } from "../../native-parser/parse-markup.js";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 
-const DIR = "/tmp/s441-coverage-invariant-fixtures";
+const DIR = join(tmpdir(), "s441-coverage-invariant-fixtures");
 mkdirSync(DIR, { recursive: true });
 let n = 0;
 function compile(source, parser) {

@@ -1,0 +1,27 @@
+// =============================================================================
+// self-host-v2 / slice-codec / bundle.scrml — the compile ENTRY for the §57
+// codec slice (arc unit Uc).
+//
+// The same device as slice-m1/bundle.scrml (progress.md F1 / F11): impl#1
+// lowers the library modules' `match` through its real emitter only when the
+// compile set contains a `<program>` entry. This one imports the M2 front end
+// (so a test can lower a real source and take its Core types) and the codec's
+// compile-time half. It renders nothing.
+// =============================================================================
+<program>
+    import { mkSym } from "../core.scrml"
+    import { allNodes } from "../walk.scrml"
+    import { printProgram } from "../print.scrml"
+    import { checkCore } from "../check.scrml"
+    import { countNodes } from "../measure.scrml"
+    import { lex } from "../lex.scrml"
+    import { parseFile } from "../parse.scrml"
+    import { analyze } from "../analyze.scrml"
+    import { lower } from "../lower.scrml"
+    import { wireBuild } from "../codec.scrml"
+    import { counterCore } from "../slice-m1/counter.core.scrml"
+    import { dropdownCore } from "../slice-m1/dropdown.core.scrml"
+    import { valuesemCore } from "../slice-m1/valuesem.core.scrml"
+
+    fn bundleProbe() -> int { return mkSym(0, "probe").id }
+</program>

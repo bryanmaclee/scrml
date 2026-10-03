@@ -1,0 +1,6 @@
+// §6.8.4 rule 3 — a two-cell cycle.
+<program>
+  <a reset-on=[@b]> = 0
+  <b reset-on=[@a]> = 0
+  <p>${@a} ${@b}</p>
+</program>

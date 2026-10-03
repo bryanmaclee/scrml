@@ -157,6 +157,69 @@ describe("§14.8.9 P3 — an error never carries a protected value to the client
   });
 });
 
+// S447 round 7 (item 4) — `scrml dev` answered an uncaught route error with
+// `{"error":"Internal server error","detail": err.message}` — measured with a
+// real `scrml dev`: `detail: "bad JSON path: 'SECRET-HASH-123'"`. Now it answers
+// the fixed 500 and logs the error; and the dev serve config carries an `error:`
+// handler for anything that throws past the route catch (Bun's development error
+// page otherwise prints the message and source, `scrml dev` not being
+// NODE_ENV=production).
+describe("§14.8.9 round 7 — `scrml dev` never echoes an error message", () => {
+  test("devDispatch: a failing route answers a fixed 500; the message goes to the server log", async () => {
+    const { loadServerRoutes, devDispatch } = await import("../../src/commands/dev.js");
+    const dir = mkdtempSync(join(tmpdir(), "scrml-protect-error-dev-"));
+    const outDir = join(dir, "dist");
+    mkdirSync(outDir, { recursive: true });
+    writeFileSync(join(dir, "app.scrml"), SRC(' auth="none"'));
+    const dbPath = join(dir, "app.db");
+    const db = new Database(dbPath, { create: true });
+    db.run("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)");
+    db.run(`INSERT INTO users VALUES (1, 'ada', '${SECRET}')`);
+    db.close();
+    compileScrml({ inputFiles: [join(dir, "app.scrml")], write: true, outputDir: outDir, log: () => {} });
+    const sp = join(outDir, "app.server.js");
+    writeFileSync(sp, readFileSync(sp, "utf8").replace('new SQL("sqlite:./app.db")', `new SQL(${JSON.stringify("sqlite:" + dbPath)})`));
+    await loadServerRoutes(outDir);
+    const mod = await import(`file://${sp}`);
+    const route = mod.routes.find((r) => r.path.startsWith("/_scrml/__ri_route_getIt"));
+    const logged = [];
+    const origError = console.error;
+    console.error = (...a) => logged.push(a.map((x) => (x instanceof Error ? x.message : String(x))).join(" "));
+    let res;
+    try {
+      res = await devDispatch(new Request("http://localhost" + route.path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": "t", Cookie: "scrml_csrf=t" },
+        body: "{}",
+      }), null, outDir, {});
+    } finally {
+      console.error = origError;
+    }
+    const body = await res.text();
+    expect(res.status).toBe(500);
+    expect(body).not.toContain(SECRET);
+    expect(JSON.parse(body)).toEqual({ error: "Internal server error" });
+    expect(logged.join("\n")).toContain(SECRET); // the developer still sees it, server-side
+  });
+
+  test("the dev serve config's error: handler answers the fixed 500, never the message", async () => {
+    const { buildServeConfig } = await import("../../src/commands/dev.js");
+    const cfg = buildServeConfig({ port: 0 }, mkdtempSync(join(tmpdir(), "scrml-dev-errh-")));
+    const origError = console.error;
+    console.error = () => {};
+    let res;
+    try {
+      res = cfg.error(new Error(`bad JSON path: '${SECRET}'`));
+    } finally {
+      console.error = origError;
+    }
+    expect(res.status).toBe(500);
+    const body = await res.text();
+    expect(body).not.toContain(SECRET);
+    expect(JSON.parse(body)).toEqual({ error: "Internal server error" });
+  });
+});
+
 // S443 round 6b (MUST 4) — round 6 made the descriptor non-writable, and
 // `Object.assign(a, b)` on two tagged rows (a refresh in place) answered HTTP 500
 // where base answered 200 stripped (review, measured). Over real HTTP: it works

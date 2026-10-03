@@ -24,13 +24,14 @@ import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
 import { SecretRedactor } from "./diagnostic-secrets.ts";
-import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource } from "./route-inference.ts";
+import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource, programRoleBuildFacts } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
 import { runTS, buildTypeRegistry, BUILTIN_TYPES } from "./type-system.ts";
 import { runMetaChecker } from "./meta-checker.ts";
 import { runDG } from "./dependency-graph.ts";
 import { isLibraryShape, classifyFileShape } from "./library-shape.js";
+import { findTopLevelProgram, programRoleOptionsOf, stampImpliedProgramAncestors } from "./program-role.ts";
 import { runBatchPlanner, serializeBatchPlan } from "./batch-planner.ts";
 import { runReachabilitySolver, serializeReachabilityRecord } from "./reachability-solver.ts";
 import { buildEngineGraphJson } from "./engine-graph.ts";
@@ -1648,6 +1649,18 @@ function _compileScrmlImpl(options = {}) {
   //
   // The pass body lives in `precg.ts` (`runPRECG`) so the stage has a named, substitutable entry
   // (s430-stage-swap); it was moved there verbatim.
+  // S445 item 1 (§4.12) — the implied application ancestor is a BUILD fact:
+  // when an application program exists, every `<program>` in a route file is
+  // nested. Decided ONCE here, over the whole parsed set, before PRECG reads any
+  // program role (program-role.ts). The route-file classifier is route
+  // inference's own build-root rule (`programRoleBuildFacts`) — swap it there, not here.
+  {
+    const _asts = tabResults.map((r) => r?.ast).filter(Boolean);
+    const _givenRoot = typeof options.buildRoot === "string" && options.buildRoot !== ""
+      ? resolve(options.buildRoot)
+      : undefined;
+    stampImpliedProgramAncestors(_asts, programRoleBuildFacts(_asts, _givenRoot));
+  }
   const _runPRECG = seams.pick("PRECG", runPRECG);
   for (const tabResult of tabResults) {
     const fileAST = tabResult?.ast;
@@ -1705,7 +1718,7 @@ function _compileScrmlImpl(options = {}) {
       // is exactly the change nobody would think to re-verify here.
       const shape =
         fileAST.fileShape ??
-        classifyFileShape(fileAST.nodes ?? [], fileAST.hasProgramRoot === true);
+        classifyFileShape(fileAST.nodes ?? [], fileAST.hasProgramRoot === true, programRoleOptionsOf(fileAST));
       return isLibraryShape(shape, fileAST.exports ?? []);
     });
     if (allPureFnModules) {
@@ -2168,7 +2181,9 @@ function _compileScrmlImpl(options = {}) {
   // VP-3 — attribute interpolation: `${...}` in non-interpolating attribute
   //        values (e.g. `<channel name=>`) becomes E-CHANNEL-007.
   // VP-1 — attribute allowlist: unknown attributes on scrml-special elements
-  //        (or `auth="role:X"`) emit W-ATTR-001 / W-ATTR-002 (warnings).
+  //        (or an unrecognized value) emit W-ATTR-001 / W-ATTR-002 (warnings); an
+  //        `auth=` on <program>/<page> outside the three literals is the ERROR
+  //        E-AUTH-ATTR-INVALID (§52.13.2, S449).
   // Run all three on the post-CE AST set so downstream stages see consistent
   // diagnostics. Errors fail the run; warnings continue.
   const postCEResult = stage("VP-2", () => seams.pick("VP-2", runPostCEInvariant)({ files: ceResults }));
@@ -2352,7 +2367,9 @@ function _compileScrmlImpl(options = {}) {
           : null;
       } else {
         // Fallback: parse from raw db= attribute value via the helper.
-        const programNode = (f.nodes ?? f.ast?.nodes ?? []).find(n => n?.kind === "markup" && (n.tag ?? "") === "program");
+        // The file's top-level <program> (program-role.ts; §4.12, S445 — whatever
+        // markup wraps it), the same node its middlewareConfig was read from.
+        const programNode = findTopLevelProgram(f.nodes ?? f.ast?.nodes ?? [], programRoleOptionsOf(f));
         const dbAttr = programNode?.attrs?.find(a => a.name === "db");
         const dbVal = dbAttr?.value?.kind === "string-literal" ? dbAttr.value.value : null;
         dbDriver = extractDbDriverFromValue(dbVal);
@@ -2910,7 +2927,16 @@ function _compileScrmlImpl(options = {}) {
     debugPerf,
     log,
   }));
-  collectErrors("CG", cgResult.errors);
+  // §6.6.9 / §20.5 (S449) — the codegen backstop E-INTERNAL-SESSION-AMBIENT-SERVER
+  // reports a server `@session` lowering the front end MISSED. When route
+  // inference already reported E-SESSION-AMBIENT-SERVER the backstop's hits are
+  // the same reads, refused twice: report the author-facing code only (the
+  // E-INTERNAL-BODY-TOP-DROPPED precedent — an internal floor does not fire when
+  // the run already carries the real error).
+  const _riRefusedSession = (riResult.errors ?? []).some((e) => e && e.code === "E-SESSION-AMBIENT-SERVER");
+  collectErrors("CG", _riRefusedSession
+    ? (cgResult.errors ?? []).filter((e) => !(e && e.code === "E-INTERNAL-SESSION-AMBIENT-SERVER"))
+    : cgResult.errors);
 
   const durationMs = parseFloat((performance.now() - pipelineStart).toFixed(1));
 
@@ -3257,6 +3283,8 @@ function _compileScrmlImpl(options = {}) {
   // dist-relative POSIX paths. Function-scoped so it reaches the return value;
   // populated in the write phase below. Empty for `write:false` / library mode.
   const hashedAssets = new Set();
+  // S445 review F3 — dist-relative POSIX paths of every `.server.js` written this run.
+  const writtenServerModules = new Set();
   // SPEC §47.13 — the client-asset manifest (g-static-server-serves-db-and-server-
   // source). `clientSeeds` records every artifact written FOR THE BROWSER
   // (documents, CSS, client bundles, the shared runtime, per-route chunks);
@@ -3537,6 +3565,9 @@ function _compileScrmlImpl(options = {}) {
           || suffix.endsWith(".worker.js")) {
           clientSeeds.add(relFromRoot(outputDir, fullPath));
         }
+        // S445 review F3 — the server modules THIS compile wrote, so `scrml dev`
+        // loads only those and never a stale `.server.js` an earlier compile left.
+        if (suffix === ".server.js") writtenServerModules.add(relFromRoot(outputDir, fullPath));
         return true;
       }
 
@@ -4052,6 +4083,16 @@ function _compileScrmlImpl(options = {}) {
     // on the build path, page bundles + CSS). The generated `_server.js` serves
     // `immutable` by membership in this set — never by a filename shape guess.
     hashedAssets: [...hashedAssets],
+    // S445 review F3 — dist-relative POSIX paths of every `.server.js` this compile
+    // wrote. `scrml dev` mounts exactly these; any other `.server.js` under the
+    // output dir is a leftover of an earlier compile and is not imported.
+    serverModules: [...writtenServerModules],
+    // s447-dev-db-r5 (§47.14) — every SQLite file handle codegen emitted, as noted by
+    // emit-server / emit-tool (`codegen/sqlite-file-target.ts noteSqliteHandle`):
+    // recorded path, ownership, declaring file, project-root provenance, and kind
+    // ("server" | "tool"). `scrml build` reports them, warns on paths the data root
+    // cannot move, and bakes the referencing ones into the server's startup check.
+    sqliteDatabases: (metaFiles ?? []).flatMap((f) => (f && Array.isArray(f._sqliteFileHandles) ? f._sqliteFileHandles : [])),
     // SPEC §47.13 — dist-relative POSIX paths the static servers may serve (the
     // browser artifacts + their import closure). `generateServerEntry` bakes it
     // into `_server.js`; `scrml dev` reads the `.scrml-client-assets.json` copy.

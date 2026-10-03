@@ -24,7 +24,7 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdirSync, writeFileSync, readFileSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "fs";
 import { join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { perRunTmp } from "../helpers/per-run-tmp.js";
@@ -276,37 +276,58 @@ const typoFiles = (programAttrs) => {
   return files;
 };
 
-describe("r3 F1 — an unrecognized auth= literal on a member page is not a declaration (fail closed)", () => {
-  test("under a required application program, every typo inherits the gate", () => {
+// S449 ruling item 4 (ruling:user-voice-scrml.md S449 "RULED — 'your recs.'" item 4;
+// supersedes the S443 r3 F1 "an unrecognized literal declares nothing, the page
+// inherits" behaviour these tests used to pin): an `auth=` on a `<page>` that is not
+// exactly one of the three literals is E-AUTH-ATTR-INVALID, and the build writes
+// nothing — under a required application program and without one alike.
+describe("r3 F1 → S449 item 4 — an unrecognized auth= literal on a member page refuses the build", () => {
+  test("under a required application program, every typo is E-AUTH-ATTR-INVALID and nothing is written", () => {
     const fx = buildWithDiagnostics("typo-required", typoFiles(` auth="required"`));
-    expect(fx.exitCode).toBe(0);
-    const res = getProbe(fx, Object.keys(TYPOS).map((k) => `/t${k}`));
-    for (const k of Object.keys(TYPOS)) {
-      const r = res[`/t${k}`];
-      expect(`${k} ${r.status} ${r.location} ${r.marker}`).toBe(`${k} 302 /login null`);
+    expect(fx.exitCode).not.toBe(0);
+    expect(fx.out).toContain("E-AUTH-ATTR-INVALID");
+    expect(fx.out).toContain("No files were written");
+    expect(existsSync(fx.dist)).toBe(false);
+    // One error per typo'd page, and the message names the value and the fix
+    // (read via the API — the CLI truncates messages).
+    for (const [k, v] of Object.entries(TYPOS)) {
+      const r = compileScrml({ inputFiles: [join(fx.root, "src", "pages", `t${k}.scrml`)], write: false, outputDir: join(fx.root, "api-out"), log: () => {} });
+      const errs = (r.errors ?? []).filter((d) => d.code === "E-AUTH-ATTR-INVALID");
+      expect(`${k} ${errs.length}`).toBe(`${k} 1`);
+      expect(errs[0].message).toContain(`\`"${v}"\``);
+      expect(errs[0].message).toContain('`auth="required"`, `auth="optional"`, `auth="none"`');
+      expect([...(r.errors ?? []), ...(r.warnings ?? [])].some((d) => d.code === "W-ATTR-002")).toBe(false);
     }
-    // The W-ATTR-002 text states the real effect on a <page> (read via the API —
-    // the CLI truncates messages).
-    const r = compileScrml({ inputFiles: [join(fx.root, "src", "pages", "tupper.scrml")], write: false, outputDir: join(fx.root, "api-out"), log: () => {} });
-    const w = [...(r.errors ?? []), ...(r.warnings ?? [])].find((d) => d.code === "W-ATTR-002");
-    expect(w).toBeDefined();
-    expect(w.message).toContain("is not an auth declaration");
-    expect(w.message).toContain("inherits");
   }, 60_000);
 
-  test("with no required application program, a typo gates nothing (unchanged)", () => {
+  test("with no required application program, a typo is refused too", () => {
     const fx = buildWithDiagnostics("typo-public", typoFiles(""));
-    const res = getProbe(fx, ["/tupper", "/toff"]);
-    expect(res["/tupper"]).toEqual({ status: 200, location: null, marker: "typo-marker" });
-    expect(res["/toff"]).toEqual({ status: 200, location: null, marker: "typo-marker" });
+    expect(fx.exitCode).not.toBe(0);
+    expect(fx.out).toContain("E-AUTH-ATTR-INVALID");
+    expect(existsSync(fx.dist)).toBe(false);
   }, 60_000);
 });
 
 describe("r3 F2 — only the APPLICATION's top-level <program> is inherited", () => {
-  test("a required <program> inside a route file gates its own file only, not the public app's pages", () => {
-    const fx = buildWithDiagnostics("overgate", {
+  // S445 item 1 (ruling:user-voice-scrml.md S445 — "This removes §40.2's 'route file's
+  // own program' sentence"): when an application program exists, a <program> in a
+  // route file is NESTED (implied ancestor, §4.12), so `auth=` on it is
+  // E-PROGRAM-NESTED-AUTH and the build writes nothing. The per-route remedy is
+  // `<page auth="required">` — it gates its own file only, never the public app's pages.
+  test("S445 #1: a required <program> inside a route file is E-PROGRAM-NESTED-AUTH (refused)", () => {
+    const fx = buildWithDiagnostics("overgate-nested", {
       "app.scrml": `<program><p>home-marker</p></program>\n`,
       "pages/admin.scrml": `<program auth="required"><p>admin-marker</p></program>\n`,
+      "pages/about.scrml": `<page>\n<p>about-marker</p>\n</page>\n`,
+    });
+    expect(fx.exitCode).not.toBe(0);
+    expect(fx.out).toContain("E-PROGRAM-NESTED-AUTH");
+  }, 60_000);
+
+  test("a required <page> in a route file gates its own file only, not the public app's pages", () => {
+    const fx = buildWithDiagnostics("overgate", {
+      "app.scrml": `<program><p>home-marker</p></program>\n`,
+      "pages/admin.scrml": `<page auth="required"><p>admin-marker</p></page>\n`,
       "pages/about.scrml": `<page>\n<p>about-marker</p>\n</page>\n`,
       "pages/login.scrml": `<page>\n<p>login-marker</p>\n</page>\n`,
     });
@@ -353,15 +374,27 @@ describe("r3 nit — an unresolvable redirect target is said out loud", () => {
     expect(getProbe(fx, ["/s"])["/s"]).toEqual({ status: 302, location: "/login", marker: null });
   }, 60_000);
 
-  test("an identified application program answers; a route file's own loginRedirect= does not make it ambiguous", () => {
-    const fx = buildWithDiagnostics("root-answers", {
+  test("S445 #1 + #5: a route file's (nested) program's loginRedirect= is E-PROGRAM-NESTED-ATTR, never a competing redirect", () => {
+    // S445 item 1: the route file's `<program>` is nested (implied ancestor); S445 item 5:
+    // `loginRedirect=` is application-level, so on a nested program it fails loudly
+    // instead of being silently ignored.
+    const fx = buildWithDiagnostics("root-answers-nested", {
       "app.scrml": `<program><p>home-marker</p></program>\n`,
-      "pages/admin.scrml": `<program auth="required" loginRedirect="/admin-login"><p>admin-marker</p></program>\n`,
+      "pages/admin.scrml": `<program loginRedirect="/admin-login"><p>admin-marker</p></program>\n`,
+      "pages/s.scrml": `<page auth="required">\n<p>s-marker</p>\n</page>\n`,
+    });
+    expect(fx.exitCode).not.toBe(0);
+    expect(fx.out).toContain("E-PROGRAM-NESTED-ATTR");
+    expect(fx.out).not.toContain("W-AUTH-LOGIN-REDIRECT-AMBIGUOUS");
+  }, 60_000);
+
+  test("an identified application program answers the page scope's redirect", () => {
+    const fx = buildWithDiagnostics("root-answers", {
+      "app.scrml": `<program loginRedirect="/signin"><p>home-marker</p></program>\n`,
       "pages/s.scrml": `<page auth="required">\n<p>s-marker</p>\n</page>\n`,
     });
     expect(fx.out).not.toContain("W-AUTH-LOGIN-REDIRECT-AMBIGUOUS");
-    const res = getProbe(fx, ["/s", "/admin"]);
-    expect(res["/s"]).toEqual({ status: 302, location: "/login", marker: null });
-    expect(res["/admin"].location).toBe("/admin-login");
+    const res = getProbe(fx, ["/s"]);
+    expect(res["/s"]).toEqual({ status: 302, location: "/signin", marker: null });
   }, 60_000);
 });

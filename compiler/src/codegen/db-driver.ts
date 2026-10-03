@@ -113,6 +113,19 @@ export function resolveDbDriver(uri: string): DbDriverResult {
   // Reject obvious URL schemes we don't support so typos surface early.
   // A relative path like `./app.db` matches the path heuristic below; a typo'd
   // scheme like `postgress://` (note the extra s) reaches this branch.
+  if (cls.kind === "unsupported-scheme" && cls.scheme !== null && cls.scheme.toLowerCase() === "file") {
+    // S445 F8 — `file:./x.db` used to be taken as a FILE NAMED `file:./x.db`.
+    return {
+      ok: false,
+      error: {
+        code: "E-SQL-005",
+        message:
+          `E-SQL-005: \`db="${redactDbUri(trimmed)}"\` is a \`file:\` URI, which is not accepted. ` +
+          `Write the path itself (e.g. \`./app.db\`, resolved against the directory of this ` +
+          `.scrml file — §8.1.1) or \`sqlite:./app.db\`. See SPEC §44.2.`,
+      },
+    };
+  }
   if (cls.kind === "unsupported-scheme") {
     return {
       ok: false,

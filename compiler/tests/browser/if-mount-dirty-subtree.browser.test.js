@@ -44,6 +44,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // One page carrying every category. `<shown>` gates them all so a single write
 // drives the whole surface, which is also how the leak check in §7 works.
@@ -84,7 +85,7 @@ function bumpInput() {
 </page>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-if-mount-dirty");
+const tmpRoot = resolve(tmpdir(), "scrml-if-mount-dirty");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

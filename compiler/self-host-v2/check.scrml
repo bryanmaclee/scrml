@@ -38,14 +38,24 @@
 //       ≥ 1; RemoveAnywhere carries `SeqCall(Filter, <the field itself>, λ)`
 //   C10 (s444) a Star's instance resolves to its declaration (C4's rule), and
 //       that declaration has a renders
+//   C11 (s449) an Effect's dependency list is non-empty, every dependency
+//       resolves (C4's rule) to a MUTABLE field (one with a write capability
+//       — E-LIFECYCLE-007), and its body writes NO cell: no Write / Commit in
+//       the body or its continuations, and no Call of a function that writes,
+//       transitively (§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE)
+//   C12 (s449) a Suspend stands only at the tail of an effect body (an Effect
+//       body, or the `then` of another Suspend) — the CPS split point
+//   C13 (s449) a ResetOn has ≥ 1 trigger, each a MUTABLE field (C11's rule);
+//       its reset is exactly ONE Write, to a cell that is not one of its own
+//       triggers (§6.8.4 rules 1-3; C3 / C6 judge that Write's contract)
 //   (C3 covers the s444 edits: the removals by the field's grants; ElemAt by
 //   the ELEMENT field's own contract, dpa-052 Q3.)
 // A diagnostic is a message string (§4 permits strings as text).
 // =============================================================================
 ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, Attr, Block,
-             EditKind, Check, Stmt, View, Field, Decl, CoreProgram, CapOwner, TransitionGraph,
-             capOwner, grantsAnyWrite, findDecl, findTypeDef } from "./core.scrml"
+             EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, CoreProgram, CapOwner, TransitionGraph,
+             capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
 
     export fn checkCore(p: CoreProgram) -> string[] {
@@ -66,7 +76,7 @@ ${
         for (const s of p.server) {
             for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, [], n)) }
         }
-        return out
+        return out.concat(checkSuspends(p))
     }
 
     fn checkField(d: Decl, f: Field) -> string[] {
@@ -123,6 +133,7 @@ ${
             .If(cond: x) :> ["C8: a bind's write is not a Write"]
             .Return(e: x) :> ["C8: a bind's write is not a Write"]
             .Eval(e: x) :> ["C8: a bind's write is not a Write"]
+            .Suspend(bind: x) :> ["C8: a bind's write is not a Write"]
         }
     }
 
@@ -224,6 +235,8 @@ ${
     fn checkView(p: CoreProgram, encl: Decl[], v: View) -> string[] {
         return match v {
             .Star(decl: d, inst: i) :> checkStar(p, encl, d, i)
+            .Effect(deps: ds, body: b) :> checkEffect(p, encl, ds, b)
+            .ResetOn(triggers: ds, reset: b) :> checkResetOn(p, encl, ds, b)
             .El(tag: x) :> []
             .Text(text: x) :> []
             .Dyn(e: x) :> []
@@ -232,6 +245,367 @@ ${
             .Instance(decl: x) :> []
             .Slot :> []
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // C11 (s449) — an Effect (§6.7.4): its dependency list is non-empty; every
+    // dependency resolves (C4's rule) to a field of its declaration that has a
+    // write capability — a locked or derived field has no change event
+    // (E-LIFECYCLE-007); and its body writes no reactive cell, directly or
+    // through a called function (the no-write rule, E-EFFECT-WRITES-STATE): no
+    // Write or Commit anywhere in the body (continuations included — they are
+    // nested Blocks), and no Call of a function whose body writes, closed over
+    // its own calls. The front end decides this first, from source (the write
+    // summary in analyze.scrml); C11 states it again over Core, where a
+    // function value cannot exist outside a SeqCall's Lambda (whose body the
+    // walk below already enters).
+    // -------------------------------------------------------------------------
+    fn checkEffect(p: CoreProgram, encl: Decl[], deps: EffectDep[], body: Block) -> string[] {
+        let out: string[] = []
+        if (deps.length == 0) out = out.concat(["C11: an Effect has an empty dependency list (§6.7.4: at least one entry)"])
+        for (const dep of deps) { out = out.concat(checkEffectDep(p, encl, dep)) }
+        const w: string = blockWriteWitness(p, body, [])
+        if (w != "") out = out.concat(["C11: an Effect body writes reactive state — " + w + " (§6.7.4: an effect may not write any reactive cell, directly or through a called function)"])
+        return out
+    }
+
+    // -------------------------------------------------------------------------
+    // C13 (s449) — a ResetOn (§6.8.4): at least one trigger (rule 2, "an empty
+    // list … is the same error"); every trigger a mutable cell (C11's rule —
+    // rule 2's E-LIFECYCLE-007 condition); the reset is exactly ONE Write
+    // (rule 1: "performs exactly one write — reset(@self)"), and its cell is
+    // not among its own triggers (rule 3: "a cell listing itself" is a cycle).
+    // The Write's contract — replace granted, or a Static transition every
+    // state admits (rules 5-6) — is C3 / C6's, as for any Write.
+    // -------------------------------------------------------------------------
+    fn checkResetOn(p: CoreProgram, encl: Decl[], triggers: EffectDep[], reset: Block) -> string[] {
+        let out: string[] = []
+        if (triggers.length == 0) out = out.concat(["C13: a ResetOn has no trigger (§6.8.4 rule 2)"])
+        for (const t of triggers) {
+            for (const m of checkEffectDep(p, encl, t)) { out = out.concat([m.replace("C11: an Effect dependency", "C13: a ResetOn trigger")]) }
+        }
+        if (reset.stmts.length != 1) return out.concat(["C13: a ResetOn's reset is " + reset.stmts.length + " statements — it is exactly one Write (§6.8.4 rule 1)"])
+        const cap: Sym | not = writeCapOf(reset.stmts[0])
+        if (cap is not) return out.concat(["C13: a ResetOn's reset is not a Write (§6.8.4 rule 1)"])
+        const o: CapOwner | not = capOwner(p, cap)
+        if (o is not) return out
+        for (const t of triggers) {
+            if (t.decl.id == o.decl.sym.id && t.idx == o.idx) out = out.concat(["C13: a ResetOn on <" + o.decl.sym.hint + ">." + o.decl.fields[o.idx].sym.hint + " lists its own cell as a trigger (§6.8.4 rule 3, a cycle)"])
+        }
+        return out
+    }
+
+    fn writeCapOf(s: Stmt) -> Sym | not {
+        return match s {
+            .Write(cap: c) :> c
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
+        }
+    }
+
+    fn checkEffectDep(p: CoreProgram, encl: Decl[], dep: EffectDep) -> string[] {
+        const d: Decl | not = findDecl(p, dep.decl)
+        if (d is not) return ["C11: an Effect dependency names declaration `" + dep.decl.hint + "`, which does not exist"]
+        const target: Decl | not = resolveInst(p, encl, dep.inst)
+        if (target is not) return ["C11: an Effect dependency of <" + d.sym.hint + "> goes through " + instText(dep.inst) + ", which does not resolve"]
+        if (target.sym.id != d.sym.id) return ["C11: an Effect dependency of <" + d.sym.hint + "> goes through " + instText(dep.inst) + ", an instance of <" + target.sym.hint + ">"]
+        if (dep.idx < 0 || dep.idx >= d.fields.length) return ["C11: an Effect dependency names field " + dep.idx + " of <" + d.sym.hint + ">, which has no such field"]
+        const f: Field = d.fields[dep.idx]
+        if (f.wcap is not) return ["C11: an Effect dependency <" + d.sym.hint + ">." + f.sym.hint + " is not a mutable cell (no write capability — a locked or derived field has no change event)"]
+        return []
+    }
+
+    // The first write a block performs, directly or through a called function
+    // (closed over calls; `seen` stops recursion), as a message ("" — none).
+    fn blockWriteWitness(p: CoreProgram, b: Block, seen: int[]) -> string {
+        for (const n of allNodes(Node.NBlock(b))) {
+            const w: string = nodeWriteWitness(p, n, seen)
+            if (w != "") return w
+        }
+        return ""
+    }
+
+    fn nodeWriteWitness(p: CoreProgram, n: Node, seen: int[]) -> string {
+        return match n {
+            .NStmt(s: s) :> stmtWriteWitness(p, s)
+            .NExpr(e: e) :> callWriteWitness(p, e, seen)
+            .NProgram(p: q) :> ""
+            .NDecl(d: d) :> ""
+            .NField(f: f) :> ""
+            .NFn(f: f) :> ""
+            .NServerFn(f: f) :> ""
+            .NBlock(b: b) :> ""
+            .NPlace(pl: pl) :> formulaWriteWitness(p, pl, seen)
+            .NInst(i: i) :> constructWriteWitness(p, i, seen)
+            .NPattern(pat: pat) :> ""
+            .NEdit(k: k) :> ""
+            .NView(v: v) :> ""
+            .NAttr(a: a) :> ""
+        }
+    }
+
+    // A read through `.Shared(d)` may CONSTRUCT d's shared instance (first
+    // reference, §66.6.4): its field initializers run, and the instances its
+    // renders uses are built with it (L12 (b); every use counted — the
+    // front end's construction summary, restated over Core).
+    fn constructWriteWitness(p: CoreProgram, i: InstRef, seen: int[]) -> string {
+        const ds: Sym | not = sharedDeclOf(i)
+        if (ds is not) return ""
+        if (ds.id == p.program.id || seen.indexOf(ds.id) >= 0) return ""
+        const d: Decl | not = findDecl(p, ds)
+        if (d is not) return ""
+        const inner: string = declConstructWitness(p, d, seen.concat([ds.id]))
+        if (inner == "") return ""
+        return "through the construction of <" + ds.hint + ">: " + inner
+    }
+
+    fn declConstructWitness(p: CoreProgram, d: Decl, seen: int[]) -> string {
+        for (const f of d.fields) {
+            for (const n of allNodes(Node.NField(f))) {
+                const w: string = nodeWriteWitness(p, n, seen)
+                if (w != "") return w
+            }
+        }
+        const r: View[] | not = d.renders
+        if (r is not) return ""
+        for (const v of r) {
+            for (const n of allNodes(Node.NView(v))) {
+                const used: Sym | not = instanceDeclOf(n)
+                if (used is some) {
+                    const w2: string = constructWriteWitness(p, InstRef.Shared(used), seen)
+                    if (w2 != "") return w2
+                }
+            }
+        }
+        return ""
+    }
+
+    // fix round (HIGH-1): a read of a field with no write capability RUNS its
+    // initializer (the printer makes it a `rt.derived`, lazily pulled) — the
+    // program's own derived cells included.
+    fn formulaWriteWitness(p: CoreProgram, pl: Place, seen: int[]) -> string {
+        const ref: FieldRef | not = cellFieldOf(pl)
+        if (ref is not) return ""
+        const d: Decl | not = findDecl(p, ref.owner)
+        if (d is not || ref.idx < 0 || ref.idx >= d.fields.length) return ""
+        const f: Field = d.fields[ref.idx]
+        if (f.wcap is some) return ""
+        if (seen.indexOf(f.sym.id) >= 0) return ""
+        const init: Expr | not = f.init
+        if (init is not) return ""
+        for (const n of allNodes(Node.NExpr(init))) {
+            const w: string = nodeWriteWitness(p, n, seen.concat([f.sym.id]))
+            if (w != "") return "through the formula of <" + d.sym.hint + ">." + f.sym.hint + ": " + w
+        }
+        return ""
+    }
+
+    fn cellFieldOf(pl: Place) -> FieldRef | not {
+        return match pl {
+            .Cell(decl: d, inst: i, path: path) :> firstRef(d, path)
+            .LocalPath(sym: s) :> not
+        }
+    }
+
+    fn firstRef(d: Sym, path: FieldRef[]) -> FieldRef | not {
+        if (path.length == 0) return not
+        return { owner: d, idx: path[0].idx }
+    }
+
+    fn sharedDeclOf(i: InstRef) -> Sym | not {
+        return match i {
+            .Shared(decl: d) :> d
+            .Lexical(depth: n) :> not
+            .Alias(sym: s) :> not
+            .Narrowed(sym: s) :> not
+        }
+    }
+
+    fn instanceDeclOf(n: Node) -> Sym | not {
+        return match n {
+            .NView(v: v) :> viewInstanceDecl(v)
+            .NProgram(p: q) :> not
+            .NDecl(d: d) :> not
+            .NField(f: f) :> not
+            .NFn(f: f) :> not
+            .NServerFn(f: f) :> not
+            .NBlock(b: b) :> not
+            .NStmt(s: s) :> not
+            .NExpr(e: e) :> not
+            .NPlace(pl: pl) :> not
+            .NInst(i: i) :> not
+            .NPattern(pat: pat) :> not
+            .NEdit(k: k) :> not
+            .NAttr(a: a) :> not
+        }
+    }
+
+    fn viewInstanceDecl(v: View) -> Sym | not {
+        return match v {
+            .Instance(decl: d) :> d
+            .El(tag: x) :> not
+            .Text(text: x) :> not
+            .Dyn(e: x) :> not
+            .Cond(arms: x) :> not
+            .Each(src: x) :> not
+            .Slot :> not
+            .Star(decl: x) :> not
+            .Effect(deps: x) :> not
+            .ResetOn(triggers: x) :> not
+        }
+    }
+
+    fn stmtWriteWitness(p: CoreProgram, s: Stmt) -> string {
+        return match s {
+            .Write(cap: cap) :> "a Write of " + capText(p, cap)
+            .Commit(writes: ws) :> "a Commit of " + ws.length + " write(s)"
+            .Let(sym: x) :> ""
+            .Assign(local: x) :> ""
+            .If(cond: x) :> ""
+            .Return(e: x) :> ""
+            .Eval(e: x) :> ""
+            .Suspend(bind: x) :> ""
+        }
+    }
+
+    fn capText(p: CoreProgram, cap: Sym) -> string {
+        const o: CapOwner | not = capOwner(p, cap)
+        if (o is not) return "capability `" + cap.hint + "`"
+        return "<" + o.decl.sym.hint + ">." + o.decl.fields[o.idx].sym.hint
+    }
+
+    fn callWriteWitness(p: CoreProgram, e: Expr, seen: int[]) -> string {
+        const callee: Sym | not = calledSym(e)
+        if (callee is not) return ""
+        if (seen.indexOf(callee.id) >= 0) return ""
+        const f: Fn | not = findFn(p, callee)
+        if (f is not) return ""                       // C2 reports an unknown callee
+        const inner: string = blockWriteWitness(p, f.body, seen.concat([callee.id]))
+        if (inner == "") return ""
+        return "through `" + callee.hint + "()`: " + inner
+    }
+
+    fn calledSym(e: Expr) -> Sym | not {
+        return match e {
+            .Call(callee: c) :> c
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Read(place: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .Handle(inst: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // C12 (s449) — a Suspend is a CPS split point: its continuation is its
+    // `then`, so nothing may follow it in its block, and it stands only at the
+    // TAIL of an effect body — an Effect body, or (a chain) the `then` of
+    // another Suspend. In an If branch the statements after the If would run
+    // before the branch's continuation; in a function, handler or bind there is
+    // no owning effect task to cancel it on teardown or re-run.
+    // -------------------------------------------------------------------------
+    fn checkSuspends(p: CoreProgram) -> string[] {
+        let total: int = 0
+        let legal: int = 0
+        for (const n of allNodes(Node.NProgram(p))) {
+            total = total + suspendAt(n)
+            legal = legal + effectTails(n)
+        }
+        if (total == legal) return []
+        return ["C12: " + (total - legal) + " Suspend(s) stand outside the tail of an effect body (an Effect body or a Suspend's continuation, and last in that block)"]
+    }
+
+    fn suspendAt(n: Node) -> int {
+        return match n {
+            .NStmt(s: s) :> suspendThenCount(s)
+            .NProgram(p: q) :> 0
+            .NDecl(d: d) :> 0
+            .NField(f: f) :> 0
+            .NFn(f: f) :> 0
+            .NServerFn(f: f) :> 0
+            .NBlock(b: b) :> 0
+            .NExpr(e: e) :> 0
+            .NPlace(pl: pl) :> 0
+            .NInst(i: i) :> 0
+            .NPattern(pat: pat) :> 0
+            .NEdit(k: k) :> 0
+            .NView(v: v) :> 0
+            .NAttr(a: a) :> 0
+        }
+    }
+
+    fn suspendThenCount(s: Stmt) -> int {
+        const t: Block | not = suspendThen(s)
+        if (t is some) return 1
+        return 0
+    }
+
+    fn suspendThen(s: Stmt) -> Block | not {
+        return match s {
+            .Suspend(then: t) :> t
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+        }
+    }
+
+    fn effectTails(n: Node) -> int {
+        return match n {
+            .NView(v: v) :> viewEffectTails(v)
+            .NProgram(p: q) :> 0
+            .NDecl(d: d) :> 0
+            .NField(f: f) :> 0
+            .NFn(f: f) :> 0
+            .NServerFn(f: f) :> 0
+            .NBlock(b: b) :> 0
+            .NStmt(s: s) :> 0
+            .NExpr(e: e) :> 0
+            .NPlace(pl: pl) :> 0
+            .NInst(i: i) :> 0
+            .NPattern(pat: pat) :> 0
+            .NEdit(k: k) :> 0
+            .NAttr(a: a) :> 0
+        }
+    }
+
+    fn viewEffectTails(v: View) -> int {
+        return match v {
+            .Effect(body: b) :> tailChain(b)
+            .ResetOn(triggers: x) :> 0
+            .El(tag: x) :> 0
+            .Text(text: x) :> 0
+            .Dyn(e: x) :> 0
+            .Cond(arms: x) :> 0
+            .Each(src: x) :> 0
+            .Instance(decl: x) :> 0
+            .Slot :> 0
+            .Star(decl: x) :> 0
+        }
+    }
+
+    // The legally placed Suspends of a chain: the block's LAST statement, if a
+    // Suspend, and those of its continuation.
+    fn tailChain(b: Block) -> int {
+        if (b.stmts.length == 0) return 0
+        const t: Block | not = suspendThen(b.stmts[b.stmts.length - 1])
+        if (t is not) return 0
+        return 1 + tailChain(t)
     }
 
     fn checkStar(p: CoreProgram, encl: Decl[], dsym: Sym, i: InstRef) -> string[] {
@@ -253,6 +627,7 @@ ${
             .If(cond: c) :> []
             .Return(e: e) :> []
             .Eval(e: e) :> []
+            .Suspend(bind: b) :> []
         }
     }
 
@@ -280,6 +655,7 @@ ${
             .If(cond: x) :> "an If inside a Commit"
             .Return(e: x) :> "a Return inside a Commit"
             .Eval(e: x) :> "an Eval inside a Commit"
+            .Suspend(bind: x) :> "a Suspend inside a Commit"
         }
     }
 
@@ -589,6 +965,8 @@ ${
             .Each(src: s) :> not
             .Slot :> not
             .Star(decl: d) :> not
+            .Effect(deps: ds) :> not
+            .ResetOn(triggers: ds) :> not
         }
     }
 
@@ -636,6 +1014,7 @@ ${
             .If(cond: x) :> not
             .Return(e: x) :> not
             .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
         }
     }
 

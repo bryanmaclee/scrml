@@ -39,8 +39,9 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
 
-const tmpRoot = resolve("/tmp", "scrml-formfor-component-expand-in-arms-s177");
+const tmpRoot = resolve(tmpdir(), "scrml-formfor-component-expand-in-arms-s177");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

@@ -1,6 +1,144 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-10-01T14:31:06Z  commit: 464c9ab4d
+# updated: 2026-10-02T19:15:50Z  commit: 6a592ed5c
+# ⛑ **S447 STAMP — `78e4ddad` -> `6a592ed5c`. 12 COMMITS (S446-peter wrap #1223, S448 wrap #1224, bootstrap Uc codec
+# #1213/#1221, S447-bryan #1216/#1222/#1225/#1226/#1227/#1228/#1229/#1230), incremental refresh, main checkout on
+# `wrap/s447` == `origin/main` `6a592ed5c`.** MAP-STAMP RULE at write time: `git log --oneline 78e4ddad..HEAD` -> 12;
+# `bun scripts/state.ts --check` reported `maps: 12 commits behind HEAD (watermark 78e4ddad, HEAD 6a592ed5c)` at pass
+# start — confirms the window exactly. Source-relevant, grep-verified at `6a592ed5c`:
+# #1230 (**`compiler/self-host/` — the frozen v1 tree — is REMOVED.** 18 tracked files / 22,433 lines deleted;
+# `git ls-files compiler/self-host` is EMPTY; a gitignored untracked `compiler/self-host/dist/` can linger on an old
+# checkout and is NOT source. Deleted with it: `scripts/rebuild-self-host-dist.ts`, `scripts/rebuild-bs-dist.ts`,
+# `scripts/rebuild-tab-dist.ts`; the v1 sections of `integration/self-host-smoke.test.js` (§B bs.js, §C tab.js) and of
+# `integration/self-compilation.test.js` ("compiler compiles compiler" + the skipped L3); the 11 v1 keys of
+# `parser-conformance-within-node-allowlist.json`. Trimmed: `compiler/scripts/build-self-host.js` builds ONLY the
+# `stdlib/compiler/{module-resolver,meta-checker}` pair; `commands/compile.js` `--self-host` loads ONLY that pair (the
+# optional bs/ast/bpp/pa/ri/ts/dg/cg/tokenizer swap-ins are gone). Re-pointed: `parser-conformance/corpus-enumerator.js`
+# corpus root "self-host" -> `compiler/self-host-v2` (`driftGated: false`; 11 v2 files `[gap]`-skipped — gap
+# `G-SELF-HOST-V2-CORPUS-PARSER-DIVERGENCE-SKIPS`); `parser-conformance-canary.test.js` inlines the cg/bs fixture shapes
+# it used to read from the tree. KEPT (not v1): the `selfHostModules` API option (`api.js` / `pipeline-seam.ts`) and
+# `codegen/compat/parser-workarounds.js` `setBPPOverrides`), #1226 (S448 test infra: NEW
+# `compiler/tests/helpers/tmp-root-preload.js`, registered via NEW `bunfig.toml` `[test] preload` — every `bun test`
+# process from the repo root gets a per-process temp root `<base>/<pid>-<rand>` with TMPDIR/TEMP/TMP pointed at it;
+# `<base>` = `SCRML_TEST_TMP_BASE` else `${XDG_CACHE_HOME:-~/.cache}/scrml-test-tmp`; MUST NOT sit in a git repo or
+# under a `scrml.toml` (falls back to `<os.tmpdir()>/scrml-test-tmp`, else leaves TMPDIR alone); wraps
+# `Bun.spawn`/`Bun.spawnSync` calls that pass no `env`; layered removal (global `afterAll`, `exit`, SIGINT/SIGTERM/SIGHUP,
+# a detached POSIX `sh` watchdog, stale-root prune >24h of dead pids) — PLUS `commands/dev.js` child lifecycle:
+# `spawnedAppChildren` Set + `killAllAppChildren()` reap every starting/live/in-grace app child on `exit`/SIGINT/SIGTERM
+# (SIGHUP deliberately unhandled, preserves `nohup`); `runDevChildServer(serveDir, opts, serverModules, parentPid)`
+# arms its 2 s orphan guard on the parent pid written into the child config (`parentPid: process.pid`), BEFORE route
+# loading; the parent's own launcher guard uses the ppid captured at entry (`launchPpidAtEntry`); NEW test
+# `compiler/tests/commands/dev-child-dies-with-parent.test.js`), #1228 (§14.8.9 protect egress round 8,
+# `codegen/protect-flow.ts` +685: `RowPart.paths` — where a row sits inside a value (`ROW_SELF`, `PATH_SEP`, `ANY_KEY`,
+# `ROW_ANYWHERE`, `MAX_ROW_PATH = 4`; `normPaths`/`prefixPaths`/`readPaths`/`rowAnywhere`/`anyDepth`) so `{ h: u }.h`
+# is the row, not column `h`; `Taint.gn`/`gnAny` — global names a value was read through (`carryGlobalNames`,
+# `containerOf`, `subsumes`) so an aliased global (`const { C } = globalThis`, `const P = process`) reaches functions
+# stored under that name, fail-closed when unnamed; one descriptor path (`get`/`set`/`value` and a getter's returned
+# function are stored under the key); `LANGUAGE_COERCIONS` (String/Number/Boolean/BigInt/Symbol) no longer apply every
+# reachable function — removes the round-7 perf cliff; new gap `g-protect-egress-round-9-residuals`), #1213/#1221
+# (bootstrap arc unit Uc — the §57 wire codec: NEW `compiler/self-host-v2/codec.scrml` (compile-time, type-directed
+# `WireTable` descriptor; refuses payload enums, a `__scrml_absent` field, unnamed `Named`) + NEW
+# `compiler/self-host-v2/slice-codec/` (`runtime/codec.js`: `ABSENT_KEY`, `CodecDefect`, `isAbsenceEnvelope`,
+# `encode`/`encodeText`/`decode`/`decodeText`; `codec.test.js`, `cross-impl.test.js`, `harness.js`, `bundle.scrml`,
+# `src/types.scrml`); CI `gate` runs `bun test ./compiler/self-host-v2/slice-codec/` — 92 pass / 0 fail re-executed this
+# pass), SPEC-only landings (#1216 §55 validity surface for validated top-level values + §55.17 compiler submit gate;
+# #1222 §7.3.4 call arity + argument-type checking, UFCS parked; #1227 dpa-063 §7.2.2 newline ends a statement,
+# `E-STMT-NO-EFFECT` language-wide; #1229 §6.7.4 `<effect deps=[…]>` outside-world only + §6.8.4 `reset-on=` + §6.7.7.3
+# write requests skip mount). ALL NEW SPEC CODES ARE NOMINAL — grep of `compiler/src` finds ZERO emitters for:
+# `E-EFFECT-NO-DEPS`, `E-EFFECT-WRITES-STATE`, `E-EFFECT-WRITE-UNPROVEN`, `E-RESET-ON-CYCLE`, `E-RESET-ON-ENGINE-REFUSED`,
+# `E-RESET-ON-INVALID-ENTRY`, `E-RESET-ON-NOT-WRITABLE`, `E-STMT-LEADING-OPERATOR`, `E-VALIDITY-RESERVED-NAME`,
+# `E-WHEN-EFFECT-DEPRECATED`, `W-WHEN-EFFECT-DEPRECATED`, `I-FORM-SUBMIT-GATED` (also emitter-less: `E-CALL-ARITY`,
+# `E-VALIDITY-NO-SURFACE`, `E-VALIDATOR-DEAD`). impl#1 still compiles `when … changes { }` with writes allowed
+# (gap `g-impl1-when-effect-divergence-s447`). `db-ownership.ts` / `db-target.ts` / `codegen/sqlite-file-target.ts` are
+# ZERO-DIFF this window (#1215 data root mapped at the S446 stamp stands); #1225 is inbox-only.
+# ⛑ **FIGURES RE-EXECUTED AT `6a592ed5c`** (`bun scripts/facts.ts --check` PASS): version **0.8.0** · `compiler/src`
+# **280,923 lines / 220 files** (+495 lines, +0 files) · test files **1,558** (+1) · `compiler/SPEC.md` **43,038 lines**
+# (+1,052; `regen-spec-index.ts --check` OK, 72/72) · conformance **1209** cases (+0); `bun conformance/run.ts` ->
+# **1201/1209 pass + 8 xfail** · `docs/known-gaps.md` open **HIGH 235** (+10; 4 carried) · **MED 462** (+20) · **LOW 215**
+# (+1) · Nominal 7. §34 census (Linux run, path-separator bug does not apply): **881 rows** (+12 — the 12 Nominal codes
+# above) · STRUCK **35** · PINNED **377** · IMPL-SITES **317**.
+# ⚑ `file:line` citations in S447 sections are grep-derived at `6a592ed5c`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S446 HEADER (stamp `78e4ddad`), CARRIED FOR PROVENANCE. ━━━━━━━
+# ⛑ **S446 STAMP — `464c9ab4d` -> `78e4ddad`. 13 COMMITS (S444/S445 wrap tail #1201/#1203-#1206, S446-peter
+# #1207/#1209/#1212/#1217, test fixes #1219/#1220, S447-bryan #1215/#1218), incremental refresh, branch `wrap/s446-peter`.**
+# MAP-STAMP RULE at write time: `git log --oneline 464c9ab4d..78e4ddad` -> 13; `bun scripts/state.ts --check` reports
+# `maps: 13 commits behind HEAD (watermark 464c9ab4d, HEAD 78e4ddad)` at the moment this pass started — confirms the
+# window exactly. Source-relevant, grep-verified at `78e4ddad`:
+# #1201 (§4.12/§40 program role by ancestor — NEW `compiler/src/program-role.ts`: `ProgramRole`, `forEachProgramWithRole`,
+# `findTopLevelProgram(s)`, `stampImpliedProgramAncestors`, `nestedProgramAttrVerdict`; NEW codes `E-PROGRAM-NESTED-SESSION`,
+# `E-PROGRAM-NESTED-ATTR`, `E-PROGRAM-CONFIG-UNREAD`, `W-PROGRAM-TITLE-NESTED` beside the S443 `E-PROGRAM-002` /
+# `E-PROGRAM-NESTED-AUTH`; a `<program>` is top-level iff it has no `<program>`/`<page>` ancestor, whatever markup wraps
+# it, and every `<program>` in a route file of a build with an app program is nested (implied ancestor); consumed by
+# `compute-program-config.ts`, `tool-program.ts`, `auth-graph.ts`, `reachability/entry-points.ts`, `route-inference.ts`,
+# `refusal-gate.js` (fail-closed: no `server.js` written on `E-PROGRAM-002`/`E-PROGRAM-NESTED-AUTH`); +9 conformance
+# cases under `conformance/cases/auth/program-*`), #1209 (schema: `E-SCHEMA-014` NEW — a readable, unqualified
+# `CREATE TABLE` head that is not a plain declaration (a kind modifier / no column list / unclosed list / trailing
+# `INHERITS`); extends `E-SCHEMA-012`/`013` to a declarative `name {` DSL head glued to a longer token; emitted at
+# `gauntlet-phase1-checks.js` from `schema-differ.js` `findRejectedCreateTableHeads` / `findGluedDslTableHeads`; a
+# same-PR tenant-declaration UNION attempt was REVERTED for a worse silent over-scope — base shadow (first-wins)
+# stands, gap reopened routed to bryan), #1207 (CLI: NEW `compiler/src/commands/listen.js` — the ONE CLI `Bun.serve`
+# call site (`listen`, `listenOrExit`, `parseHostFlag`, `isLoopbackHost`, `bindPlan`, `displayUrl`, `networkNotice`);
+# `scrml dev`/`scrml serve` now bind `127.0.0.1` (+ a best-effort `::1` twin) by default instead of every interface;
+# `--host`/`--host=` opts in, bare `--host` = `0.0.0.0`; new non-catalog CLI error codes `E_SCRML_HOST_SHORTHAND`
+# (inet_aton numeric shorthand refused on every OS), `E_SCRML_HOST_WHITESPACE`, `E_SCRML_LISTEN`), #1212 + #1217
+# (§5.2.3/§13.2 handler statement lists, three residual silent drops + one regression of the fix itself, all
+# execute-verified in happy-dom: `for…lift` rows now attach `handlerBlock` via the same `attachHandlerStatementList`
+# function bodies use, lowered by `emit-lift.js` `emitHandlerStatementList`; a match-arm handler's LATER statements are
+# now scanned for the arm-name read by `emit-variant-guard.ts` `exprReadsArmName` (the old `handlerReadsArmName` was
+# first-statement-only); `collectExpr`'s ASI boundary now treats a postfix `++`/`--` as value-ending so the next line
+# is not swallowed into one bare-expr statement; #1217 then makes a ≥2-statement handler's OWN server-call cell write
+# await in place before the next statement reads the cell (`js-async-analysis.ts` `handlerStatementListColor` /
+# `activeHandlerStatementListColor`, `ColorOpts.reactiveArg1SkipKeep`), with a same-PR fix-round narrowing it to KEEP
+# the §36 SSE-generator arg1 skip (`scheduling.ts` `_clientSseFnNames`) so GITI-026's subscription rewrite still
+# matches — `emit-event-wiring.ts`/`emit-each.ts` call sites pass the new skip-set through; 7 out-of-scope gaps filed
+# (4 HIGH) for shapes still dropped: an imported server fn call, an SSE call nested in an expression), #1215 (db: NEW
+# `compiler/src/db-ownership.ts` (`decideOwnedDbFiles`, `sqlDeclaresTable`, `fileDefaultDbValue`, `collectOwnedDbFiles`)
+# + NEW `compiler/src/codegen/sqlite-file-target.ts` (`projectRootFor`, `runtimeDbPath`, `sqliteFileHandle` —
+# `_scrml_sqlite_owned` / `_scrml_sqlite_referenced`); a `db=` path now resolves against ITS DECLARING FILE and
+# OWNERSHIP is per declaring file (only the file whose body declares the schema may create the database; a
+# referencing file opens lazily, never creates, loud error if absent); ONE runtime data root, `SCRML_DATA_DIR` env var
+# if set else the recorded project root (NEW SPEC §47.14); `db-target.ts` `resolveDbFilePath` is the one compile-time
+# resolver, used by `protect-analyzer.ts`; NEW catalog row `W-DB-PATH-RESOLVES-ELSEWHERE`; NEW non-catalog build
+# warnings `W-DEPLOY-DB-OUTSIDE-DATA-ROOT` / `W-DEPLOY-DB-NO-PROJECT-ROOT` / `W-DEPLOY-DB-SHARED-PATH`
+# (`commands/build.js`); docker/fly/render/railway adapters now set `SCRML_DATA_DIR=/data` on a mounted volume; `scrml
+# dev` ignores `SCRML_DATA_DIR` by design (opens beside the declaring `.scrml`)), #1218 (§14.8.9 protect egress round
+# 7, `protect-flow.ts`: `this` is tracked as the receiver so `this.p = v` writes the class exactly as `o.p = v`; a
+# function stored under a key the LANGUAGE may call — protocol string keys, accessors, any key the compiler cannot
+# read, a thenable `.then`, a tagged-template call, an `instanceof` hasInstance hook, a built-in-shadowing method name
+# — is analysed as invoked with that `this`; stdlib-identity now keys on the pre-write `scrml:NAME` specifier, not any
+# `_scrml/NAME.js`-shaped path (closes a same-named author file spoofing the allowlist); `scrml dev`'s route catch and
+# its `error:` handler now answer a FIXED 500 body, never `err.message`, matching the production entry), #1219/#1220
+# (test-only: 58 files restore happy-dom globals at a root `afterAll` — a prior file's leaked `Response`/`fetch`/
+# `window`/`document` no longer bleeds into a later file in the same `bun test` process; one §K assertion now expects
+# the platform-resolved project root, forward-slashed, instead of a hard-coded POSIX `/test` — Windows-red since
+# `c12b52c2`, root-caused to this very session).
+# ⛑ **FIGURES RE-EXECUTED AT `78e4ddad`** (`bun scripts/facts.ts --check` PASS): version **0.8.0** · `compiler/src`
+# **280,428 lines / 220 files** (+2,891 lines, +4 files — the four NEW modules above) · test files **1,557** (+11,
+# exactly the 11 new test files below) · `compiler/SPEC.md` **41,986 lines** (+226; `bun scripts/regen-spec-index.ts
+# --check` PASS, 72/72 sections current) · conformance **1209** cases (+9); `bun conformance/run.ts` ->
+# **1201/1209 pass + 8 xfail** · `docs/known-gaps.md` `@generated:gap-counts` open **HIGH 225** (+3; 4 carried) ·
+# **MED 442** (+9) · **LOW 214** (+5) · Nominal 7 (+0) — vs the S445-stamp figures 222/433/209/7.
+# ⚑ **§34 census (`bun scripts/s34-census.ts`) NOT FULLY TRUSTED THIS PASS, ON THIS OS — ROOT-CAUSED, NOT
+# HAND-WAVED.** Row total **869** (+6 vs the S445 stamp's 863 — reconciles: +1 `E-SCHEMA-014`, +4 program-role codes,
+# +1 `W-DB-PATH-RESOLVES-ELSEWHERE`) and STRUCK **34** / PINNED **377** are reliable (string/JSON-derived, no path
+# logic). The IMPL-SITES/FALSE-CLAIM split this run read **IMPL-SITES 0 · FALSE-CLAIM 395**, which is WRONG: the
+# script's emitter scan guards `isImpl` with `rel.startsWith("compiler/src/")` against a path from Node's `relative()`,
+# which on **win32** returns `\`-separated segments (`compiler\src\...`) and so NEVER matches — `implHits` stays
+# empty for every run on this Windows checkout, and every code that should land in IMPL-SITES falls through to
+# FALSE-CLAIM/DECLARED-AHEAD instead. Confirmed directly: `E-STMT-NO-EFFECT` is a live string literal at
+# `ast-builder.js:1708` (grep-verified), yet the census still scored 0 IMPL-SITES. This is a PRE-EXISTING cross-platform
+# bug in `scripts/s34-census.ts` (zero-diff this window — not caused by any commit above) — filed as a tooling
+# finding in `non-compliance.report.md`, not fixed (a mapper does not edit source). Do not cite this pass's
+# IMPL-SITES/FALSE-CLAIM/DECLARED-AHEAD split as ground truth; re-run on Linux/macOS or after a `path.sep`-safe fix.
+# ⛑ **BOOTSTRAP RE-RUN: NOT RE-EXECUTED THIS PASS** (time budget). `compiler/self-host-v2` has exactly ONE line-level
+# touch this window (`ingest.scrml`, registering `precgTopLevelProgramSpan` as an identity field for the within-node
+# classifier, part of #1201's `E-PROGRAM-CONFIG-UNREAD` support — no logic change); `compiler/native-parser` is
+# zero-diff. lint-no-default-arm / slice-m1..m4 / CG+CSS footprint figures from the S445 stamp stand, carried forward
+# unchanged.
+# ⚑ `file:line` citations in S446 sections are grep-derived at `78e4ddad`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S445 HEADER (stamp `464c9ab4d`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S445 STAMP — `5b1d0dab0` -> `464c9ab4d`. 20 COMMITS (S443 wrap #1187, S444 #1182-#1202, S445 #1192/#1194/#1196/#1198),
 # incremental refresh, branch `maps/s444-wrap`.** MAP-STAMP RULE at write time: `git log --oneline 5b1d0dab0..464c9ab4d` -> 20;
 # `git merge-base HEAD origin/main` == `origin/main` == `464c9ab4d` (no fork). (The dispatch brief named `108ca89be` as the stamp;
@@ -183,7 +321,7 @@
 # a BARE `;`-sequence is `E-MULTI-STATEMENT-HANDLER` in every position (incl. `<each>`/engine/`<match>` sub-builds);
 # braceless `else` (`if (c) a; else b`) no longer runs `b` unconditionally; a dangling `else` after `};` is
 # `E-STMT-UNEXPECTED-TOKEN`. #1105 bootstrap slice M1 — `compiler/self-host-v2/` Core IR + walk + JS/HTML trees + printer +
-# checker; `slice-m1/` instance-record runtime + 68 tests; new CI step. #1104 — `compiler/self-host/` FROZEN (reference
+# checker; `slice-m1/` instance-record runtime + 68 tests; new CI step. #1104 — `compiler/self-host/` FROZEN [REMOVED S447 #1230] (reference
 # only). #1107/#1108 — SPEC §66 rulings (L6, L12, identities, O57-O60, O21/O43; reads through an un-narrowed handle are
 # `E-DECL-HANDLE-NOT-NARROWED`); §66 stays NOMINAL — impl#1 implements none of it.
 # ⏳ **NOT MAPPED — bootstrap M2 (#1109, `072741ca9`, parse / analyze / lower) LANDED ON `origin/main` MID-PASS, AFTER
@@ -969,6 +1107,89 @@ THIS one and exited 0 again. Nothing in the toolchain fails on stale maps.
 # Per-window landing narratives stay DELETED (S302 ruling). **History lives in `docs/changelog.md` +
 # `handOffs/delta-log.md`.** What earns space here is rules a grep cannot find.
 
+## S447 — READ FIRST (facts at `6a592ed5c`; supersedes the S446 block below where it conflicts)
+
+**Window:** `78e4ddad → 6a592ed5c`, 12 commits — bootstrap Uc codec (#1213/#1221), S446-peter wrap (#1223), S448 wrap
+(#1224), S447-bryan: SPEC-only #1216 (§55 validity surface / submit gate), #1222 (§7.3.4 call checking), #1227 (dpa-063
+statement termination), #1229 (`<effect>` / `reset-on=`); code #1226 (test temp root + `scrml dev` child reaping),
+#1228 (protect egress round 8), #1230 (v1 self-host removal); #1225 inbox-only.
+
+**`compiler/self-host/` IS GONE.** Do not look for it, cite it, or rebuild it; the `rebuild-*-dist.ts` scripts are
+deleted too. The bootstrap compiler is `compiler/self-host-v2/`; `--self-host` now means only the `stdlib/compiler`
+module-resolver + meta-checker pair.
+
+**Size, updated:** `compiler/src` **280,923 lines / 220 files** (+495 / +0). Test files **1,558** (+1).
+`compiler/SPEC.md` **43,038 lines** (+1,052; SPEC-INDEX current, 72/72). Conformance **1209** cases, **1201 pass + 8
+xfail**. `docs/known-gaps.md` open **HIGH 235** · **MED 462** · **LOW 215** · Nominal 7. §34 census 881 rows.
+
+**SPEC ran ahead this window:** 12 new §34 codes (effect / reset-on / leading-operator / validity-reserved-name /
+when-deprecated / submit-gated) have NO emitter in `compiler/src`. Read the SPEC section, then the matching
+`g-*-unbuilt` / `g-impl1-*` gap, before assuming impl#1 enforces a rule written this window.
+
+**Test runs now use a per-process temp root** (`bunfig.toml` preload → `compiler/tests/helpers/tmp-root-preload.js`);
+`os.tmpdir()` inside a test is NOT `/tmp`.
+
+## S446 — READ FIRST (facts at `78e4ddad`; supersedes the S445 block below where it conflicts)
+
+**Window:** `464c9ab4d → 78e4ddad`, 13 commits — S444/S445 wrap tail (#1201 program role by ancestor,
+#1203-#1206), S446-peter (#1207 loopback-default CLI bind, #1209 schema tenant-floor holes / `E-SCHEMA-014`, #1212 +
+#1217 §5.2.3 handler-statement-list ordering, #1219/#1220 test-only), S447-bryan (#1215 db ownership /
+`SCRML_DATA_DIR`, #1218 protect-egress round 7). Full per-area detail lives in each map's own `## S446 — … DELTA`
+section (prepended above its S445 predecessor); this section is the cross-map summary.
+
+**Fingerprint, unchanged:** language/framework/runtime facts are unchanged this window — still Bun + TypeScript/JS,
+still the same CLI verb set (11; `listen` is an internal helper, NOT a 12th verb — confirmed via `facts.ts`'s
+`NOT_A_VERB` set).
+
+**Size, updated:** `compiler/src` **280,428 lines / 220 files** (+2,891 / +4 — `commands/listen.js`,
+`db-ownership.ts`, `codegen/sqlite-file-target.ts`, `program-role.ts`). Test files **1,557** (+11). `compiler/SPEC.md`
+**41,986 lines** (+226; SPEC-INDEX regen-checked current, 72/72 sections). Conformance **1209** cases (+9), run result
+**1201 pass + 8 xfail**. `docs/known-gaps.md` open **HIGH 225** (+3, 4 carried) · **MED 442** (+9) · **LOW 214**
+(+5) · Nominal 7.
+
+**Tooling caveat carried into this stamp:** `scripts/s34-census.ts`'s IMPL-SITES/FALSE-CLAIM split is NOT trustworthy
+on a Windows checkout (a `relative()`-vs-`startsWith("compiler/src/")` separator bug zeroes `implHits` every run) —
+filed in `non-compliance.report.md`, not fixed here. The row-count total (869) and PINNED/STRUCK buckets are
+unaffected and reliable.
+
+## Map Index (counts refreshed at `6a592ed5c`)
+| Map                  | Status  | Contents                          |
+|----------------------|---------|-----------------------------------|
+| structure.map.md     | present | v1 `compiler/self-host/` + 3 rebuild scripts REMOVED; +9 new files (codec slice, tmp-root preload, dev-child test) |
+| dependencies.map.md  | present | 0 npm changes; `--self-host` / build-self-host edges narrowed to stdlib/compiler; corpus → self-host-v2 |
+| schema.map.md        | present | protect-flow `RowPart.paths` / `Taint.gn`; bootstrap `WireTable`; `runDevChildServer` 4th param |
+| config.map.md        | present | +1 test-only env var (`SCRML_TEST_TMP_BASE`), bunfig `[test] preload` |
+| build.map.md         | present | bunfig preload, CI slice-codec step, 3 scripts deleted, dev child reaping |
+| error.map.md         | present | +12 NOMINAL §34 codes (881 rows), 0 new emitters; `CodecDefect` (bootstrap) |
+| test.map.md          | present | 1,558 test files (+1); per-process temp root; v1 self-host tests removed |
+| auth.map.md          | present | protect egress round 8 (`protect-flow.ts`) |
+| domain.map.md        | present | §7.2.2 / §7.3.4 / §6.7.4 / §6.8.4 / §55 rulings (all Nominal) + codec invariants |
+| infra.map.md         | present | CI-only change |
+| migrations.map.md    | present | zero-diff |
+
+## Key Facts (S447 additions)
+- `compiler/self-host/` no longer exists; the bootstrap compiler is `compiler/self-host-v2/` and `scrml compile
+  --self-host` loads only the `stdlib/compiler` module-resolver + meta-checker.
+- Every `bun test` from the repo root runs with TMPDIR pointed at a per-process root under
+  `~/.cache/scrml-test-tmp/` (or `SCRML_TEST_TMP_BASE`), removed at exit — registered as a `bunfig.toml` preload.
+- `scrml dev` reaps every app child it spawned (starting, live, or in grace) on exit/SIGINT/SIGTERM, and each child
+  exits within ~2 s of its parent's death via a `parentPid` orphan guard.
+- The SPEC gained 12 §34 codes this window with zero `compiler/src` emitters — new §6.7.4 `<effect>`, §6.8.4
+  `reset-on=`, §7.2.2 termination, §55.17 submit-gate rules are not enforced by impl#1.
+
+## Key Facts (S446 additions)
+- A `<program>`'s top-level/nested role is now ancestor-based and markup-transparent (`program-role.ts`, §4.12) —
+  the single source every auth/codegen consumer reads.
+- A SQLite database is owned by exactly one declaring file; every other file only references it, lazily, and never
+  creates it (`db-ownership.ts`, SPEC §8.1.1); the runtime data root is `SCRML_DATA_DIR` or the project root
+  (§47.14), and `scrml dev` deliberately ignores that env var.
+- `scrml dev` / `scrml serve` bind loopback (`127.0.0.1` + `::1`) by default now, not every interface; the one
+  listener call site is `commands/listen.js`, structurally pinned by a test.
+- A `${s1; s2}` handler's own server-call cell write is now awaited before the next statement runs, except an
+  SSE-generator write (kept un-awaited so its subscription rewrite still matches).
+- `scripts/s34-census.ts` has a pre-existing, unfixed Windows path-separator bug that zeroes its IMPL-SITES bucket on
+  this OS — do not trust that split from a Windows run.
+
 ## S445 — READ FIRST (facts at `464c9ab4d`; supersede the S444b / S444 blocks below where they conflict)
 - **§40.8 body-top is CODE now (#1196).** Every bare run at a `<program>` / `<page>` / `<channel>` body-top is lifted as code
   (`liftBareDeclarations`, `compiler/src/ast-builder.js:2008`). Prose there is `E-UNQUOTED-DISPLAY-TEXT` (`rejectBodyTopProse`,
@@ -1132,7 +1353,7 @@ THIS one and exited 0 again. Nothing in the toolchain fails on stale maps.
 
 ## S437b — READ FIRST (facts at `9941a504c` that supersede the S437 block below)
 - **Handlers are parsed, not text-split (#1106).** A multi-statement handler value carries `value.handlerBlock.stmts` (function-body statement nodes); every emitter lowers from them via `emitHandlerStatementList` (`codegen/emit-logic.ts`). A BARE `;`-sequence is `E-MULTI-STATEMENT-HANDLER` in every position; braced blocks run every statement everywhere. The shared statement parser's braceless `else` now runs conditionally (it ran unconditionally in every function body before). → schema.map.md · error.map.md · domain.map.md.
-- **`compiler/self-host/` is FROZEN (#1104).** Supersedes the S437 bullet below that calls `hybrid.ts --swap … --conformance` "the bootstrap module-done gate": per-stage swap now exists only at the LEX seam and for the whole compiler; done for a bootstrap module = its conformance footprint. Do not fix or extend `compiler/self-host/`.
+- **`compiler/self-host/` is REMOVED (S447 #1230; was FROZEN #1104).** The v1 tree no longer exists in git; the bootstrap is `compiler/self-host-v2/`. Supersedes the S437 bullet below that calls `hybrid.ts --swap … --conformance` "the bootstrap module-done gate": per-stage swap now exists only at the LEX seam and for the whole compiler; done for a bootstrap module = its conformance footprint. There is no `compiler/self-host/` to fix or extend.
 - **The native bootstrap lives in `compiler/self-host-v2/`** (four-phase re-cut, own IRs). M1 (#1105) = Core IR + printer + instance-record runtime; CI `gate` runs `lint-no-default-arm.js` + the slice suite, which `bun test` alone never reaches. A default arm in an enum `match` there fails CI. → structure.map.md · test.map.md.
 - **§66 grew rulings, still NOMINAL (#1107/#1108):** L6 use-site initializers, L12 construction-time instance records, identities-not-values, spread-override = field edit, and READS through an un-narrowed `T | not` handle are `E-DECL-HANDLE-NOT-NARROWED`. impl#1 emits none of it. → domain.map.md.
 - **Conformance at this SHA: 1040/1047 pass + 7 XFAIL** (3 handler xfails flipped to pass; 4 new carried template-in-handler xfails).
@@ -1163,7 +1384,7 @@ THIS one and exited 0 again. Nothing in the toolchain fails on stale maps.
 - **Conformance at this SHA: 967/973 pass + 6 XFAIL** (`bun conformance/run.ts`).
 
 ## Project Fingerprint
-Language:   TypeScript / JavaScript (mixed) + scrml itself (self-hosting stdlib + self-host compiler experiments)
+Language:   TypeScript / JavaScript (mixed) + scrml itself (self-hosting stdlib `stdlib/compiler/` + the bootstrap compiler `compiler/self-host-v2/`)
 Framework:  Custom compiler pipeline (no web framework) — Bun-native
 Runtime:    Bun >=1.3.13 (no Node support; Bun-specific APIs throughout — `Bun.serve`, `bun:sqlite`, `Bun.$`, `Bun.SQL`, `Bun.hash`)
 Type:       CLI compiler + language toolchain (single-file full-stack web-language compiler, with LSP + editor-tooling + MCP surfaces)
@@ -1866,7 +2087,7 @@ that is precisely why they went stale twice in a row.** non-compliance.report.md
 - **AN OBLIGATION WHOSE PROBE ONLY READS THE CHANNEL IS UNDISCHARGED — THIRD INSTANCE, THIRD PROBE (#536).** review-debt (PRs), dpa-debt (deliberation queue), now issue-debt (adopter issues): three open issues were NAMED at four consecutive boots and homed by nobody. `issue-debt.ts` asserts the HOME, not the listing. pa-base §10.
 
 ## Tags
-#scrml #map #primary #index #compiler #bun #invariants #prohibitions #w-dead-function #reachability #route-inference #not-usage-analyzer #runtime-chunk-pruning #scrml-runtime-vs-template #verification-tier #section-40-8 #default-logic-lift #liftbaredeclarations #code-as-page-text #stdlib-client-registry #runtime-chunk-order #asis-unknown-split #types-gate #value-form-if #silent-wrong #map-stamp-rule #module-init #rehydrator-boundary #route-region #machine-retired #e-deprecated-001 #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #match-arm-autoawait #parenthesize-await-server-calls #scheduling-ts #crossmodule-async-markup #s239-catch #subparse-span-rebase #within-node-gate-windows-fix #export-let-var-emission #serve-tool-reachability #dist-relative-local-specifier #coordinate-space #§47.9.5 #cps-choke-point #auto-await #puppeteer-skip-download #windows-ci #review-debt-script #s34-census-broken #no-scheduled-map-refresh #changelog-dereferenced #pr-405-landed #cps-choke-point-landed #inject-promise-await-retired #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #collect-structural-decl-names #§6.8 #§17.1 #correction-pass #g-implicit-cell-double-write-clobbers-reset-init #async-name-provider #async-name-facts #is-async-callee-name #is-server-boundary-callee #decision-sites-3-to-1 #one-provider-three-consumers #seed-trigger-not-result-set #u1 #dpa-020 #dpa-023 #client-server-fn-await #is-client-server-fn-call #client-async-body #can-suppress-never-strand #position-invariant #owning-file-filter #routemap-key-carries-the-file #decide-off-emitted-output #match-iife-header #await-absorb #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #reset-init-thunk-promise #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #1878-sources #exit-code-2-invalid-comparison #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #permissive-by-design #s34-census-works-on-linux #windows-only-enoent #concurrent-clone-drift #session-numbers-collide #routed-to-bryan #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #embed-runtime #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #object-hasown #prototype-chain-read-closed #read-side-policy-open #under-claiming #side-landing #verify-locus-against-head #heading-vs-marker #spec-silent-shall #workflow-dispatch #manual-refire #prospective-not-retroactive #422-target-ref #show-false-ssr-REVERTED #ctrl-017-020 #undoable-emit-time-decoration #toggle-needs-a-toggler #fail-open-not-fail-closed #block-arm-value-position #keyword-fence-charset #not-backslash-b #identifier-charset-not-w #rcdata-restricted-parent #four-non-agreeing-answers #is-rcdata-body #eachbodylowering-does-not-exist #option-label-counter-gate #s239-do-not-land #§4.14-byte-identity #§17.7.6 #response-contract-has-a-spec-home #s326-n1-closed #shall-without-a-code #enforced-by-construction #artifact-behaviour-not-js-shape #stamp-must-be-an-ancestor #pr-branch-tip-stamp #merge-base-is-ancestor #selfhostmodules-seam #call-graph-invisible-codegen #run-cg-indirection #test-deleted-with-reverted-code  #near-zero-line-delta #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #grep-the-predicate-not-the-plan #separator-dependent #closes-block-statement #statement-start-whitelist #per-arm-declarednames #re-dispatch-not-drop-opts #§6.6.19 #e-derived-server-only-reach #refuse-not-escalate #per-function-scope-only #§12.4-literally #two-positions-still-open #shortest-edit-restores-the-leak #kind-tool-carve-out #807-codes #catalog-moved-first-time-in-five #s34-census-fixed-everywhere #fileurltopath #e-sql-006-compile-time #sink-not-detector #dedup-at-drain #request-ref-two-siblings-open #silent-vs-loud #each-arm-reparse #throwaway-id-range #nodetypes-memo-clobber #a-probe-is-code #scripts-is-code-bearing #two-rates-one-signal #count-threshold-not-percentage #prove-the-bite #auto-widen #cry-wolf-guard-deleted #heading-marker-drift-13 #883-conformance #1339-tests #240428-lines #24-commit-window #two-operators #map-stamp-rule #ancestor-of-origin-main #squash-merge-orphans-a-branch-tip #inbound-vs-outbound-check #outbound-stamp-check #generated-at-is-not-the-watermark #state-ts-line-3 #behind-count-unavailable #silent-instrument #mandatory-step-unanswerable #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #honest-older-stamp-still-bounds-nothing #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #each-body-scope-is-at-sigil-plus-as #fail-closed-not-silent-drop #dangling-ref-empties-the-whole-list #ssr-fallback-now-loud #fallback-descriptor-not-null #ssr-renderable-subset #§6.6.19-any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #descend-one-field-too-many #second-instance-of-the-class #six-leaking-positions #object-keys-is-insertion-order #§6.7.5 #§6.7.6 #§6.7.8 #deferred-lifecycle-body-tags #timer-poll-timeout #module-init-double-emit #request-and-channel-excluded-deliberately #poll-immediate-first-tick #never-refired-on-resume #timeout-tag-e-markup-001-false-fire #hand-maintained-beside-a-derived-list #§6.7.7 #request-ref-attr-routing-closed #each-request-ids-stash #reparse-lift-attr-request-ref #escape-hatch-node #should-skip-expr-parse #gated-to-registered-requests #byte-identical-non-request-path #post-ast-source-text-regex #source-text-regex-census #ratio-not-inspection #five-authors-one-substitution #invisible-to-differentials #new-or-touched-only #boot-read-set-gate #detection-not-control #pickup-led-digest #dpa-debt-probe #a-channel-the-probe-does-not-read-does-not-exist #bidirectional-probe #stale-table #filesscanned-is-environment-dependent #tracked-not-on-disk #facts-counts-only-test-js #state-which-derivation #bunfig-timeout-never-in-force #timeout-wears-fail-marker #skip-cursor-oracle #inputfiles-order-open #once-true-dcl-boots #issue-debt-probe #push-scoped-to-main #pr-539-in-flight #810-codes #242954-lines #190-src-files #1378-tests #gate-13-steps #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #precedence-off-source-not-filename #cors-preflight-stage-1 #ratelimit-per-route #emit-transition-css #transitions-chunk-retired #headers-strict-binds-compiler-emissions #ssr-seed-application-json #soft-nav-per-page-asset-hole #app-wide-union #invariant-59-bracketed-vs-parsed #invariant-60-step-name-is-coverage-claim #invariant-61-strict-headers #invariant-62-soft-nav-stylesheet #invariant-63-count-codes-by-absence #invariant-58-retired #delta-lint-gate #expect-shapes #maps-currency-is-warn-only #watermark-moved-mid-run #asis-split-NOT-on-main #types-gate-NOT-on-main #if-show-lowering #emit-event-wiring #compute-display-toggle-condition #synth-cell-collapse #resolve-synth-cell-prefix #section-55 #validated-form-flagship #each-lift-vs-structural #each-block-from-markup-node #parse-lift-tag #fail-open-predicate #accepted-then-discarded #spec-stale-table #stale-locus #self-contradicting-map #merge-base-not-tip #e-state-block-statement-form #state-block-locus #stage-2-5c #pre-ast-lint #not-an-invariant-55-violation #no-try-catch-in-an-error-gate #bs-type-state-is-not-semantic #glob-disarms-a-fatal-gate #wrong-file-not-drifted-line #internally-contradictory-figure #one-sha-on-two-lines #813-codes #192-src-files #1398-tests #browser-tier-outside-the-commit-gate #show-in-each-is-reactive #if-in-each-is-frozen #snippet-arity-tolerant #render-bearing-live-fallback #glued-interp-in-lift-reconcile #invariant-71 #invariant-72 #s437b #9941a504c #handler-block #self-host-frozen #self-host-v2 #section-66-rulings #s440 #cf62b415 #bootstrap-m3 #s440-read-first
+#scrml #map #primary #index #compiler #bun #invariants #prohibitions #w-dead-function #reachability #route-inference #not-usage-analyzer #runtime-chunk-pruning #scrml-runtime-vs-template #verification-tier #section-40-8 #default-logic-lift #liftbaredeclarations #code-as-page-text #stdlib-client-registry #runtime-chunk-order #asis-unknown-split #types-gate #value-form-if #silent-wrong #map-stamp-rule #module-init #rehydrator-boundary #route-region #machine-retired #e-deprecated-001 #e-fn-equals-body #e-fn-arrow-body #fn-decl-parse-sites #export-reparse-swallow #keep-alive #§4.15 #§20.8.4 #§40.8 #page-fifth-attribute #w-route-request-duplicates-server-load #follow-on-not-alternative #timer-poll-first-tick #§6.7.5 #§6.7.6 #immediate-poll-tick #match-arm-autoawait #parenthesize-await-server-calls #scheduling-ts #crossmodule-async-markup #s239-catch #subparse-span-rebase #within-node-gate-windows-fix #export-let-var-emission #serve-tool-reachability #dist-relative-local-specifier #coordinate-space #§47.9.5 #cps-choke-point #auto-await #puppeteer-skip-download #windows-ci #review-debt-script #s34-census-broken #no-scheduled-map-refresh #changelog-dereferenced #pr-405-landed #cps-choke-point-landed #inject-promise-await-retired #w-if-in-each #each-nested-if-not-reactive #reset-init-thunk-reassignment #collect-structural-decl-names #§6.8 #§17.1 #correction-pass #g-implicit-cell-double-write-clobbers-reset-init #async-name-provider #async-name-facts #is-async-callee-name #is-server-boundary-callee #decision-sites-3-to-1 #one-provider-three-consumers #seed-trigger-not-result-set #u1 #dpa-020 #dpa-023 #client-server-fn-await #is-client-server-fn-call #client-async-body #can-suppress-never-strand #position-invariant #owning-file-filter #routemap-key-carries-the-file #decide-off-emitted-output #match-iife-header #await-absorb #auto-await-family-not-closed #142-bare-sites #option-c-ruled-not-built #reset-init-thunk-promise #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #1878-sources #exit-code-2-invalid-comparison #dangling-ref-class #session-proxy-bind #gh357 #csrf-token-disclosure #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #permissive-by-design #s34-census-works-on-linux #windows-only-enoent #concurrent-clone-drift #session-numbers-collide #routed-to-bryan #region-fence #two-region-classes #lexical-vs-structural #change-the-input-not-the-pattern #join-around-runtime-slot #classify-brace-group #object-shorthand-expansion #binding-pattern-half-repair #proto-shorthand-b31 #engine-dependent #register-fn-name #identifier-shape-guard #zero-width-alternation #embed-runtime #§12.5 #response-contract #one-exit #instanceof-response-passthrough #redact-before-serialize #fail-open-403-to-200 #bun-welcome-page #stderr-only-for-undefined #session-cookie-wrap #object-hasown #prototype-chain-read-closed #read-side-policy-open #under-claiming #side-landing #verify-locus-against-head #heading-vs-marker #spec-silent-shall #workflow-dispatch #manual-refire #prospective-not-retroactive #422-target-ref #show-false-ssr-REVERTED #ctrl-017-020 #undoable-emit-time-decoration #toggle-needs-a-toggler #fail-open-not-fail-closed #block-arm-value-position #keyword-fence-charset #not-backslash-b #identifier-charset-not-w #rcdata-restricted-parent #four-non-agreeing-answers #is-rcdata-body #eachbodylowering-does-not-exist #option-label-counter-gate #s239-do-not-land #§4.14-byte-identity #§17.7.6 #response-contract-has-a-spec-home #s326-n1-closed #shall-without-a-code #enforced-by-construction #artifact-behaviour-not-js-shape #stamp-must-be-an-ancestor #pr-branch-tip-stamp #merge-base-is-ancestor #selfhostmodules-seam #call-graph-invisible-codegen #run-cg-indirection #test-deleted-with-reverted-code  #near-zero-line-delta #§18.5-four-routes #plan-block-arm-lift-is-not-the-segmenter #leaf-predicate-not-single-classifier #grep-the-predicate-not-the-plan #separator-dependent #closes-block-statement #statement-start-whitelist #per-arm-declarednames #re-dispatch-not-drop-opts #§6.6.19 #e-derived-server-only-reach #refuse-not-escalate #per-function-scope-only #§12.4-literally #two-positions-still-open #shortest-edit-restores-the-leak #kind-tool-carve-out #807-codes #catalog-moved-first-time-in-five #s34-census-fixed-everywhere #fileurltopath #e-sql-006-compile-time #sink-not-detector #dedup-at-drain #request-ref-two-siblings-open #silent-vs-loud #each-arm-reparse #throwaway-id-range #nodetypes-memo-clobber #a-probe-is-code #scripts-is-code-bearing #two-rates-one-signal #count-threshold-not-percentage #prove-the-bite #auto-widen #cry-wolf-guard-deleted #heading-marker-drift-13 #883-conformance #1339-tests #240428-lines #24-commit-window #two-operators #map-stamp-rule #ancestor-of-origin-main #squash-merge-orphans-a-branch-tip #inbound-vs-outbound-check #outbound-stamp-check #generated-at-is-not-the-watermark #state-ts-line-3 #behind-count-unavailable #silent-instrument #mandatory-step-unanswerable #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #honest-older-stamp-still-bounds-nothing #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #each-body-scope-is-at-sigil-plus-as #fail-closed-not-silent-drop #dangling-ref-empties-the-whole-list #ssr-fallback-now-loud #fallback-descriptor-not-null #ssr-renderable-subset #§6.6.19-any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #descend-one-field-too-many #second-instance-of-the-class #six-leaking-positions #object-keys-is-insertion-order #§6.7.5 #§6.7.6 #§6.7.8 #deferred-lifecycle-body-tags #timer-poll-timeout #module-init-double-emit #request-and-channel-excluded-deliberately #poll-immediate-first-tick #never-refired-on-resume #timeout-tag-e-markup-001-false-fire #hand-maintained-beside-a-derived-list #§6.7.7 #request-ref-attr-routing-closed #each-request-ids-stash #reparse-lift-attr-request-ref #escape-hatch-node #should-skip-expr-parse #gated-to-registered-requests #byte-identical-non-request-path #post-ast-source-text-regex #source-text-regex-census #ratio-not-inspection #five-authors-one-substitution #invisible-to-differentials #new-or-touched-only #boot-read-set-gate #detection-not-control #pickup-led-digest #dpa-debt-probe #a-channel-the-probe-does-not-read-does-not-exist #bidirectional-probe #stale-table #filesscanned-is-environment-dependent #tracked-not-on-disk #facts-counts-only-test-js #state-which-derivation #bunfig-timeout-never-in-force #timeout-wears-fail-marker #skip-cursor-oracle #inputfiles-order-open #once-true-dcl-boots #issue-debt-probe #push-scoped-to-main #pr-539-in-flight #810-codes #242954-lines #190-src-files #1378-tests #gate-13-steps #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #precedence-off-source-not-filename #cors-preflight-stage-1 #ratelimit-per-route #emit-transition-css #transitions-chunk-retired #headers-strict-binds-compiler-emissions #ssr-seed-application-json #soft-nav-per-page-asset-hole #app-wide-union #invariant-59-bracketed-vs-parsed #invariant-60-step-name-is-coverage-claim #invariant-61-strict-headers #invariant-62-soft-nav-stylesheet #invariant-63-count-codes-by-absence #invariant-58-retired #delta-lint-gate #expect-shapes #maps-currency-is-warn-only #watermark-moved-mid-run #asis-split-NOT-on-main #types-gate-NOT-on-main #if-show-lowering #emit-event-wiring #compute-display-toggle-condition #synth-cell-collapse #resolve-synth-cell-prefix #section-55 #validated-form-flagship #each-lift-vs-structural #each-block-from-markup-node #parse-lift-tag #fail-open-predicate #accepted-then-discarded #spec-stale-table #stale-locus #self-contradicting-map #merge-base-not-tip #e-state-block-statement-form #state-block-locus #stage-2-5c #pre-ast-lint #not-an-invariant-55-violation #no-try-catch-in-an-error-gate #bs-type-state-is-not-semantic #glob-disarms-a-fatal-gate #wrong-file-not-drifted-line #internally-contradictory-figure #one-sha-on-two-lines #813-codes #192-src-files #1398-tests #browser-tier-outside-the-commit-gate #show-in-each-is-reactive #if-in-each-is-frozen #snippet-arity-tolerant #render-bearing-live-fallback #glued-interp-in-lift-reconcile #invariant-71 #invariant-72 #s437b #9941a504c #handler-block #self-host-frozen #self-host-v2 #section-66-rulings #s440 #cf62b415 #bootstrap-m3 #s440-read-first #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8
 #s405 #engine-statechild-loop-not-function #skipopeneraware #skiptagshapedopener #computemaskedregions-renamed #findopenerend-quote-residual #unmasked-not-created #bs-recovery-parity #apostrophe-resolved-e523478b #stale-open-row #protect-three-limbs #e-protect-005 #w-protect-005 #mediation-mark #scrml-protect-mediated #provenance-before-shape #mounthydrate-redaction #enumerate-over-the-serializer #tenant-floor-14-8-10 #one-shared-recognizer #harvestrawcreatetables #schema-differ-owns-the-recognizer #extractdesiredschema-two-consumers #rawddl-marker #split-at-the-consumer #diffschema-byte-identical #tenanttableset-case-folds #w-schema-no-tables-declared #foreign-opener-five-spellings #describeescapehatch #inert-sigils #level-0-only #w-foreign-001-inversion #emit-library-structural-by-default #rawfallbackreason #verifiedfnremovalrange #sql-splicer-fails-closed #e-cg-sql-fn-unverifiable-span #e-cg-enum-binding-collision #code-with-no-spec-home #818-codes #905-conformance #1440-tests #252403-lines #head-moved-mid-pass #stamp-tracks-merge-base #generated-maps-regenerated #root-level-test-files-14
 #tilde-accumulator #section-32 #section-32-2-1 #three-axes-not-one #router-vs-coverage #e-cg-tilde-unresolved #e-tilde-001-cannot-fire #zero-producers #liftvar-vs-var #armbodystmts-is-a-set #zero-strip-sites #process-level-not-filesystem-level #cardinality-per-emission #stamped-claim-is-falsifiable #duplicate-fingerprint-block #815-codes #897-conformance #1425-tests #definition-boundary-not-stale-figure
 #section-7-5-1 #assignability-positions #e-type-031 #position-2-state-cell #position-3-no-implementation #fieldtypeassignable-is-not-argument-assignability #section-14-8-8-width-subtyping #int-vs-number #int-is-a-refinement-ruled-s404 #int-number-census #section-53-4 #predicate-zones #static-vs-boundary #hasinterpolation-is-carried #raw-value-aliasing #literal-type-only #splitblocks-eats-dollar-brace #meta-frame-only-backticks #router-lag #wrap-commit-carried-source #attribute-per-file-not-per-subject

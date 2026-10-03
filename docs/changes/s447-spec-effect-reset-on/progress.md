@@ -1,0 +1,11 @@
+# progress — s447-spec-effect-reset-on (append-only)
+
+- start 2bb72e66a: BRIEF committed. Base = origin/main 4fd980bc6. PR #1227 (dpa-063) OPEN/unmerged — its §6.7.4 re-trigger text is NOT on main; reconciled by note in new §6.7.4.
+- a919bfd6b: §6.7.4 rewritten as `<effect>`; §6.7.1 table, §6.7.2 step 1, §6.7.3 client-side sentence.
+- §6.7.10 table, §6.7.11 Ex 2/3/4/6/10, §6.7.12, §6.7.14 A.1/A.4 respelled + amended.
+- §6.8.4 reset-on= inserted; §6.8 heading extended; §6.8.2 xref; §55.13 sentence.
+- cross-refs respelled: §6.5.4, §6.6, §6.7.8 .fired, O-061-6, §46.1, §51 ex2, §51.7.1, §51.9, §51.12.1, §53.8, §54.7.4, §55.17.
+- §34 rows: E-LIFECYCLE-006 superseded/reserved, -007/-016/W-010/E-LIN-004 amended, W-006 + H-001 struck; new E-EFFECT-WRITES-STATE, E-EFFECT-WRITE-UNPROVEN, E-EFFECT-NO-DEPS, W-/E-WHEN-EFFECT-DEPRECATED, E-RESET-ON-{INVALID-ENTRY,CYCLE,NOT-WRITABLE,ENGINE-REFUSED}. s34-census --check-new PASS (26 rows).
+- PRIMER §11 row + new §6.6 + 2 inline mentions; known-gaps: g-impl1-when-effect-divergence-s447 (HIGH, DIVERGENCE) + g-bootstrap-effect-reset-on-owed (MED); SPEC-INDEX/FACTS/state regenerated, all --check PASS.
+- provenance: S447 dpa-063 reading 10 (CONFIRMED) cited for transport/not-a-rollback. Tests: unit 21344 pass/0 fail; slice-m2 448/0, m3 60/0, m4 404 (1 todo)/0. Pushing spec/s447-effect-reset-on.
+- ROUND 2: merged origin/main (#1227 merged) — §6.7.4 resolved to S447 text (re-trigger transport adopts reading 10 MAY-abort-READ); keyword no-write reading RATIFIED (S447 'accept and your rec (d)' item 1); 3c=(d): new §6.7.7.3 + §6.7.7 / §6.7.7.1 / §6.13 / §6.7.4 amendments; gaps: g-impl1-autosave-request-mount-save-wipes-record (HIGH), g-request-write-one-save-in-flight-owed (MED), g-request-write-flush-or-warn-on-leave-owed (MED); PRIMER + bootstrap gap updated; regen + all --check PASS; census PASS.

@@ -25,7 +25,7 @@
  * runtime + DOM chain detects a reactive-DOM update that never fires.
  */
 
-import { describe, test, expect, beforeEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { mkdtempSync, rmSync, existsSync, writeFileSync } from "fs";
@@ -167,4 +167,11 @@ describe("ss21 g-errors-anchor — <errors of=@cell.field> DOM reactively clears
     expect(passwordAnchor.innerHTML).toBe("");
     expect(emailAnchor.innerHTML).toBe("");
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

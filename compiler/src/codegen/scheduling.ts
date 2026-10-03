@@ -415,6 +415,24 @@ export function _clientServerFnNames(routeMap: RouteMap, filePath: string): Set<
   return names;
 }
 
+/**
+ * S446 (PR #1217 fix round) — the file's §36 SSE generator server fns
+ * (`server function*`, `route.isSSE`): the routes emit-functions gives an
+ * `_scrml_sse_*` EventSource stub, which is exactly the set emit-client's
+ * GITI-026 `post-sse-reactive-bind` pass rewrites. Same file filter as
+ * `_clientServerFnNames`.
+ */
+export function _clientSseFnNames(routeMap: RouteMap, filePath: string): Set<string> {
+  const names = new Set<string>();
+  for (const [id, route] of routeMap.functions) {
+    if (!id.startsWith(`${filePath}::`)) continue;
+    if (route.boundary === "server" && (route as { isSSE?: boolean }).isSSE && route.functionName) {
+      names.add(route.functionName as string);
+    }
+  }
+  return names;
+}
+
 export function liftEmittedStatementAwaits(
   code: string,
   routeMap: RouteMap,

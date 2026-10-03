@@ -36,17 +36,18 @@
  * just the newest regression — is what actually puts the evidence in the gate.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync, rmSync, readdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { RUNTIME_CHUNK_ORDER } from "../../src/codegen/runtime-chunks.ts";
 import { isEscalationServerOnlyModule } from "../../src/route-inference.ts";
+import { tmpdir } from "os";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
-const tmpRoot = resolve("/tmp", "scrml-stdlib-client-registry");
+const tmpRoot = resolve(tmpdir(), "scrml-stdlib-client-registry");
 
 /** Compile one source string; return its errors + the emitted client/runtime text. */
 function compile(source, baseName) {
@@ -477,4 +478,11 @@ describe("§4 NEGATIVE CONTROL — the harness reports a DOA bundle rather than 
     const run = execBundle({ runtimeJs: "const _x = 1;", clientJs: "void _x;" });
     expect(run.ok).toBe(true);
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

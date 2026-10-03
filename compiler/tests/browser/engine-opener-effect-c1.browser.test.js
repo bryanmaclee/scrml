@@ -27,8 +27,9 @@ import {
 } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
-const tmpRoot = resolve("/tmp", "scrml-c1-browser");
+const tmpRoot = resolve(tmpdir(), "scrml-c1-browser");
 
 /**
  * Flagship factory. `taskCount` controls how many tasks loadTasks() returns so

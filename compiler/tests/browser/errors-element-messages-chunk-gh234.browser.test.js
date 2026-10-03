@@ -36,15 +36,16 @@
  * demand-marking, not always-shipping.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
-const tmpRoot = resolve("/tmp", "scrml-gh234-errors-messages-chunk");
+const tmpRoot = resolve(tmpdir(), "scrml-gh234-errors-messages-chunk");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -214,4 +215,11 @@ describe("GH #234 — <errors of=…/> ships the messages runtime chunk", () => 
     expect(out.runtimeJs).not.toContain("_scrml_message_for");
     expect(out.runtimeJs).not.toContain("_SCRML_DEFAULT_MESSAGES");
   });
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

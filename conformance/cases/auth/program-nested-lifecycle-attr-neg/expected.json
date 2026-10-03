@@ -1,0 +1,10 @@
+{
+  "id": "program-nested-lifecycle-attr-neg",
+  "description": "§4.12.2 / §43.4 (S445 item 5) control — the §43.4 supervision attributes (`restart=`, `max-restarts=`, `within=`) are nested-valid (§4.12.2 table), so a nested worker carrying them raises no E-PROGRAM-NESTED-ATTR.",
+  "language-version": "1.0",
+  "spec": "§4.12.2, §43.4",
+  "rationale": "§43.4: 'Supervision policy (`restart=`, `max-restarts=`, `within=`) SHALL be declared as attributes on the `<program>` element'; §4.12.2 lists them as valid in nested position.",
+  "expect": {
+    "notCodes": ["E-PROGRAM-NESTED-ATTR", "E-PROGRAM-NESTED-AUTH", "E-PROGRAM-NESTED-SESSION"]
+  }
+}

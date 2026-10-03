@@ -1,0 +1,9 @@
+// §6.7.4 — deps=[] lists no cell.
+<program>
+  <n> = 0
+  function beacon(v) {
+    return v
+  }
+  <effect deps=[]>${ beacon(@n) }</>
+  <p>${@n}</p>
+</program>

@@ -44,6 +44,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { splitBlocks } from "../../src/block-splitter.js";
+import { tmpdir } from "os";
 
 // ---------------------------------------------------------------------------
 // Helpers — locate the `<match>` / `<each>` block in the parsed BS tree.
@@ -517,7 +518,7 @@ describe("§8: End-to-end compilation of </> closers (full-pipeline sanity)", ()
     const { writeFileSync, mkdirSync, rmSync } = await import("fs");
     const { resolve } = await import("path");
     const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    const tmpDir = resolve("/tmp", `r24bug4-test-${uniq}`);
+    const tmpDir = resolve(tmpdir(), `r24bug4-test-${uniq}`);
     mkdirSync(tmpDir, { recursive: true });
     const inputFile = resolve(tmpDir, "match.scrml");
     writeFileSync(
@@ -554,7 +555,7 @@ describe("§8: End-to-end compilation of </> closers (full-pipeline sanity)", ()
     const { writeFileSync, mkdirSync, rmSync } = await import("fs");
     const { resolve } = await import("path");
     const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    const tmpDir = resolve("/tmp", `r24bug4-test-${uniq}`);
+    const tmpDir = resolve(tmpdir(), `r24bug4-test-${uniq}`);
     mkdirSync(tmpDir, { recursive: true });
     const inputFile = resolve(tmpDir, "each.scrml");
     writeFileSync(

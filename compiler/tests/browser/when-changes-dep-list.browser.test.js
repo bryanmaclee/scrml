@@ -18,7 +18,7 @@
  * Changes are driven by real clicks through the delegated handler wiring.
  */
 
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, afterAll } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
@@ -664,4 +664,11 @@ describe("§6.7.4 teardown with the enclosing scope — compiler hosts", () => {
   test.todo("if= region: the body stops firing after the region unmounts and resumes on remount");
   test.todo("component: a `when` in a component body compiles and stops firing when the instance unmounts");
   test.todo("match arm: a `when` in an arm body compiles and stops firing when the arm is swapped out");
+});
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
 });

@@ -1,0 +1,119 @@
+# progress — s449-auth-session-fail-open (append-only)
+
+- 2026-10-02T13:46:37-06:00 start; base 2d6d8cd43 == origin/main; bun install + pretest ok.
+
+## Item 1 — g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth
+
+- VERIFIED LIVE on 2d6d8cd43 (reproducers compiled via CLI):
+  - `<program auth="Required">` / `auth=" required"`: W-ATTR-002 + W-AUTH-LOGIN-MISSING + I-AUTH-REDIRECT-UNRESOLVED, 0 `_scrml_auth_check` in server.js.
+  - `<program auth=${mode}>` / `auth=@mode` / bare `<program auth>`: NO diagnostic at all, 0 auth check.
+  - `<page auth="Required">` / `" required"`: W-ATTR-002 only; `<page auth=${mode}>`: no diagnostic.
+  - HTTP (scrml build + _server.js): `auth="Required"` anon GET /app.html -> 200; control `auth="required"` -> 302 /login.
+- GOVERNING-SENTENCE GATE: found TWO, and they disagree with the brief's fix direction.
+  - §52.13: "The `auth=` attribute on `<page>`, `<program>`, and `<channel>` accepts exactly three literal values".
+  - §52.13.2: "Any literal value not in the recognized set SHALL emit `W-ATTR-002`. … On a `<program>`, an unrecognized value applies no auth gate at all — the program and its pages are public (current behaviour; tracked as `g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth`)." + §34 W-ATTR-002 row severity "Warning".
+  - => making it a compile ERROR contradicts a SHALL (W-ATTR-002 is a Warning). That half is a RULING (below).
+- FIXED (governed half), direction = inert to pass/fail (diagnostic set only):
+  - (a) auth-graph.ts: program gate built only for authConfig.auth in {"required","optional"} (was `!== "none"` over the RAW literal). Governing §52.13.2 "applies no auth gate at all" + §52.13 Login-page requirement ("When `auth=\"required\"` is declared … SHALL emit W-AUTH-LOGIN-MISSING"). Removes the false W-AUTH-LOGIN-MISSING / I-AUTH-REDIRECT-UNRESOLVED.
+  - (b) validators/attribute-allowlist.ts: a NON-literal `auth=` on `<program>`/`<page>` (`${…}`, `@x`, bare) now emits W-ATTR-002 stating the real effect. Governing §52.13 "exactly three literal values" + §52.13.2 "silent acceptance of attribute values that have no compile-time effect is itself a P0 finding". `<channel>` excluded (any auth= gates there).
+- CORPUS (measured, 2204 units: examples/ samples/ conformance/cases/ docs/readme-snippets/ stdlib/, like-for-like snapshot locations): newly failing 0; warn-set changes: the 3 new cases + `conformance/cases/reactive/server-fn-ambient-identity-clean` (+W-ATTR-002 — it is written `<program … auth>` BARE, so it never had auth on; relevant to item 2).
+- LOCI: compute-program-config getAttrValue — HELD (returns null for non-literal so no authConfig); route-inference Step 8a exact-match — HELD (correct per §52.13; not changed); attribute-registry supportsInterpolation:false not enforced — HELD (no consumer reads it; VP-1 skipped non-literals). REFINED: the lint half lives in auth-graph.ts enumerateFile (program gate test), not listed in the locus.
+
+### RULINGS NEEDED (bryan) — R1: unrecognized / non-literal `auth=` on `<program>` and `<page>`
+
+§52.13.2 ratifies warning + public program. Options:
+- (a) RECOMMENDED, fail closed: an `auth=` value that is not one of the three literals (any other literal, `${…}`, `@x`, bare) is a compile ERROR (new code, e.g. `E-AUTH-ATTR-INVALID`), on `<program>` and `<page>`; the build writes no server. Amend §52.13.2 + §34; W-ATTR-002 keeps covering `role:X` only if that stays a recognized-not-implemented shape (or `role:X` also errors).
+- (b) fail closed by semantics: treat any `<program auth=…>` that is present but unrecognized as `"required"` (as `<channel>` already does and as unknown `csrf=` resolves to `"auto"`), keep W-ATTR-002.
+- (c) status quo (current SPEC): warning, public app.
+Worked example:
+```scrml
+<program db="./app.db" auth="Required">   // today: W-ATTR-002, app PUBLIC (anon GET /app.html 200)
+                                           // (a): E-AUTH-ATTR-INVALID, no build
+                                           // (b): gated (302 /login) + W-ATTR-002
+```
+Why (a) over (b): the author's intent behind `auth=@mode` is unknowable at compile time (it might be "none"); an error makes them say it. Corpus cost of (a) measured now: the only corpus program with a non-recognized `<program auth>` is `conformance/cases/reactive/server-fn-ambient-identity-clean` (bare `auth`) — 1 file.
+
+## Item 2 — g-session-ambient-unlowered-trust-boundary-inversion — 2026-10-02T14:06-06:00
+
+- VERIFIED LIVE on 2d6d8cd43. Reproducer (`<program db=…>` + `function saveNote(body)` doing `?{INSERT INTO notes (sid, body) VALUES (${@session.userId}, ${body})}`): compile exit 0, zero diagnostics; server.js emits `INSERT … VALUES (${_scrml_body["session"].userId}, ${body})`. HTTP (scrml build + _server.js): anonymous POST `{"body":"spoofed","session":{"userId":"victim"}}` (+ double-submit token) -> 200; notes row written `{"sid":"victim","body":"spoofed"}`.
+- GOVERNING-SENTENCE GATE:
+  - §6.6.9 exclusions: "`@session` is server-only identity and SHALL NEVER be marshalled from the client — doing so would be a spoofing hole." -> the emitted `_scrml_body["session"]` read violates a SHALL NEVER. The client-body read is unambiguously a bug.
+  - But WHAT `@session.<f>` means server-side is NOT settled: §6.6.9 calls `@session` a "compiler-provided server-side singleton" (§20.5 / §52), while the compiler (type-system `RESERVED_AMBIENT_PROJECTION_NAMES`, emit-expr `_sessionProjectionActive`) and the SPEC's own cross-refs — §20.5 "the client `@session`-projection logout path", §52.15.1 "the `@session` projection precedent, §20.5" — treat `@session` as the CLIENT window projection `{ current, destroy() }`, a different shape from the server `session` object (`userId / isAuth / role / get / set / destroy`). §20.5 defines no server shape for `@session`. => the shape choice is a RULING.
+  - Per brief, the interim fail-closed fix is "reject `@session` in a server context with an error naming `session.<field>`" = NEWLY-REJECTING.
+- CORPUS for the interim reject (measured: grep of every `@session` in examples/ samples/ conformance/cases/ docs/readme-snippets/ stdlib/ — 2 hits): 1 server-context use — `conformance/cases/reactive/server-fn-ambient-identity-clean/case.scrml:4` (the green case that certifies the broken emit; it also writes a BARE `<program … auth>`, so its app has no auth at all). The other hit, `samples/compilation-tests/gauntlet-s19-phase3-operators/phase3-not-reactive-028.scrml:6`, is client markup. NON-ZERO (1) -> per brief this item STOPS -> RULING R2. Not landed.
+
+### RULINGS NEEDED (bryan) — R2: what `@session` means in a server context
+
+The client-body read must become impossible whichever way this goes. Options:
+- (a) RECOMMENDED interim, fail closed: a `@session` read in any server context (a server-escalated fn body, CPS-split or not, including inside `?{}`) is a compile error (new code, e.g. `E-SESSION-AMBIENT-SERVER`) that names the replacement `session.<field>` (§20.5), unless the file declares its own `<session>` cell (then it is an ordinary client cell and E-REACTIVE-003 governs). Migration: 1 file. Rewrite the conformance case to `session.userId`, and make it assert that the emitted artifact does not read `_scrml_body["session"]`.
+- (b) Lower `@session.<f>` server-side to the §20.5 server session (`_scrml_session_bind(_scrml_req._scrml_sess).<f>`), so `@session` and `session` become two spellings of one server accessor. Semantics change, no rejection. But `@session` then has two different shapes: the client `{current, destroy}` and the server `{userId, role, …}`. That confusion is what this gap grew from.
+- (c) Settle the SPEC the other way: `@session` is client-only (the projection), and a server read is an E-REACTIVE-003-class "client value not transported" error that is never marshalled.
+Worked example:
+```scrml
+function saveNote(body: string) {
+    ?{`INSERT INTO notes (sid, body) VALUES (${@session.userId}, ${body})`}.run()
+}
+// today: compiles; writes the attacker's body.session.userId — measured 200 + row sid="victim"
+// (a):   E-SESSION-AMBIENT-SERVER: "`@session` is not available in a server function; use `session.userId` (§20.5)"
+// (b):   writes the server session's userId (NULL when anonymous)
+```
+Why (a): one spelling per meaning. `session.x` already exists, is bound by the server prologue (Direction B, S316) and is the documented §20.5 surface. (a) can later be relaxed to (b) without breaking anyone; going from (b) back to (a) would break code.
+
+## Item 3 — g-session-store-keyed-per-compilation-unit-not-per-program — 2026-10-02T14:10-06:00
+
+- ALREADY CLOSED by `bf3b111dc` (#1062, 2026-09-26); stale `status=open` marker. Verified by execution on 2d6d8cd43: two-unit fixture (index.scrml session.set + pages/admin/panel.scrml reading session.userId), scrml build + _server.js: both units resolve `<dist>/.scrml-sessions.db`; POST login -> 200 + `__Host-scrml_sid`; POST nested whoami with that cookie -> 200 "user=alice". Governing §20.5.1: "The default store location is `.scrml-sessions.db` at the **DIST ROOT** of the build, shared by every emitted server unit regardless of the subdirectory that unit lands in". Existing pin: compiler/tests/integration/session-program-scope-multi-unit.test.js (7 pass). Marker flipped to resolved. Direction: none (docs only).
+- Locus (emit-server.ts `_scrml_session_db_path` emit): HELD as the historical locus.
+
+## Item 4 — g-session-config-bleeds-from-a-sibling-program-and-drops-the-host-prefix — 2026-10-02T14:13-06:00
+
+- ALREADY CLOSED by `75d16f137` (#1094); stale marker. Verified on 2d6d8cd43: B alone -> build + HTTP POST 200 `__Host-scrml_sid … Secure`; A(session-secure="false") + B -> E-MW-008 naming b.scrml, exit 1, no dist/build dir written. Governing §20.5.1 step 3 "With two or more web-application `<program>`s, step 3 answers nothing and `E-MW-008` governs". Locus index.ts:1867 -> REFINED: now :2226 `_readProgramAttr` (returns undefined for a multi-program set) + `session-config-resolve.ts`. Marker flipped to resolved. Direction: none (docs only).
+
+## Item 5 — g-emitted-session-store-opens-sqlite-with-no-busy-timeout-or-wal — 2026-10-02T14:25-06:00
+
+- RELAY REPRODUCED on 2d6d8cd43 (build + _server.js + a second bun:sqlite connection holding BEGIN IMMEDIATE for 400 ms): `journal_mode=delete`; contended login -> 500 after 1 ms; server stderr "database is locked".
+- GOVERNING: no SPEC sentence on WAL / busy_timeout exists (grep: 0). Governing normative ruling = user-voice S385 A1 (user-voice-scrml.md:16276): "WAL + 5s busy-timeout as the safe default". §20.5.1: the store "SHALL be durable (SQLite-backed KV …)". Proceeded on the user-voice ruling + the brief's explicit instruction; flagged as a SPEC follow-up (the ruling never reached the SPEC).
+- FIX: emit-server.ts durable-store IIFE: `PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}` then `PRAGMA journal_mode = WAL`, own try each, before CREATE TABLE. Did NOT touch the in-memory Map line, sqlite-file-target.ts or protect-flow.ts.
+- AFTER: `journal_mode=wal`; contended login -> 200 after 435 ms; no lock error. Cross-page session still works (login 200 -> nested whoami 200 "user=alice").
+- Direction: semantics-changed (a contended write waits up to 5 s instead of failing). Not rejecting — no compile-result change.
+- Test: compiler/tests/integration/session-store-sqlite-defaults.test.js (3 tests; 2 fail on the base emitter). 123 existing session-store tests pass.
+- Locus emit-server.ts `_anySessionWrite` branch: HELD.
+- Side observation (NOT filed, out of scope): `<program auth="optional" csrf="off">` still emits the baseline double-submit gate on its session-write route (a tokenless POST -> 403). It errs in the fail-closed direction, but `csrf="off"` is documented as the opt-out under `auth=` (§40.2). Worth a PA look.
+
+## Item 6 — g-session-destroy-route-has-no-csrf-check — 2026-10-02T14:45-06:00
+
+- VERIFIED LIVE on 2d6d8cd43 (base emitter, `<program auth="required">`, shipped _server.js, seeded in-memory session): forged destroy (cookie only) -> 200, record deleted; wrong token -> 200, deleted.
+- GOVERNING: §40.2 "When a `<program>` declares `auth=` and carries no `csrf=` attribute, the compiler SHALL treat it exactly as if it declared `csrf="auto"`"; §39.2.3 csrf="auto" generates "A server-side validator that checks the `X-CSRF-Token` header on state-mutating routes and returns `403 Forbidden` if the token is missing or invalid".
+- FIX (fits cleanly; both halves): server — destroy handler under csrf="auto" runs the synchronizer check (403 + token cookie) when a record exists; client — `session.destroy()` sends meta/cookie token, retries once on 403 with the planted cookie token. REFINED vs the gap text: retry inlined in the projection (not via `_scrml_fetch_with_csrf_retry`) because the helper is per-file and the build mounts ONE destroy handler app-wide (first module wins).
+- AFTER: forged -> 403 kept; wrong -> 403; correct -> 200 deleted; no-record cookie -> 200; emitted destroy() from a stale-meta page -> 403 then 200, logged out. csrf="off" -> ungated.
+- Direction: semantics-changed (runtime refusal of a token-less destroy). No compile-result change. Did not touch the in-memory Map line.
+- Test: compiler/tests/integration/session-destroy-csrf.test.js (6; 3 fail on base). 154 related tests pass; conformance 1204/1212 + 8 xfail.
+- Known residual (pre-existing, not introduced): which unit's destroy handler is mounted is first-module-wins; in an app mixing csrf="auto" and csrf="off" units the gate depends on module order. The client works either way.
+
+## Final — 2026-10-02T15:05-06:00
+
+- Full gate `bun test compiler/tests/{unit,integration,conformance}`: 27476 pass / 58 skip / 12 todo / 0 fail (27546 tests, 1411 files). `compiler/tests/commands`: 300 pass / 3 skip / 0 fail. Conformance runner: 1204/1212 + 8 xfail.
+- Final corpus vs base (2204 units): newly failing 0; warn-set changes only the 4 listed under item 1.
+- RULINGS NEEDED: R1 (item 1 error escalation), R2 (item 2 @session meaning + interim reject; corpus 1).
+- SPEC follow-ups (not edited — not the agent's authority): §52.13.2 should mention W-ATTR-002 for a NON-literal auth=; the S385 A1 WAL/busy-timeout ruling has no SPEC sentence.
+
+## Fix round (S239 review of fab618461, LAND-WITH-NITS) — 2026-10-02T15:30-06:00
+
+### F1 (MUST FIX, introduced by item 6) — session.destroy() ignored the final status
+- Before: a 403 on the retry still nulled `_scrml_session` and redirected to loginRedirect, so the user believed they were logged out while the server session lived.
+- Now: only `resp.ok` clears the projection and redirects (resolves `true`). On a final non-2xx, or a network rejection, the projection is left intact, the call resolves `false`, and the failure is reported through `_scrml_error_boundary_log('session.destroy', err)`. That is the existing client error surface: it lives in the always-included 'errors' runtime chunk and is the reporter the server-fn call IIFEs already route rejections to. destroy() does not reject, because `onclick=session.destroy()` is wired without a `.catch`; a rejection there would be a silent unhandledrejection.
+- Test: session-destroy-csrf.test.js now 8 tests: 403->200 logs out, direct 200 logs out (1 POST), stubbed 403x2 -> no redirect, projection unchanged, one logged failure naming 403, resolves false. 3 fail on the previous emitter.
+
+### F2 — merged origin/main (ba37b1a10)
+- One conflict, docs/FACTS.md. Resolved by taking main's file and re-running `bun scripts/facts.ts --write`, not by hand (`--check` PASS; the only diff vs main is the three generated figures). known-gaps.md merged clean.
+
+### F3 — filed six review residuals (docs/known-gaps.md, new `## §S449-auth` section, prov=review:S449-auth-review)
+- g-mixed-csrf-build-destroy-gate-depends-on-module-order (LOW; RELAYED from the reviewer)
+- g-auth-attr-empty-string-is-silent-and-public (NIT, filed as sev=LOW since the ledger has no NIT tier; belongs with R1)
+- g-auth-login-lints-fire-for-auth-optional (NIT -> sev=LOW)
+- g-w-attr-002-program-text-wrong-for-nested-program (NIT -> sev=LOW)
+- g-auth-optional-session-destroy-reference-error (MED)
+- g-auth-optional-csrf-off-still-emits-baseline-double-submit (LOW)
+- (b), (c), (d) and (e) were re-executed on ba37b1a10 and all reproduce. Not fixed.
+
+### F4 — CORRECTION to the item-1 entry above
+The item-1 section says "direction = inert to pass/fail (diagnostic set only)". That is wrong about EMITTED output. Removing the auth-graph program gate for an unrecognized literal (`auth="Required"`) also changes what the reachability / client-bundle stages see, so the emitted client bundle changes. Verified on ba37b1a10: `<program auth="Required">` now emits a client.js byte-identical to `<program auth="none">`'s. That is the correct bundle (§52.13.2: "applies no auth gate at all"), but it is an emitted-output change, not diagnostics-only. Pass/fail is still unchanged (0/2204 corpus units newly fail).

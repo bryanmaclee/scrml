@@ -1,0 +1,27 @@
+{
+  "id": "lifecycle-effect-nested-pos",
+  "description": "§6.7.4 an `<effect>` inside another effect's body is E-LIFECYCLE-016 (re-expressed S447).",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4 Syntax, Nesting: \"An `<effect>` — or a retiring keyword `when … changes { }` — inside the body of another `<effect>` is **E-LIFECYCLE-016**\". ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "codes": [
+      "E-LIFECYCLE-016"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": {
+        "codes": [
+          "emitted:E-DG-002=1",
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-MU-001=1",
+          "emitted:E-SCOPE-001=2",
+          "emitted:E-STMT-MISSING-SEMICOLON=1",
+          "missing:E-LIFECYCLE-016"
+        ]
+      }
+    }
+  }
+}

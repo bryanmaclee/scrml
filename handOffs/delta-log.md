@@ -4132,3 +4132,40 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3612] friction · three confident PA diagnoses reversed by execution (browser failures "unflagged" — baselined; post-merge protect failures "real interaction" — pre-existing test-order pollution; §20.8 "already aborts <request>" — router fetch only) + #1191 dispatched against S435 policy; two parallel sessions → every PR conflicts on generated files (resolve/train scripts)
 
 [3613] state · S444 WRAPPED. Open for bryan: dpa-058 B3 (bound top-level scalar lowers attrs? one switch), SPEC "unawaited Promise" softening, dpa-063/064 (S445 lane). S445 LIVE successor (ASUS). Next bootstrap arc: U0 async core.
+
+[3614] rule · S445 (user-voice S445): top-level <program> = no <program>/<page> ancestor (b); route-file programs nested (item 1); no-effect statement is an error (item 2); nested session attrs error (3); constant-key HMAC protected (4); nested app attrs error (5); db= relative to declaring file + ownership-gated create (6); SCRML_DATA_DIR + per-file ownership · → scrml-support/user-voice-scrml.md §S445 · @adv:g-wrapped-program-auth-silently-dropped,g-dev-creates-empty-db-stubs-that-break-later-compiles
+
+[3615] land · S445: #1194 app root build-relative · #1196 declared prose + E-STMT-NO-EFFECT · #1198 protect egress r6 · #1201 program role by ancestor · #1192 bank dpa-063/064 · → docs/changelog.md S445 · @adv:g-app-root-route-prefix-matched-on-absolute-path,g-body-top-invariant-bypassed-by-raw-text-nodes,g-protect-egress-round-6-residuals,g-wrapped-program-auth-silently-dropped
+
+[3616] find · S445 reviews: protect 6c/6d regressions of their own round (toJSON this-leak); writes through `this` leak on base (HIGH, round 7); `scrml serve` binds *:3100 unauthenticated with arbitrary file r/w (HIGH); server fn in `${ lift }` ships to client; named top-level program = public worker · → docs/known-gaps.md §S445 · @adv:g-protect-egress-round-7-residuals,g-serve-listens-all-interfaces-unauthenticated
+
+[3617] friction · two flaky 300-s pre-commit hangs = 81 orphaned bun servers (commands dev tests leak --__dev-child; old review servers), ~3 GB; killed by cwd (deleted) · → hand-off S445 DURABLE
+
+[3618] state · S445 held: dev-db r4 reviewed LAND-WITH-NITS — round 5 owes R4-1 (outside-root owning db ignores SCRML_DATA_DIR) then land + flogence path heads-up; protect round 7; dpa-063/064 COMPLETE ADVISORY, surface to bryan first · → hand-off.md S445 · @adv:g-dev-creates-empty-db-stubs-that-break-later-compiles,dpa-063,dpa-064
+
+[3619] land · S446-peter: #1212 handler stmt lists (lift rows, arm reads, postfix++⏎) · #1209 schema holes fail-closed (E-SCHEMA-014; union removed, """ change reverted) · #1207 loopback default + host shorthand/whitespace refusal · #1217 handler server-write awaited (SSE kept) · #1219 58-file happy-dom hygiene · #1220 §K POSIX-only test (main windows red since c12b52c2)
+
+[3620] escalate · S446-peter → bryan: note 2026-10-01-from-S446-peter-to-bryan-four-holds-one-word-each.md — #1208 Part A stamp, #1211 E-IMPORT-011-outside-root + type=module stamps, #1210 newly-loud class (38 rows); 5 language Qs (commented schema shadow, LIKE tmpl, nested-sequence stale read, headless server bind, E-ATTR-MULTI-STATEMENT)
+
+[3621] find · S446-peter: 58 test files leaked happy-dom fetch/Response into later files — tracking's 5 dev-watcher 'baseline' failures were this, not real; a stable failure set is not evidence
+
+[3622] find · S446-peter: hand-rolled AST walks again — #1210 r5 counted fn decls via body/children only, missed if/else/match-arm blocks (if-chain class); r6 generic walk
+
+[3623] state · S446-peter wrap: #1210 r6 final check in flight at wrap (enum2-rv4); holds deleted q5/s429-match/s432-expr-handler/s432-dev-server/s446-enum-removal (SHAs in hand-off); flogenceP f3b1b28 db paths; ~30 gaps filed §S446-peter
+
+[3624] state · S448-bryan-xps booted as successor to S446-bryan-xps (killed by the 11:21 reboot, unwrapped); took its lane (bryan: "take its lane") · @adv:s446-bootstrap-u0-when-effects
+
+[3625] land · S448: #1213 bootstrap §57 wire codec (update-branch + fresh gate) · #1221 codec r2 N1-N3 (re-review LAND-WITH-NITS) · @adv:s446-bootstrap-uc-codec
+
+[3626] find · XPS 1h45m boot = systemd-tmpfiles deleting ~1M /tmp files; dominant source = the test suite (~4-7k files/hook run, 529 tmpdir test files), second = full worktrees in the /tmp-resident scratchpad (~20.5k files each) → layer 1 preload (wip/s448-test-tmp-root), layer 2 overlay v2.5 rules, layer 3 sudo tmpfiles change owed by bryan · @adv:s448-test-tmp-root
+
+[3627] find · U0 re-review r2: the run-COUNT cap dropped non-looping runs (R2-1, regression) + an <each>-row when growing its own collection overflows the stack from source (R2-2) → round 3 = cycle detection by causal ancestry + per-event backstop; stopped mid-round at wrap (wip/s448-bootstrap-u0-r3 + patch) · @adv:s446-bootstrap-u0-when-effects
+
+[3628] friction · gh pr merge "blocked" for sessions = compound commands escaping the allow rule into the auto-mode classifier; run it standalone. In-repo TMPDIR breaks walk-up tests (import-host). zsh no-word-split made wrong-commit review trees.
+
+[3629] state · S448 WRAPPED (moving to ASUS): in-flight pushed as wip/s448-{bootstrap-u0-r3,test-tmp-root,spec-dpa063,dpa-062-064-results} + patches in scrml-support/handOffs/s448-wip-patches/; dpa-063 SPEC text awaits bryan's veto of 10 PA readings
+
+[3630] rule · S447 bryan: when → <effect deps=[…]> outside-world only (no reactive writes; cascades impossible by construction) + reset-on= (engines checked vs rule=) + write requests skip mount / server-origin baseline (3c); §55 Edge A reversed + compiler submit gate; opener keywords outside (let <x/>); §7.3.4 arg checks; dpa-063 readings confirmed; UFCS parked; TS tooling carve-out + no impl#1 semantics work; inbox branch in every repo → user-voice §S447 · @adv:dpa-058,dpa-063
+[3631] land · S447: #1215 #1216 #1218 #1222 #1225 #1226 #1227 #1228 #1229 #1230 (dev-db data root; validity SPEC; protect r7+r8; call checks; test temp root + dev orphans; dpa-063; <effect>; self-host v1 retired −22.4k) → docs/changelog.md S447
+[3632] friction · protect r8 introduced 4 HIGH leaks through precision narrowings, all caught at review; a possibly-accidental "your recs on all of them" accept bundled 5 items → re-surfaced individually; post-commit hook made commits 10-15 min → backgrounded → hand-off.md S447 DURABLE
+[3633] state · S447 WRAPPED. Carried: bootstrap U0 re-scope to <effect> (branch wip/s447-bootstrap-u0-r3 @9835b80a4); #1214 held for the bootstrap parser; on mount DD in flight; native-parser fate (bryan call); doorbell rollout (flogence); post-commit bg + coercion carve-out UNCONFIRMED → hand-off.md S447

@@ -1,0 +1,42 @@
+{
+  "id": "lifecycle-reset-on-resets-on-trigger-rt",
+  "description": "§6.8.4 runtime: a write to a `reset-on=` trigger resets the cell to its initializer (the S447 search page: next, next, type → page 1).",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "rationale": "§6.8.4 rule 1: \"When any listed cell changes … the runtime SHALL perform `reset(@self)`: … re-evaluate the cell's initializer … and write the result.\" Rule 4: the reset is applied in the same flush as the triggering write, before readers. #next bumps @page twice (3); #type writes @query, which resets @page to 1. ruling:user-voice-scrml.md S447 \"3b: `reset-on=` IS allowed on engine cells, checked against `rule=`\" — \"the new rec for engine reset, yes.\"",
+  "expect": {
+    "input": [
+      {
+        "click": "#next"
+      },
+      {
+        "click": "#next"
+      },
+      {
+        "click": "#type"
+      }
+    ],
+    "state": {
+      "query": "x",
+      "page": 1
+    },
+    "domAnchored": [
+      {
+        "selector": "#page",
+        "text": "1"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": {
+        "codes": [
+          "emitted:E-STATE-UNDECLARED=3",
+          "emitted:E-UNQUOTED-DISPLAY-TEXT=1"
+        ],
+        "runtime": "sha256:6d9ecd390f4b58b5"
+      }
+    }
+  }
+}

@@ -24,6 +24,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
+import { tmpdir } from "os";
 
 // The adopter's exact repro (GH #174).
 const REPRO_SRC = `<program>
@@ -35,7 +36,7 @@ const REPRO_SRC = `<program>
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-i174-formvalue");
+const tmpRoot = resolve(tmpdir(), "scrml-i174-formvalue");
 
 function compileToOutputs(source, baseName = "i174-formvalue") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

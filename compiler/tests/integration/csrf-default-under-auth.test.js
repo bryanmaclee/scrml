@@ -63,7 +63,10 @@ function compileVariant(name, attrs) {
     dir,
     outDir,
     errors: (result.errors ?? []).filter((e) => !e.code?.startsWith("W-") && !e.code?.startsWith("I-")),
-    serverJs: read("app.server.js"),
+    // §47.14 (S445) — the database handle records the db's path relative to the project
+    // root, which embeds this variant's own directory name; mask it so variants compiled
+    // in different directories compare on what the attribute changes.
+    serverJs: (read("app.server.js") ?? "").replace(/(_scrml_sqlite_(?:owned|referenced)\()"[^"]*"/g, '$1"<db>"'),
     clientJs: read("app.client.js"),
     html: read("app.html"),
   };
@@ -78,7 +81,10 @@ const PROBE = `
 import { Database } from "bun:sqlite";
 const outDir = process.argv[2];
 process.chdir(outDir);
-const db = new Database("c.db"); db.run("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)"); db.close();
+// db="./c.db" names the file beside app.scrml (s445: the declaring file's
+// directory, i.e. outDir/..). A <schema> does not create tables at runtime
+// (migration does), so the table is seeded here.
+const db = new Database("../c.db"); db.run("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)"); db.close();
 const store = (globalThis.__scrml_session_store ??= new Map());
 store.set("sid-alice", { userId: 1, role: "user" });
 const mod = await import(outDir + "/app.server.js");
@@ -94,7 +100,7 @@ const send = () => fetch(url, { method: "POST", headers: { "Content-Type": "appl
 let c = await send();
 const clientFirst = c.status;
 if (c.status === 403) { tok = ((c.headers.get("set-cookie") || "").match(/scrml_csrf=([^;]+)/) || [])[1] || ""; c = await send(); }
-const rows = new Database("c.db").query("SELECT body FROM notes ORDER BY id").all().map((r) => r.body);
+const rows = new Database("../c.db").query("SELECT body FROM notes ORDER BY id").all().map((r) => r.body);
 server.stop(true);
 console.log(JSON.stringify({ forged: forged.status, clientFirst, clientFinal: c.status, rows }));
 `;
@@ -262,7 +268,7 @@ describe("§52.13 — the csrf=\"auto\" compose route is a document request and 
 const RETRY_PROBE = `
 const [outDir, mode] = process.argv.slice(2);
 process.chdir(outDir);
-{ const { Database } = await import("bun:sqlite"); const d = new Database("c.db"); d.run("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)"); d.close(); }
+{ const { Database } = await import("bun:sqlite"); const d = new Database("../c.db"); d.run("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)"); d.close(); }
 const store = (globalThis.__scrml_session_store ??= new Map());
 store.set("sid-bob", { userId: 2, role: "user" });
 const mod = await import(outDir + "/app.server.js");

@@ -427,3 +427,10 @@ describe("Bug 18 — scrml:NAME client imports do not emit as bare ES specifiers
     expect(() => new Function(clientJs)).not.toThrow();
   });
 });
+
+// DOM-global hygiene: happy-dom's GlobalRegistrator (registered above, or by the conformance adapter's
+// run()) replaces Bun's native Response/Request/Headers/fetch/URL/setTimeout/... on globalThis.
+// Unregister at file end so every later file in the same `bun test` process sees Bun's natives.
+afterAll(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+});

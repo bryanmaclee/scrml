@@ -1,0 +1,6 @@
+${ const mode = "required" }
+<program>
+<page auth=${mode}>
+<p>page</p>
+</page>
+</program>

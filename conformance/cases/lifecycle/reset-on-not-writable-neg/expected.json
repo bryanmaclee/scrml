@@ -1,0 +1,12 @@
+{
+  "id": "lifecycle-reset-on-not-writable-neg",
+  "description": "§6.8.4 negative twin: a writable (legacy-form, all-permissions) cell admits the reset — NOT E-RESET-ON-NOT-WRITABLE.",
+  "language-version": "1.0",
+  "spec": "§6.8.4",
+  "rationale": "§6.8.4 rule 5: legal on \"a legacy-form cell (§6.2), which carries the transitional all-permissions grant (§66.12.4)\". ruling:user-voice-scrml.md S447 \"3b: `reset-on=` IS allowed on engine cells, checked against `rule=`\" — \"the new rec for engine reset, yes.\"",
+  "expect": {
+    "notCodes": [
+      "E-RESET-ON-NOT-WRITABLE"
+    ]
+  }
+}

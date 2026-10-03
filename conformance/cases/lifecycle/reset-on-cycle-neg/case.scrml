@@ -1,0 +1,7 @@
+// §6.8.4 rule 3 — a chain.
+<program>
+  <c> = 0
+  <b reset-on=[@c]> = 0
+  <a reset-on=[@b]> = 0
+  <p>${@a} ${@b} ${@c}</p>
+</program>

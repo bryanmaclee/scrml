@@ -84,10 +84,14 @@ import { collectChannelFunctionMap, collectChannelCellMap, collectChannelAttrHan
 import { buildBodyDG } from "./body-dg-builder.ts";
 import { planMultiBatchCPS } from "./cps-batch-planner.ts";
 import { isToolProgram, findToolMainFn, findTopLevelProgramNode } from "./tool-program.ts";
+import { findTopLevelProgram, programRoleOptionsOf } from "./program-role.ts";
 import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 import { countUnitProgramNodes } from "./codegen/session-config-resolve.ts";
 import { effectiveCsrfUnderAuth } from "./compute-program-config.ts";
 import { getNodes } from "./codegen/collect.ts";
+import { fileScopeDeclaresSessionCell, fileNodesOf } from "./codegen/server-session-guard.ts";
+import { rewriteCodeSegments } from "./codegen/code-segments.ts";
+import { liveSqlInterpolations } from "./codegen/sql-lex.ts";
 // §12.4 client-pin shadow (S263 review) — reuse the tested destructuring
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
 // direct deps do not import route-inference.
@@ -2454,6 +2458,140 @@ function detectServerFreeClientCellReads(
   return out;
 }
 
+/**
+ * Raw-text fields that hold UNPARSED scrml expression text on some AST nodes —
+ * scanned only when the node carries no parsed counterpart for the same field
+ * (`init`/`initExpr`, `expr`/`exprNode`, `value`/`valueExpr`, `result`/
+ * `resultExpr`, `condition`/`conditionExpr`), so a read is never reported twice.
+ */
+const SESSION_RAW_TEXT_FIELDS: ReadonlyArray<[string, readonly string[]]> = [
+  ["init", ["initExpr"]],
+  ["expr", ["exprNode", "exprExpr"]],
+  ["value", ["valueExpr"]],
+  ["result", ["resultExpr"]],
+  ["condition", ["conditionExpr", "condExpr"]],
+  ["bodyRaw", []],
+];
+
+/**
+ * §6.6.9 / §20.5 (S449 ruling item 1) — every `@session` read in a SERVER
+ * context, for E-SESSION-AMBIENT-SERVER. Returns one entry per read (in order)
+ * with the member it names, if any (`@session.userId` → `"userId"`, a bare
+ * `@session` → null).
+ *
+ * Why the read is refused rather than lowered: every server lowering of an
+ * `@name` read produces `_scrml_body["name"]` — the CLIENT request body — so a
+ * server `@session.userId` took its value from whatever the caller sent
+ * (MEASURED S449: `{"session":{"userId":"victim"}}` wrote a row as "victim").
+ * §6.6.9: "`@session` is server-only identity and SHALL NEVER be marshalled
+ * from the client". The server's own session is the §20.5 `session` object.
+ *
+ * Surfaces (verified against real parser output):
+ *   - ExprNode `{kind:"ident", name:"@session"}` anywhere by full-node recursion
+ *     (match arms, conditions, call arguments, lambda bodies…);
+ *   - the LIVE `${…}` interpolations of a `sql` node's query text (`?{}` keeps
+ *     them as text) — `liveSqlInterpolations`, so `${…}` inside SQL strings or
+ *     comments is not a read;
+ *   - a template literal (`lit` with `litType: "template"` keeps its raw text) —
+ *     the interpolations, nested templates included (S449 review F3);
+ *   - a member assignment `@session.userId = …` (`reactive-nested-assign`,
+ *     target "session" — S449 review F3);
+ *   - raw-text expression fields with no parsed counterpart (see
+ *     `SESSION_RAW_TEXT_FIELDS`).
+ * Raw text is scanned with `detectServerAmbientSessionReadsInText` (comment-,
+ * string- and template-aware). Unlike `detectServerFreeClientCellReads` this
+ * walk DOES descend into nested `function-decl` / lambda bodies: they are
+ * emitted inside the server body, so a read there is a server read too.
+ * Whatever this misses is refused by the codegen backstop (server-session-guard.ts).
+ */
+export function detectServerAmbientSessionReads(
+  body: unknown,
+): Array<{ member: string | null; span: Span | undefined; anchor: Span | undefined }> {
+  const out: Array<{ member: string | null; span: Span | undefined; anchor: Span | undefined }> = [];
+  const visited = new WeakSet<object>();
+  // `anchor` = the nearest enclosing span whose line/col were really computed
+  // (statement spans). Expression spans carry a placeholder 1:1, and an
+  // expression re-parsed from a substring carries offsets relative to it.
+  let anchor: Span | undefined;
+  const realLine = (sp: any): boolean => !!sp && typeof sp.line === "number" && !(sp.line === 1 && sp.col === 1);
+  const scanText = (text: string, span: Span | undefined): void => {
+    for (const r of detectServerAmbientSessionReadsInText(text)) out.push({ member: r.member, span, anchor });
+  };
+  const visit = (node: any, inherited: Span | undefined, parent: any): void => {
+    if (!node || typeof node !== "object" || visited.has(node)) return;
+    visited.add(node);
+    const sp: Span | undefined = (node.span && typeof node.span === "object") ? node.span : inherited;
+    const savedAnchor = anchor;
+    if (realLine(node.span)) anchor = node.span;
+    if (node.kind === "ident" && node.name === "@session") {
+      const member = parent && parent.kind === "member" && parent.object === node
+        && typeof parent.property === "string" ? parent.property as string : null;
+      out.push({ member, span: sp, anchor });
+    }
+    if (node.kind === "sql" && typeof node.query === "string") {
+      for (const interp of liveSqlInterpolations(node.query)) scanText(interp.expr, sp);
+    } else if (node.kind === "lit") {
+      if (node.litType === "template" && typeof node.raw === "string") scanText(node.raw, sp);
+    } else if (node.kind === "reactive-nested-assign" && node.target === "session") {
+      out.push({ member: Array.isArray(node.path) && typeof node.path[0] === "string" ? node.path[0] : null, span: sp, anchor });
+    } else if (node.kind !== "comment" && node.kind !== "text") {
+      for (const [field, parsed] of SESSION_RAW_TEXT_FIELDS) {
+        const v = node[field];
+        if (typeof v !== "string" || !v.includes("@session")) continue;
+        if (parsed.some((pf) => node[pf] && typeof node[pf] === "object")) continue;
+        scanText(v, sp);
+      }
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "span") continue;
+      const val = node[key];
+      if (Array.isArray(val)) { for (const c of val) visit(c, sp, node); }
+      else if (val && typeof val === "object") visit(val, sp, node);
+    }
+    anchor = savedAnchor;
+  };
+  if (Array.isArray(body)) {
+    for (const stmt of body) visit(stmt, (stmt && typeof stmt === "object") ? (stmt as any).span : undefined, null);
+  } else {
+    visit(body, undefined, null);
+  }
+  return out;
+}
+
+/**
+ * `@session` reads in RAW scrml expression text — an `<endpoint>` arm body
+ * (`bodyRaw`, §61), a template literal's raw text, a `?{}` interpolation. Uses
+ * the shared comment / string / regex / template-aware segmenter
+ * (`rewriteCodeSegments`, code-segments.ts): `'…'` / `"…"` strings, `//` and
+ * `/* *\/` comments and template STATIC text are not code, while `${…}`
+ * interpolations (nested templates included) are (S449 review F5 — the earlier
+ * quote-blanker false-fired inside comments and template text, and an apostrophe
+ * in a comment could hide a real read).
+ */
+export function detectServerAmbientSessionReadsInText(text: string): Array<{ member: string | null }> {
+  const out: Array<{ member: string | null }> = [];
+  if (typeof text !== "string" || !text.includes("@session")) return out;
+  rewriteCodeSegments(text, (code) => {
+    const re = /(?<![\w$@.])@session\b(?:\s*\??\.\s*([A-Za-z_$][A-Za-z0-9_$]*))?/g;
+    let r: RegExpExecArray | null;
+    while ((r = re.exec(code)) !== null) out.push({ member: r[1] ?? null });
+    return code;
+  });
+  return out;
+}
+
+/** The author-facing E-SESSION-AMBIENT-SERVER message for one server `@session` read. */
+export function sessionAmbientServerMessage(where: string, member: string | null): string {
+  const fix = member ? `\`session.${member}\`` : "`session.userId` / `session.role` / `session.isAuth` / `session.get(key)`";
+  const read = member ? `\`@session.${member}\`` : "`@session`";
+  return `E-SESSION-AMBIENT-SERVER: ${where} reads ${read}, but \`@session\` is not read on the ` +
+    `server. \`@session\` is the client-side session projection (§20.5); on the server it ` +
+    `would be taken from the request body the client sends, so any caller could claim any ` +
+    `identity — \`@session\` is server-only identity and is never marshalled from the client ` +
+    `(§6.6.9). Use the server's own session object instead: ${fix} (§20.5). ` +
+    `(\`session\` is available in a web-app server function body; see §20.5.1 for where it is not.)`;
+}
+
 // ---------------------------------------------------------------------------
 // §12.4 E-ROUTE-002 — client-pin body scan.
 // ---------------------------------------------------------------------------
@@ -4386,8 +4524,8 @@ function readStringAttrOf(attrs: any[] | undefined, name: string): string | null
 
 /**
  * Every literal `auth=` declaration that governs this file's route, in document
- * order: the FIRST top-level `<program>` (the only one compute-program-config
- * reads) and every `<page auth=>`. Nested `<program>`s are skipped — their `auth=`
+ * order: the file's top-level `<program>` (program-role.ts — the only one
+ * compute-program-config reads) and every `<page auth=>`. Nested `<program>`s are skipped — their `auth=`
  * is E-PROGRAM-NESTED-AUTH, not a declaration of this route.
  */
 function collectFileAuthDecls(fileAST: FileAST): Array<{ site: "program" | "page"; value: string; node: any; line: number; col: number }> {
@@ -4399,31 +4537,33 @@ function collectFileAuthDecls(fileAST: FileAST): Array<{ site: "program" | "page
     const sp = (a && a.span) || node.span || {};
     return { line: sp.line ?? 0, col: sp.col ?? 0 };
   };
-  let firstProgramSeen = false;
-  const walk = (ns: any[] | undefined, topLevel: boolean): void => {
+  // The file's top-level `<program>` by the ONE shared role definition
+  // (program-role.ts; §4.12, S445): no `<program>` / `<page>` ancestor, whatever
+  // markup wraps it — the same node compute-program-config reads.
+  const topProgram = findTopLevelProgram(nodes, programRoleOptionsOf(fileAST));
+  const walk = (ns: any[] | undefined): void => {
     if (!Array.isArray(ns)) return;
     for (const node of ns) {
       if (!node || node.kind !== "markup") continue;
       if (node.tag === "program") {
-        // Only the first top-level `<program>`'s auth= is this route's program
+        // Only the top-level `<program>`'s auth= is this route's program
         // declaration; a nested / second top-level one is not recorded (its
         // children are still walked so a `<page auth=>` inside is never missed).
-        if (topLevel && !firstProgramSeen) {
-          firstProgramSeen = true;
+        if (node === topProgram) {
           const v = readStringAttrOf(node.attrs, "auth");
           if (v) out.push({ site: "program", value: v, node, ...at(node) });
         }
-        walk(node.children, false);
+        walk(node.children);
         continue;
       }
       if (node.tag === "page") {
         const v = readStringAttrOf(node.attrs, "auth");
         if (v) out.push({ site: "page", value: v, node, ...at(node) });
       }
-      walk(node.children, false);
+      walk(node.children);
     }
   };
-  walk(nodes, true);
+  walk(nodes);
   return out;
 }
 
@@ -5988,12 +6128,120 @@ export function runRI(input: RIInput): RIOutput {
   // Step 6: Finalize RouteMap entries, apply CPS analysis, collect errors.
   // ------------------------------------------------------------------
 
+  // E-SESSION-AMBIENT-SERVER de-dup key set (a nested function can be both its
+  // own record and part of its server parent's body).
+  const _sessionAmbientSeen = new Set<string>();
+  // Only a FILE-SCOPE `<session>` cell owns the name (S449 review F2) — a
+  // component-local one does not: a top-level server read never resolves to it.
+  const _fileScopeSessionCell = new Map<string, boolean>();
+  for (const fileAST of files) {
+    _fileScopeSessionCell.set(fileAST.filePath, fileScopeDeclaresSessionCell(fileNodesOf(fileAST)));
+  }
+  // Expression spans carry byte offsets but no line/col; resolve them against the
+  // file source (CE stamps `_sourceText`) so the diagnostic points at the read
+  // rather than 1:1 (S449 review F3).
+  const _sessionSourceByFile = new Map<string, string>();
+  for (const fileAST of files) {
+    const src = (fileAST as any)._sourceText ?? (fileAST as any).ast?._sourceText;
+    if (typeof src === "string") _sessionSourceByFile.set(fileAST.filePath, src);
+  }
+  const sessionSpanWithLine = (span: Span | undefined, anchor: Span | undefined, filePath: string, fallback: Span): Span => {
+    const sp = span as any;
+    const anc = (anchor ?? fallback) as any;
+    if (sp && typeof sp.line === "number" && !(sp.line === 1 && sp.col === 1)) return sp as Span;
+    const src = _sessionSourceByFile.get(filePath);
+    // Trust the expression's byte offset only when it falls inside its enclosing
+    // statement (an expression re-parsed from a substring has relative offsets).
+    const inside = sp && typeof sp.start === "number" && anc && typeof anc.start === "number"
+      && typeof anc.end === "number" && sp.start >= anc.start && sp.start <= anc.end;
+    if (!inside || typeof src !== "string" || sp.start > src.length) return (anc ?? sp) as Span;
+    let line = 1, lineStart = 0;
+    for (let i = 0; i < sp.start; i++) if (src.charCodeAt(i) === 10) { line++; lineStart = i + 1; }
+    return { ...sp, file: sp.file ?? filePath, line, col: sp.start - lineStart + 1 } as Span;
+  };
+  /** Report every `@session` read in `stmts` — the SERVER part of a function body. */
+  const reportServerSessionReads = (record: AnalysisRecord, stmts: unknown[]): void => {
+    if (_fileScopeSessionCell.get(record.filePath) === true) return;
+    const _fnName = record.fnNode.name ?? "<anonymous>";
+    for (const _r of detectServerAmbientSessionReads(stmts)) {
+      const _sp = sessionSpanWithLine(_r.span, _r.anchor, record.filePath, record.fnNode.span as Span);
+      const _key = `${record.filePath}:${_sp?.start ?? -1}:${_r.member ?? ""}`;
+      if (_sessionAmbientSeen.has(_key)) continue;
+      _sessionAmbientSeen.add(_key);
+      errors.push(new RIError(
+        "E-SESSION-AMBIENT-SERVER",
+        sessionAmbientServerMessage(`Server function \`${_fnName}\``, _r.member),
+        _sp,
+      ));
+    }
+  };
+  // §6.6.9 / §20.5 (S449 ruling item 1) — the other server context that can
+  // name `@session`: a `<cell server> = ?{…}` declaration, whose inline query
+  // runs on the server (§52.6.5 Pattern C). Same refusal, same reason.
+  for (const fileAST of files) {
+    if (_fileScopeSessionCell.get(fileAST.filePath) === true) continue;
+    const nodes: any[] = (fileAST as any).nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []);
+    const visitDecls = (list: any[]): void => {
+      if (!Array.isArray(list)) return;
+      for (const node of list) {
+        if (!node || typeof node !== "object") continue;
+        if (node.kind === "state-decl" && node.isServer === true && node.sqlNode) {
+          for (const _r of detectServerAmbientSessionReads([node.sqlNode])) {
+            const _sp = sessionSpanWithLine(_r.span, _r.anchor, fileAST.filePath, node.span as Span);
+            const _key = `${fileAST.filePath}:${_sp?.start ?? -1}:${_r.member ?? ""}`;
+            if (_sessionAmbientSeen.has(_key)) continue;
+            _sessionAmbientSeen.add(_key);
+            errors.push(new RIError(
+              "E-SESSION-AMBIENT-SERVER",
+              sessionAmbientServerMessage(`The server cell \`<${node.name} server>\`'s load query`, _r.member),
+              _sp,
+            ));
+          }
+        }
+        // An `<endpoint>` arm body (§61) runs on the server; it is kept as raw text.
+        if (node.kind === "endpoint-decl" && Array.isArray(node.arms)) {
+          for (const arm of node.arms) {
+            if (!arm || typeof arm.bodyRaw !== "string") continue;
+            for (const _r of detectServerAmbientSessionReadsInText(arm.bodyRaw)) {
+              const _start = typeof arm.spanStart === "number" ? arm.spanStart : (node.span?.start ?? -1);
+              const _key = `${fileAST.filePath}:endpoint:${_start}:${_r.member ?? ""}`;
+              if (_sessionAmbientSeen.has(_key)) continue;
+              _sessionAmbientSeen.add(_key);
+              const _sp = typeof arm.spanStart === "number"
+                ? sessionSpanWithLine({ file: fileAST.filePath, start: arm.spanStart, end: typeof arm.spanEnd === "number" ? arm.spanEnd : arm.spanStart } as unknown as Span, node.span as Span, fileAST.filePath, node.span as Span)
+                : node.span as Span;
+              errors.push(new RIError(
+                "E-SESSION-AMBIENT-SERVER",
+                sessionAmbientServerMessage(
+                  `The \`<endpoint path="${node.path ?? ""}">\` arm \`${arm.variantName ?? (arm.isWildcard ? "_" : "?")}\``,
+                  _r.member,
+                ),
+                _sp,
+              ));
+            }
+          }
+        }
+        if (node.kind === "logic" && Array.isArray(node.body)) visitDecls(node.body);
+        if (Array.isArray(node.children)) visitDecls(node.children);
+      }
+    };
+    visitDecls(nodes);
+  }
+
   for (const [fnNodeId, record] of analysisMap) {
     // Accumulate E-ROUTE-001 warnings (with severity propagated).
     for (const w of record.warnings) {
       const riErr = new RIError(w.code, w.message, w.span);
       if (w.severity) riErr.severity = w.severity;
       errors.push(riErr);
+    }
+
+    // §6.6.9 / §20.5 (S449 ruling item 1) — E-SESSION-AMBIENT-SERVER for a
+    // handle() middleware body (wholly server; it leaves this loop just below).
+    // Every other function is checked after its CPS split is known (see
+    // "E-SESSION-AMBIENT-SERVER — the server part" further down).
+    if ((record.fnNode as any).isHandleEscapeHatch === true) {
+      reportServerSessionReads(record, Array.isArray(record.fnNode.body) ? record.fnNode.body : []);
     }
 
     // §39.3: handle() escape hatch — treat as middleware boundary.
@@ -6286,6 +6534,25 @@ export function runRI(input: RIInput): RIOutput {
       }
     }
 
+    // §6.6.9 / §20.5 (S449 ruling item 1) — E-SESSION-AMBIENT-SERVER: an
+    // `@session` read in a SERVER context. Every server lowering of `@name` reads
+    // the CLIENT request body, so a server `@session` was client-controlled
+    // identity. Refused here, before codegen, so no lowering path can emit it
+    // (codegen keeps a fail-closed E-INTERNAL backstop). The server context of a
+    // server-placed function is its whole body — EXCEPT a CPS-split function,
+    // whose client statements run in the browser, where `@session` is the §20.5
+    // projection (S449 review F1): only the statements of its server batches are
+    // scanned (`serverStmtIndices`, which also holds the reactive-server
+    // statements whose initializer runs on the server). A file-scope `<session>`
+    // cell owns the name (E-REACTIVE-003 / the CPS marshal govern it).
+    if (isServer) {
+      const _body: unknown[] = Array.isArray(record.fnNode.body) ? record.fnNode.body : [];
+      const _serverPart = cpsSplit
+        ? cpsSplit.serverStmtIndices.map((i) => _body[i]).filter((x) => x != null)
+        : _body;
+      reportServerSessionReads(record, _serverPart);
+    }
+
     // Build the FunctionRoute entry.
     // Bug 2b (channel-codegen-fixes-2026-06-12): an `onserver:*` handler is
     // server-side but invoked from the WS `_scrml_ws_handlers` path, NOT an
@@ -6408,6 +6675,32 @@ export function runRI(input: RIInput): RIOutput {
   // it was inferred from (never a route file of its own project).
   const rootCandidates = buildRootRes.candidates;
   const appRoot: FileAST | null = rootCandidates.length === 1 ? rootCandidates[0] : null;
+
+  // S445 re-review nit (a) — a GIVEN build root that does not contain an application
+  // `<program>` file of the build. Route files are classified relative to the given
+  // root only, so a `<program>` file outside it is neither a route file nor inside
+  // the application the root describes, and a page under the root may stop
+  // inheriting that program's gate (measured: `buildRoot="<src>/pages"` with the app
+  // at `<src>/app.scrml` — a member page holding a wrapped worker program became a
+  // second application and served its server fn anonymously). Say so; the root is
+  // the caller's configuration, so this warns rather than guessing a different root.
+  if (buildRootRes.origin === "given" && buildRoot !== "") {
+    for (const f of rootCandidates) {
+      const norm = f.filePath.replace(/\\/g, "/");
+      if (norm.startsWith(buildRoot + "/")) continue;
+      const w = new RIError(
+        "W-BUILD-ROOT-EXCLUDES-PROGRAM",
+        `W-BUILD-ROOT-EXCLUDES-PROGRAM: this file declares a top-level <program> but lies outside the ` +
+        `build root the compiler was given ("${buildRoot}"). Route files (pages/, routes/) are classified ` +
+        `relative to that root only, so pages under it may not inherit this program's auth= gate — they ` +
+        `can be served without authentication. Give the build root that contains the application's entry ` +
+        `file (compileScrml's buildRoot; §40.8 "The build root").`,
+        { file: f.filePath, start: 0, end: 0, line: 1, col: 1 } as any,
+      );
+      w.severity = "warning";
+      errors.push(w);
+    }
+  }
 
   // The redirect target of a page scope (S443 rounds 2-3): `loginRedirect=` is not a
   // `<page>` attribute (E-PAGE-INVALID-ATTR), so it comes from the application's
@@ -6613,8 +6906,10 @@ export function runRI(input: RIInput): RIOutput {
     : (rootCandidates.map(cfgOf).find((c: any) => c && c.auth === "required") ?? null);
   // S443 round 3 (review F1): only a RECOGNIZED literal (§52.13's three values) is an
   // auth declaration. `auth="Required"`, `"requird"`, `" required"`, `"off"`,
-  // `auth=${…}` / `auth=@x` declare nothing (W-ATTR-002 says so) and the page
-  // inherits — fail closed, like §40.2's unknown csrf= literal resolving to "auto".
+  // `auth=${…}` / `auth=@x` declare nothing and the page inherits — fail closed, like
+  // §40.2's unknown csrf= literal resolving to "auto". Since S449 (ruling item 4) every
+  // such value is ALSO E-AUTH-ATTR-INVALID (VP-1), which refuses the build; this
+  // inheritance is the defense-in-depth floor under that error, not a supported shape.
   const RECOGNIZED_AUTH = new Set(["required", "optional", "none"]);
   // An unregistered member page of the application that declares no recognized
   // `auth=` of its own — the unit 8c gates (and, when nothing is inherited, the
@@ -7088,6 +7383,40 @@ function makeRouteClassifier(res: BuildRootResolution): (filePath: string) => { 
       return { idx: root.length - rootName.length - 1, prefix: "/" + rootName + "/" };
     }
     return null;
+  };
+}
+
+/**
+ * S445 item 1 — the build facts `program-role.ts#stampImpliedProgramAncestors`
+ * needs: does an application program exist, and which files are its route files.
+ * Decided by THIS file's build-root resolution (`resolveBuildRoot` +
+ * `makeRouteClassifier`), the same rule Step 8 uses, so the implied ancestor and
+ * the app-root identification cannot disagree. `api.js` calls it once, after
+ * parsing and before PRECG, over the parsed FileASTs (no file is stamped yet, so
+ * every `<program>` has its structural role here).
+ *
+ * An application program exists when a candidate is a real application file —
+ * the inferred/given entry, or a candidate that is not itself a route file.
+ * `origin: "none"` with only route-file candidates (the legacy all-`<program>`
+ * `routes/` set, where the shallowest route files are the fallback candidates)
+ * has NO application program, so nothing becomes nested there.
+ */
+export function programRoleBuildFacts(
+  files: readonly FileAST[],
+  givenRoot?: string,
+): { applicationExists: boolean; isRouteFile: (fileAST: unknown) => boolean } {
+  const res = resolveBuildRoot(files, givenRoot);
+  const classify = makeRouteClassifier(res);
+  const appFiles = new Set<FileAST>(
+    res.candidates.filter((f) => f === res.entry || classify(f.filePath) === null),
+  );
+  return {
+    applicationExists: appFiles.size > 0,
+    isRouteFile: (fileAST: unknown) => {
+      const f = fileAST as FileAST;
+      if (!f || typeof f.filePath !== "string" || appFiles.has(f)) return false;
+      return classify(f.filePath) !== null;
+    },
   };
 }
 

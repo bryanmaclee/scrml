@@ -1,0 +1,9 @@
+// §6.7.4 — one dependency is enough.
+<program>
+  <n> = 0
+  function beacon(v) {
+    return v
+  }
+  <effect deps=[@n]>${ beacon(@n) }</>
+  <p>${@n}</p>
+</program>

@@ -1,0 +1,12 @@
+// §6.7.4 rule 4 — a call through a local.
+<program>
+  <n> = 0
+  function beacon(v) {
+    return v
+  }
+  <effect deps=[@n]>${
+    const g = beacon
+    g(@n)
+  }</>
+  <p>${@n}</p>
+</program>

@@ -39,6 +39,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // A dispatched <match> under an if=, with a non-delegable handler and an
 // interpolation inside the arm so §4 can measure both hazards.
@@ -65,7 +66,7 @@ const MATCH_UNDER_IF = `<page>
 // Seed-true variant — the mount happens inside _scrml_boot's own nav_rewire pass.
 const MATCH_UNDER_IF_OPEN = MATCH_UNDER_IF.replace("<gateOn> = false", "<gateOn> = true");
 
-const tmpRoot = resolve("/tmp", "scrml-dispatched-mount");
+const tmpRoot = resolve(tmpdir(), "scrml-dispatched-mount");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
