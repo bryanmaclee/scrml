@@ -43,6 +43,8 @@ function stubFetch() {
     try {
       await new Promise((r) => setTimeout(r, 5));
       const p = String(path);
+      // A transport failure (not a `!` envelope): the call rejects.
+      if (/netfail/.test(p)) throw new TypeError("network down");
       let v = 0;
       if (/save2/.test(p)) v = 20;
       else if (/save/.test(p)) v = 10;
@@ -142,6 +144,7 @@ const PRE = `  type Doc:enum = { Empty, Note(note: string) }
   <rows> = [{ id: 1 }]
   server function save() { return 10 }
   server function save2() { return 20 }
+  server function netfail() { return 1 }
   server function* ticks() {
     let i = 0
     while (i < 3) {
@@ -266,5 +269,70 @@ describe("S450 — emit pins", () => {
     const app = mount(program("top level", "setTimeout(() => { @x = save() }, 0)"));
     expect(app.errs).toEqual([]);
     expect(app.clientJs).toContain('(async () => _scrml_cs_reactive_set("x", await _scrml_fetch_save_');
+  });
+});
+
+// S450 review F1 (DISCLOSED, not fixed — g-handler-level-rejection-bypasses-scrml-logging,
+// widened by S450). A newly-awaited write whose server call REJECTS (transport failure,
+// not a `!` envelope) is awaited in an `async` listener that has no `.catch`: the
+// rejection escapes to the host as an unhandled rejection and does NOT reach
+// `_scrml_error_boundary_log`; the statements after it do not run (function-body
+// semantics). Base (detached IIFE) logged "[scrml errorBoundary x] caught non-! runtime
+// error" and ran the later statements. This PINS the current behaviour so a future fix
+// (a handler-level backstop) shows up here as a deliberate change.
+// Observed on an `<each>` row, whose listener is attached directly with
+// addEventListener: the test wraps addEventListener to hold the promise the listener
+// returns (the browser discards it — that is the unhandled rejection). Holding it here
+// keeps the rejection from failing the bun process while still observing it.
+describe("S450 — a rejecting nested write escapes as a rejection, unlogged (pinned; gap disclosed)", () => {
+  const SHAPES = [
+    ["nested in an `if`", "if (@c) { @x = netfail(); @y = 5 }"],
+    ["nested in a `match` arm", "match (@cur) { .Note(t) => { @x = netfail(); @y = 5 } .Empty => { @y = 0 } }"],
+  ];
+  for (const [name, handler] of SHAPES) {
+    test(name, async () => {
+      const returned = [];
+      const proto = window.HTMLElement.prototype;
+      const hadOwn = Object.prototype.hasOwnProperty.call(proto, "addEventListener");
+      const orig = proto.addEventListener;
+      proto.addEventListener = function (type, fn, opts) {
+        if (type !== "click" || typeof fn !== "function") return orig.call(this, type, fn, opts);
+        return orig.call(this, type, function (ev) {
+          const r = fn.call(this, ev);
+          if (r && typeof r.then === "function") returned.push(r.then(() => "resolved", (e) => e));
+          return r;
+        }, opts);
+      };
+      try {
+        const app = mount(program("<each>", handler));
+        expect(app.errs).toEqual([]);
+        await app.click("b");
+        expect(returned.length).toBe(1);
+        expect(String(await returned[0])).toContain("network down");
+        expect(app.consoleErrors.some((l) => l.includes("scrml errorBoundary"))).toBe(false);
+        expect(app.get("y")).toBe(0); // the statement after the failed write did not run
+      } finally {
+        if (hadOwn) proto.addEventListener = orig;
+        else delete proto.addEventListener;
+      }
+    });
+  }
+});
+
+// S450 review F2 — newly REJECTED (correct under s441's E-EVENT-CONTROL-AFTER-AWAIT):
+// the nested write is now awaited, so an event-control call after it in the handler
+// runs after the first await. Corpus exposure: 0.
+describe("S450 — event control after a nested awaited write is E-EVENT-CONTROL-AFTER-AWAIT", () => {
+  test("`${ if (@c) { @x = save(); event.preventDefault() } }`", () => {
+    const app = mount(program("top level", "if (@c) { @x = save(); event.preventDefault() }"));
+    expect(app.errs).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
+  });
+  test("closure form `${(e) => { if (@c) { @x = save(); e.preventDefault() } }}`", () => {
+    const app = mount(program("top level", "(e) => { if (@c) { @x = save(); e.preventDefault() } }"));
+    expect(app.errs).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
+  });
+  test("control BEFORE the write stays legal", () => {
+    const app = mount(program("top level", "if (@c) { event.preventDefault(); @x = save(); @y = @x + 1 }"));
+    expect(app.errs).toEqual([]);
   });
 });
