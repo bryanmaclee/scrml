@@ -2147,11 +2147,21 @@ ${
         // A validator CALL may repeat with other arguments — `length(>2)
         // length(<9)` is a conjunction every one of which is read (validators.
         // test.js pins it); a bare one (`req req`) says nothing twice.
+        // s451 (S239 nit on #1260): a PRESENCE validator — `req`, `is some` —
+        // is one predicate whatever its argument (§55.1: its argument is only a
+        // message, §55.10), so `req req("m")` / `req("a") req` repeat it too.
         for (const v of d.validators) {
-            if (seen.indexOf(v.name) >= 0 && isBareValidator(v)) st = addDiag(st, file, v.span, "E-BOOTSTRAP-UNSUPPORTED", repeatedMessage(d.name, v.name))
+            if (seen.indexOf(v.name) >= 0 && (isBareValidator(v) || isPresenceValidator(v.name))) st = addDiag(st, file, v.span, "E-BOOTSTRAP-UNSUPPORTED", repeatedMessage(d.name, v.name))
             seen = seen.concat([v.name])
         }
         return st
+    }
+
+    // §55.1's presence predicates: `req` and `is some` (the latter reaches the
+    // bootstrap as the opener words `is` `some`, refused as unknown — and a
+    // second `is` is caught by the `mods` pass above).
+    fn isPresenceValidator(name: string) -> boolean {
+        return name == "req" || name == "is some"
     }
 
     fn isBareValidator(v: AValidator) -> boolean {
