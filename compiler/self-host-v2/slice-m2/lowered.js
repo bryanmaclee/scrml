@@ -37,6 +37,8 @@ export function frontEnd(mods, files) {
     typed: tp,
     core: lowered.core,
     diags: parseDiags.concat(tp.diags),
+    // s449: the non-fatal I- notes (§55.17.6: I-FORM-SUBMIT-GATED "reports in the warnings stream")
+    infos: tp.infos,
     nodes: next,
     ms: { parse: t1 - t0, analyze: t2 - t1, lower: t3 - t2, total: t3 - t0 },
   };
