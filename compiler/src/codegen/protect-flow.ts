@@ -864,7 +864,10 @@ const SQL_METHODS = new Set(["unsafe"]);
  * from inside them. Walking the Proxy + closure + queue bodies took a 25-module
  * protect build (examples/23) from ~1.4 s to more than 400 s (measured).
  */
-const TX_GUARD_RUNTIME_NAMES = new Set(["_scrml_db_guard", "_scrml_db_request_scope", "_scrml_db_scope_end", "_scrml_db_tx_kind"]);
+const TX_GUARD_RUNTIME_NAMES = new Set([
+  "_scrml_db_guard", "_scrml_db_request_scope", "_scrml_db_scope_end", "_scrml_db_stream_end",
+  "_scrml_db_tx_kind", "_scrml_db_sql_head", "_scrml_db_savepoint_name",
+]);
 
 /** Compiler-runtime helpers the analysis models itself (never walked). */
 function isModelledHelperName(name: string): boolean {

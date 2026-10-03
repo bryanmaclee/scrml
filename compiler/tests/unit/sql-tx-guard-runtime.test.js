@@ -28,7 +28,7 @@ function loadRuntime() {
   // every emitted server module; scrml absence is `null`, §42.8).
   expect(src).not.toMatch(/\bundefined\b/);
   // eslint-disable-next-line no-new-func
-  return new Function(`${src}\nreturn { _scrml_db_guard, _scrml_db_request_scope, _scrml_db_tx_kind, _scrml_db_scope_als };`)();
+  return new Function(`${src}\nreturn { _scrml_db_guard, _scrml_db_request_scope, _scrml_db_tx_kind, _scrml_db_savepoint_name, _scrml_db_stream_end, _scrml_db_scope_als };`)();
 }
 
 const rt = loadRuntime();
@@ -63,12 +63,27 @@ describe("§19.10.6 — statement classification", () => {
     expect(rt._scrml_db_tx_kind("END TRANSACTION")).toBe("commit");
     expect(rt._scrml_db_tx_kind("ROLLBACK")).toBe("rollback");
     expect(rt._scrml_db_tx_kind("abort")).toBe("rollback");
-    expect(rt._scrml_db_tx_kind("ROLLBACK TO SAVEPOINT sp1")).toBe(null);
-    expect(rt._scrml_db_tx_kind("ROLLBACK TRANSACTION TO sp1")).toBe(null);
-    expect(rt._scrml_db_tx_kind("SAVEPOINT sp1")).toBe(null);
+    expect(rt._scrml_db_tx_kind("ROLLBACK TO SAVEPOINT sp1")).toBe("rollback-to");
+    expect(rt._scrml_db_tx_kind("ROLLBACK TRANSACTION TO sp1")).toBe("rollback-to");
+    expect(rt._scrml_db_tx_kind("SAVEPOINT sp1")).toBe("savepoint");
+    expect(rt._scrml_db_tx_kind("RELEASE SAVEPOINT sp1")).toBe("release");
+    expect(rt._scrml_db_tx_kind("release sp1")).toBe("release");
     expect(rt._scrml_db_tx_kind("SELECT 1")).toBe(null);
     expect(rt._scrml_db_tx_kind("BEGINNING")).toBe(null);
     expect(rt._scrml_db_tx_kind(undefined)).toBe(null);
+  });
+
+  test("S449 review F2: leading comments are skipped; AND CHAIN is not an end", () => {
+    expect(rt._scrml_db_tx_kind("/* c */ BEGIN")).toBe("begin");
+    expect(rt._scrml_db_tx_kind("-- note\nBEGIN IMMEDIATE")).toBe("begin");
+    expect(rt._scrml_db_tx_kind("  /* a */ -- b\n /* c */ COMMIT")).toBe("commit");
+    expect(rt._scrml_db_tx_kind("/* unterminated BEGIN")).toBe(null);
+    expect(rt._scrml_db_tx_kind("COMMIT AND CHAIN")).toBe("chain");
+    expect(rt._scrml_db_tx_kind("ROLLBACK AND CHAIN")).toBe("chain");
+    expect(rt._scrml_db_tx_kind("COMMIT AND NO CHAIN")).toBe("commit");
+    expect(rt._scrml_db_savepoint_name("savepoint a1")).toBe("A1");
+    expect(rt._scrml_db_savepoint_name("RELEASE SAVEPOINT \"a1\"")).toBe("A1");
+    expect(rt._scrml_db_savepoint_name("RELEASE a1")).toBe("A1");
   });
 
   test("the declaration stays one line and names the driver + mode", () => {
@@ -231,12 +246,6 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
   });
 
   test("a failed BEGIN releases the connection", async () => {
-    // BEGIN inside an open transaction of the SAME request is handed to SQLite, which
-    // refuses it; the request's transaction and the lock are unaffected.
-    await expect(asRequest(async () => {
-      await sql.unsafe("BEGIN");
-      try { await sql.unsafe("BEGIN"); } finally { await sql.unsafe("ROLLBACK"); }
-    })).rejects.toThrow(/within a transaction/);
     // a malformed BEGIN fails at the database: the lock must come back
     await expect(asRequest(async () => { await sql.unsafe("BEGIN NONSENSE"); })).rejects.toThrow();
     const after = await asRequest(async () => sql`SELECT COUNT(*) AS n FROM acc`);
@@ -354,6 +363,133 @@ describe("§19.10.6 — SQLite: one transaction per connection, against a REAL B
     await r.promise;
     expect(r.value[0].bal).toBe(10);
   });
+  test("S449 review F3: a BEGIN inside the request's open transaction nests — its COMMIT does not commit the outer one", async () => {
+    await asRequest(async () => {
+      await sql.unsafe("BEGIN");
+      await sql`UPDATE acc SET bal = 300 WHERE id = 1`;
+      await sql.unsafe("BEGIN"); // was: SQLite "cannot start a transaction within a transaction"
+      await sql`UPDATE acc SET bal = 200 WHERE id = 2`;
+      await sql.unsafe("COMMIT"); // inner: RELEASE SAVEPOINT, the outer stays open
+      await sql.unsafe("ROLLBACK"); // outer: undoes BOTH
+    });
+    expect(committed().acc).toEqual([{ id: 1, bal: 10 }, { id: 2, bal: 0 }]);
+    // inner ROLLBACK undoes only the inner work; the outer COMMIT keeps the rest
+    await asRequest(async () => {
+      await sql.unsafe("BEGIN");
+      await sql`UPDATE acc SET bal = 11 WHERE id = 1`;
+      await sql.unsafe("BEGIN");
+      await sql`UPDATE acc SET bal = 99 WHERE id = 2`;
+      await sql.unsafe("ROLLBACK");
+      await sql.unsafe("COMMIT");
+    });
+    expect(committed().acc).toEqual([{ id: 1, bal: 11 }, { id: 2, bal: 0 }]);
+    // and the connection is free afterwards
+    const n = await asRequest(async () => sql`SELECT COUNT(*) AS n FROM acc`);
+    expect(n[0].n).toBe(2);
+  });
+
+  for (const [label, beginSql] of [["/* c */ BEGIN", "/* c */ BEGIN"], ["-- c\\nBEGIN", "-- c\nBEGIN"]]) {
+    test(`S449 review F2: a commented ${label} still takes the lock (was: classified as a plain statement)`, async () => {
+      const inTx = latch();
+      const finishTx = latch();
+      const a = track(asRequest(async () => {
+        await sql.unsafe(beginSql);
+        await sql`UPDATE acc SET bal = 999 WHERE id = 1`;
+        inTx.open();
+        await finishTx.wait;
+        await sql.unsafe("/* done */ ROLLBACK");
+      }));
+      await inTx.wait;
+      const b = track(asRequest(async () => { await sql`INSERT INTO log (msg) VALUES (${"kept"})`; }));
+      await settle();
+      expect(b.done).toBe(false);
+      finishTx.open();
+      await a.promise;
+      await b.promise;
+      expect(committed()).toEqual({ acc: [{ id: 1, bal: 10 }, { id: 2, bal: 0 }], log: ["kept"] });
+    });
+  }
+
+  test("S449 review F2: SAVEPOINT with no transaction open (SQLite opens one) takes the lock; its RELEASE ends it", async () => {
+    const inTx = latch();
+    const finishTx = latch();
+    const errors = [];
+    const origError = console.error;
+    console.error = (...x) => { errors.push(x.join(" ")); };
+    try {
+      const a = track(asRequest(async () => {
+        await sql.unsafe("SAVEPOINT outer1");
+        await sql`UPDATE acc SET bal = 50 WHERE id = 1`;
+        inTx.open();
+        await finishTx.wait;
+        await sql.unsafe("RELEASE SAVEPOINT outer1");
+        return "done";
+      }));
+      await inTx.wait;
+      const b = track(asRequest(async () => sql`SELECT bal FROM acc WHERE id = 1`));
+      await settle();
+      expect(b.done).toBe(false); // waits: never reads the uncommitted 50
+      finishTx.open();
+      await a.promise;
+      await b.promise;
+      expect(b.value[0].bal).toBe(50); // read after the RELEASE committed it
+    } finally {
+      console.error = origError;
+    }
+    expect(errors).toEqual([]); // released by RELEASE, not by the request-end backstop
+  });
+
+  test("S449 review F2: a commented COMMIT releases at once (no false 'left open' at request end)", async () => {
+    const errors = [];
+    const origError = console.error;
+    console.error = (...x) => { errors.push(x.join(" ")); };
+    try {
+      await asRequest(async () => {
+        await sql.unsafe("BEGIN");
+        await sql`UPDATE acc SET bal = 12 WHERE id = 1`;
+        await sql.unsafe("/* done */ COMMIT");
+      });
+    } finally {
+      console.error = origError;
+    }
+    expect(errors).toEqual([]);
+    expect(committed().acc[0].bal).toBe(12);
+  });
+
+  test("S449 review F5: an async WebSocket callback that AWAITS its handler is covered by the backstop", async () => {
+    const origError = console.error;
+    console.error = () => {};
+    try {
+      const onserverHandler = async () => {
+        await sql.unsafe("BEGIN");
+        await sql`UPDATE acc SET bal = 321 WHERE id = 1`; // and never commits
+      };
+      const message = rt._scrml_db_request_scope(async function message() { await onserverHandler(); });
+      await message.call({});
+    } finally {
+      console.error = origError;
+    }
+    expect(committed().acc[0].bal).toBe(10);
+    const n = await asRequest(async () => sql`SELECT COUNT(*) AS n FROM acc`);
+    expect(n[0].n).toBe(2);
+  });
+
+  test("S449 review F1: _scrml_db_stream_end rolls back a stream scope's open transaction and frees the connection", async () => {
+    const origError = console.error;
+    console.error = () => {};
+    try {
+      await asRequest(async () => {
+        await sql.unsafe("BEGIN");
+        await sql`UPDATE acc SET bal = 777 WHERE id = 1`;
+        await rt._scrml_db_stream_end(); // what the SSE stream's finally runs
+      });
+    } finally {
+      console.error = origError;
+    }
+    expect(committed().acc[0].bal).toBe(10);
+    const n = await asRequest(async () => sql`SELECT COUNT(*) AS n FROM acc`);
+    expect(n[0].n).toBe(2);
+  });
 });
 
 describe("§19.10.6 — pooled drivers (Postgres / MySQL): a reserved connection per transaction", () => {
@@ -444,6 +580,37 @@ describe("§19.10.6 — pooled drivers (Postgres / MySQL): a reserved connection
       "r2: <reserve>", "r2: BEGIN", "r2: UPDATE t SET x = 2", "r2: COMMIT", "r2: <release>",
       "r1: UPDATE t SET x = 1", "r1: COMMIT", "r1: <release>",
     ]);
+  });
+
+  test("S449 review F3 (pooled): a nested BEGIN / COMMIT is a savepoint on the reserved connection; the outer ROLLBACK still releases", async () => {
+    const { pool, log } = fakePool();
+    const sql = rt._scrml_db_guard(pool, "postgres", false);
+    await asRequest(async () => {
+      await sql.unsafe("BEGIN");
+      await sql.unsafe("BEGIN");
+      await sql.unsafe("COMMIT");
+      await sql.unsafe("BEGIN");
+      await sql.unsafe("ROLLBACK");
+      await sql.unsafe("ROLLBACK");
+    });
+    expect(log).toEqual([
+      "r1: <reserve>", "r1: BEGIN",
+      "r1: SAVEPOINT _scrml_nest_1", "r1: RELEASE SAVEPOINT _scrml_nest_1",
+      "r1: SAVEPOINT _scrml_nest_2", "r1: ROLLBACK TO SAVEPOINT _scrml_nest_2", "r1: RELEASE SAVEPOINT _scrml_nest_2",
+      "r1: ROLLBACK", "r1: <release>",
+    ]);
+  });
+
+  test("S449 review F2 (pooled): COMMIT AND CHAIN keeps the reserved connection (the chained transaction is still open)", async () => {
+    const { pool, log } = fakePool();
+    const sql = rt._scrml_db_guard(pool, "postgres", false);
+    await asRequest(async () => {
+      await sql.unsafe("BEGIN");
+      await sql.unsafe("COMMIT AND CHAIN");
+      await sql`SELECT 1`;
+      await sql.unsafe("COMMIT");
+    });
+    expect(log).toEqual(["r1: <reserve>", "r1: BEGIN", "r1: COMMIT AND CHAIN", "r1: SELECT 1", "r1: COMMIT", "r1: <release>"]);
   });
 
   test("Bun callback transaction (the db-authoritative path): pool begin outside a transaction, a savepoint on the reserved connection inside one", async () => {

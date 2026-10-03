@@ -29,6 +29,11 @@ import { resolveDbDriver } from "./db-driver.ts";
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
 import { sqliteFileHandle, ownedDbFilesFor, noteSqliteHandle, SQLITE_FILE_HELPER_IMPORT, sqliteFileHelperLines } from "./sqlite-file-target.ts";
 import { SQL_TX_GUARD_HELPER_LINES, guardHandleExpr, requestScopeLines, CONCURRENT_TRANSACTIONS_VALUE } from "./sql-tx-guard.ts";
+
+/** §19.10.6 (S449 review F1) — the SSE stream's `finally` backstop call. Emitted with
+ *  every SSE route; dropped again when the module declares no `?{}` handle (and so
+ *  carries no transaction runtime to call). */
+const SSE_STREAM_END_LINE = "        await _scrml_db_stream_end(); // §19.10.6: roll back a transaction the stream left open";
 import { fileDefaultDbDecl, dbAttrValue } from "../db-ownership.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
@@ -786,6 +791,15 @@ export interface DbScope {
   connectionString: string;
   driver: "sqlite" | "postgres" | "mysql";
   transactions?: string | null;
+  /** Where `transactions=` is written (for E-SQL-010), or null. */
+  transactionsSpan?: unknown;
+}
+
+/** The span of a named attribute on a node, or null. */
+function attrSpanOf(node: any, name: string): unknown {
+  const attrs: any[] = node?.attrs ?? node?.attributes ?? [];
+  const a = attrs.find((x: any) => x && x.name === name);
+  return a?.span ?? node?.span ?? null;
 }
 
 export function collectDbScopes(
@@ -807,6 +821,7 @@ export function collectDbScopes(
             connectionString: ds.connectionString,
             driver: ds.driver ?? "sqlite",
             transactions: dbAttrValue(node, "transactions"),
+            transactionsSpan: attrSpanOf(node, "transactions"),
           });
         }
       }
@@ -834,7 +849,7 @@ export function collectDbScopes(
     const defaultValue = defaultDecl.value;
     const driverResult = resolveDbDriver(defaultValue);
     const driver: "sqlite" | "postgres" | "mysql" = driverResult.ok ? driverResult.info.driver : "sqlite";
-    scopes.set("_scrml_sql", { connectionString: defaultValue, driver, transactions: dbAttrValue(defaultDecl.node, "transactions") });
+    scopes.set("_scrml_sql", { connectionString: defaultValue, driver, transactions: dbAttrValue(defaultDecl.node, "transactions"), transactionsSpan: attrSpanOf(defaultDecl.node, "transactions") });
   }
   return scopes;
 }
@@ -4468,6 +4483,16 @@ export function generateServerJs(
         lines.push(`        }`);
       }
       lines.push(`      } finally {`);
+      // §19.10.6 (S449 review F1) — the stream's request scope may still own a
+      // transaction: a client that disconnects while the generator is mid-transaction
+      // ends the `for await` at the next frame (the enqueue throws), so the generator's
+      // own COMMIT / ROLLBACK never runs. Roll it back and free the connection here —
+      // otherwise every later statement on that handle waits forever. Not in `cancel()`:
+      // the generator is still running then, and rolling back under it would let its
+      // remaining statements autocommit. A module with no `?{}` handle carries no
+      // transaction runtime: the line is removed again where the handles are declared
+      // (SSE_STREAM_END_LINE).
+      lines.push(SSE_STREAM_END_LINE);
       lines.push(`        _scrml_ctrl.close();`);
       lines.push(`      }`);
       lines.push(`    },`);
@@ -6937,7 +6962,7 @@ export function generateServerJs(
           "It runs each transaction on its own connection from a Postgres / MySQL connection pool; a SQLite " +
           "database is one connection, so its transactions always run one at a time (§19.10.6). " +
           "Remove the attribute, or use a `postgres://` / `mysql://` database.",
-          { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+          (scope.transactionsSpan as any) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
           "error",
         ));
         return false;
@@ -7074,6 +7099,9 @@ export function generateServerJs(
     if (_scopeLines.length > 0) {
       finalEmitted = finalEmitted.replace(/\n*$/, "\n") + _scopeLines.join("\n") + "\n";
     }
+  } else {
+    // No `?{}` handle → no transaction runtime → no stream backstop to call.
+    finalEmitted = finalEmitted.split(SSE_STREAM_END_LINE + "\n").join("");
   }
 
   // §14.8.9 — the protected-column PROVENANCE FLOW (S441, `protect-flow.ts`)

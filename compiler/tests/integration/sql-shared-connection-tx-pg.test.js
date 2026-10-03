@@ -82,6 +82,22 @@ const APP = (attr) => `<program db="${PG_URL}"${attr}>
     return 0
   }
 
+  server function innerTx(msg) {
+    ?{BEGIN}
+    ?{\`INSERT INTO log (msg) VALUES (\${msg})\`}.run()
+    ?{COMMIT}
+    return 1
+  }
+
+  // an implicit envelope around a server function with its own ?{BEGIN} … ?{COMMIT}
+  server function outerFail(n)! -> E {
+    ?{\`UPDATE accounts SET balance = 300 WHERE id = 1\`}.run()
+    ?{\`UPDATE accounts SET balance = 200 WHERE id = 2\`}.run()
+    const r = innerTx("inner")
+    if (n > 0) { fail E::Rejected }
+    return 0
+  }
+
   function plainWrite(msg) {
     ?{\`INSERT INTO log (msg) VALUES (\${msg})\`}.run()
     return 1
@@ -209,6 +225,18 @@ d("§19.10.6 on Postgres — reserved connection per transaction (live)", () => 
     const r = await call(serialized, "implicitFail", { n: 1 });
     expect(r.body.variant).toBe("Rejected");
     expect((await committed()).acc).toEqual([10, 0]);
+  });
+
+  test("S449 review F3: an inner BEGIN/COMMIT nests as a savepoint — a later `fail` rolls the whole envelope back (was: persisted [300, 200])", async () => {
+    await seed();
+    const r = await call(serialized, "outerFail", { n: 1 });
+    expect(r.body?.variant).toBe("Rejected");
+    expect(await committed()).toEqual({ acc: [10, 0], log: [] });
+    // success commits envelope + inner work; the reservation is returned (a second
+    // transaction runs at once rather than queueing behind a leaked one)
+    expect(await call(serialized, "outerFail", { n: 0 })).toEqual({ status: 200, body: 0 });
+    expect(await committed()).toEqual({ acc: [300, 200], log: ["inner"] });
+    expect(await call(serialized, "implicitFail", { n: 0 })).toEqual({ status: 200, body: 0 });
   });
 
   test("serialized: a plain write from another request does NOT wait and survives the transaction's ROLLBACK", async () => {
