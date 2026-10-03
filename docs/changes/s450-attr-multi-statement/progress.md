@@ -1,2 +1,3 @@
 - 2026-10-03T01:00:39Z start; base bc4bca1f; bun install + pretest ok (puppeteer postinstall fail, unrelated)
 - 2026-10-03T01:10:34Z impl: checkAttrMultiStatement in ast-builder (parseAttributes ATTR_BLOCK/ATTR_EXPR, parseLiftTag, SUBPARSE forward); SPEC §5.2.4 + §34 row; unit test 44 pass (bite-tested: 21 fail with check disabled); conformance pos/neg cases
+- 2026-10-03T01:16:57Z known-gaps resolved entry g-attr-multi-statement-value-silently-misread (§S446-peter); facts/state/spec-index regen; master-list recent-sessions STALE on base too (abbrev-length + missing #1231) — left as on main; corpus scan 0 hits / 975 files
