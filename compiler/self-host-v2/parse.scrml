@@ -1402,7 +1402,7 @@ ${
         if (o.star) return false
         // only the refused S435 spelling `<let x…>` reaches here with isLet set:
         // it is kept a declaration so one E-DECL-LET-IN-OPENER is the only error
-        if (o.isLet) return true
+        if (o.isLet && o.name != "") return true
         if (o.ty is some) return true
         if (hasOwn(o.own)) return true
         return o.typed.length > 0

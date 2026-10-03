@@ -24,3 +24,8 @@
   expectations (parse.test dropdown shape, front.test lib-line edit + message, form.test role, oracle role).
 - NOTE: the brief's `lifecycle/effect-*` / `reset-on-*` conformance cases are in the LEGACY RHS form (`<x> = v`),
   not the §66 opener form — nothing to migrate there.
+- phase 2 committed 0fc4af9d5 (pre-commit gate 29857 pass / 0 fail); pushed. conformance: 5 impl1-ts xfail
+  signatures recaptured (reactive/no-write-{attr,derived,if,interp,own-init}-pos); 1244/1278 pass, 0 FAILED.
+- phase 3: §66.20 rows for the three S447 codes → "Nominal on impl#1; the bootstrap emits it"; §66.21 tense.
+  `<let/>` no longer recovers as a nameless declaration (no cascade). known-gaps: parser gap RESOLVED (items
+  1, 2, 4); filed SF3 (typer), the SPEC `on`-field contradiction, and the unnamed `export`-alone code.
