@@ -39,3 +39,27 @@ Governing sentences (compiler/SPEC.md):
 - Searched §6.14, §66.12 for a FIXED-length sequence under restore — §66.12 makes `Fixed` a write contract with no static length; restore is construction → no rule fixes whether a stored length may differ → refused.
 - Searched §6.14 for two cells sharing one key — none (§6.14.1 r2 only calls the key "an external storage contract"; §6.14.4.2 r4 says "`key=` is unique per origin by the §6.14.1 rule 2 author contract") → same store + same key REFUSED (E-BOOTSTRAP-UNSUPPORTED), flagged as a SPEC question.
 - O-061-7 (OPEN, write timing) — the store runs in the writing batch's flush (one store per batch, of the latest value). Needed for r9's "instead of storing": the reset's key removal cancels the queued store of the reset value.
+
+## 2026-10-03 — implementation landed (commit 1) + tests (commit 2)
+
+- Core: `PersistStore` / `Persist`, `Field.persist`, `Stmt.Unpersist(decl, inst, idx)`; walk / measure /
+  check / print total over it. check C16 (persisted = writable PROGRAM field, wire descriptor, no Fixed
+  length; Local ⇒ replace grant + no graph; Unpersist names a persisted field and follows its reset Write);
+  C13 admits `Write [ResetSurface] [Unpersist]`.
+- analyze `persistPass` (after resetOnPass) → `Tables.persists`; `openerWordDiags` routes persist/key/
+  prepaint on a declaration or its field to `persistFieldDiag` (refused, O-061-9; prepaint w/o persist =
+  E-PREPAINT-WITHOUT-PERSIST). `hold=` walked over every file's markup (`holdDiags`).
+- lower: `Field.persist` from `Tables.persists`; `reset(@x)` and a `reset-on=` reset append `Unpersist`.
+- print: `rt.persisted(inst$.scope, <default thunk>, store, key, <codec wireTableJs>)`; `rt.unpersist(cell)`.
+- runtime: the §57 codec MOVED into runtime.js (one runtime module per program); slice-codec/runtime/codec.js
+  re-exports it. `persisted` / `unpersist` / `persistOf` + the `Persisted` observer (store queued into the
+  writing batch's flush; `storage` listener for "local"; no write-back of a synced value).
+- codec.scrml: `hasFixedLength`; codec.scrml joined the M1 / M3 module lists (check + print import it).
+- DOGFOOD (impl#1): route-inference's `/(?<!@)\bsession\b/` server-escalation trigger is STRING-BLIND —
+  an analyze function whose message string said `"session"` compiled as a server fetch stub
+  (`_scrml_fetch_persistOf_24`) and the bootstrap crashed. The bootstrap spells the word in pieces
+  (`sessionWord()`, `storeSession()`). The `print(` and `Bun.*` triggers were moved to the AST for exactly
+  this; `session` was not. Proposed gap: g-route-inference-session-trigger-string-blind.
+- Pin flipped: slice-m4/failclosed.test.js (2) — program cell now reads `persist=`; field still refused.
+- Gates after commit 1: lint 0 violations; m1 99; m2 462; m1-lowered 99; m3 60; m4 551→582 (+31 persist);
+  codec 92; full pre-commit 29944 pass / 58 skip / 12 todo / 0 fail.
