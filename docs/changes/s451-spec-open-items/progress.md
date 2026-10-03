@@ -44,3 +44,35 @@ Branch: spec/s451-open-items (cut from origin/main 2fb41d8b7, which contains #12
   (a boundary catching a HELD error value) vs §19.15 ("purely a CATCH primitive for live `!`-calls") — pre-existing.
   The §19.9.5 function bodies (`loadProfile`, `notifyOrder`) still hold `?{}` with no handler in a CPS-implicit `!`
   function — R11 migration debt measured by #1253 (69 SPEC sites), not migrated here.
+- 2026-10-03 ITEM 2 — §19.8.3 OPEN replaced ("A `<x server>` hydration load is exempt"; supersedes quote; direction
+  inert vs pre-R11 / newly-accepting vs a literal R11) + §19.8.4 bullet; §52.4.2 item 1 + §52.4.4 bullet + Pattern C
+  pointer; NEW §52.6.8 "A Failed Hydration Load — `@x.error`" (Nominal): covers the compiler-generated loads
+  (Pattern C `?{}`, the Pattern A inferred call, a call on the declaration RHS / `/__mountHydrate`); Pattern B is the
+  author's `<request>` (its `.error`; `@x.error` stays `not`). Rules: exempt from E-ERROR-002 · server log line ·
+  placeholder kept · `@x.error : Error | not`, set on failure, cleared only by the next successful hydration load,
+  read-only (E-SYNTHESIZED-WRITE, Nominal limb) · `error` reserved.
+  COLLISION found and resolved by the §55.5.3 precedent: a `<x server>` cell whose struct type has a field `error`
+  (or a child field / attribute named `error`) would put the field and `@x.error` behind one `.` (the §55.5.3
+  F12 silent-shadowing class). Resolved: `error` is reserved on a `<x server>` cell — NEW code
+  E-SERVER-CELL-RESERVED-NAME (§34 row + §52.11 row, Nominal). E-VALIDITY-RESERVED-NAME's four names are unaffected
+  (no clash with `error`). Corpus impact measured ZERO: 28 files under examples/ samples/ conformance/ docs/ stdlib/
+  declare a `<x server>` cell; the one typed one (`Driver`) has no `error` field; no child field named `error`.
+  READINGS flagged for veto (also stated in §52.6.8): (a) the log line is written in production (not the stripped
+  `log()`); (b) only a successful load clears `@x.error` (not an assignment, not a §52.6.7 push); (c) Tier 1 type-level
+  authority's generated load gets no `.error` (the ruling names `<x server>` only) — what a failed Tier 1 load
+  reports is NOT ruled; (d) the reserved name + its code are this landing's resolution, not named by the ruling.
+  impl#1 probe (`2fb41d8b7`, compiled, JS read): the Pattern C client load sets the cell from `await res.json()` with no
+  status check; `@driver.error` compiles as a member read. Filed `g-impl1-server-cell-load-error-surface-s451` (MED, open).
+- 2026-10-03 R11 MIGRATION POINTER — §19.8.3 "Migrating R11 code (tooling, not language)" paragraph + §19.8.4
+  informative bullet: the `scrml fix` rule is owed; no normative weight.
+- 2026-10-03 ITEM 5 — §2.2.1 new paragraph: a compile reporting any Error-severity diagnostic SHALL NOT produce a
+  runnable artifact (no output file of that compile exists, or it wrote none; an earlier output dir is left as it
+  was; whole compile, not per file). The parse gate, E-REACTIVE-005 (§6.6) and E-COMPONENT-035 (§15.14.2) restated as
+  instances (notes added at both). §34 intro: a "Severity" sentence (Error fails the compile → §2.2.1). Direction:
+  inert for acceptance. impl#1 measured (`2fb41d8b7`): a derived cycle reports E-DERIVED-CIRCULAR-DEP (impl#1's code
+  for §6.6's cycle, not E-REACTIVE-005) and still writes client/html/css/runtime; a bare `@x` reports
+  E-STATE-UNDECLARED, prints FAILED, and writes the same files. Filed `g-impl1-artifacts-written-on-error-s451`
+  (sev=NOMINAL status=nominal, locus=compiler/src/commands/refusal-gate.js + codegen/validate-emit.ts).
+  `bun scripts/state.ts --write` / `--check` PASS.
+- Gates: `regen-spec-index.ts` + `--check` OK (S451 open-items notes added on rows §2, §13, §19, §52, §57);
+  `s34-census.ts --check-new --base origin/main` PASS (6 new/changed rows); `facts.ts --write` then `--check` PASS.
