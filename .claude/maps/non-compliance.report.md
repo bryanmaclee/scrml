@@ -1,6 +1,36 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-10-02T22:11:04-06:00  commit: 9bafb927
+# generated: 2026-10-03T11:38:07-06:00  commit: 47c863556
+# ⛑ **S449-WRAP STAMP — `9bafb927` -> `47c863556`. 7 COMMITS (#1245 S450-peter wrap incl. the `9bafb927` map refresh,
+# #1246 state regen, #1247 bootstrap conformance counter, #1248 dpa-queue, #1249 §66 opener keywords, #1250 bootstrap §55
+# validity surface + submit gate, #1251 transaction guard), incremental refresh. Main checkout `wrap/s449` == `origin/main`
+# `47c863556`.** MAP-STAMP RULE at write time: `git log --oneline 9bafb927..origin/main` -> 7; `bun scripts/state.ts
+# --check` at pass start: `maps: 7 commits behind HEAD (watermark 9bafb927, HEAD 47c863556)` — matches exactly.
+# ALREADY COVERED by the `9bafb927` refresh (grep-verified in these maps, NOT re-mapped): #1235 bootstrap `<effect>`, #1236
+# protect r9 (`codegen/session-store-emit.ts`), #1238 §6.15 value-writes, #1239 auth (`codegen/server-session-guard.ts`,
+# `route-inference.ts`), #1240 native-parser freeze. S449-wrap only ADDS Task-Shape Routing rows for #1239 (none existed).
+# Source-relevant in THIS window, grep-verified at `47c863556`:
+#   #1251 — §19.10.6 / §8.9.2 transaction guard (impl#1): NEW `compiler/src/codegen/sql-tx-guard.ts` (360 lines; the
+#     emitted per-handle FIFO mutex + AsyncLocalStorage request scope); `emit-server.ts` (guarded handle decls, request-
+#     scope loop, body read before BEGIN, `BEGIN` vs `BEGIN DEFERRED` by driver, `fail` -> ROLLBACK, SSE stream-end
+#     backstop, `E-SQL-010`); `emit-channel.ts` (WS callbacks `async` + await their onserver handler); `protect-flow.ts`
+#     (`TX_GUARD_RUNTIME_NAMES` modelled, never walked); `attribute-registry.js` (`<program transactions=>`);
+#     `db-ownership.ts` (NEW export `fileDefaultDbDecl`).
+#   #1250 — bootstrap §55 validity surface + compiler submit gate (`compiler/self-host-v2/` ONLY; impl#1 xfail).
+#   #1249 — §66.2.5 keywords OUTSIDE the declaration opener (`let <x/>`, `export let <x/>`): SPEC + bootstrap parser
+#     (`self-host-v2/parse.scrml`) + 43 test/fixture files migrated. impl#1 has NO emitter (Nominal).
+#   #1247 — NEW `scripts/bootstrap-conformance.ts` (tracking counter), generated `docs/bootstrap-conformance.md`, a
+#     `continue-on-error` ci.yml step.
+# ⛑ FIGURES RE-EXECUTED AT `47c863556`: `facts.ts --check` PASS · `compiler/src` **284,317 lines / 220 files** (+530, +1 =
+# `sql-tx-guard.ts`) · test files **1,574** (+5) · `compiler/SPEC.md` **44,167** lines (+252; `regen-spec-index.ts --check`
+# OK 72/72) · conformance **1288** cases (+10); `bun conformance/run.ts` -> **1246 pass + 42 xfail, 0 fail** (+2 pass =
+# the 2 `sql/transactions-*` cases; +8 xfail = the 8 `forms/` bootstrap-executed cases) · `docs/known-gaps.md`
+# gap-counts open **HIGH 237** · **MED 484** · **LOW 234** · Nominal 7; heading/marker drift 61 (unchanged) ·
+# bootstrap slices: slice-m2 **462/0**, slice-m4 **551/0** · bootstrap counter (live run) PASS 42 · FAIL 18 · LEGACY 951 ·
+# UNSUPPORTED 277 of 1288 — ⚠ the committed `docs/bootstrap-conformance.md` is STALE (1286 cases; `--check` says STALE).
+# NOT MAPPED: any in-flight / unlanded fix. `file:line` cites in S449-wrap sections are grep-derived at `47c863556`.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S450 HEADER (stamp `9bafb927`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
 # ⛑ **S450 STAMP — `6a592ed5c` -> `9bafb927`. 17 COMMITS, incremental refresh, checkout `wrap/s450-peter` @ `da493e06` = `origin/main` + wrap docs.**
 # MAP-STAMP RULE at write time: `git log --oneline 6a592ed5c..9bafb927` -> 17; `bun scripts/state.ts --check` reported
 # `maps: 19 commits behind HEAD (watermark 6a592ed5c, HEAD da493e06)` at pass start (17 + 2 docs-only wrap commits).
@@ -311,6 +341,51 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S449-WRAP pass (this pass, stamp `47c863556`)
+
+**Scope: INCREMENTAL** over `9bafb927..47c863556` (7 commits). In-scope docs changed in-window: `compiler/SPEC.md` (+252
+net), `compiler/SPEC-INDEX.md`, `docs/FACTS.md`, `docs/PA-SCRML-PRIMER.md`, `NERDME.md`, `docs/known-gaps.md`,
+`docs/changelog.md`, `docs/pr-reviews.md`, `master-list.md`, NEW `docs/bootstrap-conformance.md`, and 10
+`docs/changes/{s447-spec-opener-keywords,s449-*}/{BRIEF,progress}.md` dispatch artifacts (historical by design —
+compliant). Out of scope: `handOffs/**`, `hand-off.md` (current session doc), `.claude/maps/**`.
+Checked: 20. Compliant: 18. Non-compliant: 1. Uncertain: 1 (2 SPEC PA-readings).
+Gates at `47c863556`: `facts.ts --check` PASS · `regen-spec-index.ts --check` OK (72/72) · `bun conformance/run.ts`
+1246 + 42 xfail, 0 fail · `state.ts --check` gap-counts PASS, recent-sessions PASS, heading/marker drift **61**
+(unchanged) · **`bootstrap-conformance.ts --check` STALE**.
+Spot-checks: SPEC's §66.20 rows for the three S447 codes say "Nominal on impl#1; the bootstrap emits it" — TRUE
+(`compiler/src` has 0 hits, `self-host-v2/parse.scrml` emits all three). SPEC `E-SQL-010` rows cite
+`emit-server.ts:6956` `concurrentTransactionsFor` — TRUE at `47c863556`. Residual `<let x` spellings in SPEC (7) are
+all explicitly marked superseded/historical — compliant.
+
+### N-S449W-1. `docs/bootstrap-conformance.md` (generated) is STALE on main
+**Reason:** grep-mismatch (generated doc vs current corpus). **Detail:** the doc says "1286 of 1286 cases attempted" /
+UNSUPPORTED 275; a live run at `47c863556` attempts **1288** (UNSUPPORTED **277**; PASS/FAIL unchanged at 42/18). #1251
+added `conformance/cases/sql/transactions-concurrent-{postgres-pos,sqlite-e-sql-010-neg}` after #1247/#1250 regenerated
+it. `bun scripts/bootstrap-conformance.ts --check` prints STALE; its CI step is `continue-on-error`, so main is silently
+red on this step. **Suggested disposition:** update to match current — `bun scripts/bootstrap-conformance.ts --write`
+(consider adding it to the wrap regen checklist next to `facts.ts --write` / `state.ts --write`).
+
+### U-S449W-1 (uncertain). Two new SPEC normative texts are marked "PA reading, open to bryan's veto"
+**What to check:** `SPEC.md:17934` (§19.10.6 — the `transactions=` attribute spelling and the `concurrent` /
+`serialized` value names) and the §66.2.5 / §66.20 free-text exception (`<p>let <x:int=0/></p>` →
+`E-DECL-KEYWORD-NOT-ITEM`, from #1249 review nit A). Both are implemented (impl#1 and bootstrap respectively). If
+bryan vetoes either, the SPEC, `attribute-registry.js`, `emit-server.ts`, `parse.scrml`, the 2 `sql/` conformance cases
+and these maps all move together. Not a mismatch today.
+
+### Carried — status at `47c863556`
+| item | result |
+|---|---|
+| N-S450-1 SPEC normative demands of `--parser=scrml-native` | CARRIED — `SPEC.md` still has **10** `parser=scrml-native` hits |
+| N-S450-2 `native-parser/README.md` + `M5-*`/`M6.6-*` + `master-list.md:71` | CARRIED — `native-parser/` untouched in-window; README 2 flag refs, `master-list.md` 2 |
+| N-S450-3 comments pointing at the deleted within-node gate | CARRIED — `conformance/README.md:454`, `ast-builder.js:13432` (+ `:371`, `:10197`, `:18655`), `block-splitter.js:3501`, `e2e-render-map.test.js:5` unchanged |
+| U-S450-1 slice-m2 443 pass / 5 FAIL | **RESOLVED** — executed at `47c863556`: slice-m2 **462 pass / 0 fail**, slice-m4 **551 / 0** |
+| N-S446-1 / U-S445-* / U-S444-1 | no related commit in-window — CARRIED, UNCHANGED |
+
+Also noted (not a doc finding): bootstrap parse codes `E-PARSE-LET` / `E-PARSE-EXPORT` (and the existing
+`E-PARSE-ITEM` / `-TAG` / `-ATTR` family) have no SPEC §34 rows; gap `g-spec-66-export-alone-on-attribute-unnamed`
+already tracks the unnamed `export`-on-attribute case.
+
 
 ## Summary — S450 pass (this pass, stamp `9bafb927`)
 

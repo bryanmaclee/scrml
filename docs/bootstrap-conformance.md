@@ -7,15 +7,15 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1286 of 1286 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1288 of 1288 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
 | PASS | 42 | 3.3% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 18 | 1.4% |
-| LEGACY | 951 | 74.0% |
-| UNSUPPORTED | 275 | 21.4% |
+| LEGACY | 951 | 73.8% |
+| UNSUPPORTED | 277 | 21.5% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -25,7 +25,7 @@ Scope: **1286 of 1286 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 18 of 18; the other 0 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): component-const 60 · const-cell 51 · engine-element 113 · no-program-root 411 · rhs-decl 712.
-UNSUPPORTED by reason: bootstrap-unsupported 177 · parse-reject 98.
+UNSUPPORTED by reason: bootstrap-unsupported 179 · parse-reject 98.
 
 ### Per area (case directory)
 
@@ -82,7 +82,7 @@ UNSUPPORTED by reason: bootstrap-unsupported 177 · parse-reject 98.
 | schema-for | 15 | · | · | · | · | 15 | · | · |
 | server-db | 56 | · | · | · | 53 | 3 | · | · |
 | server-fn | 22 | · | · | · | 22 | · | · | · |
-| sql | 13 | · | · | · | 10 | 3 | · | · |
+| sql | 15 | · | · | · | 10 | 5 | · | · |
 | ssr | 14 | · | · | · | 9 | 5 | · | · |
 | style | 27 | · | · | 1 | 22 | 4 | · | · |
 | table-for | 14 | · | · | · | 14 | · | · | · |
@@ -211,7 +211,7 @@ dialect parse failure: the bootstrap took a retired / unknown form as something 
 - `type-state-codes/e-struct-function-field-neg` — PASS · VACUOUS
 - `type-state-codes/e-type-any-forbidden-neg` — PASS · VACUOUS (also emitted, unasserted: E-TYPE-UNKNOWN)
 
-### UNSUPPORTED (275)
+### UNSUPPORTED (277)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-endpoint-malformed-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -467,6 +467,8 @@ dialect parse failure: the bootstrap took a retired / unknown form as something 
 - `sql/bare-identifier-body-e-sql-003-neg` — bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
 - `sql/comment-cloaked-body-e-sql-003-neg` — bootstrap-unsupported: an unannotated parameter `q` — bootstrap slice M2 needs `q: Type` (Core parameters are typed)
 - `sql/runtime-expr-body-e-sql-003-neg` — bootstrap-unsupported: an unannotated parameter `q` — bootstrap slice M2 needs `q: Type` (Core parameters are typed)
+- `sql/transactions-concurrent-postgres-pos` — bootstrap-unsupported: an unannotated parameter `note` — bootstrap slice M2 needs `note: Type` (Core parameters are typed)
+- `sql/transactions-concurrent-sqlite-e-sql-010-neg` — bootstrap-unsupported: an unannotated parameter `note` — bootstrap slice M2 needs `note: Type` (Core parameters are typed)
 - `ssr/i-ssr-auth-scoped-prerender-omitted-pos` — bootstrap-unsupported: `<db>` is a scrml structural element (§39 database), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `ssr/i-ssr-each-client-rendered-author-template-pos` — bootstrap-unsupported: member access `.id` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `ssr/i-ssr-each-client-rendered-subset-pos` — bootstrap-unsupported: member access `.id` on a value that is not a struct or an instance is not in bootstrap slice M2
