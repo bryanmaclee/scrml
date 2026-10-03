@@ -72,11 +72,6 @@ Options:
                           is the only conformance-tested path. Emitted-JS shape
                           only; adopter source unchanged.
   --self-host             Use the compiled scrml module-resolver + meta-checker (requires build-self-host.js)
-  --parser=scrml-native   Opt-in native-parser routing (M5-swap C2). When set,
-                          the per-file parse is driven by the native parser
-                          (nativeParseFile) instead of the live BS+TAB path;
-                          downstream stages run unchanged. Surfaces an
-                          I-PARSER-NATIVE-SHADOW info diagnostic per compile.
   --help, -h              Show this message
 
 Examples:
@@ -134,17 +129,6 @@ function parseArgs(args) {
   // optimization work. When set, CG/RS/DG sub-stage timings emit at the
   // sub-stage granularity (P1.1/P1.2/P1.3 consumers). Zero overhead when unset.
   let debugPerf = false;
-  // M5.1 (S114) — opt-in native-parser shadow run. When set to "scrml-native",
-  // the native parser (compiler/native-parser/) runs ALONGSIDE the live
-  // BS+TAB+BPP pipeline as an OBSERVABILITY shadow. Native-parser diagnostics
-  // surface on the same diagnostic stream; the live pipeline's AST is still
-  // the canonical input to downstream stages. See
-  // compiler/native-parser/M5-ast-bridge-scoping.md for the cost-extension
-  // rationale (the downstream-bridge work that gates the full M5 swap is
-  // 90-180h+ and was deferred at M5.1 close). The flag is recognized but
-  // accepts only `scrml-native` at this milestone; any other value errors.
-  // Default null = legacy pipeline, no shadow.
-  let parser = null;
   // S142 — emitted-JS parse gate (validate-emit). `undefined` = use the
   // compileScrml default (api.js); `--validate-emit` forces it on, and
   // `--no-validate-emit` is the dev/CI opt-out for the rare case an adopter
@@ -248,30 +232,13 @@ function parseArgs(args) {
       // PGO P1.5 (S102) — opt-in sub-stage instrumentation.
       debugPerf = true;
     } else if (arg === "--parser" || arg.startsWith("--parser=")) {
-      // M5.1 (S114) — opt-in native-parser shadow. Both
-      // `--parser=scrml-native` and `--parser scrml-native` shapes are
-      // accepted. The only valid value at this milestone is `scrml-native`;
-      // any other value errors. The flag wires through to compileScrml's
-      // `parser` option as an observability hook; downstream stages still
-      // consume the live FileAST. The M5.1 scoping doc
-      // (compiler/native-parser/M5-ast-bridge-scoping.md) explains why the
-      // full pipeline swap was deferred to a future MD-ladder dispatch
-      // (the downstream-bridge work).
-      let raw;
-      if (arg === "--parser") {
-        raw = args[++i];
-        if (!raw) {
-          console.error(c.red("error:") + ` ${arg} requires a value (only \`scrml-native\` is accepted at this milestone)`);
-          process.exit(1);
-        }
-      } else {
-        raw = arg.substring("--parser=".length);
-      }
-      if (raw !== "scrml-native") {
-        console.error(c.red("error:") + ` --parser only accepts \`scrml-native\` at this milestone (got: \`${raw}\`)`);
-        process.exit(1);
-      }
-      parser = raw;
+      // S449 (user-voice item 6) — `--parser=scrml-native` is RETIRED. It routed
+      // the whole per-file parse through the native parser; that migration was
+      // stopped (S249) and the native parser is now a frozen part of impl#1,
+      // used only at its fixed internal call sites. Fail loudly rather than
+      // treat it as an unknown flag, so a script that still passes it learns why.
+      console.error(c.red("error:") + ` ${arg.split("=")[0]} is retired (S449): the native parser is no longer selectable for the whole pipeline. Remove the flag to compile with the default front end.`);
+      process.exit(1);
     } else if (arg === "--module-format" || arg.startsWith("--module-format=")) {
       // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Both
       // `--module-format=esm` and `--module-format esm` shapes are accepted.
@@ -327,7 +294,7 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production, moduleFormat };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, validateEmit, production, moduleFormat };
 }
 
 // ---------------------------------------------------------------------------
@@ -489,7 +456,7 @@ export function formatLintDiagnostic(diag, cwd) {
  * @returns {{ success: boolean }}
  */
 function runOnce(opts, selfHostModules = null) {
-  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production, moduleFormat } = opts;
+  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, validateEmit, production, moduleFormat } = opts;
   const cwd = process.cwd();
 
   if (verbose) {
@@ -551,12 +518,6 @@ function runOnce(opts, selfHostModules = null) {
       // added output for the perf-focused invocation.
       log: (verbose || debugPerf) ? (msg) => console.log(c.dim(msg)) : () => {},
       selfHostModules,
-      // M5-swap C2 (v0.7) — `--parser=scrml-native` value forwarded. When set,
-      // compileScrml ROUTES the per-file parse through the native parser
-      // (nativeParseFile) instead of the live BS+TAB path and emits an
-      // I-PARSER-NATIVE-SHADOW routing-confirmation info diagnostic. The flag
-      // is strictly opt-in; the live pipeline is the unchanged default.
-      parser,
       // S142 — `--validate-emit` / `--no-validate-emit`. `undefined` here lets
       // compileScrml apply its own default (api.js); `true`/`false` override.
       // The emitted-JS parse gate (E-CODEGEN-INVALID-LOGIC) makes SPEC §2.2.1 a

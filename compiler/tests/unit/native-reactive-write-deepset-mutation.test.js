@@ -1,72 +1,65 @@
-// native-reactive-write-deepset-mutation.test.js — native-parser-swap parity-closer.
+// native-reactive-write-deepset-mutation.test.js — native translate-bridge fix.
 //
 // change-id: native-translate-bridge-gaps-2026-06-06 (FIX A)
 //
-// THE BUG (native-only): under `--parser=scrml-native`, a reactive deep-set
-// (`@a.ref = "p"` / `@arr[i] = x`) or an array-mutation (`@arr.push(5)`) at
-// statement position routed through the generic `makeBareExpr` path in the
-// translate bridge (translate-stmt.js). Its translated `exprNode` carried an
-// `assign` with a MEMBER target (or a `call` on a member), so codegen emitted an
-// IN-PLACE mutation with NO copy-on-write and NO reactive trigger:
-//     _scrml_reactive_get("a").ref = "p"            (deep-set)
-//     _scrml_reactive_get("arr").push(5)            (array-mutation)
-// The `${@a.ref}` / `${@arr}` bindings therefore never updated — a reactivity
-// break. The default (LIVE) pipeline synthesizes dedicated `reactive-nested-
-// assign` / `reactive-array-mutation` AST kinds (ast-builder.js:5620-5673) which
-// emit-logic.ts lowers to the COW deep-set / triggered form.
+// THE BUG (native-only): a reactive deep-set (`@a.ref = "p"` / `@arr[i] = x`) or
+// an array-mutation (`@arr.push(5)`) at statement position routed through the
+// generic `makeBareExpr` path in the translate bridge (translate-stmt.js). Its
+// translated `exprNode` carried an `assign` with a MEMBER target (or a `call` on
+// a member), so codegen emitted an IN-PLACE mutation with NO copy-on-write and
+// NO reactive trigger — a reactivity break. The default (LIVE) parser
+// synthesizes dedicated `reactive-nested-assign` / `reactive-array-mutation` AST
+// kinds which emit-logic.ts lowers to the COW deep-set / triggered form.
 //
 // THE FIX (translate-stmt.js `tryReactiveWrite`): recognize the same two forms
 // at ExprStmt position, gated STRICTLY on the path being rooted at an `@`-cell,
-// and synthesize the live node kinds — so the native path produces the COW /
-// triggered emit. A non-`@`-cell-rooted write (`obj.x = y` on a plain local)
-// stays in-place (parity with LIVE).
+// and synthesize the live node kinds. A non-`@`-cell-rooted write (`obj.x = y`
+// on a plain local) stays a bare expression (parity with LIVE).
 //
-// VERIFIED HERE: native client.js byte-matches the default (LIVE) client.js for
-// the deep-set / array-mutation forms (dotted, computed-index, string-index,
-// single-arg, multi-arg, @cell-arg) AND for the non-cell negative case. The
-// S139 "emit-string-only test masks runtime miscompiles" lower bound: byte-
-// parity with the already-green LIVE emit is the strongest static proof here.
+// S449 RE-POINT: this file used to compile under the retired full-pipeline
+// `--parser=scrml-native` flag and byte-compare the emitted function body with
+// the default pipeline's. The bridge runs in production inside `nativeParseFile`
+// (component / `^{}` / `<match>` re-parse), whose nodes go to the same codegen,
+// so the fix is now asserted on the native tree: each statement's node kind and
+// its structured fields (target, path / method, valueExpr / argsExpr) equal the
+// default parser's for the same source. The default-pipeline COW / triggered
+// emit for those node kinds is covered by the default-pipeline reactive tests.
 
 import { describe, test, expect } from "bun:test";
-import { resolve } from "path";
-import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
-import { compileScrml } from "../../src/api.js";
-import { tmpdir } from "os";
+import { nativeAst, liveAst, findNodes, withoutPositions, errorsOf } from "../helpers/native-ast.js";
 
-// compileWith — full-compile `source` under `parser` (null = default LIVE
-// BS+TAB; "scrml-native" = native pipeline). Returns errors + client.js.
-function compileWith(source, parser, suffix) {
-  const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve(tmpdir(), `scrml-rwdm-${name}`);
-  const tmpInput = resolve(tmpDir, `${name}.scrml`);
-  const outDir = resolve(tmpDir, "out");
-  mkdirSync(tmpDir, { recursive: true });
-  writeFileSync(tmpInput, source);
-  try {
-    const opts = { inputFiles: [tmpInput], write: true, outputDir: outDir };
-    if (parser) opts.parser = parser;
-    const result = compileScrml(opts);
-    const clientPath = resolve(outDir, `${name}.client.js`);
-    return {
-      errors: result.errors ?? [],
-      warnings: result.warnings ?? [],
-      clientJs: existsSync(clientPath) ? readFileSync(clientPath, "utf8") : "",
-    };
-  } finally {
-    if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
-  }
+function opBody(result, name = "op") {
+  const fn = findNodes(result.ast, (n) => n.kind === "function-decl" && n.name === name)[0];
+  return fn ? fn.body : null;
 }
 
-// Extract a named generated function body for a focused comparison.
-function fnBody(clientJs, fnName) {
-  const re = new RegExp(`function _scrml_${fnName}_\\d+\\(\\)\\s*\\{([\\s\\S]*?)\\n\\}`);
-  const m = clientJs.match(re);
-  return m ? m[1] : null;
+// The fields codegen lowers for the two reactive-write kinds, normalized over
+// the representational differences between the two parsers that codegen
+// already absorbs: the native bridge leaves the legacy string mirrors
+// (`value`, a path step's `raw`) empty and carries the structured sibling; for
+// a multi-argument or argument-less mutation it carries the argument TEXT in
+// `args` with `argsExpr: null` where the default parser wraps the same text in
+// an escape-hatch.
+function argsText(stmt) {
+  if (stmt.argsExpr === undefined || stmt.argsExpr === null) return stmt.args ?? "";
+  if (typeof stmt.argsExpr.raw === "string") return stmt.argsExpr.raw;
+  return JSON.stringify(withoutPositions(stmt.argsExpr));
+}
+function project(stmt) {
+  const p = { kind: stmt.kind, target: stmt.target };
+  if (stmt.kind === "reactive-nested-assign") {
+    p.path = withoutPositions(stmt.path).map((step) =>
+      step && typeof step === "object" ? { index: step.index } : step);
+    p.valueExpr = withoutPositions(stmt.valueExpr);
+  } else {
+    p.method = stmt.method;
+    p.args = argsText(stmt);
+  }
+  return p;
 }
 
 describe("native reactive-write deep-set + array-mutation node synthesis (FIX A)", () => {
-  test("deep-set + array-mutation: native emits COW / triggered form (not in-place)", () => {
+  test("deep-set + array-mutation synthesize the live node kinds (not bare expressions)", () => {
     const src = [
       '<a> = { ref: "" }',
       "<c> = 0",
@@ -79,97 +72,47 @@ describe("native reactive-write deep-set + array-mutation node synthesis (FIX A)
       "<button onclick=multi()>go</button>",
       "<p>${@c} ${@a.ref} ${@arr}</p>",
     ].join("\n") + "\n";
-
-    const native = compileWith(src, "scrml-native", "ds-mut");
-    expect(native.errors).toHaveLength(0);
-    const body = fnBody(native.clientJs, "multi");
+    const nat = nativeAst(src);
+    expect(errorsOf(nat)).toEqual([]);
+    const body = opBody(nat, "multi");
     expect(body).not.toBeNull();
-
-    // The COW deep-set form — NOT the in-place `_scrml_reactive_get("a").ref = `.
-    expect(body).toContain(
-      '_scrml_cs_reactive_set("a", _scrml_deep_set(_scrml_cs_reactive_get("a"), ["ref"], "p"))',
-    );
-    expect(body).not.toContain('_scrml_reactive_get("a").ref =');
-
-    // The triggered array-mutation form — push + a follow-up reactive_set.
-    expect(body).toContain('_scrml_cs_reactive_get("arr").push(5)');
-    expect(body).toContain('_scrml_cs_reactive_set("arr", _scrml_cs_reactive_get("arr"))');
+    const deep = body.find((s) => s.kind === "reactive-nested-assign");
+    const mut = body.find((s) => s.kind === "reactive-array-mutation");
+    expect(deep).toBeDefined();
+    expect(deep.target).toBe("a");
+    expect(deep.path).toEqual(["ref"]);
+    expect(mut).toBeDefined();
+    expect(mut.target).toBe("arr");
+    expect(mut.method).toBe("push");
+    // Never the pre-fix generic statement for these two writes: no bare
+    // expression assigns through a member or calls a method.
+    const genericWrite = (s) => s.kind === "bare-expr" && s.exprNode
+      && ((s.exprNode.kind === "assign" && s.exprNode.target && s.exprNode.target.kind !== "ident")
+        || s.exprNode.kind === "call");
+    expect(body.filter(genericWrite)).toHaveLength(0);
   });
 
-  // Byte-parity against the already-green LIVE emit across the reactive-write
-  // variant matrix. Each row is its own `function` body so a single divergence
-  // localizes.
   const matrix = [
+    { name: "dotted deep-set", decls: ['<a> = { ref: "" }'], lines: ['@a.ref = "p"'] },
+    { name: "nested dotted deep-set", decls: ["<obj> = { cfg: { deep: 0 } }"], lines: ["@obj.cfg.deep = 9"] },
+    { name: "computed-index write (@cell index)", decls: ["<arr> = [1, 2, 3]", "<sel> = 0"], lines: ["@arr[@sel] = 9"] },
+    { name: "literal-index write", decls: ["<arr> = [1, 2, 3]"], lines: ["@arr[0] = 9"] },
+    { name: "string-index write", decls: ["<m> = { DAL: 0 }"], lines: ['@m["DAL"] = 8'] },
+    { name: "single-arg push", decls: ["<arr> = []"], lines: ["@arr.push(5)"] },
+    { name: "push @cell arg", decls: ["<arr> = []", "<x> = 7"], lines: ["@arr.push(@x)"] },
+    { name: "multi-arg splice", decls: ["<arr> = [1, 2, 3, 4]"], lines: ["@arr.splice(0, 2)"] },
+    { name: "arg-less pop", decls: ["<arr> = [1, 2, 3]"], lines: ["@arr.pop()"] },
+    { name: "unshift / sort / reverse / fill", decls: ["<arr> = [3, 1, 2]"], lines: ["@arr.unshift(0)", "@arr.sort()", "@arr.reverse()", "@arr.fill(0)"] },
     {
-      name: "dotted deep-set",
-      decls: ['<a> = { ref: "" }'],
-      lines: ['@a.ref = "p"'],
-    },
-    {
-      name: "nested dotted deep-set",
-      decls: ["<obj> = { cfg: { deep: 0 } }"],
-      lines: ["@obj.cfg.deep = 9"],
-    },
-    {
-      name: "computed-index write (@cell index)",
-      decls: ["<arr> = [1, 2, 3]", "<sel> = 0"],
-      lines: ["@arr[@sel] = 9"],
-    },
-    {
-      name: "literal-index write",
-      decls: ["<arr> = [1, 2, 3]"],
-      lines: ["@arr[0] = 9"],
-    },
-    {
-      name: "string-index write",
-      decls: ["<m> = { DAL: 0 }"],
-      lines: ['@m["DAL"] = 8'],
-    },
-    {
-      name: "single-arg push",
-      decls: ["<arr> = []"],
-      lines: ["@arr.push(5)"],
-    },
-    {
-      name: "push @cell arg",
-      decls: ["<arr> = []", "<x> = 7"],
-      lines: ["@arr.push(@x)"],
-    },
-    {
-      name: "multi-arg splice",
-      decls: ["<arr> = [1, 2, 3, 4]"],
-      lines: ["@arr.splice(0, 2)"],
-    },
-    {
-      name: "arg-less pop",
-      decls: ["<arr> = [1, 2, 3]"],
-      lines: ["@arr.pop()"],
-    },
-    {
-      name: "unshift / sort / reverse / fill",
-      decls: ["<arr> = [3, 1, 2]"],
-      lines: ["@arr.unshift(0)", "@arr.sort()", "@arr.reverse()", "@arr.fill(0)"],
-    },
-    {
-      // NEGATIVE — a plain-local non-cell write must stay in-place (no re-shape).
+      // NEGATIVE — a plain-local non-cell write must stay a bare expression.
       name: "non-cell local write (negative)",
       decls: ["<arr> = []"],
-      lines: [
-        "let obj = { x: 0 }",
-        "obj.x = 5",
-        "obj.list = []",
-        "obj.list.push(9)",
-        "@arr.push(obj.x)",
-      ],
+      lines: ["let obj = { x: 0 }", "obj.x = 5", "obj.list = []", "obj.list.push(9)", "@arr.push(obj.x)"],
     },
   ];
 
   for (const { name, decls, lines } of matrix) {
-    test(`${name}: native client.js byte-matches default`, () => {
-      // Read the FIRST declared cell in markup so the page has a valid reactive
-      // read (the read-side E-STATE-UNDECLARED fire, S192, surfaces a markup read
-      // of an undeclared cell — earlier this hardcoded `@arr`, which is undeclared
-      // in the dotted/nested/string-index cases that declare `<a>`/`<obj>`/`<m>`).
+    test(`${name}: native statement nodes match the default parser's`, () => {
       const firstCell = (decls[0].match(/^<([A-Za-z_$][\w$]*)>/) || [])[1] || "arr";
       const src = [
         ...decls,
@@ -179,17 +122,16 @@ describe("native reactive-write deep-set + array-mutation node synthesis (FIX A)
         "<button onclick=op()>go</button>",
         `<p>\${@${firstCell}}</p>`,
       ].join("\n") + "\n";
-
-      const live = compileWith(src, null, "live");
-      const native = compileWith(src, "scrml-native", "native");
-      expect(live.errors).toHaveLength(0);
-      expect(native.errors).toHaveLength(0);
-
-      const liveBody = fnBody(live.clientJs, "op");
-      const nativeBody = fnBody(native.clientJs, "op");
-      expect(liveBody).not.toBeNull();
-      expect(nativeBody).not.toBeNull();
-      expect(nativeBody).toBe(liveBody);
+      const nat = nativeAst(src);
+      const live = liveAst(src);
+      expect(errorsOf(nat)).toEqual([]);
+      const nb = opBody(nat);
+      const lb = opBody(live);
+      expect(nb).not.toBeNull();
+      expect(lb).not.toBeNull();
+      expect(nb.map((s) => s.kind)).toEqual(lb.map((s) => s.kind));
+      const reactive = (s) => s.kind === "reactive-nested-assign" || s.kind === "reactive-array-mutation";
+      expect(nb.filter(reactive).map(project)).toEqual(lb.filter(reactive).map(project));
     });
   }
 });
