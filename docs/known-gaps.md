@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 230 | 5 |
-| MED | 472 | 1 |
+| MED | 473 | 1 |
 | LOW | 224 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -21870,6 +21870,24 @@ Measured on `main` after #1212. A postfix update followed by a line that starts 
 <!-- @gap id=g-dev-missing-helper-dep-not-watched sev=LOW status=open locus=compiler/src/commands/dev.js(watch set — only paths that resolved are watched) prov=review:S446-cj-rv2 -->
 
 **Introduced surface: PR #1211 (draft, held for bryan).** It is not on `main` until #1211 lands. If a page imports a client helper file that does not exist yet, the compile fails. Creating the file afterwards does not recompile, because the missing path was never added to the watch set. Workaround: touch the importer. Fix: watch the unresolved paths, or their parent directories.
+
+### g-attr-multi-statement-value-silently-misread — a `;`-separated statement list in a NON-handler attribute value (`title=(f(); "t")`, `title=${f(); "u"}`) compiled at exit 0 with a wrong reading — `NEW S450; HIGH; RESOLVED S450 (s450-attr-multi-statement)`
+
+<!-- @gap id=g-attr-multi-statement-value-silently-misread sev=HIGH status=resolved resolved-by=s450-attr-multi-statement locus=compiler/src/ast-builder.js(checkAttrMultiStatement / attrValueSemicolonStatementCount — called from parseAttributes and parseLiftTag; SUBPARSE_FORWARDED_CODES) prov=ruling:user-voice-scrml.md-S447-stamp-all -->
+
+Before S450, on `main` `bc4bca1f7`: `title=(f(); "t")` was not emitted at all (only a W-CG-VALUE-ATTR-UNLOWERABLE warning, exit 0); `title=${f(); "u"}` and `title={f(); "v"}` took the value of `f()` silently; `if=(f(); @x)` failed later with E-CODEGEN-INVALID-LOGIC. **RESOLVED for what is built:** SPEC §5.2.4 (new) and the §34 row `E-ATTR-MULTI-STATEMENT`. The value is parsed with the handler statement-list parser. A `${…}` / `{…}` value fires on any clean parse of two or more statements, unless the expression parser consumes it whole. A `(…)` value or a quoted `if="…"` condition fires when its statements are separated by a statement-level `;`. Covered positions: page markup, component call-site props, `<each>` rows, `for … lift` rows, engine state-child bodies and their own attributes, and `<match>` arms. Exempt: event handlers, and `effect=` on an engine opener or state-child only (S239 review fix round: `<div effect=${ f(); g() }>` now fires). Pinned by `compiler/tests/unit/attr-multi-statement-s450.test.js`, which includes the S239 review false-positive set fp01–fp30, and by `conformance/cases/markup-handler/s450-attr-multi-statement-{pos,neg}`. Corpus: 0 hits in 975 files (examples, samples, assetManagement `app/src`, flogenceP `src`), measured both before and after the fix round. The forms not yet detected are tracked in `g-attr-multi-statement-undetected-forms` below. Two related shapes are not part of that gap. A statement list inside a quoted-string interpolation (`class="a-${f(); @x}"`) already fails loudly with E-CODEGEN-INVALID-LOGIC. A bare non-handler value followed by `;` (`title=f(); g()`) is wired as a `title` event listener with `g` read as a further attribute, at exit 0.
+
+### g-attr-multi-statement-undetected-forms — some multi-statement non-handler attribute values still compile silently with a wrong reading, because E-ATTR-MULTI-STATEMENT does not detect them yet — `NEW S450; MED; open`
+
+<!-- @gap id=g-attr-multi-statement-undetected-forms sev=MED status=open locus=compiler/src/ast-builder.js(checkAttrMultiStatement) prov=review:S450-S239-review-of-fix/s450-attr-multi-statement -->
+
+Found by the S239 review of `fix/s450-attr-multi-statement`, and re-run on the fix-round head. The forms below are not detected, so each compiles at exit 0 and keeps only part of the value (or a different value). SPEC §5.2.4 lists them under "Not yet detected". The PA routes them to bryan with the recommendation "error, fail closed".
+
+- **A `${…}` / `{…}` value that the statement parser reads as ONE statement.** Two cases: newline-separated (`title=${f()⏎"u"}`, `title={f()⏎"v"}`) and juxtaposed (`title=${ f() g() }`). The value of `f()` is used. Detecting these needs a parser verdict (for example, the §7.2.2 E-STMT-MISSING-SEMICOLON / line-break rule applied to a non-handler value), not a text scanner.
+- **Markup inside a component DEFINITION body.** Examples: `${ const Card = <div title=${f(); "c"}>…</div> }` and the bare `const Card = <…>` form. The definition body is re-parsed by component expansion, and that path does not run the check.
+- **Markup values in logic.** Examples: `<p>${ <span title=(f(); "c")>x</span> }</p>` and `${ const m = <span title=${f(); "c"}>x</span> }`.
+- **The `--parser=scrml-native` front end.** The check lives in the default front end's attribute parse only.
+- **A `<match>` arm's `effect=` inside an engine state-child is silently accepted.** This is pre-existing. Outside an engine the same arm `effect=` is E-MATCH-EFFECT-FORBIDDEN (§18.0.2).
 ## §S447 — validity-surface build owed by the S447 rulings (2026-10-01; ruling:user-voice-scrml.md S447 "validated top-level cells get a validity surface (Edge A reversed)" item 1 + "validity calls 2-6"; SPEC §55.5.1-§55.5.3 / §55.7 / §55.17, change `docs/changes/s447-spec-validity-surface/`. Bootstrap loci read at `01f8dda17`; no browser run)
 
 ### g-bootstrap-validated-form-fields-fail-open-no-surface-no-gate — bootstrap: emits `novalidate` on every form carrying lowered validator attributes (S442 (3)) while it has NO §55 validity surface and NO submit gate, so a validated child field inside a `<form>` gates nothing: the browser's block is removed and nothing replaces it
