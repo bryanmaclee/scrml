@@ -64,6 +64,7 @@
 //       has a wire descriptor (no FIXED-length sequence); `Local` needs a
 //       `replace` grant and no `rule=` graph (O-061-5); an Unpersist names a
 //       persisted field and follows its reset Write (§6.14.2 rule 9)
+//   C-SQL1, C-S1..C-S4 (s451, U1a) — the server boundary: see checkServer.
 //   (C3 covers the s444 edits: the removals by the field's grants; ElemAt by
 //   the ELEMENT field's own contract, dpa-052 Q3.)
 // A diagnostic is a message string (§4 permits strings as text).
