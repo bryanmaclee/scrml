@@ -62,3 +62,28 @@
   - incident: one bare `pkill -f "exall.ts"` used to stop my own runaway scratch script (brief forbids
     bare pkill -f). It matched only that script; reported.
   - counter after: PASS 76 (62 non-vacuous) · FAIL 62 · NOT-TWINNED 500 · UNSUPPORTED 650 · graded 138.
+- S239 re-review of df9f80aab: r1 fixes hold; one HIGH + one MED, fixed on top:
+  - HIGH: a MULTI-LINE import hid a cross-file writer (both scanners were single-line). New
+    `importSpecifiers` (fix-s66.js, used by fix.js `resolveProject` too) spans lines, reads
+    `export … from` re-exports, and counts an `import` statement whose specifier cannot be read as
+    UNRESOLVED (→ every cell `let`). Tests: multi-line import end to end through the CLI
+    (`components/bump.scrml`), multi-line `export {…} from`, unreadable specifier.
+  - MED: `:int` is chosen only when EVERY write to the cell across the project is provably integer
+    from impl#1's AST (integer literal / `+ - * %` of int cells / `++` `--` / `reset`), and the cell
+    is never an operand of `/`; any non-integer or unclassifiable write (bind:, ref=, method, call
+    result, fractional cell) → reported, untouched. The raw-text regex (which tripped on `/>`) is gone.
+    Tests: Math.random(), a fractional cell, a call result → reported; integer writes → `:int`;
+    `<br/>` no longer trips it.
+  - counter unchanged by this round: PASS 76 (62 non-vacuous) · FAIL 62 · NOT-TWINNED 500 ·
+    UNSUPPORTED 650 · graded 138 of 1288.
+
+## STATUS AT S449 WRAP (for the next session)
+- Branch `wip/s449-scrml-fix-s66-twins`, tip = the commit carrying this note. Two S239 reviews done
+  (r1 DO-NOT-LAND → fixed in d20429289 + df9f80aab; re-review → this round). Ready to land after the
+  re-review confirms this round; no further work owed inside the change.
+- Open forks for the PA / bryan (filed in docs/known-gaps.md §S449-scrml-fix-s66-twins):
+  (1) union types in an opener (`string | not`) — spelling not ruled; (2) program-wrap adds the
+  §65.3.4 reset layer impl#1 omits for an implicit program — rec (a) keep plain `<program>` + CLI note.
+- Mapping rows owed: the bootstrap's E-DECL-STATE-CHILD / E-TYPE-VARIANT are named in no SPEC section.
+- Deferred: the type-dependent tier (O35 deep-dive, dpa-065), structural forms (components,
+  compounds, Shape 2, sequence grants), destructuring-write miss (filed).

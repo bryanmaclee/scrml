@@ -45,7 +45,7 @@
 
 import { readFileSync, writeFileSync, statSync, readdirSync, existsSync } from "fs";
 import { resolve, join, relative, sep, dirname } from "path";
-import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES } from "./fix-s66.js";
+import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES, importSpecifiers } from "./fix-s66.js";
 
 const HELP = `scrml fix <file|dir> [options]
 
@@ -125,9 +125,9 @@ export function resolveProject(file, extra = []) {
     let src;
     try { src = readFileSync(f, "utf8"); } catch { continue; }
     if (f !== resolve(file)) out[f] = src;
-    for (const m of src.matchAll(/\bimport\b[^\n;]*?\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']/g)) {
-      const spec = m[1] ?? m[2];
-      if (!spec || !spec.startsWith(".")) continue;
+    // Multi-line clauses included (`import {⏎ A⏎ } from "./a.scrml"`), and `export … from` re-exports.
+    for (const spec of importSpecifiers(src).specs) {
+      if (!spec.startsWith(".")) continue;
       for (const cand of [resolve(dirname(f), spec), resolve(dirname(f), spec + ".scrml")]) {
         if (!seen.has(cand) && cand.endsWith(".scrml") && existsSync(cand)) { seen.add(cand); queue.push(cand); break; }
       }

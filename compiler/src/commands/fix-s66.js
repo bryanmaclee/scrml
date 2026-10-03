@@ -369,14 +369,38 @@ function commonDir(paths) {
   return parts.join(sep) || sep;
 }
 
+/**
+ * The import specifiers of a source — `import … from "x"`, `import "x"`, and the re-export
+ * `export … from "x"` — with every clause allowed to span lines (`import {⏎ A,⏎ B⏎ } from "x"`).
+ * `unextracted` counts `import` keywords at a statement start whose specifier could NOT be read:
+ * the caller treats that as an unresolved import (a hidden file that may write a cell).
+ * @returns {{ specs: string[], unextracted: number }}
+ */
+export function importSpecifiers(src) {
+  const specs = [];
+  let unextracted = 0;
+  const CLAUSE = String.raw`(?:\{[^}]*\}|\*\s*as\s+[\w$]+|[\w$]+(?:\s*,\s*(?:\{[^}]*\}|\*\s*as\s+[\w$]+))?)`;
+  const IMPORT = new RegExp(String.raw`^import\s*(?:${CLAUSE}\s*from\s*)?["']([^"']+)["']`);
+  const REEXPORT = new RegExp(String.raw`^export\s*(?:\{[^}]*\}|\*(?:\s*as\s+[\w$]+)?)\s*from\s*["']([^"']+)["']`);
+  // `import` / `export` as a statement keyword: at a line start, or after `${`, `;` or `{`.
+  for (const m of src.matchAll(/(^|[\n;{]|\$\{)[ \t]*(import|export)\b/g)) {
+    const at = m.index + m[0].length - m[2].length;
+    const rest = src.slice(at, at + 2000);
+    if (m[2] === "import") {
+      const im = rest.match(IMPORT);
+      if (im) specs.push(im[1]);
+      else unextracted++;
+    } else {
+      const ex = rest.match(REEXPORT);
+      if (ex) specs.push(ex[1]);
+    }
+  }
+  return { specs, unextracted };
+}
+
 /** Relative `.scrml` import specifiers of a source (`import … from "./x.scrml"`). */
 function relativeImports(src) {
-  const out = [];
-  for (const m of src.matchAll(/\bimport\b[^\n;]*?\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']/g)) {
-    const spec = m[1] ?? m[2];
-    if (spec && spec.startsWith(".")) out.push(spec);
-  }
-  return out;
+  return importSpecifiers(src).specs.filter((spec) => spec.startsWith("."));
 }
 
 /**
@@ -547,6 +571,66 @@ function intReaderCells(src) {
   for (const m of src.matchAll(/<[A-Za-z_][\w]*[^<>\n]*>\s*:\s*(?:int|integer)\s*=([^\n]*)/g)) grab(m[1]);
   for (const m of src.matchAll(/<[A-Za-z_][\w]*:(?:int|integer)=([^\n]*)/g)) grab(m[1]);
   return out;
+}
+
+/** Is an ExprNode provably an integer, given the `int` cells (`self` counts as one)? */
+function isIntegerExpr(e, intCells, self) {
+  if (!e) return false;
+  switch (e.kind) {
+    case "lit":
+      return e.litType === "number" && Number.isInteger(e.value) && !/[.eE]/.test(String(e.raw ?? ""));
+    case "unary":
+      return (e.op === "-" || e.op === "+") && isIntegerExpr(e.argument, intCells, self);
+    case "binary":
+      return ["+", "-", "*", "%"].includes(e.op) && isIntegerExpr(e.left, intCells, self) && isIntegerExpr(e.right, intCells, self);
+    case "ident":
+      return typeof e.name === "string" && e.name.startsWith("@") && (e.name.slice(1) === self || intCells.has(e.name.slice(1)));
+    default:
+      return false;
+  }
+}
+
+/**
+ * Every write to `@name` across the project ASTs, judged for integer-ness:
+ *   "int"      — each write is `@x = <integer expr>`, `@x += / -= / *= / %= <integer expr>`, `@x++` /
+ *                `@x--`, or `reset(@x)` (back to its integer initializer);
+ *   "not-int"  — some write's value is not provably integer, or the cell is an operand of `/`;
+ *   "unknown"  — a write the AST does not expose as an assignment (bind:, ref=, a method / field
+ *                write, `@set(…)`), or a lexical write the AST did not show at all.
+ */
+function intWriteVerdict(name, asts, intCells, sources) {
+  let verdict = "int";
+  let astWriteCount = 0;
+  const worse = (v) => { if (v === "unknown" || verdict === "int") verdict = verdict === "unknown" ? "unknown" : v; };
+  for (const ast of asts) {
+    walkAst(ast, (n) => {
+      if (n.kind === "state-decl" && n.name === name && (n._isReactiveAssign || (n.structuralForm === false && n.shape !== "derived"))) {
+        astWriteCount++;
+        if (!isIntegerExpr(n.initExpr, intCells, name)) worse("not-int");
+      }
+      if ((n.kind === "reactive-array-mutation" || n.kind === "reactive-nested-assign") && n.target === name) worse("unknown");
+      if (n.kind === "reactive-explicit-set" && typeof n.args === "string" && new RegExp(`\\b${name}\\b`).test(n.args)) worse("unknown");
+      if (n.kind === "markup" && Array.isArray(n.attrs)) {
+        for (const a of n.attrs) {
+          if (a && typeof a.name === "string" && (a.name.startsWith("bind:") || a.name === "ref") && a.value && a.value.name === `@${name}`) worse("unknown");
+        }
+      }
+    });
+    forEachExprNode(ast, (e) => {
+      if (e.kind === "assign" && lvalueRoot(e.target) === name) {
+        astWriteCount++;
+        if (e.target.kind !== "ident") worse("unknown");
+        else if (!["=", "+=", "-=", "*=", "%="].includes(e.op) || !isIntegerExpr(e.value, intCells, name)) worse("not-int");
+      }
+      if ((e.kind === "unary" || e.kind === "update") && (e.op === "++" || e.op === "--") && lvalueRoot(e.argument) === name) astWriteCount++;
+      if (e.kind === "reset-expr" && lvalueRoot(e.target) === name) astWriteCount++;
+      // A READ as an operand of `/` also rules `int` out: `/` between two ints is E-INT-DIVISION.
+      if (e.kind === "binary" && e.op === "/" && [e.left, e.right].some((o) => o && o.kind === "ident" && o.name === `@${name}`)) worse("not-int");
+      if (e.kind === "call" && e.callee && e.callee.kind === "member" && lvalueRoot(e.callee.object) === name && !PURE_METHODS.has(e.callee.property)) worse("unknown");
+    });
+  }
+  if (astWriteCount === 0 && sources.some((s) => lexicalWritten(s, name, false))) return "unknown";
+  return verdict;
 }
 
 // ---------------------------------------------------------------------------
@@ -812,7 +896,9 @@ export function fixS66(source, opts = {}) {
   const known = new Set([resolve(filePath), ...project.map(([p]) => absKey(filePath, p))]);
   for (const [p, s] of [[filePath, src], ...project]) {
     const base = p === filePath ? resolve(filePath) : absKey(filePath, p);
-    for (const spec of relativeImports(s)) {
+    const im = importSpecifiers(s);
+    if (im.unextracted > 0) projectUnknown = true; // an import we cannot even read: assume a writer
+    for (const spec of im.specs.filter((x) => x.startsWith("."))) {
       const target = resolve(dirname(base), spec);
       if (!known.has(target) && !known.has(target + ".scrml")) projectUnknown = true;
     }
@@ -871,6 +957,8 @@ export function fixS66(source, opts = {}) {
   const allSources = [src, ...project.map(([, s]) => s), ...scanOnly.map(([, s]) => s)];
   const lifecycleCells = new Set(allSources.flatMap((s) => [...lifecycleNamedCells(s)]));
   const intReaders = new Set(allSources.flatMap((s) => [...intReaderCells(s)]));
+  // Cells that are `int` by their own annotation (the operands an integer expression may read).
+  const intCells = new Set(allSources.flatMap((s) => [...s.matchAll(/<([A-Za-z_][\w]*)[^<>\n]*>\s*:\s*(?:int|integer)\b|<([A-Za-z_][\w]*):(?:int|integer)\b/g)].map((m) => m[1] ?? m[2])));
 
   // ---- declarations ----------------------------------------------------------------------------
   for (const { node, stack } of decls) {
@@ -931,13 +1019,13 @@ export function fixS66(source, opts = {}) {
     }
     let type = cls.type ?? site.annotation ?? null;
     // An untyped integer literal is a JS number in impl#1 (`:number`), but a cell an `int`-typed
-    // declaration reads must be `int` (else E-TYPE-031). `int` is right only if nothing divides the
-    // cell or gives it a fractional value; otherwise int-vs-number is not mechanical — reported.
+    // declaration reads must be `int` (else E-TYPE-031). `int` is chosen only when EVERY write to the
+    // cell, in every project file, is provably integer from impl#1's AST (an integer literal, or an
+    // integer expression of `int` cells); anything else — or any write the AST cannot classify —
+    // leaves int-vs-number not mechanical: reported, untouched.
     if (!site.annotation && type === "number" && cls.kind === "literal" && /^-?\(?-?\d+\)?$/.test(cls.valueText) && intReaders.has(node.name)) {
-      const nm = node.name.replace(/\$/g, "\\$");
-      const divided = allSources.some((t) => new RegExp(`@${nm}(?![\\w$])\\s*/(?![/*=])|/=?\\s*@${nm}(?![\\w$])`).test(t));
-      const fractional = allSources.some((t) => [...t.matchAll(new RegExp(`@${nm}(?![\\w$])\\s*[-+*]?=(?!=)([^\\n;]*)`, "g"))].some((m) => /\d\.\d|\//.test(m[1])));
-      if (divided || fractional) { block(rule, off, "an untyped integer cell feeds an `int`-typed reader but is also divided / given a fractional value — `int` vs `number` is not mechanical"); continue; }
+      const v = projectUnknown || hasMeta || writeAttr ? "unknown" : intWriteVerdict(node.name, [ast, ...auxAsts, ...scanAsts], intCells, allSources);
+      if (v !== "int") { block(rule, off, `an untyped integer cell feeds an \`int\`-typed reader, but its writes are ${v === "not-int" ? "not all provably integer" : "not all classifiable"} — \`int\` vs \`number\` is not mechanical`); continue; }
       type = "int";
     }
     if (node.isConst && !type && cls.kind !== "literal") { block(rule, off, "derived value needs a type (CTX — O35)"); continue; }

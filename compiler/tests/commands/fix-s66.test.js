@@ -18,10 +18,10 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, cpSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, cpSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { fixS66, S66_RULES, astWrites, lexicalWritten, lifecycleNamedCells } from "../../src/commands/fix-s66.js";
+import { fixS66, S66_RULES, astWrites, lexicalWritten, lifecycleNamedCells, importSpecifiers } from "../../src/commands/fix-s66.js";
 import { runFixCommand, classifyEntry, lineDiff, resolveProject } from "../../src/commands/fix.js";
 import { compileScrml } from "../../src/api.js";
 import { splitBlocks } from "../../src/block-splitter.js";
@@ -507,5 +507,62 @@ describe("§9 S239 review MED / LOW", () => {
   test("LOW: pre-migrate never rewrites a comment", () => {
     const src = "<program>\n// legacy note: <machine> and < engine were renamed\n<p>x</p>\n</program>\n";
     expect(fix(src).output).toBe(src);
+  });
+});
+
+describe("§10 S239 re-review — multi-line imports and the `:int` choice", () => {
+  test("HIGH: a MULTI-LINE import's writer is in the project — the cell stays `let` (CLI end to end)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-fix-"));
+    try {
+      mkdirSync(join(dir, "components"));
+      writeFileSync(join(dir, "components", "bump.scrml"), "${ export const Bump = <button onclick=${@count = @count + 1}>+</button> }\n");
+      const f = join(dir, "app.scrml");
+      writeFileSync(f, "<program>\n${ import {\n    Bump\n  } from \"./components/bump.scrml\"\n<count> = 0 }\n<Bump/>\n<p>${@count}</p>\n</program>\n");
+      expect(Object.keys(resolveProject(f)).map((k) => k.slice(dir.length + 1))).toEqual(["components/bump.scrml"]);
+      runFixCommand([f, "--s66", "--write"], { out: () => {}, err: () => {} });
+      expect(readFileSync(f, "utf8")).toContain("let <count:number=0/>");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("importSpecifiers reads multi-line `import {…} from` and `export {…} from`; an unreadable import is counted", () => {
+    const r = importSpecifiers("${ import {\n  A,\n  B\n} from \"./a.scrml\"\nexport {\n  C\n} from \"./c.scrml\"\nimport D from \"./d.scrml\"\nimport \"./side.scrml\" }");
+    expect(r.specs).toEqual(["./a.scrml", "./c.scrml", "./d.scrml", "./side.scrml"]);
+    expect(r.unextracted).toBe(0);
+    expect(importSpecifiers("${ import { A } from someVariable }").unextracted).toBe(1);
+    expect(importSpecifiers("<p>Please import your data</p>").unextracted).toBe(0); // prose mid-line is not a statement
+  });
+
+  test("an import whose specifier cannot be read makes every cell `let`", () => {
+    const out = fix("<program>\n${ import { A } from someVariable }\n<n> = 0\n<p>${@n}</p>\n</program>\n").output;
+    expect(out).toContain("let <n:number=0/>");
+  });
+
+  test("a multi-line `export … from` re-export counts as an import: unresolved → every cell `let`", () => {
+    const out = fix("<program>\n${ export {\n  A\n} from \"./gone.scrml\" }\n<n> = 0\n<p>${@n}</p>\n</program>\n").output;
+    expect(out).toContain("let <n:number=0/>");
+  });
+
+  const intCase = (write) => fix(`\${\n    <price> = 1.5\n    <m> = 2\n    const <d>: int = @m * 2\n    function f() { ${write} }\n}\n<button onclick=f()>x</button>\n<p>\${@d}\${@price}</p>\n`);
+  for (const [label, write] of [
+    ["Math.random() * 10", "@m = Math.random() * 10"],
+    ["a fractional cell", "@m = @price"],
+    ["a call result", "@m = load()"],
+  ]) {
+    test(`MED: \`:int\` is NOT chosen when a write is ${label} — reported, untouched`, () => {
+      const r = intCase(write);
+      expect(r.output).toContain("<m> = 2");
+      expect(r.blockers.map((b) => b.reason).join("\n")).toContain("`int` vs `number` is not mechanical");
+    });
+  }
+  test("MED: every write an integer expression of int cells → `:int`", () => {
+    const r = intCase("@m = @m + 1; @m *= 3; @m++");
+    expect(r.output).toContain("let <m:int=2/>");
+    expect(r.blockers.filter((b) => b.reason.includes("int"))).toEqual([]);
+  });
+  test("MED: a `/>` in markup no longer trips the check (the old regex did)", () => {
+    const r = fix("${\n    <m> = 2\n    const <d>: int = @m * 2\n}\n<br/>\n<p>${@d}</p>\n");
+    expect(r.output).toContain("<m:int=2/>");
   });
 });
