@@ -18079,9 +18079,10 @@ function attrValueSemicolonStatementCount(raw, span, filePath, delimited = false
 
 /**
  * Push E-ATTR-MULTI-STATEMENT for a non-handler attribute whose expression
- * value is a `;`-separated statement list (SPEC §5.2.4). Returns true when it
- * fired (the caller then drops the value so nothing downstream lowers a
- * partial reading of it).
+ * value is a statement list (SPEC §5.2.4). Returns true when it fired. The
+ * attribute value is left as parsed (the error fails the compile; nothing is
+ * dropped here). `delimited` = the value is a `${…}` / `{…}` interior;
+ * `tagName` scopes the engine `effect=` exemption.
  */
 function checkAttrMultiStatement(name, value, filePath, errors, delimited = false, tagName = null) {
   if (!Array.isArray(errors) || typeof name !== "string" || isStatementPositionAttr(name, tagName)) return false;
@@ -18092,7 +18093,8 @@ function checkAttrMultiStatement(name, value, filePath, errors, delimited = fals
     `E-ATTR-MULTI-STATEMENT: The value of attribute \`${name}\` holds ${n} statements, ` +
     `but a non-handler attribute value is ONE expression. Write a single expression, or move the ` +
     `statements into a function and use its result (\`function compute() { … }\` then \`${name}=compute()\`). ` +
-    `Only an event-handler attribute (\`on…=\`) takes a statement list (SPEC §5.2.3, §5.2.4).`;
+    `Only an event-handler attribute (\`on…=\`) or an engine opener / state-child \`effect=\` ` +
+    `takes a statement list (SPEC §5.2.3, §5.2.4, §51.0.H).`;
   const err = new TABError("E-ATTR-MULTI-STATEMENT", msg, value.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 });
   // Kept so _forwardSubparseErrors can rebuild it with a file-true span.
   err.baseMessage = msg;

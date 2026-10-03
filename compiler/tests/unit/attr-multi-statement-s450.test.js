@@ -129,6 +129,7 @@ describe("§1 a `;`-separated statement list in a non-handler attribute value fi
     expect(f[0].message).toContain("into a function");
     expect(f[0].message).toContain("title=compute()");
     expect(f[0].message).toContain("§5.2.4");
+    expect(f[0].message).toContain("engine opener / state-child `effect=`");
   });
 
   test("each offending attribute fires its own diagnostic", () => {
