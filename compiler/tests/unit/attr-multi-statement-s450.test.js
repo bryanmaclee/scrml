@@ -221,6 +221,12 @@ describe("§3 event-handler attributes keep §5.2.3 behaviour", () => {
 </>`));
     expect(amsOf(r.errors).length).toBe(0);
   });
+
+  test("`effect=` on a non-engine element is a plain attribute and fires (review fn05)", () => {
+    const f = amsOf(compileSource(top(`<div effect=\${ f(); g() }>d</div>`)).errors);
+    expect(f.length).toBe(1);
+    expect(f[0].message).toContain("attribute `effect`");
+  });
 });
 
 // ---------------------------------------------------------------------------

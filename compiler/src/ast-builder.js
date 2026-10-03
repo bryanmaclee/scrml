@@ -4138,7 +4138,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
               emitForbiddenSwitchInRaw(raw, valSpan, (valSpan?.start ?? 0) + 1, filePath, errors);
               value = { kind: "expr", raw, refs, exprNode: parseHandlerAwareExprNode(name, raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
               // §5.2.4 (S450) — a statement list on a NON-handler attribute.
-              checkAttrMultiStatement(name, value, filePath, errors, true);
+              checkAttrMultiStatement(name, value, filePath, errors, true, tagName);
             }
           } else if (valTok.kind === "ATTR_EXPR") {
             // Boolean expression for if= attribute (e.g. !@var, @a === 1, @a && @b quoted).
@@ -4161,7 +4161,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
             emitForbiddenSwitchInRaw(raw, valSpan, valSpan?.start ?? 0, filePath, errors);
             value = { kind: "expr", raw, refs, exprNode: parseHandlerAwareExprNode(name, raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
             // §5.2.4 (S450) — a statement list on a NON-handler attribute.
-            checkAttrMultiStatement(name, value, filePath, errors, valTok.attrInterp === true);
+            checkAttrMultiStatement(name, value, filePath, errors, valTok.attrInterp === true, tagName);
           } else if (valTok.kind === "ATTR_OP_REJECT") {
             // cluster-A (S188 "reject + parens") — an unquoted CONDITION
             // attribute (`if=`/`show=`/`else-if=`) whose value contains a bare
@@ -6895,7 +6895,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           if (value.kind === "expr") delete value._liftInnerOffset;
           // §5.2.4 (S450) — lifted / `for … lift` markup attributes are parsed
           // here, not in parseAttributes: the same non-handler check.
-          checkAttrMultiStatement(attrName, value, filePath, errors, _liftInterp);
+          checkAttrMultiStatement(attrName, value, filePath, errors, _liftInterp, tag);
           attrs.push({ name: attrName, value, span: attrSpan });
         } else if (tag === "each" && attrName === "as") {
           // §17.7.3 / §59.8 — the `<each … as NAME>` / `as (K, V)` binding is a
@@ -17969,11 +17969,20 @@ export function parseHandlerStatementsForCheck(value, filePath) {
  */
 const _attrMultiStmtIds = { next: HANDLER_STMT_ID_BASE + 900_000_000 };
 
-/** Attribute names whose value is a statement position, not a value: exempt. */
-function isStatementPositionAttrName(name) {
-  // §5.2.3 event handlers (inline blocks are legal there; their own rule is
-  // E-MULTI-STATEMENT-HANDLER) and the §51.0.H engine `effect=` logic block.
-  return isEventHandlerAttrName(name) || name === "effect";
+/**
+ * Attributes whose value is a statement position, not a value: exempt.
+ * §5.2.3 event handlers (inline blocks are legal there; their own rule is
+ * E-MULTI-STATEMENT-HANDLER), and `effect=` ONLY where §51.0.H defines it as a
+ * logic block — the engine opener (`<engine>` / deprecated `<machine>`) and an
+ * engine state-child (a PascalCase element built inside an engine body). An
+ * `effect=` on any other element (`<div effect=${ f(); g() }>`) is a plain
+ * attribute and is judged (S450 fix round, S239 review fn05).
+ */
+function isStatementPositionAttr(name, tagName) {
+  if (isEventHandlerAttrName(name)) return true;
+  if (name !== "effect" || typeof tagName !== "string") return false;
+  if (tagName === "engine" || tagName === "machine") return true;
+  return _engineBodyBuildDepth > 0 && /^[A-Z]/.test(tagName);
 }
 
 function attrValueSemicolonStatementCount(raw, span, filePath, delimited = false) {
@@ -18074,8 +18083,8 @@ function attrValueSemicolonStatementCount(raw, span, filePath, delimited = false
  * fired (the caller then drops the value so nothing downstream lowers a
  * partial reading of it).
  */
-function checkAttrMultiStatement(name, value, filePath, errors, delimited = false) {
-  if (!Array.isArray(errors) || typeof name !== "string" || isStatementPositionAttrName(name)) return false;
+function checkAttrMultiStatement(name, value, filePath, errors, delimited = false, tagName = null) {
+  if (!Array.isArray(errors) || typeof name !== "string" || isStatementPositionAttr(name, tagName)) return false;
   if (!value || value.kind !== "expr") return false;
   const n = attrValueSemicolonStatementCount(value.raw, value.span, filePath, delimited);
   if (n < 2) return false;
