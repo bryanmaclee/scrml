@@ -1,0 +1,10 @@
+// §17.1.1 — a second `else` extends a chain that already ended with `else` (§17 Worked Example 5).
+<program>
+    let <isAdmin:boolean=false/>
+
+    <main>
+        <span if=@isAdmin>Admin panel</span>
+        <span else>User view</span>
+        <span else>Guest view</span>
+    </main>
+</program>

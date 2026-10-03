@@ -592,6 +592,7 @@ ${
         const t: PTok = cur(tp)
         const start: int = t.start
         if (isWord(tp, "let") || isWord(tp, "const")) return parseLocal(tp)
+        if (deferAhead(tp)) return parseDefer(tp)      // s451 (§19.16.1)
         if (isWord(tp, "return")) {
             const nx: PTok = peekAt(tp, 1)
             if (nx.cls == TC.End || nx.line != t.line || nx.text == "}" || nx.text == ";") {
@@ -833,12 +834,79 @@ ${
     }
 
     // `if (c) stmt` without braces is one statement in a block of its own.
+    // s451: a `defer` there is marked `bare` (§19.16.2 — no written block).
     fn parseBlockOrStmt(tp: TP) -> RBlock {
         if (isP(tp, "{")) return parseBlock(tp)
         const start: int = cur(tp).start
         const s: RStmt = parseStmt(tp)
-        const b: ABlock = { nid: s.tp.nid, span: spanFrom(s.tp, start), stmts: [s.s] }
+        const b: ABlock = { nid: s.tp.nid, span: spanFrom(s.tp, start), stmts: [bareDefer(s.s)] }
         return { b: b, tp: bumpId(s.tp) }
+    }
+
+    fn bareDefer(s: AStmt) -> AStmt {
+        const k: AStmtK = s.k
+        return match k {
+            .Defer(body: b, arrayLead: a) :> withStmtK(s, AStmtK.Defer(b, a, true))
+            .Eval(e: e) :> s
+            .Local(name: n) :> s
+            .Return(e: e) :> s
+            .If(cond: c) :> s
+            .Given(name: n) :> s
+            .EffectStmt(w: w) :> s
+        }
+    }
+
+    fn withStmtK(s: AStmt, k: AStmtK) -> AStmt {
+        return { nid: s.nid, span: s.span, k: k }
+    }
+
+    // =========================================================================
+    // s451 — `defer` (SPEC §19.16.1). A CONTEXTUAL keyword: it opens a defer
+    // statement "ONLY at statement start, and ONLY when the next token is on
+    // the same source line and can begin a statement — an identifier (other
+    // than the word operators `or`/`and`), an `@`-cell, a `?{}` block, a `{`,
+    // a `[` SEPARATED from `defer` by whitespace …, or a statement keyword
+    // other than `is`/`as`/`of`/`in`/`instanceof`/`else`/`from`/`extends`/
+    // `case`/`catch`/`finally`/`default`. Everywhere else `defer` is an
+    // ordinary identifier".
+    //   defer-stmt    ::= 'defer' deferred-body
+    //   deferred-body ::= statement | '{' statement* '}'
+    // =========================================================================
+    fn deferAhead(tp: TP) -> boolean {
+        const t: PTok = cur(tp)
+        if (t.cls != TC.Ident || t.v != "defer") return false
+        const nx: PTok = peekAt(tp, 1)
+        if (nx.cls == TC.End || nx.line != t.line) return false
+        if (nx.cls == TC.Ident) return nx.v != "or" && nx.v != "and"
+        if (nx.cls == TC.At) return true
+        if (nx.cls == TC.Keyword) return !deferNonLead(nx.v)
+        if (nx.cls != TC.Punct) return false
+        if (nx.text == "{") return true
+        if (nx.text == "[") return !touching(t, nx)
+        if (nx.text == "?") {
+            const n2: PTok = peekAt(tp, 2)
+            return n2.cls == TC.Punct && n2.text == "{" && touching(nx, n2)
+        }
+        return false
+    }
+
+    fn deferNonLead(w: string) -> boolean {
+        return ["is", "as", "of", "in", "instanceof", "else", "from", "extends", "case", "catch", "finally", "default"].indexOf(w) >= 0
+    }
+
+    // At `defer` (deferAhead said it opens a statement).
+    fn parseDefer(tp: TP) -> RStmt {
+        const start: int = cur(tp).start
+        const t: TP = adv(tp)
+        if (isP(t, "{")) {
+            const rb: RBlock = parseBlock(t)
+            return mkS(rb.tp, start, AStmtK.Defer(rb.b, false, false))
+        }
+        const arrayLead: boolean = isP(t, "[")
+        const bodyStart: int = cur(t).start
+        const r: RStmt = parseStmt(t)
+        const b: ABlock = { nid: r.tp.nid, span: spanFrom(r.tp, bodyStart), stmts: [r.s] }
+        return mkS(bumpId(r.tp), start, AStmtK.Defer(b, arrayLead, false))
     }
 
     // `given c = @h :> { … }` (§66.7.5)

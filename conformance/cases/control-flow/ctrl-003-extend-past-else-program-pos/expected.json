@@ -1,0 +1,11 @@
+{
+  "id": "ctrl-003-extend-past-else-program-pos",
+  "description": "§17 Worked Example 5 in the `<program>` + `let <x/>` shape — a second `<span else>` tries to extend a chain that already ended with `else`: E-CTRL-003. E-CTRL-001 co-fires by the SPEC's own rule (the second `else` is immediately preceded by an `else` element, not an `if=` / `else-if=` one) and is not asserted here; ctrl-003-extend-past-else-pos documents the same co-fire on impl#1. The twin of that legacy-shape case, so the bootstrap grades it. Severity (Error) is pinned by that legacy-shape twin; it is not asserted here because a bootstrap Diag carries no §34 severity yet.",
+  "language-version": "1.0",
+  "spec": "§17.1.1",
+  "rationale": "§17.1.1 Normative Rules: \"An `else` element SHALL be the terminal element of its chain. No element carrying `if=`, `else-if=`, or `else` SHALL appear immediately after an `else` element at the same parent level as part of the same chain. The compiler SHALL reject any element that would extend a chain past an `else` (E-CTRL-003).\"",
+  "expect": {
+    "codes": ["E-CTRL-003"],
+    "notCodes": ["E-CTRL-005"]
+  }
+}

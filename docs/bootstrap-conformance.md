@@ -7,30 +7,30 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1288 of 1288 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1293 of 1293 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 76 | 5.9% |
+| PASS | 86 | 6.7% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 60 | 4.7% |
+| FAIL | 57 | 4.4% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 510 | 39.6% |
-| UNSUPPORTED | 642 | 49.8% |
+| NOT-TWINNED | 510 | 39.4% |
+| UNSUPPORTED | 640 | 49.5% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 136; of those, 76 hold (55.9%). Runtime half executed on the bootstrap for 34 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 143; of those, 86 hold (60.1%). Runtime half executed on the bootstrap for 36 case(s).
 
-- **Vacuous** passes: 14 of 76 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **62**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 44 of 60; the other 16 are implemented checks that answered wrong.
+- **Vacuous** passes: 14 of 86 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **72**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 42 of 57; the other 15 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 378 · parse-reject 264.
+UNSUPPORTED by reason: bootstrap-unsupported 378 · parse-reject 262.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **581** — PASS 44 · FAIL 45 · UNSUPPORTED 492. Twin holds 44 (non-vacuous 35). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **581** — PASS 49 · FAIL 42 · UNSUPPORTED 490. Twin holds 49 (non-vacuous 40). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -102,8 +102,8 @@ NOT-TWINNED by reason (510 cases; a case counts once per distinct reason):
 | channel | 31 | · | · | · | · | 19 | 12 | · | · |
 | codegen | 2 | · | · | · | · | 1 | 1 | · | · |
 | components | 32 | · | · | 2 | · | 29 | 1 | · | · |
-| control-flow | 62 | 4 | · | 4 | · | 18 | 36 | · | · |
-| defer | 51 | 1 | · | 4 | · | 4 | 42 | · | · |
+| control-flow | 67 | 10 | · | 3 | · | 18 | 36 | · | · |
+| defer | 51 | 5 | · | 2 | · | 4 | 40 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
 | endpoint | 17 | · | · | · | · | · | 17 | · | · |
@@ -150,7 +150,7 @@ NOT-TWINNED by reason (510 cases; a case counts once per distinct reason):
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
 | type-state-codes | 27 | 3 | · | 2 | · | 3 | 19 | · | · |
 
-### FAIL (60)
+### FAIL (57)
 
 - `auth/auth-attr-empty-string-pos` (codes; not in the bootstrap: E-AUTH-ATTR-INVALID)
   - missing E-AUTH-ATTR-INVALID
@@ -191,28 +191,18 @@ NOT-TWINNED by reason (510 cases; a case counts once per distinct reason):
   - missing E-COMPONENT-019
 - `components/post-ce-residual-component-reject` (codes; not in the bootstrap: E-COMPONENT-035)
   - missing E-COMPONENT-035
-- `control-flow/ctrl-001-orphan-else-pos` (twin · codes; not in the bootstrap: E-CTRL-001)
-  - missing E-CTRL-001
-  - severity: E-CTRL-001 did not fire (expected error)
-- `control-flow/ctrl-002-orphan-else-if-pos` (twin · codes; not in the bootstrap: E-CTRL-002)
-  - missing E-CTRL-002
-  - severity: E-CTRL-002 did not fire (expected error)
+- `control-flow/ctrl-001-orphan-else-pos` (twin · codes)
+  - severity unobservable: E-CTRL-001 fired but the bootstrap Diag carries no §34 severity (expected error)
+- `control-flow/ctrl-002-orphan-else-if-pos` (twin · codes)
+  - severity unobservable: E-CTRL-002 fired but the bootstrap Diag carries no §34 severity (expected error)
 - `control-flow/ctrl-004-else-on-state-opener-pos` (twin · codes; not in the bootstrap: E-CTRL-004)
   - missing E-CTRL-004
   - severity: E-CTRL-004 did not fire (expected error)
-- `control-flow/if-chain-inactive-branches-absent` (twin · runtime)
-  - domAnchored: selector #rest: expected count 0, got 1
 - `defer/fn-prohibition-applies-neg` (twin · codes)
   - missing E-FN-003
 - `defer/fn-pure-local` (twin · runtime)
   - state: cell 'got' expected 41, got null
   - domAnchored: selector #out: text expected "41", got ""
-- `defer/not-reached-and-nested-blocks` (twin · runtime)
-  - state: cell 'trace' expected "body;inner;mid;end;late;outer;|body;inner;mid;outer;", got "outer;inner;body;mid;late;end;|outer;inner;body;mid;"
-  - domAnchored: selector #out: text expected "body;inner;mid;end;late;outer;|body;inner;mid;outer;", got "outer;inner;body;mid;late;end;|outer;inner;body;mid;"
-- `defer/return-value-before-deferred` (twin · runtime)
-  - state: cell 'got' expected 7, got 99
-  - domAnchored: selector #got: text expected "7", got "99"
 - `engine/engine-var-duplicate-pos` (twin · codes; mapped E-ENGINE-VAR-DUPLICATE→E-SCOPE-010)
   - severity unobservable: E-SCOPE-010 fired but the bootstrap Diag carries no §34 severity (expected error)
 - `engine/history-no-inner-engine-pos` (twin · codes; not in the bootstrap: E-HISTORY-NO-INNER-ENGINE)
@@ -322,7 +312,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (76)
+### PASS / CODES-ONLY (86)
 
 - `auth/i-auth-redirect-unresolved-neg` — PASS · VACUOUS
 - `auth/w-auth-content-not-gated-neg` — PASS · VACUOUS
@@ -336,11 +326,21 @@ none
 - `capability/argless-caps-empty-allowlist` — PASS
 - `capability/explicit-empty` — PASS
 - `capability/valid-clean` — PASS
+- `control-flow/ctrl-001-orphan-else-program-pos` — PASS
+- `control-flow/ctrl-002-orphan-else-if-program-pos` — PASS
+- `control-flow/ctrl-003-extend-past-else-program-pos` — PASS (also emitted, unasserted: E-CTRL-001)
+- `control-flow/ctrl-005-else-and-if-same-element-program-pos` — PASS
+- `control-flow/if-chain-inactive-branches-absent` — PASS · TWIN
+- `control-flow/if-chain-program-first-true-rt` — PASS
 - `control-flow/s437-r5-braced-else-block-comment-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-if-chain-comments-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-line-comment-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-ownline-comment-fn` — PASS · TWIN
 - `defer/identifier-untouched` — PASS · TWIN
+- `defer/lifo-fallthrough` — PASS · TWIN
+- `defer/nested-neg` — PASS · TWIN
+- `defer/not-reached-and-nested-blocks` — PASS · TWIN
+- `defer/return-value-before-deferred` — PASS · TWIN
 - `engine/engine-var-duplicate-neg` — PASS · TWIN
 - `engine/initial-invalid-variant-neg` — PASS · TWIN · VACUOUS
 - `engine/rule-invalid-variant-neg` — PASS · TWIN · VACUOUS
@@ -401,7 +401,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (642)
+### UNSUPPORTED (640)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -548,7 +548,7 @@ none
 - `defer/ambiguous-lead-neg` — twin · bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
 - `defer/array-literal-lead` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
 - `defer/control-flow-in-value-arms-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
-- `defer/control-flow-inner-loop-ok` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
+- `defer/control-flow-inner-loop-ok` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `i`
 - `defer/control-flow-neg` — twin · bootstrap-unsupported: member access `.Bad` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/cps-after-last-continuation` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `defer/cps-batch0-failure` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -562,13 +562,11 @@ none
 - `defer/handled-failable-ok` — twin · bootstrap-unsupported: member access `.Busy` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/hoist-structural` — twin · bootstrap-unsupported: member access `.kind` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/hoist-structural-twin` — twin · bootstrap-unsupported: member access `.kind` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `defer/later-shadow-ok` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `q`
-- `defer/lifo-fallthrough` — twin · parse-reject: E-PARSE-OBJECT: expected a field name, found `@`
+- `defer/later-shadow-ok` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
 - `defer/loop-per-iteration` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `i`
 - `defer/match-stmt-braced-arm` — twin · bootstrap-unsupported: member access `.A` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/nested-fn-handler-in-defer` — twin · bootstrap-unsupported: member access `.Gone` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `defer/nested-fn-handler-in-defer-twin` — twin · bootstrap-unsupported: member access `.Gone` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `defer/nested-neg` — twin · parse-reject: E-PARSE-OBJECT: expected a field name, found `@`
 - `defer/propagate-path` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
 - `defer/return-value-contents-not-frozen` — twin · bootstrap-unsupported: `.push(…)` on a local sequence is not in the bootstrap — Core has no edit of a local (write a new value: `let t = …`)
 - `defer/scope-redeclare-with-defer-neg` — twin · bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
