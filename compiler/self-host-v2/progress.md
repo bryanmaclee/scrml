@@ -779,3 +779,24 @@ re-run stack, depth-256 backstop) is DELETED, not brought; U0's `<each>` row-cle
 - **Not built (blocked — see `docs/known-gaps.md` `g-bootstrap-effect-reset-on-owed`)** — §6.7.7.3 write requests
   (no `<request>` / server boundary yet: units U1–U3), `reset-on=` compositions, `<onTransition>` on an engine reset,
   route-region owners.
+
+---
+
+# s449 — value positions do not write reactive state (SPEC §6.15, S449 item 3)
+
+Change `docs/changes/s449-bootstrap-no-write-formulas/` (BRIEF + progress, with the dead-proof and PA readings).
+
+- **analyze** — `valuePositions` (every initializer: program cell, user-declaration own value, attribute / child
+  field at any depth, use-site value; every derived formula; every render position: interpolation and every markup
+  attribute value but `on*=` / `bind:` / `as=`, in the program body, a `renders`, a state-child body) judged by
+  `valueDiags` against the shared `fnSummaries` fixed point: E-VALUE-WRITES-STATE (position, cell, chain, §6.15 fix
+  by shape) / E-VALUE-WRITE-UNPROVEN (fail closed). `scanExpr` records writes at any depth. The effect summary keeps
+  following reads into formulas / constructions (defence in depth, §6.15); a chain through one is the value
+  position's echo, dropped while a root is reported. Removed: the reset-value E-BOOTSTRAP-UNSUPPORTED (superseded).
+- **Gates** — slice-m4 465 → 504 (+ `value-positions.test.js` 39; `effect.test.js` / `reset-on.test.js` hole tests
+  now one source diagnostic each; C11 construction / formula tests graft the writer in Core). slice-m2 448 → 443/5
+  FAIL: five `front.test.js` tests write from a render hole on purpose — filed
+  `g-bootstrap-slice-m2-render-hole-write-tests-s449` (PA fork). `bun conformance/run.ts` 1222/1256 + 34 xfail
+  (14 new `reactive/no-write-*` cases, executed by the bootstrap in value-positions.test.js).
+- **Owed when they land** (they are value positions): §6.8.1 `default=`, multi-statement `${ }` in markup, Tier-0
+  `for … lift`, display-text `${ }`, `<match on=>`.
