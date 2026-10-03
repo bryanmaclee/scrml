@@ -1,0 +1,13 @@
+{
+  "id": "defer-ambiguous-lead-neg",
+  "description": "§19.16.1 (S432 B2) — while a binding named `defer` is in scope, `defer` + whitespace + `[` is ambiguous: an index of the binding (what `defer [0] = 9`, `defer [0].m = 5`, `defer [0].forEach(f)` meant before `defer` existed) or a deferred statement led by an array literal (the round-6 reading). Each is E-DEFER-AMBIGUOUS-LEAD — three occurrences — instead of one crashing codegen and two compiling CLEAN as silently different programs.",
+  "language-version": "1.0",
+  "spec": "§19.16.1",
+  "provenance": "ruling:user-voice-scrml.md S439 #6 (the four defer SPEC calls, all recs)",
+  "rationale": "§19.16.1: `defer` is a contextual keyword and `defer` as an identifier is unchanged; where the tokens admit both readings and the identifier reading is live (the name is bound), the program is rejected naming both spellings rather than silently re-read.",
+  "expect": {
+    "codes": ["E-DEFER-AMBIGUOUS-LEAD"],
+    "codeCounts": { "E-DEFER-AMBIGUOUS-LEAD": 3 },
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"]
+  }
+}

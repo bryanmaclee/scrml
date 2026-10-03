@@ -44,12 +44,10 @@ let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "lifecycle-comment-leak-")); });
 afterAll(() => { if (TMP) rmSync(TMP, { recursive: true, force: true }); });
 
-function compile(src, parser) {
+function compile(src) {
   const fp = join(TMP, `f-${Math.random().toString(36).slice(2)}.scrml`);
   writeFileSync(fp, src);
-  const opts = { inputFiles: [fp], outputDir: join(TMP, "dist"), write: false, log: () => {} };
-  if (parser) opts.parser = parser;
-  return compileScrml(opts);
+  return compileScrml({ inputFiles: [fp], outputDir: join(TMP, "dist"), write: false, log: () => {} });
 }
 
 // Cross-stream code count (errors + warnings).
@@ -188,31 +186,6 @@ describe("S184 — genuine function-typed struct field still rejects (no over-st
   });
 });
 
-// ---------------------------------------------------------------------------
-// Native-parser parity: the fix lives in collectBracedBody (the LIVE pipeline's
-// type-decl raw-body collector). The native parser defers type decomposition to
-// the same type-system stage; assert the comment-bearing lifecycle field does
-// not mis-fire there either, and a genuine fn field still rejects.
-// ---------------------------------------------------------------------------
-
-describe("S184 — native-parser parity", () => {
-  test("lifecycle field + trailing comment does NOT reject under --parser=scrml-native", () => {
-    const src = `\${ type User:struct = {
-  email: string
-  passwordHash: (not to string)   // transitions to string after hashing
-} }
-<u>: User = { email: "a@b.com", passwordHash: not }
-\${ const h = @u.passwordHash }
-<div>{h}</div>`;
-    expect(countCode(compile(src, "scrml-native"), "E-STRUCT-FUNCTION-FIELD")).toBe(0);
-  });
-
-  test("genuine fn field + trailing comment still rejects under --parser=scrml-native", () => {
-    const src = `\${ type Widget:struct = {
-  onTick: () -> void   // called every tick
-  label: string
-} }
-<div>x</div>`;
-    expect(countCode(compile(src, "scrml-native"), "E-STRUCT-FUNCTION-FIELD")).toBe(1);
-  });
-});
+// S449: a "native-parser parity" block stood here — the same two programs
+// compiled under the retired full-pipeline `--parser=scrml-native` flag. The
+// fix lives in the LIVE collectBracedBody, so the block only measured parity.

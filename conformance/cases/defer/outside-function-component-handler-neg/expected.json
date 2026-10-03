@@ -1,0 +1,13 @@
+{
+  "id": "defer-outside-function-component-handler-neg",
+  "description": "§19.16.3 rule 4 — `defer` in an event-handler attribute inside a component definition (`const Btn = <button onclick=${ defer [1].forEach(f) }>`) is E-DEFER-OUTSIDE-FUNCTION, exactly once. A component body is carried as raw markup text until it is expanded at each use, and a handler attribute is not a function-declaration body. Before the S432 review fix the default front-end compiled this CLEAN and the button threw a ReferenceError (`defer` is not defined) at click.",
+  "language-version": "1.0",
+  "spec": "§19.16.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.3 rule 4: `defer` SHALL appear only inside the body of a function DECLARATION; it is E-DEFER-OUTSIDE-FUNCTION in every other position — including a handler attribute of markup written in a component definition.",
+  "expect": {
+    "codes": ["E-DEFER-OUTSIDE-FUNCTION"],
+    "codeCounts": { "E-DEFER-OUTSIDE-FUNCTION": 1 },
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"]
+  }
+}

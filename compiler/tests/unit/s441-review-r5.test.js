@@ -14,10 +14,13 @@
  *   C — a label on a statement that is not a loop compiles nothing
  *       (`Total: 42` vanished on native).
  *   D — a tagged template the native bridge drops is no longer silent.
- * Every case runs on BOTH front ends.
+ * Every case ran on BOTH front ends; S449 retired the full-pipeline
+ * `--parser=scrml-native` flag, so the shared cases run on the default front end
+ * and the native-only fail-closed cases call `nativeParseFile` directly.
  */
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
+import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -37,7 +40,20 @@ function compile(bodyLines, parser) {
   return { errors, codes: errors.map((e) => e.code), client: read("client.js"), html: read("html") };
 }
 const at = (e) => e.tabSpan ?? e.span ?? {};
-const BOTH = [["default", null], ["scrml-native", "scrml-native"]];
+// S449: the second entry ran each case through the retired full-pipeline
+// `--parser=scrml-native` flag (a parity arm). The native body-top machinery
+// impl#1 can still reach (nativeParseFile at a file's top level) keeps its own
+// direct tests below.
+const BOTH = [["default", null]];
+/** Parse `source` with the native parser alone — `nativeParseFile`, the entry
+ *  impl#1 calls for component / `^{}` / `<match>` re-parse — and return its
+ *  error-severity diagnostics in the same shape as `compile`. */
+function nativeParse(source) {
+  const r = nativeParseFile("/s441-native/c.scrml", `<program>\nfunction log(x) { console.log(x) }\n${source}\n<p id="z">end</p>\n</program>\n`);
+  const errors = (r.errors ?? []).filter((e) => (e.severity ?? "error") === "error");
+  return { errors, codes: errors.map((e) => e.code), ast: r.ast };
+}
+
 
 for (const [label, parser] of BOTH) {
   describe(`A — a statement covers only what it compiles (${label})`, () => {
@@ -139,7 +155,7 @@ describe("A — default front end: a declaration that swallowed the next line gi
 
 describe("D — native: a tagged template the bridge drops is not silent", () => {
   test("`log`x`` at body top fails closed on native (the bridge translates it to an empty escape-hatch)", () => {
-    const r = compile("log`x`", "scrml-native");
+    const r = nativeParse("log`x`");
     expect(r.codes).toEqual(["E-INTERNAL-BODY-TOP-DROPPED"]);
   });
 });
@@ -230,7 +246,7 @@ for (const [label, parser] of BOTH) {
 
 describe("N1 — native: a nested expression the bridge cannot translate fails closed", () => {
   test("`go((step(), 7))` — the argument would be dropped → E-INTERNAL-BODY-TOP-DROPPED, not a clean compile", () => {
-    const r = compile("function step() { return 1 }\nfunction go(x) { console.log(x) }\ngo((step(), 7))", "scrml-native");
+    const r = nativeParse("function step() { return 1 }\nfunction go(x) { console.log(x) }\ngo((step(), 7))");
     expect(r.codes).toEqual(["E-INTERNAL-BODY-TOP-DROPPED"]);
   });
 });
@@ -252,7 +268,7 @@ describe("R1 — a C-style `for` header is three clauses, not prose (default)", 
   });
   test("native: the bridge drops the init (`for (; …)`) — that fails closed, never compiles clean", () => {
     // Pre-existing native bridge gap (main native emits `for (; i != 3; i++)`).
-    const r = compile("<zc> = 0\nfor (let i = 0; i != 3; i++) { @zc = @zc + i }\n<p>${@zc}</p>", "scrml-native");
+    const r = nativeParse("<zc> = 0\nfor (let i = 0; i != 3; i++) { @zc = @zc + i }\n<p>${@zc}</p>");
     expect(r.codes).toContain("E-INTERNAL-BODY-TOP-DROPPED");
   });
 });
