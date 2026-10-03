@@ -87,3 +87,6 @@
 - Mapping rows owed: the bootstrap's E-DECL-STATE-CHILD / E-TYPE-VARIANT are named in no SPEC section.
 - Deferred: the type-dependent tier (O35 deep-dive, dpa-065), structural forms (components,
   compounds, Shape 2, sequence grants), destructuring-write miss (filed).
+
+## r3 (S451) — S239 re-review of 8d982ee98: FIX (2 HIGH)
+- 2026-10-03T12:11:39-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-aa5497d684f4e19a8; both repros reproduced pre-fix (count locked; m :int).
