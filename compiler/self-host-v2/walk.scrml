@@ -10,7 +10,8 @@
 // =============================================================================
 ${
     import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block,
-             Attr, View, CondArm, ConstructAttr, EffectDep, Field, Decl, Fn, ServerFn, CoreProgram } from "./core.scrml"
+             Attr, View, CondArm, ConstructAttr, EffectDep, Field, Decl, Fn, ServerFn, CoreProgram,
+             ValidityOf, validityInst } from "./core.scrml"
 
     // Every Core node kind, as one sum. Types, Syms and Literals are leaves of
     // the walk (they carry no Expr/Stmt/View below them).
@@ -134,6 +135,7 @@ ${
             .Return(e: e) :> [Node.NExpr(e)]
             .Eval(e: e) :> [Node.NExpr(e)]
             .Suspend(bind: b, on: on, then: t) :> [Node.NExpr(on), Node.NBlock(t)]
+            .ResetSurface(of: v) :> [Node.NInst(validityInst(v))]
         }
     }
 
@@ -152,6 +154,7 @@ ${
             .Host(call: c) :> []
             .Lambda(params: ps, body: b) :> [Node.NExpr(b)]
             .SeqCall(op: o, seq: sq, f: f) :> [Node.NExpr(sq), Node.NExpr(f)]
+            .Validity(of: v, prop: pr) :> [Node.NInst(validityInst(v))]
         }
     }
 
@@ -193,6 +196,7 @@ ${
             .Star(decl: d, inst: inst) :> [Node.NInst(inst)]
             .Effect(deps: ds, body: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
             .ResetOn(triggers: ds, reset: b) :> effectDepNodes(ds).concat([Node.NBlock(b)])
+            .Errors(of: x, all: a) :> [Node.NInst(validityInst(x))]
         }
     }
 
@@ -210,6 +214,7 @@ ${
             .Bound(name: name, e: e) :> [Node.NExpr(e)]
             .On(event: event, body: body) :> [Node.NBlock(body)]
             .Bind(kind: k, read: r, sink: sk, write: w) :> [Node.NExpr(r), Node.NBlock(w)]
+            .Gate(values: vs) :> []
         }
     }
 
@@ -318,6 +323,7 @@ ${
             .InitOf(decl: x) :> []
             .Host(call: x) :> []
             .SeqCall(op: x) :> []
+            .Validity(of: x) :> []
         }
     }
 
@@ -327,6 +333,7 @@ ${
             .Static(name: x) :> []
             .Bound(name: x) :> []
             .On(event: x) :> []
+            .Gate(values: x) :> []
         }
     }
 
@@ -346,6 +353,7 @@ ${
             .Return(e: e) :> []
             .Eval(e: e) :> []
             .Suspend(bind: b) :> [b]
+            .ResetSurface(of: v) :> []
         }
     }
 
@@ -361,6 +369,7 @@ ${
             .Star(decl: d) :> []
             .Effect(deps: ds) :> []
             .ResetOn(triggers: ds) :> []
+            .Errors(of: x) :> []
         }
     }
 
@@ -412,6 +421,7 @@ ${
             .Return(e: e) :> -1
             .Eval(e: e) :> -1
             .Suspend(bind: b) :> -1
+            .ResetSurface(of: v) :> -1
         }
     }
 }

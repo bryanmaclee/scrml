@@ -48,6 +48,14 @@
 //   C13 (s449) a ResetOn has ≥ 1 trigger, each a MUTABLE field (C11's rule);
 //       its reset is exactly ONE Write, to a cell that is not one of its own
 //       triggers (§6.8.4 rules 1-3; C3 / C6 judge that Write's contract)
+//   C14 (s449) a validity surface (an Expr.Validity read, a View.Errors, a
+//       Stmt.ResetSurface) resolves (C4's rule) to its declaration; a field
+//       surface names a field of it, and a field of the PROGRAM has a surface
+//       only when it carries validators (§55.5.1 rule 2); a compound surface
+//       names a USER declaration (the program has no compound surface — its
+//       fields are top-level values, §55.5.1); `errors` is read only by an
+//       Errors view (§55.8)
+//   C15 (s449) a Gate stands only on a `form` element, at most once (§55.17.3)
 //   (C3 covers the s444 edits: the removals by the field's grants; ElemAt by
 //   the ELEMENT field's own contract, dpa-052 Q3.)
 // A diagnostic is a message string (§4 permits strings as text).
@@ -55,6 +63,7 @@
 ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, Attr, Block,
              EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, CoreProgram, CapOwner, TransitionGraph,
+             DeclKind, SurfaceProp, ValidityOf,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
 
@@ -119,6 +128,7 @@ ${
             .Static(name: x) :> []
             .Bound(name: x) :> []
             .On(event: x) :> []
+            .Gate(values: x) :> []
         }
     }
 
@@ -134,6 +144,7 @@ ${
             .Return(e: x) :> ["C8: a bind's write is not a Write"]
             .Eval(e: x) :> ["C8: a bind's write is not a Write"]
             .Suspend(bind: x) :> ["C8: a bind's write is not a Write"]
+            .ResetSurface(of: x) :> ["C8: a bind's write is not a Write"]
         }
     }
 
@@ -183,6 +194,7 @@ ${
             .Host(call: x) :> false
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
+            .Validity(of: x) :> false
         }
     }
 
@@ -202,6 +214,7 @@ ${
             .Host(call: x) :> "(not a cell read)"
             .Lambda(params: x) :> "(not a cell read)"
             .SeqCall(op: x) :> "(not a cell read)"
+            .Validity(of: x) :> "(not a cell read)"
         }
     }
 
@@ -237,13 +250,94 @@ ${
             .Star(decl: d, inst: i) :> checkStar(p, encl, d, i)
             .Effect(deps: ds, body: b) :> checkEffect(p, encl, ds, b)
             .ResetOn(triggers: ds, reset: b) :> checkResetOn(p, encl, ds, b)
-            .El(tag: x) :> []
+            .Errors(of: x) :> checkSurface(p, encl, x)
+            .El(tag: t, attrs: attrs) :> checkGates(t, attrs)
             .Text(text: x) :> []
             .Dyn(e: x) :> []
             .Cond(arms: x) :> []
             .Each(src: x) :> []
             .Instance(decl: x) :> []
             .Slot :> []
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // C14 (s449) — a validity surface resolves to its declaration (C4's rule):
+    // a field surface names one of its fields — of the program, only a field
+    // that carries validators (§55.5.1 rule 2: a top-level value with none has
+    // no surface); a compound surface names a user declaration (§55.5).
+    // -------------------------------------------------------------------------
+    fn checkSurface(p: CoreProgram, encl: Decl[], v: ValidityOf) -> string[] {
+        return match v {
+            .OfField(decl: d, inst: i, idx: x) :> checkFieldSurface(p, encl, d, i, x)
+            .OfDecl(decl: d, inst: i) :> checkDeclSurface(p, encl, d, i)
+        }
+    }
+
+    fn checkFieldSurface(p: CoreProgram, encl: Decl[], dsym: Sym, i: InstRef, idx: int) -> string[] {
+        const read: string[] = checkCellRead(p, encl, dsym, i, [{ owner: dsym, idx: idx }])
+        if (read.length > 0) return ["C14: a validity surface — " + read[0]]
+        const d: Decl | not = findDecl(p, dsym)
+        if (d is not) return []
+        if (isProgramKind(d.kind) && d.fields[idx].vals.length == 0) {
+            return ["C14: the top-level value `" + d.fields[idx].sym.hint + "` carries no validators — it has no validity surface (§55.5.1 rule 2)"]
+        }
+        return []
+    }
+
+    fn checkDeclSurface(p: CoreProgram, encl: Decl[], dsym: Sym, i: InstRef) -> string[] {
+        const d: Decl | not = findDecl(p, dsym)
+        if (d is not) return ["C14: a compound surface names declaration `" + dsym.hint + "`, which does not exist"]
+        if (!isUserKind(d.kind)) return ["C14: <" + d.sym.hint + "> is not a user declaration — only a user declaration has a compound surface (§55.5)"]
+        const target: Decl | not = resolveInst(p, encl, i)
+        if (target is not) return ["C14: a compound surface of <" + d.sym.hint + "> goes through " + instText(i) + ", which does not resolve"]
+        if (target.sym.id != d.sym.id) return ["C14: a compound surface of <" + d.sym.hint + "> goes through " + instText(i) + ", an instance of <" + target.sym.hint + ">"]
+        return []
+    }
+
+    fn isProgramKind(k: DeclKind) -> boolean {
+        return match k {
+            .Program :> true
+            .User :> false
+            .Predefined :> false
+        }
+    }
+
+    fn isUserKind(k: DeclKind) -> boolean {
+        return match k {
+            .User :> true
+            .Program :> false
+            .Predefined :> false
+        }
+    }
+
+    // A read of a surface property: C14's resolution, and `errors` only through
+    // an Errors view (§55.8) — a value read of the ValidationError array has no
+    // type in the bootstrap's Core.
+    fn checkSurfaceRead(p: CoreProgram, encl: Decl[], v: ValidityOf, pr: SurfaceProp) -> string[] {
+        const isErrors: boolean = pr == SurfaceProp.Errors
+        if (isErrors) return ["C14: `errors` is read as a value — the bootstrap reads it only through `<errors of=…/>` (§55.8)"]
+        return checkSurface(p, encl, v)
+    }
+
+    // C15 (s449) — a Gate stands only on a `form`, at most once (§55.17.3).
+    fn checkGates(tag: string, attrs: Attr[]) -> string[] {
+        let n = 0
+        for (const a of attrs) {
+            if (attrIsGate(a)) n = n + 1
+        }
+        if (n > 0 && tag != "form") return ["C15: a submit gate on `<" + tag + ">` — only a `<form>` is gated (§55.17.5)"]
+        if (n > 1) return ["C15: a `<form>` carries " + n + " submit gates; it has one"]
+        return []
+    }
+
+    fn attrIsGate(a: Attr) -> boolean {
+        return match a {
+            .Gate(values: vs) :> true
+            .Static(name: x) :> false
+            .Bound(name: x) :> false
+            .On(event: x) :> false
+            .Bind(kind: x) :> false
         }
     }
 
@@ -305,6 +399,7 @@ ${
             .Return(e: x) :> not
             .Eval(e: x) :> not
             .Suspend(bind: x) :> not
+            .ResetSurface(of: x) :> not
         }
     }
 
@@ -457,6 +552,7 @@ ${
             .Star(decl: x) :> not
             .Effect(deps: x) :> not
             .ResetOn(triggers: x) :> not
+            .Errors(of: x) :> not
         }
     }
 
@@ -470,6 +566,7 @@ ${
             .Return(e: x) :> ""
             .Eval(e: x) :> ""
             .Suspend(bind: x) :> ""
+            .ResetSurface(of: x) :> ""
         }
     }
 
@@ -505,6 +602,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Validity(of: x) :> not
         }
     }
 
@@ -555,6 +653,7 @@ ${
     fn suspendThen(s: Stmt) -> Block | not {
         return match s {
             .Suspend(then: t) :> t
+            .ResetSurface(of: x) :> not
             .Let(sym: x) :> not
             .Assign(local: x) :> not
             .Write(cap: x) :> not
@@ -588,6 +687,7 @@ ${
         return match v {
             .Effect(body: b) :> tailChain(b)
             .ResetOn(triggers: x) :> 0
+            .Errors(of: x) :> 0
             .El(tag: x) :> 0
             .Text(text: x) :> 0
             .Dyn(e: x) :> 0
@@ -628,6 +728,7 @@ ${
             .Return(e: e) :> []
             .Eval(e: e) :> []
             .Suspend(bind: b) :> []
+            .ResetSurface(of: v) :> checkSurface(p, encl, v)
         }
     }
 
@@ -656,6 +757,7 @@ ${
             .Return(e: x) :> "a Return inside a Commit"
             .Eval(e: x) :> "an Eval inside a Commit"
             .Suspend(bind: x) :> "a Suspend inside a Commit"
+            .ResetSurface(of: x) :> "a ResetSurface inside a Commit"
         }
     }
 
@@ -674,6 +776,7 @@ ${
             .Host(call: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Lambda(params: x) :> "a Commit write's value is not a Local (the snapshot)"
             .SeqCall(op: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .Validity(of: x) :> "a Commit write's value is not a Local (the snapshot)"
         }
     }
 
@@ -754,6 +857,7 @@ ${
             .InitOf(decl: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Host(call: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Lambda(params: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Validity(of: x) :> "a shrink-anywhere's value is not a filter of the field"
         }
     }
 
@@ -967,6 +1071,7 @@ ${
             .Star(decl: d) :> not
             .Effect(deps: ds) :> not
             .ResetOn(triggers: ds) :> not
+            .Errors(of: ds) :> not
         }
     }
 
@@ -1015,6 +1120,7 @@ ${
             .Return(e: x) :> not
             .Eval(e: x) :> not
             .Suspend(bind: x) :> not
+            .ResetSurface(of: x) :> not
         }
     }
 
@@ -1038,6 +1144,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Validity(of: x) :> not
         }
     }
 
@@ -1057,6 +1164,7 @@ ${
             .Host(call: c) :> []
             .Lambda(params: ps) :> []
             .SeqCall(op: o) :> []
+            .Validity(of: v, prop: pr) :> checkSurfaceRead(p, encl, v, pr)
         }
     }
 
@@ -1123,6 +1231,7 @@ ${
             .Host(call: x) :> not
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
+            .Validity(of: x) :> not
         }
     }
 

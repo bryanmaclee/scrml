@@ -56,18 +56,18 @@ ${
         const fCount: Field = {
             sym: sCount, ty: Type.Int, init: litInt(0),
             mode: FieldMode.Let, role: FieldRole.Child, grants: replaceGrant(),
-            graph: not, exported: false, wcap: wCount,
+            graph: not, exported: false, wcap: wCount, vals: [],
         }
         const fStep: Field = {
             sym: sStep, ty: Type.Int, init: litInt(1),
             mode: FieldMode.Locked, role: FieldRole.Child, grants: noGrants(),
-            graph: not, exported: false, wcap: not,
+            graph: not, exported: false, wcap: not, vals: [],
         }
         const fDoubled: Field = {
             sym: sDoubled, ty: Type.Int,
             init: prim2(PrimOp.Mul, readField(sProgram, here, COUNT), litInt(2)),
             mode: FieldMode.Derived, role: FieldRole.Child, grants: noGrants(),
-            graph: not, exported: false, wcap: not,
+            graph: not, exported: false, wcap: not, vals: [],
         }
 
         // function bump() { @count = @count + @step }  — a `.Replace` on a `let` scalar.

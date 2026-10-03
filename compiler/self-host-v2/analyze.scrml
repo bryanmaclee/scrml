@@ -44,7 +44,8 @@
 ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
-             DeclKind, HostCall, SeqFn, BindKind, mkSym, noGrants, replaceGrant, typeDefSym } from "./core.scrml"
+             DeclKind, HostCall, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf,
+             mkSym, noGrants, replaceGrant, typeDefSym } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
@@ -88,7 +89,8 @@ ${
     // `max`, `pattern` only when exact): the attributes that land on every
     // native input / textarea / select whose `bind:` targets the field's value.
     export type HtmlAttrPair:struct = { name: string, value: string }
-    export type ValInfo:struct = { name: string, span: ASpan, attrs: HtmlAttrPair[] }
+    // `core` (s449): the validator as Core carries it — what the §55 surface evaluates.
+    export type ValInfo:struct = { name: string, span: ASpan, attrs: HtmlAttrPair[], core: Validator }
 
     // `nid` = the ADecl (user) / AProgram node. `file` = the defining file (E2).
     export type DeclInfo:struct = {
@@ -282,7 +284,14 @@ ${
         typing: Typing,
         novalidate: int[],      // s444 Phase B (RULED S442 (3)): the `<form>` elements the compiler adds `novalidate` to
         resets: ResetOnInfo[],  // s449: the program cells' accepted `reset-on=` rules (§6.8.4)
+        gated: GateInfo[],      // s449: the GATED `<form>` elements (§55.17.3) and the values that gate each
     }
+
+    // s449 — a gated form (§55.17.3: its composed subtree binds a value that
+    // carries validators) and the gating values in source order, named as
+    // §55.17.6 names them (a top-level value `email`, a child field
+    // `signup.email`).
+    export type GateInfo:struct = { form: int, values: string[] }
 
     export type TypedProgram:struct = { files: FileAst[], tables: Tables, diags: Diag[] }
 
@@ -1319,8 +1328,8 @@ ${
 
     fn pair(n: string, v: string) -> HtmlAttrPair { return { name: n, value: v } }
 
-    fn valOk(v: AValidator, attrs: HtmlAttrPair[], st: AS) -> RVal {
-        return { v: { name: v.name, span: v.span, attrs: attrs }, st: st }
+    fn valOk(v: AValidator, attrs: HtmlAttrPair[], core: Validator, st: AS) -> RVal {
+        return { v: { name: v.name, span: v.span, attrs: attrs, core: core }, st: st }
     }
 
     fn valBad(file: string, v: AValidator, code: string, msg: string, st: AS) -> RVal {
@@ -1355,7 +1364,7 @@ ${
     // "checked" (not exact); on a number / sequence / struct there is no form.
     fn bareVal(file: string, ty: Type, v: AValidator, st: AS) -> RVal {
         if (v.name != "req") return valBad(file, v, "E-PARSE-ATTR", "`" + v.name + "` needs its argument: `" + v.name + "(…)` (§55.1)", st)
-        if (isStrLike(ty)) return valOk(v, [pair("required", "")], st)
+        if (isStrLike(ty)) return valOk(v, [pair("required", "")], Validator.Req, st)
         return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`req` on a `" + typeName(ty) + "` value has no exact HTML form (only a string's `required`)"), st)
     }
 
@@ -1366,11 +1375,12 @@ ${
         if (!isStrLike(ty) && seqElem(ty) is not) return valBad(file, v, "E-TYPE-031", "`length(…)` applies to a string or a sequence, and this value is `" + typeName(ty) + "` (§55.1)", st)
         const n: int = intLit(x)
         if (!isStrLike(ty) || n < 0) return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`length(" + op + " …)` here has no exact HTML form (a string's length against an int literal)"), st)
-        if (op == ">=") return valOk(v, [pair("minlength", "" + n)], st)
-        if (op == ">") return valOk(v, [pair("minlength", "" + (n + 1))], st)
-        if (op == "<=") return valOk(v, [pair("maxlength", "" + n)], st)
-        if (op == "<" && n >= 1) return valOk(v, [pair("maxlength", "" + (n - 1))], st)
-        if (op == "==") return valOk(v, [pair("minlength", "" + n), pair("maxlength", "" + n)], st)
+        const lc: Validator = Validator.LengthCmp(op, n)
+        if (op == ">=") return valOk(v, [pair("minlength", "" + n)], lc, st)
+        if (op == ">") return valOk(v, [pair("minlength", "" + (n + 1))], lc, st)
+        if (op == "<=") return valOk(v, [pair("maxlength", "" + n)], lc, st)
+        if (op == "<" && n >= 1) return valOk(v, [pair("maxlength", "" + (n - 1))], lc, st)
+        if (op == "==") return valOk(v, [pair("minlength", "" + n), pair("maxlength", "" + n)], lc, st)
         return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`length(" + op + " " + n + ")` has no exact HTML form"), st)
     }
 
@@ -1385,7 +1395,10 @@ ${
             if (!isNumLike(ty)) return valBad(file, v, "E-TYPE-031", "`" + v.name + "(…)` applies to a number, and this value is `" + typeName(ty) + "` (§55.1)", st)
             const lit: string = numLitText(es)
             if (lit == "") return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`" + v.name + "(…)` with a non-literal bound has no static HTML form"), st)
-            return valOk(v, [pair(v.name, lit)], st)
+            const bound: number = Number(lit)
+            let mc: Validator = Validator.Max(bound)
+            if (v.name == "min") mc = Validator.Min(bound)
+            return valOk(v, [pair(v.name, lit)], mc, st)
         }
         return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`" + v.name + "(…)` has no HTML-native form"), st)
     }
@@ -1399,7 +1412,7 @@ ${
         if (flags != "" || !exactPattern(src)) {
             return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`pattern(/" + src + "/" + flags + ")` is not exact as an HTML `pattern` (it needs no flags, `^…$` anchoring, no top-level `|`, and plain characters / classes)"), st)
         }
-        return valOk(v, [pair("pattern", src)], st)
+        return valOk(v, [pair("pattern", src)], Validator.Pattern(src), st)
     }
 
     // The value of a non-negative int literal (-1: not one).
@@ -9862,7 +9875,7 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
-                                novalidate: [], resets: rr.infos }
+                                novalidate: [], resets: rr.infos, gated: [] }
         const scopeDiags: Diag[] = checkScopes(files, bound)
         // s449: the no-write rule over every accepted effect (§6.7.4)
         const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects)
@@ -9872,7 +9885,7 @@ ${
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets }
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated }
         return { files: files, tables: t, diags: st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags) }
     }
 
@@ -9887,7 +9900,7 @@ ${
     //    inlines, `<*x/>` Stars, uses, `<each>` rows and state-view arms — holds
     //    a bound element with lowered validator attributes.
     // =========================================================================
-    type ValPass:struct = { diags: Diag[], forms: int[] }
+    type ValPass:struct = { diags: Diag[], forms: int[], gated: GateInfo[] }
     type BindKey:struct = { decl: int, idx: int }
 
     fn validatorPass(g: Globals, t: Tables) -> ValPass {
@@ -9913,11 +9926,123 @@ ${
             for (const n of declMarkup(ds)) { uses = uses.concat(useSitesIn(t, ds.info.sym.id, n)) }
         }
         let forms: int[] = []
+        let gated: GateInfo[] = []
         for (const ds of g.decls) {
             const cx: CarryCx = { g: g, t: t, uses: uses, seen: [], slot: ds.info.sym.id, slotSeen: [] }
-            for (const n of declMarkup(ds)) { forms = forms.concat(formsIn(cx, n)) }
+            for (const n of declMarkup(ds)) {
+                forms = forms.concat(formsIn(cx, n))
+                gated = gated.concat(gatesIn(cx, n))
+            }
         }
-        return { diags: diags, forms: forms }
+        return { diags: diags, forms: forms, gated: gated }
+    }
+
+    // ---- s449: THE GATED FORMS (§55.17.3) ------------------------------------
+    // "A gated form is every `<form>` whose composed subtree (§55.17.2 rule 1)
+    // contains a native control whose `bind:` targets a value that carries
+    // validators, whether or not any of those validators lowers to an HTML
+    // attribute." The composed subtree is the one `novalidate` walks
+    // (formsIn): inlines, Stars, uses, `<each>` rows, state-view arms, slot
+    // content. A form the author wrote `novalidate` on is gated all the same
+    // (S447 gate-calls item 1: "with or without `novalidate`").
+    fn gatesIn(cx: CarryCx, n: ANode) -> GateInfo[] {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> gatesInElem(cx, e)
+            .Text(text: x) :> []
+            .Interp(e: x) :> []
+            .DeclNode(d: d) :> []
+            .Effect(w: w) :> []
+        }
+    }
+
+    fn gatesInElem(cx: CarryCx, e: AElem) -> GateInfo[] {
+        let out: GateInfo[] = []
+        if (e.tag == "form" && !e.star && isHtmlFact(elemFact(cx.t.elems, e.nid))) {
+            const names: string[] = elemBound(cx, e)
+            if (names.length > 0) out = [{ form: e.nid, values: names }]
+        }
+        for (const k of e.kids) { out = out.concat(gatesIn(cx, k)) }
+        return out
+    }
+
+    // The validated values bound under this element (through its expansion
+    // and its children), named, each once, in source order.
+    fn elemBound(cx: CarryCx, e: AElem) -> string[] {
+        let out: string[] = []
+        for (const a of e.attrs) { out = addNames(out, boundValidated(cx.t, attrFact(cx.t.attrs, a.nid))) }
+        out = addNames(out, expansionBound(cx, elemFact(cx.t.elems, e.nid)))
+        return addNames(out, nodesBound(cx, e.kids))
+    }
+
+    fn addNames(xs: string[], ys: string[]) -> string[] {
+        let out: string[] = xs
+        for (const y of ys) {
+            if (out.indexOf(y) < 0) out = out.concat([y])
+        }
+        return out
+    }
+
+    fn nodesBound(cx: CarryCx, ns: ANode[]) -> string[] {
+        let out: string[] = []
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            const el: AElem | not = elemOfNode(k)
+            if (el is some) out = addNames(out, elemBound(cx, el))
+        }
+        return out
+    }
+
+    // A bind of a field's WHOLE value whose field carries validators → its name.
+    fn boundValidated(t: Tables, k: AttrKind | not) -> string[] {
+        return match k {
+            .ABind(w: w, decl: d, idx: i) :> validatedName(t, w, d, i)
+            .AStatic :> []
+            .ABound :> []
+            .AOn(event: ev) :> []
+            .AIf :> []
+            .AConstruct(field: x) :> []
+            .AAs :> []
+            .AEachIn :> []
+            .AEachKey :> []
+            .AEachAs :> []
+            not :> []
+        }
+    }
+
+    fn validatedName(t: Tables, w: WriteFact, d: Sym, i: int) -> string[] {
+        if (bindKeyFor(w, d, i).length == 0) return []
+        const di: DeclInfo | not = declInfo(t, d)
+        if (di is not) return []
+        if (i < 0 || i >= di.fields.length) return []
+        if (di.fields[i].vals.length == 0) return []
+        if (di.sym.id == t.program.id) return [di.fields[i].sym.hint]
+        return [di.sym.hint + "." + di.fields[i].sym.hint]
+    }
+
+    fn expansionBound(cx: CarryCx, f: ElemFact | not) -> string[] {
+        return match f {
+            .MInline(v: v) :> nodesBound(cx, v.nodes)
+            .MStar(decl: d) :> nodesBound(intoDecl(cx, d), declRendersOnce(cx, d))
+            .MUse(decl: d) :> nodesBound(intoDecl(cx, d), declRendersOnce(cx, d))
+            .MStateView(v: v) :> nodesBound(cx, stateArmNodes(v))
+            .MSlot :> slotBound(cx)
+            .MHtml :> []
+            .MEach(bind: b) :> []
+            not :> []
+        }
+    }
+
+    fn slotBound(cx: CarryCx) -> string[] {
+        if (cx.slot < 0 || cx.slotSeen.indexOf(cx.slot) >= 0) return []
+        let out: string[] = []
+        for (const u of cx.uses) {
+            if (u.decl == cx.slot) {
+                const ux: CarryCx = { g: cx.g, t: cx.t, uses: cx.uses, seen: cx.seen, slot: u.owner, slotSeen: cx.slotSeen.concat([cx.slot]) }
+                out = addNames(out, nodesBound(ux, u.kids))
+            }
+        }
+        return out
     }
 
     // A use of declaration `decl` (`<decl …>kids</>`) written in `owner`'s
