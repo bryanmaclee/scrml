@@ -147,6 +147,14 @@ export interface Token {
    * descend into them.)
    */
   isTemplate?: boolean;
+  /**
+   * S450 (§5.2.4) — set on an ATTR_EXPR token read from the `${…}` attribute
+   * value form (the token text holds only the interior). ast-builder's
+   * E-ATTR-MULTI-STATEMENT check judges a delimited `${…}` / `{…}` interior
+   * by its statement count; other ATTR_EXPR forms (`(…)`, quoted `if=`) only
+   * by a `;` separator.
+   */
+  attrInterp?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -911,7 +919,9 @@ export function tokenizeAttributes(raw: string, baseOffset: number, baseLine: nu
             expr += raw[pos];
             advance();
           }
-          tokens.push(makeToken("ATTR_EXPR", expr, vs, absOff(), vl, vc));
+          const interpTok = makeToken("ATTR_EXPR", expr, vs, absOff(), vl, vc);
+          interpTok.attrInterp = true;
+          tokens.push(interpTok);
         } else if (/[A-Za-z0-9_@]/.test(ch())) {
           // Unquoted: peek ahead to see if it's a call (has `(`)
           const vs = absOff();

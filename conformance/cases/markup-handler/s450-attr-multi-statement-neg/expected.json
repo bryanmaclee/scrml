@@ -1,0 +1,12 @@
+{
+  "id": "s450-attr-multi-statement-neg",
+  "description": "§5.2.4 NEG mirror of `s450-attr-multi-statement-pos` — a `;` inside a nested arrow body or a string literal of a single-expression NON-handler value, and a `;`-separated inline block on an EVENT HANDLER, do not fire E-ATTR-MULTI-STATEMENT.",
+  "language-version": "1.0",
+  "spec": "§5.2.4",
+  "source-test": "compiler/tests/unit/attr-multi-statement-s450.test.js",
+  "rationale": "§5.2.4 (S450): a `;` is a separator only between statements of the value itself — \"a `;` inside a string, template, regex or comment, inside a nested arrow / function body, or in the text of a markup value is not a separator\" — and \"an event-handler attribute (§5.2.3) is not judged by this rule\". The `title=` value is ONE expression (an IIFE call) and `onclick={ … }` is the §5.2.3 inline block, so the code SHALL stay silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ATTR-MULTI-STATEMENT"]
+  }
+}
