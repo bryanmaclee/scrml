@@ -93,3 +93,19 @@
 - Filed: disabled/readonly controls still gate; `form="id"` external controls; infos-vs-warnings
   note. The live-DOM gap marked resolved.
 - Gates: m4 550; conformance 1244/1286 + 42 xfail.
+- Landed `893adc24e`.
+
+## 5. S239 re-review of `893adc24e` (LAND-WITH-NITS) — docs-only correction
+
+- **CORRECTION to §4 above:** "Closed-`if=` and multi-step cases block" is true only for TOP-LEVEL
+  values and `<*x/>` (Star) instances (and slot content written inside the form). Three shapes stay
+  fail-open: P3 a USE (`<f/>`) whose renders holds the control in a closed `if=`; P4 a form inside a
+  declaration's renders with the slot filled at the use site; P12 an `as=` handle (and `given`) bound
+  in a closed region. Root: `nameable()` → `not` for `.Alias` / `.Narrowed`; `namedFields` cannot
+  reach behind `View.Instance`; `.Slot :> []`.
+- known-gaps: `g-bootstrap-gate-reach-live-dom-reading` REOPENED (MED, open) with P3/P4/P12 and the
+  fix path; "The live-DOM gap marked resolved" in §4 is superseded.
+  `g-bootstrap-gate-external-form-owner-control` raised to MED (the `<select>` length change made it
+  fail-open). Filed `g-bootstrap-gate-marker-over-names-each-row-fields` (LOW) and the SPEC question
+  `g-spec-55-17-hidden-region-field-cannot-be-optional` (LOW, for bryan; agent rec: an author-written
+  conditional validator). No code changed (the review's verdict stands on `893adc24e`).
