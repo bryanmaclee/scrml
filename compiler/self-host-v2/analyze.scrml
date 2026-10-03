@@ -10850,8 +10850,10 @@ ${
     //    E-VALIDATOR-DEAD — only when nothing can ever change the value: no
     //    `bind:` targets it, it is locked (no write grant), it is not
     //    server-loaded, not seeded at a use site, not restored by `persist=`.
-    //    (`server` and `persist=` are not in the bootstrap — they are refused
-    //    where written.) A `let` value set only from logic is LIVE: its
+    //    (`server` is not in the bootstrap — refused where written; s451:
+    //    `persist=` is, but only on a writable cell — persistPass refuses it on
+    //    a locked one — so "locked" already implies "not restored".) A `let`
+    //    value set only from logic is LIVE: its
     //    surface reports what logic writes.
     //  - RULED S442 (3) "the compiler adds `novalidate` to any form carrying
     //    lowered attributes": every `<form>` whose markup — through `<*f/>`
