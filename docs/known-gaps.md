@@ -30,11 +30,64 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 232 | 5 |
+| HIGH | 233 | 5 |
 | MED | 470 | 1 |
-| LOW | 224 | 0 |
+| LOW | 225 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
+
+### g-each-row-whitespace-only-text-dropped — inside an `<each>` row, `<td>${r.f} ${r.l}</td>` renders `PeterOliver`: every whitespace-only text run in a row body was dropped — `NEW S450 (adopter: assetManagement); HIGH; RESOLVED S450`
+
+<!-- @gap id=g-each-row-whitespace-only-text-dropped sev=HIGH status=resolved locus=compiler/src/codegen/emit-each.ts(renderTemplateChildToJs text branch — `if (!txt.trim()) return;` skipped every whitespace-only run; now emitted verbatim unless it is an each-body TOP-LEVEL run, isItemRoot) prov=adopter:assetManagement-scrml-finding-adjacent-interpolation-whitespace+spec:§4.18.5 -->
+
+**Adopter-reported** (assetManagement `docs/scrml-finding-adjacent-interpolation-whitespace.md`), reproduced in
+happy-dom on `daca85d8`: inside an `<each>` row, `${a} ${b}` rendered `PeterOliver`, while the same markup at top
+level, `Name: ${x}` and `${a + " " + b}` all rendered correctly. Silent — exit 0, no diagnostic, content lost.
+**Root (the PA-located locus HELD):** `renderTemplateChildToJs` treated every whitespace-only text child as
+formatting and returned before emitting it, so the ` ` between two interpolations, the whitespace between two
+sibling elements (`<b>…</b> <i>…</i>`), leading/trailing/multiple spaces and the newline+indentation of a multi-line
+row body all vanished. **Contract:** §4.18.5 — *"No stage SHALL collapse runs, strip leading or trailing whitespace,
+or drop the whitespace adjacent to a `${…}` interpolation"*; *"Whitespace-only text between elements is kept exactly
+too"*. A per-item `<li>`/`<td>` is plain markup → a free-text body (§4.18.1; §17.7.7 — per-item bodies take the
+classification of their element kind); `<empty>` is a free-text body (§17.7.4), so its top-level whitespace is kept
+too. **Deliberately unchanged:** whitespace DIRECTLY in the `<each>` body (between `<each>` and the per-item root) —
+§4.18.1 classifies neither production there, and a top-level text node would become an extra reconcile-tracked item
+root (§17.7.2). **Fixed:** nested row text, `if=` branches inside rows, components rendered per row (they now match
+their top-level rendering), `<empty>` bodies. **Not this emitter, unchanged:** `lift` bodies
+([[g-lift-markup-adjacent-text-leading-space-dropped]], [[g-ast-markup-text-interp-adjacent-space-dropped]] — same
+family; §4.18.5 assigns the `lift`/markup-as-value and component-definition-body whitespace fixes to the bootstrap),
+`<match>` arms and engine state-children inside rows (their own emitter; see
+[[g-code-default-arm-inter-tag-whitespace-rendered]]). **Measured** (examples/ + samples/ + aM `app/src` +
+flogenceP `src/`, base `daca85d8` vs branch): every changed emitted file differs ONLY by added whitespace-only
+`appendChild(document.createTextNode("…"))` lines, zero removed lines — counts in
+`docs/changes/s450-each-row-interp-whitespace/progress.md`. Gates: `compiler/tests/unit/each-row-interp-whitespace-s450.test.js`
+(7 mounted cases incl. keyed reconcile after an update; 0/7 on base) + conformance case
+`conformance/cases/each/row-interp-whitespace-rt` (fails on base).
+
+### g-each-shorthand-display-literal-interp-rendered-raw — inside `<each>`, a `:`-shorthand display-text literal with an interpolation (`<li : "x ${r.f} y">`) renders the literal text `x ${r.f} y` — `NEW S450; HIGH; open`
+
+<!-- @gap id=g-each-shorthand-display-literal-interp-rendered-raw sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(renderTemplateChildToJs `:`-shorthand arm — emits `textContent = String("x ${r.f} y")`, a JS string with the interpolation unlowered) prov=empirical:S450-found-probing-the-whitespace-class-siblings-happy-dom-on-daca85d8+spec:§4.18.4 -->
+
+Found while probing the siblings of [[g-each-row-whitespace-only-text-dropped]] — a different defect, not
+whitespace, so filed rather than widened into that fix. `<ul><each in=@rows as r key=r.id><li : "x ${r.f} y"></each></ul>`
+emits `_scrml_el_2.textContent = String("x ${r.f} y");` and renders `x ${r.f} y`, silently, exit 0. The top-level
+twin `<p : "${@a} ${@a}">` renders `hello hello`, and the expression form `<li : r.f + " " + r.l>` in a row is
+correct. §4.18.4: *"`${expr}` inside a display-text literal opens a logic context per §3.1, exactly as `${...}` does
+elsewhere."* Fix direction: lower a standalone display-text literal's `${…}` segments in the each shorthand arm the
+way the top-level shorthand path does. Not reached by an adopter yet.
+
+### g-code-default-arm-inter-tag-whitespace-rendered — in a `<match>` arm / engine state-child body, the whitespace BETWEEN two nested tags renders (`<B(t)>  <b>y</b>   <i>y</i>  </>` → `y   y`), while §4.18.5 calls it source formatting — `NEW S450; LOW; open`
+
+<!-- @gap id=g-code-default-arm-inter-tag-whitespace-rendered sev=LOW status=open locus=searched:compiler/src/codegen/emit-match.ts+the engine state-child body emitter (NOT emit-each.ts renderTemplateChildToJs — unchanged by S450, identical at top level and in an <each> row) prov=empirical:S450-happy-dom-probe-on-daca85d8+spec:§4.18.5 -->
+
+§4.18.5: *"Whitespace **outside** a display-text literal but inside a code-default body — whitespace between a
+literal and a sibling value, between two nested tags, between a value and a closer — is **source formatting** and is
+NOT content."* Measured on `daca85d8` (happy-dom): a match arm `<B(tag)>  <b>${tag}</b>   <i>${tag}</i>  </>` renders
+`y   y` (the leading/trailing runs are dropped, the inter-tag run is kept); the engine state-child
+`<Idle>  <b>e1</b>   <i>e2</i>  </>` renders `e1   e2`; a bare-run arm `<B(tag)>${r.f} ${tag}</>` renders `Peter x`.
+The S442 E(a) measurement recorded these loci as conforming; that measured whitespace INSIDE nested markup, not
+between it. LOW: the divergence ADDS a space rather than losing content, and conforming would newly drop whitespace
+adopters may rely on — so this needs a ruling-aware pass, not a drive-by.
 
 ### g-sse-generator-write-in-client-fn-body-awaited-loses-subscription — `function go(){ @feed = ticks(); … }` with a `server function*` emits `await _scrml_sse_ticks()`: the cell holds the EventSource and every message drops — `NEW S446; HIGH; open`
 
@@ -5319,6 +5372,11 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 ### g-lift-markup-adjacent-text-leading-space-dropped — `lift <div><span>x</span> tail</div>` emits `createTextNode("tail")`, dropping the space, so `BIG 90` renders `BIG90` — `NEW S433; LOW; open`
 <!-- @gap id=g-lift-markup-adjacent-text-leading-space-dropped sev=LOW status=open locus=compiler/src/codegen/emit-lift.js(the markup-tree text-child lowering reached from emitLiftExpr — the `lift` path, NOT the §17.6.10 desugar) prov=empirical:S433-found-as-a-FAVOURABLE-divergence-while-checking-sugar-vs-lift-parity -->
 
+> **S450 cross-ref:** the `<each>`-row member of this family is RESOLVED as
+> [[g-each-row-whitespace-only-text-dropped]]; this `lift` entry is untouched (different emitter — `emit-lift.js`).
+> The whitespace-model question below is answered by S442 (§4.18.5, *"Whitespace is kept exactly"*), which assigns
+> the `lift`-segment fix to the bootstrap.
+>
 > **⚑ FOUND AS A PARITY FAILURE IN WHICH *OUR NEW PATH IS THE CORRECT ONE*, which is why it is filed
 > against `lift` and not against the sugar.** While gating [[g-if-arm-bare-markup-branch-silently-dropped]]
 > on "the sugar must emit what `lift` emits", one shape diverged in the sugar's FAVOUR:
@@ -5406,6 +5464,12 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 
 ### g-ast-markup-text-interp-adjacent-space-dropped — a space between literal text and an adjacent `${…}` in markup text is dropped: `Saved ${@cell}` renders `Savedhello`
 <!-- @gap id=g-ast-markup-text-interp-adjacent-space-dropped sev=MED status=open locus=searched:compiler/src/tokenizer.ts(~804 read-to-whitespace-or-tag-close),compiler/src/ast-builder.js(text-child construction) — parseLiftContentParts PROVEN INNOCENT by S377-peter (returns [{text:"Saved "},{expr:"@cell"}] with the space intact); the content string reaching the emitter already lacks it prov=adopter:S377-peter-dog-food-routed -->
+> **S450 cross-ref — the `<each>`-row instance of this family is RESOLVED** as
+> [[g-each-row-whitespace-only-text-dropped]] (emit-each.ts; a different emitter from this entry's `lift` path, which
+> S450 did not touch). The S442 ruling settles the fork below: §4.18.5 *"Whitespace is kept exactly"* — so this is a
+> defect, not intentional collapse. Measured S450 on `daca85d8`: the top-level shape `<p>Saved ${@a}</p>` renders
+> `Saved hello` (correct); a `lift <li>${r.f} ${r.l}</li>` in a for-lift still renders `PeterOliver`.
+>
 > **S441 — now REPRODUCED by execution (tutorial-fix T3, happy-dom at `cf62b4154`), no longer relay-only:** `lift <p>Got ${n} rows.</p>` inside a JS-style `match` arm renders `<p>Got42rows.</p>`, while the identical text in the block-form `<match>` renders `Block got 42 rows.` — so the collapse is position-dependent, which argues against the "maybe intentional" reading. The multi-line half of the same probe is g-match-arm-lift-skips-render-by-tag-and-lands-outside-host. Reproducer `docs/changes/s441-audit-gap-filing/repro/tut-match-lift-multiline-form-garbage-dom.scrml`.
 
 > **Routed turnkey by S377-peter. RELAYED — the PA has NOT independently reproduced this one.** Reported shapes: `Saved ${@cell}` → `"Savedhello"`; `Val ${x}` in a for-lift → `"Val7"`; `Priority: ${p}` → `"Priority:7"` (the `:` survives, the space after it does not). Scope reported as shared across top-level markup AND for-lift.
