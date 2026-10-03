@@ -59,3 +59,18 @@
 - Handles declared inside an `else-if=` / `else` branch are conditional (handlesInElem), like `if=`.
 - state-child bodies are now resolved one sibling list each (`stateBodyLists`), so a chain can never be
   formed across two state-children's bodies.
+
+## 2026-10-03 — fix landed on branch (ddb7c8a70) + conformance twins
+- analyze (chainCheck / chainMember / chainHost / elemFactNow / condAttrOf / isChainAttr / stateBodyLists),
+  lower (chainEnd / chainView / chainTest / bareElem / htmlView / useView). slice-m4/if-chain.test.js:
+  30 tests, 27 fail on the pre-fix sources (bite verified by swapping HEAD's analyze/lower back in).
+- self-host-v2 suites: 1294 pass / 0 fail. Pre-commit gate: 29944 pass / 0 fail.
+- Counter AFTER the fix, existing corpus: unchanged (PASS 42 · FAIL 18 · graded 60) — every existing
+  chain case is LEGACY / parse-reject.
+- Added 5 `<program>` + `let <x/>` twins the bootstrap grades (control-flow/ctrl-00{1,2,3,5}-…-program-pos,
+  control-flow/if-chain-program-first-true-rt). Severity is not asserted in the twins (a bootstrap Diag
+  carries no §34 severity — the grader reports "severity unobservable"); the legacy twins pin it on impl#1.
+  impl#1: the 4 codes twins PASS; the rt twin XFAILs (impl#1 does not parse `let <x/>`: E-STATE-UNDECLARED,
+  runtime "let is not defined") under the carried gap g-impl1-value-writes-state-codes-unimplemented-s449
+  (whose title names the §66 opener) — PA may re-point to a dedicated impl#1 opener gap.
+- Counter with the twins: PASS 47 · FAIL 18 · graded 65 · non-vacuous 32 (was 42 / 18 / 60 / 27).
