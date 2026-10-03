@@ -1,6 +1,47 @@
 # test.map.md
 # project: scrml
-# updated: 2026-10-02T19:15:50Z  commit: 6a592ed5c
+# updated: 2026-10-02T22:11:04-06:00  commit: 9bafb927
+# ⛑ **S450 STAMP — `6a592ed5c` -> `9bafb927`. 17 COMMITS (S447 wrap #1231, S449 #1232-#1240 incl. the native-parser
+# FREEZE #1240, S450 #1208/#1210/#1211/#1241/#1242/#1243/#1244), incremental refresh. Checkout `wrap/s450-peter` @
+# `da493e06` = `origin/main` `9bafb927` + wrap docs (`git diff 9bafb927 da493e06 -- compiler scripts conformance` is
+# EMPTY).** MAP-STAMP RULE at write time: `git log --oneline 6a592ed5c..9bafb927` -> 17; `bun scripts/state.ts --check`
+# at pass start: `maps: 19 commits behind HEAD (watermark 6a592ed5c, HEAD da493e06)` = 17 landings + wrap `65d64e9f` +
+# merge `da493e06`. After this restamp it reads 2 behind `da493e06` — both docs-only wrap commits, not source drift.
+# Source-relevant, grep-verified at `9bafb927`: #1240 (native-parser FREEZE — see HEADLINE), #1239 (E-SESSION-AMBIENT-SERVER
+# + E-AUTH-ATTR-INVALID, both build-refusing), #1234 (session store WAL+busy_timeout; CSRF-gated session destroy; auth=
+# lints), #1233 (§47.14 data-root containment refuses unresolvable symlinks; W-DEPLOY rows), #1236 (§14.8.9 protect
+# egress round 9), #1235/#1238 (bootstrap `<effect deps=>` / `reset-on=` / §6.15 value-position no-write — self-host-v2
+# ONLY), #1237 (SPEC-only S449 lifecycle rulings), #1208 (defer: E-DEFER-OUTSIDE-FUNCTION reaches text-lowered bodies),
+# #1210 (imported-enum match binding), #1211 (client helper `.js` copied into `dist/_scrml_local/`; E-IMPORT-011), #1241
+# (headless serve-target binds loopback; `SCRML_HOST`), #1242 (nested server-call cell write awaited in place), #1243
+# (E-SCHEMA-014 / E-SCHEMA-015), #1244 (E-ATTR-MULTI-STATEMENT). #1231/#1232 = wrap / gaps / reviews only.
+# ⛑ **FIGURES RE-EXECUTED AT `9bafb927`** (`bun scripts/facts.ts --check` PASS): version **0.8.0** · `compiler/src`
+# **283,787 lines / 219 files** (+2,864 lines, -1 file) · test files **1,569** (+11) · `compiler/SPEC.md` **43,915** lines
+# (+877; `regen-spec-index.ts --check` OK, 72/72) · conformance **1278** cases (+69); `bun conformance/run.ts` ->
+# **1244/1278 pass + 34 xfail, 0 fail** (was 1201 + 8 xfail; the new xfails are bootstrap-only `lifecycle/` +
+# `reactive/no-write-*` cases) · `docs/known-gaps.md` `@generated:gap-counts` at `9bafb927`: open **HIGH 230** (+5
+# carried) · **MED 473** (+1 carried) · **LOW 224** · Nominal 7. §34 census NOT re-run this pass (Windows host; see N-S446-1).
+# ⛑ **HEADLINE — #1240 NATIVE-PARSER FREEZE (S449 ruling 6).** `compiler/native-parser/` 81 -> **44** tracked files: all
+# 37 `.scrml` mirrors DELETED; the `.js` files STAY as a FROZEN component of impl#1, called at fixed sites only:
+# `component-expander.ts` + `meta-eval.ts` (`nativeParseFile`), `codegen/emit-match.ts` + `codegen/emit-engine.ts`
+# (re-parse via `require`), `validators/defer-structure.ts` (`lex` + `parseProgram` probe), `native-walker/
+# forbidden-js-native.ts` (E-CLASS / E-DYNAMIC-IMPORT), `ast-builder.js` + `block-splitter.js` (`body-top-prose.js`,
+# `body-top-coverage.js`), `api.js` (`translate-expr.js` `resetMarkupValueExprIdCounter`), `native-walker/
+# engine-statechild-walker.ts` (`collect-hoisted.js`). **`--parser=scrml-native` RETIRED** — `scrml compile` exits 1 with
+# "is retired (S449)" (`commands/compile.js`; help line removed from `cli.js`; test `unit/parser-flag-retired.test.js`).
+# DELETED: `src/native-parser-canary/within-node-classifier.ts` (dir gone), `src/native-walker/attrvalue-exprnode-walker.ts`,
+# `src/native-walker/exprtext-backfill-walker.ts`, `scripts/native-parser-flip-harness.ts`, the parity suite
+# (`tests/parser-conformance.test.js`, `-canary.test.js`, `-within-node.test.js`, the 6,736-line
+# `parser-conformance-within-node-allowlist.json`, `parser-conformance/{dual-pipeline-canary,parsers,tier-diff}.js`,
+# `parser-conformance/live-phantom-fixture.scrml`) and ci.yml's tracking "Within-node parser-parity" step. KEPT:
+# `tests/parser-conformance/{corpus-enumerator.js,bench/,markup-bench/}`, `tests/parser-conformance-corpus.test.js`,
+# `-expr.test.js`, `-each-contextual-sigil.test.js`; NEW `tests/helpers/native-ast.js` (direct `nativeParseFile` tree +
+# `liveAst` oracle for tests that used to compile under the flag).
+# ⚠ Every OLDER stamp block / section below that describes the within-node parity gate, the canary, the allowlist,
+# `STRIP_KEYS` registration, the flip harness, or `--parser=scrml-native` as LIVE is SUPERSEDED by this block.
+# ⚑ `file:line` citations in S450 sections are grep-derived at `9bafb927`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S447 HEADER (stamp `6a592ed5c`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S447 STAMP — `78e4ddad` -> `6a592ed5c`. 12 COMMITS (S446-peter wrap #1223, S448 wrap #1224, bootstrap Uc codec
 # #1213/#1221, S447-bryan #1216/#1222/#1225/#1226/#1227/#1228/#1229/#1230), incremental refresh, main checkout on
 # `wrap/s447` == `origin/main` `6a592ed5c`.** MAP-STAMP RULE at write time: `git log --oneline 78e4ddad..HEAD` -> 12;
@@ -644,6 +685,42 @@
 # **62** are `count: 0` and **all 62 are count-only**; **18** are MIXED (a count AND a first-match
 # check) and **all 18 are `count: 1`** — those 18 are exactly what #822 un-blinded.
 #
+
+## S450 — TEST SURFACE DELTA (`6a592ed5c..9bafb927`)
+
+Counts at `9bafb927`: FACTS test files **1,569** (+11 = 18 added − 7 deleted under `compiler/tests`); conformance
+**1278** cases, `bun conformance/run.ts` **1244 pass + 34 xfail, 0 fail** (re-executed this pass).
+
+**DELETED (#1240 parity suite retired):** `parser-conformance.test.js`, `parser-conformance-canary.test.js`,
+`parser-conformance-within-node.test.js` + `parser-conformance-within-node-allowlist.json`,
+`parser-conformance/{dual-pipeline-canary,parsers,tier-diff}.js`, `parser-conformance/live-phantom-fixture.scrml`,
+`browser/each-contextual-sigil-native.browser.test.js`, `integration/m6-5-parser-workarounds-noop-under-native.test.js`,
+`unit/native-attrvalue-exprnode-population.test.js`, `unit/native-exprtext-backfill.test.js`. 11 `unit/native-*` /
+`m67-c*` parity tests REWRITTEN to assert on the native tree directly via NEW `tests/helpers/native-ast.js`.
+**No within-node parity obligation remains for AST-field changes.**
+
+**ADDED (`compiler/tests`):**
+| file | covers |
+|---|---|
+| `unit/parser-flag-retired.test.js` | `--parser` exits 1 |
+| `integration/session-ambient-server-refused.test.js` | E-SESSION-AMBIENT-SERVER + codegen backstop |
+| `integration/auth-attr-invalid-or-dynamic-value.test.js`, `commands/s449-auth-refusal-no-dist.test.js` | E-AUTH-ATTR-INVALID; refused build writes no dist |
+| `integration/session-destroy-csrf.test.js`, `integration/session-store-sqlite-defaults.test.js` | CSRF-gated destroy; WAL + busy_timeout |
+| `unit/schema-tenant-union-and-like.test.js` | E-SCHEMA-014 / -015 |
+| `unit/attr-multi-statement-s450.test.js` | E-ATTR-MULTI-STATEMENT |
+| `browser/handler-nested-server-write-s450.browser.test.js` | nested server-call cell write awaited (#1242) |
+| `unit/headless-serve-bind-host.test.js` | serve-target loopback default + `SCRML_HOST` |
+| `integration/clientjs-helper-copy-into-dist.test.js`, `commands/dev-watches-copied-client-helper.test.js` | `_scrml_local/` helper copy (#1211) |
+| `integration/imported-enum-match-binding.test.js` | imported-enum match binding (22 tests, #1210) |
+| `unit/defer-{binder-completeness,outside-function-bodies,spec-calls,text-body-completeness,text-probe-fail-closed}.test.js` | #1208 |
+
+**Bootstrap (`compiler/self-host-v2`, not in the FACTS count):** NEW `slice-m1/effect.runtime.test.js`,
+`slice-m1/reset-on.runtime.test.js`, `slice-m4/effect.test.js`, `slice-m4/reset-on.test.js`, `slice-m4/value-positions.test.js`.
+Per `self-host-v2/progress.md` (NOT re-run this pass): slice-m4 465 -> 504; slice-m2 443 pass / **5 FAIL** — five
+`front.test.js` tests write from a render hole on purpose, filed `g-bootstrap-slice-m2-render-hole-write-tests-s449`.
+New conformance dirs: `lifecycle/` (effect / reset-on / when-effect cases), `reactive/no-write-*`, `schema/schema-01{4,5}-*`,
+`*/s450-attr-multi-statement-*`, `*/nested-server-write-awaited`.
+
 
 ## S447 — TEST SURFACE DELTA (`78e4ddad..6a592ed5c`)
 **Test files 1,557 → 1,558 (+1, matches facts.ts).** NEW `compiler/tests/commands/dev-child-dies-with-parent.test.js`
@@ -1614,7 +1691,7 @@ inherited the same population). `pa-base v2.13 §8` names it THE TRUNCATED PROBE
 tool is marked `HARD REQ n` at its site so a future editor can see what they would be removing.
 
 ## Tags
-#scrml #map #test #which-runtime-executed #scrml-runtime-vs-template #chunk-pruning #conformance-blind-spot #ternary-markup-giti033 #reconciliation-chunk #types-baseline #stdlib-client-registry #instrument-integrity #test-tier-vs-merge-gate #bite-proof #recursive-recount #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout #seven-new-merge-blockers #bite-proven #declaration-form-parameterised #pinned-343 #spacing-agnostic-assertion #field-presence-not-byte-layout #1398-tests #category-dirs-plus-root-level #browser-tier-not-in-pre-commit #state-block-statement-form-suite #known-open-pinned-not-endorsed #s437b #9941a504c #conformance-1047 #xfail-7 #slice-m1-tests #s440 #cf62b415 #slice-m3 #footprint-grade #bite-matrix #mutation-harness #typer-tests #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8
+#scrml #map #test #which-runtime-executed #scrml-runtime-vs-template #chunk-pruning #conformance-blind-spot #ternary-markup-giti033 #reconciliation-chunk #types-baseline #stdlib-client-registry #instrument-integrity #test-tier-vs-merge-gate #bite-proof #recursive-recount #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout #seven-new-merge-blockers #bite-proven #declaration-form-parameterised #pinned-343 #spacing-agnostic-assertion #field-presence-not-byte-layout #1398-tests #category-dirs-plus-root-level #browser-tier-not-in-pre-commit #state-block-statement-form-suite #known-open-pinned-not-endorsed #s437b #9941a504c #conformance-1047 #xfail-7 #slice-m1-tests #s440 #cf62b415 #slice-m3 #footprint-grade #bite-matrix #mutation-harness #typer-tests #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s450 #9bafb927 #native-parser-frozen #parser-flag-retired #session-ambient-server #auth-attr-invalid
 #ctrl-025-028 #tilde-accumulator #codecounts-is-an-emission-property #neg-case-pins-cardinality #case-flipped-sides #integration-tier-is-not-gated #1425-tests #897-conformance
 #1436-tests #897-conformance-flat #normative-widening-zero-conformance-cases #template-literal-classification-suite #unit-pin-is-not-a-conformance-pin
 #s405 #1440-tests #905-conformance #54-category-dirs #root-level-test-files-14 #mapgen-keys-on-first-subdir #definition-boundary-not-stale-figure #conformance-corpus-bridge-outside #engine-statechild-prose-punctuation #already-broken-upstream-pinned #mechanical-seam-test #mediation-marked #the-split-describe-block #protect-case-dir-10 #zero-over-an-unexercised-path #unloweredscrmlsyntax #emitted-bytes-gate #test-generated-regenerated

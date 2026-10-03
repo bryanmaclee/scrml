@@ -1,6 +1,47 @@
 # build.map.md
 # project: scrml
-# updated: 2026-10-02T19:15:50Z  commit: 6a592ed5c
+# updated: 2026-10-02T22:11:04-06:00  commit: 9bafb927
+# ⛑ **S450 STAMP — `6a592ed5c` -> `9bafb927`. 17 COMMITS (S447 wrap #1231, S449 #1232-#1240 incl. the native-parser
+# FREEZE #1240, S450 #1208/#1210/#1211/#1241/#1242/#1243/#1244), incremental refresh. Checkout `wrap/s450-peter` @
+# `da493e06` = `origin/main` `9bafb927` + wrap docs (`git diff 9bafb927 da493e06 -- compiler scripts conformance` is
+# EMPTY).** MAP-STAMP RULE at write time: `git log --oneline 6a592ed5c..9bafb927` -> 17; `bun scripts/state.ts --check`
+# at pass start: `maps: 19 commits behind HEAD (watermark 6a592ed5c, HEAD da493e06)` = 17 landings + wrap `65d64e9f` +
+# merge `da493e06`. After this restamp it reads 2 behind `da493e06` — both docs-only wrap commits, not source drift.
+# Source-relevant, grep-verified at `9bafb927`: #1240 (native-parser FREEZE — see HEADLINE), #1239 (E-SESSION-AMBIENT-SERVER
+# + E-AUTH-ATTR-INVALID, both build-refusing), #1234 (session store WAL+busy_timeout; CSRF-gated session destroy; auth=
+# lints), #1233 (§47.14 data-root containment refuses unresolvable symlinks; W-DEPLOY rows), #1236 (§14.8.9 protect
+# egress round 9), #1235/#1238 (bootstrap `<effect deps=>` / `reset-on=` / §6.15 value-position no-write — self-host-v2
+# ONLY), #1237 (SPEC-only S449 lifecycle rulings), #1208 (defer: E-DEFER-OUTSIDE-FUNCTION reaches text-lowered bodies),
+# #1210 (imported-enum match binding), #1211 (client helper `.js` copied into `dist/_scrml_local/`; E-IMPORT-011), #1241
+# (headless serve-target binds loopback; `SCRML_HOST`), #1242 (nested server-call cell write awaited in place), #1243
+# (E-SCHEMA-014 / E-SCHEMA-015), #1244 (E-ATTR-MULTI-STATEMENT). #1231/#1232 = wrap / gaps / reviews only.
+# ⛑ **FIGURES RE-EXECUTED AT `9bafb927`** (`bun scripts/facts.ts --check` PASS): version **0.8.0** · `compiler/src`
+# **283,787 lines / 219 files** (+2,864 lines, -1 file) · test files **1,569** (+11) · `compiler/SPEC.md` **43,915** lines
+# (+877; `regen-spec-index.ts --check` OK, 72/72) · conformance **1278** cases (+69); `bun conformance/run.ts` ->
+# **1244/1278 pass + 34 xfail, 0 fail** (was 1201 + 8 xfail; the new xfails are bootstrap-only `lifecycle/` +
+# `reactive/no-write-*` cases) · `docs/known-gaps.md` `@generated:gap-counts` at `9bafb927`: open **HIGH 230** (+5
+# carried) · **MED 473** (+1 carried) · **LOW 224** · Nominal 7. §34 census NOT re-run this pass (Windows host; see N-S446-1).
+# ⛑ **HEADLINE — #1240 NATIVE-PARSER FREEZE (S449 ruling 6).** `compiler/native-parser/` 81 -> **44** tracked files: all
+# 37 `.scrml` mirrors DELETED; the `.js` files STAY as a FROZEN component of impl#1, called at fixed sites only:
+# `component-expander.ts` + `meta-eval.ts` (`nativeParseFile`), `codegen/emit-match.ts` + `codegen/emit-engine.ts`
+# (re-parse via `require`), `validators/defer-structure.ts` (`lex` + `parseProgram` probe), `native-walker/
+# forbidden-js-native.ts` (E-CLASS / E-DYNAMIC-IMPORT), `ast-builder.js` + `block-splitter.js` (`body-top-prose.js`,
+# `body-top-coverage.js`), `api.js` (`translate-expr.js` `resetMarkupValueExprIdCounter`), `native-walker/
+# engine-statechild-walker.ts` (`collect-hoisted.js`). **`--parser=scrml-native` RETIRED** — `scrml compile` exits 1 with
+# "is retired (S449)" (`commands/compile.js`; help line removed from `cli.js`; test `unit/parser-flag-retired.test.js`).
+# DELETED: `src/native-parser-canary/within-node-classifier.ts` (dir gone), `src/native-walker/attrvalue-exprnode-walker.ts`,
+# `src/native-walker/exprtext-backfill-walker.ts`, `scripts/native-parser-flip-harness.ts`, the parity suite
+# (`tests/parser-conformance.test.js`, `-canary.test.js`, `-within-node.test.js`, the 6,736-line
+# `parser-conformance-within-node-allowlist.json`, `parser-conformance/{dual-pipeline-canary,parsers,tier-diff}.js`,
+# `parser-conformance/live-phantom-fixture.scrml`) and ci.yml's tracking "Within-node parser-parity" step. KEPT:
+# `tests/parser-conformance/{corpus-enumerator.js,bench/,markup-bench/}`, `tests/parser-conformance-corpus.test.js`,
+# `-expr.test.js`, `-each-contextual-sigil.test.js`; NEW `tests/helpers/native-ast.js` (direct `nativeParseFile` tree +
+# `liveAst` oracle for tests that used to compile under the flag).
+# ⚠ Every OLDER stamp block / section below that describes the within-node parity gate, the canary, the allowlist,
+# `STRIP_KEYS` registration, the flip harness, or `--parser=scrml-native` as LIVE is SUPERSEDED by this block.
+# ⚑ `file:line` citations in S450 sections are grep-derived at `9bafb927`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S447 HEADER (stamp `6a592ed5c`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S447 STAMP — `78e4ddad` -> `6a592ed5c`. 12 COMMITS (S446-peter wrap #1223, S448 wrap #1224, bootstrap Uc codec
 # #1213/#1221, S447-bryan #1216/#1222/#1225/#1226/#1227/#1228/#1229/#1230), incremental refresh, main checkout on
 # `wrap/s447` == `origin/main` `6a592ed5c`.** MAP-STAMP RULE at write time: `git log --oneline 78e4ddad..HEAD` -> 12;
@@ -619,6 +660,22 @@
 # `conformance/` corpus is gated, and it is gated by a BRIDGE rather than by any workflow naming it.
 # See the CI section and invariant 87 in primary.map.md.
 #
+
+## S450 — CI + BUILD DELTA (`6a592ed5c..9bafb927`)
+
+- `.github/workflows/ci.yml`: the `tracking` job's **"Within-node parser-parity" step is RETIRED** (#1240); tracking now
+  covers the remaining non-blocking items + the types gate. Native functions impl#1 still calls keep their own tests,
+  run by the blocking `gate` job's root glob and the unit suite.
+- `scripts/native-parser-flip-harness.ts` DELETED. `scripts/facts.ts`: comment-only — `compiler/native-parser` (~30k lines
+  JS, frozen) still excluded from the `compiler/src` LOC figure.
+- `scrml compile --parser…` now exits 1 ("is retired (S449)").
+- Build output: `compile`/`build` copy client-reachable plain-JS helpers (+ transitive relative `.js`/`.mjs` imports) to
+  `<dist>/_scrml_local/…` (#1211); `scrml dev` now watches the copied helpers' sources (`commands/dev.js`). A classic-format
+  page whose client bundle has a top-level ES import loads its client-bundle tags as `type="module"`.
+- Refusal gate (`commands/refusal-gate.js`): `E-AUTH-ATTR-INVALID`, `E-SESSION-AMBIENT-SERVER`,
+  `E-INTERNAL-SESSION-AMBIENT-SERVER` added — the build writes NO dist when any fires (#1239).
+- `commands/build.js` console warnings `W-DEPLOY-DB-OUTSIDE-DATA-ROOT` / `W-DEPLOY-DB-NO-PROJECT-ROOT` now have §34 rows (#1233).
+
 
 ## S447 — CI + BUILD DELTA (`78e4ddad..6a592ed5c`)
 - **`bunfig.toml`** — NEW `[test] preload = ["./compiler/tests/helpers/tmp-root-preload.js"]` (per-process temp root;
@@ -1691,7 +1748,7 @@ pre-push — **SCOPE AND TRIGGER BOTH CHANGED THIS WINDOW.**
 None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 
 ## Tags
-#scrml #map #build #types-gate #tsc #typescript-dep #baseline-name-count #tracking-job #test-tier-vs-merge-gate #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #s34-census-base-fallback #weakens-no-gate #root-vs-position #review-debt-code-bearing #two-rates-one-signal #volume-statistic-not-alarm #directory-whitelist-not-blacklist #scripts-is-code-bearing #count-threshold-not-percentage #bite-test #widen-before-you-count #auto-widen #widen-ceiling #epoch-clearing-not-list-full #cry-wolf-guard-deleted-not-tuned #state-ts-ledger-integrity #marker-truncation-internal-gt #duplicate-gap-id-double-count #throw-on-conflicting-status #heading-marker-drift-13 #warn-only-not-gated #maps-watermark-no-ancestry-check #s34-census-windows-fix-landed #fileurltopath #boot-read-set-gate #a-memory-navigates-it-does-not-gate #pickup-led-digest #delegate-dont-reimplement #detection-not-control #two-failure-classes-enumerated #behind-is-timing-not-a-defect #derive-dont-declare-guarded #needle-driftcheck #honest-residual-reverse-direction #windows-first #fileurltopath-not-url-pathname #dpa-debt-probe #a-channel-the-probe-does-not-read-does-not-exist #bidirectional-probe #stale-table #anchored-not-contains #third-instance-of-unanchored-match #ratification-lives-in-column-3 #run-not-ratify #source-text-regex-census #post-ast-source-text-rule #five-authors-one-substitution #invisible-to-differentials #pre-ast-is-exempt #ratio-not-inspection #reports-a-floor-not-a-count #never-quote-the-raw-regex-count #probe-inherited-its-own-blind-spot #structural-successor-named #new-or-touched-only #not-a-ci-gate #cry-wolf-shape #zero-github-diff #second-window-running #gate-13-steps #delta-lint-gate #delta-log-sequence #checkpoint-cursor #baselined-not-enforced #pa-base-8 #step-name-is-a-coverage-claim #canary-gated-in-gate-job #g-ci-does-not-run-root-level-test-files #corpus-zero-debt #corpus-zero-is-blast-radius-only #reverse-ouroboros #types-gate-NOT-on-main #package-json-zero-diff-11-windows #ctx-ts-not-on-main #gate-13-steps #s437b #9941a504c #ci-bootstrap-step #lint-no-default-arm #s440 #cf62b415 #slice-m3-ci #hybrid-footprint #before-write #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8
+#scrml #map #build #types-gate #tsc #typescript-dep #baseline-name-count #tracking-job #test-tier-vs-merge-gate #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #s34-census-base-fallback #weakens-no-gate #root-vs-position #review-debt-code-bearing #two-rates-one-signal #volume-statistic-not-alarm #directory-whitelist-not-blacklist #scripts-is-code-bearing #count-threshold-not-percentage #bite-test #widen-before-you-count #auto-widen #widen-ceiling #epoch-clearing-not-list-full #cry-wolf-guard-deleted-not-tuned #state-ts-ledger-integrity #marker-truncation-internal-gt #duplicate-gap-id-double-count #throw-on-conflicting-status #heading-marker-drift-13 #warn-only-not-gated #maps-watermark-no-ancestry-check #s34-census-windows-fix-landed #fileurltopath #boot-read-set-gate #a-memory-navigates-it-does-not-gate #pickup-led-digest #delegate-dont-reimplement #detection-not-control #two-failure-classes-enumerated #behind-is-timing-not-a-defect #derive-dont-declare-guarded #needle-driftcheck #honest-residual-reverse-direction #windows-first #fileurltopath-not-url-pathname #dpa-debt-probe #a-channel-the-probe-does-not-read-does-not-exist #bidirectional-probe #stale-table #anchored-not-contains #third-instance-of-unanchored-match #ratification-lives-in-column-3 #run-not-ratify #source-text-regex-census #post-ast-source-text-rule #five-authors-one-substitution #invisible-to-differentials #pre-ast-is-exempt #ratio-not-inspection #reports-a-floor-not-a-count #never-quote-the-raw-regex-count #probe-inherited-its-own-blind-spot #structural-successor-named #new-or-touched-only #not-a-ci-gate #cry-wolf-shape #zero-github-diff #second-window-running #gate-13-steps #delta-lint-gate #delta-log-sequence #checkpoint-cursor #baselined-not-enforced #pa-base-8 #step-name-is-a-coverage-claim #canary-gated-in-gate-job #g-ci-does-not-run-root-level-test-files #corpus-zero-debt #corpus-zero-is-blast-radius-only #reverse-ouroboros #types-gate-NOT-on-main #package-json-zero-diff-11-windows #ctx-ts-not-on-main #gate-13-steps #s437b #9941a504c #ci-bootstrap-step #lint-no-default-arm #s440 #cf62b415 #slice-m3-ci #hybrid-footprint #before-write #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s450 #9bafb927 #native-parser-frozen #parser-flag-retired #session-ambient-server #auth-attr-invalid
 #int-number-census #hand-run-instrument #not-gated #gate-flat-14-steps #ci-zero-diff
 #s405 #ci-zero-diff #gate-14-steps #verified-empty-diff #gate-excludes-integration #seven-of-fourteen-outside-the-gate #corpus-bridge-invariant-88 #905-conformance #state-ts-check-exits-0 #maps-staleness-vs-local-head #stamp-tracks-merge-base
 #s437 #d02738767 #gate-16-steps #windows-5-steps #e2e-render-map-gated #hybrid-harness #p5-module-done-gate #xfail #status-carried #cloud-maps-relabel #v0-8-0

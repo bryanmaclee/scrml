@@ -1,6 +1,12 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-10-02T19:15:50Z  commit: 6a592ed5c
+# generated: 2026-10-02T22:11:04-06:00  commit: 9bafb927
+# ⛑ **S450 STAMP — `6a592ed5c` -> `9bafb927`. 17 COMMITS, incremental refresh, checkout `wrap/s450-peter` @ `da493e06` = `origin/main` + wrap docs.**
+# MAP-STAMP RULE at write time: `git log --oneline 6a592ed5c..9bafb927` -> 17; `bun scripts/state.ts --check` reported
+# `maps: 19 commits behind HEAD (watermark 6a592ed5c, HEAD da493e06)` at pass start (17 + 2 docs-only wrap commits).
+# Full PR list, figures and the #1240 native-parser FREEZE headline: see any map's own S450 stamp (identical text, broadcast to all 12 maps).
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S447 HEADER (stamp `6a592ed5c`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S447 STAMP — `78e4ddad` -> `6a592ed5c`. 12 COMMITS, incremental refresh, main checkout on `wrap/s447` == `origin/main`.**
 # MAP-STAMP RULE at write time: `git log --oneline 78e4ddad..HEAD` -> 12; `bun scripts/state.ts --check` reported
 # `maps: 12 commits behind HEAD (watermark 78e4ddad, HEAD 6a592ed5c)` at pass start; `maps: current` after line-3 restamp.
@@ -305,6 +311,63 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S450 pass (this pass, stamp `9bafb927`)
+
+**Scope: INCREMENTAL** over `6a592ed5c..9bafb927` (17 commits), focused on the areas the window touched — chiefly the
+#1240 native-parser freeze, which made every doc that describes `--parser=scrml-native` / the within-node gate as live
+a candidate. In-scope docs changed in-window: `compiler/SPEC.md` (+877), `compiler/SPEC-INDEX.md`, `docs/FACTS.md`,
+`docs/changelog.md`, `docs/known-gaps.md`, `docs/pr-reviews.md`, `compiler/self-host-v2/progress.md`, and 24
+`docs/changes/{s449-*,s450-*}/{BRIEF,progress}.md` dispatch artifacts (historical by design — compliant). Also
+re-checked (unchanged in-window but invalidated by #1240): `compiler/native-parser/*.md`, `conformance/README.md`,
+`master-list.md`. Out of scope: `handOffs/**`, `.claude/maps/**`. Checked: 38. Compliant: 30. Non-compliant: 8 docs in 3 findings (+ 4 source/test comments)
+Uncertain: 1. Gates at `9bafb927` (run on `da493e06`, identical for compiler/scripts/conformance):
+`facts.ts --check` PASS · `regen-spec-index.ts --check` OK (72/72) · `bun conformance/run.ts` 1244 + 34 xfail, 0 fail ·
+`state.ts --check`: gap-counts PASS, **`@generated:recent-sessions` (master-list.md) STALE on the `da493e06` working
+tree** (the S450 wrap edits; run `bun scripts/state.ts --write` before the wrap PR), known-gaps heading/marker drift
+**61** (+6 vs 55 at the S447 stamp).
+
+### N-S450-1. `compiler/SPEC.md` still makes NORMATIVE demands of the retired `--parser=scrml-native` front end
+**Reason:** grep-mismatch (spec vs code). **Detail:** `commands/compile.js` now exits 1 on `--parser` ("is retired
+(S449)"), and `SPEC.md:20918` itself records "M6 not pursued (S449)". Yet: `SPEC.md:7769` (E-CLASS) and `:19967`
+(E-DYNAMIC-IMPORT) say "Both front-ends SHALL fire the code: the default pipeline and `--parser=scrml-native`";
+`:18879` (§19.16 defer) says the codes "fire identically under `--parser=scrml-native`"; `:2022` (§5.2.4, added S450)
+lists "The `--parser=scrml-native` front end" as a not-yet-detected position. The native code still runs at fixed
+sites (the E-CLASS / E-DYNAMIC-IMPORT pass in `native-walker/forbidden-js-native.ts`, the defer probe), so the rules are
+not wrong in substance — the flag they name is unselectable. **Suggested disposition:** update to match current
+(language-owner SPEC edit; regen SPEC-INDEX after).
+
+### N-S450-2. `compiler/native-parser/README.md` + the `M5-*.md` / `M6.6-CONTRACT-DERIVATION.md` docs describe the pre-freeze plan
+**Reason:** combo (grep-mismatch + aspirational). **Detail:** README (104 lines, not edited by #1240) says the parser
+"ships behind `--parser=scrml-native`", that "M6 deletes the `compiler/src/` front-end stages", that ".scrml files carry
+the CANONICAL scrml-source SHAPE", and points readers to 15 `.scrml` files (`lex-mode.scrml`, `bracket-stack.scrml`,
+`error-recovery.scrml`, …) — all deleted by #1240. `M5-ast-bridge-scoping.md` (3 flag refs), `M5-divergence-ledger.md`
+(1), `M5-SWAP-residual-decomposition.md`, `M6.6-CONTRACT-DERIVATION.md` are milestone-era design/ledger docs for a swap
+that is no longer pursued. `master-list.md:71` likewise still carries the S112 "M1-M6 ladder swaps it out behind
+`--parser=scrml-native`" status with no S449 freeze note. **Suggested disposition:** README → update to match current
+(frozen impl#1 component, list the live call sites); `M5-*.md` + `M6.6-CONTRACT-DERIVATION.md` → deref to
+`scrml-support/archive/`; `master-list.md:71` → append the S449 freeze status.
+
+### N-S450-3. Comments/docs pointing at the DELETED within-node parity gate as if it exists (minor)
+**Reason:** grep-mismatch. **Detail:** `conformance/README.md:454` (OQ5: "`parser-conformance-within-node` (the
+live↔native AST parity canary) is an impl#1-internal … scaffold" — present tense), `compiler/src/ast-builder.js:13432`
+("LIVE-only in within-node-classifier's STRIP_KEYS"), `compiler/src/block-splitter.js:3501`,
+`compiler/native-parser/parse-file.js:1728`, `compiler/tests/e2e-render-map/e2e-render-map.test.js:5` ("cloned from
+… `compiler/tests/parser-conformance-within-node.test.js`"). `ci.yml:125` is an explicitly historical S302 note next to
+the retirement comment — compliant. **Suggested disposition:** update to match current (past tense / "retired S449").
+
+### U-S450-1 (uncertain). `self-host-v2/progress.md` reports slice-m2 **443 pass / 5 FAIL** at the #1238 landing
+**What to check:** run `bun test compiler/self-host-v2/slice-m2` on `9bafb927`; if the five `front.test.js` render-hole
+write tests still fail, confirm `g-bootstrap-slice-m2-render-hole-write-tests-s449` is open and whether CI runs slice-m2
+(a red bootstrap slice on main). Not re-run by this pass.
+
+### Carried — status at `9bafb927`
+| item | result |
+|---|---|
+| N-S447-1 `SPEC.md` §19.16.7 cites removed `compiler/self-host/pa.scrml` | **RESOLVED** — `SPEC.md:18833` now adds "that v1 tree was retired S447, PR 1230; the example stands as motivation" |
+| N-S446-1 `scripts/s34-census.ts` Windows path-separator bug | NOT RE-PROBED (script unchanged in-window) — CARRIED |
+| U-S445-1 / U-S445-2 / U-S445-3 / U-S444-1 | no related commit in-window — CARRIED, UNCHANGED |
+
 
 ## Summary — S447 pass (this pass, stamp `6a592ed5c`)
 
@@ -710,7 +773,7 @@ predates #1106. `scanForTopLevelSemicolon` is still the scan primitive, so the s
 ⏳ Not scanned: anything from bootstrap M2 (#1109, `072741ca9`, incl. `compiler/self-host-v2/slice-m2/progress.md`) — landed after this stamp.
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #s437b #9941a504c #gap-status-stale #moot-by-ruling #ghost-lint-false-positive #e-manifest-001 #pa-scrml-reference-locus-drift
+#non-compliance #project-mapper #cleanup #scrml #s437b #9941a504c #gap-status-stale #moot-by-ruling #ghost-lint-false-positive #e-manifest-001 #pa-scrml-reference-locus-drift #s450 #9bafb927 #native-parser-frozen #parser-flag-retired #session-ambient-server #auth-attr-invalid
 
 ## Links
 - [primary.map.md](./primary.map.md)

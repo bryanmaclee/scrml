@@ -1,6 +1,47 @@
 # error.map.md
 # project: scrml
-# updated: 2026-10-02T19:15:50Z  commit: 6a592ed5c
+# updated: 2026-10-02T22:11:04-06:00  commit: 9bafb927
+# ⛑ **S450 STAMP — `6a592ed5c` -> `9bafb927`. 17 COMMITS (S447 wrap #1231, S449 #1232-#1240 incl. the native-parser
+# FREEZE #1240, S450 #1208/#1210/#1211/#1241/#1242/#1243/#1244), incremental refresh. Checkout `wrap/s450-peter` @
+# `da493e06` = `origin/main` `9bafb927` + wrap docs (`git diff 9bafb927 da493e06 -- compiler scripts conformance` is
+# EMPTY).** MAP-STAMP RULE at write time: `git log --oneline 6a592ed5c..9bafb927` -> 17; `bun scripts/state.ts --check`
+# at pass start: `maps: 19 commits behind HEAD (watermark 6a592ed5c, HEAD da493e06)` = 17 landings + wrap `65d64e9f` +
+# merge `da493e06`. After this restamp it reads 2 behind `da493e06` — both docs-only wrap commits, not source drift.
+# Source-relevant, grep-verified at `9bafb927`: #1240 (native-parser FREEZE — see HEADLINE), #1239 (E-SESSION-AMBIENT-SERVER
+# + E-AUTH-ATTR-INVALID, both build-refusing), #1234 (session store WAL+busy_timeout; CSRF-gated session destroy; auth=
+# lints), #1233 (§47.14 data-root containment refuses unresolvable symlinks; W-DEPLOY rows), #1236 (§14.8.9 protect
+# egress round 9), #1235/#1238 (bootstrap `<effect deps=>` / `reset-on=` / §6.15 value-position no-write — self-host-v2
+# ONLY), #1237 (SPEC-only S449 lifecycle rulings), #1208 (defer: E-DEFER-OUTSIDE-FUNCTION reaches text-lowered bodies),
+# #1210 (imported-enum match binding), #1211 (client helper `.js` copied into `dist/_scrml_local/`; E-IMPORT-011), #1241
+# (headless serve-target binds loopback; `SCRML_HOST`), #1242 (nested server-call cell write awaited in place), #1243
+# (E-SCHEMA-014 / E-SCHEMA-015), #1244 (E-ATTR-MULTI-STATEMENT). #1231/#1232 = wrap / gaps / reviews only.
+# ⛑ **FIGURES RE-EXECUTED AT `9bafb927`** (`bun scripts/facts.ts --check` PASS): version **0.8.0** · `compiler/src`
+# **283,787 lines / 219 files** (+2,864 lines, -1 file) · test files **1,569** (+11) · `compiler/SPEC.md` **43,915** lines
+# (+877; `regen-spec-index.ts --check` OK, 72/72) · conformance **1278** cases (+69); `bun conformance/run.ts` ->
+# **1244/1278 pass + 34 xfail, 0 fail** (was 1201 + 8 xfail; the new xfails are bootstrap-only `lifecycle/` +
+# `reactive/no-write-*` cases) · `docs/known-gaps.md` `@generated:gap-counts` at `9bafb927`: open **HIGH 230** (+5
+# carried) · **MED 473** (+1 carried) · **LOW 224** · Nominal 7. §34 census NOT re-run this pass (Windows host; see N-S446-1).
+# ⛑ **HEADLINE — #1240 NATIVE-PARSER FREEZE (S449 ruling 6).** `compiler/native-parser/` 81 -> **44** tracked files: all
+# 37 `.scrml` mirrors DELETED; the `.js` files STAY as a FROZEN component of impl#1, called at fixed sites only:
+# `component-expander.ts` + `meta-eval.ts` (`nativeParseFile`), `codegen/emit-match.ts` + `codegen/emit-engine.ts`
+# (re-parse via `require`), `validators/defer-structure.ts` (`lex` + `parseProgram` probe), `native-walker/
+# forbidden-js-native.ts` (E-CLASS / E-DYNAMIC-IMPORT), `ast-builder.js` + `block-splitter.js` (`body-top-prose.js`,
+# `body-top-coverage.js`), `api.js` (`translate-expr.js` `resetMarkupValueExprIdCounter`), `native-walker/
+# engine-statechild-walker.ts` (`collect-hoisted.js`). **`--parser=scrml-native` RETIRED** — `scrml compile` exits 1 with
+# "is retired (S449)" (`commands/compile.js`; help line removed from `cli.js`; test `unit/parser-flag-retired.test.js`).
+# DELETED: `src/native-parser-canary/within-node-classifier.ts` (dir gone), `src/native-walker/attrvalue-exprnode-walker.ts`,
+# `src/native-walker/exprtext-backfill-walker.ts`, `scripts/native-parser-flip-harness.ts`, the parity suite
+# (`tests/parser-conformance.test.js`, `-canary.test.js`, `-within-node.test.js`, the 6,736-line
+# `parser-conformance-within-node-allowlist.json`, `parser-conformance/{dual-pipeline-canary,parsers,tier-diff}.js`,
+# `parser-conformance/live-phantom-fixture.scrml`) and ci.yml's tracking "Within-node parser-parity" step. KEPT:
+# `tests/parser-conformance/{corpus-enumerator.js,bench/,markup-bench/}`, `tests/parser-conformance-corpus.test.js`,
+# `-expr.test.js`, `-each-contextual-sigil.test.js`; NEW `tests/helpers/native-ast.js` (direct `nativeParseFile` tree +
+# `liveAst` oracle for tests that used to compile under the flag).
+# ⚠ Every OLDER stamp block / section below that describes the within-node parity gate, the canary, the allowlist,
+# `STRIP_KEYS` registration, the flip harness, or `--parser=scrml-native` as LIVE is SUPERSEDED by this block.
+# ⚑ `file:line` citations in S450 sections are grep-derived at `9bafb927`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S447 HEADER (stamp `6a592ed5c`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S447 STAMP — `78e4ddad` -> `6a592ed5c`. 12 COMMITS (S446-peter wrap #1223, S448 wrap #1224, bootstrap Uc codec
 # #1213/#1221, S447-bryan #1216/#1222/#1225/#1226/#1227/#1228/#1229/#1230), incremental refresh, main checkout on
 # `wrap/s447` == `origin/main` `6a592ed5c`.** MAP-STAMP RULE at write time: `git log --oneline 78e4ddad..HEAD` -> 12;
@@ -701,6 +742,40 @@
 # a spurious `E-ROUTE-001` on a `server fn` declared inside an `if=`/`else` branch of a `<program>`
 # worker body. Both descents landed in the same commit for that reason.
 #
+
+## S450 — DIAGNOSTIC DELTA (`6a592ed5c..9bafb927`)
+
+### New impl#1 codes (emitter sites grep-verified at `9bafb927`)
+| code | site | fires when |
+|---|---|---|
+| `E-SESSION-AMBIENT-SERVER` | `route-inference.ts:6172` / `:6195` (`detectServerAmbientSessionReads` :2507) | `@session` read in a server context (§6.6.9 / §20.5); build-refusing |
+| `E-INTERNAL-SESSION-AMBIENT-SERVER` | `codegen/server-session-guard.ts:152` | codegen backstop: a server `@session` reached lowering unrefused; suppressed in `api.js:3114` when the front-end code already fired; build-refusing |
+| `E-AUTH-ATTR-INVALID` | `validators/attribute-allowlist.ts:180` | `auth=` on `<program>`/`<page>` not exactly `required`/`optional`/`none` (incl. non-literal); build-refusing (§52.13.2) |
+| `E-SCHEMA-014` | `gauntlet-phase1-checks.js:816` | `LIKE` template inside a `CREATE TABLE` head (§39) |
+| `E-SCHEMA-015` | `gauntlet-phase1-checks.js:911` (`schema-differ.js` `findTenantDeclarationDisagreements` :925) | same-name table declarations disagree on `tenant_id` |
+| `E-ATTR-MULTI-STATEMENT` | `ast-builder.js:18111` (forwarded by `SUBPARSE_FORWARDED_CODES` :17594) | statement list in a NON-handler attribute value (was silently dropped) (§5.2.4) |
+| `E-IMPORT-011` | `api.js:837` / `:846` | client helper import resolves outside the project root or to a §47.13-denied dist path (#1211) |
+| `E-DEFER-OUTSIDE-FUNCTION` | `validators/lint-defer.ts:253` / `:261` | now also reaches text-lowered bodies (`defer-structure.ts` `textLoweredBodiesOf`) (#1208) |
+| `E-DEFER-AMBIGUOUS-LEAD` | `validators/lint-defer.ts:1000` | (#1208) |
+
+Re-scoped: `W-ATTR-002` no longer covers an invalid/non-literal `auth=` (now the error above); `auth-graph.ts` treats a
+program gate as present only for `auth="required"`/`"optional"`. `E-VARIANT-AMBIGUOUS` sites touched (#1210:
+`type-system.ts:15687`, `codegen/emit-expr.ts:3487`). `E-IMPORT-006` also covers a missing client helper.
+LSP: `lsp/handlers.js` gained hover text for `E-AUTH-ATTR-INVALID`, `E-SESSION-AMBIENT-SERVER`,
+`E-INTERNAL-SESSION-AMBIENT-SERVER`.
+
+### Bootstrap-only codes (`compiler/self-host-v2`, NOT emitted by impl#1)
+`E-EFFECT-WRITES-STATE`, `E-EFFECT-WRITE-UNPROVEN`, `E-EFFECT-NO-DEPS`, `E-PARSE-EFFECT`, `E-RESET-ON-{INVALID-ENTRY,CYCLE,
+NOT-WRITABLE,ENGINE-REFUSED}`, `W-WHEN-EFFECT-DEPRECATED`, `E-VALUE-WRITES-STATE`, `E-VALUE-WRITE-UNPROVEN` (§6.15) —
+`analyze.scrml` (+ `check.scrml`, `parse.scrml`, `ast.scrml`, `core.scrml`). Their conformance cases are xfail on impl#1.
+
+### Runtime error paths
+- Generated serve-target: refused `SCRML_HOST` or unbindable primary socket -> stderr + exit 1 (`emit-tool.ts`).
+- Emitted `session.destroy()`: clears + redirects only on 2xx; a final failure keeps state and reports via
+  `_scrml_error_boundary_log` (#1234).
+- Emitted server `@session` that slipped past both guards references `_scrml_server_session_refused` (undefined ->
+  ReferenceError) rather than reading the request body.
+
 
 ## S447 — DIAGNOSTIC DELTA (`78e4ddad..6a592ed5c`)
 §34 census (Linux run): **881 rows** (+12) · STRUCK 35 · PINNED 377 · IMPL-SITES 317. Every addition is a NOMINAL
@@ -1850,7 +1925,7 @@ compiling stdlib source emitting a browser-DOA bundle, invisible to every prior 
 once (wrong goggle AND `stdlib/` outside the corpus roots). See build.map.md for how to run it.
 
 ## Tags
-#scrml #map #error #diagnostics #w-dead-function #reachability #route-inference #not-usage-analyzer #dead-function-locus #routing #e-stdlib-client-chunk-missing #w-type-031-unproven #asis-unknown-split #stdlib-client-registry #e-control-flow-in-markup #default-logic-lift #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed #zero-new-codes #806-unchanged #silent-drop-testable #no-diagnostic-by-design #register-fn-name #e-codegen-invalid-logic #validate-emit-contract #e-scope-001 #response-contract-has-no-code #spec-silent-shall #807-codes #e-derived-server-only-reach #§6.6.19 #step-3b #refuse-not-escalate #per-function-scope-only #one-position-not-a-class #shortest-edit-restores-the-leak #kind-tool-carve-out #e-sql-006-compile-time #sink-not-detector #prepared-stmt-errors #narrow-sink-drain #dedup-at-drain #handle-escape-hatch-body #census-oracle-re-executed #pinned-341 #impl-sites-320 #false-claim-95-unchanged #prefix-grep-is-not-the-catalog-figure #silent-wrong-output-no-code #§18.5-no-diagnostic #undefined-does-not-exist-§42.1.1 #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #pinned-in-the-emitting-pr #pinned-341-to-343 #silent-broken-bundle-to-compile-error #surfaces-not-changes #fallback-descriptor-not-null #four-fixes-no-code #false-fire-is-a-defect-with-no-count #e-markup-001-false-fire #silent-vs-loud-same-class #awk-cross-check-810-ewih #prefix-grep-series-diverges #filesscanned-is-not-a-repo-fact #810-codes #e-mw-007 #e-program-002 #e-import-005 #declared-ahead #census-reclassification #false-claim-disposition #build-arc #home-no-shall #orphan-index #nominal-home #impl-sites-minus-20 #w-lint-nine-no-row #fire-site-not-comment #files-scanned-not-a-fact #select-request-onion #one-onion-rule #no-diagnostic-class #accepted-then-discarded #fail-open #structural-show #structural-if-row-template #census-re-executed #files-scanned-not-a-repo-fact #e-state-block-statement-form #813-codes #impl-sites-303 #bs-lint-stage #pre-ast-error-gate #fresh-code-not-reserved-code #do-not-cite-a-code-token-in-a-message #glob-disarms-a-fatal-gate #census-table-needs-a-sha #s380-incremental #w-each-peritem-if-multiroot-deferred #w-lift-tier0-line-fix #silent-wrong-no-new-code #§52.13 #s437b #9941a504c #e-multi-statement-handler #dangling-else #braceless-else #s440 #cf62b415 #e-call-arity #e-each-not-sequence #e-struct-duplicate-key #e-select-option-not-variant #e-bootstrap-codes #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8
+#scrml #map #error #diagnostics #w-dead-function #reachability #route-inference #not-usage-analyzer #dead-function-locus #routing #e-stdlib-client-chunk-missing #w-type-031-unproven #asis-unknown-split #stdlib-client-registry #e-control-flow-in-markup #default-logic-lift #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed #zero-new-codes #806-unchanged #silent-drop-testable #no-diagnostic-by-design #register-fn-name #e-codegen-invalid-logic #validate-emit-contract #e-scope-001 #response-contract-has-no-code #spec-silent-shall #807-codes #e-derived-server-only-reach #§6.6.19 #step-3b #refuse-not-escalate #per-function-scope-only #one-position-not-a-class #shortest-edit-restores-the-leak #kind-tool-carve-out #e-sql-006-compile-time #sink-not-detector #prepared-stmt-errors #narrow-sink-drain #dedup-at-drain #handle-escape-hatch-body #census-oracle-re-executed #pinned-341 #impl-sites-320 #false-claim-95-unchanged #prefix-grep-is-not-the-catalog-figure #silent-wrong-output-no-code #§18.5-no-diagnostic #undefined-does-not-exist-§42.1.1 #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #pinned-in-the-emitting-pr #pinned-341-to-343 #silent-broken-bundle-to-compile-error #surfaces-not-changes #fallback-descriptor-not-null #four-fixes-no-code #false-fire-is-a-defect-with-no-count #e-markup-001-false-fire #silent-vs-loud-same-class #awk-cross-check-810-ewih #prefix-grep-series-diverges #filesscanned-is-not-a-repo-fact #810-codes #e-mw-007 #e-program-002 #e-import-005 #declared-ahead #census-reclassification #false-claim-disposition #build-arc #home-no-shall #orphan-index #nominal-home #impl-sites-minus-20 #w-lint-nine-no-row #fire-site-not-comment #files-scanned-not-a-fact #select-request-onion #one-onion-rule #no-diagnostic-class #accepted-then-discarded #fail-open #structural-show #structural-if-row-template #census-re-executed #files-scanned-not-a-repo-fact #e-state-block-statement-form #813-codes #impl-sites-303 #bs-lint-stage #pre-ast-error-gate #fresh-code-not-reserved-code #do-not-cite-a-code-token-in-a-message #glob-disarms-a-fatal-gate #census-table-needs-a-sha #s380-incremental #w-each-peritem-if-multiroot-deferred #w-lift-tier0-line-fix #silent-wrong-no-new-code #§52.13 #s437b #9941a504c #e-multi-statement-handler #dangling-else #braceless-else #s440 #cf62b415 #e-call-arity #e-each-not-sequence #e-struct-duplicate-key #e-select-option-not-variant #e-bootstrap-codes #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s450 #9bafb927 #native-parser-frozen #parser-flag-retired #session-ambient-server #auth-attr-invalid
 #e-cg-tilde-unresolved #tilde-accumulator #section-32 #fail-closed-floor #narrow-sink #two-drains #reset-once-per-run #process-level-not-filesystem-level #partial-span-position #resolvespanlinecol #spanfromestree-hardcodes-1-1 #cardinality-per-emission #e-tilde-001-zero-fire-sites #zero-producers #cause-traced #815-codes #pinned-344
 #e-type-031-three-positions #section-7-5-1-position-2 #e-contract-001 #e-contract-001-rt #classifypredicatezone #checkpredicateliteral #buckets-sum-to-total #dispositions-redistributed #catalog-flat-815 #range-moved-not-total
 #s405 #818-codes #catalog-19750-20639 #921-e-rows #182-w-rows #786-unique-codes #row-count-is-not-a-code-count #e-protect-004-is-a-lint #e-protect-005 #file-scoped-not-query-scoped #dedup-key-span-plus-name #endpoint-arm-shares-a-span #w-protect-005 #compile-runtime-seam #zero-byte-readablestream #w-schema-no-tables-declared #four-way-conjunction #cry-wolf-gate-gets-deleted #schema-anchor-fixture-declared-nothing #e-cg-enum-binding-collision #e-cg-sql-fn-unverifiable-span #code-with-no-spec-home #catalog-count-measures-the-catalog #emitter-derived-vs-catalog-derived #error-generated-regenerated

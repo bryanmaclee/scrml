@@ -1,6 +1,47 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-10-02T19:15:50Z  commit: 6a592ed5c
+# updated: 2026-10-02T22:11:04-06:00  commit: 9bafb927
+# ⛑ **S450 STAMP — `6a592ed5c` -> `9bafb927`. 17 COMMITS (S447 wrap #1231, S449 #1232-#1240 incl. the native-parser
+# FREEZE #1240, S450 #1208/#1210/#1211/#1241/#1242/#1243/#1244), incremental refresh. Checkout `wrap/s450-peter` @
+# `da493e06` = `origin/main` `9bafb927` + wrap docs (`git diff 9bafb927 da493e06 -- compiler scripts conformance` is
+# EMPTY).** MAP-STAMP RULE at write time: `git log --oneline 6a592ed5c..9bafb927` -> 17; `bun scripts/state.ts --check`
+# at pass start: `maps: 19 commits behind HEAD (watermark 6a592ed5c, HEAD da493e06)` = 17 landings + wrap `65d64e9f` +
+# merge `da493e06`. After this restamp it reads 2 behind `da493e06` — both docs-only wrap commits, not source drift.
+# Source-relevant, grep-verified at `9bafb927`: #1240 (native-parser FREEZE — see HEADLINE), #1239 (E-SESSION-AMBIENT-SERVER
+# + E-AUTH-ATTR-INVALID, both build-refusing), #1234 (session store WAL+busy_timeout; CSRF-gated session destroy; auth=
+# lints), #1233 (§47.14 data-root containment refuses unresolvable symlinks; W-DEPLOY rows), #1236 (§14.8.9 protect
+# egress round 9), #1235/#1238 (bootstrap `<effect deps=>` / `reset-on=` / §6.15 value-position no-write — self-host-v2
+# ONLY), #1237 (SPEC-only S449 lifecycle rulings), #1208 (defer: E-DEFER-OUTSIDE-FUNCTION reaches text-lowered bodies),
+# #1210 (imported-enum match binding), #1211 (client helper `.js` copied into `dist/_scrml_local/`; E-IMPORT-011), #1241
+# (headless serve-target binds loopback; `SCRML_HOST`), #1242 (nested server-call cell write awaited in place), #1243
+# (E-SCHEMA-014 / E-SCHEMA-015), #1244 (E-ATTR-MULTI-STATEMENT). #1231/#1232 = wrap / gaps / reviews only.
+# ⛑ **FIGURES RE-EXECUTED AT `9bafb927`** (`bun scripts/facts.ts --check` PASS): version **0.8.0** · `compiler/src`
+# **283,787 lines / 219 files** (+2,864 lines, -1 file) · test files **1,569** (+11) · `compiler/SPEC.md` **43,915** lines
+# (+877; `regen-spec-index.ts --check` OK, 72/72) · conformance **1278** cases (+69); `bun conformance/run.ts` ->
+# **1244/1278 pass + 34 xfail, 0 fail** (was 1201 + 8 xfail; the new xfails are bootstrap-only `lifecycle/` +
+# `reactive/no-write-*` cases) · `docs/known-gaps.md` `@generated:gap-counts` at `9bafb927`: open **HIGH 230** (+5
+# carried) · **MED 473** (+1 carried) · **LOW 224** · Nominal 7. §34 census NOT re-run this pass (Windows host; see N-S446-1).
+# ⛑ **HEADLINE — #1240 NATIVE-PARSER FREEZE (S449 ruling 6).** `compiler/native-parser/` 81 -> **44** tracked files: all
+# 37 `.scrml` mirrors DELETED; the `.js` files STAY as a FROZEN component of impl#1, called at fixed sites only:
+# `component-expander.ts` + `meta-eval.ts` (`nativeParseFile`), `codegen/emit-match.ts` + `codegen/emit-engine.ts`
+# (re-parse via `require`), `validators/defer-structure.ts` (`lex` + `parseProgram` probe), `native-walker/
+# forbidden-js-native.ts` (E-CLASS / E-DYNAMIC-IMPORT), `ast-builder.js` + `block-splitter.js` (`body-top-prose.js`,
+# `body-top-coverage.js`), `api.js` (`translate-expr.js` `resetMarkupValueExprIdCounter`), `native-walker/
+# engine-statechild-walker.ts` (`collect-hoisted.js`). **`--parser=scrml-native` RETIRED** — `scrml compile` exits 1 with
+# "is retired (S449)" (`commands/compile.js`; help line removed from `cli.js`; test `unit/parser-flag-retired.test.js`).
+# DELETED: `src/native-parser-canary/within-node-classifier.ts` (dir gone), `src/native-walker/attrvalue-exprnode-walker.ts`,
+# `src/native-walker/exprtext-backfill-walker.ts`, `scripts/native-parser-flip-harness.ts`, the parity suite
+# (`tests/parser-conformance.test.js`, `-canary.test.js`, `-within-node.test.js`, the 6,736-line
+# `parser-conformance-within-node-allowlist.json`, `parser-conformance/{dual-pipeline-canary,parsers,tier-diff}.js`,
+# `parser-conformance/live-phantom-fixture.scrml`) and ci.yml's tracking "Within-node parser-parity" step. KEPT:
+# `tests/parser-conformance/{corpus-enumerator.js,bench/,markup-bench/}`, `tests/parser-conformance-corpus.test.js`,
+# `-expr.test.js`, `-each-contextual-sigil.test.js`; NEW `tests/helpers/native-ast.js` (direct `nativeParseFile` tree +
+# `liveAst` oracle for tests that used to compile under the flag).
+# ⚠ Every OLDER stamp block / section below that describes the within-node parity gate, the canary, the allowlist,
+# `STRIP_KEYS` registration, the flip harness, or `--parser=scrml-native` as LIVE is SUPERSEDED by this block.
+# ⚑ `file:line` citations in S450 sections are grep-derived at `9bafb927`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S447 HEADER (stamp `6a592ed5c`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S447 STAMP — `78e4ddad` -> `6a592ed5c`. 12 COMMITS (S446-peter wrap #1223, S448 wrap #1224, bootstrap Uc codec
 # #1213/#1221, S447-bryan #1216/#1222/#1225/#1226/#1227/#1228/#1229/#1230), incremental refresh, main checkout on
 # `wrap/s447` == `origin/main` `6a592ed5c`.** MAP-STAMP RULE at write time: `git log --oneline 78e4ddad..HEAD` -> 12;
@@ -627,6 +668,29 @@
 #
 
 scrml has THREE distinct auth-adjacent surfaces: (1) the compiler's own `<program auth=...>` declarative config that the codegen wires into emitted apps, (2) the `scrml:auth` / `scrml:oauth` stdlib modules an author imports for flow logic, and (3) the §20.5 `session` server builtin (NEW this window — the write half of the session model, landed in two passes). This map covers all three, plus the §14.8.9 protect-floor that backstops them, plus the §64.9 headless-target auth carve-out.
+
+## S450 — AUTH-RELEVANT DELTA (`6a592ed5c..9bafb927`)
+
+- **`@session` is never read on the server (#1239, S449 ruling 1, §6.6.9 / §20.5).** Before: a server `@session.userId`
+  lowered to `_scrml_body["session"]` — client-controlled identity. Now: front end `route-inference.ts`
+  `detectServerAmbientSessionReads` (:2507) / `…InText` (:2571) -> `E-SESSION-AMBIENT-SERVER`; codegen floor
+  `codegen/server-session-guard.ts` (used by `emit-expr.ts`, `rewrite.ts`, `expression-parser.ts`, `emit-server.ts`)
+  emits `_scrml_server_session_refused` and drains `E-INTERNAL-SESSION-AMBIENT-SERVER`. Both are in
+  `commands/refusal-gate.js` (no dist written). Server code reads `session.<field>`. A file declaring its own
+  file-scope `<session>` cell owns the name (`fileScopeDeclaresSessionCell`, guard stands down).
+- **`auth=` literal set is closed (#1239 ruling 4 + #1234).** `<program>`/`<page>` `auth=` must be exactly
+  `"required"` / `"optional"` / `"none"`; anything else (case variants, spaces, `""`, `role:X`, `${…}`, a cell, bare)
+  = `E-AUTH-ATTR-INVALID` (`validators/attribute-allowlist.ts:180`), build-refusing. `auth-graph.ts`: a program gate
+  exists only for `required`/`optional` (was any non-`none` raw literal).
+- **Session destroy is CSRF-gated (#1234, §40.2 / §39.2.3).** Under `csrf="auto"` the destroy handler runs the
+  session-synchronizer check (403 + token planted in `scrml_csrf`) whenever a session record exists; emitted
+  `session.destroy()` sends the meta/cookie token, retries once on 403, clears + redirects only on 2xx. `csrf="off"` ungated.
+- **Session store (#1234):** SQLite variant opens with `busy_timeout` then WAL (`codegen/session-store-emit.ts`); the
+  in-memory `Map` variant is unchanged. `protect-flow.ts` models the store by summary keyed on the exact emitted text.
+- **§14.8.9 protect egress round 9 (#1236):** global logical-assignment (`??=`/`||=`/`&&=`) keeps alias cells;
+  element-returning built-ins hand back receiver elements; platform writes refused; session store by summary under an
+  allow-list precondition.
+
 
 ## S447 — AUTH-RELEVANT DELTA (`78e4ddad..6a592ed5c`)
 **§14.8.9 protect egress round 8 (#1228, `compiler/src/codegen/protect-flow.ts`).** The protected-column flow analysis
@@ -1265,7 +1329,7 @@ Expiry: `sessionExpiry` on `<program>` for the session cookie `Max-Age` + durabl
 Magic-link/verify/reset tokens: TTL-bound (caller-supplied, embedded in the stored record as an authoritative `expiresAt`), single-use, namespace-scoped.
 
 ## Tags
-#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller #request-onion #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #scrml-onion-dispatch #mw-pipeline-export #mw-declared-in #cors-preflight-stage-1 #preflight-carries-no-credentials #ratelimit-route-scoped #filename-sorted-precedence-hazard #csp-default-src-self #ssr-seed-application-json #transition-css-stylesheet #dev-prod-onion-parity #onion-dispatch-is-in-build-js #wrong-file-not-drifted-line #zero-diff-is-not-correctness #§52.13 #protected-document #scrml-protected-document #auth-required-document-guard #g-auth-required-does-not-protect-the-served-html-document #protecteddocs #scrml-pd-alias #case-insensitive-doc-guard #dev-prod-guard-parity #s380-incremental #s738-dev-rewrite #dev-child-process #dev-parent-proxy #run-dev-child-server #serve-dev-infra #child-ready-prefix #issue-724 #s437b #9941a504c #zero-diff #s440 #cf62b415 #nested-async-helper #accept-all-closed #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8
+#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller #request-onion #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #scrml-onion-dispatch #mw-pipeline-export #mw-declared-in #cors-preflight-stage-1 #preflight-carries-no-credentials #ratelimit-route-scoped #filename-sorted-precedence-hazard #csp-default-src-self #ssr-seed-application-json #transition-css-stylesheet #dev-prod-onion-parity #onion-dispatch-is-in-build-js #wrong-file-not-drifted-line #zero-diff-is-not-correctness #§52.13 #protected-document #scrml-protected-document #auth-required-document-guard #g-auth-required-does-not-protect-the-served-html-document #protecteddocs #scrml-pd-alias #case-insensitive-doc-guard #dev-prod-guard-parity #s380-incremental #s738-dev-rewrite #dev-child-process #dev-parent-proxy #run-dev-child-server #serve-dev-infra #child-ready-prefix #issue-724 #s437b #9941a504c #zero-diff #s440 #cf62b415 #nested-async-helper #accept-all-closed #s447 #6a592ed5c #self-host-v1-removed #test-tmp-root #protect-egress-r8 #s450 #9bafb927 #native-parser-frozen #parser-flag-retired #session-ambient-server #auth-attr-invalid
 #fourth-consecutive-zero-diff #anchors-carry-by-measurement
 #s405 #auth-surface-non-empty #protect-analyzer-deleted-its-regex #import-direction-invariant #e-pa-003-shadow-db #§14.8.9-three-limbs #e-protect-004-is-a-lint #e-protect-005 #runtime-refusal-is-the-guarantee #the-unit-is-the-body #status-and-headers-not-the-body #mediation-mark #provenance-vs-shape #w-protect-005 #zero-byte-readablestream #mounthydrate-was-unguarded #serverload-safe-for-a-reason #enumerate-over-the-serializer #tagged-refusal #soundness-bound-by-origin #§14.8.10-tenant-floor #four-app-matrix #cross-tenant-escape-executed #tenanttableset #w-schema-no-tables-declared #foreign-opener-two-of-five-are-security-floors
 #s437 #d02738767 #session-store-dist-root #session-config-resolve #e-mw-008 #e-auth-005-application-scope #secret-redactor #db-target #cookie-name-per-application
