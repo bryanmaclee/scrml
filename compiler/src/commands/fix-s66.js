@@ -370,29 +370,60 @@ function commonDir(paths) {
 }
 
 /**
+ * The inert regions of a source — comments (`//` to end of line, a CLOSED `/* … *\/`, a CLOSED
+ * `<!-- … -->`) and `"…"` / `` `…` `` strings — as a predicate on offsets. Used only to SUPPRESS
+ * the "unreadable import" count, never to hide a readable import (see importSpecifiers).
+ */
+function inertAt(src) {
+  const ranges = [];
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === '"' || ch === "`") { const j = skipString(src, i); ranges.push([i, j]); i = j; continue; }
+    let end = -1;
+    if (ch === "/" && src[i + 1] === "/" && src[i - 1] !== ":") { end = src.indexOf("\n", i); if (end === -1) end = src.length; }
+    else if (ch === "/" && src[i + 1] === "*") { const e = src.indexOf("*/", i + 2); end = e === -1 ? -1 : e + 2; }
+    else if (src.startsWith("<!--", i)) { const e = src.indexOf("-->", i + 4); end = e === -1 ? -1 : e + 3; }
+    if (end !== -1) { ranges.push([i, end]); i = end; continue; }
+    i++;
+  }
+  return (off) => ranges.some(([a, b]) => off >= a && off < b);
+}
+
+/**
  * The import specifiers of a source — `import … from "x"`, `import "x"`, and the re-export
  * `export … from "x"` — with every clause allowed to span lines (`import {⏎ A,⏎ B⏎ } from "x"`).
- * `unextracted` counts `import` keywords at a statement start whose specifier could NOT be read:
- * the caller treats that as an unresolved import (a hidden file that may write a cell).
+ *
+ * Fail-closed BY CONSTRUCTION (S239 re-review r3): there is no list of positions where `import`
+ * "is a statement". EVERY `import` token in the source is examined; a token that begins a readable
+ * import contributes its specifier (wherever it sits — even in a comment or string: loading one
+ * more file only adds writes), and every other `import` token outside a comment / string counts as
+ * `unextracted` — the caller treats that as an unresolved import (a hidden file that may write a
+ * cell → every cell `let`). Known over-conservative cases, accepted: prose (`<p>import your
+ * data</p>`), `import.meta`, `x.import`, an apostrophe-quoted `'import'`.
+ * A re-export (`export {…} from`, `export * from`, `export type {…} from`) is read the same way;
+ * one whose specifier cannot be read is `unextracted` too.
  * @returns {{ specs: string[], unextracted: number }}
  */
 export function importSpecifiers(src) {
   const specs = [];
   let unextracted = 0;
-  const CLAUSE = String.raw`(?:\{[^}]*\}|\*\s*as\s+[\w$]+|[\w$]+(?:\s*,\s*(?:\{[^}]*\}|\*\s*as\s+[\w$]+))?)`;
-  const IMPORT = new RegExp(String.raw`^import\s*(?:${CLAUSE}\s*from\s*)?["']([^"']+)["']`);
-  const REEXPORT = new RegExp(String.raw`^export\s*(?:\{[^}]*\}|\*(?:\s*as\s+[\w$]+)?)\s*from\s*["']([^"']+)["']`);
-  // `import` / `export` as a statement keyword: at a line start, or after `${`, `;` or `{`.
-  for (const m of src.matchAll(/(^|[\n;{]|\$\{)[ \t]*(import|export)\b/g)) {
-    const at = m.index + m[0].length - m[2].length;
-    const rest = src.slice(at, at + 2000);
-    if (m[2] === "import") {
+  const NAMED = String.raw`(?:type\s+)?(?:\{[^}]*\}|\*\s*as\s+[\w$]+|[\w$]+(?:\s*,\s*(?:\{[^}]*\}|\*\s*as\s+[\w$]+))?)`;
+  const IMPORT = new RegExp(String.raw`^import\s*(?:${NAMED}\s*from\s*)?["']([^"']+)["']`);
+  const REEXPORT = new RegExp(String.raw`^export\s*(?:type\s+)?(?:\{[^}]*\}|\*(?:\s*as\s+[\w$]+)?)\s*from\s*["']([^"']+)["']`);
+  // An `export` that IS a re-export (has a `from` clause), whether or not its specifier reads.
+  const REEXPORT_SHAPE = /^export\s*(?:type\s+)?(?:\*|\{[^}]*\}\s*from\b)/;
+  const inert = inertAt(src);
+  for (const m of src.matchAll(/\b(import|export)\b/g)) {
+    const rest = src.slice(m.index, m.index + 2000);
+    if (m[1] === "import") {
       const im = rest.match(IMPORT);
       if (im) specs.push(im[1]);
-      else unextracted++;
+      else if (!inert(m.index)) unextracted++;
     } else {
       const ex = rest.match(REEXPORT);
       if (ex) specs.push(ex[1]);
+      else if (REEXPORT_SHAPE.test(rest) && !inert(m.index)) unextracted++;
     }
   }
   return { specs, unextracted };
@@ -561,30 +592,98 @@ export function lifecycleNamedCells(src) {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Per-cell resolution (S239 re-review r3, HIGH 2): which DECLARATION a `@name` in a given file
+// refers to — that file's own declaration, else the declaration its `import { name }` names
+// (transitively). Never a regex, never keyed on the name across the project. Unresolvable → null.
+// ---------------------------------------------------------------------------
+
+/** A legacy cell declaration node (not the `@x = v` write impl#1 also builds as a state-decl). */
+const isCellDecl = (n) => n.kind === "state-decl" && n.structuralForm && !n._isReactiveAssign;
+
 /**
- * Cells read by an `int`-annotated declaration's initializer (`<d>: int = @x * 2`,
- * `<d:int=(@x * 2)/>`): an untyped integer cell feeding one must be `int`, not `number`.
+ * A resolver over project files `[{ path, ast }]` (absolute paths; files[0] = the file being fixed).
+ * `resolveCell(i, name)` → `{ file, decls }` (the declaring file index and its declaration nodes
+ * of that name), or null when `@name` in files[i] resolves to no declaration the tool can see.
  */
-function intReaderCells(src) {
-  const out = new Set();
-  const grab = (rhs) => { for (const r of rhs.matchAll(/@([A-Za-z_$][\w$]*)/g)) out.add(r[1]); };
-  for (const m of src.matchAll(/<[A-Za-z_][\w]*[^<>\n]*>\s*:\s*(?:int|integer)\s*=([^\n]*)/g)) grab(m[1]);
-  for (const m of src.matchAll(/<[A-Za-z_][\w]*:(?:int|integer)=([^\n]*)/g)) grab(m[1]);
+function cellResolver(files) {
+  const index = new Map();
+  const info = (i) => {
+    if (!index.has(i)) {
+      const decls = new Map();
+      const imports = [];
+      walkAst(files[i].ast, (n) => {
+        if (isCellDecl(n) && typeof n.name === "string") decls.set(n.name, [...(decls.get(n.name) ?? []), n]);
+        if (n.kind === "import-decl" && typeof n.source === "string" && Array.isArray(n.specifiers)) imports.push(n);
+      });
+      index.set(i, { decls, imports });
+    }
+    return index.get(i);
+  };
+  const byPath = new Map(files.map((f, i) => [f.path, i]));
+  const resolveCell = (i, name, seen = new Set()) => {
+    const key = `${i}\u0000${name}`;
+    if (seen.has(key)) return null;
+    seen.add(key);
+    const { decls, imports } = info(i);
+    if (decls.has(name)) return { file: i, decls: decls.get(name) };
+    for (const im of imports) {
+      const sp = im.specifiers.find((s) => s && (s.local === name || s.local === `@${name}`));
+      if (!sp || !im.source.startsWith(".")) continue;
+      const base = resolve(dirname(files[i].path), im.source);
+      const j = byPath.get(base) ?? byPath.get(base + ".scrml");
+      if (j === undefined) return null;
+      return resolveCell(j, String(sp.imported ?? name).replace(/^@/, ""), seen);
+    }
+    return null;
+  };
+  /** Is `@name` in files[i] an `int` cell by its declaration's own annotation? Unresolvable → no. */
+  const isIntCell = (i, name) => {
+    const r = resolveCell(i, name);
+    return !!r && r.decls.length > 0 && r.decls.every((d) => typeof d.typeAnnotation === "string" && /^(?:int|integer)$/.test(d.typeAnnotation.trim()));
+  };
+  return { resolveCell, isIntCell, info };
+}
+
+/** Every `@cell` identifier an ExprNode reads. */
+function exprCellReads(e, out = new Set()) {
+  if (!e || typeof e !== "object") return out;
+  if (Array.isArray(e)) { for (const x of e) exprCellReads(x, out); return out; }
+  if (e.kind === "ident" && typeof e.name === "string" && e.name.startsWith("@")) out.add(e.name.slice(1));
+  for (const [k, v] of Object.entries(e)) if (k !== "span" && v && typeof v === "object") exprCellReads(v, out);
   return out;
 }
 
-/** Is an ExprNode provably an integer, given the `int` cells (`self` counts as one)? */
-function isIntegerExpr(e, intCells, self) {
+/**
+ * Cells of files[0] read by an `int`-annotated declaration's initializer (`<d>: int = @x * 2`) in
+ * any project file — each read resolved per file to its declaration: an untyped integer cell
+ * feeding one must be `int`, not `number`.
+ */
+function intReaderCells(files, resolver) {
+  const out = new Set();
+  files.forEach((f, i) => {
+    for (const ds of resolver.info(i).decls.values()) {
+      for (const d of ds) {
+        if (typeof d.typeAnnotation !== "string" || !/^(?:int|integer)$/.test(d.typeAnnotation.trim())) continue;
+        for (const x of exprCellReads(d.initExpr)) if (resolver.resolveCell(i, x)?.file === 0) out.add(x);
+      }
+    }
+  });
+  return out;
+}
+
+/** Is an ExprNode provably an integer? `isInt(name)` answers for a `@name` operand (`self` counts as int). */
+function isIntegerExpr(e, isInt, self) {
   if (!e) return false;
   switch (e.kind) {
     case "lit":
       return e.litType === "number" && Number.isInteger(e.value) && !/[.eE]/.test(String(e.raw ?? ""));
     case "unary":
-      return (e.op === "-" || e.op === "+") && isIntegerExpr(e.argument, intCells, self);
+      return (e.op === "-" || e.op === "+") && isIntegerExpr(e.argument, isInt, self);
     case "binary":
-      return ["+", "-", "*", "%"].includes(e.op) && isIntegerExpr(e.left, intCells, self) && isIntegerExpr(e.right, intCells, self);
+      return ["+", "-", "*", "%"].includes(e.op) && isIntegerExpr(e.left, isInt, self) && isIntegerExpr(e.right, isInt, self);
     case "ident":
-      return typeof e.name === "string" && e.name.startsWith("@") && (e.name.slice(1) === self || intCells.has(e.name.slice(1)));
+      return typeof e.name === "string" && e.name.startsWith("@") && (e.name.slice(1) === self || isInt(e.name.slice(1)));
     default:
       return false;
   }
@@ -596,13 +695,21 @@ function isIntegerExpr(e, intCells, self) {
  *                `@x--`, or `reset(@x)` (back to its integer initializer);
  *   "not-int"  — some write's value is not provably integer, or the cell is an operand of `/`;
  *   "unknown"  — a write the AST does not expose as an assignment (bind:, ref=, a method / field
- *                write, `@set(…)`), or a lexical write the AST did not show at all.
+ *                write, `@set(…)`, a destructuring target, any escape-hatch expression naming the
+ *                cell), or a lexical write the AST did not show at all.
+ * Writes are gathered by NAME across every project file (over-inclusion only makes the verdict
+ * stricter); an OPERAND `@x` is `int` only by its own declaration as resolved from the file the
+ * write sits in (`resolver.isIntCell`) — unresolvable → not int.
  */
-function intWriteVerdict(name, asts, intCells, sources) {
+function intWriteVerdict(name, files, resolver, sources) {
   let verdict = "int";
   let astWriteCount = 0;
   const worse = (v) => { if (v === "unknown" || verdict === "int") verdict = verdict === "unknown" ? "unknown" : v; };
-  for (const ast of asts) {
+  const mentions = new RegExp(`@${name.replace(/[$]/g, "\\$&")}(?![\\w$])`);
+  for (let fi = 0; fi < files.length; fi++) {
+    const ast = files[fi].ast;
+    // An operand `@x` is `int` only by ITS declaration as seen from THIS file (per-cell, r3).
+    const intCells = (x) => resolver.isIntCell(fi, x);
     walkAst(ast, (n) => {
       if (n.kind === "state-decl" && n.name === name && (n._isReactiveAssign || (n.structuralForm === false && n.shape !== "derived"))) {
         astWriteCount++;
@@ -621,7 +728,14 @@ function intWriteVerdict(name, asts, intCells, sources) {
         astWriteCount++;
         if (e.target.kind !== "ident") worse("unknown");
         else if (!["=", "+=", "-=", "*=", "%="].includes(e.op) || !isIntegerExpr(e.value, intCells, name)) worse("not-int");
+      } else if (e.kind === "assign" && lvalueRoot(e.target) === null && mentions.test(JSON.stringify(e.target))) {
+        // A destructuring target (`[@x] = …`, `({k: @x} = …)`) — impl#1 builds it as an escape
+        // hatch: a write whose value cannot be judged → fail closed.
+        astWriteCount++;
+        worse("unknown");
       }
+      // Any expression impl#1 could not structure (an escape hatch) that mentions the cell may write it.
+      if (e.kind === "escape-hatch" && typeof e.raw === "string" && mentions.test(e.raw)) worse("unknown");
       if ((e.kind === "unary" || e.kind === "update") && (e.op === "++" || e.op === "--") && lvalueRoot(e.argument) === name) astWriteCount++;
       if (e.kind === "reset-expr" && lvalueRoot(e.target) === name) astWriteCount++;
       // A READ as an operand of `/` also rules `int` out: `/` between two ints is E-INT-DIVISION.
@@ -882,14 +996,18 @@ export function fixS66(source, opts = {}) {
   const projKeys = new Set(project.map(([q]) => absKey(filePath, q)));
   const scanOnly = Object.entries(opts.scanSources ?? {}).filter(([p]) => absKey(filePath, p) !== resolve(filePath) && !projKeys.has(absKey(filePath, p)));
   const auxAsts = [];
+  const projectAsts = []; // parallel to `project` (null where impl#1 built no AST)
   let projectUnknown = false; // a file we cannot read for writes: every cell is then `let`
   for (const [p, s] of project) {
     const a = parseAstMemo(p, s);
+    projectAsts.push(a);
     if (a) auxAsts.push(a); else projectUnknown = true;
   }
   const scanAsts = [];
+  const scanOnlyAsts = []; // parallel to `scanOnly`
   for (const [p, s] of scanOnly) {
     const a = parseAstMemo(p, s);
+    scanOnlyAsts.push(a);
     if (a) scanAsts.push(a); else projectUnknown = true;
   }
   // An import we cannot resolve inside the project hides a file that may write a cell.
@@ -956,9 +1074,15 @@ export function fixS66(source, opts = {}) {
   for (const a of [...auxAsts, ...scanAsts]) for (const w of astWrites(a)) writes.add(w);
   const allSources = [src, ...project.map(([, s]) => s), ...scanOnly.map(([, s]) => s)];
   const lifecycleCells = new Set(allSources.flatMap((s) => [...lifecycleNamedCells(s)]));
-  const intReaders = new Set(allSources.flatMap((s) => [...intReaderCells(s)]));
-  // Cells that are `int` by their own annotation (the operands an integer expression may read).
-  const intCells = new Set(allSources.flatMap((s) => [...s.matchAll(/<([A-Za-z_][\w]*)[^<>\n]*>\s*:\s*(?:int|integer)\b|<([A-Za-z_][\w]*):(?:int|integer)\b/g)].map((m) => m[1] ?? m[2])));
+  // Per-cell resolution over the project's ASTs (files[0] = this file): which declaration each
+  // `@name` in each file refers to. `int`-ness is read from THAT declaration only (S239 r3 HIGH 2).
+  const cellFiles = [
+    { path: resolve(filePath), ast },
+    ...project.map(([p], k) => ({ path: absKey(filePath, p), ast: projectAsts[k] })),
+    ...scanOnly.map(([p], k) => ({ path: absKey(filePath, p), ast: scanOnlyAsts[k] })),
+  ].filter((f) => f.ast);
+  const resolver = cellResolver(cellFiles);
+  const intReaders = intReaderCells(cellFiles, resolver);
 
   // ---- declarations ----------------------------------------------------------------------------
   for (const { node, stack } of decls) {
@@ -1024,7 +1148,7 @@ export function fixS66(source, opts = {}) {
     // integer expression of `int` cells); anything else — or any write the AST cannot classify —
     // leaves int-vs-number not mechanical: reported, untouched.
     if (!site.annotation && type === "number" && cls.kind === "literal" && /^-?\(?-?\d+\)?$/.test(cls.valueText) && intReaders.has(node.name)) {
-      const v = projectUnknown || hasMeta || writeAttr ? "unknown" : intWriteVerdict(node.name, [ast, ...auxAsts, ...scanAsts], intCells, allSources);
+      const v = projectUnknown || hasMeta || writeAttr ? "unknown" : intWriteVerdict(node.name, cellFiles, resolver, allSources);
       if (v !== "int") { block(rule, off, `an untyped integer cell feeds an \`int\`-typed reader, but its writes are ${v === "not-int" ? "not all provably integer" : "not all classifiable"} — \`int\` vs \`number\` is not mechanical`); continue; }
       type = "int";
     }

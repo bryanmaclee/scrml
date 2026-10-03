@@ -531,7 +531,8 @@ describe("§10 S239 re-review — multi-line imports and the `:int` choice", () 
     expect(r.specs).toEqual(["./a.scrml", "./c.scrml", "./d.scrml", "./side.scrml"]);
     expect(r.unextracted).toBe(0);
     expect(importSpecifiers("${ import { A } from someVariable }").unextracted).toBe(1);
-    expect(importSpecifiers("<p>Please import your data</p>").unextracted).toBe(0); // prose mid-line is not a statement
+    // r3: no statement-position list — prose `import` is counted (over-conservative, accepted).
+    expect(importSpecifiers("<p>Please import your data</p>").unextracted).toBe(1);
   });
 
   test("an import whose specifier cannot be read makes every cell `let`", () => {
@@ -565,4 +566,94 @@ describe("§10 S239 re-review — multi-line imports and the `:int` choice", () 
     const r = fix("${\n    <m> = 2\n    const <d>: int = @m * 2\n}\n<br/>\n<p>${@d}</p>\n");
     expect(r.output).toContain("<m:int=2/>");
   });
+});
+
+describe("§11 S239 re-review r3 — imports anywhere (fail closed by construction); `int` per cell", () => {
+  const BUMP = "${ export const Bump = <button onclick=${@count = @count + 1}>+</button> }\n";
+  const appWith = (logic) => `<program>\n\${ ${logic} }\n<count> = 0\n<Bump/>\n<p>\${@count}</p>\n</program>\n`;
+
+  test("HIGH 1 repro: `${ /* ui */ import … }` — the writer in bump.scrml keeps the cell `let` (CLI end to end)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-fix-"));
+    try {
+      writeFileSync(join(dir, "bump.scrml"), BUMP);
+      const f = join(dir, "app.scrml");
+      writeFileSync(f, appWith("/* ui */ import { Bump } from \"./bump.scrml\""));
+      expect(Object.keys(resolveProject(f)).map((k) => k.slice(dir.length + 1))).toEqual(["bump.scrml"]);
+      runFixCommand([f, "--s66", "--write"], { out: () => {}, err: () => {} });
+      const out = readFileSync(f, "utf8");
+      expect(out).toContain("let <count:number=0/>");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // Every position the old statement-start list missed: the import is READ (the writer is found)…
+  for (const [label, logic] of [
+    ["a comment in the braces", "/* ui */ import { Bump } from \"./bump.scrml\""],
+    ["`const k = 1` on the same line", "const k = 1 import { Bump } from \"./bump.scrml\""],
+    ["`)`", "log(1) import { Bump } from \"./bump.scrml\""],
+    ["`,`", "const a = [1, 2], import { Bump } from \"./bump.scrml\""],
+    ["`}`", "function g() { return 1 } import { Bump } from \"./bump.scrml\""],
+  ]) {
+    test(`HIGH 1: an import after ${label} is read — the writer keeps the cell \`let\``, () => {
+      expect(importSpecifiers(appWith(logic)).specs).toEqual(["./bump.scrml"]);
+      expect(fix(appWith(logic), { auxSources: { "bump.scrml": BUMP } }).output).toContain("let <count:number=0/>");
+    });
+    // …and the same position with an UNREADABLE specifier is unextracted → every cell `let`.
+    test(`HIGH 1: an unreadable import after ${label} is unextracted — every cell \`let\``, () => {
+      const bad = logic.replace("\"./bump.scrml\"", "someVariable");
+      expect(importSpecifiers(appWith(bad)).unextracted).toBe(1);
+      expect(fix(appWith(bad)).output).toContain("let <count:number=0/>");
+    });
+  }
+
+  test("HIGH 1: an `import` token in a comment / string is not unextracted; a readable one in a comment is still read", () => {
+    expect(importSpecifiers("// we import things here\n<p>\"import\"</p>").unextracted).toBe(0);
+    expect(importSpecifiers("/* import { A } from \"./a.scrml\" */").specs).toEqual(["./a.scrml"]);
+    // an UNCLOSED `/*` is not a comment — the token after it still counts
+    expect(importSpecifiers("<p>a /* b</p>\n${ import { A } from x }").unextracted).toBe(1);
+  });
+
+  test("HIGH 1: `export type { X } from` is read; unreadable → unextracted; `import type` too", () => {
+    expect(importSpecifiers("${ export type { X } from \"./t.scrml\" }").specs).toEqual(["./t.scrml"]);
+    expect(importSpecifiers("${ export type { X } from someVar }").unextracted).toBe(1);
+    expect(importSpecifiers("${ export * from someVar }").unextracted).toBe(1);
+    expect(importSpecifiers("${ import type { X } from \"./t.scrml\" }").specs).toEqual(["./t.scrml"]);
+    expect(importSpecifiers("${ export const A = 1\nexport { A } }").unextracted).toBe(0); // not re-exports
+  });
+
+  const kApp = (extra) => `<program>\n<k> = 0.5\n${extra}<m> = 2\nconst <d>: int = @m * 2\n\${ function f() { @m = @k } }\n<button onclick=f()>go</button>\n<p>\${@m} \${@d}</p>\n</program>\n`;
+  const reported = (r) => {
+    expect(r.output).toContain("<m> = 2");
+    expect(r.output).not.toContain("<m:int");
+    expect(r.blockers.map((b) => b.reason).join("\n")).toContain("`int` vs `number` is not mechanical");
+  };
+
+  test("HIGH 2 repro: a comment `// was <k>: int = 1` does not make @k an int operand", () => {
+    reported(fix(kApp("// was <k>: int = 1 before\n")));
+    reported(fix(kApp(""))); // and without the comment (unchanged behaviour)
+  });
+
+  test("HIGH 2: a same-named `<k>: int` cell in ANOTHER file does not make this file's @k int", () => {
+    reported(fix(kApp(""), { auxSources: { "other.scrml": "<k>: int = 1\n<p>${@k}</p>\n" } }));
+    reported(fix(kApp(""), { scanSources: { "other.scrml": "<k>: int = 1\n<p>${@k}</p>\n" } }));
+  });
+
+  test("HIGH 2: an operand resolved through an import to an `int` declaration counts as int", () => {
+    const src = "<program>\n${ import { k } from \"./lib.scrml\" }\n<m> = 2\nconst <d>: int = @m * 2\n${ function f() { @m = @k } }\n<button onclick=f()>go</button>\n<p>${@m} ${@d}</p>\n</program>\n";
+    expect(fix(src, { auxSources: { "lib.scrml": "<k>: int = 1\n" } }).output).toContain("let <m:int=2/>");
+    reported(fix(src, { auxSources: { "lib.scrml": "<k> = 0.5\n" } }));
+    // an import that names a file outside the project → unresolvable operand → not int (and every cell `let`)
+    expect(fix(src).output).not.toContain("<m:int");
+  });
+
+  for (const [label, write] of [
+    ["an array destructuring", "[@m] = [1.5]"],
+    ["an object destructuring", "({m: @m} = obj)"],
+  ]) {
+    test(`LOW: ${label} write makes the int verdict fail closed`, () => {
+      const r = fix(`\${\n    <m> = 2\n    const <d>: int = @m * 2\n    function f(obj) { ${write} }\n}\n<button onclick=f({})>x</button>\n<p>\${@d}</p>\n`);
+      reported(r);
+    });
+  }
 });
