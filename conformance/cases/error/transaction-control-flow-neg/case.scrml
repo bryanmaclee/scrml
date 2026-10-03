@@ -1,0 +1,26 @@
+<program db="./app.db">
+    <schema>
+        orders {
+            id: integer primary key
+            name: text
+        }
+    </schema>
+    type E:enum = { Bad }
+    function early(a: number)! -> E {
+        transaction {
+            if (a > 1) {
+                return 5
+            }
+            ?{`UPDATE orders SET name = 'x' WHERE id = ${a}`}.run()
+        }
+    }
+    function leaveLoop(a: number)! -> E {
+        for (let i = 0; i < 3; i++) {
+            transaction {
+                if (a > i) { break }
+                ?{`UPDATE orders SET name = 'y' WHERE id = ${i}`}.run()
+            }
+        }
+    }
+    <p>x</p>
+</program>

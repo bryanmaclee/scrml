@@ -1,0 +1,47 @@
+<program db="./app.db">
+    <schema>
+        accounts {
+            id: integer primary key
+            balance: integer
+        }
+    </schema>
+    type TransferError:enum = {
+        InsufficientFunds(balance: number)
+    }
+    <outcome> = "none"
+    <b1> = not
+    <b2> = not
+    function transfer(amount: number)! -> TransferError {
+        transaction {
+            ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = 1`}.run()
+            let row = ?{`SELECT balance FROM accounts WHERE id = 1`}.get()
+            if (row.balance < 0) {
+                fail TransferError::InsufficientFunds(row.balance)
+            }
+            ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = 2`}.run()
+        }
+    }
+    function balanceOf(id: number) {
+        return ?{`SELECT balance FROM accounts WHERE id = ${id}`}.get()
+    }
+    function onOk() {
+        transfer(4) !{
+            | ::InsufficientFunds(b) :> @outcome = "insufficient"
+        }
+    }
+    function onTooMuch() {
+        transfer(100) !{
+            | ::InsufficientFunds(b) :> @outcome = "insufficient"
+        }
+    }
+    function onRead() {
+        @b1 = balanceOf(1)
+        @b2 = balanceOf(2)
+    }
+    <button id="ok" onclick=onOk()>ok</button>
+    <button id="toomuch" onclick=onTooMuch()>too much</button>
+    <button id="read" onclick=onRead()>read</button>
+    <p id="o">${@outcome}</p>
+    <p id="b1">${@b1?.balance}</p>
+    <p id="b2">${@b2?.balance}</p>
+</program>

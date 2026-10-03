@@ -4394,6 +4394,13 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           }
         }
       }
+      // A marked `fail` / `?` rolled back but its `return` did not leave the
+      // block (it returned from an arm IIFE instead — g-stmt-match-block-return-
+      // falls-through, a `fail` in a statement-`match` arm). Never COMMIT past a
+      // rollback (on Postgres a COMMIT with no open transaction only WARNS, so the
+      // failure would be silently swallowed): fail loudly. The data is safe — the
+      // transaction was already rolled back.
+      lines.push(`  if (!${open}) throw new Error("scrml: a \`fail\` inside this \`transaction\` rolled it back but did not leave the block (compiler defect: g-stmt-match-block-return-falls-through)");`);
       lines.push(`  await ${db}.unsafe("COMMIT");`);
       lines.push(`  ${open} = false;`);
       lines.push(`} catch (_scrml_txn_err) {`);

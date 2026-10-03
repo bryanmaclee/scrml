@@ -1,0 +1,14 @@
+{
+  "id": "error-transaction-control-flow-neg",
+  "description": "§19.10.4 (S450 interim, fail-closed) — a `return`, or a `break` / `continue` whose target is outside the block, inside a `transaction { }` in a function is E-TRANSACTION-CONTROL-FLOW. §19.10.3 decides only completion (COMMIT), `fail` and a SQL error (ROLLBACK); whether another exit commits or rolls back is undecided, so the compiler rejects it rather than guess. Two sites → exactly two diagnostics.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/transaction-in-function-body.test.js",
+  "spec": "§19.10.4",
+  "rationale": "§19.10.4: \"The compiler SHALL guarantee that every `transaction` block either commits (on success) or rolls back (on `fail` or SQL error). No transaction SHALL be left open.\" The commit-or-rollback choice for `return` / `break` / `continue` out of the block has no governing sentence (searched §19.10, §8.9); the S450 interim sentence in §19.10.4 rejects it pending a ruling.",
+  "expect": {
+    "codes": ["E-TRANSACTION-CONTROL-FLOW"],
+    "notCodes": ["E-SCOPE-001", "E-ERROR-001", "E-ERROR-007"],
+    "severity": { "E-TRANSACTION-CONTROL-FLOW": "error" },
+    "codeCounts": { "E-TRANSACTION-CONTROL-FLOW": 2 }
+  }
+}
