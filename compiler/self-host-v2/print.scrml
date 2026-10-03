@@ -29,7 +29,7 @@ ${
     import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
              HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
-             Decl, Fn, CoreProgram, CapOwner,
+             Decl, Fn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator,
              findDecl, findTypeDef, typeDefSym, capOwner } from "./core.scrml"
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt,
@@ -284,6 +284,32 @@ ${
             .Host(call: c) :> hostJs(c)
             .Lambda(params: ps, body: b) :> JsExpr.JArrowE(symNames(ctx, ps), exprJs(ctx, b))
             .SeqCall(op: o, seq: sq, f: f) :> jmcall(exprJs(ctx, sq), seqFnName(o), [exprJs(ctx, f)])
+            .Validity(of: v, prop: pr) :> jmcall(surfaceJs(ctx, v), surfaceMethod(pr), [])
+        }
+    }
+
+    // s449 — the validity surface (§55.5 / §55.6): `rt.validity(inst, i)` is
+    // field i's record, `rt.compound(inst)` the declaration's; a property is
+    // a tracked read (`.isValid()`, `.errors()`, `.touched()`, `.submitted()`).
+    fn surfaceJs(ctx: Ctx, v: ValidityOf) -> JsExpr {
+        return match v {
+            .OfField(decl: d, inst: i, idx: x) :> rtCall(ctx, "validity", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))])
+            .OfDecl(decl: d, inst: i) :> rtCall(ctx, "compound", [instJs(ctx, i)])
+        }
+    }
+
+    fn surfacesJs(ctx: Ctx, fs: ValidityOf[]) -> JsExpr[] {
+        let out: JsExpr[] = []
+        for (const f of fs) { out = out.concat([surfaceJs(ctx, f)]) }
+        return out
+    }
+
+    fn surfaceMethod(pr: SurfaceProp) -> string {
+        return match pr {
+            .IsValid :> "isValid"
+            .Errors :> "errors"
+            .Touched :> "touched"
+            .Submitted :> "submitted"
         }
     }
 
@@ -459,6 +485,7 @@ ${
             .Return(e: e) :> [JsStmt.SReturn(exprJs(ctx, e))]
             .Eval(e: e) :> [sexpr(exprJs(ctx, e))]
             .Suspend(bind: b, on: on, then: t) :> [suspendJs(ctx, b, on, t)]
+            .ResetSurface(of: v) :> [sexpr(jmcall(surfaceJs(ctx, v), "reset", []))]
         }
     }
 
@@ -523,6 +550,7 @@ ${
             .Return :> []
             .Eval :> []
             .Suspend :> []
+            .ResetSurface :> []
         }
     }
 
@@ -536,6 +564,7 @@ ${
             .Return :> []
             .Eval :> []
             .Suspend :> []
+            .ResetSurface :> []
         }
     }
 
@@ -640,6 +669,7 @@ ${
             // s449: an `<effect>` renders no DOM; its comment keeps child-index paths positional
             .Effect :> hole(HNode.HComment("effect"), path, v)
             .ResetOn :> hole(HNode.HComment("reset-on"), path, v)
+            .Errors :> hole(HNode.HComment("errors"), path, v)
         }
     }
 
@@ -662,7 +692,15 @@ ${
             .Bound :> []
             .On :> []
             .Bind :> []
+            .Gate(values: vs) :> gatedMarker(vs)
         }
+    }
+
+    // §55.17.6: `data-scrml-gated` on a GATED form only (a form whose listener
+    // only records the submit, §55.7, gates nothing).
+    fn gatedMarker(vs: string[]) -> HAttr[] {
+        if (vs.length == 0) return []
+        return [{ name: "data-scrml-gated", value: vs.join(" ") }]
     }
 
     fn hasWiredAttr(attrs: Attr[]) -> boolean {
@@ -680,6 +718,7 @@ ${
             .Bound(name: n) :> true
             .On(event: ev) :> true
             .Bind(kind: k) :> true
+            .Gate(values: vs) :> true
         }
     }
 
@@ -735,6 +774,7 @@ ${
             .Star :> false
             .Effect :> false
             .ResetOn :> false
+            .Errors :> false
         }
     }
 
@@ -751,6 +791,7 @@ ${
             .Instance(decl: d) :> true
             .Slot :> true
             .Star(decl: d) :> true
+            .Errors(of: x) :> true
         }
     }
 
@@ -776,6 +817,7 @@ ${
             .Star :> []
             .Effect :> []
             .ResetOn :> []
+            .Errors :> []
         }
     }
 
@@ -793,6 +835,7 @@ ${
             .Star(decl: d, inst: i) :> starJs(ctx, d, i, node)
             .Effect(deps: ds, body: b) :> effectJs(ctx, ds, b)
             .ResetOn(triggers: ds, reset: b, rank: r) :> resetOnJs(ctx, ds, b, r)
+            .Errors(of: x, all: a) :> only([sexpr(rtCall(ctx, "errors", [scopeVar(), node, jthunk(jmcall(surfaceJs(ctx, x), "messages", [])), JsExpr.JBool(a)]))])
         }
     }
 
@@ -844,6 +887,7 @@ ${
             .If(cond: x) :> false
             .Return(e: x) :> false
             .Eval(e: x) :> false
+            .ResetSurface(of: x) :> false
         }
     }
 
@@ -854,10 +898,30 @@ ${
         return only([sexpr(jcall(jid(nameOf(ctx.names, NameKey.Render(d.id))), [instJs(ctx, i), scopeVar(), node, JsExpr.JNull]))])
     }
 
+    // s449: a form's submit gate is registered BEFORE every other listener of
+    // the element (§55.17.3: it runs before any author handler) — whatever the
+    // attribute order.
     fn attrsJs(ctx: Ctx, attrs: Attr[], node: JsExpr) -> JsStmt[] {
+        let gates: JsStmt[] = []
         let out: JsStmt[] = []
-        for (const a of attrs) { out = out.concat(attrJs(ctx, a, node)) }
-        return out
+        for (const a of attrs) {
+            if (isGate(a)) {
+                gates = gates.concat(attrJs(ctx, a, node))
+            } else {
+                out = out.concat(attrJs(ctx, a, node))
+            }
+        }
+        return gates.concat(out)
+    }
+
+    fn isGate(a: Attr) -> boolean {
+        return match a {
+            .Gate(values: vs) :> true
+            .Static(name: n) :> false
+            .Bound(name: n) :> false
+            .On(event: ev) :> false
+            .Bind(kind: k) :> false
+        }
     }
 
     fn attrJs(ctx: Ctx, a: Attr, node: JsExpr) -> JsStmt[] {
@@ -865,7 +929,57 @@ ${
             .Static :> []
             .Bound(name: n, e: e) :> [sexpr(rtCall(ctx, "attr", [scopeVar(), node, jstr(n), jthunk(exprJs(ctx, e))]))]
             .On(event: ev, body: body) :> [sexpr(rtCall(ctx, "on", [scopeVar(), node, jstr(ev), JsExpr.JArrow([], blockJs(ctx, body))]))]
-            .Bind(kind: k, read: r, sink: sk, write: w) :> [sexpr(rtCall(ctx, "bind", [scopeVar(), node, jstr(bindProp(k)), jthunk(exprJs(ctx, r)), JsExpr.JArrow([symName(ctx, sk)], blockJs(ctx, w))]))]
+            .Bind(kind: k, read: r, sink: sk, write: w) :> [sexpr(rtCall(ctx, "bind", [scopeVar(), node, jstr(bindProp(k)), jthunk(exprJs(ctx, r)), JsExpr.JArrow([symName(ctx, sk)], blockJs(ctx, w))].concat(bindSurface(ctx, r))))]
+            .Gate(values: vs, fields: fs) :> [sexpr(rtCall(ctx, "gate", [scopeVar(), node, JsExpr.JArrowE([], JsExpr.JArray(surfacesJs(ctx, fs)))]))]
+        }
+    }
+
+    // s449 — the validity record a bind marks `touched` and a gate reads
+    // (§55.7, §55.17.3): a bind of a field's WHOLE value, when the field has a
+    // surface — every field of a user declaration (§55.6), a top-level value
+    // only when it carries validators (§55.5.1 rule 2).
+    fn bindSurface(ctx: Ctx, read: Expr) -> JsExpr[] {
+        return match read {
+            .Read(place: pl) :> placeSurface(ctx, pl)
+            .Lit(lit: x) :> []
+            .Local(sym: x) :> []
+            .Call(callee: x) :> []
+            .Prim(op: x) :> []
+            .Match(scrut: x) :> []
+            .ArrayOf(elems: x) :> []
+            .StructOf(ty: x) :> []
+            .Handle(inst: x) :> []
+            .InitOf(decl: x) :> []
+            .Host(call: x) :> []
+            .Lambda(params: x) :> []
+            .SeqCall(op: x) :> []
+            .Validity(of: x) :> []
+        }
+    }
+
+    fn placeSurface(ctx: Ctx, pl: Place) -> JsExpr[] {
+        return match pl {
+            .Cell(decl: d, inst: i, path: path) :> cellSurface(ctx, d, i, path)
+            .LocalPath(sym: s) :> []
+        }
+    }
+
+    fn cellSurface(ctx: Ctx, dsym: Sym, i: InstRef, path: FieldRef[]) -> JsExpr[] {
+        if (path.length != 1) return []
+        const d: Decl | not = findDecl(ctx.p, dsym)
+        if (d is not) return []
+        const idx: int = path[0].idx
+        if (idx >= d.fields.length) return []
+        if (!hasSurface(d, d.fields[idx])) return []
+        return [rtCall(ctx, "validity", [instJs(ctx, i), JsExpr.JAnnot(jnum(idx), fieldHint(d, idx))])]
+    }
+
+    fn hasSurface(d: Decl, f: Field) -> boolean {
+        const k: DeclKind = d.kind
+        return match k {
+            .User :> true
+            .Program :> f.vals.length > 0
+            .Predefined :> false
         }
     }
 
@@ -1001,6 +1115,7 @@ ${
             .Star(decl: d) :> false
             .Effect(deps: ds) :> false
             .ResetOn(triggers: ds) :> false
+            .Errors(of: x) :> false
         }
     }
 
@@ -1089,7 +1204,7 @@ ${
             JsStmt.SBlank,
             JsStmt.SComment(declComment(d)),
             JsStmt.SConst(nameOf(ctx.names, NameKey.DeclInfo(d.sym.id)),
-                rtCall(ctx, "declare", [jstr(h), JsExpr.JArray(fieldNamesJs(d))])),
+                rtCall(ctx, "declare", [jstr(h), JsExpr.JArray(fieldNamesJs(d))].concat(declOptsJs(ctx, d)))),
         ]
         stmts = stmts.concat(edgeTablesJs(ctx, d))
         stmts = stmts.concat([factoryJs(ctx, d)])
@@ -1127,6 +1242,52 @@ ${
     fn symIn(xs: Sym[], s: Sym) -> boolean {
         for (const x of xs) { if (x.id == s.id) return true }
         return false
+    }
+
+    // s449 — the validators of each field (§55.1), when any field carries one:
+    // `{ checks: [[…], …] }`, plus `topLevel: true` for the program, whose
+    // fields are top-level values with their own `submitted` (§55.5.1).
+    fn declOptsJs(ctx: Ctx, d: Decl) -> JsExpr[] {
+        let any = false
+        let perField: JsExpr[] = []
+        for (const f of d.fields) {
+            if (f.vals.length > 0) any = true
+            perField = perField.concat([JsExpr.JArray(validatorsJs(ctx, f.vals))])
+        }
+        if (!any) return []
+        let props: JsProp[] = []
+        if (isProgramDecl(d)) props = [{ key: "topLevel", value: JsExpr.JBool(true) }]
+        props = props.concat([{ key: "checks", value: JsExpr.JArray(perField) }])
+        return [JsExpr.JObject(props)]
+    }
+
+    fn isProgramDecl(d: Decl) -> boolean {
+        const k: DeclKind = d.kind
+        return match k {
+            .Program :> true
+            .User :> false
+            .Predefined :> false
+        }
+    }
+
+    fn validatorsJs(ctx: Ctx, vs: Validator[]) -> JsExpr[] {
+        let out: JsExpr[] = []
+        for (const v of vs) { out = out.concat([validatorJs(ctx, v)]) }
+        return out
+    }
+
+    fn checkCall(ctx: Ctx, name: string, args: JsExpr[]) -> JsExpr {
+        return jcall(jmember(jmember(jid(rtName(ctx)), "check"), name), args)
+    }
+
+    fn validatorJs(ctx: Ctx, v: Validator) -> JsExpr {
+        return match v {
+            .Req :> checkCall(ctx, "req", [])
+            .LengthCmp(op: op, n: n) :> checkCall(ctx, "length", [jstr(op), jnum(n)])
+            .Min(n: n) :> checkCall(ctx, "min", [JsExpr.JNum("" + n)])
+            .Max(n: n) :> checkCall(ctx, "max", [JsExpr.JNum("" + n)])
+            .Pattern(source: src) :> checkCall(ctx, "pattern", [jstr(src)])
+        }
     }
 
     fn fieldNamesJs(d: Decl) -> JsExpr[] {
@@ -1250,6 +1411,7 @@ ${
             .Host(call: c) :> false
             .Lambda(params: ps) :> false
             .SeqCall(op: o) :> false
+            .Validity(of: x) :> false
         }
     }
 
@@ -1281,6 +1443,7 @@ ${
             .Star :> []
             .Effect :> []
             .ResetOn :> []
+            .Errors :> []
         }
     }
 

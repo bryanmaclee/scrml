@@ -144,6 +144,36 @@ ${
     // Each makes a NEW sequence value (R3: values are immutable).
     export type SeqFn:enum = { Filter, Map }
 
+    // s449 — the §55 validity surface. A surface is the reactive validity
+    // state the compiler synthesizes for a value that carries validators
+    // (§55.5.1 — a top-level value), for every child field of a user
+    // declaration (§55.6, Edge B: a field with no validators reads trivially
+    // valid) and for a user declaration as a whole (§55.5 — the compound). It
+    // is READ-ONLY by construction: nothing here names a write capability, so
+    // no Write can target it (§55.7, E-SYNTHESIZED-WRITE). `OfField` is field
+    // `idx` of `decl` through `inst`; `OfDecl` is the compound of the
+    // instance `inst` of user declaration `decl`.
+    export type SurfaceProp:enum = { IsValid, Errors, Touched, Submitted }
+    export type ValidityOf:enum = {
+        OfField(decl: Sym, inst: InstRef, idx: int),
+        OfDecl(decl: Sym, inst: InstRef),
+    }
+
+    // s449 — one validator a field carries (§55.1), as the bootstrap admits it
+    // (the predicates whose meaning it evaluates; analyze refuses the rest).
+    // Declaration order is kept (§55.12: errors are reported in source order).
+    // `LengthCmp.op` is the comparison as written (`>=`, `>`, `<=`, `<`, `==`)
+    // and `n` its int literal; `Min` / `Max` carry the numeric literal;
+    // `Pattern` carries the regex source (no flags — analyze admits only an
+    // exact, flag-free pattern).
+    export type Validator:enum = {
+        Req,
+        LengthCmp(op: string, n: int),
+        Min(n: number),
+        Max(n: number),
+        Pattern(source: string),
+    }
+
     export type Expr:enum = {
         Lit(lit: Literal),
         Local(sym: Sym),
@@ -166,6 +196,8 @@ ${
         Lambda(params: Sym[], body: Expr),
         // s444: `seq.filter(f)` / `seq.map(f)` — a new sequence value.
         SeqCall(op: SeqFn, seq: Expr, f: Expr),
+        // s449: a read of the validity surface (§55.5 / §55.6) — read-only.
+        Validity(of: ValidityOf, prop: SurfaceProp),
     }
     export type MatchArm:struct = { pat: Pattern, body: Expr }
 
@@ -227,6 +259,12 @@ ${
         Return(e: Expr),
         Eval(e: Expr),
         Suspend(bind: Sym, on: Expr, then: Block),
+        // s449 — the surface half of `reset(@x)` (§55.13): it follows the
+        // reset's Write of the value. `touched` reverts to false; a validated
+        // top-level value's `submitted` reverts too (S447 call 6 (ii)); a child
+        // field's compound `submitted` is unchanged (§55.13 row 2). Writes no
+        // cell a program can name (the surface is read-only to programs).
+        ResetSurface(of: ValidityOf),
     }
     export type Block:struct = { stmts: Stmt[] }
 
@@ -246,6 +284,26 @@ ${
         Bound(name: string, e: Expr),
         On(event: string, body: Block),
         Bind(kind: BindKind, read: Expr, sink: Sym, write: Block),
+        // s449 — the form's submit listener for the §55 surface, on every
+        // `<form>` whose composed subtree (§55.17.2 rule 1) binds a field that
+        // has a surface. It runs BEFORE any author handler and synchronously.
+        //  - It sets `submitted` (§55.7: "the first submit of a `<form>` that
+        //    binds the value — for a compound, a form that binds any of its
+        //    fields") on every bound value with a surface.
+        //  - When `values` is non-empty the form is GATED (§55.17.3): it also
+        //    marks `touched` on every bound validated value and, if any is
+        //    invalid, cancels the submission and runs no author handler; a
+        //    `formnovalidate` submitter bypasses the touch and the block
+        //    (§55.17.4). `values` names the gating values in source order (a
+        //    top-level value by its name, a child field by `decl.field`) — the
+        //    `data-scrml-gated` marker (§55.17.6).
+        // `fields` are the bound surfaced fields the composed subtree NAMES —
+        // through the form's own markup, `if=` / state-view arms (mounted or
+        // not: §55.17.3 reach is the static subtree), slot content written
+        // here and `<*x/>` Stars. A field the subtree cannot name statically
+        // (an instance a use, an `<each>` row or a slot creates) is found on
+        // the live form, through the control that binds it.
+        Gate(values: string[], fields: ValidityOf[]),
     }
     export type ConstructAttr:struct = { field: int, value: Expr }
     export type CondArm:struct = { test: Expr, body: View[] }
@@ -288,6 +346,12 @@ ${
         // terminates without any runtime bound. Registered with the program's
         // scope; renders no DOM.
         ResetOn(triggers: EffectDep[], reset: Block, rank: int),
+        // s449 — `<errors of=expr/>` (§55.8): the errors of the surface `of`,
+        // each rendered as `<p class="scrml-error">message</p>` (the first
+        // only, or all when `all`); when there are none it renders NO DOM.
+        // The message is the §55.10 Level-3 English default for the
+        // ValidationError tag and the field's name.
+        Errors(of: ValidityOf, all: boolean),
     }
 
     // -------------------------------------------------------------------------
@@ -318,6 +382,8 @@ ${
         graph: TransitionGraph | not,
         exported: boolean,
         wcap: Sym | not,
+        // s449: the validators the field carries (§55.1), in declaration order.
+        vals: Validator[],
     }
 
     export type DeclKind:enum = { Program, User, Predefined }
@@ -437,6 +503,20 @@ ${
             }
         }
         return not
+    }
+
+    // s449 — the declaration and instance reference a surface is reached through.
+    export fn validityDecl(v: ValidityOf) -> Sym {
+        return match v {
+            .OfField(decl: d, inst: i, idx: x) :> d
+            .OfDecl(decl: d, inst: i) :> d
+        }
+    }
+    export fn validityInst(v: ValidityOf) -> InstRef {
+        return match v {
+            .OfField(decl: d, inst: i, idx: x) :> i
+            .OfDecl(decl: d, inst: i) :> i
+        }
     }
 
     // Does a field's contract grant ANY write? (the wcap invariant, §66.11.1)

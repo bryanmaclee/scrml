@@ -12,6 +12,7 @@ import { join, resolve } from "node:path";
 import {
   classifyCase,
   codeLiterals,
+  codesHalfFailures,
   isVacuousPass,
   legacyMarkers,
   loadBootstrapModules,
@@ -144,6 +145,25 @@ describe("helpers", () => {
     expect(isVacuousPass({ codes: [], notCodePrefixes: ["E-KN"] }, known, false)).toBe(false);
     expect(isVacuousPass({ codes: ["E-UNKNOWN"] }, known, false)).toBe(false);
     expect(isVacuousPass({ codes: [] }, known, true)).toBe(false);
+  });
+});
+
+// s449-bootstrap-form-validity: the bootstrap reports I- notes (I-FORM-SUBMIT-GATED, §55.17.6 "reports
+// in the warnings stream") in a separate non-fatal `infos` list. The codes half unions both streams, as
+// conformance/run.ts does for impl#1; an I- code in `infos` has observable severity "info".
+describe("codes half — the bootstrap's non-fatal infos stream", () => {
+  const d = (code) => ({ code, message: "", file: "f", span: { start: 0, end: 0 } });
+  test("a required code found only in `infos` holds; severity info holds; any other severity fails", () => {
+    expect(codesHalfFailures({ codes: ["I-FORM-SUBMIT-GATED"] }, [], [d("I-FORM-SUBMIT-GATED")])).toEqual([]);
+    expect(codesHalfFailures({ severity: { "I-FORM-SUBMIT-GATED": "info" } }, [], [d("I-FORM-SUBMIT-GATED")])).toEqual([]);
+    expect(codesHalfFailures({ severity: { "I-FORM-SUBMIT-GATED": "warning" } }, [], [d("I-FORM-SUBMIT-GATED")]))
+      .toEqual(["severity: I-FORM-SUBMIT-GATED fired as info (expected warning)"]);
+  });
+  test("bite: without the infos stream the same required code is missing", () => {
+    expect(codesHalfFailures({ codes: ["I-FORM-SUBMIT-GATED"] }, [])).toEqual(["missing I-FORM-SUBMIT-GATED"]);
+  });
+  test("forbidden codes are judged over both streams", () => {
+    expect(codesHalfFailures({ notCodes: ["I-X"] }, [], [d("I-X")])).toEqual(["forbidden I-X fired"]);
   });
 });
 

@@ -44,7 +44,8 @@
 ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
-             DeclKind, HostCall, SeqFn, BindKind, mkSym, noGrants, replaceGrant, typeDefSym } from "./core.scrml"
+             DeclKind, HostCall, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf,
+             mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
@@ -81,6 +82,7 @@ ${
         reads: string[],
         shrink: SeqAt[],        // s442: the SHRINK places its sequence type grants (RULED S442 grow/shrink split)
         vals: ValInfo[],        // s444 Phase B: its validators, as the bootstrap honors them (their HTML-native lowering)
+        valsWritten: int,       // s449: how many validators the source wrote (a refused one is absent from `vals`)
     }
 
     // s444 Phase B (dpa-058, RULED S442 (2)) — one validator of a field and its
@@ -88,7 +90,8 @@ ${
     // `max`, `pattern` only when exact): the attributes that land on every
     // native input / textarea / select whose `bind:` targets the field's value.
     export type HtmlAttrPair:struct = { name: string, value: string }
-    export type ValInfo:struct = { name: string, span: ASpan, attrs: HtmlAttrPair[] }
+    // `core` (s449): the validator as Core carries it — what the §55 surface evaluates.
+    export type ValInfo:struct = { name: string, span: ASpan, attrs: HtmlAttrPair[], core: Validator }
 
     // `nid` = the ADecl (user) / AProgram node. `file` = the defining file (E2).
     export type DeclInfo:struct = {
@@ -177,6 +180,7 @@ ${
         NStruct(owner: Sym, idx: int),                    // a struct-field step
         NFn(sym: Sym),                                    // a function
         NLength,                                          // `.length` of a sequence or a string (a primitive read)
+        NSurface(of: ValidityOf, prop: SurfaceProp),      // s449: a read of the validity surface (§55.5 / §55.6) — read-only
     }
     export type ValueFact:enum = {
         VLit(lit: Literal),                               // a literal (int vs number resolved)
@@ -209,6 +213,7 @@ ${
         MStateView(v: StateView),                         // `<*f/>` of a graph field: its state-child bodies (O5 (1i))
         MInline(v: InlineView),                           // `<*x/>` rendered by inlining its markup (s442)
         MStar(decl: Sym, inst: InstRef),                  // s444: `<*x/>` of a user declaration's EXISTING instance (Core View.Star)
+        MErrors(of: ValidityOf, all: boolean),            // s449: `<errors of=…/>` (§55.8) — the surface whose errors it renders
     }
     // s442 — `<*x/>` (§66.6.2, "the existing one") rendered by INLINING markup
     // that is already resolved in the right context: a child field's own
@@ -282,9 +287,21 @@ ${
         typing: Typing,
         novalidate: int[],      // s444 Phase B (RULED S442 (3)): the `<form>` elements the compiler adds `novalidate` to
         resets: ResetOnInfo[],  // s449: the program cells' accepted `reset-on=` rules (§6.8.4)
+        gated: GateInfo[],      // s449: the `<form>` elements that bind a surfaced value (§55.7), and the values that gate each (§55.17.3)
     }
 
-    export type TypedProgram:struct = { files: FileAst[], tables: Tables, diags: Diag[] }
+    // s449 — a form whose composed subtree binds a value with a surface: its
+    // submit sets `submitted` (§55.7). `values`: the bound values that carry
+    // validators, in source order, named as §55.17.6 names them (a top-level
+    // value `email`, a child field `signup.email`) — non-empty = GATED
+    // (§55.17.3); empty = the form only records the submit.
+    // `span` / `file`: the form's opener, where I-FORM-SUBMIT-GATED reports.
+    export type GateInfo:struct = { form: int, values: string[], span: ASpan, file: string }
+
+    // `infos` (s449): the non-fatal I- notes — SPEC §55.17.6 "As an `I-` code it
+    // is non-fatal and reports in the warnings stream" — kept apart from
+    // `diags`, so a program with a gated form still compiles clean.
+    export type TypedProgram:struct = { files: FileAst[], tables: Tables, diags: Diag[], infos: Diag[] }
 
     // s449 — one `reset-on=[…]` rule of a program cell (§6.8.4), as the
     // analysis accepted it: field `target` of the program resets when any field
@@ -1209,8 +1226,8 @@ ${
     // One field: its type, mode (§66.9), grants (L3/L18, §66.12), graph, capability.
     // `vals` / `where` (s444 Phase B): the field's validators, and where the
     // field stands — 0 an attribute (it has none, §66.4 rule 1), 1 a child
-    // field of a user declaration (honored), 2 a program cell (a top-level
-    // scalar: no surface → dead, RULED S442 (5)).
+    // field of a user declaration, 2 a program cell (a top-level value — it
+    // has the surface, §55.5.1, S447). Both 1 and 2 are honored.
     fn fieldOf(te: TypeEnv, g: TypeInfo[], nid: int, span: ASpan, name: string, isLet: boolean, exported: boolean,
                aty: AType | not, init: AAttrValue, body: ADeclChild[], role: FieldRole, vals: AValidator[], where: int, st0: AS) -> RField {
         let st: AS = st0
@@ -1264,23 +1281,34 @@ ${
             wcap = rw.s
             st = rw.st
         }
+        // s449 — §55.5.3 case 1: "`isValid`, `errors`, `touched` and `submitted`
+        // SHALL NOT be used as … the name of a child field (child declaration) or
+        // an attribute of any declaration — every compound has the surface (Edge
+        // B), so a field by one of these names would shadow it." A top-level
+        // value's own name is "Not affected" (where 2). Case 2 (a field of a
+        // validated value's STRUCT type) cannot arise here: the bootstrap admits
+        // validators only on string / number values (fieldVals).
+        if (where != 2 && isSurfaceProp(name)) {
+            st = addDiag(st, te.file, span, "E-VALIDITY-RESERVED-NAME", "`" + name + "` is a reserved validity-surface name — a field or attribute by this name would hide the declaration's synthesized `." + name + "` (§55.5.3); rename it")
+        }
         const rv: RVals = fieldVals(te.file, name, ty, mode, vals, where, st)
         st = rv.st
         const f: FieldInfo = {
             nid: nid, span: span, annotated: aty is some, trusted: resolved, typeSpan: typeSpanOf(aty), sym: rs.s, ty: ty, mode: mode, role: role, grants: grants, graph: rg.graph,
-            exported: exported, wcap: wcap, init: init, reads: reads, shrink: shrinkOf(aty), vals: rv.vs,
+            exported: exported, wcap: wcap, init: init, reads: reads, shrink: shrinkOf(aty), vals: rv.vs, valsWritten: vals.length,
         }
         return { f: f, st: st }
     }
 
     // =========================================================================
-    // s444 Phase B — VALIDATORS (dpa-058, RULED S442). The bootstrap honors a
-    // validator through its HTML-native lowering only (RULED S442 (2): "the
-    // HTML-native subset (`required`, `minlength`/`maxlength`, `min`/`max`,
-    // `pattern` only when exact) lands on every native `input`/`textarea`/
-    // `select` whose `bind:` targets that declaration's value") — the §55.5
-    // validity surface is not in the bootstrap, so a validator with no exact
-    // HTML form is refused (E-BOOTSTRAP-UNSUPPORTED), never kept inert.
+    // s444 Phase B — VALIDATORS (dpa-058, RULED S442); s449 — evaluated by the
+    // §55 surface and enforced by the §55.17 gate. The bootstrap's runtime
+    // evaluates `req` on a string, `length` of a string against an int literal,
+    // `min` / `max` against a numeric literal, and a `pattern` whose HTML
+    // `pattern` form is exact; each also lowers to its HTML-native attribute
+    // (RULED S442 (2), §55.17.1) on the controls that bind the value. Any other
+    // validator is not evaluated yet, so it is refused (E-BOOTSTRAP-UNSUPPORTED)
+    // — never kept inert (g-bootstrap-validity-errors-value-and-messages-unbuilt).
     // =========================================================================
     type RVals:struct = { vs: ValInfo[], st: AS }
     type RVal:struct = { v: ValInfo | not, st: AS }
@@ -1288,11 +1316,7 @@ ${
     fn fieldVals(file: string, name: string, ty: Type, mode: FieldMode, vals: AValidator[], where: int, st0: AS) -> RVals {
         let st: AS = st0
         if (vals.length == 0) return { vs: [], st: st }
-        const topLowers: boolean = where == 2 && topLevelValidatorsLower()
-        if (where == 2 && !topLowers) {
-            return { vs: [], st: addDiag(st, file, vals[0].span, "E-VALIDATOR-DEAD", "`" + name + "` is a top-level cell — it has no validity surface (§55.5 Edge A: single-value top-level cells synthesize none), so its validators can never be observed; silently dead validators are errors (dpa-058, RULED S442 (5)) — make it a validated CHILD field of a declaration (`<form:struct> let <" + name + "…/> </>`, §55.5, §66.4 rule 2) and bind it") }
-        }
-        if (where != 1 && !topLowers) return { vs: [], st: addDiag(st, file, vals[0].span, "E-BOOTSTRAP-UNSUPPORTED", "validators here are not in the bootstrap (only on a child field of a declaration)") }
+        if (where != 1 && where != 2) return { vs: [], st: addDiag(st, file, vals[0].span, "E-BOOTSTRAP-UNSUPPORTED", "validators here are not in the bootstrap (only on a top-level value or a child field of a declaration)") }
         const isDerived: boolean = mode == FieldMode.Derived
         if (isDerived) {
             return { vs: [], st: addDiag(st, file, vals[0].span, "E-DERIVED-WITH-VALIDATORS", "`" + name + "` is derived (a locked declaration whose initializer reads cells) — validators on a derived value are rejected (§55.14); constrain it with a refinement type instead") }
@@ -1307,25 +1331,22 @@ ${
         return { vs: out, st: st }
     }
 
-    // ⚑ B3 — PENDING bryan's ruling; THE ONE SITE to flip. RULED S442 (5) reads
-    // "validators on a top-level scalar with no surface … → an error"; the
-    // dpa-058 deep-dive (P2b §55) expected a BOUND top-level scalar to "at
-    // least get `required`" (PA reading: yes). false = as built: every
-    // program cell with validators is E-VALIDATOR-DEAD, bound or not. true =
-    // a program cell's validators lower onto the elements that bind it (the
-    // fieldVals path of a child field), and only an UNBOUND one is
-    // E-VALIDATOR-DEAD (validatorPass). `@cell.isValid` stays
-    // E-VALIDITY-NO-SURFACE either way (§55.5 Edge A).
-    fn topLevelValidatorsLower() -> boolean { return false }
+    // s449 — B3 is RULED (S447, user-voice "validated top-level cells get a
+    // validity surface (Edge A reversed)" item 1; SPEC §55.5.1): a top-level
+    // value that carries validators has the surface, bound or not, and its
+    // validators lower onto every control that binds it (§55.17.1) — the
+    // former `topLevelValidatorsLower()` switch is gone: a program cell's
+    // validators take the same path as a child field's. Dead is §55.5.2
+    // (validatorPass).
 
     fn noSurfaceMsg(what: string) -> string {
-        return what + " — the bootstrap honors a validator only through its exact HTML-native form (dpa-058, RULED S442 (2)); the §55.5 validity surface that would evaluate it is not in the bootstrap yet"
+        return what + " — the bootstrap's validity surface does not evaluate this validator yet (it evaluates `req` on a string, `length` of a string against an int literal, `min` / `max` against a numeric literal, and an exact `pattern`, §55.1); it is refused rather than left inert"
     }
 
     fn pair(n: string, v: string) -> HtmlAttrPair { return { name: n, value: v } }
 
-    fn valOk(v: AValidator, attrs: HtmlAttrPair[], st: AS) -> RVal {
-        return { v: { name: v.name, span: v.span, attrs: attrs }, st: st }
+    fn valOk(v: AValidator, attrs: HtmlAttrPair[], core: Validator, st: AS) -> RVal {
+        return { v: { name: v.name, span: v.span, attrs: attrs, core: core }, st: st }
     }
 
     fn valBad(file: string, v: AValidator, code: string, msg: string, st: AS) -> RVal {
@@ -1360,8 +1381,8 @@ ${
     // "checked" (not exact); on a number / sequence / struct there is no form.
     fn bareVal(file: string, ty: Type, v: AValidator, st: AS) -> RVal {
         if (v.name != "req") return valBad(file, v, "E-PARSE-ATTR", "`" + v.name + "` needs its argument: `" + v.name + "(…)` (§55.1)", st)
-        if (isStrLike(ty)) return valOk(v, [pair("required", "")], st)
-        return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`req` on a `" + typeName(ty) + "` value has no exact HTML form (only a string's `required`)"), st)
+        if (isStrLike(ty)) return valOk(v, [pair("required", "")], Validator.Req, st)
+        return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`req` on a `" + typeName(ty) + "` value"), st)
     }
 
     // `length(>=N)` / `(<=N)` / `(>N)` / `(<N)` / `(==N)` on a string, N an int
@@ -1370,29 +1391,33 @@ ${
         if (v.name != "length") return valBad(file, v, "E-PARSE-ATTR", "`" + v.name + "(" + op + " …)` — only `length` takes a comparison (§55.1)", st)
         if (!isStrLike(ty) && seqElem(ty) is not) return valBad(file, v, "E-TYPE-031", "`length(…)` applies to a string or a sequence, and this value is `" + typeName(ty) + "` (§55.1)", st)
         const n: int = intLit(x)
-        if (!isStrLike(ty) || n < 0) return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`length(" + op + " …)` here has no exact HTML form (a string's length against an int literal)"), st)
-        if (op == ">=") return valOk(v, [pair("minlength", "" + n)], st)
-        if (op == ">") return valOk(v, [pair("minlength", "" + (n + 1))], st)
-        if (op == "<=") return valOk(v, [pair("maxlength", "" + n)], st)
-        if (op == "<" && n >= 1) return valOk(v, [pair("maxlength", "" + (n - 1))], st)
-        if (op == "==") return valOk(v, [pair("minlength", "" + n), pair("maxlength", "" + n)], st)
-        return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`length(" + op + " " + n + ")` has no exact HTML form"), st)
+        if (!isStrLike(ty) || n < 0) return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`length(" + op + " …)` here (not a string's length against an int literal)"), st)
+        const lc: Validator = Validator.LengthCmp(op, n)
+        if (op == ">=") return valOk(v, [pair("minlength", "" + n)], lc, st)
+        if (op == ">") return valOk(v, [pair("minlength", "" + (n + 1))], lc, st)
+        if (op == "<=") return valOk(v, [pair("maxlength", "" + n)], lc, st)
+        if (op == "<" && n >= 1) return valOk(v, [pair("maxlength", "" + (n - 1))], lc, st)
+        if (op == "==") return valOk(v, [pair("minlength", "" + n), pair("maxlength", "" + n)], lc, st)
+        return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`length(" + op + " " + n + ")`"), st)
     }
 
     // `min(n)` / `max(n)` on a number, n a numeric literal → `min` / `max`. A
     // Level-1 message (`req("…")`, §55.10) has no reader in the bootstrap (no
     // `messageFor`, no `<errors>`). The rest of §55.1 has no HTML form.
     fn exprsVal(file: string, ty: Type, v: AValidator, es: AExpr[], st: AS) -> RVal {
-        if (v.name == "req") return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", "`req(\"…\")` — a Level-1 message (§55.10) is read by `messageFor` / `<errors>`, which are not in the bootstrap", st)
+        if (v.name == "req") return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", "`req(\"…\")` — a Level-1 message (§55.10): the bootstrap's `<errors of=…/>` renders only the Level-3 default messages, so the inline message would be dropped; write `req` and let the default message render", st)
         if (v.name == "length") return valBad(file, v, "E-PARSE-ATTR", "`length(…)` takes a comparison: `length(>=N)` (§55.1)", st)
         if (v.name == "pattern") return valBad(file, v, "E-PARSE-ATTR", "`pattern(…)` takes a regex literal: `pattern(/…/)` (§55.1)", st)
         if (v.name == "min" || v.name == "max") {
             if (!isNumLike(ty)) return valBad(file, v, "E-TYPE-031", "`" + v.name + "(…)` applies to a number, and this value is `" + typeName(ty) + "` (§55.1)", st)
             const lit: string = numLitText(es)
-            if (lit == "") return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`" + v.name + "(…)` with a non-literal bound has no static HTML form"), st)
-            return valOk(v, [pair(v.name, lit)], st)
+            if (lit == "") return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`" + v.name + "(…)` with a non-literal bound"), st)
+            const bound: number = Number(lit)
+            let mc: Validator = Validator.Max(bound)
+            if (v.name == "min") mc = Validator.Min(bound)
+            return valOk(v, [pair(v.name, lit)], mc, st)
         }
-        return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`" + v.name + "(…)` has no HTML-native form"), st)
+        return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`" + v.name + "(…)`"), st)
     }
 
     // `pattern(/re/)` on a string → `pattern="re"` ONLY WHEN EXACT (RULED S442
@@ -1402,9 +1427,9 @@ ${
         if (v.name != "pattern") return valBad(file, v, "E-PARSE-ATTR", "`" + v.name + "(…)` does not take a regex (§55.1)", st)
         if (!isStrLike(ty)) return valBad(file, v, "E-TYPE-031", "`pattern(…)` applies to a string, and this value is `" + typeName(ty) + "` (§55.1)", st)
         if (flags != "" || !exactPattern(src)) {
-            return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`pattern(/" + src + "/" + flags + ")` is not exact as an HTML `pattern` (it needs no flags, `^…$` anchoring, no top-level `|`, and plain characters / classes)"), st)
+            return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`pattern(/" + src + "/" + flags + ")` — a pattern is admitted only when its HTML `pattern` attribute says the same (no flags, `^…$` anchoring, no top-level `|`, plain characters / classes), so the browser's attribute and the surface agree"), st)
         }
-        return valOk(v, [pair("pattern", src)], st)
+        return valOk(v, [pair("pattern", src)], Validator.Pattern(src), st)
     }
 
     // The value of a non-negative int literal (-1: not one).
@@ -1962,7 +1987,7 @@ ${
         for (const f of fs) {
             out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: f.trusted && typeTrusted(errs, f.typeSpan),
                                 typeSpan: f.typeSpan, sym: f.sym, ty: f.ty, mode: f.mode, role: f.role, grants: f.grants,
-                                graph: f.graph, exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads, shrink: f.shrink, vals: f.vals }])
+                                graph: f.graph, exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads, shrink: f.shrink, vals: f.vals, valsWritten: f.valsWritten }])
         }
         return out
     }
@@ -2739,20 +2764,20 @@ ${
             const d: DeclSrc | not = findDeclSrc(env.g, iDecl)
             if (d is not) return diagX(env, e, "E-SCOPE-001", "unknown declaration", st)
             const i: int = fieldIndex(d.info, name)
-            if (i < 0 && isSurfaceProp(name) && !d.isProgram) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", surfaceDeferred("@" + d.info.sym.hint + "." + name, "§55.5"), st)
+            // s449 — the compound surface (§55.5): every user declaration has one (Edge B)
+            if (i < 0 && isSurfaceProp(name) && !d.isProgram) return compoundSurface(env, e, iDecl, inst, name, st)
             if (i < 0) return diagX(env, e, "E-SCOPE-001", "`<" + d.info.sym.hint + ">` has no field `" + name + "`", st)
             return { x: { ty: d.info.fields[i].ty, inst: not, iDecl: not, maybe: ro.x.maybe },
                      st: addName(st, e.nid, NameFact.NField(iDecl, inst, i)) }
         }
-        // s444 Phase B — the synthesized validity surface of a FIELD read
-        // (`@c.isValid`): a program cell has none (§55.5 Edge A — RULED S442 (5)
-        // "`@x.isValid` on a no-surface cell → an error"); a declaration's child
-        // field has one (§55.6), not built in the bootstrap yet.
+        // s449 — the validity surface of a FIELD read (`@email.isValid`,
+        // `@signup.email.touched`): a top-level value has one when it carries
+        // validators (§55.5.1 rules 1-2), a user declaration's field always
+        // (§55.6, Edge B).
         if (isSurfaceProp(name)) {
             const nf: NameFact | not = nameFactIn(st, obj.nid)
             const where: int = fieldReadKind(env, nf)
-            if (where == 2) return diagX(env, e, "E-VALIDITY-NO-SURFACE", "`." + name + "` — `" + exprLabel(obj) + "` is a top-level cell, and a single-value top-level cell has no validity surface (§55.5 Edge A); only a declaration and its child fields synthesize `isValid` / `errors` / `touched` / `submitted` (dpa-058, RULED S442 (5))", st)
-            if (where == 1) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", surfaceDeferred(exprLabel(obj) + "." + name, "§55.6"), st)
+            if (where == 2 || where == 1) return fieldSurface(env, e, obj, nf, name, where, st)
         }
         const t: Type | not = ro.x.ty
         if (t is some) {
@@ -2784,6 +2809,94 @@ ${
         return "`" + what + "` reads the synthesized validity surface (" + sec + "), which is not in the bootstrap yet"
     }
 
+    fn surfaceProp(n: string) -> SurfaceProp {
+        if (n == "isValid") return SurfaceProp.IsValid
+        if (n == "errors") return SurfaceProp.Errors
+        if (n == "touched") return SurfaceProp.Touched
+        return SurfaceProp.Submitted
+    }
+
+    // `errors` read as a VALUE: §55.9 makes it an array of ValidationError
+    // tags (a map of them on a compound), and the bootstrap has no
+    // ValidationError type for the typer to give it — refused, never read as
+    // an untyped value. `<errors of=…/>` renders it (§55.8).
+    fn errorsAsValue(what: string) -> string {
+        return "`" + what + ".errors` read as a value — the ValidationError array (§55.9) has no type in the bootstrap yet; render it with `<errors of=" + what + "/>` (§55.8), or test `" + what + ".isValid`"
+    }
+
+    // s449 — `@signup.isValid` / `.submitted` (§55.5): the compound of a user
+    // declaration's instance. Its `touched` / `errors` are per-field maps
+    // (§55.5) the bootstrap has no type for — refused (read them per field).
+    fn compoundSurface(env: Env, e: AExpr, d: Sym, inst: InstRef, name: string, st: AS) -> RX {
+        const what: string = "@" + d.hint
+        if (name == "errors") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", errorsAsValue(what), st)
+        if (name == "touched") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`" + what + ".touched` is a map of per-field flags (§55.5) — a map value has no type in the bootstrap yet; read one field's: `" + what + ".<field>.touched` (§55.6)", st)
+        return plain(Type.Bool, addName(st, e.nid, NameFact.NSurface(ValidityOf.OfDecl(d, inst), surfaceProp(name))))
+    }
+
+    // s449 — a field's surface (§55.5.1 / §55.6). `where`: 2 a top-level
+    // value, 1 a user declaration's field (fieldReadKind).
+    fn fieldSurface(env: Env, e: AExpr, obj: AExpr, nf: NameFact | not, name: string, where: int, st: AS) -> RX {
+        const v: ValidityOf | not = fieldValidity(nf)
+        if (v is not) return diagX(env, e, "E-SCOPE-001", "`." + name + "` — `" + exprLabel(obj) + "` is not a field", st)
+        const what: string = exprLabel(obj)
+        // its validators were written but refused (already reported): no second, false diagnostic
+        if (where == 2 && fieldValidatorsRefused(env, v)) return plain(not, st)
+        if (where == 2 && !fieldCarriesValidators(env, v)) {
+            return diagX(env, e, "E-VALIDITY-NO-SURFACE", "`." + name + "` — `" + what + "` is a top-level value that carries no validators, so it has no validity surface (§55.5.1 rule 2: only a value that carries validators gets one); add a validator to its declaration, or drop the read", st)
+        }
+        if (name == "errors") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", errorsAsValue(what), st)
+        if (where == 1 && name == "submitted") {
+            return diagX(env, e, "E-SCOPE-001", "`" + what + ".submitted` — a field of a declaration has no `submitted` of its own (§55.6); its compound has it: `@" + validityDecl(v).hint + ".submitted` (§55.5)", st)
+        }
+        return plain(Type.Bool, addName(st, e.nid, NameFact.NSurface(v, surfaceProp(name))))
+    }
+
+    fn fieldValidity(nf: NameFact | not) -> ValidityOf | not {
+        return match nf {
+            .NField(decl: d, inst: i, idx: x) :> ValidityOf.OfField(d, i, x)
+            .NLocal(sym: s) :> not
+            .NInst(decl: d) :> not
+            .NStruct(owner: o) :> not
+            .NFn(sym: s) :> not
+            .NLength :> not
+            .NSurface(of: x) :> not
+            not :> not
+        }
+    }
+
+    fn fieldCarriesValidators(env: Env, v: ValidityOf) -> boolean {
+        return match v {
+            .OfField(decl: d, inst: i, idx: x) :> declFieldValidated(env, d, x)
+            .OfDecl(decl: d) :> false
+        }
+    }
+
+    // A value whose source wrote validators that were all refused (each
+    // reported where written): it has no admitted validator, but the author
+    // did write some — a surface read of it is not E-VALIDITY-NO-SURFACE.
+    fn fieldValidatorsRefused(env: Env, v: ValidityOf) -> boolean {
+        return match v {
+            .OfField(decl: d, inst: i, idx: x) :> declFieldRefused(env, d, x)
+            .OfDecl(decl: d) :> false
+        }
+    }
+
+    fn declFieldRefused(env: Env, d: Sym, idx: int) -> boolean {
+        const ds: DeclSrc | not = findDeclSrc(env.g, d)
+        if (ds is not) return false
+        if (idx < 0 || idx >= ds.info.fields.length) return false
+        const f: FieldInfo = ds.info.fields[idx]
+        return f.vals.length == 0 && f.valsWritten > 0
+    }
+
+    fn declFieldValidated(env: Env, d: Sym, idx: int) -> boolean {
+        const ds: DeclSrc | not = findDeclSrc(env.g, d)
+        if (ds is not) return false
+        if (idx < 0 || idx >= ds.info.fields.length) return false
+        return ds.info.fields[idx].vals.length > 0
+    }
+
     fn exprLabel(e: AExpr) -> string {
         const k: string = placeKey(e)
         if (k == "") return "this value"
@@ -2807,6 +2920,7 @@ ${
             .NStruct(owner: o) :> 0
             .NFn(sym: s) :> 0
             .NLength :> 0
+            .NSurface(of: x) :> 0
             not :> 0
         }
     }
@@ -2844,6 +2958,7 @@ ${
             .NInst(decl: d) :> not
             .NStruct(owner: o) :> not
             .NLength :> not
+            .NSurface(of: x) :> not
             not :> not
         }
     }
@@ -3326,6 +3441,13 @@ ${
         const rp: RPlace = resolvePlace(env, obj, st0)
         const base: WPlace | not = rp.place
         if (base is not) return rp
+        // s449 — a field's surface property is read-only too (§55.5.1 rule 7, §55.7)
+        if (isSurfaceProp(name) && base.path.length == 0) {
+            const isProg: boolean = base.decl.sym.id == env.g.program.id
+            if (!isProg || base.decl.fields[base.idx].vals.length > 0) {
+                return noPlace(addDiag(rp.st, env.file, t.span, "E-SYNTHESIZED-WRITE", "`" + exprLabel(obj) + "." + name + "` is a synthesized validity property — read-only (§55.5.1 rule 7, §55.7)"))
+            }
+        }
         const bt: Type | not = base.ty
         if (bt is some) {
             const s: Sym | not = namedOf(bt)
@@ -4526,6 +4648,7 @@ ${
             .NStruct(owner: o) :> notMutableDep(env, d, name, st)
             .NFn(sym: s) :> notMutableDep(env, d, name, st)
             .NLength :> notMutableDep(env, d, name, st)
+            .NSurface(of: x) :> notMutableDep(env, d, name, st)
         }
     }
 
@@ -4658,6 +4781,8 @@ ${
         // the same for a program cell declared `single` (§66.19.6 `<phase/>`)
         const sd: ADecl | not = singleProgramField(env, e.tag)
         if (sd is some) return singleInstantiated(env, e, st)
+        // s449 — `<errors of=…/>` (§55.8), when no declaration takes the name
+        if (e.tag == "errors") return resolveErrors(env, e, st)
         // s444 (PA): a scrml STRUCTURAL element the bootstrap does not
         // implement is never an HTML element (§4.15, §24.4 "These element names
         // SHALL NOT be treated as HTML elements") — refused, not rendered as
@@ -4668,6 +4793,84 @@ ${
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
         }
         return resolveHtml(env, e, st)
+    }
+
+    // s449 — `<errors of=expr/>` (§55.8): "`of=expr` REQUIRED — References a
+    // per-field cell (`@signup.name`), a compound cell (`@signup`), or a
+    // validated top-level value (`@email`)"; `all` (optional flag) renders
+    // the full array. `of=` missing → E-ERRORS-001; not a `@`-rooted
+    // reference to one of those → E-ERRORS-002; a top-level value with no
+    // validators has no surface → E-VALIDITY-NO-SURFACE (§55.8, the S442 (5)
+    // read rule applied to the convention). The body override (`<errors
+    // of=…>${(err) => …}</>`) is not in the bootstrap — refused, never
+    // dropped. Any other attribute is refused (it would be ignored).
+    fn resolveErrors(env: Env, e: AElem, st0: AS) -> AS {
+        let st: AS = st0
+        let of: AAttr | not = not
+        let all = false
+        for (const a of e.attrs) {
+            if (a.name == "of") {
+                of = a
+            } else if (a.name == "all" && isNoValue(a.value)) {
+                all = true
+            } else {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is not an attribute of `<errors>` — it takes `of=` and the `all` flag (§55.8); it would be ignored")
+            }
+        }
+        for (const k of e.kids) {
+            if (!blankNode(k)) {
+                return addDiag(st, env.file, k.span, "E-BOOTSTRAP-UNSUPPORTED", "a body inside `<errors of=…>` (the §55.8 body override) is not in the bootstrap — it would be dropped silently; write `<errors of=…/>` (the default rendering)")
+            }
+        }
+        if (of is not) return addDiag(st, env.file, e.span, "E-ERRORS-001", "`<errors>` needs `of=` — the value whose errors it renders: `<errors of=@signup.email/>` (§55.8)")
+        const x: AExpr | not = valueExpr(of.value)
+        if (x is not || !isReactiveRoot(placeRoot(x))) {
+            return addDiag(st, env.file, of.span, "E-ERRORS-002", "`<errors of=…>` takes a `@`-rooted reference — a field (`@signup.email`), a declaration (`@signup`) or a validated top-level value (`@email`) (§55.8)")
+        }
+        const r: RX = resolveExpr(env, x, not, st)
+        if (r.st.diags.length > st.diags.length) return r.st
+        const nf: NameFact | not = nameFactIn(r.st, x.nid)
+        const where: int = fieldReadKind(env, nf)
+        const fv: ValidityOf | not = fieldValidity(nf)
+        if (fv is some) {
+            if (where == 2 && fieldValidatorsRefused(env, fv)) return r.st
+            if (where == 2 && !fieldCarriesValidators(env, fv)) {
+                return addDiag(r.st, env.file, of.span, "E-VALIDITY-NO-SURFACE", "`<errors of=" + exprLabel(x) + "/>` — `" + exprLabel(x) + "` is a top-level value that carries no validators, so it has no validity surface and no `errors` (§55.5.1 rule 2, §55.8)")
+            }
+            return addElem(r.st, e.nid, ElemFact.MErrors(fv, all))
+        }
+        const dv: ValidityOf | not = declValidity(env, nf)
+        if (dv is some) return addElem(r.st, e.nid, ElemFact.MErrors(dv, all))
+        return addDiag(r.st, env.file, of.span, "E-ERRORS-002", "`<errors of=" + exprLabel(x) + "/>` — `" + exprLabel(x) + "` is not a field, a declaration or a validated top-level value, so it has no `errors` (§55.8)")
+    }
+
+    fn isNoValue(v: AAttrValue) -> boolean {
+        return match v {
+            .NoValue :> true
+            .Bare(e: x) :> false
+            .Paren(e: x) :> false
+            .Quoted(v: s) :> false
+            .Braced(b: b) :> false
+        }
+    }
+
+    // An instance of a USER declaration → its compound surface (§55.5).
+    fn declValidity(env: Env, nf: NameFact | not) -> ValidityOf | not {
+        return match nf {
+            .NInst(decl: d, inst: i) :> userCompound(env, d, i)
+            .NField(decl: d) :> not
+            .NLocal(sym: s) :> not
+            .NStruct(owner: o) :> not
+            .NFn(sym: s) :> not
+            .NLength :> not
+            .NSurface(of: x) :> not
+            not :> not
+        }
+    }
+
+    fn userCompound(env: Env, d: Sym, i: InstRef) -> ValidityOf | not {
+        if (d.id == env.g.program.id) return not
+        return ValidityOf.OfDecl(d, i)
     }
 
     // s449 (from U0 review r2 N2): `<slot>` CONTENT (fallback for a use with no
@@ -4722,7 +4925,6 @@ ${
             "ontransition"  :> "§51.0.H"
             "ontimeout"     :> "§51.0.M"
             "onidle"        :> "§51.0.R"
-            "errors"        :> "§55.8"
             "match"         :> "§18.0.1"
             "empty"         :> "§17.7 `<each>` fallback"
             "render"        :> "§19.15"
@@ -5097,20 +5299,23 @@ ${
     // Each validator's HTML attributes, where they apply to this element (HTML's
     // own applicability: `required` on text-like inputs / textarea / select;
     // `minlength` / `maxlength` / `pattern` on text-like inputs (and textarea
-    // for the lengths); `min` / `max` on number / range / date-time inputs). A
-    // validator with no form on THIS element is refused — it would be inert here.
+    // for the lengths); `min` / `max` on number / range / date-time inputs).
+    // s449: an attribute HTML does not apply to THIS element is simply not
+    // written (§55.17.1: "No other validator is lowered") — the validator is
+    // not inert: the §55 surface evaluates it and the §55.17 gate enforces it.
+    // (Was: refused, when the HTML attribute was the only enforcement.)
     fn bindValAttrs(env: Env, e: AElem, a: AAttr, f: FieldInfo, kind: BindKind, st0: AS) -> RPairs {
         let st: AS = st0
         let out: HtmlAttrPair[] = []
         const itype: string = inputType(e)
         for (const v of f.vals) {
             for (const h of v.attrs) {
-                if (!htmlApplies(h.name, e.tag, itype, kind)) {
-                    st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`" + f.sym.hint + "`'s validator `" + v.name + "` has no HTML form (`" + h.name + "`) on `<" + e.tag + typeSuffix(e, itype) + ">`"))
-                } else if (attrNamed(e.attrs, h.name) is some) {
-                    st = handAttrConflict(env, e, f, v.name, h, st)
-                } else if (!hasPairNamed(out, h.name)) {
-                    out = out.concat([h])
+                if (htmlApplies(h.name, e.tag, itype, kind)) {
+                    if (attrNamed(e.attrs, h.name) is some) {
+                        st = handAttrConflict(env, e, f, v.name, h, st)
+                    } else if (!hasPairNamed(out, h.name)) {
+                        out = out.concat([h])
+                    }
                 }
             }
         }
@@ -5153,11 +5358,6 @@ ${
         const t: string = staticAttrText(e.attrs, "type")
         if (t == "") return "text"
         return t.toLowerCase()
-    }
-
-    fn typeSuffix(e: AElem, itype: string) -> string {
-        if (e.tag != "input") return ""
-        return " type=\"" + itype + "\""
     }
 
     fn isTextInput(t: string) -> boolean {
@@ -6000,6 +6200,7 @@ ${
             .NStruct(owner: o) :> ""
             .NFn(sym: s) :> ""
             .NLength :> ""
+            .NSurface(of: x) :> ""
             not :> ""
         }
     }
@@ -6611,7 +6812,20 @@ ${
             .NStruct(owner: o, idx: x) :> structFieldType(env.t, o, x)
             .NFn(sym: s) :> VType.Unknown
             .NLength :> known(Type.Int)
+            .NSurface(of: x, prop: pr) :> surfaceType(pr)
             not :> VType.Unknown
+        }
+    }
+
+    // s449 — a surface property's value type (§55.5 / §55.6): `isValid`,
+    // `touched` and `submitted` are booleans; `errors` (a ValidationError
+    // array, or a map of them) is refused as a value before typing.
+    fn surfaceType(pr: SurfaceProp) -> VType {
+        return match pr {
+            .IsValid :> known(Type.Bool)
+            .Touched :> known(Type.Bool)
+            .Submitted :> known(Type.Bool)
+            .Errors :> VType.Unknown
         }
     }
 
@@ -6629,6 +6843,7 @@ ${
             .NStruct(owner: o) :> false
             .NFn(sym: s) :> false
             .NLength :> false
+            .NSurface(of: x) :> false
             not :> false
         }
     }
@@ -6677,6 +6892,7 @@ ${
             .NInst(decl: d) :> not
             .NStruct(owner: o) :> not
             .NLength :> not
+            .NSurface(of: x) :> not
             not :> not
         }
     }
@@ -6798,6 +7014,7 @@ ${
             .MEach(bind: b) :> not
             .MHtml :> not
             .MSlot :> not
+            .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
             .MStar(decl: d) :> not
@@ -6812,6 +7029,7 @@ ${
             .MUse(decl: d) :> not
             .MHtml :> not
             .MSlot :> not
+            .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
             .MStar(decl: d) :> not
@@ -8661,6 +8879,7 @@ ${
             .NStruct(owner: o) :> not
             .NFn(sym: s) :> not
             .NLength :> not
+            .NSurface(of: x) :> not
             not :> not
         }
     }
@@ -8685,6 +8904,7 @@ ${
             .NStruct(owner: o) :> not
             .NFn(sym: s) :> not
             .NLength :> not
+            .NSurface(of: v) :> sharedOf(validityInst(v))
             not :> not
         }
     }
@@ -8736,6 +8956,7 @@ ${
             .NInst(decl: d) :> not
             .NStruct(owner: o) :> not
             .NLength :> not
+            .NSurface(of: x) :> not
             not :> not
         }
     }
@@ -8747,6 +8968,7 @@ ${
             .NInst(decl: d) :> "an instance"
             .NStruct(owner: o) :> "a struct field"
             .NLength :> "a length"
+            .NSurface(of: x) :> "a validity surface"
             .NFn(sym: s) :> "a function"
         }
     }
@@ -9165,6 +9387,7 @@ ${
             .MHtml :> not
             .MEach(bind: b) :> not
             .MSlot :> not
+            .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
             not :> not
@@ -9867,7 +10090,7 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
-                                novalidate: [], resets: rr.infos }
+                                novalidate: [], resets: rr.infos, gated: [] }
         const scopeDiags: Diag[] = checkScopes(files, bound)
         // s449: the no-write rule over every accepted effect (§6.7.4)
         const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects)
@@ -9877,38 +10100,58 @@ ${
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets }
-        return { files: files, tables: t, diags: st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags) }
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated }
+        return { files: files, tables: t, diags: st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags),
+                 infos: gatedInfos(vp.gated) }
+    }
+
+    // s449 — I-FORM-SUBMIT-GATED (§55.17.6 item 1): "one per gated form, at the
+    // form's opener, naming the gating values in source order: *"this form's
+    // submit is gated by: email, password"*".
+    fn gatedInfos(gs: GateInfo[]) -> Diag[] {
+        let out: Diag[] = []
+        for (const g of gs) {
+            // a form that binds only unvalidated fields records the submit (§55.7) but gates nothing
+            if (g.values.length > 0) out = out.concat([{ code: "I-FORM-SUBMIT-GATED", file: g.file, span: g.span,
+                message: "this form's submit is gated by: " + g.values.join(", ") + " — the compiler blocks the submit while any of them is invalid, before the form's `onsubmit` runs (§55.17.3); a submit button carrying `formnovalidate` bypasses the block (§55.17.4)" }])
+        }
+        return out
     }
 
     // =========================================================================
     // s444 Phase B — THE VALIDATOR PASS, over the bound tables.
-    //  - RULED S442 (5) "Silently dead validators become errors": a validated
-    //    child field that NO `bind:` targets → E-VALIDATOR-DEAD (its validators
-    //    reach the DOM only through a bound element, RULED S442 (2); a program
-    //    cell's are refused in fieldVals).
+    //  - §55.5.2 (S447 call 4, narrowing RULED S442 (5)): validators are DEAD —
+    //    E-VALIDATOR-DEAD — only when nothing can ever change the value: no
+    //    `bind:` targets it, it is locked (no write grant), it is not
+    //    server-loaded, not seeded at a use site, not restored by `persist=`.
+    //    (`server` and `persist=` are not in the bootstrap — they are refused
+    //    where written.) A `let` value set only from logic is LIVE: its
+    //    surface reports what logic writes.
     //  - RULED S442 (3) "the compiler adds `novalidate` to any form carrying
     //    lowered attributes": every `<form>` whose markup — through `<*f/>`
     //    inlines, `<*x/>` Stars, uses, `<each>` rows and state-view arms — holds
     //    a bound element with lowered validator attributes.
     // =========================================================================
-    type ValPass:struct = { diags: Diag[], forms: int[] }
+    type ValPass:struct = { diags: Diag[], forms: int[], gated: GateInfo[] }
     type BindKey:struct = { decl: int, idx: int }
 
     fn validatorPass(g: Globals, t: Tables) -> ValPass {
         let keys: BindKey[] = []
         for (const k of t.attrs.facts) { keys = keys.concat(bindKeyOf(k)) }
+        let seeds: BindKey[] = []
+        for (const ds of g.decls) {
+            for (const n of declMarkup(ds)) { seeds = seeds.concat(seedKeysIn(t, n)) }
+        }
         let diags: Diag[] = []
         for (const ds of g.decls) {
-            if (!ds.isProgram || topLevelValidatorsLower()) {
-                let i = 0
-                for (const f of ds.info.fields) {
-                    if (f.vals.length > 0 && !hasBindKey(keys, ds.info.sym.id, i)) {
-                        diags = diags.concat([{ code: "E-VALIDATOR-DEAD", file: ds.file, span: f.span,
-                            message: "`" + f.sym.hint + "` has validators, but no `bind:` targets `@" + f.sym.hint + "` — a validator reaches the page only through the element that binds its value (dpa-058, RULED S442 (1)/(2): the bind is always written), so these are silently dead; silently dead validators are errors (RULED S442 (5)) — bind it in its `renders`: `renders <input bind:value=@" + f.sym.hint + "/>`" }])
-                    }
-                    i = i + 1
+            let i = 0
+            for (const f of ds.info.fields) {
+                const locked: boolean = f.wcap is not
+                if (f.vals.length > 0 && locked && !hasBindKey(keys, ds.info.sym.id, i) && !hasBindKey(seeds, ds.info.sym.id, i)) {
+                    diags = diags.concat([{ code: "E-VALIDATOR-DEAD", file: ds.file, span: f.span,
+                        message: "`" + f.sym.hint + "` has validators, but nothing can ever change its value — it is locked (no `let`), no `bind:` targets it, and no use site seeds it — so its validity is a compile-time constant and the validators can never report a change (§55.5.2); make it `let` (and bind it or set it from logic), or drop the validators" }])
                 }
+                i = i + 1
             }
         }
         // r2 F1: a `<slot/>` in a declaration's markup is filled by the
@@ -9918,11 +10161,177 @@ ${
             for (const n of declMarkup(ds)) { uses = uses.concat(useSitesIn(t, ds.info.sym.id, n)) }
         }
         let forms: int[] = []
+        let gated: GateInfo[] = []
         for (const ds of g.decls) {
             const cx: CarryCx = { g: g, t: t, uses: uses, seen: [], slot: ds.info.sym.id, slotSeen: [] }
-            for (const n of declMarkup(ds)) { forms = forms.concat(formsIn(cx, n)) }
+            for (const n of declMarkup(ds)) {
+                forms = forms.concat(formsIn(cx, n))
+                for (const gi of gatesIn(cx, n)) { gated = gated.concat([{ form: gi.form, values: gi.values, span: gi.span, file: ds.file }]) }
+            }
         }
-        return { diags: diags, forms: forms }
+        return { diags: diags, forms: forms, gated: gated }
+    }
+
+    // ---- s449: THE GATED FORMS (§55.17.3) ------------------------------------
+    // "A gated form is every `<form>` whose composed subtree (§55.17.2 rule 1)
+    // contains a native control whose `bind:` targets a value that carries
+    // validators, whether or not any of those validators lowers to an HTML
+    // attribute." The composed subtree is the one `novalidate` walks
+    // (formsIn): inlines, Stars, uses, `<each>` rows, state-view arms, slot
+    // content. A form the author wrote `novalidate` on is gated all the same
+    // (S447 gate-calls item 1: "with or without `novalidate`").
+    fn gatesIn(cx: CarryCx, n: ANode) -> GateInfo[] {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> gatesInElem(cx, e)
+            .Text(text: x) :> []
+            .Interp(e: x) :> []
+            .DeclNode(d: d) :> []
+            .Effect(w: w) :> []
+        }
+    }
+
+    fn gatesInElem(cx: CarryCx, e: AElem) -> GateInfo[] {
+        let out: GateInfo[] = []
+        if (e.tag == "form" && !e.star && isHtmlFact(elemFact(cx.t.elems, e.nid))) {
+            // §55.7: a form that binds ANY field with a surface sets `submitted`
+            // (`all`); it is GATED (§55.17.3) when one of them carries validators.
+            const surfaced: string[] = elemBound(cx, e, true)
+            if (surfaced.length > 0) out = [{ form: e.nid, values: elemBound(cx, e, false), span: e.span, file: "" }]
+        }
+        for (const k of e.kids) { out = out.concat(gatesIn(cx, k)) }
+        return out
+    }
+
+    // The validated values bound under this element (through its expansion
+    // and its children), named, each once, in source order. `all`: every
+    // bound value that has a surface (a validated top-level value, any field
+    // of a user declaration), not only the validated ones.
+    fn elemBound(cx: CarryCx, e: AElem, all: boolean) -> string[] {
+        let out: string[] = []
+        for (const a of e.attrs) { out = addNames(out, boundValidated(cx.t, attrFact(cx.t.attrs, a.nid), all)) }
+        out = addNames(out, expansionBound(cx, elemFact(cx.t.elems, e.nid), all))
+        return addNames(out, nodesBound(cx, e.kids, all))
+    }
+
+    fn addNames(xs: string[], ys: string[]) -> string[] {
+        let out: string[] = xs
+        for (const y of ys) {
+            if (out.indexOf(y) < 0) out = out.concat([y])
+        }
+        return out
+    }
+
+    fn nodesBound(cx: CarryCx, ns: ANode[], all: boolean) -> string[] {
+        let out: string[] = []
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            const el: AElem | not = elemOfNode(k)
+            if (el is some) out = addNames(out, elemBound(cx, el, all))
+        }
+        return out
+    }
+
+    // A bind of a field's WHOLE value whose field carries validators → its name.
+    fn boundValidated(t: Tables, k: AttrKind | not, all: boolean) -> string[] {
+        return match k {
+            .ABind(w: w, decl: d, idx: i) :> validatedName(t, w, d, i, all)
+            .AStatic :> []
+            .ABound :> []
+            .AOn(event: ev) :> []
+            .AIf :> []
+            .AConstruct(field: x) :> []
+            .AAs :> []
+            .AEachIn :> []
+            .AEachKey :> []
+            .AEachAs :> []
+            not :> []
+        }
+    }
+
+    fn validatedName(t: Tables, w: WriteFact, d: Sym, i: int, all: boolean) -> string[] {
+        if (bindKeyFor(w, d, i).length == 0) return []
+        const di: DeclInfo | not = declInfo(t, d)
+        if (di is not) return []
+        if (i < 0 || i >= di.fields.length) return []
+        const surfacedOnly: boolean = all && di.sym.id != t.program.id
+        if (di.fields[i].vals.length == 0 && !surfacedOnly) return []
+        if (di.sym.id == t.program.id) return [di.fields[i].sym.hint]
+        return [di.sym.hint + "." + di.fields[i].sym.hint]
+    }
+
+    fn expansionBound(cx: CarryCx, f: ElemFact | not, all: boolean) -> string[] {
+        return match f {
+            .MInline(v: v) :> nodesBound(cx, v.nodes, all)
+            .MStar(decl: d) :> nodesBound(intoDecl(cx, d), declRendersOnce(cx, d), all)
+            .MUse(decl: d) :> nodesBound(intoDecl(cx, d), declRendersOnce(cx, d), all)
+            .MStateView(v: v) :> nodesBound(cx, stateArmNodes(v), all)
+            .MSlot :> slotBound(cx, all)
+            .MErrors(of: x) :> []
+            .MHtml :> []
+            .MEach(bind: b) :> []
+            not :> []
+        }
+    }
+
+    fn slotBound(cx: CarryCx, all: boolean) -> string[] {
+        if (cx.slot < 0 || cx.slotSeen.indexOf(cx.slot) >= 0) return []
+        let out: string[] = []
+        for (const u of cx.uses) {
+            if (u.decl == cx.slot) {
+                const ux: CarryCx = { g: cx.g, t: cx.t, uses: cx.uses, seen: cx.seen, slot: u.owner, slotSeen: cx.slotSeen.concat([cx.slot]) }
+                out = addNames(out, nodesBound(ux, u.kids, all))
+            }
+        }
+        return out
+    }
+
+    // s449 — the fields a USE seeds (`<f v="x"/>`, a use-site value, §66.9
+    // rule 8): a locked validated field seeded there is LIVE (§55.5.2 (4)).
+    fn seedKeysIn(t: Tables, n: ANode) -> BindKey[] {
+        const k: ANodeK = n.k
+        const e: AElem | not = elemOfNode(k)
+        if (e is not) return []
+        let out: BindKey[] = []
+        const used: Sym | not = useDeclOf(elemFact(t.elems, e.nid))
+        if (used is some) {
+            for (const a of e.attrs) {
+                const i: int = constructIdx(attrFact(t.attrs, a.nid))
+                if (i >= 0) out = out.concat([{ decl: used.id, idx: i }])
+            }
+        }
+        for (const c of e.kids) { out = out.concat(seedKeysIn(t, c)) }
+        return out
+    }
+
+    fn useDeclOf(f: ElemFact | not) -> Sym | not {
+        return match f {
+            .MUse(decl: d) :> d
+            .MStar(decl: d) :> not
+            .MInline(v: v) :> not
+            .MStateView(v: v) :> not
+            .MHtml :> not
+            .MEach(bind: b) :> not
+            .MSlot :> not
+            .MErrors(of: x) :> not
+            not :> not
+        }
+    }
+
+    fn constructIdx(k: AttrKind | not) -> int {
+        return match k {
+            .AConstruct(field: i) :> i
+            .AStatic :> -1
+            .ABound :> -1
+            .AOn(event: ev) :> -1
+            .AIf :> -1
+            .AAs :> -1
+            .AEachIn :> -1
+            .AEachKey :> -1
+            .AEachAs :> -1
+            .ABind(kind: b) :> -1
+            not :> -1
+        }
     }
 
     // A use of declaration `decl` (`<decl …>kids</>`) written in `owner`'s
@@ -9947,6 +10356,7 @@ ${
             .MHtml :> []
             .MEach(bind: b) :> []
             .MSlot :> []
+            .MErrors(of: x) :> []
             not :> []
         }
     }
@@ -10023,6 +10433,7 @@ ${
             .MUse(decl: d) :> false
             .MEach(bind: b) :> false
             .MSlot :> false
+            .MErrors(of: x) :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
             .MStar(decl: d) :> false
@@ -10090,6 +10501,7 @@ ${
             .MUse(decl: d) :> nodesCarry(intoDecl(cx, d), declRendersOnce(cx, d))
             .MStateView(v: v) :> nodesCarry(cx, stateArmNodes(v))
             .MSlot :> slotCarries(cx)
+            .MErrors(of: x) :> false
             .MHtml :> false
             .MEach(bind: b) :> false
             not :> false

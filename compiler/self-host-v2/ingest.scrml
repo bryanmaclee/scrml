@@ -1054,6 +1054,7 @@ ${
             .Host(call: x) :> false
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
+            .Validity(of: x) :> false
         }
     }
 
@@ -1139,7 +1140,7 @@ ${
     fn mkField(sym: Sym, ty: Type, init: Expr, mode: FieldMode, grants: GrantSet, cap: Sym | not) -> Field {
         return {
             sym: sym, ty: ty, init: init, mode: mode, role: FieldRole.Child, grants: grants,
-            graph: not, exported: false, wcap: cap,
+            graph: not, exported: false, wcap: cap, vals: [],
         }
     }
 
@@ -1313,6 +1314,7 @@ ${
             .Host(call: x) :> "Expr.Host"
             .Lambda(params: x) :> "Expr.Lambda"
             .SeqCall(op: x) :> "Expr.SeqCall"
+            .Validity(of: x) :> "Expr.Validity"
         }
     }
 

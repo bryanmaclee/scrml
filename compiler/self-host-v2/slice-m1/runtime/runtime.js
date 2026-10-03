@@ -493,9 +493,18 @@ export const devtools = {
   key: (inst, field) => `d${inst.decl.id}.i${inst.id}.f${field}`,
 };
 
-/** A declaration descriptor: its name and field names (for snapshots and devtools). */
-export function declare(name, fields) {
-  return { id: nextDeclId++, name, fields: Object.freeze(fields), nextId: 1, shared: null };
+/**
+ * A declaration descriptor: its name and field names (for snapshots and
+ * devtools). `opts.checks[i]` lists field i's validators (§55.1, built with
+ * `check.*`); `opts.topLevel` says the fields are top-level values (the
+ * program's cells), each with its own `submitted` (§55.5.1 rule 6) — a user
+ * declaration's fields share their instance's (§55.7).
+ */
+export function declare(name, fields, opts = {}) {
+  return {
+    id: nextDeclId++, name, fields: Object.freeze(fields), nextId: 1, shared: null,
+    checks: opts.checks ?? [], topLevel: opts.topLevel === true,
+  };
 }
 
 /** An instance record (§5.1): an identity holding one signal per field. */
@@ -512,6 +521,11 @@ export class Instance {
     // use-site value's thunk, else the declared default's.
     this.inits = [];
     this.scope = scope;
+    // The validity surface (§55), created on first use: one record per field
+    // (`validity`), the compound (`compound`) and the compound's `submitted`.
+    this.validity = [];
+    this.compound = null;
+    this.submittedCell = null;
   }
 }
 
@@ -580,6 +594,226 @@ export function bindHandle(handle, inst) {
 /** An attribute declared with no default, reached with no use-site value (⚑ O33 — not ruled). */
 export function noDefault(what) {
   throw new Error(`${what} has no default and no use-site value (SPEC §66.3 O33 is OPEN)`);
+}
+
+// ---------------------------------------------------------------------------
+// The validity surface (SPEC §55.5–§55.8, §55.12, §55.13).
+//
+// A field's surface is a RECORD created on first use (a read, a bind, a
+// gate): `errors` is a Derived over the field's value — recomputed when the
+// value changes, never on read (§55.2 "reactive recompute") — and `touched`
+// is a Cell only the runtime writes (first `bind:` change or first focus-out,
+// §55.7; a gate's touch, §55.17.3 step 1; cleared by a reset, §55.13).
+// `submitted` belongs to a top-level value itself (§55.5.1 rule 6) or, for a
+// field of a user declaration, to its instance — the compound (§55.7). No
+// program can write any of them: Core has no write capability for a surface
+// (E-SYNTHESIZED-WRITE is a compile-time error), and these setters are not
+// reachable from compiled code except through the gate, a bind and a reset.
+//
+// The validators (§55.1) a field carries arrive as `check.*` descriptors,
+// in declaration order. An error is a ValidationError tag (§55.9) in the
+// bootstrap's enum layout: a nullary variant is its tag string ("Required"),
+// a variant with fields is `{ tag, ...fields }`.
+// ---------------------------------------------------------------------------
+
+const absent = (v) => v === null || v === undefined;
+
+function lengthHolds(len, op, n) {
+  switch (op) {
+    case ">=": return len >= n;
+    case ">": return len > n;
+    case "<=": return len <= n;
+    case "<": return len < n;
+    case "==": return len === n;
+    default: throw new Error(`length(${op} ${n}): unknown comparison`);
+  }
+}
+
+/**
+ * The validators the bootstrap evaluates (§55.1). Each `test(value)` returns
+ * the ValidationError tag of a failure, or null. `req` short-circuits
+ * (§55.12): when it fails, the field reports `.Required` alone. A value that
+ * is absent (`not`) fails only `req`; the other predicates are about a
+ * length / a number / a string the absent value does not have (agent
+ * reading — §55.12 states the short-circuit only for `req` / `is some`).
+ */
+export const check = {
+  req: () => ({ shortCircuit: true, test: (v) => (absent(v) || v === "" ? "Required" : null) }),
+  length: (op, n) => ({
+    test: (v) => (absent(v) || lengthHolds(v.length, op, n) ? null : { tag: "LengthFailed", predicate: `(${op}${n})` }),
+  }),
+  min: (n) => ({ test: (v) => (absent(v) || v >= n ? null : { tag: "MinFailed", threshold: n }) }),
+  max: (n) => ({ test: (v) => (absent(v) || v <= n ? null : { tag: "MaxFailed", threshold: n }) }),
+  pattern: (source) => {
+    const re = new RegExp(source);
+    return { test: (v) => (absent(v) || re.test(v) ? null : { tag: "PatternMismatch", re: source }) };
+  },
+};
+
+/** Every failing validator's error, in declaration order; `req` short-circuits (§55.12). */
+function runChecks(checks, v) {
+  const out = [];
+  for (const c of checks) {
+    const err = c.test(v);
+    if (err === null) continue;
+    if (c.shortCircuit) return [err];
+    out.push(err);
+  }
+  return out;
+}
+
+// §55.10 Level 3 — the shipped English defaults (impl#1's wording, the same
+// catalogue `scrml:data` ships). Levels 1 / 2 are not in the bootstrap (a
+// Level-1 message is refused at compile time).
+function messageFor(err, field) {
+  const tag = typeof err === "string" ? err : err.tag;
+  switch (tag) {
+    case "Required": return `${field} is required.`;
+    case "LengthFailed": return `${field} length must satisfy ${err.predicate.slice(1, -1)}.`;
+    case "PatternMismatch": return `${field} doesn't match the expected format.`;
+    case "MinFailed": return `${field} must be at least ${err.threshold}.`;
+    case "MaxFailed": return `${field} must be at most ${err.threshold}.`;
+    default: return `${field} is invalid.`;
+  }
+}
+
+/** The compound's `submitted` (§55.7): one per instance of a user declaration. */
+function compoundSubmitted(inst) {
+  if (inst.submittedCell === null) inst.submittedCell = new Cell(false);
+  return inst.submittedCell;
+}
+
+/**
+ * Field `i`'s validity record (§55.6; §55.5.1 for a top-level value).
+ * `validated` — the field carries validators (only those gate a form,
+ * §55.17.3); a field with none reads trivially valid (Edge B).
+ */
+export function validity(inst, i) {
+  const have = inst.validity[i];
+  if (have) return have;
+  const checks = inst.decl.checks[i] ?? [];
+  const value = inst.fields[i];
+  const name = inst.decl.fields[i];
+  const errors = checks.length === 0 ? null : new Derived(inst.scope, () => runChecks(checks, value.get()));
+  const touched = new Cell(false);
+  const submitted = inst.decl.topLevel ? new Cell(false) : compoundSubmitted(inst);
+  const rec = {
+    name,
+    validated: checks.length > 0,
+    errors: () => (errors === null ? [] : errors.get()),
+    isValid: () => (errors === null ? true : errors.get().length === 0),
+    touched: () => touched.get(),
+    submitted: () => submitted.get(),
+    messages: () => rec.errors().map((e) => messageFor(e, name)),
+    touch() { touched.set(true); },
+    submit() { submitted.set(true); },
+    // §55.13: `reset(@x)` reverts `touched`; a top-level value's `submitted` too.
+    reset() {
+      batch(() => {
+        touched.set(false);
+        if (inst.decl.topLevel) submitted.set(false);
+      });
+    },
+  };
+  inst.validity[i] = rec;
+  return rec;
+}
+
+/**
+ * The compound surface of an instance of a user declaration (§55.5): valid
+ * when every field is; `errors` / `touched` map field names to the per-field
+ * values; `submitted` is the instance's own.
+ */
+export function compound(inst) {
+  if (inst.compound !== null) return inst.compound;
+  const recs = () => inst.decl.fields.map((_, i) => validity(inst, i));
+  const submitted = compoundSubmitted(inst);
+  inst.compound = {
+    isValid: () => recs().every((r) => r.isValid()),
+    errors: () => Object.fromEntries(recs().map((r) => [r.name, r.errors()])),
+    touched: () => Object.fromEntries(recs().map((r) => [r.name, r.touched()])),
+    submitted: () => submitted.get(),
+    messages: () => recs().flatMap((r) => r.messages()),
+  };
+  return inst.compound;
+}
+
+/**
+ * `<errors of=…/>` (§55.8): one `<p class="scrml-error">` per message — the
+ * first only unless `all` — and NO DOM when there are none (not a hidden
+ * element). Replaces the marker comment; re-renders when the errors change.
+ */
+export function errors(scope, marker, messages, all) {
+  const end = document.createComment("/errors");
+  marker.parentNode.insertBefore(end, marker.nextSibling);
+  let shown = [];
+  effect(scope, () => {
+    const ms = messages();
+    const want = all ? ms : ms.slice(0, 1);
+    untrack(() => {
+      for (const p of shown) p.remove();
+      shown = want.map((m) => {
+        const p = document.createElement("p");
+        p.className = "scrml-error";
+        p.textContent = m;
+        end.parentNode.insertBefore(p, end);
+        return p;
+      });
+    });
+  });
+  scope.own(() => { for (const p of shown) p.remove(); end.remove(); });
+}
+
+// The validity record a bound control writes to (set by `bind`): the gate
+// finds a form's bound validated values through its live controls.
+const boundSurface = new WeakMap();
+
+/**
+ * The form's surface listener (§55.7) and, when a bound value carries
+ * validators, the compiler submit gate (§55.17.3). Registered BEFORE any
+ * author `submit` listener of the form, so it runs first and synchronously.
+ *
+ * The bound values are the union of `named()` — the records of the fields the
+ * form's composed subtree names statically, mounted or not (§55.17.3: the
+ * values bound "inside the form (the §55.17.2 rule 1 composed subtree)") —
+ * and the records of the controls rendered inside the form, which is how an
+ * instance a use, an `<each>` row or a slot creates is reached.
+ *
+ * On each submit:
+ *   1. touch — `touched` on every bound VALIDATED value;
+ *   2. submitted — `submitted` on every bound value (a field's compound);
+ *   3. block if invalid — cancel the submission (no native navigation / POST)
+ *      and stop the event, so no author handler runs;
+ *   4. otherwise the event proceeds to the author's handler.
+ * A submitter carrying `formnovalidate` (§55.17.4) bypasses steps 1 and 3;
+ * step 2 still runs. `SubmitEvent.submitter` is null for `requestSubmit()`
+ * with no argument — that submit is gated.
+ */
+export function gate(scope, form, named) {
+  requireScope(scope, "a submit gate");
+  const h = (e) => batch(() => {
+    const recs = new Set(named());
+    for (const el of form.querySelectorAll("input, textarea, select")) {
+      const rec = boundSurface.get(el);
+      if (rec) recs.add(rec);
+    }
+    const bypass = e.submitter != null && e.submitter.hasAttribute("formnovalidate");
+    for (const r of recs) r.submit();
+    if (bypass) return;
+    let valid = true;
+    for (const r of recs) {
+      if (!r.validated) continue;
+      r.touch();
+      if (!r.isValid()) valid = false;
+    }
+    if (!valid) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }
+  });
+  form.addEventListener("submit", h);
+  stats.listeners++;
+  scope.own(() => { form.removeEventListener("submit", h); stats.listeners--; });
 }
 
 // ---------------------------------------------------------------------------
@@ -724,15 +958,27 @@ export function on(scope, el, event, handler) {
  * event hands the property's value to `write` — the compiled, contract-checked
  * write of that value to the same place. A write that lands the value the
  * element already shows changes nothing (no caret jump).
+ *
+ * `surface` (§55.7) — the validity record of the bound field, when it has
+ * one: the bind's change and the element's first focus-out mark it
+ * `touched`, and a gated form finds it through this element (§55.17.3).
  */
-export function bind(scope, el, prop, read, write) {
+export function bind(scope, el, prop, read, write, surface) {
   requireScope(scope, "a bind");
   effect(scope, () => {
     const v = read();
     const shown = prop === "checked" ? v === true : display(v);
     if (el[prop] !== shown) el[prop] = shown;
   });
-  on(scope, el, prop === "checked" ? "change" : "input", () => write(el[prop]));
+  on(scope, el, prop === "checked" ? "change" : "input", () => {
+    write(el[prop]);
+    if (surface) surface.touch();
+  });
+  if (surface) {
+    boundSurface.set(el, surface);
+    on(scope, el, "focusout", () => surface.touch());
+    scope.own(() => { if (boundSurface.get(el) === surface) boundSurface.delete(el); });
+  }
 }
 
 /**
