@@ -40,7 +40,26 @@ ${
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest } from "./analyze.scrml"
 
-    export type Lowered:struct = { core: CoreProgram, diags: Diag[] }
+    // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
+    // reported an ERROR (an `E-` code — §34: severity is "carried by the `E-`
+    // prefix per the §34 diagnostic-stream convention"; `W-` notes in `diags`
+    // are non-fatal and do not close it). A Core is the only thing the printer
+    // takes, so a compile with an error has NO artifact to print — by
+    // construction, for every code, not a per-code refusal list. Before s451
+    // `lower` returned a Core unconditionally and the printer emitted a
+    // runnable program over a tree analysis had rejected
+    // (g-bootstrap-defer-scope-001-and-runs-anyway: `defer` reported as
+    // E-SCOPE-001, then run in place).
+    export type Lowered:struct = { core: CoreProgram | not, diags: Diag[] }
+
+    // Does the compile hold an error — an `E-` code from the analysis, or any
+    // parse diagnostic (the parser reports only `E-PARSE-*`-family errors; a
+    // file carries their spans in `errs`, the codes go to the driver)?
+    export fn hasError(tp: TypedProgram) -> boolean {
+        for (const d of tp.diags) { if (d.code.startsWith("E-")) return true }
+        for (const f of tp.files) { if (f.errs.length > 0) return true }
+        return false
+    }
 
     // The lowering context: the tables, the file (for diagnostics), and — while
     // lowering a field initializer for `reset` (L4) — the instance being reset,
@@ -1367,6 +1386,7 @@ ${
     }
 
     export fn lower(tp: TypedProgram) -> Lowered {
+        if (hasError(tp)) return { core: not, diags: tp.diags }   // s451: the diagnostics gate
         const t: Tables = tp.tables
         const ss: DeclSyntax[] = declSyntaxes(tp.files)
         let decls: Decl[] = []

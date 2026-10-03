@@ -37,8 +37,9 @@ describe("(1) a scrml structural element is never an HTML element", () => {
   test("`<request>` as the PA's survey wrote it: refused, and nothing of it reaches Core", () => {
     const r = run(inMain(`<request id="users" url="/api/users"/>`));
     expect(r.diags.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    const main = r.core.decls.find((d) => d.sym.id === r.core.program.id).renders[0];
-    expect(JSON.stringify(main)).not.toContain("request");
+    // s451: a compile with an error lowers to NO Core (the diagnostics gate) — so nothing of it
+    // can reach Core, or the printer, at all.
+    expect(r.core == null).toBe(true);
   });
   // r2 F2 (S239 review): a USER declaration of that name wins over the refusal
   // list, exactly as a declaration wins over an HTML element of the same name.

@@ -405,6 +405,14 @@ export async function classifyCase(boot: Bootstrap, c: LoadedCase): Promise<Case
   }
 
   // The client runtime half — execute the bootstrap's own artifact.
+  // s451: a compile with an error has no Core (lower.scrml's diagnostics gate), so no artifact
+  // exists to execute — the runtime half cannot hold.
+  if (fe.core == null) {
+    return v("FAIL", codeFailures.length ? "codes+runtime" : "runtime", {
+      ...base,
+      failures: [...codeFailures, `runtime: no artifact — the compile reported an error (${emitted.filter((c) => c.startsWith("E-")).join(", ")})`],
+    });
+  }
   const ill = boot.mods.check.checkCore(fe.core) as string[];
   if (ill.length > 0) {
     return v("FAIL", codeFailures.length ? "codes+runtime" : "runtime", {
