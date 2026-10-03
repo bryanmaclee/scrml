@@ -1596,6 +1596,9 @@ ${
     // exist — §12.3 obliges a route handler and a client fetch call for EVERY
     // server-escalated function. So the whole program is refused, naming the
     // slice that lifts it, rather than printed incomplete.
+    // the SQL sigil for messages, in two pieces (parse.scrml sqlSigil)
+    fn sqlSigil() -> string { return "?" + "{" }
+
     fn serverRefusal(p: CoreProgram) -> string[] {
         let out: string[] = []
         if (p.server.length > 0) {
@@ -1604,7 +1607,7 @@ ${
             out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: this program has server functions (" + names.join(", ") + ") — the bootstrap printer emits only the client artifact; the server artifact (route handlers, the client fetch stubs, the §57 codec at both ends) arrives with unit U1c"])
         }
         if (holdsQuery(p) && p.server.length == 0) {
-            out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: this program holds a `?{}` query outside a server function — the client printer has no SQL (unit U1c)"])
+            out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: this program holds a `" + sqlSigil() + "}` query outside a server function — the client printer has no SQL (unit U1c)"])
         }
         return out
     }

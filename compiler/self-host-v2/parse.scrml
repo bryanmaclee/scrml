@@ -370,6 +370,13 @@ ${
     // ignored handler would drop the error it exists to handle. Each is parsed
     // past so the rest of the file still reads.
     // =========================================================================
+    // The SQL sigil, for messages. Spelled in two pieces ON PURPOSE: impl#1
+    // (which compiles this file) pre-scans every expression for the sigil —
+    // string literals included — and replaces the "query" it finds with its
+    // own SQL placeholder (expression-parser.ts replaceSqlBlockPlaceholder),
+    // so a message holding the sigil literally comes out mangled.
+    fn sqlSigil() -> string { return "?" + "{" }
+
     fn ueReason() -> string { return "it arrives with unit Ue (the error model: `!` signatures, `fail`, `?`, `!{}`, and `match` on a failable result), which the bootstrap does not have yet" }
 
     // `!{` on the line of what precedes it (a `!` that starts a new line starts
@@ -486,7 +493,7 @@ ${
     }
 
     fn sql008(tp: TP, open: PTok) -> TP {
-        return diagAt(tp, "E-SQL-008", "this `?{` SQL block has no matching `}` — an unterminated SQL template, an unterminated backtick template, or an unmatched `${` inside the SQL body (§44.8); close the template with a backtick and the block with `}`", open)
+        return diagAt(tp, "E-SQL-008", "this `" + sqlSigil() + "` SQL block has no matching `}` — an unterminated SQL template, an unterminated backtick template, or an unmatched `${` inside the SQL body (§44.8); close the template with a backtick and the block with `}`", open)
     }
 
     fn parseSql(tp: TP) -> RExpr {
@@ -513,7 +520,7 @@ ${
         if (atEnd(t)) return mkE(sql008(t, open), start, AExprK.Recovered)
         if (!(cur(t).cls == TC.Punct && cur(t).text == "}")) {
             const extra: PTok = cur(t)
-            const d: TP = diagAt(t, "E-SQL-003", "the content of `?{ … }` must be ONE backtick SQL template — found `" + extra.text + "` after it (§8.1: `?{` `…` `}`). The SQL text is fixed at compile time; bind values with `${…}` inside the template (§8.2), and reuse SQL by extracting a function (§8.4.1)", extra)
+            const d: TP = diagAt(t, "E-SQL-003", "the content of `" + sqlSigil() + " … }` must be ONE backtick SQL template — found `" + extra.text + "` after it (§8.1: `" + sqlSigil() + "` `…` `}`). The SQL text is fixed at compile time; bind values with `${…}` inside the template (§8.2), and reuse SQL by extracting a function (§8.4.1)", extra)
             const past: RSkip = skipToSqlClose(d, open)
             if (!past.closed) return mkE(past.tp, start, AExprK.Recovered)
             const rc: RSqlChain = parseSqlChain(past.tp, emptySqlChain())
@@ -522,7 +529,7 @@ ${
         t = adv(t)
         const rc2: RSqlChain = parseSqlChain(t, emptySqlChain())
         if (onlyInterp(chunks, params)) {
-            const d2: TP = diagAt(rc2.tp, "E-SQL-003", "this SQL template has no literal SQL text — its whole content is `${…}`, a runtime expression (§8.1, §8.4: the `?{}` body SHALL remain a literal string at compile time, so every value is a bound parameter, never SQL text). Write the SQL inside the backticks and bind values with `${…}`; reuse SQL by extracting a function (§8.4.1)", open)
+            const d2: TP = diagAt(rc2.tp, "E-SQL-003", "this SQL template has no literal SQL text — its whole content is `${…}`, a runtime expression (§8.1, §8.4: the `" + sqlSigil() + "}` body SHALL remain a literal string at compile time, so every value is a bound parameter, never SQL text). Write the SQL inside the backticks and bind values with `${…}`; reuse SQL by extracting a function (§8.4.1)", open)
             return mkE(d2, start, AExprK.Recovered)
         }
         const q: ASql = { chunks: chunks, params: params, mode: rc2.c.mode, nobatch: rc2.c.nobatch, handled: false }
@@ -544,7 +551,7 @@ ${
         const found: PTok = cur(t0)
         const past: RSkip = skipToSqlClose(t0, open)
         if (!past.closed) return mkE(past.tp, start, AExprK.Recovered)
-        const d: TP = diagAt(past.tp, "E-SQL-003", "the content of `?{ … }` must be a backtick SQL template (`?{`SELECT …`}`) — found `" + found.text + "` (§8.1). The SQL text is fixed at compile time; a runtime value is bound with `${…}` inside the template (§8.2), never assembled into the SQL", found)
+        const d: TP = diagAt(past.tp, "E-SQL-003", "the content of `" + sqlSigil() + " … }` must be a backtick SQL template (`" + sqlSigil() + "`SELECT …`}`) — found `" + found.text + "` (§8.1). The SQL text is fixed at compile time; a runtime value is bound with `${…}` inside the template (§8.2), never assembled into the SQL", found)
         const rc: RSqlChain = parseSqlChain(d, emptySqlChain())
         return mkE(rc.tp, start, AExprK.Recovered)
     }
@@ -588,13 +595,13 @@ ${
                     && paren.cls == TC.Punct && paren.text == "(" && paren.line == name.line) {
                 const args: RExprs = parseList(adv(adv(adv(t))), ")")
                 t = args.tp
-                if (args.es.length > 0) t = diagAt(t, "E-PARSE-SQL-CHAIN", "`." + name.v + "()` on a `?{}` takes no arguments (§8.3)", name)
+                if (args.es.length > 0) t = diagAt(t, "E-PARSE-SQL-CHAIN", "`." + name.v + "()` on a `" + sqlSigil() + "}` takes no arguments (§8.3)", name)
                 if (name.v == "prepare") {
-                    t = diagAt(t, "E-SQL-006", "`.prepare()` on a `?{}` is removed (§8.5.2, §44.3) — Bun.SQL manages prepared-statement caching itself; call `.all()`, `.get()` or `.run()` on the query directly", name)
+                    t = diagAt(t, "E-SQL-006", "`.prepare()` on a `" + sqlSigil() + "}` is removed (§8.5.2, §44.3) — Bun.SQL manages prepared-statement caching itself; call `.all()`, `.get()` or `.run()` on the query directly", name)
                 } else if (name.v == "nobatch") {
                     c = { mode: c.mode, terminated: c.terminated, nobatch: true }
                 } else {
-                    if (c.terminated) t = diagAt(t, "E-PARSE-SQL-CHAIN", "a `?{}` takes ONE of `.all()`, `.get()`, `.run()` (§8.3) — `." + name.v + "()` follows another", name)
+                    if (c.terminated) t = diagAt(t, "E-PARSE-SQL-CHAIN", "a `" + sqlSigil() + "}` takes ONE of `.all()`, `.get()`, `.run()` (§8.3) — `." + name.v + "()` follows another", name)
                     c = { mode: chainMode(name.v), terminated: true, nobatch: c.nobatch }
                 }
             } else {
@@ -747,7 +754,7 @@ ${
         // s451 (U1a): `match ?{…} { … }` — a match on a query's failable result
         // (§19.8.3 item 2) is refused until Ue (the error model)
         if (t.v == "match" && isSqlOpen(adv(tp))) {
-            const dm: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a `match` on a `?{}` query's result (§19.8.3) is not in the bootstrap — " + ueReason(), t)
+            const dm: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a `match` on a `" + sqlSigil() + "}` query's result (§19.8.3) is not in the bootstrap — " + ueReason(), t)
             const subj: RExpr = parsePostfix(adv(dm))
             return mkE(skipBraced(subj.tp), start, AExprK.Recovered)
         }

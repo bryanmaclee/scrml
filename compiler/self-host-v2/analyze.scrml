@@ -50,8 +50,9 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, FileAst, Diag, mkSpan } from "./ast.scrml"
+             AProgram, AItem, AItemK, FileAst, Diag, ASql, mkSpan } from "./ast.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
+    import { SqlFacts, sqlFacts } from "./sql.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -299,10 +300,21 @@ ${
     // lower makes each a Core ServerFn. `sqls`: one fact per `?{}` node (by
     // NodeId) — the database it runs on and what its SQL does (recorded once,
     // from the literal text — sql.scrml). `dbs`: the program's databases.
+    // `places`: every function's placement (§12.1/§12.2 — design §2's table:
+    // Ambient = no server trigger and no client access, emitted on every side
+    // that reaches it; Client; Server; Split = a server trigger + a reactive
+    // write, split across the boundary — refused until U1d).
     export type SqlInfo:struct = { nid: int, db: Sym, kind: SqlKind, reads: SqlTables, writes: SqlTables, columns: SqlColumns }
-    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[] }
+    export type PlaceK:enum = { Ambient, Client, Server, Split }
 
-    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [] } }
+    // The SQL sigil for messages, in two pieces: impl#1 (which compiles this
+    // file) rewrites a literal sigil inside a string literal into its own SQL
+    // placeholder (parse.scrml sqlSigil).
+    fn sqlSigil() -> string { return "?" + "{" }
+    export type PlaceFact:struct = { sym: int, name: string, place: PlaceK }
+    export type ServerFacts:struct = { servers: int[], sqls: SqlInfo[], dbs: Db[], places: PlaceFact[] }
+
+    export fn noServerFacts() -> ServerFacts { return { servers: [], sqls: [], dbs: [], places: [] } }
 
     export fn sqlInfo(t: Tables, nid: int) -> SqlInfo | not {
         for (const s of t.server.sqls) {
@@ -1162,7 +1174,7 @@ ${
             .Spread(e: x) :> exprReads(x)
             .Index(obj: o, idx: i) :> exprReads(o).concat(exprReads(i))
             .Lambda(params: ps2, body: b) :> exprReads(b)
-            .Sql(q: q) :> ["?{}"].concat(listReads(q.params))      // s451: a query reads (like a call)
+            .Sql(q: q) :> ["" + sqlSigil() + "}"].concat(listReads(q.params))      // s451: a query reads (like a call)
             .Name(name: n) :> []
             .Num(raw: r) :> []
             .Str(v: s) :> []
@@ -10910,6 +10922,913 @@ ${
     }
 
     // =========================================================================
+    // s451 (U1a) — ROUTE PLACEMENT, `?{}` AND THE DATABASES (placePass).
+    // Design authority: scrml-support/docs/deep-dives/bootstrap-u1-server-
+    // boundary-design-2026-10-03.md §1, §2, §5 — superseded where the S451
+    // rulings say so (user-voice-scrml.md §S451; normative in SPEC). The
+    // governing sentences, quoted (docs/changes/s451-boot-u1a/progress.md has
+    // the full list and every reading this pass takes):
+    //  §12.1 "The compiler SHALL decide where each function executes. The
+    //        default is client-side execution."
+    //  §12.2 "SHALL escalate a function to a server route if ANY of": T1 "The
+    //        function accesses a resource not accessible from the client" (a
+    //        `?{}` — §8.5.4 "any function that contains a `?{}` block is
+    //        server-escalated"); T4 "an explicit `server` annotation (§52.10).
+    //        DEPRECATED" (T2 protected fields and T3 server-only stdlib imports
+    //        have no source form in the bootstrap — `protect=` / stdlib imports
+    //        are not in it; T5 is emission — design §2 "Trigger 5 is emission,
+    //        not inference" — and T6/T7/T8 have no bootstrap surface).
+    //  §52.10 "During the deprecation window, the parser SHALL accept `server
+    //        function` declarations and emit `W-DEPRECATED-SERVER-MODIFIER`."
+    //  §19.9.5 "A function whose body mixes a server-trigger statement with a
+    //        reactive-assignment statement is split across the client/server
+    //        boundary" — the SPLIT (CPS); §6.6.9 "A function that also performs
+    //        a reactive assignment (`@cell = …`) is CPS-split — a CLIENT
+    //        function with an embedded server round-trip." Detected here,
+    //        REFUSED until unit U1d builds the body split.
+    //  §6.6.9 "A WHOLLY server-escalated function body that READS a client
+    //        cell … SHALL be a compile error, E-REACTIVE-003."
+    //  §34 E-RI-002 "Server-escalated function mutates `@` reactive variable"
+    //        — a wholly-server body that writes a cell (only the deprecated
+    //        `server` modifier makes a writing body wholly server: without it
+    //        the write splits the body, §19.9.5).
+    //  §12.4 (S451 R2) "A server-escalated function whose static call graph
+    //        reaches such an access through a callee, directly or
+    //        transitively, SHALL be E-ROUTE-002, and the message SHALL name
+    //        the chain down to the function that touches the cell and the
+    //        cell itself."
+    //  §12.4 (S451 R3) "A function that the compiler cannot fully analyze for
+    //        route placement SHALL be a compile error (E-ROUTE-001)."
+    //  §12.4 E-ROUTE-005: "A single function whose own body accesses BOTH a
+    //        server-only resource … AND a client-only global (a DOM global
+    //        with no server-side referent) … The DOM globals recognized … are
+    //        … (`document`, `window`); an access rooted at a name bound by an
+    //        in-scope local, parameter, or import is a domain object".
+    //  §12.5.3 E-ROUTE-003 / E-ROUTE-004: non-serializable return / parameter
+    //        types of a server function (judged against the §57 codec).
+    //  §13.7 (S451 R1) "A value position … SHALL NOT contain an expression
+    //        whose value arrives only after the program waits … E-VALUE-
+    //        SERVER-CALL": a server call, a client function that reaches one,
+    //        a `?{}` written in the position (a Promise-returning stdlib call
+    //        has no source form in the bootstrap).
+    //  §19.8.3 (S451 R11) "Outside a `!` function it is treated exactly like a
+    //        call to a `!` function whose error type is `SqlError` … an
+    //        unhandled `?{}` SHALL be a compile error, E-ERROR-002."
+    //  §8.1.1 / §44.2 "If no ancestor `<program>` has a `db=` attribute, the
+    //        `?{}` block SHALL be a compile error (E-SQL-004)"; "An
+    //        unrecognized prefix SHALL be a compile error (E-SQL-005)".
+    // Placement is decided over binder facts (Syms) — never names, never text
+    // (§12.4 "SHALL NOT classify a function based on … string-literal
+    // contents" holds by construction).
+    // =========================================================================
+    // A `?{}` site: the node, its query, where.
+    type SqlSite:struct = { nid: int, span: ASpan, q: ASql }
+    // A client-state access in a body: what (as the author spells it), where.
+    type CellUse:struct = { what: string, span: ASpan }
+    // One function's direct facts (its own body only).
+    type FnFacts:struct = {
+        sym: int, name: string, file: string, span: ASpan, nid: int,
+        modifier: boolean, failable: boolean,
+        sqls: SqlSite[], reads: CellUse[], doms: CellUse[], scan: BodyScan,
+    }
+    // A chain from a function down to a site (display labels, outermost first).
+    type Reach:struct = { chain: string[], what: string }
+    type PlaceCx:struct = { t: Tables, g: Globals }
+    // `doms`: where an E-ROUTE-005 function names a DOM global — the binder's
+    // E-SCOPE-001 for that name is replaced by the placement error (one report).
+    type RPlaced:struct = { facts: ServerFacts, doms: int[], st: AS }
+
+    // ---- the direct facts ----------------------------------------------------
+    // Every `?{}` in a block / expression, at any depth (a lambda included).
+    fn sqlsInBlock(b: ABlock) -> SqlSite[] {
+        let out: SqlSite[] = []
+        for (const s of b.stmts) { out = out.concat(sqlsInStmt(s)) }
+        return out
+    }
+
+    fn sqlsInStmt(s: AStmt) -> SqlSite[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> sqlsInExpr(e)
+            .Local(name: n, init: i) :> sqlsInExpr(i)
+            .Return(e: e) :> sqlsInMaybe(e)
+            .If(cond: c, thenB: tb, elseB: eb) :> sqlsInExpr(c).concat(sqlsInBlock(tb)).concat(sqlsInMaybeBlock(eb))
+            .Given(name: n, subject: x, body: b) :> sqlsInExpr(x).concat(sqlsInBlock(b))
+            .EffectStmt(w: w) :> sqlsInBlock(w.body)
+            .Defer(body: b) :> sqlsInBlock(b)
+        }
+    }
+
+    fn sqlsInMaybe(e: AExpr | not) -> SqlSite[] {
+        if (e is not) return []
+        return sqlsInExpr(e)
+    }
+
+    fn sqlsInMaybeBlock(b: ABlock | not) -> SqlSite[] {
+        if (b is not) return []
+        return sqlsInBlock(b)
+    }
+
+    fn sqlsInExpr(e: AExpr) -> SqlSite[] {
+        let out: SqlSite[] = []
+        const q: ASql | not = sqlOfK(e.k)
+        if (q is some) out = [{ nid: e.nid, span: e.span, q: q }]
+        for (const x of exprKids(e)) { out = out.concat(sqlsInExpr(x)) }
+        return out
+    }
+
+    fn sqlsInValue(v: AAttrValue) -> SqlSite[] {
+        return match v {
+            .Bare(e: e) :> sqlsInExpr(e)
+            .Paren(e: e) :> sqlsInExpr(e)
+            .Braced(b: b) :> sqlsInBlock(b)
+            .Quoted(v: s) :> []
+            .NoValue :> []
+        }
+    }
+
+    fn sqlOfK(k: AExprK) -> ASql | not {
+        return match k {
+            .Sql(q: q) :> q
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    // Every READ of client state in a body (a cell, an instance, a validity
+    // surface) — the binder's name facts. A write's TARGET is not a read (the
+    // write is BodyScan's), and neither is the receiver of an edit call.
+    fn readsInBlock(t: Tables, b: ABlock) -> CellUse[] {
+        let out: CellUse[] = []
+        for (const s of b.stmts) { out = out.concat(readsInStmt(t, s)) }
+        return out
+    }
+
+    fn readsInStmt(t: Tables, s: AStmt) -> CellUse[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> readsInExpr(t, e)
+            .Local(name: n, init: i) :> readsInExpr(t, i)
+            .Return(e: e) :> readsInMaybe(t, e)
+            .If(cond: c, thenB: tb, elseB: eb) :> readsInExpr(t, c).concat(readsInBlock(t, tb)).concat(readsInMaybeBlock(t, eb))
+            .Given(name: n, subject: x, body: b) :> readsInExpr(t, x).concat(readsInBlock(t, b))
+            .EffectStmt(w: w) :> []
+            .Defer(body: b) :> readsInBlock(t, b)
+        }
+    }
+
+    fn readsInMaybe(t: Tables, e: AExpr | not) -> CellUse[] {
+        if (e is not) return []
+        return readsInExpr(t, e)
+    }
+
+    fn readsInMaybeBlock(t: Tables, b: ABlock | not) -> CellUse[] {
+        if (b is not) return []
+        return readsInBlock(t, b)
+    }
+
+    fn readsInExpr(t: Tables, e: AExpr) -> CellUse[] {
+        // an assignment: only its value is read; an edit / reset call: its arguments
+        const v: AExpr | not = assignedValue(e)
+        if (v is some) return readsInExpr(t, v)
+        if (effectFact(t.effects, e.nid) is some) {
+            let acc: CellUse[] = []
+            for (const x of exprKids(e).slice(1)) { acc = acc.concat(readsInExpr(t, x)) }
+            return acc
+        }
+        const what: string = clientRead(t, nameFact(t.names, e.nid))
+        if (what != "") return [{ what: what, span: e.span }]
+        let out: CellUse[] = []
+        for (const x of exprKids(e)) { out = out.concat(readsInExpr(t, x)) }
+        return out
+    }
+
+    // The client state a name fact reads ("" — none), as the author spells it.
+    fn clientRead(t: Tables, f: NameFact | not) -> string {
+        return match f {
+            .NField(decl: d, inst: i, idx: x) :> fieldUseLabel(t, d, x)
+            .NInst(decl: d) :> "@" + d.hint
+            .NSurface(of: v) :> "the validity surface of @" + validityDecl(v).hint
+            .NLocal(sym: s) :> ""
+            .NStruct(owner: o) :> ""
+            .NFn(sym: s) :> ""
+            .NLength :> ""
+            not :> ""
+        }
+    }
+
+    fn fieldUseLabel(t: Tables, d: Sym, idx: int) -> string {
+        const di: DeclInfo | not = declInfo(t, d)
+        if (di is not || idx < 0 || idx >= di.fields.length) return "@" + d.hint
+        const f: FieldInfo = di.fields[idx]
+        if (di.kind == DeclKind.Program) return "@" + f.sym.hint
+        return "@" + d.hint + "." + f.sym.hint
+    }
+
+    // §12.4: a DOM global — `document` / `window` named with NO binding (a
+    // local, parameter or import of that name is a domain object, and has a
+    // name fact). The bootstrap has no DOM API; the binder reports the name
+    // (E-SCOPE-001) — this records it as a client-only access for placement.
+    fn domsInBlock(t: Tables, b: ABlock) -> CellUse[] {
+        let out: CellUse[] = []
+        for (const s of b.stmts) { out = out.concat(domsInStmt(t, s)) }
+        return out
+    }
+
+    fn domsInStmt(t: Tables, s: AStmt) -> CellUse[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> domsInExpr(t, e)
+            .Local(name: n, init: i) :> domsInExpr(t, i)
+            .Return(e: e) :> domsInMaybe(t, e)
+            .If(cond: c, thenB: tb, elseB: eb) :> domsInExpr(t, c).concat(domsInBlock(t, tb)).concat(domsInMaybeBlock(t, eb))
+            .Given(name: n, subject: x, body: b) :> domsInExpr(t, x).concat(domsInBlock(t, b))
+            .EffectStmt(w: w) :> []
+            .Defer(body: b) :> domsInBlock(t, b)
+        }
+    }
+
+    fn domsInMaybe(t: Tables, e: AExpr | not) -> CellUse[] {
+        if (e is not) return []
+        return domsInExpr(t, e)
+    }
+
+    fn domsInMaybeBlock(t: Tables, b: ABlock | not) -> CellUse[] {
+        if (b is not) return []
+        return domsInBlock(t, b)
+    }
+
+    fn domsInExpr(t: Tables, e: AExpr) -> CellUse[] {
+        const n: string = exprName(e)
+        if ((n == "document" || n == "window") && nameFact(t.names, e.nid) is not && bindFact(t.binds, e.nid) is not) {
+            return [{ what: "the DOM global `" + n + "`", span: e.span }]
+        }
+        let out: CellUse[] = []
+        for (const x of exprKids(e)) { out = out.concat(domsInExpr(t, x)) }
+        return out
+    }
+
+    fn fnFacts(cx: PlaceCx, fs: FnSrc) -> FnFacts {
+        const scan: BodyScan = scanBlock({ t: cx.t, file: fs.info.file }, fs.f.body, emptyScan())
+        return { sym: fs.info.sym.id, name: fs.info.name, file: fs.info.file, span: fs.info.span, nid: fs.info.nid,
+                 modifier: fs.f.server, failable: fs.f.failable,
+                 sqls: sqlsInBlock(fs.f.body), reads: readsInBlock(cx.t, fs.f.body), doms: domsInBlock(cx.t, fs.f.body), scan: scan }
+    }
+
+    // ---- placement -------------------------------------------------------------
+    fn serverTriggered(f: FnFacts) -> boolean { return f.sqls.length > 0 || f.modifier }
+    fn clientDirect(f: FnFacts) -> boolean { return f.reads.length > 0 || f.scan.writes.length > 0 || f.doms.length > 0 }
+
+    // §12.2 + §19.9.5 / §6.6.9, by the function's OWN body. Calling a server
+    // function does not move the caller (design §2: "Calling a Server fn does
+    // NOT change the caller's placement … it makes the caller async-colored");
+    // reaching a client-only function DOES pin it to the client (§12.4: a
+    // client-only function is "any function determined by route analysis to
+    // execute exclusively on the client").
+    fn directPlace(f: FnFacts) -> PlaceK {
+        if (serverTriggered(f)) {
+            // §19.9.5: a server trigger + a reactive assignment splits the body —
+            // unless the deprecated `server` modifier declares the WHOLE body
+            // server (§52.10: "historically forced server-side execution"); a
+            // DOM access makes it unplaceable (E-ROUTE-005, judged first)
+            if (f.sqls.length > 0 && f.scan.writes.length > 0 && !f.modifier && f.doms.length == 0) return PlaceK.Split
+            return PlaceK.Server
+        }
+        if (clientDirect(f)) return PlaceK.Client
+        return PlaceK.Ambient
+    }
+
+    fn factsOf(all: FnFacts[], sym: int) -> FnFacts | not {
+        for (const f of all) {
+            if (f.sym == sym) return f
+        }
+        return not
+    }
+
+    // A symbol no function owns (a declaration a construction reference names)
+    // has no placement of its own: Ambient.
+    fn placeOf(ps: PlaceFact[], sym: int) -> PlaceK {
+        for (const p of ps) {
+            if (p.sym == sym) return p.place
+        }
+        return PlaceK.Ambient
+    }
+
+    // The function references (calls and values) a body makes — the scan's
+    // refs that name a scrml FUNCTION (a construction / formula reference
+    // names a declaration or a field: that is a cell read, recorded already).
+    fn fnRefs(all: FnFacts[], f: FnFacts) -> FnRef[] {
+        let out: FnRef[] = []
+        for (const r of f.scan.refs) {
+            if (factsOf(all, r.sym) is some) out = out.concat([r])
+        }
+        return out
+    }
+
+    // CLIENT REACH (a fixed point): the first chain from a NON-server function
+    // down to its client-state access, through non-server callees. A server
+    // callee stops the walk — it is judged on its own (server → server is a
+    // call in place, §13.4).
+    type ReachOf:struct = { sym: int, r: Reach | not }
+
+    fn clientReach(all: FnFacts[], ps: PlaceFact[]) -> ReachOf[] {
+        let out: ReachOf[] = []
+        for (const f of all) {
+            let r: Reach | not = not
+            const p: PlaceK = placeOf(ps, f.sym)
+            if (p != PlaceK.Server) r = directClient(f)
+            out = out.concat([{ sym: f.sym, r: r }])
+        }
+        let changed = true
+        let pass = 0
+        while (changed && pass < all.length + 2) {
+            changed = false
+            let next: ReachOf[] = []
+            for (const x of out) {
+                let r: Reach | not = x.r
+                const f: FnFacts | not = factsOf(all, x.sym)
+                const p: PlaceK = placeOf(ps, x.sym)
+                if (r is not && f is some && p != PlaceK.Server) {
+                    for (const ref of fnRefs(all, f)) {
+                        const c: Reach | not = reachOf(out, ref.sym)
+                        if (r is not && c is some && placeOf(ps, ref.sym) != PlaceK.Server) {
+                            r = { chain: [f.name + "()"].concat(c.chain), what: c.what }
+                            changed = true
+                        }
+                    }
+                }
+                next = next.concat([{ sym: x.sym, r: r }])
+            }
+            out = next
+            pass = pass + 1
+        }
+        return out
+    }
+
+    fn directClient(f: FnFacts) -> Reach | not {
+        if (f.doms.length > 0) return { chain: [f.name + "()"], what: f.doms[0].what }
+        if (f.scan.writes.length > 0) return { chain: [f.name + "()"], what: "writes `" + f.scan.writes[0].cell + "`" }
+        if (f.reads.length > 0) return { chain: [f.name + "()"], what: "reads `" + f.reads[0].what + "`" }
+        return not
+    }
+
+    fn reachOf(rs: ReachOf[], sym: int) -> Reach | not {
+        for (const x of rs) {
+            if (x.sym == sym) return x.r
+        }
+        return not
+    }
+
+    // UNRESOLVED REACH: the first chain from a function down to a call the
+    // analysis cannot resolve, through non-server callees.
+    fn unresolvedReach(all: FnFacts[], ps: PlaceFact[]) -> ReachOf[] {
+        let out: ReachOf[] = []
+        for (const f of all) {
+            let r: Reach | not = not
+            if (f.scan.unproven.length > 0) r = { chain: [f.name + "()"], what: f.scan.unproven[0].what }
+            out = out.concat([{ sym: f.sym, r: r }])
+        }
+        let changed = true
+        let pass = 0
+        while (changed && pass < all.length + 2) {
+            changed = false
+            let next: ReachOf[] = []
+            for (const x of out) {
+                let r: Reach | not = x.r
+                const f: FnFacts | not = factsOf(all, x.sym)
+                if (r is not && f is some) {
+                    for (const ref of fnRefs(all, f)) {
+                        const c: Reach | not = reachOf(out, ref.sym)
+                        if (r is not && c is some && placeOf(ps, ref.sym) != PlaceK.Server) {
+                            r = { chain: [f.name + "()"].concat(c.chain), what: c.what }
+                            changed = true
+                        }
+                    }
+                }
+                next = next.concat([{ sym: x.sym, r: r }])
+            }
+            out = next
+            pass = pass + 1
+        }
+        return out
+    }
+
+    // ASYNC COLOR (§13.2, §13.7 item 2): a server or split function, or a
+    // client function that reaches one — the chain down to the server call.
+    fn asyncReach(all: FnFacts[], ps: PlaceFact[]) -> ReachOf[] {
+        let out: ReachOf[] = []
+        for (const f of all) {
+            let r: Reach | not = not
+            const p: PlaceK = placeOf(ps, f.sym)
+            if (p == PlaceK.Server || p == PlaceK.Split) r = { chain: [f.name + "()"], what: "" }
+            out = out.concat([{ sym: f.sym, r: r }])
+        }
+        let changed = true
+        let pass = 0
+        while (changed && pass < all.length + 2) {
+            changed = false
+            let next: ReachOf[] = []
+            for (const x of out) {
+                let r: Reach | not = x.r
+                const f: FnFacts | not = factsOf(all, x.sym)
+                if (r is not && f is some) {
+                    for (const ref of fnRefs(all, f)) {
+                        const c: Reach | not = reachOf(out, ref.sym)
+                        if (r is not && c is some) {
+                            r = { chain: [f.name + "()"].concat(c.chain), what: "" }
+                            changed = true
+                        }
+                    }
+                }
+                next = next.concat([{ sym: x.sym, r: r }])
+            }
+            out = next
+            pass = pass + 1
+        }
+        return out
+    }
+
+    // ---- the databases (§8.1.1, §44.2) -------------------------------------------
+    // One `<program db=…>`: its node, the Db it declares (`not` — the value was
+    // refused, reported), where.
+    type ProgDb:struct = { pnid: int, db: Db | not }
+    // Each function's nearest `<program>` with a `db=` (-1: none).
+    type FnDb:struct = { fnid: int, pnid: int }
+    type RDbs:struct = { progs: ProgDb[], fns: FnDb[], st: AS }
+
+    fn dbsPass(files: FileAst[], st0: AS) -> RDbs {
+        let st: AS = st0
+        let progs: ProgDb[] = []
+        let fns: FnDb[] = []
+        for (const f of files) {
+            const r: RDbs = dbsInItems(f.path, f.items, -1, { progs: progs, fns: fns, st: st })
+            progs = r.progs
+            fns = r.fns
+            st = r.st
+        }
+        return { progs: progs, fns: fns, st: st }
+    }
+
+    fn dbsInItems(file: string, items: AItem[], pnid: int, acc0: RDbs) -> RDbs {
+        let acc: RDbs = acc0
+        for (const it of items) {
+            const k: AItemK = it.k
+            const f: AFn | not = fnOfItemK(k)
+            if (f is some) acc = { progs: acc.progs, fns: acc.fns.concat([{ fnid: f.nid, pnid: pnid }]), st: acc.st }
+            const p: AProgram | not = programOfK(k)
+            if (p is some) {
+                const a: AAttr | not = attrNamed(p.attrs, "db")
+                if (a is some) {
+                    const rd: RDb = dbOfAttr(file, a, acc.st)
+                    acc = dbsInItems(file, p.items, p.nid, { progs: acc.progs.concat([{ pnid: p.nid, db: rd.db }]), fns: acc.fns, st: rd.st })
+                } else {
+                    acc = dbsInItems(file, p.items, pnid, acc)
+                }
+            }
+        }
+        return acc
+    }
+
+    fn fnOfItemK(k: AItemK) -> AFn | not {
+        return match k {
+            .FnItem(f: f) :> f
+            .ImportItem(i: i) :> not
+            .TypeItem(t: t) :> not
+            .DeclItem(d: d) :> not
+            .MarkupItem(n: n) :> not
+            .ProgramItem(p: p) :> not
+        }
+    }
+
+    fn programOfK(k: AItemK) -> AProgram | not {
+        return match k {
+            .ProgramItem(p: p) :> p
+            .FnItem(f: f) :> not
+            .ImportItem(i: i) :> not
+            .TypeItem(t: t) :> not
+            .DeclItem(d: d) :> not
+            .MarkupItem(n: n) :> not
+        }
+    }
+
+    type RDb:struct = { db: Db | not, st: AS }
+
+    // §8.1.1's driver table (`./path`, `sqlite:`, `:memory:`, `postgres://`,
+    // `postgresql://`, `mysql://`; `mongo*` is "NOT VALID for `?{}`"), §44.2,
+    // and "A `file:` URI is not a path and SHALL be E-SQL-005". A value that is
+    // not a literal is refused (a connection string is configuration, read at
+    // compile time).
+    fn dbOfAttr(file: string, a: AAttr, st: AS) -> RDb {
+        const v: string | not = quotedValue(a.value)
+        if (v is not) return { db: not, st: addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`db=` must be a literal connection string (`db=\"./app.db\"`, §8.1.1) — the bootstrap reads it at compile time") }
+        const why: string = dbRefusal(v)
+        if (why != "") return { db: not, st: addDiag(st, file, a.span, "E-SQL-005", "`db=\"" + v + "\"`: " + why + " (§8.1.1, §44.2). A `" + sqlSigil() + "}` runs on SQLite (`./app.db`, `sqlite:./app.db`, `:memory:`), PostgreSQL (`postgres://…`, `postgresql://…`) or MySQL (`mysql://…`)") }
+        const r: RSym = mint(st, "db")
+        return { db: { sym: r.s, driver: dbDriver(v), target: dbTarget(v), file: file, owner: false }, st: r.st }
+    }
+
+    fn quotedValue(v: AAttrValue) -> string | not {
+        return match v {
+            .Quoted(v: s) :> s
+            .NoValue :> not
+            .Bare(e: x) :> not
+            .Paren(e: x) :> not
+            .Braced(b: b) :> not
+        }
+    }
+
+    // Why a connection string is not a `?{}` database ("" — it is one).
+    fn dbRefusal(v: string) -> string {
+        if (v.trim() == "") return "an empty connection string names no database"
+        const scheme: string = schemeOf(v)
+        if (scheme == "") return ""                      // a plain path: implicit `sqlite:`
+        if (scheme == "sqlite") {
+            if (v.substring(7).trim() == "") return "`sqlite:` names no path"
+            return ""
+        }
+        if (scheme == "postgres" || scheme == "postgresql" || scheme == "mysql") {
+            if (v.indexOf("://") != scheme.length) return "a `" + scheme + ":` connection string is a URL (`" + scheme + "://…`)"
+            return ""
+        }
+        if (scheme == "mongo" || scheme == "mongodb") return "MongoDB is not a `" + sqlSigil() + "}` database — use a `^{}` meta context"
+        if (scheme == "file") return "a `file:` URI is not a path — write the path itself or `sqlite:<path>`"
+        return "`" + scheme + ":` is not a recognized database connection prefix"
+    }
+
+    // The URI scheme of a value ("" — none: a path, or `:memory:`).
+    fn schemeOf(v: string) -> string {
+        if (v == ":memory:") return ""
+        const colon: int = v.indexOf(":")
+        if (colon <= 0) return ""
+        const s: string = v.substring(0, colon)
+        let i: int = 0
+        while (i < s.length) {
+            const c: string = s.substring(i, i + 1)
+            const ok: boolean = c.toUpperCase() != c.toLowerCase() || "0123456789+.-".indexOf(c) >= 0
+            if (!ok) return ""
+            i = i + 1
+        }
+        // a one-letter "scheme" is a Windows drive path (`C:\…`), not a scheme
+        if (s.length == 1) return ""
+        return s.toLowerCase()
+    }
+
+    fn dbDriver(v: string) -> Driver {
+        const s: string = schemeOf(v)
+        if (s == "postgres" || s == "postgresql") return Driver.Postgres
+        if (s == "mysql") return Driver.Mysql
+        return Driver.Sqlite
+    }
+
+    fn dbTarget(v: string) -> string {
+        if (schemeOf(v) == "sqlite") return v.substring(7)
+        return v
+    }
+
+    fn progDbOf(ps: ProgDb[], pnid: int) -> ProgDb | not {
+        for (const p of ps) {
+            if (p.pnid == pnid) return p
+        }
+        return not
+    }
+
+    fn fnDbProg(fs: FnDb[], fnid: int) -> int {
+        for (const f of fs) {
+            if (f.fnid == fnid) return f.pnid
+        }
+        return -1
+    }
+
+    // The entry file's top-level `<program>` (the db of a `?{}` that stands in
+    // no function — a value / action position — is its).
+    fn entryProgramNid(g: Globals) -> int {
+        const d: DeclSrc | not = findDeclSrc(g, g.program)
+        if (d is not) return -1
+        const p: AProgram | not = d.p
+        if (p is not) return -1
+        return p.nid
+    }
+
+    // ---- the action positions (not value positions, §6.15) ------------------------
+    // An event-handler value and an `<effect>` body: client code that RUNS (a
+    // handler on its event, an effect on its change), so a server call there
+    // is a suspension (unit U1b) and a `?{}` there splits the client body
+    // around server work (§19.9.5 — unit U1d).
+    type ActionPos:struct = { what: string, v: AAttrValue, file: string }
+
+    fn actionPositions(g: Globals) -> ActionPos[] {
+        let out: ActionPos[] = []
+        for (const ds of g.decls) {
+            for (const n of declMarkup(ds)) { out = out.concat(nodeActions(n, ds.file)) }
+        }
+        return out
+    }
+
+    fn nodeActions(n: ANode, file: string) -> ActionPos[] {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> elemActions(e, file)
+            .Effect(w: w) :> [{ what: "this `<effect>` body", v: AAttrValue.Braced(w.body), file: file }]
+            .Text(text: s) :> []
+            .Interp(e: x) :> []
+            .DeclNode(d: d) :> []
+        }
+    }
+
+    fn elemActions(e: AElem, file: string) -> ActionPos[] {
+        let out: ActionPos[] = []
+        for (const a of e.attrs) {
+            if (eventName(a.name) != "") out = out.concat([{ what: "the `" + a.name + "=` handler on `<" + e.tag + ">`", v: a.value, file: file }])
+        }
+        for (const k of e.kids) { out = out.concat(nodeActions(k, file)) }
+        return out
+    }
+
+    // ---- the pass ------------------------------------------------------------------
+    fn placePass(g: Globals, t: Tables, st0: AS) -> RPlaced {
+        const cx: PlaceCx = { t: t, g: g }
+        let st: AS = st0
+        let all: FnFacts[] = []
+        for (const fs of g.fns) { all = all.concat([fnFacts(cx, fs)]) }
+        let places: PlaceFact[] = []
+        for (const f of all) { places = places.concat([{ sym: f.sym, name: f.name, place: directPlace(f) }]) }
+        // a function that reaches a client-only function is client-only (§12.4)
+        const creach: ReachOf[] = clientReach(all, places)
+        let ps2: PlaceFact[] = []
+        for (const p of places) {
+            let pk: PlaceK = p.place
+            if (pk == PlaceK.Ambient && reachOf(creach, p.sym) is some) pk = PlaceK.Client
+            ps2 = ps2.concat([{ sym: p.sym, name: p.name, place: pk }])
+        }
+        places = ps2
+        const ureach: ReachOf[] = unresolvedReach(all, places)
+        const areach: ReachOf[] = asyncReach(all, places)
+
+        // the databases
+        const rd: RDbs = dbsPass(g.files, st)
+        st = rd.st
+        let dbs: Db[] = []
+        for (const p of rd.progs) {
+            const d: Db | not = p.db
+            if (d is some) dbs = dbs.concat([d])
+        }
+
+        let servers: int[] = []
+        let sqls: SqlInfo[] = []
+        let creates: int[] = []
+        let doms: int[] = []
+        for (const f of all) {
+            const pk: PlaceK = placeOf(places, f.sym)
+            if (f.modifier) st = addDiag(st, f.file, f.span, "W-DEPRECATED-SERVER-MODIFIER", "`server function " + f.name + "` — the `server` modifier is deprecated (§52.10, Insight 26): write `function " + f.name + "(…)` and let route inference place it (§12.2 — a `" + sqlSigil() + "}` in its body places it on the server)")
+            if (f.doms.length > 0 && serverTriggered(f)) {
+                for (const du of f.doms) { doms = doms.concat([du.span.start]) }
+                st = addDiag(st, f.file, f.span, "E-ROUTE-005", "`" + f.name + "()` cannot be placed: its own body uses " + serverTrigger(f) + " (server-only) AND " + f.doms[0].what + " (client-only, no server referent) — route analysis can put it on neither side (§12.4). Split it: keep the server work in a server function, move the DOM access into a client function, and have the client function call the server one")
+            } else if (pk == PlaceK.Split) {
+                st = addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` both runs a `" + sqlSigil() + "}` query and writes `" + f.scan.writes[0].cell + "`, so it is split across the client/server boundary (§19.9.5: \"A function whose body mixes a server-trigger statement with a reactive-assignment statement is split\") — the body split arrives with unit U1d. Until then: return the value from a server function and write the cell in the caller")
+            } else if (pk == PlaceK.Server) {
+                servers = servers.concat([f.sym])
+                st = serverBodyDiags(cx, f, all, places, creach, ureach, st)
+            } else {
+                // client / ambient code calling a server function: a suspension (U1b)
+                for (const r of fnRefs(all, f)) {
+                    if (placeOf(places, r.sym) == PlaceK.Server) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", u1bText("`" + f.name + "()`", r))
+                }
+            }
+            // the queries in its body: database, facts, the failable rule
+            for (const s of f.sqls) {
+                const sr: RSqlSite = sqlSiteFacts(g, rd, f.file, fnDbProg(rd.fns, f.nid), s, f.failable, st)
+                st = sr.st
+                const si: SqlInfo | not = sr.info
+                if (si is some) {
+                    sqls = sqls.concat([si])
+                    if (sr.creates) creates = creates.concat([si.db.id])
+                }
+            }
+        }
+        // §8.1.1 Ownership: a file owns a SQLite database when a query in it creates a table there
+        let owned: Db[] = []
+        for (const d of dbs) {
+            owned = owned.concat([{ sym: d.sym, driver: d.driver, target: d.target, file: d.file, owner: d.driver == Driver.Sqlite && creates.indexOf(d.sym.id) >= 0 }])
+        }
+
+        // value positions (§13.7) and action positions
+        st = valueServerDiags(g, t, all, places, areach, rd, st)
+        st = actionServerDiags(g, t, all, places, rd, st)
+        return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places }, doms: doms, st: st }
+    }
+
+    fn serverTrigger(f: FnFacts) -> string {
+        if (f.sqls.length > 0) return "a `" + sqlSigil() + "}` query"
+        return "the `server` modifier"
+    }
+
+    fn u1bText(caller: string, r: FnRef) -> string {
+        if (r.asValue) return caller + " hands the server function `" + r.name + "` on as a value — a client-side reference to a server function is a server round trip (§12.3), and the client→server call arrives with unit U1b"
+        return caller + " calls the server function `" + r.name + "` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives with unit U1b"
+    }
+
+    // A wholly-server function's own body and call graph (§6.6.9, §12.4, §12.5.3).
+    fn serverBodyDiags(cx: PlaceCx, f: FnFacts, all: FnFacts[], ps: PlaceFact[], creach: ReachOf[], ureach: ReachOf[], st0: AS) -> AS {
+        let st: AS = st0
+        let seen: string[] = []
+        for (const r of f.reads) {
+            if (seen.indexOf(r.what) < 0) {
+                seen = seen.concat([r.what])
+                st = addDiag(st, f.file, r.span, "E-REACTIVE-003", "server function `" + f.name + "()` (placed on the server by " + serverTrigger(f) + ") reads `" + r.what + "` — a reactive cell lives in the browser (§6.6.9) and is not sent with the call, so on the server it would be `undefined`. Pass the value as an argument (`" + f.name + "(" + r.what + ")` at the call site, a parameter here), or have the server compute it itself inside the query")
+            }
+        }
+        for (const w of f.scan.writes) {
+            st = addDiag(st, w.file, w.span, "E-RI-002", "server function `" + f.name + "()` writes `" + w.cell + "` — the `server` modifier runs the whole body on the server, where reactive cells do not exist (§6.6.9), so the write would be lost. Remove the modifier and let the body split around its server work (§19.9.5), or return the value and write the cell in the caller")
+        }
+        for (const ref of fnRefs(all, f)) {
+            if (placeOf(ps, ref.sym) != PlaceK.Server) {
+                const c: Reach | not = reachOf(creach, ref.sym)
+                if (c is some) {
+                    st = addDiag(st, ref.file, ref.span, "E-ROUTE-002", "server function `" + f.name + "()` reaches client-only code: `" + [f.name + "()"].concat(c.chain).join(" → ") + "` " + c.what + " (§12.4 — reactive state and the DOM live in the browser, S451 R2). Pass the value in as an argument, extract the shared logic into a pure function (§33) that touches no cell, or duplicate the logic inside `" + f.name + "()`")
+                }
+                const u: Reach | not = reachOf(ureach, ref.sym)
+                if (u is some) {
+                    st = addDiag(st, ref.file, ref.span, "E-ROUTE-001", "server function `" + f.name + "()` cannot be fully analyzed for route placement: `" + [f.name + "()"].concat(u.chain).join(" → ") + "` — " + u.what + " (§12.4: \"SHALL be a compile error\"). Call a declared scrml function by its name")
+                }
+            }
+        }
+        for (const u2 of f.scan.unproven) {
+            st = addDiag(st, u2.file, u2.span, "E-ROUTE-001", "server function `" + f.name + "()` cannot be fully analyzed for route placement: " + u2.what + " (§12.4: \"SHALL be a compile error\"). Call a declared scrml function by its name")
+        }
+        return wireDiags(cx, f, st)
+    }
+
+    // §12.5.3 E-ROUTE-003 / E-ROUTE-004 against the §57 codec: a declaration's
+    // instance (a live state object) is not serializable; a type the codec
+    // cannot yet describe (a payload enum — S451 R8 ruled its wire shape, the
+    // codec does not have it yet) is refused, not called non-serializable.
+    fn wireDiags(cx: PlaceCx, f: FnFacts, st0: AS) -> AS {
+        let st: AS = st0
+        const fs: FnSrc | not = fnSrcOf(cx.g, f.sym)
+        if (fs is not) return st
+        for (const p of fs.f.params) {
+            const pty: Type | not = boundParamType(bindFact(cx.t.binds, p.nid))
+            if (pty is some) st = wireDiag(cx, f, pty, "E-ROUTE-004", "parameter `" + p.name + "`", p.span, st)
+        }
+        const rt: Type | not = fs.info.ret
+        if (rt is some) {
+            const r: AType | not = fs.f.ret
+            let sp: ASpan = f.span
+            if (r is some) sp = r.span
+            st = wireDiag(cx, f, rt, "E-ROUTE-003", "return type", sp, st)
+        }
+        return st
+    }
+
+    fn wireDiag(cx: PlaceCx, f: FnFacts, ty: Type, code: string, what: string, span: ASpan, st: AS) -> AS {
+        const state: string = stateTypeIn(cx.g, ty)
+        if (state != "") return addDiag(st, f.file, span, code, "server function `" + f.name + "()`'s " + what + " is not serializable: it holds `" + state + "`, a declaration's instance — a live state object (it has identity; it is not a value), with no wire form (§12.5.3). Pass the values it holds instead")
+        const wb: WireBuild = wireBuild(typesProgram(cx.g), ty)
+        if (wb.table is not) return addDiag(st, f.file, span, "E-BOOTSTRAP-UNSUPPORTED", "server function `" + f.name + "()`'s " + what + " has no wire descriptor in the bootstrap's codec: " + wb.why.join("; ") + " — the payload-enum wire shape (S451 R8, §57.8) is not in the codec yet (it lands with the server artifact, unit U1c)")
+        return st
+    }
+
+    // The declaration a type names (directly or inside a sequence / `T | not`), "" — none.
+    fn stateTypeIn(g: Globals, ty: Type) -> string {
+        return match ty {
+            .Named(sym: s) :> declTypeName(g, s)
+            .Seq(elem: e) :> stateTypeIn(g, e)
+            .Maybe(inner: i) :> stateTypeIn(g, i)
+            .Int :> ""
+            .Num :> ""
+            .Str :> ""
+            .Bool :> ""
+        }
+    }
+
+    fn declTypeName(g: Globals, s: Sym) -> string {
+        for (const d of g.decls) {
+            if (d.info.sym.id == s.id) return d.info.sym.hint
+        }
+        return ""
+    }
+
+    fn boundParamType(f: BindFact | not) -> Type | not {
+        return match f {
+            .BParam(sym: s, ty: ty) :> ty
+            .BBind(sym: s) :> not
+            .BGiven(sym: s) :> not
+            not :> not
+        }
+    }
+
+    fn fnSrcOf(g: Globals, sym: int) -> FnSrc | not {
+        for (const fs of g.fns) {
+            if (fs.info.sym.id == sym) return fs
+        }
+        return not
+    }
+
+    // One `?{}` in a function body: its database (§8.1.1), the failable rule
+    // (§19.8.3), and its facts (sql.scrml).
+    type RSqlSite:struct = { info: SqlInfo | not, creates: boolean, st: AS }
+
+    fn sqlSiteFacts(g: Globals, rd: RDbs, file: string, pnid: int, s: SqlSite, failable: boolean, st0: AS) -> RSqlSite {
+        let st: AS = errorTwo(file, s, failable, st0)
+        if (file != g.entry) {
+            st = addDiag(st, file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "a `" + sqlSigil() + "}` in an imported module makes it a module-with-db-context (§44.7.1), which is not in the bootstrap — keep the query in the program's file")
+            return { info: not, creates: false, st: st }
+        }
+        if (pnid < 0) {
+            st = addDiag(st, file, s.span, "E-SQL-004", sql004Text())
+            return { info: not, creates: false, st: st }
+        }
+        const pd: ProgDb | not = progDbOf(rd.progs, pnid)
+        if (pd is not) return { info: not, creates: false, st: st }
+        const db: Db | not = pd.db
+        if (db is not) return { info: not, creates: false, st: st }   // its `db=` was refused (E-SQL-005, reported)
+        const sf: SqlFacts = sqlFacts(s.q.chunks)
+        return { info: { nid: s.nid, db: db.sym, kind: sf.kind, reads: sf.reads, writes: sf.writes, columns: sf.columns }, creates: sf.createsTable, st: st }
+    }
+
+    fn sql004Text() -> string {
+        return "this `" + sqlSigil() + "}` has no `db=` declaration in any ancestor `<program>` (§8.1.1) — add one to the enclosing `<program>`: `<program db=\"./app.db\">` for SQLite, `<program db=\"postgres://…\">` for PostgreSQL"
+    }
+
+    // §19.8.3 (S451 R11): a `?{}` outside a `!` function, not handled at the site.
+    fn errorTwo(file: string, s: SqlSite, failable: boolean, st: AS) -> AS {
+        if (failable || s.q.handled) return st
+        return addDiag(st, file, s.span, "E-ERROR-002", "this `" + sqlSigil() + "}` query is failable (§19.8.3, S451): outside a `!` function it must be handled at the site — a `!{ … }` handler on the query, or a `match` on its result — or moved into a `!` function, where a failure propagates (§19.8.2). An unhandled query is E-ERROR-002. (\"No row\" is not a failure: `.get()` still returns `not`, `.all()` still `[]`.) The bootstrap has none of these handling forms yet — they arrive with unit Ue, the error model")
+    }
+
+    // §13.7 (S451 R1): a value position that would have to WAIT.
+    fn valueServerDiags(g: Globals, t: Tables, all: FnFacts[], ps: PlaceFact[], areach: ReachOf[], rd: RDbs, st0: AS) -> AS {
+        let st: AS = st0
+        const pnid: int = entryProgramNid(g)
+        for (const p of valuePositions(g, t)) {
+            for (const s of sqlsInValue(p.v)) {
+                st = errorTwo(p.file, s, false, st)
+                st = positionDb(g, rd, p.file, pnid, s, st)
+                st = addDiag(st, p.file, s.span, "E-VALUE-SERVER-CALL", p.what + " runs a `" + sqlSigil() + "}` query — the query runs on the server, and " + waitFix())
+            }
+            const scan: BodyScan = scanValue({ t: t, file: p.file }, p.v, emptyScan())
+            for (const r of scan.refs) {
+                const pk: PlaceK = placeOf(ps, r.sym)
+                const c: Reach | not = reachOf(areach, r.sym)
+                if (pk == PlaceK.Server) {
+                    st = addDiag(st, r.file, r.span, "E-VALUE-SERVER-CALL", p.what + " calls the server function `" + r.name + "` — " + waitFix())
+                } else if (c is some) {
+                    st = addDiag(st, r.file, r.span, "E-VALUE-SERVER-CALL", p.what + " calls `" + r.name + "`, which reaches a server call (`" + c.chain.join(" → ") + "`) — " + waitFix())
+                }
+            }
+        }
+        return st
+    }
+
+    fn waitFix() -> string {
+        return "a value position cannot wait for the server (§13.7). Load the value with a `<request>` (§6.7.7) into a cell and read the cell here — or, where the cell is server-authoritative, a `<x server>` declaration (§52)"
+    }
+
+    // E-SQL-004 for a `?{}` that stands in no function (the entry program's db).
+    fn positionDb(g: Globals, rd: RDbs, file: string, pnid: int, s: SqlSite, st: AS) -> AS {
+        if (file != g.entry) return st
+        if (pnid >= 0 && progDbOf(rd.progs, pnid) is some) return st
+        return addDiag(st, file, s.span, "E-SQL-004", sql004Text())
+    }
+
+    // The action positions: a `?{}` there is client code doing server work (a
+    // split — U1d); a server call there is a suspension (U1b).
+    fn actionServerDiags(g: Globals, t: Tables, all: FnFacts[], ps: PlaceFact[], rd: RDbs, st0: AS) -> AS {
+        let st: AS = st0
+        const pnid: int = entryProgramNid(g)
+        for (const a of actionPositions(g)) {
+            for (const s of sqlsInValue(a.v)) {
+                st = errorTwo(a.file, s, false, st)
+                st = positionDb(g, rd, a.file, pnid, s, st)
+                st = addDiag(st, a.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", a.what + " runs a `" + sqlSigil() + "}` query — client code that does server work is split around it (§19.9.5), and the body split arrives with unit U1d. Until then: put the query in a function")
+            }
+            const scan: BodyScan = scanValue({ t: t, file: a.file }, a.v, emptyScan())
+            for (const r of scan.refs) {
+                if (placeOf(ps, r.sym) == PlaceK.Server) st = addDiag(st, r.file, r.span, "E-BOOTSTRAP-UNSUPPORTED", u1bText(a.what, r))
+            }
+        }
+        return st
+    }
+
+    // =========================================================================
     // Entry. `files` in LINK ORDER: every file after the files it imports; the
     // entry (the file with `<program>`) last.
     // =========================================================================
@@ -10941,12 +11860,25 @@ ${
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound)
         const typed: RTyping = typeProgram(files, bound)
+        // s451 (U1a): route placement, the queries and the databases
+        const pp: RPlaced = placePass(ra.g, bound, st)
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: bound.server }
-        return { files: files, tables: t, diags: st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags),
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts }
+        return { files: files, tables: t, diags: domScopeDropped(pp.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags),
                  infos: gatedInfos(vp.gated) }
+    }
+
+    // s451 (U1a): a DOM global in a server-triggered body is E-ROUTE-005 (the
+    // function cannot be placed, §12.4), not also "not declared".
+    fn domScopeDropped(ds: Diag[], doms: int[]) -> Diag[] {
+        if (doms.length == 0) return ds
+        let out: Diag[] = []
+        for (const d of ds) {
+            if (!(d.code == "E-SCOPE-001" && doms.indexOf(d.span.start) >= 0)) out = out.concat([d])
+        }
+        return out
     }
 
     // s449 — I-FORM-SUBMIT-GATED (§55.17.6 item 1): "one per gated form, at the

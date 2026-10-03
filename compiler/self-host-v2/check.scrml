@@ -76,6 +76,10 @@ ${
     import { Node, allNodes } from "./walk.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
 
+    // s451: the SQL sigil for messages, in two pieces (impl#1 rewrites a
+    // literal sigil inside a string — parse.scrml sqlSigil).
+    fn sqlSigil() -> string { return "?" + "{" }
+
     export fn checkCore(p: CoreProgram) -> string[] {
         let out: string[] = []
         for (const d of p.decls) {
@@ -172,7 +176,7 @@ ${
     fn clientSide(p: CoreProgram, root: Node, where: string) -> string[] {
         let out: string[] = []
         for (const n of allNodes(root)) {
-            if (nodeIsSql(n)) out = out.concat(["C-S2: a `?{}` query in client code (" + where + ") — a query stands only in a server function"])
+            if (nodeIsSql(n)) out = out.concat(["C-S2: a `" + sqlSigil() + "}` query in client code (" + where + ") — a query stands only in a server function"])
             const callee: Sym | not = nodeCallee(n)
             if (callee is some) {
                 if (findServerFn(p, callee) is some) out = out.concat(["C-S3: client code (" + where + ") calls the server function " + callee.hint + "() as a plain call"])
