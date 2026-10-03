@@ -447,6 +447,9 @@ ${
         types: TypeDef[],
         fns: Fn[],
         server: ServerFn[],
+        // s451 — §65.3.4: the built-in reset layer ships unless the top-level
+        // program opts out with `<program reset="none">`.
+        reset: boolean,
     }
 
     // -------------------------------------------------------------------------

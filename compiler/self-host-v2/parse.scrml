@@ -3038,7 +3038,7 @@ ${
         const k: TagKind = tagKind(o)
         const od: Opener = isLet ? withLet(o) : o
         return match k {
-            .IsProgram :> programItem(o, letOnNonDecl(ro.mp, o, isLet))
+            .IsProgram :> programItem(o, programOpenerDiags(o, letOnNonDecl(ro.mp, o, isLet), exported))
             .IsDecl :> declItem(finishDecl(od, ro.mp, exported))
             .IsElem :> elemItem(finishElem(o, letOnNonDecl(ro.mp, o, isLet)), exported)
         }
@@ -3068,6 +3068,29 @@ ${
         if (exported) m = mDiag(m, "E-PARSE-EXPORT", "`export` applies to a declaration, not to markup", r.e.span.start, r.e.span.end)
         const n: ANode = { nid: m.nid, span: r.e.span, k: ANodeK.Elem(r.e) }
         return mItem(mBump(m), r.e.span.start, AItemK.MarkupItem(n))
+    }
+
+    // s451 (S239 review MED-1): a `<program>` opener carries plain attributes
+    // only — AProgram keeps `o.attrs` and nothing else, so anything else the
+    // opener parsed (a typed attribute `auth:x="…"`, a validator call, an own
+    // type `<program:int>`, an own value `<program=5>`, a `:`-shorthand body,
+    // `export`) would be dropped silently. No SPEC sentence gives such a
+    // `<program>` a meaning or a code (searched §4.12, §40.8, §66.2), so each
+    // is refused here, by construction, rather than discarded.
+    fn programOpenerDiags(o: Opener, mp: MP, exported: boolean) -> MP {
+        let m: MP = mp
+        const why: string = " on `<program>` is not in the bootstrap — a `<program>` opener carries plain attributes only (`name=\"…\"`); it is not a declaration"
+        if (exported) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`export`" + why, o.start, o.start + 8)
+        if (o.ty is some) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "an own type `<program:…>`" + why, o.start, o.start + 8)
+        if (!isNoValue(o.own)) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "an own value `<program=…>`" + why, o.start, o.start + 8)
+        for (const ta of o.typed) {
+            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the typed attribute `" + ta.name + ":…`" + why, ta.span.start, ta.span.end)
+        }
+        for (const v of o.vals) {
+            m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "the validator `" + v.name + "(…)`" + why, v.span.start, v.span.end)
+        }
+        if (o.short is some) m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "a `:`-shorthand body" + why, o.start, o.start + 8)
+        return m
     }
 
     fn programItem(o: Opener, mp: MP) -> RMItems {

@@ -114,6 +114,6 @@ ${
             fields: [fCount, fStep, fDoubled],
             renders: [main], wiring: [], handles: [],
         }
-        return { program: sProgram, decls: [program], types: [], fns: [bump, restart], server: [] }
+        return { program: sProgram, decls: [program], types: [], fns: [bump, restart], server: [], reset: true }
     }
 }
