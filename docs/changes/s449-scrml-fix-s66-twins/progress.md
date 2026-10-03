@@ -110,3 +110,6 @@
     orig vs fixed: no E- codes either side; only shape lints differ (W-PROGRAM-REDUNDANT-LOGIC /
     W-PROGRAM-001 → W-PROGRAM-SPA-INFERRED), as before.
   - counter unchanged: PASS 76 (62 non-vacuous) · FAIL 62 · NOT-TWINNED 500 · UNSUPPORTED 650 · graded 138.
+
+## r4 (S451) — root fix: impl#1 import graph + AST write classification
+- 2026-10-03T12:28:47-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a3f9e2453bd925702, HEAD 9e72c53d6.
