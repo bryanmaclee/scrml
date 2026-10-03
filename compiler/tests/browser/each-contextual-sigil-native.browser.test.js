@@ -21,6 +21,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // `<each in=@lines>` whose per-item body uses BOTH the `@.field` sigil (text)
 // and a chained `@.foo.bar` sigil — the exact shapes the native lexer fix
@@ -36,7 +37,7 @@ type Line:struct = { id: string, label: string }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-each-sigil-native-canary");
+const tmpRoot = resolve(tmpdir(), "scrml-each-sigil-native-canary");
 
 function compileNative(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

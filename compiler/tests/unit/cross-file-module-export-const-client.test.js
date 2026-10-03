@@ -46,10 +46,11 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { writeFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
+import { tmpdir } from "os";
 import vm from "vm";
 import { compileScrml } from "../../src/api.js";
 
-const TMP_ROOT = "/tmp/scrml-263-export-const-tests";
+const TMP_ROOT = join(tmpdir(), "scrml-263-export-const-tests");
 const OPEN = "${";
 const CLOSE = "}";
 

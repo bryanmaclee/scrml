@@ -1,0 +1,5 @@
+<program>
+<page auth="role:admin">
+<p>admin</p>
+</page>
+</program>

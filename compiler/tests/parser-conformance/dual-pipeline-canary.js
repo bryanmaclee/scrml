@@ -396,7 +396,9 @@ export function liveImportsHaveDynamicCallShape(extraImports) {
 //     scanner harvests only 1 (the type-decl). Native matches the source-
 //     witness count exactly.
 //
-//   - IMPORTS-AXIS  — `compiler/self-host/cg.scrml`. Source contains zero
+//   - IMPORTS-AXIS  — `compiler/self-host/cg.scrml` (v1 tree retired S447; the
+//     source is preserved inline as CG_SCRML_SOURCE in
+//     parser-conformance-canary.test.js). Source contains zero
 //     `import ... from ...` declarations and five `await import("...")`
 //     dynamic-import-call expressions inside an `^{...}` meta block. Native
 //     correctly hoists 0 imports; live's scanner phantoms the dynamic-import
@@ -417,7 +419,7 @@ export function liveImportsHaveDynamicCallShape(extraImports) {
 //
 //   Both diverging-axis shapes additionally require the SOURCE-WITNESS
 //   count to equal NATIVE's count. This rules out cases where neither
-//   pipeline is the broken side (e.g. `compiler/self-host/bs.scrml` where
+//   pipeline is the broken side (e.g. the since-retired v1 `compiler/self-host/bs.scrml`, where
 //   native phantoms an empty type-decl mid-statement at line 241 — native
 //   over-counts; source-witness count agrees with LIVE, not native; that
 //   file must remain `DIFF-hoist-count` as a Wave 5 H-bs-tail investigation

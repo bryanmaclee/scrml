@@ -1,0 +1,27 @@
+{
+  "id": "lifecycle-effect-empty-body-pos",
+  "description": "§6.7.4 an `<effect>` with an empty body is W-LIFECYCLE-010 (a warning).",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4 Syntax: \"An empty body (`<effect deps=[@x]/>` or `${ }`) is **W-LIFECYCLE-010**: the trigger fires and does nothing.\" ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "codes": [
+      "W-LIFECYCLE-010"
+    ],
+    "severity": {
+      "W-LIFECYCLE-010": "warning"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "missing:W-LIFECYCLE-010",
+          "severity:code 'W-LIFECYCLE-010' did not fire (expected severity warning)"
+        ]
+      }
+    }
+  }
+}

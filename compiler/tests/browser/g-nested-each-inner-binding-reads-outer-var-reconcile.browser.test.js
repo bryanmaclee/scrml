@@ -34,6 +34,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 const D = "$";
 const SRC = `<program>
@@ -59,7 +60,7 @@ function pick(gid) { @clicked = gid }
 
 function compileOut(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  const dir = resolve("/tmp", "scrml-nested-outer-var", `c-${uniq}`);
+  const dir = resolve(tmpdir(), "scrml-nested-outer-var", `c-${uniq}`);
   const input = resolve(dir, `${baseName}.scrml`);
   const outDir = resolve(dir, "out");
   mkdirSync(dir, { recursive: true });

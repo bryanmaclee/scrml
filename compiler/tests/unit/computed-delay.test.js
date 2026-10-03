@@ -25,6 +25,7 @@ import { parseAfterDuration } from "../../src/codegen/parse-after-duration.ts";
 import { emitEngineTimersTable } from "../../src/codegen/emit-engine.ts";
 import { compileScrml } from "../../src/api.js";
 import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 /**
  * Compile the source through the full pipeline (BS→TAB→...→CG) and return the
@@ -35,7 +36,7 @@ import { unNamespaceEngineNames } from "../helpers/chunk-scope.js";
 function compileToClientJs(source, suffix = "computed-delay") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
@@ -61,7 +62,7 @@ function compileToClientJs(source, suffix = "computed-delay") {
 function compileForErrors(source, suffix = "computed-delay") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });

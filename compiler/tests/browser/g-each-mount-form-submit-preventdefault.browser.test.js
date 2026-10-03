@@ -31,6 +31,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { chunkCellKey } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // Per-item <form onsubmit=fn()> (the each factory mounts the <li> root per item;
 // the form + a non-submit control button live inside it). The handlers read the
@@ -66,7 +67,7 @@ function topSubmit() { @topdone = "yes" }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-each-submit-preventdefault-ss20");
+const tmpRoot = resolve(tmpdir(), "scrml-each-submit-preventdefault-ss20");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

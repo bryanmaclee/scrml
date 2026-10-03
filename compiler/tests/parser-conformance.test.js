@@ -18,7 +18,8 @@
  *   - samples/     — ~869 .scrml gauntlet + compilation-test fixtures
  *   - examples/    — ~62 .scrml example apps
  *   - stdlib/      — ~46 .scrml stdlib modules
- *   - self-host/   — ~11 .scrml self-hosted compiler modules
+ *   - compiler/self-host-v2/ — the bootstrap compiler's .scrml sources (replaced
+ *                  the retired v1 compiler/self-host/ at S447)
  *
  * Per primer Pillar 5b: the comparator HARNESS is calculation (pure diff over
  * input trees), but `describe`/`test` are framework idioms (modeling exception
@@ -100,7 +101,7 @@ describe("Parser conformance — corpus sanity", () => {
     expect(SIZES.samples).toBeGreaterThan(0);
     expect(SIZES.examples).toBeGreaterThan(0);
     expect(SIZES.stdlib).toBeGreaterThan(0);
-    expect(SIZES["self-host"]).toBeGreaterThan(0);
+    expect(SIZES["self-host-v2"]).toBeGreaterThan(0);
   });
 
   test("both parsers are callable on a trivial JS expression", () => {

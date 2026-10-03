@@ -1,0 +1,14 @@
+// §6.7.4 — reads, a local, a write-free call: legal.
+<program>
+  <n> = 0
+  <k> = 5
+  function beacon(v) {
+    return v
+  }
+  <effect deps=[@n]>${
+    let sum = 0
+    sum = @n + @k
+    beacon(sum)
+  }</>
+  <p>${@n}</p>
+</program>

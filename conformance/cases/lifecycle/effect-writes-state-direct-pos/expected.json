@@ -1,0 +1,23 @@
+{
+  "id": "lifecycle-effect-writes-state-direct-pos",
+  "description": "§6.7.4 the no-write rule: an `<effect>` body that writes a reactive cell directly is E-EFFECT-WRITES-STATE.",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4 \"The no-write rule\": \"**An effect body SHALL NOT write any reactive cell, directly or through a called function.** A write found by the analysis below is **E-EFFECT-WRITES-STATE**\"; rule 1: \"A **direct write** in the body is E-EFFECT-WRITES-STATE.\" The worked example is this program (`@page = 1` on a `@query` change). ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "codes": [
+      "E-EFFECT-WRITES-STATE"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "missing:E-EFFECT-WRITES-STATE"
+        ]
+      }
+    }
+  }
+}

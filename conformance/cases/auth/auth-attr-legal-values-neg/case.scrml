@@ -1,0 +1,8 @@
+<program auth="optional">
+<page auth="none">
+<p>public</p>
+</page>
+<channel name="c" auth="required">
+</channel>
+<p>home</p>
+</program>

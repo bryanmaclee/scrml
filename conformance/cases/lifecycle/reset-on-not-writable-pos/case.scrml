@@ -1,0 +1,7 @@
+// §6.8.4 rule 5 — a derived cell cannot be reset.
+<program>
+  <query> = ""
+  <n> = 1
+  const <twice reset-on=[@query]> = @n * 2
+  <p>${@twice}</p>
+</program>

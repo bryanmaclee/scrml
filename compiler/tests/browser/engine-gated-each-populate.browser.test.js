@@ -48,6 +48,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // repro-1: pre-populated @todos; button transitions Loading -> Browsing. Exercises
 // Mode 2 (entry render) and Mode 3 (chunk shipping). The each is inside the
@@ -89,7 +90,7 @@ type Todo:struct = { id: string, name: string }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-engine-gated-each");
+const tmpRoot = resolve(tmpdir(), "scrml-engine-gated-each");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

@@ -15,9 +15,10 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 const D = "$";
-const tmpRoot = resolve("/tmp", "scrml-xfile-markup-dom");
+const tmpRoot = resolve(tmpdir(), "scrml-xfile-markup-dom");
 
 const BADGES = `${D}{
   export fn badge(n: string) { return <span class="b">${D}{n}</span> }

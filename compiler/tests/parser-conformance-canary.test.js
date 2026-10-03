@@ -52,6 +52,61 @@ function node(kind, children) {
   return Array.isArray(children) ? { kind, children } : { kind };
 }
 
+// CG_SCRML_SOURCE — byte-for-byte the retired v1 `compiler/self-host/cg.scrml`
+// (21 lines). The v1 tree was removed at S447 (s447-retire-self-host-v1); this
+// file was the corpus witness for the IMPORTS-AXIS LIVE-HOIST-MISCLASSIFY shape
+// (five `await import(...)` calls in a `^{ }` meta block, zero import-decls), so
+// it is preserved inline to keep the three guards below exercising it.
+const CG_SCRML_PATH = "compiler/self-host/cg.scrml";
+const CG_SCRML_SOURCE = `<program>
+^{
+    // Code Generator (CG) — Stage 8 of the scrml compiler pipeline.
+    // Self-hosted port of compiler/src/codegen/ (32 files, ~13,000 lines TS).
+    //
+    // Uses ^{} meta to import pre-ported JS sections. Each section is a
+    // standalone JS module ported from the TypeScript originals.
+    //
+    // Exports: runCG, CGError
+
+    const cgCore = await import("./cg-parts/section-core.js")
+    const cgRewrite = await import("./cg-parts/section-rewrite.js")
+    const cgEmitCore = await import("./cg-parts/section-emit-core.js")
+    const cgEmitWiring = await import("./cg-parts/section-emit-wiring.js")
+    const cgAssembly = await import("./cg-parts/section-assembly.js")
+
+    // Re-export the main entry point
+    export const runCG = cgAssembly.runCG
+    export const CGError = cgCore.CGError
+}
+</program>
+`;
+
+// BS_NOT_FIELD_SOURCE — the retired v1 `compiler/self-host/bs.scrml` shape that
+// carried the S124 phantom-typeDecl guard: an object-literal field whose value is
+// the absence token (`name: not,`), inside a function in a `\${ }` block. The full
+// 894-line file is gone with the v1 tree (S447); this is its `pushBraceContext`
+// function verbatim minus unrelated fields.
+const BS_NOT_FIELD_SOURCE = `<program>
+\${
+    function pushBraceContext(type, openPos, openLine, openCol) {
+        const parentFrame = topFrame()
+        const inheritedTagNesting = (parentFrame is some && parentFrame.tagNesting is some)
+            ? parentFrame.tagNesting : 0
+        stack.push({
+            type,
+            name: not,
+            isComponent: false,
+            depth: stack.length,
+            startPos: openPos,
+            children: [],
+            braceDepth: 1,
+            tagNesting: inheritedTagNesting,
+        })
+    }
+}
+</program>
+`;
+
 describe("dual-pipeline-canary — nodeKindSequence (the recursive walk)", () => {
   test("walks children pre-order, recursively", () => {
     const tree = [
@@ -606,9 +661,7 @@ describe("dual-pipeline-canary — countSourceImportDeclLines", () => {
   });
 
   test("matches the cg.scrml source-witness count (0 — all imports are dynamic-call form)", () => {
-    const path = __dirname + "/../../compiler/self-host/cg.scrml";
-    const src = readFileSync(path, "utf8");
-    expect(countSourceImportDeclLines(src)).toBe(0);
+    expect(countSourceImportDeclLines(CG_SCRML_SOURCE)).toBe(0);
   });
 });
 
@@ -880,7 +933,7 @@ describe("dual-pipeline-canary — classifyDivergence LIVE-HOIST-MISCLASSIFY bra
     expect(v.detail.nativeHoist.exports).toBe(5); // S400 — block-comment skip restores the 5th export
   });
 
-  test("the real cg.scrml corpus file classifies EXACT post-S142 dynamic-import phantom fix (was LIVE-HOIST-MISCLASSIFY imports-axis)", () => {
+  test("the cg.scrml source (inline — v1 tree retired S447) classifies EXACT post-S142 dynamic-import phantom fix (was LIVE-HOIST-MISCLASSIFY imports-axis)", () => {
     // S142 (gate-flip-and-residuals) — residual-1 collectExpr STMT_KEYWORD fix
     // eliminated the LIVE dynamic-import-as-module-import phantom EARLY (ahead
     // of M6). cg.scrml's five `const X = await import("...")` statements were
@@ -898,16 +951,14 @@ describe("dual-pipeline-canary — classifyDivergence LIVE-HOIST-MISCLASSIFY bra
     //
     // Regression-guard against the phantom returning if the STMT_KEYWORD
     // keyword-as-operand guard regresses.
-    const path = __dirname + "/../../compiler/self-host/cg.scrml";
-    const src = readFileSync(path, "utf8");
-    const v = classifyDivergence(path, src);
+    const v = classifyDivergence(CG_SCRML_PATH, CG_SCRML_SOURCE);
     expect(v.class).toBe("EXACT");
     expect(v.explained).toBe(true);
     expect(v.detail.liveHoist.imports).toBe(0);
     expect(v.detail.nativeHoist.imports).toBe(0);
   });
 
-  test("the real bs.scrml corpus file classifies EXACT post-S124 null-to-not migration (was DIFF-hoist-count phantom typeDecl)", () => {
+  test("the bs.scrml `name: not` object-literal shape (inline — v1 tree retired S447) classifies EXACT post-S124 null-to-not migration (was DIFF-hoist-count phantom typeDecl)", () => {
     // S124 M6.7 Phase 1 corpus migration eliminated the phantom typeDecl.
     // Pre-S124 history: the file held 10 `null` absence-sentinel sites + 1
     // comment-doc null reference. `name: null,` in object-literal position
@@ -925,11 +976,12 @@ describe("dual-pipeline-canary — classifyDivergence LIVE-HOIST-MISCLASSIFY bra
     // count moved 998 → 999.
     //
     // This test stays as a regression-guard against the phantom typeDecl
-    // returning if someone reintroduces a `null` token in an object-literal
-    // value position in bs.scrml without the canonical `not` migration.
-    const path = __dirname + "/../../compiler/self-host/bs.scrml";
-    const src = readFileSync(path, "utf8");
-    const v = classifyDivergence(path, src);
+    // returning on the canonical `name: not,` object-literal shape. S447: the
+    // v1 file is retired, so the guard runs on BS_NOT_FIELD_SOURCE (the shape,
+    // inline) rather than the whole 894-line file. NB the historical `null`
+    // spelling no longer reproduces the phantom in this minimal form either —
+    // the guard pins today's correct verdict, it is not a bite-proven repro.
+    const v = classifyDivergence("compiler/self-host/bs.scrml", BS_NOT_FIELD_SOURCE);
     expect(v.class).toBe("EXACT");
     expect(v.explained).toBe(true);
     expect(v.detail.liveHoist.typeDecls).toBe(0);

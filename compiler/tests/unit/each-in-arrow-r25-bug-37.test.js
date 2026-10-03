@@ -65,6 +65,7 @@ import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { execFileSync } from "child_process";
 import { compileScrml } from "../../src/api.js";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // ---------------------------------------------------------------------------
 // compile helper — mirrors each-colon-shorthand-r25-bug-40.test.js pattern.
@@ -73,7 +74,7 @@ import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 function compileToOutputs(source, suffix = "arrow") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const name = `${suffix}-${uniq}`;
-  const tmpDir = resolve("/tmp", `scrml-${name}`);
+  const tmpDir = resolve(tmpdir(), `scrml-${name}`);
   const tmpInput = resolve(tmpDir, `${name}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });
@@ -306,7 +307,7 @@ describe("R25-Bug-37 §10 — emitted JS parses cleanly under node --check", () 
   test("minimal repro emitted client.js parses without SyntaxError", () => {
     const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     const name = `bug37-nodecheck-${uniq}`;
-    const tmpDir = resolve("/tmp", `scrml-${name}`);
+    const tmpDir = resolve(tmpdir(), `scrml-${name}`);
     const tmpInput = resolve(tmpDir, `${name}.scrml`);
     const outDir = resolve(tmpDir, "out");
     mkdirSync(tmpDir, { recursive: true });

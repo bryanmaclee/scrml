@@ -32,6 +32,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 const DOLLAR = "$";
 
@@ -50,7 +51,7 @@ type Group:struct = { id: string, name: string, subitems: string[] }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-nested-each-outer-reuse-item3");
+const tmpRoot = resolve(tmpdir(), "scrml-nested-each-outer-reuse-item3");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

@@ -126,6 +126,17 @@ const CLASSIFY_VERDICTS = CORPUS.map((row) => {
 // =============================================================================
 describe("M6.5.b.0 — within-node parity per-fixture gate", () => {
   for (const { row, result } of CLASSIFY_VERDICTS) {
+    if (!row.driftGated) {
+      // An actively-developed corpus source (corpus-enumerator.js
+      // `driftGated: false` — the bootstrap tree). Exact counts are not pinned
+      // (every source edit would re-baseline them); both pipelines must still
+      // produce a FileAST, which the PARSE-FAILURE check below also enforces.
+      test(`[parse-only] ${row.relpath}`, () => {
+        expect({ file: row.relpath, parseFailed: result.parseFailed })
+          .toEqual({ file: row.relpath, parseFailed: false });
+      });
+      continue;
+    }
     const allowlistEntry = ALLOWLIST[row.relpath];
     const residual = subtractAllowlist(result.classCounts, allowlistEntry);
     const residualTotal = Object.values(residual).reduce((a, b) => a + b, 0);

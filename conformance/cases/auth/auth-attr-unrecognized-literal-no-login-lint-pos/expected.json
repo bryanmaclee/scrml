@@ -1,0 +1,24 @@
+{
+  "id": "auth-attr-unrecognized-literal-no-login-lint-pos",
+  "description": "§52.13.2 (S449 ruling item 4) — `<program auth=\"Required\">` (wrong case) is E-AUTH-ATTR-INVALID; the value is matched exactly. Before S449 it was W-ATTR-002 and the program applied NO auth gate (measured: anonymous GET /app.html -> 200). The auth lints still do not treat it as a gate (#1234): no W-AUTH-LOGIN-MISSING / I-AUTH-REDIRECT-UNRESOLVED.",
+  "language-version": "1.0",
+  "spec": "§52.13, §52.13.2",
+  "source-test": "compiler/tests/integration/auth-attr-invalid-or-dynamic-value.test.js",
+  "rationale": "§52.13.2 as amended S449. Ruling: user-voice-scrml.md S449 \"RULED — 'your recs.'\" item 4 — 'Unrecognized / non-literal `auth=` (incl. `\"\"`) = (a): compile error; amend §52.13.2 (supersedes its W-ATTR-002 + \"no auth gate\" SHALL).'",
+  "expect": {
+    "codes": [
+      "E-AUTH-ATTR-INVALID"
+    ],
+    "notCodes": [
+      "W-ATTR-002",
+      "W-AUTH-LOGIN-MISSING",
+      "I-AUTH-REDIRECT-UNRESOLVED"
+    ],
+    "severity": {
+      "E-AUTH-ATTR-INVALID": "error"
+    },
+    "codeCounts": {
+      "E-AUTH-ATTR-INVALID": 1
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "id": "lifecycle-when-effect-deprecated-pos",
+  "description": "§6.7.4 / §63 the keyword `when … changes { }` is the soft-deprecated spelling of `<effect>` — W-WHEN-EFFECT-DEPRECATED at every site.",
+  "language-version": "1.0",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4 Normative Statements: \"`when … changes { }` SHALL be accepted during its §63 window as a spelling of `<effect>` with identical semantics, with W-WHEN-EFFECT-DEPRECATED at every site.\" ruling:user-voice-scrml.md S447 \"`when` → outside-world effects only, spelled `<effect>`\" — \"your recs, except expound 3b, specifically why the engine restriction.\"",
+  "expect": {
+    "codes": [
+      "W-WHEN-EFFECT-DEPRECATED"
+    ],
+    "severity": {
+      "W-WHEN-EFFECT-DEPRECATED": "warning"
+    }
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-effect-reset-on-codes-unimplemented-s447",
+      "fails": {
+        "codes": [
+          "missing:W-WHEN-EFFECT-DEPRECATED",
+          "severity:code 'W-WHEN-EFFECT-DEPRECATED' did not fire (expected severity warning)"
+        ]
+      }
+    }
+  }
+}

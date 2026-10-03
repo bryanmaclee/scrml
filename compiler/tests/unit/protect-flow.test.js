@@ -6,6 +6,7 @@
  */
 import { describe, test, expect } from "bun:test";
 import { analyzeProtectFlow, analyzeCompileProtectFlow, buildProtectFlowDiagnostics, sqlSkeleton } from "../../src/codegen/protect-flow.ts";
+import { SESSION_STORE_SQLITE_TEXT, SESSION_STORE_MEMORY_TEXT } from "../../src/codegen/session-store-emit.ts";
 
 // A minimal module in the emitted shape: the compiler's SQL client, a tagged
 // row, a handler whose capture IIFE returns `ret`, and the compiler's
@@ -754,6 +755,592 @@ describe("analyzeProtectFlow — round 7: implicit invocation", () => {
   test("a host function handed to a host call does not recurse (base overflowed the stack)", () => {
     const r = analyzeProtectFlow(`import { a, b } from "some-npm";\nexport async function f() { return a(b); }\n`);
     expect(r.saturated).toBe(false);
+  });
+});
+
+// S447 round 8 — the two ROOTS (raw JS; every LEAK shape below served or was
+// accepted on base f9cd63d86 — a module with no session middleware, so the
+// global heap's name scoping is not masked by the compiler's own round trip).
+const r8 = (body) => mod(body).replace('["passwordHash"]', '["passwordHash", "pin"]');
+describe("analyzeProtectFlow — round 8: a row held in a field is a row", () => {
+  test("a named read off a value that HOLDS a row yields the row, not a column of it", () => {
+    for (const body of [
+      "const t = { h: u }; return t.h.passwordHash;",
+      "const t = { h: u }; const { h } = t; return h.passwordHash;",
+      "const t = { h: u }; return JSON.stringify(t.h);",
+      "const t = { h: u }; return Object.values(t.h);",
+      "const rs = [u]; const t = { rs }; return t.rs.map((r) => r.passwordHash);",
+      "const t = { a: { b: u } }; return t.a.b.pin;",
+      "const t = { h: u, f() { return this.h.passwordHash; } }; return t.f();",
+      "const t = { h: u }; Object.defineProperty(t, 'z', { get: function () { return this.h.passwordHash; }, enumerable: true }); return { z: t.z };",
+      "const t = {}; t.h = u; return t.h.passwordHash;",
+      "const t = { a: {} }; t.a.b = u; return t.a.b.passwordHash;",
+      "const a = {}; const t = { a }; a.b = u; return t.a.b.passwordHash;",
+      "const t = { h: u }; return { ...t }.h.passwordHash;",
+      "const t = { h: u }; return Object.assign({}, t).h.passwordHash;",
+      "const t = { h: u }; const f = (o) => o.h; return f(t).passwordHash;",
+      "function g() { return { h: u }; } return g().h.passwordHash;",
+      "const o = Object.create({ h: u }); return o.h.passwordHash;",
+      "const p = Promise.resolve({ h: u }); return (await p).h.passwordHash;",
+      "function* g() { yield { h: u }; } for (const x of g()) { return x.h.passwordHash; } return 1;",
+      "const t = { h: [u] }; return t.h[0].passwordHash;",
+      "const t = { h: u }; const o = {}; o.t = t; return o.t.h.passwordHash;",
+      "const t = { h: u }; return [t][0].h.passwordHash;",
+      "const t = { h: u }; const { h: { passwordHash: x } } = t; return x;",
+      "const t = { h: u }; return t?.h?.passwordHash;",
+      "const t = { h: u }; globalThis.st8 = t; return globalThis.st8.h.passwordHash;",
+      // the shapes that already failed closed stay closed
+      "const m = new Map([['k', u]]); return m.get('k').passwordHash;",
+      "const t = [[u]]; return t[0][0].passwordHash;",
+      "return [1].flatMap(() => [u])[0].passwordHash;",
+    ]) {
+      expect([body, leakCols(r8(body)).length > 0]).toEqual([body, true]);
+    }
+  });
+
+  test("a field that does not hold the row stays clean; the row itself is still stripped", () => {
+    for (const body of [
+      "const t = { user: u, n: u.name }; return { n: t.n, id: t.user.id };",
+      "const t = { h: u }; return t;",
+      "const t = { h: u }; return t.h;",
+      "const t = { h: u, meta: { count: 1 } }; return { c: t.meta.count };",
+      "const t = { h: u }; return { id: t.h.id, n: t.h.name };",
+      "const rs = [u]; const t = { rs }; return t.rs.map((r) => ({ id: r.id }));",
+      "const t = { user: u, label: 'x' }; return { l: String(t.label), id: t.user.id };",
+    ]) {
+      expect([body, leakCols(r8(body))]).toEqual([body, []]);
+    }
+  });
+});
+
+describe("analyzeProtectFlow — round 8: an aliased global resolves to its named path", () => {
+  test("a function stored in the global heap is reached through an alias, whatever its name", () => {
+    for (const body of [
+      "globalThis.box17 = { h: '', set: function (r) { this.h = r.passwordHash; } }; const g = globalThis.box17; g.set(u); return g;",
+      "globalThis.box22 = { h: '', set: function (r) { this.h = r.passwordHash; } }; const g = globalThis.box22; g.set(u); return { v: g.h };",
+      "globalThis.C31 = { set: function (x) { return x.passwordHash; } }; const C = globalThis.C31; return C.set(u);",
+      "globalThis.C32 = { map: function (x) { return x.passwordHash; } }; const C = globalThis.C32; return C.map(u);",
+      "globalThis.C34 = { get: function (x) { return x.passwordHash; } }; const P = globalThis; return P.C34.get(u);",
+      "globalThis.box40 = { h: '', set: function (r) { this.h = r.passwordHash; } }; const w = { g: globalThis.box40 }; w.g.set(u); return w.g;",
+      "globalThis.box42 = { forEach: function (r) { return r.passwordHash; } }; const g = globalThis.box42; return g.forEach(u);",
+      "const g = globalThis; g.bx = { set(r) { this.h = r.passwordHash; } }; g.bx.set(u); return { v: globalThis.bx.h };",
+      "globalThis.bx2 = { h: '', set(r) { this.h = r.passwordHash; } }; const k = 'bx2'; globalThis[k].set(u); return { v: 1 };",
+      // instanceof through an alias — destructured, a const, a namespace alias
+      "let s = ''; globalThis.C10 = { [Symbol.hasInstance]: function (x) { s = x.passwordHash; return true; } }; const C = globalThis.C10; const b = u instanceof C; return s;",
+      "let s = ''; globalThis.C14 = { [Symbol.hasInstance]: function (x) { s = x.passwordHash; return true; } }; const { C14 } = globalThis; const b = u instanceof C14; return s;",
+      "let s = ''; process.C24 = { [Symbol.hasInstance]: function (x) { s = x.passwordHash; return true; } }; const P = process; const b = u instanceof P.C24; return s;",
+      // a path the compiler cannot name fails closed
+      "let s = ''; const k = 'C' + '9'; globalThis[k] = { [Symbol.hasInstance]: function (x) { s = x.passwordHash; return true; } }; const C = globalThis[k]; const b = u instanceof C; return s;",
+    ]) {
+      expect([body, leakCols(r8(body)).length > 0]).toEqual([body, true]);
+    }
+  });
+
+  test("a clean value through the same aliases stays clean", () => {
+    for (const body of [
+      // (S449 round 9: `globalThis.box50 = { h: "", set(r) { this.h = r.name } };
+      // const g = globalThis.box50; g.set(u); return { v: g.h }` left this list. It
+      // was clean only because a `Map` key was modelled as its labels alone; a
+      // `Map` holds its KEY, so the row now joins the global heap exactly as with
+      // `g.set("k", u)` or `g.put(u)` — both already rejected on base: the
+      // field-insensitive heap hands the row the heap's functions, which the
+      // unknown-callee rule then applies. A precision cost, filed in round-10.)
+      "const m = new Map(); m.set('k', u.name); return { v: m.get('k') };",
+      "return { n: Math.max(u.id, 1) };",
+      "let s = ''; globalThis.C51 = { [Symbol.hasInstance]: function (x) { s = x.name; return true; } }; const C = globalThis.C51; const b = u instanceof C; return { s };",
+    ]) {
+      expect([body, leakCols(r8(body))]).toEqual([body, []]);
+    }
+  });
+});
+
+describe("analyzeProtectFlow — round 8: adversarial follow-ups (self-review)", () => {
+  test("prototypes, platform mutators with an explicit receiver, element-aliasing built-ins, mixed global names", () => {
+    for (const body of [
+      // `__proto__:` in a literal sets the prototype — its properties are read off the object
+      "return { __proto__: { h: u } }.h.passwordHash;",
+      "const p = { h: u }; const o = { __proto__: p }; return o.h.passwordHash;",
+      // a platform method run with an explicit receiver writes into it
+      "const arr = []; Array.prototype.push.call(arr, u); return arr[0].passwordHash;",
+      "const arr = []; arr.push.call(arr, u); return arr[0].passwordHash;",
+      "const arr = []; Reflect.apply(Array.prototype.push, arr, [u]); return arr[0].passwordHash;",
+      // `Reflect.get` / `Object.values` hand back members WITH their functions
+      "globalThis.box60 = { h: '', set(r) { this.h = r.passwordHash; } }; Reflect.get(globalThis, 'box60').set(u); return { v: globalThis.box60.h };",
+      "globalThis.box61 = { h: '', set(r) { this.h = r.passwordHash; } }; Object.values(globalThis)[0].set(u); return { v: globalThis.box61.h };",
+      // a global object reached WITHOUT a name, joined with a named one: the names no longer cover it
+      "const o = { h: '', stash(r) { this.h = r.passwordHash; } }; globalThis.box62 = o; const p = u.id > 0 ? o : globalThis.other62; p.stash(u); return o;",
+      // further row-in-field shapes
+      "const o = {}; o.__proto__ = { h: u }; return o.h.passwordHash;",
+      "const o = { get h() { return u; } }; return o.h.passwordHash;",
+      "return Object.defineProperty({}, 'h', { value: u }).h.passwordHash;",
+      "const t = { h: u }; for (const k in t) { return t[k].passwordHash; } return 1;",
+      "const t = { h: u }; return [t].concat([])[0].h.passwordHash;",
+      "try { throw { h: u }; } catch (e) { return e.h.passwordHash; }",
+      "function f() { return arguments[0].h; } return f({ h: u }).passwordHash;",
+      "const t = { 1: u }; return t[1].passwordHash;",
+      "const t = { h: u }; const k = 'h'; const { [k]: v } = t; return v.passwordHash;",
+      "const t = { a: { b: { c: { d: { e: { f: u } } } } } }; return t.a.b.c.d.e.f.passwordHash;",
+      "const t = { h: u }; return t.h.PASSWORDHASH;",
+    ]) {
+      expect([body, leakCols(r8(body)).length > 0]).toEqual([body, true]);
+    }
+    expect(leakCols(r8("const t = { h: u }; t.h = null; return { id: 1 };"))).toEqual([]);
+  });
+});
+
+describe("analyzeProtectFlow — round 8: logical assignment and element positions", () => {
+  test("`a ||= b` / `a ??= b` evaluate to a's current value", () => {
+    for (const body of [
+      "let a = u; const x = (a ||= 1); return x.passwordHash;",
+      "const t = { h: u }; const x = (t.h ??= 1); return x.passwordHash;",
+      "let a = u; const x = (a &&= a); return x.pin;",
+      "globalThis.k70 = u; const x = (globalThis.k70 ??= {}); return x.passwordHash;",
+    ]) {
+      expect([body, leakCols(r8(body)).length > 0]).toEqual([body, true]);
+    }
+  });
+
+  test("a function stored in an ELEMENT of a global container is reached by element reads, not by every named call", () => {
+    // Base: writing a global-derived value into a container recorded every global
+    // function as "stored where no name is readable", so `Math.min(u.pin, 1)`
+    // applied `keep` with the pin — a false global store (g2-deep on main).
+    expect(leakCols(r8('globalThis.keep = function (v) { globalThis.kept = v; }; const S = new Map(); S.set("k", globalThis.cfg); return Math.min(u.pin, 1) == 3;'))).toEqual([]);
+    for (const body of [
+      'globalThis.keep = function (v) { globalThis.kept = v; }; const S = new Map(); S.set("k", globalThis.cfg); globalThis.keep(u.pin); return 1;',
+      'const S = new Map(); S.set("k", globalThis.cfg); S.set("f", function (v) { globalThis.kept = v; }); S.get("f")(u.pin); return 1;',
+      "globalThis.arr = []; globalThis.arr.push(function (v) { return v; }); return globalThis.arr[0](u.passwordHash);",
+      "globalThis.arr2 = []; globalThis.arr2.push({ m(v) { return v; } }); return globalThis.arr2[0].m(u.passwordHash);",
+      'globalThis.m3 = new Map(); globalThis.m3.set("k", { m(v) { return v; } }); const g = globalThis.m3.get("k"); return g.m(u.passwordHash);',
+      "globalThis.arr4 = []; globalThis.arr4.push({ m(v) { return v; } }); for (const g of globalThis.arr4) { return g.m(u.passwordHash); } return 1;",
+    ]) {
+      expect([body, leakCols(r8(body)).length > 0]).toEqual([body, true]);
+    }
+  });
+});
+
+describe("analyzeProtectFlow — r8b: a spelled path through an element is not a name", () => {
+  test("functions stored in global array elements are reached by spelled index paths, iterators and tags", () => {
+    // S239 review of round 8 (DO-NOT-LAND): all served the hash at the round-8 head.
+    for (const body of [
+      "globalThis.arrA = []; globalThis.arrA.push({ m: function (r) { s = r.passwordHash; } }); globalThis.arrA[0].m(u); return { v: s };",
+      "globalThis.arrB = []; globalThis.arrB.push({ m: function (r) { return r.passwordHash; } }); return { v: globalThis.arrB[0].m(u) };",
+      "globalThis.arrC = []; globalThis.arrC.push(function (r) { s = r.passwordHash; }); const it = globalThis.arrC[Symbol.iterator](); it.next().value(u); return { v: s };",
+      "globalThis.arrD = []; globalThis.arrD.push(function (strs, r) { s = r.passwordHash; }); globalThis.arrD[0]`${u}`; return { v: s };",
+      "globalThis.a8 = []; globalThis.a8.push({ m: { n: function (r) { s = r.passwordHash; } } }); globalThis.a8[0].m.n(u); return { v: s };",
+      "const loc = { m: function (r) { s = r.passwordHash; } }; globalThis.a19 = []; globalThis.a19.push(loc); globalThis.a19[0].m(u); return { v: s };",
+    ]) {
+      expect([body, leakCols(r8("let s = ''; " + body)).length > 0]).toEqual([body, true]);
+    }
+  });
+});
+
+describe("analyzeProtectFlow — r8b: pre-existing HIGHs closed (callback to a global callee, assignment value, accessor-returned functions)", () => {
+  test("each served the hash on base and round 8", () => {
+    for (const body of [
+      // P1b — a global function handed a callback may call it with protected data in scope
+      "globalThis.run2 = function (f) { f(u.passwordHash); }; globalThis.run2(function (x) { s = x; }); return { v: s };",
+      "globalThis.run1 = function (f) { return f(u.passwordHash); }; return { v: run1(function (x) { return x; }) };",
+      // P2 — `x = (target = v)` is in the target's alias class
+      "const x = (globalThis.k94 = {}); x.h = u.passwordHash; return { v: globalThis.k94.h };",
+      "let y; const x = (y = {}); x.h = u.passwordHash; return { v: y.h };",
+      "const o = {}; const x = (o.k = {}); x.h = u.passwordHash; return o;",
+      // P4 — a function an accessor returns is the property's value
+      "const o = { h: u.passwordHash }; Object.defineProperty(o, 'toString', { get: function () { return function () { s = this.h; return ''; }; } }); const z = String(o); return { v: s };",
+      "const o = { h: u.passwordHash, get toString() { return function () { s = this.h; return ''; }; } }; const z = `${o}`; return { v: s };",
+      "const o = {}; Object.defineProperty(o, 'm', { get: function () { return function (r) { s = r.passwordHash; }; } }); o.m(u); return { v: s };",
+    ]) {
+      expect([body, leakCols(r8("let s = ''; " + body)).length > 0]).toEqual([body, true]);
+    }
+    for (const body of [
+      "const o = {}; const x = (o.k = {}); x.h = u.name; return { o, id: u.id };",
+      "const o = { h: u.name, get toString() { return function () { return this.h; }; } }; return { v: `${o}`, id: u.id };",
+      "globalThis.run3 = function (f) { return f(1); }; return { v: run3(function (x) { return x; }), id: u.id };",
+    ]) {
+      expect([body, leakCols(r8(body))]).toEqual([body, []]);
+    }
+  });
+});
+
+describe("analyzeProtectFlow — r8c: Object.create's descriptor map goes through the descriptor path", () => {
+  test("a getter-returned hook in Object.create's descriptors is a hook (introduced by round 8, re-review measured)", () => {
+    const G = "{ get: function () { return function () { s = this.h; return ''; }; } }";
+    for (const body of [
+      `const o = Object.create({}, { toString: ${G}, h: { value: u.passwordHash } }); const z = String(o); return { v: s };`,
+      `const o = Object.create(null, { toString: ${G}, h: { value: u.passwordHash } }); const z = String(o); return { v: s };`,
+      `const o = Object.create({}, { toString: ${G} }); o.h = u.passwordHash; const z = String(o); return { v: s };`,
+      `const d = { toString: ${G}, h: { value: u.passwordHash } }; const o = Object.create({}, d); const z = String(o); return { v: s };`,
+      `const o = Object.create({}, { m: ${G}, h: { value: u.passwordHash } }); o.m(); return { v: s };`,
+    ]) {
+      expect([body, leakCols(r8("let s = ''; " + body)).length > 0]).toEqual([body, true]);
+    }
+    expect(leakCols(r8(`let s = ''; const o = Object.create({}, { toString: ${G}, h: { value: u.name } }); const z = String(o); return { v: s, id: u.id };`))).toEqual([]);
+  });
+});
+
+describe("analyzeProtectFlow — round 8: the round-7 performance cliff", () => {
+  // Review-measured on round 7: a 240-object `toString` chain took 13.7 s
+  // (0.47 s on base); a shared `this`-writing method on 240 receivers 40.5 s.
+  const chain = (n, line) => Array.from({ length: n }, (_, i) => line(i)).join("\n");
+  test("a long toString-hook chain finishes fast and clean", () => {
+    const body = chain(240, (i) => `const o${i} = { f${i}: ${i === 0 ? "u.name" : `o${i - 1}`}, toString: function () { return String(this.f${i}); } };`) +
+      "\nreturn { id: u.id, s: `${o239}` };";
+    const t0 = performance.now();
+    const r = analyzeProtectFlow(r8(body));
+    expect(r.saturated).toBe(false);
+    expect(r.leaks).toEqual([]);
+    expect(performance.now() - t0).toBeLessThan(10000);
+  }, 30000);
+
+  test("a this-writing method shared by many receivers finishes fast and clean", () => {
+    const body = "const w = function (v) { this.x = v; return this; };\n" +
+      chain(240, (i) => `const o${i} = { f${i}: ${i}, toString: function () { return String(this.f${i}); } }; o${i}.w = w; o${i}.w(o${i === 0 ? 0 : i - 1});`) +
+      "\nreturn { id: u.id, s: `${o239}` };";
+    const t0 = performance.now();
+    const r = analyzeProtectFlow(r8(body));
+    expect(r.saturated).toBe(false);
+    expect(r.leaks).toEqual([]);
+    expect(performance.now() - t0).toBeLessThan(10000);
+  }, 30000);
+
+  test("coercions still carry their argument's hooks (they are analysed where stored)", () => {
+    for (const body of [
+      "const o = { toString: function () { return u.passwordHash; } }; return String(o);",
+      "const o = { valueOf: function () { return u.pin; } }; return Number(o);",
+      "const o = { [Symbol.toPrimitive]: function () { return u.pin; } }; return Number(o);",
+      "const o = { toString: function () { return this.s; }, s: '' }; o.s = u.passwordHash; return String(o);",
+      "return String(u.passwordHash);",
+      "return Number(u.pin);",
+    ]) {
+      expect([body, leakCols(r8(body)).length > 0]).toEqual([body, true]);
+    }
+  });
+});
+
+describe("analyzeProtectFlow — round 9: a global logical assignment's value is the object the target holds", () => {
+  test("a write through `(global ??= {})` / `||=` / `&&=` is a write into the global heap (served the hash on base, all three sinks)", () => {
+    for (const body of [
+      "const x = (globalThis.k90 ??= {}); x.h = u.passwordHash; return { v: globalThis.k90.h };",
+      "const x = (globalThis.k91 ||= {}); x.h = u.passwordHash; return { v: globalThis.k91.h };",
+      "globalThis.k92 = {}; const x = (globalThis.k92 &&= {}); x.h = u.passwordHash; return { v: globalThis.k92.h };",
+      "const g = globalThis; const x = (g.k97 ??= {}); x.h = u.passwordHash; return { v: globalThis.k97.h };",
+      "const x = (globalThis.k98 ??= []); x.push(u.passwordHash); return { v: globalThis.k98[0] };",
+      "const x = (globalThis.k99 ??= new Map()); x.set('a', u.passwordHash); return { v: globalThis.k99.get('a') };",
+      "globalThis.k100 = { a: {} }; const x = (globalThis.k100.a ??= {}); x.h = u.passwordHash; return { v: globalThis.k100.a.h };",
+      "const x = (globalThis['k' + 101] ??= {}); x.h = u.passwordHash; return { v: globalThis.k101.h };",
+      "const x = (process.k104 ??= {}); x.h = u.passwordHash; return { v: process.k104.h };",
+    ]) {
+      expect([body, leakCols(r8(body)).length > 0]).toEqual([body, true]);
+    }
+    expect(leakCols(r8("const x = (globalThis.k105 ??= {}); x.h = u.name; return { v: globalThis.k105.h, id: u.id };"))).toEqual([]);
+  });
+});
+
+describe("analyzeProtectFlow — round 9: the compiler-owned session store is modelled by summary", () => {
+  const sqlite = `import { Database as _ScrmlSessionDatabase } from "bun:sqlite";
+const _scrml_session_db_path = "a";
+${SESSION_STORE_SQLITE_TEXT}
+function mw(sid) { const r = _scrml_session_store.get(sid); return r; }`;
+  const memory = `${SESSION_STORE_MEMORY_TEXT}
+function mw(sid) { const r = _scrml_session_store.get(sid); return r; }`;
+  const S = (body, extra) => r8(body).replace("const _scrml_sql =", `${extra}\nconst _scrml_sql =`);
+  test("JSON drops the row's markers; an author object in the slot is applied; a write through the binding is a global store", () => {
+    for (const body of [
+      'globalThis.__scrml_session_stores = { a: { get(k) { return { uid: u.passwordHash }; } } }; return { v: mw("s").uid };',
+      '_scrml_session_store.set("k", { h: u.passwordHash }); return { v: 1 };',
+      '_scrml_session_store.set("k", u); return { v: 1 };',
+      "_scrml_session_store.x = u.passwordHash; return { v: 1 };",
+      'globalThis.__scrml_session_stores.a.get = function (k) { return u.passwordHash; }; return { v: mw("s") };',
+      'function setIt() { _scrml_session_store.set("k", u); } setIt(); return { v: mw("k").passwordHash };',
+      "const o = _scrml_session_store; o.y = u.passwordHash; return { v: 1 };",
+    ]) {
+      expect([body, leakCols(S(body, sqlite)).length > 0]).toEqual([body, true]);
+    }
+    for (const body of [
+      'globalThis.__scrml_session_store = { get(k) { return { uid: u.passwordHash }; } }; return { v: mw("s").uid };',
+      '_scrml_session_store.set("k", { h: u.passwordHash }); return { v: 1 };',
+      "_scrml_session_store.x = u.passwordHash; return { v: 1 };",
+      'globalThis.__scrml_session_store.set("s", u); return { v: mw("s").passwordHash };',
+    ]) {
+      expect([body, leakCols(S(body, memory)).length > 0]).toEqual([body, true]);
+    }
+    expect(leakCols(S('_scrml_session_store.set("k", { id: u.id }); return { v: _scrml_session_store.get("k"), w: mw("s") };', sqlite))).toEqual([]);
+    expect(leakCols(S('_scrml_session_store.set("k", u); return { v: mw("k") };', memory))).toEqual([]);
+  });
+
+  test("the store's own functions are not walked (the summary replaces them)", () => {
+    // Walked, the store's object literal would mint closures for get / set / delete.
+    const withStore = analyzeProtectFlow(S("return { id: u.id };", sqlite));
+    const changed = analyzeProtectFlow(S("return { id: u.id };", sqlite.replace("delete(key) {", "delete(k2) {")));
+    expect(withStore.leaks).toEqual([]);
+    expect(changed.leaks).toEqual([]);
+  });
+});
+
+describe("analyzeProtectFlow — round 9: element-returning built-ins hand back the receiver's elements", () => {
+  const F = "function (r) { s = r.passwordHash; }";
+  test("global (spelled and aliased) and local receivers — every form served the hash on base", () => {
+    for (const body of [
+      `globalThis.g1 = new Map(); globalThis.g1.set('k', ${F}); [...globalThis.g1.values()][0](u); return { v: s };`,
+      `globalThis.g2 = []; globalThis.g2.push(${F}); globalThis.g2.slice()[0](u); return { v: s };`,
+      `globalThis.g3 = []; globalThis.g3.push(${F}); globalThis.g3.values().next().value(u); return { v: s };`,
+      `globalThis.g4 = []; globalThis.g4.push(${F}); globalThis.g4.entries().next().value[1](u); return { v: s };`,
+      `globalThis.g6 = new Map(); globalThis.g6.set(${F}, 1); for (const [g] of globalThis.g6) g(u); return { v: s };`,
+      `globalThis.g7 = new Map(); globalThis.g7.set(${F}, 1); globalThis.g7.keys().next().value(u); return { v: s };`,
+      `globalThis.g8 = []; globalThis.g8.push(${F}); globalThis.g8.concat([])[0](u); return { v: s };`,
+      `globalThis.g14 = []; globalThis.g14.push(${F}); globalThis.g14.values().toArray()[0](u); return { v: s };`,
+      `globalThis.g16 = new Set(); globalThis.g16.add(${F}); globalThis.g16.values().next().value(u); return { v: s };`,
+      `const l1 = []; l1.push(${F}); l1.values().next().value(u); return { v: s };`,
+      `const l3 = new Map(); l3.set(${F}, 1); for (const [g] of l3) g(u); return { v: s };`,
+      `const l4 = [${F}]; l4.slice()[0](u); return { v: s };`,
+      `const l10 = [${F}]; l10[Symbol.iterator]().next().value(u); return { v: s };`,
+      `const l11 = { m: ${F} }; const w = new WeakRef(l11); w.deref().m(u); return { v: s };`,
+      "const mp = new Map([['k', function () { s = this.h; return ''; }]]); const o = { h: u.passwordHash }; o.toString = mp.values().next().value; String(o); return { v: s };",
+      "globalThis.arrE = [{}]; globalThis.arrE.slice()[0].x = u.passwordHash; return { v: 1 };",
+    ]) {
+      expect([body, leakCols(r8("let s = ''; " + body)).length > 0]).toEqual([body, true]);
+    }
+    for (const body of [
+      "globalThis.c1 = []; globalThis.c1.push(1); return { v: globalThis.c1.slice(), id: u.id };",
+      "const t = Date.now(); const o = { t }; return { o, id: u.id };",
+      "const xs = [1, 2]; return { v: xs.slice().map((x) => x + 1), id: u.id };",
+    ]) {
+      expect([body, leakCols(r8(body))]).toEqual([body, []]);
+    }
+  });
+});
+
+// Round 9 — a body is refused if the flow reports a leak OR a platform write.
+const refused = (js) => { const r = analyzeProtectFlow(js); return r.leaks.length > 0 || r.poisoned.length > 0; };
+
+describe("analyzeProtectFlow — round 9: Reflect.apply and call / apply / bind on a platform function", () => {
+  test("each served the hash on base (every shape executed first)", () => {
+    const F = "function (r) { s = r.passwordHash; }";
+    for (const body of [
+      `globalThis.arr20 = []; globalThis.arr20.push(${F}); Reflect.apply(globalThis.arr20[0], null, [u]); return { v: s };`,
+      `globalThis.arr21 = []; globalThis.arr21.push(${F}); const f = globalThis.arr21[0]; Reflect.apply(f, {}, [u]); return { v: s };`,
+      "const arr = [function (a) { s = a.u.passwordHash; }]; arr.u = u; arr.forEach(Function.prototype.call.bind(Function.prototype.call)); return { v: s };",
+    ]) {
+      expect([body, refused(r8("let s = ''; " + body))]).toEqual([body, true]);
+    }
+    expect(refused(r8("const has = Object.prototype.toString.call(u.id); return { has, id: u.id };"))).toBe(false);
+  });
+});
+
+describe("analyzeProtectFlow — round 9: the platform is not the program's to replace", () => {
+  test("writes into built-in prototypes, functions stored onto built-ins, and rebound built-in names are refused", () => {
+    for (const body of [
+      "Object.prototype.toString = function () { s = this.h; return ''; }; String({ h: u.passwordHash }); return { v: s };",
+      "Array.prototype.join = function () { s = this[0]; return ''; }; String([u.passwordHash]); return { v: s };",
+      "const P = Object.prototype; P.toString = function () { s = this.h; return ''; }; String({ h: u.passwordHash }); return { v: s };",
+      "Object.defineProperty(Object.prototype, 'toString', { value: function () { s = this.h; return ''; } }); String({ h: u.passwordHash }); return { v: s };",
+      "Object.assign(Array.prototype, { join() { s = this[0]; return ''; } }); String([u.passwordHash]); return { v: s };",
+      "({}).__proto__.toString = function () { s = this.h; return ''; }; String({ h: u.passwordHash }); return { v: s };",
+      "Object.getPrototypeOf({}).toString = function () { s = this.h; return ''; }; String({ h: u.passwordHash }); return { v: s };",
+      "({}).constructor.prototype.toString = function () { s = this.h; return ''; }; String({ h: u.passwordHash }); return { v: s };",
+      "({}).__proto__.leak = u.passwordHash; return { v: ({}).leak };",
+      "const ps = [Array.prototype]; ps[0].join = function () { s = this[0]; return ''; }; String([u.passwordHash]); return { v: s };",
+      "Object.setPrototypeOf(Array.prototype, { toJSON() { s = this[0]; return 1; } }); JSON.stringify([u.passwordHash]); return { v: s };",
+      "globalThis.String = function (f) { Reflect.apply(f, null, [u.passwordHash]); return ''; }; String(function (x) { s = x; return ''; }); return { v: s };",
+      "String = function (f) { f(u.passwordHash); return ''; }; String(function (x) { s = x; return ''; }); return { v: s };",
+      "Object.assign(globalThis, { String: function (f) { f(u.passwordHash); return ''; } }); String(function (x) { s = x; return ''; }); return { v: s };",
+      "globalThis['Str' + 'ing'] = function (f) { f(u.passwordHash); return ''; }; String(function (x) { s = x; return ''; }); return { v: s };",
+      "console.log = function (x) { s = x; }; console.log(u.passwordHash); return { v: s };",
+      "const J = JSON; J.stringify = function (x) { s = x.passwordHash; return ''; }; JSON.stringify(u); return { v: s };",
+    ]) {
+      expect([body, refused(r8("let s = ''; " + body))]).toEqual([body, true]);
+    }
+    // A built-in replaced through a route the platform-write rule cannot name is
+    // still applied at the program's own calls before the built-in model returns.
+    for (const body of [
+      "function patch(J) { J.stringify = function (x) { s = x.passwordHash; return ''; }; } patch(JSON); JSON.stringify(u); return { v: s };",
+      "const box = { J: JSON }; box.J.stringify = function (x) { s = x.passwordHash; return ''; }; JSON.stringify(u); return { v: s };",
+    ]) {
+      expect([body, refused(r8("let s = ''; " + body))]).toEqual([body, true]);
+    }
+    const r = analyzeProtectFlow(r8("Object.prototype.toString = function () { return ''; }; return { id: u.id };"));
+    expect(r.poisoned).toHaveLength(1);
+    expect(r.poisoned[0].site).toContain("Object.prototype.toString");
+    for (const body of [
+      "const name = ({}).constructor.name; return { name, id: u.id };",
+      "const t = { kind: ({}).constructor.name }; t.extra = 1; return { t, id: u.id };",
+      "globalThis.myApp = { fmt: function (x) { return String(x); } }; return { v: globalThis.myApp.fmt(u.id) };",
+      "process.env.APP_MODE = 'x'; return { id: u.id };",
+    ]) {
+      expect([body, refused(r8(body))]).toEqual([body, false]);
+    }
+  });
+
+  test("the diagnostic names the write and the resolution", () => {
+    const errs = buildProtectFlowDiagnostics(r8("Array.prototype.join = function () { return ''; }; return { id: u.id };"), [], "app.server.js", () => null);
+    const e = errs.find((x) => x.code === "E-PROTECT-006");
+    expect(e).toBeDefined();
+    expect(e.message).toContain("Array.prototype.join");
+    expect(e.message).toMatch(/platform-owned object/);
+    expect(e.message).toMatch(/Resolution:/);
+  });
+});
+
+describe("analyzeProtectFlow — round 9: code evaluators and receiver-returning built-ins", () => {
+  test("Function / eval / a .constructor called by any route is refused; valueOf returns its receiver", () => {
+    const ST = "function (r) { this.h = r.passwordHash; }";
+    for (const body of [
+      `globalThis.box14 = { h: '', set: ${ST} }; const g = Function('return this')(); g.box14.set(u); return globalThis.box14;`,
+      `globalThis.box16 = { h: '', set: ${ST} }; const F = Function; const g = F('return this')(); g.box16.set(u); return globalThis.box16;`,
+      `globalThis.box18 = { h: '', set: ${ST} }; const g = ({}).constructor.constructor('return this')(); g.box18.set(u); return globalThis.box18;`,
+      `globalThis.box19 = { h: '', set: ${ST} }; const g = globalThis.eval('globalThis'); g.box19.set(u); return globalThis.box19;`,
+      `globalThis.box20 = { h: '', set: ${ST} }; const g = Function.call(null, 'return this')(); g.box20.set(u); return globalThis.box20;`,
+      "globalThis.valueOf().x = u.passwordHash; return { v: globalThis.x };",
+      "const e = process.env.valueOf(); e.K = u.passwordHash; return { v: process.env.K };",
+    ]) {
+      expect([body, refused(r8(body))]).toEqual([body, true]);
+    }
+    expect(refused(r8("const kind = ({}).constructor.name; return { kind, id: u.id };"))).toBe(false);
+  });
+});
+
+describe("analyzeProtectFlow — round 9: Object.fromEntries stores its functions under keys from data", () => {
+  test("a hook built by fromEntries is a hook", () => {
+    for (const body of [
+      "const o = Object.fromEntries([['toString', function () { s = this.h.passwordHash; return ''; }], ['h', u]]); String(o); return { v: s };",
+      "const o = Object.fromEntries([['valueOf', function () { s = this.h.passwordHash; return 0; }], ['h', u]]); Number(o); return { v: s };",
+      "const o = Object.fromEntries(new Map([['toString', function () { s = this.h; return ''; }], ['h', u.passwordHash]])); String(o); return { v: s };",
+    ]) {
+      expect([body, refused(r8("let s = ''; " + body))]).toEqual([body, true]);
+    }
+  });
+});
+
+describe("analyzeProtectFlow — round 9: bind with leading arguments shifts the parameters", () => {
+  test("a bound function prepends its bound arguments", () => {
+    for (const body of [
+      "const g = function (y, x) { s = x; }; const b = g.bind(null, 1); b(u.passwordHash); return { v: s };",
+      "globalThis.c3 = function (f) { f(u.passwordHash); }; const g = function (y, x) { s = x; }; globalThis.c3(g.bind(null, 1)); return { v: s };",
+      "const g = function (a, b, x) { s = x; }; const b1 = g.bind(null, 1); const b2 = b1.bind(null, 2); b2(u.passwordHash); return { v: s };",
+      "const g = function (y, x) { s = x; }; [u.passwordHash].forEach(g.bind(null, 0)); return { v: s };",
+      "let b = function (y, x) { s = x; }; b = b.bind(null, 1); b(u.passwordHash); return { v: s };",
+    ]) {
+      expect([body, refused(r8("let s = ''; " + body))]).toEqual([body, true]);
+    }
+    expect(refused(r8("const g = function (y, x) { return y + x; }; const b = g.bind(null, 1); return { v: b(u.id) };"))).toBe(false);
+  });
+});
+
+describe("analyzeProtectFlow — round 9: Array species", () => {
+  test("a species constructor receives the result's elements", () => {
+    for (const m of ["map((x) => x)", "filter(() => true)", "slice()", "concat([])"]) {
+      const body = `const cap = []; const a = [u.passwordHash]; a.constructor = { [Symbol.species]: function () { return cap; } }; a.${m}; return { v: cap };`;
+      expect([body, refused(r8(body))]).toEqual([body, true]);
+    }
+    expect(refused(r8("const a = [u.id, 2]; return { v: a.map((x) => x + 1).filter((x) => x > 1).slice(0, 1) };"))).toBe(false);
+  });
+});
+
+describe("analyzeProtectFlow — r9 fix round (S239 review of round 9)", () => {
+  const memory = `${SESSION_STORE_MEMORY_TEXT}
+function putIt(u) { _scrml_session_store.set("k", {}); _scrml_session_store.get("k").h = u.passwordHash; }`;
+  const sqlite = `import { Database as _ScrmlSessionDatabase } from "bun:sqlite";
+const _scrml_session_db_path = "a";
+${SESSION_STORE_SQLITE_TEXT}
+function mw(sid) { return _scrml_session_store.get(sid); }`;
+  const S = (body, extra) => r8(body).replace("const _scrml_sql =", `${extra}\nconst _scrml_sql =`);
+
+  test("R1 — the MEMORY store hands back the LIVE stored object (served the hash cross-request on round 9)", () => {
+    for (const body of [
+      'putIt(u); return { v: _scrml_session_store.get("k").h };',
+      '_scrml_session_store.set("k", {}); const r = _scrml_session_store.get("k"); r.h = u.passwordHash; return { v: 1 };',
+      '_scrml_session_store.set("k", []); _scrml_session_store.get("k").push(u.passwordHash); return { v: 1 };',
+      "let s = ''; _scrml_session_store.set(\"x\", { f: function (y) { s = y; } }); _scrml_session_store.get(\"x\").f(u.passwordHash); return { v: s };",
+      "let s = ''; _scrml_session_store.set(\"x\", (y) => { s = y; }); _scrml_session_store.get(\"x\")(u.passwordHash); return { v: s };",
+      '_scrml_session_store.set("x", { h: "" }); for (const [k, o] of _scrml_session_store) o.h = u.passwordHash; return { v: 1 };',
+    ]) {
+      expect([body, refused(S(body, memory))]).toEqual([body, true]);
+    }
+    expect(refused(S('_scrml_session_store.set("k", { n: 1 }); return { v: _scrml_session_store.get("k").n, id: u.id };', memory))).toBe(false);
+  });
+
+  test("R4 — whatever reaches the store by any route is what `.get` returns", () => {
+    for (const body of [
+      'const s2 = _scrml_session_store; s2.set("k", u); return { v: mw("k").passwordHash };',
+      '_scrml_session_store["set"]("k", u); return { v: mw("k").passwordHash };',
+      'globalThis.__scrml_session_stores.a.set("k", u); return { v: mw("k").passwordHash };',
+      'Object.values(globalThis.__scrml_session_stores)[0].set("k", u); return { v: mw("k").passwordHash };',
+    ]) {
+      expect([body, refused(S(body, sqlite))]).toEqual([body, true]);
+    }
+    // A row kept in an unrelated global does not reach the store.
+    expect(refused(S('globalThis.rowCache = u; return { v: mw("k"), id: u.id };', sqlite))).toBe(false);
+  });
+
+  test("R2 — bind keeps the global candidates whatever its own arguments", () => {
+    for (const body of [
+      "let s = ''; globalThis.a1 = { f: function (x) { s = x; } }; const b = globalThis.a1.f.bind({}); b(u.passwordHash); return { v: s };",
+      "globalThis.a2 = { f: function () { return u.passwordHash; } }; return { v: globalThis.a2.f.bind({})() };",
+      "let s = ''; globalThis.a3 = []; globalThis.a3.push({ f: function (x) { s = x; } }); const b = globalThis.a3[0].f.bind({}); b(u.passwordHash); return { v: s };",
+    ]) {
+      expect([body, refused(r8(body))]).toEqual([body, true]);
+    }
+  });
+
+  test("R3 — the program's own prototypes and constructors MUST compile; the built-ins' stay refused", () => {
+    for (const body of [
+      "const Pt = function (x) { this.x = x; }; Pt.prototype.norm = function () { return this.x * 2; }; const p = new Pt(u.id); return { v: p.norm() };",
+      "const Pt = function (x) { this.x = x; }; Pt.prototype.kind = 'pt'; return { v: new Pt(1).kind, id: u.id };",
+      "const o = { a: 1 }; const c = new o.constructor(); return { c, id: u.id };",
+      "const Pt = function () {}; const p = new Pt(); const q = new p.constructor(); return { id: u.id };",
+      "globalThis['cache_' + u.id] = { n: 1 }; return { id: u.id };",
+      "globalThis[`cache_${u.id}`] = { n: 1 }; return { id: u.id };",
+      "const proto = { kind: 'x' }; const ownObj = Object.create(proto); Object.getPrototypeOf(ownObj).extra = 1; return { id: u.id };",
+      "const Pt = function () {}; const ownObj = new Pt(); Object.getPrototypeOf(ownObj).extra = 1; return { id: u.id };",
+      "const proto = { kind: 'x' }; const o2 = { __proto__: proto, a: 1 }; o2.__proto__.extra = 1; return { id: u.id };",
+    ]) {
+      expect([body, refused(r8(body))]).toEqual([body, false]);
+    }
+    for (const body of [
+      "Object.getPrototypeOf({ a: 1 }).extra = u.passwordHash; return { v: ({}).extra };",
+      "({ a: 1 }).constructor.prototype.x = 1; return { id: u.id };",
+      "globalThis['Str' + 'ing'] = function () { return ''; }; return { id: u.id };",
+      "const g = (function () {}).constructor('return this')(); return { id: u.id };",
+    ]) {
+      expect([body, refused(r8(body))]).toEqual([body, true]);
+    }
+  });
+});
+
+describe("analyzeProtectFlow — r9 re-review: the session-store summary is a fail-closed precondition", () => {
+  // Any program touch of the store outside `B.get / .set / .delete(…)` calls — or of
+  // the registry, or of the global object as a value — disables the summary; the
+  // store is then analysed faithfully. Each shape below served the hash on 79cf49f77.
+  for (const variant of ["sqlite", "memory"]) {
+    const extra = variant === "sqlite"
+      ? `import { Database as _ScrmlSessionDatabase } from "bun:sqlite";\nconst _scrml_session_db_path = "a";\n${SESSION_STORE_SQLITE_TEXT}\nfunction mw(sid) { return _scrml_session_store.get(sid); }`
+      : `${SESSION_STORE_MEMORY_TEXT}\nfunction mw(sid) { return _scrml_session_store.get(sid); }`;
+    const R = variant === "sqlite" ? "globalThis.__scrml_session_stores" : "globalThis.__scrml_session_store";
+    const S = (body) => r8("let s = ''; " + body).replace("const _scrml_sql =", `${extra}\nconst _scrml_sql =`);
+    test(`${variant}: overwriting / registering a store function, by any route`, () => {
+      for (const body of [
+        '_scrml_session_store.get = function (k) { return u.passwordHash; }; return { v: _scrml_session_store.get("k") };',
+        'const box = { v: "" }; _scrml_session_store.get = function (k) { box.v = k; return 1; }; _scrml_session_store.get(u.passwordHash); return { v: box.v };',
+        `_scrml_session_store.zz = function (x) { s = x; }; Object.values(${variant === "sqlite" ? R : "{ a: " + R + " }"})[0].zz(u.passwordHash); return { v: s };`,
+        `_scrml_session_store.zz = function (x) { s = x; }; ${variant === "sqlite" ? R + ".a" : R}.zz(u.passwordHash); return { v: s };`,
+        'const box = { v: "" }; _scrml_session_store.set = function (k, v) { box.v = v; }; _scrml_session_store.set("k", u.passwordHash); return { v: box.v };',
+        'const box = { v: "" }; _scrml_session_store.delete = function (k) { box.v = k; }; _scrml_session_store.delete(u.passwordHash); return { v: box.v };',
+        'const st = _scrml_session_store; st.get = function (k) { return u.passwordHash; }; return { v: _scrml_session_store.get("k") };',
+        '_scrml_session_store["g" + "et"] = function (k) { return u.passwordHash; }; return { v: _scrml_session_store.get("k") };',
+        'Object.defineProperty(_scrml_session_store, "get", { value: function (k) { return u.passwordHash; } }); return { v: _scrml_session_store.get("k") };',
+        'Object.assign(_scrml_session_store, { get(k) { return u.passwordHash; } }); return { v: _scrml_session_store.get("k") };',
+        'const n = "get"; _scrml_session_store[n] = function (k) { return u.passwordHash; }; return { v: _scrml_session_store.get("k") };',
+        `_scrml_session_store.zz = function (x) { s = x; }; for (const k in ${R}) ${R}[k].zz?.(u.passwordHash); return { v: s };`,
+        `_scrml_session_store.zz = function (x) { s = x; }; const g = globalThis; ${variant === "sqlite" ? 'g["__scrml_session_stores"].a' : 'g["__scrml_session_store"]'}.zz(u.passwordHash); return { v: s };`,
+        `_scrml_session_store.zz = function (x) { s = x; }; const k = "__scrml_" + "session_store${variant === "sqlite" ? "s" : ""}"; globalThis.globalThis[k]${variant === "sqlite" ? ".a" : ""}.zz(u.passwordHash); return { v: s };`,
+      ]) {
+        expect([body, refused(S(body))]).toEqual([body, true]);
+      }
+      expect(refused(S('_scrml_session_store.set("k", { n: 1 }); return { v: _scrml_session_store.get("k"), w: mw("s"), id: u.id };'))).toBe(false);
+    });
+  }
+  test("a program-stored global method named like a built-in returns what it returns, even when its arguments do not matter", () => {
+    expect(refused(r8("globalThis.box = { get(k) { return u.passwordHash; } }; return { v: globalThis.box.get('k') };"))).toBe(true);
+    expect(refused(r8("globalThis.box2 = { get(k) { return u.name; } }; return { v: globalThis.box2.get('k'), id: u.id };"))).toBe(false);
   });
 });
 

@@ -28,6 +28,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // `outsideEl` is declared OUTSIDE the gated subtree; `insideEl` INSIDE it.
 // `@shown` seeds false so §1 can also cover the boot-time-true variant below.
@@ -46,7 +47,7 @@ const SRC = `<page>
 // Same shape, predicate TRUE at seed — the pre-first-paint variant.
 const SRC_OPEN = SRC.replace("<shown> = false", "<shown> = true");
 
-const tmpRoot = resolve("/tmp", "scrml-if-ref-clobber");
+const tmpRoot = resolve(tmpdir(), "scrml-if-ref-clobber");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

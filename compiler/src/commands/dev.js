@@ -869,6 +869,21 @@ export const CHILD_READY_PREFIX = "__SCRML_DEV_CHILD_READY__ ";
 // collision between two child spawns in one parent process).
 let childCfgSeq = 0;
 
+// Every app child this parent has spawned and that has not yet exited — the one
+// STARTING (spawned, not yet ready, so not yet `appChild`), the LIVE one, and an
+// old one inside its kill-grace window. The parent's exit/signal reaper kills all
+// of them; killing only the current `appChild` orphaned a respawn that was still
+// starting when the parent was stopped (s447-dev-child-leak — ~3 orphans per
+// commands-suite run, S445 measured 81 ≈ 3 GB).
+const spawnedAppChildren = new Set();
+
+/** Kill every app child this parent spawned that is still running. */
+function killAllAppChildren() {
+  for (const proc of spawnedAppChildren) {
+    try { proc.kill(); } catch { /* already gone */ }
+  }
+}
+
 /**
  * The hot-reload client itself. Served AS A FILE at `HOT_RELOAD_SRC`, not
  * inlined into the page.
@@ -1552,30 +1567,44 @@ export function launchingProcessGone(launchPpid) {
  * `/_scrml/live-reload` + hot-reload endpoints are simply never reached because
  * the parent proxy serves those from its own stable port.
  *
+ * ORPHAN GUARD. The child exits when the `scrml dev` parent that spawned it is
+ * gone. It guards against `parentPid` — the parent's own pid, written into the
+ * child config by `spawnAppChild` — NOT against whatever `process.ppid` is by
+ * the time the server is up: a parent that dies while the child is still
+ * loading routes has already been replaced as ppid by init / a subreaper
+ * (systemd --user), and a guard keyed to THAT pid never fires (the
+ * s447-dev-child-leak orphans: ppid = systemd --user, listening, idle forever).
+ * The guard is armed BEFORE route loading, so a child stuck at import also exits.
+ *
  * @param {string} serveDir
  * @param {object} opts   parsed dev opts (the port is overridden to 0 here)
+ * @param {string[]|null} [serverModules]
+ * @param {number} [parentPid]  pid of the spawning `scrml dev`; defaults to the
+ *   current `process.ppid` (a caller that is not `spawnAppChild`)
  * @returns {Promise<never>}
  */
-export async function runDevChildServer(serveDir, opts, serverModules = null) {
+export async function runDevChildServer(serveDir, opts, serverModules = null, parentPid = process.ppid) {
+  let server = null;
+  const shutdownIfOrphaned = () => {
+    if (!launchingProcessGone(parentPid)) return;
+    try { server?.stop(true); } catch { /* already stopped */ }
+    process.exit(0);
+  };
+  // The parent may already be gone (it died before this process got here).
+  shutdownIfOrphaned();
+  const guard = setInterval(shutdownIfOrphaned, 2000);
+  guard.unref?.();
+
   await loadServerRoutes(serveDir, serverModules);
   // The child is INTERNAL: only the parent proxy (which dials the 127.0.0.1
   // literal) talks to it, so it binds IPv4 loopback only, regardless of
   // `--host` — the browser-facing parent is the only listener `--host` exposes.
-  const server = listen(buildServeConfig({ ...opts, port: 0 }, serveDir), "127.0.0.1", { ipv6Twin: false });
+  server = listen(buildServeConfig({ ...opts, port: 0 }, serveDir), "127.0.0.1", { ipv6Twin: false });
   // C18 (§38.6): channel `broadcast()` runs in THIS child; publishing on the
   // child server reaches the parent's upstream proxy socket, which forwards to
   // the browser — so realtime survives the proxy.
   globalThis._scrml_active_server = server;
   console.log(`${CHILD_READY_PREFIX}${server.port}`);
-
-  // Orphan guard — if the parent dev process dies, do not linger holding the port.
-  const launchPpid = process.ppid;
-  const guard = setInterval(() => {
-    if (!launchingProcessGone(launchPpid)) return;
-    try { server.stop(true); } catch { /* already stopped */ }
-    process.exit(0);
-  }, 2000);
-  guard.unref?.();
   await new Promise(() => {});
 }
 
@@ -1589,12 +1618,17 @@ export async function runDevChildServer(serveDir, opts, serverModules = null) {
  */
 async function spawnAppChild(serveDir, opts) {
   const cfgPath = join(tmpdir(), `scrml-dev-child-${process.pid}-${childCfgSeq++}.json`);
-  writeFileSync(cfgPath, JSON.stringify({ serveDir, opts, serverModules: lastCompileServerModules }));
+  // `parentPid`: the child's orphan guard follows THIS pid (see runDevChildServer).
+  writeFileSync(cfgPath, JSON.stringify({ serveDir, opts, serverModules: lastCompileServerModules, parentPid: process.pid }));
 
   const proc = Bun.spawn(
     [process.execPath, process.argv[1], "dev", "--__dev-child", cfgPath],
     { stdout: "pipe", stderr: "inherit", stdin: "ignore" },
   );
+  // Tracked from the moment it exists — before it is ready, before it becomes
+  // `appChild` — so no exit path of this parent can miss it.
+  spawnedAppChildren.add(proc);
+  proc.exited.then(() => spawnedAppChildren.delete(proc), () => spawnedAppChildren.delete(proc));
 
   let port;
   try {
@@ -1812,6 +1846,9 @@ const wsProxyHandlers = {
  * @param {string[]} args — raw argv slice after "dev"
  */
 export async function runDev(args) {
+  // Captured before anything else runs: the app child's fallback launcher pid when
+  // its config carries no `parentPid` (see runDevChildServer's orphan guard).
+  const launchPpidAtEntry = process.ppid;
   // §47.14 / §8.1.1 (ruling:user-voice-scrml.md S445 — "dev / compile keep S445 item 6:
   // relative to the declaring `.scrml` file") — SCRML_DATA_DIR is the BUILT server's
   // data root. `scrml dev` opens each database beside its declaring file, so it drops the
@@ -1834,7 +1871,7 @@ export async function runDev(args) {
     // The child owns its config file from here — delete it immediately so a later
     // hard-kill of either process cannot leak it in the temp dir.
     try { rmSync(cfgPath, { force: true }); } catch { /* parent may have removed it */ }
-    await runDevChildServer(cfg.serveDir, cfg.opts, cfg.serverModules ?? null);
+    await runDevChildServer(cfg.serveDir, cfg.opts, cfg.serverModules ?? null, cfg.parentPid ?? launchPpidAtEntry);
     return;
   }
 
@@ -1890,10 +1927,16 @@ export async function runDev(args) {
     respawnChain = run.catch(() => {});
     return run;
   }
-  function killAppChild() { try { appChild?.proc.kill(); } catch { /* already gone */ } }
-  process.on("exit", killAppChild);
-  process.on("SIGINT", () => { killAppChild(); process.exit(0); });
-  process.on("SIGTERM", () => { killAppChild(); process.exit(0); });
+  // Reap EVERY spawned child (starting / live / in grace — see spawnedAppChildren)
+  // on the exit paths this process owns: a normal exit, Ctrl+C, a harness's SIGTERM.
+  // SIGHUP is deliberately NOT handled: a listener would override `nohup`'s
+  // inherited ignore (a nohup-started dev server would then die on HUP). A parent
+  // that dies of an unhandled HUP — or of SIGKILL — is covered by each child's own
+  // orphan guard, which exits within one 2 s poll of the parent's death.
+  process.on("exit", killAllAppChildren);
+  for (const sig of ["SIGINT", "SIGTERM"]) {
+    process.on(sig, () => { killAllAppChildren(); process.exit(0); });
+  }
 
   // The STABLE public server: dev-infra endpoints are served here (so the
   // hot-reload SSE stream survives every child respawn); everything else is
@@ -1968,7 +2011,11 @@ export async function runDev(args) {
   // NON-INTERACTIVE stdin so a human's terminal `scrml dev` — whose parent shell
   // is its rightful owner — is never affected.
   if (!process.stdin.isTTY) {
-    const launchPpid = process.ppid;
+    // The ppid captured at ENTRY, not now: a launcher that died during the initial
+    // compile / first child spawn has already been replaced as ppid by init or a
+    // subreaper, and a guard keyed to that pid would never fire (s447-dev-child-leak).
+    // The exit below runs the `exit` reaper, which kills every app child too.
+    const launchPpid = launchPpidAtEntry;
     const parentDeathTimer = setInterval(() => {
       if (!launchingProcessGone(launchPpid)) return;
       console.error("[dev] launching process is gone — shutting down so the watcher is not orphaned");

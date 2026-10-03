@@ -1,5 +1,9 @@
 # compiler/tests/self-host — retired (s430-stage-swap)
 
+> S447: the `compiler/self-host/` tree these files exercised was itself removed
+> (s447-retire-self-host-v1); it survives in git history. The bootstrap compiler is
+> `compiler/self-host-v2/`.
+
 The four per-module "self-host parity" test files that lived here were retired by
 `s430-stage-swap` (bryan S430 ruling P5). They are not coming back in this shape.
 

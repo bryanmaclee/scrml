@@ -1,0 +1,13 @@
+// §6.7.4 — a nested effect.
+<program>
+  <n> = 0
+  <m> = 0
+  function beacon(v) {
+    return v
+  }
+  <effect deps=[@n]>${
+    beacon(@n)
+    <effect deps=[@m]>${ beacon(@m) }</>
+  }</>
+  <p>${@n}</p>
+</program>

@@ -76,8 +76,9 @@ import { generateMachineTestJs, projectStateChildRules } from "./emit-machine-pr
 import { generateWorkerJs } from "./emit-worker.ts";
 import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
-import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding } from "./log-loc.ts";
+import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding, resolveSpanLineCol } from "./log-loc.ts";
 import { resetUnattributableSessionUnits, drainUnattributableSessionUnits } from "./session-config-resolve.ts";
+import { setServerSessionUserCell, resetServerAmbientSessionRefusals, drainServerAmbientSessionRefusalErrors, fileScopeDeclaresSessionCell, fileNodesOf } from "./server-session-guard.ts";
 import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive, resetTildeUnresolvedErrors, drainTildeUnresolvedErrors, setCurrentFileRequestIds, setServerAsyncClassifier, resetSessionValueUseErrors } from "./emit-expr.ts";
 import {
   buildChunkNamespaceState,
@@ -1169,6 +1170,8 @@ export function resetCodegenModuleState(): void {
   setPrintShadowedNames([]);
   setSessionShadowedInFile(false);
   setSessionProjectionActive(false);
+  setServerSessionUserCell(false);
+  resetServerAmbientSessionRefusals();
   setCurrentUserAmbientActive(false); // also resets rewrite.ts + expression-parser mirrors
   setCurrentFileRequestIds(null);
   setServerAsyncClassifier(null);
@@ -1530,6 +1533,9 @@ export function runCG(input: CgInput): CgOutput {
     // builtin, so its member / index / call lowerings step aside (honor the user's
     // value). Mirrors the render/log shadow flags — set per-file by runCG.
     setSessionShadowedInFile(fileDeclaresFileScopeBinding(fileAST, "session") || collectReactiveVarNames(fileAST).has("session"));
+    // §6.6.9 / §20.5 (S449) — a FILE-SCOPE user `<session>` cell owns `@session` (not a component-local one); otherwise a
+    // server `@session` lowering is refused (server-session-guard.ts backstop).
+    setServerSessionUserCell(fileScopeDeclaresSessionCell(fileNodesOf(fileAST)));
     // §52 (S233) — default the `@currentUser` ambient OFF in worker bundles
     // (re-set per-file in the main emit loop). A worker carries no session.
     setCurrentUserAmbientActive(false);
@@ -2335,6 +2341,9 @@ export function runCG(input: CgInput): CgOutput {
       // worker-loop note above). A file-scope `let session` / `<session>` cell shadows
       // the reserved server establishment builtin file-wide.
       setSessionShadowedInFile(fileDeclaresFileScopeBinding(fileAST, "session") || collectReactiveVarNames(fileAST).has("session"));
+      // §6.6.9 / §20.5 (S449) — a FILE-SCOPE user `<session>` cell owns `@session` (not a component-local one); otherwise a
+      // server `@session` lowering is refused (server-session-guard.ts backstop).
+      setServerSessionUserCell(fileScopeDeclaresSessionCell(fileNodesOf(fileAST)));
       // §52 (S233) — default the `@currentUser` ambient OFF; re-set per-file below.
       setCurrentUserAmbientActive(false);
       // s430-emit-state-leak — install THIS file's emit-logic state (§6.8
@@ -3180,6 +3189,9 @@ export function runCG(input: CgInput): CgOutput {
         lintCompiledForUndefined(filePath, clientJs, serverJs)
       );
       if (undefinedLintErrors.length > 0) errors.push(...undefinedLintErrors);
+      // §6.6.9 / §20.5 (S449) — server `@session` lowerings refused outside this
+      // file's server-emit window (server-session-guard.ts backstop).
+      for (const e of drainServerAmbientSessionRefusalErrors(filePath, resolveSpanLineCol)) errors.push(e);
     }
   } finally {
     // chunk-namespacing — the per-file loop is done; drop the last file's
@@ -4258,6 +4270,7 @@ export function runCG(input: CgInput): CgOutput {
   // returns. Draining is idempotent (it clears), so the first drain having already
   // run costs nothing here.
   for (const e of drainTildeUnresolvedErrors()) errors.push(e);
+  for (const e of drainServerAmbientSessionRefusalErrors(null, resolveSpanLineCol)) errors.push(e);
 
   return {
     outputs,

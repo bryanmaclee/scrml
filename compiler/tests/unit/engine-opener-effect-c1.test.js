@@ -39,6 +39,7 @@ import { buildAST } from "../../src/ast-builder.js";
 import { runSYM } from "../../src/symbol-table.ts";
 import { compileScrml } from "../../src/api.js";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -77,7 +78,7 @@ function collectEngineDecls(ast) {
 /** Compile a source string through the real pipeline; return errors + client.js. */
 function compileToClientJs(source, baseName = "opener-effect") {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  const tmpDir = resolve("/tmp", `scrml-c1-${baseName}-${uniq}`);
+  const tmpDir = resolve(tmpdir(), `scrml-c1-${baseName}-${uniq}`);
   const tmpInput = resolve(tmpDir, `${baseName}.scrml`);
   const outDir = resolve(tmpDir, "out");
   mkdirSync(tmpDir, { recursive: true });

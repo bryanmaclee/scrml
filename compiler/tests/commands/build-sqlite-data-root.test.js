@@ -129,9 +129,12 @@ describe("R4-1 an owning db recorded absolute never gets created outside SCRML_D
     expect(msg).toContain("refusing to create database");
     expect(msg).toContain(outside.split(sep).join("/"));
     expect(msg).toContain(`SCRML_DATA_DIR is set (${data.split(sep).join("/")})`);
-    // r5b item 4 — the fix is a rebuild, not seeding (the module stops at load).
-    expect(msg).toContain("move the db= path inside the project");
-    expect(msg).toContain("set SCRML_DATA_DIR to a directory that contains it, then rebuild");
+    // r5b item 4 — the fix is a rebuild or a different SCRML_DATA_DIR, not seeding (the
+    // module stops at load). s449 item 4 — only moving the db= path needs the rebuild;
+    // SCRML_DATA_DIR is read when the program starts.
+    expect(msg).toContain("move the db= path inside the project (so it resolves under SCRML_DATA_DIR) and rebuild");
+    expect(msg).toContain("set SCRML_DATA_DIR to a directory that contains this path (read when the program starts; no rebuild needed)");
+    expect(msg).not.toContain("then rebuild");
     expect(msg).not.toContain("yourself");
     expect(existsSync(outside)).toBe(false);
     expect(existsSync(dirname(outside))).toBe(false); // not even the directory
@@ -231,6 +234,123 @@ describe("r5b-3 the R4-1 containment check resolves symlinks", () => {
     try { await withDataDir(vol, () => importFresh(join(copyOf(root), "app.server.js"))); } catch (e) { err = e; }
     expect(String(err?.message)).toContain("refusing to create database");
     expect(existsSync(join(elsewhere, "app.db"))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// s449 — residuals of the containment check (g-dev-db-data-root-residuals)
+//
+// §47.14: "'Inside' is decided on real paths (symlinks resolved; a path that does not
+// exist yet through its nearest existing ancestor), and a path that cannot be resolved
+// counts as outside." A symbolic link EXISTS even when its target does not, so it is not
+// a path that "does not exist yet": a link whose target cannot be resolved (dangling, a
+// loop) cannot be resolved, and counts as outside. Before s449 the check stepped over it
+// to its parent (inside), and SQLite then followed the link and created its target.
+// ---------------------------------------------------------------------------
+
+describe("s449-2 a symlink whose target cannot be resolved is not inside SCRML_DATA_DIR", () => {
+  /** A project whose owning handle records `src/app.db` (relative → under SCRML_DATA_DIR). */
+  function relativeOwning(name) {
+    const { root } = project(name, { "app.scrml": OWNING_APP("./app.db") });
+    compile(root, ["app.scrml"]);
+    expect(readFileSync(join(root, "dist", "app.server.js"), "utf8")).toContain('_scrml_sqlite_owned("src/app.db"');
+    return copyOf(root);
+  }
+
+  test("a DANGLING database symlink inside the volume is refused; its target is never created", async () => {
+    const copy = relativeOwning("s449dang");
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "s449-dang-")));
+    const vol = join(base, "data");
+    mkdirSync(join(vol, "src"), { recursive: true });
+    mkdirSync(join(base, "out"));
+    symlinkSync("../../out/target.db", join(vol, "src", "app.db")); // data/src/app.db -> out/target.db (missing)
+    let err = null;
+    try { await withDataDir(vol, () => importFresh(join(copy, "app.server.js"))); } catch (e) { err = e; }
+    const msg = String(err?.message);
+    expect(msg).toContain("refusing to create database");
+    expect(msg).toContain(`${vol}/src/app.db`);
+    expect(msg).toContain("symbolic link");
+    expect(existsSync(join(base, "out", "target.db"))).toBe(false);
+  });
+
+  test("a DANGLING intermediate directory symlink is refused; nothing is created behind it", async () => {
+    const copy = relativeOwning("s449dangdir");
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "s449-dangdir-")));
+    const vol = join(base, "data");
+    mkdirSync(vol);
+    symlinkSync("../out/gone", join(vol, "src")); // data/src -> out/gone (missing)
+    let err = null;
+    try { await withDataDir(vol, () => importFresh(join(copy, "app.server.js"))); } catch (e) { err = e; }
+    const msg = String(err?.message);
+    expect(msg).toContain("refusing to create database");
+    expect(msg).toContain("symbolic link");
+    expect(existsSync(join(base, "out"))).toBe(false);
+  });
+
+  test("a RELATIVE recorded path through a resolvable symlink pointing OUT is refused, and the message says so", async () => {
+    const copy = relativeOwning("s449out");
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "s449-out-")));
+    const vol = join(base, "data");
+    mkdirSync(vol);
+    mkdirSync(join(base, "elsewhere"));
+    symlinkSync("../elsewhere", join(vol, "src")); // data/src -> elsewhere (exists)
+    let err = null;
+    try { await withDataDir(vol, () => importFresh(join(copy, "app.server.js"))); } catch (e) { err = e; }
+    const msg = String(err?.message);
+    expect(msg).toContain("refusing to create database");
+    expect(msg).toContain("a symbolic link on this path points outside it");
+    expect(msg).not.toContain("recorded it as an absolute path"); // that reason is for absolute paths
+    expect(existsSync(join(base, "elsewhere", "app.db"))).toBe(false);
+  });
+
+  test("an intermediate directory symlink that RESOLVES inside the volume still creates (positive control)", async () => {
+    const copy = relativeOwning("s449okdir");
+    const vol = realpathSync(mkdtempSync(join(tmpdir(), "s449-okdir-")));
+    mkdirSync(join(vol, "real"));
+    symlinkSync("real", join(vol, "src")); // data/src -> data/real
+    await withDataDir(vol, () => importFresh(join(copy, "app.server.js")));
+    expect(existsSync(join(vol, "real", "app.db"))).toBe(true);
+  });
+
+  test("a database symlink to an EXISTING file still opens (only creation is refused)", async () => {
+    const copy = relativeOwning("s449okfile");
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "s449-okfile-")));
+    const vol = join(base, "data");
+    mkdirSync(join(vol, "src"), { recursive: true });
+    mkdirSync(join(base, "seed"));
+    new Database(join(base, "seed", "real.db")).close();
+    symlinkSync("../../seed/real.db", join(vol, "src", "app.db"));
+    await withDataDir(vol, () => importFresh(join(copy, "app.server.js")));
+    expect(existsSync(join(base, "seed", "real.db"))).toBe(true);
+  });
+});
+
+describe("s449-3 a symlink loop surfaces a scrml error naming the path, not a raw EEXIST", () => {
+  test("SCRML_DATA_DIR set: a looping directory symlink is refused as unresolvable", async () => {
+    const { root } = project("s449loop", { "app.scrml": OWNING_APP("./app.db") });
+    compile(root, ["app.scrml"]);
+    const copy = copyOf(root);
+    const vol = realpathSync(mkdtempSync(join(tmpdir(), "s449-loop-")));
+    symlinkSync("src", join(vol, "src")); // data/src -> data/src
+    let err = null;
+    try { await withDataDir(vol, () => importFresh(join(copy, "app.server.js"))); } catch (e) { err = e; }
+    const msg = String(err?.message);
+    expect(msg).toContain("refusing to create database");
+    expect(msg).toContain(`${vol}/src/app.db`);
+    expect(msg).not.toMatch(/^EEXIST/);
+  });
+
+  test("SCRML_DATA_DIR unset: a loop under the project root is a scrml error naming the path", async () => {
+    const { root } = project("s449loop2", { "app.scrml": OWNING_APP("./loop1/app.db") });
+    symlinkSync("loop1", join(root, "src", "loop1")); // src/loop1 -> src/loop1
+    compile(root, ["app.scrml"]);
+    let err = null;
+    try { await withDataDir(null, () => importFresh(join(copyOf(root), "app.server.js"))); } catch (e) { err = e; }
+    const msg = String(err?.message);
+    expect(msg).toContain("scrml: cannot create database");
+    expect(msg).toContain(`${root.split(sep).join("/")}/src/loop1/app.db`);
+    expect(msg).toContain("loops or points nowhere");
+    expect(err?.code).toBeUndefined(); // not the raw fs error
   });
 });
 

@@ -2181,7 +2181,9 @@ function _compileScrmlImpl(options = {}) {
   // VP-3 — attribute interpolation: `${...}` in non-interpolating attribute
   //        values (e.g. `<channel name=>`) becomes E-CHANNEL-007.
   // VP-1 — attribute allowlist: unknown attributes on scrml-special elements
-  //        (or `auth="role:X"`) emit W-ATTR-001 / W-ATTR-002 (warnings).
+  //        (or an unrecognized value) emit W-ATTR-001 / W-ATTR-002 (warnings); an
+  //        `auth=` on <program>/<page> outside the three literals is the ERROR
+  //        E-AUTH-ATTR-INVALID (§52.13.2, S449).
   // Run all three on the post-CE AST set so downstream stages see consistent
   // diagnostics. Errors fail the run; warnings continue.
   const postCEResult = stage("VP-2", () => seams.pick("VP-2", runPostCEInvariant)({ files: ceResults }));
@@ -3001,7 +3003,16 @@ function _compileScrmlImpl(options = {}) {
     debugPerf,
     log,
   }));
-  collectErrors("CG", cgResult.errors);
+  // §6.6.9 / §20.5 (S449) — the codegen backstop E-INTERNAL-SESSION-AMBIENT-SERVER
+  // reports a server `@session` lowering the front end MISSED. When route
+  // inference already reported E-SESSION-AMBIENT-SERVER the backstop's hits are
+  // the same reads, refused twice: report the author-facing code only (the
+  // E-INTERNAL-BODY-TOP-DROPPED precedent — an internal floor does not fire when
+  // the run already carries the real error).
+  const _riRefusedSession = (riResult.errors ?? []).some((e) => e && e.code === "E-SESSION-AMBIENT-SERVER");
+  collectErrors("CG", _riRefusedSession
+    ? (cgResult.errors ?? []).filter((e) => !(e && e.code === "E-INTERNAL-SESSION-AMBIENT-SERVER"))
+    : cgResult.errors);
 
   const durationMs = parseFloat((performance.now() - pipelineStart).toFixed(1));
 

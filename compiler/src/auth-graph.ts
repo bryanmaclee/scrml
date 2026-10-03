@@ -218,11 +218,16 @@ export function runAuthGraph(
 // Per-file enumeration
 // ---------------------------------------------------------------------------
 
+/** The `<program auth=>` literals that gate (§52.13): `"required"` and `"optional"`.
+ *  `"none"` applies no gate. An unrecognized literal is E-AUTH-ATTR-INVALID (S449,
+ *  §52.13.2 — the build is refused); it is not treated as a gate here either. */
+const PROGRAM_GATING_AUTH: ReadonlySet<string> = new Set(["required", "optional"]);
+
 /**
  * Walk one `FileAST` and append each gate-bearing site to the gates map.
  * Covers the four AuthSiteKind variants per SCOPING §2.2:
  *
- *   - `program-auth`     — `fileAST.authConfig.auth != null && != "none"`.
+ *   - `program-auth`     — `fileAST.authConfig.auth` is `"required"` or `"optional"`.
  *   - `page-auth`        — any MarkupNode where `tag === "page"` + `auth` attr.
  *   - `auth-role-block`  — any MarkupNode where `tag === "auth"`.
  *   - `channel-auth`     — any ChannelDeclNode where attrs include `auth`.
@@ -243,7 +248,14 @@ function enumerateFile(
   // classify this as closed_form: true / gated_for_role: ALL).
   // -------------------------------------------------------------------
 
-  if (fileAST.authConfig != null && fileAST.authConfig.auth !== "none") {
+  // S449 (g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth): authConfig.auth
+  // is the RAW literal — compute-program-config does not normalize it — so the old
+  // `!== "none"` test made `auth="Required"` / `auth=" required"` a program gate here
+  // while route-inference (exact `=== "required"`) emitted NO auth check for it. The
+  // auth graph then drove W-AUTH-LOGIN-MISSING / I-AUTH-REDIRECT-UNRESOLVED as if the
+  // app were gated. §52.13.2: "On a `<program>`, an unrecognized value applies no auth
+  // gate at all". Only the two gating literals of §52.13's three build a gate.
+  if (fileAST.authConfig != null && PROGRAM_GATING_AUTH.has(fileAST.authConfig.auth as string)) {
     const programNode = findProgramNode(fileAST.nodes, programRoleOptionsOf(fileAST));
     if (programNode) {
       const gate = buildProgramGate(programNode, fileAST);

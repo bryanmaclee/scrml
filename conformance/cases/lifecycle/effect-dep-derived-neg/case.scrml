@@ -1,0 +1,10 @@
+// §6.7.4 — list the source cell, read the derived value.
+<program>
+  <p> = 1
+  const <d> = @p * 2
+  function beacon(v) {
+    return v
+  }
+  <effect deps=[@p]>${ beacon(@d) }</>
+  <p>${@p}</p>
+</program>

@@ -41,6 +41,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 const srcFor = (items) => `<page>
 <shown> = false
@@ -67,7 +68,7 @@ const NO_IF_SRC = `<page>
 </page>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-if-each-leak");
+const tmpRoot = resolve(tmpdir(), "scrml-if-each-leak");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

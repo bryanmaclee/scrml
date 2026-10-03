@@ -39,6 +39,7 @@ import { resolve } from "path";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { captureInsideChunkScope, foldChunkNamespacing } from "../helpers/chunk-scope.js";
+import { tmpdir } from "os";
 
 // The bug shape: `<each in=@CELL>` over a SAME-PROGRAM cell, NO `<empty>` block.
 const NONEMPTY_SRC = `<program>
@@ -63,7 +64,7 @@ type Item:struct = { id: string, name: string }
 </program>
 `;
 
-const tmpRoot = resolve("/tmp", "scrml-each-init-order");
+const tmpRoot = resolve(tmpdir(), "scrml-each-init-order");
 
 function compileToOutputs(source, baseName) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;

@@ -10,6 +10,11 @@
  * After compilation, copies any runtime dependencies that the compiled
  * modules require (e.g. expression-parser.js imported by meta-checker).
  *
+ * S447: the frozen v1 self-host tree (compiler/self-host/ — bs/bpp/tab/ast/pa/
+ * ri/ts/dg plus the cg-parts assembly) was retired; this script now builds only
+ * the two stdlib/compiler modules. The bootstrap compiler lives in
+ * compiler/self-host-v2/ and has its own build/test entry points.
+ *
  * Usage:
  *   bun run compiler/scripts/build-self-host.js
  *   bun compiler/scripts/build-self-host.js [--verbose]
@@ -52,46 +57,6 @@ const modules = [
     scrmlFile: resolve(stdlibCompilerDir, "meta-checker.scrml"),
     outputBase: "meta-checker",
   },
-  {
-    name: "block-splitter",
-    scrmlFile: resolve(projectRoot, "compiler", "self-host", "bs.scrml"),
-    outputBase: "block-splitter",
-  },
-  {
-    name: "body-pre-parser",
-    scrmlFile: resolve(projectRoot, "compiler", "self-host", "bpp.scrml"),
-    outputBase: "body-pre-parser",
-  },
-  {
-    name: "tokenizer",
-    scrmlFile: resolve(projectRoot, "compiler", "self-host", "tab.scrml"),
-    outputBase: "tokenizer",
-  },
-  {
-    name: "ast-builder",
-    scrmlFile: resolve(projectRoot, "compiler", "self-host", "ast.scrml"),
-    outputBase: "ast-builder",
-  },
-  {
-    name: "protect-analyzer",
-    scrmlFile: resolve(projectRoot, "compiler", "self-host", "pa.scrml"),
-    outputBase: "pa",
-  },
-  {
-    name: "route-inference",
-    scrmlFile: resolve(projectRoot, "compiler", "self-host", "ri.scrml"),
-    outputBase: "ri",
-  },
-  {
-    name: "type-system",
-    scrmlFile: resolve(projectRoot, "compiler", "self-host", "ts.scrml"),
-    outputBase: "ts",
-  },
-  {
-    name: "dependency-graph",
-    scrmlFile: resolve(projectRoot, "compiler", "self-host", "dg.scrml"),
-    outputBase: "dg",
-  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -111,21 +76,6 @@ const runtimeDeps = [
     name: "expression-parser.js",
     src: resolve(srcDir, "expression-parser.ts"),
     // Required by: meta-checker.js (from ^{} import)
-  },
-];
-
-// ---------------------------------------------------------------------------
-// Post-compilation aliases
-//
-// Some compiled modules import each other by names that differ from the
-// scrml input filename. Create symlinks/copies to satisfy these imports.
-// ---------------------------------------------------------------------------
-
-const aliases = [
-  {
-    // ast.js imports "./tokenizer.js" but the file is compiled as "tab.js"
-    src: "tab.js",
-    alias: "tokenizer.js",
   },
 ];
 
@@ -258,56 +208,6 @@ for (const mod of modules) {
     writeFileSync(modPath, src);
     console.log(`  FIX    ${mod.outputBase}.js — sibling-dep import → ./`);
   }
-}
-
-// Step 2.5: Create aliases for cross-module imports
-console.log("");
-console.log("Creating module aliases:");
-for (const { src, alias } of aliases) {
-  const srcPath = join(outputDir, src);
-  const aliasPath = join(outputDir, alias);
-  if (existsSync(srcPath)) {
-    copyFileSync(srcPath, aliasPath);
-    console.log(`  ALIAS  ${src} → ${alias}`);
-  }
-}
-
-// Step 3: Assemble CG (codegen) from pre-ported JS sections
-//
-// The CG stage is 32 files / ~13K lines of code-generating JavaScript.
-// These files emit JS code strings containing braces that confuse the
-// block splitter's brace-depth tracking. Rather than fighting the BS,
-// we concatenate the ported JS sections directly into an ES module.
-console.log("");
-console.log("Assembling CG (codegen) from sections:");
-const cgSections = [
-  "section-core.js",
-  "section-rewrite.js",
-  "section-emit-core.js",
-  "section-emit-wiring.js",
-  "section-assembly.js",
-];
-const cgPartsDir = resolve(projectRoot, "compiler", "self-host", "cg-parts");
-const cgOutputPath = join(outputDir, "cg.js");
-try {
-  let cgContent = "// Self-hosted CG — assembled from ported JS sections\n";
-  for (const section of cgSections) {
-    const sectionPath = join(cgPartsDir, section);
-    if (!existsSync(sectionPath)) {
-      console.error(`  SKIP  ${section} — not found`);
-      allPassed = false;
-      continue;
-    }
-    cgContent += `\n// --- ${section} ---\n`;
-    cgContent += readFileSync(sectionPath, "utf8");
-    console.log(`  INCLUDE  ${section}`);
-  }
-  const { writeFileSync: _writeSync } = await import("fs");
-  _writeSync(cgOutputPath, cgContent);
-  console.log(`  ASSEMBLED  cg.js → ${cgOutputPath}`);
-} catch (err) {
-  console.error(`  FAIL  cg.js: ${err.message}`);
-  allPassed = false;
 }
 
 console.log("");
