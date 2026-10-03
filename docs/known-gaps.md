@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 233 | 5 |
-| MED | 469 | 1 |
+| HIGH | 232 | 5 |
+| MED | 468 | 1 |
 | LOW | 221 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -593,7 +593,9 @@ parent gap). — `NEW S438-peter`; **HIGH**; open
 
 ### g-schema-commented-out-declaration-shadows-live-table — a commented-out earlier declaration of the same table (raw or DSL) wins first-wins, so a live `tenant_id` table is silently NOT tenant-scoped
 
-<!-- @gap id=g-schema-commented-out-declaration-shadows-live-table sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(the pre-S438 read inside schemaCreateTables — comment-agnostic, first-wins per key)+compiler/src/schema-differ.js(parseSchemaBlock — reads DSL inside /* */) prov=empirical:S438-peter-fix-round-reproduced-by-compilation-on-98d94e96-and-the-fix-branch-identical -->
+<!-- @gap id=g-schema-commented-out-declaration-shadows-live-table sev=HIGH status=resolved owner=bryan locus=compiler/src/schema-differ.js(schemaTableDeclarations + findTenantDeclarationDisagreements — every same-name declaration, comment-agnostic like the floor)+compiler/src/codegen/db-authoritative.ts(extractDesiredSchema tenantTables — the union the tenant floor reads)+compiler/src/gauntlet-phase1-checks.js(E-SCHEMA-015 in the <schema> body checks) prov=empirical:S438-peter-fix-round-reproduced-by-compilation-on-98d94e96-and-the-fix-branch-identical+ruling:user-voice-scrml.md-S447-stamp-all -->
+
+**⚑ RESOLVED S450 (branch `fix/s450-schema-tenant-union-and-like`) — bryan RULED S447 "stamp all" (i): "union over declarations + a loud diagnostic when same-name declarations disagree on `tenant_id` (new code)".** The §14.8.10 floor now reads the UNION over every same-name `<schema>` declaration (`extractDesiredSchema` `tenantTables`; `tables` — db-migrate's desired state — stays first-wins), and same-name declarations that DISAGREE on `tenant_id` are the new **E-SCHEMA-015** (§34 + §39.2 + §39.12), naming every declaration and which sit inside a comment. Both rows of the table below, and the S446 over-scope shape (live table WITHOUT `tenant_id` + a stale commented copy WITH it after), now report E-SCHEMA-015; a commented copy that AGREES is quiet; live + commented both WITHOUT `tenant_id` is unchanged (untagged, no diagnostic). Declarations stay comment-agnostic (the harvest ⊇ base invariant is untouched — no recognizer change). Newly-rejecting; 207-file `<schema>` corpus differential (scrml repo, assetManagement; flogenceP has none) identical apart from the new conformance cases. The protect-floor sibling (§14.8.9 shadow DB, first-wins) is unchanged and still bryan's lane — moot for a program that compiles, since the disagreement is now an error. Pins: `compiler/tests/unit/schema-tenant-union-and-like.test.js`, `conformance/cases/schema/schema-015-*`.
 
 **⚑ S446 — NOT closed by #1209; ROUTED TO BRYAN.** A union fix was built on #1209 and REMOVED before landing
 (PA decision): `extractDesiredSchema` returned every same-name declaration (`tenantDecls`) and the tenant
@@ -627,11 +629,13 @@ false positive `g-secdef-fn-body-ddl-false-positive`.) **PA recommendation:** fo
 §14.8.10 declaration read, UNION the columns of every same-name declaration (over-declaring only adds
 floor) rather than change which statement feeds the shadow DB — a fix that preserves the harvest ⊇
 base invariant. Not done in S438: it changes base's per-key record, which the fix round held fixed on
-purpose. — `NEW S438-peter`; **HIGH**; open
+purpose. — `NEW S438-peter`; **HIGH**; RESOLVED S450 (branch `fix/s450-schema-tenant-union-and-like`, E-SCHEMA-015)
 
 ### g-schema-create-table-like-template-columns-not-declared — `CREATE TABLE assets (LIKE tmpl INCLUDING ALL)` copies `tenant_id` in Postgres, but the floor reads no columns from it
 
-<!-- @gap id=g-schema-create-table-like-template-columns-not-declared sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(isTableLevelConstraint — `LIKE x` is skipped as a constraint; columnsFromDdlBody) prov=review:S446-S239-review-of-#1209+empirical:PA-reproduced-by-compilation-on-the-fix-round-branch -->
+<!-- @gap id=g-schema-create-table-like-template-columns-not-declared sev=MED status=resolved owner=bryan locus=compiler/src/schema-differ.js(notADeclarationReason + findLikeTemplateReference — reason "like"; isTableLevelConstraint / columnsFromDdlBody unchanged) prov=review:S446-S239-review-of-#1209+empirical:PA-reproduced-by-compilation-on-the-fix-round-branch+ruling:user-voice-scrml.md-S447-stamp-all -->
+
+**⚑ RESOLVED S450 (branch `fix/s450-schema-tenant-union-and-like`) — bryan RULED S447 "stamp all" (ii): "`CREATE TABLE x (LIKE tmpl INCLUDING|EXCLUDING …)` = a template reference, fail closed (E-SCHEMA-014)".** Inside a `<schema>` CREATE TABLE column list, an unquoted `LIKE <name>` (one name chain, bare or quoted parts) followed by `INCLUDING` | `EXCLUDING` | `,` | `)` is a template reference → **E-SCHEMA-014** reason `like` (§34 row + §39.2 case (e) + §39.12 row extended). Both repro shapes below now reject. A column named `like` keeps working quoted (`"like" TEXT`, `[like] TEXT`) or with anything after its type (`like TEXT NOT NULL`, `like VARCHAR(50)`); a bare `like TEXT` item is the template-reference shape and now rejects (base never read it as a column — the constraint filter skipped it). Harvest unchanged. Newly-rejecting; corpus measured zero (same differential). Pins: `compiler/tests/unit/schema-tenant-union-and-like.test.js`, `conformance/cases/schema/schema-014-like-*`.
 
 Same class as the RESOLVED `g-schema-no-column-list-heads-declare-nothing` (columns that live
 elsewhere), one level down — inside the column list. Repro: `CREATE TABLE tmpl (id INTEGER PRIMARY
@@ -640,7 +644,7 @@ KEY, name TEXT, tenant_id TEXT)` then `CREATE TABLE assets (LIKE tmpl INCLUDING 
 **Not fixed in #1209:** `LIKE <word>` is indistinguishable from a column named `like` with an
 unquoted type (`like TEXT` — legal in SQLite, where LIKE falls back to an identifier), so rejecting
 it fail-closed needs a ruling: reject an unquoted `like` column-list item (quote the column to keep
-it), or resolve `LIKE tmpl` to `tmpl`'s declared columns. — `NEW S446-peter (S239 review of #1209)`; **MED**; open
+it), or resolve `LIKE tmpl` to `tmpl`'s declared columns. — `NEW S446-peter (S239 review of #1209)`; **MED**; RESOLVED S450 (branch `fix/s450-schema-tenant-union-and-like`, E-SCHEMA-014 reason `like`)
 
 ### g-schema-alter-table-add-tenant-id-ignored — `ALTER TABLE assets ADD COLUMN tenant_id …` in a `<schema>` is not read, so the table stays un-scoped
 

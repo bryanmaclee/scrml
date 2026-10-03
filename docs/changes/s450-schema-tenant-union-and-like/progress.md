@@ -1,3 +1,4 @@
 - 2026-10-03T01:00:48Z start: worktree verified, branch cut from origin/main bc4bca1f, pretest ok
 - 2026-10-03T01:08:26Z impl: E-SCHEMA-015 (union tenantTables + disagreement check) + E-SCHEMA-014 reason like; unit tests 37 new pass; schema/tenant suites 659/0; base probe confirms all REJECT shapes silent on bc4bca1f
 - 2026-10-03T01:18:43Z conformance: 4 schema cases (015 disagree-neg/agree-pos, 014 like-template-neg/like-column-pos) PASS; run.ts 1232/1266 + 34 xfail
+- 2026-10-03T01:37:41Z docs: SPEC §34 (014 ext + 015 new), §39.2 (case (e), same-name rule, Provenance blockquote), §39.12 rows; known-gaps both resolved; state/spec-index/facts regen; master-list recent-sessions churn NOT committed (unrelated, abbrev-dependent; gate does not check it). Corpus: 13-file corpus (examples/samples/aM/flogenceP) 0 diffs; 207-file wide <schema> corpus 2 diffs = the 2 new negative conformance cases
