@@ -3718,6 +3718,15 @@ to a path where the value actually crosses the wire.
   server lowers to `_scrml_body[<cell>]` (client-SEND == server-READ). So a CPS read is
   transported — E-REACTIVE-003 SHALL NOT fire for a CPS-split function; only a wholly-server
   function (no split) leaves the read unmarshalled.
+  **A read of a cell the same batch has already written is not a marshal read (S451 R7).**
+  When an earlier statement of the batch writes the cell, a later read in that batch sees the
+  written value (§19.9.9.7) — it is not lowered to `_scrml_body[<cell>]`, and it does not
+  by itself put the cell in the marshal set. The marshal set is the set of cells the batch
+  reads BEFORE (or without) writing them; client-SEND == server-READ holds over that set.
+  > **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" (R7 = (a)) · supersedes:
+  > nothing struck — the sentence *"The marshal set SHALL equal the set the server lowers to
+  > `_scrml_body[<cell>]` (client-SEND == server-READ)"* stands, now over marshal reads only ·
+  > direction of change: semantics-changed (§19.9.9.7).
 - **Trust warning on a marshalled derived (`W-SERVER-DERIVED-MARSHAL`, §34).** When a CPS
   function marshals a `const <name>` DERIVED read, the compiler SHALL emit
   `W-SERVER-DERIVED-MARSHAL` (severity `warning`): the server receives a CLIENT-computed
@@ -7692,6 +7701,12 @@ case reads the same in all three rules.
 server-side code later causes a push into a synced cell, is a later write by a different writer, not a write by the
 evaluation.
 
+**A value position may not call the server at all (S451 R1).** A server call in a value position is a compile error
+of its own, E-VALUE-SERVER-CALL, whatever the callee writes — the position cannot wait for the round trip. That rule
+lives in §13.7 (the async model) and uses this section's list of value positions by reference; §52 `<x server>`
+declarations keep their own hydration rule. *(Provenance: ruling:user-voice-scrml.md S451 "your recs. R11 b", R1 = (a)
+· newly-rejecting.)*
+
 #### Normative statements
 
 - Evaluating an initializer (own value, field or attribute default, use-site construction value, `default=`), a
@@ -7706,7 +7721,7 @@ evaluation.
 **Cross-references:** §6.6 (derived cells) · §6.7.1a (`<onMount>` — the mount-time sibling rule) · §6.7.4 (the
 write summary; the `<effect>` rule) · §6.8.1–§6.8.4 (reset values) · §7.4.2 / §4.18.4 (interpolation) · §17.4
 (Tier-0 iteration) · §40.8 (body-top statement lists) · §66.5 (`renders`) · §66.6.4 (lazy shared instance) ·
-§66.9 (initializers) · §34 (E-VALUE-WRITES-STATE, E-VALUE-WRITE-UNPROVEN).
+§66.9 (initializers) · §13.7 (no server call in a value position — E-VALUE-SERVER-CALL, S451) · §34 (E-VALUE-WRITES-STATE, E-VALUE-WRITE-UNPROVEN, E-VALUE-SERVER-CALL).
 
 ---
 
@@ -8979,8 +8994,12 @@ read/write distinction.
 
 At runtime, `?{}` queries can fail (connection lost, constraint violation, invalid query). The error type is the built-in `SqlError` enum (§19.8.1):
 
-- Inside a `!` function: SQL errors produce `SqlError` variants, propagated via the error channel. Handle with `!{}` arms matching `::QueryFailed`, `::ConstraintViolation`, `::ConnectionLost`.
-- Outside a `!` function: failed `.get()` returns `not`, failed `.all()` returns `[]`. No error is raised.
+- A `?{}` query is a **failable expression everywhere** (S451 R11): a failed query produces a `SqlError` variant, never a value.
+- Inside a `!` function: SQL errors are propagated via the error channel (§19.8.2, unchanged). Handle with `!{}` arms matching `::QueryFailed`, `::ConstraintViolation`, `::ConnectionLost`.
+- Outside a `!` function: the query SHALL be handled at the site — a `!{}` handler or a `match` — exactly like a call to a `!` function; an unhandled `?{}` there is **E-ERROR-002** (§19.8.3).
+- "No row" is not a failure: `.get()` on zero rows returns `not` and `.all()` returns `[]`, in every context (§19.8.3).
+
+> **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" · supersedes: *"Outside a `!` function: failed `.get()` returns `not`, failed `.all()` returns `[]`. No error is raised."* · **Direction of change: newly-rejecting** (an unhandled `?{}` outside a `!` function was accepted; it is now E-ERROR-002). Measured migration: §19.8.3.
 
 See §19.8 for the full `SqlError` type definition and propagation rules.
 
@@ -9032,7 +9051,9 @@ When two or more `?{}` calls in a server handler are coalescing candidates, the 
 
 #### 8.9.4 Error Model
 
-Outside `!`: coalescing is never applied with a transactional envelope (§8.9.2). Each `?{}` retains §8.7 semantics — failed `.get()` → `not`, failed `.all()` → `[]`.
+Outside `!`: coalescing is never applied with a transactional envelope (§8.9.2). Each `?{}` retains §8.7 / §19.8.3 semantics — a failed query produces a `SqlError` variant that its own site handles (`!{}` or `match`); a query with no matching row is not a failure.
+
+> **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" · supersedes: *"Each `?{}` retains §8.7 semantics — failed `.get()` → `not`, failed `.all()` → `[]`."* · Direction of change: newly-rejecting (follows §19.8.3).
 
 Inside `!`:
 - **Prepare-phase errors** (a SQL syntax error detected while preparing the batched statements) surface as a single variant `SqlError::BatchPrepareFailed { sites: [<?{} source locations>] }`. The variant lists source locations of all coalesced `?{}` blocks so that `!{}` arms can attribute the failure.
@@ -9816,7 +9837,7 @@ The compiler SHALL:
 
 1. Build a dependency graph of all operations in the program (see Section 30).
 2. Identify which operations are independent (no data dependency between them).
-3. Parallelize independent operations using `Promise.all` in generated code.
+3. Parallelize independent operations using `Promise.all` in generated code — for server calls, only those that are also provably read-only (below, S451 R4).
 4. Sequence dependent operations using `await` in generated code.
 5. Emit all generated async infrastructure without any developer input.
 
@@ -9825,7 +9846,26 @@ The compiler SHALL:
 - The compiler SHALL insert `await` at every call site where a server-generated fetch call is made.
 - The compiler SHALL wrap any function containing at least one server call in an `async` function in generated code.
 - The developer SHALL write flat, synchronous-looking code. The compiler SHALL produce optimal async execution patterns from this code.
-- Independent server calls in the same function body SHALL be parallelized in generated code unless there is a data dependency between them.
+- Server calls in the same function body SHALL be parallelized in generated code only when they are independent (no data dependency between them) **and each of them is provably read-only**. Otherwise they SHALL run in source order, each awaited before the next starts. A call is provably read-only when it is **READ** under §6.7.7.1 rule 1's body-form test, applied to the call: (a) no non-`SELECT` SQL (`?{}`) is reachable anywhere in its call graph, transitively through every server function it reaches, and (b) it lowers to a single server batch (not a §19.9.9 multi-batch body). A call the compiler cannot classify is not provably read-only (§6.7.7.1: "unclassifiable = write"), and neither is one whose call graph reaches a side effect §6.7.7.1 leaves unclassified (O-059-3: a non-SQL write such as an outbound HTTP call or a `scrml:store` `set`) — the test fails closed to source order.
+
+  **Why a data dependency is not enough.** Two calls that share no scrml value can still depend on each other through the database: a write and a read of the same table. The client-side dependency graph cannot see that edge, so the only parallelism it may introduce is between calls that write nothing.
+
+  ```scrml
+  ${ function reserve(id)! -> SqlError { ?{`UPDATE seats SET held = held + 1 WHERE show_id = ${id}`}.run() }
+     function count(id)! -> SqlError   { return ?{`SELECT held FROM seats WHERE show_id = ${id}`}.get() }
+
+     function book(id)! -> SqlError {
+         const a = reserve(id)?    // UPDATE seats — not read-only
+         const b = count(id)?      // SELECT seats — read-only
+         @held = b.held
+     } }
+  ```
+
+  `reserve` and `count` share no scrml value, so before S451 the two calls were "independent" and SHALL-parallelized: `Promise.all([reserve(id), count(id)])`. The UPDATE and the SELECT then raced, and whether `@held` included the new seat depended on which request reached the server first. `reserve` is not READ (its call graph reaches an `UPDATE`), so the pair now runs in source order: `count` starts after `reserve` has returned, and reads the updated row. Two calls that are both READ — `count(id)` and `count(other)` — are still parallelized.
+
+  > **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" (R4 = (a): *"amend §13.2 — independent server calls are parallelized only when independent AND provably read-only (§6.7.7.1 READ); otherwise source order. (impl#1 today: `const a = reserve(id); const b = count(id)` → `Promise.all` — an UPDATE races a SELECT.)"*) · design: `scrml-support/docs/deep-dives/bootstrap-u1-server-boundary-design-2026-10-03.md` §10 R4 · S441 bryan rule "parallelize only calls proven read-only" (already applied by impl#1 to the whole-result cell-write batch) · supersedes: *"Independent server calls in the same function body SHALL be parallelized in generated code unless there is a data dependency between them."*
+  >
+  > **Direction of change (pa-base §8): semantics-changed.** No program's acceptance changes. A body whose independent server calls are not all provably read-only now runs them in source order instead of concurrently; its results can differ only where the old order was a race. **impl#1 divergence:** impl#1's `const` / `let` declaration batch still groups such calls into one `Promise.all` (`g-const-batch-parallelizes-side-effecting-server-calls`, now governed by this sentence); impl#1 is frozen for language semantics (S447), so it is filed, not fixed. The O-059-3 fail-closed clause above is this section's reading of "provably" while O-059-3 is open (flagged for veto).
 - These statements apply to EVERY body the compiler emits, including an inline event-handler value (`onclick=${…}` / `onclick={…}`) and an `<onMount>` / `on mount` body (§6.7.1a): a server call there SHALL be awaited, and the handler or block SHALL run in an `async` scope when it awaits.
 - **A cell write from a server call in an event handler (S450).** The one exemption from awaiting is the handler whose SOLE root statement is the write: `onclick=@x = save()`, its braced single-statement form `onclick={@x = save()}`, `onclick=${@x = save()}`, and the guarded `@x = f() !{ … }` (§19.4.3) written alone. That write MAY run fire-and-forget — the handler does not wait for it, and no statement of the handler runs after it. In every other position the write SHALL be awaited in place, so the next statement observes the resolved value: when it is one of two or more root statements (`onclick={ @x = save(); @y = @x + 1 }`), and when it is nested at any depth inside an `if` / `else if` / `else` limb, a `for` / `for … of` / `while` body, or a block of a handler (`onclick=${ if (@c) { @x = save(); @y = @x + 1 } }`), or inside a `match` statement written as one of the handler's root statements. A `match` arm or other construct the compiler lowers to an inline function is part of the handler's statement sequence, and is awaited with it. A §36 server generator (SSE) write is a subscription, not a value, and is never awaited at any position. Because the write is now awaited, an event-control call after it in the handler (`onclick=${ if (@c) { @x = save(); event.preventDefault() } }`, and the closure form) is `E-EVENT-CONTROL-AFTER-AWAIT` (above); put the control call before the write. The rule holds for every DELEGABLE handler position (`click`, `submit`, …): top level, an `<each>` row, a `for … lift` row, and a delegable handler inside an engine or `<match>` element arm. A non-delegable handler (`input`, `focus`, …) inside an engine or `<match>` element arm is not yet covered (carried gap below).
 
@@ -9866,7 +9906,7 @@ async function loadDashboard() {
     ]);
 }
 ```
-Because `user`, `items`, and `stats` have no data dependency on each other, the compiler parallelizes all three calls.
+Because `user`, `items`, and `stats` have no data dependency on each other **and `getUser`, `getItems` and `getStats` are each provably read-only** (§13.2, S451 R4 — each reaches only `SELECT` SQL in one server batch), the compiler parallelizes all three calls. Had any of them reached an `INSERT` / `UPDATE` / `DELETE`, the three calls would run in source order. *(S451 R4 — supersedes: "Because `user`, `items`, and `stats` have no data dependency on each other, the compiler parallelizes all three calls.")*
 
 ### 13.4 Server Function Composition
 
@@ -10181,6 +10221,99 @@ Again no async coloring; `chunkArray` is a generator, but `processInChunks` cons
 - §19.9.8 — `async`/`await` language-wide standing rule (the rule that does NOT extend to generators).
 - §37 — `server function*` Server-Sent Events (the load-bearing existing generator surface).
 - §48 — The `fn` keyword (NB: `fn` is a pure-function form; generator semantics are orthogonal — see §48.3 body prohibitions for the `fn`-specific constraints, which apply uniformly whether the body is a generator or not. A `fn` that is also a generator is admissible under both this section and §48's purity contract, provided the body satisfies §48.3.)
+
+### 13.7 Server Calls in Value Positions — E-VALUE-SERVER-CALL
+
+> **Status: Nominal / spec-ahead (S451).** NORMATIVE; **impl#1 does not implement it** and is not changed for it
+> (frozen for language semantics, S447 — the divergence is filed: `docs/known-gaps.md`
+> `g-impl1-value-server-call-s451`). The bootstrap builds it: its lowering refuses a server call wherever no
+> statement boundary exists to suspend at (design §3(a)).
+>
+> **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" — R1 = (a): *"a server call in a value
+> position (non-§52 initializer, derived formula, markup interpolation, attribute value) is a COMPILE ERROR
+> everywhere (named code, e.g. `E-VALUE-ASYNC`), message: load it with a `<request>`. §52 `<x server>` keeps its
+> own hydration rule. Limit, fail closed, reversible; the async-derived alternative belongs to dpa-023 if ever."* ·
+> design: `scrml-support/docs/deep-dives/bootstrap-u1-server-boundary-design-2026-10-03.md` §10 R1 · **supersedes:**
+> nothing written — the SPEC was silent on whether a value position may call the server (§6.15 says only that such a
+> callee must write nothing). The code is spelled `E-VALUE-SERVER-CALL` (the ruling's `E-VALUE-ASYNC` was an
+> example name): it names the trigger, a server call, and sits beside §6.15's `E-VALUE-*` codes. **Direction of
+> change (pa-base §8): newly-rejecting.** Measured corpus impact: `docs/changes/s451-spec-u1-rulings/progress.md`.
+
+**Why this lives in §13.** The rule is about the async boundary, not about writes: a value position is evaluated to
+produce a value now — at construction, on every recompute, on every render — and has no statement boundary at which
+the compiler could suspend and resume (§13.2's inserted `await` needs one). A server call there yields a value only
+after a round trip, so the position would hold a pending result, or the compiler would have to invent a loading
+value the author never wrote. §6.15 defines the value positions and is the home of the no-write rule; this section
+uses its list by reference and adds the no-server-call rule.
+
+**The rule.** A **server call** — a call whose callee is server-placed (§12.2: escalated by a server-only resource,
+a protected field, a server-only stdlib import, `server`, or inheritance) — written in a **value position** (§6.15:
+an initializer, a derived formula, or a render expression, which includes a markup `${ … }` interpolation and a
+markup attribute value expression) SHALL be a compile error, **E-VALUE-SERVER-CALL**.
+
+**What is not affected.**
+- **§52 `<x server>` declarations.** The right-hand side of a `<x server>` declaration is governed by §52 — its
+  placeholder value (§52.4.3) and its hydration load (§52.6.5 Patterns A–C) — not by this section.
+- **Action positions** (§6.15's "not value positions"): an event-handler value (`onclick=…`), a `bind:` binding, a
+  function body, a lifecycle element body — a `<request>` body is exactly where a server call that fills a cell
+  belongs — an engine `effect=` / `<onTransition>`, and a body-top statement list (§40.8). A server call in a
+  function body is judged where it occurs (§13.2 awaits it there).
+
+**The message names the position and the fix.** E-VALUE-SERVER-CALL SHALL name the position (*"the initializer of
+`@n`"*, *"the formula of derived `@label`"*, *"the interpolation at line 12"*, *"the `class=` value at line 12"*),
+the server function called, and the fix: *"a value position cannot wait for the server; load the value with a
+`<request>` (§6.7.7) into a cell and read the cell here"* — and, where the cell is server-authoritative, a
+`<x server>` declaration (§52).
+
+```scrml
+<program db="sqlite:./app.db">
+  ${ function userCount() {
+      const row = ?{`SELECT count(*) AS n FROM users`}.get() !{ | _ :> not }
+      return row is not ? 0 : row.n
+  } }
+
+  <n> = userCount()                                   // E-VALUE-SERVER-CALL — the initializer of `@n` calls `userCount`
+  const <label> = "Users: " + userCount()             // E-VALUE-SERVER-CALL — the formula of derived `@label`
+  <p>${userCount()}</p>                               // E-VALUE-SERVER-CALL — the interpolation
+  <p class=${userCount() > 10 ? "busy" : ""}>…</p>    // E-VALUE-SERVER-CALL — the `class=` value
+
+  // The fix: load into a cell with a <request>, read the cell.
+  <users> = 0
+  <request id="usersLoad" deps=[]>${ @users = userCount() }</>
+  <p class=${@users > 10 ? "busy" : ""}>Users: ${@users}</p>
+  <button onclick={ @users = userCount() }>Refresh</button>   // legal: a handler is an action position
+</program>
+```
+
+**OPEN (S451 — not decided by this section).**
+- **O-R1-1 — a client function that reaches a server call.** A value-position call to a client function whose body
+  calls a server function (an async-colored function, §13.2) waits on the same round trip, but its callee is not
+  itself server-placed. Whether it is E-VALUE-SERVER-CALL (rec: yes — the position waits either way, and the
+  bootstrap's lowering refuses it) is not ruled. Today such a position is the carried impl#1 defect
+  `g-top-level-derived-from-async-helper-holds-promise` (a cell holding a Promise).
+- **O-R1-2 — a `?{}` written directly in a value position** outside a §52 declaration (`<n> = ?{…}.get()`), and a
+  Promise-returning standard-library call there (`fetch`, `scrml:http`), are not server calls by the definition
+  above. Whether they share this code is not ruled.
+- **O-R1-3 — `<errorBoundary>`'s render-time call pattern.** §19.6 shows a failable call rendered inside a boundary
+  (`<errorBoundary>${loadUser(42)}</>`, §19.6.2; `${notifyOrder(@currentOrderId)}`, §19.9.5; `${loadProfile(…)}`,
+  §19.9.5 migration path 1) and §19.6.6 makes the boundary the handler of exactly such render-time calls. When the
+  rendered callee is server-placed (or CPS-split), that interpolation is a value position calling the server, which this
+  section rejects; the boundary would then have no render-time server call left to catch. How §19.6's render-time
+  pattern and this rule fit together (the `<request>` + `.error` route, a boundary over a `<request>`, or an exception
+  for boundaries) is not ruled. Measured in the corpus: `conformance/cases/server-fn/error-boundary-fallback` pins
+  the pattern on impl#1.
+
+#### Normative statements
+
+- A call whose callee is server-placed (§12.2) SHALL NOT appear in a value position (§6.15). Such a call SHALL be a
+  compile error, E-VALUE-SERVER-CALL.
+- The right-hand side of a §52 `<x server>` declaration SHALL be governed by §52 (placeholder, hydration load), not
+  by this rule.
+- E-VALUE-SERVER-CALL SHALL name the position, the called server function, and the `<request>` fix.
+
+**Cross-references:** §6.15 (value positions — the definition this rule uses) · §6.7.7 (`<request>` — the fix) ·
+§12.2 (server placement) · §13.2 (where server calls are awaited) · §52.4.3 / §52.6.5 (`<x server>` placeholder and
+load) · §34 (E-VALUE-SERVER-CALL).
 
 ---
 
@@ -17160,6 +17293,8 @@ A call to a `!` function SHALL NOT be ignored. The caller MUST do one of the fol
 
 Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: **E-ERROR-002** -- `Result of failable function '{name}' is not handled. Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`
 
+**A `?{}` query is a failable expression too (S451 R11).** Outside a `!` function, a `?{}` query is handled like a call to a `!` function whose error type is `SqlError` — with `!{}` or `match` at the site — and an unhandled one is E-ERROR-002 (§19.8.3, which states the forms that apply). Inside a `!` function it propagates implicitly (§19.8.2, unchanged). *(Provenance: ruling:user-voice-scrml.md S451 "your recs. R11 b" · supersedes: §19.8.3's backwards-compatible mode, quoted there · newly-rejecting.)*
+
 At an event-handler site neither `?` (a handler is not a `!` function, §19.5.4) nor `<errorBoundary>` (render-time only, §19.6.6) can handle the call, so the message offers only the remedies that apply there. For a call: `Result of failable function '{name}' is not handled in this event handler. Catch it with '!{}' (e.g. '{name}(…) !{ | .Variant :> … }'), match the result, or call it from a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).` For a reference (below): `Failable function '{name}' is passed as an event-handler reference, so the event would call it and discard its error. Call it in a handler that handles the result (e.g. '{attr}={ {name}() !{ | .Variant :> … } }'), or wire a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`
 
 **Event-handler values — no exemption (S439 ruling #14; S440 "restore conformance").** The two SHALLs above (this section's E-ERROR-002 sentence and §19.4.4) apply to event-handler attribute values (§5.2.2, §5.2.3) exactly as they apply anywhere else. Every unhandled call to a `!` function in an event-handler value SHALL be E-ERROR-002, whatever the handler's statement count or form. The answer follows the unhandled call, not the shape of the handler around it. The bare `onclick=risky()`, the braced `onclick={ risky() }` (on one line or several), `onclick=${risky()}`, the multi-statement `onclick={ risky(); @r = 1 }`, and a call reached through control flow in the handler (`onclick={ if (@ready) risky() }`, `onclick={ for (const i of ids) risky() }`) all get the same answer. So does a handler placed at top level, in an `<each>` row, in an engine state-child, in a `<match>` arm, or in a component body.
@@ -17464,20 +17599,65 @@ function loadUser(id)! -> UserError {
 
 For `?` propagation to work, the enclosing function's error type MUST include the `SqlError` variants, OR the function must explicitly handle SQL errors with `!{}` or `match`.
 
-#### 19.8.3 `?{}` Outside a `!` Function
+*(S451 R11: this subsection is UNCHANGED. Inside a `!` function a `?{}` still propagates implicitly; what changed is the outside-`!` case, §19.8.3.)*
 
-When a `?{}` query is executed outside a `!` function (backwards-compatible mode):
+#### 19.8.3 `?{}` Outside a `!` Function — a failable expression, handled at the site
 
-- A failed query SHALL return `not` (for `.get()`) or an empty array (for `.all()`).
-- No error is propagated. No compile error is emitted.
-- This preserves backwards compatibility with existing `?{}` usage (§8).
+A `?{}` query is a **failable expression everywhere**. Outside a `!` function it is treated exactly like a call to a `!` function whose error type is `SqlError` (§19.4.3): its result SHALL NOT be ignored, and an unhandled `?{}` SHALL be a compile error, **E-ERROR-002**. "Outside a `!` function" means that no enclosing function is declared `!` (§19.4.1) — including a `?{}` at a body top or in a function without `!`.
+
+**What counts as handling a `?{}`.** The handling forms are §19.4.3's, restricted to those that apply where the query sits:
+
+1. **A `!{}` handler on the query** — written after the terminator (`.get()`, `.all()`, `.run()`), its arms match `SqlError` variants:
+   ```scrml
+   function userName(id) {
+       const row = ?{`SELECT name FROM users WHERE id = ${id}`}.get() !{
+           | ::QueryFailed m        :> { log("lookup failed: " + m); return "?" }
+           | ::ConstraintViolation f :> { return "?" }
+           | ::ConnectionLost        :> { return "?" }
+           | _                       :> { return "?" }
+       }
+       return row is not ? "(none)" : row.name
+   }
+   ```
+   The handler is checked for exhaustiveness against `SqlError` like any other `!{}` handler. Because the compiler MAY add `SqlError` variants (§19.8.4) — §8.9.4's `BatchPrepareFailed` is one — a `| _ :>` arm keeps a handler total as the enum grows.
+2. **A `match` on the result** — the success value arrives as `::Ok` (§19.7.1):
+   ```scrml
+   function openOrders(customerId) {
+       const rows = match ?{`SELECT * FROM orders WHERE customer_id = ${customerId} AND open = 1`}.all() {
+           ::Ok(found)       :> found
+           ::QueryFailed(m)  :> { log(m); [] }
+           _                 :> []
+       }
+       return rows
+   }
+   ```
+3. **Moving the query into a `!` function** — §19.8.2 then applies (implicit propagation), and the CALLER handles the function's result under §19.4.3 (`match`, `?`, `!{}`, or — for a render-time call — `<errorBoundary>`):
+   ```scrml
+   function loadUser(id)! -> SqlError {
+       return ?{`SELECT * FROM users WHERE id = ${id}`}.get()   // a failure propagates (§19.8.2)
+   }
+   function showUser(id) {
+       @user = loadUser(id) !{ | _ :> not }                    // the caller handles it
+   }
+   ```
+
+`?` on a `?{}` is valid only inside a `!` function (§19.5.4, E-ERROR-003), where it is the same as the implicit propagation of §19.8.2. An `<errorBoundary>` does not handle a `?{}` written outside a `!` function: it catches the error of a `!` function CALL made while rendering (§19.6.6), and the `?{}` here is not such a call — handle it at the site, or move it into a `!` function and render the call.
+
+**"No row" is not a failure.** A query that runs and matches nothing succeeds: `.get()` on zero rows returns `not`, and `.all()` on zero rows returns `[]`, in every context, inside or outside a `!` function. Only a query that fails to run (a connection lost, a constraint violated, an invalid query) produces a `SqlError` variant. Code that tests `row is not` tests for absence, never for failure.
+
+**OPEN (S451 — not decided by this section).** A §52.6.5 Pattern C declaration RHS (`<driver server> : Driver = ?{…}.get()`) is an inline `?{}` that IS the cell's compiler-generated mount load, not a statement the author's code runs. Whether R11 requires a handler on it, or the §52 hydration route owns its failure, is not ruled.
+
+> **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" (the entry: *"a `?{}` query is a FAILABLE expression everywhere, not only inside `!` functions. Outside a `!` function the existing unhandled-failable rule applies (E-ERROR-002 — handle with `!{}`, `match`, or move into a `!` function)"*) · supersedes: *"When a `?{}` query is executed outside a `!` function (backwards-compatible mode): A failed query SHALL return `not` (for `.get()`) or an empty array (for `.all()`). No error is propagated. No compile error is emitted. This preserves backwards compatibility with existing `?{}` usage (§8)."* · design: `scrml-support/docs/deep-dives/bootstrap-u1-server-boundary-design-2026-10-03.md` §10 R11 (the PA's minimum rec (a), keep the value semantics + a server log line, was NOT taken).
+>
+> **Direction of change (pa-base §8): newly-rejecting.** Every `?{}` outside a `!` function that no `!{}` / `match` handles was accepted and is now E-ERROR-002. **impl#1 divergence (Nominal for impl#1, §34.0):** impl#1 emits no E-ERROR-002 for a `?{}` and is frozen for language semantics (S447); filed `g-impl1-sql-unhandled-outside-failable-s451` in `docs/known-gaps.md`. impl#1 never implemented the struck silent mode at run time either — a failed query throws on the server (`g-sql-error-surface-unwired`). The bootstrap builds this section. Migration measured in `docs/changes/s451-spec-u1-rulings/progress.md`; the corpus is migrated with the bootstrap's implementation, not by this SPEC change.
 
 #### 19.8.4 Normative Statements
 
 - `SqlError` SHALL be a built-in enum type provided by the compiler. The developer SHALL NOT redefine it.
 - `SqlError` SHALL have at least the three variants specified above: `QueryFailed`, `ConstraintViolation`, `ConnectionLost`. The compiler MAY add additional variants in future versions.
 - Inside a `!` function, a `?{}` query that fails at runtime SHALL produce a `SqlError` variant. This variant SHALL be propagated if the enclosing function's error type is compatible, or SHALL be a compile error if incompatible.
-- Outside a `!` function, a `?{}` query that fails at runtime SHALL return `not` (for `.get()`) or `[]` (for `.all()`). No error SHALL be raised.
+- A `?{}` query SHALL be a failable expression in every context. Outside a `!` function it SHALL be handled at the site with a `!{}` handler or a `match` (§19.8.3); an unhandled `?{}` there SHALL be E-ERROR-002. *(S451 R11 — supersedes: "Outside a `!` function, a `?{}` query that fails at runtime SHALL return `not` (for `.get()`) or `[]` (for `.all()`). No error SHALL be raised.")*
+- A query that runs and matches no row SHALL NOT be a failure: `.get()` SHALL return `not` and `.all()` SHALL return `[]`.
 
 ---
 
@@ -17844,6 +18024,35 @@ Per the body-split soundness predicates **S1-S5** (body-split soundness design d
 
 **Cross-references.** §8.9 (per-handler transactional envelope — each batch is one); §12 / §19.9.3 (CPS eligibility / preservation — the tier classification source); §19.6.7 (multi-batch CPS granularity — `<errorBoundary>` catches per-batch; ratified here); §19.9.5 (Ext 4 auto-`!`-wrap — per-stub composition); §19.9.6 (Ext 5 static monotonicity + idempotency-key replay — lifted per-batch by §19.9.9.3); §19.9.7 (`.idempotent()` modifier — applies per-batch); §19.9.8 (no `async`/`await` — Ext 1 preserves the CPS wrapper envelope); §22 (`^{}` meta — orthogonal; Ext 1 does not enter meta bodies); §31 (module-grain dependency graph — the body-DG is a statement-grain sibling, not a replacement); §51.0.G (`<machine>` `.advance()` — the machine-crossing reject leg); §34 catalog (`E-CPS-MULTIBATCH-REORDER`, `E-CPS-MULTIBATCH-MACHINE-CROSSING`).
 
+##### 19.9.9.7 Within one batch, a cell read sees the batch's own earlier write (S451 R7)
+
+A server batch runs its statements in source order, and a cell read inside it SHALL see the effect of every earlier statement of the same batch. When a statement of a batch writes a reactive cell (a `reactive`-tier statement, §19.9.9.1 — `@total = <server work>`) and a LATER statement of the **same batch** reads that cell, the read SHALL yield the value the earlier statement wrote — the batch-local value — and SHALL NOT yield the value marshalled from the client at the start of the batch (§6.6.9). No extra batch and no extra round trip is introduced: the batch carries the written value forward itself.
+
+- The rule is batch-local. A read in a LATER batch of a cell written in an earlier batch is the existing cross-batch case: the cell's value is marshalled forward as a parameter to the later stub (§19.9.9.2 step 3, `writes` edge), and the client statement between the batches has already applied the write.
+- A read of a cell that NO earlier statement of the batch wrote is a marshal read: it receives the client's value at the batch's start (§6.6.9), as before.
+- The client still applies the write to its own store when the batch returns, in source order with the batch's other client-observable effects.
+
+**Worked example.**
+
+```scrml
+<program db="sqlite:./shop.db">
+  <total> = 0
+  ${ function snapshotTotal(orderId)! -> SqlError {
+      // one server batch: both statements are server work, nothing client-tier between them
+      @total = ?{`SELECT count(*) AS n FROM items WHERE order_id = ${orderId}`}.get().n
+      ?{`INSERT INTO totals (order_id, total) VALUES (${orderId}, ${@total})`}.run()
+  } }
+  <button onclick={ snapshotTotal(7) !{ | _ :> log("snapshot failed") } }>Snapshot</button>
+  <p>${@total}</p>
+</program>
+```
+
+The `SELECT` writes `@total`; the `INSERT` reads it in the same batch. Under this rule the `INSERT` binds the count the `SELECT` just returned. Before S451 nothing said so, and impl#1 marshals `@total` into the request at the batch's start and binds that: the row logged is the client's value before the click (`0` on the first click), whatever the count was.
+
+> **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" (R7 = (a): *"inside one server batch, a cell written by an earlier statement and read by a later one reads the batch-local (just-written) value — source-order semantics, no extra round trip. (impl#1 today marshals the cell at batch start → the INSERT logs the stale value.)"*) · design: `scrml-support/docs/deep-dives/bootstrap-u1-server-boundary-design-2026-10-03.md` §3(b) and §10 R7 · supersedes: nothing written — §19.9.9 was silent on a within-batch write-then-read; the conflicting sentence is §6.6.9's marshal rule, which is reconciled there (*"The marshal set SHALL equal the set the server lowers to `_scrml_body[<cell>]` (client-SEND == server-READ)"*).
+>
+> **Direction of change (pa-base §8): semantics-changed.** No program's acceptance changes; a batch that writes then reads a cell now reads the value it wrote. **impl#1 divergence:** compiled S451 on `b490f3b75` and the emitted server stub read (not run) — the same shape's server stub binds `_scrml_body["total"]` in the `INSERT`; filed `g-impl1-cps-batch-reads-marshalled-not-written-s451`. impl#1 is frozen for language semantics (S447); the bootstrap builds this by substitution when it outlines the batch (design §3(b)).
+
 ---
 
 ### 19.10 SQL Transactions
@@ -18148,7 +18357,7 @@ The following error codes are introduced by this section. They SHALL be added to
 | Code | Section | Trigger | Severity |
 |------|---------|---------|----------|
 | E-ERROR-001 | §19.3.3 | `fail` used in non-`!` function | Error |
-| E-ERROR-002 | §19.4.3 | `!` function result not handled (no match, `?`, `!{}`, or boundary). At an event-handler site — a call or a reference to a `!` function (S441) — only `!{}`, `match`, or a handling wrapper applies; `?` and a boundary do not (emitted at `compiler/src/type-system.ts:10892` for a statement-position call, `:14374` for an event-handler call, and `:14547` for an event-handler reference.) | Error |
+| E-ERROR-002 | §19.4.3 | `!` function result not handled (no match, `?`, `!{}`, or boundary). At an event-handler site — a call or a reference to a `!` function (S441) — only `!{}`, `match`, or a handling wrapper applies; `?` and a boundary do not (emitted at `compiler/src/type-system.ts:10892` for a statement-position call, `:14374` for an event-handler call, and `:14547` for an event-handler reference.) **S451 R11 trigger — a `?{}` query outside a `!` function that no `!{}` / `match` handles (§19.8.3): Nominal / not yet emitted by impl#1 (frozen; `g-impl1-sql-unhandled-outside-failable-s451`); lands with the bootstrap.** Provenance: ruling:user-voice-scrml.md S451 "your recs. R11 b". | Error |
 | E-ERROR-003 | §19.5.4 | `?` propagation used in non-`!` function | Error |
 | E-ERROR-004 | §19.5.4 | `?` applied to non-`!` function call | Error |
 | E-ERROR-005 | §19.6.3, §41.14.3 | Error variant in markup without `renders` clause or boundary `fallback`; ALSO (S440 #19) a `<formFor>` whose `onsubmit=` error has no enclosing `<errorBoundary>` (§41.14.3; Nominal for that case) | Error |
@@ -18440,7 +18649,7 @@ In this example:
 | `renders` clause | Optional markup on enum variants; auto-displays in boundary |
 | `<errorBoundary>` | Catches errors in markup; uses `renders` or `fallback` |
 | `match` (§18) | Exhaustive over success + error variants in logic context |
-| `?{}` SQL (§8) | Produces `SqlError` in `!` functions; `not`/empty outside |
+| `?{}` SQL (§8) | A failable expression everywhere (S451 R11): propagates `SqlError` implicitly in `!` functions (§19.8.2); handled at the site with `!{}` / `match` outside them, else E-ERROR-002 (§19.8.3). No row is not a failure (`.get()` → `not`, `.all()` → `[]`). *(Supersedes: "Produces `SqlError` in `!` functions; `not`/empty outside".)* |
 | `@reactive` (§6) | Reactive variables can hold error variants; trigger updates |
 | `~{}` tests | `assert.fails` / `assert.fails.with` for failable functions |
 | `server` functions (§12) | CPS preserves `!`; errors serialize as tagged JSON |
@@ -23196,7 +23405,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-MATCH-002 | §18.16 | Non-exhaustive literal match (string/number/boolean without `_` arm) | Warning |
 | W-DERIVED-001 | §6.6.11 | `const <name> = expr` has no `@variable` references; value never re-evaluates | Warning |
 | E-ERROR-001 | §19.3.3 | `fail` used in non-`!` function | Error |
-| E-ERROR-002 | §19.4.3 | `!` function result not handled (no match, `?`, `!{}`, or boundary). At an event-handler site — a call or a reference to a `!` function (S441) — only `!{}`, `match`, or a handling wrapper applies; `?` and a boundary do not (emitted at `compiler/src/type-system.ts:10892` for a statement-position call, `:14374` for an event-handler call, and `:14547` for an event-handler reference.) | Error |
+| E-ERROR-002 | §19.4.3 | `!` function result not handled (no match, `?`, `!{}`, or boundary). At an event-handler site — a call or a reference to a `!` function (S441) — only `!{}`, `match`, or a handling wrapper applies; `?` and a boundary do not (emitted at `compiler/src/type-system.ts:10892` for a statement-position call, `:14374` for an event-handler call, and `:14547` for an event-handler reference.) **S451 R11 trigger — a `?{}` query outside a `!` function that no `!{}` / `match` handles (§19.8.3): Nominal / not yet emitted by impl#1 (frozen; `g-impl1-sql-unhandled-outside-failable-s451`); lands with the bootstrap.** Provenance: ruling:user-voice-scrml.md S451 "your recs. R11 b". | Error |
 | E-ERROR-003 | §19.5.4 | `?` propagation used in non-`!` function | Error |
 | E-ERROR-004 | §19.5.4 | `?` applied to non-`!` function call | Error |
 | E-ERROR-005 | §19.6.3, §41.14.3 | Error variant in markup without `renders` clause or boundary `fallback`. ALSO (S440 ruling #19, §41.14.3): a `<formFor>` whose `onsubmit=` handler's error has no enclosing `<errorBoundary>` to route to. **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 19). **Named; impl pending — Nominal / not yet emitted for the `formFor` case** (measured S440: compiles clean); impl#1 carries it (§34.0). | Error |
@@ -23663,6 +23872,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ON-MOUNT-DEPRECATED | §6.7.1a, §63.7 | **Reserved** (§63.2) end-of-window code for the `on mount { }` keyword statement. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 2, 2b). | Error |
 | E-VALUE-WRITES-STATE | §6.15, §6.6, §6.8, §7.4.2, §66.9 | Evaluating a **value position** writes a reactive cell, directly or through a called function: an initializer (own value, field / attribute default, use-site construction value, `default=`), a derived formula, or a render expression (a markup `${ … }` interpolation incl. a multi-statement or Tier-0 `for/lift` block, a display-text-literal interpolation, a `renders` body, a markup attribute value). Writes are the §6.7.4 list; the analysis is the §6.7.4 write summary, rules 1–6 as written (a function value in the expression counts as called, except the value of an `on*=` handler attribute in produced markup). Not value positions: `on*=` handlers, `bind:`, function bodies (judged at their call site), lifecycle element bodies (`<request>`, `<effect>`, `<onMount>`, `<timer>` / `<poll>` / `<timeout>`), engine `effect=` / `<onTransition>`, body-top statement lists (§40.8). The message SHALL name the position, the written cell, the call chain and the fix by shape (initializer → `<request>` / `<onMount>` / the handler; formula → derive it / the handler; render → the handler / derive it). One code for every position, because the positions overlap (a formula is an initializer; a use-site value is an initializer that rendering evaluates). Closes by construction the derived-read and construction-read routes into an effect's writes (§6.7.4) and the writing reset value (§6.8.4 rule 3 — supersedes the bootstrap's interim fail-closed refusal of it). **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 3: *"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function (language-wide; closes the four S449 bootstrap holes + the render self-write hang by construction)."*). Newly-rejecting; impl#1 corpus impact measured as a filing aid in `g-impl1-value-writes-state-s449`. **Nominal / not yet emitted**; impl#1 frozen. | Error |
 | E-VALUE-WRITE-UNPROVEN | §6.15, §6.7.4 | A value position (§6.15) reaches code whose reactive writes the compiler cannot determine — a `^{ }` meta block, a call through a function-typed binding not resolvable to a known set of scrml functions, or any call site the write-summary analysis cannot resolve (§6.7.4 rule 4). Fails CLOSED; the fail-closed half mirrors `E-EFFECT-WRITE-UNPROVEN` / `E-MOUNT-WRITE-UNPROVEN`. A host / platform call is not this code. The message SHALL name the position, the unresolvable site and why. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 3: *"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function (language-wide; closes the four S449 bootstrap holes + the render self-write hang by construction)."*). **Nominal / not yet emitted**. | Error |
+| E-VALUE-SERVER-CALL | §13.7, §6.15 | A call whose callee is server-placed (§12.2) appears in a **value position** (§6.15): an initializer (own value, field / attribute default, use-site construction value, `default=`), a derived formula, or a render expression (a markup `${ … }` interpolation, a display-text-literal interpolation, a `renders` body, a markup attribute value). A value position has no statement boundary to suspend at, so it cannot wait for the round trip. Not this code: the right-hand side of a §52 `<x server>` declaration (its placeholder and hydration load, §52.4.3 / §52.6.5), and every §6.15 action position (handlers, `bind:`, function bodies, lifecycle element bodies incl. `<request>`, engine `effect=` / `<onTransition>`, body-top statement lists). The message SHALL name the position, the called server function, and the fix: load the value with a `<request>` (§6.7.7) into a cell and read the cell. **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" (R1 = (a): *"a server call in a value position (non-§52 initializer, derived formula, markup interpolation, attribute value) is a COMPILE ERROR everywhere (named code, e.g. `E-VALUE-ASYNC`), message: load it with a `<request>`"*). Newly-rejecting. **Nominal / not yet emitted**; impl#1 frozen (`g-impl1-value-server-call-s451`); lands with the bootstrap. | Error |
 | E-LIFT-IN-LIFECYCLE-BODY | §6.7.4, §6.7.1a | `lift` in an `<effect>` body or an `<onMount>` body (or their soft-deprecated keyword spellings). Neither body has a render position: an `<effect>` renders nothing, and `lift` writes scrml-owned DOM, which is not the outside world. The message SHALL point to `<each in=@…>`, `if=`, or a derived markup cell (§6.6.17). Newly-rejecting (the keyword `when` form allowed it; pack-measured blast radius zero). **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 3 = (a); the `<onMount>` limb follows from item 2, the body having no render position). **Nominal / not yet emitted**; impl#1 frozen (`g-impl1-effect-open-items-s449`); lands with the bootstrap. | Error |
 | E-TRANSITION-WRITE-CYCLE | §6.7.4, §6.8.4, §51.0.H | The **transition-write graph** has a cycle: nodes are the states of every transition-graph cell and every other cell; edges run from a state to every node a transition handler run on entering it (a state-child `effect=`, an `<onTransition>`) may write by its write summary, on any path including after a server call, and from a `reset-on=` entry to the reset target. A self-write is a no-op and adds no edge; time-driven transitions (`<onTimeout>`, `<onIdle>`), `<timer>` / `<timeout>` / `<poll>` bodies, event handlers and the engine opener `effect=` add none. The message SHALL name the nodes and the handler or `reset-on=` on each edge, and name a time edge (`<onTimeout after=… to=…/>`) as the fix. A guarded terminating cycle is a stated false positive. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 7 = (b): *"static cycle check. A cycle with no time edge is an error, and the fix is `<onTimeout>`"*). Newly-rejecting. **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-open-items-owed`). | Error |
 | E-LIFECYCLE-011 | §28.1 | The `<timer>` or `<poll>` `running` attribute references an undeclared or non-`@` variable. The `running=@flag` form must point at a declared reactive variable to be meaningful. (Catalog addition S84 Wave 2 #5; full prose at §28.1 line 3639.) | Error |
@@ -28758,6 +28968,8 @@ A nested `<program db="...">` creates its own database driver scope. `?{}` block
 | `.all()` (or bare `?{}`) | `Row[]` |
 | `.get()` | `Row | not` |
 | `.run()` | `void` |
+
+`Row | not` is the success type of `.get()`: `not` means the query ran and matched no row. A query that fails to run is not `not` and not `[]` — it is a `SqlError` variant, and the `?{}` is a failable expression in every context (§19.8.3, S451 R11).
 
 `.prepare()` is removed — Bun.SQL manages caching internally. Using `.prepare()` SHALL be compile error E-SQL-006.
 
