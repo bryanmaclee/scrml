@@ -7702,7 +7702,9 @@ server-side code later causes a push into a synced cell, is a later write by a d
 evaluation.
 
 **A value position may not call the server at all (S451 R1).** A server call in a value position is a compile error
-of its own, E-VALUE-SERVER-CALL, whatever the callee writes — the position cannot wait for the round trip. That rule
+of its own, E-VALUE-SERVER-CALL, whatever the callee writes — the position cannot wait for the round trip. So is
+anything else the position would have to wait for: a client function that reaches a server call, a `?{}` query, a
+Promise-returning standard-library call (S451 "your recs on all five" item 3). That rule
 lives in §13.7 (the async model) and uses this section's list of value positions by reference; §52 `<x server>`
 declarations keep their own hydration rule. *(Provenance: ruling:user-voice-scrml.md S451 "your recs. R11 b", R1 = (a)
 · newly-rejecting.)*
@@ -10275,10 +10277,24 @@ after a round trip, so the position would hold a pending result, or the compiler
 value the author never wrote. §6.15 defines the value positions and is the home of the no-write rule; this section
 uses its list by reference and adds the no-server-call rule.
 
-**The rule.** A **server call** — a call whose callee is server-placed (§12.2: escalated by a server-only resource,
-a protected field, a server-only stdlib import, `server`, or inheritance) — written in a **value position** (§6.15:
-an initializer, a derived formula, or a render expression, which includes a markup `${ … }` interpolation and a
-markup attribute value expression) SHALL be a compile error, **E-VALUE-SERVER-CALL**.
+**The rule — one test: would this position have to wait?** A **value position** (§6.15: an initializer, a derived
+formula, or a render expression, which includes a markup `${ … }` interpolation and a markup attribute value
+expression) SHALL NOT contain an expression whose value arrives only after the program waits. Each of the following
+there SHALL be a compile error, **E-VALUE-SERVER-CALL**:
+
+1. **A server call** — a call whose callee is server-placed (§12.2: escalated by a server-only resource, a protected
+   field, a server-only stdlib import, `server`, or inheritance).
+2. **A call to a client function that reaches a server call** — a function that is not itself server-placed but is
+   async-colored (§13.2: it calls, directly or transitively, a server function or a Promise-returning
+   standard-library function). The position waits on the same round trip, through one more frame.
+3. **A `?{}` query written directly in the position** (`<n> = ?{…}.get()`), outside the right-hand side of a §52
+   `<x server>` declaration. The query runs on the server; the position would wait for it.
+4. **A call to a Promise-returning standard-library function** (§13.2) — `fetch`, the `scrml:http` functions, and
+   every other standard-library function the compiler emits `async`. The position would wait for the Promise.
+
+All four are one rule, not four: each is an expression that is async-colored in §13.2's sense, and a value position
+has no statement boundary at which the compiler could await it. *(S451 "your recs on all five" item 3 — provenance
+below, under "Resolved S451".)*
 
 **What is not affected.**
 - **§52 `<x server>` declarations.** The right-hand side of a `<x server>` declaration is governed by §52 — its
@@ -10290,7 +10306,9 @@ markup attribute value expression) SHALL be a compile error, **E-VALUE-SERVER-CA
 
 **The message names the position and the fix.** E-VALUE-SERVER-CALL SHALL name the position (*"the initializer of
 `@n`"*, *"the formula of derived `@label`"*, *"the interpolation at line 12"*, *"the `class=` value at line 12"*),
-the server function called, and the fix: *"a value position cannot wait for the server; load the value with a
+what would wait — the server function called; for a client function (item 2), that function and the server or
+standard-library call it reaches; for a `?{}` (item 3), the query; for a standard-library call (item 4), the
+function — and the fix: *"a value position cannot wait for the server; load the value with a
 `<request>` (§6.7.7) into a cell and read the cell here"* — and, where the cell is server-authoritative, a
 `<x server>` declaration (§52).
 
@@ -10306,6 +10324,11 @@ the server function called, and the fix: *"a value position cannot wait for the 
   <p>${userCount()}</p>                               // E-VALUE-SERVER-CALL — the interpolation
   <p class=${userCount() > 10 ? "busy" : ""}>…</p>    // E-VALUE-SERVER-CALL — the `class=` value
 
+  ${ function usersLabel() { return "Users: " + userCount() } }   // a client function that reaches userCount
+  <p>${usersLabel()}</p>                              // E-VALUE-SERVER-CALL (item 2) — usersLabel reaches userCount
+  <m> = ?{`SELECT count(*) AS n FROM users`}.get() !{ | _ :> not }   // E-VALUE-SERVER-CALL (item 3) — a `?{}` here
+  <about> = fetch("/about.txt")                       // E-VALUE-SERVER-CALL (item 4) — `fetch` returns a Promise
+
   // The fix: load into a cell with a <request>, read the cell.
   <users> = 0
   <request id="usersLoad" deps=[]>${ @users = userCount() }</>
@@ -10314,33 +10337,59 @@ the server function called, and the fix: *"a value position cannot wait for the 
 </program>
 ```
 
-**OPEN (S451 — not decided by this section).**
-- **O-R1-1 — a client function that reaches a server call.** A value-position call to a client function whose body
-  calls a server function (an async-colored function, §13.2) waits on the same round trip, but its callee is not
-  itself server-placed. Whether it is E-VALUE-SERVER-CALL (rec: yes — the position waits either way, and the
-  bootstrap's lowering refuses it) is not ruled. Today such a position is the carried impl#1 defect
-  `g-top-level-derived-from-async-helper-holds-promise` (a cell holding a Promise).
-- **O-R1-2 — a `?{}` written directly in a value position** outside a §52 declaration (`<n> = ?{…}.get()`), and a
-  Promise-returning standard-library call there (`fetch`, `scrml:http`), are not server calls by the definition
-  above. Whether they share this code is not ruled.
-- **O-R1-3 — `<errorBoundary>`'s render-time call pattern.** §19.6 shows a failable call rendered inside a boundary
-  (`<errorBoundary>${loadUser(42)}</>`, §19.6.2; `${notifyOrder(@currentOrderId)}`, §19.9.5; `${loadProfile(…)}`,
-  §19.9.5 migration path 1) and §19.6.6 makes the boundary the handler of exactly such render-time calls. When the
-  rendered callee is server-placed (or CPS-split), that interpolation is a value position calling the server, which this
-  section rejects; the boundary would then have no render-time server call left to catch. How §19.6's render-time
-  pattern and this rule fit together (the `<request>` + `.error` route, a boundary over a `<request>`, or an exception
-  for boundaries) is not ruled. Measured in the corpus: `conformance/cases/server-fn/error-boundary-fallback` pins
-  the pattern on impl#1.
+**Resolved S451 — the three OPEN items this section carried (O-R1-1, O-R1-2, O-R1-3).**
+- **O-R1-1 and O-R1-2** are items 2–4 of the rule above: a client function that reaches a server call, a `?{}` in
+  the position, and a Promise-returning standard-library call are E-VALUE-SERVER-CALL. The test is whether the
+  position would have to wait, not whether the callee is server-placed.
+- **O-R1-3 — `<errorBoundary>`.** This rule wins. Server data reaches markup through a `<request>` (§6.7.7), and a
+  failed load is read from `<#id>.error`. An `<errorBoundary>` catches render-time failures of CLIENT `!` calls and
+  host throws (§19.6.6, §19.6.8 backstop). A server call cannot occur at render time — this section rejects it — so
+  no boundary has a render-time server call to catch. §19.6's and §19.9.5's examples are rewritten to the
+  `<request>` route.
+
+> **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1
+> (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`.
+> `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6
+> examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case +
+> a `<request>` twin. The Suspense-style async-boundary alternative (b) is NOT taken here (it belongs to dpa-023 if
+> ever)."* — item 3: *"**R1 reach (O-R1-1, O-R1-2) = yes to both:** one rule keyed on "this position would have to
+> wait" — a client function that reaches a server call, a bare `?{}`, and a Promise-returning stdlib call (`fetch`,
+> `scrml:http`) in a value position are all E-VALUE-SERVER-CALL."* · **supersedes:** the rule sentence *"A **server
+> call** — a call whose callee is server-placed (§12.2 …) — written in a **value position** (§6.15 …) SHALL be a
+> compile error, **E-VALUE-SERVER-CALL**."* (now item 1 of four) and the OPEN block that stood here: *"O-R1-1 — a
+> client function that reaches a server call. … Whether it is E-VALUE-SERVER-CALL (rec: yes …) is not ruled."* ·
+> *"O-R1-2 — a `?{}` written directly in a value position … and a Promise-returning standard-library call there
+> (`fetch`, `scrml:http`), are not server calls by the definition above. Whether they share this code is not
+> ruled."* · *"O-R1-3 — `<errorBoundary>`'s render-time call pattern. … How §19.6's render-time pattern and this
+> rule fit together (the `<request>` + `.error` route, a boundary over a `<request>`, or an exception for
+> boundaries) is not ruled."*
+>
+> **Direction of change (pa-base §8): newly-rejecting.** Items 2–4 reject positions that compiled before: a value
+> position calling an async-colored client helper (on impl#1 the cell holds a Promise —
+> `g-top-level-derived-from-async-helper-holds-promise` — and a markup gate tests one —
+> `g-markup-gate-tests-server-call-promise`), a `?{}` in an initializer, and `fetch` / `scrml:http` in an initializer
+> or interpolation. A render-time server call inside an `<errorBoundary>` was already a value position calling the
+> server under item 1 (R1); this ruling confirms the boundary does not exempt it. The corpus case
+> `conformance/cases/server-fn/error-boundary-fallback` pins that pattern and is superseded by
+> `server-fn/error-boundary-value-server-call-neg` and `server-fn/error-boundary-request-error-twin`
+> (`docs/changes/s451-spec-open-items/progress.md`). impl#1 emits none of this (frozen; carried as
+> `g-impl1-value-server-call-s451`); the bootstrap builds it.
 
 #### Normative statements
 
-- A call whose callee is server-placed (§12.2) SHALL NOT appear in a value position (§6.15). Such a call SHALL be a
-  compile error, E-VALUE-SERVER-CALL.
+- A value position (§6.15) SHALL NOT contain an expression the program would have to wait for: a call whose callee
+  is server-placed (§12.2), a call to an async-colored client function (§13.2), a `?{}` query, or a call to a
+  Promise-returning standard-library function (`fetch`, the `scrml:http` functions). Each SHALL be a compile error,
+  E-VALUE-SERVER-CALL.
+- An `<errorBoundary>` (§19.6) SHALL NOT exempt a value position from this rule. A server call is not a render-time
+  call a boundary catches; server data reaches markup through a `<request>` and its failure through `<#id>.error`.
 - The right-hand side of a §52 `<x server>` declaration SHALL be governed by §52 (placeholder, hydration load), not
   by this rule.
-- E-VALUE-SERVER-CALL SHALL name the position, the called server function, and the `<request>` fix.
+- E-VALUE-SERVER-CALL SHALL name the position, what would wait (the server function, the client function and the
+  call it reaches, the `?{}`, or the standard-library function), and the `<request>` fix.
 
 **Cross-references:** §6.15 (value positions — the definition this rule uses) · §6.7.7 (`<request>` — the fix) ·
+§19.6 (`<errorBoundary>` — render-time CLIENT `!` calls and host throws only) ·
 §12.2 (server placement) · §13.2 (where server calls are awaited) · §52.4.3 / §52.6.5 (`<x server>` placeholder and
 load) · §34 (E-VALUE-SERVER-CALL).
 
@@ -17318,7 +17367,10 @@ A call to a `!` function SHALL NOT be ignored. The caller MUST do one of the fol
 1. **Match** the result: `match riskyFunction() { ::Ok(val) -> ... ::ErrorVariant -> ... }`
 2. **Propagate** with `?`: `let x = riskyFunction()?`
 3. **Catch** with `!{}` inline handler: `let x = riskyFunction() !{ ::ErrorVariant -> fallbackValue }`
-4. **Contain** inside `<errorBoundary>`: in markup context, an `<errorBoundary>` catches the error of a call made while RENDERING (§19.6.6). It does not contain a call in an event handler, which runs after render.
+4. **Contain** inside `<errorBoundary>`: in markup context, an `<errorBoundary>` catches the error of a call made while RENDERING (§19.6.6). It does not contain a call in an event handler, which runs after render. A render-time call is a call to a CLIENT `!` function: a server call cannot be made while rendering (§13.7, E-VALUE-SERVER-CALL).
+5. **Load** it in a `<request>` body (§6.7.7): the call that is the right-hand side of the body's single `@var = expr` assignment is handled by the request. Its failure sets `<#id>.error` (§6.7.7, "Settled state (failure)") and leaves `@var` and `<#id>.data` at their previous values. This is how server data reaches markup, failure included (§19.6.6).
+
+> **Provenance (item 4's last sentence and item 5):** ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."* · **supersedes:** nothing struck — item 4 is narrowed by §13.7, and item 5 states the handling the ruling gives the `<request>` route (*"its failure surfaces on `<#id>.error`"*), which this list did not name. *(Reading, flagged: the ruling routes the failure to `<#id>.error`; that the request therefore satisfies E-ERROR-002 for its body's call is this section's consequence of it.)* **Direction of change (pa-base §8): newly-accepting** for item 5 in principle (a `!` call as a `<request>` body's right-hand side is handled, not E-ERROR-002); impl#1 never flagged it (it checks only whole-statement calls), so no measured program changes.
 
 Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: **E-ERROR-002** -- `Result of failable function '{name}' is not handled. Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`
 
@@ -17456,15 +17508,59 @@ This ensures that `?` never silently drops error information.
 
 `<errorBoundary>` is a **pre-defined state type** (§11 → §6, §52) that catches errors from `!` function calls within its markup content. It is the markup-context counterpart to `match` in logic context.
 
+**Scope (S451).** A boundary catches two things raised while its content renders: the error of a call to a CLIENT `!` function, and a host throw (the §19.6.8 backstop). It does not catch the failure of a server call, because a server call cannot occur at render time — a render-time server call is E-VALUE-SERVER-CALL (§13.7). Server data reaches markup through a `<request>` (§6.7.7), and its failure is read from `<#id>.error`. The one route by which a server function's error reaches a boundary is the `<formFor>` submit route (§19.6.6), which is handler-time, not render-time.
+
+> **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."* · **supersedes:** nothing struck in this subsection — it stated no scope. The examples below (§19.6.2, §19.6.4) are rewritten; each rewrite quotes what it replaces. · **Direction of change (pa-base §8): newly-rejecting** — measured as part of §13.7 (a render-time server call inside a boundary compiled on impl#1 and is E-VALUE-SERVER-CALL now; impl#1 carries it as `g-impl1-value-server-call-s451`).
+
 #### 19.6.2 Syntax
 
 ```scrml
+${
+    type CodeError:enum = {
+        Empty
+            renders <p class="error">Enter a code</>
+        TooLong(text: string)
+    }
+    // A CLIENT `!` function: no server call, so it may be called while rendering.
+    function checkCode(text: string)! -> CodeError {
+        if (text == "") fail CodeError::Empty
+        if (text.length > 8) fail CodeError::TooLong(text)
+        return text.toUpperCase()
+    }
+}
+
+<entry> = ""
+
 <errorBoundary fallback={<div>Something went wrong/}>
-    // content that may contain failable function calls
-    ${loadUser(42)}
-    ${processPayment(100)}
+    // content that may contain render-time calls to CLIENT failable functions
+    <p>Code: ${checkCode(@entry)}</p>
 </>
 ```
+
+`Empty` renders its own clause; `TooLong` has none, so the boundary's `fallback` shows (§19.6.3).
+
+**Server data is loaded, not rendered through a boundary.** A server call in the boundary's content (`${loadUser(42)}`, where `loadUser` reads the database — §19.9.3) is E-VALUE-SERVER-CALL (§13.7). Load it with a `<request>` and read the failure from `<#id>.error`:
+
+```scrml
+<user> = not
+
+// loadUser is the server `!` function of §19.9.3. The request handles its failure (§19.4.3 item 5).
+<request id="userLoad" deps=[]>${ @user = loadUser(42) }</>
+
+<div>
+    ${
+        if (<#userLoad>.error is some) {
+            lift <div>Could not load the user</>
+        } else if (@user is some) {
+            lift <h1>${@user.name}</h1>
+        } else {
+            lift <p>Loading…</p>
+        }
+    }
+</div>
+```
+
+*(S451 — supersedes the example whose boundary content was `${loadUser(42)}` and `${processPayment(100)}` under the comment "content that may contain failable function calls": both callees read as server calls, which a boundary's content cannot hold (§13.7). Provenance: §19.6.1 Scope.)*
 
 **Attributes:**
 
@@ -17485,18 +17581,21 @@ When a `!` function call inside an `<errorBoundary>` produces an error variant:
 `<errorBoundary>` elements are nestable. An inner boundary catches errors before an outer boundary.
 
 ```scrml
+// buildNav, buildContent, buildFooter: CLIENT `!` functions over cells already loaded (no server call — §13.7).
 <errorBoundary fallback={<div>Page error/}>
-    <header>${loadNav()}</>
+    <header>${buildNav(@nav)}</>
     <errorBoundary fallback={<div>Content error/}>
-        ${loadContent()}
+        ${buildContent(@article)}
     </>
-    <footer>${loadFooter()}</>
+    <footer>${buildFooter(@site)}</>
 </>
 ```
 
 In this example:
-- If `loadContent()` fails, the inner boundary catches it. The header and footer remain visible.
-- If `loadNav()` or `loadFooter()` fail, the outer boundary catches them.
+- If `buildContent()` fails, the inner boundary catches it. The header and footer remain visible.
+- If `buildNav()` or `buildFooter()` fail, the outer boundary catches them.
+
+*(S451 — the functions were `loadNav()` / `loadContent()` / `loadFooter()`, names that read as server loads; a server load here would be E-VALUE-SERVER-CALL (§13.7). Provenance: §19.6.1 Scope. The nesting rule itself is unchanged.)*
 
 #### 19.6.5 Interaction with `renders` Clauses
 
@@ -17512,6 +17611,7 @@ When an error variant with a `renders` clause is caught by an `<errorBoundary>`,
 
 - `<errorBoundary>` SHALL be a pre-defined state type recognized by the compiler. It SHALL NOT be user-definable; the compiler provides it.
 - `<errorBoundary>` SHALL catch error variants produced by any `!` function call made while RENDERING its direct or nested markup content (a `${…}` interpolation, for example). It SHALL NOT catch an error raised in an author-written event handler (an `on…=` attribute value, including an arrow-valued one): a handler runs when its event fires, after render.
+- **Scope (S451).** The calls a boundary catches at render time are calls to CLIENT `!` functions; together with host throws (§19.6.8 backstop) they are everything a boundary catches while rendering. A server call SHALL NOT occur at render time: in the boundary's content, as in any value position, it is E-VALUE-SERVER-CALL (§13.7), and the boundary SHALL NOT exempt it. Server data reaches markup through a `<request>` (§6.7.7), whose failure is `<#id>.error`. *(Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."* · supersedes: nothing struck — the statement above did not distinguish client and server callees; §13.7 now does · direction: newly-rejecting, measured in §13.7.)*
 - **The one handler-time exception is the `<formFor>` submit route (§41.14.3, S440 #19).** The error returned by a `<formFor>`'s `onsubmit=` handler SHALL route to the nearest `<errorBoundary>` enclosing the `<formFor>`. With no enclosing boundary, the `<formFor>` SHALL be E-ERROR-005. That handler is called by the compiler-generated submit dispatch, not by an author-written handler, so the render-time limit above does not apply to it. Its error variants are reachable inside the boundary for the E-ERROR-005 exhaustiveness check below (each needs a `renders` clause or the boundary's `fallback`). No other handler-time error reaches a boundary.
   > *(PA note, S441)* The exhaustiveness consequence is DERIVED from the existing §19.6.6 E-ERROR-005 SHALL ("every error variant reachable inside an `<errorBoundary>` …") applied to the routed variants; ruling #19 itself states only the routing and the no-boundary E-ERROR-005.
 - Within an `<errorBoundary>`, a RENDER-time call to a `!` function without explicit match/propagation SHALL NOT trigger E-ERROR-002; the boundary satisfies the handling requirement. A call in an author-written event handler inside the boundary is not render-time: when it is unhandled it is E-ERROR-002, as anywhere else (§19.4.3). The `<formFor>` `onsubmit=` value is the one handler reference exempt from E-ERROR-002 (§19.4.3, S441); its handling requirement is the route above.
@@ -17522,20 +17622,23 @@ When an error variant with a `renders` clause is caught by an `<errorBoundary>`,
 
 - Nested `<errorBoundary>` elements SHALL follow inner-catches-first semantics. An error caught by an inner boundary SHALL NOT propagate to an outer boundary.
 - The compiler SHALL verify, at compile time, that every error variant reachable inside an `<errorBoundary>` either has a `renders` clause or is covered by the boundary's `fallback` attribute. Failure to satisfy this SHALL be E-ERROR-005.
+  *(S451 note — the rule is unchanged; what is "reachable" is narrower. The variants reachable inside a boundary are those of the render-time CLIENT `!` calls in its content and, by the `<formFor>` submit route, those of the submit handler's error type. A server function's error variants reach a boundary only by that route; a `<request>`'s failure is `<#id>.error` and is not checked here.)*
 
 #### 19.6.7 Multi-Batch CPS Granularity
 
 **Added:** 2026-05-08, A9 Ext 4 (S72 body-split integration design dive Q3 verdict).
 
-When a server function is split across the client/server boundary (CPS — see §19.9.5), and the CPS implementation produces multiple server batches in execution order, the granularity at which `<errorBoundary>` catches a failure is **per-batch**, not per-function:
+When a server function is split across the client/server boundary (CPS — see §19.9.5), and the CPS implementation produces multiple server batches in execution order, the granularity at which the caller's handling sees a failure is **per-batch**, not per-function:
 
 - Batch 1 commits stand if batch 1 succeeded; batch 2's failure does NOT roll batch 1 back. (No 2PC / saga is performed; per S72 body-split soundness verdict, that path is deliberately out-of-scope.)
-- The `<errorBoundary>` catches batch K's failure as a tagged scrml-error variant. The boundary's `fallback` markup (or a variant's `renders` clause) is displayed in place of the function's expected output.
+- The caller receives batch K's failure as a tagged scrml-error variant, and handles it as §19.4.3 says: `match`, `?`, `!{}`, or — when the call loads data for markup — a `<request>` body, where the failure sets `<#id>.error` (§6.7.7). An `<errorBoundary>` does not receive it: a CPS-split function is async-colored (§13.2), so it cannot be called while rendering (§13.7).
 - Recovery from a non-tail batch failure is **idempotency-key replay** of batch K (A9 Ext 5; future scope, per S72 body-split integration ratification).
 
-The pathological multi-batch case — batch N depends on batch K's durable write across the client/server boundary AND K is non-tail — is **rejected at compile time** by the S3 reorder verdict (`E-CPS-MULTIBATCH-REORDER`, implemented in §19.9.9 — A9 Ext 1, S114). For all admissible cases, the existing §19 mechanisms (`?` propagation, `!{}` handler, `<errorBoundary>` markup) catch the failure surface; no new mechanism is required.
+The pathological multi-batch case — batch N depends on batch K's durable write across the client/server boundary AND K is non-tail — is **rejected at compile time** by the S3 reorder verdict (`E-CPS-MULTIBATCH-REORDER`, implemented in §19.9.9 — A9 Ext 1, S114). For all admissible cases, the existing §19 mechanisms (`?` propagation, `!{}` handler, `match`) and the `<request>` route (`<#id>.error`) catch the failure surface; no new mechanism is required.
 
-A worked example illustrating "batch 1 commits stand on batch 2 failure; the developer's `<errorBoundary>` catches the error variant" is provided in §19.9.5.
+A worked example illustrating "batch 1 commits stand on batch 2 failure; the `<request>` that made the call reports the error on `<#id>.error`" is provided in §19.9.5.
+
+> **Provenance (S451):** ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."* · **supersedes:** *"The `<errorBoundary>` catches batch K's failure as a tagged scrml-error variant. The boundary's `fallback` markup (or a variant's `renders` clause) is displayed in place of the function's expected output."*; *"the existing §19 mechanisms (`?` propagation, `!{}` handler, `<errorBoundary>` markup) catch the failure surface"*; *"the developer's `<errorBoundary>` catches the error variant"*; and the heading sentence's *"the granularity at which `<errorBoundary>` catches a failure"* · **Direction of change (pa-base §8): newly-rejecting** — the render-time CPS call this subsection described is E-VALUE-SERVER-CALL (§13.7 item 1 or 2); the per-batch rule is unchanged.
 
 #### 19.6.8 Runtime Backstop for Non-`!` Errors (C-Hybrid)
 
@@ -17660,7 +17763,7 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
        return rows
    }
    ```
-3. **Moving the query into a `!` function** — §19.8.2 then applies (implicit propagation), and the CALLER handles the function's result under §19.4.3 (`match`, `?`, `!{}`, or — for a render-time call — `<errorBoundary>`):
+3. **Moving the query into a `!` function** — §19.8.2 then applies (implicit propagation), and the CALLER handles the function's result under §19.4.3 (`match`, `?`, `!{}`, or — when the result loads data for markup — a `<request>` body, whose failure is `<#id>.error`; S451: the function is server-placed by its `?{}`, so it cannot be called while rendering, §13.7):
    ```scrml
    function loadUser(id)! -> SqlError {
        return ?{`SELECT * FROM users WHERE id = ${id}`}.get()   // a failure propagates (§19.8.2)
@@ -17670,7 +17773,7 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
    }
    ```
 
-`?` on a `?{}` is valid only inside a `!` function (§19.5.4, E-ERROR-003), where it is the same as the implicit propagation of §19.8.2. An `<errorBoundary>` does not handle a `?{}` written outside a `!` function: it catches the error of a `!` function CALL made while rendering (§19.6.6), and the `?{}` here is not such a call — handle it at the site, or move it into a `!` function and render the call.
+`?` on a `?{}` is valid only inside a `!` function (§19.5.4, E-ERROR-003), where it is the same as the implicit propagation of §19.8.2. An `<errorBoundary>` does not handle a `?{}` written outside a `!` function: it catches the error of a CLIENT `!` function call made while rendering (§19.6.6), and the `?{}` here is not such a call — handle it at the site, or move it into a `!` function and load the call with a `<request>` (§6.7.7, §13.7). *(S451 — supersedes "or move it into a `!` function and render the call": a function holding a `?{}` is server-placed, and rendering its call is E-VALUE-SERVER-CALL. Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."*)*
 
 **"No row" is not a failure.** A query that runs and matches nothing succeeds: `.get()` on zero rows returns `not`, and `.all()` on zero rows returns `[]`, in every context, inside or outside a `!` function. Only a query that fails to run (a connection lost, a constraint violated, an invalid query) produces a `SqlError` variant. Code that tests `row is not` tests for absence, never for failure.
 
@@ -17702,7 +17805,7 @@ When a server `!` function fails:
    **S451 R8 — one shape for values and errors.** The envelope's `variant` and `data` are the §57.8 payload-enum shape, so an error variant crosses the wire exactly as the same variant would as a returned value, plus the two error keys (`__scrml_error`, `type`): `data` is an object keyed by the variant's declared field names, each value encoded per §57 (`{}` for a variant with no fields). *(Provenance: ruling:user-voice-scrml.md S451 "yes on all seven" — R8: *"payload-enum wire shape = `{"variant": "V", "data": {…}}` — one shape for values and `fail` errors (§19.9.1 generalized)."* · supersedes: nothing struck — this item defined `data` only as `{ ... }` · direction of change: semantics-changed (stated); impl#1 already keys `fail` data by declared field name (`compiler/src/codegen/emit-logic.ts`), except a variant with no declared field schema given one argument, where it puts the bare value on `.data` — filed `g-impl1-payload-enum-wire-shape-s451`.)*
 2. The HTTP response carries an appropriate status code (see §19.9.2).
 3. The client CPS continuation deserializes the tagged object back into the error enum variant.
-4. The client code handles the error via match, `?`, `!{}`, or `<errorBoundary>`.
+4. The client code handles the error via match, `?`, `!{}`, or a `<request>` body (the failure is `<#id>.error`, §6.7.7). It reaches an `<errorBoundary>` only through the `<formFor>` submit route (§19.6.6) — a server call is never made while rendering (§13.7). *(S451 — supersedes "or `<errorBoundary>`". Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."*)*
 
 #### 19.9.2 HTTP Status Code Mapping
 
@@ -17797,20 +17900,22 @@ function loadProfile(id: number) {
 **Caller-context propagation (D2).** A function `F` calling a CPS-split function `G` from within `F`'s body satisfies the §19.4 handling requirement automatically when:
 
 1. `F` is itself `!`-typed (caller propagates the failure structurally), OR
-2. `F`'s call to `G` occurs inside a `<errorBoundary>` markup region (the boundary catches the failure).
+2. the call to `G` is the right-hand side of a `<request>` body's assignment (the request handles the failure; it lands on `<#id>.error` — §19.4.3 item 5, §6.7.7).
+
+*(S451 — supersedes condition 2 "`F`'s call to `G` occurs inside a `<errorBoundary>` markup region (the boundary catches the failure)": a call to a CPS-split function in a boundary's markup is a render-time server call, E-VALUE-SERVER-CALL (§13.7 item 1 or 2). Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."* Direction: newly-rejecting, measured in §13.7.)*
 
 If neither condition holds, the compiler emits **W-CPS-NEEDS-FAILABLE** (warning, deprecation cycle stage 1, v0.next) at the call site. The warning is informational; existing code compiles + runs unchanged. The warning is reserved to promote to **E-CPS-NEEDS-FAILABLE** (error) only at a future MAJOR language-version event (unscheduled per §63.7). Per S72 user-direction (`user-voice-scrml.md` 2026-05-08), the migration codemod is deferred — the two-stage cycle is sufficient given current adopter state.
 
-**Worked example — multi-batch CPS with `<errorBoundary>`.**
+**Worked example — multi-batch CPS with a `<request>`.**
 
 ```scrml
 // Function with two independent batches.
 // Batch 1 (server): durable log write.
 // Batch 2 (server): email send (independent of log write).
 //
-// Per §19.6.7, batch 1's commit is durable; if batch 2 fails, the developer's
-// <errorBoundary> catches the error variant; the log entry from batch 1 is
-// NOT rolled back. (No 2PC / saga; per S72 body-split soundness verdict, that
+// Per §19.6.7, batch 1's commit is durable; if batch 2 fails, the <request>
+// that made the call reports the error variant on <#id>.error; the log entry
+// from batch 1 is NOT rolled back. (No 2PC / saga; per S72 body-split soundness verdict, that
 // path is out-of-scope.)
 function notifyOrder(orderId: number) {
     // Batch 1 — server: durable log write
@@ -17824,24 +17929,42 @@ function notifyOrder(orderId: number) {
     // across durable writes; this example uses independent batches per
     // §19.6.7's admissible-case framing).
     scrml:email.send(@msg)
+    return orderId
 }
 
-// Caller wraps in <errorBoundary>. On batch 2 failure, the boundary catches
-// the tagged scrml-error variant; the log entry from batch 1 is durable
-// (already committed); the developer recovers via retry (Ext 5 future scope).
-<errorBoundary fallback={<div>Notification failed; logged but email pending</>}>
-    ${notifyOrder(@currentOrderId)}
-</>
+// The call is a <request>'s body (S451 — a server call cannot be rendered, §13.7).
+// On batch 2 failure the request catches the tagged scrml-error variant and sets
+// <#notify>.error; the log entry from batch 1 is durable (already committed); the
+// developer recovers via <#notify>.refetch() (retry; Ext 5 replay safety).
+// notifyOrder provably writes (its INSERT), so the request does not run on mount; it
+// runs when the user's own edit changes @currentOrderId, or on refetch() (§6.7.7.3).
+<notifiedId> = not
+<request id="notify" deps=[@currentOrderId]>${ @notifiedId = notifyOrder(@currentOrderId) }</>
+<div>
+    ${
+        if (<#notify>.error is some) {
+            lift <div>Notification failed; logged but email pending</>
+            lift <button onclick=${<#notify>.refetch()}>Retry</>
+        }
+    }
+</div>
 ```
+
+*(S451 — supersedes the caller* `<errorBoundary fallback={<div>Notification failed; logged but email pending</>}> ${notifyOrder(@currentOrderId)} </>` *and its comment "Caller wraps in <errorBoundary>. On batch 2 failure, the boundary catches the tagged scrml-error variant": a render-time call of a CPS-split function is E-VALUE-SERVER-CALL (§13.7). `return orderId` is added so the request body has a value to assign (§6.7.7, E-LIFECYCLE-021). Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."*)*
 
 **Three migration paths for adopters today (cycle 1, v0.next).** When a CPS-eligible call site fires W-CPS-NEEDS-FAILABLE, the developer chooses one of:
 
-1. **`<errorBoundary>` markup wrapper** (markup-context callers; canonical pattern):
+1. **A `<request>` load** (markup-context callers; canonical pattern). The load is a `<request>` body's assignment, and its failure is read from `<#id>.error` (§6.7.7, §19.4.3 item 5). The body needs a returned value to assign, so the cell write moves out of the function into the request:
    ```scrml
-   <errorBoundary fallback={<div>Failed to load profile</>}>
-       ${loadProfile(@currentUserId)}
-   </>
+   function fetchProfile(id: number)! -> SqlError {
+       return ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+   }
+   <request id="profileLoad" deps=[@currentUserId]>${ @profile = fetchProfile(@currentUserId) }</>
+   <div>
+       ${ if (<#profileLoad>.error is some) { lift <div>Failed to load profile</> } }
+   </div>
    ```
+   *(S451 — supersedes path 1 "**`<errorBoundary>` markup wrapper**: `<errorBoundary fallback={<div>Failed to load profile</>}> ${loadProfile(@currentUserId)} </>`": a render-time server call is E-VALUE-SERVER-CALL (§13.7). Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."*)*
 2. **Caller `!` modifier** (logic-context propagation):
    ```scrml
    function reloadProfile(id)! -> CpsError {
@@ -18410,7 +18533,7 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-DEFER-AMBIGUOUS-LEAD | §19.16.1 | `defer` + whitespace + `[` (a single-statement defer led by an array literal) while a binding named `defer` is in scope — ambiguous with an index of that binding; write `defer[…]` to index or `defer { […]… }` to defer (S432; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-DUPLICATE-FUNCTION | §19.16.6 | A block that contains a `defer` declares the same `function` name twice (the lowered block is a host `try` block, where that is not allowed) (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-TEST-006 | §19.12.7 | `~{}` test block: server-function call inside an active `test-bind` context references a server function with no `test-bind` declaration in scope (fail-fast over silent passthrough; design-insight 22, S74). | Test |
-| W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to CPS-implicit-`!` function from non-`!` / non-boundary caller (cycle 1 of A9 Ext 4 deprecation; v0.next). | Warning |
+| W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to CPS-implicit-`!` function from a non-`!` caller that is not a `<request>` body's assignment (cycle 1 of A9 Ext 4 deprecation; v0.next). *(S451: the "non-boundary caller" limb is replaced by the `<request>` body — a render-time CPS call is E-VALUE-SERVER-CALL, §13.7.)* | Warning |
 | E-CPS-NEEDS-FAILABLE | §19.9.5 | Same condition; reserved-E, unscheduled per §63.7. Not yet emitted. | Error |
 | E-CPS-NONIDEM-NO-STORAGE | §19.9.6 | Non-monotone CPS batch in scope of `<program>` with `idempotency-store="none"` OR no resolvable backend (default-resolution falls through). (A9 Ext 5; S76.) | Error |
 | E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH | §39.2.6 | `idempotency-store="postgres" \| "sqlite" \| "mysql"` does not match the closest-ancestor `<program db=>` driver. (A9 Ext 5; S76.) | Error |
@@ -18668,6 +18791,7 @@ In this example:
 - Each widget is wrapped in its own `<errorBoundary>`. If `loadRevenueWidget()` fails, only the revenue widget shows an error. The users widget and analytics widget remain functional.
 - The outer boundary catches errors from `loadDashboardHeader()` and `loadDashboardFooter()`. If either fails, the entire page falls back to "Dashboard unavailable."
 - Error variants with `renders` clauses display context-specific error UIs (retry buttons, explanatory text) without any explicit match handling in the template.
+- *(S451 — §19.6.1 Scope.)* The `load…()` functions here are rendered, so each must be a CLIENT `!` function — one that builds the widget from cells already loaded. A widget whose data comes from the server loads it with a `<request>` and reads the failure from `<#id>.error` (§19.6.2); a `load…()` that called the server here would be E-VALUE-SERVER-CALL (§13.7). *(Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" item 1 · supersedes: nothing struck — the example never said where the `load…()` functions run.)*
 
 ---
 
@@ -23457,7 +23581,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute (S196 — render-expression) | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's held enum has no `renders` clause; reuses the §19.6.6 E-ERROR-005 per-variant exhaustiveness logic at the render-expression fire site (S196) | Error |
 | E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum; the render-expression is enum-scoped (S196) | Error |
-| W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to a CPS-eligible (implicitly-`!`) function from a non-`!`, non-`<errorBoundary>`-wrapped caller. Cycle 1 of the deprecation cycle (v0.next). Resolution: wrap call site in `<errorBoundary>`, mark caller `!`, or match on result. (Per A9 Ext 4, S72 body-split soundness verdict 2026-05-08.) | Warning |
+| W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to a CPS-eligible (implicitly-`!`) function from a non-`!` caller that is not the right-hand side of a `<request>` body's assignment. Cycle 1 of the deprecation cycle (v0.next). Resolution: load it in a `<request>` (its failure is `<#id>.error`), mark caller `!`, or match on result. (Per A9 Ext 4, S72 body-split soundness verdict 2026-05-08.) **S451 amendment** (ruling:user-voice-scrml.md S451 "your recs on all five" item 1; supersedes *"non-`<errorBoundary>`-wrapped caller"* and *"wrap call site in `<errorBoundary>`"*): a CPS call in a boundary's markup is a render-time server call, E-VALUE-SERVER-CALL (§13.7), so the boundary is no longer a resolution; the `<request>` limb of the trigger is **Nominal / spec-ahead** (impl#1 still suppresses the code inside a boundary and does not recognise a `<request>` body). Emitted at `compiler/src/type-system.ts:10936`. | Warning |
 | E-CPS-NEEDS-FAILABLE | §19.9.5 | Same condition as W-CPS-NEEDS-FAILABLE, reserved to promote to error only at a future MAJOR (unscheduled per §63.7). Not yet emitted. | Error |
 | E-CPS-NONIDEM-NO-STORAGE | §19.9.6 | Non-monotone CPS batch in scope of `<program>` with `idempotency-store="none"` OR no resolvable backend (default-resolution falls through). Resolution: declare `idempotency-store=` on the closest-ancestor `<program>` (matching the `db=` driver), import `scrml:redis`, or annotate the function with `.idempotent()` if the batch is monotone-by-construction. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Error |
 | E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH | §39.2.6 | `idempotency-store="postgres" \| "sqlite" \| "mysql"` does not match the closest-ancestor `<program db=>` driver. Resolution: change `idempotency-store=` to match `db=`, or use `"auto"` for compiler-default resolution. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Error |
@@ -23904,7 +24028,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ON-MOUNT-DEPRECATED | §6.7.1a, §63.7 | **Reserved** (§63.2) end-of-window code for the `on mount { }` keyword statement. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 2, 2b). | Error |
 | E-VALUE-WRITES-STATE | §6.15, §6.6, §6.8, §7.4.2, §66.9 | Evaluating a **value position** writes a reactive cell, directly or through a called function: an initializer (own value, field / attribute default, use-site construction value, `default=`), a derived formula, or a render expression (a markup `${ … }` interpolation incl. a multi-statement or Tier-0 `for/lift` block, a display-text-literal interpolation, a `renders` body, a markup attribute value). Writes are the §6.7.4 list; the analysis is the §6.7.4 write summary, rules 1–6 as written (a function value in the expression counts as called, except the value of an `on*=` handler attribute in produced markup). Not value positions: `on*=` handlers, `bind:`, function bodies (judged at their call site), lifecycle element bodies (`<request>`, `<effect>`, `<onMount>`, `<timer>` / `<poll>` / `<timeout>`), engine `effect=` / `<onTransition>`, body-top statement lists (§40.8). The message SHALL name the position, the written cell, the call chain and the fix by shape (initializer → `<request>` / `<onMount>` / the handler; formula → derive it / the handler; render → the handler / derive it). One code for every position, because the positions overlap (a formula is an initializer; a use-site value is an initializer that rendering evaluates). Closes by construction the derived-read and construction-read routes into an effect's writes (§6.7.4) and the writing reset value (§6.8.4 rule 3 — supersedes the bootstrap's interim fail-closed refusal of it). **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 3: *"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function (language-wide; closes the four S449 bootstrap holes + the render self-write hang by construction)."*). Newly-rejecting; impl#1 corpus impact measured as a filing aid in `g-impl1-value-writes-state-s449`. **Nominal / not yet emitted**; impl#1 frozen. | Error |
 | E-VALUE-WRITE-UNPROVEN | §6.15, §6.7.4 | A value position (§6.15) reaches code whose reactive writes the compiler cannot determine — a `^{ }` meta block, a call through a function-typed binding not resolvable to a known set of scrml functions, or any call site the write-summary analysis cannot resolve (§6.7.4 rule 4). Fails CLOSED; the fail-closed half mirrors `E-EFFECT-WRITE-UNPROVEN` / `E-MOUNT-WRITE-UNPROVEN`. A host / platform call is not this code. The message SHALL name the position, the unresolvable site and why. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 3: *"Initializers / derived formulas / markup interpolations may NOT write reactive state = (a) — a compile error everywhere, directly or through a called function (language-wide; closes the four S449 bootstrap holes + the render self-write hang by construction)."*). **Nominal / not yet emitted**. | Error |
-| E-VALUE-SERVER-CALL | §13.7, §6.15 | A call whose callee is server-placed (§12.2) appears in a **value position** (§6.15): an initializer (own value, field / attribute default, use-site construction value, `default=`), a derived formula, or a render expression (a markup `${ … }` interpolation, a display-text-literal interpolation, a `renders` body, a markup attribute value). A value position has no statement boundary to suspend at, so it cannot wait for the round trip. Not this code: the right-hand side of a §52 `<x server>` declaration (its placeholder and hydration load, §52.4.3 / §52.6.5), and every §6.15 action position (handlers, `bind:`, function bodies, lifecycle element bodies incl. `<request>`, engine `effect=` / `<onTransition>`, body-top statement lists). The message SHALL name the position, the called server function, and the fix: load the value with a `<request>` (§6.7.7) into a cell and read the cell. **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" (R1 = (a): *"a server call in a value position (non-§52 initializer, derived formula, markup interpolation, attribute value) is a COMPILE ERROR everywhere (named code, e.g. `E-VALUE-ASYNC`), message: load it with a `<request>`"*). Newly-rejecting. **Nominal / not yet emitted**; impl#1 frozen (`g-impl1-value-server-call-s451`); lands with the bootstrap. | Error |
+| E-VALUE-SERVER-CALL | §13.7, §6.15 | An expression the program would have to wait for appears in a **value position** (§6.15) — a call whose callee is server-placed (§12.2); a call to an async-colored client function (§13.2 — one that reaches a server call or a Promise-returning standard-library call); a `?{}` query; or a call to a Promise-returning standard-library function (`fetch`, the `scrml:http` functions). *(The last three limbs: ruling:user-voice-scrml.md S451 "your recs on all five" item 3 — O-R1-1 / O-R1-2 = yes. An `<errorBoundary>` does not exempt the position — item 1.)* The value positions: an initializer (own value, field / attribute default, use-site construction value, `default=`), a derived formula, or a render expression (a markup `${ … }` interpolation, a display-text-literal interpolation, a `renders` body, a markup attribute value). A value position has no statement boundary to suspend at, so it cannot wait for the round trip. Not this code: the right-hand side of a §52 `<x server>` declaration (its placeholder and hydration load, §52.4.3 / §52.6.5), and every §6.15 action position (handlers, `bind:`, function bodies, lifecycle element bodies incl. `<request>`, engine `effect=` / `<onTransition>`, body-top statement lists). The message SHALL name the position, what would wait, and the fix: load the value with a `<request>` (§6.7.7) into a cell and read the cell. **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" (R1 = (a): *"a server call in a value position (non-§52 initializer, derived formula, markup interpolation, attribute value) is a COMPILE ERROR everywhere (named code, e.g. `E-VALUE-ASYNC`), message: load it with a `<request>`"*). Newly-rejecting. **Nominal / not yet emitted**; impl#1 frozen (`g-impl1-value-server-call-s451`); lands with the bootstrap. | Error |
 | E-LIFT-IN-LIFECYCLE-BODY | §6.7.4, §6.7.1a | `lift` in an `<effect>` body or an `<onMount>` body (or their soft-deprecated keyword spellings). Neither body has a render position: an `<effect>` renders nothing, and `lift` writes scrml-owned DOM, which is not the outside world. The message SHALL point to `<each in=@…>`, `if=`, or a derived markup cell (§6.6.17). Newly-rejecting (the keyword `when` form allowed it; pack-measured blast radius zero). **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 3 = (a); the `<onMount>` limb follows from item 2, the body having no render position). **Nominal / not yet emitted**; impl#1 frozen (`g-impl1-effect-open-items-s449`); lands with the bootstrap. | Error |
 | E-TRANSITION-WRITE-CYCLE | §6.7.4, §6.8.4, §51.0.H | The **transition-write graph** has a cycle: nodes are the states of every transition-graph cell and every other cell; edges run from a state to every node a transition handler run on entering it (a state-child `effect=`, an `<onTransition>`) may write by its write summary, on any path including after a server call, and from a `reset-on=` entry to the reset target. A self-write is a no-op and adds no edge; time-driven transitions (`<onTimeout>`, `<onIdle>`), `<timer>` / `<timeout>` / `<poll>` bodies, event handlers and the engine opener `effect=` add none. The message SHALL name the nodes and the handler or `reset-on=` on each edge, and name a time edge (`<onTimeout after=… to=…/>`) as the fix. A guarded terminating cycle is a stated false positive. **Provenance:** ruling:user-voice-scrml.md S449 "⭐⭐ RULED — \"your recs.\" on the S449 eight-question queue" — *"your recs."* (item 7: *"**`<effect>` OPEN items — accept the rec pack** (`docs/deep-dives/effect-open-items-rec-pack-2026-10-02.md`) incl. 7-9 = **(a)** server load wins + compile error on the silent-loss combination …"*) — pack item 7 = (b): *"static cycle check. A cycle with no time edge is an error, and the fix is `<onTimeout>`"*). Newly-rejecting. **Nominal / not yet emitted**; lands with the bootstrap (`g-bootstrap-effect-open-items-owed`). | Error |
 | E-LIFECYCLE-011 | §28.1 | The `<timer>` or `<poll>` `running` attribute references an undeclared or non-`@` variable. The `running=@flag` form must point at a declared reactive variable to be meaningful. (Catalog addition S84 Wave 2 #5; full prose at §28.1 line 3639.) | Error |

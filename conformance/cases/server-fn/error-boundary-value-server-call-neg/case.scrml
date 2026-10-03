@@ -1,0 +1,14 @@
+${
+    type LoadError:enum = { Timeout, NotFound }
+    function loadName(id: string)! LoadError {
+        rows = ?{`SELECT name FROM users LIMIT 1`}
+        return rows[0].name
+    }
+}
+<page>
+    <h1 class="eb-header">Profile</>
+    <errorBoundary fallback={<div class="eb-fallback">Could not load profile</>}>
+        ${loadName("1")}
+    </>
+    <footer class="eb-footer">End</>
+</page>
