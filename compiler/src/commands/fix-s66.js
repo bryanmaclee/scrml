@@ -63,12 +63,12 @@
 import { splitBlocks } from "../block-splitter.js";
 import { buildAST } from "../ast-builder.js";
 import { parseExprToNode, deepEqualExprNode, captureTrailingContentWarnings, hasLostTrailingContent, parseStatements, esTreeToExprNode } from "../expression-parser.ts";
-import { buildImportGraph, resolveModulePathNative } from "../module-resolver.js";
+import { buildImportGraph, resolveModulePathNative, isStdlibImport } from "../module-resolver.js";
 import { parseComponentBody } from "../component-expander.ts";
 import { isUniversalCorePredicate } from "../validator-catalog.ts";
 import { applyMigrations } from "./migrate.js";
 import { compileScrml } from "../api.js";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from "node:path";
 
@@ -388,21 +388,38 @@ function commonDir(paths) {
  *
  *   ok          impl#1 read the file: the front end built an AST and raised no `E-` code. A file it
  *               cannot read may hide an import — the caller treats it as unextracted.
- *   edges       absolute paths of every relative import / re-export target (impl#1's resolution).
- *               `scrml:` / `vendor:` modules are not project files and are not edges.
+ *   edges       absolute paths of every import / re-export target impl#1's `resolveModulePathNative`
+ *               resolves to an existing file — relative, `vendor:` (→ `<importer>/../vendor/…`), any
+ *               other shape. The caller requires each edge to be a project file.
+ *   stdlib      `scrml:` targets inside impl#1's bundled stdlib (STDLIB_DIR) — the ONLY targets that
+ *               are not project files (S239 re-review r5: classification by exclusion of the one
+ *               known non-project destination, not by an allow-list of project prefixes).
  *   unresolved  reasons impl#1 could not resolve an import: an `E-IMPORT-*` from the graph builder
- *               (E-IMPORT-006 missing file, E-IMPORT-005 bare specifier, host-import errors), or an
- *               import declaration with no readable source. Any → the caller treats every cell as
+ *               (E-IMPORT-006 missing file, E-IMPORT-005 bare specifier, host-import errors), an
+ *               import declaration with no readable source, or a specifier the resolver throws on /
+ *               leaves unresolved / resolves to a missing file. Any → the caller treats every cell as
  *               possibly written by a file it cannot see.
  * Every `import-decl` node anywhere in the tree counts, not only the hoisted list impl#1 resolves —
  * one more edge only adds writes.
  * @returns {{ ok: boolean, edges: string[], unresolved: string[] }}
  */
+/**
+ * The directory impl#1 resolves `scrml:` specifiers into (its bundled stdlib) — read from impl#1's
+ * own resolver, not restated: `scrml:<m>` → `<STDLIB_ROOT>/<m>.scrml` when no `<m>/index.scrml`.
+ */
+const STDLIB_DIR = dirname(resolveModulePathNative("scrml:__scrml_fix_probe__", resolve("/")));
+/** Is `p` inside directory `dir` (or equal to it)? */
+function isInside(dir, p) {
+  const r = relative(dir, p);
+  return r === "" || (!r.startsWith("..") && !isAbsolute(r));
+}
+
 export function moduleEdges(filePath, source) {
   const fe = frontEndMemo(filePath, source);
   if (!fe) return { ok: false, edges: [], unresolved: ["impl#1's front end could not read the file"] };
   const unresolved = fe.errorCodes.map((c) => `front end ${c}`);
   const edges = [];
+  const stdlib = []; // `scrml:` targets in impl#1's bundled stdlib (not project files)
   const ast = fe.ast;
   let graph;
   try {
@@ -412,12 +429,34 @@ export function moduleEdges(filePath, source) {
   } catch (e) {
     return { ok: false, edges: [], unresolved: [`impl#1's module resolver threw: ${String(e?.message ?? e).split("\n")[0]}`] };
   }
-  const isProjectSpec = (s) => !/^(?:scrml|vendor):/.test(s);
+  // Classification by construction (S239 re-review r5): the ONLY specifier that is not a project
+  // file is one impl#1 itself resolves into its BUNDLED stdlib (`scrml:` → STDLIB_ROOT, a directory
+  // of the compiler, never of the project). Every other specifier — relative, `vendor:`, any other
+  // prefix, a bare name — goes through impl#1's `resolveModulePathNative`: an absolute path to an
+  // existing file is an edge (the caller then requires it to be a project file); anything else
+  // (throws, missing file, an unresolved specifier returned as-is) is UNRESOLVED → every cell `let`.
   const addSpec = (s) => {
     if (typeof s !== "string" || s.length === 0) { unresolved.push("an import with no readable source"); return; }
-    if (!isProjectSpec(s)) return;
-    if (!s.startsWith(".")) { unresolved.push(`non-relative import ${s}`); return; }
-    edges.push(resolveModulePathNative(s, filePath));
+    let target;
+    try {
+      target = resolveModulePathNative(s, filePath);
+    } catch (e) {
+      unresolved.push(`impl#1 could not resolve ${s}: ${String(e?.message ?? e).split("\n")[0]}`);
+      return;
+    }
+    // The resolver hands back a specifier it does not know as-is (not an absolute path).
+    if (typeof target !== "string" || !isAbsolute(target)) { unresolved.push(`unresolved import ${s}`); return; }
+    // The bundled stdlib is outside the project — unless the importer is itself a stdlib file (the
+    // stdlib IS the project being fixed), in which case it is an edge like any other. A stdlib
+    // module that does not exist is unresolved, not silently skipped.
+    if (isStdlibImport(s) && isInside(STDLIB_DIR, target) && !isInside(STDLIB_DIR, resolve(filePath))) {
+      if (existsSync(target)) stdlib.push(target); else unresolved.push(`unresolved import ${s}`);
+      return;
+    }
+    // Every other absolute target is an edge. Whether it is a PROJECT file that exists is the
+    // caller's check (fixS66: in the project set, else every cell `let`; the CLI's project walk
+    // follows only existing `.scrml` files) — the project may be in memory (auxSources).
+    edges.push(target);
   };
   // impl#1's resolved graph entry (imports it could resolve; E-IMPORT-006 ones are in `unresolved`).
   const entry = graph?.get(filePath);
@@ -436,7 +475,7 @@ export function moduleEdges(filePath, source) {
     // `export * from someVar`): what it re-exports is unknown — fail closed.
     else if (!ex.exportedName && !ex.exportKind) unresolved.push("an export declaration impl#1 could not read");
   }
-  return { ok: fe.errorCodes.length === 0, edges: [...new Set(edges)], unresolved };
+  return { ok: fe.errorCodes.length === 0, edges: [...new Set(edges)], unresolved, stdlib: [...new Set(stdlib)] };
 }
 
 /**
@@ -651,7 +690,12 @@ function rawTextEvents(str, filePath, stack) {
   // 1. statements (also any single expression)
   try {
     const r = parseStatements(str);
-    if (r && r.ast && !r.error) return esEvents(r.ast, filePath);
+    if (r && r.ast && !r.error) {
+      // a dropped mention (S239 re-review r5): a `@name` of the text that the parsed statements no
+      // longer name — e.g. inside a `?{…}` impl#1 substitutes with a placeholder — is `unknown`.
+      const seen = esMentions(r.ast);
+      return [...names.filter((nm) => !seen.has(nm)).map((name) => ({ name, w: "unknown" })), ...esEvents(r.ast, filePath)];
+    }
   } catch { /* not statements */ }
   // 2. one scrml expression, read in full
   try {
@@ -1271,7 +1315,10 @@ export function fixS66(source, opts = {}) {
   const engines = []; // { node, stack }
   const edits = [];   // { start, end, text, rule, detail }
   const tagUses = new Map(); // tag name → first offset (render-by-tag detection)
-  const hasMeta = /\^\{/.test(src);
+  // A `^{}` meta block can write any cell at runtime: in ANY file whose writes this decision reads
+  // (the fixed file, its import closure, the scanned target files) it makes every cell `let` /
+  // int-unknown (S239 re-review r5 — was the fixed file only). Additional fail-closed only.
+  const hasMeta = [src, ...project.map(([, s]) => s), ...scanOnly.map(([, s]) => s)].some((s) => typeof s === "string" && /\^\{/.test(s));
   const markupStarts = new Set();
 
   walkAst(ast, (n, stack) => {

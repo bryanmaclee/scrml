@@ -534,7 +534,7 @@ describe("§10 S239 re-review — multi-line imports and the `:int` choice", () 
     // impl#1 builds a bare `import "./x.scrml"` with no source → unresolved (fail closed).
     expect(moduleEdges("/proj/app.scrml", "${ import \"./side.scrml\" }").unresolved.length).toBeGreaterThan(0);
     // r4: prose is prose — impl#1's tree has no import there (the r3 text scanner counted it).
-    expect(moduleEdges("/proj/app.scrml", "<program>\n<p>Please import your data</p>\n</program>\n")).toEqual({ ok: true, edges: [], unresolved: [] });
+    expect(moduleEdges("/proj/app.scrml", "<program>\n<p>Please import your data</p>\n</program>\n")).toEqual({ ok: true, edges: [], unresolved: [], stdlib: [] });
   });
 
   test("an import whose specifier cannot be read makes every cell `let`", () => {
@@ -623,7 +623,7 @@ describe("§11 S239 re-review r3 — imports anywhere (fail closed by constructi
     expect(moduleEdges("/proj/app.scrml", "${ export * from someVar }").unresolved.length).toBeGreaterThan(0);
     expect(moduleEdges("/proj/app.scrml", "${ import type { X } from \"./t.scrml\" }").unresolved.length).toBeGreaterThan(0);
     expect(moduleEdges("/proj/app.scrml", "${ export * from \"./s.scrml\" }").edges).toEqual(["/proj/s.scrml"]);
-    expect(moduleEdges("/proj/app.scrml", "${ export const A = 1\nexport { A } }")).toEqual({ ok: true, edges: [], unresolved: [] }); // not re-exports
+    expect(moduleEdges("/proj/app.scrml", "${ export const A = 1\nexport { A } }")).toEqual({ ok: true, edges: [], unresolved: [], stdlib: [] }); // not re-exports
   });
 
   const kApp = (extra) => `<program>\n<k> = 0.5\n${extra}<m> = 2\nconst <d>: int = @m * 2\n\${ function f() { @m = @k } }\n<button onclick=f()>go</button>\n<p>\${@m} \${@d}</p>\n</program>\n`;
@@ -759,5 +759,98 @@ describe("§12 S239 re-review r4 — the import graph and the write set come fro
     expect(ev[0].span).toEqual({ start: 2, end: 28 });
     // a pure read is no write event
     expect(writeEvents(astOf("<program>\n<c> = 0\n<p>${@c + 1}</p>\n</program>\n")).filter((e) => e.name === "c" && e.w !== "div")).toEqual([]);
+  });
+});
+
+describe("§13 S239 re-review r5 — every specifier but the bundled stdlib is resolved by impl#1; dropped mentions; meta anywhere", () => {
+  /**
+   * Write `files` under a fresh `proj/` dir, run `scrml fix <target> --s66 --write` (the CLI) with
+   * target = `proj/<target>`, return proj/src/app.scrml.
+   */
+  function cli(files, target) {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-fix-r5-"));
+    try {
+      for (const [p, s] of Object.entries(files)) {
+        mkdirSync(dirname(join(dir, "proj", p)), { recursive: true });
+        writeFileSync(join(dir, "proj", p), s);
+      }
+      expect(runFixCommand([join(dir, "proj", target), "--s66", "--write"], { out: () => {}, err: () => {} })).toBe(0);
+      return readFileSync(join(dir, "proj", "src", "app.scrml"), "utf8");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const BUMP = "${ export const Bump = <button onclick=${@count = @count + 1}>+</button> }\n";
+  const READER = "${ export const Bump = <span>${@count}</span> }\n";
+  const app = (spec) => `<program>\n\${ import { Bump } from "${spec}" }\n<count> = 0\n<Bump/>\n<p>\${@count}</p>\n</program>\n`;
+
+  for (const target of ["src", "src/app.scrml"]) {
+    test(`HIGH: a \`vendor:\` component that writes @count keeps it \`let\` (CLI, target proj/${target})`, () => {
+      const out = cli({ "vendor/bump.scrml": BUMP, "src/app.scrml": app("vendor:bump") }, target);
+      expect(out).toContain("let <count:number=0/>");
+    });
+    test(`HIGH: a READ-only \`vendor:\` component leaves the cell locked — the vendor file is a real edge (CLI, target proj/${target})`, () => {
+      const out = cli({ "vendor/bump.scrml": READER, "src/app.scrml": app("vendor:bump") }, target);
+      expect(out).toContain("<count:number=0/>");
+      expect(out).not.toContain("let <count");
+    });
+  }
+  test("a `vendor:` directory module (`vendor/bump/index.scrml`) is followed too", () => {
+    const out = cli({ "vendor/bump/index.scrml": BUMP, "src/app.scrml": app("vendor:bump") }, "src");
+    expect(out).toContain("let <count:number=0/>");
+  });
+  test("a missing `vendor:` file → every cell `let` (fail closed)", () => {
+    const out = cli({ "src/app.scrml": app("vendor:bump") }, "src");
+    expect(out).toContain("let <count:number=0/>");
+  });
+  test("an unknown prefix (`acme:bump`) → every cell `let` (fail closed)", () => {
+    const out = cli({ "vendor/bump.scrml": READER, "acme/bump.scrml": READER, "src/app.scrml": app("acme:bump") }, "src");
+    expect(out).toContain("let <count:number=0/>");
+  });
+  test("a bare specifier (`bump`) → every cell `let` (fail closed)", () => {
+    const out = cli({ "src/bump.scrml": READER, "src/app.scrml": app("bump") }, "src/app.scrml");
+    expect(out).toContain("let <count:number=0/>");
+  });
+  test("moduleEdges: `scrml:` (bundled stdlib) is the only non-project target; `vendor:` is an edge; a missing one is unresolved", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-fix-r5-me-"));
+    try {
+      mkdirSync(join(dir, "src"), { recursive: true });
+      mkdirSync(join(dir, "vendor"), { recursive: true });
+      writeFileSync(join(dir, "vendor", "bump.scrml"), READER);
+      const f = join(dir, "src", "app.scrml");
+      const src = "<program>\n${ import { Bump } from \"vendor:bump\"\n import { clamp } from \"scrml:math\" }\n<Bump/>\n</program>\n";
+      const me = moduleEdges(f, src);
+      expect(me.edges).toEqual([join(dir, "vendor", "bump.scrml")]);
+      expect(me.stdlib.length).toBe(1);
+      expect(me.unresolved).toEqual([]);
+      // a missing vendor file is still impl#1's absolute target — an edge the caller finds outside
+      // the project (fixS66 → every cell `let`; the CLI test above proves it end to end)
+      const miss = moduleEdges(f, "<program>\n${ import { Bump } from \"vendor:nope\" }\n<Bump/>\n</program>\n");
+      expect(miss.edges.concat(miss.unresolved).length).toBeGreaterThan(0);
+      // an unknown prefix: the resolver returns it as-is (not a path) → unresolved
+      const odd = moduleEdges(f, "<program>\n${ import { Bump } from \"acme:bump\" }\n<Bump/>\n</program>\n");
+      expect(odd.edges).toEqual([]);
+      expect(odd.unresolved.length).toBeGreaterThan(0);
+      // a missing stdlib module is unresolved, not skipped
+      expect(moduleEdges(f, "<program>\n${ import { x } from \"scrml:no_such_module_zz\" }\n</program>\n").unresolved.length).toBeGreaterThan(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  test("a `^{}` meta block in an IMPORTED file makes the cells `let` (hasMeta spans the project)", () => {
+    const out = cli({
+      "src/bump.scrml": "${ export const Bump = <span>${@count}</span> }\n^{ }\n",
+      "src/app.scrml": app("./bump.scrml"),
+    }, "src/app.scrml");
+    expect(out).toContain("let <count:number=0/>");
+  });
+
+  test("writeEvents (LOW): a `@name` parseStatements drops (inside `?{…}`) is an `unknown` write", () => {
+    for (const payload of ["@k = ?{SELECT * FROM t WHERE x = ${@m}}.get()", "@k = ?{UPDATE t SET x = ${@m = 3}}.run()"]) {
+      const synthetic = { kind: "logic", span: { start: 0, end: 30 }, body: [{ kind: "future-thing", span: { start: 2, end: 28 }, payload }] };
+      const ev = writeEvents(synthetic).map((e) => [e.name, e.w]);
+      expect(ev).toContainEqual(["m", "unknown"]);
+      expect(ev).toContainEqual(["k", "assign"]);
+    }
   });
 });
