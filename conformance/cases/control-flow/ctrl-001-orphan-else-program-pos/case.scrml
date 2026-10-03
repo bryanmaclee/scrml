@@ -1,0 +1,9 @@
+// §17.1.1 — `else` with no preceding `if=` / `else-if=` element at the same level (§17 Worked Example 2).
+<program>
+    let <loggedIn:boolean=false/>
+
+    <main>
+        <p>${@loggedIn}</p>
+        <span else>Please log in</span>
+    </main>
+</program>

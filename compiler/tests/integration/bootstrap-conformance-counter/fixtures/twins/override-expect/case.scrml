@@ -1,0 +1,4 @@
+<program>
+<n> = 0
+<p id="n">${@n}</p>
+</program>

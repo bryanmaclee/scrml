@@ -1,0 +1,30 @@
+{
+  "id": "server-fn-error-boundary-request-error-twin",
+  "description": "S451 (\"your recs on all five\" item 1, R1 wins): the `<request>` twin of server-fn/error-boundary-fallback. Server data reaches markup through a `<request>`, not a render-time call inside an `<errorBoundary>` (which is E-VALUE-SERVER-CALL, §13.7 — see server-fn/error-boundary-value-server-call-neg). loadName(id)! LoadError touches a server resource (escalates); the server answers with the impl-neutral error directive {\"__serverError\": {type:\"LoadError\", variant:\"Timeout\"}}. The request settles to failure: `<#nameLoad>.error` is set, so .eb-fallback renders; `<#nameLoad>.data` stays absent, so .eb-name is not in the DOM; @name keeps its initial value; siblings render (.eb-header, .eb-footer). No E-ERROR-* fires: the `<request>` body's call is handled by the request (§19.4.3 item 5), and no E-VALUE-SERVER-CALL fires (a `<request>` body is an action position, §6.15 / §13.7).",
+  "language-version": "1.0",
+  "spec": "§19.6.1",
+  "rationale": "§19.6.1 Scope / §13.7 (S451): server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. §6.7.7 settled(failure): .error -> the caught error value, .data retains its prior value (not, on first mount), the success cell is left untouched. §19.9.1: a server `!` function serializes its error variant across the boundary.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-VALUE-SERVER-CALL"],
+    "notCodePrefixes": ["E-ERROR-"],
+    "input": [{ "wait": "settle" }],
+    "serverStub": { "loadName": { "__serverError": { "type": "LoadError", "variant": "Timeout" } } },
+    "state": { "name": "" },
+    "domAnchored": [
+      { "selector": ".eb-fallback", "count": 1 },
+      { "selector": ".eb-fallback", "text": "Could not load profile" },
+      { "selector": ".eb-name", "count": 0 },
+      { "selector": ".eb-header", "text": "Profile" },
+      { "selector": ".eb-footer", "text": "End" }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-request-fail-envelope-lands-in-cell-s451",
+      "fails": {
+        "runtime": "sha256:8dd7b19a2879b876"
+      }
+    }
+  }
+}

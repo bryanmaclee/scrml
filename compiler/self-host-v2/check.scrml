@@ -56,6 +56,10 @@
 //       fields are top-level values, §55.5.1); `errors` is read only by an
 //       Errors view (§55.8)
 //   C15 (s449) a Gate stands only on a `form` element, at most once (§55.17.3)
+//   C16 (s451) a Defer stands only in a function body (not in a declaration's
+//       initializers / renders / handlers / effects — §19.16.3 rule 4), and
+//       its body holds no Return, no Defer and no Suspend at any depth
+//       (§19.16.3 rules 1-2; a Suspend would split the block's exit)
 //   (C3 covers the s444 edits: the removals by the field's grants; ElemAt by
 //   the ELEMENT field's own contract, dpa-052 Q3.)
 // A diagnostic is a message string (§4 permits strings as text).
@@ -159,6 +163,7 @@ ${
             .Eval(e: x) :> ["C8: a bind's write is not a Write"]
             .Suspend(bind: x) :> ["C8: a bind's write is not a Write"]
             .ResetSurface(of: x) :> ["C8: a bind's write is not a Write"]
+            .Defer(body: x) :> ["C8: a bind's write is not a Write"]
         }
     }
 
@@ -419,6 +424,7 @@ ${
             .Return(e: x) :> false
             .Eval(e: x) :> false
             .Suspend(bind: x) :> false
+            .Defer(body: x) :> false
         }
     }
 
@@ -433,6 +439,7 @@ ${
             .Eval(e: x) :> not
             .Suspend(bind: x) :> not
             .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
         }
     }
 
@@ -600,6 +607,7 @@ ${
             .Eval(e: x) :> ""
             .Suspend(bind: x) :> ""
             .ResetSurface(of: x) :> ""
+            .Defer(body: x) :> ""
         }
     }
 
@@ -694,6 +702,7 @@ ${
             .If(cond: x) :> not
             .Return(e: x) :> not
             .Eval(e: x) :> not
+            .Defer(body: x) :> not
         }
     }
 
@@ -762,6 +771,53 @@ ${
             .Eval(e: e) :> []
             .Suspend(bind: b) :> []
             .ResetSurface(of: v) :> checkSurface(p, encl, v)
+            .Defer(body: d) :> checkDefer(encl, d)
+        }
+    }
+
+    // C16 (s451): `encl` is non-empty exactly inside a declaration (checkCore),
+    // which is never a function body.
+    fn checkDefer(encl: Decl[], body: Block) -> string[] {
+        let out: string[] = []
+        if (encl.length > 0) out = out.concat(["C16: a Defer inside <" + encl[0].sym.hint + "> — a Defer stands only in a function body (§19.16.3 rule 4)"])
+        for (const n of allNodes(Node.NBlock(body))) {
+            const what: string = deferForbidden(n)
+            if (what != "") out = out.concat(["C16: a Defer's body holds " + what + " (§19.16.3)"])
+        }
+        return out
+    }
+
+    fn deferForbidden(n: Node) -> string {
+        return match n {
+            .NStmt(s: s) :> deferForbiddenStmt(s)
+            .NProgram(p: q) :> ""
+            .NDecl(d: d) :> ""
+            .NField(f: f) :> ""
+            .NFn(f: f) :> ""
+            .NServerFn(f: f) :> ""
+            .NBlock(b: b) :> ""
+            .NExpr(e: e) :> ""
+            .NPlace(pl: pl) :> ""
+            .NInst(i: i) :> ""
+            .NPattern(pat: pat) :> ""
+            .NEdit(k: k) :> ""
+            .NView(v: v) :> ""
+            .NAttr(a: a) :> ""
+        }
+    }
+
+    fn deferForbiddenStmt(s: Stmt) -> string {
+        return match s {
+            .Return(e: x) :> "a Return"
+            .Defer(body: x) :> "a Defer"
+            .Suspend(bind: x) :> "a Suspend"
+            .Let(sym: x) :> ""
+            .Assign(local: x) :> ""
+            .Write(cap: x) :> ""
+            .Commit(writes: x) :> ""
+            .If(cond: x) :> ""
+            .Eval(e: x) :> ""
+            .ResetSurface(of: x) :> ""
         }
     }
 
@@ -791,6 +847,7 @@ ${
             .Eval(e: x) :> "an Eval inside a Commit"
             .Suspend(bind: x) :> "a Suspend inside a Commit"
             .ResetSurface(of: x) :> "a ResetSurface inside a Commit"
+            .Defer(body: x) :> "a Defer inside a Commit"
         }
     }
 
@@ -1154,6 +1211,7 @@ ${
             .Eval(e: x) :> not
             .Suspend(bind: x) :> not
             .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
         }
     }
 

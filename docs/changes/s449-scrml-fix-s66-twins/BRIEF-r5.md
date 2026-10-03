@@ -1,0 +1,18 @@
+CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE (path-leak incidents on record >0)
+1. `pwd` MUST start with /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent- . Else STOP and report. Call it WORKTREE_ROOT.
+2. `git -C "$WORKTREE_ROOT" rev-parse --show-toplevel` == WORKTREE_ROOT; tree clean.
+3. Worktree is cut from origin/main. Run `git -C "$WORKTREE_ROOT" fetch origin wip/s449-scrml-fix-s66-twins` then `git -C "$WORKTREE_ROOT" reset --hard FETCH_HEAD`; verify HEAD == a7abb79ee9c2cf394484960677900530aceed187. Run git commands as separate plain commands.
+4. `bun install`. TMPDIR per command = ~/.cache/scrml-agent-tmp/s451-fix-r5/ (never inside a repo).
+5. Edit/Write only absolute paths under WORKTREE_ROOT. Never `cd` into /home/bryan-maclee/scrmlMaster/scrml. Never `git stash`. Never bare `pkill -f`/`killall`. First commit: `WIP(s449-fix-r5): start at <pwd>`.
+6. Commit after each change; append to docs/changes/s449-scrml-fix-s66-twins/progress.md; archive this prompt verbatim as BRIEF-r5.md there in the first commit. When done: `git push origin HEAD:wip/s449-scrml-fix-s66-twins` (fast-forward only; regenerate docs/FACTS.md if the pre-push gate asks).
+
+CONTEXT: read progress.md + BRIEF-r4.md. Round 4 (impl#1-derived imports/writes) held under adversarial review except ONE HIGH, PA-reproduced at a7abb79ee:
+HIGH — `moduleEdges` (compiler/src/commands/fix-s66.js ~:415, `isProjectSpec = !/^(?:scrml|vendor):/`) silently DROPS `vendor:` imports (no edge, no `unresolved`). impl#1's `resolveModulePathNative` resolves `vendor:x` → `<dirname(importer)>/../vendor/x.scrml`, a project file. Repro: proj/vendor/bump.scrml = `${ export const Bump = <button onclick=${@count = @count + 1}>+</button> }`; proj/src/app.scrml = `<program>` / `${ import { Bump } from "vendor:bump" }` / `<count> = 0` / `<Bump/>` / `<p>${@count}</p>` / `</program>`. `scrml fix proj/src --s66` → `+<count:number=0/>` (LOCKED). impl#1 compiles it and writes count.
+
+REQUIRED SHAPE (by construction, not another allow-list entry):
+- Invert the classification: the ONLY spec excluded as "not a project file" is one impl#1 itself resolves to the bundled stdlib (`scrml:` — confirm by reading module-resolver.js how scrml: resolves; exclude only if it resolves outside the project). EVERY other spec — relative, `vendor:`, any other prefix or bare name — is passed to `resolveModulePathNative`; a result inside the project root that exists is an edge; anything else (throws, missing file, outside project, unknown prefix) → `unresolved` (fail closed: every cell `let`). Remove the `!s.startsWith(".")` special case in favour of that rule.
+- LOW residual, close it too: when `parseStatements` succeeds on a raw region, apply the same dropped-mention check the expression path has — any `@name` in the source text that the parsed statements do not account for as a read or write → an `unknown` write of that name (the `?{}` placeholder substitution can erase `@m`).
+- LOW nit: `hasMeta` should consider every project file the decision depends on, not only the fixed file.
+- Tests: the vendor repro end to end through the CLI (both `proj/src` and `proj/src/app.scrml` targets), a missing vendor file → all `let`, an unknown prefix → all `let`, the dropped-mention case at unit level. All prior fix-s66 tests stay green; pre-commit subset passes at commit.
+- Re-run default CLI on examples/*.scrml copies, compile original vs fixed with impl#1 — no new E- codes; re-run scripts/bootstrap-conformance.ts (was PASS 76 / 62 / graded 136); report and explain any change.
+Paste the post-fix repro output. Final report <40 lines: worktree, final SHA pushed, files, tests, repro output, counter, deferred.
