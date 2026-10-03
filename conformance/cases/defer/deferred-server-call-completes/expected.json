@@ -1,0 +1,16 @@
+{
+  "id": "defer-deferred-server-call-completes",
+  "description": "§19.16.6 — a deferred call to a server function completes before the function returns. work() writes a, then exits; its deferred block awaits ping(1) (stubbed to 2) and writes n2. go() continues only after work() has returned, so trace = \"a;n2;after;\". If the defer-stack runner did not await the deferred closure, work() would return while ping was in flight and trace would be \"a;after;n2;\".",
+  "language-version": "1.0",
+  "spec": "§19.16.6",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.6: when the host body is async the deferred closures are async and the runner awaits each one, so a deferred call to a server function completes before the function returns; §19.16.2: the deferred body runs at the block's exit, i.e. before control returns to the caller.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "serverStub": { "ping": 2 },
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": { "trace": "a;n2;after;" },
+    "domAnchored": [{ "selector": "#out", "text": "a;n2;after;" }]
+  }
+}

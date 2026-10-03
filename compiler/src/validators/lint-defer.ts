@@ -53,7 +53,7 @@
  * @module lint-defer
  */
 import { isMetaKind } from "../types/ast.ts";
-import { parseStatementText, textBodiesOf, textContainsDeferStatement, textContainsNativeKind, textLambdaContainsDefer } from "./defer-structure.ts";
+import { isWhenTextKind, parseStatementText, textBodiesOf, textContainsDeferStatement, textContainsDirectDeferStatement, textContainsNativeKind, textLambdaContainsDefer, textLoweredBodiesOf } from "./defer-structure.ts";
 import { iterDestructuredNames } from "../type-system.ts";
 import type { FileAST, Span } from "../types/ast.ts";
 
@@ -64,7 +64,8 @@ export type DeferCode =
   | "E-DEFER-UNHANDLED-FAILABLE"
   | "E-DEFER-UNSUPPORTED-SITE"
   | "E-DEFER-LATER-SHADOW"
-  | "E-DEFER-DUPLICATE-FUNCTION";
+  | "E-DEFER-DUPLICATE-FUNCTION"
+  | "E-DEFER-AMBIGUOUS-LEAD";
 
 export interface DeferDiagnostic {
   code: DeferCode;
@@ -111,6 +112,40 @@ const LAMBDA_MSG =
   "(§19.16.3) — those bodies are lowered as host-expression text, not as a scrml statement list. " +
   "Move the body into a named `function` / `fn` declaration and call it.";
 
+const LOWERED_TEXT_MSG = (label: string, anyDepth: boolean): string =>
+  `\`defer\` is only valid inside a function declaration body (\`function\`, \`fn\`, \`server function\`) ` +
+  `or a block nested in one (§19.16.3). ${label.charAt(0).toUpperCase() + label.slice(1)} is not a function-declaration body` +
+  (anyDepth
+    ? ` — and it is lowered as text, so a \`defer\` anywhere in it (including in a function declared inside ` +
+      `it) has no block exit to run at. Move the cleanup into a named function declared outside it, and call ` +
+      `that function from here.`
+    : `. Move the handler body into a named function declaration and reference it (\`onclick=handler()\`).`);
+
+/**
+ * S432 review A-3 — a text probe that could not analyse its text (`null`)
+ * fails CLOSED: the diagnostic is reported, saying the body could not be
+ * verified rather than claiming a `defer` was seen.
+ */
+const unverified = (probe: boolean | null, message: string): string =>
+  probe === null
+    ? `${message} (This body could not be parsed to verify that it contains no \`defer\`, so it is rejected ` +
+      `rather than passed to code generation unchecked.)`
+    : message;
+
+/** Parse a `component-def.raw` markup body the way the component expander does; `null` on failure. */
+function parseComponentMarkup(raw: string, name: string, filePath: string): unknown[] | null {
+  try {
+    /* eslint-disable-next-line @typescript-eslint/no-require-imports */
+    const ce = require("../component-expander.ts") as {
+      parseComponentBody: (r: string, n: string, f: string) => { nodes: unknown[]; errors: unknown[] };
+    };
+    const out = ce.parseComponentBody(raw, name, filePath);
+    return Array.isArray(out.nodes) && out.nodes.length > 0 ? out.nodes : null;
+  } catch {
+    return null;
+  }
+}
+
 const UNSUPPORTED_SITE_MSG = (where: string, why?: string): string =>
   `\`defer\` is not supported in ${where} in this stage (§19.16.2): ` +
   (why ?? `the front-end carries that body as text, not as a scrml statement list, so there is no block ` +
@@ -136,6 +171,9 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
   // lands on a node the front-end left without one (an expression escape-hatch
   // inside a statement; S430 round 6, G).
   let anchor: Node | null = null;
+  // Set while walking a tree re-parsed from a node's TEXT (a component body):
+  // its spans are relative to the synthesized source, so report at the owner.
+  let forcedAnchor: Node | null = null;
   const hasLine = (x: Node | null | undefined): boolean => {
     const sp = x && (x.span as { line?: number; start?: number } | undefined);
     return !!sp && typeof sp.line === "number" && (sp.line > 1 || (typeof sp.start === "number" && sp.start > 0));
@@ -148,7 +186,7 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
   const report = (code: DeferCode, n: Node, message: string) => {
     // An expression node's span can be relative to its own source snippet; a
     // statement's is a real source position.
-    const at = hasLine(n) && isStatementNode(n) ? n : (anchor ?? n);
+    const at = forcedAnchor ?? (hasLine(n) && isStatementNode(n) ? n : (anchor ?? n));
     diagnostics.push({ code, severity: "error", span: spanOf(at, filePath), message: `${code}: ${message}` });
   };
 
@@ -209,15 +247,94 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
     // escape-hatch, an `on mount { }` body) would reach codegen verbatim (an
     // E-CODEGEN-INVALID-LOGIC with no root cause). The text is PARSED (native
     // statement parser) and a `Defer` node looked for — no word matching.
-    if (kind === "escape-hatch" && typeof n.raw === "string" && n.raw.includes("defer") &&
-        textLambdaContainsDefer(n.raw as string)) {
-      report("E-DEFER-OUTSIDE-FUNCTION", n, LAMBDA_MSG);
-      return;
+    if (kind === "escape-hatch" && typeof n.raw === "string" && n.raw.includes("defer")) {
+      const r = textLambdaContainsDefer(n.raw as string);
+      if (r !== false) {
+        report("E-DEFER-OUTSIDE-FUNCTION", n, unverified(r, LAMBDA_MSG));
+        return;
+      }
     }
     if (kind === "bare-expr" && n._onMountEffect === true && typeof n.expr === "string" &&
-        (n.expr as string).includes("defer") && textContainsDeferStatement(n.expr as string, false)) {
-      report("E-DEFER-OUTSIDE-FUNCTION", n, TOP_LEVEL_MSG);
+        (n.expr as string).includes("defer")) {
+      const r = textContainsDeferStatement(n.expr as string, false);
+      if (r !== false) {
+        report("E-DEFER-OUTSIDE-FUNCTION", n, unverified(r, TOP_LEVEL_MSG));
+        return;
+      }
+    }
+    // §19.16.3 rule 4 (S432 review A-1) — a `const Name = <markup>` component
+    // definition is carried as RAW markup text (`component-def.raw`) until the
+    // component expander re-parses it at each use. Parse it the same way here
+    // and walk the markup with this walker (not in a function: a component
+    // body is markup), so its handler attributes / `${ }` logic are checked
+    // like any other markup. Diagnostics anchor on the definition.
+    // The same for a `<match>` block whose arms reached the AST only as TEXT
+    // (`armsRaw` without the live front-end's structured `armBodyChildren` —
+    // the native front-end): parse the arm markup and walk it in place.
+    if (kind === "match-block" && typeof n.armsRaw === "string" && !Array.isArray(n.armBodyChildren) &&
+        (n.armsRaw as string).includes("defer")) {
+      const parsed = parseComponentMarkup(n.armsRaw as string, "MatchArms", filePath);
+      if (parsed === null) {
+        report("E-DEFER-OUTSIDE-FUNCTION", n, unverified(null, TOP_LEVEL_MSG));
+      } else {
+        const prevForced = forcedAnchor;
+        forcedAnchor = n;
+        try { walk(parsed, st); } finally { forcedAnchor = prevForced; }
+      }
+    }
+    if (kind === "component-def" && typeof n.raw === "string" && (n.raw as string).includes("defer")) {
+      const parsed = parseComponentMarkup(n.raw as string, typeof n.name === "string" ? n.name : "Component", filePath);
+      if (parsed === null) {
+        report("E-DEFER-OUTSIDE-FUNCTION", n, unverified(null, TOP_LEVEL_MSG));
+      } else {
+        const prevForced = forcedAnchor;
+        forcedAnchor = n;
+        try { walk(parsed, { inFunction: false, defer: null }); } finally { forcedAnchor = prevForced; }
+      }
       return;
+    }
+    // The same for an EXPORTED component, `export const Name = <markup>` (S446):
+    // that form reaches the AST only as an `export-decl` whose `raw` holds the
+    // markup, and the component expander recovers the body by stripping the
+    // `export const Name =` prefix (component-expander.ts, cross-file path b).
+    // Recover it the same way and walk it like a `component-def`.
+    if (kind === "export-decl" && n.exportKind === "const" && typeof n.exportedName === "string" &&
+        typeof n.raw === "string" && (n.raw as string).includes("defer")) {
+      const prefix = `export const ${n.exportedName as string} =`;
+      const idx = (n.raw as string).indexOf(prefix);
+      const body = idx === -1 ? "" : (n.raw as string).slice(idx + prefix.length).trimStart();
+      if (body.startsWith("<")) {
+        const parsed = parseComponentMarkup(body, n.exportedName as string, filePath);
+        if (parsed === null) {
+          report("E-DEFER-OUTSIDE-FUNCTION", n, unverified(null, TOP_LEVEL_MSG));
+        } else {
+          const prevForced = forcedAnchor;
+          forcedAnchor = n;
+          try { walk(parsed, { inFunction: false, defer: null }); } finally { forcedAnchor = prevForced; }
+        }
+      }
+    }
+    // §19.16.3 rule 4 (S432, A1) — statement bodies a node carries AND codegen
+    // lowers as TEXT, in any context: `when` handler bodies, `test` bodies, an
+    // `on*=${ … }` handler attribute. None is a function-declaration body. The
+    // text is PARSED and a `Defer` looked for (defer-structure.ts
+    // textLoweredBodiesOf enumerates the node kinds).
+    if (!st.defer) {
+      let loweredHit = false;
+      for (const tb of textLoweredBodiesOf(n)) {
+        const hit = tb.anyDepth ? textContainsDeferStatement(tb.text, false) : textContainsDirectDeferStatement(tb.text);
+        if (hit !== false) {
+          report("E-DEFER-OUTSIDE-FUNCTION", n, unverified(hit, LOWERED_TEXT_MSG(tb.label, tb.anyDepth)));
+          loweredHit = true;
+          // The handler attribute's own value (its `exprNode` escape-hatch) is
+          // the same text: do not walk it again under the lambda rule (review A-2).
+          if (tb.owner && typeof tb.owner === "object") seen.add(tb.owner as object);
+        }
+      }
+      // A `when` node's only other child is `bodyExpr`, a best-effort EXPRESSION
+      // parse of the same text; walking it would re-report the same `defer`
+      // under the wrong rule (a function declared in the body reads as a lambda).
+      if (loweredHit && isWhenTextKind(kind)) return;
     }
 
     // --- function boundaries: a fresh control-flow scope ---
@@ -315,6 +432,17 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
     }
 
     const d = st.defer;
+    if (!d && !st.inFunction && !st.inLambda) {
+      // §19.16.3 rule 4 (S432, A1) — the same text-carried bodies (a match / `!{}`
+      // arm, a bare `{ }` block) OUTSIDE any function declaration: top-level
+      // `${ }` logic, which is not a defer site at all. Without this a `defer`
+      // there reached codegen verbatim (live: an inline arm / `!{}` arm / bare
+      // block; native: every statement-position match arm).
+      for (const tb of textBodiesOf(n)) {
+        const r = tb.text === null ? false : textContainsDeferStatement(tb.text, false);
+        if (r !== false) report("E-DEFER-OUTSIDE-FUNCTION", n, unverified(r, TOP_LEVEL_MSG));
+      }
+    }
     if (!d && st.inFunction && !st.inLambda) {
       // §19.16.2 (S430 round 5, F3/F4) — a bare `{ }` block and a
       // single-statement `match` / handler arm are carried as TEXT, so a
@@ -322,9 +450,8 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
       // reach codegen verbatim). Not a stage-1 defer site: fail closed. The text
       // is PARSED (native statement parser) and a `Defer` node looked for.
       for (const tb of textBodiesOf(n)) {
-        if (tb.text !== null && textContainsDeferStatement(tb.text, false)) {
-          report("E-DEFER-UNSUPPORTED-SITE", n, UNSUPPORTED_SITE_MSG(tb.label));
-        }
+        const r = tb.text === null ? false : textContainsDeferStatement(tb.text, false);
+        if (r !== false) report("E-DEFER-UNSUPPORTED-SITE", n, unverified(r, UNSUPPORTED_SITE_MSG(tb.label)));
       }
     }
     if (d) {
@@ -367,7 +494,7 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
       if (kind === "yield-stmt") controlFlow(n, "`yield`");
       else if (kind === "escape-hatch" && n.nativeKind === "Yield") controlFlow(n, "`yield`");
       else if (kind === "escape-hatch" && typeof n.raw === "string" && (n.raw as string).includes("yield") &&
-               textContainsNativeKind(n.raw as string, true, ["Yield"])) controlFlow(n, "`yield`");
+               textContainsNativeKind(n.raw as string, true, ["Yield"]) !== false) controlFlow(n, "`yield`");
       if (kind === "return-stmt") controlFlow(n, "`return`");
       else if (kind === "fail-expr") controlFlow(n, "`fail`");
       else if (kind === "propagate-expr") controlFlow(n, "a `?` propagation");
@@ -417,7 +544,20 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
   }
 
   walk((ast as { nodes?: unknown }).nodes ?? ast, { inFunction: false, defer: null });
+  // S446 — the export registry is where the component expander reads an
+  // exported component's markup (`ast.exports`); the native front-end carries
+  // the full `export const Name = <…>` text ONLY there. Walk the entries the
+  // tree walk did not reach (the `seen` set keeps a shared entry single).
+  const exportsList = (ast as { exports?: unknown }).exports;
+  if (Array.isArray(exportsList)) {
+    for (const e of exportsList) {
+      if (e && typeof e === "object" && (e as Node).kind === "export-decl" && !seen.has(e as object)) {
+        walk(e, { inFunction: false, defer: null });
+      }
+    }
+  }
   checkLaterShadow((ast as { nodes?: unknown }).nodes ?? ast, filePath, report);
+  checkAmbiguousLead((ast as { nodes?: unknown }).nodes ?? ast, report);
   return diagnostics;
 }
 
@@ -544,7 +684,7 @@ function deferredFreeNames(stmts: unknown[]): Set<string> | null {
     }
     for (const key of Object.keys(nn)) {
       if (key === "span") continue;
-      if (key === "arms" && k === "guarded-expr") continue;  // handler bodies walked via textBodiesOf
+      if (key === "arms" && (k === "guarded-expr" || k === "error-effect")) continue;  // handler bodies walked via textBodiesOf
       if (key === "rawArms") continue;
       if ((k === "match-expr" || k === "match-stmt") && key === "body") {
         // arm PATTERNS are not reads; arm bodies were walked via textBodiesOf,
@@ -646,4 +786,225 @@ function checkLaterShadow(root: unknown, filePath: string, report: ReportFn): vo
   };
 
   walkNode(root, []);
+}
+
+// ---------------------------------------------------------------------------
+// §19.16.1 (S432, B2) — E-DEFER-AMBIGUOUS-LEAD
+// ---------------------------------------------------------------------------
+//
+// S430 round 6 made `defer` + whitespace + `[` open a defer statement
+// (`defer ["a"].forEach(f)`). Where a binding NAMED `defer` is in scope, the
+// same tokens were — before `defer` existed — an index of that binding:
+// `defer [0] = 9`, `defer [0].m = 5`, `defer [0].forEach(f)`. The parser cannot
+// tell the two apart from the tokens (both readings are well-formed), and
+// choosing the defer reading silently changes what a pre-existing program does.
+// So: a `[`-led single-statement `defer` while a binding named `defer` is in
+// scope is a compile error naming both spellings — `defer[0]` (adjacent) indexes
+// the binding, `defer { [0]… }` defers the statement. With no such binding
+// the round-6 reading stands (the identifier reading would be an undeclared
+// name, which never compiled).
+//
+// "In scope" means VISIBLE at the `defer` (the name the identifier reading
+// would resolve to, and could read without a TDZ error): a parameter of an
+// enclosing function or lambda, an enclosing loop binder, a `function` named
+// `defer` anywhere in an enclosing block (hoisted), a `let` / `const` / `lin` /
+// `~` declared EARLIER in an enclosing block, or any file-level declaration or
+// import (a function body runs after the file's top level). A `let defer`
+// declared LATER in the block is not visible there — the identifier reading
+// could only throw — so the statement reading stands (S430 round 6's own
+// conformance case defer/array-literal-lead declares exactly that).
+
+const DEFER_NAME = "defer";
+
+function bindingName(raw: string): string {
+  // A rest binder (`...defer`) binds the name after the spread (S446 review F2).
+  return raw.replace(/^\s*(const|let|var|lin)\s+/, "").split(":")[0].split("=")[0].trim().replace(/^\.\.\.\s*/, "");
+}
+
+/**
+ * S432 review B-1 — every construct that introduces a binding, as
+ * `owner-kind` + path (`a.b`, `arms[].binding`) + SCOPE:
+ *   - "list"    — a declaration: visible to the statements AFTER it in its
+ *                 statement list (and, at file level, everywhere);
+ *   - "subtree" — a parameter / pattern / loop / handler binder: visible in the
+ *                 owner node's whole subtree (over-approximated to the whole
+ *                 owner where the precise region is an arm of it — fail closed).
+ * `text: true` marks a binder list the front-end keeps as TEXT (a parameter list,
+ * a payload pattern); it is read as a list of identifiers.
+ *
+ * The table is CHECKED: defer-binder-completeness.test.js censuses every
+ * binder-like field the two front-ends produce over the corpus and requires
+ * each to be here or in its explicit exclusion list.
+ */
+export type BinderField = { kind: string; path: string; scope: "list" | "subtree"; text?: boolean };
+export const DEFER_BINDER_FIELDS: readonly BinderField[] = [
+  // declarations
+  { kind: "let-decl", path: "name", scope: "list" },
+  { kind: "const-decl", path: "name", scope: "list" },
+  { kind: "lin-decl", path: "name", scope: "list" },
+  { kind: "tilde-decl", path: "name", scope: "list" },
+  { kind: "propagate-expr", path: "binding", scope: "list" },     // `let x = f()?` carried as propagate-expr
+  { kind: "import-decl", path: "names", scope: "list" },
+  { kind: "import-decl", path: "specifiers[].local", scope: "list" },
+  { kind: "use-decl", path: "names", scope: "list" },
+  // function-decl.name is hoisted to the top of its block (checkAmbiguousLead)
+  // parameters, loop and pattern binders
+  { kind: "function-decl", path: "params", scope: "subtree" },
+  { kind: "lambda", path: "params", scope: "subtree" },
+  { kind: "transition-decl", path: "paramsRaw", scope: "subtree", text: true },
+  { kind: "for-stmt", path: "variable", scope: "subtree" },
+  { kind: "for-expr", path: "variable", scope: "subtree" },
+  { kind: "given-guard", path: "variables", scope: "subtree" },
+  { kind: "match-arm-block", path: "binding", scope: "subtree" },
+  { kind: "match-arm-block", path: "payloadBindings", scope: "subtree" },
+  { kind: "match-arm-inline", path: "binding", scope: "subtree" },
+  { kind: "match-arm-inline", path: "productPatterns", scope: "subtree", text: true },
+  { kind: "guarded-expr", path: "arms[].binding", scope: "subtree" },
+  { kind: "error-effect", path: "arms[].binding", scope: "subtree" },
+  { kind: "endpoint-decl", path: "arms[].payloadBindingsRaw", scope: "subtree", text: true },
+  { kind: "onchange-decl", path: "arms[].payloadBindingsRaw", scope: "subtree", text: true },
+  { kind: "try-stmt", path: "catchNode.header", scope: "subtree", text: true },
+  { kind: "when-message", path: "binding", scope: "subtree" },
+  { kind: "when-worker-message", path: "binding", scope: "subtree" },
+  { kind: "when-worker-error", path: "binding", scope: "subtree" },
+  { kind: "each-block", path: "asName", scope: "subtree" },
+  { kind: "each-block", path: "asNames", scope: "subtree" },
+];
+
+function valuesAt(n: unknown, path: string): unknown[] {
+  let cur: unknown[] = [n];
+  for (const seg of path.split(".")) {
+    const arr = seg.endsWith("[]");
+    const key = arr ? seg.slice(0, -2) : seg;
+    const next: unknown[] = [];
+    for (const c of cur) {
+      if (!c || typeof c !== "object") continue;
+      const v = (c as Record<string, unknown>)[key];
+      if (arr) { if (Array.isArray(v)) next.push(...v); } else if (v !== undefined && v !== null) next.push(v);
+    }
+    cur = next;
+  }
+  return cur;
+}
+
+/** Does a binder VALUE (a name, a name list, a parameter / destructuring shape) bind `defer`? */
+function binderValueBindsDefer(v: unknown, text: boolean): boolean {
+  if (typeof v === "string") {
+    // A binder list kept as text holds only names / patterns: read its identifiers.
+    return text ? /(^|[^\w$.@])defer(?![\w$])/.test(v) : bindingName(v) === DEFER_NAME;
+  }
+  if (Array.isArray(v)) return v.some((x) => binderValueBindsDefer(x, text));
+  if (v && typeof v === "object") {
+    const o = v as Node;
+    if (o.kind === "destructure-array" || o.kind === "destructure-object") return declNames(o).includes(DEFER_NAME);
+    for (const key of ["name", "local", "bindName"]) {
+      const nm = o[key];
+      if (typeof nm === "string" && bindingName(nm) === DEFER_NAME) return true;
+      if (nm && typeof nm === "object" && declNames(nm).includes(DEFER_NAME)) return true;
+    }
+  }
+  return false;
+}
+
+function bindsDeferIn(n: Node, scope: "list" | "subtree"): boolean {
+  for (const f of DEFER_BINDER_FIELDS) {
+    if (f.kind !== n.kind || f.scope !== scope) continue;
+    if (valuesAt(n, f.path).some((v) => binderValueBindsDefer(v, f.text === true))) return true;
+  }
+  return false;
+}
+
+/**
+ * Is a single-statement deferred body led by an array literal? Structural: the
+ * leftmost operand of the statement's expression tree is an `array` node. When
+ * the front-end could not structure the statement (an escape-hatch — e.g. the
+ * invalid `[0] = 9`), its token text is the parser's own space-joined token
+ * stream, whose first token is the lead.
+ */
+function deferIsBracketLed(d: Node): boolean {
+  if (d.blockForm === true || !Array.isArray(d.body) || d.body.length === 0) return false;
+  const s = d.body[0] as Node;
+  if (!s || typeof s !== "object") return false;
+  let e = (s.exprNode ?? s.initExpr ?? null) as Node | null;
+  for (let guard = 0; e && guard < 64; guard++) {
+    if (e.kind === "array") return true;
+    if (e.kind === "call" || e.kind === "new") e = e.callee as Node;
+    else if (e.kind === "member" || e.kind === "index") e = e.object as Node;
+    else if (e.kind === "assign") e = e.target as Node;
+    else if (e.kind === "binary") e = e.left as Node;
+    else if (e.kind === "ternary") e = e.condition as Node;
+    else break;
+  }
+  if (e && e.kind === "escape-hatch") {
+    const text = typeof s.expr === "string" && s.expr.trim() !== "" ? s.expr : (typeof e.raw === "string" ? e.raw : "");
+    return (text as string).trimStart().startsWith("[");
+  }
+  return false;
+}
+
+function checkAmbiguousLead(root: unknown, report: ReportFn): void {
+  // File level: any top-level binding (in any order) — a function body runs
+  // after the file's top level has executed.
+  let fileBinds = false;
+  const seenTop = new WeakSet<object>();
+  const scanTop = (x: unknown): void => {
+    if (fileBinds || !x || typeof x !== "object" || seenTop.has(x as object)) return;
+    seenTop.add(x as object);
+    if (Array.isArray(x)) { for (const c of x) scanTop(c); return; }
+    const nn = x as Node;
+    if (nn.kind === "function-decl") { if (nn.name === DEFER_NAME) fileBinds = true; return; }
+    if (nn.kind === "lambda") return;
+    if (bindsDeferIn(nn, "list")) { fileBinds = true; return; }
+    // S446 review F4 — only TRUE file-level bindings: a statement's nested block
+    // (`for (…) { let defer }`, `if (…) { const defer }`, a match arm, a `given`
+    // body) is block-scoped and not visible inside a function. Narrowed by not
+    // descending into statement nodes at all.
+    if (typeof nn.kind === "string" &&
+        (/-stmt$/.test(nn.kind) || /^(for|if|match|while)-expr$/.test(nn.kind) || nn.kind === "given-guard")) return;
+    for (const key of Object.keys(nn)) if (key !== "span" && key !== "parent") scanTop(nn[key]);
+  };
+  scanTop(root);
+
+  const seen = new WeakSet<object>();
+  const isStmtList = (x: unknown[]): boolean =>
+    x.some((c) => c && typeof c === "object" && typeof (c as Node).kind === "string");
+
+  const walkList = (list: unknown[], bound: boolean, inFn: boolean): void => {
+    // a function declaration is hoisted to the top of its block
+    let b = bound || list.some((c) => c && typeof c === "object" &&
+      (c as Node).kind === "function-decl" && (c as Node).name === DEFER_NAME);
+    for (const c of list) {
+      walk(c, b, inFn);
+      const cn = c as Node;
+      if (!b && cn && typeof cn === "object" && bindsDeferIn(cn, "list")) {
+        b = true; // declared here: visible to the statements after it
+      }
+    }
+  };
+
+  // `inFn`: inside a function DECLARATION body. A `defer` anywhere else is
+  // E-DEFER-OUTSIDE-FUNCTION (§19.16.3 rule 4), which is the error there
+  // INSTEAD of this one (§19.16.1; S446 review F3 — both used to fire).
+  const walk = (x: unknown, bound: boolean, inFn: boolean): void => {
+    if (!x || typeof x !== "object" || seen.has(x as object)) return;
+    seen.add(x as object);
+    if (Array.isArray(x)) {
+      if (isStmtList(x)) walkList(x, bound, inFn);
+      else for (const c of x) walk(c, bound, inFn);
+      return;
+    }
+    const nn = x as Node;
+    const inner = bound || bindsDeferIn(nn, "subtree");
+    const innerFn = inFn || nn.kind === "function-decl";
+    if (nn.kind === "defer-stmt" && bound && inFn && deferIsBracketLed(nn)) {
+      report("E-DEFER-AMBIGUOUS-LEAD", nn,
+        `\`defer [\` is ambiguous here: a binding named \`defer\` is in scope, so this could index it ` +
+        `(\`defer[…]\`) or defer a statement that starts with an array literal (§19.16.1). Write ` +
+        `\`defer[…]\` with no space to index the binding, \`defer { […]… }\` to defer the statement, or ` +
+        `rename the binding.`);
+    }
+    for (const key of Object.keys(nn)) if (key !== "span" && key !== "parent") walk(nn[key], inner, innerFn);
+  };
+
+  walk(root, fileBinds, false);
 }
