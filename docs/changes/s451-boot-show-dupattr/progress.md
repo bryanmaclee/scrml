@@ -29,3 +29,9 @@
 
 ## Dogfood
 - The runtime already had a module-local `function show(x)`; adding `export function show` made Bun SILENTLY drop the export (Node rejects: "Identifier 'show' has already been declared"). Named the runtime fn `visibility`.
+
+## Fix round (S239 review of 40902674c — MED + LOW-1 + LOW-2)
+- MED: analyze `attrCaseDiags` (every non-use element) — a case variant of a scrml control name (if / else-if / else / show / ref / as / in / key / of / all / deps / rule, `on…`, any `x:y`) → E-BOOTSTRAP-UNSUPPORTED; exact `ref=` on an HTML element refused (§6.7.1a, not in the bootstrap). `<program>`: `unknownProgramAttrDiag` refuses a case variant of a program / control name instead of W-ATTR-001. SPEC names no attribute-name-case rule.
+- LOW-1: parser repeats compare exactly; the case-folded repeat is HTML-only (attrCaseDiags) and program (via the variant refusal). Use fields `a` / `A` stay distinct (tested at runtime).
+- LOW-2: parser `quotedInterpDiags` — a quoted value (any opener, incl. a decl's own value) holding `${` → E-BOOTSTRAP-UNSUPPORTED (§5.5.3 template not implemented). The §66.19.4 worked program's `style="background:${hex}"` was emitted literally; typer.test.js pin +1.
+- Counter: PASS 89 → 88 · FAIL 48 · UNSUPPORTED 653. The lost PASS is `type-state-codes/e-state-undeclared-neg` (twin) — `<p onClick=f()>`: the bootstrap wired a `Click` event that never fires; codes-only case, so it passed vacuously on that axis. Now refused (the MED ruling). ⚑ PA: HTML would treat `onClick` as `onclick`; an alternative is to lower-case event names rather than refuse.
