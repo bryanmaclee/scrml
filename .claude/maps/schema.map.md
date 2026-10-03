@@ -1,6 +1,36 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-10-02T22:11:04-06:00  commit: 9bafb927
+# updated: 2026-10-03T11:38:07-06:00  commit: 47c863556
+# ⛑ **S449-WRAP STAMP — `9bafb927` -> `47c863556`. 7 COMMITS (#1245 S450-peter wrap incl. the `9bafb927` map refresh,
+# #1246 state regen, #1247 bootstrap conformance counter, #1248 dpa-queue, #1249 §66 opener keywords, #1250 bootstrap §55
+# validity surface + submit gate, #1251 transaction guard), incremental refresh. Main checkout `wrap/s449` == `origin/main`
+# `47c863556`.** MAP-STAMP RULE at write time: `git log --oneline 9bafb927..origin/main` -> 7; `bun scripts/state.ts
+# --check` at pass start: `maps: 7 commits behind HEAD (watermark 9bafb927, HEAD 47c863556)` — matches exactly.
+# ALREADY COVERED by the `9bafb927` refresh (grep-verified in these maps, NOT re-mapped): #1235 bootstrap `<effect>`, #1236
+# protect r9 (`codegen/session-store-emit.ts`), #1238 §6.15 value-writes, #1239 auth (`codegen/server-session-guard.ts`,
+# `route-inference.ts`), #1240 native-parser freeze. S449-wrap only ADDS Task-Shape Routing rows for #1239 (none existed).
+# Source-relevant in THIS window, grep-verified at `47c863556`:
+#   #1251 — §19.10.6 / §8.9.2 transaction guard (impl#1): NEW `compiler/src/codegen/sql-tx-guard.ts` (360 lines; the
+#     emitted per-handle FIFO mutex + AsyncLocalStorage request scope); `emit-server.ts` (guarded handle decls, request-
+#     scope loop, body read before BEGIN, `BEGIN` vs `BEGIN DEFERRED` by driver, `fail` -> ROLLBACK, SSE stream-end
+#     backstop, `E-SQL-010`); `emit-channel.ts` (WS callbacks `async` + await their onserver handler); `protect-flow.ts`
+#     (`TX_GUARD_RUNTIME_NAMES` modelled, never walked); `attribute-registry.js` (`<program transactions=>`);
+#     `db-ownership.ts` (NEW export `fileDefaultDbDecl`).
+#   #1250 — bootstrap §55 validity surface + compiler submit gate (`compiler/self-host-v2/` ONLY; impl#1 xfail).
+#   #1249 — §66.2.5 keywords OUTSIDE the declaration opener (`let <x/>`, `export let <x/>`): SPEC + bootstrap parser
+#     (`self-host-v2/parse.scrml`) + 43 test/fixture files migrated. impl#1 has NO emitter (Nominal).
+#   #1247 — NEW `scripts/bootstrap-conformance.ts` (tracking counter), generated `docs/bootstrap-conformance.md`, a
+#     `continue-on-error` ci.yml step.
+# ⛑ FIGURES RE-EXECUTED AT `47c863556`: `facts.ts --check` PASS · `compiler/src` **284,317 lines / 220 files** (+530, +1 =
+# `sql-tx-guard.ts`) · test files **1,574** (+5) · `compiler/SPEC.md` **44,167** lines (+252; `regen-spec-index.ts --check`
+# OK 72/72) · conformance **1288** cases (+10); `bun conformance/run.ts` -> **1246 pass + 42 xfail, 0 fail** (+2 pass =
+# the 2 `sql/transactions-*` cases; +8 xfail = the 8 `forms/` bootstrap-executed cases) · `docs/known-gaps.md`
+# gap-counts open **HIGH 237** · **MED 484** · **LOW 234** · Nominal 7; heading/marker drift 61 (unchanged) ·
+# bootstrap slices: slice-m2 **462/0**, slice-m4 **551/0** · bootstrap counter (live run) PASS 42 · FAIL 18 · LEGACY 951 ·
+# UNSUPPORTED 277 of 1288 — ⚠ the committed `docs/bootstrap-conformance.md` is STALE (1286 cases; `--check` says STALE).
+# NOT MAPPED: any in-flight / unlanded fix. `file:line` cites in S449-wrap sections are grep-derived at `47c863556`.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S450 HEADER (stamp `9bafb927`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
 # ⛑ **S450 STAMP — `6a592ed5c` -> `9bafb927`. 17 COMMITS (S447 wrap #1231, S449 #1232-#1240 incl. the native-parser
 # FREEZE #1240, S450 #1208/#1210/#1211/#1241/#1242/#1243/#1244), incremental refresh. Checkout `wrap/s450-peter` @
 # `da493e06` = `origin/main` `9bafb927` + wrap docs (`git diff 9bafb927 da493e06 -- compiler scripts conformance` is
@@ -671,6 +701,32 @@ existing node kinds, or through codegen-internal / schema-differ-internal shapes
 `ast.ts` types (the §38.6.2 constraint-drift record, the D-5 module-const candidate filter's reliance
 on `ConstDeclNode`/`LetDeclNode.initExpr`, `LogicBinding.directiveIsFormValue`, and the S302
 `ifRaw`/`ifCond` pair below), and now the #458 region shapes immediately below.
+
+## S449-WRAP — SHAPE DELTA (`9bafb927..47c863556`)
+
+### impl#1
+| shape | file | change |
+|---|---|---|
+| `DbScope` | `codegen/emit-server.ts:790` | + `transactions?: string \| null` (raw `transactions=` value), + `transactionsSpan?: unknown` (span for E-SQL-010) |
+| `fileDefaultDbDecl(nodes)` | `db-ownership.ts:91` | NEW → `{ value: string; node: AnyNode } \| null` (the declaring `<program db=>` / `<db src=>` node + value) |
+| `program` element attrs | `attribute-registry.js:151` | + `transactions` — `allowedValues: ["serialized", "concurrent"]`, no interpolation |
+| `CONCURRENT_TRANSACTIONS_VALUE` | `codegen/sql-tx-guard.ts:80` | `"concurrent"` |
+| `guardHandleExpr(expr, driver: "sqlite"\|"postgres"\|"mysql", concurrent: boolean)` | `sql-tx-guard.ts:330` | → one-line `_scrml_db_guard(...)` initializer |
+| `requestScopeLines(routeNames, hasWsHandlers)` | `sql-tx-guard.ts:345` | → lines wrapping each route `.handler` + `_scrml_ws_handlers` callbacks |
+
+### Bootstrap (`compiler/self-host-v2/core.scrml`, #1250) — NOT impl#1
+| shape | line | fields |
+|---|---|---|
+| `SurfaceProp:enum` | 156 | `IsValid`, `Errors`, `Touched`, `Submitted` |
+| `ValidityOf:enum` | 157 | `OfField(decl: Sym, inst: InstRef, idx: int)`, `OfDecl(decl: Sym, inst: InstRef)` |
+| `Validator:enum` | 169 | `Req`, `LengthCmp(op: string, n: int)`, `Min(n: number)`, `Max(n: number)`, `Pattern(source: string)` |
+| `Expr.Validity` | 200 | `(of: ValidityOf, prop: SurfaceProp)` — read-only surface read |
+| `Stmt.ResetSurface` | 267 | `(of: ValidityOf)` — surface half of `reset(@x)` |
+| `Attr.Gate` | 306 | `(values: string[], fields: ValidityOf[])` — form submit gate (§55.17.3) |
+| `View.Errors` | 354 | `(of: ValidityOf, all: boolean)` — `<errors of=…/>` |
+| `Field.vals` | 386 | `Validator[]` |
+Helpers: `validityDecl(v)`, `validityInst(v)` (core.scrml). Runtime: `validity(inst, i)` `runtime.js:691`, `gate(scope, form, named)` `runtime.js:792`.
+
 
 ## S450 — SHAPE DELTA (`6a592ed5c..9bafb927`)
 

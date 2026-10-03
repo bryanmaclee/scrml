@@ -13,36 +13,36 @@ Scope: **1288 of 1288 cases attempted** — every attempted case reached the pur
 |---|---:|---:|
 | PASS | 76 | 5.9% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 62 | 4.8% |
+| FAIL | 60 | 4.7% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 500 | 38.8% |
-| UNSUPPORTED | 650 | 50.5% |
+| NOT-TWINNED | 510 | 39.6% |
+| UNSUPPORTED | 642 | 49.8% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 138; of those, 76 hold (55.1%). Runtime half executed on the bootstrap for 34 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 136; of those, 76 hold (55.9%). Runtime half executed on the bootstrap for 34 case(s).
 
 - **Vacuous** passes: 14 of 76 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **62**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 46 of 62; the other 16 are implemented checks that answered wrong.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 44 of 60; the other 16 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 380 · parse-reject 270.
+UNSUPPORTED by reason: bootstrap-unsupported 378 · parse-reject 264.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **591** — PASS 44 · FAIL 47 · UNSUPPORTED 500. Twin holds 44 (non-vacuous 35). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **581** — PASS 44 · FAIL 45 · UNSUPPORTED 492. Twin holds 44 (non-vacuous 35). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (500 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (510 cases; a case counts once per distinct reason):
 
 - 60 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 57 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - 46 — rhs-decl: `…` initializer needs a type (CTX — O35)
+- 46 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - 40 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
 - 40 — rhs-decl: compound cell with child declarations (Tier 2 — `…` rewrite owed)
 - 40 — rhs-decl: field of a compound cell (Tier 2 — `…` rewrite owed)
-- 35 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - 33 — rhs-decl: empty `…` needs an element type (CTX — O35)
 - 32 — const-cell: non-literal initializer needs a type (CTX — O35)
 - 30 — program-wrap: `…` root with no `…` (route-file shape — not wrapped)
@@ -102,7 +102,7 @@ NOT-TWINNED by reason (500 cases; a case counts once per distinct reason):
 | channel | 31 | · | · | · | · | 19 | 12 | · | · |
 | codegen | 2 | · | · | · | · | 1 | 1 | · | · |
 | components | 32 | · | · | 2 | · | 29 | 1 | · | · |
-| control-flow | 62 | 4 | · | 5 | · | 14 | 39 | · | · |
+| control-flow | 62 | 4 | · | 4 | · | 18 | 36 | · | · |
 | defer | 51 | 1 | · | 4 | · | 4 | 42 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
@@ -123,7 +123,7 @@ NOT-TWINNED by reason (500 cases; a case counts once per distinct reason):
 | linear | 15 | · | · | 2 | · | · | 13 | · | · |
 | loop | 8 | · | · | · | · | 3 | 5 | · | · |
 | maps | 13 | · | · | · | · | 13 | · | · | · |
-| markup-handler | 77 | 6 | · | 4 | · | 31 | 36 | · | · |
+| markup-handler | 77 | 6 | · | 3 | · | 36 | 32 | · | · |
 | match-block | 18 | · | · | · | · | 9 | 9 | · | · |
 | match-codes | 25 | · | · | 1 | · | · | 24 | · | · |
 | match-identifier | 1 | · | · | · | · | 1 | · | · | · |
@@ -148,9 +148,9 @@ NOT-TWINNED by reason (500 cases; a case counts once per distinct reason):
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
 | style | 27 | · | · | 1 | · | 24 | 2 | · | · |
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
-| type-state-codes | 27 | 3 | · | 2 | · | 2 | 20 | · | · |
+| type-state-codes | 27 | 3 | · | 2 | · | 3 | 19 | · | · |
 
-### FAIL (62)
+### FAIL (60)
 
 - `auth/auth-attr-empty-string-pos` (codes; not in the bootstrap: E-AUTH-ATTR-INVALID)
   - missing E-AUTH-ATTR-INVALID
@@ -200,9 +200,6 @@ NOT-TWINNED by reason (500 cases; a case counts once per distinct reason):
 - `control-flow/ctrl-004-else-on-state-opener-pos` (twin · codes; not in the bootstrap: E-CTRL-004)
   - missing E-CTRL-004
   - severity: E-CTRL-004 did not fire (expected error)
-- `control-flow/ctrl-012-bare-control-flow-in-markup-pos` (twin · codes; not in the bootstrap: E-CONTROL-FLOW-IN-MARKUP)
-  - missing E-CONTROL-FLOW-IN-MARKUP
-  - severity: E-CONTROL-FLOW-IN-MARKUP did not fire (expected error)
 - `control-flow/if-chain-inactive-branches-absent` (twin · runtime)
   - domAnchored: selector #rest: expected count 0, got 1
 - `defer/fn-prohibition-applies-neg` (twin · codes)
@@ -271,8 +268,6 @@ NOT-TWINNED by reason (500 cases; a case counts once per distinct reason):
   - severity: E-MU-001 did not fire (expected error)
 - `markup-handler/multi-stmt-handler-colon-shorthand-neg` (twin · twin-extra-error)
   - twin emitted unasserted error(s): E-VALUE-WRITES-STATE
-- `markup-handler/s437-r4-dangling-else-each-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
-  - missing E-STMT-UNEXPECTED-TOKEN
 - `markup-handler/s437-r4-dangling-else-engine-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
   - missing E-STMT-UNEXPECTED-TOKEN
 - `markup-handler/s437-r4-dangling-else-top-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
@@ -406,7 +401,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (650)
+### UNSUPPORTED (642)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -521,9 +516,7 @@ none
 - `control-flow/ctrl-004-orphan-else-on-state-opener-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
 - `control-flow/ctrl-005-else-and-if-same-element-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
 - `control-flow/ctrl-005-else-and-if-same-element-pos` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
-- `control-flow/ctrl-010-else-on-for-in-if-chain-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `item`
 - `control-flow/ctrl-010-else-on-for-without-lift-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `item`
-- `control-flow/ctrl-010-else-on-for-without-lift-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `item`
 - `control-flow/ctrl-010-for-lift-in-match-arm-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `item`
 - `control-flow/ctrl-012-bare-control-flow-default-logic-root-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/ctrl-012-bare-control-flow-in-markup-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `of`
@@ -531,7 +524,6 @@ none
 - `control-flow/ctrl-012-default-logic-non-leading-residual-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/ctrl-012-default-logic-prose-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/ctrl-013-braceless-for-of-head-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `of`
-- `control-flow/ctrl-013-braceless-for-of-head-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `x`
 - `control-flow/ctrl-021-value-form-sugar-lift-less-branch-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
 - `control-flow/ctrl-022-value-form-no-else-renders-nothing-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
 - `control-flow/ctrl-023-value-form-sugar-bound-position-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
@@ -785,22 +777,18 @@ none
 - `markup-handler/multi-stmt-handler-attr-pos` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
 - `markup-handler/multi-stmt-handler-colon-shorthand-pos` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
 - `markup-handler/multi-stmt-handler-in-engine-state-child-pos` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
-- `markup-handler/s437-r4-arrow-block-seq-dollar-each-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `markup-handler/s437-r4-arrow-block-seq-dollar-engine-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `markup-handler/s437-r4-arrow-block-seq-dollar-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `markup-handler/s437-r4-arrow-block-seq-dollar-top-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
-- `markup-handler/s437-r4-arrow-seq-braced-each-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
 - `markup-handler/s437-r4-arrow-seq-braced-engine-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
 - `markup-handler/s437-r4-arrow-seq-braced-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `markup-handler/s437-r4-arrow-seq-braced-top-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
-- `markup-handler/s437-r4-arrow-seq-dollar-each-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `markup-handler/s437-r4-arrow-seq-dollar-engine-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `markup-handler/s437-r4-arrow-seq-dollar-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `markup-handler/s437-r4-arrow-seq-dollar-top-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `markup-handler/s437-r4-dangling-else-function-body-neg` — twin · parse-reject: E-PARSE-OBJECT: expected a field name, found `@`
 - `markup-handler/s437-r4-dangling-else-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `markup-handler/s437-r4-single-arrow-expr-form-ok` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
-- `markup-handler/s437-r4-try-braced-each-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
 - `markup-handler/s437-r4-try-braced-engine-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
 - `markup-handler/s437-r4-try-braced-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `markup-handler/s437-r4-try-braced-top-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
@@ -1042,7 +1030,6 @@ none
 - `type-state-codes/e-state-terminal-mutation-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
 - `type-state-codes/e-state-transition-illegal-neg` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
 - `type-state-codes/e-state-transition-illegal-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
-- `type-state-codes/e-state-undeclared-nested-each-in-match-arm-pos` — twin · bootstrap-unsupported: member access `.A` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `type-state-codes/e-struct-function-field-pos` — twin · parse-reject: E-PARSE-TYPE: expected a field name, found `(`
 - `type-state-codes/e-type-004-struct-field-access-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
 - `type-state-codes/e-type-004-struct-field-access-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
@@ -1059,7 +1046,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (500)
+### NOT-TWINNED (510)
 
 - `auth/auth-001-neg` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
 - `auth/auth-001-pos` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
@@ -1125,8 +1112,12 @@ none
 - `components/unresolved-component-ref-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/unslotted-children-no-spread-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `components/unslotted-children-no-spread-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `control-flow/ctrl-010-else-on-for-in-if-chain-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `control-flow/ctrl-010-else-on-for-without-lift-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `control-flow/ctrl-011-for-in-neg` — not mechanical: unwrap-logic: top-level `${}` holding a legacy declaration also holds a `for-stmt` statement, which impl#1 reads differently outside `${}` (S441) — not unwrapped
 - `control-flow/ctrl-011-for-in-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `for-stmt` statement, which impl#1 reads differently o
+- `control-flow/ctrl-012-bare-control-flow-in-markup-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `control-flow/ctrl-013-braceless-for-of-head-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `control-flow/ctrl-017-show-ssr-hide-variant-render-no-hide-pos` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
 - `control-flow/ctrl-018-show-ssr-hide-module-init-write-fail-open-pos` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441) — not unwr
 - `control-flow/ctrl-019-show-ssr-hide-spelling-parity-pos` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holding a legacy declaration also holds a `state-constructor-def` statement, which impl#1 reads differently outside `${}` (S441) — not unwr
@@ -1359,11 +1350,16 @@ none
 - `markup-handler/s437-handler-shape-ternary-continuation-lines` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `markup-handler/s437-handler-shape-trailing-line-comments` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `markup-handler/s437-handler-shape-trailing-operator-continuation` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-r4-arrow-block-seq-dollar-each-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `markup-handler/s437-r4-arrow-seq-braced-each-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `markup-handler/s437-r4-arrow-seq-dollar-each-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `markup-handler/s437-r4-continuation-expr-form-leading-plus` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `markup-handler/s437-r4-continuation-leading-plus` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `markup-handler/s437-r4-continuation-leading-question-colon` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `markup-handler/s437-r4-continuation-trailing-multiply` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `markup-handler/s437-r4-continuation-trailing-question-colon` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-r4-dangling-else-each-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `markup-handler/s437-r4-try-braced-each-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `markup-handler/s437-r5-handler-map-literal-notice` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
 - `markup-handler/s437-r5-template-cell-read-first-multiline` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
 - `markup-handler/s437-r5-template-cell-read-second` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
@@ -1445,7 +1441,7 @@ none
 - `reactive/decl-needs-initializer-array-pos` — excluded (dialect.s66): the case's subject is a legacy form itself: a `const <x>: T[]` with no right-hand side (E-DECL-NEEDS-INITIALIZER, §6.2 Shape 4 / §6.6) has no §66 spelling to twin; a §66 case for the opener-form replacement is owed (
 - `reactive/decl-needs-initializer-pos` — excluded (dialect.s66): the case's subject is a legacy form itself: `const <doubled>: int` with no right-hand side (E-DECL-NEEDS-INITIALIZER, §6.2 Shape 4 / §6.6) has no §66 spelling to twin; a §66 case for the opener-form replacement is ow
 - `reactive/decl-rhs-interp-wrapped-neg` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35) · const-cell: non-literal initializer needs a type (CTX — O35)
-- `reactive/decl-rhs-interp-wrapped-pos` — not mechanical: rhs-decl: initializer extent could not be verified against impl#1's AST · const-cell: initializer extent could not be verified against impl#1's AST · program-wrap: impl#1 reads the restructured file differently (-E-DECL-RHS-
+- `reactive/decl-rhs-interp-wrapped-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · rhs-decl: initializer extent could not be verified against impl#1's AST · const-cell: initializer extent could not be verified
 - `reactive/derived-circular-dep-mutual` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
 - `reactive/derived-circular-dep-self` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
 - `reactive/derived-default-on-const` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
@@ -1559,5 +1555,6 @@ none
 - `table-for/tablefor-selectable-no-primary-key` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `table-for/tablefor-type-not-struct` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `table-for/tablefor-variant-payload-enum` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `type-state-codes/e-state-undeclared-nested-each-in-match-arm-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - `type-state-codes/e-state-undeclared-pos` — not mechanical: program-move: impl#1 reads the restructured file differently (-E-STATE-UNDECLARED) — not restructured, no `${}` unwrapped
 - `type-state-codes/e-type-045-prefix-not-negation-neg` — not mechanical: rhs-decl: type `string | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
