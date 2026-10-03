@@ -1,0 +1,11 @@
+{
+  "id": "fixture-vacuous",
+  "description": "KNOWN VACUOUS PASS: the only assertion is the absence of a code no bootstrap source mentions.",
+  "language-version": "1.0",
+  "spec": "§34",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-FIXTURE-NEVER-EMITTED"]
+  }
+}

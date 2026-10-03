@@ -1,0 +1,12 @@
+{
+  "id": "fixture-fail-runtime",
+  "description": "KNOWN FAIL (runtime half): the pass-runtime counter, ONE click, but the contract claims count 2 — the executed runtime half must disagree.",
+  "language-version": "1.0",
+  "spec": "§66.9",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": {
+    "codes": [],
+    "input": [{ "click": "#inc" }],
+    "state": { "count": 2 }
+  }
+}
