@@ -5,11 +5,10 @@
  * WHAT THIS PROVES, AND WHAT IT DOES NOT: every assertion here is (1) the
  * written specifier resolves ON DISK from the written file, and (2) the gated
  * bytes equal the written bytes. It does NOT prove the page works in a
- * browser — a classic-format `.client.js` with a top-level `import` is a
- * SyntaxError as a classic <script>, and an esm specifier re-based into the
- * source tree 404s under a server that serves only dist. That browser half is
- * open: docs/known-gaps.md
- * g-clientjs-skips-relative-import-rebasing-so-a-host-import-dangles.
+ * browser. That browser half (S440 item 16: copy the helper into dist, and
+ * load a classic page's importing bundles as modules) is pinned separately by
+ * clientjs-helper-copy-into-dist.test.js; here a plain `.js` helper's
+ * specifier is expected to name its dist copy, `_scrml_local/…`.
  *
  * Pre-fix: `api.js` passed `clientJs` through `rewriteStdlibImports` only, while
  * `toolJs` / `serverJs` / `libraryJs` each got `rewriteRelativeImportPaths`
@@ -152,6 +151,7 @@ describe("#1045 F1 — client JS relative specifiers resolve on disk, and gated 
 
   test("a plain .js helper specifier resolves on disk (flat + nested pages, deeper output dir); gated == written", () => {
     const root = project({
+      "scrml.toml": "",
       "vendor/util.js": "export function dbl(x) { return x * 2 }\n",
       "app/page.scrml":
         'import { dbl } from "../vendor/util.js"\n' +
@@ -164,14 +164,16 @@ describe("#1045 F1 — client JS relative specifiers resolve on disk, and gated 
     expect(fatal(r)).toEqual([]);
     const top = written(out, /\/build\/dist\/page\.client\.js$/);
     const deep = written(out, /\/build\/dist\/sub\/deep\.client\.js$/);
-    expect(expectAllImportsResolve(top)).toEqual(["../../vendor/util.js"]);
-    expect(expectAllImportsResolve(deep)).toEqual(["../../../vendor/util.js"]);
+    // S440 item 16 — the specifier now names the dist COPY (one file for both pages).
+    expect(expectAllImportsResolve(top)).toEqual(["./_scrml_local/vendor/util.js"]);
+    expect(expectAllImportsResolve(deep)).toEqual(["../_scrml_local/vendor/util.js"]);
     expect(gatedFor(g, "page.client.js")).toEqual([readFileSync(top, "utf8")]);
     expect(gatedFor(g, "deep.client.js")).toEqual([readFileSync(deep, "utf8")]);
   });
 
   test("esm: the dist-space runtime specifier is NOT re-based; the helper specifier resolves on disk; gated == written", () => {
     const root = project({
+      "scrml.toml": "",
       "vendor/util.js": "export function dbl(x) { return x * 2 }\n",
       "app/page.scrml":
         'import { dbl } from "../vendor/util.js"\n' +
@@ -188,14 +190,15 @@ describe("#1045 F1 — client JS relative specifiers resolve on disk, and gated 
     const deepSpecs = expectAllImportsResolve(deep);
     expect(topSpecs.some((s) => /^\.\/scrml-runtime\.[0-9a-z]+\.js$/.test(s))).toBe(true);
     expect(deepSpecs.some((s) => /^\.\.\/scrml-runtime\.[0-9a-z]+\.js$/.test(s))).toBe(true);
-    expect(topSpecs).toContain("../../vendor/util.js");
-    expect(deepSpecs).toContain("../../../vendor/util.js");
+    expect(topSpecs).toContain("./_scrml_local/vendor/util.js");
+    expect(deepSpecs).toContain("../_scrml_local/vendor/util.js");
     expect(gatedFor(g, "page.client.js")).toEqual([readFileSync(top, "utf8")]);
     expect(gatedFor(g, "deep.client.js")).toEqual([readFileSync(deep, "utf8")]);
   });
 
   test("content-hashed client bundles carry the on-disk re-based specifier too", () => {
     const root = project({
+      "scrml.toml": "",
       "vendor/util.js": "export function dbl(x) { return x * 2 }\n",
       "app/sub/deep.scrml":
         'import { dbl } from "../../vendor/util.js"\n' +
@@ -205,7 +208,7 @@ describe("#1045 F1 — client JS relative specifiers resolve on disk, and gated 
     const { r, out } = build(root, ["app/page.scrml", "app/sub/deep.scrml"], "build/dist", { contentHashAssets: true });
     expect(fatal(r)).toEqual([]);
     const deep = written(out, /\/build\/dist\/sub\/deep\.client\.[0-9a-z]+\.js$/);
-    expect(expectAllImportsResolve(deep)).toEqual(["../../../vendor/util.js"]);
+    expect(expectAllImportsResolve(deep)).toEqual(["../_scrml_local/vendor/util.js"]);
   });
 
   test("gate sibling: a nested library artifact's stdlib import is gated as written", () => {

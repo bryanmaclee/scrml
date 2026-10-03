@@ -33,7 +33,6 @@ import { runDeferChecks } from "../../src/validators/lint-defer.ts";
 import { runRedeclareChecks } from "../../src/validators/lint-redeclare.ts";
 import { lowerDeferList, lowerDefers, isDeferLoweredTry } from "../../src/codegen/lower-defer.ts";
 import { deferStackRunnerLines } from "../../src/codegen/emit-control-flow.ts";
-import { normalizeChunkToken } from "../helpers/chunk-scope.js";
 import { tmpdir } from "os";
 
 // ---------------------------------------------------------------------------
@@ -567,10 +566,12 @@ describe("§7 body-split — the deferred body runs after the LAST continuation"
 });
 
 // ---------------------------------------------------------------------------
-// §8 — front-end parity
+// §8 — end-to-end compile (S449: was live-vs-native client-JS parity; the
+// full-pipeline `--parser=scrml-native` flag is retired. The native defer
+// parse impl#1 reaches is tested directly through `nativeParseFile` above.)
 // ---------------------------------------------------------------------------
 
-describe("§8 live and native front-ends emit the same client JS for defer", () => {
+describe("§8 the default front-end compiles a LIFO / nested / early-return defer program clean", () => {
   test("LIFO + nested block + early return program", () => {
     const src = wrap(`
       <trace> = ""
@@ -590,10 +591,8 @@ describe("§8 live and native front-ends emit the same client JS for defer", () 
         @trace = @trace + "end;"
       }`, `<button onclick=step(1)>go</button><p>\${@trace}</p>`);
     const live = compile(src);
-    const nat = compile(src, { parser: "scrml-native" });
     expect(live.errors.map((e) => e.code)).toEqual([]);
-    expect(nat.errors.map((e) => e.code)).toEqual([]);
-    expect(normalizeChunkToken(nat.clientJs)).toBe(normalizeChunkToken(live.clientJs));
+    expect(live.clientJs.length).toBeGreaterThan(0);
   });
 });
 

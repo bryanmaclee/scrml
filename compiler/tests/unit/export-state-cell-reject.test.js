@@ -13,7 +13,9 @@
  *
  * SHARED fire site (module-resolver.js MOD stage) — runs for BOTH the default
  * BS+Acorn pipeline AND the scrml-native parser (both feed `file.ast.exports`).
- * Tests assert on BOTH pipelines for the braced form.
+ * S449: the native arm of these tests ran the whole file through the retired
+ * `--parser=scrml-native` flag (a file-level export is not a shape impl#1
+ * routes through the native parser), so only the default-pipeline arm remains.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -26,12 +28,10 @@ let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "export-cell-reject-")); });
 afterAll(() => { if (TMP) rmSync(TMP, { recursive: true, force: true }); });
 
-function compile(src, parser) {
+function compile(src) {
   const fp = join(TMP, `f-${Math.random().toString(36).slice(2)}.scrml`);
   writeFileSync(fp, src);
-  const opts = { inputFiles: [fp], outputDir: join(TMP, "dist"), write: false, log: () => {} };
-  if (parser) opts.parser = parser;
-  return compileScrml(opts);
+  return compileScrml({ inputFiles: [fp], outputDir: join(TMP, "dist"), write: false, log: () => {} });
 }
 
 // E-EXPORT-001 is an ERROR → result.errors.
@@ -40,7 +40,7 @@ function exportRejectErrors(res) {
 }
 
 // ---------------------------------------------------------------------------
-// POSITIVE — state-cell exports fire E-EXPORT-001 (both pipelines)
+// POSITIVE — state-cell exports fire E-EXPORT-001
 // ---------------------------------------------------------------------------
 
 describe("E-EXPORT-001 — positive (default pipeline)", () => {
@@ -81,30 +81,6 @@ describe("E-EXPORT-001 — positive (default pipeline)", () => {
   });
 });
 
-describe("E-EXPORT-001 — positive (--parser=scrml-native)", () => {
-  test("export { count } of a plain cell fires under native", () => {
-    const res = compile(`<program>
-\${
-  <count> = 0
-  export { count }
-}
-</program>`, "scrml-native");
-    expect(exportRejectErrors(res).length).toBe(1);
-  });
-
-  test("export { total } of a derived cell fires under native", () => {
-    const res = compile(`<program>
-\${
-  <a> = 1
-  <b> = 2
-  const <total> = @a + @b
-  export { total }
-}
-</program>`, "scrml-native");
-    expect(exportRejectErrors(res).length).toBe(1);
-  });
-});
-
 // ---------------------------------------------------------------------------
 // NEGATIVE — function / const / component / channel exports stay clean
 // ---------------------------------------------------------------------------
@@ -131,12 +107,6 @@ describe("E-EXPORT-001 — negative (exportable bindings stay clean)", () => {
     expect(exportRejectErrors(res).length).toBe(0);
   });
 
-  test("export const Greeting does NOT fire under native either", () => {
-    const res = compile(`<program>
-\${ export const Greeting = <p props={ name: string }>Hi \${name}</> }
-</program>`, "scrml-native");
-    expect(exportRejectErrors(res).length).toBe(0);
-  });
 
   test("exported channel does NOT fire", () => {
     const res = compile(`<program>

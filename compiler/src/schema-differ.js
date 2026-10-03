@@ -33,6 +33,10 @@ export function parseSchemaBlock(schemaBody) {
   const fns = [];
   const gluedHeads = [];
   const fnBodySpans = [];
+  // Offset of each `tables[k]` head in `text` (parallel array, additive — read by
+  // `findTenantDeclarationDisagreements` to locate a declaration for E-SCHEMA-015;
+  // the table objects themselves are unchanged).
+  const tableOffsets = [];
   let maskedForGlue = null;
   const text = typeof schemaBody === "string" ? schemaBody : (schemaBody?.body ?? "");
   const n = text.length;
@@ -64,6 +68,7 @@ export function parseSchemaBlock(schemaBody) {
     const tblHead = /^([A-Za-z_]\w*)\s*\{/.exec(rest);
     if (tblHead) {
       const tableName = tblHead[1];
+      const tblStart = i;
       const braceOpen = i + tblHead[0].length - 1; // index of the `{`
       const braceClose = findSchemaBlockEnd(text, braceOpen);
       if (braceClose === -1) {
@@ -99,6 +104,7 @@ export function parseSchemaBlock(schemaBody) {
       }
 
       tables.push(table);
+      tableOffsets.push(tblStart);
       continue;
     }
 
@@ -107,7 +113,7 @@ export function parseSchemaBlock(schemaBody) {
     i++;
   }
 
-  return { tables, fns, gluedHeads, fnBodySpans };
+  return { tables, fns, gluedHeads, fnBodySpans, tableOffsets };
 }
 
 /**
@@ -312,7 +318,7 @@ function legacyScanCreateTables(text) {
     const statement = m[1]
       ? statementRaw.replace(/(CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)["`'[]?\w+["`'\]]?\s*\.\s*/i, "$1")
       : statementRaw;
-    found.push({ key: m[2].toLowerCase(), name: m[2], statement, body: text.slice(bodyStart, bodyEnd) });
+    found.push({ key: m[2].toLowerCase(), name: m[2], statement, body: text.slice(bodyStart, bodyEnd), offset: m.index, end: bodyEnd + 1 });
     re.lastIndex = bodyEnd + 1;
   }
   return found;
@@ -540,6 +546,7 @@ function structuredScanCreateTables(text) {
       modifiers: h.modifiers,
       statement,
       body: text.slice(h.parenAt + 1, h.bodyEnd),
+      offset: h.start,
     });
   }
   return found;
@@ -694,6 +701,39 @@ function notADeclarationReason(text, h) {
   if (h.parenAt === -1) return "no-columns";
   if (h.bodyEnd === -1) return "unclosed";
   if (readSqlKeyword(text, skipSqlTrivia(text, h.bodyEnd + 1), "INHERITS") !== -1) return "inherits";
+  if (findLikeTemplateReference(text.slice(h.parenAt + 1, h.bodyEnd)) !== null) return "like";
+  return null;
+}
+
+/**
+ * A `LIKE <template>` item inside a CREATE TABLE column list (bryan RULED S447
+ * "stamp all" (ii), gap g-schema-create-table-like-template-columns-not-declared).
+ * `CREATE TABLE assets (LIKE tmpl INCLUDING ALL)` copies `tmpl`'s columns — a
+ * `tenant_id` among them — in Postgres, but the floors read no column from it, so
+ * the table was silently not tenant-scoped. The item is a TEMPLATE REFERENCE when
+ * an unquoted `LIKE` is followed by ONE name chain (bare / quoted parts, `.`-joined)
+ * and then `INCLUDING` | `EXCLUDING` | the end of the item (the `,` or `)` that
+ * closes it). A column NAMED `like` keeps working when it is quoted (`"like" TEXT`)
+ * or when its type is followed by anything other than the end of the item
+ * (`like TEXT NOT NULL`, `like VARCHAR(50)`); a bare `like TEXT` is the same token
+ * shape as `LIKE tmpl` and is, by the ruling, the template reference (base already
+ * read it as one: `isTableLevelConstraint` skipped it, so no column was declared).
+ *
+ * @param {string} body the text between a column list's `(` and its closing `)`
+ * @returns {string|null} the item text, or null when the list has none
+ */
+const LIKE_TEMPLATE_ITEM_RE = new RegExp(
+  "^LIKE\\s+" +
+  "(?:[\\p{L}\\p{N}_$]+|\"[^\"]*\"|`[^`]*`|\\[[^\\]]*\\])" +
+  "(?:\\s*\\.\\s*(?:[\\p{L}\\p{N}_$]+|\"[^\"]*\"|`[^`]*`|\\[[^\\]]*\\]))*" +
+  "\\s*(?:$|(?:INCLUDING|EXCLUDING)(?![\\p{L}\\p{N}_$]))",
+  "iu",
+);
+function findLikeTemplateReference(body) {
+  for (const item of splitTopLevelCommas(body)) {
+    const trimmed = item.trim();
+    if (LIKE_TEMPLATE_ITEM_RE.test(trimmed)) return trimmed;
+  }
   return null;
 }
 
@@ -780,6 +820,123 @@ export function harvestRawCreateTableDecls(text) {
  */
 export function harvestRawCreateTables(text, out) {
   harvestInto(schemaCreateTables(text), out, false);
+}
+
+/**
+ * EVERY raw `CREATE TABLE … (…)` statement in a `< schema>` body — the legacy read
+ * UNION the structured read, de-duplicated by SOURCE SPAN, not by key (S450 fix
+ * round, S239 F1). `schemaCreateTables` drops a structured hit whose KEY the
+ * legacy read already has — right for first-wins, wrong for an all-declarations
+ * list: a live head with a comment inside it (`CREATE TABLE assets /* live *\/ (…)`,
+ * `CREATE /*x*\/ TABLE …`, `assets -- v2⏎(…)`) is read ONLY by the structured
+ * reader, so keying it away hid the live table behind a same-name commented copy
+ * and turned the tenant floor OFF at exit 0. A structured hit is the same
+ * statement as a legacy one only when it starts inside that legacy statement's
+ * raw source span. Modified heads stay out (neither harvest reads them; E-SCHEMA-014).
+ * Used ONLY by `schemaTableDeclarations`; the harvest and first-wins are untouched.
+ */
+function allSchemaCreateTableDecls(text) {
+  const legacy = legacyScanCreateTables(text);
+  const spans = legacy.map((t) => [t.offset, t.end]);
+  const extra = [];
+  for (const t of structuredScanCreateTables(text)) {
+    if (t.modifiers.length !== 0) continue;
+    if (spans.some(([a, b]) => t.offset >= a && t.offset < b)) continue;
+    extra.push(t);
+  }
+  return [...legacy, ...extra];
+}
+
+/**
+ * EVERY table declaration in one `< schema>` body that the §14.8.10 tenant floor
+ * reads — duplicates INCLUDED, in source order — with whether it carries a
+ * `tenant_id` column. The two forms are read by the same recognizers the floor
+ * uses: `parseSchemaBlock` for the DSL (`name { … }`) and the raw reads
+ * (`allSchemaCreateTableDecls` — legacy ∪ structured, de-duplicated by span) for `CREATE TABLE … (…)`,
+ * minus a raw declaration with no readable column (which `extractDesiredSchema`
+ * skips too). Both recognizers are COMMENT-AGNOSTIC (the ⊇-base guarantee above),
+ * so a commented-out copy is a declaration here exactly as it is to the floor;
+ * `commented` records that it sits inside a `--` / closed `/* *\/` comment or a
+ * one-line literal, for the E-SCHEMA-015 message only.
+ *
+ * @param {string} text a `< schema>` body
+ * @returns {Array<{name: string, key: string, form: "declarative"|"raw", offset: number, tenant: boolean, commented: boolean, columns: Array<{name: string}>}>}
+ */
+export function schemaTableDeclarations(text) {
+  const out = [];
+  if (typeof text !== "string" || text.length === 0) return out;
+  const masked = blankLiteralBodies(text, { comments: true, backtick: false });
+  const carriesTenant = (cols) =>
+    cols.some((c) => typeof c?.name === "string" && c.name.toLowerCase() === "tenant_id");
+  let parsed = { tables: [], tableOffsets: [] };
+  try { parsed = parseSchemaBlock(text); } catch { /* graceful — no DSL tables */ }
+  (parsed.tables ?? []).forEach((t, k) => {
+    if (!t || typeof t.name !== "string") return;
+    const offset = parsed.tableOffsets?.[k] ?? -1;
+    const columns = Array.isArray(t.columns) ? t.columns : [];
+    out.push({
+      name: t.name,
+      key: t.name.toLowerCase(),
+      form: "declarative",
+      offset,
+      tenant: carriesTenant(columns),
+      commented: offset >= 0 && masked.slice(offset, offset + t.name.length) !== t.name,
+      columns,
+    });
+  });
+  for (const t of allSchemaCreateTableDecls(text)) {
+    const columns = columnsFromDdlBody(t.body);
+    if (columns.length === 0) continue;
+    out.push({
+      name: t.name,
+      key: t.key,
+      form: "raw",
+      offset: t.offset,
+      tenant: carriesTenant(columns),
+      commented: masked.slice(t.offset, t.offset + 6).toUpperCase() !== "CREATE",
+      columns,
+    });
+  }
+  out.sort((a, b) => a.offset - b.offset);
+  return out;
+}
+
+/**
+ * Same-name `< schema>` declarations that DISAGREE on `tenant_id` — E-SCHEMA-015
+ * (bryan RULED S447 "stamp all" (i), gap
+ * g-schema-commented-out-declaration-shadows-live-table).
+ *
+ * The tenant floor reads the UNION of every same-name declaration (a table is
+ * tenant-scoped when ANY declaration of it carries `tenant_id` —
+ * `extractDesiredSchema` `tenantTables`). The union alone is not safe: a stale
+ * commented-out copy WITH `tenant_id` beside a live table WITHOUT it over-scopes
+ * the live table (`SELECT *` silently returns `[]`, S446 review of #1209), and
+ * first-wins — the pre-ruling read — lets a stale copy WITHOUT `tenant_id` shadow
+ * a live table WITH it. So when the declarations of one table (names compared
+ * case-insensitively, as the floor keys them) do not all agree on whether the
+ * table carries `tenant_id`, the program is rejected and neither direction is
+ * silent. Declarations that agree — including a commented-out copy — are quiet.
+ *
+ * @param {string} text a `< schema>` body
+ * @returns {Array<{name: string, withTenant: object[], withoutTenant: object[]}>}
+ *   one entry per disagreeing table, in order of first declaration; each list holds
+ *   `schemaTableDeclarations` records.
+ */
+export function findTenantDeclarationDisagreements(text) {
+  const groups = new Map();
+  for (const d of schemaTableDeclarations(text)) {
+    if (!groups.has(d.key)) groups.set(d.key, []);
+    groups.get(d.key).push(d);
+  }
+  const out = [];
+  for (const decls of groups.values()) {
+    const withTenant = decls.filter((d) => d.tenant);
+    const withoutTenant = decls.filter((d) => !d.tenant);
+    if (withTenant.length > 0 && withoutTenant.length > 0) {
+      out.push({ name: decls[0].name, withTenant, withoutTenant });
+    }
+  }
+  return out;
 }
 
 /**

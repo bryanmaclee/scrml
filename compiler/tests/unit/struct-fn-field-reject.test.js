@@ -34,12 +34,10 @@ let TMP;
 beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "struct-fn-field-")); });
 afterAll(() => { if (TMP) rmSync(TMP, { recursive: true, force: true }); });
 
-function compile(src, parser) {
+function compile(src) {
   const fp = join(TMP, `f-${Math.random().toString(36).slice(2)}.scrml`);
   writeFileSync(fp, src);
-  const opts = { inputFiles: [fp], outputDir: join(TMP, "dist"), write: false, log: () => {} };
-  if (parser) opts.parser = parser;
-  return compileScrml(opts);
+  return compileScrml({ inputFiles: [fp], outputDir: join(TMP, "dist"), write: false, log: () => {} });
 }
 
 // Cross-stream helper: E- codes partition to result.errors, but assert over
@@ -157,24 +155,6 @@ describe("E-STRUCT-FUNCTION-FIELD — negative (lifecycle + plain fields)", () =
   });
 });
 
-// ---------------------------------------------------------------------------
-// SHARED — rejects identically on the native parser (defers to same type-system)
-// ---------------------------------------------------------------------------
-
-describe("E-STRUCT-FUNCTION-FIELD — native parser parity", () => {
-  test("rejects on --parser=scrml-native for each shape", () => {
-    const src = `<ul>
-\${ type T:struct = { a: () -> void, b: fn(), c: (x: int) => string, d: string } }
-<li>x</li>
-</ul>`;
-    expect(fnFieldDiags(compile(src, "scrml-native")).length).toBe(3);
-  });
-
-  test("does NOT reject a lifecycle field under --parser=scrml-native", () => {
-    const src = `<ul>
-\${ type T:struct = { passwordHash: (not to string), label: string } }
-<li>x</li>
-</ul>`;
-    expect(fnFieldDiags(compile(src, "scrml-native")).length).toBe(0);
-  });
-});
+// S449: a "native parser parity" block stood here — two programs compiled
+// under the retired full-pipeline `--parser=scrml-native` flag. The rule lives
+// in the type-system stage both front-ends fed; only the parity arm went.

@@ -49,7 +49,11 @@ function slashKind(code, from = 0) {
 const prog = (logic) => `<program>\n\${\n${logic}\n}\n<p>x</p>\n</program>\n`;
 const TAIL = `\n  const msg = "class Foo { }"`;
 
-const PARSERS = [["default", undefined], ["scrml-native", "scrml-native"]];
+// S449: the second entry was the retired full-pipeline `--parser=scrml-native`
+// flag. The default pipeline decides this code family on the native lexer's
+// token stream, so the default arm exercises the native function on its
+// production path.
+const PARSERS = [["default", undefined]];
 
 describe("lexer — a `/` after a statement closer is a regex", () => {
   const REGEX = [
@@ -93,7 +97,7 @@ describe("lexer — a `/` after a statement closer is a regex", () => {
   });
 });
 
-describe("no E-CLASS-NOT-IN-SCRML inside a later string (both pipelines)", () => {
+describe("no E-CLASS-NOT-IN-SCRML inside a later string (default pipeline, native lexer)", () => {
   const CLEAN = [
     ["if (s) /\"/ (reviewer repro)", `  function f(s) {\n    if (s) /"/.test(s)\n    return 1\n  }`],
     ["if (s) /'/", `  function f(s) {\n    if (s) /'/.test(s)\n    return 1\n  }`],
