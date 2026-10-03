@@ -65,6 +65,44 @@ function getBatchInListCap(): number {
 
 let _variantFields: Map<string, string[]> | null = null;
 let _variantFieldCollisions: Set<string> | null = null;
+/** Names in `_variantFields` that came from an IMPORTED enum (not a local decl). */
+let _importedVariantNames: Set<string> | null = null;
+/** Local variants + ambient ParseError only — the error-envelope registry (see getErrorVariantFieldSchema). */
+let _localVariantFields: Map<string, string[]> | null = null;
+/**
+ * S438 review (N1/N3) — variant names declared BOTH by a file-local enum and by
+ * an imported enum with a DIFFERENT field list. A bare-dot CONSTRUCTOR of such
+ * a name is lowered only where TS typed its position (the `__variantFields`
+ * stamp); anywhere else (a reassignment, a match-arm result, a handler string)
+ * it is E-VARIANT-AMBIGUOUS / left unlowered — never the pre-F11 silent pick
+ * of the local enum, which the matching side (bound against the subject's own
+ * enum) would then contradict. Set on BOTH the client and server passes.
+ */
+let _shadowedVariantNames: Set<string> | null = null;
+/**
+ * S446 — variant names the by-name registries hold ONLY because an IMPORTED
+ * enum declares them (no local enum does). Read by the bare-dot constructor
+ * lowering (emit-expr.ts emitCall): an UNSTAMPED constructor of such a name —
+ * a position TS did not type, whose destination enum codegen cannot see — is
+ * never built by name (`conv(.Neg(6))` with `conv(o: Other)` in another file
+ * and an imported `Expr.Neg(x)` here); it stays unlowered, the pre-F11 loud
+ * failure. The string-rewrite path refuses the same names (they ride its
+ * collision set). Set on BOTH the client and server passes, with the shadowed set.
+ */
+let _importedOnlyVariantNames: Set<string> | null = null;
+
+export function setShadowedVariantNames(names: Set<string> | null, importedOnly?: Set<string> | null): void {
+  _shadowedVariantNames = names && names.size > 0 ? names : null;
+  _importedOnlyVariantNames = importedOnly && importedOnly.size > 0 ? importedOnly : null;
+}
+
+export function isShadowedVariantName(variantName: string): boolean {
+  return _shadowedVariantNames?.has(variantName) ?? false;
+}
+
+export function isImportedOnlyVariantName(variantName: string): boolean {
+  return _importedOnlyVariantNames?.has(variantName) ?? false;
+}
 
 /**
  * §41.13 — the fixed ParseError payload-variant schema. ParseError is imported
@@ -84,9 +122,25 @@ const PARSE_ERROR_VARIANT_FIELDS: ReadonlyArray<readonly [string, string[]]> = [
 export function setVariantFieldsForFile(
   variantFields: Map<string, string[]> | null,
   collisions?: Set<string> | null,
+  importedNames?: Set<string> | null,
 ): void {
   _variantFields = variantFields;
   _variantFieldCollisions = collisions ?? null;
+  _importedVariantNames = importedNames ?? null;
+  // The ERROR-ENVELOPE registry: file-local variants + the compiler-ambient
+  // ParseError schema, WITHOUT imported names (built before the seed below so
+  // an imported same-named variant can never shadow ParseError here).
+  _localVariantFields = null;
+  if (variantFields) {
+    _localVariantFields = new Map();
+    for (const [name, fields] of variantFields) {
+      if (importedNames && importedNames.has(name)) continue;
+      _localVariantFields.set(name, fields);
+    }
+    for (const [name, fields] of PARSE_ERROR_VARIANT_FIELDS) {
+      if (!_localVariantFields.has(name)) _localVariantFields.set(name, [...fields]);
+    }
+  }
   // Seed the ParseError schema for parseVariant binding resolution. Only fill
   // in variants the file does NOT already declare — a file-local enum of the
   // same name always wins (and a genuine cross-enum collision keeps the entry,
@@ -97,6 +151,25 @@ export function setVariantFieldsForFile(
     }
   }
 }
+
+/**
+ * Error-envelope field schema for a variant NAME, for the consumers whose
+ * subject is a failable result / `!{}` handler / `fail` payload and whose error
+ * enum TS did not resolve: file-local enums + the compiler-ambient ParseError
+ * schema (§41.13), never an imported enum's same-named variant. The error type
+ * of a failable call is its DECLARED error enum (or an ambient one — ParseError,
+ * the CPS `NetworkError`/`ServerError`, which have no field schema and bind the
+ * whole `.data`), so a by-name hit on an unrelated imported enum is always
+ * wrong here (S438 review F1). This is exactly the pre-F11 lookup.
+ */
+export function getErrorVariantFieldSchema(variantName: string): string[] | null {
+  if (!_localVariantFields) return null;
+  if (_variantFieldCollisions && _variantFieldCollisions.has(variantName)
+      && !(_importedVariantNames?.has(variantName) ?? false)) return null;
+  return _localVariantFields.get(variantName) ?? null;
+}
+
+
 
 /**
  * Bug 2 (S95) — Lookup helper for the variant payload-field schema. Used by
@@ -1321,6 +1394,25 @@ export interface PayloadBinding {
  * Returns [] for an empty/whitespace-only string.
  * Each element is one comma-separated item. Leading/trailing whitespace is trimmed.
  */
+/**
+ * The payload binding text of a block-bodied arm (`match-arm-block`, ast-builder
+ * Form 1b: `.V(bindings) :> { … }`), in the `parseBindingList` shape.
+ *
+ * The node's raw `binding` (the paren interior, e.g. `e : q`) is authoritative:
+ * it keeps the NAMED form. `payloadBindings` holds only the LOCAL names (`["q"]`
+ * — what the type system scopes into the body), so rebuilding the binding from
+ * it turned every named binding into a POSITIONAL one: dropped when the variant's
+ * field order was unknown, or bound to the WRONG field when the named field was
+ * not the one at that position (g-impl1-match-miscompiles-hit-by-the-bootstrap
+ * F17 — the object-literal arm body is what routes an arm through Form 1b).
+ * `payloadBindings` remains the fallback for a node built without `binding`.
+ */
+export function matchArmBlockBinding(child: any): string | null {
+  if (typeof child?.binding === "string" && child.binding.trim().length > 0) return child.binding;
+  const payloadBindings = Array.isArray(child?.payloadBindings) ? child.payloadBindings : [];
+  return payloadBindings.length > 0 ? payloadBindings.join(", ") : null;
+}
+
 export function parseBindingList(raw: string): PayloadBinding[] {
   if (!raw) return [];
   const result: PayloadBinding[] = [];
@@ -2248,6 +2340,11 @@ function emitMultiScrutineeMatch(
     tagVars.push(tagVar);
   }
 
+  // §18.7 / F11 — per-position TS-resolved subject enums (null = unresolved).
+  const perPositionSubject: Array<SubjectVariantFields | null> = Array.isArray(node.__matchScrutineeVariants)
+    ? node.__matchScrutineeVariants.map((list: any) => getMatchSubjectVariantFields({ __matchSubjectVariants: list }))
+    : [];
+
   const body: any[] = node.body ?? [];
   let conditionIndex = 0;
   for (const child of body) {
@@ -2270,7 +2367,7 @@ function emitMultiScrutineeMatch(
         if (!posArm || posArm.kind === "wildcard") continue; // `_` position: no test.
         conds.push(armCondition(posArm, valVars[i], tagVars[i]));
         if (posArm.kind === "variant") {
-          const prelude = emitVariantBindingPrelude(posArm, valVars[i]);
+          const prelude = emitVariantBindingPrelude(posArm, valVars[i], false, perPositionSubject[i] ?? null);
           if (prelude) preludes.push(prelude);
         }
       }
@@ -2496,18 +2593,10 @@ export function emitMatchExpr(node: any, opts?: any): string {
     // the body emit as unbound JS identifiers → ReferenceError at runtime.
     // (B20 fixed parse + typer for this shape at S69; this closes the CG gap.)
     if (child.kind === "match-arm-block") {
-      const payloadBindings = Array.isArray(child.payloadBindings) ? child.payloadBindings : [];
-      // Prefer the raw paren text (`binding`, ast-builder Form 1b) — it keeps the
-      // `field: local` pairing, so a NAMED binding reads its own field. The local
-      // names alone (`payloadBindings`) are positional: `.W(e: x) :> { x }` bound
-      // `x` to the FIRST field instead of `e` (silent wrong value).
-      const binding = typeof child.binding === "string" && child.binding.trim()
-        ? child.binding
-        : (payloadBindings.length > 0 ? payloadBindings.join(", ") : null);
       const arm: MatchArm = {
         kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
         test: child.variant ?? null,
-        binding,
+        binding: matchArmBlockBinding(child),
         result: "",
         structuredBody: Array.isArray(child.body) ? child.body : null,
       };
@@ -2582,8 +2671,9 @@ export function emitMatchExpr(node: any, opts?: any): string {
   // §19.7 — a match over a failable result ALWAYS needs the discriminator (the
   // success value is bare, so the `::Ok` arm can only be recognized via the
   // `__scrml_error`-sentinel tag).
-  const failableMatch = isFailableOkMatch(arms);
-  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms);
+  const subjectVariants = getMatchSubjectVariantFields(node);
+  const failableMatch = isFailableOkMatch(arms, subjectVariants, isMatchSubjectFailable(node));
+  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms, subjectVariants);
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
 
   const iifeLines: string[] = [];
@@ -2606,7 +2696,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
     // §19.7.3 — the failable-match `::Ok(v)` arm binds `v` to the whole bare
     // success value (not `tmpVar.data.field`).
     const bindingPrelude = arm.kind === "variant"
-      ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok")
+      ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok", subjectVariants, failableMatch)
       : "";
 
     // Structured body: emit each statement via emitLogicNode (handles lift-expr, etc.)
@@ -2723,8 +2813,8 @@ export function emitMatchExpr(node: any, opts?: any): string {
       : inlineEngineWrite
         ? `{ ${bindingPrelude}${inlineEngineWrite.guardLines.join("\n")} }`
         : (bindingPrelude
-            ? `{ ${bindingPrelude}return ${emitExprField(null, arm.result, _matchCtx)}; }`
-            : `return ${emitExprField(null, arm.result, _matchCtx)};`);
+            ? `{ ${bindingPrelude}return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitExprField(null, arm.result, _matchCtx))}; }`
+            : `return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitExprField(null, arm.result, _matchCtx))};`);
 
     if (arm.kind === "wildcard") {
       if (arm.binding) {
@@ -2734,7 +2824,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
           // block-body / errarm-refail re-`fail` cases).
           iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; ${emitResult} }`);
         } else {
-          iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; return ${emitExprField(null, arm.result, _matchCtx)}; }`);
+          iifeLines.push(`  else { const ${arm.binding} = ${tmpVar}; return ${(emitTypedArmResultCtor(arm.result, node, _matchCtx) ?? emitExprField(null, arm.result, _matchCtx))}; }`);
         }
       } else {
         iifeLines.push(`  else ${emitResult}`);
@@ -2951,7 +3041,16 @@ export function armCondition(arm: MatchArm, tmpVar: string, tagVar: string): str
  * list OR the arm has a binding). When true, callers emit the __tag
  * normalization. When false, unit-only / scalar arms can keep plain equality.
  */
-export function hasPayloadBindingOrTaggedVariant(arms: MatchArm[]): boolean {
+export function hasPayloadBindingOrTaggedVariant(
+  arms: MatchArm[],
+  subject?: SubjectVariantFields | null,
+): boolean {
+  // A variant is payload-bearing if the match SUBJECT's enum (TS-resolved,
+  // F16) or the file's variant registry says so. Either source suffices: the
+  // `.variant` normalization is correct for unit values too, so over-including
+  // is safe and under-including is the F16 never-matches miscompile.
+  const isPayload = (t: string): boolean =>
+    (_variantFields?.has(t) ?? false) || (subject?.get(t) != null);
   return arms.some(a => {
     if (a.kind !== "variant") return false;
     if (a.binding) return true;
@@ -2968,10 +3067,78 @@ export function hasPayloadBindingOrTaggedVariant(arms: MatchArm[]): boolean {
     // extracts only when some alternate is a registered PAYLOAD variant (the
     // registry records payload variants only), as for a singleton arm.
     if (a.tests && a.tests.length > 1) {
-      return _variantFields ? a.tests.some(t => _variantFields!.has(t)) : true;
+      return _variantFields ? a.tests.some(t => isPayload(t)) : true;
     }
-    return _variantFields?.has(a.test ?? "") ?? false;
+    return isPayload(a.test ?? "");
   });
+}
+
+/**
+ * §18.7 — the match SUBJECT's enum schema, as stamped on the match node by TS
+ * (`__matchSubjectVariants`, type-system.ts checkMatchDiagnostics): variant name
+ * → declared payload field names in declaration order (`null` for a unit
+ * variant). `null` when TS did not resolve the subject to an enum (a literal /
+ * union / failable match, or a node TS never visited) — callers then fall back
+ * to the by-name file registry.
+ *
+ * This is the authority for positional binding: "Bindings are assigned
+ * left-to-right in the order the fields were declared in the enum definition"
+ * (§18.7) — the subject's enum, local or imported, never whichever same-named
+ * variant the file registry happened to hold
+ * (g-impl1-match-miscompiles-hit-by-the-bootstrap F11/F16).
+ */
+export type SubjectVariantFields = Map<string, string[] | null>;
+
+/** §19.7.1 — TS stamped this match's subject as a failable-call result union. */
+export function isMatchSubjectFailable(node: any): boolean {
+  return node?.__matchSubjectFailable === true;
+}
+/**
+ * §14.10 — lower a match-arm RESULT that is, as a whole, a bare-dot payload
+ * constructor (`.Neg(k)`), against the enum TS stamped as the match VALUE's
+ * declared position type (`__armResultVariants`: the return of a `-> T`
+ * function, a `: T`-annotated let/const initializer). The constructor's ident is
+ * stamped with `T`'s field list and emitted through the ordinary AST path —
+ * the same `__variantFields` lowering every TS-typed position uses — so the
+ * variant is never looked up by name.
+ *
+ * Returns null (caller keeps its existing string lowering) unless: the match
+ * carries the stamp, the result parses to ONE call whose callee is a bare-dot
+ * variant, and `T` declares that variant with a payload. A constructor nested
+ * inside a result (a call argument, a payload argument) is at another position
+ * and is never typed from this stamp.
+ */
+export function emitTypedArmResultCtor(result: string, matchNode: any, ctx: EmitExprContext): string | null {
+  const schema = matchNode?.__armResultVariants;
+  if (!Array.isArray(schema) || schema.length === 0 || typeof result !== "string") return null;
+  const trimmed = result.trim();
+  if (!/^\.\s*[A-Z][A-Za-z0-9_]*\s*\(/.test(trimmed) || !trimmed.endsWith(")")) return null;
+  let node: any = null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { parseExprToNode } = require("../expression-parser.ts") as {
+      parseExprToNode: (r: string, f: string, o: number) => any;
+    };
+    node = parseExprToNode(trimmed, "", 0);
+  } catch { node = null; }
+  if (!node || node.kind !== "call" || !node.callee || node.callee.kind !== "ident") return null;
+  const calleeName: unknown = node.callee.name;
+  if (typeof calleeName !== "string" || !/^\.[A-Z]/.test(calleeName)) return null;
+  const variantName = calleeName.slice(1);
+  const v = schema.find((x: any) => x && x.name === variantName);
+  if (!v || !Array.isArray(v.fields)) return null;
+  node.callee.__variantFields = [...v.fields];
+  return emitExpr(node, ctx);
+}
+
+export function getMatchSubjectVariantFields(node: any): SubjectVariantFields | null {
+  const list = node?.__matchSubjectVariants;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const out: SubjectVariantFields = new Map();
+  for (const v of list) {
+    if (v && typeof v.name === "string") out.set(v.name, Array.isArray(v.fields) ? v.fields : null);
+  }
+  return out;
 }
 
 /**
@@ -2988,8 +3155,24 @@ export function hasPayloadBindingOrTaggedVariant(arms: MatchArm[]): boolean {
  * (it lands in `_variantFields`), so this predicate defers to the regular
  * tagged-object path in that (pathological) collision.
  */
-export function isFailableOkMatch(arms: MatchArm[]): boolean {
-  if (_variantFields?.has("Ok")) return false;
+export function isFailableOkMatch(
+  arms: MatchArm[],
+  subject?: SubjectVariantFields | null,
+  subjectIsFailable?: boolean,
+): boolean {
+  // TS resolved the subject as a failable-call result (§19.7.1 synthetic
+  // `::Ok | <error variants>` union) — failable by construction.
+  if (subjectIsFailable) return true;
+  // A subject TS resolved to an enum that DECLARES `Ok` binds that enum's `Ok`
+  // (a payload `Res.Ok(v)`, or a unit `Status.Ok` — which the failable path
+  // matched for EVERY value, S438 review). A resolved enum WITHOUT `Ok` keeps
+  // the pre-F11 behaviour below (an ill-typed `::Ok` arm over it is not ours
+  // to reinterpret here — S438 review F3).
+  if (subject && subject.has("Ok")) return false;
+  // Only a FILE-LOCAL payload `Ok` claims the name. An imported enum's `Ok`
+  // (now in `_variantFields` too — F11) must not flip every unresolved
+  // `::Ok` match in the importing file off the failable path.
+  if (_variantFields?.has("Ok") && !(_importedVariantNames?.has("Ok") ?? false)) return false;
   return arms.some(a =>
     a.kind === "variant" &&
     (a.test === "Ok" || (Array.isArray(a.tests) && a.tests.includes("Ok"))),
@@ -3015,7 +3198,13 @@ export function emitMatchTagDiscriminator(tmpVar: string, tagVar: string, failab
   return `const ${tagVar} = (${tmpVar} != null && typeof ${tmpVar} === "object") ? ${tmpVar}.variant : ${tmpVar};`;
 }
 
-export function emitVariantBindingPrelude(arm: MatchArm, tmpVar: string, failableOk?: boolean): string {
+export function emitVariantBindingPrelude(
+  arm: MatchArm,
+  tmpVar: string,
+  failableOk?: boolean,
+  subject?: SubjectVariantFields | null,
+  errorContext?: boolean,
+): string {
   if (!arm.binding) return "";
   const bindings = parseBindingList(arm.binding);
   if (bindings.length === 0) return "";
@@ -3035,8 +3224,21 @@ export function emitVariantBindingPrelude(arm: MatchArm, tmpVar: string, failabl
   }
 
   const variantName = arm.test ?? "";
-  const fieldSchema = _variantFields?.get(variantName) ?? null;
-  const ambiguous = _variantFieldCollisions?.has(variantName) ?? false;
+  // The subject's own enum is exact (F11 — covers imported enums and a variant
+  // name two enums share); the by-name registry is the fallback, where a name
+  // declared by two differently-shaped enums stays ambiguous.
+  // In an error context (a failable-result match, TS did not resolve the error
+  // enum) the fallback is the ERROR registry — local + ambient ParseError, never
+  // an unrelated imported enum's same-named variant (S438 review F1).
+  // Error contexts never read the subject: they keep the pre-F11 by-name error
+  // lookup, the same one the `fail` producer uses (S438 review N2).
+  const fromSubject = subject != null && subject.has(variantName) && !errorContext;
+  const fieldSchema = fromSubject
+    ? (subject!.get(variantName) ?? null)
+    : errorContext
+      ? getErrorVariantFieldSchema(variantName)
+      : (_variantFields?.get(variantName) ?? null);
+  const ambiguous = fromSubject || errorContext ? false : (_variantFieldCollisions?.has(variantName) ?? false);
 
   const statements: string[] = [];
   for (let i = 0; i < bindings.length; i++) {

@@ -4,7 +4,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, emitTypedArmResultCtor, matchArmBlockBinding, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
@@ -647,7 +647,13 @@ function emitFailExpr(node: FailExprLike, opts: EmitLogicOpts): string {
     data = "null";
   } else {
     const argParts = _splitTopLevelCommas(rawArgs);
-    const schema = getVariantFieldSchema(variant);
+    // The ERROR registry — exactly the pre-F11 lookup (file-local enums + the
+    // ambient ParseError schema), never an imported enum's same-named variant.
+    // Kept at the pre-F11 shape deliberately: a `fail` of an IMPORTED error enum
+    // stays `.data = <value>` so a reader in another file, which cannot type
+    // the callee's error enum, still agrees with it (S438 review N2; the
+    // field-keyed §51.3.2 shape for imported enums is residual (f)).
+    const schema = getErrorVariantFieldSchema(variant);
     // §51.3.2 / §19.3.2 — the error envelope's `.data` is a field-keyed object
     // whose keys are the variant's DECLARED payload field names, for BOTH single-
     // AND multi-field variants (matching the enum constructor `Shape.Circle(10)`
@@ -850,10 +856,19 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
  *   producer side, which likewise emits the bare `.data` value for a single
  *   unknown-schema arg, keeping the reader and writer in step.
  */
-function emitGuardedArmBinding(binding: string, variantName: string, resultVar: string): string[] {
+function emitGuardedArmBinding(
+  binding: string,
+  variantName: string,
+  resultVar: string,
+): string[] {
   const names = binding.split(",").map((s) => s.trim()).filter((s) => s.length > 0 && s !== "_");
   if (names.length === 0) return [];
-  const schema = variantName ? getVariantFieldSchema(variantName) : null;
+  // S438 review F1 — the ERROR registry: exactly the pre-F11 lookup (local +
+  // ambient ParseError; an ambient CPS `NetworkError`/`ServerError` has no
+  // schema → whole `.data`), never an imported enum's same-named variant, which
+  // the by-name registry now also holds (F11). Same lookup as the `fail`
+  // producer, so producer and reader agree exactly as they did pre-F11.
+  const schema = variantName ? getErrorVariantFieldSchema(variantName) : null;
   if (names.length === 1) {
     // Declared single-field variant → project the field (§51.3.2). No schema
     // (wildcard / ambient variant) → bind the whole `.data` payload.
@@ -5677,13 +5692,13 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       // local list) exactly as the sibling emitter in emit-control-flow.ts does —
       // a hard-coded `null` here emitted NO `const local = …data.field` prelude,
       // so a block arm of `const r = match …` referenced an unbound name.
-      const _pb = Array.isArray(child.payloadBindings) ? child.payloadBindings : [];
+
       arms.push({
         kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
         test: child.variant ?? null,
-        binding: typeof child.binding === "string" && child.binding.trim()
-          ? child.binding
-          : (_pb.length > 0 ? _pb.join(", ") : null),
+        // F17 — a block arm's payload binding (was `null`: every binding of a
+        // block-bodied arm in a `const x = match …` was dropped).
+        binding: matchArmBlockBinding(child),
         result: "",
         structuredBody: Array.isArray(child.body) ? child.body : null,
       });
@@ -5717,8 +5732,10 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   // §19.7 — a match over a failable result ALWAYS needs the discriminator (the
   // success value is bare; the `::Ok` arm is recognized only via the
   // `__scrml_error`-sentinel tag).
-  const failableMatch = isFailableOkMatch(arms);
-  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms);
+  // §18.7 / F11-F16 — bind + tag-compare against the TS-resolved subject enum.
+  const subjectVariants = getMatchSubjectVariantFields(matchExpr);
+  const failableMatch = isFailableOkMatch(arms, subjectVariants, isMatchSubjectFailable(matchExpr));
+  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms, subjectVariants);
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
   if (needsTagNormalization) {
     lines.push(emitMatchTagDiscriminator(tmpVar, tagVar, failableMatch));
@@ -5727,7 +5744,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   // Emit arms as if/else-if chain with tilde assignment
   let conditionIndex = 0;
   for (const arm of arms) {
-    const bindingPrelude = arm.kind === "variant" ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok") : "";
+    const bindingPrelude = arm.kind === "variant" ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok", subjectVariants, failableMatch) : "";
     // Structured body: emit each statement via emitLogicNode (handles lift via tildeContext)
     if (arm.structuredBody) {
       const bodyCode: string[] = [];
@@ -5827,7 +5844,11 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       // the server call(s) here; the enclosing fn is coloured `async` in parallel by
       // the match-arm callee harvest in collectCalleeIdents (emit-library-shared.ts),
       // so the `await` is always legal.
-      const rhs = _awaitMatchArmServerCalls(emitExprField(null, a.result, _makeExprCtx(opts)), opts);
+      // §14.10 — a whole-result bare-dot constructor takes the match VALUE's
+      // declared position type (`const e: Expr = match …`), never a by-name guess.
+      const _armCtx = _makeExprCtx(opts);
+      const rhs = _awaitMatchArmServerCalls(
+        emitTypedArmResultCtor(a.result, matchExpr, _armCtx) ?? emitExprField(null, a.result, _armCtx), opts);
       return `  ${tildeVar} = ${rhs};`;
     };
 

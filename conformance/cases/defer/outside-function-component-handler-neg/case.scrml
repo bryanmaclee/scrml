@@ -1,0 +1,9 @@
+${
+    <trace> = ""
+    function f(x) { @trace = @trace + "f" + x + ";" }
+    const Btn = <button id="go" onclick=${ defer [1].forEach(f) }>Go</>
+}
+<program>
+    <Btn/>
+    <p id="out">${@trace}</p>
+</program>
