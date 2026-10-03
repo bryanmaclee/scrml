@@ -648,8 +648,19 @@ export function fixS66(source, opts = {}) {
   if (enabled.has("pre-migrate")) {
     const pm = applyMigrations(src);
     if (pm.changed) {
-      src = pm.rewritten;
-      applied.push({ rule: "pre-migrate", line: 0, detail: JSON.stringify(pm.migrations) });
+      // The older migrate rules are verified the same way as the structural ones: impl#1 must read
+      // the migrated file with the same codes, aside from the codes those rules exist to clear (incl.
+      // E-DEPRECATED-001, the hard error impl#1 now raises on `<machine>`).
+      const PM_LINTS = new Set(["W-WHITESPACE-001", "W-DEPRECATED-001", "E-DEPRECATED-001", "W-PURE-DEPRECATED", "W-CONST-AT-DEPRECATED"]);
+      const strip = (cs) => cs && cs.filter((c) => !PM_LINTS.has(c));
+      const a = opts.verify === false ? [] : strip(compiledCodes(filePath, src, opts.auxSources));
+      const b = opts.verify === false ? [] : strip(compiledCodes(filePath, pm.rewritten, opts.auxSources));
+      if (a && b && a.join() === b.join()) {
+        src = pm.rewritten;
+        applied.push({ rule: "pre-migrate", line: 0, detail: JSON.stringify(pm.migrations) });
+      } else {
+        blockers.push({ rule: "pre-migrate", line: 0, reason: "the chained `scrml migrate` rewrites change impl#1's reading of this file — not applied", snippet: "" });
+      }
     }
   }
 

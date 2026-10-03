@@ -26,3 +26,18 @@
   Counter: PASS 76 (57 non-vacuous) · FAIL 54 · NOT-TWINNED 475 · UNSUPPORTED 673 · graded 130
   (was PASS 34 (19) · FAIL 18 · LEGACY 951 · graded 52). 619 twins graded.
   3 dialect.s66 excludes (reactive/decl-needs-initializer-{pos,neg,array-pos}: subject is the legacy form).
+- step 5 / verification: meaning preservation MEASURED on the rules impl#1 compiles (pre-migrate,
+  program-wrap, program-move, unwrap-logic): conformance 752 rewritten files → 426 identical normalized
+  impl#1 output + 326 identical except the §65.3.4 reset layer (impl#1 emits it only for a declared
+  <program>) + 0 other; samples/ 764 → 373 + 391 + 0; examples/ 9 → 4 + 5 + 0. Normalization: runtime
+  hash, per-file scope/hash ids, AST-counter id renumbering, source line refs, inter-element whitespace.
+  The first runs found REAL differences, all closed by construction: unwrap now items-only; wrap only
+  with a top-level markup element; every structural rewrite (and pre-migrate) is verified by an impl#1
+  compile and withdrawn on any diagnostic-code change (caught E-OUTLET-OUTSIDE-SHELL, E-LOOP-006,
+  E-FOREIGN-LANG-IN-PROGRAM, E-CTX-001 on spaced `< Account`, recipe-book E-CTX-003).
+  The declaration rules emit §66 openers impl#1 does not implement — not measurable by impl#1; their
+  semantic check is the counter: 27 twins executed the runtime half, 23 hold, the 4 that fail are
+  bootstrap defects (if-chain else-if/else ignored; defer) verified with one-file probes.
+- `scrml fix --dry-run`: conformance/cases 1297 files · 878 would change · 493 with constructs left;
+  samples 877 · 776 · 171; examples 71 · 23 · 48; stdlib 53 · 10 · 22.
+- known-gaps §S449-scrml-fix-s66-twins: 9 gaps filed (2 HIGH: else-if/else ignored; defer).

@@ -145,6 +145,15 @@ describe("§1 rhs-decl", () => {
   });
 });
 
+describe("§1b pre-migrate (the older `scrml migrate` rules, chained and verified)", () => {
+  test("`<machine>` → `<engine>` is chained first, then the engine rule applies", () => {
+    const r = fix(wrapP(`type Phase:enum = { Idle, Busy }\n<machine for=Phase initial=.Idle>\n    <Idle rule=.Busy></>\n    <Busy rule=.Idle></>\n</>\n<p>\${@phase}</p>`));
+    expect(r.applied.map((a) => a.rule)).toContain("pre-migrate");
+    expect(r.output).toContain("<phase:Phase=.Idle single>");
+    expect(r.blockers).toEqual([]);
+  });
+});
+
 describe("§2 const-cell", () => {
   test("annotated derived → locked declaration with a parenthesized reactive initializer (§66.9 rule 7)", () => {
     const out = clean(wrapP(`<a> = 1\nconst <d>: number = @a * 2\nfunction f() { @a = 3 }\n<button onclick=f()>x</button>\n<p>\${@d}</p>`));
