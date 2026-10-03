@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { loadBundle, SELF_HOST_V2 } from "../slice-m1/harness.js";
 import { M2_MODULES } from "../slice-m2/harness.js";
 
-export const CODEC_MODULES = [...M2_MODULES, "codec.scrml"];
+// s451: codec.scrml is in the M1 module set (check + print import it, U5).
+export const CODEC_MODULES = M2_MODULES;
 
 export function loadCodec() {
   return loadBundle(join(SELF_HOST_V2, "slice-codec", "bundle.scrml"), CODEC_MODULES);

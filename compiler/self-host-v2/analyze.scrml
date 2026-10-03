@@ -44,12 +44,13 @@
 ${
     import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
              Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
-             DeclKind, HostCall, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf,
+             DeclKind, HostCall, SeqFn, BindKind, Validator, SurfaceProp, ValidityOf, Persist, PersistStore, CoreProgram,
              mkSym, noGrants, replaceGrant, typeDefSym, validityInst, validityDecl } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, mkSpan } from "./ast.scrml"
+    import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -288,7 +289,12 @@ ${
         novalidate: int[],      // s444 Phase B (RULED S442 (3)): the `<form>` elements the compiler adds `novalidate` to
         resets: ResetOnInfo[],  // s449: the program cells' accepted `reset-on=` rules (§6.8.4)
         gated: GateInfo[],      // s449: the `<form>` elements that bind a surfaced value (§55.7), and the values that gate each (§55.17.3)
+        persists: PersistInfo[], // s451: the program cells' accepted `persist=` (§6.14)
     }
+
+    // s451 — one accepted `persist=` program cell (§6.14): field `sym` of the
+    // program and its storage + key. `lower` sets Core Field.persist from it.
+    export type PersistInfo:struct = { sym: Sym, persist: Persist }
 
     // s449 — a form whose composed subtree binds a value with a surface: its
     // submit sets `submitted` (§55.7). `values`: the bound values that carry
@@ -2100,6 +2106,9 @@ ${
         for (const a of d.mods) {
             if (a.name == "reset-on" && !cell) {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset-on=` on `<" + d.name + ">`, a field of a declaration, is not in the bootstrap — whether a field's `reset-on=` may name a sibling field of the same instance (a per-instance reset) is OPEN (§6.8.4); it is read on a program cell")
+            } else if (isPersistWord(a.name)) {
+                // s451: on a program cell, persistPass reads them (§6.14)
+                if (!cell) st = persistFieldDiag(file, d, a, st)
             } else if (!isKnownOpenerWord(a.name) && a.name.indexOf(":") < 0) {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", unknownOpenerMessage(a.name))
             }
@@ -2120,8 +2129,32 @@ ${
                w == "gte" || w == "lte" || w == "eq" || w == "neq" || w == "oneOf" || w == "notIn"
     }
 
+    // s451 — the `persist=` storage value "session", spelled in pieces: impl#1
+    // (which compiles the bootstrap) escalates a function to the SERVER when
+    // its body holds the word `session` ANYWHERE, string literals included —
+    // route-inference.ts SERVER_ONLY_PATTERNS `/(?<!@)\bsession\b/` is
+    // string-blind (the `print(` and `Bun.*` triggers moved to the AST; this
+    // one did not). Dogfood finding, s451.
+    fn sessionWord() -> string { return "sess" + "ion" }
+
+    // s451 — the §6.14 opener words: `persist=`, `key=` and `prepaint`.
+    fn isPersistWord(w: string) -> boolean {
+        return w == "persist" || w == "key" || w == "prepaint"
+    }
+
+    // s451 — a §6.14 word on a user declaration or on a field of one. §6.14.1
+    // rule 3: "On a §66 declaration it governs the **shared instance only**";
+    // where the attribute sits in a declaration, and per-instance keys, are
+    // OPEN (O-061-9) — refused. `prepaint` with no `persist=` on the same
+    // opener is §6.14.4.2 rule 2's error wherever it is written.
+    fn persistFieldDiag(file: string, d: ADecl, a: AAttr, st: AS) -> AS {
+        if (a.name == "prepaint" && attrNamed(d.mods, "persist") is not) {
+            return addDiag(st, file, a.span, "E-PREPAINT-WITHOUT-PERSIST", "`prepaint` on `<" + d.name + ">`, which has no `persist=` — REFLECT pre-paints a STORED value, so it needs `persist=\"local\"` or `\"" + sessionWord() + "\"` + `key=` on the same cell (§6.14.4.2 rule 2)")
+        }
+        return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` on `<" + d.name + ">`, a declaration or a field of one, is not in the bootstrap — on a §66 declaration `persist=` governs the shared instance only (§6.14.1 rule 3), and its position there and per-instance keys are OPEN (O-061-9); the bootstrap persists a program cell, `let <x:T=v persist=\"local\" key=\"app.x\"/>`")
+    }
+
     fn unknownOpenerMessage(w: string) -> string {
-        if (w == "persist" || w == "key") return "`" + w + "=` on a declaration — §6.14 persist= is not in the bootstrap yet"
         return "`" + w + "` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement"
     }
 
@@ -10429,6 +10462,302 @@ ${
         return false
     }
 
+    // =========================================================================
+    // s451 — `persist="local" | "session"` + `key=` (SPEC §6.14) on a PROGRAM
+    // cell — the §6.8.4 opener position: "In the §66 opener it is a
+    // **modifier** — the same class as `debounced=` (§6.13), `persist=` (§6.14)
+    // and validators". Governing sentences and every refusal's search are in
+    // docs/changes/s451-boot-u5-persist/progress.md. Codes:
+    //   E-PERSIST-STORAGE-UNKNOWN  §6.14.1 r1 — a value other than "local" / "session"
+    //   E-PERSIST-KEY-REQUIRED     §6.14.1 r2 — `persist=` without `key=`
+    //   E-PERSIST-WITH-SERVER      §6.14.3 r3 — `server` on the same cell
+    //   E-PREPAINT-WITHOUT-PERSIST §6.14.4.2 r2 — `prepaint` without `persist=`
+    //   E-HOLD-WITHOUT-PERSIST     §6.14.4.3 r2 — `hold=@x` naming no `persist=` cell
+    // Refused (E-BOOTSTRAP-UNSUPPORTED), never accepted-and-ignored: `prepaint`
+    // and `hold=` on a persisted cell (no pre-paint script); a computed `key=`
+    // (O-061-9); a locked or derived cell (O-061-10); `"local"` on a cell whose
+    // contract refuses a whole-value write, and a `"local"` cell as a
+    // `reset-on=` trigger (O-061-5; §6.8.4 rule 7); a type with no §57 wire
+    // descriptor or holding a FIXED-length sequence; two cells sharing one
+    // storage + key; `key=` without `persist=`.
+    // E-PERSIST-LIN / -REVEALED cannot be written in the bootstrap (no `lin`
+    // cell, no `reveal`); E-PERSIST-DRAFT-OVERWRITTEN needs `<request>` (refused).
+    // =========================================================================
+    type RPersists:struct = { infos: PersistInfo[], st: AS }
+    type RPersist:struct = { info: PersistInfo | not, st: AS }
+
+    fn persistPass(g: Globals, files: FileAst[], st0: AS) -> RPersists {
+        let st: AS = st0
+        const prog: DeclSrc | not = findDeclSrc(g, g.program)
+        if (prog is not) return { infos: [], st: st }
+        const p: AProgram | not = prog.p
+        if (p is not) return { infos: [], st: st }
+        const errs: ASpan[] = fileErrs(files, prog.file)
+        let infos: PersistInfo[] = []
+        // every program cell that WRITES `persist=` (accepted or not) — what `hold=` names
+        let declared: string[] = []
+        for (const it of p.items) {
+            for (const d of declsOfItem(it)) {
+                if (!isNestedUserDecl(d) && !hasErrIn(errs, d.span)) {
+                    if (attrNamed(d.mods, "persist") is some) declared = declared.concat([d.name])
+                    const r: RPersist = persistOf(g, prog, d, st)
+                    st = r.st
+                    const pi: PersistInfo | not = r.info
+                    if (pi is some) {
+                        const other: string = keyHolder(infos, pi.persist)
+                        if (other != "") {
+                            st = addDiag(st, prog.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + d.name + "` and `@" + other + "` persist under the same key \"" + pi.persist.key + "\" in the same storage — each would restore and overwrite the other's value; the SPEC names no code for it (`key=` is \"an external storage contract\", §6.14.1 rule 2), so the bootstrap refuses it — give each cell its own key")
+                        } else {
+                            infos = infos.concat([pi])
+                        }
+                    }
+                }
+            }
+        }
+        // §6.8.4 rule 7: "whether a cross-tab `storage`-event write to a
+        // trigger is a change follows O-061-5" (OPEN) — refused.
+        for (const it of p.items) {
+            for (const d of declsOfItem(it)) {
+                if (!isNestedUserDecl(d)) {
+                    for (const a of d.mods) {
+                        if (a.name == "reset-on") st = syncedTriggerDiags(prog.file, d, a, infos, st)
+                    }
+                }
+            }
+        }
+        st = holdDiags(files, declared, st)
+        return { infos: infos, st: st }
+    }
+
+    fn syncedTriggerDiags(file: string, d: ADecl, a: AAttr, infos: PersistInfo[], st0: AS) -> AS {
+        let st: AS = st0
+        const es: AExpr[] | not = resetEntries(a.value)
+        if (es is not) return st
+        for (const x of es) {
+            const n: string = atName(x)
+            if (n != "" && isSyncedCell(infos, n)) {
+                st = addDiag(st, file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "`reset-on=` on `@" + d.name + "` lists `@" + n + "`, a `persist=\"local\"` cell another tab can write — whether that cross-tab write is a change that resets `@" + d.name + "` is OPEN (§6.8.4 rule 7, O-061-5); use `persist=\"" + sessionWord() + "\"` (no cross-tab sync) or drop the entry")
+            }
+        }
+        return st
+    }
+
+    fn isSyncedCell(infos: PersistInfo[], name: string) -> boolean {
+        for (const i of infos) {
+            if (i.sym.hint == name && i.persist.store == PersistStore.Local) return true
+        }
+        return false
+    }
+
+    // The cell already persisted under `ps`'s storage + key ("" — none).
+    fn keyHolder(infos: PersistInfo[], ps: Persist) -> string {
+        for (const i of infos) {
+            if (i.persist.key == ps.key && i.persist.store == ps.store) return i.sym.hint
+        }
+        return ""
+    }
+
+    fn persistOf(g: Globals, prog: DeclSrc, d: ADecl, st0: AS) -> RPersist {
+        let st: AS = st0
+        const pm: AAttr | not = attrNamed(d.mods, "persist")
+        const km: AAttr | not = attrNamed(d.mods, "key")
+        const pp: AAttr | not = attrNamed(d.mods, "prepaint")
+        if (pm is not) {
+            if (pp is some) st = addDiag(st, prog.file, pp.span, "E-PREPAINT-WITHOUT-PERSIST", "`prepaint` on `@" + d.name + "`, which has no `persist=` — REFLECT pre-paints a STORED value, so it needs `persist=\"local\"` or `\"" + sessionWord() + "\"` + `key=` on the same cell (§6.14.4.2 rule 2)")
+            if (km is some) st = addDiag(st, prog.file, km.span, "E-BOOTSTRAP-UNSUPPORTED", "`key=` on `@" + d.name + "`, which has no `persist=` — a storage key means nothing without a storage; add `persist=\"local\"` or `\"" + sessionWord() + "\"` (§6.14.1)")
+            return { info: not, st: st }
+        }
+        let ok = true
+        const store: PersistStore | not = storeOf(pm.value)
+        if (store is not) {
+            st = addDiag(st, prog.file, pm.span, "E-PERSIST-STORAGE-UNKNOWN", "`persist=` takes \"local\" (localStorage) or \"" + sessionWord() + "\" (sessionStorage) — " + storeText(pm.value) + " is neither (§6.14.1 rule 1; \"cookie\" is deferred, and IndexedDB is a planned stdlib addition, not a `persist=` value)")
+            ok = false
+        }
+        let key: string = ""
+        if (km is not) {
+            st = addDiag(st, prog.file, pm.span, "E-PERSIST-KEY-REQUIRED", "`persist=` on `@" + d.name + "` has no `key=` — the storage key is an external contract the author writes, never derived from the cell's name (a rename would silently drop every user's saved value): add `key=\"app." + d.name + "\"` or similar (§6.14.1 rule 2)")
+            ok = false
+        } else {
+            const kv: string | not = quotedOf(km.value)
+            if (kv is not) {
+                st = addDiag(st, prog.file, km.span, "E-BOOTSTRAP-UNSUPPORTED", "a computed `key=` on `@" + d.name + "` is not in the bootstrap — a per-instance key expression is OPEN (O-061-9); write the key as a quoted string")
+                ok = false
+            } else {
+                key = kv
+            }
+        }
+        const sv: AAttr | not = attrNamed(d.mods, "server")
+        if (sv is some) {
+            st = addDiag(st, prog.file, pm.span, "E-PERSIST-WITH-SERVER", "`persist=` on `@" + d.name + "`, a server-authority cell — it is already durable, and browser persistence is legal only where authority is local (§6.14.3 rule 3)")
+            ok = false
+        }
+        if (pp is some) {
+            st = addDiag(st, prog.file, pp.span, "E-BOOTSTRAP-UNSUPPORTED", "`prepaint` (REFLECT, §6.14.4.2) is not in the bootstrap — it emits no pre-paint script; drop `prepaint` (the cell restores when the client runs, §6.14.2 rule 7)")
+            ok = false
+        }
+        const i: int = fieldIndex(prog.info, d.name)
+        if (i < 0) return { info: not, st: st }
+        const f: FieldInfo = prog.info.fields[i]
+        const why: string = persistCellProblem(g, f, store, st)
+        if (why != "") {
+            st = addDiag(st, prog.file, pm.span, "E-BOOTSTRAP-UNSUPPORTED", "`persist=` on `@" + d.name + "` — " + why)
+            ok = false
+        }
+        if (!ok) return { info: not, st: st }
+        if (store is some) return { info: { sym: f.sym, persist: { store: store, key: key } }, st: st }
+        return { info: not, st: st }
+    }
+
+    // Why the bootstrap refuses to persist `f` ("" — it does not).
+    fn persistCellProblem(g: Globals, f: FieldInfo, store: PersistStore | not, st: AS) -> string {
+        const m: FieldMode = f.mode
+        if (f.wcap is not) {
+            return match m {
+                .Derived :> "a DERIVED cell (its value is computed); persisting one is OPEN (O-061-10)"
+                .Locked :> "a LOCKED cell never changes, and no rule says what a restore does to one; make it writable (`let`)"
+                .Let :> "a cell whose contract grants no write"
+                .Seeded :> "a cell whose contract grants no write"
+            }
+        }
+        if (store is some && store == PersistStore.Local && (f.graph is some || !f.grants.replace)) {
+            return "another tab's value reaches a `persist=\"local\"` cell as one whole-value write, and this cell's contract refuses one (" + contractText(f) + ") — whether its contract judges that write or it is applied like a restore is OPEN (O-061-5); use `persist=\"" + sessionWord() + "\"` (no cross-tab sync)"
+        }
+        // r8: an unresolved type is never checked against
+        if (st.bad.fields.indexOf(f.sym.id) >= 0) return ""
+        const wb: WireBuild = wireBuild(typesProgram(g), f.ty)
+        const wt: WireTable | not = wb.table
+        if (wt is not) return "its type has no §57 wire form in the bootstrap codec: " + wb.why.join("; ")
+        if (hasFixedLength(wt)) return "its type holds a FIXED-length sequence — the length is fixed by construction, and no rule says whether a restored value may bring another length"
+        return ""
+    }
+
+    fn contractText(f: FieldInfo) -> string {
+        if (f.graph is some) return "a `rule=` graph"
+        return "no `replace` grant"
+    }
+
+    // The program's type definitions as a CoreProgram — all the codec reads.
+    fn typesProgram(g: Globals) -> CoreProgram {
+        let defs: TypeDef[] = []
+        for (const t of g.types) { defs = defs.concat([t.def]) }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [] }
+    }
+
+    fn storeOf(v: AAttrValue) -> PersistStore | not {
+        const s: string | not = quotedOf(v)
+        if (s is not) return not
+        if (s == "local") return PersistStore.Local
+        if (s == sessionWord()) return PersistStore.Session
+        return not
+    }
+
+    fn quotedOf(v: AAttrValue) -> string | not {
+        return match v {
+            .Quoted(v: s) :> s
+            .Bare(e: e) :> not
+            .Paren(e: e) :> not
+            .NoValue :> not
+            .Braced(b: b) :> not
+        }
+    }
+
+    fn storeText(v: AAttrValue) -> string {
+        return match v {
+            .Quoted(v: s) :> "\"" + s + "\""
+            .Bare(e: e) :> "an unquoted value"
+            .Paren(e: e) :> "a computed value"
+            .NoValue :> "no value"
+            .Braced(b: b) :> "a block"
+        }
+    }
+
+    // §6.14.4.3 rule 2 — `hold=@cell`, wherever markup is written. A cell's
+    // own declaration's fields shadow program cells of the same name.
+    fn holdDiags(files: FileAst[], declared: string[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const f of files) {
+            for (const it of f.items) { st = holdInItem(f.path, it, declared, [], st) }
+        }
+        return st
+    }
+
+    fn holdInItem(file: string, it: AItem, declared: string[], shadow: string[], st0: AS) -> AS {
+        let st: AS = st0
+        const k: AItemK = it.k
+        const ns: ANode[] = match k {
+            .MarkupItem(n: n) :> [n]
+            .ImportItem(i: i) :> []
+            .TypeItem(t: t) :> []
+            .FnItem(f: f) :> []
+            .DeclItem(d: d) :> []
+            .ProgramItem(p: p) :> []
+        }
+        for (const n of ns) { st = holdInNode(file, n, declared, shadow, st) }
+        for (const d of declsOfItem(it)) { st = holdInDecl(file, d, declared, shadow, st) }
+        const ps: AItem[] = match k {
+            .ProgramItem(p: p) :> p.items
+            .MarkupItem(n: n) :> []
+            .ImportItem(i: i) :> []
+            .TypeItem(t: t) :> []
+            .FnItem(f: f) :> []
+            .DeclItem(d: d) :> []
+        }
+        for (const x of ps) { st = holdInItem(file, x, declared, shadow, st) }
+        return st
+    }
+
+    fn holdInDecl(file: string, d: ADecl, declared: string[], shadow0: string[], st0: AS) -> AS {
+        let st: AS = st0
+        let shadow: string[] = shadow0
+        if (isNestedUserDecl(d)) {
+            for (const a of d.attrs) { shadow = shadow.concat([a.name]) }
+            for (const c of childFields(d.body)) { shadow = shadow.concat([c.name]) }
+        }
+        const r: AElem | not = d.renders
+        if (r is some) st = holdInElem(file, r, declared, shadow, st)
+        for (const c of d.body) {
+            const ch: ADeclChild = c
+            const kids: ANode[] = match ch {
+                .ChildField(d: x) :> []
+                .StateChild(s: s) :> s.body
+            }
+            for (const n of kids) { st = holdInNode(file, n, declared, shadow, st) }
+        }
+        for (const c of childFields(d.body)) { st = holdInDecl(file, c, declared, shadow, st) }
+        return st
+    }
+
+    fn holdInNode(file: string, n: ANode, declared: string[], shadow: string[], st: AS) -> AS {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> holdInElem(file, e, declared, shadow, st)
+            .DeclNode(d: d) :> holdInDecl(file, d, declared, shadow, st)
+            .Text(text: t) :> st
+            .Interp(e: x) :> st
+            .Effect(w: w) :> st
+        }
+    }
+
+    fn holdInElem(file: string, e: AElem, declared: string[], shadow: string[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const a of e.attrs) {
+            if (a.name == "hold") st = holdAttrDiag(file, a, declared, shadow, st)
+        }
+        for (const n of e.kids) { st = holdInNode(file, n, declared, shadow, st) }
+        return st
+    }
+
+    fn holdAttrDiag(file: string, a: AAttr, declared: string[], shadow: string[], st: AS) -> AS {
+        const x: AExpr | not = valueExpr(a.value)
+        let n: string = ""
+        if (x is some) n = atName(x)
+        if (n == "") return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`hold=` takes one persisted cell, `hold=@cell` — any other operand form is OPEN (O-062-10)")
+        if (declared.indexOf(n) >= 0 && shadow.indexOf(n) < 0) {
+            return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`hold=@" + n + "` (HOLD, §6.14.4.3) is not in the bootstrap — it emits no pre-paint script, so nothing would be held; drop `hold=` (the region shows the default until the client restores `@" + n + "`, §6.14.2 rule 7)")
+        }
+        return addDiag(st, file, a.span, "E-HOLD-WITHOUT-PERSIST", "`hold=@" + n + "` — `@" + n + "` is not a `persist=` cell, and a region is held only until a STORED value is restored (§6.14.4.3 rule 2); a general \"cloak until rendered\" marker is not this attribute")
+    }
+
     // s449: an effect at FILE level (outside `<program>`) has no element scope to
     // own it — refused, never silently dropped (no pass reaches file-level markup).
     fn strayEffects(files: FileAst[], st0: AS) -> AS {
@@ -10474,6 +10803,8 @@ ${
         st = strayEffects(files, st)
         const rr: RResets = resetOnPass(ra.g, st)
         st = rr.st
+        const rp: RPersists = persistPass(ra.g, files, st)
+        st = rp.st
         let decls: DeclInfo[] = []
         for (const d of ra.g.decls) { decls = decls.concat([d.info]) }
         let fns: FnInfo[] = []
@@ -10485,7 +10816,7 @@ ${
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
-                                novalidate: [], resets: rr.infos, gated: [] }
+                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos }
         const scopeDiags: Diag[] = checkScopes(files, bound)
         // s449: the no-write rule over every accepted effect (§6.7.4)
         const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects)
@@ -10495,7 +10826,7 @@ ${
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
-                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated }
+                            novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists }
         return { files: files, tables: t, diags: st.diags.concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags),
                  infos: gatedInfos(vp.gated) }
     }

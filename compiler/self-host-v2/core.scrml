@@ -272,6 +272,13 @@ ${
         // (§19.16.2). A Defer stands only in a function body, and its body holds
         // no Return / Defer / Suspend (check.scrml C16; §19.16.3 rules 1-2).
         Defer(body: Block),
+        // s451 — the storage half of `reset(@x)` on a `persist=` field
+        // (§6.14.2 rule 9: the reset "SHALL write the reset value to the cell
+        // … and SHALL **remove** the cell's storage key instead of storing
+        // that value"). It follows the reset's Write (and its ResetSurface)
+        // of that same field: the key is removed and the store the Write
+        // queued is cancelled. Writes no cell (check.scrml C16).
+        Unpersist(decl: Sym, inst: InstRef, idx: int),
     }
     export type Block:struct = { stmts: Stmt[] }
 
@@ -378,6 +385,16 @@ ${
     export type Edge:struct = { origin: int, targets: int[] }
     export type TransitionGraph:struct = { enumSym: Sym, edges: Edge[] }
 
+    // s451 — `persist="local" | "session"` + `key=` (§6.14): browser
+    // persistence is a LIFETIME property of a client-owned cell (§6.14 — not a
+    // §52 authority value). `Local` = Web localStorage (restored, written on
+    // change, synced across tabs — §6.14.2 rules 1-5), `Session` = Web
+    // sessionStorage (no cross-tab sync, rule 5). `key` is the author's
+    // external storage contract (§6.14.1 rule 2 — never derived). The value is
+    // encoded / decoded with the §57 codec against the field's type (codec.scrml).
+    export type PersistStore:enum = { Local, Session }
+    export type Persist:struct = { store: PersistStore, key: string }
+
     // `init` is `not` for an attribute declared without a default (O33).
     export type Field:struct = {
         sym: Sym,
@@ -391,6 +408,9 @@ ${
         wcap: Sym | not,
         // s449: the validators the field carries (§55.1), in declaration order.
         vals: Validator[],
+        // s451: its browser persistence (§6.14) — only on a field of the
+        // PROGRAM that has a write capability (check.scrml C16).
+        persist: Persist | not,
     }
 
     export type DeclKind:enum = { Program, User, Predefined }

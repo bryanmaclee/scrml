@@ -154,17 +154,17 @@ ${
         const fLabel: Field = {
             sym: sLabel, ty: Type.Str, init: not,                          // ⚑ O33
             mode: FieldMode.Locked, role: FieldRole.Attribute, grants: noGrants(),
-            graph: not, exported: false, wcap: not, vals: [],
+            graph: not, exported: false, wcap: not, vals: [], persist: not,
         }
         const fOptions: Field = {
             sym: sOptions, ty: fixedSeq(Type.Str), init: not,              // ⚑ O33
             mode: FieldMode.Locked, role: FieldRole.Attribute, grants: noGrants(),
-            graph: not, exported: false, wcap: not, vals: [],
+            graph: not, exported: false, wcap: not, vals: [], persist: not,
         }
         const fValue: Field = {
             sym: sValue, ty: Type.Str, init: litStr(""),
             mode: FieldMode.Let, role: FieldRole.Child, grants: replaceGrant(),      // a child since S447 (§66.4 rule 6)
-            graph: not, exported: true, wcap: wValue, vals: [],
+            graph: not, exported: true, wcap: wValue, vals: [], persist: not,
         }
         const fOpen: Field = {
             sym: sOpen, ty: Type.Named(sOpenness), init: litVariant(sOpenness, CLOSED),
@@ -174,7 +174,7 @@ ${
                 { origin: CLOSED, targets: [OPENED] },
                 { origin: OPENED, targets: [CLOSED] },
             ] },
-            exported: true, wcap: wOpen, vals: [],
+            exported: true, wcap: wOpen, vals: [], persist: not,
         }
 
         const readOpen: Expr = readField(sDropdown, here, OPEN)
@@ -234,19 +234,19 @@ ${
         let fLines: Field = {
             sym: sLines, ty: fixedSeq(Type.Named(sLine)), init: initLines,
             mode: FieldMode.Locked, role: FieldRole.Child, grants: noGrants(),
-            graph: not, exported: false, wcap: not, vals: [],
+            graph: not, exported: false, wcap: not, vals: [], persist: not,
         }
         if (reorderable) {
             fLines = {
                 sym: sLines, ty: fixedSeq(Type.Named(sLine)), init: initLines,
                 mode: FieldMode.Locked, role: FieldRole.Child, grants: replaceGrant(),
-                graph: not, exported: false, wcap: wLines, vals: [],
+                graph: not, exported: false, wcap: wLines, vals: [], persist: not,
             }
         }
         const fShowColor: Field = {
             sym: sShowColor, ty: Type.Bool, init: litBool(false),
             mode: FieldMode.Let, role: FieldRole.Child, grants: replaceGrant(),
-            graph: not, exported: false, wcap: wShowColor, vals: [],
+            graph: not, exported: false, wcap: wShowColor, vals: [], persist: not,
         }
 
         const qtyValue: Expr = Expr.Read(Place.Cell(sDropdown, InstRef.Alias(hQty), [{ owner: sDropdown, idx: VALUE }]))
@@ -330,7 +330,7 @@ ${
             programFields = programFields.concat([{
                 sym: sFirstCountry, ty: Type.Str, init: call0(sCountryValue),
                 mode: FieldMode.Seeded, role: FieldRole.Child, grants: replaceGrant(),
-                graph: not, exported: false, wcap: wFirstCountry, vals: [],
+                graph: not, exported: false, wcap: wFirstCountry, vals: [], persist: not,
             }])
         }
 

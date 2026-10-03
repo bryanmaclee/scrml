@@ -30,14 +30,14 @@
 ${
     import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
-             GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf,
+             GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
              block, litStr } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag,
              mkSpan } from "./ast.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair, ValInfo, GateInfo,
-             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo,
+             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest } from "./analyze.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
@@ -839,7 +839,7 @@ ${
         const di: DeclInfo | not = declInfo(c.t, d)
         if (di is not) return []
         const target: InstRef = instOf(c, w.inst)
-        const surf: Stmt[] = surfaceReset(di, target, idx)
+        const surf: Stmt[] = surfaceReset(di, target, idx).concat(unpersistReset(c.t, di, target, idx))
         if (!isProgramKind(di.kind)) return [Stmt.Write(w.cap, target, w.edit, Expr.InitOf(d, target, idx), w.check)].concat(surf)
         const ic: LC = { t: c.t, file: c.file, subst: target, snap: not }
         const init: Expr | not = lowerValue(ic, di.fields[idx].init)
@@ -884,7 +884,7 @@ ${
         if (init is not) return []
         let edit: EditKind = EditKind.Replace
         if (f.graph is some) edit = EditKind.Transition
-        return [Stmt.Write(cap, InstRef.Lexical(0), edit, init, Check.Static)].concat(surfaceReset(d, InstRef.Lexical(0), idx))
+        return [Stmt.Write(cap, InstRef.Lexical(0), edit, init, Check.Static)].concat(surfaceReset(d, InstRef.Lexical(0), idx)).concat(unpersistReset(c.t, d, InstRef.Lexical(0), idx))
     }
 
     fn isProgramKind(k: DeclKind) -> boolean {
@@ -1350,7 +1350,25 @@ ${
         return {
             sym: f.sym, ty: f.ty, init: lowerValue(c, f.init), mode: f.mode, role: f.role,
             grants: f.grants, graph: f.graph, exported: f.exported, wcap: f.wcap, vals: valCores(f.vals),
+            persist: persistOf(c.t, f.sym),
         }
+    }
+
+    // s451 — the field's accepted `persist=` (§6.14; analyze persistPass).
+    fn persistOf(t: Tables, s: Sym) -> Persist | not {
+        for (const p of t.persists) {
+            if (p.sym.id == s.id) return p.persist
+        }
+        return not
+    }
+
+    // s451 — §6.14.2 rule 9: a reset of a persisted field "SHALL **remove** the
+    // cell's storage key instead of storing that value" — an Unpersist after
+    // the reset's Write (and its ResetSurface).
+    fn unpersistReset(t: Tables, di: DeclInfo, inst: InstRef, idx: int) -> Stmt[] {
+        if (idx < 0 || idx >= di.fields.length) return []
+        if (persistOf(t, di.fields[idx].sym) is not) return []
+        return [Stmt.Unpersist(di.sym, inst, idx)]
     }
 
     // s449 — the field's validators as Core carries them (§55.1, declaration order).

@@ -64,6 +64,7 @@ ${
             .Suspend(bind: x) :> "Suspend"
             .ResetSurface(of: x) :> "ResetSurface"
             .Defer(body: x) :> "Defer"
+            .Unpersist(decl: x) :> "Unpersist"
         }
     }
 
