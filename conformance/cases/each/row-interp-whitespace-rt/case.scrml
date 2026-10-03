@@ -1,0 +1,9 @@
+${
+    <rows> = [{ id: 1, f: "Peter", l: "Oliver" }, { id: 2, f: "Ada", l: "Lovelace" }]
+}
+<table id="t"><tbody>
+    <each in=@rows key=@.id as r>
+        <tr class="row"><td class="name">${r.f} ${r.l}</td><td class="tags"><b>${r.f}</b> <i>${r.l}</i></td></tr>
+    </each>
+</tbody></table>
+<ul id="list"><each in=@rows key=@.id as r><li class="item">${r.l}, ${r.f}</li></each></ul>

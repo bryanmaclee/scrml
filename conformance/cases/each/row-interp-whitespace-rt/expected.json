@@ -1,0 +1,17 @@
+{
+  "id": "each-row-interp-whitespace-rt",
+  "description": "§4.18.5 — inside an <each> row, the whitespace-only text between two adjacent interpolations (`${r.f} ${r.l}`) and between two sibling elements (`<b>…</b> <i>…</i>`) is content of the row element's free-text body and renders. impl#1 dropped every whitespace-only run in a row body (emit-each.ts renderTemplateChildToJs), so the rows rendered `PeterOliver` / `AdaLovelace` while the same markup outside <each> rendered correctly. Adopter-reported (assetManagement).",
+  "language-version": "1.0",
+  "spec": "§4.18.5",
+  "rationale": "§4.18.5: \"No stage SHALL collapse runs, strip leading or trailing whitespace, or drop the whitespace adjacent to a `${…}` interpolation.\" and \"Whitespace-only text between elements is kept exactly too … SHALL NOT be dropped or normalized.\" A per-item `<tr>`/`<td>`/`<li>` is a plain-markup element, so its body is a free-text body (§4.18.1; §17.7.7: <each> per-item bodies inherit the classification of their element kind).",
+  "expect": {
+    "codes": [],
+    "domAnchored": [
+      { "selector": "#t tr.row", "count": 2 },
+      { "selector": "#t td.name", "text": "Peter Oliver" },
+      { "selector": "#t td.tags", "text": "Peter Oliver" },
+      { "selector": "#list li.item", "count": 2 },
+      { "selector": "#list li.item", "text": "Oliver, Peter" }
+    ]
+  }
+}
