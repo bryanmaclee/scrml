@@ -29,3 +29,8 @@
 - phase 3: §66.20 rows for the three S447 codes → "Nominal on impl#1; the bootstrap emits it"; §66.21 tense.
   `<let/>` no longer recovers as a nameless declaration (no cascade). known-gaps: parser gap RESOLVED (items
   1, 2, 4); filed SF3 (typer), the SPEC `on`-field contradiction, and the unnamed `export`-alone code.
+- phase 4 (bryan S449 rulings on top of frozen 873367d0c): (1) `on` = (a): §66.2.5 + §66.4 rule 6 examples
+  re-spelled `checked`, note after the amendment; PRIMER + parse.scrml comment too; §66.19 re-sync = no change;
+  gap closed. (2) prose = (b): parseKids (free text) no longer reports keywords — they are text; parseCodeBody
+  (state-child bodies) still E-DECL-KEYWORD-NOT-ITEM. SPEC §66.0 row / §66.2.5 / §66.5.4 O38 / §66.20 row amended
+  with S449 item 2 provenance. Tests: parse.test (prose AST + code-default BITE), core-additions (prose renders).

@@ -447,3 +447,14 @@ describe("4c — lambdas as the argument of `.filter` / `.map` (Expr.Lambda, Exp
     expect(codes(P(`    let <n:int=0/>\n    function f() -> int { return @n.filter(x => true).length }`, `        <p>x</p>`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
 });
+
+// S449 ruling item 2 (§66.2.5, narrowed): in a FREE-TEXT body `let` / `export` before a tag are prose.
+describe("S449 — opener keywords in free text are prose; a real declaration still parses", () => {
+  test("`<p>Please let <b>me</b> know</p>` and `<p>You can export <a …>a CSV</a></p>` compile and render the words", async () => {
+    const src = P("    let <n:int=0/>", `        <p>Please let <b>me</b> know</p>\n        <p>You can export <a href="/x">a CSV</a></p>\n        <p>\${@n}</p>`);
+    await loadProgram(coreOf(src), "prose-keywords");
+    expect(texts("main > p")).toEqual(["Please let me know", "You can export a CSV", "0"]);
+    expect($("main > p > b").textContent).toBe("me");
+    expect($("main > p > a").getAttribute("href")).toBe("/x");
+  });
+});

@@ -218,11 +218,23 @@ describe("parse — S447 opener keywords (§66.2.5)", () => {
     expect(codes("<program>\n    let <email:string=\"\" req/>\n    renders <input type=\"email\" bind:value=@email/>\n</program>")).toEqual([]);
   });
 
-  test("BITE — `let` / `export` before a tag in a MARKUP body is E-DECL-KEYWORD-NOT-ITEM, never text", () => {
-    expect(codes("<program>\n    <main>let <y:int=0/></main>\n</program>")).toContain("E-DECL-KEYWORD-NOT-ITEM");
-    expect(codes("<program>\n    <main><p>x</p> export let <y:int=0/></main>\n</program>")).toContain("E-DECL-KEYWORD-NOT-ITEM");
-    // a word that merely ENDS in "let" is text
-    expect(codes("<program>\n    <main><p>outlet <b>x</b></p></main>\n</program>")).toEqual([]);
+  // S449 ruling item 2 (§66.2.5, narrowed): in a FREE-TEXT body the words are text; only a CODE-DEFAULT body
+  // that is not an item position (an engine state-child body) reports the misplaced keyword.
+  test("free-text bodies: `let` / `export` before a tag are TEXT (S449) — the words are kept, the tag is an element", () => {
+    const r = parse("t.scrml", "<program>\n    <main><p>Please let <b>me</b> know</p><p>You can export <a href=\"/x\">a CSV</a></p></main>\n</program>");
+    expect(r.diags).toEqual([]);
+    const main = r.ast.items[0].k.data.p.items[0].k.data.n.k.data.e;
+    const ps = main.kids.map((k) => k.k.data.e);
+    expect(ps[0].kids.map((k) => k.k.variant === "Text" ? k.k.data.text : "<" + k.k.data.e.tag + ">")).toEqual(["Please let ", "<b>", " know"]);
+    expect(ps[1].kids.map((k) => k.k.variant === "Text" ? k.k.data.text : "<" + k.k.data.e.tag + ">")).toEqual(["You can export ", "<a>"]);
+  });
+
+  test("BITE — `let` / `export` before a tag in a CODE-DEFAULT body (an engine state-child) is E-DECL-KEYWORD-NOT-ITEM", () => {
+    const eng = (body) => "<program>\n    type Phase:enum = { Idle, Busy }\n    <phase:Phase=.Idle single>\n        <Idle rule=.Busy>" + body + "</>\n        <Busy rule=.Idle/>\n    </>\n</program>";
+    expect(codes(eng("let <y:int=0/>"))).toContain("E-DECL-KEYWORD-NOT-ITEM");
+    expect(codes(eng("export let <y:int=0/>"))).toContain("E-DECL-KEYWORD-NOT-ITEM");
+    // a word that merely ENDS in "let" is not the keyword
+    expect(codes(eng("outlet <b>x</b>"))).not.toContain("E-DECL-KEYWORD-NOT-ITEM");
   });
 
   test("BITE — the marker comes from the opener alone: `let <signup>` (no own value, no typed attribute) is not a declaration (SF2)", () => {

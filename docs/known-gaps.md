@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 236 | 5 |
 | MED | 475 | 1 |
-| LOW | 226 | 0 |
+| LOW | 225 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22421,9 +22421,11 @@ Repro (verify batch, unrequested find): a component body containing `${...}` (di
 <!-- @gap id=g-bootstrap-opener-scalar-init-for-sequence-type-unchecked sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(the opener initializer check that gives `<n:int="hello"/>` E-TYPE-031 does not cover a TSeq own type) prov=dd:opener-keyword-vs-attribute-2026-10-01-SF3 -->
 **Agent-executed on the change branch (S449).** `<program> <n:int[append]=0/> <main>${@n}</main> </program>` → no diagnostics; `<n:int="hello"/>` → `E-TYPE-031`. Expected: the own value is checked against the declared type, so `0` for `int[append]` is `E-TYPE-031`. Split out of `g-bootstrap-parser-opener-let-and-unchecked-opener-shapes` item 3 (a typer check, not a parser one). Left in analyze.scrml for its owner — a sibling dispatch held analyze.scrml during this change.
 
-### g-spec-66-on-field-name-contradicts-illegal-names — SPEC: the S447 examples declare a field named `on` (`export let <on:bool=false/>`, §66.2.5 and the §66.4 rule 6 `toggle`), which §66.2.3 makes an illegal field name
-<!-- @gap id=g-spec-66-on-field-name-contradicts-illegal-names sev=LOW status=open locus=compiler/SPEC.md(§66.2.5 zone 1 example; §66.4 rule 6 lib/toggle.scrml example; §66.0 S447 table) prov=empirical:S449-opener-keywords-land -->
+### g-spec-66-on-field-name-contradicts-illegal-names — SPEC: the S447 examples declare a field named `on` (`export let <on:bool=false/>`, §66.2.5 and the §66.4 rule 6 `toggle`), which §66.2.3 makes an illegal field name — **RESOLVED S449 (ruled (a); s449-opener-keywords-land)**
+<!-- @gap id=g-spec-66-on-field-name-contradicts-illegal-names sev=LOW status=resolved resolved-by=s449-opener-keywords-land locus=compiler/SPEC.md(§66.2.5 zone 1 example; §66.4 rule 6 lib/toggle.scrml example; §66.0 S447 table) prov=empirical:S449-opener-keywords-land -->
 **Agent-executed on the change branch (S449).** The §66.4 rule 6 `toggle` example, compiled by the bootstrap, gives `E-DECL-ILLEGAL-FIELD-NAME` on `export let <on:bool=false/>`: §66.2.3 lists `on` among the five illegal attribute and field names (it keeps `on…` handler attributes unambiguous). The same spelling is in bryan's S447 ruling text as quoted (*"`export let <on:bool=false/>`"*), so the example cannot just be edited without a call. Options: (a) re-spell the worked examples (`checked`, `enabled`) and keep the ruling quote as-is, noting it illustrates position only; (b) narrow §66.2.3 for `on` when no `:` follows. PA recommendation owed; the bootstrap enforces §66.2.3 today.
+
+**Resolved S449 — ruled (a).** ruling:user-voice-scrml.md S449 "RULED — \"your recs.\" — the `on` field contradiction, the opener-keyword prose cost, the corpus-dialect lean" item 1: *"re-spell the S447 worked examples (`checked` / `open`); the S447 ruling is read as being about keyword POSITION, not that name; §66.2.3's illegal-name list (incl. `on`) stands."* §66.2.5's zone-1 example and the §66.4 rule 6 `toggle` now use `checked` (no §66.19 block used `on`); a note after §66.2.5's S449 amendment records the re-spelling against the S447 quote. PRIMER line re-spelled too.
 
 ### g-spec-66-export-alone-on-attribute-unnamed — SPEC: `export` written alone on an attribute (`<box export k:int=0/>`) is illegal under §66.4 rule 6 but no §66.20 code names it
 <!-- @gap id=g-spec-66-export-alone-on-attribute-unnamed sev=LOW status=open locus=compiler/SPEC.md(§66.20 E-DECL-LET-IN-OPENER row — "`let` (or `export let`)"; §66.4 rule 6 — "neither `let` nor `export` may be written on it") prov=empirical:S449-opener-keywords-land -->

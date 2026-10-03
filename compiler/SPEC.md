@@ -42114,7 +42114,7 @@ the follow-up *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*).** Each is ma
 |---|---|---|
 | §66.2.5 (new), §66.9 rule 2, Notation | Words that say what kind of thing a declaration is — `export`, `let` — go BEFORE the `<`, in JS order: `let <x:T=v/>`, `export let <x:T=v/>`, `export <x …/>`. Inside the opener: only the name, `:Type`, `=value`, typed attributes, and flags true by presence. After the closer: `renders` (unchanged) | supersedes ruling S435 "writable cells spelled `let`" — POSITION ONLY (the word `let`, `const` retiring, derived / seeded all stand) |
 | §66.5.1, §66.20 | `renders` inside an opener is its own error (sub-ruling 2) | new code `E-DECL-RENDERS-IN-OPENER` |
-| §66.2.5, §66.20 | `let <x/>` / `export <x/>` only where declarations are ITEMS (program body, declaration body); an error elsewhere, never text (sub-ruling 3) | new code `E-DECL-KEYWORD-NOT-ITEM` |
+| §66.2.5, §66.20 | `let <x/>` / `export <x/>` only where declarations are ITEMS (program body, declaration body); an error elsewhere, never text (sub-ruling 3) — **narrowed S449:** in a FREE-TEXT body (§4.18.1) the words are text; the error fires only in a code-default body | new code `E-DECL-KEYWORD-NOT-ITEM` |
 | §66.4 rule 6, §66.14 rule 3 | Writable / exported attributes become CHILD declarations; attributes are always locked data (sub-ruling 4); a use-site attribute still sets a child (O43) | §66.4 rule 6 (former O53) RETIRES |
 
 > **Provenance:** ruling:user-voice-scrml.md S447 — *"your recs"* (item 2: *"Words that say what kind of thing it
@@ -42258,7 +42258,7 @@ follows the adopted restatement.)
 A declaration is read in three zones. **No word inside an opener modifies or introduces the word after it.**
 
 1. **Before the `<` — what kind of thing the declaration is.** `export` and `let`, in the JavaScript order:
-   `let <darkMode:bool=false/>`, `export let <on:bool=false/>`, `export <toggle label:string>…</>`. `let` is the
+   `let <darkMode:bool=false/>`, `export let <checked:bool=false/>`, `export <toggle label:string>…</>`. `let` is the
    `replace` grant (§66.9 rule 2); `export` is cross-file visibility / write (§66.14).
 2. **Inside the opener — data and flags true by presence.** Only the name, `:Type`, the own value `=value`, typed
    attributes (`attr:Type=default`), and flags that are true just by being present: validators (`req`,
@@ -42279,11 +42279,24 @@ let <seats:int=3/>
 export let <mode:Mode=.Light/>                 // exported and writable: JS order (⚑ O2 / O39 on what export grants)
 ```
 
-**Where `let <x/>` and `export <x/>` are recognized (sub-ruling 3).** `let` or `export` before a tag is recognized
-ONLY where declarations are ITEMS: a program body and a declaration body. Anywhere else — for example inside a
-markup body (`<main>`, `<div>`, a `renders`) — `let` or `export` followed by a tag is an error,
-`E-DECL-KEYWORD-NOT-ITEM` (§66.20); it is never guessed to be the text "let" followed by an element. (So a
-declaration in a markup position — §66.5.4, ⚑ O38 — cannot carry `let` or `export`.)
+**Where `let <x/>` and `export <x/>` are recognized (sub-ruling 3, narrowed S449).** `let` or `export` before a tag
+is a declaration keyword ONLY where declarations are ITEMS: a program body and a declaration body. In a
+**code-default** body that is not an item position — an engine state-child body, a match arm, a `:`-shorthand body
+(§4.18.1) — `let` or `export` followed by a tag is an error, `E-DECL-KEYWORD-NOT-ITEM` (§66.20): there a bare run is
+code, so the keyword is meaningful but misplaced. In a **free-text** body (§4.18.1 — plain-markup element bodies such
+as `<p>`, `<main>`, `<div>`, a `renders` element's body; literal by default) the words are TEXT: `<p>Please let
+<b>me</b> know</p>` and `<p>You can export <a href="/x">a CSV</a></p>` render the words, and no declaration is read.
+(So a declaration in a markup position — §66.5.4, ⚑ O38 — cannot carry `let` or `export`.)
+
+> **Amendment S449 — the "never text" rule is narrowed to code-default bodies.**
+> **Provenance:** ruling:user-voice-scrml.md S449 "RULED — \"your recs.\" — the `on` field contradiction, the opener-keyword prose cost, the corpus-dialect lean" — *"your recs."*, item 2: *"in FREE-TEXT bodies (§4.18.1 — literal by default) `let` /
+> `export` before a tag stay TEXT (`<p>Please let <b>me</b> know</p>` is legal prose); only in CODE-DEFAULT bodies
+> (engine state-children, match arms, `:`-shorthand) and logic/program bodies are they declaration keywords."* ·
+> supersedes (narrows): the S447 sub-ruling 3 "never text" for free-text bodies.
+
+> **Note (S449, item 1 of the same ruling):** the S447 ruling's example name `on` (*"`export let <on:bool=false/>`"*,
+> user-voice S447) is re-spelled `checked` in every §66 example: §66.2.3 forbids `on` as an attribute or field name,
+> and the S447 ruling is read as being about keyword POSITION, not that name. **Provenance:** ruling:user-voice-scrml.md S449 "RULED — \"your recs.\" — the `on` field contradiction, the opener-keyword prose cost, the corpus-dialect lean", item 1.
 
 **`let` followed by `<` is the declaration keyword; `let` followed by a name is the logic binding.** In an item
 position (whose body parses in the §40.8 default-logic mode), `let` (or `export let`) whose next token is `<` is
@@ -42385,13 +42398,13 @@ attribute (`<x let a:T/>`, `export let a:T`) — is `E-DECL-LET-IN-OPENER` (§66
    ```scrml
    // lib/toggle.scrml
    export <toggle label:string>                       // `label`: a locked attribute (data)
-       export let <on:bool=false/>                    // a writable, exported CHILD (was an attribute under S435)
+       export let <checked:bool=false/>               // a writable, exported CHILD (was an attribute under S435)
    </>
-   renders <label><input type="checkbox" bind:checked=@toggle.on/> ${label}</label>   // ⚑ O54
+   renders <label><input type="checkbox" bind:checked=@toggle.checked/> ${label}</label>   // ⚑ O54
 
    // app.scrml
-   <toggle as=notify label="Email me" on=true/>      // a use-site attribute still sets the child (O43)
-   function muteAll() { @notify.on = false }          // a cross-file write to an EXPORTED field (§66.14)
+   <toggle as=notify label="Email me" checked=true/> // a use-site attribute still sets the child (O43)
+   function muteAll() { @notify.checked = false }     // a cross-file write to an EXPORTED field (§66.14)
    ```
 
    **The cost, stated:** a component with writable state now has a body. A declaration whose only fields were
@@ -42494,8 +42507,9 @@ declaration's markup appears only where an instance is used (`<x …/>`) or the 
 > (the usual place for library declarations and app cells) counts as a markup position for #19 — and so renders
 > there — is not ruled. Which instance renders at the declaration site (the shared instance, by engine parity,
 > is the DD's F20 reading) is likewise not stated by a ruling. (S447 narrows one consequence: inside a MARKUP
-> body, a declaration cannot carry `let` or `export` — `E-DECL-KEYWORD-NOT-ITEM`, §66.2.5; a program body and a
-> declaration body are item positions, where both are recognized.)
+> body, a declaration cannot carry `let` or `export` — in a free-text body the words are text (S449), in a
+> code-default body they are `E-DECL-KEYWORD-NOT-ITEM`, §66.2.5; a program body and a declaration body are item
+> positions, where both are recognized.)
 
 #### 66.5.5 Binding and validators inside `renders`
 
@@ -43965,7 +43979,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-FOREIGN-REPLACE-PRIVATE`** | Error | A whole-value replace, from outside the defining file, of a value whose type has any private field (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-THEME-TOKEN-CELL-COLLISION`** | Error | A `<theme>` token and a cell are declared with the same name in one program — tokens and cells share ONE namespace (§66.17 item 4), so the pair cannot coexist silently. The message names both declarations. (No existing code fits: `E-NAME-COLLIDES-STATE` is a *local* reusing a cell name, §6.1.3; `E-SCOPE-REDECLARE` is function-body scope, §7.3.3.) **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §66; the bootstrap front end does not parse T3 yet, so it has no fire site). Provenance: ruling:user-voice-scrml.md S440 (all recs #2, item 5). |
 | **`E-DECL-RENDERS-IN-OPENER`** | Error | `renders` is written inside a declaration's opener (§66.5.1). Message: *"`renders` follows the closer (`/>` or `</>`)"* — replacing the generic parse error on the `<` that follows it. **Provenance:** ruling:user-voice-scrml.md S447 (*"your recs"*, item 2, sub-rec 2). **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/parse.scrml`, S449). |
-| **`E-DECL-KEYWORD-NOT-ITEM`** | Error | `let` or `export` (or `export let`) followed by a tag OUTSIDE an item position — anywhere but a program body or a declaration body, e.g. inside a markup body or a `renders` (§66.2.5). It is never read as the text "let"/"export" followed by an element. (Whether a `<page>` / `<theme>` body is an item position: ⚑ O61.) **Provenance:** ruling:user-voice-scrml.md S447 (*"your recs"*, item 2, sub-rec 3). **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/parse.scrml` — markup bodies and state-child bodies; a refused `<theme>` body does not report it, ⚑ O61; S449). |
+| **`E-DECL-KEYWORD-NOT-ITEM`** | Error | `let` or `export` (or `export let`) followed by a tag in a CODE-DEFAULT body that is not an item position — an engine state-child body, a match arm, a `:`-shorthand body (§4.18.1, §66.2.5). In a FREE-TEXT body (a plain-markup element body, a `renders` element's body) the words are text and nothing fires (narrowed S449). (Whether a `<page>` / `<theme>` body is an item position: ⚑ O61.) **Provenance:** ruling:user-voice-scrml.md S447 (*"your recs"*, item 2, sub-rec 3) · narrowed by ruling:user-voice-scrml.md S449 "RULED — \"your recs.\" — the `on` field contradiction, the opener-keyword prose cost, the corpus-dialect lean", item 2. **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/parse.scrml` — state-child bodies; S449). |
 | **`E-DECL-LET-IN-OPENER`** | Error | `let` (or `export let`) written INSIDE a declaration opener: the S435 in-opener prefix `<let x:T=v/>`, a trailing `<x:T=v let/>`, or a grant on an attribute (`<x let a:T/>`, `<x export let a:T/>`) (§66.2.5, §66.4 rule 6). The message names the fix: `let <x:T=v/>` for the declaration's own value; a child declaration `let <a:T=v/>` (or `export let <a:T=v/>`) in the body for an attribute. **Provenance:** ruling:user-voice-scrml.md S447 (*"your recs"*, item 2; sub-rec 4) · supersedes: ruling:S435 "writable cells spelled `let`" (position). **Nominal on impl#1; the bootstrap emits it** (`compiler/self-host-v2/parse.scrml`; the bootstrap's parser and tests migrated S449 — `docs/changes/s449-opener-keywords-land/`). |
 | **`E-GRANT-LET-ON-SEQUENCE`** | Error | `let` on a sequence-typed declaration (`let <xs:int[append]=[]/>`): a sequence carries every grant, including `replace`, in its type's grants — message: *"write `replace` in the type's grants"* (§66.9, O3 = (c)). **Provenance:** ruling:user-voice-scrml.md S435 — O3 = *"c"* (*"`let` on a sequence is a compile error ("write `replace` in the type's grants")"*). Row added S447 (the code was emitted by the bootstrap but unnamed here — DD opener-keyword-vs-attribute-2026-10-01 SF4). **Nominal on impl#1; the bootstrap emits it.** |
 

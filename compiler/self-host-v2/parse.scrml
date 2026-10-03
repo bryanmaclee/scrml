@@ -30,7 +30,7 @@
 //   house rule is that §34 rows land with the implementation).
 //
 // S447 opener keywords (§66.2.5): `export` / `let` stand BEFORE the `<`, in JS
-// order (`let <x:int=0/>`, `export let <on:bool=false/>`), and are read only
+// order (`let <x:int=0/>`, `export let <checked:bool=false/>`), and are read only
 // where declarations are ITEMS — a program body and a declaration body. Inside
 // an opener stand only the name, `:Type`, `=value`, typed attributes and flags;
 // `renders` follows the closer. An attribute is always locked data: a writable
@@ -2232,14 +2232,6 @@ ${
                 out = out.concat([rn.n])
                 m = rn.mp
                 textStart = m.pos
-            } else if (keywordTagAt(m) >= 0) {
-                if (text != "") {
-                    out = out.concat([textNode(m, textStart, text)])
-                    m = mBump(m)
-                    text = ""
-                }
-                m = keywordNotItem(m, tag)
-                textStart = m.pos
             } else {
                 if (text == "") textStart = m.pos
                 text = text + chAt(m, 0)
@@ -2280,11 +2272,13 @@ ${
         return c == "!" || c == "/" || c == "?" || c == "*" || c == "_" || c == "."
     }
 
-    // S447 sub-ruling 3 (§66.2.5): in a MARKUP body (an element's children, a
-    // `renders`, a state-child body) `let` / `export` / `export let` followed
-    // by a tag is E-DECL-KEYWORD-NOT-ITEM — never the text "let" then an
-    // element. The keyword must stand as a word (not the tail of `outlet`).
-    // Returns the position of the tag's `<`, or -1.
+    // S447 sub-ruling 3, narrowed S449 (§66.2.5): in a CODE-DEFAULT body that
+    // is not an item position (an engine state-child body — parseCodeBody)
+    // `let` / `export` / `export let` followed by a tag is
+    // E-DECL-KEYWORD-NOT-ITEM. In a FREE-TEXT body (parseKids — plain markup,
+    // a `renders` element) the words are TEXT and this is never consulted
+    // (`<p>Please let <b>me</b> know</p>`). The keyword must stand as a word
+    // (not the tail of `outlet`). Returns the position of the tag's `<`, or -1.
     fn keywordTagAt(mp: MP) -> int {
         const c: string = chAt(mp, 0)
         if (c != "l" && c != "e") return -1
@@ -2310,7 +2304,7 @@ ${
     fn keywordNotItem(mp: MP, tag: string) -> MP {
         const lt: int = keywordTagAt(mp)
         const kw: string = mp.src.substring(mp.pos, lt).trim()
-        const d: MP = mDiag(mp, "E-DECL-KEYWORD-NOT-ITEM", "`" + kw + "` before a tag declares an ITEM, and only a program body or a declaration body holds items — not the markup body of `<" + tag + ">` (§66.2.5, S447); move the declaration to the program body or into a declaration's body, or drop `" + kw + "`", mp.pos, mp.pos + kw.length)
+        const d: MP = mDiag(mp, "E-DECL-KEYWORD-NOT-ITEM", "`" + kw + "` before a tag declares an ITEM, and only a program body or a declaration body holds items — not the code-default body of `<" + tag + ">` (§66.2.5); move the declaration to the program body or into a declaration's body, or drop `" + kw + "` (display text here is a quoted literal, §4.18.3)", mp.pos, mp.pos + kw.length)
         return mAt(d, lt)
     }
 
@@ -2452,17 +2446,10 @@ ${
     fn refuseTheme(o: Opener, mp: MP) -> MP {
         let m: MP = mp
         if (!o.selfClosing) {
+            // the refused body is consumed as free text (parseKids reports no
+            // keyword there, S449) — it does not decide ⚑ O61 (§66.2.5)
             const kids: RNodes = parseKids(mp, o.name)
-            // ⚑ O61 (§66.2.5, not ruled): whether a `<theme>` body is an item
-            // position for `export` is open — the refused body does not decide
-            // it, so the keyword reports its markup-body read would make are dropped.
-            let keep: Diag[] = []
-            let i = 0
-            for (const d of kids.mp.diags) {
-                if (i < mp.diags.length || d.code != "E-DECL-KEYWORD-NOT-ITEM") keep = keep.concat([d])
-                i = i + 1
-            }
-            m = { src: kids.mp.src, pos: kids.mp.pos, nid: kids.mp.nid, diags: keep, file: kids.mp.file }
+            m = kids.mp
         }
         return mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`<theme>` (§66.17 — tokens lower to CSS custom properties) is not in the bootstrap: it has no CSS emission in this slice", o.start, m.pos)
     }
