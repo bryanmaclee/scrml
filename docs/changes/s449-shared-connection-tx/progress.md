@@ -26,3 +26,20 @@ SQLite file db, WAL. Requests carry `scrml_csrf=tok` + `X-CSRF-Token: tok`.
 
 Repro scripts: worktree `.tmp/repro/{app.scrml,seed.ts,client.ts,client2.ts,client3.ts}`
 (scratch; contents recorded in the final report).
+
+## 2. Fix built (C + D + PG opt-in)
+
+- `compiler/src/codegen/sql-tx-guard.ts` (new): emitted runtime — `_scrml_db_guard` (per-handle
+  FIFO async mutex; transaction control recognized by statement text; owner = request scope
+  via a process-wide AsyncLocalStorage; pooled drivers reserve a connection per transaction),
+  `_scrml_db_request_scope` (wraps every route handler + WS callback), `_scrml_db_scope_end`
+  (request-end backstop: rolls back a transaction left open).
+- emit-server.ts: handle declarations wrapped (one line, `_scrml_db_guard(<expr>, driver, concurrent)`);
+  request-scope loop appended at module end; D — the envelope ROLLs BACK when `_scrml_result`
+  is an error envelope; envelope BEGIN is `BEGIN` on postgres/mysql (PG rejects `BEGIN DEFERRED`).
+- `transactions="concurrent"` on `<program>` (attribute-registry; E-SQL-010 on SQLite).
+- protect-flow.ts: the guard runtime is modelled (identity) and never walked — walking it took
+  examples/23's protect flow from 1.4 s to >400 s.
+- HTTP after (same scripts): SYMPTOM 1 0/10 lost; SYMPTOM 2 0/10 failed; SYMPTOM 3 clean read;
+  D implicitFail(1) → error returned, balances 10/0.
+- Live PG (local cluster): envelope commits, `fail` rolls back, serialized vs concurrent verified.
