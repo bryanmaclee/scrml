@@ -162,10 +162,14 @@ describe("(B) §40.8 — a second top-level `<program>` in one file is E-PROGRAM
     expect(codes(`<program><p>a</p></program>\n<program><p>b</p></program>\n<program><p>c</p></program>\n`)).toEqual(["E-PROGRAM-002", "E-PROGRAM-002"]);
   });
   test("the FIRST program is the one analyzed; a later program's body is not read as the program", () => {
-    const r = run(`<program>\n<p>public</p>\n</program>\n<program>\n<p>\${@undeclared}</p>\n</program>\n`);
-    expect(r.diags.map((x) => x.code)).toEqual(["E-PROGRAM-002"]);
-    const main = r.core.decls.find((d) => d.sym.id === r.core.program.id);
-    expect(JSON.stringify(main.renders)).toContain("public");
+    // Proved through diagnostics (an errored compile returns no Core, §2.2.1):
+    // an undeclared read in program 1's body is reported; the same read in
+    // program 2's body is not (that body is never analyzed as the program).
+    const second = codes(`<program>\n<p>public</p>\n</program>\n<program>\n<p>\${@undeclared}</p>\n</program>\n`);
+    expect(second).toEqual(["E-PROGRAM-002"]);
+    const first = codes(`<program>\n<p>\${@undeclared}</p>\n</program>\n<program>\n<p>public</p>\n</program>\n`);
+    expect(first).toContain("E-PROGRAM-002");
+    expect(first.filter((c) => c !== "E-PROGRAM-002").length).toBeGreaterThan(0);
   });
 });
 
