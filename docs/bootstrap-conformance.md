@@ -11,84 +11,136 @@ Scope: **1278 of 1278 cases attempted** — every attempted case reached the pur
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 34 | 2.7% |
+| PASS | 76 | 5.9% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 18 | 1.4% |
-| LEGACY | 951 | 74.4% |
-| UNSUPPORTED | 275 | 21.5% |
+| FAIL | 54 | 4.2% |
+| LEGACY | 0 | 0.0% |
+| NOT-TWINNED | 475 | 37.2% |
+| UNSUPPORTED | 673 | 52.7% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 52; of those, 34 hold (65.4%). Runtime half executed on the bootstrap for 0 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 130; of those, 76 hold (58.5%). Runtime half executed on the bootstrap for 27 case(s).
 
-- **Vacuous** passes: 15 of 34 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **19**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 18 of 18; the other 0 are implemented checks that answered wrong.
+- **Vacuous** passes: 19 of 76 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **57**.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 47 of 54; the other 7 are implemented checks that answered wrong.
 
-LEGACY by marker (a case may carry several): component-const 60 · const-cell 51 · engine-element 113 · no-program-root 411 · rhs-decl 712.
-UNSUPPORTED by reason: bootstrap-unsupported 177 · parse-reject 98.
+LEGACY by marker (a case may carry several): none.
+UNSUPPORTED by reason: bootstrap-unsupported 399 · parse-reject 274.
+
+### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
+
+Legacy-dialect cases graded on their generated §66 twin: **619** — PASS 52 · FAIL 39 · UNSUPPORTED 528. Twin holds 52 (non-vacuous 38). Every twin verdict above is included in the bucket table.
+- `dialect.s66` overrides: 0 replace a twin's expectations · 3 exclude a case.
+- Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
+
+NOT-TWINNED by reason (475 cases; a case counts once per distinct reason):
+
+- 60 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
+- 57 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- 46 — rhs-decl: `…` initializer needs a type (CTX — O35)
+- 40 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
+- 40 — rhs-decl: compound cell with child declarations (Tier 2 — `…` rewrite owed)
+- 40 — rhs-decl: field of a compound cell (Tier 2 — `…` rewrite owed)
+- 35 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- 33 — rhs-decl: empty `…` needs an element type (CTX — O35)
+- 32 — const-cell: non-literal initializer needs a type (CTX — O35)
+- 30 — program-wrap: `…` root with no `…` (route-file shape — not wrapped)
+- 23 — engine-simple: engine without a bare-variant `…`
+- 23 — rhs-decl: declaration in a markup position (⚑ O38)
+- 19 — rhs-decl: type `…` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- 13 — rhs-decl: declaration text not found at the AST site
+- 12 — const-cell: initializer extent could not be verified against impl#1's AST
+- 10 — engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
+- 9 — rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- 8 — rhs-decl: initializer not parsed by impl#1
+- 8 — rhs-decl: non-literal initializer needs a type (CTX — O35)
+- 8 — theme-body: `…` body (§66.17 — blocked on O17)
+- 7 — engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- 6 — engine-simple: engine in a nested / markup position (O38 / nested engine)
+- 6 — engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- 6 — engine-simple: nested engine (→ enum-valued child field, structural)
+- 6 — program-wrap: top-level prose (a `…` body reads it as code — §4.18.1 / S441)
+- 6 — rhs-decl: object literal needs a struct type (CTX)
+- 5 — rhs-decl: bare variant .X declared by N enums (needs a type)
+- 5 — rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
+- 4 — program-wrap: a `…` the front end does not recognize as the root (malformed source)
+- 3 — excluded by dialect.s66
+- 3 — program-wrap: the restructured file does not parse to one top-level `…` (malformed source) — not restructured
+- 3 — rhs-decl: Shape 2 `…` (→ `…`, CTX — ⚑ O25)
+- 2 — const-cell: declaration in a markup position (⚑ O38)
+- 2 — engine-simple: engine surface beyond the simple rule: effect (⚑ O5 surface)
+- 2 — engine-simple: engine surface beyond the simple rule: if (⚑ O5 surface)
+- 2 — program-move: `…` outside `…` (where it renders is not mechanical)
+- 2 — rhs-decl: initializer extent could not be verified against impl#1's AST
+- 2 — unwrap-logic: top-level `…` holds a `…` statement (rendered in legacy, evaluated in a program body — S441)
+- 1 — const-cell: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- 1 — engine-simple: `…` impl#1's front end did not surface as an engine declaration (left untouched)
+- 1 — engine-simple: engine surface beyond the simple rule: derived, effect (⚑ O5 surface)
+- 1 — rhs-decl: opener attribute `…` has no mechanical §66 spelling
 
 ### Per area (case directory)
 
-| area | cases | PASS | CODES-ONLY | FAIL | LEGACY | UNSUPPORTED | CRASH | INVALID |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| api | 10 | · | · | · | 3 | 7 | · | · |
-| apply | 7 | · | · | · | 1 | 6 | · | · |
-| auth | 65 | 4 | · | 7 | 21 | 33 | · | · |
-| block-grammar | 7 | · | · | · | 7 | · | · | · |
-| body-top | 27 | · | · | · | 15 | 12 | · | · |
-| capability | 12 | 5 | · | 2 | · | 5 | · | · |
-| channel | 31 | · | · | · | 16 | 15 | · | · |
-| codegen | 2 | · | · | · | 1 | 1 | · | · |
-| components | 32 | · | · | 2 | 29 | 1 | · | · |
-| control-flow | 62 | · | · | · | 50 | 12 | · | · |
-| defer | 51 | · | · | · | 50 | 1 | · | · |
-| derived | 6 | · | · | · | 6 | · | · | · |
-| each | 25 | · | · | · | 25 | · | · | · |
-| endpoint | 17 | · | · | · | · | 17 | · | · |
-| engine | 91 | 6 | · | 1 | 73 | 11 | · | · |
-| enum | 1 | · | · | · | 1 | · | · | · |
-| equality | 10 | · | · | · | 4 | 6 | · | · |
-| error | 62 | · | · | · | 61 | 1 | · | · |
-| error-boundary | 11 | · | · | · | 11 | · | · | · |
-| files | 1 | · | · | · | 1 | · | · | · |
-| fn | 18 | 1 | · | · | 4 | 13 | · | · |
-| foreign | 9 | · | · | 1 | 8 | · | · | · |
-| form-for | 16 | · | · | · | · | 16 | · | · |
-| forms | 46 | · | · | · | 46 | · | · | · |
-| hostmethod | 1 | · | · | · | 1 | · | · | · |
-| input | 2 | · | · | · | · | 2 | · | · |
-| lifecycle | 56 | · | · | 1 | 52 | 3 | · | · |
-| linear | 15 | 1 | · | 1 | 9 | 4 | · | · |
-| loop | 8 | · | · | · | 8 | · | · | · |
-| maps | 13 | · | · | · | 13 | · | · | · |
-| markup-handler | 77 | · | · | · | 77 | · | · | · |
-| match-block | 18 | · | · | · | 15 | 3 | · | · |
-| match-codes | 25 | · | · | · | 10 | 15 | · | · |
-| match-identifier | 1 | · | · | · | 1 | · | · | · |
-| meta | 17 | · | · | · | 17 | · | · | · |
-| middleware | 4 | 1 | · | 1 | · | 2 | · | · |
-| module | 32 | · | · | · | 28 | 4 | · | · |
-| navigate | 3 | · | · | · | · | 3 | · | · |
-| outlet | 7 | · | · | · | 4 | 3 | · | · |
-| page | 1 | · | · | · | 1 | · | · | · |
-| parse-syntax | 4 | · | · | · | 2 | 2 | · | · |
-| parse-variant | 8 | · | · | · | 8 | · | · | · |
-| print | 1 | · | · | · | · | 1 | · | · |
-| protect | 69 | · | · | · | 47 | 22 | · | · |
-| reactive | 88 | 14 | · | · | 72 | 2 | · | · |
-| refinement | 10 | · | · | · | 10 | · | · | · |
-| route-region | 1 | · | · | · | 1 | · | · | · |
-| schema | 10 | · | · | · | · | 10 | · | · |
-| schema-for | 15 | · | · | · | · | 15 | · | · |
-| server-db | 56 | · | · | · | 53 | 3 | · | · |
-| server-fn | 22 | · | · | · | 22 | · | · | · |
-| sql | 13 | · | · | · | 10 | 3 | · | · |
-| ssr | 14 | · | · | · | 9 | 5 | · | · |
-| style | 27 | · | · | 1 | 22 | 4 | · | · |
-| table-for | 14 | · | · | · | 14 | · | · | · |
-| type-state-codes | 27 | 2 | · | 1 | 12 | 12 | · | · |
+| area | cases | PASS | CODES-ONLY | FAIL | LEGACY | NOT-TWINNED | UNSUPPORTED | CRASH | INVALID |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| api | 10 | · | · | · | · | · | 10 | · | · |
+| apply | 7 | · | · | · | · | · | 7 | · | · |
+| auth | 65 | 4 | · | 8 | · | 12 | 41 | · | · |
+| block-grammar | 7 | 3 | · | · | · | 3 | 1 | · | · |
+| body-top | 27 | · | · | · | · | 2 | 25 | · | · |
+| capability | 12 | 5 | · | 2 | · | · | 5 | · | · |
+| channel | 31 | · | · | · | · | 19 | 12 | · | · |
+| codegen | 2 | · | · | · | · | 1 | 1 | · | · |
+| components | 32 | · | · | 2 | · | 29 | 1 | · | · |
+| control-flow | 62 | 4 | · | 5 | · | 9 | 44 | · | · |
+| defer | 51 | 1 | · | 4 | · | 1 | 45 | · | · |
+| derived | 6 | · | · | · | · | 5 | 1 | · | · |
+| each | 25 | · | · | · | · | 25 | · | · | · |
+| endpoint | 17 | · | · | · | · | · | 17 | · | · |
+| engine | 91 | 5 | · | 10 | · | 49 | 27 | · | · |
+| enum | 1 | · | · | 1 | · | · | · | · | · |
+| equality | 10 | · | · | · | · | 4 | 6 | · | · |
+| error | 62 | · | · | 2 | · | 5 | 55 | · | · |
+| error-boundary | 11 | · | · | · | · | 11 | · | · | · |
+| files | 1 | 1 | · | · | · | · | · | · | · |
+| fn | 18 | 1 | · | · | · | 1 | 16 | · | · |
+| foreign | 9 | · | · | 1 | · | · | 8 | · | · |
+| form-for | 16 | · | · | · | · | · | 16 | · | · |
+| forms | 46 | 4 | · | · | · | 38 | 4 | · | · |
+| hostmethod | 1 | · | · | · | · | · | 1 | · | · |
+| input | 2 | · | · | · | · | · | 2 | · | · |
+| lifecycle | 56 | 5 | · | 3 | · | 28 | 20 | · | · |
+| linear | 15 | 1 | · | 1 | · | · | 13 | · | · |
+| loop | 8 | · | · | · | · | 1 | 7 | · | · |
+| maps | 13 | · | · | · | · | 13 | · | · | · |
+| markup-handler | 77 | 7 | · | 3 | · | 30 | 37 | · | · |
+| match-block | 18 | · | · | · | · | 9 | 9 | · | · |
+| match-codes | 25 | · | · | 1 | · | · | 24 | · | · |
+| match-identifier | 1 | · | · | · | · | 1 | · | · | · |
+| meta | 17 | · | · | · | · | 1 | 16 | · | · |
+| middleware | 4 | 1 | · | 1 | · | · | 2 | · | · |
+| module | 32 | 5 | · | 5 | · | 6 | 16 | · | · |
+| navigate | 3 | · | · | · | · | · | 3 | · | · |
+| outlet | 7 | · | · | · | · | · | 7 | · | · |
+| page | 1 | · | · | · | · | 1 | · | · | · |
+| parse-syntax | 4 | · | · | · | · | 2 | 2 | · | · |
+| parse-variant | 8 | · | · | · | · | · | 8 | · | · |
+| print | 1 | · | · | · | · | · | 1 | · | · |
+| protect | 69 | · | · | · | · | 44 | 25 | · | · |
+| reactive | 88 | 25 | · | 3 | · | 39 | 21 | · | · |
+| refinement | 10 | · | · | · | · | 3 | 7 | · | · |
+| route-region | 1 | · | · | · | · | 1 | · | · | · |
+| schema | 10 | · | · | · | · | · | 10 | · | · |
+| schema-for | 15 | · | · | · | · | · | 15 | · | · |
+| server-db | 56 | · | · | · | · | 16 | 40 | · | · |
+| server-fn | 22 | · | · | · | · | 7 | 15 | · | · |
+| sql | 13 | · | · | · | · | 9 | 4 | · | · |
+| ssr | 14 | · | · | · | · | 14 | · | · | · |
+| style | 27 | · | · | 1 | · | 24 | 2 | · | · |
+| table-for | 14 | · | · | · | · | 11 | 3 | · | · |
+| type-state-codes | 27 | 4 | · | 1 | · | 1 | 21 | · | · |
 
-### FAIL (18)
+### FAIL (54)
 
 - `auth/auth-attr-empty-string-pos` (codes; not in the bootstrap: E-AUTH-ATTR-INVALID)
   - missing E-AUTH-ATTR-INVALID
@@ -97,6 +149,10 @@ UNSUPPORTED by reason: bootstrap-unsupported 177 · parse-reject 98.
 - `auth/auth-attr-nested-program-one-code-pos` (codes; not in the bootstrap: E-PROGRAM-NESTED-AUTH)
   - missing E-PROGRAM-NESTED-AUTH
   - count: E-PROGRAM-NESTED-AUTH fired 0 time(s), expected exactly 1
+- `auth/auth-attr-nonliteral-program-pos` (twin · codes; not in the bootstrap: E-AUTH-ATTR-INVALID)
+  - missing E-AUTH-ATTR-INVALID
+  - severity: E-AUTH-ATTR-INVALID did not fire (expected error)
+  - count: E-AUTH-ATTR-INVALID fired 0 time(s), expected exactly 1
 - `auth/auth-attr-unrecognized-literal-no-login-lint-pos` (codes; not in the bootstrap: E-AUTH-ATTR-INVALID)
   - missing E-AUTH-ATTR-INVALID
   - severity: E-AUTH-ATTR-INVALID did not fire (expected error)
@@ -125,23 +181,116 @@ UNSUPPORTED by reason: bootstrap-unsupported 177 · parse-reject 98.
   - missing E-COMPONENT-019
 - `components/post-ce-residual-component-reject` (codes; not in the bootstrap: E-COMPONENT-035)
   - missing E-COMPONENT-035
-- `engine/mount-not-engine-pos` (codes; not in the bootstrap: E-ENGINE-MOUNT-NOT-ENGINE)
+- `control-flow/ctrl-001-orphan-else-pos` (twin · codes; not in the bootstrap: E-CTRL-001)
+  - missing E-CTRL-001
+  - severity: E-CTRL-001 did not fire (expected error)
+- `control-flow/ctrl-002-orphan-else-if-pos` (twin · codes; not in the bootstrap: E-CTRL-002)
+  - missing E-CTRL-002
+  - severity: E-CTRL-002 did not fire (expected error)
+- `control-flow/ctrl-004-else-on-state-opener-pos` (twin · codes; not in the bootstrap: E-CTRL-004)
+  - missing E-CTRL-004
+  - severity: E-CTRL-004 did not fire (expected error)
+- `control-flow/ctrl-012-bare-control-flow-in-markup-pos` (twin · codes; not in the bootstrap: E-CONTROL-FLOW-IN-MARKUP)
+  - missing E-CONTROL-FLOW-IN-MARKUP
+  - severity: E-CONTROL-FLOW-IN-MARKUP did not fire (expected error)
+- `control-flow/if-chain-inactive-branches-absent` (twin · runtime)
+  - domAnchored: selector #rest: expected count 0, got 1
+- `defer/fn-prohibition-applies-neg` (twin · codes)
+  - missing E-FN-003
+- `defer/fn-pure-local` (twin · runtime)
+  - state: cell 'got' expected 41, got null
+  - domAnchored: selector #out: text expected "41", got ""
+- `defer/not-reached-and-nested-blocks` (twin · runtime)
+  - state: cell 'trace' expected "body;inner;mid;end;late;outer;|body;inner;mid;outer;", got "outer;inner;body;mid;late;end;|outer;inner;body;mid;"
+  - domAnchored: selector #out: text expected "body;inner;mid;end;late;outer;|body;inner;mid;outer;", got "outer;inner;body;mid;late;end;|outer;inner;body;mid;"
+- `defer/return-value-before-deferred` (twin · runtime)
+  - state: cell 'got' expected 7, got 99
+  - domAnchored: selector #got: text expected "7", got "99"
+- `engine/engine-var-duplicate-pos` (twin · codes; mapped E-ENGINE-VAR-DUPLICATE→E-SCOPE-010)
+  - severity unobservable: E-SCOPE-010 fired but the bootstrap Diag carries no §34 severity (expected error)
+- `engine/history-no-inner-engine-pos` (twin · codes; not in the bootstrap: E-HISTORY-NO-INNER-ENGINE)
+  - missing E-HISTORY-NO-INNER-ENGINE
+  - severity: E-HISTORY-NO-INNER-ENGINE did not fire (expected error)
+- `engine/initial-invalid-variant-pos` (twin · codes; not in the bootstrap: E-ENGINE-INITIAL-INVALID-VARIANT)
+  - missing E-ENGINE-INITIAL-INVALID-VARIANT
+  - severity: E-ENGINE-INITIAL-INVALID-VARIANT did not fire (expected error)
+- `engine/internal-rule-not-composite-pos` (twin · codes; not in the bootstrap: E-INTERNAL-RULE-NOT-COMPOSITE)
+  - missing E-INTERNAL-RULE-NOT-COMPOSITE
+  - severity: E-INTERNAL-RULE-NOT-COMPOSITE did not fire (expected error)
+- `engine/mount-not-engine-pos` (twin · codes; not in the bootstrap: E-ENGINE-MOUNT-NOT-ENGINE)
   - missing E-ENGINE-MOUNT-NOT-ENGINE
   - severity: E-ENGINE-MOUNT-NOT-ENGINE did not fire (expected error)
+- `engine/payload-arity-mismatch-pos` (twin · codes; not in the bootstrap: E-ENGINE-PAYLOAD-ARITY-MISMATCH)
+  - missing E-ENGINE-PAYLOAD-ARITY-MISMATCH
+  - severity: E-ENGINE-PAYLOAD-ARITY-MISMATCH did not fire (expected error)
+- `engine/payload-unit-variant-pos` (twin · codes; not in the bootstrap: E-ENGINE-PAYLOAD-ON-UNIT-VARIANT)
+  - missing E-ENGINE-PAYLOAD-ON-UNIT-VARIANT
+  - severity: E-ENGINE-PAYLOAD-ON-UNIT-VARIANT did not fire (expected error)
+- `engine/rule-invalid-variant-pos` (twin · codes; not in the bootstrap: E-ENGINE-RULE-INVALID-VARIANT)
+  - missing E-ENGINE-RULE-INVALID-VARIANT
+  - severity: E-ENGINE-RULE-INVALID-VARIANT did not fire (expected error)
+- `engine/state-child-invalid-variant-pos` (twin · codes; not in the bootstrap: E-ENGINE-STATE-CHILD-INVALID-VARIANT)
+  - missing E-ENGINE-STATE-CHILD-INVALID-VARIANT
+  - severity: E-ENGINE-STATE-CHILD-INVALID-VARIANT did not fire (expected error)
+- `engine/state-child-missing-pos` (twin · codes; not in the bootstrap: E-ENGINE-STATE-CHILD-MISSING)
+  - missing E-ENGINE-STATE-CHILD-MISSING
+  - severity: E-ENGINE-STATE-CHILD-MISSING did not fire (expected error)
+- `enum/variant-name-lowercase-reject` (twin · codes; not in the bootstrap: E-ENUM-VARIANT-CASE)
+  - missing E-ENUM-VARIANT-CASE
+  - severity: E-ENUM-VARIANT-CASE did not fire (expected error)
+- `error/await-not-in-scrml` (twin · codes; not in the bootstrap: E-AWAIT-NOT-IN-SCRML)
+  - missing E-AWAIT-NOT-IN-SCRML
+  - forbidden E-SCOPE-001 fired
+  - severity: E-AWAIT-NOT-IN-SCRML did not fire (expected error)
+- `error/throw-not-in-scrml` (twin · codes; not in the bootstrap: E-THROW-NOT-IN-SCRML)
+  - missing E-THROW-NOT-IN-SCRML
+  - severity: E-THROW-NOT-IN-SCRML did not fire (expected error)
 - `foreign/foreign-lang-in-program-neg` (codes; not in the bootstrap: E-FOREIGN-LANG-IN-PROGRAM)
   - missing E-FOREIGN-LANG-IN-PROGRAM
   - severity: E-FOREIGN-LANG-IN-PROGRAM did not fire (expected error)
 - `lifecycle/cleanup-error-non-function` (codes; not in the bootstrap: E-LIFECYCLE-004)
   - missing E-LIFECYCLE-004
-- `linear/must-use-unread-pos` (codes; not in the bootstrap: E-MU-001)
+- `lifecycle/effect-bare-not-interpolated` (twin · codes; not in the bootstrap: E-ENGINE-EFFECT-NOT-INTERPOLATED)
+  - missing E-ENGINE-EFFECT-NOT-INTERPOLATED
+  - severity: E-ENGINE-EFFECT-NOT-INTERPOLATED did not fire (expected error)
+- `lifecycle/effect-empty-body-pos` (twin · codes)
+  - severity unobservable: W-LIFECYCLE-010 fired but the bootstrap Diag carries no §34 severity (expected warning)
+- `linear/must-use-unread-pos` (twin · codes; not in the bootstrap: E-MU-001)
   - missing E-MU-001
   - severity: E-MU-001 did not fire (expected error)
+- `markup-handler/s437-r4-dangling-else-each-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
+  - missing E-STMT-UNEXPECTED-TOKEN
+- `markup-handler/s437-r4-dangling-else-engine-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
+  - missing E-STMT-UNEXPECTED-TOKEN
+- `markup-handler/s437-r4-dangling-else-top-neg` (twin · codes; not in the bootstrap: E-STMT-UNEXPECTED-TOKEN)
+  - missing E-STMT-UNEXPECTED-TOKEN
+- `match-codes/e-type-026-match-in-markup-pos` (twin · codes; not in the bootstrap: E-TYPE-026)
+  - missing E-TYPE-026
 - `middleware/ratelimit-invalid-unit-pos` (codes; not in the bootstrap: E-MW-002)
   - missing E-MW-002
   - severity: E-MW-002 did not fire (expected error)
+- `module/e-export-003-attr-conflict-reject` (twin · codes; not in the bootstrap: E-EXPORT-003)
+  - missing E-EXPORT-003
+- `module/e-import-004-name-not-exported-reject` (twin · codes; not in the bootstrap: E-IMPORT-004)
+  - missing E-IMPORT-004
+- `module/e-import-005-bare-specifier-reject` (twin · codes; not in the bootstrap: E-IMPORT-005)
+  - missing E-IMPORT-005
+- `module/e-import-006-missing-file-reject` (twin · codes; not in the bootstrap: E-IMPORT-006)
+  - missing E-IMPORT-006
+- `module/e-import-pinned-invalid-reject` (twin · codes; not in the bootstrap: E-IMPORT-PINNED-INVALID)
+  - missing E-IMPORT-PINNED-INVALID
+- `reactive/dg-002-no-readers-pos` (twin · codes; not in the bootstrap: E-DG-002)
+  - missing E-DG-002
+  - severity: E-DG-002 did not fire (expected warning)
+- `reactive/name-collides-state-pos` (twin · codes; not in the bootstrap: E-NAME-COLLIDES-STATE)
+  - missing E-NAME-COLLIDES-STATE
+  - severity: E-NAME-COLLIDES-STATE did not fire (expected error)
+- `reactive/reset-reserved-identifier` (twin · codes; not in the bootstrap: E-RESERVED-IDENTIFIER)
+  - missing E-RESERVED-IDENTIFIER
+  - severity: E-RESERVED-IDENTIFIER did not fire (expected error)
 - `style/style-001-style-block-pos` (codes; not in the bootstrap: E-STYLE-001)
   - missing E-STYLE-001
-- `type-state-codes/e-type-any-forbidden-pos` (codes; not in the bootstrap: E-TYPE-ANY-FORBIDDEN)
+- `type-state-codes/e-type-any-forbidden-pos` (twin · codes; not in the bootstrap: E-TYPE-ANY-FORBIDDEN)
   - missing E-TYPE-ANY-FORBIDDEN
   - severity: E-TYPE-ANY-FORBIDDEN did not fire (expected error)
 
@@ -153,39 +302,62 @@ none
 
 none
 
-### LEGACY, accepted silently (7)
-
-Legacy-dialect cases the bootstrap compiled with NO unexpected diagnostic and then answered wrong — not a
-dialect parse failure: the bootstrap took a retired / unknown form as something else, with no W-lint (§66.21) and no refusal.
-
-- `engine/engine-var-duplicate-pos` (engine-element · accepted-silently, then codes wrong): missing E-ENGINE-VAR-DUPLICATE · severity: E-ENGINE-VAR-DUPLICATE did not fire (expected error)
-- `engine/initial-cell-undeclared-pos` (engine-element · accepted-silently, then codes wrong): missing E-ENGINE-INITIAL-CELL-UNDECLARED · severity: E-ENGINE-INITIAL-CELL-UNDECLARED did not fire (expected error)
-- `engine/initial-invalid-variant-pos` (engine-element · accepted-silently, then codes wrong): missing E-ENGINE-INITIAL-INVALID-VARIANT · severity: E-ENGINE-INITIAL-INVALID-VARIANT did not fire (expected error)
-- `engine/ontransition-no-target-pos` (engine-element · accepted-silently, then codes wrong): missing E-ONTRANSITION-NO-TARGET · severity: E-ONTRANSITION-NO-TARGET did not fire (expected error)
-- `engine/rule-invalid-variant-pos` (engine-element · accepted-silently, then codes wrong): missing E-ENGINE-RULE-INVALID-VARIANT · severity: E-ENGINE-RULE-INVALID-VARIANT did not fire (expected error)
-- `engine/state-child-invalid-variant-pos` (engine-element · accepted-silently, then codes wrong): missing E-ENGINE-STATE-CHILD-INVALID-VARIANT · severity: E-ENGINE-STATE-CHILD-INVALID-VARIANT did not fire (expected error)
-- `engine/state-child-missing-pos` (engine-element · accepted-silently, then codes wrong): missing E-ENGINE-STATE-CHILD-MISSING · severity: E-ENGINE-STATE-CHILD-MISSING did not fire (expected error)
-
-### PASS / CODES-ONLY (34)
+### PASS / CODES-ONLY (76)
 
 - `auth/i-auth-redirect-unresolved-neg` — PASS · VACUOUS
 - `auth/w-auth-content-not-gated-neg` — PASS · VACUOUS
 - `auth/w-auth-login-missing-neg` — PASS · VACUOUS
 - `auth/w-auth-redirect-loop-neg` — PASS · VACUOUS
+- `block-grammar/block-028-leading-equals-text-pos` — PASS · TWIN
+- `block-grammar/block-029-leading-equals-quote-prose-pos` — PASS · TWIN
+- `block-grammar/block-ctx-001-closed-raw-content-neg` — PASS · TWIN
 - `capability/all-tokens-valid` — PASS
 - `capability/arg-union-repeated-token` — PASS
 - `capability/argless-caps-empty-allowlist` — PASS
 - `capability/explicit-empty` — PASS
 - `capability/valid-clean` — PASS
-- `engine/engine-var-duplicate-neg` — PASS · VACUOUS
-- `engine/initial-invalid-variant-neg` — PASS · VACUOUS
-- `engine/ontransition-no-target-neg` — PASS · VACUOUS
-- `engine/rule-invalid-variant-neg` — PASS · VACUOUS
-- `engine/state-child-invalid-variant-neg` — PASS · VACUOUS
-- `engine/state-child-missing-neg` — PASS · VACUOUS
-- `fn/plain-arrow-clean` — PASS · VACUOUS (also emitted, unasserted: E-TYPE-STRUCT-CONTEXT)
-- `linear/must-use-unread-neg` — PASS · VACUOUS (also emitted, unasserted: E-SCOPE-001)
+- `control-flow/s437-r5-braced-else-block-comment-fn` — PASS · TWIN
+- `control-flow/s437-r5-braced-else-if-chain-comments-fn` — PASS · TWIN
+- `control-flow/s437-r5-braced-else-line-comment-fn` — PASS · TWIN
+- `control-flow/s437-r5-braced-else-ownline-comment-fn` — PASS · TWIN
+- `defer/identifier-untouched` — PASS · TWIN
+- `engine/engine-var-duplicate-neg` — PASS · TWIN
+- `engine/initial-invalid-variant-neg` — PASS · TWIN · VACUOUS
+- `engine/rule-invalid-variant-neg` — PASS · TWIN · VACUOUS
+- `engine/state-child-invalid-variant-neg` — PASS · TWIN · VACUOUS
+- `engine/state-child-missing-neg` — PASS · TWIN · VACUOUS
+- `files/multifile-import` — PASS · TWIN
+- `fn/plain-arrow-clean` — PASS · TWIN · VACUOUS (also emitted, unasserted: E-TYPE-STRUCT-CONTEXT)
+- `forms/bind-value-input` — PASS · TWIN
+- `forms/bind-value-two-field` — PASS · TWIN
+- `forms/checkbox-check` — PASS · TWIN
+- `forms/checkbox-uncheck` — PASS · TWIN
+- `lifecycle/effect-writes-state-direct-pos` — PASS · TWIN (also emitted, unasserted: E-LIFECYCLE-007)
+- `lifecycle/effect-writes-state-function-value-pos` — PASS · TWIN (also emitted, unasserted: E-LIFECYCLE-007)
+- `lifecycle/reset-on-engine-refused-neg` — PASS · TWIN (also emitted, unasserted: E-RESET-ON-INVALID-ENTRY)
+- `lifecycle/reset-on-engine-refused-pos` — PASS · TWIN (also emitted, unasserted: E-RESET-ON-INVALID-ENTRY)
+- `lifecycle/when-effect-writes-state-pos` — PASS · TWIN (also emitted, unasserted: E-LIFECYCLE-007)
+- `linear/must-use-unread-neg` — PASS · TWIN · VACUOUS (also emitted, unasserted: E-SCOPE-001)
+- `markup-handler/inline-block-handler-multi-line` — PASS · TWIN
+- `markup-handler/multi-stmt-handler-attr-neg` — PASS · TWIN · VACUOUS
+- `markup-handler/multi-stmt-handler-colon-shorthand-neg` — PASS · TWIN · VACUOUS (also emitted, unasserted: E-VALUE-WRITES-STATE)
+- `markup-handler/s437-r4-undeclared-fn-2nd-each-neg` — PASS · TWIN
+- `markup-handler/s437-r4-undeclared-fn-2nd-engine-neg` — PASS · TWIN
+- `markup-handler/s437-r4-undeclared-fn-2nd-top-neg` — PASS · TWIN
+- `markup-handler/s437-r5-braced-else-line-comment-handler` — PASS · TWIN
 - `middleware/ratelimit-invalid-unit-neg` — PASS · VACUOUS
+- `module/e-export-003-attr-distinct-clean` — PASS · TWIN · VACUOUS
+- `module/e-import-003-import-top-of-logic-clean` — PASS · TWIN (also emitted, unasserted: E-TYPE-UNKNOWN)
+- `module/e-import-004-name-exported-clean` — PASS · TWIN (also emitted, unasserted: E-TYPE-UNKNOWN)
+- `module/e-import-005-relative-specifier-clean` — PASS · TWIN (also emitted, unasserted: E-TYPE-UNKNOWN)
+- `module/e-import-006-present-file-clean` — PASS · TWIN (also emitted, unasserted: E-TYPE-UNKNOWN)
+- `reactive/counter-increment` — PASS · TWIN
+- `reactive/dg-002-no-readers-neg` — PASS · TWIN · VACUOUS
+- `reactive/if-top-level-absent` — PASS · TWIN
+- `reactive/if-wiring-bearing-subtree-absent` — PASS · TWIN
+- `reactive/if-wiring-bearing-subtree-mounts` — PASS · TWIN
+- `reactive/multi-cell-interp` — PASS · TWIN
+- `reactive/name-collides-state-neg` — PASS · TWIN
 - `reactive/no-write-attr-neg` — PASS
 - `reactive/no-write-attr-pos` — PASS
 - `reactive/no-write-derived-neg` — PASS
@@ -200,30 +372,51 @@ dialect parse failure: the bootstrap took a retired / unknown form as something 
 - `reactive/no-write-own-init-neg` — PASS
 - `reactive/no-write-own-init-pos` — PASS
 - `reactive/no-write-unproven-pos` — PASS
-- `type-state-codes/e-struct-function-field-neg` — PASS · VACUOUS
-- `type-state-codes/e-type-any-forbidden-neg` — PASS · VACUOUS (also emitted, unasserted: E-TYPE-UNKNOWN)
+- `reactive/reset-handler` — PASS · TWIN
+- `reactive/reset-handler-nonzero-initial` — PASS · TWIN
+- `reactive/textarea-rcdata-value-bind` — PASS · TWIN
+- `reactive/toggle-show` — PASS · TWIN
+- `type-state-codes/e-state-undeclared-neg` — PASS · TWIN · VACUOUS
+- `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
+- `type-state-codes/e-type-any-forbidden-neg` — PASS · TWIN · VACUOUS (also emitted, unasserted: E-TYPE-UNKNOWN)
+- `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (275)
+### UNSUPPORTED (673)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-endpoint-malformed-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `api/api-endpoint-unknown-neg` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-method-invalid-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-path-param-unbound-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `api/api-req-shape-mismatch-neg` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-response-not-variant-info` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-response-type-undeclared-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-unknown-type-ref-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `apply/apply-arbitrary-value-pos` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
+- `apply/apply-author-class-no-lint-pos` — twin · bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
 - `apply/apply-bare-clean-pos` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
 - `apply/apply-composing-family-pos` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
 - `apply/apply-non-inlinable-neg` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
 - `apply/apply-unknown-utility-neg` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
 - `apply/apply-variant-unsupported-neg` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
+- `auth/async-fn-escapes-as-value-dispatch-object-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `auth/async-fn-escapes-as-value-user-hof-neg` — twin · bootstrap-unsupported: an unannotated parameter `h` — bootstrap slice M2 needs `h: Type` (Core parameters are typed)
+- `auth/async-fn-escapes-destructured-scheduler-arr-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `auth/async-fn-escapes-destructured-scheduler-obj-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `auth/async-fn-escapes-forof-scheduler-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `auth/async-fn-escapes-local-scheduler-neg` — twin · bootstrap-unsupported: an unannotated parameter `h` — bootstrap slice M2 needs `h: Type` (Core parameters are typed)
+- `auth/async-fn-escapes-scheduler-x02-strip-server-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `auth/async-fn-escapes-scheduler-x04-blk-server-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `auth/auth-002-neg` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `auth/auth-003-neg` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
 - `auth/auth-003-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
 - `auth/auth-004-neg` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
 - `auth/auth-004-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
+- `auth/auth-005-neg` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
+- `auth/auth-005-pos` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
 - `auth/auth-attr-legal-values-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `auth/auth-attr-nonliteral-page-pos` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `auth/auth-attr-nonliteral-page-pos` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `auth/auth-attr-role-page-pos` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `auth/auth-graph-002-neg` — bootstrap-unsupported: `<auth>` is a scrml structural element (§40.9.5), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `auth/auth-graph-002-pos` — bootstrap-unsupported: `<auth>` is a scrml structural element (§40.9.5), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -231,50 +424,58 @@ dialect parse failure: the bootstrap took a retired / unknown form as something 
 - `auth/auth-graph-003-pos` — bootstrap-unsupported: `<auth>` is a scrml structural element (§40.9.5), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `auth/auth-graph-004-neg` — bootstrap-unsupported: `<auth>` is a scrml structural element (§40.9.5), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `auth/auth-graph-004-pos` — bootstrap-unsupported: `<auth>` is a scrml structural element (§40.9.5), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `auth/nested-helper-block-shadowed-import-sort-neg` — bootstrap-unsupported: an unannotated parameter `h` — bootstrap slice M2 needs `h: Type` (Core parameters are typed)
-- `auth/nested-helper-verify-password-sort-neg` — bootstrap-unsupported: an unannotated parameter `h` — bootstrap slice M2 needs `h: Type` (Core parameters are typed)
+- `auth/nested-helper-block-shadowed-import-sort-neg` — twin · bootstrap-unsupported: an unannotated parameter `h` — bootstrap slice M2 needs `h: Type` (Core parameters are typed)
+- `auth/nested-helper-server-block-body-callback-neg` — twin · bootstrap-unsupported: an unannotated parameter `h` — bootstrap slice M2 needs `h: Type` (Core parameters are typed)
+- `auth/nested-helper-verify-password-sort-neg` — twin · bootstrap-unsupported: an unannotated parameter `h` — bootstrap slice M2 needs `h: Type` (Core parameters are typed)
 - `auth/page-auth-required-gates-document` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `auth/program-nested-app-attr-pos` — parse-reject: E-PARSE-PROGRAM: `<program>` inside markup
-- `auth/program-nested-auth-in-page-pos` — parse-reject: E-PARSE-PROGRAM: `<program>` inside markup
 - `auth/program-nested-auth-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `auth/program-nested-auth-pos` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `auth/program-nested-auth-through-div-pos` — parse-reject: E-PARSE-PROGRAM: `<program>` inside markup
 - `auth/program-nested-lifecycle-attr-neg` — parse-reject: E-PARSE-PROGRAM: `<program>` inside markup
 - `auth/program-nested-session-attr-pos` — parse-reject: E-PARSE-PROGRAM: `<program>` inside markup
 - `auth/program-nested-worker-not-e-program-002-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `when` (statements at logic-block level are not in bootstrap slice M2)
-- `auth/program-top-level-session-attr-neg` — parse-reject: E-PARSE-PROGRAM: `<program>` inside markup
 - `auth/program-two-top-level-one-wrapped-pos` — parse-reject: E-PARSE-PROGRAM: `<program>` inside markup
-- `auth/program-worker-under-div-in-wrapped-app-not-e-program-002-neg` — parse-reject: E-PARSE-PROGRAM: `<program>` inside markup
-- `auth/program-wrapped-in-markup-is-application-gated` — parse-reject: E-PARSE-PROGRAM: `<program>` inside markup
 - `auth/session-ambient-server-neg` — bootstrap-unsupported: member access `.current` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `auth/session-ambient-server-pos` — bootstrap-unsupported: member access `.userId` on a value that is not a struct or an instance is not in bootstrap slice M2
 - `auth/w-auth-content-not-gated-pos` — bootstrap-unsupported: `<auth>` is a scrml structural element (§40.9.5), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `auth/w-auth-file-conflict-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `auth/w-auth-file-conflict-pos` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `block-grammar/block-047-closed-brace-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `x`
+- `body-top/bare-expression-evaluates-not-renders` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `body-top/bare-write-is-legal` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `body-top/code-line-after-declaration-runs` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `body-top/declaration-trailing-tokens-rejected` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `=`
+- `body-top/declared-prose-renders` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `body-top/does-nothing-rejected` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
 - `body-top/js-construct-await` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `body-top/js-construct-class` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `body-top/js-construct-dynamic-import` — parse-reject: E-PARSE-EXPECTED: expected `{`, found `(`
 - `body-top/js-construct-throw` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `body-top/js-construct-try-brace-on-next-line` — parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `body-top/label-on-non-loop-rejected` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `body-top/line-after-declaration-rejected` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `body-top/lone-identifier-is-code` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `body-top/loose-prose-rejected` — parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `body-top/no-effect-statement-rejected` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `body-top/prose-after-declaration-rejected` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `body-top/prose-before-code-line-rejected` — parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `body-top/prose-in-declaration-run-rejected` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `body-top/semicolon-is-formatting` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `body-top/sql-statement-not-shipped` — parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `body-top/template-cell-renders` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `body-top/template-const-renders` — parse-reject: E-PARSE-ITEM: unexpected text at program level
-- `body-top/template-const-renders-explicit-logic` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `body-top/template-const-renders-explicit-logic` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `body-top/unknown-characters-rejected` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `capability/inheritance-closest-wins-no-union` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `capability/inheritance-inherit-covers` — parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `capability/inline-block-covered` — bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
 - `capability/inline-block-undeclared` — bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
 - `capability/undeclared-with-foreign` — parse-reject: E-PARSE-ITEM: unexpected text at program level
-- `channel/dup-name-cross-file` — parse-reject: E-PARSE-EXPR: expected an expression, found `<`
 - `channel/onchange-misplaced` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `channel/onchange-not-exhaustive` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `channel/onchange-wildcard-exhaustive` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `channel/same-source-two-aliases` — parse-reject: E-PARSE-EXPR: expected an expression, found `<`
 - `channel/shared-modifier` — bootstrap-unsupported: `<channel>` is a scrml structural element (§38), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `channel/watches-52-authority-shape` — bootstrap-unsupported: `<channel>` is a scrml structural element (§38), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `channel/watches-broadcast-forbidden` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `channel/watches-broadcast-member-call-ok` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `channel/watches-clean` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -283,7 +484,7 @@ dialect parse failure: the bootstrap took a retired / unknown form as something 
 - `channel/watches-no-consumer` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `channel/watches-no-pk` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `channel/watches-unknown-table` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `codegen/cg-001-server-block-warn-pos` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `?` (statements at logic-block level are not in bootstrap slice M2)
+- `codegen/cg-export-enum-library-rep` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `=`
 - `components/invalid-prop-decl-syntax-clean` — parse-reject: E-PARSE-EXPR: expected an expression, found `:`
 - `control-flow/ctrl-001-orphan-else-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
 - `control-flow/ctrl-002-orphan-else-if-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<wizard`
@@ -293,11 +494,88 @@ dialect parse failure: the bootstrap took a retired / unknown form as something 
 - `control-flow/ctrl-004-orphan-else-on-state-opener-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
 - `control-flow/ctrl-005-else-and-if-same-element-neg` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
 - `control-flow/ctrl-005-else-and-if-same-element-pos` — parse-reject: E-PARSE-TAG: unexpected `{` in the tag `<session`
-- `control-flow/ctrl-012-bare-control-flow-default-logic-root-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `control-flow/ctrl-010-else-on-for-in-if-chain-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `item`
+- `control-flow/ctrl-010-else-on-for-without-lift-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `item`
+- `control-flow/ctrl-010-else-on-for-without-lift-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `item`
+- `control-flow/ctrl-010-for-lift-in-match-arm-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `item`
+- `control-flow/ctrl-011-for-in-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `control-flow/ctrl-012-bare-control-flow-default-logic-root-neg` — twin · bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `control-flow/ctrl-012-bare-control-flow-in-markup-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `of`
 - `control-flow/ctrl-012-default-logic-multiline-prose-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/ctrl-012-default-logic-non-leading-residual-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/ctrl-012-default-logic-prose-neg` — bootstrap-unsupported: `<page>` is a scrml structural element (§40), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `defer/yield-in-defer-neg` — bootstrap-unsupported: an unannotated parameter `gen` — bootstrap slice M2 needs `gen: Type` (Core parameters are typed)
+- `control-flow/ctrl-013-braceless-for-of-head-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `of`
+- `control-flow/ctrl-013-braceless-for-of-head-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `x`
+- `control-flow/ctrl-021-value-form-sugar-lift-less-branch-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
+- `control-flow/ctrl-022-value-form-no-else-renders-nothing-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
+- `control-flow/ctrl-023-value-form-sugar-bound-position-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
+- `control-flow/ctrl-024-value-form-sugar-bound-no-else-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
+- `control-flow/ctrl-025-arm-body-statement-is-side-effect-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
+- `control-flow/ctrl-026-arm-body-nested-value-form-decl-pos` — twin · bootstrap-unsupported: an index `a[i]` is in the bootstrap only as an element-field write target (dpa-052 Q3) — Core has no index read
+- `control-flow/ctrl-027-arm-body-tilde-read-and-recovery-pos` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `control-flow/ctrl-028-arm-body-tilde-read-orphan-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
+- `control-flow/ctrl-029-value-form-sugar-markup-branch-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
+- `control-flow/ctrl-switch-forbidden-attr-expr-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `control-flow/ctrl-switch-forbidden-fn-body-pos` — twin · bootstrap-unsupported: member access `.Busy` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `control-flow/ctrl-switch-forbidden-logic-block-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `control-flow/ctrl-switch-forbidden-match-neg` — twin · bootstrap-unsupported: member access `.Busy` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `control-flow/if-chain-branch-declared-function-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `branchHelper`
+- `control-flow/if-in-dispatched-arm-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `control-flow/if-on-match-render-gate-absent-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `control-flow/if-on-match-render-gate-mounts-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `control-flow/loop-007-separate-while-after-decl-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `control-flow/loop-007-while-as-expr-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `control-flow/loop-007-while-as-expr-no-lift-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `control-flow/loop-007-while-as-expr-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `control-flow/s437-braceless-else-in-failable-arm` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `control-flow/s437-r5-braced-else-line-comment-top-logic` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `control-flow/s437-r5-value-form-if-else-line-comment` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
+- `defer/ambiguous-lead-arm-payload-neg` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
+- `defer/ambiguous-lead-neg` — twin · bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
+- `defer/array-literal-lead` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `defer/control-flow-in-value-arms-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
+- `defer/control-flow-inner-loop-ok` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
+- `defer/control-flow-neg` — twin · bootstrap-unsupported: member access `.Bad` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `defer/cps-after-last-continuation` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `defer/cps-batch0-failure` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `defer/cps-batch1-failure` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `defer/deferred-host-error-runs-rest` — twin · bootstrap-unsupported: an unannotated parameter `o` — bootstrap slice M2 needs `o: Type` (Core parameters are typed)
+- `defer/deferred-server-call-completes` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `defer/duplicate-function-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `1`
+- `defer/duplicate-function-no-defer-ok` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `1`
+- `defer/fail-path` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `defer/function-hoist-across-defer` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `"H"`
+- `defer/handled-failable-ok` — twin · bootstrap-unsupported: member access `.Busy` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `defer/hoist-structural` — twin · bootstrap-unsupported: member access `.kind` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `defer/hoist-structural-twin` — twin · bootstrap-unsupported: member access `.kind` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `defer/later-shadow-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `defer/later-shadow-ok` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `q`
+- `defer/lifo-fallthrough` — twin · parse-reject: E-PARSE-OBJECT: expected a field name, found `@`
+- `defer/loop-per-iteration` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `i`
+- `defer/match-stmt-braced-arm` — twin · bootstrap-unsupported: member access `.A` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `defer/nested-fn-handler-in-defer` — twin · bootstrap-unsupported: member access `.Gone` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `defer/nested-fn-handler-in-defer-twin` — twin · bootstrap-unsupported: member access `.Gone` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `defer/nested-neg` — twin · parse-reject: E-PARSE-OBJECT: expected a field name, found `@`
+- `defer/outside-function-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `defer/outside-function-when-body-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `defer/propagate-path` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `defer/return-value-contents-not-frozen` — twin · bootstrap-unsupported: `.push(…)` on a local sequence is not in the bootstrap — Core has no edit of a local (write a new value: `let t = …`)
+- `defer/scope-redeclare-with-defer-neg` — twin · bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
+- `defer/server-block-nested-neg` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `defer/server-callee-error-total-handler` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `defer/server-callee-error-total-handler-twin` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `defer/server-in-split-neg` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `defer/stack-arrow-helper-before-defer` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
+- `defer/stack-arrow-helper-before-defer-twin` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
+- `defer/stack-fn-calls-fn-before-defer` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `second`
+- `defer/stack-fn-calls-fn-before-defer-twin` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `second`
+- `defer/tilde-across-defer` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `~`
+- `defer/unbraced-arm-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `i`
+- `defer/unhandled-failable-neg` — twin · bootstrap-unsupported: member access `.Busy` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `defer/unsupported-site-neg` — twin · bootstrap-unsupported: member access `.B` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `defer/value-arm-site-neg` — twin · parse-reject: E-PARSE-OBJECT: expected a field name, found `.A`
+- `defer/yield-in-defer-neg` — twin · bootstrap-unsupported: an unannotated parameter `gen` — bootstrap slice M2 needs `gen: Type` (Core parameters are typed)
+- `derived/e-derived-server-only-reach-fn-path` — twin · bootstrap-unsupported: an unannotated parameter `pw` — bootstrap slice M2 needs `pw: Type` (Core parameters are typed)
 - `endpoint/accepts-missing` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `endpoint/accepts-not-enum-primitive` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `endpoint/accepts-not-enum-struct` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -315,94 +593,305 @@ dialect parse failure: the bootstrap took a retired / unknown form as something 
 - `endpoint/path-missing` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `endpoint/self-closing-arm-exhaustive` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `endpoint/wildcard-exhaustive` — bootstrap-unsupported: `<endpoint>` is a scrml structural element (§61), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `engine/machine-alternation-binding-parity-neg` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
-- `engine/machine-alternation-binding-parity-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
-- `engine/machine-guard-undefined-self-field-neg` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
-- `engine/machine-guard-undefined-self-field-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
-- `engine/machine-rule-binding-unit-variant-neg` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
-- `engine/machine-rule-binding-unit-variant-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
-- `engine/mount-not-engine-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
-- `engine/transitions-unknown-variant-neg` — parse-reject: E-PARSE-TYPE: expected a variant name, found `{`
-- `engine/transitions-unknown-variant-pos` — parse-reject: E-PARSE-TYPE: expected a variant name, found `{`
-- `engine/type-level-transitions-guard-neg` — parse-reject: E-PARSE-TYPE: expected a variant name, found `{`
-- `engine/type-level-transitions-guard-pos` — parse-reject: E-PARSE-TYPE: expected a variant name, found `{`
-- `equality/cross-type-primitive-reject` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `equality/eq-not-reject` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `equality/equality-operator-clean` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `equality/is-not-clean` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `equality/same-type-primitive-clean` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `equality/strict-operator-reject` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `error/propagate-in-non-failable-fn-pos` — parse-reject: E-PARSE-EXPECTED: expected `{`, found `!`
-- `fn/arrow-body-reject` — bootstrap-unsupported: the argument of `.map(…)` must be an arrow function of one parameter, `x => …` (the bootstrap has no other function value)
-- `fn/async-decl-reject` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `async` (statements at logic-block level are not in bootstrap slice M2)
-- `fn/deterministic-call-clean` — bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
-- `fn/dom-mutation-pure-value-clean` — bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
-- `fn/dom-mutation-reject` — bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
-- `fn/lift-local-accumulator-clean` — parse-reject: E-PARSE-EXPR: expected an expression, found `~`
+- `engine/match-in-state-child-warns` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `engine/mount-not-engine-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `engine/msg-without-accepts-pos` — twin · bootstrap-unsupported: `<*gate/>` — rendering a field is in the bootstrap only for a `rule=` graph field whose state-children have bodies (O5 (1i)); `gate` has none (a field with no markup of its own is ⚑ O51)
+- `engine/on-timeout` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `engine/on-timeout-no-advance` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `engine/onidle-duplicate-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `m` after the expression
+- `engine/onidle-invalid-variant-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `m` after the expression
+- `engine/onidle-legal-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `m` after the expression
+- `engine/onidle-misplaced-pos` — twin · bootstrap-unsupported: `<onIdle>` is a scrml structural element (§51.0.R), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `engine/ontimeout-invalid-target-pos` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `engine/ontimeout-legal-neg` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `engine/ontimeout-misplaced-markup-pos` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `engine/ontimeout-misplaced-pos` — twin · bootstrap-unsupported: `<onTimeout>` is a scrml structural element (§51.0.M), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `engine/ontransition-no-target-neg` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `engine/ontransition-no-target-pos` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `engine/payload-reserved-collision-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<Done`
+- `engine/phase-advance` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `engine/rule-violation-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `engine/rule-violation-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `engine/s437-braceless-else-in-effect-bodies` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `engine/self-target-ontransition-pos` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `engine/self-write-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `engine/self-write-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `engine/transitions-unknown-variant-neg` — twin · parse-reject: E-PARSE-TYPE: expected a variant name, found `{`
+- `engine/transitions-unknown-variant-pos` — twin · parse-reject: E-PARSE-TYPE: expected a variant name, found `{`
+- `engine/type-level-transitions-guard-neg` — twin · parse-reject: E-PARSE-TYPE: expected a variant name, found `{`
+- `engine/type-level-transitions-guard-pos` — twin · parse-reject: E-PARSE-TYPE: expected a variant name, found `{`
+- `equality/cross-type-primitive-reject` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `equality/eq-not-reject` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `equality/equality-operator-clean` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `equality/is-not-clean` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `equality/same-type-primitive-clean` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `equality/strict-operator-reject` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `error/async-not-in-scrml` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `error/construct-variant-payload-arity-let-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `error/construct-variant-payload-arity-ok` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/construct-variant-payload-arity-return-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/construct-variant-payload-arity-trailing-comma-ok` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/error-008-message-pos` — twin · parse-reject: E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
+- `error/error-008-neg` — twin · parse-reject: E-PARSE-TYPE: expected `:enum` or `:struct`, found `:error`
+- `error/fail-bare-variant-payload-arity-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/fail-bare-variant-reaches-handler` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/fail-bare-variant-undeclared-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/fail-imported-builtin-name-enum-neg` — twin · bootstrap-unsupported: member access `.Nope` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/fail-imported-builtin-name-enum-ok` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/fail-in-failable-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/fail-non-enum-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `{`, found `!`
+- `error/fail-outside-failable` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/fail-variant-foreign-enum-neg` — twin · bootstrap-unsupported: member access `.Whatever` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/fail-variant-payload-arity-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/fail-variant-payload-arity-too-few-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/fail-variant-undeclared-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/failable-handler-lift` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/failable-handler-lift-success` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/failable-handler-lift-timeout` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/failable-match-nonexhaustive-err` — twin · bootstrap-unsupported: member access `.NotFound` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/failable-match-nonexhaustive-ok` — twin · bootstrap-unsupported: member access `.NotFound` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/for-await-not-in-scrml` — twin · bootstrap-unsupported: an unannotated parameter `items` — bootstrap slice M2 needs `items: Type` (Core parameters are typed)
+- `error/handler-exhaustive-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/handler-failable-guard-and-plain-reference-neg` — twin · bootstrap-unsupported: member access `.Empty` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/handler-failable-reference-pos` — twin · bootstrap-unsupported: `<errorBoundary>` is a scrml structural element (§19 error boundary), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error/handler-guard-in-arrow-rt` — twin · bootstrap-unsupported: member access `.Empty` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/handler-guard-in-match-arm-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error/handler-non-exhaustive` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/handler-recovery-into-cell` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/handler-unhandled-failable-arrow-pos` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
+- `error/handler-unhandled-failable-bare-and-expr-pos` — twin · bootstrap-unsupported: member access `.Empty` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/handler-unhandled-failable-multi-stmt-pos` — twin · bootstrap-unsupported: member access `.Empty` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/handler-unhandled-failable-one-stmt-pos` — twin · bootstrap-unsupported: member access `.Empty` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/handler-wildcard-escape` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `error/implicit-tx-explicit-begin` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `error/match-failable-ok-arm-rt` — twin · bootstrap-unsupported: an unannotated parameter `a` — bootstrap slice M2 needs `a: Type` (Core parameters are typed)
+- `error/propagate-in-non-failable-fn-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `{`, found `!`
+- `error/propagate-in-non-failable-fn-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `{`, found `!`
+- `error/propagate-incompat-variants` — twin · bootstrap-unsupported: member access `.Alpha` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/propagate-non-failable-callee-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `{`, found `!`
+- `error/propagate-non-failable-callee-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `{`, found `!`
+- `error/propagate-reaches-handler` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/propagate-success-unwrap` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `error/render-no-clause-neg` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error/render-no-clause-pos` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error/render-no-of-neg` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error/render-no-of-pos` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error/render-not-enum-neg` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error/render-not-enum-pos` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `error/renders-payload-field-ok` — twin · parse-reject: E-PARSE-TYPE: expected a variant name, found `<`
+- `error/renders-undefined-var` — twin · parse-reject: E-PARSE-TYPE: expected a variant name, found `<`
+- `error/try-not-in-scrml` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `x`
+- `fn/arrow-body-reject` — twin · bootstrap-unsupported: the argument of `.map(…)` must be an arrow function of one parameter, `x => …` (the bootstrap has no other function value)
+- `fn/async-decl-reject` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `fn/deterministic-call-clean` — twin · bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
+- `fn/dom-mutation-pure-value-clean` — twin · bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
+- `fn/dom-mutation-reject` — twin · bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
+- `fn/lift-local-accumulator-clean` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `~`
 - `fn/lift-outer-accumulator-reject` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `~` (statements at logic-block level are not in bootstrap slice M2)
-- `fn/nondeterministic-call-reject` — bootstrap-unsupported: `build()` reads the clock (`Date.now()`, directly or through a function it calls) — here (an initializer, markup, or an attribute value) that is not in the bootstrap; its host-call surface is a `funct
-- `fn/reactive-read-clean` — bootstrap-unsupported: an unannotated parameter `a` — bootstrap slice M2 needs `a: Type` (Core parameters are typed)
-- `fn/reactive-write-reject` — bootstrap-unsupported: an unannotated parameter `a` — bootstrap slice M2 needs `a: Type` (Core parameters are typed)
-- `fn/sql-access-in-function-clean` — bootstrap-unsupported: an unannotated parameter `id` — bootstrap slice M2 needs `id: Type` (Core parameters are typed)
-- `fn/sql-access-reject` — bootstrap-unsupported: an unannotated parameter `id` — bootstrap slice M2 needs `id: Type` (Core parameters are typed)
-- `fn/sync-decl-clean` — bootstrap-unsupported: an unannotated parameter `id` — bootstrap slice M2 needs `id: Type` (Core parameters are typed)
-- `form-for/formfor-error-strategy-invalid` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-nested-struct-no-slot` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-nested-struct-with-slot-clean` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-not-imported` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-omit-invalid-field` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-omit-valid-clean` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-onsubmit-signature` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-pick-invalid-field` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-pick-omit-conflict` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-pick-valid-clean` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-slot-unknown` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-submit-collects-values` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-type-not-struct` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-typing-errors` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-valid-enables-submit` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `form-for/formfor-validity-bug58-clean` — bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `fn/nondeterministic-call-reject` — twin · bootstrap-unsupported: `build()` reads the clock (`Date.now()`, directly or through a function it calls) — here (an initializer, markup, or an attribute value) that is not in the bootstrap; its host-call surface is a `funct
+- `fn/reactive-read-clean` — twin · bootstrap-unsupported: an unannotated parameter `a` — bootstrap slice M2 needs `a: Type` (Core parameters are typed)
+- `fn/reactive-write-reject` — twin · bootstrap-unsupported: an unannotated parameter `a` — bootstrap slice M2 needs `a: Type` (Core parameters are typed)
+- `fn/scope-redeclare-fn-over-param-ok` — twin · bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
+- `fn/scope-redeclare-neg` — twin · bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
+- `fn/scope-redeclare-nested-ok` — twin · bootstrap-unsupported: an unannotated parameter `w` — bootstrap slice M2 needs `w: Type` (Core parameters are typed)
+- `fn/sql-access-in-function-clean` — twin · bootstrap-unsupported: an unannotated parameter `id` — bootstrap slice M2 needs `id: Type` (Core parameters are typed)
+- `fn/sql-access-reject` — twin · bootstrap-unsupported: an unannotated parameter `id` — bootstrap slice M2 needs `id: Type` (Core parameters are typed)
+- `fn/sync-decl-clean` — twin · bootstrap-unsupported: an unannotated parameter `id` — bootstrap slice M2 needs `id: Type` (Core parameters are typed)
+- `foreign/foreign-bare-block-neg` — twin · bootstrap-unsupported: `<foreign>` is a scrml structural element (§23.6), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `foreign/foreign-crossing-clean-pos` — twin · bootstrap-unsupported: `<foreign>` is a scrml structural element (§23.6), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `foreign/foreign-crossing-shadow-neg` — twin · bootstrap-unsupported: `<foreign>` is a scrml structural element (§23.6), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `foreign/foreign-inline-lang-declared-pos` — twin · bootstrap-unsupported: `<foreign>` is a scrml structural element (§23.6), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `foreign/foreign-inline-no-lang-neg` — twin · parse-reject: E-PARSE-OBJECT: expected a field name, found `1`
+- `foreign/foreign-lang-duplicate-neg` — twin · bootstrap-unsupported: `<foreign>` is a scrml structural element (§23.6), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `foreign/foreign-lang-single-pos` — twin · bootstrap-unsupported: `<foreign>` is a scrml structural element (§23.6), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `foreign/foreign-lang-unsupported-neg` — twin · bootstrap-unsupported: `<foreign>` is a scrml structural element (§23.6), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-error-strategy-invalid` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-nested-struct-no-slot` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-nested-struct-with-slot-clean` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-not-imported` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-omit-invalid-field` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-omit-valid-clean` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-onsubmit-signature` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-pick-invalid-field` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-pick-omit-conflict` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-pick-valid-clean` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-slot-unknown` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-submit-collects-values` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-type-not-struct` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-typing-errors` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-valid-enables-submit` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `form-for/formfor-validity-bug58-clean` — twin · bootstrap-unsupported: `<formFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `forms/derived-refinement-type-accepted` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<doubled`
+- `forms/validator-applies-min-on-string-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
+- `forms/validator-applies-pattern-on-number-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
+- `forms/validator-applies-typed-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `@` (statements at logic-block level are not in bootstrap slice M2)
+- `hostmethod/substring-match-typed` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
 - `input/input-001-neg` — bootstrap-unsupported: `<keyboard>` is a scrml structural element (§36 input state), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `input/input-001-pos` — bootstrap-unsupported: `<keyboard>` is a scrml structural element (§36 input state), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `lifecycle/cleanup-error-call-expression` — parse-reject: E-PARSE-EXPECTED: expected `}`, found `closeConnection`
-- `lifecycle/cleanup-error-outside-element-scope` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `cleanup` (statements at logic-block level are not in bootstrap slice M2)
+- `lifecycle/cleanup-error-outside-element-scope` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
 - `lifecycle/cleanup-happy-arrow-and-reference` — parse-reject: E-PARSE-EXPECTED: expected `}`, found `teardown`
-- `linear/lin-004-recurring-ctx-timer-neg` — bootstrap-unsupported: `<timer>` is a scrml structural element (§6.7 lifecycle), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `linear/lin-004-recurring-ctx-timer-pos` — bootstrap-unsupported: `<timer>` is a scrml structural element (§6.7 lifecycle), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `linear/lin-006-deferred-ctx-neg` — bootstrap-unsupported: `<request>` is a scrml structural element (§6.7.7 async request), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `linear/lin-006-deferred-ctx-pos` — bootstrap-unsupported: `<request>` is a scrml structural element (§6.7.7 async request), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `match-block/member-access-complete-clean` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
-- `match-block/member-access-nonexhaustive` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
-- `match-block/member-access-subset-dead-arm` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
-- `match-codes/e-match-012-tnot-else-exhaustive-neg` — bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `match-codes/e-match-012-tnot-missing-not-arm-pos` — bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `match-codes/e-match-012-tnot-not-arm-exhaustive-neg` — bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `match-codes/e-match-arm-markup-in-value-neg` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
-- `match-codes/e-match-arm-markup-in-value-pos` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
-- `match-codes/e-syntax-010-else-last-neg` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
-- `match-codes/e-syntax-010-else-not-last-pos` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
-- `match-codes/e-syntax-011-guard-clause-pos` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `,`
-- `match-codes/e-syntax-011-plain-pattern-neg` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `,`
-- `match-codes/e-type-006-multi-scrutinee-exhaustive-neg` — parse-reject: E-PARSE-OBJECT: expected a field name, found `(`
-- `match-codes/e-type-006-multi-scrutinee-union-pos` — parse-reject: E-PARSE-OBJECT: expected a field name, found `(`
-- `match-codes/e-type-024-enum-subject-neg` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
-- `match-codes/e-type-024-struct-subject-pos` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
-- `match-codes/e-type-025-asis-subject-pos` — parse-reject: E-PARSE-EXPR: expected an expression, found `>`
-- `match-codes/e-type-025-enum-subject-neg` — bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `middleware/duplicate-handle-neg` — bootstrap-unsupported: an unannotated parameter `request` — bootstrap slice M2 needs `request: Type` (Core parameters are typed)
-- `middleware/duplicate-handle-pos` — bootstrap-unsupported: an unannotated parameter `request` — bootstrap slice M2 needs `request: Type` (Core parameters are typed)
-- `module/e-import-003-host-import-inside-logic-reject` — bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `module/e-import-008-host-import-no-manifest-reject` — bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `module/e-import-008-plain-import-clean` — bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
-- `module/e-import-009-host-tag-unknown-reject` — parse-reject: E-PARSE-EXPECTED: expected `{`, found `:`
-- `navigate/explicit-variants` — bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `navigate/no-path-error` — bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `navigate/soft-scope-clean` — bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `lifecycle/effect-ambiguous-multi-target` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `lifecycle/effect-empty-body-neg` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
+- `lifecycle/effect-nested-neg` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
+- `lifecycle/effect-nested-pos` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
+- `lifecycle/effect-no-deps-empty-list-pos` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
+- `lifecycle/effect-no-deps-neg` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
+- `lifecycle/effect-no-deps-pos` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
+- `lifecycle/effect-on-leave` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `lifecycle/effect-ontransition-coexist` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `lifecycle/effect-write-unproven-neg` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
+- `lifecycle/effect-write-unproven-pos` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
+- `lifecycle/effect-writes-state-neg` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
+- `lifecycle/effect-writes-state-transitive-pos` — twin · bootstrap-unsupported: an unannotated parameter `c` — bootstrap slice M2 needs `c: Type` (Core parameters are typed)
+- `lifecycle/on-transition-from` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `lifecycle/ontransition-once-if-attrs` — twin · bootstrap-unsupported: `<onTransition>` is a scrml structural element (§51.0.H), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `lifecycle/when-effect-deprecated-neg` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
+- `lifecycle/when-effect-deprecated-pos` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
+- `linear/lin-001-never-consumed-neg` — twin · bootstrap-unsupported: an unannotated parameter `t` — bootstrap slice M2 needs `t: Type` (Core parameters are typed)
+- `linear/lin-001-never-consumed-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `linear/lin-002-consumed-in-loop-neg` — twin · bootstrap-unsupported: an unannotated parameter `t` — bootstrap slice M2 needs `t: Type` (Core parameters are typed)
+- `linear/lin-002-consumed-in-loop-pos` — twin · bootstrap-unsupported: an unannotated parameter `t` — bootstrap slice M2 needs `t: Type` (Core parameters are typed)
+- `linear/lin-002-double-use-pos` — twin · bootstrap-unsupported: an unannotated parameter `t` — bootstrap slice M2 needs `t: Type` (Core parameters are typed)
+- `linear/lin-003-branch-asymmetry-neg` — twin · bootstrap-unsupported: an unannotated parameter `t` — bootstrap slice M2 needs `t: Type` (Core parameters are typed)
+- `linear/lin-003-branch-asymmetry-pos` — twin · bootstrap-unsupported: an unannotated parameter `t` — bootstrap slice M2 needs `t: Type` (Core parameters are typed)
+- `linear/lin-004-recurring-ctx-timer-neg` — twin · bootstrap-unsupported: `<timer>` is a scrml structural element (§6.7 lifecycle), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `linear/lin-004-recurring-ctx-timer-pos` — twin · bootstrap-unsupported: `<timer>` is a scrml structural element (§6.7 lifecycle), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `linear/lin-005-shadow-lin-neg` — twin · bootstrap-unsupported: an unannotated parameter `t` — bootstrap slice M2 needs `t: Type` (Core parameters are typed)
+- `linear/lin-005-shadow-lin-pos` — twin · bootstrap-unsupported: an unannotated parameter `t` — bootstrap slice M2 needs `t: Type` (Core parameters are typed)
+- `linear/lin-006-deferred-ctx-neg` — twin · bootstrap-unsupported: `<request>` is a scrml structural element (§6.7.7 async request), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `linear/lin-006-deferred-ctx-pos` — twin · bootstrap-unsupported: `<request>` is a scrml structural element (§6.7.7 async request), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `loop/loop-001-break-outside` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `loop/loop-002-continue-outside` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `loop/loop-005-break-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `loop/loop-005-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `loop/loop-006-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `loop/loop-006-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `loop/w-assign-001-severity-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `markup-handler/inline-block-handler-assign-led-order` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
+- `markup-handler/inline-block-handler-call-first` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
+- `markup-handler/inline-block-handler-in-engine-state-child` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
+- `markup-handler/inline-block-handler-in-engine-state-child-call-led` — twin · bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
+- `markup-handler/inline-block-handler-in-match-arm` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `markup-handler/inline-block-handler-runs-every-statement` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
+- `markup-handler/multi-stmt-handler-assign-led-pos` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
+- `markup-handler/multi-stmt-handler-attr-pos` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
+- `markup-handler/multi-stmt-handler-colon-shorthand-pos` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
+- `markup-handler/multi-stmt-handler-in-engine-state-child-pos` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
+- `markup-handler/multi-stmt-handler-in-match-arm-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `markup-handler/s437-r4-arrow-block-seq-dollar-each-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `markup-handler/s437-r4-arrow-block-seq-dollar-engine-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `markup-handler/s437-r4-arrow-block-seq-dollar-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `markup-handler/s437-r4-arrow-block-seq-dollar-top-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `markup-handler/s437-r4-arrow-seq-braced-each-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
+- `markup-handler/s437-r4-arrow-seq-braced-engine-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
+- `markup-handler/s437-r4-arrow-seq-braced-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `markup-handler/s437-r4-arrow-seq-braced-top-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
+- `markup-handler/s437-r4-arrow-seq-dollar-each-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `markup-handler/s437-r4-arrow-seq-dollar-engine-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `markup-handler/s437-r4-arrow-seq-dollar-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `markup-handler/s437-r4-arrow-seq-dollar-top-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `markup-handler/s437-r4-dangling-else-function-body-neg` — twin · parse-reject: E-PARSE-OBJECT: expected a field name, found `@`
+- `markup-handler/s437-r4-dangling-else-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `markup-handler/s437-r4-single-arrow-expr-form-ok` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `markup-handler/s437-r4-try-braced-each-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
+- `markup-handler/s437-r4-try-braced-engine-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
+- `markup-handler/s437-r4-try-braced-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `markup-handler/s437-r4-try-braced-top-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `(`
+- `markup-handler/s437-r4-undeclared-cell-2nd-each-neg` — twin · bootstrap-unsupported: `@zz = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@zz.f = …`)
+- `markup-handler/s437-r4-undeclared-cell-2nd-engine-neg` — twin · bootstrap-unsupported: `@zz = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@zz.f = …`)
+- `markup-handler/s437-r4-undeclared-cell-2nd-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `markup-handler/s437-r4-undeclared-cell-2nd-top-neg` — twin · bootstrap-unsupported: `@zz = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@zz.f = …`)
+- `markup-handler/s437-r4-undeclared-fn-2nd-match-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `markup-handler/s450-attr-multi-statement-neg` — twin · bootstrap-unsupported: an arrow function with a braced body is not in the bootstrap — write an expression body
+- `markup-handler/s450-attr-multi-statement-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `;`
+- `match-block/empty-wildcard-clear` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-block/inline-markup-match` — twin · bootstrap-unsupported: member access `.Grid` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-block/member-access-complete-clean` — twin · bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-block/member-access-nonexhaustive` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
+- `match-block/member-access-subset-dead-arm` — twin · bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-block/payload-bind` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-block/phase-arm-swap` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-block/round-trip` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-block/wildcard` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-codes/e-match-012-tnot-else-exhaustive-neg` — twin · bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-codes/e-match-012-tnot-missing-not-arm-pos` — twin · bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-codes/e-match-012-tnot-not-arm-exhaustive-neg` — twin · bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-codes/e-match-arm-markup-in-value-neg` — twin · bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-codes/e-match-arm-markup-in-value-pos` — twin · bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-codes/e-match-block-in-lift-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-codes/e-match-block-in-lift-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `)`, found `s`
+- `match-codes/e-match-effect-forbidden-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-codes/e-match-effect-forbidden-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-codes/e-match-on-required-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-codes/e-match-on-required-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-codes/e-match-ontransition-forbidden-neg` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-codes/e-match-ontransition-forbidden-pos` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `match-codes/e-syntax-010-else-last-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
+- `match-codes/e-syntax-010-else-not-last-pos` — twin · bootstrap-unsupported: member access `.Admin` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-codes/e-syntax-011-guard-clause-pos` — twin · bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-codes/e-syntax-011-plain-pattern-neg` — twin · bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-codes/e-type-006-multi-scrutinee-exhaustive-neg` — twin · parse-reject: E-PARSE-OBJECT: expected a field name, found `(`
+- `match-codes/e-type-006-multi-scrutinee-union-pos` — twin · parse-reject: E-PARSE-OBJECT: expected a field name, found `(`
+- `match-codes/e-type-024-enum-subject-neg` — twin · bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-codes/e-type-024-struct-subject-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
+- `match-codes/e-type-025-asis-subject-pos` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `>`
+- `match-codes/e-type-025-enum-subject-neg` — twin · bootstrap-unsupported: member access `.Editor` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `match-codes/e-type-026-match-in-logic-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
+- `meta/meta-compiler-namespace-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-emit-clean-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-emit-normalize-escape` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-emit-raw-escape` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-emit-splice-render-rt` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-eval-clean-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-eval-reparse-error-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-eval-runtime-error-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-invalid-token-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-jshost-global-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-mixed-patterns-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-nested-block-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-reflect-clean-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-reflect-outside-block-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-reflect-unknown-type-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `meta/meta-sql-in-runtime-block-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `middleware/duplicate-handle-neg` — twin · bootstrap-unsupported: an unannotated parameter `request` — bootstrap slice M2 needs `request: Type` (Core parameters are typed)
+- `middleware/duplicate-handle-pos` — twin · bootstrap-unsupported: an unannotated parameter `request` — bootstrap slice M2 needs `request: Type` (Core parameters are typed)
+- `module/e-export-001-export-const-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-export-001-export-state-cell-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `{` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-export-002-component-multiroot-reject` — twin · parse-reject: E-PARSE-EXPORT: `export` applies to a declaration, not to markup
+- `module/e-export-002-component-single-root-clean` — twin · parse-reject: E-PARSE-EXPORT: `export` applies to a declaration, not to markup
+- `module/e-import-001-export-inside-logic-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-002-acyclic-import-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-002-circular-import-reject` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-import-003-host-import-inside-logic-reject` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `module/e-import-003-import-inside-fn-reject` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `}`
+- `module/e-import-008-host-import-no-manifest-reject` — twin · bootstrap-unsupported: member access `.length` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `module/e-import-008-plain-import-clean` — twin · bootstrap-unsupported: an unannotated parameter `name` — bootstrap slice M2 needs `name: Type` (Core parameters are typed)
+- `module/e-import-009-host-tag-unknown-reject` — twin · parse-reject: E-PARSE-EXPECTED: expected `{`, found `:`
+- `module/e-import-pinned-const-clean` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
+- `module/e-scope-010-filescope-distinct-clean` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `module/e-scope-010-filescope-duplicate-reject` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `module/e-use-001-use-inside-logic-reject` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `navigate/explicit-variants` — twin · bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `navigate/no-path-error` — twin · bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `navigate/soft-scope-clean` — twin · bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `outlet/class-id` — bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `outlet/duplicate` — bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `outlet/duplicate-branch-exclusive` — twin · bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `outlet/if-guard-false` — twin · bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `outlet/logic-child` — twin · bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `outlet/outside-shell` — twin · bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `outlet/recognized-clean` — bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `parse-syntax/e-syntax-042-not-value-position-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `parse-syntax/e-syntax-042-null-value-position-pos` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
+- `parse-syntax/e-syntax-042-not-value-position-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `parse-syntax/e-syntax-042-null-value-position-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `parse-variant/error-invalid-payload` — twin · bootstrap-unsupported: `|` outside a `rule=` alternation is not in bootstrap slice M2
+- `parse-variant/error-malformed-json` — twin · bootstrap-unsupported: `|` outside a `rule=` alternation is not in bootstrap slice M2
+- `parse-variant/error-missing-discriminator` — twin · bootstrap-unsupported: `|` outside a `rule=` alternation is not in bootstrap slice M2
+- `parse-variant/error-unknown-variant` — twin · bootstrap-unsupported: `|` outside a `rule=` alternation is not in bootstrap slice M2
+- `parse-variant/happy-payload-variant` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `parse-variant/happy-unit-variant` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `parse-variant/misuse-non-enum-type` — twin · bootstrap-unsupported: `|` outside a `rule=` alternation is not in bootstrap slice M2
+- `parse-variant/single-field-payload-bind` — twin · bootstrap-unsupported: `|` outside a `rule=` alternation is not in bootstrap slice M2
 - `print/tool-println-clean-stdout` — parse-reject: E-PARSE-EXPECTED: expected `{`, found `:`
 - `protect/comment-prefixed-strip-info` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/cte-strip-info` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -417,32 +906,61 @@ dialect parse failure: the bootstrap took a retired / unknown form as something 
 - `protect/e-protect-005-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/e-protect-005-pos` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/endpoint-multikey-arm-response` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `protect/length-object-e006` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/mediated-response-passthrough` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `protect/nonprotected-field-runtime` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/null-body-response-clean` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/raw-egress-e004` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/reveal-suppresses-e004` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `protect/reveal-then-arithmetic-clean` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/reveal-wrong-column-e004` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/safe-projection-no-strip` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/sse-yield-strip` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/strip-info-select-star` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/w-protect-005-null-body-static` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `reactive/debounce-on-server` — twin · parse-reject: E-PARSE-TRAILING: unexpected `ms` after the expression
+- `reactive/debounce-trailing-commit` — twin · parse-reject: E-PARSE-TRAILING: unexpected `s` after the expression
+- `reactive/debounce-valid-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `ms` after the expression
 - `reactive/dg-001-cyclic-neg` — bootstrap-unsupported: an unannotated parameter `id` — bootstrap slice M2 needs `id: Type` (Core parameters are typed)
 - `reactive/dg-001-cyclic-pos` — bootstrap-unsupported: an unannotated parameter `id` — bootstrap slice M2 needs `id: Type` (Core parameters are typed)
-- `schema-for/error-invalid-call-context` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `length`
-- `schema-for/error-nested-struct-no-fk` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `schema-for/error-no-sql-mapping` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `schema-for/error-no-sql-mapping-canonical-array` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `schema-for/error-omit-invalid-field` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `schema-for/error-pick-invalid-field` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `schema-for/error-pick-omit-conflict` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `schema-for/error-type-not-struct` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `schema-for/error-variant-payload-enum` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `schema-for/happy-canonical-expansion` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `schema-for/happy-enum-lowering` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `schema-for/happy-multi-table-composition` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `schema-for/happy-nullable-field` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `schema-for/invalid-call-context-attr` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `length`
-- `schema-for/invalid-call-context-handler` — parse-reject: E-PARSE-EXPECTED: expected `:`, found `length`
+- `reactive/fn-mutual-recursion-hoist` — twin · bootstrap-unsupported: an unannotated parameter `n` — bootstrap slice M2 needs `n: Type` (Core parameters are typed)
+- `reactive/hoist-forward-ref-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `reactive/is-literal-rhs-reject` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `reactive/pinned-forward-ref` — twin · bootstrap-unsupported: `pinned` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
+- `reactive/reactivity-attr-conflict` — twin · parse-reject: E-PARSE-TRAILING: unexpected `ms` after the expression
+- `reactive/reset-init-after-assignment-in-if-rt` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `reactive/reset-init-after-assignment-rt` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `reactive/reset-to-default` — twin · bootstrap-unsupported: `default` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
+- `reactive/s437-r5-template-cell-read-value-attr` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `color: `
+- `reactive/server-fn-ambient-identity-clean` — twin · bootstrap-unsupported: member access `.id` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `reactive/server-fn-authority-wholly-server-error` — twin · bootstrap-unsupported: `server` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement
+- `reactive/server-fn-rawvar-read-error` — twin · parse-reject: E-PARSE-EXPECTED: expected `{`, found `:`
+- `reactive/throttle-leading` — twin · parse-reject: E-PARSE-TRAILING: unexpected `s` after the expression
+- `reactive/throttle-trailing-commit` — twin · parse-reject: E-PARSE-TRAILING: unexpected `s` after the expression
+- `reactive/write-not-in-logic-context-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `reactive/write-not-in-logic-context-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `refinement/boundary-reject-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `refinement/external-ref-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<hp`
+- `refinement/inhabit-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `refinement/literal-violation-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<amount`
+- `refinement/string-shape-inhabit-rt` — twin · bootstrap-unsupported: an unannotated parameter `` — bootstrap slice M2 needs `: Type` (Core parameters are typed)
+- `refinement/string-shape-literal-violation-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<email`
+- `refinement/unknown-shape-pos` — twin · parse-reject: E-PARSE-TAG: unexpected `(` in the tag `<s`
+- `schema-for/error-invalid-call-context` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `length`
+- `schema-for/error-nested-struct-no-fk` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `schema-for/error-no-sql-mapping` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `schema-for/error-no-sql-mapping-canonical-array` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `schema-for/error-omit-invalid-field` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `schema-for/error-pick-invalid-field` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `schema-for/error-pick-omit-conflict` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `schema-for/error-type-not-struct` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `schema-for/error-variant-payload-enum` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `schema-for/happy-canonical-expansion` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `schema-for/happy-enum-lowering` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `schema-for/happy-multi-table-composition` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `schema-for/happy-nullable-field` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `schema-for/invalid-call-context-attr` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `length`
+- `schema-for/invalid-call-context-handler` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `length`
 - `schema/clean-pos` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `schema/schema-001-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `schema/schema-002-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -453,30 +971,566 @@ dialect parse failure: the bootstrap took a retired / unknown form as something 
 - `schema/schema-015-comment-in-head-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `schema/schema-015-disagree-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `schema/w-schema-001-warn` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `server-db/async-call-then-in-handler-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/async-fn-escapes-as-value-handler-neg` — twin · bootstrap-unsupported: an unannotated parameter `f` — bootstrap slice M2 needs `f: Type` (Core parameters are typed)
+- `server-db/async-fn-escapes-handler-destructured-scheduler-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/async-fn-escapes-scheduler-s09-monkeypatch-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/async-fn-escapes-scheduler-s15-window-patch-neg` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
+- `server-db/cps-idempotency-store-driver-mismatch-neg` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `server-db/cps-idempotency-store-driver-mismatch-pos` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `server-db/cps-idempotency-store-missing-import-neg` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `server-db/cps-idempotency-store-missing-import-pos` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `server-db/cps-nonidem-no-storage-neg` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `server-db/cps-nonidem-no-storage-pos` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `server-db/event-after-await-e01-destructure-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-after-await-e02-dynkey-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-after-await-e04-dotcall-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-after-await-e09-objwrap-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-after-await-e10-methodref-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-after-await-e13-fndecl-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-after-await-e16-closure-param-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-after-await-e20-comma-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-after-await-e21-arrayalias-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-after-await-e22-returnValue-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-after-await-e23-cancelBubble-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-after-await-e25-before-ok-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-after-await-h03-helper-after-await-neg` — twin · bootstrap-unsupported: an unannotated parameter `e` — bootstrap slice M2 needs `e: Type` (Core parameters are typed)
+- `server-db/event-after-await-h08-n3-inner-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-control-after-await-alias-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-control-after-await-bracket-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-control-after-await-closure-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/event-control-after-await-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/first-class-fn-ref-server-helper-rt` — twin · bootstrap-unsupported: an unannotated parameter `rows` — bootstrap slice M2 needs `rows: Type` (Core parameters are typed)
+- `server-db/inline-handler-server-call-condition-runtime` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-db/inline-handler-server-call-sort-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `server-db/nested-helper-server-fn-some-runtime` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
 - `server-db/nested-helper-server-fn-sort-neg` — bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
-- `server-db/sql-configured-db-no-e-sql-004` — bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
-- `server-db/sql-missing-db-e-sql-004-neg` — bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
-- `sql/bare-identifier-body-e-sql-003-neg` — bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
-- `sql/comment-cloaked-body-e-sql-003-neg` — bootstrap-unsupported: an unannotated parameter `q` — bootstrap slice M2 needs `q: Type` (Core parameters are typed)
-- `sql/runtime-expr-body-e-sql-003-neg` — bootstrap-unsupported: an unannotated parameter `q` — bootstrap slice M2 needs `q: Type` (Core parameters are typed)
-- `ssr/i-ssr-auth-scoped-prerender-omitted-pos` — bootstrap-unsupported: `<db>` is a scrml structural element (§39 database), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `ssr/i-ssr-each-client-rendered-author-template-pos` — bootstrap-unsupported: member access `.id` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `ssr/i-ssr-each-client-rendered-subset-pos` — bootstrap-unsupported: member access `.id` on a value that is not a struct or an instance is not in bootstrap slice M2
-- `ssr/ssr-first-paint-redacted-runtime` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `ssr/ssr-first-paint-render` — bootstrap-unsupported: member access `.id` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `server-db/nested-helper-sibling-block-let-some-runtime` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `server-db/on-mount-server-call-some-runtime` — twin · bootstrap-unsupported: an unannotated parameter `x` — bootstrap slice M2 needs `x: Type` (Core parameters are typed)
+- `server-db/server-fn-writes-reactive-cell-neg` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `server-db/server-fn-writes-reactive-cell-pos` — twin · bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `server-db/sql-configured-db-no-e-sql-004` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `server-db/sql-missing-db-e-sql-004-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `server-fn/branch-declared-server-fn-routes-to-server` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `fn`
+- `server-fn/cell-assign-failable-arm-return-live` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `server-fn/cell-assign-failable-recovery-value` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `server-fn/cell-assign-failable-success-then-read` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `server-fn/cell-assign-independent-writes-batched` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-fn/cell-assign-read-after-write` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-fn/cell-assign-successive-writes-ordered` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `server-fn/e-route-002-neg` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `?`
+- `server-fn/e-route-002-pos` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `?`
+- `server-fn/e-route-003-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `Item`
+- `server-fn/e-route-003-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `function`
+- `server-fn/e-route-004-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `function`
+- `server-fn/e-route-004-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `function`
+- `server-fn/e-route-005-neg` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `?`
+- `server-fn/e-route-005-pos` — twin · parse-reject: E-PARSE-EXPR: expected an expression, found `?`
+- `sql/bare-identifier-body-e-sql-003-neg` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
+- `sql/comment-cloaked-body-e-sql-003-neg` — twin · bootstrap-unsupported: an unannotated parameter `q` — bootstrap slice M2 needs `q: Type` (Core parameters are typed)
+- `sql/prepare-sse-generator-e-sql-006-neg` — twin · bootstrap-unsupported: `<db>` is a scrml structural element (§39 database), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `sql/runtime-expr-body-e-sql-003-neg` — twin · bootstrap-unsupported: an unannotated parameter `q` — bootstrap slice M2 needs `q: Type` (Core parameters are typed)
 - `style/program-scope-overlap-soft` — bootstrap-unsupported: a `#{…}` CSS block is not in bootstrap slice M2
-- `style/theme-misplaced` — bootstrap-unsupported: `<theme>` (§66.17 — tokens lower to CSS custom properties) is not in the bootstrap: it has no CSS emission in this slice
-- `style/theme-name-collision` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `const` (statements at logic-block level are not in bootstrap slice M2)
-- `style/theme-tokens-recognized` — bootstrap-unsupported: `<theme>` (§66.17 — tokens lower to CSS custom properties) is not in the bootstrap: it has no CSS emission in this slice
+- `style/theme-name-collision` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `table-for/tablefor-rows-missing` — twin · bootstrap-unsupported: `<tableFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `table-for/tablefor-rows-wrong-type` — twin · bootstrap-unsupported: `<tableFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `table-for/tablefor-sortable-requires-cell-rows` — twin · bootstrap-unsupported: `<tableFor>` is a scrml structural element (§41.14), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `type-state-codes/e-state-terminal-mutation-neg` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
 - `type-state-codes/e-state-terminal-mutation-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
 - `type-state-codes/e-state-transition-illegal-neg` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
 - `type-state-codes/e-state-transition-illegal-pos` — parse-reject: E-PARSE-TAG: expected a tag name after `<`
-- `type-state-codes/e-state-undeclared-pos` — bootstrap-unsupported: `@undecl = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@undecl.f = …`)
-- `type-state-codes/e-struct-function-field-pos` — parse-reject: E-PARSE-TYPE: expected a field name, found `(`
-- `type-state-codes/e-type-004-struct-field-access-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `type-state-codes/e-type-004-struct-field-access-pos` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `type-state-codes/e-type-041-not-assign-mismatch-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `type-state-codes/e-type-041-not-assign-mismatch-pos` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `type-state-codes/e-type-062-is-non-enum-lhs-neg` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `type-state-codes/e-type-062-is-non-enum-lhs-pos` — parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
+- `type-state-codes/e-state-undeclared-nested-each-in-match-arm-pos` — twin · bootstrap-unsupported: member access `.A` on a value that is not a struct or an instance is not in bootstrap slice M2
+- `type-state-codes/e-state-undeclared-pos` — twin · bootstrap-unsupported: `@undecl = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@undecl.f = …`)
+- `type-state-codes/e-struct-function-field-pos` — twin · parse-reject: E-PARSE-TYPE: expected a field name, found `(`
+- `type-state-codes/e-type-004-struct-field-access-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `type-state-codes/e-type-004-struct-field-access-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `type-state-codes/e-type-022-engine-named-binding-neg` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `type-state-codes/e-type-022-engine-named-binding-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
+- `type-state-codes/e-type-041-not-assign-mismatch-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `type-state-codes/e-type-041-not-assign-mismatch-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `type-state-codes/e-type-045-prefix-not-negation-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `type-state-codes/e-type-062-is-non-enum-lhs-neg` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `type-state-codes/e-type-062-is-non-enum-lhs-pos` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
+- `type-state-codes/e-type-081-partial-match-render-neg` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
+- `type-state-codes/e-type-081-partial-match-render-pos` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `match`
+- `type-state-codes/e-type-lifecycle-on-engine-cell-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
+- `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
+- `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
+
+### NOT-TWINNED (475)
+
+- `auth/auth-001-neg` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `auth/auth-001-pos` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `auth/auth-002-pos` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35)
+- `auth/auth-005-db-context-neg` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38) · program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `auth/auth-async-stdlib-sync-callback-neg` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `auth/program-from-component-config-unread-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · program-wrap: a `<program>` the front end does not recognize as the root (malformed source)
+- `auth/program-nested-auth-in-page-pos` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `auth/program-top-level-session-attr-neg` — not mechanical: program-wrap: a `<program>` the front end does not recognize as the root (malformed source)
+- `auth/program-worker-under-div-in-wrapped-app-not-e-program-002-neg` — not mechanical: program-wrap: a `<program>` the front end does not recognize as the root (malformed source)
+- `auth/program-wrapped-in-markup-is-application-gated` — not mechanical: program-wrap: a `<program>` the front end does not recognize as the root (malformed source)
+- `auth/w-serverload-ungated-neg` — not mechanical: rhs-decl: initializer not parsed by impl#1
+- `auth/w-serverload-ungated-pos` — not mechanical: rhs-decl: initializer not parsed by impl#1
+- `block-grammar/block-015-bare-slash-pos` — not mechanical: program-wrap: the restructured file does not parse to one top-level `<program>` (malformed source) — not restructured
+- `block-grammar/block-047-unclosed-brace-pos` — not mechanical: program-wrap: the restructured file does not parse to one top-level `<program>` (malformed source) — not restructured
+- `block-grammar/block-ctx-001-unterminated-raw-content-pos` — not mechanical: program-wrap: the restructured file does not parse to one top-level `<program>` (malformed source) — not restructured
+- `body-top/channel-prose-rejected` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `body-top/page-prose-rejected` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `channel/dup-name-cross-file` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/export-reactive-ref-name` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/export-string-literal-name` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/inside-page` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/inside-program` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/module-file-top-level` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/name-interpolated` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/name-missing` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/name-present` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/name-static-literal` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/outside-program` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/same-source-two-aliases` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/server-cell-read` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/server-fn-uses-arg` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/shared-modifier-absent` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/sibling-of-page` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/watches-52-authority-shape` — not mechanical: rhs-decl: declaration text not found at the AST site
+- `channel/watches-client-write` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `channel/watches-derived-const-ok` — not mechanical: const-cell: declaration in a markup position (⚑ O38)
+- `codegen/cg-001-server-block-warn-pos` — not mechanical: program-move: `markup <p>` outside `<program>` (where it renders is not mechanical)
+- `components/ambient-engine-cell` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/bind-non-bindable-prop-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/bind-non-bindable-prop-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/bind-non-primitive-type-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/bind-non-primitive-type-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/duplicate-prop-decl-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/duplicate-prop-decl-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/each-in-prop-scope` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `components/extra-undeclared-prop-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/extra-undeclared-prop-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/malformed-component-body-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/malformed-component-body-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/missing-required-prop-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/missing-required-prop-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/missing-required-slot-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/missing-required-slot-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/multi-instance` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/multiple-spreads-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/multiple-spreads-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/post-ce-residual-component-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/props-render` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/slot-on-parametric-snippet-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/slot-on-parametric-snippet-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/slot-targets-non-snippet-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/slot-targets-non-snippet-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/unresolved-component-ref-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/unresolved-component-ref-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/unslotted-children-no-spread-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `components/unslotted-children-no-spread-reject` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `control-flow/ctrl-011-for-in-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `control-flow/ctrl-017-show-ssr-hide-variant-render-no-hide-pos` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `control-flow/ctrl-018-show-ssr-hide-module-init-write-fail-open-pos` — not mechanical: rhs-decl: declaration text not found at the AST site · unwrap-logic: top-level `${}` holds a `bare-expr` statement (rendered in legacy, evaluated in a program body — S441)
+- `control-flow/ctrl-019-show-ssr-hide-spelling-parity-pos` — not mechanical: rhs-decl: declaration text not found at the AST site
+- `control-flow/ctrl-020-show-ssr-hide-no-duplicate-style-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: declaration text not found at the AST site
+- `control-flow/if-on-each-render-gate-absent-rt` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `control-flow/if-on-each-render-gate-unmounts-rt` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `control-flow/if-on-engine-render-gate-absent-rt` — not mechanical: engine-simple: engine surface beyond the simple rule: if (⚑ O5 surface)
+- `control-flow/if-on-engine-render-gate-mounts-rt` — not mechanical: engine-simple: engine surface beyond the simple rule: if (⚑ O5 surface)
+- `defer/outside-function-component-handler-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `derived/chain` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
+- `derived/diamond` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
+- `derived/e-derived-server-only-reach-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `derived/e-derived-server-only-reach-nested-loop` — not mechanical: const-cell: declaration in a markup position (⚑ O38)
+- `derived/e-derived-server-only-reach-pos` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
+- `each/as-alias` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/count-reactive` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `each/each-body-decl-unsupported-pos` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/empty-fallback` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `each/empty-teardown` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `each/for-lift-list` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `each/for-lift-per-item-if-reactive/create-time-absence` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/for-lift-per-item-if-reactive/flip-false-true` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/for-lift-per-item-if-reactive/flip-true-false` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/for-lift-per-item-if-reactive/reorder-toggled` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/keyed-reconcile` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/multi-root` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/nested` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/per-item-if-reactive/create-time-absence` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/per-item-if-reactive/flip-false-true` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/per-item-if-reactive/flip-true-false` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/per-item-if-reactive/reorder-toggled` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/per-item-reactivity` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/render-static` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/shorthand-longhand-parity-rcdata` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/shorthand-option-label-preserved` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/shorthand-restricted-textarea` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/ternary-markup-giti033` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/when-changes-in-row-body` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `each/when-changes-in-row-body-no-write` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `engine/accepts-not-enum-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `engine/component-engine-scope-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · engine-simple: `<engine>` impl#1's front end did not surface as an engine declaration (left untouched)
+- `engine/composite-inner-colon-shorthand` — not mechanical: engine-simple: nested engine (→ enum-valued child field, structural) · engine-simple: engine in a nested / markup position (O38 / nested engine)
+- `engine/derived-engine-circular-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
+- `engine/derived-engine-circular-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
+- `engine/derived-engine-markup-write` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
+- `engine/derived-engine-match-nonexhaustive` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
+- `engine/derived-engine-match-qualified-lhs` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
+- `engine/derived-engine-no-initial-neg` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
+- `engine/derived-engine-no-initial-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
+- `engine/derived-engine-no-rules-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
+- `engine/derived-engine-no-rules-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
+- `engine/derived-engine-statechild-write` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, ,  (⚑ O5 surface)
+- `engine/derived-machine-no-projection-rules-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X` · engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-machine-no-projection-rules-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X` · engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-machine-unprojected-variant-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X` · engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-machine-unprojected-variant-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X` · engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-machine-write-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X` · engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/derived-machine-write-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X` · engine-simple: engine surface beyond the simple rule: derived (⚑ O5 surface)
+- `engine/engine-derived` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
+- `engine/external-transition-resets-rt` — not mechanical: engine-simple: nested engine (→ enum-valued child field, structural) · engine-simple: engine in a nested / markup position (O38 / nested engine)
+- `engine/history-fresh-reset-rt` — not mechanical: engine-simple: nested engine (→ enum-valued child field, structural) · engine-simple: engine in a nested / markup position (O38 / nested engine)
+- `engine/history-restore-rt` — not mechanical: engine-simple: nested engine (→ enum-valued child field, structural) · engine-simple: engine in a nested / markup position (O38 / nested engine)
+- `engine/initial-cell` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
+- `engine/initial-cell-type-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
+- `engine/initial-cell-type-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
+- `engine/initial-cell-undeclared-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
+- `engine/initial-cell-undeclared-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
+- `engine/internal-transition-preserves-rt` — not mechanical: engine-simple: nested engine (→ enum-valued child field, structural) · engine-simple: engine in a nested / markup position (O38 / nested engine)
+- `engine/machine-alternation-binding-parity-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
+- `engine/machine-alternation-binding-parity-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
+- `engine/machine-guard-undefined-self-field-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
+- `engine/machine-guard-undefined-self-field-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
+- `engine/machine-rule-binding-unit-variant-neg` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
+- `engine/machine-rule-binding-unit-variant-pos` — not mechanical: engine-simple: engine without a bare-variant `initial=.X`
+- `engine/message-dispatch` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `engine/message-effect` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `engine/message-payload` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `engine/msg-arm-not-exhaustive-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `engine/msg-unknown-pos` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `engine/nested-engine-inner-transition-rt` — not mechanical: engine-simple: nested engine (→ enum-valued child field, structural) · engine-simple: engine in a nested / markup position (O38 / nested engine)
+- `engine/payload-binding-neg` — not mechanical: program-move: `text` outside `<program>` (where it renders is not mechanical)
+- `engine/replay-cross-machine-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine without a bare-variant `initial=.X`
+- `engine/replay-cross-machine-pos` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine without a bare-variant `initial=.X`
+- `engine/replay-log-not-reactive-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine without a bare-variant `initial=.X`
+- `engine/replay-log-not-reactive-pos` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine without a bare-variant `initial=.X`
+- `engine/replay-target-not-machine-bound-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine without a bare-variant `initial=.X`
+- `engine/replay-target-not-machine-bound-pos` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · engine-simple: engine without a bare-variant `initial=.X`
+- `engine/statechild-component-generic-closer-in-element-rt` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `equality/map-key-comparable-clean` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `equality/map-key-function-field-reject` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `equality/payload-variant-compare-warn` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35)
+- `equality/unit-variant-compare-clean` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35)
+- `error-boundary/bare-call-no-boundary-e002` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `error-boundary/e005-nested-inner-no-fallback` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `error-boundary/e005-no-fallback-no-renders` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `error-boundary/e005-partial-coverage` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `error-boundary/fallback` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `error-boundary/nested-inner-catches` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `error-boundary/no-renders-falls-to-fallback` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `error-boundary/renders-multifield-payload` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `error-boundary/success-transparent` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `error-boundary/terse-fallback-closer` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `error-boundary/variant-renders` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `error/handler-failable-reference-component-prop-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `error/handler-failable-reference-exempt-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `error/handler-failable-reference-via-component-prop-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `error/handler-guard-arm-uses-prop-rt` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `error/handler-guard-in-component-rt` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `fn/equals-body-reject` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `forms/compound-render-not-bindable` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/compound-validator-circular-dep` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<a>` shares 
+- `forms/compound-validator-circular-dep-self` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<a>` shares 
+- `forms/crossfield-match` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<password>` 
+- `forms/crossfield-mismatch` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<password>` 
+- `forms/crossfield-source-revalidates` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<password>` 
+- `forms/derived-validators-reject` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
+- `forms/errors-element-bad-subject-neg` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)
+- `forms/errors-element-bad-subject-pos` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)
+- `forms/errors-element-no-of-neg` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)
+- `forms/errors-element-no-of-pos` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)
+- `forms/errors-empty-no-dom` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<code>` shar
+- `forms/errors-first-all-rollup` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<code>` shar
+- `forms/isvalid-rollup` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/msgchain-colon-reject` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/msgchain-dynamic-reject` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/msgchain-inline-static-accepted` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/msgchain-l1-inline-override-render` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/msgchain-l2-registered-render` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/msgchain-l4-match-escape-render` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/multierror-compose-order` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<pw>` shares
+- `forms/shortcircuit-req-empty` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<pw>` shares
+- `forms/submitted-on-submit` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/touched-on-check` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/touched-on-input` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/touched-submitted-initial` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/validator-invalid` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/validator-valid` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shar
+- `forms/validator-vocab-custom-accepted` — not mechanical: render-by-tag: markup tag `<userName>` shares a cell's name — render-by-tag (→ `<*userName/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · rhs-decl: Shape 2 `<x …> = <input …
+- `forms/validator-vocab-unknown-reject` — not mechanical: render-by-tag: markup tag `<userName>` shares a cell's name — render-by-tag (→ `<*userName/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · rhs-decl: Shape 2 `<x …> = <input …
+- `forms/vocab-equality-invalid` — not mechanical: render-by-tag: markup tag `<vform>` shares a cell's name — render-by-tag (→ `<*vform/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<pin>` shares 
+- `forms/vocab-equality-valid` — not mechanical: render-by-tag: markup tag `<vform>` shares a cell's name — render-by-tag (→ `<*vform/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<pin>` shares 
+- `forms/vocab-numeric-invalid` — not mechanical: render-by-tag: markup tag `<vform>` shares a cell's name — render-by-tag (→ `<*vform/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<age>` shares 
+- `forms/vocab-numeric-valid` — not mechanical: render-by-tag: markup tag `<vform>` shares a cell's name — render-by-tag (→ `<*vform/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<age>` shares 
+- `forms/vocab-set-invalid` — not mechanical: render-by-tag: markup tag `<vform>` shares a cell's name — render-by-tag (→ `<*vform/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<role>` shares
+- `forms/vocab-set-valid` — not mechanical: render-by-tag: markup tag `<vform>` shares a cell's name — render-by-tag (→ `<*vform/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<role>` shares
+- `forms/vocab-string-invalid` — not mechanical: render-by-tag: markup tag `<vform>` shares a cell's name — render-by-tag (→ `<*vform/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shares
+- `forms/vocab-string-valid` — not mechanical: render-by-tag: markup tag `<vform>` shares a cell's name — render-by-tag (→ `<*vform/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<name>` shares
+- `lifecycle/boot-effect` — not mechanical: engine-simple: engine surface beyond the simple rule: effect (⚑ O5 surface)
+- `lifecycle/boot-effect-reset-restores-init` — not mechanical: engine-simple: engine surface beyond the simple rule: effect (⚑ O5 surface)
+- `lifecycle/effect-dep-derived-neg` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · const-cell: non-literal initializer needs a type 
+- `lifecycle/effect-dep-derived-pos` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · const-cell: non-literal initializer needs a type 
+- `lifecycle/effect-on-derived-engine` — not mechanical: engine-simple: engine surface beyond the simple rule: derived, effect (⚑ O5 surface)
+- `lifecycle/on-transition-to` — not mechanical: engine-simple: engine surface beyond the simple rule: accepts (⚑ O5 surface)
+- `lifecycle/request-body-client-wrapper-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `lifecycle/request-data-is-some-if-attr-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · program-wrap: `<page>` root with no `<program>` (route-file shape — not 
+- `lifecycle/request-data-is-some-value-bool-class-attr-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · program-wrap: `<page>` root with no `<program>` (route-file shape — not 
+- `lifecycle/request-deps-empty-mount-only-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `lifecycle/request-deps-explicit-listed-refire-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `lifecycle/request-deps-explicit-unlisted-no-refire-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `lifecycle/request-deps-non-cell-entry-e-lifecycle-022-neg` — not mechanical: rhs-decl: object literal needs a struct type (CTX) · rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `lifecycle/request-deps-non-cell-entry-e-lifecycle-022-pos` — not mechanical: rhs-decl: object literal needs a struct type (CTX) · rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `lifecycle/request-refetch-fn-body-stmt-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `lifecycle/request-refetch-inline-multi-stmt-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `lifecycle/request-settle-error-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · program-wrap: `<page>` root with no `<program>` (route-file shape — not 
+- `lifecycle/request-settle-success-rt` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · program-wrap: `<page>` root with no `<program>` (route-file shape — not 
+- `lifecycle/reset-on-cycle-neg` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- `lifecycle/reset-on-cycle-pos` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- `lifecycle/reset-on-cycle-self-pos` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- `lifecycle/reset-on-invalid-entry-empty-pos` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- `lifecycle/reset-on-invalid-entry-neg` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- `lifecycle/reset-on-invalid-entry-pos` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35) · rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- `lifecycle/reset-on-not-writable-neg` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- `lifecycle/reset-on-not-writable-pos` — not mechanical: const-cell: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- `lifecycle/reset-on-resets-on-trigger-rt` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- `lifecycle/when-dep-derived-error` — not mechanical: render-by-tag: markup tag `<p>` shares a cell's name — render-by-tag (→ `<*p/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · const-cell: non-literal initializer needs a type 
+- `loop/loop-reactive-plain-fn` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `maps/bracket-read-miss-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `maps/bracket-write-inline-handler-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `maps/bracket-write-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `maps/core-ops-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `maps/duplicate-literal-key-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `maps/enum-key-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `maps/key-is-map-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `maps/key-not-comparable-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `maps/literal-malformed-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `maps/order-independent-eq-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `maps/remove-update-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `maps/struct-key-literal-pos` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `maps/struct-key-value-canonical-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `markup-handler/expr-handler-call-first-multi-stmt` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `markup-handler/expr-handler-in-each-row-call-led` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/inline-block-handler-in-each-row` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/inline-block-handler-in-each-row-call-led-row-item` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/multi-stmt-handler-in-each-row-pos` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/nested-server-write-awaited` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-block-comment-with-semicolon` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-comment-lines-between-statements` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-comment-only-line` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-const-then-use` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-expr-form-leading-comment` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-expr-form-trailing-comment` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-if-else-braced` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-if-else-braceless` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-loop-in-block` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-member-continuation-line` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-regex-with-semicolon-expr-form` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-regex-with-semicolon-in-block` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-template-literal-semicolon-newline` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-ternary-continuation-lines` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-trailing-line-comments` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-handler-shape-trailing-operator-continuation` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-r4-continuation-expr-form-leading-plus` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-r4-continuation-leading-plus` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-r4-continuation-leading-question-colon` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-r4-continuation-trailing-multiply` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-r4-continuation-trailing-question-colon` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-r5-handler-map-literal-notice` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
+- `markup-handler/s437-r5-template-cell-read-first-multiline` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `markup-handler/s437-r5-template-cell-read-second` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `match-block/block-arm-nested-assignment-fidelity` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST · program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `match-block/block-arm-tail-after-block-statement` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST · program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `match-block/member-assign-tail-voids-all-paths` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST · program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `match-block/value-decl-block-arm-keyword-prefixed-tail` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `match-block/value-decl-block-arm-raw` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `match-block/value-decl-block-arm-variant` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `match-block/value-form-block-arm-all-paths` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST · program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `match-block/value-form-block-arm-derived-reactive` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
+- `match-block/value-form-derived` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
+- `match-identifier/giti-016` — not mechanical: const-cell: initializer extent could not be verified against impl#1's AST
+- `meta/meta-lift-in-block-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `module/e-import-001-export-outside-logic-reject` — not mechanical: program-wrap: top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)
+- `module/e-use-001-use-toplevel-clean` — not mechanical: program-wrap: top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)
+- `module/e-use-002-use-after-markup-reject` — not mechanical: program-wrap: top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)
+- `module/e-use-002-use-before-markup-clean` — not mechanical: program-wrap: top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)
+- `module/e-use-005-use-bad-prefix-reject` — not mechanical: program-wrap: top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)
+- `module/e-use-005-use-good-prefix-clean` — not mechanical: program-wrap: top-level prose (a `<program>` body reads it as code — §4.18.1 / S441)
+- `page/keep-alive-accepted` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `parse-syntax/e-syntax-064-at-dot-inside-each-neg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `parse-syntax/e-syntax-064-at-dot-outside-each-pos` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `protect/alias-write-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/arguments-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/arithmetic-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/assign-refresh-runtime` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/bare-digest-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/callback-param-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/channel-broadcast-strip` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `protect/computed-key-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/cte-strip-client-visible-runtime` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/descriptor-symbol-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/element-alias-write-e006` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `protect/expr-column-row-strip-runtime` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/from-upper-table-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/global-store-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/helper-mutates-param-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/hmac-constant-key-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/keyed-hash-clean` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/login-verify-clean` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/lookup-field-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/lookup-keys-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/lookup-method-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/map-get-field-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/marker-removal-alias-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/merge-rows-strip-runtime` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/mounthydrate-redacts` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35)
+- `protect/nested-container-write-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/reduce-index-by-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/response-header-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/returning-strip-runtime` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/reveal-client-visible-runtime` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/run-terminator-strip-runtime` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `protect/scalar-concat-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/scalar-encoding-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/scalar-helper-cross-file-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/scalar-helper-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/scalar-in-new-object-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/scalar-map-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/scalar-return-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/select-upper-column-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/select-upper-column-row-strip-runtime` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/spaced-star-strip-runtime` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/strip-client-visible-runtime` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/symbol-description-e006` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `protect/upper-table-row-strip` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `reactive/array-reassign-reactive` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `reactive/cell-ambiguous-member-render-neg` — not mechanical: render-by-tag: markup tag `<signup>` shares a cell's name — render-by-tag (→ `<*signup/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<uname>` sha
+- `reactive/cell-ambiguous-member-render-pos` — not mechanical: render-by-tag: markup tag `<uname>` shares a cell's name — render-by-tag (→ `<*uname/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · rhs-decl: compound cell with child declar
+- `reactive/cell-no-render-spec-neg` — not mechanical: render-by-tag: markup tag `<userName>` shares a cell's name — render-by-tag (→ `<*userName/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · rhs-decl: Shape 2 `<x …> = <input …
+- `reactive/cell-no-render-spec-pos` — not mechanical: render-by-tag: markup tag `<count>` shares a cell's name — render-by-tag (→ `<*count/>`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6) · render-by-tag: markup tag `<doubled>` sha
+- `reactive/compound-variant-c` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)
+- `reactive/debounce-on-derived` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
+- `reactive/decl-array-no-rhs-plain-neg` — not mechanical: rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
+- `reactive/decl-needs-initializer-array-pos` — excluded (dialect.s66): the case's subject is a legacy form itself: a `const <x>: T[]` with no right-hand side (E-DECL-NEEDS-INITIALIZER, §6.2 Shape 4 / §6.6) has no §66 spelling to twin; a §66 case for the opener-form replacement is owed (
+- `reactive/decl-needs-initializer-neg` — excluded (dialect.s66): the case's subject is a legacy-form rule: E-DECL-NEEDS-INITIALIZER polices the §6.2 Shape-4 `const <x>: T` with no right-hand side, a form §66.21 retires (rows 1–2). Its §66 twin (`<doubled:int=(@count * 2)/>`) canno
+- `reactive/decl-needs-initializer-pos` — excluded (dialect.s66): the case's subject is a legacy form itself: `const <doubled>: int` with no right-hand side (E-DECL-NEEDS-INITIALIZER, §6.2 Shape 4 / §6.6) has no §66 spelling to twin; a §66 case for the opener-form replacement is ow
+- `reactive/decl-rhs-interp-wrapped-neg` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `reactive/decl-rhs-interp-wrapped-pos` — not mechanical: rhs-decl: initializer extent could not be verified against impl#1's AST · const-cell: initializer extent could not be verified against impl#1's AST
+- `reactive/derived-circular-dep-mutual` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
+- `reactive/derived-circular-dep-self` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
+- `reactive/derived-default-on-const` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
+- `reactive/derived-doubled` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
+- `reactive/derived-no-dep-warn` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
+- `reactive/derived-value-mutate-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `reactive/derived-value-mutate-pos` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `reactive/derived-write-reassign` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
+- `reactive/mutating-method-string-arg` — not mechanical: rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
+- `reactive/nested-path-method-call-not-first-stmt` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
+- `reactive/optional-member-access-absent` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `reactive/optional-member-access-not` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `reactive/optional-member-access-render` — not mechanical: rhs-decl: type `{ name: string } | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)
+- `reactive/reactive-map-insert-bare-variant` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `reactive/reset-compound-all` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)
+- `reactive/reset-compound-field` — not mechanical: rhs-decl: compound cell with child declarations (Tier 2 — `<x:struct>` rewrite owed) · rhs-decl: field of a compound cell (Tier 2 — `<x:struct>` rewrite owed)
+- `reactive/s437-r5-template-cell-read-function-body` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
+- `reactive/server-fn-cps-authority-marshal` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `reactive/server-fn-cps-marshal-derived-warn` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35) · rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `reactive/server-fn-cps-marshal-raw-silent` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `reactive/server-fn-derived-read-error` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
+- `reactive/server-fn-param-passthrough-clean` — not mechanical: const-cell: non-literal initializer needs a type (CTX — O35)
+- `reactive/shape4-canonical-empty` — not mechanical: rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
+- `reactive/shape4-refinement-no-default` — not mechanical: rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
+- `reactive/shape4-refinement-satisfied-neg` — not mechanical: rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
+- `reactive/shape4-struct-not-lifecycle` — not mechanical: rhs-decl: typed declaration with no initializer (Shape 4 — O31/O33)
+- `refinement/subset-dead-arm-pos` — not mechanical: rhs-decl: type `Role oneOf([.Admin, .Editor])` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: initializer extent could not be verified 
+- `refinement/subset-narrowed-exhaustive-neg` — not mechanical: rhs-decl: type `Role oneOf([.Admin, .Editor])` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: initializer extent could not be verified 
+- `refinement/subset-notin-dead-arm-pos` — not mechanical: rhs-decl: type `Role notIn([.Guest])` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: initializer extent could not be verified against i
+- `route-region/cn10-keepalive-reentry` — not mechanical: rhs-decl: declaration in a markup position (⚑ O38)
+- `server-db/server-fn-in-sync-callback-neg` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `server-db/server-fn-in-sync-callback-pos` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `server-db/sql-aggregate-group-rt` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `server-db/sql-all-array-shape-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `server-db/sql-delete-reflects-rt` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `server-db/sql-get-single-row-rt` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `server-db/sql-insert-returning-rt` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35) · rhs-decl: `not` initializer needs a type (CTX — O35)
+- `server-db/sql-join-two-tables-rt` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `server-db/sql-multi-table-sequence-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `server-db/sql-order-limit-rt` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `server-db/sql-row-contract-mismatch-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `server-db/sql-row-contract-mismatch-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `server-db/sql-select-hydrate-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `server-db/sql-unique-constraint-rt` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `server-db/sql-update-returning-rt` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `server-db/sql-where-filter-rt` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `server-fn/basic-load-hydrate` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `server-fn/cps-call-in-if-arm` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `server-fn/error-boundary-fallback` — not mechanical: program-wrap: `<page>` root with no `<program>` (route-file shape — not wrapped)
+- `server-fn/optional-absent` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `server-fn/optional-present` — not mechanical: rhs-decl: type `User | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `server-fn/sequence-two-fns` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `server-fn/sse-generator-binding-seed-survives` — not mechanical: rhs-decl: object literal needs a struct type (CTX)
+- `sql/bad-conn-prefix-neg` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `sql/batch-warn-info` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `sql/clean-pos` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `sql/commented-query-no-e-sql-003` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `sql/param-query-no-e-sql-003` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `sql/prepare-cps-return-e-sql-006-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `sql/prepare-pattern-c-cell-e-sql-006-neg` — not mechanical: rhs-decl: initializer not parsed by impl#1
+- `sql/prepare-server-fn-e-sql-006-neg` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
+- `sql/prepare-ws-onserver-e-sql-006-neg` — not mechanical: rhs-decl: legacy declaration impl#1's front end did not surface as a declaration (left untouched)
+- `ssr/i-ssr-auth-scoped-prerender-omitted-pos` — not mechanical: rhs-decl: declaration text not found at the AST site
+- `ssr/i-ssr-auth-scoped-prerender-rowscoped-neg` — not mechanical: rhs-decl: initializer not parsed by impl#1
+- `ssr/i-ssr-each-client-rendered-author-template-pos` — not mechanical: rhs-decl: declaration text not found at the AST site
+- `ssr/i-ssr-each-client-rendered-if-enclosed-pos` — not mechanical: rhs-decl: declaration text not found at the AST site
+- `ssr/i-ssr-each-client-rendered-if-gate-bypass-neg` — not mechanical: rhs-decl: declaration text not found at the AST site
+- `ssr/i-ssr-each-client-rendered-show-enclosed-neg` — not mechanical: rhs-decl: declaration text not found at the AST site
+- `ssr/i-ssr-each-client-rendered-subset-pos` — not mechanical: rhs-decl: declaration text not found at the AST site
+- `ssr/ssr-auth-scoped-callable-not-seeded` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35) · rhs-decl: initializer not parsed by impl#1
+- `ssr/ssr-auth-scoped-cell-not-seeded` — not mechanical: rhs-decl: declaration text not found at the AST site · rhs-decl: initializer not parsed by impl#1
+- `ssr/ssr-auth-scoped-commented-currentuser-not-seeded` — not mechanical: rhs-decl: initializer not parsed by impl#1
+- `ssr/ssr-auth-scoped-literal-currentuser-not-seeded` — not mechanical: rhs-decl: initializer not parsed by impl#1
+- `ssr/ssr-callable-public-seeded-gated-omitted` — not mechanical: rhs-decl: non-literal initializer needs a type (CTX — O35) · rhs-decl: opener attribute `auth="none"` has no mechanical §66 spelling
+- `ssr/ssr-first-paint-redacted-runtime` — not mechanical: rhs-decl: declaration text not found at the AST site
+- `ssr/ssr-first-paint-render` — not mechanical: rhs-decl: declaration text not found at the AST site
+- `style/bare-variant-no-theme-ambiguous` — not mechanical: rhs-decl: bare variant .Light declared by 0 enums (needs a type)
+- `style/clean-single-rule` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/conditional-hover-layer` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/conflict-id-x-class` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/conflict-tag-x-class` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/conflict-tag-x-tag` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/descendant-combinator-contraction-text` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/descendant-combinator-preserved` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/disjoint-attr-values` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/disjoint-different-tag` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/flat-inline-token-lowering-clean` — not mechanical: theme-body: `<theme>` body (§66.17 — blocked on O17) · component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/flat-inline-token-unknown` — not mechanical: theme-body: `<theme>` body (§66.17 — blocked on O17) · component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/program-import-hoist-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/r1-universal-star-layer` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/r2-bem-modifier-soft` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/reactive-cell-lowering-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · const-cell: non-literal initializer needs a type (CTX — O35)
+- `style/reset-opt-out-clean` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/style-001-scoped-css-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
+- `style/theme-emission-clean` — not mechanical: theme-body: `<theme>` body (§66.17 — blocked on O17) · component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: bare variant .Light declared by 0 enums (needs a type)
+- `style/theme-for-variant-inference` — not mechanical: theme-body: `<theme>` body (§66.17 — blocked on O17) · rhs-decl: bare variant .Light declared by 0 enums (needs a type)
+- `style/theme-misplaced` — not mechanical: theme-body: `<theme>` body (§66.17 — blocked on O17)
+- `style/theme-tokens-recognized` — not mechanical: theme-body: `<theme>` body (§66.17 — blocked on O17)
+- `style/theme-variant-not-in-set` — not mechanical: theme-body: `<theme>` body (§66.17 — blocked on O17) · rhs-decl: bare variant .Light declared by 0 enums (needs a type)
+- `style/theme-variant-rebind-unknown` — not mechanical: theme-body: `<theme>` body (§66.17 — blocked on O17) · component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate) · rhs-decl: bare variant .Light declared by 0 enums (needs a type)
+- `table-for/tablefor-column-field-unknown` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `table-for/tablefor-nested-struct-no-slot` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `table-for/tablefor-no-display-mapping` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `table-for/tablefor-not-imported` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `table-for/tablefor-omit-invalid-field` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `table-for/tablefor-pick-invalid-field` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `table-for/tablefor-pick-omit-conflict` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `table-for/tablefor-render-rt` — not mechanical: rhs-decl: initializer extent could not be verified against impl#1's AST
+- `table-for/tablefor-selectable-no-primary-key` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `table-for/tablefor-type-not-struct` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `table-for/tablefor-variant-payload-enum` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `type-state-codes/e-type-045-prefix-not-negation-neg` — not mechanical: rhs-decl: type `string | not` has a space at its top level — how it stands in an opener is not ruled (§66.2.4 covers refinement / lifecycle types only)

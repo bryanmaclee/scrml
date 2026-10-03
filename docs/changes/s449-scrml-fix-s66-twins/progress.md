@@ -18,3 +18,11 @@
     `@c / 2` becomes E-INT-DIVISION on the bootstrap — verified).
   - union types (`T | not`) in an opener: no ruled spelling (bootstrap rejects `|`, `?`, parens) →
     blocker, not a guess.
+- step 2: SPEC §66.21 row 1 + amendment block (ruling 2), §66.2.4 amendment (ruling 4); SPEC-INDEX + FACTS regen.
+- step 3+4: scripts/bootstrap-conformance.ts — twins at test time via fixS66 (twinOf), NOT-TWINNED bucket
+  (all-or-nothing, entry + aux), dialect.s66 override (exclude | expect+reason; malformed = INVALID),
+  SUPERSEDED_CODE_MAP (1 applied row E-ENGINE-VAR-DUPLICATE→E-SCOPE-010; 7 owed rows — the bootstrap's
+  E-DECL-STATE-CHILD / E-TYPE-VARIANT are named in NO SPEC section, so not mapped), --no-twins.
+  Counter: PASS 76 (57 non-vacuous) · FAIL 54 · NOT-TWINNED 475 · UNSUPPORTED 673 · graded 130
+  (was PASS 34 (19) · FAIL 18 · LEGACY 951 · graded 52). 619 twins graded.
+  3 dialect.s66 excludes (reactive/decl-needs-initializer-{pos,neg,array-pos}: subject is the legacy form).

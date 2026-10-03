@@ -1,0 +1,8 @@
+{
+  "id": "fixture-twins-override-expect",
+  "description": "KNOWN PASS via override: the legacy expectation names a code the §66 twin cannot produce; dialect.s66 replaces the twin's expectations. Without the override the twin FAILs (the bite).",
+  "language-version": "1.0",
+  "spec": "§66.21",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts",
+  "expect": { "codes": ["E-FIXTURE-LEGACY-ONLY"] }
+}
