@@ -137,6 +137,7 @@ ${
             .Suspend(bind: b, on: on, then: t) :> [Node.NExpr(on), Node.NBlock(t)]
             .ResetSurface(of: v) :> [Node.NInst(validityInst(v))]
             .Defer(body: b) :> [Node.NBlock(b)]
+            .Unpersist(inst: i) :> [Node.NInst(i)]
         }
     }
 
@@ -363,6 +364,7 @@ ${
             .Suspend(bind: b) :> [b]
             .ResetSurface(of: v) :> []
             .Defer(body: b) :> []
+            .Unpersist(decl: x) :> []
         }
     }
 
@@ -432,6 +434,7 @@ ${
             .Suspend(bind: b) :> -1
             .ResetSurface(of: v) :> -1
             .Defer(body: b) :> -1
+            .Unpersist(decl: x) :> -1
         }
     }
 }

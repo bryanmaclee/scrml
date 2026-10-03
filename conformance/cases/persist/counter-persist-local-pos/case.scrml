@@ -1,0 +1,17 @@
+// §66.19.1 counter, persisted (§6.14): the same program with `persist="local" key=` on `@count`.
+// A fresh document has no stored value, so the counter starts at its default (§6.14.2 rule 3) and
+// behaves exactly like the unpersisted counter; `reset` writes the default (and removes the key, rule 9).
+<program>
+    let <count:int=0 persist="local" key="conformance.counter"/>
+    <step=1/>
+    <doubled:int=(@count * 2)/>
+
+    function bump()    { @count = @count + @step }
+    function restart() { reset(@count) }
+
+    <main>
+        <p id="out">Count ${@count} (doubled ${@doubled})</p>
+        <button id="inc" onclick=bump()>+${@step}</button>
+        <button id="reset" onclick=restart()>Reset</button>
+    </main>
+</program>

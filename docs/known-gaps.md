@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 240 | 6 |
-| MED | 492 | 3 |
+| MED | 492 | 4 |
 | LOW | 244 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
@@ -22700,3 +22700,9 @@ Governing: SPEC §57.8 / §19.9.1 (S451 R8). From the emitter's own comment (not
 ### g-impl1-dual-decoder-on-internal-routes-s451 — impl#1 DIVERGENCE (filed, not fixed): server-function fetch stubs decode with the §57 dual decoder, so a raw JSON `null` on a compiler-internal route is accepted as `not` — `NEW S451; LOW; open`
 <!-- @gap id=g-impl1-dual-decoder-on-internal-routes-s451 sev=LOW status=open locus=compiler/src/runtime-template.js(`_scrml_wire_decode` — accepts raw null; referenced by the fetch stubs emitted from codegen/emit-functions.ts and codegen/atom-emitter.ts) prov=ruling:user-voice-scrml.md-S451-"yes-on-all-seven"-R10 -->
 Governing: SPEC §57.4 Scope / §12.5.1 decoder contract (S451 R10). By code reading on `b490f3b75`: `_scrml_wire_decode(value)` returns `null` for both `null` and the envelope and is the decoder on every server-function fetch stub. No compiler-emitted encoder sends raw `null` in a `T | not` position, so the observable effect is only that bytes this compiler did not write are accepted rather than reported malformed. The bootstrap codec already implements a `canonicalOnly` mode (`docs/changes/s446-bootstrap-uc-codec/` Q4) — R10 makes it the rule on internal routes.
+
+## §S451-boot-u5-persist — impl#1 divergence from §6.14 `persist=` (2026-10-03; ruling dpa-061, SPEC §6.14 — change `docs/changes/s451-boot-u5-persist/`; the bootstrap builds §6.14, impl#1 is frozen for semantics (S447): FILED, not scheduled)
+
+### g-impl1-persist-codes-unimplemented-s451 — impl#1 DIVERGENCE (filed, not fixed): impl#1 implements no part of §6.14 — `persist=` / `key=` / `prepaint` / `hold=` are unknown attributes, none of E-PERSIST-STORAGE-UNKNOWN / -KEY-REQUIRED / E-PREPAINT-WITHOUT-PERSIST / E-HOLD-WITHOUT-PERSIST is emitted, and the §66 opener the cases are written in does not parse — `NEW S451; MED; carried`
+<!-- @gap id=g-impl1-persist-codes-unimplemented-s451 sev=MED status=carried locus=searched:compiler/src(grep `"persist"` / `E-PERSIST` / `E-PREPAINT` / `E-HOLD-WITHOUT` — 0 matches; the §66 opener `let <x:T=v …/>` reports E-MARKUP-001 / E-STATE-UNDECLARED) prov=ruling:dpa-061;SPEC-§6.14;empirical:s451-xfail-signatures-captured-by-conformance/run.ts---xfail-signature -->
+Governing: SPEC §6.14.1 r1/r2, §6.14.4.2 r2, §6.14.4.3 r2 (Nominal; impl#1 carries the divergence per S444). Conformance: 5 cases `conformance/cases/persist/{storage-unknown-neg, key-required-neg, prepaint-without-persist-neg, hold-without-persist-neg, counter-persist-local-pos}` — all PASS on the bootstrap; impl#1 xfail under this gap.

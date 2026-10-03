@@ -1,0 +1,27 @@
+{
+  "id": "persist-storage-unknown-neg",
+  "description": "§6.14.1 rule 1: a `persist=` value other than \"local\" or \"session\" — here the deferred \"cookie\" — is E-PERSIST-STORAGE-UNKNOWN.",
+  "language-version": "1.0",
+  "spec": "§6.14.1",
+  "rationale": "§6.14.1 rule 1: \"`persist=` takes exactly one of two values: **`\"local\"`** (Web `localStorage`) or **`\"session\"`** (Web `sessionStorage`). … Any other value SHALL be `E-PERSIST-STORAGE-UNKNOWN`.\" Rule 4: \"`persist=\"cookie\"` is DEFERRED (not in this revision).\"",
+  "expect": {
+    "codes": [
+      "E-PERSIST-STORAGE-UNKNOWN"
+    ],
+    "notCodes": [
+      "E-PERSIST-KEY-REQUIRED"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-persist-codes-unimplemented-s451",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-PERSIST-STORAGE-UNKNOWN"
+        ]
+      }
+    }
+  }
+}

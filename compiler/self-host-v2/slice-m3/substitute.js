@@ -34,6 +34,7 @@ export const M3_MODULES = [
   "core.scrml",
   "walk.scrml",
   "js.scrml",
+  "codec.scrml",
   "html.scrml",
   "names.scrml",
   "print.scrml",

@@ -1,0 +1,25 @@
+{
+  "id": "persist-hold-without-persist-neg",
+  "description": "§6.14.4.3 rule 2: a `hold=` whose operand is not a `persist=` cell is E-HOLD-WITHOUT-PERSIST (not a plain DOM attribute).",
+  "language-version": "1.0",
+  "spec": "§6.14.4.3",
+  "rationale": "§6.14.4.3 rule 2: \"**Requires `persist=`.** A `hold=` whose operand is not a `persist=` cell SHALL be `E-HOLD-WITHOUT-PERSIST` (rec 8). A general \\\"cloak until rendered\\\" marker for non-persisted content is a separate question, not this attribute\"",
+  "expect": {
+    "codes": [
+      "E-HOLD-WITHOUT-PERSIST"
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-impl1-persist-codes-unimplemented-s451",
+      "fails": {
+        "codes": [
+          "emitted:E-MARKUP-001=1",
+          "emitted:E-SCOPE-001=1",
+          "emitted:E-STATE-UNDECLARED=1",
+          "missing:E-HOLD-WITHOUT-PERSIST"
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,7 @@
+// §6.14.1 rule 2 — every `persist=` cell names its storage key; the compiler never derives one.
+<program>
+    <recent:string[free, replace]=([]) persist="local"/>
+    <main>
+        <p id="n">${@recent.length}</p>
+    </main>
+</program>

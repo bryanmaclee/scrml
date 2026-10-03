@@ -47,12 +47,12 @@ ${
             init: Expr.ArrayOf([]),
             mode: FieldMode.Locked, role: FieldRole.Child,
             grants: { replace: false, edits: [EditKind.Append] },
-            graph: not, exported: false, wcap: wAudit, vals: [],
+            graph: not, exported: false, wcap: wAudit, vals: [], persist: not,
         }
         const fSeen: Field = {
             sym: sSeen, ty: Type.Int, init: litInt(0),
             mode: FieldMode.Let, role: FieldRole.Child, grants: replaceGrant(),
-            graph: not, exported: false, wcap: wSeen, vals: [],
+            graph: not, exported: false, wcap: wSeen, vals: [], persist: not,
         }
 
         const log: Fn = {
