@@ -3468,8 +3468,50 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       const { getVariantFieldSchemaFromRewriter } = require("./rewrite.ts") as {
         getVariantFieldSchemaFromRewriter: (variantName: string) => string[] | null;
       };
-      const fieldNames = getVariantFieldSchema(variantName)
-        ?? getVariantFieldSchemaFromRewriter(variantName);
+      // §14.10 / S438 review F2 — TS resolved this bare variant against its
+      // position's type (annotation, param, return, field) and stamped THAT
+      // enum's field list; it wins over the by-name registries, where a
+      // same-named variant of another enum can shadow it.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isShadowedVariantName } = require("./emit-control-flow.ts") as {
+        isShadowedVariantName: (variantName: string) => boolean;
+      };
+      const stamped = (ident as unknown as { __variantFields?: unknown }).__variantFields;
+      // S438 review N3 — a name BOTH a local enum and an imported enum declare
+      // with different fields, at a position TS did not type (a reassignment, a
+      // match-arm result, …): picking the local enum by name (pre-F11) is a
+      // silent guess the matching side now contradicts. Never guess: §14.10's
+      // E-VARIANT-AMBIGUOUS, the same resolution the typed positions apply.
+      if (!Array.isArray(stamped) && isShadowedVariantName(variantName)) {
+        _tildeUnresolvedErrors.push(new CGError(
+          "E-VARIANT-AMBIGUOUS",
+          `E-VARIANT-AMBIGUOUS: Bare variant \`.${variantName}\` is declared by a local enum AND by an ` +
+          `imported enum with different payload fields, and this position does not fix which one is ` +
+          `meant (§14.10). Qualify the constructor — write \`<Enum>.${variantName}(…)\` naming the enum ` +
+          `you mean.`,
+          _tildeDiagSpan(ident),
+          "error",
+        ));
+        return `undefined /* E-VARIANT-AMBIGUOUS: .${variantName} */`;
+      }
+      // S446 — an UNSTAMPED constructor: TS did not type its position (a call
+      // argument whose callee is in another file / untyped / a method, an
+      // untyped return, an untyped reassignment). A variant name only an
+      // IMPORTED enum declares is then a guess — the by-name hit need not be
+      // the enum the value flows into (`yOf(mk())` with `fn mk() { return
+      // .Neg(6) }`, `yOf(o: Other)` elsewhere, `Expr.Neg(x)` imported) — so it
+      // is left unlowered (the pre-F11 loud `"V"(…)`), never a silent wrong
+      // payload. Local enum names keep the pre-F11 by-name lookup.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { isImportedOnlyVariantName } = require("./emit-control-flow.ts") as {
+        isImportedOnlyVariantName: (variantName: string) => boolean;
+      };
+      const byNameRefused = !Array.isArray(stamped) && isImportedOnlyVariantName(variantName);
+      const fieldNames = Array.isArray(stamped)
+        ? (stamped as string[])
+        : byNameRefused
+          ? null
+          : (getVariantFieldSchema(variantName) ?? getVariantFieldSchemaFromRewriter(variantName));
       if (fieldNames !== null) {
         // Emit `{ variant: "X", data: { field0: arg0, field1: arg1, ... } }`.
         // Truncate to min(args.length, fieldNames.length) so an over-long

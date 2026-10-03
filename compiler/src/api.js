@@ -2554,11 +2554,83 @@ function _compileScrmlImpl(options = {}) {
     }
   }
 
+  // §14.10 — imported functions' DECLARATIONS, so TS can type a bare variant
+  // passed to one (`yOf(.Neg(n))` with `yOf(o: Other)` in another file) from
+  // the callee's declared parameter type. Same import-graph walk as the type
+  // seed above (alias-aware pairs, re-export chase); nothing is inferred — TS
+  // resolves each parameter's ANNOTATION in the exporting file's scope
+  // (type-system.ts resolveImportedFnSignatures).
+  const depFnDeclCache = new PathKeyedMap(); // absSource → Map<name, function-decl>
+  function getDepFnDecls(absSource) {
+    if (depFnDeclCache.has(absSource)) return depFnDeclCache.get(absSource);
+    const out = new Map();
+    const depFile = ceFileMap.get(absSource);
+    const top = depFile ? (depFile.nodes ?? depFile.ast?.nodes ?? []) : [];
+    // File-level declarations only: descend through markup / logic containers,
+    // never into a function body (a nested helper is not the exported name).
+    const visit = (nodes) => {
+      for (const n of nodes) {
+        if (!n || typeof n !== 'object') continue;
+        if (n.kind === 'function-decl') {
+          if (typeof n.name === 'string' && !out.has(n.name)) out.set(n.name, n);
+          continue;
+        }
+        if (Array.isArray(n.body)) visit(n.body);
+        if (Array.isArray(n.children)) visit(n.children);
+      }
+    };
+    visit(top);
+    depFnDeclCache.set(absSource, out);
+    return out;
+  }
+  function resolveFnThroughReExport(absSource, fnName, visited) {
+    const key = `${absSource}::${fnName}`;
+    if (visited.has(key)) return null;
+    visited.add(key);
+    const own = getDepFnDecls(absSource).get(fnName);
+    if (own) {
+      const depFile = ceFileMap.get(absSource);
+      return { fnNode: own, depFilePath: absSource, depTypeDecls: depFile?.typeDecls ?? depFile?.ast?.typeDecls ?? [] };
+    }
+    const depGraphEntry = moduleResult.importGraph.get(absSource);
+    if (!depGraphEntry || !depGraphEntry.exports) return null;
+    for (const exp of depGraphEntry.exports) {
+      if (exp.name !== fnName || !exp.reExportSource) continue;
+      // A RENAMED re-export (`export { yOf as g } from …`) is refused, not
+      // chased: chasing the exported name would find an unrelated `g` in the
+      // source file. No signature → the call's arguments stay unstamped.
+      if (typeof exp.localName === 'string' && exp.localName !== fnName) return null;
+      const found = resolveFnThroughReExport(exp.reExportSource, fnName, visited);
+      if (found) return found;
+    }
+    return null;
+  }
+  const importedFnDeclsByFile = new PathKeyedMap();
+  for (const [filePath, graphEntry] of moduleResult.importGraph) {
+    if (!graphEntry.imports || graphEntry.imports.length === 0) continue;
+    const decls = new Map();
+    for (const imp of graphEntry.imports) {
+      const depExports = moduleResult.exportRegistry.get(imp.absSource);
+      if (!depExports) continue;
+      const pairs = Array.isArray(imp.specifiers) && imp.specifiers.length > 0
+        ? imp.specifiers.map(s => ({ imported: s.imported, local: s.local }))
+        : (imp.names ?? []).map(n => ({ imported: n, local: n }));
+      for (const { imported: importedName, local: localName } of pairs) {
+        if (!importedName || !localName || decls.has(localName)) continue;
+        if (!depExports.has(importedName)) continue;
+        const found = resolveFnThroughReExport(imp.absSource, importedName, new Set());
+        if (found) decls.set(localName, found);
+      }
+    }
+    if (decls.size > 0) importedFnDeclsByFile.set(filePath, decls);
+  }
+
   const tsResult = stage("TS", () => _runTS({
     files: ceResults,
     protectAnalysis: paResult.protectAnalysis,
     routeMap: riResult.routeMap,
     importedTypesByFile,
+    importedFnDeclsByFile,
   }));
   // §23.5.5 / §28 — `lint.foreign-undeclared-capability = off` suppression. The
   // W-FOREIGN-UNDECLARED-CAPABILITY presence-nudge always computes in TS; drop it
@@ -2847,6 +2919,10 @@ function _compileScrmlImpl(options = {}) {
     // engine mount sites (`<engineVarName/>` resolving to `category: "engine"`)
     // and emit the §21.8 mount-position marker per SPEC §51.0.D.
     exportRegistry: moduleResult.exportRegistry,
+    // g-impl1-match-miscompiles-hit-by-the-bootstrap (F11/F16) — the SAME
+    // cross-file type map TS seeded from, so codegen's variant-payload registry
+    // sees imported enums (positional binding, tag compare, constructors).
+    importedTypesByFile,
     // known-gaps-#6 (S152) — pass MOD importGraph + dist outputBaseDir so the
     // cross-file _scrml_modules lowering (Approach B, §21.3) can identify
     // exporter files, derive identical registry keys, and emit topo-ordered
