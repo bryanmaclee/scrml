@@ -106,10 +106,14 @@ ${
     }
 
     // Close ONE dimension: `own[i]` — callable i's own atoms; `edges[i]` — the
-    // callables i references for this dimension, in source order; `order` —
-    // sccOrder over a superset of every dimension's edges. Returns each
+    // callables i references for this dimension, in source order. Returns each
     // callable's atoms in path order (its first atom is the witness).
-    export fn closeDim(own: FxAtom[][], edges: int[][], order: int[][]) -> FxAtom[][] {
+    // The component order is computed HERE, from the very edges being closed
+    // (r2 LOW-2): an order taken from another edge set could process a caller
+    // before a callee it reaches only through an edge that set lacks, and
+    // under-report. By construction it cannot.
+    export fn closeDim(own: FxAtom[][], edges: int[][]) -> FxAtom[][] {
+        const order: int[][] = sccOrder(edges)
         let fx: FxAtom[][] = []
         for (const o of own) { fx = fx.concat([ownSorted(o)]) }
         for (const scc of order) {

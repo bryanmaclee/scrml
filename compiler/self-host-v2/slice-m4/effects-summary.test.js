@@ -43,7 +43,7 @@ describe("effects.scrml — the engine", () => {
   test("closeDim: a fact reaches every caller through mutual recursion, with the shortest chain", () => {
     // 0 writes "x"; 0 ⇄ 1; 2 → 1
     const edges = [[1], [0], [1]];
-    const dim = mods.effects.closeDim([[own("x", 0, 0)], [], []], edges, mods.effects.sccOrder(edges));
+    const dim = mods.effects.closeDim([[own("x", 0, 0)], [], []], edges);
     expect(dim.map((xs) => xs.map((a) => a.key))).toEqual([["x"], ["x"], ["x"]]);
     const w = mods.effects.witnessOf(dim[2]);
     expect(mods.effects.atomChain(dim, 2, w)).toEqual([2, 1, 0]);
@@ -53,15 +53,28 @@ describe("effects.scrml — the engine", () => {
     // 0 → [1, 2]; 1 → 3 (writes "a" two steps down); 2 writes "b" itself; 4 → [2, 5], 5 writes "c"
     const edges = [[1, 2], [3], [], [], [2, 5], []];
     const ownAtoms = [[], [], [own("b", 2, 0)], [own("a", 3, 0)], [], [own("c", 5, 0)]];
-    const dim = mods.effects.closeDim(ownAtoms, edges, mods.effects.sccOrder(edges));
+    const dim = mods.effects.closeDim(ownAtoms, edges);
     expect(mods.effects.witnessOf(dim[0]).key).toBe("b");      // depth 1 beats depth 2
     expect(mods.effects.witnessOf(dim[4]).key).toBe("b");      // equal depth: the earlier reference
     expect(dim[0].map((a) => a.key)).toEqual(["b", "a"]);      // every fact is kept, in path order
   });
 
+  // r2 LOW-2: the component order is derived from the edges being closed, so
+  // no caller is processed before a callee — whatever the callables' numbering.
+  // Callees numbered AFTER their callers (0 → 1 → 2 → 3, the fact at 3) and a
+  // back-edge pattern (3 → 2 → 1 → 0, the fact at 0): every caller reaches it.
+  test("no ordering inversion: callees numbered after or before their callers", () => {
+    const fwd = mods.effects.closeDim([[], [], [], [own("x", 3, 0)]], [[1], [2], [3], []]);
+    expect(fwd.map((xs) => xs.length)).toEqual([1, 1, 1, 1]);
+    expect(mods.effects.atomChain(fwd, 0, fwd[0][0])).toEqual([0, 1, 2, 3]);
+    const back = mods.effects.closeDim([[own("x", 0, 0)], [], [], []], [[], [0], [1], [2]]);
+    expect(back.map((xs) => xs.length)).toEqual([1, 1, 1, 1]);
+    expect(mods.effects.atomChain(back, 3, back[3][0])).toEqual([3, 2, 1, 0]);
+  });
+
   test("own facts: the first site of a key is its atom; a recursive callable adds nothing", () => {
     const edges = [[0]];
-    const dim = mods.effects.closeDim([[own("x", 0, 0), own("x", 0, 1), own("y", 0, 2)]], edges, mods.effects.sccOrder(edges));
+    const dim = mods.effects.closeDim([[own("x", 0, 0), own("x", 0, 1), own("y", 0, 2)]], edges);
     expect(dim[0].map((a) => [a.key, a.pos, a.depth])).toEqual([["x", 0, 0], ["y", 2, 0]]);
   });
 });
@@ -111,6 +124,15 @@ describe("dpa-066 G7 — a value-position arm calling a wrapper of a no-value ca
   test("two wrappers deep, and through recursion", () => {
     expect(codes(prog("function h() { return nothing() }\n        function g() { return h() }"))).toEqual(["E-ERROR-012"]);
     expect(codes(prog("function g() {\n            if (@n == 1) { return g() }\n            return nothing()\n        }"))).toEqual(["E-ERROR-012"]);
+  });
+
+  // r2 LOW-1: the s452 r3 rule — an earlier unconditional return decides; a
+  // `return <call>` in the dead code after it is not a return path.
+  test("a `return nothing()` after an unconditional return is dead code — clean", () => {
+    expect(codes(prog("function g() {\n            return \"x\"\n            return nothing()\n        }"))).toEqual([]);
+    expect(codes(prog("function g() {\n            if (@n == 1) { return \"a\" } else { return \"b\" }\n            return nothing()\n        }"))).toEqual([]);
+    // twin: reachable, it still counts
+    expect(codes(prog("function g() {\n            if (@n == 1) { return \"a\" }\n            return nothing()\n        }"))).toEqual(["E-ERROR-012"]);
   });
 
   test("negative twins: a wrapper that returns a value is clean", () => {

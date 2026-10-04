@@ -124,3 +124,14 @@
   m1 lowered 99 — 0 fail. Counter PASS 120 / FAIL 48 / UNSUPPORTED 622; `--write` regenerated
   docs/bootstrap-conformance.md with no change; `--check` current; severity `--check` current;
   lint 0 (65 files).
+
+## r2 (BRIEF-r2.md — review LAND-WITH-NITS)
+
+- LOW-2 (by construction): `closeDim(own, edges)` now computes its component order from the very
+  edges it closes (sccOrder inside) — no dimension can be ordered by another edge set; the shared
+  `order` in summarize is removed. Test: "no ordering inversion" (callees numbered after / before
+  their callers, the fact at the far end — every caller reaches it, chain checked).
+- LOW-1: `retCallsBlock` stops after a statement that leaves on every path (`return`, `fail`, an
+  `if`/`else` both of whose blocks do) — the s452 r3 rule; `{ return "x"; return nothing() }` is
+  clean again. Tests: dead `return nothing()` after a return and after a both-branches-return
+  `if`/`else` → clean; reachable after a one-branch `if` → E-ERROR-012.

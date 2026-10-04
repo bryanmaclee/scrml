@@ -54,7 +54,7 @@ ${
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan, newDiag } from "./ast.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, sqlFacts, txControl, txControlAware } from "./sql.scrml"
-    import { FxAtom, ownAtom, closeDim, witnessOf, atomChain, sccOrder } from "./effects.scrml"
+    import { FxAtom, ownAtom, closeDim, witnessOf, atomChain } from "./effects.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -14151,7 +14151,6 @@ ${
             fnE = fnE.concat([refTargets(nodes, c.f.scan.refs, true)])
             callE = callE.concat([callTargets(nodes, c.f.scan.refs)])
         }
-        const order: int[][] = sccOrder(all)
         // writes / writesOpen
         let ownW: FxAtom[][] = []
         let ownU: FxAtom[][] = []
@@ -14180,7 +14179,7 @@ ${
             }
             i = i + 1
         }
-        const client: FxAtom[][] = closeDim(ownC, edgeC, order)
+        const client: FxAtom[][] = closeDim(ownC, edgeC)
         // … and an ambient function that reaches client-only code is client (§12.4)
         let places: PlaceFact[] = []
         for (const p of direct) {
@@ -14227,9 +14226,9 @@ ${
             }
             i = i + 1
         }
-        return { nodes: nodes, writes: closeDim(ownW, all, order), writesOpen: closeDim(ownU, all, order), places: places,
-                 client: client, routeOpen: closeDim(ownR, edgeR, order), waits: closeDim(ownA, edgeF, order),
-                 clock: closeDim(ownK, edgeK, order), noValue: closeDim(ownV, edgeV, order) }
+        return { nodes: nodes, writes: closeDim(ownW, all), writesOpen: closeDim(ownU, all), places: places,
+                 client: client, routeOpen: closeDim(ownR, edgeR), waits: closeDim(ownA, edgeF),
+                 clock: closeDim(ownK, edgeK), noValue: closeDim(ownV, edgeV) }
     }
 
     // The own facts of a construction / a formula: its scan only.
@@ -14369,10 +14368,44 @@ ${
         return retCallsBlock(t, fs.f.body)
     }
 
+    // r2 LOW-1: the s452 r3 rule — an earlier statement that leaves on every
+    // path decides; the dead code after it is not a return path (so
+    // `{ return "x"; return nothing() }` yields a value).
     fn retCallsBlock(t: Tables, b: ABlock) -> int[] {
         let out: int[] = []
-        for (const s of b.stmts) { out = out.concat(retCallsStmt(t, s)) }
+        for (const s of b.stmts) {
+            out = out.concat(retCallsStmt(t, s))
+            if (leavesOnAllPaths(s)) return out
+        }
         return out
+    }
+
+    // Does `s` leave the function on every path through it (`return`, `fail`,
+    // or an `if` / `else` both of whose blocks do)?
+    fn leavesOnAllPaths(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> true
+            .Fail(f: x) :> true
+            .If(cond: c, thenB: tb, elseB: eb) :> blockLeaves(tb) && maybeBlockLeaves(eb)
+            .Given(name: n) :> false
+            .Eval(e: x) :> false
+            .Local(name: n) :> false
+            .EffectStmt(w: w) :> false
+            .Defer(body: d) :> false
+        }
+    }
+
+    fn blockLeaves(b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (leavesOnAllPaths(s)) return true
+        }
+        return false
+    }
+
+    fn maybeBlockLeaves(b: ABlock | not) -> boolean {
+        if (b is not) return false
+        return blockLeaves(b)
     }
 
     fn retCallsStmt(t: Tables, s: AStmt) -> int[] {
