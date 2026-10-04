@@ -8668,7 +8668,11 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
   divergence on `<schema>`: `g-impl1-db-src-program-supply-divergences-s451`.)*
 - If no ancestor is a database scope, the `?{}` block SHALL be a compile error (E-SQL-004:
   `?{}` block has no `db=` / `<db src=>` declaration in any ancestor), except in a
-  module-with-db-context (§44.7.1), where the file's top-level `<db src=>` applies.
+  module-with-db-context (§44.7.1), where the file's top-level `<db src=>` applies. *(The
+  #1262 reading — a module-with-db-context's unscoped `?{}` and `<schema>` resolve to the module's
+  top-level `<db src>` — is **confirmed S451**: ruling:user-voice-scrml.md S451 "your recs on all
+  of them" item 3, *"#1262 (module-with-db-context unscoped `?{}`/`<schema>` → the module's
+  top-level `<db src>`)"*. The `<schema>` half is the Ownership bullet below.)*
   This holds whatever the number of database scopes in the file: a file with ONE database is
   not exempt. A `?{}` in a `${ … }` at the file top, outside its `<program db=>` element, has
   no database scope above it and is E-SQL-004 — move the logic inside the `<program>` (§40.8; the
