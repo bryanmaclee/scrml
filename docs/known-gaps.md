@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 240 | 6 |
 | MED | 500 | 4 |
-| LOW | 257 | 0 |
+| LOW | 258 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -112,6 +112,19 @@ On main, a statement-form arm (one with no value) emits the arm and then
 This happens in a function body and in a handler. After a handled failure, `@x` holds
 `{__scrml_error:true, …}`, so a later `@x + 1` gives `"[object Object]1"`.
 This contradicts the s441 comment in emit-client.ts: "a handled failure never lands the error envelope in the cell".
+
+### g-impl1-handler-arm-foreign-variant-accepted — `risky() !{ | .Empty :> … }` where `risky`'s error type `E` has no `Empty` variant compiles clean: the arm is dead and nothing says so — `NEW S452; LOW; open`
+
+<!-- @gap id=g-impl1-handler-arm-foreign-variant-accepted sev=LOW status=open locus=compiler/src/type-system.ts(guarded-expr exhaustiveness, the §19.7 E-TYPE-080 block ~:12499-12600 — Step 5 collects each arm's variant name into handledVariants but never checks it against allVariants, and the whole check is skipped when a `_`/`else` arm exists) prov=review:s452-pipeless-r1 -->
+
+impl#1 checks a `!{}` handler only for MISSING variants. An arm whose pattern names a variant that
+the handled error type does not declare (`| .Empty :>` on `E = { Bad, Pair, Gone }`; also a
+type-qualified `S.Empty :>` naming a different enum) is accepted at exit 0 and emitted as a dead
+`else if (variant === "Empty")` branch. Pre-existing on base `df6dad5ac`. It is LOW on its own (a dead
+arm), but it is what made the S452 r1 pipe-less mis-split SILENT: an arm-body tail `S.Empty`
+mis-read as an arm head produced exactly such a foreign-variant arm, and no diagnostic fired. Fix
+direction: in Step 5, report each arm variant not in `allVariants` (code to be ruled — no new
+diagnostic was added by the S452 dispatch that filed this).
 
 ### g-each-block-arrow-handler-never-runs — `onclick=${() => { @y = 5 }}` inside `<each>` never runs — `NEW S446; HIGH; open`
 
