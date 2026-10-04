@@ -1047,6 +1047,7 @@ ${
             .MUse(decl: d, alias: a) :> [useView(c, e, d, a)]
             .MEach(bind: b, handles: hs) :> lowerElem(c, e)
             .MSlot :> lowerElem(c, e)
+            .MDb :> lowerElem(c, e)
             .MErrors(of: v, all: a) :> lowerElem(c, e)
             .MStateView(v: v) :> lowerElem(c, e)
             .MInline(v: v) :> lowerElem(c, e)
@@ -1116,6 +1117,7 @@ ${
             .MUse(decl: d, alias: a) :> condWrap(c, e, [useView(c, e, d, a)])
             .MEach(bind: b, handles: hs) :> [eachView(c, e, b, hs)]
             .MSlot :> [View.Slot]
+            .MDb :> lowerNodes(c, e.kids)       // s452: a `<db>` state block renders its children in place (§4)
             .MErrors(of: v, all: a) :> [View.Errors(validityOf(c, v), a)]
             .MStateView(v: v) :> [stateView(c, v)]
             .MInline(v: v) :> inlineViews(c, v)
@@ -1727,7 +1729,7 @@ ${
         for (const r of h.retag) {
             let vals: Expr[] = []
             for (const b of r.binds) { vals = vals.concat([Expr.Local(b)]) }
-            out = out.concat([{ pat: Pattern.PVariant(h.err, r.from, r.binds), body: block([Stmt.Fail(into, r.to, vals)]), value: not }])
+            out = out.concat([{ pat: Pattern.PVariant(h.err, r.from, r.binds), body: block([Stmt.Fail(into, r.to, vals)]), value: not, whole: not }])
         }
         return out
     }
@@ -1751,17 +1753,28 @@ ${
     }
 
     // The failure arms: every arm but a `match`'s `.Ok`, in source order.
+    // s452: a whole-error arm (`_ err`, analyze's FArm(-4), §18.6.1) is the
+    // wildcard binding the whole error value to its binder's Sym.
     fn errArms(c: LC, h: HandledFact, arms: AArm[], isMatch: boolean) -> ErrArm[] {
         let out: ErrArm[] = []
         for (const a of arms) {
             const idx: int = armIdxOf(c.t, a)
             if (idx == -1) {
-                out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a) }])
+                out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a), whole: not }])
+            } else if (idx == -4) {
+                out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a), whole: wholeSym(c, a) }])
             } else if (idx >= 0) {
-                out = out.concat([{ pat: Pattern.PVariant(h.err, idx, armBindSyms(c, a)), body: armBody(c, h, a), value: armValue(c, h, a) }])
+                out = out.concat([{ pat: Pattern.PVariant(h.err, idx, armBindSyms(c, a)), body: armBody(c, h, a), value: armValue(c, h, a), whole: not }])
             }
         }
         return out
+    }
+
+    // The whole-error binder's Sym (the binder minted it; `_ _` binds nothing visible but still has one).
+    fn wholeSym(c: LC, a: AArm) -> Sym | not {
+        const bs: Sym[] = armBindSyms(c, a)
+        if (bs.length == 1) return bs[0]
+        return not
     }
 
     fn armIdxOf(t: Tables, a: AArm) -> int {
@@ -1780,6 +1793,8 @@ ${
         const bs: ABind[] = match p {
             .PName(binds: b) :> b
             .PWild :> []
+            .PWhole(bind: b) :> [b]
+            .PBare(bind: b) :> [b]
         }
         let out: Sym[] = []
         for (const b of bs) {
@@ -1795,7 +1810,7 @@ ${
     fn armBody(c: LC, h: HandledFact, a: AArm) -> Block {
         const body: AArmBody = a.body
         return match body {
-            .ArmBlock(b: b) :> lowerBlock(c, b)
+            .ArmBlock(b: b) :> armBlockBody(c, h, b)
             .ArmExpr(e: x) :> armExprBody(c, h, x)
         }
     }
@@ -1805,12 +1820,48 @@ ${
         return block(attemptsFor(c, x))
     }
 
+    // s452 — a block arm where the form has a VALUE (§18.5: "The block's
+    // result is its **last expression**"; §19.4.3 ruling 1a): its statements,
+    // then the Attempt its last expression needs; the expression itself is the
+    // arm's `value`. A block that does not end in an expression there diverges
+    // (analyze reports E-ERROR-012 for one that falls through), so it is
+    // lowered whole and carries no value.
+    fn armBlockBody(c: LC, h: HandledFact, b: ABlock) -> Block {
+        const last: AExpr | not = valueTail(h, b)
+        if (last is not) return lowerBlock(c, b)
+        const head: ABlock = { nid: b.nid, span: b.span, stmts: b.stmts.slice(0, b.stmts.length - 1) }
+        return block(lowerBlock(c, head).stmts.concat(attemptsFor(c, last)))
+    }
+
     fn armValue(c: LC, h: HandledFact, a: AArm) -> Expr | not {
         if (h.stmt) return not
         const body: AArmBody = a.body
         return match body {
-            .ArmBlock(b: b) :> not                 // it diverges (analyze refuses one that falls through)
+            .ArmBlock(b: b) :> blockValue(c, h, b)
             .ArmExpr(e: x) :> lowerExpr(c, x)
+        }
+    }
+
+    fn blockValue(c: LC, h: HandledFact, b: ABlock) -> Expr | not {
+        const last: AExpr | not = valueTail(h, b)
+        if (last is not) return not
+        return lowerExpr(c, last)
+    }
+
+    // The last expression of a value-position block arm, else not.
+    fn valueTail(h: HandledFact, b: ABlock) -> AExpr | not {
+        if (h.stmt) return not
+        if (b.stmts.length == 0) return not
+        const k: AStmtK = b.stmts[b.stmts.length - 1].k
+        return match k {
+            .Eval(e: x) :> x
+            .Local(name: n) :> not
+            .Return(e: x) :> not
+            .If(cond: x) :> not
+            .Given(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: d) :> not
+            .Fail(f: x) :> not
         }
     }
 

@@ -395,9 +395,16 @@ ${
             .ResetSurface(of: v) :> []
             .Defer(body: b) :> []
             .Unpersist(decl: x) :> []
-            .Attempt(result: r, ok: ok) :> maybeSym(r).concat([ok.bind])
+            .Attempt(result: r, ok: ok, arms: arms) :> maybeSym(r).concat([ok.bind]).concat(wholeSyms(arms))
             .Fail(err: x) :> []
         }
+    }
+
+    // s452: the whole-error binders of an Attempt's arms (§18.6.1).
+    fn wholeSyms(arms: ErrArm[]) -> Sym[] {
+        let out: Sym[] = []
+        for (const a of arms) { out = out.concat(maybeSym(a.whole)) }
+        return out
     }
 
     fn maybeSym(s: Sym | not) -> Sym[] {

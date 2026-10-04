@@ -305,8 +305,9 @@ describe("§19.4.3 item 3 / §34 E-TYPE-080 — `!{}` handlers", () => {
     const r = run(src);
     expect(r.core == null).toBe(false);
   });
-  test("a handler on a call that cannot fail is refused (the SPEC gives `!{}` no meaning there)", () => {
-    expect(codes(P(`    fn safe() -> int { return 1 }\n    function go() {\n        safe() !{ | _ :> @n = 1 }\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  // s452: S451 ruling 3 — E-ERROR-013 (error-rulings.test.js), no longer a refusal
+  test("a handler on a call that cannot fail is E-ERROR-013", () => {
+    expect(codes(P(`    fn safe() -> int { return 1 }\n    function go() {\n        safe() !{ | _ :> @n = 1 }\n    }`))).toEqual(["E-ERROR-013"]);
   });
 });
 
@@ -315,15 +316,19 @@ describe("Ue2 — slice limits, refused (never accepted and ignored)", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    fn id(s: string) -> string { return s }\n    function go() {\n        @out = id(load("a") !{ | _ :> "z" })\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go()! LoadError {\n        @out = "a" + load("a")?\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
-  test("an arm that writes but yields no value, where the result is used as a value", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        const r = load("x") !{ | _ :> @n = 1 }\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  // s452: S451 ruling 1a decided these — E-ERROR-012 (error-rulings.test.js), no longer Ue2 refusals
+  test("an arm that writes but yields no value, where the result is used as a value — E-ERROR-012", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        const r = load("x") !{ | _ :> @n = 1 }\n    }`))).toEqual(["E-ERROR-012"]);
   });
-  test("a block arm that falls through, where the result is used as a value", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        const r = load("x") !{ | _ :> { @n = 1 } }\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  test("a block arm that falls through, where the result is used as a value — E-ERROR-012", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        const r = load("x") !{ | _ :> { @n = 1 } }\n    }`))).toEqual(["E-ERROR-012"]);
   });
-  test("a binder without parentheses (`| .V m :>`, `| _ e :>`) — the SPEC does not settle what it binds", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | .NotFound m :> @log = m | _ :> @log = "o" }\n    }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ e :> @log = "o" }\n    }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+  // s452: the paren-free binder is the legacy spelling of `.V(m)` in a `!{}` arm (§19.4.3 ruling 2,
+  // S452 ruling c) — accepted; error-rulings.test.js covers its arity and the `match` parse error
+  test("a payload binder without parentheses (`| .V m :>`) binds the payload — accepted as the legacy spelling", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | .NotFound m :> @log = m | _ :> @log = "o" }\n    }`))).toEqual([]);
+    // s452: `| _ e :>` is the whole-error binder (§18.6.1) — error-rulings.test.js
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ e :> @log = "o" }\n    }`))).toEqual([]);
   });
   test("`transaction { … }` names unit U1e", () => {
     const src = P(`${TYPES}\n    function f()! LoadError {\n        transaction {\n            @n = 1\n        }\n    }`);
@@ -486,8 +491,9 @@ describe("S239 review fix round (114e6ef80)", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @n = 1\n            .Ok(w) :> @n = 2\n            else :> @n = 3\n        }\n    }`))).toEqual(["E-TYPE-023"]);
   });
 
-  test("LOW-1 — an arm after the wildcard is unreachable: refused", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ :> @n = 1 | .Timeout :> @n = 2 }\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  // s452 r2: §18.6 names the code — "An `else` arm that is not the last arm SHALL be … E-SYNTAX-010"
+  test("LOW-1 — an arm after the wildcard is E-SYNTAX-010 (the wildcard is last, §18.6)", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ :> @n = 1 | .Timeout :> @n = 2 }\n    }`))).toEqual(["E-SYNTAX-010"]);
   });
 
   test("LOW-2 — `.V(args) :> fail E.V(args)` (§19.5.2's spelling) is a `fail` arm (runtime)", async () => {

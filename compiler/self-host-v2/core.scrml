@@ -226,7 +226,12 @@ ${
     export type OkArm:struct = { bind: Sym, body: Block, value: Expr | not }
     // A failure branch: `pat` matches the error value (a variant of the
     // Attempt's `err` enum, or PWild), its payload bound positionally.
-    export type ErrArm:struct = { pat: Pattern, body: Block, value: Expr | not }
+    // s452 — `whole`: the local bound to the WHOLE error value (variant and
+    // payload) — the whole-error binder `| _ err :>` (SPEC §18.6.1). Only on a
+    // PWild arm (check.scrml C-E2): the binder is the wildcard's; a whole-value
+    // binder is not a Pattern, because §18's MatchArm shares Pattern and an
+    // ordinary `match` arm binds no whole value (§18.6).
+    export type ErrArm:struct = { pat: Pattern, body: Block, value: Expr | not, whole: Sym | not }
 
     // -------------------------------------------------------------------------
     // s451 (U1a) — SQL (SPEC §8, §44). A query is the ONE place SQL lives in

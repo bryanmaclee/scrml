@@ -114,7 +114,8 @@ ${
     //        the program's `sqlError` for a query) and an EnumDef; every arm
     //        is PWild or PVariant(err, i, binds) with `binds.length` = variant
     //        i's arity or 0 (no payload read); the arms are TOTAL (a PWild, or
-    //        every variant covered)
+    //        every variant covered); (s452) an arm's `whole` binder (the
+    //        whole-error binder, §18.6.1) stands only on a PWild arm
     //   C-E3 an Attempt with a `result`: the ok arm and every arm carry a
     //        `value` or DIVERGE (end in Return / Fail, or an If both of whose
     //        branches diverge); without one, no branch carries a value
@@ -286,6 +287,7 @@ ${
         let wild = false
         for (const a of arms) {
             const pr: ArmPat = armPat(a.pat)
+            if (a.whole is some && !pr.wild) out = out.concat(["C-E2: an Attempt arm binds the whole error but is not the wildcard (§18.6.1: `_ err`)"])
             if (pr.wild) {
                 wild = true
             } else if (pr.enumId != err.id || pr.idx < 0 || pr.idx >= vs.length) {
