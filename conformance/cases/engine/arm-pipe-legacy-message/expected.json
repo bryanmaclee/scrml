@@ -1,0 +1,17 @@
+{
+  "id": "engine-arm-pipe-legacy-message",
+  "description": "§51.0.S.2.3 / §19.4.5 / §63.5 — engine message arms written with the soft-deprecated leading `|` (the twin of engine/message-dispatch). The deprecated form is in-contract during the window: one W-ARM-PIPE-LEGACY (Info) per `|`-led arm (2 here), and the runtime is identical — a click calls @gate.advance(.Toggle) and the engine transitions Closed -> Open. The legacy spelling is the PURPOSE of this case; it is not migrated.",
+  "language-version": "deprecated",
+  "spec": "§51.0.S.2.3",
+  "rationale": "§51.0.S.2.3 — a `|`-led message arm parses identically to the §18.2 match arm and surfaces W-ARM-PIPE-LEGACY (§19.4.5, one per arm). §63.5 — during the window the W-code is conformance-required and the runtime is identical to the canonical form's (engine/message-dispatch).",
+  "expect": {
+    "codes": ["W-ARM-PIPE-LEGACY"],
+    "codeCounts": { "W-ARM-PIPE-LEGACY": 2 },
+    "severity": { "W-ARM-PIPE-LEGACY": "info" },
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#toggle" }],
+    "state": { "gate": "Open" },
+    "dom": "<button id=\"toggle\">Toggle</button><p id=\"state\">State: Open</p>",
+    "domAnchored": [{ "selector": "#state", "text": "State: Open" }]
+  }
+}
