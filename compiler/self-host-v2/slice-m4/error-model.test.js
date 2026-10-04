@@ -289,6 +289,12 @@ describe("§19.4.3 item 3 / §34 E-TYPE-080 — `!{}` handlers", () => {
     const o = await runProgram(`${TYPES}\n${LOAD}\n    function name(id: string) -> string {\n        const v = load(id) !{\n            | .NotFound(m) :> "missing " + m\n            | .Timeout :> { return "gave up" }\n        }\n        return "[" + v + "]"\n    }\n    function go() {\n        @log = name("ok") + name("x") + name("y")\n    }`, ["go"], ["go"]);
     expect(o.log).toBe("[ok][missing x]gave up");
   });
+  test("a handling form inside an arm — as a statement and as the arm's value (each Attempt names its own result)", async () => {
+    const o = await runProgram(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ :> load("y") !{ | _ :> @log = "inner" } }\n        @out = load("x") !{ | _ :> load("y") !{ | .Timeout :> "z" | _ :> "?" } }\n    }`, ["go"], ["go"]);
+    expect(o.log).toBe("inner");
+    expect(o.out).toBe("z");
+  });
+
   test("one-line arms: `!{ | .A :> 1 | _ :> 2 }`", async () => {
     const o = await runProgram(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ | .Timeout :> "t" | _ :> "?" }\n    }`, ["go"], ["go"]);
     expect(o.out).toBe("t");

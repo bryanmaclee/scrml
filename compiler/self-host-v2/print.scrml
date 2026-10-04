@@ -429,44 +429,46 @@ ${
         let body: JsStmt[] = []
         let i = 0
         for (const arm of arms) {
-            const ret: JsStmt[] = patBinds(ctx, arm.pat).concat([JsStmt.SReturn(exprJs(ctx, arm.body))])
+            const ret: JsStmt[] = patBinds(ctx, arm.pat, jid("m$")).concat([JsStmt.SReturn(exprJs(ctx, arm.body))])
             if (i == arms.length - 1) {
                 body = body.concat(ret)
             } else {
-                body = body.concat([JsStmt.SIf(patTest(ctx, arm.pat), ret, [])])
+                body = body.concat([JsStmt.SIf(patTest(ctx, arm.pat, jid("m$")), ret, [])])
             }
             i = i + 1
         }
         return jcall(JsExpr.JArrow(["m$"], body), [exprJs(ctx, scrut)])
     }
 
-    fn patTest(ctx: Ctx, p: Pattern) -> JsExpr {
+    // A pattern's test / binders against the scrutinee `on` (`m$` in a match
+    // arrow; `<raw>.error` in an Attempt — s451 Ue).
+    fn patTest(ctx: Ctx, p: Pattern, on: JsExpr) -> JsExpr {
         return match p {
-            .PVariant(enumSym: es, idx: idx) :> variantTest(ctx, es, idx)
-            .PLit(lit: l) :> JsExpr.JBin(JsOp.StrictEq, jid("m$"), litJs(ctx, l))
+            .PVariant(enumSym: es, idx: idx) :> variantTest(ctx, es, idx, on)
+            .PLit(lit: l) :> JsExpr.JBin(JsOp.StrictEq, on, litJs(ctx, l))
             .PWild :> JsExpr.JBool(true)
         }
     }
 
-    fn variantTest(ctx: Ctx, es: Sym, idx: int) -> JsExpr {
+    fn variantTest(ctx: Ctx, es: Sym, idx: int, on: JsExpr) -> JsExpr {
         const tag: JsExpr = jstr(variantTag(ctx, es, idx))
-        if (variantHasFields(ctx, es, idx)) return JsExpr.JBin(JsOp.StrictEq, jmember(jid("m$"), "tag"), tag)
-        return JsExpr.JBin(JsOp.StrictEq, jid("m$"), tag)
+        if (variantHasFields(ctx, es, idx)) return JsExpr.JBin(JsOp.StrictEq, jmember(on, "tag"), tag)
+        return JsExpr.JBin(JsOp.StrictEq, on, tag)
     }
 
-    fn patBinds(ctx: Ctx, p: Pattern) -> JsStmt[] {
+    fn patBinds(ctx: Ctx, p: Pattern, on: JsExpr) -> JsStmt[] {
         return match p {
-            .PVariant(enumSym: es, idx: idx, binds: binds) :> variantBinds(ctx, es, idx, binds)
+            .PVariant(enumSym: es, idx: idx, binds: binds) :> variantBinds(ctx, es, idx, binds, on)
             .PLit :> []
             .PWild :> []
         }
     }
 
-    fn variantBinds(ctx: Ctx, es: Sym, idx: int, binds: Sym[]) -> JsStmt[] {
+    fn variantBinds(ctx: Ctx, es: Sym, idx: int, binds: Sym[], on: JsExpr) -> JsStmt[] {
         let out: JsStmt[] = []
         let j = 0
         for (const b of binds) {
-            out = out.concat([JsStmt.SConst(symName(ctx, b), jmember(jid("m$"), variantFieldName(ctx, es, idx, j)))])
+            out = out.concat([JsStmt.SConst(symName(ctx, b), jmember(on, variantFieldName(ctx, es, idx, j)))])
             j = j + 1
         }
         return out
@@ -554,19 +556,18 @@ ${
     // Attempt binds the call's raw result to `ok.bind`:
     //   let result;                       // only when the Attempt has one
     //   const v = f(…);
-    //   if (rt.failed(v)) { const m$ = v.error; if (<arm 1 test>) { … } else … }
+    //   if (rt.failed(v)) { if (<arm 1 test on v.error>) { … } else … }
     //   else { <ok body>; result = <ok value>; }
     // The arms are total (check.scrml C-E2), so the last — or a wildcard —
-    // needs no test. `m$` is the error value the arm patterns test (as in a
-    // match); an arm's own block is a nested JS block, so an inner Attempt's
-    // `m$` shadows it.
+    // needs no test. The patterns test `v.error` (the raw result's local is a
+    // minted, unique name), so an Attempt nested in an arm never collides.
     // -------------------------------------------------------------------------
     fn attemptJs(ctx: Ctx, result: Sym | not, call: Failable, ok: OkArm, arms: ErrArm[], assigned: int[]) -> JsStmt[] {
         let out: JsStmt[] = []
         if (result is some) out = out.concat([JsStmt.SDecl(symName(ctx, result))])
         const raw: string = symName(ctx, ok.bind)
         out = out.concat([JsStmt.SConst(raw, failableJs(ctx, call))])
-        const errB: JsStmt[] = [JsStmt.SConst("m$", jmember(jid(raw), "error"))].concat(errArmsJs(ctx, arms, 0, result))
+        const errB: JsStmt[] = errArmsJs(ctx, jmember(jid(raw), "error"), arms, 0, result)
         const okB: JsStmt[] = blockJs(ctx, ok.body).concat(resultJs(ctx, result, ok.value))
         return out.concat([JsStmt.SIf(rtCall(ctx, "failed", [jid(raw)]), errB, okB)])
     }
@@ -578,12 +579,12 @@ ${
         }
     }
 
-    fn errArmsJs(ctx: Ctx, arms: ErrArm[], i: int, result: Sym | not) -> JsStmt[] {
+    fn errArmsJs(ctx: Ctx, err: JsExpr, arms: ErrArm[], i: int, result: Sym | not) -> JsStmt[] {
         if (i >= arms.length) return []
         const a: ErrArm = arms[i]
-        const body: JsStmt[] = patBinds(ctx, a.pat).concat(blockJs(ctx, a.body)).concat(resultJs(ctx, result, a.value))
+        const body: JsStmt[] = patBinds(ctx, a.pat, err).concat(blockJs(ctx, a.body)).concat(resultJs(ctx, result, a.value))
         if (i == arms.length - 1 || isWildPat(a.pat)) return body
-        return [JsStmt.SIf(patTest(ctx, a.pat), body, errArmsJs(ctx, arms, i + 1, result))]
+        return [JsStmt.SIf(patTest(ctx, a.pat, err), body, errArmsJs(ctx, err, arms, i + 1, result))]
     }
 
     fn isWildPat(p: Pattern) -> boolean {
