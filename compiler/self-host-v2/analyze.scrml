@@ -13408,125 +13408,44 @@ ${
         return out
     }
 
-    // CLIENT REACH (a fixed point): the first chain from a NON-server function
-    // down to its client-state access, through non-server callees. A server
-    // callee stops the walk — it is judged on its own (server → server is a
-    // call in place, §13.4).
-    type ReachOf:struct = { sym: int, r: Reach | not }
-
-    fn clientReach(all: FnFacts[], ps: PlaceFact[]) -> ReachOf[] {
-        let out: ReachOf[] = []
-        for (const f of all) {
-            let r: Reach | not = not
-            const p: PlaceK = placeOf(ps, f.sym)
-            if (p != PlaceK.Server) r = directClient(f)
-            out = out.concat([{ sym: f.sym, r: r }])
-        }
-        let changed = true
-        let pass = 0
-        while (changed && pass < all.length + 2) {
-            changed = false
-            let next: ReachOf[] = []
-            for (const x of out) {
-                let r: Reach | not = x.r
-                const f: FnFacts | not = factsOf(all, x.sym)
-                const p: PlaceK = placeOf(ps, x.sym)
-                if (r is not && f is some && p != PlaceK.Server) {
-                    for (const ref of fnRefs(all, f)) {
-                        const c: Reach | not = reachOf(out, ref.sym)
-                        if (r is not && c is some && placeOf(ps, ref.sym) != PlaceK.Server) {
-                            r = { chain: [f.name + "()"].concat(c.chain), what: c.what }
-                            changed = true
-                        }
-                    }
-                }
-                next = next.concat([{ sym: x.sym, r: r }])
-            }
-            out = next
-            pass = pass + 1
-        }
-        return out
+    // THE REACHES — queries over the effect summary (dpa-066 M2; the three
+    // fixpoints that computed them are retired). Each is the first chain (the
+    // summary's witness) from function `sym` down to:
+    //  - clientReachOf (§12.4 R2): a client-state access, through non-server
+    //    callees — a server callee is judged on its own (server → server is a
+    //    call in place, §13.4); a server function reaches none of its own;
+    //  - routeOpenOf (§12.4 R3): a call the analysis cannot resolve, through
+    //    non-server callees;
+    //  - waitsOf (§13.2, §13.7 item 2): a server or split function — async colour.
+    fn clientReachOf(s: Summary, sym: int) -> Reach | not {
+        const i: int = nodeIdx(s.nodes, sym)
+        if (i < 0) return not
+        const a: FxAtom | not = witnessOf(s.client[i])
+        if (a is not) return not
+        return { chain: fxChain(s, s.client, i, a), what: clientWhats(s.nodes[a.root].f)[a.pos] }
     }
 
-    fn directClient(f: FnFacts) -> Reach | not {
-        if (f.doms.length > 0) return { chain: [f.name + "()"], what: f.doms[0].what }
-        if (f.scan.writes.length > 0) return { chain: [f.name + "()"], what: "writes `" + f.scan.writes[0].cell + "`" }
-        if (f.reads.length > 0) return { chain: [f.name + "()"], what: "reads `" + f.reads[0].what + "`" }
-        return not
+    fn routeOpenOf(s: Summary, sym: int) -> Reach | not {
+        const i: int = nodeIdx(s.nodes, sym)
+        if (i < 0) return not
+        const a: FxAtom | not = witnessOf(s.routeOpen[i])
+        if (a is not) return not
+        return { chain: fxChain(s, s.routeOpen, i, a), what: s.nodes[a.root].f.scan.unproven[a.pos].what }
     }
 
-    fn reachOf(rs: ReachOf[], sym: int) -> Reach | not {
-        for (const x of rs) {
-            if (x.sym == sym) return x.r
-        }
-        return not
+    fn waitsOf(s: Summary, sym: int) -> Reach | not {
+        const i: int = nodeIdx(s.nodes, sym)
+        if (i < 0) return not
+        const a: FxAtom | not = witnessOf(s.waits[i])
+        if (a is not) return not
+        return { chain: fxChain(s, s.waits, i, a), what: "" }
     }
 
-    // UNRESOLVED REACH: the first chain from a function down to a call the
-    // analysis cannot resolve, through non-server callees.
-    fn unresolvedReach(all: FnFacts[], ps: PlaceFact[]) -> ReachOf[] {
-        let out: ReachOf[] = []
-        for (const f of all) {
-            let r: Reach | not = not
-            if (f.scan.unproven.length > 0) r = { chain: [f.name + "()"], what: f.scan.unproven[0].what }
-            out = out.concat([{ sym: f.sym, r: r }])
-        }
-        let changed = true
-        let pass = 0
-        while (changed && pass < all.length + 2) {
-            changed = false
-            let next: ReachOf[] = []
-            for (const x of out) {
-                let r: Reach | not = x.r
-                const f: FnFacts | not = factsOf(all, x.sym)
-                if (r is not && f is some) {
-                    for (const ref of fnRefs(all, f)) {
-                        const c: Reach | not = reachOf(out, ref.sym)
-                        if (r is not && c is some && placeOf(ps, ref.sym) != PlaceK.Server) {
-                            r = { chain: [f.name + "()"].concat(c.chain), what: c.what }
-                            changed = true
-                        }
-                    }
-                }
-                next = next.concat([{ sym: x.sym, r: r }])
-            }
-            out = next
-            pass = pass + 1
-        }
-        return out
-    }
-
-    // ASYNC COLOR (§13.2, §13.7 item 2): a server or split function, or a
-    // client function that reaches one — the chain down to the server call.
-    fn asyncReach(all: FnFacts[], ps: PlaceFact[]) -> ReachOf[] {
-        let out: ReachOf[] = []
-        for (const f of all) {
-            let r: Reach | not = not
-            const p: PlaceK = placeOf(ps, f.sym)
-            if (p == PlaceK.Server || p == PlaceK.Split) r = { chain: [f.name + "()"], what: "" }
-            out = out.concat([{ sym: f.sym, r: r }])
-        }
-        let changed = true
-        let pass = 0
-        while (changed && pass < all.length + 2) {
-            changed = false
-            let next: ReachOf[] = []
-            for (const x of out) {
-                let r: Reach | not = x.r
-                const f: FnFacts | not = factsOf(all, x.sym)
-                if (r is not && f is some) {
-                    for (const ref of fnRefs(all, f)) {
-                        const c: Reach | not = reachOf(out, ref.sym)
-                        if (r is not && c is some) {
-                            r = { chain: [f.name + "()"].concat(c.chain), what: "" }
-                            changed = true
-                        }
-                    }
-                }
-                next = next.concat([{ sym: x.sym, r: r }])
-            }
-            out = next
-            pass = pass + 1
+    // The functions' own facts, as the summary read them (one scan per body).
+    fn fnFactsOf(s: Summary) -> FnFacts[] {
+        let out: FnFacts[] = []
+        for (const c of s.nodes) {
+            if (c.kind == CallableK.KFn) out = out.concat([c.f])
         }
         return out
     }
@@ -13924,24 +13843,14 @@ ${
     }
 
     // ---- the pass ------------------------------------------------------------------
-    fn placePass(g: Globals, t: Tables, st0: AS) -> RPlaced {
+    fn placePass(g: Globals, t: Tables, st0: AS, sum: Summary) -> RPlaced {
         const cx: PlaceCx = { t: t, g: g }
         let st: AS = st0
-        let all: FnFacts[] = []
-        for (const fs of g.fns) { all = all.concat([fnFacts(cx, fs)]) }
-        let places: PlaceFact[] = []
-        for (const f of all) { places = places.concat([{ sym: f.sym, name: f.name, place: directPlace(f) }]) }
-        // a function that reaches a client-only function is client-only (§12.4)
-        const creach: ReachOf[] = clientReach(all, places)
-        let ps2: PlaceFact[] = []
-        for (const p of places) {
-            let pk: PlaceK = p.place
-            if (pk == PlaceK.Ambient && reachOf(creach, p.sym) is some) pk = PlaceK.Client
-            ps2 = ps2.concat([{ sym: p.sym, name: p.name, place: pk }])
-        }
-        places = ps2
-        const ureach: ReachOf[] = unresolvedReach(all, places)
-        const areach: ReachOf[] = asyncReach(all, places)
+        // the functions' own facts and the ONE placement — the effect summary's
+        // (dpa-066 M2): each function by its own body, an ambient one that
+        // reaches a client-only function made client-only (§12.4)
+        const all: FnFacts[] = fnFactsOf(sum)
+        const places: PlaceFact[] = sum.places
 
         // the databases
         const rd: RDbs = dbsPass(g, g.files, st)
@@ -13962,7 +13871,7 @@ ${
                 st = addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` both runs a `" + sqlSigil() + "}` query and writes `" + f.scan.writes[0].cell + "`, so it is split across the client/server boundary (§19.9.5: \"A function whose body mixes a server-trigger statement with a reactive-assignment statement is split\") — the body split arrives with unit U1d. Until then: return the value from a server function and write the cell in the caller")
             } else if (pk == PlaceK.Server) {
                 servers = servers.concat([f.sym])
-                st = serverBodyDiags(cx, f, all, places, creach, ureach, st)
+                st = serverBodyDiags(cx, f, all, places, sum, st)
             } else {
                 // client / ambient code calling a server function: a suspension (U1b)
                 for (const r of fnRefs(all, f)) {
@@ -13988,7 +13897,7 @@ ${
         }
 
         // value positions (§13.7) and action positions
-        st = valueServerDiags(g, t, all, places, areach, rd, st)
+        st = valueServerDiags(g, t, all, places, sum, rd, st)
         st = actionServerDiags(g, t, all, places, rd, st)
         return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places }, doms: doms, st: st }
     }
@@ -14004,7 +13913,7 @@ ${
     }
 
     // A wholly-server function's own body and call graph (§6.6.9, §12.4, §12.5.3).
-    fn serverBodyDiags(cx: PlaceCx, f: FnFacts, all: FnFacts[], ps: PlaceFact[], creach: ReachOf[], ureach: ReachOf[], st0: AS) -> AS {
+    fn serverBodyDiags(cx: PlaceCx, f: FnFacts, all: FnFacts[], ps: PlaceFact[], sum: Summary, st0: AS) -> AS {
         let st: AS = st0
         let seen: string[] = []
         for (const r of f.reads) {
@@ -14018,11 +13927,11 @@ ${
         }
         for (const ref of fnRefs(all, f)) {
             if (placeOf(ps, ref.sym) != PlaceK.Server) {
-                const c: Reach | not = reachOf(creach, ref.sym)
+                const c: Reach | not = clientReachOf(sum, ref.sym)
                 if (c is some) {
                     st = addDiag(st, ref.file, ref.span, "E-ROUTE-002", "server function `" + f.name + "()` reaches client-only code: `" + [f.name + "()"].concat(c.chain).join(" → ") + "` " + c.what + " (§12.4 — reactive state and the DOM live in the browser, S451 R2). Pass the value in as an argument, extract the shared logic into a pure function (§33) that touches no cell, or duplicate the logic inside `" + f.name + "()`")
                 }
-                const u: Reach | not = reachOf(ureach, ref.sym)
+                const u: Reach | not = routeOpenOf(sum, ref.sym)
                 if (u is some) {
                     st = addDiag(st, ref.file, ref.span, "E-ROUTE-001", "server function `" + f.name + "()` cannot be fully analyzed for route placement: `" + [f.name + "()"].concat(u.chain).join(" → ") + "` — " + u.what + " (§12.4: \"SHALL be a compile error\"). Call a declared scrml function by its name")
                 }
@@ -14156,7 +14065,7 @@ ${
     }
 
     // §13.7 (S451 R1): a value position that would have to WAIT.
-    fn valueServerDiags(g: Globals, t: Tables, all: FnFacts[], ps: PlaceFact[], areach: ReachOf[], rd: RDbs, st0: AS) -> AS {
+    fn valueServerDiags(g: Globals, t: Tables, all: FnFacts[], ps: PlaceFact[], sum: Summary, rd: RDbs, st0: AS) -> AS {
         let st: AS = st0
         for (const p of valuePositions(g, t)) {
             for (const s of sqlsInValue(p.v)) {
@@ -14168,7 +14077,7 @@ ${
             const scan: BodyScan = scanValue({ t: t, file: p.file }, p.v, emptyScan())
             for (const r of scan.refs) {
                 const pk: PlaceK = placeOf(ps, r.sym)
-                const c: Reach | not = reachOf(areach, r.sym)
+                const c: Reach | not = waitsOf(sum, r.sym)
                 if (pk == PlaceK.Server) {
                     st = addDiag(st, r.file, r.span, "E-VALUE-SERVER-CALL", p.what + " calls the server function `" + r.name + "` — " + waitFix())
                 } else if (c is some) {
@@ -14572,7 +14481,7 @@ ${
     // summary's, over one program — every disagreement as a line ([] — none).
     // The differential test (slice-m4/effects-shadow.test.js) runs it over
     // every slice program and every conformance-counter case. Each migration
-    // step deletes the comparisons of the walkers it retires (M1: W3).
+    // step deletes the comparisons of the walkers it retires (M1: W3; M2: W4-W7).
     // =========================================================================
     export fn effectsShadow(files: FileAst[], entry: string) -> string[] {
         const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [] }
@@ -14595,29 +14504,6 @@ ${
                                 novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts() }
         const sum: Summary = summarize(ra.g, bound)
         let out: string[] = []
-        // W4-W7 — placement and its three reaches (placePass)
-        const cx: PlaceCx = { t: bound, g: ra.g }
-        let all: FnFacts[] = []
-        for (const f of ra.g.fns) { all = all.concat([fnFacts(cx, f)]) }
-        let places: PlaceFact[] = []
-        for (const f of all) { places = places.concat([{ sym: f.sym, name: f.name, place: directPlace(f) }]) }
-        const creach: ReachOf[] = clientReach(all, places)
-        let ps2: PlaceFact[] = []
-        for (const p of places) {
-            let pk: PlaceK = p.place
-            if (pk == PlaceK.Ambient && reachOf(creach, p.sym) is some) pk = PlaceK.Client
-            ps2 = ps2.concat([{ sym: p.sym, name: p.name, place: pk }])
-        }
-        const ureach: ReachOf[] = unresolvedReach(all, ps2)
-        const areach: ReachOf[] = asyncReach(all, ps2)
-        for (const f of all) {
-            const i: int = nodeIdx(sum.nodes, f.sym)
-            const label: string = f.name + "()"
-            out = out.concat(shadowLine("W4 place " + label, placeText(placeOf(ps2, f.sym)), placeText(placeOf(sum.places, f.sym))))
-            out = out.concat(shadowLine("W5 client " + label, walkerReach(reachOf(creach, f.sym)), summaryClient(sum, i)))
-            out = out.concat(shadowLine("W6 route-open " + label, walkerReach(reachOf(ureach, f.sym)), summaryRouteOpen(sum, i)))
-            out = out.concat(shadowLine("W7 waits " + label, walkerReach(reachOf(areach, f.sym)), summaryWaits(sum, i)))
-        }
         // W8 / W9 / W1 — the binder's call-site re-derivations and the clock set
         for (const f of ra.g.fns) {
             const i: int = nodeIdx(sum.nodes, f.info.sym.id)
@@ -14632,41 +14518,6 @@ ${
     fn shadowLine(what: string, walker: string, summary: string) -> string[] {
         if (walker == summary) return []
         return [what + ": walker {" + walker + "} summary {" + summary + "}"]
-    }
-
-    fn placeText(p: PlaceK) -> string {
-        return match p {
-            .Ambient :> "ambient"
-            .Client :> "client"
-            .Server :> "server"
-            .Split :> "split"
-        }
-    }
-
-    fn walkerReach(r: Reach | not) -> string {
-        if (r is not) return "-"
-        return r.chain.join(" → ") + " ⇒ " + r.what
-    }
-
-    fn summaryRouteOpen(s: Summary, i: int) -> string {
-        if (i < 0) return "-"
-        const a: FxAtom | not = witnessOf(s.routeOpen[i])
-        if (a is not) return "-"
-        return fxChain(s, s.routeOpen, i, a).join(" → ") + " ⇒ " + s.nodes[a.root].f.scan.unproven[a.pos].what
-    }
-
-    fn summaryClient(s: Summary, i: int) -> string {
-        if (i < 0) return "-"
-        const a: FxAtom | not = witnessOf(s.client[i])
-        if (a is not) return "-"
-        return fxChain(s, s.client, i, a).join(" → ") + " ⇒ " + clientWhats(s.nodes[a.root].f)[a.pos]
-    }
-
-    fn summaryWaits(s: Summary, i: int) -> string {
-        if (i < 0) return "-"
-        const a: FxAtom | not = witnessOf(s.waits[i])
-        if (a is not) return "-"
-        return fxChain(s, s.waits, i, a).join(" → ") + " ⇒ "
     }
 
     // =========================================================================
@@ -14704,7 +14555,7 @@ ${
         const vp: ValPass = validatorPass(ra.g, bound)
         const typed: RTyping = typeProgram(files, bound)
         // s451 (U1a): route placement, the queries and the databases
-        const pp: RPlaced = placePass(ra.g, bound, st)
+        const pp: RPlaced = placePass(ra.g, bound, st, sum)
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,

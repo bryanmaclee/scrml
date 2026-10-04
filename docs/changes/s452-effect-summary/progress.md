@@ -55,3 +55,20 @@
 - Slices all green (m1 99, m2 462, m3 60, m4 1105, codec 92, m1 lowered 99); counter PASS 120 /
   FAIL 48 / UNSUPPORTED 622 (= base); lint 0.
 - Lines (analyze.scrml): +40 / −156.
+
+## M2 — placement as queries (W4–W7)
+
+- Replaced: W5 `clientReach`, W6 `unresolvedReach`, W7 `asyncReach` (three hand-rolled
+  `pass < n + 2` fixpoints), `directClient`, `reachOf`, the `ReachOf` type, and placePass's own
+  placement computation (direct + the Ambient→Client upgrade) and its SECOND body scan (W4's
+  `fnFacts` call per function) — by the summary's one placement (`sum.places`) and three queries:
+  `clientReachOf` / `routeOpenOf` / `waitsOf` (the witnesses of `client` / `routeOpen` / `waits`).
+  `fnFacts` is now called once per function, by `summarize` (the extractor).
+- Shadow: W4–W7 comparisons deleted.
+- Differential: 2566 inputs, diagnostics IDENTICAL to base; shadow = the 1 G7 line.
+- Slices all green (same counts as M1); counter PASS 120 / FAIL 48 / UNSUPPORTED 622; lint 0.
+- Lines (analyze.scrml): +47 / −196.
+- Not done (DD Cost "8 → 1 body walks"): `sqlsInBlock` / `readsInBlock` / `domsInBlock` are still
+  separate own-fact walkers beside `scanBlock`; merging them into the one scan is not required by
+  the DD's M2 text ("W4-W7 become queries over one placement; delete three fixpoints and the second
+  scanBlock") and is left for a later step.
