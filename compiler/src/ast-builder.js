@@ -17230,7 +17230,7 @@ function parseErrorTokens(tokens, filePath, errors) {
       errors.push(new TABError(
         "E-PARSE-001",
         `E-PARSE-001: \`${head} ${b.text}\` in a \`!{}\` handler is not an arm — a binder without parentheses ` +
-        `needs the legacy leading \`|\`. Write \`${head}(${b.text}) :>\`.`,
+        `needs the legacy leading \`|\`. Write \`${head}(${b.text}) :>\`, or add the legacy \`|\`.`,
         tokenSpan(t, filePath),
       ));
       return;
@@ -17261,6 +17261,19 @@ function parseErrorTokens(tokens, filePath, errors) {
     // arm record (pattern / binding / handler / arrow) and the emitted JS are
     // identical for both spellings.
     const _pipeless = !(tok.kind === "PUNCT" && tok.text === "|") && isPipelessErrorArmStart(tokens, i);
+
+    // S452 r4 — §19.4.5: the paren-free binder is legal ONLY after a leading
+    // `|`. A pipe-less `::V m :>` (pre-§19 legacy `::` arm) is E-PARSE-001, the
+    // same as `.V m :>` (corpus measured zero sites, 2321 files).
+    if (!_pipeless && tok.kind === "OPERATOR" && tok.text === "::") {
+      const pe = _errArmVariantPatternEnd(tokens, i);
+      const b = pe > 0 ? tokens[pe] : null;
+      if (b && b.kind === "IDENT" && _errArmIsArrowAt(tokens, pe + 1)) {
+        reportStrayToken(i);
+        i++;
+        continue;
+      }
+    }
     if ((tok.kind === "PUNCT" && tok.text === "|") || _pipeless) {
       _strayRunOpen = false;
       const armStart = tok;

@@ -165,8 +165,8 @@ const CASES = [
     piped: VALUE(["        | .Bad(m) :> m", "        | _ err :> \"other\""]),
   },
   {
-    name: "r3 — legacy paren-free `::V m :>` head stops at a following `else :>` / `.V :>`",
-    pipeless: VALUE(["        ::Bad m :> m", "        .Pair(a, b) :> \"pair\"", "        else :> \"other\""]),
+    name: "legacy `| ::V m :>` followed by pipe-less `.V :>` / `else :>` heads",
+    pipeless: VALUE(["        | ::Bad m :> m", "        .Pair(a, b) :> \"pair\"", "        else :> \"other\""]),
     piped: VALUE(["        | ::Bad m :> m", "        | .Pair(a, b) :> \"pair\"", "        | _ :> \"other\""]),
   },
 ];
@@ -344,6 +344,18 @@ describe("S452 r3 — no silent token skipping in a `!{}` arm list", () => {
     const e = (result.errors ?? []).find((x) => x.code === "E-PARSE-001");
     expect(e).toBeDefined();
     expect(String(e.message)).toContain("Write `.Bad(m) :>`");
+  });
+
+  test("r4 — pipe-less `::Bad m :>` is E-PARSE-001 too (§19.4.5: paren-free binder only after `|`)", () => {
+    const { result } = compileSrc(program(VALUE(["        ::Bad m :> m", "        _ :> \"other\""])));
+    const e = (result.errors ?? []).find((x) => x.code === "E-PARSE-001");
+    expect(e).toBeDefined();
+    expect(String(e.message)).toContain("Write `::Bad(m) :>`, or add the legacy `|`");
+  });
+
+  test("r4 — the legacy `| ::Bad m :>` is still accepted", () => {
+    const { result } = compileSrc(program(VALUE(["        | ::Bad m :> m", "        | _ :> \"other\""])));
+    expect(errorCodes(result)).toEqual([]);
   });
 
   test("an unrecognized arm head inside a body (`S` + newline `.Full(1) :> 5`) is E-PARSE-001 (was: `:> 5` dropped)", () => {

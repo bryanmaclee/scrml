@@ -10,3 +10,4 @@
 - fix round r3
 - r3: (1) stray arm-level token / depth-0 body `:>` -> E-PARSE-001 (reused); (2) pipe-less `_ err :>`; (3) E-TYPE-ARM-QUALIFIER-MISMATCH (new, needs §34 row); (4) legacy `::V m` body loop depth-0 break. Differential vs df6dad5ac: 2249 files, delta = new conformance case only (0 corpus files newly rejected). LEFT (pre-existing, not fixed): LOW-6 short-form `_ =>`/`Name =>` break inside arrow-function bodies; nested-`match`-in-block-body E-CODEGEN; COMMENT tokens absorbed into a preceding arm's handler text (statement-boundary warning).
 - fix round r4
+- r4 item 1: pipe-less `::V <ident> :>` measured by instrumenting the legacy `::` arm path and compiling examples/ samples/ conformance/cases/ stdlib/ (2321 files): ZERO sites. Now E-PARSE-001 (same as `.V m :>`). prov=pa-ruled:§19.4.5 paren-free binder only after | — newly-rejecting, corpus measured zero. parser-conformance-markup parity cases moved to the legacy `|` spelling.
