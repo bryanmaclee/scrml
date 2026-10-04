@@ -64,6 +64,7 @@
 //       has a wire descriptor (no FIXED-length sequence); `Local` needs a
 //       `replace` grant and no `rule=` graph (O-061-5); an Unpersist names a
 //       persisted field and follows its reset Write (§6.14.2 rule 9)
+//   C-SQL1, C-S1..C-S4 (s451, U1a) — the server boundary: see checkServer.
 //   (C3 covers the s444 edits: the removals by the field's grants; ElemAt by
 //   the ELEMENT field's own contract, dpa-052 Q3.)
 // A diagnostic is a message string (§4 permits strings as text).
@@ -71,10 +72,14 @@
 ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, Attr, Block,
              EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, CoreProgram, CapOwner, TransitionGraph,
-             DeclKind, SurfaceProp, ValidityOf, Persist, PersistStore,
-             capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn } from "./core.scrml"
+             DeclKind, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db,
+             capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
+
+    // s451: the SQL sigil for messages, in two pieces (impl#1 rewrites a
+    // literal sigil inside a string — parse.scrml sqlSigil).
+    fn sqlSigil() -> string { return "?" + "{" }
 
     export fn checkCore(p: CoreProgram) -> string[] {
         let out: string[] = []
@@ -94,7 +99,263 @@ ${
         for (const s of p.server) {
             for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, [], n)) }
         }
-        return out.concat(checkSuspends(p))
+        return out.concat(checkSuspends(p)).concat(checkServer(p))
+    }
+
+    // =========================================================================
+    // s451 (U1a) — THE SERVER BOUNDARY IN CORE. Placement lives in the shape of
+    // Core (a ServerFn vs a Fn); these are the shape's invariants:
+    //   C-SQL1 a query's text and values line up: `chunks.length ==
+    //          slots.length + 1`, every slot indexes `params`, every param is
+    //          bound by a slot, and `db` names one of the program's Dbs
+    //          (checkSqlQuery — §8.1/§8.2: a value is only ever a bound slot)
+    //   C-S1   a ServerFn touches no client state: no cell read (Place.Cell),
+    //          no Write / Commit, no instance Handle / InitOf, no validity
+    //          surface, no Suspend — directly, or through a Fn it calls
+    //          (transitively). Cells are client-held (§6.6.9); a server body
+    //          awaits in place. (§12.4 R2's E-ROUTE-002, restated over Core.)
+    //   C-S2   an Expr.Sql stands only in a ServerFn body — never in a Fn (a
+    //          pure `fn` included) or a declaration's initializers / views
+    //   C-S3   client code (a Fn, a declaration) never calls a ServerFn as a
+    //          plain Call — a client→server call is a suspension (unit U1b)
+    //   C-S4   every ServerFn's parameter and declared return types have a
+    //          §57 wire descriptor (codec.scrml — E-ROUTE-003 / E-ROUTE-004 are
+    //          analyze's reports; this is their Core restatement)
+    // =========================================================================
+    fn checkSqlQuery(p: CoreProgram, q: SqlQuery) -> string[] {
+        let out: string[] = []
+        if (q.chunks.length != q.slots.length + 1) {
+            out = out.concat(["C-SQL1: a query has " + q.chunks.length + " SQL text runs for " + q.slots.length + " bound values (a template has one more run than values)"])
+        }
+        let used: int[] = []
+        for (const s of q.slots) {
+            if (s < 0 || s >= q.params.length) {
+                out = out.concat(["C-SQL1: a query slot names parameter #" + s + " of " + q.params.length])
+            } else {
+                used = used.concat([s])
+            }
+        }
+        let i: int = 0
+        while (i < q.params.length) {
+            if (used.indexOf(i) < 0) out = out.concat(["C-SQL1: a query's parameter #" + i + " is bound by no slot"])
+            i = i + 1
+        }
+        if (findDb(p, q.db) is not) out = out.concat(["C-SQL1: a query runs on `" + q.db.hint + "`, which is not one of the program's databases"])
+        return out
+    }
+
+    fn checkServer(p: CoreProgram) -> string[] {
+        let out: string[] = []
+        const touching: int[] = clientTouchingFns(p)
+        for (const s of p.server) {
+            for (const n of allNodes(Node.NServerFn(s))) {
+                const what: string = clientStateIn(n)
+                if (what != "") out = out.concat(["C-S1: server function " + s.sym.hint + "() " + what])
+                const callee: Sym | not = nodeCallee(n)
+                if (callee is some && touching.indexOf(callee.id) >= 0) {
+                    out = out.concat(["C-S1: server function " + s.sym.hint + "() calls " + callee.hint + "(), which touches client state"])
+                }
+            }
+            for (const prm of s.params) {
+                if (wireBuild(p, prm.ty).table is not) out = out.concat(["C-S4: server function " + s.sym.hint + "()'s parameter " + prm.sym.hint + " has no wire descriptor"])
+            }
+            const rt: Type | not = s.ret
+            if (rt is some) {
+                if (wireBuild(p, rt).table is not) out = out.concat(["C-S4: server function " + s.sym.hint + "()'s return type has no wire descriptor"])
+            }
+        }
+        for (const d of p.decls) {
+            out = out.concat(clientSide(p, Node.NDecl(d), "<" + d.sym.hint + ">"))
+        }
+        for (const f of p.fns) {
+            out = out.concat(clientSide(p, Node.NFn(f), f.sym.hint + "()"))
+        }
+        return out
+    }
+
+    // C-S2 / C-S3 over one client-side root.
+    fn clientSide(p: CoreProgram, root: Node, where: string) -> string[] {
+        let out: string[] = []
+        for (const n of allNodes(root)) {
+            if (nodeIsSql(n)) out = out.concat(["C-S2: a `" + sqlSigil() + "}` query in client code (" + where + ") — a query stands only in a server function"])
+            const callee: Sym | not = nodeCallee(n)
+            if (callee is some) {
+                if (findServerFn(p, callee) is some) out = out.concat(["C-S3: client code (" + where + ") calls the server function " + callee.hint + "() as a plain call"])
+            }
+        }
+        return out
+    }
+
+    // The Fns that touch client state, directly or through a Fn they call (a
+    // fixed point; recursion closes because the set only grows).
+    fn clientTouchingFns(p: CoreProgram) -> int[] {
+        let out: int[] = []
+        for (const f of p.fns) {
+            let direct = false
+            for (const n of allNodes(Node.NFn(f))) {
+                if (clientStateIn(n) != "") direct = true
+            }
+            if (direct) out = out.concat([f.sym.id])
+        }
+        let changed = true
+        while (changed) {
+            changed = false
+            for (const f of p.fns) {
+                if (out.indexOf(f.sym.id) < 0) {
+                    let reaches = false
+                    for (const n of allNodes(Node.NFn(f))) {
+                        const c: Sym | not = nodeCallee(n)
+                        if (c is some && out.indexOf(c.id) >= 0) reaches = true
+                    }
+                    if (reaches) {
+                        out = out.concat([f.sym.id])
+                        changed = true
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    // What client state node `n` touches ("" — none).
+    fn clientStateIn(n: Node) -> string {
+        return match n {
+            .NPlace(pl: pl) :> placeIsCell(pl)
+            .NStmt(s: s) :> stmtTouchesClient(s)
+            .NExpr(e: e) :> exprTouchesClient(e)
+            .NProgram(p: x) :> ""
+            .NDecl(d: x) :> ""
+            .NField(f: x) :> ""
+            .NFn(f: x) :> ""
+            .NServerFn(f: x) :> ""
+            .NBlock(b: x) :> ""
+            .NInst(i: x) :> ""
+            .NPattern(pat: x) :> ""
+            .NEdit(k: x) :> ""
+            .NView(v: x) :> "holds a view"
+            .NAttr(a: x) :> "holds a markup attribute"
+        }
+    }
+
+    fn placeIsCell(pl: Place) -> string {
+        return match pl {
+            .Cell(decl: d) :> "reads a cell of <" + d.hint + ">"
+            .LocalPath(sym: x) :> ""
+        }
+    }
+
+    fn stmtTouchesClient(s: Stmt) -> string {
+        return match s {
+            .Write(cap: c) :> "writes a cell (capability " + c.hint + ")"
+            .Commit(writes: x) :> "commits cell writes"
+            .Suspend(bind: x) :> "suspends (a server body awaits in place)"
+            .ResetSurface(of: x) :> "resets a validity surface"
+            .Unpersist(decl: x) :> "removes a persisted cell's storage"
+            .Let(sym: x) :> ""
+            .Assign(local: x) :> ""
+            .If(cond: x) :> ""
+            .Return(e: x) :> ""
+            .Eval(e: x) :> ""
+            .Defer(body: x) :> ""
+        }
+    }
+
+    fn exprTouchesClient(e: Expr) -> string {
+        return match e {
+            .Handle(inst: x) :> "names an instance"
+            .InitOf(decl: d) :> "re-evaluates an initializer of <" + d.hint + ">"
+            .Validity(of: x) :> "reads a validity surface"
+            .Lit(lit: x) :> ""
+            .Local(sym: x) :> ""
+            .Read(place: x) :> ""
+            .Call(callee: x) :> ""
+            .Prim(op: x) :> ""
+            .Match(scrut: x) :> ""
+            .ArrayOf(elems: x) :> ""
+            .StructOf(ty: x) :> ""
+            .Host(call: x) :> ""
+            .Lambda(params: x) :> ""
+            .SeqCall(op: x) :> ""
+            .Sql(q: x) :> ""
+        }
+    }
+
+    fn nodeIsSql(n: Node) -> boolean {
+        return match n {
+            .NExpr(e: e) :> exprIsSql(e)
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NFn(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NStmt(s: x) :> false
+            .NPlace(pl: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
+        }
+    }
+
+    fn exprIsSql(e: Expr) -> boolean {
+        return match e {
+            .Sql(q: x) :> true
+            .Lit(lit: x) :> false
+            .Local(sym: x) :> false
+            .Read(place: x) :> false
+            .Call(callee: x) :> false
+            .Prim(op: x) :> false
+            .Match(scrut: x) :> false
+            .ArrayOf(elems: x) :> false
+            .StructOf(ty: x) :> false
+            .Handle(inst: x) :> false
+            .InitOf(decl: x) :> false
+            .Host(call: x) :> false
+            .Lambda(params: x) :> false
+            .SeqCall(op: x) :> false
+            .Validity(of: x) :> false
+        }
+    }
+
+    fn nodeCallee(n: Node) -> Sym | not {
+        return match n {
+            .NExpr(e: e) :> exprCallee(e)
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NStmt(s: x) :> not
+            .NPlace(pl: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
+    fn exprCallee(e: Expr) -> Sym | not {
+        return match e {
+            .Call(callee: c) :> c
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Read(place: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .Handle(inst: x) :> not
+            .InitOf(decl: x) :> not
+            .Host(call: x) :> not
+            .Lambda(params: x) :> not
+            .SeqCall(op: x) :> not
+            .Validity(of: x) :> not
+            .Sql(q: x) :> not
+        }
     }
 
     fn checkField(d: Decl, f: Field) -> string[] {
@@ -221,6 +482,7 @@ ${
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
             .Validity(of: x) :> false
+            .Sql(q: x) :> false
         }
     }
 
@@ -241,6 +503,7 @@ ${
             .Lambda(params: x) :> "(not a cell read)"
             .SeqCall(op: x) :> "(not a cell read)"
             .Validity(of: x) :> "(not a cell read)"
+            .Sql(q: x) :> "(not a cell read)"
         }
     }
 
@@ -757,6 +1020,7 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
+            .Sql(q: x) :> not
         }
     }
 
@@ -984,6 +1248,7 @@ ${
             .Lambda(params: x) :> "a Commit write's value is not a Local (the snapshot)"
             .SeqCall(op: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Validity(of: x) :> "a Commit write's value is not a Local (the snapshot)"
+            .Sql(q: x) :> "a Commit write's value is not a Local (the snapshot)"
         }
     }
 
@@ -1065,6 +1330,7 @@ ${
             .Host(call: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Lambda(params: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Validity(of: x) :> "a shrink-anywhere's value is not a filter of the field"
+            .Sql(q: x) :> "a shrink-anywhere's value is not a filter of the field"
         }
     }
 
@@ -1354,6 +1620,7 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
+            .Sql(q: x) :> not
         }
     }
 
@@ -1374,6 +1641,7 @@ ${
             .Lambda(params: ps) :> []
             .SeqCall(op: o) :> []
             .Validity(of: v, prop: pr) :> checkSurfaceRead(p, encl, v, pr)
+            .Sql(q: q) :> checkSqlQuery(p, q)
         }
     }
 
@@ -1441,6 +1709,7 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
+            .Sql(q: x) :> not
         }
     }
 

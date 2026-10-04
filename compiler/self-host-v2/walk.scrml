@@ -157,6 +157,7 @@ ${
             .Lambda(params: ps, body: b) :> [Node.NExpr(b)]
             .SeqCall(op: o, seq: sq, f: f) :> [Node.NExpr(sq), Node.NExpr(f)]
             .Validity(of: v, prop: pr) :> [Node.NInst(validityInst(v))]
+            .Sql(q: q) :> exprNodes(q.params)
         }
     }
 
@@ -309,7 +310,7 @@ ${
             .NProgram(p: p) :> []
             .NDecl(d: d) :> []
             .NField(f: f) :> []
-            .NServerFn(f: f) :> []
+            .NServerFn(f: f) :> serverParamSyms(f)
             .NBlock(b: b) :> []
             .NPlace(pl: pl) :> []
             .NInst(i: i) :> []
@@ -334,6 +335,7 @@ ${
             .Host(call: x) :> []
             .SeqCall(op: x) :> []
             .Validity(of: x) :> []
+            .Sql(q: x) :> []
         }
     }
 
@@ -349,6 +351,13 @@ ${
     }
 
     fn paramSyms(f: Fn) -> Sym[] {
+        let out: Sym[] = []
+        for (const p of f.params) { out = out.concat([p.sym]) }
+        return out
+    }
+
+    // s451 (U1a): a server function binds its parameters too.
+    fn serverParamSyms(f: ServerFn) -> Sym[] {
         let out: Sym[] = []
         for (const p of f.params) { out = out.concat([p.sym]) }
         return out

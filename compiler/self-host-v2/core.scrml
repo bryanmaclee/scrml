@@ -198,8 +198,62 @@ ${
         SeqCall(op: SeqFn, seq: Expr, f: Expr),
         // s449: a read of the validity surface (§55.5 / §55.6) — read-only.
         Validity(of: ValidityOf, prop: SurfaceProp),
+        // s451 (U1a): a `?{}` SQL query (§8). Legal ONLY in a ServerFn body
+        // (check.scrml C-S2). Its values are `q.params` — Exprs, never text:
+        // there is no node that can carry a runtime value into SQL text, so
+        // E-SQL-001 (§8.1) is unrepresentable rather than checked.
+        Sql(q: SqlQuery),
     }
     export type MatchArm:struct = { pat: Pattern, body: Expr }
+
+    // -------------------------------------------------------------------------
+    // s451 (U1a) — SQL (SPEC §8, §44). A query is the ONE place SQL lives in
+    // Core, and its facts are recorded ONCE, at analysis, from the literal SQL
+    // text (a foreign language — never scrml source): what it does (`kind`),
+    // which tables it reads and writes, and what it selects. Later passes
+    // (READ classification §6.7.7.1, cache invalidation §6.7.7.2, batching
+    // §19.9.6) read these facts; nobody rescans SQL. Every fact FAILS CLOSED:
+    // a query not provably a pure SELECT is `SqlWrite`; a table set not
+    // provably known is `TablesUnknown` (= every table).
+    //
+    // `chunks` are the literal SQL runs; `slots[i]` is the parameter the i-th
+    // `${…}` binds — `chunks.length == slots.length + 1`, every slot indexes
+    // `params` (check.scrml C-SQL1). §8.2: "If the same expression appears more
+    // than once in a single SQL template, the compiler SHALL assign it a single
+    // positional parameter slot" — so `params` holds each DISTINCT expression
+    // once (structurally equal Core Exprs are one parameter, evaluated once).
+    // `db` names the CoreProgram.dbs entry the query runs on (§8.1.1).
+    // `site`: the `?{}` node (its NodeId), for diagnostics and later passes.
+    // -------------------------------------------------------------------------
+    export type SqlMode:enum = { All, Get, Run }
+    export type SqlKind:enum = { SqlSelect, SqlWrite }
+    export type SqlTables:enum = { TablesKnown(names: string[]), TablesUnknown }
+    // What a query's rows carry: `*` (ColsAll), a list of result names
+    // (ColsListed), no rows (ColsNone — a write without RETURNING), or not
+    // provable (ColsUnknown). Recorded for column provenance (protect=, later).
+    export type SqlColumns:enum = { ColsAll, ColsListed(names: string[]), ColsNone, ColsUnknown }
+    export type SqlQuery:struct = {
+        db: Sym,
+        chunks: string[],
+        params: Expr[],
+        slots: int[],
+        mode: SqlMode,
+        kind: SqlKind,
+        reads: SqlTables,
+        writes: SqlTables,
+        columns: SqlColumns,
+        nobatch: boolean,
+        site: NodeId,
+    }
+
+    // s451 (U1a) — a database a program's queries run on (§8.1.1, §44.2):
+    // `<program db=…>`. `target` is the connection value with any `sqlite:`
+    // prefix removed (a SQLite path, `:memory:`, or the forwarded URL); `file`
+    // is the declaring file a relative SQLite path resolves against (§8.1.1
+    // "Resolution base"); `owner`: that file declares schema for it — a query
+    // in it creates a table (§8.1.1 "Ownership").
+    export type Driver:enum = { Sqlite, Postgres, Mysql }
+    export type Db:struct = { sym: Sym, driver: Driver, target: string, file: string, owner: boolean }
 
     // -------------------------------------------------------------------------
     // Statements. `Let` and `Assign` are DIFFERENT nodes (§3.3 — the
@@ -437,16 +491,23 @@ ${
 
     export type Param:struct    = { sym: Sym, ty: Type }
     export type Fn:struct       = { sym: Sym, params: Param[], body: Block, pure: boolean }
-    export type ServerFn:struct = { sym: Sym, params: Param[], body: Block }
+    // s451 (U1a): a function route inference placed on the SERVER (§12.2) — its
+    // body holds the program's SQL and no client state (check.scrml C-S1/C-S2);
+    // `ret` is its declared return type (`not`: none written). Placement lives
+    // in the SHAPE of Core — a ServerFn, not a Fn with a flag — so no later pass
+    // re-derives it.
+    export type ServerFn:struct = { sym: Sym, params: Param[], ret: Type | not, body: Block }
 
     // One CoreProgram per linked program (a library's declarations appear in
     // the consumer's Core). `program` names the program declaration.
+    // s451 (U1a): `dbs` — the databases its queries run on (Expr.Sql.q.db).
     export type CoreProgram:struct = {
         program: Sym,
         decls: Decl[],
         types: TypeDef[],
         fns: Fn[],
         server: ServerFn[],
+        dbs: Db[],
         // s451 — §65.3.4: the built-in reset layer ships unless the top-level
         // program opts out with `<program reset="none">`.
         reset: boolean,
@@ -520,6 +581,21 @@ ${
     export fn findFn(p: CoreProgram, s: Sym) -> Fn | not {
         for (const f of p.fns) {
             if (f.sym.id == s.id) return f
+        }
+        return not
+    }
+
+    // s451 (U1a)
+    export fn findServerFn(p: CoreProgram, s: Sym) -> ServerFn | not {
+        for (const f of p.server) {
+            if (f.sym.id == s.id) return f
+        }
+        return not
+    }
+
+    export fn findDb(p: CoreProgram, s: Sym) -> Db | not {
+        for (const d of p.dbs) {
+            if (d.sym.id == s.id) return d
         }
         return not
     }

@@ -61,7 +61,24 @@ ${
         Spread(e: AExpr),
         Index(obj: AExpr, idx: AExpr),
         Lambda(params: string[], body: AExpr),
+        // s451 (U1a) — a `?{ `…` }` SQL context (§8.1, §44.8), its call chain
+        // absorbed (ASql). Placement, the database, the failable rule and the
+        // query's facts are analyze's.
+        Sql(q: ASql),
     }
+
+    // s451 (U1a) — the terminator of a `?{}` chain (§8.3): `.all()` (or none
+    // written — "`.all()` (or bare `?{}`)"), `.get()`, `.run()`.
+    export type ASqlMode:enum = { SqlAll, SqlGet, SqlRun }
+    // s451 (U1a) — a SQL context. `chunks` are the template's literal text runs
+    // (cooked; a foreign language's literal, never scrml source), `params` the
+    // `${…}` expressions between them, in order — `chunks.length ==
+    // params.length + 1`, so a value can only ever be a BOUND parameter (§8.1:
+    // "SHALL NOT be compiled to string interpolation under any circumstance").
+    // `nobatch`: `.nobatch()` was written (§8.9.5). `handled`: a `!{}` handler
+    // follows it (refused until Ue — the parser reports it; analyze does not
+    // also call it unhandled, E-ERROR-002).
+    export type ASql:struct = { chunks: string[], params: AExpr[], mode: ASqlMode, nobatch: boolean, handled: boolean }
 
     // -------------------------------------------------------------------------
     // Statements.
@@ -121,9 +138,14 @@ ${
     // -------------------------------------------------------------------------
     export type AParam:struct = { nid: int, span: ASpan, name: string, ty: AType | not }
     // `pure` = declared with `fn` (§48.3); `function` otherwise.
+    // s451 (U1a): `server` = written with the DEPRECATED `server` modifier
+    // (§12.2 Trigger 4, §52.10 — analyze warns W-DEPRECATED-SERVER-MODIFIER);
+    // `failable` = declared `!` (§19.4.1 — refused until Ue, the error model,
+    // but recorded: a `?{}` inside it is not "outside a `!` function", §19.8.3).
     export type AFn:struct = {
         nid: int, span: ASpan, exported: boolean, pure: boolean,
         name: string, params: AParam[], ret: AType | not, body: ABlock,
+        server: boolean, failable: boolean,
     }
     export type AImportName:struct = { nid: int, span: ASpan, name: string }
     export type AImport:struct = { nid: int, span: ASpan, names: AImportName[], from: string }
