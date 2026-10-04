@@ -72,3 +72,42 @@
   separate own-fact walkers beside `scanBlock`; merging them into the one scan is not required by
   the DD's M2 text ("W4-W7 become queries over one placement; delete three fixpoints and the second
   scanBlock") and is left for a later step.
+
+## M3 — the binder's decisions move to a post-summary rules pass; W8 / W9 / W1 deleted; G7 closed
+
+- Mechanism: phaseB runs before any summary exists, so the binder RECORDS each summary-dependent
+  decision (`AS.pend`, `addPending`) with the diagnostic(s) it would report and `at` = the
+  diagnostic list's length at that moment; `rulesPass(sum, st)` (right after `summarize`, before
+  placePass) decides each by a query and splices its diagnostic back at `at`. The diagnostics keep
+  the binder's order exactly (proven: every base input IDENTICAL). A rolled-back `st` (a binder
+  helper that returns an older state) drops its pendings with its diagnostics — same as before.
+  Rules: `IfNoValue` (E-ERROR-012), `ServerOrDead` (U1b refusal vs E-ERROR-013), `IfClock` (the
+  clock refusal in an initializer / markup / attribute), `PureCall` (E-FN-003's clock clause).
+- Deleted: W8 `mayRunOnServer` (→ `serverTriggeredFn` = the summary's own `server` fact, the same
+  predicate placement uses); W9 `fnYieldsValue` + `callYieldsNothing` (→ `yieldsNoValue` = the
+  `noValue` dimension; the syntactic helpers blockYieldsOnAllPaths / blockHasBareReturn /
+  declaresVoid stay as the own-fact extractor `ownNoValue`); W1 `clockFns` + `calledNames` +
+  `anyIn` + `FnCalls` + `Globals.clock` (→ `readsClock` = the `clock` dimension; `blockClock` and
+  its helpers stay as the own-fact extractor). The M0 shadow (`effectsShadow`) and
+  effects-shadow.test.js are deleted — no walker is left to compare.
+- G7 CLOSED: `noValue` is transitive through `return <call>` (retCallsOf → edges). Tests
+  (slice-m4/effects-summary.test.js): the DD probe `function g() { return nothing() }` +
+  `load("x") !{ _ :> g() }` → E-ERROR-012; the declared form `function g() -> string { return
+  nothing() }` → E-ERROR-012; two wrappers deep; through recursion; negative twins clean. Verified
+  the three G7 tests FAIL on the M2 analyze.scrml and pass on M3. Fail direction: an unknown callee
+  now yields NO value (fail closed; the walker failed open — DD G10).
+- Newly-firing E-ERROR-012 from G7 over the existing corpus: NONE (no slice program, slice-test
+  inline program or counter case exercises it; the typer-s440 `w() -> string { return u() }` has
+  no arm calling `w`).
+- Differential: all 2566 base inputs IDENTICAL; the only differences are 10 inputs analyzed AFTER
+  only = the new test file's programs. Counter: 1301 cases, zero bucket moves, PASS 120 / FAIL 48 /
+  UNSUPPORTED 622. Slices: m1 99, m2 462, m3 60, m4 1112 (+12 new − 5 retired shadow), codec 92,
+  m1 lowered 99 — all 0 fail. severity --check current; lint 0.
+- Lines: analyze.scrml +150 / −163 (incl. −85 of M0 shadow; walkers deleted: W1 ≈ 45, W8 8,
+  W9 ≈ 40 incl. comments; added: rulesPass + pendings ≈ 95, call-site recorders ≈ 30);
+  effects-shadow.test.js −159; effects-summary.test.js +190.
+- Known reading (not a change on the corpus): three binder sites compare `diags.length` before and
+  after resolving an expression (resolveEffectDep 6724, `<errors of=>` 7202, star attrs 7344). A
+  deferred diagnostic is not counted there. Only the `<errors of=@x[f()]>` shape (a call inside an
+  index of the `of=` place, of a clock reader) could see it: it would now also run the validity
+  checks after the clock refusal (an added refusal, never a silence).

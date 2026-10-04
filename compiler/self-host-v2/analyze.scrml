@@ -484,7 +484,9 @@ ${
     // scope, in order, with their file — the input of the no-write pass
     // (effectPass), which runs once every function body is bound.
     type EffectSrc:struct = { w: AEffect, file: string }
-    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[] }
+    // `pend` (s452, dpa-066 M3): the binder's decisions that need the effect
+    // summary — recorded where the binder meets them, decided by rulesPass.
+    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[] }
     type RSym:struct = { s: Sym, st: AS }
 
     fn noFacts() -> NodeFacts {
@@ -507,11 +509,11 @@ ${
     }
 
     fn mint(st: AS, hint: string) -> RSym {
-        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects } }
+        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend } }
     }
 
     fn withFacts(st: AS, fs: NodeFacts) -> AS {
-        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects }
+        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend }
     }
 
     fn addName(st: AS, nid: int, f: NameFact) -> AS {
@@ -558,27 +560,38 @@ ${
 
     fn addDiag(st: AS, file: string, span: ASpan, code: string, msg: string) -> AS {
         const d: Diag = newDiag(code, msg, file, span)
-        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects }
+        return withDiag(st, d)
+    }
+
+    fn withDiag(st: AS, d: Diag) -> AS {
+        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend }
+    }
+
+    // s452 (dpa-066 M3): a decision for rulesPass, at the place in the
+    // diagnostic list where the binder used to make it.
+    fn addPending(st: AS, r: PendRule) -> AS {
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects,
+                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]) }
     }
 
     fn addAnnot(st: AS, s: Sym, ty: Type) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend }
     }
 
     fn badParam(st: AS, nid: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects }
+                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend }
     }
 
     fn badField(st: AS, id: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects }
+                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend }
     }
 
     // s449: record an effect the binder accepted (the no-write pass's input).
     fn addEffectSrc(st: AS, w: AEffect, file: string) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad,
-                 effects: st.effects.concat([{ w: w, file: file }]) }
+                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend }
     }
 
     // =========================================================================
@@ -598,7 +611,6 @@ ${
         fns: FnSrc[],
         handles: HandleInfo[],
         files: FileAst[],
-        clock: string[],        // r2 F4: the functions that read the clock, transitively (clockFns)
         errorSym: Sym,          // s451 (Ue): the built-in `Error` enum (§19.4.2 — a bare `!`'s error type)
         sqlErrorSym: Sym,       // s451 (Ue): the built-in `SqlError` enum (§19.8.1 — every query's error type)
     }
@@ -3038,58 +3050,17 @@ ${
             const info: DeclInfo = { nid: ds.nid, span: declSpan(ds), sym: ds.sym, kind: kind, single: single, file: ds.file, fields: fields, handles: own }
             decls = decls.concat([{ info: info, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
         }
-        const g: Globals = { program: program, entry: entry, te: te0, types: rt.ts, decls: decls, fns: rf.fs, handles: handles, files: files, clock: clockFns(files),
+        const g: Globals = { program: program, entry: entry, te: te0, types: rt.ts, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError") }
         return { g: g, st: st }
     }
 
-    // r2 F4 — THE CLOCK SET: the functions whose body reads the clock
-    // (`Date.now()`), directly or through a function it calls (closed over the
-    // calls; a fixpoint bounded by the function count + 2). Syntactic and
-    // whole-program, like fnWrites: a call is matched by NAME (the bootstrap
-    // links one namespace), so a local that shadows a function's name
-    // over-approximates — a refusal, never a silence.
-    type FnCalls:struct = { name: string, callees: string[] }
-
-    fn clockFns(files: FileAst[]) -> string[] {
-        let clock: string[] = []
-        let calls: FnCalls[] = []
-        for (const f of files) {
-            for (const af of fnItems(f.items)) {
-                if (blockClock(af.body)) clock = clock.concat([af.name])
-                calls = calls.concat([{ name: af.name, callees: calledNames(blockEffects(af.body, [])) }])
-            }
-        }
-        let changed = true
-        let pass = 0
-        while (changed && pass < calls.length + 2) {
-            changed = false
-            for (const c of calls) {
-                if (clock.indexOf(c.name) < 0 && anyIn(c.callees, clock)) {
-                    clock = clock.concat([c.name])
-                    changed = true
-                }
-            }
-            pass = pass + 1
-        }
-        return clock
-    }
-
-    fn calledNames(keys: string[]) -> string[] {
-        let out: string[] = []
-        for (const k of keys) {
-            if (k.indexOf("()") == 0) out = out.concat([k.substring(2)])
-        }
-        return out
-    }
-
-    fn anyIn(xs: string[], set: string[]) -> boolean {
-        for (const x of xs) {
-            if (set.indexOf(x) >= 0) return true
-        }
-        return false
-    }
-
+    // r2 F4 — does a body read the clock (`Date.now()`) ITSELF? The effect
+    // summary's own `clock` fact (dpa-066 M3: the name-keyed whole-program
+    // set this section used to close over calls is retired — the summary
+    // closes it over the binder's Syms, rulesPass reads it). Syntactic — the
+    // call's shape, wherever it stands (a `fn` body too, where E-FN-004 also
+    // reports it).
     fn blockClock(b: ABlock) -> boolean {
         for (const s of b.stmts) {
             if (stmtClock(s)) return true
@@ -3873,28 +3844,32 @@ ${
     //    clock only by calling it itself (E-FN-004, resolveHost) — §48.6.1's
     //    "transitivity of `fn` constraints" holds by construction.
     //  - where the clock is not in the bootstrap (an initializer, markup, an
-    //    attribute value), a call of a function that reads it (clockFns) is
-    //    refused exactly as a direct `Date.now()` there is.
+    //    attribute value), a call of a function that reads it (directly or
+    //    through a call — the effect summary's `clock`) is refused exactly as a
+    //    direct `Date.now()` there is.
+    // Whether the callee reads the clock is the summary's to say: both are
+    // recorded here and decided by rulesPass (dpa-066 M3).
     fn callPurity(env: Env, e: AExpr, cf: FnInfo, st: AS) -> AS {
         const h: HostCtx = env.host
-        const clock: boolean = env.g.clock.indexOf(cf.name) >= 0
         return match h {
             .HostOk :> st
-            .HostPure :> fnCallsFunction(env, e, cf, clock, st)
-            .HostNo :> clockCallHere(env, e, cf, clock, st)
+            .HostPure :> fnCallsFunction(env, e, cf, st)
+            .HostNo :> clockCallHere(env, e, cf, st)
         }
     }
 
-    fn fnCallsFunction(env: Env, e: AExpr, cf: FnInfo, clock: boolean, st: AS) -> AS {
+    fn fnCallsFunction(env: Env, e: AExpr, cf: FnInfo, st: AS) -> AS {
         if (cf.pure) return st
-        let why: string = ""
-        if (clock) why = " — and `" + cf.name + "` reads the clock (" + dateNowText() + ", non-deterministic, §48.3.4)"
-        return addDiag(st, env.file, e.span, "E-FN-003", "a `fn` body calls `" + cf.name + "`, which is declared `function` — a `function` carries no purity guarantee, so a `fn` may call only another `fn` (§48.6.2)" + why + "; declare `" + cf.name + "` with `fn`, or make the caller a `function`")
+        return addPending(st, PendRule.PureCall(cf.sym.id, fnCallsFunctionDiag(env, e, cf, ""),
+            fnCallsFunctionDiag(env, e, cf, " — and `" + cf.name + "` reads the clock (" + dateNowText() + ", non-deterministic, §48.3.4)")))
     }
 
-    fn clockCallHere(env: Env, e: AExpr, cf: FnInfo, clock: boolean, st: AS) -> AS {
-        if (!clock) return st
-        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + cf.name + "()` reads the clock (" + dateNowText() + ", directly or through a function it calls) — here (an initializer, markup, or an attribute value) that is not in the bootstrap; its host-call surface is a `function` body or an event handler")
+    fn fnCallsFunctionDiag(env: Env, e: AExpr, cf: FnInfo, why: string) -> Diag {
+        return newDiag("E-FN-003", "a `fn` body calls `" + cf.name + "`, which is declared `function` — a `function` carries no purity guarantee, so a `fn` may call only another `fn` (§48.6.2)" + why + "; declare `" + cf.name + "` with `fn`, or make the caller a `function`", env.file, e.span)
+    }
+
+    fn clockCallHere(env: Env, e: AExpr, cf: FnInfo, st: AS) -> AS {
+        return addPending(st, PendRule.IfClock(cf.sym.id, newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + cf.name + "()` reads the clock (" + dateNowText() + ", directly or through a function it calls) — here (an initializer, markup, or an attribute value) that is not in the bootstrap; its host-call surface is a `function` body or an event handler", env.file, e.span)))
     }
 
     // s444 — THE HOST-CALL SURFACE (progress.md "host call surface"): exactly
@@ -6053,10 +6028,11 @@ ${
         const nf: NameFact | not = nameFactIn(st, c.nid)
         const f: FnInfo | not = calledFn(env, nf)
         if (f is some) {
-            if (mayRunOnServer(env.g, f)) {
-                return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `!{ … }` handler on " + f.name + "(…), whose body can place it on the server (a `" + sqlSigil() + "}` query or the `server` modifier) — a CLIENT call of a server function is failable whether or not it is declared `!` (§19.9.10), and the client→server call arrives with unit U1b; until then whether this handler can run is not decided here")
-            }
-            return addDiag(st, env.file, e.span, "E-ERROR-013", deadHandlerMsg(f.name))
+            // whether its own body places it on the server is the effect
+            // summary's `server` fact — decided by rulesPass (dpa-066 M3)
+            return addPending(st, PendRule.ServerOrDead(f.sym.id,
+                newDiag("E-BOOTSTRAP-UNSUPPORTED", "a `!{ … }` handler on " + f.name + "(…), whose body can place it on the server (a `" + sqlSigil() + "}` query or the `server` modifier) — a CLIENT call of a server function is failable whether or not it is declared `!` (§19.9.10), and the client→server call arrives with unit U1b; until then whether this handler can run is not decided here", env.file, e.span),
+                newDiag("E-ERROR-013", deadHandlerMsg(f.name), env.file, e.span)))
         }
         const n: string = exprName(c)
         if (n != "" && nf is not) return st               // the name did not resolve: reported where it stands
@@ -6105,15 +6081,6 @@ ${
     fn boolText(b: boolean) -> string {
         if (b) return "true"
         return "false"
-    }
-
-    // A function placePass may put on the server (§12.2 T1 / T4 — its own
-    // body's `?{}` or the deprecated `server` modifier; placePass's
-    // `serverTriggered`, read from the same syntax).
-    fn mayRunOnServer(g: Globals, f: FnInfo) -> boolean {
-        const fs: FnSrc | not = fnSrcOf(g, f.sym.id)
-        if (fs is not) return false
-        return fs.f.server || sqlsInBlock(fs.f.body).length > 0
     }
 
     // One arm: its pattern's variant (`idx`: -1 wildcard, -2 `.Ok`, -3 none),
@@ -6332,8 +6299,18 @@ ${
     fn armValueExpr(env: Env, a: AArm, x: AExpr, cx: ArmCx, st0: AS) -> AS {
         if (isWriteExpr(x)) return fallsThrough(env, a, cx, resolveStmtExpr(env, x, st0))
         const st: AS = resolveExpr(withWholeAt(env, x.nid, "the value of an enclosing arm"), x, not, st0).st
-        if (callYieldsNothing(env, st, x)) return fallsThrough(env, a, cx, st)
-        return st
+        return pendNoValue(env, a, cx, x, st)
+    }
+
+    // A call of a declared scrml function as the arm's value: whether it yields
+    // a value is the effect summary's `noValue` (transitive through
+    // `return <call>` — G7), decided by rulesPass (dpa-066 M3).
+    fn pendNoValue(env: Env, a: AArm, cx: ArmCx, x: AExpr, st: AS) -> AS {
+        const c: AExpr | not = calleeOf(x.k)
+        if (c is not) return st
+        const f: FnInfo | not = calledFn(env, nameFactIn(st, c.nid))
+        if (f is not) return st
+        return addPending(st, PendRule.IfNoValue(f.sym.id, fallsThroughDiag(env, a, cx)))
     }
 
     fn armBlock(env: Env, a: AArm, b: ABlock, cx: ArmCx, st0: AS) -> AS {
@@ -6413,44 +6390,8 @@ ${
         return false
     }
 
-    // A call of a declared scrml function that yields no value (§19.4.3: "a
-    // call whose result is not a value of the success type (`log(m)`)").
-    fn callYieldsNothing(env: Env, st: AS, x: AExpr) -> boolean {
-        const c: AExpr | not = calleeOf(x.k)
-        if (c is not) return false
-        const f: FnInfo | not = calledFn(env, nameFactIn(st, c.nid))
-        if (f is not) return false
-        return !fnYieldsValue(env.g, f)
-    }
-
-    // Does a call of `f` produce a value? A declared return type does (`->
-    // void` declares that it does not, §7.5 — FnInfo.ret is `not` for it); a
-    // `!` function's result is handled, never read here; otherwise the body
-    // decides — a value on EVERY path, proven syntactically, FAIL CLOSED
-    // (judged "no value" → E-ERROR-012 at a value-position arm):
-    //   - s452 r3 (MED-B): a bare `return` ANYWHERE in the body (any depth — an
-    //     `if` branch, a `given` body, a handling form's arm block) is a path
-    //     with no value;
-    //   - otherwise the statements are walked in order and the FIRST one that
-    //     returns a value on every path through it decides (s452 r3 LOW-C — what
-    //     follows it is dead): `return <expr>`, or an `if` / `else` both of whose
-    //     blocks do. Reaching the end of the body is no value.
-    //   - A `fn` / `function` body's tail EXPRESSION is not a value: the
-    //     bootstrap gives neither implicit tail return (`fn h() { "a" }` prints
-    //     `function h() { "a"; }` — returns nothing; checked s452 r3).
-    // Unprovable, so judged "no value": a `given` (its body runs only when the
-    // value is present), a statement-position handling form whose arms return,
-    // an `if` without `else`.
-    fn fnYieldsValue(g: Globals, f: FnInfo) -> boolean {
-        if (f.ret is some || f.failable) return true
-        const fs: FnSrc | not = fnSrcOf(g, f.sym.id)
-        if (fs is not) return true                         // unknown: never claimed to be empty
-        const r: AType | not = fs.f.ret
-        if (r is some) return !declaresVoid(r)
-        if (blockHasBareReturn(fs.f.body)) return false
-        return blockYieldsOnAllPaths(fs.f.body)
-    }
-
+    // What "yields a value" reads in a body (ownNoValue, the effect summary's
+    // own fact; the rule is stated there).
     fn declaresVoid(t: AType) -> boolean {
         const k: ATypeK = t.k
         return match k {
@@ -6533,14 +6474,18 @@ ${
 
     // E-ERROR-012 (§19.4.3 ruling 1a), with the SPEC's message.
     fn fallsThrough(env: Env, a: AArm, cx: ArmCx, st: AS) -> AS {
+        return withDiag(st, fallsThroughDiag(env, a, cx))
+    }
+
+    fn fallsThroughDiag(env: Env, a: AArm, cx: ArmCx) -> Diag {
         const pat: string = patLabel(a.pat)
         const where: string = whereLabel(cx.what)
         const form: string = handledFormLabel(cx)
         const n: string = exprName(maybeCallee(cx.subj))
         if (n != "") {
-            return addDiag(st, env.file, a.span, "E-ERROR-012", "Arm '" + pat + "' of the " + form + " on '" + n + "(…)' produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of '" + n + "'s success type or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or call '" + n + "(…) !{ … }' as a statement and keep the writes in its arms.")
+            return newDiag("E-ERROR-012", "Arm '" + pat + "' of the " + form + " on '" + n + "(…)' produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of '" + n + "'s success type or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or call '" + n + "(…) !{ … }' as a statement and keep the writes in its arms.", env.file, a.span)
         }
-        return addDiag(st, env.file, a.span, "E-ERROR-012", "Arm '" + pat + "' of the " + form + " on " + subjectName(cx.subj) + " produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of its success type (a `" + sqlSigil() + "}` query's is its terminator's, §44.3: `.get()` → `Row | not`, `.all()` → `Row[]`) or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or handle it as a statement and keep the writes in its arms.")
+        return newDiag("E-ERROR-012", "Arm '" + pat + "' of the " + form + " on " + subjectName(cx.subj) + " produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of its success type (a `" + sqlSigil() + "}` query's is its terminator's, §44.3: `.get()` → `Row | not`, `.all()` → `Row[]`) or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or handle it as a statement and keep the writes in its arms.", env.file, a.span)
     }
 
     fn maybeCallee(e: AExpr) -> AExpr {
@@ -14477,47 +14422,87 @@ ${
     }
 
     // =========================================================================
-    // s452 (dpa-066 M0) — THE SHADOW: each per-rule walker's answer beside the
-    // summary's, over one program — every disagreement as a line ([] — none).
-    // The differential test (slice-m4/effects-shadow.test.js) runs it over
-    // every slice program and every conformance-counter case. Each migration
-    // step deletes the comparisons of the walkers it retires (M1: W3; M2: W4-W7).
+    // s452 (dpa-066 M3) — THE RULES PASS: the binder's decisions that read the
+    // effect summary. The binder (phaseB) meets them before any summary
+    // exists, so it records each (addPending) with the diagnostic(s) it would
+    // report and the position in the diagnostic list where it would have
+    // reported it; here each is decided by a query and its diagnostic put
+    // back at that position — the diagnostics keep the order the binder gave
+    // them.
+    //   IfNoValue    §19.4.3 ruling 1a — E-ERROR-012 when the arm's callee
+    //                yields no value (noValue: transitive through `return <call>`,
+    //                which closes G7; fail closed: an unknown callee yields none)
+    //   ServerOrDead §19.4.3 ruling 3 / §19.9.10 — a handler on a function
+    //                whose own body is server-triggered (the summary's `server`
+    //                fact) is the U1b refusal; otherwise E-ERROR-013
+    //   IfClock      a call of a clock reader where the clock is not in the
+    //                bootstrap (the summary's `clock`, through calls)
+    //   PureCall     E-FN-003, its message naming the clock when the callee reads it
     // =========================================================================
-    export fn effectsShadow(files: FileAst[], entry: string) -> string[] {
-        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [] }
-        const ra: RGlobals = phaseA(files, entry, st0)
-        let st: AS = checkImports(files, ra.g, ra.st)
-        st = phaseB(ra.g, st)
-        st = strayEffects(files, st)
-        const rr: RResets = resetOnPass(ra.g, st)
-        st = rr.st
-        const rp: RPersists = persistPass(ra.g, files, st)
-        st = rp.st
-        let decls: DeclInfo[] = []
-        for (const d of ra.g.decls) { decls = decls.concat([d.info]) }
-        let fns: FnInfo[] = []
-        for (const f of ra.g.fns) { fns = fns.concat([f.info]) }
-        const fs: NodeFacts = indexed(st.facts)
-        const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
-                                names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
-                                attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
-                                novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts() }
-        const sum: Summary = summarize(ra.g, bound)
-        let out: string[] = []
-        // W8 / W9 / W1 — the binder's call-site re-derivations and the clock set
-        for (const f of ra.g.fns) {
-            const i: int = nodeIdx(sum.nodes, f.info.sym.id)
-            const label: string = f.info.name + "()"
-            out = out.concat(shadowLine("W8 server " + label, boolText(mayRunOnServer(ra.g, f.info)), boolText(sum.nodes[i].f.sqls.length > 0 || sum.nodes[i].f.modifier)))
-            out = out.concat(shadowLine("W9 yields " + label, boolText(fnYieldsValue(ra.g, f.info)), boolText(sum.noValue[i].length == 0)))
-            out = out.concat(shadowLine("W1 clock " + label, boolText(ra.g.clock.indexOf(f.info.name) >= 0), boolText(sum.clock[i].length > 0)))
+    type PendRule:enum = {
+        IfNoValue(fnSym: int, diag: Diag),
+        ServerOrDead(fnSym: int, onServer: Diag, notFailable: Diag),
+        IfClock(fnSym: int, diag: Diag),
+        PureCall(fnSym: int, bare: Diag, clocked: Diag),
+    }
+    type Pending:struct = { at: int, rule: PendRule }
+
+    fn rulesPass(s: Summary, st: AS) -> AS {
+        if (st.pend.length == 0) return st
+        let out: Diag[] = []
+        let k: int = 0
+        let i: int = 0
+        while (i <= st.diags.length) {
+            while (k < st.pend.length && st.pend[k].at == i) {
+                out = out.concat(decide(s, st.pend[k].rule))
+                k = k + 1
+            }
+            if (i < st.diags.length) out = out.concat([st.diags[i]])
+            i = i + 1
         }
-        return out
+        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [] }
     }
 
-    fn shadowLine(what: string, walker: string, summary: string) -> string[] {
-        if (walker == summary) return []
-        return [what + ": walker {" + walker + "} summary {" + summary + "}"]
+    fn decide(s: Summary, r: PendRule) -> Diag[] {
+        return match r {
+            .IfNoValue(fnSym: f, diag: d) :> onlyIf(yieldsNoValue(s, f), d)
+            .ServerOrDead(fnSym: f, onServer: a, notFailable: b) :> either(serverTriggeredFn(s, f), a, b)
+            .IfClock(fnSym: f, diag: d) :> onlyIf(readsClock(s, f), d)
+            .PureCall(fnSym: f, bare: a, clocked: b) :> either(readsClock(s, f), b, a)
+        }
+    }
+
+    fn onlyIf(yes: boolean, d: Diag) -> Diag[] {
+        if (yes) return [d]
+        return []
+    }
+
+    fn either(yes: boolean, a: Diag, b: Diag) -> Diag[] {
+        if (yes) return [a]
+        return [b]
+    }
+
+    // ---- the queries ----------------------------------------------------------------
+    // Does a call of function `sym` yield no value? An unknown callee: fail
+    // closed (dpa-066 G10 — the walker this replaces failed open).
+    fn yieldsNoValue(s: Summary, sym: int) -> boolean {
+        const i: int = nodeIdx(s.nodes, sym)
+        if (i < 0) return true
+        return s.noValue[i].length > 0
+    }
+
+    // §12.2 T1 / T4: its own body has a `?{}` or the deprecated `server` modifier.
+    fn serverTriggeredFn(s: Summary, sym: int) -> boolean {
+        const i: int = nodeIdx(s.nodes, sym)
+        if (i < 0) return false
+        return serverTriggered(s.nodes[i].f)
+    }
+
+    // Does function `sym` read the clock, itself or through a call?
+    fn readsClock(s: Summary, sym: int) -> boolean {
+        const i: int = nodeIdx(s.nodes, sym)
+        if (i < 0) return false
+        return s.clock[i].length > 0
     }
 
     // =========================================================================
@@ -14525,7 +14510,7 @@ ${
     // entry (the file with `<program>`) last.
     // =========================================================================
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram {
-        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [] }
+        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [] }
         const ra: RGlobals = phaseA(files, entry, st0)
         let st: AS = checkImports(files, ra.g, ra.st)
         st = phaseB(ra.g, st)
@@ -14547,8 +14532,10 @@ ${
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
                                 novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts() }
         const scopeDiags: Diag[] = checkScopes(files, bound)
-        // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables
+        // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
+        // and the binder's decisions that read it (rulesPass, M3)
         const sum: Summary = summarize(ra.g, bound)
+        st = rulesPass(sum, st)
         // s449: the no-write rule over every accepted effect (§6.7.4)
         const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects, sum)
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
