@@ -24546,6 +24546,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE | §51.0.S | A state declares `(state × message)` arms but does not cover every `accepts=` MsgType variant and has no `_ :>` wildcard (mirrors E-MATCH-NOT-EXHAUSTIVE). (Catalog addition S154 — §51.0.S; emitted at `compiler/src/symbol-table.ts:7653`. S452: wildcard written without the deprecated leading `|`, §51.0.S.2.3.) | Error |
 | E-ENGINE-MSG-UNKNOWN | §51.0.S, §51.0.G.1 | `.advance(.X)` where `.X` (literal bare-variant) is a variant of NEITHER the `for=` state enum NOR the `accepts=` message enum. (Catalog addition S154 — §51.0.S.) | Error |
 | E-ENGINE-MSG-WITHOUT-ACCEPTS | §51.0.S | A state-child declares a `(state × message)` arm but the engine opener has no `accepts=` declaration. (Catalog addition S154 — §51.0.S.) | Error |
+| E-ENGINE-MSG-ARM-POSITION | §51.0.S.2.3 | A pattern-arm head — `<arm-pattern> :>` (or a deprecated separator), with or without the legacy leading `\|` — appears in an engine state-child body AFTER render content. Message arms are the leading items of the body (recognised by position, §7.2.2); a later arm-shaped line is neither code nor display text. Resolution: move the arm above the render content. **Provenance:** `rationale:` the limiting option (fork rule); PA reading in its veto window, S452 (follows ruling:user-voice-scrml.md S452 "a. one spelling"). **Nominal / not yet emitted** — impl#1 renders such a line as text (`g-impl1-engine-message-arm-pipeless-as-text-s452`); the bootstrap does not emit it. | Error |
 | E-VALIDATOR-CIRCULAR-DEP | §55.11 | Two or more validators reference each other via cross-field predicate args (e.g., `<a eq(@b)>` and `<b eq(@a)>`). The validator dependency graph is a DAG; cycles are forbidden. | Error |
 | E-DERIVED-WITH-VALIDATORS | §55.14 | Validators applied to a derived cell (`const <x ...>`). Derived cells are read-only; validators imply gating which is incoherent on a computed value. Use a refinement type instead (`const <x>: number(>=0) = ...`). | Error |
 | E-DEBOUNCED-WITH-DERIVED | §6.13 | A `debounced=` (or `throttled=`) reactivity attribute is applied to a derived cell (`const <x debounced=300ms> = expr`). Derived cells are read-only; debounce/throttle is a write-side wrapper; combining the two is meaningless. Resolution: debounce the upstream source instead (`<source debounced=300ms> = @raw; const <doubled> = @source * 2`). (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
@@ -34959,6 +34960,21 @@ content), one per line; at that position a line whose first token is an arm patt
 surfaces `W-ARM-PIPE-LEGACY`; reserved `E-ARM-PIPE-LEGACY`; `scrml fix` deletes the `|`. Element arms
 (the state-children themselves, `<match>` arms) are unchanged.
 
+**An arm after render content is an error.** A pattern-arm head — `<arm-pattern> :>` (or a deprecated
+separator), with or without the legacy leading `|` — that appears in a state-child body AFTER render
+content SHALL be a compile error, **E-ENGINE-MSG-ARM-POSITION**, and SHALL NOT be read as code or as
+text. Message arms come first; the message SHALL say so and name the arm. *(Nominal / not yet
+emitted.)*
+
+> **Provenance:** `rationale:` the limiting option under the fork rule (limit primitives, don't
+> widen): the arm region is the leading items only, so an arm-shaped line later in the body has no
+> reading but an error. It mirrors impl#1's behaviour for the piped form (only the leading `|`-run is
+> arms), and newly-rejecting is reversible where a permissive reading is not. *(PA reading, in its
+> veto window — bryan was told: "I'm keeping that, plus a rule that an arm appearing after other
+> content is an error".)* · **supersedes:** nothing written. **Direction of change (pa-base §8):
+> newly-rejecting.** impl#1 reads a later `|`-led line as render text (it compiles, displayed
+> literally), so the code is not emitted there (frozen; `g-impl1-engine-message-arm-pipeless-as-text-s452`).
+
 > **Provenance:** ruling:user-voice-scrml.md S452 "a. one spelling" — *"a. one spelling"* — answering
 > the PA's §51.0.S question: `(state × message)` message arms are PATTERN arms and follow §18.2 like
 > every other logic arm, no leading `|` (`.Drop(col) :> …`); the `|` form soft-deprecates through §63
@@ -35101,6 +35117,7 @@ a self-WRITE does not. This divergence is ratified and specified at §51.0.R.
 | `E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE` | Error | a state declares message-arms but does not cover every `accepts=` MsgType variant and has no `_ :>` wildcard (mirrors `E-MATCH-NOT-EXHAUSTIVE`; emitted at `compiler/src/symbol-table.ts:7653`) |
 | `E-ENGINE-MSG-UNKNOWN` | Error | `.advance(.X)` where `.X` (literal bare-variant) is a variant of NEITHER the `for=` state enum NOR the `accepts=` message enum |
 | `E-ENGINE-MSG-WITHOUT-ACCEPTS` | Error | a state-child declares a `(state × message)` arm but the engine opener has no `accepts=` declaration |
+| `E-ENGINE-MSG-ARM-POSITION` | Error | a pattern-arm head (`<arm-pattern> :>`, `|`-led or not) appears in a state-child body after render content (S452, §51.0.S.2.3 — Nominal / not yet emitted) |
 
 **Reused (no new code):** `E-VARIANT-AMBIGUOUS` (§14.10) — the state/message name-collision
 case (§51.0.G.1 step 1) AND the union-typed-argument case (§51.0.G.1 step 3).
