@@ -172,28 +172,68 @@ a pipe, and make every wait loop print why it is still waiting.**
   shared surface, his session live).
 
 
-## Maps (wrap 6c) — ⚑ NOT REFRESHED THIS SESSION, and that is owed
-The `project-mapper` dispatch was launched at wrap and **produced nothing before close** — the stamp is
-still `d3e660a08` (the S451 wrap), so the maps are now behind by the S452 landings (#1273–#1280, #1287)
-and all three S453 landings (#1283, #1286, #1289). Stated rather than skipped. **Re-run it next session**
-with the same brief, which carries a measured router gap worth fixing:
+## Maps (wrap 6c) — REFRESHED, stamp `fd2f757d0`
+The `project-mapper` pass landed late but complete: **13 map files**, +2,121/−14 lines, stamp moved
+`d3e660a08` → **`fd2f757d0`** (a 17-commit window), `state.ts --check` reports `maps: current`.
+HEAD moved twice under it (my #1287 merge, then the re-linearisation to #1289/#1291); it re-executed
+every figure and re-stamped rather than leave a watermark that is not an ancestor of HEAD, and it
+justified not re-running the suites a third time by showing `git diff 1d45ef281 fd2f757d0 -- compiler
+scripts conformance stdlib docs/FACTS.md docs/known-gaps.md compiler/SPEC.md` is **empty**.
 
-Both S453 adversarial reviewers independently reported that the handler-async-colouring / listener-registration
-surface has **no Task-Shape Routing row at all**, and that the symbols a dispatch brief would name are
-absent from the whole set — across all 13 maps, `colorHandlerAsync` **0 hits**, `armFactoryLines` **0**,
-`rootAsync` **0**, `E-TRANSACTION-CONTROL-FLOW` **0**; `colorAsyncFunctionExpr` / `colorActiveHandler`
-one hit each, and it was a plain file-inventory row (`structure.map.md:861`).
+**The router gap both reviewers measured is closed three ways** — three new Task-Shape Routing rows
+(handler/listener emission + async colouring · `transaction {}` §19.10 · the §14.8.10 tenant floor,
+added because it is a live self-declared-PARTIAL security surface), full file inventories with line
+numbers, and symbol findability re-measured after writing. PA-verified: `colorHandlerAsync` 22 hits
+(was **0**), `rootAsync` 25 (0), `E-TRANSACTION-CONTROL-FLOW` 25 (0), `armFactoryLines` 4 (0).
+The row now records the load-bearing asymmetry: **`colorHandlerAsync` is ONE call covering three
+registrations; `colorActiveHandler` is FOURTEEN separate call sites**, so a fix at the
+`emit-event-wiring.ts` locus alone leaves all fourteen untouched — the exact trap my own A3 brief set.
+It also flags that `colorHandlerAsync` is module-LOCAL, not an export.
 
-⚑ **That inventory row was the single most load-bearing line in the map set this session** — it is what
-revealed there are TWO colouring entry points, which redirected the A3 fix off the locus my own brief had
-named and prevented a landing that would have left 14 listener sites silently unlogged. The *routing*
-rows were not load-bearing for either arc. So the feedback is not "add more routing rows" — it is that an
-inventory row outperformed them here, which is a signal about where map value actually comes from and is
-worth recording in the non-compliance report rather than smoothing over.
-Also owed to that report: PRIMER §12 lists `scrml-js-codegen-engineer`'s tool set as including `Agent`
-while the staged definition in `scrml-support/agents/` does not — one of the two is stale, and the staged
-dir is an S217 snapshot (3½ months old) whose live source is on bryan's machine.
+⚑ **It corrected a stale figure in our own routing table, and the staleness had survived an explicit
+"re-parsed, not carried" assurance.** The table claimed the `gate` job is *"14 TOTAL STEPS — 12
+`- name:` + 2 `- uses:` — RE-PARSED AT `499eecce`, NOT CARRIED"*. **PA-verified independently with my
+own awk: 15 `- name:` + 2 `- uses:` = 17**, identical at both ends of the window. The lesson is kept
+beside the fix: a figure labelled "not carried" is still only as good as the pass that re-parsed it.
 
+### Structural signal recorded, not smoothed over (C-S453-A)
+The mapper's own conclusion from the reviewers' zero-hit data: **the inventory row out-performed every
+routing row**, because a routing row is written from the window that just closed (the standing
+`S1 router-lag` finding) while an inventory row is a fact about a file. The winning row was even
+*stale* — it said 1306 L for a 1671-line file — and still worked, because the part that mattered was
+the export list. Its recommendation, worth honouring: **when a pass can write only one, write the
+inventory row.**
+
+### Non-compliance — 6 findings, 3 prior closed. Two are bryan-lane and ACTIONABLE
+Full report: `.claude/maps/non-compliance.report.md`. Routed to bryan in a follow-up inbox note:
+- **N-S453-2 (highest value)** — `SPEC.md:18134` says `W-ARM-PIPE-LEGACY` is *"not yet emitted by
+  impl#1 (frozen) or the bootstrap"*, and the §34 row at `:19386` ends *"never emitted under either
+  name"*. **Both are false since #1279, inside this window**: `self-host-v2/parse.scrml:524` emits it
+  (Info per `severity.scrml:101`) and `scripts/bootstrap-conformance.ts:649` now depends on it. **A dev
+  agent reading either line writes the wrong test.**
+- **N-S453-3** — `SPEC.md:35087` says *"`scrml fix` deletes the `|`"* in the present tense, but
+  `fix-s66.js` has **zero** pipe rules, and §63.7 says the code is gate-blocked until that rule lands —
+  so the SPEC contradicts itself, while `:18132` tells readers the **186 `|`-led arms in 70 files**
+  migrate by a rule that does not exist.
+- **N-S453-1** — `docs/bootstrap-conformance.md` stale for the **third consecutive window** (committed
+  1301/511/622 vs live 1310/513/629); the S451 "add it to the checklist" fix did not take. Mapper's
+  recommendation: make its `--check` blocking on PRs touching `conformance/cases/**` or
+  `self-host-v2/**`. Left stale here deliberately — regenerating it is a repo write outside the maps.
+- **N-S453-4/5/6** — readme/PRIMER snippets migrated off the paren-free binder but kept the `|` lead
+  the same window soft-deprecated; two E-SQL-004 messages still carry the §8.1.1-superseded wording;
+  two files still narrate the retired `_scrml_tenant_tag`.
+- **N-S453-7/8** — both items I asked it to confirm: PRIMER §12 (`:1182`) lists `Agent` in the codegen
+  agent's tool set while the staged definition (`agents/scrml-js-codegen-engineer.md:34`) does not, and
+  that staged dir is an **S217 snapshot** (added `fd62911` 2026-06-23, last touched `4dc0eb7`
+  2026-07-28). Its recommendation: mark the README `SNAPSHOT (S217) — NOT AUTHORITATIVE`, since N-S453-7
+  cannot be *resolved* until that ambiguity is settled.
+- **Closed:** `N-S451-2`, `N-S451-3` (first limb), `U-S451-1`, and `U-S453-1` (the hand-off was still
+  the S451 wrap when the pass opened).
+
+⚑ **`slice-m2` reads 420 pass / 6 fail on this box and it is NOT a regression** — all six are
+`compareCore` text-node diffs of the shape `a="\r\n    "` vs `b="\n    "`, i.e. `core.autocrlf=true`
+CRLF fixtures against `\n` oracles (4 in `lower.test.js`, 1 `tables.test.js`, 1 `typer.test.js`). The
+S451 stamp's 462/0 was a different host. Judge that tier by its failure NAME SET.
 ## Worktrees + branches
 Removed: the spent A/B compile tree, both frozen review trees, both agent trees, and the
 cross-session `agent-a17aa5322771d6ebc` (audited first — its one unlanded-looking commit's test passes
