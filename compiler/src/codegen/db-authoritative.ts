@@ -126,6 +126,7 @@ export function extractDesiredSchema(
   tenantTables: Array<{ name: string; dbAuthoritative?: boolean; [k: string]: unknown }>;
   fns: Array<{ name: string; [k: string]: unknown }>;
   warnings: string[];
+  schemaText: string;
 } {
   const seen = new WeakSet<object>();
   const bodies: string[] = [];
@@ -272,7 +273,9 @@ export function extractDesiredSchema(
     return added.length === 0 ? t : { ...t, columns: [...own, ...added] };
   });
 
-  return { tables, tenantTables, fns, warnings };
+  // §14.8.10 (S452 r4) — the raw `<schema>` text, so the tenant floor can see the
+  // triggers / rules / cascading foreign keys a tenant write would set off.
+  return { tables, tenantTables, fns, warnings, schemaText: bodies.join("\n") };
 }
 
 /**

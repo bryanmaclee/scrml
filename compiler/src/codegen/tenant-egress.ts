@@ -49,8 +49,20 @@
  * foreign row).
  */
 
-import { extractSelectProjection, normalizeSqlText } from "../sql-projection.ts";
+import { normalizeSqlText } from "../sql-projection.ts";
 import type { ProtectContext } from "./protect-egress.ts";
+import {
+  analyzeTenantSql,
+  tenantTableMentioned,
+  lexTenantSubset,
+  topLevelFromOffset,
+  addKeyColumnsBeforeFrom,
+  injectInsertTenant,
+  injectWriteTenantFilter,
+  TENANT_ROW_FUNCTIONS,
+  TENANT_GROUP_AGGREGATES,
+  type TenantAnalysis,
+} from "./tenant-sql-subset.ts";
 
 /** The canonical tenant-discriminator column (§14.8.10 declaration convention). */
 export const TENANT_COLUMN = "tenant_id";
@@ -64,6 +76,79 @@ export const TENANT_COLUMN = "tenant_id";
  */
 export interface TenantContext {
   tenantScopedTables: Set<string>;
+  /**
+   * S452 r4 — per tenant-scoped table (lowercased), the `<schema>`-declared
+   * objects that turn ONE write into further, unanalysed writes: triggers, rules,
+   * and foreign keys with a CASCADE / SET NULL / SET DEFAULT action that this
+   * table's writes fire. A tenant write to such a table is refused (E-TENANT-WRITE)
+   * — the floor constrains the statement, not what the database runs because of it.
+   * Only what `<schema>` declares is visible: a trigger created outside it (an
+   * external database, a `<db src>` with no schema) is not.
+   */
+  writeHazards?: Map<string, string[]>;
+  /** S452 r4 — the driver of a SQL handle (`_scrml_sql`, …), for dialect-specific injection. */
+  driverFor?: (dbVar: string) => string | undefined;
+}
+
+/** The last part of a possibly-qualified, possibly-quoted SQL name, lowercased. */
+function bareName(name: string): string {
+  const parts = name.split(".");
+  return parts[parts.length - 1].replace(/^["`[]|["`\]]$/g, "").toLowerCase();
+}
+
+/**
+ * Read the write hazards a `<schema>` body declares (see `TenantContext.writeHazards`).
+ * TEXTUAL and deliberately over-inclusive: a hazard the reader cannot attribute
+ * to a table is attributed to EVERY tenant-scoped table (fail-closed), and a
+ * commented-out declaration still counts.
+ */
+export function schemaWriteHazards(schemaText: string, tenantTables: Set<string>): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const add = (table: string | null, what: string): void => {
+    const targets = table === null ? [...tenantTables] : [table];
+    for (const t of targets) {
+      if (!tenantTables.has(t)) continue;
+      const key = t.toLowerCase();
+      const list = out.get(key) ?? [];
+      if (!list.includes(what)) list.push(what);
+      out.set(key, list);
+    }
+  };
+  const text = typeof schemaText === "string" ? schemaText : "";
+  const NAME = `("[^"]+"|\`[^\`]+\`|\\[[^\\]]+\\]|[A-Za-z_][\\w$]*(?:\\.[A-Za-z_][\\w$]*)?)`;
+  // Triggers (SQLite / Postgres): `TRIGGER name … ON table`.
+  let attributedTriggers = 0;
+  const trigRe = new RegExp(`\\bTRIGGER\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?${NAME}[\\s\\S]*?\\bON\\s+${NAME}`, "gi");
+  for (const m of text.matchAll(trigRe)) {
+    attributedTriggers++;
+    add(bareName(m[2]), `trigger \`${bareName(m[1])}\``);
+  }
+  const triggerWords = (text.match(/\bTRIGGER\b/gi) ?? []).length;
+  if (triggerWords > attributedTriggers) add(null, "a trigger the floor could not attribute to a table");
+  // Postgres rules: `RULE name AS ON event TO table`.
+  let attributedRules = 0;
+  const ruleRe = new RegExp(`\\bRULE\\s+${NAME}\\s+AS\\s+ON\\s+\\w+\\s+TO\\s+${NAME}`, "gi");
+  for (const m of text.matchAll(ruleRe)) {
+    attributedRules++;
+    add(bareName(m[2]), `rule \`${bareName(m[1])}\``);
+  }
+  if ((text.match(/\bCREATE\s+(?:OR\s+REPLACE\s+)?RULE\b/gi) ?? []).length > attributedRules) {
+    add(null, "a rule the floor could not attribute to a table");
+  }
+  // Foreign-key actions fire on writes to the REFERENCED (parent) table.
+  const ACTION = /\bON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT)\b/gi;
+  let attributedActions = 0;
+  const fkRe = new RegExp(`\\bREFERENCES\\s+${NAME}\\s*(?:\\([^)]*\\))?((?:\\s+(?:ON\\s+(?:DELETE|UPDATE)\\s+(?:CASCADE|SET\\s+NULL|SET\\s+DEFAULT|NO\\s+ACTION|RESTRICT)|MATCH\\s+\\w+|NOT\\s+DEFERRABLE|DEFERRABLE|INITIALLY\\s+\\w+))*)`, "gi");
+  for (const m of text.matchAll(fkRe)) {
+    const actions = m[2].match(ACTION) ?? [];
+    if (actions.length === 0) continue;
+    attributedActions += actions.length;
+    add(bareName(m[1]), `a foreign key with \`${actions[0].replace(/\s+/g, " ").toUpperCase()}\` referencing it`);
+  }
+  if ((text.match(ACTION) ?? []).length > attributedActions) {
+    add(null, "a foreign-key action (CASCADE / SET NULL / SET DEFAULT) the floor could not attribute to a table");
+  }
+  return out;
 }
 
 /**
@@ -137,6 +222,8 @@ class TenantTableSet extends Set<string> {
 export function buildTenantContext(
   protectCtx: ProtectContext,
   schemaTables?: Array<{ name?: unknown; columns?: unknown }>,
+  schemaText?: string,
+  driverFor?: (dbVar: string) => string | undefined,
 ): TenantContext {
   const tenantScopedTables = new TenantTableSet();
   for (const [table, cols] of protectCtx.schemaByTable) {
@@ -149,7 +236,8 @@ export function buildTenantContext(
     );
     if (carriesTenant) tenantScopedTables.add(t.name);
   }
-  return { tenantScopedTables };
+  if (tenantScopedTables.size === 0) return { tenantScopedTables };
+  return { tenantScopedTables, writeHazards: schemaWriteHazards(schemaText ?? "", tenantScopedTables), driverFor };
 }
 
 /**
@@ -172,7 +260,7 @@ export interface TenantKeyColumn {
  *   - "function":  a function call outside the per-row allow-list (an aggregate
  *                  — `json_group_array`, `string_agg`, … — or anything unknown);
  *   - "window":    an `OVER (…)` window (it reads other rows of the result);
- *   - "subquery":  a subquery / CTE / derived table anywhere in the query;
+ *   - "subquery":  a subquery / CTE / derived table / `IN <table>` anywhere;
  *   - "setop":     UNION / INTERSECT / EXCEPT;
  *   - "reserved":  the author's SQL names the floor's reserved key alias.
  */
@@ -180,306 +268,121 @@ export type TenantRefusal = "aggregate" | "function" | "window" | "subquery" | "
 
 /**
  * The result of resolving a `?{}` read's tenant scoping:
- *   - `null`                    — no floor: not row-producing, or no tenant-scoped
- *                                 table is mentioned. Lowered unchanged.
+ *   - `null`                    — no floor: not a read, or no tenant-scoped table
+ *                                 is named. Lowered unchanged.
  *   - `{ kind: "read" }`        — a plain row read of tenant-scoped sources; filtered
  *                                 at the source. `keys` has ONE reserved-alias key
  *                                 column per tenant-scoped source (a row is kept iff
  *                                 every one matches).
  *   - `{ kind: "agg" }`         — refused → `E-TENANT-AGG` (see TenantRefusal).
- *   - `{ kind: "unresolvable" }`— mentions a tenant-scoped table but its sources
- *                                 cannot be resolved → ZERO rows at the source.
+ *   - `{ kind: "outside" }`     — names a tenant-scoped table but lies outside the
+ *                                 floor's SQL subset → `E-TENANT-SQL-SUBSET`.
+ *   - `{ kind: "unresolvable" }`— names a tenant-scoped table but not as a source
+ *                                 the floor can key → ZERO rows at the source.
  */
 export type TenantScoping =
   | { kind: "read"; table: string; keys: TenantKeyColumn[] }
   | { kind: "agg"; table: string; reason: TenantRefusal; detail?: string }
+  | { kind: "outside"; table: string; detail: string }
   | { kind: "unresolvable" }
   | null;
 
-/** The leading keyword (SELECT / WITH / INSERT / UPDATE / DELETE / ...) of NORMALIZED text, uppercased. */
-function leaderOf(norm: string): string {
-  const m = /^([A-Za-z]+)/.exec(norm);
-  return m ? m[1].toUpperCase() : "";
-}
-
 /**
- * The first tenant-scoped table named (as a whole word) in NORMALIZED text, or
- * null. Returned in the query's own spelling (the set is case-folded).
+ * THE ONE DECISION (S452 r3). Every tenant check — scoping, injection, refusal,
+ * the I-TENANT-ACROSS audit, the §8.10 hoist gate — derives from this reading
+ * of the raw `?{}` body by the allow-listed SQL subset (`tenant-sql-subset.ts`),
+ * so no two checks can read different queries.
  */
-function firstTenantTableIn(norm: string, ctx: TenantContext): string | null {
-  for (const t of ctx.tenantScopedTables) {
-    const m = new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").exec(norm);
-    if (m) return m[0];
-  }
-  return null;
+export function analyzeTenantQuery(sqlContent: string, ctx: TenantContext): TenantAnalysis {
+  if (ctx.tenantScopedTables.size === 0) return null;
+  return analyzeTenantSql(sqlContent, (n) => ctx.tenantScopedTables.has(n), ctx.tenantScopedTables, {
+    writeHazards: (t) => ctx.writeHazards?.get(t.toLowerCase()),
+  });
 }
 
 /**
- * Does `?{}` SQL text mention a tenant-scoped table anywhere (comments and string
- * literals excluded)? The fail-closed gate for every path that cannot apply the
- * row filter itself (e.g. the §8.10 loop hoist refuses to hoist such a query).
+ * Does `?{}` SQL text touch a tenant-scoped table? Inside the subset, an
+ * identifier decides; outside it, any whole-word occurrence anywhere does
+ * (fail-closed). The gate for every path that cannot apply the row filter
+ * itself (e.g. the §8.10 loop hoist refuses to hoist such a query).
  */
 export function sqlMentionsTenantTable(sqlContent: string, ctx: TenantContext): boolean {
-  return ctx.tenantScopedTables.size > 0 && firstTenantTableIn(normalizeSqlText(sqlContent), ctx) !== null;
+  return ctx.tenantScopedTables.size > 0 &&
+    tenantTableMentioned(sqlContent, (n) => ctx.tenantScopedTables.has(n), ctx.tenantScopedTables) !== null;
 }
 
-/**
- * The per-row scalar functions a plain tenant-table read may call. An ALLOW-list
- * (S451: text classification cannot prove a query safe): each of these maps one
- * row's values to one value and never sees another row. Anything else — every
- * aggregate (`count`, `json_group_array`, `string_agg`, …), every table-valued or
- * user-defined function, every name this list does not know — is refused
- * (`E-TENANT-AGG`, reason "function"), unless the query groups by every tenant
- * source's `tenant_id` (then each group holds one tenant's rows only).
- */
-export const TENANT_ROW_FUNCTIONS: ReadonlySet<string> = new Set([
-  "lower", "upper", "length", "trim", "ltrim", "rtrim", "substr", "substring",
-  "replace", "instr", "coalesce", "ifnull", "nullif", "abs", "round",
-  "date", "time", "datetime", "julianday", "strftime", "cast",
-]);
-
-/**
- * Words a `(` may follow that are NOT a function call. An allow-list too: an
- * identifier followed by `(` that is neither here nor in TENANT_ROW_FUNCTIONS is
- * treated as an unknown function and refused.
- */
-const NON_CALL_WORDS: ReadonlySet<string> = new Set([
-  "select", "from", "where", "and", "or", "not", "in", "on", "as", "join", "using",
-  "when", "then", "else", "case", "is", "like", "glob", "between", "by", "limit",
-  "offset", "escape", "values", "exists", "asc", "desc", "end", "null",
-]);
+export { TENANT_ROW_FUNCTIONS };
 
 /** The reserved alias prefix of the floor's key columns (removed after the filter). */
 export const TENANT_KEY_ALIAS_PREFIX = "__scrml_tenant_";
 
-/**
- * The SQL references (alias, or bare table name) of every tenant-scoped source in
- * a resolvable FROM/JOIN list, in source order. A self-join yields one reference
- * per occurrence (`assets a JOIN assets b` → `a`, `b`).
- */
-function tenantSourceRefs(
-  fromTables: string[],
-  aliasMap: Map<string, string>,
-  ctx: TenantContext,
-): string[] {
-  const refs: string[] = [];
-  const seenTables = new Set<string>();
-  for (const table of fromTables) {
-    if (!ctx.tenantScopedTables.has(table) || seenTables.has(table)) continue;
-    seenTables.add(table);
-    const explicitAliases = [...aliasMap].filter(([a, t]) => t === table && a !== table).map(([a]) => a);
-    refs.push(...explicitAliases);
-    const occurrences = fromTables.filter((t) => t === table).length;
-    if (occurrences > explicitAliases.length) refs.push(table);
+/** The key columns for a read's tenant sources: ONE reserved alias per source, always added. */
+function keysFor(refs: string[]): TenantKeyColumn[] {
+  // The author's projection is never trusted to carry the key (`SELECT *, 'A' AS
+  // tenant_id` would forge it), and the alias cannot collide (an author naming
+  // it is refused). Each is removed from the row after the filter.
+  return refs.map((ref, i) => ({
+    col: `${TENANT_KEY_ALIAS_PREFIX}${i}`,
+    add: `${ref}.${TENANT_COLUMN} AS ${TENANT_KEY_ALIAS_PREFIX}${i}`,
+  }));
+}
+
+/** Map one analysis to the read view (`null` for anything that is not a read). */
+function scopingOf(a: TenantAnalysis): TenantScoping {
+  if (a === null) return null;
+  switch (a.kind) {
+    case "read": return { kind: "read", table: a.table, keys: keysFor(a.refs) };
+    case "unresolvable": return { kind: "unresolvable" };
+    case "refuse":
+      if (a.code === "E-TENANT-AGG") return { kind: "agg", table: a.table, reason: a.reason as TenantRefusal, detail: a.detail };
+      if (a.code === "E-TENANT-SQL-SUBSET") return { kind: "outside", table: a.table, detail: a.detail };
+      return null;
+    default: return null;
   }
-  return refs;
 }
 
-/**
- * The GROUP BY column list of NORMALIZED, subquery-free SQL, read structurally:
- * from the top-level `GROUP BY` to the next clause keyword (HAVING, ORDER BY,
- * LIMIT, OFFSET, WINDOW) or the end. Items are lowercased and trimmed. `null`
- * when there is no GROUP BY.
- */
-function groupByItems(norm: string): string[] | null {
-  const m = /\bGROUP\s+BY\b/i.exec(norm);
-  if (!m) return null;
-  const rest = norm.slice(m.index + m[0].length);
-  const stop = /\b(HAVING|ORDER\s+BY|LIMIT|OFFSET|WINDOW)\b|;/i.exec(rest);
-  const clause = stop ? rest.slice(0, stop.index) : rest;
-  const items: string[] = [];
-  let depth = 0;
-  let cur = "";
-  for (const ch of clause) {
-    if (ch === "(") depth++;
-    else if (ch === ")") depth--;
-    if (ch === "," && depth === 0) { items.push(cur); cur = ""; } else cur += ch;
-  }
-  items.push(cur);
-  return items.map((s) => s.trim().toLowerCase()).filter((s) => s.length > 0);
-}
-
-/**
- * Does the GROUP BY list name EVERY tenant source's `tenant_id`? `<ref>.tenant_id`
- * always counts; a bare `tenant_id` counts only for a single-table read. Anything
- * the reader cannot match (an expression, a position number, a quoted name) does
- * not — then the query is not exempt.
- */
-function groupsByEveryTenantSource(items: string[], refs: string[], singleTable: boolean): boolean {
-  const set = new Set(items);
-  return refs.every((ref) =>
-    set.has(`${ref.toLowerCase()}.${TENANT_COLUMN}`) || (singleTable && set.has(TENANT_COLUMN)));
-}
-
-/**
- * Resolve the tenant scoping a `?{}` READ carries. Reads only — writes are
- * classified separately by `classifyTenantWrite`. Every check runs on ONE text:
- * `normalizeSqlText` (comments removed, string literals blanked) — the same
- * normalization `extractSelectProjection` reads, so no check can see a different
- * query from another.
- */
+/** Resolve the tenant scoping a `?{}` READ carries (writes: `classifyTenantWrite`). */
 export function resolveTenantScoping(sqlContent: string, ctx: TenantContext): TenantScoping {
-  if (ctx.tenantScopedTables.size === 0) return null;
-  const norm = normalizeSqlText(sqlContent);
-  const leader = leaderOf(norm);
-  if (leader !== "SELECT" && leader !== "WITH") return null;
-  const mentioned = firstTenantTableIn(norm, ctx);
-  if (mentioned === null) return null;
-  const refuse = (reason: TenantRefusal, detail?: string): TenantScoping =>
-    ({ kind: "agg", table: mentioned, reason, ...(detail ? { detail } : {}) });
-
-  // The fail-closed shape checks — none of these can be a plain row read.
-  if (new RegExp(`\\b${TENANT_KEY_ALIAS_PREFIX}`, "i").test(norm)) return refuse("reserved");
-  if (leader === "WITH" || /\(\s*(?:SELECT|WITH|VALUES)\b/i.test(norm)) return refuse("subquery");
-  if (/\b(?:UNION|INTERSECT|EXCEPT)\b/i.test(norm)) return refuse("setop");
-  if (/\bOVER\b/i.test(norm)) return refuse("window");
-
-  const proj = extractSelectProjection(sqlContent);
-  if (!proj.resolvable) return { kind: "unresolvable" };
-  const refs = tenantSourceRefs(proj.fromTables, proj.aliasMap, ctx);
-  // A tenant table is named, but not as a FROM / JOIN source the floor can key
-  // on: nothing is provably the active tenant's → zero rows.
-  if (refs.length === 0) return { kind: "unresolvable" };
-  const table = proj.aliasMap.get(refs[0]) ?? refs[0];
-
-  // Grouping is allowed ONLY when it groups by every tenant source's key: then
-  // each output row is one tenant's group, and the key column carries it.
-  const groupItems = groupByItems(norm);
-  const exempt = groupItems !== null && groupsByEveryTenantSource(groupItems, refs, proj.fromTables.length === 1);
-  if (!exempt) {
-    if (groupItems !== null || /\bHAVING\b/i.test(norm) || /\bDISTINCT\b/i.test(norm)) {
-      return { kind: "agg", table, reason: "aggregate" };
-    }
-    const callRe = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
-    let m: RegExpExecArray | null;
-    while ((m = callRe.exec(norm)) !== null) {
-      const name = m[1].toLowerCase();
-      if (NON_CALL_WORDS.has(name) || TENANT_ROW_FUNCTIONS.has(name)) continue;
-      return { kind: "agg", table, reason: "function", detail: m[1] };
-    }
-  }
-
-  // ONE reserved-alias key column per tenant source, always added: the author's
-  // projection is never trusted to carry the key (`SELECT *, 'A' AS tenant_id`
-  // would forge it), and the alias cannot collide (an author naming it is refused
-  // above). Each is removed from the row after the filter.
-  return {
-    kind: "read",
-    table,
-    keys: refs.map((ref, i) => ({
-      col: `${TENANT_KEY_ALIAS_PREFIX}${i}`,
-      add: `${ref}.${TENANT_COLUMN} AS ${TENANT_KEY_ALIAS_PREFIX}${i}`,
-    })),
-  };
+  return scopingOf(analyzeTenantQuery(sqlContent, ctx));
 }
 
 /**
  * Rewrite a resolvable SELECT to ADD the key columns the source filter needs to
- * the projection (a deterministic projection-column add, NOT a WHERE-parse). The
- * columns are appended just before the first top-level `FROM`. Returns the
- * original SQL unchanged when nothing is added.
+ * the projection (a deterministic projection-column add), just before the
+ * top-level `FROM` token. Returns the original SQL unchanged when nothing is
+ * added (if the FROM is not found the key columns are absent and the filter
+ * keeps no row — fail-closed).
  */
 export function rewriteSelectAddTenantId(sqlContent: string, scoping: TenantScoping): string {
   if (!scoping || scoping.kind !== "read") return sqlContent;
   const adds = scoping.keys.map((k) => k.add).filter((a): a is string => a !== null);
-  if (adds.length === 0) return sqlContent;
-
-  // Locate the first top-level FROM in the ORIGINAL (un-normalized) text so we
-  // insert the columns before it, preserving `${...}` params + spacing verbatim.
-  // (If it is not found the key columns are absent and the filter keeps no row.)
-  const fromIdx = findTopLevelFromInSource(sqlContent);
-  if (fromIdx === -1) return sqlContent;
-  const before = sqlContent.slice(0, fromIdx);
-  const after = sqlContent.slice(fromIdx);
-  return `${before.replace(/\s*$/, "")}, ${adds.join(", ")} ${after}`;
-}
-
-/**
- * Find the byte index of the projection-terminating top-level `FROM` in the
- * ORIGINAL source text: parenthesis-depth aware, word-boundary aware, and
- * skipping `${...}` interpolations, comments, string literals and quoted
- * identifiers (a `FROM` inside any of those is not the clause). Returns -1 when none.
- */
-function findTopLevelFromInSource(src: string): number {
-  let depth = 0;
-  let i = 0;
-  const upper = src.toUpperCase();
-  while (i < src.length) {
-    const ch = src[i];
-    const next = src[i + 1];
-    if (ch === "$" && next === "{") {
-      let d = 1; let j = i + 2;
-      while (j < src.length && d > 0) { if (src[j] === "{") d++; else if (src[j] === "}") d--; j++; }
-      i = j;
-      continue;
-    }
-    if (ch === "-" && next === "-") { const nl = src.indexOf("\n", i); i = nl === -1 ? src.length : nl + 1; continue; }
-    if (ch === "/" && next === "*") { const e = src.indexOf("*/", i + 2); i = e === -1 ? src.length : e + 2; continue; }
-    if (ch === "'" || ch === '"' || ch === "`" || ch === "[") {
-      const close = ch === "[" ? "]" : ch;
-      let j = i + 1;
-      while (j < src.length) {
-        if (src[j] === close && close === "'" && src[j + 1] === "'") { j += 2; continue; }
-        if (src[j] === close) break;
-        j++;
-      }
-      i = j + 1;
-      continue;
-    }
-    if (ch === "(") { depth++; i++; continue; }
-    if (ch === ")") { depth = Math.max(0, depth - 1); i++; continue; }
-    if (depth === 0 && upper[i] === "F" && upper.startsWith("FROM", i)) {
-      const before = i === 0 ? " " : src[i - 1];
-      const after = i + 4 >= src.length ? " " : src[i + 4];
-      if (!/[A-Za-z0-9_]/.test(before) && !/[A-Za-z0-9_]/.test(after)) return i;
-    }
-    i++;
-  }
-  return -1;
+  const fromAt = topLevelFromOffset(sqlContent);
+  if (adds.length === 0 || fromAt === -1) return sqlContent;
+  return addKeyColumnsBeforeFrom(sqlContent, fromAt, adds);
 }
 
 /**
  * The result of classifying a `?{}` WRITE that touches a tenant-scoped table:
- *   - `null`                     — not a write, or no tenant-scoped table mentioned.
- *   - `{ kind: "insert-inject" }`— an INSERT the floor can safely tenant-inject.
- *   - `{ kind: "hard-fail" }`    — anything else → `E-TENANT-WRITE` (unless
- *                                  `.acrossTenants()`, see classifyAcrossTenantInsert).
+ *   - `null`                      — not a write, or no tenant-scoped table named.
+ *   - `{ kind: "insert-inject" }` — a single-row INSERT; `tenant_id` is injected.
+ *   - `{ kind: "filter-inject" }` — an UPDATE / DELETE; `tenant_id = <active
+ *                                   tenant>` is ANDed onto its WHERE.
+ *   - `{ kind: "hard-fail" }`     — anything else → `E-TENANT-WRITE`.
+ * (A write outside the SQL subset is `E-TENANT-SQL-SUBSET` — see tenantFloorViolation.)
  */
 export type TenantWrite =
   | { kind: "insert-inject"; table: string }
+  | { kind: "filter-inject"; table: string; op: "UPDATE" | "DELETE" }
   | { kind: "hard-fail"; table: string; op: string }
   | null;
 
-const INJECTABLE_INSERT_RE =
-  /^(?:INSERT|REPLACE)(?:\s+OR\s+\w+)?\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^()]*)\)\s*VALUES\s*\(([^()]*)\)\s*;?$/i;
-
-/**
- * Classify a `?{}` write. Fail-closed, on the ONE normalized text: any
- * INSERT / REPLACE / UPDATE / DELETE that mentions a tenant-scoped table anywhere
- * hard-fails, EXCEPT the one shape the floor can provably inject — a single-row
- * `INSERT INTO <tenant table> (cols) VALUES (vals)` whose column list omits
- * `tenant_id`, whose values hold no subquery or call, and which the injection
- * rewrite can actually rewrite. (UPDATE/DELETE have no WHERE-parser behind them;
- * a committed cross-tenant write is durable before any filter could run.)
- */
 export function classifyTenantWrite(sqlContent: string, ctx: TenantContext): TenantWrite {
-  if (ctx.tenantScopedTables.size === 0) return null;
-  const norm = normalizeSqlText(sqlContent);
-  const leader = leaderOf(norm);
-  if (leader !== "INSERT" && leader !== "REPLACE" && leader !== "UPDATE" && leader !== "DELETE") return null;
-  const mentioned = firstTenantTableIn(norm, ctx);
-  if (mentioned === null) return null;
-  const fail: TenantWrite = { kind: "hard-fail", table: mentioned, op: leader };
-  if (leader === "UPDATE" || leader === "DELETE") return fail;
-  const m = INJECTABLE_INSERT_RE.exec(norm);
-  if (!m || !ctx.tenantScopedTables.has(m[1])) return fail;
-  const cols = m[2].split(",").map((c) => c.trim().toLowerCase());
-  if (cols.includes(TENANT_COLUMN)) return { kind: "hard-fail", table: m[1], op: leader };
-  // The tenant table may be named only as the target (a mention in the values
-  // would be a read of other rows into this one).
-  if (firstTenantTableIn(m[3], ctx) !== null) return { kind: "hard-fail", table: m[1], op: leader };
-  if (rewriteInsertAddTenantId(sqlContent, "X") === sqlContent) return { kind: "hard-fail", table: m[1], op: leader };
-  return { kind: "insert-inject", table: m[1] };
+  const a = analyzeTenantQuery(sqlContent, ctx);
+  if (a === null) return null;
+  if (a.kind === "insert") return { kind: "insert-inject", table: a.table };
+  if (a.kind === "filtered-write") return { kind: "filter-inject", table: a.table, op: a.op };
+  if (a.kind === "refuse" && a.code === "E-TENANT-WRITE") return { kind: "hard-fail", table: a.table, op: a.op };
+  return null;
 }
 
 /**
@@ -489,33 +392,91 @@ export function classifyTenantWrite(sqlContent: string, ctx: TenantContext): Ten
  * query, so an omitted `tenant_id` would silently write an unowned row. Returns
  * the target table when an `.acrossTenants()` INSERT / REPLACE into a
  * tenant-scoped table does not name `tenant_id` in a column list (or has no
- * column list at all); `null` otherwise.
+ * column list at all); `null` otherwise. Read over the subset tokens; a body
+ * outside the subset falls back to the text reading (fail-closed: a quoted
+ * `"tenant_id"` there does not count as naming it).
  */
 export function acrossTenantInsertMissingTenantColumn(sqlContent: string, ctx: TenantContext): string | null {
   if (ctx.tenantScopedTables.size === 0) return null;
+  const lex = lexTenantSubset(sqlContent);
+  if (lex.ok) {
+    const t = lex.toks;
+    if (!(t[0]?.kind === "ident" && (t[0].up === "INSERT" || t[0].up === "REPLACE"))) return null;
+    const into = t.findIndex((x) => x.kind === "ident" && x.up === "INTO");
+    const target = into === -1 ? undefined : t[into + 1];
+    if (!target || target.kind !== "ident" || !ctx.tenantScopedTables.has(target.text)) return null;
+    const open = t[into + 2];
+    if (open && open.kind === "punct" && open.text === "(") {
+      for (let k = into + 3; k < t.length && !(t[k].kind === "punct" && t[k].text === ")"); k++) {
+        if (t[k].kind === "ident" && t[k].text.toLowerCase() === TENANT_COLUMN) return null;
+      }
+    }
+    return target.text;
+  }
   const norm = normalizeSqlText(sqlContent);
-  const leader = leaderOf(norm);
-  if (leader !== "INSERT" && leader !== "REPLACE") return null;
-  const target = /^(?:INSERT|REPLACE)(?:\s+OR\s+\w+)?\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)/i.exec(norm)?.[1];
-  if (!target || !ctx.tenantScopedTables.has(target)) return null;
+  const head = /^(?:INSERT|REPLACE)(?:\s+OR\s+\w+)?\s+INTO\s+([A-Za-z_][A-Za-z0-9_]*)/i.exec(norm);
+  if (!head || !ctx.tenantScopedTables.has(head[1])) return null;
   const cols = /^(?:INSERT|REPLACE)(?:\s+OR\s+\w+)?\s+INTO\s+[A-Za-z_][A-Za-z0-9_]*\s*\(([^()]*)\)/i.exec(norm)?.[1];
   if (cols !== undefined && cols.split(",").map((c) => c.trim().toLowerCase()).includes(TENANT_COLUMN)) return null;
-  return target;
+  return head[1];
+}
+
+/** The INSERT's target name (token after INTO) when the body lexes; used to analyse without a context. */
+function insertTargetOf(sqlContent: string): string | null {
+  const lex = lexTenantSubset(sqlContent);
+  if (!lex.ok) return null;
+  const into = lex.toks.findIndex((x) => x.kind === "ident" && x.up === "INTO");
+  const t = into === -1 ? undefined : lex.toks[into + 1];
+  return t && t.kind === "ident" ? t.text : null;
+}
+
+/**
+ * S452 r4 — does a tenant write on handle `dbVar` take SQLite's statement-level
+ * `OR ABORT` (see `injectInsertTenant`)? Postgres and MySQL have no table-level
+ * conflict resolution — a constraint violation always aborts the statement there,
+ * and their statement-level upserts (`ON CONFLICT`, `ON DUPLICATE KEY`) are
+ * outside the subset — and both REJECT `INSERT OR ABORT` as a syntax error. A
+ * handle whose driver is unknown is treated as SQLite: on another database that
+ * fails the statement (closed), never the reverse.
+ */
+function sqliteDialect(ctx: TenantContext | undefined, dbVar: string | undefined): boolean {
+  const driver = ctx?.driverFor && dbVar ? ctx.driverFor(dbVar) : undefined;
+  return driver === undefined || driver === "sqlite";
 }
 
 /**
  * Rewrite an injectable INSERT to add `tenant_id` to its column-set with the
- * ambient tenant value bound as a param expression `${<ambientExpr>}`. The
- * caller supplies the ambient-tenant JS expression (e.g.
- * `_scrml_current_user(_scrml_req).tenantId`). Only touches the single-row
- * `INSERT INTO t (cols) VALUES (vals)` shape validated by `classifyTenantWrite`.
+ * ambient tenant value bound as a param expression `${<ambientExpr>}` (and, on
+ * SQLite, `OR ABORT`). Only touches the single-row subset shape; anything else
+ * is returned unchanged.
  */
-export function rewriteInsertAddTenantId(sqlContent: string, ambientExpr: string): string {
-  return sqlContent.replace(
-    /(\b(?:INSERT|REPLACE)(?:\s+OR\s+\w+)?\s+INTO\s+[A-Za-z_][A-Za-z0-9_]*\s*\()([^)]*)(\)\s*VALUES\s*\()([^)]*)(\))/i,
-    (_full, head: string, cols: string, mid: string, vals: string, tail: string) =>
-      `${head}${cols.replace(/\s*$/, "")}, ${TENANT_COLUMN}${mid}${vals.replace(/\s*$/, "")}, \${${ambientExpr}}${tail}`,
-  );
+export function rewriteInsertAddTenantId(sqlContent: string, ambientExpr: string, ctx?: TenantContext, dbVar?: string): string {
+  // With the context: the SAME analysis `classifyTenantWrite` read. Without it
+  // (a standalone rewrite), the target is the only tenant table considered.
+  let a: TenantAnalysis;
+  if (ctx) {
+    a = analyzeTenantQuery(sqlContent, ctx);
+  } else {
+    const target = insertTargetOf(sqlContent);
+    if (target === null) return sqlContent;
+    a = analyzeTenantSql(sqlContent, (n) => n.toLowerCase() === target.toLowerCase(), [target]);
+  }
+  if (!a || a.kind !== "insert") return sqlContent;
+  return injectInsertTenant(sqlContent, a.colsClose, a.valsClose, ambientExpr,
+    sqliteDialect(ctx, dbVar) ? a.leaderEnd : null);
+}
+
+/**
+ * Constrain a subset UPDATE / DELETE against a tenant-scoped table to the active
+ * tenant (`… WHERE (<author's condition>) AND tenant_id = ${<ambientExpr>}`; a
+ * SQLite UPDATE also gets `OR ABORT`). Returns the SQL unchanged unless
+ * `classifyTenantWrite` reads it as `filter-inject`.
+ */
+export function rewriteWriteAddTenantFilter(sqlContent: string, ambientExpr: string, ctx: TenantContext, dbVar?: string): string {
+  const a = analyzeTenantQuery(sqlContent, ctx);
+  if (!a || a.kind !== "filtered-write") return sqlContent;
+  return injectWriteTenantFilter(sqlContent, a.whereEnd, ambientExpr,
+    a.op === "UPDATE" && sqliteDialect(ctx, dbVar) ? a.leaderEnd : null);
 }
 
 /**
@@ -589,7 +550,7 @@ function tenantAggMessage(
   const head = `E-TENANT-AGG: \`${dispQ}\` reads the tenant-scoped table \`${scoping.table}\``;
   switch (scoping.reason) {
     case "subquery":
-      return `${head} through a subquery, CTE or derived table, which can fold several tenants' rows into one ` +
+      return `${head} through a subquery, CTE, derived table or \`IN <table>\` (${scoping.detail ?? "?"}), which can fold several tenants' rows into one ` +
         `result row before the tenant floor filters it (§14.8.10). Resolution: read the tenant-scoped table at the ` +
         `top level of the query (FROM / JOIN), ${optOut}.`;
     case "setop":
@@ -602,7 +563,7 @@ function tenantAggMessage(
     case "function":
       return `${head} and calls \`${scoping.detail ?? "?"}\`, which is not on the floor's per-row function allow-list ` +
         `(${[...TENANT_ROW_FUNCTIONS].join(", ")}). An aggregate (or any function the floor cannot prove reads one ` +
-        `row) can fold several tenants into one value (§14.8.10). Resolution: add \`GROUP BY tenant_id\` so each ` +
+        `row) can fold several tenants into one value (§14.8.10). Under \`GROUP BY tenant_id\` the aggregates ${[...TENANT_GROUP_AGGREGATES].join(", ")} are also allowed, nothing else. Resolution: add \`GROUP BY tenant_id\` so each ` +
         `result row is one tenant's group, compute it over the filtered rows in server code, ${optOut}.`;
     case "reserved":
       return `${head} and names the floor's reserved key alias \`__scrml_tenant_…\`, which the source filter reads ` +
@@ -614,21 +575,26 @@ function tenantAggMessage(
   }
 }
 
+/** The §14.8.10 codes a tenant-table query can be refused with at compile time. */
+export type TenantViolationCode = "E-TENANT-AGG" | "E-TENANT-WRITE" | "E-TENANT-SQL-SUBSET";
+
 /**
  * The §14.8.10 compile-time refusal for one `?{}` query, or null. Decided at the
  * ONE choke every lowering passes through (`_lowerTenantForQuery`), so it covers
- * every SQL spelling (`?{\`…\`}` and `?{ … }` alike) — a source-text scan over
- * one spelling was how `?{ update assets … }` reached the database unconstrained.
+ * every SQL spelling (`?{\`…\`}` and `?{ … }` alike), and from the ONE analysis
+ * (`analyzeTenantQuery`) the lowering itself uses.
  *   - `.acrossTenants()`: only an INSERT that omits the tenant column is refused.
- *   - otherwise: a refused read (E-TENANT-AGG) or a non-injectable write (E-TENANT-WRITE).
+ *   - otherwise: a query outside the floor's SQL subset (E-TENANT-SQL-SUBSET), a
+ *     refused read (E-TENANT-AGG), or a non-injectable write (E-TENANT-WRITE).
  */
 export function tenantFloorViolation(
   sqlContent: string,
   isAcross: boolean,
   ctx: TenantContext,
-): { code: "E-TENANT-AGG" | "E-TENANT-WRITE"; message: string } | null {
+): { code: TenantViolationCode; message: string } | null {
   if (ctx.tenantScopedTables.size === 0) return null;
   const dispQ = sqlContent.trim().replace(/\s+/g, " ").slice(0, 60);
+  const optOut = "mark the query `.acrossTenants()` for a deliberate cross-tenant query";
   if (isAcross) {
     const table = acrossTenantInsertMissingTenantColumn(sqlContent, ctx);
     if (table === null) return null;
@@ -642,29 +608,38 @@ export function tenantFloorViolation(
         `to have the request's tenant injected.`,
     };
   }
-  const write = classifyTenantWrite(sqlContent, ctx);
-  if (write && write.kind === "hard-fail") {
-    const why = write.op === "UPDATE" || write.op === "DELETE"
-      ? "An UPDATE/DELETE needs a WHERE constraint the V1 floor does not parse"
-      : "This INSERT is not safely tenant-injectable (it sets tenant_id itself, is multi-row, reads rows in its values, is INSERT ... SELECT, or names the table in a form the floor cannot rewrite)";
+  const a = analyzeTenantQuery(sqlContent, ctx);
+  if (a === null || a.kind !== "refuse") return null;
+  if (a.code === "E-TENANT-SQL-SUBSET") {
     return {
-      code: "E-TENANT-WRITE",
+      code: "E-TENANT-SQL-SUBSET",
       message:
-        `E-TENANT-WRITE: a ${write.op} against the tenant-scoped table \`${write.table}\` in \`${dispQ}\` ` +
-        `cannot be tenant-constrained by the V1 floor (a committed cross-tenant write is durable before any ` +
-        `filter could run). ${why} (§14.8.10). Resolution: for a per-tenant INSERT, write the plain ` +
-        `\`INSERT INTO t (cols) VALUES (vals)\` without \`tenant_id\` (the floor injects the request's tenant); for a ` +
-        `deliberate cross-tenant write, mark the query \`.acrossTenants()\`.`,
+        `E-TENANT-SQL-SUBSET: \`${dispQ}\` names the tenant-scoped table \`${a.table}\` but is outside the SQL ` +
+        `subset the tenant floor can read exactly: ${a.detail}. The floor scopes a tenant query only when every ` +
+        `token is one it knows — unquoted identifiers, numbers, plain '…' literals (no backslash), \`\${…}\` ` +
+        `parameters (no brace, backtick, slash or backslash inside, quotes only as plain strings), the operators ( ) , . * = <> != < > <= >= ` +
+        `+ - / % || — in ONE SELECT / INSERT / UPDATE / DELETE statement; anything else (a quoted name, a comment, ` +
+        `a \`;\`, a dialect-specific literal, another statement kind) could be read differently by the database ` +
+        `(§14.8.10). Resolution: write the query in that subset, or ${optOut}.`,
     };
   }
-  const scoping = resolveTenantScoping(sqlContent, ctx);
-  if (scoping && scoping.kind === "agg") return { code: "E-TENANT-AGG", message: tenantAggMessage(scoping, dispQ) };
-  return null;
+  if (a.code === "E-TENANT-AGG") {
+    return { code: "E-TENANT-AGG", message: tenantAggMessage({ table: a.table, reason: a.reason, detail: a.detail }, dispQ) };
+  }
+  return {
+    code: "E-TENANT-WRITE",
+    message:
+      `E-TENANT-WRITE: a ${a.op} against the tenant-scoped table \`${a.table}\` in \`${dispQ}\` cannot be ` +
+      `tenant-constrained by the floor (a committed cross-tenant write is durable before any filter could run): ` +
+      `${a.detail} (§14.8.10). Resolution: write the plain \`INSERT INTO t (cols) VALUES (vals)\` without ` +
+      `\`tenant_id\`, \`UPDATE t SET col = … WHERE …\` or \`DELETE FROM t WHERE …\` (the floor injects the ` +
+      `request's tenant), or ${optOut}.`,
+  };
 }
 
 /** Is this `.acrossTenants()` query one the tenant floor would otherwise have scoped or refused (the I-TENANT-ACROSS audit)? */
 export function tenantAcrossIsAudited(sqlContent: string, ctx: TenantContext): boolean {
-  return resolveTenantScoping(sqlContent, ctx) !== null || classifyTenantWrite(sqlContent, ctx) !== null;
+  return analyzeTenantQuery(sqlContent, ctx) !== null;
 }
 
 /**
@@ -715,7 +690,8 @@ export const SERVER_TENANT_HELPER: string = [
   "  return _s ? _scrml_active_tenant(_s.req) : null;",
   "}",
   "// THE WRITE KEY. An INSERT into a tenant-scoped table gets the active tenant",
-  "// injected into its tenant_id column. With NO active tenant (an unpinned request,",
+  "// injected into its tenant_id column; an UPDATE / DELETE gets `AND tenant_id =`",
+  "// the active tenant on its WHERE. With NO active tenant (an unpinned request,",
   "// boot code, a scheduled job, a server function reached outside a request) the",
   "// write is REFUSED, by name: writing it with a NULL tenant would store a row no",
   "// tenant owns. The deliberate way to write outside a request is an",
@@ -724,7 +700,7 @@ export const SERVER_TENANT_HELPER: string = [
   "  const _k = _scrml_tenant_source_key();",
   "  if (_k == null) {",
   "    throw new Error(",
-  "      \"E-TENANT-WRITE (runtime): an INSERT into a tenant-scoped table ran with no active \" +",
+  "      \"E-TENANT-WRITE (runtime): a write (INSERT / UPDATE / DELETE) to a tenant-scoped table ran with no active \" +",
   "      \"tenant (no request in scope, or the request has no pinned @currentUser.tenantId), \" +",
   "      \"so the \\u00a714.8.10 floor has no tenant to write it under. Refusing the write. \" +",
   "      \"To write outside a request, mark the query .acrossTenants() and name the tenant \" +",
@@ -916,5 +892,5 @@ export function wrapWithTenantScope(rowsExpr: string, scoping: TenantScoping): s
     const addedCols = scoping.keys.filter((k) => k.add !== null).map((k) => k.col);
     return `_scrml_tenant_scope(${rowsExpr}, ${JSON.stringify(keyCols)}, ${JSON.stringify(addedCols)})`;
   }
-  return rowsExpr; // "agg" carries no filter — it hard-fails at compile.
+  return rowsExpr; // "agg" / "outside" carry no filter — they hard-fail at compile.
 }

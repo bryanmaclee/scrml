@@ -301,12 +301,14 @@ ${schemaSrc}
     expect(sc.table).toBe("ASSETS");
   });
 
-  test("writes fold too — an UPDATE on a differently-cased name still hard-fails", () => {
+  test("writes fold too — an UPDATE / DELETE on a differently-cased name is still tenant-constrained", () => {
     const ctx = ctxOf("    CREATE TABLE Assets (id INTEGER PRIMARY KEY, tenant_id TEXT)");
     expect(classifyTenantWrite("UPDATE assets SET name = ${1} WHERE id = ${2}", ctx))
-      .toEqual({ kind: "hard-fail", table: "assets", op: "UPDATE" });
+      .toEqual({ kind: "filter-inject", table: "assets", op: "UPDATE" });
     expect(classifyTenantWrite("DELETE FROM ASSETS WHERE id = ${1}", ctx))
-      .toEqual({ kind: "hard-fail", table: "ASSETS", op: "DELETE" });
+      .toEqual({ kind: "filter-inject", table: "ASSETS", op: "DELETE" });
+    expect(classifyTenantWrite("UPDATE ASSETS SET TENANT_ID = ${1}", ctx))
+      .toEqual({ kind: "hard-fail", table: "ASSETS", op: "UPDATE" });
   });
 
   test("NO over-fire: a genuinely different table is still not tenant-scoped", () => {
