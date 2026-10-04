@@ -7,7 +7,7 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1301 of 1301 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1310 of 1310 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
@@ -15,8 +15,8 @@ Scope: **1301 of 1301 cases attempted** — every attempted case reached the pur
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 48 | 3.7% |
 | LEGACY | 0 | 0.0% |
-| NOT-TWINNED | 511 | 39.3% |
-| UNSUPPORTED | 622 | 47.8% |
+| NOT-TWINNED | 513 | 39.2% |
+| UNSUPPORTED | 629 | 48.0% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
@@ -26,7 +26,7 @@ Scope: **1301 of 1301 cases attempted** — every attempted case reached the pur
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 48; the other 21 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 429 · parse-reject 193.
+UNSUPPORTED by reason: bootstrap-unsupported 436 · parse-reject 193.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
@@ -34,11 +34,11 @@ Legacy-dialect cases graded on their generated §66 twin: **583** — PASS 75 ·
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
-NOT-TWINNED by reason (511 cases; a case counts once per distinct reason):
+NOT-TWINNED by reason (513 cases; a case counts once per distinct reason):
 
 - 60 — component-const: component `…` (structural rewrite — §66.15; hand-migrate)
 - 57 — rhs-decl: array of non-scalar / mixed elements needs a type (CTX — O35)
-- 46 — rhs-decl: `…` initializer needs a type (CTX — O35)
+- 48 — rhs-decl: `…` initializer needs a type (CTX — O35)
 - 46 — rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
 - 40 — render-by-tag: markup tag `…` shares a cell's name — render-by-tag (→ `…`, SAME-ARC) or a collision; in §66 it would be an instance of the declaration (CTX — §66.6.6)
 - 40 — rhs-decl: compound cell with child declarations (Tier 2 — `…` rewrite owed)
@@ -110,7 +110,7 @@ NOT-TWINNED by reason (511 cases; a case counts once per distinct reason):
 | engine | 91 | 6 | · | 5 | · | 49 | 31 | · | · |
 | enum | 1 | · | · | 1 | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
-| error | 63 | 19 | · | 5 | · | 5 | 34 | · | · |
+| error | 70 | 19 | · | 5 | · | 5 | 41 | · | · |
 | error-boundary | 11 | · | · | · | · | 11 | · | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 18 | · | · | 1 | · | 1 | 16 | · | · |
@@ -143,7 +143,7 @@ NOT-TWINNED by reason (511 cases; a case counts once per distinct reason):
 | route-region | 1 | · | · | · | · | 1 | · | · | · |
 | schema | 10 | · | · | · | · | · | 10 | · | · |
 | schema-for | 15 | · | · | · | · | · | 15 | · | · |
-| server-db | 56 | · | · | · | · | 16 | 40 | · | · |
+| server-db | 58 | · | · | · | · | 18 | 40 | · | · |
 | server-fn | 24 | · | · | · | · | 8 | 16 | · | · |
 | sql | 15 | 1 | · | · | · | 9 | 5 | · | · |
 | ssr | 14 | · | · | · | · | 14 | · | · | · |
@@ -397,7 +397,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (622)
+### UNSUPPORTED (629)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -656,6 +656,7 @@ none
 - `error/handler-unhandled-failable-arrow-pos` — twin · bootstrap-unsupported: an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence
 - `error/handler-unhandled-failable-bare-and-expr-pos` — twin · parse-reject: E-PARSE-TRAILING: unexpected `{` after the expression
 - `error/implicit-tx-explicit-begin` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `,`
+- `error/implicit-tx-explicit-transaction-block` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — it arrives with unit U1e (transactions, which need the error model's `!` functions)
 - `error/match-failable-ok-arm-rt` — twin · bootstrap-unsupported: an unannotated parameter `a` — bootstrap slice M2 needs `a: Type` (Core parameters are typed)
 - `error/propagate-incompat-variants` — twin · bootstrap-unsupported: `given` over a value that is not an instance handle is not in bootstrap slice M2 (O56: writes through it would be errors)
 - `error/propagate-reaches-handler` — twin · bootstrap-unsupported: member access `.Idle` on a value that is not a struct or an instance is not in bootstrap slice M2
@@ -668,6 +669,12 @@ none
 - `error/render-not-enum-pos` — twin · bootstrap-unsupported: `<render>` is a scrml structural element (§19.15), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/renders-payload-field-ok` — twin · parse-reject: E-PARSE-TYPE: expected a variant name, found `<`
 - `error/renders-undefined-var` — twin · parse-reject: E-PARSE-TYPE: expected a variant name, found `<`
+- `error/transaction-control-flow-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — it arrives with unit U1e (transactions, which need the error model's `!` functions)
+- `error/transaction-control-flow-pos` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — it arrives with unit U1e (transactions, which need the error model's `!` functions)
+- `error/transaction-nested-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — it arrives with unit U1e (transactions, which need the error model's `!` functions)
+- `error/transaction-non-failable-fn-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — it arrives with unit U1e (transactions, which need the error model's `!` functions)
+- `error/transaction-stmt-match-arm-fail-neg` — bootstrap-unsupported: `transaction { … }` (§19.10) is not in the bootstrap — it arrives with unit U1e (transactions, which need the error model's `!` functions)
+- `error/transaction-top-level-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `error/try-not-in-scrml` — twin · parse-reject: E-PARSE-EXPECTED: expected `:`, found `x`
 - `fn/arrow-body-reject` — twin · bootstrap-unsupported: the argument of `.map(…)` must be an arrow function of one parameter, `x => …` (the bootstrap has no other function value)
 - `fn/async-decl-reject` — twin · parse-reject: E-PARSE-ITEM: unexpected text at program level
@@ -1022,7 +1029,7 @@ none
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-neg` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 - `type-state-codes/e-type-lifecycle-variant-not-transitioned-pos` — twin · parse-reject: E-PARSE-TYPE: expected a type after `:`
 
-### NOT-TWINNED (511)
+### NOT-TWINNED (513)
 
 - `auth/auth-001-neg` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
 - `auth/auth-001-pos` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
@@ -1463,6 +1470,8 @@ none
 - `server-db/sql-row-contract-mismatch-neg` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `server-db/sql-row-contract-mismatch-pos` — not mechanical: component-const: component `const X = <root …>` (structural rewrite — §66.15; hand-migrate)
 - `server-db/sql-select-hydrate-rt` — not mechanical: rhs-decl: written sequence — its grants are the least §66.12 axes its writes use (CTX — grants)
+- `server-db/sql-transaction-exit-rollback-rt` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
+- `server-db/sql-transaction-in-function-rt` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
 - `server-db/sql-unique-constraint-rt` — not mechanical: rhs-decl: `not` initializer needs a type (CTX — O35)
 - `server-db/sql-update-returning-rt` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
 - `server-db/sql-where-filter-rt` — not mechanical: rhs-decl: empty `[]` needs an element type (CTX — O35)
