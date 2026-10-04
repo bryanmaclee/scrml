@@ -8,9 +8,12 @@
  *
  * Row shape. A row is a markdown table line under §34 whose FIRST cell is a diagnostic code
  * (`E-…` / `W-…` / `I-…`, optionally `~~struck~~`, `**bold**` or `backticked`). The SEVERITY is
- * the LAST non-empty cell: most rows end `| Error |`, a few omit the trailing pipe
- * (`… | Error`), and a trigger cell may itself contain a `|` (a union type in backticks) — the
- * last cell is the Severity column in every case.
+ * the cell in the column the table's HEADER names `Severity` (`| Code | Section | Trigger |
+ * Severity |`). A few rows omit the trailing pipe (`… | Error`), and a trigger cell may itself
+ * contain a `|` (a union type in backticks), so a row with MORE cells than its header is indexed
+ * from the END. An EMPTY Severity cell stays empty — never read the trigger text in its place (a
+ * trigger starting "Warning…" would otherwise become a Warning: fail-OPEN) — and an empty cell
+ * states no compile severity (compileSeverityOf → null → the bootstrap's fail-closed Error).
  */
 
 export type S34Row = {
@@ -43,22 +46,43 @@ export function s34Range(specLines: string[]): S34Range {
   return { start, end: next - 1, nativeStart: find(/^###\s+34\.1\s/) };
 }
 
+/** A table line's cells: the text between pipes, trimmed, without the empty edge cells. */
+function rowCells(raw: string): string[] {
+  const c = raw.split("|").map((x) => x.trim());
+  c.shift(); // before the leading pipe
+  if (c.length > 0 && c[c.length - 1] === "" && raw.trimEnd().endsWith("|")) c.pop(); // after the trailing pipe
+  return c;
+}
+
+/** The Severity cell of a code row, by the header's column (indexed from the end when the row has
+ *  extra cells from a `|` inside its text); "" when the table has no Severity column or the cell is
+ *  missing or empty. */
+export function severityCell(raw: string, header: string[] | null): string {
+  if (!header) return "";
+  const sev = header.findIndex((h) => /^severity$/i.test(h));
+  if (sev < 0) return "";
+  const c = rowCells(raw);
+  const i = c.length > header.length ? c.length - (header.length - sev) : sev;
+  return c[i] ?? "";
+}
+
 /** Every code row of §34, in SPEC order (duplicates kept — the caller decides). */
 export function parseS34Rows(specLines: string[]): S34Row[] {
   const { start, end } = s34Range(specLines);
   const rows: S34Row[] = [];
+  let header: string[] | null = null;
   for (let i = start - 1; i < end && i < specLines.length; i++) {
     const raw = specLines[i];
-    if (!raw.startsWith("|")) continue;
+    if (!raw.startsWith("|")) { header = null; continue; } // a table ends at its first non-table line
     const cells = raw.split("|");
     if (cells.length < 3) continue;
     const first = cells[1].trim();
-    if (!first || /^-+$/.test(first) || /^code$/i.test(first)) continue;
+    if (/^code$/i.test(first)) { header = rowCells(raw); continue; }
+    if (!first || /^-+$/.test(first)) continue;
     const struck = first.includes("~~");
     const code = first.replace(/~~/g, "").replace(/\*\*/g, "").replace(/`/g, "").trim();
     if (!/^[EWI]-[A-Z0-9-]+$/.test(code)) continue;
-    const nonEmpty = cells.map((c) => c.trim()).filter((c) => c !== "");
-    rows.push({ code, struck, severity: nonEmpty[nonEmpty.length - 1] ?? "", line: i + 1, raw, cells });
+    rows.push({ code, struck, severity: severityCell(raw, header), line: i + 1, raw, cells });
   }
   return rows;
 }
