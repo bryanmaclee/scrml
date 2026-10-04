@@ -107,30 +107,106 @@ describe("§2 §19.10.4 checks (lint-transaction)", () => {
   test("nested transaction → E-ERROR-007 (at any depth inside the outer block)", () => {
     expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { transaction { if (a) { ${TX} } } } }`)).toEqual(["E-ERROR-007"]);
   });
-  test("nested transaction at TOP level → E-ERROR-007 (was E-SCOPE-001 — still rejected)", () => {
-    expect(codes(`\${ transaction { ${TX} } }`)).toEqual(["E-ERROR-007"]);
+  test("nested transaction at TOP level → E-ERROR-001 on the outer (B1b) + E-ERROR-007 on the inner, NOT E-ERROR-001 twice", () => {
+    expect(codes(`\${ transaction { ${TX} } }`)).toEqual(["E-ERROR-001", "E-ERROR-007"]);
   });
-  test("top-level transaction alone → no diagnostic (top level unchanged)", () => {
-    expect(codes(`\${ ${TX} }`)).toEqual([]);
+
+  // ---- S453 / B1b (RULED) -------------------------------------------------
+  // §19.10.4 "valid only inside `!` functions" covers the TOP LEVEL too. The
+  // hold left it alone and routed it; bryan ruled it rejected, on E-ERROR-001
+  // rather than a new code (one code for one condition).
+  test("B1b: a top-level transaction (outside any function) → E-ERROR-001", () => {
+    expect(codes(`\${ ${TX} }`)).toEqual(["E-ERROR-001"]);
+  });
+  test("B1b: the top-level message names the top level, not a function", () => {
+    const { ast } = parse(`\${ ${TX} }`);
+    const d = runTransactionChecks(ast)[0];
+    expect(d.code).toBe("E-ERROR-001");
+    expect(d.message).toContain("top-level logic block, outside any function");
+    expect(d.message).toContain("§19.10.4");
+  });
+  // ⚑ MEASURED LIMIT of B1b's reach, pinned so the next pass does not assume it.
+  // A `transaction { }` inside a LAMBDA arrow body is never seen by this checker:
+  // `parseTransactionBlock()` is reached from the top-level loop and from
+  // `parseOneStatement` (nested STATEMENT bodies) only, and a lambda body sits
+  // inside an EXPRESSION — so `xs.forEach((x) => { transaction { … } })` builds a
+  // `bare-expr` with no `transaction-block` and no `lambda` node at all, at exit 0.
+  // That is a PRE-EXISTING parse gap of the same class S450 fixed for function
+  // bodies, NOT something B1a/B1b changes; the lint's lambda limb exists so the
+  // message is right if the parser is ever extended there.
+  test("B1b limit: a transaction in a lambda arrow body never reaches the checker (pre-existing parse gap)", () => {
+    const src = `\${ type E:enum = { Bad } function f(xs)! -> E { xs.forEach((x) => { ${TX} }) } }`;
+    const { ast } = parse(src);
+    expect(collect(ast, "transaction-block").length).toBe(0);
+    expect(collect(ast, "lambda").length).toBe(0);
+    expect(runTransactionChecks(ast)).toEqual([]);
   });
   test("a transaction in a function nested INSIDE a transaction is its own scope (no E-ERROR-007)", () => {
     expect(codes(`\${ type E:enum = { Bad } function f()! -> E { transaction { function g()! -> E { ${TX} } } } }`)).toEqual([]);
   });
 
-  test("`return` inside the block → E-TRANSACTION-CONTROL-FLOW", () => {
-    expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { transaction { if (a) { return 1 } } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+  // ---- S453 / B1a (RULED) -------------------------------------------------
+  // `return` / `break` / `continue` out of the block ROLL IT BACK and the exit
+  // proceeds (§19.10.3 "only normal completion commits"). They were the hold's
+  // interim E-TRANSACTION-CONTROL-FLOW refusal; each assertion below INVERTS a
+  // pin that was green on the hold tree, which is this change's bite.
+  test("B1a: `return` inside the block → legal (rolls back; see the integration twin for the row-level proof)", () => {
+    expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { transaction { if (a) { return 1 } } } }`)).toEqual([]);
   });
-  test("`break` / `continue` targeting a loop OUTSIDE the block → E-TRANSACTION-CONTROL-FLOW each", () => {
-    expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { for (let i = 0; i < 2; i++) { transaction { if (a) { break } } } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
-    expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { while (a) { transaction { if (a) { continue } } } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+  test("B1a: `break` / `continue` targeting a loop OUTSIDE the block → legal", () => {
+    expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { for (let i = 0; i < 2; i++) { transaction { if (a) { break } } } } }`)).toEqual([]);
+    expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { while (a) { transaction { if (a) { continue } } } } }`)).toEqual([]);
   });
-  test("labeled break to a label outside the block → E-TRANSACTION-CONTROL-FLOW; inside → legal", () => {
-    expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { outer: for (let i = 0; i < 2; i++) { transaction { for (let j = 0; j < 2; j++) { break outer } } } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+  test("B1a: a labeled break to a label outside the block → legal; inside → legal (unchanged)", () => {
+    expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { outer: for (let i = 0; i < 2; i++) { transaction { for (let j = 0; j < 2; j++) { break outer } } } } }`)).toEqual([]);
     expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { transaction { inner: for (let j = 0; j < 2; j++) { break inner } } } }`)).toEqual([]);
   });
-  test("`return` inside a `!{}` handler arm carried as text, inside the block → E-TRANSACTION-CONTROL-FLOW", () => {
+  test("B1a: `return` inside a `!{}` handler arm carried as text, inside the block → legal", () => {
+    // A `!{}` arm is lowered as an INLINE `if (…__scrml_error) { … }` block, not
+    // an IIFE, and `rewriteTopLevelReturn` leaves the `return` alone inside a
+    // function body — so the `return` really leaves the enclosing function and
+    // the block's `finally` rolls back. Runtime-proved in the integration twin.
     const src = `\${ type E:enum = { Bad } function g()! -> E { fail E::Bad } function f()! -> E { transaction { g() !{ | _ :> return 3 } } } }`;
+    expect(codes(src)).toEqual([]);
+  });
+
+  // ---- S453 PA READING 1: `yield` stays refused ----------------------------
+  test("PA reading: `yield` inside the block STAYS E-TRANSACTION-CONTROL-FLOW (a suspension, not an exit)", () => {
+    const src = `\${ type E:enum = { Bad } function* f(a)! -> E { transaction { yield 1 } } }`;
+    const { ast } = parse(src);
+    const ds = runTransactionChecks(ast);
+    expect(ds.map((d) => d.code)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+    expect(ds[0].message).toContain("`yield`");
+    expect(ds[0].message).toContain("SUSPENDS");
+  });
+
+  // ---- S453 PA READING 2: a match-arm EXIT must NOT become legal-and-broken --
+  // `emitMatchExpr` lowers BOTH match positions as an IIFE, so an exit in an arm
+  // returns from the arm and never reaches the block's `finally`: the rollback
+  // would not run and the post-`match` statements would keep executing inside the
+  // open transaction. This is the shape B1a would silently open; it stays refused.
+  test("PA reading: `return` inside a STATEMENT-position `match` arm in the block → still E-TRANSACTION-CONTROL-FLOW", () => {
+    const pre = "type M:enum = {\n A\n B\n }\n type E:enum = { Bad }\n";
+    const src = `\${ ${pre} function f(m: M)! -> E { transaction { match m {\n .A :> { return 1 }\n .B :> { log(1) }\n } } } }`;
+    const { ast } = parse(src);
+    const ds = runTransactionChecks(ast);
+    expect(ds.map((d) => d.code)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+    expect(ds[0].message).toContain("nested function");
+    expect(ds[0].message).toContain("`return`");
+  });
+  test("PA reading: `return` inside an EXPRESSION-position `match` arm in the block → still E-TRANSACTION-CONTROL-FLOW", () => {
+    const pre = "type M:enum = {\n A\n B\n }\n type E:enum = { Bad }\n";
+    const src = `\${ ${pre} function f(m: M)! -> E { transaction { let v = match m {\n .A :> { return 1 }\n .B :> 2\n } } } }`;
     expect(codes(src)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+  });
+  test("PA reading: an outward `break` / `continue` inside a `match` arm in the block → still E-TRANSACTION-CONTROL-FLOW", () => {
+    const pre = "type M:enum = {\n A\n B\n }\n type E:enum = { Bad }\n";
+    expect(codes(`\${ ${pre} function f(m: M)! -> E { for (let i = 0; i < 2; i++) { transaction { match m {\n .A :> { break }\n .B :> { log(1) }\n } } } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+    expect(codes(`\${ ${pre} function f(m: M)! -> E { while (m) { transaction { match m {\n .A :> { continue }\n .B :> { log(1) }\n } } } } }`)).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+  });
+  test("PA reading: a break targeting a loop INSIDE the arm is legal (it never crosses the arm boundary)", () => {
+    const pre = "type M:enum = {\n A\n B\n }\n type E:enum = { Bad }\n";
+    expect(codes(`\${ ${pre} function f(m: M)! -> E { transaction { match m {\n .A :> { for (let j = 0; j < 2; j++) { break } }\n .B :> { log(1) }\n } } } }`)).toEqual([]);
   });
   test("S450 fix round: `fail` / `?` in a STATEMENT-match arm in the block → E-TRANSACTION-CONTROL-FLOW (braced, unbraced/text-carried, in a loop)", () => {
     const pre = "type M:enum = {\n A\n B\n }\n type E:enum = { Bad }\n function g()! -> E { fail E::Bad }\n";

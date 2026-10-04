@@ -220,7 +220,10 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
       // one code. Outside a `!` function a `fail` inside the block has nowhere to
       // go, which is the same reason §19.10.4's S451 bullet refuses manual
       // transaction control there (E-ERROR-015).
-      if (!st.fn || !st.fn.canFail) {
+      // `!st.txn`: a NESTED block's placement is already reported on the outer
+      // one — E-ERROR-007 is the diagnostic for the inner block, and repeating
+      // E-ERROR-001 per nesting level is noise, not information.
+      if (!st.txn && (!st.fn || !st.fn.canFail)) {
         const name = st.fn ? st.fn.name : null;
         const where = name !== null
           ? `function '${name}', which is not declared as failable`
