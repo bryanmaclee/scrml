@@ -24,7 +24,12 @@ Branch `spec/s451-ue-forks`, cut from origin/main `25677da72`. SPEC text for the
   the same fix (split by database). The two impl#1-only triggers (own sites on two dbs w/o envelope;
   `watches=` in two scopes) are recorded in the row as implementation limits. Corpus: 0 files declare
   two different databases.
-- [ ] 5 — §8.1.1 confirmed; gap filed
+- [x] 5 — §8.1.1: no sentence carved out a single-database exemption (§44.7.1's module fallback is for
+  files with no `<program>`); added one clarifying sentence + provenance to the E-SQL-004 bullet. Gap
+  `g-impl1-unscoped-sql-single-db-accepted-s451` lists the 11 cases (all compile with no E-SQL-004 on
+  impl#1). Correction to the relayed premise: 10 are logic-outside-`<program>`;
+  `protect/channel-broadcast-strip` has its `?{}` INSIDE a `<program>` without `db=`, beside its
+  `<db src>` — program-move does not migrate it.
 - [ ] §34 rows E-ERROR-011, E-SQL-011; gaps; generated docs; checks
 
 ## Measurements (impl#1 on 25677da72)

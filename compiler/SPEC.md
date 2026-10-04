@@ -8612,6 +8612,18 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
 - If no ancestor is a database scope, the `?{}` block SHALL be a compile error (E-SQL-004:
   `?{}` block has no `db=` / `<db src=>` declaration in any ancestor), except in a
   module-with-db-context (§44.7.1), where the file's top-level `<db src=>` applies.
+  This holds whatever the number of database scopes in the file: a file with ONE database is
+  not exempt. A `?{}` in a `${ … }` at the file top, outside its `<program db=>` element, has
+  no database scope above it and is E-SQL-004 — move the logic inside the `<program>` (§40.8; the
+  `scrml fix` program-move does this mechanically). *(Provenance: ruling:user-voice-scrml.md S451 "5 enforce" —
+  *"§8.1.1 is enforced as written: an unscoped `?{}` is E-SQL-004 whatever the database count.
+  impl#1 (frozen) keeps accepting it → filed divergence; corpus migration measured."* ·
+  supersedes: nothing — this sentence states what the bullet above already says; no SPEC text
+  carved out a single-database exemption (§44.7.1's module-with-db-context fallback is the only
+  exemption, and it applies to a file with no `<program>`). **Direction of change (pa-base §8):
+  inert for the SPEC; newly-rejecting relative to impl#1**, which runs an unscoped `?{}` on the
+  file's only database (`g-impl1-unscoped-sql-single-db-accepted-s451`; 11 conformance cases
+  rely on it, listed there).)*
 
 > **Provenance:** ruling:user-voice-scrml.md S451 "your recs on both" (rec 2 — *"§8.1.1 — the NEAREST enclosing database scope wins: `<program db=>` and `<db src=>` are both database scopes; a `?{}` runs on the closest one above it (the existing normative 'closest ancestor' SHALL, extended to `<db src=>`). The Ownership bullet's 'that database … every `?{}` in a file runs on the file's default database — its first `<db src=>` in document order, else its first `<program db=>`' is amended to defer to this rule. Any impl#1 per-file-handle behaviour that differs is a filed divergence."*) · **supersedes:** the prose "walking up the `<program>` ancestor tree from the `?{}` block's position to find the closest `<program>` with a `db=` attribute"; the bullet "The compiler SHALL resolve the database driver for each `?{}` block by finding the closest ancestor `<program>` element with a `db=` attribute. 'Closest' means fewest nesting levels up the `<program>` tree."; and E-SQL-004's "no `db=` declaration in any ancestor `<program>`". These contradicted the Ownership bullet below (one default database per file); the ruling picks the nearest-scope reading. **Direction of change:** (a) **semantic** for a file with more than one database scope — which database a `?{}` runs on follows its position, not the file's first scope; no acceptance status moves for that shape; (b) **newly-accepting (SPEC text only)** for a `?{}` inside a `<db src=>` whose `<program>` has no `db=` — the old text made it E-SQL-004; impl#1 already compiled it (S451 probe), so no program's observed status moves. impl#1 binds every `?{}` in a file to one per-file handle (S451 probe: a `?{}` in an inner `<program db="./b.db">` inside `<program db="./a.db">` opens `a.db`; a `?{}` in `<program db="./a.db">` beside a `<db src="./b.db">` block opens `b.db`) — filed as `g-impl1-db-resolution-not-nearest-s451`.
 - The compiler SHALL parse the `db=` connection string prefix to determine the driver. An
