@@ -11422,10 +11422,11 @@ ${
     // transitively over the static call graph (a fixed point, so recursion is
     // handled)." Here each function's body is SCANNED once over the binder's
     // facts (BodyScan: its direct writes, the scrml functions it calls or hands
-    // on as values, and the call sites nothing resolves), then the summaries are
-    // closed over those references to a fixed point. What a summary keeps is a
-    // WITNESS — the first call chain down to a write (or to an unresolvable
-    // call) — because the message "SHALL name the call chain down to the write".
+    // on as values, and the call sites nothing resolves), and the EFFECT
+    // SUMMARY (summarize, below — dpa-066) closes the scans over those
+    // references to a fixed point. What a rule reads from it is a WITNESS — the
+    // first call chain down to a write (or to an unresolvable call) — because
+    // the message "SHALL name the call chain down to the write".
     //
     // The rules, as the bootstrap meets them:
     //  1. a direct write in the body — any write the binder classified (an
@@ -11478,10 +11479,9 @@ ${
     type FnRef:struct = { sym: int, name: string, span: ASpan, file: string, asValue: boolean }
     type BodyScan:struct = { writes: WSite[], refs: FnRef[], unproven: USite[] }
     // The first chain (display labels — `f()` — outermost first) down to a
-    // write / an unresolvable call.
+    // write / an unresolvable call: what the summary answers (writeWitness).
     type Witness:struct = { chain: string[], site: WSite }
     type UWitness:struct = { chain: string[], site: USite }
-    type FnSummary:struct = { sym: int, name: string, scan: BodyScan, w: Witness | not, u: UWitness | not }
     type WCx:struct = { t: Tables, file: string }
 
     fn emptyScan() -> BodyScan { return { writes: [], refs: [], unproven: [] } }
@@ -12028,50 +12028,9 @@ ${
         return ""
     }
 
-    // ---- the summaries: one scan per function, closed over references ---------
-    // Plus one per user declaration (its CONSTRUCTION) and one per formula (a
-    // field computed on its read) — see the banner.
-    fn fnSummaries(g: Globals, t: Tables) -> FnSummary[] {
-        let out: FnSummary[] = []
-        for (const fs of g.fns) {
-            const label: string = fs.info.name + "()"
-            const scan: BodyScan = scanBlock({ t: t, file: fs.info.file }, fs.f.body, emptyScan())
-            out = out.concat([{ sym: fs.info.sym.id, name: label, scan: scan, w: directWitness(label, scan), u: directUWitness(label, scan) }])
-        }
-        for (const ds of g.decls) {
-            if (!ds.isProgram) {
-                const label: string = constructionLabel(ds.info.sym.hint)
-                const scan: BodyScan = constructionScan(t, ds)
-                out = out.concat([{ sym: ds.info.sym.id, name: label, scan: scan, w: directWitness(label, scan), u: directUWitness(label, scan) }])
-            }
-            // HIGH-1: one summary per formula — a field computed on its read
-            for (const fi of ds.info.fields) {
-                const w: Sym | not = fi.wcap
-                if (w is not) {
-                    const flabel: string = formulaLabel(t, fi)
-                    const fscan: BodyScan = scanValue({ t: t, file: ds.file }, fi.init, emptyScan())
-                    out = out.concat([{ sym: fi.sym.id, name: flabel, scan: fscan, w: directWitness(flabel, fscan), u: directUWitness(flabel, fscan) }])
-                }
-            }
-        }
-        // the fixed point: a pass adds a witness to a function whose callee has
-        // one; a witness, once found, is kept (each function gains at most two),
-        // so it ends within (function count + 2) passes
-        let changed = true
-        let pass = 0
-        while (changed && pass < out.length + 2) {
-            changed = false
-            let next: FnSummary[] = []
-            for (const s of out) {
-                const r: FnSummary = propagated(s, out)
-                if (gainedWitness(s, r)) changed = true
-                next = next.concat([r])
-            }
-            out = next
-            pass = pass + 1
-        }
-        return out
-    }
+    // ---- the scans the summary closes: one per function (scanBlock), one per
+    // user declaration (its CONSTRUCTION) and one per formula (a field computed
+    // on its read) — see the banner; summarize builds them.
 
     // What constructing a declaration's instance runs: every field initializer
     // (the declared defaults — a use-site value is evaluated where the use
@@ -12128,62 +12087,26 @@ ${
         }
     }
 
-    fn directWitness(name: string, scan: BodyScan) -> Witness | not {
-        if (scan.writes.length == 0) return not
-        return { chain: [name], site: scan.writes[0] }
+    // ---- the queries: the first write / unresolvable call callable `i` reaches
+    // (its first atom in the summary's `writes` / `writesOpen`; dpa-066 M1).
+    fn writeWitness(s: Summary, i: int) -> Witness | not {
+        const a: FxAtom | not = witnessOf(s.writes[i])
+        if (a is not) return not
+        return { chain: fxChain(s, s.writes, i, a), site: s.nodes[a.root].f.scan.writes[a.pos] }
     }
 
-    fn directUWitness(name: string, scan: BodyScan) -> UWitness | not {
-        if (scan.unproven.length == 0) return not
-        return { chain: [name], site: scan.unproven[0] }
-    }
-
-    // `s` with a witness taken from the first callee (or function value) that has one.
-    fn propagated(s: FnSummary, all: FnSummary[]) -> FnSummary {
-        let w: Witness | not = s.w
-        let u: UWitness | not = s.u
-        for (const r of s.scan.refs) {
-            const c: FnSummary | not = summaryOf(all, r.sym)
-            if (c is some) {
-                const cw: Witness | not = c.w
-                const cu: UWitness | not = c.u
-                if (w is not && cw is some) w = { chain: [s.name].concat(cw.chain), site: cw.site }
-                if (u is not && cu is some) u = { chain: [s.name].concat(cu.chain), site: cu.site }
-            }
-        }
-        return { sym: s.sym, name: s.name, scan: s.scan, w: w, u: u }
-    }
-
-    fn gainedWitness(before: FnSummary, after: FnSummary) -> boolean {
-        const bw: Witness | not = before.w
-        const aw: Witness | not = after.w
-        const bu: UWitness | not = before.u
-        const au: UWitness | not = after.u
-        return (bw is not && aw is some) || (bu is not && au is some)
-    }
-
-    fn summaryOf(all: FnSummary[], sym: int) -> FnSummary | not {
-        for (const s of all) {
-            if (s.sym == sym) return s
-        }
-        return not
+    fn openWitness(s: Summary, i: int) -> UWitness | not {
+        const a: FxAtom | not = witnessOf(s.writesOpen[i])
+        if (a is not) return not
+        return { chain: fxChain(s, s.writesOpen, i, a), site: s.nodes[a.root].f.scan.unproven[a.pos] }
     }
 
     // ---- the pass: every accepted effect's body against the summaries ---------
     // (and every value position — §6.15, valueDiags)
-    fn effectPass(g: Globals, t: Tables, effects: EffectSrc[]) -> Diag[] {
-        // the value positions are scanned first: the summaries are built only
-        // when something refers to a function (most initializers are literals)
+    fn effectPass(g: Globals, t: Tables, effects: EffectSrc[], sum: Summary) -> Diag[] {
         const ps: ValuePos[] = valuePositions(g, t)
         let scans: BodyScan[] = []
-        let needSums: boolean = effects.length > 0
-        for (const p of ps) {
-            const ps1: BodyScan = scanValue({ t: t, file: p.file }, p.v, emptyScan())
-            if (ps1.refs.length > 0) needSums = true
-            scans = scans.concat([ps1])
-        }
-        let sums: FnSummary[] = []
-        if (needSums) sums = fnSummaries(g, t)
+        for (const p of ps) { scans = scans.concat([scanValue({ t: t, file: p.file }, p.v, emptyScan())]) }
         // The ROOTS: each value position's own writes / write chains (not
         // through another value position). They come first — each is the cause
         // of whatever a reader of that value would report. When there is a
@@ -12195,8 +12118,8 @@ ${
         let echoes: Diag[] = []
         let i: int = 0
         for (const p of ps) {
-            roots = roots.concat(valueDiags(p, scans[i], sums, true))
-            echoes = echoes.concat(valueDiags(p, scans[i], sums, false))
+            roots = roots.concat(valueDiags(p, scans[i], sum, true))
+            echoes = echoes.concat(valueDiags(p, scans[i], sum, false))
             i = i + 1
         }
         const quiet: boolean = roots.length > 0
@@ -12205,7 +12128,7 @@ ${
         for (const es of effects) {
             const scan: BodyScan = scanBlock({ t: t, file: es.file }, es.w.body, emptyScan())
             for (const w of scan.writes) { out = out.concat([writesDirect(es.w, w)]) }
-            for (const r of scan.refs) { out = out.concat(refDiags(es.w, r, summaryOf(sums, r.sym), quiet)) }
+            for (const r of scan.refs) { out = out.concat(refDiags(es.w, r, sum, quiet)) }
             for (const u of scan.unproven) { out = out.concat([unprovenDirect(u)]) }
         }
         return out
@@ -12225,15 +12148,16 @@ ${
         return l.indexOf("formula of ") == 0 || l.indexOf("construction of ") == 0
     }
 
-    fn refDiags(w: AEffect, r: FnRef, s: FnSummary | not, quiet: boolean) -> Diag[] {
+    fn refDiags(w: AEffect, r: FnRef, s: Summary, quiet: boolean) -> Diag[] {
         // fix round (LOW a): a reference with no summary is unresolved — fail closed
-        if (s is not) return [newDiag("E-EFFECT-WRITE-UNPROVEN", "this effect reaches `" + r.name + "`, which has no write summary — the compiler cannot prove it writes no reactive cell, and the rule fails closed (§6.7.4 rule 4)", r.file, r.span)]
-        const sw: Witness | not = s.w
+        const i: int = nodeIdx(s.nodes, r.sym)
+        if (i < 0) return [newDiag("E-EFFECT-WRITE-UNPROVEN", "this effect reaches `" + r.name + "`, which has no write summary — the compiler cannot prove it writes no reactive cell, and the rule fails closed (§6.7.4 rule 4)", r.file, r.span)]
+        const sw: Witness | not = writeWitness(s, i)
         if (sw is some) {
             if (quiet && throughValue(r, sw.chain)) return []
             return [writesThrough(w, r, sw)]
         }
-        const su: UWitness | not = s.u
+        const su: UWitness | not = openWitness(s, i)
         if (su is some) {
             if (quiet && throughValue(r, su.chain)) return []
             return [unprovenThrough(r, su)]
@@ -12459,17 +12383,18 @@ ${
     // Every write / write chain / unresolvable call a position's scan reaches.
     // `rootsOnly`: leave out a chain through another value position (a
     // formula / a construction) — its echo (see effectPass).
-    fn valueDiags(p: ValuePos, scan: BodyScan, sums: FnSummary[], rootsOnly: boolean) -> Diag[] {
+    fn valueDiags(p: ValuePos, scan: BodyScan, sum: Summary, rootsOnly: boolean) -> Diag[] {
         let out: Diag[] = []
         for (const w of scan.writes) { out = out.concat([valueWrites(p, "writes `" + w.cell + "`", w.span, w.file)]) }
-        for (const r of scan.refs) { out = out.concat(valueRefDiags(p, r, summaryOf(sums, r.sym), rootsOnly)) }
+        for (const r of scan.refs) { out = out.concat(valueRefDiags(p, r, sum, rootsOnly)) }
         for (const u of scan.unproven) { out = out.concat([valueUnproven(p, u.what, u.span, u.file)]) }
         return out
     }
 
-    fn valueRefDiags(p: ValuePos, r: FnRef, s: FnSummary | not, rootsOnly: boolean) -> Diag[] {
-        if (s is not) return [valueUnproven(p, "it reaches `" + r.name + "`, which has no write summary", r.span, r.file)]
-        const sw: Witness | not = s.w
+    fn valueRefDiags(p: ValuePos, r: FnRef, s: Summary, rootsOnly: boolean) -> Diag[] {
+        const i: int = nodeIdx(s.nodes, r.sym)
+        if (i < 0) return [valueUnproven(p, "it reaches `" + r.name + "`, which has no write summary", r.span, r.file)]
+        const sw: Witness | not = writeWitness(s, i)
         if (sw is some) {
             if (rootsOnly && throughValue(r, sw.chain)) return []
             const chain: string = chainText(sw.chain) + " → " + sw.site.cell
@@ -12478,7 +12403,7 @@ ${
             if (isValueLabel(r.name)) how = "reads a value whose evaluation writes `" + sw.site.cell + "`: `" + chain + "`"
             return [valueWrites(p, how, r.span, r.file)]
         }
-        const su: UWitness | not = s.u
+        const su: UWitness | not = openWitness(s, i)
         if (su is some) {
             if (rootsOnly && throughValue(r, su.chain)) return []
             return [valueUnproven(p, "it reaches a call the compiler cannot resolve, through `" + chainText(su.chain) + "`: " + su.site.what, r.span, r.file)]
@@ -14647,7 +14572,7 @@ ${
     // summary's, over one program — every disagreement as a line ([] — none).
     // The differential test (slice-m4/effects-shadow.test.js) runs it over
     // every slice program and every conformance-counter case. Each migration
-    // step deletes the comparisons of the walkers it retires.
+    // step deletes the comparisons of the walkers it retires (M1: W3).
     // =========================================================================
     export fn effectsShadow(files: FileAst[], entry: string) -> string[] {
         const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [] }
@@ -14670,16 +14595,6 @@ ${
                                 novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts() }
         const sum: Summary = summarize(ra.g, bound)
         let out: string[] = []
-        // W3 — the write summaries (effectPass, valueDiags)
-        for (const ws of fnSummaries(ra.g, bound)) {
-            const i: int = nodeIdx(sum.nodes, ws.sym)
-            if (i < 0) {
-                out = out.concat(["W3 " + ws.name + ": no callable in the summary"])
-            } else {
-                out = out.concat(shadowLine("W3 writes " + ws.name, walkerW(ws.w), summaryW(sum, i)))
-                out = out.concat(shadowLine("W3 open " + ws.name, walkerU(ws.u), summaryU(sum, sum.writesOpen, i)))
-            }
-        }
         // W4-W7 — placement and its three reaches (placePass)
         const cx: PlaceCx = { t: bound, g: ra.g }
         let all: FnFacts[] = []
@@ -14726,39 +14641,6 @@ ${
             .Server :> "server"
             .Split :> "split"
         }
-    }
-
-    fn fixText2(f: FixShape) -> string {
-        return match f {
-            .ResetFix :> "reset"
-            .RequestFix :> "request"
-            .OtherFix :> "other"
-        }
-    }
-
-    fn walkerW(w: Witness | not) -> string {
-        if (w is not) return "-"
-        return w.chain.join(" → ") + " ⇒ " + w.site.cell + " @" + w.site.file + ":" + w.site.span.start + " " + fixText2(w.site.fix)
-    }
-
-    fn summaryW(s: Summary, i: int) -> string {
-        const a: FxAtom | not = witnessOf(s.writes[i])
-        if (a is not) return "-"
-        const w: WSite = s.nodes[a.root].f.scan.writes[a.pos]
-        return fxChain(s, s.writes, i, a).join(" → ") + " ⇒ " + w.cell + " @" + w.file + ":" + w.span.start + " " + fixText2(w.fix)
-    }
-
-    fn walkerU(u: UWitness | not) -> string {
-        if (u is not) return "-"
-        return u.chain.join(" → ") + " ⇒ " + u.site.what + " @" + u.site.file + ":" + u.site.span.start
-    }
-
-    fn summaryU(s: Summary, dim: FxAtom[][], i: int) -> string {
-        if (i < 0) return "-"
-        const a: FxAtom | not = witnessOf(dim[i])
-        if (a is not) return "-"
-        const u: USite = s.nodes[a.root].f.scan.unproven[a.pos]
-        return fxChain(s, dim, i, a).join(" → ") + " ⇒ " + u.what + " @" + u.file + ":" + u.span.start
     }
 
     fn walkerReach(r: Reach | not) -> string {
@@ -14814,8 +14696,10 @@ ${
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
                                 novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts() }
         const scopeDiags: Diag[] = checkScopes(files, bound)
+        // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables
+        const sum: Summary = summarize(ra.g, bound)
         // s449: the no-write rule over every accepted effect (§6.7.4)
-        const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects)
+        const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects, sum)
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound)
         const typed: RTyping = typeProgram(files, bound)

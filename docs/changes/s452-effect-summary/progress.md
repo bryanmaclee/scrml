@@ -39,3 +39,19 @@
 - Slices: m1 99/0, m2 462/0, m3 60/0, m4 1105/0, codec 92/0, m1 lowered 99/0; counter PASS 120 /
   FAIL 48 / UNSUPPORTED 622 (= base); severity --check current; counter doc --check current; lint 0.
 - Lines: +502 analyze (0 deleted), +237 effects.scrml, +27/-1 harness, test/tool +257.
+
+## M1 — writes as queries (W3)
+
+- Replaced: W3's own fixpoint — `fnSummaries` (the per-pass witness propagation), `propagated`,
+  `gainedWitness`, `summaryOf`, `directWitness`, `directUWitness`, the `FnSummary` type, and
+  effectPass's lazy `needSums` build — by two queries over the summary: `writeWitness(sum, i)` /
+  `openWitness(sum, i)` (the first atom of `writes` / `writesOpen`, its chain rebuilt from the
+  back-pointers). `refDiags` / `valueRefDiags` / `valueDiags` / `effectPass` read the summary;
+  the "no write summary" fail-closed branch is now "no callable in the summary" (nodeIdx < 0).
+  `scan*` / `constructionScan` / `scanValue` stay — they ARE the direct-fact extractor.
+  analyze() computes the summary once, after the scope pass, before effectPass.
+- Shadow: W3 comparisons deleted (the walker is gone).
+- Differential: 2566 inputs, diagnostics IDENTICAL to base; shadow lines = the 1 G7 line (as M0).
+- Slices all green (m1 99, m2 462, m3 60, m4 1105, codec 92, m1 lowered 99); counter PASS 120 /
+  FAIL 48 / UNSUPPORTED 622 (= base); lint 0.
+- Lines (analyze.scrml): +40 / −156.
