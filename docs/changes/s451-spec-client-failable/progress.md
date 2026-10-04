@@ -13,6 +13,21 @@ Branch `spec/s451-client-calls-failable`, cut from origin/main `dbb671c2d`. SPEC
   §13.7 example (the unhandled `onclick={ @users = userCount() }` line); §13.3 example; §12.3 pointer; §6.7.7 bullet;
   §19.13 + §34 E-ERROR-002 and W-CPS-NEEDS-FAILABLE rows; Appendix A row. Gap
   `g-impl1-client-server-call-not-failable-s451` (status=open — a carried case needs the U1b error shape).
+- [x] Ruling 2 — three forms are compile errors (all Nominal on impl#1, verified by compiling on dbb671c2d):
+  (a) **E-MATCH-BARE-BINDER** (new; §18.2 bullet + provenance, §18.15 row, §19.4.3 struck "further unruled form",
+  §19.4.4 bullet, §34 row) — 4 `| err :>` arms in examples/09 (2, binding USED), 16, 29; 0 in a `match`; impl#1 accepts
+  the `!{}` form and fails the `match` form closed with E-CODEGEN-INVALID-LOGIC. Gap `g-impl1-bare-binder-arm-accepted-s451`.
+  (b) **E-ERROR-014** (new; §19.4.3 paragraph + example, §19.4.4 bullet, §19.13 + §34 rows) — 5 samples/compilation-tests
+  files (the 6th, error-004-in-logic, is in logic and is E-ERROR-013); impl#1 drops the block silently. Gap
+  `g-impl1-detached-handler-in-markup-s451`. Also: samples/login.scrml's E-ERROR-013 "depends on §19.9.5 reach" note
+  resolved by ruling 1.
+  (c) **E-ERROR-015** (new; §19.10.4 bullet + provenance, §19.10.5 + §8.9.2 W-BATCH-001 bullets narrowed to `!`,
+  §8.6 rows, §19.13 + §34 rows, §34 W-BATCH-001 row narrowed). W-BATCH-001 stays for a `!` function (the suppression
+  is real there); outside `!` there is no envelope to suppress, so E-ERROR-015 is the one diagnostic. Corpus: 4
+  statements in 2 conformance cases — implicit-tx-explicit-begin (in `!`, unchanged) and sql/batch-warn-info (non-`!`,
+  newly E-ERROR-015; its W-BATCH-001 pin migrates). Gap `g-impl1-manual-tx-outside-failable-s451`.
+  Readings flagged in the SPEC: every transaction-control statement (not only BEGIN); "non-`!` function" includes a
+  body top.
 
 ## Measurement (impl#1 on dbb671c2d)
 
