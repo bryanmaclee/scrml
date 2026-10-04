@@ -468,9 +468,14 @@ ${
             }
             const astart: int = cur(t).start
             const pfrom: int = t.i
+            const dfrom: int = t.diags.length
             const rp: RPat = parsePattern(t, guard && piped)
             t = rp.tp
-            if (guard && piped) t = pipeLint(t, pipe, pfrom, rp.pat)
+            // r2: the lint names a rewrite, so only for an arm that PARSED — a
+            // non-empty pattern with no diagnostic of its own, followed by its
+            // separator (not an unsupported alternation, not error recovery)
+            const patOk: boolean = t.i > pfrom && t.diags.length == dfrom && sepAt(t, 0)
+            if (guard && piped && patOk) t = pipeLint(t, pipe, pfrom, rp.pat)
             let legacy = false
             const c: PTok = cur(t)
             const g: PTok = peekAt(t, 1)

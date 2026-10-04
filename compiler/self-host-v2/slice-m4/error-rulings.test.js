@@ -575,6 +575,23 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
     expect(mt).not.toContain("W-ARM-PIPE-LEGACY");
     expect(codes(fnH(`            .NotFound(m) | .Timeout :> @n = 1`))).not.toContain("W-ARM-PIPE-LEGACY");
   });
+
+  // r2 (review LOW): the lint names a rewrite, so it fires only for an arm that PARSED — never
+  // during error recovery, never with an empty or truncated pattern. The errors are unchanged.
+  test("r2: no lint during recovery — a bitwise `|` in a pipe-less arm's body (empty pattern)", () => {
+    const src = fnH(`            .NotFound(m) :> @n = @n | 2\n            _ :> @n = 2`);
+    expect(codes(src)).toEqual(["E-PARSE-ARM", "E-PARSE-ARM", "E-SYNTAX-010"]);
+    expect(wMsgs(src)).toEqual([]);
+  });
+
+  test("r2: no lint for a `|`-led unsupported alternation (`| .A | .B :>`) — no suggestion that drops `.B`", () => {
+    const piped = fnH(`            | .NotFound(m) | .Timeout :> @n = 1\n            | _ :> @n = 2`);
+    const plain = fnH(`            .NotFound(m) | .Timeout :> @n = 1\n            _ :> @n = 2`);
+    expect(codes(plain)).toEqual(["E-PARSE-ARM"]);
+    // only the well-formed `| _ :>` arm lints; the alternation keeps its one E-PARSE-ARM
+    expect(codes(piped)).toEqual(["E-PARSE-ARM", "W-ARM-PIPE-LEGACY"]);
+    expect(wMsgs(piped)).toEqual([`Arm '| _ :>' uses the deprecated leading '|'. A pattern arm is a match arm (§18.2): write '_ :>'. Run 'scrml fix' to rewrite every site (§19.4.5).`]);
+  });
 });
 
 describe("fix round r2 — E-ERROR-015 statement list, LOW-3 arm order, DB-LOW-1 redaction, NIT", () => {
