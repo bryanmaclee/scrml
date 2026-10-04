@@ -42,7 +42,7 @@ ${
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo,
              SqlInfo, HandledFact, FailFact, Retag,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
-             failFact, builtinFile } from "./analyze.scrml"
+             failFact, builtinFile, blockReference } from "./analyze.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
     // reported an ERROR (an `E-` code — §34: severity is "carried by the `E-`
@@ -1276,12 +1276,38 @@ ${
     // A handler value is one statement (`f()`, `(@x = …)`) or a braced block.
     fn handlerBlock(c: LC, v: AAttrValue) -> Block {
         return match v {
-            .Bare(e: e) :> block(evalStmt(c, e))
-            .Paren(e: e) :> block(evalStmt(c, e))
-            .Braced(b: b) :> lowerBlock(c, b)
+            .Bare(e: e) :> block(handlerStmt(c, e))
+            .Paren(e: e) :> block(handlerStmt(c, e))
+            .Braced(b: b) :> bracedHandlerBlock(c, b)
             .Quoted(v: s) :> block([])
             .NoValue :> block([])
         }
+    }
+
+    // s451 (Ue, review HIGH-2): an event-handler REFERENCE `onclick=f` /
+    // `onclick={ f }` CALLS f when the event fires (analyze admitted it: a
+    // parameterless function that cannot fail). Before, the name was lowered
+    // as a value — `null` — and the handler did nothing.
+    fn handlerStmt(c: LC, e: AExpr) -> Stmt[] {
+        const f: NameFact | not = nameFact(c.t.names, e.nid)
+        const s: Sym | not = match f {
+            .NFn(sym: x) :> x
+            .NLocal(sym: x) :> not
+            .NField(decl: d) :> not
+            .NInst(decl: d) :> not
+            .NStruct(owner: o) :> not
+            .NLength :> not
+            .NSurface(of: x) :> not
+            not :> not
+        }
+        if (s is some) return [Stmt.Eval(Expr.Call(s, []))]
+        return evalStmt(c, e)
+    }
+
+    fn bracedHandlerBlock(c: LC, b: ABlock) -> Block {
+        const r: AExpr | not = blockReference(b)
+        if (r is some) return block(handlerStmt(c, r))
+        return lowerBlock(c, b)
     }
 
     // L6 / O60: a use's attributes are construction values, IN FIELD-INDEX ORDER

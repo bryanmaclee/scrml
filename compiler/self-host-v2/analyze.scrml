@@ -3222,9 +3222,11 @@ ${
     // handling form's subject (its failable is handled there); `whole`: the
     // node that is a statement's WHOLE value — the one place a handling form
     // stands in this slice (nested ones are Ue2's).
-    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int }
+    // `fnRef` (review HIGH-2): the one node allowed to NAME a function without
+    // calling it here — a direct call's callee, or an event-handler reference.
+    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int }
 
-    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1 } }
+    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1 } }
 
     fn withFx(env: Env, fx: FailCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
@@ -3233,17 +3235,22 @@ ${
 
     fn withSubject(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef })
     }
 
     fn withWhole(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef })
+    }
+
+    fn withFnRef(env: Env, nid: int) -> Env {
+        const f: FailCtx = env.fx
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid })
     }
 
     fn withDeferFx(env: Env) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef })
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
@@ -3466,7 +3473,18 @@ ${
             }
         }
         const f: FnInfo | not = fnNamed(env.g, name)
-        if (f is some) return plain(not, addName(st, e.nid, NameFact.NFn(f.sym)))
+        if (f is some) {
+            const st2: AS = addName(st, e.nid, NameFact.NFn(f.sym))
+            if (env.fx.fnRef == e.nid) return plain(not, st2)
+            // s451 (Ue, review HIGH-2): a function named without being called —
+            // an alias, a returned / passed / stored function. Core has no
+            // function value (only a Lambda as a SeqCall argument), so it was
+            // lowered as `null`. A `!` function there is a call left unhandled
+            // (§19.4.3 / §19.4.4: an unhandled `!` call SHALL be E-ERROR-002);
+            // any other function value is refused.
+            if (f.failable) return plain(not, addDiag(st2, env.file, e.span, "E-ERROR-002", "the failable function '" + f.name + "' is used as a value — whatever calls it later would discard its error. Call it here and handle the result (`" + f.name + "(…) !{ … }`, `match`, `?`) (§19.4.3)"))
+            return plain(not, addDiag(st2, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "` names a function without calling it (an alias, a returned, passed or stored function) — function values arrive with a later \"function values\" slice; call it directly: `" + name + "(…)`"))
+        }
         const pi: DeclInfo | not = programInfo(env)
         if (pi is some) {
             if (fieldIndex(pi, name) >= 0) {
@@ -3805,7 +3823,7 @@ ${
             }
             return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "only calls of a named function, " + dateNowText() + ", and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap", st0)
         }
-        const rc: RX = resolveExpr(env, callee, not, st0)
+        const rc: RX = resolveExpr(withFnRef(env, callee.nid), callee, not, st0)
         const st: AS = resolveExprs(env, args, not, rc.st)
         const cf: FnInfo | not = calledFn(env, nameFactIn(st, callee.nid))
         if (cf is some) {
@@ -5774,13 +5792,45 @@ ${
 
     // A failable function passed as an event-handler REFERENCE (S441: "SHALL
     // be E-ERROR-002, exactly like `onclick=risky()`").
-    fn handlerReference(env: Env, v: AAttrValue, st: AS) -> AS {
-        const e: AExpr | not = valueExpr(v)
-        if (e is not) return st
+    // `onclick={ risky }` is a reference too (S441: "the bare `onclick=risky`,
+    // `onclick=${risky}`, or `onclick={ risky }`").
+    fn bracedHandler(env: Env, b: ABlock, st: AS) -> AS {
+        const r: AExpr | not = blockReference(b)
+        if (r is not) return resolveBlock(env, b, st)
+        return handlerReference(env, r, resolveBlock(withFnRef(env, r.nid), b, st))
+    }
+
+    // The one name a braced handler body consists of, else not.
+    export fn blockReference(b: ABlock) -> AExpr | not {
+        if (b.stmts.length != 1) return not
+        const k: AStmtK = b.stmts[0].k
+        const e: AExpr | not = match k {
+            .Eval(e: x) :> x
+            .Local(name: n) :> not
+            .Return(e: x) :> not
+            .If(cond: c) :> not
+            .Given(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: d) :> not
+            .Fail(f: x) :> not
+        }
+        if (e is not) return not
+        if (exprName(e) == "") return not
+        return e
+    }
+
+    // An event-handler REFERENCE (`onclick=f`): the event calls `f` (s451 Ue,
+    // review HIGH-2 — before, it was lowered as `null` and called nothing).
+    // A `!` function there is E-ERROR-002 (S441); a function with parameters
+    // would receive the event, which the bootstrap does not model — refused.
+    fn handlerReference(env: Env, e: AExpr, st: AS) -> AS {
         if (exprName(e) == "") return st
         const f: FnInfo | not = calledFn(env, nameFactIn(st, e.nid))
         if (f is not) return st
-        if (!f.failable) return st
+        if (!f.failable) {
+            if (f.arity == 0) return st
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "an event-handler reference to `" + f.name + "`, which takes parameters — the event would be its argument, which the bootstrap does not model; write the call: `{ " + f.name + "(…) }`")
+        }
         return addDiag(st, env.file, e.span, "E-ERROR-002", "Failable function '" + f.name + "' is passed as an event-handler reference, so the event would call it and discard its error. Call it in a handler that handles the result (e.g. '{ " + f.name + "() !{ | .Variant :> … } }'), or wire a function that handles it (§19.4.3, S441)")
     }
 
@@ -5921,6 +5971,16 @@ ${
         for (const a of arms) {
             const ra: RArm = resolveArm(env, a, err, vs, isMatch, stmt, st)
             st = ra.st
+            // review MED-1 / LOW-1 — §18.8.1: "Duplicate variant arms (two arms for
+            // the same variant) SHALL be a compile error (E-TYPE-023 …). The second
+            // arm is unreachable." (`!{}` arms follow the match rule, §19 alias
+            // note.) An arm AFTER a wildcard is unreachable too; the SPEC names no
+            // code for that, so it is refused rather than silently dead.
+            if (wild) {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "this arm follows a wildcard (`_` / `else`), which already took every remaining case — it can never run (the SPEC names no code for an arm after a wildcard: refused); move the wildcard last")
+            } else if ((ra.idx >= 0 && covered.indexOf(ra.idx) >= 0) || (ra.idx == -2 && okSeen)) {
+                st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same variant — the first arm already takes it, so this one is unreachable (§18.8.1 E-TYPE-023: duplicate match arm)")
+            }
             if (ra.idx == -1) wild = true
             if (ra.idx == -2) okSeen = true
             if (ra.idx >= 0) covered = covered.concat([ra.idx])
@@ -6955,9 +7015,9 @@ ${
     // A handler value is a statement (or a block of them).
     fn resolveHandler(env: Env, v: AAttrValue, st: AS) -> AS {
         return match v {
-            .Bare(e: e) :> handlerReference(env, v, resolveStmtExpr(env, e, st))
-            .Paren(e: e) :> handlerReference(env, v, resolveStmtExpr(env, e, st))
-            .Braced(b: b) :> resolveBlock(env, b, st)
+            .Bare(e: e) :> handlerReference(env, e, resolveStmtExpr(withFnRef(env, e.nid), e, st))
+            .Paren(e: e) :> handlerReference(env, e, resolveStmtExpr(withFnRef(env, e.nid), e, st))
+            .Braced(b: b) :> bracedHandler(env, b, st)
             .Quoted(v: s) :> st
             .NoValue :> st
         }
@@ -7441,7 +7501,7 @@ ${
             if (fs.info.file == g.entry) hs = progHandles
             let host: HostCtx = HostCtx.HostOk
             if (fs.info.pure) host = HostCtx.HostPure
-            const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1 }
+            const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1 }
             let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx }
             const fte: TypeEnv = { stubs: g.te.stubs, declNames: g.te.declNames, declSyms: g.te.declSyms, file: fs.info.file }
             for (const p of fs.f.params) {

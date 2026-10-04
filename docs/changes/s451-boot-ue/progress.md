@@ -24,3 +24,17 @@
   unobservable" (the right code fired; the bootstrap Diag carries no §34 severity — a harness limit, 24 pre-existing
   FAILs are the same), 2 E-SCOPE-001 for `log` (no stdlib: error/handler-exhaustive-neg, handler-wildcard-escape),
   1 E-OPERATOR-OPERAND-TYPE for `"saved " + amount` (the S440 operand rule: defer/fail-path).
+- 2026-10-03 S239 review fix round (review of 114e6ef80 = FIX). Red first: 9 new tests in error-model.test.js
+  ("S239 review fix round"), all RED on 114e6ef80's sources, GREEN after.
+  - HIGH-1: payload enum value is `{ variant, data: [positional] }` (print variantTest / variantBinds /
+    variantValueJs) — no field name is ever a key beside the discriminant (`tag` / `variant` / `data` tested at
+    runtime). Runtime ValidationError records keep their own `{ tag }` (runtime-internal, no Core pattern reads them).
+  - HIGH-2: a function named without a call (alias, return, argument, stored) is E-BOOTSTRAP-UNSUPPORTED (a
+    "function values" slice), a `!` one E-ERROR-002 (analyze resolveName, FailCtx.fnRef = the only node allowed to
+    name a function: a call's callee or a handler reference). Event-handler references (`onclick=f`, `onclick={ f }`)
+    were ALSO lowered as `null` (verified by execution: the handler did nothing) — now they call `f` (parameterless,
+    non-failable; with parameters refused). Core has no function-value Expr; lower's `readName` NFn `missing()` is
+    now unreachable behind the binder. effect.test.js / value-positions.test.js function-value tests now also see
+    the refusal (asserted, then filtered).
+  - MED-1: E-TYPE-023 for a second arm of one variant / a second `.Ok` (§18.8.1). LOW-1: an arm after a wildcard is
+    refused (no SPEC code). LOW-2: `.V(a) :> fail E.V(a)` parses as a one-statement `fail` arm.

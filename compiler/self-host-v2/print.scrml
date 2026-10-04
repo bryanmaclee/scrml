@@ -450,9 +450,20 @@ ${
         }
     }
 
+    // s451 (Ue, review HIGH-1) — THE ENUM VALUE SHAPE. A nullary variant is its
+    // name (a string); a payload variant is `{ variant: "V", data: [v0, v1, …] }`
+    // — the payload POSITIONAL, in declared field order. No field name ever
+    // becomes a key next to the discriminant (a field named `tag`, `variant`,
+    // `data` or `__proto__` cannot overwrite or reroute anything): the shape
+    // holds by construction. The R8 wire form (§19.9.1 / §57.8) is
+    // `{"variant": "V", "data": {<field>: …}}` — the same discriminant key; the
+    // codec maps `data` index i ↔ declared field i (U1c, when payload enums
+    // cross the wire). (The runtime's own ValidationError records — §55, read
+    // only by the runtime — keep their `{ tag, … }` shape; no Core pattern
+    // reads them.)
     fn variantTest(ctx: Ctx, es: Sym, idx: int, on: JsExpr) -> JsExpr {
         const tag: JsExpr = jstr(variantTag(ctx, es, idx))
-        if (variantHasFields(ctx, es, idx)) return JsExpr.JBin(JsOp.StrictEq, jmember(on, "tag"), tag)
+        if (variantHasFields(ctx, es, idx)) return JsExpr.JBin(JsOp.StrictEq, jmember(on, "variant"), tag)
         return JsExpr.JBin(JsOp.StrictEq, on, tag)
     }
 
@@ -468,7 +479,7 @@ ${
         let out: JsStmt[] = []
         let j = 0
         for (const b of binds) {
-            out = out.concat([JsStmt.SConst(symName(ctx, b), jmember(on, variantFieldName(ctx, es, idx, j)))])
+            out = out.concat([JsStmt.SConst(symName(ctx, b), JsExpr.JIndex(jmember(on, "data"), JsExpr.JAnnot(jnum(j), variantFieldName(ctx, es, idx, j))))])
             j = j + 1
         }
         return out
@@ -601,18 +612,18 @@ ${
         return [JsStmt.SAssign(jid(symName(ctx, result)), exprJs(ctx, v))]
     }
 
-    // An enum value as the runtime holds it: a nullary variant is its tag; a
-    // payload variant `{ tag, <field>: value, … }` (what patTest / patBinds read).
+    // An enum value as the runtime holds it (THE ENUM VALUE SHAPE, above):
+    // a nullary variant is its name; a payload variant `{ variant, data: […] }`.
     fn variantValueJs(ctx: Ctx, es: Sym, idx: int, args: Expr[]) -> JsExpr {
         const tag: JsExpr = jstr(variantTag(ctx, es, idx))
         if (!variantHasFields(ctx, es, idx)) return tag
-        let props: JsProp[] = [{ key: "tag", value: tag }]
+        let vals: JsExpr[] = []
         let j = 0
         for (const a of args) {
-            props = props.concat([{ key: variantFieldName(ctx, es, idx, j), value: exprJs(ctx, a) }])
+            vals = vals.concat([JsExpr.JAnnot(exprJs(ctx, a), variantFieldName(ctx, es, idx, j))])
             j = j + 1
         }
-        return JsExpr.JObject(props)
+        return JsExpr.JObject([{ key: "variant", value: tag }, { key: "data", value: JsExpr.JArray(vals) }])
     }
 
     // s449 — `rt.suspend(task$, <on>, (x) => { <then> })`: the CPS split

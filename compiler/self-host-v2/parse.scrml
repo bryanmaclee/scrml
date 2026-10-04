@@ -542,6 +542,16 @@ ${
         }
         const end: int = armEnd(tp)
         const sub: TP = { toks: tp.toks.slice(0, end).concat([endTokAt(tp.toks[end])]), i: tp.i, nid: tp.nid, diags: tp.diags, file: tp.file }
+        // review LOW-2 — `.V(args) :> fail E.V(args)` (§19.5.2's own spelling):
+        // a `fail` arm is a one-statement block (it leaves the function)
+        if (failAhead(sub)) {
+            const start: int = cur(sub).start
+            const rf: RStmt = parseFail(sub)
+            let ft: TP = rf.tp
+            if (!atEnd(ft)) ft = diagAt(ft, "E-PARSE-ARM", "unexpected `" + cur(ft).text + "` after the arm's `fail`", cur(ft))
+            const fb: ABlock = { nid: ft.nid, span: spanFrom(ft, start), stmts: [rf.s] }
+            return { body: AArmBody.ArmBlock(fb), tp: { toks: tp.toks, i: end, nid: ft.nid + 1, diags: ft.diags, file: tp.file } }
+        }
         const r: RExpr = parseAssign(sub)
         let st: TP = r.tp
         if (!atEnd(st)) {

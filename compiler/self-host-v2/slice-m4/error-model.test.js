@@ -423,7 +423,7 @@ describe("the printed shape and the runtime half", () => {
   test("`fail` prints `return rt.failure(<value>)`; a handled call prints `rt.failed(…)` — no try/catch", () => {
     const r = clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ :> @n = 1 }\n    }`, ["go"]));
     const js = mods.print.printProgram(r.core, "t.client.js", "scrml-runtime.js").js;
-    expect(js).toContain(`return rt.failure({ tag: "NotFound", id: id });`);
+    expect(js).toContain(`return rt.failure({ variant: "NotFound", data: [id /* id */] });`);
     expect(js).toContain(`return rt.failure("Timeout");`);
     expect(js).toContain("rt.failed(");
     expect(js).not.toContain("catch");
@@ -439,6 +439,60 @@ describe("the printed shape and the runtime half", () => {
   test("a pure `fn` may be failable (§19.4.4)", async () => {
     const o = await runProgram(`${TYPES}\n    fn half(x: int)! LoadError {\n        if (x % 2 == 1) fail .Timeout\n        return x - 1\n    }\n    function go() {\n        @n = half(8) !{ | _ :> -1 }\n    }`, ["go"], ["go"]);
     expect(o.n).toBe("7");
+  });
+});
+
+describe("S239 review fix round (114e6ef80)", () => {
+  // HIGH-1: a payload field named like the discriminant overwrote it (`{ tag: "A", tag: "zz" }`)
+  test("HIGH-1 — payload fields named `tag`, `variant`, `data` never touch the discriminant (runtime)", async () => {
+    const o = await runProgram(`    type E:enum = { A(tag: string), B, C(x: int), D(variant: string, data: string) }\n    function f(k: int)! E {\n        if (k == 0) fail .A("zz")\n        if (k == 1) fail .D("v", "d")\n        if (k == 2) fail .C(7)\n        fail .B\n    }\n    function go() {\n        f(0) !{ | .A(t) :> @log = @log + "A:" + t + ";" | .C(x) :> @log = @log + "C;" | .B :> @log = @log + "B;" | .D(a, b) :> @log = @log + "D;" }\n        f(1) !{ | .A(t) :> @log = @log + "A;" | .C(x) :> @log = @log + "C;" | .B :> @log = @log + "B;" | .D(a, b) :> @log = @log + "D:" + a + b + ";" }\n        f(2) !{ | .A(t) :> @log = @log + "A;" | .C(x) :> @n = x | .B :> @log = @log + "B;" | .D(a, b) :> @log = @log + "D;" }\n        f(3) !{ | .A(t) :> @log = @log + "A;" | .C(x) :> @log = @log + "C;" | .B :> @log = @log + "B;" | .D(a, b) :> @log = @log + "D;" }\n    }`, ["go"], ["go"]);
+    expect(o.log).toBe("A:zz;D:vd;B;");
+    expect(o.n).toBe("7");
+  });
+
+  test("HIGH-1 — the printed value: `{ variant, data: [ … ] }`, no field name as a key", () => {
+    const r = clean(P(`    type E:enum = { A(tag: string) }\n    function f()! E {\n        fail .A("zz")\n    }\n    function go() {\n        f() !{ | .A(t) :> @log = t }\n    }`, ["go"]));
+    const js = mods.print.printProgram(r.core, "t.client.js", "scrml-runtime.js").js;
+    expect(js).toContain(`rt.failure({ variant: "A", data: ["zz" /* tag */] })`);
+    expect(js).not.toContain("tag: ");
+  });
+
+  // HIGH-2: a function named without a call was lowered as `null`
+  test("HIGH-2 — a function value (alias, return, argument) is refused, never lowered as `null`", () => {
+    const ok = `    function ok() -> int {\n        return 3\n    }`;
+    expect(codes(P(`${ok}\n    function go() {\n        const g = ok\n        @n = g()\n    }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(P(`${ok}\n    function go() -> int {\n        return ok\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(P(`${ok}\n    fn id(x: int) -> int { return x }\n    function go() {\n        @n = id(ok)\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+
+  test("HIGH-2 — a `!` function used as a value is E-ERROR-002 (its error would be dropped by whoever calls it)", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        const g = load\n    }`))).toEqual(["E-ERROR-002"]);
+  });
+
+  test("HIGH-2 — an event-handler reference CALLS the function (bare and braced; it used to do nothing)", async () => {
+    const r = clean(P(`    function bump() {\n        @n = @n + 1\n    }`, [], `        <button onclick=bump>a</button>\n        <button onclick={ bump }>b</button>\n`));
+    await loadProgram(r.core, "ue-ref" + k++);
+    click(btn("a"));
+    click(btn("b"));
+    expect($("#n").textContent).toBe("2");
+  });
+
+  test("HIGH-2 — a handler reference to a function with parameters is refused (the event would be its argument)", () => {
+    expect(codes(P(`    function set(v: int) {\n        @n = v\n    }`, [], `        <button onclick=set>a</button>\n`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+
+  test("MED-1 — E-TYPE-023: two `!{}` arms for one variant; two `.Ok` arms in a `match` (§18.8.1)", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | .Timeout :> @n = 1 | .Timeout :> @n = 2 | _ :> @n = 3 }\n    }`))).toEqual(["E-TYPE-023"]);
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @n = 1\n            .Ok(w) :> @n = 2\n            else :> @n = 3\n        }\n    }`))).toEqual(["E-TYPE-023"]);
+  });
+
+  test("LOW-1 — an arm after the wildcard is unreachable: refused", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ :> @n = 1 | .Timeout :> @n = 2 }\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+
+  test("LOW-2 — `.V(args) :> fail E.V(args)` (§19.5.2's spelling) is a `fail` arm (runtime)", async () => {
+    const o = await runProgram(`${TYPES}\n    type Outer:enum = { Lost(id: string), Slow }\n${LOAD}\n    function outer(id: string)! Outer {\n        const v = load(id) !{\n            | .NotFound(m) :> fail Outer.Lost(m)\n            | .Timeout :> fail .Slow\n        }\n        return v\n    }\n    function go() {\n        outer("x") !{ | .Lost(m) :> @out = "lost:" + m | .Slow :> @out = "slow" }\n    }`, ["go"], ["go"]);
+    expect(o.out).toBe("lost:x");
   });
 });
 

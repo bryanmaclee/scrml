@@ -132,7 +132,7 @@ or an Eval); in value context = its `value`. `fail` → `Fail(err, idx, args)`.
 `rt.failure(e)` (named so to keep clear of the codec's private `fail`) returns a frozen instance of a runtime-private class `Failure { error }`; `rt.failed(r)` is
 `r instanceof Failure` — unforgeable by any scrml value (no classes / `new` in scrml), so a success value can never be
 mistaken for a failure. The error value is the ordinary enum value (nullary: its tag string; payload:
-`{ tag, field… }` — the shape match/patBinds already read). `Fail` → `return rt.failure(<variant value>)`. `Attempt` →
+`{ variant: "V", data: [v0, …] }`, the payload POSITIONAL — review fix: a `{ tag, <field>… }` shape let a field named `tag` overwrite the discriminant; the R8 wire form keys `data` by field name, the codec maps index ↔ field, U1c). `Fail` → `return rt.failure(<variant value>)`. `Attempt` →
 
 ```js
 let x$;                         // only when result
