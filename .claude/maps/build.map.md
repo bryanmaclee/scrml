@@ -1,6 +1,107 @@
 # build.map.md
 # project: scrml
-# updated: 2026-10-04T08:42:07-06:00  commit: d3e660a08
+# updated: 2026-10-04T16:05:00-06:00  commit: fd2f757d0
+# ⛑ **S453 STAMP — `d3e660a08` -> `fd2f757d0`. 17 COMMITS (#1269 SPEC whole-error binder, #1271 S451 wrap, #1270
+# bootstrap §34 severity, S452-bryan #1272/#1273/#1274/#1275/#1276/#1277/#1278/#1279/#1280, S453-peter #1283/#1286
+# + the S453 bookkeeping commit `b6a43445e`, and #1287 brought in by the merge commit `fd2f757d0`), incremental
+# refresh. Checkout `docs/s453-wrap-bookkeeping` @ `fd2f757d0` = `origin/main` (`38ec5fcab`, #1287) merged into the
+# S453 bookkeeping branch.** MAP-STAMP RULE: `git log --oneline d3e660a08..HEAD` -> 17; `bun scripts/state.ts
+# --check` at pass start: `maps: 17 commits behind HEAD (watermark d3e660a08, HEAD fd2f757d0)` — matches exactly.
+# ⚠ **HEAD MOVED TWICE MID-PASS; THE STAMP IS THE FINAL HEAD AND THE FIGURES ARE STILL EXACT.** The pass opened at
+# `b6a43445e` (15 commits, clean tree). (1) The PA merged `origin/main` #1287 in at `1d45ef281` while the pass ran —
+# every figure in this stamp was re-executed there, so #1287 IS mapped. (2) The branch was then RE-LINEARISED: the
+# merge went away, `b6a43445e` became `d33842588` (#1289) and the S453 wrap commit `fd2f757d0` (#1291) was added, so
+# `1d45ef281` is no longer an ancestor of HEAD (`state.ts --check` will say so about any stamp older than this one).
+# ⛑ **THE FIGURES WERE NOT RE-RUN A THIRD TIME, AND DO NOT NEED TO BE:** `git diff 1d45ef281 fd2f757d0 -- compiler
+# scripts conformance stdlib docs/FACTS.md docs/known-gaps.md compiler/SPEC.md` is **EMPTY** — the two commits have a
+# byte-identical source, figure and gap-ledger tree. The only differences are `docs/changelog.md`, `hand-off.md` and
+# `handOffs/**` (out of scope). `git log --oneline d3e660a08..fd2f757d0` is **17**, the same window.
+# Source-relevant in THIS window, grep-verified at `fd2f757d0`:
+#   impl#1 (`compiler/src`, 224 files):
+#   #1283 — §13.2 / S449 ruling A3: an async event listener's rejection reaches scrml's logging surface.
+#     `codegen/js-async-analysis.ts` NEW `wrapHandlerRejectionLog` :1539 (module-LOCAL, not exported) +
+#     `DEFAULT_HANDLER_BOUNDARY_ID` :1505 (`"event handler"`) + `ColorOpts.boundaryId` :1472; the wrap is applied
+#     INSIDE `colorAsyncFunctionExpr`'s `if (r.rootAsync)` branch (:1666-1667) — ONE seam, so every listener
+#     emitter inherits it. A DIRECTIVE PROLOGUE stays OUTSIDE the `try` (the first cut returned `null` there and
+#     left the listener `async` with no arm — worse than the bug). Catch var `_scrml_async_err`; sink
+#     `_scrml_error_boundary_log(boundaryId, err)`, called UNGUARDED from the always-included `errors` runtime
+#     chunk, matching its sibling sites (`emit-engine` `effect=`, `emit-reactive-wiring` `on mount`, `emit-client`
+#     `session.destroy`). Boundary ids threaded at the call sites: `emit-event-wiring.ts:1345` (the ONE
+#     `colorHandlerAsync` call — covers all THREE registrations there), `emit-each.ts:2536`, and the **13**
+#     `colorActiveHandler` sites in `emit-lift.js`. See structure.map.md's S453 inventory for the full surface.
+#   #1286 — §19.10 transaction exits + the top-level refusal. NEW `validators/lint-transaction.ts` (404 lines):
+#     `runTransactionChecks(ast)` :143, `TransactionCode` = `E-ERROR-001` | `E-ERROR-007` |
+#     `E-TRANSACTION-CONTROL-FLOW` :58, `TransactionDiagnostic` :60, internal `TxnCtx` :70 (`loopDepth`,
+#     `switchDepth`, `labels`, `inFunction`, `inStmtMatchArm`, `inMatchArm` :115 — a FAIL-CLOSED union over
+#     statement- and value-position `match` arms) / `WalkState` :118. Wired in `api.js:1946` as the
+#     `TRANSACTION-CHECKS` stage (after TAB, before `SCOPE-REDECLARE`). `ast-builder.js` NEW shared
+#     `parseTransactionBlock()` :7803, reached from BOTH the top-level loop (:15697) and `parseOneStatement`
+#     (:9689, gated on a following `{`) — before this a `transaction {}` in a function body degraded to an
+#     undeclared identifier (E-SCOPE-001). `emit-logic.ts` `case "transaction-block"` :4377 owns the emission
+#     (BEGIN / COMMIT / `_markTransactionExits` :700 marking every `fail` / `?` exit with the rollback closure /
+#     a `finally` backstop so no transaction is ever left open); the `fail` limb is `emit-logic.ts:685-687`.
+#   #1287 — §14.8.10 (SECURITY): the tenant floor now filters at the SOURCE. `codegen/tenant-egress.ts` (920 lines,
+#     +819 changed) `_scrml_tenant_scope(rows, keyCols, addedCols)` :792 / `_scrml_tenant_scope_none` :814 REPLACE
+#     the retired `_scrml_tenant_tag`; `resolveTenantScoping` :321 emits one key column per tenant-scoped JOIN
+#     source (`TENANT_KEY_ALIAS_PREFIX = "__scrml_tenant_"` :253), a subquery / CTE / derived-table read of a
+#     tenant table -> `E-TENANT-AGG` (reason `"subquery"`), anything else unresolvable -> ZERO rows;
+#     `wrapWithTenantScope` :911 wraps EVERY terminator (`.all`, `.get`, `.run`, bare `?{}` — the last two were
+#     never tagged before) via `rewrite.ts` + `emit-logic.ts`, and `.get()` takes `[0]` AFTER the filter;
+#     `emit-server.ts` wraps route handlers in `_scrml_tenant_request_scope` :705 (AsyncLocalStorage) so PEER
+#     server functions are scoped too, and outside any request the filter yields zero rows;
+#     `_scrml_tenant_redact` :851 stays as defense in depth. Closes the C4 extraction leak (`rows.map(r =>
+#     r.name)`, `rows.length`, a sum, a join, a hand-built `Response`). **PARTIAL — lexical bypasses are open,
+#     r3 next.** Also `sql-projection.ts`, `emit-tool.ts`, `emit-control-flow.ts`, `protect-flow.ts` (one name).
+#   #1275 / #1276 — §51.0.S.2.3 / §19.4.5 impl#1 EXCEPTIONS to the S452 freeze: engine message arms and `!{}`
+#     handler arms parse with NO leading `|`. `engine-statechild-parser.ts` NEW `pipelessHeadAt` (+ `readIdent`):
+#     a head is EXACTLY `.V` / `::V` / `T.V` / `T::V` (optionally `( … )`) or `_` / `else`, with the arm arrow on
+#     the SAME line — no paren-free binder, no alternation, a bare name is not a pattern; anything else ends the
+#     arm run and the line is render content (FAILS CLOSED, byte-identical to before). `ast-builder.js` carries
+#     the `!{}` twin. `type-system.ts` NEW `E-TYPE-ARM-QUALIFIER-MISMATCH` — a type-qualified arm (`T.V :>`) must
+#     name the handled error type; compares the ENUMS both names resolve to (alias-following `enumNameOf`), and
+#     SKIPS when either side is unresolvable. The unqualified foreign variant (`.Zap :>`) is still accepted
+#     (`g-impl1-handler-arm-foreign-variant-accepted`).
+#   bootstrap (`compiler/self-host-v2/`, impl#2 — NOT impl#1): #1270 NEW GENERATED `severity.scrml` (208 lines;
+#     `Severity:enum = { Error, Warning, Info }` :86, `severityOf(code)` :90) written by NEW
+#     `scripts/gen-bootstrap-severity.ts` from NEW `scripts/s34-catalog.ts` (the ONE §34 catalog-row parser, also
+#     used by `scripts/s34-census.ts`); `ast.scrml` `newDiag` :309 reads `severityOf` so no call site can state a
+#     severity. #1274 the S451 error-model rulings (E-ERROR-012..015, E-MATCH-BARE-BINDER, `| _ err :>`, value-arm
+#     `defer`, `<db src>` per §8.1.1, one arm parser). #1279 `W-ARM-PIPE-LEGACY` (`parse.scrml:524`, Info per
+#     `severity.scrml:101`) + the conformance counter grades ONLY Error-severity parse diagnostics as rejections.
+#     #1280 §58 determinism: NEW `link.scrml` (246 lines; `Source` / `Linked` types, `codeUnitCompare`,
+#     `canonicalSources`, `resolveFrom`, `linkOrder`, `programPaths`, `parseProgram`) — the compile is a function
+#     of the SOURCE SET: path-sorted (UTF-16 code units, no locale), canonical link order, no host paths in any
+#     artifact or diagnostic; NEW `slice-m4/determinism.test.js` is its gate.
+#   SPEC-only: #1269 (`| _ err :>` whole-error binder), #1272 (currency fixes — the §8.1.1 impl#1 divergence
+#     marked RESOLVED by #1264, E-SQL-004 loci cited by function, a §34 row for
+#     E-INTERNAL-DB-HANDLE-UNRESOLVED), #1273 (ONE pattern-arm grammar: `!{}` and engine message arms take
+#     §18.2's `match-arm`; the `|` lead soft-deprecates under `W-ARM-PIPE-LEGACY`, `E-ARM-PIPE-LEGACY` reserved),
+#     #1278 (§14.8.10 filters at the SOURCE — the NORMATIVE mechanism changed; WHERE-injection is demoted to a
+#     v1.next optimization and the egress strip is explicitly no longer the guarantee). #1277 = dpa-queue only.
+# ⛑ FIGURES RE-EXECUTED AT `fd2f757d0`: `facts.ts --check` PASS · `compiler/src` **288,402 lines / 224 files**
+# (+1,506, +1 file = `validators/lint-transaction.ts`) · test files **1,588** (+10 by the FACTS definition; 13 new
+# files, 3 of them under `self-host-v2/`, which FACTS excludes) · `compiler/SPEC.md` **45,673** lines (+444;
+# `regen-spec-index.ts --check` OK 72/72) · conformance **1310** cases (+10); `bun conformance/run.ts` -> **1260
+# pass + 50 xfail, 0 fail** · `docs/known-gaps.md` (committed; `state.ts --check` gap-counts PASS at this HEAD)
+# open **HIGH 241** (carried 6) · **MED 500** (4) · **LOW 264** · Nominal 8; heading/marker drift **61**
+# (unchanged) · slice-m4 **1115 pass / 1 todo / 0 fail** across 33 files (was 1002/0) · bootstrap counter (live)
+# 1310 of 1310 attempted: PASS **120** · CODES-ONLY 0 · FAIL **48** · LEGACY 0 · NOT-TWINNED **513** ·
+# UNSUPPORTED **629** · CRASH 0; graded 168, of which 120 hold (71.4%), 11 of those vacuous — ⚠ committed
+# `docs/bootstrap-conformance.md` is STALE AGAIN (1301 cases / 511 / 622; `--check` says STALE) · `state.ts
+# --check` `@generated:recent-sessions` (master-list.md) STALE.
+# ⚠ **HOST ARTIFACT, NOT A REGRESSION — do not open a bug on it.** `bun test ./compiler/self-host-v2/slice-m2/` is
+# **420 pass / 6 fail** on this Windows clone. All six are `compareCore` text-node diffs of the shape
+# a=`"\r\n    "` b=`"\n    "` at `decls[0].renders[0].data.kids[0].data.text` — `core.autocrlf=true` CRLF in the
+# fixture sources, not a lowering defect. The S451 stamp's 462/0 was measured on a different host.
+# ⛔ **CORRECTED THIS PASS: the `gate` CI job is 17 TOTAL STEPS (15 `- name:` + 2 `- uses:`)**, re-parsed at BOTH
+# `d3e660a08` and `fd2f757d0` (identical at both ends). `primary.map.md`'s Task-Shape Routing row published
+# `14 TOTAL STEPS — 12 + 2` with a "RE-PARSED, NOT CARRIED" assurance attached; see build.map.md's S453 section
+# and non-compliance.report.md `C-S453-A`.
+# NOT MAPPED: the PA's in-flight S453 wrap edits, and the untracked `compiler/tests/unit/gauntlet-s20/__fixtures__/`
+# that appeared mid-pass. `file:line` cites in S453 sections are grep-derived at `fd2f757d0` — locate by SYMBOL
+# after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S451 HEADER (stamp `d3e660a08`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
 # ⛑ **S451 STAMP — `47c863556` -> `d3e660a08`. 17 COMMITS (#1252 S449 wrap, #1253-#1268 S451), incremental refresh.
 # Checkout `wrap/s451` @ `d3e660a08` + uncommitted wrap docs (changelog / known-gaps / pr-reviews / hand-off / delta-log —
 # NOT mapped). `origin/main` is ONE ahead at `2a614009b` (#1269, SPEC-only `| _ err :>` whole-error binder) — NOT in this
@@ -731,6 +832,68 @@
 # `conformance/` corpus is gated, and it is gated by a BRIDGE rather than by any workflow naming it.
 # See the CI section and invariant 87 in primary.map.md.
 #
+
+## S453 — CI + BUILD DELTA (`d3e660a08..fd2f757d0`)
+
+### ⛔ CORRECTION FIRST — THE `gate` JOB'S STEP COUNT WAS WRONG IN THESE MAPS
+
+**Re-parsed at `fd2f757d0`: the `gate` job is 15 `- name:` + 2 `- uses:` = 17 TOTAL STEPS.** Re-parsed at
+`d3e660a08` as well: **identical (15 + 2)**. So the figure `primary.map.md`'s Task-Shape Routing row published —
+`14 TOTAL STEPS — 12 `- name:` + 2 `- uses:``, with a `RE-PARSED AT 499eecce, NOT CARRIED` assurance attached, and
+with an explicit lecture about a figure contradicting its sibling — **has itself been stale for more than one
+window**. The routing row is corrected in place this pass. Method, so the next pass can repeat it exactly:
+
+```
+awk '/^  gate:/{f=1;next} /^  [a-z_-]+:$/{if(f)exit} f && /^      - name:/{n++} f && /^      - uses:/{u++} END{print n, u}' .github/workflows/ci.yml
+```
+
+The 15 named `gate` steps at this watermark, in order (line numbers at `fd2f757d0`): Install deps :117 · Populate
+browser-test fixtures :119 · Gate suite (unit + conformance) :121 · Root-level parser/native conformance :134 ·
+e2e-render-map tier assertions :145 · Bootstrap slice (self-host-v2) :156 · Gauntlet quick check :166 · Browser tier
+failure NAME-SET gate :183 · Snippet gate :185 · Compile-floor gate :194 · Facts gate :196 · Conflict-marker gate
+:203 · SPEC-INDEX currency gate :212 · delta-log sequence gate :223 · §34.0 row-provenance gate :225. Plus
+`actions/checkout@v4` :113 and `oven-sh/setup-bun@v2` :116.
+
+### The ONE ci.yml change in this window
+
+| job | step | gating |
+|---|---|---|
+| `tracking` (line 228; the job is `continue-on-error: true`) | **NEW** `Bootstrap severity table (tracking; report staleness)` :266 — `bun scripts/gen-bootstrap-severity.ts --check` | NON-blocking by TWO mechanisms (job-level AND step-level `continue-on-error`), deliberately. A docs-only §34 edit can make the generated file stale without changing an answer, so staleness is reported, not gated. `tracking` now has 7 named steps |
+
+`gate` gained nothing and lost nothing. No new workflow file. No Dockerfile / docker-compose change. No
+`package.json` script change (0 npm diff).
+
+### Build-shape facts that changed
+
+- **The bootstrap compile is now a pure function of its input SET (#1280, §58.1).** `link.scrml` sorts the sources
+  by path (UTF-16 code units, no locale; text as a total tie-break), derives the canonical LINK ORDER from that
+  sorted list, and parses in link order, so node ids, symbol numbering, declaration order and diagnostic order no
+  longer depend on the order a driver listed files in or a filesystem enumerated them. The gate is
+  `slice-m4/determinism.test.js` (266 lines, four limbs): compiled twice -> byte-identical client JS + HTML + Core
+  + ASTs + diagnostics; every permutation of the file list -> identical; the same project under two different
+  ABSOLUTE roots, each compiled from its own cwd -> identical, **and no absolute path in any artifact or
+  diagnostic**; a program with diagnostics in every file -> one diagnostic order. Its fixture program has four
+  files whose path order is deliberately NOT their link order.
+- **`severity.scrml` is a GENERATED build input** (`scripts/gen-bootstrap-severity.ts` <- `scripts/s34-catalog.ts`
+  <- `compiler/SPEC.md` §34). Treat it like `docs/FACTS.md`: never hand-edit; regenerate in the same push as a §34
+  change that touches a code the bootstrap names.
+- **`scrml fix` has NO arm-pipe rule yet.** SPEC §51.0.S.2.3 says "`scrml fix` deletes the `|`"; the rule sets in
+  `commands/fix-s66.js` are `IMPL1_SAFE_RULES` = pre-migrate / program-wrap / program-move / unwrap-logic and
+  `S66_DECL_RULES` = rhs-decl / const-cell / engine-simple — **zero** pipe/arm hits. §63.7 is consistent with the
+  code (the code is "gate-blocked until its `scrml fix` rule is verified-landed"); §51.0.S.2.3's present tense is
+  not. Filed as `N-S453-3`.
+
+### Measurement caveats for anyone re-running the suites on a Windows clone
+
+- `bun test ./compiler/self-host-v2/slice-m2/` is **420 pass / 6 fail** here, and all six are CRLF: `compareCore`
+  reports `a="\r\n    "` vs `b="\n    "` at `decls[0].renders[0].data.kids[0].data.text`. `core.autocrlf=true`
+  rewrites the fixture sources; the lowering is innocent. Do NOT read this tier's exit code as a regression signal
+  on this host — diff the failure NAME SET against a base run instead.
+- `bun test ./compiler/self-host-v2/slice-m4/` is green here: **1115 pass / 1 todo / 0 fail** across 33 files.
+- `bun conformance/run.ts` -> **1260 pass + 50 xfail, 0 fail** of 1310 (~4 min on this host).
+- `bun scripts/facts.ts --check` PASS · `bun scripts/regen-spec-index.ts --check` OK 72/72 ·
+  `bun scripts/bootstrap-conformance.ts --check` **STALE** · `bun scripts/state.ts --check` gap-counts PASS,
+  `@generated:recent-sessions` STALE.
 
 ## S451 — CI + BUILD DELTA (`47c863556..d3e660a08`)
 

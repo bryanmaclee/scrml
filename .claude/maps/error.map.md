@@ -1,6 +1,107 @@
 # error.map.md
 # project: scrml
-# updated: 2026-10-04T08:42:07-06:00  commit: d3e660a08
+# updated: 2026-10-04T16:05:00-06:00  commit: fd2f757d0
+# ⛑ **S453 STAMP — `d3e660a08` -> `fd2f757d0`. 17 COMMITS (#1269 SPEC whole-error binder, #1271 S451 wrap, #1270
+# bootstrap §34 severity, S452-bryan #1272/#1273/#1274/#1275/#1276/#1277/#1278/#1279/#1280, S453-peter #1283/#1286
+# + the S453 bookkeeping commit `b6a43445e`, and #1287 brought in by the merge commit `fd2f757d0`), incremental
+# refresh. Checkout `docs/s453-wrap-bookkeeping` @ `fd2f757d0` = `origin/main` (`38ec5fcab`, #1287) merged into the
+# S453 bookkeeping branch.** MAP-STAMP RULE: `git log --oneline d3e660a08..HEAD` -> 17; `bun scripts/state.ts
+# --check` at pass start: `maps: 17 commits behind HEAD (watermark d3e660a08, HEAD fd2f757d0)` — matches exactly.
+# ⚠ **HEAD MOVED TWICE MID-PASS; THE STAMP IS THE FINAL HEAD AND THE FIGURES ARE STILL EXACT.** The pass opened at
+# `b6a43445e` (15 commits, clean tree). (1) The PA merged `origin/main` #1287 in at `1d45ef281` while the pass ran —
+# every figure in this stamp was re-executed there, so #1287 IS mapped. (2) The branch was then RE-LINEARISED: the
+# merge went away, `b6a43445e` became `d33842588` (#1289) and the S453 wrap commit `fd2f757d0` (#1291) was added, so
+# `1d45ef281` is no longer an ancestor of HEAD (`state.ts --check` will say so about any stamp older than this one).
+# ⛑ **THE FIGURES WERE NOT RE-RUN A THIRD TIME, AND DO NOT NEED TO BE:** `git diff 1d45ef281 fd2f757d0 -- compiler
+# scripts conformance stdlib docs/FACTS.md docs/known-gaps.md compiler/SPEC.md` is **EMPTY** — the two commits have a
+# byte-identical source, figure and gap-ledger tree. The only differences are `docs/changelog.md`, `hand-off.md` and
+# `handOffs/**` (out of scope). `git log --oneline d3e660a08..fd2f757d0` is **17**, the same window.
+# Source-relevant in THIS window, grep-verified at `fd2f757d0`:
+#   impl#1 (`compiler/src`, 224 files):
+#   #1283 — §13.2 / S449 ruling A3: an async event listener's rejection reaches scrml's logging surface.
+#     `codegen/js-async-analysis.ts` NEW `wrapHandlerRejectionLog` :1539 (module-LOCAL, not exported) +
+#     `DEFAULT_HANDLER_BOUNDARY_ID` :1505 (`"event handler"`) + `ColorOpts.boundaryId` :1472; the wrap is applied
+#     INSIDE `colorAsyncFunctionExpr`'s `if (r.rootAsync)` branch (:1666-1667) — ONE seam, so every listener
+#     emitter inherits it. A DIRECTIVE PROLOGUE stays OUTSIDE the `try` (the first cut returned `null` there and
+#     left the listener `async` with no arm — worse than the bug). Catch var `_scrml_async_err`; sink
+#     `_scrml_error_boundary_log(boundaryId, err)`, called UNGUARDED from the always-included `errors` runtime
+#     chunk, matching its sibling sites (`emit-engine` `effect=`, `emit-reactive-wiring` `on mount`, `emit-client`
+#     `session.destroy`). Boundary ids threaded at the call sites: `emit-event-wiring.ts:1345` (the ONE
+#     `colorHandlerAsync` call — covers all THREE registrations there), `emit-each.ts:2536`, and the **13**
+#     `colorActiveHandler` sites in `emit-lift.js`. See structure.map.md's S453 inventory for the full surface.
+#   #1286 — §19.10 transaction exits + the top-level refusal. NEW `validators/lint-transaction.ts` (404 lines):
+#     `runTransactionChecks(ast)` :143, `TransactionCode` = `E-ERROR-001` | `E-ERROR-007` |
+#     `E-TRANSACTION-CONTROL-FLOW` :58, `TransactionDiagnostic` :60, internal `TxnCtx` :70 (`loopDepth`,
+#     `switchDepth`, `labels`, `inFunction`, `inStmtMatchArm`, `inMatchArm` :115 — a FAIL-CLOSED union over
+#     statement- and value-position `match` arms) / `WalkState` :118. Wired in `api.js:1946` as the
+#     `TRANSACTION-CHECKS` stage (after TAB, before `SCOPE-REDECLARE`). `ast-builder.js` NEW shared
+#     `parseTransactionBlock()` :7803, reached from BOTH the top-level loop (:15697) and `parseOneStatement`
+#     (:9689, gated on a following `{`) — before this a `transaction {}` in a function body degraded to an
+#     undeclared identifier (E-SCOPE-001). `emit-logic.ts` `case "transaction-block"` :4377 owns the emission
+#     (BEGIN / COMMIT / `_markTransactionExits` :700 marking every `fail` / `?` exit with the rollback closure /
+#     a `finally` backstop so no transaction is ever left open); the `fail` limb is `emit-logic.ts:685-687`.
+#   #1287 — §14.8.10 (SECURITY): the tenant floor now filters at the SOURCE. `codegen/tenant-egress.ts` (920 lines,
+#     +819 changed) `_scrml_tenant_scope(rows, keyCols, addedCols)` :792 / `_scrml_tenant_scope_none` :814 REPLACE
+#     the retired `_scrml_tenant_tag`; `resolveTenantScoping` :321 emits one key column per tenant-scoped JOIN
+#     source (`TENANT_KEY_ALIAS_PREFIX = "__scrml_tenant_"` :253), a subquery / CTE / derived-table read of a
+#     tenant table -> `E-TENANT-AGG` (reason `"subquery"`), anything else unresolvable -> ZERO rows;
+#     `wrapWithTenantScope` :911 wraps EVERY terminator (`.all`, `.get`, `.run`, bare `?{}` — the last two were
+#     never tagged before) via `rewrite.ts` + `emit-logic.ts`, and `.get()` takes `[0]` AFTER the filter;
+#     `emit-server.ts` wraps route handlers in `_scrml_tenant_request_scope` :705 (AsyncLocalStorage) so PEER
+#     server functions are scoped too, and outside any request the filter yields zero rows;
+#     `_scrml_tenant_redact` :851 stays as defense in depth. Closes the C4 extraction leak (`rows.map(r =>
+#     r.name)`, `rows.length`, a sum, a join, a hand-built `Response`). **PARTIAL — lexical bypasses are open,
+#     r3 next.** Also `sql-projection.ts`, `emit-tool.ts`, `emit-control-flow.ts`, `protect-flow.ts` (one name).
+#   #1275 / #1276 — §51.0.S.2.3 / §19.4.5 impl#1 EXCEPTIONS to the S452 freeze: engine message arms and `!{}`
+#     handler arms parse with NO leading `|`. `engine-statechild-parser.ts` NEW `pipelessHeadAt` (+ `readIdent`):
+#     a head is EXACTLY `.V` / `::V` / `T.V` / `T::V` (optionally `( … )`) or `_` / `else`, with the arm arrow on
+#     the SAME line — no paren-free binder, no alternation, a bare name is not a pattern; anything else ends the
+#     arm run and the line is render content (FAILS CLOSED, byte-identical to before). `ast-builder.js` carries
+#     the `!{}` twin. `type-system.ts` NEW `E-TYPE-ARM-QUALIFIER-MISMATCH` — a type-qualified arm (`T.V :>`) must
+#     name the handled error type; compares the ENUMS both names resolve to (alias-following `enumNameOf`), and
+#     SKIPS when either side is unresolvable. The unqualified foreign variant (`.Zap :>`) is still accepted
+#     (`g-impl1-handler-arm-foreign-variant-accepted`).
+#   bootstrap (`compiler/self-host-v2/`, impl#2 — NOT impl#1): #1270 NEW GENERATED `severity.scrml` (208 lines;
+#     `Severity:enum = { Error, Warning, Info }` :86, `severityOf(code)` :90) written by NEW
+#     `scripts/gen-bootstrap-severity.ts` from NEW `scripts/s34-catalog.ts` (the ONE §34 catalog-row parser, also
+#     used by `scripts/s34-census.ts`); `ast.scrml` `newDiag` :309 reads `severityOf` so no call site can state a
+#     severity. #1274 the S451 error-model rulings (E-ERROR-012..015, E-MATCH-BARE-BINDER, `| _ err :>`, value-arm
+#     `defer`, `<db src>` per §8.1.1, one arm parser). #1279 `W-ARM-PIPE-LEGACY` (`parse.scrml:524`, Info per
+#     `severity.scrml:101`) + the conformance counter grades ONLY Error-severity parse diagnostics as rejections.
+#     #1280 §58 determinism: NEW `link.scrml` (246 lines; `Source` / `Linked` types, `codeUnitCompare`,
+#     `canonicalSources`, `resolveFrom`, `linkOrder`, `programPaths`, `parseProgram`) — the compile is a function
+#     of the SOURCE SET: path-sorted (UTF-16 code units, no locale), canonical link order, no host paths in any
+#     artifact or diagnostic; NEW `slice-m4/determinism.test.js` is its gate.
+#   SPEC-only: #1269 (`| _ err :>` whole-error binder), #1272 (currency fixes — the §8.1.1 impl#1 divergence
+#     marked RESOLVED by #1264, E-SQL-004 loci cited by function, a §34 row for
+#     E-INTERNAL-DB-HANDLE-UNRESOLVED), #1273 (ONE pattern-arm grammar: `!{}` and engine message arms take
+#     §18.2's `match-arm`; the `|` lead soft-deprecates under `W-ARM-PIPE-LEGACY`, `E-ARM-PIPE-LEGACY` reserved),
+#     #1278 (§14.8.10 filters at the SOURCE — the NORMATIVE mechanism changed; WHERE-injection is demoted to a
+#     v1.next optimization and the egress strip is explicitly no longer the guarantee). #1277 = dpa-queue only.
+# ⛑ FIGURES RE-EXECUTED AT `fd2f757d0`: `facts.ts --check` PASS · `compiler/src` **288,402 lines / 224 files**
+# (+1,506, +1 file = `validators/lint-transaction.ts`) · test files **1,588** (+10 by the FACTS definition; 13 new
+# files, 3 of them under `self-host-v2/`, which FACTS excludes) · `compiler/SPEC.md` **45,673** lines (+444;
+# `regen-spec-index.ts --check` OK 72/72) · conformance **1310** cases (+10); `bun conformance/run.ts` -> **1260
+# pass + 50 xfail, 0 fail** · `docs/known-gaps.md` (committed; `state.ts --check` gap-counts PASS at this HEAD)
+# open **HIGH 241** (carried 6) · **MED 500** (4) · **LOW 264** · Nominal 8; heading/marker drift **61**
+# (unchanged) · slice-m4 **1115 pass / 1 todo / 0 fail** across 33 files (was 1002/0) · bootstrap counter (live)
+# 1310 of 1310 attempted: PASS **120** · CODES-ONLY 0 · FAIL **48** · LEGACY 0 · NOT-TWINNED **513** ·
+# UNSUPPORTED **629** · CRASH 0; graded 168, of which 120 hold (71.4%), 11 of those vacuous — ⚠ committed
+# `docs/bootstrap-conformance.md` is STALE AGAIN (1301 cases / 511 / 622; `--check` says STALE) · `state.ts
+# --check` `@generated:recent-sessions` (master-list.md) STALE.
+# ⚠ **HOST ARTIFACT, NOT A REGRESSION — do not open a bug on it.** `bun test ./compiler/self-host-v2/slice-m2/` is
+# **420 pass / 6 fail** on this Windows clone. All six are `compareCore` text-node diffs of the shape
+# a=`"\r\n    "` b=`"\n    "` at `decls[0].renders[0].data.kids[0].data.text` — `core.autocrlf=true` CRLF in the
+# fixture sources, not a lowering defect. The S451 stamp's 462/0 was measured on a different host.
+# ⛔ **CORRECTED THIS PASS: the `gate` CI job is 17 TOTAL STEPS (15 `- name:` + 2 `- uses:`)**, re-parsed at BOTH
+# `d3e660a08` and `fd2f757d0` (identical at both ends). `primary.map.md`'s Task-Shape Routing row published
+# `14 TOTAL STEPS — 12 + 2` with a "RE-PARSED, NOT CARRIED" assurance attached; see build.map.md's S453 section
+# and non-compliance.report.md `C-S453-A`.
+# NOT MAPPED: the PA's in-flight S453 wrap edits, and the untracked `compiler/tests/unit/gauntlet-s20/__fixtures__/`
+# that appeared mid-pass. `file:line` cites in S453 sections are grep-derived at `fd2f757d0` — locate by SYMBOL
+# after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S451 HEADER (stamp `d3e660a08`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
 # ⛑ **S451 STAMP — `47c863556` -> `d3e660a08`. 17 COMMITS (#1252 S449 wrap, #1253-#1268 S451), incremental refresh.
 # Checkout `wrap/s451` @ `d3e660a08` + uncommitted wrap docs (changelog / known-gaps / pr-reviews / hand-off / delta-log —
 # NOT mapped). `origin/main` is ONE ahead at `2a614009b` (#1269, SPEC-only `| _ err :>` whole-error binder) — NOT in this
@@ -813,6 +914,73 @@
 # a spurious `E-ROUTE-001` on a `server fn` declared inside an `if=`/`else` branch of a `<program>`
 # worker body. Both descents landed in the same commit for that reason.
 #
+
+## S453 — DIAGNOSTIC DELTA (`d3e660a08..fd2f757d0`)
+
+### impl#1 — codes that NEWLY FIRE at this watermark
+
+| code | §  | emitted at | trigger |
+|---|---|---|---|
+| `E-TRANSACTION-CONTROL-FLOW` | §19.10.4 | `validators/lint-transaction.ts` :168, :175, :188, :272, :318, :338 | An exit from a `transaction {}` block that §19.10.3 does not govern. TWO fail-closed limbs: **(1)** a `yield` inside the block; **(2)** a `return`, or a `break` / `continue` whose target is outside the block, from inside a `match` ARM within the block. §34 rows at `SPEC.md:19378` + `:24437` |
+| `E-ERROR-001` (transaction limb) | §19.10.4 | `validators/lint-transaction.ts:262` | A `transaction {}` block outside a `!` (failable) function — **this is also the TOP-LEVEL refusal** (`transaction {}` at a logic body's top level). The nesting case is NOT re-reported here (:249-250: repeating E-ERROR-001 per level is noise) |
+| `E-ERROR-007` | §19.10.4 | `validators/lint-transaction.ts:238` | A `transaction {}` block inside another one |
+| `E-TYPE-ARM-QUALIFIER-MISMATCH` | §19.4.5, §18.2 | `type-system.ts` (~:12570-:12620) | A `!{}` handler arm's TYPE QUALIFIER names a type other than the handled error type (`F.Bad(m) :>` on an `E` handler, or a dead `S.Empty` arm). Dispatch is by variant name only, so this used to match silently. Compares the ENUMS both names resolve to (alias-following `enumNameOf`), so `type A = E` on either side is the same type; SKIPPED when either side is unresolvable (an unseen imported alias, a non-enum) — unverifiable, not wrong. §34 row present |
+| `E-TENANT-AGG` reason `"subquery"` | §14.8.10 | `codegen/tenant-egress.ts` (`resolveTenantScoping` :321; `TenantRefusal` :179) | NEW refusal reason (#1287): a tenant-scoped table read inside a SUBQUERY / CTE / derived table. The full reason union is `"aggregate" \| "function" \| "window" \| "subquery" \| "setop" \| "reserved"` |
+| `I-TENANT-STRIP` | §14.8.10 | `codegen/emit-server.ts` | message REWORDED (#1287) — it now describes the SOURCE filter, not the egress strip |
+
+All three transaction codes are Error-severity (`TransactionDiagnostic.severity: "error"`), drained through
+`api.js:1946`'s `collectErrors("TRANSACTION-CHECKS", …)`. A file with one of them produces no runnable artifact.
+
+### impl#1 — the §13.2 rejection surface (NOT a diagnostic; a RUNTIME log route)
+
+⛑ **#1283 adds no compile-time code. It adds a runtime log ROUTE, and that is the thing to grep for.** An async
+event listener that rejects used to disappear: `addEventListener` ignores a listener's return value, so the
+rejection became an unobserved promise rejection with no diagnostic and exit 0. Now every listener that
+`colorAsyncFunctionExpr` makes `async` (i.e. `rootAsync` is true) carries
+`catch (_scrml_async_err) { _scrml_error_boundary_log(<boundaryId>, _scrml_async_err); }`.
+
+- Sink: `_scrml_error_boundary_log` — the always-included `errors` runtime chunk. Called **UNGUARDED** here, which
+  deliberately matches its sibling emit sites (`emit-engine.ts:2041` `effect=`, `emit-reactive-wiring.ts:1263` /
+  `:1285` `on mount`, `emit-client.ts:2548` / `:3655` / `:3733` `session.destroy` + detached IIFEs,
+  `emit-event-wiring.ts:2401` / `:2411` `<errorBoundary>`). (`runtime-template.js:1177` notes the `typeof` guard
+  used on the OPTIONAL surfaces — not this one.)
+- Boundary ids actually emitted: ``"<eventName> <placeholderId>"`` (delegated / non-delegable / arm-factory, one
+  `colorHandlerAsync` call at `emit-event-wiring.ts:1345`), ``"on<ev> <each> row"`` (`emit-each.ts:2536`),
+  ``"on<event> lift …"`` (13 sites in `emit-lift.js`), and `DEFAULT_HANDLER_BOUNDARY_ID` = `"event handler"` for
+  anything that passes no id.
+- ⛑ **Known hole, already filed:** a directive-prologue body (a listener whose first statement is a string
+  literal) was the first cut's bail-out — it returned `null`, left the listener `async`, and shipped NO arm, no
+  diagnostic, exit 0. Fixed by keeping the prologue outside the `try`. The reviewer's second finding is still open:
+  `g-errorboundary-async-render-rejection-unobserved-s453` (LOW) — an async `<errorBoundary>` with no `fallback=`
+  invokes its render fn as `${renderFn}();` with no `await` and no `.catch` (`emit-event-wiring.ts` ~:2430), so
+  its own re-`throw` escapes unobserved.
+
+### bootstrap (impl#2) — codes that newly fire there
+
+| code | where | note |
+|---|---|---|
+| `W-ARM-PIPE-LEGACY` | `self-host-v2/parse.scrml:524` (`pipeLint`), severity Info per `severity.scrml:101` | NEW (#1279). ONE per `\|`-led `!{}` / engine message arm. ⛔ **SPEC still says this code is never emitted** — `SPEC.md:18134` ("W-ARM-PIPE-LEGACY and E-ARM-PIPE-LEGACY are Nominal / not yet emitted by impl#1 (frozen) or the bootstrap") and the §34 row at `:19386` ("never emitted under either name"). Both are now FALSE for the bootstrap. Filed as `N-S453-2` |
+| `E-ERROR-012`, `E-ERROR-013`, `E-ERROR-014`, `E-ERROR-015`, `E-MATCH-BARE-BINDER` | `self-host-v2/` (#1274) | NOW IMPLEMENTED IN THE BOOTSTRAP — this CLOSES `U-S451-1`, which flagged §19.9.10's "The bootstrap builds it" as having zero bootstrap references. **Still Nominal on impl#1**: `compiler/src` has 0 emitting hits for all five (`E-ERROR-015`'s single `compiler/src` hit is a COMMENT at `validators/lint-transaction.ts:247`) |
+| `E-ARM-PIPE-LEGACY` | reserved, unfired anywhere | §63.7 keeps it gate-blocked until the `scrml fix` rule lands |
+| `E-SERVER-CELL-RESERVED-NAME` | nowhere (0 hits in `compiler/src` AND `self-host-v2/`) | still Nominal in BOTH implementations; §34 row at `SPEC.md:24911` |
+
+### Severity is now a property of the CODE in the bootstrap (#1270)
+
+`self-host-v2/ast.scrml`'s `newDiag` :309 sets `severity: severityOf(code)` from the GENERATED `severity.scrml`
+table, so no bootstrap call site can state a severity. The table is derived from §34's Severity column by
+`scripts/s34-catalog.ts`; a code with no usable row (no row, a struck row, or a cell reading `—` / `Runtime` /
+`Test`) is **FAIL-CLOSED Error** and is listed as a catalog gap in the generated file's own header. The prefix is
+NOT the severity (§34 makes `E-DG-002` a Warning and ~30 `W-` codes Info) — do not infer severity from a prefix.
+
+### Prior findings CLOSED at this watermark
+
+- `N-S451-2` — SPEC §8.1.1's "impl#1 divergence" is now marked **resolved S451 by #1264** (`SPEC.md:8731`), and the
+  E-SQL-004 loci are cited by FUNCTION rather than by a dead line (#1272).
+- `N-S451-3`, first limb — `E-INTERNAL-DB-HANDLE-UNRESOLVED` now HAS a §34 row (`SPEC.md`, §34, §8.1.1 column).
+- `U-S451-1` — see the bootstrap table above.
+- `N-S451-3`, second limb — **STILL OPEN**: `emit-server.ts:7096` and `emit-tool.ts:794` still say E-SQL-004 means
+  "a `?{}` SQL block has no `db=` declaration in any ancestor `<program>`", the exact phrasing §8.1.1 (S451)
+  superseded; the §34 row now says "no database scope". Re-filed as `N-S453-5`.
 
 ## S451 — DIAGNOSTIC DELTA (`47c863556..d3e660a08`)
 
