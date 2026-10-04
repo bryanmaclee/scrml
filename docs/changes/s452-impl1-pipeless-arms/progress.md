@@ -6,3 +6,4 @@
 - tests: unit error-handler-pipeless-arms-s452 (18), conformance error/handler-pipeless-arms-rt; 2 legacy assertions (`_ :>` implicit binding e) updated to the S451 rule (binds nothing).
 - differential: 2249 files / 13319 artifacts base vs head; delta = only the new conformance case.
 - fix round r2
+- r2: head = .V|::V|T.V|T::V [(..)] arrow, or _/else arrow; no paren-free binder; glued ./:: never a head. Differential vs df6dad5ac: 2249 files/13319 artifacts, delta = new conformance case only. Gate 30114/0. Gap g-impl1-handler-arm-foreign-variant-accepted filed.
