@@ -12566,6 +12566,65 @@ function annotateNodes(
         // Step 3: look up the function's errorType from our pre-built map.
         const errorTypeName = calleeName ? (fnErrorTypes.get(calleeName) ?? null) : null;
 
+        // S452 r3 — a type-qualified arm (`T.V :>` / `T::V :>`, recorded by
+        // parseErrorTokens as `arm.typeQualifier`) must name the handled error
+        // type. Dispatch is by variant name only, so `F.Bad(m)` on an `E`
+        // handler silently matched `E.Bad`, and `S.Empty` was a silent dead
+        // arm. The unqualified foreign variant (`.Zap :>`) is NOT checked here
+        // (g-impl1-handler-arm-foreign-variant-accepted).
+        //
+        // S452 r5 — compare the ENUMS both names resolve to, not the names, so a
+        // type alias on either side (`type A = E`, `function f()! -> A`, arm
+        // `E.Bad`) is the same type. The registry holds a `type A = <RHS>` alias
+        // as `asIs`; its RHS (fileAST.typeDecls, `typeKind: ""`) is resolved with
+        // the checker's own `resolveTypeExpr`, following alias-to-alias names.
+        // If either side does not resolve to an enum (an imported alias this
+        // compile cannot see, a non-enum), the check is SKIPPED — unverifiable,
+        // not wrong (as for an unknown callee).
+        if (errorTypeName) {
+          const _aliasRhs = new Map<string, string>();
+          const _tds = ((fileAST.typeDecls as ASTNodeLike[] | undefined)
+            ?? ((fileAST.ast as FileAST | undefined)?.typeDecls as ASTNodeLike[] | undefined)
+            ?? []);
+          for (const d of _tds) {
+            if (!d) continue;
+            const k = d.typeKind;
+            if (k === "" || k === undefined || k === null) {
+              const raw = String(d.raw ?? "").trim();
+              if (d.name && raw && !raw.startsWith("{")) _aliasRhs.set(String(d.name), raw);
+            }
+          }
+          const enumNameOf = (name: string): string | null => {
+            let cur = name;
+            for (let hop = 0; hop < 16; hop++) {
+              const t = typeRegistry.get(cur);
+              if (t && t.kind === "enum") return (t as EnumType).name ?? cur;
+              const rhs = _aliasRhs.get(cur);
+              if (!rhs) return null;
+              if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(rhs)) { cur = rhs; continue; }
+              const r = resolveTypeExpr(rhs, typeRegistry);
+              return r && r.kind === "enum" ? ((r as EnumType).name ?? null) : null;
+            }
+            return null;
+          };
+          const handledEnum = enumNameOf(errorTypeName);
+          for (const arm of errorArms as Array<{ typeQualifier?: string; pattern?: string; span?: Span }>) {
+            const q = arm.typeQualifier;
+            if (!q || q === errorTypeName || !handledEnum) continue;
+            const qEnum = enumNameOf(q);
+            if (!qEnum || qEnum === handledEnum) continue;
+            const v = String(arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "");
+            const named = (x: string, e: string) => (x === e ? "`" + x + "`" : "`" + x + "` (= `" + e + "`)");
+            errors.push(new TSError(
+              "E-TYPE-ARM-QUALIFIER-MISMATCH",
+              `E-TYPE-ARM-QUALIFIER-MISMATCH: the \`!{}\` handler arm \`${q}.${v}\` names the enum ${named(q, qEnum)}, ` +
+              `but the handled call fails with ${named(errorTypeName, handledEnum)}. Qualify the arm with \`${errorTypeName}\` ` +
+              `(\`${errorTypeName}.${v}\`) or write it bare (\`.${v}\`).`,
+              ((arm.span ?? n.span) as Span),
+            ));
+          }
+        }
+
         // Step 4: if we have a named errorType, look it up in the typeRegistry.
         if (errorTypeName) {
           const errorEnumType = typeRegistry.get(errorTypeName);

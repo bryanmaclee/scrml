@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 240 | 6 |
-| MED | 501 | 4 |
-| LOW | 259 | 0 |
+| MED | 500 | 4 |
+| LOW | 260 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -112,6 +112,20 @@ On main, a statement-form arm (one with no value) emits the arm and then
 This happens in a function body and in a handler. After a handled failure, `@x` holds
 `{__scrml_error:true, …}`, so a later `@x + 1` gives `"[object Object]1"`.
 This contradicts the s441 comment in emit-client.ts: "a handled failure never lands the error envelope in the cell".
+
+### g-impl1-handler-arm-foreign-variant-accepted — `risky() !{ | .Empty :> … }` where `risky`'s error type `E` has no `Empty` variant compiles clean: the arm is dead and nothing says so — `NEW S452; LOW; open`
+
+<!-- @gap id=g-impl1-handler-arm-foreign-variant-accepted sev=LOW status=open locus=compiler/src/type-system.ts(guarded-expr exhaustiveness, the §19.7 E-TYPE-080 block ~:12499-12600 — Step 5 collects each arm's variant name into handledVariants but never checks it against allVariants, and the whole check is skipped when a `_`/`else` arm exists) prov=review:s452-pipeless-r1 -->
+
+impl#1 checks a `!{}` handler only for MISSING variants. An arm whose pattern names a variant that
+the handled error type does not declare (`| .Empty :>` on `E = { Bad, Pair, Gone }`) is accepted at
+exit 0 and emitted as a dead
+`else if (variant === "Empty")` branch. Pre-existing on base `df6dad5ac`. It is LOW on its own (a dead
+arm), but it is what made the S452 r1 pipe-less mis-split SILENT: an arm-body tail `S.Empty`
+mis-read as an arm head produced exactly such a foreign-variant arm, and no diagnostic fired. Fix
+direction: in Step 5, report each arm variant not in `allVariants` (code to be ruled — no new
+diagnostic was added by the S452 dispatch that filed this). A TYPE-QUALIFIED foreign arm (`S.Empty :>`, `F.Bad(m) :>`) is no
+longer in this gap: S452 r3 made it E-TYPE-ARM-QUALIFIER-MISMATCH (same branch).
 
 ### g-each-block-arrow-handler-never-runs — `onclick=${() => { @y = 5 }}` inside `<each>` never runs — `NEW S446; HIGH; open`
 
@@ -22804,9 +22818,11 @@ Binding requirement recorded in the U1 design addendum §12 (scrml-support): any
 
 ## §S452-one-arm-grammar — impl#1 divergences from the S452 one-arm-grammar ruling (2026-10-04; ruling:user-voice-scrml.md S452 "c looks right"; SPEC §19.4.5 / §18.2 / §34 — change `docs/changes/s452-one-arm-grammar/`. impl#1 probes compiled on `df6dad5ac` with `bun compiler/bin/scrml.js compile <f> --output-dir <dir>`; probe files were temporary and are not committed. impl#1 is frozen for semantics (S447): FILED, not scheduled; the bootstrap builds the rule)
 
-### g-impl1-handler-arm-pipeless-dropped-s452 — impl#1 DIVERGENCE (filed, not fixed): the canonical pipe-less `!{}` arm `.V(m) :>` is not recognised — the arm is silently dropped and the handler fails with E-TYPE-080 "Missing variant(s)", a code that names the symptom, not the cause — `NEW S452; MED; open`
-<!-- @gap id=g-impl1-handler-arm-pipeless-dropped-s452 sev=MED status=open locus=compiler/src/ast-builder.js:17069(parseErrorTokens — three arm branches: `|`-led, `::`-led, and the "simplified" `Ident :>`; a pipe-less `.V` or `_ name` arm reaches the skip-one-token `else`) prov=ruling:user-voice-scrml.md-S452-"c-looks-right" -->
+### g-impl1-handler-arm-pipeless-dropped-s452 — impl#1 DIVERGENCE: the canonical pipe-less `!{}` arm `.V(m) :>` is not recognised — the arm is silently dropped and the handler fails with E-TYPE-080 "Missing variant(s)", a code that names the symptom, not the cause — `NEW S452; MED; RESOLVED S452 (fix/s452-impl1-pipeless-arms, 79cd61d15)`
+<!-- @gap id=g-impl1-handler-arm-pipeless-dropped-s452 sev=MED status=resolved locus=compiler/src/ast-builder.js:17069(parseErrorTokens — three arm branches: `|`-led, `::`-led, and the "simplified" `Ident :>`; a pipe-less `.V` or `_ name` arm reaches the skip-one-token `else`) prov=ruling:user-voice-scrml.md-S452-"c-looks-right" -->
 Governing: SPEC §19.4.5 (S452) — a `!{}` arm is a §18.2 `match-arm`; the `|`-led arm is soft-deprecated. Measured on `df6dad5ac` with `type E:enum = { Bad(msg: string), Gone }`, `function risky(n)! -> E`, `risky(2) !{ .Bad(m) :> { return }⏎ .Gone :> { return } }` → **E-TYPE-080** *"Non-exhaustive error handler for `E`. Missing variant(s): Bad. Add the missing arms or use `else =>` …"*. The `.Bad(m)` arm is dropped; `.Gone` survives only because the `.` is skipped and `Gone :>` matches the simplified `TypeName :>` branch (which binds an implicit `e`). Pipe-less `_ err :>` is dropped the same way (E-TYPE-080, missing `Gone`). Accepted today: pipe-less `::Bad(m) :>` and `_ :>`, and every `|`-led form (`| .Bad(m) :>`, `| ::Bad m :>`). Also owed with the fix: (1) **W-ARM-PIPE-LEGACY** is not emitted for a `|`-led arm (Nominal, §34); (2) impl#1's own messages steer to the deprecated spelling — E-ERROR-002 at an event-handler site suggests `'{name}(…) !{ | .Variant :> … }'` (`compiler/src/type-system.ts:14488`, `:14661`), the defer message `'defer f(...) !{ | _ :> ... }'` (`:10923`), and E-TYPE-080's text says `else =>` (a deprecated separator). **README.md and docs/PA-SCRML-PRIMER.md** use `| .Network(msg) :>` (canonical prefix + parenthesised binder, pipe kept) because the pipe-less form does not compile on impl#1 and the README's blocks are CI-compiled excerpts of `docs/readme-snippets/tasks-app.scrml`; they move to the pipe-less form when this gap closes. Corpus (`|`-led `!{}` arms, migrated by the `scrml fix` rule, §19.4.5): 186 arms in 70 files — examples 4/3, samples 55/16, conformance 106/44, stdlib 21/7.
+
+> **RESOLVED S452 — `fix/s452-impl1-pipeless-arms` (f8d93ef9c → 5641b1061 → 2ec0e4dc0 → 79cd61d15).** `parseErrorTokens` (ast-builder.js) recognises a pipe-less §18.2 arm head — `.V`, `::V`, `T.V`, `T::V`, optionally `( … )`, then the arm arrow at once; or `_` / `else` / `_ err` then the arrow — and parses it by the SAME path as the `|`-led spelling, so the emitted JS is byte-identical (unit `error-handler-pipeless-arms-s452.test.js`; conformance `error/handler-pipeless-arms-rt`). A pipe-less head never takes a paren-free binder, and a `.`/`::` glued to the previous token is never a head (the r1 mis-split). The arm list no longer drops a token silently: a stray arm-level token, a depth-0 `:>` inside an arm body, and a pipe-less paren-free binder (`.V m :>` / `::V m :>`, §19.4.5) are E-PARSE-001. `| else :>` (E-CODEGEN-INVALID-LOGIC before) now works. A type-qualified arm whose qualifier is not the handled error type is E-TYPE-ARM-QUALIFIER-MISMATCH. Pipe-less `_ :>` now binds nothing (was an implicit `e`), as `| _ :>`. Corpus differential vs `df6dad5ac` (2249 files): only the new conformance case changes. **NOT closed here, still owed:** (1) W-ARM-PIPE-LEGACY is not emitted; (2) the messages that steer to the `|` spelling (E-ERROR-002, the defer message, E-TYPE-080's `else =>`); (3) README / PA-SCRML-PRIMER still show the `|`-led form.
 
 ### g-impl1-match-leading-pipe-misleading-diagnostic-s452 — impl#1 DIAGNOSTIC DEFECT (filed, not fixed): a `match` whose arms carry a leading `|` reports E-TYPE-020 "Missing variants" for every variant instead of naming the `|` — `NEW S452; LOW; open`
 <!-- @gap id=g-impl1-match-leading-pipe-misleading-diagnostic-s452 sev=LOW status=open locus=compiler/src/codegen/emit-control-flow.ts:1486(parseMatchArm — no `|`-led form)+compiler/src/type-system.ts:18744(checkMatchDiagnostics — an unrecognised arm is not counted, so every variant reads as missing) prov=ruling:user-voice-scrml.md-S452-"c-looks-right" -->

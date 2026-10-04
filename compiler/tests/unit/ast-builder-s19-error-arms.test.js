@@ -84,9 +84,14 @@ describe("ast-builder §19 simplified arm §2: implicit binding", () => {
     expect(arms[0].binding).toBe("e");
   });
 
-  test("wildcard _ arm also has binding e", () => {
+  // S452 — a pipe-less `_ =>` is the §18.2 wildcard arm, parsed by the same
+  // path as `| _ =>`, and binds NOTHING (§19.4.3 S451: "`| _ :>` and
+  // `| else :>` still bind nothing"; the whole-error binder is the explicit
+  // `_ err`). Pre-S452 the short-form path gave it an implicit `e`.
+  test("wildcard _ arm binds nothing (S452: same as `| _ =>`)", () => {
     const { arms } = parseErrorArms("call()", "_ => fallback()");
-    expect(arms[0].binding).toBe("e");
+    expect(arms[0].pattern).toBe("_");
+    expect(arms[0].binding).toBe("");
   });
 });
 

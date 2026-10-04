@@ -268,9 +268,12 @@ describe("match-arrow-alias §8: :> wildcard arm in error-effect", () => {
     expect(arms[0].pattern).toBe("_");
   });
 
-  test("_ :> has implicit binding 'e'", () => {
+  // S452 — a pipe-less `_ :>` is the §18.2 wildcard arm, parsed by the same
+  // path as `| _ :>`, and binds NOTHING (§19.4.3 S451). Pre-S452 the
+  // short-form path gave it an implicit `e`.
+  test("_ :> binds nothing (S452: same as `| _ :>`)", () => {
     const { arms } = parseErrorArms("call()", "_ :> fallback()");
-    expect(arms[0].binding).toBe("e");
+    expect(arms[0].binding).toBe("");
   });
 
   test("multiple :> arms in error-effect produce correct count", () => {

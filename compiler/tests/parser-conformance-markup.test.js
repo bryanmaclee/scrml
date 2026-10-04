@@ -5925,11 +5925,15 @@ describe("F8 — Error-effect arms (!{...} — shapeErrorEffectBlock)", () => {
     // is only reached inside the leading-`|` branch). The native shaper is
     // more permissive (it recognizes a no-pipe `_` — see the unit test
     // above); the piped form is what both pipelines agree on for parity.
+    // S452 r4 — §19.4.5: a paren-free binder (`::NotFound e`) is legal only
+    // after a leading `|`; the live parser rejects the pipe-less spelling
+    // (E-PARSE-001), so the parity cases with a paren-free binder carry the
+    // legacy `|`.
     const ERR_PARITY_CASES = [
-        "!{ ::NotFound e -> fallback() }",
-        "!{ ::NotFound e -> a() | ::Timeout -> b() }",
+        "!{ | ::NotFound e -> fallback() }",
+        "!{ | ::NotFound e -> a() | ::Timeout -> b() }",
         "!{ ::QueryFailed (err) -> log(err) }",
-        "!{ ::A a -> x() | _ -> defaultHandler() }",
+        "!{ | ::A a -> x() | _ -> defaultHandler() }",
     ];
     const normWs = (s) => (typeof s === "string" ? s.replace(/\s+/g, "") : s);
     for (const src of ERR_PARITY_CASES) {
