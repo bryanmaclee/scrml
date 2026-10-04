@@ -54,6 +54,7 @@ ${
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan, newDiag } from "./ast.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, sqlFacts, txControl, txControlAware } from "./sql.scrml"
+    import { FxAtom, ownAtom, closeDim, witnessOf, atomChain } from "./effects.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -483,7 +484,9 @@ ${
     // scope, in order, with their file — the input of the no-write pass
     // (effectPass), which runs once every function body is bound.
     type EffectSrc:struct = { w: AEffect, file: string }
-    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[] }
+    // `pend` (s452, dpa-066 M3): the binder's decisions that need the effect
+    // summary — recorded where the binder meets them, decided by rulesPass.
+    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved, effects: EffectSrc[], pend: Pending[] }
     type RSym:struct = { s: Sym, st: AS }
 
     fn noFacts() -> NodeFacts {
@@ -506,11 +509,11 @@ ${
     }
 
     fn mint(st: AS, hint: string) -> RSym {
-        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects } }
+        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend } }
     }
 
     fn withFacts(st: AS, fs: NodeFacts) -> AS {
-        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects }
+        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend }
     }
 
     fn addName(st: AS, nid: int, f: NameFact) -> AS {
@@ -557,27 +560,38 @@ ${
 
     fn addDiag(st: AS, file: string, span: ASpan, code: string, msg: string) -> AS {
         const d: Diag = newDiag(code, msg, file, span)
-        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects }
+        return withDiag(st, d)
+    }
+
+    fn withDiag(st: AS, d: Diag) -> AS {
+        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: st.pend }
+    }
+
+    // s452 (dpa-066 M3): a decision for rulesPass, at the place in the
+    // diagnostic list where the binder used to make it.
+    fn addPending(st: AS, r: PendRule) -> AS {
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects,
+                 pend: st.pend.concat([{ at: st.diags.length, rule: r }]) }
     }
 
     fn addAnnot(st: AS, s: Sym, ty: Type) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad, effects: st.effects, pend: st.pend }
     }
 
     fn badParam(st: AS, nid: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects }
+                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields }, effects: st.effects, pend: st.pend }
     }
 
     fn badField(st: AS, id: int) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
-                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects }
+                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) }, effects: st.effects, pend: st.pend }
     }
 
     // s449: record an effect the binder accepted (the no-write pass's input).
     fn addEffectSrc(st: AS, w: AEffect, file: string) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad,
-                 effects: st.effects.concat([{ w: w, file: file }]) }
+                 effects: st.effects.concat([{ w: w, file: file }]), pend: st.pend }
     }
 
     // =========================================================================
@@ -597,7 +611,6 @@ ${
         fns: FnSrc[],
         handles: HandleInfo[],
         files: FileAst[],
-        clock: string[],        // r2 F4: the functions that read the clock, transitively (clockFns)
         errorSym: Sym,          // s451 (Ue): the built-in `Error` enum (§19.4.2 — a bare `!`'s error type)
         sqlErrorSym: Sym,       // s451 (Ue): the built-in `SqlError` enum (§19.8.1 — every query's error type)
     }
@@ -3037,58 +3050,17 @@ ${
             const info: DeclInfo = { nid: ds.nid, span: declSpan(ds), sym: ds.sym, kind: kind, single: single, file: ds.file, fields: fields, handles: own }
             decls = decls.concat([{ info: info, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
         }
-        const g: Globals = { program: program, entry: entry, te: te0, types: rt.ts, decls: decls, fns: rf.fs, handles: handles, files: files, clock: clockFns(files),
+        const g: Globals = { program: program, entry: entry, te: te0, types: rt.ts, decls: decls, fns: rf.fs, handles: handles, files: files,
                              errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError") }
         return { g: g, st: st }
     }
 
-    // r2 F4 — THE CLOCK SET: the functions whose body reads the clock
-    // (`Date.now()`), directly or through a function it calls (closed over the
-    // calls; a fixpoint bounded by the function count + 2). Syntactic and
-    // whole-program, like fnWrites: a call is matched by NAME (the bootstrap
-    // links one namespace), so a local that shadows a function's name
-    // over-approximates — a refusal, never a silence.
-    type FnCalls:struct = { name: string, callees: string[] }
-
-    fn clockFns(files: FileAst[]) -> string[] {
-        let clock: string[] = []
-        let calls: FnCalls[] = []
-        for (const f of files) {
-            for (const af of fnItems(f.items)) {
-                if (blockClock(af.body)) clock = clock.concat([af.name])
-                calls = calls.concat([{ name: af.name, callees: calledNames(blockEffects(af.body, [])) }])
-            }
-        }
-        let changed = true
-        let pass = 0
-        while (changed && pass < calls.length + 2) {
-            changed = false
-            for (const c of calls) {
-                if (clock.indexOf(c.name) < 0 && anyIn(c.callees, clock)) {
-                    clock = clock.concat([c.name])
-                    changed = true
-                }
-            }
-            pass = pass + 1
-        }
-        return clock
-    }
-
-    fn calledNames(keys: string[]) -> string[] {
-        let out: string[] = []
-        for (const k of keys) {
-            if (k.indexOf("()") == 0) out = out.concat([k.substring(2)])
-        }
-        return out
-    }
-
-    fn anyIn(xs: string[], set: string[]) -> boolean {
-        for (const x of xs) {
-            if (set.indexOf(x) >= 0) return true
-        }
-        return false
-    }
-
+    // r2 F4 — does a body read the clock (`Date.now()`) ITSELF? The effect
+    // summary's own `clock` fact (dpa-066 M3: the name-keyed whole-program
+    // set this section used to close over calls is retired — the summary
+    // closes it over the binder's Syms, rulesPass reads it). Syntactic — the
+    // call's shape, wherever it stands (a `fn` body too, where E-FN-004 also
+    // reports it).
     fn blockClock(b: ABlock) -> boolean {
         for (const s of b.stmts) {
             if (stmtClock(s)) return true
@@ -3872,28 +3844,32 @@ ${
     //    clock only by calling it itself (E-FN-004, resolveHost) — §48.6.1's
     //    "transitivity of `fn` constraints" holds by construction.
     //  - where the clock is not in the bootstrap (an initializer, markup, an
-    //    attribute value), a call of a function that reads it (clockFns) is
-    //    refused exactly as a direct `Date.now()` there is.
+    //    attribute value), a call of a function that reads it (directly or
+    //    through a call — the effect summary's `clock`) is refused exactly as a
+    //    direct `Date.now()` there is.
+    // Whether the callee reads the clock is the summary's to say: both are
+    // recorded here and decided by rulesPass (dpa-066 M3).
     fn callPurity(env: Env, e: AExpr, cf: FnInfo, st: AS) -> AS {
         const h: HostCtx = env.host
-        const clock: boolean = env.g.clock.indexOf(cf.name) >= 0
         return match h {
             .HostOk :> st
-            .HostPure :> fnCallsFunction(env, e, cf, clock, st)
-            .HostNo :> clockCallHere(env, e, cf, clock, st)
+            .HostPure :> fnCallsFunction(env, e, cf, st)
+            .HostNo :> clockCallHere(env, e, cf, st)
         }
     }
 
-    fn fnCallsFunction(env: Env, e: AExpr, cf: FnInfo, clock: boolean, st: AS) -> AS {
+    fn fnCallsFunction(env: Env, e: AExpr, cf: FnInfo, st: AS) -> AS {
         if (cf.pure) return st
-        let why: string = ""
-        if (clock) why = " — and `" + cf.name + "` reads the clock (" + dateNowText() + ", non-deterministic, §48.3.4)"
-        return addDiag(st, env.file, e.span, "E-FN-003", "a `fn` body calls `" + cf.name + "`, which is declared `function` — a `function` carries no purity guarantee, so a `fn` may call only another `fn` (§48.6.2)" + why + "; declare `" + cf.name + "` with `fn`, or make the caller a `function`")
+        return addPending(st, PendRule.PureCall(cf.sym.id, fnCallsFunctionDiag(env, e, cf, ""),
+            fnCallsFunctionDiag(env, e, cf, " — and `" + cf.name + "` reads the clock (" + dateNowText() + ", non-deterministic, §48.3.4)")))
     }
 
-    fn clockCallHere(env: Env, e: AExpr, cf: FnInfo, clock: boolean, st: AS) -> AS {
-        if (!clock) return st
-        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + cf.name + "()` reads the clock (" + dateNowText() + ", directly or through a function it calls) — here (an initializer, markup, or an attribute value) that is not in the bootstrap; its host-call surface is a `function` body or an event handler")
+    fn fnCallsFunctionDiag(env: Env, e: AExpr, cf: FnInfo, why: string) -> Diag {
+        return newDiag("E-FN-003", "a `fn` body calls `" + cf.name + "`, which is declared `function` — a `function` carries no purity guarantee, so a `fn` may call only another `fn` (§48.6.2)" + why + "; declare `" + cf.name + "` with `fn`, or make the caller a `function`", env.file, e.span)
+    }
+
+    fn clockCallHere(env: Env, e: AExpr, cf: FnInfo, st: AS) -> AS {
+        return addPending(st, PendRule.IfClock(cf.sym.id, newDiag("E-BOOTSTRAP-UNSUPPORTED", "`" + cf.name + "()` reads the clock (" + dateNowText() + ", directly or through a function it calls) — here (an initializer, markup, or an attribute value) that is not in the bootstrap; its host-call surface is a `function` body or an event handler", env.file, e.span)))
     }
 
     // s444 — THE HOST-CALL SURFACE (progress.md "host call surface"): exactly
@@ -6052,10 +6028,11 @@ ${
         const nf: NameFact | not = nameFactIn(st, c.nid)
         const f: FnInfo | not = calledFn(env, nf)
         if (f is some) {
-            if (mayRunOnServer(env.g, f)) {
-                return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `!{ … }` handler on " + f.name + "(…), whose body can place it on the server (a `" + sqlSigil() + "}` query or the `server` modifier) — a CLIENT call of a server function is failable whether or not it is declared `!` (§19.9.10), and the client→server call arrives with unit U1b; until then whether this handler can run is not decided here")
-            }
-            return addDiag(st, env.file, e.span, "E-ERROR-013", deadHandlerMsg(f.name))
+            // whether its own body places it on the server is the effect
+            // summary's `server` fact — decided by rulesPass (dpa-066 M3)
+            return addPending(st, PendRule.ServerOrDead(f.sym.id,
+                newDiag("E-BOOTSTRAP-UNSUPPORTED", "a `!{ … }` handler on " + f.name + "(…), whose body can place it on the server (a `" + sqlSigil() + "}` query or the `server` modifier) — a CLIENT call of a server function is failable whether or not it is declared `!` (§19.9.10), and the client→server call arrives with unit U1b; until then whether this handler can run is not decided here", env.file, e.span),
+                newDiag("E-ERROR-013", deadHandlerMsg(f.name), env.file, e.span)))
         }
         const n: string = exprName(c)
         if (n != "" && nf is not) return st               // the name did not resolve: reported where it stands
@@ -6104,15 +6081,6 @@ ${
     fn boolText(b: boolean) -> string {
         if (b) return "true"
         return "false"
-    }
-
-    // A function placePass may put on the server (§12.2 T1 / T4 — its own
-    // body's `?{}` or the deprecated `server` modifier; placePass's
-    // `serverTriggered`, read from the same syntax).
-    fn mayRunOnServer(g: Globals, f: FnInfo) -> boolean {
-        const fs: FnSrc | not = fnSrcOf(g, f.sym.id)
-        if (fs is not) return false
-        return fs.f.server || sqlsInBlock(fs.f.body).length > 0
     }
 
     // One arm: its pattern's variant (`idx`: -1 wildcard, -2 `.Ok`, -3 none),
@@ -6331,8 +6299,18 @@ ${
     fn armValueExpr(env: Env, a: AArm, x: AExpr, cx: ArmCx, st0: AS) -> AS {
         if (isWriteExpr(x)) return fallsThrough(env, a, cx, resolveStmtExpr(env, x, st0))
         const st: AS = resolveExpr(withWholeAt(env, x.nid, "the value of an enclosing arm"), x, not, st0).st
-        if (callYieldsNothing(env, st, x)) return fallsThrough(env, a, cx, st)
-        return st
+        return pendNoValue(env, a, cx, x, st)
+    }
+
+    // A call of a declared scrml function as the arm's value: whether it yields
+    // a value is the effect summary's `noValue` (transitive through
+    // `return <call>` — G7), decided by rulesPass (dpa-066 M3).
+    fn pendNoValue(env: Env, a: AArm, cx: ArmCx, x: AExpr, st: AS) -> AS {
+        const c: AExpr | not = calleeOf(x.k)
+        if (c is not) return st
+        const f: FnInfo | not = calledFn(env, nameFactIn(st, c.nid))
+        if (f is not) return st
+        return addPending(st, PendRule.IfNoValue(f.sym.id, fallsThroughDiag(env, a, cx)))
     }
 
     fn armBlock(env: Env, a: AArm, b: ABlock, cx: ArmCx, st0: AS) -> AS {
@@ -6412,44 +6390,8 @@ ${
         return false
     }
 
-    // A call of a declared scrml function that yields no value (§19.4.3: "a
-    // call whose result is not a value of the success type (`log(m)`)").
-    fn callYieldsNothing(env: Env, st: AS, x: AExpr) -> boolean {
-        const c: AExpr | not = calleeOf(x.k)
-        if (c is not) return false
-        const f: FnInfo | not = calledFn(env, nameFactIn(st, c.nid))
-        if (f is not) return false
-        return !fnYieldsValue(env.g, f)
-    }
-
-    // Does a call of `f` produce a value? A declared return type does (`->
-    // void` declares that it does not, §7.5 — FnInfo.ret is `not` for it); a
-    // `!` function's result is handled, never read here; otherwise the body
-    // decides — a value on EVERY path, proven syntactically, FAIL CLOSED
-    // (judged "no value" → E-ERROR-012 at a value-position arm):
-    //   - s452 r3 (MED-B): a bare `return` ANYWHERE in the body (any depth — an
-    //     `if` branch, a `given` body, a handling form's arm block) is a path
-    //     with no value;
-    //   - otherwise the statements are walked in order and the FIRST one that
-    //     returns a value on every path through it decides (s452 r3 LOW-C — what
-    //     follows it is dead): `return <expr>`, or an `if` / `else` both of whose
-    //     blocks do. Reaching the end of the body is no value.
-    //   - A `fn` / `function` body's tail EXPRESSION is not a value: the
-    //     bootstrap gives neither implicit tail return (`fn h() { "a" }` prints
-    //     `function h() { "a"; }` — returns nothing; checked s452 r3).
-    // Unprovable, so judged "no value": a `given` (its body runs only when the
-    // value is present), a statement-position handling form whose arms return,
-    // an `if` without `else`.
-    fn fnYieldsValue(g: Globals, f: FnInfo) -> boolean {
-        if (f.ret is some || f.failable) return true
-        const fs: FnSrc | not = fnSrcOf(g, f.sym.id)
-        if (fs is not) return true                         // unknown: never claimed to be empty
-        const r: AType | not = fs.f.ret
-        if (r is some) return !declaresVoid(r)
-        if (blockHasBareReturn(fs.f.body)) return false
-        return blockYieldsOnAllPaths(fs.f.body)
-    }
-
+    // What "yields a value" reads in a body (ownNoValue, the effect summary's
+    // own fact; the rule is stated there).
     fn declaresVoid(t: AType) -> boolean {
         const k: ATypeK = t.k
         return match k {
@@ -6532,14 +6474,18 @@ ${
 
     // E-ERROR-012 (§19.4.3 ruling 1a), with the SPEC's message.
     fn fallsThrough(env: Env, a: AArm, cx: ArmCx, st: AS) -> AS {
+        return withDiag(st, fallsThroughDiag(env, a, cx))
+    }
+
+    fn fallsThroughDiag(env: Env, a: AArm, cx: ArmCx) -> Diag {
         const pat: string = patLabel(a.pat)
         const where: string = whereLabel(cx.what)
         const form: string = handledFormLabel(cx)
         const n: string = exprName(maybeCallee(cx.subj))
         if (n != "") {
-            return addDiag(st, env.file, a.span, "E-ERROR-012", "Arm '" + pat + "' of the " + form + " on '" + n + "(…)' produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of '" + n + "'s success type or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or call '" + n + "(…) !{ … }' as a statement and keep the writes in its arms.")
+            return newDiag("E-ERROR-012", "Arm '" + pat + "' of the " + form + " on '" + n + "(…)' produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of '" + n + "'s success type or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or call '" + n + "(…) !{ … }' as a statement and keep the writes in its arms.", env.file, a.span)
         }
-        return addDiag(st, env.file, a.span, "E-ERROR-012", "Arm '" + pat + "' of the " + form + " on " + subjectName(cx.subj) + " produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of its success type (a `" + sqlSigil() + "}` query's is its terminator's, §44.3: `.get()` → `Row | not`, `.all()` → `Row[]`) or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or handle it as a statement and keep the writes in its arms.")
+        return newDiag("E-ERROR-012", "Arm '" + pat + "' of the " + form + " on " + subjectName(cx.subj) + " produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of its success type (a `" + sqlSigil() + "}` query's is its terminator's, §44.3: `.get()` → `Row | not`, `.all()` → `Row[]`) or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or handle it as a statement and keep the writes in its arms.", env.file, a.span)
     }
 
     fn maybeCallee(e: AExpr) -> AExpr {
@@ -11421,10 +11367,11 @@ ${
     // transitively over the static call graph (a fixed point, so recursion is
     // handled)." Here each function's body is SCANNED once over the binder's
     // facts (BodyScan: its direct writes, the scrml functions it calls or hands
-    // on as values, and the call sites nothing resolves), then the summaries are
-    // closed over those references to a fixed point. What a summary keeps is a
-    // WITNESS — the first call chain down to a write (or to an unresolvable
-    // call) — because the message "SHALL name the call chain down to the write".
+    // on as values, and the call sites nothing resolves), and the EFFECT
+    // SUMMARY (summarize, below — dpa-066) closes the scans over those
+    // references to a fixed point. What a rule reads from it is a WITNESS — the
+    // first call chain down to a write (or to an unresolvable call) — because
+    // the message "SHALL name the call chain down to the write".
     //
     // The rules, as the bootstrap meets them:
     //  1. a direct write in the body — any write the binder classified (an
@@ -11477,10 +11424,9 @@ ${
     type FnRef:struct = { sym: int, name: string, span: ASpan, file: string, asValue: boolean }
     type BodyScan:struct = { writes: WSite[], refs: FnRef[], unproven: USite[] }
     // The first chain (display labels — `f()` — outermost first) down to a
-    // write / an unresolvable call.
+    // write / an unresolvable call: what the summary answers (writeWitness).
     type Witness:struct = { chain: string[], site: WSite }
     type UWitness:struct = { chain: string[], site: USite }
-    type FnSummary:struct = { sym: int, name: string, scan: BodyScan, w: Witness | not, u: UWitness | not }
     type WCx:struct = { t: Tables, file: string }
 
     fn emptyScan() -> BodyScan { return { writes: [], refs: [], unproven: [] } }
@@ -12027,50 +11973,9 @@ ${
         return ""
     }
 
-    // ---- the summaries: one scan per function, closed over references ---------
-    // Plus one per user declaration (its CONSTRUCTION) and one per formula (a
-    // field computed on its read) — see the banner.
-    fn fnSummaries(g: Globals, t: Tables) -> FnSummary[] {
-        let out: FnSummary[] = []
-        for (const fs of g.fns) {
-            const label: string = fs.info.name + "()"
-            const scan: BodyScan = scanBlock({ t: t, file: fs.info.file }, fs.f.body, emptyScan())
-            out = out.concat([{ sym: fs.info.sym.id, name: label, scan: scan, w: directWitness(label, scan), u: directUWitness(label, scan) }])
-        }
-        for (const ds of g.decls) {
-            if (!ds.isProgram) {
-                const label: string = constructionLabel(ds.info.sym.hint)
-                const scan: BodyScan = constructionScan(t, ds)
-                out = out.concat([{ sym: ds.info.sym.id, name: label, scan: scan, w: directWitness(label, scan), u: directUWitness(label, scan) }])
-            }
-            // HIGH-1: one summary per formula — a field computed on its read
-            for (const fi of ds.info.fields) {
-                const w: Sym | not = fi.wcap
-                if (w is not) {
-                    const flabel: string = formulaLabel(t, fi)
-                    const fscan: BodyScan = scanValue({ t: t, file: ds.file }, fi.init, emptyScan())
-                    out = out.concat([{ sym: fi.sym.id, name: flabel, scan: fscan, w: directWitness(flabel, fscan), u: directUWitness(flabel, fscan) }])
-                }
-            }
-        }
-        // the fixed point: a pass adds a witness to a function whose callee has
-        // one; a witness, once found, is kept (each function gains at most two),
-        // so it ends within (function count + 2) passes
-        let changed = true
-        let pass = 0
-        while (changed && pass < out.length + 2) {
-            changed = false
-            let next: FnSummary[] = []
-            for (const s of out) {
-                const r: FnSummary = propagated(s, out)
-                if (gainedWitness(s, r)) changed = true
-                next = next.concat([r])
-            }
-            out = next
-            pass = pass + 1
-        }
-        return out
-    }
+    // ---- the scans the summary closes: one per function (scanBlock), one per
+    // user declaration (its CONSTRUCTION) and one per formula (a field computed
+    // on its read) — see the banner; summarize builds them.
 
     // What constructing a declaration's instance runs: every field initializer
     // (the declared defaults — a use-site value is evaluated where the use
@@ -12127,62 +12032,26 @@ ${
         }
     }
 
-    fn directWitness(name: string, scan: BodyScan) -> Witness | not {
-        if (scan.writes.length == 0) return not
-        return { chain: [name], site: scan.writes[0] }
+    // ---- the queries: the first write / unresolvable call callable `i` reaches
+    // (its first atom in the summary's `writes` / `writesOpen`; dpa-066 M1).
+    fn writeWitness(s: Summary, i: int) -> Witness | not {
+        const a: FxAtom | not = witnessOf(s.writes[i])
+        if (a is not) return not
+        return { chain: fxChain(s, s.writes, i, a), site: s.nodes[a.root].f.scan.writes[a.pos] }
     }
 
-    fn directUWitness(name: string, scan: BodyScan) -> UWitness | not {
-        if (scan.unproven.length == 0) return not
-        return { chain: [name], site: scan.unproven[0] }
-    }
-
-    // `s` with a witness taken from the first callee (or function value) that has one.
-    fn propagated(s: FnSummary, all: FnSummary[]) -> FnSummary {
-        let w: Witness | not = s.w
-        let u: UWitness | not = s.u
-        for (const r of s.scan.refs) {
-            const c: FnSummary | not = summaryOf(all, r.sym)
-            if (c is some) {
-                const cw: Witness | not = c.w
-                const cu: UWitness | not = c.u
-                if (w is not && cw is some) w = { chain: [s.name].concat(cw.chain), site: cw.site }
-                if (u is not && cu is some) u = { chain: [s.name].concat(cu.chain), site: cu.site }
-            }
-        }
-        return { sym: s.sym, name: s.name, scan: s.scan, w: w, u: u }
-    }
-
-    fn gainedWitness(before: FnSummary, after: FnSummary) -> boolean {
-        const bw: Witness | not = before.w
-        const aw: Witness | not = after.w
-        const bu: UWitness | not = before.u
-        const au: UWitness | not = after.u
-        return (bw is not && aw is some) || (bu is not && au is some)
-    }
-
-    fn summaryOf(all: FnSummary[], sym: int) -> FnSummary | not {
-        for (const s of all) {
-            if (s.sym == sym) return s
-        }
-        return not
+    fn openWitness(s: Summary, i: int) -> UWitness | not {
+        const a: FxAtom | not = witnessOf(s.writesOpen[i])
+        if (a is not) return not
+        return { chain: fxChain(s, s.writesOpen, i, a), site: s.nodes[a.root].f.scan.unproven[a.pos] }
     }
 
     // ---- the pass: every accepted effect's body against the summaries ---------
     // (and every value position — §6.15, valueDiags)
-    fn effectPass(g: Globals, t: Tables, effects: EffectSrc[]) -> Diag[] {
-        // the value positions are scanned first: the summaries are built only
-        // when something refers to a function (most initializers are literals)
+    fn effectPass(g: Globals, t: Tables, effects: EffectSrc[], sum: Summary) -> Diag[] {
         const ps: ValuePos[] = valuePositions(g, t)
         let scans: BodyScan[] = []
-        let needSums: boolean = effects.length > 0
-        for (const p of ps) {
-            const ps1: BodyScan = scanValue({ t: t, file: p.file }, p.v, emptyScan())
-            if (ps1.refs.length > 0) needSums = true
-            scans = scans.concat([ps1])
-        }
-        let sums: FnSummary[] = []
-        if (needSums) sums = fnSummaries(g, t)
+        for (const p of ps) { scans = scans.concat([scanValue({ t: t, file: p.file }, p.v, emptyScan())]) }
         // The ROOTS: each value position's own writes / write chains (not
         // through another value position). They come first — each is the cause
         // of whatever a reader of that value would report. When there is a
@@ -12194,8 +12063,8 @@ ${
         let echoes: Diag[] = []
         let i: int = 0
         for (const p of ps) {
-            roots = roots.concat(valueDiags(p, scans[i], sums, true))
-            echoes = echoes.concat(valueDiags(p, scans[i], sums, false))
+            roots = roots.concat(valueDiags(p, scans[i], sum, true))
+            echoes = echoes.concat(valueDiags(p, scans[i], sum, false))
             i = i + 1
         }
         const quiet: boolean = roots.length > 0
@@ -12204,7 +12073,7 @@ ${
         for (const es of effects) {
             const scan: BodyScan = scanBlock({ t: t, file: es.file }, es.w.body, emptyScan())
             for (const w of scan.writes) { out = out.concat([writesDirect(es.w, w)]) }
-            for (const r of scan.refs) { out = out.concat(refDiags(es.w, r, summaryOf(sums, r.sym), quiet)) }
+            for (const r of scan.refs) { out = out.concat(refDiags(es.w, r, sum, quiet)) }
             for (const u of scan.unproven) { out = out.concat([unprovenDirect(u)]) }
         }
         return out
@@ -12224,15 +12093,16 @@ ${
         return l.indexOf("formula of ") == 0 || l.indexOf("construction of ") == 0
     }
 
-    fn refDiags(w: AEffect, r: FnRef, s: FnSummary | not, quiet: boolean) -> Diag[] {
+    fn refDiags(w: AEffect, r: FnRef, s: Summary, quiet: boolean) -> Diag[] {
         // fix round (LOW a): a reference with no summary is unresolved — fail closed
-        if (s is not) return [newDiag("E-EFFECT-WRITE-UNPROVEN", "this effect reaches `" + r.name + "`, which has no write summary — the compiler cannot prove it writes no reactive cell, and the rule fails closed (§6.7.4 rule 4)", r.file, r.span)]
-        const sw: Witness | not = s.w
+        const i: int = nodeIdx(s.nodes, r.sym)
+        if (i < 0) return [newDiag("E-EFFECT-WRITE-UNPROVEN", "this effect reaches `" + r.name + "`, which has no write summary — the compiler cannot prove it writes no reactive cell, and the rule fails closed (§6.7.4 rule 4)", r.file, r.span)]
+        const sw: Witness | not = writeWitness(s, i)
         if (sw is some) {
             if (quiet && throughValue(r, sw.chain)) return []
             return [writesThrough(w, r, sw)]
         }
-        const su: UWitness | not = s.u
+        const su: UWitness | not = openWitness(s, i)
         if (su is some) {
             if (quiet && throughValue(r, su.chain)) return []
             return [unprovenThrough(r, su)]
@@ -12458,17 +12328,18 @@ ${
     // Every write / write chain / unresolvable call a position's scan reaches.
     // `rootsOnly`: leave out a chain through another value position (a
     // formula / a construction) — its echo (see effectPass).
-    fn valueDiags(p: ValuePos, scan: BodyScan, sums: FnSummary[], rootsOnly: boolean) -> Diag[] {
+    fn valueDiags(p: ValuePos, scan: BodyScan, sum: Summary, rootsOnly: boolean) -> Diag[] {
         let out: Diag[] = []
         for (const w of scan.writes) { out = out.concat([valueWrites(p, "writes `" + w.cell + "`", w.span, w.file)]) }
-        for (const r of scan.refs) { out = out.concat(valueRefDiags(p, r, summaryOf(sums, r.sym), rootsOnly)) }
+        for (const r of scan.refs) { out = out.concat(valueRefDiags(p, r, sum, rootsOnly)) }
         for (const u of scan.unproven) { out = out.concat([valueUnproven(p, u.what, u.span, u.file)]) }
         return out
     }
 
-    fn valueRefDiags(p: ValuePos, r: FnRef, s: FnSummary | not, rootsOnly: boolean) -> Diag[] {
-        if (s is not) return [valueUnproven(p, "it reaches `" + r.name + "`, which has no write summary", r.span, r.file)]
-        const sw: Witness | not = s.w
+    fn valueRefDiags(p: ValuePos, r: FnRef, s: Summary, rootsOnly: boolean) -> Diag[] {
+        const i: int = nodeIdx(s.nodes, r.sym)
+        if (i < 0) return [valueUnproven(p, "it reaches `" + r.name + "`, which has no write summary", r.span, r.file)]
+        const sw: Witness | not = writeWitness(s, i)
         if (sw is some) {
             if (rootsOnly && throughValue(r, sw.chain)) return []
             const chain: string = chainText(sw.chain) + " → " + sw.site.cell
@@ -12477,7 +12348,7 @@ ${
             if (isValueLabel(r.name)) how = "reads a value whose evaluation writes `" + sw.site.cell + "`: `" + chain + "`"
             return [valueWrites(p, how, r.span, r.file)]
         }
-        const su: UWitness | not = s.u
+        const su: UWitness | not = openWitness(s, i)
         if (su is some) {
             if (rootsOnly && throughValue(r, su.chain)) return []
             return [valueUnproven(p, "it reaches a call the compiler cannot resolve, through `" + chainText(su.chain) + "`: " + su.site.what, r.span, r.file)]
@@ -13482,125 +13353,44 @@ ${
         return out
     }
 
-    // CLIENT REACH (a fixed point): the first chain from a NON-server function
-    // down to its client-state access, through non-server callees. A server
-    // callee stops the walk — it is judged on its own (server → server is a
-    // call in place, §13.4).
-    type ReachOf:struct = { sym: int, r: Reach | not }
-
-    fn clientReach(all: FnFacts[], ps: PlaceFact[]) -> ReachOf[] {
-        let out: ReachOf[] = []
-        for (const f of all) {
-            let r: Reach | not = not
-            const p: PlaceK = placeOf(ps, f.sym)
-            if (p != PlaceK.Server) r = directClient(f)
-            out = out.concat([{ sym: f.sym, r: r }])
-        }
-        let changed = true
-        let pass = 0
-        while (changed && pass < all.length + 2) {
-            changed = false
-            let next: ReachOf[] = []
-            for (const x of out) {
-                let r: Reach | not = x.r
-                const f: FnFacts | not = factsOf(all, x.sym)
-                const p: PlaceK = placeOf(ps, x.sym)
-                if (r is not && f is some && p != PlaceK.Server) {
-                    for (const ref of fnRefs(all, f)) {
-                        const c: Reach | not = reachOf(out, ref.sym)
-                        if (r is not && c is some && placeOf(ps, ref.sym) != PlaceK.Server) {
-                            r = { chain: [f.name + "()"].concat(c.chain), what: c.what }
-                            changed = true
-                        }
-                    }
-                }
-                next = next.concat([{ sym: x.sym, r: r }])
-            }
-            out = next
-            pass = pass + 1
-        }
-        return out
+    // THE REACHES — queries over the effect summary (dpa-066 M2; the three
+    // fixpoints that computed them are retired). Each is the first chain (the
+    // summary's witness) from function `sym` down to:
+    //  - clientReachOf (§12.4 R2): a client-state access, through non-server
+    //    callees — a server callee is judged on its own (server → server is a
+    //    call in place, §13.4); a server function reaches none of its own;
+    //  - routeOpenOf (§12.4 R3): a call the analysis cannot resolve, through
+    //    non-server callees;
+    //  - waitsOf (§13.2, §13.7 item 2): a server or split function — async colour.
+    fn clientReachOf(s: Summary, sym: int) -> Reach | not {
+        const i: int = nodeIdx(s.nodes, sym)
+        if (i < 0) return not
+        const a: FxAtom | not = witnessOf(s.client[i])
+        if (a is not) return not
+        return { chain: fxChain(s, s.client, i, a), what: clientWhats(s.nodes[a.root].f)[a.pos] }
     }
 
-    fn directClient(f: FnFacts) -> Reach | not {
-        if (f.doms.length > 0) return { chain: [f.name + "()"], what: f.doms[0].what }
-        if (f.scan.writes.length > 0) return { chain: [f.name + "()"], what: "writes `" + f.scan.writes[0].cell + "`" }
-        if (f.reads.length > 0) return { chain: [f.name + "()"], what: "reads `" + f.reads[0].what + "`" }
-        return not
+    fn routeOpenOf(s: Summary, sym: int) -> Reach | not {
+        const i: int = nodeIdx(s.nodes, sym)
+        if (i < 0) return not
+        const a: FxAtom | not = witnessOf(s.routeOpen[i])
+        if (a is not) return not
+        return { chain: fxChain(s, s.routeOpen, i, a), what: s.nodes[a.root].f.scan.unproven[a.pos].what }
     }
 
-    fn reachOf(rs: ReachOf[], sym: int) -> Reach | not {
-        for (const x of rs) {
-            if (x.sym == sym) return x.r
-        }
-        return not
+    fn waitsOf(s: Summary, sym: int) -> Reach | not {
+        const i: int = nodeIdx(s.nodes, sym)
+        if (i < 0) return not
+        const a: FxAtom | not = witnessOf(s.waits[i])
+        if (a is not) return not
+        return { chain: fxChain(s, s.waits, i, a), what: "" }
     }
 
-    // UNRESOLVED REACH: the first chain from a function down to a call the
-    // analysis cannot resolve, through non-server callees.
-    fn unresolvedReach(all: FnFacts[], ps: PlaceFact[]) -> ReachOf[] {
-        let out: ReachOf[] = []
-        for (const f of all) {
-            let r: Reach | not = not
-            if (f.scan.unproven.length > 0) r = { chain: [f.name + "()"], what: f.scan.unproven[0].what }
-            out = out.concat([{ sym: f.sym, r: r }])
-        }
-        let changed = true
-        let pass = 0
-        while (changed && pass < all.length + 2) {
-            changed = false
-            let next: ReachOf[] = []
-            for (const x of out) {
-                let r: Reach | not = x.r
-                const f: FnFacts | not = factsOf(all, x.sym)
-                if (r is not && f is some) {
-                    for (const ref of fnRefs(all, f)) {
-                        const c: Reach | not = reachOf(out, ref.sym)
-                        if (r is not && c is some && placeOf(ps, ref.sym) != PlaceK.Server) {
-                            r = { chain: [f.name + "()"].concat(c.chain), what: c.what }
-                            changed = true
-                        }
-                    }
-                }
-                next = next.concat([{ sym: x.sym, r: r }])
-            }
-            out = next
-            pass = pass + 1
-        }
-        return out
-    }
-
-    // ASYNC COLOR (§13.2, §13.7 item 2): a server or split function, or a
-    // client function that reaches one — the chain down to the server call.
-    fn asyncReach(all: FnFacts[], ps: PlaceFact[]) -> ReachOf[] {
-        let out: ReachOf[] = []
-        for (const f of all) {
-            let r: Reach | not = not
-            const p: PlaceK = placeOf(ps, f.sym)
-            if (p == PlaceK.Server || p == PlaceK.Split) r = { chain: [f.name + "()"], what: "" }
-            out = out.concat([{ sym: f.sym, r: r }])
-        }
-        let changed = true
-        let pass = 0
-        while (changed && pass < all.length + 2) {
-            changed = false
-            let next: ReachOf[] = []
-            for (const x of out) {
-                let r: Reach | not = x.r
-                const f: FnFacts | not = factsOf(all, x.sym)
-                if (r is not && f is some) {
-                    for (const ref of fnRefs(all, f)) {
-                        const c: Reach | not = reachOf(out, ref.sym)
-                        if (r is not && c is some) {
-                            r = { chain: [f.name + "()"].concat(c.chain), what: "" }
-                            changed = true
-                        }
-                    }
-                }
-                next = next.concat([{ sym: x.sym, r: r }])
-            }
-            out = next
-            pass = pass + 1
+    // The functions' own facts, as the summary read them (one scan per body).
+    fn fnFactsOf(s: Summary) -> FnFacts[] {
+        let out: FnFacts[] = []
+        for (const c of s.nodes) {
+            if (c.kind == CallableK.KFn) out = out.concat([c.f])
         }
         return out
     }
@@ -13998,24 +13788,14 @@ ${
     }
 
     // ---- the pass ------------------------------------------------------------------
-    fn placePass(g: Globals, t: Tables, st0: AS) -> RPlaced {
+    fn placePass(g: Globals, t: Tables, st0: AS, sum: Summary) -> RPlaced {
         const cx: PlaceCx = { t: t, g: g }
         let st: AS = st0
-        let all: FnFacts[] = []
-        for (const fs of g.fns) { all = all.concat([fnFacts(cx, fs)]) }
-        let places: PlaceFact[] = []
-        for (const f of all) { places = places.concat([{ sym: f.sym, name: f.name, place: directPlace(f) }]) }
-        // a function that reaches a client-only function is client-only (§12.4)
-        const creach: ReachOf[] = clientReach(all, places)
-        let ps2: PlaceFact[] = []
-        for (const p of places) {
-            let pk: PlaceK = p.place
-            if (pk == PlaceK.Ambient && reachOf(creach, p.sym) is some) pk = PlaceK.Client
-            ps2 = ps2.concat([{ sym: p.sym, name: p.name, place: pk }])
-        }
-        places = ps2
-        const ureach: ReachOf[] = unresolvedReach(all, places)
-        const areach: ReachOf[] = asyncReach(all, places)
+        // the functions' own facts and the ONE placement — the effect summary's
+        // (dpa-066 M2): each function by its own body, an ambient one that
+        // reaches a client-only function made client-only (§12.4)
+        const all: FnFacts[] = fnFactsOf(sum)
+        const places: PlaceFact[] = sum.places
 
         // the databases
         const rd: RDbs = dbsPass(g, g.files, st)
@@ -14036,7 +13816,7 @@ ${
                 st = addDiag(st, f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + f.name + "()` both runs a `" + sqlSigil() + "}` query and writes `" + f.scan.writes[0].cell + "`, so it is split across the client/server boundary (§19.9.5: \"A function whose body mixes a server-trigger statement with a reactive-assignment statement is split\") — the body split arrives with unit U1d. Until then: return the value from a server function and write the cell in the caller")
             } else if (pk == PlaceK.Server) {
                 servers = servers.concat([f.sym])
-                st = serverBodyDiags(cx, f, all, places, creach, ureach, st)
+                st = serverBodyDiags(cx, f, all, places, sum, st)
             } else {
                 // client / ambient code calling a server function: a suspension (U1b)
                 for (const r of fnRefs(all, f)) {
@@ -14062,7 +13842,7 @@ ${
         }
 
         // value positions (§13.7) and action positions
-        st = valueServerDiags(g, t, all, places, areach, rd, st)
+        st = valueServerDiags(g, t, all, places, sum, rd, st)
         st = actionServerDiags(g, t, all, places, rd, st)
         return { facts: { servers: servers, sqls: sqls, dbs: owned, places: places }, doms: doms, st: st }
     }
@@ -14078,7 +13858,7 @@ ${
     }
 
     // A wholly-server function's own body and call graph (§6.6.9, §12.4, §12.5.3).
-    fn serverBodyDiags(cx: PlaceCx, f: FnFacts, all: FnFacts[], ps: PlaceFact[], creach: ReachOf[], ureach: ReachOf[], st0: AS) -> AS {
+    fn serverBodyDiags(cx: PlaceCx, f: FnFacts, all: FnFacts[], ps: PlaceFact[], sum: Summary, st0: AS) -> AS {
         let st: AS = st0
         let seen: string[] = []
         for (const r of f.reads) {
@@ -14092,11 +13872,11 @@ ${
         }
         for (const ref of fnRefs(all, f)) {
             if (placeOf(ps, ref.sym) != PlaceK.Server) {
-                const c: Reach | not = reachOf(creach, ref.sym)
+                const c: Reach | not = clientReachOf(sum, ref.sym)
                 if (c is some) {
                     st = addDiag(st, ref.file, ref.span, "E-ROUTE-002", "server function `" + f.name + "()` reaches client-only code: `" + [f.name + "()"].concat(c.chain).join(" → ") + "` " + c.what + " (§12.4 — reactive state and the DOM live in the browser, S451 R2). Pass the value in as an argument, extract the shared logic into a pure function (§33) that touches no cell, or duplicate the logic inside `" + f.name + "()`")
                 }
-                const u: Reach | not = reachOf(ureach, ref.sym)
+                const u: Reach | not = routeOpenOf(sum, ref.sym)
                 if (u is some) {
                     st = addDiag(st, ref.file, ref.span, "E-ROUTE-001", "server function `" + f.name + "()` cannot be fully analyzed for route placement: `" + [f.name + "()"].concat(u.chain).join(" → ") + "` — " + u.what + " (§12.4: \"SHALL be a compile error\"). Call a declared scrml function by its name")
                 }
@@ -14230,7 +14010,7 @@ ${
     }
 
     // §13.7 (S451 R1): a value position that would have to WAIT.
-    fn valueServerDiags(g: Globals, t: Tables, all: FnFacts[], ps: PlaceFact[], areach: ReachOf[], rd: RDbs, st0: AS) -> AS {
+    fn valueServerDiags(g: Globals, t: Tables, all: FnFacts[], ps: PlaceFact[], sum: Summary, rd: RDbs, st0: AS) -> AS {
         let st: AS = st0
         for (const p of valuePositions(g, t)) {
             for (const s of sqlsInValue(p.v)) {
@@ -14242,7 +14022,7 @@ ${
             const scan: BodyScan = scanValue({ t: t, file: p.file }, p.v, emptyScan())
             for (const r of scan.refs) {
                 const pk: PlaceK = placeOf(ps, r.sym)
-                const c: Reach | not = reachOf(areach, r.sym)
+                const c: Reach | not = waitsOf(sum, r.sym)
                 if (pk == PlaceK.Server) {
                     st = addDiag(st, r.file, r.span, "E-VALUE-SERVER-CALL", p.what + " calls the server function `" + r.name + "` — " + waitFix())
                 } else if (c is some) {
@@ -14286,11 +14066,484 @@ ${
     }
 
     // =========================================================================
+    // s452 (dpa-066, RATIFIED S452 "all your recs" item 3) — THE EFFECT
+    // SUMMARY. One record per CALLABLE — a scrml function, a user
+    // declaration's CONSTRUCTION, a FORMULA (a field computed on its read) —
+    // computed once, after binding, over the binder's Syms, and closed over
+    // the call graph by effects.scrml (strongly connected components,
+    // bottom-up; ruling 3.1). Every rule that asks "what does this callable
+    // transitively do?" reads it.
+    //
+    // The OWN facts of a callable come from its body, read once: the write
+    // scan (BodyScan — writes, references, unresolvable calls; the no-write
+    // rule's banner above), its `?{}` sites, its client reads and DOM globals
+    // (placement), whether it reads the clock, and whether a call of it yields
+    // a value. The DIMENSIONS, each closed over the references that carry it
+    // (per-dimension knowledge, ruling 3.2 — known facts and open reasons are
+    // separate dimensions; no global TOP):
+    //   writes      §6.7.4 / §6.15 — the cells it may write; every reference
+    //               (calls, function values — rule 3 —, the construction a
+    //               shared-instance read runs, the formula a derived read runs)
+    //   writesOpen  §6.7.4 rule 4 — the calls the analysis cannot resolve; the same references
+    //   client      §12.4 R2 — a client-only access (DOM global, cell write,
+    //               cell read) of a NON-server function, through non-server
+    //               functions: a server callee is judged on its own
+    //   routeOpen   §12.4 R3 — the unresolvable calls of a function, through non-server functions
+    //   waits       §13.2 / §13.7 item 2 — async colour: a server or split
+    //               function, through every function reference
+    //   clock       §48.6 / §33.3 item 7 — a body that reads the clock, through
+    //               function CALLS (§48.6.2 is a rule about calls; a function
+    //               value is refused in the bootstrap)
+    //   noValue     §19.4.3 ruling 1a — a call of it yields no value: its own
+    //               body (a bare `return`, a path that falls off, `-> void`),
+    //               or a `return <call>` of a function that yields none (G7 —
+    //               ruling 3.4/3.6: "returns a value" is in the summary)
+    // and the ONE placement (§12.2): each function by its own body, an
+    // ambient one that reaches client-only code made client (§12.4).
+    // =========================================================================
+    type CallableK:enum = { KFn, KConstruct, KFormula }
+    // `f`: the own facts (a construction / formula has no `?{}`, client read or
+    // DOM access of its own here — its reads are cell reads, recorded by the
+    // reads that reach it). `clock` / `noValue` / `rets`: functions only.
+    type Callable:struct = { kind: CallableK, label: string, f: FnFacts, clock: boolean, noValue: boolean, rets: int[] }
+    type Summary:struct = {
+        nodes: Callable[],
+        writes: FxAtom[][],
+        writesOpen: FxAtom[][],
+        places: PlaceFact[],
+        client: FxAtom[][],
+        routeOpen: FxAtom[][],
+        waits: FxAtom[][],
+        clock: FxAtom[][],
+        noValue: FxAtom[][],
+    }
+
+    fn summarize(g: Globals, t: Tables) -> Summary {
+        const cx: PlaceCx = { t: t, g: g }
+        let nodes: Callable[] = []
+        for (const fs of g.fns) {
+            nodes = nodes.concat([{ kind: CallableK.KFn, label: fs.info.name + "()", f: fnFacts(cx, fs), clock: blockClock(fs.f.body),
+                                    noValue: ownNoValue(fs), rets: retCallsOf(t, fs) }])
+        }
+        for (const ds of g.decls) {
+            if (!ds.isProgram) {
+                const label: string = constructionLabel(ds.info.sym.hint)
+                nodes = nodes.concat([{ kind: CallableK.KConstruct, label: label, f: valueFacts(ds.info.sym.id, label, ds.file, ds.info.span, ds.info.nid, constructionScan(t, ds)),
+                                        clock: false, noValue: false, rets: [] }])
+            }
+            for (const fi of ds.info.fields) {
+                const w: Sym | not = fi.wcap
+                if (w is not) {
+                    const flabel: string = formulaLabel(t, fi)
+                    const fscan: BodyScan = scanValue({ t: t, file: ds.file }, fi.init, emptyScan())
+                    nodes = nodes.concat([{ kind: CallableK.KFormula, label: flabel, f: valueFacts(fi.sym.id, flabel, ds.file, fi.span, fi.nid, fscan),
+                                            clock: false, noValue: false, rets: [] }])
+                }
+            }
+        }
+        // the references: every one (the write dimensions), those to a function
+        // (called or handed on as a value), and the CALLS of a function (the clock)
+        let all: int[][] = []
+        let fnE: int[][] = []
+        let callE: int[][] = []
+        for (const c of nodes) {
+            all = all.concat([refTargets(nodes, c.f.scan.refs, false)])
+            fnE = fnE.concat([refTargets(nodes, c.f.scan.refs, true)])
+            callE = callE.concat([callTargets(nodes, c.f.scan.refs)])
+        }
+        // writes / writesOpen
+        let ownW: FxAtom[][] = []
+        let ownU: FxAtom[][] = []
+        let i: int = 0
+        for (const c of nodes) {
+            ownW = ownW.concat([writeAtoms(c.f.scan.writes, i)])
+            ownU = ownU.concat([openAtoms(c.f.scan.unproven, i)])
+            i = i + 1
+        }
+        // the placement: each function by its own body …
+        let direct: PlaceFact[] = []
+        for (const c of nodes) {
+            if (c.kind == CallableK.KFn) direct = direct.concat([{ sym: c.f.sym, name: c.f.name, place: directPlace(c.f) }])
+        }
+        // … client reach: non-server functions, through non-server functions
+        let ownC: FxAtom[][] = []
+        let edgeC: int[][] = []
+        i = 0
+        for (const c of nodes) {
+            if (c.kind == CallableK.KFn && placeOf(direct, c.f.sym) != PlaceK.Server) {
+                ownC = ownC.concat([clientAtoms(c.f, i)])
+                edgeC = edgeC.concat([notServer(nodes, direct, fnE[i])])
+            } else {
+                ownC = ownC.concat([[]])
+                edgeC = edgeC.concat([[]])
+            }
+            i = i + 1
+        }
+        const client: FxAtom[][] = closeDim(ownC, edgeC)
+        // … and an ambient function that reaches client-only code is client (§12.4)
+        let places: PlaceFact[] = []
+        for (const p of direct) {
+            let pk: PlaceK = p.place
+            if (pk == PlaceK.Ambient && client[nodeIdx(nodes, p.sym)].length > 0) pk = PlaceK.Client
+            places = places.concat([{ sym: p.sym, name: p.name, place: pk }])
+        }
+        // routeOpen / waits / clock / noValue — functions only
+        let ownR: FxAtom[][] = []
+        let edgeR: int[][] = []
+        let ownA: FxAtom[][] = []
+        let edgeF: int[][] = []
+        let ownK: FxAtom[][] = []
+        let edgeK: int[][] = []
+        let ownV: FxAtom[][] = []
+        let edgeV: int[][] = []
+        i = 0
+        for (const c of nodes) {
+            if (c.kind == CallableK.KFn) {
+                const pk: PlaceK = placeOf(places, c.f.sym)
+                ownR = ownR.concat([openAtoms(c.f.scan.unproven, i)])
+                edgeR = edgeR.concat([notServer(nodes, places, fnE[i])])
+                let a: FxAtom[] = []
+                if (pk == PlaceK.Server || pk == PlaceK.Split) a = [ownAtom("s", i, 0)]
+                ownA = ownA.concat([a])
+                edgeF = edgeF.concat([fnE[i]])
+                let k: FxAtom[] = []
+                if (c.clock) k = [ownAtom("c", i, 0)]
+                ownK = ownK.concat([k])
+                edgeK = edgeK.concat([callE[i]])
+                let v: FxAtom[] = []
+                if (c.noValue) v = [ownAtom("v", i, 0)]
+                ownV = ownV.concat([v])
+                edgeV = edgeV.concat([fnTargets(nodes, c.rets)])
+            } else {
+                ownR = ownR.concat([[]])
+                edgeR = edgeR.concat([[]])
+                ownA = ownA.concat([[]])
+                edgeF = edgeF.concat([[]])
+                ownK = ownK.concat([[]])
+                edgeK = edgeK.concat([[]])
+                ownV = ownV.concat([[]])
+                edgeV = edgeV.concat([[]])
+            }
+            i = i + 1
+        }
+        return { nodes: nodes, writes: closeDim(ownW, all), writesOpen: closeDim(ownU, all), places: places,
+                 client: client, routeOpen: closeDim(ownR, edgeR), waits: closeDim(ownA, edgeF),
+                 clock: closeDim(ownK, edgeK), noValue: closeDim(ownV, edgeV) }
+    }
+
+    // The own facts of a construction / a formula: its scan only.
+    fn valueFacts(sym: int, label: string, file: string, span: ASpan, nid: int, scan: BodyScan) -> FnFacts {
+        return { sym: sym, name: label, file: file, span: span, nid: nid, modifier: false, failable: false,
+                 sqls: [], reads: [], doms: [], scan: scan }
+    }
+
+    // The callable a Sym names (-1: none — a reference with no summary).
+    fn nodeIdx(nodes: Callable[], sym: int) -> int {
+        let i: int = 0
+        for (const c of nodes) {
+            if (c.f.sym == sym) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    fn isFnNode(nodes: Callable[], i: int) -> boolean {
+        if (i < 0) return false
+        return nodes[i].kind == CallableK.KFn
+    }
+
+    // The callables a body's references name, in source order (`fnOnly`: functions only).
+    fn refTargets(nodes: Callable[], refs: FnRef[], fnOnly: boolean) -> int[] {
+        let out: int[] = []
+        for (const r of refs) {
+            const j: int = nodeIdx(nodes, r.sym)
+            if (j >= 0 && (!fnOnly || isFnNode(nodes, j))) out = out.concat([j])
+        }
+        return out
+    }
+
+    // The functions a body CALLS (§48.6.2's purity rule is about calls, and a
+    // function value is refused in the bootstrap — the clock follows calls).
+    fn callTargets(nodes: Callable[], refs: FnRef[]) -> int[] {
+        let out: int[] = []
+        for (const r of refs) {
+            const j: int = nodeIdx(nodes, r.sym)
+            if (!r.asValue && isFnNode(nodes, j)) out = out.concat([j])
+        }
+        return out
+    }
+
+    fn fnTargets(nodes: Callable[], syms: int[]) -> int[] {
+        let out: int[] = []
+        for (const s of syms) {
+            const j: int = nodeIdx(nodes, s)
+            if (isFnNode(nodes, j)) out = out.concat([j])
+        }
+        return out
+    }
+
+    // The references to a function NOT placed on the server (a server callee is judged on its own).
+    fn notServer(nodes: Callable[], ps: PlaceFact[], es: int[]) -> int[] {
+        let out: int[] = []
+        for (const j of es) {
+            if (placeOf(ps, nodes[j].f.sym) != PlaceK.Server) out = out.concat([j])
+        }
+        return out
+    }
+
+    fn writeAtoms(ws: WSite[], i: int) -> FxAtom[] {
+        let out: FxAtom[] = []
+        let k: int = 0
+        for (const w of ws) {
+            out = out.concat([ownAtom("w:" + w.cell, i, k)])
+            k = k + 1
+        }
+        return out
+    }
+
+    fn openAtoms(us: USite[], i: int) -> FxAtom[] {
+        let out: FxAtom[] = []
+        let k: int = 0
+        for (const u of us) {
+            out = out.concat([ownAtom("u:" + u.file + ":" + u.span.start, i, k)])
+            k = k + 1
+        }
+        return out
+    }
+
+    // A function's own client-only accesses, in §12.4's order of report: its
+    // DOM globals, then its cell writes, then its cell reads.
+    fn clientWhats(f: FnFacts) -> string[] {
+        let out: string[] = []
+        for (const d of f.doms) { out = out.concat([d.what]) }
+        for (const w of f.scan.writes) { out = out.concat(["writes `" + w.cell + "`"]) }
+        for (const r of f.reads) { out = out.concat(["reads `" + r.what + "`"]) }
+        return out
+    }
+
+    fn clientAtoms(f: FnFacts, i: int) -> FxAtom[] {
+        let out: FxAtom[] = []
+        let k: int = 0
+        for (const w of clientWhats(f)) {
+            out = out.concat([ownAtom("c:" + w, i, k)])
+            k = k + 1
+        }
+        return out
+    }
+
+    // ---- the own "yields a value" fact (§19.4.3 ruling 1a) -----------------------
+    // Does a call of the function produce no value, by its OWN body? A declared
+    // return type does produce one (`-> void` declares that it does not, §7.5 —
+    // FnInfo.ret is `not` for it); a `!` function's result is handled, never
+    // read as a value; otherwise the body decides — a value on EVERY path,
+    // proven syntactically, FAIL CLOSED:
+    //   - s452 r3 (MED-B): a bare `return` ANYWHERE in the body (any depth — an
+    //     `if` branch, a `given` body, a handling form's arm block) is a path
+    //     with no value;
+    //   - otherwise the statements are walked in order and the FIRST one that
+    //     returns a value on every path through it decides (s452 r3 LOW-C — what
+    //     follows it is dead): `return <expr>`, or an `if` / `else` both of whose
+    //     blocks do. Reaching the end of the body is no value.
+    //   - A `fn` / `function` body's tail EXPRESSION is not a value: the
+    //     bootstrap gives neither implicit tail return (`fn h() { "a" }` prints
+    //     `function h() { "a"; }` — returns nothing; checked s452 r3).
+    // Unprovable, so judged "no value": a `given` (its body runs only when the
+    // value is present), a statement-position handling form whose arms return,
+    // an `if` without `else`. What a `return <call>` returns is the CALLEE's
+    // (retCallsOf — the summary closes it, G7).
+    fn ownNoValue(fs: FnSrc) -> boolean {
+        if (fs.info.ret is some || fs.info.failable) return false
+        const r: AType | not = fs.f.ret
+        if (r is some) return declaresVoid(r)
+        if (blockHasBareReturn(fs.f.body)) return true
+        return !blockYieldsOnAllPaths(fs.f.body)
+    }
+
+    // G7 (dpa-066): every `return <call of a scrml function>` in a function's
+    // body, at any depth — the value it returns is that callee's, so a callee
+    // that yields none makes this a path with no value. (A `!` function's
+    // result is handled: none. A `-> void` function yields none already.)
+    fn retCallsOf(t: Tables, fs: FnSrc) -> int[] {
+        if (fs.info.failable) return []
+        return retCallsBlock(t, fs.f.body)
+    }
+
+    // r2 LOW-1: the s452 r3 rule — an earlier statement that leaves on every
+    // path decides; the dead code after it is not a return path (so
+    // `{ return "x"; return nothing() }` yields a value).
+    fn retCallsBlock(t: Tables, b: ABlock) -> int[] {
+        let out: int[] = []
+        for (const s of b.stmts) {
+            out = out.concat(retCallsStmt(t, s))
+            if (leavesOnAllPaths(s)) return out
+        }
+        return out
+    }
+
+    // Does `s` leave the function on every path through it (`return`, `fail`,
+    // or an `if` / `else` both of whose blocks do)?
+    fn leavesOnAllPaths(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> true
+            .Fail(f: x) :> true
+            .If(cond: c, thenB: tb, elseB: eb) :> blockLeaves(tb) && maybeBlockLeaves(eb)
+            .Given(name: n) :> false
+            .Eval(e: x) :> false
+            .Local(name: n) :> false
+            .EffectStmt(w: w) :> false
+            .Defer(body: d) :> false
+        }
+    }
+
+    fn blockLeaves(b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (leavesOnAllPaths(s)) return true
+        }
+        return false
+    }
+
+    fn maybeBlockLeaves(b: ABlock | not) -> boolean {
+        if (b is not) return false
+        return blockLeaves(b)
+    }
+
+    fn retCallsStmt(t: Tables, s: AStmt) -> int[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> retCallsReturn(t, x)
+            .If(cond: c, thenB: tb, elseB: eb) :> retCallsExpr(t, c).concat(retCallsBlock(t, tb)).concat(retCallsElse(t, eb))
+            .Given(name: n, subject: x, body: b) :> retCallsExpr(t, x).concat(retCallsBlock(t, b))
+            .Eval(e: x) :> retCallsExpr(t, x)
+            .Local(name: n, init: i) :> retCallsExpr(t, i)
+            .EffectStmt(w: w) :> []
+            .Defer(body: d) :> []                       // a deferred body holds no `return` (§19.16.3 rule 1)
+            .Fail(f: x) :> []
+        }
+    }
+
+    fn retCallsElse(t: Tables, b: ABlock | not) -> int[] {
+        if (b is not) return []
+        return retCallsBlock(t, b)
+    }
+
+    fn retCallsReturn(t: Tables, x: AExpr | not) -> int[] {
+        if (x is not) return []
+        let out: int[] = retCallsExpr(t, x)
+        const c: AExpr | not = calleeOf(x.k)
+        if (c is some) {
+            const s: Sym | not = fnSymOf(nameFact(t.names, c.nid))
+            if (s is some) out = [s.id].concat(out)
+        }
+        return out
+    }
+
+    // ... a `return` inside a handling form's arm block in `e`, at any depth.
+    fn retCallsExpr(t: Tables, e: AExpr) -> int[] {
+        let out: int[] = []
+        for (const b of exprBlocks(e)) { out = out.concat(retCallsBlock(t, b)) }
+        for (const x of exprKids(e)) { out = out.concat(retCallsExpr(t, x)) }
+        return out
+    }
+
+    // ---- the queries -------------------------------------------------------------
+    // The witness of callable `i` in a dimension, as the chain of labels down to it.
+    fn fxChain(s: Summary, dim: FxAtom[][], i: int, a: FxAtom) -> string[] {
+        let out: string[] = []
+        for (const j of atomChain(dim, i, a)) { out = out.concat([s.nodes[j].label]) }
+        return out
+    }
+
+    // =========================================================================
+    // s452 (dpa-066 M3) — THE RULES PASS: the binder's decisions that read the
+    // effect summary. The binder (phaseB) meets them before any summary
+    // exists, so it records each (addPending) with the diagnostic(s) it would
+    // report and the position in the diagnostic list where it would have
+    // reported it; here each is decided by a query and its diagnostic put
+    // back at that position — the diagnostics keep the order the binder gave
+    // them.
+    //   IfNoValue    §19.4.3 ruling 1a — E-ERROR-012 when the arm's callee
+    //                yields no value (noValue: transitive through `return <call>`,
+    //                which closes G7; fail closed: an unknown callee yields none)
+    //   ServerOrDead §19.4.3 ruling 3 / §19.9.10 — a handler on a function
+    //                whose own body is server-triggered (the summary's `server`
+    //                fact) is the U1b refusal; otherwise E-ERROR-013
+    //   IfClock      a call of a clock reader where the clock is not in the
+    //                bootstrap (the summary's `clock`, through calls)
+    //   PureCall     E-FN-003, its message naming the clock when the callee reads it
+    // =========================================================================
+    type PendRule:enum = {
+        IfNoValue(fnSym: int, diag: Diag),
+        ServerOrDead(fnSym: int, onServer: Diag, notFailable: Diag),
+        IfClock(fnSym: int, diag: Diag),
+        PureCall(fnSym: int, bare: Diag, clocked: Diag),
+    }
+    type Pending:struct = { at: int, rule: PendRule }
+
+    fn rulesPass(s: Summary, st: AS) -> AS {
+        if (st.pend.length == 0) return st
+        let out: Diag[] = []
+        let k: int = 0
+        let i: int = 0
+        while (i <= st.diags.length) {
+            while (k < st.pend.length && st.pend[k].at == i) {
+                out = out.concat(decide(s, st.pend[k].rule))
+                k = k + 1
+            }
+            if (i < st.diags.length) out = out.concat([st.diags[i]])
+            i = i + 1
+        }
+        return { facts: st.facts, diags: out, nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects, pend: [] }
+    }
+
+    fn decide(s: Summary, r: PendRule) -> Diag[] {
+        return match r {
+            .IfNoValue(fnSym: f, diag: d) :> onlyIf(yieldsNoValue(s, f), d)
+            .ServerOrDead(fnSym: f, onServer: a, notFailable: b) :> either(serverTriggeredFn(s, f), a, b)
+            .IfClock(fnSym: f, diag: d) :> onlyIf(readsClock(s, f), d)
+            .PureCall(fnSym: f, bare: a, clocked: b) :> either(readsClock(s, f), b, a)
+        }
+    }
+
+    fn onlyIf(yes: boolean, d: Diag) -> Diag[] {
+        if (yes) return [d]
+        return []
+    }
+
+    fn either(yes: boolean, a: Diag, b: Diag) -> Diag[] {
+        if (yes) return [a]
+        return [b]
+    }
+
+    // ---- the queries ----------------------------------------------------------------
+    // Does a call of function `sym` yield no value? An unknown callee: fail
+    // closed (dpa-066 G10 — the walker this replaces failed open).
+    fn yieldsNoValue(s: Summary, sym: int) -> boolean {
+        const i: int = nodeIdx(s.nodes, sym)
+        if (i < 0) return true
+        return s.noValue[i].length > 0
+    }
+
+    // §12.2 T1 / T4: its own body has a `?{}` or the deprecated `server` modifier.
+    fn serverTriggeredFn(s: Summary, sym: int) -> boolean {
+        const i: int = nodeIdx(s.nodes, sym)
+        if (i < 0) return false
+        return serverTriggered(s.nodes[i].f)
+    }
+
+    // Does function `sym` read the clock, itself or through a call?
+    fn readsClock(s: Summary, sym: int) -> boolean {
+        const i: int = nodeIdx(s.nodes, sym)
+        if (i < 0) return false
+        return s.clock[i].length > 0
+    }
+
+    // =========================================================================
     // Entry. `files` in LINK ORDER: every file after the files it imports; the
     // entry (the file with `<program>`) last.
     // =========================================================================
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram {
-        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [] }
+        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] }, effects: [], pend: [] }
         const ra: RGlobals = phaseA(files, entry, st0)
         let st: AS = checkImports(files, ra.g, ra.st)
         st = phaseB(ra.g, st)
@@ -14312,13 +14565,17 @@ ${
                                 attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
                                 novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts() }
         const scopeDiags: Diag[] = checkScopes(files, bound)
+        // s452 (dpa-066): THE EFFECT SUMMARY — once, over the bound tables —
+        // and the binder's decisions that read it (rulesPass, M3)
+        const sum: Summary = summarize(ra.g, bound)
+        st = rulesPass(sum, st)
         // s449: the no-write rule over every accepted effect (§6.7.4)
-        const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects)
+        const effectDiags: Diag[] = effectPass(ra.g, bound, st.effects, sum)
         // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
         const vp: ValPass = validatorPass(ra.g, bound)
         const typed: RTyping = typeProgram(files, bound)
         // s451 (U1a): route placement, the queries and the databases
-        const pp: RPlaced = placePass(ra.g, bound, st)
+        const pp: RPlaced = placePass(ra.g, bound, st, sum)
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
                             elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,

@@ -1,0 +1,18 @@
+CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE.
+1. `pwd` MUST start with /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent- ; `git rev-parse --show-toplevel` == pwd; clean tree. `git fetch origin main`; `git merge-base HEAD origin/main` MUST equal `git rev-parse origin/main` (else `git merge --ff-only origin/main`; if that fails STOP). Must include #1278 (§14.8.10 filter-at-source).
+2. Every Read/Write/Edit uses an ABSOLUTE path under YOUR worktree root; never write outside it; never `cd` into the main checkout. scrml-support is read-only for you.
+3. NEVER `git stash`; NEVER `pkill -f`.
+4. `bun install` first. Scratch under "$WT/.tmp/" (delete at end).
+5. First commit: archive THIS ENTIRE PROMPT verbatim as docs/changes/s452-spec-security-forks/BRIEF.md (body `start at $(pwd)`); progress.md. Never --no-verify. Pre-commit timeout 300000. Run git commands singly.
+6. Push as `spec/s452-security-forks`. Do NOT open/merge a PR.
+
+TASK — SPEC text for bryan's S452 "all your recs" (read it verbatim: /home/bryan-maclee/scrmlMaster/scrml-support/user-voice-scrml.md §S452, entry "RULED — "all your recs""; items 1 and 4). Background: /home/bryan-maclee/scrmlMaster/scrml-support/docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md (forks F1, F4–F7). Read compiler/SPEC.md §14.8.9, §14.8.10 (as amended by #1278), §14.8.11, and the §34 rows for E-TENANT-*, I-TENANT-*, E-PROTECT-*, I-PROTECT-*, `reveal` IN FULL first.
+Amend:
+1. **E-TENANT-RAW-EGRESS narrowed** (item 1): it now fires only when rows obtained through `.acrossTenants()` reach a raw `Response` (the one remaining foreign-data egress). Update the §14.8.10 rule text + the §34 row. supersedes: its pre-S452 trigger. Direction: NEWLY-ACCEPTING for raw egress of non-opted-out tenant rows (those are scoped at the source now) — state it; impl#1 still enforces the old trigger → note the divergence (a sibling dispatch will narrow impl#1 later; do not file gaps — the PA does).
+2. **F1 — §14.8.9 binding rule restated**: the egress floor is "keyed on value ORIGIN, enforced at every compiler-owned sink, fail-closed on an unknown origin"; the runtime descriptor (impl#1's mechanism) becomes ONE conforming implementation, a static dataflow analysis another. Do not change what programs are accepted (inert) — if any sentence change would, STOP that item and report.
+3. **F5 — columns that cannot be determined**: decide with the SPEC's current text in hand. If §14.8.9 today says such rows are stripped entirely at runtime, ADD: an implementation MAY instead reject at compile time with a named error telling the author to name the columns (keep it permissive between the two so impl#1's runtime strip stays conforming) — and say the bootstrap does the compile-time reject. Name the code (suggest `E-PROTECT-UNRESOLVED-COLUMNS`; check §34 for a clash) with a §34 row, Nominal. If the SPEC text makes MAY wrong, STOP and report.
+4. **F6 — an Info code listing every `reveal` site**: name it (suggest `I-PROTECT-REVEAL`; check for clashes and for an existing one), a §34 row (Info, Nominal), and one normative sentence in §14.8.9 mirroring I-TENANT-ACROSS's audit purpose.
+5. F3 / F4 / F7 are implementation architecture — do NOT put them in the SPEC.
+Every change gets inline `> **Provenance:** ruling:user-voice-scrml.md S452 "all your recs" item N · dd:…dpa-067… · supersedes: … · Direction of change: …`.
+Gates: `bun run scripts/regen-spec-index.ts` + `--check`; `bun scripts/s34-census.ts --check-new`; `bun scripts/facts.ts --check` (write if needed). Revert any master-list.md hunk; do not touch docs/known-gaps.md.
+FINAL REPORT (<350 words): FINAL_SHA (== pushed tip), the new/changed sentences (quote), codes named, direction per item, gates, `git status` clean.
