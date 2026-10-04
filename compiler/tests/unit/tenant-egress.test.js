@@ -29,11 +29,13 @@ import {
   classifyTenantWrite,
   rewriteInsertAddTenantId,
   detectTenantRawEgress,
+  acrossTenantInsertMissingTenantColumn,
   wrapWithTenantScope,
   SERVER_TENANT_HELPER,
   TENANT_COLUMN,
 } from "../../src/codegen/tenant-egress.ts";
 import { SERVER_PROTECT_HELPER } from "../../src/codegen/protect-egress.ts";
+import { normalizeSqlText } from "../../src/sql-projection.ts";
 
 // A ProtectContext-shaped stub: schemaByTable drives tenant detection.
 function protectCtx(schema) {
@@ -72,7 +74,7 @@ function loadHelper() {
   const fn = new Function(
     "function _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
     SERVER_TENANT_HELPER +
-      "\nreturn { _scrml_tenant_scope, _scrml_tenant_scope_none, _scrml_tenant_redact, _scrml_active_tenant, _scrml_tenant_request_scope };",
+      "\nreturn { _scrml_tenant_scope, _scrml_tenant_scope_none, _scrml_tenant_redact, _scrml_active_tenant, _scrml_tenant_request_scope, _scrml_tenant_write_key };",
   );
   const H = fn();
   H.asTenant = (tenantId, f) => H._scrml_tenant_request_scope(f)({ tenantId });
@@ -103,74 +105,106 @@ describe("§14.8.10 buildTenantContext — tenant_id column presence = declarati
 // ---------------------------------------------------------------------------
 describe("§14.8.10 resolveTenantScoping — read scoping", () => {
   const ctx = ctxAssets();
-  test("SELECT * over a tenant table → read, tenant_id already present (no floor-add)", () => {
-    const sc = resolveTenantScoping("SELECT * FROM assets", ctx);
-    expect(sc).toEqual({ kind: "read", table: "assets", keys: [{ col: "tenant_id", add: null }] });
-  });
-  test("explicit projection WITHOUT tenant_id → read, floor-add", () => {
-    const sc = resolveTenantScoping("SELECT id, name FROM assets", ctx);
-    expect(sc).toEqual({ kind: "read", table: "assets", keys: [{ col: "tenant_id", add: "tenant_id" }] });
-  });
-  test("explicit projection WITH tenant_id (aliased) → read, no floor-add, keyed on the alias", () => {
-    const sc = resolveTenantScoping("SELECT id, tenant_id AS tid FROM assets", ctx);
-    expect(sc).toEqual({ kind: "read", table: "assets", keys: [{ col: "tid", add: null }] });
+  const key0 = (ref = "assets") => [{ col: "__scrml_tenant_0", add: `${ref}.tenant_id AS __scrml_tenant_0` }];
+  test("every plain read gets ONE reserved-alias key, always added (never the author's column)", () => {
+    expect(resolveTenantScoping("SELECT * FROM assets", ctx)).toEqual({ kind: "read", table: "assets", keys: key0() });
+    expect(resolveTenantScoping("SELECT id, name FROM assets", ctx)).toEqual({ kind: "read", table: "assets", keys: key0() });
+    expect(resolveTenantScoping("SELECT id, tenant_id AS tid FROM assets a", ctx)).toEqual({ kind: "read", table: "assets", keys: key0("a") });
   });
   test("a read over a NON-tenant table → null (no floor)", () => {
     expect(resolveTenantScoping("SELECT k, v FROM config", ctx)).toBeNull();
   });
-  test("aggregate without GROUP BY tenant_id → agg (E-TENANT-AGG)", () => {
-    const sc = resolveTenantScoping("SELECT COUNT(*) AS n FROM assets", ctx);
-    expect(sc).toEqual({ kind: "agg", table: "assets", reason: "aggregate" });
+  test("tenant INACTIVE → always null (byte-identical)", () => {
+    const empty = buildTenantContext(protectCtx({ users: ["id"] }));
+    expect(resolveTenantScoping("SELECT id FROM assets", empty)).toBeNull();
   });
-  test("aggregate WITH GROUP BY tenant_id → redactable read, not agg", () => {
-    const sc = resolveTenantScoping("SELECT tenant_id, COUNT(*) AS n FROM assets GROUP BY tenant_id", ctx);
+  test("per-row allow-listed functions stay a plain read", () => {
+    const sc = resolveTenantScoping("SELECT id, lower(name) AS n, coalesce(name, '') AS m, CAST(id AS TEXT) AS s FROM assets WHERE upper(name) LIKE ${q}", ctx);
     expect(sc && sc.kind).toBe("read");
   });
-  test("a CTE over a tenant table → agg/subquery (E-TENANT-AGG — S452 reading 4)", () => {
-    const sc = resolveTenantScoping("WITH t AS (SELECT * FROM assets) SELECT * FROM t", ctx);
-    expect(sc).toEqual({ kind: "agg", table: "assets", reason: "subquery" });
+  test("H3: an aggregate is refused by the ALLOW-list, whatever its name", () => {
+    for (const q of [
+      "SELECT COUNT(*) AS n FROM assets",
+      "SELECT json_group_array(name) AS a FROM assets",
+      "SELECT array_agg(name) AS a FROM assets",
+      "SELECT string_agg(name, ',') AS a FROM assets",
+      "SELECT json_agg(name) AS a FROM assets",
+      "SELECT hex(name) AS h FROM assets",          // unknown, even if harmless
+    ]) {
+      expect(resolveTenantScoping(q, ctx)).toMatchObject({ kind: "agg", reason: "function" });
+    }
   });
-  test("a derived table (subquery in FROM) over a tenant table → agg/subquery", () => {
-    const sc = resolveTenantScoping("SELECT x.id FROM (SELECT id FROM assets) x", ctx);
-    expect(sc).toEqual({ kind: "agg", table: "assets", reason: "subquery" });
+  test("L2: a window function is refused", () => {
+    expect(resolveTenantScoping("SELECT id, lead(name) OVER (ORDER BY id) AS n FROM assets", ctx))
+      .toMatchObject({ kind: "agg", reason: "window" });
   });
-  test("a tenant table read only inside a WHERE subquery → agg/subquery (no floor at all before S452)", () => {
-    const sc = resolveTenantScoping("SELECT k, v FROM config WHERE k IN (SELECT name FROM assets)", ctx);
-    expect(sc).toEqual({ kind: "agg", table: "assets", reason: "subquery" });
+  test("DISTINCT / HAVING / GROUP BY not on tenant_id are refused", () => {
+    expect(resolveTenantScoping("SELECT DISTINCT name FROM assets", ctx)).toMatchObject({ kind: "agg", reason: "aggregate" });
+    expect(resolveTenantScoping("SELECT name FROM assets GROUP BY name", ctx)).toMatchObject({ kind: "agg", reason: "aggregate" });
   });
-  test("a tenant table in a PROJECTION subquery beside a tenant FROM → agg/subquery", () => {
-    const sc = resolveTenantScoping("SELECT id, (SELECT COUNT(*) FROM assets) AS n FROM assets", ctx);
-    expect(sc && sc.kind).toBe("agg");
+  test("H4: GROUP BY is read structurally — ORDER BY tenant_id does not exempt", () => {
+    expect(resolveTenantScoping("SELECT tenant_id, count(*) AS n FROM assets GROUP BY cost ORDER BY tenant_id", ctx))
+      .toMatchObject({ kind: "agg" });
+    expect(resolveTenantScoping("SELECT tenant_id, count(*) AS n FROM assets GROUP BY tenant_id", ctx))
+      .toEqual({ kind: "read", table: "assets", keys: key0() });
+    expect(resolveTenantScoping("SELECT a.tenant_id, count(*) AS n FROM assets a GROUP BY a.tenant_id, a.name HAVING count(*) > 1", ctx))
+      .toMatchObject({ kind: "read" });
   });
-  test("a set operation mentioning a tenant table → unresolvable (zero rows — S452 reading 5)", () => {
-    const sc = resolveTenantScoping("SELECT id FROM assets UNION SELECT k FROM config", ctx);
-    expect(sc).toEqual({ kind: "unresolvable" });
+  test("H4: a JOIN groups by EVERY tenant source or is refused", () => {
+    const two = buildTenantContext(protectCtx({ assets: ["id", "tenant_id"], orders: ["id", "asset_id", "tenant_id"] }));
+    const q = "SELECT o.tenant_id, count(*) AS n FROM orders o JOIN assets a ON a.id = o.asset_id GROUP BY o.tenant_id";
+    expect(resolveTenantScoping(q, two)).toMatchObject({ kind: "agg" });
+    expect(resolveTenantScoping(q + ", a.tenant_id", two)).toMatchObject({ kind: "read" });
+    // a bare tenant_id in a JOIN is ambiguous → not exempt
+    expect(resolveTenantScoping("SELECT count(*) AS n FROM orders o JOIN assets a ON a.id = o.asset_id GROUP BY tenant_id", two))
+      .toMatchObject({ kind: "agg" });
   });
-  test("a JOIN of two tenant tables keys EACH source through its own aliased column (reading 3)", () => {
+  test("H1: a subquery / CTE / derived table is refused — a comment cannot hide one", () => {
+    for (const q of [
+      "WITH t AS (SELECT * FROM assets) SELECT * FROM t",
+      "SELECT x.id FROM (SELECT id FROM assets) x",
+      "SELECT k, v FROM config WHERE k IN (SELECT name FROM assets)",
+      "SELECT (/**/SELECT group_concat(name) FROM assets) AS names",
+      "SELECT ( -- c\n SELECT group_concat(name) FROM assets) AS names",
+      "SELECT k FROM config WHERE k IN (/* x */SELECT name FROM assets)",
+      "SELECT id FROM assets WHERE id IN (SELECT asset_id FROM config)",   // any subquery, even non-tenant
+    ]) {
+      expect(resolveTenantScoping(q, ctx)).toMatchObject({ kind: "agg", reason: "subquery" });
+    }
+  });
+  test("a set operation mentioning a tenant table is refused", () => {
+    expect(resolveTenantScoping("SELECT id FROM assets UNION SELECT k FROM config", ctx)).toMatchObject({ kind: "agg", reason: "setop" });
+  });
+  test("L1: an author projection naming the reserved key alias is refused", () => {
+    expect(resolveTenantScoping("SELECT id, 'A' AS __scrml_tenant_0 FROM assets", ctx)).toMatchObject({ kind: "agg", reason: "reserved" });
+  });
+  test("L3: a string literal or a comment is data — it neither refuses nor scopes", () => {
+    expect(resolveTenantScoping("SELECT id FROM assets WHERE name != '(SELECT count(*) FROM assets)'", ctx))
+      .toEqual({ kind: "read", table: "assets", keys: key0() });
+    expect(resolveTenantScoping("SELECT k FROM config WHERE v = 'assets'", ctx)).toBeNull();
+    expect(resolveTenantScoping("SELECT k FROM config -- assets", ctx)).toBeNull();
+  });
+  test("a tenant table that is named but not a FROM source → zero rows (unresolvable)", () => {
+    expect(resolveTenantScoping("SELECT assets FROM config", ctx)).toEqual({ kind: "unresolvable" });
+  });
+  test("a JOIN of two tenant tables keys EACH source through its own reserved alias (reading 3)", () => {
     const two = buildTenantContext(protectCtx({ assets: ["id", "tenant_id"], orders: ["id", "asset_id", "tenant_id"] }));
     const sc = resolveTenantScoping("SELECT o.id, a.id FROM orders o LEFT JOIN assets a ON a.id = o.asset_id", two);
     expect(sc).toEqual({
       kind: "read",
       table: "orders",
       keys: [
-        { col: "_scrml_tenant_key_0", add: "o.tenant_id AS _scrml_tenant_key_0" },
-        { col: "_scrml_tenant_key_1", add: "a.tenant_id AS _scrml_tenant_key_1" },
+        { col: "__scrml_tenant_0", add: "o.tenant_id AS __scrml_tenant_0" },
+        { col: "__scrml_tenant_1", add: "a.tenant_id AS __scrml_tenant_1" },
       ],
     });
   });
   test("a self-join keys BOTH occurrences", () => {
     const sc = resolveTenantScoping("SELECT p.id, c.id FROM assets p JOIN assets c ON c.id = p.id", ctx);
     expect(sc && sc.kind === "read" && sc.keys.map((k) => k.add)).toEqual([
-      "p.tenant_id AS _scrml_tenant_key_0",
-      "c.tenant_id AS _scrml_tenant_key_1",
+      "p.tenant_id AS __scrml_tenant_0",
+      "c.tenant_id AS __scrml_tenant_1",
     ]);
-  });
-  test("unresolvable read NOT mentioning a tenant table → null (do not nuke non-tenant CTE)", () => {
-    expect(resolveTenantScoping("WITH t AS (SELECT * FROM config) SELECT * FROM t", ctx)).toBeNull();
-  });
-  test("tenant INACTIVE → always null (byte-identical)", () => {
-    const empty = buildTenantContext(protectCtx({ users: ["id"] }));
-    expect(resolveTenantScoping("SELECT id FROM assets", empty)).toBeNull();
   });
 });
 
@@ -179,19 +213,18 @@ describe("§14.8.10 resolveTenantScoping — read scoping", () => {
 // ---------------------------------------------------------------------------
 describe("§14.8.10 rewriteSelectAddTenantId — projection-column add (NOT a WHERE-parse)", () => {
   const ctx = ctxAssets();
-  test("adds tenant_id just before FROM, preserving the WHERE + ${} params", () => {
-    const sc = resolveTenantScoping("SELECT id, name FROM assets WHERE id = ${x}", ctx);
-    const out = rewriteSelectAddTenantId("SELECT id, name FROM assets WHERE id = ${x}", sc);
-    expect(out).toBe("SELECT id, name, tenant_id FROM assets WHERE id = ${x}");
+  const add = (q) => rewriteSelectAddTenantId(q, resolveTenantScoping(q, ctx));
+  test("adds the reserved key just before FROM, preserving the WHERE + ${} params", () => {
+    expect(add("SELECT id, name FROM assets WHERE id = ${x}"))
+      .toBe("SELECT id, name, assets.tenant_id AS __scrml_tenant_0 FROM assets WHERE id = ${x}");
   });
-  test("qualifies + aliases the tenant table's key in a multi-table FROM", () => {
-    const sc = resolveTenantScoping("SELECT a.id, u.name FROM assets a JOIN users u ON a.uid = u.id", ctx);
-    const out = rewriteSelectAddTenantId("SELECT a.id, u.name FROM assets a JOIN users u ON a.uid = u.id", sc);
-    expect(out).toBe("SELECT a.id, u.name, a.tenant_id AS _scrml_tenant_key_0 FROM assets a JOIN users u ON a.uid = u.id");
+  test("qualifies the key with the tenant table's alias in a multi-table FROM", () => {
+    expect(add("SELECT a.id, u.name FROM assets a JOIN users u ON a.uid = u.id"))
+      .toBe("SELECT a.id, u.name, a.tenant_id AS __scrml_tenant_0 FROM assets a JOIN users u ON a.uid = u.id");
   });
-  test("no-op when tenant_id already projected (floorAdd false)", () => {
-    const sc = resolveTenantScoping("SELECT * FROM assets", ctx);
-    expect(rewriteSelectAddTenantId("SELECT * FROM assets", sc)).toBe("SELECT * FROM assets");
+  test("a FROM inside a string literal or a comment is not the clause", () => {
+    expect(add("SELECT 'x FROM y' AS a, id /* FROM z */ FROM assets"))
+      .toBe("SELECT 'x FROM y' AS a, id /* FROM z */, assets.tenant_id AS __scrml_tenant_0 FROM assets");
   });
 });
 
@@ -215,11 +248,56 @@ describe("§14.8.10 classifyTenantWrite — inject-or-hard-fail", () => {
   test("DELETE → hard-fail", () => {
     expect(classifyTenantWrite("DELETE FROM assets WHERE id = ${i}", ctx)).toEqual({ kind: "hard-fail", table: "assets", op: "DELETE" });
   });
-  test("write to a NON-tenant table → null (no floor)", () => {
+  test("a comment or a quoted name cannot hide the target (fail-closed on any mention)", () => {
+    expect(classifyTenantWrite("UPDATE/**/assets SET name = ${n}", ctx)).toMatchObject({ kind: "hard-fail" });
+    expect(classifyTenantWrite('UPDATE "assets" SET name = ${n}', ctx)).toMatchObject({ kind: "hard-fail" });
+    expect(classifyTenantWrite("INSERT/**/INTO assets (name) VALUES (${n})", ctx)).toMatchObject({ kind: "hard-fail" });
+    expect(classifyTenantWrite("INSERT INTO config (k) SELECT name FROM assets", ctx)).toMatchObject({ kind: "hard-fail" });
+    expect(classifyTenantWrite("INSERT INTO assets (name) VALUES ((SELECT name FROM assets WHERE id = 2))", ctx)).toMatchObject({ kind: "hard-fail" });
+  });
+  test("write to a NON-tenant table → null (no floor); a literal naming one is data", () => {
     expect(classifyTenantWrite("DELETE FROM config WHERE k = ${k}", ctx)).toBeNull();
+    expect(classifyTenantWrite("DELETE FROM config WHERE k = 'assets'", ctx)).toBeNull();
   });
   test("a SELECT is not a write → null", () => {
     expect(classifyTenantWrite("SELECT id FROM assets", ctx)).toBeNull();
+  });
+});
+
+describe("§14.8.10 acrossTenantInsertMissingTenantColumn — an opted-out INSERT names its tenant", () => {
+  const ctx = ctxAssets();
+  test("names tenant_id → allowed (null)", () => {
+    expect(acrossTenantInsertMissingTenantColumn("INSERT INTO assets (name, tenant_id) VALUES (${n}, ${t})", ctx)).toBeNull();
+  });
+  test("omits tenant_id, or has no column list → the target table (refused)", () => {
+    expect(acrossTenantInsertMissingTenantColumn("INSERT INTO assets (name) VALUES (${n})", ctx)).toBe("assets");
+    expect(acrossTenantInsertMissingTenantColumn("INSERT INTO assets VALUES (${a}, ${b}, ${c})", ctx)).toBe("assets");
+  });
+  test("not an INSERT into a tenant table → null", () => {
+    expect(acrossTenantInsertMissingTenantColumn("INSERT INTO config (k) VALUES (${k})", ctx)).toBeNull();
+    expect(acrossTenantInsertMissingTenantColumn("SELECT * FROM assets", ctx)).toBeNull();
+  });
+});
+
+describe("§14.8.10 the write key — no active tenant is a NAMED refusal", () => {
+  test("outside any request it throws E-TENANT-WRITE (runtime), naming the way out", () => {
+    const H = loadHelper();
+    expect(() => H._scrml_tenant_write_key()).toThrow(/E-TENANT-WRITE \(runtime\).*acrossTenants\(\)/s);
+  });
+  test("an unpinned request refuses too; a pinned one gets its tenant", () => {
+    const H = loadHelper();
+    expect(() => H.asTenant(null, () => H._scrml_tenant_write_key())).toThrow(/E-TENANT-WRITE/);
+    expect(H.asTenant("A", () => H._scrml_tenant_write_key())).toBe("A");
+  });
+});
+
+describe("normalizeSqlText — the ONE normalizer every tenant check reads", () => {
+  test("comments and interpolations vanish; string literals keep their length but lose their words", () => {
+    expect(normalizeSqlText("SELECT /* x */ id -- y\nFROM t WHERE a = ${v} AND b = 'it''s (SELECT)'"))
+      .toBe("SELECT id FROM t WHERE a = AND b = '______________'");
+  });
+  test("a comment marker inside a string is data; quoted identifiers pass through", () => {
+    expect(normalizeSqlText(`SELECT '--x', "a--b", [c/*d] FROM t`)).toBe(`SELECT '___', "a--b", [c/*d] FROM t`);
   });
 });
 

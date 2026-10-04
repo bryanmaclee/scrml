@@ -100,7 +100,8 @@ describe("§14.8.10 codes-half — each E-/I-TENANT fires on the right shape", (
   test("the INSERT injection binds the ambient tenant into the column-set", () => {
     const r = compile(`      function f() { let x = ?{\`INSERT INTO assets (name) VALUES (\${"z"})\`}.run(); return x }`);
     const out = [...r.outputs.values()][0];
-    expect(out.serverJs).toContain("INSERT INTO assets (name, tenant_id) VALUES (${\"z\"}, ${_scrml_current_user(_scrml_req).tenantId})");
+    // read from the per-request store; with no active tenant it refuses by name (S452)
+    expect(out.serverJs).toContain("INSERT INTO assets (name, tenant_id) VALUES (${\"z\"}, ${_scrml_tenant_write_key()})");
   });
 });
 
@@ -145,7 +146,7 @@ describe("§14.8.10 runtime-half — the compiled bundle wires + the shipped hel
     const server = compileServer(
       `      function loadAssets() { let rows = ?{\`SELECT id, name FROM assets\`}.all(); return rows }`,
     );
-    expect(server).toContain('_scrml_tenant_scope(await _scrml_sql`SELECT id, name, tenant_id FROM assets`, ["tenant_id"], ["tenant_id"])');
+    expect(server).toContain('_scrml_tenant_scope(await _scrml_sql`SELECT id, name, assets.tenant_id AS __scrml_tenant_0 FROM assets`, ["__scrml_tenant_0"], ["__scrml_tenant_0"])');
     expect(/_scrml_tenant_redact\([^)]*_scrml_active_tenant/.test(server)).toBe(true);
     expect(server.includes("function _scrml_tenant_redact")).toBe(true);
     expect(server.includes("function _scrml_active_tenant")).toBe(true);

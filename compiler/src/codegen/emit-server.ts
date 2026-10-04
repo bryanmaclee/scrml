@@ -10,7 +10,7 @@ import type { AsyncRoot, AsyncEscapeSite } from "./local-async-fns.ts";
 import { getNodes } from "./collect.ts";
 import { collectReactiveVarNames, collectLocalMapSetNames, buildFnReturnMapKinds } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
-import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
+import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, drainTenantViolationsFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { setShadowedVariantNames } from "./emit-control-flow.ts";
@@ -54,8 +54,6 @@ import { registerProtectModule } from "./protect-flow.ts";
 import { SESSION_STORE_SQLITE_LINES, SESSION_STORE_MEMORY_LINE } from "./session-store-emit.ts";
 import {
   buildTenantContext,
-  resolveTenantScoping,
-  classifyTenantWrite,
   detectTenantRawEgress,
   SERVER_TENANT_HELPER,
   tenantRequestScopeLines,
@@ -1616,6 +1614,7 @@ function parseArmBindings(raw: string | undefined | null): EndpointArmBinding[] 
   return out;
 }
 
+
 /**
  * Generate server-side route handler code for all server-boundary functions
  * in a file.
@@ -1959,9 +1958,6 @@ export function generateServerJs(
     extractDesiredSchema(fileAST).tenantTables,
   );
   const _tenantActive: boolean = _tenantCtx.tenantScopedTables.size > 0;
-  // Cross-tenant writes/aggregates found by the hard-fail scan below that carry a
-  // `.acrossTenants()` opt-out — merged into the I-TENANT-ACROSS audit drain.
-  const _tenantAcrossFromScan: string[] = [];
   // Tier-1 `SELECT * FROM <tenant table>` + SSR seed reads are hand-emitted (not
   // via the rewriter), so their I-TENANT-STRIP records are collected here.
   const _tenantStripsFromHandEmit: string[] = [];
@@ -2326,78 +2322,15 @@ export function generateServerJs(
     }
   }
 
-  // §14.8.10 hard-fail gates — a whole-source scan over every `?{...}` for the
-  // classes redaction cannot cover (inject-or-hard-fail): E-TENANT-WRITE (an
-  // UPDATE/DELETE, or an un-injectable INSERT, against a tenant-scoped table),
-  // E-TENANT-AGG (an aggregate/scalar over a tenant-scoped table with no output
-  // tenant discriminator), and E-TENANT-RAW-EGRESS (a tenant-scoped read reaching
-  // a `_{}` / manual `Response` / `asIs` egress the compiler cannot redact). Each
-  // is suppressed by an explicit `.acrossTenants()` on the query (which fires the
-  // I-TENANT-ACROSS audit info instead). Gated on `_tenantActive`.
+  // §14.8.10 E-TENANT-RAW-EGRESS gate — a tenant-scoped read reaching a `_{}` /
+  // manual `Response` / `asIs` egress the compiler cannot redact, suppressed by an
+  // explicit `.acrossTenants()`. (E-TENANT-AGG / E-TENANT-WRITE are decided at the
+  // lowering choke, `_lowerTenantForQuery`, for every SQL spelling — a source scan
+  // over the backtick spelling alone let `?{ update assets … }` through — and are
+  // drained into `errors` after the server body emits.) Gated on `_tenantActive`.
   if (_tenantActive) {
     const _src: string = (fileAST as { _sourceText?: string })._sourceText ?? "";
     if (_src) {
-      const _sqlRe = /\?\{`([^`]*)`\}/g;
-      let _tm: RegExpExecArray | null;
-      const _seenTenant = new Set<string>();
-      while ((_tm = _sqlRe.exec(_src)) !== null) {
-        const _q = _tm[1];
-        const _matchEnd = _tm.index + _tm[0].length;
-        // The method chain immediately following the `?{}` — an `.acrossTenants()`
-        // within it is the loud opt-out (suppress the hard-fail, audit instead).
-        const _chainAhead = /^((?:\s*\.\w+\(\s*\))*)/.exec(_src.slice(_matchEnd))?.[1] ?? "";
-        const _isAcross = /\.\s*acrossTenants\s*\(/.test(_chainAhead);
-        const _dispQ = _q.trim().replace(/\s+/g, " ").slice(0, 60);
-
-        const _write = classifyTenantWrite(_q, _tenantCtx);
-        const _scoping = resolveTenantScoping(_q, _tenantCtx);
-        const _isViolation = (_write && _write.kind === "hard-fail") || (_scoping && _scoping.kind === "agg");
-        if (_isAcross) {
-          // A cross-tenant write / aggregate is the audited legitimate case.
-          if (_isViolation && !_seenTenant.has("across::" + _dispQ)) {
-            _seenTenant.add("across::" + _dispQ);
-            _tenantAcrossFromScan.push(_dispQ);
-          }
-          continue;
-        }
-        if (_write && _write.kind === "hard-fail") {
-          const _key = "write::" + _dispQ;
-          if (_seenTenant.has(_key)) continue;
-          _seenTenant.add(_key);
-          errors.push(new CGError(
-            "E-TENANT-WRITE",
-            `E-TENANT-WRITE: a ${_write.op} against the tenant-scoped table \`${_write.table}\` in \`${_dispQ}\` ` +
-            `cannot be tenant-constrained by the V1 floor (no egress sink can redact a durable write; a committed ` +
-            `cross-tenant write is durable before any redaction). ${_write.op === "UPDATE" || _write.op === "DELETE" ? "An UPDATE/DELETE needs a WHERE constraint the V1 floor does not parse" : "This INSERT is not safely tenant-injectable (it already sets tenant_id, is multi-row, or is INSERT ... SELECT)"} (§14.8.10). ` +
-            `Resolution: for a per-tenant INSERT, omit \`tenant_id\` (the floor injects @currentUser.tenantId); for a ` +
-            `deliberate cross-tenant write, mark the query \`.acrossTenants()\`.`,
-            { start: _tm.index, end: _matchEnd } as any,
-            "error",
-          ));
-          continue;
-        }
-        if (_scoping && _scoping.kind === "agg") {
-          const _key = "agg::" + _dispQ;
-          if (_seenTenant.has(_key)) continue;
-          _seenTenant.add(_key);
-          errors.push(new CGError(
-            "E-TENANT-AGG",
-            _scoping.reason === "subquery"
-              ? `E-TENANT-AGG: \`${_dispQ}\` reads the tenant-scoped table \`${_scoping.table}\` inside a subquery, CTE or ` +
-                `derived table, so its rows are folded into the outer result before the tenant floor can filter them (the ` +
-                `floor keys each OUTER row on its source \`tenant_id\`, and this table's never reaches it) (§14.8.10). ` +
-                `Resolution: read the tenant-scoped table at the top level of the query (FROM / JOIN) so each row carries ` +
-                `its tenant, or mark the query \`.acrossTenants()\` for a deliberate cross-tenant read.`
-              : `E-TENANT-AGG: an aggregate/scalar read over the tenant-scoped table \`${_scoping.table}\` in \`${_dispQ}\` ` +
-                `has no per-tenant output discriminator, so the tenant floor has no row to key on (a bare COUNT/SUM ` +
-                `folds every tenant into one scalar) (§14.8.10). Resolution: add \`GROUP BY tenant_id\` (and project it) so ` +
-                `each output row carries its tenant, or mark the query \`.acrossTenants()\` for a deliberate cross-tenant aggregate.`,
-            { start: _tm.index, end: _matchEnd } as any,
-            "error",
-          ));
-          continue;
-        }
-      }
 
       // E-TENANT-RAW-EGRESS — per server-fn body co-occurrence (mirror of the
       // §14.8.9 E-PROTECT-004 loop): a tenant-scoped read + a raw/unanalyzable
@@ -7264,7 +7197,7 @@ export function generateServerJs(
     // §14.8.10 (S452) — the tenant SOURCE filter reads the request from a store
     // opened around every route handler (a server function called in-process has
     // no request parameter). Appended LAST, after every route export it names.
-    if (/_scrml_tenant_scope(?:_none)?\(await\b/.test(finalEmitted)) {
+    if (/_scrml_tenant_scope(?:_none)?\(await\b|\$\{_scrml_tenant_write_key\(\)\}/.test(finalEmitted)) {
       const _tenantScopeLines = tenantRequestScopeLines(collected);
       if (_tenantScopeLines.length > 0) {
         finalEmitted = finalEmitted.replace(/\n*$/, "\n") + _tenantScopeLines.join("\n") + "\n";
@@ -7301,6 +7234,18 @@ export function generateServerJs(
   // `I-TENANT-ACROSS` (Info) per opt-out — the redaction / cross-tenant read is
   // never silent (the audit surface). Routed into `errors` with severity "info".
   if (_tenantActive) {
+    // E-TENANT-AGG / E-TENANT-WRITE — decided at the lowering choke for every SQL
+    // spelling; located at the query's first occurrence in the source when found.
+    const _violSrc: string = (fileAST as { _sourceText?: string })._sourceText ?? "";
+    for (const _v of drainTenantViolationsFromRewriter()) {
+      const _at = _violSrc ? _violSrc.indexOf(_v.sql) : -1;
+      errors.push(new CGError(
+        _v.code,
+        _v.message,
+        (_at >= 0 ? { file: filePath, start: _at, end: _at + _v.sql.length } : { file: filePath, start: 0, end: 0 }) as any,
+        "error",
+      ));
+    }
     const _seenStripDrain = new Set<string>();
     const _allStrips = [...drainTenantStripsFromRewriter().map((s) => s.sql), ..._tenantStripsFromHandEmit];
     for (const _sql of _allStrips) {
@@ -7317,7 +7262,7 @@ export function generateServerJs(
       ));
     }
     const _seenAcrossDrain = new Set<string>();
-    const _allAcross = [...drainTenantAcrossesFromRewriter().map((a) => a.sql), ..._tenantAcrossFromScan];
+    const _allAcross = drainTenantAcrossesFromRewriter().map((a) => a.sql);
     for (const _sql of _allAcross) {
       if (_seenAcrossDrain.has(_sql)) continue;
       _seenAcrossDrain.add(_sql);

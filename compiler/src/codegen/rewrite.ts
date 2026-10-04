@@ -34,15 +34,19 @@ import {
   wrapWithTenantScope,
   classifyTenantWrite,
   rewriteInsertAddTenantId,
+  sqlMentionsTenantTable,
+  tenantFloorViolation,
+  tenantAcrossIsAudited,
   type TenantContext,
   type TenantScoping,
 } from "./tenant-egress.ts";
 
-// §14.8.10 — the ambient tenant JS expression bound at every server handler's
-// egress + write sites. `_scrml_req` is the universal handler request var;
-// `_scrml_current_user` is always emitted for a tenant app (it establishes the
-// tenant via `session.set("tenantId", …)`, so the §20.5 session infra is present).
-const _TENANT_AMBIENT_EXPR = "_scrml_current_user(_scrml_req).tenantId";
+// §14.8.10 — the tenant value injected into an INSERT into a tenant-scoped table.
+// Read from the per-request store (`_scrml_tenant_request_scope`), not a lexical
+// `_scrml_req`: a server function called in-process has no request parameter.
+// With no active tenant it THROWS a named E-TENANT-WRITE refusal (ruling
+// user-voice-scrml.md S452 "your rec") rather than write an unowned row.
+const _TENANT_AMBIENT_EXPR = "_scrml_tenant_write_key()";
 
 // Re-exported for back-compat with prior import sites that pulled the splitter
 // (and the regex-vs-division signal) from rewrite.ts.
@@ -264,18 +268,27 @@ interface RewriterTenantState {
   acrosses: Array<{ sql: string }>;
   seenStrip: Set<string>;
   seenAcross: Set<string>;
+  // §14.8.10 compile-time refusals (E-TENANT-AGG / E-TENANT-WRITE), recorded at
+  // THIS choke so every SQL spelling is covered; drained into errors by the caller.
+  violations: Array<{ code: "E-TENANT-AGG" | "E-TENANT-WRITE"; message: string; sql: string }>;
+  seenViolation: Set<string>;
 }
 let _rewriterTenantState: RewriterTenantState | null = null;
 
 export function setTenantContextForRewriter(ctx: TenantContext | null): void {
   _rewriterTenantState = ctx && ctx.tenantScopedTables.size > 0
-    ? { ctx, strips: [], acrosses: [], seenStrip: new Set<string>(), seenAcross: new Set<string>() }
+    ? { ctx, strips: [], acrosses: [], seenStrip: new Set<string>(), seenAcross: new Set<string>(), violations: [], seenViolation: new Set<string>() }
     : null;
 }
 
 /** Drain the tenant-scoped read records (→ `I-TENANT-STRIP`). */
 export function drainTenantStripsFromRewriter(): Array<{ sql: string }> {
   return _rewriterTenantState ? _rewriterTenantState.strips : [];
+}
+
+/** Drain the §14.8.10 compile-time refusals recorded at the lowering choke. */
+export function drainTenantViolationsFromRewriter(): Array<{ code: "E-TENANT-AGG" | "E-TENANT-WRITE"; message: string; sql: string }> {
+  return _rewriterTenantState ? _rewriterTenantState.violations : [];
 }
 
 /** Drain the `.acrossTenants()` opt-out records (→ `I-TENANT-ACROSS`). */
@@ -302,6 +315,17 @@ function _recordTenantAcross(sqlContent: string): void {
 const _identityScope = (rowsExpr: string): string => rowsExpr;
 
 /**
+ * §14.8.10 — does this `?{}` SQL touch a tenant-scoped table (comments and string
+ * literals excluded)? For an emit path that issues SQL WITHOUT going through
+ * `_lowerTenantForQuery` (the §8.10 loop hoist): such a path must not run a query
+ * the source filter would have scoped — it falls back to the scoped lowering.
+ * `false` when the tenant floor is inactive (and for every client-side emit).
+ */
+export function tenantFloorTouchesSql(sqlContent: string): boolean {
+  return _rewriterTenantState !== null && sqlMentionsTenantTable(sqlContent, _rewriterTenantState.ctx);
+}
+
+/**
  * §14.8.10 per-query lowering, shared by BOTH the text-rewrite SQL path
  * (`rewriteSqlRefs`) and the structured `emit-logic.ts` `case "sql"` path so
  * every compiler-emitted query is scoped at the SAME choke.
@@ -321,15 +345,25 @@ export function _lowerTenantForQuery(
 ): { effectiveSql: string; tenantScope: (rowsExpr: string) => string } {
   const identity = { effectiveSql: sqlContent, tenantScope: _identityScope };
   if (!_rewriterTenantState) return identity;
-  const scoping: TenantScoping = resolveTenantScoping(sqlContent, _rewriterTenantState.ctx);
+  const st = _rewriterTenantState;
+  const violation = tenantFloorViolation(sqlContent, isAcross, st.ctx);
+  if (violation !== null) {
+    const key = violation.code + "::" + sqlContent.trim();
+    if (!st.seenViolation.has(key)) {
+      st.seenViolation.add(key);
+      st.violations.push({ ...violation, sql: sqlContent });
+    }
+  }
   if (isAcross) {
     // The opt-out is only meaningful (and only audited) for a query that WOULD
-    // have been tenant-scoped; a `.acrossTenants()` on a non-tenant read is inert.
-    if (scoping !== null) _recordTenantAcross(sqlContent);
+    // have been tenant-scoped or refused; a `.acrossTenants()` on a non-tenant
+    // query is inert.
+    if (tenantAcrossIsAudited(sqlContent, st.ctx)) _recordTenantAcross(sqlContent);
     return identity;
   }
+  const scoping: TenantScoping = resolveTenantScoping(sqlContent, st.ctx);
   if (scoping !== null) {
-    if (scoping.kind === "agg") return identity; // hard-fails at compile (E-TENANT-AGG).
+    if (scoping.kind === "agg") return identity; // refused at compile (E-TENANT-AGG, recorded above).
     _recordTenantStrip(sqlContent);
     return {
       effectiveSql: rewriteSelectAddTenantId(sqlContent, scoping),

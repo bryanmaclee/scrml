@@ -37,6 +37,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
+import { SERVER_TENANT_HELPER } from "../../src/codegen/tenant-egress.ts";
 
 const _tmp = [];
 afterAll(() => { for (const d of _tmp) { try { rmSync(d, { recursive: true, force: true }); } catch {} } });
@@ -123,6 +124,9 @@ const SEED = [
   "CREATE TABLE orders (id INTEGER PRIMARY KEY, asset_id INTEGER, label TEXT, tenant_id TEXT)",
   "INSERT INTO assets (id, name, cost, tenant_id) VALUES (1, 'A-secret-asset', 10, 'A'), (2, 'B-secret-asset', 500, 'B')",
   "INSERT INTO orders (id, asset_id, label, tenant_id) VALUES (10, 1, 'A-order', 'A'), (11, 2, 'A-order-on-B-asset', 'A'), (12, 99, 'A-order-orphan', 'A'), (20, 2, 'B-order', 'B')",
+  // a NON-tenant table whose key names B's asset (the subquery-existence probe)
+  "CREATE TABLE config (k TEXT, v TEXT)",
+  "INSERT INTO config (k, v) VALUES ('B-secret-asset', 'probe'), ('other', 'x')",
 ];
 
 // Compile `source`, seed its database, import the emitted server module. Returns
@@ -189,8 +193,9 @@ describe("CONF-TENANT-SOURCE-FILTER — compile surface", () => {
     expect(strip.message).not.toContain("egress floor scopes the client response");
   });
   test("the filter wraps the driver result itself; `.get()` takes [0] of the FILTERED rows", () => {
-    expect(app.server).toContain('_scrml_tenant_scope(await _scrml_sql`SELECT id, name, tenant_id FROM assets`, ["tenant_id"], [])');
-    expect(app.server).toContain('(_scrml_tenant_scope(await _scrml_sql`SELECT id, name, tenant_id FROM assets ORDER BY id`, ["tenant_id"], ["tenant_id"]))[0] ?? null');
+    // the key is ALWAYS a floor-added reserved alias (an author column can never forge it)
+    expect(app.server).toContain('_scrml_tenant_scope(await _scrml_sql`SELECT id, name, tenant_id, assets.tenant_id AS __scrml_tenant_0 FROM assets`, ["__scrml_tenant_0"], ["__scrml_tenant_0"])');
+    expect(app.server).toContain('(_scrml_tenant_scope(await _scrml_sql`SELECT id, name, assets.tenant_id AS __scrml_tenant_0 FROM assets ORDER BY id`, ["__scrml_tenant_0"], ["__scrml_tenant_0"]))[0] ?? null');
     // every route handler carries its request to the filter
     expect(app.server).toMatch(/_scrml_route\.handler = _scrml_tenant_request_scope\(_scrml_route\.handler\)/);
     // the opt-out read is NOT filtered
@@ -318,5 +323,257 @@ describe("CONF-TENANT-SOURCE-FILTER — a hand-built Response carries only the r
     expect(await call("rawResponse", {}, ev)).toEqual([]);
     const a = await pin("A", ev);
     expect(await call("rawResponse", { cookie: a }, ev)).toEqual([{ id: 1, name: "A-secret-asset" }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX ROUND r2 — the bypasses the S452 security review of 1239366814c found.
+// Every repro here compiled AND leaked tenant B's data to an unpinned request
+// or to tenant A on 1239366814c (or, for L3, wrongly refused a safe query).
+// The rule they pin (S451 durable: "text classification cannot prove a query
+// safe"): every tenant SQL check runs on ONE normalized text (comments and
+// string literals blanked), and a tenant-table read is a plain row read only on
+// an ALLOW-LIST — anything else is E-TENANT-AGG (refused) or zero rows.
+// ---------------------------------------------------------------------------
+function probeProgram(body) {
+  const names = [...body.matchAll(/function\*?\s+(\w+)\s*\(/g)].map((m) => m[1]);
+  return `<program db="app.db">
+  <schema>
+    ?{\`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, cost INTEGER, tenant_id TEXT)\`}
+    ?{\`CREATE TABLE orders (id INTEGER PRIMARY KEY, asset_id INTEGER, label TEXT, tenant_id TEXT)\`}
+    ?{\`CREATE TABLE config (k TEXT, v TEXT)\`}
+  </schema>
+  \${
+    function pinTenant(t: string) {
+      session.set("userId", "u-" + t)
+      session.set("tenantId", t)
+      return "ok"
+    }
+${body}
+  }
+${names.map((n) => `  <button onclick=\${ ${n}() }>x</button>`).join("\n")}
+  <button onclick=\${ pinTenant("A") }>p</button>
+</program>
+`;
+}
+const fatal = (r) => (r.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? "")).map((e) => e.code);
+
+// The query is either REFUSED at compile (E-TENANT-AGG) or, executed, shows no
+// trace of tenant B to an unpinned request or to tenant A, nor of A to tenant B.
+async function expectRefusedOrNoLeak(body, fn) {
+  const p = await buildApp(probeProgram(body));
+  if (p.routes === null) {
+    expect(fatal(p.result)).toContain("E-TENANT-AGG");
+    return "refused";
+  }
+  const unpinned = JSON.stringify(await call(fn, {}, p));
+  const asA = JSON.stringify(await call(fn, { cookie: await pin("A", p) }, p));
+  expect(unpinned).not.toContain("B-secret");
+  expect(asA).not.toContain("B-secret");
+  expect(asA).not.toContain("500");   // B's cost
+  const asB = JSON.stringify(await call(fn, { cookie: await pin("B", p) }, p));
+  expect(asB).not.toContain("A-secret");
+  return "executed";
+}
+
+describe("CONF-TENANT-SOURCE-FILTER r2 — H1: comments never hide a subquery", () => {
+  test("block comment before a projection subquery", async () => {
+    await expectRefusedOrNoLeak(`    function h1a() { return ?{\`SELECT (/**/SELECT group_concat(name) FROM assets) AS names\`}.get() }`, "h1a");
+  });
+  test("line comment before a projection subquery", async () => {
+    await expectRefusedOrNoLeak(`    function h1b() { return ?{\`SELECT ( -- hidden\n SELECT group_concat(name) FROM assets) AS names\`}.get() }`, "h1b");
+  });
+  test("block comment before a WHERE subquery over a non-tenant outer table (existence probe)", async () => {
+    await expectRefusedOrNoLeak(`    function h1c() { return ?{\`SELECT k FROM config WHERE k IN (/* x */SELECT name FROM assets)\`}.all() }`, "h1c");
+  });
+});
+
+describe("CONF-TENANT-SOURCE-FILTER r2 — H2: the §8.10 loop hoist cannot bypass the filter", () => {
+  test("a per-row asset lookup inside a loop over A's orders never yields B's asset", async () => {
+    const out = await expectRefusedOrNoLeak(
+      `    function h2() {
+      let ords = ?{\`SELECT id, asset_id FROM orders ORDER BY id\`}.all()
+      let found = []
+      for (let o of ords) {
+        let a = ?{\`SELECT id, name FROM assets WHERE id = \${o.asset_id}\`}.get()
+        found.push(a)
+      }
+      return found
+    }`, "h2");
+    expect(out).toBe("executed");
+  });
+});
+
+describe("CONF-TENANT-SOURCE-FILTER r2 — H3 / L2: aggregates are an allow-list, not a name list", () => {
+  test("json_group_array folds every tenant into one value", async () => {
+    await expectRefusedOrNoLeak(`    function h3a() { return ?{\`SELECT json_group_array(name) AS names FROM assets\`}.get() }`, "h3a");
+  });
+  test("an unknown function is refused (fail-closed), even a harmless one", async () => {
+    const p = await buildApp(probeProgram(`    function h3b() { return ?{\`SELECT hex(name) AS h FROM assets\`}.all() }`));
+    expect(fatal(p.result)).toContain("E-TENANT-AGG");
+  });
+  test("L2: a window function sees the other tenant's rows", async () => {
+    await expectRefusedOrNoLeak(`    function l2() { return ?{\`SELECT id, lead(name) OVER (ORDER BY id) AS nxt FROM assets\`}.all() }`, "l2");
+  });
+});
+
+describe("CONF-TENANT-SOURCE-FILTER r2 — H4: GROUP BY tenant_id is read structurally", () => {
+  test("a GROUP BY on another column + ORDER BY tenant_id does not exempt the aggregate", async () => {
+    await expectRefusedOrNoLeak(`    function h4() { return ?{\`SELECT tenant_id, count(*) AS n, group_concat(name) AS names FROM assets GROUP BY cost > 0 ORDER BY tenant_id\`}.all() }`, "h4");
+  });
+  test("a real GROUP BY tenant_id stays allowed and scoped", async () => {
+    const p = await buildApp(probeProgram(`    function h4ok() { return ?{\`SELECT tenant_id, count(*) AS n FROM assets GROUP BY tenant_id\`}.all() }`));
+    expect(fatal(p.result)).toEqual([]);
+    expect(await call("h4ok", { cookie: await pin("A", p) }, p)).toEqual([{ tenant_id: "A", n: 1 }]);
+  });
+});
+
+describe("CONF-TENANT-SOURCE-FILTER r2 — L1: the filter key cannot be forged by the projection", () => {
+  test("`SELECT *, 'A' AS tenant_id` does not admit B's row for A", async () => {
+    await expectRefusedOrNoLeak(`    function l1a() { return ?{\`SELECT *, 'A' AS tenant_id FROM assets\`}.all() }`, "l1a");
+  });
+  test("`SELECT id, name, 'A' AS tenant_id` does not admit B's row for A", async () => {
+    const out = await expectRefusedOrNoLeak(`    function l1b() { return ?{\`SELECT id, name, 'A' AS tenant_id FROM assets\`}.all() }`, "l1b");
+    expect(out).toBe("executed");
+  });
+  test("an author projection naming the reserved key alias is refused", async () => {
+    const p = await buildApp(probeProgram(`    function l1c() { return ?{\`SELECT id, 'A' AS __scrml_tenant_0 FROM assets\`}.all() }`));
+    expect(fatal(p.result)).toContain("E-TENANT-AGG");
+  });
+});
+
+describe("CONF-TENANT-SOURCE-FILTER r2 — L3: a string literal is data, not SQL", () => {
+  test("a literal that LOOKS like a subquery does not refuse a plain read", async () => {
+    const p = await buildApp(probeProgram(`    function l3() { return ?{\`SELECT id, name FROM assets WHERE name != '(SELECT 1 FROM assets)'\`}.all() }`));
+    expect(fatal(p.result)).toEqual([]);
+    expect(await call("l3", { cookie: await pin("A", p) }, p)).toEqual([{ id: 1, name: "A-secret-asset" }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// INSERT with no active tenant (ruling user-voice-scrml.md S452 "your rec" = (a)):
+// an INSERT into a tenant-scoped table outside a tenant (boot, a job, an unpinned
+// request, a server function reached outside a request) is a NAMED runtime
+// refusal — `E-TENANT-WRITE (runtime)` — unless it is `.acrossTenants()` AND
+// names the tenant column. Before: the injected value read a lexical `_scrml_req`,
+// so an in-process peer threw an accidental ReferenceError, and an unpinned
+// request wrote a row with a NULL tenant.
+// ---------------------------------------------------------------------------
+async function callRaw(name, { cookie = "", body = {} } = {}, target = app) {
+  const route = target.routes[name];
+  try {
+    const res = await route.handler(new Request(`https://localhost${route.path}`, {
+      method: route.method,
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: `scrml_csrf=${CSRF}${cookie ? `; ${cookie}` : ""}`,
+        "X-CSRF-Token": CSRF,
+      },
+      body: JSON.stringify(body),
+    }));
+    return { status: res.status, text: await res.text() };
+  } catch (e) {
+    return { thrown: String(e && e.message) };
+  }
+}
+
+const INSERTS = `    function addOwn() {
+      ?{\`INSERT INTO assets (name, cost) VALUES ('own-new', 1)\`}.run()
+      return "added"
+    }
+    function addViaPeer() {
+      let r = addOwn()
+      let rows = ?{\`SELECT id FROM assets\`}.all()
+      return rows.length
+    }
+    function addAcrossExplicit() {
+      ?{\`INSERT INTO assets (name, cost, tenant_id) VALUES ('job-made', 2, 'B')\`}.acrossTenants().run()
+      return "added"
+    }
+    function countAll() {
+      let rows = ?{\`SELECT id, name, tenant_id FROM assets\`}.acrossTenants().all()
+      return rows.map(r => r.name + ":" + r.tenant_id)
+    }`;
+
+describe("CONF-TENANT-SOURCE-FILTER r2 — INSERT with no active tenant is a named refusal", () => {
+  test("from a route with a pinned tenant: injected (and through an in-process peer too)", async () => {
+    const p = await buildApp(probeProgram(INSERTS));
+    expect(fatal(p.result)).toEqual([]);
+    expect(p.server).toContain("${_scrml_tenant_write_key()}");
+    const a = await pin("A", p);
+    expect(await call("addViaPeer", { cookie: a }, p)).toBe(2);
+    expect(await call("countAll", {}, p)).toContain("own-new:A");
+  });
+  test("with no active tenant: refused by name, nothing written", async () => {
+    const p = await buildApp(probeProgram(INSERTS));
+    const r = await callRaw("addOwn", {}, p);
+    expect(JSON.stringify(r)).not.toContain("ReferenceError");
+    expect(r.status === 200).toBe(false);
+    expect(await call("countAll", {}, p)).toEqual(["A-secret-asset:A", "B-secret-asset:B"]);
+  });
+  test("outside ANY request (boot / a background job): the shipped write key refuses by name", async () => {
+    const H = new Function(SERVER_TENANT_HELPER + "\nreturn { _scrml_tenant_write_key };")();
+    expect(() => H._scrml_tenant_write_key()).toThrow(/E-TENANT-WRITE \(runtime\)/);
+    expect(() => H._scrml_tenant_write_key()).toThrow(/acrossTenants\(\)/);
+  });
+  test(".acrossTenants() + an explicit tenant column, with no active tenant: allowed", async () => {
+    const p = await buildApp(probeProgram(INSERTS));
+    expect(await call("addAcrossExplicit", {}, p)).toBe("added");
+    expect(await call("countAll", {}, p)).toContain("job-made:B");
+  });
+  test(".acrossTenants() WITHOUT the tenant column: refused at compile (E-TENANT-WRITE)", async () => {
+    const p = await buildApp(probeProgram(`    function addAcrossBare() {
+      ?{\`INSERT INTO assets (name, cost) VALUES ('orphan', 3)\`}.acrossTenants().run()
+      return "added"
+    }`));
+    expect(fatal(p.result)).toContain("E-TENANT-WRITE");
+  });
+  test(".acrossTenants() with NO column list: refused at compile (the tenant column is not named)", async () => {
+    const p = await buildApp(probeProgram(`    function addAcrossNoList() {
+      ?{\`INSERT INTO assets VALUES (9, 'x', 3, 'B')\`}.acrossTenants().run()
+      return "added"
+    }`));
+    expect(fatal(p.result)).toContain("E-TENANT-WRITE");
+  });
+});
+
+describe("CONF-TENANT-SOURCE-FILTER r2 — every SQL spelling meets the same refusals (the audit's bare-brace hole)", () => {
+  test("`?{ select count(*) … }` and `?{ update … }` are refused like the backtick spelling", async () => {
+    const p = await buildApp(probeProgram(`    function cnt() {
+      const r = ?{ select count(*) as n from assets }
+      return r
+    }
+    function wipe() {
+      ?{ update assets set name = 'x' }
+      return "ok"
+    }`));
+    expect(fatal(p.result)).toContain("E-TENANT-AGG");
+    expect(fatal(p.result)).toContain("E-TENANT-WRITE");
+  });
+});
+
+describe("CONF-TENANT-SOURCE-FILTER r2 — a kind=\"tool\" program runs outside any request", () => {
+  test("its tenant reads see zero rows; .acrossTenants() sees all (EXECUTED)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "conf-tenant-tool-"));
+    _tmp.push(dir);
+    writeFileSync(join(dir, "tool.scrml"), `<program kind="tool" db="app.db">
+  <schema>
+    ?{\`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, cost INTEGER, tenant_id TEXT)\`}
+  </schema>
+  function main(args) -> int {
+    let rows = ?{\`SELECT id, name FROM assets\`}.all()
+    let all = ?{\`SELECT id, name FROM assets\`}.acrossTenants().all()
+    print(rows.length + ":" + all.length)
+    return 0
+  }
+</program>
+`);
+    const db = new Database(join(dir, "app.db"), { create: true });
+    for (const s of SEED) db.exec(s);
+    db.close();
+    const r = compileScrml({ inputFiles: [join(dir, "tool.scrml")], write: true, outputDir: join(dir, "out"), log: () => {} });
+    expect(fatal(r)).toEqual([]);
+    const run = Bun.spawnSync(["bun", join(dir, "out", "tool.js")], { cwd: dir });
+    expect(run.stdout.toString().trim()).toBe("0:2");
   });
 });
