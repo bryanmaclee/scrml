@@ -8629,15 +8629,13 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
     program's database; it scopes its own children only, as before. A direct child of a
     NESTED `<program>` supplies that nested program only (the nested program is the nearer
     scope for everything in it).
-  - **At most one.** A `<program>` without `db=` that has two or more direct-child `<db src=>`
-    elements — whatever their `src=` values — SHALL be a compile error (**E-SQL-012**): which
-    `<db>` supplies the program's database, and whose `tables=` cover the program, would be
-    ambiguous. The message names the `<program>` and every direct-child `<db>`, and the fixes:
-    put `db=` on the `<program>` (each `<db>` then scopes its own children), merge the blocks
-    into one, or nest all but one inside another element. E-SQL-004 is not the governing code:
-    it is defined as *"`?{}` block has no `db=` / `<db src=>` declaration in any ancestor"* —
-    absence of a scope — while this shape has a candidate database and is ambiguous, so it
-    gets its own code.
+  - **Exactly one, or none supplies.** When a `<program>` without `db=` has two or more
+    direct-child `<db src=>` elements — whatever their `src=` values — NONE of them supplies
+    the program's database, and the program is not a database scope. Each `<db>` still scopes
+    its own children (nearest scope), and a `?{}` in the program outside all of them has no
+    database scope and is E-SQL-004. This is the multi-database layout the nearest-scope rule
+    exists to allow; it is not an error. To give such a `?{}` a database, put `db=` on the
+    `<program>` or move the `?{}` inside the `<db>` it means.
   - **A `<program db=>` is never supplied.** A `<program>` WITH `db=` is a database scope on
     its own `db=`; a direct-child `<db src=>` of it does not change the program's database,
     whether it names the same database or a different one. That `<db>` scopes its own
@@ -8664,9 +8662,9 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
   **Direction of change (pa-base §8): newly-accepting** relative to #1262's text — it restores a
   pattern impl#1 already accepted (the channel's `?{}` opens the `<db>`'s `app.db` and the
   broadcast strips `passwordHash`, S451 probe) and the corpus pins
-  (`protect/channel-broadcast-strip`); **newly-rejecting** for the E-SQL-012 shape (two direct-child
-  `<db src=>` in a `db=`-less program), measured S451 at zero files in the repo corpus; impl#1
-  does not emit E-SQL-012 (`g-impl1-db-src-program-supply-divergences-s451`).)*
+  (`protect/channel-broadcast-strip`); **inert** for two or more direct-child `<db src=>` in a
+  `db=`-less program (none supplies; nearest-scope and E-SQL-004 apply as under #1262). impl#1
+  divergence on `<schema>`: `g-impl1-db-src-program-supply-divergences-s451`.)*
 - If no ancestor is a database scope, the `?{}` block SHALL be a compile error (E-SQL-004:
   `?{}` block has no `db=` / `<db src=>` declaration in any ancestor), except in a
   module-with-db-context (§44.7.1), where the file's top-level `<db src=>` applies.
@@ -8825,16 +8823,18 @@ program is a database scope on `app.db`. The `<channel>` (which §38.1 requires 
 and the row `broadcast` publishes is stripped of `passwordHash` (§14.8.9 channel egress). The
 `<schema>` declares for `app.db` (§39.3).
 
-**Worked Example — Invalid (two direct-child `<db src=>` in a `db=`-less program, E-SQL-012):**
+**Worked Example — two direct-child `<db src=>` in a `db=`-less program (none supplies):**
 
 ```scrml
 <program>
-  <db src="a.db" tables="users"> … </db>
-  <db src="b.db" tables="items"> … </db>      // Error E-SQL-012
+  <db src="a.db" tables="users"> ${ … ?{`SELECT … FROM users`} … } </db>   // runs on a.db
+  <db src="b.db" tables="items"> ${ … ?{`SELECT … FROM items`} … } </db>   // runs on b.db
+  ${ function f() { return ?{`SELECT 1`}.get() } }                         // Error E-SQL-004
 </program>
 ```
 
-Fix: `<program db="a.db">` (each `<db>` then scopes its own children), or one `<db>`.
+Each `<db>` scopes its own children; neither supplies the program, so the `?{}` outside both has
+no database scope. Fix: `<program db="a.db">`, or move it inside the `<db>` it means.
 
 ### 8.2 Bound Parameter Semantics
 
@@ -9134,7 +9134,6 @@ read/write distinction.
 | E-SQL-006 | `.prepare()` called on `?{}` result (removed — see §44.3) | Error |
 | E-SQL-007 | `?{}` in a non-async context (see §44.4) | Error |
 | E-SQL-008 | `?{` SQL block has no matching `}` — unterminated SQL template, unterminated backtick template literal, or unmatched `${` interpolation inside the SQL body (F-SQL-001, parser-stage hard error replacing prior silent data loss) | Error |
-| E-SQL-012 | A `<program>` without `db=` has two or more direct-child `<db src=>` elements — which one supplies the program's database is ambiguous (§8.1.1, S451 "a for the channel Q"; **Nominal / not yet emitted** by impl#1, `g-impl1-db-src-program-supply-divergences-s451`) | Error |
 | E-BATCH-001 | Explicit `transaction { }` composed with an implicit per-handler transaction (§8.9.3 / §19.10.5) | Error |
 | E-BATCH-002 | Batched `IN (...)` parameter count exceeds `SQLITE_MAX_VARIABLE_NUMBER` and chunking is not applicable | Error |
 | E-PROTECT-003 | A `BatchPlan.rowCacheColumns` entry includes a `protect` column that appears in the handler's client-visible return type (§8.10.7) | Error |
@@ -24428,7 +24427,6 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-SQL-009 | §44.7, §21.5.1 | An `export server function` containing `?{}` is declared in a file with no top-level `<db src=>` block (F-AUTH-002). The exported function would have no database connection in its compiled form. Resolution: add a `<db src=...>` block, or move the function to a file that has one. (Catalog addition S84 Wave 2 #5; full prose at §44.7 line 18133-18154, also §38.12.6 line 16649 for channel interaction.) | Error |
 | E-SQL-010 | §19.10.6, §44.7 | `transactions="concurrent"` is declared for a SQLite database. The opt-in runs each transaction on its own connection from a Postgres / MySQL connection pool; a SQLite database is one connection, so its transactions always run one at a time. Resolution: remove the attribute, or use a `postgres://` / `mysql://` database. (Catalog addition S449 — ruling C opt-in (b); emitted at `compiler/src/codegen/emit-server.ts:6956` `concurrentTransactionsFor`.) | Error |
 | E-SQL-011 | §8.9.2, §19.10.5, §19.10.6, §8.1.1, §44.7 | A transaction spans two databases. **Language trigger (S451 ruling 4a):** a `!` function holds a transaction envelope on database A — the implicit per-handler transaction, a `transaction { }` block, or a manual `?{BEGIN}` — and, while it is open, writes a database B other than A, by its own `?{}` or transitively through any function it calls. A write is a non-`SELECT` `?{}` (unclassifiable = write); reads of B are allowed. The envelope covers its own database only, so its rollback could not undo the write to B; cross-database atomicity is not offered. The message names the function, both databases, the call path to the write, and the fixes (move the write out of the function, or drop the envelope with `.nobatch()`). **Provenance:** ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" item 4. **Nominal / not yet emitted** by impl#1 for this trigger (frozen; `g-impl1-cross-database-write-in-envelope-s451`); lands with the bootstrap. **impl#1 also emits this code** for two shapes that are implementation limits, not language rules: one server function whose own `?{}` sites resolve to two databases, enveloped or not (emitted at `compiler/src/codegen/emit-server.ts:1828`; reachable only from a synthetic tree — a function body declares no database scope), and a file whose `watches=` channels sit in two database scopes (emitted at `compiler/src/codegen/emit-server.ts:6652`; change capture runs on one connection per file). (Catalog addition S451 — the code was emitted by the S451 nearest-scope fix with no row.) | Error |
-| E-SQL-012 | §8.1.1 | A `<program>` without `db=` has two or more direct-child `<db src=>` elements, whatever their `src=` values. Under S451 "11a" a single direct-child `<db src=>` supplies a `db=`-less program's database (the program becomes the database scope for everything in it, and the `<db>`'s `tables=` / `protect=` cover it); with two, which `<db>` supplies it is ambiguous. Not E-SQL-004 (absence of any scope). The message names the program, every direct-child `<db>`, and the fixes: `db=` on the `<program>` (each `<db>` then scopes its own children), one merged `<db>`, or nesting all but one. **Provenance:** ruling:user-voice-scrml.md S451 "a for the channel Q" item 1. **Nominal / not yet emitted** by impl#1 (frozen; `g-impl1-db-src-program-supply-divergences-s451` — impl#1 compiles the shape at exit 0); lands with the bootstrap. Newly-rejecting; measured S451 at zero files in the repo corpus. (Catalog addition S451.) | Error |
 | E-CELL-OUT-OF-SCOPE | §51.0.Q | Reading a nested engine's auto-declared variable from outside the outer engine's composite state-child. The inner variable is reachable by canonical `@` access only while the outer is in the composite state-child. Deferred to A1c codegen for runtime-guard implementation; not yet fired in v0.next P1. (Catalog addition S84 Wave 2 #5; full prose at §51.0.Q line 21617.) | Error |
 | E-MW-003 | §40 | `resolve(request)` is called zero times or more than once in a `handle()` middleware body on a single execution path. `resolve` invokes the rest of the pipeline and MUST run exactly once per request. An early-return branch that does NOT call `resolve` is valid; the rule applies only to paths that DO call it. (Catalog addition S84 Wave 2 #5; full prose at §40 lines 17225, 17264, 17305.) | Error |
 | E-MW-004 | §40 | `handle()` middleware returns a value whose type is not `Response`. Middleware must produce a Bun `Response`; non-`Response` returns indicate a malformed pipeline. (Catalog addition S84 Wave 2 #5; full prose at §40 lines 17226, 17306.) | Error |
@@ -29376,7 +29374,7 @@ No shared reactive state across program boundaries. State changes must be sent e
 
 A nested `<program db="...">` creates its own database driver scope. `?{}` blocks inside resolve to the nested program's `db=`, not the parent's.
 
-A `<program>` without `db=` is a database scope too when exactly one `<db src="...">` is its direct child: that `<db>` supplies the program's database, and every `?{}` in the program with no nearer scope resolves to it (§8.1.1, S451 "a for the channel Q"). This applies to a nested `<program>` as to the root: a direct child of the nested program supplies the nested program only. Two or more direct-child `<db src=>` of a `db=`-less program is E-SQL-012; a `<program db=>` keeps its own `db=` whatever `<db>` children it has.
+A `<program>` without `db=` is a database scope too when exactly one `<db src="...">` is its direct child: that `<db>` supplies the program's database, and every `?{}` in the program with no nearer scope resolves to it (§8.1.1, S451 "a for the channel Q"). This applies to a nested `<program>` as to the root: a direct child of the nested program supplies the nested program only. With two or more direct-child `<db src=>`, none supplies the program (each scopes its own children); a `<program db=>` keeps its own `db=` whatever `<db>` children it has.
 
 ### 43.7 Error Codes
 
@@ -29401,7 +29399,7 @@ A `<program>` without `db=` is a database scope too when exactly one `<db src=".
 ### 44.2 Driver Resolution
 
 1. Walk upward from the `?{}` block through its enclosing elements.
-2. The first database scope reached — a `<program>` with `db=`, a `<program>` without `db=` whose single direct-child `<db src=>` supplies its database, or a `<db src=>` block — determines the driver and the database (§8.1.1; S451 "your recs on both" — supersedes "Walk upward … through enclosing `<program>` elements" / "First `<program>` with `db=` determines the driver"; the supplied-program scope is S451 "a for the channel Q"). A `db=`-less `<program>` with two or more direct-child `<db src=>` is E-SQL-012.
+2. The first database scope reached — a `<program>` with `db=`, a `<program>` without `db=` whose single direct-child `<db src=>` supplies its database, or a `<db src=>` block — determines the driver and the database (§8.1.1; S451 "your recs on both" — supersedes "Walk upward … through enclosing `<program>` elements" / "First `<program>` with `db=` determines the driver"; the supplied-program scope is S451 "a for the channel Q"). A `db=`-less `<program>` with two or more direct-child `<db src=>` is not supplied by any of them.
 3. Parse the connection string prefix.
 4. If no database scope is found, emit E-SQL-004 (unless the file is a module-with-db-context, §44.7.1).
 5. A SQLite file path resolves against the directory of the declaring `.scrml` file, and is
@@ -29457,7 +29455,6 @@ Which connection a transaction runs on, and what concurrent requests may see of 
 | E-SQL-009 | `export server function` containing `?{}` declared in a pure-fn file without a top-level `<db src=>` block (§21.5.1, F-AUTH-002) | Error |
 | E-SQL-010 | `transactions="concurrent"` on a SQLite database (§19.10.6; emitted at `compiler/src/codegen/emit-server.ts:6956` `concurrentTransactionsFor`) | Error |
 | E-SQL-011 | A transaction spans two databases: a `!` function's envelope (implicit, `transaction { }`, or `?{BEGIN}`) is on database A and, while it is open, the function writes database B — itself or transitively through a callee (§8.9.2, S451 ruling 4a; **Nominal / not yet emitted** by impl#1 for this trigger, `g-impl1-cross-database-write-in-envelope-s451`). impl#1 also emits it for one function's own `?{}` sites on two databases and for `watches=` channels in two scopes (emitted at `compiler/src/codegen/emit-server.ts:1828` and `:6652`) — implementation limits, see §34. | Error |
-| E-SQL-012 | A `<program>` without `db=` has two or more direct-child `<db src=>` elements — which supplies the program's database is ambiguous (§8.1.1, S451 "a for the channel Q"; **Nominal / not yet emitted** by impl#1, `g-impl1-db-src-program-supply-divergences-s451`) | Error |
 
 #### 44.7.1 Module-with-db-context (F-AUTH-002)
 
