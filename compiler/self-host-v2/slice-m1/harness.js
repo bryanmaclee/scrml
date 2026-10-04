@@ -81,7 +81,8 @@ export function loadBundle(bundle, modules) {
   if (errs.length > 0) {
     throw new Error("bootstrap bundle failed to compile under impl#1:\n" + errs.map((e) => `${e.code} ${e.message ?? ""}`).join("\n"));
   }
-  const chunks = listClientJs(outDir).map((file) => {
+  // sorted: readdir order is the filesystem's; the chunks load in one order everywhere
+  const chunks = listClientJs(outDir).sort().map((file) => {
     const src = readFileSync(file, "utf8");
     const reg = /_scrml_modules\["([^"]+)"\]\s*=/.exec(src);
     const deps = [...src.matchAll(/=\s*_scrml_modules\["([^"]+)"\];/g)].map((m) => m[1]);
