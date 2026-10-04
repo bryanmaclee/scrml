@@ -130,11 +130,20 @@ describe("§2 §19.10.4 checks (lint-transaction)", () => {
   // `parseTransactionBlock()` is reached from the top-level loop and from
   // `parseOneStatement` (nested STATEMENT bodies) only, and a lambda body sits
   // inside an EXPRESSION — so `xs.forEach((x) => { transaction { … } })` builds a
-  // `bare-expr` with no `transaction-block` and no `lambda` node at all, at exit 0.
-  // That is a PRE-EXISTING parse gap of the same class S450 fixed for function
-  // bodies, NOT something B1a/B1b changes; the lint's lambda limb exists so the
-  // message is right if the parser is ever extended there.
-  test("B1b limit: a transaction in a lambda arrow body never reaches the checker (pre-existing parse gap)", () => {
+  // `bare-expr` with no `transaction-block` and no `lambda` node at all. That is a
+  // PRE-EXISTING parse gap of the class S450 fixed for function bodies, NOT
+  // something B1a/B1b changes; the lint's lambda limb exists so the message is
+  // right if the parser is ever extended there.
+  //
+  // ⚠ SCOPE OF THIS TEST, because an earlier revision of this comment got it
+  // wrong: what is asserted here is the AST/checker-level fact ONLY. The claim
+  // that the shape therefore compiles "at exit 0" is FALSE. Through the full
+  // pipeline it is LOUD — `E-CODEGEN-INVALID-LOGIC`, measured on both
+  // `origin/main` and this head, with a control (the same lambda body WITHOUT the
+  // `transaction`) compiling clean. A `write: false` compile cannot see it, since
+  // that is a codegen-stage code — which is exactly how the false claim survived
+  // its first measurement. So: silent to this checker, loud to the compiler.
+  test("B1b limit: a transaction in a lambda arrow body never reaches the checker (AST-level; the pipeline refuses it loudly)", () => {
     const src = `\${ type E:enum = { Bad } function f(xs)! -> E { xs.forEach((x) => { ${TX} }) } }`;
     const { ast } = parse(src);
     expect(collect(ast, "transaction-block").length).toBe(0);
@@ -157,7 +166,14 @@ describe("§2 §19.10.4 checks (lint-transaction)", () => {
     expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { for (let i = 0; i < 2; i++) { transaction { if (a) { break } } } } }`)).toEqual([]);
     expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { while (a) { transaction { if (a) { continue } } } } }`)).toEqual([]);
   });
-  test("B1a: a labeled break to a label outside the block → legal; inside → legal (unchanged)", () => {
+  // ⚠ TITLE SCOPE: this asserts only that the §19.10.4 TRANSACTION validator does
+  // not refuse these shapes. It is NOT a claim that they compile. A LABELED break
+  // does not compile at all — scrml drops loop labels at codegen, so the first
+  // source below is `E-CODEGEN-INVALID-LOGIC` through the full pipeline. That is
+  // PRE-EXISTING and unrelated to transactions: measured, the identical labeled
+  // break with NO `transaction` in it fails the same way, on `origin/main` too.
+  // The earlier title said "→ legal", which overstated what this test checks.
+  test("B1a: the transaction validator does not refuse a labeled break out of the block, nor one inside it", () => {
     expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { outer: for (let i = 0; i < 2; i++) { transaction { for (let j = 0; j < 2; j++) { break outer } } } } }`)).toEqual([]);
     expect(codes(`\${ type E:enum = { Bad } function f(a)! -> E { transaction { inner: for (let j = 0; j < 2; j++) { break inner } } } }`)).toEqual([]);
   });
