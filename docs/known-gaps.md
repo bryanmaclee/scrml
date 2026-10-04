@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 241 | 6 |
+| HIGH | 242 | 6 |
 | MED | 501 | 4 |
 | LOW | 265 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
@@ -22979,3 +22979,12 @@ Governing: SPEC §4.18.5 — *"whitespace is kept exactly in both productions"*,
 > Fix direction (not built): the same shape recommended for the call-ref limb — give the invocation a `.catch(→ _scrml_error_boundary_log)` arm, or await it inside an async wrapper that preserves the sync prefix. Routed to bryan with the handler-rejection family so the family is fixed once.
 
 Governing: SPEC §19.6.8 (the compiler-emitted host-JS backstop) + §19.6.4 (inner-catches-first propagation, which is what the escaping throw is meant to reach).
+
+### g-tenant-floor-schema-write-hazards-beyond-the-on-table-s452-r4 — a `<schema>` trigger declared ON a NON-tenant table (or an `INSTEAD OF` trigger on a view) whose body writes a tenant table, or a cascading FK from a non-tenant parent, makes a scoped write fan out across tenants — `NEW S452 (security re-review of 21128613b); HIGH; OPEN`
+<!-- @gap id=g-tenant-floor-schema-write-hazards-beyond-the-on-table-s452-r4 sev=HIGH status=open locus=compiler/src/codegen/tenant-egress.ts(schemaWriteHazards ~:180-183 — attributes a trigger only to its ON table) + compiler/src/codegen/tenant-sql-subset.ts(~:381-399 — a write naming no tenant table is never hazard-checked) prov=review:s452-tenant-r4 -->
+Governing: SPEC §14.8.10 (S452 "a") — writes against a tenant-scoped table are inject-or-hard-fail; "a committed cross-tenant write is durable before any filter could run, so it must fail closed at compile". Executed by the reviewer on `21128613b` against two seeded tenants (relayed — reproduce before fixing):
+- **H1** `CREATE TRIGGER t_cfg AFTER INSERT ON config BEGIN UPDATE assets SET name='pwned-by-trigger'; END`; tenant A runs `INSERT INTO config …` → compiles clean, both tenants' `assets` rows rewritten.
+- **H2** `CREATE VIEW va AS SELECT id, name FROM assets` + `CREATE TRIGGER t_v INSTEAD OF UPDATE ON va BEGIN UPDATE assets … END`; A runs `UPDATE va … WHERE id = 2` → B's row rewritten (the view write path; the VIEW read gap is `g-tenant-floor-schema-view-over-tenant-table-s452`).
+- **M1** `orders.cfg REFERENCES config(k) ON DELETE CASCADE` (orders tenant-scoped, config not); A runs `DELETE FROM config` → on Postgres would delete B's orders (SQLite inert: the emitted server never enables `PRAGMA foreign_keys`; PG not run).
+Direction (PA, for the next round): a SCHEMA-LEVEL rule rather than per-statement attribution — any `<schema>` trigger/rule whose BODY writes a tenant table, and any FK action whose child is a tenant table, is refused at the schema (or charged to every table it can fire from), and EVERY write is hazard-checked whether or not it names a tenant table. Hazards outside `<schema>` remain invisible (noted).
+Also (LOW-MED, usability, executed): the r4 "a query that mentions a tenant table anywhere" rule false-positives on ordinary code — `INSERT INTO audit (msg) VALUES ('assets updated')`, `LIKE '%orders%'`, and an INTERPOLATION whose JS variable is named `orders`; the diagnostic names the table, not the offending function. Exclude interpolation text from the mention scan and name the function. Residual wider than stated: `query_to_xml(${q}, …)` with the table name in a bound parameter compiles (Postgres; a natural generic-export helper).
