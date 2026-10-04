@@ -479,6 +479,9 @@ ${
             } else if (c.cls == TC.Punct && c.text == "-" && g.text == ">" && touching(c, g)) {
                 legacy = true
                 t = adv(adv(t))
+            } else if (c.cls == TC.Punct && c.text == "|") {
+                // s452 r3 (LOW-D): `.A | .B :>` — §18.2's arm-pattern alternation
+                t = diagAt(t, "E-PARSE-ARM", "alternation `|` between patterns (`.A | .B :> …`, §18.2) is not yet supported in the bootstrap — write one arm per pattern", c)
             } else {
                 t = diagAt(t, "E-PARSE-ARM", "expected `:>` after the arm's pattern, found `" + c.text + "`", c)
             }

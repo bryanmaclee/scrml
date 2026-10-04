@@ -53,7 +53,7 @@ ${
              AProgram, AItem, AItemK, FileAst, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan, newDiag } from "./ast.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
-    import { SqlFacts, sqlFacts, txControl } from "./sql.scrml"
+    import { SqlFacts, sqlFacts, txControl, txControlAware } from "./sql.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -6425,19 +6425,28 @@ ${
     // Does a call of `f` produce a value? A declared return type does (`->
     // void` declares that it does not, §7.5 — FnInfo.ret is `not` for it); a
     // `!` function's result is handled, never read here; otherwise the body
-    // decides — s452 r2 (MED-2): a value on EVERY path (falling off the end of
-    // the body is no value). Proven syntactically: the body's last statement is
-    // `return <expr>`, or an `if` / `else` both of whose blocks are. FAIL CLOSED
-    // (judged "no value" → E-ERROR-012 at a value-position arm): a body that
-    // ends any other way — a `given` (its body runs only when the value is
-    // present), a statement-position handling form whose arms return, an `if`
-    // without `else`, a bare `return`.
+    // decides — a value on EVERY path, proven syntactically, FAIL CLOSED
+    // (judged "no value" → E-ERROR-012 at a value-position arm):
+    //   - s452 r3 (MED-B): a bare `return` ANYWHERE in the body (any depth — an
+    //     `if` branch, a `given` body, a handling form's arm block) is a path
+    //     with no value;
+    //   - otherwise the statements are walked in order and the FIRST one that
+    //     returns a value on every path through it decides (s452 r3 LOW-C — what
+    //     follows it is dead): `return <expr>`, or an `if` / `else` both of whose
+    //     blocks do. Reaching the end of the body is no value.
+    //   - A `fn` / `function` body's tail EXPRESSION is not a value: the
+    //     bootstrap gives neither implicit tail return (`fn h() { "a" }` prints
+    //     `function h() { "a"; }` — returns nothing; checked s452 r3).
+    // Unprovable, so judged "no value": a `given` (its body runs only when the
+    // value is present), a statement-position handling form whose arms return,
+    // an `if` without `else`.
     fn fnYieldsValue(g: Globals, f: FnInfo) -> boolean {
         if (f.ret is some || f.failable) return true
         const fs: FnSrc | not = fnSrcOf(g, f.sym.id)
         if (fs is not) return true                         // unknown: never claimed to be empty
         const r: AType | not = fs.f.ret
         if (r is some) return !declaresVoid(r)
+        if (blockHasBareReturn(fs.f.body)) return false
         return blockYieldsOnAllPaths(fs.f.body)
     }
 
@@ -6450,9 +6459,17 @@ ${
         }
     }
 
+    // Does SOME statement of `b` return a value on every path through it (the
+    // first such statement ends every path that reaches it)?
     fn blockYieldsOnAllPaths(b: ABlock) -> boolean {
-        if (b.stmts.length == 0) return false
-        const k: AStmtK = b.stmts[b.stmts.length - 1].k
+        for (const s of b.stmts) {
+            if (stmtYieldsOnAllPaths(s)) return true
+        }
+        return false
+    }
+
+    fn stmtYieldsOnAllPaths(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
         return match k {
             .Return(e: x) :> x is some
             .If(cond: c, thenB: t, elseB: el) :> blockYieldsOnAllPaths(t) && maybeBlockYields(el)
@@ -6468,6 +6485,49 @@ ${
     fn maybeBlockYields(b: ABlock | not) -> boolean {
         if (b is not) return false
         return blockYieldsOnAllPaths(b)
+    }
+
+    // A `return` with no value anywhere in `b` (s452 r3 MED-B).
+    fn blockHasBareReturn(b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtHasBareReturn(s)) return true
+        }
+        return false
+    }
+
+    fn stmtHasBareReturn(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> returnIsBare(x)
+            .If(cond: c, thenB: t, elseB: el) :> exprHasBareReturn(c) || blockHasBareReturn(t) || maybeBlockHasBareReturn(el)
+            .Given(name: n, subject: x, body: b) :> exprHasBareReturn(x) || blockHasBareReturn(b)
+            .Eval(e: x) :> exprHasBareReturn(x)
+            .Local(name: n, init: i) :> exprHasBareReturn(i)
+            .EffectStmt(w: w) :> false
+            .Defer(body: d) :> false                       // a deferred body holds no `return` (§19.16.3 rule 1)
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn returnIsBare(x: AExpr | not) -> boolean {
+        if (x is not) return true
+        return exprHasBareReturn(x)
+    }
+
+    fn maybeBlockHasBareReturn(b: ABlock | not) -> boolean {
+        if (b is not) return false
+        return blockHasBareReturn(b)
+    }
+
+    // ... inside a handling form's arm block in `e`, at any depth.
+    fn exprHasBareReturn(e: AExpr) -> boolean {
+        for (const b of exprBlocks(e)) {
+            if (blockHasBareReturn(b)) return true
+        }
+        for (const x of exprKids(e)) {
+            if (exprHasBareReturn(x)) return true
+        }
+        return false
     }
 
     // E-ERROR-012 (§19.4.3 ruling 1a), with the SPEC's message.
@@ -13786,7 +13846,7 @@ ${
         const v: string | not = quotedValue(a.value)
         if (v is not) return { db: not, st: addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` must be a literal connection string (`" + a.name + "=\"./app.db\"`, §8.1.1) — the bootstrap reads it at compile time") }
         const why: string = dbRefusal(v)
-        if (why != "") return { db: not, st: addDiag(st, file, a.span, "E-SQL-005", "`" + a.name + "=\"" + redactDsn(v) + "\"`: " + why + " (§8.1.1, §44.2). A `" + sqlSigil() + "}` runs on SQLite (`./app.db`, `sqlite:./app.db`, `:memory:`), PostgreSQL (`postgres://…`, `postgresql://…`) or MySQL (`mysql://…`)") }
+        if (why != "") return { db: not, st: addDiag(st, file, a.span, "E-SQL-005", "`" + a.name + "=` (" + dbKind(v) + "): " + why + " (§8.1.1, §44.2). A `" + sqlSigil() + "}` runs on SQLite (`./app.db`, `sqlite:./app.db`, `:memory:`), PostgreSQL (`postgres://…`, `postgresql://…`) or MySQL (`mysql://…`)") }
         const r: RSym = mint(st, "db")
         return { db: { sym: r.s, driver: dbDriver(v), target: dbTarget(v), file: file, owner: false }, st: r.st }
     }
@@ -13801,19 +13861,20 @@ ${
         }
     }
 
-    // s452 r2 (DB-LOW-1) — a connection string as a diagnostic may show it:
-    // its userinfo (`user:password@`) replaced by `***` (`scheme://***@host…`).
-    // Credentials never reach a diagnostic, a log or a terminal.
-    fn redactDsn(v: string) -> string {
-        const sep: int = v.indexOf("://")
-        let from: int = 0
-        if (sep >= 0) from = sep + 3
-        let end: int = v.indexOf("/", from)
-        if (end < 0) end = v.length
-        const auth: string = v.substring(from, end)
-        const at: int = auth.lastIndexOf("@")
-        if (at < 0) return v
-        return v.substring(0, from) + "***" + v.substring(from + at)
+    // s452 r3 (LOW-B) — a diagnostic SHALL NOT echo a `db=` / `src=` value at
+    // all (credentials hide in too many places: userinfo, `?password=`,
+    // `;password=`, a jdbc `&password=`, an unencoded `/`). It names what KIND
+    // of value it is instead, from the recognized scheme only.
+    fn dbKind(v: string) -> string {
+        if (v.trim() == "") return "an empty value"
+        const scheme: string = schemeOf(v)
+        if (scheme == "") return "a SQLite path"
+        if (scheme == "sqlite") return "a `sqlite:` path"
+        if (scheme == "postgres" || scheme == "postgresql") return "a PostgreSQL connection string"
+        if (scheme == "mysql") return "a MySQL connection string"
+        if (scheme == "mongo" || scheme == "mongodb") return "a MongoDB URL"
+        if (scheme == "file") return "a `file:` URI"
+        return "a connection string with an unrecognized prefix"
     }
 
     // Why a connection string is not a `?{}` database ("" — it is one).
@@ -13831,7 +13892,7 @@ ${
         }
         if (scheme == "mongo" || scheme == "mongodb") return "MongoDB is not a `" + sqlSigil() + "}` database — use a `^{}` meta context"
         if (scheme == "file") return "a `file:` URI is not a path — write the path itself or `sqlite:<path>`"
-        return "`" + scheme + ":` is not a recognized database connection prefix"
+        return "its prefix is not a recognized database connection prefix"
     }
 
     // The URI scheme of a value ("" — none: a path, or `:memory:`).
@@ -14162,7 +14223,10 @@ ${
         if (kw == "") return st
         let fix: string = "Move it into a function declared with '!' and use 'transaction { … }' (§19.10.2), which commits or rolls back on every exit."
         if (fname != "") fix = "Declare '" + fname + "' with '!' and use 'transaction { … }' (§19.10.2), which commits or rolls back on every exit."
-        return addDiag(st, file, s.span, "E-ERROR-015", "Manual transaction control '" + kw + "' in " + where + ". A transaction is '!'-gated (§19.10.4): its rollback promise needs a failure path. " + fix)
+        // s452 r3 (MED-A): found only by the fail-closed plain `;` split — say why
+        let why: string = ""
+        if (txControlAware(s.q.chunks) == "") why = " (This query's text holds a construct whose quoting or commenting depends on the database dialect — `\\`, `$`, `/*!`, `#`, or `--` not followed by a space — so every `;` is read as a statement boundary, and one of its statements reads as transaction control. If it is not one — e.g. a `$$ … BEGIN … END $$` function body — move the query into a function declared '!', where manual transaction control is allowed.)"
+        return addDiag(st, file, s.span, "E-ERROR-015", "Manual transaction control '" + kw + "' in " + where + ". A transaction is '!'-gated (§19.10.4): its rollback promise needs a failure path. " + fix + why)
     }
 
     // §13.7 (S451 R1): a value position that would have to WAIT.

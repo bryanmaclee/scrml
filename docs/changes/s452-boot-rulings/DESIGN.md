@@ -210,3 +210,28 @@ What the bootstrap had and what changed:
 - **Addendum (S452 §19.4.5 amendment).** A leading `|` is legacy on a `!{}` arm ONLY. On a `match` arm it is E-PARSE-ARM.
   - The paren-free binder is read only after a `!{}` arm's `|`. A pipe-less `!{ .V m :> }` is E-PARSE-ARM.
   - Engine message arms (§51.0.S) are NOT parsed by `parseArms`: its only callers are `parseGuard` and `parseMatch`.
+
+## 4. Fix round r3 — the runtime enforces; the static check is best-effort
+
+- **BINDING requirement on U1e** (beside S451's "text classification cannot prove a database query read-only; the
+  runtime must enforce it"): outside a `!` function, the runtime SHALL detect a transaction left open on the
+  connection after a query, roll it back, and report it. E-ERROR-015 (§19.10.4) is a best-effort static check over
+  SQL text. It cannot be complete: quoting and commenting are dialect-dependent, and `XA …` / `SET autocommit = 0`
+  are not recognised (noted gaps).
+- **MED-A (fail closed).** sql.scrml `txControl` keeps the string/comment-aware statement scan. When the text holds a
+  dialect-dependent construct, it ALSO splits plainly on every `;`; either scan finding transaction control fires the
+  code. The constructs are `\`, `$`, `/*!`, `#`, and `--` not followed by whitespace.
+  - The accepted price is false positives, e.g. a `$$ … BEGIN … END $$` body in a non-`!` function.
+  - The message says why, and names the way out: a `!` function.
+  - The old comment that a miss was impossible was false; it is corrected.
+- **MED-B / LOW-C.** A callee with no declared return type yields a value only if both of these hold:
+  - its body has no bare `return` at any depth;
+  - some statement, in order, returns a value on every path through it (`return <expr>`, or an `if`/`else` both
+    branches of which do). What follows that statement is dead.
+
+  A `fn` tail expression is NOT a value: the bootstrap gives `fn` no implicit tail return. Probe s452 r3:
+  `fn h() { "a" }` prints `function h() { "a"; }`, and `fn h() -> string { "a" }` compiles clean and returns
+  `undefined`. That is a pre-existing bootstrap gap against §48, reported, not fixed here.
+- **LOW-B.** No db diagnostic echoes a `db=` / `src=` value. E-SQL-005 names only the kind (`a MongoDB URL`,
+  `a connection string with an unrecognized prefix`, …). The round-2 `redactDsn` is deleted.
+- **LOW-D.** `.A | .B :>` (§18.2 alternation) stays unsupported, with a named E-PARSE-ARM message. Deferred.

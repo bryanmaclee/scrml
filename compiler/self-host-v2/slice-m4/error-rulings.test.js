@@ -553,11 +553,76 @@ describe("fix round r2 — E-ERROR-015 statement list, LOW-3 arm order, DB-LOW-1
     expect(r.diags.map((d) => d.code)).toEqual(["E-SQL-005"]);
     expect(r.diags[0].message).not.toContain("SECRET");
     expect(r.diags[0].message).not.toContain("admin");
-    expect(r.diags[0].message).toContain("mongodb://***@h/x");
+    expect(r.diags[0].message).toContain("a MongoDB URL");
     expect(msg(`<program db="mysql:root:pw@h">\n    <main><p>x</p></main>\n</program>\n`, "E-SQL-005")).not.toContain("pw");
   });
 
   test("r2 NIT: `if=` on a `<db>` is reported once", () => {
     expect(codes(`<program>\n    let <n:int=0/>\n    <db src="./a.db" if=@n><p>a</p></db>\n    <main><p>x</p></main>\n</program>\n`).length).toBe(1);
+  });
+});
+
+describe("fix round r3 — fail-closed tx scan, every-path yield, no echoed connection string, alternation message", () => {
+  const DBP = (body) => `<program db="./app.db">\n${body}\n    <main><p>x</p></main>\n</program>\n`;
+  const fnWith = (sql) => DBP(`    function plain() -> int {\n        ${SQ}\`${sql}\`}.run() !{ _ :> { return 0 } }\n        return 1\n    }`);
+  const go = (body) => P(`${TYPES}\n${LOAD}\n${body}`, ["go"]);
+
+  test("r3 MED-A: dialect-dependent quoting / commenting cannot hide transaction control (fail closed)", () => {
+    for (const sql of ["$$'$$; BEGIN; SELECT '1'", "E'\\\\''; BEGIN", "'a\\\\''; BEGIN", "SELECT 1--1; BEGIN", "/*! ; BEGIN */", "SELECT 1 # x'\n; COMMIT"]) {
+      expect([sql, codes(fnWith(sql))]).toEqual([sql, ["E-ERROR-015"]]);
+    }
+  });
+
+  test("r3 MED-A: a hit found only by the plain split says why, and names the way out", () => {
+    const m = msg(fnWith("'a\\\\''; BEGIN"), "E-ERROR-015");
+    expect(m).toContain("depends on the database dialect");
+    expect(m).toContain("function declared '!'");
+    // accepted false positive: a `$$ … BEGIN … END $$` body in a non-`!` function
+    expect(codes(fnWith("CREATE FUNCTION f() RETURNS int AS $$ BEGIN; RETURN 1; END $$ LANGUAGE plpgsql"))).toEqual(["E-ERROR-015"]);
+    // the way out: a `!` function
+    expect(codes(DBP(`    function tx()! SqlError {\n        ${SQ}\`'a\\\\''; BEGIN\`}.run()\n    }`))).toEqual([]);
+  });
+
+  test("r3 MED-A near-miss: no dialect-dependent construct → the aware scan alone decides", () => {
+    expect(codes(fnWith("SELECT ';BEGIN' AS a"))).toEqual([]);
+    expect(codes(fnWith("SELECT 1 -- ; BEGIN"))).toEqual([]);
+  });
+
+  test("r3 MED-B: a bare `return` at ANY depth means the callee may yield no value — E-ERROR-012", () => {
+    expect(codes(go(`    function h() {\n        if (@n == 1) { return }\n        return "a"\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() }\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function h() {\n        load("x") !{ _ :> { return } }\n        return "a"\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() }\n    }`))).toEqual(["E-ERROR-012"]);
+  });
+
+  test("r3 LOW-C: the first unconditional `return <value>` decides (what follows is dead)", () => {
+    clean(go(`    function h() {\n        return "a"\n        @n = 4\n    }\n    function go() {\n        @log = load("x") !{ _ :> h() }\n    }`));
+  });
+
+  test("r3 LOW-C: a `fn` tail expression is NOT a value in the bootstrap (no implicit tail return — it prints `\"a\";`), so it stays E-ERROR-012", () => {
+    expect(codes(go(`    fn h() { "a" }\n    function go() {\n        @log = load("x") !{ _ :> h() }\n    }`))).toEqual(["E-ERROR-012"]);
+  });
+
+  test("r3 LOW-B: no db diagnostic echoes the value — every credential shape stays out", () => {
+    const shapes = [
+      ["mongodb://u:SECRET1@h/x", "SECRET1"],
+      ["mongodb://h/x?password=SECRET2", "SECRET2"],
+      ["mongodb://h/x;password=SECRET3", "SECRET3"],
+      ["jdbc:postgresql://h/x?user=u&password=SECRET4", "SECRET4"],
+      ["mongodb://u:SEC/RET5@h/x", "RET5"],
+      ["SECRETUSER6:pw@h", "SECRETUSER6"],
+      ["mysql:root:SECRET7@h", "SECRET7"],
+    ];
+    for (const [v, secret] of shapes) {
+      for (const src of [`<program>\n    <db src="${v}"><p>a</p></db>\n    <main><p>x</p></main>\n</program>\n`, `<program db="${v}">\n    <main><p>x</p></main>\n</program>\n`]) {
+        const ds = run(src).diags;
+        expect([v, ds.length > 0]).toEqual([v, true]);
+        for (const d of ds) expect([v, d.message.includes(secret)]).toEqual([v, false]);
+      }
+    }
+  });
+
+  test("r3 LOW-D: `.A | .B :>` alternation is named as not yet supported (E-PARSE-ARM)", () => {
+    const src = go(`    function go() {\n        load("x") !{\n            .NotFound(m) | .Timeout :> @n = 1\n        }\n    }`);
+    expect(codes(src)).toContain("E-PARSE-ARM");
+    expect(msg(src, "E-PARSE-ARM")).toContain("alternation `|` between patterns");
   });
 });

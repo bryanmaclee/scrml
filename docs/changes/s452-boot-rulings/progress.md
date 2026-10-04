@@ -68,3 +68,22 @@
   - counter PASS 119 · FAIL 48 · UNSUPPORTED 622 · NOT-TWINNED 511 — identical to 311b590ef (no bucket moved; the
     report is unchanged; `--check` current);
   - `gen-bootstrap-severity --check` current.
+
+## fix round r3
+
+- 2026-10-04 BRIEF-r3.md archived. origin/main had not moved since the r2 merge.
+- MED-A fixed (fail closed: aware scan + plain `;` split when the text is dialect-dependent); the false comment is
+  corrected; the binding U1e requirement is recorded in DESIGN.md §4. Noted gaps: `XA …`, `SET autocommit`.
+- MED-B fixed (a bare `return` at any depth means "may yield no value").
+- LOW-C: an unconditional earlier `return <value>` now decides. A `fn` tail expression is NOT counted as a value,
+  because the bootstrap has no implicit tail return (verified by printing it). Found: a pre-existing gap — a declared
+  `-> T` `fn` ending in a tail expression compiles and returns undefined (§48 / LOW-A territory).
+- LOW-B fixed at the root: no db diagnostic echoes the value; `redactDsn` deleted; 7 credential shapes are tested in
+  both `<db src=>` and `<program db=>`.
+- LOW-D: an alternation-specific E-PARSE-ARM message. Implementing `.A | .B :>` is DEFERRED.
+- LEFT, as instructed: LOW-A (a declared return type is trusted); LOW-E.
+- Verification:
+  - slices m1 99, m2 462, m3 60, m4 1092, codec 92, m1-lowered 99, all 0 fail;
+  - error-rulings.test.js 82 tests;
+  - counter PASS 119 · FAIL 48 · UNSUPPORTED 622 · NOT-TWINNED 511 (unchanged; report unchanged; `--check` current);
+  - severity `--check` current.
