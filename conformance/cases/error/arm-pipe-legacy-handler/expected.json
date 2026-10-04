@@ -1,0 +1,16 @@
+{
+  "id": "error-arm-pipe-legacy-handler",
+  "description": "§19.4.5 / §63.5 — a `!{}` handler written with the soft-deprecated `|`-led arms, including the paren-free binder `| .NotFound reason :>`. The deprecated form is in-contract during the window: it surfaces W-ARM-PIPE-LEGACY (Info) once per `|`-led arm (2 here) and runs identically to the canonical `.NotFound(reason) :>` — clicking #go leaves @result = \"recovered: was-zero\" (the twin of error/handler-recovery-into-cell). The legacy spelling is the PURPOSE of this case; it is not migrated.",
+  "language-version": "deprecated",
+  "spec": "§19.4.5",
+  "rationale": "§19.4.5 — a `|`-led `!{}` arm SHALL be the same arm as the arm without the `|` (same AST, emitted code and run-time behaviour), a paren-free binder after a `|`-led variant SHALL be the same pattern as `.V(m)`, and each `|`-led arm SHALL surface W-ARM-PIPE-LEGACY (Info; one per arm). §63.5 — during the window the W-code is a conformance-required code and the deprecated form's runtime is identical to the canonical form's.",
+  "expect": {
+    "codes": ["W-ARM-PIPE-LEGACY"],
+    "codeCounts": { "W-ARM-PIPE-LEGACY": 2 },
+    "severity": { "W-ARM-PIPE-LEGACY": "info" },
+    "notCodePrefixes": ["E-"],
+    "input": [{ "click": "#go" }],
+    "state": { "result": "recovered: was-zero" },
+    "domAnchored": [{ "selector": "#out", "text": "recovered: was-zero" }]
+  }
+}

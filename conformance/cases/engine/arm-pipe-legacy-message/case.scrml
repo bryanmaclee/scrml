@@ -1,0 +1,19 @@
+// §51.0.S.2.3 / §19.4.5 (S452) — SOFT-DEPRECATED `|`-led engine message arms, kept in the legacy
+// form ON PURPOSE (the twin of engine/message-dispatch): parses identically, one
+// W-ARM-PIPE-LEGACY per `|`-led arm. Do NOT run `scrml fix` over this case.
+${
+    type Gate:enum = { Closed, Open }
+    type GateMsg:enum = { Toggle }
+}
+<engine for=Gate initial=.Closed accepts=GateMsg>
+    <Closed rule=.Open>
+        | .Toggle :> .Open
+    </>
+    <Open rule=.Closed>
+        | .Toggle :> .Closed
+    </>
+</>
+<program>
+<button id="toggle" onclick=@gate.advance(.Toggle)>Toggle</>
+<p id="state">State: ${@gate}</>
+</program>

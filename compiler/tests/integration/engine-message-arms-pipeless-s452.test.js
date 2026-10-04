@@ -54,7 +54,14 @@ function assertEquivalent(piped, pipeless) {
   const a = compileAt(dir, piped);
   const b = compileAt(dir, pipeless);
   expect(b.errors).toEqual(a.errors);
-  expect(b.warnings).toEqual(a.warnings);
+  // Identical aside from W-ARM-PIPE-LEGACY (§19.4.5): one per `|`-led arm,
+  // and only on the piped side's `|`-led arms.
+  const isPipeLint = (d) => d.startsWith("W-ARM-PIPE-LEGACY|");
+  const pipeLed = (s) => (s.match(/^[ \t]*\| /gm) ?? []).length;
+  expect(b.warnings.filter((d) => !isPipeLint(d))).toEqual(a.warnings.filter((d) => !isPipeLint(d)));
+  expect(a.warnings.filter(isPipeLint).length).toBe(pipeLed(piped));
+  expect(b.warnings.filter(isPipeLint).length).toBe(pipeLed(pipeless));
+  for (const d of a.warnings.filter(isPipeLint)) expect(d).toContain("|info|");
   expect(b.lints).toEqual(a.lints);
   expect(b.clientJs).toBe(a.clientJs);
   expect(b.serverJs).toBe(a.serverJs);
@@ -120,9 +127,16 @@ const QUALIFIED = `<program title="q">
 
 describe("S452 — pipe-less message arms ≡ piped (byte-identical artifacts + diagnostics)", () => {
   test("examples/25-triage-board.scrml", () => {
-    const src = readFileSync(resolve(import.meta.dir, "../../../examples/25-triage-board.scrml"), "utf8");
-    const bare = unpipe(src);
+    // The example is canonical (pipe-less) since `scrml fix` migrated it (S452); its legacy
+    // twin re-adds the `| ` lead to the five message-arm lines inside the `<engine>` (the
+    // match arms above the engine are not message arms and stay untouched).
+    const bare = readFileSync(resolve(import.meta.dir, "../../../examples/25-triage-board.scrml"), "utf8");
+    const at = bare.indexOf("<engine");
+    expect(at).toBeGreaterThan(0);
+    const src = bare.slice(0, at) +
+      bare.slice(at).replace(/^([ \t]*)(?=(?:\.[A-Z]\w*(?:\([^)]*\))?|_)[ \t]*:>)/gm, "$1| ");
     expect((src.match(/^[ \t]*\| /gm) ?? []).length).toBe(5);
+    expect(unpipe(src)).toBe(bare);
     const { pipeless } = assertEquivalent(src, bare);
     expect(pipeless.clientJs).toContain("_dragPhase_msg_arms");
     expect(pipeless.clientJs).toContain("_scrml_engine_dispatch_message");

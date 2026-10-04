@@ -80,11 +80,13 @@ function stdlibModules(): string[] {
  *   - `listen`               — the one CLI `Bun.serve` wrapper (bind host), imported by dev/serve.
  *   - `fix-s66`              — the §66.21 rule set behind `scrml fix`, imported by fix.js and the
  *                              bootstrap conformance counter.
+ *   - `fix-arm-pipe`         — the §19.4.5 `arm-pipe` rule behind `scrml fix`, imported by
+ *                              fix-s66.js (S452).
  */
 function cliVerbs(): string[] {
   const d = join(ROOT, "compiler/src/commands");
   if (!existsSync(d)) return [];
-  const NOT_A_VERB = new Set(["module-format-notice", "diagnostic-format", "select-request-onion", "refusal-gate", "listen", "fix-s66"]);
+  const NOT_A_VERB = new Set(["module-format-notice", "diagnostic-format", "select-request-onion", "refusal-gate", "listen", "fix-s66", "fix-arm-pipe"]);
   return readdirSync(d)
     .filter((e) => extname(e) === ".js")
     .map((e) => e.replace(/\.js$/, ""))

@@ -37,6 +37,14 @@ const EXCLUDED = {
   "props-block.propsDecl[].bindable": "a boolean flag, not a name",
   "theme-decl.mediaBinds": "CSS media-query bindings of a theme (§65), not scrml logic identifiers",
   "try-stmt.catchNode": "container object; its binder text is `catchNode.header` (in the table)",
+  // §19.4.5 (S452) — `arms[].legacyPipe` records the SPELLING of a `|`-led `!{}` arm for the
+  // W-ARM-PIPE-LEGACY lint and `scrml fix`: source offsets and flags only. The arm's binder name
+  // is `arms[].binding` (in the table).
+  ...Object.fromEntries(["guarded-expr", "error-effect"].flatMap((owner) =>
+    ["binderAt", "binderEndAt", "parenFreeBinder", "bareBinder"].map((f) => [
+      `${owner}.arms[].legacyPipe.${f}`,
+      "a source offset / spelling flag of the legacy `|`-led arm (§19.4.5), not a name; the binder is `arms[].binding`",
+    ]))),
 };
 
 function walkFiles(dir, out) {

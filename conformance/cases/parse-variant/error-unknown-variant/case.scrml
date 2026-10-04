@@ -11,10 +11,10 @@ ${
 
     function decode() {
         parseVariant('{"tag":"Archived"}', LoadResult) !{
-            | ::MissingDiscriminator          :> { @parseError = "missing-discriminator" }
-            | ::UnknownVariant(tag)           :> { @parseError = "unknown-variant" }
-            | ::InvalidPayload(field, reason) :> { @parseError = "invalid-payload:" + field }
-            | ::Malformed(reason)             :> { @parseError = "malformed" }
+            ::MissingDiscriminator          :> { @parseError = "missing-discriminator" }
+            ::UnknownVariant(tag)           :> { @parseError = "unknown-variant" }
+            ::InvalidPayload(field, reason) :> { @parseError = "invalid-payload:" + field }
+            ::Malformed(reason)             :> { @parseError = "malformed" }
         }
     }
 }

@@ -12,11 +12,11 @@ ${
 ${
     function go() {
         let result = loadItem("missing") !{
-            | .NotFound(mid) :> {
+            .NotFound(mid) :> {
                 if (mid == "missing") @r = "yes"; else @r = "no"
                 @r = @r + "!"
             }
-            | .Timeout :> @r = "timeout"
+            .Timeout :> @r = "timeout"
         }
     }
 }

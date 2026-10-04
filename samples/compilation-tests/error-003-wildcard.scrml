@@ -3,7 +3,7 @@
 
 <div>
     !{
-        | _ e -> let fallback = true
+        _ e -> let fallback = true
     }
     <p>Catch-all handler</>
 </div>

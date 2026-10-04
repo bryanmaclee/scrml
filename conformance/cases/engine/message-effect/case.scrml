@@ -5,7 +5,7 @@ ${
 }
 <engine for=Counter initial=.Counting accepts=CountMsg>
     <Counting rule=.Counting>
-        | .Inc :> { @total = @total + 1; .Counting }
+        .Inc :> { @total = @total + 1; .Counting }
     </>
 </>
 <program>
