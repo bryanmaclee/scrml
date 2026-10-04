@@ -449,9 +449,9 @@ ${
     // `match` arms", §18.2). `guard`: the arms of a `!{}` handler — the only
     // place the legacy spellings are read. The leading `|` before an arm is
     // the soft-deprecated legacy spelling OF A `!{}` ARM ONLY (S452 ruling c,
-    // the §19.4.5 amendment; its W-lint is not ruled yet, so none is emitted)
-    // and parses identically; the paren-free binder (`| .V m :>`) is read only
-    // after that `|`. A `match` arm takes no `|` (§18.2 `match-arm ::=
+    // §19.4.5) and parses identically — the arm built is the arm without the
+    // `|` — surfacing W-ARM-PIPE-LEGACY (Info; one per arm, `pipeLint`); the
+    // paren-free binder (`| .V m :>`) is read only after that `|`. A `match` arm takes no `|` (§18.2 `match-arm ::=
     // arm-pattern …`) — E-PARSE-ARM. (Engine message arms, §51.0.S, are not
     // parsed here.)
     fn parseArms(tp: TP, guard: boolean) -> RArms {
@@ -460,14 +460,17 @@ ${
         while (!isP(t, "}") && !atEnd(t)) {
             const before: int = t.i
             let piped = false
+            const pipe: PTok = cur(t)
             if (isP(t, "|")) {
                 if (!guard) t = diagAt(t, "E-PARSE-ARM", "a `match` arm takes no leading `|` (§18.2) — write `.V(x) :> …` (the `|` is a legacy spelling of a `!{}` handler arm only)", cur(t))
                 piped = true
                 t = adv(t)
             }
             const astart: int = cur(t).start
+            const pfrom: int = t.i
             const rp: RPat = parsePattern(t, guard && piped)
             t = rp.tp
+            if (guard && piped) t = pipeLint(t, pipe, pfrom, rp.pat)
             let legacy = false
             const c: PTok = cur(t)
             const g: PTok = peekAt(t, 1)
@@ -497,6 +500,49 @@ ${
             if (t.i == before) t = adv(t)
         }
         return { arms: arms, tp: expectP(t, "}") }
+    }
+
+    // s452 — W-ARM-PIPE-LEGACY (§19.4.5, Info; one per arm): the `|`-led `!{}`
+    // arm whose pattern is tokens `from` up to `tp.i`. The message is §19.4.5's:
+    // the arm as written, its canonical rewrite (the `|` dropped; a paren-free
+    // binder `.V m` written `.V(m)`), `scrml fix` and the section. The span runs
+    // from the `|` through the pattern. A lint only — the arm is unchanged.
+    fn pipeLint(tp: TP, pipe: PTok, from: int, pat: APat) -> TP {
+        const written: string = tokText(tp, from, tp.i)
+        let canonical: string = written
+        if (parenFreeBinder(pat) && tp.i - 1 > from) {
+            canonical = tokText(tp, from, tp.i - 1) + "(" + tp.toks[tp.i - 1].text + ")"
+        }
+        let end: int = pipe.end
+        if (tp.i > from) end = tp.toks[tp.i - 1].end
+        const msg: string = "Arm '| " + written + " :>' uses the deprecated leading '|'. A pattern arm is a match arm (§18.2): write '" + canonical + " :>'. Run 'scrml fix' to rewrite every site (§19.4.5)."
+        const d: Diag = newDiag("W-ARM-PIPE-LEGACY", msg, tp.file, mkSpan(pipe.start, end))
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+    }
+
+    // The source text of tokens `from` up to (not including) `to`, with a
+    // space between two tokens that do not touch.
+    fn tokText(tp: TP, from: int, to: int) -> string {
+        let s: string = ""
+        let i: int = from
+        while (i < to) {
+            const x: PTok = tp.toks[i]
+            if (i > from && !touching(tp.toks[i - 1], x)) s = s + " "
+            s = s + x.text
+            i = i + 1
+        }
+        return s
+    }
+
+    // Is the pattern the paren-free payload binder (`.V m` — `parens` false,
+    // one binder)?
+    fn parenFreeBinder(p: APat) -> boolean {
+        return match p {
+            .PName(binds: bs, parens: pr) :> !pr && bs.length == 1
+            .PWild :> false
+            .PWhole(bind: b) :> false
+            .PBare(bind: b) :> false
+        }
     }
 
     // s452: SPEC §19.4.3 ruling 2 settled what `| .V m :>` binds (the variant's
