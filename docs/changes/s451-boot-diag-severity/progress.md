@@ -7,9 +7,9 @@
 ## Done
 
 1. `scripts/s34-catalog.ts` — the one §34 row parser; `scripts/s34-census.ts` now uses it (census output byte-identical before/after, `--full` and `--full --json`). Severity = last non-empty cell (some rows omit the trailing `|`).
-2. `scripts/gen-bootstrap-severity.ts` GENERATES `compiler/self-host-v2/severity.scrml` (`Severity` enum + `severityOf(code)` match) for every `"E-/W-/I-…"` literal in the bootstrap's `*.scrml`. Two live rows that disagree → generator throws. `--check` mode. `slice-m4/severity.test.js` fails if the file is stale, executes the COMPILED table against §34 for every code, and forbids a `message:`/`severity:` struct field outside ast.scrml.
+2. `scripts/gen-bootstrap-severity.ts` GENERATES `compiler/self-host-v2/severity.scrml` (`Severity` enum + `severityOf(code)` match) for every `"E-/W-/I-…"` literal in the bootstrap's `*.scrml`. Two live rows that disagree → generator throws. `--check` mode (exit 1 when the file is stale; run by CI's NON-blocking tracking job). `slice-m4/severity.test.js` does NOT check staleness (605e006d9 removed that byte-equality check: a docs-only §34 row that changes no answer would have gone red); it executes the COMPILED table against §34 for every code, and forbids a `message:`/`severity:` struct field outside ast.scrml.
 3. `ast.scrml`: `Diag.severity: Severity`; `newDiag(code, message, file, span)` is the one constructor. All 13 literal constructions (parse 2, analyze 11) go through it.
-4. `lower.scrml hasError`: severity == Error (both `diags` and `infos`), not the prefix. `parse.scrml`: `errs` holds Error-severity spans only.
+4. `lower.scrml hasError`: keyed on severity, not the prefix (both `diags` and `infos`). Review r2: FAIL CLOSED — a diagnostic is an error unless its severity is Warning or Info, so a missing/unknown severity closes the gate (diag-gate.test.js pins it). `parse.scrml`: `errs` holds Error-severity spans only.
 5. Counter grades the Diag's severity per occurrence; twin-extra-error + no-artifact message key on severity Error.
 
 ## Gate direction
@@ -26,4 +26,11 @@ PASS 119 · FAIL 41 · NOT-TWINNED 511 · UNSUPPORTED 629 (graded 160). 24 FAIL�
 
 ## Staleness coupling (cost, by design)
 
-severity.scrml goes stale — and `slice-m4/severity.test.js` goes red — when a §34 row for a code the bootstrap names is added, struck or re-severitied, or a new code literal enters a bootstrap source. Fix: `bun scripts/gen-bootstrap-severity.ts`. The merge of dbb671c2d (new E-ERROR-011 row) exercised exactly this. The first cut wrote SPEC line numbers into the header and so went stale on ANY SPEC edit above a gap row; removed.
+severity.scrml goes stale — reported by `gen-bootstrap-severity.ts --check` in CI's tracking job, not a blocking gate — when a §34 row for a code the bootstrap names is added, struck or re-severitied, or a new code literal enters a bootstrap source. `slice-m4/severity.test.js` goes red only when staleness changes an ANSWER (a re-severitied row, or a new code whose §34 row is not Error). Fix: `bun scripts/gen-bootstrap-severity.ts`. The merge of dbb671c2d (new E-ERROR-011 row) exercised exactly this. The first cut wrote SPEC line numbers into the header and so went stale on ANY SPEC edit above a gap row; removed.
+
+## Review r2 (fix round, frozen review at 63b217e7 — LAND-WITH-NITS)
+
+1. FIXED — `hasError` fails closed (see Done item 4); bite proven (old predicate → 2 of the 3 new diag-gate tests fail).
+2. FIXED — the gate's header comment states the §34-Severity-column rule via the generated table + fail-closed default; the retired `E-`-prefix wording is gone.
+3. SKIPPED — the proposed guard ("every quoted `"[EWI]-…"` literal in the bootstrap sources is in the table") is the generator's own collector (`bootstrapCodes`, same regex, same files) restated, and severity.test.js already executes the compiled table for exactly that set. It is tautological, and it cannot see the case the finding names (a code built some way other than a quoted literal) — by construction no text scan of quoted literals can. Today every code reaching `newDiag` originates as a full quoted literal (grep: no `'E-…'`, no backtick, no `"E-" +` construction). The real-coverage guard is DYNAMIC — every code a compile actually emits ⊆ the table — and belongs in the bootstrap-conformance run (which already compiles every case); deferred, not built here (scope).
+4. FIXED — Done item 2 and the staleness note no longer claim severity.test.js checks staleness (605e006d9 removed it); staleness is `--check` in CI tracking.
