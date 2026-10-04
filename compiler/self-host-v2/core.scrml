@@ -350,6 +350,12 @@ ${
     export type Attr:enum = {
         Static(name: string, value: string),
         Bound(name: string, e: Expr),
+        // s451 — `show=` (§17.2): "The element EXISTS in the DOM regardless of
+        // `expr`. When `expr` evaluates to false, the element is hidden. The
+        // compiler generates a CSS `display: none` toggle." While `test` is
+        // false the element's inline `display` is `none`; while true it is the
+        // element's own (its static `style`'s `display`, else none set).
+        Show(test: Expr),
         On(event: string, body: Block),
         Bind(kind: BindKind, read: Expr, sink: Sym, write: Block),
         // s449 — the form's submit listener for the §55 surface, on every

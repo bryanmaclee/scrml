@@ -126,7 +126,9 @@ describe("(2) validators follow the bind — wherever it is written", () => {
     const two = `    let <n:string=""/>\n    let <m:string=""/>`;
     const d = run(P(two, `        <input bind:value=@n bind:value=@m/>`)).diags;
     expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(d[0].message).toContain("a second `bind:`");
+    // s451: the SAME `bind:` name twice is the repeated-attribute refusal
+    // (repeated-attr.test.js); two DIFFERENT binds are the second-bind one
+    expect(d[0].message).toContain("`bind:value` is written twice");
     expect(codes(P(`    let <ok:bool=false/>\n    let <n:string=""/>`, `        <input type="checkbox" bind:checked=@ok bind:value=@n/>`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(P(two, `        <input bind:value=@n/>\n        <input bind:value=@m/>`))).toEqual([]);
   });

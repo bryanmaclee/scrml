@@ -1158,6 +1158,7 @@ ${
     fn isIf(k: AttrKind) -> boolean {
         return match k {
             .AIf :> true
+            .AShow :> false
             .AOn(event: ev) :> false
             .AConstruct(field: x) :> false
             .AStatic :> false
@@ -1199,6 +1200,7 @@ ${
             .ABound :> boundAttr(c, a)
             .AOn(event: ev) :> [Attr.On(ev, handlerBlock(c, a.value))]
             .AIf :> []
+            .AShow :> showAttr(c, a)
             .AConstruct(field: x) :> []
             .AAs :> []
             .AEachIn :> []
@@ -1206,6 +1208,17 @@ ${
             .AEachAs :> []
             .ABind(kind: bk, w: w, decl: d, idx: x, sink: sk, vattrs: vs) :> [bindAttr(c, bk, w, d, x, sk)].concat(validatorAttrs(vs))
         }
+    }
+
+    // s451 — `show=cond` (§17.2) → Attr.Show: the element stays in the DOM and
+    // is hidden (`display: none`) while the condition is false. Inside an
+    // if-chain arm it composes (§17.1.1): the arm decides presence, this
+    // decides visibility. A condition that does not lower (analyze reported
+    // it) hides the element (fail closed).
+    fn showAttr(c: LC, a: AAttr) -> Attr[] {
+        const t: Expr | not = lowerValue(c, a.value)
+        if (t is some) return [Attr.Show(t)]
+        return [Attr.Show(Expr.Lit(Literal.Bool(false)))]
     }
 
     // s444 Phase B (dpa-058, RULED S442 (2)) — the bound field's validators'
@@ -1311,6 +1324,7 @@ ${
             .AStatic :> -1
             .ABound :> -1
             .AIf :> -1
+            .AShow :> -1
             .AAs :> -1
             .AEachIn :> -1
             .AEachKey :> -1
@@ -1347,6 +1361,7 @@ ${
             .AStatic :> 0
             .ABound :> 0
             .AIf :> 0
+            .AShow :> 0
             .AConstruct(field: x) :> 0
             .AAs :> 0
             .AEachAs :> 0
@@ -1717,6 +1732,7 @@ ${
             .Gate(values: vs) :> Attr.Gate(vs, namedFields(p, ks, not, []))
             .Static(name: x) :> a
             .Bound(name: x) :> a
+            .Show(test: x) :> a
             .On(event: x) :> a
             .Bind(kind: x) :> a
         }
@@ -1797,6 +1813,7 @@ ${
             .Bind(read: r) :> bindReadField(p, r, subst)
             .Static(name: x) :> []
             .Bound(name: x) :> []
+            .Show(test: x) :> []
             .On(event: x) :> []
             .Gate(values: x) :> []
         }

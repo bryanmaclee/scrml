@@ -63,7 +63,7 @@ describe("S449 item 3 — every position class: a writer is an error at the SOUR
     ["an interpolation in a declaration's `renders`", (w) => P(with_(`    <card title:string>\n    </>\n    renders <b>\${title}\${${w}s()}</b>`), `        <card title="t"/>`), "the interpolation"],
     ["a bound attribute value", (w) => P(W, `        <p title=(${w}s())>x</p>`), "the `title=` value on `<p>`"],
     ["a `class=` value", (w) => P(W, `        <p class=(${w}s())>x</p>`), "the `class=` value on `<p>`"],
-    ["a `show=` value", (w) => P(W, `        <p show=(${w}(@a) > 0)>x</p>`), "the `show=` value on `<p>`"],
+    ["a `show=` condition", (w) => P(W, `        <p show=(${w}(@a) > 0)>x</p>`), "the `show=` condition on `<p>`"],
     ["an `if=` condition", (w) => P(W, `        <p if=(${w}(@a) > 0)>x</p>`), "the `if=` condition on `<p>`"],
     ["an `<each in=…>` sequence", (w) => P(with_(`    <xs:int[]=([1, 2])/>`), `        <ul><each in=@xs.filter(x => ${w}(x) > 0) as x><li>\${x}</li></each></ul>`), "the `<each in=…>` sequence"],
   ];
