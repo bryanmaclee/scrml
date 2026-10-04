@@ -1,6 +1,107 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-10-04T08:42:07-06:00  commit: d3e660a08
+# updated: 2026-10-04T16:05:00-06:00  commit: fd2f757d0
+# ⛑ **S453 STAMP — `d3e660a08` -> `fd2f757d0`. 17 COMMITS (#1269 SPEC whole-error binder, #1271 S451 wrap, #1270
+# bootstrap §34 severity, S452-bryan #1272/#1273/#1274/#1275/#1276/#1277/#1278/#1279/#1280, S453-peter #1283/#1286
+# + the S453 bookkeeping commit `b6a43445e`, and #1287 brought in by the merge commit `fd2f757d0`), incremental
+# refresh. Checkout `docs/s453-wrap-bookkeeping` @ `fd2f757d0` = `origin/main` (`38ec5fcab`, #1287) merged into the
+# S453 bookkeeping branch.** MAP-STAMP RULE: `git log --oneline d3e660a08..HEAD` -> 17; `bun scripts/state.ts
+# --check` at pass start: `maps: 17 commits behind HEAD (watermark d3e660a08, HEAD fd2f757d0)` — matches exactly.
+# ⚠ **HEAD MOVED TWICE MID-PASS; THE STAMP IS THE FINAL HEAD AND THE FIGURES ARE STILL EXACT.** The pass opened at
+# `b6a43445e` (15 commits, clean tree). (1) The PA merged `origin/main` #1287 in at `1d45ef281` while the pass ran —
+# every figure in this stamp was re-executed there, so #1287 IS mapped. (2) The branch was then RE-LINEARISED: the
+# merge went away, `b6a43445e` became `d33842588` (#1289) and the S453 wrap commit `fd2f757d0` (#1291) was added, so
+# `1d45ef281` is no longer an ancestor of HEAD (`state.ts --check` will say so about any stamp older than this one).
+# ⛑ **THE FIGURES WERE NOT RE-RUN A THIRD TIME, AND DO NOT NEED TO BE:** `git diff 1d45ef281 fd2f757d0 -- compiler
+# scripts conformance stdlib docs/FACTS.md docs/known-gaps.md compiler/SPEC.md` is **EMPTY** — the two commits have a
+# byte-identical source, figure and gap-ledger tree. The only differences are `docs/changelog.md`, `hand-off.md` and
+# `handOffs/**` (out of scope). `git log --oneline d3e660a08..fd2f757d0` is **17**, the same window.
+# Source-relevant in THIS window, grep-verified at `fd2f757d0`:
+#   impl#1 (`compiler/src`, 224 files):
+#   #1283 — §13.2 / S449 ruling A3: an async event listener's rejection reaches scrml's logging surface.
+#     `codegen/js-async-analysis.ts` NEW `wrapHandlerRejectionLog` :1539 (module-LOCAL, not exported) +
+#     `DEFAULT_HANDLER_BOUNDARY_ID` :1505 (`"event handler"`) + `ColorOpts.boundaryId` :1472; the wrap is applied
+#     INSIDE `colorAsyncFunctionExpr`'s `if (r.rootAsync)` branch (:1666-1667) — ONE seam, so every listener
+#     emitter inherits it. A DIRECTIVE PROLOGUE stays OUTSIDE the `try` (the first cut returned `null` there and
+#     left the listener `async` with no arm — worse than the bug). Catch var `_scrml_async_err`; sink
+#     `_scrml_error_boundary_log(boundaryId, err)`, called UNGUARDED from the always-included `errors` runtime
+#     chunk, matching its sibling sites (`emit-engine` `effect=`, `emit-reactive-wiring` `on mount`, `emit-client`
+#     `session.destroy`). Boundary ids threaded at the call sites: `emit-event-wiring.ts:1345` (the ONE
+#     `colorHandlerAsync` call — covers all THREE registrations there), `emit-each.ts:2536`, and the **13**
+#     `colorActiveHandler` sites in `emit-lift.js`. See structure.map.md's S453 inventory for the full surface.
+#   #1286 — §19.10 transaction exits + the top-level refusal. NEW `validators/lint-transaction.ts` (404 lines):
+#     `runTransactionChecks(ast)` :143, `TransactionCode` = `E-ERROR-001` | `E-ERROR-007` |
+#     `E-TRANSACTION-CONTROL-FLOW` :58, `TransactionDiagnostic` :60, internal `TxnCtx` :70 (`loopDepth`,
+#     `switchDepth`, `labels`, `inFunction`, `inStmtMatchArm`, `inMatchArm` :115 — a FAIL-CLOSED union over
+#     statement- and value-position `match` arms) / `WalkState` :118. Wired in `api.js:1946` as the
+#     `TRANSACTION-CHECKS` stage (after TAB, before `SCOPE-REDECLARE`). `ast-builder.js` NEW shared
+#     `parseTransactionBlock()` :7803, reached from BOTH the top-level loop (:15697) and `parseOneStatement`
+#     (:9689, gated on a following `{`) — before this a `transaction {}` in a function body degraded to an
+#     undeclared identifier (E-SCOPE-001). `emit-logic.ts` `case "transaction-block"` :4377 owns the emission
+#     (BEGIN / COMMIT / `_markTransactionExits` :700 marking every `fail` / `?` exit with the rollback closure /
+#     a `finally` backstop so no transaction is ever left open); the `fail` limb is `emit-logic.ts:685-687`.
+#   #1287 — §14.8.10 (SECURITY): the tenant floor now filters at the SOURCE. `codegen/tenant-egress.ts` (920 lines,
+#     +819 changed) `_scrml_tenant_scope(rows, keyCols, addedCols)` :792 / `_scrml_tenant_scope_none` :814 REPLACE
+#     the retired `_scrml_tenant_tag`; `resolveTenantScoping` :321 emits one key column per tenant-scoped JOIN
+#     source (`TENANT_KEY_ALIAS_PREFIX = "__scrml_tenant_"` :253), a subquery / CTE / derived-table read of a
+#     tenant table -> `E-TENANT-AGG` (reason `"subquery"`), anything else unresolvable -> ZERO rows;
+#     `wrapWithTenantScope` :911 wraps EVERY terminator (`.all`, `.get`, `.run`, bare `?{}` — the last two were
+#     never tagged before) via `rewrite.ts` + `emit-logic.ts`, and `.get()` takes `[0]` AFTER the filter;
+#     `emit-server.ts` wraps route handlers in `_scrml_tenant_request_scope` :705 (AsyncLocalStorage) so PEER
+#     server functions are scoped too, and outside any request the filter yields zero rows;
+#     `_scrml_tenant_redact` :851 stays as defense in depth. Closes the C4 extraction leak (`rows.map(r =>
+#     r.name)`, `rows.length`, a sum, a join, a hand-built `Response`). **PARTIAL — lexical bypasses are open,
+#     r3 next.** Also `sql-projection.ts`, `emit-tool.ts`, `emit-control-flow.ts`, `protect-flow.ts` (one name).
+#   #1275 / #1276 — §51.0.S.2.3 / §19.4.5 impl#1 EXCEPTIONS to the S452 freeze: engine message arms and `!{}`
+#     handler arms parse with NO leading `|`. `engine-statechild-parser.ts` NEW `pipelessHeadAt` (+ `readIdent`):
+#     a head is EXACTLY `.V` / `::V` / `T.V` / `T::V` (optionally `( … )`) or `_` / `else`, with the arm arrow on
+#     the SAME line — no paren-free binder, no alternation, a bare name is not a pattern; anything else ends the
+#     arm run and the line is render content (FAILS CLOSED, byte-identical to before). `ast-builder.js` carries
+#     the `!{}` twin. `type-system.ts` NEW `E-TYPE-ARM-QUALIFIER-MISMATCH` — a type-qualified arm (`T.V :>`) must
+#     name the handled error type; compares the ENUMS both names resolve to (alias-following `enumNameOf`), and
+#     SKIPS when either side is unresolvable. The unqualified foreign variant (`.Zap :>`) is still accepted
+#     (`g-impl1-handler-arm-foreign-variant-accepted`).
+#   bootstrap (`compiler/self-host-v2/`, impl#2 — NOT impl#1): #1270 NEW GENERATED `severity.scrml` (208 lines;
+#     `Severity:enum = { Error, Warning, Info }` :86, `severityOf(code)` :90) written by NEW
+#     `scripts/gen-bootstrap-severity.ts` from NEW `scripts/s34-catalog.ts` (the ONE §34 catalog-row parser, also
+#     used by `scripts/s34-census.ts`); `ast.scrml` `newDiag` :309 reads `severityOf` so no call site can state a
+#     severity. #1274 the S451 error-model rulings (E-ERROR-012..015, E-MATCH-BARE-BINDER, `| _ err :>`, value-arm
+#     `defer`, `<db src>` per §8.1.1, one arm parser). #1279 `W-ARM-PIPE-LEGACY` (`parse.scrml:524`, Info per
+#     `severity.scrml:101`) + the conformance counter grades ONLY Error-severity parse diagnostics as rejections.
+#     #1280 §58 determinism: NEW `link.scrml` (246 lines; `Source` / `Linked` types, `codeUnitCompare`,
+#     `canonicalSources`, `resolveFrom`, `linkOrder`, `programPaths`, `parseProgram`) — the compile is a function
+#     of the SOURCE SET: path-sorted (UTF-16 code units, no locale), canonical link order, no host paths in any
+#     artifact or diagnostic; NEW `slice-m4/determinism.test.js` is its gate.
+#   SPEC-only: #1269 (`| _ err :>` whole-error binder), #1272 (currency fixes — the §8.1.1 impl#1 divergence
+#     marked RESOLVED by #1264, E-SQL-004 loci cited by function, a §34 row for
+#     E-INTERNAL-DB-HANDLE-UNRESOLVED), #1273 (ONE pattern-arm grammar: `!{}` and engine message arms take
+#     §18.2's `match-arm`; the `|` lead soft-deprecates under `W-ARM-PIPE-LEGACY`, `E-ARM-PIPE-LEGACY` reserved),
+#     #1278 (§14.8.10 filters at the SOURCE — the NORMATIVE mechanism changed; WHERE-injection is demoted to a
+#     v1.next optimization and the egress strip is explicitly no longer the guarantee). #1277 = dpa-queue only.
+# ⛑ FIGURES RE-EXECUTED AT `fd2f757d0`: `facts.ts --check` PASS · `compiler/src` **288,402 lines / 224 files**
+# (+1,506, +1 file = `validators/lint-transaction.ts`) · test files **1,588** (+10 by the FACTS definition; 13 new
+# files, 3 of them under `self-host-v2/`, which FACTS excludes) · `compiler/SPEC.md` **45,673** lines (+444;
+# `regen-spec-index.ts --check` OK 72/72) · conformance **1310** cases (+10); `bun conformance/run.ts` -> **1260
+# pass + 50 xfail, 0 fail** · `docs/known-gaps.md` (committed; `state.ts --check` gap-counts PASS at this HEAD)
+# open **HIGH 241** (carried 6) · **MED 500** (4) · **LOW 264** · Nominal 8; heading/marker drift **61**
+# (unchanged) · slice-m4 **1115 pass / 1 todo / 0 fail** across 33 files (was 1002/0) · bootstrap counter (live)
+# 1310 of 1310 attempted: PASS **120** · CODES-ONLY 0 · FAIL **48** · LEGACY 0 · NOT-TWINNED **513** ·
+# UNSUPPORTED **629** · CRASH 0; graded 168, of which 120 hold (71.4%), 11 of those vacuous — ⚠ committed
+# `docs/bootstrap-conformance.md` is STALE AGAIN (1301 cases / 511 / 622; `--check` says STALE) · `state.ts
+# --check` `@generated:recent-sessions` (master-list.md) STALE.
+# ⚠ **HOST ARTIFACT, NOT A REGRESSION — do not open a bug on it.** `bun test ./compiler/self-host-v2/slice-m2/` is
+# **420 pass / 6 fail** on this Windows clone. All six are `compareCore` text-node diffs of the shape
+# a=`"\r\n    "` b=`"\n    "` at `decls[0].renders[0].data.kids[0].data.text` — `core.autocrlf=true` CRLF in the
+# fixture sources, not a lowering defect. The S451 stamp's 462/0 was measured on a different host.
+# ⛔ **CORRECTED THIS PASS: the `gate` CI job is 17 TOTAL STEPS (15 `- name:` + 2 `- uses:`)**, re-parsed at BOTH
+# `d3e660a08` and `fd2f757d0` (identical at both ends). `primary.map.md`'s Task-Shape Routing row published
+# `14 TOTAL STEPS — 12 + 2` with a "RE-PARSED, NOT CARRIED" assurance attached; see build.map.md's S453 section
+# and non-compliance.report.md `C-S453-A`.
+# NOT MAPPED: the PA's in-flight S453 wrap edits, and the untracked `compiler/tests/unit/gauntlet-s20/__fixtures__/`
+# that appeared mid-pass. `file:line` cites in S453 sections are grep-derived at `fd2f757d0` — locate by SYMBOL
+# after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S451 HEADER (stamp `d3e660a08`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
 # ⛑ **S451 STAMP — `47c863556` -> `d3e660a08`. 17 COMMITS (#1252 S449 wrap, #1253-#1268 S451), incremental refresh.
 # Checkout `wrap/s451` @ `d3e660a08` + uncommitted wrap docs (changelog / known-gaps / pr-reviews / hand-off / delta-log —
 # NOT mapped). `origin/main` is ONE ahead at `2a614009b` (#1269, SPEC-only `| _ err :>` whole-error binder) — NOT in this
@@ -719,6 +820,101 @@
 #
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
+
+## S453 — DOMAIN DELTA (`d3e660a08..fd2f757d0`)
+
+### 1. ONE PATTERN-ARM GRAMMAR (§18.2 / §19.4.5 / §51.0.S.2.3 — #1273 SPEC, #1275 + #1276 impl#1)
+
+The language now has **one** spelling for a pattern arm. A `!{}` error-handler arm and an engine
+`(state × message)` message arm are both §18.2 `match-arm`s, with **no leading `|`**.
+
+- The pre-S452 `|`-led spelling — and the paren-free binder after it (`| .V m :>`) — **parses identically** and is
+  SOFT-DEPRECATED under `W-ARM-PIPE-LEGACY` (Info, one per arm). `E-ARM-PIPE-LEGACY` is reserved and unfired.
+- The canonical form is `.V(m) :>` / `::V(m) :>` / `T.V(m) :>` / `_ :>` / `else :>`.
+- Ruling provenance: `user-voice-scrml.md` S452 "c looks right" — *"multiple syntaxs in logic dosnt work for me.
+  yes, cononical version."* — plus "a. one spelling", which extended the rule from `!{}` arms to message arms.
+- ⛑ **The grammar of an arm HEAD is deliberately narrow and FAILS CLOSED**
+  (`engine-statechild-parser.ts pipelessHeadAt`): the head is EXACTLY a variant path `.V` / `::V` / `T.V` / `T::V`
+  with an optional `( … )`, or the catch-all `_` / `else`, **with the arm arrow on the SAME line**. No paren-free
+  binder (that stays `!{}`-legacy-only), no alternation, and a bare NAME is not a pattern. Anything else is not a
+  head: the arm run ends and the line is render content — exactly the prior behaviour, byte-identical.
+- The arm region is the **leading contiguous run** of arms. If the first non-trivia item is not an arm, the whole
+  body is render body. An arm AFTER render content is an error.
+- `E-TYPE-ARM-QUALIFIER-MISMATCH` (NEW, impl#1): a type-qualified arm must name the handled error type, compared by
+  the ENUMS both names resolve to (so `type A = E` aliases are the same type), SKIPPED when either side cannot be
+  resolved. Still open: the UNQUALIFIED foreign variant (`.Zap :>`) is accepted —
+  `g-impl1-handler-arm-foreign-variant-accepted`.
+- Corpus scale, measured in SPEC's own provenance note (`SPEC.md:18128-18133`): **186 `|`-led arms in 70 files** —
+  `conformance/cases/` 106 in 44, `samples/` 55 in 16 (32 of them paren-free variant binders), `stdlib/` 21 in 7,
+  `examples/` 4 in 3. The corpus is meant to migrate by a `scrml fix` rule **that does not exist yet**.
+
+### 2. A `transaction {}` NEVER SURVIVES AN EXIT, AND A TOP-LEVEL ONE IS REFUSED (§19.10 — #1286)
+
+The invariant: *no transaction is ever left open*. Four mechanisms, and you must know which one owns your case:
+
+| exit | mechanism | where |
+|---|---|---|
+| normal completion | COMMIT at the end of the block | `emit-logic.ts:4377` ff. |
+| a `fail` inside the block | the emitted `return` runs the rollback FIRST — `return (await <rollback>(), <error envelope>);` (§19.10.3 "before the fail's return") | `_markTransactionExits` :700 stamps `_scrmlTxnRollback`; the limb is `emit-logic.ts:685-687` |
+| a `?` propagation inside the block | same stamp, read at `emit-logic.ts:3726-3728` | — |
+| anything else (incl. a SQL error propagating) | the `finally` backstop: `if (open) { open = false; try { ROLLBACK } catch (r) { if (!threw) throw r; } }` | `emit-logic.ts` ~:4390 |
+| a `yield`, or a `return` / `break` / `continue` from inside a `match` ARM in the block | **REFUSED AT COMPILE TIME** — `E-TRANSACTION-CONTROL-FLOW`. The guard above cannot make these safe | `validators/lint-transaction.ts` |
+| a `transaction {}` outside a `!` function, including **at a logic body's top level** | **REFUSED** — `E-ERROR-001` | `lint-transaction.ts:262` |
+| a `transaction {}` inside another | **REFUSED** — `E-ERROR-007` | `lint-transaction.ts:238` |
+
+⛑ **Why the `match`-arm limb is fail-closed and must stay that way.** A statement-position `match` arm and a
+value-position `match` arm BOTH lower through `await (async function(){ … })()` (`codegen/emit-control-flow.ts`),
+and `lint-transaction.ts` cannot tell them apart. `TxnCtx.inMatchArm` is therefore the UNION of the two, and an
+exit in either is refused. Narrowing it needs a runtime proof first — the comment at `lint-transaction.ts:32-60`
+says exactly this. Do not "fix" the over-refusal without that proof.
+
+Note the division of labour, which a dispatch brief must respect: **placement and exits are checked post-TAB in
+`validators/lint-transaction.ts`; the parser (`ast-builder.js parseTransactionBlock`) deliberately checks
+NOTHING**, and the emitter assumes the checker ran.
+
+### 3. AN ASYNC EVENT LISTENER'S REJECTION IS NOW OBSERVABLE (§13.2 — #1283, ruling A3)
+
+Ruling A3 (`user-voice-scrml.md` S449) extends B5 to handlers: *"every async event listener routes its rejection to
+`_scrml_error_boundary_log`."* The domain fact: `addEventListener` ignores a listener's return value, so before
+this an `async` listener's rejection was an unobserved promise rejection — no diagnostic, exit 0, nothing in
+scrml's logging surface. Now the arm is attached at the ONE seam every listener emitter funnels through
+(`colorAsyncFunctionExpr`'s `rootAsync` branch), and each registration site names its own boundary id so a logged
+rejection points at ONE listener.
+
+⛑ **The lesson recorded with it (it generalized once already).** The first cut bailed out (`return null`) on a body
+whose first statement is a string literal, reasoning correctly that moving `"use strict"` inside a `try` demotes it
+to an ordinary expression statement. The CONSEQUENCE of the bail was not measured and was the worse bug: the
+listener was still emitted `async`, so its rejection still escaped — with no arm, no diagnostic and exit 0, for ANY
+string-literal first statement. The fix keeps the directive prologue outside the `try`. **A fail-open bail in a
+fail-closed surface is a defect, not a conservative choice.**
+
+### 4. THE BOOTSTRAP COMPILE IS A FUNCTION OF ITS INPUT SET (§58 — #1280)
+
+§58.1: *"No build axis outside `(source, buildStory)` … SHALL participate in artifact content."* For the bootstrap,
+the source IS a SET of files (project-relative path + text). Because every later phase (analyze, lower, print) is a
+function of the ORDER of `FileAst`s it is handed — node ids, symbol numbering, declaration order, diagnostic order
+all follow it — that order must come from the SET alone. `link.scrml` establishes it: path order by UTF-16 code
+unit (no locale), text as a total tie-break, then link order (every file after the files it imports, entry last; an
+import cycle places the first unplaced file in path order), then parse. An import EDGE is only a relative `from`
+that resolves inside the set; a bare / `scrml:` / outside-the-set `from` adds no edge. §58.12 gap 1 (the
+whole-compiler determinism audit) is still open for impl#1 — this closes it for the bootstrap only.
+
+### 5. SEVERITY IS A PROPERTY OF THE CODE, OWNED BY §34 (#1270)
+
+§34 (S451): a code whose Severity column reads **Error** fails the compile and SHALL NOT produce a runnable
+artifact (§2.2.1); **Warning** and **Info** do not fail the compile. The bootstrap now derives every diagnostic's
+severity from a generated table (`severity.scrml severityOf`, read by `ast.scrml newDiag`), so a call site cannot
+disagree with §34. Fail-closed: no row, a struck row, or a cell reading `—` / `Runtime` / `Test` -> **Error**.
+⛑ **The prefix is NOT the severity** — §34 makes `E-DG-002` a Warning and ~30 `W-` codes Info. The conformance
+counter inherited the consequence: it grades only Error-severity parse diagnostics as rejections (#1279).
+
+### 6. §14.8.10's GUARANTEE MOVED FROM THE SINK TO THE SOURCE (#1278 SPEC, #1287 impl#1)
+
+See auth.map.md's S453 section for the full mechanism. The domain-level statement: tenant isolation is now a
+property of the READ, not of any sink. Rows are filtered to the request's active tenant immediately after the query
+executes, so every value derived from them — a mapped field, a count, a join done in code, a serialized string — is
+scoped **by construction**. The egress strip remains so that a defect in the source filter is not by itself a leak.
+**Status PARTIAL**: lexical bypasses are open, r3 next.
 
 ## S451 — DOMAIN DELTA (`47c863556..d3e660a08`)
 
