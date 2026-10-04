@@ -10,6 +10,6 @@ Branch `spec/s451-db-src-program` off origin/main `dbb671c2d`.
 
 ## Steps
 - [x] BRIEF + progress
-- [ ] SPEC edits
-- [ ] known-gaps edits + state.ts
-- [ ] regen-spec-index, s34-census, facts
+- [x] SPEC edits — §8.1.1 (prose + new normative bullet + E-SQL-004 note + worked examples + §8 table), §6.12.1, §14.8.4, §14.8.9 (coverage paragraph), §34 rows (E-SQL-004, E-SQL-012 new, E-SCHEMA-001), §39.1/§39.2/§39.3/§39.9 + §39 table, §43.6, §44.1, §44.2, §44.7 table
+- [x] known-gaps: channel-broadcast-strip removed from g-impl1-unscoped-sql-single-db-accepted-s451; new g-impl1-db-src-program-supply-divergences-s451; state.ts --write/--check PASS
+- [x] regen-spec-index --check OK; s34-census --check-new PASS; facts --write/--check PASS
