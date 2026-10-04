@@ -9,9 +9,10 @@
  *
  * TWO TIERS (S239 review of 1f9de1f08, HIGH 1). impl#1 is the only compiler adopters run, and it
  * does NOT implement the §66 opener dialect. So:
- *   - DEFAULT — only the rules whose output impl#1 compiles: pre-migrate, program-wrap,
- *     program-move, unwrap-logic. Each is verified per file by an impl#1 compile of the file IN ITS
- *     PROJECT (entry + resolved imports) and withdrawn on any diagnostic change.
+ *   - DEFAULT — only the rules whose output impl#1 compiles: pre-migrate, arm-pipe (§19.4.5, the
+ *     `|`-led `!{}` / message arm — commands/fix-arm-pipe.js), program-wrap, program-move,
+ *     unwrap-logic. Each is verified per file by an impl#1 compile of the file IN ITS PROJECT
+ *     (entry + resolved imports) and withdrawn on any diagnostic change.
  *   - `--s66` — adds the §66 declaration rules (rhs-decl, const-cell, engine-simple). Their output
  *     is the §66 dialect, which impl#1 CANNOT compile; `--s66` is dry-run unless `--write` is also
  *     given, and always prints that warning. (The bootstrap conformance counter calls fix-s66.js
@@ -49,8 +50,9 @@ import { fixS66, S66_RULES, IMPL1_SAFE_RULES, S66_DECL_RULES, moduleEdges } from
 
 const HELP = `scrml fix <file|dir> [options]
 
-Apply the mechanical §66.21 rewrites. A construct that is not mechanically rewritable is left
-untouched and reported.
+Apply the mechanical §63 deprecation rewrites (the §66.21 declaration class, and arm-pipe: a
+\`|\`-led \`!{}\` / engine message arm → the §18.2 match arm, §19.4.5). A construct that is not
+mechanically rewritable is left untouched and reported.
 
 DEFAULT rules (${IMPL1_SAFE_RULES.join(", ")}): their output still compiles with
 today's compiler, and each rewrite is verified by compiling the file in its project — a rewrite

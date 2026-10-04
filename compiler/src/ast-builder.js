@@ -17442,27 +17442,30 @@ function parseErrorTokens(tokens, filePath, errors) {
       // parenthesis-free variant binder `.V m` is `.V(m)` (§19.4.3), and a bare
       // binder with no pattern, `| e :>`, is the whole-error arm `_ e` (§18.6.1
       // — what impl#1 has always read it as; a pipe-less `e :>` would be
-      // E-MATCH-BARE-BINDER, §18.2). Offsets are the tokens' source offsets.
+      // E-MATCH-BARE-BINDER, §18.2). The `…At` offsets are RELATIVE to the
+      // arm's `span.start` (its `|`), so they stay right when a caller re-bases
+      // the spans of a handler parsed out of an attribute value.
       let legacyPipe = null;
       if (!_pipeless) {
         const patText = _errArmTokensText(tokens, _patTokStart, _arrowIdx);
+        const pipeAt = armStart.span?.start ?? 0;
+        const rel = (off) => (typeof off === "number" ? off - pipeAt : undefined);
         legacyPipe = {
           pattern: patText,
           canonical: patText,
           arrowFound: _arrowFound,
-          pipeStart: armStart.span?.start,
-          patternStart: tokens[_patTokStart]?.span?.start,
+          patternAt: rel(tokens[_patTokStart]?.span?.start),
         };
         if (_bareBinderIdx >= 0) {
           const bt = tokens[_bareBinderIdx];
-          legacyPipe.binderStart = bt.span?.start;
-          legacyPipe.binderEnd = bt.span?.end;
+          legacyPipe.binderAt = rel(bt.span?.start);
+          legacyPipe.binderEndAt = rel(bt.span?.end);
           if (_patHeadEnd === _patTokStart) {
             legacyPipe.bareBinder = true;
             legacyPipe.canonical = `_ ${bt.text}`;
           } else if (pattern !== "_") {
             legacyPipe.parenFreeBinder = true;
-            legacyPipe.headEnd = tokens[_patHeadEnd - 1].span?.end;
+            legacyPipe.headEndAt = rel(tokens[_patHeadEnd - 1].span?.end);
             legacyPipe.canonical = `${_errArmTokensText(tokens, _patTokStart, _patHeadEnd)}(${bt.text})`;
           }
         }

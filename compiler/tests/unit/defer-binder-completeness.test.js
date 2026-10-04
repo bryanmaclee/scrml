@@ -41,7 +41,7 @@ const EXCLUDED = {
   // W-ARM-PIPE-LEGACY lint and `scrml fix`: source offsets and flags only. The arm's binder name
   // is `arms[].binding` (in the table).
   ...Object.fromEntries(["guarded-expr", "error-effect"].flatMap((owner) =>
-    ["binderStart", "binderEnd", "parenFreeBinder", "bareBinder"].map((f) => [
+    ["binderAt", "binderEndAt", "parenFreeBinder", "bareBinder"].map((f) => [
       `${owner}.arms[].legacyPipe.${f}`,
       "a source offset / spelling flag of the legacy `|`-led arm (§19.4.5), not a name; the binder is `arms[].binding`",
     ]))),
