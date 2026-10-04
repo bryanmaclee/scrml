@@ -315,11 +315,12 @@ describe("Ue2 — slice limits, refused (never accepted and ignored)", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    fn id(s: string) -> string { return s }\n    function go() {\n        @out = id(load("a") !{ | _ :> "z" })\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go()! LoadError {\n        @out = "a" + load("a")?\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
-  test("an arm that writes but yields no value, where the result is used as a value", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        const r = load("x") !{ | _ :> @n = 1 }\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  // s452: S451 ruling 1a decided these — E-ERROR-012 (error-rulings.test.js), no longer Ue2 refusals
+  test("an arm that writes but yields no value, where the result is used as a value — E-ERROR-012", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        const r = load("x") !{ | _ :> @n = 1 }\n    }`))).toEqual(["E-ERROR-012"]);
   });
-  test("a block arm that falls through, where the result is used as a value", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        const r = load("x") !{ | _ :> { @n = 1 } }\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  test("a block arm that falls through, where the result is used as a value — E-ERROR-012", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        const r = load("x") !{ | _ :> { @n = 1 } }\n    }`))).toEqual(["E-ERROR-012"]);
   });
   test("a payload binder without parentheses (`| .V m :>`, §19.4.3 ruling 2) — not built yet, refused", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | .NotFound m :> @log = m | _ :> @log = "o" }\n    }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");

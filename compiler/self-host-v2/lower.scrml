@@ -1808,7 +1808,7 @@ ${
     fn armBody(c: LC, h: HandledFact, a: AArm) -> Block {
         const body: AArmBody = a.body
         return match body {
-            .ArmBlock(b: b) :> lowerBlock(c, b)
+            .ArmBlock(b: b) :> armBlockBody(c, h, b)
             .ArmExpr(e: x) :> armExprBody(c, h, x)
         }
     }
@@ -1818,12 +1818,48 @@ ${
         return block(attemptsFor(c, x))
     }
 
+    // s452 — a block arm where the form has a VALUE (§18.5: "The block's
+    // result is its **last expression**"; §19.4.3 ruling 1a): its statements,
+    // then the Attempt its last expression needs; the expression itself is the
+    // arm's `value`. A block that does not end in an expression there diverges
+    // (analyze reports E-ERROR-012 for one that falls through), so it is
+    // lowered whole and carries no value.
+    fn armBlockBody(c: LC, h: HandledFact, b: ABlock) -> Block {
+        const last: AExpr | not = valueTail(h, b)
+        if (last is not) return lowerBlock(c, b)
+        const head: ABlock = { nid: b.nid, span: b.span, stmts: b.stmts.slice(0, b.stmts.length - 1) }
+        return block(lowerBlock(c, head).stmts.concat(attemptsFor(c, last)))
+    }
+
     fn armValue(c: LC, h: HandledFact, a: AArm) -> Expr | not {
         if (h.stmt) return not
         const body: AArmBody = a.body
         return match body {
-            .ArmBlock(b: b) :> not                 // it diverges (analyze refuses one that falls through)
+            .ArmBlock(b: b) :> blockValue(c, h, b)
             .ArmExpr(e: x) :> lowerExpr(c, x)
+        }
+    }
+
+    fn blockValue(c: LC, h: HandledFact, b: ABlock) -> Expr | not {
+        const last: AExpr | not = valueTail(h, b)
+        if (last is not) return not
+        return lowerExpr(c, last)
+    }
+
+    // The last expression of a value-position block arm, else not.
+    fn valueTail(h: HandledFact, b: ABlock) -> AExpr | not {
+        if (h.stmt) return not
+        if (b.stmts.length == 0) return not
+        const k: AStmtK = b.stmts[b.stmts.length - 1].k
+        return match k {
+            .Eval(e: x) :> x
+            .Local(name: n) :> not
+            .Return(e: x) :> not
+            .If(cond: x) :> not
+            .Given(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: d) :> not
+            .Fail(f: x) :> not
         }
     }
 

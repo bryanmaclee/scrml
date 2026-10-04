@@ -3224,9 +3224,11 @@ ${
     // stands in this slice (nested ones are Ue2's).
     // `fnRef` (review HIGH-2): the one node allowed to NAME a function without
     // calling it here — a direct call's callee, or an event-handler reference.
-    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int }
+    // `wholeWhat` (s452): what position `whole` is, for E-ERROR-012's message
+    // ("the initializer of `x`", "a `return` operand", …; "" — not named).
+    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int, wholeWhat: string }
 
-    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1 } }
+    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "" } }
 
     fn withFx(env: Env, fx: FailCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
@@ -3235,22 +3237,28 @@ ${
 
     fn withSubject(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat })
     }
 
     fn withWhole(env: Env, nid: int) -> Env {
+        return withWholeAt(env, nid, "")
+    }
+
+    // s452: `nid` is a statement's whole value standing in position `what`
+    // (named in E-ERROR-012's message).
+    fn withWholeAt(env: Env, nid: int, what: string) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef, wholeWhat: what })
     }
 
     fn withFnRef(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid, wholeWhat: f.wholeWhat })
     }
 
     fn withDeferFx(env: Env) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat })
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
@@ -4852,7 +4860,7 @@ ${
     fn resolveStmtExpr(env: Env, e: AExpr, st: AS) -> AS {
         const k: AExprK = e.k
         return match k {
-            .Assign(target: t, value: v) :> resolveAssign(withWhole(env, v.nid), e, t, v, st)
+            .Assign(target: t, value: v) :> resolveAssign(withWholeAt(env, v.nid, "the right-hand side of an assignment"), e, t, v, st)
             .Call(callee: c, args: args) :> resolveCallStmt(env, e, c, args, st)
             .Name(name: n) :> resolveExpr(env, e, not, st).st
             .At(name: n) :> resolveExpr(env, e, not, st).st
@@ -5973,7 +5981,7 @@ ${
         let wild = false          // a wildcard arm: plain `_` / `else`, or `_ err` — every remaining ERROR
         let okSeen = false        // `.Ok`, or a PLAIN wildcard (§18.6.1: `_ err` never takes `.Ok`)
         for (const a of arms) {
-            const ra: RArm = resolveArm(env, a, err, vs, isMatch, stmt, st)
+            const ra: RArm = resolveArm(env, a, err, vs, isMatch, { stmt: stmt, subj: subj, isMatch: isMatch, what: env.fx.wholeWhat }, st)
             st = ra.st
             // review MED-1 / LOW-1 — §18.8.1: "Duplicate variant arms (two arms for
             // the same variant) SHALL be a compile error (E-TYPE-023 …). The second
@@ -6018,7 +6026,7 @@ ${
     // its binders (locals scoped to the arm), its body.
     type RArm:struct = { idx: int, st: AS }
 
-    fn resolveArm(env: Env, a: AArm, err: Sym, vs: VariantDef[], isMatch: boolean, stmt: boolean, st0: AS) -> RArm {
+    fn resolveArm(env: Env, a: AArm, err: Sym, vs: VariantDef[], isMatch: boolean, cx: ArmCx, st0: AS) -> RArm {
         let st: AS = st0
         if (a.legacy) st = addDiag(st, env.file, a.span, "W-MATCH-ARROW-LEGACY", "the arm separator `=>` / `->` is deprecated — write `:>` (§19 alias note; `bun scrml migrate --fix` rewrites it)")
         let armEnv: Env = withSubject(withWhole(env, -1), -1)
@@ -6069,7 +6077,7 @@ ${
         }
         st = addFail(st, a.nid, FailFact.FArm(idx))
         const body: AArmBody = a.body
-        st = resolveArmBody(armEnv, a, body, stmt, st)
+        st = resolveArmBody(armEnv, a, body, cx, st)
         return { idx: idx, st: st }
     }
 
@@ -6186,27 +6194,204 @@ ${
         return { env: env, st: st }
     }
 
+    // s452 — what an arm's body is judged against: `stmt` — the form is a
+    // statement (its result is not read); otherwise it stands in a VALUE
+    // position `what` (§19.4.3 ruling 1a), and every arm yields a value or leaves.
+    type ArmCx:struct = { stmt: boolean, subj: AExpr, isMatch: boolean, what: string }
+
     // An arm's body. As a statement's arm, an expression is a statement (a
-    // write, a call); where the form has a VALUE, an expression arm is that
-    // value and a block arm must leave the function (`return` / `fail`) —
-    // what a block that falls through would yield is Ue2's.
-    fn resolveArmBody(env: Env, a: AArm, body: AArmBody, stmt: boolean, st: AS) -> AS {
+    // write, a call) and an arm MAY fall through. In a value position (§19.4.3
+    // ruling 1a) an arm "SHALL either yield a value of the call's success type
+    // or leave (`return` / `fail`)": an expression arm is its value, a block
+    // arm's value is its last expression (§18.5 "The block's result is its
+    // **last expression**"); an arm that does neither falls through —
+    // E-ERROR-012. (The bootstrap has no loops, so `break` / `continue` — which
+    // §19.4.3 also counts as leaving — have no source form here.)
+    fn resolveArmBody(env: Env, a: AArm, body: AArmBody, cx: ArmCx, st: AS) -> AS {
         return match body {
-            .ArmExpr(e: x) :> armExpr(env, x, stmt, st)
-            .ArmBlock(b: b) :> armBlock(env, a, b, stmt, st)
+            .ArmExpr(e: x) :> armExpr(env, a, x, cx, st)
+            .ArmBlock(b: b) :> armBlock(env, a, b, cx, st)
         }
     }
 
-    fn armExpr(env: Env, x: AExpr, stmt: boolean, st: AS) -> AS {
-        if (stmt) return resolveStmtExpr(withWhole(env, x.nid), x, st)
-        if (assignValue(x) is some) return addDiag(resolveStmtExpr(env, x, st), env.file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "this arm writes but yields no value, and the handled result is used as a value (`let r = …`, `return …`) — the SPEC does not say what the result is then; handle it as a statement (drop `let r =`) or give the arm a value. (Arms that only act are slice Ue2's question.)")
-        return resolveExpr(withWhole(env, x.nid), x, not, st).st
+    fn armExpr(env: Env, a: AArm, x: AExpr, cx: ArmCx, st: AS) -> AS {
+        if (cx.stmt) return resolveStmtExpr(withWhole(env, x.nid), x, st)
+        return armValueExpr(env, a, x, cx, st)
     }
 
-    fn armBlock(env: Env, a: AArm, b: ABlock, stmt: boolean, st0: AS) -> AS {
-        const st: AS = resolveBlock(env, b, st0)
-        if (stmt || blockDiverges(b)) return st
-        return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "this `{ … }` arm falls through, and the handled result is used as a value — a block arm's value (its last expression) arrives with slice Ue2; end the block with `return` / `fail`, or write the value as the arm's expression")
+    // The expression that is an arm's value (an expression arm, or a block
+    // arm's last statement): a write is resolved as the statement it is and
+    // falls through; a value is resolved as the arm's value (a handling form
+    // there is a statement's whole value — its own Attempt, Ue); a call of a
+    // function that yields nothing falls through.
+    fn armValueExpr(env: Env, a: AArm, x: AExpr, cx: ArmCx, st0: AS) -> AS {
+        if (isWriteExpr(x)) return fallsThrough(env, a, cx, resolveStmtExpr(env, x, st0))
+        const st: AS = resolveExpr(withWholeAt(env, x.nid, "the value of an enclosing arm"), x, not, st0).st
+        if (callYieldsNothing(env, st, x)) return fallsThrough(env, a, cx, st)
+        return st
+    }
+
+    fn armBlock(env: Env, a: AArm, b: ABlock, cx: ArmCx, st0: AS) -> AS {
+        if (cx.stmt || blockDiverges(b)) return resolveBlock(env, b, st0)
+        const n: int = b.stmts.length
+        if (n == 0) return fallsThrough(env, a, cx, st0)
+        const last: AExpr | not = evalOf(b.stmts[n - 1])
+        if (last is not) return fallsThrough(env, a, cx, resolveBlock(env, b, st0))
+        // `{ statement* expression }`: the statements in order (their locals in
+        // scope for the value), then the last expression as the arm's value
+        let st: AS = st0
+        let env2: Env = env
+        let i = 0
+        while (i < n - 1) {
+            const r: RB = resolveStmt(env2, b.stmts[i], st)
+            env2 = r.env
+            st = r.st
+            i = i + 1
+        }
+        return armValueExpr(env2, a, last, cx, st)
+    }
+
+    fn evalOf(s: AStmt) -> AExpr | not {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: x) :> x
+            .Local(name: n) :> not
+            .Return(e: x) :> not
+            .If(cond: c) :> not
+            .Given(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: d) :> not
+            .Fail(f: x) :> not
+        }
+    }
+
+    // A write in expression form — an assignment, `reset(@x)`, or an edit call
+    // on a reactive place (`@xs.push(v)`, `@xs.pop()`): it produces no value.
+    fn isWriteExpr(x: AExpr) -> boolean {
+        if (assignValue(x) is some) return true
+        const c: AExpr | not = calleeOf(x.k)
+        if (c is not) return false
+        if (exprName(c) == "reset") return true
+        const m: MethodCall | not = methodCall(c)
+        if (m is some) return isReactiveRoot(placeRoot(m.obj))
+        return false
+    }
+
+    // A call of a declared scrml function that yields no value (§19.4.3: "a
+    // call whose result is not a value of the success type (`log(m)`)").
+    fn callYieldsNothing(env: Env, st: AS, x: AExpr) -> boolean {
+        const c: AExpr | not = calleeOf(x.k)
+        if (c is not) return false
+        const f: FnInfo | not = calledFn(env, nameFactIn(st, c.nid))
+        if (f is not) return false
+        return !fnYieldsValue(env.g, f)
+    }
+
+    // Does a call of `f` produce a value? A declared return type does (`->
+    // void` declares that it does not, §7.5 — FnInfo.ret is `not` for it); a
+    // `!` function's result is handled, never read here; otherwise the body
+    // decides: some `return <expr>`, at any depth.
+    fn fnYieldsValue(g: Globals, f: FnInfo) -> boolean {
+        if (f.ret is some || f.failable) return true
+        const fs: FnSrc | not = fnSrcOf(g, f.sym.id)
+        if (fs is not) return true                         // unknown: never claimed to be empty
+        const r: AType | not = fs.f.ret
+        if (r is some) return !declaresVoid(r)
+        return blockReturnsValue(fs.f.body)
+    }
+
+    fn declaresVoid(t: AType) -> boolean {
+        const k: ATypeK = t.k
+        return match k {
+            .TName(name: n) :> n == "void"
+            .TSeq(elem: e) :> false
+            .TMaybe(inner: i) :> false
+        }
+    }
+
+    fn blockReturnsValue(b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtReturnsValue(s)) return true
+        }
+        return false
+    }
+
+    fn stmtReturnsValue(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> x is some
+            .If(cond: c, thenB: t, elseB: el) :> blockReturnsValue(t) || maybeBlockReturnsValue(el) || exprReturnsValue(c)
+            .Given(name: n, subject: x, body: b) :> blockReturnsValue(b)
+            .Eval(e: x) :> exprReturnsValue(x)
+            .Local(name: n, init: i) :> exprReturnsValue(i)
+            .EffectStmt(w: w) :> false
+            .Defer(body: d) :> false
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn maybeBlockReturnsValue(b: ABlock | not) -> boolean {
+        if (b is not) return false
+        return blockReturnsValue(b)
+    }
+
+    // A `return <expr>` inside an arm block of a handling form in `e`.
+    fn exprReturnsValue(e: AExpr) -> boolean {
+        for (const b of exprBlocks(e)) {
+            if (blockReturnsValue(b)) return true
+        }
+        for (const x of exprKids(e)) {
+            if (exprReturnsValue(x)) return true
+        }
+        return false
+    }
+
+    // E-ERROR-012 (§19.4.3 ruling 1a), with the SPEC's message.
+    fn fallsThrough(env: Env, a: AArm, cx: ArmCx, st: AS) -> AS {
+        const pat: string = patLabel(a.pat)
+        const where: string = whereLabel(cx.what)
+        const form: string = handledFormLabel(cx)
+        const n: string = exprName(maybeCallee(cx.subj))
+        if (n != "") {
+            return addDiag(st, env.file, a.span, "E-ERROR-012", "Arm '" + pat + "' of the " + form + " on '" + n + "(…)' produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of '" + n + "'s success type or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or call '" + n + "(…) !{ … }' as a statement and keep the writes in its arms.")
+        }
+        return addDiag(st, env.file, a.span, "E-ERROR-012", "Arm '" + pat + "' of the " + form + " on " + subjectName(cx.subj) + " produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of its success type (a `" + sqlSigil() + "}` query's is its terminator's, §44.3: `.get()` → `Row | not`, `.all()` → `Row[]`) or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or handle it as a statement and keep the writes in its arms.")
+    }
+
+    fn maybeCallee(e: AExpr) -> AExpr {
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is not) return e
+        return c
+    }
+
+    fn handledFormLabel(cx: ArmCx) -> string {
+        if (cx.isMatch) return "match"
+        return "handler"
+    }
+
+    fn whereLabel(what: string) -> string {
+        if (what == "") return "a value position"
+        return what
+    }
+
+    // An arm's pattern, as written (for messages).
+    fn patLabel(p: APat) -> string {
+        return match p {
+            .PName(name: n, binds: bs, parens: pr) :> patNameLabel(n, bs, pr)
+            .PWild :> "_"
+            .PWhole(bind: b, viaElse: v) :> wholeLabel(b.name, v)
+            .PBare(bind: b) :> b.name
+        }
+    }
+
+    fn patNameLabel(n: string, bs: ABind[], parens: boolean) -> string {
+        if (!parens) return "." + n
+        return "." + n + "(" + bindNames(bs).join(", ") + ")"
+    }
+
+    fn wholeLabel(name: string, viaElse: boolean) -> string {
+        if (viaElse) return "else " + name
+        return "_ " + name
     }
 
     // Does every path through `b` leave the function (`return` / `fail`)?
@@ -6405,7 +6590,7 @@ ${
 
     fn resolveMaybeExpr(env: Env, e: AExpr | not, st: AS) -> AS {
         if (e is not) return st
-        return resolveExpr(withWhole(env, e.nid), e, not, st).st
+        return resolveExpr(withWholeAt(env, e.nid, "a `return` operand"), e, not, st).st
     }
 
     // `let a[: T] = init`. An annotation is the local's type (and the
@@ -6420,7 +6605,7 @@ ${
             if (!rt.unresolved) annot = rt.t
             st = rt.st
         }
-        const ri: RX = resolveExpr(withWhole(env, init.nid), init, annot, st)
+        const ri: RX = resolveExpr(withWholeAt(env, init.nid, "the initializer of `" + name + "`"), init, annot, st)
         const rs: RSym = mint(ri.st, name)
         st = addBind(rs.st, s.nid, BindFact.BBind(rs.s))
         let lty: Type | not = ri.x.ty
@@ -7605,7 +7790,7 @@ ${
             if (fs.info.file == g.entry) hs = progHandles
             let host: HostCtx = HostCtx.HostOk
             if (fs.info.pure) host = HostCtx.HostPure
-            const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1 }
+            const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "" }
             let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx }
             const fte: TypeEnv = { stubs: g.te.stubs, declNames: g.te.declNames, declSyms: g.te.declSyms, file: fs.info.file }
             for (const p of fs.f.params) {

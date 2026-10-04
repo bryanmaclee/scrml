@@ -164,3 +164,90 @@ describe("§18.2 / §18.6.1 — E-MATCH-BARE-BINDER", () => {
     clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ :> @n = 1 }\n        load("y") !{ | _ err :> @n = 2 }\n    }`));
   });
 });
+
+describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yields a value or leaves", () => {
+  const go = (body, buttons = ["go"]) => P(`${TYPES}\n${LOAD}\n    function noop() {\n        @n = 1\n    }\n    function vd() -> void {\n        @n = 2\n    }\n${body}`, buttons);
+
+  test("an arm that writes (`let r = f() !{ | _ :> @n = 1 }`) — the SPEC's message, no Core", () => {
+    const src = go(`    function go() {\n        const r = load("x") !{ | _ :> @n = 1 }\n    }`);
+    expect(codes(src)).toEqual(["E-ERROR-012"]);
+    expect(msg(src, "E-ERROR-012")).toBe("Arm '_' of the handler on 'load(…)' produces no value, but the handler's result is used here (the initializer of `r`). In a value position every arm must yield a value of 'load's success type or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| _ :> { @phase = …; fallback }'), leave with 'return', or call 'load(…) !{ … }' as a statement and keep the writes in its arms.");
+    rejected(src, "E-ERROR-012");
+  });
+
+  test("every value position: an assignment's right-hand side, a `return` operand", () => {
+    expect(msg(go(`    function go() {\n        @log = load("x") !{ | _ :> @n = 1 }\n    }`), "E-ERROR-012")).toContain("(the right-hand side of an assignment)");
+    expect(msg(go(`    function go() -> string {\n        return load("x") !{ | _ :> @n = 1 }\n    }`), "E-ERROR-012")).toContain("(a `return` operand)");
+  });
+
+  test("a call that yields nothing: no `return <value>` in its body, `-> void`, `reset(@x)`", () => {
+    expect(codes(go(`    function go() {\n        const r = load("x") !{ | _ :> noop() }\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function go() {\n        @log = load("x") !{ | _ :> vd() }\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function go() {\n        const r = load("x") !{ | _ :> reset(@n) }\n    }`))).toEqual(["E-ERROR-012"]);
+  });
+
+  test("a block arm whose last statement is not an expression: a write, a declaration, a non-leaving `if`, an empty block", () => {
+    expect(codes(go(`    function go() {\n        const r = load("x") !{ | _ :> { @n = 1 } }\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function go() -> string {\n        return load("x") !{ | _ :> {\n            const q = "a"\n        } }\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function go() -> string {\n        const r = load("x") !{ | _ :> {\n            if (@n == 0) { return "a" }\n        } }\n        return r\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function go() {\n        @log = load("x") !{ | _ :> { } }\n    }`))).toEqual(["E-ERROR-012"]);
+  });
+
+  test("one report per falling arm; the arm is named by its pattern", () => {
+    const src = go(`    function go() {\n        const r = load("x") !{\n            | .NotFound(mid) :> @log = mid\n            | .Timeout :> @n = 1\n        }\n    }`);
+    expect(codes(src)).toEqual(["E-ERROR-012", "E-ERROR-012"]);
+    const ms = run(src).diags.map((d) => d.message);
+    expect(ms[0]).toContain("Arm '.NotFound(mid)'");
+    expect(ms[1]).toContain("Arm '.Timeout'");
+  });
+
+  test("a `match` on a failable result in a value position — the `.Ok(v)` arm is an arm like any other", () => {
+    const src = go(`    function go() -> string {\n        return match load("x") {\n            .Ok(v) :> @log = v\n            else :> "e"\n        }\n    }`);
+    expect(codes(src)).toEqual(["E-ERROR-012"]);
+    expect(msg(src, "E-ERROR-012")).toContain("Arm '.Ok(v)' of the match on 'load(…)'");
+  });
+
+  test("on a `?{}` query the message names the query (codes only — the printer refuses queries, U1c)", () => {
+    const src = `<program db="./app.db">\n    function f() -> int {\n        const r = ${SQ}\`SELECT a FROM t\`}.get() !{ | _ :> { const z = 1 } }\n        return 1\n    }\n    <main><p>x</p></main>\n</program>\n`;
+    expect(codes(src)).toEqual(["E-ERROR-012"]);
+    expect(msg(src, "E-ERROR-012")).toContain("the `" + SQ + "}` query");
+  });
+
+  test("near-miss: statement position MAY fall through (runtime)", async () => {
+    await load(go(`    function go() {\n        load("x") !{ | _ :> @n = 5 }\n    }`));
+    click(btn("go"));
+    expect(text().n).toBe("5");
+  });
+
+  test("a block arm yields its LAST EXPRESSION (§18.5), its statements run first (runtime)", async () => {
+    await load(go(`    function go() {\n        const r = load("x") !{ | _ :> {\n            @n = 1\n            "z"\n        } }\n        const s = load("ok") !{ | _ :> {\n            @n = 2\n            "never"\n        } }\n        @log = r + s\n    }`));
+    click(btn("go"));
+    expect(text().log).toBe("zok");
+    expect(text().n).toBe("1");
+  });
+
+  test("a block arm's value may read its own locals, and its `defer` runs after the value is taken (runtime)", async () => {
+    await load(go(`    function go() {\n        @log = load("x") !{ | _ :> {\n            const t = "v"\n            defer @n = @n + 10\n            @n = 1\n            t + "!"\n        } }\n    }`));
+    click(btn("go"));
+    expect(text().log).toBe("v!");
+    expect(text().n).toBe("11");
+  });
+
+  test("a block arm whose last expression is a handling form: its own Attempt, then its value (runtime)", async () => {
+    await load(go(`    function go() {\n        @log = load("x") !{ | _ :> {\n            @n = 3\n            load("y") !{ | _ :> "inner" }\n        } }\n    }`));
+    click(btn("go"));
+    expect(text().log).toBe("inner");
+    expect(text().n).toBe("3");
+  });
+
+  test("arms that leave (`return` / `fail` / an `if` both of whose branches leave) need no value (runtime)", async () => {
+    const { program } = await load(go(`    function pick(id: string) -> string {\n        const r = load(id) !{\n            | .NotFound(m) :> { return "nf:" + m }\n            | .Timeout :> {\n                if (@n == 0) { return "t0" } else { return "t1" }\n            }\n        }\n        return "ok:" + r\n    }\n    function relay(id: string)! LoadError {\n        const r = load(id) !{ | .NotFound(m) :> { fail .NotFound(m) } | .Timeout :> "t" }\n        return r\n    }`, []), ["pick"]);
+    expect(program.pick("x")).toBe("nf:x");
+    expect(program.pick("y")).toBe("t0");
+    expect(program.pick("a")).toBe("ok:a");
+  });
+
+  test("a call of a function that returns a value is a value", () => {
+    clean(go(`    fn d() -> string { return "q" }\n    function e() { return "w" }\n    function go() {\n        @log = load("x") !{ | .NotFound(m) :> d() | .Timeout :> e() }\n    }`));
+  });
+});
