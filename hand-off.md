@@ -1,3 +1,109 @@
+# scrml — Session 452 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Concurrent: **S453-peter (AdiPDesk)**
+> LIVE most of the session, WRAPPED (#1283 #1286 #1289; wrap PR #1291). **Rulings authority:** `scrml-support/user-voice-scrml.md`
+> §S452 (~14 entries). Board: `S452-bryan.md`. Changelog: `docs/changelog.md` §S452. Review ledger: `docs/pr-reviews.md` (S452 markers).
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 0. Check first
+- Open PRs at wrap: none of S452's — every S452 PR merged (#1270 #1272–#1281 #1285 #1287 #1290 #1293); Peter's #1289/#1291/#1292 merged — confirm each merged (`gh pr list`); a strict-rebase may be owed (they share
+  `docs/FACTS.md` / `SPEC-INDEX.md` / `known-gaps.md` generated hunks — resolve the HUNK, never a side).
+- **Peter's route note is on main, UNREAD by design** (bryan: "look at these next session"):
+  `handOffs/incoming/2026-10-04-from-S453-peter-to-bryan-answered-items-built.md` (`needs: reply`). Answer → reply via the `inbox` branch → move to `read/`.
+
+### 1. bryan's queue — surfaced at S452's end, "we will need to look at these next session" (PA recs on each)
+**U1b forks** (design: `scrml-support/docs/deep-dives/bootstrap-u1b-client-server-call-design-2026-10-04.md`) — F1 failure-type
+composition **(B) one `.Transport(t: ServerCallError)` wrapper variant** · F2 name **`ServerCallError`** · F3 variants
+`Unreachable` / `Refused(status)` / `ServerFault(status)` / `Malformed(reason)`, no timeout, no server text on the wire · F4 a
+declared variant named `Transport` = a NEW code · F5 inherited server placement **(a) SPEC-literal** · F6 source-order now, parallel
+read-only in U3 · F7 nested patterns **not now** · F8 the §19.9.10 `scrml fix` rule (local `!{ .Transport(t) :> return }` +
+Info where not exact) **yes**. Sequencing: #1290 → the codec's §57.8 payload-enum shape (`codec.scrml:211` refuses it) → U1b.
+Caveat measured: lifting U1b's refusal moves **0 of 13** blocked conformance cases (each also fails on another rule).
+**Peter's S453 note** — readings 1–5 (all rec keep; #5 = add a §19.6.8 sentence for handler rejections: rec yes) · B-1 call-ref
+handler rejection (`onclick=fn()`, 1251 sites) via a `.catch(→ _scrml_error_boundary_log)` in the auto-wrap: **rec build** ·
+B-2 async `<errorBoundary>` no fallback: fold into B-1 · B-3 `transaction` in a lambda: leave filed · B-4 (a) pin `--short=<n>` in
+`scripts/state.ts` (the recent-sessions SHA churn hit EVERY branch this session): yes · B-4 (b) re-stage changed agents in
+`scrml-support/agents/`: yes (PA) · C `defer` × `transaction` §19.10.3 note: yes. **Reply to Peter via the `inbox` branch.**
+
+### 2. Tenant floor — r3 status
+**Landed PARTIAL twice on bryan's word** (#1287 filter-at-source; #1293 allow-listed SQL subset + `OR ABORT` + schema hazards).
+OPEN, in order: **HIGH** `g-tenant-floor-schema-write-hazards-beyond-the-on-table-s452-r4` (a trigger declared ON a non-tenant
+table / INSTEAD OF on a view / a cascade from a non-tenant parent fans a scoped write across tenants — executed by the reviewer;
+direction: a SCHEMA-level rule, hazard-check every write) + the mention-scan false positives in the same entry (exclude `${}` text;
+name the offending function) · **HIGH** `g-tenant-floor-schema-view-over-tenant-table-s452` (a VIEW leaks every tenant on read) ·
+**MED** `g-tenant-floor-raw-driver-handle-callable-s452` (`_scrml_sql.unsafe(…)` — reserve the `_scrml_` prefix: a RULING) ·
+**LOW** `g-tenant-floor-predicate-oracles-before-filter-s452` (SPEC wording: the LIMIT short read is an oracle). Four review
+rounds on this surface — the next round should be the schema-level rule, not another statement-level patch. Long-term sound
+answer: database-side enforcement (§14.8.11 RLS on Postgres; per-request views / the authorizer on SQLite).
+
+### 3. Owed SPEC text (one small dispatch)
+(maps refresh N-S452W-1/2) **E-TENANT-SQL-SUBSET** has no SPEC text at all, nor do the `OR ABORT` writes or the schema-trigger limb of E-TENANT-WRITE; SPEC `:18199`, `:19495`, `:42884`, `:35238` still say the arm-pipe fix rule hasn't landed / the lint isn't emitted (#1285 landed both).
+§34 row **`E-TENANT-SQL-SUBSET`**; the runtime **`E-TENANT-WRITE`** sentence (an INSERT with no active tenant — ruling S452
+"your rec" (a)); the **UPDATE/DELETE WHERE-injection** sentence (§14.8.10 already sanctions "inject-or-hard-fail"; r3 implements
+injection) ; **`E-TYPE-ARM-QUALIFIER-MISMATCH`** row landed with #1276 — verify; `| e :>` → `_ e :>` case unnamed in the §19.4.5
+table (note from the arm-pipe agent); W-ARM-PIPE-LEGACY §34 rows now name both emitters (#1279/#1285).
+
+### 4. Bootstrap lane
+- dpa-066 M4–M6 (M4 retires the typer's name-keyed write set = the §6.15 divergence, ruled 3.7) after #1290.
+- dpa-067 F4: SQL facts record each output column's SOURCE column (cheap; before the row-type design). F1/F3/F5/F6/F7 ratified
+  — the protect pass is post-U1c.
+- U1b (above) — the next critical-path unit.
+
+### 5. Leads to chase
+- **`normalizeSqlText`'s brace counting** (the r2 C3 class) still feeds the §14.8.9 **`protect=` floor** and SQL typing — the r3
+  agent flagged it, not audited. Possible same-class hole on the protect side. **Investigate first** (security).
+- impl#1 `<#id>` rewrite reaches INSIDE string literals: `return "use <#search> to look"` compiles to
+  `"use _scrml_input_search_ to look"` (silent semantics-changed); and `<msg> = "use <#search> …"` mis-splits with a wrong
+  E-UNQUOTED-DISPLAY-TEXT. PA-verified by execution at df6dad5ac. Rule-7 class. Filed: `g-impl1-ref-sigil-rewrites-inside-string-literal-s452` (MED) + `g-impl1-string-literal-with-ref-sigil-splits-state-decl-s452` (LOW).
+- A VIEW over a tenant table is not tenant-scoped (pre-existing; r3 agent).
+- `g-impl1-component-body-pipeless-handler-s452` (MED) — pipe-less `!{}` in a component body fails to compile on impl#1
+  (undercuts §19.4.5 "parses identically" there; the lint says keep the `|`).
+
+## 🔭 DURABLE
+**Three review rounds on one text classifier = stop patching and change the boundary.** The tenant floor went r1 (comments hid a
+subquery, an aggregate missing from a name list) → r2 (normalizer + allow-list) → r2 review (quoted callee, leading `;`, braces
+inside `${}` strings, Postgres literals — `?{; DELETE FROM assets}` deleted every tenant's rows). Each round was a better
+classifier and each review beat it in one line, because the boundary was "regex over normalized text", and normalized text
+drifts from what the database parses. r3 replaced the question: not "is this query dangerous?" but "is this query in a tiny
+token-level subset we fully understand?" — anything else refused. S451's lesson again, one level down: deny-lists enumerate
+forever; allow-lists close.
+
+**The effect summary was ratified because the review rounds kept finding gaps BETWEEN walkers.** Ten analyses each re-walked
+the call graph to answer "what does this function transitively do?"; the S452 reviews of the rulings round found a void
+laundered through a wrapper (G7) and a bare `return` at depth — both gaps where one walker's answer differed from another's.
+dpa-066 made it one summary queried by every rule; the differential over 2,580 inputs proved nothing else moved.
+
+**A ruling's cost has to be shown in worked code, including its second-order consequence.** "Narrow E-TENANT-RAW-EGRESS to
+`.acrossTenants()` rows" was approved; only the SPEC agent noticed it also newly REJECTS cross-tenant raw exports with no
+opt-out. Surfaced after the fact; it stands but should have been in the original ask.
+
+## ⚑ MISSES (mine)
+1. ★★ Ran two dependent bash calls in PARALLEL; a `cd scrml-support` landed between them and the dpa-queue commit + a PR went into
+   scrml-support. Reverted (PR closed, branch deleted, main untouched). Rule: never parallelize cwd-dependent commands; `git -C`.
+2. ★ Relayed a reviewer's LOW-3 claim ("`.Ok` after `_ err` must be accepted") into a fix brief without reading §18.6.1; the agent
+   refused, citing the SPEC — correctly.
+3. ★ My brief told the impl#1 pipe-less agent to accept `T.V` heads without checking §18.2 first (it IS allowed — luck, not care).
+4. ★ A zsh `$var:c` modifier ate a path in a verification probe (`$mb:compiler/…`) — the check errored and I nearly trusted a
+   `--theirs` resolution it had not verified. Re-ran with `${mb}`. The probe-answered-a-different-question class.
+5. ★ Item-1 consequence of the RAW-EGRESS narrowing (above) not shown when recommending.
+6. ★ S451's #1270 had no review marker but was on auto-merge; I caught it at boot — the S451 wrap should have.
+
+## Worktrees + /tmp (wrap 6b / 6b′)
+Removed at wrap: every S452 agent + review worktree (14) and their local branches — all merged, clean, nothing unpushed (dry-run
+listed first). Retained: ~27 older `agent-*` trees from earlier sessions (not audited) + `agent-a667109ca5e9c2eca` (`s451-sev-land`).
+/tmp probe (ASUS): **9,284** top-level `/tmp` entries since boot (S451: 9,218) · **1,126,485** files under `/tmp/claude-1000`
+(S451: 1,125,628) — flat; residue, not a live leak. Remote S452 branches: GitHub may have kept the merged heads (auto-merge without
+`--delete-branch`) — prune with the S452 trim method if they pile up.
+
+## Gate at close
+Cloud `gate` green on every S452 landing (main at `7ce905ac2`). Review floor **0 owed** (`bun scripts/review-debt.ts`: 860/860;
+S452 markers #1270–#1293 + carve-outs for Peter's #1289/#1291/#1292). Bootstrap counter on main: **PASS 120**. `state.ts`,
+`facts.ts`, `regen-spec-index.ts`, `s34-census --check-new` all PASS on the wrap branch. pa-ruled count: **5**
+(S452 added #4 pipe-less `_ :>` binds nothing, #5 pipe-less `::V m :>` is E-PARSE-001 — both newly-rejecting, corpus measured zero).
+
+---
+
 # scrml — Session 453 (peter · AdiPDesk) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Concurrent:

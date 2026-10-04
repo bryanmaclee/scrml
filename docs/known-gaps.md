@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 242 | 6 |
-| MED | 503 | 4 |
-| LOW | 265 | 0 |
+| MED | 505 | 4 |
+| LOW | 266 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22996,3 +22996,19 @@ Governing: SPEC §14.8.10 (S452 "a") — writes against a tenant-scoped table ar
 - **M1** `orders.cfg REFERENCES config(k) ON DELETE CASCADE` (orders tenant-scoped, config not); A runs `DELETE FROM config` → on Postgres would delete B's orders (SQLite inert: the emitted server never enables `PRAGMA foreign_keys`; PG not run).
 Direction (PA, for the next round): a SCHEMA-LEVEL rule rather than per-statement attribution — any `<schema>` trigger/rule whose BODY writes a tenant table, and any FK action whose child is a tenant table, is refused at the schema (or charged to every table it can fire from), and EVERY write is hazard-checked whether or not it names a tenant table. Hazards outside `<schema>` remain invisible (noted).
 Also (LOW-MED, usability, executed): the r4 "a query that mentions a tenant table anywhere" rule false-positives on ordinary code — `INSERT INTO audit (msg) VALUES ('assets updated')`, `LIKE '%orders%'`, and an INTERPOLATION whose JS variable is named `orders`; the diagnostic names the table, not the offending function. Exclude interpolation text from the mention scan and name the function. Residual wider than stated: `query_to_xml(${q}, …)` with the table name in a bound parameter compiles (Postgres; a natural generic-export helper).
+
+### g-impl1-ref-sigil-rewrites-inside-string-literal-s452 — impl#1's `<#id>` element-ref rewrite reaches INSIDE a JS string literal: `return "use <#search> to look"` compiles to the string `"use _scrml_input_search_ to look"` — `NEW S452; MED; OPEN`
+<!-- @gap id=g-impl1-ref-sigil-rewrites-inside-string-literal-s452 sev=MED status=open locus=searched:not-traced-(PA probe only; the `<#id>` rewrite site in compiler/src not located) prov=rationale:a-string-literal-is-data-and-must-not-be-rewritten -->
+PA-verified by execution at `df6dad5ac`: a function body `return "use <#search> to look"` with an element `id="search"` → the emitted client JS returns `"use _scrml_input_search_ to look"`, no diagnostic. **semantics-changed, silent.** Rule 7 class (a text rewrite where the parsed tree knows the literal is a string). The bootstrap agent hit the same behaviour compiling the bootstrap's own sources and split its message string as a workaround (S452 rulings round). impl#1 frozen — security/bootstrap-serving only; this one is bootstrap-serving (the bootstrap is compiled by impl#1).
+
+### g-impl1-string-literal-with-ref-sigil-splits-state-decl-s452 — a string initializer containing `<#id>` (`<msg> = "use <#search> to look"`) is split mid-literal by the block splitter and reported as `E-UNQUOTED-DISPLAY-TEXT` — `NEW S452; LOW; OPEN`
+<!-- @gap id=g-impl1-string-literal-with-ref-sigil-splits-state-decl-s452 sev=LOW status=open locus=searched:not-traced-(block splitter tag recognition inside a quoted initializer) prov=rationale:the-diagnostic-names-the-wrong-cause -->
+PA-verified by execution at `df6dad5ac`: compiles to `error [E-UNQUOTED-DISPLAY-TEXT]: \`<#search> to look"\` is not valid code` — the diagnostic names the wrong cause (the string literal is valid). Loud, so LOW.
+
+### g-protect-floor-normalizer-brace-counting-unaudited-s452 — `normalizeSqlText`'s `${}` brace counting (the r2 tenant C3 class: a `{` inside a JS string in an interpolation hid a subquery) still feeds the §14.8.9 `protect=` floor and SQL row typing — `NEW S452; MED; OPEN — RELAYED-UNVERIFIED lead`
+<!-- @gap id=g-protect-floor-normalizer-brace-counting-unaudited-s452 sev=MED status=open locus=compiler/src/codegen/sql-projection.ts(normalizeSqlText, findTopLevelFromInSource) prov=review:s452-tenant-r3 -->
+Flagged by the tenant r3 agent (`fix/s452-tenant-sql-subset`): the tenant floor stopped using `normalizeSqlText` for its decisions (r3 lexes the emitter's own interpolation spans), but `protect=` and SQL typing still read it. NOT reproduced on the protect side — the first step is a C3-shaped probe against a `protect=` column (`SELECT ${ "{" } AS z, (SELECT secret FROM users) AS leak, ${ "}" } …`). If it leaks, sev → HIGH (security). Fix direction: the same r3 move — take interpolation spans from the parser/emitter, never count braces.
+
+### g-bootstrap-void-through-wrapper-passes-e-error-012-s452 — G7 (dpa-066): a void result laundered through a wrapper (`function g() { return nothing() }` in a value-position `!{}` arm) passed E-ERROR-012 and leaked `undefined` into a typed cell — `NEW S452; MED; RESOLVED (#1290)`
+<!-- @gap id=g-bootstrap-void-through-wrapper-passes-e-error-012-s452 sev=MED status=resolved locus=compiler/self-host-v2/analyze.scrml(summarize / retCallsOf — "returns a value" as an effect-summary dimension) prov=ruling:user-voice-scrml.md S452 "all your recs" item 3.6 -->
+Found by the dpa-066 deep-dive (executed: `@log` became `""`). RESOLVED by #1290 (dpa-066 M3): "returns a value" is a summary dimension closed over the call graph (two wrappers deep, recursion, across files all fire E-ERROR-012; dead code after an unconditional return ignored).
