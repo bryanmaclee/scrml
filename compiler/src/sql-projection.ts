@@ -74,17 +74,80 @@ const UNTYPEABLE_LEADERS = ["WITH", "INSERT", "UPDATE", "DELETE", "CREATE", "ALT
  * in the v1 surface, never inside the projection or FROM list we parse).
  */
 function normalizeQuery(query: string): string {
-  let q = query;
-  // Remove `${ ... }` interpolations (non-nested is the v1 surface; a greedy
-  // single-level removal is sufficient — bound params do not appear in the
-  // projection or FROM clause we parse).
-  q = q.replace(/\$\{[^}]*\}/g, " ");
-  // Remove line comments (`-- ...`) and block comments (`/* ... */`).
-  q = q.replace(/--[^\n]*/g, " ");
-  q = q.replace(/\/\*[\s\S]*?\*\//g, " ");
-  // Collapse whitespace (incl. newlines) to single spaces.
-  q = q.replace(/\s+/g, " ").trim();
-  return q;
+  return normalizeSqlText(query);
+}
+
+/**
+ * THE one SQL-text normalizer every text check shares (§14.8.10 S452 r2 — the
+ * tenant floor's checks run on exactly this text; a second copy is how a comment
+ * once hid a subquery from one check while another saw it).
+ *
+ * A single left-to-right scan, so each construct is recognized only where it
+ * really starts:
+ *   - `${ … }` bound-parameter interpolations (brace-balanced) → one space;
+ *   - `-- …` line comments and `/* … *\/` block comments → one space;
+ *   - a `'…'` string literal (with `''` escapes) keeps its quotes and its length
+ *     but its content becomes `_` — a literal is DATA, so nothing inside it (a
+ *     `--`, a `(SELECT`, a table name) can be read as SQL;
+ *   - `"…"`, `` `…` `` and `[…]` quoted identifiers are copied through unchanged;
+ *   - whitespace runs collapse to one space.
+ */
+export function normalizeSqlText(query: string): string {
+  const src = typeof query === "string" ? query : "";
+  let out = "";
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    const next = src[i + 1];
+    if (ch === "$" && next === "{") {
+      let depth = 1;
+      let j = i + 2;
+      while (j < src.length && depth > 0) {
+        if (src[j] === "{") depth++;
+        else if (src[j] === "}") depth--;
+        j++;
+      }
+      out += " ";
+      i = j;
+      continue;
+    }
+    if (ch === "-" && next === "-") {
+      const nl = src.indexOf("\n", i);
+      out += " ";
+      i = nl === -1 ? src.length : nl + 1;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      const end = src.indexOf("*/", i + 2);
+      out += " ";
+      i = end === -1 ? src.length : end + 2;
+      continue;
+    }
+    if (ch === "'") {
+      let j = i + 1;
+      let body = "";
+      while (j < src.length) {
+        if (src[j] === "'" && src[j + 1] === "'") { body += "__"; j += 2; continue; }
+        if (src[j] === "'") break;
+        body += "_";
+        j++;
+      }
+      out += "'" + body + "'";
+      i = j + 1;
+      continue;
+    }
+    if (ch === '"' || ch === "`" || ch === "[") {
+      const close = ch === "[" ? "]" : ch;
+      const end = src.indexOf(close, i + 1);
+      const stop = end === -1 ? src.length : end + 1;
+      out += src.slice(i, stop);
+      i = stop;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return out.replace(/\s+/g, " ").trim();
 }
 
 /**

@@ -46,6 +46,9 @@ import { asyncCombinatorHelperBlock, ASYNC_COMBINATOR_METHOD_ORDER } from "./asy
 import { emitExprField } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
+import { buildTenantContext, SERVER_TENANT_HELPER } from "./tenant-egress.ts";
+import { extractDesiredSchema } from "./db-authoritative.ts";
+import { setTenantContextForRewriter, drainTenantViolationsFromRewriter } from "./rewrite.ts";
 import {
   isLoopbackHost, isLegacyNumericIPv4, hostRefusal, bindPlan, displayUrlFor, probeIPv6, bindListeners, DEFAULT_HOST,
 } from "../commands/listen.js";
@@ -329,6 +332,34 @@ function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigu
 // emit these). A tool bypasses the client runtime, so the helper DEFINITIONS
 // must be inlined into the module — the same on-demand pattern the server emit
 // uses. Table = call-signature → self-contained source.
+// ---------------------------------------------------------------------------
+// §14.8.10 tenant floor in a `kind="tool"` module. A tool runs OUTSIDE any
+// request, so (S452 readings) a read of a tenant-scoped table without
+// `.acrossTenants()` sees ZERO rows and a tenant-injected INSERT is refused by
+// name at runtime; the compile-time refusals (E-TENANT-AGG / E-TENANT-WRITE)
+// apply as in a web app. Armed from the file's own `<schema>` declarations
+// around the tool's SQL lowering, then released.
+// ---------------------------------------------------------------------------
+function beginToolTenantFloor(fileAST: ASTNode): boolean {
+  const ctx = buildTenantContext(
+    { protectedByTable: new Map(), schemaByTable: new Map() } as never,
+    extractDesiredSchema(fileAST as never).tenantTables,
+  );
+  if (ctx.tenantScopedTables.size === 0) return false;
+  setTenantContextForRewriter(ctx);
+  return true;
+}
+function endToolTenantFloor(armed: boolean, filePath: string, errors?: unknown[]): void {
+  if (!armed) return;
+  for (const v of drainTenantViolationsFromRewriter()) {
+    errors?.push(new CGError(v.code, v.message, { file: filePath, start: 0, end: 0, line: 1, col: 1 }, "error"));
+  }
+  setTenantContextForRewriter(null);
+}
+/** The tenant-floor runtime names a tool body may call (all defined by SERVER_TENANT_HELPER). */
+const TENANT_HELPER_CALL_RE = /\b_scrml_tenant_(?:scope|scope_none|write_key)\(/;
+const TENANT_HELPER_NAMES = ["_scrml_tenant_scope", "_scrml_tenant_scope_none", "_scrml_tenant_write_key"];
+
 const TOOL_RUNTIME_HELPERS: Array<{ sig: string; src: string }> = [
   { sig: "_scrml_structural_eq(", src: SERVER_STRUCTURAL_EQ_HELPER },
   { sig: "_scrml_log(", src: SERVER_LOG_HELPER },
@@ -358,6 +389,11 @@ function buildRuntimeHelperHeader(body: string, filePath: string, errors?: unkno
       parts.push(src);
       inlinedNames.add(sig.slice(0, -1)); // strip trailing "("
     }
+  }
+  // §14.8.10 — the tenant floor's source filter / write key (one block, once).
+  if (TENANT_HELPER_CALL_RE.test(body)) {
+    parts.push(SERVER_TENANT_HELPER);
+    for (const n of TENANT_HELPER_NAMES) inlinedNames.add(n);
   }
   // Phase-2 colorless-async — inline any collection-combinator helper the tool
   // body lowered an async callback to (`_scrml_<method>Async(`). Register each used
@@ -653,6 +689,7 @@ export function generateToolJs(
 
   let mainFn: ASTNode | null = null;
 
+  const _tenantArmed = beginToolTenantFloor(fileAST);
   for (const stmt of stmts) {
     if (isFunctionDecl(stmt)) {
       const name = (stmt.name ?? "anon") as string;
@@ -678,6 +715,7 @@ export function generateToolJs(
       bodyLines.push(code);
     }
   }
+  endToolTenantFloor(_tenantArmed, filePath, errors);
 
   // F2 no-silent-leak — fail closed on any non-awaitable async (stdlib primitive or
   // async-callback combinator) the tool emitted BARE.
@@ -873,6 +911,7 @@ function generateServeHarnessToolJs(
   const headlessDeclaresBinding = (name: string): boolean =>
     new RegExp("(?:export\\s+)?(?:const|let)\\s+" + escapeRegExp(name) + "\\b").test(headlessModule);
 
+  const _tenantArmed = beginToolTenantFloor(fileAST);
   for (const stmt of stmts) {
     if (isFunctionDecl(stmt)) {
       const name = (stmt.name ?? "anon") as string;
@@ -907,6 +946,7 @@ function generateServeHarnessToolJs(
     for (const line of code.split("\n")) extraLines.push(line);
     extraLines.push("");
   }
+  endToolTenantFloor(_tenantArmed, filePath, errors);
 
   // F2 no-silent-leak — fail closed on any non-awaitable async (stdlib primitive or
   // async-callback combinator) emitted BARE in a composing `main`/helper. (Route
@@ -1019,6 +1059,12 @@ function buildServeExtraHelperHeader(
       parts.push(src);
       inlinedNames.add(sig.slice(0, -1));
     }
+  }
+  // §14.8.10 — the tenant floor's source filter / write key, unless the headless
+  // module already defines it.
+  if (TENANT_HELPER_CALL_RE.test(extraBody) && !headlessModule.includes("function _scrml_tenant_scope(")) {
+    parts.push(SERVER_TENANT_HELPER);
+    for (const n of TENANT_HELPER_NAMES) inlinedNames.add(n);
   }
   const referenced = new Set<string>();
   const re = /\b(_scrml_[A-Za-z0-9_]+)\s*\(/g;
@@ -1165,6 +1211,7 @@ export function generateToolLibraryJs(
     bodyLines.push("");
   }
 
+  const _tenantArmed = beginToolTenantFloor(fileAST);
   for (const stmt of stmts) {
     if (isFunctionDecl(stmt)) {
       const name = (stmt.name ?? "anon") as string;
@@ -1289,6 +1336,7 @@ export function generateToolLibraryJs(
     for (const e of preparedStmtErrors) errors.push(e);
   }
 
+  endToolTenantFloor(_tenantArmed, filePath, errors);
   const body = bodyLines.join("\n");
 
   // A db-context lib routed here whose `?{}` has NO `<db src>` would fall back to

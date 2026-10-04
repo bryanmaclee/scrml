@@ -3299,7 +3299,7 @@ class FlowAnalysis {
         return args[0] ?? clean();
       }
       if (isModelledHelperName(name)) {
-        // `_scrml_tenant_redact(v, t)` / `_scrml_tenant_tag(v, …)` preserve the
+        // `_scrml_tenant_redact(v, t)` / `_scrml_tenant_scope(rows, …)` preserve the
         // protect descriptor on survivors (§14.8.10 composes inside §14.8.9).
         return args[0] ?? clean();
       }

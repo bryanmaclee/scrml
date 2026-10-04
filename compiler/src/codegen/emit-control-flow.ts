@@ -10,6 +10,7 @@ import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry 
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { CGError } from "./errors.ts";
 import { fnTextHasOwnAwait } from "./js-async-analysis.ts";
+import { tenantFloorTouchesSql } from "./rewrite.js";
 
 // ---------------------------------------------------------------------------
 // Module-level Tier 2 hoist registry (§8.10)
@@ -690,7 +691,11 @@ function _emitForStmtInner(
   // for this for-stmt, delegate to the rewriter before falling through
   // to the standard emission path.
   const _hoist = (_hoistMap && node.id != null) ? _hoistMap.get(node.id) : null;
-  if (_hoist) {
+  // §14.8.10 (S452 r2) — the hoisted IN-query is issued raw (`.unsafe(...)`), so it
+  // would bypass the tenant source filter: a loop over tenant A's rows fetched
+  // tenant B's. A query that touches a tenant-scoped table is NOT hoisted; the
+  // loop keeps its per-iteration query, which the scoped lowering filters.
+  if (_hoist && !tenantFloorTouchesSql(String(_hoist.sqlTemplate ?? "")) && !tenantFloorTouchesSql(String(_hoist.inSqlTemplate ?? ""))) {
     return emitHoistedForStmt(node, _hoist, opts?.dbVar ?? fallbackSqlHandle(), opts ?? undefined);
   }
 
