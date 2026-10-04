@@ -124,14 +124,14 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `b490f3b75` — wrap(s449): 14 PRs landed under an S239 review each — <effect>, §6.15, opener keywords, the §55 gate in the bootstrap; the @session identity hole, protect r9, lost acknowledged writes fixed in impl#1; the bootstrap's honest number is 19 (#1252) — **pushed**
-- `fffc94b75` — wrap(s450-peter): bryan's "stamp all" built end to end — seven landings, two holes found live on main, aM pin bumped behind a deploy guard (#1245) — **pushed**
-- `2d6d8cd43` — wrap(s447): `when` became <effect> that cannot write state, the validity surface and submit gate, keywords outside the opener — and a possibly-accidental "your recs" caught before it shipped (#1231) — **pushed**
-- `4154bf006` — wrap(s448): took the reboot-killed S446-xps lane, landed the bootstrap codec, and found where a million /tmp files came from (#1224) — **pushed**
-- `5ddd56347` — wrap(s446-peter): six landed through merge-on-green, three reviewed drafts for bryan, and the tests had been lying about the network (#1223) — **pushed**
-- `bca39b61a` — wrap(s445): four security arcs landed through multi-round adversarial review; eight rulings; dev-db held one fix short (#1206) — **pushed**
-- `fe5cad679` — wrap(s444): a coderlegion port became four rulings, the bootstrap ran §66.19.5 + §66.19.2 from source, and the TS <request> turned out to loop (#1205) — **pushed**
-- `9a3d96ebb` — wrap(s443): the S441 review record was wrong, the auth holes closed, two broken flagship examples work — and the post-merge reviews found the next two fail-opens (#1187) — **pushed**
+- `54ba3271` — wrap(s451): the U1 rulings in the SPEC, the error model and U1a in the bootstrap, a wrong-database security fix in impl#1 (#1271) — **pushed**
+- `b490f3b7` — wrap(s449): 14 PRs landed under an S239 review each — <effect>, §6.15, opener keywords, the §55 gate in the bootstrap; the @session identity hole, protect r9, lost acknowledged writes fixed in impl#1; the bootstrap's honest number is 19 (#1252) — **pushed**
+- `fffc94b7` — wrap(s450-peter): bryan's "stamp all" built end to end — seven landings, two holes found live on main, aM pin bumped behind a deploy guard (#1245) — **pushed**
+- `2d6d8cd4` — wrap(s447): `when` became <effect> that cannot write state, the validity surface and submit gate, keywords outside the opener — and a possibly-accidental "your recs" caught before it shipped (#1231) — **pushed**
+- `4154bf00` — wrap(s448): took the reboot-killed S446-xps lane, landed the bootstrap codec, and found where a million /tmp files came from (#1224) — **pushed**
+- `5ddd5634` — wrap(s446-peter): six landed through merge-on-green, three reviewed drafts for bryan, and the tests had been lying about the network (#1223) — **pushed**
+- `bca39b61` — wrap(s445): four security arcs landed through multi-round adversarial review; eight rulings; dev-db held one fix short (#1206) — **pushed**
+- `fe5cad67` — wrap(s444): a coderlegion port became four rulings, the bootstrap ran §66.19.5 + §66.19.2 from source, and the TS <request> turned out to loop (#1205) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
