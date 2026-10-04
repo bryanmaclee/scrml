@@ -48,7 +48,8 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode, mkSpan } from "./ast.scrml"
+             AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan } from "./ast.scrml"
 
     // =========================================================================
     // Tokens, as the parser sees them: one TOTAL classification of TokenKind
@@ -353,8 +354,11 @@ ${
                 const ix: RExpr = parseAssign(adv(r.tp))
                 r = mkE(expectP(ix.tp, "]"), start, AExprK.Index(r.e, ix.e))
             } else if (isHandlerOpen(r.tp)) {
-                // s451: `expr !{ … }` — a failable handler (§19.4.3 item 3)
-                r = refuseHandler(r)
+                // s451 (Ue): `expr !{ … }` — a failable handler (§19.4.3 item 3)
+                r = parseGuard(r, start)
+            } else if (isPropagate(r.tp)) {
+                // s451 (Ue): `expr?` — propagation (§19.5)
+                r = handledExpr(adv(r.tp), start, r.e, AHow.Propagate)
             } else {
                 going = false
             }
@@ -363,12 +367,16 @@ ${
     }
 
     // =========================================================================
-    // s451 (U1a) — the error model's surface forms the bootstrap does not have
-    // yet. Unit Ue ("the error model": `!` signatures, `fail`, `?`, `!{}`,
-    // `match` on a failable result) is not built; each form is REFUSED
-    // (E-BOOTSTRAP-UNSUPPORTED naming Ue), never accepted and ignored — an
-    // ignored handler would drop the error it exists to handle. Each is parsed
-    // past so the rest of the file still reads.
+    // s451 (Ue) — the error model's surface forms (SPEC §19): `e?` (§19.5.1
+    // "propagation-expr ::= expression '?'"), `e !{ arms }` (§19.4.3 item 3),
+    // `match e { arms }` (§19.7.1), and the arms the last two share ("The `!{}`
+    // error-handler arms share the match arm-arrow rule (lockstep)", §19 alias
+    // note). What `e` is — whether it is failable, which enum the arms name —
+    // is analyze's. Arm syntax: an optional leading `|`; a pattern `.V`, `::V`,
+    // `.V(a, _)`, `_` or `else` (canonical `.V` / `else`, aliases `::V` / `_`);
+    // `:>` (the deprecated `=>` / `->` parse identically and are marked
+    // `legacy`, W-MATCH-ARROW-LEGACY); a `{ block }` or ONE expression, which
+    // ends at the arms' `}`, a `|`, or the end of its line (§7.2.2).
     // =========================================================================
     // The SQL sigil, for messages. Spelled in two pieces ON PURPOSE: impl#1
     // (which compiles this file) pre-scans every expression for the sigil —
@@ -376,8 +384,6 @@ ${
     // own SQL placeholder (expression-parser.ts replaceSqlBlockPlaceholder),
     // so a message holding the sigil literally comes out mangled.
     fn sqlSigil() -> string { return "?" + "{" }
-
-    fn ueReason() -> string { return "it arrives with unit Ue (the error model: `!` signatures, `fail`, `?`, `!{}`, and `match` on a failable result), which the bootstrap does not have yet" }
 
     // `!{` on the line of what precedes it (a `!` that starts a new line starts
     // a new statement; `!=` is its own token).
@@ -389,15 +395,43 @@ ${
         return peekAt(tp, -1).line == a.line
     }
 
-    fn refuseHandler(r: RExpr) -> RExpr {
-        const bang: PTok = cur(r.tp)
-        const d: TP = diagAt(r.tp, "E-BOOTSTRAP-UNSUPPORTED", "a `!{ … }` failable handler is not in the bootstrap — " + ueReason(), bang)
-        const after: TP = skipBraced(adv(d))
-        return { e: handledSql(r.e), tp: after }
+    // A postfix `?`: on the line of what it follows, and followed by what ends
+    // an expression — the end of the line or input, or `)` `]` `,` `}` `;` `|`.
+    // Anything else after it makes it a ternary's `?` (and `?{` the SQL sigil).
+    fn isPropagate(tp: TP) -> boolean {
+        const a: PTok = cur(tp)
+        if (a.cls != TC.Punct || a.text != "?") return false
+        if (tp.i == 0) return false
+        if (peekAt(tp, -1).line != a.line) return false
+        const b: PTok = peekAt(tp, 1)
+        if (b.cls == TC.End || b.line != a.line) return true
+        if (b.cls != TC.Punct) return false
+        return b.text == ")" || b.text == "]" || b.text == "," || b.text == "}" || b.text == ";" || b.text == "|"
     }
 
-    // A `?{}` a `!{}` handler follows is HANDLED (the handler is refused, but
-    // the query is not also called unhandled — one report per site).
+    fn handledExpr(tp: TP, start: int, subject: AExpr, how: AHow) -> RExpr {
+        return mkE(tp, start, AExprK.Handled({ subject: handledSql(subject), how: how }))
+    }
+
+    // `subject !{ arms }` — at the `!`.
+    fn parseGuard(r: RExpr, start: int) -> RExpr {
+        const arms: RArms = parseArms(adv(r.tp))
+        return handledExpr(arms.tp, start, r.e, AHow.Guard(arms.arms))
+    }
+
+    // `match subject { arms }` — at `match`.
+    fn parseMatch(tp: TP, start: int) -> RExpr {
+        const subj: RExpr = parseTernary(adv(tp))
+        if (!isP(subj.tp, "{")) {
+            const d: TP = diagAt(subj.tp, "E-PARSE-EXPECTED", "expected `{` to open the `match` arms, found `" + cur(subj.tp).text + "`", cur(subj.tp))
+            return mkE(d, start, AExprK.Recovered)
+        }
+        const arms: RArms = parseArms(subj.tp)
+        return handledExpr(arms.tp, start, subj.e, AHow.MatchOn(arms.arms))
+    }
+
+    // A query the handling forms take as their subject is HANDLED there — the
+    // flag analyze's §19.8.3 rule reads (E-ERROR-002 only for an unhandled one).
     fn handledSql(e: AExpr) -> AExpr {
         const k: AExprK = e.k
         const q: ASql | not = sqlOf(k)
@@ -405,9 +439,148 @@ ${
         return { nid: e.nid, span: e.span, k: AExprK.Sql({ chunks: q.chunks, params: q.params, mode: q.mode, nobatch: q.nobatch, handled: true }) }
     }
 
+    type RArms:struct = { arms: AArm[], tp: TP }
+    type RPat:struct = { pat: APat, tp: TP }
+    type RArmBody:struct = { body: AArmBody, tp: TP }
+
+    // At `{`: the arms, through the matching `}`.
+    fn parseArms(tp: TP) -> RArms {
+        let t: TP = expectP(tp, "{")
+        let arms: AArm[] = []
+        while (!isP(t, "}") && !atEnd(t)) {
+            const before: int = t.i
+            if (isP(t, "|")) t = adv(t)
+            const astart: int = cur(t).start
+            const rp: RPat = parsePattern(t)
+            t = rp.tp
+            let legacy = false
+            const c: PTok = cur(t)
+            const g: PTok = peekAt(t, 1)
+            if (c.cls == TC.Punct && c.text == ":" && g.text == ">" && touching(c, g)) {
+                t = adv(adv(t))
+            } else if (c.cls == TC.Punct && c.text == "=>") {
+                legacy = true
+                t = adv(t)
+            } else if (c.cls == TC.Punct && c.text == "-" && g.text == ">" && touching(c, g)) {
+                legacy = true
+                t = adv(adv(t))
+            } else {
+                t = diagAt(t, "E-PARSE-ARM", "expected `:>` after the arm's pattern, found `" + c.text + "`", c)
+            }
+            const rb: RArmBody = parseArmBody(t)
+            t = rb.tp
+            const arm: AArm = { nid: t.nid, span: spanFrom(t, astart), pat: rp.pat, body: rb.body, legacy: legacy }
+            arms = arms.concat([arm])
+            t = bumpId(t)
+            if (t.i == before) t = adv(t)
+        }
+        return { arms: arms, tp: expectP(t, "}") }
+    }
+
+    fn binderReason() -> string {
+        return "a pattern binder without parentheses (`| .V m :>`, `| _ e :>`) is not in the bootstrap — the SPEC does not settle what it binds (§19.8.3's example reads `m` as the payload; §19 Appendix B's `| ::ErrorTypeA e` reads the error value): write `.V(m)` to bind the payload positionally"
+    }
+
+    // An arm's pattern.
+    fn parsePattern(tp: TP) -> RPat {
+        const a: PTok = cur(tp)
+        const b: PTok = peekAt(tp, 1)
+        if (a.cls == TC.Variant) return patBinds(adv(tp), a, a.v)
+        if (a.cls == TC.Punct && a.text == "." && (b.cls == TC.Ident || b.cls == TC.Keyword) && touching(a, b)) return patBinds(adv(adv(tp)), b, b.v)
+        if (a.cls == TC.Punct && a.text == ":" && b.text == ":" && touching(a, b)) {
+            const n: PTok = peekAt(tp, 2)
+            if ((n.cls == TC.Ident || n.cls == TC.Keyword) && touching(b, n)) return patBinds(adv(adv(adv(tp))), n, n.v)
+        }
+        if ((a.cls == TC.Ident && a.v == "_") || (a.cls == TC.Keyword && a.v == "else")) {
+            const t: TP = adv(tp)
+            const nx: PTok = cur(t)
+            if (nx.cls == TC.Ident && nx.line == a.line) {
+                const d: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", binderReason(), nx)
+                return { pat: APat.PWild, tp: adv(d) }
+            }
+            return { pat: APat.PWild, tp: t }
+        }
+        if (a.cls == TC.Ident && (b.text == "." || b.text == ":") && touching(a, b)) {
+            // `E.V` / `E::V` — a qualified pattern
+            let t: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a qualified arm pattern (`" + a.v + b.text + "…`) is not in the bootstrap — write the bare variant (`.V`), which resolves against the subject's error type", a)
+            while (!atEnd(t) && !isP(t, "}") && !(isP(t, ":") && peekAt(t, 1).text == ">") && !isP(t, "=>")) { t = adv(t) }
+            return { pat: APat.PWild, tp: t }
+        }
+        return { pat: APat.PWild, tp: diagAt(tp, "E-PARSE-ARM", "expected an arm pattern (`.Variant`, `.Variant(a, b)`, `_` or `else`), found `" + a.text + "`", a) }
+    }
+
+    // After a pattern's variant name (`nameTok`): its `(binders)`, if written.
+    fn patBinds(tp: TP, nameTok: PTok, name: string) -> RPat {
+        const o: PTok = cur(tp)
+        if (o.cls == TC.Punct && o.text == "(" && touching(nameTok, o)) {
+            let t: TP = adv(tp)
+            let binds: ABind[] = []
+            while (!isP(t, ")") && !atEnd(t)) {
+                const b: PTok = cur(t)
+                if (b.cls != TC.Ident) {
+                    t = adv(diagAt(t, "E-PARSE-ARM", "expected a binder name (or `_`) in the pattern's `(…)`, found `" + b.text + "`", b))
+                } else {
+                    binds = binds.concat([{ nid: t.nid, span: mkSpan(b.start, b.end), name: b.v }])
+                    t = bumpId(adv(t))
+                }
+                if (isP(t, ",")) t = adv(t)
+            }
+            return { pat: APat.PName(name, binds, true), tp: expectP(t, ")") }
+        }
+        if (o.cls == TC.Ident && o.line == nameTok.line) {
+            const d: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", binderReason(), o)
+            return { pat: APat.PName(name, [], false), tp: adv(d) }
+        }
+        return { pat: APat.PName(name, [], false), tp: tp }
+    }
+
+    // An arm's body: a `{ block }`, or one expression read up to `armEnd`.
+    fn parseArmBody(tp: TP) -> RArmBody {
+        if (isP(tp, "{")) {
+            const rb: RBlock = parseBlock(tp)
+            return { body: AArmBody.ArmBlock(rb.b), tp: rb.tp }
+        }
+        const end: int = armEnd(tp)
+        const sub: TP = { toks: tp.toks.slice(0, end).concat([endTokAt(tp.toks[end])]), i: tp.i, nid: tp.nid, diags: tp.diags, file: tp.file }
+        const r: RExpr = parseAssign(sub)
+        let st: TP = r.tp
+        if (!atEnd(st)) {
+            const x: PTok = cur(st)
+            st = diagAt(st, "E-PARSE-ARM", "unexpected `" + x.text + "` in an arm — an arm holds one expression or a `{ … }` block", x)
+        }
+        return { body: AArmBody.ArmExpr(r.e), tp: { toks: tp.toks, i: end, nid: st.nid, diags: st.diags, file: tp.file } }
+    }
+
+    // Where an expression arm ends: at bracket depth 0, the arms' closing `}`,
+    // a `|` (the next arm), or the first token on a later line.
+    fn armEnd(tp: TP) -> int {
+        let i: int = tp.i
+        let depth: int = 0
+        while (i < tp.toks.length) {
+            const x: PTok = tp.toks[i]
+            if (x.cls == TC.End) return i
+            if (depth == 0 && i > tp.i) {
+                if (x.line != tp.toks[i - 1].line) return i
+                if (x.cls == TC.Punct && x.text == "|") return i
+            }
+            if (x.cls == TC.Punct && (x.text == "(" || x.text == "[" || x.text == "{")) depth = depth + 1
+            if (x.cls == TC.Punct && (x.text == ")" || x.text == "]" || x.text == "}")) {
+                if (depth == 0) return i
+                depth = depth - 1
+            }
+            i = i + 1
+        }
+        return tp.toks.length - 1
+    }
+
+    fn endTokAt(x: PTok) -> PTok {
+        return { cls: TC.End, v: "", text: "", start: x.start, end: x.start, line: x.line }
+    }
+
     fn sqlOf(k: AExprK) -> ASql | not {
         return match k {
             .Sql(q: q) :> q
+            .Handled(h: x) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -751,13 +924,8 @@ ${
             const d: TP = diagAt(tp, "E-PARSE-NO-NULL", "`" + t.v + "` does not exist in scrml — absence is `not` (§42)", t)
             return mkE(adv(d), start, AExprK.Recovered)
         }
-        // s451 (U1a): `match ?{…} { … }` — a match on a query's failable result
-        // (§19.8.3 item 2) is refused until Ue (the error model)
-        if (t.v == "match" && isSqlOpen(adv(tp))) {
-            const dm: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "a `match` on a `" + sqlSigil() + "}` query's result (§19.8.3) is not in the bootstrap — " + ueReason(), t)
-            const subj: RExpr = parsePostfix(adv(dm))
-            return mkE(skipBraced(subj.tp), start, AExprK.Recovered)
-        }
+        // s451 (Ue): `match e { … }` (§19.7.1 — analyze admits a failable subject)
+        if (t.v == "match") return parseMatch(tp, start)
         return mkE(adv(tp), start, AExprK.Name(t.v))
     }
 
@@ -865,6 +1033,14 @@ ${
         const start: int = t.start
         if (isWord(tp, "let") || isWord(tp, "const")) return parseLocal(tp)
         if (deferAhead(tp)) return parseDefer(tp)      // s451 (§19.16.1)
+        if (failAhead(tp)) return parseFail(tp)        // s451 (Ue, §19.3.1)
+        if (isWord(tp, "transaction") && peekAt(tp, 1).text == "{" && peekAt(tp, 1).line == t.line) {
+            // s451 (Ue): §19.10.2 — refused, never read as a name + a block
+            const dt: TP = diagAt(tp, "E-BOOTSTRAP-UNSUPPORTED", "`transaction { … }` (§19.10) is not in the bootstrap — it arrives with unit U1e (transactions, which need the error model's `!` functions)", t)
+            const rb: RBlock = parseBlock(adv(dt))
+            const re: RExpr = mkE(rb.tp, start, AExprK.Recovered)
+            return mkS(re.tp, start, AStmtK.Eval(re.e))
+        }
         if (isWord(tp, "return")) {
             const nx: PTok = peekAt(tp, 1)
             if (nx.cls == TC.End || nx.line != t.line || nx.text == "}" || nx.text == ";") {
@@ -1012,6 +1188,7 @@ ${
             .Index(obj: o) :> false
             .Lambda(params: p) :> false
             .Sql(q: q) :> false
+            .Handled(h: x) :> false
         }
     }
 
@@ -1126,6 +1303,7 @@ ${
             .If(cond: c) :> s
             .Given(name: n) :> s
             .EffectStmt(w: w) :> s
+            .Fail(f: x) :> s
         }
     }
 
@@ -1180,6 +1358,55 @@ ${
         const r: RStmt = parseStmt(t)
         const b: ABlock = { nid: r.tp.nid, span: spanFrom(r.tp, bodyStart), stmts: [r.s] }
         return mkS(bumpId(r.tp), start, AStmtK.Defer(b, arrayLead, false))
+    }
+
+    // s451 (Ue) — `fail` (§19.3.1 `fail-stmt ::= 'fail' enum-type? ('.' |
+    // '::') variant-name ('(' arg-list ')')?`). `fail` is not reserved: it
+    // opens a statement only at statement start, followed on the same line by
+    // something that is not an identifier's continuation (`fail.x`, `fail(…)`,
+    // `fail[i]` touch it; `fail = 1` assigns it).
+    fn failAhead(tp: TP) -> boolean {
+        if (!isWord(tp, "fail")) return false
+        const f: PTok = cur(tp)
+        const nx: PTok = peekAt(tp, 1)
+        if (nx.cls == TC.End || nx.line != f.line) return false
+        if (nx.cls == TC.Variant || nx.cls == TC.Ident || nx.cls == TC.Keyword || nx.cls == TC.Str || nx.cls == TC.Num) return true
+        if (nx.cls != TC.Punct || touching(f, nx)) return false
+        return nx.text == "." || nx.text == ":"
+    }
+
+    fn isNameTok(x: PTok) -> boolean { return x.cls == TC.Ident || x.cls == TC.Keyword }
+
+    fn parseFail(tp: TP) -> RStmt {
+        const start: int = cur(tp).start
+        const t: TP = adv(tp)
+        const a: PTok = cur(t)
+        const b: PTok = peekAt(t, 1)
+        const c: PTok = peekAt(t, 2)
+        if (a.cls == TC.Variant) return failArgs(adv(t), start, "", a)
+        if (a.cls == TC.Punct && a.text == "." && isNameTok(b) && touching(a, b)) return failArgs(adv(adv(t)), start, "", b)
+        if (a.cls == TC.Punct && a.text == ":" && b.text == ":" && touching(a, b) && isNameTok(c) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, "", c)
+        if (a.cls == TC.Ident && b.cls == TC.Punct && b.text == "." && isNameTok(c) && touching(a, b) && touching(b, c)) return failArgs(adv(adv(adv(t))), start, a.v, c)
+        if (a.cls == TC.Ident && b.text == ":" && c.text == ":" && touching(a, b) && touching(b, c)) {
+            const d: PTok = peekAt(t, 3)
+            if (isNameTok(d) && touching(c, d)) return failArgs(adv(adv(adv(adv(t)))), start, a.v, d)
+        }
+        // not a variant (`fail "x"`): kept, so analyze reports E-ERROR-009
+        const r: RExpr = parseAssign(t)
+        return mkS(r.tp, start, AStmtK.Fail({ enumName: "", variant: "", args: [], target: r.e }))
+    }
+
+    // After the variant name: its payload `(args)`, when written touching it.
+    fn failArgs(tp: TP, start: int, enumName: string, vtok: PTok) -> RStmt {
+        let t: TP = tp
+        let args: AExpr[] = []
+        const o: PTok = cur(t)
+        if (o.cls == TC.Punct && o.text == "(" && touching(vtok, o)) {
+            const r: RExprs = parseList(adv(t), ")")
+            args = r.es
+            t = r.tp
+        }
+        return mkS(t, start, AStmtK.Fail({ enumName: enumName, variant: vtok.v, args: args, target: not }))
     }
 
     // `given c = @h :> { … }` (§66.7.5)
@@ -1412,9 +1639,8 @@ ${
     }
 
     // `function name(p, q: T) { … }` / `fn name(p: T) -> T { … }`
-    // s451 (U1a): `server` = written with the deprecated modifier; a `!` after
-    // the parameter list (§19.4.1 `'!' (('->' error-type) | error-type)?`) is a
-    // failable function — refused until Ue, recorded as `failable`.
+    // s451 (U1a): `server` = written with the deprecated modifier; (Ue) a `!`
+    // after the parameter list is a failable function, its error type `err`.
     fn parseFn(tp: TP, start: int, exported: boolean, pure: boolean, server: boolean) -> RItems {
         let t: TP = adv(tp)
         const nameTok: PTok = cur(t)
@@ -1435,27 +1661,39 @@ ${
             if (isP(t, ",")) t = adv(t)
         }
         t = expectP(t, ")")
+        // s451 (Ue) — §19.4.1 `failable-fn ::= 'function' identifier '('
+        // param-list ')' '!' (('->' error-type) | error-type)? block`: after a
+        // `!` an arrow names the ERROR type (there is no success-type slot).
         let failable = false
+        let err: AType | not = not
         if (isP(t, "!")) {
             failable = true
-            const bang: PTok = cur(t)
-            t = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "a failable function `" + nameTok.v + "(…)!` (§19.4) is not in the bootstrap — " + ueReason(), bang)
             t = adv(t)
-            // its error type (`-> E` or bare `E`) is skipped with the refusal
-            while (!isP(t, "{") && !atEnd(t)) { t = adv(t) }
+            const ea: PTok = cur(t)
+            const eb: PTok = peekAt(t, 1)
+            if (ea.text == "-" && eb.text == ">" && touching(ea, eb)) {
+                const re: RType = parseType(adv(adv(t)))
+                err = re.t
+                t = re.tp
+            } else if (!isP(t, "{")) {
+                const re2: RType = parseType(t)
+                err = re2.t
+                t = re2.tp
+            }
         }
         let ret: AType | not = not
         const a: PTok = cur(t)
         const b: PTok = peekAt(t, 1)
         if (a.text == "-" && b.text == ">" && touching(a, b)) {
+            if (failable) t = diagAt(t, "E-PARSE-FN", "a failable function has no success-type annotation (§19.4.1: `function " + nameTok.v + "(…)! ErrorType { … }` — its success type is inferred from its returns, §19.4.2)", a)
             const r2: RType = parseType(adv(adv(t)))
-            ret = r2.t
+            if (!failable) ret = r2.t
             t = r2.tp
         }
         const body: RBlock = parseBlock(t)
         t = body.tp
         const f: AFn = { nid: t.nid, span: spanFrom(t, start), exported: exported, pure: pure,
-                         name: nameTok.v, params: params, ret: ret, body: body.b, server: server, failable: failable }
+                         name: nameTok.v, params: params, ret: ret, body: body.b, server: server, failable: failable, err: err }
         return mkItem(bumpId(t), start, AItemK.FnItem(f))
     }
 
@@ -2059,6 +2297,7 @@ ${
             .Index(obj: o) :> ""
             .Lambda(params: ps) :> ""
             .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
         }
     }
 
@@ -3033,6 +3272,7 @@ ${
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -3175,6 +3415,7 @@ ${
             .Index(obj: ix) :> false
             .Lambda(params: lp) :> false
             .Sql(q: q) :> false
+            .Handled(h: x) :> false
         }
     }
 
@@ -3203,6 +3444,7 @@ ${
             .Index(obj: ix) :> false
             .Lambda(params: lp) :> false
             .Sql(q: q) :> false
+            .Handled(h: x) :> false
         }
     }
 

@@ -343,7 +343,7 @@ ${
 
         // function closeCountry() { @country.open = .Closed }
         const closeCountry: Fn = {
-            sym: sCloseCountry, params: [], pure: false,
+            sym: sCloseCountry, params: [], pure: false, err: not,
             body: block([
                 Stmt.Write(wOpen, InstRef.Alias(hCountry), EditKind.Transition,
                     litVariant(sOpenness, CLOSED), Check.RuntimeEdge),
@@ -353,7 +353,7 @@ ${
         // `given` over an instance handle → Let + If(IsSome) + a write through
         // `.Narrowed(c)` (L11).
         const clearColor: Fn = {
-            sym: sClearColor, params: [], pure: false,
+            sym: sClearColor, params: [], pure: false, err: not,
             body: block([
                 Stmt.Let(sC, Expr.Handle(InstRef.Alias(hColor))),
                 Stmt.If(prim1(PrimOp.IsSome, Expr.Local(sC)),
@@ -377,7 +377,7 @@ ${
         if (earlyRead) {
             // function countryValue() { return @country.value }
             const fCountryValue: Fn = {
-                sym: sCountryValue, params: [], pure: false,
+                sym: sCountryValue, params: [], pure: false, err: not,
                 body: block([Stmt.Return(countryValue)]),
             }
             fns = fns.concat([fCountryValue])
@@ -391,6 +391,7 @@ ${
             server: [],
             dbs: [],
             reset: true,
+            sqlError: not,
         }
     }
 
@@ -398,7 +399,7 @@ ${
     // reassignment, i.e. a `.Replace` (§66.11.2).
     fn rewriteLines(name: Sym, cap: Sym, shared: InstRef, rows: Expr[]) -> Fn {
         return {
-            sym: name, params: [], pure: false,
+            sym: name, params: [], pure: false, err: not,
             body: block([Stmt.Write(cap, shared, EditKind.Replace, Expr.ArrayOf(rows), Check.Static)]),
         }
     }

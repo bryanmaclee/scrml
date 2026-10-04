@@ -50,7 +50,8 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
-             AProgram, AItem, AItemK, FileAst, Diag, ASql, mkSpan } from "./ast.scrml"
+             AProgram, AItem, AItemK, FileAst, Diag, ASql,
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan } from "./ast.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, sqlFacts } from "./sql.scrml"
 
@@ -121,8 +122,12 @@ ${
     // (no arity check against it). `ret`: the declared return type (`-> T`),
     // resolved here; `not` when none is written (or `-> void`), or when the
     // signature did not parse.
+    // s451 (Ue): `failable` — declared `!` (§19.4); `err` — its error enum
+    // (the declared `! E`, or the built-in `Error` for a bare `!`, §19.4.2);
+    // `not` when it cannot fail, or when the declared type is not an enum
+    // (E-ERROR-011 — then nothing is checked against it).
     export type FnInfo:struct = { nid: int, span: ASpan, sym: Sym, name: string, file: string, exported: boolean,
-                                  pure: boolean, arity: int, ret: Type | not }
+                                  pure: boolean, arity: int, ret: Type | not, failable: boolean, err: Sym | not }
 
     // A classified write (§6.2): the capability, the instance, the edit, the check.
     export type WriteFact:struct = { cap: Sym, inst: InstRef, edit: EditKind, check: Check }
@@ -245,6 +250,31 @@ ${
     // (`indexed`); a node has one fact (the binder resolves each node once —
     // tables.test.js checks), and were there two, the first would answer, as
     // the linear scan this replaces did.
+    // s451 (Ue) — THE ERROR-MODEL FACTS (lower reads them; it decides nothing).
+    //   FHandled — a handling form (`?` / `!{}` / `match`, keyed by its
+    //     AExprK.Handled node), or a `?{}` a `!` function propagates
+    //     implicitly (keyed by its Sql node, §19.8.2): see HandledFact.
+    //   FArm — an arm of a `!{}` / `match` (keyed by its AArm nid): the
+    //     variant index it matches; -1 the wildcard (`_` / `else`); -2 `.Ok`.
+    //   FFail — a `fail` statement (keyed by its AStmt nid): variant `idx` of
+    //     enum `err` (§19.3).
+    // HandledFact: `err` — the error enum of the failable; `result` — the local
+    // its value is read from after the Attempt (an AExprK.Handled reads as
+    // it); `ok` — the local the raw result is bound to; `stmt` — the form
+    // stands as a statement (its arms yield no value); `into` / `retag` — for
+    // propagation (`?`, an implicit `?{}`), the enclosing function's error enum
+    // and, per variant of `err`, the variant of `into` it re-fails as with
+    // the payload locals it binds (§19.5.2: "`::ErrorVariant(args) :> fail
+    // EnclosingErrorType::ErrorVariant(args)`").
+    export type Retag:struct = { from: int, to: int, binds: Sym[] }
+    export type HandledFact:struct = { err: Sym, result: Sym, ok: Sym, stmt: boolean, into: Sym | not, retag: Retag[] }
+    export type FailFact:enum = {
+        FHandled(h: HandledFact),
+        FArm(idx: int),
+        FFail(err: Sym, idx: int),
+    }
+    export type FailTable:struct = { facts: FailFact[], nids: int[], at: int[] }
+
     export type NameTable:struct = { facts: NameFact[], nids: int[], at: int[] }
     export type ValueTable:struct = { facts: ValueFact[], nids: int[], at: int[] }
     export type EffectTable:struct = { facts: EffectFact[], nids: int[], at: int[] }
@@ -286,6 +316,7 @@ ${
         binds: BindTable,
         elems: ElemTable,
         attrs: AttrTable,
+        fails: FailTable,       // s451 (Ue): the error-model facts (FailFact)
         annots: LocalAnnot[],
         unresolved: Unresolved,
         typing: Typing,
@@ -408,6 +439,12 @@ ${
         return t.facts[i]
     }
 
+    export fn failFact(t: FailTable, nid: int) -> FailFact | not {
+        const i: int = slotOf(t.at, nid)
+        if (i < 0) return not
+        return t.facts[i]
+    }
+
     export fn bindFact(t: BindTable, nid: int) -> BindFact | not {
         const i: int = slotOf(t.at, nid)
         if (i < 0) return not
@@ -439,7 +476,7 @@ ${
     // every index once, when the binder is done.
     // =========================================================================
     type NodeFacts:struct = { names: NameTable, values: ValueTable, effects: EffectTable, binds: BindTable,
-                              elems: ElemTable, attrs: AttrTable }
+                              elems: ElemTable, attrs: AttrTable, fails: FailTable }
     // `bad`: the declared types that did not resolve (r8 — see Unresolved).
     // `effects` (s449): the reactive effects the binder accepted in an element
     // scope, in order, with their file — the input of the no-write pass
@@ -451,7 +488,8 @@ ${
     fn noFacts() -> NodeFacts {
         return { names: { facts: [], nids: [], at: [] }, values: { facts: [], nids: [], at: [] },
                  effects: { facts: [], nids: [], at: [] }, binds: { facts: [], nids: [], at: [] },
-                 elems: { facts: [], nids: [], at: [] }, attrs: { facts: [], nids: [], at: [] } }
+                 elems: { facts: [], nids: [], at: [] }, attrs: { facts: [], nids: [], at: [] },
+                 fails: { facts: [], nids: [], at: [] } }
     }
 
     fn indexed(fs: NodeFacts) -> NodeFacts {
@@ -462,6 +500,7 @@ ${
             binds: { facts: fs.binds.facts, nids: fs.binds.nids, at: nidIndex(fs.binds.nids) },
             elems: { facts: fs.elems.facts, nids: fs.elems.nids, at: nidIndex(fs.elems.nids) },
             attrs: { facts: fs.attrs.facts, nids: fs.attrs.nids, at: nidIndex(fs.attrs.nids) },
+            fails: { facts: fs.fails.facts, nids: fs.fails.nids, at: nidIndex(fs.fails.nids) },
         }
     }
 
@@ -476,38 +515,45 @@ ${
     fn addName(st: AS, nid: int, f: NameFact) -> AS {
         const fs: NodeFacts = st.facts
         const t: NameTable = { facts: fs.names.facts.concat([f]), nids: fs.names.nids.concat([nid]), at: [] }
-        return withFacts(st, { names: t, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs })
+        return withFacts(st, { names: t, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs, fails: fs.fails })
     }
 
     fn addValue(st: AS, nid: int, f: ValueFact) -> AS {
         const fs: NodeFacts = st.facts
         const t: ValueTable = { facts: fs.values.facts.concat([f]), nids: fs.values.nids.concat([nid]), at: [] }
-        return withFacts(st, { names: fs.names, values: t, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs })
+        return withFacts(st, { names: fs.names, values: t, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs, fails: fs.fails })
     }
 
     fn addEffect(st: AS, nid: int, f: EffectFact) -> AS {
         const fs: NodeFacts = st.facts
         const t: EffectTable = { facts: fs.effects.facts.concat([f]), nids: fs.effects.nids.concat([nid]), at: [] }
-        return withFacts(st, { names: fs.names, values: fs.values, effects: t, binds: fs.binds, elems: fs.elems, attrs: fs.attrs })
+        return withFacts(st, { names: fs.names, values: fs.values, effects: t, binds: fs.binds, elems: fs.elems, attrs: fs.attrs, fails: fs.fails })
     }
 
     fn addBind(st: AS, nid: int, f: BindFact) -> AS {
         const fs: NodeFacts = st.facts
         const t: BindTable = { facts: fs.binds.facts.concat([f]), nids: fs.binds.nids.concat([nid]), at: [] }
-        return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: t, elems: fs.elems, attrs: fs.attrs })
+        return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: t, elems: fs.elems, attrs: fs.attrs, fails: fs.fails })
     }
 
     fn addElem(st: AS, nid: int, f: ElemFact) -> AS {
         const fs: NodeFacts = st.facts
         const t: ElemTable = { facts: fs.elems.facts.concat([f]), nids: fs.elems.nids.concat([nid]), at: [] }
-        return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: t, attrs: fs.attrs })
+        return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: t, attrs: fs.attrs, fails: fs.fails })
     }
 
     fn addAttr(st: AS, nid: int, k: AttrKind) -> AS {
         const fs: NodeFacts = st.facts
         const t: AttrTable = { facts: fs.attrs.facts.concat([k]), nids: fs.attrs.nids.concat([nid]), at: [] }
-        return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: t })
+        return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: t, fails: fs.fails })
     }
+    // s451 (Ue)
+    fn addFail(st: AS, nid: int, f: FailFact) -> AS {
+        const fs: NodeFacts = st.facts
+        const t: FailTable = { facts: fs.fails.facts.concat([f]), nids: fs.fails.nids.concat([nid]), at: [] }
+        return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs, fails: t })
+    }
+
     fn addDiag(st: AS, file: string, span: ASpan, code: string, msg: string) -> AS {
         const d: Diag = { code: code, message: msg, file: file, span: span }
         return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects }
@@ -551,6 +597,8 @@ ${
         handles: HandleInfo[],
         files: FileAst[],
         clock: string[],        // r2 F4: the functions that read the clock, transitively (clockFns)
+        errorSym: Sym,          // s451 (Ue): the built-in `Error` enum (§19.4.2 — a bare `!`'s error type)
+        sqlErrorSym: Sym,       // s451 (Ue): the built-in `SqlError` enum (§19.8.1 — every query's error type)
     }
 
     type RTypeInfos:struct = { ts: TypeInfo[], st: AS }
@@ -584,7 +632,61 @@ ${
                                     isEnum: isEnum, members: members, src: td }])
             }
         }
+        // s451 (Ue): the built-in error enums, AFTER every user type (a user
+        // `Error` is found first by name — it shadows the built-in, whose Sym
+        // the bare `!` default still names; a user `SqlError` is refused,
+        // builtinRedeclares).
+        for (const bd of builtinTypeDecls()) {
+            const rb: RSym = mint(st, bd.name)
+            st = rb.st
+            let bms: Sym[] = []
+            for (const n of typeMemberNames(bd.body)) {
+                const rm2: RSym = mint(st, n)
+                st = rm2.st
+                bms = bms.concat([rm2.s])
+            }
+            out = out.concat([{ nid: -1, name: bd.name, file: builtinFile(), exported: false, sym: rb.s,
+                                isEnum: true, members: bms, src: bd }])
+        }
         return { stubs: out, st: st }
+    }
+
+    // s451 (Ue) — the built-in error enums, written as the SPEC writes them:
+    // §19.4.2 "`!` without `-> ErrorType` uses a built-in default error enum:
+    // `Error`, which has a single variant `Error::Generic(message: string)`";
+    // §19.8.1 `type SqlError:enum = { QueryFailed(message: string)
+    // ConstraintViolation(field: string) ConnectionLost }` (their `renders`
+    // clauses display a variant inside an `<errorBoundary>` / `<render of=>`,
+    // neither of which is in the bootstrap). §8.9.4's `BatchPrepareFailed`
+    // arrives with batch coalescing (not in the bootstrap — §19.8.4 "The
+    // compiler MAY add additional variants").
+    export fn builtinFile() -> string { return "scrml:builtin" }
+
+    fn builtinTypeDecls() -> ATypeDecl[] {
+        return [
+            builtinEnum("Error", [builtinVariant("Generic", ["message"])]),
+            builtinEnum("SqlError", [builtinVariant("QueryFailed", ["message"]), builtinVariant("ConstraintViolation", ["field"]), builtinVariant("ConnectionLost", [])]),
+        ]
+    }
+
+    fn builtinEnum(name: string, vs: AVariant[]) -> ATypeDecl {
+        return { nid: -1, span: mkSpan(0, 0), exported: false, name: name, body: ATypeBody.EnumBody(vs) }
+    }
+
+    fn builtinVariant(name: string, fields: string[]) -> AVariant {
+        let fs: ATypeField[] = []
+        for (const f of fields) {
+            const ty: AType = { nid: -1, span: mkSpan(0, 0), k: ATypeK.TName("string") }
+            fs = fs.concat([{ nid: -1, span: mkSpan(0, 0), isLet: false, name: f, ty: ty }])
+        }
+        return { nid: -1, span: mkSpan(0, 0), name: name, fields: fs }
+    }
+
+    fn builtinSym(stubs: TypeStub[], name: string) -> Sym {
+        for (const s of stubs) {
+            if (s.file == builtinFile() && s.name == name) return s.sym
+        }
+        return mkSym(-1, name)
     }
 
     fn isEnumBody(b: ATypeBody) -> boolean {
@@ -1496,6 +1598,7 @@ ${
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -1531,6 +1634,7 @@ ${
             .Index(obj: o) :> { name: "", ok: false }
             .Lambda(params: ps) :> { name: "", ok: false }
             .Sql(q: q) :> { name: "", ok: false }
+            .Handled(h: x) :> { name: "", ok: false }
         }
     }
 
@@ -1568,6 +1672,7 @@ ${
             .Index(obj: x) :> ""
             .Lambda(params: ps) :> ""
             .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
         }
     }
 
@@ -1610,6 +1715,7 @@ ${
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
             .Sql(q: q) :> false
+            .Handled(h: x) :> false
         }
     }
 
@@ -1638,6 +1744,7 @@ ${
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
             .Sql(q: q) :> false
+            .Handled(h: x) :> false
         }
     }
 
@@ -1714,6 +1821,7 @@ ${
             .Index(obj: o, idx: i) :> exprReads(o).concat(exprReads(i))
             .Lambda(params: ps2, body: b) :> exprReads(b)
             .Sql(q: q) :> ["" + sqlSigil() + "}"].concat(listReads(q.params))      // s451: a query reads (like a call)
+            .Handled(h: h) :> listReads(handledKids(h))      // s451 (Ue): the subject and the arms' values
             .Name(name: n) :> []
             .Num(raw: r) :> []
             .Str(v: s) :> []
@@ -1773,6 +1881,7 @@ ${
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -2037,6 +2146,7 @@ ${
             .Index(obj: ix) :> -1
             .Lambda(params: lp) :> -1
             .Sql(q: q) :> -1
+            .Handled(h: x) :> -1
         }
     }
 
@@ -2072,6 +2182,7 @@ ${
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
         }
     }
 
@@ -2308,6 +2419,7 @@ ${
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
             .Sql(q: q) :> []
+            .Handled(h: x) :> []
         }
     }
 
@@ -2449,6 +2561,7 @@ ${
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
         }
     }
 
@@ -2543,13 +2656,45 @@ ${
                 }
                 let arity: int = af.params.length
                 if (!paramsTrusted(f.errs, af.params)) arity = -1
+                const re: RErrType = errTypeOf(fte, f, af, st)
+                st = re.st
                 const info: FnInfo = { nid: af.nid, span: af.span, sym: r.s, name: af.name, file: f.path,
-                                       exported: af.exported, pure: af.pure, arity: arity, ret: ret }
+                                       exported: af.exported, pure: af.pure, arity: arity, ret: ret,
+                                       failable: af.failable, err: re.err }
                 st = addBind(st, af.nid, BindFact.BBind(r.s))
                 out = out.concat([{ info: info, f: af }])
             }
         }
         return { fs: out, st: st }
+    }
+
+    // s451 (Ue) — a `!` function's error type. §19.4.2 "`!` without
+    // `-> ErrorType` uses a built-in default error enum: `Error`"; §19.4.4.1
+    // "The error type after `!` SHALL be an enum type … A non-enum error type
+    // SHALL be E-ERROR-011" (scalar, sequence, `T | not` — "they fail for one
+    // reason, not several"). A type that does not resolve is E-TYPE-UNKNOWN's.
+    type RErrType:struct = { err: Sym | not, st: AS }
+
+    fn errTypeOf(te: TypeEnv, f: FileAst, af: AFn, st: AS) -> RErrType {
+        if (!af.failable) return { err: not, st: st }
+        const at: AType | not = af.err
+        if (at is not) return { err: builtinSym(te.stubs, "Error"), st: st }
+        if (hasErrIn(f.errs, at.span)) return { err: not, st: st }
+        const rt: RType = resolveType(te, at, st)
+        if (rt.unresolved) return { err: not, st: rt.st }
+        const es: Sym | not = enumStubSym(te, rt.t)
+        if (es is some) return { err: es, st: rt.st }
+        return { err: not, st: addDiag(rt.st, f.path, at.span, "E-ERROR-011", "the error type of `" + af.name + "(…)!` is not an enum — §19.4.4.1: \"The error type after `!` SHALL be an enum type\" (a `:enum` declaration, or the built-in `Error` when it is omitted). Declare the failures as variants: `type " + af.name + "Error:enum = { … }`") }
+    }
+
+    // The enum a resolved type names (a `type … :enum` or a built-in one), else not.
+    fn enumStubSym(te: TypeEnv, t: Type) -> Sym | not {
+        const s: Sym | not = namedOf(t)
+        if (s is not) return not
+        for (const st of te.stubs) {
+            if (st.sym.id == s.id && st.isEnum) return s
+        }
+        return not
     }
 
     // Did the parser report an error inside `span`?
@@ -2891,7 +3036,8 @@ ${
             const info: DeclInfo = { nid: ds.nid, span: declSpan(ds), sym: ds.sym, kind: kind, single: single, file: ds.file, fields: fields, handles: own }
             decls = decls.concat([{ info: info, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
         }
-        const g: Globals = { program: program, entry: entry, te: te0, types: rt.ts, decls: decls, fns: rf.fs, handles: handles, files: files, clock: clockFns(files) }
+        const g: Globals = { program: program, entry: entry, te: te0, types: rt.ts, decls: decls, fns: rf.fs, handles: handles, files: files, clock: clockFns(files),
+                             errorSym: builtinSym(rs.stubs, "Error"), sqlErrorSym: builtinSym(rs.stubs, "SqlError") }
         return { g: g, st: st }
     }
 
@@ -2959,7 +3105,15 @@ ${
             .Given(name: n, subject: sub, body: b) :> exprClock(sub) || blockClock(b)
             .EffectStmt(w: w) :> blockClock(w.body)
             .Defer(body: b) :> blockClock(b)
+            .Fail(f: f) :> exprsClock(failExprs(f))
         }
+    }
+
+    fn exprsClock(es: AExpr[]) -> boolean {
+        for (const x of es) {
+            if (exprClock(x)) return true
+        }
+        return false
     }
 
     fn maybeClock(e: AExpr | not) -> boolean {
@@ -2976,6 +3130,9 @@ ${
         if (isClockCall(e)) return true
         for (const x of exprKids(e)) {
             if (exprClock(x)) return true
+        }
+        for (const b of exprBlocks(e)) {
+            if (blockClock(b)) return true
         }
         return false
     }
@@ -3012,6 +3169,7 @@ ${
             .Index(obj: ix) :> not
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -3053,38 +3211,71 @@ ${
         host: HostCtx,          // s444: may a host call stand here?
         own: string,            // s444: the child field whose own `renders` this is ("" — none): `@own` is this instance (O54 = (a), RULED S442)
         inEffect: boolean,      // s449: inside an effect body (an effect there is E-LIFECYCLE-016, §6.7.4)
+        fx: FailCtx,            // s451 (Ue): the error-model context (see FailCtx)
+    }
+
+    // s451 (Ue) — the error-model context of the code being resolved.
+    // `inFn` / `fnName` / `failable` / `err`: the enclosing function
+    // DECLARATION (a handler, an effect and a declaration's markup are not
+    // one — "a handler is not a `!` function", §19.4.3); `defer`: inside a
+    // deferred body (§19.16.3 rule 3); `subject`: the node being resolved as a
+    // handling form's subject (its failable is handled there); `whole`: the
+    // node that is a statement's WHOLE value — the one place a handling form
+    // stands in this slice (nested ones are Ue2's).
+    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int }
+
+    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1 } }
+
+    fn withFx(env: Env, fx: FailCtx) -> Env {
+        return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: fx }
+    }
+
+    fn withSubject(env: Env, nid: int) -> Env {
+        const f: FailCtx = env.fx
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole })
+    }
+
+    fn withWhole(env: Env, nid: int) -> Env {
+        const f: FailCtx = env.fx
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid })
+    }
+
+    fn withDeferFx(env: Env) -> Env {
+        const f: FailCtx = env.fx
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole })
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx }
     }
 
     fn withRow(env: Env, row: RowB, name: string, hs: HandleInfo[]) -> Env {
         const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not }
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows.concat([row]),
-                 handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect }
+                 handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx }
     }
 
     fn withNarrow(env: Env, n: NarrowB) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows.concat([n]), present: env.present, host: env.host, own: env.own, inEffect: env.inEffect }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows.concat([n]), present: env.present, host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx }
     }
 
     fn withPresent(env: Env, name: string) -> Env {
         if (name == "") return env
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present.concat([name]), host: env.host, own: env.own, inEffect: env.inEffect }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present.concat([name]), host: env.host, own: env.own, inEffect: env.inEffect, fx: env.fx }
     }
 
     fn withHost(env: Env, h: HostCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: h, own: env.own, inEffect: env.inEffect }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: h, own: env.own, inEffect: env.inEffect, fx: env.fx }
     }
 
     fn withOwn(env: Env, name: string) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: name, inEffect: env.inEffect }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: env.host, own: name, inEffect: env.inEffect, fx: env.fx }
     }
 
     // s449: an effect body — a logic context (§6.7.4 "same rules as `${}`") run
@@ -3093,7 +3284,7 @@ ${
     // E-LIFECYCLE-016.
     fn effectBodyEnv(env: Env) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: HostCtx.HostOk, own: env.own, inEffect: true }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present, host: HostCtx.HostOk, own: env.own, inEffect: true, fx: env.fx }
     }
 
     // s444 — O54 = (a) (RULED S442: "`@email` inside `email`'s own `renders` …
@@ -3245,7 +3436,8 @@ ${
             .Spread(e: x) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an array spread `...` is in the bootstrap only as a recognized edit shape (`@x = [...@x, e]`, §66.11.2) — Core has no spread value", st)
             .Index(obj: o) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an index `a[i]` is in the bootstrap only as an element-field write target (dpa-052 Q3) — Core has no index read", st)
             .Lambda(params: ps2) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function is in the bootstrap only as the argument of `.filter(…)` / `.map(…)` on a sequence", st)
-            .Sql(q: q) :> plain(not, resolveExprs(env, q.params, not, st))   // s451: a query's values are bound like any expression; its facts are placePass's
+            .Sql(q: q) :> resolveSql(env, e, q, false, st)   // s451: a query's values are bound like any expression; its facts are placePass's; (Ue) its failable rule here
+            .Handled(h: h) :> resolveHandled(env, e, h, false, st)   // s451 (Ue)
         }
     }
 
@@ -3331,6 +3523,7 @@ ${
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
         }
     }
 
@@ -3401,9 +3594,10 @@ ${
         let found: Sym[] = []
         let idx: int = -1
         for (const t of env.g.types) {
+            // s451 (Ue): a built-in error enum's variant resolves only where its type is expected
             const s: Sym = typeDefSym(t.def)
             const i: int = variantIndex(env.g.types, s, name)
-            if (i >= 0) {
+            if (i >= 0 && t.file != builtinFile()) {
                 found = found.concat([s])
                 idx = i
             }
@@ -3614,7 +3808,12 @@ ${
         const rc: RX = resolveExpr(env, callee, not, st0)
         const st: AS = resolveExprs(env, args, not, rc.st)
         const cf: FnInfo | not = calledFn(env, nameFactIn(st, callee.nid))
-        if (cf is some) return plain(not, callPurity(env, e, cf, st))
+        if (cf is some) {
+            const sp: AS = callPurity(env, e, cf, st)
+            // s451 (Ue): a `!` function's call is handled only as a handling form's subject (§19.4.3)
+            if (cf.failable && env.fx.subject != e.nid) return plain(not, unhandledCall(env, e, cf.name, sp))
+            return plain(not, sp)
+        }
         return plain(not, st)
     }
 
@@ -3780,6 +3979,7 @@ ${
         return match k {
             .Lambda(params: ps) :> ps
             .Sql(q: q) :> []
+            .Handled(h: x) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -3807,6 +4007,7 @@ ${
         return match k {
             .Lambda(params: ps, body: b) :> b
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -3863,6 +4064,7 @@ ${
             .Index(obj: ix) :> false
             .Lambda(params: lp) :> false
             .Sql(q: q) :> false
+            .Handled(h: x) :> false
         }
     }
 
@@ -4058,6 +4260,7 @@ ${
             .Index(obj: o) :> noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "writing an element `a[i]` is in the bootstrap only as an element-FIELD write (`@xs[i].f = v`, dpa-052 Q3) — Core has no position-write place"))
             .Lambda(params: ps2) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .Sql(q: q) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Handled(h: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
         }
     }
 
@@ -4209,6 +4412,7 @@ ${
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
         }
     }
 
@@ -4451,6 +4655,7 @@ ${
             .Index(obj: o) :> false
             .Lambda(params: ps2) :> false
             .Sql(q: q) :> false
+            .Handled(h: x) :> false
             .Name(name: n) :> false
             .At(name: n) :> false
             .AtItem :> false
@@ -4510,6 +4715,7 @@ ${
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
         }
     }
 
@@ -4580,6 +4786,7 @@ ${
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
             .Sql(q: q) :> []
+            .Handled(h: x) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -4627,7 +4834,7 @@ ${
     fn resolveStmtExpr(env: Env, e: AExpr, st: AS) -> AS {
         const k: AExprK = e.k
         return match k {
-            .Assign(target: t, value: v) :> resolveAssign(env, e, t, v, st)
+            .Assign(target: t, value: v) :> resolveAssign(withWhole(env, v.nid), e, t, v, st)
             .Call(callee: c, args: args) :> resolveCallStmt(env, e, c, args, st)
             .Name(name: n) :> resolveExpr(env, e, not, st).st
             .At(name: n) :> resolveExpr(env, e, not, st).st
@@ -4647,7 +4854,8 @@ ${
             .Spread(e: x) :> resolveExpr(env, e, not, st).st
             .Index(obj: o) :> resolveExpr(env, e, not, st).st
             .Lambda(params: ps2) :> resolveExpr(env, e, not, st).st
-            .Sql(q: q) :> resolveExpr(env, e, not, st).st
+            .Sql(q: q) :> resolveSql(withWhole(env, e.nid), e, q, true, st).st
+            .Handled(h: h) :> resolveHandled(withWhole(env, e.nid), e, h, true, st).st   // s451 (Ue)
         }
     }
 
@@ -4695,6 +4903,7 @@ ${
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -4809,6 +5018,7 @@ ${
             .Index(obj: o) :> []
             .Lambda(params: ps) :> []
             .Sql(q: q) :> []
+            .Handled(h: x) :> []
         }
     }
 
@@ -4836,6 +5046,7 @@ ${
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -4864,6 +5075,7 @@ ${
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -4891,6 +5103,7 @@ ${
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -5003,6 +5216,7 @@ ${
             .Spread(e: x) :> false
             .Lambda(params: ps) :> false
             .Sql(q: q) :> false
+            .Handled(h: x) :> false
         }
     }
 
@@ -5138,6 +5352,7 @@ ${
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -5165,6 +5380,7 @@ ${
             .Spread(e: x) :> not
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -5238,6 +5454,7 @@ ${
             .Eval(e: e) :> keepEnv(env, resolveStmtExpr(env, e, st))
             .Local(name: n, mutable: m, ty: y, init: i) :> resolveLocal(env, s, n, m, y, i, st)
             .Return(e: e) :> keepEnv(env, resolveMaybeExpr(env, e, st))
+            .Fail(f: f) :> keepEnv(env, resolveFail(env, s, f, st))       // s451 (Ue, §19.3)
             .If(cond: c, thenB: t, elseB: el) :> keepEnv(env, resolveIf(env, c, t, el, st))
             .Given(name: n, subject: sub, body: b) :> keepEnv(env, resolveGiven(env, s, n, sub, b, st))
             .EffectStmt(w: w) :> keepEnv(env, effectAsStatement(env, w, st))
@@ -5300,8 +5517,9 @@ ${
         let st: AS = st0
         if (bare) st = addDiag(st, env.file, s.span, "E-DEFER-UNSUPPORTED-SITE", "a `defer` that is the whole unbraced arm of an `if` / `else` has no written block to belong to (§19.16.2) — brace the arm (`{ defer … }`) or move the `defer` to the enclosing block")
         // The deferred body sees the bindings in scope at the `defer` (§19.16.2
-        // "Evaluation time"); its own locals stay inside it.
-        return resolveBlock(env, body, st)
+        // "Evaluation time"); its own locals stay inside it. (Ue) A failable in
+        // it is handled in place (§19.16.3 rule 3).
+        return resolveBlock(withDeferFx(env), body, st)
     }
 
     // Is a binding named `defer` VISIBLE here (§19.16.1: a parameter, an
@@ -5354,11 +5572,18 @@ ${
             .Defer(body: d) :> deferShadow(file, s, d, later, deferBodyRules(file, d, st))
             .If(cond: c, thenB: t, elseB: el) :> deferChecksElse(file, el, later, deferChecksIn(file, t, later, st))
             .Given(name: n, body: d) :> deferChecksIn(file, d, later, st)
-            .Eval(e: e) :> st
-            .Local(name: n) :> st
-            .Return(e: e) :> st
+            .Eval(e: e) :> deferChecksBlocks(file, allExprBlocks(e), later, st)        // s451 (Ue): a braced arm block is a defer site (§19.16.2)
+            .Local(name: n, init: i) :> deferChecksBlocks(file, allExprBlocks(i), later, st)
+            .Return(e: e) :> deferChecksBlocks(file, maybeExprBlocks(e), later, st)
             .EffectStmt(w: w) :> st
+            .Fail(f: f) :> st
         }
+    }
+
+    fn deferChecksBlocks(file: string, bs: ABlock[], later: DeferLater[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const b of bs) { st = deferChecksIn(file, b, later, st) }
+        return st
     }
 
     fn deferChecksElse(file: string, el: ABlock | not, later: DeferLater[], st: AS) -> AS {
@@ -5385,10 +5610,27 @@ ${
             .Defer(body: d) :> addDiag(st, file, s.span, "E-DEFER-NESTED", "a deferred statement cannot contain a `defer` — there is no block to attach it to that is not already exiting (§19.16.3 rule 2)")
             .If(cond: c, thenB: t, elseB: el) :> deferBodyElse(file, el, deferBodyRules(file, t, st))
             .Given(name: n, body: d) :> deferBodyRules(file, d, st)
-            .Eval(e: e) :> st
-            .Local(name: n) :> st
+            .Eval(e: e) :> deferExprRules(file, e, st)
+            .Local(name: n, init: i) :> deferExprRules(file, i, st)
             .EffectStmt(w: w) :> st
+            .Fail(f: x) :> addDiag(st, file, s.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `fail` — it runs while its block is already exiting; a failure here would replace the function's real result (§19.16.3 rule 1)")
         }
+    }
+
+    // s451 (Ue) — rule 1 inside a deferred statement's expressions: no `?`
+    // (§19.16.3 rule 1: "a `?` propagation"), and the arms of a handling form
+    // obey the deferred-body rules ("The rule reaches EVERY statement position
+    // inside the deferred body, including … the arms of a `!{}` handler").
+    fn deferExprRules(file: string, e: AExpr, st0: AS) -> AS {
+        let st: AS = st0
+        const h: AHandled | not = handledOf(e.k)
+        if (h is some) {
+            const how: AHow = h.how
+            if (how == AHow.Propagate) st = addDiag(st, file, e.span, "E-DEFER-CONTROL-FLOW", "a deferred statement cannot contain a `?` propagation — it runs while its block is already exiting (§19.16.3 rule 1); handle the failure in place with `!{ … | _ :> … }`")
+        }
+        for (const x of exprKids(e)) { st = deferExprRules(file, x, st) }
+        for (const b of exprBlocks(e)) { st = deferBodyRules(file, b, st) }
+        return st
     }
 
     fn deferBodyElse(file: string, el: ABlock | not, st: AS) -> AS {
@@ -5437,6 +5679,7 @@ ${
             .Given(name: n, subject: sub, body: d) :> exprNameRefs(sub, bound).concat(blockNameRefs(d, bound.concat([n])))
             .EffectStmt(w: w) :> []
             .Defer(body: d) :> blockNameRefs(d, bound)
+            .Fail(f: f) :> exprsNameRefs(failExprs(f), bound)
         }
     }
 
@@ -5450,13 +5693,432 @@ ${
         return blockNameRefs(el, bound)
     }
 
+    // s451 (Ue): a handling form — its subject, then each arm with the arm's
+    // own binders bound.
+    fn handledNameRefs(h: AHandled, bound: string[]) -> string[] {
+        let out: string[] = exprNameRefs(h.subject, bound)
+        for (const a of handledArms(h)) {
+            const ab: string[] = bound.concat(armBindNames(a.pat))
+            const body: AArmBody = a.body
+            for (const x of armExprOf(body)) { out = out.concat(exprNameRefs(x, ab)) }
+            for (const b of armBlockOf(body)) { out = out.concat(blockNameRefs(b, ab)) }
+        }
+        return out
+    }
+
+    fn armBindNames(p: APat) -> string[] {
+        return match p {
+            .PName(binds: bs) :> bindNames(bs)
+            .PWild :> []
+        }
+    }
+
+    fn bindNames(bs: ABind[]) -> string[] {
+        let out: string[] = []
+        for (const b of bs) { out = out.concat([b.name]) }
+        return out
+    }
+
+    fn exprsNameRefs(es: AExpr[], bound: string[]) -> string[] {
+        let out: string[] = []
+        for (const x of es) { out = out.concat(exprNameRefs(x, bound)) }
+        return out
+    }
+
     fn exprNameRefs(e: AExpr, bound0: string[]) -> string[] {
+        const h: AHandled | not = handledOf(e.k)
+        if (h is some) return handledNameRefs(h, bound0)
         const bound: string[] = bound0.concat(lambdaParams(e))
         let out: string[] = []
         const n: string = exprName(e)
         if (n != "" && bound.indexOf(n) < 0) out = [n]
         for (const x of exprKids(e)) { out = out.concat(exprNameRefs(x, bound)) }
         return out
+    }
+
+    // =========================================================================
+    // s451 (Ue) — THE ERROR MODEL (SPEC §19), in the binder.
+    //
+    // §19.4.3 "A call to a `!` function SHALL NOT be ignored. The caller MUST"
+    // match / propagate with `?` / catch with `!{}` / … — "Failing to handle
+    // the result of a `!` function call in any of these ways SHALL be a
+    // compile error: E-ERROR-002" — at EVERY position the binder resolves (a
+    // call, an event-handler call and an event-handler REFERENCE, S439/S441);
+    // §19.8.3 (R11) the same for a `?{}` outside a `!` function. A handling
+    // form resolves its subject with `subject` set, so that one node is not
+    // reported. Inside a deferred body the code is E-DEFER-UNHANDLED-FAILABLE
+    // (§19.16.3 rule 3: "Inside a deferred body this code REPLACES
+    // E-ERROR-002").
+    //
+    // Slice limit (Ue2): a handling form stands only as a statement's WHOLE
+    // value — `f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`,
+    // `@c = …`, `return …`, or an arm's value — so its Attempt is a statement
+    // that runs where the source evaluates it. Inside a larger expression it
+    // would need ordered hoisting (an argument, an operand, a condition, an
+    // interpolation): refused.
+    // =========================================================================
+    fn ue2Reason() -> string {
+        return "is in the bootstrap only as a statement's whole value (`f() !{ … }` / `match f() { … }` alone, `let x = …`, `x = …`, `@c = …`, `return …`) — inside a larger expression (an argument, an operand, a condition, an interpolation or an initializer) it arrives with slice Ue2 (ordered hoisting)"
+    }
+
+    // A call of a `!` function, not the subject of a handling form.
+    fn unhandledCall(env: Env, e: AExpr, name: string, st: AS) -> AS {
+        if (env.fx.defer) return addDiag(st, env.file, e.span, "E-DEFER-UNHANDLED-FAILABLE", "`" + name + "(…)` is failable and this is a deferred statement — handle it in place with a total `!{ … | _ :> … }` (or an exhaustive `match`): the block is already exiting, so there is no caller-bound path left for its error, and an enclosing `!` does not cover it (§19.16.3 rule 3)")
+        if (env.fx.inFn) return addDiag(st, env.file, e.span, "E-ERROR-002", "Result of failable function '" + name + "' is not handled. Either match the result, propagate with '?' (inside a `!` function), or catch with '!{}' (§19.4.3)")
+        return addDiag(st, env.file, e.span, "E-ERROR-002", "Result of failable function '" + name + "' is not handled here. Catch it with '!{}' (e.g. '" + name + "(…) !{ | .Variant :> … }'), match the result, or call it from a function that handles it — `?` needs an enclosing `!` function, and the bootstrap has no `<errorBoundary>` (§19.4.3)")
+    }
+
+    // A failable function passed as an event-handler REFERENCE (S441: "SHALL
+    // be E-ERROR-002, exactly like `onclick=risky()`").
+    fn handlerReference(env: Env, v: AAttrValue, st: AS) -> AS {
+        const e: AExpr | not = valueExpr(v)
+        if (e is not) return st
+        if (exprName(e) == "") return st
+        const f: FnInfo | not = calledFn(env, nameFactIn(st, e.nid))
+        if (f is not) return st
+        if (!f.failable) return st
+        return addDiag(st, env.file, e.span, "E-ERROR-002", "Failable function '" + f.name + "' is passed as an event-handler reference, so the event would call it and discard its error. Call it in a handler that handles the result (e.g. '{ " + f.name + "() !{ | .Variant :> … } }'), or wire a function that handles it (§19.4.3, S441)")
+    }
+
+    // The `!` function a call names, else not.
+    fn failableCallee(env: Env, st: AS, e: AExpr) -> FnInfo | not {
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is not) return not
+        const f: FnInfo | not = calledFn(env, nameFactIn(st, c.nid))
+        if (f is not) return not
+        if (!f.failable) return not
+        return f
+    }
+
+    // The name a handled subject is reported by.
+    fn subjectName(e: AExpr) -> string {
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is some) {
+            const n: string = exprName(c)
+            if (n != "") return n + "(…)"
+        }
+        if (sqlOfK(e.k) is some) return "the `" + sqlSigil() + "}` query"
+        return "this expression"
+    }
+
+    // `subject?` / `subject !{ … }` / `match subject { … }`. `stmt`: the form
+    // stands as a statement (its arms yield no value).
+    fn resolveHandled(env: Env, e: AExpr, h: AHandled, stmt: boolean, st0: AS) -> RX {
+        let st: AS = st0
+        if (!stmt && env.fx.whole != e.nid) st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a handled failable (`?`, `!{ … }`, `match`) " + ue2Reason())
+        const subj: AExpr = h.subject
+        const rs: RX = resolveExpr(withSubject(withWhole(env, -1), subj.nid), subj, not, st)
+        st = rs.st
+        const f: FnInfo | not = failableCallee(env, st, subj)
+        let failable = false
+        let err: Sym | not = not
+        if (f is some) {
+            failable = true
+            err = f.err
+        } else if (sqlOfK(subj.k) is some) {
+            failable = true
+            err = env.g.sqlErrorSym
+        }
+        const how: AHow = h.how
+        return match how {
+            .Propagate :> plain(rs.x.ty, propagate(env, e, subj, failable, err, stmt, st))
+            .Guard(arms: arms) :> plain(rs.x.ty, guarded(env, e, subj, arms, failable, err, false, stmt, st))
+            .MatchOn(arms: arms) :> plain(not, guarded(env, e, subj, arms, failable, err, true, stmt, st))
+        }
+    }
+
+    // §19.5.4: "`?` SHALL be valid only inside a `!` function body … E-ERROR-003";
+    // "`?` SHALL be valid only when applied to a call to a `!` function …
+    // E-ERROR-004"; §19.5.3 compatibility (E-ERROR-010).
+    fn propagate(env: Env, e: AExpr, subj: AExpr, failable: boolean, err: Sym | not, stmt: boolean, st0: AS) -> AS {
+        if (!failable) return addDiag(st0, env.file, e.span, "E-ERROR-004", "'?' applied to " + subjectName(subj) + ", which is not a call of a failable function. Only '!' functions (and `" + sqlSigil() + "}` queries) can be propagated with '?' (§19.5.4)")
+        if (!env.fx.failable) {
+            let where: string = "this handler or markup, which is not a function"
+            if (env.fx.inFn) where = "function '" + env.fx.fnName + "', which is not declared as failable"
+            return addDiag(st0, env.file, e.span, "E-ERROR-003", "'?' propagation operator used in " + where + ". Add '!' to the function signature or handle the error with 'match' or '!{}' (§19.5.4)")
+        }
+        return propagationFact(env, e, err, stmt, st0)
+    }
+
+    // The re-fail of a propagation: each variant of `err` re-fails as the
+    // SAME-NAMED variant of the enclosing function's enum with the same
+    // payload (§19.5.2's desugaring constructs it positionally, so the
+    // payloads must agree in count and type); otherwise E-ERROR-010 (§19.5.3:
+    // "the compiler SHALL emit a compile error (E-ERROR-010) identifying the
+    // incompatible variants" — §19.8.4 the same for a `?{}`).
+    fn propagationFact(env: Env, e: AExpr, err: Sym | not, stmt: boolean, st0: AS) -> AS {
+        const into: Sym | not = env.fx.err
+        if (err is not || into is not) return st0          // an error type that is not an enum: E-ERROR-011 reported
+        let st: AS = st0
+        const from: VariantDef[] = enumVariantsOf(env.g, err)
+        const to: VariantDef[] = enumVariantsOf(env.g, into)
+        let bad: string[] = []
+        let retag: Retag[] = []
+        let i = 0
+        for (const v of from) {
+            const j: int = variantIndex(env.g.types, into, v.sym.hint)
+            if (j < 0 || !samePayload(v, to[j])) {
+                bad = bad.concat([v.sym.hint])
+            } else {
+                let binds: Sym[] = []
+                for (const fd of v.fields) {
+                    const rb: RSym = mint(st, fd.sym.hint)
+                    st = rb.st
+                    binds = binds.concat([rb.s])
+                }
+                retag = retag.concat([{ from: i, to: j, binds: binds }])
+            }
+            i = i + 1
+        }
+        if (bad.length > 0) {
+            return addDiag(st, env.file, e.span, "E-ERROR-010", "propagating `" + err.hint + "` into `" + env.fx.fnName + "(…)! " + into.hint + "` would drop the variant(s) " + bad.join(", ") + " — every variant the callee can fail with must exist in the enclosing function's error type with the same payload (§19.5.3). Add them to `" + into.hint + "`, or handle the call with `!{ … }` / `match`")
+        }
+        return handledFact(env, e, err, stmt, into, retag, st)
+    }
+
+    fn samePayload(a: VariantDef, b: VariantDef) -> boolean {
+        if (a.fields.length != b.fields.length) return false
+        let i = 0
+        while (i < a.fields.length) {
+            if (!(a.fields[i].ty == b.fields[i].ty)) return false
+            i = i + 1
+        }
+        return true
+    }
+
+    fn enumVariantsOf(g: Globals, s: Sym) -> VariantDef[] {
+        const t: TypeInfo | not = typeInfoOf(g.types, s)
+        if (t is not) return []
+        return enumVariants(t.def)
+    }
+
+    // The fact lower reads: the result / raw-result locals, minted here.
+    fn handledFact(env: Env, e: AExpr, err: Sym, stmt: boolean, into: Sym | not, retag: Retag[], st0: AS) -> AS {
+        const rr: RSym = mint(st0, "handled")
+        const ro: RSym = mint(rr.st, "outcome")
+        return addFail(ro.st, e.nid, FailFact.FHandled({ err: err, result: rr.s, ok: ro.s, stmt: stmt, into: into, retag: retag }))
+    }
+
+    // `!{ arms }` / `match subject { arms }`.
+    fn guarded(env: Env, e: AExpr, subj: AExpr, arms: AArm[], failable: boolean, err: Sym | not, isMatch: boolean, stmt: boolean, st0: AS) -> AS {
+        let st: AS = st0
+        if (!failable) {
+            if (isMatch) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `match` over " + subjectName(subj) + " — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `" + sqlSigil() + "}` query, §19.7.1)")
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `!{ … }` handler on " + subjectName(subj) + ", which cannot fail — the SPEC defines `!{}` only on a failable result (§19.4.3 item 3); remove the handler")
+        }
+        if (err is not) return st                          // E-ERROR-011 reported: no variant set to check against
+        const vs: VariantDef[] = enumVariantsOf(env.g, err)
+        if (isMatch && variantIndex(env.g.types, err, "Ok") >= 0) {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + err.hint + "` has a variant named `Ok`, which a `match` on a failable result reserves for the success value (§19.7.3) — rename the variant")
+        }
+        let covered: int[] = []
+        let wild = false
+        let okSeen = false
+        for (const a of arms) {
+            const ra: RArm = resolveArm(env, a, err, vs, isMatch, stmt, st)
+            st = ra.st
+            if (ra.idx == -1) wild = true
+            if (ra.idx == -2) okSeen = true
+            if (ra.idx >= 0) covered = covered.concat([ra.idx])
+        }
+        let missing: string[] = []
+        if (isMatch && !okSeen) missing = ["Ok"]
+        let i = 0
+        for (const v of vs) {
+            if (covered.indexOf(i) < 0) missing = missing.concat([v.sym.hint])
+            i = i + 1
+        }
+        if (!wild && !isMatch && env.fx.defer) {
+            st = addDiag(st, env.file, e.span, "E-DEFER-UNHANDLED-FAILABLE", "a `!{ … }` handler in a deferred statement SHALL carry a catch-all `| _ :> …` arm (§19.16.3 rule 3) — listing every variant of `" + err.hint + "` is not enough: a failure outside the declared enum would otherwise leave the `finally`")
+        } else if (!wild && missing.length > 0) {
+            if (isMatch) {
+                st = addDiag(st, env.file, e.span, "E-TYPE-020", "this `match` over the result of " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " — a `match` on a failable result covers `.Ok` and every variant of `" + err.hint + "`, or ends with `else :>` / `_ :>` (§19.7.1)")
+            } else {
+                st = addDiag(st, env.file, e.span, "E-TYPE-080", "this `!{ … }` handler on " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " of `" + err.hint + "` — add those arms, or a catch-all `| _ :> …` (§19.7)")
+            }
+        }
+        return handledFact(env, e, err, stmt, not, [], st)
+    }
+
+    // One arm: its pattern's variant (`idx`: -1 wildcard, -2 `.Ok`, -3 none),
+    // its binders (locals scoped to the arm), its body.
+    type RArm:struct = { idx: int, st: AS }
+
+    fn resolveArm(env: Env, a: AArm, err: Sym, vs: VariantDef[], isMatch: boolean, stmt: boolean, st0: AS) -> RArm {
+        let st: AS = st0
+        if (a.legacy) st = addDiag(st, env.file, a.span, "W-MATCH-ARROW-LEGACY", "the arm separator `=>` / `->` is deprecated — write `:>` (§19 alias note; `bun scrml migrate --fix` rewrites it)")
+        let armEnv: Env = withSubject(withWhole(env, -1), -1)
+        let idx: int = -3
+        const p: APat = a.pat
+        const pn: PatName | not = patName(p)
+        if (pn is not) {
+            idx = -1
+        } else if (isMatch && pn.name == "Ok") {
+            idx = -2
+            if (pn.parens && pn.binds.length != 1) st = addDiag(st, env.file, a.span, "E-TYPE-021", "`.Ok` carries one value (the success value, §19.7.3) — bind it as `.Ok(v)`, not with " + pn.binds.length + " binder(s)")
+            const rb: RBinds = bindArm(armEnv, pn.binds, [], st)
+            armEnv = rb.env
+            st = rb.st
+        } else {
+            const i: int = variantIndex(env.g.types, err, pn.name)
+            if (i < 0) {
+                let what: string = "`." + pn.name + "` is not a variant of `" + err.hint + "`"
+                if (pn.name == "Ok") what = "`.Ok` is the success value of a `match` — a `!{ … }` handler's arms are failures only"
+                st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", what + " (its variants: " + variantNamesOf(vs).join(", ") + ")")
+            } else {
+                idx = i
+                const fs: FieldDef[] = vs[i].fields
+                if (pn.parens && pn.binds.length != fs.length) st = addDiag(st, env.file, a.span, "E-TYPE-021", "`." + pn.name + "` carries " + fs.length + " value(s) but the pattern binds " + pn.binds.length + " — bind one name (or `_`) per payload field, in declaration order (§18.7)")
+                const rb2: RBinds = bindArm(armEnv, pn.binds, fs, st)
+                armEnv = rb2.env
+                st = rb2.st
+            }
+        }
+        st = addFail(st, a.nid, FailFact.FArm(idx))
+        const body: AArmBody = a.body
+        st = resolveArmBody(armEnv, a, body, stmt, st)
+        return { idx: idx, st: st }
+    }
+
+    type PatName:struct = { name: string, binds: ABind[], parens: boolean }
+
+    fn patName(p: APat) -> PatName | not {
+        return match p {
+            .PName(name: n, binds: bs, parens: pr) :> { name: n, binds: bs, parens: pr }
+            .PWild :> not
+        }
+    }
+
+    fn variantNamesOf(vs: VariantDef[]) -> string[] {
+        let out: string[] = []
+        for (const v of vs) { out = out.concat([v.sym.hint]) }
+        return out
+    }
+
+    type RBinds:struct = { env: Env, st: AS }
+
+    // The arm's binders: a minted local each (`_` binds nothing visible),
+    // typed by the payload field it takes (`.Ok`'s by nothing: the success
+    // type is not written, §19.4.1).
+    fn bindArm(env0: Env, bs: ABind[], fs: FieldDef[], st0: AS) -> RBinds {
+        let env: Env = env0
+        let st: AS = st0
+        let i = 0
+        for (const b of bs) {
+            const rb: RSym = mint(st, b.name)
+            st = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
+            let ty: Type | not = not
+            if (i < fs.length) ty = fs[i].ty
+            if (b.name != "_") env = withLocal(env, { name: b.name, s: rb.s, ty: ty, mutable: false, narrowed: not, nDecl: not })
+            i = i + 1
+        }
+        return { env: env, st: st }
+    }
+
+    // An arm's body. As a statement's arm, an expression is a statement (a
+    // write, a call); where the form has a VALUE, an expression arm is that
+    // value and a block arm must leave the function (`return` / `fail`) —
+    // what a block that falls through would yield is Ue2's.
+    fn resolveArmBody(env: Env, a: AArm, body: AArmBody, stmt: boolean, st: AS) -> AS {
+        return match body {
+            .ArmExpr(e: x) :> armExpr(env, x, stmt, st)
+            .ArmBlock(b: b) :> armBlock(env, a, b, stmt, st)
+        }
+    }
+
+    fn armExpr(env: Env, x: AExpr, stmt: boolean, st: AS) -> AS {
+        if (stmt) return resolveStmtExpr(withWhole(env, x.nid), x, st)
+        if (assignValue(x) is some) return addDiag(resolveStmtExpr(env, x, st), env.file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "this arm writes but yields no value, and the handled result is used as a value (`let r = …`, `return …`) — the SPEC does not say what the result is then; handle it as a statement (drop `let r =`) or give the arm a value. (Arms that only act are slice Ue2's question.)")
+        return resolveExpr(withWhole(env, x.nid), x, not, st).st
+    }
+
+    fn armBlock(env: Env, a: AArm, b: ABlock, stmt: boolean, st0: AS) -> AS {
+        const st: AS = resolveBlock(env, b, st0)
+        if (stmt || blockDiverges(b)) return st
+        return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "this `{ … }` arm falls through, and the handled result is used as a value — a block arm's value (its last expression) arrives with slice Ue2; end the block with `return` / `fail`, or write the value as the arm's expression")
+    }
+
+    // Does every path through `b` leave the function (`return` / `fail`)?
+    fn blockDiverges(b: ABlock) -> boolean {
+        if (b.stmts.length == 0) return false
+        return stmtDiverges(b.stmts[b.stmts.length - 1])
+    }
+
+    fn stmtDiverges(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> true
+            .Fail(f: x) :> true
+            .If(cond: c, thenB: t, elseB: el) :> blockDiverges(t) && elseDiverges(el)
+            .Eval(e: x) :> false
+            .Local(name: n) :> false
+            .Given(name: n) :> false
+            .EffectStmt(w: w) :> false
+            .Defer(body: x) :> false
+        }
+    }
+
+    fn elseDiverges(el: ABlock | not) -> boolean {
+        if (el is not) return false
+        return blockDiverges(el)
+    }
+
+    // §19.8.3 (R11) / §19.8.2 — a `?{}` no handling form takes. In a function
+    // body: outside a `!` function E-ERROR-002; inside one it propagates
+    // implicitly ("The `?{}` expression behaves as if it were a `!` function
+    // call") — §19.8.4 "propagated if the enclosing function's error type is
+    // compatible, or SHALL be a compile error if incompatible" (E-ERROR-010).
+    // Elsewhere (a handler, an effect, markup) a query is refused by placement
+    // (U1d / E-VALUE-SERVER-CALL) — placePass's.
+    fn resolveSql(env: Env, e: AExpr, q: ASql, stmt: boolean, st0: AS) -> RX {
+        const st: AS = resolveExprs(env, q.params, not, st0)
+        if (!env.fx.inFn || q.handled) return plain(not, st)
+        if (env.fx.defer) return plain(not, addDiag(st, env.file, e.span, "E-DEFER-UNHANDLED-FAILABLE", "this `" + sqlSigil() + "}` query is failable and stands in a deferred statement — handle it in place with a total `!{ … | _ :> … }` (§19.16.3 rule 3); an enclosing `!` does not cover it"))
+        if (!env.fx.failable) return plain(not, addDiag(st, env.file, e.span, "E-ERROR-002", "this `" + sqlSigil() + "}` query is failable (§19.8.3, S451): outside a `!` function it must be handled at the site — a `!{ … }` handler on the query, or a `match` on its result — or moved into a `!` function, where a failure propagates (§19.8.2). (\"No row\" is not a failure: `.get()` returns `not`, `.all()` `[]`.)"))
+        if (!stmt && env.fx.whole != e.nid) return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `" + sqlSigil() + "}` query that a `!` function propagates implicitly (§19.8.2) " + ue2Reason()))
+        return plain(not, propagationFact(env, e, env.g.sqlErrorSym, stmt, st))
+    }
+
+    // §19.3 — `fail …`. §19.3.3: "`fail` SHALL be valid only inside a function
+    // body declared with the `!` modifier … E-ERROR-001"; "The variant
+    // specified in the `fail` statement SHALL be a valid variant of that error
+    // enum type … E-ERROR-009 … a variant undeclared by the declared enum, a
+    // `fail` naming a foreign enum entirely, and a `fail` target that is not an
+    // enum variant"; the bare form resolves against the declared type; a valid
+    // variant with the wrong payload count is E-TYPE-082 ("never double-fire").
+    fn resolveFail(env: Env, s: AStmt, f: AFail, st0: AS) -> AS {
+        let st: AS = resolveExprs(env, f.args, not, st0)
+        const t: AExpr | not = f.target
+        if (t is some) st = resolveExpr(env, t, not, st).st
+        if (!env.fx.failable) {
+            let where: string = "outside any function (a handler, an effect or markup)"
+            if (env.fx.inFn) where = "in function '" + env.fx.fnName + "', which is not declared as failable"
+            return addDiag(st, env.file, s.span, "E-ERROR-001", "'fail' used " + where + ". Add '!' to the function signature: 'function " + env.fx.fnName + "(...)! ErrorType' (§19.3.3)")
+        }
+        const err: Sym | not = env.fx.err
+        if (err is not) return st                          // E-ERROR-011 reported
+        const vs: VariantDef[] = enumVariantsOf(env.g, err)
+        const valid: string = variantNamesOf(vs).join(", ")
+        if (t is some) return addDiag(st, env.file, s.span, "E-ERROR-009", "'fail' names something that is not a variant of the declared error type '" + err.hint + "' for function '" + env.fx.fnName + "'. Valid variants: " + valid + " (§19.3.3)")
+        if (f.enumName != "") {
+            const named: Sym | not = typeNamedHere(env, f.enumName)
+            let same = false
+            if (named is some) same = named.id == err.id
+            if (!same) return addDiag(st, env.file, s.span, "E-ERROR-009", "'fail' names variant '" + f.enumName + "." + f.variant + "', which is not a valid variant of the declared error type '" + err.hint + "' for function '" + env.fx.fnName + "' — '" + f.enumName + "' is a different type. Valid variants: " + valid + " (§19.3.3)")
+        }
+        const idx: int = variantIndex(env.g.types, err, f.variant)
+        if (idx < 0) return addDiag(st, env.file, s.span, "E-ERROR-009", "'fail' names variant '" + f.variant + "' which is not a valid variant of the declared error type '" + err.hint + "' for function '" + env.fx.fnName + "'. Valid variants: " + valid + " (§19.3.3)")
+        const n: int = vs[idx].fields.length
+        if (n != f.args.length) return addDiag(st, env.file, s.span, "E-TYPE-082", "`" + err.hint + "." + f.variant + "` carries " + n + " payload value(s) but this `fail` supplies " + f.args.length + " — one argument per declared field, in order (§19.3.3, §14.4)")
+        return addFail(st, s.nid, FailFact.FFail(err, idx))
+    }
+
+    // The type a name denotes where `env` stands (user types first, so a user
+    // `Error` shadows the built-in), else not.
+    fn typeNamedHere(env: Env, name: string) -> Sym | not {
+        const s: TypeStub | not = stubNamed(env.g.te, name)
+        if (s is not) return not
+        return s.sym
     }
 
     // =========================================================================
@@ -5572,7 +6234,7 @@ ${
 
     fn resolveMaybeExpr(env: Env, e: AExpr | not, st: AS) -> AS {
         if (e is not) return st
-        return resolveExpr(env, e, not, st).st
+        return resolveExpr(withWhole(env, e.nid), e, not, st).st
     }
 
     // `let a[: T] = init`. An annotation is the local's type (and the
@@ -5587,7 +6249,7 @@ ${
             if (!rt.unresolved) annot = rt.t
             st = rt.st
         }
-        const ri: RX = resolveExpr(env, init, annot, st)
+        const ri: RX = resolveExpr(withWhole(env, init.nid), init, annot, st)
         const rs: RSym = mint(ri.st, name)
         st = addBind(rs.st, s.nid, BindFact.BBind(rs.s))
         let lty: Type | not = ri.x.ty
@@ -6286,8 +6948,8 @@ ${
     // A handler value is a statement (or a block of them).
     fn resolveHandler(env: Env, v: AAttrValue, st: AS) -> AS {
         return match v {
-            .Bare(e: e) :> resolveStmtExpr(env, e, st)
-            .Paren(e: e) :> resolveStmtExpr(env, e, st)
+            .Bare(e: e) :> handlerReference(env, v, resolveStmtExpr(env, e, st))
+            .Paren(e: e) :> handlerReference(env, v, resolveStmtExpr(env, e, st))
             .Braced(b: b) :> resolveBlock(env, b, st)
             .Quoted(v: s) :> st
             .NoValue :> st
@@ -6600,6 +7262,7 @@ ${
             .Index(obj: o) :> false
             .Lambda(params: ps) :> false
             .Sql(q: q) :> false
+            .Handled(h: x) :> false
         }
     }
 
@@ -6741,7 +7404,7 @@ ${
     fn declEnv(g: Globals, ds: DeclSrc, inRenders: boolean) -> Env {
         return { g: g, file: ds.file, ctx: CtxK.InDecl(ds.info.sym, ds.isProgram), locals: [], rows: [],
                  handles: handlesOwnedBy(g, ds.info.nid), inRenders: inRenders, narrows: [], present: [],
-                 host: HostCtx.HostNo, own: "", inEffect: false }
+                 host: HostCtx.HostNo, own: "", inEffect: false, fx: noFailCtx() }
     }
 
     fn phaseB(g: Globals, st0: AS) -> AS {
@@ -6771,7 +7434,8 @@ ${
             if (fs.info.file == g.entry) hs = progHandles
             let host: HostCtx = HostCtx.HostOk
             if (fs.info.pure) host = HostCtx.HostPure
-            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false }
+            const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1 }
+            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx }
             const fte: TypeEnv = { stubs: g.te.stubs, declNames: g.te.declNames, declSyms: g.te.declSyms, file: fs.info.file }
             for (const p of fs.f.params) {
                 const rs: RSym = mint(st, p.name)
@@ -6912,15 +7576,21 @@ ${
     // Two `type` declarations of one name (SPEC-silent: bootstrap-local). In
     // two files the bootstrap's one type namespace would silently take the first.
     fn dupTypes(t: Tables) -> Diag[] {
-        let out: Diag[] = []
+        let out: Diag[] = builtinRedeclares(t)
         let names: string[] = []
-        for (const ti of t.types) { names = names.concat([ti.name]) }
+        let users: TypeInfo[] = []
+        for (const ti of t.types) {
+            if (ti.file != builtinFile()) {
+                names = names.concat([ti.name])
+                users = users.concat([ti])
+            }
+        }
         let j = 0
         while (j < names.length) {
             const i: int = earlierSame(names, j)
             if (i >= 0) {
-                const ti: TypeInfo = t.types[j]
-                const first: TypeInfo = t.types[i]
+                const ti: TypeInfo = users[j]
+                const first: TypeInfo = users[i]
                 if (first.file == ti.file) {
                     out = out.concat([mkDiag(ti.file, ti.span, "E-BOOTSTRAP-REDECLARE", "type `" + names[j] + "` is already declared in this file (at " + offsetOf(first.span) + ") — a file declares each type name once (the SPEC names no code for this; bootstrap-local)")])
                 } else {
@@ -6928,6 +7598,21 @@ ${
                 }
             }
             j = j + 1
+        }
+        return out
+    }
+
+    // s451 (Ue) — §19.8.4: "`SqlError` SHALL be a built-in enum type provided by
+    // the compiler. The developer SHALL NOT redefine it." (No code is named:
+    // the bootstrap-local redeclaration code, as for the other unnamed cases.)
+    // A user `Error` is legal: it shadows the built-in by name (§19.4.2 only
+    // makes the built-in the bare `!`'s default).
+    fn builtinRedeclares(t: Tables) -> Diag[] {
+        let out: Diag[] = []
+        for (const ti of t.types) {
+            if (ti.file != builtinFile() && ti.name == "SqlError") {
+                out = out.concat([mkDiag(ti.file, ti.span, "E-BOOTSTRAP-REDECLARE", "`SqlError` is the built-in enum of query failures (§19.8.1) — \"The developer SHALL NOT redefine it\" (§19.8.4); name this type something else")])
+            }
         }
         return out
     }
@@ -7115,6 +7800,7 @@ ${
             .Given(name: n) :> ""
             .EffectStmt(w: w) :> ""
             .Defer(body: b) :> ""
+            .Fail(f: x) :> ""
         }
     }
 
@@ -7124,11 +7810,31 @@ ${
             .If(cond: c, thenB: t, elseB: el) :> thenElse(t, el)
             .Given(name: n, body: b) :> [b]
             .EffectStmt(w: w) :> []
-            .Eval(e: e) :> []
-            .Local(name: n) :> []
-            .Return(e: e) :> []
+            .Eval(e: e) :> allExprBlocks(e)                 // s451 (Ue): a handling form's arm blocks
+            .Local(name: n, init: i) :> allExprBlocks(i)
+            .Return(e: e) :> maybeExprBlocks(e)
             .Defer(body: b) :> [b]
+            .Fail(f: x) :> []
         }
+    }
+
+    // s451 (Ue) — every arm block inside an expression, at any depth.
+    fn allExprBlocks(e: AExpr) -> ABlock[] {
+        let out: ABlock[] = exprBlocks(e)
+        for (const x of exprKids(e)) { out = out.concat(allExprBlocks(x)) }
+        return out
+    }
+
+    fn maybeExprBlocks(e: AExpr | not) -> ABlock[] {
+        if (e is not) return []
+        return allExprBlocks(e)
+    }
+
+    // s451 (Ue) — a `fail`'s expressions: its payload values, or the non-variant target.
+    fn failExprs(f: AFail) -> AExpr[] {
+        const t: AExpr | not = f.target
+        if (t is some) return f.args.concat([t])
+        return f.args
     }
 
     fn thenElse(t: ABlock, el: ABlock | not) -> ABlock[] {
@@ -7414,6 +8120,7 @@ ${
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
         }
     }
 
@@ -7454,6 +8161,7 @@ ${
             .Index(obj: ix) :> false
             .Lambda(params: lp) :> false
             .Sql(q: q) :> false
+            .Handled(h: x) :> false
         }
     }
 
@@ -7482,6 +8190,7 @@ ${
             .Index(obj: ix) :> noNarrowing()
             .Lambda(params: lp) :> noNarrowing()
             .Sql(q: q) :> noNarrowing()
+            .Handled(h: x) :> noNarrowing()
         }
     }
 
@@ -7555,6 +8264,7 @@ ${
             .Given(name: n) :> false
             .EffectStmt(w: w) :> false
             .Defer(body: b) :> false
+            .Fail(f: x) :> true                  // s451 (Ue): `fail` leaves the function (§19.3.2)
         }
     }
 
@@ -7588,6 +8298,7 @@ ${
             .Index(obj: o, idx: i) :> [o, i]
             .Lambda(params: lp, body: b) :> [b]
             .Sql(q: q) :> q.params
+            .Handled(h: h) :> handledKids(h)      // s451 (Ue): the subject, then each expression arm (block arms: exprBlocks)
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -7600,6 +8311,54 @@ ${
         }
     }
 
+    // s451 (Ue) — a handling form's expression children: its subject, then
+    // each EXPRESSION arm's body. Its arm BLOCKS hold statements — every walk
+    // that recurses through exprKids reaches them through exprBlocks.
+    fn handledKids(h: AHandled) -> AExpr[] {
+        let out: AExpr[] = [h.subject]
+        for (const a of handledArms(h)) {
+            const b: AArmBody = a.body
+            out = out.concat(armExprOf(b))
+        }
+        return out
+    }
+
+    fn handledArms(h: AHandled) -> AArm[] {
+        const how: AHow = h.how
+        return match how {
+            .Propagate :> []
+            .Guard(arms: arms) :> arms
+            .MatchOn(arms: arms) :> arms
+        }
+    }
+
+    fn armExprOf(b: AArmBody) -> AExpr[] {
+        return match b {
+            .ArmExpr(e: x) :> [x]
+            .ArmBlock(b: blk) :> []
+        }
+    }
+
+    fn armBlockOf(b: AArmBody) -> ABlock[] {
+        return match b {
+            .ArmExpr(e: x) :> []
+            .ArmBlock(b: blk) :> [blk]
+        }
+    }
+
+    // s451 (Ue) — the statement BLOCKS directly inside an expression: a
+    // handling form's block arms (no other expression holds statements).
+    fn exprBlocks(e: AExpr) -> ABlock[] {
+        const h: AHandled | not = handledOf(e.k)
+        if (h is not) return []
+        let out: ABlock[] = []
+        for (const a of handledArms(h)) {
+            const b: AArmBody = a.body
+            out = out.concat(armBlockOf(b))
+        }
+        return out
+    }
+
     fn propValueList(ps: AProp[]) -> AExpr[] {
         let out: AExpr[] = []
         for (const p of ps) { out = out.concat([p.value]) }
@@ -7610,6 +8369,13 @@ ${
     fn exprEffects(e: AExpr) -> string[] {
         let out: string[] = ownEffect(e)
         for (const x of exprKids(e)) { out = out.concat(exprEffects(x)) }
+        for (const b of exprBlocks(e)) { out = out.concat(blockEffects(b, [])) }    // s451 (Ue): an arm block's writes
+        return out
+    }
+
+    fn exprsEffects(es: AExpr[]) -> string[] {
+        let out: string[] = []
+        for (const x of es) { out = out.concat(exprEffects(x)) }
         return out
     }
 
@@ -7637,6 +8403,7 @@ ${
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
             .Sql(q: q) :> []
+            .Handled(h: x) :> []
         }
     }
 
@@ -7668,6 +8435,7 @@ ${
             .Given(name: n, subject: sub, body: b) :> aliased(exprEffects(sub), al).concat(blockEffects(b, al.concat([aliasOf(n, sub)])))
             .EffectStmt(w: w) :> []              // registers nothing where it stands (refused there) and writes nothing
             .Defer(body: b) :> blockEffects(b, al)   // s451: runs at the block's exit — its writes are the function's
+            .Fail(f: f) :> aliased(exprsEffects(failExprs(f)), al)
         }
     }
 
@@ -8416,6 +9184,7 @@ ${
             .Index(obj: ix) :> -1
             .Lambda(params: lp) :> -1
             .Sql(q: q) :> -1
+            .Handled(h: x) :> -1
         }
     }
 
@@ -8528,6 +9297,7 @@ ${
             .Spread(e: x) :> rvt(VType.Unknown, typeExpr(env, x, ts).ts)
             .Index(obj: o, idx: i) :> rvt(VType.Unknown, typeExpr(env, i, typeExpr(env, o, ts).ts).ts)
             .Lambda(params: ps2, body: b) :> typeLambda(env, e, b, ts)
+            .Handled(h: h) :> typeHandled(env, e, h, ts)   // s451 (Ue)
             .Sql(q: q) :> rvt(VType.Unknown, typeExprList(env, q.params, ts))   // s451: no row type yet (§14.8 schema types are not in the bootstrap)
         }
     }
@@ -9051,6 +9821,7 @@ ${
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
             .Sql(q: q) :> []
+            .Handled(h: x) :> []
         }
     }
 
@@ -9092,6 +9863,105 @@ ${
 
     fn keepTEnv(env: TEnv, ts: TypeState) -> RTEnv { return { env: env, ts: ts } }
 
+    // s451 (Ue) — a handling form: its subject, then each arm with its
+    // binders typed by the payload field each takes (the binder's FArm /
+    // FHandled facts). `?` and `!{}` yield the subject's success type (a `!`
+    // signature has no success-type slot, §19.4.1, so it is Unknown unless
+    // inference knows it); a `match` yields Unknown (its arms' join is not
+    // computed — no check fires on Unknown).
+    fn typeHandled(env: TEnv, e: AExpr, h: AHandled, ts0: TypeState) -> RVT {
+        const rs: RVT = typeExpr(env, h.subject, ts0)
+        let ts: TypeState = rs.ts
+        const err: Sym | not = handledErr(failFact(env.t.fails, e.nid))
+        for (const a of handledArms(h)) {
+            let aenv: TEnv = env
+            const fs: FieldDef[] = armFields(env.t, err, failFact(env.t.fails, a.nid))
+            const p: APat = a.pat
+            let i = 0
+            for (const b of patBindsOf(p)) {
+                const bs: Sym | not = bindSym(bindFact(env.t.binds, b.nid))
+                let vt: VType = VType.Unknown
+                if (i < fs.length && env.t.unresolved.fields.indexOf(fs[i].sym.id) < 0) vt = known(fs[i].ty)
+                if (bs is some) aenv = tWithLocal(aenv, bs, vt)
+                i = i + 1
+            }
+            const body: AArmBody = a.body
+            for (const x of armExprOf(body)) {
+                if (assignValue(x) is some) {
+                    ts = typeStmtExpr(aenv, x, ts)
+                } else {
+                    ts = typeExpr(aenv, x, ts).ts
+                }
+            }
+            for (const b2 of armBlockOf(body)) { ts = typeBlock(aenv, b2, ts) }
+        }
+        const how: AHow = h.how
+        if (how == AHow.Propagate) return rvt(rs.vt, ts)
+        return rvt(VType.Unknown, ts)
+    }
+
+    fn handledErr(f: FailFact | not) -> Sym | not {
+        return match f {
+            .FHandled(h: h) :> h.err
+            .FArm(idx: x) :> not
+            .FFail(err: x) :> not
+            not :> not
+        }
+    }
+
+    // The payload fields an arm's binders take (none for `.Ok` / `_`).
+    fn armFields(t: Tables, err: Sym | not, f: FailFact | not) -> FieldDef[] {
+        if (err is not) return []
+        const idx: int = armIdx(f)
+        if (idx < 0) return []
+        const ti: TypeInfo | not = typeInfoOf(t.types, err)
+        if (ti is not) return []
+        const vs: VariantDef[] = enumVariants(ti.def)
+        if (idx >= vs.length) return []
+        return vs[idx].fields
+    }
+
+    fn armIdx(f: FailFact | not) -> int {
+        return match f {
+            .FArm(idx: i) :> i
+            .FHandled(h: x) :> -3
+            .FFail(err: x) :> -3
+            not :> -3
+        }
+    }
+
+    fn patBindsOf(p: APat) -> ABind[] {
+        return match p {
+            .PName(binds: bs) :> bs
+            .PWild :> []
+        }
+    }
+
+    // s451 (Ue) — `fail E.V(args)`: each payload value against its field's
+    // type (§19.3.3: the `fail` is "a variant CONSTRUCTION", typed as one).
+    fn typeFail(env: TEnv, s: AStmt, f: AFail, ts0: TypeState) -> TypeState {
+        let ts: TypeState = typeExprList(env, failExprs(f), ts0)
+        const ff: FailFact | not = failFact(env.t.fails, s.nid)
+        const fs: FieldDef[] = failFields(env.t, ff)
+        let i = 0
+        for (const a of f.args) {
+            if (i < fs.length && env.t.unresolved.fields.indexOf(fs[i].sym.id) < 0) {
+                ts = checkValue(env, exprType0(ts, a.nid), fs[i].ty, a.span, "payload value " + (i + 1) + " of this `fail`", ts)
+            }
+            i = i + 1
+        }
+        return ts
+    }
+
+    fn failFields(t: Tables, f: FailFact | not) -> FieldDef[] {
+        return match f {
+            .FFail(err: e, idx: i) :> armFields(t, e, FailFact.FArm(i))
+            .FHandled(h: x) :> []
+            .FArm(idx: x) :> []
+            not :> []
+        }
+    }
+
     // Each statement's continuation env: the narrowing a statement's CALLS
     // may undo (a callee that writes the place, r2 F1) is dropped, and an
     // `if` / `given` leaves the JOIN of its paths (r2 F1 / F3).
@@ -9105,6 +9975,7 @@ ${
             .Given(name: n, subject: sub, body: b) :> typeGiven(env, s, sub, b, ts)
             .EffectStmt(w: w) :> keepTEnv(env, ts)     // refused by the binder (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
             .Defer(body: b) :> keepTEnv(env, typeBlock(tDeferEnv(env), b, ts))   // s451: typed at its exit, not where it stands
+            .Fail(f: f) :> keepTEnv(env, typeFail(env, s, f, ts))               // s451 (Ue)
         }
     }
 
@@ -9150,6 +10021,7 @@ ${
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -9178,6 +10050,7 @@ ${
             .Index(obj: ix) :> ""
             .Lambda(params: lp) :> ""
             .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
         }
     }
 
@@ -9293,6 +10166,7 @@ ${
             .Index(obj: o) :> typeExpr(env, e, ts).ts
             .Lambda(params: ps2) :> typeExpr(env, e, ts).ts
             .Sql(q: q) :> typeExpr(env, e, ts).ts
+            .Handled(h: x) :> typeExpr(env, e, ts).ts
         }
     }
 
@@ -9460,6 +10334,7 @@ ${
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -9512,6 +10387,7 @@ ${
             .Index(obj: o) :> ts
             .Lambda(params: ps2) :> ts
             .Sql(q: q) :> ts
+            .Handled(h: x) :> ts
             .ArrayLit(elems: es) :> checkLitList(env, es, ts)
             .Ternary(test: x, yes: y, no: n) :> checkLitFields(env, n, checkLitFields(env, y, ts))
             .Name(name: n) :> ts
@@ -10055,6 +10931,7 @@ ${
             .Given(name: n, subject: sub, body: b) :> scanBlock(cx, b, scanExpr(cx, sub, acc))
             .EffectStmt(w: w) :> acc                // refused where it stands (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
             .Defer(body: b) :> scanBlock(cx, b, acc)
+            .Fail(f: f) :> scanExprs(cx, failExprs(f), acc)
         }
     }
 
@@ -10085,6 +10962,7 @@ ${
         if (c is some) return scanExprs(cx, exprKids(e).slice(1), scanCall(cx, e, c, acc1))
         let acc: BodyScan = formulaRef(cx, e, constructionRef(cx, e, fnValueRef(cx, e, acc1)))
         for (const x of exprKids(e)) { acc = scanExpr(cx, x, acc) }
+        for (const b of exprBlocks(e)) { acc = scanBlock(cx, b, acc) }      // s451 (Ue): an arm block
         return acc
     }
 
@@ -10280,6 +11158,7 @@ ${
             .Index(obj: o) :> ""
             .Lambda(params: ps) :> ""
             .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
         }
     }
 
@@ -10308,6 +11187,7 @@ ${
             .Index(obj: o) :> []
             .Lambda(params: ps) :> []
             .Sql(q: q) :> []
+            .Handled(h: x) :> []
         }
     }
 
@@ -10337,6 +11217,7 @@ ${
             .Spread(e: x) :> ""
             .Lambda(params: ps) :> ""
             .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
         }
     }
 
@@ -10460,6 +11341,7 @@ ${
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -10487,6 +11369,7 @@ ${
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -10516,6 +11399,7 @@ ${
             .Index(obj: o) :> ""
             .Lambda(params: ps) :> ""
             .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
         }
     }
 
@@ -11169,6 +12053,7 @@ ${
             .Index(obj: o) :> not
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -11485,7 +12370,7 @@ ${
     fn typesProgram(g: Globals) -> CoreProgram {
         let defs: TypeDef[] = []
         for (const t of g.types) { defs = defs.concat([t.def]) }
-        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true }
+        return { program: g.program, decls: [], types: defs, fns: [], server: [], dbs: [], reset: true, sqlError: not }
     }
 
     fn storeOf(v: AAttrValue) -> PersistStore | not {
@@ -11731,6 +12616,7 @@ ${
             .Given(name: n, subject: x, body: b) :> sqlsInExpr(x).concat(sqlsInBlock(b))
             .EffectStmt(w: w) :> sqlsInBlock(w.body)
             .Defer(body: b) :> sqlsInBlock(b)
+            .Fail(f: f) :> sqlsInExprs(failExprs(f))
         }
     }
 
@@ -11749,6 +12635,13 @@ ${
         const q: ASql | not = sqlOfK(e.k)
         if (q is some) out = [{ nid: e.nid, span: e.span, q: q }]
         for (const x of exprKids(e)) { out = out.concat(sqlsInExpr(x)) }
+        for (const b of exprBlocks(e)) { out = out.concat(sqlsInBlock(b)) }   // s451 (Ue): an arm block
+        return out
+    }
+
+    fn sqlsInExprs(es: AExpr[]) -> SqlSite[] {
+        let out: SqlSite[] = []
+        for (const x of es) { out = out.concat(sqlsInExpr(x)) }
         return out
     }
 
@@ -11765,6 +12658,35 @@ ${
     fn sqlOfK(k: AExprK) -> ASql | not {
         return match k {
             .Sql(q: q) :> q
+            .Handled(h: x) :> not
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    // s451 (Ue): the handling form an expression is, else not.
+    fn handledOf(k: AExprK) -> AHandled | not {
+        return match k {
+            .Sql(q: q) :> not
+            .Handled(h: h) :> h
             .Name(name: n) :> not
             .At(name: n) :> not
             .AtItem :> not
@@ -11807,6 +12729,7 @@ ${
             .Given(name: n, subject: x, body: b) :> readsInExpr(t, x).concat(readsInBlock(t, b))
             .EffectStmt(w: w) :> []
             .Defer(body: b) :> readsInBlock(t, b)
+            .Fail(f: f) :> readsInExprs(t, failExprs(f))
         }
     }
 
@@ -11836,6 +12759,13 @@ ${
         if (what != "") return [{ what: what, span: e.span }]
         let out: CellUse[] = []
         for (const x of exprKids(e)) { out = out.concat(readsInExpr(t, x)) }
+        for (const b of exprBlocks(e)) { out = out.concat(readsInBlock(t, b)) }   // s451 (Ue): an arm block
+        return out
+    }
+
+    fn readsInExprs(t: Tables, es: AExpr[]) -> CellUse[] {
+        let out: CellUse[] = []
+        for (const x of es) { out = out.concat(readsInExpr(t, x)) }
         return out
     }
 
@@ -11881,6 +12811,7 @@ ${
             .Given(name: n, subject: x, body: b) :> domsInExpr(t, x).concat(domsInBlock(t, b))
             .EffectStmt(w: w) :> []
             .Defer(body: b) :> domsInBlock(t, b)
+            .Fail(f: f) :> domsInExprs(t, failExprs(f))
         }
     }
 
@@ -11901,6 +12832,13 @@ ${
         }
         let out: CellUse[] = []
         for (const x of exprKids(e)) { out = out.concat(domsInExpr(t, x)) }
+        for (const b of exprBlocks(e)) { out = out.concat(domsInBlock(t, b)) }   // s451 (Ue): an arm block
+        return out
+    }
+
+    fn domsInExprs(t: Tables, es: AExpr[]) -> CellUse[] {
+        let out: CellUse[] = []
+        for (const x of es) { out = out.concat(domsInExpr(t, x)) }
         return out
     }
 
@@ -12465,7 +13403,8 @@ ${
     type RSqlSite:struct = { info: SqlInfo | not, creates: boolean, st: AS }
 
     fn sqlSiteFacts(g: Globals, rd: RDbs, file: string, pnid: int, s: SqlSite, failable: boolean, st0: AS) -> RSqlSite {
-        let st: AS = errorTwo(file, s, failable, st0)
+        // (s451 Ue: the §19.8.3 failable rule — E-ERROR-002 — is the binder's, resolveSql)
+        let st: AS = st0
         if (file != g.entry) {
             st = addDiag(st, file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "a `" + sqlSigil() + "}` in an imported module makes it a module-with-db-context (§44.7.1), which is not in the bootstrap — keep the query in the program's file")
             return { info: not, creates: false, st: st }
@@ -12486,10 +13425,13 @@ ${
         return "this `" + sqlSigil() + "}` has no `db=` declaration in any ancestor `<program>` (§8.1.1) — add one to the enclosing `<program>`: `<program db=\"./app.db\">` for SQLite, `<program db=\"postgres://…\">` for PostgreSQL"
     }
 
-    // §19.8.3 (S451 R11): a `?{}` outside a `!` function, not handled at the site.
+
+    // §19.8.3 (S451 R11): a `?{}` outside any function (a value / action
+    // position), not handled at the site. (In a function body the binder
+    // reports it — resolveSql — where the enclosing `!` and `defer` are known.)
     fn errorTwo(file: string, s: SqlSite, failable: boolean, st: AS) -> AS {
         if (failable || s.q.handled) return st
-        return addDiag(st, file, s.span, "E-ERROR-002", "this `" + sqlSigil() + "}` query is failable (§19.8.3, S451): outside a `!` function it must be handled at the site — a `!{ … }` handler on the query, or a `match` on its result — or moved into a `!` function, where a failure propagates (§19.8.2). An unhandled query is E-ERROR-002. (\"No row\" is not a failure: `.get()` still returns `not`, `.all()` still `[]`.) The bootstrap has none of these handling forms yet — they arrive with unit Ue, the error model")
+        return addDiag(st, file, s.span, "E-ERROR-002", "this `" + sqlSigil() + "}` query is failable (§19.8.3, S451): outside a `!` function it must be handled at the site — a `!{ … }` handler on the query, or a `match` on its result — or moved into a `!` function, where a failure propagates (§19.8.2). An unhandled query is E-ERROR-002. (\"No row\" is not a failure: `.get()` still returns `not`, `.all()` still `[]`.)")
     }
 
     // §13.7 (S451 R1): a value position that would have to WAIT.
@@ -12570,7 +13512,7 @@ ${
         const fs: NodeFacts = indexed(st.facts)
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
-                                attrs: fs.attrs, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
+                                attrs: fs.attrs, fails: fs.fails, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
                                 novalidate: [], resets: rr.infos, gated: [], persists: rp.infos, server: noServerFacts() }
         const scopeDiags: Diag[] = checkScopes(files, bound)
         // s449: the no-write rule over every accepted effect (§6.7.4)
@@ -12582,7 +13524,7 @@ ${
         const pp: RPlaced = placePass(ra.g, bound, st)
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
-                            elems: bound.elems, attrs: bound.attrs, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
+                            elems: bound.elems, attrs: bound.attrs, fails: bound.fails, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
                             novalidate: vp.forms, resets: bound.resets, gated: vp.gated, persists: bound.persists, server: pp.facts }
         return { files: files, tables: t, diags: domScopeDropped(pp.st.diags, pp.doms).concat(scopeDiags).concat(effectDiags).concat(vp.diags).concat(typed.diags),
                  infos: gatedInfos(vp.gated) }

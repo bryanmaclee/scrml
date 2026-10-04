@@ -9,7 +9,7 @@
 // over Core (the TS compiler's F1 "walker misses a position" family).
 // =============================================================================
 ${
-    import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block,
+    import { Sym, Type, Place, InstRef, Literal, Pattern, Expr, MatchArm, EditKind, Stmt, Block, Failable, OkArm, ErrArm,
              Attr, View, CondArm, ConstructAttr, EffectDep, Field, Decl, Fn, ServerFn, CoreProgram,
              ValidityOf, validityInst } from "./core.scrml"
 
@@ -138,7 +138,28 @@ ${
             .ResetSurface(of: v) :> [Node.NInst(validityInst(v))]
             .Defer(body: b) :> [Node.NBlock(b)]
             .Unpersist(inst: i) :> [Node.NInst(i)]
+            .Attempt(result: r, call: c, ok: ok, arms: arms) :> failableKids(c).concat(okKids(ok)).concat(errArmKids(arms))
+            .Fail(args: args) :> exprNodes(args)
         }
+    }
+
+    // s451 (Ue): an Attempt's children — the failable's values, the success
+    // branch, then each failure arm (its pattern, body and value).
+    fn failableKids(c: Failable) -> Node[] {
+        return match c {
+            .FCall(fn: f, args: args) :> exprNodes(args)
+            .FSql(q: q) :> exprNodes(q.params)
+        }
+    }
+
+    fn okKids(ok: OkArm) -> Node[] {
+        return [Node.NBlock(ok.body)].concat(maybeExpr(ok.value))
+    }
+
+    fn errArmKids(arms: ErrArm[]) -> Node[] {
+        let out: Node[] = []
+        for (const a of arms) { out = out.concat([Node.NPattern(a.pat), Node.NBlock(a.body)]).concat(maybeExpr(a.value)) }
+        return out
     }
 
     fn exprKids(e: Expr) -> Node[] {
@@ -157,7 +178,6 @@ ${
             .Lambda(params: ps, body: b) :> [Node.NExpr(b)]
             .SeqCall(op: o, seq: sq, f: f) :> [Node.NExpr(sq), Node.NExpr(f)]
             .Validity(of: v, prop: pr) :> [Node.NInst(validityInst(v))]
-            .Sql(q: q) :> exprNodes(q.params)
         }
     }
 
@@ -335,7 +355,6 @@ ${
             .Host(call: x) :> []
             .SeqCall(op: x) :> []
             .Validity(of: x) :> []
-            .Sql(q: x) :> []
         }
     }
 
@@ -376,7 +395,14 @@ ${
             .ResetSurface(of: v) :> []
             .Defer(body: b) :> []
             .Unpersist(decl: x) :> []
+            .Attempt(result: r, ok: ok) :> maybeSym(r).concat([ok.bind])
+            .Fail(err: x) :> []
         }
+    }
+
+    fn maybeSym(s: Sym | not) -> Sym[] {
+        if (s is not) return []
+        return [s]
     }
 
     fn viewBinds(v: View) -> Sym[] {
@@ -446,6 +472,8 @@ ${
             .ResetSurface(of: v) :> -1
             .Defer(body: b) :> -1
             .Unpersist(decl: x) :> -1
+            .Attempt(result: r) :> -1
+            .Fail(err: x) :> -1
         }
     }
 }

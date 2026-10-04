@@ -65,6 +65,8 @@ ${
             .ResetSurface(of: x) :> "ResetSurface"
             .Defer(body: x) :> "Defer"
             .Unpersist(decl: x) :> "Unpersist"
+            .Attempt(result: x) :> "Attempt"
+            .Fail(err: x) :> "Fail"
         }
     }
 
@@ -84,7 +86,6 @@ ${
             .Lambda(params: x) :> "Lambda"
             .SeqCall(op: x) :> "SeqCall"
             .Validity(of: x) :> "Validity"
-            .Sql(q: x) :> "Sql"
         }
     }
 

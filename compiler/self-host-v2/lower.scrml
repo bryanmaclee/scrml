@@ -31,16 +31,18 @@ ${
     import { Sym, Type, TypeDef, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldMode, FieldRole,
              GrantSet, TransitionGraph, Field, DeclKind, WiringAttr, Decl, Param, Fn, CoreProgram, Validator, SurfaceProp, ValidityOf, Persist,
-             ServerFn, SqlMode, Db,
-             block, litStr } from "./core.scrml"
+             ServerFn, SqlMode, Db, SqlQuery, SqlKind, SqlTables, SqlColumns, Failable, OkArm, ErrArm,
+             block, litStr, mkSym, typeDefSym } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail,
              mkSpan } from "./ast.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair, ValInfo, GateInfo,
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo,
-             SqlInfo,
-             nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced } from "./analyze.scrml"
+             SqlInfo, HandledFact, FailFact, Retag,
+             nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest, sqlInfo, isServerPlaced,
+             failFact, builtinFile } from "./analyze.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
     // reported an ERROR (an `E-` code — §34: severity is "carried by the `E-`
@@ -172,7 +174,6 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
-            .Sql(q: x) :> not
         }
     }
 
@@ -200,7 +201,6 @@ ${
             .Lambda(params: x) :> op
             .SeqCall(op: x) :> op
             .Validity(of: x) :> op
-            .Sql(q: x) :> op
         }
     }
 
@@ -258,7 +258,6 @@ ${
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
             .Validity(of: x) :> false
-            .Sql(q: x) :> false
         }
     }
 
@@ -342,7 +341,8 @@ ${
             .Spread(e: sx) :> missing()
             .Index(obj: ix) :> missing()
             .Lambda(params: lp, body: lb) :> lambdaExpr(c, valueFact(c.t.values, e.nid), lb)
-            .Sql(q: q) :> sqlExpr(c, e, q)
+            .Sql(q: q) :> handledRead(c, e)        // s451 (Ue): a query is an Attempt's call; its value, the Attempt's result
+            .Handled(h: h) :> handledRead(c, e)
         }
     }
 
@@ -392,6 +392,7 @@ ${
             .Index(obj: x) :> not
             .Lambda(params: ps) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -484,7 +485,6 @@ ${
             .Lambda(params: x) :> missing()
             .SeqCall(op: x) :> missing()
             .Validity(of: x) :> missing()
-            .Sql(q: x) :> missing()
         }
     }
 
@@ -550,13 +550,14 @@ ${
     fn lowerStmt(c: LC, s: AStmt) -> Stmt[] {
         const k: AStmtK = s.k
         return match k {
-            .Eval(e: e) :> exprStmt(c, e)
-            .Local(name: n, mutable: m, init: i) :> letStmt(c, s, i)
-            .Return(e: e) :> [Stmt.Return(returnValue(c, e))]
+            .Eval(e: e) :> evalStmt(c, e)                                       // s451 (Ue): + the Attempt a handled value needs
+            .Local(name: n, mutable: m, init: i) :> attemptsFor(c, i).concat(letStmt(c, s, i))
+            .Return(e: e) :> attemptsFor(c, e).concat([Stmt.Return(returnValue(c, e))])
             .If(cond: x, thenB: t, elseB: el) :> [Stmt.If(lowerExpr(c, x), lowerBlock(c, t), maybeBlock(c, el))]
             .Given(name: n, subject: sub, body: b) :> givenStmts(c, s, b)
             .EffectStmt(w: w) :> []              // analyze refused it (E-LIFECYCLE-016 / E-BOOTSTRAP-UNSUPPORTED)
             .Defer(body: b) :> [Stmt.Defer(lowerBlock(c, b))]   // s451 (§19.16)
+            .Fail(f: f) :> failStmt(c, s, f)                     // s451 (Ue, §19.3)
         }
     }
 
@@ -649,6 +650,7 @@ ${
             .Index(obj: ix) :> not
             .Lambda(params: lp) :> not
             .Sql(q: q) :> not
+            .Handled(h: x) :> not
         }
     }
 
@@ -809,7 +811,6 @@ ${
             .Lambda(params: x) :> missing()
             .SeqCall(op: x) :> missing()
             .Validity(of: x) :> missing()
-            .Sql(q: x) :> missing()
         }
     }
 
@@ -821,6 +822,7 @@ ${
             .Index(obj: ix) :> []
             .Lambda(params: lp) :> []
             .Sql(q: q) :> []
+            .Handled(h: x) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -1274,8 +1276,8 @@ ${
     // A handler value is one statement (`f()`, `(@x = …)`) or a braced block.
     fn handlerBlock(c: LC, v: AAttrValue) -> Block {
         return match v {
-            .Bare(e: e) :> block(exprStmt(c, e))
-            .Paren(e: e) :> block(exprStmt(c, e))
+            .Bare(e: e) :> block(evalStmt(c, e))
+            .Paren(e: e) :> block(evalStmt(c, e))
             .Braced(b: b) :> lowerBlock(c, b)
             .Quoted(v: s) :> block([])
             .NoValue :> block([])
@@ -1553,7 +1555,7 @@ ${
                 const c: LC = { t: t, file: info.file, subst: not, snap: not }
                 let params: Param[] = []
                 for (const p of s.f.params) { params = params.concat(paramOf(bindFact(t.binds, p.nid))) }
-                return { sym: info.sym, params: params, body: lowerBlock(c, s.f.body), pure: info.pure }
+                return { sym: info.sym, params: params, body: lowerBlock(c, s.f.body), pure: info.pure, err: info.err }
             }
         }
         return not
@@ -1565,7 +1567,341 @@ ${
     fn lowerServerFn(t: Tables, fs: FnSyntax[], info: FnInfo) -> ServerFn | not {
         const f: Fn | not = lowerFn(t, fs, info)
         if (f is not) return not
-        return { sym: f.sym, params: f.params, ret: info.ret, body: f.body }
+        return { sym: f.sym, params: f.params, ret: info.ret, body: f.body, err: f.err }
+    }
+
+    // =========================================================================
+    // s451 (Ue) — THE ERROR MODEL (§19). A handling form (`?` / `!{}` /
+    // `match`, AExprK.Handled) or a `?{}` its `!` function propagates (§19.8.2)
+    // stands as a statement's WHOLE value (analyze refuses it elsewhere — Ue2),
+    // so it lowers to ONE Stmt.Attempt placed before that statement, and the
+    // statement reads the Attempt's `result`. Everything here is analyze's
+    // facts (FHandled / FArm / FFail and the arm binders' Syms) — lower decides
+    // nothing.
+    // =========================================================================
+    // A handled value, read where it stands: its Attempt's result.
+    fn handledRead(c: LC, e: AExpr) -> Expr {
+        const h: HandledFact | not = handledFactOf(c.t, e.nid)
+        if (h is not) return missing()
+        return Expr.Local(h.result)
+    }
+
+    fn handledFactOf(t: Tables, nid: int) -> HandledFact | not {
+        const f: FailFact | not = failFact(t.fails, nid)
+        return match f {
+            .FHandled(h: h) :> h
+            .FArm(idx: x) :> not
+            .FFail(err: x) :> not
+            not :> not
+        }
+    }
+
+    // The Attempt a whole value needs (none when it is not a handled one).
+    fn attemptsFor(c: LC, e: AExpr | not) -> Stmt[] {
+        if (e is not) return []
+        const h: HandledFact | not = handledFactOf(c.t, e.nid)
+        if (h is not) return []
+        return [attemptOf(c, e, h)]
+    }
+
+    fn attemptOf(c: LC, e: AExpr, h: HandledFact) -> Stmt {
+        let result: Sym | not = h.result
+        if (h.stmt) result = not
+        const hd: AHandled | not = handledOfK(e.k)
+        if (hd is not) {
+            // an implicit `?{}` propagation (§19.8.2): the query is the call
+            return Stmt.Attempt(result, failableOf(c, e), h.err, plainOk(h), retagArms(h))
+        }
+        const how: AHow = hd.how
+        return match how {
+            .Propagate :> Stmt.Attempt(result, failableOf(c, hd.subject), h.err, plainOk(h), retagArms(h))
+            .Guard(arms: arms) :> Stmt.Attempt(result, failableOf(c, hd.subject), h.err, plainOk(h), errArms(c, h, arms, false))
+            .MatchOn(arms: arms) :> Stmt.Attempt(result, failableOf(c, hd.subject), h.err, matchOk(c, h, arms), errArms(c, h, arms, true))
+        }
+    }
+
+    // The success branch of `?` / `!{}`: the value itself.
+    fn plainOk(h: HandledFact) -> OkArm {
+        if (h.stmt) return { bind: h.ok, body: block([]), value: not }
+        return { bind: h.ok, body: block([]), value: Expr.Local(h.ok) }
+    }
+
+    // The call: a `!` function's (FCall) or a query (FSql).
+    fn failableOf(c: LC, e: AExpr) -> Failable {
+        const q: ASql | not = sqlOfExpr(e.k)
+        if (q is some) return Failable.FSql(sqlQueryOf(c, e, q))
+        const k: AExprK = e.k
+        return match k {
+            .Call(callee: cal, args: args) :> failableCall(c, nameFact(c.t.names, cal.nid), args)
+            .Name(name: n) :> noCall()
+            .At(name: n) :> noCall()
+            .AtItem :> noCall()
+            .Num(raw: r) :> noCall()
+            .Str(v: s) :> noCall()
+            .Bool(v: b) :> noCall()
+            .NotLit :> noCall()
+            .Recovered :> noCall()
+            .Variant(name: n) :> noCall()
+            .Member(obj: o) :> noCall()
+            .Unary(op: o) :> noCall()
+            .Binary(op: o) :> noCall()
+            .Ternary(test: t) :> noCall()
+            .Assign(target: t) :> noCall()
+            .ArrayLit(elems: es) :> noCall()
+            .ObjectLit(props: ps) :> noCall()
+            .Spread(e: x) :> noCall()
+            .Index(obj: o) :> noCall()
+            .Lambda(params: ps) :> noCall()
+            .Sql(q: x) :> noCall()
+            .Handled(h: x) :> noCall()
+        }
+    }
+
+    fn noCall() -> Failable { return Failable.FCall(mkSym(-1, "unhandled"), []) }
+
+    // (A subject analyze did not resolve to a `!` function never reaches here —
+    // it is E-ERROR-004 / refused, and the gate stops lowering; check.scrml's
+    // C-E2 names any FCall of a Sym that is no function.)
+    fn failableCall(c: LC, f: NameFact | not, args: AExpr[]) -> Failable {
+        return match f {
+            .NFn(sym: s) :> Failable.FCall(s, lowerExprs(c, args))
+            .NLocal(sym: s) :> noCall()
+            .NField(decl: d) :> noCall()
+            .NInst(decl: d) :> noCall()
+            .NStruct(owner: o) :> noCall()
+            .NLength :> noCall()
+            .NSurface(of: x) :> noCall()
+            not :> noCall()
+        }
+    }
+
+    // `?` (§19.5.2): one arm per callee variant, re-failing as the enclosing
+    // enum's variant with the same payload (analyze's Retag map).
+    fn retagArms(h: HandledFact) -> ErrArm[] {
+        const into: Sym | not = h.into
+        if (into is not) return []
+        let out: ErrArm[] = []
+        for (const r of h.retag) {
+            let vals: Expr[] = []
+            for (const b of r.binds) { vals = vals.concat([Expr.Local(b)]) }
+            out = out.concat([{ pat: Pattern.PVariant(h.err, r.from, r.binds), body: block([Stmt.Fail(into, r.to, vals)]), value: not }])
+        }
+        return out
+    }
+
+    // A `match`'s success branch: its `.Ok(v)` arm, else its wildcard (which
+    // covers the success value too, §19.7.3).
+    fn matchOk(c: LC, h: HandledFact, arms: AArm[]) -> OkArm {
+        for (const a of arms) {
+            if (armIdxOf(c.t, a) == -2) return { bind: okBind(c, h, a), body: armBody(c, h, a), value: armValue(c, h, a) }
+        }
+        for (const a2 of arms) {
+            if (armIdxOf(c.t, a2) == -1) return { bind: h.ok, body: armBody(c, h, a2), value: armValue(c, h, a2) }
+        }
+        return plainOk(h)
+    }
+
+    fn okBind(c: LC, h: HandledFact, a: AArm) -> Sym {
+        const bs: Sym[] = armBindSyms(c, a)
+        if (bs.length == 1) return bs[0]
+        return h.ok
+    }
+
+    // The failure arms: every arm but a `match`'s `.Ok`, in source order.
+    fn errArms(c: LC, h: HandledFact, arms: AArm[], isMatch: boolean) -> ErrArm[] {
+        let out: ErrArm[] = []
+        for (const a of arms) {
+            const idx: int = armIdxOf(c.t, a)
+            if (idx == -1) {
+                out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a) }])
+            } else if (idx >= 0) {
+                out = out.concat([{ pat: Pattern.PVariant(h.err, idx, armBindSyms(c, a)), body: armBody(c, h, a), value: armValue(c, h, a) }])
+            }
+        }
+        return out
+    }
+
+    fn armIdxOf(t: Tables, a: AArm) -> int {
+        const f: FailFact | not = failFact(t.fails, a.nid)
+        return match f {
+            .FArm(idx: i) :> i
+            .FHandled(h: x) :> -3
+            .FFail(err: x) :> -3
+            not :> -3
+        }
+    }
+
+    // The arm's binders' Syms (the binder minted one per written binder, `_` included).
+    fn armBindSyms(c: LC, a: AArm) -> Sym[] {
+        const p: APat = a.pat
+        const bs: ABind[] = match p {
+            .PName(binds: b) :> b
+            .PWild :> []
+        }
+        let out: Sym[] = []
+        for (const b of bs) {
+            const s: Sym | not = letSym(bindFact(c.t.binds, b.nid))
+            if (s is some) out = out.concat([s])
+        }
+        return out
+    }
+
+    // An arm as a statement: its block, or its expression as a statement (a
+    // classified write, a call, a nested handling form). As a value: the
+    // statements its value needs first (a nested handling form's Attempt).
+    fn armBody(c: LC, h: HandledFact, a: AArm) -> Block {
+        const body: AArmBody = a.body
+        return match body {
+            .ArmBlock(b: b) :> lowerBlock(c, b)
+            .ArmExpr(e: x) :> armExprBody(c, h, x)
+        }
+    }
+
+    fn armExprBody(c: LC, h: HandledFact, x: AExpr) -> Block {
+        if (h.stmt) return block(evalStmt(c, x))
+        return block(attemptsFor(c, x))
+    }
+
+    fn armValue(c: LC, h: HandledFact, a: AArm) -> Expr | not {
+        if (h.stmt) return not
+        const body: AArmBody = a.body
+        return match body {
+            .ArmBlock(b: b) :> not                 // it diverges (analyze refuses one that falls through)
+            .ArmExpr(e: x) :> lowerExpr(c, x)
+        }
+    }
+
+    // `fail E.V(args)` (analyze's FFail).
+    fn failStmt(c: LC, s: AStmt, f: AFail) -> Stmt[] {
+        const ff: FailFact | not = failFact(c.t.fails, s.nid)
+        return match ff {
+            .FFail(err: e, idx: i) :> [Stmt.Fail(e, i, lowerExprs(c, f.args))]
+            .FHandled(h: x) :> []
+            .FArm(idx: x) :> []
+            not :> []
+        }
+    }
+
+    // An expression statement, with the Attempt its whole value — or its
+    // assigned value — needs before it.
+    fn evalStmt(c: LC, e: AExpr) -> Stmt[] {
+        const pre: Stmt[] = attemptsFor(c, e)
+        if (pre.length > 0) {
+            const h: HandledFact | not = handledFactOf(c.t, e.nid)
+            if (h is some) {
+                if (h.stmt) return pre
+            }
+        }
+        const v: AExpr | not = assignedValueOf(e.k)
+        return pre.concat(attemptsFor(c, v)).concat(exprStmt(c, e))
+    }
+
+    // The value of an assignment `t = v` (only an assignment's — an edit call's
+    // argument is never a handling form: analyze refuses it there).
+    fn assignedValueOf(k: AExprK) -> AExpr | not {
+        return match k {
+            .Assign(target: t, value: v) :> v
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: x) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
+            .Handled(h: x) :> not
+        }
+    }
+
+    fn handledOfK(k: AExprK) -> AHandled | not {
+        return match k {
+            .Handled(h: h) :> h
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: x) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
+            .Sql(q: q) :> not
+        }
+    }
+
+    fn sqlOfExpr(k: AExprK) -> ASql | not {
+        return match k {
+            .Sql(q: q) :> q
+            .Handled(h: x) :> not
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: x) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
+        }
+    }
+
+    // The error enums the program's Core names (a `!` function's, an
+    // Attempt's, a Fail's) — a built-in enum's TypeDef ships only then.
+    fn usedErrs(t: Tables) -> int[] {
+        let out: int[] = []
+        for (const f of t.fns) {
+            const e: Sym | not = f.err
+            if (e is some) out = out.concat([e.id])
+        }
+        for (const ff of t.fails.facts) { out = out.concat(failFactErrs(ff)) }
+        return out
+    }
+
+    fn failFactErrs(f: FailFact) -> int[] {
+        return match f {
+            .FHandled(h: h) :> [h.err.id].concat(maybeId(h.into))
+            .FFail(err: e) :> [e.id]
+            .FArm(idx: x) :> []
+        }
+    }
+
+    fn maybeId(s: Sym | not) -> int[] {
+        if (s is not) return []
+        return [s.id]
     }
 
     // s451 (U1a) — a `?{}` query: its literal runs and its values, with the
@@ -1576,9 +1912,20 @@ ${
     // appearance left-to-right" — the lowered values are compared structurally
     // (`==` on Core Expr: the same local, the same call, the same literal), so
     // a repeated value is ONE parameter, evaluated once.
-    fn sqlExpr(c: LC, e: AExpr, q: ASql) -> Expr {
+    fn sqlQueryOf(c: LC, e: AExpr, q: ASql) -> SqlQuery {
         const info: SqlInfo | not = sqlInfo(c.t, e.nid)
-        if (info is not) return missing()
+        let db: Sym = mkSym(-1, "nodb")
+        let kind: SqlKind = SqlKind.SqlWrite
+        let reads: SqlTables = SqlTables.TablesUnknown
+        let writes: SqlTables = SqlTables.TablesUnknown
+        let columns: SqlColumns = SqlColumns.ColsUnknown
+        if (info is some) {
+            db = info.db
+            kind = info.kind
+            reads = info.reads
+            writes = info.writes
+            columns = info.columns
+        }
         let params: Expr[] = []
         let slots: int[] = []
         for (const p of q.params) {
@@ -1591,9 +1938,9 @@ ${
                 slots = slots.concat([at])
             }
         }
-        return Expr.Sql({ db: info.db, chunks: q.chunks, params: params, slots: slots, mode: sqlMode(q.mode),
-                          kind: info.kind, reads: info.reads, writes: info.writes, columns: info.columns,
-                          nobatch: q.nobatch, site: { n: e.nid } })
+        return { db: db, chunks: q.chunks, params: params, slots: slots, mode: sqlMode(q.mode),
+                 kind: kind, reads: reads, writes: writes, columns: columns,
+                 nobatch: q.nobatch, site: { n: e.nid } }
     }
 
     fn exprIndex(es: Expr[], x: Expr) -> int {
@@ -1645,7 +1992,14 @@ ${
         let decls: Decl[] = []
         for (const d of t.decls) { decls = decls.concat([lowerDecl(t, ss, d)]) }
         let types: TypeDef[] = []
-        for (const ti of t.types) { types = types.concat([ti.def]) }
+        // s451 (Ue): a built-in error enum ships only when the Core names it
+        const used: int[] = usedErrs(t)
+        let sqlError: Sym | not = not
+        for (const ti of t.types) {
+            const ts: Sym = typeDefSym(ti.def)
+            if (ti.file != builtinFile() || used.indexOf(ts.id) >= 0) types = types.concat([ti.def])
+            if (ti.file == builtinFile() && ti.name == "SqlError" && used.indexOf(ts.id) >= 0) sqlError = ts
+        }
         const fsx: FnSyntax[] = fnSyntaxes(tp.files)
         let fns: Fn[] = []
         let server: ServerFn[] = []
@@ -1660,8 +2014,8 @@ ${
         }
         const dbs: Db[] = t.server.dbs
         const reset: boolean = resetShips(tp.files, t)
-        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset }
-        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset }
+        const pre: CoreProgram = { program: t.program, decls: decls, types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError }
+        const core: CoreProgram = { program: t.program, decls: gateDecls(pre), types: types, fns: fns, server: server, dbs: dbs, reset: reset, sqlError: sqlError }
         return { core: core, diags: tp.diags }
     }
 
@@ -1835,7 +2189,6 @@ ${
             .Lambda(params: x) :> []
             .SeqCall(op: x) :> []
             .Validity(of: x) :> []
-            .Sql(q: x) :> []
         }
     }
 

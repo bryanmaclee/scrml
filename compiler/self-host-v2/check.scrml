@@ -73,6 +73,7 @@ ${
     import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr, SeqFn, Attr, Block,
              EditKind, Check, Stmt, View, EffectDep, Field, Decl, Fn, CoreProgram, CapOwner, TransitionGraph,
              DeclKind, SurfaceProp, ValidityOf, Persist, PersistStore, ServerFn, SqlQuery, Db,
+             Pattern, Failable, OkArm, ErrArm,
              capOwner, grantsAnyWrite, findDecl, findTypeDef, findFn, findServerFn, findDb } from "./core.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
@@ -99,7 +100,264 @@ ${
         for (const s of p.server) {
             for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, [], n)) }
         }
-        return out.concat(checkSuspends(p)).concat(checkServer(p))
+        return out.concat(checkSuspends(p)).concat(checkServer(p)).concat(checkFailures(p))
+    }
+
+    // =========================================================================
+    // s451 (Ue) — THE ERROR MODEL IN CORE (SPEC §19). A failable is only ever
+    // the call of an Attempt whose arms are total over its error enum, and an
+    // error value is only ever built by a Fail in a function that declares that
+    // enum — so "an unhandled `!` call" (§19.4.3, E-ERROR-002) and "`fail` in
+    // a function not declared `!`" (§19.3.3, E-ERROR-001) are unrepresentable:
+    //   C-E1 no Expr.Call names a Fn / ServerFn whose `err` is some
+    //   C-E2 an Attempt's `err` is its call's error enum (a function's `err`;
+    //        the program's `sqlError` for a query) and an EnumDef; every arm
+    //        is PWild or PVariant(err, i, binds) with `binds.length` = variant
+    //        i's arity; the arms are TOTAL (a PWild, or every variant covered)
+    //   C-E3 an Attempt with a `result`: the ok arm and every arm carry a
+    //        `value` or DIVERGE (end in Return / Fail, or an If both of whose
+    //        branches diverge); without one, no branch carries a value
+    //   C-E4 a Fail stands only in a Fn / ServerFn whose `err` is the Fail's
+    //        `err` (never in a declaration's initializers / views / handlers),
+    //        names a variant of it, with one value per payload field
+    // (C16 covers a Fail inside a deferred body, C-SQL1 / C-S2 a query.)
+    // =========================================================================
+    fn checkFailures(p: CoreProgram) -> string[] {
+        let out: string[] = []
+        for (const d of p.decls) {
+            for (const n of allNodes(Node.NDecl(d))) {
+                out = out.concat(callFailable(p, n))
+                if (nodeFailErr(n) is some) out = out.concat(["C-E4: a Fail inside <" + d.sym.hint + "> — a Fail stands only in the body of a function declared `!`"])
+            }
+        }
+        for (const f of p.fns) {
+            out = out.concat(fnFailures(p, Node.NFn(f), f.sym.hint, f.err))
+        }
+        for (const s of p.server) {
+            out = out.concat(fnFailures(p, Node.NServerFn(s), s.sym.hint, s.err))
+        }
+        return out
+    }
+
+    fn fnFailures(p: CoreProgram, root: Node, name: string, err: Sym | not) -> string[] {
+        let out: string[] = []
+        for (const n of allNodes(root)) {
+            out = out.concat(callFailable(p, n))
+            const fe: FailAt | not = nodeFailErr(n)
+            if (fe is some) out = out.concat(checkFail(p, name, err, fe))
+        }
+        return out
+    }
+
+    // C-E1: a plain call of a failable function.
+    fn callFailable(p: CoreProgram, n: Node) -> string[] {
+        const c: Sym | not = exprNodeCallee(n)
+        if (c is not) return []
+        const e: Sym | not = fnErr(p, c)
+        if (e is some) return ["C-E1: a plain call of " + c.hint + "(), which is declared `!` — a failable call stands only as an Attempt's call (§19.4.3)"]
+        return []
+    }
+
+    fn exprNodeCallee(n: Node) -> Sym | not {
+        return match n {
+            .NExpr(e: e) :> exprCallee(e)
+            .NStmt(s: x) :> not
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NPlace(pl: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
+    // The error enum of function `s` (a Fn or a ServerFn) — not when it cannot fail.
+    fn fnErr(p: CoreProgram, s: Sym) -> Sym | not {
+        const f: Fn | not = findFn(p, s)
+        if (f is some) return f.err
+        const sf: ServerFn | not = findServerFn(p, s)
+        if (sf is some) return sf.err
+        return not
+    }
+
+    type FailAt:struct = { err: Sym, idx: int, args: int }
+
+    fn nodeFailErr(n: Node) -> FailAt | not {
+        return match n {
+            .NStmt(s: s) :> stmtFail(s)
+            .NExpr(e: x) :> not
+            .NProgram(p: x) :> not
+            .NDecl(d: x) :> not
+            .NField(f: x) :> not
+            .NFn(f: x) :> not
+            .NServerFn(f: x) :> not
+            .NBlock(b: x) :> not
+            .NPlace(pl: x) :> not
+            .NInst(i: x) :> not
+            .NPattern(pat: x) :> not
+            .NEdit(k: x) :> not
+            .NView(v: x) :> not
+            .NAttr(a: x) :> not
+        }
+    }
+
+    fn stmtFail(s: Stmt) -> FailAt | not {
+        return match s {
+            .Fail(err: e, idx: i, args: args) :> { err: e, idx: i, args: args.length }
+            .Attempt(result: x) :> not
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+        }
+    }
+
+    // C-E4
+    fn checkFail(p: CoreProgram, name: string, err: Sym | not, fe: FailAt) -> string[] {
+        if (err is not) return ["C-E4: a Fail in " + name + "(), which is not declared `!` (§19.3.3)"]
+        if (err.id != fe.err.id) return ["C-E4: a Fail of `" + fe.err.hint + "` in " + name + "(), whose error type is `" + err.hint + "`"]
+        const n: int = variantArityOf(p, fe.err, fe.idx)
+        if (n < 0) return ["C-E4: a Fail names variant #" + fe.idx + " of `" + fe.err.hint + "`, which has no such variant"]
+        if (n != fe.args) return ["C-E4: a Fail of `" + fe.err.hint + "` variant #" + fe.idx + " carries " + fe.args + " value(s) for " + n + " payload field(s)"]
+        return []
+    }
+
+    // The payload arity of variant `idx` of enum `es` (-1: no such enum / variant).
+    fn variantArityOf(p: CoreProgram, es: Sym, idx: int) -> int {
+        const t: TypeDef | not = findTypeDef(p, es)
+        if (t is not) return -1
+        const vs: VariantDef[] = enumVariantDefs(t)
+        if (idx < 0 || idx >= vs.length) return -1
+        return vs[idx].fields.length
+    }
+
+    fn enumVariantDefs(t: TypeDef) -> VariantDef[] {
+        return match t {
+            .EnumDef(variants: vs) :> vs
+            .StructDef(fields: x) :> []
+        }
+    }
+
+    fn isEnumDef(t: TypeDef) -> boolean {
+        return match t {
+            .EnumDef(variants: x) :> true
+            .StructDef(fields: x) :> false
+        }
+    }
+
+    // C-SQL1 (a query's text and values) + C-E2 + C-E3, for one Attempt.
+    fn checkAttempt(p: CoreProgram, result: Sym | not, call: Failable, err: Sym, ok: OkArm, arms: ErrArm[]) -> string[] {
+        let out: string[] = []
+        const q: SqlQuery | not = failableSql(call)
+        let want: Sym | not = p.sqlError
+        if (q is some) {
+            out = out.concat(checkSqlQuery(p, q))
+        } else {
+            const f: Sym | not = failableFn(call)
+            want = not
+            if (f is some) {
+                want = fnErr(p, f)
+                if (findFn(p, f) is not && findServerFn(p, f) is not) out = out.concat(["C-E2: an Attempt calls `" + f.hint + "`, which is not a function of the program"])
+                if (want is not && (findFn(p, f) is some || findServerFn(p, f) is some)) out = out.concat(["C-E2: an Attempt calls " + f.hint + "(), which is not declared `!` (nothing to handle)"])
+            }
+        }
+        if (want is some) {
+            if (want.id != err.id) out = out.concat(["C-E2: an Attempt handles `" + err.hint + "` but its call fails with `" + want.hint + "`"])
+        }
+        const t: TypeDef | not = findTypeDef(p, err)
+        if (t is not) return out.concat(["C-E2: an Attempt's error type `" + err.hint + "` is not a type of the program"])
+        if (!isEnumDef(t)) return out.concat(["C-E2: an Attempt's error type `" + err.hint + "` is not an enum (§19.4.4.1)"])
+        const vs: VariantDef[] = enumVariantDefs(t)
+        let covered: int[] = []
+        let wild = false
+        for (const a of arms) {
+            const pr: ArmPat = armPat(a.pat)
+            if (pr.wild) {
+                wild = true
+            } else if (pr.enumId != err.id || pr.idx < 0 || pr.idx >= vs.length) {
+                out = out.concat(["C-E2: an Attempt arm matches something other than a variant of `" + err.hint + "`"])
+            } else {
+                if (pr.binds != vs[pr.idx].fields.length) out = out.concat(["C-E2: an Attempt arm binds " + pr.binds + " value(s) of a variant with " + vs[pr.idx].fields.length + " payload field(s)"])
+                covered = covered.concat([pr.idx])
+            }
+        }
+        if (!wild) {
+            let i: int = 0
+            while (i < vs.length) {
+                if (covered.indexOf(i) < 0) out = out.concat(["C-E2: an Attempt's arms do not cover variant #" + i + " of `" + err.hint + "` (they are total by construction — E-TYPE-080 / E-TYPE-020)"])
+                i = i + 1
+            }
+        }
+        // C-E3
+        const needs: boolean = result is some
+        if (!branchOk(needs, ok.body, ok.value)) out = out.concat([valueProblem(needs, "the success branch")])
+        for (const a of arms) {
+            if (!branchOk(needs, a.body, a.value)) out = out.concat([valueProblem(needs, "a failure arm")])
+        }
+        return out
+    }
+
+    fn valueProblem(needs: boolean, what: string) -> string {
+        if (needs) return "C-E3: an Attempt with a result: " + what + " has no value and does not diverge"
+        return "C-E3: an Attempt without a result: " + what + " carries a value"
+    }
+
+    fn branchOk(needs: boolean, b: Block, v: Expr | not) -> boolean {
+        if (!needs) return v is not
+        if (v is some) return true
+        return diverges(b)
+    }
+
+    // Does every path through `b` end in a Return or a Fail?
+    fn diverges(b: Block) -> boolean {
+        if (b.stmts.length == 0) return false
+        return stmtDiverges(b.stmts[b.stmts.length - 1])
+    }
+
+    fn stmtDiverges(s: Stmt) -> boolean {
+        return match s {
+            .Return(e: x) :> true
+            .Fail(err: x) :> true
+            .If(thenB: t, elseB: el) :> ifDiverges(t, el)
+            .Attempt(result: x) :> false
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Write(cap: x) :> false
+            .Commit(writes: x) :> false
+            .Eval(e: x) :> false
+            .Suspend(bind: x) :> false
+            .ResetSurface(of: x) :> false
+            .Defer(body: x) :> false
+            .Unpersist(decl: x) :> false
+        }
+    }
+
+    fn ifDiverges(t: Block, el: Block | not) -> boolean {
+        if (el is not) return false
+        return diverges(t) && diverges(el)
+    }
+
+    type ArmPat:struct = { wild: boolean, enumId: int, idx: int, binds: int }
+
+    fn armPat(pat: Pattern) -> ArmPat {
+        return match pat {
+            .PWild :> { wild: true, enumId: -1, idx: -1, binds: 0 }
+            .PVariant(enumSym: es, idx: i, binds: bs) :> { wild: false, enumId: es.id, idx: i, binds: bs.length }
+            .PLit(lit: x) :> { wild: false, enumId: -1, idx: -1, binds: 0 }
+        }
     }
 
     // =========================================================================
@@ -114,7 +372,7 @@ ${
     //          surface, no Suspend — directly, or through a Fn it calls
     //          (transitively). Cells are client-held (§6.6.9); a server body
     //          awaits in place. (§12.4 R2's E-ROUTE-002, restated over Core.)
-    //   C-S2   an Expr.Sql stands only in a ServerFn body — never in a Fn (a
+    //   C-S2   a query (an Attempt's FSql) stands only in a ServerFn body — never in a Fn (a
     //          pure `fn` included) or a declaration's initializers / views
     //   C-S3   client code (a Fn, a declaration) never calls a ServerFn as a
     //          plain Call — a client→server call is a suspension (unit U1b)
@@ -251,6 +509,8 @@ ${
             .Suspend(bind: x) :> "suspends (a server body awaits in place)"
             .ResetSurface(of: x) :> "resets a validity surface"
             .Unpersist(decl: x) :> "removes a persisted cell's storage"
+            .Attempt(result: x) :> ""
+            .Fail(err: x) :> ""
             .Let(sym: x) :> ""
             .Assign(local: x) :> ""
             .If(cond: x) :> ""
@@ -276,20 +536,19 @@ ${
             .Host(call: x) :> ""
             .Lambda(params: x) :> ""
             .SeqCall(op: x) :> ""
-            .Sql(q: x) :> ""
         }
     }
 
     fn nodeIsSql(n: Node) -> boolean {
         return match n {
-            .NExpr(e: e) :> exprIsSql(e)
+            .NStmt(s: s) :> stmtSql(s) is some
+            .NExpr(e: x) :> false
             .NProgram(p: x) :> false
             .NDecl(d: x) :> false
             .NField(f: x) :> false
             .NFn(f: x) :> false
             .NServerFn(f: x) :> false
             .NBlock(b: x) :> false
-            .NStmt(s: x) :> false
             .NPlace(pl: x) :> false
             .NInst(i: x) :> false
             .NPattern(pat: x) :> false
@@ -299,36 +558,69 @@ ${
         }
     }
 
-    fn exprIsSql(e: Expr) -> boolean {
-        return match e {
-            .Sql(q: x) :> true
-            .Lit(lit: x) :> false
-            .Local(sym: x) :> false
-            .Read(place: x) :> false
-            .Call(callee: x) :> false
-            .Prim(op: x) :> false
-            .Match(scrut: x) :> false
-            .ArrayOf(elems: x) :> false
-            .StructOf(ty: x) :> false
-            .Handle(inst: x) :> false
-            .InitOf(decl: x) :> false
-            .Host(call: x) :> false
-            .Lambda(params: x) :> false
-            .SeqCall(op: x) :> false
-            .Validity(of: x) :> false
+    // s451 (Ue): a query is the call of an Attempt (Failable.FSql) — its query, else not.
+    fn stmtSql(s: Stmt) -> SqlQuery | not {
+        return match s {
+            .Attempt(call: c) :> failableSql(c)
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Fail(err: x) :> not
+        }
+    }
+
+    fn failableSql(c: Failable) -> SqlQuery | not {
+        return match c {
+            .FSql(q: q) :> q
+            .FCall(fn: x) :> not
+        }
+    }
+
+    // s451 (Ue): the function an Attempt calls (a failable call is not an
+    // Expr.Call — C-E1), else not.
+    fn stmtCallee(s: Stmt) -> Sym | not {
+        return match s {
+            .Attempt(call: c) :> failableFn(c)
+            .Let(sym: x) :> not
+            .Assign(local: x) :> not
+            .Write(cap: x) :> not
+            .Commit(writes: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+            .Suspend(bind: x) :> not
+            .ResetSurface(of: x) :> not
+            .Defer(body: x) :> not
+            .Unpersist(decl: x) :> not
+            .Fail(err: x) :> not
+        }
+    }
+
+    fn failableFn(c: Failable) -> Sym | not {
+        return match c {
+            .FCall(fn: f) :> f
+            .FSql(q: x) :> not
         }
     }
 
     fn nodeCallee(n: Node) -> Sym | not {
         return match n {
             .NExpr(e: e) :> exprCallee(e)
+            .NStmt(s: s) :> stmtCallee(s)
             .NProgram(p: x) :> not
             .NDecl(d: x) :> not
             .NField(f: x) :> not
             .NFn(f: x) :> not
             .NServerFn(f: x) :> not
             .NBlock(b: x) :> not
-            .NStmt(s: x) :> not
             .NPlace(pl: x) :> not
             .NInst(i: x) :> not
             .NPattern(pat: x) :> not
@@ -354,7 +646,6 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
-            .Sql(q: x) :> not
         }
     }
 
@@ -432,6 +723,8 @@ ${
             .ResetSurface(of: x) :> ["C8: a bind's write is not a Write"]
             .Defer(body: x) :> ["C8: a bind's write is not a Write"]
             .Unpersist(decl: x) :> ["C8: a bind's write is not a Write"]
+            .Attempt(result: x) :> ["C8: a bind's write is not a Write"]
+            .Fail(err: x) :> ["C8: a bind's write is not a Write"]
         }
     }
 
@@ -482,7 +775,6 @@ ${
             .Lambda(params: x) :> false
             .SeqCall(op: x) :> false
             .Validity(of: x) :> false
-            .Sql(q: x) :> false
         }
     }
 
@@ -503,7 +795,6 @@ ${
             .Lambda(params: x) :> "(not a cell read)"
             .SeqCall(op: x) :> "(not a cell read)"
             .Validity(of: x) :> "(not a cell read)"
-            .Sql(q: x) :> "(not a cell read)"
         }
     }
 
@@ -693,6 +984,8 @@ ${
         return match s {
             .ResetSurface(of: v) :> true
             .Unpersist(decl: x) :> false
+            .Attempt(result: x) :> false
+            .Fail(err: x) :> false
             .Write(cap: x) :> false
             .Let(sym: x) :> false
             .Assign(local: x) :> false
@@ -708,6 +1001,8 @@ ${
     fn isUnpersist(s: Stmt) -> boolean {
         return match s {
             .Unpersist(decl: x) :> true
+            .Attempt(result: x) :> false
+            .Fail(err: x) :> false
             .ResetSurface(of: v) :> false
             .Write(cap: x) :> false
             .Let(sym: x) :> false
@@ -781,6 +1076,8 @@ ${
     fn unpersistKey(s: Stmt) -> string {
         return match s {
             .Unpersist(decl: d, idx: x) :> d.hint + "#" + d.id + "." + x
+            .Attempt(result: x) :> ""
+            .Fail(err: x) :> ""
             .ResetSurface(of: v) :> ""
             .Write(cap: x) :> ""
             .Let(sym: x) :> ""
@@ -815,6 +1112,8 @@ ${
             .ResetSurface(of: x) :> not
             .Defer(body: x) :> not
             .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
         }
     }
 
@@ -842,7 +1141,7 @@ ${
 
     fn nodeWriteWitness(p: CoreProgram, n: Node, seen: int[]) -> string {
         return match n {
-            .NStmt(s: s) :> stmtWriteWitness(p, s)
+            .NStmt(s: s) :> stmtOrCallWitness(p, s, seen)
             .NExpr(e: e) :> callWriteWitness(p, e, seen)
             .NProgram(p: q) :> ""
             .NDecl(d: d) :> ""
@@ -984,7 +1283,19 @@ ${
             .ResetSurface(of: x) :> ""
             .Defer(body: x) :> ""
             .Unpersist(decl: x) :> ""
+            .Attempt(result: x) :> ""
+            .Fail(err: x) :> ""
         }
+    }
+
+    // s451 (Ue): a failable call is an Attempt's, not an Expr.Call — a write
+    // through it is found here.
+    fn stmtOrCallWitness(p: CoreProgram, s: Stmt, seen: int[]) -> string {
+        const w: string = stmtWriteWitness(p, s)
+        if (w != "") return w
+        const callee: Sym | not = stmtCallee(s)
+        if (callee is not) return ""
+        return fnWriteWitness(p, callee, seen)
     }
 
     fn capText(p: CoreProgram, cap: Sym) -> string {
@@ -996,6 +1307,10 @@ ${
     fn callWriteWitness(p: CoreProgram, e: Expr, seen: int[]) -> string {
         const callee: Sym | not = calledSym(e)
         if (callee is not) return ""
+        return fnWriteWitness(p, callee, seen)
+    }
+
+    fn fnWriteWitness(p: CoreProgram, callee: Sym, seen: int[]) -> string {
         if (seen.indexOf(callee.id) >= 0) return ""
         const f: Fn | not = findFn(p, callee)
         if (f is not) return ""                       // C2 reports an unknown callee
@@ -1020,7 +1335,6 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
-            .Sql(q: x) :> not
         }
     }
 
@@ -1073,6 +1387,8 @@ ${
             .Suspend(then: t) :> t
             .ResetSurface(of: x) :> not
             .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
             .Let(sym: x) :> not
             .Assign(local: x) :> not
             .Write(cap: x) :> not
@@ -1151,6 +1467,8 @@ ${
             .ResetSurface(of: v) :> checkSurface(p, encl, v)
             .Defer(body: d) :> checkDefer(encl, d)
             .Unpersist(decl: d, inst: i, idx: x) :> checkUnpersist(p, encl, d, i, x)
+            .Attempt(result: r, call: c, err: e, ok: ok, arms: arms) :> checkAttempt(p, r, c, e, ok, arms)
+            .Fail(err: x) :> []
         }
     }
 
@@ -1198,6 +1516,8 @@ ${
             .Eval(e: x) :> ""
             .ResetSurface(of: x) :> ""
             .Unpersist(decl: x) :> ""
+            .Attempt(result: x) :> ""
+            .Fail(err: x) :> "a Fail"
         }
     }
 
@@ -1229,6 +1549,8 @@ ${
             .ResetSurface(of: x) :> "a ResetSurface inside a Commit"
             .Defer(body: x) :> "a Defer inside a Commit"
             .Unpersist(decl: x) :> "an Unpersist inside a Commit"
+            .Attempt(result: x) :> "an Attempt inside a Commit"
+            .Fail(err: x) :> "a Fail inside a Commit"
         }
     }
 
@@ -1248,7 +1570,6 @@ ${
             .Lambda(params: x) :> "a Commit write's value is not a Local (the snapshot)"
             .SeqCall(op: x) :> "a Commit write's value is not a Local (the snapshot)"
             .Validity(of: x) :> "a Commit write's value is not a Local (the snapshot)"
-            .Sql(q: x) :> "a Commit write's value is not a Local (the snapshot)"
         }
     }
 
@@ -1330,7 +1651,6 @@ ${
             .Host(call: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Lambda(params: x) :> "a shrink-anywhere's value is not a filter of the field"
             .Validity(of: x) :> "a shrink-anywhere's value is not a filter of the field"
-            .Sql(q: x) :> "a shrink-anywhere's value is not a filter of the field"
         }
     }
 
@@ -1596,6 +1916,8 @@ ${
             .ResetSurface(of: x) :> not
             .Defer(body: x) :> not
             .Unpersist(decl: x) :> not
+            .Attempt(result: x) :> not
+            .Fail(err: x) :> not
         }
     }
 
@@ -1620,7 +1942,6 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
-            .Sql(q: x) :> not
         }
     }
 
@@ -1641,7 +1962,6 @@ ${
             .Lambda(params: ps) :> []
             .SeqCall(op: o) :> []
             .Validity(of: v, prop: pr) :> checkSurfaceRead(p, encl, v, pr)
-            .Sql(q: q) :> checkSqlQuery(p, q)
         }
     }
 
@@ -1709,7 +2029,6 @@ ${
             .Lambda(params: x) :> not
             .SeqCall(op: x) :> not
             .Validity(of: x) :> not
-            .Sql(q: x) :> not
         }
     }
 
