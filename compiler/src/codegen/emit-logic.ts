@@ -3513,11 +3513,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // terminator; filter it out of the chain and note the suppression.
       const _tenantAcross = _rawCalls.some((c) => c && c.method === "acrossTenants");
       const calls: any[] = _rawCalls.filter((c) => c && c.method !== "acrossTenants");
-      const _effMethod: string = calls.length > 0 ? calls[0].method : "";
-      const _isReadSql = _effMethod === "get" || _effMethod === "first" || _effMethod === "all";
-      // §14.8.10 — for a read, add `tenant_id` to the projection + get the row-tag
-      // wrapper; for an INSERT, inject the ambient tenant. No-op when tenant inactive.
-      const { effectiveSql: _tenantSql, tenantTag: _tenantTag } = _lowerTenantForQuery(rawQuery, _tenantAcross, _isReadSql);
+      // §14.8.10 — for a tenant-scoped read (any terminator), add its key
+      // column(s) to the projection + get the SOURCE-filter wrapper `_tenantScope`,
+      // applied to the driver's row array before `.get()` takes `[0]` and before
+      // the §14.8.9 / §39.4 per-row wrappers; for an INSERT, inject the ambient
+      // tenant. No-op (identity) when tenant inactive.
+      const { effectiveSql: _tenantSql, tenantScope: _tenantScope } = _lowerTenantForQuery(rawQuery, _tenantAcross);
       const { sql, params, segments } = extractSqlParams(_tenantSql);
       const db = opts.dbVar ?? fallbackSqlHandle();
 
@@ -3653,52 +3654,56 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // §14.8.9 — tag the SELECT row result with the protected-origin
         // descriptor (no-op when protect inactive / no protected column).
         if (params.length > 0) {
-          const tagged = taggedFromParams();
+          const rows = _tenantScope(`await ${taggedFromParams()}`);
           if (method === "get" || method === "first") {
-            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`(await ${tagged})[0] ?? null`, rawQuery, true), rawQuery)) + ";";
+            return protectTagSqlResult(boolCoerceSqlResult(`(${rows})[0] ?? null`, rawQuery, true), rawQuery) + ";";
           }
           if (method === "all") {
-            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${tagged}`, rawQuery, false), rawQuery)) + ";";
+            return protectTagSqlResult(boolCoerceSqlResult(rows, rawQuery, false), rawQuery) + ";";
           }
           // ⚑ S443 round 6: `.run()` / any other terminator / a bare `?{}` is the
           // driver's result array when used as a value (`let r = ?{`SELECT *…`}.run()`,
           // `UPDATE … RETURNING *`) — measured serving `passwordHash` untagged. Every
           // terminator below is tagged; a statement with no protected output emits
           // unchanged (protectTagSqlResult is a no-op for it).
-          return protectTagSqlResult(`await ${tagged}`, rawQuery) + ";";
+          return protectTagSqlResult(rows, rawQuery) + ";";
         }
 
         // Branch B: SQL uses bare ? placeholders + explicit call.args.
         // Use sql.unsafe(rawSql, [argArray]) — unsafe() accepts a bound array.
         if (call.args && call.args.trim()) {
           const argList = emitExprField(null, call.args.trim(), _makeExprCtx(opts));
+          const rows = _tenantScope(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`);
           if (method === "get" || method === "first") {
-            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`(await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]))[0] ?? null`, rawQuery, true), rawQuery)) + ";";
+            return protectTagSqlResult(boolCoerceSqlResult(`(${rows})[0] ?? null`, rawQuery, true), rawQuery) + ";";
           }
           if (method === "all") {
-            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`, rawQuery, false), rawQuery)) + ";";
+            return protectTagSqlResult(boolCoerceSqlResult(rows, rawQuery, false), rawQuery) + ";";
           }
-          return protectTagSqlResult(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`, rawQuery) + ";";
+          return protectTagSqlResult(rows, rawQuery) + ";";
         }
 
         // Branch C: no params, no call.args. Bare tagged template.
         const taggedNoParams = `${db}\`${sql.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${")}\``;
+        const rows = _tenantScope(`await ${taggedNoParams}`);
         if (method === "get" || method === "first") {
-          return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`(await ${taggedNoParams})[0] ?? null`, rawQuery, true), rawQuery)) + ";";
+          return protectTagSqlResult(boolCoerceSqlResult(`(${rows})[0] ?? null`, rawQuery, true), rawQuery) + ";";
         }
         if (method === "all") {
-          return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${taggedNoParams}`, rawQuery, false), rawQuery)) + ";";
+          return protectTagSqlResult(boolCoerceSqlResult(rows, rawQuery, false), rawQuery) + ";";
         }
-        return protectTagSqlResult(`await ${taggedNoParams}`, rawQuery) + ";";
+        return protectTagSqlResult(rows, rawQuery) + ";";
       }
 
-      // No chained call.
+      // No chained call. A bare `?{}` used as a value is the driver's row array —
+      // a tenant-scoped SELECT is filtered at the source like every read.
       if (params.length > 0) {
         // Defaults to .run() semantics — value dropped.
-        return protectTagSqlResult(`await ${taggedFromParams()}`, rawQuery) + ";";
+        return protectTagSqlResult(_tenantScope(`await ${taggedFromParams()}`), rawQuery) + ";";
       }
       // Static DDL — route through unsafe() so the runtime accepts no-param SQL.
-      return protectTagSqlResult(`await ${db}.unsafe(${JSON.stringify(rawQuery)})`, rawQuery) + ";";
+      // `_tenantSql` is `rawQuery` unless the floor added a key column to a SELECT.
+      return protectTagSqlResult(_tenantScope(`await ${db}.unsafe(${JSON.stringify(_tenantSql)})`), rawQuery) + ";";
     }
 
     case "fail-expr": {
