@@ -18,6 +18,7 @@
  */
 
 import { scanClassesFromHtml, getAllUsedCSS } from "../tailwind-classes.js";
+import { setFileSqlFallback, fallbackSqlHandle } from "./sql-handle-name.ts";
 import { collectClassNamesFromAst } from "./collect-class-names.ts";
 import { basename, dirname, relative, resolve } from "path";
 import { toPosix } from "../path-canonical.js";
@@ -2328,6 +2329,10 @@ export function runCG(input: CgInput): CgOutput {
   try {
     for (const fileAST of files) {
       const filePath = (fileAST as any).filePath as string;
+      // §8.1.1 (S451 review) — this file's fallback database handle: `_scrml_sql` with
+      // one database, UNRESOLVED (a compile error) with two or more — a lowering that
+      // was told no handle never lands on the file's first database.
+      setFileSqlFallback(resolveDbScopes(getNodes(fileAST as never), filePath || null).handles.length);
       // §20.6 — register this file's source for log() file:line resolution.
       registerFileSource(filePath, ((fileAST as any)?._sourceText ?? "") as string);
       // §20.6 (shadowing) — a file-level `function log` shadows the builtin
@@ -2559,7 +2564,7 @@ export function runCG(input: CgInput): CgOutput {
           encodingCtx: null,
           mode,
           testMode,
-          dbVar: "_scrml_sql",
+          dbVar: fallbackSqlHandle(), // S451: never the first database of a multi-database file
           workerNames: [],
           errors,
           registry: new BindingRegistry(),
@@ -2643,7 +2648,7 @@ export function runCG(input: CgInput): CgOutput {
         encodingCtx: null,
         mode,
         testMode,
-        dbVar: "_scrml_sql",
+        dbVar: fallbackSqlHandle(), // S451: never the first database of a multi-database file
         workerNames: fileWorkerNames,
         errors,
         registry,
@@ -3154,7 +3159,7 @@ export function runCG(input: CgInput): CgOutput {
           encodingCtx: null,
           mode: "library",
           testMode,
-          dbVar: "_scrml_sql",
+          dbVar: fallbackSqlHandle(), // S451: never the first database of a multi-database file
           workerNames: [],
           errors,
           registry: new BindingRegistry(),

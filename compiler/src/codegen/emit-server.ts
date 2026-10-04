@@ -36,6 +36,7 @@ import { SQL_TX_GUARD_HELPER_LINES, guardHandleExpr, requestScopeLines, CONCURRE
 const SSE_STREAM_END_LINE = "        if (await _scrml_db_stream_end()) { try { _scrml_ctrl.enqueue(_scrml_enc.encode('event: error\\ndata: ' + JSON.stringify({ error: { kind: \"TransactionLeftOpen\", message: \"the stream ended with its database transaction still open; its writes were rolled back (SPEC §19.10.6)\" } }) + '\\n\\n')); } catch (_scrml_enqErr) { /* the client is already gone */ } }";
 import { dbAttrValue, resolveDbScopes, dbHandlesWithin, type DbScopeResolution, type DbHandle } from "../db-ownership.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
+import { sqlHandleRegExp, compareSqlHandles, UNRESOLVED_SQL_HANDLE, DEFAULT_SQL_HANDLE, setFileSqlFallback, fallbackSqlHandle } from "./sql-handle-name.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER, resolveSpanLineCol } from "./log-loc.ts";
@@ -1768,6 +1769,9 @@ export function generateServerJs(
   // contains, threaded explicitly as `opts.dbVar` so no lowering path can fall back to
   // the file default; the §8.9.2 implicit envelope opens on that same handle.
   const _dbRes: DbScopeResolution = dbScopeResolutionFor(fileAST);
+  // S451 review — a lowering with no threaded handle defaults to `_scrml_sql` only in a
+  // single-database file; with two or more it gets UNRESOLVED (a compile error).
+  setFileSqlFallback(_dbRes.handles.length);
   const _dbScopesForFile = collectDbScopes(fileAST);
   const _DB_SITE_KINDS = new Set(["sql", "sql-ref", "transaction-block"]);
   /** The handle idents of the `?{}` / `<transaction>` sites inside `node`. */
@@ -1847,10 +1851,11 @@ export function generateServerJs(
   };
   // §8.1.1 / §44.7 — a `?{}` with NO database scope above it, in a file that declares
   // MORE THAN ONE database, used to run silently on the file's first one — which of
-  // them it meant is exactly what the file cannot say. It is E-SQL-004, except in a
-  // §44.7.1 module-with-db-context (a library-shaped file), where "the file's top-level
-  // `<db src=>` applies". (A file with no scope at all keeps the declaration-time
-  // E-SQL-004 below.)
+  // them it meant is exactly what the file cannot say. It is E-SQL-004. The §44.7.1
+  // module-with-db-context fallback ("the file's top-level `<db src=>` applies") names
+  // ONE database — §44.7.1 allows "at most one top-level `<db src="...">` block" — so
+  // a library-shaped file with two databases has no fallback either: E-SQL-004 too.
+  // (A file with no scope at all keeps the declaration-time E-SQL-004 below.)
   // ⚑ SCOPE OF THIS FIX, STATED: with exactly ONE database in the file an unscoped
   // `?{}` (the file-top `${ … }` beside `<program db=>` shape) still runs on that one
   // database, as before. §8.1.1 makes that E-SQL-004 too, but the divergence predates
@@ -1858,7 +1863,8 @@ export function generateServerJs(
   // no wrong-database hazard; refusing it is a separate acceptance change (11
   // conformance cases measured at S451) left to a ruling — see
   // docs/changes/s451-impl1-db-nearest/progress.md.
-  if (_dbRes.handles.length > 1 && !isLibraryShapedFile(fileAST)) {
+  if (_dbRes.handles.length > 1) {
+    const _libShaped = isLibraryShapedFile(fileAST);
     for (const site of _dbRes.sites) {
       if (site.handle !== null || site.node.kind === "transaction-block") continue;
       const sp: any = (site.node as any).span ?? {};
@@ -1867,7 +1873,11 @@ export function generateServerJs(
         "E-SQL-004: this `?{}` SQL block has no database scope above it. A `?{}` runs on its nearest " +
         "enclosing `<program db=>` or `<db src=>` (§8.1.1); this one sits outside every database scope " +
         "this file declares, so it would have no database of its own. Move it inside the `<program db=>` " +
-        "or `<db src=>` whose database it queries.",
+        "or `<db src=>` whose database it queries." +
+        (_libShaped
+          ? " (A module-with-db-context falls back to its top-level `<db src=>` only when it has exactly " +
+            "one — §44.7.1; this file declares more than one database.)"
+          : ""),
         { file: filePath, start: sp.start ?? 0, end: sp.end ?? 0, line: sp.line ?? 1, col: sp.col ?? 1 },
         "error",
       ));
@@ -4842,7 +4852,7 @@ export function generateServerJs(
       const _envelope = needsImplicitEnvelope(name);
       // §8.1.1 (S451) — the envelope's BEGIN / COMMIT / ROLLBACK go to the handle the
       // body's `?{}` sites run on, so the transaction wraps the queries it is for.
-      const _envDb: string = _fnDbVar(fnNode) ?? "_scrml_sql";
+      const _envDb: string = _fnDbVar(fnNode) ?? fallbackSqlHandle();
       // A9-Ext-4 D1 (2026-05-08): always-`!`-wrap CPS server endpoints.
       // For CPS-split functions, wrap the body in an outer try/catch that
       // serializes any thrown exception as a tagged scrml-error variant
@@ -6136,13 +6146,13 @@ export function generateServerJs(
     const _slTenant = _tenantActive && _tenantCtx.tenantScopedTables.has(table);
     if (_slTenant) _tenantStripsFromHandEmit.push(`SELECT * FROM ${table}`);
     if ((_slProtCols && _slProtCols.size > 0) || _slTenant) {
-      let _rowsExpr = `await ${_dbIdentAt(inst) ?? "_scrml_sql"}\`SELECT * FROM ${table}\``;
+      let _rowsExpr = `await ${_dbIdentAt(inst) ?? fallbackSqlHandle()}\`SELECT * FROM ${table}\``;
       if (_slProtCols && _slProtCols.size > 0) _rowsExpr = `_scrml_protect_tag(${_rowsExpr}, ${JSON.stringify([..._slProtCols])})`;
       if (_slTenant) _rowsExpr = `_scrml_tenant_tag(${_rowsExpr}, "tenant_id", false)`;
       lines.push(`  const _scrml_rows = ${_rowsExpr};`);
       lines.push(`  return new Response(JSON.stringify(${_egressRedact("_scrml_rows")}), {`);
     } else {
-      lines.push(`  const _scrml_rows = await ${_dbIdentAt(inst) ?? "_scrml_sql"}\`SELECT * FROM ${table}\`;`);
+      lines.push(`  const _scrml_rows = await ${_dbIdentAt(inst) ?? fallbackSqlHandle()}\`SELECT * FROM ${table}\`;`);
       lines.push(`  return new Response(JSON.stringify(_scrml_rows), {`);
     }
     lines.push(`    status: 200,`);
@@ -6396,13 +6406,13 @@ export function generateServerJs(
         const _tenTbl = _tenantActive && _tenantCtx.tenantScopedTables.has(_tbl);
         if (_tenTbl) _tenantStripsFromHandEmit.push(`SELECT * FROM ${_tbl}`);
         if ((_prot && _prot.size > 0) || _tenTbl) {
-          let _rowsExpr = `await ${_dbIdentAt(inst) ?? "_scrml_sql"}\`SELECT * FROM ${_tbl}\``;
+          let _rowsExpr = `await ${_dbIdentAt(inst) ?? fallbackSqlHandle()}\`SELECT * FROM ${_tbl}\``;
           if (_prot && _prot.size > 0) _rowsExpr = `_scrml_protect_tag(${_rowsExpr}, ${JSON.stringify([..._prot])})`;
           if (_tenTbl) _rowsExpr = `_scrml_tenant_tag(${_rowsExpr}, "tenant_id", false)`;
           lines.push(`  { const _scrml_rows = ${_rowsExpr};`);
           lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_egressRedact("_scrml_rows")}; }`);
         } else {
-          lines.push(`  _scrml_ssr_state[${JSON.stringify(_vn)}] = await ${_dbIdentAt(inst) ?? "_scrml_sql"}\`SELECT * FROM ${_tbl}\`;`);
+          lines.push(`  _scrml_ssr_state[${JSON.stringify(_vn)}] = await ${_dbIdentAt(inst) ?? fallbackSqlHandle()}\`SELECT * FROM ${_tbl}\`;`);
         }
       }
       // Tier-2 Pattern-C — the cell's actual inline ?{} (same §44 lowering the
@@ -6634,7 +6644,7 @@ export function generateServerJs(
     // captured from one of them.
     const _feedNodes = channelNodes.filter((n: any) => n && n._rowChangeSynth && n._rowChangeSynth.pkColumn);
     const _feedIdents = [...new Set(_feedNodes.map((n: any) => _dbIdentAt(n)).filter((x: string | null): x is string => x !== null))];
-    let _watchesHandle = "_scrml_sql";
+    let _watchesHandle = DEFAULT_SQL_HANDLE;
     let _pgScope: DbScope | undefined;
     if (_feedIdents.length > 1) {
       const names = _feedIdents.map((id) => `\`${_dbScopesForFile.get(id)?.connectionString ?? id}\``).join(" and ");
@@ -6650,9 +6660,11 @@ export function generateServerJs(
       const sc = _dbScopesForFile.get(_feedIdents[0]);
       if (sc && sc.driver === "postgres") { _watchesHandle = _feedIdents[0]; _pgScope = sc; }
     } else {
-      // No feed sits under a database scope: the file default database, when it is Postgres.
-      const sc = _dbScopesForFile.get("_scrml_sql");
-      if (sc && sc.driver === "postgres") _pgScope = sc;
+      // No feed sits under a database scope: the file default database, when it is
+      // Postgres — in a single-database file only. With two or more databases the
+      // feed's database is unknown: fail closed (UNRESOLVED → internal error).
+      const sc = _dbScopesForFile.get(DEFAULT_SQL_HANDLE);
+      if (sc && sc.driver === "postgres") { _pgScope = sc; _watchesHandle = fallbackSqlHandle(); }
     }
     // §14.8.9 — the watches re-SELECT + publish is a NEW compiler-emitted client
     // egress; pass the protected-column map so the LISTEN bridge tag-then-redacts
@@ -6949,7 +6961,8 @@ export function generateServerJs(
   // MUST run BEFORE the §14.8.10 tenant-helper injection below so the wrapper's
   // `_scrml_active_tenant(_scrml_req)` reference triggers that helper's emission.
   if (appDeclaresDbAuthoritative(fileAST)) {
-    finalEmitted = wrapPrincipalTxn(finalEmitted);
+    // Every declared handle, structurally (S451 HIGH-1: `_scrml_sql_<n>` used to go unwrapped).
+    finalEmitted = wrapPrincipalTxn(finalEmitted, new Set(_dbScopesForFile.keys()));
   }
 
   // §14.8.10 — inject the tenant-row isolation floor helper (tag/redact +
@@ -7032,11 +7045,26 @@ export function generateServerJs(
   // A SQLite FILE (e.g. `./contacts.db`) does NOT go through a `sqlite:` literal:
   // it is resolved against the declaring source file's directory — never the
   // runtime CWD — and created only by a program that owns it (§8.1.1; codegen/sqlite-file-target.ts).
-  const sqlIdentRe = /\b_scrml_sql(?:_\d+)?\b/g;
+  const sqlIdentRe = sqlHandleRegExp();
   const usedIdents = new Set<string>();
   let _m: RegExpExecArray | null;
   while ((_m = sqlIdentRe.exec(finalEmitted)) !== null) {
     usedIdents.add(_m[0]);
+  }
+  // FAIL CLOSED (S451 review): in a file with two or more databases a lowering that
+  // was told no handle gets `UNRESOLVED_SQL_HANDLE`, never the file's first database.
+  // It is never declared; reaching it is a compiler defect, reported as one.
+  if (usedIdents.delete(UNRESOLVED_SQL_HANDLE)) {
+    errors.push(new CGError(
+      "E-INTERNAL-DB-HANDLE-UNRESOLVED",
+      "E-INTERNAL-DB-HANDLE-UNRESOLVED: this file declares more than one database, and a database " +
+      "query in it was lowered without knowing which database it runs on (§8.1.1: each `?{}` runs on " +
+      "its nearest `<program db=>` / `<db src=>`). The compiler refuses rather than run it on the " +
+      "file's first database. This is a compiler defect; any other error reported for the same query " +
+      "(e.g. E-SQL-004) names the cause.",
+      { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+      "error",
+    ));
   }
   if (usedIdents.size > 0) {
     const dbScopes = collectDbScopes(fileAST);
@@ -7071,13 +7099,7 @@ export function generateServerJs(
     // scoped `_scrml_sql_<n>` ascending. The declaration order must precede
     // any code that references the handle (the idempotency / structural-eq
     // helpers above + every server-fn route below).
-    const sortedIdents = Array.from(usedIdents).sort((a, b) => {
-      if (a === "_scrml_sql") return -1;
-      if (b === "_scrml_sql") return 1;
-      const an = parseInt(a.replace("_scrml_sql_", ""), 10);
-      const bn = parseInt(b.replace("_scrml_sql_", ""), 10);
-      return an - bn;
-    });
+    const sortedIdents = Array.from(usedIdents).sort(compareSqlHandles);
     // §19.10.6 (S449 C, opt-in (b)) — `transactions="concurrent"` on a Postgres / MySQL
     // database runs each transaction on its own reserved pool connection instead of
     // serializing them behind the handle's mutex. SQLite is ONE connection: there is

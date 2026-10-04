@@ -1,4 +1,5 @@
 import { genVar } from "./var-counter.ts";
+import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liveSqlInterpolations } from "./sql-lex.ts";
 import { splitBareExprStatements } from "./compat/parser-workarounds.js";
 import { rewriteReactiveRefsAST, rewriteServerReactiveRefsAST, setParserCurrentUserAmbientActive } from "../expression-parser.ts";
@@ -536,7 +537,7 @@ export function buildTaggedTemplate(
  */
 export function rewriteSqlRefs(
   expr: string,
-  dbVar: string = "_scrml_sql",
+  dbVar: string = fallbackSqlHandle(),
   errors?: any[],
 ): string {
   if (!expr || typeof expr !== "string") return expr;
@@ -2801,7 +2802,7 @@ const clientPasses: RewritePass[] = [
   // Pass 7
   (s, _ctx) => rewriteInputStateRefs(s),
   // Pass 8
-  (s, ctx) => rewriteSqlRefs(s, "_scrml_sql", ctx.errors),
+  (s, ctx) => rewriteSqlRefs(s, fallbackSqlHandle(), ctx.errors),
   // Pass 9
   (s, _ctx) => rewriteEnumToEnum(s),
   // Pass 9.5: early struct construction strip — ensures `@var` inside `Type { ...@var }` is
@@ -2889,7 +2890,7 @@ const serverPasses: RewritePass[] = [
   // Pass 7: server-side reactive refs (different from client rewriteReactiveRefs)
   (s, _ctx) => rewriteServerReactiveRefs(s),
   // Pass 8: SQL with server dbVar
-  (s, ctx) => rewriteSqlRefs(s, ctx.dbVar ?? "_scrml_sql", ctx.errors),
+  (s, ctx) => rewriteSqlRefs(s, ctx.dbVar ?? fallbackSqlHandle(), ctx.errors),
   // Pass 8.5: re-run server reactive refs to catch @var that rewriteSqlRefs exposed.
   // rewriteSqlRefs extracts @var from SQL template params (${@var}) into plain JS argList
   // positions. Those @var were inside backtick strings during pass 7 and were skipped.
@@ -3064,7 +3065,7 @@ export function rewriteServerReactiveRefs(expr: string): string {
  * - rewriteServerReactiveRefs runs BEFORE rewriteSqlRefs (opposite of client ordering)
  * - dbVar is threaded via context for the SQL pass
  */
-export function rewriteServerExpr(expr: string, dbVar: string = "_scrml_sql", errors?: any[]): string {
+export function rewriteServerExpr(expr: string, dbVar: string = fallbackSqlHandle(), errors?: any[]): string {
   return runPasses(expr, serverPasses, { dbVar, errors });
 }
 

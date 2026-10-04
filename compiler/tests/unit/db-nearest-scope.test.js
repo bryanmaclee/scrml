@@ -175,3 +175,55 @@ describe("server emission — each function on its own scope's handle", () => {
     expect(js).toMatch(/await _scrml_sql`SELECT 1`/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// S451 review fix round (HIGH-1, silent fallbacks, MED-2)
+// ---------------------------------------------------------------------------
+
+describe("fix round — every pass recognises every handle; no silent default in a multi-database file", () => {
+  test("HIGH-1: wrapPrincipalTxn wraps a query on a scoped handle `_scrml_sql_<n>`", async () => {
+    const { wrapPrincipalTxn } = await import("../../src/codegen/db-authoritative.ts");
+    const src = "async function _scrml_handler_x(_scrml_req) {\n  const r = await _scrml_sql_1`SELECT 1`;\n  return r;\n}\n";
+    const out = wrapPrincipalTxn(src);
+    expect(out).toContain("_scrml_sql_1.begin(async (tx) =>");
+    expect(out).toContain('tx.unsafe("SET LOCAL ROLE scrml_app")');
+    expect(out).toContain("set_config('scrml.tenant'");
+    expect(out).toContain("return await tx`SELECT 1`");
+  });
+
+  test("HIGH-1: wrapPrincipalTxn leaves an identifier that merely starts with the handle name alone", async () => {
+    const { wrapPrincipalTxn } = await import("../../src/codegen/db-authoritative.ts");
+    const src = "async function h(_scrml_req) {\n  return await _scrml_sql_1x`SELECT 1`;\n}\n";
+    expect(wrapPrincipalTxn(src)).toBe(src);
+  });
+
+  test("fail closed: an unscoped ?{} in a two-database file lowers onto NO database (internal error), never the file's first one", () => {
+    const f = fn("loose", [sql("SELECT 1")]);
+    const nodes = [logic([f]), program("./a.db", [dbBlock("./b.db", [])])];
+    const errors = [];
+    const js = generateServerJs(fileAST(nodes), routeMapFor([f]), errors, null, null);
+    expect(js).not.toMatch(/await _scrml_sql(?:_\d+)?`SELECT 1`/);
+    expect(errors.some((x) => x.code === "E-INTERNAL-DB-HANDLE-UNRESOLVED")).toBe(true);
+    expect(js).not.toMatch(/const _scrml_sql_UNRESOLVED\b/);
+  });
+
+  test("single-database file: the fallback is still `_scrml_sql` (unchanged)", () => {
+    const f = fn("loose", [sql("SELECT 1")]);
+    const nodes = [logic([f]), program("./a.db", [])];
+    const errors = [];
+    const js = generateServerJs(fileAST(nodes), routeMapFor([f]), errors, null, null);
+    expect(js).toMatch(/await _scrml_sql`SELECT 1`/);
+    expect(errors.some((x) => x.code === "E-INTERNAL-DB-HANDLE-UNRESOLVED")).toBe(false);
+  });
+
+  test("MED-2: two `<db src=\":memory:\">` scopes are two databases (two handles)", () => {
+    const q1 = sql("SELECT 1");
+    const q2 = sql("SELECT 2");
+    const nodes = [program(null, [dbBlock(":memory:", [logic([q1])]), dbBlock(":memory:", [logic([q2])])])];
+    const res = resolveDbScopes(nodes, FILE);
+    expect(res.handles.length).toBe(2);
+    expect(res.scopeOf.get(q1)).not.toBe(res.scopeOf.get(q2));
+    const scopes = collectDbScopes(fileAST(nodes));
+    expect([...scopes.keys()]).toEqual(["_scrml_sql", "_scrml_sql_1"]);
+  });
+});

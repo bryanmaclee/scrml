@@ -171,9 +171,24 @@ export function dbScopeValueOf(node: AnyNode): string | null {
   return null;
 }
 
-/** What makes two scope values the SAME database: the resolved SQLite file when the
- *  declaring file is known, else the trimmed value. */
-function databaseIdentity(value: string, filePath: string | null): string {
+/** A stable id per `:memory:` scope element (see `databaseIdentity`). */
+const _memoryScopeIds = new WeakMap<object, number>();
+let _memoryScopeNext = 0;
+function memoryScopeId(node: AnyNode): number {
+  let id = _memoryScopeIds.get(node);
+  if (id === undefined) { id = ++_memoryScopeNext; _memoryScopeIds.set(node, id); }
+  return id;
+}
+
+/** What makes two scope values the SAME database: the declaring element for
+ *  `:memory:`; the resolved SQLite file when the declaring file is known; else the
+ *  trimmed value. */
+function databaseIdentity(value: string, filePath: string | null, node: AnyNode): string {
+  // `:memory:` names no shared thing: each scope that declares it is its OWN empty
+  // database, so it is keyed by the declaring ELEMENT, never by value (S451 review
+  // MED-2: two `<db src=":memory:">` blocks shared one connection, each reading the
+  // other's rows).
+  if (classifyDbTarget(value).kind === "sqlite-memory") return "memory:" + memoryScopeId(node);
   if (filePath) {
     const f = sqliteFileTarget(value, filePath);
     if (f !== null) return "file:" + f;
@@ -210,11 +225,11 @@ export function resolveDbScopes(nodes: unknown, filePath: string | null = null):
     defaultHandle = { ident: "_scrml_sql", value: defaultDecl.value, node: defaultDecl.node };
     handles.push(defaultHandle);
     byIdent.set(defaultHandle.ident, defaultHandle);
-    byIdentity.set(databaseIdentity(defaultDecl.value, filePath), defaultHandle);
+    byIdentity.set(databaseIdentity(defaultDecl.value, filePath, defaultDecl.node), defaultHandle);
   }
   let next = 0;
   const handleFor = (value: string, node: AnyNode): DbHandle => {
-    const id = databaseIdentity(value, filePath);
+    const id = databaseIdentity(value, filePath, node);
     const known = byIdentity.get(id);
     if (known) return known;
     const h: DbHandle = { ident: `_scrml_sql_${++next}`, value, node };

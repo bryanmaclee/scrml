@@ -219,6 +219,95 @@ describe("§8.1.1 nearest database scope — which database a query hits at runt
     expect(await call(mod, "inDb")).toEqual([{ who: "a" }]);
   });
 
+  test("MED-2: two `<db src=\":memory:\">` blocks are two databases — a table made in one is not in the other", async () => {
+    const { errors, serverJsPath, text } = compile(`<program>
+<db src=":memory:" tables="t1">
+\${
+  function makeOne() {
+    ?{\`CREATE TABLE IF NOT EXISTS t1 (who TEXT)\`}.run()
+    return ?{\`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name\`}.all()
+  }
+}
+<p>a</p>
+</>
+<db src=":memory:" tables="t2">
+\${
+  function makeTwo() {
+    ?{\`CREATE TABLE IF NOT EXISTS t2 (who TEXT)\`}.run()
+    return ?{\`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name\`}.all()
+  }
+}
+<p>b</p>
+</>
+</program>
+`, "two-memory");
+    expect(errors).toEqual([]);
+    expect([...text.matchAll(/^const (_scrml_sql(?:_\d+)?) = /gm)].map((m) => m[1])).toEqual(["_scrml_sql", "_scrml_sql_1"]);
+    if (domPolluted()) return;
+    const mod = await load(serverJsPath);
+    expect(await call(mod, "makeOne")).toEqual([{ name: "t1" }]);
+    expect(await call(mod, "makeTwo")).toEqual([{ name: "t2" }]);
+  });
+
+  test("HIGH-1: a db-authoritative program's queries are principal-wrapped on EVERY handle, the authoritative one included", () => {
+    const { errors, text } = compile(`<program db="postgres://localhost/app">
+  <schema>
+    invoices {
+      id: text primary key
+      tenant_id: text not null
+      amount: real not null
+    } db-authoritative
+  </schema>
+
+  function listInvoices() {
+    const rows = ?{ select id, tenant_id, amount from invoices }
+    rows
+  }
+
+  <db src="./b.db" tables="shared">
+    \${
+    function listShared() {
+      const r = ?{ select who from shared }
+      r
+    }
+    }
+  </db>
+</program>
+`, "dbauth-two-dbs");
+    expect(errors).toEqual([]);
+    // The authoritative database is NOT the default handle (the first <db src> is).
+    expect(text).toMatch(/^const _scrml_sql_1 = _scrml_db_guard\(new SQL\("postgres:\/\/localhost\/app"\)/m);
+    const auth = text.slice(text.indexOf("_scrml_handler_listInvoices"), text.indexOf("_scrml_route_listInvoices"));
+    expect(auth).toContain("_scrml_sql_1.begin(async (tx) =>");
+    expect(auth).toContain("set_config('scrml.tenant'");
+    expect(auth).toContain('tx.unsafe("SET LOCAL ROLE scrml_app")');
+    expect(auth).toContain('return await tx.unsafe("select id, tenant_id, amount from invoices")');
+    expect(auth).not.toMatch(/await _scrml_sql_1\.unsafe\("select/);
+    // The other database's query is wrapped exactly as before (default handle).
+    const other = text.slice(text.indexOf("_scrml_handler_listShared"), text.indexOf("_scrml_route_listShared"));
+    expect(other).toContain("_scrml_sql.begin(async (tx) =>");
+    expect(other).toContain('return await tx.unsafe("select who from shared")');
+  });
+
+  test("fail closed: an unscoped `?{}` in a two-database file never lowers onto the first database", () => {
+    const { errors, text } = compile(`\${
+  function loose() {
+    return ${Q}
+  }
+}
+<program db="./a.db">
+<db src="./b.db" tables="shared">
+<p>x</p>
+</>
+</program>
+`, "unscoped-fail-closed");
+    const codes = errors.map((e) => e.code);
+    expect(codes).toContain("E-SQL-004");
+    expect(codes).toContain("E-INTERNAL-DB-HANDLE-UNRESOLVED");
+    const loose = text.slice(text.indexOf("_scrml_handler_loose"), text.indexOf("_scrml_route_loose"));
+    expect(loose).not.toMatch(/await _scrml_sql(?:_\d+)?`SELECT who FROM shared`/);
+  });
+
   test("a `?{}` outside every database scope, in a file with two databases, is E-SQL-004 (it used to run on the file's first `<db src>`)", () => {
     const { errors } = compile(`\${
   function loose() {
