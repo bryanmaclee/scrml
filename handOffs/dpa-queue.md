@@ -3882,3 +3882,51 @@ history of silent auth drops (wrapped program, nested program, page auth) as the
 a sidecar under a `<div>` in an auth=optional page with `<program lang=… auth="required">`; a db-scoped nested program
 with a stricter role; a worker (likely: auth meaningless → error stays?). Rec on the surface + which cases stay errors.
 | dpa-065 | **BANKED S449 (bryan "your recs." — dialect ruling 3).** O35 (SPEC §66.22): must a NON-LITERAL own value carry a type annotation (`let <total=(sum(@items))/>` vs `let <total:int=(…)/>`)? Decides how many of the 201 type-only legacy conformance cases twin mechanically. Scope: §66.3 inference rule (integer literal infers `int`), §14 inference reach, what the error/diagnostic is, ergonomics vs the S322 "by construction" test; capability-map + worked adopter code. R2 deep-dive; bryan rules. | `scrml-support/docs/deep-dives/corpus-dialect-codemod-scope-2026-10-03.md` (context) |
+
+## [dpa-066] deep-dive — one effect/footprint summary per function in the bootstrap's Core
+`status:    banked`
+banked:     S452 2026-10-04 (bryan: "looks good, go on DDs and 3"; PA ask: "Nominal features that make sense now rather than retrofit later")
+
+The question: the bootstrap (compiler/self-host-v2/) is a from-scratch compiler. Many ruled/Nominal rules each ask "what does
+this function TRANSITIVELY do?" — §6.15 value positions may not write · E-EFFECT-WRITES-STATE (§6.7.4) · R1
+E-VALUE-SERVER-CALL (§13.7, "would this position have to wait") · R4 parallelize only provably-read calls (§13.2) ·
+§6.7.7.1 `<request>` READ/WRITE · E-SQL-011 cross-database writes in an envelope (§8.9.2) · E-ERROR-012 callee yields a
+value (§19.4.3) · §19.9.10 client calls to server functions failable · §23.5 capability enforcement (Nominal, deferred).
+impl#1 answers each with its own walker (the S322 retrofit signature); the bootstrap has started repeating it
+(`analyze.scrml`: exprEffects/stmtEffects/callEffect, mayRunOnServer, isWriteExpr, fnYieldsValue, capability checks —
+S452 review rounds kept finding gaps BETWEEN walkers). Should Core carry ONE per-function effect summary (a lattice:
+reads cells, writes cells, server reach, db read/write per database, capabilities, may-fail + its error type, may-wait),
+computed once to a fixpoint over the call graph (recursion, mutual recursion, imports, lambdas/closures, `^{}`/`_{}`
+opacity = fail-closed TOP), with every rule a QUERY on it?
+Must address: the lattice and its soundness (what is TOP; unknown/opaque = worst case, fail-closed); per-call-site vs
+per-function (a function that writes only on one branch); higher-order functions and callbacks (a function passed to
+`map`, a handler stored in a cell); stdlib/host calls (a declared effect table, not inference); how each listed rule
+becomes a query and which existing bootstrap walkers it replaces (inventory them, with file:function); interaction with
+the S451 binding requirements (a read that is parallelized or cached runs in a read-only transaction; outside `!` the
+runtime detects an open transaction) — static summary decides MAY, runtime enforces; incremental build/caching
+implications; prior art (Koka/Eff effect rows, Rust's Send/Sync-style auto traits, Haskell IO, Flow/TS purity
+analyses, React Compiler's effect inference, Koka's `div`/`exn`, Swift async/throws colouring vs scrml's uncoloured
+source). Deliver: the Core shape, the inventory → query map, a migration path for the existing walkers, the cost, and a
+rec. Sequencing: rule BEFORE U1b's design pass (U1b's failure type for client server calls is an effect question).
+Architecture of the new compiler — R2 minimum.
+
+## [dpa-067] deep-dive — provenance tracking for the security floors (protect egress, tenant-row isolation) by construction in the bootstrap
+`status:    banked`
+banked:     S452 2026-10-04 (bryan: "looks good, go on DDs and 3")
+
+The question: §14.8.9 (`protect=` server→client column egress floor) and §14.8.10 (tenant-row isolation floor, Nominal)
+are delivered in impl#1 by RETROFIT — the protect egress floor took ten adversarial review rounds and still carries
+residuals (`g-protect-egress-round-10-residuals`; S449 DURABLE: "a precision shortcut inside a soundness analysis is
+where the leaks come back"). The bootstrap barely touches protect yet (a clean slate). Should a value's PROVENANCE
+("came from a protected column", "came from a row scoped to tenant T") be a property carried through Core — by type,
+by taint label, or by a separate dataflow fact — so that egress to the client and cross-tenant flow are checked BY
+CONSTRUCTION at the boundary (the U1c server artifact), not by scanning emitted code?
+Must address: read the SPEC sections IN FULL (§14.8.9, §14.8.10, §52, §40, the `reveal` provenance §6.14 mentions,
+`protect=` coverage §8.1.1 note) and impl#1's history (known-gaps protect/tenant entries; the S445/S447/S449 protect
+rounds) as the adversarial checklist; label vs type vs dataflow approaches and their soundness under aliasing,
+struct/spread copies, closures, string interpolation, serialization (§57), channels (§38), SSE (§37), logs/diagnostics,
+`^{}`/`_{}` opacity (fail-closed); declassification (`reveal`, explicit and auditable); how it composes with dpa-066's
+effect summary (same fixpoint? separate?); what is checked statically vs enforced at runtime (row-level: Postgres RLS
+/ the tenant floor's runtime half); prior art (Jif/FlowCaml information-flow types, Rust's taint crates, LIO,
+Laminar/Hails, Ur/Web's policy checking, Rails strong-params, Prisma field omission). Deliver: the design, what it
+replaces in impl#1's approach, cost, sequencing against U1c, and a rec. Security-architecture — R2 minimum.
