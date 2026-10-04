@@ -17920,7 +17920,7 @@ function show(id: string) {
     const item = load(id) !{
         .Network(msg) :> { @phase = .Failed(msg); return }
         .Timeout      :> placeholderItem(id)
-        _ err         :> { log(describe(err)); return }
+        _ err         :> { @phase = .Failed(describe(err)); return }
     }
     @phase = .Loaded(item)
 }
