@@ -162,3 +162,28 @@ refused, §52 — outside U1); `<db>` (already refused — see "Design divergenc
 - LOW (b), owed by U1c: when the printer writes SQL chunks into a JS template literal it MUST escape backticks, `\`
   and `${` (or pass the chunks as a string array: `conn.sql(["…", "…"], …values)`) — a chunk is SQL text and must
   never become JS template syntax.
+
+## S239 narrow re-review fix round (fae46e8cd = FIX)
+
+- Red first (7 tests red on fae46e8cd), then fixed in `sql.scrml`:
+  - HIGH-1: `[` was lexed as a SQLite quoted name on every driver; on Postgres it is array subscripting and its
+    contents run (`arr[nextval('s')]`, `a[1:f()]`). `[` is now in the fail-closed set (corpus cost reported 0).
+  - HIGH-2: a qualified name got the keyword / built-in exemptions (`public.exists(1)`, `public.count(a)`,
+    `mydb.values(1)`). A token before `(` whose previous token is `.` is now ALWAYS a call.
+  - MED: `FOR SHARE` / MySQL `LOCK IN SHARE MODE` read as SqlSelect. `FOR` and `LOCK` are write words now (accepted
+    cost: `SUBSTRING(x FROM 1 FOR 2)` reads as a write).
+- CLAIM narrowed in the sql.scrml header: SqlSelect means "the query text calls no non-built-in", not "read-only".
+- KNOWN LIMITS (recorded beside `t.f` in the header): Postgres overload resolution reaching a user function through a
+  built-in name (CVE-2018-1058 class); user-defined casts / domains / operators the whitelist admits by spelling
+  (incl. jsonb `?` and `=` on a user type); views and RLS policies that call volatile functions; SQLite functions a
+  driver registers over a built-in name.
+
+## Requirement on U3 (READ classification consumers)
+
+BINDING on every later slice that consumes `SqlKind` (U3 READ classification, U4 caching, R4 parallelization,
+§19.9.6 batching): any query a later slice runs in PARALLEL, or serves from CACHE, because it is classified
+`SqlSelect` SHALL execute inside a read-only transaction — Postgres `SET TRANSACTION READ ONLY`, MySQL
+`START TRANSACTION READ ONLY`, SQLite `PRAGMA query_only=ON` scoped to that statement — so that a misclassified write
+fails closed at RUN time. Reason: the classification is a fact about the query TEXT (see the known limits above);
+only the database can prove a statement read-only. (For the PA to carry into the U1 design doc's slice table; not
+edited in scrml-support by this dispatch.)

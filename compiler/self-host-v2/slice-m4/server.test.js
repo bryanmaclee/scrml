@@ -480,6 +480,25 @@ describe("S239 review fix round — the kind scan cannot be talked into SqlSelec
     expect(kind("SELECT ~a FROM t")).toBe(W);
     expect(kind("SELECT a::int FROM t")).toBe(W);
   });
+  // re-review HIGH-1: `[` is array subscripting on Postgres — its contents run
+  test("`[…]` fails closed (Postgres subscripts run their contents)", () => {
+    expect(kind("SELECT arr[nextval('s')] FROM t")).toBe(W);
+    expect(kind("SELECT a[1:f()] FROM t")).toBe(W);
+    expect(kind("SELECT [x] FROM t")).toBe(W);
+  });
+  // re-review HIGH-2: a qualified name before `(` is always a call
+  for (const q of ["public.exists(1)", "public.select(1)", "mydb.values(1)", "public.count(a)", "public.lower(a)"]) {
+    test(`\`${q}\` — a qualified name before \`(\` is a call, no exemptions`, () => {
+      expect(kind(`SELECT ${q} FROM t`)).toBe(W);
+    });
+  }
+  // re-review MED: row locks
+  test("`FOR SHARE` / `FOR UPDATE` / MySQL `LOCK IN SHARE MODE` are writes (they lock rows)", () => {
+    expect(kind("SELECT a FROM t FOR SHARE")).toBe(W);
+    expect(kind("SELECT a FROM t LOCK IN SHARE MODE")).toBe(W);
+    expect(kind("SELECT a FROM t FOR UPDATE")).toBe(W);
+  });
+
   test("twins stay SqlSelect: plain selects, the justified builtins, IN / EXISTS / subqueries, ordinary operators", () => {
     expect(kind("SELECT count(*) AS n, max(a) FROM t WHERE a IN (1, 2) AND EXISTS (SELECT 1 FROM u) AND b <= 3 AND c <> 'x''y'")).toBe("SqlSelect");
     expect(kind("SELECT lower(name) || '-' || coalesce(nick, '') FROM users WHERE id = 1")).toBe("SqlSelect");

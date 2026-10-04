@@ -14,21 +14,34 @@
 // after this.
 //
 // EVERY FACT FAILS CLOSED:
-//   - kind is SqlSelect ONLY when the statement provably reads: its first
-//     keyword is SELECT (or WITH), no write verb appears anywhere outside a
+//   - kind is SqlSelect ONLY when THE QUERY TEXT CALLS NO NON-BUILT-IN (text
+//     alone cannot prove a statement read-only — see KNOWN LIMITS): its first
+//     keyword is SELECT (or WITH), no write word appears anywhere outside a
 //     string literal (INSERT UPDATE DELETE REPLACE UPSERT MERGE CREATE DROP
-//     ALTER TRUNCATE — and INTO: `SELECT … INTO t` creates a table on
-//     Postgres), and nothing in it is a call: ANY token followed by `(` is a
-//     call (a quoted name included) unless it is a syntax word no dialect lets
-//     name a function or a short list of read-only built-ins. Anything else —
-//     another first keyword (PRAGMA, ATTACH, BEGIN …), a comment, a string the
-//     drivers could end differently (a backslash, an `E'…'` prefix), any
-//     character or operator outside the scanner's whitelist — is SqlWrite.
-//     (S239 review fix round: the scanner is whitelist-only, so an input it was
-//     not built for can never read as a SELECT.)
-//     KNOWN LIMIT: Postgres attribute notation — `t.f` may call `f(t)` when
-//     `t` has no column `f` — is indistinguishable from a column read without
-//     the schema; it is read as a column.
+//     ALTER TRUNCATE; INTO — `SELECT … INTO t` creates a table on Postgres;
+//     FOR / LOCK — `FOR UPDATE` / `FOR SHARE` / `LOCK IN SHARE MODE` lock
+//     rows), and nothing in it is a call: ANY token followed by `(` is a call
+//     (a quoted name included; a QUALIFIED name — `public.count(…)` — always)
+//     unless it is a syntax word no dialect lets name a function or a short
+//     list of read-only built-ins. Anything else — another first keyword
+//     (PRAGMA, ATTACH, BEGIN …), a comment, a string the drivers could end
+//     differently (a backslash, an `E'…'` prefix), `[` (Postgres subscripts
+//     run their contents), any character or operator outside the scanner's
+//     whitelist — is SqlWrite. (S239 review fix rounds: the scanner is
+//     whitelist-only, so an input it was not built for can never read as a
+//     SELECT.)
+//     KNOWN LIMITS (the text cannot see them; the runtime must guard — see
+//     docs/changes/s451-boot-u1a/progress.md "Requirement on U3"):
+//       · Postgres attribute notation: `t.f` may call `f(t)` when `t` has no
+//         column `f` — read as a column;
+//       · Postgres overload resolution reaching a user function through a
+//         built-in name (the CVE-2018-1058 class: a better-matching
+//         `public.lower(mytype)`);
+//       · user-defined casts, domains (CHECK functions) and operators the
+//         whitelist admits by spelling (jsonb `?` is a built-in, but `=` /
+//         `<` on a user type run a user function);
+//       · views and row-level-security policies that call volatile functions;
+//       · SQLite functions a driver registers over a built-in name.
 //   - a table set is TablesKnown only when every table position holds a bare
 //     name the scanner read; a quoted or qualified name, a value where a name
 //     stands, a comment anywhere, or ZERO tables found → TablesUnknown (=
@@ -49,7 +62,8 @@ ${
 
     // One SQL token. `k`: Word (`w` = upper-cased, `text` = as written), Punct
     // (one character), Str (a string literal), QName (a quoted identifier
-    // `"x"` / `` `x` `` / `[x]`), Value (a `${…}` bound value), Num.
+    // `"x"` / `` `x` ``; `[` is never read — Postgres subscripts run their
+    // contents — and fails closed), Value (a `${…}` bound value), Num.
     type SK:enum = { Word, Punct, Str, QName, Value, Num }
     type STok:struct = { k: SK, w: string, text: string }
     // `broken`: text the scanner cannot read with CERTAINTY on every driver —
@@ -134,11 +148,6 @@ ${
                 if (c == "'") k = SK.Str
                 toks = toks.concat([tok(k, s.substring(i, r.end))])
                 i = r.end
-            } else if (c == "[") {
-                const close: int = s.indexOf("]", i + 1)
-                if (close < 0) return { toks: toks, broken: true }
-                toks = toks.concat([tok(SK.QName, s.substring(i, close + 1))])
-                i = close + 1
             } else if (isWordStart(c)) {
                 let j: int = i + 1
                 while (j < s.length && isWordCh(ch(s, j))) { j = j + 1 }
@@ -188,7 +197,7 @@ ${
 
     // ---- vocabulary -------------------------------------------------------------
     fn isWriteVerb(w: string) -> boolean {
-        return ["INSERT", "UPDATE", "DELETE", "REPLACE", "UPSERT", "MERGE", "CREATE", "DROP", "ALTER", "TRUNCATE", "INTO"].indexOf(w) >= 0
+        return ["INSERT", "UPDATE", "DELETE", "REPLACE", "UPSERT", "MERGE", "CREATE", "DROP", "ALTER", "TRUNCATE", "INTO", "FOR", "LOCK"].indexOf(w) >= 0
     }
 
     // Words a `(` may follow as SQL SYNTAX, not a call. Only words no dialect
@@ -278,6 +287,9 @@ ${
             // a call unless it is punctuation, a syntax word no dialect lets
             // name a function, or a listed read-only built-in (an unquoted word).
             if (isP(at(ts, i + 1), "(") && t.k != SK.Punct) {
+                // a QUALIFIED name (`public.count(…)`, `mydb.values(…)`) names
+                // whatever that schema holds — never the keyword or built-in
+                if (isP(at(ts, i - 1), ".")) return SqlKind.SqlWrite
                 if (!(isWord(t) && (isParenKeyword(t.w) || isReadOnlyFn(t.w)))) return SqlKind.SqlWrite
             }
             i = i + 1
