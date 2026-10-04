@@ -5190,7 +5190,7 @@ the **transition-write graph** and reject a cycle in it:
 type SyncState:enum = { Idle, Pushing, Failed }
 <engine for=SyncState initial=.Idle>
     <Idle rule=.Pushing/>
-    <Pushing rule=(.Idle | .Failed) effect=${ push() !{ | _ e :> { @syncState = .Failed } } }/>
+    <Pushing rule=(.Idle | .Failed) effect=${ push() !{ _ e :> { @syncState = .Failed } } }/>
     <Failed rule=.Pushing>
         <onTransition from=.Pushing>${ @syncState = .Pushing }</>   // E-TRANSITION-WRITE-CYCLE: Pushing → Failed → Pushing
     </>                                                            // fix: <onTimeout after=5s to=.Pushing/> in Failed
@@ -7854,7 +7854,7 @@ c = stepped(c)
 | JS-style `match` arms (§18) and `!{}` arms (§19) | arms are newline-separated (§18.2, unchanged). See "Arm heads" below |
 | `?{ … }` SQL (§8), `_{ … }` foreign code (§23.2.3), `#{ … }` CSS | **exempt** — a foreign grammar; its own newlines and `;` are its own. The block itself is an expression inside a scrml statement and takes this rule after its closing `}` |
 
-**Arm heads — the `.Variant :>` line (structural, not a lookahead).** Directly inside a `match { … }` body or a `!{ … }` handler body, the unit at depth 0 is the **arm**, not a statement (§18.2: arms are juxtaposed, one per line). A line at that level begins an arm, so its first token is an arm pattern (`.Variant`, `::Variant`, `Type.Variant`, `| ::E`, `else`, `_`, a literal or `(` tuple pattern) — a leading `.` there is the arm's pattern, not a leading operator. Which reading applies is decided by **position** (arm level vs statement level), never by looking ahead for `:>`. Inside an arm's `{ … }` block body the level is statement level again, and a line starting with `.` there is `E-STMT-LEADING-OPERATOR`. A single-expression arm body (`.A :> expr`) ends at its line break unless the line ends in a continuation token (rule 2); a following line that starts with `.` at arm level is read as an arm head, and if it does not form an arm (`.map(f)` with no `:>`) it is a parse error whose message SHOULD carry the rule-3 suggestion.
+**Arm heads — the `.Variant :>` line (structural, not a lookahead).** Directly inside a `match { … }` body or a `!{ … }` handler body (and, S452, in the leading message-arm region of an engine state-child, §51.0.S.2.3), the unit at depth 0 is the **arm**, not a statement (§18.2: arms are juxtaposed, one per line). A line at that level begins an arm, so its first token is an arm pattern (`.Variant`, `::Variant`, `Type.Variant`, `| ::E` (the soft-deprecated `|`-led `!{}` arm, §19.4.5), `else`, `_`, a literal or `(` tuple pattern) — a leading `.` there is the arm's pattern, not a leading operator. Which reading applies is decided by **position** (arm level vs statement level), never by looking ahead for `:>`. Inside an arm's `{ … }` block body the level is statement level again, and a line starting with `.` there is `E-STMT-LEADING-OPERATOR`. A single-expression arm body (`.A :> expr`) ends at its line break unless the line ends in a continuation token (rule 2); a following line that starts with `.` at arm level is read as an arm head, and if it does not form an arm (`.map(f)` with no `:>`) it is a parse error whose message SHOULD carry the rule-3 suggestion.
 
 > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 6, ACCEPTED: *"arm heads by position"* — position, never a `:>` lookahead, decides arm head vs statement; S446 Call 4a (i) already ruled out a `.Variant`-arm vs chain lookahead).
 
@@ -10083,13 +10083,13 @@ The compiler SHALL:
 **Developer writes (synchronous-looking):**
 ```scrml
 ${ function loadDashboard() {
-    let user = getUser(userId) !{ | _ :> return };
-    let items = getItems(userId) !{ | _ :> return };
-    let stats = getStats(userId) !{ | _ :> return };
+    let user = getUser(userId) !{ _ :> return };
+    let items = getItems(userId) !{ _ :> return };
+    let stats = getStats(userId) !{ _ :> return };
 } }
 ```
 
-*(S451 — each call is handled: a client call to a server function is failable (§19.9.10), and each `!{ | _ :> return }` leaves on failure (§19.4.3, value position). Supersedes the unhandled `let user = getUser(userId);` lines. The emitted shape below shows only the parallelization; the failure checks are omitted from it. Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1.)*
+*(S451 — each call is handled: a client call to a server function is failable (§19.9.10), and each `!{ _ :> return }` leaves on failure (§19.4.3, value position). Supersedes the unhandled `let user = getUser(userId);` lines. The emitted shape below shows only the parallelization; the failure checks are omitted from it. Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1.)*
 
 **Compiler emits (simplified):**
 ```javascript
@@ -10479,7 +10479,7 @@ function — and the fix: *"a value position cannot wait for the server; load th
 ```scrml
 <program db="sqlite:./app.db">
   ${ function userCount() {
-      const row = ?{`SELECT count(*) AS n FROM users`}.get() !{ | _ :> not }
+      const row = ?{`SELECT count(*) AS n FROM users`}.get() !{ _ :> not }
       return row is not ? 0 : row.n
   } }
 
@@ -10490,7 +10490,7 @@ function — and the fix: *"a value position cannot wait for the server; load th
 
   ${ function usersLabel() { return "Users: " + userCount() } }   // a client function that reaches userCount
   <p>${usersLabel()}</p>                              // E-VALUE-SERVER-CALL (item 2) — usersLabel reaches userCount
-  <m> = ?{`SELECT count(*) AS n FROM users`}.get() !{ | _ :> not }   // E-VALUE-SERVER-CALL (item 3) — a `?{}` here
+  <m> = ?{`SELECT count(*) AS n FROM users`}.get() !{ _ :> not }   // E-VALUE-SERVER-CALL (item 3) — a `?{}` here
   <about> = fetch("/about.txt")                       // E-VALUE-SERVER-CALL (item 4) — `fetch` returns a Promise
 
   // The fix: load into a cell with a <request>, read the cell.
@@ -10498,7 +10498,7 @@ function — and the fix: *"a value position cannot wait for the server; load th
   <request id="usersLoad" deps=[]>${ @users = userCount() }</>
   <p class=${@users > 10 ? "busy" : ""}>Users: ${@users}</p>
   <button onclick=${<#usersLoad>.refetch()}>Refresh</button>   // legal: a handler is an action position
-  <button onclick={ @users = userCount() !{ | _ :> @users } }>Recount</button>   // legal too: the call is handled (§19.9.10)
+  <button onclick={ @users = userCount() !{ _ :> @users } }>Recount</button>   // legal too: the call is handled (§19.9.10)
 </program>
 ```
 
@@ -12536,7 +12536,7 @@ applyMushroom(.Small)                   // bare variant — parameter type fixes
 - A bare variant reference SHALL fail with `E-VARIANT-AMBIGUOUS` when the position's type is a union or otherwise ambiguous (e.g., `let x = .Small` with no annotation; the compiler cannot pick which enum has a `.Small` variant).
 - A bare variant reference IS NOT supported in expression positions where no type context exists (top-level expressions, `let`/`const` without annotation in untyped contexts).
 - The fully-qualified form (`MarioState.Small`, `MarioState::Small`) remains legal everywhere bare variants are legal. Writers may always be explicit.
-- Bare variants and the `::` qualifier (cross-ref §18.5) are interchangeable in match arm patterns where the matched type is statically known: `| .Small => ...` and `| MarioState::Small => ...` are equivalent.
+- Bare variants and the `::` qualifier (cross-ref §18.5) are interchangeable in match arm patterns where the matched type is statically known: `.Small :> ...` and `MarioState::Small :> ...` are equivalent. *(Currency correction S452 — spec: §18.2 governs (a `match-arm` has no leading `|`; `:>` is the canonical separator). supersedes: `| .Small => ...` / `| MarioState::Small => ...`. Direction: inert — impl#1 already rejects a `|`-led single-scrutinee `match` arm (with the misleading E-TYPE-020, `g-impl1-match-leading-pipe-misleading-diagnostic-s452`).)*
 
 **Cross-references:**
 - §6.2 — three RHS shapes (the `: T = .V` form composes with bare-variant inference).
@@ -16090,7 +16090,8 @@ tuple value (no-tuple, §59.7 / §14.11). Full grammar + product-exhaustiveness 
   live end-to-end. New code SHALL use `:>`; existing samples MAY migrate via `bun scrml migrate
   --fix` (AST-driven; MUST NOT be a text replace, since `=>` is also the arrow-function glyph).
   The `!{}` error-handler arm separators (§19) follow this rule in lockstep — they share the
-  arm-arrow parser rule. (S145 ratification — `match-arrow-colon-canonical` deep-dive; user-voice
+  arm-arrow parser rule. (S452: a `!{}` arm IS a `match-arm` — the whole grammar above, not only
+  its separator, §19.4.5.) (S145 ratification — `match-arrow-colon-canonical` deep-dive; user-voice
   S145; supersedes the prior "`=>` canonical / `->` alias / formatter-normalizes" rule.)
 - Match arms SHALL be juxtaposed (`match-arm+`) and written one per line (newline-separated).
   There is NO comma separator between arms — the arm body's terminating expression / `block-body`
@@ -16106,15 +16107,17 @@ tuple value (no-tuple, §59.7 / §14.11). Full grammar + product-exhaustiveness 
   (§34). Only POSITIONAL `_` discards (`.P(_) | .Q(_) :> r`) are permitted. (S438 —
   g-impl1-match-miscompiles F12.)
 - **A bare name is not an arm pattern.** An arm whose WHOLE pattern is a bare identifier —
-  `err :> …` in a `match`, `| err :> …` in a `!{}` handler (§19.4.3) — SHALL be a compile error,
+  `err :> …` in a `match` or a `!{}` handler (§19.4.3; in a `!{}`, also its soft-deprecated
+  `| err :> …` spelling, §19.4.5) — SHALL be a compile error,
   **E-MATCH-BARE-BINDER**. The grammar above has no such pattern, and none is added. The pattern
   that binds the whole error is `_ <name>` (`whole-error-arm`, §18.6.1, S451): in a `!{}` arm or a
-  `match` on a failable result, write `| _ err :>` / `_ err :>`. Elsewhere a match arm does not bind
+  `match` on a failable result, write `_ err :>`. Elsewhere a match arm does not bind
   the whole matched value (§18.6). Write `_` / `else` for a catch-all that binds nothing, or name the
-  variant — `.V(x)` binds its payload (§18.7), and in a `!{}` arm `| .V x :>` does too (§19.4.3).
+  variant — `.V(x)` binds its payload (§18.7), and in a `!{}` arm the soft-deprecated `| .V x :>`
+  does too (§19.4.3, §19.4.5).
   `not` is not a bare name here: it is the absence arm (§42). The message SHALL name the identifier
   and offer the fixes that apply at the site. In a `!{}` arm or a `match` on a failable result:
-  `Arm pattern '{name}' is a bare name. To bind the whole error, write '_ {name}' (e.g. '| _ {name} :>');
+  `Arm pattern '{name}' is a bare name. To bind the whole error, write '_ {name}' (e.g. '_ {name} :>');
   for a catch-all that binds nothing write '_' (or 'else'); or name the variant ('.V(x)') to bind its
   payload.` In a `match` on any other value: `Arm pattern '{name}' is a bare name. A match arm does not
   bind the whole value: write '_' (or 'else') for a catch-all, or name the variant ('.V(x)') to bind
@@ -16383,7 +16386,8 @@ type" means the SUBSET variant set (§18.8.1); W-MATCH-001 therefore fires on a 
 #### 18.6.1 The Whole-Error Binder — `_ <name>` (S451)
 
 In a `!{}` handler arm (§19.4.3) and in a `match` whose subject is a failable result (§19.7.1), the
-wildcard MAY carry one binder: `| _ err :>` in a `!{}`, `_ err :>` in a `match`. The arm matches
+wildcard MAY carry one binder: `_ err :>`, in a `!{}` and in a `match` alike (S452 — a `!{}` arm is a
+§18.2 `match-arm`, §19.4.5; the `|`-led `| _ err :>` is the soft-deprecated spelling). The arm matches
 like the wildcard — any error variant not matched by an earlier arm — and `err` binds the WHOLE
 error value: the variant together with its payload, not the payload alone. The name is the
 author's; `err` is the usual choice (`e` reads as an event to most JS developers).
@@ -16396,7 +16400,7 @@ type DraftState:enum = { Idle, Saving, Failed(error: SaveError) }
 function saveDraft()! SaveError { … }
 
 function save() {
-    saveDraft() !{ | _ err :> { @state = .Failed(err) } }   // err: SaveError — the whole value
+    saveDraft() !{ _ err :> { @state = .Failed(err) } }   // err: SaveError — the whole value
 }
 ```
 
@@ -16415,7 +16419,7 @@ the variants an earlier arm matched: a later `match err { … }` is exhaustive o
 
 **Normative statements:**
 
-- In a `!{}` arm, `| _ <name> :>` SHALL match every error variant not matched by an earlier arm,
+- In a `!{}` arm, `_ <name> :>` SHALL match every error variant not matched by an earlier arm,
   and `<name>` SHALL bind the whole error value, typed as above.
 - In a `match` on a failable result, `_ <name> :>` SHALL match every ERROR variant not matched by
   an earlier arm, and SHALL NOT match the success variant `.Ok`: `<name>` holds an error, never a
@@ -16935,7 +16939,7 @@ duplicate match arm). The first arm for a variant is used; the second is an erro
 | E-TYPE-026 | Match expression in invalid context (markup, SQL, CSS, attribute) | Error |
 | E-TYPE-027 | Shorthand pattern used when enum type cannot be inferred | Error |
 | E-SYNTAX-010 | `else` default arm is not the last arm | Error |
-| E-MATCH-BARE-BINDER | An arm's whole pattern is a bare identifier (`err :>`, `\| err :>` in `!{}`) — fix: `\| _ err :>` binds the whole error (§18.6.1); also `_ <name>` on a non-failable `match` and `else <name>` — §18.2 (S451). **Nominal / not yet emitted by impl#1.** | Error |
+| E-MATCH-BARE-BINDER | An arm's whole pattern is a bare identifier (`err :>`, in a `match` or a `!{}`; also the legacy `\| err :>` in a `!{}`) — fix: `_ err :>` binds the whole error (§18.6.1); also `_ <name>` on a non-failable `match` and `else <name>` — §18.2 (S451). **Nominal / not yet emitted by impl#1.** | Error |
 | E-SYNTAX-011 | Guard clause syntax (`if` after arm pattern) — not supported in v1 | Error |
 | E-SYNTAX-012 | Nested pattern in binding position — not supported in v1 | Error |
 | W-MATCH-001 | Wildcard `_` arm is unreachable (all variants already covered) | Warning |
@@ -17457,7 +17461,7 @@ fn step(st: LexState): LexState {
         (.InCode, .SawLineComment)          :> scanLineComment(st)
         (.InTemplateBody, .SawInterpClose)  :> closeInterp(st)
         (_, .SawEof)                        :> emitEof(st)
-        | _                                 :> advanceOne(st)
+        _                                   :> advanceOne(st)
     }
 }
 ```
@@ -17514,8 +17518,8 @@ TS-C-tractability rationale.
 #### Exhaustiveness — product totality (extends §18.8)
 
 The arms must cover the CROSS-PRODUCT of the per-scrutinee variant sets, OR provide coverage via
-`_` — a whole-product `| _ :>` wildcard arm, and/or a per-position `_` inside a `product-pattern`
-(`(_, .SawEof)` covers every mode paired with `SawEof`). The check is the cross-product of the
+`_` — a whole-product `_ :>` wildcard arm, and/or a per-position `_` inside a `product-pattern`
+(`(_, .SawEof)` covers every mode paired with `SawEof`). *(Currency correction S452 — spec: §18.2 governs: a `match-arm` has no leading `|`, and §18.19's own `product-pattern` grammar admits only `wildcard-arm` (`_` / `else`) for the whole product. supersedes: the `|`-led spelling previously shown here. Direction: **newly-rejecting on paper for the multi-scrutinee `| _` arm** — impl#1 accepts it and emits code identical to `_ :>` (measured on `58c11625f`); 0 sites in the corpus (`examples/` `samples/` `conformance/` `stdlib/` `compiler/self-host-v2/` `docs/`); filed `g-impl1-multi-scrutinee-pipe-wildcard-accepted-s452`. Ruling context: user-voice-scrml.md S452 "c looks right".)* The check is the cross-product of the
 §18.8.1 variant-set coverage, computed at Stage 6 (TS-C). A missing combination is non-exhaustive:
 **E-TYPE-020** (the canonical non-exhaustive-enum-match code, §18.8.1) — extended so the message
 names the uncovered `(V1 × … × VN)` cell(s); **E-TYPE-006** when a scrutinee position is a union
@@ -17564,7 +17568,9 @@ product-dispatch, reactive-runtime vehicle); §59.7 / §14.11 (no-tuple — the 
 > DEPRECATED arm-separator aliases (surface `W-MATCH-ARROW-LEGACY`, §34, during the deprecation
 > window — all three forms still parse + emit identically). The `!{}` error-handler arms share
 > the match arm-arrow rule (lockstep). Examples in this section may use either form. (S145 —
-> `match-arrow-colon-canonical`.)
+> `match-arrow-colon-canonical`.) **S452:** the lockstep is now the whole arm, not only its
+> separator — a `!{}` arm is a §18.2 `match-arm` (§19.4.5). A leading `|` on a `!{}` arm, and the
+> parenthesis-free binder `| .V m :>`, are SOFT-DEPRECATED (`W-ARM-PIPE-LEGACY`, §19.4.5).
 
 ### 19.1 Overview
 
@@ -17705,7 +17711,7 @@ A call to a `!` function SHALL NOT be ignored. The caller MUST do one of the fol
 
 1. **Match** the result: `match riskyFunction() { ::Ok(val) -> ... ::ErrorVariant -> ... }`
 2. **Propagate** with `?`: `let x = riskyFunction()?`
-3. **Catch** with `!{}` inline handler: `let x = riskyFunction() !{ ::ErrorVariant -> fallbackValue }`
+3. **Catch** with `!{}` inline handler: `let x = riskyFunction() !{ .ErrorVariant :> fallbackValue }`
 4. **Contain** inside `<errorBoundary>`: in markup context, an `<errorBoundary>` catches the error of a call made while RENDERING (§19.6.6). It does not contain a call in an event handler, which runs after render. A render-time call is a call to a CLIENT `!` function: a server call cannot be made while rendering (§13.7, E-VALUE-SERVER-CALL).
 5. **Load** it in a `<request>` body (§6.7.7): the call that is the right-hand side of the body's single `@var = expr` assignment is handled by the request. Its failure sets `<#id>.error` (§6.7.7, "Settled state (failure)") and leaves `@var` and `<#id>.data` at their previous values. This is how server data reaches markup, failure included (§19.6.6).
 
@@ -17717,11 +17723,11 @@ Failing to handle the result of a `!` function call in any of these ways SHALL b
 
 **A client call to a server function is a failable call too (S451).** A call evaluated on the client whose callee is server-placed (§12.2) can fail on the wire, so it is a failable call whether or not the callee is declared `!`: it is handled by every form above (a `!{}`, a `match`, `?` inside a `!` function, a `<request>` body), and an unhandled one is E-ERROR-002. A server→server call (§13.4) is not affected. §19.9.10 states the rule, its scope, and what its error type covers (its exact shape is OPEN for the bootstrap's U1b design pass). *(Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1 · supersedes: the CPS-implicit exemption in "Event-handler values" and "Handler references" below, quoted in §19.9.10 · newly-rejecting.)*
 
-At an event-handler site neither `?` (a handler is not a `!` function, §19.5.4) nor `<errorBoundary>` (render-time only, §19.6.6) can handle the call, so the message offers only the remedies that apply there. For a call: `Result of failable function '{name}' is not handled in this event handler. Catch it with '!{}' (e.g. '{name}(…) !{ | .Variant :> … }'), match the result, or call it from a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).` For a reference (below): `Failable function '{name}' is passed as an event-handler reference, so the event would call it and discard its error. Call it in a handler that handles the result (e.g. '{attr}={ {name}() !{ | .Variant :> … } }'), or wire a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`
+At an event-handler site neither `?` (a handler is not a `!` function, §19.5.4) nor `<errorBoundary>` (render-time only, §19.6.6) can handle the call, so the message offers only the remedies that apply there. For a call: `Result of failable function '{name}' is not handled in this event handler. Catch it with '!{}' (e.g. '{name}(…) !{ .Variant :> … }'), match the result, or call it from a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).` For a reference (below): `Failable function '{name}' is passed as an event-handler reference, so the event would call it and discard its error. Call it in a handler that handles the result (e.g. '{attr}={ {name}() !{ .Variant :> … } }'), or wire a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`
 
 **Event-handler values — no exemption (S439 ruling #14; S440 "restore conformance").** The two SHALLs above (this section's E-ERROR-002 sentence and §19.4.4) apply to event-handler attribute values (§5.2.2, §5.2.3) exactly as they apply anywhere else. Every unhandled call to a `!` function in an event-handler value SHALL be E-ERROR-002, whatever the handler's statement count or form. The answer follows the unhandled call, not the shape of the handler around it. The bare `onclick=risky()`, the braced `onclick={ risky() }` (on one line or several), `onclick=${risky()}`, the multi-statement `onclick={ risky(); @r = 1 }`, and a call reached through control flow in the handler (`onclick={ if (@ready) risky() }`, `onclick={ for (const i of ids) risky() }`) all get the same answer. So does a handler placed at top level, in an `<each>` row, in an engine state-child, in a `<match>` arm, or in a component body.
 
-A handler handles the call the way any other caller does: `onclick={ risky() !{ | .Empty :> @r = 1 } }`, a `match` on the result, or a non-failable function that handles the call and is wired as the handler (`onclick=load()`). An enclosing `<errorBoundary>` does NOT handle it: a handler runs when its event fires, after render, and the boundary (item 4, §19.6.6) catches render-time calls only (its one handler-time exception is the compiler-generated `<formFor>` submit dispatch, §19.6.6 / §41.14.3, which no author-written handler reaches). A handler call inside an `<errorBoundary>` is therefore E-ERROR-002 when unhandled, like anywhere else. This is §19.6.6 as limited by S440 #22: a boundary catches errors raised while rendering, not in event handlers. A call to a server function — declared `!` or not, body-split or not — is a failable call in a handler like anywhere else on the client (§19.9.10, S451), and gets E-ERROR-002 when unhandled. *(S451 "your recs on all of them" item 1 — supersedes: "A function whose `!` is only CPS-implicit (a server function not declared `!`, §19.4.2) is outside this rule. Its one-statement handler call gets neither E-ERROR-002 nor W-CPS-NEEDS-FAILABLE (S440 #18).")* The callee is resolved through scope, so a local binding that shadows a failable function's name (an `<each in=@xs as risky>` row alias, a component prop) is not that function.
+A handler handles the call the way any other caller does: `onclick={ risky() !{ .Empty :> @r = 1 } }`, a `match` on the result, or a non-failable function that handles the call and is wired as the handler (`onclick=load()`). An enclosing `<errorBoundary>` does NOT handle it: a handler runs when its event fires, after render, and the boundary (item 4, §19.6.6) catches render-time calls only (its one handler-time exception is the compiler-generated `<formFor>` submit dispatch, §19.6.6 / §41.14.3, which no author-written handler reaches). A handler call inside an `<errorBoundary>` is therefore E-ERROR-002 when unhandled, like anywhere else. This is §19.6.6 as limited by S440 #22: a boundary catches errors raised while rendering, not in event handlers. A call to a server function — declared `!` or not, body-split or not — is a failable call in a handler like anywhere else on the client (§19.9.10, S451), and gets E-ERROR-002 when unhandled. *(S451 "your recs on all of them" item 1 — supersedes: "A function whose `!` is only CPS-implicit (a server function not declared `!`, §19.4.2) is outside this rule. Its one-statement handler call gets neither E-ERROR-002 nor W-CPS-NEEDS-FAILABLE (S440 #18).")* The callee is resolved through scope, so a local binding that shadows a failable function's name (an `<each in=@xs as risky>` row alias, a component prop) is not that function.
 
 **Handler references (S441 ruling).** A `!` function passed as an event-handler REFERENCE — the bare `onclick=risky`, `onclick=${risky}`, or `onclick={ risky }` — SHALL be E-ERROR-002, exactly like `onclick=risky()`: the event dispatcher calls the function and discards its result, so the reference is an unhandled call. This holds in every position a handler call is checked in (top level, an `<each>` row, an engine state-child, a `<match>` arm, a component body, inside an `<errorBoundary>`). A reference to a non-failable function is an ordinary handler. The rule applies to event-handler attributes only: a component's declared prop whose name starts with `on` (`<Btn onSave=risky/>`) is a callback value handed to the component, not a handler reference. Where the component wires such a prop as its own raw handler reference (`onclick=onSave`), the resulting handler is a reference to whatever the call site passed, and a call site that passes a `!` function is E-ERROR-002 (reported at that call site). The one exempt reference is `<formFor onsubmit=persist/>`: §41.14.3 (`E-FORMFOR-ONSUBMIT-SIGNATURE`) REQUIRES that function to be failable, and its error takes the compiler-generated submit route to the nearest `<errorBoundary>` (§19.6.6, §41.14.3). The same scope applies as for a call: the callee is resolved through scope, and a server function passed as a handler reference is a failable function here whether or not it is declared `!` (§19.9.10). *(S451 "your recs on all of them" item 1 — supersedes: "and a function whose `!` is only CPS-implicit is outside the rule.")*
 
@@ -17741,7 +17747,7 @@ A handler handles the call the way any other caller does: `onclick={ risky() !{ 
 
 In a value position, every arm SHALL do one of two things:
 
-1. **Yield a value** of the call's success type: the arm is an expression, or a block whose last expression is that value (§18.5). The `match` form's `.Ok(v)` arm is an arm like any other. For a `?{}` the success type is the terminator's (§44.3): `.get()` yields `Row | not`, so `| _ :> not` yields a value; `.all()` yields `Row[]`, so `| _ :> []` does.
+1. **Yield a value** of the call's success type: the arm is an expression, or a block whose last expression is that value (§18.5). The `match` form's `.Ok(v)` arm is an arm like any other. For a `?{}` the success type is the terminator's (§44.3): `.get()` yields `Row | not`, so `_ :> not` yields a value; `.all()` yields `Row[]`, so `_ :> []` does.
 2. **Leave**: the arm ends in `return` or `fail` on every path through it (an `if` whose two branches each leave, leaves). A `break` or `continue` that targets a loop enclosing the whole statement also leaves, where §7 makes it legal there.
 
 An arm that does neither — it ends in a write (`@phase = .Missing`), a declaration, a call whose result is not a value of the success type (`log(m)`), or a block whose last statement is not an expression — **falls through**, and in a value position that SHALL be a compile error: **E-ERROR-012** — `Arm '{pattern}' of the handler on '{name}(…)' produces no value, but the handler's result is used here ({position}). In a value position every arm must yield a value of '{name}'s success type or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| {pattern} :> { @phase = …; fallback }'), leave with 'return', or call '{name}(…) !{ … }' as a statement and keep the writes in its arms.` An arm that yields a value of the WRONG type is not E-ERROR-012: it is the existing type error (E-TYPE-001, §18.4). The two never fire for the same arm.
@@ -17755,8 +17761,8 @@ function loadItem(id: string)! LoadError { … }        // success type: Item
 // VALID — value position, every arm yields an Item or leaves
 function itemOrPlaceholder(id: string) {
     const item = loadItem(id) !{
-        | .NotFound(mid) :> placeholderItem(mid)       // yields a value
-        | .Timeout       :> { @phase = .TimedOut; return placeholderItem(id) }   // leaves
+        .NotFound(mid) :> placeholderItem(mid)       // yields a value
+        .Timeout       :> { @phase = .TimedOut; return placeholderItem(id) }   // leaves
     }
     return item
 }
@@ -17764,16 +17770,16 @@ function itemOrPlaceholder(id: string) {
 // VALID — statement position: the arms only write, nothing reads a result
 function refresh(id: string) {
     loadItem(id) !{
-        | .NotFound(mid) :> @phase = .Missing(mid)
-        | .Timeout       :> @phase = .TimedOut
+        .NotFound(mid) :> @phase = .Missing(mid)
+        .Timeout       :> @phase = .TimedOut
     }
 }
 
 // INVALID — value position, the arms fall through
 function show(id: string) {
     let item = loadItem(id) !{
-        | .NotFound(mid) :> @phase = .Missing(mid)     // E-ERROR-012: produces no value
-        | .Timeout       :> @phase = .TimedOut         // E-ERROR-012
+        .NotFound(mid) :> @phase = .Missing(mid)     // E-ERROR-012: produces no value
+        .Timeout       :> @phase = .TimedOut         // E-ERROR-012
     }
     @phase = .Loaded(item)                             // on failure `item` would hold nothing
 }
@@ -17792,13 +17798,13 @@ function label(id: string) {
 >
 > **Direction of change (pa-base §8): newly-rejecting.** impl#1 accepts the shape and stores whatever the arm's last statement evaluates to (measured on `25677da72`: an arm `{ console.log("a") }` in `let r = risky(n) !{ … }` lowers to `_scrml_result = console.log("a")`, so `r` holds the host's `undefined` — a value scrml does not have). **Corpus measured** (`examples/`, `samples/`, `conformance/cases/`, 2267 files; impl#1's front end, `guarded-expr` nodes whose guarded statement is a declaration or an assignment, arms read from the node; `match` on a failable found by the same-file `!` declarations): 64 `!{}` handlers, 35 in a value position, **19 value-position handlers with fall-through arms in 13 files, all under `conformance/cases/`; 0 in `examples/` and `samples/`.** A text scan of every `!{` (the handlers on a `?{}` terminator included, which impl#1 does not model as `guarded-expr`) found no more. Five `match`-on-failable sites, none falling through in a value position. (`samples/compilation-tests/error-004-in-logic.scrml` puts a falling-through `!{}` after `let data = not` — no failable call at all; that is E-ERROR-013's shape, below, not counted here.) Files: `conformance/cases/error/{failable-handler-lift, failable-handler-lift-success, failable-handler-lift-timeout}` (3 handlers each), `conformance/cases/error/{fail-imported-builtin-name-enum-ok, fail-bare-variant-reaches-handler, propagate-reaches-handler, propagate-success-unwrap, handler-exhaustive-neg, handler-wildcard-escape, handler-non-exhaustive}`, `conformance/cases/parse-variant/{happy-payload-variant, happy-unit-variant}`, `conformance/cases/control-flow/s437-braceless-else-in-failable-arm` (1 each). In every one the handler's arms only write cells, so the migration is mechanical: drop the unused binding (`let result = f() !{ … }` → `f() !{ … }`), or, where the binding is read after (`failable-handler-lift*` `handleOk`, `propagate-success-unwrap`), give each arm a fallback value or a `return`. The cases are migrated with the bootstrap's implementation, not by this SPEC change. **Nominal / not yet emitted by impl#1** (frozen; `g-impl1-value-position-arm-fallthrough-s451`).
 
-**A binder without parentheses binds the payload (S451 ruling 2).** In a `!{}` arm, `| .V m :>` (or `| ::V m :>`) is the same pattern as `| .V(m) :>`: `m` binds the variant's PAYLOAD — the value of its one declared field — never the error value as a whole. The §18.7 positional-binding rules apply to it unchanged, as a pattern with exactly one binder:
+**A binder without parentheses binds the payload (S451 ruling 2).** *(S452: the parenthesis-free binder is now a SOFT-DEPRECATED spelling, accepted only after a legacy leading `|` and surfacing `W-ARM-PIPE-LEGACY` — §19.4.5. This paragraph states what it means during the window; the canonical arm is `.V(m) :>`.)* In a `!{}` arm, `| .V m :>` (or `| ::V m :>`) is the same pattern as `.V(m) :>`: `m` binds the variant's PAYLOAD — the value of its one declared field — never the error value as a whole. The §18.7 positional-binding rules apply to it unchanged, as a pattern with exactly one binder:
 
 - a variant with **one** field: `m` binds that field, with that field's declared type (`| .QueryFailed m :>` binds the `message: string`, §19.8.1);
-- a variant with **two or more** fields: one binder is fewer bindings than the variant has fields, so it SHALL be **E-TYPE-021** (§18.7 — positional binding has no partial form). Bind every field positionally (`| .InvalidPayload(field, reason) :>`) or use the named form for a subset (`| .InvalidPayload(field: f) :>`);
-- a **unit** variant (no fields): one binder is more bindings than fields — **E-TYPE-021**. Write `| .ConnectionLost :>`.
+- a variant with **two or more** fields: one binder is fewer bindings than the variant has fields, so it SHALL be **E-TYPE-021** (§18.7 — positional binding has no partial form). Bind every field positionally (`.InvalidPayload(field, reason) :>`) or use the named form for a subset (`.InvalidPayload(field: f) :>`);
+- a **unit** variant (no fields): one binder is more bindings than fields — **E-TYPE-021**. Write `.ConnectionLost :>`.
 
-~~The wildcard arm takes no binder: `_` is the `else` arm, and `else` does not bind the matched value (§18.6). A `| _ e :>` arm therefore has no meaning under this rule; an arm that needs the payload names its variant.~~ **Superseded S451 (the whole-error binder, ruling:user-voice-scrml.md S451 "a"):** a binder on the wildcard is not a payload binder — `| _ err :>` binds the WHOLE error value (variant and payload), typed as the call's error type (§18.6.1). `| _ :>` and `| else :>` still bind nothing. An arm that needs one variant's payload names its variant. This paragraph covers `!{}` arms only: §18.2's `match` grammar has no parenthesis-free payload binder, and none is added here (its `_ <name>` arm is the whole-error binder, §18.6.1).
+~~The wildcard arm takes no binder: `_` is the `else` arm, and `else` does not bind the matched value (§18.6). A `| _ e :>` arm therefore has no meaning under this rule; an arm that needs the payload names its variant.~~ **Superseded S451 (the whole-error binder, ruling:user-voice-scrml.md S451 "a"):** a binder on the wildcard is not a payload binder — `_ err :>` binds the WHOLE error value (variant and payload), typed as the call's error type (§18.6.1). `_ :>` and `else :>` still bind nothing. An arm that needs one variant's payload names its variant. This paragraph covers `!{}` arms only: §18.2's `match` grammar has no parenthesis-free payload binder, and none is added here (its `_ <name>` arm is the whole-error binder, §18.6.1).
 
 > **Provenance:** ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 2: *"**yes:** in `| ::V m :>`, `m` binds the variant's PAYLOAD (§19.8.3's own example); Appendix B's contrary line is historical."* · **supersedes:** Appendix B's *"The arm syntax `| ::ErrorTypeA e -> handlerA` is retained."*, which read `e` as the error value (struck there, kept as history); otherwise nothing written — §19.8.3's example used the form without defining it. *(PA reading, flagged: the multi-field and unit cases are §18.7's existing arity rule applied to a one-binder pattern; the ruling names only "the variant's PAYLOAD". That `| _ e :>` binds nothing follows from §18.6; the SPEC names no dedicated code for it.)* **Direction of change (pa-base §8): semantics-changed (stated) for one-field variants; newly-rejecting for a binder on a unit or multi-field variant.** impl#1 (measured on `25677da72`) binds the FIRST field for a multi-field variant (`| .C c :>` on `C(x: number, y: number)` lowers to `const c = …data.x`) and binds the raw `.data` for a unit variant (`| .A x :>` → `const x = …data`), both silently; filed `g-impl1-paren-free-binder-arity-s451`. One-field variants already bind the field, as ruled. **Corpus measured (ruling 2)** (text scan of `!{` arms, `examples/` `samples/` `conformance/cases/`): 46 parenthesis-free binder arms in 12 files, **all under `samples/`** (0 in `examples/` and `conformance/cases/`) — 18 of them `| _ e :>`, and most of the rest name variants their callee's enum does not declare (`::SQLError e`, `::ConflictError e`; the `SqlError` variants are §19.8.1's three) and read `e.message` as if `e` were the whole error. They are the pre-§19 legacy handler shape and are already wrong on the variant name; this ruling moves none of them from correct to incorrect. ~~(`examples/16-remote-data.scrml` and `examples/29-engine-vs-flags.scrml` write `| err :>` — a bare identifier as the whole pattern — a further unruled form this paragraph does not cover.)~~ **Ruled S451:** a bare identifier as the whole pattern (`| err :>`) is **E-MATCH-BARE-BINDER** (§18.2) — write `| _ :>` or name the variant. *(ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(a).)*
 
@@ -17808,7 +17814,7 @@ function label(id: string) {
 function parseCount(src: string) { return src.length }        // not failable
 
 function show(src: string) {
-    let n = parseCount(src) !{ | _ :> 0 }   // E-ERROR-013: parseCount cannot fail
+    let n = parseCount(src) !{ _ :> 0 }   // E-ERROR-013: parseCount cannot fail
     let m = parseCount(src)                  // VALID — nothing to handle
 }
 ```
@@ -17820,7 +17826,7 @@ function show(src: string) {
 ```scrml
 <div>
     !{                                      // E-ERROR-014 — attached to nothing
-        | _ :> <p class="error">Something went wrong</p>
+        _ :> <p class="error">Something went wrong</p>
     }
     <p>Content</p>
 </div>
@@ -17836,11 +17842,12 @@ function show(src: string) {
 - The caller of a `!` function SHALL handle the result via match, `?`, `!{}`, or `<errorBoundary>` (`?` inside a `!` function only, §19.5.4; `<errorBoundary>` for render-time calls only, §19.6.6). An unhandled `!` function call SHALL be a compile error (E-ERROR-002).
 - A call evaluated on the client whose callee is server-placed SHALL be a failable call, declared `!` or not, under the bullet above (§19.9.10). *(S451 "your recs on all of them" item 1.)*
 - A `!{}` handler or a `match` on a failable result in a value position (§19.4.3) SHALL have every arm either yield a value of the call's success type or leave (`return` / `fail`, or a `break` / `continue` out of an enclosing loop). An arm that falls through there SHALL be a compile error (**E-ERROR-012**). In a statement position an arm MAY fall through. *(S451 ruling 1a.)*
-- In a `!{}` arm, a parenthesis-free binder (`| .V m :>`) SHALL bind the variant's payload exactly as `| .V(m) :>` does, under §18.7's positional arity: on a unit variant or a variant with two or more fields it SHALL be E-TYPE-021. *(S451 ruling 2.)*
+- In a `!{}` arm, a parenthesis-free binder (`| .V m :>` — the soft-deprecated spelling, accepted only after a leading `|`, §19.4.5) SHALL bind the variant's payload exactly as `.V(m) :>` does, under §18.7's positional arity: on a unit variant or a variant with two or more fields it SHALL be E-TYPE-021. *(S451 ruling 2.)*
 - A `!{}` handler SHALL be attached only to an expression that can fail (a `!` function call, a call the compiler treats as `!`, or a `?{}`). A `!{}` on anything else SHALL be a compile error (**E-ERROR-013**). *(S451 ruling 3.)*
 - A `!{}` handler written as markup content and attached to no expression SHALL be a compile error (**E-ERROR-014**). *(S451 "your recs on all of them" item 2(b).)*
-- An arm whose whole pattern is a bare identifier (`| err :>`) SHALL be a compile error (**E-MATCH-BARE-BINDER**, §18.2). *(S451 "your recs on all of them" item 2(a).)* To bind the whole error, write `| _ err :>`.
+- An arm whose whole pattern is a bare identifier (`err :>`, or the legacy `| err :>`) SHALL be a compile error (**E-MATCH-BARE-BINDER**, §18.2). *(S451 "your recs on all of them" item 2(a).)* To bind the whole error, write `_ err :>`.
 - In a `!{}` arm or a `match` on a failable result, `_ <name>` SHALL match every error variant not matched by an earlier arm (never `.Ok`) and SHALL bind the whole error value, typed as the failure's error type (§18.6.1). *(S451 "a", the whole-error binder.)*
+- A `!{}` handler's arms SHALL be §18.2 `match-arm`s (§19.4.5). A `|`-led arm, and a paren-free binder after it (`| .V m :>`), SHALL parse identically to the canonical arm (`.V(m) :>`) and surface **W-ARM-PIPE-LEGACY**; `E-ARM-PIPE-LEGACY` is reserved. *(S452 "c looks right".)*
 - The `!` modifier SHALL be part of the function's type signature. It is visible to the type system and participates in type checking.
 
 ##### 19.4.4.1 The error type SHALL be an enum
@@ -17886,6 +17893,129 @@ not the SPEC sentence — is what actually moved it.
 
 - `server` and `!` modifiers MAY coexist: `server function loadUser(id)! -> UserError { ... }` (arrow form) or `server function loadUser(id)! UserError { ... }` (bare form).
 - `pure` (§33) and `!` modifiers MAY coexist: `pure function validate(x)! -> ValidationError { ... }`. A `pure` failable function SHALL NOT have side effects but MAY produce error values.
+
+#### 19.4.5 The `!{}` Handler Arm Grammar — one arm grammar in logic (S452)
+
+A `!{}` handler's arms are `match` arms. The arm list is a sequence of §18.2 `match-arm`s — the same
+patterns, the same separator, the same juxtaposition — and this section adds nothing to the arm
+itself:
+
+```
+handled-expr  ::= expression '!{' handler-arm+ '}'
+handler-arm   ::= match-arm                  // §18.2 — arm-pattern, ':>' (or a deprecated alias), arm-body
+```
+
+So, in a `!{}` exactly as in a `match`: a variant arm is `.V`, or `.V(binding-list)` to bind its
+payload (§18.7; `::V` is the §18.2 alias); `_` / `else` is the catch-all; `_ <name>` binds the whole
+error (§18.6.1); alternates are separated by `|` within one arm (`.A | .B :> …`, §18.2); arms are
+written one per line with no separator between them (E-MATCH-ARM-SEPARATOR); a bare name is not a
+pattern (E-MATCH-BARE-BINDER). The arm's pattern resolves against the type of the failure being
+handled (the declared error enum, `SqlError` for a `?{}`, §18.6.1's list).
+
+```scrml
+type LoadError:enum = { Network(msg: string), Timeout, Gone }
+function load(id: string)! LoadError { … }
+
+function show(id: string) {
+    const item = load(id) !{
+        .Network(msg) :> { @phase = .Failed(msg); return }
+        .Timeout      :> placeholderItem(id)
+        _ err         :> { @phase = .Failed(describe(err)); return }
+    }
+    @phase = .Loaded(item)
+}
+```
+
+**Element arms are not changed; pattern arms have one spelling.** Element arms in markup — the
+`<match>` block form (§18.0.1) and an engine's state-children (§51) — keep their own grammar. Every
+PATTERN arm takes §18.2's: a `match`, a `!{}`, and the `(state × message)` message arms written
+inside a state-child (§51.0.S.2.3, S452 "a. one spelling"). The retiring `|`-led spelling below
+covers both `!{}` arms and message arms.
+
+##### The retiring `|`-led arm (§63)
+
+The pre-S452 pattern arm of a `!{}` handler and of an engine message arm (§51.0.S.2.3) — a leading
+`|`, and, in a `!{}` only, after it optionally a variant followed by one parenthesis-free binder —
+is **SOFT-DEPRECATED** (§63.1 Stage 1):
+
+```
+legacy-handler-arm ::= '|' legacy-arm-pattern (':>' | '=>' | '->') arm-body          (deprecated)
+legacy-arm-pattern ::= arm-pattern                                                    // §18.2
+                     | ('.' | '::') VariantName Identifier                            // = .V(Identifier); `!{}` only
+                     | TypeName ('.' | '::') VariantName Identifier                   // = T.V(Identifier); `!{}` only
+```
+
+| Retired form | W-lint (Stage 1) | Reserved E | `scrml fix` rule |
+|---|---|---|---|
+| `\| <pattern> :> body` in a `!{}` (including the paren-free binder `\| .V m :> body`) or as an engine message arm (§51.0.S.2.3) | `W-ARM-PIPE-LEGACY` | `E-ARM-PIPE-LEGACY` | Delete the leading `\|` (and the space after it): `\| <pattern> :>` → `<pattern> :>`. A paren-free binder gains its parentheses: `.V m` → `.V(m)` (`::V m` → `::V(m)`, `T.V m` → `T.V(m)`). Where two or more legacy arms share a line (`!{ \| .A :> 1 \| .B :> 2 }`), put each arm on its own line (§18.2: one arm per line). The separator, the pattern's prefix (`.` / `::`) and the arm body are left as written — the separator has its own lint and rule (`W-MATCH-ARROW-LEGACY`, §18.2). |
+
+**Normative statements:**
+
+- A `!{}` handler's arms SHALL be §18.2 `match-arm`s. Every §18 rule on an arm — its patterns, its
+  separators and their deprecation, juxtaposition (one arm per line), alternation and
+  E-MATCH-ALT-BINDING, E-MATCH-BARE-BINDER, the last-position rule for the catch-all (E-SYNTAX-010),
+  W-MATCH-001, §18.7 payload binding — SHALL apply to a `!{}` arm unchanged.
+- An engine's `(state × message)` message arms SHALL be §18.2 `match-arm`s on the same terms
+  (§51.0.S.2.3).
+- **Parses identically (§63.1).** During the window, a `!{}` arm or a message arm led by `|` SHALL be the same arm
+  as the arm without the `|` — the same AST, emitted code and run-time behaviour — and a
+  paren-free binder after a `|`-led variant (`| .V m :>`) SHALL be the same pattern as `.V(m) :>`
+  (its meaning and arity rules: §19.4.3, *"A binder without parentheses binds the payload"*). At
+  arm level (the §7.2.2 "arm heads" position) a `|` that begins an arm is this lead, never an
+  alternation separator; a `|` between two patterns of one arm is alternation (§18.2). On one line,
+  a `|` that begins a legacy arm also ends the arm before it.
+- Each `|`-led arm SHALL surface **W-ARM-PIPE-LEGACY** (Info; one per arm). The message
+  SHALL name the canonical rewrite of that arm, `scrml fix`, and this section: `Arm '| {pattern} :>'
+  uses the deprecated leading '|'. A pattern arm is a match arm (§18.2): write '{canonical} :>'. Run
+  'scrml fix' to rewrite every site (§19.4.5).` — where `{canonical}` is the pattern without the
+  `|`, a paren-free binder written `.V(m)`.
+- The paren-free binder is part of the legacy `!{}` arm only: a pipe-less `.V m :>` is not in the
+  grammar of a `!{}` (nor of a `match`, §18.2), and is a syntax error as it is in a `match`. It was
+  never a message-arm form and is not one now.
+- **E-ARM-PIPE-LEGACY** is reserved (§63.2): named, not scheduled, never fired before a §62
+  MAJOR event schedules it (§63.7 permanent-soft). Scheduling is gate-blocked until the `scrml fix`
+  rule above is verified-landed (§63.4).
+- This section does not change `match`. §18.2's `match` grammar never admitted a leading `|`, so
+  the window covers `!{}` arms and engine message arms (§51.0.S.2.3) — the two places the form was
+  ever accepted. (impl#1 accepts `| _` on a multi-scrutinee `match` too; that is a filed divergence,
+  `g-impl1-multi-scrutinee-pipe-wildcard-accepted-s452`, not part of the window.)
+
+> **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" — *"c looks right. markup vs
+> logic is understandable (an possibly a bonus) but multiple syntaxs in logic dosnt work for me.
+> yes, cononical version."* — answering the PA's option (c): drop the `|` from `!{}` so both logic
+> arm forms use §18.2's `match`-arm grammar, through the §63 lifecycle with a `scrml fix` rule;
+> markup vs logic stays different by design. · **supersedes:** the example-only `| ::V m :>`
+> handler shape (§19.8.3 et al.), which never had a grammar production — §19.4.3's arms were
+> shown by example only (`!{ ::ErrorVariant -> fallbackValue }` in its item 3, `| ::V m :>` in
+> §19.8.3), and impl#1's parser comment states the form as *"Error arm syntax: `| ::TypeA e ->
+> handler`"* (`compiler/src/ast-builder.js` `parseErrorTokens`). *(PA reading, in its veto window,
+> flagged: "multiple syntaxs in logic dosnt work for me" is read as covering the PAYLOAD BINDER too —
+> logic arms bind with §18.2's parenthesized `.V(m)`; the paren-free `| ::V m :>` binder (S451
+> ruling 2 named only what `m` binds, not that the spelling should survive) deprecates with the
+> `|`, and the whole-error binder is written `_ err :>` (§18.2's `whole-error-arm`). Separately ruled
+> aliases — `::` for `.`, `=>` / `->` for `:>` — are NOT re-ruled here. Further PA readings: the
+> paren-free binder is accepted only after a `|`, since a pipe-less `.V m :>` was never in the
+> contract; the W-lint is Info, the severity of its §18.2 sibling W-MATCH-ARROW-LEGACY; one lint per
+> arm.)*
+>
+> **Direction of change (pa-base §8): newly-accepting on impl#1 for the canonical form; inert for
+> the legacy form.** The SPEC's grammar is new, but the canonical arm is not: §19.4.3 item 3 already
+> showed a pipe-less arm. impl#1 rejects it — measured on `df6dad5ac`, compiling
+> `risky(2) !{ .Bad(m) :> { return }⏎ .Gone :> { return } }` (with `type E:enum = { Bad(msg: string),
+> Gone }`, `risky` declared `! -> E`) fails with **E-TYPE-080** *"Non-exhaustive error handler for
+> `E`. Missing variant(s): Bad"*: the pipe-less `.Bad(m)` arm is silently dropped, and `.Gone`
+> survives only because impl#1 skips the `.` and reads `Gone :>` as its "simplified" `TypeName :>`
+> arm. A pipe-less `_ err :>` is dropped the same way (E-TYPE-080, missing `Gone`). Pipe-less
+> `::Bad(m) :>` and `_ :>` already compile, and the `|`-led forms (`| .Bad(m) :>`, `| ::Bad m :>`)
+> compile clean with no lint. Filed `g-impl1-handler-arm-pipeless-dropped-s452` (impl#1 frozen —
+> carried, §34.0). The legacy form keeps compiling everywhere; W-ARM-PIPE-LEGACY is
+> non-fatal. **Corpus measured** (each `!{` brace-matched, strings and comments skipped; every lone
+> `|` at the handler's top level is one arm, since impl#1 ends an arm at any `|`): **186 `|`-led
+> arms in 70 files** — `examples/` 4 in 3 (all `| err :>`, already E-MATCH-BARE-BINDER),
+> `samples/` 55 in 16 (32 of them paren-free variant binders), `conformance/cases/` 106 in 44 (six
+> one-line handlers carry a second arm on the same line), `stdlib/` 21 in 7. The corpus migrates by
+> the `scrml fix` rule, not by this SPEC change. **W-ARM-PIPE-LEGACY and
+> E-ARM-PIPE-LEGACY are Nominal / not yet emitted** by impl#1 (frozen) or the bootstrap.
 
 ---
 
@@ -18194,15 +18324,15 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
    ```scrml
    function userName(id) {
        const row = ?{`SELECT name FROM users WHERE id = ${id}`}.get() !{
-           | ::QueryFailed m        :> { log("lookup failed: " + m); return "?" }
-           | ::ConstraintViolation f :> { return "?" }
-           | ::ConnectionLost        :> { return "?" }
-           | _                       :> { return "?" }
+           .QueryFailed(m)         :> { log("lookup failed: " + m); return "?" }
+           .ConstraintViolation(f) :> { return "?" }
+           .ConnectionLost         :> { return "?" }
+           _                       :> { return "?" }
        }
        return row is not ? "(none)" : row.name
    }
    ```
-   `| ::QueryFailed m :>` binds the variant's payload, the `message: string` (§19.4.3, S451 ruling 2 — *"in `| ::V m :>`, `m` binds the variant's PAYLOAD (§19.8.3's own example)"*); `| ::ConstraintViolation f :>` binds the `field`. The handler is checked for exhaustiveness against `SqlError` like any other `!{}` handler. Because the compiler MAY add `SqlError` variants (§19.8.4) — §8.9.4's `BatchPrepareFailed` is one — a `| _ :>` arm keeps a handler total as the enum grows.
+   `.QueryFailed(m) :>` binds the variant's payload, the `message: string` (§18.7; §19.4.3, S451 ruling 2 — *"in `| ::V m :>`, `m` binds the variant's PAYLOAD (§19.8.3's own example)"* — this example was then written `| ::QueryFailed m :>`, the spelling S452 soft-deprecates, §19.4.5); `.ConstraintViolation(f) :>` binds the `field`. The handler is checked for exhaustiveness against `SqlError` like any other `!{}` handler. Because the compiler MAY add `SqlError` variants (§19.8.4) — §8.9.4's `BatchPrepareFailed` is one — a `_ :>` arm keeps a handler total as the enum grows.
 2. **A `match` on the result** — the success value arrives as `::Ok` (§19.7.1):
    ```scrml
    function openOrders(customerId) {
@@ -18220,7 +18350,7 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
        return ?{`SELECT * FROM users WHERE id = ${id}`}.get()   // a failure propagates (§19.8.2)
    }
    function showUser(id) {
-       @user = loadUser(id) !{ | _ :> not }                    // the caller handles it
+       @user = loadUser(id) !{ _ :> not }                    // the caller handles it
    }
    ```
 
@@ -18232,7 +18362,7 @@ A `?{}` query is a **failable expression everywhere**. Outside a `!` function it
 
 > **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all five" — item 2: *"**§52 Pattern C hydration vs R11:** the compiler-generated hydration load of a `<x server>` declaration is EXEMPT from E-ERROR-002, but never silent: a failure writes a server log line and the cell keeps its §52.4.3 placeholder with a readable failed state (`@x.error`, mirroring `<request>.error`)."* · **supersedes:** the OPEN that stood here — *"Whether R11 requires a handler on it, or the §52 hydration route owns its failure, is not ruled."* · **Direction of change (pa-base §8): inert** relative to the pre-R11 SPEC (a Pattern C `?{}` was never E-ERROR-002) and **newly-accepting** relative to a literal reading of R11 (which would have required a handler on it). The new failed state `@x.error` is **Nominal / spec-ahead** (§52.6.8).
 
-**Migrating R11 code (tooling, not language).** The R11 migration route is a `scrml fix` rule that writes the struck silent behaviour out explicitly at each site — `.get() !{ | _ :> not }`, `.all() !{ | _ :> [] }`, and the matching shape for `.run()` — so the meaning is preserved and the silence becomes visible. The rule is owed; it is a tool behaviour with no normative weight here. *(Pointer only. Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 5(a): *"R11 migration = a `scrml fix` rule that writes the old silent behaviour out explicitly (`?{…}.get() !{ | _ :> not }`, `.all() !{ | _ :> [] }`, `.run() !{ | _ :> {} }`-shape) — meaning-preserving, silence made visible"*.)*
+**Migrating R11 code (tooling, not language).** The R11 migration route is a `scrml fix` rule that writes the struck silent behaviour out explicitly at each site — `.get() !{ _ :> not }`, `.all() !{ _ :> [] }`, and the matching shape for `.run()` — so the meaning is preserved and the silence becomes visible. The rule is owed; it is a tool behaviour with no normative weight here. *(Pointer only. Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 5(a): *"R11 migration = a `scrml fix` rule that writes the old silent behaviour out explicitly (`?{…}.get() !{ | _ :> not }`, `.all() !{ | _ :> [] }`, `.run() !{ | _ :> {} }`-shape) — meaning-preserving, silence made visible"*.)*
 
 > **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" (the entry: *"a `?{}` query is a FAILABLE expression everywhere, not only inside `!` functions. Outside a `!` function the existing unhandled-failable rule applies (E-ERROR-002 — handle with `!{}`, `match`, or move into a `!` function)"*) · supersedes: *"When a `?{}` query is executed outside a `!` function (backwards-compatible mode): A failed query SHALL return `not` (for `.get()`) or an empty array (for `.all()`). No error is propagated. No compile error is emitted. This preserves backwards compatibility with existing `?{}` usage (§8)."* · design: `scrml-support/docs/deep-dives/bootstrap-u1-server-boundary-design-2026-10-03.md` §10 R11 (the PA's minimum rec (a), keep the value semantics + a server log line, was NOT taken).
 >
@@ -18655,7 +18785,7 @@ A server batch runs its statements in source order, and a cell read inside it SH
       @total = ?{`SELECT count(*) AS n FROM items WHERE order_id = ${orderId}`}.get().n
       ?{`INSERT INTO totals (order_id, total) VALUES (${orderId}, ${@total})`}.run()
   } }
-  <button onclick={ snapshotTotal(7) !{ | _ :> log("snapshot failed") } }>Snapshot</button>
+  <button onclick={ snapshotTotal(7) !{ _ :> log("snapshot failed") } }>Snapshot</button>
   <p>${@total}</p>
 </program>
 ```
@@ -18743,13 +18873,13 @@ fn: string)`) already names the first two for body-split stubs, and is the start
 is assigned to the bootstrap's U1b design pass:** the type's name (whether `CpsError` is extended or replaced by one
 built-in transport error), its variants and payloads (whether a decode failure is its own variant, whether a status
 code travels in the payload), its `renders` clauses (§19.2), and its `httpStatus` behaviour. Until U1b, a handler
-that must be total over a server call writes a `| _ :>` arm (§19.4.3) — or `| _ err :>` to bind the whole failure (§18.6.1) — which covers every transport variant whatever
+that must be total over a server call writes a `_ :>` arm (§19.4.3) — or `_ err :>` to bind the whole failure (§18.6.1) — which covers every transport variant whatever
 their final names.
 
 **A server function declared `!`.** Its client call can fail in two ways: with the function's declared error (§19.9.1,
 §19.9.3 — the `fail` envelope it sends) or with a transport failure. The call's failure set is BOTH: the declared
 error type's variants and the transport error's. A `!{}` handler or a `match` on the call SHALL cover both — by
-naming the variants of each, or with a `| _ :>` arm. A function declared `!` loses nothing it had: its declared
+naming the variants of each, or with a `_ :>` arm. A function declared `!` loses nothing it had: its declared
 variants arrive exactly as §19.9.1 sends them. **OPEN for U1b:** how the two sets combine in the type system (a flat
 union of variants, or one wrapping variant such as `.Transport(e)`), and how `?` carries the transport half through
 §19.5.3's compatibility check (E-ERROR-010) when the enclosing function's error type does not name it.
@@ -18758,14 +18888,14 @@ union of variants, or one wrapping variant such as `.Transport(e)`), and how `?`
 <program db="sqlite:./app.db">
   <users> = 0
   ${ function userCount() {                                  // server-placed (?{}), not declared `!`
-      const row = ?{`SELECT count(*) AS n FROM users`}.get() !{ | _ :> not }
+      const row = ?{`SELECT count(*) AS n FROM users`}.get() !{ _ :> not }
       return row is not ? 0 : row.n
   } }
   ${ function refresh() {
       @users = userCount()                                   // E-ERROR-002 — the call can fail on the wire
   } }
   ${ function refreshOrKeep() {
-      @users = userCount() !{ | _ :> @users }                // VALID — on failure keep the old count
+      @users = userCount() !{ _ :> @users }                // VALID — on failure keep the old count
   } }
   <request id="usersLoad" deps=[]>${ @users = userCount() }</>   // VALID — the request handles it (<#usersLoad>.error)
   <button onclick={ userCount() }>Count</button>             // E-ERROR-002 — a handler call is a client call
@@ -19128,12 +19258,14 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-ERROR-013 | §19.4.3 | A `!{}` handler is attached to an expression that cannot fail — a call to a function that is neither declared `!` nor treated as `!` by the compiler (§19.9.5 CPS split, a built-in failable), not a `?{}`, or not a call at all. No arm can run; the message names the callee and says to remove the handler or declare the function `!`. The `!{}` sibling of E-ERROR-004. **Provenance:** ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" item 3. **Nominal / not yet emitted** by impl#1 (frozen; `g-impl1-handler-on-non-failable-s451`); lands with the bootstrap. | Error |
 | E-ERROR-014 | §19.4.3 | A `!{}` handler written as markup content and attached to no expression (the legacy free-standing "error effect block"). No failure precedes it, so no arm can run; the message says to attach it to a call, load through a `<request>` and read `<#id>.error`, or use an `<errorBoundary>`. The markup sibling of E-ERROR-013. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(b). **Nominal / not yet emitted** by impl#1 — it drops the block silently (frozen; `g-impl1-detached-handler-in-markup-s451`); lands with the bootstrap. | Error |
 | E-ERROR-015 | §19.10.4 | Manual transaction control — a `?{}` whose statement is `BEGIN` (any form), `COMMIT`, `END`, `ROLLBACK`, `SAVEPOINT` or `RELEASE` — where no enclosing function is declared `!` (a function without `!`, or a body top). Use `transaction { }` inside a `!` function. Replaces W-BATCH-001 at those sites. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(c). **Nominal / not yet emitted** by impl#1 (frozen; `g-impl1-manual-tx-outside-failable-s451`); lands with the bootstrap. | Error |
+| W-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3 | A `!{}` handler arm or an engine message arm led by `\|` — `\| <pattern> :>`, including the paren-free binder `\| .V m :>` — SOFT-DEPRECATED (§63.1 Stage 1): a `!{}` arm is a §18.2 `match-arm`. Parses identically to `<pattern> :>` / `.V(m) :>`; one lint per arm, naming the canonical arm, `scrml fix` and §19.4.5. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" + "a. one spelling" (message arms). Renamed S452 from `W-HANDLER-ARM-PIPE-LEGACY` when "a. one spelling" extended it to message arms (never emitted under either name). **Nominal / not yet emitted** by impl#1 (frozen) or the bootstrap. | Info |
+| E-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3 | **Reserved** (§63.2) end-of-window code for the `\|`-led `!{}` arm and engine message arm. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). **Provenance:** ruling:user-voice-scrml.md S452 "c looks right". **Nominal / not yet emitted.** | Error |
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's enum has no `renders` clause (reuses the §19.6.6 E-ERROR-005 exhaustiveness fence at the render-expression fire site) | Error |
 | E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum (the render-expression is enum-scoped) | Error |
 | E-DEFER-CONTROL-FLOW | §19.16.3 | A deferred body contains `return`, `fail`, `?`, or a `break`/`continue` whose target is outside it (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-NESTED | §19.16.3 | A deferred body contains a `defer` (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
-| E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A failable call inside a deferred body is not handled in place (`!{}` or `match`), or a deferred `!{}` handler has no catch-all `\| _ :>` arm; replaces E-ERROR-002 there (S430; emitted at `compiler/src/type-system.ts` + `compiler/src/validators/lint-defer.ts`.) | Error |
+| E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A failable call inside a deferred body is not handled in place (`!{}` or `match`), or a deferred `!{}` handler has no catch-all `_ :>` arm; replaces E-ERROR-002 there (S430; emitted at `compiler/src/type-system.ts` + `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body (top-level logic, `<onMount>` / `on mount`, markup/state-block body, a `when` body, an `on*=${}` handler attribute or a `<channel>` `<onchange>` arm (S446), or — stage 1 — an arrow/function-expression body) (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-SERVER-IN-SPLIT | §19.16.5 | In a body-split (CPS) function: a server-tier deferred body, or a `defer` nested inside a statement the split runs server-side (S430; emitted at `compiler/src/route-inference.ts`.) | Error |
 | E-DEFER-UNSUPPORTED-SITE | §19.16.2 | `defer` in a bare `{ }` block, a single-statement (unbraced) `match` / `!{}` arm, the unbraced body of an `if` / `else` / loop arm, or an arm of a value-producing `match` / `if` / `for` — not a stage-1 defer site (S430; emitted at `compiler/src/validators/lint-defer.ts` + `compiler/native-parser/parse-expr.js`.) | Error |
@@ -19698,7 +19830,7 @@ return value already computed or an error already in flight — so it SHALL NOT 
    body this code REPLACES E-ERROR-002 / W-CPS-NEEDS-FAILABLE for the same call. (Scope: the same
    statement-position call shape E-ERROR-002 checks — a bare call statement.)
 
-   **A deferred `!{}` handler SHALL be total — it SHALL carry a catch-all `| _ :> …` arm** (S430 round
+   **A deferred `!{}` handler SHALL be total — it SHALL carry a catch-all `_ :> …` arm** (S430 round
    3). Listing every variant of the callee's DECLARED error enum is not enough: a server function or a
    CPS-split callee can also fail with a transport error (`CpsError`, §19.9.5) that no declared enum
    lists, and outside a deferred body an unmatched error propagates to the caller — which, from a
@@ -19854,7 +19986,7 @@ export function runPA(input) {
 
 `closeAll(cache)` runs once: after the returned object has been built, or — if `processDbBlock` raises a
 host error — before that error continues outward. Were `closeAll` failable, rule 3 requires
-`defer closeAll(cache) !{ | _ :> log("cache close failed") }` (or one arm per error variant).
+`defer closeAll(cache) !{ _ :> log("cache close failed") }` (or one arm per error variant).
 
 A body-split function (§19.9.9) — the deferred clear runs after BOTH batches, never between them
 (this is the `conformance/cases/defer/cps-after-last-continuation` program):
@@ -24186,7 +24318,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ERROR-015 | §19.10.4 | Manual transaction control — a `?{}` whose statement is `BEGIN` (any form), `COMMIT`, `END`, `ROLLBACK`, `SAVEPOINT` or `RELEASE` — where no enclosing function is declared `!` (a function without `!`, or a body top). Use `transaction { }` inside a `!` function. Replaces W-BATCH-001 at those sites. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(c). **Nominal / not yet emitted** by impl#1 (frozen; `g-impl1-manual-tx-outside-failable-s451`); lands with the bootstrap. | Error |
 | E-DEFER-CONTROL-FLOW | §19.16.3 | A deferred body (`defer <stmt>`) contains `return`, `fail`, a `?` propagation, or a `break`/`continue` whose target lies outside the deferred body. A deferred body runs while its block is already exiting, so it cannot redirect control. A loop inside the deferred body, and a function nested in it, are their own targets/scopes. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-NESTED | §19.16.3 | A deferred body contains a `defer` statement (outside a nested function). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
-| E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A bare call to a failable function (declared `!` or CPS-implicit `!`) inside a deferred body is not handled in place with `!{}` (or a `match`). `?` is excluded and an enclosing `!` does not cover it; inside a deferred body this REPLACES E-ERROR-002 / W-CPS-NEEDS-FAILABLE for the same call. **Provenance:** `ruling:user-voice-S430-P3`. ALSO (S430 round 3): a `!{}` handler on a deferred call that has no catch-all `\| _ :>` arm — a transport failure outside the declared enum (a server / CPS callee's `CpsError`) would otherwise propagate out of the `finally`. (S430; emitted at `compiler/src/type-system.ts`, the function-body §19 walker, and — for the totality limb — `compiler/src/validators/lint-defer.ts`.) | Error |
+| E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A bare call to a failable function (declared `!` or CPS-implicit `!`) inside a deferred body is not handled in place with `!{}` (or a `match`). `?` is excluded and an enclosing `!` does not cover it; inside a deferred body this REPLACES E-ERROR-002 / W-CPS-NEEDS-FAILABLE for the same call. **Provenance:** `ruling:user-voice-S430-P3`. ALSO (S430 round 3): a `!{}` handler on a deferred call that has no catch-all `_ :>` arm — a transport failure outside the declared enum (a server / CPS callee's `CpsError`) would otherwise propagate out of the `finally`. (S430; emitted at `compiler/src/type-system.ts`, the function-body §19 walker, and — for the totality limb — `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body: the top level of a `${ }` logic block, an `<onMount>` / `on mount` body, a markup / state-block body — page/module initialisation with no single block exit — a `when … changes` / `when message` body, an `on*=${ … }` event-handler attribute or a `<channel>` `<onchange>` arm body (S432, S446; lowered as text, so a function declared inside a `when` body cannot hold one either; a `~{}` test body is not diagnosed by impl#1, S446) — or (stage-1 limitation) an arrow-function / function-expression body, which the front-ends carry as host-expression text. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-SERVER-IN-SPLIT | §19.16.5 | A deferred body that is itself server-tier (own `?{}` SQL, a server-only resource, protected-field access, or a call to a server-escalated function) in a function the compiler body-splits (§19.9.9) — OR (S430 review) a `defer` of any tier nested inside a top-level statement the split places on the server (e.g. an `if` whose branch holds a `?{}`). Either way the deferred body would run inside a server batch, which ends before the later batches and client continuations — the premature release §19.16.5 forbids; rejected (fail closed) rather than lowered wrongly. The message names the concrete trigger (query, server-only resource, or the callee the compiler placed server-side). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/route-inference.ts`, the CPS-eligibility caller.) | Error |
 | E-DEFER-UNSUPPORTED-SITE | §19.16.2 | `defer` written in a bare `{ }` block statement, as a single-statement (unbraced) `match` / `!{}` handler arm (`.A :> defer D()`), or as the whole unbraced body of an `if` / `else` / `for` / `while` / `do` arm (S430 round 6 — the live front-end drops an unbraced `else` arm, which would silently attach the defer to the enclosing block). The front-ends carry those bodies as text (the native bridge flattens bare blocks), so the `defer` would never be parsed or lowered — or would silently attach to the enclosing block. Also: a `defer` directly in an arm of a `match` / `if` / `for` used for its VALUE (a value-form expression, or a `match` that is a `fn`'s implicit-return tail) — the defer block would capture the arm's result (measured: the produced value was lost). Rejected in stage 1; supporting bare blocks needs them parsed structurally (a separate arc). **Provenance:** `ruling:user-voice-S430-P3` (S430 round-5 review). (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
@@ -24322,6 +24454,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-TYPE-004 | §14.3 | Struct field access on non-struct type | Error |
 | E-TYPE-052 | §14.2 | InitCap algorithm: type name must be PascalCase | Error |
 | E-TYPE-080 | §19.7 | Non-exhaustive error handler: not all error variants covered | Error |
+| E-TYPE-ARM-QUALIFIER-MISMATCH | §19.4.5, §18.2 | A `!{}` handler arm's type qualifier names a type other than the handled error type — `F.Bad(m) :>` or `| S.Empty :>` on a call that fails with `E` (the arm pattern `TypeName.V` / `TypeName::V`). Dispatch is by variant name, so without this check the arm silently matched `E`'s same-named variant or was a dead arm. The message names both types and offers `E.V` or the bare `.V`. Fires only where the handled call's error type is known. The unqualified foreign variant (`.Zap :>`) is not this code. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" (the §18.2 arm grammar for `!{}`), S452 review of `fix/s452-impl1-pipeless-arms` (LOW-3). Emitted at `compiler/src/type-system.ts` (`annotateNodes` → `visitNode`, `case "guarded-expr"`, before the E-TYPE-080 exhaustiveness step). | Error |
 | E-TAILWIND-001 | §26.4.1 | Invalid arbitrary value in Tailwind utility class (empty brackets, whitespace, malformed hex/unit/function, injection vector, unbalanced parens, malformed `var()` or `url()`) | Error |
 | E-APPLY-UNKNOWN-UTILITY | §26.8.2, §26.8.3 | (ss40 W2 — wired by the `@apply` expansion, `bug-1-tailwind-apply-2026-06-26`.) A token in an `@apply <utilities>;` directive (SPEC §26.8) inside a `#{}` / `<style>` author CSS rule does NOT resolve to a known Tailwind utility — a typo (`@apply flexx`), or a utility / arbitrary prefix the embedded registry does not support. Per §26.8.2 this is an **Error** (deliberately harder than the info-level `W-TAILWIND-UNRECOGNIZED-CLASS` that fires on a `class=` token): a `class=` token may legitimately be an author or third-party class, but an unresolved `@apply` token silently drops the declarations the author explicitly asked the compiler to compose — a broken named class, surfaced loudly. Fires once per offending token, anchored at the `@apply` directive's span; the message names the token and includes the underlying arbitrary-value validation reason when one was produced. Token classification is `resolveApplyToken` in `compiler/src/tailwind-classes.js`; the diagnostic is emitted by `renderApplyGroupedDeclarations` in `compiler/src/codegen/emit-css.ts` (threaded via `generateCss` → `renderCssBlock` from codegen `index.ts`). Resolution: fix the spelling, or write the equivalent CSS declarations directly. Partitions into `result.errors`. | Error |
 | E-APPLY-VARIANT-UNSUPPORTED | §26.8.2, §26.8.3 | (ss40 W2 — wired by the `@apply` expansion, `bug-1-tailwind-apply-2026-06-26`.) A variant-prefixed token in an `@apply` directive (SPEC §26.8) — `hover:bg-blue-500`, `md:flex`, `group-hover:*`, `before:*`, … (a `:` at bracket-depth 0; an arbitrary value whose payload carries a colon, `bg-[url(http://x)]`, is NOT a variant). Per §26.8.2 variants require a nested/companion selector and cannot be flat-inlined in v1 (a bounded follow-on, lift when variants land). Fires once per offending token, anchored at the `@apply` directive's span. Detected by `resolveApplyToken` in `compiler/src/tailwind-classes.js` (BEFORE registry resolution); emitted by `renderApplyGroupedDeclarations` in `compiler/src/codegen/emit-css.ts`. Resolution: apply the variant on the element's `class=` attribute instead, or split it into its own rule. Partitions into `result.errors`. | Error |
@@ -24361,11 +24494,13 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MATCH-SUBSET-DEAD-ARM | §18.8.1, §53.15 | A concrete arm names a variant that is excluded by the matched value's enum-subset refinement type (`oneOf([…])` / `notIn([…])`) — the arm is dead (the variant can never inhabit the value). The message names the excluded variant + the subset. Distinct from E-TYPE-023 (duplicate arm names the SAME variant twice); a dead subset arm names an excluded variant once. (Catalog addition S154 — §53.15 enum-subset refinement, SF-1.) | Error |
 | E-MATCH-ON-REQUIRED | §18.0.1 | (Catalog addition S107 — Phase 2 of match block-form impl arc.) Block-form `<match for=Type>` is missing the `on=expr` attribute AND no `<engine for=Type>` for the same `Type` is in scope (auto-implied `on=` per §18.0.1 line 9578-9580 requires a same-type engine for the most-local-semantics-friendly resolution). Add `on=expr` to the `<match>` opener or declare a compatible `<engine>` in scope. | Error |
 | E-MATCH-ARM-SEPARATOR | §18.2 | A `match` arm is followed by a `,` separator. Match arms are juxtaposed (`match-arm+` per §18.2 grammar); the ONLY arm separator is the arm body's terminating `:>`-introduced arm boundary (the deprecated `=>`/`->` aliases behave identically) — arms are written one per line (newline-separated). A trailing `,` after an arm body is invalid. Resolution: remove the `,` (`.A :> x, .B :> y` → `.A :> x` / `.B :> y` on separate lines). Replaces the generic E-CODEGEN-INVALID-LOGIC that the stray comma would otherwise surface from codegen. (Catalog addition S144 Cluster D — Bug Y; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
-| E-MATCH-BARE-BINDER | §18.2, §19.4.3 | An arm whose WHOLE pattern is a bare identifier — `err :> …` in a `match`, `\| err :> …` in a `!{}` handler. In a `!{}` arm or a `match` on a failable result the fix is `\| _ err :>` / `_ err :>`, which binds the WHOLE error (§18.6.1); elsewhere a match arm does not bind the whole matched value (§18.6). Write `_` / `else` for a catch-all that binds nothing, or name the variant (`.V(x)`, or `\| .V x :>` in a `!{}`) to bind its payload. Also fires for the whole-error binder out of place: `_ <name>` in a `match` whose subject is not a failable result, and `else <name>` in any arm (§18.6.1). `not` is the absence arm, not a bare name. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(a); amended by ruling:user-voice-scrml.md S451 "a" (the whole-error binder). **Nominal / not yet emitted** by impl#1 — it accepts the `!{}` form, and fails a `match` form closed with E-CODEGEN-INVALID-LOGIC (frozen; `g-impl1-bare-binder-arm-accepted-s451`); lands with the bootstrap. | Error |
-| E-MATCH-SCRUTINEE-ARITY | §18.19 | A multi-scrutinee `match (e1, …, eN)` (§18.19) product-pattern arm's pattern count does NOT equal the head's scrutinee count N — e.g. `(.A) :> …` under a 2-scrutinee head, or `(.A, .B, .C) :> …` under a 2-scrutinee head. Each `product-pattern` MUST supply exactly one §18.2 arm-pattern per head position (multi-scrutinee widens over scrutinees — breadth, NOT pattern depth; the §18.11 nested-pattern exclusion is preserved). A whole-product wildcard arm (`_` / `else`, optionally `\| _`) is exempt — it covers every position at once. Resolution: write exactly N comma-separated patterns per `(…)` arm, matching the head's scrutinee count, or use a whole-product `_` / `else` arm. (Catalog addition S224 — Q-MATCH multi-scrutinee match; NAMED at §18.19 W1, catalogued WITH the W2 impl per Rule 4 — the §60 `<api>` / §61 `<endpoint>` / §26.8 `@apply` precedent; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
+| E-MATCH-BARE-BINDER | §18.2, §19.4.3 | An arm whose WHOLE pattern is a bare identifier — `err :> …` in a `match` or a `!{}` handler (in a `!{}`, also its soft-deprecated `\| err :> …` spelling, §19.4.5). In a `!{}` arm or a `match` on a failable result the fix is `_ err :>`, which binds the WHOLE error (§18.6.1); elsewhere a match arm does not bind the whole matched value (§18.6). Write `_` / `else` for a catch-all that binds nothing, or name the variant (`.V(x)`; in a `!{}` also the soft-deprecated `\| .V x :>`) to bind its payload. Also fires for the whole-error binder out of place: `_ <name>` in a `match` whose subject is not a failable result, and `else <name>` in any arm (§18.6.1). `not` is the absence arm, not a bare name. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(a); amended by ruling:user-voice-scrml.md S451 "a" (the whole-error binder). **Nominal / not yet emitted** by impl#1 — it accepts the `!{}` form, and fails a `match` form closed with E-CODEGEN-INVALID-LOGIC (frozen; `g-impl1-bare-binder-arm-accepted-s451`); lands with the bootstrap. | Error |
+| E-MATCH-SCRUTINEE-ARITY | §18.19 | A multi-scrutinee `match (e1, …, eN)` (§18.19) product-pattern arm's pattern count does NOT equal the head's scrutinee count N — e.g. `(.A) :> …` under a 2-scrutinee head, or `(.A, .B, .C) :> …` under a 2-scrutinee head. Each `product-pattern` MUST supply exactly one §18.2 arm-pattern per head position (multi-scrutinee widens over scrutinees — breadth, NOT pattern depth; the §18.11 nested-pattern exclusion is preserved). A whole-product wildcard arm (`_` / `else`) is exempt — it covers every position at once. *(S452 currency correction, spec: §18.2 / §18.19 grammar — struck "optionally `\| _`"; impl#1 still accepts it, `g-impl1-multi-scrutinee-pipe-wildcard-accepted-s452`.)* Resolution: write exactly N comma-separated patterns per `(…)` arm, matching the head's scrutinee count, or use a whole-product `_` / `else` arm. (Catalog addition S224 — Q-MATCH multi-scrutinee match; NAMED at §18.19 W1, catalogued WITH the W2 impl per Rule 4 — the §60 `<api>` / §61 `<endpoint>` / §26.8 `@apply` precedent; emitted at `compiler/src/type-system.ts:19159` (`checkMatchDiagnostics`).) | Error |
 | E-MATCH-ARM-MARKUP-IN-VALUE | §18.0 | A JS-style value-match arm (`match expr { .V :> ... }`) has an arm body that is a MARKUP element. §18.0 splits the two match forms by output category: the JS-style form emits a VALUE (server logic, derivations, computed expressions); the block-form `<match for=Type [on=expr]>` (§18.0.1) emits MARKUP. The natural reflex `${match err { .V(p) :> <markup with ${p}> }}` sits on the value↔markup boundary the two forms split. Resolution: use a `<match for=Type [on=expr]>` block to render a UI tree per variant, or fire a variant's `renders` display via the render-expression; to compute a VALUE per variant have the arm return that value (`:> "Failed: " + reason`) and interpolate it in markup. The render-expression routes around this without widening value-match to emit markup (limit-primitives-not-godify). This early TYPER-stage steer REPLACES the wrong-altitude failures the reflex otherwise surfaces at a later stage — E-CODEGEN-INVALID-LOGIC (markup body lowered literally) and E-SCOPE-001 (a payload var in a `${...}` inside the markup body, not in scope for value-match codegen); the arm-body visit is skipped once the steer fires so it is the ONLY diagnostic. SCOPED to JS-style match-stmt/match-expr `match-arm-inline` arms; the block-form `<match>` is a distinct `match-block` node, structurally exempt. (Catalog addition S196 — error-handling-holistic DD §1.4 Seams 1+2 / debate §6 prereqs 3+4 (H1); emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
 | E-MATCH-BLOCK-IN-LIFT | §18.0.1, §17.7 | A block-form `<match for=Type on=expr>` is placed inside a `${ ... lift ... }` logic loop (the Tier-0 iteration form). The logic-context inline-markup parser does NOT route `<match>` through the BS-layer S107 match-block recognition (`ast-builder.js` `block.name === "match"`), so the variant arms (`<Open>`/`<Closed>`) land as unresolved uppercase-tag markup and would otherwise surface a misleading E-COMPONENT-035 "residual component / cross-file import" cascade. The supported per-item form is the Tier-1 `<each>` block: move the `<match>` into an `<each in=@coll as item> ... <match for=Type on=item> ... </match> ... </each>` body — the same block `<match>` compiles there. This targeted steer REPLACES the misleading E-COMPONENT-035 cascade for the shape (the arm errors are suppressed). Supporting block-`<match>` inside `${...lift}` was REJECTED (limit-primitives; `<each>` is canonical per S130 HU-1). (Catalog addition S213 — g-block-match-in-lift; user ruling S212 "(b) targeted diagnostic, steer to `<each>`"; emitted by VP-2 post-CE invariant at `compiler/src/validators/post-ce-invariant.ts`.) | Error |
 | W-MATCH-ARROW-LEGACY | §18.2 | A `match` arm (or `!{}` error-handler arm, §19) uses a deprecated arm separator — `=>` or `->` — instead of the canonical `:>`. All three forms parse, build, and emit identically during the deprecation window; the canonical separator is `:>`. The lint is ARM-CONTEXT-SCOPED: `=>` remains fully valid as the arrow-function glyph and `->` as the `fn` return-type separator / legacy `<machine>` event-arrow — only the match / handler arm-separator position fires. Resolution: rewrite `<pattern> => <body>` / `<pattern> -> <body>` as `<pattern> :> <body>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace, since `=>` is also the arrow-function glyph). New code SHALL use `:>`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to `E-MATCH-ARROW-LEGACY` (reserved; not yet emitted). (S145 — `match-arrow-colon-canonical` deep-dive; user-voice S145; mirrors the W-LIFECYCLE-LEGACY-ARROW `->`→`to` template.) | Info |
+| W-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3, §63.7 | A `!{}` error-handler arm or an engine `(state × message)` message arm led by `\|` — `\| <pattern> :> body` — SOFT-DEPRECATED (§63.1 Stage 1): both are §18.2 `match-arm`s, with no leading `\|`. Also covers the paren-free binder, which the legacy `!{}` arm alone admits: `\| .V m :>` (or `\| ::V m :>`) is `.V(m) :>`. It parses identically to the canonical arm (same AST, emitted code and run-time behaviour). One lint per arm; the message names the canonical arm, `scrml fix`, and §19.4.5. Resolution: `scrml fix` deletes the leading `\|`, writes a paren-free binder as `.V(m)`, and puts arms that shared a line on their own lines (§18.2). SCOPED to `!{}` arms and message arms: a `\|` between alternates of one arm (§18.2) is alternation, untouched; element arms (`<match>`, engine state-children) are not in scope. Renamed S452 from `W-HANDLER-ARM-PIPE-LEGACY` when "a. one spelling" extended it to message arms (never emitted under either name). Info, like its separator sibling `W-MATCH-ARROW-LEGACY`. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" — *"c looks right. markup vs logic is understandable (an possibly a bonus) but multiple syntaxs in logic dosnt work for me. yes, cononical version."* + S452 "a. one spelling" (message arms). **Nominal / not yet emitted** — impl#1 (frozen) accepts the `\|`-led arm without a lint (`g-impl1-handler-arm-pipeless-dropped-s452`, `g-impl1-engine-message-arm-pipeless-as-text-s452`); the bootstrap does not emit it either. | Info |
+| E-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3, §63.7 | **Reserved** (§63.2) end-of-window code for the `\|`-led `!{}` arm (and its paren-free binder) and engine message arm. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right". **Nominal / not yet emitted.** | Error |
 | W-GIVEN-ARROW-LEGACY | §42.2.3 | A standalone `given` presence-guard uses the deprecated separator `=>` instead of the canonical `:>` (`given x => { ... }` → `given x :> { ... }`). The sibling of `W-MATCH-ARROW-LEGACY` for the standalone `given`-guard context (an in-`match` `given`-arm already fires `W-MATCH-ARROW-LEGACY`). Both forms parse + resolve identically during the deprecation window; the canonical separator is `:>` (the same maps-to separator as a match arm). SCOPED to the `given`-guard separator only — the JS arrow-function `=>` is untouched. Resolution: rewrite as `given x :> { ... }`, or run `bun scrml migrate --fix` (AST-driven). The end-of-window timing promotes this to a reserved `E-GIVEN-ARROW-LEGACY` (not yet emitted). (Catalog addition S148 — Insight 33 extension; ratified via user AskUserQuestion; mirrors W-MATCH-ARROW-LEGACY.) | Info |
 | W-COLON-SHORTHAND-LEGACY-PLACEMENT | §4.14, §51.0.I, §18.0.1 | A `:`-shorthand body uses the legacy AFTER-`>` placement (`<Variant rule=... > : expr`) instead of the canonical inside-opener placement (`<Variant rule=... : expr>`). Both parse, build, and emit identically during the deprecation window; the inside-opener form is canonical across every locus (Pillar 5 — one `:`-shorthand placement: HTML elements §24, `<each>` per-item §17.7.6, match block-form arms §18.0.1, engine state-children §51.0.I). The lint is ARM / state-child-context-scoped — it fires ONLY where after-`>` was ever a legal placement (engine state-children + match arms); HTML elements and `<each>` per-item never used after-`>`, so the lint never fires there. Resolution: move the `: expr` inside the opener, before the `>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace — a `>` can appear inside a string attribute value or a markup body). New code SHALL use the inside-opener placement; existing samples MAY migrate at convenience. The end-of-window timing promotes this to a reserved `E-COLON-SHORTHAND-LEGACY-PLACEMENT` (not yet emitted). (S160 — S154 ruling (b); mirrors the W-MATCH-ARROW-LEGACY / W-GIVEN-ARROW-LEGACY / W-LIFECYCLE-LEGACY-ARROW deprecation template.) | Info |
 | W-CONST-AT-DEPRECATED | §6.6.1 | The legacy expression-form derived-cell declaration `const @name = expr` is deprecated; the canonical (and per §6.6.1 SOLE) derived-cell form is `const <name> = expr`. The `@`-form still compiles + registers in logic / top-level / `${...}` contexts during the deprecation window. Inside a **raw markup element body**, however, NEITHER form is a valid derived-decl: the legacy `const @name` silently DROPS the cell (inert text — the read site then resolves to nothing), and the canonical `const <name>` does NOT register there either — its `<name>` parses as a markup element open-tag and loud-errors `E-CTX-001`. The canonical derived-decl form `const <name>` is for **logic / file-top-level / `${...}`** contexts; to declare a derived cell a markup body consumes, write it in a `${...}` logic block. Resolution: rewrite `const @name = expr` as `const <name> = expr`, or run `bun scrml migrate --fix` (AST-driven). New code SHALL use `const <name>`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to a reserved `E-CONST-AT-DEPRECATED` (not yet emitted). **Fires:** in logic / top-level contexts emitted by TS (`compiler/src/type-system.ts`, the `case "state-decl"` path, gated on `shape === "derived" && isConst === true && structuralForm === false`); at the markup-element-body silent-drop site (where no AST node is produced) emitted by TAB (`compiler/src/ast-builder.js` `scanMarkupBodyConstAtDecls`, called from `liftBareDeclarations` on the non-decl-site markup path). (Added 2026-06-13, sym-cell-registration-completeness; markup-body fire site added 2026-06-13 fixup; the Info-severity precedent is W-MATCH-ARROW-LEGACY — like it, an info-level deprecation steering lint; the deprecation-CYCLE shape (warn-window -> reserved hard error) mirrors W-PURE-DEPRECATED / W-MATCH-ARROW-LEGACY both.) | Info |
@@ -24409,9 +24544,10 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ENGINE-PAYLOAD-ARITY-MISMATCH | §51.0.B.1 | The number of payload-binding attributes on an engine state-child does not match the variant's payload field count (per §14.4). In the bare-attribute and positional-parenthesized forms, all fields MUST be bound; too few or too many bindings fire this code. Also fires when the bare-attribute or named form contains mixed positional + named bindings within the same state-child opener (the §18.7 mixed-form prohibition extends to this locus). Distinct from §18.7's `E-TYPE-021` because the diagnostic surface differs (state-child attribute list vs match arm pattern); in the parenthesized form `E-TYPE-021` fires for arity / mixed-form (per §18.7 inheritance) and `E-ENGINE-PAYLOAD-ARITY-MISMATCH` is reserved for the attribute-list-based forms. Resolution: list all payload field bindings in declaration order, OR use the named form to bind a subset by field name. (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
 | E-ENGINE-PAYLOAD-RESERVED-COLLISION | §51.0.B.1 | A payload-binding name on an engine state-child collides with a reserved state-child attribute name (`rule`, `effect`, `history`, `internal:rule` — per §51.0.B / §51.0.F / §51.0.H / §51.0.N / §51.0.O). The reserved attribute interpretation takes precedence in the bare-attribute form, so the bareword would be consumed as the reserved attribute and the payload field would silently fail to bind. Resolution: either rename the payload field at its enum variant declaration site (§14.4), OR use the parenthesized form's positional binding with a non-colliding local name (`<Variant(rule_local)>` — binds the field positionally to a local that does not shadow the reserved name). (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
 | E-ENGINE-ACCEPTS-NOT-ENUM | §51.0.S | `accepts=` opener attribute value does not resolve to a declared `:enum` type. (Catalog addition S154 — §51.0.S event-payload-transition.) | Error |
-| E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE | §51.0.S | A state declares `(state × message)` arms but does not cover every `accepts=` MsgType variant and has no `| _ :>` wildcard (mirrors E-MATCH-NOT-EXHAUSTIVE). (Catalog addition S154 — §51.0.S.) | Error |
+| E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE | §51.0.S | A state declares `(state × message)` arms but does not cover every `accepts=` MsgType variant and has no `_ :>` wildcard (mirrors E-MATCH-NOT-EXHAUSTIVE). (Catalog addition S154 — §51.0.S; emitted at `compiler/src/symbol-table.ts:7653`. S452: wildcard written without the deprecated leading `|`, §51.0.S.2.3.) | Error |
 | E-ENGINE-MSG-UNKNOWN | §51.0.S, §51.0.G.1 | `.advance(.X)` where `.X` (literal bare-variant) is a variant of NEITHER the `for=` state enum NOR the `accepts=` message enum. (Catalog addition S154 — §51.0.S.) | Error |
 | E-ENGINE-MSG-WITHOUT-ACCEPTS | §51.0.S | A state-child declares a `(state × message)` arm but the engine opener has no `accepts=` declaration. (Catalog addition S154 — §51.0.S.) | Error |
+| E-ENGINE-MSG-ARM-POSITION | §51.0.S.2.3 | A pattern-arm head — `<arm-pattern> :>` (or a deprecated separator), with or without the legacy leading `\|` — appears in an engine state-child body AFTER render content. Message arms are the leading items of the body (recognised by position, §7.2.2); a later arm-shaped line is neither code nor display text. Resolution: move the arm above the render content. **Provenance:** `rationale:` the limiting option (fork rule); PA reading in its veto window, S452 (follows ruling:user-voice-scrml.md S452 "a. one spelling"). **Nominal / not yet emitted** — impl#1 renders such a line as text (`g-impl1-engine-message-arm-pipeless-as-text-s452`); the bootstrap does not emit it. | Error |
 | E-VALIDATOR-CIRCULAR-DEP | §55.11 | Two or more validators reference each other via cross-field predicate args (e.g., `<a eq(@b)>` and `<b eq(@a)>`). The validator dependency graph is a DAG; cycles are forbidden. | Error |
 | E-DERIVED-WITH-VALIDATORS | §55.14 | Validators applied to a derived cell (`const <x ...>`). Derived cells are read-only; validators imply gating which is incoherent on a computed value. Use a refinement type instead (`const <x>: number(>=0) = ...`). | Error |
 | E-DEBOUNCED-WITH-DERIVED | §6.13 | A `debounced=` (or `throttled=`) reactivity attribute is applied to a derived cell (`const <x debounced=300ms> = expr`). Derived cells are read-only; debounce/throttle is a write-side wrapper; combining the two is meaningless. Resolution: debounce the upstream source instead (`<source debounced=300ms> = @raw; const <doubled> = @source * 2`). (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
@@ -28513,10 +28649,10 @@ type LoadError:enum  = { Malformed(reason: string), Network(msg: string) }
 function loadResult()! -> LoadError {
     const raw = fetch("https://api.example.com/results")
     const result = parseVariant(raw, LoadResult) !{
-        | ::MissingDiscriminator          :> { fail LoadError::Malformed("missing discriminator") }
-        | ::UnknownVariant(tag)           :> { fail LoadError::Malformed("unknown variant: " + tag) }
-        | ::InvalidPayload(field, reason) :> { fail LoadError::Malformed(field + ": " + reason) }
-        | ::Malformed(reason)             :> { fail LoadError::Malformed(reason) }
+        .MissingDiscriminator          :> { fail LoadError::Malformed("missing discriminator") }
+        .UnknownVariant(tag)           :> { fail LoadError::Malformed("unknown variant: " + tag) }
+        .InvalidPayload(field, reason) :> { fail LoadError::Malformed(field + ": " + reason) }
+        .Malformed(reason)             :> { fail LoadError::Malformed(reason) }
     }
     return result    // typed as LoadResult; the handler matches the four ParseError variants exhaustively
 }
@@ -33726,7 +33862,7 @@ transition**, co-located with the engine declaration exactly as Elm co-locates
 <engine for=Phase initial=.Loading effect=${
     // runs ONCE on boot into .Loading — the implicit init→.Loading edge's effect
     @tasks = loadTasks() !{
-        | ::Network msg :> { @phase = .ErrorState(msg); return }
+        .Network(msg) :> { @phase = .ErrorState(msg); return }
     }
     @phase = @tasks.length == 0 ? .Empty : .Editing   // checked against .Loading.rule
 }>
@@ -34071,8 +34207,8 @@ type LoadPhase:enum = { Idle, Loading, Done(rows: int), TimedOut, Error(msg: str
 function load() {
   @loadPhase = .Loading
   const result = fetchItems() !{
-    | ::Network msg :> { @loadPhase = .Error(msg); return }
-    | ::Empty       :> { @loadPhase = .Done(0);    return }
+    .Network(msg) :> { @loadPhase = .Error(msg); return }
+    .Empty        :> { @loadPhase = .Done(0);    return }
   }
   @loadPhase = .Done(result.length)
 }
@@ -34786,7 +34922,8 @@ type DragMsg:enum   = { Start(id: number), Drop(col: string), End }
 ```
 
 The engine does not learn a bespoke event sub-DSL; it `match`es on an ordinary enum, reusing
-match (§18.0.1) + payload-binding (§18.7 / §51.0.B.1) grammar verbatim.
+the §18.2 `match-arm` + payload-binding (§18.7 / §51.0.B.1) grammar verbatim (S452 — previously
+cited as §18.0.1, the block form, whose arms are elements).
 
 ###### 51.0.S.2.2 The engine declares its message type — `accepts=MsgType`
 
@@ -34809,22 +34946,73 @@ on the twin element would be a live collision.
 
 ###### 51.0.S.2.3 The `(state × message)` arm form — reuses match grammar
 
-Inside a state-child body, a message-arm reacts to a message variant. It reuses the §18.0.1
-match block-form arm grammar (`| .Variant(binding) :> body`) verbatim; payload binding follows
-§18.7 / §51.0.B.1; the arm-body block shape `{ statement* expression? }` matches §18.2:
+Inside a state-child body, a message-arm reacts to a message variant. A message arm IS a §18.2
+`match-arm` — the same production a `match` and a `!{}` handler use (§19.4.5), with no leading `|`:
+
+```
+message-arm ::= match-arm                    // §18.2 — the arm's pattern matches the accepts= MsgType
+```
+
+Payload binding follows §18.7 / §51.0.B.1; the arm-body block shape `{ statement* expression? }`
+matches §18.2. The message arms are the leading items of the state-child body (before any render
+content), one per line; at that position a line whose first token is an arm pattern is an arm head
+(§7.2.2 "arm heads" — by position, not by a `:>` lookahead). The pre-S452 `|`-led spelling
+(`| .Variant(binding) :> body`) is SOFT-DEPRECATED under §19.4.5's rule — it parses identically and
+surfaces `W-ARM-PIPE-LEGACY`; reserved `E-ARM-PIPE-LEGACY`; `scrml fix` deletes the `|`. Element arms
+(the state-children themselves, `<match>` arms) are unchanged.
+
+**An arm after render content is an error.** A pattern-arm head — `<arm-pattern> :>` (or a deprecated
+separator), with or without the legacy leading `|` — that appears in a state-child body AFTER render
+content SHALL be a compile error, **E-ENGINE-MSG-ARM-POSITION**, and SHALL NOT be read as code or as
+text. Message arms come first; the message SHALL say so and name the arm. *(Nominal / not yet
+emitted.)*
+
+> **Provenance:** `rationale:` the limiting option under the fork rule (limit primitives, don't
+> widen): the arm region is the leading items only, so an arm-shaped line later in the body has no
+> reading but an error. It mirrors impl#1's behaviour for the piped form (only the leading `|`-run is
+> arms), and newly-rejecting is reversible where a permissive reading is not. *(PA reading, in its
+> veto window — bryan was told: "I'm keeping that, plus a rule that an arm appearing after other
+> content is an error".)* · **supersedes:** nothing written. **Direction of change (pa-base §8):
+> newly-rejecting.** impl#1 reads a later `|`-led line as render text (it compiles, displayed
+> literally), so the code is not emitted there (frozen; `g-impl1-engine-message-arm-pipeless-as-text-s452`).
+
+> **Provenance:** ruling:user-voice-scrml.md S452 "a. one spelling" — *"a. one spelling"* — answering
+> the PA's §51.0.S question: `(state × message)` message arms are PATTERN arms and follow §18.2 like
+> every other logic arm, no leading `|` (`.Drop(col) :> …`); the `|` form soft-deprecates through §63
+> with the same W-lint as `!{}` arms; element arms stay the markup form. · **supersedes:** this
+> section's *"It reuses the §18.0.1 match block-form arm grammar (`| .Variant(binding) :> body`)
+> verbatim"* — a false citation: §18.0.1's block-form arms are elements, and §18.2's `match-arm` has
+> no leading `|`. *(PA readings, flagged: the arm region is the leading items of the body, its arm
+> heads recognised by position, as impl#1's leading `|`-run was; the paren-free `!{}` binder was never
+> a message-arm form and is not admitted; the W-lint/E-code are §19.4.5's, renamed from
+> `W-/E-HANDLER-ARM-PIPE-LEGACY` to `W-/E-ARM-PIPE-LEGACY` to cover both arm kinds.)* **Direction of
+> change (pa-base §8): newly-accepting on impl#1 — and impl#1 today MISCOMPILES the canonical form
+> silently.** Measured on `8c02ff49a`: `examples/25-triage-board.scrml` (five `|`-led message arms)
+> compiles; with the five `|`s deleted it STILL compiles at exit 0 with no new diagnostic, but the
+> arms are read as the state-child's render body — the `…_msg_arms` dispatch table is gone, each
+> state renders the arm source as literal text, and `@dragPhase.advance(.Drop(col))` lowers to a
+> plain `_scrml_engine_advance` instead of message dispatch. Locus: a separate path from the `!{}`
+> parser — `compiler/src/engine-statechild-parser.ts` `parseMessageArms` (:2102), whose arm region is
+> *"the leading contiguous `|`-run; if the first non-trivia char is not `|`, there are no message
+> arms"*. Filed `g-impl1-engine-message-arm-pipeless-as-text-s452` (HIGH). **Corpus measured**
+> (`|`-led arm lines in files with `accepts=`, `!{}` bodies and comments blanked): 17 arms in 8 files
+> — `examples/` 5 in 1 (`25-triage-board`), `conformance/cases/` 10 in 6, `docs/` 2 in 1 (a repro
+> under `docs/changes/`); plus 10 in 2 `compiler/tests/fixtures/`. The 22 `<endpoint accepts=>`
+> files use element arms (§61) and are not in scope. Migrated by `scrml fix`, not by this change.
+> **Nominal / not yet emitted** by impl#1 or the bootstrap.
 
 ```scrml
 <engine for=DragPhase initial=.Idle accepts=DragMsg>
 
   <Idle rule=.Dragging>
-    | .Start(id) :> .Dragging(id)              <!-- (Idle × Start) → Dragging, carrying id -->
-    | _          :> @dragPhase                 <!-- ignore Drop/End while Idle (§51.0.S.2.4 wildcard; self-target no-op §51.0.F.1) -->
+    .Start(id) :> .Dragging(id)              <!-- (Idle × Start) → Dragging, carrying id -->
+    _          :> @dragPhase                 <!-- ignore Drop/End while Idle (§51.0.S.2.4 wildcard; self-target no-op §51.0.F.1) -->
   </>
 
   <Dragging(id) rule=.Idle>                     <!-- id bound from the .Dragging payload (§51.0.B.1) -->
-    | .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }   <!-- id (state) + col (msg) in scope -->
-    | .End       :> .Idle
-    | _          :> @dragPhase                 <!-- ignore Start while Dragging (§51.0.S.2.4 wildcard) -->
+    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }   <!-- id (state) + col (msg) in scope -->
+    .End       :> .Idle
+    _          :> @dragPhase                 <!-- ignore Start while Dragging (§51.0.S.2.4 wildcard) -->
   </>
 
 </>
@@ -34844,16 +35032,16 @@ Per-state message-arms are a `match` over `MsgType`; standard scrml match exhaus
 applies. The teachable shape is **opt in per-state; once you declare one arm, cover the set**:
 
 - A state that declares ANY message-arms MUST cover every `MsgType` variant OR carry a
-  `| _ :>` wildcard. Non-exhaustive → **E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE** (§34; sibling of
+  `_ :>` wildcard. Non-exhaustive → **E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE** (§34; sibling of
   `E-MATCH-NOT-EXHAUSTIVE`).
 - A state that declares NO message-arms ignores all messages while in that state (a message
   dispatched in that state is a no-op, §51.0.S.2.6). This is the "this state doesn't react to
   messages" case, NOT an exhaustiveness violation.
-- `| _ :> @<engineVar>` (stay in the current state — a self-target no-op per §51.0.F.1) is the
+- `_ :> @<engineVar>` (stay in the current state — a self-target no-op per §51.0.F.1) is the
   canonical "explicitly ignore the rest" escape hatch.
 
 This gives the Rust `match (state, event)` compile-safety WITHOUT a full N×M grid: a state opts
-out by declaring no arms, and opts into partial coverage via `| _ :>`.
+out by declaring no arms, and opts into partial coverage via `_ :>`.
 
 ###### 51.0.S.2.5 Dispatch rides `.advance` — no `.send` verb
 
@@ -34887,7 +35075,7 @@ a COMPILE error, and a state with NO arms no-ops (§51.0.S.2.6).
 A message dispatched while in a state that declares no arm for it (only possible when the state
 declares NO message-arms — the partial case is a compile error per §51.0.S.2.4) is a runtime
 no-op. This mirrors XState's "unhandled events ignored" default and §51.0.F.1's no-op
-intuition. A state that reacts to SOME messages and ignores the rest uses `| _ :> @<engineVar>`.
+intuition. A state that reacts to SOME messages and ignores the rest uses `_ :> @<engineVar>`.
 
 ###### 51.0.S.2.7 `rule=` is still the transition contract
 
@@ -34927,9 +35115,10 @@ a self-WRITE does not. This divergence is ratified and specified at §51.0.R.
 | Code | Severity | Fires when |
 |---|---|---|
 | `E-ENGINE-ACCEPTS-NOT-ENUM` | Error | `accepts=` opener attribute value does not resolve to a declared `:enum` type |
-| `E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE` | Error | a state declares message-arms but does not cover every `accepts=` MsgType variant and has no `| _ :>` wildcard (mirrors `E-MATCH-NOT-EXHAUSTIVE`) |
+| `E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE` | Error | a state declares message-arms but does not cover every `accepts=` MsgType variant and has no `_ :>` wildcard (mirrors `E-MATCH-NOT-EXHAUSTIVE`; emitted at `compiler/src/symbol-table.ts:7653`) |
 | `E-ENGINE-MSG-UNKNOWN` | Error | `.advance(.X)` where `.X` (literal bare-variant) is a variant of NEITHER the `for=` state enum NOR the `accepts=` message enum |
 | `E-ENGINE-MSG-WITHOUT-ACCEPTS` | Error | a state-child declares a `(state × message)` arm but the engine opener has no `accepts=` declaration |
+| `E-ENGINE-MSG-ARM-POSITION` | Error | a pattern-arm head (`<arm-pattern> :>`, `|`-led or not) appears in a state-child body after render content (S452, §51.0.S.2.3 — Nominal / not yet emitted) |
 
 **Reused (no new code):** `E-VARIANT-AMBIGUOUS` (§14.10) — the state/message name-collision
 case (§51.0.G.1 step 1) AND the union-typed-argument case (§51.0.G.1 step 3).
@@ -34959,13 +35148,13 @@ type DragMsg:enum   = { Start(id: number), Drop(col: string), End }
 
 <engine for=DragPhase initial=.Idle accepts=DragMsg>
   <Idle rule=.Dragging>
-    | .Start(id) :> .Dragging(id)
-    | _          :> @dragPhase
+    .Start(id) :> .Dragging(id)
+    _          :> @dragPhase
   </>
   <Dragging(id) rule=.Idle>
-    | .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }
-    | .End       :> .Idle
-    | _          :> @dragPhase
+    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }
+    .End       :> .Idle
+    _          :> @dragPhase
   </>
 </>
 
@@ -39087,7 +39276,7 @@ The mechanism is structurally identical to `<engine for=Type>` validation (§51.
 
 Type-as-argument primitives MAY use enum or struct types declared in stdlib modules (e.g., `ParseError:enum` declared in `scrml:data` per §41.13). Cross-file enum/struct-type imports use the existing protocol of §21.8 (cross-file engine import via `import { Type } from './path'`); the stdlib `scrml:` protocol prefix follows the same resolution path through MOD (§41.3-§41.4).
 
-The importing file's `typeRegistry` SHALL include any imported stdlib types after MOD resolution. This is a prerequisite for `!{}` handler exhaustiveness checking against stdlib-declared failure types (e.g., `parseVariant(json, T) !{ | ::ParseError msg -> ... }` requires the importer's typeRegistry to contain `ParseError`).
+The importing file's `typeRegistry` SHALL include any imported stdlib types after MOD resolution. This is a prerequisite for `!{}` handler exhaustiveness checking against stdlib-declared failure types (e.g., `parseVariant(json, T) !{ .ParseError(msg) :> ... }` requires the importer's typeRegistry to contain `ParseError`).
 
 ### Cross-references
 
@@ -42457,6 +42646,11 @@ Applying the machine to the existing corpus:
   precedent). `on dismount { }` is not in the window — it was never in the contract. *(Provenance:
   ruling:user-voice-scrml.md S449 item 2 — *"2b `on mount {}` soft-deprecates through §63 with a `scrml fix`
   rule"*.)*
+- **`W-ARM-PIPE-LEGACY` (`| <pattern> :>` → `<pattern> :>` in a `!{}` or an engine message arm, §19.4.5 / §51.0.S.2.3) — added S452:** SOFT,
+  unscheduled; reserved `E-ARM-PIPE-LEGACY` named, unfired; **gate-blocked** until its `scrml fix` rule is
+  verified-landed (§63.4). The rule is mechanical (delete the `|`; a paren-free binder `.V m` → `.V(m)`; arms that
+  shared a line onto their own lines). *(Provenance: ruling:user-voice-scrml.md S452 "c looks right" — *"multiple
+  syntaxs in logic dosnt work for me. yes, cononical version."*)*
 
 ### 63.8 What is NOT a lifecycle deprecation
 

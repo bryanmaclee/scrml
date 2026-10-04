@@ -18,8 +18,9 @@ const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const inMain = (markup) => `<program>\n let <n:int=0/>\n <main>${markup}</main>\n</program>\n`;
 
 // s449: `errors` left this list — `<errors of=…/>` (§55.8) is implemented (gate.test.js).
+// s452: `db` left it — `<db src=…>` (§4 state block, §8.1.1 scope) is implemented (error-rulings.test.js).
 const STRUCTURAL = [
-  "request", "poll", "timer", "timeout", "machine", "errorBoundary", "db", "schema", "channel", "onchange", "auth",
+  "request", "poll", "timer", "timeout", "machine", "errorBoundary", "schema", "channel", "onchange", "auth",
   "page", "engine", "onTransition", "onTimeout", "onIdle", "match", "empty", "render", "outlet", "column",
   "formFor", "tableFor", "if", "else", "component", "snippet", "partial", "foreign", "endpoint", "api", "markup",
   "defaults", "keyboard", "mouse", "gamepad",
@@ -43,7 +44,7 @@ describe("(1) a scrml structural element is never an HTML element", () => {
   });
   // r2 F2 (S239 review): a USER declaration of that name wins over the refusal
   // list, exactly as a declaration wins over an HTML element of the same name.
-  for (const name of [...STRUCTURAL, "errors", "Page", "Timer"]) {
+  for (const name of [...STRUCTURAL, "errors", "db", "Page", "Timer"]) {
     test(`a user declaration named \`${name}\` is used as the declaration, not refused`, () => {
       const src = `<program>\n    <${name} label:string="x">\n    </>\n    renders <p>\${label}</p>\n    <main>\n        <${name} label="y"/>\n    </main>\n</program>\n`;
       const r = run(src);

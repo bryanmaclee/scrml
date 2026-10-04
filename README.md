@@ -82,7 +82,7 @@ ${
     function submit() {
         @phase = .Saving
         createTask(@userId, @newTask) !{
-            | ::Network msg :> { @phase = .ErrorState(msg); return }
+            | .Network(msg) :> { @phase = .ErrorState(msg); return }
         }
         reset(@newTask)
         @phase = .Saved
@@ -129,7 +129,7 @@ const <visible> = match @filter {
 
 <engine for=Phase initial=.Loading effect=${
     @tasks = loadTasks(@userId) !{
-        | ::Network msg :> { @phase = .ErrorState(msg); return }
+        | .Network(msg) :> { @phase = .ErrorState(msg); return }
     }
     @phase = @tasks.length == 0 ? .Empty : .Editing
 }>
@@ -311,7 +311,7 @@ scrml uses sigil-delimited contexts to separate concerns within a single file:
 | Logic   | `${}` | scrml logical expressions and functions |
 | SQL     | `?{}` | Database queries (Bun.SQL tagged-template; SQLite shipping, Postgres in progress); auto-batched N+1 |
 | CSS     | `#{}` | Scoped styles |
-| Error   | `!{}` | Typed error handling (failable `!{ \| ::V :> ... }` arms) |
+| Error   | `!{}` | Typed error handling (failable `!{ \| .V :> ... }` arms) |
 | Meta    | `^{}` | Compile-time (or runtime) code generation |
 | Test    | `~{}` | Inline tests + `test-bind` server-fn mocks (stripped from production) |
 | Foreign | `_{}` | Inline foreign code — the value-returning `_={…}=` ts/js form ships; WASM call-char sigils + `use foreign:` sidecars are specced-pending |
