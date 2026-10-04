@@ -98,8 +98,16 @@ import { hasRuntimeHalf, loadCases, validateExpectContainers, type LoadedCase } 
 import { driveInputs, type ConformanceHook, type InputStep } from "../conformance/driver.ts";
 import { FakeClock } from "../conformance/fake-clock.ts";
 import { normalizeDom, runAnchored } from "../conformance/normalize.ts";
-import { fixS66 } from "../compiler/src/commands/fix-s66.js";
+import { fixS66, S66_RULES } from "../compiler/src/commands/fix-s66.js";
 import { frontEnd as sharedFrontEnd } from "../compiler/self-host-v2/slice-m2/lowered.js";
+
+/**
+ * The rules a twin is generated with: the §66 dialect class — every `scrml fix` rule EXCEPT
+ * `arm-pipe` (§19.4.5, S452). The `|`-led arm is a §63 spelling deprecation whose legacy form is
+ * itself in the conformance contract during the window (§63.5: W-ARM-PIPE-LEGACY is
+ * conformance-required), so a case written in it must be graded AS WRITTEN, not on a pipe-less twin.
+ */
+const TWIN_RULES = S66_RULES.filter((r) => r !== "arm-pipe");
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SELF_HOST_V2 = join(REPO_ROOT, "compiler", "self-host-v2");
@@ -325,7 +333,7 @@ export function twinOf(c: { source: string; auxFiles: Record<string, string> }):
   const rules = new Set<string>();
   const blockers: string[] = [];
   let changed = false;
-  const entry = fixS66(c.source, { filePath: "case.scrml", entry: true, auxSources: c.auxFiles });
+  const entry = fixS66(c.source, { filePath: "case.scrml", entry: true, auxSources: c.auxFiles, rules: TWIN_RULES });
   for (const a of entry.applied) rules.add(a.rule);
   for (const b of entry.blockers) blockers.push(`case.scrml:${b.line} ${b.rule}: ${b.reason}`);
   changed ||= entry.changed;
@@ -333,7 +341,7 @@ export function twinOf(c: { source: string; auxFiles: Record<string, string> }):
   for (const p of Object.keys(c.auxFiles).sort()) {
     const others = { ...c.auxFiles, "case.scrml": c.source };
     delete others[p];
-    const r = fixS66(c.auxFiles[p], { filePath: p, entry: false, auxSources: others });
+    const r = fixS66(c.auxFiles[p], { filePath: p, entry: false, auxSources: others, rules: TWIN_RULES });
     for (const a of r.applied) rules.add(a.rule);
     for (const b of r.blockers) blockers.push(`${p}:${b.line} ${b.rule}: ${b.reason}`);
     changed ||= r.changed;

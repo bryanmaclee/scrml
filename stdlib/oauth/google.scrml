@@ -95,12 +95,12 @@ ${
         const b64 = payload.replace(/-/g, "+").replace(/_/g, "/")
         const pad = b64.length % 4 == 0 ? "" : "=".repeat(4 - (b64.length % 4))
         const json = safeCall(() => atob(b64 + pad)) !{
-            | ::Thrown(msg, name) -> {
+            ::Thrown(msg, name) -> {
                 fail OAuthError::ParseFailed(msg)
             }
         }
         return safeCall(() => JSON.parse(json)) !{
-            | ::Thrown(msg, name) -> {
+            ::Thrown(msg, name) -> {
                 fail OAuthError::ParseFailed(msg)
             }
         }

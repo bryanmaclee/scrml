@@ -12,8 +12,8 @@ ${
 
     function go() {
         @result = risky() !{
-            | ::NotFound(reason) :> "recovered: " + reason
-            | ::Empty            :> "was-empty"
+            ::NotFound(reason) :> "recovered: " + reason
+            ::Empty            :> "was-empty"
         }
     }
 }

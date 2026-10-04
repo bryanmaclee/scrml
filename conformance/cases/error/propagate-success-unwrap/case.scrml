@@ -28,8 +28,8 @@ ${
 ${
     function handleOk() {
         let r = outer("ok") !{
-            | .NotFound(mid) :> @phase = Phase.Missing(mid)
-            | .Timeout :> @phase = Phase.TimedOut
+            .NotFound(mid) :> @phase = Phase.Missing(mid)
+            .Timeout :> @phase = Phase.TimedOut
         }
         @phase = Phase.Ok(r)
     }

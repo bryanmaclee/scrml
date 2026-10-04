@@ -39,8 +39,8 @@ ${
 }
 <program>
     <button onclick=a()>a</>
-    <button onclick={ b() !{ | .Bad :> @n = -1 } }>b</>
-    <button onclick={ c() !{ | .Bad :> @n = -1 } }>c</>
+    <button onclick={ b() !{ .Bad :> @n = -1 } }>b</>
+    <button onclick={ c() !{ .Bad :> @n = -1 } }>c</>
     <button onclick=d()>d</>
     <p>${@n}</p>
 </program>

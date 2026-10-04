@@ -7,8 +7,8 @@ ${
 <engine for=Game initial=.Playing accepts=GameMsg>
     <Title rule=.Playing></>
     <Playing rule=(.Title | .Playing)>
-        | .Tick :> { @score = @score + 1; .Playing }
-        | .Quit :> .Title
+        .Tick :> { @score = @score + 1; .Playing }
+        .Quit :> .Title
         <onTransition to=.Title>${ @transitions = @transitions + 1 }</>
     </>
 </>

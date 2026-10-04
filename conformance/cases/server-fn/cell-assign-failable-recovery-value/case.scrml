@@ -10,7 +10,7 @@ ${
     }
     function go() {
         @result = risky(-1) !{
-            | .Boom(m) :> "recovered: " + m
+            .Boom(m) :> "recovered: " + m
         }
         @after = "saw " + @result
     }

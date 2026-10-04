@@ -110,11 +110,11 @@
         @phase = .Submitting
 
         validate() !{
-            | err :> { @phase = .Failed(err); return }
+            _ err :> { @phase = .Failed(err); return }
         }
 
         submit(@name, @email, @body) !{
-            | err :> { @phase = .Failed(err); return }
+            _ err :> { @phase = .Failed(err); return }
         }
 
         @phase = .Succeeded

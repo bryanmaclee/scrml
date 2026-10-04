@@ -15,8 +15,8 @@ ${
 <div>
 ${
   let item = loadItem(1) !{
-    | ::NotFound(msg) -> "missing"
-    | ::Forbidden -> "denied"
+    ::NotFound(msg) -> "missing"
+    ::Forbidden -> "denied"
   }
 }
 <p>${item}</>

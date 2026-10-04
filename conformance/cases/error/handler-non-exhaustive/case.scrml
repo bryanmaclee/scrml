@@ -12,7 +12,7 @@ ${
 
     function go() {
         let r = f("x") !{
-            | .NotFound(m) :> log(m)
+            .NotFound(m) :> log(m)
         }
     }
 }

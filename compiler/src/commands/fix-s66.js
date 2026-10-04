@@ -17,6 +17,10 @@
  *
  *   pre-migrate     the older `scrml migrate` rewrites (`< engine` whitespace, `<machine>`, `pure`,
  *                   `const @x`) — chained first, unchanged (migrate.js `applyMigrations`).
+ *   arm-pipe        §19.4.5 / §51.0.S.2.3 (S452): a `|`-led `!{}` handler arm or engine message arm
+ *                   → the §18.2 match arm (`| .V m :>` → `.V(m) :>`; shared-line arms onto their
+ *                   own lines). Chained second; its own module (fix-arm-pipe.js) locates the arms
+ *                   from impl#1's arm records and verifies each file (identical artifacts).
  *   rhs-decl        `<x> = v` / `<x>: T = v` / `<x attrs> = v` → `<x:T=v attrs/>` (locked) or
  *                   `let <x:T=v attrs/>`. §66.21 row 1 as amended S449 (dialect ruling 2): LOCKED
  *                   only when the cell is never written AND its initializer reads no cell;
@@ -71,6 +75,7 @@ import { buildImportGraph, resolveModulePathNative, isStdlibImport } from "../mo
 import { parseComponentBody } from "../component-expander.ts";
 import { isUniversalCorePredicate } from "../validator-catalog.ts";
 import { applyMigrations } from "./migrate.js";
+import { fixArmPipe } from "./fix-arm-pipe.js";
 import { compileScrml } from "../api.js";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -88,12 +93,13 @@ import { join, dirname, basename, resolve, relative, isAbsolute, sep } from "nod
  */
 export const WRAP_OPENER = '<program reset="none">';
 
-export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "program-wrap", "program-move", "unwrap-logic"]);
+export const IMPL1_SAFE_RULES = Object.freeze(["pre-migrate", "arm-pipe", "program-wrap", "program-move", "unwrap-logic"]);
 /** The §66 declaration rules: their output is the §66 opener dialect, which impl#1 does NOT compile. */
 export const S66_DECL_RULES = Object.freeze(["rhs-decl", "const-cell", "engine-simple"]);
 
 export const S66_RULES = Object.freeze([
   "pre-migrate",
+  "arm-pipe",
   "rhs-decl",
   "const-cell",
   "engine-simple",
@@ -1265,6 +1271,16 @@ export function fixS66(source, opts = {}) {
         blockers.push({ rule: "pre-migrate", line: 0, reason: "the chained `scrml migrate` rewrites change impl#1's reading of this file — not applied", snippet: "" });
       }
     }
+  }
+
+  if (enabled.has("arm-pipe")) {
+    // §19.4.5 / §51.0.S.2.3 (S452) — `|`-led `!{}` and message arms → §18.2 match arms. Chained
+    // like pre-migrate: its own structural location + verification (commands/fix-arm-pipe.js);
+    // a file it cannot verify is left untouched and reported.
+    const ap = fixArmPipe(src, { filePath, auxSources: opts.auxSources, verify: opts.verify });
+    if (ap.changed) src = ap.output;
+    applied.push(...ap.applied);
+    blockers.push(...ap.blockers);
   }
 
   // The same memoized front-end reading moduleEdges / the CLI's project walk use (one parse per file).

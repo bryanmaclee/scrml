@@ -118,7 +118,7 @@ ${
      */
     export async function verifyJwt(token, secret) {
         const decoded = decodeJwt(token) !{
-            | ::DecodeFailed(msg) -> {
+            ::DecodeFailed(msg) -> {
                 return { valid: false, reason: "malformed" }
             }
         }
@@ -155,7 +155,7 @@ ${
                 new TextEncoder().encode(signingInput)
             ))
         }) !{
-            | ::Thrown(msg, name) -> {
+            ::Thrown(msg, name) -> {
                 return { valid: false, reason: "invalid" }
             }
         }
@@ -187,17 +187,17 @@ ${
         const parts = token.split(".")
         if (parts.length != 3) return not
         const bytes = safeCall(() => base64urlDecode(parts[1])) !{
-            | ::Thrown(msg, name) -> {
+            ::Thrown(msg, name) -> {
                 fail JwtError::DecodeFailed(msg)
             }
         }
         const json = safeCall(() => new TextDecoder().decode(bytes)) !{
-            | ::Thrown(msg, name) -> {
+            ::Thrown(msg, name) -> {
                 fail JwtError::DecodeFailed(msg)
             }
         }
         return safeCall(() => JSON.parse(json)) !{
-            | ::Thrown(msg, name) -> {
+            ::Thrown(msg, name) -> {
                 fail JwtError::DecodeFailed(msg)
             }
         }
@@ -239,7 +239,7 @@ ${
 
         // 1. Structural decode of the header + payload. Malformed -> reject.
         const decoded = decodeJwtParts(token) !{
-            | ::DecodeFailed(m) -> not
+            ::DecodeFailed(m) -> not
         }
         if (decoded is not) return { valid: false, reason: "malformed" }
 
@@ -291,7 +291,7 @@ ${
                 new TextEncoder().encode(decoded.signingInput)
             ))
         }) !{
-            | ::Thrown(msg, name) -> {
+            ::Thrown(msg, name) -> {
                 return { valid: false, reason: "invalid" }
             }
         }
@@ -351,16 +351,16 @@ ${
         const parts = token.split(".")
         if (parts.length != 3) return not
         const headerJson = safeCall(() => new TextDecoder().decode(base64urlDecode(parts[0]))) !{
-            | ::Thrown(msg, name) -> { fail JwtError::DecodeFailed(msg) }
+            ::Thrown(msg, name) -> { fail JwtError::DecodeFailed(msg) }
         }
         const payloadJson = safeCall(() => new TextDecoder().decode(base64urlDecode(parts[1]))) !{
-            | ::Thrown(msg, name) -> { fail JwtError::DecodeFailed(msg) }
+            ::Thrown(msg, name) -> { fail JwtError::DecodeFailed(msg) }
         }
         const header = safeCall(() => JSON.parse(headerJson)) !{
-            | ::Thrown(msg, name) -> { fail JwtError::DecodeFailed(msg) }
+            ::Thrown(msg, name) -> { fail JwtError::DecodeFailed(msg) }
         }
         const payload = safeCall(() => JSON.parse(payloadJson)) !{
-            | ::Thrown(msg, name) -> { fail JwtError::DecodeFailed(msg) }
+            ::Thrown(msg, name) -> { fail JwtError::DecodeFailed(msg) }
         }
         // JSON.parse("null") / a JSON array or primitive does NOT throw — a header
         // or payload that is not a plain object is malformed. Fail closed here so
@@ -440,7 +440,7 @@ ${
 
         // decodeJwt is now failable — use !{} to handle DecodeFailed
         const decoded = decodeJwt(fakeToken) !{
-            | ::DecodeFailed(m) -> not
+            ::DecodeFailed(m) -> not
         }
         assertTruthy(decoded is some)
         assertEqual(decoded.sub, "1234")

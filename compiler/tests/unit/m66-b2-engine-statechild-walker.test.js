@@ -111,11 +111,15 @@ function dualWalk(src) {
 // across the two pipelines (legacy from the trimmed `rulesRaw`; native from
 // the engine-block's child-span window). The legacy and native values are
 // not expected to be byte-identical. Strip both for cross-pipeline equality
-// while leaving offsets intact for offset-specific tests.
+// while leaving offsets intact for offset-specific tests. `bodyRawOffset`
+// (S452, §19.4.5) is the same kind of `rulesRaw`-relative offset, recorded by
+// the live parser only (its one consumer, `scrml fix` arm-pipe, reads the live
+// parser) — stripped likewise.
 function stripRawOffsetRecursive(entries) {
   return entries.map((entry) => {
     const out = { ...entry };
     delete out.rawOffset;
+    delete out.bodyRawOffset;
     if (Array.isArray(out.onTimeoutElements)) {
       out.onTimeoutElements = out.onTimeoutElements.map((e) => {
         const c = { ...e };
