@@ -14634,6 +14634,12 @@ The `show=` attribute is a visibility conditional.
 - When `expr` evaluates to false, the element is hidden. The compiler generates a CSS `display: none` toggle.
 - When `expr` evaluates to true, the element is visible.
 - `show=` is distinct from `if=`: `show=` hides, `if=` removes.
+- `show=` SHALL NOT narrow. Because the element and its children exist and are evaluated while
+  `expr` is false, a binding tested by `show=` keeps its un-narrowed type inside the element
+  (§42.3.5); a member access through a possibly-`not` binding there needs `?.` or an `if=`.
+  **Provenance:** ruling:user-voice-scrml.md S451 "your recs on both" (rec 1) · supersedes:
+  nothing in this section (it never claimed narrowing); added so §17.2 and §42.3.5 agree.
+  Direction of change: newly-rejecting (see §42.3.5).
 
 ### 17.3 Lifecycle of Bare Expressions
 
@@ -28863,7 +28869,10 @@ A function that may return no value SHALL declare its return type as `T | not`. 
 
 - A member access whose receiver's static type admits `not` (a plain-optional `T | not` / `T?` receiver) SHALL be compile error **E-TYPE-046** UNLESS the access is made absence-safe by one of:
   1. **Optional chaining** the access itself — `recv?.field` / `recv?.[key]` / `recv?.method(...)` (§42.3.6) — which propagates `not`.
-  2. **Narrowing** `recv` from `T | not` to `T` in an enclosing scope, via any canonical presence-discrimination: the `if=` / `show=` markup guard (§42.4), `given recv :> { ... }` (§42.2.3), an `if (recv is not) return` / `is some` early-return, or a `match recv { not :> …  given recv :> … }` arm (§42.2.3). Inside the narrowed scope `recv` is `T` and bare `.field` access is safe.
+  2. **Narrowing** `recv` from `T | not` to `T` in an enclosing scope, via any canonical presence-discrimination: the `if=` markup guard (§42.4), `given recv :> { ... }` (§42.2.3), an `if (recv is not) return` / `is some` early-return, or a `match recv { not :> …  given recv :> … }` arm (§42.2.3). Inside the narrowed scope `recv` is `T` and bare `.field` access is safe.
+  - **`show=` is NOT a narrowing guard.** A `show=` element EXISTS in the DOM while its condition is false (§17.2) — it is hidden, not removed — so its children are still evaluated and rendered when `recv` is `not`. Narrowing under `show=` would be unsound. Inside a `<div show=@user>`, `@user` keeps its un-narrowed type `T | not`; a bare `@user.name` there SHALL fire E-TYPE-046. Use `if=` (which does not evaluate its children when the condition is false, §17.1) or `?.`.
+
+> **Provenance:** ruling:user-voice-scrml.md S451 "your recs on both" (rec 1 — *"`show=` is NOT a narrowing guard: strike `show=` from §42.3.5's guard list. §17.2: a `show=` element EXISTS in the DOM while its condition is false, so its children are evaluated and narrowing under it is unsound; only `if=` (which skips evaluation) narrows."*) · **supersedes:** "the `if=` / `show=` markup guard (§42.4)" in item 2 above. **Direction of change: newly-rejecting** — a bare member access on a plain-optional receiver inside a `show=` element, which compiled before, is now E-TYPE-046. Measured (S451): of the 12 `.scrml` files under `examples/`, `samples/`, `conformance/cases/` that use `show=`, **0** read a member of a `show=`-narrowed binding — with `show` removed from impl#1's narrowing attributes, every one of them compiles with the same E-TYPE-046 count (0). impl#1 still narrows under `show=` (`compiler/src/type-system.ts` `markupNarrowedCells`); that divergence is filed as `g-impl1-show-narrows-s451`.
 - The rule is **per-hop**. Each member-access hop through a possibly-`not` receiver needs its own guard. `?.` guards ONLY its immediate receiver (§42.3.6): in `@user?.address.city`, the `?.` guards `@user`, but if `address` is itself optional the bare `.city` on `@user?.address` (type `Address | not`) is a fresh possibly-`not` dereference and SHALL fire E-TYPE-046 — the absence-safe form is `@user?.address?.city`.
 - E-TYPE-046 is DISTINCT from **E-TYPE-001** (§14.12.6.1). E-TYPE-001 fires for a **lifecycle** receiver — a bare-`T` no-RHS cell (Shape 4, §6.2) or a `(not to T)` function return, where `not` is a *pre-transition* state that a presence-discrimination *transitions away*. E-TYPE-046 fires for a **plain-optional** receiver, where `not` is a legitimate *steady-state* value (§42.3.1, §14.3.1) that must be handled at every access; there is no transition. Both codes demand the same handling (guard or optional-chain); they differ only in what the `not` means. A given receiver fires exactly one of the two, never both — a lifecycle-annotated receiver routes to E-TYPE-001; a plain-optional receiver routes to E-TYPE-046.
 

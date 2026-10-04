@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 240 | 6 |
 | MED | 492 | 4 |
-| LOW | 244 | 0 |
+| LOW | 245 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22706,3 +22706,9 @@ Governing: SPEC §57.4 Scope / §12.5.1 decoder contract (S451 R10). By code rea
 ### g-impl1-persist-codes-unimplemented-s451 — impl#1 DIVERGENCE (filed, not fixed): impl#1 implements no part of §6.14 — `persist=` / `key=` / `prepaint` / `hold=` are unknown attributes, none of E-PERSIST-STORAGE-UNKNOWN / -KEY-REQUIRED / E-PREPAINT-WITHOUT-PERSIST / E-HOLD-WITHOUT-PERSIST is emitted, and the §66 opener the cases are written in does not parse — `NEW S451; MED; carried`
 <!-- @gap id=g-impl1-persist-codes-unimplemented-s451 sev=MED status=carried locus=searched:compiler/src(grep `"persist"` / `E-PERSIST` / `E-PREPAINT` / `E-HOLD-WITHOUT` — 0 matches; the §66 opener `let <x:T=v …/>` reports E-MARKUP-001 / E-STATE-UNDECLARED) prov=ruling:dpa-061;SPEC-§6.14;empirical:s451-xfail-signatures-captured-by-conformance/run.ts---xfail-signature -->
 Governing: SPEC §6.14.1 r1/r2, §6.14.4.2 r2, §6.14.4.3 r2 (Nominal; impl#1 carries the divergence per S444). Conformance: 5 cases `conformance/cases/persist/{storage-unknown-neg, key-required-neg, prepaint-without-persist-neg, hold-without-persist-neg, counter-persist-local-pos}` — all PASS on the bootstrap; impl#1 xfail under this gap.
+
+## §S451-show-db — impl#1 divergences from the S451 `show=` narrowing + §8.1.1 database-resolution rulings (2026-10-03; ruling:user-voice-scrml.md S451 "your recs on both"; SPEC §42.3.5 / §17.2 / §8.1.1 / §44.2 — change `docs/changes/s451-spec-show-db/`. impl#1 probes compiled with `bun compiler/bin/scrml.js compile <f> --output-dir <dir>` and the emitted JS read; probe files were temporary and are not committed. impl#1 is frozen for semantics (S447): FILED, not scheduled)
+
+### g-impl1-show-narrows-s451 — impl#1 DIVERGENCE (filed, not fixed): impl#1 still narrows a plain-optional cell under `show=@x`, so a bare `@x.field` inside a `show=` element compiles without E-TYPE-046 — `NEW S451; LOW; open`
+<!-- @gap id=g-impl1-show-narrows-s451 sev=LOW status=open locus=compiler/src/type-system.ts(markupNarrowedCells — the attr-name filter admits "show" beside "if" / "else-if") prov=ruling:user-voice-scrml.md-S451-"your-recs-on-both"-rec-1 -->
+Governing: SPEC §42.3.5 / §17.2 (S451 rec 1). Measured: `<user>: { name: string } | not` + `<div show=@user><p>${@user.name}</p></div>` → 0 E-TYPE-046 on impl#1; with `"show"` removed from the filter → 1. Corpus impact: 0 of the 12 `show=` files under `examples/`, `samples/`, `conformance/cases/` change (same E-TYPE-046 count, 0, with and without the filter entry), so the fix is a one-token deletion with no measured migration.
