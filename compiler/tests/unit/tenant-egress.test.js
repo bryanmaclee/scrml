@@ -29,7 +29,7 @@ import {
   classifyTenantWrite,
   rewriteInsertAddTenantId,
   detectTenantRawEgress,
-  wrapWithTenantTag,
+  wrapWithTenantScope,
   SERVER_TENANT_HELPER,
   TENANT_COLUMN,
 } from "../../src/codegen/tenant-egress.ts";
@@ -51,8 +51,9 @@ async function loadHelperModule() {
   const file = join(dir, "helper.mjs");
   writeFileSync(
     file,
+    "function _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
     SERVER_TENANT_HELPER +
-      "\nexport { _scrml_tenant_tag, _scrml_tenant_tag_all, _scrml_tenant_redact, _scrml_tenant_opaque };\n",
+      "\nexport { _scrml_tenant_scope, _scrml_tenant_mark, _scrml_tenant_redact, _scrml_tenant_opaque, _scrml_tenant_request_scope };\n",
   );
   return await import(file);
 }
@@ -63,14 +64,19 @@ const HELPER_STRICT = await loadHelperModule();
 
 // SLOPPY-MODE loader (`new Function`). Faithful for every mode-INSENSITIVE
 // property — which is all of them except the non-extensible-write pair.
-// `_scrml_current_user` is stubbed so `_scrml_active_tenant` can resolve an
-// ambient tenant.
+// `_scrml_current_user` is stubbed (a request is `{ tenantId }`) so
+// `_scrml_active_tenant` can resolve the request's tenant; `asTenant` runs a
+// function as the request of that tenant (the per-request store the emitted
+// route wrapper opens).
 function loadHelper() {
   const fn = new Function(
+    "function _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
     SERVER_TENANT_HELPER +
-      "\nreturn { _scrml_tenant_tag, _scrml_tenant_tag_all, _scrml_tenant_redact, _scrml_active_tenant };",
+      "\nreturn { _scrml_tenant_scope, _scrml_tenant_scope_none, _scrml_tenant_redact, _scrml_active_tenant, _scrml_tenant_request_scope };",
   );
-  return fn();
+  const H = fn();
+  H.asTenant = (tenantId, f) => H._scrml_tenant_request_scope(f)({ tenantId });
+  return H;
 }
 
 // ---------------------------------------------------------------------------
@@ -99,30 +105,65 @@ describe("§14.8.10 resolveTenantScoping — read scoping", () => {
   const ctx = ctxAssets();
   test("SELECT * over a tenant table → read, tenant_id already present (no floor-add)", () => {
     const sc = resolveTenantScoping("SELECT * FROM assets", ctx);
-    expect(sc).toEqual({ kind: "read", floorAdd: false, tenantCol: "tenant_id", table: "assets" });
+    expect(sc).toEqual({ kind: "read", table: "assets", keys: [{ col: "tenant_id", add: null }] });
   });
   test("explicit projection WITHOUT tenant_id → read, floor-add", () => {
     const sc = resolveTenantScoping("SELECT id, name FROM assets", ctx);
-    expect(sc).toEqual({ kind: "read", floorAdd: true, tenantCol: "tenant_id", table: "assets" });
+    expect(sc).toEqual({ kind: "read", table: "assets", keys: [{ col: "tenant_id", add: "tenant_id" }] });
   });
   test("explicit projection WITH tenant_id (aliased) → read, no floor-add, keyed on the alias", () => {
     const sc = resolveTenantScoping("SELECT id, tenant_id AS tid FROM assets", ctx);
-    expect(sc).toEqual({ kind: "read", floorAdd: false, tenantCol: "tid", table: "assets" });
+    expect(sc).toEqual({ kind: "read", table: "assets", keys: [{ col: "tid", add: null }] });
   });
   test("a read over a NON-tenant table → null (no floor)", () => {
     expect(resolveTenantScoping("SELECT k, v FROM config", ctx)).toBeNull();
   });
   test("aggregate without GROUP BY tenant_id → agg (E-TENANT-AGG)", () => {
     const sc = resolveTenantScoping("SELECT COUNT(*) AS n FROM assets", ctx);
-    expect(sc).toEqual({ kind: "agg", table: "assets" });
+    expect(sc).toEqual({ kind: "agg", table: "assets", reason: "aggregate" });
   });
   test("aggregate WITH GROUP BY tenant_id → redactable read, not agg", () => {
     const sc = resolveTenantScoping("SELECT tenant_id, COUNT(*) AS n FROM assets GROUP BY tenant_id", ctx);
     expect(sc && sc.kind).toBe("read");
   });
-  test("unresolvable read (CTE) mentioning a tenant table → strip-all (fail-closed)", () => {
+  test("a CTE over a tenant table → agg/subquery (E-TENANT-AGG — S452 reading 4)", () => {
     const sc = resolveTenantScoping("WITH t AS (SELECT * FROM assets) SELECT * FROM t", ctx);
-    expect(sc).toEqual({ kind: "strip" });
+    expect(sc).toEqual({ kind: "agg", table: "assets", reason: "subquery" });
+  });
+  test("a derived table (subquery in FROM) over a tenant table → agg/subquery", () => {
+    const sc = resolveTenantScoping("SELECT x.id FROM (SELECT id FROM assets) x", ctx);
+    expect(sc).toEqual({ kind: "agg", table: "assets", reason: "subquery" });
+  });
+  test("a tenant table read only inside a WHERE subquery → agg/subquery (no floor at all before S452)", () => {
+    const sc = resolveTenantScoping("SELECT k, v FROM config WHERE k IN (SELECT name FROM assets)", ctx);
+    expect(sc).toEqual({ kind: "agg", table: "assets", reason: "subquery" });
+  });
+  test("a tenant table in a PROJECTION subquery beside a tenant FROM → agg/subquery", () => {
+    const sc = resolveTenantScoping("SELECT id, (SELECT COUNT(*) FROM assets) AS n FROM assets", ctx);
+    expect(sc && sc.kind).toBe("agg");
+  });
+  test("a set operation mentioning a tenant table → unresolvable (zero rows — S452 reading 5)", () => {
+    const sc = resolveTenantScoping("SELECT id FROM assets UNION SELECT k FROM config", ctx);
+    expect(sc).toEqual({ kind: "unresolvable" });
+  });
+  test("a JOIN of two tenant tables keys EACH source through its own aliased column (reading 3)", () => {
+    const two = buildTenantContext(protectCtx({ assets: ["id", "tenant_id"], orders: ["id", "asset_id", "tenant_id"] }));
+    const sc = resolveTenantScoping("SELECT o.id, a.id FROM orders o LEFT JOIN assets a ON a.id = o.asset_id", two);
+    expect(sc).toEqual({
+      kind: "read",
+      table: "orders",
+      keys: [
+        { col: "_scrml_tenant_key_0", add: "o.tenant_id AS _scrml_tenant_key_0" },
+        { col: "_scrml_tenant_key_1", add: "a.tenant_id AS _scrml_tenant_key_1" },
+      ],
+    });
+  });
+  test("a self-join keys BOTH occurrences", () => {
+    const sc = resolveTenantScoping("SELECT p.id, c.id FROM assets p JOIN assets c ON c.id = p.id", ctx);
+    expect(sc && sc.kind === "read" && sc.keys.map((k) => k.add)).toEqual([
+      "p.tenant_id AS _scrml_tenant_key_0",
+      "c.tenant_id AS _scrml_tenant_key_1",
+    ]);
   });
   test("unresolvable read NOT mentioning a tenant table → null (do not nuke non-tenant CTE)", () => {
     expect(resolveTenantScoping("WITH t AS (SELECT * FROM config) SELECT * FROM t", ctx)).toBeNull();
@@ -143,10 +184,10 @@ describe("§14.8.10 rewriteSelectAddTenantId — projection-column add (NOT a WH
     const out = rewriteSelectAddTenantId("SELECT id, name FROM assets WHERE id = ${x}", sc);
     expect(out).toBe("SELECT id, name, tenant_id FROM assets WHERE id = ${x}");
   });
-  test("qualifies with the tenant table's alias in a multi-table FROM", () => {
+  test("qualifies + aliases the tenant table's key in a multi-table FROM", () => {
     const sc = resolveTenantScoping("SELECT a.id, u.name FROM assets a JOIN users u ON a.uid = u.id", ctx);
     const out = rewriteSelectAddTenantId("SELECT a.id, u.name FROM assets a JOIN users u ON a.uid = u.id", sc);
-    expect(out).toContain(", a.tenant_id FROM");
+    expect(out).toBe("SELECT a.id, u.name, a.tenant_id AS _scrml_tenant_key_0 FROM assets a JOIN users u ON a.uid = u.id");
   });
   test("no-op when tenant_id already projected (floorAdd false)", () => {
     const sc = resolveTenantScoping("SELECT * FROM assets", ctx);
@@ -208,79 +249,114 @@ describe("§14.8.10 detectTenantRawEgress — the E-PROTECT-004 sibling", () => 
 });
 
 // ---------------------------------------------------------------------------
-// The SHIPPED runtime helper — tag + redact on real rows (EXECUTED)
+// The SHIPPED runtime helper — the SOURCE filter + the egress re-check (EXECUTED)
 // ---------------------------------------------------------------------------
-describe("§14.8.10 SERVER_TENANT_HELPER — the shipped tag/redact runtime (eval'd)", () => {
+describe("§14.8.10 SERVER_TENANT_HELPER — the shipped source filter (eval'd)", () => {
   const rowsAB = () => [
     { id: 1, name: "a1", tenant_id: "A" },
     { id: 2, name: "a2", tenant_id: "A" },
     { id: 3, name: "b1", tenant_id: "B" },
   ];
+  const wire = (v) => JSON.parse(JSON.stringify(v));
 
-  test("tag(floorAdded) then redact(A) → only tenant-A rows, tenant_id stripped", () => {
+  test("scope(A) → only tenant-A rows; a floor-ADDED key column is removed after the filter", () => {
     const H = loadHelper();
-    const tagged = H._scrml_tenant_tag(rowsAB(), "tenant_id", true);
-    const out = H._scrml_tenant_redact(tagged, "A");
-    expect(out).toEqual([{ id: 1, name: "a1" }, { id: 2, name: "a2" }]);
+    const out = H.asTenant("A", () => H._scrml_tenant_scope(rowsAB(), ["tenant_id"], ["tenant_id"]));
+    expect(wire(out)).toEqual([{ id: 1, name: "a1" }, { id: 2, name: "a2" }]);
   });
 
-  test("redact with a NULL ambient tenant (unpinned) → ZERO rows (fail-closed)", () => {
+  test("an author-projected key column is KEPT on the survivors", () => {
     const H = loadHelper();
-    const tagged = H._scrml_tenant_tag(rowsAB(), "tenant_id", true);
-    expect(H._scrml_tenant_redact(tagged, null)).toEqual([]);
+    const out = H.asTenant("B", () => H._scrml_tenant_scope(rowsAB(), ["tenant_id"], []));
+    expect(wire(out)).toEqual([{ id: 3, name: "b1", tenant_id: "B" }]);
   });
 
-  test("tag(floorAdded=false) → keeps tenant_id in output for the matching tenant", () => {
+  test("an UNPINNED request (null tenant) → ZERO rows (fail-closed)", () => {
     const H = loadHelper();
-    const tagged = H._scrml_tenant_tag(rowsAB(), "tenant_id", false);
-    // floorAdded=false passes the surviving row through as-is (the descriptor
-    // Symbol rides along but is JSON-invisible); compare the wire shape.
-    const out = H._scrml_tenant_redact(tagged, "B");
-    expect(JSON.parse(JSON.stringify(out))).toEqual([{ id: 3, name: "b1", tenant_id: "B" }]);
+    expect(H.asTenant(null, () => H._scrml_tenant_scope(rowsAB(), ["tenant_id"], []))).toEqual([]);
   });
 
-  test("a single .get() row of the wrong tenant → null; of the right tenant → the row", () => {
+  test("code OUTSIDE any request (boot, a background job) → ZERO rows (S452 reading 7)", () => {
     const H = loadHelper();
-    const rowB = H._scrml_tenant_tag({ id: 3, name: "b1", tenant_id: "B" }, "tenant_id", true);
-    expect(H._scrml_tenant_redact(rowB, "A")).toBeNull();
-    const rowB2 = H._scrml_tenant_tag({ id: 3, name: "b1", tenant_id: "B" }, "tenant_id", true);
-    expect(H._scrml_tenant_redact(rowB2, "B")).toEqual({ id: 3, name: "b1" });
+    expect(H._scrml_tenant_scope(rowsAB(), ["tenant_id"], [])).toEqual([]);
   });
 
-  test("strip-all tag → zero rows regardless of the ambient tenant", () => {
+  test("the request is found through an async hop (a peer server function awaited in the handler)", async () => {
     const H = loadHelper();
-    const tagged = H._scrml_tenant_tag_all(rowsAB());
-    expect(H._scrml_tenant_redact(tagged, "A")).toEqual([]);
+    const peer = async () => { await Promise.resolve(); return H._scrml_tenant_scope(rowsAB(), ["tenant_id"], []); };
+    const out = await H._scrml_tenant_request_scope(async () => { await null; return peer(); })({ tenantId: "B" });
+    expect(wire(out)).toEqual([{ id: 3, name: "b1", tenant_id: "B" }]);
   });
 
-  test("UNtagged rows (acrossTenants / non-tenant) pass through unchanged", () => {
+  test("filters IN PLACE: the driver's array is kept, and its `count` is corrected", () => {
     const H = loadHelper();
-    const plain = rowsAB();
-    expect(H._scrml_tenant_redact(plain, "A")).toEqual(rowsAB());
+    const rows = rowsAB();
+    rows.count = 3;
+    const out = H.asTenant("A", () => H._scrml_tenant_scope(rows, ["tenant_id"], []));
+    expect(out).toBe(rows);
+    expect(out.length).toBe(2);
+    expect(out.count).toBe(2);
   });
 
-  test("the descriptor is Symbol-keyed → invisible to JSON.stringify", () => {
+  test("a JOIN row is kept only if EVERY tenant source matches; NULL never matches (reading 3)", () => {
     const H = loadHelper();
-    const tagged = H._scrml_tenant_tag([{ id: 1, tenant_id: "A" }], "tenant_id", false);
-    expect(JSON.parse(JSON.stringify(tagged))).toEqual([{ id: 1, tenant_id: "A" }]);
+    const joined = () => [
+      { id: 1, _scrml_tenant_key_0: "A", _scrml_tenant_key_1: "A" },
+      { id: 2, _scrml_tenant_key_0: "A", _scrml_tenant_key_1: "B" },   // foreign right side
+      { id: 3, _scrml_tenant_key_0: "A", _scrml_tenant_key_1: null },  // LEFT JOIN, no match
+      { id: 4, _scrml_tenant_key_0: "B", _scrml_tenant_key_1: "A" },
+    ];
+    const keys = ["_scrml_tenant_key_0", "_scrml_tenant_key_1"];
+    const out = H.asTenant("A", () => H._scrml_tenant_scope(joined(), keys, keys));
+    expect(wire(out)).toEqual([{ id: 1 }]);
   });
 
-  test("composition: preserves the §14.8.9 protect descriptor Symbol on survivors", () => {
+  test("scope_none (an unresolvable read) → zero rows whatever the tenant (reading 5)", () => {
+    const H = loadHelper();
+    expect(H.asTenant("A", () => H._scrml_tenant_scope_none(rowsAB()))).toEqual([]);
+  });
+
+  test("a non-array result of the wrong tenant → null; of the right tenant → the row", () => {
+    const H = loadHelper();
+    expect(H.asTenant("A", () => H._scrml_tenant_scope({ id: 3, tenant_id: "B" }, ["tenant_id"], []))).toBeNull();
+    expect(wire(H.asTenant("B", () => H._scrml_tenant_scope({ id: 3, tenant_id: "B" }, ["tenant_id"], ["tenant_id"]))))
+      .toEqual({ id: 3 });
+  });
+
+  test("the mark is Symbol-keyed → invisible to JSON.stringify", () => {
+    const H = loadHelper();
+    const out = H.asTenant("A", () => H._scrml_tenant_scope([{ id: 1, tenant_id: "A" }], ["tenant_id"], []));
+    expect(JSON.stringify(out)).toBe('[{"id":1,"tenant_id":"A"}]');
+    expect(out[0][Symbol.for("scrml.tenant.origin")]).toEqual({ tenant: "A" });
+  });
+
+  test("the egress re-check keeps rows admitted for the request tenant; drops them for another / none", () => {
+    const H = loadHelper();
+    const scoped = H.asTenant("A", () => H._scrml_tenant_scope(rowsAB(), ["tenant_id"], []));
+    expect(H._scrml_tenant_redact(scoped, "A").length).toBe(2);
+    expect(H._scrml_tenant_redact(scoped, "B")).toEqual([]);
+    expect(H._scrml_tenant_redact(scoped, null)).toEqual([]);
+  });
+
+  test("UNscoped rows (acrossTenants / non-tenant) pass the egress re-check unchanged", () => {
+    const H = loadHelper();
+    expect(H._scrml_tenant_redact(rowsAB(), "A")).toEqual(rowsAB());
+  });
+
+  test("composition: the §14.8.9 protect descriptor Symbol survives the filter", () => {
     const H = loadHelper();
     const PROT = Symbol.for("scrml.protect.col:secret");
     const rows = [{ id: 1, name: "a1", secret: "s", tenant_id: "A" }];
     rows[0][PROT] = true;
-    const tagged = H._scrml_tenant_tag(rows, "tenant_id", true);
-    const out = H._scrml_tenant_redact(tagged, "A");
-    // tenant redact stripped the floor-added tenant_id but kept the protect Symbol
-    // so a subsequent protect-redact still sees which column to strip.
+    const out = H.asTenant("A", () => H._scrml_tenant_scope(rows, ["tenant_id"], ["tenant_id"]));
     expect(out[0][PROT]).toBe(true);
     expect("tenant_id" in out[0]).toBe(false);
   });
 
-  test("_scrml_active_tenant is null-safe when no _scrml_current_user resolver exists", () => {
-    const H = loadHelper();
-    expect(H._scrml_active_tenant({})).toBeNull();
+  test("_scrml_active_tenant is null-safe with no resolver and with no request", () => {
+    const S = new Function(SERVER_TENANT_HELPER + "\nreturn { _scrml_active_tenant };")();
+    expect(S._scrml_active_tenant({})).toBeNull();
+    expect(S._scrml_active_tenant(null)).toBeNull();
   });
 
   test("INTEGER tenant_id column vs STRING session key — string-coerced match (S239 fix)", () => {
@@ -294,118 +370,110 @@ describe("§14.8.10 SERVER_TENANT_HELPER — the shipped tag/redact runtime (eva
       { id: 2, name: "a2", tenant_id: 1 },
       { id: 3, name: "b1", tenant_id: 2 },
     ];
-    // ambient key is the STRING "1" — the tenant-1 (integer) rows SURVIVE.
-    const t1 = H._scrml_tenant_redact(H._scrml_tenant_tag(intRows(), "tenant_id", true), "1");
-    expect(t1).toEqual([{ id: 1, name: "a1" }, { id: 2, name: "a2" }]);
-    // a wrong-tenant STRING key "2" → only the integer-2 row.
-    const t2 = H._scrml_tenant_redact(H._scrml_tenant_tag(intRows(), "tenant_id", true), "2");
-    expect(t2).toEqual([{ id: 3, name: "b1" }]);
-    // unpinned (null) still → ZERO rows (fail-closed; the null-guard runs first).
-    const anon = H._scrml_tenant_redact(H._scrml_tenant_tag(intRows(), "tenant_id", true), null);
-    expect(anon).toEqual([]);
-    // a single .get() integer row of the matching tenant survives; wrong → null.
-    const okGet = H._scrml_tenant_redact(H._scrml_tenant_tag({ id: 1, name: "a1", tenant_id: 1 }, "tenant_id", true), "1");
-    expect(okGet).toEqual({ id: 1, name: "a1" });
-    const noGet = H._scrml_tenant_redact(H._scrml_tenant_tag({ id: 3, name: "b1", tenant_id: 2 }, "tenant_id", true), "1");
-    expect(noGet).toBeNull();
+    const t1 = H.asTenant("1", () => H._scrml_tenant_scope(intRows(), ["tenant_id"], ["tenant_id"]));
+    expect(wire(t1)).toEqual([{ id: 1, name: "a1" }, { id: 2, name: "a2" }]);
+    const t2 = H.asTenant("2", () => H._scrml_tenant_scope(intRows(), ["tenant_id"], ["tenant_id"]));
+    expect(wire(t2)).toEqual([{ id: 3, name: "b1" }]);
+    expect(H.asTenant(null, () => H._scrml_tenant_scope(intRows(), ["tenant_id"], []))).toEqual([]);
+    // and the egress re-check agrees with the source filter on the coerced key.
+    expect(H._scrml_tenant_redact(t1, 1).length).toBe(2);
   });
 
-  test("COMPOSITION with §14.8.9 protect — the exact emitted sink, both shipped helpers", () => {
-    // The emitted lowering:  _scrml_tenant_tag(_scrml_protect_tag(rows, [cols]), "tenant_id", true)
+  test("COMPOSITION with §14.8.9 protect — the exact emitted lowering + sink, both shipped helpers", () => {
+    // The emitted lowering:  _scrml_protect_tag(_scrml_tenant_scope(rows, keys, added), [cols])
     // The emitted sink:      _scrml_protect_redact(_scrml_tenant_redact(result, ambientTenant))
     const H = new Function(
+      "function _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
       SERVER_PROTECT_HELPER + SERVER_TENANT_HELPER +
-        "\nreturn { _scrml_protect_tag, _scrml_protect_redact, _scrml_tenant_tag, _scrml_tenant_redact };",
+        "\nreturn { _scrml_protect_tag, _scrml_protect_redact, _scrml_tenant_scope, _scrml_tenant_redact, _scrml_tenant_request_scope };",
     )();
-    let rows = [
+    const rows = [
       { id: 1, name: "ua", passwordHash: "secretA", tenant_id: "A" },
       { id: 2, name: "ub", passwordHash: "secretB", tenant_id: "B" },
     ];
-    rows = H._scrml_tenant_tag(H._scrml_protect_tag(rows, ["passwordHash"]), "tenant_id", true);
-    const out = H._scrml_protect_redact(H._scrml_tenant_redact(rows, "A"));
-    // tenant B dropped (isolation) + passwordHash stripped (protect) + floor-added
-    // tenant_id stripped — all three at the composed sink.
+    const lowered = H._scrml_tenant_request_scope(() =>
+      H._scrml_protect_tag(H._scrml_tenant_scope(rows, ["tenant_id"], ["tenant_id"]), ["passwordHash"]))({ tenantId: "A" });
+    const out = H._scrml_protect_redact(H._scrml_tenant_redact(lowered, "A"));
+    // tenant B dropped at the source + floor-added tenant_id removed at the source +
+    // passwordHash stripped at the sink.
     expect(out).toEqual([{ id: 1, name: "ua" }]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// wrapWithTenantTag — emitted wrap text
+// wrapWithTenantScope — emitted wrap text
 // ---------------------------------------------------------------------------
-describe("§14.8.10 wrapWithTenantTag", () => {
-  test("read scoping → `_scrml_tenant_tag(<inner>, \"tenant_id\", <floorAdd>)`", () => {
-    expect(wrapWithTenantTag("ROWS", { kind: "read", floorAdd: true, tenantCol: TENANT_COLUMN, table: "assets" }))
-      .toBe('_scrml_tenant_tag(ROWS, "tenant_id", true)');
+describe("§14.8.10 wrapWithTenantScope", () => {
+  test("read scoping → `_scrml_tenant_scope(<rows>, [keyCols], [addedCols])`", () => {
+    expect(wrapWithTenantScope("ROWS", { kind: "read", table: "assets", keys: [{ col: TENANT_COLUMN, add: TENANT_COLUMN }] }))
+      .toBe('_scrml_tenant_scope(ROWS, ["tenant_id"], ["tenant_id"])');
+    expect(wrapWithTenantScope("ROWS", { kind: "read", table: "assets", keys: [{ col: "tid", add: null }] }))
+      .toBe('_scrml_tenant_scope(ROWS, ["tid"], [])');
   });
-  test("strip scoping → `_scrml_tenant_tag_all(<inner>)`", () => {
-    expect(wrapWithTenantTag("ROWS", { kind: "strip" })).toBe("_scrml_tenant_tag_all(ROWS)");
+  test("unresolvable scoping → `_scrml_tenant_scope_none(<rows>)`", () => {
+    expect(wrapWithTenantScope("ROWS", { kind: "unresolvable" })).toBe("_scrml_tenant_scope_none(ROWS)");
   });
   test("null / agg → no wrap", () => {
-    expect(wrapWithTenantTag("ROWS", null)).toBe("ROWS");
-    expect(wrapWithTenantTag("ROWS", { kind: "agg", table: "assets" })).toBe("ROWS");
+    expect(wrapWithTenantScope("ROWS", null)).toBe("ROWS");
+    expect(wrapWithTenantScope("ROWS", { kind: "agg", table: "assets", reason: "aggregate" })).toBe("ROWS");
   });
 });
 
 // ---------------------------------------------------------------------------
-// §14.8.10 fail-CLOSED at the runtime sink — refuse what the monitor cannot inspect
+// §14.8.10 fail-CLOSED at the egress re-check — refuse what the monitor cannot inspect
 //
 // dpa-039 arc B / B3. The shipped `_scrml_tenant_redact` opened with
 //
 //     if (typeof Response !== "undefined" && value instanceof Response) return value;
 //
 // BEFORE it read the tenant descriptor. That ordering meant a value the compiler
-// had TAGGED as carrying tenant-scoped rows was handed to the client entirely
-// uninspected the moment it sat inside a host-opaque carrier — the one fail-OPEN
-// in this redactor, and the mirror image of the §14.8.10 contract, which is
-// fail-closed everywhere else (an unpinned request sees zero rows).
-//
-// The descriptor is now read FIRST. Tagged + opaque REFUSES (throws, loudly);
-// UNtagged + opaque still passes through untouched, because that is the shipped
+// had MARKED as tenant-scoped was handed to the client entirely uninspected the
+// moment it sat inside a host-opaque carrier — the one fail-OPEN in this
+// redactor. The mark is now read FIRST. Marked + opaque REFUSES (throws, loudly);
+// UNmarked + opaque still passes through untouched, because that is the shipped
 // binary / PDF egress path (§12.5) and must not regress.
+//
+// Under the S452 source filter a host-opaque value is never marked by correct
+// emission (it carries no tenant key column, so `_scrml_tenant_scope` drops it),
+// so these cases mark through `_scrml_tenant_mark` directly — defense in depth.
 // ---------------------------------------------------------------------------
-describe("§14.8.10 redact — a TAGGED host-opaque carrier is refused, not passed through", () => {
+describe("§14.8.10 redact — a MARKED host-opaque carrier is refused, not passed through", () => {
   const H = new Function(
     SERVER_TENANT_HELPER +
-      "\nreturn { _scrml_tenant_tag, _scrml_tenant_tag_all, _scrml_tenant_redact, _scrml_tenant_opaque };",
+      "\nreturn { _scrml_tenant_mark, _scrml_tenant_redact, _scrml_tenant_opaque, _scrml_tenant_scope };",
   )();
+  const mark = (v) => { H._scrml_tenant_mark(v, { tenant: "A" }); return v; };
 
-  test("a TAGGED Response is REFUSED (was: returned verbatim, uninspected)", () => {
-    const r = H._scrml_tenant_tag(new Response("secret rows"), "tenant_id", true);
-    expect(() => H._scrml_tenant_redact(r, "A")).toThrow(/E-TENANT-RAW-EGRESS \(runtime\)/);
+  test("a MARKED Response is REFUSED (was: returned verbatim, uninspected)", () => {
+    expect(() => H._scrml_tenant_redact(mark(new Response("secret rows")), "A")).toThrow(/E-TENANT-RAW-EGRESS \(runtime\)/);
   });
 
-  test("a TAGGED Response is refused for an UNPINNED request too (no null-key shortcut)", () => {
-    const r = H._scrml_tenant_tag(new Response("secret rows"), "tenant_id", true);
-    expect(() => H._scrml_tenant_redact(r, null)).toThrow(/E-TENANT-RAW-EGRESS \(runtime\)/);
+  test("a MARKED Response is refused for an UNPINNED request too (no null-key shortcut)", () => {
+    expect(() => H._scrml_tenant_redact(mark(new Response("secret rows")), null)).toThrow(/E-TENANT-RAW-EGRESS \(runtime\)/);
   });
 
-  test("a strip-ALL tagged Response is refused (the unresolvable-read fallback)", () => {
-    const r = H._scrml_tenant_tag_all(new Response("secret rows"));
-    expect(() => H._scrml_tenant_redact(r, "A")).toThrow(/E-TENANT-RAW-EGRESS \(runtime\)/);
-  });
-
-  test("a TAGGED Blob / stream / buffer is refused too — the carrier set is enumerated", () => {
+  test("a MARKED Blob / stream / buffer is refused too — the carrier set is enumerated", () => {
     for (const opaque of [
       new Blob(["secret"]),
       new ReadableStream({ start(c) { c.close(); } }),
       new ArrayBuffer(8),
       new Uint8Array([1, 2, 3]),
     ]) {
-      const t = H._scrml_tenant_tag(opaque, "tenant_id", true);
-      expect(() => H._scrml_tenant_redact(t, "A")).toThrow(/E-TENANT-RAW-EGRESS \(runtime\)/);
+      expect(() => H._scrml_tenant_redact(mark(opaque), "A")).toThrow(/E-TENANT-RAW-EGRESS \(runtime\)/);
     }
   });
 
-  test("a TAGGED opaque carrier nested in an array is refused as well", () => {
-    const rows = [
-      { id: 1, tenant_id: "A" },
-      new Response("secret"),
-    ];
-    H._scrml_tenant_tag(rows, "tenant_id", true);
+  test("a MARKED opaque carrier nested in an array is refused as well", () => {
+    const rows = [{ id: 1, tenant_id: "A" }, mark(new Response("secret"))];
     expect(() => H._scrml_tenant_redact(rows, "A")).toThrow(/E-TENANT-RAW-EGRESS \(runtime\)/);
   });
 
-  test("REGRESSION GUARD: an UNTAGGED Response still passes through byte-identical", () => {
+  test("the SOURCE filter never admits a host-opaque value (no tenant key column)", () => {
+    expect(H._scrml_tenant_scope(new Response("secret rows"), ["tenant_id"], [])).toBeNull();
+    expect(H._scrml_tenant_scope([new Blob(["x"])], ["tenant_id"], [])).toEqual([]);
+  });
+
+  test("REGRESSION GUARD: an UNMARKED Response still passes through byte-identical", () => {
     // The shipped §12.5 binary / PDF egress path. Refusing this would be a
     // catastrophic over-fire, so it is pinned here explicitly.
     const resp = new Response("a legitimate binary body");
@@ -413,7 +481,7 @@ describe("§14.8.10 redact — a TAGGED host-opaque carrier is refused, not pass
     expect(H._scrml_tenant_redact(resp, null)).toBe(resp);
   });
 
-  test("REGRESSION GUARD: an UNTAGGED opaque value inside a plain object survives", () => {
+  test("REGRESSION GUARD: an UNMARKED opaque value inside a plain object survives", () => {
     const blob = new Blob(["x"]);
     const out = H._scrml_tenant_redact({ file: blob, n: 1 }, "A");
     expect(out.file).toBe(blob);
@@ -434,101 +502,64 @@ describe("§14.8.10 redact — a TAGGED host-opaque carrier is refused, not pass
 });
 
 // ---------------------------------------------------------------------------
-// §14.8.10 fail-CLOSED at the TAG end — the descriptor write must be VERIFIED
+// §14.8.10 fail-CLOSED at the MARK — the descriptor write must be VERIFIED
 //
-// Found by running the arc-B adversarial population sweep against arc B's OWN
-// B3 fix. `_scrml_tenant_opaque` enumerates five host-opaque carrier kinds; the
-// question that matters is what happens to a TAGGED value of a kind NOT in that
-// set. Thirteen such kinds were exercised (Map, Set, Date, Promise, RegExp,
-// Error, URL, Headers, FormData, WeakMap, a class instance, a null-prototype
-// object, and a FROZEN row). Twelve fail CLOSED — the redact finds a descriptor,
-// cannot key on it, and drops the value. The thirteenth LEAKED.
-//
-// Mechanism, reproduced: attaching the descriptor is a plain property write, and
-// a plain property write to a frozen / sealed / non-extensible object is a
-// SILENT no-op outside strict mode. So the row was never tagged, the redact
-// found nothing to key on, and a row of tenant B reached a request whose ambient
-// tenant was A. The identical fail-OPEN B3 closed in the redact, one function
-// earlier — the floor reporting a success it had not achieved.
-//
-// Not reachable from correct emission today: the tag wraps the RAW driver result
-// of a `?{}` query and no author code can run between the await and the tag. So
-// this is defence in depth, not a live leak — but the cost is one property read
-// per row and the failure it prevents is silent cross-tenant disclosure.
+// Found by the arc-B adversarial population sweep: attaching the descriptor is a
+// plain property write, and a plain property write to a frozen / sealed /
+// non-extensible object is a SILENT no-op outside strict mode (and a TypeError
+// inside it). Not reachable from correct emission (the scope wraps the RAW driver
+// result of a `?{}` query and no author code runs between the await and the
+// scope) — defense in depth: the floor never reports a success it did not achieve.
 // ---------------------------------------------------------------------------
-describe("§14.8.10 tag — a descriptor that cannot be attached REFUSES, never silently no-ops", () => {
-  // ⚑ STRICT MODE, deliberately, and the correction matters more than the code.
-  // This block is the ONE place in the file whose outcome depends on which JS
-  // mode the helper runs in: a write to a non-extensible object THROWS under
-  // strict and silently NO-OPS under sloppy. The emitted `app.server.js` is an
-  // ES module, so strict is what ships — and an earlier version of these cases
-  // ran under `new Function` (sloppy), i.e. proved the refusal on the one mode
-  // the bundle never runs in, while the file header claimed it exercised "the
-  // EXACT runtime the server bundle ships." The instrument asserted a fidelity
-  // it did not have. `_scrml_tenant_mark` now routes BOTH failure shapes to the
-  // same refusal, and both limbs are pinned below, each under its own mode.
+describe("§14.8.10 mark — a descriptor that cannot be attached REFUSES, never silently no-ops", () => {
+  // ⚑ STRICT MODE, deliberately: the emitted `app.server.js` is an ES module, so
+  // strict is what ships. The sloppy-mode limb is pinned separately below.
   const H = HELPER_STRICT;
   const REFUSAL = /E-TENANT-RAW-EGRESS \(runtime\)/;
+  const inA = (fn) => H._scrml_tenant_request_scope(fn)({ tenantId: "A" });
 
   test("SLOPPY-mode limb: the silent no-op is caught by the verify-after-write", () => {
-    // The `new Function` loader is the RIGHT instrument here and only here: it
-    // is the only way to reach the no-op path at all, and without this case that
-    // limb of `_scrml_tenant_mark` would be dead code no test ever entered.
-    const S = new Function(
-      SERVER_TENANT_HELPER + "\nreturn { _scrml_tenant_tag };",
-    )();
-    expect(() => S._scrml_tenant_tag(Object.freeze({ tenant_id: "B" }), "tenant_id", true))
-      .toThrow(REFUSAL);
+    const S = new Function(SERVER_TENANT_HELPER + "\nreturn { _scrml_tenant_mark };")();
+    expect(() => S._scrml_tenant_mark(Object.freeze({ tenant_id: "A" }), { tenant: "A" })).toThrow(REFUSAL);
   });
 
-  test("a FROZEN row refuses (was: untagged, then shipped to the wrong tenant)", () => {
-    expect(() => H._scrml_tenant_tag(Object.freeze({ tenant_id: "B", secret: "s" }), "tenant_id", true))
+  test("a FROZEN admitted row refuses (never shipped unmarked)", () => {
+    expect(() => inA(() => H._scrml_tenant_scope([Object.freeze({ tenant_id: "A" })], ["tenant_id"], [])))
       .toThrow(REFUSAL);
   });
 
   test("SEALED and preventExtensions refuse too — the cause is non-extensibility, not freezing", () => {
-    expect(() => H._scrml_tenant_tag(Object.seal({ tenant_id: "B" }), "tenant_id", true)).toThrow(REFUSAL);
-    expect(() => H._scrml_tenant_tag(Object.preventExtensions({ tenant_id: "B" }), "tenant_id", true))
-      .toThrow(REFUSAL);
+    expect(() => H._scrml_tenant_mark(Object.seal({ tenant_id: "A" }), { tenant: "A" })).toThrow(REFUSAL);
+    expect(() => H._scrml_tenant_mark(Object.preventExtensions({ tenant_id: "A" }), { tenant: "A" })).toThrow(REFUSAL);
   });
 
-  test("a frozen row inside an array refuses (the per-row write is verified too)", () => {
-    expect(() => H._scrml_tenant_tag([Object.freeze({ tenant_id: "B" })], "tenant_id", true))
-      .toThrow(REFUSAL);
+  test("a FOREIGN frozen row is simply dropped (never marked, never kept)", () => {
+    expect(inA(() => H._scrml_tenant_scope([Object.freeze({ tenant_id: "B" })], ["tenant_id"], []))).toEqual([]);
   });
 
-  test("the strip-all tag verifies its write as well", () => {
-    expect(() => H._scrml_tenant_tag_all(Object.freeze({ tenant_id: "B" }))).toThrow(REFUSAL);
-  });
-
-  test("REGRESSION GUARD: ordinary driver rows tag and redact exactly as before", () => {
+  test("REGRESSION GUARD: ordinary driver rows scope and re-check exactly as before", () => {
     const rows = [
       { id: 1, name: "a1", tenant_id: "A" },
       { id: 2, name: "b1", tenant_id: "B" },
     ];
-    expect(H._scrml_tenant_redact(H._scrml_tenant_tag(rows, "tenant_id", true), "A"))
-      .toEqual([{ id: 1, name: "a1" }]);
+    const scoped = inA(() => H._scrml_tenant_scope(rows, ["tenant_id"], ["tenant_id"]));
+    expect(JSON.parse(JSON.stringify(H._scrml_tenant_redact(scoped, "A")))).toEqual([{ id: 1, name: "a1" }]);
   });
 
-  test("EVERY tagged non-carrier kind fails CLOSED — none reaches the client", () => {
-    // The twelve that already failed closed, asserted as a set rather than on the
-    // one member that happened to motivate the fix.
+  test("EVERY non-row kind fails CLOSED at the source — none is admitted", () => {
     const makers = [
-      () => new Map([["tenant_id", "B"]]),
-      () => new Set(["B"]),
+      () => new Map([["tenant_id", "A"]]),
+      () => new Set(["A"]),
       () => new Date(0),
       () => /x/,
       () => new Error("secret"),
       () => new URL("https://example.com/secret"),
-      () => new Headers({ "x-tenant": "B" }),
+      () => new Headers({ "x-tenant": "A" }),
       () => new FormData(),
       () => new WeakMap(),
-      () => { class Row { constructor() { this.tenant_id = "B"; this.secret = "s"; } } return new Row(); },
-      () => Object.assign(Object.create(null), { tenant_id: "B", secret: "s" }),
     ];
     for (const make of makers) {
-      const tagged = H._scrml_tenant_tag(make(), "tenant_id", true);
-      expect(H._scrml_tenant_redact(tagged, "A")).toBeNull();
+      expect(inA(() => H._scrml_tenant_scope(make(), ["tenant_id"], []))).toBeNull();
     }
   });
 });

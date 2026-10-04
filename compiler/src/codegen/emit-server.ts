@@ -58,6 +58,8 @@ import {
   classifyTenantWrite,
   detectTenantRawEgress,
   SERVER_TENANT_HELPER,
+  tenantRequestScopeLines,
+  wrapWithTenantScope,
   type TenantContext,
 } from "./tenant-egress.ts";
 // §52.8 SSR A-terminus, Dispatch 1 — server-side per-row markup renderer.
@@ -2380,10 +2382,16 @@ export function generateServerJs(
           _seenTenant.add(_key);
           errors.push(new CGError(
             "E-TENANT-AGG",
-            `E-TENANT-AGG: an aggregate/scalar read over the tenant-scoped table \`${_scoping.table}\` in \`${_dispQ}\` ` +
-            `has no per-tenant output discriminator, so the row-redaction floor has no row to key on (a bare COUNT/SUM ` +
-            `folds every tenant into one scalar) (§14.8.10). Resolution: add \`GROUP BY tenant_id\` (and project it) so ` +
-            `each output row carries its tenant, or mark the query \`.acrossTenants()\` for a deliberate cross-tenant aggregate.`,
+            _scoping.reason === "subquery"
+              ? `E-TENANT-AGG: \`${_dispQ}\` reads the tenant-scoped table \`${_scoping.table}\` inside a subquery, CTE or ` +
+                `derived table, so its rows are folded into the outer result before the tenant floor can filter them (the ` +
+                `floor keys each OUTER row on its source \`tenant_id\`, and this table's never reaches it) (§14.8.10). ` +
+                `Resolution: read the tenant-scoped table at the top level of the query (FROM / JOIN) so each row carries ` +
+                `its tenant, or mark the query \`.acrossTenants()\` for a deliberate cross-tenant read.`
+              : `E-TENANT-AGG: an aggregate/scalar read over the tenant-scoped table \`${_scoping.table}\` in \`${_dispQ}\` ` +
+                `has no per-tenant output discriminator, so the tenant floor has no row to key on (a bare COUNT/SUM ` +
+                `folds every tenant into one scalar) (§14.8.10). Resolution: add \`GROUP BY tenant_id\` (and project it) so ` +
+                `each output row carries its tenant, or mark the query \`.acrossTenants()\` for a deliberate cross-tenant aggregate.`,
             { start: _tm.index, end: _matchEnd } as any,
             "error",
           ));
@@ -2466,10 +2474,11 @@ export function generateServerJs(
   // byte-identical output.
   setBoolColumnsForRewriter(buildBoolColumnsFromFileAST(fileAST));
 
-  // §14.8.10 — arm the SERVER SQL-lowering pass to (a) add `tenant_id` to a
-  // tenant-scoped read's projection when absent and (b) tag its rows with the
-  // `_scrml_tenant_tag(...)` descriptor. `null` when tenant is inactive (a true
-  // no-op — byte-identical output). Released alongside the protect ctx below.
+  // §14.8.10 — arm the SERVER SQL-lowering pass to (a) add a tenant-scoped read's
+  // key column(s) to its projection when absent and (b) filter its rows to the
+  // request's tenant at the source (`_scrml_tenant_scope(...)`). `null` when
+  // tenant is inactive (a true no-op — byte-identical output). Released alongside
+  // the protect ctx below.
   setTenantContextForRewriter(_tenantActive ? _tenantCtx : null);
 
   // §8.9.2 / §19.10.5: determine whether a handler receives an implicit
@@ -6140,15 +6149,16 @@ export function generateServerJs(
     // This `SELECT * FROM <table>` is hand-emitted (not via rewriteSqlRefs), so
     // tag `_scrml_rows` inline with the table's protected columns, then redact.
     // §14.8.10 — a `SELECT * FROM <tenant-scoped table>` already carries
-    // `tenant_id` (star includes it → no floor-add); tag the rows so the sink
-    // drops other tenants' rows, then redact. Composes with the protect tag.
+    // `tenant_id` (star includes it → no floor-add); the rows are filtered to the
+    // request's tenant at the source (innermost), then protect-tagged, then
+    // redacted at the sink (defense in depth).
     const _slProtCols = _protectActive ? _protectCtx.protectedByTable.get(table) : undefined;
     const _slTenant = _tenantActive && _tenantCtx.tenantScopedTables.has(table);
     if (_slTenant) _tenantStripsFromHandEmit.push(`SELECT * FROM ${table}`);
     if ((_slProtCols && _slProtCols.size > 0) || _slTenant) {
       let _rowsExpr = `await ${_dbIdentAt(inst) ?? fallbackSqlHandle()}\`SELECT * FROM ${table}\``;
+      if (_slTenant) _rowsExpr = wrapWithTenantScope(_rowsExpr, { kind: "read", table, keys: [{ col: "tenant_id", add: null }] });
       if (_slProtCols && _slProtCols.size > 0) _rowsExpr = `_scrml_protect_tag(${_rowsExpr}, ${JSON.stringify([..._slProtCols])})`;
-      if (_slTenant) _rowsExpr = `_scrml_tenant_tag(${_rowsExpr}, "tenant_id", false)`;
       lines.push(`  const _scrml_rows = ${_rowsExpr};`);
       lines.push(`  return new Response(JSON.stringify(${_egressRedact("_scrml_rows")}), {`);
     } else {
@@ -6398,7 +6408,7 @@ export function generateServerJs(
         lines.push(`  const _scrml_currentUser = _scrml_current_user(_scrml_req);`);
       }
       // Tier-1 instances — SELECT * FROM <table> (+ §14.8.9 protect tag/redact and
-      // §14.8.10 tenant tag/redact when applicable; both compose at the sink).
+      // the §14.8.10 tenant source filter + sink re-check when applicable).
       for (const inst of _ssrSeedTier1) {
         const _vn = inst.name as string;
         const _tbl = (inst as any).serverAuthorityTable as string;
@@ -6407,8 +6417,8 @@ export function generateServerJs(
         if (_tenTbl) _tenantStripsFromHandEmit.push(`SELECT * FROM ${_tbl}`);
         if ((_prot && _prot.size > 0) || _tenTbl) {
           let _rowsExpr = `await ${_dbIdentAt(inst) ?? fallbackSqlHandle()}\`SELECT * FROM ${_tbl}\``;
+          if (_tenTbl) _rowsExpr = wrapWithTenantScope(_rowsExpr, { kind: "read", table: _tbl, keys: [{ col: "tenant_id", add: null }] });
           if (_prot && _prot.size > 0) _rowsExpr = `_scrml_protect_tag(${_rowsExpr}, ${JSON.stringify([..._prot])})`;
-          if (_tenTbl) _rowsExpr = `_scrml_tenant_tag(${_rowsExpr}, "tenant_id", false)`;
           lines.push(`  { const _scrml_rows = ${_rowsExpr};`);
           lines.push(`    _scrml_ssr_state[${JSON.stringify(_vn)}] = ${_egressRedact("_scrml_rows")}; }`);
         } else {
@@ -7251,6 +7261,15 @@ export function generateServerJs(
     if (_scopeLines.length > 0) {
       finalEmitted = finalEmitted.replace(/\n*$/, "\n") + _scopeLines.join("\n") + "\n";
     }
+    // §14.8.10 (S452) — the tenant SOURCE filter reads the request from a store
+    // opened around every route handler (a server function called in-process has
+    // no request parameter). Appended LAST, after every route export it names.
+    if (/_scrml_tenant_scope(?:_none)?\(await\b/.test(finalEmitted)) {
+      const _tenantScopeLines = tenantRequestScopeLines(collected);
+      if (_tenantScopeLines.length > 0) {
+        finalEmitted = finalEmitted.replace(/\n*$/, "\n") + _tenantScopeLines.join("\n") + "\n";
+      }
+    }
   } else {
     // No `?{}` handle → no transaction runtime → no stream backstop to call.
     finalEmitted = finalEmitted.split(SSE_STREAM_END_LINE + "\n").join("");
@@ -7289,9 +7308,10 @@ export function generateServerJs(
       _seenStripDrain.add(_sql);
       errors.push(new CGError(
         "I-TENANT-STRIP",
-        `I-TENANT-STRIP: the egress floor scopes the client response of \`${_sql}\` to the request's ambient ` +
-        `\`@currentUser.tenantId\` — any row of another tenant is dropped, and an unpinned request sees zero rows ` +
-        `(§14.8.10, the row-level twin of the §14.8.9 protect floor). For a deliberate cross-tenant read use \`.acrossTenants()\`.`,
+        `I-TENANT-STRIP: the rows of \`${_sql}\` are filtered to the request's ambient \`@currentUser.tenantId\` ` +
+        `as soon as the query returns, before any server code sees them — every row of another tenant is dropped, ` +
+        `so values derived from the rows (fields, counts, joins) are this tenant's alone; an unpinned request, or code ` +
+        `running outside a request, sees zero rows (§14.8.10). For a deliberate cross-tenant read use \`.acrossTenants()\`.`,
         { file: filePath, start: 0, end: 0 } as any,
         "info",
       ));

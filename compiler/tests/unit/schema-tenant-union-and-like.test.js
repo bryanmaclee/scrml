@@ -59,7 +59,7 @@ ${QUERY}
 }
 const errCodes = (r) => (r.errors ?? []).map((d) => d.code);
 const schemaCodes = (r) => errCodes(r).filter((c) => /^E-SCHEMA-01[2-5]$/.test(c));
-const tagged = (server) => /_scrml_tenant_tag\(await _scrml_sql/.test(server);
+const tagged = (server) => /_scrml_tenant_scope\(await _scrml_sql/.test(server);
 
 const WITH = "(id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)";
 const WITHOUT = "(id INTEGER PRIMARY KEY, name TEXT)";

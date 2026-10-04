@@ -3,10 +3,11 @@
  *
  * Two layers:
  *   1. code-firing — each E-TENANT-* / I-TENANT-* fires on the right shape;
- *   2. runtime — the compiled bundle WIRES the redact at the egress sink, and the
- *      SHIPPED redact helper, EXECUTED, isolates rows (tenant A → only A + tenant_id
- *      stripped; unpinned → zero; untagged / `.acrossTenants()` → passthrough); plus
- *      a non-tenant app is byte-identical.
+ *   2. runtime — the compiled bundle WIRES the source filter + the egress re-check,
+ *      and the SHIPPED helpers, EXECUTED, isolate rows (tenant A → only A + the
+ *      floor-added tenant_id removed; unpinned → zero; `.acrossTenants()` →
+ *      passthrough); plus a non-tenant app is byte-identical. The executed
+ *      end-to-end handler run lives in conformance/conf-TENANT-SOURCE-FILTER.
  *
  * The runtime half EXECUTES the shipped redact (not a grep of a marker — the S265
  * lesson). The end-to-end full-bundle-over-HTTP path is cloud-runner-infra-flaky, so
@@ -113,11 +114,16 @@ describe("§14.8.10 codes-half — each E-/I-TENANT fires on the right shape", (
 // EXECUTING the shipped redact (not a grep of a marker — the S265 lesson): (1) codegen
 // WIRES the redact at the compiled artifact's egress sink; (2) the shipped helper,
 // run, ISOLATES rows. (PA-side R26 exercised the true end-to-end path once, locally.)
-describe("§14.8.10 runtime-half — the compiled bundle wires + the shipped redact isolates rows", () => {
-  // Eval the SHIPPED helper block (the EXACT runtime the emitted server carries).
+describe("§14.8.10 runtime-half — the compiled bundle wires + the shipped helpers isolate rows", () => {
+  // Eval the SHIPPED helper block (the EXACT runtime the emitted server carries),
+  // with a stub session resolver: a request is `{ tenantId }`.
   const H = new Function(
-    SERVER_TENANT_HELPER + "\nreturn { _scrml_tenant_tag, _scrml_tenant_redact };",
+    "function _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
+    SERVER_TENANT_HELPER +
+    "\nreturn { _scrml_tenant_scope, _scrml_tenant_redact, _scrml_tenant_request_scope };",
   )();
+  const scopeAs = (tenantId, rowsIn, added = ["tenant_id"]) =>
+    JSON.parse(JSON.stringify(H._scrml_tenant_request_scope(() => H._scrml_tenant_scope(rowsIn, ["tenant_id"], added))({ tenantId })));
   const rows = () => [
     { id: 1, name: "a1", tenant_id: "A" },
     { id: 2, name: "a2", tenant_id: "A" },
@@ -135,32 +141,32 @@ describe("§14.8.10 runtime-half — the compiled bundle wires + the shipped red
     return readFileSync(join(outDir, "app.server.js"), "utf8");
   }
 
-  test("(wiring) the scoped read's client-egress return is wrapped in the tenant redact", () => {
+  test("(wiring) the read is filtered at the source and the return re-checked at the egress", () => {
     const server = compileServer(
       `      function loadAssets() { let rows = ?{\`SELECT id, name FROM assets\`}.all(); return rows }`,
     );
+    expect(server).toContain('_scrml_tenant_scope(await _scrml_sql`SELECT id, name, tenant_id FROM assets`, ["tenant_id"], ["tenant_id"])');
     expect(/_scrml_tenant_redact\([^)]*_scrml_active_tenant/.test(server)).toBe(true);
     expect(server.includes("function _scrml_tenant_redact")).toBe(true);
     expect(server.includes("function _scrml_active_tenant")).toBe(true);
   });
 
-  test("(a) tenant A → ONLY tenant-A rows, the floor-added tenant_id stripped", () => {
-    const out = H._scrml_tenant_redact(H._scrml_tenant_tag(rows(), "tenant_id", true), "A");
+  test("(a) tenant A → ONLY tenant-A rows, the floor-added tenant_id removed", () => {
+    const out = scopeAs("A", rows());
     expect(out).toEqual([{ id: 1, name: "a1" }, { id: 2, name: "a2" }]);
     expect(out.every((r) => !("tenant_id" in r))).toBe(true);
   });
 
   test("(b) an absent ambient tenant (unpinned request) → ZERO rows (fail-closed)", () => {
-    expect(H._scrml_tenant_redact(H._scrml_tenant_tag(rows(), "tenant_id", true), null)).toEqual([]);
+    expect(scopeAs(null, rows())).toEqual([]);
   });
 
-  test("(c) .acrossTenants() emits UNtagged rows → passthrough (all tenants)", () => {
+  test("(c) .acrossTenants() emits UNscoped rows → the egress re-check passes them (all tenants)", () => {
     expect(H._scrml_tenant_redact(rows(), "A")).toEqual(rows());
   });
 
   test("tenant B → ONLY tenant-B rows", () => {
-    expect(H._scrml_tenant_redact(H._scrml_tenant_tag(rows(), "tenant_id", true), "B"))
-      .toEqual([{ id: 3, name: "b1" }]);
+    expect(scopeAs("B", rows())).toEqual([{ id: 3, name: "b1" }]);
   });
 });
 

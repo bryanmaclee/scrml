@@ -7,36 +7,46 @@
  * invariant: *a row belonging to tenant A never reaches a request whose ambient
  * tenant is B*. Policy (which tenant a user may act as) stays app-owned.
  *
- * Mechanism ("tag at query-lowering, redact at the egress sink", mirroring
- * protect):
+ * Mechanism ("filter at the SOURCE", S452 ruling "a"; the egress strip stays as
+ * defense in depth):
  *
  *   1. A `<schema>` table carrying a `tenant_id` column IS tenant-scoped (the
  *      column's PRESENCE is the declaration — no per-table opt-in attribute).
  *      `tenantScopedTables` is built from the same schema registry §14.8.9 uses.
  *
- *   2. At `?{ SELECT ... }` lowering, if the read's FROM tables intersect the
- *      tenant-scoped set, its result rows are tagged with a Symbol-keyed
- *      descriptor (`Symbol.for("scrml.tenant.origin")`) recording the row's
- *      `tenant_id` output column + whether the floor ADDED that column to the
- *      projection (a deterministic projection-column add — NOT a WHERE-parse; the
- *      SQL-WHERE injection is v1.next). `SELECT *` already carries `tenant_id`, so
- *      no add is needed.
+ *   2. At `?{ SELECT ... }` lowering, if the read's FROM/JOIN sources include a
+ *      tenant-scoped table, the projection is made to carry ONE key column per
+ *      tenant-scoped source (a deterministic projection-column add — NOT a
+ *      WHERE-parse; the SQL-WHERE injection is v1.next), and the driver's result
+ *      is wrapped in `_scrml_tenant_scope(rows, keyCols, addedCols)`.
  *
- *   3. At the single compiler-owned egress sink, `_scrml_tenant_redact(value,
- *      tenantKey)` drops every row whose `tenant_id` !== the ambient
- *      `@currentUser.tenantId`, and strips the floor-added `tenant_id` column from
- *      the survivors. `tenantKey == null` (an unpinned / anonymous request) →
- *      ZERO rows (fail-closed by construction, the §52.15.3 shape). It composes
- *      with the §14.8.9 protect redact (both descriptors coexist on a row).
+ *   3. `_scrml_tenant_scope` runs IMMEDIATELY after the query, before any program
+ *      code holds a row. It keeps a row iff EVERY key column equals the request's
+ *      active tenant (NULL never matches), removes the key columns the floor
+ *      added, and marks each survivor with the tenant it was admitted for. No
+ *      active tenant (an unpinned request, or code running outside any request)
+ *      → ZERO rows. Because the rows are scoped before the program sees them,
+ *      every value derived from them — a mapped field, a count, a join done in
+ *      code — is scoped by construction (the C4 leak: `rows.map(r => r.name)`
+ *      used to ship every tenant's names, because the strip below could only see
+ *      rows, not strings).
  *
- * Enforcement is HYBRID (§14.8.10): redaction guarantees reads; the classes
- * redaction cannot cover fail closed at compile — an aggregate-without-discriminator
- * (`E-TENANT-AGG`), a write (`E-TENANT-WRITE`), or a raw/unanalyzable egress
- * (`E-TENANT-RAW-EGRESS`). `.acrossTenants()` is the sole loud opt-out (fires
- * `I-TENANT-ACROSS`); `I-TENANT-STRIP` names every row-strip (never silent).
+ *   4. At the compiler-owned egress sink, `_scrml_tenant_redact(value, tenantKey)`
+ *      re-checks every marked row against the ambient tenant — defense in depth;
+ *      under a correct source filter it drops nothing.
  *
- * V1-minimal scope (the freeze): the redact floor + the hard-fails. NO
- * SQL-WHERE-parser (predicate injection is v1.next — the `OR`-precedence hazard).
+ * Enforcement is HYBRID (§14.8.10): the source filter guarantees reads; the
+ * classes a row filter cannot cover fail closed at compile — an
+ * aggregate-without-discriminator or a tenant table read only inside a
+ * subquery / CTE / derived table (`E-TENANT-AGG`), a write (`E-TENANT-WRITE`), or
+ * a raw/unanalyzable egress (`E-TENANT-RAW-EGRESS`). `.acrossTenants()` is the
+ * sole loud opt-out (fires `I-TENANT-ACROSS`); `I-TENANT-STRIP` names every scoped
+ * read (never silent).
+ *
+ * V1-minimal scope (the freeze): the source filter + the hard-fails. NO
+ * SQL-WHERE-parser (predicate injection is v1.next — the `OR`-precedence hazard),
+ * so a `LIMIT` / `OFFSET` applies before the filter (a short page, never a
+ * foreign row).
  */
 
 import { extractSelectProjection } from "../sql-projection.ts";
@@ -143,25 +153,39 @@ export function buildTenantContext(
 }
 
 /**
+ * One key column the source filter checks: the OUTPUT column of a result row that
+ * holds one tenant-scoped source's `tenant_id`. `add` is the projection fragment
+ * the floor appends to produce it (`null` when the author's projection already
+ * carries it); an added column is removed from each row after the filter.
+ */
+export interface TenantKeyColumn {
+  col: string;
+  add: string | null;
+}
+
+/**
  * The result of resolving a `?{}` read's tenant scoping:
- *   - `null`                — no floor (not row-producing, or FROM tables carry no
- *                             tenant-scoped table). No tag is emitted.
- *   - `{ kind: "read" }`    — a resolvable SELECT over a tenant-scoped table; tag +
- *                             redact. `floorAdd` true → the projection lacks
- *                             `tenant_id` and the floor must ADD it (and strip it
- *                             from the output). `tenantCol` is the OUTPUT column
- *                             name the redact keys on.
- *   - `{ kind: "agg" }`     — an aggregate/scalar over a tenant-scoped table with
- *                             NO output tenant discriminator (`GROUP BY tenant_id`)
- *                             → redaction has no row to key on → `E-TENANT-AGG`.
- *   - `{ kind: "strip" }`   — an unresolvable dynamic read that mentions a
- *                             tenant-scoped table name → wholesale strip-all rows
- *                             at the sink (fail-closed, `I-TENANT-STRIP`).
+ *   - `null`                    — no floor (not row-producing, or no source is a
+ *                                 tenant-scoped table). Lowered unchanged.
+ *   - `{ kind: "read" }`        — a resolvable SELECT whose FROM/JOIN sources
+ *                                 include a tenant-scoped table; filtered at the
+ *                                 source. `keys` has ONE entry per tenant-scoped
+ *                                 source (a row is kept iff every one matches).
+ *   - `{ kind: "agg" }`         — no row to key on → `E-TENANT-AGG`. `reason`
+ *                                 "aggregate": an aggregate/scalar with NO output
+ *                                 tenant discriminator (`GROUP BY tenant_id`);
+ *                                 "subquery": a tenant-scoped table read inside a
+ *                                 subquery / CTE / derived table, whose rows fold
+ *                                 into the outer row before any filter can run.
+ *   - `{ kind: "unresolvable" }`— a read the extractor cannot resolve (a set
+ *                                 operation, an unparseable FROM) that mentions a
+ *                                 tenant-scoped table → ZERO rows at the source
+ *                                 (fail-closed, `I-TENANT-STRIP`).
  */
 export type TenantScoping =
-  | { kind: "read"; floorAdd: boolean; tenantCol: string; table: string }
-  | { kind: "agg"; table: string }
-  | { kind: "strip" }
+  | { kind: "read"; table: string; keys: TenantKeyColumn[] }
+  | { kind: "agg"; table: string; reason: "aggregate" | "subquery" }
+  | { kind: "unresolvable" }
   | null;
 
 /**
@@ -212,6 +236,54 @@ function mentionsTenantTable(sqlContent: string, ctx: TenantContext): boolean {
 
 const AGGREGATE_FN = /\b(count|sum|avg|min|max|total|group_concat)\s*\(/i;
 
+/** The prefix of a floor-added key column in a multi-source read (removed after the filter). */
+export const TENANT_KEY_ALIAS_PREFIX = "_scrml_tenant_key_";
+
+/**
+ * Does a parenthesized `SELECT` / `WITH` (a subquery, a derived table, a CTE body)
+ * anywhere in the query mention a tenant-scoped table? Such a read folds tenant
+ * rows into the OUTER row before any row filter can run (§14.8.10 S452 reading:
+ * the aggregate case → E-TENANT-AGG).
+ */
+function subqueryMentionsTenantTable(sqlContent: string, ctx: TenantContext): boolean {
+  const norm = sqlContent.replace(/\$\{[^}]*\}/g, " ");
+  const opener = /\(\s*(?:SELECT|WITH)\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = opener.exec(norm)) !== null) {
+    let depth = 0;
+    let end = norm.length;
+    for (let i = m.index; i < norm.length; i++) {
+      if (norm[i] === "(") depth++;
+      else if (norm[i] === ")") { depth--; if (depth === 0) { end = i; break; } }
+    }
+    if (mentionsTenantTable(norm.slice(m.index, end), ctx)) return true;
+  }
+  return false;
+}
+
+/**
+ * The SQL references (alias, or bare table name) of every tenant-scoped source in
+ * a resolvable FROM/JOIN list, in source order. A self-join yields one reference
+ * per occurrence (`assets a JOIN assets b` → `a`, `b`).
+ */
+function tenantSourceRefs(
+  fromTables: string[],
+  aliasMap: Map<string, string>,
+  ctx: TenantContext,
+): string[] {
+  const refs: string[] = [];
+  const seenTables = new Set<string>();
+  for (const table of fromTables) {
+    if (!ctx.tenantScopedTables.has(table) || seenTables.has(table)) continue;
+    seenTables.add(table);
+    const explicitAliases = [...aliasMap].filter(([a, t]) => t === table && a !== table).map(([a]) => a);
+    refs.push(...explicitAliases);
+    const occurrences = fromTables.filter((t) => t === table).length;
+    if (occurrences > explicitAliases.length) refs.push(table);
+  }
+  return refs;
+}
+
 /**
  * Resolve the tenant scoping a `?{}` READ carries. Reads only — writes are
  * classified separately by `classifyTenantWrite`.
@@ -222,80 +294,95 @@ export function resolveTenantScoping(sqlContent: string, ctx: TenantContext): Te
 
   const proj = extractSelectProjection(sqlContent);
   if (!proj.resolvable) {
-    // Unresolvable dynamic read (CTE / UNION / subquery-in-FROM). Fail-closed:
-    // strip-all rows IFF a tenant-scoped table name appears (never accept-unknown),
-    // else no floor (it is over non-tenant tables — do not nuke a non-tenant CTE).
-    return mentionsTenantTable(sqlContent, ctx) ? { kind: "strip" } : null;
+    // Never accept-unknown: a read that mentions a tenant-scoped table but whose
+    // sources cannot be resolved is either the subquery / CTE / derived-table case
+    // (E-TENANT-AGG — its tenant rows fold into the outer row) or an unresolvable
+    // read (ZERO rows at the source). A read over non-tenant tables only is left
+    // alone (do not nuke a non-tenant CTE).
+    if (!mentionsTenantTable(sqlContent, ctx)) return null;
+    if (sqlLeader(sqlContent) === "WITH" || subqueryMentionsTenantTable(sqlContent, ctx)) {
+      return { kind: "agg", table: firstMentionedTenantTable(sqlContent, ctx), reason: "subquery" };
+    }
+    return { kind: "unresolvable" };
   }
 
-  // Which FROM tables are tenant-scoped?
-  const scopedFrom = proj.fromTables.filter((t) => ctx.tenantScopedTables.has(t));
-  if (scopedFrom.length === 0) return null;
-  const table = scopedFrom[0];
+  // A tenant-scoped table read inside a subquery (in the projection, WHERE,
+  // HAVING, …) never reaches the outer row's key columns, whatever the outer
+  // sources are.
+  if (subqueryMentionsTenantTable(sqlContent, ctx)) {
+    return { kind: "agg", table: firstMentionedTenantTable(sqlContent, ctx), reason: "subquery" };
+  }
 
-  // Aggregate/scalar over a tenant-scoped table: redaction can only key on a
+  // Which FROM/JOIN sources are tenant-scoped?
+  const refs = tenantSourceRefs(proj.fromTables, proj.aliasMap, ctx);
+  if (refs.length === 0) return null;
+  const table = proj.aliasMap.get(refs[0]) ?? refs[0];
+
+  // Aggregate/scalar over a tenant-scoped table: the filter can only key on a
   // per-tenant output row. WITH `GROUP BY tenant_id` the aggregate yields a
-  // tenant-discriminated row (redactable, kind "read"); WITHOUT one it folds
-  // every tenant into one scalar → E-TENANT-AGG.
+  // tenant-discriminated row (kind "read"); WITHOUT one it folds every tenant
+  // into one scalar → E-TENANT-AGG.
   if (AGGREGATE_FN.test(sqlContent)) {
     const hasGroupByTenant = /\bGROUP\s+BY\b[^;]*\btenant_id\b/i.test(sqlContent.replace(/\$\{[^}]*\}/g, " "));
-    if (!hasGroupByTenant) return { kind: "agg", table };
-    // GROUP BY tenant_id present — the output carries tenant_id; treat as a read
-    // whose discriminator is projected (or add it if the projection omitted it).
+    if (!hasGroupByTenant) return { kind: "agg", table, reason: "aggregate" };
   }
 
-  // Is `tenant_id` already an OUTPUT column (so the row can be keyed without a
-  // projection add)? A `star` includes it (source column name == output name);
-  // an explicit `(table, tenant_id)` column projects it under its outputName.
-  let tenantOutputName: string | null = null;
+  // A multi-source read (a JOIN, or a comma join) keys EVERY tenant-scoped source
+  // through its own explicitly-aliased column — `SELECT *` over two tenant tables
+  // yields ONE `tenant_id` key in the row object (the last one wins), so the
+  // author's projection cannot be trusted to carry each source's key.
+  if (proj.fromTables.length > 1) {
+    return {
+      kind: "read",
+      table,
+      keys: refs.map((ref, i) => ({
+        col: `${TENANT_KEY_ALIAS_PREFIX}${i}`,
+        add: `${ref}.${TENANT_COLUMN} AS ${TENANT_KEY_ALIAS_PREFIX}${i}`,
+      })),
+    };
+  }
+
+  // A single-table read: is `tenant_id` already an OUTPUT column (so the row can
+  // be keyed without a projection add)? A `star` includes it (source column name
+  // == output name); an explicit `(table, tenant_id)` column projects it under its
+  // outputName.
   for (const col of proj.columns) {
     if (col.kind === "star") {
-      const starTables = col.table ? [col.table] : proj.fromTables;
-      if (starTables.includes(table)) { tenantOutputName = TENANT_COLUMN; break; }
-    } else if (col.kind === "column" && col.table === table && col.column === TENANT_COLUMN) {
-      tenantOutputName = col.outputName;
-      break;
+      return { kind: "read", table, keys: [{ col: TENANT_COLUMN, add: null }] };
+    }
+    if (col.kind === "column" && col.column.toLowerCase() === TENANT_COLUMN) {
+      return { kind: "read", table, keys: [{ col: col.outputName, add: null }] };
     }
   }
+  return { kind: "read", table, keys: [{ col: TENANT_COLUMN, add: TENANT_COLUMN }] };
+}
 
-  if (tenantOutputName !== null) {
-    return { kind: "read", floorAdd: false, tenantCol: tenantOutputName, table };
+/** The first tenant-scoped table name the query mentions (for diagnostics). */
+function firstMentionedTenantTable(sqlContent: string, ctx: TenantContext): string {
+  for (const t of ctx.tenantScopedTables) {
+    if (new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(sqlContent)) return t;
   }
-  return { kind: "read", floorAdd: true, tenantCol: TENANT_COLUMN, table };
+  return "";
 }
 
 /**
- * Rewrite a resolvable SELECT to ADD the tenant-scoped table's `tenant_id` to
+ * Rewrite a resolvable SELECT to ADD the key columns the source filter needs to
  * the projection (a deterministic projection-column add, NOT a WHERE-parse). The
- * column is appended just before the first top-level `FROM`. In a multi-table
- * FROM it is qualified with the tenant-scoped table's alias to stay unambiguous.
- * Returns the original SQL unchanged when the add is not applicable.
+ * columns are appended just before the first top-level `FROM`. Returns the
+ * original SQL unchanged when nothing is added.
  */
 export function rewriteSelectAddTenantId(sqlContent: string, scoping: TenantScoping): string {
-  if (!scoping || scoping.kind !== "read" || !scoping.floorAdd) return sqlContent;
-
-  const proj = extractSelectProjection(sqlContent);
-  if (!proj.resolvable) return sqlContent;
-
-  // Qualify with the tenant-scoped table's alias when the FROM has >1 table, so
-  // a JOIN does not make `tenant_id` ambiguous. Find an alias that maps to the
-  // tenant table (prefer a non-identity alias so `assets a` → `a.tenant_id`).
-  let qualifier = "";
-  if (proj.fromTables.length > 1) {
-    let alias = scoping.table;
-    for (const [a, t] of proj.aliasMap) {
-      if (t === scoping.table) { alias = a; if (a !== t) break; }
-    }
-    qualifier = `${alias}.`;
-  }
+  if (!scoping || scoping.kind !== "read") return sqlContent;
+  const adds = scoping.keys.map((k) => k.add).filter((a): a is string => a !== null);
+  if (adds.length === 0) return sqlContent;
 
   // Locate the first top-level FROM in the ORIGINAL (un-normalized) text so we
-  // insert the column before it, preserving `${...}` params + spacing verbatim.
+  // insert the columns before it, preserving `${...}` params + spacing verbatim.
   const fromIdx = findTopLevelFromInSource(sqlContent);
   if (fromIdx === -1) return sqlContent;
   const before = sqlContent.slice(0, fromIdx);
   const after = sqlContent.slice(fromIdx);
-  return `${before.replace(/\s*$/, "")}, ${qualifier}${TENANT_COLUMN} ${after}`;
+  return `${before.replace(/\s*$/, "")}, ${adds.join(", ")} ${after}`;
 }
 
 /**
@@ -463,25 +550,50 @@ export function detectTenantRawEgress(
 
 /**
  * The server-bundle runtime helper block (§14.8.10). Injected into the server
- * module IFF `_scrml_tenant_tag` / `_scrml_tenant_redact` is referenced (mirrors
- * the §14.8.9 helper's inline-on-use precedent). Server-only — never client.js.
+ * module IFF a `_scrml_tenant_` helper / `_scrml_active_tenant` is referenced
+ * (mirrors the §14.8.9 helper's inline-on-use precedent). Server-only — never
+ * client.js.
  *
  * `_scrml_active_tenant(req)` resolves the ambient tenant from the §20.5
- * `_scrml_current_user` resolver (always emitted for a tenant app — it uses
- * `session.set("tenantId", …)`). A row's `tenant_id` != that scalar is dropped;
- * a null scalar (unpinned) drops EVERY row (fail-closed).
+ * `_scrml_current_user` resolver (emitted when the app uses a session — it pins
+ * the tenant with `session.set("tenantId", …)`). `_scrml_tenant_scope` filters a
+ * query's rows to that tenant at the source; `_scrml_tenant_redact` re-checks at
+ * the egress sink. No tenant (unpinned, or no request at all) → zero rows.
  */
 export const SERVER_TENANT_HELPER: string = [
   "",
   "// --- §14.8.10 Tenant-row isolation floor (server-only confidentiality floor) ---",
-  "// A Symbol-keyed descriptor records, per result row, the tenant discriminator",
-  "// column + whether the floor ADDED it to the projection. The egress sink drops",
-  "// every row whose tenant_id != the ambient @currentUser.tenantId; an unpinned",
-  "// request (null tenant) sees ZERO rows (fail-closed). Composes with §14.8.9.",
+  "// THE FLOOR FILTERS AT THE SOURCE. A read of a tenant-scoped table is filtered to",
+  "// the request's active tenant (@currentUser.tenantId) immediately after the query",
+  "// runs, before any program code holds a row — so every value the program derives",
+  "// from the rows (a mapped field, a count, a join done in code) is that tenant's",
+  "// alone. No active tenant — an unpinned request, or code running outside any",
+  "// request (boot, a background job, a WebSocket callback) — means ZERO rows.",
+  "// .acrossTenants() is the only unscoped read. The egress strip",
+  "// (_scrml_tenant_redact) re-checks every row at the client sink: defense in",
+  "// depth, it drops nothing while the source filter is correct. Composes with §14.8.9.",
   "const _SCRML_TENANT = Symbol.for(\"scrml.tenant.origin\");",
   "function _scrml_active_tenant(req) {",
+  "  if (req == null) return null;",
   "  const _cu = (typeof _scrml_current_user === \"function\") ? _scrml_current_user(req) : null;",
   "  return _cu ? (_cu.tenantId ?? null) : null;",
+  "}",
+  "// The request a query runs for. Server functions called in-process (a peer",
+  "// callable) have no request parameter, so the request is carried in an",
+  "// AsyncLocalStorage opened around every route handler (installed at the end of",
+  "// this module) rather than read from a lexical `_scrml_req`.",
+  "const _scrml_tenant_req_als = (globalThis.__scrml_tenant_req_als ??= new (process.getBuiltinModule(\"node:async_hooks\").AsyncLocalStorage)());",
+  "function _scrml_tenant_request_scope(handler) {",
+  "  if (typeof handler !== \"function\") return handler;",
+  "  return function (...args) {",
+  "    return _scrml_tenant_req_als.run({ req: args[0] ?? null }, () => handler.apply(this, args));",
+  "  };",
+  "}",
+  "// The active tenant of the request this code runs for; null outside any request.",
+  "// Read per query, so a tenant switch earlier in the same request is honored.",
+  "function _scrml_tenant_source_key() {",
+  "  const _s = _scrml_tenant_req_als.getStore();",
+  "  return _s ? _scrml_active_tenant(_s.req) : null;",
   "}",
   "// §14.8.11.2 S4 — the principal's capability SET as a JSON array string, pinned",
   "// into the `scrml.principal.caps` GUC by the db-authoritative txn wrapper and read",
@@ -493,35 +605,21 @@ export const SERVER_TENANT_HELPER: string = [
   "  const _caps = (_cu && Array.isArray(_cu.caps)) ? _cu.caps : [];",
   "  return JSON.stringify(_caps);",
   "}",
-  "// THE TAG MUST STICK, AND SILENCE IS NOT PROOF THAT IT DID. Attaching the",
+  "// THE MARK MUST STICK, AND SILENCE IS NOT PROOF THAT IT DID. Attaching the",
   "// descriptor is a plain property write, and a plain property write to a FROZEN,",
-  "// SEALED or preventExtensions object is a SILENT no-op outside strict mode.",
-  "// MEASURED: a frozen row tagged with `tenant_id` kept no descriptor at all, the",
-  "// egress redact then found nothing to key on, and a row of tenant B was handed",
-  "// to a request whose ambient tenant was A — the same fail-OPEN the redact half",
-  "// closes below, one function earlier. So every write is VERIFIED and a failure",
-  "// REFUSES; the floor never reports a success it did not achieve.",
-  "//",
-  "// Not reachable from correct emission today (the tag wraps the RAW driver",
-  "// result of a `?{}` query, and no author code can run between the await and the",
-  "// tag), so this is defence in depth rather than a live leak — but the cost is a",
-  "// property read per row and the failure it prevents is silent cross-tenant",
-  "// disclosure.",
+  "// SEALED or preventExtensions object is a SILENT no-op outside strict mode (and",
+  "// a TypeError inside it — this module is an ES module, so always strict). Both",
+  "// paths route to one refusal: the floor never reports a success it did not",
+  "// achieve. Not reachable from correct emission (the scope wraps the RAW driver",
+  "// result, and no author code runs between the await and the scope).",
   "function _scrml_tenant_refuse_untaggable() {",
   "  throw new Error(",
   "    \"E-TENANT-RAW-EGRESS (runtime): the \\u00a714.8.10 floor could not attach its \" +",
   "    \"tenant descriptor to a query result row (the value is frozen, sealed or \" +",
-  "    \"non-extensible), so the egress redact would have no discriminator to key on \" +",
-  "    \"and a foreign tenant's row could not be stripped. Refusing to emit it.\",",
+  "    \"non-extensible), so the egress re-check would have no tenant to key on. \" +",
+  "    \"Refusing to emit it.\",",
   "  );",
   "}",
-  "// BOTH FAILURE MODES, because the write fails DIFFERENTLY in the two JS modes",
-  "// and this helper runs in the strict one. The emitted `app.server.js` carries",
-  "// top-level `import`/`export`, so it is an ES module and therefore ALWAYS",
-  "// STRICT: a write to a non-extensible object THROWS a TypeError rather than",
-  "// no-opping. The verify-after-write below only ever fires in SLOPPY mode. Both",
-  "// paths must route to the same refusal, or the operator gets a bare",
-  "// `TypeError: Cannot add property` with none of the guidance.",
   "function _scrml_tenant_mark(target, descriptor) {",
   "  try {",
   "    target[_SCRML_TENANT] = descriptor;",
@@ -530,39 +628,57 @@ export const SERVER_TENANT_HELPER: string = [
   "  }",
   "  if (target[_SCRML_TENANT] !== descriptor) _scrml_tenant_refuse_untaggable(); // sloppy mode: it no-opped",
   "}",
-  "function _scrml_tenant_tag(value, tenantCol, floorAdded) {",
-  "  if (value == null || typeof value !== \"object\") return value;",
-  "  if (Array.isArray(value)) {",
-  "    for (const row of value) {",
-  "      if (row != null && typeof row === \"object\" && !Array.isArray(row)) _scrml_tenant_mark(row, { tenantCol, floorAdded });",
-  "    }",
-  "    return value;",
+  "// A row is admitted iff EVERY key column — one per tenant-scoped source in the",
+  "// query, so a JOIN of two tenant tables checks both — holds the active tenant.",
+  "// NULL never matches (the missing side of an outer join is dropped).",
+  "function _scrml_tenant_row_admitted(row, keyCols, tenantKey) {",
+  "  if (row == null || typeof row !== \"object\" || Array.isArray(row)) return false;",
+  "  for (const c of keyCols) {",
+  "    const v = row[c];",
+  "    if (v == null || String(v) !== String(tenantKey)) return false;",
   "  }",
-  "  _scrml_tenant_mark(value, { tenantCol, floorAdded });",
-  "  return value;",
+  "  return true;",
   "}",
-  "function _scrml_tenant_tag_all(value) {",
-  "  if (value == null || typeof value !== \"object\") return value;",
-  "  if (Array.isArray(value)) {",
-  "    for (const row of value) {",
-  "      if (row != null && typeof row === \"object\" && !Array.isArray(row)) _scrml_tenant_mark(row, { stripAll: true });",
-  "    }",
-  "    return value;",
-  "  }",
-  "  _scrml_tenant_mark(value, { stripAll: true });",
-  "  return value;",
+  "// A surviving row loses the key columns the floor ADDED to the projection (the",
+  "// program sees exactly the columns it asked for) and is marked with the tenant it",
+  "// was admitted for — the egress re-check compares that mark, not a column.",
+  "function _scrml_tenant_admit(row, addedCols, tenantKey) {",
+  "  for (const c of addedCols) delete row[c];",
+  "  _scrml_tenant_mark(row, { tenant: String(tenantKey) });",
+  "  return row;",
   "}",
-  "function _scrml_tenant_strip_col(row, d) {",
-  "  if (!d.floorAdded) return row;",
-  "  const out = {};",
-  "  for (const k of Object.keys(row)) { if (k === d.tenantCol) continue; out[k] = row[k]; }",
-  "  // Preserve the §14.8.9 protect markers (one per protected column) so a composed",
-  "  // protect-redact still fires.",
-  "  for (const _s of Object.getOwnPropertySymbols(row)) {",
-  "    const _k = Symbol.keyFor(_s);",
-  "    if (typeof _k === \"string\" && _k.startsWith(\"scrml.protect.col:\")) out[_s] = row[_s];",
+  "// THE SOURCE FILTER. `rows` is the driver's result array; it is compacted IN PLACE",
+  "// so the driver's array type and its row `count` survive (and `count` is",
+  "// corrected — left alone it would still count every tenant's rows). `.get()`",
+  "// takes its first row AFTER this, so a lookup of another tenant's row is `not`.",
+  "function _scrml_tenant_scope(rows, keyCols, addedCols) {",
+  "  if (rows == null) return rows;",
+  "  const tenantKey = _scrml_tenant_source_key();",
+  "  if (!Array.isArray(rows)) {",
+  "    // Not a row array (no driver returns one for a SELECT): one row or nothing.",
+  "    if (tenantKey == null || !_scrml_tenant_row_admitted(rows, keyCols, tenantKey)) return null;",
+  "    return _scrml_tenant_admit(rows, addedCols, tenantKey);",
   "  }",
-  "  return out;",
+  "  let kept = 0;",
+  "  for (let i = 0; i < rows.length; i++) {",
+  "    const row = rows[i];",
+  "    if (tenantKey != null && _scrml_tenant_row_admitted(row, keyCols, tenantKey)) {",
+  "      rows[kept++] = _scrml_tenant_admit(row, addedCols, tenantKey);",
+  "    }",
+  "  }",
+  "  rows.length = kept;",
+  "  if (typeof rows.count === \"number\") rows.count = kept;",
+  "  return rows;",
+  "}",
+  "// A read the compiler cannot resolve to its sources (a set operation, an",
+  "// unparseable FROM) that mentions a tenant-scoped table: nothing is provably the",
+  "// active tenant's, so nothing is admitted.",
+  "function _scrml_tenant_scope_none(rows) {",
+  "  if (rows == null) return rows;",
+  "  if (!Array.isArray(rows)) return null;",
+  "  rows.length = 0;",
+  "  if (typeof rows.count === \"number\") rows.count = 0;",
+  "  return rows;",
   "}",
   "// A HOST-OPAQUE carrier: a value whose contents the floor structurally cannot",
   "// read (a streamed/binary body). Enumerated, not guessed — Response, Blob,",
@@ -576,16 +692,13 @@ export const SERVER_TENANT_HELPER: string = [
   "  if (typeof ArrayBuffer !== \"undefined\" && (v instanceof ArrayBuffer || ArrayBuffer.isView(v))) return true;",
   "  return false;",
   "}",
-  "// REFUSE WHAT THE MONITOR CANNOT INSPECT. A value carrying the tenant",
-  "// descriptor is one the compiler asserted holds tenant-scoped rows. If it is",
-  "// also host-opaque, the floor can neither read its tenant_id nor strip a",
-  "// foreign row — so it must not cross the wire. Throwing (rather than dropping)",
-  "// is deliberate: this state is UNREACHABLE from correct emission — the tag is",
-  "// only ever applied to a lowered `?{}` result, which is rows or a scalar and",
-  "// never a stream — so reaching it means the §14.8.10 E-TENANT-RAW-EGRESS",
-  "// compile gate was bypassed by a value-flow the compiler did not model. A",
-  "// silent drop would present as an empty body and be indistinguishable from",
-  "// \"this tenant has no rows\"; the invariant breach has to be loud.",
+  "// REFUSE WHAT THE MONITOR CANNOT INSPECT. A value carrying the tenant mark is",
+  "// one the compiler asserted is a tenant-scoped row. If it is also host-opaque,",
+  "// the re-check cannot read it — so it must not cross the wire. Throwing (rather",
+  "// than dropping) is deliberate: this state is UNREACHABLE from correct emission —",
+  "// the mark is only ever applied to a row of a lowered `?{}` result, never a",
+  "// stream — so reaching it means a value-flow the compiler did not model. A",
+  "// silent drop would be indistinguishable from \"this tenant has no rows\".",
   "function _scrml_tenant_refuse_opaque() {",
   "  throw new Error(",
   "    \"E-TENANT-RAW-EGRESS (runtime): a tenant-scoped value reached the egress \" +",
@@ -595,6 +708,8 @@ export const SERVER_TENANT_HELPER: string = [
   "    \".acrossTenants() for a deliberate cross-tenant read.\",",
   "  );",
   "}",
+  "// THE EGRESS RE-CHECK (defense in depth). Drops every marked row whose admitting",
+  "// tenant is not the request's tenant now; an unpinned request keeps none.",
   "function _scrml_tenant_redact(value, tenantKey) {",
   "  if (value == null || typeof value !== \"object\") return value;",
   "  if (Array.isArray(value)) {",
@@ -603,10 +718,8 @@ export const SERVER_TENANT_HELPER: string = [
   "      const d = (el != null && typeof el === \"object\") ? el[_SCRML_TENANT] : null;",
   "      if (d) {",
   "        if (_scrml_tenant_opaque(el)) _scrml_tenant_refuse_opaque();",
-  "        if (d.stripAll) continue;",
-  "        if (tenantKey == null) continue;",
-  "        if (String(el[d.tenantCol]) !== String(tenantKey)) continue;",
-  "        out.push(_scrml_tenant_strip_col(el, d));",
+  "        if (tenantKey == null || d.tenant !== String(tenantKey)) continue;",
+  "        out.push(el);",
   "      } else {",
   "        out.push(_scrml_tenant_redact(el, tenantKey));",
   "      }",
@@ -615,20 +728,15 @@ export const SERVER_TENANT_HELPER: string = [
   "  }",
   "  const d = value[_SCRML_TENANT];",
   "  if (d) {",
-  "    // The descriptor is read BEFORE the opaque passthrough below, and that",
-  "    // ORDER is the whole fix: the passthrough used to run first, so a TAGGED",
-  "    // Response was handed to the client entirely uninspected — the one",
-  "    // fail-OPEN in this redactor.",
+  "    // The mark is read BEFORE the opaque passthrough below, and that ORDER",
+  "    // matters: a MARKED opaque value is refused, never passed uninspected.",
   "    if (_scrml_tenant_opaque(value)) _scrml_tenant_refuse_opaque();",
-  "    if (d.stripAll) return null;",
-  "    if (tenantKey == null) return null;",
-  "    if (String(value[d.tenantCol]) !== String(tenantKey)) return null;",
-  "    return _scrml_tenant_strip_col(value, d);",
+  "    if (tenantKey == null || d.tenant !== String(tenantKey)) return null;",
+  "    return value;",
   "  }",
-  "  // UNtagged and opaque: not a tenant-scoped value, and rebuilding it as a",
+  "  // UNmarked and opaque: not a tenant-scoped value, and rebuilding it as a",
   "  // plain object would destroy it. Passed through unchanged — this is the",
-  "  // shipped binary/PDF egress path (§12.5), and it is deliberately NOT",
-  "  // touched by the refusal above.",
+  "  // shipped binary/PDF egress path (§12.5).",
   "  if (_scrml_tenant_opaque(value)) return value;",
   "  const out = {};",
   "  for (const k of Object.keys(value)) out[k] = _scrml_tenant_redact(value[k], tenantKey);",
@@ -638,14 +746,37 @@ export const SERVER_TENANT_HELPER: string = [
 ].join("\n");
 
 /**
- * Build the `_scrml_tenant_tag(<inner>, "<col>", <floorAdded>)` wrap (or the
- * strip-all wrap) for a lowered SQL result expression `inner`.
+ * The request-scope installation for the source filter, appended at the END of a
+ * tenant app's server module (after every route export it names). Wraps each
+ * route's `handler` so `_scrml_tenant_source_key()` can find the request from any
+ * code the handler runs — including a server function called in-process, which
+ * has no request parameter. Mutates the exported route objects in place, so every
+ * dispatcher (`_server.js`, `scrml dev`, the module's own `fetch`) gets it.
+ * WebSocket callbacks are deliberately NOT wrapped: they serve no single HTTP
+ * request, so a tenant-scoped read there sees zero rows (fail-closed).
  */
-export function wrapWithTenantTag(inner: string, scoping: TenantScoping): string {
-  if (!scoping) return inner;
-  if (scoping.kind === "strip") return `_scrml_tenant_tag_all(${inner})`;
+export function tenantRequestScopeLines(routeNames: readonly string[]): string[] {
+  if (routeNames.length === 0) return [];
+  return [
+    "",
+    "// --- §14.8.10: every route handler carries its request to the tenant source filter (compiler-generated) ---",
+    `for (const _scrml_route of [${routeNames.join(", ")}]) _scrml_route.handler = _scrml_tenant_request_scope(_scrml_route.handler);`,
+  ];
+}
+
+/**
+ * Build the source-filter wrap for a lowered SQL read whose value is the driver's
+ * row ARRAY (`await sql`…``): `_scrml_tenant_scope(<rows>, [keyCols], [addedCols])`,
+ * or `_scrml_tenant_scope_none(<rows>)` for an unresolvable read. A `.get()` takes
+ * `[0]` of THIS result (the first row after the filter).
+ */
+export function wrapWithTenantScope(rowsExpr: string, scoping: TenantScoping): string {
+  if (!scoping) return rowsExpr;
+  if (scoping.kind === "unresolvable") return `_scrml_tenant_scope_none(${rowsExpr})`;
   if (scoping.kind === "read") {
-    return `_scrml_tenant_tag(${inner}, ${JSON.stringify(scoping.tenantCol)}, ${scoping.floorAdd})`;
+    const keyCols = scoping.keys.map((k) => k.col);
+    const addedCols = scoping.keys.filter((k) => k.add !== null).map((k) => k.col);
+    return `_scrml_tenant_scope(${rowsExpr}, ${JSON.stringify(keyCols)}, ${JSON.stringify(addedCols)})`;
   }
-  return inner; // "agg" carries no tag — it hard-fails at compile.
+  return rowsExpr; // "agg" carries no filter — it hard-fails at compile.
 }
