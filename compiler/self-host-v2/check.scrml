@@ -113,7 +113,8 @@ ${
     //   C-E2 an Attempt's `err` is its call's error enum (a function's `err`;
     //        the program's `sqlError` for a query) and an EnumDef; every arm
     //        is PWild or PVariant(err, i, binds) with `binds.length` = variant
-    //        i's arity; the arms are TOTAL (a PWild, or every variant covered)
+    //        i's arity or 0 (no payload read); the arms are TOTAL (a PWild, or
+    //        every variant covered)
     //   C-E3 an Attempt with a `result`: the ok arm and every arm carry a
     //        `value` or DIVERGE (end in Return / Fail, or an If both of whose
     //        branches diverge); without one, no branch carries a value
@@ -290,7 +291,8 @@ ${
             } else if (pr.enumId != err.id || pr.idx < 0 || pr.idx >= vs.length) {
                 out = out.concat(["C-E2: an Attempt arm matches something other than a variant of `" + err.hint + "`"])
             } else {
-                if (pr.binds != vs[pr.idx].fields.length) out = out.concat(["C-E2: an Attempt arm binds " + pr.binds + " value(s) of a variant with " + vs[pr.idx].fields.length + " payload field(s)"])
+                // binds: none (the arm reads no payload), or one per payload field
+                if (pr.binds != 0 && pr.binds != vs[pr.idx].fields.length) out = out.concat(["C-E2: an Attempt arm binds " + pr.binds + " value(s) of a variant with " + vs[pr.idx].fields.length + " payload field(s)"])
                 covered = covered.concat([pr.idx])
             }
         }

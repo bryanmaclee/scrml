@@ -543,13 +543,13 @@ ${
             .Defer(body: d) :> [deferJs(ctx, d)]
             .Unpersist(decl: d, inst: i, idx: x) :> [unpersistJs(ctx, d, i, x)]
             .Attempt(result: r, call: c, err: e, ok: ok, arms: arms) :> attemptJs(ctx, r, c, ok, arms, assigned)
-            .Fail(err: e, idx: i, args: args) :> [JsStmt.SReturn(rtCall(ctx, "fail", [variantValueJs(ctx, e, i, args)]))]
+            .Fail(err: e, idx: i, args: args) :> [JsStmt.SReturn(rtCall(ctx, "failure", [variantValueJs(ctx, e, i, args)]))]
         }
     }
 
     // -------------------------------------------------------------------------
     // s451 (Ue) — the error model (§19). A failure is a runtime-private
-    // `Failure` object around the error value (`rt.fail(e)`); `rt.failed(r)`
+    // `Failure` object around the error value (`rt.failure(e)`); `rt.failed(r)`
     // tells it apart from ANY success value (no scrml value is one). An
     // Attempt binds the call's raw result to `ok.bind`:
     //   let result;                       // only when the Attempt has one

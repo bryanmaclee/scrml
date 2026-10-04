@@ -5479,15 +5479,18 @@ ${
     //
     // Exits the bootstrap HAS, all handled by the lowering (print.scrml
     // deferBlockJs — a `try … finally` per block that holds a defer): falling
-    // off the end of a block; `return` (after its value is evaluated); a host
+    // off the end of a block; `return` (after its value is evaluated); (Ue)
+    // `fail` and `?` — each a `return` of a failure (print.scrml: `return
+    // rt.failure(…)`), so the same `finally` runs the deferred bodies; a host
     // error passing through. Exits the bootstrap does NOT have — loops and
-    // `break` / `continue`, `fail`, `?`, the CPS split of a function body,
-    // server functions — have no source form here at all (each is a parse or
-    // scope error, so the compile has no Core — lower.scrml's gate), so no
-    // `defer` can meet them and be mis-run. For the same reason the codes
-    // E-DEFER-UNHANDLED-FAILABLE (no failable function), -DUPLICATE-FUNCTION
-    // (no function declaration inside a body) and -SERVER-IN-SPLIT (no split)
-    // have no trigger the bootstrap can parse.
+    // `break` / `continue`, the CPS split of a function body — have no source
+    // form here (a parse or scope error, so the compile has no Core —
+    // lower.scrml's gate), so no `defer` can meet them and be mis-run. For the
+    // same reason -DUPLICATE-FUNCTION (no function declaration inside a body)
+    // and -SERVER-IN-SPLIT (no split) have no trigger the bootstrap can parse.
+    // (Ue) E-DEFER-UNHANDLED-FAILABLE is the binder's (resolveCall /
+    // resolveSql / guarded, under FailCtx.defer); `fail` / `?` inside a
+    // deferred body are E-DEFER-CONTROL-FLOW (deferBodyRule / deferExprRules).
     //
     // Here: §19.16.3 rule 4 (E-DEFER-OUTSIDE-FUNCTION: "`defer` SHALL appear
     // only inside the body of a function DECLARATION … It is
@@ -5591,10 +5594,11 @@ ${
         return deferChecksIn(file, el, later, st)
     }
 
-    // Rules 1-2 inside a deferred body, at every depth: no `return`
-    // (E-DEFER-CONTROL-FLOW — "A deferred body SHALL NOT contain a `return`"),
-    // no `defer` (E-DEFER-NESTED — "A deferred body SHALL NOT contain a
-    // `defer` statement"). The bootstrap parses no `fail` / `?` / `yield` /
+    // Rules 1-2 inside a deferred body, at every depth: no `return`, `fail` or
+    // `?` (E-DEFER-CONTROL-FLOW — "A deferred body SHALL NOT contain a
+    // `return`, a `fail`, a `?` propagation"), no `defer` (E-DEFER-NESTED —
+    // "A deferred body SHALL NOT contain a `defer` statement"), the arms of a
+    // handling form included (s451 Ue). The bootstrap parses no `yield` /
     // `break` / `continue` and no nested function body (a lambda body is an
     // expression), so a `return` here always leaves the deferred body.
     fn deferBodyRules(file: string, b: ABlock, st0: AS) -> AS {
@@ -5965,6 +5969,9 @@ ${
                 let what: string = "`." + pn.name + "` is not a variant of `" + err.hint + "`"
                 if (pn.name == "Ok") what = "`.Ok` is the success value of a `match` — a `!{ … }` handler's arms are failures only"
                 st = addDiag(st, env.file, a.span, "E-TYPE-VARIANT", what + " (its variants: " + variantNamesOf(vs).join(", ") + ")")
+                const rb0: RBinds = bindArm(armEnv, pn.binds, [], st)     // bound anyway: one report, not a cascade
+                armEnv = rb0.env
+                st = rb0.st
             } else {
                 idx = i
                 const fs: FieldDef[] = vs[i].fields

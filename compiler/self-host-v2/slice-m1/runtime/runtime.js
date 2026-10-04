@@ -618,7 +618,7 @@ export function runDefers(stack) {
 // ---------------------------------------------------------------------------
 // s451 (Ue) — the error model (SPEC §19). "There is NO try/catch. There are
 // NO exceptions. Errors are values" (§19.1): a `!` function that fails RETURNS
-// a failure — `fail` and `?` print as `return rt.fail(<error value>)` — and the
+// a failure — `fail` and `?` print as `return rt.failure(<error value>)` — and the
 // caller's Attempt asks `rt.failed(result)` before it uses the result. A
 // failure is an instance of this module-private class, so no value a scrml
 // program can build (scrml has no classes and no `new`) is ever mistaken for
@@ -634,7 +634,7 @@ class Failure {
 }
 
 /** A failure carrying the error value `error` — what `fail E.V(…)` returns. */
-export function fail(error) {
+export function failure(error) {
   return new Failure(error);
 }
 

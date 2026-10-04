@@ -59,7 +59,7 @@ Expr.Sql  — REMOVED (a query is a Failable: it exists only as an Attempt's cal
   - **C-E1** an `Expr.Call` never names a Fn/ServerFn whose `err` is some (the unhandled call is unrepresentable;
     E-ERROR-002 is the source-side report). (`walk` makes this total over every position.)
   - **C-E2** `Attempt.err` is the callee's `err` (FCall) / the program's `SqlError` (FSql); every arm pattern is
-    `PVariant(err, i, binds)` with `binds.length` = variant i's arity, or `PWild`; the arms are TOTAL over `err`
+    `PVariant(err, i, binds)` with `binds.length` = variant i's arity or 0 (no payload read), or `PWild`; the arms are TOTAL over `err`
     (every variant covered by a PVariant, or a PWild present).
   - **C-E3** `result` is some ⇒ `ok` and every arm carry a `value`, or their block DIVERGES (ends in Return / Fail,
     or an If whose two branches diverge); `result` not ⇒ no value anywhere.
@@ -129,10 +129,10 @@ or an Eval); in value context = its `value`. `fail` → `Fail(err, idx, args)`.
 
 ## 5. Runtime + printer
 
-`rt.fail(e)` returns a frozen instance of a runtime-private class `Failure { error }`; `rt.failed(r)` is
+`rt.failure(e)` (named so to keep clear of the codec's private `fail`) returns a frozen instance of a runtime-private class `Failure { error }`; `rt.failed(r)` is
 `r instanceof Failure` — unforgeable by any scrml value (no classes / `new` in scrml), so a success value can never be
 mistaken for a failure. The error value is the ordinary enum value (nullary: its tag string; payload:
-`{ tag, field… }` — the shape match/patBinds already read). `Fail` → `return rt.fail(<variant value>)`. `Attempt` →
+`{ tag, field… }` — the shape match/patBinds already read). `Fail` → `return rt.failure(<variant value>)`. `Attempt` →
 
 ```js
 let x$;                         // only when result

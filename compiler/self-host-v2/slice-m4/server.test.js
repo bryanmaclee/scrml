@@ -13,11 +13,10 @@
 //   server-fn/e-route-005-{pos,neg}, server-db/server-fn-writes-reactive-cell-{pos,neg}.
 //
 // S451 R11: every `?{}` is failable; outside a `!` function an unhandled one
-// is E-ERROR-002, and every handling form (`!{}`, `match`, a `!` function) is
-// refused until unit Ue. So NO program holding a `?{}` lowers to Core here —
-// the diagnostics gate (§2.2.1) holds. The tests that inspect the lowered
-// query drop the E-ERROR-002 reports from the TypedProgram THEMSELVES (test
-// side — the compiler has no such door) to stand in for Ue's handled form.
+// is E-ERROR-002. s451 (Ue) lifted the refusals of the handling forms (`!{}`,
+// `match`, a `!` function): a handled query lowers to Core as the call of a
+// Stmt.Attempt (Failable.FSql) — the tests that inspect the lowered query
+// handle it in the SOURCE (`!{ | _ :> not }`) and read the Attempt.
 
 import { describe, test, expect, beforeAll } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
@@ -31,8 +30,13 @@ const sorted = (src) => codes(src).slice().sort();
 const diag = (src, code) => run(src).diags.find((d) => d.code === code);
 const P = (attrs, decls, main = "") => `<program${attrs}>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
 const DB = ` db="./app.db"`;
-// the lowered Core as Ue would give it: the test drops the R11 reports
-const lowerHandled = (r) => mods.lower.lower({ ...r.typed, diags: r.typed.diags.filter((d) => d.code !== "E-ERROR-002") }).core;
+// the lowered Core of a clean program (s451 Ue: queries are handled in the source)
+const lowerClean = (r) => {
+  expect(r.diags.filter((d) => !d.code.startsWith("W-")).map((d) => `${d.code}: ${d.message}`)).toEqual([]);
+  return r.core;
+};
+// the query an Attempt runs (`stmts[i]` an Attempt over Failable.FSql)
+const attemptQuery = (st) => st.data.call.data.q;
 const v = (x) => (x && typeof x === "object" ? x.variant : x);
 const SQ = "?" + "{";   // the sigil, for building sources in JS strings
 
@@ -103,27 +107,27 @@ describe("§8.1 / §44.8 — parsing `?{}`", () => {
   });
 });
 
-describe("S451 R11 — `?{}` is failable everywhere; the error model (Ue) is refused, never guessed", () => {
+describe("S451 R11 — `?{}` is failable everywhere; s451 Ue — the handling forms", () => {
   test("an unhandled `?{}` outside a `!` function is E-ERROR-002", () => {
     expect(codes(P(DB, fnQ("f", "SELECT a FROM t WHERE id = ${id}")))).toEqual(["E-ERROR-002"]);
   });
 
-  test("a `!{}` handler on the query is refused (Ue) — and the query is then not ALSO reported unhandled", () => {
+  test("a `!{}` handler on the query handles it (§19.8.3 item 1): clean — and lowered as an Attempt over the query", () => {
     const src = P(DB, `    function f(id: int) {\n        const r = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ | _ :> not }\n    }`);
-    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(diag(src, "E-BOOTSTRAP-UNSUPPORTED").message).toContain("Ue");
+    expect(codes(src)).toEqual([]);
+    const at = run(src).core.server[0].body.stmts[0];
+    expect(v(at)).toBe("Attempt");
+    expect(v(at.data.call)).toBe("FSql");
   });
 
-  test("a `match` on a query's result is refused (Ue)", () => {
+  test("a `match` on a query's result handles it (§19.8.3 item 2): clean", () => {
     const src = P(DB, `    function f() {\n        const r = match ${SQ}\`SELECT a FROM t\`}.all() {\n            _ :> 1\n        }\n    }`);
-    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(diag(src, "E-BOOTSTRAP-UNSUPPORTED").message).toContain("Ue");
+    expect(codes(src)).toEqual([]);
   });
 
-  test("a `!` function signature is refused (Ue); a query inside it is not E-ERROR-002 (it is inside a `!` function)", () => {
+  test("a `!` function: a query inside it propagates (§19.8.2) — not E-ERROR-002; `! SqlError` is compatible", () => {
     const src = P(DB, `    function f(id: int)! -> SqlError {\n        ${SQ}\`DELETE FROM t WHERE id = \${id}\`}.run()\n    }`);
-    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(diag(src, "E-BOOTSTRAP-UNSUPPORTED").message).toContain("Ue");
+    expect(codes(src)).toEqual([]);
   });
 
   test("an unhandled query in a value position is E-ERROR-002 too (and E-VALUE-SERVER-CALL)", () => {
@@ -144,7 +148,7 @@ describe("§8.1.1 / §44.2 — the database", () => {
   });
 
   test("an unrecognized prefix → E-SQL-005 (mirror: sql/bad-conn-prefix-neg)", () => {
-    expect(codes(P(` db="ftp://bad"`, fnQ("f", "SELECT a FROM t")))).toEqual(["E-SQL-005", "E-ERROR-002"]);
+    expect(sorted(P(` db="ftp://bad"`, fnQ("f", "SELECT a FROM t")))).toEqual(["E-ERROR-002", "E-SQL-005"]);
   });
 
   for (const [val, ok] of [
@@ -505,12 +509,12 @@ describe("S239 review fix round — the kind scan cannot be talked into SqlSelec
   });
 });
 
-describe("the lowered query in Core (as Ue would hand it on — the test drops E-ERROR-002 itself)", () => {
-  test("a ServerFn holds Expr.Sql: runs, DEDUPED values (§8.2), slots, mode, facts, db", () => {
-    const r = run(P(DB, `    function find(id: int) {\n        const row = ${SQ}\`SELECT * FROM activity WHERE created_by = \${id} OR updated_by = \${id}\`}.get()\n    }`));
-    const core = lowerHandled(r);
+describe("the lowered query in Core (s451 Ue: handled in the source, an Attempt's FSql)", () => {
+  test("a ServerFn holds the query as an Attempt's call: runs, DEDUPED values (§8.2), slots, mode, facts, db", () => {
+    const r = run(P(DB, `    function find(id: int) {\n        const row = ${SQ}\`SELECT * FROM activity WHERE created_by = \${id} OR updated_by = \${id}\`}.get() !{ | _ :> not }\n    }`));
+    const core = lowerClean(r);
     expect(core.server.map((s) => s.sym.hint)).toEqual(["find"]);
-    const q = core.server[0].body.stmts[0].data.init.data.q;
+    const q = attemptQuery(core.server[0].body.stmts[0]);
     expect(q.chunks).toEqual(["SELECT * FROM activity WHERE created_by = ", " OR updated_by = ", ""]);
     expect(q.params.length).toBe(1);
     expect(q.slots).toEqual([0, 0]);
@@ -521,20 +525,20 @@ describe("the lowered query in Core (as Ue would hand it on — the test drops E
   });
 
   test("distinct values keep distinct slots, in first-appearance order", () => {
-    const r = run(P(DB, `    function find(a: int, b: int) {\n        ${SQ}\`UPDATE t SET x = \${b} WHERE id = \${a} AND y = \${b}\`}.run()\n    }`));
-    const q = lowerHandled(r).server[0].body.stmts[0].data.e.data.q;
+    const r = run(P(DB, `    function find(a: int, b: int) {\n        ${SQ}\`UPDATE t SET x = \${b} WHERE id = \${a} AND y = \${b}\`}.run() !{ | _ :> not }\n    }`));
+    const q = attemptQuery(lowerClean(r).server[0].body.stmts[0]);
     expect(q.params.map((p) => p.data.sym.hint)).toEqual(["b", "a"]);
     expect(q.slots).toEqual([0, 1, 0]);
   });
 
   test("the printer refuses the lowered program (U1c)", () => {
-    const core = lowerHandled(run(P(DB, fnQ("f", "SELECT a FROM t"))));
+    const core = lowerClean(run(P(DB, `    function f() -> int {\n        const r = ${SQ}\`SELECT a FROM t\`}.get() !{ | _ :> not }\n        return 1\n    }`)));
     expect(mods.print.printProgram(core, "t.client.js", "scrml-runtime.js").refused[0]).toContain("U1c");
   });
 });
 
 describe("check — the server boundary in Core (C-SQL1, C-S1..C-S4)", () => {
-  const base = () => lowerHandled(run(P(DB, `    let <n:int=0/>\n    function find(id: int) -> int {\n        const row = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get()\n        return 1\n    }\n    function cli() {\n        @n = 2\n    }`)));
+  const base = () => lowerClean(run(P(DB, `    let <n:int=0/>\n    function find(id: int) -> int {\n        const row = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ | _ :> not }\n        return 1\n    }\n    function cli() {\n        @n = 2\n    }`)));
   const issues = (core, tag) => mods.check.checkCore(core).filter((s) => s.startsWith(tag));
 
   test("the lowered program is well-formed", () => {
@@ -579,8 +583,8 @@ describe("check — the server boundary in Core (C-SQL1, C-S1..C-S4)", () => {
     const core = base();
     const sf = core.server[0];
     const st = sf.body.stmts[0];
-    const q = st.data.init.data.q;
-    const bad = (q2) => ({ ...core, server: [{ ...sf, body: { stmts: [{ ...st, data: { ...st.data, init: { variant: "Sql", data: { q: q2 } } } }, ...sf.body.stmts.slice(1)] } }] });
+    const q = attemptQuery(st);
+    const bad = (q2) => ({ ...core, server: [{ ...sf, body: { stmts: [{ ...st, data: { ...st.data, call: { variant: "FSql", data: { q: q2 } } } }, ...sf.body.stmts.slice(1)] } }] });
     expect(issues(bad({ ...q, slots: [] }), "C-SQL1").length).toBeGreaterThan(0);
     expect(issues(bad({ ...q, slots: [3] }), "C-SQL1").length).toBeGreaterThan(0);
     expect(issues(bad({ ...q, db: { id: 9999, hint: "nope" } }), "C-SQL1").length).toBe(1);
