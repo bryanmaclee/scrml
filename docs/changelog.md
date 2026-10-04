@@ -7862,6 +7862,55 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### S453 (2026-10-04, Peter · AdiPDesk) — bryan's answered queue built end to end, and the review caught a gap marked resolved whose own reproducer still reproduced
+
+Every item bryan had ruled on S450-peter's routed asks was built, reviewed and landed: handler-rejection
+logging, the transaction-exit semantics, and the one he sent to the bootstrap. Three PRs merged, each
+through a full S239 adversarial pass, each verdict's findings reproduced by the PA before being acted on.
+The session ran alongside S452-bryan the whole time — he landed nine PRs into the same two generated docs,
+so every landing here was a real 3-way merge rather than a file-pull.
+
+- **#1283 — an async event listener's rejection now reaches scrml's logging surface** (`§13.2`, bryan's
+  A3 ruling). `addEventListener` ignores a listener's return value, so once S450's #1242 made handlers
+  await a server-call write in place, a failed call stopped reaching `_scrml_error_boundary_log` and
+  surfaced only as a browser `unhandledrejection`. The wrap went into the one primitive both colouring
+  entry points share, covering five registration paths — the dispatch brief had named only one, and the
+  other feeds 14 further listener sites. 57 of 57 async-coloured sites in 44 of 44 affected artifacts
+  carry exactly one arm; non-async handlers are byte-identical by construction.
+  **The adversarial pass returned FIX on a land-blocker**: the gap had been marked `resolved` while its
+  own S441 reproducer still reproduced on head. The §5.2.2 call-ref limb (`onclick=fn()`) leaves the
+  listener sync and is *not* closed — measured at 1251 sites across 640 files against the 57 covered — so
+  the parent gap stays open, narrowed to the limb that did close, and the rest is filed ruling-gated
+  (changing the auto-wrap moves the language surface).
+- **#1286 — a transaction rolls back on every exit the ruling names; a top-level block is refused**
+  (`§19.10`, bryan's B1a/B1b + the S435 policy exception). Lands the S450 work parked on a hold ref.
+  **B1a needed no codegen change at all**: the parked lowering's `try`/`finally` already rolled back on
+  `return`/`break`/`continue`, so S450 had spent a review round refusing a shape its own lowering
+  handled — and the `finally` is the better mechanism, rolling back *after* the return expression is
+  evaluated. The exits stay refused inside a `match` arm, because impl#1 lowers an arm as a nested
+  function; built without that limb, the shape compiled clean, swallowed the author's `return`, ran the
+  post-`match` write and persisted every row with no rollback anywhere. Four PA readings are flagged for
+  bryan's veto window, including a new evaluation-order `SHALL` the ruling did not decide.
+- **#1289 — bookkeeping**: review-floor markers for both landings (the floor binds merged PRs; 11 remain
+  owed, all bryan's), bryan's B2 ruling recorded by filing `g-each-row-whitespace-only-text-dropped` as
+  BOOTSTRAP-OWED on main with its hold retired unlanded, and a new LOW gap for an async
+  `<errorBoundary>` with no `fallback=` whose re-throw escapes unobserved — an adjacent surface the A3
+  review found and we deliberately did not widen that change into.
+- **assetManagement re-verified twice, because main moved mid-session.** Against #1258/#1264, as the
+  S450 hand-off owed: 26 of 26 emitted artifacts byte-identical, so #1257–#1272 is inert on aM — aM's
+  nested db scopes all name the same file, so the nearest-scope rule changed which scope is *nearest*,
+  not which database *opens*, and aM emits exactly one query handle per file so the S451 handle-name
+  hazard cannot reach it. Then against **#1287** (the tenant floor filtering at the source), which bryan
+  had explicitly asked be checked: that one **does** change aM's output — all four `.server.js`
+  artifacts gain the same +38-line `AsyncLocalStorage` request-scope preamble, and `I-TENANT-ACROSS`
+  drops 35 → 29 — but it is **behaviourally inert for aM**, because all 15 of aM's query lines touching
+  a tenant-scoped table already take `.acrossTenants()`, the only unscoped read. The standing risk is
+  recorded: with no active tenant, a tenant-scoped read without that opt-out now returns zero rows.
+- **Methodological, and the most reusable thing here**: a `compileScrml({write:false})` probe cannot
+  surface any `E-CODEGEN-*` diagnostic because it never runs codegen. It falsified two *correct* PA
+  corrections and had silently invalidated the authoring agent's own 993-file corpus differential, which
+  was re-closed with `write:true`.
+
 ### S450 (2026-10-02, Peter · P-Tech1) — bryan's "stamp all" built end to end; two reviews found holes live on main; aM pin bumped behind a deploy guard
 
 **The arc.** bryan answered S446's routing note with *"stamp all"*: three held drafts to land and five language rulings to
