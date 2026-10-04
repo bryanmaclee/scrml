@@ -447,17 +447,26 @@ ${
     // At `{`: the arms, through the matching `}`. ONE arm parser for `!{}`
     // and `match` (S452 ruling c: "`!{}` handler arms use the SAME grammar as
     // `match` arms", §18.2). `guard`: the arms of a `!{}` handler — the only
-    // place the legacy paren-free payload binder (`.V m`) is read. The leading
-    // `|` before an arm is the soft-deprecated legacy spelling (S452 ruling c;
-    // its W-lint is not ruled yet, so none is emitted) and parses identically.
+    // place the legacy spellings are read. The leading `|` before an arm is
+    // the soft-deprecated legacy spelling OF A `!{}` ARM ONLY (S452 ruling c,
+    // the §19.4.5 amendment; its W-lint is not ruled yet, so none is emitted)
+    // and parses identically; the paren-free binder (`| .V m :>`) is read only
+    // after that `|`. A `match` arm takes no `|` (§18.2 `match-arm ::=
+    // arm-pattern …`) — E-PARSE-ARM. (Engine message arms, §51.0.S, are not
+    // parsed here.)
     fn parseArms(tp: TP, guard: boolean) -> RArms {
         let t: TP = expectP(tp, "{")
         let arms: AArm[] = []
         while (!isP(t, "}") && !atEnd(t)) {
             const before: int = t.i
-            if (isP(t, "|")) t = adv(t)
+            let piped = false
+            if (isP(t, "|")) {
+                if (!guard) t = diagAt(t, "E-PARSE-ARM", "a `match` arm takes no leading `|` (§18.2) — write `.V(x) :> …` (the `|` is a legacy spelling of a `!{}` handler arm only)", cur(t))
+                piped = true
+                t = adv(t)
+            }
             const astart: int = cur(t).start
-            const rp: RPat = parsePattern(t, guard)
+            const rp: RPat = parsePattern(t, guard && piped)
             t = rp.tp
             let legacy = false
             const c: PTok = cur(t)
@@ -488,7 +497,7 @@ ${
     // parenthesis-free payload binder yet, so it stays refused — never read as
     // something else.
     fn binderReason() -> string {
-        return "a `match` arm has no parenthesis-free payload binder (§18.2: `variant-pattern ::= ('.' | '::') VariantName ('(' binding-list ')')?`) — write `.V(m)`"
+        return "an arm pattern has no parenthesis-free payload binder (§18.2: `variant-pattern ::= ('.' | '::') VariantName ('(' binding-list ')')?`) — write `.V(m)` (`| .V m :>` is read only as the legacy spelling of a `!{}` handler arm, after its `|`)"
     }
 
     // An arm separator (`:>`, or the deprecated `=>` / `->`) at token offset `k`.

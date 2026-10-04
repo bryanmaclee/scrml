@@ -41,3 +41,30 @@
   The 13 SPEC-listed fall-through files: 7 UNSUPPORTED (other refusals; E-ERROR-012 now fires in each), 3 FAIL
   twin-extra-error E-SCOPE-001 (`log` — no stdlib, so the `log(m)` arm cannot be judged), 2 parse-variant UNSUPPORTED
   (`<match>` / other refusals), 1 FAIL (s437, above). None migrated (brief).
+
+## fix round r2
+
+- 2026-10-04 BRIEF-r2.md archived. Merged origin/main (df6dad5ac, #1272, SPEC-only); no conflicts;
+  severity regenerated (now 108 codes with a §34 severity, 69 without).
+- HIGH-1 fixed: E-DEFER-UNSUPPORTED-SITE for a `defer` directly in a value-position `!{}` / `match` arm, including a
+  leaving arm (PA readings, DESIGN §3). The `branchJs` value-then-defer lowering was removed.
+- MED-1 fixed: `txControl` reads every `;`-separated statement, skipping empty ones, strings and comments.
+- LOW-1 fixed: ABORT, START TRANSACTION, PREPARE TRANSACTION, COMMIT/ROLLBACK PREPARED are now recognised; RELEASE
+  [SAVEPOINT] was already covered.
+- MED-2 fixed: a callee must yield a value on every path (the syntactic rule is in DESIGN §3).
+- LOW-3: fixed per the SPEC, not per the PA's wording. An arm after `_ err` is E-SYNTAX-010 with a true message, not
+  accepted (§18.6.1). An arm after a plain wildcard is E-SYNTAX-010 too (was a refusal).
+- DB-LOW-1 fixed: `redactDsn` in E-SQL-005 (`scheme://***@host`); the other db diagnostics echo no value.
+- NIT fixed: `if=` / `else*` / `show=` on `<db>` are reported once (by the chain / show rules).
+- Addendum fixed: a leading `|` on a `match` arm is E-PARSE-ARM; the paren-free binder is read only after a `!{}`
+  arm's `|`. Engine message arms are not parsed by `parseArms`.
+- LEFT, as instructed:
+  - LOW-2 (`?{/* ${x} */ BEGIN}`): the statement-list scanner now joins chunks with an opaque ` ? `, so this case is
+    detected incidentally. It is not separately pinned.
+  - LOW-4 (`.V _` / `_ _` give E-PARSE-ARM): fails closed.
+- Verification:
+  - slices m1 99, m2 462, m3 60, m4 1084, codec 92, m1-lowered 99, all 0 fail;
+  - error-rulings.test.js 74 tests;
+  - counter PASS 119 · FAIL 48 · UNSUPPORTED 622 · NOT-TWINNED 511 — identical to 311b590ef (no bucket moved; the
+    report is unchanged; `--check` current);
+  - `gen-bootstrap-severity --check` current.

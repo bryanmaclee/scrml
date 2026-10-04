@@ -579,7 +579,7 @@ ${
         const raw: string = symName(ctx, ok.bind)
         out = out.concat([JsStmt.SConst(raw, failableJs(ctx, call))])
         const errB: JsStmt[] = errArmsJs(ctx, jmember(jid(raw), "error"), arms, 0, result)
-        const okB: JsStmt[] = branchJs(ctx, ok.body, result, ok.value)
+        const okB: JsStmt[] = blockJs(ctx, ok.body).concat(resultJs(ctx, result, ok.value))
         return out.concat([JsStmt.SIf(rtCall(ctx, "failed", [jid(raw)]), errB, okB)])
     }
 
@@ -593,7 +593,7 @@ ${
     fn errArmsJs(ctx: Ctx, err: JsExpr, arms: ErrArm[], i: int, result: Sym | not) -> JsStmt[] {
         if (i >= arms.length) return []
         const a: ErrArm = arms[i]
-        const body: JsStmt[] = wholeBind(ctx, a.whole, err).concat(patBinds(ctx, a.pat, err)).concat(branchJs(ctx, a.body, result, a.value))
+        const body: JsStmt[] = wholeBind(ctx, a.whole, err).concat(patBinds(ctx, a.pat, err)).concat(blockJs(ctx, a.body)).concat(resultJs(ctx, result, a.value))
         if (i == arms.length - 1 || isWildPat(a.pat)) return body
         return [JsStmt.SIf(patTest(ctx, a.pat, err), body, errArmsJs(ctx, err, arms, i + 1, result))]
     }
@@ -613,20 +613,10 @@ ${
         }
     }
 
-    // s452 — a branch: its body, then the result written from its value, in
-    // ONE block. A value-yielding block arm (§18.5) reads the locals its body
-    // declared, and a block that holds a `defer` runs its deferred bodies at
-    // its exit — after the value is evaluated (§19.16.2) — so the value is
-    // assigned inside the block (inside its `try`), never after it.
-    fn branchJs(ctx: Ctx, b: Block, result: Sym | not, v: Expr | not) -> JsStmt[] {
-        const assigned: int[] = assignedSyms(Node.NBlock(b))
-        let out: JsStmt[] = []
-        for (const s of b.stmts) { out = out.concat(stmtJs(ctx, s, assigned)) }
-        out = out.concat(resultJs(ctx, result, v))
-        if (holdsDefer(b)) return deferBlockJs(ctx, out)
-        return out
-    }
-
+    // s452 r2: a branch with a value never holds a `defer` (analyze refuses a
+    // `defer` directly in a value-position arm — E-DEFER-UNSUPPORTED-SITE,
+    // §19.16.2), so its block is never wrapped in a `try` and the result
+    // assignment after it reads the block's locals in the same JS block.
     fn resultJs(ctx: Ctx, result: Sym | not, v: Expr | not) -> JsStmt[] {
         if (result is not) return []
         if (v is not) return []

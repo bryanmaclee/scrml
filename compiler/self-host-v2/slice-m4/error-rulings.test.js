@@ -226,11 +226,41 @@ describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yiel
     expect(text().n).toBe("1");
   });
 
-  test("a block arm's value may read its own locals, and its `defer` runs after the value is taken (runtime)", async () => {
-    await load(go(`    function go() {\n        @log = load("x") !{ _ :> {\n            const t = "v"\n            defer @n = @n + 10\n            @n = 1\n            t + "!"\n        } }\n    }`));
+  test("a block arm's value may read its own locals (runtime)", async () => {
+    await load(go(`    function go() {\n        @log = load("x") !{ _ :> {\n            const t = "v"\n            @n = 1\n            t + "!"\n        } }\n    }`));
     click(btn("go"));
     expect(text().log).toBe("v!");
+    expect(text().n).toBe("1");
+  });
+
+  // r2 HIGH-1 — §19.16.2: "The same code covers a `defer` written directly in an arm of a `match` / `if` /
+  // `for` that is used for its VALUE … the defer block would capture it" (E-DEFER-UNSUPPORTED-SITE)
+  test("r2 HIGH-1: a `defer` directly in a value-position `!{}` arm is E-DEFER-UNSUPPORTED-SITE, no Core", () => {
+    rejected(go(`    function go() {\n        const r = load("x") !{ _ :> {\n            @n = 1\n            defer @n = 99\n            @n\n        } }\n    }`), "E-DEFER-UNSUPPORTED-SITE");
+    expect(codes(go(`    function go() {\n        const r = load("x") !{ _ :> {\n            @n = 1\n            defer @n = 99\n            @n\n        } }\n    }`))).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);
+  });
+
+  test("r2 HIGH-1: the same in a value-position `match` arm, and in an arm that LEAVES (PA reading)", () => {
+    const m = go(`    function pick(id: string) -> string {\n        return match load(id) {\n            .Ok(v) :> {\n                defer @n = 7\n                v\n            }\n            _ :> "e"\n        }\n    }`, []);
+    expect(codes(m)).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);
+    rejected(m, "E-DEFER-UNSUPPORTED-SITE");
+    expect(codes(go(`    function pick(id: string) -> string {\n        const r = load(id) !{ _ :> {\n            defer @n = 7\n            return "L"\n        } }\n        return r\n    }`, []))).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);
+  });
+
+  test("r2 HIGH-1 near-miss: a `defer` in a STATEMENT-position arm stays legal and runs at the arm's exit (runtime)", async () => {
+    await load(go(`    function go() {\n        load("x") !{ _ :> {\n            defer @n = @n + 10\n            @n = 1\n        } }\n    }`));
+    click(btn("go"));
     expect(text().n).toBe("11");
+  });
+
+  // r2 MED-2 — a value on EVERY path; falling off the end of the body is no value
+  test("r2 MED-2: a callee that returns a value on only SOME paths yields nothing there — E-ERROR-012", () => {
+    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q" }\n        @n = 4\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() }\n    }`))).toEqual(["E-ERROR-012"]);
+    expect(codes(go(`    function h() {\n        if (@n == 5) { return "q" }\n    }\n    function go() {\n        const r = load("x") !{ _ :> h() }\n    }`))).toEqual(["E-ERROR-012"]);
+  });
+
+  test("r2 MED-2 near-miss: every path returns a value (a final `return`, or an if / else both returning)", () => {
+    clean(go(`    function h() {\n        if (@n == 5) { return "q" }\n        return "r"\n    }\n    function k() {\n        if (@n == 5) { return "q" } else { return "w" }\n    }\n    function go() {\n        @log = load("x") !{ .NotFound(m) :> h()\n            _ :> k() }\n    }`));
   });
 
   test("a block arm whose last expression is a handling form: its own Attempt, then its value (runtime)", async () => {
@@ -438,7 +468,7 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
   });
 
   test("one-line arms, both spellings: `!{ .A :> 1 _ :> 2 }` and `!{ | .A :> 1 | _ :> 2 }`", async () => {
-    for (const h of [`!{ .NotFound(m) :> "nf" _ :> "o" }`, `!{ | .NotFound m :> "nf" | _ :> "o" }`, `!{ .NotFound m :> "nf" _ err :> "o" }`]) {
+    for (const h of [`!{ .NotFound(m) :> "nf" _ :> "o" }`, `!{ | .NotFound m :> "nf" | _ :> "o" }`, `!{ .NotFound(m) :> "nf" _ err :> "o" }`]) {
       await load(P(`${TYPES}\n${LOAD}\n    function go() {\n        @log = load("x") ${h}\n    }`, ["go"]));
       click(btn("go"));
       expect([h, text().log]).toEqual([h, "nf"]);
@@ -447,22 +477,32 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
 
   test("the paren-free binder binds the PAYLOAD (§19.4.3 ruling 2): one field only — E-TYPE-021 on a unit or multi-field variant", () => {
     const T2 = `    type E2:enum = { Unit, Two(a: string, b: string), One(m: string) }\n    function f()! E2 {\n        fail .Unit\n    }`;
-    expect(codes(P(`${T2}\n    function go() {\n        f() !{ .Unit u :> @n = 1  _ :> @n = 2 }\n    }`))).toEqual(["E-TYPE-021"]);
-    expect(codes(P(`${T2}\n    function go() {\n        f() !{ .Two t :> @n = 1  _ :> @n = 2 }\n    }`))).toEqual(["E-TYPE-021"]);
-    clean(P(`${T2}\n    function go() {\n        f() !{ .One m :> @log = m  _ :> @n = 2 }\n    }`));
+    expect(codes(P(`${T2}\n    function go() {\n        f() !{ | .Unit u :> @n = 1 | _ :> @n = 2 }\n    }`))).toEqual(["E-TYPE-021"]);
+    expect(codes(P(`${T2}\n    function go() {\n        f() !{ | .Two t :> @n = 1 | _ :> @n = 2 }\n    }`))).toEqual(["E-TYPE-021"]);
+    clean(P(`${T2}\n    function go() {\n        f() !{ | .One m :> @log = m | _ :> @n = 2 }\n    }`));
+  });
+
+  test("addendum: the paren-free binder is read only after the legacy `|` — the canonical pipe-less arm has none", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            .NotFound m :> @n = 1\n            _ :> @n = 2\n        }\n    }`))).toContain("E-PARSE-ARM");
   });
 
   test("a `match` arm has no paren-free binder (§18.2 grammar) — a parse error, not a silent reading", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @log = v\n            .NotFound m :> @n = 1\n            _ :> @n = 2\n        }\n    }`))).toContain("E-PARSE-ARM");
   });
 
-  test("a `match` arm may carry the legacy `|` too (one shared arm parser)", () => {
-    clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            | .Ok(v) :> @log = v\n            | _ err :> @n = 2\n        }\n    }`));
+  test("addendum: a `match` arm takes no leading `|` (§18.2) — E-PARSE-ARM naming the `|`, no Core; the `!{}` arm keeps it", () => {
+    const src = P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            | .Ok(v) :> @log = v\n            | _ err :> @n = 2\n        }\n    }`);
+    expect(codes(src)).toEqual(["E-PARSE-ARM", "E-PARSE-ARM"]);
+    expect(msg(src, "E-PARSE-ARM")).toContain("no leading `|`");
+    rejected(src, "E-PARSE-ARM");
+    clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            | .NotFound(m) :> @log = m\n            | _ err :> @n = 2\n        }\n    }`));
   });
 
   test("E-MATCH-BARE-BINDER and the whole-error binder hold in both spellings, in `!{}` and in `match`", () => {
     for (const arms of [`err :> @n = 1`, `| err :> @n = 1`, `else err :> @n = 1`, `| else err :> @n = 1`]) {
       expect([arms, codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            ${arms}\n        }\n    }`))]).toEqual([arms, ["E-MATCH-BARE-BINDER"]]);
+    }
+    for (const arms of [`err :> @n = 1`, `else err :> @n = 1`]) {
       expect([arms, codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @log = v\n            ${arms}\n        }\n    }`))]).toEqual([arms, ["E-MATCH-BARE-BINDER"]]);
     }
   });
@@ -471,5 +511,53 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
     const r = run(P(`${TYPES}\n${LOAD}\n${legacy}`, ["go"]));
     expect(r.diags).toEqual([]);
     expect((r.infos || []).length).toBe(0);
+  });
+});
+
+describe("fix round r2 — E-ERROR-015 statement list, LOW-3 arm order, DB-LOW-1 redaction, NIT", () => {
+  const DBP = (body) => `<program db="./app.db">\n${body}\n    <main><p>x</p></main>\n</program>\n`;
+  const fnWith = (sql) => DBP(`    function plain() -> int {\n        ${SQ}\`${sql}\`}.run() !{ _ :> { return 0 } }\n        return 1\n    }`);
+
+  test("r2 MED-1: EVERY statement is read — `?{;BEGIN}`, `?{SELECT 1; BEGIN}`", () => {
+    for (const sql of [";BEGIN", "SELECT 1; BEGIN", "SELECT 1;\n  -- c\n  COMMIT", "UPDATE t SET a = 1;;ROLLBACK"]) {
+      expect([sql, codes(fnWith(sql))]).toEqual([sql, ["E-ERROR-015"]]);
+    }
+  });
+
+  test("r2 MED-1 near-miss: a `;` or a keyword inside a string or a comment is not a statement", () => {
+    for (const sql of ["SELECT ';BEGIN' AS a", "SELECT 1 /* ; COMMIT */", "SELECT 1 -- ; BEGIN", "UPDATE t SET a = 1; SELECT 2"]) {
+      expect([sql, codes(fnWith(sql))]).toEqual([sql, []]);
+    }
+  });
+
+  test("r2 LOW-1: START TRANSACTION, ABORT, RELEASE SAVEPOINT, PREPARE TRANSACTION, COMMIT PREPARED", () => {
+    for (const sql of ["START TRANSACTION", "ABORT", "RELEASE SAVEPOINT s", "PREPARE TRANSACTION 'x'", "COMMIT PREPARED 'x'", "ROLLBACK PREPARED 'x'"]) {
+      expect([sql, codes(fnWith(sql))]).toEqual([sql, ["E-ERROR-015"]]);
+    }
+    expect(msg(fnWith("START TRANSACTION"), "E-ERROR-015")).toContain("'START TRANSACTION'");
+    expect(codes(fnWith("PREPARE q AS SELECT 1"))).toEqual([]);
+  });
+
+  test("r2 LOW-3: an arm after `_ err` is E-SYNTAX-010 (§18.6.1: `_ err` is the wildcard for the last-arm position) — with a true message", () => {
+    const okAfter = P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            _ err :> @n = 2\n            .Ok(v) :> @log = v\n        }\n    }`);
+    expect(codes(okAfter)).toEqual(["E-SYNTAX-010"]);
+    expect(msg(okAfter, "E-SYNTAX-010")).toContain("never `.Ok`");
+    expect(msg(okAfter, "E-SYNTAX-010")).not.toContain("already took every remaining case");
+    const wildAfter = P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            _ err :> @n = 2\n            _ :> @n = 3\n        }\n    }`);
+    expect(codes(wildAfter)).toEqual(["E-SYNTAX-010"]);
+  });
+
+  test("r2 DB-LOW-1: E-SQL-005 never echoes credentials", () => {
+    const src = `<program>\n    <db src="mongodb://admin:SECRETpasswd@h/x"><p>a</p></db>\n    <main><p>x</p></main>\n</program>\n`;
+    const r = run(src);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-SQL-005"]);
+    expect(r.diags[0].message).not.toContain("SECRET");
+    expect(r.diags[0].message).not.toContain("admin");
+    expect(r.diags[0].message).toContain("mongodb://***@h/x");
+    expect(msg(`<program db="mysql:root:pw@h">\n    <main><p>x</p></main>\n</program>\n`, "E-SQL-005")).not.toContain("pw");
+  });
+
+  test("r2 NIT: `if=` on a `<db>` is reported once", () => {
+    expect(codes(`<program>\n    let <n:int=0/>\n    <db src="./a.db" if=@n><p>a</p></db>\n    <main><p>x</p></main>\n</program>\n`).length).toBe(1);
   });
 });

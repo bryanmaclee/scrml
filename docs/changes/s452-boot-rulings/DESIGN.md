@@ -181,3 +181,32 @@ What the bootstrap had and what changed:
 - E-MATCH-BARE-BINDER and the whole-error binder were already shared by `!{}` and `match` (one `resolveArm`).
 - Tests: error-rulings.test.js uses the canonical pipe-less form as the primary case; a "S452 ruling c" block pins the
   legacy spellings as equivalences (same Core, same runtime, both binder codes in both spellings, no warning emitted).
+
+## 3. Fix round r2 (adversarial review of 311b590ef) — PA readings recorded
+
+- **HIGH-1 (`defer` in a value-position arm).** §19.16.2: "The same code covers a `defer` written directly in an arm of a
+  `match` / `if` / `for` that is used for its VALUE — a value-form expression (…) — the arm's last expression is the
+  value produced, and the defer block would capture it." → E-DEFER-UNSUPPORTED-SITE, decided in analyze `armBlock`.
+  - **PA reading:** a `!{}` handler arm is the same shape as a `match` arm (both lower to one Attempt). The sentence
+    names `match` / `if` / `for`, not `!{}`.
+  - **PA reading:** a value-position arm that LEAVES (`{ defer …; return "L" }`) is still an arm used for its value,
+    so it is refused too. This is fail-closed and reversible.
+  - A `defer` in a STATEMENT-position arm stays legal.
+  - The bootstrap has no value-form `if` / `for` (`if` is a statement only; there are no loops).
+  - print.scrml's value-then-defer `branchJs` (round 1) was removed. A branch carrying a value now never holds a `defer`.
+- **LOW-3 — divergence from the PA's instruction, SPEC wins (Rule 4).** The PA asked that an `.Ok` arm after `_ err` be
+  ACCEPTED. §18.6.1 says the whole-error arm "obeys every other arm rule unchanged: it is the wildcard for the last-arm
+  position (E-SYNTAX-010)", and §18.6 says "An `else` arm that is not the last arm SHALL be a compile error
+  (E-SYNTAX-010)".
+  - Any arm after `_ err` is therefore E-SYNTAX-010. The message is now true: `_ err` never takes `.Ok`; it must come last.
+  - An arm after a plain `_` / `else` also takes E-SYNTAX-010. It used to be refused with "the SPEC names no code",
+    which was false.
+- **MED-2 decision boundary (fail closed).** A function with no declared return type yields a value only when its body
+  ends in `return <expr>`, or in an `if` / `else` whose blocks both do. A body ending any other way is judged "no
+  value", which means E-ERROR-012 at a value-position arm:
+  - a `given`;
+  - a statement-position handler or `match` whose arms return;
+  - an `if` without `else`.
+- **Addendum (S452 §19.4.5 amendment).** A leading `|` is legacy on a `!{}` arm ONLY. On a `match` arm it is E-PARSE-ARM.
+  - The paren-free binder is read only after a `!{}` arm's `|`. A pipe-less `!{ .V m :> }` is E-PARSE-ARM.
+  - Engine message arms (§51.0.S) are NOT parsed by `parseArms`: its only callers are `parseGuard` and `parseMatch`.

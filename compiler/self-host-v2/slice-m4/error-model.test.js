@@ -491,8 +491,9 @@ describe("S239 review fix round (114e6ef80)", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @n = 1\n            .Ok(w) :> @n = 2\n            else :> @n = 3\n        }\n    }`))).toEqual(["E-TYPE-023"]);
   });
 
-  test("LOW-1 — an arm after the wildcard is unreachable: refused", () => {
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ :> @n = 1 | .Timeout :> @n = 2 }\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  // s452 r2: §18.6 names the code — "An `else` arm that is not the last arm SHALL be … E-SYNTAX-010"
+  test("LOW-1 — an arm after the wildcard is E-SYNTAX-010 (the wildcard is last, §18.6)", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ :> @n = 1 | .Timeout :> @n = 2 }\n    }`))).toEqual(["E-SYNTAX-010"]);
   });
 
   test("LOW-2 — `.V(args) :> fail E.V(args)` (§19.5.2's spelling) is a `fail` arm (runtime)", async () => {

@@ -242,18 +242,61 @@ ${
     // — `BEGIN` (in any form: `BEGIN DEFERRED`, `BEGIN IMMEDIATE`, `BEGIN
     // TRANSACTION`, …), `COMMIT`, `END`, `ROLLBACK` (including `ROLLBACK TO`),
     // `SAVEPOINT`, or `RELEASE`, recognized after any leading comments
-    // (§19.10.6)". Returns that statement keyword, upper-cased ("" — the query
-    // is not transaction control). Read from the FIRST literal run only: the
-    // keyword is the statement's first word, and a `${…}` value can never be a
-    // keyword (§8.1 — it is a bound parameter). Leading whitespace, `-- …` line
-    // comments and `/* … */` block comments are skipped; an unterminated
-    // block comment leaves no statement.
+    // (§19.10.6)"; the E-ERROR-015 row's list ends in "…" (manual transaction
+    // control). s452 r2: EVERY statement of the query is read (a `;`-separated
+    // list, empty statements skipped — `?{;BEGIN}`, `?{SELECT 1; BEGIN}`), and
+    // the Postgres / MySQL spellings count too: `ABORT`, `START TRANSACTION`,
+    // `PREPARE TRANSACTION`, `COMMIT PREPARED` / `ROLLBACK PREPARED`, `RELEASE
+    // [SAVEPOINT]`. Returns the first such statement's keyword(s), upper-cased
+    // ("" — none). A `${…}` value is one opaque token (` ? `) — never a keyword
+    // (§8.1). Strings ('…', "…", `…`) and comments (`-- …`, `/* … */`) are
+    // skipped when looking for `;`; an unterminated comment or string ends the
+    // scan. FAILS TOWARD FLAGGING: a dialect that reads a string's end
+    // differently (a MySQL backslash escape, a Postgres `$$` body) can only make
+    // a `;` visible that is not — a false E-ERROR-015, never a missed one inside
+    // the text the scanner does read as code.
     export fn txControl(chunks: string[]) -> string {
-        if (chunks.length == 0) return ""
-        const s: string = chunks[0]
+        const s: string = chunks.join(" ? ")
         let i: int = 0
-        let going = true
-        while (going && i < s.length) {
+        let atStart = true
+        while (i < s.length) {
+            if (atStart) {
+                i = skipSqlTrivia(s, i)
+                if (i < 0 || i >= s.length) return ""
+                if (ch(s, i) == ";") {
+                    i = i + 1
+                } else {
+                    const kw: string = txWordAt(s, i)
+                    if (kw != "") return kw
+                    atStart = false
+                }
+            } else {
+                const c: string = ch(s, i)
+                if (c == "'" || c == "\"" || c == "`") {
+                    const close: int = s.indexOf(c, i + 1)
+                    if (close < 0) return ""
+                    i = close + 1
+                } else if (c == "-" && ch(s, i + 1) == "-") {
+                    while (i < s.length && ch(s, i) != "\n") { i = i + 1 }
+                } else if (c == "/" && ch(s, i + 1) == "*") {
+                    const close2: int = s.indexOf("*/", i + 2)
+                    if (close2 < 0) return ""
+                    i = close2 + 2
+                } else if (c == ";") {
+                    atStart = true
+                    i = i + 1
+                } else {
+                    i = i + 1
+                }
+            }
+        }
+        return ""
+    }
+
+    // Past whitespace and comments from `i` (-1: an unterminated block comment).
+    fn skipSqlTrivia(s: string, i0: int) -> int {
+        let i: int = i0
+        while (i < s.length) {
             const c: string = ch(s, i)
             if (isSpace(c)) {
                 i = i + 1
@@ -261,17 +304,34 @@ ${
                 while (i < s.length && ch(s, i) != "\n") { i = i + 1 }
             } else if (c == "/" && ch(s, i + 1) == "*") {
                 const close: int = s.indexOf("*/", i + 2)
-                if (close < 0) return ""
+                if (close < 0) return -1
                 i = close + 2
             } else {
-                going = false
+                return i
             }
         }
+        return i
+    }
+
+    // The word at `i`, upper-cased, and where it ends.
+    type SqlWord:struct = { w: string, end: int }
+
+    fn sqlWordAt(s: string, i: int) -> SqlWord {
         let j: int = i
         while (j < s.length && isWordCh(ch(s, j))) { j = j + 1 }
-        if (j == i) return ""
-        const w: string = s.substring(i, j).toUpperCase()
-        if (w == "BEGIN" || w == "COMMIT" || w == "END" || w == "ROLLBACK" || w == "SAVEPOINT" || w == "RELEASE") return w
+        return { w: s.substring(i, j).toUpperCase(), end: j }
+    }
+
+    // The transaction-control keyword(s) a statement starting at `i` opens with, else "".
+    fn txWordAt(s: string, i: int) -> string {
+        const a: SqlWord = sqlWordAt(s, i)
+        const k: int = skipSqlTrivia(s, a.end)
+        let b: string = ""
+        if (k >= 0) b = sqlWordAt(s, k).w
+        const w: string = a.w
+        if ((w == "COMMIT" || w == "ROLLBACK") && b == "PREPARED") return w + " PREPARED"
+        if (w == "BEGIN" || w == "COMMIT" || w == "END" || w == "ROLLBACK" || w == "SAVEPOINT" || w == "RELEASE" || w == "ABORT") return w
+        if ((w == "START" || w == "PREPARE") && b == "TRANSACTION") return w + " TRANSACTION"
         return ""
     }
 
