@@ -21,14 +21,17 @@
  *       (1) a `yield` inside a `transaction` block in a function. A `yield`
  *           SUSPENDS the block rather than leaving it, so neither of §19.10.3's
  *           endings applies. Fail-closed.
- *       (2) an exit that cannot reach the block's own `finally` because the
- *           emitted arm is a nested function: a `fail` / `?` inside an arm of a
+ *       (2) an exit that may not reach the block's own `finally`, because some
+ *           arm lowerings are nested functions and this validator does not
+ *           distinguish them: a `fail` / `?` inside an arm of a
  *           STATEMENT-position `match` (S450 fix round), and a `return` /
  *           `break` / `continue` inside an arm of ANY `match`, statement- or
- *           expression-position (S453/B1a). `emitMatchExpr` lowers both match
- *           positions as an IIFE, so such an exit returns from the arm only and
- *           the statements after the `match` keep running
- *           (g-stmt-match-block-return-falls-through).
+ *           expression-position (S453/B1a). `emitMatchExpr` /
+ *           `emitMultiScrutineeMatch` emit an IIFE, so such an exit returns from
+ *           the arm only and the statements after the `match` keep running
+ *           (g-stmt-match-block-return-falls-through). ⚑ A DECL-position
+ *           `let v = match …` lowers INLINE instead (`emitMatchExprDecl`) and is
+ *           refused anyway — fail-closed on the union; see TxnCtx.inMatchArm.
  *
  *     ⚑ **RULED AT S453 and no longer refused (B1a):** a `return`, or a `break` /
  *     `continue` whose target is outside the block, anywhere else in the block.
@@ -79,14 +82,35 @@ interface TxnCtx {
    * True inside the arms of ANY `match` within the block — statement- AND
    * expression-position. S453/B1a: `return` / `break` / `continue` now ROLL BACK
    * and proceed, which is sound only when the exit crosses no function boundary
-   * on its way out of the emitted `try`/`finally`. `emitMatchExpr`
-   * (codegen/emit-logic.ts `case "match-stmt"` / `case "match-expr"`) lowers BOTH
-   * match positions as an IIFE, so an exit inside an arm returns from the arm and
-   * never reaches the block's `finally` — the same swallowing defect the
-   * `fail` / `?` arm limb refuses (g-stmt-match-block-return-falls-through).
-   * Kept refused. This flag is deliberately WIDER than `inStmtMatchArm`: a
-   * `fail` / `?` in an EXPRESSION-position arm is governed and fine (runtime-
-   * verified S450), but an EXIT in one is not.
+   * on its way out of the emitted `try`/`finally`. SOME arm lowerings are nested
+   * functions: `emitMatchExpr` / `emitMultiScrutineeMatch`
+   * (codegen/emit-control-flow.ts) emit `await (async function(){ … })()`, so an
+   * exit inside such an arm returns from the ARM and never reaches the block's
+   * `finally` — the same swallowing defect the `fail` / `?` arm limb refuses
+   * (g-stmt-match-block-return-falls-through).
+   *
+   * ⚑ **THIS FLAG IS COARSER THAN THAT, DELIBERATELY, AND THE EARLIER COMMENT
+   * HERE WAS FACTUALLY WRONG.** It said "`emitMatchExpr` lowers BOTH match
+   * positions as an IIFE". That is FALSE for a DECL-position match: a
+   * `let v = match m { … }` / `const v = match m { … }` is lowered by
+   * `emitMatchExprDecl` (`codegen/emit-logic.ts:5669`, dispatched from the
+   * let-decl handler `:2174` and the const-decl handler `:2322`) as INLINE host
+   * statements — an if / else-if chain over a tilde var — with no function
+   * boundary at all. So an exit in a decl-position arm is refused here even
+   * though that particular lowering may well be sound.
+   *
+   * The refusal is kept anyway, and the reason is the honest one: **this
+   * validator does not distinguish which arm lowering it is looking at, and some
+   * of them swallow the exit.** Fail-closed on the union is correct; narrowing it
+   * on the strength of a lowering read from the emitter — rather than proved by
+   * execution — is the wrong direction (pa-base: a soundness claim needs a gate,
+   * not a reading). Narrowing is filed as
+   * `g-transaction-exit-refused-in-a-decl-position-match-arm-whose-lowering-is-inline`,
+   * which names the runtime proof it would need.
+   *
+   * Wider than `inStmtMatchArm` on purpose: a `fail` / `?` in an
+   * EXPRESSION-position arm is governed and fine (runtime-verified S450), but an
+   * EXIT in one is not.
    */
   inMatchArm: boolean;
 }
@@ -162,12 +186,13 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
   // they left. Same defect as the `fail` / `?` arm limb; kept refused.
   const exitInMatchArm = (n: Node, what: string) =>
     report("E-TRANSACTION-CONTROL-FLOW", n,
-      `${what} inside a \`match\` arm cannot leave a \`transaction\` block — the arm is lowered as a ` +
-      `nested function, so the ${what} would return from the arm only: the block's rollback would never ` +
-      `run and the statements after the \`match\` would keep executing inside the open transaction ` +
-      `(g-stmt-match-block-return-falls-through). Outside a \`match\` arm, ${what} out of a \`transaction\` ` +
-      `block is valid and ROLLS the block BACK (§19.10.3). Use an expression-position \`match\` ` +
-      `(\`let v = match … { … }\`) to pick a value and ${what} after the \`match\`, or an \`if\` / \`else if\` chain.`);
+      `${what} inside a \`match\` arm cannot leave a \`transaction\` block — some \`match\` arms are lowered ` +
+      `as a nested function, and the compiler does not distinguish them here, so the ${what} may return from ` +
+      `the arm only: the block's rollback would never run and the statements after the \`match\` would keep ` +
+      `executing inside the open transaction (g-stmt-match-block-return-falls-through). Outside a \`match\` ` +
+      `arm, ${what} out of a \`transaction\` block is valid and ROLLS the block BACK (§19.10.3). Move the ` +
+      `${what} out of the arm: let the \`match\` pick a VALUE and ${what} after it, or use an \`if\` / ` +
+      `\`else if\` chain.`);
 
   function walk(node: unknown, st: WalkState): void {
     if (!node || typeof node !== "object") return;
@@ -270,8 +295,12 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
     if (t0 && kind === "match-stmt" && t0.inFunction && !t0.inStmtMatchArm) {
       st = { ...st, txn: { ...t0, inStmtMatchArm: true, inMatchArm: true } };
     }
-    // S453/B1a — an EXPRESSION-position `match` is lowered by the SAME
-    // `emitMatchExpr` IIFE, so an EXIT inside one of its arms is swallowed too.
+    // S453/B1a — an EXPRESSION-position `match` is also covered, because SOME of
+    // those arms lower to the same `emitMatchExpr` / `emitMultiScrutineeMatch`
+    // IIFE that swallows an exit. ⚑ NOT all of them: a DECL-position
+    // `let v = match …` goes through `emitMatchExprDecl` (emit-logic.ts:5669) and
+    // lowers INLINE. This flag is coarse on purpose and fail-closed on the union —
+    // see TxnCtx.inMatchArm for why narrowing it needs a runtime proof first.
     // `inStmtMatchArm` is deliberately NOT set here: a `fail` / `?` in an
     // expression-position arm is governed and was runtime-verified at S450.
     else if (t0 && kind === "match-expr" && t0.inFunction && !t0.inMatchArm) {
@@ -328,8 +357,9 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
         // `?{}` read in `return count` still runs inside the transaction. The
         // `fail` / `?` pre-return marking stays as it is, because an error
         // envelope has nothing to evaluate inside the block.
-        // The ONE shape still refused is an exit inside a `match` arm, which the
-        // `finally` cannot reach (see TxnCtx.inMatchArm).
+        // The ONE shape still refused is an exit inside a `match` arm, where the
+        // `finally` may not be reached because some arm lowerings are nested
+        // functions and this pass does not tell them apart (TxnCtx.inMatchArm).
         if (kind === "return-stmt") { if (t.inMatchArm) exitInMatchArm(n, "`return`"); }
         else if (kind === "yield-stmt") controlFlow(n, "`yield`");
         else if (kind === "break-stmt" || kind === "continue-stmt") {
