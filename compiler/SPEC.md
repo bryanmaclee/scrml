@@ -7302,6 +7302,8 @@ The `protect=` attribute on `<db>` state blocks is a field-level access-control 
 
 `protect=` is DISTINCT from the V5-strict cell declarations in §6.1-§6.3. It applies to database-backed state types (the `<db>` state block) and operates at the type system level, not at the reactive cell level.
 
+**Coverage.** A `<db>` block's `protect=` is not confined to the `?{}` blocks lexically inside it. It covers every `?{}` in its database scope — and, when the `<db>` is the single direct child of a `<program>` without `db=`, that `<db>` supplies the program's database and its `protect=` covers every `?{}` anywhere in the program (§8.1.1; S451 "a for the channel Q"). The egress floor's own coverage is wider still: origin-keyed across the compile (§14.8.9, "Which `?{}` a `protect=` declaration covers").
+
 For the full `protect=` specification, see **§52** (State Authority Declarations), which covers:
 - §52.x — Client-visible type vs. full type (the `protect=` split)
 - §52.x — Server-escalated functions and full-type access
@@ -8578,10 +8580,14 @@ The content between backticks in `?{` \`...\` `}` is a **scrml SQL template**. I
 
 A `?{}` context resolves its database by walking up the ancestor tree from the `?{}` block's
 position to the closest **database scope**. Two elements are database scopes: a `<program>`
-with a `db=` attribute, and a `<db>` state block (its `src=` attribute). The NEAREST one
-wins, whichever of the two kinds it is. The connection string value of that scope's `db=` /
-`src=` determines the driver and names the database the `?{}` runs on. (`<db>`'s other
-attributes — `tables=`, `protect=` — are unchanged by this rule; §14.8, §52.)
+that has a database, and a `<db>` state block (its `src=` attribute). A `<program>` has a
+database when it carries a `db=` attribute, or — without `db=` — when exactly one `<db src=>` is
+its direct child: that `<db>` element supplies the program's database (S451 "a for the channel
+Q", normative bullet below). The NEAREST scope wins, whichever kind it is. The connection string
+of that scope's database (`db=`, or the `src=` of the `<db>` that is or supplies it) determines
+the driver and names the database the `?{}` runs on. `<db>`'s other
+attributes — `tables=`, `protect=` — cover the queries of the scope the `<db>` defines, and of
+the program it supplies (§14.8.4, §14.8.9).
 
 The codegen target is **Bun.SQL** for all SQL drivers (SPEC §44). MongoDB uses `^{}` meta
 contexts, not `?{}`. The driver-prefix table below is the source-language view; for the
@@ -8604,11 +8610,61 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
 **Normative statements:**
 
 - The compiler SHALL resolve the database for each `?{}` block by finding its closest ancestor
-  **database scope** — a `<program>` element with a `db=` attribute, or a `<db src=>` state
-  block. "Closest" means fewest nesting levels up the element tree, counting both kinds; the
+  **database scope** — a `<program>` element with a `db=` attribute, a `<program>` element
+  whose database a direct-child `<db src=>` supplies (next bullet), or a `<db src=>` state
+  block. "Closest" means fewest nesting levels up the element tree, counting every kind; the
   `?{}` runs on that scope's database and on no other. A `<db src=>` nested inside a
   `<program db=>` therefore takes precedence for the `?{}` blocks inside it, and a `?{}` in
   the same `<program db=>` but outside that `<db>` block runs on the `<program>`'s database.
+- **A `<db src=>` that supplies its program's database.** When a `<program>` element has no
+  `db=` attribute and exactly one `<db src=>` element is its **direct child**, that `<program>`
+  SHALL be a database scope whose database is the `<db>`'s `src=` value. Every `?{}` inside the
+  program whose nearest database scope is the program — in a `<channel>`, a `<page>`, a
+  `${ … }` beside the `<db>`, any element of the program — SHALL run on that database. The
+  nearest-scope rule above is unchanged and stays the only resolution rule: the program is the
+  scope; the `<db>` element supplies its database. Precisely:
+  - **Direct child only.** The `<db>` element's parent element SHALL be the `<program>`
+    element itself. A `<db src=>` nested deeper — inside a `<page>`, a `<channel>`, a
+    component, another `<db>`, or any other element of the program — does not supply the
+    program's database; it scopes its own children only, as before. A direct child of a
+    NESTED `<program>` supplies that nested program only (the nested program is the nearer
+    scope for everything in it).
+  - **Exactly one, or none supplies.** When a `<program>` without `db=` has two or more
+    direct-child `<db src=>` elements — whatever their `src=` values — NONE of them supplies
+    the program's database, and the program is not a database scope. Each `<db>` still scopes
+    its own children (nearest scope), and a `?{}` in the program outside all of them has no
+    database scope and is E-SQL-004. This is the multi-database layout the nearest-scope rule
+    exists to allow; it is not an error. To give such a `?{}` a database, put `db=` on the
+    `<program>` or move the `?{}` inside the `<db>` it means.
+  - **A `<program db=>` is never supplied.** A `<program>` WITH `db=` is a database scope on
+    its own `db=`; a direct-child `<db src=>` of it does not change the program's database,
+    whether it names the same database or a different one. That `<db>` scopes its own
+    children (nearest scope): a `?{}` inside it runs on the `<db>`'s `src=`, a `?{}` in the
+    program outside it runs on the program's `db=`.
+  - **Coverage.** The `<db>` that supplies a program's database also supplies its
+    declarations to that program: its `tables=` generated types are in scope throughout the
+    program (§14.8.4), and its `protect=` columns are protected for every `?{}` that resolves
+    to that database anywhere in the program (§14.8.9 — whose origin-keyed coverage is wider
+    still; nothing here narrows it). A `<schema>` that is a direct child of the program
+    declares for the supplied database (§39.3).
+  *(Provenance: ruling:user-voice-scrml.md S451 "a for the channel Q" — item 1, *"11a: a
+  `<db src=…>` that is a DIRECT CHILD of a `<program>` WITHOUT `db=` supplies that program's
+  database — the program becomes the database scope for everything in it (the `<db>`'s
+  `protect=` / `tables=` therefore cover queries anywhere in that program, e.g. a `<channel>`'s
+  server function)."* The motivating program is `conformance/cases/protect/channel-broadcast-strip`:
+  a `<channel>` must sit directly in `<program>` (§38.1), so its server function's `?{}` cannot
+  move inside the `<db>`. · **supersedes:** the S451 (#1262) text "Two elements are database
+  scopes: a `<program>` with a `db=` attribute, and a `<db>` state block", and "`<db>`'s other
+  attributes — `tables=`, `protect=` — are unchanged by this rule", under which such a `?{}` was
+  E-SQL-004; §39.3's "A `<schema>` block SHALL be valid only inside a file whose `<program>` root
+  element has a `db=` attribute"; §14.8.4's "Outside the lexical scope of the enclosing `<db>`
+  block, the generated type name SHALL NOT be accessible" for a program-supplying `<db>`. ·
+  **Direction of change (pa-base §8): newly-accepting** relative to #1262's text — it restores a
+  pattern impl#1 already accepted (the channel's `?{}` opens the `<db>`'s `app.db` and the
+  broadcast strips `passwordHash`, S451 probe) and the corpus pins
+  (`protect/channel-broadcast-strip`); **inert** for two or more direct-child `<db src=>` in a
+  `db=`-less program (none supplies; nearest-scope and E-SQL-004 apply as under #1262). impl#1
+  divergence on `<schema>`: `g-impl1-db-src-program-supply-divergences-s451`.)*
 - If no ancestor is a database scope, the `?{}` block SHALL be a compile error (E-SQL-004:
   `?{}` block has no `db=` / `<db src=>` declaration in any ancestor), except in a
   module-with-db-context (§44.7.1), where the file's top-level `<db src=>` applies.
@@ -8622,8 +8678,11 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
   carved out a single-database exemption (§44.7.1's module-with-db-context fallback is the only
   exemption, and it applies to a file with no `<program>`). **Direction of change (pa-base §8):
   inert for the SPEC; newly-rejecting relative to impl#1**, which runs an unscoped `?{}` on the
-  file's only database (`g-impl1-unscoped-sql-single-db-accepted-s451`; 11 conformance cases
-  rely on it, listed there).)*
+  file's only database (`g-impl1-unscoped-sql-single-db-accepted-s451`; 10 conformance cases
+  rely on it, listed there — an eleventh, `protect/channel-broadcast-strip`, is legal under the
+  program-supplying `<db>` rule above, S451 "a for the channel Q").)*
+  A `?{}` in a `<program>` without `db=` whose single direct-child `<db src=>` supplies the
+  program's database HAS a database scope (the bullet above) and is not E-SQL-004.
 
 > **Provenance:** ruling:user-voice-scrml.md S451 "your recs on both" (rec 2 — *"§8.1.1 — the NEAREST enclosing database scope wins: `<program db=>` and `<db src=>` are both database scopes; a `?{}` runs on the closest one above it (the existing normative 'closest ancestor' SHALL, extended to `<db src=>`). The Ownership bullet's 'that database … every `?{}` in a file runs on the file's default database — its first `<db src=>` in document order, else its first `<program db=>`' is amended to defer to this rule. Any impl#1 per-file-handle behaviour that differs is a filed divergence."*) · **supersedes:** the prose "walking up the `<program>` ancestor tree from the `?{}` block's position to find the closest `<program>` with a `db=` attribute"; the bullet "The compiler SHALL resolve the database driver for each `?{}` block by finding the closest ancestor `<program>` element with a `db=` attribute. 'Closest' means fewest nesting levels up the `<program>` tree."; and E-SQL-004's "no `db=` declaration in any ancestor `<program>`". These contradicted the Ownership bullet below (one default database per file); the ruling picks the nearest-scope reading. **Direction of change:** (a) **semantic** for a file with more than one database scope — which database a `?{}` runs on follows its position, not the file's first scope; no acceptance status moves for that shape; (b) **newly-accepting (SPEC text only)** for a `?{}` inside a `<db src=>` whose `<program>` has no `db=` — the old text made it E-SQL-004; impl#1 already compiled it (S451 probe), so no program's observed status moves. impl#1 binds every `?{}` in a file to one per-file handle (S451 probe: a `?{}` in an inner `<program db="./b.db">` inside `<program db="./a.db">` opens `a.db`; a `?{}` in `<program db="./a.db">` beside a `<db src="./b.db">` block opens `b.db`) — filed as `g-impl1-db-resolution-not-nearest-s451`.
 - The compiler SHALL parse the `db=` connection string prefix to determine the driver. An
@@ -8651,9 +8710,10 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
     connection's temp schema, not the file). A table qualified to another attached schema
     (`other.t`) does not count; `main.t` does.
   - *That database* for a `?{}` block is the database the block runs against, as the
-    resolution rule above gives it: its nearest enclosing database scope (`<program db=>` or
-    `<db src=>`). A `<schema>` block declares for the database the same rule gives its
-    position — its nearest enclosing `<program db=>` or `<db src=>`; with neither, for the
+    resolution rule above gives it: its nearest enclosing database scope (`<program db=>`, a
+    `<program>` whose direct-child `<db src=>` supplies its database, or `<db src=>`). A
+    `<schema>` block declares for the database the same rule gives its position — its nearest
+    enclosing `<program db=>`, supplied `<program>`, or `<db src=>`; with none, for the
     module-with-db-context's top-level `<db src=>` (§44.7.1). A file can therefore own more
     than one database, one per scope that declares schema.
     **Provenance:** ruling:user-voice-scrml.md S451 "your recs on both" (rec 2) ·
@@ -8733,6 +8793,48 @@ Error E-SQL-004 at line 3: `?{}` block has no `db=` declaration in any ancestor 
   Add a `db=` attribute to the enclosing `<program>` element.
   Example: `<program db="./app.db">` for SQLite or `<program db="postgres://...">` for Postgres.
 ```
+
+**Worked Example — Valid (a direct-child `<db src=>` supplies the program's database, S451 "11a"):**
+
+```scrml
+<program>
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${ function noop() { return 1 } }
+  </db>
+  <channel name="chat" topic="lobby">
+    ${
+      <messages> = []
+      function pushUser(id) {
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()   // runs on app.db
+        broadcast(u)                                             // passwordHash stripped (§14.8.9)
+      }
+    }
+  </>
+  <div><p>hi</p></div>
+</program>
+```
+
+The `<program>` has no `db=`, and `<db src="app.db">` is its only direct-child `<db>`, so the
+program is a database scope on `app.db`. The `<channel>` (which §38.1 requires to sit directly in
+`<program>`) has no nearer scope, so its `?{}` runs on `app.db`; the `<db>`'s `protect=` covers it,
+and the row `broadcast` publishes is stripped of `passwordHash` (§14.8.9 channel egress). The
+`<schema>` declares for `app.db` (§39.3).
+
+**Worked Example — two direct-child `<db src=>` in a `db=`-less program (none supplies):**
+
+```scrml
+<program>
+  <db src="a.db" tables="users"> ${ … ?{`SELECT … FROM users`} … } </db>   // runs on a.db
+  <db src="b.db" tables="items"> ${ … ?{`SELECT … FROM items`} … } </db>   // runs on b.db
+  ${ function f() { return ?{`SELECT 1`}.get() } }                         // Error E-SQL-004
+</program>
+```
+
+Each `<db>` scopes its own children; neither supplies the program, so the `?{}` outside both has
+no database scope. Fix: `<program db="a.db">`, or move it inside the `<db>` it means.
 
 ### 8.2 Bound Parameter Semantics
 
@@ -9027,7 +9129,7 @@ read/write distinction.
 | E-SQL-001 | Compiler emits string interpolation into a SQL string (compiler defect, not user error) **(Reserved / spec-ahead, S263 — no fire site: a compiler-DEFECT self-check, not a user-reachable error — the developer cannot write this in scrml source; defensive invariant guard. Excluded from the freeze fireable set.)** | Error |
 | E-SQL-002 | SQL template string (after `?N` substitution) is syntactically invalid SQL **(Reserved / spec-ahead, S263 — no fire site: no compile-time SQL parser exists — Bun.SQL validates at runtime, so the "validated at compile time" claim is aspirational/spec-ahead infra. Excluded from the freeze fireable set.)** | Error |
 | E-SQL-003 | SQL template content is a runtime expression, not a literal string template | Error |
-| E-SQL-004 | `?{}` block has no database scope (`<program db=>` or `<db src=>`) in any ancestor (§8.1.1, S451). Emitted at `compiler/src/codegen/emit-server.ts:7000` and `compiler/src/codegen/emit-tool.ts:746` (impl#1 checks per file — see `g-impl1-db-resolution-not-nearest-s451`). | Error |
+| E-SQL-004 | `?{}` block has no database scope (`<program db=>`, a `<program>` whose single direct-child `<db src=>` supplies its database, or `<db src=>`) in any ancestor (§8.1.1, S451). Emitted at `compiler/src/codegen/emit-server.ts:7000` and `compiler/src/codegen/emit-tool.ts:746` (impl#1 checks per file — see `g-impl1-db-resolution-not-nearest-s451`). | Error |
 | E-SQL-005 | Unrecognized database connection string prefix in `db=` attribute | Error |
 | E-SQL-006 | `.prepare()` called on `?{}` result (removed — see §44.3) | Error |
 | E-SQL-007 | `?{}` in a non-async context (see §44.4) | Error |
@@ -10939,7 +11041,8 @@ the type is `T` alone.
 
 The two generated types for each table SHALL be inserted into the lexical scope of the
 enclosing `<db>` state block. They are accessible to all code within that block and its
-children according to normal lexical scoping rules.
+children according to normal lexical scoping rules. For a `<db>` that supplies its
+`<program>`'s database (§8.1.1, S451 "a for the channel Q"), the scope is that `<program>`'s.
 
 The two views for the same table share the same generated type name. TS resolves which view
 is in scope at each usage site using the `RouteMap` produced by RI (Stage 5):
@@ -10962,7 +11065,18 @@ during type resolution. Developer code references the type by its single generat
   scope. If a user-declared type and a generated table type share the same name, this SHALL
   be a compile error (E-TYPE-050).
 - Outside the lexical scope of the enclosing `<db>` block, the generated type name SHALL NOT
-  be accessible. It does not leak into sibling or parent scopes.
+  be accessible. It does not leak into sibling or parent scopes — with one exception: a `<db>`
+  that supplies its `<program>`'s database (a single direct-child `<db src=>` of a `<program>`
+  without `db=`, §8.1.1) SHALL have its generated types inserted into the scope of that
+  `<program>`, so they are accessible throughout the program (a `<channel>`, a `<page>`, a
+  `${ … }` beside the `<db>`), and the read-site row typing of §14.8.7 uses them for every `?{}`
+  that resolves to that database in the program. They do not leak above that `<program>`.
+  *(Provenance: ruling:user-voice-scrml.md S451 "a for the channel Q" — *"the `<db>`'s `protect=`
+  / `tables=` therefore cover queries anywhere in that program"* · supersedes: this bullet's
+  unqualified "Outside the lexical scope of the enclosing `<db>` block … SHALL NOT be accessible"
+  for a program-supplying `<db>` · direction: newly-accepting (names resolve that were
+  E-TYPE-UNKNOWN-NAME); impl#1 exposes no generated table type name at all, inside a `<db>` or
+  out (S451 probe), so no observed status moves.)*
 - The TS stage SHALL use the `RouteMap` from RI to select the full-schema or client-schema
   view at each expression that resolves to the generated type name. This selection is
   transparent to developer code.
@@ -11208,6 +11322,28 @@ value derived in SQL (`length(passwordHash)`, `passwordHash = ${x} AS ok`) strip
 `CAST`, `substr`, `coalesce`, `json_object`, `group_concat`, `pin + 0`, `"passwordHash"` and a
 scalar subquery each served the value — measured, also on main.) The redaction is the **load-bearing
 guarantee**: it is sound *by construction*, not by proving any return clean.
+
+⚑ **WHICH `?{}` A `protect=` DECLARATION COVERS (S451).** The protected origins are the
+`(table, column)` pairs named by every `protect=` declaration in the compile — each `<db>` block's
+`protect=` and each §52 type-level `protect=`. A `?{}` is covered by all of them, wherever it sits:
+inside or outside any `<db>` block, in a `<channel>`, a `<page>` or a `${ … }`, on any database
+scope. The coverage is keyed by origin, never by the lexical position of the declaring `<db>`. As a
+FLOOR that no implementation SHALL go below, a `<db>`'s `protect=` covers every `?{}` in its database
+scope: its own children, and — for a `<db>` that supplies its `<program>`'s database (§8.1.1) —
+every `?{}` anywhere in that program. Likewise, "a scope that declares `protect=` columns"
+(`E-PROTECT-005`, `W-PROTECT-005` below) is the FILE holding the declaration (limb 2: "file-scoped,
+not query-scoped"), which includes every server function, `<endpoint>` arm and `server function*`
+of a program whose database a protect-bearing `<db>` supplies — a `<channel>`'s server function
+included. No sentence of this section restricts a `protect=` declaration to the `?{}` blocks
+lexically inside its `<db>`. *(Provenance: ruling:user-voice-scrml.md S451 "a for the channel Q"
+item 1 — *"the `<db>`'s `protect=` / `tables=` therefore cover queries anywhere in that program,
+e.g. a `<channel>`'s server function"* · supersedes: nothing written — the section said "a `protect=`
+field" without naming which declarations reach which query; the compile-wide, origin-keyed reading
+stated here is the one impl#1 implements (`buildProtectContext` unions every `<db>`'s protected
+fields by table, `compiler/src/codegen/protect-egress.ts`) and is wider than the ruling's program
+floor, so it fails closed. **Reading recorded for bryan to confirm or veto:** a `protect=` on one
+database's `users.passwordHash` also strips a same-named column of ANOTHER database in the same
+compile (over-strip, never under-strip). · direction: inert for programs impl#1 compiles today.)*
 
 ⚑ **S443 round 6 — WHICH ROWS ARE TAGGED, AND WHAT AN UNKNOWN ORIGIN MEANS.** Every row a `?{}`
 lowering hands to the program SHALL carry the descriptor, whatever its terminator — `.get()`,
@@ -23567,7 +23703,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-RENDER-SHADOWED | §20.3a | A user-declared `function render` / `fn render` (or any in-scope binding named `render`) shadows the `render()` client component-render call built-in. The built-in steps aside; `render(...)` resolves to the user function (the §47 name-encoding + `fnNameMap` post-pass rewrite the call site to the encoded user-fn name, so def and call agree). Without the yield the hijack emitted `_scrml_render` directly — a name the word-boundary post-pass cannot repair — causing a def/call mismatch + runtime ReferenceError. Surfaces so the author knows the built-in is inactive for that name. `render` is NOT a reserved identifier (the hard-reserved client identifier is `reset`); this lint, not `E-RESERVED-IDENTIFIER`. Partitions into `result.warnings` (non-fatal). Mirrors `W-LOG-SHADOWED`. (Catalog addition ss16 C3; emitted at `compiler/src/type-system.ts` `checkRenderShadowing`.) | Info |
 | W-PRINT-SHADOWED | §20.7.5 | A user-declared `function print` / `fn println` (or any in-scope binding named `print` / `println`) shadows the clean-stdout `print()` / `println()` builtin (§20.7). The builtin steps aside; `print(...)` / `println(...)` resolves to the user function (the §47 name-encoding + `fnNameMap` post-pass rewrite the call site to the encoded user-fn name, so def and call agree — as for `render()`) and does NOT write host stdout. Surfaces so the author knows the builtin is inactive for that name. Name-precise: a `function print` shadows only `print`, leaving the `println` builtin active. `print` / `println` are NOT reserved identifiers (declaring `function print` is legal — this lint, not `E-RESERVED-IDENTIFIER`). Partitions into `result.warnings` (non-fatal). Reserved for promotion to `E-PRINT-SHADOWED` end-of-window once shadowing declarations migrate. Mirrors `W-LOG-SHADOWED`. (S241 — SPEC §20.7; emitted at `compiler/src/type-system.ts` `checkPrintShadowing`.) | Info |
 | W-RCDATA-BIND-VALUE-CONTENT-CONFLICT | §24 | A `<textarea>` (an RCDATA-content element) declares BOTH `bind:value=@cell` (two-way binding) AND reactive `${...}` content. These are two competing writers to the element's value; `bind:value` wins (the canonical two-way form, §5.4/§6.2) and the reactive content interpolation is dropped (NOT double-bound; no `<span data-scrml-logic>` leak into the RCDATA content). Surfaces so the author knows the content interp is inactive. Background: a reactive `${...}` in a `<textarea>`'s RCDATA content compiles to a reactive `.value` bind (not a placeholder span, which would render as literal text — 6nz-F4); when `bind:value` is also present the content bind is redundant. (S241 — 6nz-F4 RCDATA `.value`-bind carve-out; emitted at `compiler/src/codegen/emit-html.ts` as `CGError(…, "warning")`. S260 §34-vs-impl audit: severity corrected Info→Warning — the impl explicitly emits a warning, so no case could ever pin it as "info".) | Warning |
-| E-SQL-004 | §8.1.1 | `?{}` block has no database scope — no `<program db=>` and no `<db src=>` — in any ancestor, and the file is not a module-with-db-context (§44.7.1). The nearest scope of either kind resolves the `?{}` (S451 "your recs on both"). Emitted at `compiler/src/codegen/emit-server.ts:7000` and `compiler/src/codegen/emit-tool.ts:746` (impl#1 checks per file — see `g-impl1-db-resolution-not-nearest-s451`). | Error |
+| E-SQL-004 | §8.1.1 | `?{}` block has no database scope — no `<program db=>`, no `<program>` whose database a single direct-child `<db src=>` supplies (S451 "a for the channel Q"), and no `<db src=>` — in any ancestor, and the file is not a module-with-db-context (§44.7.1). The nearest scope of any kind resolves the `?{}` (S451 "your recs on both"). Emitted at `compiler/src/codegen/emit-server.ts:7000` and `compiler/src/codegen/emit-tool.ts:746` (impl#1 checks per file — see `g-impl1-db-resolution-not-nearest-s451`). | Error |
 | E-SQL-005 | §8.1.1 | Unrecognized database connection string prefix in `db=` attribute | Error |
 | E-SERVER-FN-IN-SYNC-CALLBACK | §13.2 | A **peer server-fn** call appears in a **server** function in a position where the compiler CANNOT insert `await` — a synchronous `.some`/`.sort`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a parameter default. scrml has no source `await` (§13.1), so the compiler auto-awaits peer calls in awaitable positions; a **bare** emission here returns an unawaited Promise, which is **always truthy** — the same accept-everything hazard the async-stdlib sibling below describes. **FAIL-CLOSED** — a hard compile error rather than a silent wrong answer (§49 no-silent-bad-output). Resolution: restructure so the call runs in the server function's async body (e.g. hoist it into a `for` loop). The peer-server-fn twin of `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`. (Catalog addition S305 — the code was LIVE at `compiler/src/codegen/emit-server.ts` and reachable from source [verified by execution], but carried no row: its sibling's row named it in prose while it had none of its own, so the freeze gate could neither pin nor honestly defer it. Closes `g-e-server-fn-in-sync-callback-uncatalogued`.) | Error |
 | E-ASYNC-STDLIB-IN-SYNC-CALLBACK | §13.2 | A Promise-returning stdlib call (`scrml:auth` `verifyPassword`/`hashPassword`, `scrml:crypto`, `scrml:redis`, `scrml:http`, …) appears in a **server** function in a position where the compiler CANNOT insert `await`: a synchronous `.some`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a parameter default (`await` is illegal in all three — a sync callback yields values, not Promises, and a default is evaluated eagerly). scrml has no source `await` (§13.1), so the compiler auto-awaits Promise-returning stdlib calls in awaitable positions (§13.2) — but a **bare** emission here returns an unawaited Promise, which is **always truthy**: `hashes.some(h => verifyPassword(pw, h))` accepts EVERY password (an accept-all auth bypass). **FAIL-CLOSED** — a hard compile error rather than a silent security leak (§49 no-silent-bad-output). Resolution: restructure so the call runs in the server function's async body — e.g. hoist it into a `for` loop (`for (const x of xs) { const r = verifyPassword(…); … }`). The async-stdlib sibling of the peer-server-fn `E-SERVER-FN-IN-SYNC-CALLBACK`. (Issue #26 Finding-2 — S239 adversarial review of the auth-bypass auto-await fix; emitted at `compiler/src/codegen/emit-server.ts`.) | Error |
@@ -24230,7 +24366,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-PROG-003 | §40.4 | A reference inside a nested `<program>` reaches a parent-scope binding. Nested programs are fully isolated — no bindings, types, `use`, or `import` declarations propagate across the `<program>` boundary. Resolution: declare the binding inside the nested program, or import it via a `use foreign:` declaration. (Catalog addition S84 Wave 2 #5; full prose at §40 line 17980.) | Error |
 | E-PROG-004 | §40.4 | A cross-program function call is not `await`-ed. Cross-program calls return `Promise<T>`; the result must be awaited. (Catalog addition S84 Wave 2 #5; full prose at §40 line 18009.) | Error |
 | E-PROG-005 | §40.4 | Circular nested-program dependency detected. Program A nests/uses program B, B nests/uses A. (Catalog addition S84 Wave 2 #5; full prose at §40 line 18040.) | Error |
-| E-SCHEMA-001 | §39.12 | A `<schema>` block appears in a file whose `<program>` root has no `db=` attribute. The schema block declares table shapes for the program's database driver; without a driver the schema has no target. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16683.) | Error |
+| E-SCHEMA-001 | §39.12 | A `<schema>` block appears in a file whose `<program>` root has no database — no `db=` attribute, and no single direct-child `<db src=>` supplying it (§8.1.1, S451 "a for the channel Q"; impl#1 still requires `db=` — `g-impl1-db-src-program-supply-divergences-s451`; emitted at `compiler/src/gauntlet-phase1-checks.js:770`). The schema block declares table shapes for the program's database driver; without a driver the schema has no target. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16683.) | Error |
 | E-SCHEMA-002 | §39.12 | A file contains more than one `<schema>` block. Each file declares at most one schema. (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16684.) | Error |
 | E-SCHEMA-003 | §39.12 | A `<schema>` block is nested inside any block other than the `<program>` root (logic context, component body, `<page>`, `<db>`, etc.). Schemas are immediate children of `<program>` only. (Catalog addition S84 Wave 2 #5; placement amended S130 phase-2 D per Q7 ratification; full prose at §39.12.) | Error |
 | E-SCHEMA-004 | §39.12 | A `<schema>` column declaration uses an unrecognized column type name. The legal type set is enumerated per-driver (SQLite, Postgres, MySQL). (Catalog addition S84 Wave 2 #5; full prose at §39.12 line 16977.) | Error |
@@ -26430,7 +26566,7 @@ The v1 capture substrate is **Postgres LISTEN/NOTIFY**, chosen (DD 2026-07-06) b
 
 ### 39.1 Overview
 
-scrml provides a `<schema>` state block for declaring the desired database schema directly in source. The compiler reads the declared schema at compile time, reads the actual schema from the database at the path named in the enclosing `<program db="...">` attribute, computes the diff, and generates migration SQL. The `scrml migrate` CLI command applies that SQL to the live database.
+scrml provides a `<schema>` state block for declaring the desired database schema directly in source. The compiler reads the declared schema at compile time, reads the actual schema from the program's database (the enclosing `<program db="...">` attribute, or the direct-child `<db src="...">` that supplies a `db=`-less program's database, §8.1.1), computes the diff, and generates migration SQL. The `scrml migrate` CLI command applies that SQL to the live database.
 
 **Design principle:** The schema is code. The developer declares what the database SHOULD look like. The compiler figures out what it takes to get there. The developer never writes `ALTER TABLE` by hand.
 
@@ -26448,7 +26584,7 @@ column-constraint ::= 'primary key' | 'not null' | 'unique' | 'default' '(' lite
                     | 'rename from' identifier
 ```
 
-A `<schema>` block appears as an immediate child of the `<program>` root, alongside (not nested inside) `<db>` / `<page>` / other program children. It does not require the `src=` or `tables=` attributes of `<db>` because the database path is read from the enclosing `<program db="...">`.
+A `<schema>` block appears as an immediate child of the `<program>` root, alongside (not nested inside) `<db>` / `<page>` / other program children. It does not require the `src=` or `tables=` attributes of `<db>` because the database path is read from the enclosing `<program>`'s database (its `db=`, or the direct-child `<db src=>` that supplies it — §39.3).
 
 **Raw `CREATE TABLE` heads are unqualified.** A `<schema>` body MAY also declare a table with raw SQL `CREATE TABLE <name> ( … )` DDL (the form every §14.8.9 / §14.8.10 floor reads alongside the declarative `table-declaration`; see `W-SCHEMA-NO-TABLES-DECLARED`). *(provenance: ruling:user-voice-scrml.md S435 "1 both" — gap `g-tenant-floor-inert-for-a-two-qualifier-create-table`.)*
 
@@ -26497,11 +26633,11 @@ A `<schema>` block appears as an immediate child of the `<program>` root, alongs
 
 ### 39.3 `<schema>` Block Attributes
 
-The `<schema>` block takes no attributes. The database path is always read from the enclosing `<program db="...">` attribute.
+The `<schema>` block takes no attributes. The database path is always read from the enclosing `<program>`'s database: its `db=` attribute, or — for a `<program>` without `db=` — the `src=` of the single direct-child `<db>` that supplies it (§8.1.1, S451).
 
 **Normative statements:**
 
-- A `<schema>` block SHALL be valid only inside a file whose `<program>` root element has a `db=` attribute. A `<schema>` block without an enclosing `<program db="...">` SHALL be a compile error (E-SCHEMA-001).
+- A `<schema>` block SHALL be valid only inside a `<program>` that has a database: a `db=` attribute, or a single direct-child `<db src="...">` that supplies the program's database (§8.1.1). The `<schema>` declares for that database. A `<schema>` block in a `<program>` with neither SHALL be a compile error (E-SCHEMA-001). *(Provenance: ruling:user-voice-scrml.md S451 "a for the channel Q" — item 1, *"the program becomes the database scope for everything in it"*; the motivating program `conformance/cases/protect/channel-broadcast-strip` declares its table in a `<schema>` beside `<db src="app.db">` · supersedes: "valid only inside a file whose `<program>` root element has a `db=` attribute. A `<schema>` block without an enclosing `<program db="...">` SHALL be a compile error" · direction: newly-accepting; impl#1 still emits E-SCHEMA-001 for this shape — `g-impl1-db-src-program-supply-divergences-s451`.)*
 - A file SHALL NOT contain more than one `<schema>` block. A second `<schema>` block in the same file SHALL be a compile error (E-SCHEMA-002).
 - A `<schema>` block SHALL appear as an immediate child of the `<program>` root. A `<schema>` block nested inside any other block (logic context, component body, `<page>`, `<db>`, etc.) SHALL be a compile error (E-SCHEMA-003).
 
@@ -26778,7 +26914,7 @@ At compile time, the compiler writes two files alongside the database path:
 
 ### 39.9 Interaction with `<db>` and `?{}` SQL Contexts
 
-- A `<schema>` block and a `<db>` block in the same file refer to the same database (from `<program db="..."`). They are complementary, not competing.
+- A `<schema>` block and a `<db>` block in the same file refer to the same database (the program's database — its `db=`, or the `src=` of the direct-child `<db>` that supplies it, §8.1.1). They are complementary, not competing.
 - `<schema>` declares structure. `<db>` scopes queries. The developer MAY have one without the other.
 - A file with only `<schema>` and no `<db>` is valid. The compiler generates the migration artifacts but produces no SQL query infrastructure.
 - A file with `<db>` but no `<schema>` is valid and is the pre-existing behavior from §11. No migration artifacts are generated.
@@ -26877,7 +27013,7 @@ rule); §39.1 (`<schema>` opener forms).
 
 | Code | Trigger | Severity |
 |---|---|---|
-| E-SCHEMA-001 | `<schema>` block without `<program db="...">` attribute | Error |
+| E-SCHEMA-001 | `<schema>` block in a `<program>` with no database — neither `db=` nor a single direct-child `<db src=>` supplying it (§8.1.1, S451; emitted at `compiler/src/gauntlet-phase1-checks.js:770`, which still requires `db=` — `g-impl1-db-src-program-supply-divergences-s451`) | Error |
 | E-SCHEMA-002 | More than one `<schema>` block in the same file | Error |
 | E-SCHEMA-003 | `<schema>` block nested inside any block other than the `<program>` root | Error |
 | E-SCHEMA-004 | Unrecognized column type name in `<schema>` | Error |
@@ -29238,6 +29374,8 @@ No shared reactive state across program boundaries. State changes must be sent e
 
 A nested `<program db="...">` creates its own database driver scope. `?{}` blocks inside resolve to the nested program's `db=`, not the parent's.
 
+A `<program>` without `db=` is a database scope too when exactly one `<db src="...">` is its direct child: that `<db>` supplies the program's database, and every `?{}` in the program with no nearer scope resolves to it (§8.1.1, S451 "a for the channel Q"). This applies to a nested `<program>` as to the root: a direct child of the nested program supplies the nested program only. With two or more direct-child `<db src=>`, none supplies the program (each scopes its own children); a `<program db=>` keeps its own `db=` whatever `<db>` children it has.
+
 ### 43.7 Error Codes
 
 | Code | Trigger | Severity |
@@ -29256,12 +29394,12 @@ A nested `<program db="...">` creates its own database driver scope. `?{}` block
 
 ### 44.1 Overview
 
-`?{}` is a context-sensitive database query sigil that generates driver calls for the database of its closest ancestor database scope — a `<program db="...">` or a `<db src="...">` block, whichever is nearer (§8.1.1, S451). The compile target is **Bun.SQL** — a unified tagged-template SQL client covering SQLite, PostgreSQL, and MySQL.
+`?{}` is a context-sensitive database query sigil that generates driver calls for the database of its closest ancestor database scope — a `<program db="...">`, a `<program>` whose database its single direct-child `<db src="...">` supplies, or a `<db src="...">` block, whichever is nearer (§8.1.1, S451; the supplied-program scope is S451 "a for the channel Q"). The compile target is **Bun.SQL** — a unified tagged-template SQL client covering SQLite, PostgreSQL, and MySQL.
 
 ### 44.2 Driver Resolution
 
 1. Walk upward from the `?{}` block through its enclosing elements.
-2. The first database scope reached — a `<program>` with `db=` or a `<db src=>` block — determines the driver and the database (§8.1.1; S451 "your recs on both" — supersedes "Walk upward … through enclosing `<program>` elements" / "First `<program>` with `db=` determines the driver").
+2. The first database scope reached — a `<program>` with `db=`, a `<program>` without `db=` whose single direct-child `<db src=>` supplies its database, or a `<db src=>` block — determines the driver and the database (§8.1.1; S451 "your recs on both" — supersedes "Walk upward … through enclosing `<program>` elements" / "First `<program>` with `db=` determines the driver"; the supplied-program scope is S451 "a for the channel Q"). A `db=`-less `<program>` with two or more direct-child `<db src=>` is not supplied by any of them.
 3. Parse the connection string prefix.
 4. If no database scope is found, emit E-SQL-004 (unless the file is a module-with-db-context, §44.7.1).
 5. A SQLite file path resolves against the directory of the declaring `.scrml` file, and is
@@ -29309,7 +29447,7 @@ Which connection a transaction runs on, and what concurrent requests may see of 
 
 | Code | Trigger | Severity |
 |---|---|---|
-| E-SQL-004 | `?{}` has no database scope (`<program db=>` or `<db src=>`) in any ancestor AND the file is not a module-with-db-context (§44.7.1). Emitted at `compiler/src/codegen/emit-server.ts:7000` and `compiler/src/codegen/emit-tool.ts:746` (impl#1 checks per file — see `g-impl1-db-resolution-not-nearest-s451`). | Error |
+| E-SQL-004 | `?{}` has no database scope (`<program db=>`, a `<program>` whose single direct-child `<db src=>` supplies its database, or `<db src=>`) in any ancestor AND the file is not a module-with-db-context (§44.7.1). Emitted at `compiler/src/codegen/emit-server.ts:7000` and `compiler/src/codegen/emit-tool.ts:746` (impl#1 checks per file — see `g-impl1-db-resolution-not-nearest-s451`). | Error |
 | E-SQL-005 | Unsupported db prefix (e.g. `mongodb:`) | Error |
 | E-SQL-006 | `.prepare()` called on `?{}` result | Error |
 | E-SQL-007 | `?{}` in a non-async context | Error |
