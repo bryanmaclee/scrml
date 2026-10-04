@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 240 | 6 |
 | MED | 493 | 4 |
-| LOW | 246 | 0 |
+| LOW | 247 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22727,3 +22727,7 @@ Governing: SPEC §19.4.3 "Handling in a value position" + §19.7.3 (S451 ruling 
 ### g-impl1-paren-free-binder-arity-s451 — impl#1 DIVERGENCE (filed, not fixed): a parenthesis-free `!{}` binder on a multi-field variant silently binds the FIRST field, and on a unit variant binds the raw `.data` — E-TYPE-021 is not emitted for either — `NEW S451; LOW; open`
 <!-- @gap id=g-impl1-paren-free-binder-arity-s451 sev=LOW status=open locus=compiler/src/codegen/emit-logic.ts(the guarded-expr arm binder lowering projects the first declared field, or `.data` when there is none; no arity check against the variant) prov=ruling:user-voice-scrml.md-S451-"1a-2-yes-3-yes-4a"-item-2 -->
 Governing: SPEC §19.4.3 "A binder without parentheses binds the payload" + §18.7 (S451 ruling 2). Measured on `25677da72`: `type E:enum = { A, B(msg: string), C(x: number, y: number) }`, `let r = risky(n) !{ | .A x :> 0  | .B m :> m.length  | .C c :> c }` → exit 0; the client JS binds `const x = …data`, `const m = …data.msg` (as ruled), `const c = …data.x` (rule: E-TYPE-021 for `.A x` and `.C c`). Corpus: no file under `examples/` or `conformance/cases/` writes a parenthesis-free binder; the 46 arms in 12 `samples/` files are the legacy `::SQLError e` / `_ e` shape (SPEC §19.4.3 note).
+
+### g-impl1-handler-on-non-failable-s451 — impl#1 DIVERGENCE (filed, not fixed): a `!{}` handler on a call to an ordinary (non-`!`) function, or on an expression that is not a call, compiles at exit 0 with a dead guard — E-ERROR-013 is not emitted — `NEW S451; LOW; open`
+<!-- @gap id=g-impl1-handler-on-non-failable-s451 sev=LOW status=open locus=searched:compiler/src(no E-ERROR-013; the guarded-expr checks in type-system.ts test the arms' exhaustiveness, never whether the guarded expression is failable) prov=ruling:user-voice-scrml.md-S451-"1a-2-yes-3-yes-4a"-item-3 -->
+Governing: SPEC §19.4.3 "A `!{}` handler on something that cannot fail is an error" (S451 ruling 3). Measured on `25677da72`: `function safe(n: number) { return n * 2 }`, `let r = safe(n) !{ | _ :> 0 }` → exit 0; the client JS emits `if (_scrml__scrml_result_4 && _scrml__scrml_result_4.__scrml_error) { … }` on a value that never carries the flag, so the arm is dead and nothing tells the author. LOW: dead code, no wrong value. Corpus: 2 sites (`samples/compilation-tests/control-015-try-catch.scrml`, `samples/compilation-tests/error-004-in-logic.scrml`); `samples/login.scrml` depends on §19.9.5's reach.
