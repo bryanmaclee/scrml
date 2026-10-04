@@ -17072,19 +17072,32 @@ function reemitHandlerStringToken(tok) {
  * `!{}` handler arms use the §18.2 `match`-arm grammar (ruling:
  * user-voice-scrml.md S452 "c looks right"): `arm-pattern (':>' | '=>' | '->')
  * arm-body` with no leading `|`. The `|`-prefixed spelling stays accepted
- * unchanged. Recognized here (the arm arrow is REQUIRED, which is what keeps a
- * member access like `obj.Field` or a qualified `E::V(x)` inside an arm body
- * from being read as the next arm):
+ * unchanged. A pipe-less head is EXACTLY one of:
  *
- *   .Variant [binder | '(' binder (',' binder)* ')'] arrow
- *   ::Variant [binder | '(' binder (',' binder)* ')'] arrow
+ *   .Variant        ['(' binder (',' binder)* ')'] arrow
+ *   ::Variant       ['(' binder (',' binder)* ')'] arrow
+ *   Type.Variant    ['(' binder (',' binder)* ')'] arrow
+ *   Type::Variant   ['(' binder (',' binder)* ')'] arrow
  *   _ arrow
  *   else arrow
  *
  * where arrow is `:>` / `=>` (one OPERATOR token) or `-` `>` (two PUNCT
- * tokens). The `.Variant` head requires an uppercase variant name, exactly as
- * the `|`-prefixed path does. Returns false for anything else; the caller then
- * falls through to the pre-existing branches.
+ * tokens), and it must come IMMEDIATELY after the pattern. Two rules keep the
+ * tail of an arm body from being read as the next arm's head (S452 review r1:
+ * `.Bad(m) :> S.Empty` + newline + `_ :> …` was read as head `.Empty` with
+ * binder `_` — a silent miscompile):
+ *
+ *   1. A pipe-less head never takes a parenthesis-free binder. §19.4.5 (S452)
+ *      admits the paren-free binder (`| .V m :>`) ONLY after a leading `|`, so
+ *      a pipe-less pattern is followed by `( … )` or the arrow, nothing else.
+ *   2. A `.` / `::` glued to the preceding token (no whitespace between them)
+ *      is member / qualified access and never starts a pipe-less head; the
+ *      same holds for a `Type` glued after a `.` / `::`.
+ *
+ * Variant names (and `Type`) must start uppercase, as the `|`-prefixed `.V`
+ * path requires. Returns false for anything else; the caller then falls
+ * through to the pre-existing branches (the old short form `Name :>` among
+ * them, unchanged).
  */
 function isPipelessErrorArmStart(tokens, i) {
   const at = (k) => (k < tokens.length ? tokens[k] : null);
@@ -17097,38 +17110,71 @@ function isPipelessErrorArmStart(tokens, i) {
   };
   const t0 = at(i);
   if (!t0) return false;
+  // Rule 2 — a token glued to the previous one continues an expression.
+  if (_errArmGluedToPrev(tokens, i)) return false;
   // Wildcard: `_ :>` / `else :>` (no binder — the whole-error binder `_ err`
   // is a separate gap and is not admitted here).
   if ((t0.kind === "IDENT" && t0.text === "_") || (t0.kind === "KEYWORD" && t0.text === "else")) {
     return isArrowAt(i + 1);
   }
-  let k;
-  if (t0.kind === "PUNCT" && t0.text === ".") {
-    const n = at(i + 1);
-    if (!n || (n.kind !== "IDENT" && n.kind !== "KEYWORD") || !/^[A-Z]/.test(n.text ?? "")) return false;
-    k = i + 2;
-  } else if (t0.kind === "OPERATOR" && t0.text === "::") {
-    const n = at(i + 1);
-    if (!n || (n.kind !== "IDENT" && n.kind !== "KEYWORD")) return false;
-    k = i + 2;
-  } else {
-    return false;
-  }
-  // Optional binder: `(a, b, …)` or a single bare identifier.
-  const b = at(k);
+  const k = _errArmVariantPatternEnd(tokens, i);
+  if (k < 0) return false;
+  // Optional parenthesized binder `(a, b, …)` — rule 1: no paren-free binder.
+  let j = k;
+  const b = at(j);
   if (b && b.kind === "PUNCT" && b.text === "(") {
-    k++;
-    while (at(k) && !(at(k).kind === "PUNCT" && at(k).text === ")")) {
-      const t = at(k);
-      if (t.kind === "IDENT" || (t.kind === "PUNCT" && t.text === ",")) { k++; continue; }
+    j++;
+    while (at(j) && !(at(j).kind === "PUNCT" && at(j).text === ")")) {
+      const t = at(j);
+      if (t.kind === "IDENT" || (t.kind === "PUNCT" && t.text === ",")) { j++; continue; }
       return false;
     }
-    if (!at(k)) return false;
-    k++; // `)`
-  } else if (b && b.kind === "IDENT") {
-    k++;
+    if (!at(j)) return false;
+    j++; // `)`
   }
-  return isArrowAt(k);
+  return isArrowAt(j);
+}
+
+/** Is a `.` / `::` token, by kind and text? */
+function _errArmIsSep(t) {
+  return !!t && ((t.kind === "PUNCT" && t.text === ".") || (t.kind === "OPERATOR" && t.text === "::"));
+}
+
+/** S452 rule 2 — does token `i` touch token `i-1` (no whitespace between)? */
+function _errArmGluedToPrev(tokens, i) {
+  if (i <= 0) return false;
+  const prev = tokens[i - 1];
+  const cur = tokens[i];
+  const pe = prev && prev.span && typeof prev.span.end === "number" ? prev.span.end : null;
+  const cs = cur && cur.span && typeof cur.span.start === "number" ? cur.span.start : null;
+  if (pe === null || cs === null || pe !== cs) return false;
+  // Glued only matters where it makes `cur` a continuation: `.`/`::` after any
+  // token (member / qualified access), or a name right after a `.`/`::`.
+  return _errArmIsSep(cur) || _errArmIsSep(prev);
+}
+
+/**
+ * Variant-pattern head at `i` — `.V`, `::V`, `T.V`, `T::V` (V and T start
+ * uppercase for the `.` / `T` forms; `::V` keeps the legacy `|`-path rule of
+ * any name). Returns the index just past the variant name, or -1.
+ */
+function _errArmVariantPatternEnd(tokens, i) {
+  const at = (k) => (k < tokens.length ? tokens[k] : null);
+  const isName = (t) => !!t && (t.kind === "IDENT" || t.kind === "KEYWORD");
+  const upper = (t) => /^[A-Z]/.test((t && t.text) || "");
+  const t0 = at(i);
+  if (!t0) return -1;
+  if (t0.kind === "PUNCT" && t0.text === ".") {
+    return isName(at(i + 1)) && upper(at(i + 1)) ? i + 2 : -1;
+  }
+  if (t0.kind === "OPERATOR" && t0.text === "::") {
+    return isName(at(i + 1)) ? i + 2 : -1;
+  }
+  if (t0.kind === "IDENT" && upper(t0) && _errArmIsSep(at(i + 1))) {
+    const v = at(i + 2);
+    return isName(v) && upper(v) ? i + 3 : -1;
+  }
+  return -1;
 }
 
 /**
@@ -17163,6 +17209,7 @@ function parseErrorTokens(tokens, filePath) {
       // Pattern: `::TypeName`, `.Variant` (bare-dot per §14.10 / M9), or `_`
       let pattern = "_";
       let binding = "";
+      let armTypeQualifier = ""; // S452 — `T` of a `T.V` / `T::V` pattern
 
       if (i < tokens.length && tokens[i].kind === "OPERATOR" && tokens[i].text === "::") {
         i++; // consume `::`
@@ -17190,6 +17237,18 @@ function parseErrorTokens(tokens, filePath) {
       } else if (i < tokens.length && tokens[i].text === "_") {
         pattern = "_";
         i++;
+      } else if (
+        // S452 — type-qualified variant pattern `T.V` / `T::V` (§19.4.5
+        // legacy-arm-pattern + §18.2 arm heads). Pre-S452 `T` was taken as a
+        // paren-free binder and `.V…` leaked into the handler. The qualifier
+        // is recorded; the pattern is the same `.V` / `::V` the unqualified
+        // spelling produces (dispatch is by variant name).
+        i < tokens.length && tokens[i].kind === "IDENT" &&
+        _errArmVariantPatternEnd(tokens, i) === i + 3
+      ) {
+        armTypeQualifier = tokens[i].text;
+        pattern = (tokens[i + 1].text === "::" ? "::" : ".") + tokens[i + 2].text;
+        i += 3;
       } else if (
         // S452 — `else` is the §18.2 wildcard spelling (`| else :>` / `else :>`),
         // the same pattern as `_`. Pre-S452 the `else` was left unconsumed and
@@ -17290,6 +17349,7 @@ function parseErrorTokens(tokens, filePath) {
         handler: _handlerTrimmed,
         handlerExpr: _parseHandlerExpr(_handlerTrimmed, filePath, tokenSpan(armStart, filePath)?.start ?? 0),
         armArrow,
+        ...(armTypeQualifier ? { typeQualifier: armTypeQualifier } : {}),
         span: tokenSpan(armStart, filePath),
       });
     } else if (tok.kind === "OPERATOR" && tok.text === "::") {

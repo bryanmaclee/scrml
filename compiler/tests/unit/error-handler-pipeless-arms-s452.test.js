@@ -44,6 +44,7 @@ const errorCodes = (result) => (result.errors ?? []).map((e) => e.code);
 const PRELUDE = [
   "<program>",
   "type E:enum = { Bad(msg: string), Pair(a: number, b: number), Gone }",
+  "type S:enum = { Empty, Unknown, Full }",
   "function risky(n)! -> E {",
   "    if (n < 2) fail E::Bad(\"bad-msg\")",
   "    if (n < 3) fail E::Pair(3, 4)",
@@ -87,9 +88,21 @@ const CASES = [
     piped: VALUE(["        | .Bad(m) :> m", "        | .Pair(a, b) :> \"pair\"", "        | .Gone :> \"gone\""]),
   },
   {
-    name: "paren-free binder `.V m :>`",
-    pipeless: VALUE(["        .Bad m :> m", "        _ :> \"other\""]),
+    // §19.4.5 (S452): the paren-free binder exists ONLY after a `|`; its
+    // canonical pipe-less spelling is `.V(m)`.
+    name: "legacy paren-free binder `| .V m :>` ≡ canonical `.V(m) :>`",
+    pipeless: VALUE(["        .Bad(m) :> m", "        _ :> \"other\""]),
     piped: VALUE(["        | .Bad m :> m", "        | _ :> \"other\""]),
+  },
+  {
+    name: "type-qualified heads `T.V(a) :>` / `T::V :>`",
+    pipeless: VALUE(["        E.Bad(m) :> m", "        E::Pair(a, b) :> \"pair\"", "        E.Gone :> \"gone\""]),
+    piped: VALUE(["        | E.Bad(m) :> m", "        | E::Pair(a, b) :> \"pair\"", "        | E.Gone :> \"gone\""]),
+  },
+  {
+    name: "arm bodies ending in `S.V` / `S::V` before `_` / `.V` heads (r1 HIGH shape)",
+    pipeless: VALUE(["        .Pair(a, b) :> S.Full", "        .Gone :> S::Full", "        .Bad(m) :> S.Empty", "        _ :> S.Unknown"]),
+    piped: VALUE(["        | .Pair(a, b) :> S.Full", "        | .Gone :> S::Full", "        | .Bad(m) :> S.Empty", "        | _ :> S.Unknown"]),
   },
   {
     name: "`::V(a) :>` head",
@@ -198,5 +211,111 @@ describe("S452 — pipe-less arms are still checked", () => {
     ])));
     expect(errorCodes(result)).toEqual([]);
     expect(runGo(clientJs, 1)).toBe(7);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S452 review r1 (HIGH, silent miscompile): an arm body ending in `X.V` /
+// `X::V` followed by an arm starting `_` or a bare name was mis-split — the
+// r1 head recognizer read `.Empty _ :>` as head `.Empty` + paren-free binder
+// `_`, emitting `_result = S;`, a fake `variant === "Empty"` arm, and a
+// wildcard that returned the raw error. Root fix: a pipe-less head never takes
+// a paren-free binder (§19.4.5), and a `.`/`::` glued to the previous token is
+// never a head. Each repro asserts the correct JS AND the run-time arm.
+// ---------------------------------------------------------------------------
+
+describe("S452 r2 — arm-body tail `X.V` / `X::V` is never read as the next arm's head", () => {
+  const assertShape = (clientJs) => {
+    expect(clientJs).not.toMatch(/=\s*S;/);
+    expect(clientJs).not.toContain('variant === "Empty"');
+    expect(clientJs).not.toContain('variant === "Full"');
+    expect(clientJs).not.toContain('variant === "Unknown"');
+  };
+
+  test("pipe-less: `.Bad(m) :> S.Empty` then `_ :> S.Unknown` (the PA repro)", () => {
+    const { result, clientJs } = compileSrc(program(VALUE([
+      "        .Pair(a, b) :> S.Full",
+      "        .Gone :> S.Full",
+      "        .Bad(m) :> S.Empty",
+      "        _ :> S.Unknown",
+    ])));
+    expect(errorCodes(result)).toEqual([]);
+    assertShape(clientJs);
+    expect(clientJs).toMatch(/= S\.Empty;/);
+    expect(runGo(clientJs, 1)).toBe("Empty");
+    expect(runGo(clientJs, 2)).toBe("Full");
+    expect(runGo(clientJs, 3)).toBe("Full");
+    expect(runGo(clientJs, 5)).toBe(5);
+  });
+
+  test("pipe-less: wildcard after an `S.V` tail catches the remaining variants", () => {
+    const { result, clientJs } = compileSrc(program(VALUE([
+      "        .Bad(m) :> S.Empty",
+      "        _ :> S.Unknown",
+    ])));
+    expect(errorCodes(result)).toEqual([]);
+    assertShape(clientJs);
+    expect(runGo(clientJs, 1)).toBe("Empty");
+    expect(runGo(clientJs, 2)).toBe("Unknown");
+    expect(runGo(clientJs, 3)).toBe("Unknown");
+  });
+
+  test("mixed: `| .Bad(m) :> S.Empty` then pipe-less `_ :> S.Unknown`", () => {
+    const { result, clientJs } = compileSrc(program(VALUE([
+      "        | .Bad(m) :> S.Empty",
+      "        _ :> S.Unknown",
+    ])));
+    expect(errorCodes(result)).toEqual([]);
+    assertShape(clientJs);
+    expect(runGo(clientJs, 1)).toBe("Empty");
+    expect(runGo(clientJs, 2)).toBe("Unknown");
+  });
+
+  test("`::` tail: `.Bad(m) :> E::Gone` then `_ :> 0`", () => {
+    const { result, clientJs } = compileSrc(program(VALUE([
+      "        .Bad(m) :> E::Gone",
+      "        _ :> 0",
+    ])));
+    expect(errorCodes(result)).toEqual([]);
+    expect(clientJs).not.toMatch(/=\s*E;/);
+    expect(runGo(clientJs, 1)).toBe("Gone");
+    expect(runGo(clientJs, 2)).toBe(0);
+    expect(runGo(clientJs, 3)).toBe(0);
+  });
+
+  test("mixed `::` tail: `| .Bad(m) :> S::Empty` then `_ :> S.Unknown`", () => {
+    const { result, clientJs } = compileSrc(program(VALUE([
+      "        | .Bad(m) :> S::Empty",
+      "        _ :> S.Unknown",
+    ])));
+    expect(errorCodes(result)).toEqual([]);
+    assertShape(clientJs);
+    expect(runGo(clientJs, 1)).toBe("Empty");
+    expect(runGo(clientJs, 3)).toBe("Unknown");
+  });
+
+  test("`S.Empty` tail then the old short form `Gone :> …` (short form unchanged)", () => {
+    const { result, clientJs } = compileSrc(program(VALUE([
+      "        | .Bad(m) :> S.Empty",
+      "        | .Pair(a, b) :> S.Unknown",
+      "        Gone :> S.Full",
+    ])));
+    expect(errorCodes(result)).toEqual([]);
+    assertShape(clientJs);
+    expect(runGo(clientJs, 1)).toBe("Empty");
+    expect(runGo(clientJs, 2)).toBe("Unknown");
+    expect(runGo(clientJs, 3)).toBe("Full");
+  });
+
+  test("pipe-less `S.Empty` tail then pipe-less `.Gone :>`", () => {
+    const { result, clientJs } = compileSrc(program(VALUE([
+      "        .Bad(m) :> S.Empty",
+      "        .Pair(a, b) :> S.Unknown",
+      "        .Gone :> S.Full",
+    ])));
+    expect(errorCodes(result)).toEqual([]);
+    assertShape(clientJs);
+    expect(runGo(clientJs, 1)).toBe("Empty");
+    expect(runGo(clientJs, 3)).toBe("Full");
   });
 });
