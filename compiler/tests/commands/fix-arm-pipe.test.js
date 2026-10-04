@@ -197,8 +197,98 @@ describe("arm-pipe — handlers in attribute values, and what it reports instead
     const src = program(["    const r = risky(n) !{", "        | Mystery e -> \"x\"", "        | .Gone :> \"g\"", "    }", "    return r"]);
     const r = fix(src, { verify: false });
     expect(r.changed).toBe(false);
-    expect(r.blockers.length).toBe(1);
+    // Both `|`-led arms are reported: the unrewritable one, and its sibling left with it.
+    expect(r.blockers.length).toBe(2);
     expect(r.blockers[0].reason).toContain("no arm arrow");
+    expect(r.blockers[1].reason).toContain("left as written with the rest of its handler");
+  });
+
+  test("a component-body blocker does not recommend deleting the `|` (impl#1 gap)", () => {
+    const src = [
+      "type LoadError:enum = { Empty, Bad }",
+      "${",
+      "    function risky()! -> LoadError { fail LoadError.Empty }",
+      "    const Btn = <button onclick={ risky() !{ | .Empty :> @r = 1 | .Bad :> @r = 2 } }>go</>",
+      "}",
+      "<r> = 0",
+      "<Btn/>",
+      "",
+    ].join("\n");
+    const [b] = fix(src).blockers;
+    expect(b.reason).toContain("keep the `|`");
+    expect(b.reason).toContain("g-impl1-component-body-pipeless-handler-s452");
+  });
+});
+
+describe("arm-pipe — S452 review r1: every `|`-led arm is rewritten or reported", () => {
+  test("a handler NESTED in another arm's body is rewritten (verified)", () => {
+    const src = program([
+      "    const r = risky(n) !{",
+      "        | .Bad(m) :> {",
+      "            const x = risky(2) !{",
+      "                | .Gone :> 1",
+      "                | _ :> 2",
+      "            }",
+      "            return x",
+      "        }",
+      "        | _ :> 3",
+      "    }",
+      "    return r",
+    ]);
+    const r = fix(src);
+    expect(r.blockers).toEqual([]);
+    expect(r.applied.length).toBe(4);
+    expect(r.output).not.toMatch(/^\s*\|/m);
+    expect(count(codesOf(r.output), "W-ARM-PIPE-LEGACY")).toBe(0);
+  });
+
+  test("a standalone `!{ … }` error-effect block is rewritten", () => {
+    const src = "<div>\n    !{\n        | ::ValidationError(err) -> let msg = \"v\"\n        | _ err -> let msg = \"x\"\n    }\n    <p>t</>\n</div>\n";
+    const r = fix(src);
+    expect(r.blockers).toEqual([]);
+    expect(r.output).toBe(src.split("        | ").join("        "));
+  });
+
+  test("a `!{}` impl#1 never parses as a handler (object-literal method) is REPORTED", () => {
+    const src = [
+      "<program>",
+      "${",
+      "    type KvError:enum = { ParseFailed(message: string) }",
+      "    export function make() {",
+      "        return {",
+      "            get(v) ! -> KvError {",
+      "                return safeCall(() => JSON.parse(v)) !{",
+      "                    | ::Thrown(msg, name) -> { fail KvError::ParseFailed(msg) }",
+      "                }",
+      "            }",
+      "        }",
+      "    }",
+      "}",
+      "</program>",
+      "",
+    ].join("\n");
+    const r = fix(src, { verify: false });
+    expect(r.changed).toBe(false);
+    expect(r.blockers.length).toBe(1);
+    expect(r.blockers[0].line).toBe(8);
+    expect(r.blockers[0].reason).toContain("does not parse as a handler");
+  });
+
+  test("a file impl#1's block splitter rejects is REPORTED, not passed as clean", () => {
+    const src = "<div>\n<p>unclosed\n${\n    const r = f() !{\n        | .A :> 1\n    }\n}\n";
+    const r = fix(src, { verify: false });
+    expect(r.changed).toBe(false);
+    expect(r.blockers.length).toBe(1);
+    expect(r.blockers[0].reason).toContain("E-CTX-003");
+    expect(r.blockers[0].reason).toContain("check this file by hand");
+  });
+
+  test("splitting shared-line arms in a CRLF file inserts CRLF", () => {
+    const src = program(["    const r = risky(n) !{ | .Bad(m) :> m | _ :> \"x\" }", "    return r"]).split("\n").join("\r\n");
+    const r = fix(src);
+    expect(r.blockers).toEqual([]);
+    expect(r.changed).toBe(true);
+    expect(r.output.replace(/\r\n/g, "")).not.toContain("\n");
   });
 });
 
