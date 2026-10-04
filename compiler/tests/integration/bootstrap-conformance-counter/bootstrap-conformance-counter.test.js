@@ -39,6 +39,7 @@ beforeAll(async () => {
 const KNOWN = {
   "codes/pass-codes": ["PASS", false],
   "codes/vacuous": ["PASS", true],
+  "codes/parse-info": ["PASS", false],
   "runtime/pass-runtime": ["PASS", false],
   "runtime/fail-runtime": ["FAIL", false],
   "runtime/codes-only": ["CODES-ONLY", true],
@@ -72,6 +73,21 @@ describe("fixture corpus — each case lands in its known bucket", () => {
     const fail = await classifyCase(boot, cs.find((x) => x.relDir === "runtime/fail-runtime"));
     expect(fail.runtimeExecuted).toBe(true);
     expect(fail.failures).toEqual(["state: cell 'count' expected 2, got 1"]);
+  }, { timeout: 60000 });
+
+  // s452-boot-arm-pipe: a parse-phase Info lint (W-ARM-PIPE-LEGACY) is an ACCEPTED form — graded,
+  // never `parse-reject`. Bite: the same source with a parse ERROR added is UNSUPPORTED/parse-reject.
+  test("a parse-phase Info lint is graded (unasserted, allowed), not a parse rejection", async () => {
+    const cs = loadCases(FIXTURES);
+    const c = cs.find((x) => x.relDir === "codes/parse-info");
+    const v = await classifyCase(boot, c);
+    expect([v.bucket, v.reason]).toEqual(["PASS", "codes"]);
+    expect(v.unexpected).toEqual(["W-ARM-PIPE-LEGACY"]);
+    expect(v.unexpectedErrors).toEqual([]);
+    const bad = { ...c, source: c.source.replace("| _ :> @n = 2", "| _ :> @n = 2\n            ]") };
+    const b = await classifyCase(boot, bad);
+    expect([b.bucket, b.reason]).toEqual(["UNSUPPORTED", "parse-reject"]);
+    expect(b.failures.every((f) => !f.startsWith("W-"))).toBe(true);
   }, { timeout: 60000 });
 
   test("UNSUPPORTED names the refusal; --no-twins grades a legacy case as written → LEGACY, naming the marker", async () => {
@@ -319,7 +335,7 @@ describe("CLI — exit status is separate from the output (pa-base §8)", () => 
     const run = (...a) => Bun.spawnSync(["bun", SCRIPT, "--cases", FIXTURES, ...a], { cwd: REPO, stdout: "pipe", stderr: "pipe" });
     const plain = run();
     expect(plain.exitCode).toBe(0);
-    expect(plain.stdout.toString()).toContain("13 of 13 cases attempted");
+    expect(plain.stdout.toString()).toContain("14 of 14 cases attempted");
     expect(plain.stdout.toString()).toContain("### §66 twins");
     expect(run("--fail-on-fail").exitCode).toBe(1);
     const none = run("--filter", "no-such-case-anywhere");
