@@ -5643,6 +5643,7 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 - `<#id>.error` SHALL be reset to `not` at the start of each new fetch.
 - `<#id>.stale` SHALL be `true` iff `<#id>.data` is not `not` and a fetch is in flight.
 - The compiler SHALL NOT emit E-RI-002 for the single declared assignment in a `<request>` body.
+- The call that is the right-hand side of the body's assignment SHALL be handled by the request, and SHALL NOT be E-ERROR-002: its failure — the callee's declared error, or the transport failure of a call to a server function (§19.9.10) — SHALL set `<#id>.error` and leave `@var` and `<#id>.data` at their previous values (§19.4.3 item 5). *(S451 "your recs on all of them" — item 1 makes every client call of a server function failable; item 3 confirms the #1259 reading that the request handles its body's call.)*
 - The compiler SHALL emit E-LIFECYCLE-018 if `<request>` has no `id` attribute.
 - The compiler SHALL emit E-LIFECYCLE-019 if `<request>` is self-closing (no body).
 - The compiler SHALL emit E-LIFECYCLE-020 if the body contains more than one assignment.
@@ -9842,7 +9843,7 @@ Additional escalation triggers MAY be added in future versions of this specifica
 
 For each server-escalated function, the compiler SHALL generate:
 - A server-side route handler.
-- A client-side fetch call that invokes the route.
+- A client-side fetch call that invokes the route. A call to it is a failable call at the client site — the network, the route's response, and the decode can each fail — whether or not the function is declared `!` (§19.9.10, S451 "your recs on all of them" item 1).
 - An event listener or reactive trigger that calls the fetch function at the appropriate time.
 - Serialization and deserialization for all arguments and return values.
 
@@ -10072,11 +10073,13 @@ The compiler SHALL:
 **Developer writes (synchronous-looking):**
 ```scrml
 ${ function loadDashboard() {
-    let user = getUser(userId);
-    let items = getItems(userId);
-    let stats = getStats(userId);
+    let user = getUser(userId) !{ | _ :> return };
+    let items = getItems(userId) !{ | _ :> return };
+    let stats = getStats(userId) !{ | _ :> return };
 } }
 ```
+
+*(S451 — each call is handled: a client call to a server function is failable (§19.9.10), and each `!{ | _ :> return }` leaves on failure (§19.4.3, value position). Supersedes the unhandled `let user = getUser(userId);` lines. The emitted shape below shows only the parallelization; the failure checks are omitted from it. Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1.)*
 
 **Compiler emits (simplified):**
 ```javascript
@@ -10484,9 +10487,12 @@ function — and the fix: *"a value position cannot wait for the server; load th
   <users> = 0
   <request id="usersLoad" deps=[]>${ @users = userCount() }</>
   <p class=${@users > 10 ? "busy" : ""}>Users: ${@users}</p>
-  <button onclick={ @users = userCount() }>Refresh</button>   // legal: a handler is an action position
+  <button onclick=${<#usersLoad>.refetch()}>Refresh</button>   // legal: a handler is an action position
+  <button onclick={ @users = userCount() !{ | _ :> @users } }>Recount</button>   // legal too: the call is handled (§19.9.10)
 </program>
 ```
+
+*(S451 — supersedes the example line `<button onclick={ @users = userCount() }>Refresh</button>   // legal: a handler is an action position`: a handler IS an action position, so the call is not E-VALUE-SERVER-CALL, but a client call to a server function is failable and the unhandled call is E-ERROR-002 (§19.9.10). Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1.)*
 
 **Resolved S451 — the three OPEN items this section carried (O-R1-1, O-R1-2, O-R1-3).**
 - **O-R1-1 and O-R1-2** are items 2–4 of the rule above: a client function that reaches a server call, a `?{}` in
@@ -17569,13 +17575,15 @@ Failing to handle the result of a `!` function call in any of these ways SHALL b
 
 **A `?{}` query is a failable expression too (S451 R11).** Outside a `!` function, a `?{}` query is handled like a call to a `!` function whose error type is `SqlError` — with `!{}` or `match` at the site — and an unhandled one is E-ERROR-002 (§19.8.3, which states the forms that apply). Inside a `!` function it propagates implicitly (§19.8.2, unchanged). *(Provenance: ruling:user-voice-scrml.md S451 "your recs. R11 b" · supersedes: §19.8.3's backwards-compatible mode, quoted there · newly-rejecting.)*
 
+**A client call to a server function is a failable call too (S451).** A call evaluated on the client whose callee is server-placed (§12.2) can fail on the wire, so it is a failable call whether or not the callee is declared `!`: it is handled by every form above (a `!{}`, a `match`, `?` inside a `!` function, a `<request>` body), and an unhandled one is E-ERROR-002. A server→server call (§13.4) is not affected. §19.9.10 states the rule, its scope, and what its error type covers (its exact shape is OPEN for the bootstrap's U1b design pass). *(Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1 · supersedes: the CPS-implicit exemption in "Event-handler values" and "Handler references" below, quoted in §19.9.10 · newly-rejecting.)*
+
 At an event-handler site neither `?` (a handler is not a `!` function, §19.5.4) nor `<errorBoundary>` (render-time only, §19.6.6) can handle the call, so the message offers only the remedies that apply there. For a call: `Result of failable function '{name}' is not handled in this event handler. Catch it with '!{}' (e.g. '{name}(…) !{ | .Variant :> … }'), match the result, or call it from a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).` For a reference (below): `Failable function '{name}' is passed as an event-handler reference, so the event would call it and discard its error. Call it in a handler that handles the result (e.g. '{attr}={ {name}() !{ | .Variant :> … } }'), or wire a function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`
 
 **Event-handler values — no exemption (S439 ruling #14; S440 "restore conformance").** The two SHALLs above (this section's E-ERROR-002 sentence and §19.4.4) apply to event-handler attribute values (§5.2.2, §5.2.3) exactly as they apply anywhere else. Every unhandled call to a `!` function in an event-handler value SHALL be E-ERROR-002, whatever the handler's statement count or form. The answer follows the unhandled call, not the shape of the handler around it. The bare `onclick=risky()`, the braced `onclick={ risky() }` (on one line or several), `onclick=${risky()}`, the multi-statement `onclick={ risky(); @r = 1 }`, and a call reached through control flow in the handler (`onclick={ if (@ready) risky() }`, `onclick={ for (const i of ids) risky() }`) all get the same answer. So does a handler placed at top level, in an `<each>` row, in an engine state-child, in a `<match>` arm, or in a component body.
 
-A handler handles the call the way any other caller does: `onclick={ risky() !{ | .Empty :> @r = 1 } }`, a `match` on the result, or a non-failable function that handles the call and is wired as the handler (`onclick=load()`). An enclosing `<errorBoundary>` does NOT handle it: a handler runs when its event fires, after render, and the boundary (item 4, §19.6.6) catches render-time calls only (its one handler-time exception is the compiler-generated `<formFor>` submit dispatch, §19.6.6 / §41.14.3, which no author-written handler reaches). A handler call inside an `<errorBoundary>` is therefore E-ERROR-002 when unhandled, like anywhere else. This is §19.6.6 as limited by S440 #22: a boundary catches errors raised while rendering, not in event handlers. A function whose `!` is only CPS-implicit (a server function not declared `!`, §19.4.2) is outside this rule. Its one-statement handler call gets neither E-ERROR-002 nor W-CPS-NEEDS-FAILABLE (S440 #18). The callee is resolved through scope, so a local binding that shadows a failable function's name (an `<each in=@xs as risky>` row alias, a component prop) is not that function.
+A handler handles the call the way any other caller does: `onclick={ risky() !{ | .Empty :> @r = 1 } }`, a `match` on the result, or a non-failable function that handles the call and is wired as the handler (`onclick=load()`). An enclosing `<errorBoundary>` does NOT handle it: a handler runs when its event fires, after render, and the boundary (item 4, §19.6.6) catches render-time calls only (its one handler-time exception is the compiler-generated `<formFor>` submit dispatch, §19.6.6 / §41.14.3, which no author-written handler reaches). A handler call inside an `<errorBoundary>` is therefore E-ERROR-002 when unhandled, like anywhere else. This is §19.6.6 as limited by S440 #22: a boundary catches errors raised while rendering, not in event handlers. A call to a server function — declared `!` or not, body-split or not — is a failable call in a handler like anywhere else on the client (§19.9.10, S451), and gets E-ERROR-002 when unhandled. *(S451 "your recs on all of them" item 1 — supersedes: "A function whose `!` is only CPS-implicit (a server function not declared `!`, §19.4.2) is outside this rule. Its one-statement handler call gets neither E-ERROR-002 nor W-CPS-NEEDS-FAILABLE (S440 #18).")* The callee is resolved through scope, so a local binding that shadows a failable function's name (an `<each in=@xs as risky>` row alias, a component prop) is not that function.
 
-**Handler references (S441 ruling).** A `!` function passed as an event-handler REFERENCE — the bare `onclick=risky`, `onclick=${risky}`, or `onclick={ risky }` — SHALL be E-ERROR-002, exactly like `onclick=risky()`: the event dispatcher calls the function and discards its result, so the reference is an unhandled call. This holds in every position a handler call is checked in (top level, an `<each>` row, an engine state-child, a `<match>` arm, a component body, inside an `<errorBoundary>`). A reference to a non-failable function is an ordinary handler. The rule applies to event-handler attributes only: a component's declared prop whose name starts with `on` (`<Btn onSave=risky/>`) is a callback value handed to the component, not a handler reference. Where the component wires such a prop as its own raw handler reference (`onclick=onSave`), the resulting handler is a reference to whatever the call site passed, and a call site that passes a `!` function is E-ERROR-002 (reported at that call site). The one exempt reference is `<formFor onsubmit=persist/>`: §41.14.3 (`E-FORMFOR-ONSUBMIT-SIGNATURE`) REQUIRES that function to be failable, and its error takes the compiler-generated submit route to the nearest `<errorBoundary>` (§19.6.6, §41.14.3). The same scope applies as for a call: the callee is resolved through scope, and a function whose `!` is only CPS-implicit is outside the rule.
+**Handler references (S441 ruling).** A `!` function passed as an event-handler REFERENCE — the bare `onclick=risky`, `onclick=${risky}`, or `onclick={ risky }` — SHALL be E-ERROR-002, exactly like `onclick=risky()`: the event dispatcher calls the function and discards its result, so the reference is an unhandled call. This holds in every position a handler call is checked in (top level, an `<each>` row, an engine state-child, a `<match>` arm, a component body, inside an `<errorBoundary>`). A reference to a non-failable function is an ordinary handler. The rule applies to event-handler attributes only: a component's declared prop whose name starts with `on` (`<Btn onSave=risky/>`) is a callback value handed to the component, not a handler reference. Where the component wires such a prop as its own raw handler reference (`onclick=onSave`), the resulting handler is a reference to whatever the call site passed, and a call site that passes a `!` function is E-ERROR-002 (reported at that call site). The one exempt reference is `<formFor onsubmit=persist/>`: §41.14.3 (`E-FORMFOR-ONSUBMIT-SIGNATURE`) REQUIRES that function to be failable, and its error takes the compiler-generated submit route to the nearest `<errorBoundary>` (§19.6.6, §41.14.3). The same scope applies as for a call: the callee is resolved through scope, and a server function passed as a handler reference is a failable function here whether or not it is declared `!` (§19.9.10). *(S451 "your recs on all of them" item 1 — supersedes: "and a function whose `!` is only CPS-implicit is outside the rule.")*
 
 > **Provenance:** ruling:user-voice-scrml.md S441 "yes on references" ("RULED — a failable function passed as a handler REFERENCE is E-ERROR-002 (S441)"). Newly-rejecting; measured S441 by compiling `examples/ samples/ conformance/cases/ docs/readme-snippets/ docs/tutorial-snippets/` (2041 files): no file other than the new pinning case `conformance/cases/error/handler-failable-reference-pos` passes a `!` function as a handler reference, so no migration was needed. The S440 pin `handler-failable-reference-and-guard-neg`, which held `onclick=risky` clean, became `handler-failable-guard-and-plain-reference-neg` (a non-failable reference).
 
@@ -17673,6 +17681,7 @@ function show(src: string) {
 - The error type annotation after `!` MAY be declared with the arrow form (`! -> ErrorType`) or the bare form (`! ErrorType`) — the two forms are EQUIVALENT; both declare the function's error type explicitly (S137 amendment). That type SHALL be an enum (§19.4.4.1).
 - A function with `!` SHALL accept `fail` statements in its body. A function without `!` SHALL NOT accept `fail` statements (E-ERROR-001).
 - The caller of a `!` function SHALL handle the result via match, `?`, `!{}`, or `<errorBoundary>` (`?` inside a `!` function only, §19.5.4; `<errorBoundary>` for render-time calls only, §19.6.6). An unhandled `!` function call SHALL be a compile error (E-ERROR-002).
+- A call evaluated on the client whose callee is server-placed SHALL be a failable call, declared `!` or not, under the bullet above (§19.9.10). *(S451 "your recs on all of them" item 1.)*
 - A `!{}` handler or a `match` on a failable result in a value position (§19.4.3) SHALL have every arm either yield a value of the call's success type or leave (`return` / `fail`, or a `break` / `continue` out of an enclosing loop). An arm that falls through there SHALL be a compile error (**E-ERROR-012**). In a statement position an arm MAY fall through. *(S451 ruling 1a.)*
 - In a `!{}` arm, a parenthesis-free binder (`| .V m :>`) SHALL bind the variant's payload exactly as `| .V(m) :>` does, under §18.7's positional arity: on a unit variant or a variant with two or more fields it SHALL be E-TYPE-021. *(S451 ruling 2.)*
 - A `!{}` handler SHALL be attached only to an expression that can fail (a `!` function call, a call the compiler treats as `!`, or a `?{}`). A `!{}` on anything else SHALL be a compile error (**E-ERROR-013**). *(S451 ruling 3.)*
@@ -18148,6 +18157,7 @@ The client calling `loadUser(id)?` propagates the same `UserError` variants that
 - The HTTP status code SHALL be determined by the `httpStatus` attribute on the variant, or by the heuristic in §19.9.2, or by the default of 500.
 - The CPS client wrapper of a server `!` function SHALL itself be `!` with the same error type.
 - Client code SHALL handle server function errors identically to local function errors. The serialization boundary SHALL be transparent to the developer.
+- A client call to a server function NOT declared `!` SHALL also be failable: the boundary itself can fail (transport, a non-2xx response, a decode failure), and that failure SHALL be handled at the call like any `!` call's (§19.9.10, S451 "your recs on all of them" item 1).
 
 #### 19.9.5 Auto-`!`-Wrap of CPS Server Stubs (Worked Example)
 
@@ -18187,7 +18197,9 @@ function loadProfile(id: number) {
 
 *(S451 — supersedes condition 2 "`F`'s call to `G` occurs inside a `<errorBoundary>` markup region (the boundary catches the failure)": a call to a CPS-split function in a boundary's markup is a render-time server call, E-VALUE-SERVER-CALL (§13.7 item 1 or 2). Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."* Direction: newly-rejecting, measured in §13.7.)*
 
-If neither condition holds, the compiler emits **W-CPS-NEEDS-FAILABLE** (warning, deprecation cycle stage 1, v0.next) at the call site. The warning is informational; existing code compiles + runs unchanged. The warning is reserved to promote to **E-CPS-NEEDS-FAILABLE** (error) only at a future MAJOR language-version event (unscheduled per §63.7). Per S72 user-direction (`user-voice-scrml.md` 2026-05-08), the migration codemod is deferred — the two-stage cycle is sufficient given current adopter state.
+~~If neither condition holds, the compiler emits **W-CPS-NEEDS-FAILABLE** (warning, deprecation cycle stage 1, v0.next) at the call site. The warning is informational; existing code compiles + runs unchanged. The warning is reserved to promote to **E-CPS-NEEDS-FAILABLE** (error) only at a future MAJOR language-version event (unscheduled per §63.7). Per S72 user-direction (`user-voice-scrml.md` 2026-05-08), the migration codemod is deferred — the two-stage cycle is sufficient given current adopter state.~~
+
+**Superseded S451 — a client call to a CPS-split function is a failable call, and an unhandled one is E-ERROR-002 (§19.9.10).** The rule above is generalized to every client call whose callee is server-placed, body-split or not, and the two-stage warning cycle is closed early: an unhandled call is the error E-ERROR-002, not W-CPS-NEEDS-FAILABLE, and no separate E-CPS-NEEDS-FAILABLE is introduced. The handling forms are §19.4.3's. Condition 1 above is read under that rule: a `!` caller handles the call with `?` (§19.5) or a handler, as for any `!` call — not by being `!` alone. *(Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1 (quoted in §19.9.10) · supersedes: the struck paragraph · direction: newly-rejecting — the warning's sites become errors. Reading, flagged: that condition 1 now needs an explicit `?` follows from "handled like any `!` call"; the ruling did not address condition 1 by name. impl#1 still emits W-CPS-NEEDS-FAILABLE (`compiler/src/type-system.ts`) and is frozen — `g-impl1-client-server-call-not-failable-s451`.)*
 
 **Worked example — multi-batch CPS with a `<request>`.**
 
@@ -18235,7 +18247,7 @@ function notifyOrder(orderId: number) {
 
 *(S451 — supersedes the caller* `<errorBoundary fallback={<div>Notification failed; logged but email pending</>}> ${notifyOrder(@currentOrderId)} </>` *and its comment "Caller wraps in <errorBoundary>. On batch 2 failure, the boundary catches the tagged scrml-error variant": a render-time call of a CPS-split function is E-VALUE-SERVER-CALL (§13.7). `return orderId` is added so the request body has a value to assign (§6.7.7, E-LIFECYCLE-021). Provenance: ruling:user-voice-scrml.md S451 "your recs on all five" — item 1: *"**`<errorBoundary>` vs R1 (O-R1-3) = (a):** R1 wins. Server data enters markup through `<request>`; its failure surfaces on `<#id>.error`. `<errorBoundary>` keeps render-time failures of CLIENT `!` calls and host throws (the §19.6.8 backstop). §19.6 examples rewritten to `<request>`; `conformance/cases/server-fn/error-boundary-fallback` becomes a negative case + a `<request>` twin."*)*
 
-**Three migration paths for adopters today (cycle 1, v0.next).** When a CPS-eligible call site fires W-CPS-NEEDS-FAILABLE, the developer chooses one of:
+**Three migration paths for adopters today (cycle 1, v0.next).** When a CPS-eligible call site fires W-CPS-NEEDS-FAILABLE (S451: E-ERROR-002 — §19.9.10; the paths are unchanged and apply to every client call of a server function), the developer chooses one of:
 
 1. **A `<request>` load** (markup-context callers; canonical pattern). The load is a `<request>` body's assignment, and its failure is read from `<#id>.error` (§6.7.7, §19.4.3 item 5). The body needs a returned value to assign, so the cell write moves out of the function into the request:
    ```scrml
@@ -18488,6 +18500,139 @@ The `SELECT` writes `@total`; the `INSERT` reads it in the same batch. Under thi
 > **Provenance:** ruling:user-voice-scrml.md S451 "your recs. R11 b" (R7 = (a): *"inside one server batch, a cell written by an earlier statement and read by a later one reads the batch-local (just-written) value — source-order semantics, no extra round trip. (impl#1 today marshals the cell at batch start → the INSERT logs the stale value.)"*) · design: `scrml-support/docs/deep-dives/bootstrap-u1-server-boundary-design-2026-10-03.md` §3(b) and §10 R7 · supersedes: nothing written — §19.9.9 was silent on a within-batch write-then-read; the conflicting sentence is §6.6.9's marshal rule, which is reconciled there (*"The marshal set SHALL equal the set the server lowers to `_scrml_body[<cell>]` (client-SEND == server-READ)"*).
 >
 > **Direction of change (pa-base §8): semantics-changed.** No program's acceptance changes; a batch that writes then reads a cell now reads the value it wrote. **impl#1 divergence:** compiled S451 on `b490f3b75` and the emitted server stub read (not run) — the same shape's server stub binds `_scrml_body["total"]` in the `INSERT`; filed `g-impl1-cps-batch-reads-marshalled-not-written-s451`. impl#1 is frozen for language semantics (S447); the bootstrap builds this by substitution when it outlines the batch (design §3(b)).
+
+#### 19.9.10 A Client Call to a Server Function Is Failable (S451)
+
+> **Status: Nominal / spec-ahead (S451).** NORMATIVE; **impl#1 does not implement it** and is not changed for it
+> (frozen for language semantics, S447 — the divergence is filed: `docs/known-gaps.md`
+> `g-impl1-client-server-call-not-failable-s451`). The bootstrap builds it.
+>
+> **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" — item 1: *"**A client call to a plain
+> (non-`!`) server function IS failable** — a network call can fail, so at the client it is an implicit `!` call (the
+> §19.9.5 CPS-stub rule generalized to every client→server call) and SHALL be handled like any `!` call (E-ERROR-002
+> otherwise), exactly as R11 made `?{}` failable. Design detail (the error type — e.g. a built-in network/route error
+> enum, its variants, composition with a declared `!` signature) is U1b's design pass."* · **supersedes:** §19.4.3's
+> *"A function whose `!` is only CPS-implicit (a server function not declared `!`, §19.4.2) is outside this rule. Its
+> one-statement handler call gets neither E-ERROR-002 nor W-CPS-NEEDS-FAILABLE (S440 #18)."* and its handler-reference
+> clause *"and a function whose `!` is only CPS-implicit is outside the rule"*; §19.9.5's W-CPS-NEEDS-FAILABLE
+> paragraph (*"If neither condition holds, the compiler emits **W-CPS-NEEDS-FAILABLE** (warning, deprecation cycle
+> stage 1, v0.next) at the call site. The warning is informational; existing code compiles + runs unchanged. The
+> warning is reserved to promote to **E-CPS-NEEDS-FAILABLE** (error) only at a future MAJOR language-version event"*)
+> for a client call site; and the §13.7 example line *"`<button onclick={ @users = userCount() }>Refresh</button>
+> // legal: a handler is an action position`"*. Before this ruling the SPEC made a client call to a server function
+> failable only when the callee was body-split (§19.9.5) or declared `!` (§19.9.3).
+>
+> **Direction of change (pa-base §8): newly-rejecting — large.** Every client call to a server function not declared
+> `!` that no handler handles was accepted and is now E-ERROR-002. Measured below.
+
+A server function runs on the other side of a network. The call the client makes to it can fail even when the
+function itself cannot: the request does not arrive, the server answers with an error status, or the answer does not
+decode. A call that can fail is a failable call, and §19.4.3 already says what a failable call owes its caller.
+
+**The rule.** A call made on the client whose callee is server-placed is a **failable call** at that site, whether or
+not the callee is declared `!`. It SHALL be handled exactly as a call to a `!` function (§19.4.3): with a `!{}`
+handler, a `match` on the result, `?` inside a `!` function (§19.5.4), or as the right-hand side of a `<request>` body's
+assignment (§19.4.3 item 5, §6.7.7). An unhandled one SHALL be **E-ERROR-002**. This is the §19.9.5 rule — a CPS stub
+is implicitly `!` — applied to every call that crosses the client→server boundary, and the same step §19.8.3 (S451
+R11) took for `?{}`.
+
+**Scope — which calls.** The rule applies to a call when both hold:
+
+1. **The callee is server-placed** (§12.2): escalated by any trigger, including inheritance (Trigger 5), a deprecated
+   `server` annotation, and a function whose body the compiler splits across the boundary (§19.9.5). A call to a
+   function imported from another file is judged by the callee's placement, exactly as a same-file call.
+2. **The call is evaluated on the client**: in the body of a client-placed function; in an event-handler value, as a
+   call or as a handler reference (§19.4.3 "Event-handler values" and "Handler references" apply unchanged — a server
+   function is now a failable function for both); in an arrow-valued handler's body; in a lifecycle body (`<onMount>`,
+   `<effect>`, `<timer>`, `<poll>`, `<timeout>`) or a `<request>` body; and in a body-top statement.
+
+Not affected:
+- **A server→server call.** A call whose caller is itself server-placed runs in the same server handler: the callee is
+  inlined (§13.4), no request is made, and nothing on the wire can fail. Its failure set is the callee's own — none
+  for a function not declared `!`. The same holds for a call in the server part of a body-split function.
+- **A server call in a value position.** It is **E-VALUE-SERVER-CALL** (§13.7) — the position cannot wait — and is not
+  reported a second time as E-ERROR-002. Its fix, a `<request>` load, handles the failure.
+- **The compiler-generated hydration load of a `<x server>` declaration** (§52.6.5) — exempt from E-ERROR-002 and
+  reported through `@x.error` (§52.6.8, §19.8.3), whether the load is a `?{}` or a call to a load function.
+- **A `<formFor onsubmit=persist/>` submit** — §41.14.3 already requires `persist` to be failable and routes its
+  error through the compiler-generated submit dispatch (§19.6.6).
+
+**The error type — what it SHALL cover.** A client call to a server function can fail in at least three ways, and the
+error type that carries those failures SHALL distinguish each of them:
+
+1. **Transport failure** — no response arrives: the connection fails, is reset, or times out. (A request the client
+   itself aborts on supersede or teardown, §6.7.7.1, is not a failure: an abort sets no error.)
+2. **A non-2xx route response** that is not the function's own declared error (§19.9.1's `fail` envelope) — for
+   example an authentication or CSRF rejection by the generated middleware (§40), a rolled-back transaction answered as
+   a server error (§19.10.6), or an exception on the server.
+3. **A decode failure** — a response whose body does not decode under the §57 rules for that route (the strict
+   decoder on a compiler-emitted route, S451 R10).
+
+§19.9.5's synthetic `CpsError` enum (`NetworkError(message: string, fn: string)`, `ServerError(message: string,
+fn: string)`) already names the first two for body-split stubs, and is the starting point. **OPEN — the exact shape
+is assigned to the bootstrap's U1b design pass:** the type's name (whether `CpsError` is extended or replaced by one
+built-in transport error), its variants and payloads (whether a decode failure is its own variant, whether a status
+code travels in the payload), its `renders` clauses (§19.2), and its `httpStatus` behaviour. Until U1b, a handler
+that must be total over a server call writes a `| _ :>` arm (§19.4.3), which covers every transport variant whatever
+their final names.
+
+**A server function declared `!`.** Its client call can fail in two ways: with the function's declared error (§19.9.1,
+§19.9.3 — the `fail` envelope it sends) or with a transport failure. The call's failure set is BOTH: the declared
+error type's variants and the transport error's. A `!{}` handler or a `match` on the call SHALL cover both — by
+naming the variants of each, or with a `| _ :>` arm. A function declared `!` loses nothing it had: its declared
+variants arrive exactly as §19.9.1 sends them. **OPEN for U1b:** how the two sets combine in the type system (a flat
+union of variants, or one wrapping variant such as `.Transport(e)`), and how `?` carries the transport half through
+§19.5.3's compatibility check (E-ERROR-010) when the enclosing function's error type does not name it.
+
+```scrml
+<program db="sqlite:./app.db">
+  <users> = 0
+  ${ function userCount() {                                  // server-placed (?{}), not declared `!`
+      const row = ?{`SELECT count(*) AS n FROM users`}.get() !{ | _ :> not }
+      return row is not ? 0 : row.n
+  } }
+  ${ function refresh() {
+      @users = userCount()                                   // E-ERROR-002 — the call can fail on the wire
+  } }
+  ${ function refreshOrKeep() {
+      @users = userCount() !{ | _ :> @users }                // VALID — on failure keep the old count
+  } }
+  <request id="usersLoad" deps=[]>${ @users = userCount() }</>   // VALID — the request handles it (<#usersLoad>.error)
+  <button onclick={ userCount() }>Count</button>             // E-ERROR-002 — a handler call is a client call
+  <button onclick=${<#usersLoad>.refetch()}>Refresh</button> // VALID — reload through the request
+</program>
+```
+
+**Measured corpus impact** (impl#1 on `dbb671c2d`; every `.scrml` file under `examples/`, `samples/` and
+`conformance/cases/` compiled alone with impl#1's own Route Inference result captured through the stage seam, and the
+component-expanded AST walked — `docs/changes/s451-spec-client-failable/measure.mjs`; 2267 files, 1 not compiled):
+404 call sites whose callee is server-placed. 26 are server→server and 17 call a function declared `!` (already
+E-ERROR-002 when unhandled). Of the 361 client calls to a function NOT declared `!`, 11 are a `<request>` body's
+right-hand side, 7 sit under a `!{}` / `match` / `?`, and 6 are `<x server>` hydration loads — **337 are unhandled,
+in 231 files**: 139 in a client function body, 170 in an event-handler value, 17 at a body top, and 11 in a value
+position (9 initializers, 2 attribute values — already E-VALUE-SERVER-CALL under §13.7). By directory: `examples/` 54
+sites in 26 files, `samples/` 109 in 47, `conformance/cases/` 174 in 158. Top files:
+`samples/compilation-tests/gauntlet-r10-rails-blog.scrml` (17), `samples/compilation-tests/gauntlet-r10-bun-admin.scrml`
+(9), `samples/compilation-tests/gauntlet-r10-go-contacts.scrml` (9), `samples/compilation-tests/gauntlet-r10-elixir-chat.scrml`
+(8), `examples/23-trucking-dispatch/pages/driver/load-detail.scrml` (7), `examples/23-trucking-dispatch/pages/dispatch/load-detail.scrml`
+(6), `examples/18-state-authority.scrml` (4). Full list: `docs/changes/s451-spec-client-failable/progress.md`. The
+corpus is migrated with the bootstrap's implementation, not by this SPEC change. *(The count is a floor: a call
+reached only through an alias or a cell is not counted, and nor is a call inside a body-split function's own body.)*
+
+**Normative statements:**
+
+- A call evaluated on the client whose callee is server-placed (§12.2) SHALL be a failable call, whether or not the
+  callee is declared `!`. It SHALL be handled as a call to a `!` function is (§19.4.3); an unhandled one SHALL be
+  E-ERROR-002.
+- A call whose caller is server-placed (§13.4), the compiler-generated hydration load of a `<x server>` declaration
+  (§52.6.5), and a server call in a value position (E-VALUE-SERVER-CALL, §13.7) SHALL NOT be E-ERROR-002 under this
+  rule.
+- A failed client call to a server function SHALL produce an error value that distinguishes a transport failure, a
+  non-2xx route response other than the function's declared error, and a decode failure (§57). Its exact type is
+  OPEN (U1b).
+- The client call of a server function declared `! E` SHALL fail with a variant of `E` (as the server sent it) or with
+  a transport error; a handler on it SHALL cover both.
+- W-CPS-NEEDS-FAILABLE (§19.9.5) SHALL NOT be emitted for a client call site: the unhandled call is E-ERROR-002.
 
 ---
 
@@ -18797,7 +18942,7 @@ The following error codes are introduced by this section. They SHALL be added to
 | Code | Section | Trigger | Severity |
 |------|---------|---------|----------|
 | E-ERROR-001 | §19.3.3 | `fail` used in non-`!` function | Error |
-| E-ERROR-002 | §19.4.3 | `!` function result not handled (no match, `?`, `!{}`, or boundary). At an event-handler site — a call or a reference to a `!` function (S441) — only `!{}`, `match`, or a handling wrapper applies; `?` and a boundary do not (emitted at `compiler/src/type-system.ts:10892` for a statement-position call, `:14374` for an event-handler call, and `:14547` for an event-handler reference.) **S451 R11 trigger — a `?{}` query outside a `!` function that no `!{}` / `match` handles (§19.8.3): Nominal / not yet emitted by impl#1 (frozen; `g-impl1-sql-unhandled-outside-failable-s451`); lands with the bootstrap.** Provenance: ruling:user-voice-scrml.md S451 "your recs. R11 b". | Error |
+| E-ERROR-002 | §19.4.3 | `!` function result not handled (no match, `?`, `!{}`, or boundary). At an event-handler site — a call or a reference to a `!` function (S441) — only `!{}`, `match`, or a handling wrapper applies; `?` and a boundary do not (emitted at `compiler/src/type-system.ts:10892` for a statement-position call, `:14374` for an event-handler call, and `:14547` for an event-handler reference.) **S451 R11 trigger — a `?{}` query outside a `!` function that no `!{}` / `match` handles (§19.8.3): Nominal / not yet emitted by impl#1 (frozen; `g-impl1-sql-unhandled-outside-failable-s451`); lands with the bootstrap.** Provenance: ruling:user-voice-scrml.md S451 "your recs. R11 b". **S451 client-server-call trigger — a call evaluated on the client whose callee is server-placed, declared `!` or not, that no `!{}` / `match` / `?` / `<request>` body handles (§19.9.10): Nominal / not yet emitted by impl#1 for a callee not declared `!` (frozen; `g-impl1-client-server-call-not-failable-s451`); lands with the bootstrap.** Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1. | Error |
 | E-ERROR-003 | §19.5.4 | `?` propagation used in non-`!` function | Error |
 | E-ERROR-004 | §19.5.4 | `?` applied to non-`!` function call | Error |
 | E-ERROR-005 | §19.6.3, §41.14.3 | Error variant in markup without `renders` clause or boundary `fallback`; ALSO (S440 #19) a `<formFor>` whose `onsubmit=` error has no enclosing `<errorBoundary>` (§41.14.3; Nominal for that case) | Error |
@@ -18821,7 +18966,7 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-DEFER-AMBIGUOUS-LEAD | §19.16.1 | `defer` + whitespace + `[` (a single-statement defer led by an array literal) while a binding named `defer` is in scope — ambiguous with an index of that binding; write `defer[…]` to index or `defer { […]… }` to defer (S432; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-DUPLICATE-FUNCTION | §19.16.6 | A block that contains a `defer` declares the same `function` name twice (the lowered block is a host `try` block, where that is not allowed) (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-TEST-006 | §19.12.7 | `~{}` test block: server-function call inside an active `test-bind` context references a server function with no `test-bind` declaration in scope (fail-fast over silent passthrough; design-insight 22, S74). | Test |
-| W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to CPS-implicit-`!` function from a non-`!` caller that is not a `<request>` body's assignment (cycle 1 of A9 Ext 4 deprecation; v0.next). *(S451: the "non-boundary caller" limb is replaced by the `<request>` body — a render-time CPS call is E-VALUE-SERVER-CALL, §13.7; the `<request>` limb is Nominal / spec-ahead.) Emitted at `compiler/src/type-system.ts:10936`.* | Warning |
+| W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to CPS-implicit-`!` function from a non-`!` caller that is not a `<request>` body's assignment (cycle 1 of A9 Ext 4 deprecation; v0.next). *(S451: the "non-boundary caller" limb is replaced by the `<request>` body — a render-time CPS call is E-VALUE-SERVER-CALL, §13.7; the `<request>` limb is Nominal / spec-ahead.) Emitted at `compiler/src/type-system.ts:10936`.* **Superseded S451 at a client call site** — the unhandled call is E-ERROR-002 (§19.9.10; ruling:user-voice-scrml.md S451 "your recs on all of them" item 1); this warning is no longer emitted there by the language; impl#1 still emits it (frozen; `g-impl1-client-server-call-not-failable-s451`). | Warning |
 | E-CPS-NEEDS-FAILABLE | §19.9.5 | Same condition; reserved-E, unscheduled per §63.7. Not yet emitted. | Error |
 | E-CPS-NONIDEM-NO-STORAGE | §19.9.6 | Non-monotone CPS batch in scope of `<program>` with `idempotency-store="none"` OR no resolvable backend (default-resolution falls through). (A9 Ext 5; S76.) | Error |
 | E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH | §39.2.6 | `idempotency-store="postgres" \| "sqlite" \| "mysql"` does not match the closest-ancestor `<program db=>` driver. (A9 Ext 5; S76.) | Error |
@@ -19096,7 +19241,7 @@ In this example:
 | `?{}` SQL (§8) | A failable expression everywhere (S451 R11): propagates `SqlError` implicitly in `!` functions (§19.8.2); handled at the site with `!{}` / `match` outside them, else E-ERROR-002 (§19.8.3). No row is not a failure (`.get()` → `not`, `.all()` → `[]`). *(Supersedes: "Produces `SqlError` in `!` functions; `not`/empty outside".)* |
 | `@reactive` (§6) | Reactive variables can hold error variants; trigger updates |
 | `~{}` tests | `assert.fails` / `assert.fails.with` for failable functions |
-| `server` functions (§12) | CPS preserves `!`; errors serialize as tagged JSON |
+| `server` functions (§12) | CPS preserves `!`; errors serialize as tagged JSON. A client call of a server function is failable whether or not it is declared `!` (transport / non-2xx / decode), handled like any `!` call, else E-ERROR-002 (§19.9.10, S451) |
 | `transaction` | Auto-rollback on `fail`; syntactic sugar over BEGIN/COMMIT/ROLLBACK |
 | `pure` (§33) | `pure` and `!` coexist; pure functions can fail without side effects |
 | `lin` (§35) | `lin` variables inside `!` functions follow normal linear rules; `fail` is a scope exit that must consume `lin` variables |
@@ -23851,7 +23996,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-MATCH-002 | §18.16 | Non-exhaustive literal match (string/number/boolean without `_` arm) | Warning |
 | W-DERIVED-001 | §6.6.11 | `const <name> = expr` has no `@variable` references; value never re-evaluates | Warning |
 | E-ERROR-001 | §19.3.3 | `fail` used in non-`!` function | Error |
-| E-ERROR-002 | §19.4.3 | `!` function result not handled (no match, `?`, `!{}`, or boundary). At an event-handler site — a call or a reference to a `!` function (S441) — only `!{}`, `match`, or a handling wrapper applies; `?` and a boundary do not (emitted at `compiler/src/type-system.ts:10892` for a statement-position call, `:14374` for an event-handler call, and `:14547` for an event-handler reference.) **S451 R11 trigger — a `?{}` query outside a `!` function that no `!{}` / `match` handles (§19.8.3): Nominal / not yet emitted by impl#1 (frozen; `g-impl1-sql-unhandled-outside-failable-s451`); lands with the bootstrap.** Provenance: ruling:user-voice-scrml.md S451 "your recs. R11 b". | Error |
+| E-ERROR-002 | §19.4.3 | `!` function result not handled (no match, `?`, `!{}`, or boundary). At an event-handler site — a call or a reference to a `!` function (S441) — only `!{}`, `match`, or a handling wrapper applies; `?` and a boundary do not (emitted at `compiler/src/type-system.ts:10892` for a statement-position call, `:14374` for an event-handler call, and `:14547` for an event-handler reference.) **S451 R11 trigger — a `?{}` query outside a `!` function that no `!{}` / `match` handles (§19.8.3): Nominal / not yet emitted by impl#1 (frozen; `g-impl1-sql-unhandled-outside-failable-s451`); lands with the bootstrap.** Provenance: ruling:user-voice-scrml.md S451 "your recs. R11 b". **S451 client-server-call trigger — a call evaluated on the client whose callee is server-placed, declared `!` or not, that no `!{}` / `match` / `?` / `<request>` body handles (§19.9.10): Nominal / not yet emitted by impl#1 for a callee not declared `!` (frozen; `g-impl1-client-server-call-not-failable-s451`); lands with the bootstrap.** Provenance: ruling:user-voice-scrml.md S451 "your recs on all of them" item 1. | Error |
 | E-ERROR-003 | §19.5.4 | `?` propagation used in non-`!` function | Error |
 | E-ERROR-004 | §19.5.4 | `?` applied to non-`!` function call | Error |
 | E-ERROR-005 | §19.6.3, §41.14.3 | Error variant in markup without `renders` clause or boundary `fallback`. ALSO (S440 ruling #19, §41.14.3): a `<formFor>` whose `onsubmit=` handler's error has no enclosing `<errorBoundary>` to route to. **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 19). **Named; impl pending — Nominal / not yet emitted for the `formFor` case** (measured S440: compiles clean); impl#1 carries it (§34.0). | Error |
@@ -23874,7 +24019,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute (S196 — render-expression) | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's held enum has no `renders` clause; reuses the §19.6.6 E-ERROR-005 per-variant exhaustiveness logic at the render-expression fire site (S196) | Error |
 | E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum; the render-expression is enum-scoped (S196) | Error |
-| W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to a CPS-eligible (implicitly-`!`) function from a non-`!` caller that is not the right-hand side of a `<request>` body's assignment. Cycle 1 of the deprecation cycle (v0.next). Resolution: load it in a `<request>` (its failure is `<#id>.error`), mark caller `!`, or match on result. (Per A9 Ext 4, S72 body-split soundness verdict 2026-05-08.) **S451 amendment** (ruling:user-voice-scrml.md S451 "your recs on all five" item 1; supersedes *"non-`<errorBoundary>`-wrapped caller"* and *"wrap call site in `<errorBoundary>`"*): a CPS call in a boundary's markup is a render-time server call, E-VALUE-SERVER-CALL (§13.7), so the boundary is no longer a resolution; the `<request>` limb of the trigger is **Nominal / spec-ahead** (impl#1 still suppresses the code inside a boundary and does not recognise a `<request>` body). Emitted at `compiler/src/type-system.ts:10936`. | Warning |
+| W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to a CPS-eligible (implicitly-`!`) function from a non-`!` caller that is not the right-hand side of a `<request>` body's assignment. Cycle 1 of the deprecation cycle (v0.next). Resolution: load it in a `<request>` (its failure is `<#id>.error`), mark caller `!`, or match on result. (Per A9 Ext 4, S72 body-split soundness verdict 2026-05-08.) **S451 amendment** (ruling:user-voice-scrml.md S451 "your recs on all five" item 1; supersedes *"non-`<errorBoundary>`-wrapped caller"* and *"wrap call site in `<errorBoundary>`"*): a CPS call in a boundary's markup is a render-time server call, E-VALUE-SERVER-CALL (§13.7), so the boundary is no longer a resolution; the `<request>` limb of the trigger is **Nominal / spec-ahead** (impl#1 still suppresses the code inside a boundary and does not recognise a `<request>` body). Emitted at `compiler/src/type-system.ts:10936`. **Superseded S451 at a client call site** (ruling:user-voice-scrml.md S451 "your recs on all of them" item 1; supersedes the two-stage W- → E-CPS-NEEDS-FAILABLE cycle of §19.9.5): an unhandled client call of a server function — body-split or not — is E-ERROR-002 (§19.9.10); the language no longer emits this warning there and introduces no E-CPS-NEEDS-FAILABLE. impl#1 still emits it (frozen; `g-impl1-client-server-call-not-failable-s451`). | Warning |
 | E-CPS-NEEDS-FAILABLE | §19.9.5 | Same condition as W-CPS-NEEDS-FAILABLE, reserved to promote to error only at a future MAJOR (unscheduled per §63.7). Not yet emitted. | Error |
 | E-CPS-NONIDEM-NO-STORAGE | §19.9.6 | Non-monotone CPS batch in scope of `<program>` with `idempotency-store="none"` OR no resolvable backend (default-resolution falls through). Resolution: declare `idempotency-store=` on the closest-ancestor `<program>` (matching the `db=` driver), import `scrml:redis`, or annotate the function with `.idempotent()` if the batch is monotone-by-construction. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Error |
 | E-CPS-IDEMPOTENCY-STORE-DRIVER-MISMATCH | §39.2.6 | `idempotency-store="postgres" \| "sqlite" \| "mysql"` does not match the closest-ancestor `<program db=>` driver. Resolution: change `idempotency-store=` to match `db=`, or use `"auto"` for compiler-default resolution. (Per A9 Ext 5, S76 dispatch overlay 2026-05-09.) | Error |
