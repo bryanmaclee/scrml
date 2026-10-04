@@ -16,7 +16,14 @@ Branch `spec/s451-ue-forks`, cut from origin/main `25677da72`. SPEC text for the
 - [x] 3 — `!{}` on a non-failable call + E-ERROR-013 (§19.4.3 paragraph, §19.4.4 bullet, §19.13 + §34 rows);
   gap `g-impl1-handler-on-non-failable-s451`. Corpus: 2 sites (samples/compilation-tests); login.scrml
   depends on §19.9.5 reach (open).
-- [ ] 4a — cross-database write inside an envelope (§8.9.2, §19.10.5/.6, §8.1.1) + E-SQL-011 generalized
+- [x] 4a — cross-database write inside an envelope (§8.9.2 bullet, §19.10.5 bullet, §19.10.6 bullet, §8.1.1
+  bullet) + E-SQL-011 GENERALIZED ("a transaction spans two databases") with §34 + §44.7 rows; gap
+  `g-impl1-cross-database-write-in-envelope-s451`. Why generalize, not a new code: impl#1's existing
+  E-SQL-011 already means "one function's database work on two databases" and its emitter is
+  unreachable from source; the ruling's shape is the same root (one atomic unit, two databases) with
+  the same fix (split by database). The two impl#1-only triggers (own sites on two dbs w/o envelope;
+  `watches=` in two scopes) are recorded in the row as implementation limits. Corpus: 0 files declare
+  two different databases.
 - [ ] 5 — §8.1.1 confirmed; gap filed
 - [ ] §34 rows E-ERROR-011, E-SQL-011; gaps; generated docs; checks
 
