@@ -29,6 +29,17 @@ Branch `spec/s451-client-calls-failable`, cut from origin/main `dbb671c2d`. SPEC
   Readings flagged in the SPEC: every transaction-control statement (not only BEGIN); "non-`!` function" includes a
   body top.
 
+- [x] Ruling 3 — veto-window readings confirmed (qualifiers stripped on those sentences only):
+  #1259 — §19.4.3 item 5 (the request handles its body's call), §52.6.8 readings (a) production log line,
+  (b) `@x.error` cleared only by a successful load, (d) `error` reserved + E-SERVER-CELL-RESERVED-NAME (§34 row);
+  §52.6.8 (c) Tier 1 left flagged (not in the confirmed list); §6.7.7 bullet states the request-handles rule.
+  #1266 — §19.4.3 1a `break`/`continue` leave; §8.9.2 4a readings (i) own `?{}` and (iii) module connection = another
+  database; (ii) fail-closed "writes" left flagged; the ruling-2 paren-free-binder and non-call E-ERROR-013 readings
+  left flagged (not in the list). The 4a note's "manual `?{BEGIN}` in a non-`!` function … not covered" now points to
+  E-ERROR-015.
+  #1262 — no qualifier existed in the SPEC (the module-with-db-context fallback was written unflagged in §8.1.1);
+  a confirmation note is added there after rebasing onto the sibling's §8.1.1 landing (#1267).
+
 ## Measurement (impl#1 on dbb671c2d)
 
 Method: `docs/changes/s451-spec-client-failable/measure.mjs` — every `.scrml` under `examples/`, `samples/`,
