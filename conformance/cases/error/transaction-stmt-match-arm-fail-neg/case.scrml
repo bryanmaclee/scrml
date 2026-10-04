@@ -1,0 +1,71 @@
+<program db="./app.db">
+    <schema>
+        orders {
+            id: integer primary key
+            name: text
+        }
+    </schema>
+    type E:enum = {
+        Bad
+        Rejected
+    }
+    type M:enum = {
+        A
+        B
+    }
+    function h(x: number)! -> E {
+        if (x > 1) { fail E::Bad }
+        return x
+    }
+    function failInArm(m: M)! -> E {
+        transaction {
+            match m {
+                .A :> { fail E::Rejected }
+                .B :> { let y = 1 }
+            }
+            ?{`UPDATE orders SET name = 'after-match'`}.run()
+        }
+    }
+    function propagateInArm(m: M)! -> E {
+        transaction {
+            match m {
+                .A :> { let x = h(5)? }
+                .B :> { let y = 1 }
+            }
+            ?{`UPDATE orders SET name = 'after'`}.run()
+        }
+    }
+    function matchInLoop(m: M)! -> E {
+        transaction {
+            for (let i = 0; i < 3; i++) {
+                match m {
+                    .A :> { fail E::Rejected }
+                    .B :> { let z = 0 }
+                }
+                ?{`UPDATE orders SET name = 'loop'`}.run()
+            }
+        }
+    }
+    function transactionInArm(m: M)! -> E {
+        match m {
+            .A :> {
+                transaction {
+                    ?{`UPDATE orders SET name = 'in-arm'`}.run()
+                    fail E::Rejected
+                }
+            }
+            .B :> { let w = 0 }
+        }
+        ?{`UPDATE orders SET name = 'after-match'`}.run()
+    }
+    function expressionMatchOk(m: M)! -> E {
+        transaction {
+            let v = match m {
+                .A :> fail E::Rejected
+                .B :> 2
+            }
+            ?{`UPDATE orders SET name = 'after'`}.run()
+        }
+    }
+    <p>x</p>
+</program>
