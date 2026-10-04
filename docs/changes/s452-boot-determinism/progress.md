@@ -60,3 +60,14 @@ orders → one list (order + text). Plus link.scrml unit tests.
 `bun scripts/bootstrap-conformance.ts`: PASS 120 (was 119 in the committed doc; the doc was already
 STALE on main — #1276 added `error/handler-pipeless-arms-rt` without regenerating; no other verdict
 moved with the driver change). Regenerated; `--check` current. `gen-bootstrap-severity --check` current.
+
+## r2 (BRIEF-r2.md — review LAND-WITH-NITS)
+- MED: `frontEnd`'s positional entry default removed. Omitted entry → `deriveEntry`: one file → itself;
+  else the single file with a top-level `<program>` (link.scrml `programPaths`, order-independent);
+  0 or ≥2 → throw (name the entry). No caller needed changing: every existing multi-file caller has
+  exactly one `<program>` (all slices green unmodified).
+- LOW: `assertProjectRelative` rejects `.`/`..`/empty segments. LOW: duplicate paths → driver error.
+- Tests +5 (diamond, all rotations/orders entry-omitted; 4-file rotations entry-omitted == named;
+  0/2-program throws; non-normal paths; duplicates). Bite: restoring `entry = files[last].path` →
+  3 r2 tests RED; restored → 15/15.
+- Merged origin/main (handOffs/dpa-queue.md only).

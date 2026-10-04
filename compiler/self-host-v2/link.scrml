@@ -204,6 +204,33 @@ ${
         return true
     }
 
+    fn hasProgramItem(items: AItem[]) -> boolean {
+        for (const it of items) {
+            const k: AItemK = it.k
+            const isProgram: boolean = match k {
+                .ImportItem(i: i) :> false
+                .TypeItem(t: t) :> false
+                .FnItem(f: f) :> false
+                .DeclItem(d: d) :> false
+                .MarkupItem(n: n) :> false
+                .ProgramItem(p: p) :> true
+            }
+            if (isProgram) return true
+        }
+        return false
+    }
+
+    // The paths (in canonical order) of the files with a top-level
+    // `<program>` — the entry candidates when a driver names no entry. The
+    // answer depends only on the set.
+    export fn programPaths(xs: Source[]) -> string[] {
+        let out: string[] = []
+        for (const f of parseInOrder(canonicalSources(xs)).files) {
+            if (hasProgramItem(f.items)) out = out.concat([f.path])
+        }
+        return out
+    }
+
     // Parse a linked program: `xs` in ANY order; `entry` the path of the file
     // with the `<program>`. The result depends only on the set and `entry`.
     export fn parseProgram(xs: Source[], entry: string) -> Linked {

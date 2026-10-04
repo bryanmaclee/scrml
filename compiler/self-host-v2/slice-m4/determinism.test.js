@@ -167,6 +167,67 @@ describe("determinism (iii) — two absolute roots, two working directories", ()
   });
 });
 
+describe("determinism (r2) — the entry omitted, and the driver's input contract", () => {
+  /** A diamond: app → { left, right } → base. */
+  function diamond() {
+    return [
+      { path: "app.scrml", src: '${ import { L } from "./lib/left.scrml"\n import { R } from "./lib/right.scrml" }\n<program>\n    <p>diamond</p>\n</program>\n' },
+      { path: "lib/base.scrml", src: "${ export type Base:enum = { One, Two } }\n" },
+      { path: "lib/left.scrml", src: '${ import { Base } from "./base.scrml"\n export type L:enum = { Left } }\n' },
+      { path: "lib/right.scrml", src: '${ import { Base } from "./base.scrml"\n export type R:enum = { Right } }\n' },
+    ];
+  }
+  const rotations = (xs) => xs.map((_, i) => [...xs.slice(i), ...xs.slice(0, i)]);
+  const noEntry = (files) => {
+    const r = frontEnd(mods, files);
+    return { order: r.asts.map((a) => a.path), diags: JSON.stringify(r.diags), core: JSON.stringify(r.core), asts: JSON.stringify(r.asts) };
+  };
+
+  test("entry omitted: every rotation (and every order) of the diamond → one result, entry = the <program> file", () => {
+    const base = noEntry(diamond());
+    expect(base.order[base.order.length - 1]).toBe("app.scrml");
+    expect(base.order[0]).toBe("lib/base.scrml");
+    for (const p of [...rotations(diamond()), ...permutations(diamond())]) expect(noEntry(p)).toEqual(base);
+    // and the same as naming it
+    expect(noEntry(diamond())).toEqual((() => {
+      const r = frontEnd(mods, diamond(), "app.scrml");
+      return { order: r.asts.map((a) => a.path), diags: JSON.stringify(r.diags), core: JSON.stringify(r.core), asts: JSON.stringify(r.asts) };
+    })());
+  });
+
+  test("entry omitted on the four-file program: rotations → identical to the named-entry compile", () => {
+    const named = compile(mods, program());
+    for (const p of rotations(program())) {
+      const r = frontEnd(mods, p);
+      expect(JSON.stringify(r.core)).toBe(named.core);
+      expect(JSON.stringify(r.diags)).toBe(named.diags);
+    }
+  });
+
+  test("entry omitted with zero or several <program> files → a driver error, not a positional guess", () => {
+    const libs = diamond().filter((f) => f.path !== "app.scrml");
+    expect(() => frontEnd(mods, libs)).toThrow(/cannot derive the entry: 0 files/);
+    const two = [...diamond(), { path: "other.scrml", src: "<program>\n</program>\n" }];
+    expect(() => frontEnd(mods, two)).toThrow(/cannot derive the entry: 2 files .*app\.scrml, other\.scrml/);
+    // naming the entry still compiles them
+    expect(() => frontEnd(mods, two, "app.scrml")).not.toThrow();
+    // a single file is its own entry
+    expect(frontEnd(mods, [libs[0]]).asts.map((a) => a.path)).toEqual(["lib/base.scrml"]);
+  });
+
+  test("a non-normal path (`.`, `..`, empty segment) is refused — one spelling per file", () => {
+    for (const bad of ["./lib/l.scrml", "lib//l.scrml", "lib/../lib/l.scrml", "lib/./l.scrml", "lib/", "..", "", "C:/x.scrml", "lib\\l.scrml"]) {
+      const files = [...diamond().filter((f) => f.path !== "lib/left.scrml"), { path: bad, src: diamond()[2].src }];
+      expect(() => frontEnd(mods, files, "app.scrml")).toThrow(/normal project-relative/);
+    }
+  });
+
+  test("two files with one path → a driver error", () => {
+    const files = [...diamond(), { path: "lib/base.scrml", src: "${ export type Other:enum = { X } }\n" }];
+    expect(() => frontEnd(mods, files, "app.scrml")).toThrow(/two files named "lib\/base\.scrml"/);
+  });
+});
+
 describe("link.scrml — the canonical order's parts", () => {
   test("codeUnitCompare is UTF-16 code-unit order, not locale order", () => {
     const c = mods.link.codeUnitCompare;

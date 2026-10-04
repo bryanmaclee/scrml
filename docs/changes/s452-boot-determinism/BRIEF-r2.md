@@ -1,0 +1,7 @@
+# BRIEF-r2 — s452-boot-determinism fix round (archived verbatim)
+
+PA → determinism agent: review LAND-WITH-NITS (counter verdicts 1301/1301 identical; bites re-proven; no leaks). Fix round on the SAME branch. Archive this as BRIEF-r2.md.
+1. MED — `slice-m2/lowered.js:35` `entry = files[files.length - 1].path` makes the result depend on list order when `entry` is omitted, and MANY callers omit it (`compileProgram`, slice-m4 `harness.js` `compileClean`/`codesOf`, typer/tables/lower/server/program-shape/effect/typing/theme tests, front/typer-s440/typer-gap helpers). Repro: a rotated diamond → different artifacts. ROOT fix: when `entry` is omitted, DERIVE it canonically = the single file containing a top-level `<program>`; zero or several → THROW requiring an explicit `entry` (no positional default). Single-file input stays as is. If some callers compile multi-file sets with no `<program>` (library-only), pass their entry explicitly. Add a determinism test with entry omitted (rotated orders → identical).
+2. LOW — `assertProjectRelative` (`lowered.js:20`) accepts `./lib/l.scrml`, `lib//l.scrml`, `lib/../lib/l.scrml` → silently drops import edges → different output for the same project. Reject `.`/`..`/empty segments (+ tests).
+3. LOW — duplicate paths in the input set compile silently; make it a driver error.
+Then `git merge origin/main`, run all slices by path + counter `--check` + the pre-commit gate, push. Reply: FINAL_SHA, test counts, which callers you changed (≤100 words).

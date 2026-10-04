@@ -13,14 +13,38 @@ export function readSlice(rel) {
 }
 
 /**
- * A path the compiler may be handed: project-relative, `/`-separated. An
- * absolute path (or a `\`) would carry the build host's directory layout into
- * diagnostics — SPEC §58.1, no build-host identity in the output.
+ * A path the compiler may be handed: project-relative, `/`-separated, and
+ * NORMAL — one spelling per file. An absolute path (or a `\`) would carry the
+ * build host's directory layout into diagnostics (SPEC §58.1, no build-host
+ * identity in the output); a `.`, `..` or empty segment is a second spelling
+ * of a path, under which import sources (resolved to normal paths, link.scrml
+ * `resolveFrom`) no longer find the file — the same project would link, and
+ * compile, differently.
  */
 export function assertProjectRelative(path) {
-  if (typeof path !== "string" || path === "" || path.startsWith("/") || /^[A-Za-z]:/.test(path) || path.includes("\\")) {
-    throw new Error(`the bootstrap front end takes project-relative "/"-separated paths, got ${JSON.stringify(path)}`);
+  const bad = (why) => {
+    throw new Error(`the bootstrap front end takes normal project-relative "/"-separated paths (${why}), got ${JSON.stringify(path)}`);
+  };
+  if (typeof path !== "string" || path === "") bad("empty");
+  if (path.startsWith("/") || /^[A-Za-z]:/.test(path) || path.includes("\\")) bad("absolute or `\\`");
+  for (const seg of path.split("/")) {
+    if (seg === "" || seg === "." || seg === "..") bad("a `.`, `..` or empty segment");
   }
+}
+
+/**
+ * The entry when the driver names none, derived from the SET: a single file is
+ * its own entry; otherwise the one file with a top-level `<program>`. Zero or
+ * several such files is a driver error — name the entry (no positional default:
+ * the result would depend on the list's order).
+ */
+export function deriveEntry(mods, files) {
+  if (files.length === 1) return files[0].path;
+  const ps = mods.link.programPaths(files.map((f) => ({ path: f.path, src: f.src })));
+  if (ps.length !== 1) {
+    throw new Error(`the bootstrap front end cannot derive the entry: ${ps.length} files have a top-level <program> (${ps.join(", ") || "none"}) — pass the entry explicitly`);
+  }
+  return ps[0];
 }
 
 /**
@@ -28,12 +52,17 @@ export function assertProjectRelative(path) {
  * link.scrml `parseProgram` puts them in the canonical order (path order, then
  * link order) so the result is a function of the set and `entry` alone
  * (s452-boot-determinism, SPEC §58.1/§58.12). `entry` is the path of the
- * `<program>` file; omitted, it is the LAST file listed (the legacy link-order
- * convention — the one input here that reads the list's order, and an explicit
- * one). Returns every phase's output and timing.
+ * `<program>` file; omitted, it is derived from the set (`deriveEntry`).
+ * Returns every phase's output and timing.
  */
-export function frontEnd(mods, files, entry = files[files.length - 1].path) {
-  for (const f of files) assertProjectRelative(f.path);
+export function frontEnd(mods, files, entry) {
+  const seen = new Set();
+  for (const f of files) {
+    assertProjectRelative(f.path);
+    if (seen.has(f.path)) throw new Error(`the bootstrap front end was handed two files named ${JSON.stringify(f.path)} — a project names each file once`);
+    seen.add(f.path);
+  }
+  if (entry === undefined) entry = deriveEntry(mods, files);
   const t0 = performance.now();
   const linked = mods.link.parseProgram(files.map((f) => ({ path: f.path, src: f.src })), entry);
   const asts = linked.files;
