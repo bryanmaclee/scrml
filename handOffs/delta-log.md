@@ -4217,3 +4217,10 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3679] land · #1266 SPEC E-ERROR-012/013, E-SQL-011 · #1267 SPEC 11a · #1268 SPEC client calls failable §19.9.10
 [3680] friction · PA relayed a wrong premise (all 11 E-SQL-004 cases legacy) into a ruling; agent caught channel-broadcast-strip → re-ruled 11a
 [3681] state · S451 WRAPPED; #1269 (| _ err :>) + #1270 (bootstrap §34 severity, counter 95→119) on auto-merge at wrap; next = bootstrap error-model rulings round + U1b design pass
+[3682] land · #1283 A3 async event listener rejections route to _scrml_error_boundary_log (shared colouring seam, 5 registration paths) · @adv:g-handler-level-rejection-bypasses-scrml-logging
+[3683] land · #1286 B1a/B1b transaction exits roll back; top-level transaction refused (E-ERROR-001); exits still refused in a match arm · @adv:g-transaction-block-not-recognized-inside-a-function-body
+[3684] rule · B2 ruled bootstrap-owed — g-each-row-whitespace-only-text-dropped filed open on main, hold/s450-each-row-interp-whitespace retired unlanded · → user-voice-scrml.md §S449
+[3685] gap · g-handler-callref-auto-wrap-drops-async-callee-rejection filed (the §5.2.2 call-ref limb A3 does NOT close; 1251 sites/640 files, 464/180 at risk; ruling-gated) · g-errorboundary-async-render-rejection-unobserved-s453 filed (LOW)
+[3686] finding · B1a needed NO codegen change — the parked try/finally already rolled back on return/break/continue; S450 refused a shape its own lowering handled · @adv:g-transaction-block-not-recognized-inside-a-function-body
+[3687] friction · a write:false probe is blind to the whole codegen stage (no E-CODEGEN-* can appear); it falsified two true PA corrections and invalidated an agent own 993-file differential until re-closed with write:true
+[3688] verify · aM re-verified green vs #1258/#1264 — 26/26 emitted artifacts byte-identical, pre-#1258 vs HEAD; all of S451+S452 inert on aM
