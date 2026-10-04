@@ -27,6 +27,7 @@
  */
 
 import type { CompileContext } from "./context.ts";
+import { sqlHandleRegExp, compareSqlHandles, UNRESOLVED_SQL_HANDLE } from "./sql-handle-name.ts";
 import { getNodes, containsSql, containsSqlOrTransaction } from "./collect.ts";
 import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
 import type { AsyncEscapeSite } from "./local-async-fns.ts";
@@ -209,22 +210,30 @@ function toolParamSignature(p: unknown, i: number): string {
  * (§44.2), driven by which `_scrml_sql`/`_scrml_sql_<n>` identifiers the emitted
  * body references. Returns "" when the tool uses no `?{}`.
  */
-function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigure = false): string {
+function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigure = false, errors?: unknown[]): string {
   const usedIdents = new Set<string>();
-  const re = /\b_scrml_sql(?:_\d+)?\b/g;
+  const re = sqlHandleRegExp(); // every handle name (sql-handle-name.ts)
   let m: RegExpExecArray | null;
   while ((m = re.exec(emittedBody)) !== null) usedIdents.add(m[0]);
+  // FAIL CLOSED (S451 review) — a lowering told no handle in a multi-database file.
+  // Never declared (no `:memory:` stand-in); a compile error.
+  if (usedIdents.delete(UNRESOLVED_SQL_HANDLE) && errors) {
+    errors.push(new CGError(
+      "E-INTERNAL-DB-HANDLE-UNRESOLVED",
+      "E-INTERNAL-DB-HANDLE-UNRESOLVED: this file declares more than one database, and a database " +
+      "query in it was lowered without knowing which database it runs on (§8.1.1). The compiler " +
+      "refuses rather than run it on the file's first database. This is a compiler defect.",
+      { file: typeof fileAST.filePath === "string" ? fileAST.filePath : "", start: 0, end: 0, line: 1, col: 1 },
+      "error",
+    ));
+  }
   if (usedIdents.size === 0) return "";
 
   const dbScopes = collectDbScopes(fileAST as never);
   const lines: string[] = [];
   lines.push("// --- §44.2: Bun.SQL handle declarations (compiler-generated) ---");
   lines.push('import { SQL } from "bun";');
-  const sorted = Array.from(usedIdents).sort((a, b) => {
-    if (a === "_scrml_sql") return -1;
-    if (b === "_scrml_sql") return 1;
-    return parseInt(a.replace("_scrml_sql_", ""), 10) - parseInt(b.replace("_scrml_sql_", ""), 10);
-  });
+  const sorted = Array.from(usedIdents).sort(compareSqlHandles);
   // §44 (S433 fix-round, F2-2) — the file-backed sqlite handles this module declares,
   // collected as they are emitted and configured in one block after them.
   const sqliteConfiguredIdents: string[] = [];
@@ -1053,7 +1062,7 @@ function assembleModuleHeaders(
   awaitSqliteConfigure = false,
 ): string {
   const runtimeHeader = buildRuntimeHelperHeader(body, filePath, errors);
-  const dbHeader = buildDbHandleHeader(fileAST, body, awaitSqliteConfigure);
+  const dbHeader = buildDbHandleHeader(fileAST, body, awaitSqliteConfigure, errors);
   const importHeader = buildImportHeader(fileAST);
   return (
     (importHeader ? importHeader + "\n" : "") +
@@ -1074,9 +1083,10 @@ function assembleModuleHeaders(
  */
 function dbHandleMissingScope(fileAST: ASTNode, body: string): boolean {
   const used = new Set<string>();
-  const re = /\b_scrml_sql(?:_\d+)?\b/g;
+  const re = sqlHandleRegExp(); // every handle name (sql-handle-name.ts)
   let m: RegExpExecArray | null;
   while ((m = re.exec(body)) !== null) used.add(m[0]);
+  used.delete(UNRESOLVED_SQL_HANDLE); // its own internal error (buildDbHandleHeader), not a missing-scope code
   if (used.size === 0) return false;
   const scopes = collectDbScopes(fileAST as never);
   for (const id of used) if (!scopes.get(id)) return true;

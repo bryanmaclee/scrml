@@ -23,14 +23,14 @@
  *     `TEMP`, not a table qualified to another attached schema), or
  *   - a `<schema>` block (any form — declarative, raw DDL, `schemaFor(T)`).
  *
- * WHICH TARGET (S445 review F6 — one rule with codegen). A `?{}` block runs against
- * the handle codegen binds it to, and codegen binds EVERY `?{}` in a file to the
- * file's DEFAULT handle `_scrml_sql` (`fileDefaultDbValue`: the first `<db src=>` in
- * document order, else the first `<program db=>`) — `collectDbScopes` calls the same
- * function. So a `?{}` declaration owns the file's default target, exactly the
- * database its statement will run against. A `<schema>` block is not executed; it
- * declares schema for its innermost enclosing `<program db=>` / `<db src=>`, else for
- * the file's default target.
+ * WHICH TARGET (S445 review F6 — one rule with codegen; S451 §8.1.1 nearest scope). A
+ * `?{}` block runs against its NEAREST enclosing database scope — a `<program db=>` or
+ * a `<db src=>`, whichever is closer (`resolveDbScopes`, which codegen's
+ * `collectDbScopes` and every `?{}` lowering also read). So a `?{}` declaration owns
+ * exactly the database its statement will run against. A `<schema>` block is not
+ * executed; it declares schema for the database the same rule gives its position, else
+ * (no scope above it — a §44.7.1 module-with-db-context) for the file's default
+ * database (`fileDefaultDbValue`).
  *
  * Consumers (none may decide ownership another way):
  *   - codegen (`codegen/sqlite-file-target.ts`): an owned target's handle may create
@@ -70,9 +70,11 @@ function hasAttr(node: AnyNode, name: string): boolean {
 }
 
 /**
- * The `db=` / `src=` value codegen binds a file's default `_scrml_sql` handle to —
- * THE rule for which database a `?{}` block runs against (every `?{}` in a file is
- * lowered onto `_scrml_sql`; codegen/index.ts passes `dbVar: "_scrml_sql"`).
+ * The `db=` / `src=` value codegen binds a file's DEFAULT `_scrml_sql` handle to. It is
+ * NOT the rule for which database a `?{}` runs on — that is its nearest scope
+ * (`resolveDbScopes`, §8.1.1 S451). The default names the handle a single-database file
+ * has always emitted, the compiler's own bookkeeping queries (the §19.9.6 idempotency
+ * table), and the §44.7.1 module-with-db-context fallback.
  *
  * Walks `children` depth-first in document order, as `collectDbScopes` always has:
  * the first non-empty `<db src=>` wins; with none, the first `<program db=>` that
@@ -109,6 +111,188 @@ export function fileDefaultDbDecl(nodes: unknown): { value: string; node: AnyNod
   };
   walk(nodes);
   return firstDbSrc ?? firstProgramDb;
+}
+
+// ---------------------------------------------------------------------------
+// §8.1.1 — which database each `?{}` runs on: its NEAREST enclosing database scope
+// ---------------------------------------------------------------------------
+
+/**
+ * One database HANDLE a file's server code opens. Several database scopes that name
+ * the SAME database (the same resolved SQLite file, or the same connection string)
+ * share one handle — one connection, one §19.10.6 transaction guard — so a
+ * `<program db="./app.db">` holding a `<db src="./app.db">` still opens the file once.
+ */
+export interface DbHandle {
+  /** The emitted identifier: `_scrml_sql` for the file's default database, else `_scrml_sql_<n>`. */
+  ident: string;
+  /** The `db=` / `src=` value as written on `node`. */
+  value: string;
+  /** The FIRST scope element (document order) that names this database — per-database
+   *  attributes (`transactions=`, §19.10.6) are read off it; for the default handle it is
+   *  the `fileDefaultDbDecl` node, exactly as before. */
+  node: AnyNode;
+}
+
+/** A `?{}` (or `<transaction>`) site and the handle its nearest scope resolves to. */
+export interface DbSite {
+  node: AnyNode;
+  /** null = no database scope above it (E-SQL-004 unless the file is a module-with-db-context). */
+  handle: DbHandle | null;
+}
+
+export interface DbScopeResolution {
+  /** Every handle, default (`_scrml_sql`) first, then `_scrml_sql_<n>` ascending. */
+  handles: DbHandle[];
+  /** Handle by identifier. */
+  byIdent: Map<string, DbHandle>;
+  /** The file's default handle (`fileDefaultDbDecl`), or null when the file has no scope. */
+  defaultHandle: DbHandle | null;
+  /** Every `?{}` / `<transaction>` site, document order, with its nearest scope's handle. */
+  sites: DbSite[];
+  /** Nearest-scope handle for every object visited (null = visited, no scope above). */
+  scopeOf: WeakMap<object, DbHandle | null>;
+}
+
+/** The `?{}`-class node kinds — the same set as codegen/collect.ts `SQL_KINDS` +
+ *  `TRANSACTION_KINDS`: each runs against a database handle. */
+const DB_SITE_KINDS: ReadonlySet<string> = new Set(["sql", "sql-ref", "transaction-block"]);
+
+/** The `db=` / `src=` value when `node` is a DATABASE SCOPE (§8.1.1), else null. */
+export function dbScopeValueOf(node: AnyNode): string | null {
+  if (node.kind === "markup" && node.tag === "program") {
+    const v = dbAttrValue(node, "db");
+    return v !== null && v.trim().length > 0 ? v : null;
+  }
+  if (node.kind === "state" && node.stateType === "db") {
+    const v = dbAttrValue(node, "src");
+    return v !== null && v.trim().length > 0 ? v : null;
+  }
+  return null;
+}
+
+/** A stable id per `:memory:` scope element (see `databaseIdentity`). */
+const _memoryScopeIds = new WeakMap<object, number>();
+let _memoryScopeNext = 0;
+function memoryScopeId(node: AnyNode): number {
+  let id = _memoryScopeIds.get(node);
+  if (id === undefined) { id = ++_memoryScopeNext; _memoryScopeIds.set(node, id); }
+  return id;
+}
+
+/** What makes two scope values the SAME database: the declaring element for
+ *  `:memory:`; the resolved SQLite file when the declaring file is known; else the
+ *  trimmed value. */
+function databaseIdentity(value: string, filePath: string | null, node: AnyNode): string {
+  // `:memory:` names no shared thing: each scope that declares it is its OWN empty
+  // database, so it is keyed by the declaring ELEMENT, never by value (S451 review
+  // MED-2: two `<db src=":memory:">` blocks shared one connection, each reading the
+  // other's rows).
+  if (classifyDbTarget(value).kind === "sqlite-memory") return "memory:" + memoryScopeId(node);
+  if (filePath) {
+    const f = sqliteFileTarget(value, filePath);
+    if (f !== null) return "file:" + f;
+  }
+  return "value:" + value.trim();
+}
+
+/**
+ * THE §8.1.1 resolution rule, structurally: "A `?{}` context resolves its database by
+ * walking up the ancestor tree from the `?{}` block's position to the closest database
+ * scope. Two elements are database scopes: a `<program>` with a `db=` attribute, and a
+ * `<db>` state block (its `src=` attribute). The NEAREST one wins."
+ *
+ * One depth-first walk over every structural field (as `codegen/collect.ts
+ * bodyContains` walks — `span` and `_`-prefixed annotation fields skipped) carries the nearest scope down the tree, so
+ * each node's answer comes from its ANCESTOR CHAIN, never from text or document order.
+ * Document order only NUMBERS the handles (`_scrml_sql_1`, `_scrml_sql_2`, …); the
+ * default handle `_scrml_sql` keeps naming the database `fileDefaultDbDecl` names, so a
+ * file with one database emits exactly what it always did.
+ *
+ * `filePath` (the declaring `.scrml` file) lets two spellings of one SQLite file share a
+ * handle; without it values are compared as written.
+ */
+export function resolveDbScopes(nodes: unknown, filePath: string | null = null): DbScopeResolution {
+  const handles: DbHandle[] = [];
+  const byIdent = new Map<string, DbHandle>();
+  const byIdentity = new Map<string, DbHandle>();
+  const sites: DbSite[] = [];
+  const scopeOf = new WeakMap<object, DbHandle | null>();
+
+  const defaultDecl = fileDefaultDbDecl(nodes);
+  let defaultHandle: DbHandle | null = null;
+  if (defaultDecl !== null) {
+    defaultHandle = { ident: "_scrml_sql", value: defaultDecl.value, node: defaultDecl.node };
+    handles.push(defaultHandle);
+    byIdent.set(defaultHandle.ident, defaultHandle);
+    byIdentity.set(databaseIdentity(defaultDecl.value, filePath, defaultDecl.node), defaultHandle);
+  }
+  let next = 0;
+  const handleFor = (value: string, node: AnyNode): DbHandle => {
+    const id = databaseIdentity(value, filePath, node);
+    const known = byIdentity.get(id);
+    if (known) return known;
+    const h: DbHandle = { ident: `_scrml_sql_${++next}`, value, node };
+    handles.push(h);
+    byIdent.set(h.ident, h);
+    byIdentity.set(id, h);
+    return h;
+  };
+
+  const seen = new WeakSet<object>();
+  const visit = (value: unknown, scope: DbHandle | null): void => {
+    if (value === null || typeof value !== "object") return;
+    if (seen.has(value as object)) return;
+    seen.add(value as object);
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item, scope);
+      return;
+    }
+    const node = value as AnyNode;
+    let here = scope;
+    const sv = dbScopeValueOf(node);
+    // The scope element itself (and so its attributes) is INSIDE its own scope.
+    if (sv !== null) here = handleFor(sv, node);
+    scopeOf.set(node, here);
+    if (typeof node.kind === "string" && DB_SITE_KINDS.has(node.kind)) {
+      sites.push({ node, handle: here });
+    }
+    for (const key of Object.keys(node)) {
+      if (key === "span" || key.startsWith("_")) continue; // annotations are not tree edges
+      visit(node[key], here);
+    }
+  };
+  visit(nodes, null);
+
+  return { handles, byIdent, defaultHandle, sites, scopeOf };
+}
+
+/**
+ * The handles of every `?{}` / `<transaction>` site INSIDE `node` (a server function, a
+ * cell declaration, …). A null entry is a site with no scope above it.
+ */
+export function dbHandlesWithin(res: DbScopeResolution, node: unknown): Set<DbHandle | null> {
+  const out = new Set<DbHandle | null>();
+  const seen = new WeakSet<object>();
+  const visit = (value: unknown): void => {
+    if (value === null || typeof value !== "object") return;
+    if (seen.has(value as object)) return;
+    seen.add(value as object);
+    if (Array.isArray(value)) { for (const item of value) visit(item); return; }
+    const n = value as AnyNode;
+    if (typeof n.kind === "string" && DB_SITE_KINDS.has(n.kind)) {
+      const h = res.scopeOf.get(n);
+      // A site the resolution walk never reached (a node rebuilt after it ran) has no
+      // known scope: report it as unresolved rather than guess one.
+      out.add(h === undefined ? null : h);
+    }
+    for (const key of Object.keys(n)) {
+      if (key === "span" || key.startsWith("_")) continue;
+      visit(n[key]);
+    }
+  };
+  visit(node);
+  return out;
 }
 
 /** The absolute FILE a `db=` / `src=` value names, or null when it is not a SQLite file. */
@@ -205,38 +389,42 @@ export function sqlDeclaresTable(sql: string): boolean {
 
 /** The SQLite files ONE `.scrml` file declares schema for (see the module comment). */
 export function collectOwnedDbFiles(nodes: unknown, filePath: string, out: Set<string> = new Set()): Set<string> {
-  const fileDefault = sqliteFileTarget(fileDefaultDbValue(nodes), filePath);
+  // §8.1.1 *Ownership* (S451): "*That database* for a `?{}` block is the database the
+  // block runs against, as the resolution rule above gives it: its nearest enclosing
+  // database scope … A `<schema>` block declares for the database the same rule gives
+  // its position … with neither, for the module-with-db-context's top-level
+  // `<db src=>`." — the SAME resolution codegen binds each `?{}` with.
+  const res = resolveDbScopes(nodes, filePath);
+  const targetOf = (h: DbHandle | null | undefined): string | null => {
+    const handle = h ?? res.defaultHandle;
+    return handle ? sqliteFileTarget(handle.value, filePath) : null;
+  };
 
-  const visit = (value: unknown, scope: string | null, depth: number): void => {
+  for (const site of res.sites) {
+    const node = site.node;
+    if (node.kind === "sql" && typeof node.query === "string" && sqlDeclaresTable(node.query as string)) {
+      const t = targetOf(site.handle);
+      if (t !== null) out.add(t);
+    }
+  }
+  const visit = (value: unknown, depth: number): void => {
     if (value === null || typeof value !== "object" || depth > 96) return;
     if (Array.isArray(value)) {
-      for (const item of value) visit(item, scope, depth + 1);
+      for (const item of value) visit(item, depth + 1);
       return;
     }
     const node = value as AnyNode;
-    let here = scope;
-    if (node.kind === "markup" && node.tag === "program" && !hasAttr(node, "name")) {
-      const t = sqliteFileTarget(dbAttrValue(node, "db"), filePath);
-      if (t !== null) here = t;
-    } else if (node.kind === "state" && node.stateType === "db") {
-      const t = sqliteFileTarget(dbAttrValue(node, "src"), filePath);
-      if (t !== null) here = t;
-    }
-    if (node.kind === "sql" && typeof node.query === "string" && sqlDeclaresTable(node.query as string)) {
-      // A `?{}` runs on the file's default handle — own THAT database.
-      if (fileDefault !== null) out.add(fileDefault);
-    }
     if (node.kind === "state" && node.stateType === "schema") {
-      const t = here ?? fileDefault;
+      const t = targetOf(res.scopeOf.get(node));
       if (t !== null) out.add(t);
     }
     for (const key of Object.keys(node)) {
       if (key === "span" || key.startsWith("_")) continue;
-      visit(node[key], here, depth + 1);
+      visit(node[key], depth + 1);
     }
   };
 
-  visit(nodes, null, 0);
+  visit(nodes, 0);
   return out;
 }
 

@@ -526,19 +526,33 @@ describe("§5 S445 review findings", () => {
     expect(sqlDeclaresTable("CREATE INDEX i ON t (n)")).toBe(false);
   });
 
-  test("F6 — a `?{}` declares for the database codegen runs it on (the file's first <db src>)", () => {
+  // S451 (§8.1.1 nearest scope) — this test used to pin BOTH statements onto the file's
+  // first <db src> (a.db), `CREATE TABLE u` included although `u` is b.db's table: the
+  // wrong-database behaviour g-impl1-db-resolution-not-nearest-s451 fixed. A `?{}`
+  // outside both scopes of a two-database file now has no database (E-SQL-004, never
+  // a silent default); written inside its scope, each statement owns ITS database.
+  test("F6 — a `?{}` outside both <db src> scopes of a two-database module is refused, not run on the first", () => {
     const root = join(_tmp.root, "f6");
     mkdirSync(root, { recursive: true });
     const src = `<db src="./a.db" tables="t" />\n<db src="./b.db" tables="u" />\n\${\nexport function ensure() {\n  ?{\`CREATE TABLE IF NOT EXISTS t (n INTEGER)\`}.run()\n  ?{\`CREATE TABLE IF NOT EXISTS u (n INTEGER)\`}.run()\n}\n}\n`;
     writeFileSync(join(root, "lib.scrml"), src);
     const r = compileScrml({ inputFiles: [join(root, "lib.scrml")], write: true, outputDir: join(root, "dist"), log: () => {} });
+    const codes = (r.errors ?? []).map((e) => e.code);
+    expect(codes).toContain("E-SQL-004");
+  });
+
+  test("F6 — a `?{}` declares for the database codegen runs it on (its nearest <db src>)", () => {
+    const root = join(_tmp.root, "f6-scoped");
+    mkdirSync(root, { recursive: true });
+    const src = `<program>\n<db src="./a.db" tables="t">\n\${\nfunction ensureT() {\n  ?{\`CREATE TABLE IF NOT EXISTS t (n INTEGER)\`}.run()\n}\n}\n<p>a</p>\n</>\n<db src="./b.db" tables="u">\n\${\nfunction ensureU() {\n  ?{\`CREATE TABLE IF NOT EXISTS u (n INTEGER)\`}.run()\n}\n}\n<p>b</p>\n</>\n</program>\n`;
+    writeFileSync(join(root, "app.scrml"), src);
+    const r = compileScrml({ inputFiles: [join(root, "app.scrml")], write: true, outputDir: join(root, "dist"), log: () => {} });
     const fatal = (r.errors ?? []).filter((e) => e.severity !== "warning" && !String(e.code).startsWith("W-") && !String(e.code).startsWith("I-"));
     expect(fatal).toEqual([]);
-    // Both statements run on `_scrml_sql` = a.db (the first <db src>) — so a.db is the owned one.
     const all = readdirSync(join(root, "dist")).filter((f) => f.endsWith(".js"))
       .map((f) => readFileSync(join(root, "dist", f), "utf8")).join("\n");
-    expect(all).toMatch(/new SQL\(_scrml_sqlite_owned\("[^"]*\/a\.db", "\.\/a\.db", "lib\.scrml"\)\)/);
-    expect(all).not.toMatch(/_scrml_sqlite_owned\("[^"]*\/b\.db"/);
+    expect(all).toMatch(/new SQL\(_scrml_sqlite_owned\("[^"]*\/a\.db", "\.\/a\.db", "app\.scrml"\)\)/);
+    expect(all).toMatch(/new SQL\(_scrml_sqlite_owned\("[^"]*\/b\.db", "\.\/b\.db", "app\.scrml"\)\)/);
   });
 
   test("F1(b) — W-DB-PATH-RESOLVES-ELSEWHERE names both files when the path was written for the CWD", () => {

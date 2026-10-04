@@ -1250,9 +1250,10 @@ return { h: _scrml_mountHydrate_handler };`)();
       new URL("../../src/codegen/emit-server.ts", import.meta.url),
       "utf8",
     );
-    expect(emitter).toContain('try { await _scrml_sql.unsafe("ROLLBACK"); } catch');
+    // §8.1.1 (S451): the envelope runs on the handler's own handle (`_envDb`).
+    expect(emitter).toContain('try { await ${_envDb}.unsafe("ROLLBACK"); } catch');
     // the bare form, which drops `_scrml_batch_err` on a rollback failure, is gone
-    expect(emitter).not.toMatch(/lines\.push\(`\s*await _scrml_sql\.unsafe\("ROLLBACK"\);`\)/);
+    expect(emitter).not.toMatch(/lines\.push\(`\s*await (?:_scrml_sql|\$\{_envDb\})\.unsafe\("ROLLBACK"\);`\)/);
     // and the original error is still what propagates
     expect(emitter).toContain("throw _scrml_batch_err;");
   });

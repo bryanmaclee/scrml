@@ -1,4 +1,5 @@
 import { genVar } from "./var-counter.ts";
+import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import { emitLogicNode, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody } from "./emit-logic.js";
@@ -690,7 +691,7 @@ function _emitForStmtInner(
   // to the standard emission path.
   const _hoist = (_hoistMap && node.id != null) ? _hoistMap.get(node.id) : null;
   if (_hoist) {
-    return emitHoistedForStmt(node, _hoist, opts?.dbVar ?? "_scrml_sql", opts ?? undefined);
+    return emitHoistedForStmt(node, _hoist, opts?.dbVar ?? fallbackSqlHandle(), opts ?? undefined);
   }
 
   if (typeof iterable === "string") {
