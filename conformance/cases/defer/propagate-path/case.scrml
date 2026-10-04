@@ -20,7 +20,7 @@ ${
 
     function go() {
         @result = outer() !{
-            | ::Missing(key) :> "missing " + key
+            ::Missing(key) :> "missing " + key
         }
     }
 }

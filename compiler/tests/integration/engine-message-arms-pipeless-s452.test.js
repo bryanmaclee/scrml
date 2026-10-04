@@ -127,9 +127,16 @@ const QUALIFIED = `<program title="q">
 
 describe("S452 — pipe-less message arms ≡ piped (byte-identical artifacts + diagnostics)", () => {
   test("examples/25-triage-board.scrml", () => {
-    const src = readFileSync(resolve(import.meta.dir, "../../../examples/25-triage-board.scrml"), "utf8");
-    const bare = unpipe(src);
+    // The example is canonical (pipe-less) since `scrml fix` migrated it (S452); its legacy
+    // twin re-adds the `| ` lead to the five message-arm lines inside the `<engine>` (the
+    // match arms above the engine are not message arms and stay untouched).
+    const bare = readFileSync(resolve(import.meta.dir, "../../../examples/25-triage-board.scrml"), "utf8");
+    const at = bare.indexOf("<engine");
+    expect(at).toBeGreaterThan(0);
+    const src = bare.slice(0, at) +
+      bare.slice(at).replace(/^([ \t]*)(?=(?:\.[A-Z]\w*(?:\([^)]*\))?|_)[ \t]*:>)/gm, "$1| ");
     expect((src.match(/^[ \t]*\| /gm) ?? []).length).toBe(5);
+    expect(unpipe(src)).toBe(bare);
     const { pipeless } = assertEquivalent(src, bare);
     expect(pipeless.clientJs).toContain("_dragPhase_msg_arms");
     expect(pipeless.clientJs).toContain("_scrml_engine_dispatch_message");

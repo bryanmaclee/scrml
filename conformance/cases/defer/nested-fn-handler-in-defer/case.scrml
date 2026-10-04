@@ -13,12 +13,12 @@ ${
         defer {
             function inner()! -> E {
                 risky() !{
-                    | ::Busy :> @trace = @trace + "busy;"
+                    ::Busy :> @trace = @trace + "busy;"
                 }
                 @trace = @trace + "past;"
             }
             inner() !{
-                | _ :> @trace = @trace + "inner-failed;"
+                _ :> @trace = @trace + "inner-failed;"
             }
         }
         @trace = @trace + "work;"

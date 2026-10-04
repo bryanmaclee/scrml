@@ -12,8 +12,8 @@ ${
 
     function go() {
         let r = f("x") !{
-            | .NotFound(m) :> log(m)
-            | .Timeout :> log("t")
+            .NotFound(m) :> log(m)
+            .Timeout :> log("t")
         }
     }
 }

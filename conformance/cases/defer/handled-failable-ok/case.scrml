@@ -12,8 +12,8 @@ ${
 
     function work() {
         defer closeAll() !{
-            | ::Busy :> @trace = @trace + "close-busy;"
-            | _ :> @trace = @trace + "close-other;"
+            ::Busy :> @trace = @trace + "close-busy;"
+            _ :> @trace = @trace + "close-other;"
         }
         @trace = @trace + "work;"
     }

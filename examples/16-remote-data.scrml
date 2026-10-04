@@ -80,7 +80,7 @@
     function load() {
       @phase = .Loading
       const rows = fetchContacts() !{
-        | err :> { @phase = .Failed("Couldn't load contacts."); return }
+        _ err :> { @phase = .Failed("Couldn't load contacts."); return }
       }
       @phase = .Loaded(rows)
     }

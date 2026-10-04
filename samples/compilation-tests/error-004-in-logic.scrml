@@ -5,7 +5,7 @@
     ${
         let data = not
         !{
-            | ::ParseError e -> let fixed = "default"
+            ::ParseError(e) -> let fixed = "default"
         }
     }
     <p>Error in logic</>

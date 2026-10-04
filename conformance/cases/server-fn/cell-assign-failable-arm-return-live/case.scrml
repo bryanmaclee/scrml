@@ -11,7 +11,7 @@ ${
     }
     function load() {
         @out = risky(2) !{
-            | .Boom(m) :> { @seen = "boom:" + m; return }
+            .Boom(m) :> { @seen = "boom:" + m; return }
         }
         @after = "ran"
     }

@@ -25,7 +25,7 @@ ${
     function bindlessRecoveryInArm() {
         const label = if (@n > 0) {
             load("ok") !{
-                | .NotFound(mid) :> console.warn("not found", mid)
+                .NotFound(mid) :> console.warn("not found", mid)
             }
             lift "found"
         } else {

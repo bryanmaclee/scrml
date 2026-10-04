@@ -37,7 +37,7 @@ ${
 
     function viaHandlerArm() {
         defer risky() !{
-            | ::Bad :> { return 9 }
+            ::Bad :> { return 9 }
         }
         return 1
     }

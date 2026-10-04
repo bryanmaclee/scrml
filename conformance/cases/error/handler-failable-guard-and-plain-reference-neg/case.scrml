@@ -7,5 +7,5 @@ ${
 <r> = 0
 
 <button id="ref" onclick=bump>reference</>
-<button id="guarded" onclick={ risky() !{ | .Empty :> @r = 7 } }>guarded</>
+<button id="guarded" onclick={ risky() !{ .Empty :> @r = 7 } }>guarded</>
 <p id="out">${@r}</p>
