@@ -3518,9 +3518,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // applied to the driver's row array before `.get()` takes `[0]` and before
       // the §14.8.9 / §39.4 per-row wrappers; for an INSERT, inject the ambient
       // tenant. No-op (identity) when tenant inactive.
-      const { effectiveSql: _tenantSql, tenantScope: _tenantScope } = _lowerTenantForQuery(rawQuery, _tenantAcross);
-      const { sql, params, segments } = extractSqlParams(_tenantSql);
       const db = opts.dbVar ?? fallbackSqlHandle();
+      const { effectiveSql: _tenantSql, tenantScope: _tenantScope } = _lowerTenantForQuery(rawQuery, _tenantAcross, db);
+      const { sql, params, segments } = extractSqlParams(_tenantSql);
 
       const taggedFromParams = (): string => {
         const _sqlExprCtx = _makeExprCtx(opts);

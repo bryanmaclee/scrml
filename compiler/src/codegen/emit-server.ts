@@ -1953,9 +1953,14 @@ export function generateServerJs(
   // byte-identically (every redaction site below is a no-op / absent).
   // `tenantTables` = the UNION over every same-name `<schema>` declaration (S447
   // "stamp all" (i)); disagreeing declarations are rejected at GCP1 (E-SCHEMA-015).
+  const _desiredForTenant = extractDesiredSchema(fileAST);
   const _tenantCtx: TenantContext = buildTenantContext(
     _protectCtx,
-    extractDesiredSchema(fileAST).tenantTables,
+    _desiredForTenant.tenantTables,
+    _desiredForTenant.schemaText,
+    // §14.8.10 (S452 r4) — the dialect of the handle a query runs on: an injected
+    // SQLite write carries `OR ABORT` (it overrides a table-level ON CONFLICT REPLACE).
+    (ident: string) => _dbScopesForFile.get(ident)?.driver,
   );
   const _tenantActive: boolean = _tenantCtx.tenantScopedTables.size > 0;
   // Tier-1 `SELECT * FROM <tenant table>` + SSR seed reads are hand-emitted (not

@@ -60,6 +60,7 @@ import {
   injectInsertTenant,
   injectWriteTenantFilter,
   TENANT_ROW_FUNCTIONS,
+  TENANT_GROUP_AGGREGATES,
   type TenantAnalysis,
 } from "./tenant-sql-subset.ts";
 
@@ -75,6 +76,79 @@ export const TENANT_COLUMN = "tenant_id";
  */
 export interface TenantContext {
   tenantScopedTables: Set<string>;
+  /**
+   * S452 r4 — per tenant-scoped table (lowercased), the `<schema>`-declared
+   * objects that turn ONE write into further, unanalysed writes: triggers, rules,
+   * and foreign keys with a CASCADE / SET NULL / SET DEFAULT action that this
+   * table's writes fire. A tenant write to such a table is refused (E-TENANT-WRITE)
+   * — the floor constrains the statement, not what the database runs because of it.
+   * Only what `<schema>` declares is visible: a trigger created outside it (an
+   * external database, a `<db src>` with no schema) is not.
+   */
+  writeHazards?: Map<string, string[]>;
+  /** S452 r4 — the driver of a SQL handle (`_scrml_sql`, …), for dialect-specific injection. */
+  driverFor?: (dbVar: string) => string | undefined;
+}
+
+/** The last part of a possibly-qualified, possibly-quoted SQL name, lowercased. */
+function bareName(name: string): string {
+  const parts = name.split(".");
+  return parts[parts.length - 1].replace(/^["`[]|["`\]]$/g, "").toLowerCase();
+}
+
+/**
+ * Read the write hazards a `<schema>` body declares (see `TenantContext.writeHazards`).
+ * TEXTUAL and deliberately over-inclusive: a hazard the reader cannot attribute
+ * to a table is attributed to EVERY tenant-scoped table (fail-closed), and a
+ * commented-out declaration still counts.
+ */
+export function schemaWriteHazards(schemaText: string, tenantTables: Set<string>): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const add = (table: string | null, what: string): void => {
+    const targets = table === null ? [...tenantTables] : [table];
+    for (const t of targets) {
+      if (!tenantTables.has(t)) continue;
+      const key = t.toLowerCase();
+      const list = out.get(key) ?? [];
+      if (!list.includes(what)) list.push(what);
+      out.set(key, list);
+    }
+  };
+  const text = typeof schemaText === "string" ? schemaText : "";
+  const NAME = `("[^"]+"|\`[^\`]+\`|\\[[^\\]]+\\]|[A-Za-z_][\\w$]*(?:\\.[A-Za-z_][\\w$]*)?)`;
+  // Triggers (SQLite / Postgres): `TRIGGER name … ON table`.
+  let attributedTriggers = 0;
+  const trigRe = new RegExp(`\\bTRIGGER\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?${NAME}[\\s\\S]*?\\bON\\s+${NAME}`, "gi");
+  for (const m of text.matchAll(trigRe)) {
+    attributedTriggers++;
+    add(bareName(m[2]), `trigger \`${bareName(m[1])}\``);
+  }
+  const triggerWords = (text.match(/\bTRIGGER\b/gi) ?? []).length;
+  if (triggerWords > attributedTriggers) add(null, "a trigger the floor could not attribute to a table");
+  // Postgres rules: `RULE name AS ON event TO table`.
+  let attributedRules = 0;
+  const ruleRe = new RegExp(`\\bRULE\\s+${NAME}\\s+AS\\s+ON\\s+\\w+\\s+TO\\s+${NAME}`, "gi");
+  for (const m of text.matchAll(ruleRe)) {
+    attributedRules++;
+    add(bareName(m[2]), `rule \`${bareName(m[1])}\``);
+  }
+  if ((text.match(/\bCREATE\s+(?:OR\s+REPLACE\s+)?RULE\b/gi) ?? []).length > attributedRules) {
+    add(null, "a rule the floor could not attribute to a table");
+  }
+  // Foreign-key actions fire on writes to the REFERENCED (parent) table.
+  const ACTION = /\bON\s+(?:DELETE|UPDATE)\s+(?:CASCADE|SET\s+NULL|SET\s+DEFAULT)\b/gi;
+  let attributedActions = 0;
+  const fkRe = new RegExp(`\\bREFERENCES\\s+${NAME}\\s*(?:\\([^)]*\\))?((?:\\s+(?:ON\\s+(?:DELETE|UPDATE)\\s+(?:CASCADE|SET\\s+NULL|SET\\s+DEFAULT|NO\\s+ACTION|RESTRICT)|MATCH\\s+\\w+|NOT\\s+DEFERRABLE|DEFERRABLE|INITIALLY\\s+\\w+))*)`, "gi");
+  for (const m of text.matchAll(fkRe)) {
+    const actions = m[2].match(ACTION) ?? [];
+    if (actions.length === 0) continue;
+    attributedActions += actions.length;
+    add(bareName(m[1]), `a foreign key with \`${actions[0].replace(/\s+/g, " ").toUpperCase()}\` referencing it`);
+  }
+  if ((text.match(ACTION) ?? []).length > attributedActions) {
+    add(null, "a foreign-key action (CASCADE / SET NULL / SET DEFAULT) the floor could not attribute to a table");
+  }
+  return out;
 }
 
 /**
@@ -148,6 +222,8 @@ class TenantTableSet extends Set<string> {
 export function buildTenantContext(
   protectCtx: ProtectContext,
   schemaTables?: Array<{ name?: unknown; columns?: unknown }>,
+  schemaText?: string,
+  driverFor?: (dbVar: string) => string | undefined,
 ): TenantContext {
   const tenantScopedTables = new TenantTableSet();
   for (const [table, cols] of protectCtx.schemaByTable) {
@@ -160,7 +236,8 @@ export function buildTenantContext(
     );
     if (carriesTenant) tenantScopedTables.add(t.name);
   }
-  return { tenantScopedTables };
+  if (tenantScopedTables.size === 0) return { tenantScopedTables };
+  return { tenantScopedTables, writeHazards: schemaWriteHazards(schemaText ?? "", tenantScopedTables), driverFor };
 }
 
 /**
@@ -218,7 +295,9 @@ export type TenantScoping =
  */
 export function analyzeTenantQuery(sqlContent: string, ctx: TenantContext): TenantAnalysis {
   if (ctx.tenantScopedTables.size === 0) return null;
-  return analyzeTenantSql(sqlContent, (n) => ctx.tenantScopedTables.has(n), ctx.tenantScopedTables);
+  return analyzeTenantSql(sqlContent, (n) => ctx.tenantScopedTables.has(n), ctx.tenantScopedTables, {
+    writeHazards: (t) => ctx.writeHazards?.get(t.toLowerCase()),
+  });
 }
 
 /**
@@ -352,11 +431,26 @@ function insertTargetOf(sqlContent: string): string | null {
 }
 
 /**
- * Rewrite an injectable INSERT to add `tenant_id` to its column-set with the
- * ambient tenant value bound as a param expression `${<ambientExpr>}`. Only
- * touches the single-row subset shape; anything else is returned unchanged.
+ * S452 r4 — does a tenant write on handle `dbVar` take SQLite's statement-level
+ * `OR ABORT` (see `injectInsertTenant`)? Postgres and MySQL have no table-level
+ * conflict resolution — a constraint violation always aborts the statement there,
+ * and their statement-level upserts (`ON CONFLICT`, `ON DUPLICATE KEY`) are
+ * outside the subset — and both REJECT `INSERT OR ABORT` as a syntax error. A
+ * handle whose driver is unknown is treated as SQLite: on another database that
+ * fails the statement (closed), never the reverse.
  */
-export function rewriteInsertAddTenantId(sqlContent: string, ambientExpr: string, ctx?: TenantContext): string {
+function sqliteDialect(ctx: TenantContext | undefined, dbVar: string | undefined): boolean {
+  const driver = ctx?.driverFor && dbVar ? ctx.driverFor(dbVar) : undefined;
+  return driver === undefined || driver === "sqlite";
+}
+
+/**
+ * Rewrite an injectable INSERT to add `tenant_id` to its column-set with the
+ * ambient tenant value bound as a param expression `${<ambientExpr>}` (and, on
+ * SQLite, `OR ABORT`). Only touches the single-row subset shape; anything else
+ * is returned unchanged.
+ */
+export function rewriteInsertAddTenantId(sqlContent: string, ambientExpr: string, ctx?: TenantContext, dbVar?: string): string {
   // With the context: the SAME analysis `classifyTenantWrite` read. Without it
   // (a standalone rewrite), the target is the only tenant table considered.
   let a: TenantAnalysis;
@@ -368,19 +462,21 @@ export function rewriteInsertAddTenantId(sqlContent: string, ambientExpr: string
     a = analyzeTenantSql(sqlContent, (n) => n.toLowerCase() === target.toLowerCase(), [target]);
   }
   if (!a || a.kind !== "insert") return sqlContent;
-  return injectInsertTenant(sqlContent, a.colsClose, a.valsClose, ambientExpr);
+  return injectInsertTenant(sqlContent, a.colsClose, a.valsClose, ambientExpr,
+    sqliteDialect(ctx, dbVar) ? a.leaderEnd : null);
 }
 
 /**
  * Constrain a subset UPDATE / DELETE against a tenant-scoped table to the active
- * tenant (`… WHERE (<author's condition>) AND tenant_id = ${<ambientExpr>}`).
- * Returns the SQL unchanged unless `classifyTenantWrite` reads it as
- * `filter-inject`.
+ * tenant (`… WHERE (<author's condition>) AND tenant_id = ${<ambientExpr>}`; a
+ * SQLite UPDATE also gets `OR ABORT`). Returns the SQL unchanged unless
+ * `classifyTenantWrite` reads it as `filter-inject`.
  */
-export function rewriteWriteAddTenantFilter(sqlContent: string, ambientExpr: string, ctx: TenantContext): string {
+export function rewriteWriteAddTenantFilter(sqlContent: string, ambientExpr: string, ctx: TenantContext, dbVar?: string): string {
   const a = analyzeTenantQuery(sqlContent, ctx);
   if (!a || a.kind !== "filtered-write") return sqlContent;
-  return injectWriteTenantFilter(sqlContent, a.whereEnd, ambientExpr);
+  return injectWriteTenantFilter(sqlContent, a.whereEnd, ambientExpr,
+    a.op === "UPDATE" && sqliteDialect(ctx, dbVar) ? a.leaderEnd : null);
 }
 
 /**
@@ -467,7 +563,7 @@ function tenantAggMessage(
     case "function":
       return `${head} and calls \`${scoping.detail ?? "?"}\`, which is not on the floor's per-row function allow-list ` +
         `(${[...TENANT_ROW_FUNCTIONS].join(", ")}). An aggregate (or any function the floor cannot prove reads one ` +
-        `row) can fold several tenants into one value (§14.8.10). Resolution: add \`GROUP BY tenant_id\` so each ` +
+        `row) can fold several tenants into one value (§14.8.10). Under \`GROUP BY tenant_id\` the aggregates ${[...TENANT_GROUP_AGGREGATES].join(", ")} are also allowed, nothing else. Resolution: add \`GROUP BY tenant_id\` so each ` +
         `result row is one tenant's group, compute it over the filtered rows in server code, ${optOut}.`;
     case "reserved":
       return `${head} and names the floor's reserved key alias \`__scrml_tenant_…\`, which the source filter reads ` +

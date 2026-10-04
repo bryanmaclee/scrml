@@ -701,3 +701,130 @@ describe("CONF-TENANT-SOURCE-FILTER r3 — ordinary tenant queries still compile
     expect((await call("everything", {}, p)).map((r) => r.name)).toEqual(["A-secret-asset", "B-secret-asset"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// FIX ROUND r4 (S452) — the security review of 12825558d. EXECUTED on
+// 12825558d before the fix: (1) with `name TEXT UNIQUE ON CONFLICT REPLACE`,
+// tenant A's scoped `UPDATE assets SET name = 'B-secret-asset' WHERE id = 1`
+// DELETED B's row 2, and an injected INSERT did the same; (2) an `AFTER UPDATE
+// ON assets` trigger turned A's scoped UPDATE into a write of B's order.
+// ---------------------------------------------------------------------------
+async function buildCustom(ddl, seed, body) {
+  const dir = mkdtempSync(join(tmpdir(), "conf-tenant-r4-"));
+  _tmp.push(dir);
+  const names = [...body.matchAll(/function\*?\s+(\w+)\s*\(/g)].map((m) => m[1]);
+  const src = `<program db="app.db">
+  <schema>
+${ddl.map((d) => `    ?{${BT}${d}${BT}}`).join("\n")}
+  </schema>
+  \${
+    function pinTenant(t: string) {
+      session.set("userId", "u-" + t)
+      session.set("tenantId", t)
+      return "ok"
+    }
+${body}
+    function everything() {
+      return ?{${BT}SELECT id, name, tenant_id FROM assets ORDER BY id${BT}}.acrossTenants().all()
+    }
+    function orderLabels() {
+      return ?{${BT}SELECT id, label FROM orders ORDER BY id${BT}}.acrossTenants().all()
+    }
+  }
+${[...names, "everything", "orderLabels"].map((n) => `  <button onclick=\${ ${n}() }>x</button>`).join("\n")}
+  <button onclick=\${ pinTenant("A") }>p</button>
+</program>
+`;
+  writeFileSync(join(dir, "app.scrml"), src);
+  const db = new Database(join(dir, "app.db"), { create: true });
+  for (const s of [...ddl, ...seed]) db.exec(s);
+  db.close();
+  const result = compileScrml({ inputFiles: [join(dir, "app.scrml")], write: true, outputDir: join(dir, "out"), log: () => {} });
+  if (fatal(result).length > 0) return { result, routes: null, server: "" };
+  const serverPath = join(dir, "out", "app.server.js");
+  const mod = await import(`${serverPath}?v=${Date.now()}-${Math.random()}`);
+  const routes = {};
+  for (const r of mod.routes) routes[r.path.replace(/^.*__ri_route_/, "").replace(/_\d+$/, "")] = r;
+  return { result, routes, server: readFileSync(serverPath, "utf8") };
+}
+const R4_SEED = [
+  "INSERT INTO assets (id, name, cost, tenant_id) VALUES (1, 'A-secret-asset', 10, 'A'), (2, 'B-secret-asset', 500, 'B')",
+  "INSERT INTO orders (id, asset_id, label, tenant_id) VALUES (10, 1, 'A-order', 'A'), (20, 2, 'B-order', 'B')",
+];
+const R4_ORDERS = "CREATE TABLE orders (id INTEGER PRIMARY KEY, asset_id INTEGER, label TEXT, tenant_id TEXT)";
+
+describe("CONF-TENANT-SOURCE-FILTER r4 — a table-level ON CONFLICT REPLACE cannot delete another tenant's row", () => {
+  const DDL = ["CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT UNIQUE ON CONFLICT REPLACE, cost INTEGER, tenant_id TEXT)", R4_ORDERS];
+  const BODY = `    function steal() {
+      ?{${BT}UPDATE assets SET name = 'B-secret-asset' WHERE id = 1${BT}}.run()
+      return "ok"
+    }
+    function stealIns() {
+      ?{${BT}INSERT INTO assets (name, cost) VALUES ('B-secret-asset', 1)${BT}}.run()
+      return "ok"
+    }`;
+  test("the injected UPDATE / INSERT carry OR ABORT", async () => {
+    const p = await buildCustom(DDL, R4_SEED, BODY);
+    expect(fatal(p.result)).toEqual([]);
+    expect(p.server).toContain("UPDATE OR ABORT assets SET name = 'B-secret-asset' WHERE (id = 1) AND tenant_id = ${_scrml_tenant_write_key()}");
+    expect(p.server).toContain("INSERT OR ABORT INTO assets (name, cost, tenant_id) VALUES ('B-secret-asset', 1, ${_scrml_tenant_write_key()})");
+  });
+  for (const fn of ["steal", "stealIns"]) {
+    test(`${fn}: A's statement fails with the constraint error; B's row survives`, async () => {
+      const p = await buildCustom(DDL, R4_SEED, BODY);
+      const r = await callRaw(fn, { cookie: await pin("A", p) }, p);
+      expect(r.status === 200).toBe(false);
+      expect(JSON.stringify(r)).toContain("UNIQUE constraint failed");
+      expect(await call("everything", {}, p)).toEqual([
+        { id: 1, name: "A-secret-asset", tenant_id: "A" },
+        { id: 2, name: "B-secret-asset", tenant_id: "B" },
+      ]);
+    });
+  }
+});
+
+describe("CONF-TENANT-SOURCE-FILTER r4 — a write to a table with a <schema> trigger / cascading FK is refused", () => {
+  const ASSETS = "CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, cost INTEGER, tenant_id TEXT)";
+  test("an AFTER UPDATE trigger → E-TENANT-WRITE naming it", async () => {
+    const p = await buildCustom(
+      [ASSETS, R4_ORDERS, "CREATE TRIGGER t_upd AFTER UPDATE ON assets BEGIN UPDATE orders SET label = 'pwned'; END"],
+      R4_SEED,
+      `    function bump() {\n      ?{${BT}UPDATE assets SET cost = 1 WHERE id = 1${BT}}.run()\n      return "ok"\n    }`);
+    expect(p.routes).toBeNull();
+    const e = (p.result.errors ?? []).find((x) => x.code === "E-TENANT-WRITE");
+    expect(e.message).toContain("trigger `t_upd`");
+  });
+  test("an ON DELETE CASCADE foreign key referencing the table → E-TENANT-WRITE naming it", async () => {
+    const p = await buildCustom(
+      [ASSETS, "CREATE TABLE orders (id INTEGER PRIMARY KEY, asset_id INTEGER REFERENCES assets(id) ON DELETE CASCADE, label TEXT, tenant_id TEXT)"],
+      R4_SEED,
+      `    function drop() {\n      ?{${BT}DELETE FROM assets WHERE id = 1${BT}}.run()\n      return "ok"\n    }`);
+    expect(p.routes).toBeNull();
+    const e = (p.result.errors ?? []).find((x) => x.code === "E-TENANT-WRITE");
+    expect(e.message).toContain("ON DELETE CASCADE");
+  });
+  test("`.acrossTenants()` is the explicit opt-out; a READ of the table is unaffected", async () => {
+    const p = await buildCustom(
+      [ASSETS, R4_ORDERS, "CREATE TRIGGER t_upd AFTER UPDATE ON assets BEGIN UPDATE orders SET label = 'pwned'; END"],
+      R4_SEED,
+      `    function bump() {\n      ?{${BT}UPDATE assets SET cost = 1 WHERE id = 1${BT}}.acrossTenants().run()\n      return "ok"\n    }\n    function mine() {\n      return ?{${BT}SELECT id FROM assets${BT}}.all()\n    }`);
+    expect(fatal(p.result)).toEqual([]);
+    expect(await call("mine", { cookie: await pin("A", p) }, p)).toEqual([{ id: 1 }]);
+  });
+});
+
+describe("CONF-TENANT-SOURCE-FILTER r4 — functions that can run SQL from a string are refused", () => {
+  test("query_to_xml('select … from assets') over a NON-tenant table → E-TENANT-SQL-SUBSET", async () => {
+    const p = await buildApp(probeProgram(r3read(`SELECT query_to_xml('select name from assets', true, false, '') AS x FROM config`)));
+    expect(fatal(p.result)).toContain("E-TENANT-SQL-SUBSET");
+  });
+  test("table_to_xml('assets') / group_concat in a GROUP BY tenant_id read → E-TENANT-AGG; count/sum stay legal", async () => {
+    for (const f of ["table_to_xml('assets', true, false, '')", "group_concat(name)"]) {
+      const p = await buildApp(probeProgram(r3read(`SELECT tenant_id, ${f} AS x FROM assets GROUP BY tenant_id`)));
+      expect(fatal(p.result)).toContain("E-TENANT-AGG");
+    }
+    const ok = await buildApp(probeProgram(r3read(`SELECT tenant_id, count(*) AS n, sum(cost) AS s FROM assets GROUP BY tenant_id`)));
+    expect(fatal(ok.result)).toEqual([]);
+    expect(await call("q", { cookie: await pin("A", ok) }, ok)).toEqual([{ tenant_id: "A", n: 1, s: 10 }]);
+  });
+});

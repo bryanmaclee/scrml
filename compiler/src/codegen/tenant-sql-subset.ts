@@ -232,6 +232,18 @@ export const TENANT_ROW_FUNCTIONS: ReadonlySet<string> = new Set([
   "date", "time", "datetime", "julianday", "strftime", "cast",
 ]);
 
+/**
+ * S452 r4 — the aggregates a read grouped by every tenant source's `tenant_id`
+ * may call (each group is one tenant's rows). An ALLOW-list like the per-row one:
+ * before r4 a grouped read could call ANY function, and on Postgres
+ * `table_to_xml('assets', …)` / `query_to_xml('select … from assets', …)` run SQL
+ * from a string — every tenant's rows, in one value.
+ */
+export const TENANT_GROUP_AGGREGATES: ReadonlySet<string> = new Set([
+  "count", "sum", "avg", "min", "max", "total",
+]);
+const ROW_AND_AGGREGATES: ReadonlySet<string> = new Set([...TENANT_ROW_FUNCTIONS, ...TENANT_GROUP_AGGREGATES]);
+
 /** Keywords a `(` may follow that are not a function call. */
 const NON_CALL_WORDS: ReadonlySet<string> = new Set([
   "SELECT", "FROM", "WHERE", "AND", "OR", "NOT", "IN", "ON", "AS", "JOIN", "USING",
@@ -244,7 +256,6 @@ const NON_CALL_WORDS: ReadonlySet<string> = new Set([
 const FROM_STOP = new Set(["WHERE", "GROUP", "HAVING", "ORDER", "LIMIT", "OFFSET", "WINDOW"]);
 const JOIN_WORDS = new Set(["JOIN", "LEFT", "RIGHT", "FULL", "INNER", "CROSS", "NATURAL", "OUTER"]);
 const NOT_AN_ALIAS = new Set([...FROM_STOP, ...JOIN_WORDS, "ON", "USING", "AS", "INDEXED", "NOT"]);
-const CONFLICT_ALGOS = new Set(["IGNORE", "ABORT", "FAIL", "ROLLBACK"]);
 
 export type TenantCode = "E-TENANT-AGG" | "E-TENANT-WRITE" | "E-TENANT-SQL-SUBSET";
 
@@ -268,14 +279,22 @@ export interface TenantSource { table: string; ref: string }
  *   - `unresolvable`      — names a tenant table but not as a source the floor can key → zero rows;
  *   - `insert`            — an injectable single-row INSERT (offsets of the two closing parens);
  *   - `filtered-write`    — an UPDATE / DELETE; `whereEnd` is the offset just past `WHERE` (or -1).
+ * `leaderEnd` (writes) is the offset just past the INSERT / UPDATE keyword, where
+ * the SQLite `OR ABORT` conflict clause is injected.
  */
 export type TenantAnalysis =
   | null
   | { kind: "refuse"; code: TenantCode; reason: TenantRefusalReason; table: string; op: string; detail: string }
   | { kind: "read"; table: string; refs: string[]; fromAt: number }
   | { kind: "unresolvable"; table: string }
-  | { kind: "insert"; table: string; colsClose: number; valsClose: number }
-  | { kind: "filtered-write"; table: string; op: "UPDATE" | "DELETE"; whereEnd: number };
+  | { kind: "insert"; table: string; colsClose: number; valsClose: number; leaderEnd: number }
+  | { kind: "filtered-write"; table: string; op: "UPDATE" | "DELETE"; whereEnd: number; leaderEnd: number };
+
+/** Options for `analyzeTenantSql`. */
+export interface TenantAnalyzeOptions {
+  /** S452 r4 — the `<schema>` triggers / rules / cascading FKs a write to `table` fires (see TenantContext.writeHazards). */
+  writeHazards?: (table: string) => readonly string[] | undefined;
+}
 
 /** Case-insensitive whole-word mention of `name` anywhere in raw text (quotes, comments and interpolations included). */
 function rawWordMention(raw: string, name: string): boolean {
@@ -335,6 +354,7 @@ export function analyzeTenantSql(
   raw: string,
   isTenant: (name: string) => boolean,
   tenantNames: Iterable<string>,
+  opts: TenantAnalyzeOptions = {},
 ): TenantAnalysis {
   const lex = lexTenantSubset(raw);
   if (!lex.ok) {
@@ -347,7 +367,25 @@ export function analyzeTenantSql(
   }
   const toks = lex.toks;
   const mention = toks.find((x) => x.kind === "ident" && isTenant(x.text));
-  if (!mention) return null;
+  if (!mention) {
+    // S452 r4 — a function can run SQL held in a STRING (Postgres `query_to_xml(
+    // 'select name from assets', …)`, `table_to_xml('assets', …)`): the tenant
+    // table is then data to this reader, never an identifier. So a query that
+    // names a tenant table ANYWHERE in its text — a literal included — may call
+    // only allow-listed functions, whatever table it reads.
+    const named = [...tenantNames].find((n) => rawWordMention(raw, n));
+    if (named !== undefined) {
+      const bad = firstDisallowedCall(toks, new Set(), ROW_AND_AGGREGATES);
+      if (bad !== null) {
+        return {
+          kind: "refuse", code: "E-TENANT-SQL-SUBSET", reason: "subset", table: named, op: toks[0]?.text.toUpperCase() ?? "?",
+          detail: `a call to \`${bad}\` (not on the floor's function allow-list) in a query whose text names the ` +
+            `tenant-scoped table \`${named}\` — a function can run SQL held in a string`,
+        };
+      }
+    }
+    return null;
+  }
   const table = mention.text;
   const lead = toks[0];
   const leader = lead && lead.kind === "ident" ? lead.up : "";
@@ -395,14 +433,35 @@ export function analyzeTenantSql(
   }
 
   if (isRead) return analyzeSelect(toks, dep, table, isTenant, refuse);
-  if (leader === "INSERT") return analyzeInsert(toks, dep, isTenant, refuse);
-  return analyzeFilteredWrite(toks, dep, leader as "UPDATE" | "DELETE", isTenant, refuse);
+  const write = leader === "INSERT"
+    ? analyzeInsert(toks, dep, isTenant, refuse)
+    : analyzeFilteredWrite(toks, dep, leader as "UPDATE" | "DELETE", isTenant, refuse);
+  // S452 r4 — the floor constrains the STATEMENT; a trigger, rule or cascading
+  // foreign key the table's `<schema>` declares runs further writes the floor
+  // never sees (measured: an AFTER UPDATE trigger rewrote another tenant's rows).
+  if (write !== null && (write.kind === "insert" || write.kind === "filtered-write")) {
+    const hazards = opts.writeHazards?.(write.table) ?? [];
+    if (hazards.length > 0) {
+      return refuse("E-TENANT-WRITE", "write-shape",
+        `the table's <schema> declares ${hazards.join(", ")}, which runs further writes the floor cannot ` +
+        `constrain to the active tenant`, write.table);
+    }
+  }
+  return write;
 }
 
 type Refuse = (code: TenantCode, reason: TenantRefusalReason, detail: string, t?: string) => TenantAnalysis;
 
-/** The first function call not on the allow-list (`skip` = token indices known not to be calls), or null. */
-function firstDisallowedCall(toks: SqlTok[], skip: ReadonlySet<number>): string | null {
+/**
+ * The first function call not on `allowed` (default: the per-row allow-list), or
+ * null. `skip` = token indices known not to be calls. A name followed by `(` right
+ * after INTO / TABLE / EXISTS is a table and its column list, not a call.
+ */
+function firstDisallowedCall(
+  toks: SqlTok[],
+  skip: ReadonlySet<number>,
+  allowed: ReadonlySet<string> = TENANT_ROW_FUNCTIONS,
+): string | null {
   for (let k = 0; k + 1 < toks.length; k++) {
     const t = toks[k];
     if (t.kind !== "ident" || !isP(toks[k + 1], "(") || skip.has(k)) continue;
@@ -410,7 +469,9 @@ function firstDisallowedCall(toks: SqlTok[], skip: ReadonlySet<number>): string 
       // A qualified callee (`schema.fn(…)`) may resolve to anything.
       return `${toks[k - 2]?.text ?? ""}.${t.text}`;
     }
-    if (NON_CALL_WORDS.has(t.up) || TENANT_ROW_FUNCTIONS.has(t.text.toLowerCase())) continue;
+    const prev = toks[k - 1];
+    if (prev && prev.kind === "ident" && ["INTO", "TABLE", "EXISTS"].includes(prev.up)) continue;
+    if (NON_CALL_WORDS.has(t.up) || allowed.has(t.text.toLowerCase())) continue;
     return t.text;
   }
   return null;
@@ -502,9 +563,11 @@ function analyzeSelect(
     const bad = firstDisallowedCall(toks, new Set());
     if (bad !== null) return refuse("E-TENANT-AGG", "function", bad, table);
   } else {
-    // Even grouped, a qualified callee may resolve to anything.
-    const bad = firstDisallowedCall(toks, new Set());
-    if (bad !== null && bad.includes(".")) return refuse("E-TENANT-AGG", "function", bad, table);
+    // Grouped by every tenant source: the per-row functions plus an explicit
+    // aggregate allow-list (S452 r4) — nothing else, since a function may run
+    // SQL held in a string (Postgres `table_to_xml('assets', …)`).
+    const bad = firstDisallowedCall(toks, new Set(), ROW_AND_AGGREGATES);
+    if (bad !== null) return refuse("E-TENANT-AGG", "function", bad, table);
   }
   return { kind: "read", table, refs, fromAt: toks[fromIdx].start };
 }
@@ -517,10 +580,9 @@ function analyzeInsert(
 ): TenantAnalysis {
   const W = (detail: string, t?: string): TenantAnalysis => refuse("E-TENANT-WRITE", "write-shape", detail, t);
   let k = 1;
-  if (isKw(toks[k], "OR")) {
-    if (!(toks[k + 1]?.kind === "ident" && CONFLICT_ALGOS.has(toks[k + 1].up))) return W("an `INSERT OR …` conflict clause outside IGNORE / ABORT / FAIL / ROLLBACK");
-    k += 2;
-  }
+  // S452 r4 — the floor writes the conflict clause itself (`OR ABORT` on SQLite);
+  // an author-written one is refused, whatever it names.
+  if (isKw(toks[k], "OR")) return W("an author-written `INSERT OR …` conflict clause (the floor sets the conflict resolution of a tenant write)");
   if (!isKw(toks[k], "INTO")) return W("an INSERT the floor cannot read (expected INTO)");
   const target = toks[k + 1];
   if (target === undefined || target.kind !== "ident" || isP(toks[k + 2], ".")) return W("a schema-qualified or missing INSERT target");
@@ -551,7 +613,7 @@ function analyzeInsert(
   const bad = firstDisallowedCall(toks, new Set([colsOpen - 1]));
   if (bad !== null) return W(`a call to \`${bad}\`, which is not on the per-row function allow-list`, target.text);
   void dep;
-  return { kind: "insert", table: target.text, colsClose: toks[colsClose].start, valsClose: toks[valsClose].start };
+  return { kind: "insert", table: target.text, colsClose: toks[colsClose].start, valsClose: toks[valsClose].start, leaderEnd: toks[0].end };
 }
 
 function analyzeFilteredWrite(
@@ -564,8 +626,7 @@ function analyzeFilteredWrite(
   const W = (detail: string, t?: string): TenantAnalysis => refuse("E-TENANT-WRITE", "write-shape", detail, t);
   let k = 1;
   if (op === "UPDATE" && isKw(toks[k], "OR")) {
-    if (!(toks[k + 1]?.kind === "ident" && CONFLICT_ALGOS.has(toks[k + 1].up))) return W("an `UPDATE OR …` conflict clause outside IGNORE / ABORT / FAIL / ROLLBACK");
-    k += 2;
+    return W("an author-written `UPDATE OR …` conflict clause (the floor sets the conflict resolution of a tenant write)");
   }
   if (op === "DELETE") {
     if (!isKw(toks[k], "FROM")) return W("a DELETE the floor cannot read (expected FROM)");
@@ -618,7 +679,7 @@ function analyzeFilteredWrite(
   }
   const bad = firstDisallowedCall(toks, new Set());
   if (bad !== null) return W(`a call to \`${bad}\`, which is not on the per-row function allow-list`, T);
-  return { kind: "filtered-write", table: T, op, whereEnd };
+  return { kind: "filtered-write", table: T, op, whereEnd, leaderEnd: toks[0].end };
 }
 
 // ---------------------------------------------------------------------------
@@ -642,21 +703,49 @@ export function addKeyColumnsBeforeFrom(raw: string, fromAt: number, adds: strin
   return `${raw.slice(0, fromAt).replace(/\s*$/, "")}, ${adds.join(", ")} ${raw.slice(fromAt)}`;
 }
 
-/** Inject `tenant_id` into an analysed INSERT's column list and `${ambientExpr}` into its VALUES tuple. */
-export function injectInsertTenant(raw: string, colsClose: number, valsClose: number, ambientExpr: string): string {
-  return raw.slice(0, colsClose).replace(/\s*$/, "") + `, ${TENANT_COLUMN}` +
-    raw.slice(colsClose, valsClose).replace(/\s*$/, "") + `, \${${ambientExpr}}` +
-    raw.slice(valsClose);
+/**
+ * S452 r4 — SQLite's conflict resolution can be declared on the TABLE
+ * (`name TEXT UNIQUE ON CONFLICT REPLACE`), and REPLACE deletes the conflicting
+ * row whoever owns it: measured, tenant A's scoped `UPDATE assets SET name =
+ * 'B-secret-asset' WHERE id = 1` deleted tenant B's row. A statement-level
+ * conflict clause overrides the table's, so every injected SQLite INSERT /
+ * UPDATE carries `OR ABORT` (the constraint error surfaces; no other row is
+ * touched). `leaderEnd` is the offset just past the INSERT / UPDATE keyword;
+ * every other edit lies after it, so it is applied last.
+ */
+function withOrAbort(edited: string, leaderEnd: number | null): string {
+  if (leaderEnd === null) return edited;
+  return `${edited.slice(0, leaderEnd)} OR ABORT${edited.slice(leaderEnd)}`;
+}
+
+/**
+ * Inject `tenant_id` into an analysed INSERT's column list and `${ambientExpr}`
+ * into its VALUES tuple; with `orAbortAt` (the SQLite dialect) also `OR ABORT`.
+ */
+export function injectInsertTenant(
+  raw: string, colsClose: number, valsClose: number, ambientExpr: string, orAbortAt: number | null = null,
+): string {
+  return withOrAbort(
+    raw.slice(0, colsClose).replace(/\s*$/, "") + `, ${TENANT_COLUMN}` +
+      raw.slice(colsClose, valsClose).replace(/\s*$/, "") + `, \${${ambientExpr}}` +
+      raw.slice(valsClose),
+    orAbortAt,
+  );
 }
 
 /**
  * Constrain an analysed UPDATE / DELETE to the active tenant: the author's WHERE
  * is parenthesized whole (the `OR`-precedence hazard cannot arise — the subset
  * has no clause after WHERE) and `tenant_id = ${ambientExpr}` is ANDed on; a
- * statement with no WHERE gets one.
+ * statement with no WHERE gets one. With `orAbortAt` (a SQLite UPDATE) also
+ * `OR ABORT` (DELETE has no conflict clause).
  */
-export function injectWriteTenantFilter(raw: string, whereEnd: number, ambientExpr: string): string {
+export function injectWriteTenantFilter(
+  raw: string, whereEnd: number, ambientExpr: string, orAbortAt: number | null = null,
+): string {
   const pred = `${TENANT_COLUMN} = \${${ambientExpr}}`;
-  if (whereEnd === -1) return `${raw.replace(/\s*$/, "")} WHERE ${pred}`;
-  return `${raw.slice(0, whereEnd)} (${raw.slice(whereEnd).trim()}) AND ${pred}`;
+  const edited = whereEnd === -1
+    ? `${raw.replace(/\s*$/, "")} WHERE ${pred}`
+    : `${raw.slice(0, whereEnd)} (${raw.slice(whereEnd).trim()}) AND ${pred}`;
+  return withOrAbort(edited, orAbortAt);
 }

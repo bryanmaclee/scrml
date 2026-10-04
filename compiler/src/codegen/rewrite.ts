@@ -343,6 +343,7 @@ export function tenantFloorTouchesSql(sqlContent: string): boolean {
 export function _lowerTenantForQuery(
   sqlContent: string,
   isAcross: boolean,
+  dbVar?: string,
 ): { effectiveSql: string; tenantScope: (rowsExpr: string) => string } {
   const identity = { effectiveSql: sqlContent, tenantScope: _identityScope };
   if (!_rewriterTenantState) return identity;
@@ -377,10 +378,10 @@ export function _lowerTenantForQuery(
   // WHERE. Every other write was refused above (E-TENANT-WRITE / -SQL-SUBSET).
   const write = classifyTenantWrite(sqlContent, st.ctx);
   if (write && write.kind === "insert-inject") {
-    return { effectiveSql: rewriteInsertAddTenantId(sqlContent, _TENANT_AMBIENT_EXPR, st.ctx), tenantScope: _identityScope };
+    return { effectiveSql: rewriteInsertAddTenantId(sqlContent, _TENANT_AMBIENT_EXPR, st.ctx, dbVar), tenantScope: _identityScope };
   }
   if (write && write.kind === "filter-inject") {
-    return { effectiveSql: rewriteWriteAddTenantFilter(sqlContent, _TENANT_AMBIENT_EXPR, st.ctx), tenantScope: _identityScope };
+    return { effectiveSql: rewriteWriteAddTenantFilter(sqlContent, _TENANT_AMBIENT_EXPR, st.ctx, dbVar), tenantScope: _identityScope };
   }
   return identity;
 }
@@ -607,7 +608,7 @@ export function rewriteSqlRefs(
     // first row and before the §14.8.9 / §39.4 per-row wrappers). A write: an
     // injectable INSERT gets `tenant_id` (the hard-fail codes fire from the
     // emit-server scan).
-    const { effectiveSql, tenantScope } = _lowerTenantForQuery(sqlContent, _acrossSqls.has(sqlContent));
+    const { effectiveSql, tenantScope } = _lowerTenantForQuery(sqlContent, _acrossSqls.has(sqlContent), dbVar);
     const { params, segments } = extractSqlParams(effectiveSql);
     const tagged = buildTaggedTemplate(dbVar, segments, params);
     const rows = tenantScope(`await ${tagged}`);
@@ -643,7 +644,7 @@ export function rewriteSqlRefs(
   result = result.replace(/\?\{`([^`]*)`\}/g, (_, sqlContent: string) => {
     // §14.8.10 — a bare INSERT into a tenant-scoped table gets `tenant_id`
     // injected; a bare SELECT of one is filtered at the source like every read.
-    const { effectiveSql, tenantScope } = _lowerTenantForQuery(sqlContent, _acrossSqls.has(sqlContent));
+    const { effectiveSql, tenantScope } = _lowerTenantForQuery(sqlContent, _acrossSqls.has(sqlContent), dbVar);
     const { sql, params } = extractSqlParams(effectiveSql);
     // ⚑ S443 round 6: a bare `?{`SELECT * …`}` used as a VALUE is the driver's row
     // array — tag it like every other lowering (measured: it served `passwordHash`).

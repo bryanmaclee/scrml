@@ -73,7 +73,7 @@ describe("§14.8.10 codes-half — each E-/I-TENANT fires on the right shape", (
     const r = compile(`      function f() { let x = ?{\`UPDATE assets SET name = \${"z"} WHERE id = \${1} OR id = 2\`}.run(); return x }`);
     expect(hasCode(r, "E-TENANT-WRITE")).toBe(false);
     const out = [...r.outputs.values()][0];
-    expect(out.serverJs).toContain("UPDATE assets SET name = ${\"z\"} WHERE (id = ${1} OR id = 2) AND tenant_id = ${_scrml_tenant_write_key()}");
+    expect(out.serverJs).toContain("UPDATE OR ABORT assets SET name = ${\"z\"} WHERE (id = ${1} OR id = 2) AND tenant_id = ${_scrml_tenant_write_key()}");
   });
   test("DELETE against a tenant table → constrained to the active tenant (a missing WHERE gets one)", () => {
     const r = compile(`      function f() { let x = ?{\`DELETE FROM assets\`}.run(); return x }`);
@@ -117,7 +117,7 @@ describe("§14.8.10 codes-half — each E-/I-TENANT fires on the right shape", (
     const r = compile(`      function f() { let x = ?{\`INSERT INTO assets (name) VALUES (\${"z"})\`}.run(); return x }`);
     const out = [...r.outputs.values()][0];
     // read from the per-request store; with no active tenant it refuses by name (S452)
-    expect(out.serverJs).toContain("INSERT INTO assets (name, tenant_id) VALUES (${\"z\"}, ${_scrml_tenant_write_key()})");
+    expect(out.serverJs).toContain("INSERT OR ABORT INTO assets (name, tenant_id) VALUES (${\"z\"}, ${_scrml_tenant_write_key()})");
   });
 });
 

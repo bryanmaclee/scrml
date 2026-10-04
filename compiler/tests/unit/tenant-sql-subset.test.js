@@ -90,9 +90,12 @@ describe("analyzeTenantSql — the statement grammar", () => {
     expect(analyze("SELECT * FROM assets INDEXED BY ix")).toEqual({ kind: "unresolvable", table: "assets" });
     expect(analyze("SELECT * FROM assets JOIN assets")).toEqual({ kind: "unresolvable", table: "assets" });
   });
-  test("INSERT: the subset shape is injectable; a conflict clause other than REPLACE is allowed", () => {
+  test("INSERT: the subset shape is injectable; an author-written conflict clause is refused (S452 r4)", () => {
     expect(analyze("INSERT INTO assets (name) VALUES (${n})")).toMatchObject({ kind: "insert", table: "assets" });
-    expect(analyze("INSERT OR IGNORE INTO assets (name) VALUES (datetime('now'))")).toMatchObject({ kind: "insert" });
+    expect(analyze("INSERT INTO assets (name) VALUES (datetime(${q}))")).toMatchObject({ kind: "insert" });
+    for (const q of ["INSERT OR IGNORE INTO assets (name) VALUES (1)", "INSERT OR ABORT INTO assets (name) VALUES (1)", "UPDATE OR IGNORE assets SET name = 1"]) {
+      expect(analyze(q)).toMatchObject({ code: "E-TENANT-WRITE" });
+    }
     expect(analyze("INSERT INTO assets (name) VALUES (hex(${n}))")).toMatchObject({ code: "E-TENANT-WRITE" });
     expect(analyze("INSERT INTO assets VALUES (1, 'x')")).toMatchObject({ code: "E-TENANT-WRITE" });
     expect(analyze("INSERT INTO assets DEFAULT VALUES")).toMatchObject({ code: "E-TENANT-WRITE" });
@@ -112,5 +115,39 @@ describe("the write rewrites", () => {
     const q = "INSERT INTO assets (name, cost) VALUES (${n}, 3)";
     const a = analyze(q);
     expect(injectInsertTenant(q, a.colsClose, a.valsClose, "K()")).toBe("INSERT INTO assets (name, cost, tenant_id) VALUES (${n}, 3, ${K()})");
+  });
+  test("S452 r4: on SQLite an injected INSERT / UPDATE carries OR ABORT (overrides a table-level ON CONFLICT REPLACE)", () => {
+    const i = "INSERT INTO assets (name) VALUES (${n})";
+    const ai = analyze(i);
+    expect(injectInsertTenant(i, ai.colsClose, ai.valsClose, "K()", ai.leaderEnd)).toBe("INSERT OR ABORT INTO assets (name, tenant_id) VALUES (${n}, ${K()})");
+    const u = "  UPDATE assets SET name = ${n} WHERE id = 1";
+    const au = analyze(u);
+    expect(injectWriteTenantFilter(u, au.whereEnd, "K()", au.leaderEnd)).toBe("  UPDATE OR ABORT assets SET name = ${n} WHERE (id = 1) AND tenant_id = ${K()}");
+  });
+});
+
+describe("S452 r4 — functions that can run SQL from a string; write hazards", () => {
+  test("a GROUP BY tenant_id read may call the per-row functions and count/sum/avg/min/max/total only", () => {
+    expect(analyze("SELECT tenant_id, count(*) AS n, sum(cost) AS s, avg(cost) AS a, min(cost) AS lo, max(cost) AS hi, total(cost) AS t, lower(tenant_id) AS l FROM assets GROUP BY tenant_id"))
+      .toMatchObject({ kind: "read" });
+    for (const f of ["group_concat(name)", "table_to_xml('assets', true, false, '')", "json_group_array(name)", "string_agg(name, ',')"]) {
+      expect(analyze(`SELECT tenant_id, ${f} AS x FROM assets GROUP BY tenant_id`)).toMatchObject({ code: "E-TENANT-AGG", reason: "function" });
+    }
+  });
+  test("ANY query whose text names a tenant table — even only in a literal — may call allow-listed functions only", () => {
+    expect(analyze("SELECT query_to_xml('select name from assets', true, false, '') AS x FROM config"))
+      .toMatchObject({ kind: "refuse", code: "E-TENANT-SQL-SUBSET", table: "assets" });
+    expect(analyze("SELECT count(*) AS n FROM config WHERE v = 'assets'")).toBeNull();
+    expect(analyze("INSERT INTO config (k, v) VALUES ('assets', lower(${x}))")).toBeNull();
+    expect(analyze("SELECT hex(k) AS h FROM config")).toBeNull();     // no tenant name anywhere: not the floor's
+  });
+  test("a write to a table with a <schema> trigger / cascading FK is refused, naming it", () => {
+    const hz = (t) => (t === "assets" ? ["trigger `t_upd`"] : undefined);
+    const a = analyzeTenantSql("UPDATE assets SET cost = 1 WHERE id = 1", isTenant, tenants, { writeHazards: hz });
+    expect(a).toMatchObject({ kind: "refuse", code: "E-TENANT-WRITE" });
+    expect(a.detail).toContain("trigger `t_upd`");
+    expect(analyzeTenantSql("UPDATE orders SET label = 'x'", isTenant, tenants, { writeHazards: hz })).toMatchObject({ kind: "filtered-write" });
+    // reads are unaffected
+    expect(analyzeTenantSql("SELECT id FROM assets", isTenant, tenants, { writeHazards: hz })).toMatchObject({ kind: "read" });
   });
 });

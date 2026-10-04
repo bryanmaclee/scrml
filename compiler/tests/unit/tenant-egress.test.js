@@ -24,6 +24,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import {
   buildTenantContext,
+  schemaWriteHazards,
   resolveTenantScoping,
   rewriteSelectAddTenantId,
   classifyTenantWrite,
@@ -321,6 +322,38 @@ describe("§14.8.10 acrossTenantInsertMissingTenantColumn — an opted-out INSER
   });
 });
 
+describe("§14.8.10 S452 r4 — schemaWriteHazards reads triggers / rules / cascading FKs from <schema>", () => {
+  const tenants = new Set(["assets", "orders"]);
+  test("a trigger is attributed to its ON table; a rule to its TO table", () => {
+    const h = schemaWriteHazards("CREATE TRIGGER t_upd AFTER UPDATE OF cost ON assets BEGIN UPDATE orders SET label = 'x'; END;\nCREATE RULE r1 AS ON DELETE TO orders DO INSTEAD NOTHING;", tenants);
+    expect(h.get("assets")).toEqual(["trigger `t_upd`"]);
+    expect(h.get("orders")).toEqual(["rule `r1`"]);
+  });
+  test("an FK action fires on writes to the REFERENCED table; NO ACTION / RESTRICT do not count", () => {
+    const h = schemaWriteHazards(
+      "CREATE TABLE orders (id INTEGER, asset_id INTEGER REFERENCES assets(id) ON DELETE CASCADE, tenant_id TEXT)\n" +
+      "CREATE TABLE notes (id INTEGER, order_id INTEGER REFERENCES orders(id) ON DELETE RESTRICT ON UPDATE NO ACTION)", tenants);
+    expect(h.get("assets")).toEqual(["a foreign key with `ON DELETE CASCADE` referencing it"]);
+    expect(h.has("orders")).toBe(false);
+  });
+  test("a hazard the reader cannot attribute is charged to EVERY tenant table (fail-closed)", () => {
+    const h = schemaWriteHazards("-- a TRIGGER we cannot parse\nFOREIGN KEY (a) REFERENCES (weird) ON DELETE SET NULL", tenants);
+    expect(h.get("assets")?.length).toBeGreaterThan(0);
+    expect(h.get("orders")?.length).toBeGreaterThan(0);
+  });
+  test("OR ABORT is SQLite-only: a Postgres / MySQL handle gets the plain injected statement", () => {
+    const base = buildTenantContext(protectCtx({ assets: ["id", "name", "tenant_id"] }));
+    const ctx = { ...base, driverFor: (id) => ({ _scrml_sql: "sqlite", _scrml_sql_pg: "postgres", _scrml_sql_my: "mysql" })[id] };
+    const ins = "INSERT INTO assets (name) VALUES (${n})";
+    expect(rewriteInsertAddTenantId(ins, "K()", ctx, "_scrml_sql")).toBe("INSERT OR ABORT INTO assets (name, tenant_id) VALUES (${n}, ${K()})");
+    expect(rewriteInsertAddTenantId(ins, "K()", ctx, "_scrml_sql_pg")).toBe("INSERT INTO assets (name, tenant_id) VALUES (${n}, ${K()})");
+    expect(rewriteInsertAddTenantId(ins, "K()", ctx, "_scrml_sql_my")).toBe("INSERT INTO assets (name, tenant_id) VALUES (${n}, ${K()})");
+  });
+  test("a schema with none → no hazards", () => {
+    expect(schemaWriteHazards("CREATE TABLE assets (id INTEGER, tenant_id TEXT)", tenants).size).toBe(0);
+  });
+});
+
 describe("§14.8.10 the write key — no active tenant is a NAMED refusal", () => {
   test("outside any request it throws E-TENANT-WRITE (runtime), naming the way out", () => {
     const H = loadHelper();
@@ -346,7 +379,7 @@ describe("normalizeSqlText — the ONE normalizer every tenant check reads", () 
 describe("§14.8.10 rewriteInsertAddTenantId", () => {
   test("injects tenant_id column + the ambient value param", () => {
     const out = rewriteInsertAddTenantId("INSERT INTO assets (name) VALUES (${n})", "_scrml_current_user(_scrml_req).tenantId");
-    expect(out).toBe("INSERT INTO assets (name, tenant_id) VALUES (${n}, ${_scrml_current_user(_scrml_req).tenantId})");
+    expect(out).toBe("INSERT OR ABORT INTO assets (name, tenant_id) VALUES (${n}, ${_scrml_current_user(_scrml_req).tenantId})");
   });
 });
 
