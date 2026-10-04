@@ -1,0 +1,23 @@
+<program db="./app.db">
+    <schema>
+        orders {
+            id: integer primary key
+            name: text
+        }
+    </schema>
+    type E:enum = { Bad }
+    function loopInside(a: number)! -> E {
+        transaction {
+            for (let i = 0; i < 3; i++) {
+                if (a > i) { continue }
+                if (i == 2) { break }
+                ?{`UPDATE orders SET name = 'y' WHERE id = ${i}`}.run()
+            }
+            if (a > 10) {
+                fail E::Bad
+            }
+        }
+        return 1
+    }
+    <p>x</p>
+</program>

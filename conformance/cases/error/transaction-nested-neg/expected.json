@@ -1,0 +1,14 @@
+{
+  "id": "error-transaction-nested-neg",
+  "description": "§19.10.4 — a `transaction { }` inside another one (here nested one `if` deep) is E-ERROR-007, in a `!` function (so E-ERROR-001 does not fire).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/transaction-in-function-body.test.js",
+  "spec": "§19.10.4",
+  "rationale": "§19.10.4: \"`transaction` blocks SHALL NOT nest. A `transaction` inside another `transaction` SHALL be a compile error: E-ERROR-007.\"",
+  "expect": {
+    "codes": ["E-ERROR-007"],
+    "notCodes": ["E-SCOPE-001", "E-ERROR-001"],
+    "severity": { "E-ERROR-007": "error" },
+    "codeCounts": { "E-ERROR-007": 1 }
+  }
+}
