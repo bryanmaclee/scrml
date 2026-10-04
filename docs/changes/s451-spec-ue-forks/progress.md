@@ -30,7 +30,11 @@ Branch `spec/s451-ue-forks`, cut from origin/main `25677da72`. SPEC text for the
   impl#1). Correction to the relayed premise: 10 are logic-outside-`<program>`;
   `protect/channel-broadcast-strip` has its `?{}` INSIDE a `<program>` without `db=`, beside its
   `<db src>` — program-move does not migrate it.
-- [ ] §34 rows E-ERROR-011, E-SQL-011; gaps; generated docs; checks
+- [x] §34 + §19.13 rows E-ERROR-011 (bootstrap emitter `compiler/self-host-v2/analyze.scrml`; Nominal
+  on impl#1, existing gap `g-failable-error-type-non-enum-spec-vs-corpus-conflict` annotated) and
+  §19.4.4.1's "no emitter yet" parenthetical updated. E-SQL-011 rows landed with 4a.
+  Checks green: state.ts --check, regen-spec-index --check, facts.ts --check, s34-census --check-new
+  (8 new/changed rows well-formed).
 
 ## Measurements (impl#1 on 25677da72)
 
