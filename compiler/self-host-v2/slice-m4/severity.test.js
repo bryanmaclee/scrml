@@ -14,7 +14,7 @@ import { describe, test, expect, beforeAll } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadM2, frontEnd } from "./harness.js";
-import { render, bootstrapCodes, resolveSeverities, SEVERITY_FILE } from "../../../scripts/gen-bootstrap-severity.ts";
+import { bootstrapCodes, resolveSeverities } from "../../../scripts/gen-bootstrap-severity.ts";
 
 const SHV2 = join(import.meta.dir, "..");
 const SPEC_TEXT = readFileSync(join(SHV2, "..", "SPEC.md"), "utf8");
@@ -26,10 +26,10 @@ const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const P = (attrs, decls, main) => `<program${attrs}>\n${decls}\n    <main>\n${main}\n    </main>\n</program>\n`;
 
 describe("the table is §34's, and current", () => {
-  test("severity.scrml is exactly what the generator renders from SPEC.md + the bootstrap sources", () => {
-    // Stale → run `bun scripts/gen-bootstrap-severity.ts`.
-    expect(readFileSync(SEVERITY_FILE, "utf8")).toBe(render(SPEC_TEXT, bootstrapCodes()));
-  });
+  // No byte-equality check against a fresh generation here: a docs-only SPEC PR adding a §34 row
+  // (same severity) for a row-less code would go red for a change that alters no answer. Byte
+  // staleness is TRACKED in CI's non-blocking job (`gen-bootstrap-severity.ts --check`); this file
+  // checks the SEMANTICS — every answer the compiled table gives is §34's.
 
   test("the COMPILED table answers §34's severity for every code the bootstrap names; no row → Error (fail closed)", () => {
     const codes = bootstrapCodes();
