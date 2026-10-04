@@ -437,6 +437,55 @@ describe("the query's facts (design §1) — recorded once, fail closed", () => 
   });
 });
 
+describe("S239 review fix round — the kind scan cannot be talked into SqlSelect (fail closed BY CONSTRUCTION)", () => {
+  const kind = (sql) => v(mods.sql.sqlFacts([sql]).kind);
+  const W = "SqlWrite";
+  // (1) a quoted identifier as a function name
+  test('a quoted function name — "f"(…), [f](…), `f`(…) — is a call', () => {
+    expect(kind(`SELECT "nextval"('s')`)).toBe(W);
+    expect(kind(`SELECT [nextval]('s')`)).toBe(W);
+    expect(kind("SELECT `nextval`('s')")).toBe(W);
+  });
+  test("through the front end too (the PA's reproduction)", () => {
+    const r = run(P(DB, `    function f() {\n        const x = ${SQ}\`SELECT "nextval"('s')\`}.get()\n    }`));
+    expect(v(r.typed.tables.server.sqls[0].kind)).toBe(W);
+  });
+  // (2) whitespace outside the scanner's whitelist
+  test("a form feed / vertical tab / NBSP / other Unicode space between a name and `(` fails closed", () => {
+    expect(kind("SELECT evil\f(1)")).toBe(W);
+    expect(kind("SELECT evil\v(1)")).toBe(W);
+    expect(kind("SELECT evil (1)")).toBe(W);
+    expect(kind("SELECT evil (1)")).toBe(W);
+    expect(kind("SELECT évil(1)")).toBe(W);
+  });
+  // (3) keyword-named functions (non-reserved on Postgres / MySQL)
+  for (const k of ["rows", "range", "partition", "filter", "over", "window", "set", "any", "some", "join", "like", "is", "by", "lateral", "recursive", "limit"]) {
+    test(`\`${k}(…)\` is a call (the keyword is not reserved in all three dialects)`, () => {
+      expect(kind(`SELECT ${k}(1) FROM t`)).toBe(W);
+    });
+  }
+  // (4) driver-dependent lexing
+  test("a backslash in a string, an `E'…'` / prefixed string, `#`, and any comment fail closed", () => {
+    expect(kind("SELECT 'a\\' , 1 FROM t")).toBe(W);
+    expect(kind("SELECT E'x' FROM t")).toBe(W);
+    expect(kind("SELECT a FROM t # nextval('s')")).toBe(W);
+    expect(kind("SELECT a /*! , nextval('s') */ FROM t")).toBe(W);
+    expect(kind("SELECT 1--1, a FROM t")).toBe(W);
+    expect(kind("SELECT $$x$$ FROM t")).toBe(W);
+  });
+  // LOW (a): operators outside a whitelist
+  test("a user-definable operator (`@@`, `<->`, `~`, `::`) fails closed", () => {
+    expect(kind("SELECT a @@ b FROM t")).toBe(W);
+    expect(kind("SELECT a <-> b FROM t")).toBe(W);
+    expect(kind("SELECT ~a FROM t")).toBe(W);
+    expect(kind("SELECT a::int FROM t")).toBe(W);
+  });
+  test("twins stay SqlSelect: plain selects, the justified builtins, IN / EXISTS / subqueries, ordinary operators", () => {
+    expect(kind("SELECT count(*) AS n, max(a) FROM t WHERE a IN (1, 2) AND EXISTS (SELECT 1 FROM u) AND b <= 3 AND c <> 'x''y'")).toBe("SqlSelect");
+    expect(kind("SELECT lower(name) || '-' || coalesce(nick, '') FROM users WHERE id = 1")).toBe("SqlSelect");
+  });
+});
+
 describe("the lowered query in Core (as Ue would hand it on — the test drops E-ERROR-002 itself)", () => {
   test("a ServerFn holds Expr.Sql: runs, DEDUPED values (§8.2), slots, mode, facts, db", () => {
     const r = run(P(DB, `    function find(id: int) {\n        const row = ${SQ}\`SELECT * FROM activity WHERE created_by = \${id} OR updated_by = \${id}\`}.get()\n    }`));

@@ -18,10 +18,17 @@
 //     keyword is SELECT (or WITH), no write verb appears anywhere outside a
 //     string literal (INSERT UPDATE DELETE REPLACE UPSERT MERGE CREATE DROP
 //     ALTER TRUNCATE — and INTO: `SELECT … INTO t` creates a table on
-//     Postgres), and every function it calls is a known read-only one (a
-//     `nextval()` / `setval()` / user function can write). Anything else —
-//     another first keyword (PRAGMA, ATTACH, BEGIN …), text the scanner cannot
-//     read to its end (an unterminated string or comment) — is SqlWrite.
+//     Postgres), and nothing in it is a call: ANY token followed by `(` is a
+//     call (a quoted name included) unless it is a syntax word no dialect lets
+//     name a function or a short list of read-only built-ins. Anything else —
+//     another first keyword (PRAGMA, ATTACH, BEGIN …), a comment, a string the
+//     drivers could end differently (a backslash, an `E'…'` prefix), any
+//     character or operator outside the scanner's whitelist — is SqlWrite.
+//     (S239 review fix round: the scanner is whitelist-only, so an input it was
+//     not built for can never read as a SELECT.)
+//     KNOWN LIMIT: Postgres attribute notation — `t.f` may call `f(t)` when
+//     `t` has no column `f` — is indistinguishable from a column read without
+//     the schema; it is read as a column.
 //   - a table set is TablesKnown only when every table position holds a bare
 //     name the scanner read; a quoted or qualified name, a value where a name
 //     stands, a comment anywhere, or ZERO tables found → TablesUnknown (=
@@ -45,23 +52,40 @@ ${
     // `"x"` / `` `x` `` / `[x]`), Value (a `${…}` bound value), Num.
     type SK:enum = { Word, Punct, Str, QName, Value, Num }
     type STok:struct = { k: SK, w: string, text: string }
-    // `broken`: text the scanner could not read to its end; `commented`: a
-    // comment was skipped (it could hide a table — §1 "comment hiding").
-    type SScan:struct = { toks: STok[], broken: boolean, commented: boolean }
+    // `broken`: text the scanner cannot read with CERTAINTY on every driver —
+    // see scanRun. A broken query is SqlWrite with every table set unknown.
+    type SScan:struct = { toks: STok[], broken: boolean }
 
     fn ch(s: string, i: int) -> string { return s.substring(i, i + 1) }
 
+    // S239 review fix round — the scanner reads ONLY an explicit ASCII
+    // vocabulary; any other character outside a string literal (a form feed, a
+    // vertical tab, a non-breaking or other Unicode space, a non-ASCII letter,
+    // `#`, `$`, `:`, `@`, `~`, `\`, …) is something one of the three dialects
+    // may read differently, so the scan FAILS CLOSED (broken). Whitelists, not
+    // blacklists: an unlisted character can never be read as harmless.
     fn isDigit(c: string) -> boolean { return c != "" && "0123456789".indexOf(c) >= 0 }
 
     fn isWordStart(c: string) -> boolean {
-        if (c == "") return false
-        if (c == "_") return true
-        return c.toUpperCase() != c.toLowerCase()
+        return c != "" && "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_".indexOf(c) >= 0
     }
 
-    fn isWordCh(c: string) -> boolean { return isWordStart(c) || isDigit(c) || c == "$" }
+    fn isWordCh(c: string) -> boolean { return isWordStart(c) || isDigit(c) }
 
     fn isSpace(c: string) -> boolean { return c == " " || c == "\n" || c == "\t" || c == "\r" }
+
+    // Operator characters, read as a maximal run; only the runs in opOk stand.
+    fn isOpCh(c: string) -> boolean { return c != "" && "+-*/<>=!%|".indexOf(c) >= 0 }
+
+    // The operators every dialect gives the same built-in meaning. A run of
+    // operator characters outside this list (`@@`, `<->`, `=-`, a Postgres user
+    // operator) fails closed — a user-defined operator is a function call.
+    fn opOk(op: string) -> boolean {
+        return ["=", "<", ">", "<=", ">=", "<>", "!=", "+", "-", "*", "/", "%", "||"].indexOf(op) >= 0
+    }
+
+    // Single punctuation that is syntax only.
+    fn isPunctOk(c: string) -> boolean { return c != "" && "(),.;?".indexOf(c) >= 0 }
 
     fn tok(k: SK, text: string) -> STok { return { k: k, w: text.toUpperCase(), text: text } }
 
@@ -69,69 +93,52 @@ ${
     fn scanSql(chunks: string[]) -> SScan {
         let toks: STok[] = []
         let broken = false
-        let commented = false
         let ci: int = 0
         for (const c of chunks) {
             const r: SScan = scanRun(c)
             toks = toks.concat(r.toks)
             if (r.broken) broken = true
-            if (r.commented) commented = true
             if (ci < chunks.length - 1) toks = toks.concat([tok(SK.Value, "?")])
             ci = ci + 1
         }
-        return { toks: toks, broken: broken, commented: commented }
+        return { toks: toks, broken: broken }
     }
 
-    // One literal run. A string, quoted name or comment must END in the run: a
-    // `${…}` inside one (`'%${q}%'`) leaves the text unreadable — broken.
+    // One literal run. FAILS CLOSED (broken) on:
+    //  - any COMMENT: `--` is a comment on SQLite / Postgres but `1--1` is
+    //    arithmetic on MySQL, and MySQL runs `/*! … */` — a comment can hide or
+    //    reveal a call depending on the driver;
+    //  - a string literal holding a backslash (MySQL — and Postgres `E'…'` —
+    //    read `\'` as an escaped quote, SQLite does not: the string's END differs
+    //    by driver), a prefixed string (`E'…'`, `N'…'`, `X'…'`), or one that does
+    //    not end in the run (a `${…}` inside it, `'%${q}%'`);
+    //  - any character outside the vocabulary above.
     fn scanRun(s: string) -> SScan {
         let toks: STok[] = []
-        let broken = false
-        let commented = false
         let i: int = 0
         while (i < s.length) {
             const c: string = ch(s, i)
             if (isSpace(c)) {
                 i = i + 1
             } else if (c == "-" && ch(s, i + 1) == "-") {
-                commented = true
-                while (i < s.length && ch(s, i) != "\n") { i = i + 1 }
+                return { toks: toks, broken: true }
             } else if (c == "/" && ch(s, i + 1) == "*") {
-                commented = true
-                const end: int = s.indexOf("*/", i + 2)
-                if (end < 0) {
-                    broken = true
-                    i = s.length
-                } else {
-                    i = end + 2
-                }
-            } else if (c == "'") {
-                const r: StrEnd = quotedEnd(s, i, "'")
-                if (r.end < 0) {
-                    broken = true
-                    i = s.length
-                } else {
-                    toks = toks.concat([tok(SK.Str, s.substring(i, r.end))])
-                    i = r.end
-                }
-            } else if (c == "\"" || c == "`") {
-                const r2: StrEnd = quotedEnd(s, i, c)
-                if (r2.end < 0) {
-                    broken = true
-                    i = s.length
-                } else {
-                    toks = toks.concat([tok(SK.QName, s.substring(i, r2.end))])
-                    i = r2.end
-                }
+                return { toks: toks, broken: true }
+            } else if (c == "'" || c == "\"" || c == "`") {
+                // a prefixed string / name (`E'…'`): a word touching the quote
+                if (i > 0 && isWordCh(ch(s, i - 1))) return { toks: toks, broken: true }
+                const r: StrEnd = quotedEnd(s, i, c)
+                if (r.end < 0) return { toks: toks, broken: true }
+                if (s.substring(i, r.end).indexOf("\\") >= 0) return { toks: toks, broken: true }
+                let k: SK = SK.QName
+                if (c == "'") k = SK.Str
+                toks = toks.concat([tok(k, s.substring(i, r.end))])
+                i = r.end
             } else if (c == "[") {
                 const close: int = s.indexOf("]", i + 1)
-                if (close < 0) {
-                    broken = true
-                    i = s.length
-                } else {
-                    toks = toks.concat([tok(SK.QName, s.substring(i, close + 1))])
-                    i = close + 1
-                }
+                if (close < 0) return { toks: toks, broken: true }
+                toks = toks.concat([tok(SK.QName, s.substring(i, close + 1))])
+                i = close + 1
             } else if (isWordStart(c)) {
                 let j: int = i + 1
                 while (j < s.length && isWordCh(ch(s, j))) { j = j + 1 }
@@ -142,12 +149,21 @@ ${
                 while (j2 < s.length && (isDigit(ch(s, j2)) || ch(s, j2) == ".")) { j2 = j2 + 1 }
                 toks = toks.concat([tok(SK.Num, s.substring(i, j2))])
                 i = j2
-            } else {
+            } else if (isOpCh(c)) {
+                let j3: int = i + 1
+                while (j3 < s.length && isOpCh(ch(s, j3))) { j3 = j3 + 1 }
+                const op: string = s.substring(i, j3)
+                if (!opOk(op)) return { toks: toks, broken: true }
+                toks = toks.concat([tok(SK.Punct, op)])
+                i = j3
+            } else if (isPunctOk(c)) {
                 toks = toks.concat([tok(SK.Punct, c)])
                 i = i + 1
+            } else {
+                return { toks: toks, broken: true }
             }
         }
-        return { toks: toks, broken: broken, commented: commented }
+        return { toks: toks, broken: false }
     }
 
     // The end (one past the closing quote) of a quoted run starting at `i`; a
@@ -175,29 +191,25 @@ ${
         return ["INSERT", "UPDATE", "DELETE", "REPLACE", "UPSERT", "MERGE", "CREATE", "DROP", "ALTER", "TRUNCATE", "INTO"].indexOf(w) >= 0
     }
 
-    // Words a `(` may follow that are SQL syntax, not a function call.
+    // Words a `(` may follow as SQL SYNTAX, not a call. Only words no dialect
+    // lets name a function: RESERVED in MySQL 8 and, in Postgres, reserved or
+    // "non-reserved (cannot be function or type)" (EXISTS, VALUES, BETWEEN);
+    // SQLite has no SQL-level function definition. Every other word before a
+    // `(` — `rows`, `range`, `filter`, `over`, `set`, `join`, `like`, `any` … —
+    // can be a user function on some driver, so it is a call.
     fn isParenKeyword(w: string) -> boolean {
-        return ["IN", "EXISTS", "AS", "VALUES", "OVER", "FILTER", "ON", "USING", "AND", "OR", "NOT", "WHERE", "SELECT",
-                "FROM", "JOIN", "ANY", "ALL", "SOME", "BETWEEN", "CASE", "WHEN", "THEN", "ELSE", "LIKE", "IS", "BY",
-                "HAVING", "RETURNING", "UNION", "EXCEPT", "INTERSECT", "LIMIT", "OFFSET", "WITH", "RECURSIVE", "DISTINCT",
-                "PARTITION", "ROWS", "RANGE", "SET", "INTO", "TABLE", "WINDOW", "GROUP", "ORDER", "LATERAL"].indexOf(w) >= 0
+        return ["IN", "EXISTS", "VALUES", "AS", "ON", "USING", "AND", "OR", "NOT", "SELECT", "FROM", "WHERE",
+                "CASE", "WHEN", "THEN", "ELSE", "BETWEEN", "ALL", "DISTINCT", "UNION", "HAVING"].indexOf(w) >= 0
     }
 
-    // Functions that only compute a value (SQLite core + aggregate + date/JSON
-    // functions, their common Postgres / MySQL spellings). A call to any other
-    // function is presumed to write (`nextval`, `setval`, a user function).
+    // Functions that only compute a value, on all three drivers: built-ins of
+    // SQLite, Postgres and MySQL that resolve to the built-in (Postgres searches
+    // `pg_catalog` first; MySQL built-in names take precedence over stored
+    // functions; a SQLite connection is the runtime's own). Kept short on
+    // purpose — each entry is a claim; any other call is presumed to write.
     fn isReadOnlyFn(w: string) -> boolean {
-        return ["COUNT", "SUM", "AVG", "MIN", "MAX", "TOTAL", "GROUP_CONCAT", "STRING_AGG", "ARRAY_AGG", "COALESCE",
-                "IFNULL", "NULLIF", "IIF", "LOWER", "UPPER", "LENGTH", "CHAR_LENGTH", "ABS", "ROUND", "FLOOR", "CEIL",
-                "CEILING", "TRIM", "LTRIM", "RTRIM", "SUBSTR", "SUBSTRING", "INSTR", "POSITION", "CONCAT", "CONCAT_WS",
-                "PRINTF", "FORMAT", "QUOTE", "HEX", "TYPEOF", "DATE", "TIME", "DATETIME", "JULIANDAY", "STRFTIME",
-                "UNIXEPOCH", "NOW", "JSON", "JSON_EXTRACT", "JSON_ARRAY", "JSON_OBJECT", "JSON_GROUP_ARRAY",
-                "JSON_GROUP_OBJECT", "JSON_ARRAY_LENGTH", "JSON_TYPE", "JSON_VALID", "MOD", "POWER", "POW", "SQRT",
-                "SIGN", "RANDOM", "CAST", "EXTRACT", "ROW_NUMBER", "RANK", "DENSE_RANK", "LAG", "LEAD", "FIRST_VALUE",
-                "LAST_VALUE", "NTILE", "GREATEST", "LEAST", "TO_CHAR", "DATE_TRUNC", "AGE", "GLOB", "UNICODE", "CHAR",
-                "LIKELIHOOD", "LIKELY", "UNLIKELY", "ZEROBLOB", "SOUNDEX", "COUNT_BIG", "BOOL_AND", "BOOL_OR",
-                "EVERY", "PERCENT_RANK", "CUME_DIST", "NTH_VALUE", "TO_TIMESTAMP", "TO_DATE", "LEFT", "RIGHT",
-                "REVERSE", "REPEAT", "LPAD", "RPAD", "SPLIT_PART"].indexOf(w) >= 0
+        return ["COUNT", "SUM", "AVG", "MIN", "MAX", "COALESCE", "NULLIF", "LOWER", "UPPER", "LENGTH", "ABS",
+                "ROUND", "TRIM", "LTRIM", "RTRIM", "SUBSTR", "SUBSTRING", "CAST"].indexOf(w) >= 0
     }
 
     // Words that end a FROM item or cannot be one (not an alias, not a table).
@@ -227,7 +239,7 @@ ${
         const tp: TablePass = tablePass(ts)
         let reads: SqlTables = SqlTables.TablesKnown(tp.reads)
         let writes: SqlTables = SqlTables.TablesKnown(tp.writes)
-        if (sc.commented || tp.doubt) {
+        if (tp.doubt) {
             reads = SqlTables.TablesUnknown
             writes = SqlTables.TablesUnknown
         }
@@ -241,7 +253,7 @@ ${
             // function …) may touch any table
             reads = SqlTables.TablesUnknown
             writes = SqlTables.TablesUnknown
-        } else if (!sc.commented && !tp.doubt) {
+        } else if (!tp.doubt) {
             // a write reads its own target too (UPDATE … SET x = x + 1, a
             // WHERE, ON CONFLICT)
             reads = SqlTables.TablesKnown(dedupe(tp.reads.concat(tp.writes)))
@@ -260,10 +272,13 @@ ${
         let i: int = 0
         while (i < ts.length) {
             const t: STok = ts[i]
-            if (isWord(t)) {
-                if (isWriteVerb(t.w)) return SqlKind.SqlWrite
-                // a function call: a word touching `(` that is not SQL syntax
-                if (isP(at(ts, i + 1), "(") && !isParenKeyword(t.w) && !isReadOnlyFn(t.w)) return SqlKind.SqlWrite
+            if (isWord(t) && isWriteVerb(t.w)) return SqlKind.SqlWrite
+            // A CALL, by construction: ANY token followed by `(` — a word, a
+            // quoted name ("f"(…), [f](…), `f`(…)), a value, a literal — is
+            // a call unless it is punctuation, a syntax word no dialect lets
+            // name a function, or a listed read-only built-in (an unquoted word).
+            if (isP(at(ts, i + 1), "(") && t.k != SK.Punct) {
+                if (!(isWord(t) && (isParenKeyword(t.w) || isReadOnlyFn(t.w)))) return SqlKind.SqlWrite
             }
             i = i + 1
         }

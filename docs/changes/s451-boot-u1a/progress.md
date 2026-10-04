@@ -142,3 +142,23 @@ refused, §52 — outside U1); `<db>` (already refused — see "Design divergenc
   35/35; lint 0. Counter, main @086f8f209 (measured by checking main's self-host-v2 out into this worktree and back):
   PASS 88 · FAIL 48 · UNSUPPORTED 653 (bootstrap-unsupported 421 · parse-reject 232) → this branch PASS 89 · FAIL 48 ·
   UNSUPPORTED 652 (458 · 194). PASS/FAIL set diff: +PASS `sql/bare-identifier-body-e-sql-003-neg` (twin), nothing else.
+
+## S239 review fix round (HIGH: the kind scan could read a write as SqlSelect)
+
+- Reproduced red first (server.test.js "S239 review fix round", 21 tests red on 55db4bcbd): `SELECT "nextval"('s')`,
+  `[f](…)`, `` `f`(…) ``; `\f` / `\v` / NBSP / U+2003 / a non-ASCII letter before `(`; keyword-named functions
+  (rows range partition filter over window set any some join like is by lateral recursive limit); a backslash in a
+  string, `E'…'`, `#`, `/*! … */`, MySQL `1--1`, `$$…$$`; operators `@@`, `<->`, `~`, `::`.
+- Fixed BY CONSTRUCTION in `sql.scrml`: the scanner is whitelist-only (ASCII letters/digits/`_`, four whitespace
+  characters, `(),.;?`, quotes, and the operator runs `= < > <= >= <> != + - * / % ||`); anything else, any comment,
+  a backslash in a quoted run or a prefixed quote ⇒ broken ⇒ SqlWrite + every table set unknown. A call is ANY
+  non-punctuation token followed by `(` unless (a) a syntax word RESERVED in MySQL 8 and reserved or "cannot be
+  function" in Postgres (IN EXISTS VALUES AS ON USING AND OR NOT SELECT FROM WHERE CASE WHEN THEN ELSE BETWEEN ALL
+  DISTINCT UNION HAVING) or (b) a short list of built-ins that resolve to the built-in on all three drivers (COUNT SUM
+  AVG MIN MAX COALESCE NULLIF LOWER UPPER LENGTH ABS ROUND TRIM LTRIM RTRIM SUBSTR SUBSTRING CAST). The cost is
+  precision (a comment, a `JOIN (subquery)`, `::int`, `x=-1` now read as writes), never safety.
+- LOW (a): user-defined operators fail closed (operator-run whitelist). Postgres attribute notation `t.f` (= `f(t)`)
+  is a KNOWN LIMIT — indistinguishable from a column read without the schema (recorded in sql.scrml's header).
+- LOW (b), owed by U1c: when the printer writes SQL chunks into a JS template literal it MUST escape backticks, `\`
+  and `${` (or pass the chunks as a string array: `conn.sql(["…", "…"], …values)`) — a chunk is SQL text and must
+  never become JS template syntax.
