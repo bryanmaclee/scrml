@@ -6,7 +6,10 @@ Branch `spec/s451-ue-forks`, cut from origin/main `25677da72`. SPEC text for the
 ## Log
 
 - [x] BRIEF archived, branch cut, `bun install`.
-- [ ] 1a — value-position arms (§19.4.3, §19.7.1) + E-ERROR-012
+- [x] 1a — value-position arms (§19.4.3, §19.4.4, §19.7.3) + E-ERROR-012 (§19.13 + §34 rows) + gap
+  `g-impl1-value-position-arm-fallthrough-s451`. Measured: 64 `!{}` handlers (impl#1 AST), 35 in a
+  value position, 19 with fall-through arms in 13 files, all conformance/cases; 0 examples/samples.
+  5 match-on-failable sites, none falling through in a value position.
 - [ ] 2 — `| .V m :>` binds the payload (§19.8.3) + Appendix B historical
 - [ ] 3 — `!{}` on a non-failable call + E-ERROR-013
 - [ ] 4a — cross-database write inside an envelope (§8.9.2, §19.10.5/.6, §8.1.1) + E-SQL-011 generalized

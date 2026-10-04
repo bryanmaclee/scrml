@@ -17432,12 +17432,68 @@ A handler handles the call the way any other caller does: `onclick={ risky() !{ 
 
 > **Provenance:** ruling:user-voice-scrml.md S439 #14 + S440 "all recs" (restore conformance)
 
+**Handling in a value position — every arm yields a value or leaves (S451 ruling 1a).** A `!{}` handler or a `match` on a failable result is in a **value position** when its result is used: the initializer of a `let` / `const` / `lin` or state declaration (`let r = f() !{ … }`, `<x> = f() !{ … }`), the right-hand side of an assignment (`@x = f() !{ … }`, `x = f() !{ … }`), a function argument, a `return` operand, an operand of an operator, an interpolation, an attribute value — any position whose result is read. It is in a **statement position** when the handled call is the whole statement (`f() !{ … }` alone on its line, or alone in an event-handler body).
+
+In a value position, every arm SHALL do one of two things:
+
+1. **Yield a value** of the call's success type: the arm is an expression, or a block whose last expression is that value (§18.5). The `match` form's `.Ok(v)` arm is an arm like any other. For a `?{}` the success type is the terminator's (§44.3): `.get()` yields `Row | not`, so `| _ :> not` yields a value; `.all()` yields `Row[]`, so `| _ :> []` does.
+2. **Leave**: the arm ends in `return` or `fail` on every path through it (an `if` whose two branches each leave, leaves). A `break` or `continue` that targets a loop enclosing the whole statement also leaves, where §7 makes it legal there.
+
+An arm that does neither — it ends in a write (`@phase = .Missing`), a declaration, a call whose result is not a value of the success type (`log(m)`), or a block whose last statement is not an expression — **falls through**, and in a value position that SHALL be a compile error: **E-ERROR-012** — `Arm '{pattern}' of the handler on '{name}(…)' produces no value, but the handler's result is used here ({position}). In a value position every arm must yield a value of '{name}'s success type or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| {pattern} :> { @phase = …; fallback }'), leave with 'return', or call '{name}(…) !{ … }' as a statement and keep the writes in its arms.` An arm that yields a value of the WRONG type is not E-ERROR-012: it is the existing type error (E-TYPE-001, §18.4). The two never fire for the same arm.
+
+In a statement position an arm MAY fall through: the handler's result is not read, so no arm owes it a value, and an arm that does yield one has it discarded.
+
+```scrml
+type LoadError:enum = { NotFound(id: string), Timeout }
+function loadItem(id: string)! LoadError { … }        // success type: Item
+
+// VALID — value position, every arm yields an Item or leaves
+function itemOrPlaceholder(id: string) {
+    const item = loadItem(id) !{
+        | .NotFound(mid) :> placeholderItem(mid)       // yields a value
+        | .Timeout       :> { @phase = .TimedOut; return }   // leaves
+    }
+    return item
+}
+
+// VALID — statement position: the arms only write, nothing reads a result
+function refresh(id: string) {
+    loadItem(id) !{
+        | .NotFound(mid) :> @phase = .Missing(mid)
+        | .Timeout       :> @phase = .TimedOut
+    }
+}
+
+// INVALID — value position, the arms fall through
+function show(id: string) {
+    let item = loadItem(id) !{
+        | .NotFound(mid) :> @phase = .Missing(mid)     // E-ERROR-012: produces no value
+        | .Timeout       :> @phase = .TimedOut         // E-ERROR-012
+    }
+    @phase = .Loaded(item)                             // on failure `item` would hold nothing
+}
+
+// VALID — `match` in a value position: every arm, `.Ok` included, yields a string
+function label(id: string) {
+    return match loadItem(id) {
+        .Ok(item)        :> item.title
+        .NotFound(mid)   :> "missing " + mid
+        .Timeout         :> "timed out"
+    }
+}
+```
+
+> **Provenance:** ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 1: *"**(a):** in a VALUE position (`let r = f() !{ … }`, `@x = f() !{ … }`, any position whose result is used), every arm SHALL either yield a value of the call's success type or leave (`return` / `fail`); a fall-through arm there is a compile error. In STATEMENT position (`f() !{ … }` alone) fall-through is fine. Measured migration owed for corpus fall-through arms in value position."* · **supersedes:** nothing written — the SPEC was silent on what a value-position handler holds when an arm yields nothing (§18.3 makes an ALL-void `match` unassignable, E-TYPE-001, but says nothing of a mix, and nothing of `!{}`); the bootstrap design refused the shape as an open reading (`docs/changes/s451-boot-ue/DESIGN.md` §9). *(PA reading, flagged: the ruling names `return` / `fail`; a `break` / `continue` out of the enclosing loop is counted as leaving because it, too, never reaches the use of the result.)*
+>
+> **Direction of change (pa-base §8): newly-rejecting.** impl#1 accepts the shape and stores whatever the arm's last statement evaluates to (measured on `25677da72`: an arm `{ console.log("a") }` in `let r = risky(n) !{ … }` lowers to `_scrml_result = console.log("a")`, so `r` holds the host's `undefined` — a value scrml does not have). **Corpus measured** (`examples/`, `samples/`, `conformance/cases/`, 2267 files; impl#1's front end, `guarded-expr` nodes whose guarded statement is a declaration or an assignment, arms read from the node; `match` on a failable found by the same-file `!` declarations): 64 `!{}` handlers, 35 in a value position, **19 value-position handlers with fall-through arms in 13 files, all under `conformance/cases/`; 0 in `examples/` and `samples/`.** A text scan of every `!{` (the handlers on a `?{}` terminator included, which impl#1 does not model as `guarded-expr`) found no more. Five `match`-on-failable sites, none falling through in a value position. (`samples/compilation-tests/error-004-in-logic.scrml` puts a falling-through `!{}` after `let data = not` — no failable call at all; that is E-ERROR-013's shape, below, not counted here.) Files: `conformance/cases/error/{failable-handler-lift, failable-handler-lift-success, failable-handler-lift-timeout}` (3 handlers each), `conformance/cases/error/{fail-imported-builtin-name-enum-ok, fail-bare-variant-reaches-handler, propagate-reaches-handler, propagate-success-unwrap, handler-exhaustive-neg, handler-wildcard-escape, handler-non-exhaustive}`, `conformance/cases/parse-variant/{happy-payload-variant, happy-unit-variant}`, `conformance/cases/control-flow/s437-braceless-else-in-failable-arm` (1 each). In every one the handler's arms only write cells, so the migration is mechanical: drop the unused binding (`let result = f() !{ … }` → `f() !{ … }`), or, where the binding is read after (`failable-handler-lift*` `handleOk`, `propagate-success-unwrap`), give each arm a fallback value or a `return`. The cases are migrated with the bootstrap's implementation, not by this SPEC change. **Nominal / not yet emitted by impl#1** (frozen; `g-impl1-value-position-arm-fallthrough-s451`).
+
 #### 19.4.4 Normative Statements
 
 - The `!` modifier SHALL appear after the parameter list and before the optional error-type annotation in a function declaration.
 - The error type annotation after `!` MAY be declared with the arrow form (`! -> ErrorType`) or the bare form (`! ErrorType`) — the two forms are EQUIVALENT; both declare the function's error type explicitly (S137 amendment). That type SHALL be an enum (§19.4.4.1).
 - A function with `!` SHALL accept `fail` statements in its body. A function without `!` SHALL NOT accept `fail` statements (E-ERROR-001).
 - The caller of a `!` function SHALL handle the result via match, `?`, `!{}`, or `<errorBoundary>` (`?` inside a `!` function only, §19.5.4; `<errorBoundary>` for render-time calls only, §19.6.6). An unhandled `!` function call SHALL be a compile error (E-ERROR-002).
+- A `!{}` handler or a `match` on a failable result in a value position (§19.4.3) SHALL have every arm either yield a value of the call's success type or leave (`return` / `fail`, or a `break` / `continue` out of an enclosing loop). An arm that falls through there SHALL be a compile error (**E-ERROR-012**). In a statement position an arm MAY fall through. *(S451 ruling 1a.)*
 - The `!` modifier SHALL be part of the function's type signature. It is visible to the type system and participates in type checking.
 
 ##### 19.4.4.1 The error type SHALL be an enum
@@ -17731,6 +17787,7 @@ Inside an `<errorBoundary>`, exhaustive matching is NOT required. The boundary h
 - In markup context inside an `<errorBoundary>`, the boundary satisfies the error handling requirement. Exhaustive matching of error variants is NOT required.
 - The `::Ok` variant SHALL be the implicit wrapper for the success value of a `!` function. The developer SHALL match `::Ok(value)` to access the success case in logic context.
 - A `_` wildcard arm SHALL satisfy exhaustiveness for remaining unmatched variants, per existing §18.6 rules.
+- In a value position (§19.4.3), every arm of a `match` on a `!` function result — the `.Ok` arm and every error arm — SHALL yield a value of the call's success type or leave (`return` / `fail`); an arm that falls through SHALL be **E-ERROR-012**. In a statement position an arm MAY fall through. For a `match` on a failable result this is the answer §18.3 / §18.4 leave open for a mix of value and void arms; E-TYPE-001 still reports an arm whose value has the wrong type, and the two never fire for the same arm. *(Provenance: ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 1 (a), quoted in §19.4.3 · supersedes: nothing written — §19.7 was silent on arms that yield nothing · newly-rejecting; measured in §19.4.3.)*
 
 ---
 
@@ -18562,6 +18619,7 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
 | E-ERROR-009 | §19.3.3 | `fail` variant (qualified, or bare `fail .V` resolved against the declared `!` type) not a valid variant of the declared error enum (emitted at `compiler/src/type-system.ts:10629`, `:10637`, `:10644` for a qualified/bare target that is not a variant, and `:10686` for a bare `fail .V` whose declared type is not an enum.) | Error |
 | E-ERROR-010 | §19.5.4 | `?`-propagation: a called function's error variants are incompatible with the enclosing function's declared error type (dedicated code; formerly overloaded on E-TYPE-001) | Error |
+| E-ERROR-012 | §19.4.3, §19.7.3 | A `!{}` handler or a `match` on a failable result is in a value position (its result is used — an initializer, an assignment's right-hand side, an argument, a `return` operand) and one of its arms falls through: it neither yields a value of the call's success type nor leaves (`return` / `fail`). The message names the arm, the call, the position, and the fixes (end the arm with a fallback value, leave with `return`, or make the call a statement). In a statement position fall-through is legal. A wrong-typed arm value is E-TYPE-001, never this. **Provenance:** ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" item 1. **Nominal / not yet emitted** by impl#1 (frozen; `g-impl1-value-position-arm-fallthrough-s451`); lands with the bootstrap. | Error |
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's enum has no `renders` clause (reuses the §19.6.6 E-ERROR-005 exhaustiveness fence at the render-expression fire site) | Error |
 | E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum (the render-expression is enum-scoped) | Error |
@@ -23613,6 +23671,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
 | E-ERROR-009 | §19.3.3 | `fail` variant (qualified, or bare `fail .V` resolved against the declared `!` type) not a valid variant of the declared error enum (emitted at `compiler/src/type-system.ts:10629`, `:10637`, `:10644` for a qualified/bare target that is not a variant, and `:10686` for a bare `fail .V` whose declared type is not an enum.) | Error |
 | E-ERROR-010 | §19.5.4 | `?`-propagation: a called function's error variants are incompatible with the enclosing function's declared error type (dedicated code; formerly overloaded on E-TYPE-001) | Error |
+| E-ERROR-012 | §19.4.3, §19.7.3 | A `!{}` handler or a `match` on a failable result is in a value position (its result is used — an initializer, an assignment's right-hand side, an argument, a `return` operand) and one of its arms falls through: it neither yields a value of the call's success type nor leaves (`return` / `fail`). The message names the arm, the call, the position, and the fixes (end the arm with a fallback value, leave with `return`, or make the call a statement). In a statement position fall-through is legal. A wrong-typed arm value is E-TYPE-001, never this. **Provenance:** ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" item 1. **Nominal / not yet emitted** by impl#1 (frozen; `g-impl1-value-position-arm-fallthrough-s451`); lands with the bootstrap. | Error |
 | E-DEFER-CONTROL-FLOW | §19.16.3 | A deferred body (`defer <stmt>`) contains `return`, `fail`, a `?` propagation, or a `break`/`continue` whose target lies outside the deferred body. A deferred body runs while its block is already exiting, so it cannot redirect control. A loop inside the deferred body, and a function nested in it, are their own targets/scopes. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-NESTED | §19.16.3 | A deferred body contains a `defer` statement (outside a nested function). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A bare call to a failable function (declared `!` or CPS-implicit `!`) inside a deferred body is not handled in place with `!{}` (or a `match`). `?` is excluded and an enclosing `!` does not cover it; inside a deferred body this REPLACES E-ERROR-002 / W-CPS-NEEDS-FAILABLE for the same call. **Provenance:** `ruling:user-voice-S430-P3`. ALSO (S430 round 3): a `!{}` handler on a deferred call that has no catch-all `\| _ :>` arm — a transport failure outside the declared enum (a server / CPS callee's `CpsError`) would otherwise propagate out of the `finally`. (S430; emitted at `compiler/src/type-system.ts`, the function-body §19 walker, and — for the totality limb — `compiler/src/validators/lint-defer.ts`.) | Error |
