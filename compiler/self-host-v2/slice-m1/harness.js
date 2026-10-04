@@ -60,10 +60,6 @@ function listClientJs(dir, out = []) {
 const cache = new Map();
 
 /**
- * Compile + load every module. Returns { mods, warnings } where `mods` maps a
- * module base name (e.g. "print") to its export object.
- */
-/**
  * s452-effect-summary — the DIAGNOSTIC DIFFERENTIAL hook. With
  * SCRML_BOOT_DIAG_LOG=<file> set, every `analyze` call (every slice test and
  * every conformance-counter case — they all load through here) appends one
@@ -87,6 +83,10 @@ function logAnalyze(analyzeMod, file) {
   };
 }
 
+/**
+ * Compile + load every module. Returns { mods, warnings } where `mods` maps a
+ * module base name (e.g. "print") to its export object.
+ */
 export function loadBootstrap() {
   return loadBundle(join(SELF_HOST_V2, "slice-m1", "bundle.scrml"), MODULES);
 }
@@ -105,7 +105,8 @@ export function loadBundle(bundle, modules) {
   if (errs.length > 0) {
     throw new Error("bootstrap bundle failed to compile under impl#1:\n" + errs.map((e) => `${e.code} ${e.message ?? ""}`).join("\n"));
   }
-  const chunks = listClientJs(outDir).map((file) => {
+  // sorted: readdir order is the filesystem's; the chunks load in one order everywhere
+  const chunks = listClientJs(outDir).sort().map((file) => {
     const src = readFileSync(file, "utf8");
     const reg = /_scrml_modules\["([^"]+)"\]\s*=/.exec(src);
     const deps = [...src.matchAll(/=\s*_scrml_modules\["([^"]+)"\];/g)].map((m) => m[1]);

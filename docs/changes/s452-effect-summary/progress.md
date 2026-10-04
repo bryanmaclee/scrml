@@ -111,3 +111,16 @@
   deferred diagnostic is not counted there. Only the `<errors of=@x[f()]>` shape (a call inside an
   index of the `of=` place, of a clock reader) could see it: it would now also run the validity
   checks after the clock refusal (an added refusal, never a silence).
+
+## Merge of origin/main (#1280 bootstrap determinism, 6700ff591)
+
+- Conflict: `slice-m2/harness.js` M2_MODULES (main added `link.scrml`, this branch `effects.scrml`) —
+  both kept (`link.scrml`, `effects.scrml`, `analyze.scrml`). `slice-m1/harness.js` auto-merged;
+  the hook's JSDoc moved so `loadBootstrap` keeps its own comment.
+- Re-verified against a NEW base (origin/main's analyze.scrml swapped in, everything else merged):
+  2580 analyze inputs; the only differences are the G7 test programs (E-ERROR-012 now fires —
+  the closure) and one G7 program main's run never reached (its test stopped at the first failed
+  expect). Slices: m1 99, m2 462, m3 60, m4 1127 (incl. #1280's determinism.test.js), codec 92,
+  m1 lowered 99 — 0 fail. Counter PASS 120 / FAIL 48 / UNSUPPORTED 622; `--write` regenerated
+  docs/bootstrap-conformance.md with no change; `--check` current; severity `--check` current;
+  lint 0 (65 files).

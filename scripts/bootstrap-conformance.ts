@@ -99,6 +99,7 @@ import { driveInputs, type ConformanceHook, type InputStep } from "../conformanc
 import { FakeClock } from "../conformance/fake-clock.ts";
 import { normalizeDom, runAnchored } from "../conformance/normalize.ts";
 import { fixS66 } from "../compiler/src/commands/fix-s66.js";
+import { frontEnd as sharedFrontEnd } from "../compiler/self-host-v2/slice-m2/lowered.js";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SELF_HOST_V2 = join(REPO_ROOT, "compiler", "self-host-v2");
@@ -378,7 +379,7 @@ export function codeLiterals(sources: string[]): Set<string> {
 export async function loadBootstrapModules(): Promise<Bootstrap> {
   const { loadM2, M2_MODULES } = await import("../compiler/self-host-v2/slice-m2/harness.js");
   const { mods } = loadM2();
-  for (const m of ["parse", "analyze", "lower", "check", "print"]) {
+  for (const m of ["parse", "link", "analyze", "lower", "check", "print"]) {
     if (!mods[m]) throw new Error(`bootstrap module '${m}' missing from the slice-m2 bundle`);
   }
   const knownCodes = codeLiterals((M2_MODULES as string[]).map((m) => readFileSync(join(SELF_HOST_V2, m), "utf8")));
@@ -386,25 +387,22 @@ export async function loadBootstrapModules(): Promise<Bootstrap> {
 }
 
 /**
- * The front end, phase-separated. Mirrors compiler/self-host-v2/slice-m2/lowered.js `frontEnd`
- * (files in LINK ORDER: aux imports first, the entry last), but keeps the PARSE-phase diagnostics
- * apart — they decide the `parse-reject` bucket.
+ * The front end, phase-separated: the ONE driver, compiler/self-host-v2/slice-m2/lowered.js
+ * `frontEnd` (s452-boot-determinism — this used to be a copy of it that read the entry off the
+ * list's last position). The file SET goes in in any order; link.scrml canonicalizes it (path
+ * order, then link order), so a verdict is a function of the case's files alone. The entry is
+ * named. The PARSE-phase diagnostics are kept apart — they decide the `parse-reject` bucket.
  */
-function frontEnd(mods: Record<string, any>, files: Array<{ path: string; src: string }>) {
-  let next = 0;
-  const asts: unknown[] = [];
-  let parseDiags: Diag[] = [];
-  for (const f of files) {
-    const r = mods.parse.parseFile(f.path, f.src, next);
-    next = r.nextId;
-    asts.push(r.ast);
-    parseDiags = parseDiags.concat(r.diags);
-  }
-  const tp = mods.analyze.analyze(asts, files[files.length - 1].path);
-  const lowered = mods.lower.lower(tp);
+function frontEnd(mods: Record<string, any>, files: Array<{ path: string; src: string }>, entry: string) {
+  const r = sharedFrontEnd(mods, files, entry);
   // `infos`: the bootstrap's non-fatal I- notes (s449 — SPEC §55.17.6 I-FORM-SUBMIT-GATED "reports in
   // the warnings stream"), kept apart from `diags` by the bootstrap.
-  return { core: lowered.core, parseDiags, diags: parseDiags.concat(tp.diags as Diag[]), infos: ((tp.infos ?? []) as Diag[]) };
+  return { core: r.core, parseDiags: r.parseDiags as Diag[], diags: r.diags as Diag[], infos: ((r.infos ?? []) as Diag[]) };
+}
+
+/** Code-unit order (no locale): the report's order cannot depend on the build host's locale. */
+export function codeUnitCmp(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 /** The runtime half's server/tool selectors — halves the bootstrap emits no artifact for. */
@@ -624,13 +622,14 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
   const shape = validateExpectContainers(ex);
   if (shape.length > 0) return v("INVALID", "malformed expect", { failures: shape });
 
+  // the case's file SET (its aux imports + the entry); the front end orders it
   const files = [
-    ...Object.keys(g.auxFiles).sort().map((p) => ({ path: p, src: g.auxFiles[p] })),
+    ...Object.keys(g.auxFiles).map((p) => ({ path: p, src: g.auxFiles[p] })),
     { path: "case.scrml", src: g.source },
   ];
   let fe: ReturnType<typeof frontEnd>;
   try {
-    fe = frontEnd(boot.mods, files);
+    fe = frontEnd(boot.mods, files, "case.scrml");
   } catch (e) {
     return v("CRASH", "front end threw", { failures: [String((e as Error)?.message ?? e).split("\n")[0]] });
   }
@@ -827,7 +826,7 @@ export function renderReport(r: Report): string {
     L.push("");
     L.push(`NOT-TWINNED by reason (${r.counts["NOT-TWINNED"]} cases; a case counts once per distinct reason):`);
     L.push("");
-    const nt = Object.entries(r.notTwinnedReasons).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const nt = Object.entries(r.notTwinnedReasons).sort((a, b) => b[1] - a[1] || codeUnitCmp(a[0], b[0]));
     if (nt.length === 0) L.push("none");
     for (const [k, n] of nt) L.push(`- ${n} — ${k}`);
     L.push("");
@@ -921,7 +920,8 @@ async function main(): Promise<number> {
     console.error(`bootstrap-conformance: no case root ${casesDir}`);
     return 2;
   }
-  const all = loadCases(casesDir);
+  // loadCases orders by `localeCompare` (host-locale dependent); this report orders by code unit
+  const all = loadCases(casesDir).sort((a, b) => codeUnitCmp(a.relDir, b.relDir));
   const cases = filter ? all.filter((c) => c.relDir.includes(filter)) : all;
   if (cases.length === 0) {
     console.error(`bootstrap-conformance: zero cases attempted (of ${all.length}) — not a valid run`);
