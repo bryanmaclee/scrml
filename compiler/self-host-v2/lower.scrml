@@ -46,10 +46,13 @@ ${
              failFact, builtinFile, blockReference } from "./analyze.scrml"
 
     // s451 — THE DIAGNOSTICS GATE. `core` is `not` whenever the analysis
-    // reported an ERROR (an `E-` code — §34: severity is "carried by the `E-`
-    // prefix per the §34 diagnostic-stream convention"; `W-` notes in `diags`
-    // are non-fatal and do not close it). A Core is the only thing the printer
-    // takes, so a compile with an error has NO artifact to print — by
+    // reported an ERROR — a diagnostic whose §34 Severity column reads Error,
+    // read from the generated table (severity.scrml `severityOf`, which
+    // `newDiag` stamps on every Diag; a code with no §34 row is Error). The
+    // test FAILS CLOSED: anything not positively Warning or Info closes the
+    // gate. Warning / Info notes are non-fatal (§34) and do not close it — the
+    // prefix plays no part (§34 makes E-DG-002 a Warning). A Core is the
+    // only thing the printer takes, so a compile with an error has NO artifact to print — by
     // construction, for every code, not a per-code refusal list. Before s451
     // `lower` returned a Core unconditionally and the printer emitted a
     // runnable program over a tree analysis had rejected
@@ -64,11 +67,19 @@ ${
     // code whose Severity column reads **Error** fails the compile, and a compile
     // that reports one SHALL NOT produce a runnable artifact (§2.2.1). **Warning**
     // and **Info** codes do not fail the compile."
+    // FAIL CLOSED (s451 review r2): a diagnostic is an error UNLESS its severity
+    // is Warning or Info — a Diag whose severity is missing or unrecognised
+    // closes the gate rather than opening it (the same rule as
+    // scripts/bootstrap-conformance.ts's error-code classification).
     export fn hasError(tp: TypedProgram) -> boolean {
-        for (const d of tp.diags) { if (d.severity == Severity.Error) return true }
-        for (const d of tp.infos) { if (d.severity == Severity.Error) return true }
+        for (const d of tp.diags) { if (isErrorSeverity(d)) return true }
+        for (const d of tp.infos) { if (isErrorSeverity(d)) return true }
         for (const f of tp.files) { if (f.errs.length > 0) return true }
         return false
+    }
+
+    fn isErrorSeverity(d: Diag) -> boolean {
+        return d.severity != Severity.Warning && d.severity != Severity.Info
     }
 
     // The lowering context: the tables, the file (for diagnostics), and — while

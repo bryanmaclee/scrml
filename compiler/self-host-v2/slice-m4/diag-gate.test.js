@@ -67,3 +67,33 @@ describe("twins — non-fatal notes do not close the gate", () => {
     expect(printable(r).length).toBeGreaterThan(0);
   });
 });
+
+// s451 review r2 — the gate FAILS CLOSED. Before r2 `hasError` asked "is the
+// severity Error?", so a Diag with a missing or unrecognised severity read as
+// not-an-error and the gate OPENED. It now asks "is the severity Warning or
+// Info?" — anything else is an error. (`newDiag` always stamps a severity
+// today; this is the defence for a Diag that is ever built without one.)
+describe("the gate fails closed on a diagnostic with no / an unknown severity", () => {
+  const sp = { start: 0, end: 0 };
+  const tp = (diags, infos = []) => ({ diags, infos, files: [] });
+  const bare = { code: "E-SCOPE-001", message: "", file: "f", span: sp };
+
+  test("hasError: a severity-less or unknown-severity diagnostic (in diags, or in infos) is an error", () => {
+    expect(mods.lower.hasError(tp([bare]))).toBe(true);
+    expect(mods.lower.hasError(tp([], [bare]))).toBe(true);
+    expect(mods.lower.hasError(tp([{ ...bare, severity: "Bogus" }]))).toBe(true);
+  });
+
+  test("twins: Warning / Info do not close it; Error does; an empty compile does not", () => {
+    expect(mods.lower.hasError(tp([]))).toBe(false);
+    expect(mods.lower.hasError(tp([{ ...bare, severity: "Warning" }], [{ ...bare, severity: "Info" }]))).toBe(false);
+    expect(mods.lower.hasError(tp([{ ...bare, severity: "Error" }]))).toBe(true);
+  });
+
+  test("lower: a clean program's TypedProgram plus one severity-less diagnostic lowers to NO Core", () => {
+    const r = run(P(`    let <n:int=0/>\n    function go() { @n = @n + 1 }`, `        <button onclick=go()>go</button>`));
+    expect(r.core == null).toBe(false);
+    const bad = { ...r.typed, diags: r.typed.diags.concat([{ ...bare, file: "t.scrml" }]) };
+    expect(mods.lower.lower(bad).core == null).toBe(true);
+  });
+});
