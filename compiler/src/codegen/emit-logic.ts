@@ -678,7 +678,46 @@ function emitFailExpr(node: FailExprLike, opts: EmitLogicOpts): string {
       data = `{ ${props.join(", ")} }`;
     }
   }
-  return `return { __scrml_error: true, type: ${JSON.stringify(enumType)}, variant: ${JSON.stringify(variant)}, data: ${data} };`;
+  const envelope = `{ __scrml_error: true, type: ${JSON.stringify(enumType)}, variant: ${JSON.stringify(variant)}, data: ${data} }`;
+  // §19.10.3 — a `fail` inside a `transaction { }` rolls the transaction back
+  // BEFORE the fail's return (marked by _markTransactionExits). One statement,
+  // so it stays valid as the unbraced body of an `if` / arm.
+  const txnRollback = (node as { _scrmlTxnRollback?: string })._scrmlTxnRollback;
+  if (typeof txnRollback === "string" && txnRollback.length > 0) {
+    return `return (await ${txnRollback}(), ${envelope});`;
+  }
+  return `return ${envelope};`;
+}
+
+/**
+ * §19.10.3 (S450) — mark every `fail` / `?` exit inside a `transaction { }`
+ * body, at ANY depth (if/else, loops, match arms, `!{}` re-fail arms carried as
+ * `failExpr` side-fields), with the transaction's rollback closure name, so
+ * their emitted `return` rolls back first. Does NOT descend into a nested
+ * function declaration or a lambda: their `fail` / `?` return from THAT
+ * function, not from the transaction's.
+ */
+function _markTransactionExits(body: unknown, rollbackName: string | null): void {
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object") return;
+    if (seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const k = (n as { kind?: unknown }).kind;
+    if (k === "function-decl" || k === "fn-decl" || k === "lambda") return;
+    if (k === "fail-expr" || k === "propagate-expr") {
+      // null clears the mark after the block is emitted, so it can never leak into
+      // an emission of the same node outside this transaction.
+      if (rollbackName === null) delete (n as { _scrmlTxnRollback?: string })._scrmlTxnRollback;
+      else (n as { _scrmlTxnRollback?: string })._scrmlTxnRollback = rollbackName;
+    }
+    for (const key of Object.keys(n as object)) {
+      if (key === "span" || key === "parent" || key === "_scrmlTxnRollback") continue;
+      walk((n as Record<string, unknown>)[key]);
+    }
+  };
+  walk(body);
 }
 
 // ---------------------------------------------------------------------------
@@ -3474,11 +3513,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // terminator; filter it out of the chain and note the suppression.
       const _tenantAcross = _rawCalls.some((c) => c && c.method === "acrossTenants");
       const calls: any[] = _rawCalls.filter((c) => c && c.method !== "acrossTenants");
-      const _effMethod: string = calls.length > 0 ? calls[0].method : "";
-      const _isReadSql = _effMethod === "get" || _effMethod === "first" || _effMethod === "all";
-      // §14.8.10 — for a read, add `tenant_id` to the projection + get the row-tag
-      // wrapper; for an INSERT, inject the ambient tenant. No-op when tenant inactive.
-      const { effectiveSql: _tenantSql, tenantTag: _tenantTag } = _lowerTenantForQuery(rawQuery, _tenantAcross, _isReadSql);
+      // §14.8.10 — for a tenant-scoped read (any terminator), add its key
+      // column(s) to the projection + get the SOURCE-filter wrapper `_tenantScope`,
+      // applied to the driver's row array before `.get()` takes `[0]` and before
+      // the §14.8.9 / §39.4 per-row wrappers; for an INSERT, inject the ambient
+      // tenant. No-op (identity) when tenant inactive.
+      const { effectiveSql: _tenantSql, tenantScope: _tenantScope } = _lowerTenantForQuery(rawQuery, _tenantAcross);
       const { sql, params, segments } = extractSqlParams(_tenantSql);
       const db = opts.dbVar ?? fallbackSqlHandle();
 
@@ -3614,52 +3654,56 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // §14.8.9 — tag the SELECT row result with the protected-origin
         // descriptor (no-op when protect inactive / no protected column).
         if (params.length > 0) {
-          const tagged = taggedFromParams();
+          const rows = _tenantScope(`await ${taggedFromParams()}`);
           if (method === "get" || method === "first") {
-            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`(await ${tagged})[0] ?? null`, rawQuery, true), rawQuery)) + ";";
+            return protectTagSqlResult(boolCoerceSqlResult(`(${rows})[0] ?? null`, rawQuery, true), rawQuery) + ";";
           }
           if (method === "all") {
-            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${tagged}`, rawQuery, false), rawQuery)) + ";";
+            return protectTagSqlResult(boolCoerceSqlResult(rows, rawQuery, false), rawQuery) + ";";
           }
           // ⚑ S443 round 6: `.run()` / any other terminator / a bare `?{}` is the
           // driver's result array when used as a value (`let r = ?{`SELECT *…`}.run()`,
           // `UPDATE … RETURNING *`) — measured serving `passwordHash` untagged. Every
           // terminator below is tagged; a statement with no protected output emits
           // unchanged (protectTagSqlResult is a no-op for it).
-          return protectTagSqlResult(`await ${tagged}`, rawQuery) + ";";
+          return protectTagSqlResult(rows, rawQuery) + ";";
         }
 
         // Branch B: SQL uses bare ? placeholders + explicit call.args.
         // Use sql.unsafe(rawSql, [argArray]) — unsafe() accepts a bound array.
         if (call.args && call.args.trim()) {
           const argList = emitExprField(null, call.args.trim(), _makeExprCtx(opts));
+          const rows = _tenantScope(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`);
           if (method === "get" || method === "first") {
-            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`(await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]))[0] ?? null`, rawQuery, true), rawQuery)) + ";";
+            return protectTagSqlResult(boolCoerceSqlResult(`(${rows})[0] ?? null`, rawQuery, true), rawQuery) + ";";
           }
           if (method === "all") {
-            return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`, rawQuery, false), rawQuery)) + ";";
+            return protectTagSqlResult(boolCoerceSqlResult(rows, rawQuery, false), rawQuery) + ";";
           }
-          return protectTagSqlResult(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`, rawQuery) + ";";
+          return protectTagSqlResult(rows, rawQuery) + ";";
         }
 
         // Branch C: no params, no call.args. Bare tagged template.
         const taggedNoParams = `${db}\`${sql.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/\$\{/g, "\\${")}\``;
+        const rows = _tenantScope(`await ${taggedNoParams}`);
         if (method === "get" || method === "first") {
-          return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`(await ${taggedNoParams})[0] ?? null`, rawQuery, true), rawQuery)) + ";";
+          return protectTagSqlResult(boolCoerceSqlResult(`(${rows})[0] ?? null`, rawQuery, true), rawQuery) + ";";
         }
         if (method === "all") {
-          return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${taggedNoParams}`, rawQuery, false), rawQuery)) + ";";
+          return protectTagSqlResult(boolCoerceSqlResult(rows, rawQuery, false), rawQuery) + ";";
         }
-        return protectTagSqlResult(`await ${taggedNoParams}`, rawQuery) + ";";
+        return protectTagSqlResult(rows, rawQuery) + ";";
       }
 
-      // No chained call.
+      // No chained call. A bare `?{}` used as a value is the driver's row array —
+      // a tenant-scoped SELECT is filtered at the source like every read.
       if (params.length > 0) {
         // Defaults to .run() semantics — value dropped.
-        return protectTagSqlResult(`await ${taggedFromParams()}`, rawQuery) + ";";
+        return protectTagSqlResult(_tenantScope(`await ${taggedFromParams()}`), rawQuery) + ";";
       }
       // Static DDL — route through unsafe() so the runtime accepts no-param SQL.
-      return protectTagSqlResult(`await ${db}.unsafe(${JSON.stringify(rawQuery)})`, rawQuery) + ";";
+      // `_tenantSql` is `rawQuery` unless the floor added a key column to a SELECT.
+      return protectTagSqlResult(_tenantScope(`await ${db}.unsafe(${JSON.stringify(_tenantSql)})`), rawQuery) + ";";
     }
 
     case "fail-expr": {
@@ -3677,7 +3721,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const expr = emitExprField(node.exprNode, node.expr ?? "", _makeExprCtx(opts));
       const lines: string[] = [];
       lines.push(`const ${tmpVar} = ${expr};`);
-      lines.push(`if (${tmpVar}.__scrml_error) return ${tmpVar};`);
+      // §19.10.3 / §19.5.2 — `?` is a `fail` of the callee's variant: inside a
+      // `transaction { }` it rolls back before returning (_markTransactionExits).
+      const txnRollback = (node as { _scrmlTxnRollback?: string })._scrmlTxnRollback;
+      lines.push(typeof txnRollback === "string" && txnRollback.length > 0
+        ? `if (${tmpVar}.__scrml_error) return (await ${txnRollback}(), ${tmpVar});`
+        : `if (${tmpVar}.__scrml_error) return ${tmpVar};`);
       if (node.binding) {
         lines.push(`const ${node.binding} = ${tmpVar};`);
       }
@@ -4326,35 +4375,86 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
     // emit-client.ts.
 
     case "transaction-block": {
-      // SPEC §44.6 — transactions are deferred to SPEC-ISSUE-018. The current
-      // workaround is to use Bun.SQL `sql.unsafe()` for BEGIN/COMMIT/ROLLBACK
-      // on the same connection. Proper `sql.begin(callback)` integration
-      // requires a callback-shaped emitter restructure and is out of scope
-      // for Phase 1.
+      // §19.10.3 — `transaction { }` lowers to BEGIN at the start, COMMIT at the
+      // end of normal completion, ROLLBACK before any `fail` in the block, and
+      // ROLLBACK before a SQL error propagates. §19.10.4 — no transaction is ever
+      // left open. BEGIN/COMMIT/ROLLBACK go through Bun.SQL `unsafe()` on the
+      // same handle the block's `?{}` queries use.
+      //
+      // Shape (S450):
+      //   await db.unsafe("BEGIN");
+      //   let open = true, threw = false;
+      //   const rollback = async () => { if (open) { open = false; await db.unsafe("ROLLBACK"); } };
+      //   try { <body> ; await db.unsafe("COMMIT"); open = false; }
+      //   catch (e) { threw = true; throw e; }
+      //   finally { if (open) { open = false; try { ROLLBACK } catch (r) { if (!threw) throw r; } } }
+      //
+      // `fail` / `?` (§19.5.2: `?` IS a `fail` of the callee's variant) at ANY
+      // depth in the block — not only a direct child — are marked so their
+      // emitted `return` runs the rollback FIRST (§19.10.3 "before the fail's
+      // return"): `return (await rollback(), <error envelope>);`. The `finally`
+      // is the backstop that makes "no transaction left open" hold for every
+      // other exit (a thrown SQL error; a re-`fail` carried as handler text).
+      //
+      // ⚑ S453/B1a (RULED) — a `return`, or a `break` / `continue` whose target
+      // is outside the block, now LEAVES the block with a ROLLBACK and proceeds;
+      // only normal completion COMMITs (§19.10.3). They are NOT marked by
+      // `_markTransactionExits`, and that is deliberate: the `finally` below
+      // already rolls back on every one of them (JS runs a `finally` on a
+      // `return` / `break` / `continue` out of its `try`), and it rolls back at
+      // the RIGHT moment — AFTER the return expression has been evaluated, so a
+      // `?{}` read in `return count` still executes inside the transaction. The
+      // `fail` / `?` pre-return marking stays as it is because an error envelope
+      // has nothing to evaluate inside the block. One mechanism, two entry
+      // points; no second rollback path was added.
+      // A `yield`, and an exit inside a `match` arm (which is lowered as a nested
+      // function and so never reaches this `finally`), are still rejected before
+      // codegen (validators/lint-transaction.ts, E-TRANSACTION-CONTROL-FLOW).
       const lines: string[] = [];
+      // ⚑ #1264 (post-hold): the default handle is `fallbackSqlHandle()`, not a
+      // literal `"_scrml_sql"` — §8.1.1 gives one handle per database.
       const db = opts.dbVar ?? fallbackSqlHandle();
+      const open = genVar("txn_open");
+      const threw = genVar("txn_threw");
+      const rollback = genVar("txn_rollback");
+      _markTransactionExits(node.body ?? [], rollback);
       lines.push(`await ${db}.unsafe("BEGIN");`);
+      lines.push(`let ${open} = true;`);
+      lines.push(`let ${threw} = false;`);
+      lines.push(`const ${rollback} = async () => { if (${open}) { ${open} = false; await ${db}.unsafe("ROLLBACK"); } };`);
       lines.push(`try {`);
-      for (const stmt of (node.body ?? [])) {
-        const code = emitLogicNode(stmt, opts);
-        if (code) {
-          for (const line of code.split("\n")) {
-            lines.push(`  ${line}`);
-          }
-          if (stmt.kind === "fail-expr") {
-            const lastIdx = lines.length - 1;
-            const lastLine = lines[lastIdx];
-            if (lastLine.trimStart().startsWith("return {")) {
-              lines[lastIdx] = `  await ${db}.unsafe("ROLLBACK");`;
-              lines.push(`  ${lastLine.trim()}`);
+      try {
+        for (const stmt of (node.body ?? [])) {
+          const code = emitLogicNode(stmt, opts);
+          if (code) {
+            for (const line of code.split("\n")) {
+              lines.push(`  ${line}`);
             }
           }
         }
+      } finally {
+        _markTransactionExits(node.body ?? [], null);
       }
+      // Defensive backstop ONLY: a marked `fail` / `?` rolled back but its
+      // `return` did not leave the block (it returned from a nested function —
+      // the statement-`match` arm IIFE, g-stmt-match-block-return-falls-through).
+      // That shape is REJECTED at compile time (E-TRANSACTION-CONTROL-FLOW,
+      // validators/lint-transaction.ts) because this guard cannot make it safe:
+      // the statements between the arm and this point have ALREADY run with no
+      // transaction open (autocommit) and persisted. The guard only stops a
+      // COMMIT past a rollback (on Postgres a COMMIT with no open transaction
+      // merely WARNS) if some other nested-function lowering reaches here.
+      lines.push(`  if (!${open}) throw new Error("scrml: a \`fail\` inside this \`transaction\` rolled it back but did not leave the block (compiler defect: g-stmt-match-block-return-falls-through)");`);
       lines.push(`  await ${db}.unsafe("COMMIT");`);
+      lines.push(`  ${open} = false;`);
       lines.push(`} catch (_scrml_txn_err) {`);
-      lines.push(`  await ${db}.unsafe("ROLLBACK");`);
+      lines.push(`  ${threw} = true;`);
       lines.push(`  throw _scrml_txn_err;`);
+      lines.push(`} finally {`);
+      lines.push(`  if (${open}) {`);
+      lines.push(`    ${open} = false;`);
+      lines.push(`    try { await ${db}.unsafe("ROLLBACK"); } catch (_scrml_txn_rb_err) { if (!${threw}) throw _scrml_txn_rb_err; }`);
+      lines.push(`  }`);
       lines.push(`}`);
       return lines.join("\n");
     }
