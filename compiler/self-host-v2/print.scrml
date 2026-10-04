@@ -30,6 +30,7 @@ ${
              HostCall, SeqFn, BindKind,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, EffectDep, FieldRole, Field,
              Decl, Fn, CoreProgram, CapOwner, SurfaceProp, ValidityOf, Validator, Persist, PersistStore,
+             Failable, OkArm, ErrArm,
              findDecl, findTypeDef, typeDefSym, capOwner } from "./core.scrml"
     import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt,
@@ -291,7 +292,6 @@ ${
             .Lambda(params: ps, body: b) :> JsExpr.JArrowE(symNames(ctx, ps), exprJs(ctx, b))
             .SeqCall(op: o, seq: sq, f: f) :> jmcall(exprJs(ctx, sq), seqFnName(o), [exprJs(ctx, f)])
             .Validity(of: v, prop: pr) :> jmcall(surfaceJs(ctx, v), surfaceMethod(pr), [])
-            .Sql(q: q) :> JsExpr.JNull      // unreachable: printProgram refuses a program holding a query (U1c)
         }
     }
 
@@ -429,44 +429,57 @@ ${
         let body: JsStmt[] = []
         let i = 0
         for (const arm of arms) {
-            const ret: JsStmt[] = patBinds(ctx, arm.pat).concat([JsStmt.SReturn(exprJs(ctx, arm.body))])
+            const ret: JsStmt[] = patBinds(ctx, arm.pat, jid("m$")).concat([JsStmt.SReturn(exprJs(ctx, arm.body))])
             if (i == arms.length - 1) {
                 body = body.concat(ret)
             } else {
-                body = body.concat([JsStmt.SIf(patTest(ctx, arm.pat), ret, [])])
+                body = body.concat([JsStmt.SIf(patTest(ctx, arm.pat, jid("m$")), ret, [])])
             }
             i = i + 1
         }
         return jcall(JsExpr.JArrow(["m$"], body), [exprJs(ctx, scrut)])
     }
 
-    fn patTest(ctx: Ctx, p: Pattern) -> JsExpr {
+    // A pattern's test / binders against the scrutinee `on` (`m$` in a match
+    // arrow; `<raw>.error` in an Attempt — s451 Ue).
+    fn patTest(ctx: Ctx, p: Pattern, on: JsExpr) -> JsExpr {
         return match p {
-            .PVariant(enumSym: es, idx: idx) :> variantTest(ctx, es, idx)
-            .PLit(lit: l) :> JsExpr.JBin(JsOp.StrictEq, jid("m$"), litJs(ctx, l))
+            .PVariant(enumSym: es, idx: idx) :> variantTest(ctx, es, idx, on)
+            .PLit(lit: l) :> JsExpr.JBin(JsOp.StrictEq, on, litJs(ctx, l))
             .PWild :> JsExpr.JBool(true)
         }
     }
 
-    fn variantTest(ctx: Ctx, es: Sym, idx: int) -> JsExpr {
+    // s451 (Ue, review HIGH-1) — THE ENUM VALUE SHAPE. A nullary variant is its
+    // name (a string); a payload variant is `{ variant: "V", data: [v0, v1, …] }`
+    // — the payload POSITIONAL, in declared field order. No field name ever
+    // becomes a key next to the discriminant (a field named `tag`, `variant`,
+    // `data` or `__proto__` cannot overwrite or reroute anything): the shape
+    // holds by construction. The R8 wire form (§19.9.1 / §57.8) is
+    // `{"variant": "V", "data": {<field>: …}}` — the same discriminant key; the
+    // codec maps `data` index i ↔ declared field i (U1c, when payload enums
+    // cross the wire). (The runtime's own ValidationError records — §55, read
+    // only by the runtime — keep their `{ tag, … }` shape; no Core pattern
+    // reads them.)
+    fn variantTest(ctx: Ctx, es: Sym, idx: int, on: JsExpr) -> JsExpr {
         const tag: JsExpr = jstr(variantTag(ctx, es, idx))
-        if (variantHasFields(ctx, es, idx)) return JsExpr.JBin(JsOp.StrictEq, jmember(jid("m$"), "tag"), tag)
-        return JsExpr.JBin(JsOp.StrictEq, jid("m$"), tag)
+        if (variantHasFields(ctx, es, idx)) return JsExpr.JBin(JsOp.StrictEq, jmember(on, "variant"), tag)
+        return JsExpr.JBin(JsOp.StrictEq, on, tag)
     }
 
-    fn patBinds(ctx: Ctx, p: Pattern) -> JsStmt[] {
+    fn patBinds(ctx: Ctx, p: Pattern, on: JsExpr) -> JsStmt[] {
         return match p {
-            .PVariant(enumSym: es, idx: idx, binds: binds) :> variantBinds(ctx, es, idx, binds)
+            .PVariant(enumSym: es, idx: idx, binds: binds) :> variantBinds(ctx, es, idx, binds, on)
             .PLit :> []
             .PWild :> []
         }
     }
 
-    fn variantBinds(ctx: Ctx, es: Sym, idx: int, binds: Sym[]) -> JsStmt[] {
+    fn variantBinds(ctx: Ctx, es: Sym, idx: int, binds: Sym[], on: JsExpr) -> JsStmt[] {
         let out: JsStmt[] = []
         let j = 0
         for (const b of binds) {
-            out = out.concat([JsStmt.SConst(symName(ctx, b), jmember(jid("m$"), variantFieldName(ctx, es, idx, j)))])
+            out = out.concat([JsStmt.SConst(symName(ctx, b), JsExpr.JIndex(jmember(on, "data"), JsExpr.JAnnot(jnum(j), variantFieldName(ctx, es, idx, j))))])
             j = j + 1
         }
         return out
@@ -513,6 +526,8 @@ ${
             .Suspend(bind: x) :> false
             .ResetSurface(of: x) :> false
             .Unpersist(decl: x) :> false
+            .Attempt(result: x) :> false
+            .Fail(err: x) :> false
         }
     }
 
@@ -540,7 +555,75 @@ ${
             .ResetSurface(of: v) :> [sexpr(jmcall(surfaceJs(ctx, v), "reset", []))]
             .Defer(body: d) :> [deferJs(ctx, d)]
             .Unpersist(decl: d, inst: i, idx: x) :> [unpersistJs(ctx, d, i, x)]
+            .Attempt(result: r, call: c, err: e, ok: ok, arms: arms) :> attemptJs(ctx, r, c, ok, arms, assigned)
+            .Fail(err: e, idx: i, args: args) :> [JsStmt.SReturn(rtCall(ctx, "failure", [variantValueJs(ctx, e, i, args)]))]
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // s451 (Ue) — the error model (§19). A failure is a runtime-private
+    // `Failure` object around the error value (`rt.failure(e)`); `rt.failed(r)`
+    // tells it apart from ANY success value (no scrml value is one). An
+    // Attempt binds the call's raw result to `ok.bind`:
+    //   let result;                       // only when the Attempt has one
+    //   const v = f(…);
+    //   if (rt.failed(v)) { if (<arm 1 test on v.error>) { … } else … }
+    //   else { <ok body>; result = <ok value>; }
+    // The arms are total (check.scrml C-E2), so the last — or a wildcard —
+    // needs no test. The patterns test `v.error` (the raw result's local is a
+    // minted, unique name), so an Attempt nested in an arm never collides.
+    // -------------------------------------------------------------------------
+    fn attemptJs(ctx: Ctx, result: Sym | not, call: Failable, ok: OkArm, arms: ErrArm[], assigned: int[]) -> JsStmt[] {
+        let out: JsStmt[] = []
+        if (result is some) out = out.concat([JsStmt.SDecl(symName(ctx, result))])
+        const raw: string = symName(ctx, ok.bind)
+        out = out.concat([JsStmt.SConst(raw, failableJs(ctx, call))])
+        const errB: JsStmt[] = errArmsJs(ctx, jmember(jid(raw), "error"), arms, 0, result)
+        const okB: JsStmt[] = blockJs(ctx, ok.body).concat(resultJs(ctx, result, ok.value))
+        return out.concat([JsStmt.SIf(rtCall(ctx, "failed", [jid(raw)]), errB, okB)])
+    }
+
+    fn failableJs(ctx: Ctx, c: Failable) -> JsExpr {
+        return match c {
+            .FCall(fn: f, args: args) :> jcall(jid(symName(ctx, f)), exprsJs(ctx, args))
+            .FSql(q: q) :> JsExpr.JNull     // unreachable: printProgram refuses a program holding a query (U1c)
+        }
+    }
+
+    fn errArmsJs(ctx: Ctx, err: JsExpr, arms: ErrArm[], i: int, result: Sym | not) -> JsStmt[] {
+        if (i >= arms.length) return []
+        const a: ErrArm = arms[i]
+        const body: JsStmt[] = patBinds(ctx, a.pat, err).concat(blockJs(ctx, a.body)).concat(resultJs(ctx, result, a.value))
+        if (i == arms.length - 1 || isWildPat(a.pat)) return body
+        return [JsStmt.SIf(patTest(ctx, a.pat, err), body, errArmsJs(ctx, err, arms, i + 1, result))]
+    }
+
+    fn isWildPat(p: Pattern) -> boolean {
+        return match p {
+            .PWild :> true
+            .PVariant :> false
+            .PLit :> false
+        }
+    }
+
+    fn resultJs(ctx: Ctx, result: Sym | not, v: Expr | not) -> JsStmt[] {
+        if (result is not) return []
+        if (v is not) return []
+        return [JsStmt.SAssign(jid(symName(ctx, result)), exprJs(ctx, v))]
+    }
+
+    // An enum value as the runtime holds it (THE ENUM VALUE SHAPE, above):
+    // a nullary variant is its name; a payload variant `{ variant, data: […] }`.
+    fn variantValueJs(ctx: Ctx, es: Sym, idx: int, args: Expr[]) -> JsExpr {
+        const tag: JsExpr = jstr(variantTag(ctx, es, idx))
+        if (!variantHasFields(ctx, es, idx)) return tag
+        let vals: JsExpr[] = []
+        let j = 0
+        for (const a of args) {
+            vals = vals.concat([JsExpr.JAnnot(exprJs(ctx, a), variantFieldName(ctx, es, idx, j))])
+            j = j + 1
+        }
+        return JsExpr.JObject([{ key: "variant", value: tag }, { key: "data", value: JsExpr.JArray(vals) }])
     }
 
     // s449 — `rt.suspend(task$, <on>, (x) => { <then> })`: the CPS split
@@ -607,6 +690,8 @@ ${
             .ResetSurface :> []
             .Defer :> []
             .Unpersist :> []
+            .Attempt :> []
+            .Fail :> []
         }
     }
 
@@ -623,6 +708,8 @@ ${
             .ResetSurface :> []
             .Defer :> []
             .Unpersist :> []
+            .Attempt :> []
+            .Fail :> []
         }
     }
 
@@ -950,6 +1037,8 @@ ${
             .ResetSurface(of: x) :> false
             .Defer(body: x) :> false
             .Unpersist(decl: x) :> false
+            .Attempt(result: x) :> false
+            .Fail(err: x) :> false
         }
     }
 
@@ -1018,7 +1107,6 @@ ${
             .Lambda(params: x) :> []
             .SeqCall(op: x) :> []
             .Validity(of: x) :> []
-            .Sql(q: x) :> []
         }
     }
 
@@ -1477,7 +1565,6 @@ ${
             .Lambda(params: ps) :> false
             .SeqCall(op: o) :> false
             .Validity(of: x) :> false
-            .Sql(q: x) :> false
         }
     }
 
@@ -1626,14 +1713,14 @@ ${
 
     fn nodeIsQuery(n: Node) -> boolean {
         return match n {
-            .NExpr(e: e) :> exprIsQuery(e)
+            .NStmt(s: s) :> stmtIsQuery(s)
+            .NExpr(e: x) :> false
             .NProgram(p: x) :> false
             .NDecl(d: x) :> false
             .NField(f: x) :> false
             .NFn(f: x) :> false
             .NServerFn(f: x) :> false
             .NBlock(b: x) :> false
-            .NStmt(s: x) :> false
             .NPlace(pl: x) :> false
             .NInst(i: x) :> false
             .NPattern(pat: x) :> false
@@ -1643,23 +1730,28 @@ ${
         }
     }
 
-    fn exprIsQuery(e: Expr) -> boolean {
-        return match e {
-            .Sql(q: x) :> true
-            .Lit(lit: x) :> false
-            .Local(sym: x) :> false
-            .Read(place: x) :> false
-            .Call(callee: x) :> false
-            .Prim(op: x) :> false
-            .Match(scrut: x) :> false
-            .ArrayOf(elems: x) :> false
-            .StructOf(ty: x) :> false
-            .Handle(inst: x) :> false
-            .InitOf(decl: x) :> false
-            .Host(call: x) :> false
-            .Lambda(params: x) :> false
-            .SeqCall(op: x) :> false
-            .Validity(of: x) :> false
+    fn stmtIsQuery(s: Stmt) -> boolean {
+        return match s {
+            .Attempt(call: c) :> failableIsQuery(c)
+            .Let(sym: x) :> false
+            .Assign(local: x) :> false
+            .Write(cap: x) :> false
+            .Commit(writes: x) :> false
+            .If(cond: x) :> false
+            .Return(e: x) :> false
+            .Eval(e: x) :> false
+            .Suspend(bind: x) :> false
+            .ResetSurface(of: x) :> false
+            .Defer(body: x) :> false
+            .Unpersist(decl: x) :> false
+            .Fail(err: x) :> false
+        }
+    }
+
+    fn failableIsQuery(c: Failable) -> boolean {
+        return match c {
+            .FSql(q: x) :> true
+            .FCall(fn: x) :> false
         }
     }
 

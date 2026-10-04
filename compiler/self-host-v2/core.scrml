@@ -198,13 +198,35 @@ ${
         SeqCall(op: SeqFn, seq: Expr, f: Expr),
         // s449: a read of the validity surface (§55.5 / §55.6) — read-only.
         Validity(of: ValidityOf, prop: SurfaceProp),
-        // s451 (U1a): a `?{}` SQL query (§8). Legal ONLY in a ServerFn body
-        // (check.scrml C-S2). Its values are `q.params` — Exprs, never text:
-        // there is no node that can carry a runtime value into SQL text, so
-        // E-SQL-001 (§8.1) is unrepresentable rather than checked.
-        Sql(q: SqlQuery),
     }
     export type MatchArm:struct = { pat: Pattern, body: Expr }
+
+    // -------------------------------------------------------------------------
+    // s451 (Ue) — the error model (SPEC §19). A FAILABLE is something whose
+    // result may be a failure (§19.4.2 "a tagged union of the success type and
+    // the error type"): a call of a function declared `!` (§19.4), or a `?{}`
+    // query (§19.8.3, S451 R11: "a failable expression everywhere"). A
+    // failable exists in Core ONLY as the `call` of a Stmt.Attempt — the node
+    // that inspects its result with arms total over its error enum — so an
+    // unhandled failable is unrepresentable (§19.4.3 "SHALL NOT be ignored"):
+    // an Expr.Call never names a function whose `err` is some (check.scrml
+    // C-E1), and a query is not an Expr at all.
+    //
+    // FSql (U1a's query, moved here from Expr): legal ONLY in a ServerFn body
+    // (check.scrml C-S2). Its values are `q.params` — Exprs, never text: there
+    // is no node that can carry a runtime value into SQL text, so E-SQL-001
+    // (§8.1) is unrepresentable rather than checked.
+    // -------------------------------------------------------------------------
+    export type Failable:enum = {
+        FCall(fn: Sym, args: Expr[]),
+        FSql(q: SqlQuery),
+    }
+    // The success branch: the result is bound to `bind`, `body` runs, and
+    // `value` is the branch's value (when the Attempt has a `result`).
+    export type OkArm:struct = { bind: Sym, body: Block, value: Expr | not }
+    // A failure branch: `pat` matches the error value (a variant of the
+    // Attempt's `err` enum, or PWild), its payload bound positionally.
+    export type ErrArm:struct = { pat: Pattern, body: Block, value: Expr | not }
 
     // -------------------------------------------------------------------------
     // s451 (U1a) — SQL (SPEC §8, §44). A query is the ONE place SQL lives in
@@ -333,6 +355,25 @@ ${
         // of that same field: the key is removed and the store the Write
         // queued is cancelled. Writes no cell (check.scrml C17).
         Unpersist(decl: Sym, inst: InstRef, idx: int),
+        // s451 (Ue) — run the failable `call`. Success: bind its value to
+        // `ok.bind`, run `ok.body`. Failure: run the FIRST arm whose pattern
+        // matches the error value (a value of enum `err`), its payload bound.
+        // When `result` is some, it is bound to the taken branch's `value`
+        // and is in scope after the Attempt. Every handling form lowers to
+        // this one node — `!{}` (§19.4.3 item 3), a `match` on the result
+        // (§19.7.1; `.Ok` is the success arm), `?` (§19.5.2: one arm per
+        // callee variant re-failing as the enclosing enum's same-named
+        // variant) and the implicit propagation of a `?{}` in a `!` function
+        // (§19.8.2). check.scrml C-E2 / C-E3: the arms are total over `err`;
+        // with a `result`, every branch has a value or diverges.
+        Attempt(result: Sym | not, call: Failable, err: Sym, ok: OkArm, arms: ErrArm[]),
+        // s451 (Ue) — `fail Err.V(args)` (§19.3): return the failure whose
+        // error value is variant `idx` of enum `err` built from `args` — "it
+        // returns the error variant value to its caller exactly as if a
+        // `return` statement had been used" (§19.3.2). The ONLY construction of
+        // an error value: no failure value exists in Core outside a Fail.
+        // Legal only in a function whose `err` is this enum (check.scrml C-E4).
+        Fail(err: Sym, idx: int, args: Expr[]),
     }
     export type Block:struct = { stmts: Stmt[] }
 
@@ -490,17 +531,21 @@ ${
     }
 
     export type Param:struct    = { sym: Sym, ty: Type }
-    export type Fn:struct       = { sym: Sym, params: Param[], body: Block, pure: boolean }
+    // s451 (Ue): `err` — the error enum of a function declared `!` (§19.4: the
+    // declared `! E`, or the built-in `Error` for a bare `!`); `not` for a
+    // function that cannot fail. A call of a function with an `err` exists only
+    // as an Attempt's call (check.scrml C-E1); a Fail only in its body (C-E4).
+    export type Fn:struct       = { sym: Sym, params: Param[], body: Block, pure: boolean, err: Sym | not }
     // s451 (U1a): a function route inference placed on the SERVER (§12.2) — its
     // body holds the program's SQL and no client state (check.scrml C-S1/C-S2);
     // `ret` is its declared return type (`not`: none written). Placement lives
     // in the SHAPE of Core — a ServerFn, not a Fn with a flag — so no later pass
-    // re-derives it.
-    export type ServerFn:struct = { sym: Sym, params: Param[], ret: Type | not, body: Block }
+    // re-derives it. `err`: as Fn's (Ue).
+    export type ServerFn:struct = { sym: Sym, params: Param[], ret: Type | not, body: Block, err: Sym | not }
 
     // One CoreProgram per linked program (a library's declarations appear in
     // the consumer's Core). `program` names the program declaration.
-    // s451 (U1a): `dbs` — the databases its queries run on (Expr.Sql.q.db).
+    // s451 (U1a): `dbs` — the databases its queries run on (SqlQuery.db).
     export type CoreProgram:struct = {
         program: Sym,
         decls: Decl[],
@@ -511,6 +556,9 @@ ${
         // s451 — §65.3.4: the built-in reset layer ships unless the top-level
         // program opts out with `<program reset="none">`.
         reset: boolean,
+        // s451 (Ue): the built-in `SqlError` enum (§19.8.1) — the error type
+        // of every query (an Attempt's FSql); `not` when the program has none.
+        sqlError: Sym | not,
     }
 
     // -------------------------------------------------------------------------

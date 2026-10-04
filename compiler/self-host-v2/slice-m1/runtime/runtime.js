@@ -616,6 +616,34 @@ export function runDefers(stack) {
 }
 
 // ---------------------------------------------------------------------------
+// s451 (Ue) — the error model (SPEC §19). "There is NO try/catch. There are
+// NO exceptions. Errors are values" (§19.1): a `!` function that fails RETURNS
+// a failure — `fail` and `?` print as `return rt.failure(<error value>)` — and the
+// caller's Attempt asks `rt.failed(result)` before it uses the result. A
+// failure is an instance of this module-private class, so no value a scrml
+// program can build (scrml has no classes and no `new`) is ever mistaken for
+// one, whatever its shape; `error` is the ordinary enum value of the
+// function's error type (a nullary variant's tag, or `{ tag, …fields }`).
+// A host error (§19.6.8) is never a failure, and a failure never throws.
+// ---------------------------------------------------------------------------
+class Failure {
+  constructor(error) {
+    this.error = error;
+    Object.freeze(this);
+  }
+}
+
+/** A failure carrying the error value `error` — what `fail E.V(…)` returns. */
+export function failure(error) {
+  return new Failure(error);
+}
+
+/** Is `result` (a failable call's result) a failure? */
+export function failed(result) {
+  return result instanceof Failure;
+}
+
+// ---------------------------------------------------------------------------
 // The validity surface (SPEC §55.5–§55.8, §55.12, §55.13).
 //
 // A field's surface is a RECORD created on first use (a read, a bind, a

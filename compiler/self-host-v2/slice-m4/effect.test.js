@@ -21,6 +21,14 @@ afterEach(() => expectNoPageErrors());
 const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const codes = (src) => run(src).diags.map((d) => d.code);
 const diagsOf = (src) => run(src).diags;
+
+// s451 (Ue, review HIGH-2): a function named without a call is refused (Core has no
+// function value — it was lowered as `null`). The tests below pin what the no-write
+// rule says about such a value; they first check the refusal is there, then read the rest.
+const fnValueRefused = (ds) => {
+  expect(ds.some((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED" && d.message.includes("names a function without calling it"))).toBe(true);
+  return ds.filter((d) => !(d.code === "E-BOOTSTRAP-UNSUPPORTED" && d.message.includes("names a function without calling it")));
+};
 const clean = (src) => {
   const r = run(src);
   expect(r.diags.map((d) => `${d.code}: ${d.message}`)).toEqual([]);
@@ -400,7 +408,9 @@ describe("§6.7.4 the no-write rule — E-EFFECT-WRITES-STATE (the transitive wr
     expect(W(ds)).toEqual(["E-EFFECT-WRITES-STATE"]);
     expect(ds[0].message).toContain("`bump() → @hits`");
     // a writer NAMED as a value, never called in scrml — whatever receives it may call it
-    const named = writes(`    function logFilter() {\n        @hits = @hits + 1\n    }`, `<effect deps=[@query]>\${\n        const handler = logFilter\n    }</>`);
+    // (s451 Ue review HIGH-2: the function value itself is also refused — E-BOOTSTRAP-UNSUPPORTED —
+    // as Core has no function value; the no-write rule still reports it, fail-closed twice.)
+    const named = fnValueRefused(writes(`    function logFilter() {\n        @hits = @hits + 1\n    }`, `<effect deps=[@query]>\${\n        const handler = logFilter\n    }</>`));
     expect(W(named)).toEqual(["E-EFFECT-WRITES-STATE"]);
     expect(named[0].message).toContain("hands `logFilter` on as a function value");
   });
@@ -424,13 +434,13 @@ describe("§6.7.4 rule 4 — E-EFFECT-WRITE-UNPROVEN (fails closed)", () => {
   const D = `    let <query:string=""/>\n${PING}`;
 
   test("a call through a local holding a function value — the compiler cannot resolve it", () => {
-    const ds = diagsOf(P(`${D}\n    <effect deps=[@query]>\${\n        const g = ping\n        g()\n    }</>`, ""));
+    const ds = fnValueRefused(diagsOf(P(`${D}\n    <effect deps=[@query]>\${\n        const g = ping\n        g()\n    }</>`, "")));
     expect(ds.map((d) => d.code)).toEqual(["E-EFFECT-WRITE-UNPROVEN"]);
     expect(ds[0].message).toMatch(/`g\(…\)` calls through `g`.*fails closed/);
   });
 
   test("…reached through a called function: the message names the chain", () => {
-    const ds = diagsOf(P(`${D}\n    function viaLocal() {\n        const g = ping\n        g()\n    }\n    <effect deps=[@query]>\${ viaLocal() }</>`, ""));
+    const ds = fnValueRefused(diagsOf(P(`${D}\n    function viaLocal() {\n        const g = ping\n        g()\n    }\n    <effect deps=[@query]>\${ viaLocal() }</>`, "")));
     expect(ds.map((d) => d.code)).toEqual(["E-EFFECT-WRITE-UNPROVEN"]);
     expect(ds[0].message).toContain("through `viaLocal()`");
   });

@@ -65,7 +65,45 @@ ${
         // absorbed (ASql). Placement, the database, the failable rule and the
         // query's facts are analyze's.
         Sql(q: ASql),
+        // s451 (Ue) — a failable result HANDLED (§19.4.3): `e?` (§19.5),
+        // `e !{ arms }` (item 3), or `match e { arms }` (§19.7.1). Whether
+        // `e` is failable, which enum the arms name, and what each binds are
+        // analyze's.
+        Handled(h: AHandled),
     }
+
+    // s451 (Ue) — the handling forms. `subject` is the failable (a call of a
+    // `!` function, or a `?{}` query).
+    export type AHow:enum = {
+        Propagate,                  // `subject?`
+        Guard(arms: AArm[]),        // `subject !{ | .V(a) :> … | _ :> … }`
+        MatchOn(arms: AArm[]),      // `match subject { .Ok(v) :> …  .V :> … }`
+    }
+    export type AHandled:struct = { subject: AExpr, how: AHow }
+    // One arm. `legacy`: written with a deprecated `=>` / `->` separator
+    // (W-MATCH-ARROW-LEGACY — the `!{}` arms share the match rule, §19).
+    export type AArm:struct = { nid: int, span: ASpan, pat: APat, body: AArmBody, legacy: boolean }
+    // `.V` / `::V` with its positional binders (`parens`: written `(…)`),
+    // or the wildcard (`_` / `else`, §19 alias note).
+    export type APat:enum = {
+        PName(name: string, binds: ABind[], parens: boolean),
+        PWild,
+    }
+    // A binder: a name, or `_` (binds nothing).
+    export type ABind:struct = { nid: int, span: ASpan, name: string }
+    // An arm's body: an expression (a value, or a statement such as a write),
+    // or a braced block.
+    export type AArmBody:enum = {
+        ArmExpr(e: AExpr),
+        ArmBlock(b: ABlock),
+    }
+
+    // s451 (Ue) — `fail E.V(args)` / `fail E::V` / `fail .V(args)` /
+    // `fail ::V` (§19.3.1). `enumName` "" = the bare form (resolved against the
+    // function's declared error type, §19.3.3). `target`: a `fail` whose
+    // target is not a variant at all (`fail "x"`) — kept, so analyze reports
+    // E-ERROR-009 ("a `fail` target that is not an enum variant").
+    export type AFail:struct = { enumName: string, variant: string, args: AExpr[], target: AExpr | not }
 
     // s451 (U1a) — the terminator of a `?{}` chain (§8.3): `.all()` (or none
     // written — "`.all()` (or bare `?{}`)"), `.get()`, `.run()`.
@@ -75,9 +113,9 @@ ${
     // `${…}` expressions between them, in order — `chunks.length ==
     // params.length + 1`, so a value can only ever be a BOUND parameter (§8.1:
     // "SHALL NOT be compiled to string interpolation under any circumstance").
-    // `nobatch`: `.nobatch()` was written (§8.9.5). `handled`: a `!{}` handler
-    // follows it (refused until Ue — the parser reports it; analyze does not
-    // also call it unhandled, E-ERROR-002).
+    // `nobatch`: `.nobatch()` was written (§8.9.5). `handled`: the query is
+    // the subject of a handling form (`?`, `!{}`, `match` — AExprK.Handled), so
+    // analyze does not call it unhandled (E-ERROR-002, §19.8.3).
     export type ASql:struct = { chunks: string[], params: AExpr[], mode: ASqlMode, nobatch: boolean, handled: boolean }
 
     // -------------------------------------------------------------------------
@@ -113,6 +151,8 @@ ${
         // is visible). `bare`: the defer is the whole UNBRACED arm of an
         // `if` / `else` (§19.16.2 E-DEFER-UNSUPPORTED-SITE).
         Defer(body: ABlock, arrayLead: boolean, bare: boolean),
+        // s451 (Ue) — `fail …` (§19.3).
+        Fail(f: AFail),
     }
 
     // -------------------------------------------------------------------------
@@ -140,12 +180,14 @@ ${
     // `pure` = declared with `fn` (§48.3); `function` otherwise.
     // s451 (U1a): `server` = written with the DEPRECATED `server` modifier
     // (§12.2 Trigger 4, §52.10 — analyze warns W-DEPRECATED-SERVER-MODIFIER);
-    // `failable` = declared `!` (§19.4.1 — refused until Ue, the error model,
-    // but recorded: a `?{}` inside it is not "outside a `!` function", §19.8.3).
+    // `failable` = declared `!` (§19.4.1); `err` (s451 Ue) = the error type
+    // written after it (`! E` / `! -> E`), `not` for a bare `!` (the built-in
+    // `Error`, §19.4.2). A failable function has no success-type slot (§19.4.1),
+    // so its `ret` is `not`.
     export type AFn:struct = {
         nid: int, span: ASpan, exported: boolean, pure: boolean,
         name: string, params: AParam[], ret: AType | not, body: ABlock,
-        server: boolean, failable: boolean,
+        server: boolean, failable: boolean, err: AType | not,
     }
     export type AImportName:struct = { nid: int, span: ASpan, name: string }
     export type AImport:struct = { nid: int, span: ASpan, names: AImportName[], from: string }

@@ -29,6 +29,14 @@ afterEach(() => expectNoPageErrors());
 
 const run = (src) => frontEnd(mods, [{ path: "t.scrml", src }]);
 const diagsOf = (src) => run(src).diags;
+
+// s451 (Ue, review HIGH-2): a function named without a call is refused (Core has no
+// function value — it was lowered as `null`). The tests below pin what the no-write
+// rule says about such a value; they first check the refusal is there, then read the rest.
+const fnValueRefused = (ds) => {
+  expect(ds.some((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED" && d.message.includes("names a function without calling it"))).toBe(true);
+  return ds.filter((d) => !(d.code === "E-BOOTSTRAP-UNSUPPORTED" && d.message.includes("names a function without calling it")));
+};
 const codes = (src) => diagsOf(src).map((d) => d.code);
 const clean = (src) => {
   const r = run(src);
@@ -114,7 +122,7 @@ describe("S449 item 3 — the write summary, as the effect rule uses it", () => 
 
   test("an unresolvable call reached from a render position fails closed — " + UNPROVEN, () => {
     const via = `    function viaLocal() -> int {\n        const k = h\n        return k(1)\n    }`;
-    const ds = diagsOf(P(with_(via), `        <p>\${viaLocal()}</p>`));
+    const ds = fnValueRefused(diagsOf(P(with_(via), `        <p>\${viaLocal()}</p>`)));
     expect(ds.map((d) => d.code)).toEqual([UNPROVEN]);
     expect(ds[0].message).toContain("through `viaLocal()`");
     expect(ds[0].message).toContain("fails closed");
