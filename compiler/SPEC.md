@@ -17472,7 +17472,7 @@ function loadItem(id: string)! LoadError { … }        // success type: Item
 function itemOrPlaceholder(id: string) {
     const item = loadItem(id) !{
         | .NotFound(mid) :> placeholderItem(mid)       // yields a value
-        | .Timeout       :> { @phase = .TimedOut; return }   // leaves
+        | .Timeout       :> { @phase = .TimedOut; return placeholderItem(id) }   // leaves
     }
     return item
 }
