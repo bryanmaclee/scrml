@@ -1,6 +1,47 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-10-03T11:38:07-06:00  commit: 47c863556
+# updated: 2026-10-04T08:42:07-06:00  commit: d3e660a08
+# ⛑ **S451 STAMP — `47c863556` -> `d3e660a08`. 17 COMMITS (#1252 S449 wrap, #1253-#1268 S451), incremental refresh.
+# Checkout `wrap/s451` @ `d3e660a08` + uncommitted wrap docs (changelog / known-gaps / pr-reviews / hand-off / delta-log —
+# NOT mapped). `origin/main` is ONE ahead at `2a614009b` (#1269, SPEC-only `| _ err :>` whole-error binder) — NOT in this
+# stamp. #1270 (`scripts/s34-catalog.ts`) and the bootstrap severity branch are UNLANDED — NOT mapped.** MAP-STAMP RULE:
+# `git log --oneline 47c863556..HEAD` -> 17; `bun scripts/state.ts --check` at pass start: `maps: 17 commits behind HEAD
+# (watermark 47c863556, HEAD d3e660a08)` — matches exactly.
+# Source-relevant in THIS window, grep-verified at `d3e660a08`:
+#   impl#1 (`compiler/src`, 223 files):
+#   #1264 — §8.1.1 nearest database scope (security): `db-ownership.ts` NEW `resolveDbScopes` :215 / `dbHandlesWithin`
+#     :274 / `dbScopeValueOf` :162 + `DbHandle`/`DbSite`/`DbScopeResolution` :126-155; NEW `codegen/sql-handle-name.ts`
+#     (85 lines: `DEFAULT_SQL_HANDLE`, `UNRESOLVED_SQL_HANDLE`, `SQL_HANDLE_PATTERN`, `sqlHandleRegExp`, `sqlHandleAt`,
+#     `compareSqlHandles`, `setFileSqlFallback`, `fallbackSqlHandle`); `emit-server.ts` `dbScopeResolutionFor` :834, one
+#     handle per database (`_scrml_sql`, `_scrml_sql_<n>`), E-SQL-011 :1828 (one fn, two databases) + :6652 (`watches=`
+#     channels in two scopes), E-INTERNAL-DB-HANDLE-UNRESOLVED :7059 / `emit-tool.ts:222`; `db-authoritative.ts`
+#     `wrapPrincipalTxn(src, handles?)` — tenant floor on EVERY handle (was `_scrml_sql` only).
+#   #1258 — §12.4 route inference ignores string-literal / template-text / comment contents: `expression-parser.ts`
+#     `blankLiteralTextInSource` :3689, `emitCodeOnlyStringFromTree` :3763; `route-inference.ts` `codeOnlyTextForTrigger` :926.
+#   #1256 — NEW `scrml fix` verb: `commands/fix.js` (253 lines; `runFix`, `runFixCommand`, `parseFixArgs`, `classifyEntry`,
+#     `resolveProject`, `lineDiff`) + `commands/fix-s66.js` (1684 lines; `fixS66`, `IMPL1_SAFE_RULES` = pre-migrate /
+#     program-wrap / program-move / unwrap-logic, `S66_DECL_RULES` = rhs-decl / const-cell / engine-simple); `cli.js`
+#     dispatch. CLI verbs now **12**. Bootstrap counter grades legacy cases on generated §66 twins (`--no-twins` = old).
+#   bootstrap (`compiler/self-host-v2/`, impl#2 — NOT impl#1): #1254 if/else-if/else chains (E-CTRL-001..005), #1255 defer
+#     + no artifact on error, #1257 `<program>` attrs checked/refused, #1260 `persist=` (E-PERSIST-*, E-HOLD-/E-PREPAINT-
+#     WITHOUT-PERSIST; runtime `persisted` `slice-m1/runtime/runtime.js:1665`), #1261 `show=` + repeated/case-variant
+#     attrs refused, #1263 U1a NEW `sql.scrml` (577 lines; `sqlFacts(chunks) -> SqlFacts`, fail-closed SELECT-vs-write
+#     scan), #1265 error model — ONE `Stmt.Attempt` (core.scrml:369) for `!{}` / `match` / `?` / `?{}`.
+#   SPEC-only: #1253 (U1 R1-R11), #1259 (OPEN items), #1262 (`show=` no-narrow; nearest db scope), #1266 (E-ERROR-012/013,
+#     E-SQL-011), #1267 (lone direct-child `<db src>` supplies the program db), #1268 (§19.9.10 client server-calls
+#     failable; E-ERROR-014/015, E-MATCH-BARE-BINDER). New SPEC headings: §13.7, §19.8.3, §19.9.9.7, §19.9.10, §52.6.8,
+#     §57.5, §57.8. All new language codes are **Nominal on impl#1**; bootstrap emits none of E-ERROR-012..015 /
+#     E-MATCH-BARE-BINDER / E-SERVER-CELL-RESERVED-NAME yet.
+# ⛑ FIGURES RE-EXECUTED AT `d3e660a08`: `facts.ts --check` PASS · `compiler/src` **286,896 lines / 223 files** (+2,579,
+# +3 = `sql-handle-name.ts`, `commands/fix.js`, `commands/fix-s66.js`) · test files **1,578** (+4, FACTS def.) ·
+# `compiler/SPEC.md` **45,229** lines (+1,062; `regen-spec-index.ts --check` OK 72/72) · conformance **1300** cases (+12);
+# `bun conformance/run.ts` -> **1250 pass + 50 xfail, 0 fail** · `docs/known-gaps.md` (committed) open **HIGH 240** ·
+# **MED 496** · **LOW 251** · Nominal 8; heading/marker drift 61 (unchanged) · slice-m2 **462/0**, slice-m4 **1002/0**
+# (+451; 10 new test files) · bootstrap counter (live, with twins) PASS **95** · FAIL **65** · LEGACY 0 · UNSUPPORTED
+# **629** of 1300 — ⚠ committed `docs/bootstrap-conformance.md` STALE again (89/52/648; `--check` says STALE).
+# NOT MAPPED: in-flight / unlanded work. `file:line` cites in S451 sections are grep-derived at `d3e660a08`.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S449-WRAP HEADER (stamp `47c863556`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
 # ⛑ **S449-WRAP STAMP — `9bafb927` -> `47c863556`. 7 COMMITS (#1245 S450-peter wrap incl. the `9bafb927` map refresh,
 # #1246 state regen, #1247 bootstrap conformance counter, #1248 dpa-queue, #1249 §66 opener keywords, #1250 bootstrap §55
 # validity surface + submit gate, #1251 transaction guard), incremental refresh. Main checkout `wrap/s449` == `origin/main`
@@ -1177,6 +1218,48 @@ THIS one and exited 0 again. Nothing in the toolchain fails on stale maps.
 #
 # Per-window landing narratives stay DELETED (S302 ruling). **History lives in `docs/changelog.md` +
 # `handOffs/delta-log.md`.** What earns space here is rules a grep cannot find.
+
+## S451 — READ FIRST (facts at `d3e660a08`; supersedes the S449-wrap block below where it conflicts)
+
+**Window:** `47c863556 → d3e660a08`, 17 commits — #1252 S449 wrap; impl#1 #1256 (`scrml fix`), #1258 (route-inference
+literal blanking), #1264 (§8.1.1 nearest db scope + tenant floor on every handle); bootstrap #1254/#1255/#1257/#1260/
+#1261/#1263/#1265; SPEC-only #1253/#1259/#1262/#1266/#1267/#1268. `origin/main` +1 (#1269 SPEC-only) not in stamp.
+
+**ONE HANDLE PER DATABASE (#1264).** Use `codegen/sql-handle-name.ts` for every handle-name test — never a bare
+`_scrml_sql` regex. `resolveDbScopes` (`db-ownership.ts:215`) is the source of truth for which database a `?{}` runs on.
+Multi-database file + unknown handle = `E-INTERNAL-DB-HANDLE-UNRESOLVED` (never a silent first-database fallback).
+
+**`scrml fix` EXISTS (#1256).** Default rules keep files impl#1-compilable and are verified per file; `--s66` previews the
+§66 declaration rules (impl#1 cannot compile the output). The bootstrap counter uses `fix-s66.js` to grade legacy cases on twins.
+
+**SPEC RAN AHEAD AGAIN.** The S451 error-model rulings (E-ERROR-012..015, E-MATCH-BARE-BINDER, §19.9.10, §52.6.8) are
+Nominal on impl#1 AND not yet in the bootstrap. Do not write tests expecting them from either implementation.
+
+**Size, updated:** `compiler/src` **286,896 lines / 223 files**. Test files **1,578**. `compiler/SPEC.md` **45,229**.
+Conformance **1300**: **1250 pass + 50 xfail, 0 fail**. Gaps open HIGH 240 · MED 496 · LOW 251 · Nominal 8 (committed).
+Bootstrap counter (live) PASS 95 / FAIL 65 / UNSUPPORTED 629 of 1300; slice-m4 1002/0.
+
+## Map Index (counts refreshed at `d3e660a08`)
+| Map                  | Status  | Contents                          |
+|----------------------|---------|-----------------------------------|
+| structure.map.md     | present | +`sql-handle-name.ts`, +`commands/fix{,-s66}.js`, +`self-host-v2/sql.scrml`, +`conformance/cases/persist/`; 223 src files |
+| dependencies.map.md  | present | 0 npm changes; 9 codegen files -> sql-handle-name; cli -> fix -> fix-s66; counter -> fix-s66 |
+| schema.map.md        | present | `DbHandle`/`DbSite`/`DbScopeResolution`; handle-name API; bootstrap Attempt/Failable/Sql*/Persist shapes |
+| config.map.md        | present | 0 env vars; `scrml fix` flags; counter `--no-twins`; `dialect.s66` |
+| build.map.md         | present | 0 CI changes; `scrml fix`; per-database handle emit shape |
+| error.map.md         | present | impl#1 +E-SQL-011 (2 sites), +E-INTERNAL-DB-HANDLE-UNRESOLVED; 7 SPEC-only codes; ~60 bootstrap codes |
+| test.map.md          | present | 1,578 test files; conformance 1300 (1250 + 50 xfail); slice-m4 1002/0 |
+| auth.map.md          | present | tenant floor on every handle; literal-blind route inference |
+| domain.map.md        | present | §8.1.1 nearest scope enforced; S451 error-model rulings (mostly Nominal) |
+| infra.map.md         | present | per-database handles |
+| migrations.map.md    | present | zero-diff (ownership follows scope) |
+
+## Key Facts (S451 additions)
+- Which database a `?{}` hits = its nearest `<program db=>` / `<db src=>` ancestor; a server function must stay on one.
+- Any pass that scans emitted text for SQL handles must use `sqlHandleRegExp()` / `sqlHandleAt()` (`sql-handle-name.ts`).
+- Route inference reads code-only text: names inside strings/templates/comments never trigger server placement.
+- `scrml fix` is the §63.4 migration verb; `--check` exits 1 (would change) / 2 (reported construct untouched) / 0.
+- Bootstrap error handling = one `Stmt.Attempt`; SQL facts read once in `sql.scrml` (unknown = write, fail closed).
 
 ## S449-WRAP — READ FIRST (facts at `47c863556`; supersedes the S450 block below where it conflicts)
 

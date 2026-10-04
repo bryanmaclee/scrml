@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 240 | 6 |
-| MED | 497 | 4 |
-| LOW | 251 | 0 |
+| MED | 500 | 4 |
+| LOW | 256 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22763,3 +22763,37 @@ Governing: SPEC §19.4.3 "A `!{}` attached to nothing is an error" (S451 "your r
 ### g-impl1-manual-tx-outside-failable-s451 — impl#1 DIVERGENCE (filed, not fixed): manual transaction control (`?{BEGIN}` / `?{COMMIT}` / `?{ROLLBACK}` …) in a function not declared `!` compiles — E-ERROR-015 is not emitted, and W-BATCH-001 still fires there — `NEW S451; MED; open`
 <!-- @gap id=g-impl1-manual-tx-outside-failable-s451 sev=MED status=open locus=compiler/src/batch-planner.ts(W-BATCH-001 keys on an explicit BEGIN in any `isServer` handler, `!` or not; no check refuses transaction control outside a `!` function) prov=ruling:user-voice-scrml.md-S451-"your-recs-on-all-of-them"-item-2c -->
 Governing: SPEC §19.10.4 "Manual transaction control outside a `!` function is an error" + §19.10.5 / §8.9.2 / §8.6 (S451 "your recs on all of them" item 2(c)). Measured on `dbb671c2d`: `function plain() { ?{BEGIN}  ?{UPDATE …}.run()  ?{COMMIT} }` → no E-ERROR-015; `conformance/cases/sql/batch-warn-info` (a non-`!` `server function loadPair` with `?{BEGIN}` … `?{COMMIT}`) → W-BATCH-001. MED: a failure between the `BEGIN` and the `COMMIT` has no failure path to the caller, and the cross-database check (E-SQL-011) does not cover a non-`!` function. Corpus: 2 statements in `conformance/cases/sql/batch-warn-info` (its W-BATCH-001 pin becomes an E-ERROR-015 pin, or the function gains `!`); the other 2 manual-transaction statements in the corpus (`conformance/cases/error/implicit-tx-explicit-begin`) sit in a `!` function and stay valid with W-BATCH-001.
+
+## §S451-wrap — follow-ups found by this session's S239 reviews (2026-10-04; each a reviewer finding the PA chose to file rather than fix in the reviewed PR)
+
+### g-bootstrap-s34-rows-owed-s451 — 69 codes the bootstrap emits have no usable §34 row (31 E-PARSE-*, E-BOOTSTRAP-*, the §66.20 codes, E-DECL-STATE-CHILD / E-TYPE-VARIANT, E-ENGINE-INVALID-TRANSITION "Runtime") — treated as Error by `severityOf`
+<!-- @gap id=g-bootstrap-s34-rows-owed-s451 sev=LOW status=open locus=compiler/self-host-v2/severity.scrml(generated header lists them)+compiler/SPEC.md(§34) prov=review:S451-#1270 -->
+§66.20 says its rows "land WITH the implementation" — the bootstrap is that implementation. Adding a row is docs-only (severity.test.js checks semantics only since #1270).
+
+### g-impl1-server-lift-db-src-dropped-s451 — impl#1's server emitter silently drops a `lift <db src>` inside a function body (`return null; /* server-lift: non-expr form */`)
+<!-- @gap id=g-impl1-server-lift-db-src-dropped-s451 sev=MED status=open locus=compiler/src/codegen/emit-server.ts(server-lift non-expr form) prov=review:S451-#1264 -->
+Found while trying to reach E-SQL-011 from source. Silent drop of authored content (impl#1 frozen — filed).
+
+### g-impl1-db-handle-nits-s451 — three non-security follow-ups from the nearest-database fix (#1264)
+<!-- @gap id=g-impl1-db-handle-nits-s451 sev=LOW status=open locus=compiler/src/codegen/sql-handle-name.ts(module-level `_fileFallback`)+compiler/src/codegen/emit-server.ts(principal wrap applied to every declared handle)+compiler/src/codegen/index.ts:1833+compiler/src/codegen/emit-channel.ts:1000 prov=review:S451-#1264 -->
+(1) the fallback handle is module-level state — a direct emitter call inherits the last file's value (thread it on CompileContext or reset at the end of runCG); (2) the db-authoritative Postgres wrap applies to every handle, so a sibling SQLite `<db>` gets `set_config`/`SET LOCAL ROLE` it rejects (pre-existing — main was worse); restrict to Postgres handles holding authoritative tables; (3) two remaining silent `"_scrml_sql"` defaults (not security paths).
+
+### g-ri-trigger2-d2c-unblanked-s451 — impl#1 route inference Trigger-2 field scans and D2c namespace detection still read string/comment text (over-eager, not fail-open)
+<!-- @gap id=g-ri-trigger2-d2c-unblanked-s451 sev=LOW status=open locus=compiler/src/route-inference.ts(detectImportedServerNamespaceRef/matchesNamespaceRef; bareExprAccessesField/declDestructuresField) prov=review:S451-#1258 -->
+`codeOnlyTextForTrigger` (#1258) is a drop-in for both. §12.4 forbids classifying on string-literal contents.
+
+### g-bootstrap-attr-namespaced-and-case-s451 — bootstrap attribute follow-ups from #1261
+<!-- @gap id=g-bootstrap-attr-namespaced-and-case-s451 sev=LOW status=open locus=compiler/self-host-v2/parse.scrml(repeatedAttrDiags; `name:type` opener read)+compiler/self-host-v2/analyze.scrml(isControlAttrName) prov=review:S451-#1261 -->
+(1) `xlink:href` / `xml:lang` fail in the parser (`name:type` read as a typed declaration) — fails closed but a real SVG gap; (2) case-folding of `x:y` names should fold only the prefix (`class:Active` vs `class:active` are different class names) — masked today by the `class:` slice refusal; (3) `onclick=${f}` mis-parses (E-PARSE-TRAILING + E-SCOPE-001) instead of a clean refusal; (4) a quoted `\${` escape is refused (fail-closed; SPEC names no escape for quoted values).
+
+### g-bootstrap-function-values-slice-s451 — a function used as a VALUE is refused (E-BOOTSTRAP-UNSUPPORTED "function values") since #1265; handler references with parameters refused
+<!-- @gap id=g-bootstrap-function-values-slice-s451 sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(non-call function reference refusal)+compiler/self-host-v2/lower.scrml prov=review:S451-#1265 -->
+Before #1265 these lowered to `null` silently. §5.2.2 makes `onclick=f` with `f(e)` legal (the event is passed). 3 conformance cases hold a function value. A real "function values" slice is owed.
+
+### g-bootstrap-twin-log-unknown-s451 — `log` is not in the bootstrap, so error-handler twins that call it carry an unasserted E-SCOPE-001 (e.g. error/handler-non-exhaustive)
+<!-- @gap id=g-bootstrap-twin-log-unknown-s451 sev=LOW status=open locus=searched:compiler/self-host-v2/analyze.scrml(no stdlib binding) prov=review:S451-#1270 -->
+Also: §19.8.3's own worked example calls `log(...)` — check it is a real scrml name.
+
+### g-bootstrap-sql-kind-known-limits-s451 — text classification cannot prove a query read-only (Postgres `t.f` attribute notation, overload resolution through a built-in name — CVE-2018-1058 class, user casts/domains/operators, views/RLS, SQLite driver-registered overrides)
+<!-- @gap id=g-bootstrap-sql-kind-known-limits-s451 sev=MED status=open locus=compiler/self-host-v2/sql.scrml(header KNOWN LIMITS) prov=review:S451-#1263 -->
+Binding requirement recorded in the U1 design addendum §12 (scrml-support): any query parallelized or cached because it classifies Select SHALL run in a read-only transaction. Owned by U3 / `<request cache>`.

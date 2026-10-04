@@ -2,6 +2,33 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S451 — 2026-10-03/04 (bryan · ASUS; solo) — the U1 rulings in the SPEC, the error model in the bootstrap, a wrong-database bug closed in impl#1
+
+**Rulings (user-voice §S451).** All eleven U1 server-boundary rulings: a value position that would have to wait is
+`E-VALUE-SERVER-CALL` (R1); server calls parallelize only when provably read-only (R4); a batch reads its own writes (R7);
+**`?{}` is failable everywhere** (R11 = (b), not the PA's minimum rec); plus R2/R3/R5/R6/R8/R9/R10. The contradictions that
+left: R1 wins over `<errorBoundary>` (server data enters markup through `<request>` + `.error`); §52 hydration loads exempt but
+never silent (`@x.error`); §57.5 yields to R10; **§2.2.1 — any error, no runnable artifact**. `show=` does not narrow.
+**A `?{}` runs on its nearest database scope**; a lone direct-child `<db src>` supplies its program. Error model: value-position
+arms yield or leave (E-ERROR-012); `!{}` on a non-failable is an error (E-ERROR-013); no cross-database transaction envelope
+(E-SQL-011); **client calls to server functions are failable** (§19.9.10); `| _ err :>` binds the whole error.
+
+**impl#1 security fix.** impl#1 used one database handle per file, so a query could silently run against a different database
+than its scope (#1264). Bryan ruled it security-class. The S239 review then found the db-authoritative tenant floor skipped on
+every non-default handle — protection inverted next to a sibling `<db src>` — fixed before landing.
+
+**Bootstrap.** else-if/else chains; `defer` + no artifact on errors; `persist=`; `<program>` attributes checked or refused;
+`show=`; repeated and case-variant attributes refused; **U1a (SQL + placement, fail-closed query classification)**; **Ue (the
+error model — one `Attempt` node for `!{}` / `match` / `?` / `?{}`)**; function values no longer silently lower to `null`.
+Counter 34 → 95 PASS on main (119 with #1270).
+
+- #1253 SPEC U1 rulings R1–R11 + `scrml fix` forks a/c · #1259 SPEC open items · #1262 SPEC `show=` / nearest db · #1266 SPEC E-ERROR-012/013, E-SQL-011 · #1267 SPEC 11a · #1268 SPEC client calls failable
+- #1256 `scrml fix` — impl#1-safe codemod CLI + `--s66` (six S239 rounds; rebuilt on impl#1's own AST/resolver after three text-scanner fail-opens)
+- #1258 impl#1 route inference ignores string/template/comment contents (§12.4) · #1264 impl#1 nearest database scope (security)
+- #1254 else-chains · #1255 defer + gate · #1257 `<program>` shape · #1260 persist= · #1261 show= · #1263 U1a · #1265 Ue
+- At wrap, on auto-merge: #1269 SPEC `| _ err :>` · #1270 bootstrap §34 severity (counter 95 → 119)
+- Gate: cloud `gate` green on every landing; review floor 0 owed.
+
 ## S449 — 2026-10-02/03 (bryan · ASUS; booted solo, ran autonomous while bryan was out)
 
 **Rulings (user-voice §S449).** Eight-question queue, "your recs.": `@session` in a server context = compile error (interim);

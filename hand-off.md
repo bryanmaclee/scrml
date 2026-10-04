@@ -1,3 +1,99 @@
+# scrml — Session 451 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Solo session. **Rulings authority:**
+> `scrml-support/user-voice-scrml.md` §S451 (~12 entries). Board: `S451-bryan.md`. Changelog: `docs/changelog.md` §S451.
+> Mechanical state: delta-log `[3660]`–`[3681]`; review ledger `docs/pr-reviews.md` (0 owed); gaps `§S451-wrap` + the
+> `*-s451` impl#1 divergence entries.
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 0. Check first
+- **#1269** (SPEC `| _ err :>`) MERGED at wrap. **#1270** (bootstrap §34 severity, counter 95 → 119) was on auto-merge at wrap — confirm
+  it merged (`gh pr list`). If #1270 went red, read the log: it touches scripts/s34-catalog.ts + the bootstrap Diag type.
+- **Nothing is waiting on bryan.** Every question surfaced this session was ruled. Standing veto-window readings are listed in
+  each SPEC PR body (#1266 #1267 #1268 #1269) — silence = accepted.
+
+### 1. Bootstrap — the rulings round (dispatch once #1270 is on main; it touches every diagnostic site)
+Implement this session's error-model rulings in compiler/self-host-v2/: **E-ERROR-012** (a value-position arm must yield or
+leave — today refused as "Ue2"), **E-ERROR-013** (`!{}` on a non-failable — today refused), **E-ERROR-014** (free-standing
+markup `!{}`), **E-ERROR-015** (raw transaction SQL outside a `!` function), **E-MATCH-BARE-BINDER**, the **`| _ err :>`**
+whole-error binder (§18.6.1), **E-SQL-011** (no envelope spanning two databases — needs U1e), **`<db src>`** resolution per
+§8.1.1 incl. 11a (a lone direct-child `<db src>` supplies its program — U1a refuses `<db src>` today). Pattern: the Ue landing
+(#1265, `docs/changes/s451-boot-ue/DESIGN.md`).
+
+### 2. Bootstrap — U1b design pass (client side: ServerCall + Suspend)
+Design: `scrml-support/docs/deep-dives/bootstrap-u1-server-boundary-design-2026-10-03.md` §8 U1b row — BUT it predates
+**§19.9.10 (client calls to server functions are failable, S451)**: U1b must design the failure TYPE (transport failure,
+non-2xx other than the declared error, §57 decode failure; `CpsError` the starting point; composition with a declared `! E`;
+`?` through E-ERROR-010). Readings already in SPEC: a `!` caller writes `?` explicitly. **Binding on U3 (design addendum §12):**
+anything parallelized or cached as a read runs in a read-only transaction. Then U1c (server artifact; printer must escape
+backticks/`${` in SQL chunks — `docs/changes/s451-boot-u1a/progress.md`), U1d, U1e.
+
+### 2b. SPEC fix-ups from the wrap maps refresh (`.claude/maps/non-compliance.report.md`, stamp d3e660a08)
+- N-S451-2: §8.1.1 still describes `g-impl1-db-resolution-not-nearest-s451` as a live divergence — #1264 resolved it; the three
+  E-SQL-004 rows cite `emit-server.ts:7000` (stale) — real emitters `emit-server.ts` ~1872/~7152, `emit-tool.ts` ~755.
+- N-S451-3: `E-INTERNAL-DB-HANDLE-UNRESOLVED` (#1264) has no §34 row; two E-SQL-004 messages keep the pre-S451 "no `db=` in any
+  ancestor `<program>`" wording. §19.9.10 says "the bootstrap builds it" — true only after U1b. `E-PARSE-ARM` /
+  `E-PARSE-SQL-CHAIN` have no §34 rows (part of `g-bootstrap-s34-rows-owed-s451`).
+
+### 3. Migrations owed (measured, not started)
+- R11 (`?{}` failable): 598 sites / 272 files (+≤133 unseen) — rec: a `scrml fix` rule writing the old silence out
+  (`?{…}.get() !{ | _ :> not }`). ⚑ Not yet built.
+- §19.9.10 client calls failable: **337 sites / 231 files**.
+- E-ERROR-012 fall-through arms: 19 arms / 13 conformance files. Bare binder: examples/09 → `| _ err :>`; examples/16, /29 → `| _ :>`.
+- E-SQL-004 enforce: 10 conformance cases ("logic above `<program>`") — `scrml fix` program-move covers them.
+- These are corpus / conformance migrations; the bootstrap counter's test-time twins absorb part of them.
+
+### 4. impl#1 (frozen: security + bootstrap-serving only)
+Filed, not fixed: the `*-s451` divergence gaps (value-server-call, cps batch marshal HIGH, unhandled `?{}`, route-002 cell chain,
+manual BEGIN, payload wire shape, dual decoder, show narrows, value-position fall-through, handler on non-failable,
+cross-database envelope, unscoped single-db, db-src supply, client server call not failable, whole-error binder — impl#1
+silently DROPS a `_ name :>` arm in `match`). HIGH carried: `g-impl1-request-fail-envelope-lands-in-cell-s451` (a server `fail`
+inside `<request>` lands in the cell as data). Peter messaged at wrap (scrml `inbox` branch).
+
+## 🔭 DURABLE
+**Three review rounds on the same class = the root is the instrument, not the positions.** `scrml fix` failed review three
+times on "who writes this cell / what does this file import" because it answered with its own text scanners; each fix patched
+positions and each review found new ones. Round 4 deleted the scanners and asked impl#1's own front end, resolver and AST — and
+held (one remaining finding was a deliberate exclusion, not a scanner gap). Rule 7 at the tool level.
+
+**Text classification cannot prove a database query read-only; the runtime must enforce it.** Three review rounds hardened
+U1a's SELECT/Write scan; the third reviewer showed why it can never be complete (Postgres overload resolution through a
+built-in name, views, user casts). The answer was not a fourth round but a binding requirement: a read that is parallelized or
+cached runs in a read-only transaction. Static analysis decides what MAY be treated as a read; the database enforces that it IS.
+
+**A fix that adds handles must audit every place that names the old one.** The nearest-database fix introduced
+`_scrml_sql_<n>`; the tenant floor matched only `_scrml_sql` and silently skipped the new handles — protection inverted. The
+fix was one shared handle-name list and turning every silent default into a compile error when more than one database exists.
+
+## ⚑ MISSES (mine)
+1. ★★ Relayed a premise into a ruling: told bryan all 11 E-SQL-004 cases were legacy "logic above `<program>`" (from the agent's
+   one-line list, unchecked). One (`protect/channel-broadcast-strip`) was a real pattern; bryan had ruled "enforce" on it. The
+   SPEC agent caught it; re-ruled 11a. Should have opened all 11 before recommending.
+2. ★ Recommended the single-db carve-out on corpus cost alone (the corpus-is-artifact mistake); bryan's "what is the use case?"
+   exposed it.
+3. ★ Briefed "warnings block builds" as fact for the severity work; the agent measured it false.
+4. ★ My brief for 11a invented "two direct-child `<db src>` = error" — not in the ruling, and it contradicted #1262; caught at the
+   agent's report, reversed.
+5. ★ A census-identity probe compared against an archive missing `conformance/` + `compiler/src` (wrong referent) — re-ran on full
+   checkouts.
+6. ★ Nearly wrapped without messaging Peter about the impl#1 changes (#1258, #1264) and the rulings — sent at wrap (`origin/inbox` 2026-10-04-from-S451-bryan-to-peter-…).
+
+## Worktrees + /tmp (wrap 6b / 6b′)
+Removed at wrap: 30 S451/S449 worktrees whose work landed (8 `s451-rev-*`, `s449-rev-fix`, `land-1254`, 18 S451 agent trees,
+the S449 `scrml fix` tree, the superseded U0 tree `s447-u0-r3`) + their local branches. **Retained:** the #1270
+agent tree (`feat/s451-boot-diag-severity`) until it merges; ~30 older `agent-*` trees from
+earlier sessions (not audited this session) and `/tmp/claude-1000/…/3d8eae9f…/scratchpad/wrap` (a S441 `wrap/s441` checkout in
+the scratchpad — remove next session after confirming). /tmp probe (ASUS): **9,218** top-level `/tmp` entries since boot;
+**1,125,628** files under `/tmp/claude-1000` (S449: 1.77M) — bryan is clearing the residue by hand (the `find … -exec rm -rf {} +`
+commands are in the S451 transcript).
+
+## Gate at close
+Cloud `gate` green on every S451 landing (#1253–#1268). Local pre-commit runs on each agent branch. Review floor: 0 owed
+(`docs/pr-reviews.md`, S451 markers #1252–#1268). Bootstrap counter on main: PASS 95 (119 with #1270).
+
+---
+
 # scrml — Session 449 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Solo session (S446-peter / S447 / S448 wrapped;

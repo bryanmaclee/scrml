@@ -1,6 +1,47 @@
 # error.map.md
 # project: scrml
-# updated: 2026-10-03T11:38:07-06:00  commit: 47c863556
+# updated: 2026-10-04T08:42:07-06:00  commit: d3e660a08
+# ⛑ **S451 STAMP — `47c863556` -> `d3e660a08`. 17 COMMITS (#1252 S449 wrap, #1253-#1268 S451), incremental refresh.
+# Checkout `wrap/s451` @ `d3e660a08` + uncommitted wrap docs (changelog / known-gaps / pr-reviews / hand-off / delta-log —
+# NOT mapped). `origin/main` is ONE ahead at `2a614009b` (#1269, SPEC-only `| _ err :>` whole-error binder) — NOT in this
+# stamp. #1270 (`scripts/s34-catalog.ts`) and the bootstrap severity branch are UNLANDED — NOT mapped.** MAP-STAMP RULE:
+# `git log --oneline 47c863556..HEAD` -> 17; `bun scripts/state.ts --check` at pass start: `maps: 17 commits behind HEAD
+# (watermark 47c863556, HEAD d3e660a08)` — matches exactly.
+# Source-relevant in THIS window, grep-verified at `d3e660a08`:
+#   impl#1 (`compiler/src`, 223 files):
+#   #1264 — §8.1.1 nearest database scope (security): `db-ownership.ts` NEW `resolveDbScopes` :215 / `dbHandlesWithin`
+#     :274 / `dbScopeValueOf` :162 + `DbHandle`/`DbSite`/`DbScopeResolution` :126-155; NEW `codegen/sql-handle-name.ts`
+#     (85 lines: `DEFAULT_SQL_HANDLE`, `UNRESOLVED_SQL_HANDLE`, `SQL_HANDLE_PATTERN`, `sqlHandleRegExp`, `sqlHandleAt`,
+#     `compareSqlHandles`, `setFileSqlFallback`, `fallbackSqlHandle`); `emit-server.ts` `dbScopeResolutionFor` :834, one
+#     handle per database (`_scrml_sql`, `_scrml_sql_<n>`), E-SQL-011 :1828 (one fn, two databases) + :6652 (`watches=`
+#     channels in two scopes), E-INTERNAL-DB-HANDLE-UNRESOLVED :7059 / `emit-tool.ts:222`; `db-authoritative.ts`
+#     `wrapPrincipalTxn(src, handles?)` — tenant floor on EVERY handle (was `_scrml_sql` only).
+#   #1258 — §12.4 route inference ignores string-literal / template-text / comment contents: `expression-parser.ts`
+#     `blankLiteralTextInSource` :3689, `emitCodeOnlyStringFromTree` :3763; `route-inference.ts` `codeOnlyTextForTrigger` :926.
+#   #1256 — NEW `scrml fix` verb: `commands/fix.js` (253 lines; `runFix`, `runFixCommand`, `parseFixArgs`, `classifyEntry`,
+#     `resolveProject`, `lineDiff`) + `commands/fix-s66.js` (1684 lines; `fixS66`, `IMPL1_SAFE_RULES` = pre-migrate /
+#     program-wrap / program-move / unwrap-logic, `S66_DECL_RULES` = rhs-decl / const-cell / engine-simple); `cli.js`
+#     dispatch. CLI verbs now **12**. Bootstrap counter grades legacy cases on generated §66 twins (`--no-twins` = old).
+#   bootstrap (`compiler/self-host-v2/`, impl#2 — NOT impl#1): #1254 if/else-if/else chains (E-CTRL-001..005), #1255 defer
+#     + no artifact on error, #1257 `<program>` attrs checked/refused, #1260 `persist=` (E-PERSIST-*, E-HOLD-/E-PREPAINT-
+#     WITHOUT-PERSIST; runtime `persisted` `slice-m1/runtime/runtime.js:1665`), #1261 `show=` + repeated/case-variant
+#     attrs refused, #1263 U1a NEW `sql.scrml` (577 lines; `sqlFacts(chunks) -> SqlFacts`, fail-closed SELECT-vs-write
+#     scan), #1265 error model — ONE `Stmt.Attempt` (core.scrml:369) for `!{}` / `match` / `?` / `?{}`.
+#   SPEC-only: #1253 (U1 R1-R11), #1259 (OPEN items), #1262 (`show=` no-narrow; nearest db scope), #1266 (E-ERROR-012/013,
+#     E-SQL-011), #1267 (lone direct-child `<db src>` supplies the program db), #1268 (§19.9.10 client server-calls
+#     failable; E-ERROR-014/015, E-MATCH-BARE-BINDER). New SPEC headings: §13.7, §19.8.3, §19.9.9.7, §19.9.10, §52.6.8,
+#     §57.5, §57.8. All new language codes are **Nominal on impl#1**; bootstrap emits none of E-ERROR-012..015 /
+#     E-MATCH-BARE-BINDER / E-SERVER-CELL-RESERVED-NAME yet.
+# ⛑ FIGURES RE-EXECUTED AT `d3e660a08`: `facts.ts --check` PASS · `compiler/src` **286,896 lines / 223 files** (+2,579,
+# +3 = `sql-handle-name.ts`, `commands/fix.js`, `commands/fix-s66.js`) · test files **1,578** (+4, FACTS def.) ·
+# `compiler/SPEC.md` **45,229** lines (+1,062; `regen-spec-index.ts --check` OK 72/72) · conformance **1300** cases (+12);
+# `bun conformance/run.ts` -> **1250 pass + 50 xfail, 0 fail** · `docs/known-gaps.md` (committed) open **HIGH 240** ·
+# **MED 496** · **LOW 251** · Nominal 8; heading/marker drift 61 (unchanged) · slice-m2 **462/0**, slice-m4 **1002/0**
+# (+451; 10 new test files) · bootstrap counter (live, with twins) PASS **95** · FAIL **65** · LEGACY 0 · UNSUPPORTED
+# **629** of 1300 — ⚠ committed `docs/bootstrap-conformance.md` STALE again (89/52/648; `--check` says STALE).
+# NOT MAPPED: in-flight / unlanded work. `file:line` cites in S451 sections are grep-derived at `d3e660a08`.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S449-WRAP HEADER (stamp `47c863556`), CARRIED — STILL ACCURATE FOR ITS WINDOW. ━━━━━━━
 # ⛑ **S449-WRAP STAMP — `9bafb927` -> `47c863556`. 7 COMMITS (#1245 S450-peter wrap incl. the `9bafb927` map refresh,
 # #1246 state regen, #1247 bootstrap conformance counter, #1248 dpa-queue, #1249 §66 opener keywords, #1250 bootstrap §55
 # validity surface + submit gate, #1251 transaction guard), incremental refresh. Main checkout `wrap/s449` == `origin/main`
@@ -772,6 +813,33 @@
 # a spurious `E-ROUTE-001` on a `server fn` declared inside an `if=`/`else` branch of a `<program>`
 # worker body. Both descents landed in the same commit for that reason.
 #
+
+## S451 — DIAGNOSTIC DELTA (`47c863556..d3e660a08`)
+
+### impl#1 — newly emitted
+| code | emitted at | when |
+|---|---|---|
+| E-SQL-011 | `codegen/emit-server.ts:1828` | one server function's `?{}` sites resolve to two databases |
+| E-SQL-011 | `codegen/emit-server.ts:6652` | a file's `watches=` channels sit in two database scopes |
+| E-INTERNAL-DB-HANDLE-UNRESOLVED | `emit-server.ts:7059`, `emit-tool.ts:222` | lowering reached a `?{}` with no handle in a multi-database file (compiler defect, fail-closed) — **no §34 row** |
+| E-SQL-004 | `emit-server.ts:1872` (new nearest-scope message), `:7152`, `emit-tool.ts:755` | `?{}` with no database scope |
+
+### SPEC-only codes added (Nominal on impl#1; bootstrap does NOT emit them yet)
+E-ERROR-012 (`!{}`/`match` arm in value position must yield or leave), E-ERROR-013 (`!{}` on non-failable), E-ERROR-014
+(markup `!{}` attached to nothing), E-ERROR-015 (manual `?{BEGIN}`/… outside a `!` function), E-MATCH-BARE-BINDER,
+E-SERVER-CELL-RESERVED-NAME (§52.6.8 `error` name), E-SQL-011 language trigger (cross-database write in an envelope).
+E-VALUE-SERVER-CALL (§13.7) — bootstrap emits it (`analyze.scrml`); impl#1 Nominal.
+
+### Bootstrap (`self-host-v2/`) — codes new in-window
+E-CTRL-001..005 · E-DEFER-{AMBIGUOUS-LEAD, CONTROL-FLOW, LATER-SHADOW, NESTED, OUTSIDE-FUNCTION, UNHANDLED-FAILABLE,
+UNSUPPORTED-SITE} · E-ERROR-001/002/003/004/009/010/011 · E-PERSIST-{DRAFT-OVERWRITTEN, KEY-REQUIRED, LIN,
+STORAGE-UNKNOWN, WITH-SERVER} · E-HOLD-WITHOUT-PERSIST · E-PREPAINT-WITHOUT-PERSIST · E-PROGRAM-002 ·
+E-PROGRAM-NESTED-{ATTR, AUTH, SESSION} · W-PROGRAM-TITLE-NESTED · W-STORY-ON-TOP-LEVEL · E-CHANNEL-OUTSIDE-PROGRAM ·
+E-OUTLET-OUTSIDE-SHELL · E-FOREIGN-{CAPABILITY-UNKNOWN, LANG-IN-PROGRAM} · E-ATTR-{UNQUOTED-OPERATOR, WRITER-CONFLICT} ·
+W-ATTR-001 · E-ROUTE-001..005 · E-SQL-001/003/004/005/006/008 · E-TYPE-020/021/023/080/082 · E-VALUE-SERVER-CALL ·
+W-DEPRECATED-SERVER-MODIFIER · W-MATCH-ARROW-LEGACY · parse-only `E-PARSE-ARM`, `E-PARSE-SQL-CHAIN` (no §34 rows).
+Bootstrap error-model pattern: every handling form lowers to `Stmt.Attempt` (core.scrml:369); `check.scrml` C-E1 (a
+Failable only as an Attempt's call), C-E4 (a Fail only in its body). No artifact is written when any Error fires (#1255).
 
 ## S449-WRAP — DIAGNOSTIC DELTA (`9bafb927..47c863556`)
 
