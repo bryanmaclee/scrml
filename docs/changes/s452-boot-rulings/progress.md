@@ -23,3 +23,21 @@
   shared (parseArms) and `|` already optional in both forms; added the legacy paren-free binder (in `!{}` only,
   ruling-2 arity) — DESIGN.md §2. Tests converted to the canonical form + a legacy-equivalence block.
 - OUT OF SCOPE reminder: E-SQL-011 (cross-database envelope) needs U1e — untouched.
+- 2026-10-04T12:20 PHASE 3 verification.
+  (a) one reproducer per code through the bootstrap (front end), each fires and leaves NO Core: E-ERROR-012,
+      E-ERROR-013, E-ERROR-014, E-ERROR-015, E-MATCH-BARE-BINDER (bare / `else err` / `_ rest` on a non-failable
+      match — the last beside the §18 refusal), E-SQL-004 (two direct-child `<db src>`, none supplies).
+  (b) near-misses compile (and run where printable): statement-position fall-through, `_ :>`, `_ err :>` (runtime:
+      the bound value is `{ variant, data }` / the tag), a `<db src>` direct-child program (runtime: children render,
+      no connection string in the client artifact), the same with a query (Core; print refused — U1c).
+  (c) counter: PASS 119 → 119 · FAIL 41 → 48 · UNSUPPORTED 629 → 622 · NOT-TWINNED 511. No case left PASS.
+      UNSUPPORTED → FAIL (7): control-flow/s437-braceless-else-in-failable-arm (E-ERROR-012 now named — one of the
+      13 SPEC-listed fall-through files; + its pre-existing E-SCOPE-001); parse-variant/{error-invalid-payload,
+      error-malformed-json, error-missing-discriminator, error-unknown-variant, misuse-non-enum-type,
+      single-field-payload-bind} (the old "handler on parseVariant(…) cannot fail" refusal was WRONG — parseVariant
+      is a built-in failable, §41.13; what remains is the honest gap: the bootstrap has no `parseVariant`, E-SCOPE-001).
+      docs/bootstrap-conformance.md regenerated; `--check` current.
+  (d) `bun scripts/gen-bootstrap-severity.ts --check`: current (107 codes with a §34 severity, 69 without).
+  The 13 SPEC-listed fall-through files: 7 UNSUPPORTED (other refusals; E-ERROR-012 now fires in each), 3 FAIL
+  twin-extra-error E-SCOPE-001 (`log` — no stdlib, so the `log(m)` arm cannot be judged), 2 parse-variant UNSUPPORTED
+  (`<match>` / other refusals), 1 FAIL (s437, above). None migrated (brief).
