@@ -8576,9 +8576,12 @@ The content between backticks in `?{` \`...\` `}` is a **scrml SQL template**. I
 
 ### 8.1.1 Database Driver Resolution
 
-A `?{}` context resolves its database driver by walking up the `<program>` ancestor tree from
-the `?{}` block's position to find the closest `<program>` with a `db=` attribute. The
-connection string value of that `db=` attribute determines the driver.
+A `?{}` context resolves its database by walking up the ancestor tree from the `?{}` block's
+position to the closest **database scope**. Two elements are database scopes: a `<program>`
+with a `db=` attribute, and a `<db>` state block (its `src=` attribute). The NEAREST one
+wins, whichever of the two kinds it is. The connection string value of that scope's `db=` /
+`src=` determines the driver and names the database the `?{}` runs on. (`<db>`'s other
+attributes — `tables=`, `protect=` — are unchanged by this rule; §14.8, §52.)
 
 The codegen target is **Bun.SQL** for all SQL drivers (SPEC §44). MongoDB uses `^{}` meta
 contexts, not `?{}`. The driver-prefix table below is the source-language view; for the
@@ -8600,11 +8603,17 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
 
 **Normative statements:**
 
-- The compiler SHALL resolve the database driver for each `?{}` block by finding the closest
-  ancestor `<program>` element with a `db=` attribute. "Closest" means fewest nesting levels
-  up the `<program>` tree.
-- If no ancestor `<program>` has a `db=` attribute, the `?{}` block SHALL be a compile error
-  (E-SQL-004: `?{}` block has no `db=` declaration in any ancestor `<program>`).
+- The compiler SHALL resolve the database for each `?{}` block by finding its closest ancestor
+  **database scope** — a `<program>` element with a `db=` attribute, or a `<db src=>` state
+  block. "Closest" means fewest nesting levels up the element tree, counting both kinds; the
+  `?{}` runs on that scope's database and on no other. A `<db src=>` nested inside a
+  `<program db=>` therefore takes precedence for the `?{}` blocks inside it, and a `?{}` in
+  the same `<program db=>` but outside that `<db>` block runs on the `<program>`'s database.
+- If no ancestor is a database scope, the `?{}` block SHALL be a compile error (E-SQL-004:
+  `?{}` block has no `db=` / `<db src=>` declaration in any ancestor), except in a
+  module-with-db-context (§44.7.1), where the file's top-level `<db src=>` applies.
+
+> **Provenance:** ruling:user-voice-scrml.md S451 "your recs on both" (rec 2 — *"§8.1.1 — the NEAREST enclosing database scope wins: `<program db=>` and `<db src=>` are both database scopes; a `?{}` runs on the closest one above it (the existing normative 'closest ancestor' SHALL, extended to `<db src=>`). The Ownership bullet's 'that database … every `?{}` in a file runs on the file's default database — its first `<db src=>` in document order, else its first `<program db=>`' is amended to defer to this rule. Any impl#1 per-file-handle behaviour that differs is a filed divergence."*) · **supersedes:** the prose "walking up the `<program>` ancestor tree from the `?{}` block's position to find the closest `<program>` with a `db=` attribute"; the bullet "The compiler SHALL resolve the database driver for each `?{}` block by finding the closest ancestor `<program>` element with a `db=` attribute. 'Closest' means fewest nesting levels up the `<program>` tree."; and E-SQL-004's "no `db=` declaration in any ancestor `<program>`". These contradicted the Ownership bullet below (one default database per file); the ruling picks the nearest-scope reading. **Direction of change:** (a) **semantic** for a file with more than one database scope — which database a `?{}` runs on follows its position, not the file's first scope; no acceptance status moves for that shape; (b) **newly-accepting (SPEC text only)** for a `?{}` inside a `<db src=>` whose `<program>` has no `db=` — the old text made it E-SQL-004; impl#1 already compiled it (S451 probe), so no program's observed status moves. impl#1 binds every `?{}` in a file to one per-file handle (S451 probe: a `?{}` in an inner `<program db="./b.db">` inside `<program db="./a.db">` opens `a.db`; a `?{}` in `<program db="./a.db">` beside a `<db src="./b.db">` block opens `b.db`) — filed as `g-impl1-db-resolution-not-nearest-s451`.
 - The compiler SHALL parse the `db=` connection string prefix to determine the driver. An
   unrecognized prefix SHALL be a compile error (E-SQL-005: unrecognized database connection
   string prefix; valid prefixes are `sqlite:`, `postgres:`, `postgresql:`, `mysql:`,
@@ -8629,10 +8638,19 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
     string literal. A `TEMP` / `TEMPORARY` table does not count (it lives in the
     connection's temp schema, not the file). A table qualified to another attached schema
     (`other.t`) does not count; `main.t` does.
-  - *That database* for a `?{}` block is the database the block runs against: every `?{}` in
-    a file runs on the file's default database — its first `<db src=>` in document order,
-    else its first `<program db=>`. A `<schema>` block declares for its innermost enclosing
-    `<program db=>` or `<db src=>`, else for the file's default database.
+  - *That database* for a `?{}` block is the database the block runs against, as the
+    resolution rule above gives it: its nearest enclosing database scope (`<program db=>` or
+    `<db src=>`). A `<schema>` block declares for the database the same rule gives its
+    position — its nearest enclosing `<program db=>` or `<db src=>`; with neither, for the
+    module-with-db-context's top-level `<db src=>` (§44.7.1). A file can therefore own more
+    than one database, one per scope that declares schema.
+    **Provenance:** ruling:user-voice-scrml.md S451 "your recs on both" (rec 2) ·
+    **supersedes:** "every `?{}` in a file runs on the file's default database — its first
+    `<db src=>` in document order, else its first `<program db=>`. A `<schema>` block declares
+    for its innermost enclosing `<program db=>` or `<db src=>`, else for the file's default
+    database." · **Direction of change:** semantic (ownership follows the scope a `?{}` or
+    `<schema>` sits in, not the file's first scope); no acceptance status moves. impl#1
+    divergence: `g-impl1-db-resolution-not-nearest-s451`.
   - Ownership is decided at compile time, per declaring file and per database file.
 - **Creation.** Only an owning file's handle SHALL create a SQLite database file. An owning
   handle opens when its module loads. When it creates the file, it SHALL say so in one line
@@ -8663,9 +8681,10 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
 - The bound parameter security rule of §8.1 (E-SQL-001) applies regardless of driver.
   All `${}` interpolations inside `?{}` blocks SHALL be bound parameters, never string
   interpolation, across all drivers.
-- When a nested `<program>` with its own `db=` attribute is an ancestor, it SHALL take
-  precedence over any outer `<program>` `db=` attribute for `?{}` blocks inside the nested
-  `<program>`.
+- When a nested `<program>` with its own `db=` attribute, or a nested `<db src=>` block, is an
+  ancestor, it SHALL take precedence over any outer database scope for `?{}` blocks inside
+  it (the nearest-scope rule above; S451 rec 2 — supersedes "over any outer `<program>`
+  `db=` attribute for `?{}` blocks inside the nested `<program>`").
 
 **Worked Example — Valid (PostgreSQL driver):**
 
@@ -8990,7 +9009,7 @@ read/write distinction.
 | E-SQL-001 | Compiler emits string interpolation into a SQL string (compiler defect, not user error) **(Reserved / spec-ahead, S263 — no fire site: a compiler-DEFECT self-check, not a user-reachable error — the developer cannot write this in scrml source; defensive invariant guard. Excluded from the freeze fireable set.)** | Error |
 | E-SQL-002 | SQL template string (after `?N` substitution) is syntactically invalid SQL **(Reserved / spec-ahead, S263 — no fire site: no compile-time SQL parser exists — Bun.SQL validates at runtime, so the "validated at compile time" claim is aspirational/spec-ahead infra. Excluded from the freeze fireable set.)** | Error |
 | E-SQL-003 | SQL template content is a runtime expression, not a literal string template | Error |
-| E-SQL-004 | `?{}` block has no `db=` declaration in any ancestor `<program>` | Error |
+| E-SQL-004 | `?{}` block has no database scope (`<program db=>` or `<db src=>`) in any ancestor (§8.1.1, S451). Emitted at `compiler/src/codegen/emit-server.ts:7000` and `compiler/src/codegen/emit-tool.ts:746` (impl#1 checks per file — see `g-impl1-db-resolution-not-nearest-s451`). | Error |
 | E-SQL-005 | Unrecognized database connection string prefix in `db=` attribute | Error |
 | E-SQL-006 | `.prepare()` called on `?{}` result (removed — see §44.3) | Error |
 | E-SQL-007 | `?{}` in a non-async context (see §44.4) | Error |
@@ -14634,6 +14653,12 @@ The `show=` attribute is a visibility conditional.
 - When `expr` evaluates to false, the element is hidden. The compiler generates a CSS `display: none` toggle.
 - When `expr` evaluates to true, the element is visible.
 - `show=` is distinct from `if=`: `show=` hides, `if=` removes.
+- `show=` SHALL NOT narrow. Because the element and its children exist and are evaluated while
+  `expr` is false, a binding tested by `show=` keeps its un-narrowed type inside the element
+  (§42.3.5); a member access through a possibly-`not` binding there needs `?.` or an `if=`.
+  **Provenance:** ruling:user-voice-scrml.md S451 "your recs on both" (rec 1) · supersedes:
+  nothing in this section (it never claimed narrowing); added so §17.2 and §42.3.5 agree.
+  Direction of change: newly-rejecting (see §42.3.5).
 
 ### 17.3 Lifecycle of Bare Expressions
 
@@ -23432,7 +23457,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-RENDER-SHADOWED | §20.3a | A user-declared `function render` / `fn render` (or any in-scope binding named `render`) shadows the `render()` client component-render call built-in. The built-in steps aside; `render(...)` resolves to the user function (the §47 name-encoding + `fnNameMap` post-pass rewrite the call site to the encoded user-fn name, so def and call agree). Without the yield the hijack emitted `_scrml_render` directly — a name the word-boundary post-pass cannot repair — causing a def/call mismatch + runtime ReferenceError. Surfaces so the author knows the built-in is inactive for that name. `render` is NOT a reserved identifier (the hard-reserved client identifier is `reset`); this lint, not `E-RESERVED-IDENTIFIER`. Partitions into `result.warnings` (non-fatal). Mirrors `W-LOG-SHADOWED`. (Catalog addition ss16 C3; emitted at `compiler/src/type-system.ts` `checkRenderShadowing`.) | Info |
 | W-PRINT-SHADOWED | §20.7.5 | A user-declared `function print` / `fn println` (or any in-scope binding named `print` / `println`) shadows the clean-stdout `print()` / `println()` builtin (§20.7). The builtin steps aside; `print(...)` / `println(...)` resolves to the user function (the §47 name-encoding + `fnNameMap` post-pass rewrite the call site to the encoded user-fn name, so def and call agree — as for `render()`) and does NOT write host stdout. Surfaces so the author knows the builtin is inactive for that name. Name-precise: a `function print` shadows only `print`, leaving the `println` builtin active. `print` / `println` are NOT reserved identifiers (declaring `function print` is legal — this lint, not `E-RESERVED-IDENTIFIER`). Partitions into `result.warnings` (non-fatal). Reserved for promotion to `E-PRINT-SHADOWED` end-of-window once shadowing declarations migrate. Mirrors `W-LOG-SHADOWED`. (S241 — SPEC §20.7; emitted at `compiler/src/type-system.ts` `checkPrintShadowing`.) | Info |
 | W-RCDATA-BIND-VALUE-CONTENT-CONFLICT | §24 | A `<textarea>` (an RCDATA-content element) declares BOTH `bind:value=@cell` (two-way binding) AND reactive `${...}` content. These are two competing writers to the element's value; `bind:value` wins (the canonical two-way form, §5.4/§6.2) and the reactive content interpolation is dropped (NOT double-bound; no `<span data-scrml-logic>` leak into the RCDATA content). Surfaces so the author knows the content interp is inactive. Background: a reactive `${...}` in a `<textarea>`'s RCDATA content compiles to a reactive `.value` bind (not a placeholder span, which would render as literal text — 6nz-F4); when `bind:value` is also present the content bind is redundant. (S241 — 6nz-F4 RCDATA `.value`-bind carve-out; emitted at `compiler/src/codegen/emit-html.ts` as `CGError(…, "warning")`. S260 §34-vs-impl audit: severity corrected Info→Warning — the impl explicitly emits a warning, so no case could ever pin it as "info".) | Warning |
-| E-SQL-004 | §8.1.1 | `?{}` block has no `db=` declaration in any ancestor `<program>` | Error |
+| E-SQL-004 | §8.1.1 | `?{}` block has no database scope — no `<program db=>` and no `<db src=>` — in any ancestor, and the file is not a module-with-db-context (§44.7.1). The nearest scope of either kind resolves the `?{}` (S451 "your recs on both"). Emitted at `compiler/src/codegen/emit-server.ts:7000` and `compiler/src/codegen/emit-tool.ts:746` (impl#1 checks per file — see `g-impl1-db-resolution-not-nearest-s451`). | Error |
 | E-SQL-005 | §8.1.1 | Unrecognized database connection string prefix in `db=` attribute | Error |
 | E-SERVER-FN-IN-SYNC-CALLBACK | §13.2 | A **peer server-fn** call appears in a **server** function in a position where the compiler CANNOT insert `await` — a synchronous `.some`/`.sort`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a parameter default. scrml has no source `await` (§13.1), so the compiler auto-awaits peer calls in awaitable positions; a **bare** emission here returns an unawaited Promise, which is **always truthy** — the same accept-everything hazard the async-stdlib sibling below describes. **FAIL-CLOSED** — a hard compile error rather than a silent wrong answer (§49 no-silent-bad-output). Resolution: restructure so the call runs in the server function's async body (e.g. hoist it into a `for` loop). The peer-server-fn twin of `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`. (Catalog addition S305 — the code was LIVE at `compiler/src/codegen/emit-server.ts` and reachable from source [verified by execution], but carried no row: its sibling's row named it in prose while it had none of its own, so the freeze gate could neither pin nor honestly defer it. Closes `g-e-server-fn-in-sync-callback-uncatalogued`.) | Error |
 | E-ASYNC-STDLIB-IN-SYNC-CALLBACK | §13.2 | A Promise-returning stdlib call (`scrml:auth` `verifyPassword`/`hashPassword`, `scrml:crypto`, `scrml:redis`, `scrml:http`, …) appears in a **server** function in a position where the compiler CANNOT insert `await`: a synchronous `.some`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a parameter default (`await` is illegal in all three — a sync callback yields values, not Promises, and a default is evaluated eagerly). scrml has no source `await` (§13.1), so the compiler auto-awaits Promise-returning stdlib calls in awaitable positions (§13.2) — but a **bare** emission here returns an unawaited Promise, which is **always truthy**: `hashes.some(h => verifyPassword(pw, h))` accepts EVERY password (an accept-all auth bypass). **FAIL-CLOSED** — a hard compile error rather than a silent security leak (§49 no-silent-bad-output). Resolution: restructure so the call runs in the server function's async body — e.g. hoist it into a `for` loop (`for (const x of xs) { const r = verifyPassword(…); … }`). The async-stdlib sibling of the peer-server-fn `E-SERVER-FN-IN-SYNC-CALLBACK`. (Issue #26 Finding-2 — S239 adversarial review of the auth-bypass auto-await fix; emitted at `compiler/src/codegen/emit-server.ts`.) | Error |
@@ -28863,7 +28888,10 @@ A function that may return no value SHALL declare its return type as `T | not`. 
 
 - A member access whose receiver's static type admits `not` (a plain-optional `T | not` / `T?` receiver) SHALL be compile error **E-TYPE-046** UNLESS the access is made absence-safe by one of:
   1. **Optional chaining** the access itself — `recv?.field` / `recv?.[key]` / `recv?.method(...)` (§42.3.6) — which propagates `not`.
-  2. **Narrowing** `recv` from `T | not` to `T` in an enclosing scope, via any canonical presence-discrimination: the `if=` / `show=` markup guard (§42.4), `given recv :> { ... }` (§42.2.3), an `if (recv is not) return` / `is some` early-return, or a `match recv { not :> …  given recv :> … }` arm (§42.2.3). Inside the narrowed scope `recv` is `T` and bare `.field` access is safe.
+  2. **Narrowing** `recv` from `T | not` to `T` in an enclosing scope, via any canonical presence-discrimination: the `if=` markup guard (§42.4), `given recv :> { ... }` (§42.2.3), an `if (recv is not) return` / `is some` early-return, or a `match recv { not :> …  given recv :> … }` arm (§42.2.3). Inside the narrowed scope `recv` is `T` and bare `.field` access is safe.
+  - **`show=` is NOT a narrowing guard.** A `show=` element EXISTS in the DOM while its condition is false (§17.2) — it is hidden, not removed — so its children are still evaluated and rendered when `recv` is `not`. Narrowing under `show=` would be unsound. Inside a `<div show=@user>`, `@user` keeps its un-narrowed type `T | not`; a bare `@user.name` there SHALL fire E-TYPE-046. Use `if=` (which does not evaluate its children when the condition is false, §17.1) or `?.`.
+
+> **Provenance:** ruling:user-voice-scrml.md S451 "your recs on both" (rec 1 — *"`show=` is NOT a narrowing guard: strike `show=` from §42.3.5's guard list. §17.2: a `show=` element EXISTS in the DOM while its condition is false, so its children are evaluated and narrowing under it is unsound; only `if=` (which skips evaluation) narrows."*) · **supersedes:** "the `if=` / `show=` markup guard (§42.4)" in item 2 above. **Direction of change: newly-rejecting** — a bare member access on a plain-optional receiver inside a `show=` element, which compiled before, is now E-TYPE-046. Measured (S451): of the 12 `.scrml` files under `examples/`, `samples/`, `conformance/cases/` that use `show=`, **0** read a member of a `show=`-narrowed binding — with `show` removed from impl#1's narrowing attributes, every one of them compiles with the same E-TYPE-046 count (0). impl#1 still narrows under `show=` (`compiler/src/type-system.ts` `markupNarrowedCells`); that divergence is filed as `g-impl1-show-narrows-s451`.
 - The rule is **per-hop**. Each member-access hop through a possibly-`not` receiver needs its own guard. `?.` guards ONLY its immediate receiver (§42.3.6): in `@user?.address.city`, the `?.` guards `@user`, but if `address` is itself optional the bare `.city` on `@user?.address` (type `Address | not`) is a fresh possibly-`not` dereference and SHALL fire E-TYPE-046 — the absence-safe form is `@user?.address?.city`.
 - E-TYPE-046 is DISTINCT from **E-TYPE-001** (§14.12.6.1). E-TYPE-001 fires for a **lifecycle** receiver — a bare-`T` no-RHS cell (Shape 4, §6.2) or a `(not to T)` function return, where `not` is a *pre-transition* state that a presence-discrimination *transitions away*. E-TYPE-046 fires for a **plain-optional** receiver, where `not` is a legitimate *steady-state* value (§42.3.1, §14.3.1) that must be handled at every access; there is no transition. Both codes demand the same handling (guard or optional-chain); they differ only in what the `not` means. A given receiver fires exactly one of the two, never both — a lifecycle-annotated receiver routes to E-TYPE-001; a plain-optional receiver routes to E-TYPE-046.
 
@@ -29114,14 +29142,14 @@ A nested `<program db="...">` creates its own database driver scope. `?{}` block
 
 ### 44.1 Overview
 
-`?{}` is a context-sensitive database query sigil that generates driver calls for the database declared in the closest ancestor `<program db="...">`. The compile target is **Bun.SQL** — a unified tagged-template SQL client covering SQLite, PostgreSQL, and MySQL.
+`?{}` is a context-sensitive database query sigil that generates driver calls for the database of its closest ancestor database scope — a `<program db="...">` or a `<db src="...">` block, whichever is nearer (§8.1.1, S451). The compile target is **Bun.SQL** — a unified tagged-template SQL client covering SQLite, PostgreSQL, and MySQL.
 
 ### 44.2 Driver Resolution
 
-1. Walk upward from the `?{}` block through enclosing `<program>` elements.
-2. First `<program>` with `db=` determines the driver.
+1. Walk upward from the `?{}` block through its enclosing elements.
+2. The first database scope reached — a `<program>` with `db=` or a `<db src=>` block — determines the driver and the database (§8.1.1; S451 "your recs on both" — supersedes "Walk upward … through enclosing `<program>` elements" / "First `<program>` with `db=` determines the driver").
 3. Parse the connection string prefix.
-4. If no `db=` found, emit E-SQL-004.
+4. If no database scope is found, emit E-SQL-004 (unless the file is a module-with-db-context, §44.7.1).
 5. A SQLite file path resolves against the directory of the declaring `.scrml` file, and is
    created at runtime only by a handle in the file that declares its schema. Every other
    handle opens lazily and fails loudly on a missing file. A running program resolves the
@@ -29167,7 +29195,7 @@ Which connection a transaction runs on, and what concurrent requests may see of 
 
 | Code | Trigger | Severity |
 |---|---|---|
-| E-SQL-004 | `?{}` has no `db=` in any ancestor `<program>` AND the file is not a module-with-db-context (§44.7.1) | Error |
+| E-SQL-004 | `?{}` has no database scope (`<program db=>` or `<db src=>`) in any ancestor AND the file is not a module-with-db-context (§44.7.1). Emitted at `compiler/src/codegen/emit-server.ts:7000` and `compiler/src/codegen/emit-tool.ts:746` (impl#1 checks per file — see `g-impl1-db-resolution-not-nearest-s451`). | Error |
 | E-SQL-005 | Unsupported db prefix (e.g. `mongodb:`) | Error |
 | E-SQL-006 | `.prepare()` called on `?{}` result | Error |
 | E-SQL-007 | `?{}` in a non-async context | Error |
