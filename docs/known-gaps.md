@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 240 | 6 |
+| HIGH | 241 | 6 |
 | MED | 501 | 4 |
-| LOW | 264 | 0 |
+| LOW | 265 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22961,3 +22961,21 @@ Governing: SPEC §14.8.10 — *".acrossTenants() … is the only way to emit an 
 <!-- @gap id=g-tenant-floor-predicate-oracles-before-filter-s452 sev=LOW status=open locus=compiler/SPEC.md(§14.8.10 "LIMIT / OFFSET" reading and the Soundness-scope paragraph)+compiler/src/codegen/tenant-egress.ts(_scrml_tenant_scope runs after the query) prov=review:s452-tenant-r3 -->
 Governing: SPEC §14.8.10 Soundness scope — *"the LIMIT / OFFSET short-read above (a completeness loss, not a leak)"*. The source filter runs after the database evaluates the author's WHERE, ORDER BY and LIMIT over all tenants' rows. A page that comes back short, or a WHERE whose evaluation errors only on a foreign row (a cast / division over another tenant's value), tells tenant A something about tenant B's rows: an existence / value oracle. Reads (and the r3 WHERE-injected writes, whose WHERE also runs before the `tenant_id` conjunct is known to short-circuit) are affected. The structural fix is the deferred v1.next WHERE injection for reads (filter before LIMIT) or the §14.8.11 database tier. **SPEC wording item (PA):** the Soundness-scope bullet should name this as an oracle / covert channel, beside the UNIQUE-violation one, not as "not a leak".
 
+
+### g-each-row-whitespace-only-text-dropped — inside an `<each>` row, `<td>${r.f} ${r.l}</td>` renders `PeterOliver`: every whitespace-only text run in a row body is dropped — `NEW S450 (adopter: assetManagement); HIGH; open — BOOTSTRAP-OWED (ruled S449)`
+<!-- @gap id=g-each-row-whitespace-only-text-dropped sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(renderTemplateChildToJs, the text branch — `if (!txt.trim()) return;` returns before emitting every whitespace-only run) prov=adopter:assetManagement-scrml-finding-adjacent-interpolation-whitespace+ruling:user-voice-scrml.md S449 (B2) -->
+
+> **BOOTSTRAP-OWED — ruled S449 (bryan, on S450-peter's routed asks): "B2 = leave to the bootstrap (`<each>` row interpolation whitespace; workaround exists)."** impl#1 is NOT being fixed for this. The S450 impl#1 fix exists, is reviewed (S239 → LAND-WITH-NITS) and is parked unlanded on `hold/s450-each-row-interp-whitespace` @`d5500e69` should the ruling ever be revisited; S453 retired that hold rather than landing it.
+> **Adopter-reported** (assetManagement `docs/scrml-finding-adjacent-interpolation-whitespace.md`), reproduced in happy-dom on `daca85d8`: inside an `<each>` row, `${a} ${b}` rendered `PeterOliver`, while the same markup at top level, `Name: ${x}`, and `${a + " " + b}` all rendered correctly. Silent — exit 0, no diagnostic, content lost. Adopter workaround: `${a + " " + b}`.
+> ⚑ Filed `status=open` rather than `status=carried` deliberately: `carried` requires an xfail conformance pin (the runner enforces the pairing both ways) and S453 landed no conformance case for it, so `open` is the honest state — impl#1 really does carry the defect.
+
+Governing: SPEC §4.18.5 — *"whitespace is kept exactly in both productions"*, and whitespace-only text between elements is kept too (S442). The §4.18.1 "Body modes nest" citation is the one the S450 review's nit 2 corrected (from §17.7.7).
+
+### g-errorboundary-async-render-rejection-unobserved-s453 — an async `<errorBoundary>` with no `fallback=` lets its own re-`throw` escape as an unobserved promise rejection — `NEW S453; LOW; open`
+<!-- @gap id=g-errorboundary-async-render-rejection-unobserved-s453 sev=LOW status=open locus=compiler/src/codegen/emit-event-wiring.ts(~2430 — the boundary render fn is invoked as `${renderFn}();` with no `await` and no `.catch`, while the fn itself is emitted `async` when its expression reaches a server fn) prov=review:s453-a3-adversarial-pass-adjacent-finding -->
+
+> Found by the S453 adversarial pass on the A3 landing (#1283) as an adjacent surface, reproduced, and **deliberately not widened into that change** — A3's ruling names *"every async event listener"*, and this is a logic/render binding, not an event binding. When the boundary's render fn is async (its expression reaches a server fn) **and** it has no `fallback=`, the §19.6.8-B3 path re-throws `_eb_err` to propagate to an enclosing boundary or the host — but the call site does not observe the returned promise, so the throw surfaces only as a browser `unhandledrejection`. Same class as [[g-handler-level-rejection-bypasses-scrml-logging]] one surface over.
+> **Lesser harm than the handler case, which is why it is LOW:** the boundary calls `_scrml_error_boundary_log(bId, _eb_err)` *before* throwing, so the diagnostic is not lost — only the propagation to an enclosing boundary is. A boundary WITH `fallback=` returns instead of throwing and is unaffected.
+> Fix direction (not built): the same shape recommended for the call-ref limb — give the invocation a `.catch(→ _scrml_error_boundary_log)` arm, or await it inside an async wrapper that preserves the sync prefix. Routed to bryan with the handler-rejection family so the family is fixed once.
+
+Governing: SPEC §19.6.8 (the compiler-emitted host-JS backstop) + §19.6.4 (inner-catches-first propagation, which is what the escaping throw is meant to reach).
