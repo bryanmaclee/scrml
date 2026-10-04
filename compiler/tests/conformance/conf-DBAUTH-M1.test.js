@@ -149,7 +149,9 @@ describe("CONF-DBAUTH-M1 (A1-wrapper compile-shape): conditional engagement", ()
     expect(js).toContain("set_config('scrml.tenant', ${_scrml_active_tenant(_scrml_req)}, true)");
     expect(js).toContain('tx.unsafe("SET LOCAL ROLE scrml_app")');
     // the query runs on the tx, never the shared pool handle
-    expect(js).toContain('return await tx.unsafe("select id, tenant_id, amount from invoices")');
+    // (§14.8.10 S452: the floor appends its reserved key column, and filters the
+    // transaction's result rows at the source.)
+    expect(js).toContain('return await tx.unsafe("select id, tenant_id, amount, invoices.tenant_id AS __scrml_tenant_0 from invoices")');
   });
 
   test("NON-db-authoritative Postgres app emits NO A1 markers (byte-identical fast path)", () => {
@@ -158,7 +160,7 @@ describe("CONF-DBAUTH-M1 (A1-wrapper compile-shape): conditional engagement", ()
     expect(js).not.toContain("set_config('scrml.tenant'");
     expect(js).not.toContain("SET LOCAL ROLE scrml_app");
     // the query runs directly on the shared handle (today's fast path)
-    expect(js).toContain('_scrml_sql.unsafe("select id, tenant_id, amount from invoices")');
+    expect(js).toContain('_scrml_sql.unsafe("select id, tenant_id, amount, invoices.tenant_id AS __scrml_tenant_0 from invoices")');
   });
 
   test("the shipped postgres sample carries NO A1 markers (anti-regression anchor)", () => {

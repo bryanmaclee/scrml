@@ -620,7 +620,7 @@ ${q}
   return { r, server };
 }
 const errCodes = (r) => (r.errors ?? []).map((d) => d.code);
-const tagged = (server) => /_scrml_tenant_tag\(await _scrml_sql/.test(server);
+const tagged = (server) => /_scrml_tenant_scope\(await _scrml_sql/.test(server);
 const COLS = "(id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)";
 const NOTES = "\n    CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)";
 

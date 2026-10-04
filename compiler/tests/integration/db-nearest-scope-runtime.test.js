@@ -281,7 +281,9 @@ describe("§8.1.1 nearest database scope — which database a query hits at runt
     expect(auth).toContain("_scrml_sql_1.begin(async (tx) =>");
     expect(auth).toContain("set_config('scrml.tenant'");
     expect(auth).toContain('tx.unsafe("SET LOCAL ROLE scrml_app")');
-    expect(auth).toContain('return await tx.unsafe("select id, tenant_id, amount from invoices")');
+    // (§14.8.10 S452: the floor appends its reserved key column and filters the
+    // transaction's rows at the source.)
+    expect(auth).toContain('return await tx.unsafe("select id, tenant_id, amount, invoices.tenant_id AS __scrml_tenant_0 from invoices")');
     expect(auth).not.toMatch(/await _scrml_sql_1\.unsafe\("select/);
     // The other database's query is wrapped exactly as before (default handle).
     const other = text.slice(text.indexOf("_scrml_handler_listShared"), text.indexOf("_scrml_route_listShared"));
