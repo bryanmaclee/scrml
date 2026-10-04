@@ -2,6 +2,35 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S452 — 2026-10-04 (bryan · ASUS; S453-peter concurrent) — one pattern-arm spelling, a live cross-tenant leak closed over four review rounds, the bootstrap's effect summary
+
+**Rulings (user-voice §S452).** **One pattern-arm grammar** in logic: `!{}` handler arms and engine message arms take §18.2's
+`match`-arm — no leading `|` (`!{ .Network(msg) :> … }`); the `|` form soft-deprecates through §63 (W-ARM-PIPE-LEGACY + `scrml fix`).
+Markup element arms stay their own form ("possibly a bonus"). impl#1 freeze exceptions granted for both pipe-less forms. The
+**tenant floor filters at the SOURCE** (rows from a tenant table are filtered to the active tenant right after the query; server
+code never observes another tenant's rows without `.acrossTenants()`); E-TENANT-RAW-EGRESS narrowed to `.acrossTenants()` rows
+reaching a raw `Response`; an INSERT with no active tenant is a named refusal. **dpa-066 ratified** (one effect summary per callable
+in the bootstrap); **dpa-067 forks ratified** (protect as a dataflow pass keyed on origin; one origin lattice). Deterministic
+bootstrap compile. 483 merged/landed remote branches trimmed (bundle-backed: `scrml-support/archive/branch-trims/`).
+
+**Landed:** #1270 (bootstrap §34 severity, fail-closed gate) · #1272 (SPEC currency) · #1273 (SPEC: one pattern-arm grammar) ·
+#1274 (bootstrap: the S451 error-model rulings — E-ERROR-012..015, bare binder, `_ err`, value-arm `defer`, `<db src>` §8.1.1; one
+arm parser) · #1275 (impl#1: pipe-less engine message arms) · #1276 (impl#1: pipe-less `!{}` arms; the arm parser fails closed;
+E-TYPE-ARM-QUALIFIER-MISMATCH) · #1277 (dpa-066/067 banked) · #1278 (SPEC §14.8.10 filter-at-source) · #1279 (bootstrap
+W-ARM-PIPE-LEGACY; the counter grades only Error-severity parse rejections) · #1280 (bootstrap determinism, §58) · #1281 (SPEC:
+RAW-EGRESS narrowed, §14.8.9 keyed on origin, E-PROTECT-UNRESOLVED-COLUMNS, I-PROTECT-REVEAL) · #1285 (impl#1 W-ARM-PIPE-LEGACY +
+`scrml fix arm-pipe` + 170-arm corpus migration, 0/11,406 artifact diffs) · #1287 (impl#1 tenant filter-at-source — PARTIAL) ·
+#1290 (bootstrap dpa-066 M0–M3: one effect summary, rules as queries, G7 closed) · #1293 (impl#1 tenant SQL allow-listed subset +
+OR ABORT + schema hazards — PARTIAL). Peter (S453): #1283 #1286 #1289.
+
+**Security.** dpa-067's deep-dive found a live impl#1 leak: values extracted from tenant rows (`rows.map(r => r.name)`) shipped
+every tenant's data. Four review rounds on the floor's SQL handling (r1 classifier → r2 normalizer + allow-list → r3 token-level
+allow-listed subset → r4 OR ABORT + trigger hazards) — each review beat the previous design in one line until r3 changed the
+question from "is this dangerous?" to "is this in a subset we fully understand?". Open at close: schema write hazards beyond the
+ON table (HIGH), a VIEW over a tenant table (HIGH), the `_scrml_` prefix (MED, ruling), predicate oracles (LOW).
+
+**Bootstrap counter:** PASS 95 → 120 (the #1270 severity work; the rest held every bucket across the session's changes).
+
 ## S451 — 2026-10-03/04 (bryan · ASUS; solo) — the U1 rulings in the SPEC, the error model in the bootstrap, a wrong-database bug closed in impl#1
 
 **Rulings (user-voice §S451).** All eleven U1 server-boundary rulings: a value position that would have to wait is

@@ -87,6 +87,8 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-062 | **RULED S444 (c) split surface** (user-voice S444; SPEC §6.14.4). dPA rec = split the surface: cell-level `prepaint` = REFLECT only (root attribute before paint); HOLD = a separate author-placed region marker `hold=@cell` with a no-JS CSS failsafe release. 4 route-to-PA notes (§52.8/§6.14.2 pre-hydration wording vs emit; inline `_SCRML_CHUNKS` under strict CSP — fixed #1200). | `scrml-support/docs/deep-dives/prepaint-opt-in-dpa-062-2026-09-30.md` |
 | dpa-063 | **RULED S446 — FULLY** (user-voice S446): Call 1 (b) a newline ends a statement, continuation explicit (line-final operator / open bracket); 4a (i) leading `.`/`?.` is an error; 4b line-final `;` legal; 5 (i) `E-STMT-NO-EFFECT` language-wide + leading `+`/`-`; 6 (i) immediate error pre-1.0 + `scrml migrate --fix` codemod; 7 confirm (S440 #6 subsumed). SPEC text: branch `wip/s448-spec-dpa063` (§7.2.2), PR owed after bryan vetoes the agent's 10 PA readings. | scrml-support/docs/deep-dives/statement-termination-dpa-063-2026-09-30.md |
 | dpa-064 | **COMPLETE (ADVISORY) dPA 2026-09-30 — awaiting bryan;** rec = relax `E-PROGRAM-NESTED-AUTH` only for `auth="required"`, tighten-only (stricter-wins, one governing-scope resolver), gates endpoints not markup; only the transparent nested program qualifies at 29eb80c31; worker/WASM stay errors permanently, db-scope/sidecar/`route=` until built. 5 fail-open prerequisites + 7 gaps to file; 4 route-to-PA. | `scrml-support/docs/deep-dives/nested-program-auth-scope-dpa-064-2026-09-30.md` |
+| dpa-066 | **RATIFIED S452** ("all your recs" item 3) — Approach B: one effect/footprint summary per callable in the bootstrap's Core, per-dimension unknowability, rules as queries; effect variables deferred. M0–M3 BUILT (#1290; G7 closed); M4–M6 owed (M4 retires the typer's name-keyed write set). | `scrml-support/docs/deep-dives/bootstrap-effect-summary-dpa-066-2026-10-04.md` |
+| dpa-067 | **RATIFIED S452** — tenant F2 = filter at the SOURCE ("a"; SPEC #1278, impl#1 #1287/#1293 partial); F1 protect as a dataflow pass keyed on origin (SPEC #1281); F3 shared call graph, separate pass; F4 U1c keeps the floors refused + SQL facts record source columns (owed); F5 E-PROTECT-UNRESOLVED-COLUMNS; F6 I-PROTECT-REVEAL; F7 one origin lattice. | `scrml-support/docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md` |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
 
@@ -3884,7 +3886,7 @@ with a stricter role; a worker (likely: auth meaningless → error stays?). Rec 
 | dpa-065 | **BANKED S449 (bryan "your recs." — dialect ruling 3).** O35 (SPEC §66.22): must a NON-LITERAL own value carry a type annotation (`let <total=(sum(@items))/>` vs `let <total:int=(…)/>`)? Decides how many of the 201 type-only legacy conformance cases twin mechanically. Scope: §66.3 inference rule (integer literal infers `int`), §14 inference reach, what the error/diagnostic is, ergonomics vs the S322 "by construction" test; capability-map + worked adopter code. R2 deep-dive; bryan rules. | `scrml-support/docs/deep-dives/corpus-dialect-codemod-scope-2026-10-03.md` (context) |
 
 ## [dpa-066] deep-dive — one effect/footprint summary per function in the bootstrap's Core
-`status:    banked`
+`status:    complete`  # PA-run S452 → docs/deep-dives/bootstrap-effect-summary-dpa-066-2026-10-04.md · RATIFIED S452 (see status table)
 banked:     S452 2026-10-04 (bryan: "looks good, go on DDs and 3"; PA ask: "Nominal features that make sense now rather than retrofit later")
 
 The question: the bootstrap (compiler/self-host-v2/) is a from-scratch compiler. Many ruled/Nominal rules each ask "what does
@@ -3911,7 +3913,7 @@ rec. Sequencing: rule BEFORE U1b's design pass (U1b's failure type for client se
 Architecture of the new compiler — R2 minimum.
 
 ## [dpa-067] deep-dive — provenance tracking for the security floors (protect egress, tenant-row isolation) by construction in the bootstrap
-`status:    banked`
+`status:    complete`  # PA-run S452 → docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md · RATIFIED S452 (see status table)
 banked:     S452 2026-10-04 (bryan: "looks good, go on DDs and 3")
 
 The question: §14.8.9 (`protect=` server→client column egress floor) and §14.8.10 (tenant-row isolation floor, Nominal)
