@@ -11633,6 +11633,9 @@ ${
         const v: AExpr | not = assignedValue(e)
         if (v is some) return readsInExpr(t, v)
         if (effectFact(t.effects, e.nid) is some) {
+            // `reset(@x)`: its argument is the write's target, not a read
+            const c: AExpr | not = calleeOf(e.k)
+            if (c is some && exprName(c) == "reset") return []
             let acc: CellUse[] = []
             for (const x of exprKids(e).slice(1)) { acc = acc.concat(readsInExpr(t, x)) }
             return acc

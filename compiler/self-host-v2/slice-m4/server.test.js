@@ -229,6 +229,10 @@ describe("§6.6.9 / §12 — a wholly-server body touches no cell", () => {
     expect(sorted(src)).toEqual(["E-RI-002", "W-DEPRECATED-SERVER-MODIFIER"]);
   });
 
+  test("E-RI-002 for `reset(@x)` in a `server` function — its argument is the write's target, not also a read (no E-REACTIVE-003)", () => {
+    expect(sorted(P("", `    let <count:int=0/>\n    server function clear() {\n        reset(@count)\n    }`))).toEqual(["E-RI-002", "W-DEPRECATED-SERVER-MODIFIER"]);
+  });
+
   test("twin: the server function returns the value; the caller is not refused for E-RI-002 (mirror: …-neg)", () => {
     const src = P("", `    let <count:int=0/>\n    server function loadCount() -> int {\n        return 1\n    }`);
     expect(codes(src)).toEqual(["W-DEPRECATED-SERVER-MODIFIER"]);
