@@ -45,11 +45,12 @@
 // =============================================================================
 ${
     import { Token, TokenKind, LexStop, LexRun, lexFrom, lexFromMode } from "./lex.scrml"
+    import { Severity } from "./severity.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AEffect, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan } from "./ast.scrml"
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan, newDiag } from "./ast.scrml"
 
     // =========================================================================
     // Tokens, as the parser sees them: one TOTAL classification of TokenKind
@@ -157,7 +158,7 @@ ${
     }
 
     fn diagAt(tp: TP, code: string, msg: string, t: PTok) -> TP {
-        const d: Diag = { code: code, message: msg, file: tp.file, span: mkSpan(t.start, t.end) }
+        const d: Diag = newDiag(code, msg, tp.file, mkSpan(t.start, t.end))
         return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
     }
 
@@ -1791,7 +1792,7 @@ ${
     }
 
     fn mDiag(mp: MP, code: string, msg: string, start: int, end: int) -> MP {
-        const d: Diag = { code: code, message: msg, file: mp.file, span: mkSpan(start, end) }
+        const d: Diag = newDiag(code, msg, mp.file, mkSpan(start, end))
         return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file }
     }
 
@@ -3731,8 +3732,11 @@ ${
     export fn parseFile(path: string, src: string, firstId: int) -> Parsed {
         const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path }
         const r: RMItems = parseMarkupItems(m0, "")
+        // `errs`: the ERROR spans only (s451) — §34: Warning and Info codes "do
+        // not fail the compile", so a parse warning neither untrusts a declaration
+        // nor closes the diagnostics gate.
         let errs: ASpan[] = []
-        for (const d of r.mp.diags) { errs = errs.concat([d.span]) }
+        for (const d of r.mp.diags) { if (d.severity == Severity.Error) errs = errs.concat([d.span]) }
         return { ast: { path: path, items: r.items, errs: errs }, diags: r.mp.diags, nextId: r.mp.nid }
     }
 }

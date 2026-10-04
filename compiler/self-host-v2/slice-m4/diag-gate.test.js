@@ -5,10 +5,14 @@
 // g-bootstrap-defer-scope-001-and-runs-anyway (`defer` was reported as an
 // undeclared name, E-SCOPE-001, and the printed program then ran the deferred
 // statements in place). The gate is ONE check at the front end → back end
-// hand-off (lower.scrml `hasError`): an `E-` code from analysis, or any parse
-// diagnostic, lowers to NO Core — and the printer only takes a Core, so there
-// is nothing to print. It is not a per-code list: every error closes it.
-// `W-` notes (non-fatal, §34) and the `infos` stream do not.
+// hand-off (lower.scrml `hasError`): a diagnostic of §34 severity Error (from
+// analysis or the parser) lowers to NO Core — and the printer only takes a Core,
+// so there is nothing to print. It is not a per-code list: every error closes it.
+// s451-boot-diag-severity: the test is the Diag's SEVERITY (severity.scrml, the
+// table generated from §34), not the `E-` prefix — §34: "A code whose Severity
+// column reads **Error** fails the compile, and a compile that reports one SHALL
+// NOT produce a runnable artifact (§2.2.1). **Warning** and **Info** codes do not
+// fail the compile." So Warning / Info diagnostics do not close it.
 
 import { describe, test, expect, beforeAll } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
@@ -30,7 +34,7 @@ describe("an error lowers to no Core — nothing to print", () => {
   test("a parse error: no Core", () => {
     const r = run(P(`    let <n:int=0/>\n    function go() { @n = (1 + }`, `        <p>\${@n}</p>`));
     expect(r.diags.length).toBeGreaterThan(0);
-    expect(r.diags.every((d) => d.code.startsWith("E-"))).toBe(true);
+    expect(r.diags.every((d) => d.severity === "Error")).toBe(true);
     expect(r.core == null).toBe(true);
   });
 

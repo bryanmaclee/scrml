@@ -24,6 +24,8 @@
 // workaround: F15 — no helper fn in this file shares a name with a field.
 // =============================================================================
 ${
+    import { Severity, severityOf } from "./severity.scrml"
+
     export type ASpan:struct = { start: int, end: int }
 
     // -------------------------------------------------------------------------
@@ -287,8 +289,18 @@ ${
     // signature containing one is not trusted by the typer (no check against it).
     export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[] }
 
-    // A diagnostic: a code, a message, where. (§4 permits message text.)
-    export type Diag:struct = { code: string, message: string, file: string, span: ASpan }
+    // A diagnostic: a code, its §34 severity, a message, where. (§4 permits
+    // message text.)
+    // `severity` (s451) is the CODE's §34 row — §34: "A code whose Severity
+    // column reads **Error** fails the compile … **Warning** and **Info** codes
+    // do not fail the compile." It is never a call site's choice: build every
+    // Diag with `newDiag`, which reads the generated §34 table (severity.scrml).
+    export type Diag:struct = { code: string, severity: Severity, message: string, file: string, span: ASpan }
+
+    // The ONE Diag constructor (s451): the severity is derived from the code.
+    export fn newDiag(code: string, message: string, file: string, span: ASpan) -> Diag {
+        return { code: code, severity: severityOf(code), message: message, file: file, span: span }
+    }
 
     export fn mkSpan(start: int, end: int) -> ASpan { return { start: start, end: end } }
 }

@@ -37,6 +37,7 @@ ${
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag, ASql, ASqlMode,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail,
              mkSpan } from "./ast.scrml"
+    import { Severity } from "./severity.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair, ValInfo, GateInfo,
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram, ResetOnInfo, PersistInfo,
@@ -56,11 +57,16 @@ ${
     // E-SCOPE-001, then run in place).
     export type Lowered:struct = { core: CoreProgram | not, diags: Diag[] }
 
-    // Does the compile hold an error — an `E-` code from the analysis, or any
-    // parse diagnostic (the parser reports only `E-PARSE-*`-family errors; a
-    // file carries their spans in `errs`, the codes go to the driver)?
+    // Does the compile hold an error — an analysis diagnostic of severity Error,
+    // or a parse error (a file carries the spans of its Error-severity parse
+    // diagnostics in `errs`; the codes go to the driver)?
+    // s451: the test is the diagnostic's §34 SEVERITY, not its prefix — §34: "A
+    // code whose Severity column reads **Error** fails the compile, and a compile
+    // that reports one SHALL NOT produce a runnable artifact (§2.2.1). **Warning**
+    // and **Info** codes do not fail the compile."
     export fn hasError(tp: TypedProgram) -> boolean {
-        for (const d of tp.diags) { if (d.code.startsWith("E-")) return true }
+        for (const d of tp.diags) { if (d.severity == Severity.Error) return true }
+        for (const d of tp.infos) { if (d.severity == Severity.Error) return true }
         for (const f of tp.files) { if (f.errs.length > 0) return true }
         return false
     }

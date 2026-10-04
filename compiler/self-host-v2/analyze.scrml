@@ -51,7 +51,7 @@ ${
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, ASql,
-             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan } from "./ast.scrml"
+             AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan, newDiag } from "./ast.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
     import { SqlFacts, sqlFacts } from "./sql.scrml"
 
@@ -555,7 +555,7 @@ ${
     }
 
     fn addDiag(st: AS, file: string, span: ASpan, code: string, msg: string) -> AS {
-        const d: Diag = { code: code, message: msg, file: file, span: span }
+        const d: Diag = newDiag(code, msg, file, span)
         return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad, effects: st.effects }
     }
 
@@ -7558,7 +7558,7 @@ ${
     //     E-BOOTSTRAP-UNSUPPORTED.
     // =========================================================================
     fn mkDiag(file: string, span: ASpan, code: string, msg: string) -> Diag {
-        return { code: code, message: msg, file: file, span: span }
+        return newDiag(code, msg, file, span)
     }
 
     fn offsetOf(span: ASpan) -> string { return "offset " + span.start }
@@ -11710,7 +11710,7 @@ ${
 
     fn refDiags(w: AEffect, r: FnRef, s: FnSummary | not, quiet: boolean) -> Diag[] {
         // fix round (LOW a): a reference with no summary is unresolved — fail closed
-        if (s is not) return [{ code: "E-EFFECT-WRITE-UNPROVEN", file: r.file, span: r.span, message: "this effect reaches `" + r.name + "`, which has no write summary — the compiler cannot prove it writes no reactive cell, and the rule fails closed (§6.7.4 rule 4)" }]
+        if (s is not) return [newDiag("E-EFFECT-WRITE-UNPROVEN", "this effect reaches `" + r.name + "`, which has no write summary — the compiler cannot prove it writes no reactive cell, and the rule fails closed (§6.7.4 rule 4)", r.file, r.span)]
         const sw: Witness | not = s.w
         if (sw is some) {
             if (quiet && throughValue(r, sw.chain)) return []
@@ -11731,7 +11731,7 @@ ${
 
     fn writesDirect(w: AEffect, site: WSite) -> Diag {
         const msg: string = effectWord(w) + " writes `" + site.cell + "`. An effect drives the outside world and may not write reactive state, directly or through a called function (§6.7.4). " + fixText(w, site)
-        return { code: "E-EFFECT-WRITES-STATE", message: msg, file: site.file, span: site.span }
+        return newDiag("E-EFFECT-WRITES-STATE", msg, site.file, site.span)
     }
 
     fn writesThrough(w: AEffect, r: FnRef, wit: Witness) -> Diag {
@@ -11741,17 +11741,17 @@ ${
         if (r.name.indexOf("formula of ") == 0) how = " reads a value computed on its read — its formula runs inside the effect and writes `" + wit.site.cell + "`: `" + chain + "`"
         if (r.name.indexOf("construction of ") == 0) how = " reads a shared instance that its first read CONSTRUCTS, running initializers that write `" + wit.site.cell + "`: `" + chain + "`"
         const msg: string = effectWord(w) + how + ". An effect drives the outside world and may not write reactive state, directly or through a called function (§6.7.4). " + fixText(w, wit.site)
-        return { code: "E-EFFECT-WRITES-STATE", message: msg, file: r.file, span: r.span }
+        return newDiag("E-EFFECT-WRITES-STATE", msg, r.file, r.span)
     }
 
     fn unprovenDirect(u: USite) -> Diag {
         const msg: string = u.what + " — the compiler cannot prove this effect writes no reactive cell, and the rule fails closed (§6.7.4 rule 4). Call a declared scrml function by its name"
-        return { code: "E-EFFECT-WRITE-UNPROVEN", message: msg, file: u.file, span: u.span }
+        return newDiag("E-EFFECT-WRITE-UNPROVEN", msg, u.file, u.span)
     }
 
     fn unprovenThrough(r: FnRef, wit: UWitness) -> Diag {
         const msg: string = "this effect reaches a call the compiler cannot resolve, through `" + chainText(wit.chain) + "`: " + wit.site.what + " — it cannot prove the effect writes no reactive cell, and the rule fails closed (§6.7.4 rule 4)"
-        return { code: "E-EFFECT-WRITE-UNPROVEN", message: msg, file: r.file, span: r.span }
+        return newDiag("E-EFFECT-WRITE-UNPROVEN", msg, r.file, r.span)
     }
 
     fn chainText(labels: string[]) -> string {
@@ -11980,12 +11980,12 @@ ${
 
     fn valueWrites(p: ValuePos, how: string, span: ASpan, file: string) -> Diag {
         const msg: string = p.what + " " + how + ". A value position may not write reactive state, directly or through a called function (§6.15): " + valueFix(p.vk) + "."
-        return { code: valueWritesCode(), message: msg, file: file, span: span }
+        return newDiag(valueWritesCode(), msg, file, span)
     }
 
     fn valueUnproven(p: ValuePos, why: string, span: ASpan, file: string) -> Diag {
         const msg: string = p.what + ": " + why + " — the compiler cannot prove it writes no reactive cell, and a value position fails closed (§6.15). Call a declared scrml function by its name."
-        return { code: valueUnprovenCode(), message: msg, file: file, span: span }
+        return newDiag(valueUnprovenCode(), msg, file, span)
     }
 
     // =========================================================================
@@ -13615,8 +13615,8 @@ ${
         let out: Diag[] = []
         for (const g of gs) {
             // a form that binds only unvalidated fields records the submit (§55.7) but gates nothing
-            if (g.values.length > 0) out = out.concat([{ code: "I-FORM-SUBMIT-GATED", file: g.file, span: g.span,
-                message: "this form's submit is gated by: " + g.values.join(", ") + " — the compiler blocks the submit while any of them is invalid, before the form's `onsubmit` runs (§55.17.3); a submit button carrying `formnovalidate` bypasses the block (§55.17.4)" }])
+            if (g.values.length > 0) out = out.concat([newDiag("I-FORM-SUBMIT-GATED",
+                "this form's submit is gated by: " + g.values.join(", ") + " — the compiler blocks the submit while any of them is invalid, before the form's `onsubmit` runs (§55.17.3); a submit button carrying `formnovalidate` bypasses the block (§55.17.4)", g.file, g.span)])
         }
         return out
     }
@@ -13653,8 +13653,8 @@ ${
             for (const f of ds.info.fields) {
                 const locked: boolean = f.wcap is not
                 if (f.vals.length > 0 && locked && !hasBindKey(keys, ds.info.sym.id, i) && !hasBindKey(seeds, ds.info.sym.id, i)) {
-                    diags = diags.concat([{ code: "E-VALIDATOR-DEAD", file: ds.file, span: f.span,
-                        message: "`" + f.sym.hint + "` has validators, but nothing can ever change its value — it is locked (no `let`), no `bind:` targets it, and no use site seeds it — so its validity is a compile-time constant and the validators can never report a change (§55.5.2); make it `let` (and bind it or set it from logic), or drop the validators" }])
+                    diags = diags.concat([newDiag("E-VALIDATOR-DEAD",
+                        "`" + f.sym.hint + "` has validators, but nothing can ever change its value — it is locked (no `let`), no `bind:` targets it, and no use site seeds it — so its validity is a compile-time constant and the validators can never report a change (§55.5.2); make it `let` (and bind it or set it from logic), or drop the validators", ds.file, f.span)])
                 }
                 i = i + 1
             }
