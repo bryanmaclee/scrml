@@ -11,28 +11,32 @@
  *
  * Codes (all hard errors):
  *
- *   - `E-ERROR-001` (§19.10.4) — a `transaction` block inside a function that is
- *     not declared `!`. ("Using `transaction` in a non-`!` function SHALL be a
- *     compile error (E-ERROR-001 applies)".)
+ *   - `E-ERROR-001` (§19.10.4) — a `transaction` block OUTSIDE a `!` function:
+ *     inside a function not declared `!`, or (S453/B1b) at the top level of a
+ *     `${}` logic block, outside any function. ("`transaction { }` SHALL be valid
+ *     only inside `!` functions … E-ERROR-001 applies".)
  *   - `E-ERROR-007` (§19.10.4) — a `transaction` block inside another one.
- *   - `E-TRANSACTION-CONTROL-FLOW` (§19.10.4, S450 interim) — a `return`, a
- *     `yield`, or a `break` / `continue` whose target is outside the block, inside
- *     a `transaction` block in a function. §19.10.3 defines the block's exits as
- *     normal completion (COMMIT), `fail` (ROLLBACK) and a SQL error (ROLLBACK);
- *     whether any OTHER exit commits or rolls back is not decided (searched
- *     §19.10, §8.9 — no governing sentence), so the compiler fails closed rather
- *     than pick one. `fail` and `?` (§19.5.2: `?` is a `fail`) are the governed
- *     exits and are allowed — EXCEPT (S450 fix round) inside an arm of a
- *     STATEMENT-position `match` within the block: that arm is lowered as a
- *     nested function, so the exit rolls back but returns from the arm only and
- *     the statements after the `match` run with no transaction open
- *     (g-stmt-match-block-return-falls-through). Same code, fail-closed; an
- *     expression-position `match` arm is unaffected.
+ *   - `E-TRANSACTION-CONTROL-FLOW` (§19.10.4) — the exits §19.10.3 does not
+ *     govern. TWO limbs remain after S453:
+ *       (1) a `yield` inside a `transaction` block in a function. A `yield`
+ *           SUSPENDS the block rather than leaving it, so neither of §19.10.3's
+ *           endings applies. Fail-closed.
+ *       (2) an exit that cannot reach the block's own `finally` because the
+ *           emitted arm is a nested function: a `fail` / `?` inside an arm of a
+ *           STATEMENT-position `match` (S450 fix round), and a `return` /
+ *           `break` / `continue` inside an arm of ANY `match`, statement- or
+ *           expression-position (S453/B1a). `emitMatchExpr` lowers both match
+ *           positions as an IIFE, so such an exit returns from the arm only and
+ *           the statements after the `match` keep running
+ *           (g-stmt-match-block-return-falls-through).
  *
- * Top-level (`${}` outside any function) transaction blocks keep their prior
- * behaviour: only the nesting check (E-ERROR-007) applies there. §19.10.4 says
- * "valid only inside `!` functions"; the top-level question is routed, not
- * decided here.
+ *     ⚑ **RULED AT S453 and no longer refused (B1a):** a `return`, or a `break` /
+ *     `continue` whose target is outside the block, anywhere else in the block.
+ *     Those ROLL THE BLOCK BACK and the exit proceeds; only normal completion
+ *     COMMITs (§19.10.3). The rollback is carried by the block's `try`/`finally`
+ *     in emit-logic.ts — see the note at the exit checks below for why that is
+ *     the right mechanism rather than the `fail`-style pre-return marking.
+ *     `fail` and `?` (§19.5.2: `?` is a `fail`) stay governed and allowed.
  *
  * Text-carried bodies (`!{}` handler arms, single-statement `match` arms, a bare
  * `{ }` block) are PARSED into statement trees with the same helper lint-defer
@@ -71,6 +75,20 @@ interface TxnCtx {
   inFunction: boolean;
   /** True inside the arms of a STATEMENT-position `match` within the block. */
   inStmtMatchArm: boolean;
+  /**
+   * True inside the arms of ANY `match` within the block — statement- AND
+   * expression-position. S453/B1a: `return` / `break` / `continue` now ROLL BACK
+   * and proceed, which is sound only when the exit crosses no function boundary
+   * on its way out of the emitted `try`/`finally`. `emitMatchExpr`
+   * (codegen/emit-logic.ts `case "match-stmt"` / `case "match-expr"`) lowers BOTH
+   * match positions as an IIFE, so an exit inside an arm returns from the arm and
+   * never reaches the block's `finally` — the same swallowing defect the
+   * `fail` / `?` arm limb refuses (g-stmt-match-block-return-falls-through).
+   * Kept refused. This flag is deliberately WIDER than `inStmtMatchArm`: a
+   * `fail` / `?` in an EXPRESSION-position arm is governed and fine (runtime-
+   * verified S450), but an EXIT in one is not.
+   */
+  inMatchArm: boolean;
 }
 
 interface WalkState {
@@ -81,15 +99,22 @@ interface WalkState {
   /** Outside any transaction: true under an arm of a statement-position `match`
    *  in the current function (reset at a function boundary). */
   inStmtMatchArmOuter?: boolean;
+  /** True inside a lambda body — `fn` is null there too, so this is what tells a
+   *  lambda apart from the top level for the S453/B1b E-ERROR-001 message. */
+  inLambda?: boolean;
 }
 
 const LOOP_KINDS = new Set(["for-stmt", "while-stmt", "do-while-stmt"]);
 
+// S453/B1a narrowed this to `yield` alone. `return` / `break` / `continue` are
+// RULED (§19.10.3): they roll back and the exit proceeds. A `yield` is a
+// SUSPENSION, not an exit — the block would be re-entered after the resume, so
+// rolling back is wrong and committing is undecided. Fail-closed.
 const CONTROL_FLOW_WHY =
-  "§19.10.3 defines how a `transaction` block ends — it COMMITs on normal completion and " +
-  "ROLLs BACK on `fail` or a SQL error — and does not say whether any other exit commits or " +
-  "rolls back, so the compiler does not guess (§19.10.4: no transaction is left open). " +
-  "Let the block complete and act on the result after it, or use `fail` to leave it with a rollback.";
+  "a `yield` SUSPENDS the block rather than leaving it, so neither of §19.10.3's endings applies: " +
+  "rolling back would discard work the block is about to continue, and committing would end a " +
+  "transaction that is still open (§19.10.4: no transaction is left open). " +
+  "Move the `yield` out of the block — let the block complete, then yield its result.";
 
 export function runTransactionChecks(ast: FileAST | null | undefined): TransactionDiagnostic[] {
   const diagnostics: TransactionDiagnostic[] = [];
@@ -129,6 +154,20 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
       `transaction would be rolled back while the statements after the \`match\` kept running outside it ` +
       `(g-stmt-match-block-return-falls-through). Use an expression-position \`match\` ` +
       `(\`let v = match … { .A :> fail … }\`) or an \`if\` / \`else if\` chain, or move the ${what} out of the arm.`);
+  // S453/B1a — an EXIT (`return` / `break` / `continue`) inside a `match` arm in
+  // the block. B1a makes these exits roll back and proceed, and the rollback is
+  // carried by the block's `finally` — which an exit inside the arm IIFE never
+  // reaches. So the shape would compile, roll back nothing, and let the
+  // statements after the `match` run inside a transaction the author believes
+  // they left. Same defect as the `fail` / `?` arm limb; kept refused.
+  const exitInMatchArm = (n: Node, what: string) =>
+    report("E-TRANSACTION-CONTROL-FLOW", n,
+      `${what} inside a \`match\` arm cannot leave a \`transaction\` block — the arm is lowered as a ` +
+      `nested function, so the ${what} would return from the arm only: the block's rollback would never ` +
+      `run and the statements after the \`match\` would keep executing inside the open transaction ` +
+      `(g-stmt-match-block-return-falls-through). Outside a \`match\` arm, ${what} out of a \`transaction\` ` +
+      `block is valid and ROLLS the block BACK (§19.10.3). Use an expression-position \`match\` ` +
+      `(\`let v = match … { … }\`) to pick a value and ${what} after the \`match\`, or an \`if\` / \`else if\` chain.`);
 
   function walk(node: unknown, st: WalkState): void {
     if (!node || typeof node !== "object") return;
@@ -165,7 +204,7 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
       return;
     }
     if (kind === "lambda") {
-      walkChildren(n, { fn: null, txn: null });
+      walkChildren(n, { fn: null, txn: null, inLambda: true });
       return;
     }
 
@@ -175,12 +214,27 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
           "Nested 'transaction' blocks are not supported. Use savepoints via '?{SAVEPOINT name}' " +
           "for nested transaction semantics. (§19.10.4)");
       }
-      if (st.fn && !st.fn.canFail) {
-        const name = st.fn.name;
+      // §19.10.4 — "`transaction { }` SHALL be valid only inside `!` functions."
+      // S453/B1b (RULED): that covers the TOP LEVEL (outside any function) as
+      // well as a non-`!` function, so all three of them are one condition on
+      // one code. Outside a `!` function a `fail` inside the block has nowhere to
+      // go, which is the same reason §19.10.4's S451 bullet refuses manual
+      // transaction control there (E-ERROR-015).
+      if (!st.fn || !st.fn.canFail) {
+        const name = st.fn ? st.fn.name : null;
+        const where = name !== null
+          ? `function '${name}', which is not declared as failable`
+          : (st.inLambda === true
+            ? "a lambda, which cannot be declared failable"
+            : "a top-level logic block, outside any function");
+        const howToFix = name !== null
+          ? `Add '!' to the function signature: 'function ${name}(...)! -> {ErrorType}'.`
+          : `Move the 'transaction' block into a '!' function and call it: ` +
+            `'function apply()! -> {DbError} { transaction { … } }'.`;
         report("E-ERROR-001", n,
-          `'transaction' used in function '${name}' which is not declared as failable. ` +
-          `A 'transaction' block is valid only inside a '!' function (§19.10.4). ` +
-          `Add '!' to the function signature: 'function ${name}(...)! -> {ErrorType}'.`);
+          `'transaction' used in ${where}. ` +
+          `A 'transaction' block is valid only inside a '!' function (§19.10.4): its commit-or-rollback ` +
+          `promise needs a failure path. ${howToFix}`);
       }
       if (st.fn && !st.txn && st.inStmtMatchArmOuter) {
         // S450 re-review nit — the converse shape: the transaction block itself sits
@@ -197,7 +251,11 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
       }
       const inner: WalkState = {
         fn: st.fn,
-        txn: { loopDepth: 0, switchDepth: 0, labels: new Set(), inFunction: st.fn !== null, inStmtMatchArm: false },
+        inLambda: st.inLambda,
+        txn: {
+          loopDepth: 0, switchDepth: 0, labels: new Set(),
+          inFunction: st.fn !== null, inStmtMatchArm: false, inMatchArm: false,
+        },
       };
       walk(n.body, inner);
       return;
@@ -207,7 +265,14 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
     // Entering a STATEMENT-position `match` inside the block: everything under
     // its arms (structured or text-carried) is walked with inStmtMatchArm set.
     if (t0 && kind === "match-stmt" && t0.inFunction && !t0.inStmtMatchArm) {
-      st = { ...st, txn: { ...t0, inStmtMatchArm: true } };
+      st = { ...st, txn: { ...t0, inStmtMatchArm: true, inMatchArm: true } };
+    }
+    // S453/B1a — an EXPRESSION-position `match` is lowered by the SAME
+    // `emitMatchExpr` IIFE, so an EXIT inside one of its arms is swallowed too.
+    // `inStmtMatchArm` is deliberately NOT set here: a `fail` / `?` in an
+    // expression-position arm is governed and was runtime-verified at S450.
+    else if (t0 && kind === "match-expr" && t0.inFunction && !t0.inMatchArm) {
+      st = { ...st, txn: { ...t0, inMatchArm: true } };
     }
     // Entering a statement-position `match` in a function OUTSIDE any transaction:
     // a `transaction` block under its arms is the converse shape (rejected above).
@@ -251,7 +316,18 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
       }
 
       if (t.inFunction) {
-        if (kind === "return-stmt") controlFlow(n, "`return`");
+        // S453/B1a (RULED) — `return` / `break` / `continue` out of the block ROLL
+        // IT BACK and the exit proceeds; only normal completion COMMITs
+        // (§19.10.3). No diagnostic, and no marking pass: the block's own
+        // `try`/`finally` (emit-logic.ts `case "transaction-block"`) is the
+        // rollback-before-exit machinery for them, and it is the CORRECT one —
+        // the `finally` runs after the return EXPRESSION is evaluated, so a
+        // `?{}` read in `return count` still runs inside the transaction. The
+        // `fail` / `?` pre-return marking stays as it is, because an error
+        // envelope has nothing to evaluate inside the block.
+        // The ONE shape still refused is an exit inside a `match` arm, which the
+        // `finally` cannot reach (see TxnCtx.inMatchArm).
+        if (kind === "return-stmt") { if (t.inMatchArm) exitInMatchArm(n, "`return`"); }
         else if (kind === "yield-stmt") controlFlow(n, "`yield`");
         else if (kind === "break-stmt" || kind === "continue-stmt") {
           const label = typeof n.label === "string" && n.label.length > 0 ? n.label : null;
@@ -259,7 +335,9 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
           const targetInside = label
             ? t.labels.has(label)
             : (isBreak ? t.loopDepth + t.switchDepth > 0 : t.loopDepth > 0);
-          if (!targetInside) controlFlow(n, isBreak ? "a `break` whose target is outside it" : "a `continue` whose target is outside it");
+          if (!targetInside && t.inMatchArm) {
+            exitInMatchArm(n, isBreak ? "a `break` whose target is outside it" : "a `continue` whose target is outside it");
+          }
         }
         if (t.inStmtMatchArm) {
           if (kind === "fail-expr" || (kind === "escape-hatch" && n.nativeKind === "Fail")) failInStmtMatchArm(n, "`fail`");
@@ -278,6 +356,7 @@ export function runTransactionChecks(ast: FileAST | null | undefined): Transacti
             labels,
             inFunction: t.inFunction,
             inStmtMatchArm: t.inStmtMatchArm,
+            inMatchArm: t.inMatchArm,
           },
         });
         return;

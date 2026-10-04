@@ -4390,10 +4390,21 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // return"): `return (await rollback(), <error envelope>);`. The `finally`
       // is the backstop that makes "no transaction left open" hold for every
       // other exit (a thrown SQL error; a re-`fail` carried as handler text).
-      // `return` / `break` / `continue` / `yield` leaving the block are not
-      // governed by §19.10 and are rejected before codegen
-      // (validators/lint-transaction.ts, E-TRANSACTION-CONTROL-FLOW), so the
-      // only exits that reach here are normal completion, `fail`/`?` and a throw.
+      //
+      // ⚑ S453/B1a (RULED) — a `return`, or a `break` / `continue` whose target
+      // is outside the block, now LEAVES the block with a ROLLBACK and proceeds;
+      // only normal completion COMMITs (§19.10.3). They are NOT marked by
+      // `_markTransactionExits`, and that is deliberate: the `finally` below
+      // already rolls back on every one of them (JS runs a `finally` on a
+      // `return` / `break` / `continue` out of its `try`), and it rolls back at
+      // the RIGHT moment — AFTER the return expression has been evaluated, so a
+      // `?{}` read in `return count` still executes inside the transaction. The
+      // `fail` / `?` pre-return marking stays as it is because an error envelope
+      // has nothing to evaluate inside the block. One mechanism, two entry
+      // points; no second rollback path was added.
+      // A `yield`, and an exit inside a `match` arm (which is lowered as a nested
+      // function and so never reaches this `finally`), are still rejected before
+      // codegen (validators/lint-transaction.ts, E-TRANSACTION-CONTROL-FLOW).
       const lines: string[] = [];
       // ⚑ #1264 (post-hold): the default handle is `fallbackSqlHandle()`, not a
       // literal `"_scrml_sql"` — §8.1.1 gives one handle per database.
