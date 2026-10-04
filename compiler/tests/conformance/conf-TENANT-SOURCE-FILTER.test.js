@@ -358,12 +358,13 @@ ${names.map((n) => `  <button onclick=\${ ${n}() }>x</button>`).join("\n")}
 }
 const fatal = (r) => (r.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? "")).map((e) => e.code);
 
-// The query is either REFUSED at compile (E-TENANT-AGG) or, executed, shows no
+// The query is either REFUSED at compile (E-TENANT-AGG, or — since S452 r3 — E-TENANT-SQL-SUBSET
+// for a body outside the floor's SQL subset, e.g. one carrying a comment) or, executed, shows no
 // trace of tenant B to an unpinned request or to tenant A, nor of A to tenant B.
 async function expectRefusedOrNoLeak(body, fn) {
   const p = await buildApp(probeProgram(body));
   if (p.routes === null) {
-    expect(fatal(p.result)).toContain("E-TENANT-AGG");
+    expect(fatal(p.result).some((c) => c === "E-TENANT-AGG" || c === "E-TENANT-SQL-SUBSET")).toBe(true);
     return "refused";
   }
   const unpinned = JSON.stringify(await call(fn, {}, p));
@@ -544,7 +545,7 @@ describe("CONF-TENANT-SOURCE-FILTER r2 — every SQL spelling meets the same ref
       return r
     }
     function wipe() {
-      ?{ update assets set name = 'x' }
+      ?{ update assets set tenant_id = 'x' }
       return "ok"
     }`));
     expect(fatal(p.result)).toContain("E-TENANT-AGG");
@@ -575,5 +576,128 @@ describe("CONF-TENANT-SOURCE-FILTER r2 — a kind=\"tool\" program runs outside 
     expect(fatal(r)).toEqual([]);
     const run = Bun.spawnSync(["bun", join(dir, "out", "tool.js")], { cwd: dir });
     expect(run.stdout.toString().trim()).toBe("0:2");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX ROUND r3 (S452) — the lexical bypasses the security re-review of
+// ea5dcc459 found (g-tenant-floor-sql-lexical-bypasses-s452-r3). Each was
+// EXECUTED on 38ec5fcab against the two seeded tenants before the fix: C1 (a
+// quoted callee) gave pinned A every tenant's names / count; C2 (a leading `;`)
+// read, deleted and updated every tenant's rows; C3 (braces inside `${}` strings)
+// hid a subquery; H2 (REPLACE) re-owned B's row for A; H3 (a quoted tenant_id
+// column) forged B's ownership. The direction (not a fourth classifier patch): a
+// tenant query is legal only inside an ALLOW-LISTED SQL subset the floor reads
+// token by token (compiler/src/codegen/tenant-sql-subset.ts); anything outside it
+// is refused at compile time unless `.acrossTenants()`.
+// ---------------------------------------------------------------------------
+const BT = "`";
+const r3read = (sql) => `    function q() { return ?{${BT}${sql}${BT}}.all() }`;
+const r3write = (sql) => `    function q() {\n      ?{${BT}${sql}${BT}}.run()\n      return "ok"\n    }`;
+const R3_REFUSED = [
+  // C1 — a quoted callee (the bare spelling admits a backtick-quoted one)
+  ["C1 \"group_concat\"(…)", r3read(`SELECT "group_concat"(name) AS c FROM assets`), "E-TENANT-SQL-SUBSET"],
+  ["C1 [group_concat](…)", r3read(`SELECT [group_concat](name) AS c FROM assets`), "E-TENANT-SQL-SUBSET"],
+  ["C1 `group_concat`(…) (bare spelling)", "    function q() { return ?{ SELECT `group_concat`(name) AS c FROM assets }.all() }", "E-TENANT-SQL-SUBSET"],
+  ["C1 \"count\"(*)", r3read(`SELECT "count"(*) AS c FROM assets`), "E-TENANT-SQL-SUBSET"],
+  // C2 — a leading `;`, and leaders outside SELECT/INSERT/UPDATE/DELETE
+  ["C2 ; SELECT", r3read(`; SELECT id, name FROM assets`), "E-TENANT-SQL-SUBSET"],
+  ["C2 ; DELETE", r3write(`; DELETE FROM assets`), "E-TENANT-SQL-SUBSET"],
+  ["C2 ;UPDATE", r3write(`;UPDATE assets SET name = 'pwn'`), "E-TENANT-SQL-SUBSET"],
+  ["C2 comment ; SELECT", r3read(`/* x */ ; SELECT id, name FROM assets`), "E-TENANT-SQL-SUBSET"],
+  ["C2 (SELECT …)", r3read(`(SELECT id, name FROM assets)`), "E-TENANT-SQL-SUBSET"],
+  ["C2 TRUNCATE", r3write(`TRUNCATE assets`), "E-TENANT-SQL-SUBSET"],
+  ["C2 MERGE", r3write(`MERGE INTO assets USING config ON 1 = 1 WHEN MATCHED THEN DELETE`), "E-TENANT-SQL-SUBSET"],
+  ["C2 EXPLAIN ANALYZE DELETE", r3write(`EXPLAIN ANALYZE DELETE FROM assets`), "E-TENANT-SQL-SUBSET"],
+  // C3 — braces inside JS strings in an interpolation
+  ["C3 ${\"{\"} … ${\"}\"}", r3read(`SELECT \${ "{" } AS z, (SELECT group_concat(name) FROM assets) AS leak, \${ "}" } AS w, name FROM assets`), "E-TENANT-SQL-SUBSET"],
+  // H1 — Postgres literal forms
+  ["H1 E'\\''", r3read(`SELECT id, E'\\\\'' AS x, (SELECT group_concat(name) FROM assets) AS l FROM config`), "E-TENANT-SQL-SUBSET"],
+  ["H1 $q$'$q$", r3read(`SELECT $q$'$q$ AS x, (SELECT group_concat(name) FROM assets) AS l FROM config`), "E-TENANT-SQL-SUBSET"],
+  ["H1 ARRAY[']']", r3read(`SELECT ARRAY[']'] AS x, (SELECT group_concat(name) FROM assets) AS l FROM config`), "E-TENANT-SQL-SUBSET"],
+  // H2 — REPLACE
+  ["H2 REPLACE INTO", r3write(`REPLACE INTO assets (id, name) VALUES (2, 'x')`), "E-TENANT-WRITE"],
+  ["H2 INSERT OR REPLACE", r3write(`INSERT OR REPLACE INTO assets (id, name) VALUES (2, 'x')`), "E-TENANT-WRITE"],
+  // H3 — a quoted tenant column
+  ["H3 \"tenant_id\"", r3write(`INSERT INTO assets (name, "tenant_id") VALUES ('forged', 'B')`), "E-TENANT-SQL-SUBSET"],
+  ["H3 [tenant_id]", r3write(`INSERT INTO assets (name, [tenant_id]) VALUES ('forged', 'B')`), "E-TENANT-SQL-SUBSET"],
+  ["H3 TENANT_ID (case)", r3write(`INSERT INTO assets (name, TENANT_ID) VALUES ('forged', 'B')`), "E-TENANT-WRITE"],
+  // M1 — a second statement
+  ["M1 SELECT …; UPDATE …", r3read(`SELECT id FROM assets; UPDATE assets SET name = 'pwn'`), "E-TENANT-SQL-SUBSET"],
+];
+
+describe("CONF-TENANT-SOURCE-FILTER r3 — every lexical bypass is refused at compile time", () => {
+  for (const [label, body, code] of R3_REFUSED) {
+    test(label, async () => {
+      const p = await buildApp(probeProgram(body));
+      expect(p.routes).toBeNull();
+      expect(fatal(p.result)).toContain(code);
+    });
+  }
+  test("`.acrossTenants()` still admits a query outside the subset (the declared opt-out)", async () => {
+    const p = await buildApp(probeProgram(`    function q() { return ?{${BT}SELECT "count"(*) AS c FROM assets${BT}}.acrossTenants().get() }`));
+    expect(fatal(p.result)).toEqual([]);
+    expect(await call("q", {}, p)).toEqual({ c: 2 });
+  });
+});
+
+describe("CONF-TENANT-SOURCE-FILTER r3 — ordinary tenant queries still compile AND scope (EXECUTED, two tenants)", () => {
+  const OK = `    function rd(x: int) {
+      return ?{${BT}SELECT id, lower(name) AS n FROM assets WHERE id > \${x} ORDER BY name LIMIT 10${BT}}.all()
+    }
+    function jn() {
+      return ?{${BT}SELECT o.id, o.label, a.name FROM orders o JOIN assets a ON a.id = o.asset_id ORDER BY o.id${BT}}.all()
+    }
+    function grp() {
+      return ?{${BT}SELECT tenant_id, count(*) AS n FROM assets GROUP BY tenant_id${BT}}.all()
+    }
+    function ins(n: string) {
+      ?{${BT}INSERT INTO assets (name, cost) VALUES (\${n}, 3)${BT}}.run()
+      return "ok"
+    }
+    function upd(n: string) {
+      ?{${BT}UPDATE assets SET name = \${n} WHERE id = 1 OR id = 2${BT}}.run()
+      return "ok"
+    }
+    function del(i: int) {
+      ?{${BT}DELETE FROM assets WHERE id = \${i} OR cost > 0${BT}}.run()
+      return "ok"
+    }
+    function everything() {
+      return ?{${BT}SELECT id, name, tenant_id FROM assets ORDER BY id${BT}}.acrossTenants().all()
+    }`;
+  test("reads: a param + allow-listed function + ORDER BY + LIMIT, a JOIN of two tenant tables, GROUP BY tenant_id", async () => {
+    const p = await buildApp(probeProgram(OK));
+    expect(fatal(p.result)).toEqual([]);
+    expect(await call("rd", { body: { x: 0 } }, p)).toEqual([]);
+    const a = await pin("A", p);
+    expect(await call("rd", { cookie: a, body: { x: 0 } }, p)).toEqual([{ id: 1, n: "a-secret-asset" }]);
+    // order 11 (A) points at B's asset 2 → dropped (every tenant source must match)
+    expect(await call("jn", { cookie: a }, p)).toEqual([{ id: 10, label: "A-order", name: "A-secret-asset" }]);
+    expect(await call("grp", { cookie: a }, p)).toEqual([{ tenant_id: "A", n: 1 }]);
+    const b = await pin("B", p);
+    expect(await call("rd", { cookie: b, body: { x: 0 } }, p)).toEqual([{ id: 2, n: "b-secret-asset" }]);
+  });
+  test("writes: INSERT is injected; UPDATE / DELETE touch only the active tenant's rows (a WHERE naming B's row too)", async () => {
+    const p = await buildApp(probeProgram(OK));
+    expect(fatal(p.result)).toEqual([]);
+    expect(p.server).toContain("WHERE (id = 1 OR id = 2) AND tenant_id = ${_scrml_tenant_write_key()}");
+    const a = await pin("A", p);
+    expect(await call("ins", { cookie: a, body: { n: "A-new" } }, p)).toBe("ok");
+    expect(await call("upd", { cookie: a, body: { n: "renamed-by-A" } }, p)).toBe("ok");
+    let rows = await call("everything", {}, p);
+    expect(rows.find((r) => r.id === 2)).toEqual({ id: 2, name: "B-secret-asset", tenant_id: "B" });
+    expect(rows.filter((r) => r.tenant_id === "A").map((r) => r.name).sort()).toEqual(["A-new", "renamed-by-A"]);
+    expect(await call("del", { cookie: a, body: { i: 2 } }, p)).toBe("ok");
+    rows = await call("everything", {}, p);
+    expect(rows).toEqual([{ id: 2, name: "B-secret-asset", tenant_id: "B" }]);
+  });
+  test("an UPDATE / DELETE with no active tenant is refused by name; nothing changes", async () => {
+    const p = await buildApp(probeProgram(OK));
+    for (const [fn, body] of [["upd", { n: "x" }], ["del", { i: 1 }]]) {
+      const r = await callRaw(fn, { body }, p);
+      expect(r.status === 200).toBe(false);
+    }
+    expect((await call("everything", {}, p)).map((r) => r.name)).toEqual(["A-secret-asset", "B-secret-asset"]);
   });
 });

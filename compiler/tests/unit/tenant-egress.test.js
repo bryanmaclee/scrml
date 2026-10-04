@@ -30,6 +30,7 @@ import {
   rewriteInsertAddTenantId,
   detectTenantRawEgress,
   acrossTenantInsertMissingTenantColumn,
+  tenantFloorViolation,
   wrapWithTenantScope,
   SERVER_TENANT_HELPER,
   TENANT_COLUMN,
@@ -159,17 +160,24 @@ describe("§14.8.10 resolveTenantScoping — read scoping", () => {
     expect(resolveTenantScoping("SELECT count(*) AS n FROM orders o JOIN assets a ON a.id = o.asset_id GROUP BY tenant_id", two))
       .toMatchObject({ kind: "agg" });
   });
-  test("H1: a subquery / CTE / derived table is refused — a comment cannot hide one", () => {
+  test("H1: a subquery / CTE / derived table / IN <table> is refused", () => {
     for (const q of [
       "WITH t AS (SELECT * FROM assets) SELECT * FROM t",
       "SELECT x.id FROM (SELECT id FROM assets) x",
       "SELECT k, v FROM config WHERE k IN (SELECT name FROM assets)",
+      "SELECT id FROM assets WHERE id IN (SELECT asset_id FROM config)",   // any subquery, even non-tenant
+      "SELECT k FROM config WHERE k IN assets",
+    ]) {
+      expect(resolveTenantScoping(q, ctx)).toMatchObject({ kind: "agg", reason: "subquery" });
+    }
+  });
+  test("H1 (S452 r3): a comment is OUTSIDE the subset — refused whatever it hides", () => {
+    for (const q of [
       "SELECT (/**/SELECT group_concat(name) FROM assets) AS names",
       "SELECT ( -- c\n SELECT group_concat(name) FROM assets) AS names",
       "SELECT k FROM config WHERE k IN (/* x */SELECT name FROM assets)",
-      "SELECT id FROM assets WHERE id IN (SELECT asset_id FROM config)",   // any subquery, even non-tenant
     ]) {
-      expect(resolveTenantScoping(q, ctx)).toMatchObject({ kind: "agg", reason: "subquery" });
+      expect(resolveTenantScoping(q, ctx)).toMatchObject({ kind: "outside", table: "assets" });
     }
   });
   test("a set operation mentioning a tenant table is refused", () => {
@@ -178,11 +186,15 @@ describe("§14.8.10 resolveTenantScoping — read scoping", () => {
   test("L1: an author projection naming the reserved key alias is refused", () => {
     expect(resolveTenantScoping("SELECT id, 'A' AS __scrml_tenant_0 FROM assets", ctx)).toMatchObject({ kind: "agg", reason: "reserved" });
   });
-  test("L3: a string literal or a comment is data — it neither refuses nor scopes", () => {
+  test("L3: a plain string literal is data — it neither refuses nor scopes", () => {
     expect(resolveTenantScoping("SELECT id FROM assets WHERE name != '(SELECT count(*) FROM assets)'", ctx))
       .toEqual({ kind: "read", table: "assets", keys: key0() });
     expect(resolveTenantScoping("SELECT k FROM config WHERE v = 'assets'", ctx)).toBeNull();
-    expect(resolveTenantScoping("SELECT k FROM config -- assets", ctx)).toBeNull();
+    // A comment carries a query OUT of the subset; outside it nothing is trusted
+    // to be data, so naming a tenant table anywhere refuses (fail-closed)…
+    expect(resolveTenantScoping("SELECT k FROM config -- assets", ctx)).toMatchObject({ kind: "outside" });
+    // …and a body outside the subset that names no tenant table is not the floor's.
+    expect(resolveTenantScoping("SELECT k FROM config -- other", ctx)).toBeNull();
   });
   test("a tenant table that is named but not a FROM source → zero rows (unresolvable)", () => {
     expect(resolveTenantScoping("SELECT assets FROM config", ctx)).toEqual({ kind: "unresolvable" });
@@ -222,9 +234,9 @@ describe("§14.8.10 rewriteSelectAddTenantId — projection-column add (NOT a WH
     expect(add("SELECT a.id, u.name FROM assets a JOIN users u ON a.uid = u.id"))
       .toBe("SELECT a.id, u.name, a.tenant_id AS __scrml_tenant_0 FROM assets a JOIN users u ON a.uid = u.id");
   });
-  test("a FROM inside a string literal or a comment is not the clause", () => {
-    expect(add("SELECT 'x FROM y' AS a, id /* FROM z */ FROM assets"))
-      .toBe("SELECT 'x FROM y' AS a, id /* FROM z */, assets.tenant_id AS __scrml_tenant_0 FROM assets");
+  test("a FROM inside a string literal or a parenthesized call is not the clause", () => {
+    expect(add("SELECT 'x FROM y' AS a, substr(name, 1) AS s FROM assets"))
+      .toBe("SELECT 'x FROM y' AS a, substr(name, 1) AS s, assets.tenant_id AS __scrml_tenant_0 FROM assets");
   });
 });
 
@@ -242,18 +254,48 @@ describe("§14.8.10 classifyTenantWrite — inject-or-hard-fail", () => {
   test("multi-row INSERT → hard-fail (not safely injectable)", () => {
     expect(classifyTenantWrite("INSERT INTO assets (name) VALUES (${a}), (${b})", ctx)).toEqual({ kind: "hard-fail", table: "assets", op: "INSERT" });
   });
-  test("UPDATE → hard-fail", () => {
-    expect(classifyTenantWrite("UPDATE assets SET name = ${n} WHERE id = ${i}", ctx)).toEqual({ kind: "hard-fail", table: "assets", op: "UPDATE" });
+  test("subset UPDATE / DELETE → filter-inject (S452 r3: the WHERE is parenthesized and ANDed with the tenant)", () => {
+    expect(classifyTenantWrite("UPDATE assets SET name = ${n} WHERE id = ${i}", ctx)).toEqual({ kind: "filter-inject", table: "assets", op: "UPDATE" });
+    expect(classifyTenantWrite("DELETE FROM assets WHERE id = ${i}", ctx)).toEqual({ kind: "filter-inject", table: "assets", op: "DELETE" });
   });
-  test("DELETE → hard-fail", () => {
-    expect(classifyTenantWrite("DELETE FROM assets WHERE id = ${i}", ctx)).toEqual({ kind: "hard-fail", table: "assets", op: "DELETE" });
+  test("UPDATE / DELETE the floor cannot constrain → hard-fail", () => {
+    for (const q of [
+      "UPDATE assets SET tenant_id = ${t} WHERE id = ${i}",
+      "UPDATE assets SET name = ${n} FROM config WHERE id = 1",
+      "UPDATE OR REPLACE assets SET id = 2 WHERE id = 1",
+      "UPDATE assets AS a SET name = ${n}",
+      "DELETE FROM assets WHERE id = 1 RETURNING name",
+      "DELETE FROM assets WHERE id = 1 ORDER BY id LIMIT 1",
+      "DELETE FROM assets WHERE id = hex(name)",
+      "DELETE FROM assets WHERE id IN (SELECT asset_id FROM orders)",
+    ]) {
+      expect(classifyTenantWrite(q, ctx)).toMatchObject({ kind: "hard-fail" });
+    }
   });
-  test("a comment or a quoted name cannot hide the target (fail-closed on any mention)", () => {
-    expect(classifyTenantWrite("UPDATE/**/assets SET name = ${n}", ctx)).toMatchObject({ kind: "hard-fail" });
-    expect(classifyTenantWrite('UPDATE "assets" SET name = ${n}', ctx)).toMatchObject({ kind: "hard-fail" });
-    expect(classifyTenantWrite("INSERT/**/INTO assets (name) VALUES (${n})", ctx)).toMatchObject({ kind: "hard-fail" });
-    expect(classifyTenantWrite("INSERT INTO config (k) SELECT name FROM assets", ctx)).toMatchObject({ kind: "hard-fail" });
-    expect(classifyTenantWrite("INSERT INTO assets (name) VALUES ((SELECT name FROM assets WHERE id = 2))", ctx)).toMatchObject({ kind: "hard-fail" });
+  test("REPLACE / INSERT OR REPLACE / ON CONFLICT / INSERT … SELECT / a subquery in VALUES → hard-fail", () => {
+    for (const q of [
+      "REPLACE INTO assets (id, name) VALUES (2, 'x')",
+      "INSERT OR REPLACE INTO assets (id, name) VALUES (2, 'x')",
+      "INSERT INTO assets (id, name) VALUES (2, 'x') ON CONFLICT (id) DO UPDATE SET name = 'x'",
+      "INSERT INTO config (k) SELECT name FROM assets",
+      "INSERT INTO assets (name) VALUES ((SELECT name FROM assets WHERE id = 2))",
+      "INSERT INTO assets (name, TENANT_ID) VALUES ('forged', 'B')",
+      "INSERT INTO assets (name) VALUES (${n}) RETURNING id",
+    ]) {
+      expect(classifyTenantWrite(q, ctx)).toMatchObject({ kind: "hard-fail" });
+    }
+  });
+  test("a comment or a quoted name takes a write OUT of the subset (E-TENANT-SQL-SUBSET)", () => {
+    for (const q of [
+      "UPDATE/**/assets SET name = ${n}",
+      'UPDATE "assets" SET name = ${n}',
+      "INSERT/**/INTO assets (name) VALUES (${n})",
+      'INSERT INTO assets (name, "tenant_id") VALUES (\'forged\', \'B\')',
+      "INSERT INTO assets (name, [tenant_id]) VALUES ('forged', 'B')",
+    ]) {
+      expect(classifyTenantWrite(q, ctx)).toBeNull();
+      expect(tenantFloorViolation(q, false, ctx)).toMatchObject({ code: "E-TENANT-SQL-SUBSET" });
+    }
   });
   test("write to a NON-tenant table → null (no floor); a literal naming one is data", () => {
     expect(classifyTenantWrite("DELETE FROM config WHERE k = ${k}", ctx)).toBeNull();

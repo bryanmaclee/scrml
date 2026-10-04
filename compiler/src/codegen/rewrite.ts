@@ -34,6 +34,7 @@ import {
   wrapWithTenantScope,
   classifyTenantWrite,
   rewriteInsertAddTenantId,
+  rewriteWriteAddTenantFilter,
   sqlMentionsTenantTable,
   tenantFloorViolation,
   tenantAcrossIsAudited,
@@ -270,7 +271,7 @@ interface RewriterTenantState {
   seenAcross: Set<string>;
   // §14.8.10 compile-time refusals (E-TENANT-AGG / E-TENANT-WRITE), recorded at
   // THIS choke so every SQL spelling is covered; drained into errors by the caller.
-  violations: Array<{ code: "E-TENANT-AGG" | "E-TENANT-WRITE"; message: string; sql: string }>;
+  violations: Array<{ code: "E-TENANT-AGG" | "E-TENANT-WRITE" | "E-TENANT-SQL-SUBSET"; message: string; sql: string }>;
   seenViolation: Set<string>;
 }
 let _rewriterTenantState: RewriterTenantState | null = null;
@@ -287,7 +288,7 @@ export function drainTenantStripsFromRewriter(): Array<{ sql: string }> {
 }
 
 /** Drain the §14.8.10 compile-time refusals recorded at the lowering choke. */
-export function drainTenantViolationsFromRewriter(): Array<{ code: "E-TENANT-AGG" | "E-TENANT-WRITE"; message: string; sql: string }> {
+export function drainTenantViolationsFromRewriter(): Array<{ code: "E-TENANT-AGG" | "E-TENANT-WRITE" | "E-TENANT-SQL-SUBSET"; message: string; sql: string }> {
   return _rewriterTenantState ? _rewriterTenantState.violations : [];
 }
 
@@ -361,20 +362,25 @@ export function _lowerTenantForQuery(
     if (tenantAcrossIsAudited(sqlContent, st.ctx)) _recordTenantAcross(sqlContent);
     return identity;
   }
+  if (violation !== null) return identity; // refused at compile (recorded above).
   const scoping: TenantScoping = resolveTenantScoping(sqlContent, st.ctx);
   if (scoping !== null) {
-    if (scoping.kind === "agg") return identity; // refused at compile (E-TENANT-AGG, recorded above).
+    if (scoping.kind === "agg" || scoping.kind === "outside") return identity; // refused at compile.
     _recordTenantStrip(sqlContent);
     return {
       effectiveSql: rewriteSelectAddTenantId(sqlContent, scoping),
       tenantScope: (rowsExpr: string) => wrapWithTenantScope(rowsExpr, scoping),
     };
   }
-  // Write path — inject `tenant_id` into an injectable INSERT. UPDATE/DELETE +
-  // un-injectable INSERT hard-fail in the emit-server scan; here they lower unchanged.
-  const write = classifyTenantWrite(sqlContent, _rewriterTenantState.ctx);
+  // Write path (S452 r3) — a subset INSERT gets `tenant_id` injected; a subset
+  // UPDATE / DELETE gets `AND tenant_id = <active tenant>` on its parenthesized
+  // WHERE. Every other write was refused above (E-TENANT-WRITE / -SQL-SUBSET).
+  const write = classifyTenantWrite(sqlContent, st.ctx);
   if (write && write.kind === "insert-inject") {
-    return { effectiveSql: rewriteInsertAddTenantId(sqlContent, _TENANT_AMBIENT_EXPR), tenantScope: _identityScope };
+    return { effectiveSql: rewriteInsertAddTenantId(sqlContent, _TENANT_AMBIENT_EXPR, st.ctx), tenantScope: _identityScope };
+  }
+  if (write && write.kind === "filter-inject") {
+    return { effectiveSql: rewriteWriteAddTenantFilter(sqlContent, _TENANT_AMBIENT_EXPR, st.ctx), tenantScope: _identityScope };
   }
   return identity;
 }

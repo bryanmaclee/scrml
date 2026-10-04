@@ -153,9 +153,17 @@ describe("CONF-TENANT-FLOOR (codes-half): each code fires on its shape", () => {
     const { r } = compile(`      function f() { let x = ?{\`SELECT COUNT(*) AS n FROM assets\`}.get(); return x }`);
     expect(codes(r).has("E-TENANT-AGG")).toBe(true);
   });
-  test("E-TENANT-WRITE — an UPDATE against a tenant table", () => {
-    const { r } = compile(`      function f() { let x = ?{\`UPDATE assets SET name = \${"z"} WHERE id = \${1}\`}.run(); return x }`);
+  test("E-TENANT-WRITE — an UPDATE that moves a row to another tenant", () => {
+    const { r } = compile(`      function f() { let x = ?{\`UPDATE assets SET tenant_id = \${"z"} WHERE id = \${1}\`}.run(); return x }`);
     expect(codes(r).has("E-TENANT-WRITE")).toBe(true);
+  });
+  test("off-shape (S452 r3): a subset UPDATE is tenant-constrained, not refused", () => {
+    const { r } = compile(`      function f() { let x = ?{\`UPDATE assets SET name = \${"z"} WHERE id = \${1}\`}.run(); return x }`);
+    expect(codes(r).has("E-TENANT-WRITE")).toBe(false);
+  });
+  test("E-TENANT-SQL-SUBSET — a tenant query outside the floor's SQL subset", () => {
+    const { r } = compile(`      function f() { let x = ?{\`SELECT "count"(*) AS n FROM assets\`}.get(); return x }`);
+    expect(codes(r).has("E-TENANT-SQL-SUBSET")).toBe(true);
   });
   test("E-TENANT-RAW-EGRESS — a tenant read reaching a manual Response", () => {
     const { r } = compile(`      function f() { let x = ?{\`SELECT id FROM assets\`}.all(); return new Response(JSON.stringify(x)) }`);
