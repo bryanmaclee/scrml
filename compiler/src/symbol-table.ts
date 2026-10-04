@@ -7629,9 +7629,27 @@ export function validateEngineStateChildrenAndRules(
     // parseMessageArms' `|` path (engine-statechild-parser.ts).
     for (const arm of arms) {
       if (!arm.legacyPipe) continue;
-      const span: SYMDiagnostic["span"] = engineDecl?.span ?? {
+      // The arm's own span (S452 review r1): `rulesRawPos` (ast-builder.js)
+      // places `rulesRaw` in the file; the arm sits `bodyRawOffset +
+      // spanStart` into it. Falls back to the engine's span when unplaced.
+      const rp = (engineDecl as { rulesRawPos?: { start: number; line: number; col: number } } | undefined)?.rulesRawPos;
+      const rulesRawText = typeof (engineDecl as { rulesRaw?: unknown } | undefined)?.rulesRaw === "string"
+        ? (engineDecl as { rulesRaw: string }).rulesRaw : null;
+      let span: SYMDiagnostic["span"] = engineDecl?.span ?? {
         file: filePath, start: 0, end: 0, line: 1, col: 1,
       };
+      if (rp && rulesRawText !== null && typeof sc.bodyRawOffset === "number") {
+        const rel = sc.bodyRawOffset + arm.spanStart;
+        const before = rulesRawText.slice(0, rel);
+        const nl = before.lastIndexOf("\n");
+        span = {
+          file: filePath,
+          start: rp.start + rel,
+          end: rp.start + rel + 1,
+          line: rp.line + (before.match(/\n/g) ?? []).length,
+          col: nl < 0 ? rp.col + before.length : before.length - nl,
+        };
+      }
       errors.push({
         code: "W-ARM-PIPE-LEGACY",
         message: armPipeLegacyMessage(
@@ -7683,8 +7701,8 @@ export function validateEngineStateChildrenAndRules(
         `\`<engine for=${forType} accepts=${acceptsType}>\` declares message-arm(s) but does ` +
         `not cover every \`${acceptsType}\` variant. Missing arm(s) for: ` +
         `${missing.map((v) => `.${v}`).join(", ")}. Per SPEC §51.0.S.2.4, once a state declares ` +
-        `any message-arm it must cover the full message set OR carry a \`| _ :>\` wildcard. ` +
-        `Add the missing arm(s), or add \`| _ :> @${meta.varName}\` to explicitly ignore the rest ` +
+        `any message-arm it must cover the full message set OR carry a \`_ :>\` wildcard. ` +
+        `Add the missing arm(s), or add \`_ :> @${meta.varName}\` to explicitly ignore the rest ` +
         `(stay in the current state).`,
         engineDecl,
         filePath,

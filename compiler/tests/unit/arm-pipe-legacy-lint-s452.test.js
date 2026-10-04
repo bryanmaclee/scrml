@@ -148,6 +148,88 @@ describe("W-ARM-PIPE-LEGACY — `!{}` handler arms", () => {
   });
 });
 
+describe("W-ARM-PIPE-LEGACY — every handler impl#1 parses (S452 review r1)", () => {
+  test("a handler NESTED in another arm's `{…}` body: its `|`-led arms lint too", () => {
+    const { result } = compileSrc(program([
+      "    const r = risky(n) !{",
+      "        | .Bad(m) :> {",
+      "            const x = risky(2) !{",
+      "                | .Gone :> 1",
+      "                | _ :> 2",
+      "            }",
+      "            return x",
+      "        }",
+      "        | _ :> 3",
+      "    }",
+      "    return r",
+    ]));
+    expect(errorCodes(result)).toEqual([]);
+    const ws = pipeLints(result);
+    expect(ws.length).toBe(4);
+    expect(ws.map((w) => w.span.line)).toEqual([11, 13, 14, 18]);
+  });
+
+  test("a standalone `!{ … }` error-effect block lints", () => {
+    const { result } = compileSrc([
+      "<div>",
+      "    !{",
+      "        | ::ValidationError(err) -> let msg = \"Validation failed\"",
+      "        | _ err -> let msg = \"Something went wrong\"",
+      "    }",
+      "    <p>Typed error handler</>",
+      "</div>",
+      "",
+    ].join("\n"));
+    const ws = pipeLints(result);
+    expect(ws.length).toBe(2);
+    expect(ws[0].message).toContain("write '::ValidationError(err) ->'");
+  });
+
+  test("one lint per arm SITE: a component instantiated twice lints its arms once", () => {
+    const { result } = compileSrc([
+      "type LoadError:enum = { Empty, Bad }",
+      "${",
+      "    function risky()! -> LoadError { fail LoadError.Empty }",
+      "    const Btn = <button onclick={ risky() !{ | .Empty :> @r = 1 | .Bad :> @r = 2 } }>go</>",
+      "}",
+      "<r> = 0",
+      "<Btn/>",
+      "<Btn/>",
+      "",
+    ].join("\n"));
+    expect(pipeLints(result).length).toBe(2);
+  });
+
+  test("in a component body the lint does NOT tell the author to drop the `|` (impl#1 gap)", () => {
+    const { result } = compileSrc([
+      "type LoadError:enum = { Empty, Bad }",
+      "${",
+      "    function risky()! -> LoadError { fail LoadError.Empty }",
+      "    const Btn = <button onclick={ risky() !{ | .Empty :> @r = 1 | .Bad :> @r = 2 } }>go</>",
+      "}",
+      "<r> = 0",
+      "<Btn/>",
+      "",
+    ].join("\n"));
+    const [w] = pipeLints(result);
+    expect(w.message).toContain("component body");
+    expect(w.message).toContain("keep the '|'");
+    expect(w.message).not.toContain("Run 'scrml fix'");
+  });
+
+  test("an arm with no separator of its own (attempted alternation) gets no rewrite suggestion", () => {
+    const { result } = compileSrc(program(VALUE([
+      "        | .Bad(m) :> m",
+      "        | .Pair(a, b) | .Gone :> \"x\"",
+    ])));
+    const msgs = pipeLints(result).map((w) => w.message);
+    expect(msgs.length).toBe(3);
+    const alt = msgs.find((m) => m.includes("'| .Pair(a, b)'"));
+    expect(alt).toContain("no arm separator");
+    expect(alt).not.toContain("write '.Pair(a, b) :>'");
+  });
+});
+
 const ENGINE = (arms) => [
   "<program>",
   "type Phase:enum = { Idle, Busy(id: number) }",
@@ -179,6 +261,19 @@ describe("W-ARM-PIPE-LEGACY — engine message arms (§51.0.S.2.3)", () => {
     expect(ws[0].message).toContain("write '.Start(id) :>'");
     expect(ws[0].message).toContain("<Idle>");
     expect(ws[0].message).toContain("§19.4.5");
+    // Each lint carries its OWN arm's span (line:col of its `|`), not the engine's.
+    expect(ws.map((w) => [w.span.line, w.span.col])).toEqual([[6, 5], [7, 5], [10, 5], [11, 5]]);
+  });
+
+  test("E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE suggests the pipe-less wildcard `_ :>`", () => {
+    const { result } = compileSrc(ENGINE({
+      idle: ["    .Start(id) :> .Busy(id)"],
+      busy: ["    .Stop :> .Idle", "    _ :> @phase"],
+    }));
+    const e = (result.errors ?? []).find((d) => d.code === "E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE");
+    expect(e).toBeDefined();
+    expect(e.message).toContain("`_ :>`");
+    expect(e.message).not.toContain("`| _");
   });
 
   test("pipe-less message arms: no lint, and byte-identical client JS to the piped spelling", () => {

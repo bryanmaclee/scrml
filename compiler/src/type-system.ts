@@ -12502,23 +12502,9 @@ function annotateNodes(
         const guardedNode = n.guardedNode as ASTNodeLike | undefined;
         const errorArms = (n.arms as Array<{pattern?: string; binding?: string; handler?: string; handlerExpr?: unknown; failExpr?: unknown; armArrow?: string; legacyPipe?: { pattern?: string; canonical?: string }; span?: Span}> | undefined) ?? [];
 
-        // §19.4.5 / §34 — W-ARM-PIPE-LEGACY (S452). A `!{}` handler arm led
-        // by `|` is soft-deprecated (§63.1 Stage 1): it parses identically to
-        // the pipe-less §18.2 match arm. One info-level lint per `|`-led arm.
-        // `legacyPipe` is set ONLY by the `!{}` arm parser's `|` path
-        // (ast-builder.js parseErrorTokens), so a pipe-less arm, an alternation
-        // `|` and a `|` inside an arm body never reach here.
-        for (const arm of errorArms) {
-          const lp = arm.legacyPipe;
-          if (!lp) continue;
-          const armSpan = (arm.span ?? ((n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 })) as Span;
-          errors.push(new TSError(
-            "W-ARM-PIPE-LEGACY",
-            armPipeLegacyMessage(String(lp.pattern ?? ""), String(lp.canonical ?? ""), arm.armArrow ?? ":>", "in a `!{}` handler"),
-            armSpan,
-            "info",
-          ));
-        }
+        // §19.4.5 W-ARM-PIPE-LEGACY is fired once per file by checkArmPipeLegacy
+        // (processFile) — it must also reach standalone error-effect handlers and
+        // handlers nested in an arm body, which this case does not visit.
 
         // §18.2 / §34 — W-MATCH-ARROW-LEGACY (S147), `!{}`-handler-arm lockstep.
         // The match and `!{}` handler arms share the §18.2 arm-arrow rule:
@@ -18626,6 +18612,75 @@ function matchArrowLegacyMessage(location: string, glyph: string): string {
     `rewrites ONLY arm-separator arrows, never arrow-function or fn-return ` +
     `arrows). See SPEC §18.2 / §34.`
   );
+}
+
+/**
+ * §19.4.5 / §34 — W-ARM-PIPE-LEGACY (S452) for `!{}` handler arms. A `!{}` arm
+ * led by `|` is soft-deprecated (§63.1 Stage 1); one info-level lint per arm.
+ *
+ * The arm record carries `legacyPipe` ONLY when the `!{}` arm parser
+ * (ast-builder.js parseErrorTokens) read it through its `|` path, so a
+ * pipe-less arm, a match arm, `||` and a `|` in a string never reach here. The
+ * walk visits EVERY object of the file's tree, so it finds the arms of a
+ * guarded-expr, of a standalone error-effect block, and of a handler nested in
+ * another arm's body (`arm.nestedHandlers`, ast-builder.js
+ * `_nestedHandlersIn`). One lint per arm SITE: an arm reached twice (a shared
+ * array, or a component body instantiated more than once) is linted once.
+ *
+ * Special cases (S452 review r1):
+ *  - an arm the parser found no arm arrow for (`| .A | .B :> …` — impl#1 has
+ *    no `!{}` alternation; it reads `| .A` as an arm of its own) gets no
+ *    rewrite suggestion;
+ *  - an arm inside a COMPONENT BODY (its span's file is the synthetic
+ *    `<file>#<Component>` the component expander re-parses under) is not told
+ *    to drop the `|`: impl#1 does not yet compile the pipe-less form there
+ *    (g-impl1-component-body-pipeless-handler-s452).
+ */
+function checkArmPipeLegacy(nodes: ASTNodeLike[], errors: TSError[], fileSpan: Span): void {
+  const seenObj = new WeakSet<object>();
+  const seenSite = new Set<string>();
+  const found: TSError[] = [];
+  const stack: unknown[] = [nodes];
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (!n || typeof n !== "object" || seenObj.has(n as object)) continue;
+    seenObj.add(n as object);
+    const o = n as Record<string, unknown>;
+    const lp = o.legacyPipe as { pattern?: string; canonical?: string; arrowFound?: boolean } | undefined;
+    if (lp && typeof o.pattern === "string" && typeof o.armArrow === "string") {
+      const span = (o.span as Span | undefined) ?? fileSpan;
+      const key = `${span.file ?? ""}:${span.start}:${lp.pattern ?? ""}`;
+      if (!seenSite.has(key)) {
+        seenSite.add(key);
+        const inComponent = typeof span.file === "string" && span.file.includes("#");
+        let message: string;
+        if (lp.arrowFound === false) {
+          message =
+            `W-ARM-PIPE-LEGACY: Arm '| ${lp.pattern ?? ""}' in a \`!{}\` handler uses the deprecated leading '|' ` +
+            `and has no arm separator of its own: a \`!{}\` handler has no alternation on impl#1, so this ` +
+            `pattern is read as a separate arm. Write each pattern as its own §18.2 match arm ` +
+            `('<pattern> :> <body>'); 'scrml fix' leaves this arm for a human (§19.4.5).`;
+        } else if (inComponent) {
+          message =
+            `W-ARM-PIPE-LEGACY: Arm '| ${lp.pattern ?? ""} ${o.armArrow}' in a \`!{}\` handler in a component body ` +
+            `uses the deprecated leading '|'. The canonical arm is '${lp.canonical ?? ""} ${o.armArrow}' (§18.2), ` +
+            `but impl#1 does not yet compile the pipe-less form inside a component body — keep the '|' there ` +
+            `for now (§19.4.5).`;
+        } else {
+          message = armPipeLegacyMessage(String(lp.pattern ?? ""), String(lp.canonical ?? ""), String(o.armArrow), "in a `!{}` handler");
+        }
+        found.push(new TSError("W-ARM-PIPE-LEGACY", message, span, "info"));
+      }
+    }
+    for (const k of Object.keys(o)) {
+      const v = o[k];
+      if (v && typeof v === "object") stack.push(v);
+    }
+  }
+  // Source order (the walk is a stack).
+  const pos = (e: TSError) => { const sp = (e as unknown as { span?: Span }).span; return [String(sp?.file ?? ""), Number(sp?.start ?? 0)] as const; };
+  found.sort((a, b) => { const [fa, sa] = pos(a); const [fb, sb] = pos(b); return fa < fb ? -1 : fa > fb ? 1 : sa - sb; });
+  errors.push(...found);
 }
 
 /**
@@ -25697,6 +25752,10 @@ function processFile(
     // §20.7.5 / W-PRINT-SHADOWED — a user-declared `function print` / `println`
     // shadows the clean-stdout builtin; info-level nudge (mirrors W-LOG-SHADOWED).
     checkPrintShadowing(fnFieldTopNodes, errors, fileSpan);
+    // §19.4.5 / W-ARM-PIPE-LEGACY — every `|`-led `!{}` handler arm impl#1
+    // parsed, wherever it hangs (guarded-expr, standalone error-effect, a
+    // handler nested in an arm body). Engine message arms: symbol-table.ts.
+    checkArmPipeLegacy(fnFieldTopNodes, errors, fileSpan);
     // §20.7.2 / E-PRINT-NON-PRIMITIVE — a print()/println() arg must be a
     // string / number / boolean; a struct/enum/array/map/markup/`not` is rejected.
     checkPrintArgs(fnFieldTopNodes, errors, fileSpan);

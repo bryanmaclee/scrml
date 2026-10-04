@@ -17221,6 +17221,36 @@ function _errArmTokensText(tokens, from, to) {
   return out;
 }
 
+/**
+ * §19.4.5 (S452) — the `!{}` handlers NESTED in an arm body. The tokenizer lexes
+ * a `!{…}` inside an arm body as one error-effect BLOCK_REF token, so its arms
+ * reach no AST node (the arm body stays text; codegen re-parses it). Each one is
+ * parsed here with the same arm parser — positions only, NO diagnostics (the
+ * `errors` sink is omitted, so nothing a compile reports changes) — so the
+ * W-ARM-PIPE-LEGACY lint and `scrml fix` see its `|`-led arms.
+ * Returns `{ nestedHandlers: [{ raw, arms }] }` (spread into the arm record), or
+ * `{}` when the body holds none. Kind-less on purpose: AST walkers keyed on
+ * `kind` do not see it.
+ */
+function _nestedHandlersIn(tokens, from, to, filePath) {
+  const out = [];
+  for (let k = from; k < to && k < tokens.length; k++) {
+    const t = tokens[k];
+    if (t.kind !== "BLOCK_REF" || !t.block || t.block.type !== "error-effect") continue;
+    const raw = typeof t.block.raw === "string" ? t.block.raw : t.text;
+    if (typeof raw !== "string" || !raw.startsWith("!{") || !raw.endsWith("}")) continue;
+    const start = t.span?.start ?? t.block.span?.start ?? 0;
+    try {
+      const inner = tokenizeError(raw.slice(2, raw.length - 1), start + 2, t.span?.line ?? 1, (t.span?.col ?? 1) + 2);
+      const arms = parseErrorTokens(inner, filePath);
+      if (arms.length > 0) out.push({ raw, arms });
+    } catch {
+      // a nested body the arm parser cannot read is left to the codegen re-parse
+    }
+  }
+  return out.length > 0 ? { nestedHandlers: out } : {};
+}
+
 function parseErrorTokens(tokens, filePath, errors) {
   const arms = [];
   let i = 0;
@@ -17474,6 +17504,7 @@ function parseErrorTokens(tokens, filePath, errors) {
       // Handler: collect until next `|`, next simplified arm start, or EOF
       // BUG-ASI-ERROR-ARM: Track source line per token so newlines between statements
       // survive into rewriteBlockBody (which splits on semicolons and newlines).
+      const _hFrom = i; // §19.4.5 — first handler token (nested `!{}` scan)
       const handlerParts = [];
       const handlerPartLines = []; // parallel: source line number for each part
       let _armDepth = 0; // S452 — bracket depth within this arm's handler
@@ -17518,6 +17549,7 @@ function parseErrorTokens(tokens, filePath, errors) {
         armArrow,
         ...(armTypeQualifier ? { typeQualifier: armTypeQualifier } : {}),
         ...(legacyPipe ? { legacyPipe } : {}),
+        ..._nestedHandlersIn(tokens, _hFrom, i, filePath),
         span: tokenSpan(armStart, filePath),
       });
     } else if (tok.kind === "OPERATOR" && tok.text === "::") {
@@ -17564,6 +17596,7 @@ function parseErrorTokens(tokens, filePath, errors) {
         i++;
         if (i < tokens.length && tokens[i].kind === "PUNCT" && tokens[i].text === ">") i++;
       }
+      const _hFrom = i; // §19.4.5 — first handler token (nested `!{}` scan)
       const handlerParts = [];
       const handlerPartLines = [];
       let _armDepth2 = 0; // S452 r3 — bracket depth within this arm's handler
@@ -17603,6 +17636,7 @@ function parseErrorTokens(tokens, filePath, errors) {
         handler: _handlerTrimmed3,
         handlerExpr: _parseHandlerExpr(_handlerTrimmed3, filePath, tokenSpan(armStart, filePath)?.start ?? 0),
         armArrow: armArrow2,
+        ..._nestedHandlersIn(tokens, _hFrom, i, filePath),
         span: tokenSpan(armStart, filePath),
       });
     } else if (
@@ -17626,6 +17660,7 @@ function parseErrorTokens(tokens, filePath, errors) {
       const armArrow3 = tokens[i + 1] && tokens[i + 1].text === "=>" ? "=>" : ":>";
       i++; // consume TypeName or _
       i++; // consume arm arrow
+      const _hFrom = i; // §19.4.5 — first handler token (nested `!{}` scan)
       const handlerParts = [];
       const handlerPartLines = []; // parallel: source line number for each part
       let _armDepth3 = 0; // S452 — bracket depth within this arm's handler
@@ -17665,6 +17700,7 @@ function parseErrorTokens(tokens, filePath, errors) {
         handler: _handlerTrimmed2,
         handlerExpr: _parseHandlerExpr(_handlerTrimmed2, filePath, tokenSpan(armStart, filePath)?.start ?? 0),
         armArrow: armArrow3,
+        ..._nestedHandlersIn(tokens, _hFrom, i, filePath),
         span: tokenSpan(armStart, filePath),
       });
     } else {
@@ -21065,6 +21101,23 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           // EXCEPT the codes no downstream validator re-derives (S437).
           _forwardSubparseErrors(_bodyErrors, errors, 0, block);
         }
+        // §19.4.5 (S452 review r1) — the source position where the TRIMMED
+        // rulesRaw begins, when rulesRaw is the concatenation of the body
+        // children (contiguous source): lets a message-arm diagnostic carry its
+        // own span (symbol-table.ts W-ARM-PIPE-LEGACY). Absent otherwise.
+        let rulesRawPos = null;
+        {
+          const c0 = block.children && block.children[0];
+          if (rulesRaw && c0 && c0.span && typeof c0.span.start === "number" && typeof c0.span.line === "number") {
+            const lead = rulesRaw.slice(0, rulesRaw.length - rulesRaw.trimStart().length);
+            const nl = lead.lastIndexOf("\n");
+            rulesRawPos = {
+              start: c0.span.start + lead.length,
+              line: c0.span.line + (lead.match(/\n/g) ?? []).length,
+              col: nl < 0 ? (c0.span.col ?? 1) + lead.length : lead.length - nl,
+            };
+          }
+        }
         // Also extract from raw content after the header line
         if (!rulesRaw && firstLineEnd >= 0) {
           rulesRaw = machineRaw.slice(firstLineEnd + 1);
@@ -21099,6 +21152,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           engineName: engineName,
           governedType,
           rulesRaw,
+          ...(rulesRawPos ? { rulesRawPos } : {}),
           // Phase A10 (S78, 2026-05-10) — walkable body children. See note
           // above the bodyChildren = [] declaration for full rationale.
           // ADDITIVE field: undefined on legacy zero-child engine bodies,
