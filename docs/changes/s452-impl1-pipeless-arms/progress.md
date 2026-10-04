@@ -8,3 +8,4 @@
 - fix round r2
 - r2: head = .V|::V|T.V|T::V [(..)] arrow, or _/else arrow; no paren-free binder; glued ./:: never a head. Differential vs df6dad5ac: 2249 files/13319 artifacts, delta = new conformance case only. Gate 30114/0. Gap g-impl1-handler-arm-foreign-variant-accepted filed.
 - fix round r3
+- r3: (1) stray arm-level token / depth-0 body `:>` -> E-PARSE-001 (reused); (2) pipe-less `_ err :>`; (3) E-TYPE-ARM-QUALIFIER-MISMATCH (new, needs §34 row); (4) legacy `::V m` body loop depth-0 break. Differential vs df6dad5ac: 2249 files, delta = new conformance case only (0 corpus files newly rejected). LEFT (pre-existing, not fixed): LOW-6 short-form `_ =>`/`Name =>` break inside arrow-function bodies; nested-`match`-in-block-body E-CODEGEN; COMMENT tokens absorbed into a preceding arm's handler text (statement-boundary warning).
