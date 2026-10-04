@@ -62,6 +62,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, relative, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { parseS34Rows } from "./s34-catalog.ts";
 
 // `new URL(import.meta.url).pathname` yields a `/C:/…` form on Windows that does not
 // open (the leading slash makes an invalid `\C:\…` after dirname/join); `fileURLToPath`
@@ -142,21 +143,15 @@ const RUNTIME_SURFACED = /\bRuntime:|Surfaced via|surfaces? (?:via|as) `?::|\(ru
 type Row = { code: string; struck: boolean; severity: string; line: number; native: boolean; refs: string; declared: boolean; runtime: boolean };
 const rows: Row[] = [];
 const idx = new Map<string, Row>();
-for (let i = SEC34_START - 1; i < SEC34_END && i < specLines.length; i++) {
-  const raw = specLines[i];
-  if (!raw.startsWith("|")) continue;
-  const cells = raw.split("|");
-  if (cells.length < 3) continue;
-  const first = cells[1].trim();
-  if (!first || /^-+$/.test(first) || /^code$/i.test(first)) continue;
-  const struck = first.includes("~~"); // T1
-  const code = first.replace(/~~/g, "").replace(/\*\*/g, "").replace(/`/g, "").trim();
-  if (!/^[EWI]-[A-Z0-9-]+$/.test(code)) continue;
+// The row parse is shared with scripts/gen-bootstrap-severity.ts (scripts/s34-catalog.ts), so the
+// census and the bootstrap's severity table read the catalog one way. `struck` is trap T1.
+for (const pr of parseS34Rows(specLines)) {
+  const { code, struck, raw, cells } = pr;
   const prior = idx.get(code);
-  if (prior) { if (prior.struck && !struck) { prior.struck = false; prior.line = i + 1; } continue; }
+  if (prior) { if (prior.struck && !struck) { prior.struck = false; prior.line = pr.line; } continue; }
   const r: Row = {
-    code, struck, severity: cells[cells.length - 2]?.trim() ?? "", line: i + 1,
-    native: NATIVE_START > 0 && i + 1 >= NATIVE_START, refs: (cells[2] ?? "").trim(),
+    code, struck, severity: pr.severity, line: pr.line,
+    native: NATIVE_START > 0 && pr.line >= NATIVE_START, refs: (cells[2] ?? "").trim(),
     declared: DECLARED_AHEAD.test(raw), runtime: RUNTIME_SURFACED.test(raw),
   };
   idx.set(code, r); rows.push(r);

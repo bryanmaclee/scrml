@@ -59,10 +59,12 @@
  *     only when the case has no `dialect.s66` expect.
  * `--no-twins` reproduces the pre-twin measurement (legacy cases graded as written, LEGACY bucket).
  *
- * Severity: the bootstrap's `Diag` (ast.scrml) carries no §34 severity. A case asserting
- * `severity` for a code the bootstrap DID emit fails with "severity unobservable" — it is a real
- * divergence (the language contract partitions by severity), reported as its own family so it
- * does not drown the rest.
+ * Severity (s451-boot-diag-severity): every bootstrap `Diag` (ast.scrml) carries its §34 severity
+ * ("Error" | "Warning" | "Info"), derived from its code by the generated table
+ * compiler/self-host-v2/severity.scrml. A case asserting `severity` is graded against it, per
+ * occurrence, in both streams. "Error" is also what the twin-extra-error rule and the no-artifact
+ * message key on — never the code's prefix (§34 makes E-DG-002 a Warning, many W- codes Info). A
+ * diagnostic with no severity field is reported "severity unobservable" (a bootstrap defect).
  *
  * ═══ USAGE ═══
  *
@@ -116,6 +118,8 @@ export interface CaseVerdict {
   emitted: string[];
   /** Codes the bootstrap emitted that the case does not list in `codes` (sorted). */
   unexpected: string[];
+  /** The subset of `unexpected` the bootstrap emitted at §34 severity Error (sorted). */
+  unexpectedErrors: string[];
   /** Failure lines (FAIL / CRASH / INVALID). */
   failures: string[];
   /** Did the runtime half execute on the bootstrap? */
@@ -343,8 +347,15 @@ export function twinOf(c: { source: string; auxFiles: Record<string, string> }):
 
 interface Diag {
   code: string;
+  /** The code's §34 severity — "Error" | "Warning" | "Info" (compiler/self-host-v2/severity.scrml). */
+  severity?: string;
   message: string;
   file: string;
+}
+
+/** A diagnostic's §34 severity as a conformance `severity` value ("error" | "warning" | "info"), or null. */
+export function severityOfDiag(d: Diag): string | null {
+  return typeof d.severity === "string" ? d.severity.toLowerCase() : null;
 }
 
 export interface Bootstrap {
@@ -468,13 +479,13 @@ const stableKey = (v: unknown): string => {
 
 /**
  * The codes-half assertions, judged exactly as conformance/run.ts `runCase` judges impl#1: the codes
- * are the union of BOTH streams (`diags` and the non-fatal `infos`). Severity is observable for the
- * `infos` stream only — a code there IS an info; a code in `diags` carries no §34 severity.
+ * are the union of BOTH streams (`diags` and the non-fatal `infos`). Severity is each diagnostic's
+ * own §34 severity (the `severity` field the bootstrap derives from the code); every occurrence of
+ * an asserted code must carry the asserted severity.
  */
 export function codesHalfFailures(ex: Record<string, any>, diags: Diag[], infos: Diag[] = []): string[] {
   const all = diags.concat(infos);
   const emitted = new Set(all.map((d) => d.code));
-  const asInfo = new Set(infos.map((d) => d.code));
   const counts: Record<string, number> = {};
   for (const d of all) counts[d.code] = (counts[d.code] ?? 0) + 1;
   const out: string[] = [];
@@ -482,9 +493,10 @@ export function codesHalfFailures(ex: Record<string, any>, diags: Diag[], infos:
   for (const c of ex.notCodes ?? []) if (emitted.has(c)) out.push(`forbidden ${c} fired`);
   for (const p of ex.notCodePrefixes ?? []) for (const c of emitted) if (c.startsWith(p)) out.push(`forbidden family ${p}* fired: ${c}`);
   for (const [c, want] of Object.entries(ex.severity ?? {})) {
-    if (!emitted.has(c)) out.push(`severity: ${c} did not fire (expected ${want})`);
-    else if (asInfo.has(c)) { if (want !== "info") out.push(`severity: ${c} fired as info (expected ${want})`); }
-    else out.push(`severity unobservable: ${c} fired but the bootstrap Diag carries no §34 severity (expected ${want})`);
+    if (!emitted.has(c)) { out.push(`severity: ${c} did not fire (expected ${want})`); continue; }
+    const got = [...new Set(all.filter((d) => d.code === c).map(severityOfDiag))];
+    if (got.includes(null)) out.push(`severity unobservable: ${c} fired with no severity on its Diag (expected ${want})`);
+    else if (got.some((g) => g !== want)) out.push(`severity: ${c} fired as ${got.sort().join("+")} (expected ${want})`);
   }
   for (const [c, want] of Object.entries(ex.codeCounts ?? {})) {
     if (typeof want !== "number" || !Number.isInteger(want) || want < 0) out.push(`codeCounts['${c}'] malformed`);
@@ -522,7 +534,7 @@ export async function classifyCase(boot: Bootstrap, c: LoadedCase, opts: Classif
   if (opts.twins === false) return gradeCase(boot, c, { source: c.source, auxFiles: c.auxFiles, ex: ex0, legacy });
   const area = c.relDir.split("/")[0];
   const notTwinned = (reason: string, failures: string[], override: CaseVerdict["override"] = null): CaseVerdict => ({
-    relDir: c.relDir, area, bucket: "NOT-TWINNED", reason, emitted: [], unexpected: [], failures, runtimeExecuted: false,
+    relDir: c.relDir, area, bucket: "NOT-TWINNED", reason, emitted: [], unexpected: [], unexpectedErrors: [], failures, runtimeExecuted: false,
     vacuous: false, unimplementedCodes: [], legacyMarkers: legacy, twin: false, twinRules: [], mapped: [], override,
   });
   let tw: Twin;
@@ -546,7 +558,7 @@ export async function classifyCase(boot: Bootstrap, c: LoadedCase, opts: Classif
   const out: CaseVerdict = { ...verdict, legacyMarkers: legacy, twin: true, twinRules: tw.rules, mapped, override: ov?.expect ? "expect" : null };
   // A twin is GENERATED: an error the case does not assert is a codemod-defect signal (or a
   // bootstrap one), never a free pass. A passing twin that emitted one is graded FAIL.
-  const extraErrors = out.unexpected.filter((code) => code.startsWith("E-"));
+  const extraErrors = out.unexpectedErrors;
   if ((out.bucket === "PASS" || out.bucket === "CODES-ONLY") && extraErrors.length > 0) {
     return {
       ...out,
@@ -592,6 +604,7 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
       reason,
       emitted: [],
       unexpected: [],
+      unexpectedErrors: [],
       failures: [],
       runtimeExecuted: false,
       vacuous: false,
@@ -623,7 +636,9 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
   const expectedCodes = new Set<string>(ex.codes ?? []);
   const emitted = [...new Set(fe.diags.map((d) => d.code))].sort();
   const unexpected = emitted.filter((code) => !expectedCodes.has(code));
-  const base = { emitted, unexpected };
+  const errorCodes = new Set(fe.diags.concat(fe.infos).filter((d) => severityOfDiag(d) !== "warning" && severityOfDiag(d) !== "info").map((d) => d.code));
+  const unexpectedErrors = unexpected.filter((code) => errorCodes.has(code));
+  const base = { emitted, unexpected, unexpectedErrors };
 
   if (legacy.length > 0 && unexpected.length > 0) return v("LEGACY", legacy.join("+"), base);
   if (unexpected.includes("E-BOOTSTRAP-UNSUPPORTED")) {
@@ -655,7 +670,7 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
   if (fe.core == null) {
     return v("FAIL", codeFailures.length ? "codes+runtime" : "runtime", {
       ...base,
-      failures: [...codeFailures, `runtime: no artifact — the compile reported an error (${emitted.filter((c) => c.startsWith("E-")).join(", ")})`],
+      failures: [...codeFailures, `runtime: no artifact — the compile reported an error (${emitted.filter((c) => errorCodes.has(c)).join(", ")})`],
     });
   }
   const ill = boot.mods.check.checkCore(fe.core) as string[];

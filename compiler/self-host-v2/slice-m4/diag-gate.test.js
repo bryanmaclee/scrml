@@ -5,10 +5,14 @@
 // g-bootstrap-defer-scope-001-and-runs-anyway (`defer` was reported as an
 // undeclared name, E-SCOPE-001, and the printed program then ran the deferred
 // statements in place). The gate is ONE check at the front end → back end
-// hand-off (lower.scrml `hasError`): an `E-` code from analysis, or any parse
-// diagnostic, lowers to NO Core — and the printer only takes a Core, so there
-// is nothing to print. It is not a per-code list: every error closes it.
-// `W-` notes (non-fatal, §34) and the `infos` stream do not.
+// hand-off (lower.scrml `hasError`): a diagnostic of §34 severity Error (from
+// analysis or the parser) lowers to NO Core — and the printer only takes a Core,
+// so there is nothing to print. It is not a per-code list: every error closes it.
+// s451-boot-diag-severity: the test is the Diag's SEVERITY (severity.scrml, the
+// table generated from §34), not the `E-` prefix — §34: "A code whose Severity
+// column reads **Error** fails the compile, and a compile that reports one SHALL
+// NOT produce a runnable artifact (§2.2.1). **Warning** and **Info** codes do not
+// fail the compile." So Warning / Info diagnostics do not close it.
 
 import { describe, test, expect, beforeAll } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
@@ -30,7 +34,7 @@ describe("an error lowers to no Core — nothing to print", () => {
   test("a parse error: no Core", () => {
     const r = run(P(`    let <n:int=0/>\n    function go() { @n = (1 + }`, `        <p>\${@n}</p>`));
     expect(r.diags.length).toBeGreaterThan(0);
-    expect(r.diags.every((d) => d.code.startsWith("E-"))).toBe(true);
+    expect(r.diags.every((d) => d.severity === "Error")).toBe(true);
     expect(r.core == null).toBe(true);
   });
 
@@ -61,5 +65,35 @@ describe("twins — non-fatal notes do not close the gate", () => {
     expect(r.core == null).toBe(false);
     expect(mods.check.checkCore(r.core)).toEqual([]);
     expect(printable(r).length).toBeGreaterThan(0);
+  });
+});
+
+// s451 review r2 — the gate FAILS CLOSED. Before r2 `hasError` asked "is the
+// severity Error?", so a Diag with a missing or unrecognised severity read as
+// not-an-error and the gate OPENED. It now asks "is the severity Warning or
+// Info?" — anything else is an error. (`newDiag` always stamps a severity
+// today; this is the defence for a Diag that is ever built without one.)
+describe("the gate fails closed on a diagnostic with no / an unknown severity", () => {
+  const sp = { start: 0, end: 0 };
+  const tp = (diags, infos = []) => ({ diags, infos, files: [] });
+  const bare = { code: "E-SCOPE-001", message: "", file: "f", span: sp };
+
+  test("hasError: a severity-less or unknown-severity diagnostic (in diags, or in infos) is an error", () => {
+    expect(mods.lower.hasError(tp([bare]))).toBe(true);
+    expect(mods.lower.hasError(tp([], [bare]))).toBe(true);
+    expect(mods.lower.hasError(tp([{ ...bare, severity: "Bogus" }]))).toBe(true);
+  });
+
+  test("twins: Warning / Info do not close it; Error does; an empty compile does not", () => {
+    expect(mods.lower.hasError(tp([]))).toBe(false);
+    expect(mods.lower.hasError(tp([{ ...bare, severity: "Warning" }], [{ ...bare, severity: "Info" }]))).toBe(false);
+    expect(mods.lower.hasError(tp([{ ...bare, severity: "Error" }]))).toBe(true);
+  });
+
+  test("lower: a clean program's TypedProgram plus one severity-less diagnostic lowers to NO Core", () => {
+    const r = run(P(`    let <n:int=0/>\n    function go() { @n = @n + 1 }`, `        <button onclick=go()>go</button>`));
+    expect(r.core == null).toBe(false);
+    const bad = { ...r.typed, diags: r.typed.diags.concat([{ ...bare, file: "t.scrml" }]) };
+    expect(mods.lower.lower(bad).core == null).toBe(true);
   });
 });

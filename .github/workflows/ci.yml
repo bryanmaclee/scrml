@@ -258,6 +258,14 @@ jobs:
       - name: Bootstrap conformance count (tracking; report staleness)
         continue-on-error: true
         run: bun scripts/bootstrap-conformance.ts --check
+      # s451-boot-diag-severity — compiler/self-host-v2/severity.scrml is GENERATED from SPEC §34.
+      # Staleness is TRACKED here, not gated: a docs-only SPEC PR adding a §34 row for a code the
+      # bootstrap names (same severity) makes the file stale without changing any answer. The
+      # SEMANTIC check (compiled severityOf == §34) is in slice-m4/severity.test.js. Regenerate
+      # with `bun scripts/gen-bootstrap-severity.ts`.
+      - name: Bootstrap severity table (tracking; report staleness)
+        continue-on-error: true
+        run: bun scripts/gen-bootstrap-severity.ts --check
       - name: Populate browser-test fixtures
         run: bun run pretest
       - name: integration + lsp + commands (promotion candidates)
