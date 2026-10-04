@@ -271,7 +271,10 @@ describe("S446 — a 1-statement `${@x = save()}` handler keeps its emit (fire-a
     expect(app.errs).toEqual([]);
     const line = app.clientJs.split("\n").find((l) => /_scrml_attr_onclick/.test(l) && /save/.test(l));
     expect(line).toBeDefined();
-    expect(line).toContain(": async function(event) { _scrml_cs_reactive_set(\"x\", await _scrml_fetch_save_");
+    // S453 — `try {` now opens the async listener's body (bryan S449 ruling A3,
+    // the rejection log). The await-in-place is what this pin is for and is
+    // unchanged; the `try {` is threaded through so the pin still bites.
+    expect(line).toContain(": async function(event) { try { _scrml_cs_reactive_set(\"x\", await _scrml_fetch_save_");
     expect(line).not.toContain("(async () =>");
   });
 });

@@ -118,14 +118,21 @@ function mount(source) {
         if (!el) throw new Error(`no element #${id}`);
         const origE = console.error;
         console.error = (...a) => { consoleErrors.push(a.map(String).join(" ")); };
-        try { el.dispatchEvent(new window.Event("click", { bubbles: true })); }
-        finally { console.error = origE; }
-        // Settle: every in-flight server call has resolved (bounded).
-        for (let t = 0; t < 50; t++) {
+        // S453 — the capture stays open across the SETTLE, not just the
+        // dispatch. An async listener's rejection log (bryan's S449 ruling A3,
+        // `_scrml_error_boundary_log`) fires AFTER the awaited call rejects, so
+        // a capture that closed at dispatch saw nothing and read as a false
+        // negative — which is how the pinned block below was once able to assert
+        // "unlogged" either way.
+        try {
+          el.dispatchEvent(new window.Event("click", { bubbles: true }));
+          // Settle: every in-flight server call has resolved (bounded).
+          for (let t = 0; t < 50; t++) {
+            await new Promise((r) => setTimeout(r, 20));
+            if (inflight === 0) break;
+          }
           await new Promise((r) => setTimeout(r, 20));
-          if (inflight === 0) break;
-        }
-        await new Promise((r) => setTimeout(r, 20));
+        } finally { console.error = origE; }
       },
     };
   } finally {
@@ -256,14 +263,19 @@ describe("S450 — emit pins", () => {
   test("top level: a write nested in an `if` is awaited in place in an `async` listener", () => {
     const app = mount(program("top level", "if (@c) { @x = save(); @y = @x + 1 }"));
     expect(app.errs).toEqual([]);
-    expect(app.clientJs).toMatch(/: async function\(event\) \{ if \(/);
+    // S453 — `try {` now opens the async listener's body (bryan S449 ruling A3,
+    // the rejection log). What this pin is FOR is the await-in-place, which is
+    // unchanged; the `try {` is threaded through so the pin still bites on the
+    // thing it pins.
+    expect(app.clientJs).toMatch(/: async function\(event\) \{ try \{ if \(/);
     expect(app.clientJs).toContain('_scrml_cs_reactive_set("x", await _scrml_fetch_save_');
     expect(app.clientJs).not.toContain('(async () => _scrml_cs_reactive_set("x"');
   });
   test("top level: a `match` arm write — the arm IIFE is made async and awaited in place", () => {
     const app = mount(program("top level", "match (@cur) { .Note(t) => { @x = save(); @y = @x + 1 } .Empty => { @y = 0 } }"));
     expect(app.errs).toEqual([]);
-    expect(app.clientJs).toMatch(/: async function\(event\) \{ await \(async function\(\) \{/);
+    // S453 — `try {` as above; the arm IIFE being async + awaited is the pin.
+    expect(app.clientJs).toMatch(/: async function\(event\) \{ try \{ await \(async function\(\) \{/);
   });
   test("a write inside a callback handed to a scheduler is not in the handler's sequence — unchanged", () => {
     const app = mount(program("top level", "setTimeout(() => { @x = save() }, 0)"));
@@ -272,19 +284,31 @@ describe("S450 — emit pins", () => {
   });
 });
 
-// S450 review F1 (DISCLOSED, not fixed — g-handler-level-rejection-bypasses-scrml-logging,
-// widened by S450). A newly-awaited write whose server call REJECTS (transport failure,
-// not a `!` envelope) is awaited in an `async` listener that has no `.catch`: the
-// rejection escapes to the host as an unhandled rejection and does NOT reach
-// `_scrml_error_boundary_log`; the statements after it do not run (function-body
-// semantics). Base (detached IIFE) logged "[scrml errorBoundary x] caught non-! runtime
-// error" and ran the later statements. This PINS the current behaviour so a future fix
-// (a handler-level backstop) shows up here as a deliberate change.
+// S450 review F1 — WAS DISCLOSED-NOT-FIXED, now CLOSED by S453.
+//
+// ⛑ THE PIN IS FLIPPED, WHICH IS WHAT IT WAS FOR. S450 left this block asserting the
+// then-current behaviour — a newly-awaited write whose server call REJECTS escaped the
+// `async` listener unobserved and never reached `_scrml_error_boundary_log` — with the
+// stated purpose that "a future fix (a handler-level backstop) shows up here as a
+// deliberate change". bryan RULED that fix in S449 (ruling A3, `user-voice-scrml.md`:
+// *"every async event listener routes its rejection to `_scrml_error_boundary_log`"*,
+// closing `g-handler-level-rejection-bypasses-scrml-logging`), and S453 built it in
+// `js-async-analysis.ts:colorAsyncFunctionExpr`. So the three assertions invert:
+//   * the promise the listener returns now RESOLVES (the body's try/catch absorbed it)
+//     instead of rejecting with "network down";
+//   * `_scrml_error_boundary_log` IS reached, exactly once;
+// and one is UNCHANGED, deliberately:
+//   * `@y` is still 0 — the statements after the failed write still do not run, which is
+//     function-body semantics (§13.2) and NOT what A3 changed. S453 logs the rejection;
+//     it does not resume the handler.
+// The acceptance for the ruling across every registration path lives in
+// `async-listener-rejection-log-s453.browser.test.js`; this block stays because it is
+// the S450 shape that widened the gap, measured in the file that widened it.
+//
 // Observed on an `<each>` row, whose listener is attached directly with
 // addEventListener: the test wraps addEventListener to hold the promise the listener
-// returns (the browser discards it — that is the unhandled rejection). Holding it here
-// keeps the rejection from failing the bun process while still observing it.
-describe("S450 — a rejecting nested write escapes as a rejection, unlogged (pinned; gap disclosed)", () => {
+// returns (the browser discards it) so the settled state of that promise is readable.
+describe("S453 — a rejecting nested write is logged, not escaped (bryan S449 ruling A3)", () => {
   const SHAPES = [
     ["nested in an `if`", "if (@c) { @x = netfail(); @y = 5 }"],
     ["nested in a `match` arm", "match (@cur) { .Note(t) => { @x = netfail(); @y = 5 } .Empty => { @y = 0 } }"],
@@ -307,10 +331,15 @@ describe("S450 — a rejecting nested write escapes as a rejection, unlogged (pi
         const app = mount(program("<each>", handler));
         expect(app.errs).toEqual([]);
         await app.click("b");
+        // The listener is still async and still returns a promise — but it no
+        // longer rejects: nothing escapes to the host.
         expect(returned.length).toBe(1);
-        expect(String(await returned[0])).toContain("network down");
-        expect(app.consoleErrors.some((l) => l.includes("scrml errorBoundary"))).toBe(false);
-        expect(app.get("y")).toBe(0); // the statement after the failed write did not run
+        expect(String(await returned[0])).toBe("resolved");
+        const logged = app.consoleErrors.filter((l) => l.includes("scrml errorBoundary"));
+        expect(logged.length).toBe(1);
+        expect(logged[0]).toContain("network down");
+        expect(logged[0]).toContain("onclick <each> row");
+        expect(app.get("y")).toBe(0); // UNCHANGED: the statement after the failed write still does not run
       } finally {
         if (hadOwn) proto.addEventListener = orig;
         else delete proto.addEventListener;
