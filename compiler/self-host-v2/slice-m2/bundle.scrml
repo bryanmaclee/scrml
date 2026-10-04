@@ -16,6 +16,7 @@
     import { parseFile } from "../parse.scrml"
     import { analyze } from "../analyze.scrml"
     import { lower } from "../lower.scrml"
+    import { parseProgram } from "../link.scrml"
     import { sqlFacts } from "../sql.scrml"
     import { counterCore } from "../slice-m1/counter.core.scrml"
     import { dropdownCore } from "../slice-m1/dropdown.core.scrml"
