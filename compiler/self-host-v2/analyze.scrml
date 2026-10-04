@@ -53,7 +53,7 @@ ${
              AProgram, AItem, AItemK, FileAst, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan, newDiag } from "./ast.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
-    import { SqlFacts, sqlFacts } from "./sql.scrml"
+    import { SqlFacts, sqlFacts, txControl, txControlAware } from "./sql.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -223,6 +223,7 @@ ${
         MInline(v: InlineView),                           // `<*x/>` rendered by inlining its markup (s442)
         MStar(decl: Sym, inst: InstRef),                  // s444: `<*x/>` of a user declaration's EXISTING instance (Core View.Star)
         MErrors(of: ValidityOf, all: boolean),            // s449: `<errors of=…/>` (§55.8) — the surface whose errors it renders
+        MDb,                                              // s452: a `<db src=…>` state block (§4, §8.1.1) — its children render in place
     }
     // s442 — `<*x/>` (§66.6.2, "the existing one") rendered by INLINING markup
     // that is already resolved in the right context: a child field's own
@@ -3224,9 +3225,11 @@ ${
     // stands in this slice (nested ones are Ue2's).
     // `fnRef` (review HIGH-2): the one node allowed to NAME a function without
     // calling it here — a direct call's callee, or an event-handler reference.
-    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int }
+    // `wholeWhat` (s452): what position `whole` is, for E-ERROR-012's message
+    // ("the initializer of `x`", "a `return` operand", …; "" — not named).
+    type FailCtx:struct = { inFn: boolean, fnName: string, failable: boolean, err: Sym | not, defer: boolean, subject: int, whole: int, fnRef: int, wholeWhat: string }
 
-    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1 } }
+    fn noFailCtx() -> FailCtx { return { inFn: false, fnName: "", failable: false, err: not, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "" } }
 
     fn withFx(env: Env, fx: FailCtx) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
@@ -3235,22 +3238,28 @@ ${
 
     fn withSubject(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: nid, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat })
     }
 
     fn withWhole(env: Env, nid: int) -> Env {
+        return withWholeAt(env, nid, "")
+    }
+
+    // s452: `nid` is a statement's whole value standing in position `what`
+    // (named in E-ERROR-012's message).
+    fn withWholeAt(env: Env, nid: int, what: string) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: nid, fnRef: f.fnRef, wholeWhat: what })
     }
 
     fn withFnRef(env: Env, nid: int) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: f.defer, subject: f.subject, whole: f.whole, fnRef: nid, wholeWhat: f.wholeWhat })
     }
 
     fn withDeferFx(env: Env) -> Env {
         const f: FailCtx = env.fx
-        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef })
+        return withFx(env, { inFn: f.inFn, fnName: f.fnName, failable: f.failable, err: f.err, defer: true, subject: f.subject, whole: f.whole, fnRef: f.fnRef, wholeWhat: f.wholeWhat })
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
@@ -4852,7 +4861,7 @@ ${
     fn resolveStmtExpr(env: Env, e: AExpr, st: AS) -> AS {
         const k: AExprK = e.k
         return match k {
-            .Assign(target: t, value: v) :> resolveAssign(withWhole(env, v.nid), e, t, v, st)
+            .Assign(target: t, value: v) :> resolveAssign(withWholeAt(env, v.nid, "the right-hand side of an assignment"), e, t, v, st)
             .Call(callee: c, args: args) :> resolveCallStmt(env, e, c, args, st)
             .Name(name: n) :> resolveExpr(env, e, not, st).st
             .At(name: n) :> resolveExpr(env, e, not, st).st
@@ -5732,6 +5741,8 @@ ${
         return match p {
             .PName(binds: bs) :> bindNames(bs)
             .PWild :> []
+            .PWhole(bind: b) :> [b.name]
+            .PBare(bind: b) :> [b.name]
         }
     }
 
@@ -5957,8 +5968,10 @@ ${
     fn guarded(env: Env, e: AExpr, subj: AExpr, arms: AArm[], failable: boolean, err: Sym | not, isMatch: boolean, stmt: boolean, st0: AS) -> AS {
         let st: AS = st0
         if (!failable) {
+            if (isMatch) st = plainMatchBinderDiags(env, arms, st)
+            if (!isMatch) st = deadHandlerBinderDiags(env, arms, st)
             if (isMatch) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `match` over " + subjectName(subj) + " — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `" + sqlSigil() + "}` query, §19.7.1)")
-            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `!{ … }` handler on " + subjectName(subj) + ", which cannot fail — the SPEC defines `!{}` only on a failable result (§19.4.3 item 3); remove the handler")
+            return deadHandler(env, e, subj, st)
         }
         if (err is not) return st                          // E-ERROR-011 reported: no variant set to check against
         const vs: VariantDef[] = enumVariantsOf(env.g, err)
@@ -5966,35 +5979,49 @@ ${
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + err.hint + "` has a variant named `Ok`, which a `match` on a failable result reserves for the success value (§19.7.3) — rename the variant")
         }
         let covered: int[] = []
-        let wild = false
-        let okSeen = false
+        let wild = false          // a wildcard arm: plain `_` / `else`, or `_ err` — every remaining ERROR
+        let okSeen = false        // `.Ok`, or a PLAIN wildcard (§18.6.1: `_ err` never takes `.Ok`)
+        let wildWhole = false     // the first wildcard was `_ err`
         for (const a of arms) {
-            const ra: RArm = resolveArm(env, a, err, vs, isMatch, stmt, st)
+            const ra: RArm = resolveArm(env, a, err, vs, isMatch, { stmt: stmt, subj: subj, isMatch: isMatch, what: env.fx.wholeWhat }, st)
             st = ra.st
             // review MED-1 / LOW-1 — §18.8.1: "Duplicate variant arms (two arms for
             // the same variant) SHALL be a compile error (E-TYPE-023 …). The second
             // arm is unreachable." (`!{}` arms follow the match rule, §19 alias
-            // note.) An arm AFTER a wildcard is unreachable too; the SPEC names no
-            // code for that, so it is refused rather than silently dead.
+            // note.) s452 r2 (LOW-3): an arm AFTER a wildcard is E-SYNTAX-010 —
+            // §18.6 "The `else` arm SHALL be the last arm. An `else` arm that is
+            // not the last arm SHALL be a compile error (E-SYNTAX-010)" (`_` is its
+            // alias), and §18.6.1 for the whole-error binder: "it is the wildcard
+            // for the last-arm position (E-SYNTAX-010)". After `_ err` the reason
+            // is the position rule, NOT unreachability (`_ err` never takes `.Ok`).
             if (wild) {
-                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "this arm follows a wildcard (`_` / `else`), which already took every remaining case — it can never run (the SPEC names no code for an arm after a wildcard: refused); move the wildcard last")
+                st = addDiag(st, env.file, a.span, "E-SYNTAX-010", afterWildMsg(wildWhole))
             } else if ((ra.idx >= 0 && covered.indexOf(ra.idx) >= 0) || (ra.idx == -2 && okSeen)) {
                 st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same variant — the first arm already takes it, so this one is unreachable (§18.8.1 E-TYPE-023: duplicate match arm)")
             }
-            if (ra.idx == -1) wild = true
+            if (ra.idx == -1) {
+                wild = true
+                okSeen = true                // a plain wildcard takes the success value too (§19.7.3)
+            }
+            if (ra.idx == -4 && !wild) {
+                wild = true                  // `_ err`: every remaining error, never `.Ok` (§18.6.1)
+                wildWhole = true
+            }
             if (ra.idx == -2) okSeen = true
             if (ra.idx >= 0) covered = covered.concat([ra.idx])
         }
         let missing: string[] = []
         if (isMatch && !okSeen) missing = ["Ok"]
-        let i = 0
-        for (const v of vs) {
-            if (covered.indexOf(i) < 0) missing = missing.concat([v.sym.hint])
-            i = i + 1
+        if (!wild) {
+            let i = 0
+            for (const v of vs) {
+                if (covered.indexOf(i) < 0) missing = missing.concat([v.sym.hint])
+                i = i + 1
+            }
         }
         if (!wild && !isMatch && env.fx.defer) {
             st = addDiag(st, env.file, e.span, "E-DEFER-UNHANDLED-FAILABLE", "a `!{ … }` handler in a deferred statement SHALL carry a catch-all `| _ :> …` arm (§19.16.3 rule 3) — listing every variant of `" + err.hint + "` is not enough: a failure outside the declared enum would otherwise leave the `finally`")
-        } else if (!wild && missing.length > 0) {
+        } else if (missing.length > 0) {
             if (isMatch) {
                 st = addDiag(st, env.file, e.span, "E-TYPE-020", "this `match` over the result of " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " — a `match` on a failable result covers `.Ok` and every variant of `" + err.hint + "`, or ends with `else :>` / `_ :>` (§19.7.1)")
             } else {
@@ -6004,18 +6031,118 @@ ${
         return handledFact(env, e, err, stmt, not, [], st)
     }
 
+    // s452 — §19.4.3 ruling 3: "A `!{}` handler SHALL be attached only to an
+    // expression that can fail: a call to a function declared `!` (§19.4.1), a
+    // call the compiler treats as `!` (a CPS body-split function, §19.9.5; a
+    // built-in failable such as `parseVariant`, §41.13), or a `?{}` query … On
+    // anything else … That SHALL be a compile error: E-ERROR-013" ("For a
+    // handler on a non-call expression the message names the expression
+    // instead"). Fail-closed readings (DESIGN.md item 2): a callee whose body
+    // can place it on the server may be a client→server call, which §19.9.10
+    // makes failable — that depends on where the CALLER runs, and the
+    // client→server call is unit U1b: refused, never E-ERROR-013. A callee name
+    // that did not resolve was reported (E-SCOPE-001 — the bootstrap has no
+    // built-in `parseVariant`): no second report.
+    fn deadHandler(env: Env, e: AExpr, subj: AExpr, st: AS) -> AS {
+        const c: AExpr | not = calleeOf(subj.k)
+        if (c is not) {
+            const what: string = subjectLabel(subj)
+            return addDiag(st, env.file, e.span, "E-ERROR-013", "'!{}' handler on '" + what + "', which cannot fail: '" + what + "' is not a call of a failable function, so none of its arms can run. Remove the '!{ … }' handler.")
+        }
+        const nf: NameFact | not = nameFactIn(st, c.nid)
+        const f: FnInfo | not = calledFn(env, nf)
+        if (f is some) {
+            if (mayRunOnServer(env.g, f)) {
+                return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `!{ … }` handler on " + f.name + "(…), whose body can place it on the server (a `" + sqlSigil() + "}` query or the `server` modifier) — a CLIENT call of a server function is failable whether or not it is declared `!` (§19.9.10), and the client→server call arrives with unit U1b; until then whether this handler can run is not decided here")
+            }
+            return addDiag(st, env.file, e.span, "E-ERROR-013", deadHandlerMsg(f.name))
+        }
+        const n: string = exprName(c)
+        if (n != "" && nf is not) return st               // the name did not resolve: reported where it stands
+        let label: string = n
+        if (label == "") label = subjectLabel(c)
+        return addDiag(st, env.file, e.span, "E-ERROR-013", deadHandlerMsg(label))
+    }
+
+    fn deadHandlerMsg(name: string) -> string {
+        return "'!{}' handler on '" + name + "(…)', which cannot fail: '" + name + "' is not a failable function, so none of its arms can run. Remove the '!{ … }' handler, or declare '" + name + "' with '!' if it can fail."
+    }
+
+    // An expression as written, for E-ERROR-013's non-call form.
+    fn subjectLabel(e: AExpr) -> string {
+        const k: AExprK = e.k
+        const lit: string = match k {
+            .NotLit :> "not"
+            .Num(raw: r) :> r
+            .Bool(v: b) :> boolText(b)
+            .Str(v: sv) :> "\"" + sv + "\""
+            .Name(name: n) :> n
+            .At(name: n) :> "@" + n
+            .AtItem :> "@."
+            .Recovered :> ""
+            .Variant(name: n) :> "." + n
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: x) :> ""
+            .Index(obj: o) :> ""
+            .Lambda(params: ps) :> ""
+            .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
+        }
+        if (lit != "") return lit
+        const pk: string = placeKey(e)
+        if (pk != "") return pk
+        return "this expression"
+    }
+
+    fn boolText(b: boolean) -> string {
+        if (b) return "true"
+        return "false"
+    }
+
+    // A function placePass may put on the server (§12.2 T1 / T4 — its own
+    // body's `?{}` or the deprecated `server` modifier; placePass's
+    // `serverTriggered`, read from the same syntax).
+    fn mayRunOnServer(g: Globals, f: FnInfo) -> boolean {
+        const fs: FnSrc | not = fnSrcOf(g, f.sym.id)
+        if (fs is not) return false
+        return fs.f.server || sqlsInBlock(fs.f.body).length > 0
+    }
+
     // One arm: its pattern's variant (`idx`: -1 wildcard, -2 `.Ok`, -3 none),
     // its binders (locals scoped to the arm), its body.
     type RArm:struct = { idx: int, st: AS }
 
-    fn resolveArm(env: Env, a: AArm, err: Sym, vs: VariantDef[], isMatch: boolean, stmt: boolean, st0: AS) -> RArm {
+    fn resolveArm(env: Env, a: AArm, err: Sym, vs: VariantDef[], isMatch: boolean, cx: ArmCx, st0: AS) -> RArm {
         let st: AS = st0
         if (a.legacy) st = addDiag(st, env.file, a.span, "W-MATCH-ARROW-LEGACY", "the arm separator `=>` / `->` is deprecated — write `:>` (§19 alias note; `bun scrml migrate --fix` rewrites it)")
         let armEnv: Env = withSubject(withWhole(env, -1), -1)
         let idx: int = -3
         const p: APat = a.pat
         const pn: PatName | not = patName(p)
-        if (pn is not) {
+        const wb: WholePat | not = wholePatOf(p)
+        if (wb is some) {
+            // s452 — §18.6.1: `_ err` matches every error variant an earlier arm
+            // did not (never `.Ok`) and binds the WHOLE error value, typed as the
+            // failure's error type. A bare name (§18.2) and `else err` (§18.6.1)
+            // are E-MATCH-BARE-BINDER; they are bound anyway (one report, no
+            // E-SCOPE-001 cascade) and count as that wildcard (no E-TYPE-080 one).
+            idx = -4
+            if (wb.bare) {
+                st = addDiag(st, env.file, a.span, "E-MATCH-BARE-BINDER", bareBinderFailableMsg(wb.b.name))
+            } else if (wb.viaElse) {
+                st = addDiag(st, env.file, a.span, "E-MATCH-BARE-BINDER", elseBinderMsg(wb.b.name))
+            }
+            const rw: RBinds = bindWhole(armEnv, wb.b, err, st)
+            armEnv = rw.env
+            st = rw.st
+        } else if (pn is not) {
             idx = -1
         } else if (isMatch && pn.name == "Ok") {
             idx = -2
@@ -6036,6 +6163,11 @@ ${
                 idx = i
                 const fs: FieldDef[] = vs[i].fields
                 if (pn.parens && pn.binds.length != fs.length) st = addDiag(st, env.file, a.span, "E-TYPE-021", "`." + pn.name + "` carries " + fs.length + " value(s) but the pattern binds " + pn.binds.length + " — bind one name (or `_`) per payload field, in declaration order (§18.7)")
+                // s452 — the legacy paren-free binder `.V m` (a `!{}` arm only, the
+                // parser's): §19.4.3 ruling 2 "the same pattern as `| .V(m) :>`: `m`
+                // binds the variant's PAYLOAD … under §18.7's positional arity: on a
+                // unit variant or a variant with two or more fields it SHALL be E-TYPE-021"
+                if (!pn.parens && pn.binds.length == 1 && fs.length != 1) st = addDiag(st, env.file, a.span, "E-TYPE-021", "`." + pn.name + " " + pn.binds[0].name + "` binds ONE payload value (it is `." + pn.name + "(" + pn.binds[0].name + ")`, §19.4.3) but `." + pn.name + "` carries " + fs.length + " — bind every field positionally (`." + pn.name + "(a, b)`), or none (`." + pn.name + "`) (§18.7)")
                 const rb2: RBinds = bindArm(armEnv, pn.binds, fs, st)
                 armEnv = rb2.env
                 st = rb2.st
@@ -6043,7 +6175,7 @@ ${
         }
         st = addFail(st, a.nid, FailFact.FArm(idx))
         const body: AArmBody = a.body
-        st = resolveArmBody(armEnv, a, body, stmt, st)
+        st = resolveArmBody(armEnv, a, body, cx, st)
         return { idx: idx, st: st }
     }
 
@@ -6053,7 +6185,91 @@ ${
         return match p {
             .PName(name: n, binds: bs, parens: pr) :> { name: n, binds: bs, parens: pr }
             .PWild :> not
+            .PWhole(bind: b) :> not
+            .PBare(bind: b) :> not
         }
+    }
+
+    // s452 r2 — E-SYNTAX-010's message, true for both kinds of wildcard.
+    fn afterWildMsg(whole: boolean) -> string {
+        if (whole) return "an arm after the whole-error binder `_ err` — it is the wildcard and SHALL be the last arm (§18.6.1, §18.6: E-SYNTAX-010). It takes every remaining error but never `.Ok`, so write the `.Ok` arm (and every other arm) before it"
+        return "an arm after the wildcard (`_` / `else`) — the wildcard SHALL be the last arm (§18.6: E-SYNTAX-010); it already took every remaining case, so this arm could never run. Move the wildcard last"
+    }
+
+    // s452 — an arm whose pattern binds the whole matched value: `_ err`
+    // (§18.6.1), `else err` (`viaElse`), or a bare `err` (`bare`, §18.2).
+    type WholePat:struct = { b: ABind, viaElse: boolean, bare: boolean }
+
+    fn wholePatOf(p: APat) -> WholePat | not {
+        return match p {
+            .PWhole(bind: b, viaElse: v) :> { b: b, viaElse: v, bare: false }
+            .PBare(bind: b) :> { b: b, viaElse: false, bare: true }
+            .PName(name: n) :> not
+            .PWild :> not
+        }
+    }
+
+    // The whole-error binder's local: typed as the failure's error enum
+    // (§18.6.1 "The binder's type is the type of the failure being handled").
+    fn bindWhole(env: Env, b: ABind, err: Sym, st0: AS) -> RBinds {
+        const rb: RSym = mint(st0, b.name)
+        const st: AS = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
+        if (b.name == "_") return { env: env, st: st }
+        return { env: withLocal(env, { name: b.name, s: rb.s, ty: Type.Named(err), mutable: false, narrowed: not, nDecl: not }), st: st }
+    }
+
+    // §18.2's message at a failable site (a `!{}` arm, a `match` on a failable result).
+    fn bareBinderFailableMsg(name: string) -> string {
+        return "Arm pattern '" + name + "' is a bare name. To bind the whole error, write '_ " + name + "' (e.g. '| _ " + name + " :>'); for a catch-all that binds nothing write '_' (or 'else'); or name the variant ('.V(x)') to bind its payload."
+    }
+
+    // §18.2's message in a `match` on any other value.
+    fn bareBinderPlainMsg(name: string) -> string {
+        return "Arm pattern '" + name + "' is a bare name. A match arm does not bind the whole value: write '_' (or 'else') for a catch-all, or name the variant ('.V(x)') to bind its payload."
+    }
+
+    // §18.6.1: `else <name>` — "for the second it offers `_ <name>`".
+    fn elseBinderMsg(name: string) -> string {
+        return "Arm pattern 'else " + name + "' binds a name to 'else', which binds nothing (§18.6). To bind the whole error, write '_ " + name + "' (e.g. '| _ " + name + " :>'); for a catch-all that binds nothing write 'else' alone."
+    }
+
+    // §18.6.1: `_ <name>` on a `match` whose subject is not a failable result —
+    // "says that a match arm binds the whole value only where it is an error,
+    // and offers `_` / `else` or a named variant".
+    fn wholeBinderPlainMsg(name: string) -> string {
+        return "Arm pattern '_ " + name + "' binds the whole matched value, which a match arm does only where that value is an error — a '!{}' arm or a 'match' on a failable result (§18.6.1). Here write '_' (or 'else') for a catch-all, or name the variant ('.V(x)') to bind its payload."
+    }
+
+    // s452 — E-MATCH-BARE-BINDER for every misplaced binder of a `match` whose
+    // subject is NOT a failable result (§18.2, §18.6.1): a bare name, `_ name`,
+    // `else name`.
+    fn plainMatchBinderDiags(env: Env, arms: AArm[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const a of arms) {
+            const wb: WholePat | not = wholePatOf(a.pat)
+            if (wb is some) {
+                let m: string = wholeBinderPlainMsg(wb.b.name)
+                if (wb.bare) m = bareBinderPlainMsg(wb.b.name)
+                if (wb.viaElse) m = elseBinderMsg(wb.b.name)
+                st = addDiag(st, env.file, a.span, "E-MATCH-BARE-BINDER", m)
+            }
+        }
+        return st
+    }
+
+    // The same for a `!{}` on something that cannot fail — a `!{}` arm is a
+    // failable site whatever its subject, so `_ name` is legal there; a bare
+    // name and `else name` are not (§18.2, §18.6.1).
+    fn deadHandlerBinderDiags(env: Env, arms: AArm[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const a of arms) {
+            const wb: WholePat | not = wholePatOf(a.pat)
+            if (wb is some) {
+                if (wb.bare) st = addDiag(st, env.file, a.span, "E-MATCH-BARE-BINDER", bareBinderFailableMsg(wb.b.name))
+                if (wb.viaElse) st = addDiag(st, env.file, a.span, "E-MATCH-BARE-BINDER", elseBinderMsg(wb.b.name))
+            }
+        }
+        return st
     }
 
     fn variantNamesOf(vs: VariantDef[]) -> string[] {
@@ -6082,27 +6298,284 @@ ${
         return { env: env, st: st }
     }
 
+    // s452 — what an arm's body is judged against: `stmt` — the form is a
+    // statement (its result is not read); otherwise it stands in a VALUE
+    // position `what` (§19.4.3 ruling 1a), and every arm yields a value or leaves.
+    type ArmCx:struct = { stmt: boolean, subj: AExpr, isMatch: boolean, what: string }
+
     // An arm's body. As a statement's arm, an expression is a statement (a
-    // write, a call); where the form has a VALUE, an expression arm is that
-    // value and a block arm must leave the function (`return` / `fail`) —
-    // what a block that falls through would yield is Ue2's.
-    fn resolveArmBody(env: Env, a: AArm, body: AArmBody, stmt: boolean, st: AS) -> AS {
+    // write, a call) and an arm MAY fall through. In a value position (§19.4.3
+    // ruling 1a) an arm "SHALL either yield a value of the call's success type
+    // or leave (`return` / `fail`)": an expression arm is its value, a block
+    // arm's value is its last expression (§18.5 "The block's result is its
+    // **last expression**"); an arm that does neither falls through —
+    // E-ERROR-012. (The bootstrap has no loops, so `break` / `continue` — which
+    // §19.4.3 also counts as leaving — have no source form here.)
+    fn resolveArmBody(env: Env, a: AArm, body: AArmBody, cx: ArmCx, st: AS) -> AS {
         return match body {
-            .ArmExpr(e: x) :> armExpr(env, x, stmt, st)
-            .ArmBlock(b: b) :> armBlock(env, a, b, stmt, st)
+            .ArmExpr(e: x) :> armExpr(env, a, x, cx, st)
+            .ArmBlock(b: b) :> armBlock(env, a, b, cx, st)
         }
     }
 
-    fn armExpr(env: Env, x: AExpr, stmt: boolean, st: AS) -> AS {
-        if (stmt) return resolveStmtExpr(withWhole(env, x.nid), x, st)
-        if (assignValue(x) is some) return addDiag(resolveStmtExpr(env, x, st), env.file, x.span, "E-BOOTSTRAP-UNSUPPORTED", "this arm writes but yields no value, and the handled result is used as a value (`let r = …`, `return …`) — the SPEC does not say what the result is then; handle it as a statement (drop `let r =`) or give the arm a value. (Arms that only act are slice Ue2's question.)")
-        return resolveExpr(withWhole(env, x.nid), x, not, st).st
+    fn armExpr(env: Env, a: AArm, x: AExpr, cx: ArmCx, st: AS) -> AS {
+        if (cx.stmt) return resolveStmtExpr(withWhole(env, x.nid), x, st)
+        return armValueExpr(env, a, x, cx, st)
     }
 
-    fn armBlock(env: Env, a: AArm, b: ABlock, stmt: boolean, st0: AS) -> AS {
-        const st: AS = resolveBlock(env, b, st0)
-        if (stmt || blockDiverges(b)) return st
-        return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "this `{ … }` arm falls through, and the handled result is used as a value — a block arm's value (its last expression) arrives with slice Ue2; end the block with `return` / `fail`, or write the value as the arm's expression")
+    // The expression that is an arm's value (an expression arm, or a block
+    // arm's last statement): a write is resolved as the statement it is and
+    // falls through; a value is resolved as the arm's value (a handling form
+    // there is a statement's whole value — its own Attempt, Ue); a call of a
+    // function that yields nothing falls through.
+    fn armValueExpr(env: Env, a: AArm, x: AExpr, cx: ArmCx, st0: AS) -> AS {
+        if (isWriteExpr(x)) return fallsThrough(env, a, cx, resolveStmtExpr(env, x, st0))
+        const st: AS = resolveExpr(withWholeAt(env, x.nid, "the value of an enclosing arm"), x, not, st0).st
+        if (callYieldsNothing(env, st, x)) return fallsThrough(env, a, cx, st)
+        return st
+    }
+
+    fn armBlock(env: Env, a: AArm, b: ABlock, cx: ArmCx, st0: AS) -> AS {
+        if (cx.stmt) return resolveBlock(env, b, st0)
+        // s452 r2 (HIGH-1) — §19.16.2: "The same code covers a `defer` written
+        // directly in an arm of a `match` / `if` / `for` that is used for its
+        // VALUE … the defer block would capture it" — E-DEFER-UNSUPPORTED-SITE.
+        // PA readings (DESIGN.md §3): a `!{}` arm is the same shape (both lower
+        // to one Attempt); an arm that LEAVES (`{ defer …; return x }`) is still
+        // an arm used for its value — refused too (fail closed, reversible). A
+        // `defer` in a STATEMENT-position arm stays legal (above).
+        const dsp: AStmt | not = directDefer(b)
+        if (dsp is some) return addDiag(resolveBlock(env, b, st0), env.file, dsp.span, "E-DEFER-UNSUPPORTED-SITE", "a `defer` directly in an arm whose result is used as a value (" + whereLabel(cx.what) + ") — the deferred block would capture the arm's result (§19.16.2). Handle the call as a statement and keep the `defer` in its arm, or move the `defer` to the enclosing block")
+        if (blockDiverges(b)) return resolveBlock(env, b, st0)
+        const n: int = b.stmts.length
+        if (n == 0) return fallsThrough(env, a, cx, st0)
+        const last: AExpr | not = evalOf(b.stmts[n - 1])
+        if (last is not) return fallsThrough(env, a, cx, resolveBlock(env, b, st0))
+        // `{ statement* expression }`: the statements in order (their locals in
+        // scope for the value), then the last expression as the arm's value
+        let st: AS = st0
+        let env2: Env = env
+        let i = 0
+        while (i < n - 1) {
+            const r: RB = resolveStmt(env2, b.stmts[i], st)
+            env2 = r.env
+            st = r.st
+            i = i + 1
+        }
+        return armValueExpr(env2, a, last, cx, st)
+    }
+
+    // The first `defer` written directly in `b` (not in a nested block), else not.
+    fn directDefer(b: ABlock) -> AStmt | not {
+        for (const s of b.stmts) {
+            const k: AStmtK = s.k
+            const isD: boolean = match k {
+                .Defer(body: d) :> true
+                .Eval(e: x) :> false
+                .Local(name: n) :> false
+                .Return(e: x) :> false
+                .If(cond: c) :> false
+                .Given(name: n) :> false
+                .EffectStmt(w: w) :> false
+                .Fail(f: x) :> false
+            }
+            if (isD) return s
+        }
+        return not
+    }
+
+    fn evalOf(s: AStmt) -> AExpr | not {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: x) :> x
+            .Local(name: n) :> not
+            .Return(e: x) :> not
+            .If(cond: c) :> not
+            .Given(name: n) :> not
+            .EffectStmt(w: w) :> not
+            .Defer(body: d) :> not
+            .Fail(f: x) :> not
+        }
+    }
+
+    // A write in expression form — an assignment, `reset(@x)`, or an edit call
+    // on a reactive place (`@xs.push(v)`, `@xs.pop()`): it produces no value.
+    fn isWriteExpr(x: AExpr) -> boolean {
+        if (assignValue(x) is some) return true
+        const c: AExpr | not = calleeOf(x.k)
+        if (c is not) return false
+        if (exprName(c) == "reset") return true
+        const m: MethodCall | not = methodCall(c)
+        if (m is some) return isReactiveRoot(placeRoot(m.obj))
+        const rm: MethodCall | not = removeCall(c)
+        if (rm is some) return isReactiveRoot(placeRoot(rm.obj))
+        return false
+    }
+
+    // A call of a declared scrml function that yields no value (§19.4.3: "a
+    // call whose result is not a value of the success type (`log(m)`)").
+    fn callYieldsNothing(env: Env, st: AS, x: AExpr) -> boolean {
+        const c: AExpr | not = calleeOf(x.k)
+        if (c is not) return false
+        const f: FnInfo | not = calledFn(env, nameFactIn(st, c.nid))
+        if (f is not) return false
+        return !fnYieldsValue(env.g, f)
+    }
+
+    // Does a call of `f` produce a value? A declared return type does (`->
+    // void` declares that it does not, §7.5 — FnInfo.ret is `not` for it); a
+    // `!` function's result is handled, never read here; otherwise the body
+    // decides — a value on EVERY path, proven syntactically, FAIL CLOSED
+    // (judged "no value" → E-ERROR-012 at a value-position arm):
+    //   - s452 r3 (MED-B): a bare `return` ANYWHERE in the body (any depth — an
+    //     `if` branch, a `given` body, a handling form's arm block) is a path
+    //     with no value;
+    //   - otherwise the statements are walked in order and the FIRST one that
+    //     returns a value on every path through it decides (s452 r3 LOW-C — what
+    //     follows it is dead): `return <expr>`, or an `if` / `else` both of whose
+    //     blocks do. Reaching the end of the body is no value.
+    //   - A `fn` / `function` body's tail EXPRESSION is not a value: the
+    //     bootstrap gives neither implicit tail return (`fn h() { "a" }` prints
+    //     `function h() { "a"; }` — returns nothing; checked s452 r3).
+    // Unprovable, so judged "no value": a `given` (its body runs only when the
+    // value is present), a statement-position handling form whose arms return,
+    // an `if` without `else`.
+    fn fnYieldsValue(g: Globals, f: FnInfo) -> boolean {
+        if (f.ret is some || f.failable) return true
+        const fs: FnSrc | not = fnSrcOf(g, f.sym.id)
+        if (fs is not) return true                         // unknown: never claimed to be empty
+        const r: AType | not = fs.f.ret
+        if (r is some) return !declaresVoid(r)
+        if (blockHasBareReturn(fs.f.body)) return false
+        return blockYieldsOnAllPaths(fs.f.body)
+    }
+
+    fn declaresVoid(t: AType) -> boolean {
+        const k: ATypeK = t.k
+        return match k {
+            .TName(name: n) :> n == "void"
+            .TSeq(elem: e) :> false
+            .TMaybe(inner: i) :> false
+        }
+    }
+
+    // Does SOME statement of `b` return a value on every path through it (the
+    // first such statement ends every path that reaches it)?
+    fn blockYieldsOnAllPaths(b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtYieldsOnAllPaths(s)) return true
+        }
+        return false
+    }
+
+    fn stmtYieldsOnAllPaths(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> x is some
+            .If(cond: c, thenB: t, elseB: el) :> blockYieldsOnAllPaths(t) && maybeBlockYields(el)
+            .Given(name: n) :> false
+            .Eval(e: x) :> false
+            .Local(name: n) :> false
+            .EffectStmt(w: w) :> false
+            .Defer(body: d) :> false
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn maybeBlockYields(b: ABlock | not) -> boolean {
+        if (b is not) return false
+        return blockYieldsOnAllPaths(b)
+    }
+
+    // A `return` with no value anywhere in `b` (s452 r3 MED-B).
+    fn blockHasBareReturn(b: ABlock) -> boolean {
+        for (const s of b.stmts) {
+            if (stmtHasBareReturn(s)) return true
+        }
+        return false
+    }
+
+    fn stmtHasBareReturn(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: x) :> returnIsBare(x)
+            .If(cond: c, thenB: t, elseB: el) :> exprHasBareReturn(c) || blockHasBareReturn(t) || maybeBlockHasBareReturn(el)
+            .Given(name: n, subject: x, body: b) :> exprHasBareReturn(x) || blockHasBareReturn(b)
+            .Eval(e: x) :> exprHasBareReturn(x)
+            .Local(name: n, init: i) :> exprHasBareReturn(i)
+            .EffectStmt(w: w) :> false
+            .Defer(body: d) :> false                       // a deferred body holds no `return` (§19.16.3 rule 1)
+            .Fail(f: x) :> false
+        }
+    }
+
+    fn returnIsBare(x: AExpr | not) -> boolean {
+        if (x is not) return true
+        return exprHasBareReturn(x)
+    }
+
+    fn maybeBlockHasBareReturn(b: ABlock | not) -> boolean {
+        if (b is not) return false
+        return blockHasBareReturn(b)
+    }
+
+    // ... inside a handling form's arm block in `e`, at any depth.
+    fn exprHasBareReturn(e: AExpr) -> boolean {
+        for (const b of exprBlocks(e)) {
+            if (blockHasBareReturn(b)) return true
+        }
+        for (const x of exprKids(e)) {
+            if (exprHasBareReturn(x)) return true
+        }
+        return false
+    }
+
+    // E-ERROR-012 (§19.4.3 ruling 1a), with the SPEC's message.
+    fn fallsThrough(env: Env, a: AArm, cx: ArmCx, st: AS) -> AS {
+        const pat: string = patLabel(a.pat)
+        const where: string = whereLabel(cx.what)
+        const form: string = handledFormLabel(cx)
+        const n: string = exprName(maybeCallee(cx.subj))
+        if (n != "") {
+            return addDiag(st, env.file, a.span, "E-ERROR-012", "Arm '" + pat + "' of the " + form + " on '" + n + "(…)' produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of '" + n + "'s success type or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or call '" + n + "(…) !{ … }' as a statement and keep the writes in its arms.")
+        }
+        return addDiag(st, env.file, a.span, "E-ERROR-012", "Arm '" + pat + "' of the " + form + " on " + subjectName(cx.subj) + " produces no value, but the " + form + "'s result is used here (" + where + "). In a value position every arm must yield a value of its success type (a `" + sqlSigil() + "}` query's is its terminator's, §44.3: `.get()` → `Row | not`, `.all()` → `Row[]`) or leave with 'return' / 'fail'. End the arm with a fallback value (e.g. '| " + pat + " :> { @phase = …; fallback }'), leave with 'return', or handle it as a statement and keep the writes in its arms.")
+    }
+
+    fn maybeCallee(e: AExpr) -> AExpr {
+        const c: AExpr | not = calleeOf(e.k)
+        if (c is not) return e
+        return c
+    }
+
+    fn handledFormLabel(cx: ArmCx) -> string {
+        if (cx.isMatch) return "match"
+        return "handler"
+    }
+
+    fn whereLabel(what: string) -> string {
+        if (what == "") return "a value position"
+        return what
+    }
+
+    // An arm's pattern, as written (for messages).
+    fn patLabel(p: APat) -> string {
+        return match p {
+            .PName(name: n, binds: bs, parens: pr) :> patNameLabel(n, bs, pr)
+            .PWild :> "_"
+            .PWhole(bind: b, viaElse: v) :> wholeLabel(b.name, v)
+            .PBare(bind: b) :> b.name
+        }
+    }
+
+    fn patNameLabel(n: string, bs: ABind[], parens: boolean) -> string {
+        if (!parens) return "." + n
+        return "." + n + "(" + bindNames(bs).join(", ") + ")"
+    }
+
+    fn wholeLabel(name: string, viaElse: boolean) -> string {
+        if (viaElse) return "else " + name
+        return "_ " + name
     }
 
     // Does every path through `b` leave the function (`return` / `fail`)?
@@ -6301,7 +6774,7 @@ ${
 
     fn resolveMaybeExpr(env: Env, e: AExpr | not, st: AS) -> AS {
         if (e is not) return st
-        return resolveExpr(withWhole(env, e.nid), e, not, st).st
+        return resolveExpr(withWholeAt(env, e.nid, "a `return` operand"), e, not, st).st
     }
 
     // `let a[: T] = init`. An annotation is the local's type (and the
@@ -6316,7 +6789,7 @@ ${
             if (!rt.unresolved) annot = rt.t
             st = rt.st
         }
-        const ri: RX = resolveExpr(withWhole(env, init.nid), init, annot, st)
+        const ri: RX = resolveExpr(withWholeAt(env, init.nid, "the initializer of `" + name + "`"), init, annot, st)
         const rs: RSym = mint(ri.st, name)
         st = addBind(rs.st, s.nid, BindFact.BBind(rs.s))
         let lty: Type | not = ri.x.ty
@@ -6527,6 +7000,7 @@ ${
             .MEach(bind: b) :> false
             .MErrors(of: x) :> false
             .MSlot :> false
+            .MDb :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
             .MStar(decl: d) :> false
@@ -6540,6 +7014,7 @@ ${
             .MEach(bind: b) :> false
             .MErrors(of: x) :> false
             .MSlot :> false
+            .MDb :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
             .MStar(decl: d) :> false
@@ -6553,6 +7028,7 @@ ${
             .MEach(bind: b) :> false          // refuses `show` itself (resolveEach)
             .MErrors(of: x) :> false          // refuses it itself (resolveErrors)
             .MSlot :> true
+            .MDb :> true
             .MStateView(v: v) :> true
             .MInline(v: v) :> true
             .MStar(decl: d) :> true
@@ -6579,6 +7055,7 @@ ${
             .MEach(bind: b) :> true          // refuses `if=` / `else-if=` / `else` itself (resolveEach)
             .MErrors(of: x) :> true          // refuses them itself (resolveErrors)
             .MSlot :> false
+            .MDb :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
             .MStar(decl: d) :> false
@@ -6645,6 +7122,8 @@ ${
         if (sd is some) return singleInstantiated(env, e, st)
         // s449 — `<errors of=…/>` (§55.8), when no declaration takes the name
         if (e.tag == "errors") return resolveErrors(env, e, st)
+        // s452 — `<db src=…>` (§4 state block; §8.1.1 database scope)
+        if (e.tag == "db") return resolveDb(env, e, st)
         // s444 (PA): a scrml STRUCTURAL element the bootstrap does not
         // implement is never an HTML element (§4.15, §24.4 "These element names
         // SHALL NOT be treated as HTML elements") — refused, not rendered as
@@ -6655,6 +7134,36 @@ ${
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
         }
         return resolveHtml(env, e, st)
+    }
+
+    // s452 — a `<db src=…>` state block. §4: "A state block is a first-class
+    // context. Its content is markup context"; §8.1.1: a `<db src=>` is a
+    // database scope for the `?{}` blocks inside it (placePass's dbsPass
+    // resolves which database every query runs on, and checks `src=` —
+    // E-SQL-005). It is not an HTML element: its children render in place.
+    // Its other attributes are REFUSED, never ignored: `tables=` generates
+    // types (§14.8.4) and `protect=` keeps columns off the client (§14.8.9 — a
+    // confidentiality control), neither in the bootstrap.
+    fn resolveDb(env: Env, e: AElem, st0: AS) -> AS {
+        let st: AS = st0
+        let src = false
+        for (const a of e.attrs) {
+            if (a.name == "src") {
+                src = true
+            } else if (isChainAttr(a.name) || a.name == "show") {
+                // s452 r2 (NIT): `if=` / `else-if=` / `else` / `show=` are judged —
+                // and refused on a `<db>` — by the chain and `show=` rules (MDb is
+                // no chain host, show= is refused on it): one report, not two
+            } else if (a.name == "tables") {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored")
+            } else if (a.name == "protect") {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored")
+            } else {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<db>` is not in the bootstrap (it takes `src=`, §8.1.1) — it would be ignored")
+            }
+        }
+        if (!src) st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `<db>` without `src=` names no database (§8.1.1: a database scope is a `<db src=>`) — the bootstrap has no other reading of it")
+        return addElem(resolveNodes(env, e.kids, st), e.nid, ElemFact.MDb)
     }
 
     // s449 — `<errors of=expr/>` (§55.8): "`of=expr` REQUIRED — References a
@@ -6777,7 +7286,6 @@ ${
             "timeout"       :> "§6.7.8 lifecycle"
             "machine"       :> "§6.7 lifecycle"
             "errorboundary" :> "§19 error boundary"
-            "db"            :> "§39 database"
             "schema"        :> "§39.2"
             "channel"       :> "§38"
             "onchange"      :> "§38.13"
@@ -7501,7 +8009,7 @@ ${
             if (fs.info.file == g.entry) hs = progHandles
             let host: HostCtx = HostCtx.HostOk
             if (fs.info.pure) host = HostCtx.HostPure
-            const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1 }
+            const fx: FailCtx = { inFn: true, fnName: fs.info.name, failable: fs.info.failable, err: fs.info.err, defer: false, subject: -1, whole: -1, fnRef: -1, wholeWhat: "" }
             let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [], host: host, own: "", inEffect: false, fx: fx }
             const fte: TypeEnv = { stubs: g.te.stubs, declNames: g.te.declNames, declSyms: g.te.declSyms, file: fs.info.file }
             for (const p of fs.f.params) {
@@ -9081,6 +9589,7 @@ ${
             .MEach(bind: b) :> not
             .MHtml :> not
             .MSlot :> not
+            .MDb :> not
             .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
@@ -9096,6 +9605,7 @@ ${
             .MUse(decl: d) :> not
             .MHtml :> not
             .MSlot :> not
+            .MDb :> not
             .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
@@ -9944,11 +10454,14 @@ ${
             let aenv: TEnv = env
             const fs: FieldDef[] = armFields(env.t, err, failFact(env.t.fails, a.nid))
             const p: APat = a.pat
+            // s452: a whole-error arm's binder is the whole error enum (§18.6.1)
+            const whole: boolean = armIdx(failFact(env.t.fails, a.nid)) == -4
             let i = 0
             for (const b of patBindsOf(p)) {
                 const bs: Sym | not = bindSym(bindFact(env.t.binds, b.nid))
                 let vt: VType = VType.Unknown
                 if (i < fs.length && env.t.unresolved.fields.indexOf(fs[i].sym.id) < 0) vt = known(fs[i].ty)
+                if (whole && err is some) vt = known(Type.Named(err))
                 if (bs is some) aenv = tWithLocal(aenv, bs, vt)
                 i = i + 1
             }
@@ -10001,6 +10514,8 @@ ${
         return match p {
             .PName(binds: bs) :> bs
             .PWild :> []
+            .PWhole(bind: b) :> [b]
+            .PBare(bind: b) :> [b]
         }
     }
 
@@ -11604,6 +12119,7 @@ ${
             .MHtml :> not
             .MEach(bind: b) :> not
             .MSlot :> not
+            .MDb :> not
             .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
@@ -13089,45 +13605,212 @@ ${
         return out
     }
 
-    // ---- the databases (§8.1.1, §44.2) -------------------------------------------
-    // One `<program db=…>`: its node, the Db it declares (`not` — the value was
-    // refused, reported), where.
-    type ProgDb:struct = { pnid: int, db: Db | not }
-    // Each function's nearest `<program>` with a `db=` (-1: none).
-    type FnDb:struct = { fnid: int, pnid: int }
-    type RDbs:struct = { progs: ProgDb[], fns: FnDb[], st: AS }
+    // ---- the databases (§8.1.1 as amended S451, §44.2) ----------------------------
+    // s452 — §8.1.1: "The compiler SHALL resolve the database for each `?{}`
+    // block by finding its closest ancestor **database scope** — a `<program>`
+    // element with a `db=` attribute, a `<program>` element whose database a
+    // direct-child `<db src=>` supplies …, or a `<db src=>` state block.
+    // 'Closest' means fewest nesting levels up the element tree, counting every
+    // kind". Ruling 11a: "When a `<program>` element has no `db=` attribute and
+    // exactly one `<db src=>` element is its **direct child**, that `<program>`
+    // SHALL be a database scope whose database is the `<db>`'s `src=` value";
+    // two or more direct-child `<db src=>` → "NONE of them supplies"; "A
+    // `<program db=>` is never supplied". E-SQL-004 "whatever the number of
+    // database scopes in the file".
+    //
+    // ONE walk over every file — items, markup, declarations — carrying the
+    // nearest database scope. It records each function's scope (a function is
+    // an item of a `<program>` body: the bootstrap has no function declared
+    // inside an element), each MARKUP-position `?{}` site's scope (an attribute
+    // or handler value, an interpolation, an `<effect>` body, a declaration's
+    // value), and every scope's database.
+    //
+    // A database scope: its node (a `<program>` or a `<db>` element), its
+    // database (`not` — the value was refused, reported). A `<program>` a
+    // `<db>` supplies and that `<db>` share ONE Db (one database).
+    type ScopeDb:struct = { nid: int, db: Db | not }
+    // Each function's nearest database scope (-1: none).
+    type FnDb:struct = { fnid: int, scope: int }
+    // Each markup-position `?{}` site's nearest database scope (-1: none).
+    type SiteDb:struct = { nid: int, scope: int }
+    type RDbs:struct = { scopes: ScopeDb[], fns: FnDb[], sites: SiteDb[], st: AS }
 
-    fn dbsPass(files: FileAst[], st0: AS) -> RDbs {
-        let st: AS = st0
-        let progs: ProgDb[] = []
-        let fns: FnDb[] = []
-        for (const f of files) {
-            const r: RDbs = dbsInItems(f.path, f.items, -1, { progs: progs, fns: fns, st: st })
-            progs = r.progs
-            fns = r.fns
-            st = r.st
-        }
-        return { progs: progs, fns: fns, st: st }
+    fn dbsPass(g: Globals, files: FileAst[], st0: AS) -> RDbs {
+        let acc: RDbs = { scopes: [], fns: [], sites: [], st: st0 }
+        for (const f of files) { acc = dbsInItems(g, f.path, f.items, -1, acc) }
+        return acc
     }
 
-    fn dbsInItems(file: string, items: AItem[], pnid: int, acc0: RDbs) -> RDbs {
+    fn withScope(acc: RDbs, nid: int, db: Db | not, st: AS) -> RDbs {
+        return { scopes: acc.scopes.concat([{ nid: nid, db: db }]), fns: acc.fns, sites: acc.sites, st: st }
+    }
+
+    fn withSites(acc: RDbs, ss: SqlSite[], scope: int) -> RDbs {
+        let sites: SiteDb[] = acc.sites
+        for (const x of ss) { sites = sites.concat([{ nid: x.nid, scope: scope }]) }
+        return { scopes: acc.scopes, fns: acc.fns, sites: sites, st: acc.st }
+    }
+
+    fn dbsInItems(g: Globals, file: string, items: AItem[], scope: int, acc0: RDbs) -> RDbs {
         let acc: RDbs = acc0
         for (const it of items) {
             const k: AItemK = it.k
             const f: AFn | not = fnOfItemK(k)
-            if (f is some) acc = { progs: acc.progs, fns: acc.fns.concat([{ fnid: f.nid, pnid: pnid }]), st: acc.st }
+            if (f is some) acc = { scopes: acc.scopes, fns: acc.fns.concat([{ fnid: f.nid, scope: scope }]), sites: acc.sites, st: acc.st }
             const p: AProgram | not = programOfK(k)
-            if (p is some) {
-                const a: AAttr | not = attrNamed(p.attrs, "db")
-                if (a is some) {
-                    const rd: RDb = dbOfAttr(file, a, acc.st)
-                    acc = dbsInItems(file, p.items, p.nid, { progs: acc.progs.concat([{ pnid: p.nid, db: rd.db }]), fns: acc.fns, st: rd.st })
-                } else {
-                    acc = dbsInItems(file, p.items, pnid, acc)
+            if (p is some) acc = dbsInProgram(g, file, p, scope, acc)
+            const n: ANode | not = markupOfItemK(k)
+            if (n is some) acc = dbsInNode(g, file, n, scope, acc)
+            const d: ADecl | not = declOfItemK(k)
+            if (d is some) acc = dbsInDecl(g, file, d, scope, acc)
+        }
+        return acc
+    }
+
+    // A `<program>`: a database scope on its own `db=`; else on the `src=` of
+    // its single direct-child `<db src=>` (ruling 11a); else not a scope.
+    fn dbsInProgram(g: Globals, file: string, p: AProgram, outer: int, acc: RDbs) -> RDbs {
+        const a: AAttr | not = attrNamed(p.attrs, "db")
+        if (a is some) {
+            const rd: RDb = dbOfAttr(file, a, acc.st)
+            return dbsInItems(g, file, p.items, p.nid, withScope(acc, p.nid, rd.db, rd.st))
+        }
+        const sup: AElem | not = supplyingDb(g, p.items)
+        if (sup is some) {
+            const src: AAttr | not = attrNamed(sup.attrs, "src")
+            if (src is some) {
+                const rs: RDb = dbOfAttr(file, src, acc.st)
+                const both: RDbs = withScope(withScope(acc, p.nid, rs.db, rs.st), sup.nid, rs.db, rs.st)
+                return dbsInItems(g, file, p.items, p.nid, both)
+            }
+        }
+        return dbsInItems(g, file, p.items, outer, acc)
+    }
+
+    // The ONE direct-child `<db src=>` of a program body, else not (none, or
+    // two or more — "NONE of them supplies").
+    fn supplyingDb(g: Globals, items: AItem[]) -> AElem | not {
+        let found: AElem[] = []
+        for (const it of items) {
+            const n: ANode | not = markupOfItemK(it.k)
+            if (n is some) {
+                const e: AElem | not = elemOfANode(n)
+                if (e is some) {
+                    if (isDbElem(g, e) && attrNamed(e.attrs, "src") is some) found = found.concat([e])
                 }
             }
         }
+        if (found.length == 1) return found[0]
+        return not
+    }
+
+    // A `<db>` state block (§4 — "`db` is a built-in state type"), unless a
+    // user declaration takes the name (the binder's rule: a declaration in
+    // scope wins over every built-in reading of a tag).
+    fn isDbElem(g: Globals, e: AElem) -> boolean {
+        if (e.star || e.tag != "db") return false
+        return declNamed(g, e.tag) is not
+    }
+
+    fn dbsInNode(g: Globals, file: string, n: ANode, scope: int, acc: RDbs) -> RDbs {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> dbsInElem(g, file, e, scope, acc)
+            .Interp(e: x) :> withSites(acc, sqlsInExpr(x), scope)
+            .Effect(w: w) :> withSites(acc, sqlsInBlock(w.body), scope)
+            .DeclNode(d: d) :> dbsInDecl(g, file, d, scope, acc)
+            .Text(text: t) :> acc
+        }
+    }
+
+    // An element: its attribute values stand in the scope around it; a `<db
+    // src=>` is the scope of its children (registered once — a program's
+    // supplier is registered with the program).
+    fn dbsInElem(g: Globals, file: string, e: AElem, scope: int, acc0: RDbs) -> RDbs {
+        let acc: RDbs = acc0
+        for (const a of e.attrs) { acc = withSites(acc, sqlsInValue(a.value), scope) }
+        let inner: int = scope
+        if (isDbElem(g, e)) {
+            const src: AAttr | not = attrNamed(e.attrs, "src")
+            if (src is some) {
+                if (scopeDbOf(acc.scopes, e.nid) is not) {
+                    const rd: RDb = dbOfAttr(file, src, acc.st)
+                    acc = withScope(acc, e.nid, rd.db, rd.st)
+                }
+                inner = e.nid
+            }
+        }
+        for (const c of e.kids) { acc = dbsInNode(g, file, c, inner, acc) }
         return acc
+    }
+
+    // A declaration: its own value, its attribute defaults, the opener's other
+    // words' values, its validators' arguments, its child fields, its state
+    // children, its renders.
+    fn dbsInDecl(g: Globals, file: string, d: ADecl, scope: int, acc0: RDbs) -> RDbs {
+        let acc: RDbs = withSites(acc0, sqlsInValue(d.own), scope)
+        for (const a of d.attrs) { acc = withSites(acc, sqlsInValue(a.dflt), scope) }
+        for (const m of d.mods) { acc = withSites(acc, sqlsInValue(m.value), scope) }
+        for (const v of d.validators) { acc = withSites(acc, sqlsInExprs(valArgExprs(v.arg)), scope) }
+        for (const c of d.body) {
+            const ck: ADeclChild = c
+            acc = match ck {
+                .ChildField(d: cd) :> dbsInDecl(g, file, cd, scope, acc)
+                .StateChild(s: sc) :> dbsInStateChild(g, file, sc, scope, acc)
+            }
+        }
+        const r: AElem | not = d.renders
+        if (r is some) acc = dbsInElem(g, file, r, scope, acc)
+        return acc
+    }
+
+    fn dbsInStateChild(g: Globals, file: string, sc: AStateChild, scope: int, acc0: RDbs) -> RDbs {
+        let acc: RDbs = acc0
+        for (const a of sc.attrs) { acc = withSites(acc, sqlsInValue(a.value), scope) }
+        for (const n of sc.body) { acc = dbsInNode(g, file, n, scope, acc) }
+        return acc
+    }
+
+    fn valArgExprs(a: AValArg) -> AExpr[] {
+        return match a {
+            .NoArgs :> []
+            .Cmp(op: o, e: x) :> [x]
+            .Exprs(es: es) :> es
+            .Regex(source: x) :> []
+        }
+    }
+
+    fn markupOfItemK(k: AItemK) -> ANode | not {
+        return match k {
+            .MarkupItem(n: n) :> n
+            .FnItem(f: f) :> not
+            .ImportItem(i: i) :> not
+            .TypeItem(t: t) :> not
+            .DeclItem(d: d) :> not
+            .ProgramItem(p: p) :> not
+        }
+    }
+
+    fn declOfItemK(k: AItemK) -> ADecl | not {
+        return match k {
+            .DeclItem(d: d) :> d
+            .MarkupItem(n: n) :> not
+            .FnItem(f: f) :> not
+            .ImportItem(i: i) :> not
+            .TypeItem(t: t) :> not
+            .ProgramItem(p: p) :> not
+        }
+    }
+
+    fn elemOfANode(n: ANode) -> AElem | not {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> e
+            .Text(text: t) :> not
+            .Interp(e: x) :> not
+            .DeclNode(d: d) :> not
+            .Effect(w: w) :> not
+        }
     }
 
     fn fnOfItemK(k: AItemK) -> AFn | not {
@@ -13161,9 +13844,9 @@ ${
     // compile time).
     fn dbOfAttr(file: string, a: AAttr, st: AS) -> RDb {
         const v: string | not = quotedValue(a.value)
-        if (v is not) return { db: not, st: addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`db=` must be a literal connection string (`db=\"./app.db\"`, §8.1.1) — the bootstrap reads it at compile time") }
+        if (v is not) return { db: not, st: addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` must be a literal connection string (`" + a.name + "=\"./app.db\"`, §8.1.1) — the bootstrap reads it at compile time") }
         const why: string = dbRefusal(v)
-        if (why != "") return { db: not, st: addDiag(st, file, a.span, "E-SQL-005", "`db=\"" + v + "\"`: " + why + " (§8.1.1, §44.2). A `" + sqlSigil() + "}` runs on SQLite (`./app.db`, `sqlite:./app.db`, `:memory:`), PostgreSQL (`postgres://…`, `postgresql://…`) or MySQL (`mysql://…`)") }
+        if (why != "") return { db: not, st: addDiag(st, file, a.span, "E-SQL-005", "`" + a.name + "=` (" + dbKind(v) + "): " + why + " (§8.1.1, §44.2). A `" + sqlSigil() + "}` runs on SQLite (`./app.db`, `sqlite:./app.db`, `:memory:`), PostgreSQL (`postgres://…`, `postgresql://…`) or MySQL (`mysql://…`)") }
         const r: RSym = mint(st, "db")
         return { db: { sym: r.s, driver: dbDriver(v), target: dbTarget(v), file: file, owner: false }, st: r.st }
     }
@@ -13176,6 +13859,22 @@ ${
             .Paren(e: x) :> not
             .Braced(b: b) :> not
         }
+    }
+
+    // s452 r3 (LOW-B) — a diagnostic SHALL NOT echo a `db=` / `src=` value at
+    // all (credentials hide in too many places: userinfo, `?password=`,
+    // `;password=`, a jdbc `&password=`, an unencoded `/`). It names what KIND
+    // of value it is instead, from the recognized scheme only.
+    fn dbKind(v: string) -> string {
+        if (v.trim() == "") return "an empty value"
+        const scheme: string = schemeOf(v)
+        if (scheme == "") return "a SQLite path"
+        if (scheme == "sqlite") return "a `sqlite:` path"
+        if (scheme == "postgres" || scheme == "postgresql") return "a PostgreSQL connection string"
+        if (scheme == "mysql") return "a MySQL connection string"
+        if (scheme == "mongo" || scheme == "mongodb") return "a MongoDB URL"
+        if (scheme == "file") return "a `file:` URI"
+        return "a connection string with an unrecognized prefix"
     }
 
     // Why a connection string is not a `?{}` database ("" — it is one).
@@ -13193,7 +13892,7 @@ ${
         }
         if (scheme == "mongo" || scheme == "mongodb") return "MongoDB is not a `" + sqlSigil() + "}` database — use a `^{}` meta context"
         if (scheme == "file") return "a `file:` URI is not a path — write the path itself or `sqlite:<path>`"
-        return "`" + scheme + ":` is not a recognized database connection prefix"
+        return "its prefix is not a recognized database connection prefix"
     }
 
     // The URI scheme of a value ("" — none: a path, or `:memory:`).
@@ -13226,28 +13925,41 @@ ${
         return v
     }
 
-    fn progDbOf(ps: ProgDb[], pnid: int) -> ProgDb | not {
-        for (const p of ps) {
-            if (p.pnid == pnid) return p
+    fn scopeDbOf(ss: ScopeDb[], nid: int) -> ScopeDb | not {
+        for (const x of ss) {
+            if (x.nid == nid) return x
         }
         return not
     }
 
-    fn fnDbProg(fs: FnDb[], fnid: int) -> int {
+    fn fnScope(fs: FnDb[], fnid: int) -> int {
         for (const f of fs) {
-            if (f.fnid == fnid) return f.pnid
+            if (f.fnid == fnid) return f.scope
         }
         return -1
     }
 
-    // The entry file's top-level `<program>` (the db of a `?{}` that stands in
-    // no function — a value / action position — is its).
-    fn entryProgramNid(g: Globals) -> int {
-        const d: DeclSrc | not = findDeclSrc(g, g.program)
-        if (d is not) return -1
-        const p: AProgram | not = d.p
-        if (p is not) return -1
-        return p.nid
+    fn siteScope(ss: SiteDb[], nid: int) -> int {
+        for (const x of ss) {
+            if (x.nid == nid) return x.scope
+        }
+        return -1
+    }
+
+    // The program's databases, each once (a supplied program shares its `<db>`'s).
+    fn scopeDbs(ss: ScopeDb[]) -> Db[] {
+        let out: Db[] = []
+        let seen: int[] = []
+        for (const x of ss) {
+            const d: Db | not = x.db
+            if (d is some) {
+                if (seen.indexOf(d.sym.id) < 0) {
+                    out = out.concat([d])
+                    seen = seen.concat([d.sym.id])
+                }
+            }
+        }
+        return out
     }
 
     // ---- the action positions (not value positions, §6.15) ------------------------
@@ -13306,13 +14018,9 @@ ${
         const areach: ReachOf[] = asyncReach(all, places)
 
         // the databases
-        const rd: RDbs = dbsPass(g.files, st)
+        const rd: RDbs = dbsPass(g, g.files, st)
         st = rd.st
-        let dbs: Db[] = []
-        for (const p of rd.progs) {
-            const d: Db | not = p.db
-            if (d is some) dbs = dbs.concat([d])
-        }
+        const dbs: Db[] = scopeDbs(rd.scopes)
 
         let servers: int[] = []
         let sqls: SqlInfo[] = []
@@ -13337,7 +14045,8 @@ ${
             }
             // the queries in its body: database, facts, the failable rule
             for (const s of f.sqls) {
-                const sr: RSqlSite = sqlSiteFacts(g, rd, f.file, fnDbProg(rd.fns, f.nid), s, f.failable, st)
+                if (!f.failable) st = manualTxDiag(f.file, s, "'" + f.name + "', which is not declared '!'", f.name, st)
+                const sr: RSqlSite = sqlSiteFacts(g, rd, f.file, fnScope(rd.fns, f.nid), s, f.failable, st)
                 st = sr.st
                 const si: SqlInfo | not = sr.info
                 if (si is some) {
@@ -13469,18 +14178,18 @@ ${
     // (§19.8.3), and its facts (sql.scrml).
     type RSqlSite:struct = { info: SqlInfo | not, creates: boolean, st: AS }
 
-    fn sqlSiteFacts(g: Globals, rd: RDbs, file: string, pnid: int, s: SqlSite, failable: boolean, st0: AS) -> RSqlSite {
+    fn sqlSiteFacts(g: Globals, rd: RDbs, file: string, scope: int, s: SqlSite, failable: boolean, st0: AS) -> RSqlSite {
         // (s451 Ue: the §19.8.3 failable rule — E-ERROR-002 — is the binder's, resolveSql)
         let st: AS = st0
         if (file != g.entry) {
             st = addDiag(st, file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "a `" + sqlSigil() + "}` in an imported module makes it a module-with-db-context (§44.7.1), which is not in the bootstrap — keep the query in the program's file")
             return { info: not, creates: false, st: st }
         }
-        if (pnid < 0) {
+        if (scope < 0) {
             st = addDiag(st, file, s.span, "E-SQL-004", sql004Text())
             return { info: not, creates: false, st: st }
         }
-        const pd: ProgDb | not = progDbOf(rd.progs, pnid)
+        const pd: ScopeDb | not = scopeDbOf(rd.scopes, scope)
         if (pd is not) return { info: not, creates: false, st: st }
         const db: Db | not = pd.db
         if (db is not) return { info: not, creates: false, st: st }   // its `db=` was refused (E-SQL-005, reported)
@@ -13489,7 +14198,7 @@ ${
     }
 
     fn sql004Text() -> string {
-        return "this `" + sqlSigil() + "}` has no `db=` declaration in any ancestor `<program>` (§8.1.1) — add one to the enclosing `<program>`: `<program db=\"./app.db\">` for SQLite, `<program db=\"postgres://…\">` for PostgreSQL"
+        return "this `" + sqlSigil() + "}` has no database scope (§8.1.1): no `<program db=…>`, no `<program>` whose single direct-child `<db src=…>` supplies its database, and no `<db src=…>` encloses it — whatever the number of databases in the file. Put `db=` on the enclosing `<program>` (`<program db=\"./app.db\">` for SQLite, `<program db=\"postgres://…\">` for PostgreSQL), or move the query inside the `<db>` it means"
     }
 
 
@@ -13501,14 +14210,33 @@ ${
         return addDiag(st, file, s.span, "E-ERROR-002", "this `" + sqlSigil() + "}` query is failable (§19.8.3, S451): outside a `!` function it must be handled at the site — a `!{ … }` handler on the query, or a `match` on its result — or moved into a `!` function, where a failure propagates (§19.8.2). An unhandled query is E-ERROR-002. (\"No row\" is not a failure: `.get()` still returns `not`, `.all()` still `[]`.)")
     }
 
+    // s452 — §19.10.4 (S451): manual transaction control (`?{BEGIN}`,
+    // `?{COMMIT}`, `?{ROLLBACK}`, `?{SAVEPOINT}`, `?{RELEASE}`, `?{END}`)
+    // "written where no enclosing function is declared `!` (in a function
+    // without `!`, or at a body top) SHALL be a compile error: E-ERROR-015" —
+    // the SPEC's message. `where` names the place; `fname` the function ("" —
+    // a body top). The bootstrap emits no W-BATCH-001 (no implicit envelope
+    // until U1e), so E-ERROR-015 is the one transaction diagnostic here, as
+    // §19.10.4 requires outside a `!` function.
+    fn manualTxDiag(file: string, s: SqlSite, where: string, fname: string, st: AS) -> AS {
+        const kw: string = txControl(s.q.chunks)
+        if (kw == "") return st
+        let fix: string = "Move it into a function declared with '!' and use 'transaction { … }' (§19.10.2), which commits or rolls back on every exit."
+        if (fname != "") fix = "Declare '" + fname + "' with '!' and use 'transaction { … }' (§19.10.2), which commits or rolls back on every exit."
+        // s452 r3/r4 (MED-A): found only by the fail-closed plain `;` split — say why
+        let why: string = ""
+        if (txControlAware(s.q.chunks) == "") why = " (Found by reading every `;` in the query text as a statement boundary — quoting and commenting differ between databases, so the check does not trust them. The transaction-control word may be inside a quoted string or a comment; if so, move the query into a function declared '!', where manual transaction control is allowed, or bind the text as a value with `${…}`.)"
+        return addDiag(st, file, s.span, "E-ERROR-015", "Manual transaction control '" + kw + "' in " + where + ". A transaction is '!'-gated (§19.10.4): its rollback promise needs a failure path. " + fix + why)
+    }
+
     // §13.7 (S451 R1): a value position that would have to WAIT.
     fn valueServerDiags(g: Globals, t: Tables, all: FnFacts[], ps: PlaceFact[], areach: ReachOf[], rd: RDbs, st0: AS) -> AS {
         let st: AS = st0
-        const pnid: int = entryProgramNid(g)
         for (const p of valuePositions(g, t)) {
             for (const s of sqlsInValue(p.v)) {
                 st = errorTwo(p.file, s, false, st)
-                st = positionDb(g, rd, p.file, pnid, s, st)
+                st = manualTxDiag(p.file, s, p.what + ", which is not a function declared '!'", "", st)
+                st = positionDb(g, rd, p.file, s, st)
                 st = addDiag(st, p.file, s.span, "E-VALUE-SERVER-CALL", p.what + " runs a `" + sqlSigil() + "}` query — the query runs on the server, and " + waitFix())
             }
             const scan: BodyScan = scanValue({ t: t, file: p.file }, p.v, emptyScan())
@@ -13529,10 +14257,12 @@ ${
         return "a value position cannot wait for the server (§13.7). Load the value with a `<request>` (§6.7.7) into a cell and read the cell here — or, where the cell is server-authoritative, a `<x server>` declaration (§52)"
     }
 
-    // E-SQL-004 for a `?{}` that stands in no function (the entry program's db).
-    fn positionDb(g: Globals, rd: RDbs, file: string, pnid: int, s: SqlSite, st: AS) -> AS {
+    // E-SQL-004 for a `?{}` that stands in no function: its OWN nearest
+    // database scope (s452 — the scope pass recorded it by position).
+    fn positionDb(g: Globals, rd: RDbs, file: string, s: SqlSite, st: AS) -> AS {
         if (file != g.entry) return st
-        if (pnid >= 0 && progDbOf(rd.progs, pnid) is some) return st
+        const scope: int = siteScope(rd.sites, s.nid)
+        if (scope >= 0 && scopeDbOf(rd.scopes, scope) is some) return st
         return addDiag(st, file, s.span, "E-SQL-004", sql004Text())
     }
 
@@ -13540,11 +14270,11 @@ ${
     // split — U1d); a server call there is a suspension (U1b).
     fn actionServerDiags(g: Globals, t: Tables, all: FnFacts[], ps: PlaceFact[], rd: RDbs, st0: AS) -> AS {
         let st: AS = st0
-        const pnid: int = entryProgramNid(g)
         for (const a of actionPositions(g)) {
             for (const s of sqlsInValue(a.v)) {
                 st = errorTwo(a.file, s, false, st)
-                st = positionDb(g, rd, a.file, pnid, s, st)
+                st = manualTxDiag(a.file, s, a.what + ", which is not a function declared '!'", "", st)
+                st = positionDb(g, rd, a.file, s, st)
                 st = addDiag(st, a.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", a.what + " runs a `" + sqlSigil() + "}` query — client code that does server work is split around it (§19.9.5), and the body split arrives with unit U1d. Until then: put the query in a function")
             }
             const scan: BodyScan = scanValue({ t: t, file: a.file }, a.v, emptyScan())
@@ -13773,6 +14503,7 @@ ${
             .MUse(decl: d) :> nodesBound(intoDecl(cx, d), declRendersOnce(cx, d), all)
             .MStateView(v: v) :> nodesBound(cx, stateArmNodes(v), all)
             .MSlot :> slotBound(cx, all)
+            .MDb :> []
             .MErrors(of: x) :> []
             .MHtml :> []
             .MEach(bind: b) :> []
@@ -13819,6 +14550,7 @@ ${
             .MHtml :> not
             .MEach(bind: b) :> not
             .MSlot :> not
+            .MDb :> not
             .MErrors(of: x) :> not
             not :> not
         }
@@ -13863,6 +14595,7 @@ ${
             .MHtml :> []
             .MEach(bind: b) :> []
             .MSlot :> []
+            .MDb :> []
             .MErrors(of: x) :> []
             not :> []
         }
@@ -13941,6 +14674,7 @@ ${
             .MUse(decl: d) :> false
             .MEach(bind: b) :> false
             .MSlot :> false
+            .MDb :> false
             .MErrors(of: x) :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
@@ -14010,6 +14744,7 @@ ${
             .MUse(decl: d) :> nodesCarry(intoDecl(cx, d), declRendersOnce(cx, d))
             .MStateView(v: v) :> nodesCarry(cx, stateArmNodes(v))
             .MSlot :> slotCarries(cx)
+            .MDb :> false
             .MErrors(of: x) :> false
             .MHtml :> false
             .MEach(bind: b) :> false

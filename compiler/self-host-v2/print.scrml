@@ -593,9 +593,16 @@ ${
     fn errArmsJs(ctx: Ctx, err: JsExpr, arms: ErrArm[], i: int, result: Sym | not) -> JsStmt[] {
         if (i >= arms.length) return []
         const a: ErrArm = arms[i]
-        const body: JsStmt[] = patBinds(ctx, a.pat, err).concat(blockJs(ctx, a.body)).concat(resultJs(ctx, result, a.value))
+        const body: JsStmt[] = wholeBind(ctx, a.whole, err).concat(patBinds(ctx, a.pat, err)).concat(blockJs(ctx, a.body)).concat(resultJs(ctx, result, a.value))
         if (i == arms.length - 1 || isWildPat(a.pat)) return body
         return [JsStmt.SIf(patTest(ctx, a.pat, err), body, errArmsJs(ctx, err, arms, i + 1, result))]
+    }
+
+    // s452 — the whole-error binder (`| _ err :>`, §18.6.1): the arm's local
+    // holds the error value itself — the enum value, variant and payload.
+    fn wholeBind(ctx: Ctx, whole: Sym | not, err: JsExpr) -> JsStmt[] {
+        if (whole is not) return []
+        return [JsStmt.SConst(symName(ctx, whole), err)]
     }
 
     fn isWildPat(p: Pattern) -> boolean {
@@ -606,6 +613,10 @@ ${
         }
     }
 
+    // s452 r2: a branch with a value never holds a `defer` (analyze refuses a
+    // `defer` directly in a value-position arm — E-DEFER-UNSUPPORTED-SITE,
+    // §19.16.2), so its block is never wrapped in a `try` and the result
+    // assignment after it reads the block's locals in the same JS block.
     fn resultJs(ctx: Ctx, result: Sym | not, v: Expr | not) -> JsStmt[] {
         if (result is not) return []
         if (v is not) return []

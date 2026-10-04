@@ -111,7 +111,8 @@ describe("follow-up 1 — the closed exit set of free text", () => {
   test("`^{` / `!{` / `~{` are exits (context sigils; `~{` per SPEC §4.18.1b): skipped whole and reported", () => {
     for (const sig of ["^", "!", "~"]) {
       const d = run(P(`<p>a ${sig}{ x = "</p> }" } b</p>`)).diags;
-      expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      // s452: a `!{` in markup is a handler attached to nothing — E-ERROR-014 (§19.4.3, S451)
+      expect(d.map((x) => x.code)).toEqual([sig === "!" ? "E-ERROR-014" : "E-BOOTSTRAP-UNSUPPORTED"]);
       expect(d[0].message).toContain(sig + "{");
     }
   });
@@ -133,7 +134,7 @@ describe("follow-up 1 — the closed exit set of free text", () => {
   test("`^{` / `!{` / `~{` extent: a nested `{ … }` balances too", () => {
     for (const sig of ["^", "!", "~"]) {
       const r = run(P(`<p>a ${sig}{ f({ k: "}" }) } b</p>`));
-      expect(r.diags.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(r.diags.map((x) => x.code)).toEqual([sig === "!" ? "E-ERROR-014" : "E-BOOTSTRAP-UNSUPPORTED"]);
       expect(texts(r).filter((t) => t.trim() !== "")).toEqual(["a ", " b", "end"]);
     }
   });

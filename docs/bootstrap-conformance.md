@@ -13,24 +13,24 @@ Scope: **1300 of 1300 cases attempted** — every attempted case reached the pur
 |---|---:|---:|
 | PASS | 119 | 9.2% |
 | CODES-ONLY | 0 | 0.0% |
-| FAIL | 41 | 3.2% |
+| FAIL | 48 | 3.7% |
 | LEGACY | 0 | 0.0% |
 | NOT-TWINNED | 511 | 39.3% |
-| UNSUPPORTED | 629 | 48.4% |
+| UNSUPPORTED | 622 | 47.8% |
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 160; of those, 119 hold (74.4%). Runtime half executed on the bootstrap for 41 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 167; of those, 119 hold (71.3%). Runtime half executed on the bootstrap for 41 case(s).
 
 - **Vacuous** passes: 11 of 119 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **108**.
-- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 26 of 41; the other 15 are implemented checks that answered wrong.
+- FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 48; the other 21 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
-UNSUPPORTED by reason: bootstrap-unsupported 436 · parse-reject 193.
+UNSUPPORTED by reason: bootstrap-unsupported 429 · parse-reject 193.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **582** — PASS 74 · FAIL 37 · UNSUPPORTED 471. Twin holds 74 (non-vacuous 66). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **582** — PASS 74 · FAIL 44 · UNSUPPORTED 464. Twin holds 74 (non-vacuous 66). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -102,7 +102,7 @@ NOT-TWINNED by reason (511 cases; a case counts once per distinct reason):
 | channel | 31 | · | · | · | · | 19 | 12 | · | · |
 | codegen | 2 | · | · | · | · | 1 | 1 | · | · |
 | components | 32 | · | · | 2 | · | 29 | 1 | · | · |
-| control-flow | 67 | 12 | · | 1 | · | 18 | 36 | · | · |
+| control-flow | 67 | 12 | · | 2 | · | 18 | 35 | · | · |
 | defer | 51 | 8 | · | 3 | · | 4 | 36 | · | · |
 | derived | 6 | · | · | · | · | 5 | 1 | · | · |
 | each | 25 | · | · | · | · | 25 | · | · | · |
@@ -134,7 +134,7 @@ NOT-TWINNED by reason (511 cases; a case counts once per distinct reason):
 | outlet | 7 | · | · | · | · | 1 | 6 | · | · |
 | page | 1 | · | · | · | · | 1 | · | · | · |
 | parse-syntax | 4 | · | · | · | · | 2 | 2 | · | · |
-| parse-variant | 8 | · | · | · | · | · | 8 | · | · |
+| parse-variant | 8 | · | · | 6 | · | · | 2 | · | · |
 | persist | 5 | 5 | · | · | · | · | · | · | · |
 | print | 1 | · | · | · | · | · | 1 | · | · |
 | protect | 69 | · | · | · | · | 44 | 25 | · | · |
@@ -151,7 +151,7 @@ NOT-TWINNED by reason (511 cases; a case counts once per distinct reason):
 | table-for | 14 | · | · | · | · | 11 | 3 | · | · |
 | type-state-codes | 27 | 2 | · | 2 | · | 3 | 20 | · | · |
 
-### FAIL (41)
+### FAIL (48)
 
 - `components/invalid-prop-decl-syntax-reject` (codes; not in the bootstrap: E-COMPONENT-019)
   - missing E-COMPONENT-019
@@ -160,6 +160,8 @@ NOT-TWINNED by reason (511 cases; a case counts once per distinct reason):
 - `control-flow/ctrl-004-else-on-state-opener-pos` (twin · codes; not in the bootstrap: E-CTRL-004)
   - missing E-CTRL-004
   - severity: E-CTRL-004 did not fire (expected error)
+- `control-flow/s437-braceless-else-in-failable-arm` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-ERROR-012, E-SCOPE-001)
 - `defer/fail-path` (twin · runtime)
   - runtime: no artifact — the compile reported an error (E-OPERATOR-OPERAND-TYPE)
 - `defer/fn-prohibition-applies-neg` (twin · codes)
@@ -235,6 +237,18 @@ NOT-TWINNED by reason (511 cases; a case counts once per distinct reason):
   - twin emitted unasserted error(s): E-TYPE-UNKNOWN
 - `module/e-import-pinned-invalid-reject` (twin · codes; not in the bootstrap: E-IMPORT-PINNED-INVALID)
   - missing E-IMPORT-PINNED-INVALID
+- `parse-variant/error-invalid-payload` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-SCOPE-001)
+- `parse-variant/error-malformed-json` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-SCOPE-001)
+- `parse-variant/error-missing-discriminator` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-SCOPE-001)
+- `parse-variant/error-unknown-variant` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-SCOPE-001)
+- `parse-variant/misuse-non-enum-type` (twin · codes; not in the bootstrap: E-PARSEVARIANT-TYPE-NOT-ENUM)
+  - missing E-PARSEVARIANT-TYPE-NOT-ENUM
+- `parse-variant/single-field-payload-bind` (twin · runtime)
+  - runtime: no artifact — the compile reported an error (E-SCOPE-001)
 - `reactive/dg-002-no-readers-pos` (twin · codes; not in the bootstrap: E-DG-002)
   - missing E-DG-002
   - severity: E-DG-002 did not fire (expected warning)
@@ -382,7 +396,7 @@ none
 - `type-state-codes/e-struct-function-field-neg` — PASS · TWIN · VACUOUS
 - `type-state-codes/e-type-lifecycle-on-engine-cell-neg` — PASS · TWIN · VACUOUS
 
-### UNSUPPORTED (629)
+### UNSUPPORTED (622)
 
 - `api/api-base-missing-neg` — bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `api/api-clean-pos` — twin · bootstrap-unsupported: `<api>` is a scrml structural element (§60), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -527,7 +541,6 @@ none
 - `control-flow/if-in-dispatched-arm-neg` — twin · bootstrap-unsupported: `<match>` at a file's top level, outside any `<program>`, is not in the bootstrap — the SPEC names no rule for what it renders as (§40.8); move it inside the `<program>`
 - `control-flow/if-on-match-render-gate-absent-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `control-flow/if-on-match-render-gate-mounts-rt` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `control-flow/s437-braceless-else-in-failable-arm` — twin · bootstrap-unsupported: this `{ … }` arm falls through, and the handled result is used as a value — a block arm's value (its last expression) arrives with slice Ue2; end the block with `return` / `fail`, or write the value a
 - `control-flow/s437-r5-braced-else-line-comment-top-logic` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `if` (statements at logic-block level are not in bootstrap slice M2)
 - `control-flow/s437-r5-value-form-if-else-line-comment` — twin · parse-reject: E-PARSE-EXPECTED: expected `}`, found `@`
 - `defer/ambiguous-lead-arm-payload-neg` — twin · bootstrap-unsupported: an unannotated parameter `v` — bootstrap slice M2 needs `v: Type` (Core parameters are typed)
@@ -841,19 +854,13 @@ none
 - `outlet/recognized-clean` — bootstrap-unsupported: `<outlet>` is a scrml structural element (§20.8), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `parse-syntax/e-syntax-042-not-value-position-neg` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
 - `parse-syntax/e-syntax-042-null-value-position-pos` — twin · parse-reject: E-PARSE-ITEM: expected `import`, `type`, `function` or `fn` in a logic block, found `let` (statements at logic-block level are not in bootstrap slice M2)
-- `parse-variant/error-invalid-payload` — twin · bootstrap-unsupported: a `!{ … }` handler on parseVariant(…), which cannot fail — the SPEC defines `!{}` only on a failable result (§19.4.3 item 3); remove the handler
-- `parse-variant/error-malformed-json` — twin · bootstrap-unsupported: a `!{ … }` handler on parseVariant(…), which cannot fail — the SPEC defines `!{}` only on a failable result (§19.4.3 item 3); remove the handler
-- `parse-variant/error-missing-discriminator` — twin · bootstrap-unsupported: a `!{ … }` handler on parseVariant(…), which cannot fail — the SPEC defines `!{}` only on a failable result (§19.4.3 item 3); remove the handler
-- `parse-variant/error-unknown-variant` — twin · bootstrap-unsupported: a `!{ … }` handler on parseVariant(…), which cannot fail — the SPEC defines `!{}` only on a failable result (§19.4.3 item 3); remove the handler
 - `parse-variant/happy-payload-variant` — twin · bootstrap-unsupported: `<match>` is a scrml structural element (§18.0.1), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `parse-variant/happy-unit-variant` — twin · bootstrap-unsupported: only calls of a named function, `Date.now()`, and `.filter(x => …)` / `.map(x => …)` on a sequence are in the bootstrap
-- `parse-variant/misuse-non-enum-type` — twin · bootstrap-unsupported: a `!{ … }` handler on parseVariant(…), which cannot fail — the SPEC defines `!{}` only on a failable result (§19.4.3 item 3); remove the handler
-- `parse-variant/single-field-payload-bind` — twin · bootstrap-unsupported: a `!{ … }` handler on parseVariant(…), which cannot fail — the SPEC defines `!{}` only on a failable result (§19.4.3 item 3); remove the handler
 - `print/tool-println-clean-stdout` — bootstrap-unsupported: `<program kind=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `protect/comment-prefixed-strip-info` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/cte-strip-info` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/e-pa-002-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
-- `protect/e-pa-002-pos` — bootstrap-unsupported: `<db>` is a scrml structural element (§39 database), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `protect/e-pa-002-pos` — bootstrap-unsupported: `<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored
 - `protect/e-pa-005-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/e-pa-005-pos` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `protect/e-pa-006-neg` — bootstrap-unsupported: `<schema>` is a scrml structural element (§39.2), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
@@ -984,7 +991,7 @@ none
 - `server-fn/e-route-005-pos` — twin · bootstrap-unsupported: the `onclick=` handler on `<button>` calls the server function `saveAndPaint()` — a client→server call is a round trip the client suspends on (§12.3 fetch stub, §13.2 inserted `await`), and it arrives
 - `server-fn/error-boundary-request-error-twin` — twin · bootstrap-unsupported: `<request>` is a scrml structural element (§6.7.7 async request), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
 - `sql/comment-cloaked-body-e-sql-003-neg` — twin · bootstrap-unsupported: an unannotated parameter `q` — bootstrap slice M2 needs `q: Type` (Core parameters are typed)
-- `sql/prepare-sse-generator-e-sql-006-neg` — twin · bootstrap-unsupported: `<db>` is a scrml structural element (§39 database), not an HTML element (§4.15, §24.4) — it is not in the bootstrap
+- `sql/prepare-sse-generator-e-sql-006-neg` — twin · bootstrap-unsupported: `<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored
 - `sql/runtime-expr-body-e-sql-003-neg` — twin · bootstrap-unsupported: an unannotated parameter `q` — bootstrap slice M2 needs `q: Type` (Core parameters are typed)
 - `sql/transactions-concurrent-postgres-pos` — twin · bootstrap-unsupported: `<program transactions=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
 - `sql/transactions-concurrent-sqlite-e-sql-010-neg` — twin · bootstrap-unsupported: `<program transactions=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement
