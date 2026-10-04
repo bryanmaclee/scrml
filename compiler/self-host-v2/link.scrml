@@ -1,0 +1,219 @@
+// =============================================================================
+// self-host-v2 / link.scrml — the parse phase of a LINKED program, as a pure
+// function of the SET of its source files (s452-boot-determinism).
+//
+// SPEC §58.1: "No build axis outside `(source, buildStory)` … SHALL
+// participate in artifact content." §58.12 `*` gap 1: "There is no … audit
+// establishing that *every* compiler stage … is free of nondeterministic
+// iteration order." For the bootstrap the source is a set of files, each a
+// project-relative path and its text. Every later phase (analyze, lower,
+// print) is a function of the order of `FileAst`s it is handed — node ids,
+// symbol numbering, declaration order and diagnostic order all follow it — so
+// that order must come from the set alone, never from the order a driver
+// happened to list (or a filesystem happened to enumerate) the files in.
+//
+// The canonical order:
+//   1. the sources sorted by path, compared by UTF-16 code unit (no locale);
+//      two sources with one path (a driver error) tie-break on their text, so
+//      the order is total;
+//   2. LINK ORDER (analyze's contract: every file after the files it imports,
+//      the entry last) built from that sorted list — at each step the first
+//      file, in path order, whose imports are all placed; an import cycle
+//      places the first unplaced file in path order;
+//   3. the files parsed in link order, node ids running through them — the
+//      same id numbering a driver that listed the files in link order gets.
+// An import edge is a `from` that is relative (`./`, `../`) and resolves,
+// against the importing file's directory, to a path in the set. Any other
+// `from` (a bare or `scrml:` source, a file outside the set) adds no edge.
+//
+// Paths are the driver's project-relative names; the compiler never sees an
+// absolute path, a working directory, a clock, or an environment.
+// =============================================================================
+${
+    import { AItem, AItemK, AImport, AProgram, FileAst, Diag } from "./ast.scrml"
+    import { Parsed, parseFile } from "./parse.scrml"
+
+    export type Source:struct = { path: string, src: string }
+
+    // The parse phase's output: the files in link order, every parse
+    // diagnostic (file by file, in link order), the first unused node id.
+    export type Linked:struct = { files: FileAst[], diags: Diag[], nextId: int }
+
+    // ---- 1. code-unit order ----------------------------------------------------
+    // -1 / 0 / 1: `a` before / equal to / after `b`, by UTF-16 code unit.
+    export fn codeUnitCompare(a: string, b: string) -> int {
+        let i: int = 0
+        while (i < a.length && i < b.length) {
+            const x: int = a.charCodeAt(i)
+            const y: int = b.charCodeAt(i)
+            if (x < y) return -1
+            if (x > y) return 1
+            i = i + 1
+        }
+        if (a.length < b.length) return -1
+        if (a.length > b.length) return 1
+        return 0
+    }
+
+    fn sourceBefore(a: Source, b: Source) -> boolean {
+        const c: int = codeUnitCompare(a.path, b.path)
+        if (c != 0) return c < 0
+        return codeUnitCompare(a.src, b.src) < 0
+    }
+
+    // The sources in canonical order (an insertion sort: the result depends on
+    // the set, not on the order `xs` lists it in).
+    export fn canonicalSources(xs: Source[]) -> Source[] {
+        let out: Source[] = []
+        for (const x of xs) {
+            let placed: Source[] = []
+            let done = false
+            for (const y of out) {
+                if (!done && sourceBefore(x, y)) {
+                    placed = placed.concat([x])
+                    done = true
+                }
+                placed = placed.concat([y])
+            }
+            if (!done) placed = placed.concat([x])
+            out = placed
+        }
+        return out
+    }
+
+    // ---- 2. import edges ---------------------------------------------------------
+    // The directory part of a project-relative path ("lib/a.scrml" → "lib").
+    fn dirOf(p: string) -> string {
+        const i: int = p.lastIndexOf("/")
+        if (i < 0) return ""
+        return p.substring(0, i)
+    }
+
+    // `from`, resolved against `dir`; "" when it is not a relative source or
+    // climbs above the project root.
+    export fn resolveFrom(dir: string, from: string) -> string {
+        if (!(from.startsWith("./") || from.startsWith("../"))) return ""
+        let segs: string[] = []
+        if (dir != "") segs = dir.split("/")
+        for (const s of from.split("/")) {
+            if (s == "..") {
+                if (segs.length == 0) return ""
+                segs = segs.slice(0, segs.length - 1)
+            } else if (s != "." && s != "") {
+                segs = segs.concat([s])
+            }
+        }
+        return segs.join("/")
+    }
+
+    fn importOfItem(it: AItem) -> AImport[] {
+        const k: AItemK = it.k
+        return match k {
+            .ImportItem(i: i) :> [i]
+            .TypeItem(t: t) :> []
+            .FnItem(f: f) :> []
+            .DeclItem(d: d) :> []
+            .MarkupItem(n: n) :> []
+            .ProgramItem(p: p) :> importsOfItems(p.items)
+        }
+    }
+
+    fn importsOfItems(items: AItem[]) -> AImport[] {
+        let out: AImport[] = []
+        for (const it of items) { out = out.concat(importOfItem(it)) }
+        return out
+    }
+
+    // The paths (in the set `paths`) the file `f` imports.
+    fn importedPaths(f: FileAst, paths: string[]) -> string[] {
+        let out: string[] = []
+        const dir: string = dirOf(f.path)
+        for (const imp of importsOfItems(f.items)) {
+            const p: string = resolveFrom(dir, imp.from)
+            if (p != "" && p != f.path && paths.indexOf(p) >= 0 && out.indexOf(p) < 0) out = out.concat([p])
+        }
+        return out
+    }
+
+    // ---- link order --------------------------------------------------------------
+    // Indexes into `asts` (already in canonical order), in link order.
+    export fn linkOrder(asts: FileAst[], entry: string) -> int[] {
+        let paths: string[] = []
+        for (const a of asts) { paths = paths.concat([a.path]) }
+        let deps: string[][] = []
+        for (const a of asts) { deps = deps.concat([importedPaths(a, paths)]) }
+        let order: int[] = []
+        let placed: string[] = []
+        let rest: int = 0
+        for (const a of asts) {
+            if (a.path != entry) rest = rest + 1
+        }
+        while (rest > 0) {
+            let pick: int = -1
+            let i: int = 0
+            while (pick < 0 && i < asts.length) {
+                if (asts[i].path != entry && order.indexOf(i) < 0 && allPlaced(deps[i], placed, entry)) pick = i
+                i = i + 1
+            }
+            // an import cycle: the first unplaced file in path order
+            i = 0
+            while (pick < 0 && i < asts.length) {
+                if (asts[i].path != entry && order.indexOf(i) < 0) pick = i
+                i = i + 1
+            }
+            order = order.concat([pick])
+            placed = placed.concat([asts[pick].path])
+            rest = rest - 1
+        }
+        let j: int = 0
+        while (j < asts.length) {
+            if (asts[j].path == entry) order = order.concat([j])
+            j = j + 1
+        }
+        return order
+    }
+
+    // Every dependency placed (the entry, always last, never blocks a file).
+    fn allPlaced(ds: string[], placed: string[], entry: string) -> boolean {
+        for (const d of ds) {
+            if (d != entry && placed.indexOf(d) < 0) return false
+        }
+        return true
+    }
+
+    // ---- 3. the parse phase --------------------------------------------------------
+    fn parseInOrder(xs: Source[]) -> Linked {
+        let next: int = 0
+        let files: FileAst[] = []
+        let diags: Diag[] = []
+        for (const x of xs) {
+            const r: Parsed = parseFile(x.path, x.src, next)
+            next = r.nextId
+            files = files.concat([r.ast])
+            diags = diags.concat(r.diags)
+        }
+        return { files: files, diags: diags, nextId: next }
+    }
+
+    fn isIdentity(order: int[]) -> boolean {
+        let i: int = 0
+        while (i < order.length) {
+            if (order[i] != i) return false
+            i = i + 1
+        }
+        return true
+    }
+
+    // Parse a linked program: `xs` in ANY order; `entry` the path of the file
+    // with the `<program>`. The result depends only on the set and `entry`.
+    export fn parseProgram(xs: Source[], entry: string) -> Linked {
+        const sorted: Source[] = canonicalSources(xs)
+        const first: Linked = parseInOrder(sorted)
+        const order: int[] = linkOrder(first.files, entry)
+        if (isIdentity(order)) return first
+        // node ids run in link order: parse again, in that order
+        let linked: Source[] = []
+        for (const i of order) { linked = linked.concat([sorted[i]]) }
+        return parseInOrder(linked)
+    }
+}
