@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 239 | 6 |
+| HIGH | 240 | 6 |
 | MED | 500 | 4 |
-| LOW | 263 | 0 |
+| LOW | 264 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22899,3 +22899,21 @@ Governing: SPEC §18.19 `product-pattern ::= … | wildcard-arm` and §18.2 `mat
 <!-- @gap id=g-impl1-engine-message-arm-pipeless-as-text-s452 sev=HIGH status=resolved locus=compiler/src/engine-statechild-parser.ts:2102(parseMessageArms — the arm region is "the leading contiguous `|`-run"; a body whose first non-trivia char is not `|` has no message arms; called at :2696 and from compiler/src/native-walker/engine-statechild-walker.ts:544) prov=ruling:user-voice-scrml.md-S452-"a.-one-spelling" -->
 > **RESOLVED S452 — `878a0287c` on `fix/s452-impl1-msg-arms` (impl#1 freeze exception, user-voice-scrml.md §S452 "yes on the exception").** `parseMessageArms` recognises the leading run of arms piped, pipe-less or mixed (strict head `.V`/`::V`/`T.V`/`T::V`[`(…)`] or `_`/`else`, arrow on the same line, line-start only); examples/25 with the `|`s deleted emits byte-identical artifacts; corpus differential 2327 sources / 11353 artifacts, zero delta. W-ARM-PIPE-LEGACY and E-ENGINE-MSG-ARM-POSITION remain Nominal.
 Governing: SPEC §51.0.S.2.3 (S452 "a. one spelling") — a message arm is a §18.2 `match-arm`; the `|`-led form is soft-deprecated (§19.4.5, W-ARM-PIPE-LEGACY). Measured on `8c02ff49a`: `examples/25-triage-board.scrml` compiles; deleting the leading `|` from its five message arms still compiles at exit 0 with no new diagnostic, but the emitted client JS loses `__scrml_engine_<h>_dragPhase_msg_arms`, renders each state-child's arm source as literal text (`return "\n .Start(id) :> .Dragging(id)\n _ :> @dragPhase\n"`), and lowers `@dragPhase.advance(.Drop(col))` to `_scrml_engine_advance(…)` (a state advance with a message variant) instead of `_scrml_engine_dispatch_message(…)`. A SEPARATE path from the `!{}` handler parser (`compiler/src/ast-builder.js` `parseErrorTokens`, `g-impl1-handler-arm-pipeless-dropped-s452`) — a fix to one does not cover the other. The native walker shares the parser (`compiler/src/native-walker/engine-statechild-walker.ts:544` calls the same `parseMessageArms`), so one fix covers both front ends. Corpus with `|`-led message arms: 17 in 8 files (examples 5/1, conformance 10/6, docs 2/1) + 10 in 2 `compiler/tests/fixtures/`; `scrml fix` must not rewrite them while this gap is open, or it turns working code into silently wrong code.
+
+### g-each-row-whitespace-only-text-dropped — inside an `<each>` row, `<td>${r.f} ${r.l}</td>` renders `PeterOliver`: every whitespace-only text run in a row body is dropped — `NEW S450 (adopter: assetManagement); HIGH; open — BOOTSTRAP-OWED (ruled S449)`
+<!-- @gap id=g-each-row-whitespace-only-text-dropped sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(renderTemplateChildToJs, the text branch — `if (!txt.trim()) return;` returns before emitting every whitespace-only run) prov=adopter:assetManagement-scrml-finding-adjacent-interpolation-whitespace+ruling:user-voice-scrml.md S449 (B2) -->
+
+> **BOOTSTRAP-OWED — ruled S449 (bryan, on S450-peter's routed asks): "B2 = leave to the bootstrap (`<each>` row interpolation whitespace; workaround exists)."** impl#1 is NOT being fixed for this. The S450 impl#1 fix exists, is reviewed (S239 → LAND-WITH-NITS) and is parked unlanded on `hold/s450-each-row-interp-whitespace` @`d5500e69` should the ruling ever be revisited; S453 retired that hold rather than landing it.
+> **Adopter-reported** (assetManagement `docs/scrml-finding-adjacent-interpolation-whitespace.md`), reproduced in happy-dom on `daca85d8`: inside an `<each>` row, `${a} ${b}` rendered `PeterOliver`, while the same markup at top level, `Name: ${x}`, and `${a + " " + b}` all rendered correctly. Silent — exit 0, no diagnostic, content lost. Adopter workaround: `${a + " " + b}`.
+> ⚑ Filed `status=open` rather than `status=carried` deliberately: `carried` requires an xfail conformance pin (the runner enforces the pairing both ways) and S453 landed no conformance case for it, so `open` is the honest state — impl#1 really does carry the defect.
+
+Governing: SPEC §4.18.5 — *"whitespace is kept exactly in both productions"*, and whitespace-only text between elements is kept too (S442). The §4.18.1 "Body modes nest" citation is the one the S450 review's nit 2 corrected (from §17.7.7).
+
+### g-errorboundary-async-render-rejection-unobserved-s453 — an async `<errorBoundary>` with no `fallback=` lets its own re-`throw` escape as an unobserved promise rejection — `NEW S453; LOW; open`
+<!-- @gap id=g-errorboundary-async-render-rejection-unobserved-s453 sev=LOW status=open locus=compiler/src/codegen/emit-event-wiring.ts(~2430 — the boundary render fn is invoked as `${renderFn}();` with no `await` and no `.catch`, while the fn itself is emitted `async` when its expression reaches a server fn) prov=review:s453-a3-adversarial-pass-adjacent-finding -->
+
+> Found by the S453 adversarial pass on the A3 landing (#1283) as an adjacent surface, reproduced, and **deliberately not widened into that change** — A3's ruling names *"every async event listener"*, and this is a logic/render binding, not an event binding. When the boundary's render fn is async (its expression reaches a server fn) **and** it has no `fallback=`, the §19.6.8-B3 path re-throws `_eb_err` to propagate to an enclosing boundary or the host — but the call site does not observe the returned promise, so the throw surfaces only as a browser `unhandledrejection`. Same class as [[g-handler-level-rejection-bypasses-scrml-logging]] one surface over.
+> **Lesser harm than the handler case, which is why it is LOW:** the boundary calls `_scrml_error_boundary_log(bId, _eb_err)` *before* throwing, so the diagnostic is not lost — only the propagation to an enclosing boundary is. A boundary WITH `fallback=` returns instead of throwing and is unaffected.
+> Fix direction (not built): the same shape recommended for the call-ref limb — give the invocation a `.catch(→ _scrml_error_boundary_log)` arm, or await it inside an async wrapper that preserves the sync prefix. Routed to bryan with the handler-rejection family so the family is fixed once.
+
+Governing: SPEC §19.6.8 (the compiler-emitted host-JS backstop) + §19.6.4 (inner-catches-first propagation, which is what the escaping throw is meant to reach).
