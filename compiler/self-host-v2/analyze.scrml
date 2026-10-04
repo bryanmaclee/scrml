@@ -53,7 +53,7 @@ ${
              AProgram, AItem, AItemK, FileAst, Diag, ASql,
              AHow, AHandled, AArm, APat, ABind, AArmBody, AFail, mkSpan, newDiag } from "./ast.scrml"
     import { WireBuild, WireTable, wireBuild, hasFixedLength } from "./codec.scrml"
-    import { SqlFacts, sqlFacts } from "./sql.scrml"
+    import { SqlFacts, sqlFacts, txControl } from "./sql.scrml"
 
     // =========================================================================
     // THE TABLES (exported — `lower` consumes them).
@@ -5970,7 +5970,7 @@ ${
             if (isMatch) st = plainMatchBinderDiags(env, arms, st)
             if (!isMatch) st = deadHandlerBinderDiags(env, arms, st)
             if (isMatch) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `match` over " + subjectName(subj) + " — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `" + sqlSigil() + "}` query, §19.7.1)")
-            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `!{ … }` handler on " + subjectName(subj) + ", which cannot fail — the SPEC defines `!{}` only on a failable result (§19.4.3 item 3); remove the handler")
+            return deadHandler(env, e, subj, st)
         }
         if (err is not) return st                          // E-ERROR-011 reported: no variant set to check against
         const vs: VariantDef[] = enumVariantsOf(env.g, err)
@@ -6020,6 +6020,90 @@ ${
             }
         }
         return handledFact(env, e, err, stmt, not, [], st)
+    }
+
+    // s452 — §19.4.3 ruling 3: "A `!{}` handler SHALL be attached only to an
+    // expression that can fail: a call to a function declared `!` (§19.4.1), a
+    // call the compiler treats as `!` (a CPS body-split function, §19.9.5; a
+    // built-in failable such as `parseVariant`, §41.13), or a `?{}` query … On
+    // anything else … That SHALL be a compile error: E-ERROR-013" ("For a
+    // handler on a non-call expression the message names the expression
+    // instead"). Fail-closed readings (DESIGN.md item 2): a callee whose body
+    // can place it on the server may be a client→server call, which §19.9.10
+    // makes failable — that depends on where the CALLER runs, and the
+    // client→server call is unit U1b: refused, never E-ERROR-013. A callee name
+    // that did not resolve was reported (E-SCOPE-001 — the bootstrap has no
+    // built-in `parseVariant`): no second report.
+    fn deadHandler(env: Env, e: AExpr, subj: AExpr, st: AS) -> AS {
+        const c: AExpr | not = calleeOf(subj.k)
+        if (c is not) {
+            const what: string = subjectLabel(subj)
+            return addDiag(st, env.file, e.span, "E-ERROR-013", "'!{}' handler on '" + what + "', which cannot fail: '" + what + "' is not a call of a failable function, so none of its arms can run. Remove the '!{ … }' handler.")
+        }
+        const nf: NameFact | not = nameFactIn(st, c.nid)
+        const f: FnInfo | not = calledFn(env, nf)
+        if (f is some) {
+            if (mayRunOnServer(env.g, f)) {
+                return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `!{ … }` handler on " + f.name + "(…), whose body can place it on the server (a `" + sqlSigil() + "}` query or the `server` modifier) — a CLIENT call of a server function is failable whether or not it is declared `!` (§19.9.10), and the client→server call arrives with unit U1b; until then whether this handler can run is not decided here")
+            }
+            return addDiag(st, env.file, e.span, "E-ERROR-013", deadHandlerMsg(f.name))
+        }
+        const n: string = exprName(c)
+        if (n != "" && nf is not) return st               // the name did not resolve: reported where it stands
+        let label: string = n
+        if (label == "") label = subjectLabel(c)
+        return addDiag(st, env.file, e.span, "E-ERROR-013", deadHandlerMsg(label))
+    }
+
+    fn deadHandlerMsg(name: string) -> string {
+        return "'!{}' handler on '" + name + "(…)', which cannot fail: '" + name + "' is not a failable function, so none of its arms can run. Remove the '!{ … }' handler, or declare '" + name + "' with '!' if it can fail."
+    }
+
+    // An expression as written, for E-ERROR-013's non-call form.
+    fn subjectLabel(e: AExpr) -> string {
+        const k: AExprK = e.k
+        const lit: string = match k {
+            .NotLit :> "not"
+            .Num(raw: r) :> r
+            .Bool(v: b) :> boolText(b)
+            .Str(v: sv) :> "\"" + sv + "\""
+            .Name(name: n) :> n
+            .At(name: n) :> "@" + n
+            .AtItem :> "@."
+            .Recovered :> ""
+            .Variant(name: n) :> "." + n
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: x) :> ""
+            .Index(obj: o) :> ""
+            .Lambda(params: ps) :> ""
+            .Sql(q: q) :> ""
+            .Handled(h: x) :> ""
+        }
+        if (lit != "") return lit
+        const pk: string = placeKey(e)
+        if (pk != "") return pk
+        return "this expression"
+    }
+
+    fn boolText(b: boolean) -> string {
+        if (b) return "true"
+        return "false"
+    }
+
+    // A function placePass may put on the server (§12.2 T1 / T4 — its own
+    // body's `?{}` or the deprecated `server` modifier; placePass's
+    // `serverTriggered`, read from the same syntax).
+    fn mayRunOnServer(g: Globals, f: FnInfo) -> boolean {
+        const fs: FnSrc | not = fnSrcOf(g, f.sym.id)
+        if (fs is not) return false
+        return fs.f.server || sqlsInBlock(fs.f.body).length > 0
     }
 
     // One arm: its pattern's variant (`idx`: -1 wildcard, -2 `.Ok`, -3 none),
@@ -13631,6 +13715,7 @@ ${
             }
             // the queries in its body: database, facts, the failable rule
             for (const s of f.sqls) {
+                if (!f.failable) st = manualTxDiag(f.file, s, "'" + f.name + "', which is not declared '!'", f.name, st)
                 const sr: RSqlSite = sqlSiteFacts(g, rd, f.file, fnDbProg(rd.fns, f.nid), s, f.failable, st)
                 st = sr.st
                 const si: SqlInfo | not = sr.info
@@ -13795,6 +13880,22 @@ ${
         return addDiag(st, file, s.span, "E-ERROR-002", "this `" + sqlSigil() + "}` query is failable (§19.8.3, S451): outside a `!` function it must be handled at the site — a `!{ … }` handler on the query, or a `match` on its result — or moved into a `!` function, where a failure propagates (§19.8.2). An unhandled query is E-ERROR-002. (\"No row\" is not a failure: `.get()` still returns `not`, `.all()` still `[]`.)")
     }
 
+    // s452 — §19.10.4 (S451): manual transaction control (`?{BEGIN}`,
+    // `?{COMMIT}`, `?{ROLLBACK}`, `?{SAVEPOINT}`, `?{RELEASE}`, `?{END}`)
+    // "written where no enclosing function is declared `!` (in a function
+    // without `!`, or at a body top) SHALL be a compile error: E-ERROR-015" —
+    // the SPEC's message. `where` names the place; `fname` the function ("" —
+    // a body top). The bootstrap emits no W-BATCH-001 (no implicit envelope
+    // until U1e), so E-ERROR-015 is the one transaction diagnostic here, as
+    // §19.10.4 requires outside a `!` function.
+    fn manualTxDiag(file: string, s: SqlSite, where: string, fname: string, st: AS) -> AS {
+        const kw: string = txControl(s.q.chunks)
+        if (kw == "") return st
+        let fix: string = "Move it into a function declared with '!' and use 'transaction { … }' (§19.10.2), which commits or rolls back on every exit."
+        if (fname != "") fix = "Declare '" + fname + "' with '!' and use 'transaction { … }' (§19.10.2), which commits or rolls back on every exit."
+        return addDiag(st, file, s.span, "E-ERROR-015", "Manual transaction control '" + kw + "' in " + where + ". A transaction is '!'-gated (§19.10.4): its rollback promise needs a failure path. " + fix)
+    }
+
     // §13.7 (S451 R1): a value position that would have to WAIT.
     fn valueServerDiags(g: Globals, t: Tables, all: FnFacts[], ps: PlaceFact[], areach: ReachOf[], rd: RDbs, st0: AS) -> AS {
         let st: AS = st0
@@ -13802,6 +13903,7 @@ ${
         for (const p of valuePositions(g, t)) {
             for (const s of sqlsInValue(p.v)) {
                 st = errorTwo(p.file, s, false, st)
+                st = manualTxDiag(p.file, s, p.what + ", which is not a function declared '!'", "", st)
                 st = positionDb(g, rd, p.file, pnid, s, st)
                 st = addDiag(st, p.file, s.span, "E-VALUE-SERVER-CALL", p.what + " runs a `" + sqlSigil() + "}` query — the query runs on the server, and " + waitFix())
             }
@@ -13838,6 +13940,7 @@ ${
         for (const a of actionPositions(g)) {
             for (const s of sqlsInValue(a.v)) {
                 st = errorTwo(a.file, s, false, st)
+                st = manualTxDiag(a.file, s, a.what + ", which is not a function declared '!'", "", st)
                 st = positionDb(g, rd, a.file, pnid, s, st)
                 st = addDiag(st, a.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", a.what + " runs a `" + sqlSigil() + "}` query — client code that does server work is split around it (§19.9.5), and the body split arrives with unit U1d. Until then: put the query in a function")
             }

@@ -305,8 +305,9 @@ describe("§19.4.3 item 3 / §34 E-TYPE-080 — `!{}` handlers", () => {
     const r = run(src);
     expect(r.core == null).toBe(false);
   });
-  test("a handler on a call that cannot fail is refused (the SPEC gives `!{}` no meaning there)", () => {
-    expect(codes(P(`    fn safe() -> int { return 1 }\n    function go() {\n        safe() !{ | _ :> @n = 1 }\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  // s452: S451 ruling 3 — E-ERROR-013 (error-rulings.test.js), no longer a refusal
+  test("a handler on a call that cannot fail is E-ERROR-013", () => {
+    expect(codes(P(`    fn safe() -> int { return 1 }\n    function go() {\n        safe() !{ | _ :> @n = 1 }\n    }`))).toEqual(["E-ERROR-013"]);
   });
 });
 

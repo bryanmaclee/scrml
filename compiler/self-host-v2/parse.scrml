@@ -3192,7 +3192,23 @@ ${
         const start: int = mp.pos
         const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
         const m: MP = backToMarkup(mp, tp)
+        if (chAt(mp, 0) == "!") return mDiag(mAt(m, lastEnd(tp)), "E-ERROR-014", detachedHandlerMsg(), start, lastEnd(tp))
         return mDiag(mAt(m, lastEnd(tp)), "E-BOOTSTRAP-UNSUPPORTED", "a `" + chAt(mp, 0) + "{…}` context in markup is not in the bootstrap (§3.1)", start, lastEnd(tp))
+    }
+
+    // s452 — §19.4.3: "A `!{ … }` handler written as markup content — on its
+    // own, after an element, attached to no call or expression — SHALL be a
+    // compile error: E-ERROR-014" (the SPEC's message). A markup body and a
+    // program body are both markup content; a handler that IS attached to a
+    // call is logic (`${ save() !{ … } }`, an event-handler value) and never
+    // reaches here.
+    // `<#id>` for the message, in two pieces ON PURPOSE (the sqlSigil reason):
+    // impl#1, which compiles this file, rewrites an input-state reference it
+    // finds anywhere in an expression — string literals included.
+    fn inputRef() -> string { return "<" + "#id>" }
+
+    fn detachedHandlerMsg() -> string {
+        return "'!{}' handler attached to nothing: a '!{ … }' handler handles the failure of the call written immediately before it. Attach it to a call ('save() !{ … }'), use a '<request>' and read '" + inputRef() + ".error' for a load, or wrap render-time calls in an '<errorBoundary>'."
     }
 
     fn textNode(mp: MP, start: int, text: string) -> ANode {
@@ -3632,6 +3648,8 @@ ${
     fn parseMarkupItem(mp: MP) -> RMItems {
         const start: int = mp.pos
         if (atCss(mp)) return { items: [], mp: skipCss(mp) }
+        // s452: a `!{ … }` standing in a program body (E-ERROR-014, skipSigil)
+        if (chAt(mp, 0) == "!" && chAt(mp, 1) == "{") return { items: [], mp: skipSigil(mp) }
         if (atInterp(mp)) {
             const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
             const inner: RItems = parseLogicItems(expectP(tp, "{"), "}")

@@ -251,3 +251,93 @@ describe("§19.4.3 ruling 1a — E-ERROR-012: in a value position every arm yiel
     clean(go(`    fn d() -> string { return "q" }\n    function e() { return "w" }\n    function go() {\n        @log = load("x") !{ | .NotFound(m) :> d() | .Timeout :> e() }\n    }`));
   });
 });
+
+describe("§19.4.3 ruling 3 — E-ERROR-013: a `!{}` on something that cannot fail", () => {
+  test("a call of an ordinary function — the SPEC's message, no Core", () => {
+    const src = P(`    fn parseCount(src: string) -> int { return src.length }\n    function show(src: string) {\n        let n = parseCount(src) !{ | _ :> 0 }\n    }`);
+    expect(codes(src)).toEqual(["E-ERROR-013"]);
+    expect(msg(src, "E-ERROR-013")).toBe("'!{}' handler on 'parseCount(…)', which cannot fail: 'parseCount' is not a failable function, so none of its arms can run. Remove the '!{ … }' handler, or declare 'parseCount' with '!' if it can fail.");
+    rejected(src, "E-ERROR-013");
+  });
+
+  test("statement position too (the handler is dead wherever it stands)", () => {
+    expect(codes(P(`    fn safe() -> int { return 1 }\n    function go() {\n        safe() !{ | _ :> @n = 1 }\n    }`))).toEqual(["E-ERROR-013"]);
+  });
+
+  test("an expression that is not a call (`let data = not !{ … }`) — the message names the expression", () => {
+    const src = P(`    function go() {\n        let data = not !{ | _ :> 1 }\n    }`);
+    expect(codes(src)).toEqual(["E-ERROR-013"]);
+    expect(msg(src, "E-ERROR-013")).toContain("'!{}' handler on 'not', which cannot fail");
+  });
+
+  test("a host call (`Date.now()`) cannot fail either", () => {
+    const src = P(`    function go() {\n        @n = Date.now() !{ | _ :> 0 }\n    }`);
+    expect(codes(src)).toEqual(["E-ERROR-013"]);
+  });
+
+  test("a name that does not resolve is reported once (E-SCOPE-001 — e.g. the built-in `parseVariant` the bootstrap lacks)", () => {
+    expect(codes(P(`    function go() {\n        @n = nope(1) !{ | _ :> 0 }\n    }`))).toEqual(["E-SCOPE-001"]);
+  });
+
+  test("a function whose body can place it on the server: a client call of it is failable (§19.9.10) — refused (U1b), never E-ERROR-013", () => {
+    const src = `<program db="./app.db">\n    let <n:int=0/>\n    function count() -> int {\n        const r = ${SQ}\`SELECT 1 AS a\`}.get() !{ | _ :> not }\n        return 1\n    }\n    function go() {\n        @n = count() !{ | _ :> 0 }\n    }\n    <main><button onclick=go()>go</button></main>\n</program>\n`;
+    const cs = codes(src);
+    expect(cs).not.toContain("E-ERROR-013");
+    expect(cs).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(msg(src, "E-BOOTSTRAP-UNSUPPORTED")).toContain("§19.9.10");
+  });
+
+  test("a `match` on a non-failable value is not affected (the §18 `match` unit — refused as before)", () => {
+    const src = P(`    type Mode:enum = { A, B }\n    function go(m: Mode) -> int {\n        return match m {\n            .A :> 1\n            .B :> 2\n        }\n    }`);
+    expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+
+  test("near-miss: a `!{}` on a `!` call and on a `?{}` compile", () => {
+    clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        @log = load("x") !{ | _ :> "z" }\n    }`));
+    expect(codes(`<program db="./app.db">\n    function f() -> int {\n        ${SQ}\`DELETE FROM t\`}.run() !{ | _ :> { return 0 } }\n        return 1\n    }\n    <main><p>x</p></main>\n</program>\n`)).toEqual([]);
+  });
+});
+
+describe("§19.4.3 — E-ERROR-014: a `!{}` written as markup content, attached to nothing", () => {
+  test("inside an element — the SPEC's message, no Core", () => {
+    const src = `<program>\n    <div>\n        !{\n            | _ :> <p class="error">Something went wrong</p>\n        }\n        <p>Content</p>\n    </div>\n</program>\n`;
+    expect(codes(src)).toEqual(["E-ERROR-014"]);
+    expect(msg(src, "E-ERROR-014")).toBe("'!{}' handler attached to nothing: a '!{ … }' handler handles the failure of the call written immediately before it. Attach it to a call ('save() !{ … }'), use a '<request>' and read '<#id>.error' for a load, or wrap render-time calls in an '<errorBoundary>'.");
+    rejected(src, "E-ERROR-014");
+  });
+
+  test("after an element, at the program body top", () => {
+    expect(codes(`<program>\n    <main><p>x</p></main>\n    !{\n        | _ :> <p>bad</p>\n    }\n</program>\n`)).toEqual(["E-ERROR-014"]);
+  });
+
+  test("near-miss: a handler attached to a call in an event-handler body compiles", () => {
+    clean(P(`${TYPES}\n${LOAD}`, [], `        <button onclick={ load("x") !{ | _ :> @n = 1 } }>go</button>\n`));
+  });
+});
+
+describe("§19.10.4 — E-ERROR-015: manual transaction control outside a `!` function", () => {
+  const DBP = (body) => `<program db="./app.db">\n${body}\n    <main><p>x</p></main>\n</program>\n`;
+  const H = (sql) => `${SQ}\`${sql}\`}.run() !{ | _ :> { return 0 } }`;
+
+  test("`?{BEGIN}` in a function without `!` — the SPEC's message, no Core", () => {
+    const src = DBP(`    function plain() -> int {\n        ${H("BEGIN")}\n        return 1\n    }`);
+    expect(codes(src)).toEqual(["E-ERROR-015"]);
+    expect(msg(src, "E-ERROR-015")).toBe("Manual transaction control 'BEGIN' in 'plain', which is not declared '!'. A transaction is '!'-gated (§19.10.4): its rollback promise needs a failure path. Declare 'plain' with '!' and use 'transaction { … }' (§19.10.2), which commits or rolls back on every exit.");
+    rejected(src, "E-ERROR-015");
+  });
+
+  test("every transaction-control statement, in any form, after leading comments and whitespace", () => {
+    for (const sql of ["BEGIN", "begin transaction", "BEGIN IMMEDIATE", "COMMIT", "END", "ROLLBACK", "ROLLBACK TO sp1", "SAVEPOINT sp1", "RELEASE sp1", "  -- start\n  BEGIN", "/* x */ COMMIT"]) {
+      expect([sql, codes(DBP(`    function plain() -> int {\n        ${H(sql)}\n        return 1\n    }`))]).toEqual([sql, ["E-ERROR-015"]]);
+    }
+  });
+
+  test("an unhandled one is ALSO E-ERROR-002 (the R11 rule — a different rule; both fire)", () => {
+    expect(codes(DBP(`    function plain() {\n        ${SQ}\`COMMIT\`}.run()\n    }`)).slice().sort()).toEqual(["E-ERROR-002", "E-ERROR-015"]);
+  });
+
+  test("near-miss: inside a `!` function it stays valid; an ordinary statement is not transaction control", () => {
+    expect(codes(DBP(`    function tx()! SqlError {\n        ${SQ}\`BEGIN\`}.run()\n        ${SQ}\`COMMIT\`}.run()\n    }`))).toEqual([]);
+    expect(codes(DBP(`    function plain() -> int {\n        ${H("UPDATE t SET a = 1")}\n        ${H("SELECT ending FROM t")}\n        return 1\n    }`))).toEqual([]);
+  });
+});
