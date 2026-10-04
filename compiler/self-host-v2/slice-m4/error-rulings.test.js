@@ -454,22 +454,34 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
   const canon = `    function go() {\n        load("x") !{\n            .NotFound(m) :> @log = "nf:" + m\n            _ err :> @n = 1\n        }\n    }`;
   const legacy = `    function go() {\n        load("x") !{\n            | .NotFound m :> @log = "nf:" + m\n            | _ err :> @n = 1\n        }\n    }`;
   const strip = (x) => JSON.stringify(x, (k, v) => (k === "span" || k === "nid" || k === "site" ? undefined : v));
+  // A legacy-spelled program: its ONLY diagnostics are `n` W-ARM-PIPE-LEGACY (§19.4.5) — Info, so
+  // the artifact gate stays open (§34: Info "does not fail the compile") — and its Core checks clean.
+  const legacyOk = (src, n) => {
+    const r = run(src);
+    expect(r.diags.map((d) => `${d.code}/${d.severity}`)).toEqual(Array(n).fill("W-ARM-PIPE-LEGACY/Info"));
+    expect(r.core == null).toBe(false);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+    return r;
+  };
+  const loadLegacy = (src, n) => loadProgram(legacyOk(src, n).core, "rulings-" + k++, []);
 
   test("canonical (no `|`) and legacy (`| .V m :>`, `| _ err :>`) lower to the SAME Core", () => {
     const a = clean(P(`${TYPES}\n${LOAD}\n${canon}`, ["go"]));
-    const b = clean(P(`${TYPES}\n${LOAD}\n${legacy}`, ["go"]));
+    const b = legacyOk(P(`${TYPES}\n${LOAD}\n${legacy}`, ["go"]), 2);
     expect(strip(b.core)).toBe(strip(a.core));
   });
 
   test("the legacy spelling runs identically (runtime)", async () => {
-    await load(P(`${TYPES}\n${LOAD}\n${legacy}`, ["go"]));
+    await loadLegacy(P(`${TYPES}\n${LOAD}\n${legacy}`, ["go"]), 2);
     click(btn("go"));
     expect(text().log).toBe("nf:x");
   });
 
   test("one-line arms, both spellings: `!{ .A :> 1 _ :> 2 }` and `!{ | .A :> 1 | _ :> 2 }`", async () => {
     for (const h of [`!{ .NotFound(m) :> "nf" _ :> "o" }`, `!{ | .NotFound m :> "nf" | _ :> "o" }`, `!{ .NotFound(m) :> "nf" _ err :> "o" }`]) {
-      await load(P(`${TYPES}\n${LOAD}\n    function go() {\n        @log = load("x") ${h}\n    }`, ["go"]));
+      const src = P(`${TYPES}\n${LOAD}\n    function go() {\n        @log = load("x") ${h}\n    }`, ["go"]);
+      if (h.includes("|")) await loadLegacy(src, 2);
+      else await load(src);
       click(btn("go"));
       expect([h, text().log]).toEqual([h, "nf"]);
     }
@@ -477,9 +489,9 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
 
   test("the paren-free binder binds the PAYLOAD (§19.4.3 ruling 2): one field only — E-TYPE-021 on a unit or multi-field variant", () => {
     const T2 = `    type E2:enum = { Unit, Two(a: string, b: string), One(m: string) }\n    function f()! E2 {\n        fail .Unit\n    }`;
-    expect(codes(P(`${T2}\n    function go() {\n        f() !{ | .Unit u :> @n = 1 | _ :> @n = 2 }\n    }`))).toEqual(["E-TYPE-021"]);
-    expect(codes(P(`${T2}\n    function go() {\n        f() !{ | .Two t :> @n = 1 | _ :> @n = 2 }\n    }`))).toEqual(["E-TYPE-021"]);
-    clean(P(`${T2}\n    function go() {\n        f() !{ | .One m :> @log = m | _ :> @n = 2 }\n    }`));
+    expect(codes(P(`${T2}\n    function go() {\n        f() !{ | .Unit u :> @n = 1 | _ :> @n = 2 }\n    }`))).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY", "E-TYPE-021"]);
+    expect(codes(P(`${T2}\n    function go() {\n        f() !{ | .Two t :> @n = 1 | _ :> @n = 2 }\n    }`))).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY", "E-TYPE-021"]);
+    legacyOk(P(`${T2}\n    function go() {\n        f() !{ | .One m :> @log = m | _ :> @n = 2 }\n    }`), 2);
   });
 
   test("addendum: the paren-free binder is read only after the legacy `|` — the canonical pipe-less arm has none", () => {
@@ -495,22 +507,90 @@ describe("S452 ruling c — `!{}` arms take the `match` arm grammar; the leading
     expect(codes(src)).toEqual(["E-PARSE-ARM", "E-PARSE-ARM"]);
     expect(msg(src, "E-PARSE-ARM")).toContain("no leading `|`");
     rejected(src, "E-PARSE-ARM");
-    clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            | .NotFound(m) :> @log = m\n            | _ err :> @n = 2\n        }\n    }`));
+    legacyOk(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            | .NotFound(m) :> @log = m\n            | _ err :> @n = 2\n        }\n    }`), 2);
   });
 
   test("E-MATCH-BARE-BINDER and the whole-error binder hold in both spellings, in `!{}` and in `match`", () => {
     for (const arms of [`err :> @n = 1`, `| err :> @n = 1`, `else err :> @n = 1`, `| else err :> @n = 1`]) {
-      expect([arms, codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            ${arms}\n        }\n    }`))]).toEqual([arms, ["E-MATCH-BARE-BINDER"]]);
+      const want = arms.startsWith("|") ? ["W-ARM-PIPE-LEGACY", "E-MATCH-BARE-BINDER"] : ["E-MATCH-BARE-BINDER"];
+      expect([arms, codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n            ${arms}\n        }\n    }`))]).toEqual([arms, want]);
     }
     for (const arms of [`err :> @n = 1`, `else err :> @n = 1`]) {
       expect([arms, codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            .Ok(v) :> @log = v\n            ${arms}\n        }\n    }`))]).toEqual([arms, ["E-MATCH-BARE-BINDER"]]);
     }
   });
 
-  test("no warning is emitted for the legacy `|` (its W-lint is not ruled yet)", () => {
-    const r = run(P(`${TYPES}\n${LOAD}\n${legacy}`, ["go"]));
-    expect(r.diags).toEqual([]);
-    expect((r.infos || []).length).toBe(0);
+  // s452-boot-arm-pipe — W-ARM-PIPE-LEGACY (§19.4.5, §34: Info): one per `|`-led `!{}` arm.
+  const wMsgs = (src) => run(src).diags.filter((d) => d.code === "W-ARM-PIPE-LEGACY").map((d) => d.message);
+  const fnH = (h) => P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{\n${h}\n        }\n    }`, ["go"]);
+
+  test("W-ARM-PIPE-LEGACY fires once per `|`-led arm; pipe-less arms carry none", () => {
+    expect(codes(P(`${TYPES}\n${LOAD}\n${canon}`, ["go"]))).toEqual([]);
+    expect(codes(P(`${TYPES}\n${LOAD}\n${legacy}`, ["go"]))).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY"]);
+    // mixed: only the `|`-led arm lints
+    expect(codes(fnH(`            .NotFound(m) :> @log = m\n            | _ :> @n = 2`))).toEqual(["W-ARM-PIPE-LEGACY"]);
+    // one line, three arms
+    expect(codes(fnH(`            | .NotFound(m) :> @log = m | .Timeout :> @n = 1 | _ :> @n = 2`))).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY"]);
+    // a value-producing handler
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ | .Timeout :> "t" | _ :> "?" }\n    }`, ["go"]))).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY"]);
+  });
+
+  test("its message is §19.4.5's: the arm as written, its canonical rewrite (a paren-free binder gains parentheses), `scrml fix`", () => {
+    const tail = " :>'. Run 'scrml fix' to rewrite every site (§19.4.5).";
+    const m = (pat, canonical) => `Arm '| ${pat} :>' uses the deprecated leading '|'. A pattern arm is a match arm (§18.2): write '${canonical}${tail}`;
+    expect(wMsgs(fnH(`            | .NotFound m :> @log = m\n            | _ err :> @n = 1`))).toEqual([m(".NotFound m", ".NotFound(m)"), m("_ err", "_ err")]);
+    expect(wMsgs(fnH(`            | ::NotFound m :> @log = m\n            | ::Timeout :> @n = 1`))).toEqual([m("::NotFound m", "::NotFound(m)"), m("::Timeout", "::Timeout")]);
+    expect(wMsgs(fnH(`            | .NotFound(m) :> @log = m\n            | else :> @n = 1`))).toEqual([m(".NotFound(m)", ".NotFound(m)"), m("else", "else")]);
+  });
+
+  test("the paren-free binder after the `|` still lints — and lowers to the SAME Core as `.V(m)`", () => {
+    const a = clean(fnH(`            .NotFound(m) :> @log = m\n            _ :> @n = 2`));
+    const b = legacyOk(fnH(`            | .NotFound m :> @log = m\n            | _ :> @n = 2`), 2);
+    expect(strip(b.core)).toBe(strip(a.core));
+    // one-line, the deprecated separator too: each lint is its own (W-MATCH-ARROW-LEGACY is analyze's)
+    const one = run(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ | .Timeout => "t" | _ :> "?" }\n    }`, ["go"]));
+    expect(one.diags.map((d) => d.code).sort()).toEqual(["W-ARM-PIPE-LEGACY", "W-ARM-PIPE-LEGACY", "W-MATCH-ARROW-LEGACY"]);
+    expect(one.core == null).toBe(false);
+    const oneC = clean(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ .Timeout :> "t" _ :> "?" }\n    }`, ["go"]));
+    expect(strip(legacyOk(P(`${TYPES}\n${LOAD}\n    function go() {\n        @out = load("y") !{ | .Timeout :> "t" | _ :> "?" }\n    }`, ["go"]), 2).core)).toBe(strip(oneC.core));
+  });
+
+  test("a program whose every handler arm is `|`-led still produces a Core (Info never closes the gate) and runs", async () => {
+    const src = P(`${TYPES}\n${LOAD}\n    function go() {\n        @log = load("x") !{ | .NotFound m :> "nf:" + m | .Timeout :> "t" }\n        @out = load("y") !{ | _ :> "y-failed" }\n    }`, ["go"]);
+    const r = legacyOk(src, 3);
+    expect(r.typed.files.every((f) => f.errs.length === 0)).toBe(true);
+    await loadLegacy(src, 3);
+    click(btn("go"));
+    expect([text().log, text().out]).toEqual(["nf:x", "y-failed"]);
+  });
+
+  test("the lint's span runs from the `|` through the pattern", () => {
+    const src = fnH(`            | .NotFound m :> @log = m`);
+    const d = run(src).diags.find((x) => x.code === "W-ARM-PIPE-LEGACY");
+    expect(src.slice(d.span.start, d.span.end)).toBe("| .NotFound m");
+  });
+
+  test("not the lint: a `|` on a `match` arm (E-PARSE-ARM) or between alternates (§18.2)", () => {
+    const mt = codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        match load("x") {\n            | .Ok(v) :> @log = v\n            | _ :> @n = 2\n        }\n    }`));
+    expect(mt).not.toContain("W-ARM-PIPE-LEGACY");
+    expect(codes(fnH(`            .NotFound(m) | .Timeout :> @n = 1`))).not.toContain("W-ARM-PIPE-LEGACY");
+  });
+
+  // r2 (review LOW): the lint names a rewrite, so it fires only for an arm that PARSED — never
+  // during error recovery, never with an empty or truncated pattern. The errors are unchanged.
+  test("r2: no lint during recovery — a bitwise `|` in a pipe-less arm's body (empty pattern)", () => {
+    const src = fnH(`            .NotFound(m) :> @n = @n | 2\n            _ :> @n = 2`);
+    expect(codes(src)).toEqual(["E-PARSE-ARM", "E-PARSE-ARM", "E-SYNTAX-010"]);
+    expect(wMsgs(src)).toEqual([]);
+  });
+
+  test("r2: no lint for a `|`-led unsupported alternation (`| .A | .B :>`) — no suggestion that drops `.B`", () => {
+    const piped = fnH(`            | .NotFound(m) | .Timeout :> @n = 1\n            | _ :> @n = 2`);
+    const plain = fnH(`            .NotFound(m) | .Timeout :> @n = 1\n            _ :> @n = 2`);
+    expect(codes(plain)).toEqual(["E-PARSE-ARM"]);
+    // only the well-formed `| _ :>` arm lints; the alternation keeps its one E-PARSE-ARM
+    expect(codes(piped)).toEqual(["E-PARSE-ARM", "W-ARM-PIPE-LEGACY"]);
+    expect(wMsgs(piped)).toEqual([`Arm '| _ :>' uses the deprecated leading '|'. A pattern arm is a match arm (§18.2): write '_ :>'. Run 'scrml fix' to rewrite every site (§19.4.5).`]);
   });
 });
 

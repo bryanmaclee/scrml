@@ -305,14 +305,14 @@ none
 - `control-flow/s437-r5-braced-else-if-chain-comments-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-line-comment-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-ownline-comment-fn` — PASS · TWIN
-- `defer/handled-failable-ok` — PASS · TWIN
+- `defer/handled-failable-ok` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `defer/identifier-untouched` — PASS · TWIN
 - `defer/lifo-fallthrough` — PASS · TWIN
 - `defer/nested-neg` — PASS · TWIN
 - `defer/not-reached-and-nested-blocks` — PASS · TWIN
-- `defer/propagate-path` — PASS · TWIN
+- `defer/propagate-path` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `defer/return-value-before-deferred` — PASS · TWIN
-- `defer/unhandled-failable-neg` — PASS · TWIN
+- `defer/unhandled-failable-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `engine/engine-var-duplicate-neg` — PASS · TWIN
 - `engine/engine-var-duplicate-pos` — PASS · TWIN
 - `engine/initial-invalid-variant-neg` — PASS · TWIN · VACUOUS
@@ -321,7 +321,7 @@ none
 - `engine/state-child-missing-neg` — PASS · TWIN · VACUOUS
 - `error/fail-bare-variant-payload-arity-neg` — PASS · TWIN
 - `error/fail-bare-variant-undeclared-neg` — PASS · TWIN
-- `error/fail-imported-builtin-name-enum-neg` — PASS · TWIN
+- `error/fail-imported-builtin-name-enum-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `error/fail-in-failable-neg` — PASS · TWIN
 - `error/fail-non-enum-neg` — PASS · TWIN
 - `error/fail-outside-failable` — PASS · TWIN
@@ -329,15 +329,15 @@ none
 - `error/fail-variant-payload-arity-neg` — PASS · TWIN
 - `error/fail-variant-payload-arity-too-few-neg` — PASS · TWIN
 - `error/fail-variant-undeclared-neg` — PASS · TWIN
-- `error/handler-failable-guard-and-plain-reference-neg` — PASS · TWIN
+- `error/handler-failable-guard-and-plain-reference-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `error/handler-pipeless-arms-rt` — PASS · TWIN
-- `error/handler-recovery-into-cell` — PASS · TWIN
+- `error/handler-recovery-into-cell` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `error/handler-unhandled-failable-multi-stmt-pos` — PASS · TWIN
 - `error/handler-unhandled-failable-one-stmt-pos` — PASS · TWIN
-- `error/propagate-in-non-failable-fn-neg` — PASS · TWIN
+- `error/propagate-in-non-failable-fn-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `error/propagate-in-non-failable-fn-pos` — PASS · TWIN
-- `error/propagate-non-failable-callee-neg` — PASS · TWIN
-- `error/propagate-non-failable-callee-pos` — PASS · TWIN
+- `error/propagate-non-failable-callee-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
+- `error/propagate-non-failable-callee-pos` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `files/multifile-import` — PASS · TWIN
 - `forms/bind-value-input` — PASS · TWIN
 - `forms/bind-value-two-field` — PASS · TWIN

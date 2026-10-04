@@ -38,8 +38,9 @@
  *                `scrml fix` §66 rules, or a `dialect.s66` override excludes it. The reason is
  *                printed. All-or-nothing: a half-migrated file is never graded.
  *   UNSUPPORTED  a §66-dialect case the bootstrap refuses: an unexpected E-BOOTSTRAP-UNSUPPORTED
- *                (sub-reason `bootstrap-unsupported`), or an unexpected PARSE-phase diagnostic
- *                (sub-reason `parse-reject` — a construct the bootstrap parser does not know; the
+ *                (sub-reason `bootstrap-unsupported`), or an unexpected Error-severity PARSE-phase
+ *                diagnostic (sub-reason `parse-reject` — a construct the bootstrap parser does not
+ *                know; a parse-phase Warning / Info lint is an ACCEPTED form, not a reject; the
  *                case list is printed so a real parser bug cannot hide here).
  *   CRASH        the bootstrap THREW (front end, printer, or the runtime half) — not a verdict.
  *   INVALID      the case's own `expect` block is malformed (S365 container policy) — the
@@ -644,9 +645,13 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
     const msgs = [...new Set(fe.diags.filter((d) => d.code === "E-BOOTSTRAP-UNSUPPORTED").map((d) => d.message))];
     return v("UNSUPPORTED", "bootstrap-unsupported", { ...base, failures: msgs });
   }
-  const parseUnexpected = [...new Set(fe.parseDiags.map((d) => d.code))].filter((code) => !expectedCodes.has(code));
-  if (parseUnexpected.length > 0 || unexpected.some((code) => PARSE_PHASE_HINT.test(code))) {
-    const msgs = fe.parseDiags.filter((d) => !expectedCodes.has(d.code)).slice(0, 3).map((d) => `${d.code}: ${d.message}`);
+  // s452-boot-arm-pipe: only an ERROR-severity parse diagnostic is a parse rejection. A parse-phase
+  // Warning / Info (W-ARM-PIPE-LEGACY, §19.4.5 — the first one) means the parser KNEW the form and
+  // accepted it (§34: Warning and Info "do not fail the compile"); it is graded like any other
+  // unasserted non-error code (allowed), never bucketed UNSUPPORTED.
+  const parseRejects = fe.parseDiags.filter((d) => !expectedCodes.has(d.code) && errorCodes.has(d.code));
+  if (parseRejects.length > 0 || unexpected.some((code) => PARSE_PHASE_HINT.test(code))) {
+    const msgs = parseRejects.slice(0, 3).map((d) => `${d.code}: ${d.message}`);
     return v("UNSUPPORTED", "parse-reject", { ...base, failures: msgs });
   }
 
