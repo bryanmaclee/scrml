@@ -11922,13 +11922,22 @@ zero-row behavior, `.acrossTenants()` declassification, the INSERT column-inject
 fire (§34). The V1.next INJECT optimization (SQL-WHERE predicate injection) remains deferred (see
 "Implementation status" below). Codegen: `compiler/src/codegen/tenant-egress.ts` +
 `rewrite.ts` + `emit-logic.ts` + `emit-server.ts`.
+**Amended** 2026-10-04 (S452, ruling "a") — the floor filters at the **SOURCE**: a tenant-scoped
+read's rows are filtered to the active tenant immediately after the query executes, before any
+program code observes them. This supersedes the S273 strip-at-egress-only model; the egress strip
+stays as defense in depth. impl#1 still implements the S273 model until the fix in flight lands
+(see "Implementation status").
 
-This is the **row-level twin of §14.8.9**. §14.8.9 strips protected **columns** at the
-compiler-owned client-egress sinks; this floor isolates tenant **rows** at the same sinks. It
-owns exactly the **isolation invariant** — *a row belonging to tenant A never reaches a request
-whose ambient tenant is B* — and nothing else. It does **not** own policy: which tenant a user
-may act as, which roles/grants exist, what each may do. Those stay app-owned server logic
-(§52.15.2 trusts `@currentUser.role` without re-deriving it — the same discipline).
+This is the **row-level twin of §14.8.9**, with one structural difference that puts its mechanism
+at a different point. A protected column is something the SERVER legitimately uses and only the
+client may not see (login must read `passwordHash`), so §14.8.9 strips protected **columns** at the
+compiler-owned client-egress sinks. A foreign tenant's row is something THIS REQUEST may not see at
+all, server code included, so this floor removes tenant **rows** at the source, before the program
+holds them. It owns exactly the **isolation invariant** — *a row belonging to tenant A is never
+observed by code serving a request whose ambient tenant is B, and so never reaches that request* —
+and nothing else. It does **not** own policy: which tenant a user may act as, which roles/grants
+exist, what each may do. Those stay app-owned server logic (§52.15.2 trusts `@currentUser.role`
+without re-deriving it — the same discipline).
 
 **The tenant key — consume, never derive (the invariant/policy firewall).** The floor
 CONSUMES an app-established session scalar `@currentUser.tenantId` and NEVER computes one. The
@@ -11953,40 +11962,99 @@ the ratified security property "a uniform `tenant_id` on every scoped table is i
 property." The `tenant`-family vocabulary does NOT collide with §23.5 `capabilities=` (foreign-code
 host caps — `network` / `fs` / `spawn` / `db`, an unrelated sense of "capability").
 
-**Enforcement — HYBRID (redaction guarantees, injection optimizes).** Rows are not columns, and
-that asymmetry drives the mechanism split:
+**Enforcement — HYBRID (the source filter guarantees, injection optimizes).** Rows are not
+columns, and that asymmetry drives the mechanism split:
 
-- **Redaction is the guaranteeing FLOOR.** Every row read against a tenant-scoped table is tagged
-  with its source `tenant_id` at query-lowering (the §14.8.9 `_scrml_protect_tag` primitive, one
-  predicate deeper) and, at the client-egress sink, every row whose `tenant_id` ≠ the ambient
-  `@currentUser.tenantId` is dropped (`_scrml_protect_redact`, extended with the row-level
-  predicate). This **inherits §14.8.9's entire soundness argument verbatim** — sound by
-  construction, no query rewriting, no value-flow-completeness obligation — and reuses the
-  shipped egress paths (server-fn response, SSR `/__serverLoad`, channel `broadcast()`, SSE
-  `data:`). It fires `I-TENANT-STRIP` (the redaction is never silent).
-- **Injection is the optimization + the mandatory mechanism for what redaction can't cover.** For
-  a statically-rewritable row read, the compiler MAY inject `AND tenant_id = ${@currentUser.tenantId}`
-  into the WHERE (rows never materialize off the DB; indexes filter) — a **v1.next** optimization
-  gated on a SQL-WHERE-parser (it must parenthesize the existing WHERE — the `OR`-precedence
-  hazard makes every parser bug a silent leak, so it is deliberately deferred behind the redact
-  floor). Injection is **mandatory** (inject-or-hard-fail) exactly where redaction is unsound:
+- **The source filter is the guaranteeing FLOOR (S452).** Rows read from a tenant-scoped table
+  SHALL be filtered to the active tenant immediately after the query executes, before any program
+  code observes them: every row whose `tenant_id` ≠ the ambient `@currentUser.tenantId` is dropped
+  from the query's result, and only the remaining rows are bound, returned, or iterated. Each row is
+  keyed by its source `tenant_id`, which query-lowering guarantees is in the result (the
+  deterministic projection-column add for `tenant_id` when the author's projection omits it). The
+  filter is a property of the read, not of any sink: it needs no query rewriting and no value-flow
+  analysis, and it is the same for every program path that later consumes the rows. It fires
+  `I-TENANT-STRIP` (the scoping is never silent).
+- **The egress strip remains, as defense in depth.** The compiler-emitted client-egress sinks
+  (server-fn response, SSR `/__serverLoad`, channel `broadcast()`, SSE `data:`, §61 `<endpoint>`)
+  SHALL still drop any tagged row whose `tenant_id` ≠ the ambient tenant, composing with the
+  §14.8.9 protect strip at the same sink. Under a correct source filter it strips nothing; it exists
+  so that a defect in the source filter is not by itself a leak. It is no longer the guarantee.
+- **Injection is the optimization + the mandatory mechanism for what the source filter can't
+  cover.** For a statically-rewritable row read, the compiler MAY inject
+  `AND tenant_id = ${@currentUser.tenantId}` into the WHERE (rows never materialize off the DB;
+  indexes filter) — a **v1.next** optimization gated on a SQL-WHERE-parser (it must parenthesize the
+  existing WHERE — the `OR`-precedence hazard makes every parser bug a silent leak, so it is
+  deliberately deferred behind the source filter). Injection changes where the rows are dropped,
+  not which rows the program observes. Injection is **mandatory** (inject-or-hard-fail) exactly
+  where a filter over the result rows is unsound:
   - **Aggregate / scalar** over a tenant-scoped table WITH an output tenant discriminator
-    (`GROUP BY tenant_id`) → redaction strips non-matching groups. WITHOUT a discriminator (a bare
-    `COUNT(*)` folds every tenant into one scalar — no row to key on) → inject the constraint, and
-    if un-injectable, **hard-fail `E-TENANT-AGG`** (redaction is UNSOUND here).
+    (`GROUP BY tenant_id`) → the source filter drops non-matching groups. WITHOUT a discriminator (a
+    bare `COUNT(*)` folds every tenant into one scalar before any filter can run — no row to key
+    on) → inject the constraint, and if un-injectable, **hard-fail `E-TENANT-AGG`** (a row filter is
+    UNSOUND here).
   - **Write** (INSERT / UPDATE / DELETE) against a tenant-scoped table → **inject-or-hard-fail
-    `E-TENANT-WRITE`.** There is no egress sink for a write; a committed cross-tenant write is
-    durable before any redaction could run, so it must fail closed at compile. An INSERT gets
+    `E-TENANT-WRITE`.** A write returns no rows to filter and has no egress sink; a committed
+    cross-tenant write is durable before any filter could run, so it must fail closed at compile. An INSERT gets
     `tenant_id = @currentUser.tenantId` injected into its column-set; an UPDATE/DELETE without an
     injectable tenant constraint hard-fails.
 - **Raw / foreign egress** (a `_{}` foreign-code block §23, a manual `Response` / `handle()` body
   §40, an `asIs`-typed value §14.1.1) carrying a tenant-scoped table's rows → **hard-fail
   `E-TENANT-RAW-EGRESS`** — the compiler cannot tag/redact an un-analyzable egress. The
   confidentiality sibling of `E-PROTECT-004`, in the row-isolation direction. A `.acrossTenants()`
-  on the query suppresses it (explicit cross-tenant intent).
+  on the query suppresses it (explicit cross-tenant intent). ⚑ *Open under S452 (flagged, not
+  decided):* this rule's stated reason — the compiler cannot tag/redact at an un-analyzable egress —
+  assumed the egress strip was the guarantee. Under the source filter, the rows a non-opted-out
+  read hands the program are already the active tenant's, so a raw egress of them carries no
+  foreign row; and the one case that does carry foreign rows (`.acrossTenants()`) is the case this
+  rule exempts. Whether `E-TENANT-RAW-EGRESS` is retained, narrowed, or inverted is an owner
+  ruling; until then it stands as written.
 - **Fail-closed when the tenant scalar is absent.** `@currentUser.tenantId is not` (anonymous /
-  unpinned) → the redact predicate matches **zero rows**; an unpinned request sees nothing —
-  fail-closed by construction, identical to §52.15.3's shipped anonymous-`NULL`-matches-zero shape.
+  unpinned, or code running outside any request) → the source filter matches **zero rows**: a
+  tenant-scoped `.all()` yields `[]`, a `.get()` yields `not`, and an iteration runs zero times. An
+  unpinned request observes nothing — fail-closed by construction, identical to §52.15.3's shipped
+  anonymous-`NULL`-matches-zero shape.
+
+**Consequence — server code never observes another tenant's rows unless it opts out.** Because the
+rows are filtered before any program code holds them, every value the program derives from a
+tenant-scoped read — an extracted field (`rows.map(r => r.name)`), a count (`rows.length`), a join
+or merge done in code, a serialized or logged value, an error message built from a row — is scoped
+to the active tenant **by construction**. No provenance label is carried and no flow analysis is
+required, so the floor has no extracted-value half to enforce (contrast §14.8.9's S441 amendment,
+where a protected value legitimately lives in server code and an extracted copy must be rejected at
+compile time with `E-PROTECT-006`). This holds for every sink the program has or later gains —
+server-fn response, SSR, channel, SSE, CPS marshal, error, log — with no per-sink work.
+**Semantics changed (S452):** a server-side read of a tenant-scoped table without
+`.acrossTenants()` now yields only the active tenant's rows, where under the S273 model server code
+saw every tenant's rows until the egress sink. Code that computed over all tenants implicitly (a
+platform-wide count, a background job, a boot-time scan) returns a different result and SHALL use
+`.acrossTenants()` to keep its meaning.
+
+**How the source filter composes with query shapes (S452 readings — see the provenance note).**
+- **`.get()` and primary-key lookups.** The filter applies to the query's result rows; `.get()`
+  then takes the first remaining row. A lookup by primary key of a row that belongs to another
+  tenant therefore yields `not` — the same value as a key that does not exist. `.all()` returns the
+  remaining rows in their original order.
+- **`LIMIT` / `OFFSET`.** Under the runtime filter they are applied by the database BEFORE the
+  filter, so a page may hold fewer rows than `LIMIT` (or none) although more of the active tenant's
+  rows exist. This is fail-closed (no foreign row is observed) but it is a visible short-read;
+  the v1.next injection removes it by filtering before the limit.
+- **JOINs.** A result row is admitted iff, for EVERY tenant-scoped table among the query's FROM /
+  JOIN sources, that source's `tenant_id` in the row equals the active tenant; query-lowering
+  carries one `tenant_id` per tenant-scoped source. A non-tenant table joined to a tenant table
+  imposes no condition of its own. A `NULL` `tenant_id` never matches — including the all-`NULL`
+  side of an outer join's unmatched row, so a `LEFT JOIN` onto a tenant table drops the left rows
+  that have no match (fail-closed; author an `.acrossTenants()` read or restructure the query if
+  that is wrong).
+- **Subqueries, CTEs, derived tables.** A tenant-scoped table read only inside a subquery, CTE, or
+  derived table whose `tenant_id` does not reach the outer result row folds tenant rows into the
+  outer row before any row filter can run — the aggregate case. It SHALL be injected or rejected
+  with `E-TENANT-AGG`, unless the query is `.acrossTenants()`.
+- **Unresolvable dynamic reads.** A read whose source tables cannot be statically resolved but which
+  mentions a tenant-scoped table yields **zero rows** at the source (the wholesale fallback, now at
+  the source), with `I-TENANT-STRIP`.
+- **The added key column.** When query-lowering added `tenant_id` to a projection that did not name
+  it, the column SHALL be removed from each row after the filter, so the program observes exactly
+  the columns it projected.
 
 **Declassification — `.acrossTenants()` (the sole loud opt-out).** A greppable `?{…}.acrossTenants()`
 method suppresses tenant-scoping for one query, for legitimate cross-tenant reads (platform-admin
@@ -12006,19 +12074,33 @@ trusts an annotation.
   initial load (§52.3) is the **easiest** tag site (fully compiler-controlled, no author SQL);
   the floor and §52's generated loads reinforce each other.
 - **§14.8.9 protect** — orthogonal (columns vs rows); both reuse `extractSelectProjection` and
-  compose at the same lowering choke and the same egress sink.
+  share the same lowering choke. They act at different points: the tenant filter at the read, the
+  protect strip at the egress sink (where the tenant defense-in-depth strip also runs).
 - **§38.13 `watches=`** — the realtime feed re-SELECTs the changed row and publishes it, and the
-  published frame already runs §14.8.9 protect-redaction (§38.13.9 Phase-2 (d)). The tenant filter
-  SHALL slot in at the **same sink, per-subscriber** — a subscriber receives only its own tenant's
-  row changes; otherwise the realtime feed reopens the cross-tenant leak the read floor closed.
+  published frame already runs §14.8.9 protect-redaction (§38.13.9 Phase-2 (d)). That re-SELECT
+  serves no single request — it fans out to subscribers of many tenants — so it has no one active
+  tenant to filter to at the source. The tenant filter SHALL therefore slot in at the **published
+  frame, per-subscriber** — a subscriber receives only its own tenant's row changes; otherwise the
+  realtime feed reopens the cross-tenant leak the read floor closed.
+
+**Alignment with §14.8.11 (S452).** The opt-in DB-authoritative tier (§14.8.11) filters at the
+source in the database: Postgres row-level security removes foreign-tenant rows before the query
+returns. With the source filter, the in-process floor has the **same server-side semantics** — under
+either tier, server code observes only the active tenant's rows unless the read is
+`.acrossTenants()`, and an unpinned read observes none. The two tiers now enforce one invariant at
+one point (the source); §14.8.11 relocates that point into the database so it also holds against
+connections scrml does not emit. Moving a table between tiers does not change what server code
+observes.
 
 **Soundness scope (normative bound — the prose SHALL NOT over-claim).** The guarantee is
-**complete for reads of statically-declared tenant-scoped tables whose row `tenant_id` origin is
-resolvable, by origin.** It does **NOT** cover: covert channels (timing, row presence/absence);
-derived/implicit flows (a value computed *from* tenant rows but of independent identity);
-cross-database tenant joins (the predicate form is single-DB). An unresolvable dynamic read
-degrades to redact-at-sink (never accept-unknown); aggregate-without-discriminator, writes, and
-raw egress fail closed at compile.
+**complete for reads of statically-declared tenant-scoped tables, and for every value server code
+derives from them**: a non-opted-out read hands the program only the active tenant's rows, so every
+extracted field, count, join, and serialized value is scoped by construction. It does **NOT** cover:
+covert channels (timing; the database's own behavior on foreign rows, e.g. a `UNIQUE` violation
+revealing that a value exists in another tenant); the `LIMIT` / `OFFSET` short-read above (a
+completeness loss, not a leak); and any value read with `.acrossTenants()`, which is the declared
+opt-out. Aggregate-without-discriminator, writes, and raw egress fail closed at compile; an
+unresolvable dynamic read yields zero rows (never accept-unknown).
 
 **Anti-pattern (named) — auto-deriving the tenant.** The Trojan-horse design: have the floor join
 `user_roles` at query time to compute the tenant. It needs the grant schema (policy), must pick
@@ -12029,22 +12111,31 @@ is the entire invariant/policy firewall.
 **Diagnostics** (named now; emitted when the floor build lands, per the §14.8.9 / §38.13.8 / §60 /
 §61 named-codes-land-with-impl precedent — Rule 4):
 - **`E-TENANT-AGG`** (Error) — an aggregate/scalar over a tenant-scoped table with no output tenant
-  discriminator and no injectable tenant constraint (redaction has no row to key on).
+  discriminator and no injectable tenant constraint (the source filter has no row to key on); also
+  a tenant-scoped table read only inside a subquery / CTE / derived table (S452 reading).
 - **`E-TENANT-WRITE`** (Error) — an INSERT/UPDATE/DELETE against a tenant-scoped table with no
   injectable tenant value (no egress sink can redact a durable write; it must fail closed).
 - **`E-TENANT-RAW-EGRESS`** (Error) — a tenant-scoped table's rows reach a compiler-unanalyzable
   egress (raw `_{}` / manual `Response` / `asIs`); the row-isolation sibling of `E-PROTECT-004`.
   Suppressed by an explicit `.acrossTenants()`.
-- **`I-TENANT-STRIP`** (Info) — the egress sink dropped one or more non-matching-tenant rows (the
-  redaction is never silent). Also fires on the wholesale-strip fallback of an unresolvable dynamic
-  read. Mirrors `I-PROTECT-STRIP-001`.
+- **`I-TENANT-STRIP`** (Info) — names a read of a tenant-scoped table whose rows are filtered to
+  the active tenant at the source (S452), so the scoping is never silent. Also fires on the
+  zero-row fallback of an unresolvable dynamic read. Mirrors `I-PROTECT-STRIP-001`.
 - **`I-TENANT-ACROSS`** (Info) — a `.acrossTenants()` opt-out emitted an unscoped read against a
   tenant-scoped table (the cross-tenant audit surface).
 
-**Implementation status (Nominal — V1-minimal = the redact floor + the hard-fails).**
+**Implementation status (Nominal — V1-minimal = the source filter + the hard-fails).**
+- **S452 — impl#1 implements the superseded model.** impl#1 tags at query-lowering and strips only
+  at the egress sink, so server code sees every tenant's rows, and a value extracted from them
+  passes the strip (`_scrml_tenant_redact` returns non-objects unchanged): MEASURED at `e7fb5fba5`,
+  `rows.map(r => r.name)` over a tenant table served every tenant's names to an unpinned request
+  while `I-TENANT-STRIP` fired (dpa-067 §C4). The source-filter fix is in flight on
+  `fix/s452-tenant-filter-at-source` under the standing security exception. The bootstrap
+  (`compiler/self-host-v2/`) does not build the floor yet (U1c keeps tenant refused); the same rule
+  applies to it when built (dpa-067 F2).
 - **V1-minimal (the freeze scope — a second deliberate security-feature exception, alongside CSS
-  Wave-1):** the REDACT floor + the hard-fails — tag-then-strip at the shipped §14.8.9 egress sink
-  (reads), the `E-TENANT-AGG` / `E-TENANT-WRITE` / `E-TENANT-RAW-EGRESS` hard-fails, `.acrossTenants()`,
+  Wave-1):** the S273 floor + the hard-fails — tag-then-strip at the shipped §14.8.9 egress sink
+  (reads; S452 moves the guaranteeing filter to the read and keeps this strip as defense in depth), the `E-TENANT-AGG` / `E-TENANT-WRITE` / `E-TENANT-RAW-EGRESS` hard-fails, `.acrossTenants()`,
   and the fail-closed-when-unpinned zero-row behavior. Reuses the shipped §14.8.9 machinery;
   requires **NO** new SQL-WHERE-parser. Robustness note: the "DB-inside-the-TCB → redact is
   sufficient" premise holds for the LAN SQLite target; injection coverage grows as shared/cloud
@@ -12053,6 +12144,30 @@ is the entire invariant/policy firewall.
   SQL-WHERE-parser (the `OR`-precedence hazard, deferred behind the redact floor) — for
   defense-in-depth (rows never materialize off the DB), aggregate-over-tenant injection, and scale
   (DB-side indexed filtering vs full-table-then-strip).
+
+> **Provenance:** ruling:user-voice-scrml.md S452 "a" — *"a"* (answering the PA's fork on the C4
+> leak: rows read from a tenant-scoped table are filtered to the active tenant IMMEDIATELY after the
+> query, before any program code sees them; explicit cross-tenant access keeps its `I-TENANT-ACROSS`
+> path; NOT (b) the static `E-PROTECT-006` twin) · supersedes: §14.8.10's strip-at-egress-only model
+> (S273 — "Redaction is the guaranteeing FLOOR … at the client-egress sink"; "inherits §14.8.9's
+> entire soundness argument verbatim"), the soundness-scope exclusions of derived/implicit flows and
+> cross-database joins, the "at the same sinks" framing, and the `I-TENANT-STRIP` §34 text; the
+> egress strip is retained as defense in depth · dd:scrml-support/docs/deep-dives/bootstrap-security-provenance-dpa-067-2026-10-04.md
+> (§C1, §C4, Approach D, fork F2) · **Direction of change:** semantics-changed (server code that read
+> all tenants implicitly now sees only the active tenant's rows); impl#1 fix in flight on
+> `fix/s452-tenant-filter-at-source`; bootstrap: not yet built (U1c keeps tenant refused).
+> **PA readings, in their veto window** (the SPEC was silent; each is the clearest reading
+> consistent with the ruling): (1) `.get()` takes the first row AFTER the filter, so a primary-key
+> lookup of a foreign row yields `not`; (2) `LIMIT`/`OFFSET` apply before the runtime filter — a
+> fail-closed short-read until injection; (3) a JOIN row is admitted iff every tenant-scoped source's
+> `tenant_id` matches, a non-tenant source imposes nothing, and `NULL` never matches (an outer join's
+> unmatched tenant side drops the row); (4) a tenant table read only inside a subquery / CTE /
+> derived table is the aggregate case → inject-or-`E-TENANT-AGG` (no new code minted); (5) an
+> unresolvable dynamic read mentioning a tenant table yields zero rows at the source; (6) a
+> compiler-added `tenant_id` key column is removed after the filter; (7) code outside any request
+> (boot, background) has no active tenant → zero rows; (8) `watches=` keeps a per-subscriber filter
+> at the published frame, since its re-SELECT serves no single tenant. **Flagged, not decided:**
+> `E-TENANT-RAW-EGRESS`'s rationale no longer holds under the source filter (see the bullet above).
 
 **Cross-references:** §14.8.9 (the column twin — shares the tag/redact sink + the extractor);
 §52.15 (the per-user row-scope precedent + the stacking axes + `@currentUser`); §20.5.1
@@ -12074,8 +12189,9 @@ never-DROP-the-table fence, and the A1 per-request principal transaction wrapper
 `compiler/src/codegen/emit-server.ts` (A1 wrapper).
 
 **What this tier IS — a trust-boundary reversal, opt-in per table.** §14.8.10 owns the isolation
-invariant at scrml's **compiler-owned client-egress sink** — its trust boundary is scrml's emitted
-server, and a direct `psql` connection reads unredacted rows **by design**. A `db-authoritative`
+invariant inside scrml's **emitted server**, filtering each read's rows at the source before program
+code observes them (S452) — its trust boundary is scrml's emitted server, and a direct `psql`
+connection reads unfiltered rows **by design**. A `db-authoritative`
 table relocates the *same* isolation invariant **into the database** (Postgres row-level security),
 so it holds against **any** connection (a direct `psql`, a second service). This is a trust-boundary
 reversal, not a strength dial — but it stays on the **invariant side** of the §14.8.10 firewall
@@ -12126,7 +12242,7 @@ the tier is ready for that thread when it lands.)
 resolved driver is not Postgres (SQLite, MySQL, or no `db=` target) is a compile error
 (`E-DBAUTH-SQLITE`, §34). Every DB-authoritative primitive (RLS, `FORCE ROW LEVEL SECURITY`,
 `CREATE ROLE`, `GRANT`, `current_setting`/`set_config`) is Postgres-only; SQLite has none. A security
-feature that silently degraded to §14.8.10 egress-redaction is the exact "looks enforced and isn't"
+feature that silently degraded to the §14.8.10 in-process filter is the exact "looks enforced and isn't"
 trap, so the tier fails closed rather than degrade.
 
 **Emitted DDL (S1 RLS + S6 bounded role) — the spike-validated shape.** For a `db-authoritative`
@@ -12185,7 +12301,7 @@ connection with NO `set_config` reads **zero** rows, and a connection WITH
 and isn't" — worse than none — so the negative test is the only proof that separates real DB
 enforcement from the egress-JS gap.
 
-**Cross-references:** §14.8.10 (the egress-redaction floor this tier stacks with + the pinned-tenant
+**Cross-references:** §14.8.10 (the in-process source-filter floor this tier stacks with + the pinned-tenant
 firewall); §44.2 (driver resolution — `resolveDbDriver`); §39 (`<schema>` tables); §20.5.1
 (`session.set("tenantId", …)` — the pinned scalar `set_config` injects). Authority: phasing plan +
 evidence DD (bryan RULED S286, user-voice). Milestone 1 is reads-authoritative; P2 (write-authority)
@@ -24247,10 +24363,10 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-PROTECT-005 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` **A scope that declares `protect=` columns returns a response the COMPILER can prove payload-free but the RUNTIME sink cannot recognize as such** — on this implementation `Response.redirect(...)` and `Response.error()`. It COMPILES (there is no body for the §14.8.9 floor to fail to inspect, so `E-PROTECT-005` would be wrong), but the runtime guard still refuses it with a 500. Resolution: write the equivalent explicit null-body form, which BOTH limbs accept — `new Response(not, { status: 302, headers: { Location: "/where" } })`, `new Response(not, { status: 204 })`. ⚑ **THIS ROW EXISTS BECAUSE THE TWO LIMBS CAN PROVE DIFFERENT THINGS, AND THE SEAM HAD TO GO SOMEWHERE VISIBLE.** MEASURED on Bun 1.3.14: `new Response()` / `new Response(null, …)` give `.body === null`, but `Response.redirect(...)` and `Response.error()` give a **0-byte ReadableStream**, so the sink's non-destructive test cannot distinguish them from a body-carrying response. And it must not try: `new Response("s3cret", {status:302, headers:{Location:"/h"}})` presents IDENTICALLY — same `location`, no `content-length`, same `.body` shape — so any heuristic short of consuming (and destroying) the stream is unsound. ⛔ **The alternative to this warning is silence, and silence here is a WORSE defect than the build break it replaced**: the shape would compile clean and then 500 on the first request. A diagnosable build-time condition SHALL NOT be converted into a runtime failure. Cases: `conformance/cases/protect/w-protect-005-null-body-static` (fires) · `null-body-response-clean` (the named resolution, compiled — a diagnostic that names a working path owes a proof that it works). *(Catalog addition S405 fix round, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` `_protectResponseGate`.)* | Warning |
 | I-PROTECT-STRIP-001 | §14.8.9 | The compiler-emitted egress serializer stripped one or more protected-origin columns from a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — before it crossed to the client (the §14.8.9 structural-redaction floor). Names each stripped column so the redaction is never silent. Also fires on the wholesale strip of a row whose dynamic SQL could not be statically origin-resolved (fail-closed strip-all). Info-level — never fatal. ⚑ **S441: fires ONLY for a query whose row actually reaches a client-egress sink carrying an unrevealed protected column** — decided by the §14.8.9 provenance flow over the emitted server module. It used to fire for every protected SELECT, so a column that left as an extracted scalar was reported "stripped" while it shipped (`g-protected-column-escapes-redaction-as-scalar`), and a row used only server-side (a login that verifies the hash) was reported stripped when nothing was. Cases: `conformance/cases/protect/strip-info-select-star` (fires) · `login-verify-clean` · `nonprotected-field-runtime` · `reveal-client-visible-runtime` (silent — nothing stripped). (Catalog addition S230 dpa-017; emitted when the §14.8.9 floor build lands; S441 truthfulness fix at `compiler/src/codegen/protect-flow.ts` `buildProtectFlowDiagnostics`.) | Info |
 | E-PROTECT-006 | §14.8.9 | `provenance: brief s441-protect-scalar-egress (SECURITY HIGH, g-protected-column-escapes-redaction-as-scalar); PA ratification pending` **A value whose provenance includes a `protect=` column reaches a compiler-emitted client-egress sink OUTSIDE a descriptor-bearing row** — a server-fn / `<endpoint>` response, SSR `/__serverLoad`, `/__mountHydrate`, channel `broadcast()` (§38), or a `server function*` SSE frame (§37, including its `event` / `id`, which are serialized outside the redact). The §14.8.9 runtime floor strips a protected column by the origin descriptor its ROW carries; a value EXTRACTED from the row carries none, so before this code `return u.passwordHash` served HTTP 200 with the hash in the body (MEASURED). The analysis covers EVERY server module of the compile with imports between them resolved (a helper in another file is analysed). Provenance is PRESERVED BY DEFAULT: extraction, re-housing, concatenation / templates / encodings (`Buffer`, `btoa`, character codes), `await`, callbacks, getters / `toJSON`, `throw` → `catch`, and any call into code the compile does not contain (a host / stdlib / npm import or platform API) receiving a protected scalar or row — fail closed. The derived-flow exemption is an explicit ALLOWLIST: comparison / relational operators, `!`, `typeof`, `.length` of a value whose length is a known count (the column's own string, a string / array literal built from it, a mapped array, a row array — NOT `({ length: h })` or `new Array(u.pin)`, S441 round 5), predicate / position methods on a string-like receiver (not `charCodeAt` / `codePointAt` / `getTime`), and the one-way / boolean functions `scrml:auth` `verifyPassword` / `hashPassword` / `verifyTotp`, `scrml:crypto` `verifyHash`, `hash("argon2", …)`, `hmac(key, …)` with an unprotected, non-constant key, `Boolean`, `console.*` — no `Bun.*` API, and (RULING S443 #7) NO bare digest: `hash("md5" | "sha256" | …)` and `crypto.subtle.digest` of a protected value stay protected. ⚑ **S443 round 6:** a function handed to a callee the compile does not contain is analysed as called with everything the receiver and arguments carry (its `arguments` too); a value outside a row written into a global store (`globalThis`, `process.env`, `import.meta`, an alias of one) IS an egress and every global read carries what was written (a function kept in a global is analysed through the name it was stored under); ⚑ **round 6b:** a row from which a property is REMOVED by a key that is not a string / number literal (`delete`, `Reflect.deleteProperty`, `defineProperty`/`defineProperties`, an object-rest exclusion, a reflection-capable global callee handed the row) ships every protected column, whatever produced the key; an HMAC keyed by a compile-time constant stays protected (RULING S445 #4). A protected value used as an object KEY, or as a lookup key, is protected (keys are data). `scrml:data` `pick` / `omit` with literal key lists and `.scrml` re-exports are modelled. Sinks: every compiler-emitted client-egress serializer plus every argument of an author-built `Response` (body AND `init` headers — `Location` / `Set-Cookie`), `Response.redirect`, `Response.json`, publish / enqueue / send. `reveal("col")` discharges it for the named OUTPUT column. Resolution: return the row itself (the floor strips the column), or only a derived value; to send it deliberately, `row.reveal("col").col`. Also raised, fail-closed, when an emitted server module cannot be parsed or the analysis budget runs out. ⚑ **Arithmetic stays protected** (ruling S441): an arithmetic / bitwise / unary `+ - ~` / `++ --` / compound-assignment result on a protected value is protected (`u.pin * 1`, `+u.pin`, `cost_price * qty`); compute with a protected column by declassifying it with `reveal`. ⚑ **Keys and aliases:** a protected value used as an object key or lookup key is protected all the way down (`L[c].v`, `Object.keys(L[c])`); a write through an alias or a helper parameter lands in every binding that may hold the object. Origin matching is case-insensitive per SQLite identifier rules. ⚑ **Bounds, disclosed:** position methods with a protected ARGUMENT and implicit / control-dependence flows are out of scope; a DB round trip (write into a non-protected column, read back) is out of scope; the analysis is call-site sensitive but flow-INsensitive within a function (a binding reassigned from a protected value to a clean one is still treated as protected — fails closed). Cases: `conformance/cases/protect/scalar-return-e006` · `scalar-in-new-object-e006` · `scalar-concat-e006` · `scalar-map-e006` · `scalar-helper-e006` · `scalar-helper-cross-file-e006` · `response-header-e006` · `scalar-encoding-e006` · `computed-key-e006` · `reduce-index-by-e006` · `lookup-field-e006` · `lookup-method-e006` · `map-get-field-e006` · `lookup-keys-e006` · `alias-write-e006` · `helper-mutates-param-e006` · `nested-container-write-e006` · `select-upper-column-e006` · `from-upper-table-e006` · `arithmetic-e006` · `callback-param-e006` · `arguments-e006` · `global-store-e006` · `descriptor-symbol-e006` · `bare-digest-e006` · `symbol-description-e006` · `marker-removal-alias-e006` · `hmac-constant-key-e006` (fire) · `merge-rows-strip-runtime` · `assign-refresh-runtime` (strip) · `keyed-hash-clean` (silent) · `upper-table-row-strip` · `reveal-then-arithmetic-clean` (compile) · `login-verify-clean` · `nonprotected-field-runtime` (silent). *(Catalog addition S441; emitted compile-wide at `compiler/src/api.js` `runProtectFlow` via `analyzeCompileProtectFlow` in `compiler/src/codegen/protect-flow.ts`.)* | Error |
-| E-TENANT-AGG | §14.8.10 | An aggregate/scalar read (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`/…) over a tenant-scoped table (a `<schema>` table carrying a `tenant_id` column) has NO output tenant discriminator (`GROUP BY tenant_id` yielding a per-tenant keyable row), so the §14.8.10 row-redaction floor has no row to key on — a bare `COUNT(*)` folds every tenant into one scalar. In V1-minimal (no SQL-WHERE-injection) such a read cannot be soundly tenant-scoped → fail-closed at compile. Resolution: add a per-tenant `GROUP BY tenant_id` (and project it) so each output row carries its tenant, or mark the query `.acrossTenants()` for a deliberate cross-tenant aggregate. The aggregate sibling of the redact floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `resolveTenantScoping` (kind `agg`).) | Error |
+| E-TENANT-AGG | §14.8.10 | An aggregate/scalar read (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`/…) over a tenant-scoped table (a `<schema>` table carrying a `tenant_id` column) has NO output tenant discriminator (`GROUP BY tenant_id` yielding a per-tenant keyable row), so the §14.8.10 row filter (at the source, S452) has no row to key on — a bare `COUNT(*)` folds every tenant into one scalar before any filter can run. The same holds for a tenant-scoped table read only inside a subquery / CTE / derived table whose `tenant_id` does not reach the output row (S452 PA reading). In V1-minimal (no SQL-WHERE-injection) such a read cannot be soundly tenant-scoped → fail-closed at compile. Resolution: add a per-tenant `GROUP BY tenant_id` (and project it) so each output row carries its tenant, or mark the query `.acrossTenants()` for a deliberate cross-tenant aggregate. The aggregate sibling of the redact floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `resolveTenantScoping` (kind `agg`).) | Error |
 | E-TENANT-WRITE | §14.8.10 | A write (INSERT / UPDATE / DELETE) against a tenant-scoped table cannot be tenant-constrained by the V1-minimal floor: there is no egress sink for a write, and a committed cross-tenant write is durable before any redaction could run — so it must fail closed at compile. An INSERT that OMITS `tenant_id` and is the parseable single-row `INSERT INTO t (cols) VALUES (...)` shape is auto-injected `tenant_id = @currentUser.tenantId` (no error); an UPDATE/DELETE (which needs a WHERE constraint the V1 floor does not parse), or an un-injectable INSERT (already sets `tenant_id`, is multi-row, or is `INSERT ... SELECT`), fires this error. Resolution: for a per-tenant INSERT omit `tenant_id`; for a deliberate cross-tenant write mark the query `.acrossTenants()`. The row-isolation write sibling of the read floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `classifyTenantWrite`.) | Error |
 | E-TENANT-RAW-EGRESS | §14.8.10 | A tenant-scoped table's rows reach a compiler-unanalyzable egress path — a `_{}` foreign-code block (§23), a manual `Response` / `handle()` body (§40), or an `asIs`-typed value (§14.1.1) — where the compiler cannot tag/redact the rows, so a cross-tenant row cannot be proven stripped at this boundary. Fail-closed: the compiler will not silently ship a tenant-scoped row through a path it cannot redact. The row-isolation sibling of `E-PROTECT-004` (the column direction). Resolution: return the rows through the normal compiler-emitted response, or, for a deliberate cross-tenant read, mark the query `.acrossTenants()`. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `detectTenantRawEgress`.) | Error |
-| I-TENANT-STRIP | §14.8.10 | The compiler-emitted egress serializer scopes a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — to the request's ambient `@currentUser.tenantId`: every row of another tenant is dropped, and an unpinned (anonymous) request sees ZERO rows (fail-closed). The row-level twin of `I-PROTECT-STRIP-001`. Names the read so the redaction is never silent. Also fires on the wholesale-strip fallback of an unresolvable dynamic read that mentions a tenant-scoped table. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the rewriter/hand-emit strip drains.) | Info |
+| I-TENANT-STRIP | §14.8.10 | A read of a tenant-scoped table is filtered to the request's ambient `@currentUser.tenantId` at the SOURCE — immediately after the query executes, before any program code observes the rows (S452): every row of another tenant is dropped, and an unpinned (anonymous) request, or code outside any request, observes ZERO rows (`.all()` → `[]`, `.get()` → `not`; fail-closed). Every value server code derives from the rows is therefore scoped by construction; the compiler-emitted egress strip (server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, `server function*` SSE (§37) `data:` chunk) remains as defense in depth. The row-level twin of `I-PROTECT-STRIP-001`. Names the read so the scoping is never silent. Also fires on the zero-row fallback of an unresolvable dynamic read that mentions a tenant-scoped table. **Provenance:** ruling:user-voice-scrml.md S452 "a" · supersedes: the S273 egress-only text of this row. **Nominal as worded** — impl#1 strips only at egress until `fix/s452-tenant-filter-at-source` lands. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the rewriter/hand-emit strip drains.) | Info |
 | I-TENANT-ACROSS | §14.8.10 | A `?{…}.acrossTenants()` opt-out SUPPRESSED the §14.8.10 tenant floor for one query (a deliberate cross-tenant read/write — a platform-admin dashboard, cross-tenant reporting). It is the ONLY way to emit an unscoped read/write against a tenant-scoped table, and it fires this Info so an audit can grep every cross-tenant access in the codebase (the cross-tenant audit surface). Mirrors `reveal()`'s greppability for §14.8.9. Info-level — never fatal. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` from the `.acrossTenants()` drains.) | Info |
 | E-DBAUTH-SQLITE | §14.8.11 | A `<schema>` table is marked `db-authoritative` (the opt-in DB-authoritative security tier — Postgres RLS `FORCE ROW LEVEL SECURITY` + a bounded `NOBYPASSRLS` role + a per-request principal), OR the `<schema>` declares a SECURITY-DEFINER `fn` (§14.8.11.2 P2 writes-authority — `CREATE FUNCTION … SECURITY DEFINER`, a bounded owner role, `GRANT`/`REVOKE`), but the resolved database driver is not Postgres (SQLite, MySQL, or no `db=` target). SQLite has no per-connection principal, no roles, no `GRANT`, no RLS, no `SECURITY DEFINER` — every DB-authoritative primitive is Postgres-only. Fail CLOSED at compile: a security feature that silently degraded to §14.8.10 egress-redaction would be the exact "looks enforced and isn't" trap. Resolution: target Postgres (`<program db="postgres://...">`), or drop the `db-authoritative` marker / SECDEF `fn` to keep the §14.8.10 egress-redaction floor (which is the SQLite-first default). (Catalog addition: DB-authoritative tier Milestone 1 — reads-authoritative, S286; emitted at `compiler/src/codegen/index.ts` in the `annotateDbScopes` driver-resolution stage. `scrml db-migrate` (§14.8.11.1) re-fires it at the deploy layer for a db-authoritative project pointed at a non-Postgres `--db`. P2 (2026-07-26) extended the trigger to a SECDEF `fn`.) | Error |
 | E-DBAUTH-NO-TENANT-COLUMN | §14.8.11 | A `db-authoritative` `<schema>` table declares no `tenant_id` column. The M1 tenant-isolation policy is keyed on `tenant_id` (`CREATE POLICY … USING ("tenant_id" = current_setting('scrml.tenant', true)::…)`), so a db-authoritative table without one would emit DDL referencing a missing column — an opaque Postgres error + full transaction rollback at apply time. `scrml db-migrate` (§14.8.11.1) pre-flights this BEFORE touching the DB and fails closed, naming the offending table(s). Resolution: add a `tenant_id` column, or drop the `db-authoritative` marker. (Catalog addition: DB-authoritative tier Milestone 2 — migration-apply seam, 2026-07-26; emitted at `compiler/src/commands/db-migrate.js`.) | Error |
@@ -24499,7 +24615,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MATCH-ARM-MARKUP-IN-VALUE | §18.0 | A JS-style value-match arm (`match expr { .V :> ... }`) has an arm body that is a MARKUP element. §18.0 splits the two match forms by output category: the JS-style form emits a VALUE (server logic, derivations, computed expressions); the block-form `<match for=Type [on=expr]>` (§18.0.1) emits MARKUP. The natural reflex `${match err { .V(p) :> <markup with ${p}> }}` sits on the value↔markup boundary the two forms split. Resolution: use a `<match for=Type [on=expr]>` block to render a UI tree per variant, or fire a variant's `renders` display via the render-expression; to compute a VALUE per variant have the arm return that value (`:> "Failed: " + reason`) and interpolate it in markup. The render-expression routes around this without widening value-match to emit markup (limit-primitives-not-godify). This early TYPER-stage steer REPLACES the wrong-altitude failures the reflex otherwise surfaces at a later stage — E-CODEGEN-INVALID-LOGIC (markup body lowered literally) and E-SCOPE-001 (a payload var in a `${...}` inside the markup body, not in scope for value-match codegen); the arm-body visit is skipped once the steer fires so it is the ONLY diagnostic. SCOPED to JS-style match-stmt/match-expr `match-arm-inline` arms; the block-form `<match>` is a distinct `match-block` node, structurally exempt. (Catalog addition S196 — error-handling-holistic DD §1.4 Seams 1+2 / debate §6 prereqs 3+4 (H1); emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
 | E-MATCH-BLOCK-IN-LIFT | §18.0.1, §17.7 | A block-form `<match for=Type on=expr>` is placed inside a `${ ... lift ... }` logic loop (the Tier-0 iteration form). The logic-context inline-markup parser does NOT route `<match>` through the BS-layer S107 match-block recognition (`ast-builder.js` `block.name === "match"`), so the variant arms (`<Open>`/`<Closed>`) land as unresolved uppercase-tag markup and would otherwise surface a misleading E-COMPONENT-035 "residual component / cross-file import" cascade. The supported per-item form is the Tier-1 `<each>` block: move the `<match>` into an `<each in=@coll as item> ... <match for=Type on=item> ... </match> ... </each>` body — the same block `<match>` compiles there. This targeted steer REPLACES the misleading E-COMPONENT-035 cascade for the shape (the arm errors are suppressed). Supporting block-`<match>` inside `${...lift}` was REJECTED (limit-primitives; `<each>` is canonical per S130 HU-1). (Catalog addition S213 — g-block-match-in-lift; user ruling S212 "(b) targeted diagnostic, steer to `<each>`"; emitted by VP-2 post-CE invariant at `compiler/src/validators/post-ce-invariant.ts`.) | Error |
 | W-MATCH-ARROW-LEGACY | §18.2 | A `match` arm (or `!{}` error-handler arm, §19) uses a deprecated arm separator — `=>` or `->` — instead of the canonical `:>`. All three forms parse, build, and emit identically during the deprecation window; the canonical separator is `:>`. The lint is ARM-CONTEXT-SCOPED: `=>` remains fully valid as the arrow-function glyph and `->` as the `fn` return-type separator / legacy `<machine>` event-arrow — only the match / handler arm-separator position fires. Resolution: rewrite `<pattern> => <body>` / `<pattern> -> <body>` as `<pattern> :> <body>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace, since `=>` is also the arrow-function glyph). New code SHALL use `:>`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to `E-MATCH-ARROW-LEGACY` (reserved; not yet emitted). (S145 — `match-arrow-colon-canonical` deep-dive; user-voice S145; mirrors the W-LIFECYCLE-LEGACY-ARROW `->`→`to` template.) | Info |
-| W-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3, §63.7 | A `!{}` error-handler arm or an engine `(state × message)` message arm led by `\|` — `\| <pattern> :> body` — SOFT-DEPRECATED (§63.1 Stage 1): both are §18.2 `match-arm`s, with no leading `\|`. Also covers the paren-free binder, which the legacy `!{}` arm alone admits: `\| .V m :>` (or `\| ::V m :>`) is `.V(m) :>`. It parses identically to the canonical arm (same AST, emitted code and run-time behaviour). One lint per arm; the message names the canonical arm, `scrml fix`, and §19.4.5. Resolution: `scrml fix` deletes the leading `\|`, writes a paren-free binder as `.V(m)`, and puts arms that shared a line on their own lines (§18.2). SCOPED to `!{}` arms and message arms: a `\|` between alternates of one arm (§18.2) is alternation, untouched; element arms (`<match>`, engine state-children) are not in scope. Renamed S452 from `W-HANDLER-ARM-PIPE-LEGACY` when "a. one spelling" extended it to message arms (never emitted under either name). Info, like its separator sibling `W-MATCH-ARROW-LEGACY`. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" — *"c looks right. markup vs logic is understandable (an possibly a bonus) but multiple syntaxs in logic dosnt work for me. yes, cononical version."* + S452 "a. one spelling" (message arms). **Nominal / not yet emitted** — impl#1 (frozen) accepts the `\|`-led arm without a lint (`g-impl1-handler-arm-pipeless-dropped-s452`, `g-impl1-engine-message-arm-pipeless-as-text-s452`); the bootstrap does not emit it either. | Info |
+| W-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3, §63.7 | A `!{}` error-handler arm or an engine `(state × message)` message arm led by `\|` — `\| <pattern> :> body` — SOFT-DEPRECATED (§63.1 Stage 1): both are §18.2 `match-arm`s, with no leading `\|`. Also covers the paren-free binder, which the legacy `!{}` arm alone admits: `\| .V m :>` (or `\| ::V m :>`) is `.V(m) :>`. It parses identically to the canonical arm (same AST, emitted code and run-time behaviour). One lint per arm; the message names the canonical arm, `scrml fix`, and §19.4.5. Resolution: `scrml fix` deletes the leading `\|`, writes a paren-free binder as `.V(m)`, and puts arms that shared a line on their own lines (§18.2). SCOPED to `!{}` arms and message arms: a `\|` between alternates of one arm (§18.2) is alternation, untouched; element arms (`<match>`, engine state-children) are not in scope. Renamed S452 from `W-HANDLER-ARM-PIPE-LEGACY` when "a. one spelling" extended it to message arms (never emitted under either name). Info, like its separator sibling `W-MATCH-ARROW-LEGACY`. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" — *"c looks right. markup vs logic is understandable (an possibly a bonus) but multiple syntaxs in logic dosnt work for me. yes, cononical version."* + S452 "a. one spelling" (message arms). Emitted by the bootstrap for the `!{}` arm at `compiler/self-host-v2/parse.scrml` (`parseArms` → `pipeLint`, s452-boot-arm-pipe; the bootstrap does not parse engine message arms, so it has no message-arm emit site). **Nominal / not yet emitted by impl#1** — impl#1 (frozen) accepts the `\|`-led arm without a lint (`g-impl1-handler-arm-pipeless-dropped-s452`, `g-impl1-engine-message-arm-pipeless-as-text-s452`). | Info |
 | E-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3, §63.7 | **Reserved** (§63.2) end-of-window code for the `\|`-led `!{}` arm (and its paren-free binder) and engine message arm. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right". **Nominal / not yet emitted.** | Error |
 | W-GIVEN-ARROW-LEGACY | §42.2.3 | A standalone `given` presence-guard uses the deprecated separator `=>` instead of the canonical `:>` (`given x => { ... }` → `given x :> { ... }`). The sibling of `W-MATCH-ARROW-LEGACY` for the standalone `given`-guard context (an in-`match` `given`-arm already fires `W-MATCH-ARROW-LEGACY`). Both forms parse + resolve identically during the deprecation window; the canonical separator is `:>` (the same maps-to separator as a match arm). SCOPED to the `given`-guard separator only — the JS arrow-function `=>` is untouched. Resolution: rewrite as `given x :> { ... }`, or run `bun scrml migrate --fix` (AST-driven). The end-of-window timing promotes this to a reserved `E-GIVEN-ARROW-LEGACY` (not yet emitted). (Catalog addition S148 — Insight 33 extension; ratified via user AskUserQuestion; mirrors W-MATCH-ARROW-LEGACY.) | Info |
 | W-COLON-SHORTHAND-LEGACY-PLACEMENT | §4.14, §51.0.I, §18.0.1 | A `:`-shorthand body uses the legacy AFTER-`>` placement (`<Variant rule=... > : expr`) instead of the canonical inside-opener placement (`<Variant rule=... : expr>`). Both parse, build, and emit identically during the deprecation window; the inside-opener form is canonical across every locus (Pillar 5 — one `:`-shorthand placement: HTML elements §24, `<each>` per-item §17.7.6, match block-form arms §18.0.1, engine state-children §51.0.I). The lint is ARM / state-child-context-scoped — it fires ONLY where after-`>` was ever a legal placement (engine state-children + match arms); HTML elements and `<each>` per-item never used after-`>`, so the lint never fires there. Resolution: move the `: expr` inside the opener, before the `>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace — a `>` can appear inside a string attribute value or a markup body). New code SHALL use the inside-opener placement; existing samples MAY migrate at convenience. The end-of-window timing promotes this to a reserved `E-COLON-SHORTHAND-LEGACY-PLACEMENT` (not yet emitted). (S160 — S154 ruling (b); mirrors the W-MATCH-ARROW-LEGACY / W-GIVEN-ARROW-LEGACY / W-LIFECYCLE-LEGACY-ARROW deprecation template.) | Info |

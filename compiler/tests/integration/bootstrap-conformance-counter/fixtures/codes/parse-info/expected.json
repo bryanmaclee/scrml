@@ -1,0 +1,11 @@
+{
+  "id": "fixture-parse-info",
+  "description": "KNOWN PASS: the bootstrap PARSER emits an unasserted Info lint (W-ARM-PIPE-LEGACY, §19.4.5 — the `|`-led `!{}` arm) and accepts the form. A parse-phase Warning / Info is not a parse rejection (§34: it does not fail the compile), so the case is graded, not bucketed UNSUPPORTED.",
+  "language-version": "1.0",
+  "spec": "§19.4.5",
+  "rationale": "fixture for scripts/bootstrap-conformance.ts (s452-boot-arm-pipe)",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TYPE-080"]
+  }
+}
