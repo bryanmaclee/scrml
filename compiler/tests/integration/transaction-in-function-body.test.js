@@ -84,6 +84,62 @@ const APP = (dbPath) => `<program db="${dbPath}">
       ?{\`INSERT INTO accounts (id, balance) VALUES (\${id}, 0)\`}.run()
     }
   }
+
+  // ---- S453 / B1a (RULED): return / break / continue ROLL BACK -------------
+
+  function viaReturn(stop)! -> TransferError {
+    transaction {
+      ?{\`INSERT INTO log (msg) VALUES ('in-tx')\`}.run()
+      if (stop) { return 42 }
+      ?{\`INSERT INTO log (msg) VALUES ('tail')\`}.run()
+    }
+    return 0
+  }
+
+  // The loop is OUTSIDE the block, so the \`break\` leaves the block.
+  function viaBreak(stop)! -> TransferError {
+    for (let i = 0; i < 2; i++) {
+      transaction {
+        ?{\`INSERT INTO log (msg) VALUES ('loop-tx')\`}.run()
+        if (stop) { break }
+        ?{\`INSERT INTO log (msg) VALUES ('loop-tail')\`}.run()
+      }
+    }
+    return 0
+  }
+
+  function viaContinue(stop)! -> TransferError {
+    for (let i = 0; i < 2; i++) {
+      transaction {
+        ?{\`INSERT INTO log (msg) VALUES ('c-tx')\`}.run()
+        if (stop) { continue }
+        ?{\`INSERT INTO log (msg) VALUES ('c-tail')\`}.run()
+      }
+    }
+    return 0
+  }
+
+  // The RETURN EXPRESSION must still be evaluated INSIDE the transaction — this
+  // is why the rollback is carried by the block's \`finally\` rather than by a
+  // \`fail\`-style pre-return \`await rollback()\`, which would evaluate it after.
+  function viaReturnReadingTx()! -> TransferError {
+    transaction {
+      ?{\`INSERT INTO log (msg) VALUES ('rr')\`}.run()
+      let n = ?{\`SELECT COUNT(*) AS c FROM log\`}.get()
+      return n.c
+    }
+  }
+
+  // A \`!{}\` arm is an INLINE block, not an IIFE, so its \`return\` really leaves
+  // the function and the block's \`finally\` rolls back.
+  function boom()! -> TransferError { fail TransferError::Rejected }
+  function viaGuardedArmReturn()! -> TransferError {
+    transaction {
+      ?{\`INSERT INTO log (msg) VALUES ('ga')\`}.run()
+      boom() !{ | _ :> return 7 }
+      ?{\`INSERT INTO log (msg) VALUES ('ga-tail')\`}.run()
+    }
+  }
 }
 <p>x</>
 </program>`;
@@ -238,6 +294,94 @@ describe("S450 — transaction { } in a `!` function body, EXECUTED against bun:
   });
 });
 
+/**
+ * S453 / B1a (RULED) — `return` / `break` / `continue` out of a `transaction { }`
+ * block ROLL IT BACK; only normal completion COMMITs (§19.10.3 "end of normal
+ * completion"). These are ROW-LEVEL proofs against a real bun:sqlite file read
+ * through a SEPARATE connection — emission-inspection does not close this.
+ */
+describe("S453/B1a — leaving a transaction by return / break / continue, EXECUTED", () => {
+  // ⚑ THE BITE FOR EVERY TEST IN THIS BLOCK. The hold's lowering ALREADY rolled
+  // these exits back — the block's `try`/`finally` runs on a `return` / `break` /
+  // `continue` out of its `try`, so the row-level behaviour below is unchanged by
+  // S453 and those assertions pass on the pre-change tree too. What S453 changes
+  // is that the source now COMPILES: on the pre-change tree this very app is
+  // three E-TRANSACTION-CONTROL-FLOW errors, so none of this was reachable from
+  // scrml source. That is what this assertion pins, and it fails on the merged
+  // tree before the validator change. Measured, not assumed: the hold was
+  // refusing a shape its own lowering already handled correctly.
+  test("the B1a app COMPILES (the pre-change tree refused it — this is this block's bite)", () => {
+    if (typeof globalThis.document !== "undefined") return;
+    expect(compileErrors.map((e) => e.code)).toEqual([]);
+  });
+
+  test("`return` out of the block ROLLs BACK: the in-block row is ABSENT, the return value still arrives", async () => {
+    if (typeof globalThis.document !== "undefined") return;
+    seed();
+    const r = await call("viaReturn", { stop: true });
+    expect(r.status).toBe(200);
+    expect(r.body).toBe(42);              // the exit proceeds
+    expect(logRows()).toEqual([]);        // and the block's write is undone
+    expect(noTransactionLeftOpen()).toBe(true);
+  });
+
+  test("the SAME block completing normally COMMITs (the control for the test above)", async () => {
+    if (typeof globalThis.document !== "undefined") return;
+    seed();
+    const r = await call("viaReturn", { stop: false });
+    expect(r.status).toBe(200);
+    expect(r.body).toBe(0);
+    expect(logRows()).toEqual(["in-tx", "tail"]);
+    expect(noTransactionLeftOpen()).toBe(true);
+  });
+
+  test("`break` out of the block ROLLs BACK; the same loop without the break COMMITs both passes", async () => {
+    if (typeof globalThis.document !== "undefined") return;
+    seed();
+    const bad = await call("viaBreak", { stop: true });
+    expect(bad.status).toBe(200);
+    expect(logRows()).toEqual([]);
+    expect(noTransactionLeftOpen()).toBe(true);
+    seed();
+    await call("viaBreak", { stop: false });
+    expect(logRows()).toEqual(["loop-tx", "loop-tail", "loop-tx", "loop-tail"]);
+  });
+
+  test("`continue` out of the block ROLLs BACK every pass; without it both passes COMMIT", async () => {
+    if (typeof globalThis.document !== "undefined") return;
+    seed();
+    const bad = await call("viaContinue", { stop: true });
+    expect(bad.status).toBe(200);
+    expect(logRows()).toEqual([]);
+    expect(noTransactionLeftOpen()).toBe(true);
+    seed();
+    await call("viaContinue", { stop: false });
+    expect(logRows()).toEqual(["c-tx", "c-tail", "c-tx", "c-tail"]);
+  });
+
+  test("the return EXPRESSION is evaluated INSIDE the transaction, and the block still rolls back", async () => {
+    if (typeof globalThis.document !== "undefined") return;
+    seed();
+    const r = await call("viaReturnReadingTx", {});
+    expect(r.status).toBe(200);
+    // the COUNT(*) saw the in-transaction INSERT -> 1. A `fail`-style
+    // `return (await rollback(), expr)` lowering would have returned 0.
+    expect(r.body).toBe(1);
+    expect(logRows()).toEqual([]);
+    expect(noTransactionLeftOpen()).toBe(true);
+  });
+
+  test("`return` from inside a `!{}` handler arm in the block ROLLs BACK and leaves the function", async () => {
+    if (typeof globalThis.document !== "undefined") return;
+    seed();
+    const r = await call("viaGuardedArmReturn", {});
+    expect(r.status).toBe(200);
+    expect(r.body).toBe(7);               // the arm's `return` really exited
+    expect(logRows()).toEqual([]);        // 'ga' undone, 'ga-tail' never ran
+    expect(noTransactionLeftOpen()).toBe(true);
+  });
+});
+
 describe("S450 — §19.10.4 compile errors through the real pipeline", () => {
   function compileCodes(src) {
     const d = mkdtempSync(join(tmpdir(), "s450-tx-neg-"));
@@ -271,8 +415,35 @@ describe("S450 — §19.10.4 compile errors through the real pipeline", () => {
     const c = compileCodes(PROG("function f()! -> E { transaction { transaction { ?{`UPDATE orders SET name = 'a'`}.run() } } }"));
     expect(c).toEqual(["E-ERROR-007"]);
   });
-  test("`return` out of the block → E-TRANSACTION-CONTROL-FLOW", () => {
+  // ---- S453 / B1a + B1b (RULED), through the real pipeline -----------------
+  test("B1a: `return` out of the block COMPILES (was E-TRANSACTION-CONTROL-FLOW)", () => {
     const c = compileCodes(PROG("function f(a)! -> E { transaction { if (a) { return 1 } ?{`UPDATE orders SET name = 'a'`}.run() } }"));
+    expect(c).toEqual([]);
+  });
+  test("B1a: an outward `break` / `continue` COMPILES", () => {
+    const b = compileCodes(PROG("function f(a)! -> E { for (let i = 0; i < 2; i++) { transaction { if (a) { break } ?{`UPDATE orders SET name = 'a'`}.run() } } }"));
+    expect(b).toEqual([]);
+    const k = compileCodes(PROG("function f(a)! -> E { for (let i = 0; i < 2; i++) { transaction { if (a) { continue } ?{`UPDATE orders SET name = 'a'`}.run() } } }"));
+    expect(k).toEqual([]);
+  });
+  test("B1b: a TOP-LEVEL transaction (outside any function) → E-ERROR-001", () => {
+    const c = compileCodes(PROG("transaction { ?{`UPDATE orders SET name = 'a'`}.run() }"));
+    expect(c).toContain("E-ERROR-001");
+  });
+  test("PA reading: `yield` in the block STAYS E-TRANSACTION-CONTROL-FLOW", () => {
+    const c = compileCodes(PROG("function* f(a)! -> E { transaction { ?{`UPDATE orders SET name = 'a'`}.run() yield 1 } }"));
+    expect(c).toContain("E-TRANSACTION-CONTROL-FLOW");
+  });
+  test("PA reading: a `return` inside a statement-`match` arm in the block STAYS refused", () => {
+    // ⚑ The shape B1a must NOT make legal-and-broken. Measured under a naive B1a
+    // (no arm guard): it compiled clean, the author's `return 1` was SWALLOWED
+    // (the function returned its tail 0), the post-`match` write RAN, and BOTH
+    // rows persisted — no rollback at all.
+    const c = compileCodes(PROG("type M:enum = {\n        A\n        B\n    }\n    function f(m: M)! -> E { transaction { ?{`UPDATE orders SET name = 'a'`}.run()\n match m {\n .A :> { return 1 }\n .B :> { let y = 1 }\n }\n ?{`UPDATE orders SET name = 'after-match'`}.run() } }"));
+    expect(c).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
+  });
+  test("PA reading: a `return` inside an EXPRESSION-position `match` arm in the block STAYS refused (same IIFE lowering)", () => {
+    const c = compileCodes(PROG("type M:enum = {\n        A\n        B\n    }\n    function f(m: M)! -> E { transaction {\n let v = match m {\n .A :> { return 1 }\n .B :> 2\n }\n ?{`UPDATE orders SET name = 'after'`}.run() } }"));
     expect(c).toEqual(["E-TRANSACTION-CONTROL-FLOW"]);
   });
 
