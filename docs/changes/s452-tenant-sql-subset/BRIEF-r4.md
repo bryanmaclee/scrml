@@ -1,0 +1,18 @@
+PA → tenant SQL-subset agent: the security review of 12825558d returned FIX (narrow). The lexer holds (no parse-differential found). Fix round r4 on the same branch, same rules. Archive this as BRIEF-r4.md, and add "fix round r4" to progress.md. Reproduce each first (two seeded tenants, executed).
+
+1. HIGH (new in r3: UPDATE/DELETE are now injected rather than refused): a schema with `name TEXT UNIQUE ON CONFLICT REPLACE`. Tenant A's scoped `UPDATE assets SET name = 'B-secret-asset' WHERE id = 1` DELETED B's row 2. An injected INSERT does the same (pre-existing since r2). The table constraint's conflict resolution REPLACEs across tenants.
+   - Fix at the root: every injected tenant write is emitted with an explicit statement-level `OR ABORT` (`INSERT OR ABORT`, `UPDATE OR ABORT`). In SQLite this overrides any table-level ON CONFLICT clause.
+   - Author-written `OR <anything>` stays refused (it already is: REPLACE).
+   - For Postgres, verify the equivalent (no table-level REPLACE there; ON CONFLICT is statement-level and already refused). Say what you concluded.
+   - Tests: UNIQUE ON CONFLICT REPLACE + UPDATE, + INSERT. B's rows survive, and A's statement fails with the constraint error.
+2. MED (new in r3): triggers. `CREATE TRIGGER … AFTER UPDATE ON assets BEGIN UPDATE orders … END` — A's scoped UPDATE rewrote B's order. Trigger bodies are unanalysed writes.
+   - Fix (PA decision; fail-closed, reversible): a WRITE (INSERT/UPDATE/DELETE) to a tenant-scoped table is E-TENANT-WRITE when that table has any trigger, or any foreign key with an ON DELETE/ON UPDATE action other than NO ACTION/RESTRICT, declared in the program's `<schema>`. Name the trigger/FK in the message; `.acrossTenants()` is the explicit opt-out.
+   - If triggers can exist outside `<schema>` (an external db, `<db src>` without schema), you can't see them. Note that limit in the gap; do not try to introspect.
+3. MED (Postgres, reviewer could not run): a function that runs SQL from a string (`query_to_xml('select name from assets', …)` in a query over a NON-tenant table; `table_to_xml('assets', …)` in a `GROUP BY tenant_id`-exempt query). Fix by allow-list, not deny-list:
+   (a) the per-row function allow-list applies to GROUP-BY-exempt tenant queries too (aggregates allowed there must be an explicit allow-list: count/sum/avg/min/max/total — anything else refused);
+   (b) ANY query (tenant or not) whose text mentions a tenant table name ANYWHERE, including inside a string literal, and calls a function outside the allow-list → E-TENANT-SQL-SUBSET.
+4. FILE as separate gaps in docs/known-gaps.md (do not fix), each with `locus=` and `prov=review:s452-tenant-r3`:
+   - (a) HIGH, pre-existing: a VIEW over a tenant table declared in `<schema>` leaks every tenant (`SELECT * FROM all_assets`). Executed by the reviewer. Recommend in the entry: refuse a VIEW over a tenant table in `<schema>` unless an explicit tenant scope, or treat the view as tenant-scoped.
+   - (b) MED, pre-existing: server code can call the raw driver `_scrml_sql.unsafe(…)` and read every tenant. The `_scrml_` prefix is not reserved. Ruling needed (reserve the prefix) — say so.
+   - (c) LOW: the WHERE runs over all tenants' rows before the filter, giving error / LIMIT oracles. SPEC §14.8.10 calls the LIMIT short read "not a leak", but it is an oracle — a SPEC wording item.
+Re-run all tenant tests, the r3 repros, and the corpus differential (no tenant tables → no change), then the full gate. `git merge origin/main` (resolve generated hunks only), regenerate counts, push. Reply with FINAL_SHA, per item, tests (≤200 words).
