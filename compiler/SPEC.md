@@ -7854,7 +7854,7 @@ c = stepped(c)
 | JS-style `match` arms (§18) and `!{}` arms (§19) | arms are newline-separated (§18.2, unchanged). See "Arm heads" below |
 | `?{ … }` SQL (§8), `_{ … }` foreign code (§23.2.3), `#{ … }` CSS | **exempt** — a foreign grammar; its own newlines and `;` are its own. The block itself is an expression inside a scrml statement and takes this rule after its closing `}` |
 
-**Arm heads — the `.Variant :>` line (structural, not a lookahead).** Directly inside a `match { … }` body or a `!{ … }` handler body, the unit at depth 0 is the **arm**, not a statement (§18.2: arms are juxtaposed, one per line). A line at that level begins an arm, so its first token is an arm pattern (`.Variant`, `::Variant`, `Type.Variant`, `| ::E` (the soft-deprecated `|`-led `!{}` arm, §19.4.5), `else`, `_`, a literal or `(` tuple pattern) — a leading `.` there is the arm's pattern, not a leading operator. Which reading applies is decided by **position** (arm level vs statement level), never by looking ahead for `:>`. Inside an arm's `{ … }` block body the level is statement level again, and a line starting with `.` there is `E-STMT-LEADING-OPERATOR`. A single-expression arm body (`.A :> expr`) ends at its line break unless the line ends in a continuation token (rule 2); a following line that starts with `.` at arm level is read as an arm head, and if it does not form an arm (`.map(f)` with no `:>`) it is a parse error whose message SHOULD carry the rule-3 suggestion.
+**Arm heads — the `.Variant :>` line (structural, not a lookahead).** Directly inside a `match { … }` body or a `!{ … }` handler body (and, S452, in the leading message-arm region of an engine state-child, §51.0.S.2.3), the unit at depth 0 is the **arm**, not a statement (§18.2: arms are juxtaposed, one per line). A line at that level begins an arm, so its first token is an arm pattern (`.Variant`, `::Variant`, `Type.Variant`, `| ::E` (the soft-deprecated `|`-led `!{}` arm, §19.4.5), `else`, `_`, a literal or `(` tuple pattern) — a leading `.` there is the arm's pattern, not a leading operator. Which reading applies is decided by **position** (arm level vs statement level), never by looking ahead for `:>`. Inside an arm's `{ … }` block body the level is statement level again, and a line starting with `.` there is `E-STMT-LEADING-OPERATOR`. A single-expression arm body (`.A :> expr`) ends at its line break unless the line ends in a continuation token (rule 2); a following line that starts with `.` at arm level is read as an arm head, and if it does not form an arm (`.map(f)` with no `:>`) it is a parse error whose message SHOULD carry the rule-3 suggestion.
 
 > **Provenance:** ruling:user-voice-scrml.md S447 "your recs on all of them" item 1 (reading 6, ACCEPTED: *"arm heads by position"* — position, never a `:>` lookahead, decides arm head vs statement; S446 Call 4a (i) already ruled out a `.Variant`-arm vs chain lookahead).
 
@@ -17570,7 +17570,7 @@ product-dispatch, reactive-runtime vehicle); §59.7 / §14.11 (no-tuple — the 
 > the match arm-arrow rule (lockstep). Examples in this section may use either form. (S145 —
 > `match-arrow-colon-canonical`.) **S452:** the lockstep is now the whole arm, not only its
 > separator — a `!{}` arm is a §18.2 `match-arm` (§19.4.5). A leading `|` on a `!{}` arm, and the
-> parenthesis-free binder `| .V m :>`, are SOFT-DEPRECATED (`W-HANDLER-ARM-PIPE-LEGACY`, §19.4.5).
+> parenthesis-free binder `| .V m :>`, are SOFT-DEPRECATED (`W-ARM-PIPE-LEGACY`, §19.4.5).
 
 ### 19.1 Overview
 
@@ -17798,7 +17798,7 @@ function label(id: string) {
 >
 > **Direction of change (pa-base §8): newly-rejecting.** impl#1 accepts the shape and stores whatever the arm's last statement evaluates to (measured on `25677da72`: an arm `{ console.log("a") }` in `let r = risky(n) !{ … }` lowers to `_scrml_result = console.log("a")`, so `r` holds the host's `undefined` — a value scrml does not have). **Corpus measured** (`examples/`, `samples/`, `conformance/cases/`, 2267 files; impl#1's front end, `guarded-expr` nodes whose guarded statement is a declaration or an assignment, arms read from the node; `match` on a failable found by the same-file `!` declarations): 64 `!{}` handlers, 35 in a value position, **19 value-position handlers with fall-through arms in 13 files, all under `conformance/cases/`; 0 in `examples/` and `samples/`.** A text scan of every `!{` (the handlers on a `?{}` terminator included, which impl#1 does not model as `guarded-expr`) found no more. Five `match`-on-failable sites, none falling through in a value position. (`samples/compilation-tests/error-004-in-logic.scrml` puts a falling-through `!{}` after `let data = not` — no failable call at all; that is E-ERROR-013's shape, below, not counted here.) Files: `conformance/cases/error/{failable-handler-lift, failable-handler-lift-success, failable-handler-lift-timeout}` (3 handlers each), `conformance/cases/error/{fail-imported-builtin-name-enum-ok, fail-bare-variant-reaches-handler, propagate-reaches-handler, propagate-success-unwrap, handler-exhaustive-neg, handler-wildcard-escape, handler-non-exhaustive}`, `conformance/cases/parse-variant/{happy-payload-variant, happy-unit-variant}`, `conformance/cases/control-flow/s437-braceless-else-in-failable-arm` (1 each). In every one the handler's arms only write cells, so the migration is mechanical: drop the unused binding (`let result = f() !{ … }` → `f() !{ … }`), or, where the binding is read after (`failable-handler-lift*` `handleOk`, `propagate-success-unwrap`), give each arm a fallback value or a `return`. The cases are migrated with the bootstrap's implementation, not by this SPEC change. **Nominal / not yet emitted by impl#1** (frozen; `g-impl1-value-position-arm-fallthrough-s451`).
 
-**A binder without parentheses binds the payload (S451 ruling 2).** *(S452: the parenthesis-free binder is now a SOFT-DEPRECATED spelling, accepted only after a legacy leading `|` and surfacing `W-HANDLER-ARM-PIPE-LEGACY` — §19.4.5. This paragraph states what it means during the window; the canonical arm is `.V(m) :>`.)* In a `!{}` arm, `| .V m :>` (or `| ::V m :>`) is the same pattern as `.V(m) :>`: `m` binds the variant's PAYLOAD — the value of its one declared field — never the error value as a whole. The §18.7 positional-binding rules apply to it unchanged, as a pattern with exactly one binder:
+**A binder without parentheses binds the payload (S451 ruling 2).** *(S452: the parenthesis-free binder is now a SOFT-DEPRECATED spelling, accepted only after a legacy leading `|` and surfacing `W-ARM-PIPE-LEGACY` — §19.4.5. This paragraph states what it means during the window; the canonical arm is `.V(m) :>`.)* In a `!{}` arm, `| .V m :>` (or `| ::V m :>`) is the same pattern as `.V(m) :>`: `m` binds the variant's PAYLOAD — the value of its one declared field — never the error value as a whole. The §18.7 positional-binding rules apply to it unchanged, as a pattern with exactly one binder:
 
 - a variant with **one** field: `m` binds that field, with that field's declared type (`| .QueryFailed m :>` binds the `message: string`, §19.8.1);
 - a variant with **two or more** fields: one binder is fewer bindings than the variant has fields, so it SHALL be **E-TYPE-021** (§18.7 — positional binding has no partial form). Bind every field positionally (`.InvalidPayload(field, reason) :>`) or use the named form for a subset (`.InvalidPayload(field: f) :>`);
@@ -17847,7 +17847,7 @@ function show(src: string) {
 - A `!{}` handler written as markup content and attached to no expression SHALL be a compile error (**E-ERROR-014**). *(S451 "your recs on all of them" item 2(b).)*
 - An arm whose whole pattern is a bare identifier (`err :>`, or the legacy `| err :>`) SHALL be a compile error (**E-MATCH-BARE-BINDER**, §18.2). *(S451 "your recs on all of them" item 2(a).)* To bind the whole error, write `_ err :>`.
 - In a `!{}` arm or a `match` on a failable result, `_ <name>` SHALL match every error variant not matched by an earlier arm (never `.Ok`) and SHALL bind the whole error value, typed as the failure's error type (§18.6.1). *(S451 "a", the whole-error binder.)*
-- A `!{}` handler's arms SHALL be §18.2 `match-arm`s (§19.4.5). A `|`-led arm, and a paren-free binder after it (`| .V m :>`), SHALL parse identically to the canonical arm (`.V(m) :>`) and surface **W-HANDLER-ARM-PIPE-LEGACY**; `E-HANDLER-ARM-PIPE-LEGACY` is reserved. *(S452 "c looks right".)*
+- A `!{}` handler's arms SHALL be §18.2 `match-arm`s (§19.4.5). A `|`-led arm, and a paren-free binder after it (`| .V m :>`), SHALL parse identically to the canonical arm (`.V(m) :>`) and surface **W-ARM-PIPE-LEGACY**; `E-ARM-PIPE-LEGACY` is reserved. *(S452 "c looks right".)*
 - The `!` modifier SHALL be part of the function's type signature. It is visible to the type system and participates in type checking.
 
 ##### 19.4.4.1 The error type SHALL be an enum
@@ -17926,26 +17926,28 @@ function show(id: string) {
 }
 ```
 
-**Markup arms are not changed.** Element arms in markup — the `<match>` block form (§18.0.1) and an
-engine's state-children (§51) — keep their own grammar, and so do the `(state × message)` arms
-written inside a state-child (§51.0.S). This section governs pattern arms in logic: a `match` and a
-`!{}`.
+**Element arms are not changed; pattern arms have one spelling.** Element arms in markup — the
+`<match>` block form (§18.0.1) and an engine's state-children (§51) — keep their own grammar. Every
+PATTERN arm takes §18.2's: a `match`, a `!{}`, and the `(state × message)` message arms written
+inside a state-child (§51.0.S.2.3, S452 "a. one spelling"). The retiring `|`-led spelling below
+covers both `!{}` arms and message arms.
 
 ##### The retiring `|`-led arm (§63)
 
-The pre-S452 handler arm — a leading `|`, and after it optionally a variant followed by one
-parenthesis-free binder — is **SOFT-DEPRECATED** (§63.1 Stage 1):
+The pre-S452 pattern arm of a `!{}` handler and of an engine message arm (§51.0.S.2.3) — a leading
+`|`, and, in a `!{}` only, after it optionally a variant followed by one parenthesis-free binder —
+is **SOFT-DEPRECATED** (§63.1 Stage 1):
 
 ```
 legacy-handler-arm ::= '|' legacy-arm-pattern (':>' | '=>' | '->') arm-body          (deprecated)
 legacy-arm-pattern ::= arm-pattern                                                    // §18.2
-                     | ('.' | '::') VariantName Identifier                            // = .V(Identifier)
-                     | TypeName ('.' | '::') VariantName Identifier                   // = T.V(Identifier)
+                     | ('.' | '::') VariantName Identifier                            // = .V(Identifier); `!{}` only
+                     | TypeName ('.' | '::') VariantName Identifier                   // = T.V(Identifier); `!{}` only
 ```
 
 | Retired form | W-lint (Stage 1) | Reserved E | `scrml fix` rule |
 |---|---|---|---|
-| `\| <pattern> :> body` in a `!{}` (including the paren-free binder `\| .V m :> body`) | `W-HANDLER-ARM-PIPE-LEGACY` | `E-HANDLER-ARM-PIPE-LEGACY` | Delete the leading `\|` (and the space after it): `\| <pattern> :>` → `<pattern> :>`. A paren-free binder gains its parentheses: `.V m` → `.V(m)` (`::V m` → `::V(m)`, `T.V m` → `T.V(m)`). Where two or more legacy arms share a line (`!{ \| .A :> 1 \| .B :> 2 }`), put each arm on its own line (§18.2: one arm per line). The separator, the pattern's prefix (`.` / `::`) and the arm body are left as written — the separator has its own lint and rule (`W-MATCH-ARROW-LEGACY`, §18.2). |
+| `\| <pattern> :> body` in a `!{}` (including the paren-free binder `\| .V m :> body`) or as an engine message arm (§51.0.S.2.3) | `W-ARM-PIPE-LEGACY` | `E-ARM-PIPE-LEGACY` | Delete the leading `\|` (and the space after it): `\| <pattern> :>` → `<pattern> :>`. A paren-free binder gains its parentheses: `.V m` → `.V(m)` (`::V m` → `::V(m)`, `T.V m` → `T.V(m)`). Where two or more legacy arms share a line (`!{ \| .A :> 1 \| .B :> 2 }`), put each arm on its own line (§18.2: one arm per line). The separator, the pattern's prefix (`.` / `::`) and the arm body are left as written — the separator has its own lint and rule (`W-MATCH-ARROW-LEGACY`, §18.2). |
 
 **Normative statements:**
 
@@ -17953,25 +17955,30 @@ legacy-arm-pattern ::= arm-pattern                                              
   separators and their deprecation, juxtaposition (one arm per line), alternation and
   E-MATCH-ALT-BINDING, E-MATCH-BARE-BINDER, the last-position rule for the catch-all (E-SYNTAX-010),
   W-MATCH-001, §18.7 payload binding — SHALL apply to a `!{}` arm unchanged.
-- **Parses identically (§63.1).** During the window, a `!{}` arm led by `|` SHALL be the same arm
+- An engine's `(state × message)` message arms SHALL be §18.2 `match-arm`s on the same terms
+  (§51.0.S.2.3).
+- **Parses identically (§63.1).** During the window, a `!{}` arm or a message arm led by `|` SHALL be the same arm
   as the arm without the `|` — the same AST, emitted code and run-time behaviour — and a
   paren-free binder after a `|`-led variant (`| .V m :>`) SHALL be the same pattern as `.V(m) :>`
   (its meaning and arity rules: §19.4.3, *"A binder without parentheses binds the payload"*). At
   arm level (the §7.2.2 "arm heads" position) a `|` that begins an arm is this lead, never an
   alternation separator; a `|` between two patterns of one arm is alternation (§18.2). On one line,
   a `|` that begins a legacy arm also ends the arm before it.
-- Each `|`-led arm SHALL surface **W-HANDLER-ARM-PIPE-LEGACY** (Info; one per arm). The message
-  SHALL name the canonical rewrite of that arm, `scrml fix`, and this section: `Handler arm '| {pattern} :>'
-  uses the deprecated leading '|'. A '!{}' arm is a match arm (§18.2): write '{canonical} :>'. Run
+- Each `|`-led arm SHALL surface **W-ARM-PIPE-LEGACY** (Info; one per arm). The message
+  SHALL name the canonical rewrite of that arm, `scrml fix`, and this section: `Arm '| {pattern} :>'
+  uses the deprecated leading '|'. A pattern arm is a match arm (§18.2): write '{canonical} :>'. Run
   'scrml fix' to rewrite every site (§19.4.5).` — where `{canonical}` is the pattern without the
   `|`, a paren-free binder written `.V(m)`.
-- The paren-free binder is part of the legacy arm only: a pipe-less `.V m :>` is not in the grammar
-  of a `!{}` (nor of a `match`, §18.2), and is a syntax error as it is in a `match`.
-- **E-HANDLER-ARM-PIPE-LEGACY** is reserved (§63.2): named, not scheduled, never fired before a §62
+- The paren-free binder is part of the legacy `!{}` arm only: a pipe-less `.V m :>` is not in the
+  grammar of a `!{}` (nor of a `match`, §18.2), and is a syntax error as it is in a `match`. It was
+  never a message-arm form and is not one now.
+- **E-ARM-PIPE-LEGACY** is reserved (§63.2): named, not scheduled, never fired before a §62
   MAJOR event schedules it (§63.7 permanent-soft). Scheduling is gate-blocked until the `scrml fix`
   rule above is verified-landed (§63.4).
 - This section does not change `match`. §18.2's `match` grammar never admitted a leading `|`, so
-  the window covers `!{}` arms only — the one place the form was ever accepted.
+  the window covers `!{}` arms and engine message arms (§51.0.S.2.3) — the two places the form was
+  ever accepted. (impl#1 accepts `| _` on a multi-scrutinee `match` too; that is a filed divergence,
+  `g-impl1-multi-scrutinee-pipe-wildcard-accepted-s452`, not part of the window.)
 
 > **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" — *"c looks right. markup vs
 > logic is understandable (an possibly a bonus) but multiple syntaxs in logic dosnt work for me.
@@ -18001,14 +18008,14 @@ legacy-arm-pattern ::= arm-pattern                                              
 > arm. A pipe-less `_ err :>` is dropped the same way (E-TYPE-080, missing `Gone`). Pipe-less
 > `::Bad(m) :>` and `_ :>` already compile, and the `|`-led forms (`| .Bad(m) :>`, `| ::Bad m :>`)
 > compile clean with no lint. Filed `g-impl1-handler-arm-pipeless-dropped-s452` (impl#1 frozen —
-> carried, §34.0). The legacy form keeps compiling everywhere; W-HANDLER-ARM-PIPE-LEGACY is
+> carried, §34.0). The legacy form keeps compiling everywhere; W-ARM-PIPE-LEGACY is
 > non-fatal. **Corpus measured** (each `!{` brace-matched, strings and comments skipped; every lone
 > `|` at the handler's top level is one arm, since impl#1 ends an arm at any `|`): **186 `|`-led
 > arms in 70 files** — `examples/` 4 in 3 (all `| err :>`, already E-MATCH-BARE-BINDER),
 > `samples/` 55 in 16 (32 of them paren-free variant binders), `conformance/cases/` 106 in 44 (six
 > one-line handlers carry a second arm on the same line), `stdlib/` 21 in 7. The corpus migrates by
-> the `scrml fix` rule, not by this SPEC change. **W-HANDLER-ARM-PIPE-LEGACY and
-> E-HANDLER-ARM-PIPE-LEGACY are Nominal / not yet emitted** by impl#1 (frozen) or the bootstrap.
+> the `scrml fix` rule, not by this SPEC change. **W-ARM-PIPE-LEGACY and
+> E-ARM-PIPE-LEGACY are Nominal / not yet emitted** by impl#1 (frozen) or the bootstrap.
 
 ---
 
@@ -19251,8 +19258,8 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-ERROR-013 | §19.4.3 | A `!{}` handler is attached to an expression that cannot fail — a call to a function that is neither declared `!` nor treated as `!` by the compiler (§19.9.5 CPS split, a built-in failable), not a `?{}`, or not a call at all. No arm can run; the message names the callee and says to remove the handler or declare the function `!`. The `!{}` sibling of E-ERROR-004. **Provenance:** ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" item 3. **Nominal / not yet emitted** by impl#1 (frozen; `g-impl1-handler-on-non-failable-s451`); lands with the bootstrap. | Error |
 | E-ERROR-014 | §19.4.3 | A `!{}` handler written as markup content and attached to no expression (the legacy free-standing "error effect block"). No failure precedes it, so no arm can run; the message says to attach it to a call, load through a `<request>` and read `<#id>.error`, or use an `<errorBoundary>`. The markup sibling of E-ERROR-013. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(b). **Nominal / not yet emitted** by impl#1 — it drops the block silently (frozen; `g-impl1-detached-handler-in-markup-s451`); lands with the bootstrap. | Error |
 | E-ERROR-015 | §19.10.4 | Manual transaction control — a `?{}` whose statement is `BEGIN` (any form), `COMMIT`, `END`, `ROLLBACK`, `SAVEPOINT` or `RELEASE` — where no enclosing function is declared `!` (a function without `!`, or a body top). Use `transaction { }` inside a `!` function. Replaces W-BATCH-001 at those sites. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(c). **Nominal / not yet emitted** by impl#1 (frozen; `g-impl1-manual-tx-outside-failable-s451`); lands with the bootstrap. | Error |
-| W-HANDLER-ARM-PIPE-LEGACY | §19.4.5 | A `!{}` handler arm led by `\|` — `\| <pattern> :>`, including the paren-free binder `\| .V m :>` — SOFT-DEPRECATED (§63.1 Stage 1): a `!{}` arm is a §18.2 `match-arm`. Parses identically to `<pattern> :>` / `.V(m) :>`; one lint per arm, naming the canonical arm, `scrml fix` and §19.4.5. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right". **Nominal / not yet emitted** by impl#1 (frozen) or the bootstrap. | Info |
-| E-HANDLER-ARM-PIPE-LEGACY | §19.4.5 | **Reserved** (§63.2) end-of-window code for the `\|`-led `!{}` arm. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). **Provenance:** ruling:user-voice-scrml.md S452 "c looks right". **Nominal / not yet emitted.** | Error |
+| W-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3 | A `!{}` handler arm or an engine message arm led by `\|` — `\| <pattern> :>`, including the paren-free binder `\| .V m :>` — SOFT-DEPRECATED (§63.1 Stage 1): a `!{}` arm is a §18.2 `match-arm`. Parses identically to `<pattern> :>` / `.V(m) :>`; one lint per arm, naming the canonical arm, `scrml fix` and §19.4.5. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" + "a. one spelling" (message arms). Renamed S452 from `W-HANDLER-ARM-PIPE-LEGACY` when "a. one spelling" extended it to message arms (never emitted under either name). **Nominal / not yet emitted** by impl#1 (frozen) or the bootstrap. | Info |
+| E-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3 | **Reserved** (§63.2) end-of-window code for the `\|`-led `!{}` arm and engine message arm. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). **Provenance:** ruling:user-voice-scrml.md S452 "c looks right". **Nominal / not yet emitted.** | Error |
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's enum has no `renders` clause (reuses the §19.6.6 E-ERROR-005 exhaustiveness fence at the render-expression fire site) | Error |
 | E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum (the render-expression is enum-scoped) | Error |
@@ -24491,8 +24498,8 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MATCH-ARM-MARKUP-IN-VALUE | §18.0 | A JS-style value-match arm (`match expr { .V :> ... }`) has an arm body that is a MARKUP element. §18.0 splits the two match forms by output category: the JS-style form emits a VALUE (server logic, derivations, computed expressions); the block-form `<match for=Type [on=expr]>` (§18.0.1) emits MARKUP. The natural reflex `${match err { .V(p) :> <markup with ${p}> }}` sits on the value↔markup boundary the two forms split. Resolution: use a `<match for=Type [on=expr]>` block to render a UI tree per variant, or fire a variant's `renders` display via the render-expression; to compute a VALUE per variant have the arm return that value (`:> "Failed: " + reason`) and interpolate it in markup. The render-expression routes around this without widening value-match to emit markup (limit-primitives-not-godify). This early TYPER-stage steer REPLACES the wrong-altitude failures the reflex otherwise surfaces at a later stage — E-CODEGEN-INVALID-LOGIC (markup body lowered literally) and E-SCOPE-001 (a payload var in a `${...}` inside the markup body, not in scope for value-match codegen); the arm-body visit is skipped once the steer fires so it is the ONLY diagnostic. SCOPED to JS-style match-stmt/match-expr `match-arm-inline` arms; the block-form `<match>` is a distinct `match-block` node, structurally exempt. (Catalog addition S196 — error-handling-holistic DD §1.4 Seams 1+2 / debate §6 prereqs 3+4 (H1); emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
 | E-MATCH-BLOCK-IN-LIFT | §18.0.1, §17.7 | A block-form `<match for=Type on=expr>` is placed inside a `${ ... lift ... }` logic loop (the Tier-0 iteration form). The logic-context inline-markup parser does NOT route `<match>` through the BS-layer S107 match-block recognition (`ast-builder.js` `block.name === "match"`), so the variant arms (`<Open>`/`<Closed>`) land as unresolved uppercase-tag markup and would otherwise surface a misleading E-COMPONENT-035 "residual component / cross-file import" cascade. The supported per-item form is the Tier-1 `<each>` block: move the `<match>` into an `<each in=@coll as item> ... <match for=Type on=item> ... </match> ... </each>` body — the same block `<match>` compiles there. This targeted steer REPLACES the misleading E-COMPONENT-035 cascade for the shape (the arm errors are suppressed). Supporting block-`<match>` inside `${...lift}` was REJECTED (limit-primitives; `<each>` is canonical per S130 HU-1). (Catalog addition S213 — g-block-match-in-lift; user ruling S212 "(b) targeted diagnostic, steer to `<each>`"; emitted by VP-2 post-CE invariant at `compiler/src/validators/post-ce-invariant.ts`.) | Error |
 | W-MATCH-ARROW-LEGACY | §18.2 | A `match` arm (or `!{}` error-handler arm, §19) uses a deprecated arm separator — `=>` or `->` — instead of the canonical `:>`. All three forms parse, build, and emit identically during the deprecation window; the canonical separator is `:>`. The lint is ARM-CONTEXT-SCOPED: `=>` remains fully valid as the arrow-function glyph and `->` as the `fn` return-type separator / legacy `<machine>` event-arrow — only the match / handler arm-separator position fires. Resolution: rewrite `<pattern> => <body>` / `<pattern> -> <body>` as `<pattern> :> <body>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace, since `=>` is also the arrow-function glyph). New code SHALL use `:>`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to `E-MATCH-ARROW-LEGACY` (reserved; not yet emitted). (S145 — `match-arrow-colon-canonical` deep-dive; user-voice S145; mirrors the W-LIFECYCLE-LEGACY-ARROW `->`→`to` template.) | Info |
-| W-HANDLER-ARM-PIPE-LEGACY | §19.4.5, §63.7 | A `!{}` error-handler arm led by `\|` — `\| <pattern> :> body` — SOFT-DEPRECATED (§63.1 Stage 1): a `!{}` arm is a §18.2 `match-arm`, with no leading `\|`. Also covers the paren-free binder, which the legacy arm alone admits: `\| .V m :>` (or `\| ::V m :>`) is `.V(m) :>`. It parses identically to the canonical arm (same AST, emitted code and run-time behaviour). One lint per arm; the message names the canonical arm, `scrml fix`, and §19.4.5. Resolution: `scrml fix` deletes the leading `\|`, writes a paren-free binder as `.V(m)`, and puts arms that shared a line on their own lines (§18.2). SCOPED to `!{}` arms: a `\|` between alternates of one arm (§18.2) is alternation, untouched; markup arms (`<match>`, engine state-children, `(state × message)` arms, §51.0.S) are not in scope. Info, like its separator sibling `W-MATCH-ARROW-LEGACY`. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" — *"c looks right. markup vs logic is understandable (an possibly a bonus) but multiple syntaxs in logic dosnt work for me. yes, cononical version."* **Nominal / not yet emitted** — impl#1 (frozen) accepts the `\|`-led arm without a lint (`g-impl1-handler-arm-pipeless-dropped-s452`); the bootstrap does not emit it either. | Info |
-| E-HANDLER-ARM-PIPE-LEGACY | §19.4.5, §63.7 | **Reserved** (§63.2) end-of-window code for the `\|`-led `!{}` arm (and its paren-free binder). Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right". **Nominal / not yet emitted.** | Error |
+| W-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3, §63.7 | A `!{}` error-handler arm or an engine `(state × message)` message arm led by `\|` — `\| <pattern> :> body` — SOFT-DEPRECATED (§63.1 Stage 1): both are §18.2 `match-arm`s, with no leading `\|`. Also covers the paren-free binder, which the legacy `!{}` arm alone admits: `\| .V m :>` (or `\| ::V m :>`) is `.V(m) :>`. It parses identically to the canonical arm (same AST, emitted code and run-time behaviour). One lint per arm; the message names the canonical arm, `scrml fix`, and §19.4.5. Resolution: `scrml fix` deletes the leading `\|`, writes a paren-free binder as `.V(m)`, and puts arms that shared a line on their own lines (§18.2). SCOPED to `!{}` arms and message arms: a `\|` between alternates of one arm (§18.2) is alternation, untouched; element arms (`<match>`, engine state-children) are not in scope. Renamed S452 from `W-HANDLER-ARM-PIPE-LEGACY` when "a. one spelling" extended it to message arms (never emitted under either name). Info, like its separator sibling `W-MATCH-ARROW-LEGACY`. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right" — *"c looks right. markup vs logic is understandable (an possibly a bonus) but multiple syntaxs in logic dosnt work for me. yes, cononical version."* + S452 "a. one spelling" (message arms). **Nominal / not yet emitted** — impl#1 (frozen) accepts the `\|`-led arm without a lint (`g-impl1-handler-arm-pipeless-dropped-s452`, `g-impl1-engine-message-arm-pipeless-as-text-s452`); the bootstrap does not emit it either. | Info |
+| E-ARM-PIPE-LEGACY | §19.4.5, §51.0.S.2.3, §63.7 | **Reserved** (§63.2) end-of-window code for the `\|`-led `!{}` arm (and its paren-free binder) and engine message arm. Not scheduled (§63.7 permanent-soft; gate-blocked until the `scrml fix` rule is verified-landed, §63.4). Never fires before a §62 MAJOR event schedules it. **Provenance:** ruling:user-voice-scrml.md S452 "c looks right". **Nominal / not yet emitted.** | Error |
 | W-GIVEN-ARROW-LEGACY | §42.2.3 | A standalone `given` presence-guard uses the deprecated separator `=>` instead of the canonical `:>` (`given x => { ... }` → `given x :> { ... }`). The sibling of `W-MATCH-ARROW-LEGACY` for the standalone `given`-guard context (an in-`match` `given`-arm already fires `W-MATCH-ARROW-LEGACY`). Both forms parse + resolve identically during the deprecation window; the canonical separator is `:>` (the same maps-to separator as a match arm). SCOPED to the `given`-guard separator only — the JS arrow-function `=>` is untouched. Resolution: rewrite as `given x :> { ... }`, or run `bun scrml migrate --fix` (AST-driven). The end-of-window timing promotes this to a reserved `E-GIVEN-ARROW-LEGACY` (not yet emitted). (Catalog addition S148 — Insight 33 extension; ratified via user AskUserQuestion; mirrors W-MATCH-ARROW-LEGACY.) | Info |
 | W-COLON-SHORTHAND-LEGACY-PLACEMENT | §4.14, §51.0.I, §18.0.1 | A `:`-shorthand body uses the legacy AFTER-`>` placement (`<Variant rule=... > : expr`) instead of the canonical inside-opener placement (`<Variant rule=... : expr>`). Both parse, build, and emit identically during the deprecation window; the inside-opener form is canonical across every locus (Pillar 5 — one `:`-shorthand placement: HTML elements §24, `<each>` per-item §17.7.6, match block-form arms §18.0.1, engine state-children §51.0.I). The lint is ARM / state-child-context-scoped — it fires ONLY where after-`>` was ever a legal placement (engine state-children + match arms); HTML elements and `<each>` per-item never used after-`>`, so the lint never fires there. Resolution: move the `: expr` inside the opener, before the `>`, or run `bun scrml migrate --fix` (AST-driven; MUST NOT be a text replace — a `>` can appear inside a string attribute value or a markup body). New code SHALL use the inside-opener placement; existing samples MAY migrate at convenience. The end-of-window timing promotes this to a reserved `E-COLON-SHORTHAND-LEGACY-PLACEMENT` (not yet emitted). (S160 — S154 ruling (b); mirrors the W-MATCH-ARROW-LEGACY / W-GIVEN-ARROW-LEGACY / W-LIFECYCLE-LEGACY-ARROW deprecation template.) | Info |
 | W-CONST-AT-DEPRECATED | §6.6.1 | The legacy expression-form derived-cell declaration `const @name = expr` is deprecated; the canonical (and per §6.6.1 SOLE) derived-cell form is `const <name> = expr`. The `@`-form still compiles + registers in logic / top-level / `${...}` contexts during the deprecation window. Inside a **raw markup element body**, however, NEITHER form is a valid derived-decl: the legacy `const @name` silently DROPS the cell (inert text — the read site then resolves to nothing), and the canonical `const <name>` does NOT register there either — its `<name>` parses as a markup element open-tag and loud-errors `E-CTX-001`. The canonical derived-decl form `const <name>` is for **logic / file-top-level / `${...}`** contexts; to declare a derived cell a markup body consumes, write it in a `${...}` logic block. Resolution: rewrite `const @name = expr` as `const <name> = expr`, or run `bun scrml migrate --fix` (AST-driven). New code SHALL use `const <name>`; existing samples MAY migrate at convenience. The end-of-window timing promotes this to a reserved `E-CONST-AT-DEPRECATED` (not yet emitted). **Fires:** in logic / top-level contexts emitted by TS (`compiler/src/type-system.ts`, the `case "state-decl"` path, gated on `shape === "derived" && isConst === true && structuralForm === false`); at the markup-element-body silent-drop site (where no AST node is produced) emitted by TAB (`compiler/src/ast-builder.js` `scanMarkupBodyConstAtDecls`, called from `liftBareDeclarations` on the non-decl-site markup path). (Added 2026-06-13, sym-cell-registration-completeness; markup-body fire site added 2026-06-13 fixup; the Info-severity precedent is W-MATCH-ARROW-LEGACY — like it, an info-level deprecation steering lint; the deprecation-CYCLE shape (warn-window -> reserved hard error) mirrors W-PURE-DEPRECATED / W-MATCH-ARROW-LEGACY both.) | Info |
@@ -24536,7 +24543,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ENGINE-PAYLOAD-ARITY-MISMATCH | §51.0.B.1 | The number of payload-binding attributes on an engine state-child does not match the variant's payload field count (per §14.4). In the bare-attribute and positional-parenthesized forms, all fields MUST be bound; too few or too many bindings fire this code. Also fires when the bare-attribute or named form contains mixed positional + named bindings within the same state-child opener (the §18.7 mixed-form prohibition extends to this locus). Distinct from §18.7's `E-TYPE-021` because the diagnostic surface differs (state-child attribute list vs match arm pattern); in the parenthesized form `E-TYPE-021` fires for arity / mixed-form (per §18.7 inheritance) and `E-ENGINE-PAYLOAD-ARITY-MISMATCH` is reserved for the attribute-list-based forms. Resolution: list all payload field bindings in declaration order, OR use the named form to bind a subset by field name. (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
 | E-ENGINE-PAYLOAD-RESERVED-COLLISION | §51.0.B.1 | A payload-binding name on an engine state-child collides with a reserved state-child attribute name (`rule`, `effect`, `history`, `internal:rule` — per §51.0.B / §51.0.F / §51.0.H / §51.0.N / §51.0.O). The reserved attribute interpretation takes precedence in the bare-attribute form, so the bareword would be consumed as the reserved attribute and the payload field would silently fail to bind. Resolution: either rename the payload field at its enum variant declaration site (§14.4), OR use the parenthesized form's positional binding with a non-colliding local name (`<Variant(rule_local)>` — binds the field positionally to a local that does not shadow the reserved name). (Catalog addition S98 — §51.0.B.1 amendment.) | Error |
 | E-ENGINE-ACCEPTS-NOT-ENUM | §51.0.S | `accepts=` opener attribute value does not resolve to a declared `:enum` type. (Catalog addition S154 — §51.0.S event-payload-transition.) | Error |
-| E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE | §51.0.S | A state declares `(state × message)` arms but does not cover every `accepts=` MsgType variant and has no `| _ :>` wildcard (mirrors E-MATCH-NOT-EXHAUSTIVE). (Catalog addition S154 — §51.0.S.) | Error |
+| E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE | §51.0.S | A state declares `(state × message)` arms but does not cover every `accepts=` MsgType variant and has no `_ :>` wildcard (mirrors E-MATCH-NOT-EXHAUSTIVE). (Catalog addition S154 — §51.0.S; emitted at `compiler/src/symbol-table.ts:7653`. S452: wildcard written without the deprecated leading `|`, §51.0.S.2.3.) | Error |
 | E-ENGINE-MSG-UNKNOWN | §51.0.S, §51.0.G.1 | `.advance(.X)` where `.X` (literal bare-variant) is a variant of NEITHER the `for=` state enum NOR the `accepts=` message enum. (Catalog addition S154 — §51.0.S.) | Error |
 | E-ENGINE-MSG-WITHOUT-ACCEPTS | §51.0.S | A state-child declares a `(state × message)` arm but the engine opener has no `accepts=` declaration. (Catalog addition S154 — §51.0.S.) | Error |
 | E-VALIDATOR-CIRCULAR-DEP | §55.11 | Two or more validators reference each other via cross-field predicate args (e.g., `<a eq(@b)>` and `<b eq(@a)>`). The validator dependency graph is a DAG; cycles are forbidden. | Error |
@@ -34913,7 +34920,8 @@ type DragMsg:enum   = { Start(id: number), Drop(col: string), End }
 ```
 
 The engine does not learn a bespoke event sub-DSL; it `match`es on an ordinary enum, reusing
-match (§18.0.1) + payload-binding (§18.7 / §51.0.B.1) grammar verbatim.
+the §18.2 `match-arm` + payload-binding (§18.7 / §51.0.B.1) grammar verbatim (S452 — previously
+cited as §18.0.1, the block form, whose arms are elements).
 
 ###### 51.0.S.2.2 The engine declares its message type — `accepts=MsgType`
 
@@ -34936,22 +34944,58 @@ on the twin element would be a live collision.
 
 ###### 51.0.S.2.3 The `(state × message)` arm form — reuses match grammar
 
-Inside a state-child body, a message-arm reacts to a message variant. It reuses the §18.0.1
-match block-form arm grammar (`| .Variant(binding) :> body`) verbatim; payload binding follows
-§18.7 / §51.0.B.1; the arm-body block shape `{ statement* expression? }` matches §18.2:
+Inside a state-child body, a message-arm reacts to a message variant. A message arm IS a §18.2
+`match-arm` — the same production a `match` and a `!{}` handler use (§19.4.5), with no leading `|`:
+
+```
+message-arm ::= match-arm                    // §18.2 — the arm's pattern matches the accepts= MsgType
+```
+
+Payload binding follows §18.7 / §51.0.B.1; the arm-body block shape `{ statement* expression? }`
+matches §18.2. The message arms are the leading items of the state-child body (before any render
+content), one per line; at that position a line whose first token is an arm pattern is an arm head
+(§7.2.2 "arm heads" — by position, not by a `:>` lookahead). The pre-S452 `|`-led spelling
+(`| .Variant(binding) :> body`) is SOFT-DEPRECATED under §19.4.5's rule — it parses identically and
+surfaces `W-ARM-PIPE-LEGACY`; reserved `E-ARM-PIPE-LEGACY`; `scrml fix` deletes the `|`. Element arms
+(the state-children themselves, `<match>` arms) are unchanged.
+
+> **Provenance:** ruling:user-voice-scrml.md S452 "a. one spelling" — *"a. one spelling"* — answering
+> the PA's §51.0.S question: `(state × message)` message arms are PATTERN arms and follow §18.2 like
+> every other logic arm, no leading `|` (`.Drop(col) :> …`); the `|` form soft-deprecates through §63
+> with the same W-lint as `!{}` arms; element arms stay the markup form. · **supersedes:** this
+> section's *"It reuses the §18.0.1 match block-form arm grammar (`| .Variant(binding) :> body`)
+> verbatim"* — a false citation: §18.0.1's block-form arms are elements, and §18.2's `match-arm` has
+> no leading `|`. *(PA readings, flagged: the arm region is the leading items of the body, its arm
+> heads recognised by position, as impl#1's leading `|`-run was; the paren-free `!{}` binder was never
+> a message-arm form and is not admitted; the W-lint/E-code are §19.4.5's, renamed from
+> `W-/E-HANDLER-ARM-PIPE-LEGACY` to `W-/E-ARM-PIPE-LEGACY` to cover both arm kinds.)* **Direction of
+> change (pa-base §8): newly-accepting on impl#1 — and impl#1 today MISCOMPILES the canonical form
+> silently.** Measured on `8c02ff49a`: `examples/25-triage-board.scrml` (five `|`-led message arms)
+> compiles; with the five `|`s deleted it STILL compiles at exit 0 with no new diagnostic, but the
+> arms are read as the state-child's render body — the `…_msg_arms` dispatch table is gone, each
+> state renders the arm source as literal text, and `@dragPhase.advance(.Drop(col))` lowers to a
+> plain `_scrml_engine_advance` instead of message dispatch. Locus: a separate path from the `!{}`
+> parser — `compiler/src/engine-statechild-parser.ts` `parseMessageArms` (:2102), whose arm region is
+> *"the leading contiguous `|`-run; if the first non-trivia char is not `|`, there are no message
+> arms"*. Filed `g-impl1-engine-message-arm-pipeless-as-text-s452` (HIGH). **Corpus measured**
+> (`|`-led arm lines in files with `accepts=`, `!{}` bodies and comments blanked): 17 arms in 8 files
+> — `examples/` 5 in 1 (`25-triage-board`), `conformance/cases/` 10 in 6, `docs/` 2 in 1 (a repro
+> under `docs/changes/`); plus 10 in 2 `compiler/tests/fixtures/`. The 22 `<endpoint accepts=>`
+> files use element arms (§61) and are not in scope. Migrated by `scrml fix`, not by this change.
+> **Nominal / not yet emitted** by impl#1 or the bootstrap.
 
 ```scrml
 <engine for=DragPhase initial=.Idle accepts=DragMsg>
 
   <Idle rule=.Dragging>
-    | .Start(id) :> .Dragging(id)              <!-- (Idle × Start) → Dragging, carrying id -->
-    | _          :> @dragPhase                 <!-- ignore Drop/End while Idle (§51.0.S.2.4 wildcard; self-target no-op §51.0.F.1) -->
+    .Start(id) :> .Dragging(id)              <!-- (Idle × Start) → Dragging, carrying id -->
+    _          :> @dragPhase                 <!-- ignore Drop/End while Idle (§51.0.S.2.4 wildcard; self-target no-op §51.0.F.1) -->
   </>
 
   <Dragging(id) rule=.Idle>                     <!-- id bound from the .Dragging payload (§51.0.B.1) -->
-    | .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }   <!-- id (state) + col (msg) in scope -->
-    | .End       :> .Idle
-    | _          :> @dragPhase                 <!-- ignore Start while Dragging (§51.0.S.2.4 wildcard) -->
+    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }   <!-- id (state) + col (msg) in scope -->
+    .End       :> .Idle
+    _          :> @dragPhase                 <!-- ignore Start while Dragging (§51.0.S.2.4 wildcard) -->
   </>
 
 </>
@@ -34971,16 +35015,16 @@ Per-state message-arms are a `match` over `MsgType`; standard scrml match exhaus
 applies. The teachable shape is **opt in per-state; once you declare one arm, cover the set**:
 
 - A state that declares ANY message-arms MUST cover every `MsgType` variant OR carry a
-  `| _ :>` wildcard. Non-exhaustive → **E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE** (§34; sibling of
+  `_ :>` wildcard. Non-exhaustive → **E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE** (§34; sibling of
   `E-MATCH-NOT-EXHAUSTIVE`).
 - A state that declares NO message-arms ignores all messages while in that state (a message
   dispatched in that state is a no-op, §51.0.S.2.6). This is the "this state doesn't react to
   messages" case, NOT an exhaustiveness violation.
-- `| _ :> @<engineVar>` (stay in the current state — a self-target no-op per §51.0.F.1) is the
+- `_ :> @<engineVar>` (stay in the current state — a self-target no-op per §51.0.F.1) is the
   canonical "explicitly ignore the rest" escape hatch.
 
 This gives the Rust `match (state, event)` compile-safety WITHOUT a full N×M grid: a state opts
-out by declaring no arms, and opts into partial coverage via `| _ :>`.
+out by declaring no arms, and opts into partial coverage via `_ :>`.
 
 ###### 51.0.S.2.5 Dispatch rides `.advance` — no `.send` verb
 
@@ -35014,7 +35058,7 @@ a COMPILE error, and a state with NO arms no-ops (§51.0.S.2.6).
 A message dispatched while in a state that declares no arm for it (only possible when the state
 declares NO message-arms — the partial case is a compile error per §51.0.S.2.4) is a runtime
 no-op. This mirrors XState's "unhandled events ignored" default and §51.0.F.1's no-op
-intuition. A state that reacts to SOME messages and ignores the rest uses `| _ :> @<engineVar>`.
+intuition. A state that reacts to SOME messages and ignores the rest uses `_ :> @<engineVar>`.
 
 ###### 51.0.S.2.7 `rule=` is still the transition contract
 
@@ -35054,7 +35098,7 @@ a self-WRITE does not. This divergence is ratified and specified at §51.0.R.
 | Code | Severity | Fires when |
 |---|---|---|
 | `E-ENGINE-ACCEPTS-NOT-ENUM` | Error | `accepts=` opener attribute value does not resolve to a declared `:enum` type |
-| `E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE` | Error | a state declares message-arms but does not cover every `accepts=` MsgType variant and has no `| _ :>` wildcard (mirrors `E-MATCH-NOT-EXHAUSTIVE`) |
+| `E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE` | Error | a state declares message-arms but does not cover every `accepts=` MsgType variant and has no `_ :>` wildcard (mirrors `E-MATCH-NOT-EXHAUSTIVE`; emitted at `compiler/src/symbol-table.ts:7653`) |
 | `E-ENGINE-MSG-UNKNOWN` | Error | `.advance(.X)` where `.X` (literal bare-variant) is a variant of NEITHER the `for=` state enum NOR the `accepts=` message enum |
 | `E-ENGINE-MSG-WITHOUT-ACCEPTS` | Error | a state-child declares a `(state × message)` arm but the engine opener has no `accepts=` declaration |
 
@@ -35086,13 +35130,13 @@ type DragMsg:enum   = { Start(id: number), Drop(col: string), End }
 
 <engine for=DragPhase initial=.Idle accepts=DragMsg>
   <Idle rule=.Dragging>
-    | .Start(id) :> .Dragging(id)
-    | _          :> @dragPhase
+    .Start(id) :> .Dragging(id)
+    _          :> @dragPhase
   </>
   <Dragging(id) rule=.Idle>
-    | .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }
-    | .End       :> .Idle
-    | _          :> @dragPhase
+    .Drop(col) :> { @tasks = taskMovedTo(@tasks, id, col); .Idle }
+    .End       :> .Idle
+    _          :> @dragPhase
   </>
 </>
 
@@ -42584,8 +42628,8 @@ Applying the machine to the existing corpus:
   precedent). `on dismount { }` is not in the window — it was never in the contract. *(Provenance:
   ruling:user-voice-scrml.md S449 item 2 — *"2b `on mount {}` soft-deprecates through §63 with a `scrml fix`
   rule"*.)*
-- **`W-HANDLER-ARM-PIPE-LEGACY` (`| <pattern> :>` → `<pattern> :>` in a `!{}`, §19.4.5) — added S452:** SOFT,
-  unscheduled; reserved `E-HANDLER-ARM-PIPE-LEGACY` named, unfired; **gate-blocked** until its `scrml fix` rule is
+- **`W-ARM-PIPE-LEGACY` (`| <pattern> :>` → `<pattern> :>` in a `!{}` or an engine message arm, §19.4.5 / §51.0.S.2.3) — added S452:** SOFT,
+  unscheduled; reserved `E-ARM-PIPE-LEGACY` named, unfired; **gate-blocked** until its `scrml fix` rule is
   verified-landed (§63.4). The rule is mechanical (delete the `|`; a paren-free binder `.V m` → `.V(m)`; arms that
   shared a line onto their own lines). *(Provenance: ruling:user-voice-scrml.md S452 "c looks right" — *"multiple
   syntaxs in logic dosnt work for me. yes, cononical version."*)*
