@@ -138,3 +138,7 @@ refused, §52 — outside U1); `<db>` (already refused — see "Design divergenc
   412 · parse-reject 236) → this branch PASS 90 · FAIL 52 · UNSUPPORTED 647 (449 · 198). The one new PASS:
   `sql/bare-identifier-body-e-sql-003-neg` (twin). No case left PASS or entered FAIL (pre-merge before/after JSON diff).
 - docs/bootstrap-conformance.md is STALE against this branch (`--check`) — not edited per the brief (PA regenerates).
+- 2026-10-03 merged origin/main 086f8f209 (#1261) — clean. Final: bootstrap tests 1592 pass / 0 fail; counter test
+  35/35; lint 0. Counter, main @086f8f209 (measured by checking main's self-host-v2 out into this worktree and back):
+  PASS 88 · FAIL 48 · UNSUPPORTED 653 (bootstrap-unsupported 421 · parse-reject 232) → this branch PASS 89 · FAIL 48 ·
+  UNSUPPORTED 652 (458 · 194). PASS/FAIL set diff: +PASS `sql/bare-identifier-body-e-sql-003-neg` (twin), nothing else.
