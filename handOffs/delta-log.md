@@ -4195,3 +4195,25 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3657] land · #1250 bootstrap §55 validity surface + submit gate · @adv:g-bootstrap-validated-form-fields-fail-open-no-surface-no-gate
 [3658] land · #1251 transaction guard (§19.10.6) + fail rollback (§8.9.2) · @adv:g-shared-sql-connection-concurrent-handlers-share-transaction,g-implicit-handler-tx-commits-on-fail
 [3659] state · S449 in flight at wrap: wip/s449-scrml-fix-s66-twins @df9f80aab under re-review; open Qs R1-R11 + 3 scrml-fix forks + hidden-field + lock timeout · → hand-off.md §S449
+[3660] state · S451-bryan booted solo (ASUS), Profile A · @adv:none
+[3661] rule · U1 rulings R1/R4/R7 (a), R11 (b — ?{} failable everywhere), R2-R10 yes · → user-voice §S451 · @adv:bootstrap-u1
+[3662] land · #1253 SPEC U1 rulings R1–R11 + scrml fix forks a/c · @adv:bootstrap-u1
+[3663] rule · S451 open items: errorBoundary vs R1 (R1 wins), §52 hydration exempt + @x.error, value positions that would wait, §57.5 R10 wins, §2.2.1 no artifact on error, O-061-5 default · → user-voice §S451
+[3664] land · #1254 bootstrap else-if/else chains · @adv:g-bootstrap-else-if-else-attrs-ignored
+[3665] land · #1255 bootstrap no-artifact gate + defer · @adv:g-bootstrap-defer-scope-001-and-runs-anyway
+[3666] land · #1259 SPEC open items ruled
+[3667] land · #1256 scrml fix (6 S239 rounds; impl#1-AST-derived, reset="none" wrap) · @adv:s449-scrml-fix-s66-twins
+[3668] land · #1258 impl#1 route inference ignores string/template/comment text (§12.4) · @adv:g-route-inference-session-trigger-string-blind
+[3669] land · #1260 bootstrap persist= + repeated opener words refused · @adv:g-impl1-persist-codes-unimplemented-s451
+[3670] land · #1257 bootstrap <program> attributes checked/refused; reset= implemented · @adv:g-bootstrap-program-attrs-ignored-fail-open,g-bootstrap-entry-content-outside-program-dropped-silently
+[3671] land · #1261 bootstrap show= + repeated/case-variant attrs refused
+[3672] rule · show= does not narrow; §8.1.1 nearest database scope wins · → user-voice §S451
+[3673] land · #1262 SPEC show= / nearest db scope
+[3674] land · #1263 bootstrap U1a SQL + placement (3 S239 rounds on the kind scan) · @adv:bootstrap-u1
+[3675] rule · impl#1 wrong-database resolution = security fix · → user-voice §S451
+[3676] land · #1264 impl#1 nearest-db-scope + tenant floor on every handle · @adv:g-impl1-db-resolution-not-nearest-s451
+[3677] land · #1265 bootstrap Ue error model (+ function values no longer lower to null) · @adv:bootstrap-u1
+[3678] rule · Ue forks 1a/2/3, 4a cross-db envelope error, 5 enforce, 11a <db src> supplies program, client server calls failable, 3 forms, | _ err :> binder · → user-voice §S451
+[3679] land · #1266 SPEC E-ERROR-012/013, E-SQL-011 · #1267 SPEC 11a · #1268 SPEC client calls failable §19.9.10
+[3680] friction · PA relayed a wrong premise (all 11 E-SQL-004 cases legacy) into a ruling; agent caught channel-broadcast-strip → re-ruled 11a
+[3681] state · S451 WRAPPED; #1269 (| _ err :>) + #1270 (bootstrap §34 severity, counter 95→119) on auto-merge at wrap; next = bootstrap error-model rulings round + U1b design pass

@@ -1,6 +1,12 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-10-03T11:38:07-06:00  commit: 47c863556
+# generated: 2026-10-04T08:42:07-06:00  commit: d3e660a08
+# ⛑ **S451 STAMP — `47c863556` -> `d3e660a08`. 17 COMMITS (#1252 S449 wrap, #1253-#1268 S451), incremental refresh,
+# checkout `wrap/s451` @ `d3e660a08` + uncommitted wrap docs. `origin/main` +1 (`2a614009b`, #1269 SPEC-only) NOT in stamp.**
+# MAP-STAMP RULE: `git log --oneline 47c863556..HEAD` -> 17; `state.ts --check` at pass start: `maps: 17 commits behind
+# HEAD (watermark 47c863556, HEAD d3e660a08)`. Full PR list and figures: see any map's own S451 stamp (identical text).
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE S449-WRAP HEADER (stamp `47c863556`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S449-WRAP STAMP — `9bafb927` -> `47c863556`. 7 COMMITS (#1245 S450-peter wrap incl. the `9bafb927` map refresh,
 # #1246 state regen, #1247 bootstrap conformance counter, #1248 dpa-queue, #1249 §66 opener keywords, #1250 bootstrap §55
 # validity surface + submit gate, #1251 transaction guard), incremental refresh. Main checkout `wrap/s449` == `origin/main`
@@ -341,6 +347,67 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S451 pass (this pass, stamp `d3e660a08`)
+
+**Scope: INCREMENTAL** over `47c863556..d3e660a08` (17 commits). In-scope docs changed in-window: `compiler/SPEC.md`
+(+1,062 net), `compiler/SPEC-INDEX.md`, `docs/FACTS.md`, `docs/bootstrap-conformance.md` (generated), `docs/known-gaps.md`,
+`docs/changelog.md`, `docs/pr-reviews.md`, `master-list.md`, and 37 `docs/changes/{s449-scrml-fix-s66-twins,s451-*}/`
+dispatch artifacts (historical by design — compliant). Out of scope: `handOffs/**`, `hand-off.md`, `.claude/maps/**`,
+uncommitted wrap edits.
+Checked: 45. Compliant: 42. Non-compliant: 3. Uncertain: 2.
+Gates at `d3e660a08`: `facts.ts --check` PASS (CLI verbs 12 incl. `fix` — TRUE) · `regen-spec-index.ts --check` OK
+(72/72) · `bun conformance/run.ts` 1250 + 50 xfail, 0 fail · `state.ts --check` gap-counts PASS, heading/marker drift
+**61** (unchanged) · **`bootstrap-conformance.ts --check` STALE**.
+Spot-checks (TRUE): SPEC E-SQL-011 rows cite `emit-server.ts:1828` and `:6652` — both emit E-SQL-011 at `d3e660a08`;
+§19.9.10 / E-ERROR-012..015 / E-MATCH-BARE-BINDER / E-SERVER-CELL-RESERVED-NAME rows are labelled Nominal and
+`compiler/src` has 0 hits for each; §34 rows for E-DECL-STATE-CHILD / E-TYPE-VARIANT say "bootstrap emits" — TRUE
+(`analyze.scrml`); SPEC §8.1.1 cites `scrml fix` program-move — the rule exists (`fix-s66.js IMPL1_SAFE_RULES`).
+
+### N-S451-1. `docs/bootstrap-conformance.md` (generated) is STALE on main — again (N-S449W-1 recurred)
+**Reason:** grep-mismatch (generated doc vs current bootstrap). **Detail:** committed doc (last regenerated in #1257
+`9e0a4d2ac`) says PASS 89 · FAIL 52 · UNSUPPORTED 648; a live run at `d3e660a08` gives PASS **95** · FAIL **65** ·
+UNSUPPORTED **629** (twins: PASS 56 · FAIL 55 · UNSUPPORTED 471 vs committed 49/42/491). #1261, #1263, #1265 changed the
+bootstrap after the last `--write`. **Suggested disposition:** update to match current — `bun scripts/bootstrap-
+conformance.ts --write` in the wrap, and add it to the per-PR landing checklist for any `self-host-v2/` change.
+
+### N-S451-2. `compiler/SPEC.md` §8.1.1 still reports a RESOLVED impl#1 divergence as live, and E-SQL-004 rows cite a dead line
+**Reason:** grep-mismatch. **Detail:** `SPEC.md:8730` ("impl#1 divergence: `g-impl1-db-resolution-not-nearest-s451`")
+and the provenance at `:8692` ("impl#1 binds every `?{}` in a file to one per-file handle … filed as …") describe
+pre-#1264 behaviour; `docs/known-gaps.md` marks that gap `status=resolved` (locus `db-ownership.ts resolveDbScopes`).
+The three E-SQL-004 rows (`SPEC.md:9137`, `:23903`, `:29650`) cite `compiler/src/codegen/emit-server.ts:7000`, which is
+now `} else {`; the emissions are at `emit-server.ts:1872`, `:7152` and `emit-tool.ts:755`. **Suggested disposition:**
+update to match current (mark the divergence resolved by #1264; re-pin the three cites).
+
+### N-S451-3. IN SOURCE — `E-INTERNAL-DB-HANDLE-UNRESOLVED` is emitted with NO §34 row; two E-SQL-004 messages use superseded wording
+**Reason:** grep-mismatch (code vs SPEC; same class as N-S437-6). **Detail:** emitted at `codegen/emit-server.ts:7059`
+and `codegen/emit-tool.ts:222` (#1264); `compiler/SPEC.md` 0 hits, `docs/known-gaps.md` 0 hits (precedent:
+`E-INTERNAL-BODY-TOP-DROPPED` has a §34 row at `SPEC.md:24281`). Separately, `emit-server.ts:7153` and `emit-tool.ts:756`
+still say "no `db=` declaration in any ancestor `<program>`" — the exact phrase §8.1.1 (S451) supersedes; the new
+nearest-scope message at `emit-server.ts:1873` is correct. **Suggested disposition:** update to match current (add the
+§34 row; align the two messages — diagnostic text is part of the contract per the root-cause rule).
+
+### U-S451-1 (uncertain). §19.9.10 says "The bootstrap builds it" — the bootstrap has 0 references
+**What to check:** `SPEC.md` §19.9.10 status block (`SPEC.md:18551`).
+`compiler/self-host-v2/*.scrml` has no `19.9.10` / E-ERROR-012..015 / E-MATCH-BARE-BINDER hits at `d3e660a08`. If the
+intent is "will build", say so (and the same for "lands with the bootstrap" on the E-ERROR rows); present tense reads as
+shipped to a dev agent.
+
+### U-S451-2 (uncertain). Bootstrap parse codes with no §34 row grew
+**What to check:** `E-PARSE-ARM` (`self-host-v2/parse.scrml:468`) and `E-PARSE-SQL-CHAIN` (`parse.scrml:814`) join
+`E-PARSE-LET` / `E-PARSE-EXPORT` / `E-PARSE-ITEM` (noted S449-wrap). Decide whether bootstrap-internal parse codes need
+§34 rows; the unlanded `scripts/s34-catalog.ts` (#1270) may be the intended home — re-check once it lands.
+
+### Carried — status at `d3e660a08`
+| item | result |
+|---|---|
+| N-S449W-1 stale `docs/bootstrap-conformance.md` | RECURRED — see N-S451-1 |
+| U-S449W-1 two PA-reading SPEC texts (§19.10.6 `transactions=`, §66.2.5 free-text exception) | CARRIED, UNCHANGED |
+| N-S450-1 SPEC normative demands of `--parser=scrml-native` | CARRIED — `SPEC.md` still **10** hits |
+| N-S450-2 `native-parser/README.md` + `master-list.md` flag refs | CARRIED — 2 + 2 `--parser=scrml-native` hits; `native-parser/` untouched |
+| N-S450-3 comments pointing at the deleted within-node gate | CARRIED — `conformance/README.md:454` and `e2e-render-map.test.js:5` unchanged |
+| N-S446-1 / U-S445-* / U-S444-1 | no related commit in-window — CARRIED, UNCHANGED |
+
 
 ## Summary — S449-WRAP pass (this pass, stamp `47c863556`)
 
