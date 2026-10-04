@@ -17079,6 +17079,7 @@ function reemitHandlerStringToken(tok) {
  *   Type.Variant    ['(' binder (',' binder)* ')'] arrow
  *   Type::Variant   ['(' binder (',' binder)* ')'] arrow
  *   _ arrow
+ *   _ Identifier arrow          (§18.2 whole-error-arm, §18.6.1)
  *   else arrow
  *
  * where arrow is `:>` / `=>` (one OPERATOR token) or `-` `>` (two PUNCT
@@ -17112,10 +17113,14 @@ function isPipelessErrorArmStart(tokens, i) {
   if (!t0) return false;
   // Rule 2 — a token glued to the previous one continues an expression.
   if (_errArmGluedToPrev(tokens, i)) return false;
-  // Wildcard: `_ :>` / `else :>` (no binder — the whole-error binder `_ err`
-  // is a separate gap and is not admitted here).
+  // Wildcard: `_ :>` / `else :>`, and the whole-error arm `_ err :>`.
   if ((t0.kind === "IDENT" && t0.text === "_") || (t0.kind === "KEYWORD" && t0.text === "else")) {
-    return isArrowAt(i + 1);
+    if (isArrowAt(i + 1)) return true;
+    // S452 r3 — `_ <Identifier> :>` is the §18.2 whole-error-arm (§18.6.1,
+    // S451 "a"); `else` takes no binder. Parsed by the `|` path, so it is
+    // byte-identical to `| _ err :>`.
+    const nb = at(i + 1);
+    return t0.text === "_" && !!nb && nb.kind === "IDENT" && nb.text !== "_" && isArrowAt(i + 2);
   }
   const k = _errArmVariantPatternEnd(tokens, i);
   if (k < 0) return false;
@@ -17133,6 +17138,15 @@ function isPipelessErrorArmStart(tokens, i) {
     j++; // `)`
   }
   return isArrowAt(j);
+}
+
+/** Is an arm arrow (`:>` / `=>`, or `-` `>`) at token `k`? */
+function _errArmIsArrowAt(tokens, k) {
+  const t = tokens[k];
+  if (!t) return false;
+  if (t.kind === "OPERATOR" && (t.text === ":>" || t.text === "=>")) return true;
+  const t2 = tokens[k + 1];
+  return t.kind === "PUNCT" && t.text === "-" && !!t2 && t2.kind === "PUNCT" && t2.text === ">";
 }
 
 /** Is a `.` / `::` token, by kind and text? */
@@ -17189,9 +17203,54 @@ function _errArmDepthDelta(tok) {
   return 0;
 }
 
-function parseErrorTokens(tokens, filePath) {
+function parseErrorTokens(tokens, filePath, errors) {
   const arms = [];
   let i = 0;
+
+  // S452 r3 — the arm list never drops a token silently. A token at arm level
+  // that no arm head consumes, and an arm arrow `:>` at depth 0 inside an arm
+  // body (an arm whose head was not recognized), are E-PARSE-001. One error
+  // per contiguous run of stray tokens. `errors` is optional (no reporting
+  // when a caller passes none).
+  const ARM_SHAPES =
+    "An arm is `.V(x) :> body`, `.V :> body`, `T.V(x) :> body`, `_ :> body`, `_ err :> body` or " +
+    "`else :> body`; a binder without parentheses (`.V x :>`) needs the legacy leading `|`.";
+  let _strayRunOpen = false;
+  const reportStrayToken = (k) => {
+    if (_strayRunOpen) return;
+    _strayRunOpen = true;
+    if (!errors) return;
+    const t = tokens[k];
+    // The likeliest mistake now that the `|` is deprecated: a paren-free
+    // binder written without it (`.Bad m :>`). Name the fix outright.
+    const pe = _errArmVariantPatternEnd(tokens, k);
+    const b = pe > 0 ? tokens[pe] : null;
+    if (b && b.kind === "IDENT" && _errArmIsArrowAt(tokens, pe + 1)) {
+      const head = tokens.slice(k, pe).map((x) => x.text).join("");
+      errors.push(new TABError(
+        "E-PARSE-001",
+        `E-PARSE-001: \`${head} ${b.text}\` in a \`!{}\` handler is not an arm — a binder without parentheses ` +
+        `needs the legacy leading \`|\`. Write \`${head}(${b.text}) :>\`.`,
+        tokenSpan(t, filePath),
+      ));
+      return;
+    }
+    errors.push(new TABError(
+      "E-PARSE-001",
+      `E-PARSE-001: unexpected \`${t.text}\` in a \`!{}\` handler — it does not start an arm, so it would be dropped. ${ARM_SHAPES}`,
+      tokenSpan(t, filePath),
+    ));
+  };
+  const reportStrayArrow = (t) => {
+    if (!errors) return;
+    errors.push(new TABError(
+      "E-PARSE-001",
+      `E-PARSE-001: unexpected \`${t.text}\` inside a \`!{}\` handler arm body — the text before it on this line is not an arm pattern the handler accepts. ${ARM_SHAPES}`,
+      tokenSpan(t, filePath),
+    ));
+  };
+  const isStrayArrowAt = (k, depth) =>
+    depth === 0 && tokens[k] && tokens[k].kind === "OPERATOR" && tokens[k].text === ":>";
 
   while (i < tokens.length && tokens[i].kind !== "EOF") {
     const tok = tokens[i];
@@ -17203,6 +17262,7 @@ function parseErrorTokens(tokens, filePath) {
     // identical for both spellings.
     const _pipeless = !(tok.kind === "PUNCT" && tok.text === "|") && isPipelessErrorArmStart(tokens, i);
     if ((tok.kind === "PUNCT" && tok.text === "|") || _pipeless) {
+      _strayRunOpen = false;
       const armStart = tok;
       if (!_pipeless) i++; // consume `|`
 
@@ -17315,6 +17375,7 @@ function parseErrorTokens(tokens, filePath) {
         if (tokens[i].kind === "PUNCT" && tokens[i].text === "|") break;
         // S452 — stop at a pipe-less §18.2 arm head at the arm-list's level.
         if (_armDepth === 0 && isPipelessErrorArmStart(tokens, i)) break;
+        if (isStrayArrowAt(i, _armDepth)) reportStrayArrow(tokens[i]);
         _armDepth += _errArmDepthDelta(tokens[i]);
         // Also stop at simplified arm start (TypeName => or _ =>)
         if (
@@ -17355,6 +17416,7 @@ function parseErrorTokens(tokens, filePath) {
     } else if (tok.kind === "OPERATOR" && tok.text === "::") {
       // Canonical arm syntax (§19.4.3): ::TypeName(binding) -> handler
       // No leading pipe. Binding may be bare ident or paren-wrapped `(ident)`.
+      _strayRunOpen = false;
       const armStart = tok;
       i++; // consume `::`
       let pattern = "_";
@@ -17397,9 +17459,16 @@ function parseErrorTokens(tokens, filePath) {
       }
       const handlerParts = [];
       const handlerPartLines = [];
+      let _armDepth2 = 0; // S452 r3 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         if (tokens[i].kind === "PUNCT" && tokens[i].text === "|") break;
         if (tokens[i].kind === "OPERATOR" && tokens[i].text === "::") break;
+        // S452 r3 — stop at a pipe-less §18.2 arm head at the arm-list's level
+        // (as the `|` and short-form paths do); a following `else :>` /
+        // `.Gone :>` was absorbed into this arm's body.
+        if (_armDepth2 === 0 && isPipelessErrorArmStart(tokens, i)) break;
+        if (isStrayArrowAt(i, _armDepth2)) reportStrayArrow(tokens[i]);
+        _armDepth2 += _errArmDepthDelta(tokens[i]);
         if (
           i + 1 < tokens.length &&
           (tokens[i].kind === "IDENT" || tokens[i].kind === "KEYWORD") &&
@@ -17437,6 +17506,7 @@ function parseErrorTokens(tokens, filePath) {
       (tok.text === "_" || /^[A-Z]/.test(tok.text))
     ) {
       // Simplified arm syntax (§19 short form): TypeName => handler
+      _strayRunOpen = false;
       // No leading pipe, no :: prefix, no explicit binding variable name.
       // Produces the same arm shape as pipe-style arms, with implicit binding "e".
       const armStart = tok;
@@ -17455,6 +17525,7 @@ function parseErrorTokens(tokens, filePath) {
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         // S452 — stop at a pipe-less §18.2 arm head at the arm-list's level.
         if (_armDepth3 === 0 && isPipelessErrorArmStart(tokens, i)) break;
+        if (isStrayArrowAt(i, _armDepth3)) reportStrayArrow(tokens[i]);
         _armDepth3 += _errArmDepthDelta(tokens[i]);
         // Stop at next simplified arm start (TypeName => or _ =>)
         if (
@@ -17490,6 +17561,9 @@ function parseErrorTokens(tokens, filePath) {
         span: tokenSpan(armStart, filePath),
       });
     } else {
+      // S452 r3 — never skip silently: a comment between arms is fine; any
+      // other token here starts no arm and would be dropped -> E-PARSE-001.
+      if (tok.kind !== "COMMENT") reportStrayToken(i);
       i++;
     }
   }
@@ -21764,7 +21838,7 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const bodyRaw = rawContent.slice(0, rawContent.length - 1); // strip trailing `}`
         const bodyOffset = block.span.start + 2;
         const tokens = tokenizeError(bodyRaw, bodyOffset, block.span.line, block.span.col + 2);
-        const legacyArms = parseErrorTokens(tokens, filePath);
+        const legacyArms = parseErrorTokens(tokens, filePath, errors);
         return {
           id: ++counter.next,
           kind: "error-effect",

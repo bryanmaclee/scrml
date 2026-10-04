@@ -45,6 +45,7 @@ const PRELUDE = [
   "<program>",
   "type E:enum = { Bad(msg: string), Pair(a: number, b: number), Gone }",
   "type S:enum = { Empty, Unknown, Full }",
+  "type F:enum = { Bad(msg: string), Other }",
   "function risky(n)! -> E {",
   "    if (n < 2) fail E::Bad(\"bad-msg\")",
   "    if (n < 3) fail E::Pair(3, 4)",
@@ -157,6 +158,16 @@ const CASES = [
     name: "single-line arm list",
     pipeless: VALUE(["        .Bad(m) :> m .Pair(a, b) :> \"pair\" _ :> \"gone\""]),
     piped: VALUE(["        | .Bad(m) :> m | .Pair(a, b) :> \"pair\" | _ :> \"gone\""]),
+  },
+  {
+    name: "r3 — whole-error arm `_ err :>` ≡ `| _ err :>`",
+    pipeless: VALUE(["        .Bad(m) :> m", "        _ err :> \"other\""]),
+    piped: VALUE(["        | .Bad(m) :> m", "        | _ err :> \"other\""]),
+  },
+  {
+    name: "r3 — legacy paren-free `::V m :>` head stops at a following `else :>` / `.V :>`",
+    pipeless: VALUE(["        ::Bad m :> m", "        .Pair(a, b) :> \"pair\"", "        else :> \"other\""]),
+    piped: VALUE(["        | ::Bad m :> m", "        | .Pair(a, b) :> \"pair\"", "        | _ :> \"other\""]),
   },
 ];
 
@@ -317,5 +328,76 @@ describe("S452 r2 — arm-body tail `X.V` / `X::V` is never read as the next arm
     assertShape(clientJs);
     expect(runGo(clientJs, 1)).toBe("Empty");
     expect(runGo(clientJs, 3)).toBe("Full");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S452 r3 — the arm list never drops a token silently (E-PARSE-001); the
+// whole-error arm; a type qualifier must name the handled error type.
+// ---------------------------------------------------------------------------
+
+const allDiags = (result) => [...(result.errors ?? []), ...(result.warnings ?? [])];
+
+describe("S452 r3 — no silent token skipping in a `!{}` arm list", () => {
+  test("pipe-less paren-free binder `.Bad m :>` is E-PARSE-001 naming the fix (was: arm dropped, wildcard ran)", () => {
+    const { result } = compileSrc(program(VALUE(["        .Bad m :> m", "        _ :> \"other\""])));
+    const e = (result.errors ?? []).find((x) => x.code === "E-PARSE-001");
+    expect(e).toBeDefined();
+    expect(String(e.message)).toContain("Write `.Bad(m) :>`");
+  });
+
+  test("an unrecognized arm head inside a body (`S` + newline `.Full(1) :> 5`) is E-PARSE-001 (was: `:> 5` dropped)", () => {
+    const { result } = compileSrc(program(VALUE([
+      "        .Bad(m) :> S",
+      "        .Full(1) :> 5",
+      "        _ :> 0",
+    ])));
+    const e = (result.errors ?? []).find((x) => x.code === "E-PARSE-001");
+    expect(e).toBeDefined();
+    expect(String(e.message)).toContain("`:>`");
+  });
+
+  test("a stray token before the first arm is E-PARSE-001 naming it", () => {
+    const { result } = compileSrc(program(VALUE(["        junk", "        .Bad(m) :> m", "        _ :> \"other\""])));
+    const e = (result.errors ?? []).find((x) => x.code === "E-PARSE-001");
+    expect(e).toBeDefined();
+    expect(String(e.message)).toContain("unexpected `junk`");
+  });
+
+  test("a comment between arms is not an error", () => {
+    const { result } = compileSrc(program(VALUE(["        .Bad(m) :> m", "        // fallback", "        _ :> \"other\""])));
+    expect(errorCodes(result)).toEqual([]);
+  });
+});
+
+describe("S452 r3 — whole-error arm `_ err :>` (pipe-less) runs", () => {
+  test("`_ err :>` binds the whole error and catches the remaining variants", () => {
+    const { result, clientJs } = compileSrc(program(VALUE([
+      "        .Bad(m) :> m",
+      "        _ err :> \"caught\"",
+    ])));
+    expect(errorCodes(result)).toEqual([]);
+    expect(runGo(clientJs, 1)).toBe("bad-msg");
+    expect(runGo(clientJs, 2)).toBe("caught");
+    expect(runGo(clientJs, 3)).toBe("caught");
+  });
+});
+
+describe("S452 r3 — a type-qualified arm must name the handled error type", () => {
+  const QM = "E-TYPE-ARM-QUALIFIER-MISMATCH";
+  test("`| S.Empty :>` on an `E` handler is an error naming both enums", () => {
+    const { result } = compileSrc(program(VALUE(["        | .Bad(m) :> m", "        | S.Empty :> \"x\"", "        | _ :> \"other\""])));
+    const e = (result.errors ?? []).find((x) => x.code === QM);
+    expect(e).toBeDefined();
+    expect(String(e.message)).toContain("`S`");
+    expect(String(e.message)).toContain("`E`");
+  });
+  test("pipe-less `F.Bad(m) :>` (F also declares Bad) is an error, not a silent match of `E.Bad`", () => {
+    const { result } = compileSrc(program(VALUE(["        F.Bad(m) :> m", "        _ :> \"other\""])));
+    expect(errorCodes(result)).toContain(QM);
+  });
+  test("`E.Bad(m) :>` on an `E` handler is fine", () => {
+    const { result } = compileSrc(program(VALUE(["        E.Bad(m) :> m", "        _ :> \"other\""])));
+    expect(errorCodes(result)).toEqual([]);
   });
 });

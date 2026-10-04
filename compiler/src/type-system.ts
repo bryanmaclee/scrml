@@ -12566,6 +12566,27 @@ function annotateNodes(
         // Step 3: look up the function's errorType from our pre-built map.
         const errorTypeName = calleeName ? (fnErrorTypes.get(calleeName) ?? null) : null;
 
+        // S452 r3 — a type-qualified arm (`T.V :>` / `T::V :>`, recorded by
+        // parseErrorTokens as `arm.typeQualifier`) must name the handled error
+        // type. Dispatch is by variant name only, so `F.Bad(m)` on an `E`
+        // handler silently matched `E.Bad`, and `S.Empty` was a silent dead
+        // arm. The unqualified foreign variant (`.Zap :>`) is NOT checked here
+        // (g-impl1-handler-arm-foreign-variant-accepted).
+        if (errorTypeName) {
+          for (const arm of errorArms as Array<{ typeQualifier?: string; pattern?: string; span?: Span }>) {
+            const q = arm.typeQualifier;
+            if (!q || q === errorTypeName) continue;
+            const v = String(arm.pattern ?? "").replace(/^::/, "").replace(/^\./, "");
+            errors.push(new TSError(
+              "E-TYPE-ARM-QUALIFIER-MISMATCH",
+              `E-TYPE-ARM-QUALIFIER-MISMATCH: the \`!{}\` handler arm \`${q}.${v}\` names the enum \`${q}\`, ` +
+              `but the handled call fails with \`${errorTypeName}\`. Qualify the arm with \`${errorTypeName}\` ` +
+              `(\`${errorTypeName}.${v}\`) or write it bare (\`.${v}\`).`,
+              ((arm.span ?? n.span) as Span),
+            ));
+          }
+        }
+
         // Step 4: if we have a named errorType, look it up in the typeRegistry.
         if (errorTypeName) {
           const errorEnumType = typeRegistry.get(errorTypeName);
