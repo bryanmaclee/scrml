@@ -7,11 +7,11 @@ PURE bootstrap (`compiler/self-host-v2/` front end + printer + runtime, no impl#
 Bucket definitions: the header of `scripts/bootstrap-conformance.ts`. A TRACKING number, not a gate.
 It is a run, not a static count, so it is NOT a `docs/FACTS.md` row (FACTS excludes run-derived figures).
 
-Scope: **1300 of 1300 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
+Scope: **1301 of 1301 cases attempted** — every attempted case reached the pure bootstrap (no impl#1 stage).
 
 | bucket | cases | share of attempted |
 |---|---:|---:|
-| PASS | 119 | 9.2% |
+| PASS | 120 | 9.2% |
 | CODES-ONLY | 0 | 0.0% |
 | FAIL | 48 | 3.7% |
 | LEGACY | 0 | 0.0% |
@@ -20,9 +20,9 @@ Scope: **1300 of 1300 cases attempted** — every attempted case reached the pur
 | CRASH | 0 | 0.0% |
 | INVALID | 0 | 0.0% |
 
-**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 167; of those, 119 hold (71.3%). Runtime half executed on the bootstrap for 41 case(s).
+**Graded** (the bootstrap handled the case: PASS + CODES-ONLY + FAIL) = 168; of those, 120 hold (71.4%). Runtime half executed on the bootstrap for 42 case(s).
 
-- **Vacuous** passes: 11 of 119 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **108**.
+- **Vacuous** passes: 11 of 120 — every assertion is the absence of a code the bootstrap's sources never mention, so it would hold for any program. Non-vacuous holds: **109**.
 - FAILs whose required code appears nowhere in the bootstrap's sources (check not implemented): 27 of 48; the other 21 are implemented checks that answered wrong.
 
 LEGACY by marker (a case may carry several): none.
@@ -30,7 +30,7 @@ UNSUPPORTED by reason: bootstrap-unsupported 429 · parse-reject 193.
 
 ### §66 twins (S449 dialect ruling 1 — generated at test time by the `scrml fix` §66 rules)
 
-Legacy-dialect cases graded on their generated §66 twin: **582** — PASS 74 · FAIL 44 · UNSUPPORTED 464. Twin holds 74 (non-vacuous 66). Every twin verdict above is included in the bucket table.
+Legacy-dialect cases graded on their generated §66 twin: **583** — PASS 75 · FAIL 44 · UNSUPPORTED 464. Twin holds 75 (non-vacuous 67). Every twin verdict above is included in the bucket table.
 - `dialect.s66` overrides: 0 replace a twin's expectations · 2 exclude a case.
 - Superseded-code mappings applied: 2 case(s) (E-ENGINE-VAR-DUPLICATE→E-SCOPE-010). Rows: E-ENGINE-VAR-DUPLICATE→E-SCOPE-010 [applied] · E-ENGINE-STATE-CHILD-INVALID-VARIANT→∅ [owed] · E-ENGINE-RULE-INVALID-VARIANT→∅ [owed] · E-ENGINE-INITIAL-INVALID-VARIANT→∅ [owed] · E-CELL-NO-RENDER-SPEC→∅ [owed] · E-CELL-RENDER-SPEC-NOT-BINDABLE→∅ [owed] · E-DECL-RHS-INTERP-WRAPPED→∅ [owed] · E-COMPONENT-010→∅ [owed].
 
@@ -110,7 +110,7 @@ NOT-TWINNED by reason (511 cases; a case counts once per distinct reason):
 | engine | 91 | 6 | · | 5 | · | 49 | 31 | · | · |
 | enum | 1 | · | · | 1 | · | · | · | · | · |
 | equality | 10 | · | · | · | · | 4 | 6 | · | · |
-| error | 62 | 18 | · | 5 | · | 5 | 34 | · | · |
+| error | 63 | 19 | · | 5 | · | 5 | 34 | · | · |
 | error-boundary | 11 | · | · | · | · | 11 | · | · | · |
 | files | 1 | 1 | · | · | · | · | · | · | · |
 | fn | 18 | · | · | 1 | · | 1 | 16 | · | · |
@@ -274,7 +274,7 @@ none
 
 none
 
-### PASS / CODES-ONLY (119)
+### PASS / CODES-ONLY (120)
 
 - `auth/auth-attr-empty-string-pos` — PASS
 - `auth/auth-attr-nonliteral-program-pos` — PASS · TWIN
@@ -305,14 +305,14 @@ none
 - `control-flow/s437-r5-braced-else-if-chain-comments-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-line-comment-fn` — PASS · TWIN
 - `control-flow/s437-r5-braced-else-ownline-comment-fn` — PASS · TWIN
-- `defer/handled-failable-ok` — PASS · TWIN
+- `defer/handled-failable-ok` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `defer/identifier-untouched` — PASS · TWIN
 - `defer/lifo-fallthrough` — PASS · TWIN
 - `defer/nested-neg` — PASS · TWIN
 - `defer/not-reached-and-nested-blocks` — PASS · TWIN
-- `defer/propagate-path` — PASS · TWIN
+- `defer/propagate-path` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `defer/return-value-before-deferred` — PASS · TWIN
-- `defer/unhandled-failable-neg` — PASS · TWIN
+- `defer/unhandled-failable-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `engine/engine-var-duplicate-neg` — PASS · TWIN
 - `engine/engine-var-duplicate-pos` — PASS · TWIN
 - `engine/initial-invalid-variant-neg` — PASS · TWIN · VACUOUS
@@ -321,7 +321,7 @@ none
 - `engine/state-child-missing-neg` — PASS · TWIN · VACUOUS
 - `error/fail-bare-variant-payload-arity-neg` — PASS · TWIN
 - `error/fail-bare-variant-undeclared-neg` — PASS · TWIN
-- `error/fail-imported-builtin-name-enum-neg` — PASS · TWIN
+- `error/fail-imported-builtin-name-enum-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `error/fail-in-failable-neg` — PASS · TWIN
 - `error/fail-non-enum-neg` — PASS · TWIN
 - `error/fail-outside-failable` — PASS · TWIN
@@ -329,14 +329,15 @@ none
 - `error/fail-variant-payload-arity-neg` — PASS · TWIN
 - `error/fail-variant-payload-arity-too-few-neg` — PASS · TWIN
 - `error/fail-variant-undeclared-neg` — PASS · TWIN
-- `error/handler-failable-guard-and-plain-reference-neg` — PASS · TWIN
-- `error/handler-recovery-into-cell` — PASS · TWIN
+- `error/handler-failable-guard-and-plain-reference-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
+- `error/handler-pipeless-arms-rt` — PASS · TWIN
+- `error/handler-recovery-into-cell` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `error/handler-unhandled-failable-multi-stmt-pos` — PASS · TWIN
 - `error/handler-unhandled-failable-one-stmt-pos` — PASS · TWIN
-- `error/propagate-in-non-failable-fn-neg` — PASS · TWIN
+- `error/propagate-in-non-failable-fn-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `error/propagate-in-non-failable-fn-pos` — PASS · TWIN
-- `error/propagate-non-failable-callee-neg` — PASS · TWIN
-- `error/propagate-non-failable-callee-pos` — PASS · TWIN
+- `error/propagate-non-failable-callee-neg` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
+- `error/propagate-non-failable-callee-pos` — PASS · TWIN (also emitted, unasserted: W-ARM-PIPE-LEGACY)
 - `files/multifile-import` — PASS · TWIN
 - `forms/bind-value-input` — PASS · TWIN
 - `forms/bind-value-two-field` — PASS · TWIN

@@ -1,0 +1,18 @@
+<program>
+    let <n:int=0/>
+    type LoadError:enum = { NotFound(id: string), Timeout }
+    function load(id: string)! LoadError {
+        if (id == "x") fail LoadError.NotFound(id)
+        return id
+    }
+    function go() {
+        load("x") !{
+            | .NotFound(m) :> @n = 1
+            | _ :> @n = 2
+        }
+    }
+    <main>
+        <button onclick=go()>go</button>
+        <p>${@n}</p>
+    </main>
+</program>

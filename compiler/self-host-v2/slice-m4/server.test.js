@@ -16,7 +16,7 @@
 // is E-ERROR-002. s451 (Ue) lifted the refusals of the handling forms (`!{}`,
 // `match`, a `!` function): a handled query lowers to Core as the call of a
 // Stmt.Attempt (Failable.FSql) — the tests that inspect the lowered query
-// handle it in the SOURCE (`!{ | _ :> not }`) and read the Attempt.
+// handle it in the SOURCE (`!{ _ :> not }`) and read the Attempt.
 
 import { describe, test, expect, beforeAll } from "bun:test";
 import { loadM2, frontEnd } from "./harness.js";
@@ -113,7 +113,7 @@ describe("S451 R11 — `?{}` is failable everywhere; s451 Ue — the handling fo
   });
 
   test("a `!{}` handler on the query handles it (§19.8.3 item 1): clean — and lowered as an Attempt over the query", () => {
-    const src = P(DB, `    function f(id: int) {\n        const r = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ | _ :> not }\n    }`);
+    const src = P(DB, `    function f(id: int) {\n        const r = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ _ :> not }\n    }`);
     expect(codes(src)).toEqual([]);
     const at = run(src).core.server[0].body.stmts[0];
     expect(v(at)).toBe("Attempt");
@@ -511,7 +511,7 @@ describe("S239 review fix round — the kind scan cannot be talked into SqlSelec
 
 describe("the lowered query in Core (s451 Ue: handled in the source, an Attempt's FSql)", () => {
   test("a ServerFn holds the query as an Attempt's call: runs, DEDUPED values (§8.2), slots, mode, facts, db", () => {
-    const r = run(P(DB, `    function find(id: int) {\n        const row = ${SQ}\`SELECT * FROM activity WHERE created_by = \${id} OR updated_by = \${id}\`}.get() !{ | _ :> not }\n    }`));
+    const r = run(P(DB, `    function find(id: int) {\n        const row = ${SQ}\`SELECT * FROM activity WHERE created_by = \${id} OR updated_by = \${id}\`}.get() !{ _ :> not }\n    }`));
     const core = lowerClean(r);
     expect(core.server.map((s) => s.sym.hint)).toEqual(["find"]);
     const q = attemptQuery(core.server[0].body.stmts[0]);
@@ -525,20 +525,20 @@ describe("the lowered query in Core (s451 Ue: handled in the source, an Attempt'
   });
 
   test("distinct values keep distinct slots, in first-appearance order", () => {
-    const r = run(P(DB, `    function find(a: int, b: int) {\n        ${SQ}\`UPDATE t SET x = \${b} WHERE id = \${a} AND y = \${b}\`}.run() !{ | _ :> not }\n    }`));
+    const r = run(P(DB, `    function find(a: int, b: int) {\n        ${SQ}\`UPDATE t SET x = \${b} WHERE id = \${a} AND y = \${b}\`}.run() !{ _ :> not }\n    }`));
     const q = attemptQuery(lowerClean(r).server[0].body.stmts[0]);
     expect(q.params.map((p) => p.data.sym.hint)).toEqual(["b", "a"]);
     expect(q.slots).toEqual([0, 1, 0]);
   });
 
   test("the printer refuses the lowered program (U1c)", () => {
-    const core = lowerClean(run(P(DB, `    function f() -> int {\n        const r = ${SQ}\`SELECT a FROM t\`}.get() !{ | _ :> not }\n        return 1\n    }`)));
+    const core = lowerClean(run(P(DB, `    function f() -> int {\n        const r = ${SQ}\`SELECT a FROM t\`}.get() !{ _ :> not }\n        return 1\n    }`)));
     expect(mods.print.printProgram(core, "t.client.js", "scrml-runtime.js").refused[0]).toContain("U1c");
   });
 });
 
 describe("check — the server boundary in Core (C-SQL1, C-S1..C-S4)", () => {
-  const base = () => lowerClean(run(P(DB, `    let <n:int=0/>\n    function find(id: int) -> int {\n        const row = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ | _ :> not }\n        return 1\n    }\n    function cli() {\n        @n = 2\n    }`)));
+  const base = () => lowerClean(run(P(DB, `    let <n:int=0/>\n    function find(id: int) -> int {\n        const row = ${SQ}\`SELECT a FROM t WHERE id = \${id}\`}.get() !{ _ :> not }\n        return 1\n    }\n    function cli() {\n        @n = 2\n    }`)));
   const issues = (core, tag) => mods.check.checkCore(core).filter((s) => s.startsWith(tag));
 
   test("the lowered program is well-formed", () => {
