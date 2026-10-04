@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 240 | 6 |
 | MED | 493 | 4 |
-| LOW | 245 | 0 |
+| LOW | 246 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22723,3 +22723,7 @@ Governing: SPEC §8.1.1 (normative resolution + *Ownership* "that database", S45
 ### g-impl1-value-position-arm-fallthrough-s451 — impl#1 DIVERGENCE (filed, not fixed): a `!{}` / `match` arm that falls through in a value position compiles at exit 0 and the binding holds whatever the arm's last statement evaluated to — E-ERROR-012 is not emitted — `NEW S451; MED; open`
 <!-- @gap id=g-impl1-value-position-arm-fallthrough-s451 sev=MED status=open locus=compiler/src/codegen/emit-logic.ts(the guarded-expr lowering assigns each arm's last statement to the result temp, value or not)+searched:compiler/src(no E-ERROR-012) prov=ruling:user-voice-scrml.md-S451-"1a-2-yes-3-yes-4a"-item-1 -->
 Governing: SPEC §19.4.3 "Handling in a value position" + §19.7.3 (S451 ruling 1a). Measured on `25677da72`: `function useIt(n: number) { let r = risky(n) !{ | .A :> { console.log("a") } | .B(m) :> 0 }  return r }` → exit 0 (warnings only); the client JS lowers the `.A` arm to `_scrml__scrml_result_4 = console . log ( "a" );`, so on `.A` the function returns the host's `undefined`. Silent wrong value, hence MED. **Corpus migration owed with the bootstrap (measured — impl#1 front end, `guarded-expr` nodes whose guarded statement is a declaration or an assignment):** 19 value-position handlers with fall-through arms in 13 files, all under `conformance/cases/` (listed in SPEC §19.4.3's direction-of-change note); 0 in `examples/` and `samples/`. Do not migrate the cases ahead of the bootstrap's E-ERROR-012.
+
+### g-impl1-paren-free-binder-arity-s451 — impl#1 DIVERGENCE (filed, not fixed): a parenthesis-free `!{}` binder on a multi-field variant silently binds the FIRST field, and on a unit variant binds the raw `.data` — E-TYPE-021 is not emitted for either — `NEW S451; LOW; open`
+<!-- @gap id=g-impl1-paren-free-binder-arity-s451 sev=LOW status=open locus=compiler/src/codegen/emit-logic.ts(the guarded-expr arm binder lowering projects the first declared field, or `.data` when there is none; no arity check against the variant) prov=ruling:user-voice-scrml.md-S451-"1a-2-yes-3-yes-4a"-item-2 -->
+Governing: SPEC §19.4.3 "A binder without parentheses binds the payload" + §18.7 (S451 ruling 2). Measured on `25677da72`: `type E:enum = { A, B(msg: string), C(x: number, y: number) }`, `let r = risky(n) !{ | .A x :> 0  | .B m :> m.length  | .C c :> c }` → exit 0; the client JS binds `const x = …data`, `const m = …data.msg` (as ruled), `const c = …data.x` (rule: E-TYPE-021 for `.A x` and `.C c`). Corpus: no file under `examples/` or `conformance/cases/` writes a parenthesis-free binder; the 46 arms in 12 `samples/` files are the legacy `::SQLError e` / `_ e` shape (SPEC §19.4.3 note).

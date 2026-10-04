@@ -10,7 +10,9 @@ Branch `spec/s451-ue-forks`, cut from origin/main `25677da72`. SPEC text for the
   `g-impl1-value-position-arm-fallthrough-s451`. Measured: 64 `!{}` handlers (impl#1 AST), 35 in a
   value position, 19 with fall-through arms in 13 files, all conformance/cases; 0 examples/samples.
   5 match-on-failable sites, none falling through in a value position.
-- [ ] 2 — `| .V m :>` binds the payload (§19.8.3) + Appendix B historical
+- [x] 2 — `| .V m :>` binds the payload (§19.4.3 paragraph + §19.4.4 bullet, §19.8.3 note) + Appendix B
+  line struck as historical; multi-field / unit = E-TYPE-021 (§18.7). Gap `g-impl1-paren-free-binder-arity-s451`.
+  Corpus: 46 paren-free binder arms in 12 samples/ files (legacy `::SQLError e` / `_ e`), 0 elsewhere.
 - [ ] 3 — `!{}` on a non-failable call + E-ERROR-013
 - [ ] 4a — cross-database write inside an envelope (§8.9.2, §19.10.5/.6, §8.1.1) + E-SQL-011 generalized
 - [ ] 5 — §8.1.1 confirmed; gap filed
