@@ -1579,6 +1579,8 @@ ${
         const o: Opener = { start: start, star: star, isLet: isLet && marked, name: nm.w, ty: ty, own: own,
                             typed: typed, attrs: attrs, selfClosing: selfClosing, short: short, vals: vals }
         for (const k of kws) { m = keywordInOpener(m, k.name, nm.w, marked, k.span) }
+        if (!isDeclOpener(o)) m = repeatedAttrDiags(m, o)
+        m = quotedInterpDiags(m, o)
         for (const sp of rend) {
             if (isDeclOpener(o)) {
                 m = mDiag(m, "E-DECL-RENDERS-IN-OPENER", "`renders` follows the closer (`/>` or `</>`) — close the opener, then write `renders <…>` after it (§66.5.1, S447)", sp.start, sp.end)
@@ -1587,6 +1589,58 @@ ${
             }
         }
         return { o: o, mp: m }
+    }
+
+    // s451 (S239 review of #1254, MED) — an attribute written TWICE on one
+    // non-declaration opener (`<p if=@a if=@b>`, `<p else else>`,
+    // `class="a" class="b"`, `<program reset="none" reset="none">`, a
+    // state-child, an `<effect>`, a `<*x>` reference): every reader takes the
+    // first match, so the rest were silently dropped. Searched §4, §5, §24 and
+    // §34 for a duplicate-attribute rule — the SPEC names none — so
+    // E-BOOTSTRAP-UNSUPPORTED, by construction for EVERY name, at each repeat.
+    // Names compare EXACTLY here: the parser cannot tell an HTML element from a
+    // use of a declaration, whose attribute names are its field names (case-
+    // sensitive — `a` and `A` are distinct fields). The case-insensitive HTML
+    // repeat (`class` + `CLASS`) is analyze's attrCaseDiags (HTML elements)
+    // and unknownProgramAttrDiag (`<program>`). A namespaced name is its own
+    // name: `class` and `class:active` are distinct. Declaration openers are
+    // judged by analyze (repeatedWordDiags), which knows their validators.
+    fn repeatedAttrDiags(mp: MP, o: Opener) -> MP {
+        let m: MP = mp
+        let seen: string[] = []
+        for (const a of o.attrs) {
+            if (seen.indexOf(a.name) >= 0) {
+                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is written twice on `<" + o.name + ">` — the bootstrap reads one, so the other would be silently dropped; the SPEC names no rule for a repeated attribute, so it is refused: write it once", a.span.start, a.span.end)
+            }
+            seen = seen.concat([a.name])
+        }
+        return m
+    }
+
+    // s451 fix round (S239 LOW-2) — §5.5.3: "The `${...}` interpolation inside a
+    // quoted attribute value SHALL be recognized by the compiler" and compiled
+    // as a reactive template (§1626: `attr="${@x}"` is "already
+    // template-string-shaped"). The bootstrap parses a quoted value as literal
+    // text, so `title="t${@x}"` used to be EMITTED LITERALLY. Not implemented
+    // → refused, on every opener (element, use, declaration, `<program>`), for
+    // every attribute and a declaration's own value.
+    fn quotedInterpDiags(mp: MP, o: Opener) -> MP {
+        let m: MP = mp
+        for (const a of o.attrs) { m = quotedInterpDiag(m, a.name, a.value, a.span) }
+        m = quotedInterpDiag(m, o.name, o.own, mkSpan(o.start, o.start + o.name.length + 1))
+        return m
+    }
+
+    fn quotedInterpDiag(mp: MP, name: string, v: AAttrValue, sp: ASpan) -> MP {
+        const s: string = match v {
+            .Quoted(v: x) :> x
+            .NoValue :> ""
+            .Bare(e: x) :> ""
+            .Paren(e: x) :> ""
+            .Braced(b: b) :> ""
+        }
+        if (s.indexOf("$" + "{") < 0) return mp
+        return mDiag(mp, "E-BOOTSTRAP-UNSUPPORTED", "`" + name + "=\"…\"` holds a `$" + "{…}` interpolation — a quoted value with `$" + "{…}` is a reactive template (§5.5.3), which is not in the bootstrap; it would be emitted as literal text. Write the value as an expression: `" + name + "=(…)`", sp.start, sp.end)
     }
 
     // At the `:` of a `:`-shorthand body (§4.14): the single expression, as an

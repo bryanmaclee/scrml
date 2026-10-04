@@ -743,6 +743,7 @@ ${
         return match a {
             .Static(name: n, value: v) :> [{ name: n, value: v }]
             .Bound :> []
+            .Show :> []
             .On :> []
             .Bind :> []
             .Gate(values: vs) :> gatedMarker(vs)
@@ -769,6 +770,7 @@ ${
         return match a {
             .Static(name: n) :> false
             .Bound(name: n) :> true
+            .Show(test: t) :> true
             .On(event: ev) :> true
             .Bind(kind: k) :> true
             .Gate(values: vs) :> true
@@ -974,6 +976,7 @@ ${
             .Gate(values: vs) :> true
             .Static(name: n) :> false
             .Bound(name: n) :> false
+            .Show(test: t) :> false
             .On(event: ev) :> false
             .Bind(kind: k) :> false
         }
@@ -983,6 +986,7 @@ ${
         return match a {
             .Static :> []
             .Bound(name: n, e: e) :> [sexpr(rtCall(ctx, "attr", [scopeVar(), node, jstr(n), jthunk(exprJs(ctx, e))]))]
+            .Show(test: t) :> [sexpr(rtCall(ctx, "visibility", [scopeVar(), node, jthunk(exprJs(ctx, t))]))]
             .On(event: ev, body: body) :> [sexpr(rtCall(ctx, "on", [scopeVar(), node, jstr(ev), JsExpr.JArrow([], blockJs(ctx, body))]))]
             .Bind(kind: k, read: r, sink: sk, write: w) :> [sexpr(rtCall(ctx, "bind", [scopeVar(), node, jstr(bindProp(k)), jthunk(exprJs(ctx, r)), JsExpr.JArrow([symName(ctx, sk)], blockJs(ctx, w))].concat(bindSurface(ctx, r))))]
             .Gate(values: vs, fields: fs) :> [sexpr(rtCall(ctx, "gate", [scopeVar(), node, JsExpr.JArrowE([], JsExpr.JArray(surfacesJs(ctx, fs)))]))]

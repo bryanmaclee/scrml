@@ -149,6 +149,7 @@ ${
         ABound,                   // a plain HTML attribute bound to an expression
         AOn(event: string),       // an event handler (onclick → "click")
         AIf,                      // if= (L5)
+        AShow,                    // s451: show= (§17.2) — a visibility condition on an HTML element
         AConstruct(field: int),   // a use-site construction value (§66.14 rule 4)
         AAs,                      // as= on a use (the handle is on the element's MUse)
         AEachIn,
@@ -1262,6 +1263,21 @@ ${
         }
     }
 
+    // A name outside the closed `<program>` set (§52.13.3: "unknown attribute
+    // names emit `W-ATTR-001`"). s451 fix round (S239 MED): a CASE VARIANT of a
+    // `<program>` attribute or of a scrml control attribute (`RESET=`,
+    // `Auth=`, `loginredirect=`, `SHOW=`) is not an unknown name to warn past
+    // — it is a known one the bootstrap would not read, so it is refused (the
+    // SPEC names no rule for attribute-name case). A case-variant repeat
+    // (`reset` + `RESET`) lands here too.
+    fn unknownProgramAttrDiag(file: string, a: AAttr, st: AS) -> AS {
+        const lower: string = a.name.toLowerCase()
+        if (isProgramAttrName(lower) || lower == "loginredirect" || lower == "sessionexpiry" || (lower != a.name && isControlAttrName(lower))) {
+            return addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` on `<program>` is a case variant of a `<program>` / scrml attribute name — the bootstrap reads attribute names exactly, so it would be ignored; write the exact name")
+        }
+        return addDiag(st, file, a.span, "W-ATTR-001", "`" + a.name + "` is not a `<program>` attribute (§52.13.3: `<program>` has a closed attribute set)")
+    }
+
     // §4.12.2's table: what a NESTED `<program>` may carry.
     fn isNestedProgramAttr(a: string) -> boolean {
         return match a {
@@ -1340,7 +1356,7 @@ ${
             } else if (isProgramAttrName(a.name)) {
                 st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<program " + a.name + "=…>` is not in the bootstrap — it reads no `<program>` attribute, and never ignores one it does not implement")
             } else {
-                st = addDiag(st, file, a.span, "W-ATTR-001", "`" + a.name + "` is not a `<program>` attribute (§52.13.3: `<program>` has a closed attribute set)")
+                st = unknownProgramAttrDiag(file, a, st)
             }
         }
         return st
@@ -1620,7 +1636,7 @@ ${
             } else if (isProgramAttrName(a.name)) {
                 st = addDiag(st, file, a.span, "E-PROGRAM-NESTED-ATTR", "`" + a.name + "=` is application-level and not valid on a nested `<program>` (§4.12.2 lists what a nested program may carry)")
             } else {
-                st = addDiag(st, file, a.span, "W-ATTR-001", "`" + a.name + "` is not a `<program>` attribute (§52.13.3: `<program>` has a closed attribute set)")
+                st = unknownProgramAttrDiag(file, a, st)
             }
         }
         return st
@@ -2193,6 +2209,10 @@ ${
                                 targets = targets.concat([ti])
                             }
                         }
+                    } else {
+                        // s451: any other attribute on a state-child (`show=`,
+                        // `title=`, …) was read by nothing — silently ignored.
+                        st = addDiag(st, te.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` on the state-child `<" + c.name + ">` is not in the bootstrap — a state-child reads only `rule=` (§66.13.2); the attribute would be ignored")
                     }
                 }
                 edges = edges.concat([{ origin: origin, targets: targets }])
@@ -2662,11 +2682,21 @@ ${
         // A validator CALL may repeat with other arguments — `length(>2)
         // length(<9)` is a conjunction every one of which is read (validators.
         // test.js pins it); a bare one (`req req`) says nothing twice.
+        // s451 (S239 nit on #1260): a PRESENCE validator — `req`, `is some` —
+        // is one predicate whatever its argument (§55.1: its argument is only a
+        // message, §55.10), so `req req("m")` / `req("a") req` repeat it too.
         for (const v of d.validators) {
-            if (seen.indexOf(v.name) >= 0 && isBareValidator(v)) st = addDiag(st, file, v.span, "E-BOOTSTRAP-UNSUPPORTED", repeatedMessage(d.name, v.name))
+            if (seen.indexOf(v.name) >= 0 && (isBareValidator(v) || isPresenceValidator(v.name))) st = addDiag(st, file, v.span, "E-BOOTSTRAP-UNSUPPORTED", repeatedMessage(d.name, v.name))
             seen = seen.concat([v.name])
         }
         return st
+    }
+
+    // §55.1's presence predicates: `req` and `is some` (the latter reaches the
+    // bootstrap as the opener words `is` `some`, refused as unknown — and a
+    // second `is` is caught by the `mods` pass above).
+    fn isPresenceValidator(name: string) -> boolean {
+        return name == "req" || name == "is some"
     }
 
     fn isBareValidator(v: AValidator) -> boolean {
@@ -5573,6 +5603,8 @@ ${
             }
             if (e is some) {
                 st = chainMember(env, e, prev, st)
+                st = showHostCheck(env, e, st)
+                st = attrCaseDiags(env, e, st)
                 prev = chainRoleAfter(e)
             } else if (!blankNode(n)) {
                 prev = 0
@@ -5623,6 +5655,112 @@ ${
             st = chainHostRefused(env, e, la, st)
         }
         return st
+    }
+
+    // s451 — `show=` (§17.2) is implemented on an HTML element only
+    // (resolveShow). On a USE §17.1.1 lets a component carry it ("An `else` or
+    // `else-if=` element MAY also carry `show=`"), but a use has no single
+    // element to toggle in the bootstrap (refused in resolveUse, where a field
+    // named `show` is told apart); `<*x/>` and `<slot>` read no attributes at
+    // all. Each would IGNORE it — refused here. `<each>` and `<errors>`
+    // refuse it themselves; a refused element has no fact.
+    fn showHostCheck(env: Env, e: AElem, st: AS) -> AS {
+        const a: AAttr | not = attrNamed(e.attrs, "show")
+        if (a is not) return st
+        const f: ElemFact | not = elemFactNow(st, e.nid)
+        if (f is not) return st
+        if (!showRefusedOn(f)) return st
+        let tag: string = e.tag
+        if (e.star) tag = "*" + e.tag
+        return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`show=` on `<" + tag + ">` is not in the bootstrap — only an HTML element is shown / hidden (§17.2); the attribute would be ignored and the content always visible")
+    }
+
+    // s451 fix round (S239 MED) — every reader of an element's scrml attributes
+    // matches the name EXACTLY (`if`, `else-if`, `else`, `show`, `on…`,
+    // `bind:…`, `as`, `in`, `key`, `of`, `all`, `deps`, `rule`), so a case
+    // variant (`SHOW=`, `If=`, `Else-If=`, `onClick=`, `BIND:value`) fell
+    // through to a plain HTML attribute and did nothing. The SPEC names no rule
+    // for the case of an attribute name (§4, §5, §24 searched; §13.x makes only
+    // ELEMENT names case-insensitive), so a case variant of a scrml control
+    // name is refused on every element that is not a USE (a use's names are
+    // its declaration's field names — case-sensitive, `a` and `A` distinct).
+    // `ref=` (§6.7.1a, an element-reference binding) is not in the bootstrap:
+    // on an HTML element it would be a plain `ref="…"` attribute — refused.
+    // On an HTML element, two names equal up to case are one HTML attribute
+    // (HTML attribute names are case-insensitive): the second is a repeat
+    // (exact repeats are the parser's, repeatedAttrDiags).
+    fn attrCaseDiags(env: Env, e: AElem, st0: AS) -> AS {
+        let st: AS = st0
+        const f: ElemFact | not = elemFactNow(st, e.nid)
+        if (f is not) return st
+        if (isUseFact(f)) return st
+        const html: boolean = isHtmlFact(f)
+        let seen: string[] = []
+        let seenExact: string[] = []
+        let tag: string = e.tag
+        if (e.star) tag = "*" + e.tag
+        for (const a of e.attrs) {
+            const lower: string = a.name.toLowerCase()
+            if (lower != a.name && isControlAttrName(lower)) {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` on `<" + tag + ">` is a case variant of the scrml attribute `" + lower + "` — the bootstrap reads scrml attribute names exactly, so it would be a plain HTML attribute that does nothing; write `" + lower + "`")
+            } else if (html && a.name == "ref") {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`ref=` on `<" + tag + ">` (§6.7.1a, an element-reference binding) is not in the bootstrap — it would be emitted as a plain `ref` attribute and bind nothing")
+            } else if (html && seen.indexOf(lower) >= 0 && seenExact.indexOf(a.name) < 0) {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is written twice on `<" + tag + ">` (HTML attribute names are case-insensitive) — the bootstrap reads one, so the other would be silently dropped; the SPEC names no rule for a repeated attribute, so it is refused: write it once")
+            }
+            seen = seen.concat([lower])
+            seenExact = seenExact.concat([a.name])
+        }
+        return st
+    }
+
+    // The attribute names a scrml reader of an element dispatches on (lower
+    // case): the control attributes, the event prefix `on`, any namespaced
+    // `x:y` name (`bind:`, `class:`, `style:`, …).
+    fn isControlAttrName(n: string) -> boolean {
+        if (n.indexOf(":") >= 0) return true
+        if (n.length > 2 && n.substring(0, 2) == "on") return true
+        return n == "if" || n == "else-if" || n == "else" || n == "show" || n == "ref" || n == "as" ||
+               n == "in" || n == "key" || n == "of" || n == "all" || n == "deps" || n == "rule"
+    }
+
+    fn isUseFact(f: ElemFact) -> boolean {
+        return match f {
+            .MUse(decl: d) :> true
+            .MHtml :> false
+            .MEach(bind: b) :> false
+            .MErrors(of: x) :> false
+            .MSlot :> false
+            .MStateView(v: v) :> false
+            .MInline(v: v) :> false
+            .MStar(decl: d) :> false
+        }
+    }
+
+    fn isHtmlFact(f: ElemFact) -> boolean {
+        return match f {
+            .MHtml :> true
+            .MUse(decl: d) :> false
+            .MEach(bind: b) :> false
+            .MErrors(of: x) :> false
+            .MSlot :> false
+            .MStateView(v: v) :> false
+            .MInline(v: v) :> false
+            .MStar(decl: d) :> false
+        }
+    }
+
+    fn showRefusedOn(f: ElemFact) -> boolean {
+        return match f {
+            .MHtml :> false
+            .MUse(decl: d) :> false           // resolveUse: a field named `show` constructs; else refused there
+            .MEach(bind: b) :> false          // refuses `show` itself (resolveEach)
+            .MErrors(of: x) :> false          // refuses it itself (resolveErrors)
+            .MSlot :> true
+            .MStateView(v: v) :> true
+            .MInline(v: v) :> true
+            .MStar(decl: d) :> true
+        }
     }
 
     fn chainCondValue(env: Env, e: AElem, a: AAttr | not, st: AS) -> AS {
@@ -6142,6 +6280,8 @@ ${
                 // s451: `if=` / `else-if=` / `else` (§17.1.1) — chain attributes (chainCheck)
                 st = resolveIfValue(env, a.value, st)
                 st = addAttr(st, a.nid, AttrKind.AIf)
+            } else if (a.name == "show") {
+                st = resolveShow(penv, e, a, st)
             } else if (ev != "") {
                 st = resolveHandler(withHost(penv, HostCtx.HostOk), a.value, st)
                 st = addAttr(st, a.nid, AttrKind.AOn(ev))
@@ -6151,7 +6291,11 @@ ${
                 // (⚑ PA: the SPEC (§5.4) does not say; no code names it).
                 const first: AAttr | not = firstBind(e.attrs)
                 if (first is some && first.nid != a.nid) {
-                    st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is a second `bind:` on this `<" + e.tag + ">` (after `" + first.name + "`) — one element writes back to one place; bind each place on its own element (§5.4)")
+                    // s451: the same `bind:` name twice is the parser's
+                    // repeated-attribute refusal — one diagnostic per fault
+                    if (first.name.toLowerCase() != a.name.toLowerCase()) {
+                        st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is a second `bind:` on this `<" + e.tag + ">` (after `" + first.name + "`) — one element writes back to one place; bind each place on its own element (§5.4)")
+                    }
                 } else {
                     st = resolveBind(penv, e, a, st)
                 }
@@ -6165,6 +6309,37 @@ ${
             }
         }
         return resolveNodes(penv, e.kids, st)
+    }
+
+    // s451 — `show=cond` on an HTML element (§17.2): "The element EXISTS in the
+    // DOM regardless of `expr`. When `expr` evaluates to false, the element is
+    // hidden. The compiler generates a CSS `display: none` toggle." It is a
+    // condition like `if=` (the typer's checkCond: a `bool` or a `T | not`
+    // presence test; §5.2's atomic-only-when-bare rule is shared with `if=` —
+    // a bare operator fails in the parser, E-PARSE-TAG, for both, not yet as
+    // E-ATTR-UNQUOTED-OPERATOR), resolved
+    // in the env the element's other attributes see (inside its `if=`). It
+    // does NOT narrow the children — they exist while it is false.
+    // §17.1.1: "`if=`, `else-if=`, and `else` MAY coexist on the same element
+    // with `show=` … The two attributes compose without conflict" — the chain
+    // arm decides presence, this decides visibility (lower: Attr.Show inside
+    // the arm). Fail closed: a quoted / valueless / braced condition is
+    // refused (as for `if=`, #1254). §5.5.4 / E-ATTR-WRITER-CONFLICT: a
+    // WHOLESALE `style=(expr)` "with `if=`/`show=`" shares the `display`
+    // surface — its next write would erase the toggle. On any other host
+    // (`<each>`, a use, `<*x>`, `<errors>`, `<slot>`, a state-child) `show=`
+    // is refused (showHostCheck), never ignored.
+    fn resolveShow(env: Env, e: AElem, a: AAttr, st0: AS) -> AS {
+        let st: AS = st0
+        if (valueExpr(a.value) is not) {
+            return addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`show=` on `<" + e.tag + ">` needs a condition expression — `show=@x` or `show=(@n >= 3)`; a quoted, valueless or braced condition is not in the bootstrap (§17.2, §5.2) — it would never hide the element")
+        }
+        const sa: AAttr | not = attrNamed(e.attrs, "style")
+        if (sa is some && !isStaticAttr(sa.value)) {
+            st = addDiag(st, env.file, sa.span, "E-ATTR-WRITER-CONFLICT", "`style=(…)` on `<" + e.tag + ">` writes the whole `style` attribute, and `show=` on the same element toggles its `display` — the wholesale write would erase the toggle on its next evaluation. Keep one: drop `show=` and compute `display` in `style=(…)`, or make `style=` static (§5.5.4)")
+        }
+        st = resolveIfValue(env, a.value, st)
+        return addAttr(st, a.nid, AttrKind.AShow)
     }
 
     // s444 — `bind:value=@place` / `bind:checked=@place` (§5.4): the element
@@ -6399,7 +6574,10 @@ ${
                 st = addAttr(st, a.nid, AttrKind.AIf)
             } else {
                 const i: int = fieldIndex(d.info, a.name)
-                if (i < 0) {
+                if (i < 0 && a.name == "show") {
+                    // s451: §17.2 `show=` on a use — see showHostCheck
+                    st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`show=` on a use of `<" + e.tag + ">` is not in the bootstrap — only an HTML element is shown / hidden (§17.2); wrap the use in one: `<div show=…><" + e.tag + " …/></div>`")
+                } else if (i < 0) {
                     st = addDiag(st, env.file, a.span, "E-DECL-USE-ATTR", "`<" + e.tag + ">` has no attribute `" + a.name + "`")
                 } else {
                     const f: FieldInfo = d.info.fields[i]
@@ -7978,6 +8156,7 @@ ${
             .ABound :> -1
             .AOn(event: ev) :> -1
             .AIf :> -1
+            .AShow :> -1
             .AAs :> -1
             .AEachIn :> -1
             .AEachKey :> -1
@@ -9373,6 +9552,13 @@ ${
         return keepTEnv(tCallUnnarrow(tNarrow(env, condNarrowing(env, x).yes), x), checkCond(env, x, r.vt, "`if=`", r.ts))
     }
 
+    fn typeShowAttr(env: TEnv, a: AAttr, ts: TypeState) -> TypeState {
+        const x: AExpr | not = valueExpr(a.value)
+        if (x is not) return ts
+        const r: RVT = typeExpr(env, x, ts)
+        return checkCond(env, x, r.vt, "`show=`", r.ts)
+    }
+
     fn typeHtml(env: TEnv, e: AElem, ts0: TypeState) -> TypeState {
         const ri: RTEnv = typeIfAttr(env, e, ts0)
         const renv: TEnv = ri.env
@@ -9380,6 +9566,10 @@ ${
         for (const a of e.attrs) {
             if (isChainAttr(a.name)) {
                 // typed above (typeIfAttr); `else` has no value
+            } else if (a.name == "show") {
+                // s451: §17.2 — a condition (checkCond), under the element's
+                // `if=` narrowing; it narrows nothing itself
+                ts = typeShowAttr(renv, a, ts)
             } else if (eventName(a.name) != "") {
                 ts = typeHandlerValue(renv, a.value, ts)
             } else {
@@ -10668,6 +10858,7 @@ ${
         const named: string = "the `" + a.name + "=` value on `<" + tag + ">`"
         const what: string = match k {
             .AIf :> "the `if=` condition on `<" + tag + ">`"
+            .AShow :> "the `show=` condition on `<" + tag + ">`"
             .AConstruct(field: i) :> "the use-site value `" + a.name + "=` of `<" + tag + ">`"
             .AEachIn :> "the `<each in=…>` sequence"
             .AEachKey :> "the `<each key=…>` key"
@@ -10690,6 +10881,7 @@ ${
         return match k {
             .AConstruct(field: i) :> true
             .AIf :> false
+            .AShow :> false
             .AEachIn :> false
             .AEachKey :> false
             .AStatic :> false
@@ -11526,6 +11718,7 @@ ${
             .ABound :> []
             .AOn(event: ev) :> []
             .AIf :> []
+            .AShow :> []
             .AConstruct(field: x) :> []
             .AAs :> []
             .AEachIn :> []
@@ -11611,6 +11804,7 @@ ${
             .ABound :> -1
             .AOn(event: ev) :> -1
             .AIf :> -1
+            .AShow :> -1
             .AAs :> -1
             .AEachIn :> -1
             .AEachKey :> -1
@@ -11661,6 +11855,7 @@ ${
             .ABound :> []
             .AOn(event: ev) :> []
             .AIf :> []
+            .AShow :> []
             .AConstruct(field: x) :> []
             .AAs :> []
             .AEachIn :> []
@@ -11765,6 +11960,7 @@ ${
             .ABound :> false
             .AOn(event: ev) :> false
             .AIf :> false
+            .AShow :> false
             .AConstruct(field: x) :> false
             .AAs :> false
             .AEachIn :> false
