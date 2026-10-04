@@ -171,6 +171,29 @@ a pipe, and make every wait loop print why it is still waiting.**
 - Review floor: markers for #1283/#1286 landed; **11 owed, all S451/S452-bryan's** (not drained —
   shared surface, his session live).
 
+
+## Maps (wrap 6c) — ⚑ NOT REFRESHED THIS SESSION, and that is owed
+The `project-mapper` dispatch was launched at wrap and **produced nothing before close** — the stamp is
+still `d3e660a08` (the S451 wrap), so the maps are now behind by the S452 landings (#1273–#1280, #1287)
+and all three S453 landings (#1283, #1286, #1289). Stated rather than skipped. **Re-run it next session**
+with the same brief, which carries a measured router gap worth fixing:
+
+Both S453 adversarial reviewers independently reported that the handler-async-colouring / listener-registration
+surface has **no Task-Shape Routing row at all**, and that the symbols a dispatch brief would name are
+absent from the whole set — across all 13 maps, `colorHandlerAsync` **0 hits**, `armFactoryLines` **0**,
+`rootAsync` **0**, `E-TRANSACTION-CONTROL-FLOW` **0**; `colorAsyncFunctionExpr` / `colorActiveHandler`
+one hit each, and it was a plain file-inventory row (`structure.map.md:861`).
+
+⚑ **That inventory row was the single most load-bearing line in the map set this session** — it is what
+revealed there are TWO colouring entry points, which redirected the A3 fix off the locus my own brief had
+named and prevented a landing that would have left 14 listener sites silently unlogged. The *routing*
+rows were not load-bearing for either arc. So the feedback is not "add more routing rows" — it is that an
+inventory row outperformed them here, which is a signal about where map value actually comes from and is
+worth recording in the non-compliance report rather than smoothing over.
+Also owed to that report: PRIMER §12 lists `scrml-js-codegen-engineer`'s tool set as including `Agent`
+while the staged definition in `scrml-support/agents/` does not — one of the two is stale, and the staged
+dir is an S217 snapshot (3½ months old) whose live source is on bryan's machine.
+
 ## Worktrees + branches
 Removed: the spent A/B compile tree, both frozen review trees, both agent trees, and the
 cross-session `agent-a17aa5322771d6ebc` (audited first — its one unlanded-looking commit's test passes
