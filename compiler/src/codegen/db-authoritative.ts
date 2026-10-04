@@ -34,6 +34,7 @@
 
 import { parseSchemaBlock, harvestRawCreateTableDecls, schemaTableDeclarations } from "../schema-differ.js";
 import { DBAUTH_ROLE, DBAUTH_TENANT_GUC, DBAUTH_CAPS_GUC } from "../schema-differ.js";
+import { sqlHandleAt } from "./sql-handle-name.ts";
 
 /**
  * Walk a file AST for `<schema>` state blocks and report whether ANY declared
@@ -359,7 +360,9 @@ function matchingParenEnd(src: string, openIdx: number): number {
 }
 
 const IDENT_CHAR = /[A-Za-z0-9_$]/;
-const HANDLE = "_scrml_sql";
+// The handle names are THE shared list (sql-handle-name.ts) — every `_scrml_sql` / `_scrml_sql_<n>`
+// handle (S451 review HIGH-1: matching only `_scrml_sql` skipped the tenant floor on every
+// scoped handle, and with a sibling `<db src>` inverted it).
 const REQ_PARAM = "_scrml_req";
 
 /** True iff `word` sits at `src[at]` as a standalone identifier (word-boundary). */
@@ -438,9 +441,11 @@ function arrowParamsHaveReq(src: string, arrowIdx: number): boolean {
  * never mistaken for a query site.
  *
  * @param src the assembled server-module text
+ * @param handles the module's declared handle names (`collectDbScopes` keys) — the
+ *   structural set; when omitted, every name of the shared handle shape is a handle
  * @returns the transformed text
  */
-export function wrapPrincipalTxn(src: string): string {
+export function wrapPrincipalTxn(src: string, handles?: ReadonlySet<string> | null): string {
   let out = "";
   let i = 0;
   const n = src.length;
@@ -483,14 +488,10 @@ export function wrapPrincipalTxn(src: string): string {
 
     // `_scrml_sql` handle — classified BEFORE the bare-template branch so a
     // `_scrml_sql`…`` tagged template is treated as a query, not a skip.
-    if (matchesWordAt(src, i, HANDLE)) {
-      let j = i + HANDLE.length;
-      if (src[j] === "_") {
-        let k = j + 1;
-        while (k < n && /[0-9]/.test(src[k])) k++;
-        if (k > j + 1) j = k; // scoped `_scrml_sql_<n>`
-      }
-      const ident = src.slice(i, j);
+    const handleHere = sqlHandleAt(src, i, handles);
+    if (handleHere !== null) {
+      const ident = handleHere;
+      const j = i + ident.length;
 
       let exprEnd = -1;
       const next = src[j];

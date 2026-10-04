@@ -995,6 +995,9 @@ export function emitChannelWatchesServerBoot(
   filePath: string,
   protectedColsByTable: Map<string, Set<string>> | null = null,
   projectReconnectDefault: number | null = null,
+  // §8.1.1 (S451) — the handle of the database scope the `watches=` channels sit in
+  // (the trigger install and the re-SELECT run on the database `pgConnStr` names).
+  sqlHandle: string = "_scrml_sql",
 ): string[] {
   const feeds = channelNodes.filter(
     (n) => n && n._rowChangeSynth && typeof n._rowChangeSynth.pkColumn === "string" && n._rowChangeSynth.pkColumn,
@@ -1029,9 +1032,9 @@ export function emitChannelWatchesServerBoot(
   lines.push("async function _scrml_watches_install_triggers() {");
   lines.push("  try {");
   for (const { ddl } of derived) {
-    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(ddl.fnDDL)});`);
-    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(ddl.dropTrigDDL)});`);
-    lines.push(`    await _scrml_sql.unsafe(${JSON.stringify(ddl.createTrigDDL)});`);
+    lines.push(`    await ${sqlHandle}.unsafe(${JSON.stringify(ddl.fnDDL)});`);
+    lines.push(`    await ${sqlHandle}.unsafe(${JSON.stringify(ddl.dropTrigDDL)});`);
+    lines.push(`    await ${sqlHandle}.unsafe(${JSON.stringify(ddl.createTrigDDL)});`);
   }
   lines.push("  } catch (_e) {");
   lines.push('    console.error("[scrml] watches= trigger install failed:", _e && _e.message);');
@@ -1076,9 +1079,9 @@ export function emitChannelWatchesServerBoot(
     const _hasProt = !!(_protCols && _protCols.size > 0);
     const _selectSql = `SELECT * FROM ${qT} WHERE ${qPk} = $1`;
     if (_hasProt) {
-      lines.push(`        const _rows = _scrml_protect_tag(await _scrml_sql.unsafe(${JSON.stringify(_selectSql)}, [_p.key]), ${JSON.stringify([..._protCols!])});`);
+      lines.push(`        const _rows = _scrml_protect_tag(await ${sqlHandle}.unsafe(${JSON.stringify(_selectSql)}, [_p.key]), ${JSON.stringify([..._protCols!])});`);
     } else {
-      lines.push(`        const _rows = await _scrml_sql.unsafe(${JSON.stringify(_selectSql)}, [_p.key]);`);
+      lines.push(`        const _rows = await ${sqlHandle}.unsafe(${JSON.stringify(_selectSql)}, [_p.key]);`);
     }
     lines.push(`        const _row = _rows && _rows[0];`);
     lines.push(`        if (!_row) return;`);

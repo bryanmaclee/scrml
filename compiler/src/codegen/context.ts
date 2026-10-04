@@ -9,6 +9,7 @@
  */
 
 import { BindingRegistry } from "./binding-registry.ts";
+import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import type { CGError } from "./errors.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { FileAnalysis } from "./analyze.ts";
@@ -242,7 +243,7 @@ export function makeCompileContext(partial: Partial<CompileContext> & { fileAST:
     encodingCtx: partial.encodingCtx ?? null,
     mode: partial.mode ?? "browser",
     testMode: partial.testMode ?? false,
-    dbVar: partial.dbVar ?? "_scrml_sql",
+    dbVar: partial.dbVar ?? fallbackSqlHandle(),
     workerNames: partial.workerNames ?? [],
     errors: partial.errors ?? [],
     registry: partial.registry ?? new BindingRegistry(),

@@ -1,4 +1,5 @@
 import { genVar } from "./var-counter.ts";
+import { fallbackSqlHandle } from "./sql-handle-name.ts";
 import { paramName, paramSignature, type ParamLike } from "./utils.ts";
 import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
@@ -3479,7 +3480,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // wrapper; for an INSERT, inject the ambient tenant. No-op when tenant inactive.
       const { effectiveSql: _tenantSql, tenantTag: _tenantTag } = _lowerTenantForQuery(rawQuery, _tenantAcross, _isReadSql);
       const { sql, params, segments } = extractSqlParams(_tenantSql);
-      const db = opts.dbVar ?? "_scrml_sql";
+      const db = opts.dbVar ?? fallbackSqlHandle();
 
       const taggedFromParams = (): string => {
         const _sqlExprCtx = _makeExprCtx(opts);
@@ -4331,7 +4332,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // requires a callback-shaped emitter restructure and is out of scope
       // for Phase 1.
       const lines: string[] = [];
-      const db = opts.dbVar ?? "_scrml_sql";
+      const db = opts.dbVar ?? fallbackSqlHandle();
       lines.push(`await ${db}.unsafe("BEGIN");`);
       lines.push(`try {`);
       for (const stmt of (node.body ?? [])) {

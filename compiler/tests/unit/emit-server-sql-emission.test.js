@@ -156,13 +156,14 @@ describe("§B <program db=> form emits scoped declaration (only when referenced)
       protectAnalysis: { views: new Map() },
     });
     expect(node._dbScope).toBeDefined();
-    expect(node._dbScope.dbVar).toBe("_scrml_sql_1");
+    // §8.1.1 (S451): one handle per DATABASE; the file default database is `_scrml_sql`.
+    expect(node._dbScope.dbVar).toBe("_scrml_sql");
 
     const ast = makeFileAST([node]);
     const scopes = collectDbScopes(ast);
-    expect(scopes.has("_scrml_sql_1")).toBe(true);
-    expect(scopes.get("_scrml_sql_1").connectionString).toBe("./tasks.db");
-    expect(scopes.get("_scrml_sql_1").driver).toBe("sqlite");
+    expect(scopes.has("_scrml_sql")).toBe(true);
+    expect(scopes.get("_scrml_sql").connectionString).toBe("./tasks.db");
+    expect(scopes.get("_scrml_sql").driver).toBe("sqlite");
   });
 
   test("scoped declaration only emitted when scoped identifier is actually referenced in body", () => {
@@ -225,13 +226,13 @@ describe("§D multi-scope file emits one decl per used identifier in stable orde
       depGraph: { nodes: new Map(), edges: [] },
       protectAnalysis: { views: new Map() },
     });
-    expect(node1._dbScope.dbVar).toBe("_scrml_sql_1");
-    expect(node2._dbScope.dbVar).toBe("_scrml_sql_2");
+    expect(node1._dbScope.dbVar).toBe("_scrml_sql");
+    expect(node2._dbScope.dbVar).toBe("_scrml_sql_1");
 
     const scopes = collectDbScopes(ast);
     expect(scopes.size).toBeGreaterThanOrEqual(2);
-    expect(scopes.get("_scrml_sql_1").driver).toBe("postgres");
-    expect(scopes.get("_scrml_sql_2").driver).toBe("sqlite");
+    expect(scopes.get("_scrml_sql").driver).toBe("postgres");
+    expect(scopes.get("_scrml_sql_1").driver).toBe("sqlite");
   });
 });
 
@@ -310,7 +311,7 @@ describe("§H collectDbScopes returns a Map keyed by dbVar identifier", () => {
   });
 });
 
-describe("§J multi-scope: both _scrml_sql_1 and _scrml_sql_2 produce decls when referenced", () => {
+describe("§J multi-scope: the default _scrml_sql and the second database _scrml_sql_1 (S451: one handle per database) when referenced", () => {
   test("collectDbScopes returns both scoped vars after annotation", () => {
     const node1 = makeProgramDbNode("postgres://host1/db1");
     const node2 = makeProgramDbNode("./local2.db");
@@ -322,12 +323,12 @@ describe("§J multi-scope: both _scrml_sql_1 and _scrml_sql_2 produce decls when
       protectAnalysis: { views: new Map() },
     });
     const scopes = collectDbScopes(ast);
+    expect(scopes.has("_scrml_sql")).toBe(true);
     expect(scopes.has("_scrml_sql_1")).toBe(true);
-    expect(scopes.has("_scrml_sql_2")).toBe(true);
-    expect(scopes.get("_scrml_sql_1").connectionString).toBe("postgres://host1/db1");
-    expect(scopes.get("_scrml_sql_1").driver).toBe("postgres");
-    expect(scopes.get("_scrml_sql_2").connectionString).toBe("./local2.db");
-    expect(scopes.get("_scrml_sql_2").driver).toBe("sqlite");
+    expect(scopes.get("_scrml_sql").connectionString).toBe("postgres://host1/db1");
+    expect(scopes.get("_scrml_sql").driver).toBe("postgres");
+    expect(scopes.get("_scrml_sql_1").connectionString).toBe("./local2.db");
+    expect(scopes.get("_scrml_sql_1").driver).toBe("sqlite");
   });
 });
 
@@ -430,8 +431,8 @@ describe("§K SQLite path normalization — sqlite: prefix added when missing", 
       protectAnalysis: { views: new Map() },
     });
     const scopes = collectDbScopes(makeFileAST([node]));
-    expect(scopes.get("_scrml_sql_1").driver).toBe("postgres");
-    expect(scopes.get("_scrml_sql_1").connectionString).toBe("postgres://user@localhost/mydb");
+    expect(scopes.get("_scrml_sql").driver).toBe("postgres");
+    expect(scopes.get("_scrml_sql").connectionString).toBe("postgres://user@localhost/mydb");
   });
 
   test("explicit sqlite: prefix preserved (idempotent)", () => {

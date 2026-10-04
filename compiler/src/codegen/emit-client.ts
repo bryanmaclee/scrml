@@ -1,4 +1,5 @@
 import { SCRML_RUNTIME } from "../runtime-template.js";
+import { SQL_HANDLE_PATTERN } from "./sql-handle-name.ts";
 import { relative, basename } from "path";
 import { toPosix } from "../path-canonical.js";
 import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTopLevelCommas } from "../expression-parser.ts";
@@ -4299,7 +4300,7 @@ export function generateClientJs(ctx: CompileContext): string {
   const SQL_LEAK_PATTERNS: RegExp[] = [
     /_scrml_sql_exec\s*\(/,                 // legacy helper name (defensive)
     /_scrml_db\s*\./,                       // legacy bun:sqlite db var (defensive)
-    /\b_scrml_sql(?:_\d+)?\s*[.`]/,         // §44 Bun.SQL tag/method calls
+    new RegExp(`\\b${SQL_HANDLE_PATTERN}\\s*[.\`]`), // §44 Bun.SQL tag/method calls — EVERY handle name (sql-handle-name.ts)
     /\bprocess\.env\b/,
     /\bBun\.env\b/,
     /\bbun\.eval\s*\(/,
