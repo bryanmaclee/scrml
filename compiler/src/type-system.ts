@@ -12500,7 +12500,25 @@ function annotateNodes(
       // ------------------------------------------------------------------
       case "guarded-expr": {
         const guardedNode = n.guardedNode as ASTNodeLike | undefined;
-        const errorArms = (n.arms as Array<{pattern?: string; binding?: string; handler?: string; handlerExpr?: unknown; failExpr?: unknown; armArrow?: string; span?: Span}> | undefined) ?? [];
+        const errorArms = (n.arms as Array<{pattern?: string; binding?: string; handler?: string; handlerExpr?: unknown; failExpr?: unknown; armArrow?: string; legacyPipe?: { pattern?: string; canonical?: string }; span?: Span}> | undefined) ?? [];
+
+        // §19.4.5 / §34 — W-ARM-PIPE-LEGACY (S452). A `!{}` handler arm led
+        // by `|` is soft-deprecated (§63.1 Stage 1): it parses identically to
+        // the pipe-less §18.2 match arm. One info-level lint per `|`-led arm.
+        // `legacyPipe` is set ONLY by the `!{}` arm parser's `|` path
+        // (ast-builder.js parseErrorTokens), so a pipe-less arm, an alternation
+        // `|` and a `|` inside an arm body never reach here.
+        for (const arm of errorArms) {
+          const lp = arm.legacyPipe;
+          if (!lp) continue;
+          const armSpan = (arm.span ?? ((n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 })) as Span;
+          errors.push(new TSError(
+            "W-ARM-PIPE-LEGACY",
+            armPipeLegacyMessage(String(lp.pattern ?? ""), String(lp.canonical ?? ""), arm.armArrow ?? ":>", "in a `!{}` handler"),
+            armSpan,
+            "info",
+          ));
+        }
 
         // §18.2 / §34 — W-MATCH-ARROW-LEGACY (S147), `!{}`-handler-arm lockstep.
         // The match and `!{}` handler arms share the §18.2 arm-arrow rule:
@@ -18607,6 +18625,23 @@ function matchArrowLegacyMessage(location: string, glyph: string): string {
     `\`<pattern> :> <body>\`, or run \`bun scrml migrate --fix\` (AST-driven; it ` +
     `rewrites ONLY arm-separator arrows, never arrow-function or fn-return ` +
     `arrows). See SPEC §18.2 / §34.`
+  );
+}
+
+/**
+ * Build the W-ARM-PIPE-LEGACY (§19.4.5 / §34) diagnostic message for a `|`-led
+ * pattern arm — a `!{}` handler arm (here, `guarded-expr`) or an engine
+ * message arm (symbol-table.ts). `pattern` is the arm's pattern as written
+ * after the `|`; `canonical` is the pipe-less spelling (a parenthesis-free
+ * binder written `.V(m)`); `glyph` is the arm's separator as written (the
+ * separator has its own lint, W-MATCH-ARROW-LEGACY, and `scrml fix` leaves it).
+ * The wording is §19.4.5's; `where` (optional) names the arm's context.
+ */
+export function armPipeLegacyMessage(pattern: string, canonical: string, glyph: string, where = ""): string {
+  return (
+    `W-ARM-PIPE-LEGACY: Arm '| ${pattern} ${glyph}'${where ? " " + where : ""} uses the deprecated leading '|'. ` +
+    `A pattern arm is a match arm (§18.2): write '${canonical} ${glyph}'. ` +
+    `Run 'scrml fix' to rewrite every site (§19.4.5).`
   );
 }
 

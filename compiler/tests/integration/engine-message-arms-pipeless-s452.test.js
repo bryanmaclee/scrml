@@ -54,7 +54,14 @@ function assertEquivalent(piped, pipeless) {
   const a = compileAt(dir, piped);
   const b = compileAt(dir, pipeless);
   expect(b.errors).toEqual(a.errors);
-  expect(b.warnings).toEqual(a.warnings);
+  // Identical aside from W-ARM-PIPE-LEGACY (§19.4.5): one per `|`-led arm,
+  // and only on the piped side's `|`-led arms.
+  const isPipeLint = (d) => d.startsWith("W-ARM-PIPE-LEGACY|");
+  const pipeLed = (s) => (s.match(/^[ \t]*\| /gm) ?? []).length;
+  expect(b.warnings.filter((d) => !isPipeLint(d))).toEqual(a.warnings.filter((d) => !isPipeLint(d)));
+  expect(a.warnings.filter(isPipeLint).length).toBe(pipeLed(piped));
+  expect(b.warnings.filter(isPipeLint).length).toBe(pipeLed(pipeless));
+  for (const d of a.warnings.filter(isPipeLint)) expect(d).toContain("|info|");
   expect(b.lints).toEqual(a.lints);
   expect(b.clientJs).toBe(a.clientJs);
   expect(b.serverJs).toBe(a.serverJs);

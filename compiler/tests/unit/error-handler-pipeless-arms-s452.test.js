@@ -178,7 +178,15 @@ describe("S452 — pipe-less `!{}` handler arms compile identically to `|`-prefi
       const b = compileSrc(program(c.piped));
       expect(errorCodes(b.result)).toEqual([]);
       expect(errorCodes(a.result)).toEqual([]);
-      expect(codes(a.result)).toEqual(codes(b.result));
+      // Same diagnostics, aside from W-ARM-PIPE-LEGACY (§19.4.5): exactly one
+      // per `|`-led arm, on either side.
+      // (the case lines carry no `|` in strings / bodies: every `| ` is an arm lead)
+      const pipeLed = (lines) => lines.reduce((n, l) => n + (l.match(/(^|\s)\|\s/g) ?? []).length, 0);
+      const noPipeLint = (r) => codes(r).filter((c) => c !== "W-ARM-PIPE-LEGACY");
+      const pipeLints = (r) => codes(r).filter((c) => c === "W-ARM-PIPE-LEGACY").length;
+      expect(noPipeLint(a.result)).toEqual(noPipeLint(b.result));
+      expect(pipeLints(a.result)).toBe(pipeLed(c.pipeless));
+      expect(pipeLints(b.result)).toBe(pipeLed(c.piped));
       expect(a.clientJs.length).toBeGreaterThan(0);
       expect(a.clientJs).toBe(b.clientJs);
     });

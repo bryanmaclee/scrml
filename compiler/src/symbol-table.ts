@@ -157,7 +157,7 @@ import {
 import { scanForTopLevelSemicolon } from "./multi-statement-scan.ts";
 // s430 — destructured-pattern name walk for E-NAME-COLLIDES-STATE. The two
 // helpers are self-contained (route-inference.ts imports them the same way).
-import { isDestructurePattern, iterDestructuredNames } from "./type-system.ts";
+import { isDestructurePattern, iterDestructuredNames, armPipeLegacyMessage } from "./type-system.ts";
 import { isAuthorMainTag } from "./landmark-tag.ts";
 // §17.1.1 if-chain child SHAPE. `collapseIfChains` (ast-builder.js) rewrites an
 // `if=`/`else-if=`/`else` chain WITH an else arm into `{kind:"if-chain",
@@ -569,6 +569,11 @@ export interface MessageArmEntry {
   /** Local byte offset just past the arm body within the state-child
    *  `bodyRaw`. */
   spanEnd: number;
+  /** §19.4.5 / §51.0.S.2.3 (S452) — present iff the arm is written with the
+   *  soft-deprecated leading `|`: `pattern` is the arm pattern as written
+   *  (between the `|` and the arm arrow), `patternStart` its `bodyRaw` offset.
+   *  Drives the W-ARM-PIPE-LEGACY lint and `scrml fix`'s arm-pipe rule. */
+  legacyPipe?: { pattern: string; patternStart: number };
 }
 
 /**
@@ -821,6 +826,9 @@ export interface EngineStateChildEntry {
    *  dispatch. NOT consumed by the codegen `EngineStateChildEntry` mirror in
    *  `codegen/emit-engine.ts` until batch 3 wires it. */
   messageArms: MessageArmEntry[];
+  /** §19.4.5 (S452) — `rulesRaw` offset where `bodyRaw` begins (message-arm
+   *  offsets are `bodyRaw`-relative). Read by `scrml fix` (arm-pipe rule). */
+  bodyRawOffset?: number;
 }
 
 /**
@@ -7613,6 +7621,26 @@ export function validateEngineStateChildrenAndRules(
           severity: "info",
         });
       }
+    }
+
+    // -- W-ARM-PIPE-LEGACY (info) -- §19.4.5 / §51.0.S.2.3 (S452): a message
+    // arm led by `|` is soft-deprecated; it parses to the same entry as the
+    // pipe-less §18.2 arm. One per `|`-led arm. `legacyPipe` is set only by
+    // parseMessageArms' `|` path (engine-statechild-parser.ts).
+    for (const arm of arms) {
+      if (!arm.legacyPipe) continue;
+      const span: SYMDiagnostic["span"] = engineDecl?.span ?? {
+        file: filePath, start: 0, end: 0, line: 1, col: 1,
+      };
+      errors.push({
+        code: "W-ARM-PIPE-LEGACY",
+        message: armPipeLegacyMessage(
+          arm.legacyPipe.pattern, arm.legacyPipe.pattern, arm.armArrow,
+          `(a message arm in state-child \`<${sc.tag}>\`)`,
+        ),
+        span,
+        severity: "info",
+      });
     }
 
     // -- E-ENGINE-MSG-WITHOUT-ACCEPTS -- arms present but no `accepts=`.

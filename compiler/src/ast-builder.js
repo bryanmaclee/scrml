@@ -17203,6 +17203,24 @@ function _errArmDepthDelta(tok) {
   return 0;
 }
 
+/**
+ * §19.4.5 — the source text of tokens [from, to), single-spaced where the
+ * source had whitespace between two tokens and glued where it had none.
+ */
+function _errArmTokensText(tokens, from, to) {
+  let out = "";
+  for (let k = from; k < to && k < tokens.length; k++) {
+    const t = tokens[k];
+    if (k > from) {
+      const pe = tokens[k - 1].span?.end;
+      const cs = t.span?.start;
+      if (typeof pe !== "number" || typeof cs !== "number" || cs > pe) out += " ";
+    }
+    out += t.text;
+  }
+  return out;
+}
+
 function parseErrorTokens(tokens, filePath, errors) {
   const arms = [];
   let i = 0;
@@ -17305,6 +17323,11 @@ function parseErrorTokens(tokens, filePath, errors) {
       _strayRunOpen = false;
       const armStart = tok;
       if (!_pipeless) i++; // consume `|`
+      // §19.4.5 (S452) — the `|`-led arm is soft-deprecated. Remember where its
+      // pattern starts so the arm record can carry the legacy spelling for the
+      // W-ARM-PIPE-LEGACY lint (type-system.ts `guarded-expr`) and the
+      // `scrml fix` arm-pipe rule (commands/fix-arm-pipe.js).
+      const _patTokStart = i;
 
       // Pattern: `::TypeName`, `.Variant` (bare-dot per §14.10 / M9), or `_`
       let pattern = "_";
@@ -17363,6 +17386,8 @@ function parseErrorTokens(tokens, filePath, errors) {
         pattern = "_";
         i++;
       }
+      const _patHeadEnd = i; // token index just past the pattern head (`.V`, `T.V`, `_`, …)
+      let _bareBinderIdx = -1; // token index of a parenthesis-free binder (`| .V m`, `| _ e`, `| e`)
 
       // Binding variable: bare ident, or `(ident, ...)` tuple-style (§19.4.3
       // canonical). A multi-field error variant binds ALL its payload fields
@@ -17386,6 +17411,7 @@ function parseErrorTokens(tokens, filePath, errors) {
         if (i < tokens.length && tokens[i].kind === "PUNCT" && tokens[i].text === ")") i++;
         binding = _bindNames.join(", ");
       } else if (i < tokens.length && (tokens[i].kind === "IDENT")) {
+        _bareBinderIdx = i;
         binding = tokens[i].text;
         i++;
       }
@@ -17393,16 +17419,53 @@ function parseErrorTokens(tokens, filePath, errors) {
       // Arm arrow — `:>` (canonical), `=>` / `->` (deprecated aliases, §18.2).
       // Record which glyph the source used so the typer can fire the
       // W-MATCH-ARROW-LEGACY lock-step lint for `!{}` handler arms.
+      const _arrowIdx = i;
       let armArrow = ":>";
+      let _arrowFound = false;
       if (i < tokens.length && tokens[i].kind === "OPERATOR" && (tokens[i].text === "=>" || tokens[i].text === ":>")) {
         armArrow = tokens[i].text;
+        _arrowFound = true;
         i++;
       } else if (i < tokens.length && tokens[i].kind === "PUNCT" && tokens[i].text === "-") {
         armArrow = "->";
+        _arrowFound = true;
         i++; // consume `-`
         if (i < tokens.length && tokens[i].kind === "OPERATOR" && tokens[i].text === ">") i++; // won't happen with `>`
         // `>` is emitted as PUNCT `>`
         if (i < tokens.length && tokens[i].kind === "PUNCT" && tokens[i].text === ">") i++;
+      }
+
+      // §19.4.5 (S452) — the legacy `|`-led arm, recorded for W-ARM-PIPE-LEGACY
+      // (type-system.ts `guarded-expr`) and the `scrml fix` arm-pipe rule
+      // (commands/fix-arm-pipe.js). `pattern` is the source text between the
+      // `|` and the arm arrow; `canonical` is that pattern without the `|`: a
+      // parenthesis-free variant binder `.V m` is `.V(m)` (§19.4.3), and a bare
+      // binder with no pattern, `| e :>`, is the whole-error arm `_ e` (§18.6.1
+      // — what impl#1 has always read it as; a pipe-less `e :>` would be
+      // E-MATCH-BARE-BINDER, §18.2). Offsets are the tokens' source offsets.
+      let legacyPipe = null;
+      if (!_pipeless) {
+        const patText = _errArmTokensText(tokens, _patTokStart, _arrowIdx);
+        legacyPipe = {
+          pattern: patText,
+          canonical: patText,
+          arrowFound: _arrowFound,
+          pipeStart: armStart.span?.start,
+          patternStart: tokens[_patTokStart]?.span?.start,
+        };
+        if (_bareBinderIdx >= 0) {
+          const bt = tokens[_bareBinderIdx];
+          legacyPipe.binderStart = bt.span?.start;
+          legacyPipe.binderEnd = bt.span?.end;
+          if (_patHeadEnd === _patTokStart) {
+            legacyPipe.bareBinder = true;
+            legacyPipe.canonical = `_ ${bt.text}`;
+          } else if (pattern !== "_") {
+            legacyPipe.parenFreeBinder = true;
+            legacyPipe.headEnd = tokens[_patHeadEnd - 1].span?.end;
+            legacyPipe.canonical = `${_errArmTokensText(tokens, _patTokStart, _patHeadEnd)}(${bt.text})`;
+          }
+        }
       }
 
       // Handler: collect until next `|`, next simplified arm start, or EOF
@@ -17451,6 +17514,7 @@ function parseErrorTokens(tokens, filePath, errors) {
         handlerExpr: _parseHandlerExpr(_handlerTrimmed, filePath, tokenSpan(armStart, filePath)?.start ?? 0),
         armArrow,
         ...(armTypeQualifier ? { typeQualifier: armTypeQualifier } : {}),
+        ...(legacyPipe ? { legacyPipe } : {}),
         span: tokenSpan(armStart, filePath),
       });
     } else if (tok.kind === "OPERATOR" && tok.text === "::") {
