@@ -9,3 +9,5 @@
 
 ## fix round r2 (BRIEF-r2.md; review of f3021d9f LAND-WITH-NITS)
 - NOTE for PA (item 6): the rule rewrites a headless `| e :>` to `_ e :>` (impl#1 has always read it as the whole-error arm; a pipe-less `e :>` is E-MATCH-BARE-BINDER). The §19.4.5 table does not name this case — SPEC.md not edited; PA to decide whether the table should.
+- r2 committed 0258a2239 (lint coverage/spans/messages, items 1-4,7) + 19ed5b0f0 (fix rule: nested, completeness net, CRLF, gaps filed); merged origin/main 6700ff591 (966dde67e; bootstrap-conformance.ts import conflict resolved keeping both; FACTS regenerated).
+- r2 differential base 6700ff591 vs 966dde67e (same compiler-root path): 0/11406 artifact diffs, 0 outcome changes, 3 code changes (+W only: 2 component cases, samples/login), 8 text-only (code frames), +2 sources. Gate 30190/0; commands+lsp 664/0.
