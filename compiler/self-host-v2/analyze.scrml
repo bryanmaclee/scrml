@@ -5732,6 +5732,8 @@ ${
         return match p {
             .PName(binds: bs) :> bindNames(bs)
             .PWild :> []
+            .PWhole(bind: b) :> [b.name]
+            .PBare(bind: b) :> [b.name]
         }
     }
 
@@ -5957,6 +5959,8 @@ ${
     fn guarded(env: Env, e: AExpr, subj: AExpr, arms: AArm[], failable: boolean, err: Sym | not, isMatch: boolean, stmt: boolean, st0: AS) -> AS {
         let st: AS = st0
         if (!failable) {
+            if (isMatch) st = plainMatchBinderDiags(env, arms, st)
+            if (!isMatch) st = deadHandlerBinderDiags(env, arms, st)
             if (isMatch) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `match` over " + subjectName(subj) + " — a value that is not a failable result — is not in the bootstrap; it arrives with the §18 `match` unit (here `match` is admitted on a call of a `!` function or a `" + sqlSigil() + "}` query, §19.7.1)")
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `!{ … }` handler on " + subjectName(subj) + ", which cannot fail — the SPEC defines `!{}` only on a failable result (§19.4.3 item 3); remove the handler")
         }
@@ -5966,8 +5970,8 @@ ${
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + err.hint + "` has a variant named `Ok`, which a `match` on a failable result reserves for the success value (§19.7.3) — rename the variant")
         }
         let covered: int[] = []
-        let wild = false
-        let okSeen = false
+        let wild = false          // a wildcard arm: plain `_` / `else`, or `_ err` — every remaining ERROR
+        let okSeen = false        // `.Ok`, or a PLAIN wildcard (§18.6.1: `_ err` never takes `.Ok`)
         for (const a of arms) {
             const ra: RArm = resolveArm(env, a, err, vs, isMatch, stmt, st)
             st = ra.st
@@ -5981,20 +5985,26 @@ ${
             } else if ((ra.idx >= 0 && covered.indexOf(ra.idx) >= 0) || (ra.idx == -2 && okSeen)) {
                 st = addDiag(st, env.file, a.span, "E-TYPE-023", "a second arm for the same variant — the first arm already takes it, so this one is unreachable (§18.8.1 E-TYPE-023: duplicate match arm)")
             }
-            if (ra.idx == -1) wild = true
+            if (ra.idx == -1) {
+                wild = true
+                okSeen = true                // a plain wildcard takes the success value too (§19.7.3)
+            }
+            if (ra.idx == -4) wild = true    // `_ err`: every remaining error, never `.Ok` (§18.6.1)
             if (ra.idx == -2) okSeen = true
             if (ra.idx >= 0) covered = covered.concat([ra.idx])
         }
         let missing: string[] = []
         if (isMatch && !okSeen) missing = ["Ok"]
-        let i = 0
-        for (const v of vs) {
-            if (covered.indexOf(i) < 0) missing = missing.concat([v.sym.hint])
-            i = i + 1
+        if (!wild) {
+            let i = 0
+            for (const v of vs) {
+                if (covered.indexOf(i) < 0) missing = missing.concat([v.sym.hint])
+                i = i + 1
+            }
         }
         if (!wild && !isMatch && env.fx.defer) {
             st = addDiag(st, env.file, e.span, "E-DEFER-UNHANDLED-FAILABLE", "a `!{ … }` handler in a deferred statement SHALL carry a catch-all `| _ :> …` arm (§19.16.3 rule 3) — listing every variant of `" + err.hint + "` is not enough: a failure outside the declared enum would otherwise leave the `finally`")
-        } else if (!wild && missing.length > 0) {
+        } else if (missing.length > 0) {
             if (isMatch) {
                 st = addDiag(st, env.file, e.span, "E-TYPE-020", "this `match` over the result of " + subjectName(subj) + " is not exhaustive: it does not cover " + missing.join(", ") + " — a `match` on a failable result covers `.Ok` and every variant of `" + err.hint + "`, or ends with `else :>` / `_ :>` (§19.7.1)")
             } else {
@@ -6015,7 +6025,23 @@ ${
         let idx: int = -3
         const p: APat = a.pat
         const pn: PatName | not = patName(p)
-        if (pn is not) {
+        const wb: WholePat | not = wholePatOf(p)
+        if (wb is some) {
+            // s452 — §18.6.1: `_ err` matches every error variant an earlier arm
+            // did not (never `.Ok`) and binds the WHOLE error value, typed as the
+            // failure's error type. A bare name (§18.2) and `else err` (§18.6.1)
+            // are E-MATCH-BARE-BINDER; they are bound anyway (one report, no
+            // E-SCOPE-001 cascade) and count as that wildcard (no E-TYPE-080 one).
+            idx = -4
+            if (wb.bare) {
+                st = addDiag(st, env.file, a.span, "E-MATCH-BARE-BINDER", bareBinderFailableMsg(wb.b.name))
+            } else if (wb.viaElse) {
+                st = addDiag(st, env.file, a.span, "E-MATCH-BARE-BINDER", elseBinderMsg(wb.b.name))
+            }
+            const rw: RBinds = bindWhole(armEnv, wb.b, err, st)
+            armEnv = rw.env
+            st = rw.st
+        } else if (pn is not) {
             idx = -1
         } else if (isMatch && pn.name == "Ok") {
             idx = -2
@@ -6053,7 +6079,85 @@ ${
         return match p {
             .PName(name: n, binds: bs, parens: pr) :> { name: n, binds: bs, parens: pr }
             .PWild :> not
+            .PWhole(bind: b) :> not
+            .PBare(bind: b) :> not
         }
+    }
+
+    // s452 — an arm whose pattern binds the whole matched value: `_ err`
+    // (§18.6.1), `else err` (`viaElse`), or a bare `err` (`bare`, §18.2).
+    type WholePat:struct = { b: ABind, viaElse: boolean, bare: boolean }
+
+    fn wholePatOf(p: APat) -> WholePat | not {
+        return match p {
+            .PWhole(bind: b, viaElse: v) :> { b: b, viaElse: v, bare: false }
+            .PBare(bind: b) :> { b: b, viaElse: false, bare: true }
+            .PName(name: n) :> not
+            .PWild :> not
+        }
+    }
+
+    // The whole-error binder's local: typed as the failure's error enum
+    // (§18.6.1 "The binder's type is the type of the failure being handled").
+    fn bindWhole(env: Env, b: ABind, err: Sym, st0: AS) -> RBinds {
+        const rb: RSym = mint(st0, b.name)
+        const st: AS = addBind(rb.st, b.nid, BindFact.BBind(rb.s))
+        if (b.name == "_") return { env: env, st: st }
+        return { env: withLocal(env, { name: b.name, s: rb.s, ty: Type.Named(err), mutable: false, narrowed: not, nDecl: not }), st: st }
+    }
+
+    // §18.2's message at a failable site (a `!{}` arm, a `match` on a failable result).
+    fn bareBinderFailableMsg(name: string) -> string {
+        return "Arm pattern '" + name + "' is a bare name. To bind the whole error, write '_ " + name + "' (e.g. '| _ " + name + " :>'); for a catch-all that binds nothing write '_' (or 'else'); or name the variant ('.V(x)') to bind its payload."
+    }
+
+    // §18.2's message in a `match` on any other value.
+    fn bareBinderPlainMsg(name: string) -> string {
+        return "Arm pattern '" + name + "' is a bare name. A match arm does not bind the whole value: write '_' (or 'else') for a catch-all, or name the variant ('.V(x)') to bind its payload."
+    }
+
+    // §18.6.1: `else <name>` — "for the second it offers `_ <name>`".
+    fn elseBinderMsg(name: string) -> string {
+        return "Arm pattern 'else " + name + "' binds a name to 'else', which binds nothing (§18.6). To bind the whole error, write '_ " + name + "' (e.g. '| _ " + name + " :>'); for a catch-all that binds nothing write 'else' alone."
+    }
+
+    // §18.6.1: `_ <name>` on a `match` whose subject is not a failable result —
+    // "says that a match arm binds the whole value only where it is an error,
+    // and offers `_` / `else` or a named variant".
+    fn wholeBinderPlainMsg(name: string) -> string {
+        return "Arm pattern '_ " + name + "' binds the whole matched value, which a match arm does only where that value is an error — a '!{}' arm or a 'match' on a failable result (§18.6.1). Here write '_' (or 'else') for a catch-all, or name the variant ('.V(x)') to bind its payload."
+    }
+
+    // s452 — E-MATCH-BARE-BINDER for every misplaced binder of a `match` whose
+    // subject is NOT a failable result (§18.2, §18.6.1): a bare name, `_ name`,
+    // `else name`.
+    fn plainMatchBinderDiags(env: Env, arms: AArm[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const a of arms) {
+            const wb: WholePat | not = wholePatOf(a.pat)
+            if (wb is some) {
+                let m: string = wholeBinderPlainMsg(wb.b.name)
+                if (wb.bare) m = bareBinderPlainMsg(wb.b.name)
+                if (wb.viaElse) m = elseBinderMsg(wb.b.name)
+                st = addDiag(st, env.file, a.span, "E-MATCH-BARE-BINDER", m)
+            }
+        }
+        return st
+    }
+
+    // The same for a `!{}` on something that cannot fail — a `!{}` arm is a
+    // failable site whatever its subject, so `_ name` is legal there; a bare
+    // name and `else name` are not (§18.2, §18.6.1).
+    fn deadHandlerBinderDiags(env: Env, arms: AArm[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const a of arms) {
+            const wb: WholePat | not = wholePatOf(a.pat)
+            if (wb is some) {
+                if (wb.bare) st = addDiag(st, env.file, a.span, "E-MATCH-BARE-BINDER", bareBinderFailableMsg(wb.b.name))
+                if (wb.viaElse) st = addDiag(st, env.file, a.span, "E-MATCH-BARE-BINDER", elseBinderMsg(wb.b.name))
+            }
+        }
+        return st
     }
 
     fn variantNamesOf(vs: VariantDef[]) -> string[] {
@@ -9944,11 +10048,14 @@ ${
             let aenv: TEnv = env
             const fs: FieldDef[] = armFields(env.t, err, failFact(env.t.fails, a.nid))
             const p: APat = a.pat
+            // s452: a whole-error arm's binder is the whole error enum (§18.6.1)
+            const whole: boolean = armIdx(failFact(env.t.fails, a.nid)) == -4
             let i = 0
             for (const b of patBindsOf(p)) {
                 const bs: Sym | not = bindSym(bindFact(env.t.binds, b.nid))
                 let vt: VType = VType.Unknown
                 if (i < fs.length && env.t.unresolved.fields.indexOf(fs[i].sym.id) < 0) vt = known(fs[i].ty)
+                if (whole && err is some) vt = known(Type.Named(err))
                 if (bs is some) aenv = tWithLocal(aenv, bs, vt)
                 i = i + 1
             }
@@ -10001,6 +10108,8 @@ ${
         return match p {
             .PName(binds: bs) :> bs
             .PWild :> []
+            .PWhole(bind: b) :> [b]
+            .PBare(bind: b) :> [b]
         }
     }
 

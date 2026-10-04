@@ -87,9 +87,16 @@ ${
     export type AArm:struct = { nid: int, span: ASpan, pat: APat, body: AArmBody, legacy: boolean }
     // `.V` / `::V` with its positional binders (`parens`: written `(…)`),
     // or the wildcard (`_` / `else`, §19 alias note).
+    // s452: `PWhole` — the wildcard carrying one binder, `_ err` (§18.6.1, the
+    // whole-error binder; `viaElse`: written `else err`, which §18.6.1 makes
+    // E-MATCH-BARE-BINDER); `PBare` — a bare identifier as the WHOLE pattern
+    // (`err :>`, §18.2 E-MATCH-BARE-BINDER). Both are syntax: whether the arm is
+    // legal (a failable site or not) is analyze's.
     export type APat:enum = {
         PName(name: string, binds: ABind[], parens: boolean),
         PWild,
+        PWhole(bind: ABind, viaElse: boolean),
+        PBare(bind: ABind),
     }
     // A binder: a name, or `_` (binds nothing).
     export type ABind:struct = { nid: int, span: ASpan, name: string }

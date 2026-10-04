@@ -1727,7 +1727,7 @@ ${
         for (const r of h.retag) {
             let vals: Expr[] = []
             for (const b of r.binds) { vals = vals.concat([Expr.Local(b)]) }
-            out = out.concat([{ pat: Pattern.PVariant(h.err, r.from, r.binds), body: block([Stmt.Fail(into, r.to, vals)]), value: not }])
+            out = out.concat([{ pat: Pattern.PVariant(h.err, r.from, r.binds), body: block([Stmt.Fail(into, r.to, vals)]), value: not, whole: not }])
         }
         return out
     }
@@ -1751,17 +1751,28 @@ ${
     }
 
     // The failure arms: every arm but a `match`'s `.Ok`, in source order.
+    // s452: a whole-error arm (`_ err`, analyze's FArm(-4), §18.6.1) is the
+    // wildcard binding the whole error value to its binder's Sym.
     fn errArms(c: LC, h: HandledFact, arms: AArm[], isMatch: boolean) -> ErrArm[] {
         let out: ErrArm[] = []
         for (const a of arms) {
             const idx: int = armIdxOf(c.t, a)
             if (idx == -1) {
-                out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a) }])
+                out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a), whole: not }])
+            } else if (idx == -4) {
+                out = out.concat([{ pat: Pattern.PWild, body: armBody(c, h, a), value: armValue(c, h, a), whole: wholeSym(c, a) }])
             } else if (idx >= 0) {
-                out = out.concat([{ pat: Pattern.PVariant(h.err, idx, armBindSyms(c, a)), body: armBody(c, h, a), value: armValue(c, h, a) }])
+                out = out.concat([{ pat: Pattern.PVariant(h.err, idx, armBindSyms(c, a)), body: armBody(c, h, a), value: armValue(c, h, a), whole: not }])
             }
         }
         return out
+    }
+
+    // The whole-error binder's Sym (the binder minted it; `_ _` binds nothing visible but still has one).
+    fn wholeSym(c: LC, a: AArm) -> Sym | not {
+        const bs: Sym[] = armBindSyms(c, a)
+        if (bs.length == 1) return bs[0]
+        return not
     }
 
     fn armIdxOf(t: Tables, a: AArm) -> int {
@@ -1780,6 +1791,8 @@ ${
         const bs: ABind[] = match p {
             .PName(binds: b) :> b
             .PWild :> []
+            .PWhole(bind: b) :> [b]
+            .PBare(bind: b) :> [b]
         }
         let out: Sym[] = []
         for (const b of bs) {

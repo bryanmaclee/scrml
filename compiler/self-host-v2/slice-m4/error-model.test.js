@@ -321,9 +321,10 @@ describe("Ue2 — slice limits, refused (never accepted and ignored)", () => {
   test("a block arm that falls through, where the result is used as a value", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        const r = load("x") !{ | _ :> { @n = 1 } }\n    }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
-  test("a binder without parentheses (`| .V m :>`, `| _ e :>`) — the SPEC does not settle what it binds", () => {
+  test("a payload binder without parentheses (`| .V m :>`, §19.4.3 ruling 2) — not built yet, refused", () => {
     expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | .NotFound m :> @log = m | _ :> @log = "o" }\n    }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
-    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ e :> @log = "o" }\n    }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    // s452: `| _ e :>` is the whole-error binder (§18.6.1) — error-rulings.test.js
+    expect(codes(P(`${TYPES}\n${LOAD}\n    function go() {\n        load("x") !{ | _ e :> @log = "o" }\n    }`))).toEqual([]);
   });
   test("`transaction { … }` names unit U1e", () => {
     const src = P(`${TYPES}\n    function f()! LoadError {\n        transaction {\n            @n = 1\n        }\n    }`);
