@@ -274,9 +274,13 @@ describe("helpers", () => {
 
 // s449-bootstrap-form-validity: the bootstrap reports I- notes (I-FORM-SUBMIT-GATED, §55.17.6 "reports
 // in the warnings stream") in a separate non-fatal `infos` list. The codes half unions both streams, as
-// conformance/run.ts does for impl#1; an I- code in `infos` has observable severity "info".
+// conformance/run.ts does for impl#1.
+// s451-boot-diag-severity: severity is no longer inferred from the stream — every Diag carries its §34
+// severity (compiler/self-host-v2/severity.scrml), and the codes half grades THAT. §34 (S451): "A code
+// whose Severity column reads **Error** fails the compile … **Warning** and **Info** codes do not fail
+// the compile."
 describe("codes half — the bootstrap's non-fatal infos stream", () => {
-  const d = (code) => ({ code, message: "", file: "f", span: { start: 0, end: 0 } });
+  const d = (code, severity = "Info") => ({ code, severity, message: "", file: "f", span: { start: 0, end: 0 } });
   test("a required code found only in `infos` holds; severity info holds; any other severity fails", () => {
     expect(codesHalfFailures({ codes: ["I-FORM-SUBMIT-GATED"] }, [], [d("I-FORM-SUBMIT-GATED")])).toEqual([]);
     expect(codesHalfFailures({ severity: { "I-FORM-SUBMIT-GATED": "info" } }, [], [d("I-FORM-SUBMIT-GATED")])).toEqual([]);
@@ -288,6 +292,25 @@ describe("codes half — the bootstrap's non-fatal infos stream", () => {
   });
   test("forbidden codes are judged over both streams", () => {
     expect(codesHalfFailures({ notCodes: ["I-X"] }, [], [d("I-X")])).toEqual(["forbidden I-X fired"]);
+  });
+});
+
+describe("codes half — the Diag's own §34 severity is graded (s451-boot-diag-severity)", () => {
+  const d = (code, severity) => ({ code, severity, message: "", file: "f", span: { start: 0, end: 0 } });
+  test("an Error / Warning in `diags` is graded by its severity field, not its stream or prefix", () => {
+    expect(codesHalfFailures({ severity: { "E-SCOPE-001": "error" } }, [d("E-SCOPE-001", "Error")])).toEqual([]);
+    expect(codesHalfFailures({ severity: { "W-LIFECYCLE-010": "warning" } }, [d("W-LIFECYCLE-010", "Warning")])).toEqual([]);
+    expect(codesHalfFailures({ severity: { "E-DG-002": "warning" } }, [d("E-DG-002", "Warning")])).toEqual([]);
+    expect(codesHalfFailures({ severity: { "W-LIFECYCLE-010": "error" } }, [d("W-LIFECYCLE-010", "Warning")]))
+      .toEqual(["severity: W-LIFECYCLE-010 fired as warning (expected error)"]);
+  });
+  test("every occurrence must carry the asserted severity", () => {
+    expect(codesHalfFailures({ severity: { "E-X": "error" } }, [d("E-X", "Error"), d("E-X", "Warning")]))
+      .toEqual(["severity: E-X fired as error+warning (expected error)"]);
+  });
+  test("a Diag with no severity field is unobservable (a bootstrap defect, reported)", () => {
+    expect(codesHalfFailures({ severity: { "E-X": "error" } }, [{ code: "E-X", message: "", file: "f" }]))
+      .toEqual(["severity unobservable: E-X fired with no severity on its Diag (expected error)"]);
   });
 });
 
