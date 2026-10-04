@@ -17235,6 +17235,33 @@ function parseErrorTokens(tokens, filePath, errors) {
       ));
       return;
     }
+    // S452 r5 — a named-field binder `.V(field: x) :>` is valid §18.2
+    // (`binding ::= FieldName ':' Identifier`) but impl#1's `!{}` arm parser
+    // does not support it yet. Say so instead of calling it malformed.
+    if (b && b.kind === "PUNCT" && b.text === "(") {
+      let j = pe + 1;
+      let sawColon = false;
+      const binders = [];
+      while (j < tokens.length && !(tokens[j].kind === "PUNCT" && tokens[j].text === ")")) {
+        if (tokens[j].text === ":") sawColon = true;
+        else if (tokens[j].kind === "IDENT") {
+          // keep the binder (the ident after `:`), not the field name
+          if (tokens[j - 1] && tokens[j - 1].text === ":") binders.push(tokens[j].text);
+        }
+        else if (!(tokens[j].kind === "PUNCT" && tokens[j].text === ",")) break;
+        j++;
+      }
+      if (sawColon && tokens[j] && tokens[j].text === ")" && _errArmIsArrowAt(tokens, j + 1)) {
+        const head = tokens.slice(k, pe).map((x) => x.text).join("");
+        errors.push(new TABError(
+          "E-PARSE-001",
+          `E-PARSE-001: the named-field binder in \`${head}(…: …)\` is not yet supported in impl#1's \`!{}\` handlers ` +
+          `(it is valid §18.2). Bind the payload positionally instead, in field order — e.g. \`${head}(${binders.length ? binders.join(", ") : "x"}) :>\`.`,
+          tokenSpan(t, filePath),
+        ));
+        return;
+      }
+    }
     errors.push(new TABError(
       "E-PARSE-001",
       `E-PARSE-001: unexpected \`${t.text}\` in a \`!{}\` handler — it does not start an arm, so it would be dropped. ${ARM_SHAPES}`,

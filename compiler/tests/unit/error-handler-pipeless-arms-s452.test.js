@@ -413,3 +413,71 @@ describe("S452 r3 — a type-qualified arm must name the handled error type", ()
     expect(errorCodes(result)).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// S452 r5 — the qualifier check compares the ENUMS (aliases resolved), and the
+// named-field binder gets an honest "not yet supported" message.
+// ---------------------------------------------------------------------------
+
+/** Program whose failable `loc` declares `errType`, plus extra type decls. */
+function aliasProgram(extraTypes, errType, armLines) {
+  return [
+    "<program>",
+    "type E:enum = { Bad(msg: string), Gone }",
+    "type S:enum = { Empty, Unknown, Full }",
+    ...extraTypes,
+    `function loc(n)! -> ${errType} {`,
+    "    if (n < 2) fail E::Bad(\"bad-msg\")",
+    "    if (n < 3) fail E::Gone",
+    "    return n",
+    "}",
+    "export function go(n) {",
+    "    const r = loc(n) !{",
+    ...armLines,
+    "    }",
+    "    return r",
+    "}",
+    "</program>",
+    "",
+  ].join("\n");
+}
+
+describe("S452 r5 — E-TYPE-ARM-QUALIFIER-MISMATCH resolves type aliases on both sides", () => {
+  const QM = "E-TYPE-ARM-QUALIFIER-MISMATCH";
+  test("alias on the handled side: `-> A` (A = E), arms `E.Bad(m)` / `E.Gone` — no error, arms run", () => {
+    const { result, clientJs } = compileSrc(aliasProgram(["type A = E"], "A", ["        E.Bad(m) :> m", "        E.Gone :> \"gone\""]));
+    expect(errorCodes(result)).toEqual([]);
+    expect(runGo(clientJs, 1)).toBe("bad-msg");
+    expect(runGo(clientJs, 2)).toBe("gone");
+  });
+  test("alias on the qualifier side: `-> E`, arms `A.Bad(m)` / `A.Gone` (A = E) — no error", () => {
+    const { result } = compileSrc(aliasProgram(["type A = E"], "E", ["        A.Bad(m) :> m", "        A.Gone :> \"gone\""]));
+    expect(errorCodes(result)).toEqual([]);
+  });
+  test("alias chain on both sides (B = A = E) — no error", () => {
+    const { result } = compileSrc(aliasProgram(["type A = E", "type B = A"], "B", ["        A.Bad(m) :> m", "        _ :> \"other\""]));
+    expect(errorCodes(result)).toEqual([]);
+  });
+  test("a genuine mismatch through an alias still fires (`-> A`, A = E, arm `S.Empty`)", () => {
+    const { result } = compileSrc(aliasProgram(["type A = E"], "A", ["        .Bad(m) :> m", "        S.Empty :> \"x\"", "        _ :> \"other\""]));
+    const e = (result.errors ?? []).find((x) => x.code === QM);
+    expect(e).toBeDefined();
+    expect(String(e.message)).toContain("`A` (= `E`)");
+  });
+  test("a genuine mismatch where the QUALIFIER is an alias (`T = S`, arm `T.Empty` on `E`) fires", () => {
+    const { result } = compileSrc(aliasProgram(["type T = S"], "E", ["        .Bad(m) :> m", "        T.Empty :> \"x\"", "        _ :> \"other\""]));
+    expect(errorCodes(result)).toContain(QM);
+  });
+});
+
+describe("S452 r5 — named-field binder message", () => {
+  test("`.Bad(msg: m) :>` is E-PARSE-001 saying the named-field binder is not yet supported", () => {
+    const { result } = compileSrc(program(VALUE(["        .Bad(msg: m) :> m", "        _ :> \"other\""])));
+    const e = (result.errors ?? []).find((x) => x.code === "E-PARSE-001");
+    expect(e).toBeDefined();
+    expect(String(e.message)).toContain("named-field binder");
+    expect(String(e.message)).toContain("not yet supported");
+    expect(String(e.message)).toContain("`.Bad(m) :>`");
+    expect(String(e.message)).not.toContain("does not start an arm");
+  });
+});
