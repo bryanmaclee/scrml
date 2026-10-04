@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 240 | 6 |
 | MED | 501 | 4 |
-| LOW | 258 | 0 |
+| LOW | 259 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -22811,3 +22811,7 @@ Governing: SPEC §19.4.5 (S452) — a `!{}` arm is a §18.2 `match-arm`; the `|`
 ### g-impl1-match-leading-pipe-misleading-diagnostic-s452 — impl#1 DIAGNOSTIC DEFECT (filed, not fixed): a `match` whose arms carry a leading `|` reports E-TYPE-020 "Missing variants" for every variant instead of naming the `|` — `NEW S452; LOW; open`
 <!-- @gap id=g-impl1-match-leading-pipe-misleading-diagnostic-s452 sev=LOW status=open locus=compiler/src/codegen/emit-control-flow.ts:1486(parseMatchArm — no `|`-led form)+compiler/src/type-system.ts:18744(checkMatchDiagnostics — an unrecognised arm is not counted, so every variant reads as missing) prov=ruling:user-voice-scrml.md-S452-"c-looks-right" -->
 Governing: SPEC §18.2 (a `match-arm` has no leading `|`) and §19.4.5 (the `|`-led arm is a `!{}`-only legacy form; it was never in `match`). Measured on `df6dad5ac`: `return match d { | .North :> "up"⏎ | .South :> "down" }` over `type Dir:enum = { North, South }` → **E-TYPE-020** *"Non-exhaustive match over enum type `Dir`. Missing variants: ::North, ::South"*, plus W-CG-UNDEFINED-INTERPOLATION quoting `/* E-CG-003: match expression had no lowerable arms */`. The compile fails closed, but neither message names the cause; an author coming from a `!{}` (where the `|` was the shown form) cannot tell what is wrong. The fix is a diagnostic that names the leading `|` and offers the arm without it (no new acceptance — §19.4.5 does not put `match` in the window). Note: the SPEC itself still shows a `|`-led `match` arm in §14 (`| .Small => ...`, the bare-variant bullet) and §18.19 (`| _ :> advanceOne(st)` and "a whole-product `| _ :>` wildcard arm"), which §18.2/§18.19's grammar does not admit — reported to the PA, not edited by this change.
+
+### g-impl1-multi-scrutinee-pipe-wildcard-accepted-s452 — impl#1 DIVERGENCE (filed, not fixed): a multi-scrutinee `match (a, b) { … | _ :> r }` compiles — the `|`-led whole-product wildcard is accepted silently, though §18.2 / §18.19's grammar has no leading `|` — `NEW S452; LOW; open`
+<!-- @gap id=g-impl1-multi-scrutinee-pipe-wildcard-accepted-s452 sev=LOW status=open locus=compiler/src/codegen/emit-control-flow.ts(multi-scrutinee arm lowering)+compiler/src/type-system.ts:18744(checkMatchDiagnostics product-wildcard exemption) prov=spec:§18.2+§18.19(S452-currency-correction) -->
+Governing: SPEC §18.19 `product-pattern ::= … | wildcard-arm` and §18.2 `match-arm` (no leading `|`). Before S452 the SPEC itself showed `| _ :> advanceOne(st)` and the E-MATCH-SCRUTINEE-ARITY row said "optionally `| _`"; both were corrected to `_ :>` as a currency correction (§18.2 governs; context: ruling:user-voice-scrml.md S452 "c looks right"). Measured on `58c11625f`: `match (a, b) { (.X, .P) :> 1⏎ | _ :> 2 }` compiles, and its emitted client JS is identical to the `_ :> 2` form. Corpus: 0 such arms (`examples/` `samples/` `conformance/` `stdlib/` `compiler/self-host-v2/` `docs/`), so no migration. The single-scrutinee `|`-led arm is rejected (`g-impl1-match-leading-pipe-misleading-diagnostic-s452`) — impl#1 is inconsistent between the two `match` heads.
