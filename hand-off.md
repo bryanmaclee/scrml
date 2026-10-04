@@ -1,3 +1,209 @@
+# scrml — Session 453 (peter · AdiPDesk) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Concurrent:
+> **S452-bryan (ASUS) LIVE the whole session** — he landed #1273–#1280 and #1287 while this session
+> worked; footprints were disjoint in source, and every collision was in the two generated docs.
+> Board: `scrml-support/handOffs/active-sessions/S453-peter-adipdesk.md`. Rulings consumed:
+> `user-voice-scrml.md` §S449 (A3, B1a, B1b, B2). Peter's voice: `user-voice-pjoliver11.md` §S453.
+> Mechanical state: delta-log `[3682]`–`[3688]`; review ledger `docs/pr-reviews.md` (markers for
+> #1283/#1286; **11 owed, all bryan's**).
+>
+> **First AdiPDesk session since S436** — this box was 174 commits behind on scrml and 257 on
+> scrml-support at boot.
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 0. Nothing is waiting on us; two things are waiting on bryan, and they are ONE arc
+The answered queue is **drained**. The route note (`handOffs/incoming/2026-10-04-from-S453-peter-to-bryan-answered-items-built.md`)
+carries **5 readings** in his veto window and **5 routed findings**. The two that matter are the same
+family and should be built together on one word:
+- **`g-handler-callref-auto-wrap-drops-async-callee-rejection`** — the limb #1283 does NOT close.
+  `onclick=fn()` lowers through the §5.2.2 auto-wrap to `function(event) { fn(); }`, so the listener
+  stays **SYNC** and an async callee's rejection escapes unobserved. **Measured: 1251 call-ref sites
+  in 640 files; 464 sites / 180 files sit in a file that also declares a server fn** (the sharp upper
+  bound) — against the 57 async-coloured sites #1283 covers. **Ruling-gated**: §5.2.2 normatively says
+  *"The compiler MUST auto-wrap the call as `function(event) { fn(); }`"*, so changing it moves the
+  language surface. Recommended shape: the `.catch(→ _scrml_error_boundary_log)` arm §13.2's
+  fire-and-forget writes already use. ⚑ **The root in the entry is TRACED, not guessed**: the mangled
+  `_scrml_fetch_*` name is substituted before the wrapper is built, while the async-root resolver keys
+  on the AUTHOR name — a name-space mismatch from emission order. A first hypothesis ("the asyncness is
+  one level down") was **falsified by a two-form differential** and is recorded as such.
+- **`g-errorboundary-async-render-rejection-unobserved-s453`** (LOW) — same class, one surface over
+  (`emit-event-wiring.ts:~2430`, `${renderFn}();` with no `await`/`.catch`). Fix the family once.
+
+### 1. If bryan says no / stays silent: the next-best in-lane work
+- **Dog-food aM in happy-dom against current main.** The client-render harness recipe is in memory
+  (`reference-client-render-dogfood-harness`); this box now has aM synced at `156952a` and the A/B
+  method proven (see §aM below). Historically the richest vein for fresh silent-wrong bugs.
+- **The aM `/sw.js` static-allowlist question** — reach a turnkey ask for bryan (below).
+
+### 2. aM — the pin-bump re-verification is DISCHARGED through #1287; two Pi blockers remain, aM-side
+**Two A/Bs, because main moved mid-session and the second one is NOT inert.**
+
+**(a) #1257–#1272 — inert.** A/B compile of `assetManagement/app/src` (aM main `156952a`): scrml
+`15399647` (the parent of #1258) vs `df6dad5a` → **26 of 26 emitted artifacts byte-identical**, 0 errors
+both sides, identical warning and lint counts.
+
+**(b) #1287 (the §14.8.10 tenant floor filtering at the SOURCE) — CHANGES aM's output, but is
+behaviourally inert for it.** bryan asked for this explicitly in his S452 note (*"If aM uses
+tenant-scoped tables, its server-side results may change — check aM before the next pin bump"*), and
+the answer is measured, not assumed:
+- A/B `fcdc83ca2` (its parent) vs `d33842588`: **all four `.server.js` artifacts differ**, each by the
+  **same +38 lines** — the source-side filter's runtime preamble (an `AsyncLocalStorage` request scope
+  installed around every route handler, so in-process peer callables carry the request too). The `.html`
+  / `.css` / `.client.js` artifacts are untouched.
+- Diagnostics: the ONLY change is **`I-TENANT-ACROSS` 35 → 29** (info-level). No errors, no other code moves.
+- **Behaviourally inert for aM because its opt-out discipline is complete:** aM has **15 query lines**
+  touching a tenant-scoped table (`companies`, `user_roles`) and **zero of them lack
+  `.acrossTenants()`** — the only unscoped read. Its author tracked this deliberately (`auth.scrml:118`
+  defers multi-tenant; several portal comments read *"No tenant_id → no .acrossTenants()"*), and every
+  tenant-scoped read hardcodes `tenant_id = 1`.
+- ⚑ **The standing risk this creates for aM, and it is fail-closed in the dangerous direction:** per the
+  emitted comment, *no active tenant — an unpinned request, or code running outside any request (boot, a
+  background job, a WebSocket callback) — means ZERO rows.* So the FIRST tenant-scoped read aM adds
+  without `.acrossTenants()`, or any such read reached outside a request scope, silently returns nothing
+  rather than leaking. Re-run the 15-line grep after any aM query work.
+
+⚠️ **Supersedes the mid-session claim** (in the delta-log at `[3688]` and in the route note's first
+draft) that "all of S451+S452 is inert on aM" — that was measured before #1287 existed. (a) stands; (b)
+is the correction.
+**Mechanism, so it is never re-derived:** aM nests db scopes that all name the same file
+(`<program db="sqlite:app.db">`, then per page `<page db="../app.db">` wrapping
+`<db src="../app.db" protect="password_hash" tables=…>`), so #1264 changed which scope is *nearest*,
+not which database *opens*, across 388 `?{}` sites. **Exactly one query handle per emitted file**
+(`_scrml_sql`, no `_scrml_sql_<n>`), so the S451 handle-name hazard — the tenant floor matching only
+the old name and skipping new numbered handles — **does not reach aM**. `_scrml_protect_tag` is live
+on the protected reads; `_scrml_db_guard` wraps every handle.
+⚑ **Checked rather than inherited:** `app/src/scrml.toml` is **zero bytes**, which looked like an
+empty file propping up S450's deploy guard. It is correct by design — load-bearing by EXISTING, marking
+`app/src` as the project root; without it the root walk-up reaches the repo-root `.git` and the recorded
+data root moves. Artifacts record the canonical path as `app.db` via
+`_scrml_sqlite_referenced("app.db", "../app.db", "pages/<f>.scrml")` (arg 1 resolves against
+`SCRML_DATA_DIR`; args 2–3 are diagnostics only). §47.14's refuse-to-create-outside-the-data-root holds.
+**Blockers (aM repo, not scrml):** (1) the asset-app systemd unit needs `SCRML_DATA_DIR=/home/pi/app`;
+(2) `/`, `/index.html`, `/sw.js` 404 under the static allowlist (#1162, §47.13) — aM must ship them as
+build-written assets OR scrml needs a sanctioned extra-static mechanism (no config knob found; that is
+the ask for bryan). Also still standing: do NOT migrate aM's `db.js` replace-all to `transaction {}`
+until the shared-connection HIGH is confirmed closed by #1251 — his guard landed, aM's path is unverified.
+
+### 3. Filed, deliberately not built
+- **`g-transaction-exit-refused-in-a-decl-position-match-arm-whose-lowering-is-inline`** (LOW) — the
+  B1 guard over-refuses one exotic shape. Peter ruled *"I would prefer to fix the reason"*: the reason
+  was corrected in 5 code sites + SPEC + both §34 rows, the refusal kept. Narrowing needs a runtime
+  proof against real `bun:sqlite` for BOTH the single-scrutinee decl shape and the multi-scrutinee one
+  (which is a third lowering again); the entry names the gate and the recipe.
+- **A lambda-arrow-body `transaction`** builds no `transaction-block` node, so B1b's refusal has a
+  bypass — but it fails **LOUD** (`E-CODEGEN-INVALID-LOGIC` on both base and head). ⚑ Severity was
+  **corrected during review**: the first write-up said "silent, exit 0", true only at the AST/checker
+  level. On our reading it does not meet the S435 bar; routed as B-3 with that correction stated.
+- **`g-stmt-match-block-return-falls-through`** (HIGH, bryan's) — locus now **TRACED** to
+  `emitMatchExprDecl` / `emitMatchExpr` for both match positions, with the S453 runtime reproduction:
+  inside a transaction it is a **durability** defect, not just a wrong value. #1286 CONTAINS it by
+  refusing the shape; still open outside a transaction.
+
+## 🔭 DURABLE
+
+**A ruling can be unimplementable in one position, and saying so is the deliverable.** bryan ruled
+that `return`/`break`/`continue` out of a `transaction {}` roll back. They do — except inside a `match`
+arm, where impl#1 lowers the arm as a nested function so the exit leaves only the arm. The agent built
+a naive version without that limb and **measured** the consequence: compiled clean, the author's
+`return` swallowed, the post-`match` write ran, every row persisted, no rollback anywhere. So B1a is
+implemented everywhere else and the arm stays refused — and that gap between ruling and implementation
+is the FIRST item in the route note, not a footnote.
+
+**The cheapest fix is sometimes no fix, and only execution tells you.** B1a required **zero codegen
+change**: the parked S450 lowering already wrapped the block in `try { … } finally { ROLLBACK }`, and JS
+runs `finally` on a `return` out of its `try`. S450 spent a review round refusing a shape its own
+lowering already handled. The `finally` is also *better* than the explicit exit-marking the brief
+assumed — it rolls back after the return expression is evaluated, so `return n.c` returns 1 then rolls
+back, where rollback-then-return would return 0.
+
+**A complete differential proves coverage over the shapes the corpus contains, and nothing about the
+shapes it doesn't.** The A3 fix shipped a real defect — a parenthesized concise arrow body emitted
+invalid JS, because parens are not AST nodes so the wrap landed inside an object literal and produced a
+property named `try`. The **44-of-44, 57-of-57 differential read green on it**, correctly, because every
+corpus listener site is block-bodied. What found it was a shape table enumerating what the LANGUAGE
+admits. The reviewer then found a second instance of the same offset assumption one layer out (a comment
+inside the wrapping parens), unreachable from source today and recorded as a hardening note.
+
+**A probe is blind in two independent ways — the fields it reads and the stages it runs.** A
+`compileScrml({write:false})` probe cannot surface any `E-CODEGEN-*` diagnostic, because it never runs
+codegen. It falsified two *true* PA corrections, and worse, it had silently invalidated the agent's own
+"0 of 993 files change" corpus differential, which had to be re-closed with `write:true`. Saved to
+memory as the sibling of the three-result-fields lesson.
+
+**An exit code behind a pipeline is not an exit code.** `timeout 300 git push … | tail -2; echo $?`
+reports *`tail`'s* status, so a push killed by its own timeout reported success and the remote silently
+stayed at the pre-rebase commit. The same shape hid a failed `git apply`, and a third instance cost 30
+minutes: a wait-loop whose `jq -e` calls failed because **`jq` is not installed on this box**, so "not
+yet" was indistinguishable from "broken". Three instances in one session of the §8 failure the contract
+already names — the lesson is not "be careful", it is **never put a command whose status you need behind
+a pipe, and make every wait loop print why it is still waiting.**
+
+## ⚑ MISSES (mine)
+1. ★★ Three self-inflicted instances of §8's indistinguishable-failure class (above): two masked exit
+   codes and one `jq`-dependent wait loop that ran 30 minutes in silence — in the very script where I
+   had written that it was "bounded so an error can't render as keep-waiting". The bound fired; the
+   detection never could.
+2. ★ Hung a shell on a `python3` heredoc — the Store stub — which is recorded in my own memory and in
+   the S450 misses list. Read it at boot, did it anyway.
+3. ★ Called the `master-list.md` churn a "per-clone artifact". It is a git SHA-**abbreviation** artifact
+   driven by repo object count. The decision to exclude it was right; the reason I gave was wrong.
+4. ★ Told Peter the newly-installed codegen agent would only take effect next session. It registered
+   immediately.
+5. ★ My named locus for the A3 dispatch would have shipped an incomplete fix — I named one colouring
+   entry point; there are two, feeding 14 further listener sites. The agent found the second from a map
+   *inventory* row. The brief's verify-the-locus instruction is what saved it, not the locus.
+6. ★ Nearly routed a mis-sized ask to bryan: the lambda-body `transaction` was queued as a silent-wrong
+   S435 exception ask when it is actually loud. The review caught it.
+
+## Gate at close
+- **Cloud `gate` is the authority and was green on every landing:** #1283, #1286, #1289 each merged only
+  with `gate` + `windows` + `tracking` **all passing on the PR's current head**, checked by hand with
+  `gh pr checks`. ⚑ `scripts/merge-on-green.sh` does **not** exist on this box (scripted S438 on the
+  laptop, never committed) — worth committing it, or the check stays manual here.
+- **Local full suite NOT run at close, and it would be red if it were** — this box carries ~96–100
+  pre-existing failing names (S436-measured; counts are noise, name sets are the only valid read). This
+  is why every landing went up as a **NEW REF**: the pre-push hook (line 101) skips the suite for a new
+  ref and runs it for an update, and an update push here is rejected on pre-existing red.
+- `facts.ts --check` PASS · `regen-spec-index.ts --check` PASS · `state.ts --check` PASS for gap-counts;
+  `recent-sessions` (master-list) deliberately left stale — SHA-abbreviation churn, **not** a CI gate.
+- Review floor: markers for #1283/#1286 landed; **11 owed, all S451/S452-bryan's** (not drained —
+  shared surface, his session live).
+
+
+## Maps (wrap 6c) — ⚑ NOT REFRESHED THIS SESSION, and that is owed
+The `project-mapper` dispatch was launched at wrap and **produced nothing before close** — the stamp is
+still `d3e660a08` (the S451 wrap), so the maps are now behind by the S452 landings (#1273–#1280, #1287)
+and all three S453 landings (#1283, #1286, #1289). Stated rather than skipped. **Re-run it next session**
+with the same brief, which carries a measured router gap worth fixing:
+
+Both S453 adversarial reviewers independently reported that the handler-async-colouring / listener-registration
+surface has **no Task-Shape Routing row at all**, and that the symbols a dispatch brief would name are
+absent from the whole set — across all 13 maps, `colorHandlerAsync` **0 hits**, `armFactoryLines` **0**,
+`rootAsync` **0**, `E-TRANSACTION-CONTROL-FLOW` **0**; `colorAsyncFunctionExpr` / `colorActiveHandler`
+one hit each, and it was a plain file-inventory row (`structure.map.md:861`).
+
+⚑ **That inventory row was the single most load-bearing line in the map set this session** — it is what
+revealed there are TWO colouring entry points, which redirected the A3 fix off the locus my own brief had
+named and prevented a landing that would have left 14 listener sites silently unlogged. The *routing*
+rows were not load-bearing for either arc. So the feedback is not "add more routing rows" — it is that an
+inventory row outperformed them here, which is a signal about where map value actually comes from and is
+worth recording in the non-compliance report rather than smoothing over.
+Also owed to that report: PRIMER §12 lists `scrml-js-codegen-engineer`'s tool set as including `Agent`
+while the staged definition in `scrml-support/agents/` does not — one of the two is stale, and the staged
+dir is an S217 snapshot (3½ months old) whose live source is on bryan's machine.
+
+## Worktrees + branches
+Removed: the spent A/B compile tree, both frozen review trees, both agent trees, and the
+cross-session `agent-a17aa5322771d6ebc` (audited first — its one unlanded-looking commit's test passes
+unskipped on main, so the fix had landed; tree removed, ref kept).
+Deleted on origin: `brief/s453`, the two superseded `fix/` refs, and **`hold/s450-transaction-in-function-body`**
+(landed as #1286). **RETAINED: `hold/s450-each-row-interp-whitespace` @`d5500e69`** — the B2 gap entry
+cites it as the parked fix, so it must survive. Older holds untouched.
+
+---
+
 # scrml — Session 451 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Solo session. **Rulings authority:**
