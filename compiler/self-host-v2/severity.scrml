@@ -11,7 +11,7 @@
 // ast.scrml `newDiag` is the one Diag constructor and reads `severityOf`. The
 // code's prefix is not the severity (§34 makes E-DG-002 a Warning, many W- Info).
 //
-// 101 codes with a §34 severity; 70 without one (FAIL-CLOSED Error):
+// 102 codes with a §34 severity; 69 without one (FAIL-CLOSED Error):
 //   E-ASSIGN-CONST — no §34 row
 //   E-ASSIGN-POSITION — no §34 row
 //   E-ASSIGN-TARGET — no §34 row
@@ -32,8 +32,7 @@
 //   E-DECL-STAR-REF-ATTR-WRITE — no §34 row
 //   E-DECL-STATE-CHILD — no §34 row
 //   E-DECL-USE-ATTR — no §34 row
-//   E-ENGINE-INVALID-TRANSITION — §34 Severity "Runtime" is not a compile severity (SPEC.md:23802)
-//   E-ERROR-011 — no §34 row
+//   E-ENGINE-INVALID-TRANSITION — §34 Severity "Runtime" is not a compile severity
 //   E-FIELD-PRIVATE-WRITE — no §34 row
 //   E-GRANT-LET-ON-SEQUENCE — no §34 row
 //   E-GRANT-UNKNOWN — no §34 row
@@ -135,6 +134,7 @@ ${
             "E-ERROR-004" :> Severity.Error
             "E-ERROR-009" :> Severity.Error
             "E-ERROR-010" :> Severity.Error
+            "E-ERROR-011" :> Severity.Error
             "E-ERRORS-001" :> Severity.Error
             "E-ERRORS-002" :> Severity.Error
             "E-FN-003" :> Severity.Error

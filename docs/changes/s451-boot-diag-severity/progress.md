@@ -18,8 +18,12 @@ For every code the bootstrap names, (prefix `E-`) ⇔ (severity Error) — check
 
 ## Catalog gaps — codes the bootstrap names with no usable §34 row (fail-closed Error)
 
-70 codes (the generated header in severity.scrml is the live list). 69 have no §34 row; E-ENGINE-INVALID-TRANSITION's row says Severity "Runtime". Families: the bootstrap-private E-PARSE-* (31), E-BOOTSTRAP-UNSUPPORTED / -REDECLARE, the §66.20 codes (E-DECL-*, E-GRANT-*, E-FIELD-PRIVATE-WRITE, E-WRITE-*, …; §66.20 says "the §34 catalog rows land WITH the implementation" and lists them Error — the bootstrap IS that implementation, so the rows are owed), and the S449-flagged unnamed E-DECL-STATE-CHILD / E-TYPE-VARIANT. All are `E-` and §66.20 states Error where it names one, so fail-closed agrees with the SPEC everywhere it speaks.
+69 codes after merging origin/main dbb671c2d (which added the E-ERROR-011 row; the generated header in severity.scrml is the live list). 68 have no §34 row; E-ENGINE-INVALID-TRANSITION's row says Severity "Runtime". Families: the bootstrap-private E-PARSE-* (31), E-BOOTSTRAP-UNSUPPORTED / -REDECLARE, the §66.20 codes (E-DECL-*, E-GRANT-*, E-FIELD-PRIVATE-WRITE, E-WRITE-*, …; §66.20 says "the §34 catalog rows land WITH the implementation" and lists them Error — the bootstrap IS that implementation, so the rows are owed), and the S449-flagged unnamed E-DECL-STATE-CHILD / E-TYPE-VARIANT. All are `E-` and §66.20 states Error where it names one, so fail-closed agrees with the SPEC everywhere it speaks.
 
 ## Counter after
 
 PASS 119 · FAIL 41 · NOT-TWINNED 511 · UNSUPPORTED 629 (graded 160). 24 FAIL→PASS (all were "severity unobservable" and now hold), 1 FAIL→FAIL (`error/handler-non-exhaustive` twin: severity holds, which exposes twin-extra-error `E-SCOPE-001` — previously masked by the codes failure; pre-existing bootstrap defect, not fixed here), 0 PASS→FAIL. docs/bootstrap-conformance.md NOT regenerated (counter test does not require it; brief forbids otherwise).
+
+## Staleness coupling (cost, by design)
+
+severity.scrml goes stale — and `slice-m4/severity.test.js` goes red — when a §34 row for a code the bootstrap names is added, struck or re-severitied, or a new code literal enters a bootstrap source. Fix: `bun scripts/gen-bootstrap-severity.ts`. The merge of dbb671c2d (new E-ERROR-011 row) exercised exactly this. The first cut wrote SPEC line numbers into the header and so went stale on ANY SPEC edit above a gap row; removed.

@@ -59,7 +59,9 @@ export function resolveSeverities(specText: string, codes: string[]): { entries:
     const live = mine.filter((r) => compileSeverityOf(r) !== null);
     if (live.length === 0) {
       const r = mine[0];
-      gaps.push({ code, why: r.struck ? `§34 row struck (SPEC.md:${r.line})` : `§34 Severity "${r.severity}" is not a compile severity (SPEC.md:${r.line})` });
+      // No SPEC line numbers in the generated text: an edit above the row would make the file
+      // stale for a reason that changes nothing (the cry-wolf shape).
+      gaps.push({ code, why: r.struck ? "§34 row struck" : `§34 Severity "${r.severity}" is not a compile severity` });
       continue;
     }
     const sevs = [...new Set(live.map((r) => compileSeverityOf(r)!))];
