@@ -223,6 +223,7 @@ ${
         MInline(v: InlineView),                           // `<*x/>` rendered by inlining its markup (s442)
         MStar(decl: Sym, inst: InstRef),                  // s444: `<*x/>` of a user declaration's EXISTING instance (Core View.Star)
         MErrors(of: ValidityOf, all: boolean),            // s449: `<errors of=…/>` (§55.8) — the surface whose errors it renders
+        MDb,                                              // s452: a `<db src=…>` state block (§4, §8.1.1) — its children render in place
     }
     // s442 — `<*x/>` (§66.6.2, "the existing one") rendered by INLINING markup
     // that is already resolved in the right context: a child field's own
@@ -6900,6 +6901,7 @@ ${
             .MEach(bind: b) :> false
             .MErrors(of: x) :> false
             .MSlot :> false
+            .MDb :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
             .MStar(decl: d) :> false
@@ -6913,6 +6915,7 @@ ${
             .MEach(bind: b) :> false
             .MErrors(of: x) :> false
             .MSlot :> false
+            .MDb :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
             .MStar(decl: d) :> false
@@ -6926,6 +6929,7 @@ ${
             .MEach(bind: b) :> false          // refuses `show` itself (resolveEach)
             .MErrors(of: x) :> false          // refuses it itself (resolveErrors)
             .MSlot :> true
+            .MDb :> true
             .MStateView(v: v) :> true
             .MInline(v: v) :> true
             .MStar(decl: d) :> true
@@ -6952,6 +6956,7 @@ ${
             .MEach(bind: b) :> true          // refuses `if=` / `else-if=` / `else` itself (resolveEach)
             .MErrors(of: x) :> true          // refuses them itself (resolveErrors)
             .MSlot :> false
+            .MDb :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
             .MStar(decl: d) :> false
@@ -7018,6 +7023,8 @@ ${
         if (sd is some) return singleInstantiated(env, e, st)
         // s449 — `<errors of=…/>` (§55.8), when no declaration takes the name
         if (e.tag == "errors") return resolveErrors(env, e, st)
+        // s452 — `<db src=…>` (§4 state block; §8.1.1 database scope)
+        if (e.tag == "db") return resolveDb(env, e, st)
         // s444 (PA): a scrml STRUCTURAL element the bootstrap does not
         // implement is never an HTML element (§4.15, §24.4 "These element names
         // SHALL NOT be treated as HTML elements") — refused, not rendered as
@@ -7028,6 +7035,32 @@ ${
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
         }
         return resolveHtml(env, e, st)
+    }
+
+    // s452 — a `<db src=…>` state block. §4: "A state block is a first-class
+    // context. Its content is markup context"; §8.1.1: a `<db src=>` is a
+    // database scope for the `?{}` blocks inside it (placePass's dbsPass
+    // resolves which database every query runs on, and checks `src=` —
+    // E-SQL-005). It is not an HTML element: its children render in place.
+    // Its other attributes are REFUSED, never ignored: `tables=` generates
+    // types (§14.8.4) and `protect=` keeps columns off the client (§14.8.9 — a
+    // confidentiality control), neither in the bootstrap.
+    fn resolveDb(env: Env, e: AElem, st0: AS) -> AS {
+        let st: AS = st0
+        let src = false
+        for (const a of e.attrs) {
+            if (a.name == "src") {
+                src = true
+            } else if (a.name == "tables") {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<db tables=…>` generates a type per table from the schema (§14.8.4), which is not in the bootstrap — it would be ignored")
+            } else if (a.name == "protect") {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<db protect=…>` keeps the named columns off the client (§14.8.9), which is not in the bootstrap — a confidentiality control is refused, never ignored")
+            } else {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` on `<db>` is not in the bootstrap (it takes `src=`, §8.1.1) — it would be ignored")
+            }
+        }
+        if (!src) st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "a `<db>` without `src=` names no database (§8.1.1: a database scope is a `<db src=>`) — the bootstrap has no other reading of it")
+        return addElem(resolveNodes(env, e.kids, st), e.nid, ElemFact.MDb)
     }
 
     // s449 — `<errors of=expr/>` (§55.8): "`of=expr` REQUIRED — References a
@@ -7150,7 +7183,6 @@ ${
             "timeout"       :> "§6.7.8 lifecycle"
             "machine"       :> "§6.7 lifecycle"
             "errorboundary" :> "§19 error boundary"
-            "db"            :> "§39 database"
             "schema"        :> "§39.2"
             "channel"       :> "§38"
             "onchange"      :> "§38.13"
@@ -9454,6 +9486,7 @@ ${
             .MEach(bind: b) :> not
             .MHtml :> not
             .MSlot :> not
+            .MDb :> not
             .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
@@ -9469,6 +9502,7 @@ ${
             .MUse(decl: d) :> not
             .MHtml :> not
             .MSlot :> not
+            .MDb :> not
             .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
@@ -11982,6 +12016,7 @@ ${
             .MHtml :> not
             .MEach(bind: b) :> not
             .MSlot :> not
+            .MDb :> not
             .MErrors(of: x) :> not
             .MStateView(v: v) :> not
             .MInline(v: v) :> not
@@ -13467,45 +13502,212 @@ ${
         return out
     }
 
-    // ---- the databases (§8.1.1, §44.2) -------------------------------------------
-    // One `<program db=…>`: its node, the Db it declares (`not` — the value was
-    // refused, reported), where.
-    type ProgDb:struct = { pnid: int, db: Db | not }
-    // Each function's nearest `<program>` with a `db=` (-1: none).
-    type FnDb:struct = { fnid: int, pnid: int }
-    type RDbs:struct = { progs: ProgDb[], fns: FnDb[], st: AS }
+    // ---- the databases (§8.1.1 as amended S451, §44.2) ----------------------------
+    // s452 — §8.1.1: "The compiler SHALL resolve the database for each `?{}`
+    // block by finding its closest ancestor **database scope** — a `<program>`
+    // element with a `db=` attribute, a `<program>` element whose database a
+    // direct-child `<db src=>` supplies …, or a `<db src=>` state block.
+    // 'Closest' means fewest nesting levels up the element tree, counting every
+    // kind". Ruling 11a: "When a `<program>` element has no `db=` attribute and
+    // exactly one `<db src=>` element is its **direct child**, that `<program>`
+    // SHALL be a database scope whose database is the `<db>`'s `src=` value";
+    // two or more direct-child `<db src=>` → "NONE of them supplies"; "A
+    // `<program db=>` is never supplied". E-SQL-004 "whatever the number of
+    // database scopes in the file".
+    //
+    // ONE walk over every file — items, markup, declarations — carrying the
+    // nearest database scope. It records each function's scope (a function is
+    // an item of a `<program>` body: the bootstrap has no function declared
+    // inside an element), each MARKUP-position `?{}` site's scope (an attribute
+    // or handler value, an interpolation, an `<effect>` body, a declaration's
+    // value), and every scope's database.
+    //
+    // A database scope: its node (a `<program>` or a `<db>` element), its
+    // database (`not` — the value was refused, reported). A `<program>` a
+    // `<db>` supplies and that `<db>` share ONE Db (one database).
+    type ScopeDb:struct = { nid: int, db: Db | not }
+    // Each function's nearest database scope (-1: none).
+    type FnDb:struct = { fnid: int, scope: int }
+    // Each markup-position `?{}` site's nearest database scope (-1: none).
+    type SiteDb:struct = { nid: int, scope: int }
+    type RDbs:struct = { scopes: ScopeDb[], fns: FnDb[], sites: SiteDb[], st: AS }
 
-    fn dbsPass(files: FileAst[], st0: AS) -> RDbs {
-        let st: AS = st0
-        let progs: ProgDb[] = []
-        let fns: FnDb[] = []
-        for (const f of files) {
-            const r: RDbs = dbsInItems(f.path, f.items, -1, { progs: progs, fns: fns, st: st })
-            progs = r.progs
-            fns = r.fns
-            st = r.st
-        }
-        return { progs: progs, fns: fns, st: st }
+    fn dbsPass(g: Globals, files: FileAst[], st0: AS) -> RDbs {
+        let acc: RDbs = { scopes: [], fns: [], sites: [], st: st0 }
+        for (const f of files) { acc = dbsInItems(g, f.path, f.items, -1, acc) }
+        return acc
     }
 
-    fn dbsInItems(file: string, items: AItem[], pnid: int, acc0: RDbs) -> RDbs {
+    fn withScope(acc: RDbs, nid: int, db: Db | not, st: AS) -> RDbs {
+        return { scopes: acc.scopes.concat([{ nid: nid, db: db }]), fns: acc.fns, sites: acc.sites, st: st }
+    }
+
+    fn withSites(acc: RDbs, ss: SqlSite[], scope: int) -> RDbs {
+        let sites: SiteDb[] = acc.sites
+        for (const x of ss) { sites = sites.concat([{ nid: x.nid, scope: scope }]) }
+        return { scopes: acc.scopes, fns: acc.fns, sites: sites, st: acc.st }
+    }
+
+    fn dbsInItems(g: Globals, file: string, items: AItem[], scope: int, acc0: RDbs) -> RDbs {
         let acc: RDbs = acc0
         for (const it of items) {
             const k: AItemK = it.k
             const f: AFn | not = fnOfItemK(k)
-            if (f is some) acc = { progs: acc.progs, fns: acc.fns.concat([{ fnid: f.nid, pnid: pnid }]), st: acc.st }
+            if (f is some) acc = { scopes: acc.scopes, fns: acc.fns.concat([{ fnid: f.nid, scope: scope }]), sites: acc.sites, st: acc.st }
             const p: AProgram | not = programOfK(k)
-            if (p is some) {
-                const a: AAttr | not = attrNamed(p.attrs, "db")
-                if (a is some) {
-                    const rd: RDb = dbOfAttr(file, a, acc.st)
-                    acc = dbsInItems(file, p.items, p.nid, { progs: acc.progs.concat([{ pnid: p.nid, db: rd.db }]), fns: acc.fns, st: rd.st })
-                } else {
-                    acc = dbsInItems(file, p.items, pnid, acc)
+            if (p is some) acc = dbsInProgram(g, file, p, scope, acc)
+            const n: ANode | not = markupOfItemK(k)
+            if (n is some) acc = dbsInNode(g, file, n, scope, acc)
+            const d: ADecl | not = declOfItemK(k)
+            if (d is some) acc = dbsInDecl(g, file, d, scope, acc)
+        }
+        return acc
+    }
+
+    // A `<program>`: a database scope on its own `db=`; else on the `src=` of
+    // its single direct-child `<db src=>` (ruling 11a); else not a scope.
+    fn dbsInProgram(g: Globals, file: string, p: AProgram, outer: int, acc: RDbs) -> RDbs {
+        const a: AAttr | not = attrNamed(p.attrs, "db")
+        if (a is some) {
+            const rd: RDb = dbOfAttr(file, a, acc.st)
+            return dbsInItems(g, file, p.items, p.nid, withScope(acc, p.nid, rd.db, rd.st))
+        }
+        const sup: AElem | not = supplyingDb(g, p.items)
+        if (sup is some) {
+            const src: AAttr | not = attrNamed(sup.attrs, "src")
+            if (src is some) {
+                const rs: RDb = dbOfAttr(file, src, acc.st)
+                const both: RDbs = withScope(withScope(acc, p.nid, rs.db, rs.st), sup.nid, rs.db, rs.st)
+                return dbsInItems(g, file, p.items, p.nid, both)
+            }
+        }
+        return dbsInItems(g, file, p.items, outer, acc)
+    }
+
+    // The ONE direct-child `<db src=>` of a program body, else not (none, or
+    // two or more — "NONE of them supplies").
+    fn supplyingDb(g: Globals, items: AItem[]) -> AElem | not {
+        let found: AElem[] = []
+        for (const it of items) {
+            const n: ANode | not = markupOfItemK(it.k)
+            if (n is some) {
+                const e: AElem | not = elemOfANode(n)
+                if (e is some) {
+                    if (isDbElem(g, e) && attrNamed(e.attrs, "src") is some) found = found.concat([e])
                 }
             }
         }
+        if (found.length == 1) return found[0]
+        return not
+    }
+
+    // A `<db>` state block (§4 — "`db` is a built-in state type"), unless a
+    // user declaration takes the name (the binder's rule: a declaration in
+    // scope wins over every built-in reading of a tag).
+    fn isDbElem(g: Globals, e: AElem) -> boolean {
+        if (e.star || e.tag != "db") return false
+        return declNamed(g, e.tag) is not
+    }
+
+    fn dbsInNode(g: Globals, file: string, n: ANode, scope: int, acc: RDbs) -> RDbs {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> dbsInElem(g, file, e, scope, acc)
+            .Interp(e: x) :> withSites(acc, sqlsInExpr(x), scope)
+            .Effect(w: w) :> withSites(acc, sqlsInBlock(w.body), scope)
+            .DeclNode(d: d) :> dbsInDecl(g, file, d, scope, acc)
+            .Text(text: t) :> acc
+        }
+    }
+
+    // An element: its attribute values stand in the scope around it; a `<db
+    // src=>` is the scope of its children (registered once — a program's
+    // supplier is registered with the program).
+    fn dbsInElem(g: Globals, file: string, e: AElem, scope: int, acc0: RDbs) -> RDbs {
+        let acc: RDbs = acc0
+        for (const a of e.attrs) { acc = withSites(acc, sqlsInValue(a.value), scope) }
+        let inner: int = scope
+        if (isDbElem(g, e)) {
+            const src: AAttr | not = attrNamed(e.attrs, "src")
+            if (src is some) {
+                if (scopeDbOf(acc.scopes, e.nid) is not) {
+                    const rd: RDb = dbOfAttr(file, src, acc.st)
+                    acc = withScope(acc, e.nid, rd.db, rd.st)
+                }
+                inner = e.nid
+            }
+        }
+        for (const c of e.kids) { acc = dbsInNode(g, file, c, inner, acc) }
         return acc
+    }
+
+    // A declaration: its own value, its attribute defaults, the opener's other
+    // words' values, its validators' arguments, its child fields, its state
+    // children, its renders.
+    fn dbsInDecl(g: Globals, file: string, d: ADecl, scope: int, acc0: RDbs) -> RDbs {
+        let acc: RDbs = withSites(acc0, sqlsInValue(d.own), scope)
+        for (const a of d.attrs) { acc = withSites(acc, sqlsInValue(a.dflt), scope) }
+        for (const m of d.mods) { acc = withSites(acc, sqlsInValue(m.value), scope) }
+        for (const v of d.validators) { acc = withSites(acc, sqlsInExprs(valArgExprs(v.arg)), scope) }
+        for (const c of d.body) {
+            const ck: ADeclChild = c
+            acc = match ck {
+                .ChildField(d: cd) :> dbsInDecl(g, file, cd, scope, acc)
+                .StateChild(s: sc) :> dbsInStateChild(g, file, sc, scope, acc)
+            }
+        }
+        const r: AElem | not = d.renders
+        if (r is some) acc = dbsInElem(g, file, r, scope, acc)
+        return acc
+    }
+
+    fn dbsInStateChild(g: Globals, file: string, sc: AStateChild, scope: int, acc0: RDbs) -> RDbs {
+        let acc: RDbs = acc0
+        for (const a of sc.attrs) { acc = withSites(acc, sqlsInValue(a.value), scope) }
+        for (const n of sc.body) { acc = dbsInNode(g, file, n, scope, acc) }
+        return acc
+    }
+
+    fn valArgExprs(a: AValArg) -> AExpr[] {
+        return match a {
+            .NoArgs :> []
+            .Cmp(op: o, e: x) :> [x]
+            .Exprs(es: es) :> es
+            .Regex(source: x) :> []
+        }
+    }
+
+    fn markupOfItemK(k: AItemK) -> ANode | not {
+        return match k {
+            .MarkupItem(n: n) :> n
+            .FnItem(f: f) :> not
+            .ImportItem(i: i) :> not
+            .TypeItem(t: t) :> not
+            .DeclItem(d: d) :> not
+            .ProgramItem(p: p) :> not
+        }
+    }
+
+    fn declOfItemK(k: AItemK) -> ADecl | not {
+        return match k {
+            .DeclItem(d: d) :> d
+            .MarkupItem(n: n) :> not
+            .FnItem(f: f) :> not
+            .ImportItem(i: i) :> not
+            .TypeItem(t: t) :> not
+            .ProgramItem(p: p) :> not
+        }
+    }
+
+    fn elemOfANode(n: ANode) -> AElem | not {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> e
+            .Text(text: t) :> not
+            .Interp(e: x) :> not
+            .DeclNode(d: d) :> not
+            .Effect(w: w) :> not
+        }
     }
 
     fn fnOfItemK(k: AItemK) -> AFn | not {
@@ -13539,9 +13741,9 @@ ${
     // compile time).
     fn dbOfAttr(file: string, a: AAttr, st: AS) -> RDb {
         const v: string | not = quotedValue(a.value)
-        if (v is not) return { db: not, st: addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`db=` must be a literal connection string (`db=\"./app.db\"`, §8.1.1) — the bootstrap reads it at compile time") }
+        if (v is not) return { db: not, st: addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "=` must be a literal connection string (`" + a.name + "=\"./app.db\"`, §8.1.1) — the bootstrap reads it at compile time") }
         const why: string = dbRefusal(v)
-        if (why != "") return { db: not, st: addDiag(st, file, a.span, "E-SQL-005", "`db=\"" + v + "\"`: " + why + " (§8.1.1, §44.2). A `" + sqlSigil() + "}` runs on SQLite (`./app.db`, `sqlite:./app.db`, `:memory:`), PostgreSQL (`postgres://…`, `postgresql://…`) or MySQL (`mysql://…`)") }
+        if (why != "") return { db: not, st: addDiag(st, file, a.span, "E-SQL-005", "`" + a.name + "=\"" + v + "\"`: " + why + " (§8.1.1, §44.2). A `" + sqlSigil() + "}` runs on SQLite (`./app.db`, `sqlite:./app.db`, `:memory:`), PostgreSQL (`postgres://…`, `postgresql://…`) or MySQL (`mysql://…`)") }
         const r: RSym = mint(st, "db")
         return { db: { sym: r.s, driver: dbDriver(v), target: dbTarget(v), file: file, owner: false }, st: r.st }
     }
@@ -13604,28 +13806,41 @@ ${
         return v
     }
 
-    fn progDbOf(ps: ProgDb[], pnid: int) -> ProgDb | not {
-        for (const p of ps) {
-            if (p.pnid == pnid) return p
+    fn scopeDbOf(ss: ScopeDb[], nid: int) -> ScopeDb | not {
+        for (const x of ss) {
+            if (x.nid == nid) return x
         }
         return not
     }
 
-    fn fnDbProg(fs: FnDb[], fnid: int) -> int {
+    fn fnScope(fs: FnDb[], fnid: int) -> int {
         for (const f of fs) {
-            if (f.fnid == fnid) return f.pnid
+            if (f.fnid == fnid) return f.scope
         }
         return -1
     }
 
-    // The entry file's top-level `<program>` (the db of a `?{}` that stands in
-    // no function — a value / action position — is its).
-    fn entryProgramNid(g: Globals) -> int {
-        const d: DeclSrc | not = findDeclSrc(g, g.program)
-        if (d is not) return -1
-        const p: AProgram | not = d.p
-        if (p is not) return -1
-        return p.nid
+    fn siteScope(ss: SiteDb[], nid: int) -> int {
+        for (const x of ss) {
+            if (x.nid == nid) return x.scope
+        }
+        return -1
+    }
+
+    // The program's databases, each once (a supplied program shares its `<db>`'s).
+    fn scopeDbs(ss: ScopeDb[]) -> Db[] {
+        let out: Db[] = []
+        let seen: int[] = []
+        for (const x of ss) {
+            const d: Db | not = x.db
+            if (d is some) {
+                if (seen.indexOf(d.sym.id) < 0) {
+                    out = out.concat([d])
+                    seen = seen.concat([d.sym.id])
+                }
+            }
+        }
+        return out
     }
 
     // ---- the action positions (not value positions, §6.15) ------------------------
@@ -13684,13 +13899,9 @@ ${
         const areach: ReachOf[] = asyncReach(all, places)
 
         // the databases
-        const rd: RDbs = dbsPass(g.files, st)
+        const rd: RDbs = dbsPass(g, g.files, st)
         st = rd.st
-        let dbs: Db[] = []
-        for (const p of rd.progs) {
-            const d: Db | not = p.db
-            if (d is some) dbs = dbs.concat([d])
-        }
+        const dbs: Db[] = scopeDbs(rd.scopes)
 
         let servers: int[] = []
         let sqls: SqlInfo[] = []
@@ -13716,7 +13927,7 @@ ${
             // the queries in its body: database, facts, the failable rule
             for (const s of f.sqls) {
                 if (!f.failable) st = manualTxDiag(f.file, s, "'" + f.name + "', which is not declared '!'", f.name, st)
-                const sr: RSqlSite = sqlSiteFacts(g, rd, f.file, fnDbProg(rd.fns, f.nid), s, f.failable, st)
+                const sr: RSqlSite = sqlSiteFacts(g, rd, f.file, fnScope(rd.fns, f.nid), s, f.failable, st)
                 st = sr.st
                 const si: SqlInfo | not = sr.info
                 if (si is some) {
@@ -13848,18 +14059,18 @@ ${
     // (§19.8.3), and its facts (sql.scrml).
     type RSqlSite:struct = { info: SqlInfo | not, creates: boolean, st: AS }
 
-    fn sqlSiteFacts(g: Globals, rd: RDbs, file: string, pnid: int, s: SqlSite, failable: boolean, st0: AS) -> RSqlSite {
+    fn sqlSiteFacts(g: Globals, rd: RDbs, file: string, scope: int, s: SqlSite, failable: boolean, st0: AS) -> RSqlSite {
         // (s451 Ue: the §19.8.3 failable rule — E-ERROR-002 — is the binder's, resolveSql)
         let st: AS = st0
         if (file != g.entry) {
             st = addDiag(st, file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "a `" + sqlSigil() + "}` in an imported module makes it a module-with-db-context (§44.7.1), which is not in the bootstrap — keep the query in the program's file")
             return { info: not, creates: false, st: st }
         }
-        if (pnid < 0) {
+        if (scope < 0) {
             st = addDiag(st, file, s.span, "E-SQL-004", sql004Text())
             return { info: not, creates: false, st: st }
         }
-        const pd: ProgDb | not = progDbOf(rd.progs, pnid)
+        const pd: ScopeDb | not = scopeDbOf(rd.scopes, scope)
         if (pd is not) return { info: not, creates: false, st: st }
         const db: Db | not = pd.db
         if (db is not) return { info: not, creates: false, st: st }   // its `db=` was refused (E-SQL-005, reported)
@@ -13868,7 +14079,7 @@ ${
     }
 
     fn sql004Text() -> string {
-        return "this `" + sqlSigil() + "}` has no `db=` declaration in any ancestor `<program>` (§8.1.1) — add one to the enclosing `<program>`: `<program db=\"./app.db\">` for SQLite, `<program db=\"postgres://…\">` for PostgreSQL"
+        return "this `" + sqlSigil() + "}` has no database scope (§8.1.1): no `<program db=…>`, no `<program>` whose single direct-child `<db src=…>` supplies its database, and no `<db src=…>` encloses it — whatever the number of databases in the file. Put `db=` on the enclosing `<program>` (`<program db=\"./app.db\">` for SQLite, `<program db=\"postgres://…\">` for PostgreSQL), or move the query inside the `<db>` it means"
     }
 
 
@@ -13899,12 +14110,11 @@ ${
     // §13.7 (S451 R1): a value position that would have to WAIT.
     fn valueServerDiags(g: Globals, t: Tables, all: FnFacts[], ps: PlaceFact[], areach: ReachOf[], rd: RDbs, st0: AS) -> AS {
         let st: AS = st0
-        const pnid: int = entryProgramNid(g)
         for (const p of valuePositions(g, t)) {
             for (const s of sqlsInValue(p.v)) {
                 st = errorTwo(p.file, s, false, st)
                 st = manualTxDiag(p.file, s, p.what + ", which is not a function declared '!'", "", st)
-                st = positionDb(g, rd, p.file, pnid, s, st)
+                st = positionDb(g, rd, p.file, s, st)
                 st = addDiag(st, p.file, s.span, "E-VALUE-SERVER-CALL", p.what + " runs a `" + sqlSigil() + "}` query — the query runs on the server, and " + waitFix())
             }
             const scan: BodyScan = scanValue({ t: t, file: p.file }, p.v, emptyScan())
@@ -13925,10 +14135,12 @@ ${
         return "a value position cannot wait for the server (§13.7). Load the value with a `<request>` (§6.7.7) into a cell and read the cell here — or, where the cell is server-authoritative, a `<x server>` declaration (§52)"
     }
 
-    // E-SQL-004 for a `?{}` that stands in no function (the entry program's db).
-    fn positionDb(g: Globals, rd: RDbs, file: string, pnid: int, s: SqlSite, st: AS) -> AS {
+    // E-SQL-004 for a `?{}` that stands in no function: its OWN nearest
+    // database scope (s452 — the scope pass recorded it by position).
+    fn positionDb(g: Globals, rd: RDbs, file: string, s: SqlSite, st: AS) -> AS {
         if (file != g.entry) return st
-        if (pnid >= 0 && progDbOf(rd.progs, pnid) is some) return st
+        const scope: int = siteScope(rd.sites, s.nid)
+        if (scope >= 0 && scopeDbOf(rd.scopes, scope) is some) return st
         return addDiag(st, file, s.span, "E-SQL-004", sql004Text())
     }
 
@@ -13936,12 +14148,11 @@ ${
     // split — U1d); a server call there is a suspension (U1b).
     fn actionServerDiags(g: Globals, t: Tables, all: FnFacts[], ps: PlaceFact[], rd: RDbs, st0: AS) -> AS {
         let st: AS = st0
-        const pnid: int = entryProgramNid(g)
         for (const a of actionPositions(g)) {
             for (const s of sqlsInValue(a.v)) {
                 st = errorTwo(a.file, s, false, st)
                 st = manualTxDiag(a.file, s, a.what + ", which is not a function declared '!'", "", st)
-                st = positionDb(g, rd, a.file, pnid, s, st)
+                st = positionDb(g, rd, a.file, s, st)
                 st = addDiag(st, a.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", a.what + " runs a `" + sqlSigil() + "}` query — client code that does server work is split around it (§19.9.5), and the body split arrives with unit U1d. Until then: put the query in a function")
             }
             const scan: BodyScan = scanValue({ t: t, file: a.file }, a.v, emptyScan())
@@ -14170,6 +14381,7 @@ ${
             .MUse(decl: d) :> nodesBound(intoDecl(cx, d), declRendersOnce(cx, d), all)
             .MStateView(v: v) :> nodesBound(cx, stateArmNodes(v), all)
             .MSlot :> slotBound(cx, all)
+            .MDb :> []
             .MErrors(of: x) :> []
             .MHtml :> []
             .MEach(bind: b) :> []
@@ -14216,6 +14428,7 @@ ${
             .MHtml :> not
             .MEach(bind: b) :> not
             .MSlot :> not
+            .MDb :> not
             .MErrors(of: x) :> not
             not :> not
         }
@@ -14260,6 +14473,7 @@ ${
             .MHtml :> []
             .MEach(bind: b) :> []
             .MSlot :> []
+            .MDb :> []
             .MErrors(of: x) :> []
             not :> []
         }
@@ -14338,6 +14552,7 @@ ${
             .MUse(decl: d) :> false
             .MEach(bind: b) :> false
             .MSlot :> false
+            .MDb :> false
             .MErrors(of: x) :> false
             .MStateView(v: v) :> false
             .MInline(v: v) :> false
@@ -14407,6 +14622,7 @@ ${
             .MUse(decl: d) :> nodesCarry(intoDecl(cx, d), declRendersOnce(cx, d))
             .MStateView(v: v) :> nodesCarry(cx, stateArmNodes(v))
             .MSlot :> slotCarries(cx)
+            .MDb :> false
             .MErrors(of: x) :> false
             .MHtml :> false
             .MEach(bind: b) :> false

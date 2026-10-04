@@ -341,3 +341,80 @@ describe("§19.10.4 — E-ERROR-015: manual transaction control outside a `!` fu
     expect(codes(DBP(`    function plain() -> int {\n        ${H("UPDATE t SET a = 1")}\n        ${H("SELECT ending FROM t")}\n        return 1\n    }`))).toEqual([]);
   });
 });
+
+describe("§8.1.1 (S451) — `<db src>` database scopes: the nearest scope wins; E-SQL-004 whatever the count", () => {
+  // f(): a server function whose query is handled at the site; returns 1.
+  const FN = (name = "f") => `    function ${name}() -> int {\n        ${SQ}\`DELETE FROM t\`}.run() !{ | _ :> { return 0 } }\n        return 1\n    }`;
+  const dbOfQuery = (r, fname = "f") => {
+    const fn = r.core.server.find((x) => x.sym.hint === fname);
+    const at = attemptOf(fn);
+    const db = r.core.dbs.find((d) => d.sym.id === at.call.data.q.db.id);
+    return db && db.target;
+  };
+
+  test("ruling 11a — a `<program>` without `db=` whose ONE direct child is `<db src>`: its functions run on that database", () => {
+    const r = clean(`<program>\n    <db src="./app.db">\n        <p>in the db block</p>\n    </db>\n${FN()}\n    <main><p>x</p></main>\n</program>\n`);
+    expect(dbOfQuery(r)).toBe("./app.db");
+    expect(r.core.dbs.length).toBe(1);
+  });
+
+  test("a direct-child `<db src>` of a `<program db=>` does not change the program's database", () => {
+    const r = clean(`<program db="./a.db">\n    <db src="./b.db">\n        <p>b</p>\n    </db>\n${FN()}\n    <main><p>x</p></main>\n</program>\n`);
+    expect(dbOfQuery(r)).toBe("./a.db");
+    expect(r.core.dbs.map((d) => d.target).sort()).toEqual(["./a.db", "./b.db"]);
+  });
+
+  test("two direct-child `<db src>`: NONE supplies — a function's query has no scope (E-SQL-004)", () => {
+    expect(codes(`<program>\n    <db src="./a.db"><p>a</p></db>\n    <db src="./b.db"><p>b</p></db>\n${FN()}\n    <main><p>x</p></main>\n</program>\n`)).toEqual(["E-SQL-004"]);
+  });
+
+  test("a `<db src>` nested deeper (not a direct child) does not supply the program", () => {
+    expect(codes(`<program>\n    <main>\n        <db src="./a.db"><p>a</p></db>\n    </main>\n${FN()}\n</program>\n`)).toEqual(["E-SQL-004"]);
+  });
+
+  test("an unscoped `?{}` is E-SQL-004 — with the S451 message (no database scope of any kind)", () => {
+    const src = `<program>\n${FN()}\n    <main><p>x</p></main>\n</program>\n`;
+    expect(codes(src)).toEqual(["E-SQL-004"]);
+    expect(msg(src, "E-SQL-004")).toContain("no database scope");
+  });
+
+  // (A nested `<program>` — §4.12 — is refused by the bootstrap, so the
+  // program-in-program half of "nearest" has no runnable case here.)
+
+  test("a `?{}` in a markup position inside a `<db src>` is resolved by position (no E-SQL-004 — it is refused for running in a value position, §13.7)", () => {
+    const inDb = codes(`<program>\n    let <n:int=0/>\n    <main>\n        <db src="./a.db">\n            <p>\${${SQ}\`SELECT 1 AS a\`}.get() !{ | _ :> not }}</p>\n        </db>\n    </main>\n</program>\n`);
+    expect(inDb).not.toContain("E-SQL-004");
+    expect(inDb).toContain("E-VALUE-SERVER-CALL");
+    const outside = codes(`<program>\n    let <n:int=0/>\n    <main>\n        <db src="./a.db"><p>a</p></db>\n        <p>\${${SQ}\`SELECT 1 AS a\`}.get() !{ | _ :> not }}</p>\n    </main>\n</program>\n`);
+    expect(outside).toContain("E-SQL-004");
+  });
+
+  test("`src=` is checked like `db=` (E-SQL-005), and must be a literal", () => {
+    const src = `<program>\n    <db src="mongodb://x/y"><p>a</p></db>\n    <main><p>x</p></main>\n</program>\n`;
+    expect(codes(src)).toEqual(["E-SQL-005"]);
+    expect(msg(src, "E-SQL-005")).toContain("`src=");
+  });
+
+  test("`tables=` / `protect=` / other attributes / a missing `src=` are refused, never ignored", () => {
+    const t = codes(`<program>\n    <db src="./a.db" tables="users" protect="passwordHash"><p>a</p></db>\n    <main><p>x</p></main>\n</program>\n`);
+    expect(t).toEqual(["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(codes(`<program>\n    <db><p>a</p></db>\n    <main><p>x</p></main>\n</program>\n`)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+
+  test("the printer still refuses a program whose queries need the server artifact (U1c)", () => {
+    const r = clean(`<program>\n    <db src="./app.db"><p>a</p></db>\n${FN()}\n    <main><p>x</p></main>\n</program>\n`);
+    const out = mods.print.printProgram(r.core, "t.client.js", "scrml-runtime.js");
+    expect(out.js).toBe("");
+    expect(out.refused.join("\n")).toContain("U1c");
+  });
+
+  test("near-miss: a `<db src>` direct-child program with no query compiles and RUNS; its children render in place; no connection string reaches the client (runtime)", async () => {
+    const src = `<program>\n    let <n:int=0/>\n    <db src="./secret-app.db">\n        <p id="inside">inside \${@n}</p>\n        <button onclick=bump()>bump</button>\n    </db>\n    function bump() {\n        @n = @n + 1\n    }\n</program>\n`;
+    const { out } = await load(src);
+    expect(out.js).not.toContain("secret-app");
+    expect(out.html).not.toContain("secret-app");
+    expect(document.querySelector("db")).toBe(null);
+    click(btn("bump"));
+    expect($("#inside").textContent).toBe("inside 1");
+  });
+});
