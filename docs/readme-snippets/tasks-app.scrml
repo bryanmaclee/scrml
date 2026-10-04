@@ -65,7 +65,7 @@ ${
     function submit() {
         @phase = .Saving
         createTask(@userId, @newTask) !{
-            | ::Network msg :> { @phase = .ErrorState(msg); return }
+            | .Network(msg) :> { @phase = .ErrorState(msg); return }
         }
         reset(@newTask)
         @phase = .Saved
@@ -99,7 +99,7 @@ const <visible> = match @filter {
 
 <engine for=Phase initial=.Loading effect=${
     @tasks = loadTasks(@userId) !{
-        | ::Network msg :> { @phase = .ErrorState(msg); return }
+        | .Network(msg) :> { @phase = .ErrorState(msg); return }
     }
     @phase = @tasks.length == 0 ? .Empty : .Editing
 }>

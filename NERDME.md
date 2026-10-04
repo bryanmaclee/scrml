@@ -124,8 +124,8 @@ function checkName(n: string)! -> SignupError {
 
 function submit() {
     const ok = checkName(@name) !{
-        | ::EmptyName :> { @status = "Name is required"; return }
-        | ::TooShort min :> { @status = "At least " + min + " characters"; return }
+        | .EmptyName :> { @status = "Name is required"; return }
+        | .TooShort(min) :> { @status = "At least " + min + " characters"; return }
     }
     @status = "Welcome, " + ok
 }
