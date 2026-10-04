@@ -32,3 +32,6 @@ C4 BEFORE (base d23e6cc6d, executed in-process via .tmp harness): unpinned rowsO
 - Corpus differential (examples, samples/compilation-tests, conformance/cases, compiler/tests/conformance/cases, stdlib; 2249 .scrml, each compiled alone, server JS normalized for the tree path): 2249 identical, 0 changed, 0 tenant-active files.
 - Found, not fixed: INSERT tenant injection uses lexical `_scrml_req` → ReferenceError inside an in-process peer callable (pre-existing; fails closed, 500).
 - Landed: d87d4bb4d (code+tests), ccea4639d (known-gaps). master-list.md recent-sessions hunk from state.ts --write reverted per brief.
+
+## fix round r2 (BRIEF-r2.md; review of 1239366814c)
+- start r2 at 1239366814c
