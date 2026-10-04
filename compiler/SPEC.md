@@ -16053,7 +16053,8 @@ error from the compiler. `match` is the only exhaustiveness-enforced branch form
 ```
 match-expr      ::= 'match' expression '{' match-arm+ '}'
 match-arm       ::= arm-pattern (':>' | '=>' | '->') arm-body
-arm-pattern     ::= variant-pattern | wildcard-arm | is-pattern
+arm-pattern     ::= variant-pattern | wildcard-arm | whole-error-arm | is-pattern
+whole-error-arm ::= '_' Identifier          // failable subjects only — §18.6.1 (S451)
 variant-pattern ::= ('.' | '::') VariantName ('(' binding-list ')')?
                   | TypeName ('.' | '::') VariantName ('(' binding-list ')')?
 binding-list    ::= binding (',' binding)*
@@ -16101,13 +16102,27 @@ tuple value (no-tuple, §59.7 / §14.11). Full grammar + product-exhaustiveness 
   g-impl1-match-miscompiles F12.)
 - **A bare name is not an arm pattern.** An arm whose WHOLE pattern is a bare identifier —
   `err :> …` in a `match`, `| err :> …` in a `!{}` handler (§19.4.3) — SHALL be a compile error,
-  **E-MATCH-BARE-BINDER**. The grammar above has no such pattern, and none is added: a match arm
-  does not bind the whole matched value (§18.6 — the named default pattern is not part of v1).
-  Write `_` / `else` for a catch-all, or name the variant — `.V(x)` binds its payload (§18.7), and
-  in a `!{}` arm `| .V x :>` does too (§19.4.3). `not` is not a bare name here: it is the absence
-  arm (§42). The message SHALL name the identifier and offer both fixes: `Arm pattern '{name}' is a
-  bare name. A match arm does not bind the whole value: write '_' (or 'else') for a catch-all, or
-  name the variant ('.V(x)') to bind its payload.`
+  **E-MATCH-BARE-BINDER**. The grammar above has no such pattern, and none is added. The pattern
+  that binds the whole error is `_ <name>` (`whole-error-arm`, §18.6.1, S451): in a `!{}` arm or a
+  `match` on a failable result, write `| _ err :>` / `_ err :>`. Elsewhere a match arm does not bind
+  the whole matched value (§18.6). Write `_` / `else` for a catch-all that binds nothing, or name the
+  variant — `.V(x)` binds its payload (§18.7), and in a `!{}` arm `| .V x :>` does too (§19.4.3).
+  `not` is not a bare name here: it is the absence arm (§42). The message SHALL name the identifier
+  and offer the fixes that apply at the site. In a `!{}` arm or a `match` on a failable result:
+  `Arm pattern '{name}' is a bare name. To bind the whole error, write '_ {name}' (e.g. '| _ {name} :>');
+  for a catch-all that binds nothing write '_' (or 'else'); or name the variant ('.V(x)') to bind its
+  payload.` In a `match` on any other value: `Arm pattern '{name}' is a bare name. A match arm does not
+  bind the whole value: write '_' (or 'else') for a catch-all, or name the variant ('.V(x)') to bind
+  its payload.` The two neighbouring misuses of the whole-error binder take the same code (§18.6.1):
+  `_ <name>` in a `match` whose subject is not a failable result, and `else <name>` anywhere.
+  > **Amended S451 (the whole-error binder):** ruling:user-voice-scrml.md S451 "a" — *"`| _ <name> :>`
+  > binds the WHOLE error value (wildcard = any variant; the name is the author's, e.g. `| _ err :>`).
+  > Restores the capability `E-MATCH-BARE-BINDER` (bare `| err :>`) removed"* · **supersedes:** this
+  > bullet's *"a match arm does not bind the whole matched value (§18.6 — the named default pattern is
+  > not part of v1)"* and its message's *"A match arm does not bind the whole value: write '_' (or
+  > 'else') for a catch-all, or name the variant ('.V(x)') to bind its payload."* for failable sites;
+  > the "Who pays" sentence below on `examples/09-error-handling.scrml` (its migration is now
+  > `| err :>` → `| _ err :>`, binding unchanged).
   > **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" — item 2(a): *"a bare
   > binder as a whole `!{}`/match pattern, `| err :>` — write `| _ :>` or name the variant"* ·
   > **supersedes:** nothing written — §18.2's grammar never admitted the form, but no code named it;
@@ -16121,9 +16136,10 @@ tuple value (no-tuple, §59.7 / §14.11). Full grammar + product-exhaustiveness 
   > (2), `examples/16-remote-data.scrml` (1), `examples/29-engine-vs-flags.scrml` (1); none in a
   > `match`. **Who pays:** examples 16 and 29 discard the binding, so `| _ :>` is the whole migration;
   > `examples/09-error-handling.scrml` USES it (`@phase = .Failed(err)` routes the whole error value
-  > into a held state), and there is no longer a pattern that binds the whole error — the example must
+  > into a held state), ~~and there is no longer a pattern that binds the whole error — the example must
   > rebuild the value per variant (`| .V(x) :> @phase = .Failed(ContactError.V(x))`) or hold the
-  > payload instead. **Nominal / not yet emitted by impl#1** (frozen;
+  > payload instead.~~ **(Superseded S451 "a":** its migration is `| err :>` → `| _ err :>`, which binds
+  > the whole error as the example intends, §18.6.1.) **Nominal / not yet emitted by impl#1** (frozen;
   > `g-impl1-bare-binder-arm-accepted-s451`).
 
 - **`match` is a contextual keyword** (GITI-016, bryan S241 — Option A; modeled on the `to` §14.12
@@ -16326,7 +16342,9 @@ arm MAY appear after `else`. An `else` arm that is not the last arm is a compile
 **Binding:** `else` does NOT bind the matched value. There is no way to access the matched
 value inside an `else` arm body. `else` is a pure discard. If the developer needs access to
 the matched value in the default arm, they must name a binding explicitly (future: this use
-case is the motivation for a named default pattern, which is not part of v1).
+case is the motivation for a named default pattern, which is not part of v1). **One exception
+(S451):** where the matched value is a failure — a `!{}` arm, or a `match` on a failable result —
+`_ <name>` binds the whole error (§18.6.1). Plain `_` and `else` still bind nothing there.
 
 **Payload access:** Because `else` does not bind the value, payload fields of unmatched
 variants are inaccessible inside an `else` arm body. The developer who needs payload access
@@ -16356,6 +16374,91 @@ type" means the SUBSET variant set (§18.8.1); W-MATCH-001 therefore fires on a 
 - `_` is a VALID ALIAS for `else` in match arm default position. Both `_` and `else` are
   accepted as the default/wildcard match arm. The canonical form is `else`. The compiler
   preference setting controls which form the formatter normalizes to.
+
+#### 18.6.1 The Whole-Error Binder — `_ <name>` (S451)
+
+In a `!{}` handler arm (§19.4.3) and in a `match` whose subject is a failable result (§19.7.1), the
+wildcard MAY carry one binder: `| _ err :>` in a `!{}`, `_ err :>` in a `match`. The arm matches
+like the wildcard — any error variant not matched by an earlier arm — and `err` binds the WHOLE
+error value: the variant together with its payload, not the payload alone. The name is the
+author's; `err` is the usual choice (`e` reads as an event to most JS developers).
+
+```scrml
+type SaveError:enum = { Conflict(id: string), Offline }
+type DraftState:enum = { Idle, Saving, Failed(error: SaveError) }
+<state> = DraftState.Idle
+
+function saveDraft()! SaveError { … }
+
+function save() {
+    saveDraft() !{ | _ err :> { @state = .Failed(err) } }   // err: SaveError — the whole value
+}
+```
+
+**The binder's type** is the type of the failure being handled — the same type the arm's variant
+patterns name:
+
+- a call to a function declared `!` (§19.4.1): the declared error enum (`SaveError` above);
+- a `?{}` query (§19.8.3): `SqlError`;
+- a client call to a server function (§19.9.10): the call's failure set — the transport error
+  type, and for a server function declared `!` its declared error enum as well. Its exact shape
+  is OPEN for the bootstrap's U1b design pass (§19.9.10); the binder has whatever type U1b gives
+  the failure set, and needs no further rule.
+
+The binder's static type is that whole type even though, at run time, the value is never one of
+the variants an earlier arm matched: a later `match err { … }` is exhaustive over the whole enum.
+
+**Normative statements:**
+
+- In a `!{}` arm, `| _ <name> :>` SHALL match every error variant not matched by an earlier arm,
+  and `<name>` SHALL bind the whole error value, typed as above.
+- In a `match` on a failable result, `_ <name> :>` SHALL match every ERROR variant not matched by
+  an earlier arm, and SHALL NOT match the success variant `.Ok`: `<name>` holds an error, never a
+  success value. A `match` that does not otherwise cover `.Ok` is non-exhaustive (**E-TYPE-020**,
+  §19.7.1).
+- `_` with no name, and `else`, SHALL bind nothing (unchanged, §18.6).
+- `_ <name>` in a `match` whose subject is not a failable result SHALL be a compile error
+  (**E-MATCH-BARE-BINDER**, §18.2), as SHALL `else <name>` in any arm. The message for the first
+  says that a match arm binds the whole value only where it is an error, and offers `_` / `else`
+  or a named variant; for the second it offers `_ <name>`.
+- The arm obeys every other arm rule unchanged: it is the wildcard for the last-arm position
+  (E-SYNTAX-010), W-MATCH-001 (unreachable when every variant is already named), and E-ERROR-012
+  in a value position (§19.4.3).
+
+**Why only failures (scope reasoning).** The ruling is about errors, and §18.6 already names a
+general named default pattern as future work ("the motivation for a named default pattern,
+which is not part of v1"). A failure is the one place the whole value cannot otherwise be reached:
+in an ordinary `match` the subject expression is still in scope — `match dir { … else :> f(dir) }`
+— while a `!{}` handler's subject is an unnamed call result. A general rule would widen every
+`match` to fix a gap that only failures have, so this section does not add one.
+
+**Why not `!` as the value.** `| _ ! :>` or `| ! :>` was the alternative: `!` would have become
+a value, a fourth meaning beside logical NOT, the failable marker on a signature and the `!{}`
+handler — so the binder is an ordinary author-chosen name instead.
+
+> **Provenance:** ruling:user-voice-scrml.md S451 "a" (the whole-error binder) — *"`| _ <name> :>`
+> binds the WHOLE error value (wildcard = any variant; the name is the author's, e.g. `| _ err :>`).
+> Restores the capability `E-MATCH-BARE-BINDER` (bare `| err :>`) removed; supersedes §18.6's
+> "`| _ e :>` binds nothing" for `!{}` arms (and `match` on a failable result). `!` is NOT made a
+> value."* · **supersedes:** §19.4.3's *"The wildcard arm takes no binder: `_` is the `else` arm, and
+> `else` does not bind the matched value (§18.6). A `| _ e :>` arm therefore has no meaning under
+> this rule"* (struck there) and §18.2 E-MATCH-BARE-BINDER's *"a match arm does not bind the whole
+> matched value"* at failable sites. *(PA readings, flagged: (1) the binder never matches `.Ok` in a
+> `match` — the ruling says it binds "the WHOLE error value", so a success value cannot reach it;
+> (2) `else <name>` and `_ <name>` on a non-failable `match` take E-MATCH-BARE-BINDER rather than a
+> new code; (3) the binder's static type is the whole error type, not a refinement to the
+> variants earlier arms left.)* **Direction of change (pa-base §8): newly-accepting** (a whole-value
+> binder where §19.4.3 gave `| _ e :>` no meaning) **and newly-rejecting** for `_ <name>` on a
+> non-failable `match` and for `else <name>` (impl#1 accepts both silently — see below).
+> **impl#1 (measured on `d3e660a08`, frozen):** in a `!{}`, `| _ err :>` compiles and binds
+> `err` to the error's PAYLOAD (`const err = result.data`; `null` for a unit variant), not the
+> whole error; in a `match` — failable or not — an `_ err :>` arm is silently DROPPED (no
+> diagnostic; the emitted match has no default branch, so the unmatched case yields nothing).
+> Filed `g-impl1-whole-error-binder-s451`. **Corpus measured** (text scan, `examples/`,
+> `samples/`, `conformance/cases/`): 15 `| _ <name>` arms in 9 files, all in `!{}` handlers under
+> `samples/` with the legacy `->` separator (14 `| _ e ->`, 1 `| _ err ->`); none in a `match`.
+> They gain the meaning they were written for. `examples/09-error-handling.scrml`'s two `| err :>`
+> arms (E-MATCH-BARE-BINDER, §18.2) migrate to `| _ err :>` with the binding they intend.
 
 ---
 
@@ -16827,7 +16930,7 @@ duplicate match arm). The first arm for a variant is used; the second is an erro
 | E-TYPE-026 | Match expression in invalid context (markup, SQL, CSS, attribute) | Error |
 | E-TYPE-027 | Shorthand pattern used when enum type cannot be inferred | Error |
 | E-SYNTAX-010 | `else` default arm is not the last arm | Error |
-| E-MATCH-BARE-BINDER | An arm's whole pattern is a bare identifier (`err :>`, `\| err :>` in `!{}`) — §18.2 (S451). **Nominal / not yet emitted by impl#1.** | Error |
+| E-MATCH-BARE-BINDER | An arm's whole pattern is a bare identifier (`err :>`, `\| err :>` in `!{}`) — fix: `\| _ err :>` binds the whole error (§18.6.1); also `_ <name>` on a non-failable `match` and `else <name>` — §18.2 (S451). **Nominal / not yet emitted by impl#1.** | Error |
 | E-SYNTAX-011 | Guard clause syntax (`if` after arm pattern) — not supported in v1 | Error |
 | E-SYNTAX-012 | Nested pattern in binding position — not supported in v1 | Error |
 | W-MATCH-001 | Wildcard `_` arm is unreachable (all variants already covered) | Warning |
@@ -17690,7 +17793,7 @@ function label(id: string) {
 - a variant with **two or more** fields: one binder is fewer bindings than the variant has fields, so it SHALL be **E-TYPE-021** (§18.7 — positional binding has no partial form). Bind every field positionally (`| .InvalidPayload(field, reason) :>`) or use the named form for a subset (`| .InvalidPayload(field: f) :>`);
 - a **unit** variant (no fields): one binder is more bindings than fields — **E-TYPE-021**. Write `| .ConnectionLost :>`.
 
-The wildcard arm takes no binder: `_` is the `else` arm, and `else` does not bind the matched value (§18.6). A `| _ e :>` arm therefore has no meaning under this rule; an arm that needs the payload names its variant. This paragraph covers `!{}` arms only: §18.2's `match` grammar has no parenthesis-free binder, and none is added here.
+~~The wildcard arm takes no binder: `_` is the `else` arm, and `else` does not bind the matched value (§18.6). A `| _ e :>` arm therefore has no meaning under this rule; an arm that needs the payload names its variant.~~ **Superseded S451 (the whole-error binder, ruling:user-voice-scrml.md S451 "a"):** a binder on the wildcard is not a payload binder — `| _ err :>` binds the WHOLE error value (variant and payload), typed as the call's error type (§18.6.1). `| _ :>` and `| else :>` still bind nothing. An arm that needs one variant's payload names its variant. This paragraph covers `!{}` arms only: §18.2's `match` grammar has no parenthesis-free payload binder, and none is added here (its `_ <name>` arm is the whole-error binder, §18.6.1).
 
 > **Provenance:** ruling:user-voice-scrml.md S451 "1a 2 yes 3 yes 4a" — item 2: *"**yes:** in `| ::V m :>`, `m` binds the variant's PAYLOAD (§19.8.3's own example); Appendix B's contrary line is historical."* · **supersedes:** Appendix B's *"The arm syntax `| ::ErrorTypeA e -> handlerA` is retained."*, which read `e` as the error value (struck there, kept as history); otherwise nothing written — §19.8.3's example used the form without defining it. *(PA reading, flagged: the multi-field and unit cases are §18.7's existing arity rule applied to a one-binder pattern; the ruling names only "the variant's PAYLOAD". That `| _ e :>` binds nothing follows from §18.6; the SPEC names no dedicated code for it.)* **Direction of change (pa-base §8): semantics-changed (stated) for one-field variants; newly-rejecting for a binder on a unit or multi-field variant.** impl#1 (measured on `25677da72`) binds the FIRST field for a multi-field variant (`| .C c :>` on `C(x: number, y: number)` lowers to `const c = …data.x`) and binds the raw `.data` for a unit variant (`| .A x :>` → `const x = …data`), both silently; filed `g-impl1-paren-free-binder-arity-s451`. One-field variants already bind the field, as ruled. **Corpus measured (ruling 2)** (text scan of `!{` arms, `examples/` `samples/` `conformance/cases/`): 46 parenthesis-free binder arms in 12 files, **all under `samples/`** (0 in `examples/` and `conformance/cases/`) — 18 of them `| _ e :>`, and most of the rest name variants their callee's enum does not declare (`::SQLError e`, `::ConflictError e`; the `SqlError` variants are §19.8.1's three) and read `e.message` as if `e` were the whole error. They are the pre-§19 legacy handler shape and are already wrong on the variant name; this ruling moves none of them from correct to incorrect. ~~(`examples/16-remote-data.scrml` and `examples/29-engine-vs-flags.scrml` write `| err :>` — a bare identifier as the whole pattern — a further unruled form this paragraph does not cover.)~~ **Ruled S451:** a bare identifier as the whole pattern (`| err :>`) is **E-MATCH-BARE-BINDER** (§18.2) — write `| _ :>` or name the variant. *(ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(a).)*
 
@@ -17731,7 +17834,8 @@ function show(src: string) {
 - In a `!{}` arm, a parenthesis-free binder (`| .V m :>`) SHALL bind the variant's payload exactly as `| .V(m) :>` does, under §18.7's positional arity: on a unit variant or a variant with two or more fields it SHALL be E-TYPE-021. *(S451 ruling 2.)*
 - A `!{}` handler SHALL be attached only to an expression that can fail (a `!` function call, a call the compiler treats as `!`, or a `?{}`). A `!{}` on anything else SHALL be a compile error (**E-ERROR-013**). *(S451 ruling 3.)*
 - A `!{}` handler written as markup content and attached to no expression SHALL be a compile error (**E-ERROR-014**). *(S451 "your recs on all of them" item 2(b).)*
-- An arm whose whole pattern is a bare identifier (`| err :>`) SHALL be a compile error (**E-MATCH-BARE-BINDER**, §18.2). *(S451 "your recs on all of them" item 2(a).)*
+- An arm whose whole pattern is a bare identifier (`| err :>`) SHALL be a compile error (**E-MATCH-BARE-BINDER**, §18.2). *(S451 "your recs on all of them" item 2(a).)* To bind the whole error, write `| _ err :>`.
+- In a `!{}` arm or a `match` on a failable result, `_ <name>` SHALL match every error variant not matched by an earlier arm (never `.Ok`) and SHALL bind the whole error value, typed as the failure's error type (§18.6.1). *(S451 "a", the whole-error binder.)*
 - The `!` modifier SHALL be part of the function's type signature. It is visible to the type system and participates in type checking.
 
 ##### 19.4.4.1 The error type SHALL be an enum
@@ -18016,6 +18120,15 @@ match processPayment(100, 42) {
 ```
 
 Missing an error variant SHALL trigger E-TYPE-020 (non-exhaustive match over enum type).
+
+The error variants MAY be covered together, and the whole error bound, with the whole-error binder `_ <name>` (§18.6.1, S451). It matches every error variant an earlier arm did not name and never `.Ok`, so the `.Ok` arm is still required:
+
+```scrml
+match processPayment(100, 42) {
+    ::Ok(receipt) :> <div>Success: ${receipt.id}</>
+    _ err         :> <div class="error">${describe(err)}</>   // err: the declared error enum, whole
+}
+```
 
 #### 19.7.2 Markup Context with `<errorBoundary>`
 
@@ -18620,7 +18733,7 @@ fn: string)`) already names the first two for body-split stubs, and is the start
 is assigned to the bootstrap's U1b design pass:** the type's name (whether `CpsError` is extended or replaced by one
 built-in transport error), its variants and payloads (whether a decode failure is its own variant, whether a status
 code travels in the payload), its `renders` clauses (§19.2), and its `httpStatus` behaviour. Until U1b, a handler
-that must be total over a server call writes a `| _ :>` arm (§19.4.3), which covers every transport variant whatever
+that must be total over a server call writes a `| _ :>` arm (§19.4.3) — or `| _ err :>` to bind the whole failure (§18.6.1) — which covers every transport variant whatever
 their final names.
 
 **A server function declared `!`.** Its client call can fail in two ways: with the function's declared error (§19.9.1,
@@ -24238,7 +24351,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-MATCH-SUBSET-DEAD-ARM | §18.8.1, §53.15 | A concrete arm names a variant that is excluded by the matched value's enum-subset refinement type (`oneOf([…])` / `notIn([…])`) — the arm is dead (the variant can never inhabit the value). The message names the excluded variant + the subset. Distinct from E-TYPE-023 (duplicate arm names the SAME variant twice); a dead subset arm names an excluded variant once. (Catalog addition S154 — §53.15 enum-subset refinement, SF-1.) | Error |
 | E-MATCH-ON-REQUIRED | §18.0.1 | (Catalog addition S107 — Phase 2 of match block-form impl arc.) Block-form `<match for=Type>` is missing the `on=expr` attribute AND no `<engine for=Type>` for the same `Type` is in scope (auto-implied `on=` per §18.0.1 line 9578-9580 requires a same-type engine for the most-local-semantics-friendly resolution). Add `on=expr` to the `<match>` opener or declare a compatible `<engine>` in scope. | Error |
 | E-MATCH-ARM-SEPARATOR | §18.2 | A `match` arm is followed by a `,` separator. Match arms are juxtaposed (`match-arm+` per §18.2 grammar); the ONLY arm separator is the arm body's terminating `:>`-introduced arm boundary (the deprecated `=>`/`->` aliases behave identically) — arms are written one per line (newline-separated). A trailing `,` after an arm body is invalid. Resolution: remove the `,` (`.A :> x, .B :> y` → `.A :> x` / `.B :> y` on separate lines). Replaces the generic E-CODEGEN-INVALID-LOGIC that the stray comma would otherwise surface from codegen. (Catalog addition S144 Cluster D — Bug Y; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
-| E-MATCH-BARE-BINDER | §18.2, §19.4.3 | An arm whose WHOLE pattern is a bare identifier — `err :> …` in a `match`, `\| err :> …` in a `!{}` handler. A match arm does not bind the whole matched value (§18.6); write `_` / `else` for a catch-all, or name the variant (`.V(x)`, or `\| .V x :>` in a `!{}`) to bind its payload. `not` is the absence arm, not a bare name. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(a). **Nominal / not yet emitted** by impl#1 — it accepts the `!{}` form, and fails a `match` form closed with E-CODEGEN-INVALID-LOGIC (frozen; `g-impl1-bare-binder-arm-accepted-s451`); lands with the bootstrap. | Error |
+| E-MATCH-BARE-BINDER | §18.2, §19.4.3 | An arm whose WHOLE pattern is a bare identifier — `err :> …` in a `match`, `\| err :> …` in a `!{}` handler. In a `!{}` arm or a `match` on a failable result the fix is `\| _ err :>` / `_ err :>`, which binds the WHOLE error (§18.6.1); elsewhere a match arm does not bind the whole matched value (§18.6). Write `_` / `else` for a catch-all that binds nothing, or name the variant (`.V(x)`, or `\| .V x :>` in a `!{}`) to bind its payload. Also fires for the whole-error binder out of place: `_ <name>` in a `match` whose subject is not a failable result, and `else <name>` in any arm (§18.6.1). `not` is the absence arm, not a bare name. **Provenance:** ruling:user-voice-scrml.md S451 "your recs on all of them" item 2(a); amended by ruling:user-voice-scrml.md S451 "a" (the whole-error binder). **Nominal / not yet emitted** by impl#1 — it accepts the `!{}` form, and fails a `match` form closed with E-CODEGEN-INVALID-LOGIC (frozen; `g-impl1-bare-binder-arm-accepted-s451`); lands with the bootstrap. | Error |
 | E-MATCH-SCRUTINEE-ARITY | §18.19 | A multi-scrutinee `match (e1, …, eN)` (§18.19) product-pattern arm's pattern count does NOT equal the head's scrutinee count N — e.g. `(.A) :> …` under a 2-scrutinee head, or `(.A, .B, .C) :> …` under a 2-scrutinee head. Each `product-pattern` MUST supply exactly one §18.2 arm-pattern per head position (multi-scrutinee widens over scrutinees — breadth, NOT pattern depth; the §18.11 nested-pattern exclusion is preserved). A whole-product wildcard arm (`_` / `else`, optionally `\| _`) is exempt — it covers every position at once. Resolution: write exactly N comma-separated patterns per `(…)` arm, matching the head's scrutinee count, or use a whole-product `_` / `else` arm. (Catalog addition S224 — Q-MATCH multi-scrutinee match; NAMED at §18.19 W1, catalogued WITH the W2 impl per Rule 4 — the §60 `<api>` / §61 `<endpoint>` / §26.8 `@apply` precedent; emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
 | E-MATCH-ARM-MARKUP-IN-VALUE | §18.0 | A JS-style value-match arm (`match expr { .V :> ... }`) has an arm body that is a MARKUP element. §18.0 splits the two match forms by output category: the JS-style form emits a VALUE (server logic, derivations, computed expressions); the block-form `<match for=Type [on=expr]>` (§18.0.1) emits MARKUP. The natural reflex `${match err { .V(p) :> <markup with ${p}> }}` sits on the value↔markup boundary the two forms split. Resolution: use a `<match for=Type [on=expr]>` block to render a UI tree per variant, or fire a variant's `renders` display via the render-expression; to compute a VALUE per variant have the arm return that value (`:> "Failed: " + reason`) and interpolate it in markup. The render-expression routes around this without widening value-match to emit markup (limit-primitives-not-godify). This early TYPER-stage steer REPLACES the wrong-altitude failures the reflex otherwise surfaces at a later stage — E-CODEGEN-INVALID-LOGIC (markup body lowered literally) and E-SCOPE-001 (a payload var in a `${...}` inside the markup body, not in scope for value-match codegen); the arm-body visit is skipped once the steer fires so it is the ONLY diagnostic. SCOPED to JS-style match-stmt/match-expr `match-arm-inline` arms; the block-form `<match>` is a distinct `match-block` node, structurally exempt. (Catalog addition S196 — error-handling-holistic DD §1.4 Seams 1+2 / debate §6 prereqs 3+4 (H1); emitted by TS at `compiler/src/type-system.ts:checkMatchDiagnostics`.) | Error |
 | E-MATCH-BLOCK-IN-LIFT | §18.0.1, §17.7 | A block-form `<match for=Type on=expr>` is placed inside a `${ ... lift ... }` logic loop (the Tier-0 iteration form). The logic-context inline-markup parser does NOT route `<match>` through the BS-layer S107 match-block recognition (`ast-builder.js` `block.name === "match"`), so the variant arms (`<Open>`/`<Closed>`) land as unresolved uppercase-tag markup and would otherwise surface a misleading E-COMPONENT-035 "residual component / cross-file import" cascade. The supported per-item form is the Tier-1 `<each>` block: move the `<match>` into an `<each in=@coll as item> ... <match for=Type on=item> ... </match> ... </each>` body — the same block `<match>` compiles there. This targeted steer REPLACES the misleading E-COMPONENT-035 cascade for the shape (the arm errors are suppressed). Supporting block-`<match>` inside `${...lift}` was REJECTED (limit-primitives; `<each>` is canonical per S130 HU-1). (Catalog addition S213 — g-block-match-in-lift; user ruling S212 "(b) targeted diagnostic, steer to `<each>`"; emitted by VP-2 post-CE invariant at `compiler/src/validators/post-ce-invariant.ts`.) | Error |
