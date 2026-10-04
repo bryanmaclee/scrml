@@ -1463,6 +1463,143 @@ export interface ColorOpts {
    * every message would drop).
    */
   reactiveArg1SkipKeep?: ReadonlySet<string> | null;
+  /**
+   * S453 (bryan S449 ruling A3) — the boundary id this listener's rejection is
+   * logged under (see `wrapHandlerRejectionLog`). A site that knows its event
+   * and placeholder passes `"<eventName> <placeholderId>"`; everything else
+   * takes `DEFAULT_HANDLER_BOUNDARY_ID`.
+   */
+  boundaryId?: string;
+}
+
+/**
+ * S453 (bryan, user-voice-scrml.md S449 — ruling A3: *"every async event listener
+ * routes its rejection to `_scrml_error_boundary_log`"*, extending B5 to handlers
+ * and closing `g-handler-level-rejection-bypasses-scrml-logging`).
+ *
+ * The problem this closes: `addEventListener` ignores a listener's return value,
+ * so an `async` listener's rejection is observed by NOBODY — it surfaces only as a
+ * browser `unhandledrejection`, outside scrml's logging surface. S450's #1242 made
+ * that reachable from ordinary source: a nested server-call cell write is now
+ * awaited IN PLACE, which colours the handler `async`, so a failed call that used
+ * to reach `_scrml_error_boundary_log` through emit-client's detached
+ * `(async () => …)().catch(…)` IIFE stopped reaching it.
+ *
+ * SHAPE — an in-body `try` / `catch`, NOT a sync listener that fires an async
+ * IIFE. A handler body runs synchronously up to its first `await`, and
+ * `event.preventDefault()` / `stopPropagation()` live in that synchronous prefix.
+ * An IIFE wrapper would move them past a microtask boundary, by which time the
+ * browser has already committed the default action — a silent event-semantics
+ * change nobody asked for. The try/catch keeps the prefix exactly where it is.
+ *
+ * NOT CAUGHT, deliberately: a rejection from a DETACHED promise the body itself
+ * created (emit-client's fire-and-forget `(async () => …)()` write). A
+ * surrounding `try`/`catch` cannot see it — but those sites already carry their
+ * OWN `.catch(… → _scrml_error_boundary_log)` arm, so the surface is covered
+ * there rather than widened here.
+ *
+ * `_scrml_error_boundary_log` is called UNGUARDED, mirroring every sibling emit
+ * site (emit-engine `effect=`, emit-reactive-wiring `on mount`, emit-client
+ * `session.destroy`): it lives in the always-included `errors` runtime chunk.
+ */
+export const DEFAULT_HANDLER_BOUNDARY_ID = "event handler";
+
+/** The catch binding; `_scrml_async_err` matches the sibling `.catch(…)` sites. */
+const HANDLER_ERR_VAR = "_scrml_async_err";
+
+function freshHandlerErrVar(code: string): string {
+  if (!code.includes(HANDLER_ERR_VAR)) return HANDLER_ERR_VAR;
+  for (let i = 2; i < 1000; i++) {
+    const n = `${HANDLER_ERR_VAR}_${i}`;
+    if (!code.includes(n)) return n;
+  }
+  return `${HANDLER_ERR_VAR}_x`;
+}
+
+/**
+ * Wrap one ALREADY-COLOURED async listener's body in the rejection log (see the
+ * block comment above). `code` is the full function-expression text AFTER the
+ * `async` prefix is applied, so it parses and the offsets below are exact
+ * (`analyze`'s edits all land at call sites inside the body, never in a
+ * prologue). Returns `null` — leaving the caller's text byte-identical to the
+ * pre-S453 emission — only when the text does not parse as a single function
+ * expression.
+ *
+ * ⛑ A DIRECTIVE PROLOGUE IS KEPT OUTSIDE THE `try`, NOT BAILED ON. The first
+ * cut of this function returned `null` for a body whose first statement is a
+ * string literal, reasoning (correctly) that moving `"use strict"` inside a
+ * `try` demotes it to an ordinary expression statement and silently changes the
+ * body's strictness. The CONSEQUENCE of that bail was not measured, and it was
+ * the worse bug: the listener is still emitted `async`, so its rejection still
+ * escaped — with no arm, no diagnostic and exit 0. Any string-literal first
+ * statement triggered it, not just `"use strict"`. Emitting
+ * `async function(event) { "use strict"; try { … } catch … }` keeps the
+ * directive in directive position AND gets the arm.
+ */
+function wrapHandlerRejectionLog(code: string, boundaryId: string): string | null {
+  const PREFIX = "(";
+  const SUFFIX = "\n)";
+  const src = PREFIX + code + SUFFIX;
+  const program = tryParse(src);
+  if (!program || program.body.length !== 1) return null;
+  const root = program.body[0]?.expression;
+  if (!root || (root.type !== "FunctionExpression" && root.type !== "ArrowFunctionExpression")) return null;
+  if (root.start !== PREFIX.length) return null;
+  const body = root.body;
+  if (!body || typeof body.start !== "number" || typeof body.end !== "number") return null;
+  const v = freshHandlerErrVar(code);
+  const arm = ` catch (${v}) { _scrml_error_boundary_log(${JSON.stringify(boundaryId)}, ${v}); }`;
+  // src offset `o` is code offset `o - PREFIX.length`.
+  const toCode = (o: number) => o - PREFIX.length;
+  if (body.type === "BlockStatement") {
+    // The DIRECTIVE PROLOGUE — every leading string-literal statement, not just
+    // `"use strict"` — stays where it is; the `try` opens after it.
+    let afterPrologue = body.start + 1;
+    for (const st of (Array.isArray(body.body) ? body.body : []) as N[]) {
+      const isDirective = st && st.type === "ExpressionStatement" &&
+        (typeof st.directive === "string" ||
+          (st.expression && st.expression.type === "Literal" && typeof st.expression.value === "string"));
+      if (!isDirective) break;
+      afterPrologue = st.end;
+    }
+    return `${code.slice(0, toCode(body.start))}{${src.slice(body.start + 1, afterPrologue)} try {` +
+      `${src.slice(afterPrologue, body.end - 1)}}${arm} }` + code.slice(toCode(body.end));
+  }
+  // CONCISE ARROW BODY — the expression becomes a `return`.
+  //
+  // ⚑ The slice must start after the `=>`, NOT at `body.start`. Parentheses are
+  // not AST nodes, so for `(e) => ({a: 1})` acorn puts `body.start` on the
+  // object's `{`, i.e. INSIDE the wrapping parens — slicing from there leaves the
+  // `(` in the head and the `)` in the tail and emits `=> ({ try { … } })`, which
+  // is an object literal with a property named `try`: a SyntaxError. So walk
+  // outward over any balanced wrapping parens first, bounded so the walk can
+  // never reach PREFIX / SUFFIX.
+  //
+  // ⚑ HARDENING NOTE — THE SAME HAZARD SURVIVES ONE LAYER OUT, AND THIS WALK
+  // DOES NOT CLOSE IT. The walk below tests CHARACTERS, so it steps over
+  // whitespace but NOT over comments: `(event) => ( /*x*/ save() /*y*/ )`
+  // reproduces exactly the `try`-as-an-object-literal-property defect described
+  // above, because the comment stops the paren from being found.
+  // It is UNREACHABLE from scrml source today — every handler path re-emits from
+  // the AST and drops comment tokens before reaching this seam (probed across
+  // the delegated, `<each>` and `for … lift` paths) — so it is recorded here
+  // rather than fixed, and the fix is deliberately NOT more character cases.
+  // THE STRUCTURAL FORM IS TO ASK THE TREE, NOT THE TEXT: take the extent from
+  // the AST (the arrow's `=>` token end, or the parenthesized body's own range
+  // via a parser that records parens) instead of scanning backwards for `(`.
+  // Anything that makes this seam see comment tokens must do that first.
+  let s = body.start, e = body.end;
+  for (;;) {
+    let l = s - 1;
+    while (l >= 0 && /\s/.test(src[l]!)) l--;
+    let r = e;
+    while (r < src.length && /\s/.test(src[r]!)) r++;
+    if (l > PREFIX.length && r < src.length - SUFFIX.length && src[l] === "(" && src[r] === ")") {
+      s = l; e = r + 1;
+    } else break;
+  }
+  // Re-parenthesized, so an object literal and a sequence expression stay intact.
+  return `${code.slice(0, toCode(s))}{ try { return (${src.slice(s, e)}); }${arm} }${code.slice(toCode(e))}`;
 }
 
 /**
@@ -1517,5 +1654,18 @@ export function colorAsyncFunctionExpr(code: string, resolveFree: FreeAsyncResol
   const eventParam = root.params && root.params[0] && root.params[0].type === "Identifier" ? root.params[0].name : null;
   let r = analyze(src, program, PREFIX.length, src.length - SUFFIX.length, resolveFree, { transform: true, root, eventParam, reactiveArg1Skip: opts.reactiveArg1Skip !== false, reactiveArg1SkipKeep: opts.reactiveArg1SkipKeep ?? null, handlerRoot: true });
   if (r.rootAsync && !root.async) r = { ...r, code: "async " + r.code };
+  // S453 (bryan S449 A3) — the listener is async exactly when `rootAsync`, and an
+  // async listener's rejection is observed by nobody; route it to
+  // `_scrml_error_boundary_log`. Done HERE, at the one seam every listener
+  // emitter shares (`colorHandlerAsync` → the delegated / non-delegable /
+  // arm-bound-factory registrations in emit-event-wiring.ts; `colorActiveHandler`
+  // → emit-each rows and emit-lift's per-element listeners), rather than at the
+  // call sites: patching one branch of a surface with several spellings is how an
+  // incomplete fix ships (primary.map.md invariant 69). A handler that is NOT
+  // coloured async is byte-identical — the wrap is inside this `if`.
+  if (r.rootAsync) {
+    const wrapped = wrapHandlerRejectionLog(r.code, opts.boundaryId ?? DEFAULT_HANDLER_BOUNDARY_ID);
+    if (wrapped !== null) r = { ...r, code: wrapped };
+  }
   return r;
 }

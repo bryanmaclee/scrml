@@ -1337,9 +1337,17 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     // async function used as a value (S440 F4) — fails closed.
     // S446 (S439 #4) — a statement-list handler awaits a server-call cell write
     // in place, so the next statement sees the resolved value (see ColorOpts).
+    // S453 (bryan S449 A3) — `boundaryId` names the event and the handler site,
+    // so a logged rejection points at one listener. This ONE call covers all
+    // three registrations: the delegated `document.addEventListener` registry,
+    // the non-delegable per-element `addEventListener`, and the arm/row-bound
+    // factory (`armFactoryLines` returns this same `handlerExpr`).
     handlerExpr = colorHandlerAsync(
       handlerExpr, binding.span, ctx,
-      handlerStatementListColor(binding.handlerBlock?.stmts, sseFnNames),
+      {
+        ...handlerStatementListColor(binding.handlerBlock?.stmts, sseFnNames),
+        boundaryId: `${eventName} ${placeholderId}`,
+      },
     );
 
     if (!byEventType.has(eventName)) {

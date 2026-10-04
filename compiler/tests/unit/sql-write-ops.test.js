@@ -275,18 +275,29 @@ describe("§11 transaction-block — BEGIN/COMMIT/ROLLBACK via sql.unsafe() (§4
     expect(output).toContain("throw _scrml_txn_err");
   });
 
-  test("ROLLBACK is in the catch block, not the try block", () => {
+  // S450: the block's exits are COMMIT on normal completion (inside `try`) and a
+  // ROLLBACK on every other exit — a `finally` guarded by the open flag, plus the
+  // rollback closure a marked `fail` / `?` calls before its return. No ROLLBACK
+  // runs on the normal-completion path between BEGIN and COMMIT.
+  test("COMMIT is on the normal path; the backstop ROLLBACK is in the finally block", () => {
     const node = {
       kind: "transaction-block",
       body: [],
     };
     const output = emitLogicNode(node);
     const lines = output.split("\n");
-    const rollbackLine = lines.findIndex(l => l.includes("ROLLBACK"));
+    const tryLine = lines.findIndex(l => l.trim() === "try {");
+    const commitLine = lines.findIndex(l => l.includes('unsafe("COMMIT")'));
     const catchLine = lines.findIndex(l => l.includes("} catch ("));
-    const commitLine = lines.findIndex(l => l.includes("COMMIT"));
-    expect(rollbackLine).toBeGreaterThan(catchLine);
+    const finallyLine = lines.findIndex(l => l.includes("} finally {"));
+    const backstop = lines.findIndex((l, i) => i > finallyLine && l.includes('unsafe("ROLLBACK")'));
+    expect(tryLine).toBeGreaterThan(-1);
+    expect(commitLine).toBeGreaterThan(tryLine);
     expect(commitLine).toBeLessThan(catchLine);
+    expect(finallyLine).toBeGreaterThan(catchLine);
+    expect(backstop).toBeGreaterThan(finallyLine);
+    // nothing between `try {` and COMMIT issues a ROLLBACK
+    expect(lines.slice(tryLine, commitLine).some(l => l.includes('unsafe("ROLLBACK")'))).toBe(false);
   });
 });
 

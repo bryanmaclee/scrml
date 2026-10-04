@@ -120,8 +120,8 @@ describe("CONF-TENANT-FLOOR (declaration-source half): a `<schema>`-only app, BO
       // It must COMPILE — the fix teaches the declaration form; it does not
       // reject the input.
       expect(r.errors ?? []).toEqual([]);
-      // The read is tagged at query-lowering …
-      expect(/_scrml_tenant_tag\(await _scrml_sql/.test(server)).toBe(true);
+      // The read is filtered to the tenant at the source (query-lowering) …
+      expect(/_scrml_tenant_scope\(await _scrml_sql/.test(server)).toBe(true);
       // … the redact is wired at the client-egress sink, keyed on the ambient
       // tenant …
       expect(/_scrml_tenant_redact\([^)]*_scrml_active_tenant/.test(server)).toBe(true);
@@ -137,7 +137,7 @@ describe("CONF-TENANT-FLOOR (declaration-source half): a `<schema>`-only app, BO
         SCHEMA_SPELLINGS[spelling].plain,
         readFn("id, name"),
       );
-      expect(server.includes("_scrml_tenant_tag")).toBe(false);
+      expect(server.includes("_scrml_tenant_scope")).toBe(false);
       expect(server.includes("_scrml_tenant_redact")).toBe(false);
       expect(codes(r).has("I-TENANT-STRIP")).toBe(false);
     });
@@ -172,12 +172,17 @@ describe("CONF-TENANT-FLOOR (codes-half): each code fires on its shape", () => {
   });
 });
 
-describe("CONF-TENANT-FLOOR (runtime-half): the compiled bundle wires + the shipped redact isolates rows", () => {
+describe("CONF-TENANT-FLOOR (runtime-half): the compiled bundle wires + the shipped helpers isolate rows", () => {
   // Eval the SHIPPED helper block (the EXACT runtime the emitted server carries),
-  // the same cloud-green pattern the unit suite uses — no full-bundle HTTP.
+  // the same cloud-green pattern the unit suite uses — no full-bundle HTTP. The
+  // request a query runs for is supplied through the helper's own request store,
+  // with a stub `_scrml_current_user` standing in for the session resolver.
   const H = new Function(
-    SERVER_TENANT_HELPER + "\nreturn { _scrml_tenant_tag, _scrml_tenant_redact };",
+    "function _scrml_current_user(req) { return { tenantId: req.tenantId ?? null }; }\n" +
+    SERVER_TENANT_HELPER +
+    "\nreturn { _scrml_tenant_scope, _scrml_tenant_redact, _scrml_tenant_request_scope };",
   )();
+  const asTenant = (tenantId, fn) => H._scrml_tenant_request_scope(fn)({ tenantId });
   const rows = () => [
     { id: 1, name: "a1", tenant_id: "A" },
     { id: 2, name: "a2", tenant_id: "A" },
@@ -207,14 +212,25 @@ describe("CONF-TENANT-FLOOR (runtime-half): the compiled bundle wires + the ship
     expect(server.includes("function _scrml_active_tenant")).toBe(true);
   });
 
-  test("(2) the shipped redact ISOLATES rows: A→only A (tenant_id stripped); unpinned→zero; untagged→passthrough", () => {
-    // a floor-tagged (projection-added tenant_id) result → keep only the ambient
-    // tenant's rows, strip the floor-added tenant_id column from the survivors.
-    expect(H._scrml_tenant_redact(H._scrml_tenant_tag(rows(), "tenant_id", true), "A"))
+  test("(2) the shipped source filter ISOLATES rows: A→only A (floor-added tenant_id removed); unpinned→zero; no request→zero", () => {
+    // a floor-scoped (projection-added tenant_id) result → keep only the request
+    // tenant's rows and remove the floor-added tenant_id column from the survivors.
+    // (JSON round-trip: the survivors also carry the Symbol-keyed tenant mark.)
+    expect(JSON.parse(JSON.stringify(asTenant("A", () => H._scrml_tenant_scope(rows(), ["tenant_id"], ["tenant_id"])))))
       .toEqual([{ id: 1, name: "a1" }, { id: 2, name: "a2" }]);
-    // fail-closed: an absent ambient tenant (unpinned request) → zero rows.
-    expect(H._scrml_tenant_redact(H._scrml_tenant_tag(rows(), "tenant_id", true), null)).toEqual([]);
-    // .acrossTenants() emits UNtagged rows → the redact passes them through unchanged.
+    // fail-closed: an absent tenant (unpinned request) → zero rows.
+    expect(asTenant(null, () => H._scrml_tenant_scope(rows(), ["tenant_id"], []))).toEqual([]);
+    // fail-closed: code outside any request → zero rows.
+    expect(H._scrml_tenant_scope(rows(), ["tenant_id"], [])).toEqual([]);
+  });
+
+  test("(3) the egress re-check (defense in depth) keeps rows admitted for this tenant; untagged → passthrough", () => {
+    const scoped = asTenant("A", () => H._scrml_tenant_scope(rows(), ["tenant_id"], []));
+    expect(H._scrml_tenant_redact(scoped, "A")).toEqual(scoped);
+    // a row admitted for A never leaves on a request whose tenant is now B / none.
+    expect(H._scrml_tenant_redact(scoped, "B")).toEqual([]);
+    expect(H._scrml_tenant_redact(scoped, null)).toEqual([]);
+    // .acrossTenants() emits UNscoped rows → the redact passes them through unchanged.
     expect(H._scrml_tenant_redact(rows(), "A")).toEqual(rows());
   });
 });

@@ -60,7 +60,7 @@ ${QUERY}
 }
 const all = (r) => [...(r.errors ?? []), ...(r.warnings ?? [])].map((d) => d.code);
 const schemaCodes = (r) => (r.errors ?? []).map((d) => d.code).filter((c) => /^E-SCHEMA-01[234]$/.test(c));
-const tagged = (server) => /_scrml_tenant_tag\(await _scrml_sql/.test(server);
+const tagged = (server) => /_scrml_tenant_scope\(await _scrml_sql/.test(server);
 
 const C = "(id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)";
 const NOTES = "\n    CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)";
