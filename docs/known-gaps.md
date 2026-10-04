@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 240 | 6 |
-| MED | 492 | 4 |
+| MED | 493 | 4 |
 | LOW | 245 | 0 |
 | Nominal (spec-ahead-of-impl) | 8 | 0 |
 <!-- @generated:gap-counts END -->
@@ -22712,3 +22712,7 @@ Governing: SPEC §6.14.1 r1/r2, §6.14.4.2 r2, §6.14.4.3 r2 (Nominal; impl#1 ca
 ### g-impl1-show-narrows-s451 — impl#1 DIVERGENCE (filed, not fixed): impl#1 still narrows a plain-optional cell under `show=@x`, so a bare `@x.field` inside a `show=` element compiles without E-TYPE-046 — `NEW S451; LOW; open`
 <!-- @gap id=g-impl1-show-narrows-s451 sev=LOW status=open locus=compiler/src/type-system.ts(markupNarrowedCells — the attr-name filter admits "show" beside "if" / "else-if") prov=ruling:user-voice-scrml.md-S451-"your-recs-on-both"-rec-1 -->
 Governing: SPEC §42.3.5 / §17.2 (S451 rec 1). Measured: `<user>: { name: string } | not` + `<div show=@user><p>${@user.name}</p></div>` → 0 E-TYPE-046 on impl#1; with `"show"` removed from the filter → 1. Corpus impact: 0 of the 12 `show=` files under `examples/`, `samples/`, `conformance/cases/` change (same E-TYPE-046 count, 0, with and without the filter entry), so the fix is a one-token deletion with no measured migration.
+
+### g-impl1-db-resolution-not-nearest-s451 — impl#1 DIVERGENCE (filed, not fixed): impl#1 binds every `?{}` in a file to ONE per-file handle (the first `<db src=>` in document order, else the first `<program db=>`), not to the `?{}`'s nearest enclosing database scope — `NEW S451; MED; open`
+<!-- @gap id=g-impl1-db-resolution-not-nearest-s451 sev=MED status=open locus=compiler/src/db-ownership.ts(fileDefaultDbValue — first `<db src=>` else first `<program db=>`) + compiler/src/codegen/emit-server.ts(~L843 — the single `_scrml_sql` handle every `?{}` lowers to) prov=ruling:user-voice-scrml.md-S451-"your-recs-on-both"-rec-2;empirical:s451-spec-show-db-db-probe -->
+Governing: SPEC §8.1.1 (normative resolution + *Ownership* "that database", S451 rec 2) / §44.2. Measured on `086f8f209` (fixtures had `a.db` and `b.db` beside the source, each with tables): (1) `<program db="./a.db"><program db="./b.db">` + a server function `?{SELECT … FROM shared}` in the inner program → the server module's only handle is `_scrml_sqlite_referenced("a.db", "./a.db", …)`, so the inner query runs on `a.db` (rule: `b.db`). (2) `<program db="./a.db">` + `<db src="./b.db" tables="shared">` holding the `?{}` → handle `b.db` — agrees with the rule, but only because the first `<db src=>` wins. (3) `<program db="./a.db">` with one `?{}` directly in it and a second inside a sibling `<db src="./b.db">` → ONE handle, `b.db`, used by both queries; the outer query runs on `b.db` (rule: `a.db`). (4) `<program>` (no `db=`) + `<db src="./b.db">` holding the `?{}` → compiles, handle `b.db` — agrees with the amended rule (the pre-S451 §8.1.1 text made it E-SQL-004). The divergence is silent: a query against the wrong database compiles at exit 0 and fails or returns the other database's rows at run time. Ownership (§8.1.1 *Creation*) is computed per file on the same single handle, so a file whose scopes declare schema for two databases can own at most the one its single handle names (by code reading of `db-ownership.ts`, not executed). Disposition: impl#1 frozen for semantics (S447); the bootstrap resolves per `?{}`.
