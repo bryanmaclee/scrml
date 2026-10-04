@@ -668,6 +668,11 @@ async function gradeCase(boot: Bootstrap, c: LoadedCase, g: GradeInput): Promise
   let rtFailures: string[];
   try {
     const out = boot.mods.print.printProgram(fe.core, "program.client.js", "scrml-runtime.js");
+    // s451 (U1a): the printer REFUSES a program with server functions (no server artifact
+    // until unit U1c) — an unsupported construct, not a verdict on the case.
+    if (out.refused && out.refused.length > 0) {
+      return v("UNSUPPORTED", "bootstrap-unsupported", { ...base, failures: out.refused });
+    }
     const r = await runBootstrapArtifact(out.html, out.js, (ex.input ?? []) as InputStep[]);
     rtFailures = runtimeHalfFailures(ex, r);
   } catch (e) {

@@ -105,7 +105,8 @@ describe("(A) every other top-level attribute: its code, or a refusal — never 
   test("`name=` on the top-level `<program>` (§4.12.2 MUST NOT, no code named) → refused", () => {
     expect(codes(prog(`name="n"`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
-  for (const a of ["title", "description", "db", "tables", "cors", "log", "headers", "csrf", "loginRedirect",
+  // (`db=` is read since s451 U1a — the program's database, §8.1.1: server.test.js)
+  for (const a of ["title", "description", "tables", "cors", "log", "headers", "csrf", "loginRedirect",
                    "sessionExpiry", "session-secure", "lang", "kind", "mcp", "idempotency-store", "transactions"]) {
     test(`\`${a}=\` is not read by the bootstrap → one E-BOOTSTRAP-UNSUPPORTED naming it`, () => {
       const d = run(prog(`${a}="v"`)).diags;

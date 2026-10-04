@@ -1,0 +1,577 @@
+// =============================================================================
+// self-host-v2 / sql.scrml — what a `?{}` query's SQL does, read ONCE from its
+// literal text (bootstrap unit U1a).
+//
+// Design authority: scrml-support/docs/deep-dives/bootstrap-u1-server-boundary-
+// design-2026-10-03.md §1 ("kind/reads/writes are recorded at lowering, once,
+// from the literal chunks (a token scan of SQL, a foreign language, never of
+// scrml source) … any doubt … → Unknown"). The facts feed what later units
+// need: §6.7.7.1 READ classification ("no non-`SELECT` SQL (`?{}`) is
+// reachable … Unclassifiable = write"), §6.7.7.2 rule 4 invalidation ("a
+// non-`SELECT` write against a table the request `SELECT`s"), S451 R4
+// ("parallelized only when … provably read-only") and §8.1.1 Ownership ("a
+// `?{}` block holding a statement that creates a table"). Nobody rescans SQL
+// after this.
+//
+// EVERY FACT FAILS CLOSED:
+//   - kind is SqlSelect ONLY when THE QUERY TEXT CALLS NO NON-BUILT-IN (text
+//     alone cannot prove a statement read-only — see KNOWN LIMITS): its first
+//     keyword is SELECT (or WITH), no write word appears anywhere outside a
+//     string literal (INSERT UPDATE DELETE REPLACE UPSERT MERGE CREATE DROP
+//     ALTER TRUNCATE; INTO — `SELECT … INTO t` creates a table on Postgres;
+//     FOR / LOCK — `FOR UPDATE` / `FOR SHARE` / `LOCK IN SHARE MODE` lock
+//     rows), and nothing in it is a call: ANY token followed by `(` is a call
+//     (a quoted name included; a QUALIFIED name — `public.count(…)` — always)
+//     unless it is a syntax word no dialect lets name a function or a short
+//     list of read-only built-ins. Anything else — another first keyword
+//     (PRAGMA, ATTACH, BEGIN …), a comment, a string the drivers could end
+//     differently (a backslash, an `E'…'` prefix), `[` (Postgres subscripts
+//     run their contents), any character or operator outside the scanner's
+//     whitelist — is SqlWrite. (S239 review fix rounds: the scanner is
+//     whitelist-only, so an input it was not built for can never read as a
+//     SELECT.)
+//     KNOWN LIMITS (the text cannot see them; the runtime must guard — see
+//     docs/changes/s451-boot-u1a/progress.md "Requirement on U3"):
+//       · Postgres attribute notation: `t.f` may call `f(t)` when `t` has no
+//         column `f` — read as a column;
+//       · Postgres overload resolution reaching a user function through a
+//         built-in name (the CVE-2018-1058 class: a better-matching
+//         `public.lower(mytype)`);
+//       · user-defined casts, domains (CHECK functions) and operators the
+//         whitelist admits by spelling (jsonb `?` is a built-in, but `=` /
+//         `<` on a user type run a user function);
+//       · views and row-level-security policies that call volatile functions;
+//       · SQLite functions a driver registers over a built-in name.
+//   - a table set is TablesKnown only when every table position holds a bare
+//     name the scanner read; a quoted or qualified name, a value where a name
+//     stands, a comment anywhere, or ZERO tables found → TablesUnknown (=
+//     every table).
+//   - columns are ColsListed only when every select-list item has a name (a
+//     column or an alias); `*` → ColsAll; a write with no RETURNING → ColsNone.
+// A `${…}` value between two literal runs is ONE opaque value token — never
+// text (§8.1).
+// =============================================================================
+${
+    import { SqlKind, SqlTables, SqlColumns } from "./core.scrml"
+
+    // The facts. `createsTable`: §8.1.1 "Creates a table means a `CREATE TABLE`
+    // or `CREATE VIRTUAL TABLE` statement … A `TEMP` / `TEMPORARY` table does
+    // not count … A table qualified to another attached schema (`other.t`) does
+    // not count; `main.t` does."
+    export type SqlFacts:struct = { kind: SqlKind, reads: SqlTables, writes: SqlTables, columns: SqlColumns, createsTable: boolean }
+
+    // One SQL token. `k`: Word (`w` = upper-cased, `text` = as written), Punct
+    // (one character), Str (a string literal), QName (a quoted identifier
+    // `"x"` / `` `x` ``; `[` is never read — Postgres subscripts run their
+    // contents — and fails closed), Value (a `${…}` bound value), Num.
+    type SK:enum = { Word, Punct, Str, QName, Value, Num }
+    type STok:struct = { k: SK, w: string, text: string }
+    // `broken`: text the scanner cannot read with CERTAINTY on every driver —
+    // see scanRun. A broken query is SqlWrite with every table set unknown.
+    type SScan:struct = { toks: STok[], broken: boolean }
+
+    fn ch(s: string, i: int) -> string { return s.substring(i, i + 1) }
+
+    // S239 review fix round — the scanner reads ONLY an explicit ASCII
+    // vocabulary; any other character outside a string literal (a form feed, a
+    // vertical tab, a non-breaking or other Unicode space, a non-ASCII letter,
+    // `#`, `$`, `:`, `@`, `~`, `\`, …) is something one of the three dialects
+    // may read differently, so the scan FAILS CLOSED (broken). Whitelists, not
+    // blacklists: an unlisted character can never be read as harmless.
+    fn isDigit(c: string) -> boolean { return c != "" && "0123456789".indexOf(c) >= 0 }
+
+    fn isWordStart(c: string) -> boolean {
+        return c != "" && "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_".indexOf(c) >= 0
+    }
+
+    fn isWordCh(c: string) -> boolean { return isWordStart(c) || isDigit(c) }
+
+    fn isSpace(c: string) -> boolean { return c == " " || c == "\n" || c == "\t" || c == "\r" }
+
+    // Operator characters, read as a maximal run; only the runs in opOk stand.
+    fn isOpCh(c: string) -> boolean { return c != "" && "+-*/<>=!%|".indexOf(c) >= 0 }
+
+    // The operators every dialect gives the same built-in meaning. A run of
+    // operator characters outside this list (`@@`, `<->`, `=-`, a Postgres user
+    // operator) fails closed — a user-defined operator is a function call.
+    fn opOk(op: string) -> boolean {
+        return ["=", "<", ">", "<=", ">=", "<>", "!=", "+", "-", "*", "/", "%", "||"].indexOf(op) >= 0
+    }
+
+    // Single punctuation that is syntax only.
+    fn isPunctOk(c: string) -> boolean { return c != "" && "(),.;?".indexOf(c) >= 0 }
+
+    fn tok(k: SK, text: string) -> STok { return { k: k, w: text.toUpperCase(), text: text } }
+
+    // The tokens of every literal run, a Value token between two runs.
+    fn scanSql(chunks: string[]) -> SScan {
+        let toks: STok[] = []
+        let broken = false
+        let ci: int = 0
+        for (const c of chunks) {
+            const r: SScan = scanRun(c)
+            toks = toks.concat(r.toks)
+            if (r.broken) broken = true
+            if (ci < chunks.length - 1) toks = toks.concat([tok(SK.Value, "?")])
+            ci = ci + 1
+        }
+        return { toks: toks, broken: broken }
+    }
+
+    // One literal run. FAILS CLOSED (broken) on:
+    //  - any COMMENT: `--` is a comment on SQLite / Postgres but `1--1` is
+    //    arithmetic on MySQL, and MySQL runs `/*! … */` — a comment can hide or
+    //    reveal a call depending on the driver;
+    //  - a string literal holding a backslash (MySQL — and Postgres `E'…'` —
+    //    read `\'` as an escaped quote, SQLite does not: the string's END differs
+    //    by driver), a prefixed string (`E'…'`, `N'…'`, `X'…'`), or one that does
+    //    not end in the run (a `${…}` inside it, `'%${q}%'`);
+    //  - any character outside the vocabulary above.
+    fn scanRun(s: string) -> SScan {
+        let toks: STok[] = []
+        let i: int = 0
+        while (i < s.length) {
+            const c: string = ch(s, i)
+            if (isSpace(c)) {
+                i = i + 1
+            } else if (c == "-" && ch(s, i + 1) == "-") {
+                return { toks: toks, broken: true }
+            } else if (c == "/" && ch(s, i + 1) == "*") {
+                return { toks: toks, broken: true }
+            } else if (c == "'" || c == "\"" || c == "`") {
+                // a prefixed string / name (`E'…'`): a word touching the quote
+                if (i > 0 && isWordCh(ch(s, i - 1))) return { toks: toks, broken: true }
+                const r: StrEnd = quotedEnd(s, i, c)
+                if (r.end < 0) return { toks: toks, broken: true }
+                if (s.substring(i, r.end).indexOf("\\") >= 0) return { toks: toks, broken: true }
+                let k: SK = SK.QName
+                if (c == "'") k = SK.Str
+                toks = toks.concat([tok(k, s.substring(i, r.end))])
+                i = r.end
+            } else if (isWordStart(c)) {
+                let j: int = i + 1
+                while (j < s.length && isWordCh(ch(s, j))) { j = j + 1 }
+                toks = toks.concat([tok(SK.Word, s.substring(i, j))])
+                i = j
+            } else if (isDigit(c)) {
+                let j2: int = i + 1
+                while (j2 < s.length && (isDigit(ch(s, j2)) || ch(s, j2) == ".")) { j2 = j2 + 1 }
+                toks = toks.concat([tok(SK.Num, s.substring(i, j2))])
+                i = j2
+            } else if (isOpCh(c)) {
+                let j3: int = i + 1
+                while (j3 < s.length && isOpCh(ch(s, j3))) { j3 = j3 + 1 }
+                const op: string = s.substring(i, j3)
+                if (!opOk(op)) return { toks: toks, broken: true }
+                toks = toks.concat([tok(SK.Punct, op)])
+                i = j3
+            } else if (isPunctOk(c)) {
+                toks = toks.concat([tok(SK.Punct, c)])
+                i = i + 1
+            } else {
+                return { toks: toks, broken: true }
+            }
+        }
+        return { toks: toks, broken: false }
+    }
+
+    // The end (one past the closing quote) of a quoted run starting at `i`; a
+    // doubled quote is an escaped one (SQL `'it''s'`). -1: never closed.
+    type StrEnd:struct = { end: int }
+
+    fn quotedEnd(s: string, i: int, q: string) -> StrEnd {
+        let j: int = i + 1
+        while (j < s.length) {
+            if (ch(s, j) == q) {
+                if (ch(s, j + 1) == q) {
+                    j = j + 2
+                } else {
+                    return { end: j + 1 }
+                }
+            } else {
+                j = j + 1
+            }
+        }
+        return { end: -1 }
+    }
+
+    // ---- vocabulary -------------------------------------------------------------
+    fn isWriteVerb(w: string) -> boolean {
+        return ["INSERT", "UPDATE", "DELETE", "REPLACE", "UPSERT", "MERGE", "CREATE", "DROP", "ALTER", "TRUNCATE", "INTO", "FOR", "LOCK"].indexOf(w) >= 0
+    }
+
+    // Words a `(` may follow as SQL SYNTAX, not a call. Only words no dialect
+    // lets name a function: RESERVED in MySQL 8 and, in Postgres, reserved or
+    // "non-reserved (cannot be function or type)" (EXISTS, VALUES, BETWEEN);
+    // SQLite has no SQL-level function definition. Every other word before a
+    // `(` — `rows`, `range`, `filter`, `over`, `set`, `join`, `like`, `any` … —
+    // can be a user function on some driver, so it is a call.
+    fn isParenKeyword(w: string) -> boolean {
+        return ["IN", "EXISTS", "VALUES", "AS", "ON", "USING", "AND", "OR", "NOT", "SELECT", "FROM", "WHERE",
+                "CASE", "WHEN", "THEN", "ELSE", "BETWEEN", "ALL", "DISTINCT", "UNION", "HAVING"].indexOf(w) >= 0
+    }
+
+    // Functions that only compute a value, on all three drivers: built-ins of
+    // SQLite, Postgres and MySQL that resolve to the built-in (Postgres searches
+    // `pg_catalog` first; MySQL built-in names take precedence over stored
+    // functions; a SQLite connection is the runtime's own). Kept short on
+    // purpose — each entry is a claim; any other call is presumed to write.
+    fn isReadOnlyFn(w: string) -> boolean {
+        return ["COUNT", "SUM", "AVG", "MIN", "MAX", "COALESCE", "NULLIF", "LOWER", "UPPER", "LENGTH", "ABS",
+                "ROUND", "TRIM", "LTRIM", "RTRIM", "SUBSTR", "SUBSTRING", "CAST"].indexOf(w) >= 0
+    }
+
+    // Words that end a FROM item or cannot be one (not an alias, not a table).
+    fn isClauseWord(w: string) -> boolean {
+        return ["WHERE", "GROUP", "ORDER", "HAVING", "LIMIT", "OFFSET", "UNION", "EXCEPT", "INTERSECT", "JOIN", "INNER",
+                "LEFT", "RIGHT", "FULL", "CROSS", "NATURAL", "OUTER", "ON", "USING", "SET", "VALUES", "SELECT", "RETURNING",
+                "WINDOW", "FOR", "AS", "DEFAULT", "WHEN", "THEN", "ELSE", "END", "AND", "OR", "NOT", "IN", "IS",
+                "LATERAL", "FROM", "INTO", "UPDATE", "DELETE", "INSERT", "OR", "DO", "CONFLICT", "IF"].indexOf(w) >= 0
+    }
+
+    fn isWord(t: STok) -> boolean { return t.k == SK.Word }
+    fn isP(t: STok, c: string) -> boolean { return t.k == SK.Punct && t.text == c }
+
+    fn at(ts: STok[], i: int) -> STok {
+        if (i >= 0 && i < ts.length) return ts[i]
+        return tok(SK.Punct, "")
+    }
+
+    // ---- the facts ----------------------------------------------------------------
+    export fn sqlFacts(chunks: string[]) -> SqlFacts {
+        const sc: SScan = scanSql(chunks)
+        const ts: STok[] = sc.toks
+        if (sc.broken) return { kind: SqlKind.SqlWrite, reads: SqlTables.TablesUnknown, writes: SqlTables.TablesUnknown, columns: SqlColumns.ColsUnknown, createsTable: false }
+        const first: STok = at(ts, 0)
+        const lead: string = first.w
+        const kind: SqlKind = kindOf(ts)
+        const tp: TablePass = tablePass(ts)
+        let reads: SqlTables = SqlTables.TablesKnown(tp.reads)
+        let writes: SqlTables = SqlTables.TablesKnown(tp.writes)
+        if (tp.doubt) {
+            reads = SqlTables.TablesUnknown
+            writes = SqlTables.TablesUnknown
+        }
+        if (kind == SqlKind.SqlSelect) {
+            // a provable read writes nothing; zero tables read is a doubt (§1)
+            writes = SqlTables.TablesKnown([])
+            if (tp.reads.length == 0) reads = SqlTables.TablesUnknown
+        } else if (!isWriteLead(lead) || tp.writes.length == 0) {
+            // a statement whose target the scanner does not read exactly
+            // (PRAGMA, a WITH … DELETE, a SELECT that calls an unknown
+            // function …) may touch any table
+            reads = SqlTables.TablesUnknown
+            writes = SqlTables.TablesUnknown
+        } else if (!tp.doubt) {
+            // a write reads its own target too (UPDATE … SET x = x + 1, a
+            // WHERE, ON CONFLICT)
+            reads = SqlTables.TablesKnown(dedupe(tp.reads.concat(tp.writes)))
+        }
+        return { kind: kind, reads: reads, writes: writes, columns: columnsOf(ts, kind), createsTable: createsTable(ts) }
+    }
+
+    // The statements whose write target the scanner reads exactly.
+    fn isWriteLead(w: string) -> boolean {
+        return ["INSERT", "UPDATE", "DELETE", "REPLACE", "CREATE", "DROP", "ALTER", "TRUNCATE"].indexOf(w) >= 0
+    }
+
+    fn kindOf(ts: STok[]) -> SqlKind {
+        const lead: string = at(ts, 0).w
+        if (!isWord(at(ts, 0)) || (lead != "SELECT" && lead != "WITH")) return SqlKind.SqlWrite
+        let i: int = 0
+        while (i < ts.length) {
+            const t: STok = ts[i]
+            if (isWord(t) && isWriteVerb(t.w)) return SqlKind.SqlWrite
+            // A CALL, by construction: ANY token followed by `(` — a word, a
+            // quoted name ("f"(…), [f](…), `f`(…)), a value, a literal — is
+            // a call unless it is punctuation, a syntax word no dialect lets
+            // name a function, or a listed read-only built-in (an unquoted word).
+            if (isP(at(ts, i + 1), "(") && t.k != SK.Punct) {
+                // a QUALIFIED name (`public.count(…)`, `mydb.values(…)`) names
+                // whatever that schema holds — never the keyword or built-in
+                if (isP(at(ts, i - 1), ".")) return SqlKind.SqlWrite
+                if (!(isWord(t) && (isParenKeyword(t.w) || isReadOnlyFn(t.w)))) return SqlKind.SqlWrite
+            }
+            i = i + 1
+        }
+        return SqlKind.SqlSelect
+    }
+
+    // Tables: after FROM / JOIN a table READ (a DELETE's FROM is its target);
+    // after INTO / UPDATE / TABLE (and DELETE FROM) a table WRITTEN.
+    type TablePass:struct = { reads: string[], writes: string[], doubt: boolean }
+    type TName:struct = { name: string, next: int, ok: boolean }
+
+    fn tablePass(ts: STok[]) -> TablePass {
+        let reads: string[] = []
+        let writes: string[] = []
+        let doubt = false
+        let i: int = 0
+        while (i < ts.length) {
+            const t: STok = ts[i]
+            if (isWord(t) && (t.w == "FROM" || t.w == "JOIN")) {
+                const delTarget: boolean = t.w == "FROM" && at(ts, i - 1).w == "DELETE"
+                if (isP(at(ts, i + 1), "(")) {
+                    i = i + 1                              // a subquery: its own FROMs are read
+                } else {
+                    let going = true
+                    let j: int = i + 1
+                    while (going) {
+                        const r: TName = tableName(ts, j, true)
+                        if (!r.ok) {
+                            doubt = true
+                            going = false
+                            j = j + 1
+                        } else {
+                            if (delTarget) {
+                                writes = writes.concat([r.name])
+                            } else {
+                                reads = reads.concat([r.name])
+                            }
+                            j = skipAlias(ts, r.next)
+                            // `FROM a, b` (a JOIN takes one table)
+                            if (t.w == "FROM" && isP(at(ts, j), ",") && !isP(at(ts, j + 1), "(")) {
+                                j = j + 1
+                            } else {
+                                going = false
+                            }
+                        }
+                    }
+                    i = j
+                }
+            } else if (isWord(t) && (t.w == "INTO" || t.w == "TABLE")) {
+                const r2: TName = tableName(ts, skipIfExists(ts, i + 1), false)
+                if (r2.ok) {
+                    writes = writes.concat([r2.name])
+                    i = r2.next
+                } else {
+                    doubt = true
+                    i = i + 1
+                }
+            } else if (isWord(t) && t.w == "UPDATE") {
+                const nx: STok = at(ts, i + 1)
+                // `DO UPDATE SET` (an upsert's own target) and `FOR UPDATE` (a
+                // lock) name no table; anything else after UPDATE is its target
+                if (nx.w == "SET" || at(ts, i - 1).w == "FOR" || nx.k == SK.Punct) {
+                    i = i + 1
+                } else {
+                    const r3: TName = tableName(ts, skipOr(ts, i + 1), false)
+                    if (r3.ok) {
+                        writes = writes.concat([r3.name])
+                        i = r3.next
+                    } else {
+                        doubt = true
+                        i = i + 1
+                    }
+                }
+            } else {
+                i = i + 1
+            }
+        }
+        // a CTE's name is not a table (its body's own FROMs are read above)
+        const ctes: string[] = cteNames(ts)
+        let realReads: string[] = []
+        for (const r of dedupe(reads)) {
+            if (ctes.indexOf(r) < 0) realReads = realReads.concat([r])
+        }
+        return { reads: realReads, writes: dedupe(writes), doubt: doubt || joinCommaDoubt(ts) }
+    }
+
+    // `IF NOT EXISTS` / `IF EXISTS` before a table name.
+    fn skipIfExists(ts: STok[], i: int) -> int {
+        if (at(ts, i).w != "IF") return i
+        if (at(ts, i + 1).w == "NOT" && at(ts, i + 2).w == "EXISTS") return i + 3
+        if (at(ts, i + 1).w == "EXISTS") return i + 2
+        return i
+    }
+
+    // `UPDATE OR REPLACE t` (SQLite conflict clause).
+    fn skipOr(ts: STok[], i: int) -> int {
+        if (at(ts, i).w == "OR" && isWord(at(ts, i + 1))) return i + 2
+        return i
+    }
+
+    // A bare table name at `i` (not a keyword, not qualified, not quoted).
+    // `main.t` is §8.1.1's own schema and reads as `t`; any other qualifier,
+    // a quoted name or a value is a doubt. `inFrom`: a FROM / JOIN item, where
+    // `name(…)` is a table-valued function (`json_each(…)`), not a table — after
+    // INTO / TABLE the parenthesis is the column list.
+    fn tableName(ts: STok[], i: int, inFrom: boolean) -> TName {
+        const t: STok = at(ts, i)
+        if (!isWord(t) || isClauseWord(t.w)) return { name: "", next: i, ok: false }
+        if (isP(at(ts, i + 1), ".")) {
+            const t2: STok = at(ts, i + 2)
+            if (t.w == "MAIN" && isWord(t2)) return { name: t2.text, next: i + 3, ok: true }
+            return { name: "", next: i, ok: false }
+        }
+        if (inFrom && isP(at(ts, i + 1), "(")) return { name: "", next: i, ok: false }
+        return { name: t.text, next: i + 1, ok: true }
+    }
+
+    // A comma-joined table AFTER a join condition (`FROM a JOIN b ON … , c`)
+    // is outside the item list the table pass reads — a doubt, so the table
+    // set fails closed instead of silently missing `c`. Per parenthesis level:
+    // inside a FROM clause, after ON / USING, a top-level comma.
+    fn joinCommaDoubt(ts: STok[]) -> boolean {
+        let inFrom: boolean[] = [false]
+        let sawOn: boolean[] = [false]
+        for (const t of ts) {
+            const d: int = inFrom.length - 1
+            if (isP(t, "(")) {
+                inFrom = inFrom.concat([false])
+                sawOn = sawOn.concat([false])
+            } else if (isP(t, ")")) {
+                if (d > 0) {
+                    inFrom = inFrom.slice(0, d)
+                    sawOn = sawOn.slice(0, d)
+                }
+            } else if (isWord(t) && (t.w == "FROM" || t.w == "JOIN")) {
+                inFrom = inFrom.slice(0, d).concat([true])
+                sawOn = sawOn.slice(0, d).concat([false])
+            } else if (isWord(t) && (t.w == "ON" || t.w == "USING")) {
+                if (inFrom[d]) sawOn = sawOn.slice(0, d).concat([true])
+            } else if (isWord(t) && ["WHERE", "GROUP", "ORDER", "LIMIT", "HAVING", "UNION", "EXCEPT", "INTERSECT", "RETURNING",
+                                      "SET", "VALUES", "WINDOW", "OFFSET", "FOR", "SELECT"].indexOf(t.w) >= 0) {
+                inFrom = inFrom.slice(0, d).concat([false])
+                sawOn = sawOn.slice(0, d).concat([false])
+            } else if (isP(t, ",") && inFrom[d] && sawOn[d]) {
+                return true
+            }
+        }
+        return false
+    }
+
+    // The names a WITH clause binds (`WITH x AS (…), y AS (…)`) — not tables.
+    fn cteNames(ts: STok[]) -> string[] {
+        if (at(ts, 0).w != "WITH") return []
+        let out: string[] = []
+        let i: int = 1
+        if (at(ts, i).w == "RECURSIVE") i = i + 1
+        let depth: int = 0
+        while (i < ts.length) {
+            const t: STok = ts[i]
+            if (isP(t, "(")) depth = depth + 1
+            if (isP(t, ")")) depth = depth - 1
+            if (depth == 0 && isWord(t)) {
+                // the main statement ends the WITH list
+                if (["SELECT", "INSERT", "UPDATE", "DELETE", "REPLACE"].indexOf(t.w) >= 0) return out
+                if (at(ts, i + 1).w == "AS" && isP(at(ts, i + 2), "(")) out = out.concat([t.text])
+            }
+            i = i + 1
+        }
+        return out
+    }
+
+    // Past an optional alias (`AS a` or a bare `a`).
+    fn skipAlias(ts: STok[], i: int) -> int {
+        const t: STok = at(ts, i)
+        if (t.w == "AS" && isWord(at(ts, i + 1))) return i + 2
+        if (isWord(t) && !isClauseWord(t.w)) return i + 1
+        return i
+    }
+
+    fn dedupe(xs: string[]) -> string[] {
+        let out: string[] = []
+        for (const x of xs) {
+            if (out.indexOf(x) < 0) out = out.concat([x])
+        }
+        return out
+    }
+
+    // §8.1.1: a CREATE [VIRTUAL] TABLE that is not TEMP/TEMPORARY and not
+    // qualified to another schema.
+    fn createsTable(ts: STok[]) -> boolean {
+        let i: int = 0
+        while (i < ts.length) {
+            if (ts[i].w == "CREATE" && isWord(ts[i])) {
+                let j: int = i + 1
+                let temp = false
+                if (at(ts, j).w == "TEMP" || at(ts, j).w == "TEMPORARY") {
+                    temp = true
+                    j = j + 1
+                }
+                if (at(ts, j).w == "VIRTUAL") j = j + 1
+                if (at(ts, j).w == "TABLE" && !temp) {
+                    const k: int = skipIfExists(ts, j + 1)
+                    const q: STok = at(ts, k + 2)
+                    const qualified: boolean = isP(at(ts, k + 1), ".")
+                    if (!qualified || (at(ts, k).w == "MAIN" && isWord(q))) return true
+                }
+            }
+            i = i + 1
+        }
+        return false
+    }
+
+    // ---- columns ----------------------------------------------------------------
+    // A SELECT's select list (up to its FROM), or a write's RETURNING list.
+    fn columnsOf(ts: STok[], kind: SqlKind) -> SqlColumns {
+        const lead: string = at(ts, 0).w
+        if (lead == "SELECT") return listColumns(ts, selectListStart(ts, 1))
+        if (lead == "WITH") return SqlColumns.ColsUnknown
+        let i: int = 0
+        let depth: int = 0
+        while (i < ts.length) {
+            if (isP(ts[i], "(")) depth = depth + 1
+            if (isP(ts[i], ")")) depth = depth - 1
+            if (depth == 0 && ts[i].w == "RETURNING" && isWord(ts[i])) return listColumns(ts, i + 1)
+            i = i + 1
+        }
+        if (kind == SqlKind.SqlWrite && isWriteLead(lead)) return SqlColumns.ColsNone
+        return SqlColumns.ColsUnknown
+    }
+
+    fn selectListStart(ts: STok[], i: int) -> int {
+        if (at(ts, i).w == "DISTINCT" || at(ts, i).w == "ALL") return i + 1
+        return i
+    }
+
+    // Items separated by top-level commas, up to FROM / the end.
+    fn listColumns(ts: STok[], from: int) -> SqlColumns {
+        let names: string[] = []
+        let star = false
+        let item: STok[] = []
+        let depth: int = 0
+        let i: int = from
+        let going = true
+        while (going) {
+            const t: STok = at(ts, i)
+            const atEnd: boolean = i >= ts.length
+            const isFrom: boolean = depth == 0 && isWord(t) && (t.w == "FROM" || t.w == "WHERE" || t.w == "GROUP" || t.w == "ORDER" || t.w == "LIMIT" || t.w == "UNION")
+            if (atEnd || isFrom || (depth == 0 && isP(t, ","))) {
+                const r: ColItem = itemName(item)
+                if (r.star) star = true
+                if (!r.star && r.name == "") return SqlColumns.ColsUnknown
+                if (!r.star) names = names.concat([r.name])
+                item = []
+                if (atEnd || isFrom) going = false
+            } else {
+                if (isP(t, "(")) depth = depth + 1
+                if (isP(t, ")")) depth = depth - 1
+                item = item.concat([t])
+            }
+            i = i + 1
+        }
+        if (star) return SqlColumns.ColsAll
+        return SqlColumns.ColsListed(names)
+    }
+
+    type ColItem:struct = { name: string, star: boolean }
+
+    // `*` / `t.*` → star; `… AS n` / `… n` (an alias after a complete
+    // expression) / `c` / `t.c` → its name; anything else → "" (unprovable).
+    fn itemName(item: STok[]) -> ColItem {
+        const n: int = item.length
+        if (n == 0) return { name: "", star: false }
+        const last: STok = item[n - 1]
+        if (isP(last, "*") && (n == 1 || isP(at(item, n - 2), "."))) return { name: "", star: true }
+        if (n == 1 && isWord(last)) return { name: last.text, star: false }
+        if (n == 3 && isWord(item[0]) && isP(item[1], ".") && isWord(last)) return { name: last.text, star: false }
+        if (n >= 2 && isWord(last) && at(item, n - 2).w == "AS" && isWord(at(item, n - 2))) return { name: last.text, star: false }
+        if (n >= 2 && isWord(last) && !isClauseWord(last.w)) {
+            const prev: STok = at(item, n - 2)
+            if (isP(prev, ")") || prev.k == SK.Word || prev.k == SK.Num || prev.k == SK.Str) return { name: last.text, star: false }
+        }
+        return { name: "", star: false }
+    }
+}

@@ -40,7 +40,11 @@ ${
     import { emitCss } from "./css.scrml"
 
     export type Template:struct = { id: string, nodes: HNode[] }
-    export type Output:struct = { js: string, html: string }
+    // s451 (U1a): `refused` — why the printer emitted NOTHING (empty `js` /
+    // `html`); empty when it printed. The client printer has no server half:
+    // a program with a ServerFn (or a query anywhere) is refused whole, never
+    // printed without its server (unit U1c builds the server artifact).
+    export type Output:struct = { js: string, html: string, refused: string[] }
 
     type HandleLoc:struct = { sym: int, js: JsExpr }
     type SharedLoc:struct = { decl: int, js: JsExpr }
@@ -287,6 +291,7 @@ ${
             .Lambda(params: ps, body: b) :> JsExpr.JArrowE(symNames(ctx, ps), exprJs(ctx, b))
             .SeqCall(op: o, seq: sq, f: f) :> jmcall(exprJs(ctx, sq), seqFnName(o), [exprJs(ctx, f)])
             .Validity(of: v, prop: pr) :> jmcall(surfaceJs(ctx, v), surfaceMethod(pr), [])
+            .Sql(q: q) :> JsExpr.JNull      // unreachable: printProgram refuses a program holding a query (U1c)
         }
     }
 
@@ -1013,6 +1018,7 @@ ${
             .Lambda(params: x) :> []
             .SeqCall(op: x) :> []
             .Validity(of: x) :> []
+            .Sql(q: x) :> []
         }
     }
 
@@ -1471,6 +1477,7 @@ ${
             .Lambda(params: ps) :> false
             .SeqCall(op: o) :> false
             .Validity(of: x) :> false
+            .Sql(q: x) :> false
         }
     }
 
@@ -1587,7 +1594,78 @@ ${
     // -------------------------------------------------------------------------
     // The program.
     // -------------------------------------------------------------------------
+    // s451 (U1a) — THE SERVER REFUSAL. Route inference now places functions on
+    // the server (§12.2) and a ServerFn reaches Core, but the bootstrap prints
+    // only the CLIENT artifact. A program with server functions printed without
+    // them would be the client half of a program whose server half does not
+    // exist — §12.3 obliges a route handler and a client fetch call for EVERY
+    // server-escalated function. So the whole program is refused, naming the
+    // slice that lifts it, rather than printed incomplete.
+    // the SQL sigil for messages, in two pieces (parse.scrml sqlSigil)
+    fn sqlSigil() -> string { return "?" + "{" }
+
+    fn serverRefusal(p: CoreProgram) -> string[] {
+        let out: string[] = []
+        if (p.server.length > 0) {
+            let names: string[] = []
+            for (const f of p.server) { names = names.concat([f.sym.hint]) }
+            out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: this program has server functions (" + names.join(", ") + ") — the bootstrap printer emits only the client artifact; the server artifact (route handlers, the client fetch stubs, the §57 codec at both ends) arrives with unit U1c"])
+        }
+        if (holdsQuery(p) && p.server.length == 0) {
+            out = out.concat(["E-BOOTSTRAP-UNSUPPORTED: this program holds a `" + sqlSigil() + "}` query outside a server function — the client printer has no SQL (unit U1c)"])
+        }
+        return out
+    }
+
+    fn holdsQuery(p: CoreProgram) -> boolean {
+        for (const n of allNodes(Node.NProgram(p))) {
+            if (nodeIsQuery(n)) return true
+        }
+        return false
+    }
+
+    fn nodeIsQuery(n: Node) -> boolean {
+        return match n {
+            .NExpr(e: e) :> exprIsQuery(e)
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NFn(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NStmt(s: x) :> false
+            .NPlace(pl: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
+        }
+    }
+
+    fn exprIsQuery(e: Expr) -> boolean {
+        return match e {
+            .Sql(q: x) :> true
+            .Lit(lit: x) :> false
+            .Local(sym: x) :> false
+            .Read(place: x) :> false
+            .Call(callee: x) :> false
+            .Prim(op: x) :> false
+            .Match(scrut: x) :> false
+            .ArrayOf(elems: x) :> false
+            .StructOf(ty: x) :> false
+            .Handle(inst: x) :> false
+            .InitOf(decl: x) :> false
+            .Host(call: x) :> false
+            .Lambda(params: x) :> false
+            .SeqCall(op: x) :> false
+            .Validity(of: x) :> false
+        }
+    }
+
     export fn printProgram(p: CoreProgram, jsFile: string, runtimeFile: string) -> Output {
+        const refused: string[] = serverRefusal(p)
+        if (refused.length > 0) return { js: "", html: "", refused: refused }
         const names: NameTable = planNames(p)
         const ctx: Ctx = baseCtx(p, names)
         const rt: string = rtName(ctx)
@@ -1627,6 +1705,6 @@ ${
             head = head.concat([HNode.HElem("template", [{ name: "id", value: t.id }], t.nodes)])
         }
         const page: Page = { title: p.program.hint, head: head, body: [] }
-        return { js: printModule(body), html: printPage(page) }
+        return { js: printModule(body), html: printPage(page), refused: [] }
     }
 }
