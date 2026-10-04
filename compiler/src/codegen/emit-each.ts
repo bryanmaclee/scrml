@@ -2531,10 +2531,15 @@ function renderTemplateAttrToJs(
     // S446 (S439 #4) — a statement-list handler awaits a server-call cell write in
     // place, so the next statement sees the resolved value (ColorOpts doc).
     // `{}` (unchanged) below two statements; SSE generator writes keep the skip.
+    // S453 (bryan S449 A3) — `boundaryId` so a logged rejection names the row
+    // listener (see js-async-analysis `wrapHandlerRejectionLog`).
     const handlerFn = colorActiveHandler(
       `function(event) { ${preventLine}${wrappedHandlerBody} }`,
       (attr as { span?: unknown }).span ?? (elNode as { span?: unknown } | null)?.span,
-      valKind === "expr" ? activeHandlerStatementListColor(val.handlerBlock?.stmts) : {},
+      {
+        ...(valKind === "expr" ? activeHandlerStatementListColor(val.handlerBlock?.stmts) : {}),
+        boundaryId: `on${ev} <each> row`,
+      },
     );
     lines.push(`${indent}${elVar}.addEventListener(${JSON.stringify(ev)}, ${handlerFn});`);
     return;
