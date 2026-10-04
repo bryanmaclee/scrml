@@ -164,8 +164,8 @@ function fetchItems()! -> LoadError {
 
 function load() {
     const rows = fetchItems() !{
-        | ::Network msg :> { @phase = .Error(msg); return }
-        | ::Empty       :> { @phase = .Empty;       return }
+        | .Network(msg) :> { @phase = .Error(msg); return }
+        | .Empty        :> { @phase = .Empty;       return }
     }
     @phase = .Success(rows.length)
 }
@@ -174,7 +174,7 @@ function load() {
 Pattern:
 - `function name(args) ! ErrorType { ... }` declares failable
 - `fail .Variant(args)` surfaces the error
-- `let x = call() !{ | ::Variant arg :> { ... } }` exhaustive call-site handler
+- `let x = call() !{ | .Variant(arg) :> { ... } }` exhaustive call-site handler
 
 **Errors-as-states is the canonical lifting:** at Tier 1+, the `!{}` handler at the call site does one thing — route each error variant into the right Phase variant. The error becomes a state in the Phase enum. `<isError>` + `<errorMsg>` cells are anti-patterns; the failure modes live in the type.
 
@@ -756,8 +756,8 @@ type Phase:enum = { Idle, Loading, Error(msg: string), Empty, Success(count: int
 function load() {
     @phase = .Loading
     const result = fetchItems() !{
-        | ::Network msg :> { @phase = .Error(msg); return }
-        | ::Empty       :> { @phase = .Empty;       return }
+        | .Network(msg) :> { @phase = .Error(msg); return }
+        | .Empty        :> { @phase = .Empty;       return }
     }
     @phase = .Success(result.length)
 }
@@ -1151,7 +1151,7 @@ What LLMs reflexively reach for + the scrml form:
 |---|---|---|
 | `useState`, `ref`, `signal()` | scrml has no hook calls | `<x> = 0` declares; `@x` reads |
 | `useEffect`, `watchEffect` (incl. setting state in one) | no effect hooks; an effect that writes state is how cascades happen | Fetch → `<request deps=[…]>`; derive → a derived cell; reset a cell when others change → `let <page:int=1 reset-on=[@query]/>`; state change on a transition → `<onTransition>`; outside world only (analytics, scroll, focus, title, a widget) → `<effect deps=[@a, @b]>${ … }</>`, which may NOT write any reactive cell (E-EFFECT-WRITES-STATE) and does not run on mount. **S447, SPEC §6.7.4 / §6.8.4 — Nominal:** the bootstrap builds `<effect>` / `reset-on=`; impl#1 is frozen and still compiles only the retiring keyword form `when @x changes { }` (writes allowed there, divergence filed) |
-| `try { ... } catch (e) { ... }` | not in scrml | `function f()! -> Err { fail Err::V(...) }` + `let x = f() !{ \| ::V → ... }` |
+| `try { ... } catch (e) { ... }` | not in scrml | `function f()! -> Err { fail Err::V(...) }` + `let x = f() !{ \| .V(x) :> ... }` |
 | `if (errors.length > 0)` | manual error checking | `@form.isValid` (auto-synth); `<errors of=@form.field/>` |
 | `bcrypt.hash(pwd, 10)` | npm import | `import { hashPassword } from 'scrml:auth'` |
 | `===`, `!==` | scrml is strict-by-default | `==`, `!=` (E-EQ-004) |
