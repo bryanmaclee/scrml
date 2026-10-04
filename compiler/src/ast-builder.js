@@ -17066,6 +17066,83 @@ function reemitHandlerStringToken(tok) {
     : '"' + tok.text.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"';
 }
 
+/**
+ * S452 — is the token at `i` the start of a PIPE-LESS `!{}` handler arm?
+ *
+ * `!{}` handler arms use the §18.2 `match`-arm grammar (ruling:
+ * user-voice-scrml.md S452 "c looks right"): `arm-pattern (':>' | '=>' | '->')
+ * arm-body` with no leading `|`. The `|`-prefixed spelling stays accepted
+ * unchanged. Recognized here (the arm arrow is REQUIRED, which is what keeps a
+ * member access like `obj.Field` or a qualified `E::V(x)` inside an arm body
+ * from being read as the next arm):
+ *
+ *   .Variant [binder | '(' binder (',' binder)* ')'] arrow
+ *   ::Variant [binder | '(' binder (',' binder)* ')'] arrow
+ *   _ arrow
+ *   else arrow
+ *
+ * where arrow is `:>` / `=>` (one OPERATOR token) or `-` `>` (two PUNCT
+ * tokens). The `.Variant` head requires an uppercase variant name, exactly as
+ * the `|`-prefixed path does. Returns false for anything else; the caller then
+ * falls through to the pre-existing branches.
+ */
+function isPipelessErrorArmStart(tokens, i) {
+  const at = (k) => (k < tokens.length ? tokens[k] : null);
+  const isArrowAt = (k) => {
+    const t = at(k);
+    if (!t) return false;
+    if (t.kind === "OPERATOR" && (t.text === ":>" || t.text === "=>")) return true;
+    const t2 = at(k + 1);
+    return t.kind === "PUNCT" && t.text === "-" && !!t2 && t2.kind === "PUNCT" && t2.text === ">";
+  };
+  const t0 = at(i);
+  if (!t0) return false;
+  // Wildcard: `_ :>` / `else :>` (no binder — the whole-error binder `_ err`
+  // is a separate gap and is not admitted here).
+  if ((t0.kind === "IDENT" && t0.text === "_") || (t0.kind === "KEYWORD" && t0.text === "else")) {
+    return isArrowAt(i + 1);
+  }
+  let k;
+  if (t0.kind === "PUNCT" && t0.text === ".") {
+    const n = at(i + 1);
+    if (!n || (n.kind !== "IDENT" && n.kind !== "KEYWORD") || !/^[A-Z]/.test(n.text ?? "")) return false;
+    k = i + 2;
+  } else if (t0.kind === "OPERATOR" && t0.text === "::") {
+    const n = at(i + 1);
+    if (!n || (n.kind !== "IDENT" && n.kind !== "KEYWORD")) return false;
+    k = i + 2;
+  } else {
+    return false;
+  }
+  // Optional binder: `(a, b, …)` or a single bare identifier.
+  const b = at(k);
+  if (b && b.kind === "PUNCT" && b.text === "(") {
+    k++;
+    while (at(k) && !(at(k).kind === "PUNCT" && at(k).text === ")")) {
+      const t = at(k);
+      if (t.kind === "IDENT" || (t.kind === "PUNCT" && t.text === ",")) { k++; continue; }
+      return false;
+    }
+    if (!at(k)) return false;
+    k++; // `)`
+  } else if (b && b.kind === "IDENT") {
+    k++;
+  }
+  return isArrowAt(k);
+}
+
+/**
+ * Bracket-depth delta of one handler token — used so a pipe-less arm head is
+ * only recognized at the arm-list's own level, never inside a `{ … }` / `( … )`
+ * / `[ … ]` of an arm body (e.g. a nested `match` arm list in a block body).
+ */
+function _errArmDepthDelta(tok) {
+  if (!tok || tok.kind !== "PUNCT") return 0;
+  if (tok.text === "{" || tok.text === "(" || tok.text === "[") return 1;
+  if (tok.text === "}" || tok.text === ")" || tok.text === "]") return -1;
+  return 0;
+}
+
 function parseErrorTokens(tokens, filePath) {
   const arms = [];
   let i = 0;
@@ -17073,10 +17150,15 @@ function parseErrorTokens(tokens, filePath) {
   while (i < tokens.length && tokens[i].kind !== "EOF") {
     const tok = tokens[i];
 
-    // Arm starts with `|`
-    if (tok.kind === "PUNCT" && tok.text === "|") {
+    // Arm starts with `|`, OR (S452) is a pipe-less §18.2 arm head. A
+    // pipe-less arm is parsed by the SAME path as its `|`-prefixed spelling —
+    // the only difference is that there is no `|` token to consume — so the
+    // arm record (pattern / binding / handler / arrow) and the emitted JS are
+    // identical for both spellings.
+    const _pipeless = !(tok.kind === "PUNCT" && tok.text === "|") && isPipelessErrorArmStart(tokens, i);
+    if ((tok.kind === "PUNCT" && tok.text === "|") || _pipeless) {
       const armStart = tok;
-      i++;
+      if (!_pipeless) i++; // consume `|`
 
       // Pattern: `::TypeName`, `.Variant` (bare-dot per §14.10 / M9), or `_`
       let pattern = "_";
@@ -17106,6 +17188,19 @@ function parseErrorTokens(tokens, filePath) {
         pattern = "." + tokens[i].text;
         i++; // consume IDENT
       } else if (i < tokens.length && tokens[i].text === "_") {
+        pattern = "_";
+        i++;
+      } else if (
+        // S452 — `else` is the §18.2 wildcard spelling (`| else :>` / `else :>`),
+        // the same pattern as `_`. Pre-S452 the `else` was left unconsumed and
+        // leaked into the handler text (`else :> 9` → E-CODEGEN-INVALID-LOGIC).
+        // Gated on a following arm arrow so nothing else changes.
+        i < tokens.length && tokens[i].kind === "KEYWORD" && tokens[i].text === "else" &&
+        i + 1 < tokens.length &&
+        ((tokens[i + 1].kind === "OPERATOR" && (tokens[i + 1].text === ":>" || tokens[i + 1].text === "=>")) ||
+         (tokens[i + 1].kind === "PUNCT" && tokens[i + 1].text === "-" &&
+          i + 2 < tokens.length && tokens[i + 2].kind === "PUNCT" && tokens[i + 2].text === ">"))
+      ) {
         pattern = "_";
         i++;
       }
@@ -17156,8 +17251,12 @@ function parseErrorTokens(tokens, filePath) {
       // survive into rewriteBlockBody (which splits on semicolons and newlines).
       const handlerParts = [];
       const handlerPartLines = []; // parallel: source line number for each part
+      let _armDepth = 0; // S452 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
         if (tokens[i].kind === "PUNCT" && tokens[i].text === "|") break;
+        // S452 — stop at a pipe-less §18.2 arm head at the arm-list's level.
+        if (_armDepth === 0 && isPipelessErrorArmStart(tokens, i)) break;
+        _armDepth += _errArmDepthDelta(tokens[i]);
         // Also stop at simplified arm start (TypeName => or _ =>)
         if (
           i + 1 < tokens.length &&
@@ -17292,7 +17391,11 @@ function parseErrorTokens(tokens, filePath) {
       i++; // consume arm arrow
       const handlerParts = [];
       const handlerPartLines = []; // parallel: source line number for each part
+      let _armDepth3 = 0; // S452 — bracket depth within this arm's handler
       while (i < tokens.length && tokens[i].kind !== "EOF") {
+        // S452 — stop at a pipe-less §18.2 arm head at the arm-list's level.
+        if (_armDepth3 === 0 && isPipelessErrorArmStart(tokens, i)) break;
+        _armDepth3 += _errArmDepthDelta(tokens[i]);
         // Stop at next simplified arm start (TypeName => or _ =>)
         if (
           i + 1 < tokens.length &&
