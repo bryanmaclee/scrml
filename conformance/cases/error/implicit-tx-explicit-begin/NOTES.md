@@ -4,7 +4,11 @@ This dir covers the ONE source-reachable §19.10.5 / §8.9.2 diagnostic: **W-BAT
 (explicit `?{BEGIN}` suppresses the implicit envelope). Two related surfaces are
 DELIBERATELY UNCOVERED here (flagged, not faked — per the ss58 harness gate):
 
-1. **E-BATCH-001 (implicit envelope + explicit `transaction { }`) — NOT source-reachable
+1. **RESOLVED S450 — now covered by `../implicit-tx-explicit-transaction-block/`.** The
+   parser lands `transaction { <sql> }` in function-body position since S450
+   (`g-transaction-block-not-recognized-inside-a-function-body`), so E-BATCH-001 is
+   source-reachable. The original note, kept for provenance:
+   **E-BATCH-001 (implicit envelope + explicit `transaction { }`) — NOT source-reachable
    in impl#1.** impl#1's own `compiler/tests/unit/batch-planner.test.js` (§11) documents:
    *"Parser produces a bare-expr from `transaction { ... }` in some function-body
    configurations, so we invoke runBatchPlanner directly against a hand-built AST."*

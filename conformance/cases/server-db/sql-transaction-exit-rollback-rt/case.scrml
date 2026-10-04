@@ -1,0 +1,47 @@
+<program db="./app.db">
+    <schema>
+        accounts {
+            id: integer primary key
+            balance: integer
+        }
+    </schema>
+    type E:enum = { Bad }
+    <outcome> = "none"
+    <b1> = not
+    <b2> = not
+    function transfer(amount: number, bail: boolean)! -> E {
+        transaction {
+            ?{`UPDATE accounts SET balance = balance - ${amount} WHERE id = 1`}.run()
+            if (bail) {
+                return 0
+            }
+            ?{`UPDATE accounts SET balance = balance + ${amount} WHERE id = 2`}.run()
+        }
+        return 1
+    }
+    function balanceOf(id: number) {
+        return ?{`SELECT balance FROM accounts WHERE id = ${id}`}.get()
+    }
+    function onCommit() {
+        transfer(4, false) !{
+            | ::Bad :> @outcome = "bad"
+        }
+        @outcome = "committed"
+    }
+    function onReturnOut() {
+        transfer(100, true) !{
+            | ::Bad :> @outcome = "bad"
+        }
+        @outcome = "returned"
+    }
+    function onRead() {
+        @b1 = balanceOf(1)
+        @b2 = balanceOf(2)
+    }
+    <button id="commit" onclick=onCommit()>commit</button>
+    <button id="bail" onclick=onReturnOut()>bail</button>
+    <button id="read" onclick=onRead()>read</button>
+    <p id="o">${@outcome}</p>
+    <p id="b1">${@b1?.balance}</p>
+    <p id="b2">${@b2?.balance}</p>
+</program>

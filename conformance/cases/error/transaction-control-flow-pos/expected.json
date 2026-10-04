@@ -1,0 +1,13 @@
+{
+  "id": "error-transaction-control-flow-pos",
+  "description": "§19.10.4 — the exits that fire NONE of the §19.10.4 codes. Unchanged since S450: a `break` / `continue` whose loop is INSIDE the `transaction { }`, a `fail` (§19.10.3 ROLLBACK) nested in an `if`, and a `return` AFTER the block. ⚑ ADDED AT S453 (B1a, ruled): a `return` out of the block (`early`), and a `break` (`leaveLoop`) / `continue` (`skipPass`) whose loop is OUTSIDE it — all three were the S450 interim E-TRANSACTION-CONTROL-FLOW refusal and are now legal, rolling the block back and letting the exit proceed. `early` and `leaveLoop` are the two sites the old ../transaction-control-flow-neg/ case asserted as errors; they are moved here verbatim, so this file and that one together record the direction of the ruling. The ROLLBACK itself is proved by execution in ../../server-db/sql-transaction-exit-rollback-rt/ — a codes-only case cannot see it.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/integration/transaction-in-function-body.test.js",
+  "spec": "§19.10.3, §19.10.4",
+  "rationale": "§19.10.3 (S453): \"A `return`, or a `break` / `continue` whose target is outside the block, SHALL roll the transaction back before the exit proceeds; only normal completion COMMITs.\" A loop's own `break` / `continue` never leaves the block; a `return` after the block runs once the block has committed. Provenance: ruling:user-voice-scrml.md S449 (B1a).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-TRANSACTION-CONTROL-FLOW", "E-ERROR-001", "E-ERROR-007", "E-SCOPE-001"],
+    "notCodePrefixes": ["E-"]
+  }
+}

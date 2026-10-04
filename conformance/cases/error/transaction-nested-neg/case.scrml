@@ -1,0 +1,19 @@
+<program db="./app.db">
+    <schema>
+        orders {
+            id: integer primary key
+            name: text
+        }
+    </schema>
+    type E:enum = { Bad }
+    function nested(a: number)! -> E {
+        transaction {
+            if (a > 0) {
+                transaction {
+                    ?{`UPDATE orders SET name = 'x' WHERE id = ${a}`}.run()
+                }
+            }
+        }
+    }
+    <p>x</p>
+</program>
